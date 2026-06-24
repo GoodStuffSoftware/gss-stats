@@ -1,0 +1,160 @@
+/* ── Good Stuff Software brand tokens (ported from goodstuffsoftware.com) ─────── */
+:root {
+  color-scheme: light;
+  --canvas: 250 250 247; /* #FAFAF7 warm off-white */
+  --surface: 255 255 255; /* #FFFFFF card */
+  --sunken: 244 242 236; /* #F4F2EC recessed */
+  --ink: 26 23 21; /* #1A1715 primary text */
+  --ink-2: 92 85 77; /* #5C554D secondary */
+  --ink-3: 138 130 120; /* #8A8278 meta */
+  --line: 231 226 215; /* #E7E2D7 border */
+  --line-2: 217 211 198; /* #D9D3C6 stronger border */
+  --amber: 224 114 44; /* #E0722C accent */
+  --amber-hover: 194 94 30; /* #C25E1E */
+  --amber-tint: 248 236 224; /* #F8ECE0 */
+}
+
+.dark {
+  color-scheme: dark;
+  --canvas: 21 18 15;
+  --surface: 33 28 24;
+  --sunken: 28 23 19;
+  --ink: 244 241 234;
+  --ink-2: 168 160 150;
+  --ink-3: 110 104 96;
+  --line: 53 47 40;
+  --line-2: 66 56 47;
+  --amber: 238 138 71;
+  --amber-hover: 240 154 94;
+  --amber-tint: 42 30 18;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: rgb(var(--canvas));
+  color: rgb(var(--ink));
+  font-family: Inter, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: 'cv05', 'ss01';
+}
+
+h1,
+h2,
+h3 {
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  letter-spacing: -0.025em;
+  margin: 0;
+}
+
+.mono {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+.overline {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: rgb(var(--ink-3));
+}
+
+/* ── Controls ────────────────────────────────────────────────────────────────── */
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgb(var(--line-2));
+  background: rgb(var(--surface));
+  color: rgb(var(--ink));
+  border-radius: 9px;
+  padding: 7px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  transition: border-color 0.15s, background 0.15s;
+}
+.btn:hover {
+  border-color: rgb(var(--amber));
+}
+.btn-primary {
+  background: rgb(var(--amber));
+  border-color: rgb(var(--amber));
+  color: #fff;
+}
+.btn-primary:hover {
+  background: rgb(var(--amber-hover));
+  border-color: rgb(var(--amber-hover));
+}
+.btn-ghost {
+  border-color: transparent;
+  background: transparent;
+  padding: 5px 8px;
+}
+.btn-ghost:hover {
+  background: rgb(var(--sunken));
+  border-color: transparent;
+}
+
+select,
+input[type='text'],
+input[type='number'],
+input[type='date'] {
+  font-family: inherit;
+  font-size: 13px;
+  color: rgb(var(--ink));
+  background: rgb(var(--surface));
+  border: 1px solid rgb(var(--line-2));
+  border-radius: 9px;
+  padding: 7px 10px;
+}
+select:focus,
+input:focus {
+  outline: 2px solid rgb(var(--amber) / 0.4);
+  outline-offset: 0;
+  border-color: rgb(var(--amber));
+}
+
+label {
+  font-size: 12px;
+  color: rgb(var(--ink-2));
+  font-weight: 500;
+}
+
+.card {
+  background: rgb(var(--surface));
+  border: 1px solid rgb(var(--line));
+  border-radius: 14px;
+}
+
+/* ── grid-layout-plus theming ───────────────────────────────────────────────── */
+.vgl-item--placeholder {
+  background: rgb(var(--amber) / 0.18) !important;
+  border: 1px dashed rgb(var(--amber)) !important;
+  border-radius: 14px;
+  opacity: 1 !important;
+}
+.vgl-item__resizer {
+  z-index: 3;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--line-2));
+  border-radius: 6px;
+}

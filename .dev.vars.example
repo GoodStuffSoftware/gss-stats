@@ -1,0 +1,3 @@
+# Local dev secret for `wrangler pages dev`. Copy to .dev.vars (gitignored).
+# Value = a Cloudflare API token with Account Analytics Read.
+CF_ANALYTICS_TOKEN=your-cloudflare-analytics-token

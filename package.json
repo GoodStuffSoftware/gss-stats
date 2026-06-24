@@ -1,0 +1,25 @@
+{
+  "name": "gss-stats",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Private bot-free traffic dashboard for Good Stuff Software (RUM via Cloudflare GraphQL).",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "npm run build && wrangler pages dev",
+    "deploy": "npm run build && wrangler pages deploy"
+  },
+  "dependencies": {
+    "chart.js": "^4.4.7",
+    "grid-layout-plus": "^1.0.5",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241218.0",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7",
+    "wrangler": "^4.20.0"
+  }
+}
