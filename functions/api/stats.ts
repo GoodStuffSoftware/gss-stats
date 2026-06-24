@@ -1,0 +1,232 @@
+/// <reference types="@cloudflare/workers-types" />
+//
+// Server-side analytics proxy. Holds the Cloudflare API token (CF_ANALYTICS_TOKEN
+// secret) and queries the GraphQL Analytics API for bot-free RUM pageviews. The
+// browser calls THIS endpoint; the token never reaches client-side code.
+//
+// POST body: {
+//   site: 'goodstuff.software' | 'goodstuffsoftware.com' | 'bestsudoku.app' | 'all',
+//   host?: string,                 // optional requestHost filter (a subdomain)
+//   since: 'YYYY-MM-DD', until: 'YYYY-MM-DD',
+//   dimensions: string[],          // 0-2 of the whitelist below
+//   metric: 'pageviews' | 'visits',
+//   limit: number,
+//   excludeSelfReferrals?: boolean // drop empty + own-host referrers
+// }
+
+interface Env {
+  CF_ANALYTICS_TOKEN: string
+  STATS_CONFIG: KVNamespace
+}
+
+const ACCOUNT_ID = 'a32bba62c77df5e8f6bd33d04478ec34'
+const GQL_ENDPOINT = 'https://api.cloudflare.com/client/v4/graphql'
+
+const SITE_TAGS: Record<string, string> = {
+  'goodstuff.software': '7dd3bcb059af40f79f8df92d6d0be750',
+  'goodstuffsoftware.com': '0289e02254fc4db8b73b232c59f8421f',
+  'bestsudoku.app': 'a8baf99f3d294215a92a176e8c56bd15',
+}
+
+// Hosts that count as "us" — dropped from referrer charts when excludeSelfReferrals.
+const OWN_HOSTS = new Set([
+  'goodstuff.software',
+  'www.goodstuff.software',
+  'starrupture.goodstuff.software',
+  'simpletile.goodstuff.software',
+  'stats.goodstuff.software',
+  'goodstuffsoftware.com',
+  'www.goodstuffsoftware.com',
+  'bestsudoku.app',
+  'www.bestsudoku.app',
+  'design-preview.goodstuffsoftware.pages.dev',
+])
+
+// Only these RUM dimensions may be requested (prevents invalid/injected fields).
+const DIM_WHITELIST = new Set([
+  'requestHost',
+  'requestPath',
+  'deviceType',
+  'countryName',
+  'refererHost',
+  'date',
+])
+
+interface ReqBody {
+  site?: string
+  host?: string
+  since?: string
+  until?: string
+  dimensions?: unknown
+  metric?: string
+  limit?: unknown
+  excludeSelfReferrals?: boolean
+}
+
+interface StatsRow {
+  key: Record<string, string>
+  pageviews: number
+  visits: number
+}
+
+const json = (data: unknown, status = 200): Response =>
+  new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+  })
+
+// Accept only YYYY-MM-DD; fall back to a sane default if malformed.
+function safeDate(v: unknown, fallback: string): string {
+  return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : fallback
+}
+
+// until is inclusive — add one day so datetime_leq covers the whole final day.
+function nextDay(ymd: string): string {
+  const d = new Date(ymd + 'T00:00:00Z')
+  d.setUTCDate(d.getUTCDate() + 1)
+  return d.toISOString().slice(0, 10)
+}
+
+function todayUTC(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function weekAgoUTC(): string {
+  const d = new Date()
+  d.setUTCDate(d.getUTCDate() - 7)
+  return d.toISOString().slice(0, 10)
+}
+
+export const onRequestPost: PagesFunction<Env> = async (ctx) => {
+  let body: ReqBody
+  try {
+    body = (await ctx.request.json()) as ReqBody
+  } catch {
+    return json({ error: 'invalid JSON body' }, 400)
+  }
+
+  // Trim defensively — a secret uploaded via a shell pipe can pick up a trailing
+  // newline/CR, which would corrupt the Bearer header (CF GraphQL returns 9106).
+  const apiToken = (ctx.env.CF_ANALYTICS_TOKEN ?? '').trim()
+  if (!apiToken) {
+    return json({ error: 'CF_ANALYTICS_TOKEN not configured' }, 500)
+  }
+
+  const site = body.site === 'all' || (body.site && body.site in SITE_TAGS) ? body.site : 'goodstuff.software'
+  const dims: string[] = Array.isArray(body.dimensions)
+    ? (body.dimensions as unknown[]).filter((d): d is string => typeof d === 'string' && DIM_WHITELIST.has(d)).slice(0, 2)
+    : []
+  const metric = body.metric === 'visits' ? 'visits' : 'pageviews'
+  const limit = Math.min(Math.max(Number(body.limit) || 50, 1), 500)
+  const since = safeDate(body.since, weekAgoUTC())
+  const until = safeDate(body.until, todayUTC())
+  const host = typeof body.host === 'string' && /^[a-z0-9.\-]+$/i.test(body.host) ? body.host : null
+  const excludeSelf = body.excludeSelfReferrals !== false && dims.includes('refererHost')
+
+  const datetimeGeq = `${since}T00:00:00Z`
+  const datetimeLeq = `${nextDay(until)}T00:00:00Z`
+
+  const tags = site === 'all' ? Object.values(SITE_TAGS) : [SITE_TAGS[site as string]]
+
+  // Build the dimensions sub-selection + ordering.
+  const dimSelection = dims.length ? `dimensions { ${dims.join(' ')} }` : ''
+  const orderBy = dims.includes('date') ? 'date_ASC' : 'count_DESC'
+  // Over-fetch per tag so merge+limit downstream stays accurate.
+  const perTagLimit = Math.min(limit * 3, 1000)
+
+  const fields = tags
+    .map((tag, i) => {
+      const hostClause = host ? `, requestHost: "${host}"` : ''
+      return `s${i}: rumPageloadEventsAdaptiveGroups(
+        limit: ${perTagLimit}
+        orderBy: [${orderBy}]
+        filter: { datetime_geq: "${datetimeGeq}", datetime_leq: "${datetimeLeq}", siteTag: "${tag}"${hostClause} }
+      ) { count sum { visits } ${dimSelection} }`
+    })
+    .join('\n')
+
+  const query = `query {
+    viewer {
+      accounts(filter: { accountTag: "${ACCOUNT_ID}" }) {
+        ${fields}
+      }
+    }
+  }`
+
+  let payload: any
+  try {
+    const res = await fetch(GQL_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ query }),
+    })
+    payload = await res.json()
+  } catch (e) {
+    return json({ error: 'upstream fetch failed', detail: String(e) }, 502)
+  }
+
+  if (payload.errors) {
+    return json({ error: 'graphql error', detail: payload.errors }, 502)
+  }
+
+  const account = payload?.data?.viewer?.accounts?.[0]
+  if (!account) return json({ error: 'no account data', detail: payload }, 502)
+
+  // Merge rows across all queried site tags, summing by the dimension key.
+  const merged = new Map<string, StatsRow>()
+  for (let i = 0; i < tags.length; i++) {
+    const groups: any[] = account[`s${i}`] ?? []
+    for (const g of groups) {
+      const key: Record<string, string> = {}
+      for (const d of dims) key[d] = String(g.dimensions?.[d] ?? '')
+      const mapKey = JSON.stringify(key)
+      const existing = merged.get(mapKey)
+      const pv = Number(g.count) || 0
+      const vis = Number(g.sum?.visits) || 0
+      if (existing) {
+        existing.pageviews += pv
+        existing.visits += vis
+      } else {
+        merged.set(mapKey, { key, pageviews: pv, visits: vis })
+      }
+    }
+  }
+
+  let rows = [...merged.values()]
+
+  // Default filtering: clean external referrer list.
+  if (excludeSelf) {
+    rows = rows.filter((r) => {
+      const ref = r.key.refererHost
+      return ref && !OWN_HOSTS.has(ref)
+    })
+  }
+
+  // Totals reflect the full filtered set (before top-N truncation).
+  const totals = rows.reduce(
+    (acc, r) => ({ pageviews: acc.pageviews + r.pageviews, visits: acc.visits + r.visits }),
+    { pageviews: 0, visits: 0 },
+  )
+
+  // Sort + truncate to the requested top-N (date series stays chronological).
+  if (dims.includes('date')) {
+    rows.sort((a, b) => (a.key.date < b.key.date ? -1 : 1))
+  } else {
+    const m = metric as 'pageviews' | 'visits'
+    rows.sort((a, b) => b[m] - a[m])
+  }
+  rows = rows.slice(0, limit)
+
+  return json({
+    rows,
+    totals,
+    meta: { site, host, since, until, dimensions: dims, metric },
+  })
+}
+
+// Friendly GET for sanity checks / health.
+export const onRequestGet: PagesFunction<Env> = async () =>
+  json({ ok: true, hint: 'POST a query body to this endpoint.' })

@@ -1,0 +1,14 @@
+name = "gss-stats"
+compatibility_date = "2026-06-01"
+pages_build_output_dir = "dist"
+
+# Durable dashboard config storage. `id` is filled in after the namespace is
+# created with: npx wrangler kv namespace create STATS_CONFIG
+# Local `wrangler pages dev` simulates this binding automatically (id ignored).
+[[kv_namespaces]]
+binding = "STATS_CONFIG"
+id = "f1fa625cdb844c109c4db4acc02d00f5"
+
+# Secret (NOT here): CF_ANALYTICS_TOKEN — set per-environment via
+#   npx wrangler pages secret put CF_ANALYTICS_TOKEN
+# and locally via .dev.vars (gitignored).
