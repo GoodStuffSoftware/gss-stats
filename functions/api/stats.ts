@@ -49,8 +49,15 @@ const DIM_WHITELIST = new Set([
   'deviceType',
   'countryName',
   'refererHost',
+  'userAgentBrowser',
+  'userAgentOS',
   'date',
 ])
+
+// Sanitize a user-agent value used in a server-side exclusion filter.
+function safeUA(v: unknown): string {
+  return typeof v === 'string' && /^[A-Za-z0-9 ._-]{1,40}$/.test(v) ? v : ''
+}
 
 interface ReqBody {
   site?: string
@@ -61,6 +68,9 @@ interface ReqBody {
   metric?: string
   limit?: unknown
   excludeSelfReferrals?: boolean
+  excludeOwnVisits?: boolean
+  ownBrowser?: string
+  ownOS?: string
 }
 
 interface StatsRow {
@@ -123,6 +133,16 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const host = typeof body.host === 'string' && /^[a-z0-9.\-]+$/i.test(body.host) ? body.host : null
   const excludeSelf = body.excludeSelfReferrals !== false && dims.includes('refererHost')
 
+  // "Hide my own visits": exclude the owner's browser+OS COMBINATION (not all of
+  // either). De Morgan: NOT(b AND os) === (b≠ OR os≠).
+  const excludeOwn = body.excludeOwnVisits === true
+  const ownBrowser = safeUA((body as any).ownBrowser)
+  const ownOS = safeUA((body as any).ownOS)
+  const excludeOwnClause =
+    excludeOwn && ownBrowser && ownOS
+      ? `, OR: [{ userAgentBrowser_neq: "${ownBrowser}" }, { userAgentOS_neq: "${ownOS}" }]`
+      : ''
+
   const datetimeGeq = `${since}T00:00:00Z`
   const datetimeLeq = `${nextDay(until)}T00:00:00Z`
 
@@ -140,7 +160,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       return `s${i}: rumPageloadEventsAdaptiveGroups(
         limit: ${perTagLimit}
         orderBy: [${orderBy}]
-        filter: { datetime_geq: "${datetimeGeq}", datetime_leq: "${datetimeLeq}", siteTag: "${tag}"${hostClause} }
+        filter: { datetime_geq: "${datetimeGeq}", datetime_leq: "${datetimeLeq}", siteTag: "${tag}"${hostClause}${excludeOwnClause} }
       ) { count sum { visits } ${dimSelection} }`
     })
     .join('\n')

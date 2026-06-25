@@ -81,10 +81,24 @@ const activePreset = computed(() => {
     </div>
 
     <div class="group check">
-      <label>
+      <label title="Referrer charts only — drops referrals that come from our own sites (e.g. apex → subdomain). Does not change pageview/visit totals.">
         <input type="checkbox" v-model="local.excludeSelfReferrals" @change="commit" />
         Hide self-referrals
       </label>
+    </div>
+
+    <div class="group check">
+      <label title="Excludes your own machine from ALL numbers by dropping this exact browser + OS combination.">
+        <input type="checkbox" v-model="local.excludeOwnVisits" @change="commit" />
+        Hide my visits
+      </label>
+    </div>
+    <div v-if="local.excludeOwnVisits" class="group">
+      <label>My browser / OS</label>
+      <div class="ua-inputs">
+        <input type="text" v-model="local.ownBrowser" @change="commit" placeholder="Opera" />
+        <input type="text" v-model="local.ownOS" @change="commit" placeholder="Windows" />
+      </div>
     </div>
   </div>
 </template>
@@ -136,5 +150,12 @@ const activePreset = computed(() => {
   background: rgb(var(--amber-tint));
   border-color: rgb(var(--amber));
   color: rgb(var(--amber-hover));
+}
+.ua-inputs {
+  display: flex;
+  gap: 6px;
+}
+.ua-inputs input {
+  width: 96px;
 }
 </style>

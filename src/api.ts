@@ -17,6 +17,9 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters): Promis
     metric: widget.metric,
     limit: widget.limit ?? 50,
     excludeSelfReferrals: widget.excludeSelfReferrals ?? filters.excludeSelfReferrals,
+    excludeOwnVisits: filters.excludeOwnVisits,
+    ownBrowser: filters.ownBrowser,
+    ownOS: filters.ownOS,
   }
 
   const res = await fetch('/api/stats', {

@@ -39,6 +39,10 @@ export interface GlobalFilters {
   since: string // YYYY-MM-DD
   until: string // YYYY-MM-DD
   excludeSelfReferrals: boolean
+  // "Hide my own visits" — drops the owner's browser+OS combination server-side.
+  excludeOwnVisits: boolean
+  ownBrowser: string
+  ownOS: string
 }
 
 export interface DashboardConfig {
