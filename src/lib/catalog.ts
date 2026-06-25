@@ -47,6 +47,7 @@ export const CHART_TYPES: { value: ChartType; label: string; needsDimension: boo
   { value: 'line', label: 'Line', needsDimension: true, allowsBreakdown: false },
   { value: 'area', label: 'Area', needsDimension: true, allowsBreakdown: false },
   { value: 'doughnut', label: 'Doughnut', needsDimension: true, allowsBreakdown: false },
+  { value: 'nestedDoughnut', label: 'Nested doughnut (ring × ring)', needsDimension: true, allowsBreakdown: true },
   { value: 'pie', label: 'Pie', needsDimension: true, allowsBreakdown: false },
   { value: 'table', label: 'Table', needsDimension: true, allowsBreakdown: true },
 ]

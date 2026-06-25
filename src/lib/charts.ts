@@ -22,6 +22,47 @@ const INK = '#1A1715'
 const INK_3 = '#8A8278'
 const LINE = '#E7E2D7'
 
+// ── Color shading (for nested-ring charts: one base hue per primary, shaded per breakdown) ──
+function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace('#', '')
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]
+}
+function rgbToHex(r: number, g: number, b: number): string {
+  return '#' + [r, g, b].map((x) => Math.max(0, Math.min(255, Math.round(x))).toString(16).padStart(2, '0')).join('')
+}
+/** amount > 0 lightens toward white, < 0 darkens toward black. */
+export function shade(hex: string, amount: number): string {
+  const [r, g, b] = hexToRgb(hex)
+  if (amount >= 0) return rgbToHex(r + (255 - r) * amount, g + (255 - g) * amount, b + (255 - b) * amount)
+  const k = 1 + amount
+  return rgbToHex(r * k, g * k, b * k)
+}
+
+// Draws the grand total in the hole of a (nested) doughnut.
+function centerTextPlugin(total: number, sub: string) {
+  return {
+    id: 'centerText',
+    afterDraw(chart: any) {
+      const { ctx, chartArea } = chart
+      if (!chartArea) return
+      const cx = (chartArea.left + chartArea.right) / 2
+      const cy = (chartArea.top + chartArea.bottom) / 2
+      ctx.save()
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillStyle = isDark() ? '#F4F1EA' : INK
+      ctx.font = '700 21px "Space Grotesk", system-ui, sans-serif'
+      ctx.fillText(total.toLocaleString('en-US'), cx, cy - 7)
+      ctx.fillStyle = tickColor()
+      ctx.font = '10px Inter, system-ui, sans-serif'
+      ctx.fillText(sub, cx, cy + 13)
+      ctx.restore()
+    },
+  }
+}
+
+const DEVICE_PRIORITY: Record<string, number> = { desktop: 0, mobile: 1, tablet: 2 }
+
 export function metricValue(row: { pageviews: number; visits: number }, metric: Metric): number {
   return metric === 'visits' ? row.visits : row.pageviews
 }
@@ -103,13 +144,97 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
     }
   }
 
+  // ── Nested doughnut: inner ring = primary dimension, outer ring = breakdown ──
+  if (widget.type === 'nestedDoughnut' && widget.breakdown) {
+    const dimB = widget.breakdown
+    const primaryTotals = new Map<string, number>()
+    const combo = new Map<string, number>() // `${p}||${b}` -> value
+    const deviceSet = new Set<string>()
+    for (const r of resp.rows) {
+      const p = r.key[dim] ?? ''
+      const b = r.key[dimB] ?? ''
+      const v = metricValue(r, m)
+      primaryTotals.set(p, (primaryTotals.get(p) ?? 0) + v)
+      combo.set(`${p}||${b}`, (combo.get(`${p}||${b}`) ?? 0) + v)
+      deviceSet.add(b)
+    }
+    const primaries = [...primaryTotals.entries()].sort((a, b) => b[1] - a[1]).map((e) => e[0])
+    const devOrder = [...deviceSet].sort(
+      (a, b) => (DEVICE_PRIORITY[a] ?? 9) - (DEVICE_PRIORITY[b] ?? 9) || a.localeCompare(b),
+    )
+    const innerData = primaries.map((p) => primaryTotals.get(p) ?? 0)
+    const innerColors = primaries.map((_, i) => PALETTE[i % PALETTE.length])
+    const siteLabels = primaries.map((p) => formatKey(dim, p))
+
+    // Outer ring ordered site-major so each device arc nests under its site arc.
+    const outerData: number[] = []
+    const outerColors: string[] = []
+    const outerLabels: string[] = []
+    primaries.forEach((p, pi) => {
+      devOrder.forEach((d, rank) => {
+        const v = combo.get(`${p}||${d}`) ?? 0
+        if (v <= 0) return
+        const amt = rank === 0 ? -0.12 : Math.min(0.15 + rank * 0.22, 0.62)
+        outerData.push(v)
+        outerColors.push(shade(PALETTE[pi % PALETTE.length], amt))
+        outerLabels.push(`${formatKey(dim, p)} · ${formatKey(dimB, d)}`)
+      })
+    })
+
+    const grand = innerData.reduce((a, b) => a + b, 0)
+    const border = isDark() ? '#211C18' : '#FFFFFF'
+    return {
+      type: 'doughnut',
+      data: {
+        labels: outerLabels,
+        datasets: [
+          { data: innerData, backgroundColor: innerColors, borderColor: border, borderWidth: 2 },
+          { data: outerData, backgroundColor: outerColors, borderColor: border, borderWidth: 2 },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '40%',
+        plugins: {
+          legend: {
+            position: 'top',
+            onClick: () => {},
+            labels: {
+              color: tickColor(),
+              font: { family: 'Inter', size: 11 },
+              boxWidth: 12,
+              generateLabels: () =>
+                primaries.map((_, i) => ({
+                  text: `${siteLabels[i]} · ${innerData[i].toLocaleString('en-US')}`,
+                  fillStyle: PALETTE[i % PALETTE.length],
+                  strokeStyle: PALETTE[i % PALETTE.length],
+                  lineWidth: 0,
+                  index: i,
+                })) as any,
+            },
+          },
+          tooltip: {
+            callbacks: {
+              label: (ctx: any) => {
+                const lbl = ctx.datasetIndex === 0 ? siteLabels[ctx.dataIndex] : outerLabels[ctx.dataIndex]
+                return `${lbl}: ${Number(ctx.parsed).toLocaleString('en-US')}`
+              },
+            },
+          },
+        },
+      },
+      plugins: [centerTextPlugin(grand, `${m} · ${primaries.length} sites`)],
+    } as ChartConfiguration
+  }
+
   // ── Single-dimension series ─────────────────────────────────────────────────
   const labels = resp.rows.map((r) => formatKey(dim, r.key[dim] ?? ''))
   const values = resp.rows.map((r) => metricValue(r, m))
 
-  if (widget.type === 'doughnut' || widget.type === 'pie') {
+  if (widget.type === 'doughnut' || widget.type === 'pie' || widget.type === 'nestedDoughnut') {
     return {
-      type: widget.type,
+      type: widget.type === 'pie' ? 'pie' : 'doughnut',
       data: {
         labels,
         datasets: [{ data: values, backgroundColor: labels.map((_, i) => PALETTE[i % PALETTE.length]), borderWidth: 2, borderColor: isDark() ? '#211C18' : '#FFFFFF' }],

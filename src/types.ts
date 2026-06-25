@@ -5,6 +5,7 @@ export type ChartType =
   | 'area'
   | 'doughnut'
   | 'pie'
+  | 'nestedDoughnut'
   | 'stackedBar'
   | 'stat'
   | 'table'
