@@ -12,8 +12,8 @@ const geoVisitor = {
   dataset: 'geo', dimension: 'visitor', metric: 'pageviews', limit: 5, x: 0, y: 9999, w: 6, h: 8,
 }
 const bcnSiteDevice = {
-  id: 'bcn-sitedevice', i: 'bcn-sitedevice', title: 'Site × device', type: 'nestedDoughnut',
-  dataset: 'geo', dimension: 'site', breakdown: 'device', metric: 'pageviews', limit: 30, x: 0, y: 9999, w: 6, h: 8,
+  id: 'bcn-sitedevice', i: 'bcn-sitedevice', title: 'Device × site', type: 'nestedDoughnut',
+  dataset: 'geo', dimension: 'device', breakdown: 'site', metric: 'pageviews', limit: 30, x: 0, y: 9999, w: 7, h: 9,
 }
 
 const changes = []
