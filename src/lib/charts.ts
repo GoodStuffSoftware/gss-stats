@@ -61,6 +61,44 @@ function centerTextPlugin(total: number, sub: string) {
   }
 }
 
+// Pick a legible text color for a given fill.
+function textOn(hex: string): string {
+  const [r, g, b] = hexToRgb(hex)
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.62 ? '#1A1715' : '#ffffff'
+}
+
+// Draws each value on its arc — used on the outer ring of a nested doughnut so the
+// breakdown counts show without hovering. Skips slivers too small to fit a label.
+function arcLabelsPlugin(datasetIndex = 1) {
+  return {
+    id: 'arcLabels',
+    afterDatasetsDraw(chart: any) {
+      const ds = chart.data.datasets[datasetIndex]
+      if (!ds) return
+      const meta = chart.getDatasetMeta(datasetIndex)
+      const values = ds.data as number[]
+      const colors = (ds.backgroundColor as string[]) ?? []
+      const ctx = chart.ctx
+      ctx.save()
+      ctx.font = '600 10px Inter, system-ui, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      meta.data.forEach((arc: any, i: number) => {
+        const v = values[i]
+        if (!v) return
+        if (arc.endAngle - arc.startAngle < 0.16) return // ~9°, too small to label
+        const angle = (arc.startAngle + arc.endAngle) / 2
+        const radius = (arc.innerRadius + arc.outerRadius) / 2
+        const x = arc.x + Math.cos(angle) * radius
+        const y = arc.y + Math.sin(angle) * radius
+        ctx.fillStyle = textOn(colors[i] ?? '#888888')
+        ctx.fillText(v.toLocaleString('en-US'), x, y)
+      })
+      ctx.restore()
+    },
+  }
+}
+
 const DEVICE_PRIORITY: Record<string, number> = { desktop: 0, mobile: 1, tablet: 2 }
 
 export function metricValue(row: { pageviews: number; visits: number }, metric: Metric): number {
@@ -226,7 +264,7 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
           },
         },
       },
-      plugins: [centerTextPlugin(grand, `${m} · ${primaries.length} sites`)],
+      plugins: [centerTextPlugin(grand, `${m} · ${primaries.length} sites`), arcLabelsPlugin(1)],
     } as ChartConfiguration
   }
 
