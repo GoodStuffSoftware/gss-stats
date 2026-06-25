@@ -26,6 +26,9 @@ export interface Widget {
   site?: SiteKey // optional per-widget site override ('inherit' = use global)
   host?: string // optional per-widget host override
   excludeSelfReferrals?: boolean
+  // Full per-chart filter override. When set, this chart ignores the global
+  // filter bar and uses these instead. Undefined = follow the global filter.
+  filters?: GlobalFilters | null
   // grid geometry (managed by grid-layout-plus)
   x: number
   y: number

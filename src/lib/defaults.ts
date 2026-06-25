@@ -61,6 +61,8 @@ export function normalizeConfig(raw: any): DashboardConfig {
     site: x.site,
     host: x.host,
     excludeSelfReferrals: x.excludeSelfReferrals,
+    // Per-chart override: back-fill any filter fields added since it was saved.
+    filters: x.filters ? { ...base.filters, ...x.filters } : undefined,
     x: Number(x.x) || 0,
     y: Number(x.y) || 0,
     w: Number(x.w) || 4,
