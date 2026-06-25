@@ -1,19 +1,32 @@
 <script setup lang="ts">
-import { reactive, computed, watch } from 'vue'
+import { reactive, computed, watch, ref } from 'vue'
 import type { GlobalFilters } from '../types'
 import { SITE_OPTIONS, SITES } from '../lib/catalog'
+import { relativeRange, lastDays, isoToYmd, ymdRangeToISO, rangeLabel, isLastDays } from '../lib/range'
 
 const props = defineProps<{ start: GlobalFilters; active: boolean }>()
 const emit = defineEmits<{ apply: [GlobalFilters]; useGlobal: []; close: [] }>()
 
 const local = reactive<GlobalFilters>({ ...props.start })
+
+const rangeInput = ref('')
+const fromYmd = ref('')
+const toYmd = ref('')
+function syncRange() {
+  rangeInput.value = rangeLabel(local.since, local.until)
+  fromYmd.value = isoToYmd(local.since)
+  toYmd.value = isoToYmd(local.until)
+}
 watch(
   () => props.start,
-  (s) => Object.assign(local, s),
+  (s) => {
+    Object.assign(local, s)
+    syncRange()
+  },
   { deep: true },
 )
+syncRange()
 
-// Any edit creates / updates the override (live).
 function commit() {
   emit('apply', { ...local })
 }
@@ -23,19 +36,42 @@ function onSiteChange() {
   local.host = ''
   commit()
 }
-function preset(days: number) {
-  const until = new Date()
-  const since = new Date()
-  since.setUTCDate(since.getUTCDate() - (days - 1))
-  local.since = since.toISOString().slice(0, 10)
-  local.until = until.toISOString().slice(0, 10)
-  commit()
+
+const rangeOk = ref(true)
+function applyRange() {
+  const r = relativeRange(rangeInput.value)
+  if (r) {
+    local.since = r.since
+    local.until = r.until
+    rangeOk.value = true
+    commit()
+    syncRange()
+  } else if (!rangeInput.value.trim()) {
+    syncRange()
+    rangeOk.value = true
+  } else {
+    rangeOk.value = false
+  }
 }
-const activePreset = computed(() => {
-  const days = Math.round((Date.parse(local.until) - Date.parse(local.since)) / 86400000) + 1
-  const today = new Date().toISOString().slice(0, 10)
-  return local.until === today ? days : -1
-})
+function setDays(n: number) {
+  const r = lastDays(n)
+  local.since = r.since
+  local.until = r.until
+  commit()
+  syncRange()
+}
+function isPreset(n: number) {
+  return isLastDays(local.since, local.until, n)
+}
+function applyCal() {
+  if (!fromYmd.value || !toYmd.value) return
+  const [a, b] = fromYmd.value <= toYmd.value ? [fromYmd.value, toYmd.value] : [toYmd.value, fromYmd.value]
+  const r = ymdRangeToISO(a, b)
+  local.since = r.since
+  local.until = r.until
+  commit()
+  rangeInput.value = rangeLabel(local.since, local.until)
+}
 </script>
 
 <template>
@@ -62,21 +98,30 @@ const activePreset = computed(() => {
 
     <div class="fp-field">
       <label>Range</label>
+      <input
+        class="rangefield"
+        :class="{ bad: !rangeOk }"
+        type="text"
+        v-model="rangeInput"
+        placeholder="7d · 24h · 3h · 2w"
+        @keydown.enter.prevent="applyRange"
+        @blur="applyRange"
+      />
       <div class="presets">
-        <button :class="['chip', { on: activePreset === 7 }]" @click="preset(7)">7d</button>
-        <button :class="['chip', { on: activePreset === 30 }]" @click="preset(30)">30d</button>
-        <button :class="['chip', { on: activePreset === 90 }]" @click="preset(90)">90d</button>
+        <button :class="['chip', { on: isPreset(1) }]" @click="setDays(1)">1d</button>
+        <button :class="['chip', { on: isPreset(7) }]" @click="setDays(7)">7d</button>
+        <button :class="['chip', { on: isPreset(30) }]" @click="setDays(30)">30d</button>
       </div>
     </div>
 
     <div class="fp-row">
       <div class="fp-field">
         <label>From</label>
-        <input type="date" v-model="local.since" @change="commit" />
+        <input type="date" v-model="fromYmd" @change="applyCal" />
       </div>
       <div class="fp-field">
         <label>To</label>
-        <input type="date" v-model="local.until" @change="commit" />
+        <input type="date" v-model="toYmd" @change="applyCal" />
       </div>
     </div>
 
@@ -144,6 +189,12 @@ const activePreset = computed(() => {
 .fp-field input {
   width: 100%;
 }
+.rangefield {
+  font-family: 'JetBrains Mono', monospace;
+}
+.rangefield.bad {
+  border-color: #bc4749;
+}
 .fp-row {
   display: flex;
   gap: 8px;
@@ -151,6 +202,7 @@ const activePreset = computed(() => {
 .presets {
   display: flex;
   gap: 4px;
+  margin-top: 5px;
 }
 .chip {
   border: 1px solid rgb(var(--line-2));

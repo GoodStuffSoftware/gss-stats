@@ -2,9 +2,8 @@ import type { DashboardConfig, DashboardPage, GlobalFilters, Widget } from '../t
 
 export function defaultDateRange(): { since: string; until: string } {
   const until = new Date()
-  const since = new Date()
-  since.setUTCDate(since.getUTCDate() - 6) // last 7 calendar days inclusive
-  return { since: since.toISOString().slice(0, 10), until: until.toISOString().slice(0, 10) }
+  const since = new Date(until.getTime() - 7 * 86_400_000) // rolling last 7 days (ISO datetimes)
+  return { since: since.toISOString(), until: until.toISOString() }
 }
 
 export function defaultFilters(): GlobalFilters {

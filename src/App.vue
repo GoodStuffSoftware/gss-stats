@@ -2,6 +2,7 @@
 import { reactive, ref, watch, onMounted, nextTick, computed } from 'vue'
 import type { DashboardConfig, DashboardPage, Widget, GlobalFilters } from './types'
 import { defaultConfig, normalizeConfig, defaultWidgets, clonePage, cryptoId } from './lib/defaults'
+import { rangeLabel } from './lib/range'
 import { loadConfig, saveConfig } from './api'
 import PageBar from './components/PageBar.vue'
 import FilterBar from './components/FilterBar.vue'
@@ -16,6 +17,7 @@ const saveState = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
 
 // The page currently being viewed/edited.
 const activePage = computed<DashboardPage>(() => config.pages.find((p) => p.id === config.activePageId) ?? config.pages[0])
+const rangeText = computed(() => rangeLabel(activePage.value.filters.since, activePage.value.filters.until))
 
 onMounted(async () => {
   dark.value = localStorage.getItem('gss-stats-dark') === '1'
@@ -199,8 +201,7 @@ function toggleDark() {
     />
 
     <footer class="foot overline">
-      {{ activePage.name }} · Cloudflare RUM (humans only, bots excluded) · {{ activePage.filters.since }} →
-      {{ activePage.filters.until }}
+      {{ activePage.name }} · humans only, bots excluded · {{ rangeText }}
     </footer>
   </div>
 </template>
