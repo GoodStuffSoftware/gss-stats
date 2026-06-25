@@ -143,6 +143,12 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       ? `, OR: [{ userAgentBrowser_neq: "${ownBrowser}" }, { userAgentOS_neq: "${ownOS}" }]`
       : ''
 
+  // Always drop internal hosts — the dashboard itself (stats.) and the beacon's
+  // landing page (beacon.) get Cloudflare Web Analytics auto-injected zone-wide,
+  // so the owner's own admin usage would otherwise inflate every RUM chart.
+  const excludeInternalClause =
+    ', AND: [{ requestHost_neq: "stats.goodstuff.software" }, { requestHost_neq: "beacon.goodstuff.software" }]'
+
   const datetimeGeq = `${since}T00:00:00Z`
   const datetimeLeq = `${nextDay(until)}T00:00:00Z`
 
@@ -160,7 +166,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       return `s${i}: rumPageloadEventsAdaptiveGroups(
         limit: ${perTagLimit}
         orderBy: [${orderBy}]
-        filter: { datetime_geq: "${datetimeGeq}", datetime_leq: "${datetimeLeq}", siteTag: "${tag}"${hostClause}${excludeOwnClause} }
+        filter: { datetime_geq: "${datetimeGeq}", datetime_leq: "${datetimeLeq}", siteTag: "${tag}"${hostClause}${excludeOwnClause}${excludeInternalClause} }
       ) { count sum { visits } ${dimSelection} }`
     })
     .join('\n')
