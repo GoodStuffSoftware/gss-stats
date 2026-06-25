@@ -276,4 +276,22 @@ function toggleDark() {
   text-align: center;
   margin-top: 8px;
 }
+
+@media (max-width: 700px) {
+  .app {
+    padding: 14px 12px 48px;
+    gap: 12px;
+  }
+  .brand h1 {
+    font-size: 19px;
+  }
+  .logo {
+    width: 34px;
+    height: 34px;
+    font-size: 18px;
+  }
+  .top-actions {
+    flex-wrap: wrap;
+  }
+}
 </style>

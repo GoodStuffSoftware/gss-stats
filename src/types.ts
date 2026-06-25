@@ -7,6 +7,7 @@ export type ChartType =
   | 'pie'
   | 'nestedDoughnut'
   | 'stackedBar'
+  | 'map'
   | 'stat'
   | 'table'
 

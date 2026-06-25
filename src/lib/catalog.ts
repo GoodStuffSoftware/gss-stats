@@ -9,11 +9,20 @@ export const DATASETS: { value: Dataset; label: string }[] = [
 export const GEO_DIMENSIONS: { key: string; label: string }[] = [
   { key: 'region', label: 'Region / state' },
   { key: 'city', label: 'City' },
+  { key: 'postal', label: 'Postal / ZIP' },
   { key: 'country', label: 'Country' },
+  { key: 'continent', label: 'Continent' },
+  { key: 'timezone', label: 'Timezone' },
   { key: 'colo', label: 'Cloudflare PoP' },
+  { key: 'org', label: 'ISP / network' },
+  { key: 'referrer', label: 'Referrer' },
   { key: 'site', label: 'Site' },
   { key: 'path', label: 'Page path' },
   { key: 'device', label: 'Device' },
+  { key: 'browser', label: 'Browser' },
+  { key: 'os', label: 'Operating system' },
+  { key: 'lang', label: 'Language' },
+  { key: 'visitor', label: 'New vs returning' },
   { key: 'date', label: 'Date (trend)' },
 ]
 
@@ -68,6 +77,7 @@ export const CHART_TYPES: { value: ChartType; label: string; needsDimension: boo
   { value: 'doughnut', label: 'Doughnut', needsDimension: true, allowsBreakdown: false },
   { value: 'nestedDoughnut', label: 'Nested doughnut (ring × ring)', needsDimension: true, allowsBreakdown: true },
   { value: 'pie', label: 'Pie', needsDimension: true, allowsBreakdown: false },
+  { value: 'map', label: 'World map (geo points · beacon only)', needsDimension: false, allowsBreakdown: false },
   { value: 'table', label: 'Table', needsDimension: true, allowsBreakdown: true },
 ]
 
