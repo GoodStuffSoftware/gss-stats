@@ -70,22 +70,22 @@ function textOn(hex: string): string {
 // Draws "name + count" on each arc of the given datasets (both rings of a nested
 // doughnut), so every segment is self-labeled — no legend or hover needed. Skips
 // slivers too small to fit a label; those stay on hover.
-function arcLabelsPlugin(labelsByDataset: Record<number, string[]>) {
+type ArcItem = { name: string; sub: string }
+function arcLabelsPlugin(itemsByDataset: Record<number, ArcItem[]>) {
   return {
     id: 'arcLabels',
     afterDatasetsDraw(chart: any) {
       const ctx = chart.ctx
-      for (const key of Object.keys(labelsByDataset)) {
+      for (const key of Object.keys(itemsByDataset)) {
         const di = Number(key)
         const ds = chart.data.datasets[di]
         if (!ds) continue
         const meta = chart.getDatasetMeta(di)
-        const values = ds.data as number[]
         const colors = (ds.backgroundColor as string[]) ?? []
-        const names = labelsByDataset[di] ?? []
+        const items = itemsByDataset[di] ?? []
         meta.data.forEach((arc: any, i: number) => {
-          const v = values[i]
-          if (!v || arc.endAngle - arc.startAngle < 0.2) return // ~11°, too small
+          const it = items[i]
+          if (!it || arc.endAngle - arc.startAngle < 0.2) return // ~11°, too small to label
           const angle = (arc.startAngle + arc.endAngle) / 2
           const radius = (arc.innerRadius + arc.outerRadius) / 2
           const x = arc.x + Math.cos(angle) * radius
@@ -94,16 +94,10 @@ function arcLabelsPlugin(labelsByDataset: Record<number, string[]>) {
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
           ctx.fillStyle = textOn(colors[i] ?? '#888888')
-          const name = names[i]
-          if (name) {
-            ctx.font = '600 10px Inter, system-ui, sans-serif'
-            ctx.fillText(name, x, y - 6)
-            ctx.font = '700 12px "Space Grotesk", system-ui, sans-serif'
-            ctx.fillText(v.toLocaleString('en-US'), x, y + 6)
-          } else {
-            ctx.font = '700 11px Inter, system-ui, sans-serif'
-            ctx.fillText(v.toLocaleString('en-US'), x, y)
-          }
+          ctx.font = '600 10px Inter, system-ui, sans-serif'
+          ctx.fillText(it.name, x, y - 6)
+          ctx.font = '700 11px "Space Grotesk", system-ui, sans-serif'
+          ctx.fillText(it.sub, x, y + 6)
           ctx.restore()
         })
       }
@@ -222,8 +216,9 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
     const outerData: number[] = []
     const outerColors: string[] = []
     const outerLabels: string[] = []
-    const outerDeviceLabels: string[] = []
+    const outerItems: ArcItem[] = []
     primaries.forEach((p, pi) => {
+      const pTotal = primaryTotals.get(p) || 1
       devOrder.forEach((d, rank) => {
         const v = combo.get(`${p}||${d}`) ?? 0
         if (v <= 0) return
@@ -231,11 +226,17 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
         outerData.push(v)
         outerColors.push(shade(PALETTE[pi % PALETTE.length], amt))
         outerLabels.push(`${formatKey(dim, p)} · ${formatKey(dimB, d)}`)
-        outerDeviceLabels.push(formatKey(dimB, d))
+        // outer % is within its parent (e.g. desktop = 53% of starrupture)
+        outerItems.push({ name: formatKey(dimB, d), sub: `${v.toLocaleString('en-US')} · ${Math.round((v / pTotal) * 100)}%` })
       })
     })
 
     const grand = innerData.reduce((a, b) => a + b, 0)
+    // inner % is of the grand total (e.g. starrupture = 55% of all)
+    const innerItems: ArcItem[] = primaries.map((p, i) => ({
+      name: siteLabels[i],
+      sub: `${innerData[i].toLocaleString('en-US')} · ${Math.round((innerData[i] / (grand || 1)) * 100)}%`,
+    }))
     const border = isDark() ? '#211C18' : '#FFFFFF'
     return {
       type: 'doughnut',
@@ -254,15 +255,18 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
           legend: { display: false }, // arcs are labeled in place
           tooltip: {
             callbacks: {
+              // The two rings share one labels array, so the default title is wrong
+              // for the inner ring — suppress it and build the line ourselves.
+              title: () => '',
               label: (ctx: any) => {
-                const lbl = ctx.datasetIndex === 0 ? siteLabels[ctx.dataIndex] : outerLabels[ctx.dataIndex]
-                return `${lbl}: ${Number(ctx.parsed).toLocaleString('en-US')}`
+                const it = (ctx.datasetIndex === 0 ? innerItems : outerItems)[ctx.dataIndex]
+                return it ? `${it.name}: ${it.sub}` : ''
               },
             },
           },
         },
       },
-      plugins: [centerTextPlugin(grand, `${m} · ${primaries.length} sites`), arcLabelsPlugin({ 0: siteLabels, 1: outerDeviceLabels })],
+      plugins: [centerTextPlugin(grand, m), arcLabelsPlugin({ 0: innerItems, 1: outerItems })],
     } as ChartConfiguration
   }
 
