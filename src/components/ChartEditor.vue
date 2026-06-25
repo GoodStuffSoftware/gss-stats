@@ -26,6 +26,17 @@ function onDatasetChange() {
   }
 }
 
+// The world map is geo-only.
+watch(
+  () => draft.type,
+  (t) => {
+    if (t === 'map' && draft.dataset !== 'geo') {
+      draft.dataset = 'geo'
+      onDatasetChange()
+    }
+  },
+)
+
 const typeDef = computed(() => CHART_TYPES.find((t) => t.value === draft.type))
 const siteValue = computed({
   get: () => draft.site ?? 'inherit',

@@ -8,10 +8,10 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters): Promis
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        dimension: widget.dimension || 'region',
+        dimension: widget.type === 'map' ? 'points' : widget.dimension || 'region',
         since: filters.since,
         until: filters.until,
-        limit: widget.limit ?? 50,
+        limit: widget.type === 'map' ? 2000 : widget.limit ?? 50,
         site: widget.host || undefined,
       }),
     })

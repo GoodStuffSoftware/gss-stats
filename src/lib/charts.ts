@@ -70,11 +70,13 @@ export function metricValue(row: { pageviews: number; visits: number }, metric: 
 // Human-friendly label for a dimension value.
 export function formatKey(dimension: string, value: string): string {
   if (!value) {
-    if (dimension === 'refererHost') return '(direct)'
-    if (dimension === 'region' || dimension === 'city' || dimension === 'colo' || dimension === 'country') return '(unknown)'
+    if (dimension === 'refererHost' || dimension === 'referrer') return '(direct)'
+    if (['region', 'city', 'colo', 'country', 'postal', 'continent', 'timezone', 'org', 'lang'].includes(dimension))
+      return '(unknown)'
     return '(none)'
   }
   if (dimension === 'countryName' || dimension === 'country') return COUNTRY_NAMES[value] ?? value
+  if (dimension === 'visitor') return value.charAt(0).toUpperCase() + value.slice(1)
   if (dimension === 'date') {
     // YYYY-MM-DD → "Jun 24"
     const d = new Date(value + 'T00:00:00Z')
@@ -109,7 +111,7 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
   const m = widget.metric
   const dim = widget.dimension
 
-  if (widget.type === 'stat' || widget.type === 'table') return null
+  if (widget.type === 'stat' || widget.type === 'table' || widget.type === 'map') return null
 
   // ── Stacked bar: primary dimension × breakdown ──────────────────────────────
   if (widget.type === 'stackedBar' && widget.breakdown) {

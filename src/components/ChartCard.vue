@@ -4,6 +4,7 @@ import type { Widget, GlobalFilters, StatsResponse } from '../types'
 import { fetchStats } from '../api'
 import { buildChartConfig, formatKey, metricValue } from '../lib/charts'
 import BaseChart from './charts/BaseChart.vue'
+import WorldMap from './charts/WorldMap.vue'
 import FilterPopover from './FilterPopover.vue'
 
 const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolean }>()
@@ -111,7 +112,9 @@ const tableRows = computed(() =>
 )
 const tableMax = computed(() => Math.max(1, ...tableRows.value.map((r) => r.value)))
 
-const isEmpty = computed(() => !loading.value && !error.value && data.value && data.value.rows.length === 0)
+const isEmpty = computed(
+  () => !loading.value && !error.value && data.value && data.value.rows.length === 0 && props.widget.type !== 'map',
+)
 
 function fmt(n: number) {
   return n.toLocaleString('en-US')
@@ -183,6 +186,9 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
           </tbody>
         </table>
       </div>
+
+      <!-- World map (geo points) -->
+      <WorldMap v-else-if="widget.type === 'map'" :data="data" />
 
       <!-- Chart.js chart -->
       <BaseChart v-else-if="chartConfig" :config="chartConfig" />
