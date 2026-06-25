@@ -2,16 +2,31 @@
 import { reactive, computed, watch, ref, onMounted, onBeforeUnmount } from 'vue'
 import type { GlobalFilters } from '../types'
 import { SITE_OPTIONS, SITES } from '../lib/catalog'
+import { relativeRange, lastDays, isoToYmd, ymdRangeToISO, rangeLabel, isLastDays } from '../lib/range'
 
 const props = defineProps<{ filters: GlobalFilters }>()
 const emit = defineEmits<{ change: [GlobalFilters] }>()
 
 const local = reactive<GlobalFilters>({ ...props.filters })
+
+// Range display state (kept in sync with local.since/until).
+const rangeInput = ref('')
+const fromYmd = ref('')
+const toYmd = ref('')
+function syncRange() {
+  rangeInput.value = rangeLabel(local.since, local.until)
+  fromYmd.value = isoToYmd(local.since)
+  toYmd.value = isoToYmd(local.until)
+}
 watch(
   () => props.filters,
-  (f) => Object.assign(local, f),
+  (f) => {
+    Object.assign(local, f)
+    syncRange()
+  },
   { deep: true },
 )
+onMounted(syncRange)
 
 function commit() {
   emit('change', { ...local })
@@ -22,21 +37,53 @@ function onSiteChange() {
   local.host = ''
   commit()
 }
-function preset(days: number) {
-  const until = new Date()
-  const since = new Date()
-  since.setUTCDate(since.getUTCDate() - (days - 1))
-  local.since = since.toISOString().slice(0, 10)
-  local.until = until.toISOString().slice(0, 10)
-  commit()
-}
-const activePreset = computed(() => {
-  const days = Math.round((Date.parse(local.until) - Date.parse(local.since)) / 86400000) + 1
-  const today = new Date().toISOString().slice(0, 10)
-  return local.until === today ? days : -1
-})
 
-// ── Exclusions popout (noise filters) ─────────────────────────────────────────
+// ── Smart range ───────────────────────────────────────────────────────────────
+const rangeOk = ref(true)
+function applyRange() {
+  const r = relativeRange(rangeInput.value)
+  if (r) {
+    local.since = r.since
+    local.until = r.until
+    rangeOk.value = true
+    commit()
+    syncRange()
+  } else if (rangeInput.value.trim() === '') {
+    syncRange() // empty → revert to label
+    rangeOk.value = true
+  } else {
+    rangeOk.value = false // invalid token — flag, keep what they typed
+  }
+}
+function setDays(n: number) {
+  const r = lastDays(n)
+  local.since = r.since
+  local.until = r.until
+  commit()
+  syncRange()
+}
+function isPreset(n: number) {
+  return isLastDays(local.since, local.until, n)
+}
+
+// ── Calendar popover ──────────────────────────────────────────────────────────
+const calOpen = ref(false)
+function applyCal() {
+  if (!fromYmd.value || !toYmd.value) return
+  const [a, b] = fromYmd.value <= toYmd.value ? [fromYmd.value, toYmd.value] : [toYmd.value, fromYmd.value]
+  const r = ymdRangeToISO(a, b)
+  local.since = r.since
+  local.until = r.until
+  commit()
+  rangeInput.value = rangeLabel(local.since, local.until)
+}
+function closeCal() {
+  calOpen.value = false
+}
+onMounted(() => document.addEventListener('click', closeCal))
+onBeforeUnmount(() => document.removeEventListener('click', closeCal))
+
+// ── Exclusions popout ─────────────────────────────────────────────────────────
 const exclOpen = ref(false)
 const exclCount = computed(() => (local.excludeSelfReferrals ? 1 : 0) + (local.excludeOwnVisits ? 1 : 0))
 function closeExcl() {
@@ -63,22 +110,37 @@ onBeforeUnmount(() => document.removeEventListener('click', closeExcl))
       </select>
     </div>
 
-    <div class="group presets">
+    <div class="group range">
       <label>Range</label>
-      <div class="preset-btns">
-        <button :class="['chip', { on: activePreset === 7 }]" @click="preset(7)">7d</button>
-        <button :class="['chip', { on: activePreset === 30 }]" @click="preset(30)">30d</button>
-        <button :class="['chip', { on: activePreset === 90 }]" @click="preset(90)">90d</button>
+      <div class="range-row">
+        <input
+          class="range-field"
+          :class="{ bad: !rangeOk }"
+          type="text"
+          v-model="rangeInput"
+          placeholder="7d · 24h · 3h · 2w"
+          title="Type a span like 3h, 24h, 7d, 2w, 1mo — or use the calendar"
+          @keydown.enter.prevent="applyRange"
+          @blur="applyRange"
+        />
+        <button class="cal-btn" :class="{ on: calOpen }" title="Pick exact dates" @click.stop="calOpen = !calOpen">📅</button>
+        <div class="chips">
+          <button :class="['chip', { on: isPreset(1) }]" @click="setDays(1)">1d</button>
+          <button :class="['chip', { on: isPreset(7) }]" @click="setDays(7)">7d</button>
+          <button :class="['chip', { on: isPreset(30) }]" @click="setDays(30)">30d</button>
+        </div>
+        <div v-if="calOpen" class="cal-pop" @click.stop>
+          <div class="cal-field">
+            <label>From</label>
+            <input type="date" v-model="fromYmd" @change="applyCal" />
+          </div>
+          <div class="cal-field">
+            <label>To</label>
+            <input type="date" v-model="toYmd" @change="applyCal" />
+          </div>
+          <button class="btn-done" @click="calOpen = false">Done</button>
+        </div>
       </div>
-    </div>
-
-    <div class="group">
-      <label>From</label>
-      <input type="date" v-model="local.since" @change="commit" />
-    </div>
-    <div class="group">
-      <label>To</label>
-      <input type="date" v-model="local.until" @change="commit" />
     </div>
 
     <div class="group">
@@ -126,7 +188,35 @@ onBeforeUnmount(() => document.removeEventListener('click', closeExcl))
   flex-direction: column;
   gap: 5px;
 }
-.preset-btns {
+
+/* Range */
+.range-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+}
+.range-field {
+  width: 110px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.range-field.bad {
+  border-color: #bc4749;
+  outline-color: rgb(188 71 73 / 0.4);
+}
+.cal-btn {
+  border: 1px solid rgb(var(--line-2));
+  background: rgb(var(--surface));
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 13px;
+  line-height: 1;
+}
+.cal-btn:hover,
+.cal-btn.on {
+  border-color: rgb(var(--amber));
+}
+.chips {
   display: flex;
   gap: 4px;
 }
@@ -135,7 +225,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeExcl))
   background: rgb(var(--surface));
   color: rgb(var(--ink-2));
   border-radius: 8px;
-  padding: 6px 11px;
+  padding: 6px 10px;
   font-size: 12px;
   font-weight: 500;
   font-family: 'JetBrains Mono', monospace;
@@ -147,6 +237,37 @@ onBeforeUnmount(() => document.removeEventListener('click', closeExcl))
   background: rgb(var(--amber-tint));
   border-color: rgb(var(--amber));
   color: rgb(var(--amber-hover));
+}
+.cal-pop {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6px);
+  z-index: 40;
+  background: rgb(var(--surface));
+  border: 1px solid rgb(var(--line-2));
+  border-radius: 12px;
+  box-shadow: 0 14px 38px rgb(0 0 0 / 0.18);
+  padding: 12px 13px;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+.cal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.btn-done {
+  border: 1px solid rgb(var(--amber));
+  background: rgb(var(--amber));
+  color: #fff;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.btn-done:hover {
+  background: rgb(var(--amber-hover));
 }
 
 /* Exclusions popout */
@@ -235,13 +356,6 @@ onBeforeUnmount(() => document.removeEventListener('click', closeExcl))
   .filter-bar {
     gap: 10px;
     padding: 10px 12px;
-  }
-  .group {
-    flex: 1 1 calc(50% - 5px);
-  }
-  .group select,
-  .group input {
-    width: 100%;
   }
 }
 </style>

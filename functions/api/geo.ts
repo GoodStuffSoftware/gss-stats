@@ -22,10 +22,11 @@ const json = (data: unknown, status = 200): Response =>
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
   })
 
+const WHEN_RE = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?(\.\d+)?Z?)?$/
 function safeDate(v: unknown, fallback: string): string {
-  return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : fallback
+  return typeof v === 'string' && WHEN_RE.test(v) ? v : fallback
 }
-const dayMs = (ymd: string) => Date.parse(`${ymd}T00:00:00Z`)
+const isDateOnly = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v)
 
 export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   let body: any
@@ -42,8 +43,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const weekAgo = new Date(Date.now() - 6 * 86_400_000).toISOString().slice(0, 10)
   const since = safeDate(body.since, weekAgo)
   const until = safeDate(body.until, today)
-  const sinceMs = dayMs(since)
-  const untilMs = dayMs(until) + 86_400_000 // inclusive final day
+  const sinceMs = Date.parse(since)
+  const untilMs = isDateOnly(until) ? Date.parse(until) + 86_400_000 : Date.parse(until) // legacy day = inclusive
   // Optional beacon-site filter (e.g. "starrupture"). The RUM site keys don't map
   // here, so only apply it when it's a plain site tag.
   const site = typeof body.site === 'string' && /^[a-z0-9.\-]{1,40}$/i.test(body.site) ? body.site : null

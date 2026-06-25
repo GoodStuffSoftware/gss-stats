@@ -85,10 +85,12 @@ const json = (data: unknown, status = 200): Response =>
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
   })
 
-// Accept only YYYY-MM-DD; fall back to a sane default if malformed.
+// Accept a date (YYYY-MM-DD) or a full ISO datetime; fall back if malformed.
+const WHEN_RE = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?(\.\d+)?Z?)?$/
 function safeDate(v: unknown, fallback: string): string {
-  return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : fallback
+  return typeof v === 'string' && WHEN_RE.test(v) ? v : fallback
 }
+const isDateOnly = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v)
 
 // until is inclusive — add one day so datetime_leq covers the whole final day.
 function nextDay(ymd: string): string {
@@ -149,8 +151,9 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const excludeInternalClause =
     ', AND: [{ requestHost_neq: "stats.goodstuff.software" }, { requestHost_neq: "beacon.goodstuff.software" }]'
 
-  const datetimeGeq = `${since}T00:00:00Z`
-  const datetimeLeq = `${nextDay(until)}T00:00:00Z`
+  // Day values expand to full-day bounds; full ISO datetimes are used as-is.
+  const datetimeGeq = isDateOnly(since) ? `${since}T00:00:00Z` : since
+  const datetimeLeq = isDateOnly(until) ? `${nextDay(until)}T00:00:00Z` : until
 
   const tags = site === 'all' ? Object.values(SITE_TAGS) : [SITE_TAGS[site as string]]
 

@@ -3,6 +3,7 @@ import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
 import type { Widget, GlobalFilters, StatsResponse } from '../types'
 import { fetchStats } from '../api'
 import { buildChartConfig, formatKey, metricValue } from '../lib/charts'
+import { rangeLabel } from '../lib/range'
 import BaseChart from './charts/BaseChart.vue'
 import WorldMap from './charts/WorldMap.vue'
 import FilterPopover from './FilterPopover.vue'
@@ -78,12 +79,9 @@ const overrideSummary = computed(() => {
       : f.host
         ? f.host.replace('.goodstuff.software', '')
         : f.site.replace('goodstuff.software', 'gs').replace('.com', '')
-  const today = new Date().toISOString().slice(0, 10)
-  const days = Math.round((Date.parse(f.until) - Date.parse(f.since)) / 86400000) + 1
-  const range = f.until === today ? `${days}d` : `${f.since}→${f.until}`
   const flags: string[] = []
   if (f.excludeOwnVisits) flags.push('−me')
-  return [site, range, ...flags].join(' · ')
+  return [site, rangeLabel(f.since, f.until), ...flags].join(' · ')
 })
 watch(dataKey, load)
 onMounted(load)
