@@ -9,6 +9,12 @@ pages_build_output_dir = "dist"
 binding = "STATS_CONFIG"
 id = "f1fa625cdb844c109c4db4acc02d00f5"
 
+# Shared geo store written by the public gss-beacon project; read-only here.
+[[d1_databases]]
+binding = "gss_geo"
+database_name = "gss-geo"
+database_id = "fa0b2929-0086-479e-ae10-50509c34ebf8"
+
 # Secret (NOT here): CF_ANALYTICS_TOKEN — set per-environment via
 #   npx wrangler pages secret put CF_ANALYTICS_TOKEN
 # and locally via .dev.vars (gitignored).

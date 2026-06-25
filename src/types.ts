@@ -12,6 +12,8 @@ export type ChartType =
 
 export type Metric = 'pageviews' | 'visits'
 
+export type Dataset = 'rum' | 'geo'
+
 export type SiteKey = 'goodstuff.software' | 'goodstuffsoftware.com' | 'bestsudoku.app' | 'all'
 
 export interface Widget {
@@ -19,6 +21,7 @@ export interface Widget {
   i: string // grid item id (mirrors id; required by grid-layout-plus)
   title: string
   type: ChartType
+  dataset?: Dataset // 'rum' (default) or 'geo' (beacon region/city)
   dimension: string // primary group-by ('' for a plain total/stat)
   breakdown?: string // optional secondary dimension (stacked / grouped)
   metric: Metric

@@ -38,6 +38,8 @@ export function defaultWidgets(): Widget[] {
     w({ id: 'country', title: 'By country', type: 'hbar', dimension: 'countryName', metric: 'pageviews', limit: 10, x: 6, y: 16, w: 6, h: 8 }),
     w({ id: 'pages', title: 'Top pages', type: 'hbar', dimension: 'requestPath', metric: 'pageviews', limit: 10, x: 0, y: 19, w: 6, h: 8 }),
     w({ id: 'device', title: 'Device split', type: 'doughnut', dimension: 'deviceType', metric: 'pageviews', limit: 6, x: 6, y: 24, w: 6, h: 8 }),
+    w({ id: 'geo-region', title: 'Visitors by region (beacon)', type: 'hbar', dataset: 'geo', dimension: 'region', metric: 'pageviews', limit: 15, x: 0, y: 27, w: 6, h: 8 }),
+    w({ id: 'geo-city', title: 'Top cities (beacon)', type: 'hbar', dataset: 'geo', dimension: 'city', metric: 'pageviews', limit: 15, x: 6, y: 27, w: 6, h: 8 }),
   ]
 }
 
@@ -56,6 +58,7 @@ function normWidget(x: any): Widget {
     i: String(x.id ?? x.i ?? cryptoId()),
     title: String(x.title ?? 'Untitled'),
     type: x.type ?? 'bar',
+    dataset: x.dataset === 'geo' ? 'geo' : undefined,
     dimension: x.dimension ?? '',
     breakdown: x.breakdown || undefined,
     metric: x.metric === 'visits' ? 'visits' : 'pageviews',
