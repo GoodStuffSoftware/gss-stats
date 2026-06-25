@@ -27,8 +27,10 @@ export const onRequestPut: PagesFunction<Env> = async (ctx) => {
   const text = await ctx.request.text()
   try {
     const parsed = JSON.parse(text)
-    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.widgets)) {
-      return json('{"error":"config must have a widgets array"}', 400)
+    // Accept v2 (pages array) or legacy v1 (widgets array).
+    const ok = parsed && typeof parsed === 'object' && (Array.isArray(parsed.pages) || Array.isArray(parsed.widgets))
+    if (!ok) {
+      return json('{"error":"config must have a pages (or widgets) array"}', 400)
     }
   } catch {
     return json('{"error":"invalid JSON"}', 400)
