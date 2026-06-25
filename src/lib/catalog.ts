@@ -36,6 +36,8 @@ export const DIMENSIONS: DimensionDef[] = [
   { key: 'deviceType', label: 'Device' },
   { key: 'countryName', label: 'Country' },
   { key: 'refererHost', label: 'Referrer' },
+  { key: 'userAgentBrowser', label: 'Browser' },
+  { key: 'userAgentOS', label: 'Operating system' },
   { key: 'date', label: 'Date (trend)' },
 ]
 

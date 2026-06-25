@@ -31,7 +31,16 @@ export function defaultConfig(): DashboardConfig {
   const { since, until } = defaultDateRange()
   return {
     version: 1,
-    filters: { site: 'goodstuff.software', host: '', since, until, excludeSelfReferrals: true },
+    filters: {
+      site: 'goodstuff.software',
+      host: '',
+      since,
+      until,
+      excludeSelfReferrals: true,
+      excludeOwnVisits: true,
+      ownBrowser: 'Opera',
+      ownOS: 'Windows',
+    },
     widgets: defaultWidgets(),
   }
 }
