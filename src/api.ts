@@ -9,6 +9,7 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters): Promis
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         dimension: widget.type === 'map' ? 'points' : widget.dimension || 'region',
+        breakdown: widget.breakdown || undefined,
         since: filters.since,
         until: filters.until,
         limit: widget.type === 'map' ? 2000 : widget.limit ?? 50,

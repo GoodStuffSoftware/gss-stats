@@ -83,6 +83,38 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     return json({ rows, totals, meta: { site: site ?? 'all', since, until, dimensions: ['points'], metric: 'pageviews', dataset: 'geo' } })
   }
 
+  // Two-dimension breakdown (nested doughnut / stacked bar on geo data).
+  const breakdown =
+    typeof body.breakdown === 'string' && GEO_DIMS.has(body.breakdown) && body.breakdown !== dim && body.breakdown !== 'date'
+      ? body.breakdown
+      : null
+  if (breakdown && dim !== 'date') {
+    const w: string[] = ['ts >= ?', 'ts < ?', `${dim} <> ''`, `${breakdown} <> ''`]
+    const b: any[] = [sinceMs, untilMs]
+    if (site && site !== 'all') {
+      w.push('site = ?')
+      b.push(site)
+    }
+    const sql = `SELECT ${dim} AS k1, ${breakdown} AS k2, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY k1, k2 ORDER BY c DESC LIMIT ?`
+    b.push(Math.min(limit * 4, 1000))
+    let r: any
+    try {
+      r = await ctx.env.gss_geo.prepare(sql).bind(...b).all()
+    } catch (e) {
+      return json({ error: 'd1 query failed', detail: String(e) }, 500)
+    }
+    const rows = (r.results ?? []).map((x: any) => ({
+      key: { [dim]: String(x.k1 ?? ''), [breakdown]: String(x.k2 ?? '') },
+      pageviews: Number(x.c) || 0,
+      visits: Number(x.c) || 0,
+    }))
+    const totals = rows.reduce(
+      (a: any, x: any) => ({ pageviews: a.pageviews + x.pageviews, visits: a.visits + x.visits }),
+      { pageviews: 0, visits: 0 },
+    )
+    return json({ rows, totals, meta: { site: site ?? 'all', since, until, dimensions: [dim, breakdown], metric: 'pageviews', dataset: 'geo' } })
+  }
+
   const col = dim === 'date' ? "date(ts/1000,'unixepoch')" : dim
   const where = ['ts >= ?', 'ts < ?']
   const binds: any[] = [sinceMs, untilMs]
