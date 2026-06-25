@@ -67,34 +67,46 @@ function textOn(hex: string): string {
   return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.62 ? '#1A1715' : '#ffffff'
 }
 
-// Draws each value on its arc — used on the outer ring of a nested doughnut so the
-// breakdown counts show without hovering. Skips slivers too small to fit a label.
-function arcLabelsPlugin(datasetIndex = 1) {
+// Draws "name + count" on each arc of the given datasets (both rings of a nested
+// doughnut), so every segment is self-labeled — no legend or hover needed. Skips
+// slivers too small to fit a label; those stay on hover.
+function arcLabelsPlugin(labelsByDataset: Record<number, string[]>) {
   return {
     id: 'arcLabels',
     afterDatasetsDraw(chart: any) {
-      const ds = chart.data.datasets[datasetIndex]
-      if (!ds) return
-      const meta = chart.getDatasetMeta(datasetIndex)
-      const values = ds.data as number[]
-      const colors = (ds.backgroundColor as string[]) ?? []
       const ctx = chart.ctx
-      ctx.save()
-      ctx.font = '600 10px Inter, system-ui, sans-serif'
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
-      meta.data.forEach((arc: any, i: number) => {
-        const v = values[i]
-        if (!v) return
-        if (arc.endAngle - arc.startAngle < 0.16) return // ~9°, too small to label
-        const angle = (arc.startAngle + arc.endAngle) / 2
-        const radius = (arc.innerRadius + arc.outerRadius) / 2
-        const x = arc.x + Math.cos(angle) * radius
-        const y = arc.y + Math.sin(angle) * radius
-        ctx.fillStyle = textOn(colors[i] ?? '#888888')
-        ctx.fillText(v.toLocaleString('en-US'), x, y)
-      })
-      ctx.restore()
+      for (const key of Object.keys(labelsByDataset)) {
+        const di = Number(key)
+        const ds = chart.data.datasets[di]
+        if (!ds) continue
+        const meta = chart.getDatasetMeta(di)
+        const values = ds.data as number[]
+        const colors = (ds.backgroundColor as string[]) ?? []
+        const names = labelsByDataset[di] ?? []
+        meta.data.forEach((arc: any, i: number) => {
+          const v = values[i]
+          if (!v || arc.endAngle - arc.startAngle < 0.2) return // ~11°, too small
+          const angle = (arc.startAngle + arc.endAngle) / 2
+          const radius = (arc.innerRadius + arc.outerRadius) / 2
+          const x = arc.x + Math.cos(angle) * radius
+          const y = arc.y + Math.sin(angle) * radius
+          ctx.save()
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillStyle = textOn(colors[i] ?? '#888888')
+          const name = names[i]
+          if (name) {
+            ctx.font = '600 10px Inter, system-ui, sans-serif'
+            ctx.fillText(name, x, y - 6)
+            ctx.font = '700 12px "Space Grotesk", system-ui, sans-serif'
+            ctx.fillText(v.toLocaleString('en-US'), x, y + 6)
+          } else {
+            ctx.font = '700 11px Inter, system-ui, sans-serif'
+            ctx.fillText(v.toLocaleString('en-US'), x, y)
+          }
+          ctx.restore()
+        })
+      }
     },
   }
 }
@@ -210,14 +222,16 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
     const outerData: number[] = []
     const outerColors: string[] = []
     const outerLabels: string[] = []
+    const outerDeviceLabels: string[] = []
     primaries.forEach((p, pi) => {
       devOrder.forEach((d, rank) => {
         const v = combo.get(`${p}||${d}`) ?? 0
         if (v <= 0) return
-        const amt = rank === 0 ? -0.12 : Math.min(0.15 + rank * 0.22, 0.62)
+        const amt = Math.min(0.16 + rank * 0.2, 0.62) // progressively lighter outward (gradient)
         outerData.push(v)
         outerColors.push(shade(PALETTE[pi % PALETTE.length], amt))
         outerLabels.push(`${formatKey(dim, p)} · ${formatKey(dimB, d)}`)
+        outerDeviceLabels.push(formatKey(dimB, d))
       })
     })
 
@@ -237,23 +251,7 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
         maintainAspectRatio: false,
         cutout: '40%',
         plugins: {
-          legend: {
-            position: 'top',
-            onClick: () => {},
-            labels: {
-              color: tickColor(),
-              font: { family: 'Inter', size: 11 },
-              boxWidth: 12,
-              generateLabels: () =>
-                primaries.map((_, i) => ({
-                  text: `${siteLabels[i]} · ${innerData[i].toLocaleString('en-US')}`,
-                  fillStyle: PALETTE[i % PALETTE.length],
-                  strokeStyle: PALETTE[i % PALETTE.length],
-                  lineWidth: 0,
-                  index: i,
-                })) as any,
-            },
-          },
+          legend: { display: false }, // arcs are labeled in place
           tooltip: {
             callbacks: {
               label: (ctx: any) => {
@@ -264,7 +262,7 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
           },
         },
       },
-      plugins: [centerTextPlugin(grand, `${m} · ${primaries.length} sites`), arcLabelsPlugin(1)],
+      plugins: [centerTextPlugin(grand, `${m} · ${primaries.length} sites`), arcLabelsPlugin({ 0: siteLabels, 1: outerDeviceLabels })],
     } as ChartConfiguration
   }
 
