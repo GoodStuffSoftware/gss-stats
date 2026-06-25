@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { reactive, computed, watch } from 'vue'
 import type { Widget } from '../types'
-import { DIMENSIONS, CHART_TYPES, METRICS, SITE_OPTIONS } from '../lib/catalog'
+import { DIMENSIONS, GEO_DIMENSIONS, DATASETS, CHART_TYPES, METRICS, SITE_OPTIONS } from '../lib/catalog'
 
 const props = defineProps<{ widget: Widget; isNew: boolean }>()
 const emit = defineEmits<{ save: [Widget]; cancel: []; remove: [] }>()
@@ -11,6 +11,20 @@ watch(
   () => props.widget,
   (w) => Object.assign(draft, w),
 )
+
+const isGeo = computed(() => draft.dataset === 'geo')
+const dimOptions = computed(() => (isGeo.value ? GEO_DIMENSIONS : DIMENSIONS))
+
+// Switching data source: keep the dimension valid for the new source.
+function onDatasetChange() {
+  if (!dimOptions.value.some((d) => d.key === draft.dimension)) {
+    draft.dimension = dimOptions.value[0].key
+  }
+  if (isGeo.value) {
+    draft.breakdown = undefined
+    draft.metric = 'pageviews'
+  }
+}
 
 const typeDef = computed(() => CHART_TYPES.find((t) => t.value === draft.type))
 const siteValue = computed({
@@ -38,6 +52,13 @@ function save() {
         <input type="text" v-model="draft.title" placeholder="Chart title" />
       </div>
 
+      <div class="field">
+        <label>Data source</label>
+        <select v-model="draft.dataset" @change="onDatasetChange">
+          <option v-for="d in DATASETS" :key="d.value" :value="d.value === 'rum' ? undefined : d.value">{{ d.label }}</option>
+        </select>
+      </div>
+
       <div class="row">
         <div class="field">
           <label>Chart type</label>
@@ -45,7 +66,7 @@ function save() {
             <option v-for="t in CHART_TYPES" :key="t.value" :value="t.value">{{ t.label }}</option>
           </select>
         </div>
-        <div class="field">
+        <div class="field" v-if="!isGeo">
           <label>Metric</label>
           <select v-model="draft.metric">
             <option v-for="m in METRICS" :key="m.value" :value="m.value">{{ m.label }}</option>
@@ -57,14 +78,14 @@ function save() {
         <div class="field">
           <label>Group by</label>
           <select v-model="draft.dimension">
-            <option v-for="d in DIMENSIONS" :key="d.key" :value="d.key">{{ d.label }}</option>
+            <option v-for="d in dimOptions" :key="d.key" :value="d.key">{{ d.label }}</option>
           </select>
         </div>
-        <div class="field" v-if="typeDef?.allowsBreakdown">
+        <div class="field" v-if="typeDef?.allowsBreakdown && !isGeo">
           <label>Break down by</label>
           <select v-model="draft.breakdown">
             <option :value="undefined">— none —</option>
-            <option v-for="d in DIMENSIONS" :key="d.key" :value="d.key">{{ d.label }}</option>
+            <option v-for="d in dimOptions" :key="d.key" :value="d.key">{{ d.label }}</option>
           </select>
         </div>
       </div>

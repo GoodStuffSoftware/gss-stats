@@ -1,4 +1,21 @@
-import type { SiteKey, ChartType, Metric } from '../types'
+import type { SiteKey, ChartType, Metric, Dataset } from '../types'
+
+export const DATASETS: { value: Dataset; label: string }[] = [
+  { value: 'rum', label: 'RUM — pageviews / visits' },
+  { value: 'geo', label: 'Geo beacon — region / city (bot-free)' },
+]
+
+// Geo-beacon dimensions (D1-backed). Single dimension per chart; metric is count.
+export const GEO_DIMENSIONS: { key: string; label: string }[] = [
+  { key: 'region', label: 'Region / state' },
+  { key: 'city', label: 'City' },
+  { key: 'country', label: 'Country' },
+  { key: 'colo', label: 'Cloudflare PoP' },
+  { key: 'site', label: 'Site' },
+  { key: 'path', label: 'Page path' },
+  { key: 'device', label: 'Device' },
+  { key: 'date', label: 'Date (trend)' },
+]
 
 // Client-side mirror of the server's site registry (the Function has its own copy
 // since Pages functions compile separately from the app bundle).

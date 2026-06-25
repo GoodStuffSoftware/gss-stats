@@ -71,10 +71,10 @@ export function metricValue(row: { pageviews: number; visits: number }, metric: 
 export function formatKey(dimension: string, value: string): string {
   if (!value) {
     if (dimension === 'refererHost') return '(direct)'
-    if (dimension === 'requestPath') return '(none)'
+    if (dimension === 'region' || dimension === 'city' || dimension === 'colo' || dimension === 'country') return '(unknown)'
     return '(none)'
   }
-  if (dimension === 'countryName') return COUNTRY_NAMES[value] ?? value
+  if (dimension === 'countryName' || dimension === 'country') return COUNTRY_NAMES[value] ?? value
   if (dimension === 'date') {
     // YYYY-MM-DD → "Jun 24"
     const d = new Date(value + 'T00:00:00Z')

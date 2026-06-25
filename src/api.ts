@@ -2,6 +2,26 @@ import type { StatsResponse, Widget, GlobalFilters, DashboardConfig } from './ty
 
 /** Fetch one widget's data from the server-side stats Function. */
 export async function fetchStats(widget: Widget, filters: GlobalFilters): Promise<StatsResponse> {
+  // Geo beacon dataset → /api/geo (D1-backed, already bot-free, single dimension).
+  if (widget.dataset === 'geo') {
+    const res = await fetch('/api/geo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        dimension: widget.dimension || 'region',
+        since: filters.since,
+        until: filters.until,
+        limit: widget.limit ?? 50,
+        site: widget.host || undefined,
+      }),
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(`geo ${res.status}: ${text.slice(0, 200)}`)
+    }
+    return res.json()
+  }
+
   const dimensions = widget.dimension
     ? widget.breakdown
       ? [widget.dimension, widget.breakdown]
