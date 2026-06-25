@@ -62,7 +62,19 @@ Account `a32bba62c77df5e8f6bd33d04478ec34`. RUM site tags:
 | bestsudoku.app | `a8baf99f3d294215a92a176e8c56bd15` |
 
 Whitelisted dimensions (server-side): `requestHost`, `requestPath`, `deviceType`,
-`countryName`, `refererHost`, `date`.
+`countryName`, `refererHost`, `userAgentBrowser`, `userAgentOS`, `date`.
+**Geography is country-only** — RUM has no region/state/city dimension.
+
+**"Hide my own visits"** excludes the owner's browser+OS *combination* server-side
+(De Morgan `OR: [browser_neq, os_neq]`, so e.g. Chrome/Windows isn't dropped).
+Defaults to Opera/Windows, on by default, configurable in the filter bar. RUM
+exposes no client IP/visitor ID, so a UA combo is the only self-exclusion proxy.
+
+**Not yet wired (available for the asking):** Cloudflare has two more bot-free RUM
+datasets — **Performance** (`rumPerformanceEventsAdaptiveGroups`: load/FCP/render/
+DNS/TTFB percentiles, µs) and **Web Vitals** (`rumWebVitalsEventsAdaptiveGroups`:
+LCP/INP/CLS/FCP/TTFB bucketed Good/Needs/Poor). The Pageload dataset we use has
+only two metrics: `count` (pageviews) and `visits`.
 
 ## Local development
 

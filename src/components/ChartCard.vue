@@ -4,6 +4,7 @@ import type { Widget, GlobalFilters, StatsResponse } from '../types'
 import { fetchStats } from '../api'
 import { buildChartConfig, formatKey, metricValue } from '../lib/charts'
 import BaseChart from './charts/BaseChart.vue'
+import FilterPopover from './FilterPopover.vue'
 
 const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolean }>()
 const emit = defineEmits<{ edit: []; remove: []; duplicate: [] }>()
@@ -14,12 +15,16 @@ const error = ref<string | null>(null)
 const menuOpen = ref(false)
 let reqId = 0
 
+// Per-chart filter override: use widget.filters if set, else the global filter.
+const effectiveFilters = computed<GlobalFilters>(() => props.widget.filters ?? props.filters)
+const hasOverride = computed(() => !!props.widget.filters)
+
 async function load() {
   const my = ++reqId
   loading.value = true
   error.value = null
   try {
-    const r = await fetchStats(props.widget, props.filters)
+    const r = await fetchStats(props.widget, effectiveFilters.value)
     if (my === reqId) data.value = r
   } catch (e: any) {
     if (my === reqId) error.value = e?.message ?? 'Failed to load'
@@ -38,9 +43,47 @@ const dataKey = computed(() =>
     s: props.widget.site,
     h: props.widget.host,
     e: props.widget.excludeSelfReferrals,
-    f: props.filters,
+    f: effectiveFilters.value,
   }),
 )
+
+// ── Per-chart filter popover ──────────────────────────────────────────────────
+const filterOpen = ref(false)
+const filterBtn = ref<HTMLElement | null>(null)
+const popoverStyle = ref<Record<string, string>>({})
+
+function openFilter() {
+  const r = filterBtn.value?.getBoundingClientRect()
+  if (r) {
+    const left = Math.min(r.left, window.innerWidth - 286)
+    popoverStyle.value = { top: `${r.bottom + 6}px`, left: `${Math.max(8, left)}px` }
+  }
+  filterOpen.value = true
+}
+function onApplyOverride(f: GlobalFilters) {
+  props.widget.filters = f
+}
+function onUseGlobal() {
+  props.widget.filters = null
+  filterOpen.value = false
+}
+
+const overrideSummary = computed(() => {
+  const f = props.widget.filters
+  if (!f) return ''
+  const site =
+    f.site === 'all'
+      ? 'all sites'
+      : f.host
+        ? f.host.replace('.goodstuff.software', '')
+        : f.site.replace('goodstuff.software', 'gs').replace('.com', '')
+  const today = new Date().toISOString().slice(0, 10)
+  const days = Math.round((Date.parse(f.until) - Date.parse(f.since)) / 86400000) + 1
+  const range = f.until === today ? `${days}d` : `${f.since}→${f.until}`
+  const flags: string[] = []
+  if (f.excludeOwnVisits) flags.push('−me')
+  return [site, range, ...flags].join(' · ')
+})
 watch(dataKey, load)
 onMounted(load)
 
@@ -84,8 +127,24 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
 <template>
   <div class="chart-card">
     <header class="card-head">
-      <span class="title" :title="widget.title">{{ widget.title }}</span>
+      <div class="title-wrap">
+        <span class="title" :title="widget.title">{{ widget.title }}</span>
+        <span v-if="overrideSummary" class="ovr" :title="'Filter override: ' + overrideSummary"
+          >· {{ overrideSummary }}</span
+        >
+      </div>
       <div class="head-actions">
+        <button
+          ref="filterBtn"
+          class="btn-ghost icon"
+          :class="{ active: hasOverride }"
+          title="Filter this chart"
+          @click.stop="openFilter"
+        >
+          <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+            <path d="M1.5 2.5h13l-5 6v4.2l-3 1.5V8.5z" fill="currentColor" />
+          </svg>
+        </button>
         <button class="btn-ghost icon" title="Reload" @click.stop="load">↻</button>
         <div class="menu-anchor">
           <button class="btn-ghost icon" title="Options" @click.stop="menuOpen = !menuOpen">⋯</button>
@@ -128,6 +187,20 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
       <!-- Chart.js chart -->
       <BaseChart v-else-if="chartConfig" :config="chartConfig" />
     </div>
+
+    <Teleport to="body">
+      <div v-if="filterOpen" class="fp-backdrop" @click="filterOpen = false">
+        <div class="fp-anchor" :style="popoverStyle" @click.stop>
+          <FilterPopover
+            :start="effectiveFilters"
+            :active="hasOverride"
+            @apply="onApplyOverride"
+            @use-global="onUseGlobal"
+            @close="filterOpen = false"
+          />
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -155,6 +228,13 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
 .card-head:active {
   cursor: grabbing;
 }
+.title-wrap {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
 .title {
   font-family: 'Space Grotesk', sans-serif;
   font-size: 14px;
@@ -163,6 +243,23 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex-shrink: 0;
+  max-width: 100%;
+}
+.ovr {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  color: rgb(var(--amber-hover));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.btn-ghost.icon.active {
+  color: rgb(var(--amber));
+  background: rgb(var(--amber-tint));
+}
+.btn-ghost.icon svg {
+  display: block;
 }
 .head-actions {
   display: flex;
@@ -292,5 +389,13 @@ td {
   text-align: right;
   color: rgb(var(--ink-2));
   white-space: nowrap;
+}
+.fp-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+}
+.fp-anchor {
+  position: fixed;
 }
 </style>
