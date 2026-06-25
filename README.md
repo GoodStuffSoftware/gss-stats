@@ -48,7 +48,10 @@ Cloudflare GraphQL Analytics API  ·  Cloudflare KV
 - Global filters: site, subdomain, date range (7/30/90-day presets or custom),
   hide-self-referrals.
 - Default dashboard out of the box (pageviews/visits KPIs, trend, by-site, site×device,
-  top referrers, by-country, top pages, device split). "Reset" restores it.
+  top referrers, by-country, top pages, device split).
+- **Multiple dashboard pages** — duplicate / rename / delete pages; a protected default page (★) with
+  "Restore default charts" always available. Each page stores its **own** global filters *and* per-chart
+  overrides, independently. Per-chart override is set from the filter button in each card header.
 - Light / dark theme matching the Good Stuff Software brand.
 
 ## RUM sites & dimensions

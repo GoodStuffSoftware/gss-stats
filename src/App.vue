@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { reactive, ref, watch, onMounted, nextTick, computed } from 'vue'
-import type { DashboardConfig, Widget, GlobalFilters } from './types'
-import { defaultConfig, normalizeConfig, cryptoId } from './lib/defaults'
+import type { DashboardConfig, DashboardPage, Widget, GlobalFilters } from './types'
+import { defaultConfig, normalizeConfig, defaultWidgets, clonePage, cryptoId } from './lib/defaults'
 import { loadConfig, saveConfig } from './api'
+import PageBar from './components/PageBar.vue'
 import FilterBar from './components/FilterBar.vue'
 import Dashboard from './components/Dashboard.vue'
 import ChartEditor from './components/ChartEditor.vue'
@@ -13,6 +14,9 @@ const editing = ref<{ widget: Widget; isNew: boolean } | null>(null)
 const dark = ref(false)
 const saveState = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
 
+// The page currently being viewed/edited.
+const activePage = computed<DashboardPage>(() => config.pages.find((p) => p.id === config.activePageId) ?? config.pages[0])
+
 onMounted(async () => {
   dark.value = localStorage.getItem('gss-stats-dark') === '1'
   applyDark()
@@ -20,8 +24,8 @@ onMounted(async () => {
   const stored = await loadConfig()
   const norm = normalizeConfig(stored ?? config)
   config.version = norm.version
-  config.filters = norm.filters
-  config.widgets = norm.widgets
+  config.activePageId = norm.activePageId
+  config.pages = norm.pages
 
   await nextTick()
   loaded.value = true
@@ -44,12 +48,45 @@ const saveLabel = computed(
   () => ({ idle: '', saving: 'Saving…', saved: 'Saved', error: 'Save failed' })[saveState.value],
 )
 
-// ── Filters ───────────────────────────────────────────────────────────────────
-function onFiltersChange(f: GlobalFilters) {
-  config.filters = f
+// ── Page operations ───────────────────────────────────────────────────────────
+function switchPage(id: string) {
+  config.activePageId = id
+}
+function addPage() {
+  const clone = clonePage(activePage.value, 'Copy of ' + activePage.value.name)
+  config.pages.push(clone)
+  config.activePageId = clone.id
+}
+function duplicatePage(id: string) {
+  const src = config.pages.find((p) => p.id === id) ?? activePage.value
+  const clone = clonePage(src, 'Copy of ' + src.name)
+  config.pages.push(clone)
+  config.activePageId = clone.id
+}
+function renamePage(id: string, name: string) {
+  const p = config.pages.find((x) => x.id === id)
+  if (p) p.name = name
+}
+function deletePage(id: string) {
+  const p = config.pages.find((x) => x.id === id)
+  if (!p || p.isDefault || config.pages.length <= 1) return
+  if (!confirm(`Delete page "${p.name}"? This can't be undone.`)) return
+  const idx = config.pages.findIndex((x) => x.id === id)
+  config.pages.splice(idx, 1)
+  if (config.activePageId === id) config.activePageId = config.pages[0].id
+}
+function restoreDefaultCharts(id: string) {
+  const p = config.pages.find((x) => x.id === id) ?? activePage.value
+  if (!confirm(`Restore "${p.name}" to the default charts? Custom charts on this page will be replaced.`)) return
+  p.widgets = defaultWidgets()
 }
 
-// ── Widget CRUD ───────────────────────────────────────────────────────────────
+// ── Filters ───────────────────────────────────────────────────────────────────
+function onFiltersChange(f: GlobalFilters) {
+  activePage.value.filters = f
+}
+
+// ── Widget CRUD (operate on the active page) ──────────────────────────────────
 function addChart() {
   const id = cryptoId()
   editing.value = {
@@ -69,13 +106,14 @@ function addChart() {
     },
   }
 }
-function editChart(w: Widget) {
-  editing.value = { isNew: false, widget: JSON.parse(JSON.stringify(w)) }
+function editChart(wgt: Widget) {
+  editing.value = { isNew: false, widget: JSON.parse(JSON.stringify(wgt)) }
 }
-function onEditorSave(w: Widget) {
-  const idx = config.widgets.findIndex((x) => x.id === w.id)
-  if (idx >= 0) config.widgets[idx] = w
-  else config.widgets.push(w)
+function onEditorSave(wgt: Widget) {
+  const list = activePage.value.widgets
+  const idx = list.findIndex((x) => x.id === wgt.id)
+  if (idx >= 0) list[idx] = wgt
+  else list.push(wgt)
   editing.value = null
 }
 function onEditorRemove() {
@@ -83,20 +121,13 @@ function onEditorRemove() {
   editing.value = null
 }
 function removeWidget(id: string) {
-  const i = config.widgets.findIndex((x) => x.id === id)
-  if (i >= 0) config.widgets.splice(i, 1)
+  const list = activePage.value.widgets
+  const i = list.findIndex((x) => x.id === id)
+  if (i >= 0) list.splice(i, 1)
 }
-function duplicateWidget(w: Widget) {
+function duplicateWidget(wgt: Widget) {
   const id = cryptoId()
-  config.widgets.push({ ...w, id, i: id, x: 0, y: 9999, title: w.title + ' (copy)' })
-}
-
-function resetDashboard() {
-  if (!confirm('Reset the dashboard to the default charts? Your custom layout will be lost.')) return
-  const d = defaultConfig()
-  d.filters = config.filters // keep current filters
-  config.version = d.version
-  config.widgets = d.widgets
+  activePage.value.widgets.push({ ...wgt, id, i: id, x: 0, y: 9999, title: wgt.title + ' (copy)' })
 }
 
 // ── Theme ─────────────────────────────────────────────────────────────────────
@@ -122,7 +153,6 @@ function toggleDark() {
       </div>
       <div class="top-actions">
         <span v-if="saveLabel" class="save-state mono" :class="saveState">{{ saveLabel }}</span>
-        <button class="btn" @click="resetDashboard" title="Reset to default charts">Reset</button>
         <button class="btn" @click="toggleDark" :title="dark ? 'Light mode' : 'Dark mode'">
           {{ dark ? '☀' : '☾' }}
         </button>
@@ -130,21 +160,32 @@ function toggleDark() {
       </div>
     </header>
 
-    <FilterBar :filters="config.filters" @change="onFiltersChange" />
+    <PageBar
+      :pages="config.pages"
+      :active-page-id="config.activePageId"
+      @switch="switchPage"
+      @add="addPage"
+      @rename="renamePage"
+      @duplicate="duplicatePage"
+      @delete="deletePage"
+      @restore="restoreDefaultCharts"
+    />
+
+    <FilterBar :filters="activePage.filters" @change="onFiltersChange" />
 
     <main class="grid-area">
       <Dashboard
-        v-model:widgets="config.widgets"
-        :filters="config.filters"
+        v-model:widgets="activePage.widgets"
+        :filters="activePage.filters"
         :dark="dark"
         @edit="editChart"
         @remove="removeWidget"
         @duplicate="duplicateWidget"
         @change="scheduleSave"
       />
-      <div v-if="loaded && config.widgets.length === 0" class="empty">
-        <p>No charts yet.</p>
-        <button class="btn btn-primary" @click="addChart">＋ Add your first chart</button>
+      <div v-if="loaded && activePage.widgets.length === 0" class="empty">
+        <p>No charts on this page.</p>
+        <button class="btn btn-primary" @click="addChart">＋ Add a chart</button>
       </div>
     </main>
 
@@ -158,8 +199,8 @@ function toggleDark() {
     />
 
     <footer class="foot overline">
-      Data: Cloudflare Web Analytics (RUM) · humans only, bots excluded · {{ config.filters.since }} →
-      {{ config.filters.until }}
+      {{ activePage.name }} · Cloudflare RUM (humans only, bots excluded) · {{ activePage.filters.since }} →
+      {{ activePage.filters.until }}
     </footer>
   </div>
 </template>
@@ -171,7 +212,7 @@ function toggleDark() {
   padding: 22px 22px 60px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
 }
 .topbar {
   display: flex;

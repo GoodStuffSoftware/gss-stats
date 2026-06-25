@@ -48,10 +48,20 @@ export interface GlobalFilters {
   ownOS: string
 }
 
-export interface DashboardConfig {
-  version: number
+// A single dashboard page: its own global filters + its own widgets (each of which
+// may carry a per-chart filter override). Pages are fully independent.
+export interface DashboardPage {
+  id: string
+  name: string
+  isDefault: boolean // the default page — not deletable; always restorable
   filters: GlobalFilters
   widgets: Widget[]
+}
+
+export interface DashboardConfig {
+  version: number
+  activePageId: string
+  pages: DashboardPage[]
 }
 
 export interface StatsRow {
