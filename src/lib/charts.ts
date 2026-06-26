@@ -71,6 +71,30 @@ function textOn(hex: string): string {
 // doughnut), so every segment is self-labeled — no legend or hover needed. Skips
 // slivers too small to fit a label; those stay on hover.
 type ArcItem = { name: string; sub: string }
+
+// Draw text curved along a circle of radius r, centered on midAngle. Characters
+// stay tangent to the ring; the bottom half is flipped so text reads upright all
+// the way around. Uses the currently-set ctx font / fillStyle / align / baseline.
+function drawCurvedText(ctx: any, text: string, cx: number, cy: number, r: number, midAngle: number) {
+  if (r <= 0 || !text) return
+  const chars = [...text]
+  const widths = chars.map((c) => ctx.measureText(c).width)
+  const totalAngle = widths.reduce((a, b) => a + b, 0) / r
+  const ma = ((midAngle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)
+  const bottom = ma > 0 && ma < Math.PI // bottom half (canvas y is down) → flip
+  let a = bottom ? midAngle + totalAngle / 2 : midAngle - totalAngle / 2
+  for (let i = 0; i < chars.length; i++) {
+    const ca = widths[i] / r
+    a += bottom ? -ca / 2 : ca / 2
+    ctx.save()
+    ctx.translate(cx + Math.cos(a) * r, cy + Math.sin(a) * r)
+    ctx.rotate(bottom ? a - Math.PI / 2 : a + Math.PI / 2)
+    ctx.fillText(chars[i], 0, 0)
+    ctx.restore()
+    a += bottom ? -ca / 2 : ca / 2
+  }
+}
+
 function arcLabelsPlugin(itemsByDataset: Record<number, ArcItem[]>) {
   return {
     id: 'arcLabels',
@@ -85,19 +109,24 @@ function arcLabelsPlugin(itemsByDataset: Record<number, ArcItem[]>) {
         const items = itemsByDataset[di] ?? []
         meta.data.forEach((arc: any, i: number) => {
           const it = items[i]
-          if (!it || arc.endAngle - arc.startAngle < 0.2) return // ~11°, too small to label
-          const angle = (arc.startAngle + arc.endAngle) / 2
-          const radius = (arc.innerRadius + arc.outerRadius) / 2
-          const x = arc.x + Math.cos(angle) * radius
-          const y = arc.y + Math.sin(angle) * radius
+          if (!it) return
+          const span = arc.endAngle - arc.startAngle
+          if (span < 0.2) return // ~11°, too small to label
+          const mid = (arc.startAngle + arc.endAngle) / 2
+          const bandMid = (arc.innerRadius + arc.outerRadius) / 2
+          const ma = ((mid % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)
+          const bottom = ma > 0 && ma < Math.PI
+          // keep "name" visually above "sub" on either half
+          const nameR = bottom ? bandMid - 6 : bandMid + 6
+          const subR = bottom ? bandMid + 6 : bandMid - 6
           ctx.save()
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
           ctx.fillStyle = textOn(colors[i] ?? '#888888')
           ctx.font = '600 10px Inter, system-ui, sans-serif'
-          ctx.fillText(it.name, x, y - 6)
+          if (ctx.measureText(it.name).width / nameR < span * 0.96) drawCurvedText(ctx, it.name, arc.x, arc.y, nameR, mid)
           ctx.font = '700 11px "Space Grotesk", system-ui, sans-serif'
-          ctx.fillText(it.sub, x, y + 6)
+          if (ctx.measureText(it.sub).width / subR < span * 0.96) drawCurvedText(ctx, it.sub, arc.x, arc.y, subR, mid)
           ctx.restore()
         })
       }
