@@ -12,8 +12,15 @@ const UNIT_MS: Record<string, number> = {
 }
 
 // Parse a duration token like "24h", "3h", "7d", "2w", "1mo", "90m" → ms (or null).
+// Tolerates the way the field renders the value back ("Last 7d") and casual phrasing
+// ("past 24h", "3 days ago") by stripping a leading last/past and a trailing ago.
 export function parseDurationMs(input: string): number | null {
-  const m = (input || '').trim().toLowerCase().match(/^(\d+(?:\.\d+)?)\s*(mo|min|m|hr|h|hours?|d|days?|w|weeks?)$/)
+  const cleaned = (input || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^(last|past)\s+/, '')
+    .replace(/\s+ago$/, '')
+  const m = cleaned.match(/^(\d+(?:\.\d+)?)\s*(mo|min|m|hr|h|hours?|d|days?|w|weeks?)$/)
   if (!m) return null
   let u = m[2]
   if (u.startsWith('hour')) u = 'h'
