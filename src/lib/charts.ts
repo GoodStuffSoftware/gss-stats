@@ -124,9 +124,11 @@ function arcLabelsPlugin(itemsByDataset: Record<number, ArcItem[]>) {
           ctx.textBaseline = 'middle'
           ctx.fillStyle = textOn(colors[i] ?? '#888888')
           ctx.font = '600 10px Inter, system-ui, sans-serif'
-          if (ctx.measureText(it.name).width / nameR < span * 0.96) drawCurvedText(ctx, it.name, arc.x, arc.y, nameR, mid)
+          const nameFits = ctx.measureText(it.name).width / nameR < span * 0.96
+          if (nameFits) drawCurvedText(ctx, it.name, arc.x, arc.y, nameR, mid)
+          // only show the number line if the name fit too — no orphan "9 · 13%"
           ctx.font = '700 11px "Space Grotesk", system-ui, sans-serif'
-          if (ctx.measureText(it.sub).width / subR < span * 0.96) drawCurvedText(ctx, it.sub, arc.x, arc.y, subR, mid)
+          if (nameFits && ctx.measureText(it.sub).width / subR < span * 0.96) drawCurvedText(ctx, it.sub, arc.x, arc.y, subR, mid)
           ctx.restore()
         })
       }
@@ -269,11 +271,13 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
     const border = isDark() ? '#211C18' : '#FFFFFF'
     return {
       type: 'doughnut',
+      // Chart.js draws dataset[0] as the OUTER ring, so the breakdown goes first
+      // (outer) and the primary dimension second (inner).
       data: {
         labels: outerLabels,
         datasets: [
-          { data: innerData, backgroundColor: innerColors, borderColor: border, borderWidth: 2 },
           { data: outerData, backgroundColor: outerColors, borderColor: border, borderWidth: 2 },
+          { data: innerData, backgroundColor: innerColors, borderColor: border, borderWidth: 2 },
         ],
       },
       options: {
@@ -288,14 +292,14 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
               // for the inner ring — suppress it and build the line ourselves.
               title: () => '',
               label: (ctx: any) => {
-                const it = (ctx.datasetIndex === 0 ? innerItems : outerItems)[ctx.dataIndex]
+                const it = (ctx.datasetIndex === 0 ? outerItems : innerItems)[ctx.dataIndex]
                 return it ? `${it.name}: ${it.sub}` : ''
               },
             },
           },
         },
       },
-      plugins: [centerTextPlugin(grand, m), arcLabelsPlugin({ 0: innerItems, 1: outerItems })],
+      plugins: [centerTextPlugin(grand, m), arcLabelsPlugin({ 0: outerItems, 1: innerItems })],
     } as ChartConfiguration
   }
 
