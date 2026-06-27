@@ -4,6 +4,7 @@ import type { DashboardConfig, DashboardPage, Widget, GlobalFilters } from './ty
 import { defaultConfig, normalizeConfig, defaultWidgets, clonePage, cryptoId } from './lib/defaults'
 import { rangeLabel } from './lib/range'
 import { loadConfig, saveConfig } from './api'
+import { sessionExpired, reauth } from './session'
 import PageBar from './components/PageBar.vue'
 import FilterBar from './components/FilterBar.vue'
 import Dashboard from './components/Dashboard.vue'
@@ -145,6 +146,10 @@ function toggleDark() {
 
 <template>
   <div class="app">
+    <div v-if="sessionExpired" class="reauth-banner">
+      <span>Your sign-in session expired — the dashboard can't reach the data.</span>
+      <button class="btn btn-primary" @click="reauth">Sign in again</button>
+    </div>
     <header class="topbar">
       <div class="brand">
         <span class="logo">S</span>
@@ -214,6 +219,27 @@ function toggleDark() {
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+.reauth-banner {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: rgb(var(--amber));
+  color: #fff;
+  font-weight: 600;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+}
+.reauth-banner .btn-primary {
+  background: #fff;
+  color: rgb(var(--amber));
+  border: none;
 }
 .topbar {
   display: flex;
