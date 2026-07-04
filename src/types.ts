@@ -58,10 +58,20 @@ export interface Widget {
   h: number
 }
 
+// A drill-down constraint: filter every chart on a page to one value of a dimension.
+// `key` is a dataset-neutral semantic dimension (device/referrer/region/…) mapped to
+// each dataset's native field at query time; geo-only keys simply don't touch RUM.
+export interface DrillConstraint {
+  key: string
+  value: string
+  label: string // display label, e.g. "mobile", "California"
+}
+
 export interface GlobalFilters {
   // Multi-select site filter. Each token is a domain (whole site) or a full host
   // (one subdomain). Empty = all real sites. Resolved via the /api/sites tree.
   siteSel: string[]
+  drill?: DrillConstraint[] // active drill-downs (set when a page is opened from a chart)
   site?: SiteKey // legacy single-site (kept for migration + per-widget overrides)
   host?: string // legacy single-host
   since: string // YYYY-MM-DD

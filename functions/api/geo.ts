@@ -58,12 +58,26 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       b.push(...sites)
     }
   }
+  // Drill-down constraints — exact field = value on a whitelisted, real column
+  // ('date' is derived from ts, not a column, so it's excluded).
+  const constraints: { field: string; value: string }[] = Array.isArray(body.constraints)
+    ? (body.constraints as any[])
+        .filter((c) => c && GEO_DIMS.has(c.field) && c.field !== 'date' && typeof c.value === 'string')
+        .map((c) => ({ field: String(c.field), value: String(c.value) }))
+    : []
+  const drillClause = (w: string[], b: any[]) => {
+    for (const c of constraints) {
+      w.push(`${c.field} = ?`)
+      b.push(c.value)
+    }
+  }
 
   // Map mode: return one point per distinct lat/lon with a count (for globe/map charts).
   if (dim === 'points' || body.dimension === 'points') {
     const w: string[] = ['ts >= ?', 'ts < ?', "lat <> ''"]
     const b: any[] = [sinceMs, untilMs]
     siteClause(w, b)
+    drillClause(w, b)
     const sql = `SELECT lat, lon, city, region, country, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY lat, lon ORDER BY c DESC LIMIT ?`
     b.push(Math.min(limit, 2000))
     let r: any
@@ -99,6 +113,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     const w: string[] = ['ts >= ?', 'ts < ?', `${dim} <> ''`, `${breakdown} <> ''`]
     const b: any[] = [sinceMs, untilMs]
     siteClause(w, b)
+    drillClause(w, b)
     const sql = `SELECT ${dim} AS k1, ${breakdown} AS k2, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY k1, k2 ORDER BY c DESC LIMIT ?`
     b.push(Math.min(limit * 4, 1000))
     let r: any
@@ -123,6 +138,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const where = ['ts >= ?', 'ts < ?']
   const binds: any[] = [sinceMs, untilMs]
   siteClause(where, binds)
+  drillClause(where, binds)
   // Drop blank values from non-path dimensions for cleaner charts.
   if (dim !== 'path' && dim !== 'date') where.push(`${col} <> ''`)
 

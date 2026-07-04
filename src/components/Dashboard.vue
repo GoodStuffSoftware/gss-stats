@@ -9,7 +9,13 @@ import ChartCard from './ChartCard.vue'
 const widgets = defineModel<Widget[]>('widgets', { required: true })
 
 defineProps<{ filters: GlobalFilters; dark: boolean }>()
-const emit = defineEmits<{ edit: [Widget]; remove: [string]; duplicate: [Widget]; change: [] }>()
+const emit = defineEmits<{
+  edit: [Widget]
+  remove: [string]
+  duplicate: [Widget]
+  change: []
+  drill: [{ dimension: string; dataset: 'geo' | 'rum'; value: string; label: string; x: number; y: number }]
+}>()
 
 // On phones we stack cards via CSS (preserving the desktop layout data) and
 // disable drag/resize so touch scrolling works.
@@ -55,6 +61,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', check))
         @edit="emit('edit', item)"
         @remove="emit('remove', item.id)"
         @duplicate="emit('duplicate', item)"
+        @drill="emit('drill', $event)"
       />
     </GridItem>
   </GridLayout>

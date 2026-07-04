@@ -63,6 +63,7 @@ interface ReqBody {
   site?: string
   host?: string
   hosts?: unknown // allow-list of real requestHosts (excludes dev/preview by omission)
+  constraints?: unknown // drill-down field=value filters
   since?: string
   until?: string
   dimensions?: unknown
@@ -158,6 +159,15 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const excludeInternalClause =
     ', AND: [{ requestHost_neq: "stats.goodstuff.software" }, { requestHost_neq: "beacon.goodstuff.software" }]'
 
+  // Drill-down constraints — exact field: value on whitelisted RUM dimensions.
+  const gqlStr = (v: string) => v.replace(/[\\"]/g, '\\$&')
+  const constraintClause = Array.isArray(body.constraints)
+    ? (body.constraints as any[])
+        .filter((c) => c && DIM_WHITELIST.has(c.field) && c.field !== 'date' && typeof c.value === 'string')
+        .map((c) => `, ${c.field}: "${gqlStr(String(c.value))}"`)
+        .join('')
+    : ''
+
   // Day values expand to full-day bounds; full ISO datetimes are used as-is.
   const datetimeGeq = isDateOnly(since) ? `${since}T00:00:00Z` : since
   const datetimeLeq = isDateOnly(until) ? `${nextDay(until)}T00:00:00Z` : until
@@ -180,7 +190,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       return `s${i}: rumPageloadEventsAdaptiveGroups(
         limit: ${perTagLimit}
         orderBy: [${orderBy}]
-        filter: { datetime_geq: "${datetimeGeq}", datetime_leq: "${datetimeLeq}", siteTag: "${tag}"${hostClause}${excludeOwnClause}${excludeInternalClause} }
+        filter: { datetime_geq: "${datetimeGeq}", datetime_leq: "${datetimeLeq}", siteTag: "${tag}"${hostClause}${constraintClause}${excludeOwnClause}${excludeInternalClause} }
       ) { count sum { visits } ${dimSelection} }`
     })
     .join('\n')
