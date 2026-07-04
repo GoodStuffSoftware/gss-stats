@@ -20,8 +20,10 @@ export type SiteKey = 'goodstuff.software' | 'goodstuffsoftware.com' | 'bestsudo
 // Auto-built site tree from /api/sites — one group per registrable domain, with its
 // real subdomains (dev/preview already excluded), carrying both dataset identifiers.
 export interface SiteSub {
-  host: string // RUM requestHost (or a beacon-only tag as a fallback host)
-  tag: string | null // beacon site tag, if this host has beacon data
+  host: string // canonical/display host
+  hosts: string[] // every RUM requestHost this represents (canonical + folded aliases)
+  tag: string | null // primary beacon tag (display)
+  tags: string[] // every beacon tag to filter by (canonical + folded aliases)
   rum: number
   geo: number
 }
