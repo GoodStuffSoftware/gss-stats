@@ -62,6 +62,7 @@ function safeUA(v: unknown): string {
 interface ReqBody {
   site?: string
   host?: string
+  hosts?: unknown // allow-list of real requestHosts (excludes dev/preview by omission)
   since?: string
   until?: string
   dimensions?: unknown
@@ -133,6 +134,12 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const since = safeDate(body.since, weekAgoUTC())
   const until = safeDate(body.until, todayUTC())
   const host = typeof body.host === 'string' && /^[a-z0-9.\-]+$/i.test(body.host) ? body.host : null
+  // Allow-list of real requestHosts. When present, every subquery is restricted to
+  // these via requestHost_in — so dev/preview hosts (absent from the list) never
+  // count in any chart, not just the picker.
+  const hostList: string[] = Array.isArray(body.hosts)
+    ? (body.hosts as unknown[]).filter((h): h is string => typeof h === 'string' && /^[a-z0-9.\-]{1,120}$/i.test(h)).slice(0, 100)
+    : []
   const excludeSelf = body.excludeSelfReferrals !== false && dims.includes('refererHost')
 
   // "Hide my own visits": exclude the owner's browser+OS COMBINATION (not all of
@@ -165,7 +172,11 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
 
   const fields = tags
     .map((tag, i) => {
-      const hostClause = host ? `, requestHost: "${host}"` : ''
+      const hostClause = hostList.length
+        ? `, requestHost_in: [${hostList.map((h) => `"${h}"`).join(', ')}]`
+        : host
+          ? `, requestHost: "${host}"`
+          : ''
       return `s${i}: rumPageloadEventsAdaptiveGroups(
         limit: ${perTagLimit}
         orderBy: [${orderBy}]

@@ -9,8 +9,7 @@ export function defaultDateRange(): { since: string; until: string } {
 export function defaultFilters(): GlobalFilters {
   const { since, until } = defaultDateRange()
   return {
-    site: 'goodstuff.software',
-    host: '',
+    siteSel: [], // all real sites
     since,
     until,
     excludeSelfReferrals: true,
@@ -18,6 +17,16 @@ export function defaultFilters(): GlobalFilters {
     ownBrowser: 'Opera',
     ownOS: 'Windows',
   }
+}
+
+// Map a legacy { site, host } filter to the new siteSel token list.
+export function migrateSiteSel(raw: any): string[] {
+  if (Array.isArray(raw?.siteSel)) return raw.siteSel.filter((x: any) => typeof x === 'string')
+  const host = typeof raw?.host === 'string' ? raw.host : ''
+  const site = typeof raw?.site === 'string' ? raw.site : ''
+  if (host) return [host] // a specific subdomain was selected
+  if (site && site !== 'all') return [site] // the whole site (domain)
+  return [] // 'all' or unset
 }
 
 function w(p: Omit<Widget, 'i'>): Widget {
@@ -70,17 +79,21 @@ export function defaultBeaconWidgets(): Widget[] {
   ]
 }
 export function defaultBeaconPage(): DashboardPage {
-  // Default to all sites so the Beacon page shows every instrumented property;
-  // the Site/Subdomain selectors then narrow it (they now filter geo too).
-  return { id: 'beacon', name: 'Beacon', isDefault: false, filters: { ...defaultFilters(), site: 'all', host: '' }, widgets: defaultBeaconWidgets() }
+  // siteSel [] = all real sites; the multi-select picker narrows it.
+  return { id: 'beacon', name: 'Beacon', isDefault: false, filters: defaultFilters(), widgets: defaultBeaconWidgets() }
 }
 
 export function defaultConfig(): DashboardConfig {
   return { version: 2, activePageId: 'default', pages: [defaultPage(), defaultBeaconPage()] }
 }
 
-function normWidget(x: any): Widget {
+// Normalize a filter object, migrating legacy { site, host } → siteSel tokens.
+function normFilters(raw: any): GlobalFilters {
   const base = defaultFilters()
+  return { ...base, ...(raw ?? {}), siteSel: migrateSiteSel(raw ?? {}), site: undefined, host: undefined }
+}
+
+function normWidget(x: any): Widget {
   return {
     id: String(x.id ?? cryptoId()),
     i: String(x.id ?? x.i ?? cryptoId()),
@@ -95,7 +108,7 @@ function normWidget(x: any): Widget {
     host: x.host,
     excludeSelfReferrals: x.excludeSelfReferrals,
     // Per-chart override: back-fill any filter fields added since it was saved.
-    filters: x.filters ? { ...base, ...x.filters } : undefined,
+    filters: x.filters ? normFilters(x.filters) : undefined,
     x: Number(x.x) || 0,
     y: Number(x.y) || 0,
     w: Number(x.w) || 4,
@@ -108,7 +121,7 @@ function normPage(p: any, i: number): DashboardPage {
     id: String(p.id ?? cryptoId()),
     name: String(p.name ?? `Page ${i + 1}`),
     isDefault: !!p.isDefault,
-    filters: { ...defaultFilters(), ...(p.filters ?? {}) },
+    filters: normFilters(p.filters),
     widgets: Array.isArray(p.widgets) ? p.widgets.map(normWidget) : defaultWidgets(),
   }
 }
@@ -129,7 +142,7 @@ export function normalizeConfig(raw: any): DashboardConfig {
       id: 'default',
       name: 'Overview',
       isDefault: true,
-      filters: { ...defaultFilters(), ...(raw.filters ?? {}) },
+      filters: normFilters(raw.filters),
       widgets: raw.widgets.map(normWidget),
     }
     return { version: 2, activePageId: 'default', pages: [page] }

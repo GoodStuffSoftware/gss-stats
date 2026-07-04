@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { reactive, computed, watch, ref, onMounted, onBeforeUnmount } from 'vue'
 import type { GlobalFilters } from '../types'
-import { SITE_OPTIONS, SITES } from '../lib/catalog'
+import { sitesTree, tokenLabel } from '../sitesStore'
+import type { SiteGroup, SiteSub } from '../types'
 import { relativeRange, lastDays, isoToYmd, ymdRangeToISO, rangeLabel, isLastDays } from '../lib/range'
 
 const props = defineProps<{ filters: GlobalFilters }>()
 const emit = defineEmits<{ change: [GlobalFilters] }>()
 
 const local = reactive<GlobalFilters>({ ...props.filters })
+if (!Array.isArray(local.siteSel)) local.siteSel = []
 
 // Range display state (kept in sync with local.since/until).
 const rangeInput = ref('')
@@ -32,10 +34,55 @@ function commit() {
   emit('change', { ...local })
 }
 
-const hostOptions = computed(() => SITES.find((x) => x.key === local.site)?.hosts ?? [])
-function onSiteChange() {
-  local.host = ''
+// ── Sites multi-select ────────────────────────────────────────────────────────
+// Selection tokens are domains (whole site) or full hosts (one subdomain); empty
+// means all real sites. Built from the auto-discovered sitesTree.
+const siteOpen = ref(false)
+function closeSites() {
+  siteOpen.value = false
+}
+onMounted(() => document.addEventListener('click', closeSites))
+onBeforeUnmount(() => document.removeEventListener('click', closeSites))
+
+const siteSummary = computed(() => {
+  const sel = local.siteSel ?? []
+  if (!sel.length) return 'All sites'
+  if (sel.length === 1) return tokenLabel(sel[0])
+  return `${sel.length} selected`
+})
+function setSel(next: string[]) {
+  local.siteSel = next
   commit()
+}
+function isDomainChecked(d: SiteGroup) {
+  return (local.siteSel ?? []).includes(d.domain)
+}
+function isHostChecked(d: SiteGroup, s: SiteSub) {
+  return isDomainChecked(d) || (local.siteSel ?? []).includes(s.host)
+}
+function toggleDomain(d: SiteGroup) {
+  const sel = local.siteSel ?? []
+  if (isDomainChecked(d)) setSel(sel.filter((t) => t !== d.domain))
+  // select the whole site: drop any of its per-host tokens, add the domain token
+  else setSel([...sel.filter((t) => !d.subs.some((s) => s.host === t)), d.domain])
+}
+function toggleHost(d: SiteGroup, s: SiteSub) {
+  const sel = local.siteSel ?? []
+  if (isDomainChecked(d)) {
+    // unchecking one host from a whole-site selection → expand to its other hosts
+    setSel([...sel.filter((t) => t !== d.domain), ...d.subs.filter((x) => x.host !== s.host).map((x) => x.host)])
+  } else if (sel.includes(s.host)) {
+    setSel(sel.filter((t) => t !== s.host))
+  } else {
+    setSel([...sel, s.host])
+  }
+}
+function subLabel(d: SiteGroup, s: SiteSub) {
+  if (s.host === d.domain) return '(main site)'
+  return s.host.endsWith('.' + d.domain) ? s.host.slice(0, -(d.domain.length + 1)) : s.host
+}
+function clearSites() {
+  setSel([])
 }
 
 // ── Smart range ───────────────────────────────────────────────────────────────
@@ -117,18 +164,32 @@ onBeforeUnmount(() => window.removeEventListener('focus', readMuteCookie))
 <template>
   <div class="filter-bar">
     <div class="group">
-      <label>Site</label>
-      <select v-model="local.site" @change="onSiteChange">
-        <option v-for="o in SITE_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
-      </select>
-    </div>
-
-    <div v-if="hostOptions.length" class="group">
-      <label>Subdomain</label>
-      <select v-model="local.host" @change="commit">
-        <option value="">All</option>
-        <option v-for="h in hostOptions" :key="h" :value="h">{{ h.replace('.goodstuff.software', '') }}</option>
-      </select>
+      <label>Sites</label>
+      <div class="site-anchor">
+        <button class="site-btn" :class="{ active: (local.siteSel?.length || 0) > 0 }" @click.stop="siteOpen = !siteOpen">
+          <span class="glyph">🌐</span>{{ siteSummary }}
+          <span v-if="(local.siteSel?.length || 0) > 1" class="cnt">{{ local.siteSel.length }}</span>
+        </button>
+        <div v-if="siteOpen" class="site-pop" @click.stop>
+          <div class="site-pop-head">
+            <span>Sites &amp; subdomains</span>
+            <button v-if="(local.siteSel?.length || 0) > 0" class="site-clear" @click="clearSites">All</button>
+          </div>
+          <p v-if="!sitesTree.length" class="site-empty">No sites with data yet.</p>
+          <div v-for="d in sitesTree" :key="d.domain" class="site-group">
+            <label class="site-row domain">
+              <input type="checkbox" :checked="isDomainChecked(d)" @change="toggleDomain(d)" />
+              <span class="site-name">{{ d.domain }}</span>
+              <span class="site-count">{{ d.rum + d.geo }}</span>
+            </label>
+            <label v-for="s in d.subs" :key="s.host" class="site-row sub">
+              <input type="checkbox" :checked="isHostChecked(d, s)" @change="toggleHost(d, s)" />
+              <span class="site-name">{{ subLabel(d, s) }}</span>
+              <span class="site-count">{{ s.rum + s.geo }}</span>
+            </label>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="group range">
@@ -422,6 +483,118 @@ onBeforeUnmount(() => window.removeEventListener('focus', readMuteCookie))
   color: rgb(var(--ink-3));
 }
 
+/* Sites multi-select */
+.site-anchor {
+  position: relative;
+}
+.site-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgb(var(--line-2));
+  background: rgb(var(--surface));
+  color: rgb(var(--ink));
+  border-radius: 9px;
+  padding: 7px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.site-btn.active {
+  border-color: rgb(var(--amber));
+  color: rgb(var(--amber));
+}
+.site-btn .glyph {
+  opacity: 0.8;
+}
+.site-btn .cnt {
+  background: rgb(var(--amber));
+  color: #fff;
+  border-radius: 999px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.site-pop {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6px);
+  z-index: 40;
+  width: 280px;
+  max-width: 82vw;
+  max-height: 340px;
+  overflow-y: auto;
+  background: rgb(var(--surface));
+  border: 1px solid rgb(var(--line-2));
+  border-radius: 12px;
+  box-shadow: 0 14px 38px rgb(0 0 0 / 0.18);
+  padding: 8px;
+}
+.site-pop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgb(var(--ink-3));
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.site-clear {
+  border: none;
+  background: transparent;
+  color: rgb(var(--amber));
+  font-weight: 700;
+  font-size: 11px;
+  cursor: pointer;
+}
+.site-group {
+  padding: 2px 0;
+  border-top: 1px solid rgb(var(--line));
+}
+.site-group:first-of-type {
+  border-top: none;
+}
+.site-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.site-row:hover {
+  background: rgb(var(--line) / 0.6);
+}
+.site-row.domain .site-name {
+  font-weight: 600;
+}
+.site-row.sub {
+  padding-left: 22px;
+}
+.site-row .site-name {
+  flex: 1;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.site-row .site-count {
+  font-size: 11px;
+  color: rgb(var(--ink-3));
+  font-variant-numeric: tabular-nums;
+}
+.site-empty {
+  margin: 8px 6px;
+  font-size: 12px;
+  color: rgb(var(--ink-3));
+}
+
 @media (max-width: 640px) {
   .filter-bar {
     gap: 10px;
@@ -438,6 +611,9 @@ onBeforeUnmount(() => window.removeEventListener('focus', readMuteCookie))
   /* Keep the calendar's two date fields from overflowing the right edge. */
   .cal-pop {
     flex-wrap: wrap;
+    max-width: calc(100vw - 40px);
+  }
+  .site-pop {
     max-width: calc(100vw - 40px);
   }
 }
