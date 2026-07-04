@@ -70,7 +70,9 @@ export function defaultBeaconWidgets(): Widget[] {
   ]
 }
 export function defaultBeaconPage(): DashboardPage {
-  return { id: 'beacon', name: 'Beacon', isDefault: false, filters: defaultFilters(), widgets: defaultBeaconWidgets() }
+  // Default to all sites so the Beacon page shows every instrumented property;
+  // the Site/Subdomain selectors then narrow it (they now filter geo too).
+  return { id: 'beacon', name: 'Beacon', isDefault: false, filters: { ...defaultFilters(), site: 'all', host: '' }, widgets: defaultBeaconWidgets() }
 }
 
 export function defaultConfig(): DashboardConfig {

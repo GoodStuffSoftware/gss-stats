@@ -45,18 +45,25 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const until = safeDate(body.until, today)
   const sinceMs = Date.parse(since)
   const untilMs = isDateOnly(until) ? Date.parse(until) + 86_400_000 : Date.parse(until) // legacy day = inclusive
-  // Optional beacon-site filter (e.g. "starrupture"). The RUM site keys don't map
-  // here, so only apply it when it's a plain site tag.
-  const site = typeof body.site === 'string' && /^[a-z0-9.\-]{1,40}$/i.test(body.site) ? body.site : null
+  // Beacon-site filter — a list of site tags (e.g. ["starrupture","simpletile",
+  // "goodstuff"]) mapped from the Site/Subdomain selectors, or a single legacy
+  // `site`. Empty / "all" = no filter.
+  const rawSites: unknown[] = Array.isArray(body.sites) ? body.sites : body.site != null ? [body.site] : []
+  const sites = rawSites.filter(
+    (s): s is string => typeof s === 'string' && s !== 'all' && /^[a-z0-9.\-]{1,40}$/i.test(s),
+  )
+  const siteClause = (w: string[], b: any[]) => {
+    if (sites.length) {
+      w.push(`site IN (${sites.map(() => '?').join(', ')})`)
+      b.push(...sites)
+    }
+  }
 
   // Map mode: return one point per distinct lat/lon with a count (for globe/map charts).
   if (dim === 'points' || body.dimension === 'points') {
     const w: string[] = ['ts >= ?', 'ts < ?', "lat <> ''"]
     const b: any[] = [sinceMs, untilMs]
-    if (site && site !== 'all') {
-      w.push('site = ?')
-      b.push(site)
-    }
+    siteClause(w, b)
     const sql = `SELECT lat, lon, city, region, country, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY lat, lon ORDER BY c DESC LIMIT ?`
     b.push(Math.min(limit, 2000))
     let r: any
@@ -80,7 +87,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       (a: any, x: any) => ({ pageviews: a.pageviews + x.pageviews, visits: a.visits + x.visits }),
       { pageviews: 0, visits: 0 },
     )
-    return json({ rows, totals, meta: { site: site ?? 'all', since, until, dimensions: ['points'], metric: 'pageviews', dataset: 'geo' } })
+    return json({ rows, totals, meta: { site: sites.length ? sites.join(',') : 'all', since, until, dimensions: ['points'], metric: 'pageviews', dataset: 'geo' } })
   }
 
   // Two-dimension breakdown (nested doughnut / stacked bar on geo data).
@@ -91,10 +98,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   if (breakdown && dim !== 'date') {
     const w: string[] = ['ts >= ?', 'ts < ?', `${dim} <> ''`, `${breakdown} <> ''`]
     const b: any[] = [sinceMs, untilMs]
-    if (site && site !== 'all') {
-      w.push('site = ?')
-      b.push(site)
-    }
+    siteClause(w, b)
     const sql = `SELECT ${dim} AS k1, ${breakdown} AS k2, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY k1, k2 ORDER BY c DESC LIMIT ?`
     b.push(Math.min(limit * 4, 1000))
     let r: any
@@ -112,16 +116,13 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       (a: any, x: any) => ({ pageviews: a.pageviews + x.pageviews, visits: a.visits + x.visits }),
       { pageviews: 0, visits: 0 },
     )
-    return json({ rows, totals, meta: { site: site ?? 'all', since, until, dimensions: [dim, breakdown], metric: 'pageviews', dataset: 'geo' } })
+    return json({ rows, totals, meta: { site: sites.length ? sites.join(',') : 'all', since, until, dimensions: [dim, breakdown], metric: 'pageviews', dataset: 'geo' } })
   }
 
   const col = dim === 'date' ? "date(ts/1000,'unixepoch')" : dim
   const where = ['ts >= ?', 'ts < ?']
   const binds: any[] = [sinceMs, untilMs]
-  if (site && site !== 'all') {
-    where.push('site = ?')
-    binds.push(site)
-  }
+  siteClause(where, binds)
   // Drop blank values from non-path dimensions for cleaner charts.
   if (dim !== 'path' && dim !== 'date') where.push(`${col} <> ''`)
 
@@ -146,7 +147,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     { pageviews: 0, visits: 0 },
   )
 
-  return json({ rows, totals, meta: { site: site ?? 'all', since, until, dimensions: [dim], metric: 'pageviews', dataset: 'geo' } })
+  return json({ rows, totals, meta: { site: sites.length ? sites.join(',') : 'all', since, until, dimensions: [dim], metric: 'pageviews', dataset: 'geo' } })
 }
 
 export const onRequestGet: PagesFunction<Env> = async () =>

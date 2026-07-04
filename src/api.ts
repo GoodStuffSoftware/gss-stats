@@ -1,4 +1,18 @@
 import type { StatsResponse, Widget, GlobalFilters, DashboardConfig } from './types'
+import { SITES } from './lib/catalog'
+
+// The beacon tags each hit by its hostname's first label (starrupture.goodstuff.software
+// → "starrupture", goodstuff.software → "goodstuff", goodstuffsoftware.com →
+// "goodstuffsoftware"). Map the dashboard's Site/Subdomain selection to those tags so
+// the geo dataset honors the same filters as RUM. undefined = all sites (no filter).
+function beaconSitesFor(widget: Widget, filters: GlobalFilters): string[] | undefined {
+  const host = widget.host && widget.host !== ('inherit' as any) ? widget.host : filters.host
+  if (host) return [host.split('.')[0]] // a specific subdomain was chosen
+  if (!filters.site || filters.site === 'all') return undefined
+  const def = SITES.find((s) => s.key === filters.site)
+  const hosts = def && def.hosts.length ? def.hosts : [String(filters.site)]
+  return hosts.map((h) => h.split('.')[0])
+}
 
 /** Fetch one widget's data from the server-side stats Function. */
 export async function fetchStats(widget: Widget, filters: GlobalFilters): Promise<StatsResponse> {
@@ -13,7 +27,7 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters): Promis
         since: filters.since,
         until: filters.until,
         limit: widget.type === 'map' ? 2000 : widget.limit ?? 50,
-        site: widget.host || undefined,
+        sites: beaconSitesFor(widget, filters),
       }),
     })
     if (!res.ok) {

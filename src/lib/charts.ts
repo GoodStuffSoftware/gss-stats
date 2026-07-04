@@ -143,7 +143,18 @@ export function metricValue(row: { pageviews: number; visits: number }, metric: 
 }
 
 // Human-friendly label for a dimension value.
+// Beacon `site` tags are the hostname's first label; show the full domain so
+// "goodstuff" reads as goodstuff.software, "goodstuffsoftware" as the .com, etc.
+const BEACON_SITE_LABELS: Record<string, string> = {
+  goodstuff: 'goodstuff.software',
+  goodstuffsoftware: 'goodstuffsoftware.com',
+  starrupture: 'starrupture.goodstuff.software',
+  simpletile: 'simpletile.goodstuff.software',
+  bestsudoku: 'bestsudoku.app',
+}
+
 export function formatKey(dimension: string, value: string): string {
+  if (dimension === 'site') return BEACON_SITE_LABELS[value] ?? value
   if (!value) {
     if (dimension === 'refererHost' || dimension === 'referrer') return '(direct)'
     if (['region', 'city', 'colo', 'country', 'postal', 'continent', 'timezone', 'org', 'lang'].includes(dimension))
