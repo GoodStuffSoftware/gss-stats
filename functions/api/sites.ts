@@ -38,8 +38,15 @@ function regDomain(host: string): string {
   const parts = String(host || '').split('.').filter(Boolean)
   return parts.length <= 2 ? host : parts.slice(-2).join('.')
 }
-const isInfraHost = (h: string) =>
-  /^(stats|beacon)\./i.test(h) || /\.pages\.dev$/i.test(h) || /\.workers\.dev$/i.test(h)
+// Dev/preview subdomain labels (dev, dev01, dash, staging, preview, test, …) — not
+// real audience. Matched on the leftmost label of a host.
+const DEV_LABELS = /^(dev\d*|dash|staging|stage|preview|test|testing|qa|uat|beta|sandbox|demo|local(host)?)$/i
+// A host we never surface: our own infra, CF preview/worker deploys, or a dev subdomain.
+const isExcludedHost = (h: string) =>
+  /^(stats|beacon)\./i.test(h) ||
+  /\.pages\.dev$/i.test(h) ||
+  /\.workers\.dev$/i.test(h) ||
+  DEV_LABELS.test(firstLabel(h))
 
 interface Sub {
   host: string
@@ -81,7 +88,7 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
         for (let i = 0; i < SITE_TAGS.length; i++)
           for (const g of (acct[`s${i}`] ?? []) as any[]) {
             const host = String(g.dimensions?.requestHost ?? '')
-            if (host && !isInfraHost(host)) sub(host).rum += Number(g.count) || 0
+            if (host && !isExcludedHost(host)) sub(host).rum += Number(g.count) || 0
           }
     } catch {
       /* RUM unavailable — beacon-only list */
@@ -100,6 +107,7 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
     for (const row of (r.results ?? []) as any[]) {
       const tag = CANON_ALIAS[String(row.site)] ?? String(row.site)
       const host = byLabel.get(firstLabel(tag)) ?? tag // fall back to the tag as its own host
+      if (isExcludedHost(host)) continue // skip dev/preview beacon tags too
       const e = sub(host)
       e.tag = tag
       e.geo += Number(row.c) || 0
