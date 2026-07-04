@@ -91,6 +91,27 @@ function closeExcl() {
 }
 onMounted(() => document.addEventListener('click', closeExcl))
 onBeforeUnmount(() => document.removeEventListener('click', closeExcl))
+
+// ── Exclude this device (beacon self-mute) ────────────────────────────────────
+// The /mute page drops a durable gssb_mute cookie on .goodstuff.software (not
+// HttpOnly), so we can read it here to show status. Opening it in a new tab sets
+// the cookie on whichever device tapped the button.
+const BEACON = 'https://beacon.goodstuff.software'
+const deviceExcluded = ref(false)
+function readMuteCookie() {
+  deviceExcluded.value = /(?:^|;\s*)gssb_mute=1(?:;|$)/.test(document.cookie)
+}
+function excludeDevice() {
+  window.open(`${BEACON}/mute`, '_blank', 'noopener')
+}
+function includeDevice() {
+  window.open(`${BEACON}/unmute`, '_blank', 'noopener')
+}
+onMounted(() => {
+  readMuteCookie()
+  window.addEventListener('focus', readMuteCookie) // re-check when they return from the mute tab
+})
+onBeforeUnmount(() => window.removeEventListener('focus', readMuteCookie))
 </script>
 
 <template>
@@ -165,6 +186,18 @@ onBeforeUnmount(() => document.removeEventListener('click', closeExcl))
               <input type="text" v-model="local.ownBrowser" @change="commit" placeholder="Opera" />
               <input type="text" v-model="local.ownOS" @change="commit" placeholder="Windows" />
             </div>
+          </div>
+          <div class="excl-device">
+            <span class="ua-label">This device</span>
+            <p class="dev-status" :class="{ on: deviceExcluded }">
+              {{ deviceExcluded ? '✓ Excluded — visits from this device aren’t counted' : 'Counted in the data' }}
+            </p>
+            <button v-if="!deviceExcluded" class="dev-btn" @click="excludeDevice">Exclude this device</button>
+            <button v-else class="dev-btn ghost" @click="includeDevice">Start counting it again</button>
+            <p class="dev-note">
+              Tag the exact phone or computer you tap this from — covers every goodstuff.software site, on Wi-Fi or
+              cellular. Open the dashboard on each device you want excluded and tap once.
+            </p>
           </div>
         </div>
       </div>
@@ -351,11 +384,61 @@ onBeforeUnmount(() => document.removeEventListener('click', closeExcl))
 .ua-inputs input {
   width: 50%;
 }
+.excl-device {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid rgb(var(--line-2));
+}
+.dev-status {
+  margin: 0;
+  font-size: 11px;
+  color: rgb(var(--ink-3));
+}
+.dev-status.on {
+  color: rgb(var(--amber));
+  font-weight: 600;
+}
+.dev-btn {
+  padding: 7px 10px;
+  border: none;
+  border-radius: 8px;
+  background: rgb(var(--amber));
+  color: #fff;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+.dev-btn.ghost {
+  background: transparent;
+  color: rgb(var(--ink-2));
+  border: 1px solid rgb(var(--line-2));
+}
+.dev-note {
+  margin: 0;
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: rgb(var(--ink-3));
+}
 
 @media (max-width: 640px) {
   .filter-bar {
     gap: 10px;
     padding: 10px 12px;
+  }
+  /* The Exclusions button sits on the left on mobile, so a right-anchored popout
+     runs off the left edge. Anchor it left and clamp to the viewport instead. */
+  .excl-pop {
+    left: 0;
+    right: auto;
+    width: 264px;
+    max-width: calc(100vw - 40px);
+  }
+  /* Keep the calendar's two date fields from overflowing the right edge. */
+  .cal-pop {
+    flex-wrap: wrap;
+    max-width: calc(100vw - 40px);
   }
 }
 </style>

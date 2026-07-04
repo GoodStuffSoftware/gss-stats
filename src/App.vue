@@ -87,6 +87,14 @@ function restoreDefaultCharts(id: string) {
 // ── Filters ───────────────────────────────────────────────────────────────────
 function onFiltersChange(f: GlobalFilters) {
   activePage.value.filters = f
+  // Exclusions are global: hiding your own noise should apply on every page, not
+  // just the one you set it on. Mirror the exclusion fields onto all pages.
+  for (const p of config.pages) {
+    p.filters.excludeSelfReferrals = f.excludeSelfReferrals
+    p.filters.excludeOwnVisits = f.excludeOwnVisits
+    p.filters.ownBrowser = f.ownBrowser
+    p.filters.ownOS = f.ownOS
+  }
 }
 
 // ── Widget CRUD (operate on the active page) ──────────────────────────────────
