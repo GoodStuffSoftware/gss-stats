@@ -28,8 +28,9 @@ export function resolveSelection(sel: string[] | undefined): { hosts: string[]; 
   const hosts = new Set<string>()
   const tags = new Set<string>()
   const add = (s: SiteSub) => {
-    if (s.host) hosts.add(s.host)
-    if (s.tag) tags.add(s.tag)
+    // Each sub carries every host/tag it represents (canonical + folded aliases).
+    for (const h of s.hosts?.length ? s.hosts : s.host ? [s.host] : []) hosts.add(h)
+    for (const t of s.tags?.length ? s.tags : s.tag ? [s.tag] : []) tags.add(t)
   }
   if (!sel || !sel.length) {
     for (const g of tree) for (const s of g.subs) add(s)
