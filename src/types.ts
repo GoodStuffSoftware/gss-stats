@@ -17,6 +17,24 @@ export type Dataset = 'rum' | 'geo'
 
 export type SiteKey = 'goodstuff.software' | 'goodstuffsoftware.com' | 'bestsudoku.app' | 'all'
 
+// Auto-built site tree from /api/sites — one group per registrable domain, with its
+// real subdomains (dev/preview already excluded), carrying both dataset identifiers.
+export interface SiteSub {
+  host: string // RUM requestHost (or a beacon-only tag as a fallback host)
+  tag: string | null // beacon site tag, if this host has beacon data
+  rum: number
+  geo: number
+}
+export interface SiteGroup {
+  domain: string // registrable domain — the selectable "site"
+  rum: number
+  geo: number
+  subs: SiteSub[]
+}
+export interface SitesResponse {
+  sites: SiteGroup[]
+}
+
 export interface Widget {
   id: string
   i: string // grid item id (mirrors id; required by grid-layout-plus)
@@ -41,8 +59,11 @@ export interface Widget {
 }
 
 export interface GlobalFilters {
-  site: SiteKey
-  host: string // '' = all hosts within the site
+  // Multi-select site filter. Each token is a domain (whole site) or a full host
+  // (one subdomain). Empty = all real sites. Resolved via the /api/sites tree.
+  siteSel: string[]
+  site?: SiteKey // legacy single-site (kept for migration + per-widget overrides)
+  host?: string // legacy single-host
   since: string // YYYY-MM-DD
   until: string // YYYY-MM-DD
   excludeSelfReferrals: boolean

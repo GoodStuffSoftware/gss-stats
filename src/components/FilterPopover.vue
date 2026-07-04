@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { reactive, computed, watch, ref } from 'vue'
+import { reactive, watch, ref } from 'vue'
 import type { GlobalFilters } from '../types'
-import { SITE_OPTIONS, SITES } from '../lib/catalog'
 import { relativeRange, lastDays, isoToYmd, ymdRangeToISO, rangeLabel, isLastDays } from '../lib/range'
 
 const props = defineProps<{ start: GlobalFilters; active: boolean }>()
@@ -29,12 +28,6 @@ syncRange()
 
 function commit() {
   emit('apply', { ...local })
-}
-
-const hostOptions = computed(() => SITES.find((x) => x.key === local.site)?.hosts ?? [])
-function onSiteChange() {
-  local.host = ''
-  commit()
 }
 
 const rangeOk = ref(true)
@@ -80,21 +73,6 @@ function applyCal() {
       <span class="fp-title">Chart filter</span>
       <button class="x" title="Done" @click="emit('close')">✕</button>
     </header>
-
-    <div class="fp-field">
-      <label>Site</label>
-      <select v-model="local.site" @change="onSiteChange">
-        <option v-for="o in SITE_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
-      </select>
-    </div>
-
-    <div v-if="hostOptions.length" class="fp-field">
-      <label>Subdomain</label>
-      <select v-model="local.host" @change="commit">
-        <option value="">All</option>
-        <option v-for="h in hostOptions" :key="h" :value="h">{{ h.replace('.goodstuff.software', '') }}</option>
-      </select>
-    </div>
 
     <div class="fp-field">
       <label>Range</label>

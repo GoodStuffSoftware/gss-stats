@@ -4,6 +4,7 @@ import type { DashboardConfig, DashboardPage, Widget, GlobalFilters } from './ty
 import { defaultConfig, normalizeConfig, defaultWidgets, clonePage, cryptoId } from './lib/defaults'
 import { rangeLabel } from './lib/range'
 import { loadConfig, saveConfig } from './api'
+import { loadSites } from './sitesStore'
 import { sessionExpired, reauth } from './session'
 import PageBar from './components/PageBar.vue'
 import FilterBar from './components/FilterBar.vue'
@@ -24,7 +25,9 @@ onMounted(async () => {
   dark.value = localStorage.getItem('gss-stats-dark') === '1'
   applyDark()
 
-  const stored = await loadConfig()
+  // Load the durable config and the auto-built site tree in parallel; the tree must
+  // be ready before charts fetch so the real-host allow-list applies from the start.
+  const [stored] = await Promise.all([loadConfig(), loadSites()])
   const norm = normalizeConfig(stored ?? config)
   config.version = norm.version
   config.activePageId = norm.activePageId

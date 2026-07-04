@@ -1,21 +1,12 @@
 import type { StatsResponse, Widget, GlobalFilters, DashboardConfig } from './types'
-import { SITES } from './lib/catalog'
-
-// The beacon tags each hit by its hostname's first label (starrupture.goodstuff.software
-// → "starrupture", goodstuff.software → "goodstuff", goodstuffsoftware.com →
-// "goodstuffsoftware"). Map the dashboard's Site/Subdomain selection to those tags so
-// the geo dataset honors the same filters as RUM. undefined = all sites (no filter).
-function beaconSitesFor(widget: Widget, filters: GlobalFilters): string[] | undefined {
-  const host = widget.host && widget.host !== ('inherit' as any) ? widget.host : filters.host
-  if (host) return [host.split('.')[0]] // a specific subdomain was chosen
-  if (!filters.site || filters.site === 'all') return undefined
-  const def = SITES.find((s) => s.key === filters.site)
-  const hosts = def && def.hosts.length ? def.hosts : [String(filters.site)]
-  return hosts.map((h) => h.split('.')[0])
-}
+import { resolveSelection } from './sitesStore'
 
 /** Fetch one widget's data from the server-side stats Function. */
 export async function fetchStats(widget: Widget, filters: GlobalFilters): Promise<StatsResponse> {
+  // Resolve the site selection into concrete RUM hosts + beacon tags. Empty = all
+  // real sites; dev/preview hosts are never in the list, so they never count.
+  const { hosts, tags } = resolveSelection(filters.siteSel)
+
   // Geo beacon dataset → /api/geo (D1-backed, already bot-free, single dimension).
   if (widget.dataset === 'geo') {
     const res = await fetch('/api/geo', {
@@ -27,7 +18,7 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters): Promis
         since: filters.since,
         until: filters.until,
         limit: widget.type === 'map' ? 2000 : widget.limit ?? 50,
-        sites: beaconSitesFor(widget, filters),
+        sites: tags,
       }),
     })
     if (!res.ok) {
@@ -44,8 +35,8 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters): Promis
     : []
 
   const body = {
-    site: widget.site && widget.site !== ('inherit' as any) ? widget.site : filters.site,
-    host: widget.host != null ? widget.host : filters.host,
+    site: 'all', // all site tags; the requestHost allow-list below does the filtering
+    hosts,
     since: filters.since,
     until: filters.until,
     dimensions,
