@@ -10,7 +10,29 @@ import WorldMap from './charts/WorldMap.vue'
 import FilterPopover from './FilterPopover.vue'
 
 const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolean }>()
-const emit = defineEmits<{ edit: []; remove: []; duplicate: [] }>()
+const emit = defineEmits<{
+  edit: []
+  remove: []
+  duplicate: []
+  drill: [{ dimension: string; dataset: 'geo' | 'rum'; value: string; label: string; x: number; y: number }]
+}>()
+
+// A click on a chart element → hand the parent the raw dimension value so it can
+// offer to open a page filtered to it. v1: single-dimension charts only.
+function onPoint(p: { index: number; datasetIndex: number; x: number; y: number }) {
+  const dim = props.widget.dimension
+  if (!dim || props.widget.breakdown) return
+  const value = data.value?.rows?.[p.index]?.key?.[dim]
+  if (value == null || value === '') return
+  emit('drill', {
+    dimension: dim,
+    dataset: props.widget.dataset === 'geo' ? 'geo' : 'rum',
+    value: String(value),
+    label: formatKey(dim, String(value)),
+    x: p.x,
+    y: p.y,
+  })
+}
 
 const data = ref<StatsResponse | null>(null)
 const loading = ref(false)
@@ -191,7 +213,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
       <WorldMap v-else-if="widget.type === 'map'" :data="data" />
 
       <!-- Chart.js chart -->
-      <BaseChart v-else-if="chartConfig" :config="chartConfig" />
+      <BaseChart v-else-if="chartConfig" :config="chartConfig" @point="onPoint" />
     </div>
 
     <Teleport to="body">

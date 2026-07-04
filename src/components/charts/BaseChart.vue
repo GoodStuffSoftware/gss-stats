@@ -8,6 +8,7 @@ Chart.register(...registerables)
 Chart.defaults.animation = false as unknown as typeof Chart.defaults.animation
 
 const props = defineProps<{ config: ChartConfiguration }>()
+const emit = defineEmits<{ point: [{ index: number; datasetIndex: number; x: number; y: number }] }>()
 const canvas = ref<HTMLCanvasElement | null>(null)
 const chart = shallowRef<Chart | null>(null)
 
@@ -17,9 +18,23 @@ function render() {
   chart.value = new Chart(canvas.value, props.config)
 }
 
-onMounted(render)
+// Click on a bar/arc/point → tell the parent which data element was hit (for drill-down).
+function onCanvasClick(e: MouseEvent) {
+  const c = chart.value
+  if (!c) return
+  const els = c.getElementsAtEventForMode(e, 'nearest', { intersect: true }, false)
+  if (!els.length) return
+  e.stopPropagation() // keep this click from reaching the document (which closes the drill menu)
+  emit('point', { index: els[0].index, datasetIndex: els[0].datasetIndex, x: e.clientX, y: e.clientY })
+}
+
+onMounted(() => {
+  render()
+  canvas.value?.addEventListener('click', onCanvasClick)
+})
 watch(() => props.config, render)
 onBeforeUnmount(() => {
+  canvas.value?.removeEventListener('click', onCanvasClick)
   chart.value?.destroy()
   chart.value = null
 })
@@ -36,5 +51,8 @@ onBeforeUnmount(() => {
   position: relative;
   width: 100%;
   height: 100%;
+}
+.chart-wrap canvas {
+  cursor: pointer; /* data elements are clickable → drill-down */
 }
 </style>

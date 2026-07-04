@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { reactive, ref, watch, onMounted, nextTick, computed } from 'vue'
+import { reactive, ref, watch, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import type { DashboardConfig, DashboardPage, Widget, GlobalFilters } from './types'
 import { defaultConfig, normalizeConfig, defaultWidgets, clonePage, cryptoId } from './lib/defaults'
 import { rangeLabel } from './lib/range'
 import { loadConfig, saveConfig } from './api'
-import { loadSites } from './sitesStore'
+import { loadSites, sitesTree, tokenLabel } from './sitesStore'
+import { isSiteDim, semanticKey } from './lib/drill'
 import { sessionExpired, reauth } from './session'
 import PageBar from './components/PageBar.vue'
 import FilterBar from './components/FilterBar.vue'
@@ -144,6 +145,58 @@ function duplicateWidget(wgt: Widget) {
   activePage.value.widgets.push({ ...wgt, id, i: id, x: 0, y: 9999, title: wgt.title + ' (copy)' })
 }
 
+// ── Drill-down: click a chart datapoint → open a new page filtered to that value ─
+interface DrillPayload {
+  dimension: string
+  dataset: 'geo' | 'rum'
+  value: string
+  label: string
+  x: number
+  y: number
+}
+const drillMenu = ref<DrillPayload | null>(null)
+function onDrill(p: DrillPayload) {
+  drillMenu.value = p
+}
+function closeDrill() {
+  drillMenu.value = null
+}
+onMounted(() => document.addEventListener('click', closeDrill))
+onBeforeUnmount(() => document.removeEventListener('click', closeDrill))
+
+// Beacon tag → its full host (so a site drill from a geo chart filters both datasets).
+function tagToHost(tag: string): string {
+  for (const g of sitesTree.value) for (const s of g.subs) if (s.tag === tag) return s.host
+  return tag
+}
+function drillTitle(f: GlobalFilters): string {
+  const parts: string[] = []
+  const sel = f.siteSel ?? []
+  if (sel.length === 1) parts.push(tokenLabel(sel[0]))
+  else if (sel.length > 1) parts.push(`${sel.length} sites`)
+  for (const d of f.drill ?? []) parts.push(d.label)
+  return parts.join(' · ') || 'Filtered'
+}
+function openFilteredPage() {
+  const p = drillMenu.value
+  if (!p) return
+  const clone = clonePage(activePage.value, 'Filtered')
+  if (isSiteDim(p.dimension)) {
+    // site drill → the site multi-select (filters both datasets consistently)
+    clone.filters.siteSel = [p.dataset === 'geo' ? tagToHost(p.value) : p.value]
+  } else {
+    const key = semanticKey(p.dimension, p.dataset)
+    if (key) {
+      const existing = (clone.filters.drill ?? []).filter((d) => d.key !== key)
+      clone.filters.drill = [...existing, { key, value: p.value, label: p.label }]
+    }
+  }
+  clone.name = drillTitle(clone.filters)
+  config.pages.push(clone)
+  config.activePageId = clone.id
+  closeDrill()
+}
+
 // ── Theme ─────────────────────────────────────────────────────────────────────
 function applyDark() {
   document.documentElement.classList.toggle('dark', dark.value)
@@ -200,6 +253,7 @@ function toggleDark() {
         @remove="removeWidget"
         @duplicate="duplicateWidget"
         @change="scheduleSave"
+        @drill="onDrill"
       />
       <div v-if="loaded && activePage.widgets.length === 0" class="empty">
         <p>No charts on this page.</p>
@@ -216,6 +270,19 @@ function toggleDark() {
       @remove="onEditorRemove"
     />
 
+    <div
+      v-if="drillMenu"
+      class="drill-menu"
+      :style="{ top: drillMenu.y + 'px', left: drillMenu.x + 'px' }"
+      @click.stop
+    >
+      <div class="drill-head">
+        <span class="drill-dim">{{ drillMenu.dimension }}</span>
+        <span class="drill-val">{{ drillMenu.label }}</span>
+      </div>
+      <button class="drill-act" @click="openFilteredPage">↳ Open as filtered page</button>
+    </div>
+
     <footer class="foot overline">
       {{ activePage.name }} · humans only, bots excluded · {{ rangeText }}
     </footer>
@@ -230,6 +297,55 @@ function toggleDark() {
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+.drill-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 190px;
+  max-width: 260px;
+  background: rgb(var(--surface));
+  border: 1px solid rgb(var(--line-2));
+  border-radius: 10px;
+  box-shadow: 0 12px 34px rgb(0 0 0 / 0.24);
+  padding: 8px;
+  transform: translate(6px, 6px);
+}
+.drill-head {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 6px 8px;
+  border-bottom: 1px solid rgb(var(--line));
+  margin-bottom: 6px;
+}
+.drill-dim {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgb(var(--ink-3));
+}
+.drill-val {
+  font-weight: 600;
+  font-size: 14px;
+  color: rgb(var(--ink));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drill-act {
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: rgb(var(--ink));
+  padding: 7px 8px;
+  border-radius: 7px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.drill-act:hover {
+  background: rgb(var(--amber-tint));
+  color: rgb(var(--amber-hover));
 }
 .reauth-banner {
   position: sticky;

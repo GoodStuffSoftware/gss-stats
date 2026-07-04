@@ -1,5 +1,17 @@
-import type { StatsResponse, Widget, GlobalFilters, DashboardConfig } from './types'
+import type { StatsResponse, Widget, GlobalFilters, DashboardConfig, Dataset } from './types'
 import { resolveSelection } from './sitesStore'
+import { nativeField } from './lib/drill'
+
+// Resolve a page's drill-downs into { field, value } pairs for one dataset. A drill
+// on a dimension the dataset lacks (e.g. region on RUM) is simply omitted.
+function drillConstraints(filters: GlobalFilters, dataset: Dataset): { field: string; value: string }[] {
+  return (filters.drill ?? [])
+    .map((d) => {
+      const field = nativeField(d.key, dataset)
+      return field ? { field, value: d.value } : null
+    })
+    .filter((c): c is { field: string; value: string } => c !== null)
+}
 
 /** Fetch one widget's data from the server-side stats Function. */
 export async function fetchStats(widget: Widget, filters: GlobalFilters): Promise<StatsResponse> {
@@ -19,6 +31,7 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters): Promis
         until: filters.until,
         limit: widget.type === 'map' ? 2000 : widget.limit ?? 50,
         sites: tags,
+        constraints: drillConstraints(filters, 'geo'),
       }),
     })
     if (!res.ok) {
@@ -46,6 +59,7 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters): Promis
     excludeOwnVisits: filters.excludeOwnVisits,
     ownBrowser: filters.ownBrowser,
     ownOS: filters.ownOS,
+    constraints: drillConstraints(filters, 'rum'),
   }
 
   const res = await fetch('/api/stats', {
