@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { reactive, computed, watch, ref, onMounted, onBeforeUnmount } from 'vue'
 import type { GlobalFilters } from '../types'
-import { sitesTree, tokenLabel } from '../sitesStore'
+import { sitesTree } from '../sitesStore'
 import type { SiteGroup, SiteSub } from '../types'
 import { relativeRange, lastDays, isoToYmd, ymdRangeToISO, rangeLabel, isLastDays } from '../lib/range'
 
@@ -35,8 +35,8 @@ function commit() {
 }
 
 // ── Sites multi-select ────────────────────────────────────────────────────────
-// Selection tokens are domains (whole site) or full hosts (one subdomain); empty
-// means all real sites. Built from the auto-discovered sitesTree.
+// Selection = a list of full-host tokens; a whole site is just all its subs checked;
+// empty = all real sites. Standard tri-state parent (all/some/none) + child model.
 const siteOpen = ref(false)
 function closeSites() {
   siteOpen.value = false
@@ -44,46 +44,70 @@ function closeSites() {
 onMounted(() => document.addEventListener('click', closeSites))
 onBeforeUnmount(() => document.removeEventListener('click', closeSites))
 
-const siteSummary = computed(() => {
-  const sel = local.siteSel ?? []
-  if (!sel.length) return 'All sites'
-  if (sel.length === 1) return tokenLabel(sel[0])
-  return `${sel.length} selected`
-})
+// v-indeterminate: set the checkbox's indeterminate (dash) state for partial sites.
+const vIndeterminate = {
+  mounted(el: HTMLInputElement, b: { value: boolean }) {
+    el.indeterminate = !!b.value
+  },
+  updated(el: HTMLInputElement, b: { value: boolean }) {
+    el.indeterminate = !!b.value
+  },
+}
+
 function setSel(next: string[]) {
   local.siteSel = next
   commit()
 }
-function isDomainChecked(d: SiteGroup) {
-  return (local.siteSel ?? []).includes(d.domain)
+// Whole site = a domain token; a subdomain = a full-host token; empty = all sites.
+// The apex host (host === domain) is hidden — it's a redirect, so it's covered by the
+// whole-site selection (which includes it via resolveSelection) rather than a
+// redundant row. Sites whose ONLY host is the apex show just the site row.
+function displayedSubs(d: SiteGroup): SiteSub[] {
+  return d.subs.filter((s) => s.host !== d.domain)
 }
-function isHostChecked(d: SiteGroup, s: SiteSub) {
-  return isDomainChecked(d) || (local.siteSel ?? []).includes(s.host)
-}
-function toggleDomain(d: SiteGroup) {
+function isSubSelected(d: SiteGroup, s: SiteSub) {
   const sel = local.siteSel ?? []
-  if (isDomainChecked(d)) setSel(sel.filter((t) => t !== d.domain))
-  // select the whole site: drop any of its per-host tokens, add the domain token
-  else setSel([...sel.filter((t) => !d.subs.some((s) => s.host === t)), d.domain])
+  return sel.includes(d.domain) || sel.includes(s.host)
 }
-function toggleHost(d: SiteGroup, s: SiteSub) {
+function siteState(d: SiteGroup): 'all' | 'some' | 'none' {
   const sel = local.siteSel ?? []
-  if (isDomainChecked(d)) {
-    // unchecking one host from a whole-site selection → expand to its other hosts
-    setSel([...sel.filter((t) => t !== d.domain), ...d.subs.filter((x) => x.host !== s.host).map((x) => x.host)])
-  } else if (sel.includes(s.host)) {
-    setSel(sel.filter((t) => t !== s.host))
-  } else {
-    setSel([...sel, s.host])
-  }
+  if (sel.includes(d.domain)) return 'all'
+  const subs = displayedSubs(d)
+  if (!subs.length) return 'none'
+  const n = subs.filter((s) => sel.includes(s.host)).length
+  return n === 0 ? 'none' : n === subs.length ? 'all' : 'some'
+}
+function toggleSite(d: SiteGroup) {
+  const sel = local.siteSel ?? []
+  const cleared = sel.filter((t) => t !== d.domain && !d.subs.some((s) => s.host === t))
+  setSel(siteState(d) === 'all' ? cleared : [...cleared, d.domain]) // whole site = one domain token
+}
+function toggleSub(d: SiteGroup, s: SiteSub) {
+  let sel = [...(local.siteSel ?? [])]
+  // expand a whole-site token into its subdomains so one can be toggled off
+  if (sel.includes(d.domain)) sel = sel.filter((t) => t !== d.domain).concat(displayedSubs(d).map((x) => x.host))
+  sel = sel.includes(s.host) ? sel.filter((t) => t !== s.host) : [...sel, s.host]
+  setSel(sel)
 }
 function subLabel(d: SiteGroup, s: SiteSub) {
-  if (s.host === d.domain) return '(main site)'
   return s.host.endsWith('.' + d.domain) ? s.host.slice(0, -(d.domain.length + 1)) : s.host
 }
 function clearSites() {
   setSel([])
 }
+const siteSummary = computed(() => {
+  const sel = local.siteSel ?? []
+  if (!sel.length) return 'All sites'
+  if (sel.length === 1) {
+    if (sitesTree.value.some((g) => g.domain === sel[0])) return sel[0]
+    for (const g of sitesTree.value) {
+      const s = g.subs.find((x) => x.host === sel[0])
+      if (s) return subLabel(g, s)
+    }
+    return sel[0]
+  }
+  return `${sel.length} selected`
+})
 
 // ── Smart range ───────────────────────────────────────────────────────────────
 const rangeOk = ref(true)
@@ -168,7 +192,6 @@ onBeforeUnmount(() => window.removeEventListener('focus', readMuteCookie))
       <div class="site-anchor">
         <button class="site-btn" :class="{ active: (local.siteSel?.length || 0) > 0 }" @click.stop="siteOpen = !siteOpen">
           <span class="glyph">🌐</span>{{ siteSummary }}
-          <span v-if="(local.siteSel?.length || 0) > 1" class="cnt">{{ local.siteSel.length }}</span>
         </button>
         <div v-if="siteOpen" class="site-pop" @click.stop>
           <div class="site-pop-head">
@@ -178,12 +201,17 @@ onBeforeUnmount(() => window.removeEventListener('focus', readMuteCookie))
           <p v-if="!sitesTree.length" class="site-empty">No sites with data yet.</p>
           <div v-for="d in sitesTree" :key="d.domain" class="site-group">
             <label class="site-row domain">
-              <input type="checkbox" :checked="isDomainChecked(d)" @change="toggleDomain(d)" />
+              <input
+                type="checkbox"
+                :checked="siteState(d) === 'all'"
+                v-indeterminate="siteState(d) === 'some'"
+                @change="toggleSite(d)"
+              />
               <span class="site-name">{{ d.domain }}</span>
               <span class="site-count">{{ d.rum + d.geo }}</span>
             </label>
-            <label v-for="s in d.subs" :key="s.host" class="site-row sub">
-              <input type="checkbox" :checked="isHostChecked(d, s)" @change="toggleHost(d, s)" />
+            <label v-for="s in displayedSubs(d)" :key="s.host" class="site-row sub">
+              <input type="checkbox" :checked="isSubSelected(d, s)" @change="toggleSub(d, s)" />
               <span class="site-name">{{ subLabel(d, s) }}</span>
               <span class="site-count">{{ s.rum + s.geo }}</span>
             </label>
