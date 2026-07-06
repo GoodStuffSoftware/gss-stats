@@ -1,0 +1,34 @@
+# Changelog
+
+All notable changes to **gss-stats** are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
+[Semantic Versioning](https://semver.org/).
+
+## [Unreleased]
+
+## [0.1.0] — 2026-07-05
+
+First public release — the dashboard as currently deployed at
+`stats.goodstuff.software`.
+
+### Added
+- **Custom bot-free analytics dashboard.** A movable/resizable grid of charts over
+  Cloudflare RUM (human-only) data, with the API token held server-side so it never
+  reaches the browser.
+- **Durable, multi-page dashboards.** Layout and chart definitions persist in
+  Cloudflare KV (not `localStorage`), with multiple pages, per-page filters, and
+  per-chart filter overrides.
+- **Geo beacon dataset.** True sub-country region / city / ISP and a visitor map,
+  sourced from the companion `gss-beacon` (Cloudflare RUM is country-only).
+- **Auto-built site filter.** A single multi-select of sites and subdomains, built
+  live from the data, that merges each site's RUM and beacon identifiers and folds
+  alias hosts (HTTP redirect or `rel="canonical"`) into their canonical site.
+- **Click-to-drill-down.** Clicking any chart value opens a new page filtered to it
+  (device, referrer, location, and more), titled by the value.
+- **Owner-visit exclusion.** Hide your own traffic by browser+OS, plus a per-device
+  "exclude this device" opt-out that covers every site (first-party cookie for the
+  same domain, server-side IP list for others).
+- **Dev / preview traffic excluded** from both the site picker and every number.
+- **Smart date range** — type spans like `7d` / `24h` / `2w` or pick exact dates.
+- **Cloudflare Access lockdown** (owner-only) with a session-expiry re-sign-in prompt.
+- **Light / dark theme** matching the Good Stuff Software brand.

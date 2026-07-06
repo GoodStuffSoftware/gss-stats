@@ -1,135 +1,134 @@
 # gss-stats
 
-Private, bot-free traffic dashboard for **Good Stuff Software**. Custom UI on top of
+Bot-free traffic dashboard for **Good Stuff Software**. A custom UI on top of
 Cloudflare's **RUM** (Real User Monitoring) data — the same human-only dataset that
-powers Web Analytics, but rendered in a movable/composable dashboard you control.
+powers Web Analytics — plus a companion **geo beacon** for the sub-country geography
+RUM doesn't provide, rendered as a movable/composable dashboard you control.
 
 🔒 Live at **https://stats.goodstuff.software** — behind Cloudflare Access (owner-only).
 
----
+The API token stays server-side (in a Pages Function); it never reaches the browser.
 
-## Why this exists
+## Quick start
 
-- **Cloudflare Web Analytics (RUM)** is bot-filtered and accurate, but its UI is fixed.
-- **Edge/GraphQL analytics** (`httpRequestsAdaptiveGroups`) is customizable but, on
-  Free/Pro plans, can't filter bots — and this account's edge traffic is ~99% bots.
-- RUM data **is** available via the GraphQL API (`rumPageloadEventsAdaptiveGroups`),
-  bot-free. So this is a custom UI on the RUM API.
+```powershell
+npm install
+# one-time: create the local secret from your Cloudflare analytics token
+"CF_ANALYTICS_TOKEN=<your-token>" | Out-File .dev.vars -Encoding ascii -NoNewline
+
+npm run preview     # build + wrangler pages dev (Functions + KV + D1 simulated) on :8788
+# or
+npm run dev         # Vite only (UI iteration; /api/* not served)
+```
+
+`.dev.vars` is gitignored. See [`.dev.vars.example`](.dev.vars.example).
+
+## Stack
+
+| Layer | Choice |
+|---|---|
+| UI | Vue 3 + Vite |
+| Charts | Chart.js + custom plugins |
+| Layout | grid-layout-plus (movable/resizable widgets) |
+| Backend | Cloudflare Pages Functions (`functions/api/*.ts`) |
+| RUM data | Cloudflare GraphQL Analytics API (`rumPageloadEventsAdaptiveGroups`) |
+| Geo data | Cloudflare D1 (shared with [gss-beacon](https://github.com/GoodStuffSoftware/gss-beacon)) |
+| Config store | Cloudflare KV (`STATS_CONFIG`) |
+| Auth | Cloudflare Access (Zero Trust), owner-only |
+
+## Features
+
+- **Movable / composable charts** — drag the header, resize from the corner; add /
+  edit / duplicate / delete charts of any type: stat, bar, horizontal bar, stacked
+  bar, line, area, doughnut, nested doughnut, pie, table, and a geo point map.
+- **Durable, multi-page dashboards** — layout + chart definitions persist in KV (not
+  `localStorage`), so they follow you across devices. Duplicate / rename / delete
+  pages; a protected default page with "restore default charts"; per-page filters and
+  per-chart filter overrides.
+- **Auto-built site filter** — a single multi-select of your sites and subdomains,
+  built live from the data. It merges each site's RUM host and beacon tag into one
+  entry, groups subdomains under their site, folds **alias hosts** (an HTTP redirect
+  or a `rel="canonical"` pointing elsewhere) into their canonical site, and excludes
+  dev/preview hosts from both the picker and the numbers.
+- **Click-to-drill-down** — click any chart value to open a new page filtered to it
+  (device, referrer, location, browser, …), titled by the value; drill-downs stack.
+- **Exclusions** (global across pages) — hide self-referrals, hide your own visits by
+  browser+OS, and an **"exclude this device"** opt-out that works on every site (see
+  [gss-beacon](https://github.com/GoodStuffSoftware/gss-beacon)).
+- **Smart date range** — type spans like `7d` / `24h` / `2w` / `last 3d`, or pick
+  exact dates.
+- **Geo beacon dataset** — region / city / ISP / new-vs-returning and a visitor map,
+  from the beacon (RUM geography is country-only).
+- **Locked down** — Cloudflare Access gates the dashboard; an expired session shows a
+  one-tap re-sign-in banner instead of a wall of errors.
+- Light / dark theme matching the Good Stuff Software brand.
 
 ## Architecture
 
 ```
 Browser (Vue 3 + Chart.js + grid-layout-plus)
-   │  POST /api/stats          GET/PUT /api/config
+   │  POST /api/stats   POST /api/geo   GET /api/sites   GET/PUT /api/config
    ▼
 Cloudflare Pages Functions  (functions/api/*.ts)
-   │  - holds CF_ANALYTICS_TOKEN (secret) — never reaches the browser
-   │  - queries GraphQL Analytics API server-side
-   │  - dashboard config persisted in KV (STATS_CONFIG)
+   │  - hold CF_ANALYTICS_TOKEN (secret) — never sent to the browser
+   │  - /api/stats  → RUM GraphQL (server-side), requestHost allow-list
+   │  - /api/geo    → reads the beacon's D1 (bot-free sub-country geo)
+   │  - /api/sites  → auto-builds the merged site list (RUM + beacon, aliases folded)
+   │  - /api/config → dashboard layout in KV
    ▼
-Cloudflare GraphQL Analytics API  ·  Cloudflare KV
+Cloudflare GraphQL Analytics API  ·  D1 (gss-geo)  ·  KV (STATS_CONFIG)
 ```
 
-- **Token is server-side only.** The browser calls our Functions; the Function adds the
-  Bearer token and calls GraphQL. The token is never exposed to client JS.
-- **Durable config.** Dashboard layout + chart definitions live in Cloudflare KV
-  (`STATS_CONFIG`), so your customizations follow you across browsers/devices — not
-  `localStorage`. (Theme preference is the only local-only setting.)
-- **Locked down.** Cloudflare Access (Zero Trust) gates both `stats.goodstuff.software`
-  and the `*.pages.dev` URL, allowing only the owner emails. A `_middleware.ts`
-  host-guard is a backstop that 404s any non-canonical host.
+- **Two datasets, one dashboard.** RUM (sampled, human-only) and the beacon (every
+  real load, sub-country geo) are charted side by side; they're independent and never
+  summed.
+- **Dev/preview never counts.** Every query filters to an allow-list of *real* hosts
+  (via RUM `requestHost_in`), so `dev*` / `staging` / `*.pages.dev` traffic is out of
+  the numbers, not just hidden from the picker.
 
-## Features
+## Data & dimensions
 
-- Movable / resizable widgets (drag the card header; resize from the corner).
-- Add / edit / duplicate / delete charts of any type: **stat, bar, horizontal bar,
-  stacked bar, line, area, doughnut, pie, table**.
-- Group by any RUM dimension: site/host, page path, device, country, referrer, date.
-- Global filters: site, subdomain, date range (7/30/90-day presets or custom),
-  hide-self-referrals.
-- Default dashboard out of the box (pageviews/visits KPIs, trend, by-site, site×device,
-  top referrers, by-country, top pages, device split).
-- **Multiple dashboard pages** — duplicate / rename / delete pages; a protected default page (★) with
-  "Restore default charts" always available. Each page stores its **own** global filters *and* per-chart
-  overrides, independently. Per-chart override is set from the filter button in each card header.
-- Light / dark theme matching the Good Stuff Software brand.
-
-## RUM sites & dimensions
-
-Account `a32bba62c77df5e8f6bd33d04478ec34`. RUM site tags:
-
-| Site | siteTag |
-|---|---|
-| goodstuff.software (starrupture./simpletile./apex) | `7dd3bcb059af40f79f8df92d6d0be750` |
-| goodstuffsoftware.com | `0289e02254fc4db8b73b232c59f8421f` |
-| bestsudoku.app | `a8baf99f3d294215a92a176e8c56bd15` |
-
-Whitelisted dimensions (server-side): `requestHost`, `requestPath`, `deviceType`,
-`countryName`, `refererHost`, `userAgentBrowser`, `userAgentOS`, `date`.
-**Geography is country-only** — RUM has no region/state/city dimension.
+RUM whitelisted dimensions (server-side): `requestHost`, `requestPath`, `deviceType`,
+`countryName`, `refererHost`, `userAgentBrowser`, `userAgentOS`, `date`. **RUM
+geography is country-only** — sub-country region/city comes from the beacon.
 
 **"Hide my own visits"** excludes the owner's browser+OS *combination* server-side
-(De Morgan `OR: [browser_neq, os_neq]`, so e.g. Chrome/Windows isn't dropped).
-Defaults to Opera/Windows, on by default, configurable in the filter bar. RUM
-exposes no client IP/visitor ID, so a UA combo is the only self-exclusion proxy.
+(De Morgan `OR: [browser_neq, os_neq]`, so e.g. Chrome/Windows isn't dropped). RUM
+exposes no client IP or visitor ID, so a UA combo is the only self-exclusion proxy on
+that dataset; the beacon adds a precise per-device/per-network opt-out.
 
-**Not yet wired (available for the asking):** Cloudflare has two more bot-free RUM
-datasets — **Performance** (`rumPerformanceEventsAdaptiveGroups`: load/FCP/render/
-DNS/TTFB percentiles, µs) and **Web Vitals** (`rumWebVitalsEventsAdaptiveGroups`:
-LCP/INP/CLS/FCP/TTFB bucketed Good/Needs/Poor). The Pageload dataset we use has
-only two metrics: `count` (pageviews) and `visits`.
+## Docs
 
-## Local development
-
-```powershell
-npm install
-# one-time: create local secret from the deploy/analytics token
-"CF_ANALYTICS_TOKEN=$((Get-Content C:\Users\msant\dev\cf-token.txt -Raw).Trim())" `
-  | Out-File .dev.vars -Encoding ascii -NoNewline
-
-npm run preview     # build + wrangler pages dev (Functions + KV simulated) on :8788
-# or
-npm run dev         # Vite only (UI iteration; /api/* not served)
-```
-
-`.dev.vars` is gitignored. `localhost` / `127.0.0.1` are allowed by the host-guard.
+| Area | Entry point |
+|---|---|
+| Changelog | [CHANGELOG.md](CHANGELOG.md) |
+| Contributing / conventions | [CLAUDE.md](CLAUDE.md) |
+| Geo beacon (companion) | [GoodStuffSoftware/gss-beacon](https://github.com/GoodStuffSoftware/gss-beacon) |
 
 ## Deploy
 
-Manual `wrangler` deploy with the local token (same pattern as goodstuffsoftware.com):
+Manual `wrangler` deploy with the analytics token from a local, gitignored file:
 
 ```powershell
-$env:CLOUDFLARE_API_TOKEN = (Get-Content "C:\Users\msant\dev\cf-token.txt" -Raw).Trim()
+$env:CLOUDFLARE_API_TOKEN = (Get-Content "<path>\cf-token.txt" -Raw).Trim()
 npm run deploy      # = vite build && wrangler pages deploy
 ```
 
 Single Cloudflare account — no account-ID env needed. Pages project: **gss-stats**.
 
-## Provisioned resources
+## Security / hardening
 
-| Resource | Value |
-|---|---|
-| Pages project | `gss-stats` → https://gss-stats.pages.dev |
-| Custom domain | `stats.goodstuff.software` (CNAME → gss-stats.pages.dev, proxied) |
-| KV namespace | `STATS_CONFIG` id `f1fa625cdb844c109c4db4acc02d00f5` |
-| Secret | `CF_ANALYTICS_TOKEN` (production) |
-| Access app | "GSS Stats" id `69c4cfb0-b413-4dcd-912d-fd5745d887f5` |
-| Access policy | "Owner only" — santoro12@gmail.com, mike@goodstuffsoftware.com |
-| Zero Trust team | `bestsudoku.cloudflareaccess.com` |
+- **Access lockdown.** Cloudflare Access (Zero Trust) gates both
+  `stats.goodstuff.software` and the `*.pages.dev` URL, allowing only the owner's
+  email(s). A `functions/_middleware.ts` host-guard 404s any non-canonical host as a
+  backstop.
+- **Token hygiene.** The real token lives only in a gitignored `.dev.vars` (local) and
+  a Cloudflare Pages secret (production) — never in the repo. Follow-up: mint a
+  least-privilege token with only "Account Analytics Read" and set it as the
+  `CF_ANALYTICS_TOKEN` secret.
+- **Sign-in.** Access uses One-Time PIN (email codes) by default; a Google IdP can be
+  added in Zero Trust without code changes.
 
-## Security / hardening follow-ups
+## Branch
 
-1. **Dedicated read-only token (recommended).** The Function secret currently reuses the
-   deploy token (`cf-token.txt`), which has more than analytics-read. The deploy token
-   lacks "API Tokens: Write" so a least-privilege token couldn't be minted via API.
-   To harden: create a token in the CF dashboard with **only** "Account Analytics Read"
-   (account = Good Stuff Software), then:
-   ```powershell
-   $env:CLOUDFLARE_API_TOKEN=(Get-Content C:\Users\msant\dev\cf-token.txt -Raw).Trim()
-   "PASTE_READONLY_TOKEN" | npx wrangler pages secret put CF_ANALYTICS_TOKEN --project-name gss-stats
-   npm run deploy   # redeploy so Functions pick up the new secret
-   ```
-2. **Google sign-in (optional).** Access currently uses **One-Time PIN** (email codes) —
-   zero-config and already owner-only. To add one-click Google: create an OAuth client in
-   Google Cloud Console, add a Google IdP in Cloudflare Zero Trust → Settings →
-   Authentication, and it works automatically (the policy allows by email regardless of IdP).
+`main` — the deployed line.
