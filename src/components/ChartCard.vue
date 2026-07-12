@@ -2,6 +2,7 @@
 import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
 import type { Widget, GlobalFilters, StatsResponse } from '../types'
 import { fetchStats } from '../api'
+import { sitesLoaded } from '../sitesStore'
 import { checkSessionExpired, isNetworkError } from '../session'
 import { buildChartConfig, formatKey, metricValue } from '../lib/charts'
 import { rangeLabel } from '../lib/range'
@@ -45,6 +46,13 @@ const effectiveFilters = computed<GlobalFilters>(() => props.widget.filters ?? p
 const hasOverride = computed(() => !!props.widget.filters)
 
 async function load() {
+  // RUM charts filter to a real-host allow-list built from /api/sites; fetching before
+  // it loads would momentarily count dev/preview traffic. Wait for the tree. (Geo has
+  // no dev hosts, so it needn't wait.)
+  if (props.widget.dataset !== 'geo' && !sitesLoaded.value) {
+    loading.value = true
+    return
+  }
   const my = ++reqId
   loading.value = true
   error.value = null
@@ -108,6 +116,7 @@ const overrideSummary = computed(() => {
   return [site, rangeLabel(f.since, f.until), ...flags].join(' · ')
 })
 watch(dataKey, load)
+watch(sitesLoaded, (ready) => ready && load()) // fetch RUM charts once the allow-list is ready
 onMounted(load)
 
 const chartConfig = computed(() => {

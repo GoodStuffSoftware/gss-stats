@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **First page load no longer shows briefly inflated numbers.** RUM charts now wait
+  for the real-host allow-list before their first fetch, so dev/preview traffic is
+  never counted — not even for the split second before the site list loads.
+
 ## [0.1.0] — 2026-07-05
 
 First public release — the dashboard as currently deployed at
