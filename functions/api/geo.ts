@@ -13,7 +13,7 @@ interface Env {
 
 const GEO_DIMS = new Set([
   'country', 'region', 'city', 'postal', 'continent', 'timezone', 'colo', 'org',
-  'referrer', 'path', 'site', 'device', 'browser', 'os', 'lang', 'visitor', 'date',
+  'referrer', 'refpath', 'path', 'site', 'device', 'browser', 'os', 'lang', 'visitor', 'date',
 ])
 
 const json = (data: unknown, status = 200): Response =>

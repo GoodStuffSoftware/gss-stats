@@ -16,6 +16,7 @@ export const GEO_DIMENSIONS: { key: string; label: string }[] = [
   { key: 'colo', label: 'Cloudflare PoP' },
   { key: 'org', label: 'ISP / network' },
   { key: 'referrer', label: 'Referrer' },
+  { key: 'refpath', label: 'Referrer path (e.g. subreddit)' },
   { key: 'site', label: 'Site' },
   { key: 'path', label: 'Page path' },
   { key: 'device', label: 'Device' },
