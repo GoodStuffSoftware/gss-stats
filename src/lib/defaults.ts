@@ -83,8 +83,40 @@ export function defaultBeaconPage(): DashboardPage {
   return { id: 'beacon', name: 'Beacon', isDefault: false, filters: defaultFilters(), widgets: defaultBeaconWidgets() }
 }
 
+// "Best Sudoku launch" — a beacon page pre-filtered to the Best Sudoku traffic
+// (web + app), focused on where visitors come from (referrers + subreddit) and geo.
+export function defaultBestSudokuLaunchWidgets(): Widget[] {
+  return [
+    gw({ id: 'bsk-views', title: 'Pageviews', type: 'stat', dimension: 'site', limit: 1, x: 0, y: 0, w: 3, h: 3 }),
+    gw({ id: 'bsk-visitor', title: 'New vs returning', type: 'doughnut', dimension: 'visitor', limit: 5, x: 0, y: 3, w: 3, h: 6 }),
+    gw({ id: 'bsk-trend', title: 'Visits over time', type: 'area', dimension: 'date', limit: 90, x: 3, y: 0, w: 9, h: 8 }),
+    gw({ id: 'bsk-ref', title: 'Where they come from (referrers)', type: 'hbar', dimension: 'referrer', limit: 12, x: 0, y: 9, w: 6, h: 8 }),
+    gw({ id: 'bsk-refpath', title: 'Which subreddit / section', type: 'hbar', dimension: 'refpath', limit: 12, x: 6, y: 8, w: 6, h: 8 }),
+    gw({ id: 'bsk-webapp', title: 'Web vs app', type: 'doughnut', dimension: 'site', limit: 5, x: 0, y: 17, w: 3, h: 7 }),
+    gw({ id: 'bsk-device', title: 'Device', type: 'doughnut', dimension: 'device', limit: 6, x: 3, y: 17, w: 3, h: 7 }),
+    gw({ id: 'bsk-country', title: 'By country', type: 'hbar', dimension: 'country', limit: 10, x: 6, y: 16, w: 6, h: 8 }),
+    gw({ id: 'bsk-region', title: 'By region / state', type: 'hbar', dimension: 'region', limit: 12, x: 0, y: 24, w: 6, h: 8 }),
+    gw({ id: 'bsk-city', title: 'Top cities', type: 'hbar', dimension: 'city', limit: 12, x: 6, y: 24, w: 6, h: 8 }),
+    gw({ id: 'bsk-path', title: 'Top screens / pages', type: 'hbar', dimension: 'path', limit: 12, x: 0, y: 32, w: 6, h: 8 }),
+    gw({ id: 'bsk-map', title: 'Visitor map', type: 'map', dimension: '', limit: 2000, x: 0, y: 40, w: 12, h: 9 }),
+  ]
+}
+export function defaultBestSudokuLaunchPage(): DashboardPage {
+  return {
+    id: 'bsk-launch',
+    name: 'Best Sudoku launch',
+    isDefault: false,
+    filters: { ...defaultFilters(), siteSel: ['bestsudoku-web', 'bestsudoku-app'] },
+    widgets: defaultBestSudokuLaunchWidgets(),
+  }
+}
+
 export function defaultConfig(): DashboardConfig {
-  return { version: 2, activePageId: 'default', pages: [defaultPage(), defaultBeaconPage()] }
+  return {
+    version: 3,
+    activePageId: 'default',
+    pages: [defaultPage(), defaultBeaconPage(), defaultBestSudokuLaunchPage()],
+  }
 }
 
 // Normalize a filter object, migrating legacy { site, host } → siteSel tokens.
@@ -129,12 +161,17 @@ function normPage(p: any, i: number): DashboardPage {
 // Normalize a loaded config. Handles v2 (pages), migrates v1 (single page), and
 // falls back to factory defaults for anything unrecognized.
 export function normalizeConfig(raw: any): DashboardConfig {
-  // v2 — already a pages config
+  // v2/v3 — already a pages config
   if (raw && typeof raw === 'object' && Array.isArray(raw.pages) && raw.pages.length) {
     const pages = raw.pages.map(normPage)
     if (!pages.some((p: DashboardPage) => p.isDefault)) pages[0].isDefault = true
+    // v3 migration: add the "Best Sudoku launch" page ONCE. Gated on version, so if it's
+    // later deleted it won't keep coming back.
+    if ((Number(raw.version) || 0) < 3 && !pages.some((p: DashboardPage) => p.id === 'bsk-launch')) {
+      pages.push(defaultBestSudokuLaunchPage())
+    }
     const activePageId = pages.some((p: DashboardPage) => p.id === raw.activePageId) ? raw.activePageId : pages[0].id
-    return { version: 2, activePageId, pages }
+    return { version: 3, activePageId, pages }
   }
   // v1 — single page; wrap as the default page
   if (raw && typeof raw === 'object' && Array.isArray(raw.widgets)) {

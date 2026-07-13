@@ -7,6 +7,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **"Best Sudoku launch" dashboard page** — a beacon page pre-filtered to Best Sudoku
+  traffic (web + app) showing where visitors come from (referrers + subreddit), geo,
+  device, web-vs-app, and new-vs-returning. Added automatically via a one-time migration.
 - **"Referrer path" dimension** (beacon dataset) — chart the referrer's path, e.g. which
   subreddit sent a visit, alongside the referrer host; click-to-drill-down works on it too
   (drill a referrer, then see its subreddit breakdown).
