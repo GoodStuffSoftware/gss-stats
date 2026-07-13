@@ -8,6 +8,7 @@ import type { Dataset } from '../types'
 export const DRILL_FIELDS: Record<string, { rum: string | null; geo: string | null }> = {
   device: { rum: 'deviceType', geo: 'device' },
   referrer: { rum: 'refererHost', geo: 'referrer' },
+  refpath: { rum: null, geo: 'refpath' }, // referrer path (e.g. /r/sudoku) — beacon-only
   path: { rum: 'requestPath', geo: 'path' },
   os: { rum: 'userAgentOS', geo: 'os' },
   browser: { rum: 'userAgentBrowser', geo: 'browser' },

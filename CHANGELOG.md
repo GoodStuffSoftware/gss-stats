@@ -8,7 +8,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ### Added
 - **"Referrer path" dimension** (beacon dataset) — chart the referrer's path, e.g. which
-  subreddit sent a visit, alongside the referrer host.
+  subreddit sent a visit, alongside the referrer host; click-to-drill-down works on it too
+  (drill a referrer, then see its subreddit breakdown).
 
 ### Fixed
 - **First page load no longer shows briefly inflated numbers.** RUM charts now wait
