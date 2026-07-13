@@ -42,9 +42,19 @@ export function resolveSelection(sel: string[] | undefined): { hosts: string[]; 
       for (const s of domain.subs) add(s)
       continue
     }
+    let matched = false
     for (const g of tree) {
       const s = g.subs.find((x) => x.host === token)
-      if (s) add(s)
+      if (s) {
+        add(s)
+        matched = true
+      }
+    }
+    // Unknown token (e.g. a site tag that has no data yet) → filter by it raw, so a page
+    // can target a site before its first hit lands (empty until it does, never "all").
+    if (!matched) {
+      hosts.add(token)
+      tags.add(token)
     }
   }
   return { hosts: [...hosts], tags: [...tags] }
