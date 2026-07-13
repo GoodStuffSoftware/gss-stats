@@ -33,6 +33,7 @@ onMounted(async () => {
   config.version = norm.version
   config.activePageId = norm.activePageId
   config.pages = norm.pages
+  config.syncRange = norm.syncRange
 
   await nextTick()
   loaded.value = true
@@ -98,6 +99,24 @@ function onFiltersChange(f: GlobalFilters) {
     p.filters.excludeOwnVisits = f.excludeOwnVisits
     p.filters.ownBrowser = f.ownBrowser
     p.filters.ownOS = f.ownOS
+    // When range-sync is on, the date window is shared across every page. Site
+    // selection and drill-downs stay per-page (they're what makes a page distinct).
+    if (config.syncRange) {
+      p.filters.since = f.since
+      p.filters.until = f.until
+    }
+  }
+}
+
+// Toggle range-sync. Turning it on immediately pushes the current page's window to all.
+function onToggleSync(on: boolean) {
+  config.syncRange = on
+  if (on) {
+    const f = activePage.value.filters
+    for (const p of config.pages) {
+      p.filters.since = f.since
+      p.filters.until = f.until
+    }
   }
 }
 
@@ -242,7 +261,12 @@ function toggleDark() {
       @restore="restoreDefaultCharts"
     />
 
-    <FilterBar :filters="activePage.filters" @change="onFiltersChange" />
+    <FilterBar
+      :filters="activePage.filters"
+      :sync-range="config.syncRange"
+      @change="onFiltersChange"
+      @toggle-sync="onToggleSync"
+    />
 
     <main class="grid-area">
       <Dashboard

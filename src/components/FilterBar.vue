@@ -3,10 +3,10 @@ import { reactive, computed, watch, ref, onMounted, onBeforeUnmount } from 'vue'
 import type { GlobalFilters } from '../types'
 import { sitesTree } from '../sitesStore'
 import type { SiteGroup, SiteSub } from '../types'
-import { relativeRange, lastDays, isoToYmd, ymdRangeToISO, rangeLabel, isLastDays } from '../lib/range'
+import { relativeRange, isoToYmd, ymdRangeToISO, rangeLabel } from '../lib/range'
 
-const props = defineProps<{ filters: GlobalFilters }>()
-const emit = defineEmits<{ change: [GlobalFilters] }>()
+const props = defineProps<{ filters: GlobalFilters; syncRange?: boolean }>()
+const emit = defineEmits<{ change: [GlobalFilters]; toggleSync: [boolean] }>()
 
 const local = reactive<GlobalFilters>({ ...props.filters })
 if (!Array.isArray(local.siteSel)) local.siteSel = []
@@ -19,6 +19,8 @@ function syncRange() {
   rangeInput.value = rangeLabel(local.since, local.until)
   fromYmd.value = isoToYmd(local.since)
   toYmd.value = isoToYmd(local.until)
+  const idx = currentStepIdx()
+  if (idx >= 0) sliderIdx.value = idx
 }
 watch(
   () => props.filters,
@@ -126,15 +128,51 @@ function applyRange() {
     rangeOk.value = false // invalid token — flag, keep what they typed
   }
 }
-function setDays(n: number) {
-  const r = lastDays(n)
-  local.since = r.since
-  local.until = r.until
+// ── Range slider ──────────────────────────────────────────────────────────────
+// One control replaces the day chips: a vertical slider where the bottom is hours
+// (1h–23h) and the top is days (1d–30d). Index 0 = 1h (bottom) … 52 = 30d (top).
+const RANGE_STEPS: { label: string; ms: number }[] = [
+  ...Array.from({ length: 23 }, (_, i) => ({ label: `${i + 1}h`, ms: (i + 1) * 3_600_000 })),
+  ...Array.from({ length: 30 }, (_, i) => ({ label: `${i + 1}d`, ms: (i + 1) * 86_400_000 })),
+]
+const sliderOpen = ref(false)
+const sliderIdx = ref(29) // default = 7d (index 22 + 7)
+function closeSlider() {
+  sliderOpen.value = false
+}
+onMounted(() => document.addEventListener('click', closeSlider))
+onBeforeUnmount(() => document.removeEventListener('click', closeSlider))
+
+// Nearest step to the current "last N" window, or -1 if it's a custom (calendar) range.
+function currentStepIdx(): number {
+  const s = new Date(local.since).getTime()
+  const u = new Date(local.until).getTime()
+  if (!isFinite(s) || !isFinite(u) || Math.abs(Date.now() - u) > 180_000) return -1
+  const span = u - s
+  let best = 0
+  let bestD = Infinity
+  RANGE_STEPS.forEach((st, i) => {
+    const d = Math.abs(st.ms - span)
+    if (d < bestD) {
+      bestD = d
+      best = i
+    }
+  })
+  return best
+}
+// Button caption: the current step ("7d" / "6h") or "Range" for a custom window.
+const sliderLabel = computed(() => {
+  const idx = currentStepIdx()
+  return idx >= 0 ? RANGE_STEPS[idx].label : 'Range'
+})
+// Apply the picked step (fires on release). Rolling window ending now.
+function onSlider() {
+  const st = RANGE_STEPS[sliderIdx.value] ?? RANGE_STEPS[29]
+  const until = new Date()
+  local.since = new Date(until.getTime() - st.ms).toISOString()
+  local.until = until.toISOString()
   commit()
   syncRange()
-}
-function isPreset(n: number) {
-  return isLastDays(local.since, local.until, n)
 }
 
 // ── Calendar popover ──────────────────────────────────────────────────────────
@@ -234,10 +272,31 @@ onBeforeUnmount(() => window.removeEventListener('focus', readMuteCookie))
           @blur="applyRange"
         />
         <button class="cal-btn" :class="{ on: calOpen }" title="Pick exact dates" @click.stop="calOpen = !calOpen">📅</button>
-        <div class="chips">
-          <button :class="['chip', { on: isPreset(1) }]" @click="setDays(1)">1d</button>
-          <button :class="['chip', { on: isPreset(7) }]" @click="setDays(7)">7d</button>
-          <button :class="['chip', { on: isPreset(30) }]" @click="setDays(30)">30d</button>
+        <div class="slider-anchor">
+          <button
+            class="chip slider-btn"
+            :class="{ on: sliderOpen }"
+            title="Drag to pick how far back — hours at the bottom, days up to 30 at the top"
+            @click.stop="sliderOpen = !sliderOpen"
+          >
+            ⏱ {{ sliderLabel }}
+          </button>
+          <div v-if="sliderOpen" class="slider-pop" @click.stop>
+            <div class="slider-cur">Last {{ RANGE_STEPS[sliderIdx]?.label ?? '7d' }}</div>
+            <div class="slider-body">
+              <span class="slider-cap">30d</span>
+              <input
+                class="range-slider"
+                type="range"
+                min="0"
+                max="52"
+                step="1"
+                v-model.number="sliderIdx"
+                @change="onSlider"
+              />
+              <span class="slider-cap">1h</span>
+            </div>
+          </div>
         </div>
         <div v-if="calOpen" class="cal-pop" @click.stop>
           <div class="cal-field">
@@ -290,6 +349,22 @@ onBeforeUnmount(() => window.removeEventListener('focus', readMuteCookie))
           </div>
         </div>
       </div>
+    </div>
+
+    <div class="group">
+      <label>Pages</label>
+      <label
+        class="sync-toggle"
+        :class="{ on: syncRange }"
+        title="When on, the date range applies to every page at once. Each page keeps its own sites and drill-downs."
+      >
+        <input
+          type="checkbox"
+          :checked="syncRange"
+          @change="emit('toggleSync', ($event.target as HTMLInputElement).checked)"
+        />
+        🔗 Sync range
+      </label>
     </div>
   </div>
 </template>
@@ -359,6 +434,81 @@ onBeforeUnmount(() => window.removeEventListener('focus', readMuteCookie))
   background: rgb(var(--amber-tint));
   border-color: rgb(var(--amber));
   color: rgb(var(--amber-hover));
+}
+
+/* Range slider — one control for the whole 1h…30d span. */
+.slider-anchor {
+  position: relative;
+}
+.slider-btn {
+  cursor: pointer;
+}
+.slider-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 40;
+  background: rgb(var(--surface));
+  border: 1px solid rgb(var(--line-2));
+  border-radius: 12px;
+  box-shadow: 0 14px 38px rgb(0 0 0 / 0.18);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.slider-cur {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgb(var(--amber-hover));
+}
+.slider-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.slider-cap {
+  font-size: 11px;
+  font-weight: 500;
+  color: rgb(var(--ink-2));
+}
+.range-slider {
+  writing-mode: vertical-lr;
+  direction: rtl;
+  width: 24px;
+  height: 190px;
+  accent-color: rgb(var(--amber));
+  cursor: pointer;
+}
+
+/* Sync-range toggle — share the date window across every page. */
+.sync-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgb(var(--line-2));
+  background: rgb(var(--surface));
+  color: rgb(var(--ink-2));
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sync-toggle:hover {
+  border-color: rgb(var(--amber));
+}
+.sync-toggle.on {
+  background: rgb(var(--amber-tint));
+  border-color: rgb(var(--amber));
+  color: rgb(var(--amber-hover));
+}
+.sync-toggle input {
+  accent-color: rgb(var(--amber));
 }
 .cal-pop {
   position: absolute;

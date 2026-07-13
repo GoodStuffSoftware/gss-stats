@@ -99,6 +99,9 @@ export interface DashboardConfig {
   version: number
   activePageId: string
   pages: DashboardPage[]
+  // When true, the date range is shared across every page (change it once, it applies
+  // everywhere). Site selection and drill-downs stay per-page. Default off.
+  syncRange?: boolean
 }
 
 export interface StatsRow {

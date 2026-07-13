@@ -7,6 +7,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Range slider replaces the day chips.** One control opens a vertical slider spanning
+  the whole window — hours (1h–23h) at the bottom, days (1d–30d) at the top — so you can
+  dial in any span from "last hour" to "last month" without typing.
+- **"Sync range across pages" toggle.** When on, the date window applies to every page at
+  once; each page keeps its own site selection and drill-downs.
 - **"Best Sudoku launch" dashboard page** — a beacon page pre-filtered to Best Sudoku
   traffic (web + app) showing where visitors come from (referrers + subreddit), geo,
   device, web-vs-app, and new-vs-returning. Added automatically via a one-time migration.

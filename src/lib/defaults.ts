@@ -171,7 +171,7 @@ export function normalizeConfig(raw: any): DashboardConfig {
       pages.push(defaultBestSudokuLaunchPage())
     }
     const activePageId = pages.some((p: DashboardPage) => p.id === raw.activePageId) ? raw.activePageId : pages[0].id
-    return { version: 3, activePageId, pages }
+    return { version: 3, activePageId, pages, syncRange: !!raw.syncRange }
   }
   // v1 — single page; wrap as the default page
   if (raw && typeof raw === 'object' && Array.isArray(raw.widgets)) {
