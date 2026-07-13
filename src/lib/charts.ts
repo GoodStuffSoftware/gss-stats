@@ -156,7 +156,7 @@ const BEACON_SITE_LABELS: Record<string, string> = {
 export function formatKey(dimension: string, value: string): string {
   if (dimension === 'site') return BEACON_SITE_LABELS[value] ?? value
   if (!value) {
-    if (dimension === 'refererHost' || dimension === 'referrer') return '(direct)'
+    if (dimension === 'refererHost' || dimension === 'referrer' || dimension === 'refpath') return '(direct)'
     if (['region', 'city', 'colo', 'country', 'postal', 'continent', 'timezone', 'org', 'lang'].includes(dimension))
       return '(unknown)'
     return '(none)'
