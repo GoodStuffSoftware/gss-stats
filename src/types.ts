@@ -78,6 +78,10 @@ export interface GlobalFilters {
   host?: string // legacy single-host
   since: string // YYYY-MM-DD
   until: string // YYYY-MM-DD
+  // Relative-range token (e.g. "7d", "6h", "2w"). When set, since/until are RECOMPUTED
+  // to a fresh now-relative window on every load, so "last 7d" stays "the last 7 days"
+  // instead of freezing. Empty string = an absolute (calendar) range; keep since/until.
+  rangeRel?: string
   excludeSelfReferrals: boolean
   // "Hide my own visits" — drops the owner's browser+OS combination server-side.
   excludeOwnVisits: boolean

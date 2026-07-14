@@ -6,7 +6,15 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Your dashboard settings now actually persist.** A load-time bug discarded every saved
+  configuration and silently reverted the dashboard to defaults on each visit — so filter,
+  layout, and page changes never survived a reload. Your saved state is durable again.
+
 ### Added
+- **Relative date ranges stay relative.** "Last 7d / 24h / …" now recomputes to a fresh
+  window on every load instead of freezing to the moment you set it; exact calendar ranges
+  are still kept as-is.
 - **Range slider replaces the day chips.** One control opens a vertical slider spanning
   the whole window — hours (1h–23h) at the bottom, days (1d–30d) at the top — so you can
   dial in any span from "last hour" to "last month" without typing.

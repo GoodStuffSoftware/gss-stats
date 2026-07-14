@@ -104,6 +104,7 @@ function onFiltersChange(f: GlobalFilters) {
     if (config.syncRange) {
       p.filters.since = f.since
       p.filters.until = f.until
+      p.filters.rangeRel = f.rangeRel
     }
   }
 }
@@ -116,6 +117,7 @@ function onToggleSync(on: boolean) {
     for (const p of config.pages) {
       p.filters.since = f.since
       p.filters.until = f.until
+      p.filters.rangeRel = f.rangeRel
     }
   }
 }
