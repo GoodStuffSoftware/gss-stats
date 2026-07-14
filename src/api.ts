@@ -80,7 +80,10 @@ export async function loadConfig(): Promise<DashboardConfig | null> {
     const res = await fetch('/api/config')
     if (!res.ok) return null
     const data = await res.json()
-    return data && data.widgets ? data : null
+    // Accept any real stored config: v2/v3 have a `pages` array, legacy v1 has `widgets`.
+    // (The old check only looked for `widgets`, so every v2/v3 config was discarded on
+    // load and the dashboard silently reverted to defaults — losing all saved state.)
+    return data && (Array.isArray(data.pages) || Array.isArray(data.widgets)) ? data : null
   } catch {
     return null
   }

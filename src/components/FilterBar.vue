@@ -118,6 +118,7 @@ function applyRange() {
   if (r) {
     local.since = r.since
     local.until = r.until
+    local.rangeRel = rangeInput.value.trim() // remember the relative span
     rangeOk.value = true
     commit()
     syncRange()
@@ -171,6 +172,7 @@ function onSlider() {
   const until = new Date()
   local.since = new Date(until.getTime() - st.ms).toISOString()
   local.until = until.toISOString()
+  local.rangeRel = st.label // stays this relative span across reloads
   commit()
   syncRange()
 }
@@ -183,6 +185,7 @@ function applyCal() {
   const r = ymdRangeToISO(a, b)
   local.since = r.since
   local.until = r.until
+  local.rangeRel = '' // absolute (calendar) range — keep exactly these dates
   commit()
   rangeInput.value = rangeLabel(local.since, local.until)
 }

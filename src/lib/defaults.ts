@@ -1,4 +1,5 @@
 import type { DashboardConfig, DashboardPage, GlobalFilters, Widget } from '../types'
+import { parseDurationMs } from './range'
 
 export function defaultDateRange(): { since: string; until: string } {
   const until = new Date()
@@ -12,6 +13,7 @@ export function defaultFilters(): GlobalFilters {
     siteSel: [], // all real sites
     since,
     until,
+    rangeRel: '7d', // relative by default → stays "last 7 days" across reloads
     excludeSelfReferrals: true,
     excludeOwnVisits: true,
     ownBrowser: 'Opera',
@@ -122,7 +124,18 @@ export function defaultConfig(): DashboardConfig {
 // Normalize a filter object, migrating legacy { site, host } → siteSel tokens.
 function normFilters(raw: any): GlobalFilters {
   const base = defaultFilters()
-  return { ...base, ...(raw ?? {}), siteSel: migrateSiteSel(raw ?? {}), site: undefined, host: undefined }
+  const merged = { ...base, ...(raw ?? {}), siteSel: migrateSiteSel(raw ?? {}), site: undefined, host: undefined }
+  // Relative ranges are stored as a token and recomputed to a fresh now-relative window on
+  // load, so "last 7d" always means the last 7 days (not a frozen window). An empty
+  // rangeRel means an absolute (calendar) range — keep the stored since/until as-is.
+  const rel = typeof merged.rangeRel === 'string' ? merged.rangeRel : ''
+  const ms = rel ? parseDurationMs(rel) : null
+  if (ms && ms > 0) {
+    const until = new Date()
+    merged.since = new Date(until.getTime() - ms).toISOString()
+    merged.until = until.toISOString()
+  }
+  return merged
 }
 
 function normWidget(x: any): Widget {
