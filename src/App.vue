@@ -101,15 +101,20 @@ function onFiltersChange(f: GlobalFilters) {
     p.filters.ownOS = f.ownOS
     // When range-sync is on, the date window is shared across every page. Site
     // selection and drill-downs stay per-page (they're what makes a page distinct).
+    // Sync-all-pages: share the range AND the site selection across every page, so all
+    // filter bars act the same. (Drill-downs stay per-page — they're what make a drilled
+    // page distinct.) Turn the toggle off for independent per-page filters.
     if (config.syncRange) {
       p.filters.since = f.since
       p.filters.until = f.until
       p.filters.rangeRel = f.rangeRel
+      p.filters.siteSel = Array.isArray(f.siteSel) ? [...f.siteSel] : []
     }
   }
 }
 
-// Toggle range-sync. Turning it on immediately pushes the current page's window to all.
+// Toggle sync-all-pages. Turning it on immediately pushes the current page's range + site
+// selection to every other page so they all match right away.
 function onToggleSync(on: boolean) {
   config.syncRange = on
   if (on) {
@@ -118,6 +123,7 @@ function onToggleSync(on: boolean) {
       p.filters.since = f.since
       p.filters.until = f.until
       p.filters.rangeRel = f.rangeRel
+      p.filters.siteSel = Array.isArray(f.siteSel) ? [...f.siteSel] : []
     }
   }
 }

@@ -359,14 +359,14 @@ onBeforeUnmount(() => window.removeEventListener('focus', readMuteCookie))
       <label
         class="sync-toggle"
         :class="{ on: syncRange }"
-        title="When on, the date range applies to every page at once. Each page keeps its own sites and drill-downs."
+        title="When on, every page shares the same range and site filter — change one, they all change. Turn off for independent per-page filters."
       >
         <input
           type="checkbox"
           :checked="syncRange"
           @change="emit('toggleSync', ($event.target as HTMLInputElement).checked)"
         />
-        🔗 Sync range
+        🔗 Sync all pages
       </label>
     </div>
   </div>
