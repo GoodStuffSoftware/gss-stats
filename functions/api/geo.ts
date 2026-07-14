@@ -67,8 +67,13 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     : []
   const drillClause = (w: string[], b: any[]) => {
     for (const c of constraints) {
-      w.push(`${c.field} = ?`)
-      b.push(c.value)
+      // "(direct)" / "(none)" are the labels we show for blank values → match empty.
+      if (c.value === '(direct)' || c.value === '(none)') {
+        w.push(`${c.field} = ''`)
+      } else {
+        w.push(`${c.field} = ?`)
+        b.push(c.value)
+      }
     }
   }
 
@@ -134,15 +139,22 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     return json({ rows, totals, meta: { site: sites.length ? sites.join(',') : 'all', since, until, dimensions: [dim, breakdown], metric: 'pageviews', dataset: 'geo' } })
   }
 
-  const col = dim === 'date' ? "date(ts/1000,'unixepoch')" : dim
+  // Bucket blank values under a label ("(direct)" for referrers, "(none)" otherwise)
+  // instead of dropping the row. Every visit is then counted in every chart — a visit
+  // that appears on the map also appears (as "(direct)"/"(none)") in the referrer,
+  // subreddit, etc. charts. Dropping blanks made attribute charts look empty while the
+  // location charts stayed full for the very same visits.
+  const emptyLabel = dim === 'referrer' ? '(direct)' : '(none)'
+  const col =
+    dim === 'date'
+      ? "date(ts/1000,'unixepoch')"
+      : `CASE WHEN ${dim} = '' THEN '${emptyLabel}' ELSE ${dim} END`
   const where = ['ts >= ?', 'ts < ?']
   const binds: any[] = [sinceMs, untilMs]
   siteClause(where, binds)
   drillClause(where, binds)
-  // Drop blank values from non-path dimensions for cleaner charts.
-  if (dim !== 'path' && dim !== 'date') where.push(`${col} <> ''`)
 
-  const orderBy = dim === 'date' ? `${col} ASC` : 'c DESC'
+  const orderBy = dim === 'date' ? 'k ASC' : 'c DESC'
   const sql = `SELECT ${col} AS k, COUNT(*) AS c FROM hits WHERE ${where.join(' AND ')} GROUP BY k ORDER BY ${orderBy} LIMIT ?`
   binds.push(limit)
 

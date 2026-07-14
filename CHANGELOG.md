@@ -7,6 +7,10 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **Geo charts stay consistent with each other.** Referrer/subreddit/device/screen charts
+  no longer drop visits with a blank value — they bucket them as "(direct)" / "(none)" — so
+  a day of direct visits no longer shows a full map but an empty referrer chart. Every
+  visit is now counted in every geo chart.
 - **Your dashboard settings now actually persist.** A load-time bug discarded every saved
   configuration and silently reverted the dashboard to defaults on each visit — so filter,
   layout, and page changes never survived a reload. Your saved state is durable again.
