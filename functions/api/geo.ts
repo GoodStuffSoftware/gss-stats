@@ -119,11 +119,13 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     const b: any[] = [sinceMs, untilMs]
     siteClause(w, b)
     drillClause(w, b)
-    const sql = `SELECT ${dim} AS k1, ${breakdown} AS k2, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY k1, k2 ORDER BY c DESC LIMIT ?`
-    b.push(Math.min(limit * 4, 1000))
+    const whereSql = w.join(' AND ')
+    const sql = `SELECT ${dim} AS k1, ${breakdown} AS k2, COUNT(*) AS c FROM hits WHERE ${whereSql} GROUP BY k1, k2 ORDER BY c DESC LIMIT ?`
     let r: any
+    let totalRes: any
     try {
-      r = await ctx.env.gss_geo.prepare(sql).bind(...b).all()
+      totalRes = await ctx.env.gss_geo.prepare(`SELECT COUNT(*) AS c FROM hits WHERE ${whereSql}`).bind(...b).all()
+      r = await ctx.env.gss_geo.prepare(sql).bind(...b, Math.min(limit * 4, 1000)).all()
     } catch (e) {
       return json({ error: 'd1 query failed', detail: String(e) }, 500)
     }
@@ -132,10 +134,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       pageviews: Number(x.c) || 0,
       visits: Number(x.c) || 0,
     }))
-    const totals = rows.reduce(
-      (a: any, x: any) => ({ pageviews: a.pageviews + x.pageviews, visits: a.visits + x.visits }),
-      { pageviews: 0, visits: 0 },
-    )
+    const total = Number(totalRes.results?.[0]?.c) || 0
+    const totals = { pageviews: total, visits: total }
     return json({ rows, totals, meta: { site: sites.length ? sites.join(',') : 'all', since, until, dimensions: [dim, breakdown], metric: 'pageviews', dataset: 'geo' } })
   }
 
@@ -154,13 +154,18 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   siteClause(where, binds)
   drillClause(where, binds)
 
+  const whereSql = where.join(' AND ')
   const orderBy = dim === 'date' ? 'k ASC' : 'c DESC'
-  const sql = `SELECT ${col} AS k, COUNT(*) AS c FROM hits WHERE ${where.join(' AND ')} GROUP BY k ORDER BY ${orderBy} LIMIT ?`
-  binds.push(limit)
+  const sql = `SELECT ${col} AS k, COUNT(*) AS c FROM hits WHERE ${whereSql} GROUP BY k ORDER BY ${orderBy} LIMIT ?`
 
   let res: any
+  let totalRes: any
   try {
-    res = await ctx.env.gss_geo.prepare(sql).bind(...binds).all()
+    // Grand total over the WHOLE filtered set — computed before the GROUP BY + top-N
+    // truncation so a stat (or any chart) reports the real count, not just the sum of the
+    // returned rows. Mirrors the RUM endpoint, whose totals also precede its top-N cut.
+    totalRes = await ctx.env.gss_geo.prepare(`SELECT COUNT(*) AS c FROM hits WHERE ${whereSql}`).bind(...binds).all()
+    res = await ctx.env.gss_geo.prepare(sql).bind(...binds, limit).all()
   } catch (e) {
     return json({ error: 'd1 query failed', detail: String(e) }, 500)
   }
@@ -170,10 +175,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     pageviews: Number(r.c) || 0,
     visits: Number(r.c) || 0,
   }))
-  const totals = rows.reduce(
-    (a: any, r: any) => ({ pageviews: a.pageviews + r.pageviews, visits: a.visits + r.visits }),
-    { pageviews: 0, visits: 0 },
-  )
+  const total = Number(totalRes.results?.[0]?.c) || 0
+  const totals = { pageviews: total, visits: total }
 
   return json({ rows, totals, meta: { site: sites.length ? sites.join(',') : 'all', since, until, dimensions: [dim], metric: 'pageviews', dataset: 'geo' } })
 }

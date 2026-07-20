@@ -15,15 +15,17 @@ watch(
 const isGeo = computed(() => draft.dataset === 'geo')
 const dimOptions = computed(() => (isGeo.value ? GEO_DIMENSIONS : DIMENSIONS))
 
-// Switching data source: keep the dimension valid for the new source.
+// Switching data source: keep the dimension + breakdown valid for the new source. The
+// beacon supports a breakdown too (nested doughnut / stacked bar), so we remap rather
+// than drop it; only the metric is beacon-agnostic (it's always a count).
 function onDatasetChange() {
   if (!dimOptions.value.some((d) => d.key === draft.dimension)) {
     draft.dimension = dimOptions.value[0].key
   }
-  if (isGeo.value) {
+  if (draft.breakdown && !dimOptions.value.some((d) => d.key === draft.breakdown)) {
     draft.breakdown = undefined
-    draft.metric = 'pageviews'
   }
+  if (isGeo.value) draft.metric = 'pageviews'
 }
 
 // The world map is geo-only.
@@ -92,7 +94,7 @@ function save() {
             <option v-for="d in dimOptions" :key="d.key" :value="d.key">{{ d.label }}</option>
           </select>
         </div>
-        <div class="field" v-if="typeDef?.allowsBreakdown && !isGeo">
+        <div class="field" v-if="typeDef?.allowsBreakdown">
           <label>Break down by</label>
           <select v-model="draft.breakdown">
             <option :value="undefined">— none —</option>

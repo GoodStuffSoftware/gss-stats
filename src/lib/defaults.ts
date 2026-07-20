@@ -89,7 +89,7 @@ export function defaultBeaconPage(): DashboardPage {
 // (web + app), focused on where visitors come from (referrers + subreddit) and geo.
 export function defaultBestSudokuLaunchWidgets(): Widget[] {
   return [
-    gw({ id: 'bsk-views', title: 'Pageviews', type: 'stat', dimension: 'site', limit: 1, x: 0, y: 0, w: 3, h: 3 }),
+    gw({ id: 'bsk-views', title: 'Pageviews', type: 'stat', dimension: 'site', limit: 10, x: 0, y: 0, w: 3, h: 3 }),
     gw({ id: 'bsk-visitor', title: 'New vs returning', type: 'doughnut', dimension: 'visitor', limit: 5, x: 0, y: 3, w: 3, h: 6 }),
     gw({ id: 'bsk-trend', title: 'Visits over time', type: 'area', dimension: 'date', limit: 90, x: 3, y: 0, w: 9, h: 8 }),
     gw({ id: 'bsk-ref', title: 'Where they come from (referrers)', type: 'hbar', dimension: 'referrer', limit: 12, x: 0, y: 9, w: 6, h: 8 }),
@@ -103,22 +103,84 @@ export function defaultBestSudokuLaunchWidgets(): Widget[] {
     gw({ id: 'bsk-map', title: 'Visitor map', type: 'map', dimension: '', limit: 2000, x: 0, y: 40, w: 12, h: 9 }),
   ]
 }
+// The beacon site tags for Best Sudoku traffic. The web build tags itself
+// "bestsudoku-web" (plus a small "bestsudoku" bucket from any page that falls back to the
+// hostname auto-tag), and the app pings the beacon as "bestsudoku-app".
+export const BEST_SUDOKU_SITES = ['bestsudoku-web', 'bestsudoku', 'bestsudoku-app']
+
 export function defaultBestSudokuLaunchPage(): DashboardPage {
   return {
     id: 'bsk-launch',
     name: 'Best Sudoku launch',
     isDefault: false,
-    filters: { ...defaultFilters(), siteSel: ['bestsudoku-web', 'bestsudoku-app'] },
+    filters: { ...defaultFilters(), siteSel: [...BEST_SUDOKU_SITES] },
     widgets: defaultBestSudokuLaunchWidgets(),
   }
 }
 
 export function defaultConfig(): DashboardConfig {
   return {
-    version: 3,
+    version: 4,
     activePageId: 'default',
     pages: [defaultPage(), defaultBeaconPage(), defaultBestSudokuLaunchPage()],
   }
+}
+
+// A RUM dimension → its beacon (geo) equivalent, so a Cloudflare-RUM chart can be
+// re-pointed at the bot-free beacon dataset without losing what it groups by.
+const RUM_TO_GEO_DIM: Record<string, string> = {
+  requestHost: 'site',
+  requestPath: 'path',
+  deviceType: 'device',
+  countryName: 'country',
+  refererHost: 'referrer',
+  userAgentBrowser: 'browser',
+  userAgentOS: 'os',
+  date: 'date',
+}
+
+// Re-point one widget at the beacon (geo) dataset. Geo charts are count-based (the metric
+// is ignored) and single-dimension except nested/stacked/table; a stat groups by 'site' so
+// its total reflects the whole selection, and a map has no dimension.
+export function beaconizeWidget(wd: Widget): Widget {
+  const mapDim = (d: string | undefined): string => (d ? (RUM_TO_GEO_DIM[d] ?? d) : '')
+  const next: Widget = { ...wd, dataset: 'geo', metric: 'pageviews' }
+  if (wd.type === 'map') {
+    next.dimension = ''
+    next.breakdown = undefined
+  } else if (wd.type === 'stat') {
+    next.dimension = 'site'
+    next.breakdown = undefined
+    next.limit = Math.max(Number(wd.limit) || 0, 10)
+  } else {
+    next.dimension = mapDim(wd.dimension) || 'region'
+    next.breakdown =
+      wd.type === 'nestedDoughnut' || wd.type === 'stackedBar' || wd.type === 'table'
+        ? wd.breakdown
+          ? mapDim(wd.breakdown)
+          : undefined
+        : undefined
+  }
+  return next
+}
+
+// The launch page, whether it's the auto-added one (id 'bsk-launch') or one the user
+// built by duplicating another page and renaming it.
+export function isBestSudokuLaunchPage(p: DashboardPage): boolean {
+  return p.id === 'bsk-launch' || p.name.trim().toLowerCase() === 'best sudoku launch'
+}
+
+// The right "factory" chart set for a page when restoring defaults. The two canonical
+// pages restore their own set; a drill-down or user-made page (no fixed identity) restores
+// the set that matches its current data source — so a beacon page comes back with beacon
+// charts and a RUM page with RUM charts, instead of everything reverting to RUM Overview.
+// (The Best Sudoku launch page is handled separately: it keeps its charts and just
+// re-points them at the beacon.)
+export function defaultWidgetsForPage(p: DashboardPage): Widget[] {
+  if (p.id === 'default') return defaultWidgets()
+  if (p.id === 'beacon') return defaultBeaconWidgets()
+  const geoCount = p.widgets.filter((w) => w.dataset === 'geo').length
+  return geoCount > p.widgets.length / 2 ? defaultBeaconWidgets() : defaultWidgets()
 }
 
 // Normalize a filter object, migrating legacy { site, host } → siteSel tokens.
@@ -183,8 +245,20 @@ export function normalizeConfig(raw: any): DashboardConfig {
     if ((Number(raw.version) || 0) < 3 && !pages.some((p: DashboardPage) => p.id === 'bsk-launch')) {
       pages.push(defaultBestSudokuLaunchPage())
     }
+    // v4 migration: make the "Best Sudoku launch" page fully beacon-backed. It was often
+    // built by duplicating the RUM "Overview" page, so half its charts queried Cloudflare
+    // RUM — which has next to no Best Sudoku data (the site is behind Access; the beacon is
+    // the real source) — and rendered empty. Re-point every chart at the beacon and filter
+    // to the Best Sudoku beacon tags. Runs once (version-gated), so later edits survive.
+    if ((Number(raw.version) || 0) < 4) {
+      for (const p of pages) {
+        if (!isBestSudokuLaunchPage(p)) continue
+        p.widgets = p.widgets.map(beaconizeWidget)
+        p.filters.siteSel = [...BEST_SUDOKU_SITES]
+      }
+    }
     const activePageId = pages.some((p: DashboardPage) => p.id === raw.activePageId) ? raw.activePageId : pages[0].id
-    return { version: 3, activePageId, pages, syncRange: !!raw.syncRange }
+    return { version: 4, activePageId, pages, syncRange: !!raw.syncRange }
   }
   // v1 — single page; wrap as the default page
   if (raw && typeof raw === 'object' && Array.isArray(raw.widgets)) {
