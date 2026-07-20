@@ -151,6 +151,11 @@ function fmt(n: number) {
   return n.toLocaleString('en-US')
 }
 
+// Mark/unmark this chart as one of the page's defaults (kept on "Restore default charts").
+function toggleDefault() {
+  props.widget.isDefault = !props.widget.isDefault
+}
+
 function closeMenu() {
   menuOpen.value = false
 }
@@ -162,6 +167,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
   <div class="chart-card">
     <header class="card-head">
       <div class="title-wrap">
+        <span v-if="widget.isDefault" class="pin" title="A default chart on this page — kept when you restore defaults">★</span>
         <span class="title" :title="widget.title">{{ widget.title }}</span>
         <span v-if="overrideSummary" class="ovr" :title="'Filter override: ' + overrideSummary"
           >· {{ overrideSummary }}</span
@@ -185,6 +191,9 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
           <div v-if="menuOpen" class="menu" @click.stop>
             <button @click="emit('edit'); menuOpen = false">Edit</button>
             <button @click="emit('duplicate'); menuOpen = false">Duplicate</button>
+            <button @click="toggleDefault(); menuOpen = false">
+              {{ widget.isDefault ? 'Remove from default' : 'Set as default' }}
+            </button>
             <button class="danger" @click="emit('remove'); menuOpen = false">Delete</button>
           </div>
         </div>
@@ -290,6 +299,12 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.pin {
+  color: rgb(var(--amber));
+  font-size: 12px;
+  line-height: 1;
+  flex-shrink: 0;
 }
 .btn-ghost.icon.active {
   color: rgb(var(--amber));
