@@ -103,22 +103,35 @@ export function defaultBestSudokuLaunchWidgets(): Widget[] {
     gw({ id: 'bsk-map', title: 'Visitor map', type: 'map', dimension: '', limit: 2000, x: 0, y: 40, w: 12, h: 9 }),
   ]
 }
+// The beacon site tags for Best Sudoku traffic: the web build auto-tags from its
+// hostname ("bestsudoku"), the app pings the beacon with its own "bestsudoku-app".
+export const BEST_SUDOKU_SITES = ['bestsudoku', 'bestsudoku-app']
+
 export function defaultBestSudokuLaunchPage(): DashboardPage {
   return {
     id: 'bsk-launch',
     name: 'Best Sudoku launch',
     isDefault: false,
-    filters: { ...defaultFilters(), siteSel: ['bestsudoku-web', 'bestsudoku-app'] },
+    filters: { ...defaultFilters(), siteSel: [...BEST_SUDOKU_SITES] },
     widgets: defaultBestSudokuLaunchWidgets(),
   }
 }
 
 export function defaultConfig(): DashboardConfig {
   return {
-    version: 3,
+    version: 4,
     activePageId: 'default',
     pages: [defaultPage(), defaultBeaconPage(), defaultBestSudokuLaunchPage()],
   }
+}
+
+// Replace the legacy "bestsudoku-web" tag — which the beacon never emits (the web build
+// auto-tags from its hostname as "bestsudoku") — with the real tag, de-duplicating.
+// Mutates the launch page's filters in place so its charts pick up web traffic again.
+function repairBestSudokuSiteSel(page: DashboardPage): void {
+  const sel = page.filters.siteSel
+  if (!Array.isArray(sel) || !sel.includes('bestsudoku-web')) return
+  page.filters.siteSel = [...new Set(sel.map((t) => (t === 'bestsudoku-web' ? 'bestsudoku' : t)))]
 }
 
 // Normalize a filter object, migrating legacy { site, host } → siteSel tokens.
@@ -183,8 +196,14 @@ export function normalizeConfig(raw: any): DashboardConfig {
     if ((Number(raw.version) || 0) < 3 && !pages.some((p: DashboardPage) => p.id === 'bsk-launch')) {
       pages.push(defaultBestSudokuLaunchPage())
     }
+    // v4 migration: repair the launch page's beacon-site filter ONCE — the page shipped
+    // filtering on "bestsudoku-web", a tag the beacon never writes, so its charts came
+    // back empty for the web launch. Only rewrites the stale token; other edits are kept.
+    if ((Number(raw.version) || 0) < 4) {
+      for (const p of pages) if (p.id === 'bsk-launch') repairBestSudokuSiteSel(p)
+    }
     const activePageId = pages.some((p: DashboardPage) => p.id === raw.activePageId) ? raw.activePageId : pages[0].id
-    return { version: 3, activePageId, pages, syncRange: !!raw.syncRange }
+    return { version: 4, activePageId, pages, syncRange: !!raw.syncRange }
   }
   // v1 — single page; wrap as the default page
   if (raw && typeof raw === 'object' && Array.isArray(raw.widgets)) {
