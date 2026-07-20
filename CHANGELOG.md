@@ -7,10 +7,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
-- **Best Sudoku launch page now counts the web launch.** The page filtered on a beacon
-  site tag (`bestsudoku-web`) the beacon never writes — the web build auto-tags as
-  `bestsudoku` — so its beacon charts came back empty for web traffic. It now filters on
-  the real tags (web + app); a one-time migration repairs already-saved dashboards.
+- **Best Sudoku launch page is now fully beacon-backed.** When built by duplicating the
+  RUM "Overview" page, half its charts queried Cloudflare RUM — which has almost no Best
+  Sudoku data (the site is behind Access; the beacon is the real source) — and rendered
+  empty. Every chart on the page now reads the bot-free beacon, filtered to the Best
+  Sudoku beacon tags (web + app). A one-time migration repairs already-saved dashboards.
 - **Geo charts stay consistent with each other.** Referrer/subreddit/device/screen charts
   no longer drop visits with a blank value — they bucket them as "(direct)" / "(none)" — so
   a day of direct visits no longer shows a full map but an empty referrer chart. Every
