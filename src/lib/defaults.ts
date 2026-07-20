@@ -170,6 +170,19 @@ export function isBestSudokuLaunchPage(p: DashboardPage): boolean {
   return p.id === 'bsk-launch' || p.name.trim().toLowerCase() === 'best sudoku launch'
 }
 
+// The right "factory" chart set for a page when restoring defaults. The two canonical
+// pages restore their own set; a drill-down or user-made page (no fixed identity) restores
+// the set that matches its current data source — so a beacon page comes back with beacon
+// charts and a RUM page with RUM charts, instead of everything reverting to RUM Overview.
+// (The Best Sudoku launch page is handled separately: it keeps its charts and just
+// re-points them at the beacon.)
+export function defaultWidgetsForPage(p: DashboardPage): Widget[] {
+  if (p.id === 'default') return defaultWidgets()
+  if (p.id === 'beacon') return defaultBeaconWidgets()
+  const geoCount = p.widgets.filter((w) => w.dataset === 'geo').length
+  return geoCount > p.widgets.length / 2 ? defaultBeaconWidgets() : defaultWidgets()
+}
+
 // Normalize a filter object, migrating legacy { site, host } → siteSel tokens.
 function normFilters(raw: any): GlobalFilters {
   const base = defaultFilters()

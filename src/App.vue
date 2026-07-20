@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { reactive, ref, watch, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import type { DashboardConfig, DashboardPage, Widget, GlobalFilters } from './types'
-import { defaultConfig, normalizeConfig, defaultWidgets, clonePage, cryptoId, isBestSudokuLaunchPage, BEST_SUDOKU_SITES, beaconizeWidget } from './lib/defaults'
+import { defaultConfig, normalizeConfig, defaultWidgetsForPage, clonePage, cryptoId, isBestSudokuLaunchPage, BEST_SUDOKU_SITES, beaconizeWidget } from './lib/defaults'
 import { rangeLabel } from './lib/range'
 import { loadConfig, saveConfig } from './api'
 import { loadSites, sitesTree, tokenLabel } from './sitesStore'
@@ -95,7 +95,7 @@ function restoreDefaultCharts(id: string) {
     return
   }
   if (!confirm(`Restore "${p.name}" to the default charts? Custom charts on this page will be replaced.`)) return
-  p.widgets = defaultWidgets()
+  p.widgets = defaultWidgetsForPage(p)
 }
 
 // ── Filters ───────────────────────────────────────────────────────────────────

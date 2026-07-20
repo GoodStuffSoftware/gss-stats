@@ -18,6 +18,10 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **Beacon stat tiles no longer undercount.** A beacon stat / percentage now reflects the
   full matching set instead of only the top-N rows it charted, so its total is right even
   when there's a long tail of regions, cities, or referrers.
+- **"Restore default charts" now respects the page.** It used to rebuild every page with the
+  RUM "Overview" charts; a beacon page (or a drill-down off one) now comes back with beacon
+  charts instead of empty Cloudflare ones, and each drill-down restores to the data source
+  it was using.
 - **Geo charts stay consistent with each other.** Referrer/subreddit/device/screen charts
   no longer drop visits with a blank value — they bucket them as "(direct)" / "(none)" — so
   a day of direct visits no longer shows a full map but an empty referrer chart. Every
