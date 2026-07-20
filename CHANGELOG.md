@@ -11,7 +11,11 @@ All notable changes to **gss-stats** are documented here. The format follows
   RUM "Overview" page, half its charts queried Cloudflare RUM — which has almost no Best
   Sudoku data (the site is behind Access; the beacon is the real source) — and rendered
   empty. Every chart on the page now reads the bot-free beacon, filtered to the Best
-  Sudoku beacon tags (web + app). A one-time migration repairs already-saved dashboards.
+  Sudoku beacon tags (web + app), and new charts added there default to the beacon too. A
+  one-time migration repairs already-saved dashboards.
+- **Beacon stat tiles no longer undercount.** A beacon stat / percentage now reflects the
+  full matching set instead of only the top-N rows it charted, so its total is right even
+  when there's a long tail of regions, cities, or referrers.
 - **Geo charts stay consistent with each other.** Referrer/subreddit/device/screen charts
   no longer drop visits with a blank value — they bucket them as "(direct)" / "(none)" — so
   a day of direct visits no longer shows a full map but an empty referrer chart. Every
@@ -21,6 +25,9 @@ All notable changes to **gss-stats** are documented here. The format follows
   layout, and page changes never survived a reload. Your saved state is durable again.
 
 ### Added
+- **Beacon charts can break down by a second dimension.** Nested-doughnut and stacked-bar
+  charts now work on the beacon dataset (e.g. site × device), matching what RUM already
+  offered — the chart editor exposes "Break down by" for beacon charts too.
 - **Relative date ranges stay relative.** "Last 7d / 24h / …" now recomputes to a fresh
   window on every load instead of freezing to the moment you set it; exact calendar ranges
   are still kept as-is.

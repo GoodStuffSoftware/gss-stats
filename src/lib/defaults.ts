@@ -166,7 +166,7 @@ export function beaconizeWidget(wd: Widget): Widget {
 
 // The launch page, whether it's the auto-added one (id 'bsk-launch') or one the user
 // built by duplicating another page and renaming it.
-function isBestSudokuLaunchPage(p: DashboardPage): boolean {
+export function isBestSudokuLaunchPage(p: DashboardPage): boolean {
   return p.id === 'bsk-launch' || p.name.trim().toLowerCase() === 'best sudoku launch'
 }
 

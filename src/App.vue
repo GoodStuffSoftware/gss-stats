@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { reactive, ref, watch, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import type { DashboardConfig, DashboardPage, Widget, GlobalFilters } from './types'
-import { defaultConfig, normalizeConfig, defaultWidgets, clonePage, cryptoId } from './lib/defaults'
+import { defaultConfig, normalizeConfig, defaultWidgets, clonePage, cryptoId, isBestSudokuLaunchPage } from './lib/defaults'
 import { rangeLabel } from './lib/range'
 import { loadConfig, saveConfig } from './api'
 import { loadSites, sitesTree, tokenLabel } from './sitesStore'
@@ -131,6 +131,9 @@ function onToggleSync(on: boolean) {
 // ── Widget CRUD (operate on the active page) ──────────────────────────────────
 function addChart() {
   const id = cryptoId()
+  // On the Best Sudoku launch page, new charts default to the beacon dataset (its only
+  // real data source) instead of Cloudflare RUM, so the whole page stays beacon-backed.
+  const geo = isBestSudokuLaunchPage(activePage.value)
   editing.value = {
     isNew: true,
     widget: {
@@ -138,7 +141,8 @@ function addChart() {
       i: id,
       title: 'New chart',
       type: 'bar',
-      dimension: 'requestHost',
+      dataset: geo ? 'geo' : undefined,
+      dimension: geo ? 'region' : 'requestHost',
       metric: 'pageviews',
       limit: 10,
       x: 0,
