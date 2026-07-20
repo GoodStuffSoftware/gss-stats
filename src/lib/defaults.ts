@@ -214,6 +214,7 @@ function normWidget(x: any): Widget {
     site: x.site,
     host: x.host,
     excludeSelfReferrals: x.excludeSelfReferrals,
+    isDefault: x.isDefault === true || undefined,
     // Per-chart override: back-fill any filter fields added since it was saved.
     filters: x.filters ? normFilters(x.filters) : undefined,
     x: Number(x.x) || 0,

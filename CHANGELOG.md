@@ -31,6 +31,9 @@ All notable changes to **gss-stats** are documented here. The format follows
   layout, and page changes never survived a reload. Your saved state is durable again.
 
 ### Added
+- **Pin your own default charts.** Each chart has a "Set as default" option (★) in its ⋯
+  menu; "Restore default charts" then keeps the charts you've pinned and drops the rest,
+  falling back to the factory set only when nothing is pinned.
 - **Beacon charts can break down by a second dimension.** Nested-doughnut and stacked-bar
   charts now work on the beacon dataset (e.g. site × device), matching what RUM already
   offered — the chart editor exposes "Break down by" for beacon charts too.
