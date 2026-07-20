@@ -12,7 +12,9 @@ All notable changes to **gss-stats** are documented here. The format follows
   Sudoku data (the site is behind Access; the beacon is the real source) — and rendered
   empty. Every chart on the page now reads the bot-free beacon, filtered to the Best
   Sudoku beacon tags (web + app), and new charts added there default to the beacon too. A
-  one-time migration repairs already-saved dashboards.
+  one-time migration repairs already-saved dashboards, and "Restore default charts" on that
+  page re-switches every chart to the beacon (keeping your layout) rather than reverting to
+  the RUM charts.
 - **Beacon stat tiles no longer undercount.** A beacon stat / percentage now reflects the
   full matching set instead of only the top-N rows it charted, so its total is right even
   when there's a long tail of regions, cities, or referrers.

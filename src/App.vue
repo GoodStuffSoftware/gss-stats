@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { reactive, ref, watch, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import type { DashboardConfig, DashboardPage, Widget, GlobalFilters } from './types'
-import { defaultConfig, normalizeConfig, defaultWidgets, clonePage, cryptoId, isBestSudokuLaunchPage } from './lib/defaults'
+import { defaultConfig, normalizeConfig, defaultWidgets, clonePage, cryptoId, isBestSudokuLaunchPage, BEST_SUDOKU_SITES, beaconizeWidget } from './lib/defaults'
 import { rangeLabel } from './lib/range'
 import { loadConfig, saveConfig } from './api'
 import { loadSites, sitesTree, tokenLabel } from './sitesStore'
@@ -85,6 +85,15 @@ function deletePage(id: string) {
 }
 function restoreDefaultCharts(id: string) {
   const p = config.pages.find((x) => x.id === id) ?? activePage.value
+  // The Best Sudoku launch page keeps its own charts + layout on reset — it just switches
+  // every chart to the beacon dataset and re-filters to the Best Sudoku beacon buckets, so
+  // resetting fixes any chart that drifted back to Cloudflare RUM.
+  if (isBestSudokuLaunchPage(p)) {
+    if (!confirm(`Reset "${p.name}"? Every chart switches to the beacon data source (your layout is kept).`)) return
+    p.widgets = p.widgets.map(beaconizeWidget)
+    p.filters.siteSel = [...BEST_SUDOKU_SITES]
+    return
+  }
   if (!confirm(`Restore "${p.name}" to the default charts? Custom charts on this page will be replaced.`)) return
   p.widgets = defaultWidgets()
 }
