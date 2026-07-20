@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { reactive, ref, watch, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import type { DashboardConfig, DashboardPage, Widget, GlobalFilters } from './types'
-import { defaultConfig, normalizeConfig, defaultWidgets, clonePage, cryptoId } from './lib/defaults'
+import { defaultConfig, normalizeConfig, defaultWidgetsForPage, clonePage, cryptoId, isBestSudokuLaunchPage, BEST_SUDOKU_SITES, beaconizeWidget } from './lib/defaults'
 import { rangeLabel } from './lib/range'
 import { loadConfig, saveConfig } from './api'
 import { loadSites, sitesTree, tokenLabel } from './sitesStore'
@@ -85,8 +85,17 @@ function deletePage(id: string) {
 }
 function restoreDefaultCharts(id: string) {
   const p = config.pages.find((x) => x.id === id) ?? activePage.value
+  // The Best Sudoku launch page keeps its own charts + layout on reset — it just switches
+  // every chart to the beacon dataset and re-filters to the Best Sudoku beacon buckets, so
+  // resetting fixes any chart that drifted back to Cloudflare RUM.
+  if (isBestSudokuLaunchPage(p)) {
+    if (!confirm(`Reset "${p.name}"? Every chart switches to the beacon data source (your layout is kept).`)) return
+    p.widgets = p.widgets.map(beaconizeWidget)
+    p.filters.siteSel = [...BEST_SUDOKU_SITES]
+    return
+  }
   if (!confirm(`Restore "${p.name}" to the default charts? Custom charts on this page will be replaced.`)) return
-  p.widgets = defaultWidgets()
+  p.widgets = defaultWidgetsForPage(p)
 }
 
 // ── Filters ───────────────────────────────────────────────────────────────────
@@ -131,6 +140,9 @@ function onToggleSync(on: boolean) {
 // ── Widget CRUD (operate on the active page) ──────────────────────────────────
 function addChart() {
   const id = cryptoId()
+  // On the Best Sudoku launch page, new charts default to the beacon dataset (its only
+  // real data source) instead of Cloudflare RUM, so the whole page stays beacon-backed.
+  const geo = isBestSudokuLaunchPage(activePage.value)
   editing.value = {
     isNew: true,
     widget: {
@@ -138,7 +150,8 @@ function addChart() {
       i: id,
       title: 'New chart',
       type: 'bar',
-      dimension: 'requestHost',
+      dataset: geo ? 'geo' : undefined,
+      dimension: geo ? 'region' : 'requestHost',
       metric: 'pageviews',
       limit: 10,
       x: 0,
