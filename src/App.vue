@@ -85,17 +85,24 @@ function deletePage(id: string) {
 }
 function restoreDefaultCharts(id: string) {
   const p = config.pages.find((x) => x.id === id) ?? activePage.value
-  // The Best Sudoku launch page keeps its own charts + layout on reset — it just switches
-  // every chart to the beacon dataset and re-filters to the Best Sudoku beacon buckets, so
-  // resetting fixes any chart that drifted back to Cloudflare RUM.
-  if (isBestSudokuLaunchPage(p)) {
-    if (!confirm(`Reset "${p.name}"? Every chart switches to the beacon data source (your layout is kept).`)) return
-    p.widgets = p.widgets.map(beaconizeWidget)
+  const launch = isBestSudokuLaunchPage(p)
+  // If the user has pinned any charts as defaults, restoring keeps exactly those and drops
+  // the rest. Otherwise fall back to the factory set for this page. The Best Sudoku launch
+  // page additionally re-points its charts at the beacon and resets the site buckets.
+  const marked = p.widgets.filter((w) => w.isDefault)
+  const msg = marked.length
+    ? `Restore "${p.name}" to your default charts? Charts not set as default will be removed.`
+    : launch
+      ? `Reset "${p.name}"? Every chart switches to the beacon data source (your layout is kept).`
+      : `Restore "${p.name}" to the default charts? Custom charts on this page will be replaced.`
+  if (!confirm(msg)) return
+
+  let next = marked.length ? marked : launch ? p.widgets : defaultWidgetsForPage(p)
+  if (launch) {
+    next = next.map(beaconizeWidget)
     p.filters.siteSel = [...BEST_SUDOKU_SITES]
-    return
   }
-  if (!confirm(`Restore "${p.name}" to the default charts? Custom charts on this page will be replaced.`)) return
-  p.widgets = defaultWidgetsForPage(p)
+  p.widgets = next
 }
 
 // ── Filters ───────────────────────────────────────────────────────────────────

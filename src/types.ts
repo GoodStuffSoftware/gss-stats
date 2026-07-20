@@ -50,6 +50,10 @@ export interface Widget {
   site?: SiteKey // optional per-widget site override ('inherit' = use global)
   host?: string // optional per-widget host override
   excludeSelfReferrals?: boolean
+  // Marked by the user as one of this page's default charts. "Restore default charts"
+  // keeps the marked charts and drops the rest (falling back to the factory set when
+  // nothing is marked). Undefined/false = not a default.
+  isDefault?: boolean
   // Full per-chart filter override. When set, this chart ignores the global
   // filter bar and uses these instead. Undefined = follow the global filter.
   filters?: GlobalFilters | null
