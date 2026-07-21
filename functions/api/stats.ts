@@ -212,10 +212,21 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ query }),
+      // Cap the upstream call. Without this, a stalled GraphQL Analytics API leaves the
+      // Function hanging until the platform kills it — surfacing as a Cloudflare HTML 502
+      // page instead of a clean error the dashboard can show (and retry past).
+      signal: AbortSignal.timeout(20000),
     })
+    // A non-2xx from the API is often an HTML error page, which would make res.json()
+    // throw an opaque parse error — read it as text and report the status instead.
+    if (!res.ok) {
+      const body = (await res.text().catch(() => '')).slice(0, 200)
+      return json({ error: `upstream ${res.status}`, detail: body }, 502)
+    }
     payload = await res.json()
   } catch (e) {
-    return json({ error: 'upstream fetch failed', detail: String(e) }, 502)
+    const timedOut = e instanceof Error && e.name === 'TimeoutError'
+    return json({ error: timedOut ? 'upstream timed out' : 'upstream fetch failed', detail: String(e) }, 502)
   }
 
   if (payload.errors) {
