@@ -51,8 +51,11 @@ never drift from the code.
 
 ## Deploy
 
-Manual `wrangler` deploy — the analytics token comes from a local, **gitignored**
-file (never commit it). See the [Deploy](README.md#deploy) and
+Merges to `main` deploy automatically via GitHub Actions
+([`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)), using the
+`CLOUDFLARE_API_TOKEN` repo secret. A manual `wrangler` deploy is still available
+locally — its analytics token comes from a local, **gitignored** file (never commit
+it). See the [Deploy](README.md#deploy) and
 [Local development](README.md#local-development) sections of the README.
 
 ## Not yet set up (optional follow-ups)

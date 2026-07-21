@@ -1,0 +1,39 @@
+name: Deploy
+
+# Build and publish to Cloudflare Pages whenever main advances (i.e. on merge),
+# plus a manual "Run workflow" button. Runs entirely on GitHub's runners — no local
+# machine or local token involved.
+#
+# One-time setup: add a repository secret CLOUDFLARE_API_TOKEN (Settings → Secrets and
+# variables → Actions). Mint it at Cloudflare → My Profile → API Tokens with the
+# "Cloudflare Pages: Edit" permission on this account. The runtime analytics secret
+# (CF_ANALYTICS_TOKEN) is a Pages project secret and is NOT needed here — deploys keep
+# the project's existing secrets.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One deploy at a time; a newer push supersedes an in-flight run.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Publish to Cloudflare Pages
+        run: npx wrangler pages deploy dist --project-name=gss-stats --branch=main
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: a32bba62c77df5e8f6bd33d04478ec34
