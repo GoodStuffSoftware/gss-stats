@@ -26,6 +26,15 @@ function onCanvasClick(e: MouseEvent) {
   if (!els.length) return
   e.stopPropagation() // keep this click from reaching the document (which closes the drill menu)
   emit('point', { index: els[0].index, datasetIndex: els[0].datasetIndex, x: e.clientX, y: e.clientY })
+  // Dismiss the hover tooltip so it doesn't sit under/overlap the drill-down menu that
+  // opens at this same spot — especially on touch, where a tap both shows the tooltip and
+  // opens the menu at once.
+  c.setActiveElements([])
+  ;(c.tooltip as { setActiveElements?: (e: unknown[], p: { x: number; y: number }) => void } | undefined)?.setActiveElements(
+    [],
+    { x: 0, y: 0 },
+  )
+  c.update('none')
 }
 
 onMounted(() => {
