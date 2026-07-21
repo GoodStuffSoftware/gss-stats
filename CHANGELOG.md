@@ -7,6 +7,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **Drill-down menu no longer collides with the chart tooltip.** Clicking (or tapping) a
+  chart value now dismisses the hover tooltip as the "Open as filtered page" menu opens, so
+  the two no longer overlap — most noticeable on touch, where a tap triggered both at once.
 - **Best Sudoku launch page is now fully beacon-backed.** When built by duplicating the
   RUM "Overview" page, half its charts queried Cloudflare RUM — which has almost no Best
   Sudoku data (the site is behind Access; the beacon is the real source) — and rendered
