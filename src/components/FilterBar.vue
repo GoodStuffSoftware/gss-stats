@@ -176,6 +176,14 @@ function onSlider() {
   commit()
   syncRange()
 }
+// Fine-tune by exactly one step — drag gets you close, these land it (essential on touch,
+// where each of the 53 steps is only a few pixels of the slider).
+function nudgeRange(delta: number) {
+  const next = Math.max(0, Math.min(RANGE_STEPS.length - 1, sliderIdx.value + delta))
+  if (next === sliderIdx.value) return
+  sliderIdx.value = next
+  onSlider()
+}
 
 // ── Calendar popover ──────────────────────────────────────────────────────────
 const calOpen = ref(false)
@@ -287,6 +295,7 @@ onBeforeUnmount(() => window.removeEventListener('focus', readMuteCookie))
           <div v-if="sliderOpen" class="slider-pop" @click.stop>
             <div class="slider-cur">Last {{ RANGE_STEPS[sliderIdx]?.label ?? '7d' }}</div>
             <div class="slider-body">
+              <button class="slider-step" title="Longer range" @click.stop="nudgeRange(1)">+</button>
               <span class="slider-cap">30d</span>
               <input
                 class="range-slider"
@@ -298,6 +307,7 @@ onBeforeUnmount(() => window.removeEventListener('focus', readMuteCookie))
                 @change="onSlider"
               />
               <span class="slider-cap">1h</span>
+              <button class="slider-step" title="Shorter range" @click.stop="nudgeRange(-1)">−</button>
             </div>
           </div>
         </div>
@@ -481,10 +491,33 @@ onBeforeUnmount(() => window.removeEventListener('focus', readMuteCookie))
 .range-slider {
   writing-mode: vertical-lr;
   direction: rtl;
-  width: 24px;
-  height: 190px;
+  width: 30px;
+  height: 210px;
   accent-color: rgb(var(--amber));
   cursor: pointer;
+  touch-action: none; /* let a vertical drag move the thumb instead of scrolling the page */
+}
+.slider-step {
+  width: 40px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(var(--line-2));
+  background: rgb(var(--surface));
+  color: rgb(var(--ink));
+  border-radius: 9px;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.slider-step:hover {
+  border-color: rgb(var(--amber));
+}
+.slider-step:active {
+  background: rgb(var(--sunken));
 }
 
 /* Sync-range toggle — share the date window across every page. */
