@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **RUM charts fail gracefully when the analytics API stalls.** The RUM endpoint now bounds
+  the Cloudflare GraphQL call with a timeout and reports a clean, retryable error instead of
+  hanging until the platform returns a raw 502 page.
+
 ## [0.2.0] — 2026-07-21
 
 ### Fixed
