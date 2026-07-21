@@ -12,6 +12,9 @@ All notable changes to **gss-stats** are documented here. The format follows
   it with the button (now a zoom-out) or by clicking outside; Esc works too.
 
 ### Fixed
+- **Range slider is usable on touch.** The date-range slider now has − / + stepper buttons
+  to nudge one step at a time, plus a taller slider and a larger thumb, so you can land on
+  the exact span instead of fighting the tiny drag steps on a phone.
 - **Consistent chart colors.** A value now keeps the same color across every chart and page
   — "desktop"/"mobile" and "new"/"returning" no longer swap colors based on sort order.
   Region and country charts switch to a single brand-hue gradient (most opaque = highest,
