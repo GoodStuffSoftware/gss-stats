@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-07-21
+
 ### Fixed
 - **Drill-down menu no longer collides with the chart tooltip.** Clicking (or tapping) a
   chart value now dismisses the hover tooltip as the "Open as filtered page" menu opens, so
@@ -32,6 +34,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **Your dashboard settings now actually persist.** A load-time bug discarded every saved
   configuration and silently reverted the dashboard to defaults on each visit — so filter,
   layout, and page changes never survived a reload. Your saved state is durable again.
+- **First page load no longer shows briefly inflated numbers.** RUM charts now wait
+  for the real-host allow-list before their first fetch, so dev/preview traffic is
+  never counted — not even for the split second before the site list loads.
 
 ### Added
 - **Pin your own default charts.** Each chart has a "Set as default" option (★) in its ⋯
@@ -55,11 +60,6 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **"Referrer path" dimension** (beacon dataset) — chart the referrer's path, e.g. which
   subreddit sent a visit, alongside the referrer host; click-to-drill-down works on it too
   (drill a referrer, then see its subreddit breakdown).
-
-### Fixed
-- **First page load no longer shows briefly inflated numbers.** RUM charts now wait
-  for the real-host allow-list before their first fetch, so dev/preview traffic is
-  never counted — not even for the split second before the site list loads.
 
 ## [0.1.0] — 2026-07-05
 
