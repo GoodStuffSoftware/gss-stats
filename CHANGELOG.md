@@ -7,11 +7,13 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Added
-- **Zoom any chart.** An expand button on each chart opens it in a centered, animated
-  overlay that scales up to fill most of the screen (same aspect ratio, just bigger). Close
-  it with the button (now a zoom-out) or by clicking outside; Esc works too.
+- **Zoom any chart.** An expand button grows the chart itself — same element, same aspect
+  ratio — from its spot to a centered panel filling most of the screen, animated both ways.
+  Close with the button (now a zoom-out), by clicking outside, or Esc.
 
 ### Fixed
+- **The drill-down menu stays with its chart.** "Open as filtered page" is now anchored to
+  the page, so scrolling no longer leaves it stranded over a different chart.
 - **Range slider is usable on touch.** The date-range slider now has − / + stepper buttons
   to nudge one step at a time, plus a taller slider and a larger thumb, so you can land on
   the exact span instead of fighting the tiny drag steps on a phone.
@@ -20,8 +22,8 @@ All notable changes to **gss-stats** are documented here. The format follows
   Region and country charts switch to a single brand-hue gradient (most opaque = highest,
   fading down the list) instead of a rainbow.
 - **Tooltips work on touch.** Tapping a data point on mobile now shows its tooltip: line
-  charts get a larger tap target and lead space at each end, and a tap that doesn't drill
-  keeps its tooltip up instead of clearing it.
+  charts get a much larger tap target, and a tap that doesn't drill keeps its tooltip up
+  instead of clearing it.
 - **RUM charts fail gracefully when the analytics API stalls.** The RUM endpoint now bounds
   the Cloudflare GraphQL call with a timeout and reports a clean, retryable error instead of
   hanging until the platform returns a raw 502 page.

@@ -203,7 +203,9 @@ interface DrillPayload {
 }
 const drillMenu = ref<DrillPayload | null>(null)
 function onDrill(p: DrillPayload) {
-  drillMenu.value = p
+  // Convert the click's viewport coords to document (page) coords; the menu is positioned
+  // absolutely, so it scrolls with its chart instead of staying pinned to the viewport.
+  drillMenu.value = { ...p, x: p.x + window.scrollX, y: p.y + window.scrollY }
 }
 function closeDrill() {
   drillMenu.value = null
@@ -322,18 +324,20 @@ function toggleDark() {
       @remove="onEditorRemove"
     />
 
-    <div
-      v-if="drillMenu"
-      class="drill-menu"
-      :style="{ top: drillMenu.y + 'px', left: drillMenu.x + 'px' }"
-      @click.stop
-    >
-      <div class="drill-head">
-        <span class="drill-dim">{{ drillMenu.dimension }}</span>
-        <span class="drill-val">{{ drillMenu.label }}</span>
+    <Teleport to="body">
+      <div
+        v-if="drillMenu"
+        class="drill-menu"
+        :style="{ top: drillMenu.y + 'px', left: drillMenu.x + 'px' }"
+        @click.stop
+      >
+        <div class="drill-head">
+          <span class="drill-dim">{{ drillMenu.dimension }}</span>
+          <span class="drill-val">{{ drillMenu.label }}</span>
+        </div>
+        <button class="drill-act" @click="openFilteredPage">↳ Open as filtered page</button>
       </div>
-      <button class="drill-act" @click="openFilteredPage">↳ Open as filtered page</button>
-    </div>
+    </Teleport>
 
     <footer class="foot overline">
       {{ activePage.name }} · humans only, bots excluded · {{ rangeText }}
@@ -351,7 +355,7 @@ function toggleDark() {
   gap: 14px;
 }
 .drill-menu {
-  position: fixed;
+  position: absolute;
   z-index: 60;
   min-width: 190px;
   max-width: 260px;
