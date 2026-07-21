@@ -369,11 +369,8 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
   }
 
   if (widget.type === 'line' || widget.type === 'area') {
-    // offset:true keeps the first/last points off the very edges (lead space either end),
-    // and index/intersect:false makes the tooltip appear on a tap anywhere along the line —
-    // essential on touch, where hitting a 2px point precisely is impractical.
-    const scales = baseScales()
-    ;(scales.x as Record<string, unknown>).offset = true
+    // index/intersect:false + a wide point hit radius makes the tooltip appear on a tap
+    // anywhere along the line — essential on touch, where hitting a 2px point is impractical.
     return {
       type: 'line',
       data: {
@@ -398,7 +395,7 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
         maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
         plugins: noLegend,
-        scales,
+        scales: baseScales(),
       },
     }
   }
