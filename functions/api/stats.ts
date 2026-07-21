@@ -112,6 +112,7 @@ function weekAgoUTC(): string {
 }
 
 export const onRequestPost: PagesFunction<Env> = async (ctx) => {
+ try {
   let body: ReqBody
   try {
     body = (await ctx.request.json()) as ReqBody
@@ -286,6 +287,11 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     totals,
     meta: { site, host, since, until, dimensions: dims, metric },
   })
+ } catch (e) {
+  // Belt-and-suspenders: any unhandled error becomes a readable JSON 500 instead of a raw
+  // Cloudflare HTML 502, so the dashboard shows the real message and we can see what failed.
+  return json({ error: 'stats handler error', detail: e instanceof Error ? `${e.name}: ${e.message}` : String(e) }, 500)
+ }
 }
 
 // Friendly GET for sanity checks / health.
