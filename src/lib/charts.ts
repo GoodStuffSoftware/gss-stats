@@ -22,6 +22,39 @@ const INK = '#1A1715'
 const INK_3 = '#8A8278'
 const LINE = '#E7E2D7'
 
+// ── Consistent series colors ────────────────────────────────────────────────
+// A known categorical value gets a FIXED color so it reads the same on every chart and
+// page (e.g. "mobile" is always the same swatch, "returning" always the same), instead of
+// being colored by its sort position. Keyed by a normalized dimension → value → color.
+const STABLE_COLORS: Record<string, Record<string, string>> = {
+  device: { desktop: PALETTE[0], mobile: PALETTE[1], tablet: PALETTE[2], tv: PALETTE[5], bot: PALETTE[7] },
+  visitor: { returning: PALETTE[0], new: PALETTE[1] },
+}
+// Dimensions that read as an ordered magnitude rather than distinct categories → a single
+// brand-hue ramp (most opaque = highest, fading down the sorted list) instead of a rainbow.
+const GRADIENT_DIMS = new Set(['region', 'country', 'countryName'])
+const RAMP_RGB = '224,114,44' // brand amber (PALETTE[0]) as rgb, for rgba() opacity ramps
+
+function normDimKey(dim: string): string {
+  return dim === 'deviceType' ? 'device' : dim
+}
+function stableColor(dim: string, rawValue: string): string | null {
+  const map = STABLE_COLORS[normDimKey(dim)]
+  return map ? (map[String(rawValue).toLowerCase()] ?? null) : null
+}
+function rampColor(i: number, total: number): string {
+  const t = total <= 1 ? 0 : i / (total - 1) // rows arrive sorted desc → i=0 is the highest
+  const alpha = 1 - t * 0.72 // 1.0 at the top, ~0.28 at the bottom
+  return `rgba(${RAMP_RGB},${alpha.toFixed(3)})`
+}
+// Background colors for a single-dimension series, computed from the RAW values (not the
+// display labels, which may be re-cased/renamed). Gradient dims ramp; known categoricals
+// use their fixed color; everything else falls back to the positional palette.
+export function seriesColors(dim: string, rawValues: string[]): string[] {
+  if (GRADIENT_DIMS.has(dim)) return rawValues.map((_, i) => rampColor(i, rawValues.length))
+  return rawValues.map((v, i) => stableColor(dim, v) ?? PALETTE[i % PALETTE.length])
+}
+
 // ── Color shading (for nested-ring charts: one base hue per primary, shaded per breakdown) ──
 function hexToRgb(hex: string): [number, number, number] {
   const h = hex.replace('#', '')
@@ -317,13 +350,15 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
   // ── Single-dimension series ─────────────────────────────────────────────────
   const labels = resp.rows.map((r) => formatKey(dim, r.key[dim] ?? ''))
   const values = resp.rows.map((r) => metricValue(r, m))
+  const rawValues = resp.rows.map((r) => String(r.key[dim] ?? ''))
+  const colors = seriesColors(dim, rawValues)
 
   if (widget.type === 'doughnut' || widget.type === 'pie' || widget.type === 'nestedDoughnut') {
     return {
       type: widget.type === 'pie' ? 'pie' : 'doughnut',
       data: {
         labels,
-        datasets: [{ data: values, backgroundColor: labels.map((_, i) => PALETTE[i % PALETTE.length]), borderWidth: 2, borderColor: isDark() ? '#211C18' : '#FFFFFF' }],
+        datasets: [{ data: values, backgroundColor: colors, borderWidth: 2, borderColor: isDark() ? '#211C18' : '#FFFFFF' }],
       },
       options: {
         responsive: true,
@@ -334,6 +369,11 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
   }
 
   if (widget.type === 'line' || widget.type === 'area') {
+    // offset:true keeps the first/last points off the very edges (lead space either end),
+    // and index/intersect:false makes the tooltip appear on a tap anywhere along the line —
+    // essential on touch, where hitting a 2px point precisely is impractical.
+    const scales = baseScales()
+    ;(scales.x as Record<string, unknown>).offset = true
     return {
       type: 'line',
       data: {
@@ -347,12 +387,19 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
             fill: widget.type === 'area',
             tension: 0.3,
             pointRadius: 2,
+            pointHitRadius: 24,
             pointBackgroundColor: PALETTE[0],
             borderWidth: 2,
           },
         ],
       },
-      options: { responsive: true, maintainAspectRatio: false, plugins: noLegend, scales: baseScales() },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: noLegend,
+        scales,
+      },
     }
   }
 
@@ -362,12 +409,14 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
     type: 'bar',
     data: {
       labels,
-      datasets: [{ label: m, data: values, backgroundColor: labels.map((_, i) => PALETTE[i % PALETTE.length]), borderRadius: 4 }],
+      datasets: [{ label: m, data: values, backgroundColor: colors, borderRadius: 4 }],
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       indexAxis: horizontal ? 'y' : 'x',
+      // Show a bar's tooltip on a tap near it (not only a pixel-perfect hit) — touch-friendly.
+      interaction: { mode: 'index', intersect: false },
       plugins: noLegend,
       scales: baseScales(),
     },

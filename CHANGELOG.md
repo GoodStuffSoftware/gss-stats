@@ -6,7 +6,19 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Zoom any chart.** An expand button on each chart opens it in a centered, animated
+  overlay that scales up to fill most of the screen (same aspect ratio, just bigger). Close
+  it with the button (now a zoom-out) or by clicking outside; Esc works too.
+
 ### Fixed
+- **Consistent chart colors.** A value now keeps the same color across every chart and page
+  — "desktop"/"mobile" and "new"/"returning" no longer swap colors based on sort order.
+  Region and country charts switch to a single brand-hue gradient (most opaque = highest,
+  fading down the list) instead of a rainbow.
+- **Tooltips work on touch.** Tapping a data point on mobile now shows its tooltip: line
+  charts get a larger tap target and lead space at each end, and a tap that doesn't drill
+  keeps its tooltip up instead of clearing it.
 - **RUM charts fail gracefully when the analytics API stalls.** The RUM endpoint now bounds
   the Cloudflare GraphQL call with a timeout and reports a clean, retryable error instead of
   hanging until the platform returns a raw 502 page.

@@ -26,9 +26,15 @@ function onCanvasClick(e: MouseEvent) {
   if (!els.length) return
   e.stopPropagation() // keep this click from reaching the document (which closes the drill menu)
   emit('point', { index: els[0].index, datasetIndex: els[0].datasetIndex, x: e.clientX, y: e.clientY })
-  // Dismiss the hover tooltip so it doesn't sit under/overlap the drill-down menu that
-  // opens at this same spot — especially on touch, where a tap both shows the tooltip and
-  // opens the menu at once.
+}
+
+// Dismiss the hover tooltip + highlight. The parent calls this only when a drill-down menu
+// actually opens at the tap spot, so the two don't overlap — while taps that DON'T drill
+// (e.g. a date point) keep their tooltip visible, which is the only way to read a value on
+// touch.
+function clearActive() {
+  const c = chart.value
+  if (!c) return
   c.setActiveElements([])
   ;(c.tooltip as { setActiveElements?: (e: unknown[], p: { x: number; y: number }) => void } | undefined)?.setActiveElements(
     [],
@@ -36,6 +42,7 @@ function onCanvasClick(e: MouseEvent) {
   )
   c.update('none')
 }
+defineExpose({ clearActive })
 
 onMounted(() => {
   render()
