@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, watch, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import type { Widget, GlobalFilters, StatsResponse } from '../types'
 import { fetchStats } from '../api'
 import { sitesLoaded } from '../sitesStore'
@@ -36,17 +36,59 @@ function onPoint(p: { index: number; datasetIndex: number; x: number; y: number 
   baseChartRef.value?.clearActive() // the drill menu opens here → dismiss the overlapping tooltip
 }
 
-// ── Zoom: expand this card to a centered, animated overlay (same aspect, just bigger) ──
+// ── Zoom: grow THIS card element to a centered spot and back, via a FLIP animation ──
+// (measure old rect → let it jump to the new layout → invert with a transform → transition
+// the transform away). So the real chart element animates, not a separate overlay.
 const zoomed = ref(false)
 const aspect = ref(1.6)
 const cardEl = ref<HTMLElement | null>(null)
-function toggleZoom(next: boolean = !zoomed.value) {
-  if (next) {
-    const r = cardEl.value?.getBoundingClientRect()
-    if (r && r.height > 0) aspect.value = r.width / r.height // preserve the card's ratio when scaled up
+
+// Animate the card from `fromRect` to wherever it now sits. Works both ways: on zoom-in
+// `fromRect` is the small grid slot (it grows to center); on zoom-out it's the big centered
+// box (it shrinks back into the grid).
+function flip(fromRect: DOMRect) {
+  const el = cardEl.value
+  if (!el) return
+  const to = el.getBoundingClientRect()
+  if (to.width === 0 || to.height === 0) return
+  const zoomingOut = !zoomed.value
+  if (zoomingOut) {
+    // Back in the (statically-positioned) grid — needs a stacking context to float above
+    // neighbors while it shrinks.
+    el.style.position = 'relative'
+    el.style.zIndex = '1001'
   }
-  zoomed.value = next
+  el.style.transformOrigin = 'top left'
+  el.style.transition = 'none'
+  el.style.transform = `translate(${fromRect.left - to.left}px, ${fromRect.top - to.top}px) scale(${fromRect.width / to.width}, ${fromRect.height / to.height})`
+  void el.offsetWidth // apply the inverted start state before transitioning
+  el.style.transition = 'transform 0.3s cubic-bezier(0.2, 0.8, 0.3, 1)'
+  el.style.transform = 'none'
+  let cleared = false
+  const done = () => {
+    if (cleared) return
+    cleared = true
+    el.style.transition = ''
+    el.style.transform = ''
+    el.style.transformOrigin = ''
+    el.style.position = ''
+    el.style.zIndex = ''
+    el.removeEventListener('transitionend', done)
+  }
+  el.addEventListener('transitionend', done)
+  setTimeout(done, 360) // fallback if transitionend doesn't fire
 }
+
+async function toggleZoom(next: boolean = !zoomed.value) {
+  const el = cardEl.value
+  if (!el || next === zoomed.value) return
+  const from = el.getBoundingClientRect()
+  if (next && from.height > 0) aspect.value = from.width / from.height // keep the card's ratio
+  zoomed.value = next
+  await nextTick()
+  flip(from)
+}
+
 function onKey(e: KeyboardEvent) {
   if (e.key === 'Escape' && zoomed.value) toggleZoom(false)
 }
@@ -182,7 +224,8 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
 </script>
 
 <template>
-  <div ref="cardEl" class="chart-card">
+  <Teleport to="body" :disabled="!zoomed">
+    <div ref="cardEl" class="chart-card" :class="{ zoomed }" :style="zoomed ? { '--ar': aspect } : undefined">
     <header class="card-head">
       <div class="title-wrap">
         <span v-if="widget.isDefault" class="pin" title="A default chart on this page — kept when you restore defaults">★</span>
@@ -203,9 +246,12 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
             <path d="M1.5 2.5h13l-5 6v4.2l-3 1.5V8.5z" fill="currentColor" />
           </svg>
         </button>
-        <button class="btn-ghost icon" title="Zoom in" @click.stop="toggleZoom(true)">
-          <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+        <button class="btn-ghost icon" :title="zoomed ? 'Zoom out' : 'Zoom in'" @click.stop="toggleZoom()">
+          <svg v-if="!zoomed" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
             <path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <svg v-else viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+            <path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
         </button>
         <button class="btn-ghost icon" title="Reload" @click.stop="load">↻</button>
@@ -270,53 +316,14 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
         </div>
       </div>
     </Teleport>
+    </div>
+  </Teleport>
 
-    <!-- Zoom overlay: the same chart, scaled up to a centered panel (same aspect ratio). -->
-    <Teleport to="body">
-      <Transition name="zoom">
-        <div v-if="zoomed" class="zoom-layer" @click.self="toggleZoom(false)">
-          <div class="zoom-panel" :style="{ '--ar': aspect }">
-            <header class="card-head">
-              <div class="title-wrap">
-                <span class="title" :title="widget.title">{{ widget.title }}</span>
-                <span v-if="overrideSummary" class="ovr">· {{ overrideSummary }}</span>
-              </div>
-              <div class="head-actions">
-                <button class="btn-ghost icon" title="Zoom out" @click="toggleZoom(false)">
-                  <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-                    <path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
-                  </svg>
-                </button>
-              </div>
-            </header>
-            <div class="card-body">
-              <div v-if="loading" class="state mono">Loading…</div>
-              <div v-else-if="error" class="state error mono">{{ error }}</div>
-              <div v-else-if="isEmpty" class="state mono">No data in range</div>
-              <div v-else-if="widget.type === 'stat'" class="stat">
-                <div class="stat-num">{{ fmt(statValue) }}</div>
-                <div class="stat-label overline">{{ widget.metric }}</div>
-                <div class="stat-sub">{{ fmt(statOther) }} {{ statOtherLabel }}</div>
-              </div>
-              <div v-else-if="widget.type === 'table'" class="table-wrap">
-                <table>
-                  <tbody>
-                    <tr v-for="(r, idx) in tableRows" :key="idx">
-                      <td class="t-label" :title="r.label">{{ r.label }}</td>
-                      <td class="t-bar"><span class="bar" :style="{ width: (r.value / tableMax) * 100 + '%' }"></span></td>
-                      <td class="t-val mono">{{ fmt(r.value) }}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-              <WorldMap v-else-if="widget.type === 'map'" :data="data" />
-              <BaseChart v-else-if="chartConfig" :config="chartConfig" />
-            </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
-  </div>
+  <Teleport to="body">
+    <Transition name="fade">
+      <div v-if="zoomed" class="zoom-backdrop" @click="toggleZoom(false)"></div>
+    </Transition>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -520,54 +527,33 @@ td {
   position: fixed;
 }
 
-/* ── Zoom overlay ─────────────────────────────────────────────────────────── */
-.zoom-layer {
+/* ── Zoom: the card element itself becomes a centered, enlarged panel (JS FLIP-animates
+   it from/to its grid slot). Same aspect ratio (--ar = w/h), scaled to most of the screen;
+   width is chosen so height (= width / ar) never exceeds ~86vh. ── */
+.chart-card.zoomed {
   position: fixed;
   inset: 0;
-  z-index: 1000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-  background: rgb(0 0 0 / 0.55);
-}
-.zoom-panel {
-  /* Same aspect ratio as the source card (--ar = w/h), scaled up to fill most of the
-     screen. width is chosen so height (= width / ar) never exceeds ~86vh. */
+  margin: auto; /* centers a fixed element that has an explicit width + height */
   width: min(92vw, calc(86vh * var(--ar, 1.6)));
   aspect-ratio: var(--ar, 1.6);
   max-height: 86vh;
-  display: flex;
-  flex-direction: column;
-  background: rgb(var(--surface));
+  z-index: 1001;
   border: 2px solid rgb(var(--line-2));
   border-radius: 16px;
   box-shadow: 0 30px 80px rgb(0 0 0 / 0.4);
-  overflow: hidden;
 }
-/* Backdrop fades; the panel scales up/down — both directions animated. */
-.zoom-enter-active,
-.zoom-leave-active {
-  transition: opacity 0.22s ease;
+.zoom-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgb(0 0 0 / 0.55);
 }
-.zoom-enter-from,
-.zoom-leave-to {
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
   opacity: 0;
-}
-.zoom-enter-active .zoom-panel,
-.zoom-leave-active .zoom-panel {
-  transition: transform 0.24s cubic-bezier(0.2, 0.8, 0.3, 1);
-}
-.zoom-enter-from .zoom-panel,
-.zoom-leave-to .zoom-panel {
-  transform: scale(0.9);
-}
-@media (prefers-reduced-motion: reduce) {
-  .zoom-enter-active,
-  .zoom-leave-active,
-  .zoom-enter-active .zoom-panel,
-  .zoom-leave-active .zoom-panel {
-    transition: none;
-  }
 }
 </style>
