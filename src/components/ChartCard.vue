@@ -6,6 +6,7 @@ import { sitesLoaded } from '../sitesStore'
 import { checkSessionExpired, isNetworkError } from '../session'
 import { buildChartConfig, formatKey, metricValue } from '../lib/charts'
 import { rangeLabel } from '../lib/range'
+import { isSiteDim, semanticKey } from '../lib/drill'
 import BaseChart from './charts/BaseChart.vue'
 import WorldMap from './charts/WorldMap.vue'
 import FilterPopover from './FilterPopover.vue'
@@ -18,22 +19,39 @@ const emit = defineEmits<{
   drill: [{ dimension: string; dataset: 'geo' | 'rum'; value: string; label: string; x: number; y: number }]
 }>()
 
-// A click on a chart element → hand the parent the raw dimension value so it can
-// offer to open a page filtered to it. v1: single-dimension charts only.
+const baseChartRef = ref<{ clearActive: () => void } | null>(null)
+
+// A click on a chart element → hand the parent the raw dimension value so it can offer to
+// open a page filtered to it. Single-dimension charts only, and only for dimensions that
+// are actually drillable — tapping a non-drillable point (e.g. a date) leaves its tooltip
+// up so the value stays readable, which is the only way to read it on touch.
 function onPoint(p: { index: number; datasetIndex: number; x: number; y: number }) {
   const dim = props.widget.dimension
   if (!dim || props.widget.breakdown) return
   const value = data.value?.rows?.[p.index]?.key?.[dim]
   if (value == null || value === '') return
-  emit('drill', {
-    dimension: dim,
-    dataset: props.widget.dataset === 'geo' ? 'geo' : 'rum',
-    value: String(value),
-    label: formatKey(dim, String(value)),
-    x: p.x,
-    y: p.y,
-  })
+  const dataset = props.widget.dataset === 'geo' ? 'geo' : 'rum'
+  if (!isSiteDim(dim) && semanticKey(dim, dataset) === null) return // not drillable → keep tooltip
+  emit('drill', { dimension: dim, dataset, value: String(value), label: formatKey(dim, String(value)), x: p.x, y: p.y })
+  baseChartRef.value?.clearActive() // the drill menu opens here → dismiss the overlapping tooltip
 }
+
+// ── Zoom: expand this card to a centered, animated overlay (same aspect, just bigger) ──
+const zoomed = ref(false)
+const aspect = ref(1.6)
+const cardEl = ref<HTMLElement | null>(null)
+function toggleZoom(next: boolean = !zoomed.value) {
+  if (next) {
+    const r = cardEl.value?.getBoundingClientRect()
+    if (r && r.height > 0) aspect.value = r.width / r.height // preserve the card's ratio when scaled up
+  }
+  zoomed.value = next
+}
+function onKey(e: KeyboardEvent) {
+  if (e.key === 'Escape' && zoomed.value) toggleZoom(false)
+}
+onMounted(() => document.addEventListener('keydown', onKey))
+onBeforeUnmount(() => document.removeEventListener('keydown', onKey))
 
 const data = ref<StatsResponse | null>(null)
 const loading = ref(false)
@@ -164,7 +182,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
 </script>
 
 <template>
-  <div class="chart-card">
+  <div ref="cardEl" class="chart-card">
     <header class="card-head">
       <div class="title-wrap">
         <span v-if="widget.isDefault" class="pin" title="A default chart on this page — kept when you restore defaults">★</span>
@@ -183,6 +201,11 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
         >
           <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
             <path d="M1.5 2.5h13l-5 6v4.2l-3 1.5V8.5z" fill="currentColor" />
+          </svg>
+        </button>
+        <button class="btn-ghost icon" title="Zoom in" @click.stop="toggleZoom(true)">
+          <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+            <path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
         </button>
         <button class="btn-ghost icon" title="Reload" @click.stop="load">↻</button>
@@ -231,7 +254,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
       <WorldMap v-else-if="widget.type === 'map'" :data="data" />
 
       <!-- Chart.js chart -->
-      <BaseChart v-else-if="chartConfig" :config="chartConfig" @point="onPoint" />
+      <BaseChart v-else-if="chartConfig" ref="baseChartRef" :config="chartConfig" @point="onPoint" />
     </div>
 
     <Teleport to="body">
@@ -246,6 +269,52 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
           />
         </div>
       </div>
+    </Teleport>
+
+    <!-- Zoom overlay: the same chart, scaled up to a centered panel (same aspect ratio). -->
+    <Teleport to="body">
+      <Transition name="zoom">
+        <div v-if="zoomed" class="zoom-layer" @click.self="toggleZoom(false)">
+          <div class="zoom-panel" :style="{ '--ar': aspect }">
+            <header class="card-head">
+              <div class="title-wrap">
+                <span class="title" :title="widget.title">{{ widget.title }}</span>
+                <span v-if="overrideSummary" class="ovr">· {{ overrideSummary }}</span>
+              </div>
+              <div class="head-actions">
+                <button class="btn-ghost icon" title="Zoom out" @click="toggleZoom(false)">
+                  <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                    <path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                </button>
+              </div>
+            </header>
+            <div class="card-body">
+              <div v-if="loading" class="state mono">Loading…</div>
+              <div v-else-if="error" class="state error mono">{{ error }}</div>
+              <div v-else-if="isEmpty" class="state mono">No data in range</div>
+              <div v-else-if="widget.type === 'stat'" class="stat">
+                <div class="stat-num">{{ fmt(statValue) }}</div>
+                <div class="stat-label overline">{{ widget.metric }}</div>
+                <div class="stat-sub">{{ fmt(statOther) }} {{ statOtherLabel }}</div>
+              </div>
+              <div v-else-if="widget.type === 'table'" class="table-wrap">
+                <table>
+                  <tbody>
+                    <tr v-for="(r, idx) in tableRows" :key="idx">
+                      <td class="t-label" :title="r.label">{{ r.label }}</td>
+                      <td class="t-bar"><span class="bar" :style="{ width: (r.value / tableMax) * 100 + '%' }"></span></td>
+                      <td class="t-val mono">{{ fmt(r.value) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <WorldMap v-else-if="widget.type === 'map'" :data="data" />
+              <BaseChart v-else-if="chartConfig" :config="chartConfig" />
+            </div>
+          </div>
+        </div>
+      </Transition>
     </Teleport>
   </div>
 </template>
@@ -449,5 +518,56 @@ td {
 }
 .fp-anchor {
   position: fixed;
+}
+
+/* ── Zoom overlay ─────────────────────────────────────────────────────────── */
+.zoom-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgb(0 0 0 / 0.55);
+}
+.zoom-panel {
+  /* Same aspect ratio as the source card (--ar = w/h), scaled up to fill most of the
+     screen. width is chosen so height (= width / ar) never exceeds ~86vh. */
+  width: min(92vw, calc(86vh * var(--ar, 1.6)));
+  aspect-ratio: var(--ar, 1.6);
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  background: rgb(var(--surface));
+  border: 2px solid rgb(var(--line-2));
+  border-radius: 16px;
+  box-shadow: 0 30px 80px rgb(0 0 0 / 0.4);
+  overflow: hidden;
+}
+/* Backdrop fades; the panel scales up/down — both directions animated. */
+.zoom-enter-active,
+.zoom-leave-active {
+  transition: opacity 0.22s ease;
+}
+.zoom-enter-from,
+.zoom-leave-to {
+  opacity: 0;
+}
+.zoom-enter-active .zoom-panel,
+.zoom-leave-active .zoom-panel {
+  transition: transform 0.24s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+.zoom-enter-from .zoom-panel,
+.zoom-leave-to .zoom-panel {
+  transform: scale(0.9);
+}
+@media (prefers-reduced-motion: reduce) {
+  .zoom-enter-active,
+  .zoom-leave-active,
+  .zoom-enter-active .zoom-panel,
+  .zoom-leave-active .zoom-panel {
+    transition: none;
+  }
 }
 </style>
