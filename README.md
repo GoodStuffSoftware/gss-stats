@@ -107,7 +107,13 @@ that dataset; the beacon adds a precise per-device/per-network opt-out.
 
 ## Deploy
 
-Manual `wrangler` deploy with the analytics token from a local, gitignored file:
+**On merge to `main`** — GitHub Actions ([`.github/workflows/deploy.yml`](.github/workflows/deploy.yml))
+builds and publishes to Cloudflare Pages automatically, on GitHub's runners (nothing local).
+One-time setup: add a repo secret **`CLOUDFLARE_API_TOKEN`** (Settings → Secrets and variables
+→ Actions) — a Cloudflare token with **Cloudflare Pages: Edit**. The runtime `CF_ANALYTICS_TOKEN`
+is a Pages *project* secret and isn't needed by the workflow (deploys keep existing secrets).
+
+**Manual** (local fallback / preview), with the token from a local, gitignored file:
 
 ```powershell
 $env:CLOUDFLARE_API_TOKEN = (Get-Content "<path>\cf-token.txt" -Raw).Trim()
