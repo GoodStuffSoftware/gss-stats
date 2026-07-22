@@ -12,6 +12,10 @@ All notable changes to **gss-stats** are documented here. The format follows
   Close with the button (now a zoom-out), by clicking outside, or Esc.
 
 ### Fixed
+- **"Sync all pages" no longer wipes a page's site filter.** It now shares only the date
+  range across pages; each page keeps its own site selection. Previously it also synced the
+  site filter, so changing a filter anywhere could overwrite a purpose-built page's sites
+  (e.g. Best Sudoku's beacon filter) and leave it stuck showing no data at any date.
 - **The drill-down menu stays with its chart.** "Open as filtered page" is now anchored to
   the page, so scrolling no longer leaves it stranded over a different chart.
 - **Range slider is usable on touch.** The date-range slider now has − / + stepper buttons
