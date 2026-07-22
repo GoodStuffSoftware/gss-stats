@@ -100,6 +100,7 @@ export function defaultBestSudokuLaunchWidgets(): Widget[] {
     gw({ id: 'bsk-region', title: 'By region / state', type: 'hbar', dimension: 'region', limit: 12, x: 0, y: 24, w: 6, h: 8 }),
     gw({ id: 'bsk-city', title: 'Top cities', type: 'hbar', dimension: 'city', limit: 12, x: 6, y: 24, w: 6, h: 8 }),
     gw({ id: 'bsk-path', title: 'Top screens / pages', type: 'hbar', dimension: 'path', limit: 12, x: 0, y: 32, w: 6, h: 8 }),
+    gw({ id: 'bsk-campaign', title: 'By subreddit (tagged link)', type: 'hbar', dimension: 'campaign', limit: 12, x: 6, y: 32, w: 6, h: 8 }),
     gw({ id: 'bsk-map', title: 'Visitor map', type: 'map', dimension: '', limit: 2000, x: 0, y: 40, w: 12, h: 9 }),
   ]
 }
