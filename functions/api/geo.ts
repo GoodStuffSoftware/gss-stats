@@ -14,6 +14,7 @@ interface Env {
 const GEO_DIMS = new Set([
   'country', 'region', 'city', 'postal', 'continent', 'timezone', 'colo', 'org',
   'referrer', 'refpath', 'path', 'site', 'device', 'browser', 'os', 'lang', 'visitor', 'date',
+  'campaign', 'source', 'medium', // utm campaign tags
 ])
 
 const json = (data: unknown, status = 200): Response =>
@@ -144,7 +145,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // that appears on the map also appears (as "(direct)"/"(none)") in the referrer,
   // subreddit, etc. charts. Dropping blanks made attribute charts look empty while the
   // location charts stayed full for the very same visits.
-  const emptyLabel = dim === 'referrer' ? '(direct)' : '(none)'
+  const emptyLabel =
+    dim === 'referrer' ? '(direct)' : dim === 'campaign' || dim === 'source' || dim === 'medium' ? '(untagged)' : '(none)'
   const col =
     dim === 'date'
       ? "date(ts/1000,'unixepoch')"
