@@ -9,6 +9,9 @@ export const DRILL_FIELDS: Record<string, { rum: string | null; geo: string | nu
   device: { rum: 'deviceType', geo: 'device' },
   referrer: { rum: 'refererHost', geo: 'referrer' },
   refpath: { rum: null, geo: 'refpath' }, // referrer path (e.g. /r/sudoku) — beacon-only
+  campaign: { rum: null, geo: 'campaign' }, // utm_campaign (e.g. r/sudoku) — beacon-only
+  source: { rum: null, geo: 'source' }, // utm_source — beacon-only
+  medium: { rum: null, geo: 'medium' }, // utm_medium — beacon-only
   path: { rum: 'requestPath', geo: 'path' },
   os: { rum: 'userAgentOS', geo: 'os' },
   browser: { rum: 'userAgentBrowser', geo: 'browser' },

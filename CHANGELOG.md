@@ -7,6 +7,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Campaign / subreddit attribution.** New beacon dimensions — **Campaign** (utm), Source,
+  and Medium — so links tagged per source (e.g. one `utm_campaign` per subreddit) are
+  attributed even when the referrer is stripped. The Best Sudoku launch page gains a "By
+  subreddit (tagged link)" chart; you can also group/drill any beacon chart by these.
+  (Requires the companion gss-beacon campaign-tags update + its one-time DB migration.)
 - **Zoom any chart.** An expand button grows the chart itself — same element, same aspect
   ratio — from its spot to a centered panel filling most of the screen, animated both ways.
   Close with the button (now a zoom-out), by clicking outside, or Esc.
