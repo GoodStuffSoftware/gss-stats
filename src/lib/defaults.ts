@@ -121,7 +121,7 @@ export function defaultBestSudokuLaunchPage(): DashboardPage {
 
 export function defaultConfig(): DashboardConfig {
   return {
-    version: 4,
+    version: 5,
     activePageId: 'default',
     pages: [defaultPage(), defaultBeaconPage(), defaultBestSudokuLaunchPage()],
   }
@@ -259,8 +259,21 @@ export function normalizeConfig(raw: any): DashboardConfig {
         p.filters.siteSel = [...BEST_SUDOKU_SITES]
       }
     }
+    // v5 migration: heal a launch page whose site filter was frozen to a tag that carries
+    // no data. The v4 pass (above) hard-set siteSel to BEST_SUDOKU_SITES, which briefly
+    // shipped as ['bestsudoku', 'bestsudoku-app'] — but the web build actually tags itself
+    // "bestsudoku-web" (all the traffic lives there), so a config migrated in that window
+    // got stuck filtering on the empty "bestsudoku" tag and every chart read "No data in
+    // range". Because v4 is version-gated it never re-ran to apply the corrected constant.
+    // Restore the real tag set whenever the data-bearing "bestsudoku-web" is missing.
+    if ((Number(raw.version) || 0) < 5) {
+      for (const p of pages) {
+        if (!isBestSudokuLaunchPage(p)) continue
+        if (!p.filters.siteSel.includes('bestsudoku-web')) p.filters.siteSel = [...BEST_SUDOKU_SITES]
+      }
+    }
     const activePageId = pages.some((p: DashboardPage) => p.id === raw.activePageId) ? raw.activePageId : pages[0].id
-    return { version: 4, activePageId, pages, syncRange: !!raw.syncRange }
+    return { version: 5, activePageId, pages, syncRange: !!raw.syncRange }
   }
   // v1 — single page; wrap as the default page
   if (raw && typeof raw === 'object' && Array.isArray(raw.widgets)) {
