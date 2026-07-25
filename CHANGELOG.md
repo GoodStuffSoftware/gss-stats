@@ -17,6 +17,10 @@ All notable changes to **gss-stats** are documented here. The format follows
   Close with the button (now a zoom-out), by clicking outside, or Esc.
 
 ### Fixed
+- **Best Sudoku launch page no longer stuck on "No data in range."** A prior migration froze
+  the page's site filter to the empty `bestsudoku` tag; all the web traffic is actually logged
+  under `bestsudoku-web`, so every chart read empty even for days with data. Saved dashboards
+  now self-heal to the real Best Sudoku tags on next load.
 - **"Sync all pages" no longer wipes a page's site filter.** It now shares only the date
   range across pages; each page keeps its own site selection. Previously it also synced the
   site filter, so changing a filter anywhere could overwrite a purpose-built page's sites
