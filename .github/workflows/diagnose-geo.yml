@@ -1,0 +1,33 @@
+name: Diagnose gss-geo (read-only)
+
+# Manually-triggered, READ-ONLY diagnostic. Prints Best Sudoku beacon counts by day
+# so we can see exactly which days have data. Requires CLOUDFLARE_API_TOKEN to include
+# Account · D1 · Read (or Edit). NOTE: on a public repo the run log is public — it only
+# contains aggregate visit counts; delete the run afterward if you'd rather not keep it.
+on:
+  workflow_dispatch:
+
+jobs:
+  query:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query gss-geo
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCT: a32bba62c77df5e8f6bd33d04478ec34
+          DB: fa0b2929-0086-479e-ae10-50509c34ebf8
+        run: |
+          q() {
+            echo ""
+            echo "===== $1 ====="
+            curl -sS -X POST \
+              "https://api.cloudflare.com/client/v4/accounts/$ACCT/d1/database/$DB/query" \
+              -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+              --data "{\"sql\": \"$2\"}" | python3 -m json.tool
+          }
+          q "Best Sudoku hits by day + site (newest first)" \
+            "SELECT date(ts/1000,'unixepoch') AS day, site, COUNT(*) AS c FROM hits WHERE site IN ('bestsudoku-web','bestsudoku','bestsudoku-app') GROUP BY day, site ORDER BY day DESC LIMIT 60"
+          q "Best Sudoku span per site (first/last hit)" \
+            "SELECT site, COUNT(*) AS c, datetime(MIN(ts)/1000,'unixepoch') AS first_hit, datetime(MAX(ts)/1000,'unixepoch') AS last_hit FROM hits WHERE site LIKE 'bestsudoku%' GROUP BY site"
+          q "All-site activity, latest 10 days" \
+            "SELECT date(ts/1000,'unixepoch') AS day, COUNT(*) AS c FROM hits GROUP BY day ORDER BY day DESC LIMIT 10"
