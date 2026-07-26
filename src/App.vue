@@ -2,7 +2,7 @@
 import { reactive, ref, watch, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import type { DashboardConfig, DashboardPage, Widget, GlobalFilters } from './types'
 import { defaultConfig, normalizeConfig, defaultWidgetsForPage, clonePage, cryptoId, isBestSudokuLaunchPage, BEST_SUDOKU_SITES, beaconizeWidget } from './lib/defaults'
-import { rangeLabel } from './lib/range'
+import { rangeLabel, ymdRangeToISO } from './lib/range'
 import { loadConfig, saveConfig } from './api'
 import { loadSites, sitesTree, tokenLabel } from './sitesStore'
 import { isSiteDim, semanticKey } from './lib/drill'
@@ -228,17 +228,27 @@ function openFilteredPage() {
   const p = drillMenu.value
   if (!p) return
   const clone = clonePage(activePage.value, 'Filtered')
-  if (isSiteDim(p.dimension)) {
-    // site drill → the site multi-select (filters both datasets consistently)
-    clone.filters.siteSel = [p.dataset === 'geo' ? tagToHost(p.value) : p.value]
+  if (p.dimension === 'date') {
+    // A day isn't a filterable field (see geo.ts) — turn it into an absolute one-day RANGE
+    // instead of a drill constraint. p.value is 'YYYY-MM-DD' (from date(ts/1000,'unixepoch')).
+    const { since, until } = ymdRangeToISO(p.value, p.value)
+    clone.filters.since = since
+    clone.filters.until = until
+    clone.filters.rangeRel = '' // absolute range — don't recompute a rolling window on load
+    clone.name = p.label
   } else {
-    const key = semanticKey(p.dimension, p.dataset)
-    if (key) {
-      const existing = (clone.filters.drill ?? []).filter((d) => d.key !== key)
-      clone.filters.drill = [...existing, { key, value: p.value, label: p.label }]
+    if (isSiteDim(p.dimension)) {
+      // site drill → the site multi-select (filters both datasets consistently)
+      clone.filters.siteSel = [p.dataset === 'geo' ? tagToHost(p.value) : p.value]
+    } else {
+      const key = semanticKey(p.dimension, p.dataset)
+      if (key) {
+        const existing = (clone.filters.drill ?? []).filter((d) => d.key !== key)
+        clone.filters.drill = [...existing, { key, value: p.value, label: p.label }]
+      }
     }
+    clone.name = drillTitle(clone.filters)
   }
-  clone.name = drillTitle(clone.filters)
   config.pages.push(clone)
   config.activePageId = clone.id
   closeDrill()
@@ -301,6 +311,7 @@ function toggleDark() {
         v-model:widgets="activePage.widgets"
         :filters="activePage.filters"
         :dark="dark"
+        :drill-open="drillMenu !== null"
         @edit="editChart"
         @remove="removeWidget"
         @duplicate="duplicateWidget"

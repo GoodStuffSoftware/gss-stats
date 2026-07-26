@@ -175,6 +175,68 @@ export function metricValue(row: { pageviews: number; visits: number }, metric: 
   return metric === 'visits' ? row.visits : row.pageviews
 }
 
+// Shared grouping for a nested doughnut: per-primary totals, primary×breakdown sums, and the
+// draw orders (primaries sorted by total desc; breakdown devOrder priority-then-alpha). Both
+// buildChartConfig (below) and nestedDoughnutClickValue (drill-down) key off this same
+// grouping so the two can never disagree on which arc holds which value.
+function nestedDoughnutGroups(widget: Widget, resp: StatsResponse) {
+  const dim = widget.dimension
+  const dimB = widget.breakdown!
+  const primaryTotals = new Map<string, number>()
+  const combo = new Map<string, number>() // `${p}||${b}` -> value
+  const deviceSet = new Set<string>()
+  for (const r of resp.rows) {
+    const p = r.key[dim] ?? ''
+    const b = r.key[dimB] ?? ''
+    const v = metricValue(r, widget.metric)
+    primaryTotals.set(p, (primaryTotals.get(p) ?? 0) + v)
+    combo.set(`${p}||${b}`, (combo.get(`${p}||${b}`) ?? 0) + v)
+    deviceSet.add(b)
+  }
+  const primaries = [...primaryTotals.entries()].sort((a, b) => b[1] - a[1]).map((e) => e[0])
+  const devOrder = [...deviceSet].sort(
+    (a, b) => (DEVICE_PRIORITY[a] ?? 9) - (DEVICE_PRIORITY[b] ?? 9) || a.localeCompare(b),
+  )
+  return { primaryTotals, combo, primaries, devOrder }
+}
+
+// The ordered (primary, breakdown) pairs that make up the OUTER ring: site-major so each
+// device arc nests under its site arc, skipping empty combos — the same order the outer-ring
+// arrays are built in below, so dataIndex i into dataset 0 maps to outerPairs[i].
+function nestedDoughnutOuterPairs(g: ReturnType<typeof nestedDoughnutGroups>): { p: string; b: string }[] {
+  const pairs: { p: string; b: string }[] = []
+  g.primaries.forEach((p) => {
+    g.devOrder.forEach((d) => {
+      if ((g.combo.get(`${p}||${d}`) ?? 0) > 0) pairs.push({ p, b: d })
+    })
+  })
+  return pairs
+}
+
+// Resolve a clicked nested-doughnut arc back to its dimension + value, for drill-down.
+// Chart.js draws dataset[0] as the outer ring (widget.breakdown, one arc per primary×breakdown
+// pair) and dataset[1] as the inner ring (widget.dimension, one arc per primary) — see the
+// nestedDoughnut branch of buildChartConfig. Returns null for a non-breakdown widget or an
+// index that doesn't resolve (e.g. stale click after a data refresh).
+export function nestedDoughnutClickValue(
+  widget: Widget,
+  resp: StatsResponse,
+  datasetIndex: number,
+  index: number,
+): { dimension: string; value: string } | null {
+  if (!widget.breakdown) return null
+  const g = nestedDoughnutGroups(widget, resp)
+  if (datasetIndex === 1) {
+    const p = g.primaries[index]
+    return p == null ? null : { dimension: widget.dimension, value: p }
+  }
+  if (datasetIndex === 0) {
+    const pair = nestedDoughnutOuterPairs(g)[index]
+    return pair ? { dimension: widget.breakdown, value: pair.b } : null
+  }
+  return null
+}
+
 // Human-friendly label for a dimension value.
 // Beacon `site` tags are the hostname's first label; show the full domain so
 // "goodstuff" reads as goodstuff.software, "goodstuffsoftware" as the .com, etc.
@@ -268,21 +330,7 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
   // ── Nested doughnut: inner ring = primary dimension, outer ring = breakdown ──
   if (widget.type === 'nestedDoughnut' && widget.breakdown) {
     const dimB = widget.breakdown
-    const primaryTotals = new Map<string, number>()
-    const combo = new Map<string, number>() // `${p}||${b}` -> value
-    const deviceSet = new Set<string>()
-    for (const r of resp.rows) {
-      const p = r.key[dim] ?? ''
-      const b = r.key[dimB] ?? ''
-      const v = metricValue(r, m)
-      primaryTotals.set(p, (primaryTotals.get(p) ?? 0) + v)
-      combo.set(`${p}||${b}`, (combo.get(`${p}||${b}`) ?? 0) + v)
-      deviceSet.add(b)
-    }
-    const primaries = [...primaryTotals.entries()].sort((a, b) => b[1] - a[1]).map((e) => e[0])
-    const devOrder = [...deviceSet].sort(
-      (a, b) => (DEVICE_PRIORITY[a] ?? 9) - (DEVICE_PRIORITY[b] ?? 9) || a.localeCompare(b),
-    )
+    const { primaryTotals, combo, primaries, devOrder } = nestedDoughnutGroups(widget, resp)
     const innerData = primaries.map((p) => primaryTotals.get(p) ?? 0)
     const innerColors = primaries.map((_, i) => PALETTE[i % PALETTE.length])
     const siteLabels = primaries.map((p) => formatKey(dim, p))
