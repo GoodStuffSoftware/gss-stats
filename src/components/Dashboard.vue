@@ -8,7 +8,7 @@ import ChartCard from './ChartCard.vue'
 // item geometry back on move/resize and we persist via @layout-updated.
 const widgets = defineModel<Widget[]>('widgets', { required: true })
 
-defineProps<{ filters: GlobalFilters; dark: boolean }>()
+defineProps<{ filters: GlobalFilters; dark: boolean; drillOpen: boolean }>()
 const emit = defineEmits<{
   edit: [Widget]
   remove: [string]
@@ -58,6 +58,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', check))
         :widget="item"
         :filters="filters"
         :dark="dark"
+        :drill-open="drillOpen"
         @edit="emit('edit', item)"
         @remove="emit('remove', item.id)"
         @duplicate="emit('duplicate', item)"

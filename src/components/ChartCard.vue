@@ -4,14 +4,14 @@ import type { Widget, GlobalFilters, StatsResponse } from '../types'
 import { fetchStats } from '../api'
 import { sitesLoaded } from '../sitesStore'
 import { checkSessionExpired, isNetworkError } from '../session'
-import { buildChartConfig, formatKey, metricValue } from '../lib/charts'
+import { buildChartConfig, formatKey, metricValue, nestedDoughnutClickValue } from '../lib/charts'
 import { rangeLabel } from '../lib/range'
 import { isSiteDim, semanticKey } from '../lib/drill'
 import BaseChart from './charts/BaseChart.vue'
 import WorldMap from './charts/WorldMap.vue'
 import FilterPopover from './FilterPopover.vue'
 
-const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolean }>()
+const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolean; drillOpen: boolean }>()
 const emit = defineEmits<{
   edit: []
   remove: []
@@ -22,16 +22,32 @@ const emit = defineEmits<{
 const baseChartRef = ref<{ clearActive: () => void } | null>(null)
 
 // A click on a chart element → hand the parent the raw dimension value so it can offer to
-// open a page filtered to it. Single-dimension charts only, and only for dimensions that
-// are actually drillable — tapping a non-drillable point (e.g. a date) leaves its tooltip
-// up so the value stays readable, which is the only way to read it on touch.
+// open a page filtered to it. Only for dimensions that are actually drillable — tapping a
+// non-drillable point leaves its tooltip up so the value stays readable, which is the only
+// way to read it on touch. 'date' is the one exception: it's not a semantic drill key (see
+// drill.ts), but App.openFilteredPage special-cases it into a day range, so it's allowed
+// through here too.
 function onPoint(p: { index: number; datasetIndex: number; x: number; y: number }) {
   const dim = props.widget.dimension
-  if (!dim || props.widget.breakdown) return
+  if (!dim) return
+  const dataset = props.widget.dataset === 'geo' ? 'geo' : 'rum'
+
+  // Breakdown charts (nested doughnut): the two rings are two DIFFERENT dimensions — resolve
+  // which one this arc belongs to (and its value) instead of reading widget.dimension. Other
+  // breakdown chart types (e.g. stackedBar) aren't wired for this yet, so leave them be.
+  if (props.widget.breakdown) {
+    if (props.widget.type !== 'nestedDoughnut' || !data.value) return
+    const hit = nestedDoughnutClickValue(props.widget, data.value, p.datasetIndex, p.index)
+    if (!hit) return
+    if (!isSiteDim(hit.dimension) && semanticKey(hit.dimension, dataset) === null) return // not drillable → keep tooltip
+    emit('drill', { dimension: hit.dimension, dataset, value: hit.value, label: formatKey(hit.dimension, hit.value), x: p.x, y: p.y })
+    baseChartRef.value?.clearActive() // the drill menu opens here → dismiss the overlapping tooltip
+    return
+  }
+
   const value = data.value?.rows?.[p.index]?.key?.[dim]
   if (value == null || value === '') return
-  const dataset = props.widget.dataset === 'geo' ? 'geo' : 'rum'
-  if (!isSiteDim(dim) && semanticKey(dim, dataset) === null) return // not drillable → keep tooltip
+  if (dim !== 'date' && !isSiteDim(dim) && semanticKey(dim, dataset) === null) return // not drillable → keep tooltip
   emit('drill', { dimension: dim, dataset, value: String(value), label: formatKey(dim, String(value)), x: p.x, y: p.y })
   baseChartRef.value?.clearActive() // the drill menu opens here → dismiss the overlapping tooltip
 }
@@ -300,7 +316,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
       <WorldMap v-else-if="widget.type === 'map'" :data="data" />
 
       <!-- Chart.js chart -->
-      <BaseChart v-else-if="chartConfig" ref="baseChartRef" :config="chartConfig" @point="onPoint" />
+      <BaseChart v-else-if="chartConfig" ref="baseChartRef" :config="chartConfig" :drill-open="drillOpen" @point="onPoint" />
     </div>
 
     <Teleport to="body">

@@ -7,7 +7,7 @@ Chart.register(...registerables)
 // first paint happens immediately even in headless/offscreen render contexts.
 Chart.defaults.animation = false as unknown as typeof Chart.defaults.animation
 
-const props = defineProps<{ config: ChartConfiguration }>()
+const props = defineProps<{ config: ChartConfiguration; drillOpen: boolean }>()
 const emit = defineEmits<{ point: [{ index: number; datasetIndex: number; x: number; y: number }] }>()
 const canvas = ref<HTMLCanvasElement | null>(null)
 const chart = shallowRef<Chart | null>(null)
@@ -16,7 +16,22 @@ function render() {
   if (!canvas.value) return
   chart.value?.destroy()
   chart.value = new Chart(canvas.value, props.config)
+  if (props.drillOpen) setTooltipEnabled(false) // preserve suppression across a re-render (e.g. a data refresh) while the menu is still open
 }
+
+// The drill-down menu must never sit under the hover tooltip. clearActive() (below) only
+// clears it once — Chart.js re-shows it on the next mousemove/touch — so while the menu is
+// open we suppress the tooltip plugin outright, and restore it when the menu closes. Only one
+// drill menu is open at a time, so it's fine for every chart to react to this the same way.
+function setTooltipEnabled(enabled: boolean) {
+  const c = chart.value
+  if (!c) return
+  const tooltip = (c.options.plugins as { tooltip?: { enabled?: boolean } } | undefined)?.tooltip
+  if (!tooltip) return
+  tooltip.enabled = enabled
+  c.update('none')
+}
+watch(() => props.drillOpen, (open) => setTooltipEnabled(!open))
 
 // Click on a bar/arc/point → tell the parent which data element was hit (for drill-down).
 function onCanvasClick(e: MouseEvent) {
@@ -30,8 +45,9 @@ function onCanvasClick(e: MouseEvent) {
 
 // Dismiss the hover tooltip + highlight. The parent calls this only when a drill-down menu
 // actually opens at the tap spot, so the two don't overlap — while taps that DON'T drill
-// (e.g. a date point) keep their tooltip visible, which is the only way to read a value on
-// touch.
+// (e.g. a non-drillable dimension) keep their tooltip visible, which is the only way to read
+// a value on touch. This is just the immediate clear at click-time; the drillOpen watcher
+// above keeps the tooltip suppressed for as long as the menu stays open.
 function clearActive() {
   const c = chart.value
   if (!c) return

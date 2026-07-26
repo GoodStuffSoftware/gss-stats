@@ -6,7 +6,15 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Drill-down on more charts.** "Open as filtered page" now works from the **site × device**
+  breakdown chart (drills to the clicked site or device) and from the **pageviews-over-time**
+  chart (opens a page zoomed to that single day).
+
 ### Fixed
+- **The drill-down menu no longer overlaps the chart's hover tooltip.** The tooltip is
+  suppressed for as long as the menu is open (it kept reappearing on mouse-move before); the
+  menu already shows the value, so nothing is lost.
 - **A stray drill can no longer silently blank the Overview, Beacon, or Best Sudoku launch
   pages.** Those canonical pages now drop any persistent page-level drill-down on load — so
   a filter written into the config by another tool can't quietly narrow a whole page to a
