@@ -259,6 +259,15 @@ export function normalizeConfig(raw: any): DashboardConfig {
         p.filters.siteSel = [...BEST_SUDOKU_SITES]
       }
     }
+    // Self-heal (every load, not version-gated): the canonical pages — Overview, Beacon, and
+    // the Best Sudoku launch page — must NEVER carry a persistent page-level drill. Drilling
+    // always spawns a NEW page, so a drill sitting on one of these is always erroneous (e.g.
+    // a config written straight to KV by an external tool). Left in place it silently filters
+    // the whole page down to a value it has no data for, so the page renders empty. Strip it.
+    for (const p of pages) {
+      const canonical = p.id === 'default' || p.id === 'beacon' || isBestSudokuLaunchPage(p)
+      if (canonical && p.filters.drill?.length) p.filters.drill = []
+    }
     const activePageId = pages.some((p: DashboardPage) => p.id === raw.activePageId) ? raw.activePageId : pages[0].id
     return { version: 4, activePageId, pages, syncRange: !!raw.syncRange }
   }
