@@ -6,6 +6,12 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **A stray drill can no longer silently blank the Overview, Beacon, or Best Sudoku launch
+  pages.** Those canonical pages now drop any persistent page-level drill-down on load — so
+  a filter written into the config by another tool can't quietly narrow a whole page to a
+  value it has no data for (which was making the launch page show nothing).
+
 ### Added
 - **Campaign / subreddit attribution.** New beacon dimensions — **Campaign** (utm), Source,
   and Medium — so links tagged per source (e.g. one `utm_campaign` per subreddit) are
