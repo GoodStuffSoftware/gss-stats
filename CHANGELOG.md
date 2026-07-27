@@ -16,9 +16,10 @@ All notable changes to **gss-stats** are documented here. The format follows
   chart (opens a page zoomed to that single day).
 
 ### Fixed
-- **The drill-down menu no longer overlaps the chart's hover tooltip.** The tooltip is
-  suppressed for as long as the menu is open (it kept reappearing on mouse-move before); the
-  menu already shows the value, so nothing is lost.
+- **The drill-down menu no longer overlaps the chart's hover tooltip — and hover stays
+  smooth.** Only the chart you drilled hides its tooltip while its menu is open (other charts
+  are untouched), and the hover state is cleared on every toggle, so a tooltip can never get
+  stuck showing a stale value.
 - **A stray drill can no longer silently blank the Overview, Beacon, or Best Sudoku launch
   pages.** Those canonical pages now drop any persistent page-level drill-down on load — so
   a filter written into the config by another tool can't quietly narrow a whole page to a

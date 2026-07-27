@@ -16,7 +16,7 @@ const emit = defineEmits<{
   edit: []
   remove: []
   duplicate: []
-  drill: [{ dimension: string; dataset: 'geo' | 'rum'; value: string; label: string; x: number; y: number }]
+  drill: [{ widgetId: string; dimension: string; dataset: 'geo' | 'rum'; value: string; label: string; x: number; y: number }]
 }>()
 
 const baseChartRef = ref<{ clearActive: () => void } | null>(null)
@@ -40,7 +40,7 @@ function onPoint(p: { index: number; datasetIndex: number; x: number; y: number 
     const hit = nestedDoughnutClickValue(props.widget, data.value, p.datasetIndex, p.index)
     if (!hit) return
     if (!isSiteDim(hit.dimension) && semanticKey(hit.dimension, dataset) === null) return // not drillable → keep tooltip
-    emit('drill', { dimension: hit.dimension, dataset, value: hit.value, label: formatKey(hit.dimension, hit.value), x: p.x, y: p.y })
+    emit('drill', { widgetId: props.widget.id, dimension: hit.dimension, dataset, value: hit.value, label: formatKey(hit.dimension, hit.value), x: p.x, y: p.y })
     baseChartRef.value?.clearActive() // the drill menu opens here → dismiss the overlapping tooltip
     return
   }
@@ -48,7 +48,7 @@ function onPoint(p: { index: number; datasetIndex: number; x: number; y: number 
   const value = data.value?.rows?.[p.index]?.key?.[dim]
   if (value == null || value === '') return
   if (dim !== 'date' && !isSiteDim(dim) && semanticKey(dim, dataset) === null) return // not drillable → keep tooltip
-  emit('drill', { dimension: dim, dataset, value: String(value), label: formatKey(dim, String(value)), x: p.x, y: p.y })
+  emit('drill', { widgetId: props.widget.id, dimension: dim, dataset, value: String(value), label: formatKey(dim, String(value)), x: p.x, y: p.y })
   baseChartRef.value?.clearActive() // the drill menu opens here → dismiss the overlapping tooltip
 }
 

@@ -20,14 +20,28 @@ function render() {
 }
 
 // The drill-down menu must never sit under the hover tooltip. clearActive() (below) only
-// clears it once — Chart.js re-shows it on the next mousemove/touch — so while the menu is
-// open we suppress the tooltip plugin outright, and restore it when the menu closes. Only one
-// drill menu is open at a time, so it's fine for every chart to react to this the same way.
+// clears it once — Chart.js re-shows it on the next mousemove/touch — so while THIS chart's
+// own menu is open we suppress its tooltip plugin outright, and restore it when the menu
+// closes. `drillOpen` is scoped to the widget that actually owns the open menu (see
+// ChartCard/Dashboard/App), so only that one chart's tooltip is ever touched — a menu stuck
+// open can't kill every other chart's hover.
+//
+// Chart.js's `tooltip.enabled` flag only gates the DRAW step — it does NOT clear `_active`/
+// opacity. Toggling it alone leaves the tooltip's internal hover state exactly as it was, so
+// re-enabling redraws whatever was last active with NO new mouse event — a "ghost" tooltip
+// frozen on a stale (or entirely unrelated, since hit-testing keeps running while suppressed)
+// bar. Explicitly clearing active elements on EVERY toggle — both suppressing and restoring —
+// closes that gap: hover always starts clean and only reflects a genuinely new mousemove.
 function setTooltipEnabled(enabled: boolean) {
   const c = chart.value
   if (!c) return
   const tooltip = (c.options.plugins as { tooltip?: { enabled?: boolean } } | undefined)?.tooltip
   if (!tooltip) return
+  c.setActiveElements([])
+  ;(c.tooltip as { setActiveElements?: (e: unknown[], p: { x: number; y: number }) => void } | undefined)?.setActiveElements(
+    [],
+    { x: 0, y: 0 },
+  )
   tooltip.enabled = enabled
   c.update('none')
 }
