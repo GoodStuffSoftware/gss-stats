@@ -2,6 +2,7 @@
 import { reactive, computed, watch } from 'vue'
 import type { Widget } from '../types'
 import { DIMENSIONS, GEO_DIMENSIONS, DATASETS, CHART_TYPES, METRICS, SITE_OPTIONS } from '../lib/catalog'
+import { ringDims, RING_SOFT_CAP } from '../lib/rings'
 
 const props = defineProps<{ widget: Widget; isNew: boolean }>()
 const emit = defineEmits<{ save: [Widget]; cancel: []; remove: [] }>()
@@ -25,7 +26,46 @@ function onDatasetChange() {
   if (draft.breakdown && !dimOptions.value.some((d) => d.key === draft.breakdown)) {
     draft.breakdown = undefined
   }
+  // Extra rings (RUM vs geo dimension keys don't line up — e.g. 'deviceType' vs 'device') —
+  // drop whichever no longer resolve in the new source's catalog.
+  if (draft.rings?.length) {
+    draft.rings = draft.rings.filter((r) => dimOptions.value.some((d) => d.key === r))
+    if (!draft.rings.length) draft.rings = undefined
+  }
   if (isGeo.value) draft.metric = 'pageviews'
+}
+
+// ── Nested doughnut: extra rings beyond dimension + breakdown ──────────────────────────────
+// Options for a ring pick: the same per-dataset catalog the dimension/breakdown selects use,
+// minus 'date' (a ring must be a real group-by column — see lib/rings.ts) and whatever's
+// already used elsewhere in the ring stack (dimension/breakdown/other rings), so the same
+// field can't appear twice.
+function ringOptionsFor(idx: number) {
+  const used = new Set(ringDims(draft))
+  const current = draft.rings?.[idx]
+  if (current) used.delete(current) // keep this ring's own current value selectable
+  return dimOptions.value.filter((d) => d.key !== 'date' && !used.has(d.key))
+}
+const canAddRing = computed(() => ringOptionsFor((draft.rings ?? []).length).length > 0)
+const totalRingCount = computed(() => ringDims(draft).length)
+
+function addRing() {
+  const next = ringOptionsFor((draft.rings ?? []).length)[0]
+  if (!next) return
+  ;(draft.rings ??= []).push(next.key)
+}
+function setRing(idx: number, key: string) {
+  if (draft.rings) draft.rings[idx] = key
+}
+function removeRing(idx: number) {
+  draft.rings?.splice(idx, 1)
+}
+function moveRing(idx: number, dir: -1 | 1) {
+  const list = draft.rings
+  if (!list) return
+  const j = idx + dir
+  if (j < 0 || j >= list.length) return
+  ;[list[idx], list[j]] = [list[j], list[idx]]
 }
 
 // The world map is geo-only.
@@ -51,6 +91,16 @@ function save() {
   if (typeDef.value && !typeDef.value.needsDimension) draft.dimension = ''
   if (typeDef.value && !typeDef.value.allowsBreakdown) draft.breakdown = undefined
   if (draft.breakdown === '') draft.breakdown = undefined
+  // Extra rings only make sense for a nested doughnut with a breakdown set; sanitize (drop
+  // blanks/duplicates/'date') and clear them entirely otherwise.
+  if (draft.type === 'nestedDoughnut' && draft.breakdown) {
+    const rings = (draft.rings ?? []).filter(
+      (r, i, arr) => r && r !== 'date' && r !== draft.dimension && r !== draft.breakdown && arr.indexOf(r) === i,
+    )
+    draft.rings = rings.length ? rings : undefined
+  } else {
+    draft.rings = undefined
+  }
   emit('save', { ...draft, i: draft.id })
 }
 </script>
@@ -100,6 +150,34 @@ function save() {
             <option :value="undefined">— none —</option>
             <option v-for="d in dimOptions" :key="d.key" :value="d.key">{{ d.label }}</option>
           </select>
+        </div>
+      </div>
+
+      <!-- Nested doughnut: further outward rings beyond dimension + breakdown (e.g. site →
+           device → OS → browser). Each ring subdivides the one before it. -->
+      <div class="field" v-if="draft.type === 'nestedDoughnut' && draft.breakdown">
+        <label>Extra rings (outward from break-down)</label>
+        <div class="rings-list">
+          <div v-for="(r, idx) in draft.rings ?? []" :key="idx" class="ring-row">
+            <select :value="r" @change="setRing(idx, $event.target.value)">
+              <option v-for="d in ringOptionsFor(idx)" :key="d.key" :value="d.key">{{ d.label }}</option>
+            </select>
+            <button type="button" class="btn ring-btn" title="Move toward center" :disabled="idx === 0" @click="moveRing(idx, -1)">↑</button>
+            <button
+              type="button"
+              class="btn ring-btn"
+              title="Move outward"
+              :disabled="idx === (draft.rings?.length ?? 0) - 1"
+              @click="moveRing(idx, 1)"
+            >
+              ↓
+            </button>
+            <button type="button" class="btn ring-btn danger" title="Remove ring" @click="removeRing(idx)">✕</button>
+          </div>
+          <button type="button" class="btn" :disabled="!canAddRing" @click="addRing">+ Add ring</button>
+          <p class="hint" v-if="totalRingCount >= RING_SOFT_CAP">
+            {{ totalRingCount }} rings — charts get visually dense much past this.
+          </p>
         </div>
       </div>
 
@@ -178,6 +256,33 @@ h2 {
   align-items: center;
   gap: 8px;
   cursor: pointer;
+}
+.rings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ring-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ring-row select {
+  flex: 1;
+  width: auto;
+}
+.ring-btn {
+  flex-shrink: 0;
+  padding: 6px 9px;
+  line-height: 1;
+}
+.ring-btn.danger {
+  color: #bc4749;
+  border-color: rgb(188 71 73 / 0.4);
+}
+.hint {
+  font-size: 12px;
+  color: rgb(var(--ink-3));
 }
 .actions {
   display: flex;

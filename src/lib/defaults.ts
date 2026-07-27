@@ -210,6 +210,9 @@ function normWidget(x: any): Widget {
     dataset: x.dataset === 'geo' ? 'geo' : undefined,
     dimension: x.dimension ?? '',
     breakdown: x.breakdown || undefined,
+    // Nested-doughnut extra rings (beyond dimension+breakdown) — see lib/rings.ts. Absent/
+    // invalid on any older saved config, which is exactly the back-compat 2-ring behavior.
+    rings: Array.isArray(x.rings) ? x.rings.filter((r: any) => typeof r === 'string' && r) : undefined,
     metric: x.metric === 'visits' ? 'visits' : 'pageviews',
     limit: Number(x.limit) || 50,
     site: x.site,

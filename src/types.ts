@@ -45,6 +45,11 @@ export interface Widget {
   dataset?: Dataset // 'rum' (default) or 'geo' (beacon region/city)
   dimension: string // primary group-by ('' for a plain total/stat)
   breakdown?: string // optional secondary dimension (stacked / grouped)
+  // Nested doughnut only: further outer-ring dimensions beyond `breakdown`. The full ring
+  // list, innermost → outermost, is [dimension, breakdown, ...rings] (see lib/rings.ts) — so
+  // an existing 2-ring chart (no `rings`) is unaffected. Order matters: it's the nesting
+  // order, outward from the center.
+  rings?: string[]
   metric: Metric
   limit: number
   site?: SiteKey // optional per-widget site override ('inherit' = use global)

@@ -8,11 +8,19 @@
 //   site: 'goodstuff.software' | 'goodstuffsoftware.com' | 'bestsudoku.app' | 'all',
 //   host?: string,                 // optional requestHost filter (a subdomain)
 //   since: 'YYYY-MM-DD', until: 'YYYY-MM-DD',
-//   dimensions: string[],          // 0-2 of the whitelist below
+//   dimensions: string[],          // 0-RUM_DIMS_CAP of the whitelist below
 //   metric: 'pageviews' | 'visits',
 //   limit: number,
 //   excludeSelfReferrals?: boolean // drop empty + own-host referrers
 // }
+//
+// A nested doughnut's ring list (see lib/rings.ts) can exceed the original 2 dims. Cloudflare
+// doesn't document a hard cap on how many fields the `dimensions { }` sub-selection may carry
+// for rumPageloadEventsAdaptiveGroups, but each extra one multiplies the distinct groups a
+// query can return, competing against the fixed per-tag row limit below (perTagLimit) — so
+// more rings means a higher chance the deepest combinations get silently truncated. Capped
+// conservatively; the geo/beacon dataset (functions/api/geo.ts, exact SQL GROUP BY, no row-
+// limit-vs-cardinality tradeoff) is the intended path for charts wanting more rings than this.
 
 interface Env {
   CF_ANALYTICS_TOKEN: string
@@ -128,8 +136,10 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   }
 
   const site = body.site === 'all' || (body.site && body.site in SITE_TAGS) ? body.site : 'goodstuff.software'
+  // See the file header for why this is capped conservatively rather than left unbounded.
+  const RUM_DIMS_CAP = 4
   const dims: string[] = Array.isArray(body.dimensions)
-    ? (body.dimensions as unknown[]).filter((d): d is string => typeof d === 'string' && DIM_WHITELIST.has(d)).slice(0, 2)
+    ? [...new Set((body.dimensions as unknown[]).filter((d): d is string => typeof d === 'string' && DIM_WHITELIST.has(d)))].slice(0, RUM_DIMS_CAP)
     : []
   const metric = body.metric === 'visits' ? 'visits' : 'pageviews'
   const limit = Math.min(Math.max(Number(body.limit) || 50, 1), 500)

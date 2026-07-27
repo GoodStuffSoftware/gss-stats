@@ -7,6 +7,10 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Nested doughnuts can have any number of rings.** Add, remove, and reorder ring
+  dimensions in the chart editor (e.g. site → device → OS → browser) — each becomes another
+  ring outward. Beacon charts nest as deep as the data allows; Cloudflare-RUM charts cap at a
+  few rings. Clicking any ring still drills to that ring's value.
 - **Drill-down on more charts.** "Open as filtered page" now works from the **site × device**
   breakdown chart (drills to the clicked site or device) and from the **pageviews-over-time**
   chart (opens a page zoomed to that single day).
