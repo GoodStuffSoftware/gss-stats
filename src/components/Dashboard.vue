@@ -8,13 +8,17 @@ import ChartCard from './ChartCard.vue'
 // item geometry back on move/resize and we persist via @layout-updated.
 const widgets = defineModel<Widget[]>('widgets', { required: true })
 
-defineProps<{ filters: GlobalFilters; dark: boolean; drillOpen: boolean }>()
+// `drillOpenId` is the id of the ONE widget whose drill menu is currently open (or null) —
+// not a blanket "some menu is open somewhere" flag. Only that widget's ChartCard gets
+// `drill-open="true"`, so a suppressed/stuck tooltip is scoped to the chart the menu actually
+// belongs to, never every chart on the page.
+defineProps<{ filters: GlobalFilters; dark: boolean; drillOpenId: string | null }>()
 const emit = defineEmits<{
   edit: [Widget]
   remove: [string]
   duplicate: [Widget]
   change: []
-  drill: [{ dimension: string; dataset: 'geo' | 'rum'; value: string; label: string; x: number; y: number }]
+  drill: [{ widgetId: string; dimension: string; dataset: 'geo' | 'rum'; value: string; label: string; x: number; y: number }]
 }>()
 
 // On phones we stack cards via CSS (preserving the desktop layout data) and
@@ -58,7 +62,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', check))
         :widget="item"
         :filters="filters"
         :dark="dark"
-        :drill-open="drillOpen"
+        :drill-open="drillOpenId === item.id"
         @edit="emit('edit', item)"
         @remove="emit('remove', item.id)"
         @duplicate="emit('duplicate', item)"

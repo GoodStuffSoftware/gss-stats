@@ -192,6 +192,7 @@ function duplicateWidget(wgt: Widget) {
 
 // ── Drill-down: click a chart datapoint → open a new page filtered to that value ─
 interface DrillPayload {
+  widgetId: string // which chart's menu this is — scopes tooltip suppression to just that chart
   dimension: string
   dataset: 'geo' | 'rum'
   value: string
@@ -311,7 +312,7 @@ function toggleDark() {
         v-model:widgets="activePage.widgets"
         :filters="activePage.filters"
         :dark="dark"
-        :drill-open="drillMenu !== null"
+        :drill-open-id="drillMenu?.widgetId ?? null"
         @edit="editChart"
         @remove="removeWidget"
         @duplicate="duplicateWidget"
