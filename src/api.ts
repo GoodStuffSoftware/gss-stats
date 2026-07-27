@@ -1,6 +1,7 @@
 import type { StatsResponse, Widget, GlobalFilters, DashboardConfig, Dataset } from './types'
 import { resolveSelection } from './sitesStore'
 import { nativeField } from './lib/drill'
+import { queryDims } from './lib/rings'
 
 // Resolve a page's drill-downs into { field, value } pairs for one dataset. A drill
 // on a dimension the dataset lacks (e.g. region on RUM) is simply omitted.
@@ -19,14 +20,19 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters): Promis
   // real sites; dev/preview hosts are never in the list, so they never count.
   const { hosts, tags } = resolveSelection(filters.siteSel)
 
-  // Geo beacon dataset → /api/geo (D1-backed, already bot-free, single dimension).
+  // Geo beacon dataset → /api/geo (D1-backed, already bot-free).
   if (widget.dataset === 'geo') {
+    // The full nested-doughnut ring list (dimension, breakdown, then any further
+    // widget.rings — see lib/rings.ts). Sent as `dims` only when there are 2+ rings; older
+    // single-dim / 2-dim requests keep using `dimension`/`breakdown` alone, unchanged.
+    const rings = queryDims(widget)
     const res = await fetch('/api/geo', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         dimension: widget.type === 'map' ? 'points' : widget.dimension || 'region',
         breakdown: widget.breakdown || undefined,
+        dims: rings.length >= 2 ? rings : undefined,
         since: filters.since,
         until: filters.until,
         limit: widget.type === 'map' ? 2000 : widget.limit ?? 50,
@@ -41,11 +47,8 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters): Promis
     return res.json()
   }
 
-  const dimensions = widget.dimension
-    ? widget.breakdown
-      ? [widget.dimension, widget.breakdown]
-      : [widget.dimension]
-    : []
+  // RUM: group by every effective ring dim (1 for a plain chart, 2+ for a nested doughnut).
+  const dimensions = queryDims(widget)
 
   const body = {
     site: 'all', // all site tags; the requestHost allow-list below does the filtering

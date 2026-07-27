@@ -1,6 +1,7 @@
 import type { ChartConfiguration } from 'chart.js'
 import type { Widget, StatsResponse, Metric } from '../types'
 import { COUNTRY_NAMES } from './catalog'
+import { ringDims } from './rings'
 
 // Categorical palette: brand amber leads, with distinguishable warm/cool accents.
 export const PALETTE = [
@@ -175,66 +176,79 @@ export function metricValue(row: { pageviews: number; visits: number }, metric: 
   return metric === 'visits' ? row.visits : row.pageviews
 }
 
-// Shared grouping for a nested doughnut: per-primary totals, primary×breakdown sums, and the
-// draw orders (primaries sorted by total desc; breakdown devOrder priority-then-alpha). Both
-// buildChartConfig (below) and nestedDoughnutClickValue (drill-down) key off this same
-// grouping so the two can never disagree on which arc holds which value.
-function nestedDoughnutGroups(widget: Widget, resp: StatsResponse) {
-  const dim = widget.dimension
-  const dimB = widget.breakdown!
-  const primaryTotals = new Map<string, number>()
-  const combo = new Map<string, number>() // `${p}||${b}` -> value
-  const deviceSet = new Set<string>()
+// ── Nested doughnut: shared N-ring model ────────────────────────────────────────────────
+// A nested doughnut can have an arbitrary number of rings — inner→outer = ringDims(widget)
+// (dimension, breakdown, then any further widget.rings; see lib/rings.ts). This model is the
+// ONE place that groups rows into ring "paths" and orders them, so buildChartConfig (render)
+// and nestedDoughnutClickValue (drill-down) can never disagree on which arc holds which value.
+interface NestedDoughnutModel {
+  dims: string[] // ring dimensions, innermost → outermost
+  // pathsAtDepth[d] = every distinct value-path of length d+1 that has data, in draw order.
+  // A "path" is dims[0..d]'s values for one arc, e.g. ['starrupture','mobile','Android'].
+  pathsAtDepth: string[][][]
+  total: (path: string[]) => number // a path's summed metric value
+  grand: number // ring-0 total (the whole doughnut)
+}
+function nestedDoughnutModel(widget: Widget, resp: StatsResponse): NestedDoughnutModel {
+  const dims = ringDims(widget)
+  const sums = new Map<string, number>() // `${depth}:${path.join('||')}` -> value
+  const keyOf = (depth: number, path: string[]) => `${depth}:${path.join('||')}`
   for (const r of resp.rows) {
-    const p = r.key[dim] ?? ''
-    const b = r.key[dimB] ?? ''
+    const vals = dims.map((d) => r.key[d] ?? '')
     const v = metricValue(r, widget.metric)
-    primaryTotals.set(p, (primaryTotals.get(p) ?? 0) + v)
-    combo.set(`${p}||${b}`, (combo.get(`${p}||${b}`) ?? 0) + v)
-    deviceSet.add(b)
+    for (let depth = 0; depth < dims.length; depth++) {
+      const k = keyOf(depth, vals.slice(0, depth + 1))
+      sums.set(k, (sums.get(k) ?? 0) + v)
+    }
   }
-  const primaries = [...primaryTotals.entries()].sort((a, b) => b[1] - a[1]).map((e) => e[0])
-  const devOrder = [...deviceSet].sort(
-    (a, b) => (DEVICE_PRIORITY[a] ?? 9) - (DEVICE_PRIORITY[b] ?? 9) || a.localeCompare(b),
-  )
-  return { primaryTotals, combo, primaries, devOrder }
+  const total = (path: string[]) => sums.get(keyOf(path.length - 1, path)) ?? 0
+
+  // Ring 0 (innermost): distinct primary values, ordered by total desc (site-major, as before).
+  const ring0 = [...new Set(resp.rows.map((r) => r.key[dims[0]] ?? ''))]
+  ring0.sort((a, b) => total([b]) - total([a]))
+  const pathsAtDepth: string[][][] = [ring0.map((v) => [v])]
+
+  // Ring 1+: each ring's distinct values get ONE global order — the same priority-then-alpha
+  // rule the original 2-ring "device" breakdown used — applied under every parent path,
+  // skipping any (parent, child) combination that has no data. This is the original
+  // `primaries.forEach(p => devOrder.forEach(d => ...))` double loop, extended to N depths.
+  for (let depth = 1; depth < dims.length; depth++) {
+    const valueSet = new Set<string>()
+    for (const r of resp.rows) valueSet.add(r.key[dims[depth]] ?? '')
+    const order = [...valueSet].sort(
+      (a, b) => (DEVICE_PRIORITY[a] ?? 9) - (DEVICE_PRIORITY[b] ?? 9) || a.localeCompare(b),
+    )
+    const paths: string[][] = []
+    for (const parent of pathsAtDepth[depth - 1]) {
+      for (const child of order) {
+        const candidate = [...parent, child]
+        if (total(candidate) > 0) paths.push(candidate)
+      }
+    }
+    pathsAtDepth.push(paths)
+  }
+
+  const grand = pathsAtDepth[0].reduce((a, p) => a + total(p), 0)
+  return { dims, pathsAtDepth, total, grand }
 }
 
-// The ordered (primary, breakdown) pairs that make up the OUTER ring: site-major so each
-// device arc nests under its site arc, skipping empty combos — the same order the outer-ring
-// arrays are built in below, so dataIndex i into dataset 0 maps to outerPairs[i].
-function nestedDoughnutOuterPairs(g: ReturnType<typeof nestedDoughnutGroups>): { p: string; b: string }[] {
-  const pairs: { p: string; b: string }[] = []
-  g.primaries.forEach((p) => {
-    g.devOrder.forEach((d) => {
-      if ((g.combo.get(`${p}||${d}`) ?? 0) > 0) pairs.push({ p, b: d })
-    })
-  })
-  return pairs
-}
-
-// Resolve a clicked nested-doughnut arc back to its dimension + value, for drill-down.
-// Chart.js draws dataset[0] as the outer ring (widget.breakdown, one arc per primary×breakdown
-// pair) and dataset[1] as the inner ring (widget.dimension, one arc per primary) — see the
-// nestedDoughnut branch of buildChartConfig. Returns null for a non-breakdown widget or an
-// index that doesn't resolve (e.g. stale click after a data refresh).
+// Resolve a clicked nested-doughnut arc back to its dimension + value, for drill-down. Chart.js
+// draws dataset[0] as the OUTERMOST ring (see buildChartConfig, which pushes datasets
+// outermost→innermost), so datasetIndex 0 = the last ring dim, and the last dataset = ring 0
+// (widget.dimension). Returns null for a widget with fewer than 2 effective rings, or an index
+// that doesn't resolve (e.g. a stale click after a data refresh).
 export function nestedDoughnutClickValue(
   widget: Widget,
   resp: StatsResponse,
   datasetIndex: number,
   index: number,
 ): { dimension: string; value: string } | null {
-  if (!widget.breakdown) return null
-  const g = nestedDoughnutGroups(widget, resp)
-  if (datasetIndex === 1) {
-    const p = g.primaries[index]
-    return p == null ? null : { dimension: widget.dimension, value: p }
-  }
-  if (datasetIndex === 0) {
-    const pair = nestedDoughnutOuterPairs(g)[index]
-    return pair ? { dimension: widget.breakdown, value: pair.b } : null
-  }
-  return null
+  const dims = ringDims(widget)
+  if (dims.length < 2) return null
+  const g = nestedDoughnutModel(widget, resp)
+  const depth = dims.length - 1 - datasetIndex
+  const path = g.pathsAtDepth[depth]?.[index]
+  return path ? { dimension: dims[depth], value: path[depth] } : null
 }
 
 // Human-friendly label for a dimension value.
@@ -327,51 +341,70 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
     }
   }
 
-  // ── Nested doughnut: inner ring = primary dimension, outer ring = breakdown ──
-  if (widget.type === 'nestedDoughnut' && widget.breakdown) {
-    const dimB = widget.breakdown
-    const { primaryTotals, combo, primaries, devOrder } = nestedDoughnutGroups(widget, resp)
-    const innerData = primaries.map((p) => primaryTotals.get(p) ?? 0)
-    const innerColors = primaries.map((_, i) => PALETTE[i % PALETTE.length])
-    const siteLabels = primaries.map((p) => formatKey(dim, p))
+  // ── Nested doughnut: ring 0 (innermost) = dimension, each ring outward subdivides its
+  // parent by the next ring dim (breakdown, then any further widget.rings) ──────────────────
+  if (widget.type === 'nestedDoughnut' && ringDims(widget).length >= 2) {
+    const g = nestedDoughnutModel(widget, resp)
+    const { dims, pathsAtDepth, total, grand } = g
+    const N = dims.length
+    const primaryIndex = new Map(pathsAtDepth[0].map((p, i) => [p[0], i]))
 
-    // Outer ring ordered site-major so each device arc nests under its site arc.
-    const outerData: number[] = []
-    const outerColors: string[] = []
-    const outerLabels: string[] = []
-    const outerItems: ArcItem[] = []
-    primaries.forEach((p, pi) => {
-      const pTotal = primaryTotals.get(p) || 1
-      devOrder.forEach((d, rank) => {
-        const v = combo.get(`${p}||${d}`) ?? 0
-        if (v <= 0) return
-        const amt = Math.min(0.16 + rank * 0.2, 0.62) // progressively lighter outward (gradient)
-        outerData.push(v)
-        outerColors.push(shade(PALETTE[pi % PALETTE.length], amt))
-        outerLabels.push(`${formatKey(dim, p)} · ${formatKey(dimB, d)}`)
-        // outer % is within its parent (e.g. desktop = 53% of starrupture)
-        outerItems.push({ name: formatKey(dimB, d), sub: `${v.toLocaleString('en-US')} · ${Math.round((v / pTotal) * 100)}%` })
-      })
-    })
+    // Ring 1's lightening curve is the ORIGINAL 2-ring formula, unchanged (exact backward
+    // compatibility for existing charts); rings beyond that keep lightening further out.
+    const shadeAmt = (depth: number, rank: number) =>
+      depth === 1 ? Math.min(0.16 + rank * 0.2, 0.62) : Math.min(0.16 + rank * 0.2 + (depth - 1) * 0.16, 0.86)
 
-    const grand = innerData.reduce((a, b) => a + b, 0)
-    // inner % is of the grand total (e.g. starrupture = 55% of all)
-    const innerItems: ArcItem[] = primaries.map((p, i) => ({
-      name: siteLabels[i],
-      sub: `${innerData[i].toLocaleString('en-US')} · ${Math.round((innerData[i] / (grand || 1)) * 100)}%`,
-    }))
+    // Each ring's global child order (same rule nestedDoughnutModel uses to draw them) — needed
+    // here again to look up a path's RANK within its ring for the shading amount above.
+    const orderAtDepth: string[][] = [[]] // depth 0 unused (colored by primary index, not shaded)
+    for (let depth = 1; depth < N; depth++) {
+      const valueSet = new Set<string>()
+      for (const r of resp.rows) valueSet.add(r.key[dims[depth]] ?? '')
+      orderAtDepth.push(
+        [...valueSet].sort((a, b) => (DEVICE_PRIORITY[a] ?? 9) - (DEVICE_PRIORITY[b] ?? 9) || a.localeCompare(b)),
+      )
+    }
+
+    const dataAtDepth: number[][] = []
+    const colorsAtDepth: string[][] = []
+    const labelsAtDepth: string[][] = []
+    const itemsAtDepth: ArcItem[][] = []
+    for (let depth = 0; depth < N; depth++) {
+      const paths = pathsAtDepth[depth]
+      dataAtDepth.push(paths.map((p) => total(p)))
+      labelsAtDepth.push(paths.map((p) => p.map((v, i) => formatKey(dims[i], v)).join(' · ')))
+      colorsAtDepth.push(
+        paths.map((p) => {
+          const pi = primaryIndex.get(p[0]) ?? 0
+          if (depth === 0) return PALETTE[pi % PALETTE.length]
+          const rank = orderAtDepth[depth].indexOf(p[depth])
+          return shade(PALETTE[pi % PALETTE.length], shadeAmt(depth, rank))
+        }),
+      )
+      itemsAtDepth.push(
+        paths.map((p) => {
+          const v = total(p)
+          // % is within the parent ring (e.g. desktop = 53% of starrupture); ring 0 has no
+          // parent, so its % is of the grand total (e.g. starrupture = 55% of all).
+          const parentTotal = depth === 0 ? grand : total(p.slice(0, depth))
+          return { name: formatKey(dims[depth], p[depth]), sub: `${v.toLocaleString('en-US')} · ${Math.round((v / (parentTotal || 1)) * 100)}%` }
+        }),
+      )
+    }
+
     const border = isDark() ? '#211C18' : '#FFFFFF'
+    // Chart.js draws dataset[0] as the OUTERMOST ring, so push rings outermost → innermost.
+    const datasets: { data: number[]; backgroundColor: string[]; borderColor: string; borderWidth: number }[] = []
+    const itemsByDatasetIndex: Record<number, ArcItem[]> = {}
+    for (let depth = N - 1; depth >= 0; depth--) {
+      const datasetIndex = N - 1 - depth
+      datasets.push({ data: dataAtDepth[depth], backgroundColor: colorsAtDepth[depth], borderColor: border, borderWidth: 2 })
+      itemsByDatasetIndex[datasetIndex] = itemsAtDepth[depth]
+    }
+
     return {
       type: 'doughnut',
-      // Chart.js draws dataset[0] as the OUTER ring, so the breakdown goes first
-      // (outer) and the primary dimension second (inner).
-      data: {
-        labels: outerLabels,
-        datasets: [
-          { data: outerData, backgroundColor: outerColors, borderColor: border, borderWidth: 2 },
-          { data: innerData, backgroundColor: innerColors, borderColor: border, borderWidth: 2 },
-        ],
-      },
+      data: { labels: labelsAtDepth[N - 1], datasets },
       options: {
         responsive: true,
         maintainAspectRatio: false,
@@ -380,18 +413,18 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
           legend: { display: false }, // arcs are labeled in place
           tooltip: {
             callbacks: {
-              // The two rings share one labels array, so the default title is wrong
-              // for the inner ring — suppress it and build the line ourselves.
+              // Every ring shares one labels array, so the default title is wrong for all
+              // but the outermost — suppress it and build the line ourselves.
               title: () => '',
               label: (ctx: any) => {
-                const it = (ctx.datasetIndex === 0 ? outerItems : innerItems)[ctx.dataIndex]
+                const it = itemsByDatasetIndex[ctx.datasetIndex]?.[ctx.dataIndex]
                 return it ? `${it.name}: ${it.sub}` : ''
               },
             },
           },
         },
       },
-      plugins: [centerTextPlugin(grand, m), arcLabelsPlugin({ 0: outerItems, 1: innerItems })],
+      plugins: [centerTextPlugin(grand, m), arcLabelsPlugin(itemsByDatasetIndex)],
     } as ChartConfiguration
   }
 

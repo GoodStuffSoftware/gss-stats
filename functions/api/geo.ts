@@ -6,6 +6,11 @@
 //
 // POST { dimension, since, until, limit, site? }  (geo is already bot-free; the
 // RUM self/referral filters don't apply.)
+//
+// Nested doughnuts (N-ring breakdowns) send an additional `dims: string[]` — the FULL
+// ordered ring list (2+ dims, deduped, 'date' excluded) — which supersedes `dimension`/
+// `breakdown` for the grouped query below. Older 2-dim callers can still send just
+// { dimension, breakdown } and get the same result via a fallback.
 
 interface Env {
   gss_geo: D1Database
@@ -110,34 +115,55 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     return json({ rows, totals, meta: { site: sites.length ? sites.join(',') : 'all', since, until, dimensions: ['points'], metric: 'pageviews', dataset: 'geo' } })
   }
 
-  // Two-dimension breakdown (nested doughnut / stacked bar on geo data).
-  const breakdown =
+  // N-dimension breakdown (nested doughnut / stacked bar / table on geo data). `body.dims` is
+  // the full ordered ring list a nested doughnut sends (see api.ts); a legacy 2-dim caller
+  // that only sends { dimension, breakdown } gets the same result via the fallback below.
+  // Hard-capped independent of the client's own soft cap — defense in depth against a
+  // malformed/oversized request, not a UX limit (that lives in ChartEditor.vue).
+  const RING_DIMS_HARD_CAP = 8
+  const legacyBreakdown =
     typeof body.breakdown === 'string' && GEO_DIMS.has(body.breakdown) && body.breakdown !== dim && body.breakdown !== 'date'
       ? body.breakdown
       : null
-  if (breakdown && dim !== 'date') {
-    const w: string[] = ['ts >= ?', 'ts < ?', `${dim} <> ''`, `${breakdown} <> ''`]
+  const ringDims: string[] = (
+    Array.isArray(body.dims)
+      ? [...new Set((body.dims as unknown[]).filter((d): d is string => typeof d === 'string' && GEO_DIMS.has(d) && d !== 'date'))]
+      : legacyBreakdown
+        ? [dim, legacyBreakdown]
+        : []
+  ).slice(0, RING_DIMS_HARD_CAP)
+  if (ringDims.length >= 2 && dim !== 'date') {
+    const cols = ringDims.map((d, i) => `${d} AS k${i}`)
+    const w: string[] = ['ts >= ?', 'ts < ?', ...ringDims.map((d) => `${d} <> ''`)]
     const b: any[] = [sinceMs, untilMs]
     siteClause(w, b)
     drillClause(w, b)
     const whereSql = w.join(' AND ')
-    const sql = `SELECT ${dim} AS k1, ${breakdown} AS k2, COUNT(*) AS c FROM hits WHERE ${whereSql} GROUP BY k1, k2 ORDER BY c DESC LIMIT ?`
+    const groupBy = ringDims.map((_, i) => `k${i}`).join(', ')
+    const sql = `SELECT ${cols.join(', ')}, COUNT(*) AS c FROM hits WHERE ${whereSql} GROUP BY ${groupBy} ORDER BY c DESC LIMIT ?`
+    // Each extra ring dimension multiplies the possible distinct combinations, so a 2-ring
+    // request keeps its original fetch/cap exactly (identical behavior); N>2 over-fetches
+    // more generously so deep rings aren't truncated before the nested grouping sees them.
+    const fetchLimit =
+      ringDims.length <= 2 ? Math.min(limit * 4, 1000) : Math.min(limit * 4 * (ringDims.length - 1), 4000)
     let r: any
     let totalRes: any
     try {
       totalRes = await ctx.env.gss_geo.prepare(`SELECT COUNT(*) AS c FROM hits WHERE ${whereSql}`).bind(...b).all()
-      r = await ctx.env.gss_geo.prepare(sql).bind(...b, Math.min(limit * 4, 1000)).all()
+      r = await ctx.env.gss_geo.prepare(sql).bind(...b, fetchLimit).all()
     } catch (e) {
       return json({ error: 'd1 query failed', detail: String(e) }, 500)
     }
-    const rows = (r.results ?? []).map((x: any) => ({
-      key: { [dim]: String(x.k1 ?? ''), [breakdown]: String(x.k2 ?? '') },
-      pageviews: Number(x.c) || 0,
-      visits: Number(x.c) || 0,
-    }))
+    const rows = (r.results ?? []).map((x: any) => {
+      const key: Record<string, string> = {}
+      ringDims.forEach((d, i) => {
+        key[d] = String(x[`k${i}`] ?? '')
+      })
+      return { key, pageviews: Number(x.c) || 0, visits: Number(x.c) || 0 }
+    })
     const total = Number(totalRes.results?.[0]?.c) || 0
     const totals = { pageviews: total, visits: total }
-    return json({ rows, totals, meta: { site: sites.length ? sites.join(',') : 'all', since, until, dimensions: [dim, breakdown], metric: 'pageviews', dataset: 'geo' } })
+    return json({ rows, totals, meta: { site: sites.length ? sites.join(',') : 'all', since, until, dimensions: ringDims, metric: 'pageviews', dataset: 'geo' } })
   }
 
   // Bucket blank values under a label ("(direct)" for referrers, "(none)" otherwise)
