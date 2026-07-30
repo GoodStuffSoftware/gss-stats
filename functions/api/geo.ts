@@ -22,6 +22,21 @@ const GEO_DIMS = new Set([
   'campaign', 'source', 'medium', // utm campaign tags
 ])
 
+// Hosts that count as "us" for excludeSelfReferrals — same list functions/api/stats.ts (RUM)
+// uses for its OWN_HOSTS, so the two datasets agree on what a self-referral is.
+const OWN_HOSTS = [
+  'goodstuff.software',
+  'www.goodstuff.software',
+  'starrupture.goodstuff.software',
+  'simpletile.goodstuff.software',
+  'stats.goodstuff.software',
+  'goodstuffsoftware.com',
+  'www.goodstuffsoftware.com',
+  'bestsudoku.app',
+  'www.bestsudoku.app',
+  'design-preview.goodstuffsoftware.pages.dev',
+]
+
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), {
     status,
@@ -33,6 +48,11 @@ function safeDate(v: unknown, fallback: string): string {
   return typeof v === 'string' && WHEN_RE.test(v) ? v : fallback
 }
 const isDateOnly = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v)
+
+// Sanitize a user-agent value used in a server-side exclusion filter (same regex as stats.ts).
+function safeUA(v: unknown): string {
+  return typeof v === 'string' && /^[A-Za-z0-9 ._-]{1,40}$/.test(v) ? v : ''
+}
 
 export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   let body: any
@@ -83,12 +103,47 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     }
   }
 
+  // "Hide my own visits" + "exclude self-referrals" — same semantics as functions/api/stats.ts
+  // (RUM), applied here too so RUM and beacon charts agree on the same toggles instead of only
+  // RUM honoring them (lowers beacon numbers when active — that's intended: the owner's own
+  // visits/self-referrals stop being counted, same as RUM already does).
+  //
+  // De Morgan: NOT(browser=own AND os=own) === (browser<>own OR os<>own) — exclude the owner's
+  // browser+OS COMBINATION, not all of either. Case-insensitive (beacon-collected UA strings
+  // don't necessarily share RUM's casing). Only applies when BOTH values are present — an
+  // empty ownBrowser/ownOS must not exclude everything.
+  const excludeOwn = body.excludeOwnVisits === true
+  const ownBrowser = safeUA(body.ownBrowser)
+  const ownOS = safeUA(body.ownOS)
+  const excludeOwnClause = (w: string[], b: any[]) => {
+    if (excludeOwn && ownBrowser && ownOS) {
+      w.push(`NOT (LOWER(browser) = LOWER(?) AND LOWER(os) = LOWER(?))`)
+      b.push(ownBrowser, ownOS)
+    }
+  }
+
+  // On by default (mirrors stats.ts's `!== false`), but only actually filters a query that
+  // groups by 'referrer' — mirroring stats.ts's `dims.includes('refererHost')` scoping, so a
+  // region/city/etc. chart (or the map, which has no group-by dim at all) is never silently
+  // zeroed by a referrer-only exclusion. Also drops blank/direct rows when active, exactly
+  // matching RUM's existing "clean external referrer list" behavior — this fix is about
+  // making the two datasets AGREE, not diverging into new behavior.
+  const excludeSelf = body.excludeSelfReferrals !== false
+  const selfReferralClause = (activeDims: string[], w: string[], b: any[]) => {
+    if (!excludeSelf || !activeDims.includes('referrer')) return
+    w.push(`referrer <> ''`)
+    w.push(`referrer NOT IN (${OWN_HOSTS.map(() => '?').join(', ')})`)
+    b.push(...OWN_HOSTS)
+  }
+
   // Map mode: return one point per distinct lat/lon with a count (for globe/map charts).
   if (dim === 'points' || body.dimension === 'points') {
     const w: string[] = ['ts >= ?', 'ts < ?', "lat <> ''"]
     const b: any[] = [sinceMs, untilMs]
     siteClause(w, b)
     drillClause(w, b)
+    excludeOwnClause(w, b)
+    selfReferralClause([], w, b) // points mode has no group-by dim, so this is always inert
     const sql = `SELECT lat, lon, city, region, country, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY lat, lon ORDER BY c DESC LIMIT ?`
     b.push(Math.min(limit, 2000))
     let r: any
@@ -138,6 +193,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     const b: any[] = [sinceMs, untilMs]
     siteClause(w, b)
     drillClause(w, b)
+    excludeOwnClause(w, b)
+    selfReferralClause(ringDims, w, b) // inert unless 'referrer' is one of the ring dims
     const whereSql = w.join(' AND ')
     const groupBy = ringDims.map((_, i) => `k${i}`).join(', ')
     const sql = `SELECT ${cols.join(', ')}, COUNT(*) AS c FROM hits WHERE ${whereSql} GROUP BY ${groupBy} ORDER BY c DESC LIMIT ?`
@@ -181,6 +238,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const binds: any[] = [sinceMs, untilMs]
   siteClause(where, binds)
   drillClause(where, binds)
+  excludeOwnClause(where, binds)
+  selfReferralClause([dim], where, binds) // inert unless this IS the referrer chart
 
   const whereSql = where.join(' AND ')
   const orderBy = dim === 'date' ? 'k ASC' : 'c DESC'

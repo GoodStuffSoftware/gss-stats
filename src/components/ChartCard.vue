@@ -4,7 +4,7 @@ import type { Widget, GlobalFilters, StatsResponse } from '../types'
 import { fetchStats } from '../api'
 import { sitesLoaded } from '../sitesStore'
 import { checkSessionExpired, isNetworkError } from '../session'
-import { buildChartConfig, formatKey, metricValue, nestedDoughnutClickValue } from '../lib/charts'
+import { buildChartConfig, formatKey, metricValue, nestedDoughnutClickValue, seriesRows } from '../lib/charts'
 import { rangeLabel } from '../lib/range'
 import { isSiteDim, semanticKey } from '../lib/drill'
 import BaseChart from './charts/BaseChart.vue'
@@ -45,7 +45,9 @@ function onPoint(p: { index: number; datasetIndex: number; x: number; y: number 
     return
   }
 
-  const value = data.value?.rows?.[p.index]?.key?.[dim]
+  // Index into the rows the chart actually PLOTTED (a 'date' series is zero-filled, so the
+  // raw response rows don't line up with the point indexes) — see seriesRows.
+  const value = data.value ? seriesRows(dim, data.value)[p.index]?.key?.[dim] : undefined
   if (value == null || value === '') return
   if (dim !== 'date' && !isSiteDim(dim) && semanticKey(dim, dataset) === null) return // not drillable → keep tooltip
   emit('drill', { widgetId: props.widget.id, dimension: dim, dataset, value: String(value), label: formatKey(dim, String(value)), x: p.x, y: p.y })
