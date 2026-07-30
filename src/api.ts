@@ -38,6 +38,13 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters): Promis
         limit: widget.type === 'map' ? 2000 : widget.limit ?? 50,
         sites: tags,
         constraints: drillConstraints(filters, 'geo'),
+        // "Hide my visits" / "hide self-referrals" apply to the beacon dataset too — same
+        // resolution as the RUM branch below (widget-level override falls back to the global
+        // filter) — so the two datasets agree instead of only RUM honoring these toggles.
+        excludeSelfReferrals: widget.excludeSelfReferrals ?? filters.excludeSelfReferrals,
+        excludeOwnVisits: filters.excludeOwnVisits,
+        ownBrowser: filters.ownBrowser,
+        ownOS: filters.ownOS,
       }),
     })
     if (!res.ok) {

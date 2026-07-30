@@ -16,6 +16,13 @@ All notable changes to **gss-stats** are documented here. The format follows
   chart (opens a page zoomed to that single day).
 
 ### Fixed
+- **Trend charts now show every day in the range.** Days with no traffic are plotted as zero
+  instead of being left out, so a 4-day range no longer collapses into a 2-point line that
+  looks like a 2-day range — gaps are visible as gaps.
+- **"Hide my visits" and "Hide self-referrals" now apply to beacon charts too.** They were
+  silently ignored on every beacon chart, so beacon and Cloudflare-RUM charts disagreed on the
+  same traffic. Beacon numbers will read lower now — your own visits are finally excluded there
+  as well.
 - **The drill-down menu no longer overlaps the chart's hover tooltip — and hover stays
   smooth.** Only the chart you drilled hides its tooltip while its menu is open (other charts
   are untouched), and the hover state is cleared on every toggle, so a tooltip can never get

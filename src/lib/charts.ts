@@ -1,5 +1,5 @@
 import type { ChartConfiguration } from 'chart.js'
-import type { Widget, StatsResponse, Metric } from '../types'
+import type { Widget, StatsResponse, StatsRow, Metric } from '../types'
 import { COUNTRY_NAMES } from './catalog'
 import { ringDims } from './rings'
 
@@ -298,6 +298,44 @@ const baseScales = () => ({
 
 const noLegend = { legend: { display: false } }
 
+// Zero-fill a date series: every day between since/until gets a bucket (0 if it had no rows),
+// so a sparse range doesn't visually collapse into just its non-empty days — e.g. a 4-day
+// range with data on only 2 of those days renders 4 points (two of them 0), not 2 points that
+// read as "the range is only 2 days". `since`/`until` come from resp.meta (both /api/geo and
+// /api/stats already echo back the range they queried — see types.ts StatsResponse — so no new
+// plumbing from ChartCard/effectiveFilters is needed; buildChartConfig already has it).
+// Returns null (skip filling, keep the original rows) when since/until are missing/invalid or
+// the span is implausibly huge — a malformed or enormous range shouldn't allocate thousands of
+// empty buckets, and callers fall back to the pre-fill behavior in that case.
+const MAX_FILL_DAYS = 400
+function dayBucketsInRange(since: string, until: string): string[] | null {
+  const s = new Date(since).getTime()
+  const u = new Date(until).getTime()
+  if (!isFinite(s) || !isFinite(u)) return null
+  const startDay = Date.UTC(new Date(s).getUTCFullYear(), new Date(s).getUTCMonth(), new Date(s).getUTCDate())
+  const endDay = Date.UTC(new Date(u).getUTCFullYear(), new Date(u).getUTCMonth(), new Date(u).getUTCDate())
+  if (endDay < startDay) return null
+  const dayCount = Math.round((endDay - startDay) / 86_400_000) + 1
+  if (dayCount > MAX_FILL_DAYS) return null
+  const days: string[] = []
+  for (let i = 0; i < dayCount; i++) days.push(new Date(startDay + i * 86_400_000).toISOString().slice(0, 10))
+  return days
+}
+
+// The rows a single-dimension chart actually PLOTS, in draw order — the response rows for
+// every dimension, plus the zero-filled days for a 'date' series. Both the renderer
+// (buildChartConfig) and the drill-down click handler (ChartCard.onPoint) read this, so a
+// clicked point index always resolves to the value drawn there: with zero-fill the chart can
+// have more points than the response has rows, and indexing the raw rows would drill into the
+// wrong day (or miss entirely).
+export function seriesRows(dim: string, resp: StatsResponse): StatsRow[] {
+  if (dim !== 'date') return resp.rows
+  const buckets = dayBucketsInRange(resp.meta.since, resp.meta.until)
+  if (!buckets) return resp.rows
+  const byDay = new Map(resp.rows.map((r) => [r.key.date ?? '', r]))
+  return buckets.map((day) => byDay.get(day) ?? { key: { date: day }, pageviews: 0, visits: 0 })
+}
+
 /**
  * Build a Chart.js configuration from a widget + its data. Returns null for
  * non-Chart.js widget types (stat / table) which the card renders itself.
@@ -429,9 +467,12 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
   }
 
   // ── Single-dimension series ─────────────────────────────────────────────────
-  const labels = resp.rows.map((r) => formatKey(dim, r.key[dim] ?? ''))
-  const values = resp.rows.map((r) => metricValue(r, m))
-  const rawValues = resp.rows.map((r) => String(r.key[dim] ?? ''))
+  // 'date' gets zero-filled to every day in range; every other dimension is untouched. Shared
+  // with the drill-down click handler so point index → value can't drift (see seriesRows).
+  const rows = seriesRows(dim, resp)
+  const labels = rows.map((r) => formatKey(dim, r.key[dim] ?? ''))
+  const values = rows.map((r) => metricValue(r, m))
+  const rawValues = rows.map((r) => String(r.key[dim] ?? ''))
   const colors = seriesColors(dim, rawValues)
 
   if (widget.type === 'doughnut' || widget.type === 'pie' || widget.type === 'nestedDoughnut') {
