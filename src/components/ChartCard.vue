@@ -19,7 +19,7 @@ const emit = defineEmits<{
   drill: [{ widgetId: string; dimension: string; dataset: 'geo' | 'rum'; value: string; label: string; x: number; y: number }]
 }>()
 
-const baseChartRef = ref<{ clearActive: () => void } | null>(null)
+const baseChartRef = ref<{ suppressForDrill: () => void } | null>(null)
 
 // A click on a chart element → hand the parent the raw dimension value so it can offer to
 // open a page filtered to it. Only for dimensions that are actually drillable — tapping a
@@ -40,8 +40,11 @@ function onPoint(p: { index: number; datasetIndex: number; x: number; y: number 
     const hit = nestedDoughnutClickValue(props.widget, data.value, p.datasetIndex, p.index)
     if (!hit) return
     if (!isSiteDim(hit.dimension) && semanticKey(hit.dimension, dataset) === null) return // not drillable → keep tooltip
+    // Suppress THIS chart's tooltip SYNCHRONOUSLY, before emitting — don't wait for the
+    // drillOpen prop to round-trip through Vue's (async) reactivity. See BaseChart's
+    // suppressForDrill() for why: on touch, a stray hover event can land in that gap.
+    baseChartRef.value?.suppressForDrill()
     emit('drill', { widgetId: props.widget.id, dimension: hit.dimension, dataset, value: hit.value, label: formatKey(hit.dimension, hit.value), x: p.x, y: p.y })
-    baseChartRef.value?.clearActive() // the drill menu opens here → dismiss the overlapping tooltip
     return
   }
 
@@ -50,8 +53,8 @@ function onPoint(p: { index: number; datasetIndex: number; x: number; y: number 
   const value = data.value ? seriesRows(dim, data.value)[p.index]?.key?.[dim] : undefined
   if (value == null || value === '') return
   if (dim !== 'date' && !isSiteDim(dim) && semanticKey(dim, dataset) === null) return // not drillable → keep tooltip
+  baseChartRef.value?.suppressForDrill() // sync suppression — see above
   emit('drill', { widgetId: props.widget.id, dimension: dim, dataset, value: String(value), label: formatKey(dim, String(value)), x: p.x, y: p.y })
-  baseChartRef.value?.clearActive() // the drill menu opens here → dismiss the overlapping tooltip
 }
 
 // ── Zoom: grow THIS card element to a centered spot and back, via a FLIP animation ──

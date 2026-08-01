@@ -19,12 +19,11 @@ function render() {
   if (props.drillOpen) setTooltipEnabled(false) // preserve suppression across a re-render (e.g. a data refresh) while the menu is still open
 }
 
-// The drill-down menu must never sit under the hover tooltip. clearActive() (below) only
-// clears it once — Chart.js re-shows it on the next mousemove/touch — so while THIS chart's
-// own menu is open we suppress its tooltip plugin outright, and restore it when the menu
-// closes. `drillOpen` is scoped to the widget that actually owns the open menu (see
-// ChartCard/Dashboard/App), so only that one chart's tooltip is ever touched — a menu stuck
-// open can't kill every other chart's hover.
+// The drill-down menu must never sit under the hover tooltip. While THIS chart's own menu is
+// open we suppress its tooltip plugin outright, and restore it when the menu closes.
+// `drillOpen` is scoped to the widget that actually owns the open menu (see ChartCard/
+// Dashboard/App), so only that one chart's tooltip is ever touched — a menu stuck open can't
+// kill every other chart's hover.
 //
 // Chart.js's `tooltip.enabled` flag only gates the DRAW step — it does NOT clear `_active`/
 // opacity. Toggling it alone leaves the tooltip's internal hover state exactly as it was, so
@@ -45,7 +44,11 @@ function setTooltipEnabled(enabled: boolean) {
   tooltip.enabled = enabled
   c.update('none')
 }
-watch(() => props.drillOpen, (open) => setTooltipEnabled(!open))
+// The RESTORE side (menu closes → re-enable) stays reactive: there's no tap event racing to
+// re-show a tooltip at that instant, so a same-tick-or-so watcher firing is plenty timely.
+watch(() => props.drillOpen, (open) => {
+  if (!open) setTooltipEnabled(true)
+})
 
 // Click on a bar/arc/point → tell the parent which data element was hit (for drill-down).
 function onCanvasClick(e: MouseEvent) {
@@ -57,22 +60,25 @@ function onCanvasClick(e: MouseEvent) {
   emit('point', { index: els[0].index, datasetIndex: els[0].datasetIndex, x: e.clientX, y: e.clientY })
 }
 
-// Dismiss the hover tooltip + highlight. The parent calls this only when a drill-down menu
-// actually opens at the tap spot, so the two don't overlap — while taps that DON'T drill
-// (e.g. a non-drillable dimension) keep their tooltip visible, which is the only way to read
-// a value on touch. This is just the immediate clear at click-time; the drillOpen watcher
-// above keeps the tooltip suppressed for as long as the menu stays open.
-function clearActive() {
-  const c = chart.value
-  if (!c) return
-  c.setActiveElements([])
-  ;(c.tooltip as { setActiveElements?: (e: unknown[], p: { x: number; y: number }) => void } | undefined)?.setActiveElements(
-    [],
-    { x: 0, y: 0 },
-  )
-  c.update('none')
+// Suppress THIS chart's tooltip for an about-to-open drill menu. The parent calls this
+// SYNCHRONOUSLY, in the same call stack as the click/tap that's about to emit the drill —
+// deliberately NOT via the (async) `drillOpen` prop/watcher above, and deliberately doing the
+// full disable here rather than only clearing active elements.
+//
+// Why: on touch, Chart.js treats touchstart (and the synthetic mousemove browsers dispatch as
+// part of touch→click compatibility) as hover-equivalent — so a stray touchmove/mousemove can
+// land in the gap between "we decided to drill" and "Vue's watcher got around to disabling the
+// tooltip." Verified by reproducing it directly: after clearing active elements alone (leaving
+// `tooltip.enabled` untouched until the watcher runs), a hover landing in that gap redrew the
+// tooltip — it stayed enabled the whole time, so nothing stopped it. Setting `enabled: false`
+// HERE, before returning control to the browser's event loop, closes the window entirely: by
+// the time any further event can fire, the plugin can no longer draw, no matter how it's
+// triggered. The watcher's OWN (now redundant) open-side effect was removed above so there's
+// exactly one code path that suppresses — no risk of the two disagreeing.
+function suppressForDrill() {
+  setTooltipEnabled(false)
 }
-defineExpose({ clearActive })
+defineExpose({ suppressForDrill })
 
 onMounted(() => {
   render()
