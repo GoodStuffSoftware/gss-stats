@@ -16,6 +16,13 @@ All notable changes to **gss-stats** are documented here. The format follows
   chart (opens a page zoomed to that single day).
 
 ### Fixed
+- **On phones, the drill-down menu is now a bottom sheet and never covers the chart.** It was
+  anchored at your fingertip, sitting right on top of the data (and its tooltip) you'd just
+  tapped. On narrow screens it now slides up from the bottom with a dimming backdrop; on
+  desktop it opens beside the point you clicked and stays fully on-screen near an edge.
+- **Tapping a chart no longer leaves a tooltip stuck under the drill menu.** On touch, a
+  browser's synthetic mouse event could re-show the tooltip in the instant between the tap and
+  the menu opening; the tooltip is now switched off in the same moment the tap is handled.
 - **Trend charts now show every day in the range.** Days with no traffic are plotted as zero
   instead of being left out, so a 4-day range no longer collapses into a 2-point line that
   looks like a 2-day range — gaps are visible as gaps.

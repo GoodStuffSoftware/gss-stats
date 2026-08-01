@@ -201,10 +201,44 @@ interface DrillPayload {
   y: number
 }
 const drillMenu = ref<DrillPayload | null>(null)
+
+// Below this width the menu renders as a full-width bottom sheet instead (see template) —
+// same breakpoint Dashboard.vue uses for its own mobile layout.
+const isMobile = ref(false)
+function checkMobile() {
+  isMobile.value = window.innerWidth <= 700
+}
+onMounted(() => {
+  checkMobile()
+  window.addEventListener('resize', checkMobile)
+})
+onBeforeUnmount(() => window.removeEventListener('resize', checkMobile))
+
+// Roughly the menu's own footprint (matches the CSS below) — used to keep it fully on-screen.
+const DRILL_MENU_W = 260
+const DRILL_MENU_H = 130
+
 function onDrill(p: DrillPayload) {
-  // Convert the click's viewport coords to document (page) coords; the menu is positioned
-  // absolutely, so it scrolls with its chart instead of staying pinned to the viewport.
-  drillMenu.value = { ...p, x: p.x + window.scrollX, y: p.y + window.scrollY }
+  // On mobile the menu renders as a bottom sheet (see template/CSS) and ignores x/y entirely,
+  // so it can never sit over the tapped point — skip the desktop positioning math.
+  if (isMobile.value) {
+    drillMenu.value = p
+    return
+  }
+  // Desktop: offset AWAY from the tap point (never directly on it, where the tooltip/data
+  // is), flip to the opposite side if the preferred side would run off the viewport, then
+  // clamp fully on-screen. p.x/p.y are viewport coords (clientX/clientY); compute in that
+  // space first, then convert to document coords so the menu scrolls with its chart instead
+  // of staying pinned to the viewport (this part is unchanged from before).
+  const margin = 14 // clear of the tapped point/its tooltip
+  const pad = 8 // minimum gap from the viewport edge
+  let vx = p.x + margin
+  let vy = p.y + margin
+  if (vx + DRILL_MENU_W > window.innerWidth - pad) vx = p.x - DRILL_MENU_W - margin // flip left
+  if (vy + DRILL_MENU_H > window.innerHeight - pad) vy = p.y - DRILL_MENU_H - margin // flip up
+  vx = Math.max(pad, Math.min(vx, window.innerWidth - DRILL_MENU_W - pad))
+  vy = Math.max(pad, Math.min(vy, window.innerHeight - DRILL_MENU_H - pad))
+  drillMenu.value = { ...p, x: vx + window.scrollX, y: vy + window.scrollY }
 }
 function closeDrill() {
   drillMenu.value = null
@@ -338,7 +372,8 @@ function toggleDark() {
       <div
         v-if="drillMenu"
         class="drill-menu"
-        :style="{ top: drillMenu.y + 'px', left: drillMenu.x + 'px' }"
+        :class="{ sheet: isMobile }"
+        :style="isMobile ? undefined : { top: drillMenu.y + 'px', left: drillMenu.x + 'px' }"
         @click.stop
       >
         <div class="drill-head">
@@ -347,6 +382,11 @@ function toggleDark() {
         </div>
         <button class="drill-act" @click="openFilteredPage">↳ Open as filtered page</button>
       </div>
+    </Teleport>
+    <Teleport to="body">
+      <Transition name="fade">
+        <div v-if="drillMenu && isMobile" class="drill-backdrop" @click="closeDrill"></div>
+      </Transition>
     </Teleport>
 
     <footer class="foot overline">
@@ -366,7 +406,9 @@ function toggleDark() {
 }
 .drill-menu {
   position: absolute;
-  z-index: 60;
+  /* Above ChartCard's zoom overlay (z-index 1000/1001) too — a drill can be triggered from a
+     zoomed chart, and the menu must never end up hidden behind it. */
+  z-index: 1100;
   min-width: 190px;
   max-width: 260px;
   background: rgb(var(--surface));
@@ -374,7 +416,47 @@ function toggleDark() {
   border-radius: 10px;
   box-shadow: 0 12px 34px rgb(0 0 0 / 0.24);
   padding: 8px;
-  transform: translate(6px, 6px);
+  /* top/left are pre-clamped + offset away from the tap point in App.onDrill (never placed
+     directly on the tapped datapoint/its tooltip) — no CSS offset needed here. */
+}
+/* Mobile: a full-width bottom sheet instead of a point-anchored popup. It always shows the
+   dimension + value itself, so it never needs to sit AT the tap point — pinning it to the
+   bottom guarantees it can never cover the chart/data area at all, regardless of where on the
+   card the user tapped. */
+.drill-menu.sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  top: auto;
+  min-width: 0;
+  max-width: none;
+  width: 100%;
+  border-radius: 16px 16px 0 0;
+  border-width: 1px 0 0 0;
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+  box-shadow: 0 -10px 30px rgb(0 0 0 / 0.22);
+}
+.drill-menu.sheet .drill-head {
+  padding: 6px 4px 10px;
+}
+.drill-menu.sheet .drill-act {
+  padding: 13px 10px; /* comfortable tap target at 375px wide */
+  font-size: 14.5px;
+}
+.drill-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1099; /* just under the sheet, above everything else including the zoom overlay */
+  background: rgb(0 0 0 / 0.4);
+}
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 .drill-head {
   display: flex;
