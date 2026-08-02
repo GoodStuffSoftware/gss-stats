@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { GridLayout, GridItem } from 'grid-layout-plus'
 import type { Widget, GlobalFilters } from '../types'
+import { isTouchDevice } from '../lib/responsive'
 import ChartCard from './ChartCard.vue'
 
 // Two-way bound to the parent's reactive widgets array; grid-layout-plus writes
@@ -32,6 +33,19 @@ onMounted(() => {
   window.addEventListener('resize', check)
 })
 onBeforeUnmount(() => window.removeEventListener('resize', check))
+
+// Touch-capable devices ALSO get drag/resize disabled, regardless of width (isMobile alone
+// isn't enough — an unfolded foldable phone is well over 700px but is still a touchscreen).
+// Root cause: grid-layout-plus applies `touch-action: none` to the WHOLE grid item (title +
+// body + canvas — its own injected `.vgl-item--no-touch` rule) on Android whenever the item is
+// draggable or resizable, regardless of drag-allow-from — that scopes which element can START
+// a drag, not the CSS, which blankets the entire card. The result: a finger-drag starting
+// ANYWHERE on a card (canvas, chart body, even the title) can't scroll the page at all — only
+// the gaps between cards can. Disabling both here (capability-based, not just width-based)
+// keeps that class from ever applying, so the whole card is normal-scrollable again. A
+// device's touch capability doesn't change at runtime, so this is computed once.
+const touchCapable = isTouchDevice()
+const dragEnabled = computed(() => !isMobile.value && !touchCapable)
 </script>
 
 <template>
@@ -40,8 +54,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', check))
     :col-num="12"
     :row-height="40"
     :margin="[14, 14]"
-    :is-draggable="!isMobile"
-    :is-resizable="!isMobile"
+    :is-draggable="dragEnabled"
+    :is-resizable="dragEnabled"
     :vertical-compact="true"
     :use-css-transforms="true"
     @layout-updated="emit('change')"

@@ -7,6 +7,7 @@ import { checkSessionExpired, isNetworkError } from '../session'
 import { buildChartConfig, formatKey, metricValue, nestedDoughnutClickValue, seriesRows } from '../lib/charts'
 import { rangeLabel } from '../lib/range'
 import { isSiteDim, semanticKey } from '../lib/drill'
+import { isMobileViewport } from '../lib/responsive'
 import BaseChart from './charts/BaseChart.vue'
 import WorldMap from './charts/WorldMap.vue'
 import FilterPopover from './FilterPopover.vue'
@@ -27,6 +28,18 @@ const baseChartRef = ref<{ suppressForDrill: () => void } | null>(null)
 // way to read it on touch. 'date' is the one exception: it's not a semantic drill key (see
 // drill.ts), but App.openFilteredPage special-cases it into a day range, so it's allowed
 // through here too.
+// Hide this chart's tooltip for an about-to-open drill menu — but ONLY when the menu could
+// actually land on top of it. On mobile the menu is a bottom sheet (App.vue), so it can never
+// cover the chart, and suppressing there would take away the tooltip entirely: a tap is the
+// only way to read a value on touch, and every tap of a drillable point opens a menu. So on
+// mobile the tooltip stays. On desktop the menu opens near the pointer, so suppress — and do
+// it SYNCHRONOUSLY, in the tap's own call stack rather than via the async drillOpen prop,
+// because a stray hover event can otherwise land in that gap (see BaseChart.suppressForDrill).
+function suppressTooltipForDrill() {
+  if (isMobileViewport()) return
+  baseChartRef.value?.suppressForDrill()
+}
+
 function onPoint(p: { index: number; datasetIndex: number; x: number; y: number }) {
   const dim = props.widget.dimension
   if (!dim) return
@@ -40,10 +53,7 @@ function onPoint(p: { index: number; datasetIndex: number; x: number; y: number 
     const hit = nestedDoughnutClickValue(props.widget, data.value, p.datasetIndex, p.index)
     if (!hit) return
     if (!isSiteDim(hit.dimension) && semanticKey(hit.dimension, dataset) === null) return // not drillable → keep tooltip
-    // Suppress THIS chart's tooltip SYNCHRONOUSLY, before emitting — don't wait for the
-    // drillOpen prop to round-trip through Vue's (async) reactivity. See BaseChart's
-    // suppressForDrill() for why: on touch, a stray hover event can land in that gap.
-    baseChartRef.value?.suppressForDrill()
+    suppressTooltipForDrill()
     emit('drill', { widgetId: props.widget.id, dimension: hit.dimension, dataset, value: hit.value, label: formatKey(hit.dimension, hit.value), x: p.x, y: p.y })
     return
   }
@@ -53,7 +63,7 @@ function onPoint(p: { index: number; datasetIndex: number; x: number; y: number 
   const value = data.value ? seriesRows(dim, data.value)[p.index]?.key?.[dim] : undefined
   if (value == null || value === '') return
   if (dim !== 'date' && !isSiteDim(dim) && semanticKey(dim, dataset) === null) return // not drillable → keep tooltip
-  baseChartRef.value?.suppressForDrill() // sync suppression — see above
+  suppressTooltipForDrill()
   emit('drill', { widgetId: props.widget.id, dimension: dim, dataset, value: String(value), label: formatKey(dim, String(value)), x: p.x, y: p.y })
 }
 

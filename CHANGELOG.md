@@ -15,7 +15,19 @@ All notable changes to **gss-stats** are documented here. The format follows
   breakdown chart (drills to the clicked site or device) and from the **pageviews-over-time**
   chart (opens a page zoomed to that single day).
 
+### Changed
+- **Touch gestures on charts: tap to read, hold to drill.** On a touchscreen a short tap now
+  just shows the datapoint's tooltip, and a half-second press-and-hold opens the "open as
+  filtered page" menu (with a small haptic tick). Mouse behaviour is unchanged — a click still
+  drills straight away.
+
 ### Fixed
+- **You can scroll the dashboard by dragging anywhere on a chart again.** Cards that were
+  draggable disabled touch-scrolling across the *whole* card on Android, so scrolling only
+  worked from the page margin. Drag-to-rearrange is now switched off on touchscreens (it was
+  only ever off on narrow ones, so large phones and tablets were affected); mouse users keep it.
+- **Tapping a chart no longer flashes a blue highlight box** over it, and holding no longer pops
+  the browser's own context menu on top of the drill menu.
 - **On phones, the drill-down menu is now a bottom sheet and never covers the chart.** It was
   anchored at your fingertip, sitting right on top of the data (and its tooltip) you'd just
   tapped. On narrow screens it now slides up from the bottom with a dimming backdrop; on
