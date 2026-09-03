@@ -7,6 +7,10 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Best Sudoku launch page shows campaign source / medium.** A new "Campaign source /
+  medium" chart on the Best Sudoku page groups by `utm_source` (e.g. `google`), alongside
+  the existing campaign chart (now labeled "Campaign (utm_campaign)") — both now cover the
+  Google Ads campaign traffic as well as tagged Reddit links.
 - **Nested doughnuts can have any number of rings.** Add, remove, and reorder ring
   dimensions in the chart editor (e.g. site → device → OS → browser) — each becomes another
   ring outward. Beacon charts nest as deep as the data allows; Cloudflare-RUM charts cap at a
