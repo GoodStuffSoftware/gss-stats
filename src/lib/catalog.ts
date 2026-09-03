@@ -17,7 +17,7 @@ export const GEO_DIMENSIONS: { key: string; label: string }[] = [
   { key: 'org', label: 'ISP / network' },
   { key: 'referrer', label: 'Referrer' },
   { key: 'refpath', label: 'Referrer path (e.g. subreddit)' },
-  { key: 'campaign', label: 'Campaign / subreddit (utm)' },
+  { key: 'campaign', label: 'Campaign (utm_campaign)' },
   { key: 'source', label: 'Source (utm)' },
   { key: 'medium', label: 'Medium (utm)' },
   { key: 'site', label: 'Site' },
