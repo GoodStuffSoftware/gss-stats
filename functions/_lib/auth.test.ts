@@ -3,11 +3,14 @@ import {
   authGate,
   b64urlDecode,
   b64urlEncode,
+  CLOCK_SKEW_SECONDS,
   createSessionCookie,
   GOOGLE_TOKEN_ENDPOINT,
+  isAllowedEmail,
   parseAllowedEmails,
   readAuthConfig,
   safeNext,
+  sessionTtlHours,
   signToken,
   validateIdTokenClaims,
   type AuthConfig,
@@ -106,17 +109,29 @@ function tokenEndpointReturning(idToken: string | null, status = 200) {
   )
 }
 
-async function completeLogin(opts: { claims?: (nonce: string) => Record<string, unknown>; next?: string } = {}) {
+async function completeLogin(
+  opts: { claims?: (nonce: string) => Record<string, unknown>; next?: string; env?: AuthEnv } = {},
+) {
   const { google, stateCookie } = await startLogin(opts.next)
   const state = google.searchParams.get('state')!
   const nonce = google.searchParams.get('nonce')!
   const fetchMock = tokenEndpointReturning(fakeJwt((opts.claims ?? goodClaims)(nonce)))
   const { res, next } = await gate(
     req(`/auth/google/callback?state=${state}&code=auth-code`, { cookie: cookiePair(stateCookie) }),
-    ENV,
+    opts.env ?? ENV,
     { fetch: fetchMock as unknown as typeof fetch },
   )
   return { res, next, fetchMock, google }
+}
+
+/** True when the response sets a non-empty session cookie. */
+function issuesSession(res: Response): boolean {
+  return setCookies(res).some((c) => /^(__Host-)?gss_session=[^;]/.test(c))
+}
+
+/** A validly signed session token with arbitrary claims, as a cookie pair. */
+async function signedSession(claims: Record<string, unknown>): Promise<string> {
+  return `__Host-gss_session=${await signToken(SECRET, 'gss-stats/session/v1', claims)}`
 }
 
 // ── Configuration: allowlist + fail closed ───────────────────────────────────────
@@ -125,6 +140,115 @@ describe('allowlist parsing (deckhand convention)', () => {
   it('is comma-separated, trimmed, lower-cased, exact', () => {
     expect(parseAllowedEmails(' A@x.com,b@Y.com ,, ')).toEqual(['a@x.com', 'b@y.com'])
     expect(parseAllowedEmails(undefined)).toEqual([])
+  })
+})
+
+describe('allowlist matching is exact', () => {
+  const allowed = parseAllowedEmails(ENV.ALLOWED_EMAILS)
+  // Superstrings (contain an allowlisted address) and substrings (contained in one).
+  const nearMisses = [
+    'xowner@example.com',
+    'owner@example.com.evil.example',
+    'owner@example.comx',
+    'owner@example.co',
+    'wner@example.com',
+    'example.com',
+    '@example.com',
+    'owner',
+  ]
+
+  it('matches only the exact address, case-insensitively', () => {
+    expect(isAllowedEmail('owner@example.com', allowed)).toBe(true)
+    expect(isAllowedEmail('OWNER@Example.COM', allowed)).toBe(true)
+    for (const email of nearMisses) expect(isAllowedEmail(email, allowed), email).toBe(false)
+    for (const bad of ['', undefined, null, 42]) expect(isAllowedEmail(bad, allowed)).toBe(false)
+  })
+
+  it.each(nearMisses)('callback: a verified Google account %s gets 403 and no session', async (email) => {
+    const { res } = await completeLogin({ claims: (n) => goodClaims(n, { email }) })
+    expect(res.status).toBe(403)
+    expect(issuesSession(res)).toBe(false)
+  })
+
+  it.each(nearMisses)('readSession: a validly signed session for %s is refused', async (email) => {
+    const { res, next } = await gate(req('/api/sites', { cookie: await sessionCookieFor(email) }))
+    expect(res.status).toBe(401)
+    expect(next).not.toHaveBeenCalled()
+  })
+})
+
+describe('emails that are not printable ASCII are refused before comparing', () => {
+  // U+212A KELVIN SIGN lower-cases to ASCII "k", so a naive toLowerCase() compare would
+  // let "miKe@example.com" match an allowlisted mike@example.com.
+  const KELVIN = 'miKe@example.com'
+  const MIKE_ENV: AuthEnv = { ...ENV, ALLOWED_EMAILS: 'mike@example.com' }
+  const mikeList = parseAllowedEmails(MIKE_ENV.ALLOWED_EMAILS)
+
+  it('isAllowedEmail refuses the U+212A look-alike and other non-printable-ASCII forms', () => {
+    expect(KELVIN.toLowerCase()).toBe('mike@example.com') // the trap being guarded against
+    expect(isAllowedEmail('mike@example.com', mikeList)).toBe(true)
+    for (const email of [KELVIN, ' mike@example.com', 'mike@example.com ', 'mike@example.com\u0000', 'mike@exam ple.com']) {
+      expect(isAllowedEmail(email, mikeList), JSON.stringify(email)).toBe(false)
+    }
+  })
+
+  it('callback: a U+212A look-alike ID-token email gets no session', async () => {
+    const { res } = await completeLogin({ env: MIKE_ENV, claims: (n) => goodClaims(n, { email: KELVIN }) })
+    expect(res.status).toBe(401)
+    expect(issuesSession(res)).toBe(false)
+    // Control: the genuine ASCII address signs in under the same allowlist.
+    const ok = await completeLogin({ env: MIKE_ENV, claims: (n) => goodClaims(n, { email: 'Mike@example.com' }) })
+    expect(ok.res.status).toBe(302)
+    expect(issuesSession(ok.res)).toBe(true)
+  })
+
+  it('readSession: a validly signed U+212A look-alike session is refused', async () => {
+    const bad = await gate(req('/api/sites', { cookie: await sessionCookieFor(KELVIN) }), MIKE_ENV)
+    expect(bad.res.status).toBe(401)
+    expect(bad.next).not.toHaveBeenCalled()
+    const ok = await gate(req('/api/sites', { cookie: await sessionCookieFor('mike@example.com') }), MIKE_ENV)
+    expect(ok.next).toHaveBeenCalledOnce()
+  })
+
+  it('an allowlist entry that is not plain ASCII is a configuration error (503)', async () => {
+    const r = readAuthConfig({ ...ENV, ALLOWED_EMAILS: `owner@example.com, ${KELVIN}` })
+    expect(r).toEqual({ ok: false, problems: ['ALLOWED_EMAILS has an entry that is not a plain ASCII address'] })
+    const { res, next } = await gate(req('/api/sites', { cookie: await sessionCookieFor('owner@example.com') }), {
+      ...ENV,
+      ALLOWED_EMAILS: KELVIN,
+    })
+    expect(res.status).toBe(503)
+    expect(next).not.toHaveBeenCalled()
+  })
+})
+
+describe('SESSION_TTL_HOURS', () => {
+  it('defaults when unset or blank, and accepts a plain number from 1 to 720', () => {
+    expect(sessionTtlHours(undefined)).toBe(168)
+    expect(sessionTtlHours('')).toBe(168)
+    expect(sessionTtlHours('  ')).toBe(168)
+    expect(sessionTtlHours(' 48 ')).toBe(48)
+    expect(sessionTtlHours('1')).toBe(1)
+    expect(sessionTtlHours('1.5')).toBe(1.5)
+    expect(sessionTtlHours('720')).toBe(720)
+    expect(readAuthConfig({ ...ENV, SESSION_TTL_HOURS: '1' })).toMatchObject({ ok: true, config: { ttlSeconds: 3600 } })
+    expect(readAuthConfig({ ...ENV, SESSION_TTL_HOURS: '720' })).toMatchObject({ ok: true, config: { ttlSeconds: 720 * 3600 } })
+    expect(readAuthConfig(ENV)).toMatchObject({ ok: true, config: { ttlSeconds: 168 * 3600 } })
+  })
+
+  const bad = ['abc', '12h', '0', '0.5', '0.9999', '0.0001', '-5', '721', '720.5', '1e2', '0x10', 'Infinity', 'NaN', '1,5']
+  it.each(bad)('%s is a configuration error: 503, and even a valid cookie is refused', async (value) => {
+    expect(sessionTtlHours(value)).toBeNull()
+    const env = { ...ENV, SESSION_TTL_HOURS: value }
+    expect(readAuthConfig(env)).toEqual({ ok: false, problems: ['SESSION_TTL_HOURS must be a number of hours from 1 to 720'] })
+    const cookie = await sessionCookieFor('owner@example.com')
+    const api = await gate(req('/api/sites', { cookie }), env)
+    expect(api.res.status).toBe(503)
+    expect(api.next).not.toHaveBeenCalled()
+    expect(JSON.stringify(await api.res.json())).not.toContain(`"${value}"`)
+    const page = await gate(req('/', { cookie }), env)
+    expect(page.res.status).toBe(503)
+    expect(page.next).not.toHaveBeenCalled()
   })
 })
 
@@ -343,6 +467,10 @@ describe('Google sign-in flow', () => {
     expect(body.get('redirect_uri')).toBe('https://stats.goodstuff.software/auth/google/callback')
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body.get('code_verifier')!))
     expect(b64urlEncode(new Uint8Array(digest))).toBe(google.searchParams.get('code_challenge'))
+    // Never follow a redirect away from the token endpoint (the unsigned-ID-token ruling
+    // rests on TLS to that exact host).
+    expect(init!.method).toBe('POST')
+    expect(init!.redirect).toBe('error')
 
     const cookies = setCookies(res)
     const session = cookies.find((c) => c.startsWith('__Host-gss_session='))!
@@ -421,9 +549,87 @@ describe('Google sign-in flow', () => {
 })
 
 describe('validateIdTokenClaims', () => {
-  it('accepts the legacy issuer form and a string email_verified', () => {
-    const r = validateIdTokenClaims(goodClaims('n', { iss: 'accounts.google.com', email_verified: 'true' }), { clientId: CLIENT_ID, nonce: 'n' }, NOW)
+  const expected = { clientId: CLIENT_ID, nonce: 'n' }
+  const now = Math.floor(NOW / 1000)
+
+  it('accepts the legacy issuer form', () => {
+    const r = validateIdTokenClaims(goodClaims('n', { iss: 'accounts.google.com' }), expected, NOW)
     expect(r).toEqual({ ok: true, email: 'owner@example.com', sub: '1234567890' })
+  })
+
+  it.each([['true'], ['false'], ['False'], [1], [0], [null], [undefined], ['yes'], [{}], [[true]]])(
+    'refuses email_verified = %j (only the boolean true counts)',
+    (value) => {
+      expect(validateIdTokenClaims(goodClaims('n', { email_verified: value }), expected, NOW)).toEqual({
+        ok: false,
+        reason: 'email not verified',
+      })
+    },
+  )
+
+  it('a multi-audience token needs azp equal to our client ID', () => {
+    const other = 'other-client.apps.googleusercontent.com'
+    for (const azp of [undefined, other, '']) {
+      expect(validateIdTokenClaims(goodClaims('n', { aud: [CLIENT_ID, other], azp }), expected, NOW), String(azp)).toEqual({
+        ok: false,
+        reason: 'wrong authorized party',
+      })
+    }
+    expect(validateIdTokenClaims(goodClaims('n', { aud: [CLIENT_ID, other], azp: CLIENT_ID }), expected, NOW).ok).toBe(true)
+    // A single-element array is just our audience; azp is optional there.
+    expect(validateIdTokenClaims(goodClaims('n', { aud: [CLIENT_ID], azp: undefined }), expected, NOW).ok).toBe(true)
+    expect(validateIdTokenClaims(goodClaims('n', { aud: [other], azp: undefined }), expected, NOW)).toEqual({
+      ok: false,
+      reason: 'wrong audience',
+    })
+  })
+
+  it(`refuses an iat more than ${CLOCK_SKEW_SECONDS}s in the future, and a missing iat`, () => {
+    const at = (iat: unknown) => validateIdTokenClaims(goodClaims('n', { iat, exp: now + 7200 }), expected, NOW)
+    expect(at(now + CLOCK_SKEW_SECONDS).ok).toBe(true)
+    for (const iat of [now + CLOCK_SKEW_SECONDS + 1, now + 3600, undefined, String(now)]) {
+      expect(at(iat), String(iat)).toEqual({ ok: false, reason: 'issued in the future' })
+    }
+  })
+})
+
+describe('ID token checks, end to end through the callback', () => {
+  const now = Math.floor(NOW / 1000)
+  const other = 'other-client.apps.googleusercontent.com'
+  const refused: [string, (n: string) => Record<string, unknown>][] = [
+    ['email_verified "false"', (n) => goodClaims(n, { email_verified: 'false' })],
+    ['email_verified "true" (a string)', (n) => goodClaims(n, { email_verified: 'true' })],
+    ['email_verified 1', (n) => goodClaims(n, { email_verified: 1 })],
+    ['email_verified missing', (n) => goodClaims(n, { email_verified: undefined })],
+    ['aud [ours, other] with no azp', (n) => goodClaims(n, { aud: [CLIENT_ID, other], azp: undefined })],
+    ['aud [ours, other] with azp other', (n) => goodClaims(n, { aud: [CLIENT_ID, other], azp: other })],
+    ['iat an hour in the future', (n) => goodClaims(n, { iat: now + 3600, exp: now + 7200 })],
+  ]
+  it.each(refused)('%s → 401, no session', async (_name, claims) => {
+    const { res } = await completeLogin({ claims })
+    expect(res.status).toBe(401)
+    expect(issuesSession(res)).toBe(false)
+  })
+
+  it('aud [ours, other] with azp = ours signs in (control)', async () => {
+    const { res } = await completeLogin({ claims: (n) => goodClaims(n, { aud: [CLIENT_ID, other], azp: CLIENT_ID }) })
+    expect(res.status).toBe(302)
+    expect(issuesSession(res)).toBe(true)
+  })
+})
+
+describe('session iat in the future', () => {
+  const now = Math.floor(NOW / 1000)
+  const base = { v: 1, email: 'owner@example.com', sub: 's' }
+
+  it(`is refused beyond ${CLOCK_SKEW_SECONDS}s of skew, and accepted within it`, async () => {
+    for (const iat of [now + CLOCK_SKEW_SECONDS + 1, now + 3600]) {
+      const { res, next } = await gate(req('/api/sites', { cookie: await signedSession({ ...base, iat, exp: iat + 3600 }) }))
+      expect(res.status, String(iat - now)).toBe(401)
+      expect(next).not.toHaveBeenCalled()
+    }
+    const ok = await gate(req('/api/sites', { cookie: await signedSession({ ...base, iat: now + CLOCK_SKEW_SECONDS, exp: now + 3600 }) }))
+    expect(ok.next).toHaveBeenCalledOnce()
   })
 })
 
@@ -475,8 +681,27 @@ describe('safeNext (open-redirect guard)', () => {
     ['/auth/google/login', '/'],
     ['/a\nb', '/'],
     [null, '/'],
+    // Location must be ASCII: non-ASCII and spaces are encoded, existing escapes kept.
+    ['/中', '/%E4%B8%AD'],
+    ['/a b?q=é', '/a%20b?q=%C3%A9'],
+    ['/?q=a%20b&x=%2F#h', '/?q=a%20b&x=%2F#h'],
+    ['/%E4%B8%AD', '/%E4%B8%AD'],
+    ['/\uD800', '/'], // a lone surrogate can't be encoded
+    ['/' + '中'.repeat(700), '/'], // fits before encoding, too long after
   ])('%s → %s', (input, expected) => {
     expect(safeNext(input as string | null)).toBe(expected)
+  })
+
+  it('the post-sign-in Location is ASCII even for a non-ASCII next', async () => {
+    const { google, stateCookie } = await startLogin('/中?q=é')
+    const fetchMock = tokenEndpointReturning(fakeJwt(goodClaims(google.searchParams.get('nonce')!)))
+    const { res } = await gate(
+      req(`/auth/google/callback?state=${google.searchParams.get('state')}&code=c`, { cookie: cookiePair(stateCookie) }),
+      ENV,
+      { fetch: fetchMock as unknown as typeof fetch },
+    )
+    expect(res.status).toBe(302)
+    expect(res.headers.get('Location')).toBe('/%E4%B8%AD?q=%C3%A9')
   })
 
   it('login ignores a hostile next and returns to /', async () => {
@@ -527,6 +752,25 @@ describe('local dev bypass', () => {
     expect(unconfigured.res.status).toBe(503)
   })
 
+  it.each(['0', 'false', 'true', 'TRUE', 'yes', 'on', ' ', '', ' 1', '1 ', '01', '1.0'])(
+    'AUTH_DEV_BYPASS=%j leaves the bypass off (only exactly "1" turns it on)',
+    async (flag) => {
+      const { res, next } = await gate(req('/api/sites', {}, LOCAL), { AUTH_DEV_BYPASS: flag })
+      expect(res.status).toBe(503)
+      expect(res.headers.get('X-Auth-Dev-Bypass')).toBeNull()
+      expect(next).not.toHaveBeenCalled()
+      const me = await gate(req('/auth/me', {}, LOCAL), { AUTH_DEV_BYPASS: flag })
+      expect(me.res.status).toBe(503)
+    },
+  )
+
+  it('IPv6 loopback ([::1]) is not treated as loopback: no bypass, no plain-http', async () => {
+    const { res, next } = await gate(req('/api/sites', {}, 'http://[::1]:8788'), { AUTH_DEV_BYPASS: '1' })
+    expect(next).not.toHaveBeenCalled()
+    expect(res.status).toBe(308)
+    expect(res.headers.get('Location')).toBe('https://[::1]:8788/api/sites')
+  })
+
   it('without the flag, loopback runs the real flow with non-__Host- cookies over http', async () => {
     const { res } = await gate(req('/auth/google/login', {}, LOCAL))
     expect(new URL(res.headers.get('Location')!).searchParams.get('redirect_uri')).toBe(
@@ -548,6 +792,13 @@ describe('functions/_middleware onRequest', () => {
 
   it('404s non-canonical hosts (pages.dev, previews) before auth', async () => {
     const { ctx: c, next } = ctx(new Request('https://feat-google-auth.gss-stats.pages.dev/'), ENV)
+    const res = await onRequest(c)
+    expect(res.status).toBe(404)
+    expect(next).not.toHaveBeenCalled()
+  })
+
+  it('404s IPv6 loopback, even with the dev bypass on', async () => {
+    const { ctx: c, next } = ctx(new Request('http://[::1]:8788/api/sites'), { AUTH_DEV_BYPASS: '1' })
     const res = await onRequest(c)
     expect(res.status).toBe(404)
     expect(next).not.toHaveBeenCalled()

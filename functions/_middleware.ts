@@ -15,6 +15,7 @@
 
 import { authGate, type AuthEnv } from './_lib/auth'
 
+// The loopback entries must match isLoopbackHost in functions/_lib/auth.ts.
 export const ALLOWED_HOSTS = new Set([
   'stats.goodstuff.software', // canonical
   'localhost',

@@ -18,8 +18,9 @@
 //     and rotating SESSION_SECRET ends every session.
 //
 // FAIL CLOSED: if any required setting is missing or invalid, nobody gets in (503).
-// The only way past the gate without Google is AUTH_DEV_BYPASS=1, and even then only
-// when the request host is loopback (wrangler pages dev), never a deployed hostname.
+// The only way past the gate without Google is AUTH_DEV_BYPASS set to exactly "1", and
+// even then only when the request host is loopback (wrangler pages dev), never a
+// deployed hostname.
 
 export interface AuthEnv {
   GOOGLE_CLIENT_ID?: string
@@ -50,10 +51,16 @@ export const SIGNED_OUT_PATH = '/auth/signed-out'
 
 export const MIN_SESSION_SECRET_LENGTH = 32
 export const DEFAULT_SESSION_TTL_HOURS = 168 // 7 days, deckhand's default
+export const MIN_SESSION_TTL_HOURS = 1
 export const MAX_SESSION_TTL_HOURS = 720 // 30 days
 const STATE_TTL_SECONDS = 600 // one login attempt; deckhand's value
-const CLOCK_SKEW_SECONDS = 300
+export const CLOCK_SKEW_SECONDS = 300
 const MAX_COOKIE_TOKEN_LENGTH = 4096
+const MAX_NEXT_LENGTH = 2048
+
+// An email address is only ever compared as printable ASCII (no spaces, no controls,
+// nothing non-ASCII). See isAllowedEmail for why.
+const PRINTABLE_ASCII = /^[\x21-\x7e]+$/
 
 // Domain separation: a signed state cookie can never be replayed as a session cookie
 // (or vice versa), because each purpose signs over a different prefix.
@@ -82,17 +89,25 @@ export function parseAllowedEmails(raw: unknown): string[] {
     .filter(Boolean)
 }
 
+/** Exact, case-insensitive match: never a substring, superstring or domain match.
+ *  Anything that isn't printable ASCII is refused BEFORE lower-casing, because
+ *  toLowerCase() folds some non-ASCII letters onto ASCII ones (U+212A KELVIN SIGN
+ *  becomes "k"), which would let a look-alike address match an allowlisted one. */
 export function isAllowedEmail(email: unknown, allowed: string[]): boolean {
-  if (typeof email !== 'string' || !email) return false
-  return allowed.includes(email.trim().toLowerCase())
+  if (typeof email !== 'string' || !PRINTABLE_ASCII.test(email)) return false
+  return allowed.includes(email.toLowerCase())
 }
 
-export function sessionTtlHours(raw: unknown): number {
-  const n = Number(raw)
-  if (raw === undefined || raw === null || String(raw).trim() === '' || !Number.isFinite(n) || n <= 0) {
-    return DEFAULT_SESSION_TTL_HOURS
-  }
-  return Math.min(n, MAX_SESSION_TTL_HOURS)
+/** SESSION_TTL_HOURS in hours. Unset or blank → the default. A plain decimal number
+ *  from MIN to MAX → that number. Anything else (text, 0, 1e3, 0x10, over the cap) →
+ *  null, which readAuthConfig reports as a configuration error, so a typo locks the
+ *  gate instead of silently falling back or issuing zero-length sessions. */
+export function sessionTtlHours(raw: unknown): number | null {
+  const s = String(raw ?? '').trim()
+  if (s === '') return DEFAULT_SESSION_TTL_HOURS
+  if (!/^\d+(\.\d+)?$/.test(s)) return null
+  const n = Number(s)
+  return n >= MIN_SESSION_TTL_HOURS && n <= MAX_SESSION_TTL_HOURS ? n : null
 }
 
 /** Resolve the auth settings. Any problem → not ok, and the caller must refuse
@@ -103,13 +118,22 @@ export function readAuthConfig(env: AuthEnv): ConfigResult {
   const clientSecret = (env.GOOGLE_CLIENT_SECRET ?? '').trim()
   const sessionSecret = (env.SESSION_SECRET ?? '').trim()
   const allowedEmails = parseAllowedEmails(env.ALLOWED_EMAILS)
+  const ttlHours = sessionTtlHours(env.SESSION_TTL_HOURS)
   if (!clientId) problems.push('GOOGLE_CLIENT_ID is not set')
   if (!clientSecret) problems.push('GOOGLE_CLIENT_SECRET is not set')
   if (sessionSecret.length < MIN_SESSION_SECRET_LENGTH) {
     problems.push(`SESSION_SECRET is not set or shorter than ${MIN_SESSION_SECRET_LENGTH} characters`)
   }
   if (allowedEmails.length === 0) problems.push('ALLOWED_EMAILS is empty')
-  if (problems.length) return { ok: false, problems }
+  // Checked on the raw entries, before parseAllowedEmails lower-cases them (see isAllowedEmail).
+  const rawEntries = String(env.ALLOWED_EMAILS ?? '').split(',').map((s) => s.trim()).filter(Boolean)
+  if (rawEntries.some((e) => !PRINTABLE_ASCII.test(e))) {
+    problems.push('ALLOWED_EMAILS has an entry that is not a plain ASCII address')
+  }
+  if (ttlHours === null) {
+    problems.push(`SESSION_TTL_HOURS must be a number of hours from ${MIN_SESSION_TTL_HOURS} to ${MAX_SESSION_TTL_HOURS}`)
+  }
+  if (problems.length || ttlHours === null) return { ok: false, problems }
   return {
     ok: true,
     config: {
@@ -117,20 +141,22 @@ export function readAuthConfig(env: AuthEnv): ConfigResult {
       clientSecret,
       sessionSecret,
       allowedEmails,
-      ttlSeconds: Math.floor(sessionTtlHours(env.SESSION_TTL_HOURS) * 3600),
+      ttlSeconds: Math.floor(ttlHours * 3600),
     },
   }
 }
 
+/** The loopback hostnames local dev uses. Must stay in step with ALLOWED_HOSTS in
+ *  functions/_middleware.ts (IPv6 loopback is served by neither). */
 export function isLoopbackHost(hostname: string): boolean {
-  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
+  return hostname === 'localhost' || hostname === '127.0.0.1'
 }
 
-/** The local-dev bypass identity, or null. Needs BOTH the explicit flag AND a loopback
- *  request host, so setting the flag on a deployed project does nothing. */
+/** The local-dev bypass identity, or null. Needs BOTH the flag set to exactly "1" AND a
+ *  loopback request host, so setting the flag on a deployed project does nothing, and
+ *  "0", "false" or a stray value never switch it on. */
 export function devBypassEmail(env: AuthEnv, url: URL): string | null {
-  const flag = (env.AUTH_DEV_BYPASS ?? '').trim().toLowerCase()
-  if (flag !== '1' && flag !== 'true') return null
+  if (env.AUTH_DEV_BYPASS !== '1') return null
   if (!isLoopbackHost(url.hostname)) return null
   return (env.AUTH_DEV_EMAIL ?? '').trim().toLowerCase() || 'dev@localhost'
 }
@@ -262,8 +288,8 @@ export async function createSessionCookie(
 }
 
 /** The request's valid session, or null. Valid = signature checks out, not expired
- *  under BOTH its own exp and the CURRENT TTL setting, and the email is STILL on the
- *  allowlist. */
+ *  under BOTH its own exp and the CURRENT TTL setting, not issued in the future (beyond
+ *  a small clock skew), and the email is STILL on the allowlist. */
 export async function readSession(request: Request, config: AuthConfig, nowMs: number): Promise<Session | null> {
   const url = new URL(request.url)
   const data = await verifyToken(config.sessionSecret, PURPOSE_SESSION, getCookie(request, sessionCookieName(url)))
@@ -289,13 +315,22 @@ export function callbackUrl(url: URL): string {
 }
 
 /** A same-origin path to return to after sign-in, or '/'. Blocks open redirects
- *  (`//evil`, `/\evil`, absolute URLs) and loops back into /auth/. */
+ *  (`//evil`, `/\evil`, absolute URLs) and loops back into /auth/. The result goes
+ *  into a Location header, so it is made ASCII: runs outside printable ASCII (a space,
+ *  non-ASCII text) are encodeURI'd, and existing %XX escapes are left untouched (a
+ *  blanket encodeURI would turn them into %25XX and break the return path). */
 export function safeNext(raw: string | null | undefined): string {
-  if (typeof raw !== 'string' || !raw || raw.length > 2048) return '/'
+  if (typeof raw !== 'string' || !raw || raw.length > MAX_NEXT_LENGTH) return '/'
   if (!raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/\\')) return '/'
   if (/[\u0000-\u001f\u007f\\]/.test(raw)) return '/'
   if (raw === '/auth' || raw.startsWith('/auth/')) return '/'
-  return raw
+  let encoded: string
+  try {
+    encoded = raw.replace(/[^\x21-\x7e]+/gu, (run) => encodeURI(run))
+  } catch {
+    return '/' // a lone surrogate can't be encoded
+  }
+  return encoded.length > MAX_NEXT_LENGTH ? '/' : encoded
 }
 
 interface OAuthState {
@@ -358,10 +393,13 @@ async function readOAuthState(request: Request, config: AuthConfig, nowMs: numbe
 
 export type IdTokenResult = { ok: true; email: string; sub: string } | { ok: false; reason: string }
 
-/** Decode a JWT payload without verifying its signature. Only safe for a token that
- *  arrived directly from Google's token endpoint over TLS on a request authenticated
- *  with our client secret (OIDC Core 3.1.3.7 step 6); see the ADR. */
-export function decodeJwtPayload(jwt: string): Record<string, unknown> | null {
+/** The claims of the ID token in OUR token-endpoint response, decoded WITHOUT checking
+ *  its signature. That is only sound because the token arrived directly from Google's
+ *  token endpoint over TLS, on a request authenticated with our client secret (OIDC
+ *  Core 3.1.3.7 step 6; see the ADR). Deliberately not exported: never call this on a
+ *  token that came through the browser or any other channel; verify that one against
+ *  Google's JWKS instead. */
+function unverifiedClaimsFromTokenEndpoint(jwt: string): Record<string, unknown> | null {
   if (typeof jwt !== 'string') return null
   const parts = jwt.split('.')
   if (parts.length !== 3) return null
@@ -397,11 +435,13 @@ export function validateIdTokenClaims(
   }
   if (typeof claims.sub !== 'string' || !claims.sub) return { ok: false, reason: 'missing subject' }
   if (typeof claims.email !== 'string' || !claims.email) return { ok: false, reason: 'missing email' }
-  // Only a VERIFIED email is an identity claim (deckhand's rule too).
-  if (claims.email_verified !== true && claims.email_verified !== 'true') {
-    return { ok: false, reason: 'email not verified' }
-  }
-  return { ok: true, email: claims.email.trim().toLowerCase(), sub: claims.sub }
+  // Refused before lower-casing, which could fold a non-ASCII look-alike onto an
+  // allowlisted address (see isAllowedEmail).
+  if (!PRINTABLE_ASCII.test(claims.email)) return { ok: false, reason: 'email is not plain ASCII' }
+  // Only a VERIFIED email is an identity claim (deckhand's rule too), and only the JSON
+  // boolean true counts: never "true", "false", 1 or any other truthy value.
+  if (claims.email_verified !== true) return { ok: false, reason: 'email not verified' }
+  return { ok: true, email: claims.email.toLowerCase(), sub: claims.sub }
 }
 
 export async function handleCallback(
@@ -449,6 +489,9 @@ export async function handleCallback(
   try {
     const res = await fetchImpl(GOOGLE_TOKEN_ENDPOINT, {
       method: 'POST',
+      // The unsigned-ID-token ruling rests on TLS to THIS endpoint; never follow a
+      // redirect to anywhere else.
+      redirect: 'error',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         code,
@@ -477,7 +520,11 @@ export async function handleCallback(
     })
   }
 
-  const result = validateIdTokenClaims(decodeJwtPayload(idToken), { clientId: config.clientId, nonce: pending.nonce }, nowMs)
+  const result = validateIdTokenClaims(
+    unverifiedClaimsFromTokenEndpoint(idToken),
+    { clientId: config.clientId, nonce: pending.nonce },
+    nowMs,
+  )
   if (!result.ok) {
     console.error(`auth: ID token rejected: ${result.reason}`)
     return htmlPage(401, 'Sign-in failed', 'Google’s identity token did not pass verification.', [clearState], {

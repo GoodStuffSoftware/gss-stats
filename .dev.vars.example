@@ -4,16 +4,17 @@ CF_ANALYTICS_TOKEN=your-cloudflare-analytics-token
 
 # Sign-in (README "Auth"). Pick ONE of the two options below.
 #
-# (a) Skip Google locally. Only honoured when the request host is localhost/127.0.0.1,
-#     so it can never open the deployed site. Without it (and without (b)) every
-#     request gets a 503 "sign-in not configured". AUTH_DEV_EMAIL is the identity shown
-#     in the header (default dev@localhost).
+# (a) Skip Google locally. Only the exact value 1 turns it on, and only when the request
+#     host is localhost/127.0.0.1, so it can never open the deployed site. Without it
+#     (and without (b)) every request gets a 503 "sign-in not configured".
+#     AUTH_DEV_EMAIL is the identity shown in the header (default dev@localhost).
 AUTH_DEV_BYPASS=1
 # AUTH_DEV_EMAIL=you@example.com
 #
 # (b) Run the real Google flow locally: remove AUTH_DEV_BYPASS, fill these in, and
 #     register http://localhost:8788/auth/google/callback on the OAuth client.
-#     SESSION_SECRET must be 32+ random characters.
+#     SESSION_SECRET must be 32+ random characters; SESSION_TTL_HOURS, if set, a number
+#     from 1 to 720.
 # GOOGLE_CLIENT_ID=
 # GOOGLE_CLIENT_SECRET=
 # SESSION_SECRET=
