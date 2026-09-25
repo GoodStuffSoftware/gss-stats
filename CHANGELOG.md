@@ -7,6 +7,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **The overview page's pop-up tap rate, campaign scorecard rates, and return rate now show
+  "too few to report"** (instead of a bare "—") when they have some data but fewer than 5
+  in their denominator, matching the campaign page.
 - **Flight 1's start date was off by one ET day.** It was derived from UTC-bucketed daily
   counts; re-derived from ET-bucketed ones (the campaign's real first hit is 2026-09-02
   ~22:56 ET, already 2026-09-03 in UTC), recovering ~150 tagged hits that fell outside every

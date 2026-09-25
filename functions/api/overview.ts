@@ -191,7 +191,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     kpis.push({
       key: 'popupTapRate',
       label: 'Pop-up tap rate',
-      today: computeRate(accept.today, shown.today), // null ("—") for zero shown today, never 0%/NaN
+      today: computeRate(accept.today, shown.today), // null ("—"/"too few", never 0%/NaN — see MIN_COHORT
+      denominator: shown.today, // lets the UI tell "too few to report" apart from "—"
       notYetTracking: false,
       isRate: true,
     })
@@ -285,9 +286,11 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
         flightingToday: dayIndexToday !== null,
         taggedArrivals,
         funnelRates: rates,
+        funnelCounts: counts, // lets the UI tell "too few to report" (MIN_COHORT) apart from "—"
         authSuccess: counts.authSuccess,
         install: counts.install,
         returnRateD2to7: returnRates['d2-7'],
+        returnD0: returnCounts.d0, // same reason as funnelCounts, for returnRateD2to7
         costPerArrival: costPer(spend, taggedArrivals),
       }
     }),
