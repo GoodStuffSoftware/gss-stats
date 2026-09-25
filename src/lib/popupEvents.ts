@@ -169,6 +169,28 @@ export function computeRate(numerator: number, denominator: number): number | nu
   return numerator / denominator
 }
 
+// ── Tracking activation date ("before is unmeasured, not zero") ────────────────────
+// The US-Eastern calendar date v1.90.0 ships to prod and pop-up tracking is considered
+// LIVE. null until that release is confirmed. Every day before this date — or every day
+// at all, while this is still null — is UNMEASURED: it may hold real rows (e.g. the
+// 2026-09-19 uncapped-placement-bug reproduction: 22 /signin-prompt/dismiss, 21
+// /signin-prompt/placement, 1 /signin-prompt/streak, all from one player), but those
+// rows are not a valid baseline and must never feed a rate, a summary figure, or a
+// before/after comparison. Set this to the release date's ET calendar day when v1.90.0
+// ships — nothing else needs to change: computePopupRate, the popup-count API
+// dimensions (functions/api/popups.ts), the trend-chart "tracking starts" marker
+// (lib/charts.ts), and the page note (App.vue) all read this one constant.
+//
+// Summary figures (rate tiles, stat totals) must NEVER present a before/after change
+// across the activation boundary — there is deliberately no "vs previous period" delta
+// anywhere in the pop-up dataset; don't add one without re-reading this comment.
+export const TRACKING_ACTIVATION_DATE_ET: string | null = null
+
+/** True while `etDate` predates tracking — or activation hasn't happened at all yet. */
+export function isPreActivation(etDate: string, activationDateEt: string | null): boolean {
+  return activationDateEt === null || etDate < activationDateEt
+}
+
 // ── Aggregation ──────────────────────────────────────────────────────────────────────
 // The Function fetches one row per (UTC hour bucket, path) with its count — still an
 // aggregate query (no per-row/per-visitor data), never correlated by timestamp or
@@ -186,6 +208,15 @@ export interface PopupAggregate {
   coarse: Map<string, number> // `${family}|${kind}` -> count
   detailed: Map<string, number> // `${family}|${kind}|${extra}` -> count
   byDay: Map<string, number> // `${etDate}|${family}|${kind}` -> count
+  // The activation-gated twins of `coarse`/`detailed`: same shape, but only rows whose ET
+  // day is on/after the activation date are counted (see isPreActivation). Entirely empty
+  // while TRACKING_ACTIVATION_DATE_ET is null — every rate and every pop-up count widget
+  // (except the 'date' trend, which plots full history with a marker) reads these instead
+  // of `coarse`/`detailed`, so a pre-release row can never compute a misleading rate or
+  // count as a baseline. `coarse`/`detailed`/`byDay` themselves stay full-history and
+  // unfiltered — the trend chart and any full-history debugging still need them.
+  measuredCoarse: Map<string, number>
+  measuredDetailed: Map<string, number>
 }
 
 const coarseKey = (family: string, kind: string) => `${family}|${kind}`
@@ -196,18 +227,28 @@ function bump(m: Map<string, number>, k: string, n: number): void {
   m.set(k, (m.get(k) ?? 0) + n)
 }
 
-export function aggregatePopupRows(rows: HourPathCount[]): PopupAggregate {
+export function aggregatePopupRows(
+  rows: HourPathCount[],
+  activationDateEt: string | null = TRACKING_ACTIVATION_DATE_ET,
+): PopupAggregate {
   const coarse = new Map<string, number>()
   const detailed = new Map<string, number>()
   const byDay = new Map<string, number>()
+  const measuredCoarse = new Map<string, number>()
+  const measuredDetailed = new Map<string, number>()
   for (const r of rows) {
     const ev = classifyPopupPath(r.path)
     if (!ev) continue
     bump(coarse, coarseKey(ev.family, ev.kind), r.count)
     if (ev.extra) bump(detailed, detailedKey(ev.family, ev.kind, ev.extra), r.count)
-    bump(byDay, dayKey(etDateFromMs(r.hourStartMs), ev.family, ev.kind), r.count)
+    const etDate = etDateFromMs(r.hourStartMs)
+    bump(byDay, dayKey(etDate, ev.family, ev.kind), r.count)
+    if (!isPreActivation(etDate, activationDateEt)) {
+      bump(measuredCoarse, coarseKey(ev.family, ev.kind), r.count)
+      if (ev.extra) bump(measuredDetailed, detailedKey(ev.family, ev.kind, ev.extra), r.count)
+    }
   }
-  return { coarse, detailed, byDay }
+  return { coarse, detailed, byDay, measuredCoarse, measuredDetailed }
 }
 
 export function coarseCount(agg: PopupAggregate, family: string, kind: string): number {
@@ -215,6 +256,14 @@ export function coarseCount(agg: PopupAggregate, family: string, kind: string): 
 }
 export function detailedCount(agg: PopupAggregate, family: string, kind: string, extra: string): number {
   return agg.detailed.get(detailedKey(family, kind, extra)) ?? 0
+}
+/** Activation-gated twin of coarseCount — 0 for any pre-activation-only bucket. */
+export function measuredCoarseCount(agg: PopupAggregate, family: string, kind: string): number {
+  return agg.measuredCoarse.get(coarseKey(family, kind)) ?? 0
+}
+/** Activation-gated twin of detailedCount — 0 for any pre-activation-only bucket. */
+export function measuredDetailedCount(agg: PopupAggregate, family: string, kind: string, extra: string): number {
+  return agg.measuredDetailed.get(detailedKey(family, kind, extra)) ?? 0
 }
 /** Every `${date}` bucket for one family+kind, as [date, count] pairs, unsorted. */
 export function dayCounts(agg: PopupAggregate, family: string, kind: string): [string, number][] {
@@ -231,6 +280,16 @@ export function detailedBreakdown(agg: PopupAggregate, family: string, kind: str
   const prefix = `${family}|${kind}|`
   const out: [string, number][] = []
   for (const [key, count] of agg.detailed) {
+    if (!key.startsWith(prefix)) continue
+    out.push([key.slice(prefix.length), count])
+  }
+  return out
+}
+/** Activation-gated twin of detailedBreakdown — omits any pre-activation-only bucket. */
+export function measuredDetailedBreakdown(agg: PopupAggregate, family: string, kind: string): [string, number][] {
+  const prefix = `${family}|${kind}|`
+  const out: [string, number][] = []
+  for (const [key, count] of agg.measuredDetailed) {
     if (!key.startsWith(prefix)) continue
     out.push([key.slice(prefix.length), count])
   }
@@ -277,15 +336,21 @@ export const POPUP_RATE_SPECS: PopupRateSpec[] = [
   { key: 'signin-eligible:rate', label: 'Sign-in eligibility rate (earned / total)', kind: 'eligibility' as const },
 ]
 
+// Every rate reads the ACTIVATION-GATED (measuredCoarse) counts, never the raw
+// full-history `coarse` counts — see isPreActivation / TRACKING_ACTIVATION_DATE_ET.
+// While activation is null, measuredCoarse is entirely empty, so every rate here comes
+// back null ("—"), regardless of how much real pre-release data exists — a real
+// denominator of e.g. 22 pre-release "shown" events must never turn into a real 0%/NaN
+// tap rate (hard requirement: "before activation is unmeasured, not zero").
 export function computePopupRate(agg: PopupAggregate, spec: PopupRateSpec): number | null {
   if (spec.kind === 'eligibility') {
-    const earned = coarseCount(agg, 'signin-eligible', 'earned')
-    const capped = coarseCount(agg, 'signin-eligible', 'capped')
-    const unearned = coarseCount(agg, 'signin-eligible', 'unearned')
+    const earned = measuredCoarseCount(agg, 'signin-eligible', 'earned')
+    const capped = measuredCoarseCount(agg, 'signin-eligible', 'capped')
+    const unearned = measuredCoarseCount(agg, 'signin-eligible', 'unearned')
     return computeRate(earned, earned + capped + unearned)
   }
-  const shown = coarseCount(agg, spec.popup!, 'shown')
-  if (spec.kind === 'tap') return computeRate(coarseCount(agg, spec.popup!, 'accept'), shown)
+  const shown = measuredCoarseCount(agg, spec.popup!, 'shown')
+  if (spec.kind === 'tap') return computeRate(measuredCoarseCount(agg, spec.popup!, 'accept'), shown)
   // outcome
-  return computeRate(coarseCount(agg, `popup-outcome:${spec.popup}`, spec.outcome!), shown)
+  return computeRate(measuredCoarseCount(agg, `popup-outcome:${spec.popup}`, spec.outcome!), shown)
 }
