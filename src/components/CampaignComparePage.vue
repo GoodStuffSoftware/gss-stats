@@ -81,7 +81,12 @@ const hourChartConfig = computed<ChartConfiguration | null>(() => {
 })
 
 // ── Chart 4: daily arrivals + cumulative, aligned by flight day 1..N ───────────────────
-const maxFlightDay = computed(() => Math.max(1, ...CAMPAIGNS.map((c) => Math.round((Date.parse(c.flightEnd) - Date.parse(c.flightStart)) / 86_400_000) + 1)))
+const maxFlightDay = computed(() =>
+  Math.max(
+    1,
+    ...CAMPAIGNS.filter((c) => c.flightStart != null).map((c) => Math.round((Date.parse(c.flightEnd) - Date.parse(c.flightStart as string)) / 86_400_000) + 1),
+  ),
+)
 const dailyChartConfig = computed<ChartConfiguration | null>(() => {
   const cs = CAMPAIGNS.filter((c) => dataByCampaign.value[c.id])
   if (!cs.length) return null
@@ -211,6 +216,7 @@ function topShares(counts: Record<string, number>, n = 4): { label: string; valu
               <span class="fc-label">{{ c.label }}</span>
               <span class="fc-status">{{ c.status }}</span>
             </div>
+            <p v-if="c.measurement === 'spend-only'" class="state mono small">{{ c.measurabilityNote }}</p>
             <div v-if="dataByCampaign[c.id]" class="tagged-hits mono" :title="ARRIVALS_CAVEAT">
               tagged hits: {{ fmt(dataByCampaign[c.id].taggedHits) }} (vs {{ fmt(dataByCampaign[c.id].funnel.counts.arrivals) }} arrivals)
             </div>
@@ -218,10 +224,14 @@ function topShares(counts: Record<string, number>, n = 4): { label: string; valu
               <div v-for="step in FUNNEL_STEP_ORDER" :key="step" class="funnel-step">
                 <div class="fs-top">
                   <span class="fs-label">{{ FUNNEL_STEP_LABELS[step] }}</span>
-                  <span class="fs-count mono">{{ fmt(dataByCampaign[c.id].funnel.counts[step]) }}</span>
+                  <span class="fs-count mono">
+                    <template v-if="dataByCampaign[c.id].funnel.notInstrumented.includes(step)">not instrumented</template>
+                    <template v-else>{{ fmt(dataByCampaign[c.id].funnel.counts[step]) }}</template>
+                  </span>
                 </div>
                 <div class="fs-bar-wrap">
                   <span
+                    v-if="!dataByCampaign[c.id].funnel.notInstrumented.includes(step)"
                     class="fs-bar"
                     :style="{ width: (dataByCampaign[c.id].funnel.counts[step] / funnelMax(dataByCampaign[c.id].funnel.counts)) * 100 + '%' }"
                   ></span>
