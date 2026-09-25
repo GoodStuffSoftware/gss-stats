@@ -635,7 +635,8 @@ export async function authGate(
   if (devEmail) {
     if (path === ME_PATH) return jsonResponse(200, { email: devEmail, devBypass: true })
     if (path === LOGIN_PATH || path === CALLBACK_PATH) return redirect(safeNext(url.searchParams.get('next')))
-    if (path === LOGOUT_PATH) return signOutRedirect([])
+    // POST only, as in production, so a link or prefetch can't sign out (or clear the cache).
+    if (path === LOGOUT_PATH) return method === 'POST' ? signOutRedirect([]) : methodNotAllowed('POST')
     if (path === SIGNED_OUT_PATH) return signedOutPage()
     const out = gatedResponse(await next())
     out.headers.set('X-Auth-Dev-Bypass', '1')
