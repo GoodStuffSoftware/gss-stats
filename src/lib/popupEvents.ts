@@ -27,6 +27,12 @@ export const POPUP_EVENT_PREFIXES = [
   '/upsell',
   '/install',
   '/popup-outcome',
+  // On-device, no-ID return beacon (v1.90.0, see lib/campaigns.ts RETURN_BUCKETS): paths
+  // like /return/<uc>/d0, /return/<uc>/d1, /return/<uc>/d2-7, … — an event, not a screen.
+  // HIGH review finding (2026-09-25): this was missing here — lib/campaigns.ts already
+  // assumed it was present, so /return/ rows were NOT being excluded from geo.ts/sites.ts
+  // pageview/visit totals on this branch until now.
+  '/return',
 ] as const
 
 export function isPopupEventPath(path: string): boolean {
@@ -163,10 +169,39 @@ export function etDateFromMs(ms: number): string {
 }
 
 // ── Rate math (hard requirement #4) ─────────────────────────────────────────────────
-/** numerator / denominator, or null (never NaN/Infinity) when the denominator is 0. */
-export function computeRate(numerator: number, denominator: number): number | null {
-  if (!denominator) return null
+// ── Minimum cohort (review addendum, 2026-09-25) ────────────────────────────────────
+// A rate computed from a tiny denominator is statistically noise dressed up as a
+// percentage (2/3 reads as an alarming/impressive 67%, off by one event either way).
+// computeRate — the ONE primitive every rate in this codebase is built on (directly, or
+// via gateRate/costPer/funnelStepRates/returnVisitRates in lib/campaigns.ts) — enforces
+// this floor itself, so a caller can't accidentally bypass it by using computeRate
+// directly instead of a gated wrapper.
+export const MIN_COHORT = 5
+
+/** True when `denominator` is nonzero but under `minCohort` — the "some data, just not
+ * enough" case, distinct from a true zero ("no data at all yet"). A caller that wants to
+ * show "too few to report" instead of plain "—" checks this alongside computeRate's null. */
+export function isInsufficientCohort(denominator: number, minCohort: number = MIN_COHORT): boolean {
+  return denominator > 0 && denominator < minCohort
+}
+
+/** numerator / denominator, or null (never NaN/Infinity) when the denominator is 0 OR
+ * below MIN_COHORT — see isInsufficientCohort for telling those two null-reasons apart. */
+export function computeRate(numerator: number, denominator: number, minCohort: number = MIN_COHORT): number | null {
+  if (!denominator || denominator < minCohort) return null
   return numerator / denominator
+}
+
+export interface GatedRate {
+  value: number | null // computeRate's result
+  insufficientCohort: boolean // see isInsufficientCohort
+}
+/** computeRate bundled with WHY a null came back — the shape every rate-producing
+ * function in this codebase (computePopupRate here; funnelStepRates/returnVisitRates/
+ * costPer in lib/campaigns.ts) returns, so the frontend never has to re-derive the
+ * distinction from a bare number. */
+export function gateRate(numerator: number, denominator: number, minCohort: number = MIN_COHORT): GatedRate {
+  return { value: computeRate(numerator, denominator, minCohort), insufficientCohort: isInsufficientCohort(denominator, minCohort) }
 }
 
 // ── Tracking activation date ("before is unmeasured, not zero") ────────────────────
@@ -342,15 +377,19 @@ export const POPUP_RATE_SPECS: PopupRateSpec[] = [
 // back null ("—"), regardless of how much real pre-release data exists — a real
 // denominator of e.g. 22 pre-release "shown" events must never turn into a real 0%/NaN
 // tap rate (hard requirement: "before activation is unmeasured, not zero").
-export function computePopupRate(agg: PopupAggregate, spec: PopupRateSpec): number | null {
+//
+// Returns a GatedRate, not a bare number — EVERY kind (tap, outcome, and eligibility) is
+// MIN_COHORT-gated via gateRate, so any denominator under 5 (shown, or
+// earned+capped+unearned for eligibility) reports "insufficient" instead of a noisy rate.
+export function computePopupRate(agg: PopupAggregate, spec: PopupRateSpec): GatedRate {
   if (spec.kind === 'eligibility') {
     const earned = measuredCoarseCount(agg, 'signin-eligible', 'earned')
     const capped = measuredCoarseCount(agg, 'signin-eligible', 'capped')
     const unearned = measuredCoarseCount(agg, 'signin-eligible', 'unearned')
-    return computeRate(earned, earned + capped + unearned)
+    return gateRate(earned, earned + capped + unearned)
   }
   const shown = measuredCoarseCount(agg, spec.popup!, 'shown')
-  if (spec.kind === 'tap') return computeRate(measuredCoarseCount(agg, spec.popup!, 'accept'), shown)
+  if (spec.kind === 'tap') return gateRate(measuredCoarseCount(agg, spec.popup!, 'accept'), shown)
   // outcome
-  return computeRate(measuredCoarseCount(agg, `popup-outcome:${spec.popup}`, spec.outcome!), shown)
+  return gateRate(measuredCoarseCount(agg, `popup-outcome:${spec.popup}`, spec.outcome!), shown)
 }
