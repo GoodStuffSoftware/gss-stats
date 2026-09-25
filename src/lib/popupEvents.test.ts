@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   classifyPopupPath,
   isPopupEventPath,
+  POPUP_EVENT_PREFIXES,
   etDateFromMs,
   computeRate,
   aggregatePopupRows,
@@ -90,7 +91,7 @@ describe('classifyPopupPath', () => {
 
 describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
   it('matches every popup prefix, exactly and as a subpath', () => {
-    for (const p of ['/signin-prompt', '/signin-eligible', '/promo-first50', '/first50-congrats', '/upsell', '/install', '/popup-outcome']) {
+    for (const p of POPUP_EVENT_PREFIXES) {
       expect(isPopupEventPath(p)).toBe(true)
       expect(isPopupEventPath(`${p}/x`)).toBe(true)
     }

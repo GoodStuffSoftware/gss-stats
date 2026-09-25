@@ -150,3 +150,60 @@ export interface StatsResponse {
   // a zero denominator (no accepts/outcomes yet) — see lib/popupEvents.ts computeRate.
   rate?: number | null
 }
+
+// ── "Best Sudoku campaigns" (Part B) — a dedicated response shape (not the generic
+// Widget/StatsResponse model above): see functions/api/campaigns.ts + lib/campaigns.ts. ──
+export interface CampaignFunnelCounts {
+  arrivals: number
+  played: number
+  completed: number
+  ask: number
+  accept: number
+  authSuccess: number
+  installPrompt: number
+  install: number
+}
+export interface CampaignCompareResponse {
+  campaign: {
+    id: string
+    label: string
+    status: string
+    flightStart: string
+    flightEnd: string
+    ucValues: string[]
+    notes: string
+  }
+  funnel: {
+    counts: CampaignFunnelCounts
+    rates: Partial<Record<keyof CampaignFunnelCounts, number | null>>
+    // Steps this FLIGHT can't show a rate for — its path never appeared anywhere in D1
+    // during the flight window (or, for 'completed', anywhere at all) — see
+    // lib/campaigns.ts FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED.
+    notInstrumented: (keyof CampaignFunnelCounts)[]
+    // Show wherever `counts.arrivals` is displayed — see lib/campaigns.ts ARRIVALS_CAVEAT.
+    arrivalsCaveat: string
+  }
+  // EVERY row carrying this campaign's tag (the tag rides each beacon for its 30-min TTL) —
+  // NOT the same as arrivals (`funnel.counts.arrivals`, visitor='new' only). Label it
+  // "tagged hits" if shown at all — see the DEFINITION FIX comment in
+  // functions/api/campaigns.ts / lib/campaigns.ts.
+  taggedHits: number
+  funnelByCountry: Record<'US' | 'CA' | 'other', CampaignFunnelCounts>
+  hourOfDayEt: number[] // length 24, index = ET hour, value = arrivals
+  daily: { date: string; day: number; arrivals: number }[] // sorted by date; `day` = flightDayIndex
+  deviceMix: {
+    os: Record<string, number>
+    browser: Record<string, number>
+    screen: Record<string, number> // bucketed — see lib/campaigns.ts screenWidthBucket
+  }
+  returnVisits: {
+    counts: Record<string, number>
+    rates: Record<string, number | null>
+    notInstrumented: boolean
+    sharedWithCampaignId: string | null
+  }
+  costPerArrival: number | null
+  costPerAuthSuccess: number | null
+  spend: number | null
+  meta: { generatedAt: string }
+}

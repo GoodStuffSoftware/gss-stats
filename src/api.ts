@@ -1,4 +1,4 @@
-import type { StatsResponse, Widget, GlobalFilters, DashboardConfig, Dataset } from './types'
+import type { StatsResponse, Widget, GlobalFilters, DashboardConfig, Dataset, CampaignCompareResponse } from './types'
 import { resolveSelection } from './sitesStore'
 import { nativeField } from './lib/drill'
 import { queryDims } from './lib/rings'
@@ -104,6 +104,21 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters): Promis
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     throw new Error(`stats ${res.status}: ${text.slice(0, 200)}`)
+  }
+  return res.json()
+}
+
+/** Fetch one campaign's comparison data (funnel, hour-of-day, country, daily, device mix,
+ * return visits — see lib/campaigns.ts + functions/api/campaigns.ts). */
+export async function fetchCampaignCompare(campaignId: string): Promise<CampaignCompareResponse> {
+  const res = await fetch('/api/campaigns', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ campaignId }),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`campaigns ${res.status}: ${text.slice(0, 200)}`)
   }
   return res.json()
 }

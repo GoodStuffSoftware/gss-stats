@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { reactive, ref, watch, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import type { DashboardConfig, DashboardPage, Widget, GlobalFilters } from './types'
-import { defaultConfig, normalizeConfig, defaultWidgetsForPage, clonePage, cryptoId, isBestSudokuLaunchPage, isBestSudokuPopupsPage, BEST_SUDOKU_SITES, beaconizeWidget } from './lib/defaults'
+import { defaultConfig, normalizeConfig, defaultWidgetsForPage, clonePage, cryptoId, isBestSudokuLaunchPage, isBestSudokuPopupsPage, isCampaignComparePage, BEST_SUDOKU_SITES, beaconizeWidget } from './lib/defaults'
 import { rangeLabel, ymdRangeToISO } from './lib/range'
 import { loadConfig, saveConfig } from './api'
 import { loadSites, sitesTree, tokenLabel } from './sitesStore'
 import { isSiteDim, semanticKey } from './lib/drill'
 import { sessionExpired, reauth } from './session'
 import { TRACKING_ACTIVATION_DATE_ET } from './lib/popupEvents'
+import CampaignComparePage from './components/CampaignComparePage.vue'
 import PageBar from './components/PageBar.vue'
 import FilterBar from './components/FilterBar.vue'
 import Dashboard from './components/Dashboard.vue'
@@ -30,6 +31,10 @@ const rangeText = computed(() => rangeLabel(activePage.value.filters.since, acti
 const showPopupActivationNote = computed(
   () => TRACKING_ACTIVATION_DATE_ET === null && isBestSudokuPopupsPage(activePage.value),
 )
+
+// "Best Sudoku campaigns" is a bespoke page (see CampaignComparePage.vue) — no generic
+// Widget grid, so "Add chart" / "restore default charts" don't apply to it.
+const isCampaignPage = computed(() => isCampaignComparePage(activePage.value))
 
 onMounted(async () => {
   dark.value = localStorage.getItem('gss-stats-dark') === '1'
@@ -94,6 +99,7 @@ function deletePage(id: string) {
 }
 function restoreDefaultCharts(id: string) {
   const p = config.pages.find((x) => x.id === id) ?? activePage.value
+  if (isCampaignComparePage(p)) return // bespoke page — no generic widgets to restore
   const launch = isBestSudokuLaunchPage(p)
   const popups = isBestSudokuPopupsPage(p)
   // If the user has pinned any charts as defaults, restoring keeps exactly those and drops
@@ -331,7 +337,7 @@ function toggleDark() {
         <button class="btn" @click="toggleDark" :title="dark ? 'Light mode' : 'Dark mode'">
           {{ dark ? '☀' : '☾' }}
         </button>
-        <button class="btn btn-primary" @click="addChart">＋ Add chart</button>
+        <button v-if="!isCampaignPage" class="btn btn-primary" @click="addChart">＋ Add chart</button>
       </div>
     </header>
 
@@ -347,6 +353,7 @@ function toggleDark() {
     />
 
     <FilterBar
+      v-if="!isCampaignPage"
       :filters="activePage.filters"
       :sync-range="config.syncRange"
       @change="onFiltersChange"
@@ -358,21 +365,24 @@ function toggleDark() {
     </div>
 
     <main class="grid-area">
-      <Dashboard
-        v-model:widgets="activePage.widgets"
-        :filters="activePage.filters"
-        :dark="dark"
-        :drill-open-id="drillMenu?.widgetId ?? null"
-        @edit="editChart"
-        @remove="removeWidget"
-        @duplicate="duplicateWidget"
-        @change="scheduleSave"
-        @drill="onDrill"
-      />
-      <div v-if="loaded && activePage.widgets.length === 0" class="empty">
-        <p>No charts on this page.</p>
-        <button class="btn btn-primary" @click="addChart">＋ Add a chart</button>
-      </div>
+      <CampaignComparePage v-if="isCampaignPage" />
+      <template v-else>
+        <Dashboard
+          v-model:widgets="activePage.widgets"
+          :filters="activePage.filters"
+          :dark="dark"
+          :drill-open-id="drillMenu?.widgetId ?? null"
+          @edit="editChart"
+          @remove="removeWidget"
+          @duplicate="duplicateWidget"
+          @change="scheduleSave"
+          @drill="onDrill"
+        />
+        <div v-if="loaded && activePage.widgets.length === 0" class="empty">
+          <p>No charts on this page.</p>
+          <button class="btn btn-primary" @click="addChart">＋ Add a chart</button>
+        </div>
+      </template>
     </main>
 
     <ChartEditor
