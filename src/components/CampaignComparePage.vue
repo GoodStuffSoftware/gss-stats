@@ -303,7 +303,7 @@ function topShares(counts: Record<string, number>, n = 4): { label: string; valu
             </div>
           </div>
         </div>
-        <p class="caption">Spend isn't in D1 yet — fill in <code>CAMPAIGN_SPEND</code> in lib/campaigns.ts to populate these.</p>
+        <p v-if="CAMPAIGNS.some((c) => dataByCampaign[c.id]?.spend == null)" class="caption">Spend comes from Google Ads and is entered by hand in <code>CAMPAIGN_SPEND</code> (lib/campaigns.ts) — one or more campaigns above still need a value.</p>
       </section>
 
       <!-- Chart 6: device mix -->
