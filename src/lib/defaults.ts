@@ -1,6 +1,6 @@
 import type { DashboardConfig, DashboardPage, GlobalFilters, Widget } from '../types'
 import { parseDurationMs } from './range'
-import { POPUPS, POPUP_RATE_SPECS } from './popupEvents'
+import { POPUPS, POPUP_RATE_SPECS, NO_OUTCOME_TRACKING_NOTE, SIGNIN_ELIGIBLE_CAVEAT } from './popupEvents'
 
 export function defaultDateRange(): { since: string; until: string } {
   const until = new Date()
@@ -153,8 +153,12 @@ const POPUPS_WITH_TREND = new Set(['signin-prompt', 'upsell'])
 export function defaultBestSudokuPopupsWidgets(): Widget[] {
   const items: (Omit<Widget, 'i' | 'x' | 'y'> & { w: number; h: number })[] = []
   for (const p of POPUPS) {
+    // FINAL LIST: first50-congrats has no /popup-outcome beacon — no outcome-rate tile is
+    // generated for it below (POPUP_RATE_SPECS already excludes it), and this title carries
+    // the one-time "no outcome tracking" note instead of a placeholder implying one's coming.
+    const kindTitle = `${p.label} — shown / accepted / dismissed${p.noOutcomeTracking ? ` (${NO_OUTCOME_TRACKING_NOTE})` : ''}`
     items.push(
-      pw({ id: `pu-${p.id}-kind`, title: `${p.label} — shown / accepted / dismissed`, type: 'bar', dimension: 'kind', popup: p.id, limit: 3, w: 6, h: 8 }),
+      pw({ id: `pu-${p.id}-kind`, title: kindTitle, type: 'bar', dimension: 'kind', popup: p.id, limit: 3, w: 6, h: 8 }),
       pw({ id: `pu-${p.id}-tap`, title: `${p.label} — tap rate`, type: 'rate', dimension: `${p.id}:tap`, limit: 1, w: 3, h: 4 }),
     )
     if (p.hasReasonBreakdown) {
@@ -169,8 +173,10 @@ export function defaultBestSudokuPopupsWidgets(): Widget[] {
     }
   }
   items.push(
-    pw({ id: 'pu-eligible-bd', title: 'Sign-in eligibility — earned / capped / unearned', type: 'bar', dimension: 'eligible', limit: 3, w: 6, h: 8 }),
-    pw({ id: 'pu-eligible-rate', title: 'Sign-in eligibility rate', type: 'rate', dimension: 'signin-eligible:rate', limit: 1, w: 3, h: 4 }),
+    // FINAL LIST caveat: signin-eligible rows are deferred ≥30 min after the finish — see
+    // SIGNIN_ELIGIBLE_CAVEAT — surfaced on every chart that charts it.
+    pw({ id: 'pu-eligible-bd', title: `Sign-in eligibility — earned / capped / unearned (${SIGNIN_ELIGIBLE_CAVEAT})`, type: 'bar', dimension: 'eligible', limit: 3, w: 6, h: 8 }),
+    pw({ id: 'pu-eligible-rate', title: `Sign-in eligibility rate (${SIGNIN_ELIGIBLE_CAVEAT})`, type: 'rate', dimension: 'signin-eligible:rate', limit: 1, w: 3, h: 4 }),
     pw({ id: 'pu-install-outcomes', title: 'Install — real outcomes', type: 'table', dimension: 'installOutcome', limit: 3, w: 6, h: 8 }),
   )
   // One rate tile per (popup, outcome type) — see POPUP_RATE_SPECS. Zero data today

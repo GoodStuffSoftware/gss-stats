@@ -68,14 +68,48 @@ function segments(path: string, prefix: string): string[] {
   return path.slice(prefix.length).split('/').filter(Boolean)
 }
 
-export const UPSELL_REASONS = ['cadence', 'limit', 'daily-locked', 'upgrade-tap', 'settings-upgrade'] as const
+// FINAL LIST (Best Sudoku team, 2026-09-25): settings-upgrade removed — it is not a real
+// upsell reason. Any reason segment not in this list is still counted, bucketed as 'other'
+// (see classifyPopupPath below) — never silently dropped or passed through raw.
+export const UPSELL_REASONS = ['cadence', 'limit', 'daily-locked', 'upgrade-tap'] as const
 export const INSTALL_SHOWN_PLATFORMS = ['android', 'ios', 'desktop'] as const
 export const INSTALL_PLATFORM_LIST = ['web', 'play', 'app-store'] as const
 export const INSTALL_OUTCOMES = ['pwa-installed', 'standalone-detected', 'play-detected'] as const
 const INSTALL_PROMPT_DISMISS = ['dismiss', 'dismiss-forever', 'have-it'] as const
-// The names on /popup-outcome/<popup>/<outcome> are TBD (see task brief) — every outcome
-// type is accepted for every popup family rather than guessing which ones apply.
-export const POPUP_OUTCOME_TYPES = ['signed-in', 'installed', 'returned'] as const
+// FINAL LIST outcome vocabulary + windows (Best Sudoku team, 2026-09-25) — the window is
+// enforced app-side (the app decides when to fire each outcome beacon); this module only
+// classifies/aggregates whatever already arrived:
+//   signed-in     — within 1 day of shown
+//   installed     — within 7 days of shown
+//   returned      — days 1-7 after shown
+//   still-playing — days 14-21 after shown (NEW)
+export const POPUP_OUTCOME_TYPES = ['signed-in', 'installed', 'returned', 'still-playing'] as const
+
+// The /popup-outcome/<popup>/<outcome> wire vocabulary (FINAL LIST) differs from the
+// internal family id for install: the beacon's own path segment is "install-prompt", but
+// the family everywhere else in this file (POPUPS id, classifyPopupPath's 'install'
+// family) is "install". This is the ONE place that reconciles the two names — every other
+// popup's wire name already matches its internal id 1:1.
+export const POPUP_OUTCOME_NAME_TO_FAMILY: Record<string, string> = {
+  'signin-prompt': 'signin-prompt',
+  'promo-first50': 'promo-first50',
+  upsell: 'upsell',
+  'install-prompt': 'install',
+}
+
+// FINAL LIST caveat (Best Sudoku team, 2026-09-25): /signin-eligible is the sign-in
+// denominator — one row per signed-out regular finish — but it is DEFERRED at least 30
+// minutes after the finish, so the row's own timestamp is NOT the finish time. Show this
+// wherever signin-eligible is charted (counts or its rate), and NEVER use it to bucket by
+// hour-of-day (see lib/campaigns.ts hourOfDayEt, which is built from tagged arrivals only,
+// never from signin-eligible, for exactly this reason).
+export const SIGNIN_ELIGIBLE_CAVEAT = 'Deferred ≥30 min after the finish — row time is not the finish time; never use for hour-of-day.'
+
+// FINAL LIST page note (Best Sudoku team, 2026-09-25): the 30-minute sign-in deferral above
+// means any rate correlating a sign-in with a nearby event is conservative by construction
+// (a same-session follow-on action can land just outside the window). Shown once on the
+// pop-ups page, not per-chart.
+export const POPUP_PAGE_NOTE = 'Nothing is measured within 30 minutes after a sign-in, so rates are slightly conservative.'
 
 export function classifyPopupPath(path: string): PopupEvent | null {
   if (!path) return null
@@ -110,7 +144,11 @@ export function classifyPopupPath(path: string): PopupEvent | null {
   if (path === '/upsell' || path.startsWith('/upsell/')) {
     const [kind, reason] = segments(path, '/upsell')
     if ((kind === 'shown' || kind === 'accept' || kind === 'dismiss') && reason) {
-      return { family: 'upsell', kind, extra: reason }
+      // FINAL LIST: reasons are exactly UPSELL_REASONS — an unknown/removed reason (e.g. a
+      // leftover 'settings-upgrade' beacon) is counted under 'other', never dropped and
+      // never passed through as its own ad-hoc breakdown bucket.
+      const known = (UPSELL_REASONS as readonly string[]).includes(reason) ? reason : 'other'
+      return { family: 'upsell', kind, extra: known }
     }
     return null
   }
@@ -137,8 +175,13 @@ export function classifyPopupPath(path: string): PopupEvent | null {
 
   if (path === '/popup-outcome' || path.startsWith('/popup-outcome/')) {
     const [name, outcome] = segments(path, '/popup-outcome')
-    if (name && outcome && (POPUP_OUTCOME_TYPES as readonly string[]).includes(outcome)) {
-      return { family: `popup-outcome:${name}`, kind: outcome }
+    // FINAL LIST: <popup> is exactly {signin-prompt, promo-first50, upsell, install-prompt}
+    // — resolved through POPUP_OUTCOME_NAME_TO_FAMILY so 'install-prompt' lands on the
+    // 'install' family (see that constant's doc comment). Any other name (including the
+    // bare 'install', which is NOT part of this wire vocabulary) doesn't classify.
+    const family = name ? POPUP_OUTCOME_NAME_TO_FAMILY[name] : undefined
+    if (family && outcome && (POPUP_OUTCOME_TYPES as readonly string[]).includes(outcome)) {
+      return { family: `popup-outcome:${family}`, kind: outcome }
     }
     return null
   }
@@ -336,15 +379,21 @@ export interface PopupDef {
   id: string
   label: string
   hasReasonBreakdown?: boolean // shown/accept/dismiss further breaks down by a reason
+  // FINAL LIST: first50-congrats has no /popup-outcome beacon at all — never generate an
+  // outcome-rate spec (or a chart tile) for it, and never render a "not instrumented"
+  // placeholder that would imply one is coming. See NO_OUTCOME_TRACKING_NOTE.
+  noOutcomeTracking?: boolean
 }
 
 export const POPUPS: PopupDef[] = [
   { id: 'signin-prompt', label: 'Sign-in prompt' },
   { id: 'promo-first50', label: 'First 50 promo' },
-  { id: 'first50-congrats', label: 'First 50 congrats' },
+  { id: 'first50-congrats', label: 'First 50 congrats', noOutcomeTracking: true },
   { id: 'upsell', label: 'Upsell', hasReasonBreakdown: true },
   { id: 'install', label: 'Install prompt', hasReasonBreakdown: true },
 ]
+// Shown once, wherever first50-congrats is charted, instead of any outcome-rate row.
+export const NO_OUTCOME_TRACKING_NOTE = 'no outcome tracking'
 
 export interface PopupRateSpec {
   key: string
@@ -356,7 +405,7 @@ export interface PopupRateSpec {
 
 export const POPUP_RATE_SPECS: PopupRateSpec[] = [
   ...POPUPS.map((p) => ({ key: `${p.id}:tap`, label: `${p.label} — tap rate (accept / shown)`, kind: 'tap' as const, popup: p.id })),
-  ...POPUPS.flatMap((p) =>
+  ...POPUPS.filter((p) => !p.noOutcomeTracking).flatMap((p) =>
     POPUP_OUTCOME_TYPES.map((o) => ({
       key: `${p.id}:outcome:${o}`,
       label: `${p.label} — ${o.replace('-', ' ')} rate`,

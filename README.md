@@ -73,7 +73,25 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   upsell and install pop-ups: shown/accepted/dismissed counts, tap rates, outcome rates,
   the sign-in eligibility rate and install's real-outcome counts, bucketed by US-Eastern day.
   See [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) for the one place every pop-up path
-  pattern is defined. A configurable **tracking activation date** (`TRACKING_ACTIVATION_DATE_ET`,
+  pattern is defined, matching the Best Sudoku team's final beacon path list (2026-09-25):
+  - Upsell reasons are exactly `cadence` / `limit` / `daily-locked` / `upgrade-tap`; any
+    other reason (e.g. the retired `settings-upgrade`) is counted under "other", never
+    dropped.
+  - Outcome types are `signed-in` / `installed` / `returned` / `still-playing` (new — days
+    14-21 after shown), one MIN_COHORT-gated rate per pop-up × outcome.
+  - `/popup-outcome/<popup>/…`'s wire vocabulary is `signin-prompt` / `promo-first50` /
+    `upsell` / `install-prompt` — `install-prompt` maps to the `install` family internally
+    (`POPUP_OUTCOME_NAME_TO_FAMILY`).
+  - `first50-congrats` has no outcome beacon at all — its charts carry a one-time "no
+    outcome tracking" note instead of an outcome-rate row or a "not instrumented"
+    placeholder.
+  - `/signin-eligible` (the sign-in denominator) is deferred at least 30 minutes after the
+    finish, so its row time is not the finish time — every chart of it carries that caveat,
+    and it's never used to bucket by hour of day (see `SIGNIN_ELIGIBLE_CAVEAT`). The pop-ups
+    page also carries a standing note that rates correlated with a sign-in are
+    conservative for the same reason.
+
+  A configurable **tracking activation date** (`TRACKING_ACTIVATION_DATE_ET`,
   null until v1.90.0 ships) keeps pre-release data from reading as a baseline: every rate
   and every pop-up count widget (other than the trend line, which plots full history with
   a "tracking starts" marker) is gated to that date, so a real pre-release denominator
@@ -126,10 +144,11 @@ RUM whitelisted dimensions (server-side): `requestHost`, `requestPath`, `deviceT
 geography is country-only** — sub-country region/city comes from the beacon.
 
 **Pop-up event beacons never count as page views.** Paths under `/signin-prompt`,
-`/signin-eligible`, `/promo-first50`, `/first50-congrats`, `/upsell`, `/install` and
-`/popup-outcome` are pop-up interaction events, not screens — `/api/geo` and `/api/sites`
-exclude them from every pageview/visit total and the top-pages breakdown (see
-[`src/lib/popupEvents.ts`](src/lib/popupEvents.ts)); `/api/popups` is where they're counted.
+`/signin-eligible`, `/promo-first50`, `/first50-congrats`, `/upsell`, `/install`,
+`/popup-outcome` and `/return` are pop-up interaction events, not screens — `/api/geo` and
+`/api/sites` exclude all 8 prefixes from every pageview/visit total and the top-pages
+breakdown (see [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) `POPUP_EVENT_PREFIXES`);
+`/api/popups` is where they're counted.
 
 **Campaign attribution is uc-only.** A row belongs to a Google Ads campaign only by its own
 `campaign` column value (D1's actual column name for what the ad tags as `utm_campaign`) —

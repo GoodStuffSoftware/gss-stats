@@ -18,13 +18,14 @@
 //     'kind'           — shown/accept/dismiss counts for `popup` (required)
 //     'reason'         — reason/platform breakdown for `popup` + `kind` (default 'shown')
 //     'date'           — US-Eastern day trend for `popup` + `kind` (default 'shown')
-//     'outcome'        — popup-outcome counts (signed-in/installed/returned) for `popup`
+//     'outcome'        — popup-outcome counts (signed-in/installed/returned/still-playing) for `popup`
 //     'eligible'       — sign-in-eligible earned/capped/unearned counts (no popup needed)
 //     'installOutcome' — install's real-outcome counts (no popup needed)
 //     'rate'           — one computed rate, selected by `rateKey` (see POPUP_RATE_SPECS)
 
 import {
   POPUPS,
+  POPUP_OUTCOME_TYPES,
   POPUP_RATE_SPECS,
   TRACKING_ACTIVATION_DATE_ET,
   aggregatePopupRows,
@@ -167,10 +168,12 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     return json({ rows: rowsOut, totals: countedTotals(rowsOut), meta })
   }
 
-  // 'outcome' — activation-gated.
+  // 'outcome' — activation-gated. Reads the shared POPUP_OUTCOME_TYPES list (not a
+  // hardcoded copy) so a new outcome type (e.g. 'still-playing') never has to be added in
+  // two places again.
   if (dim === 'outcome') {
     const family = `popup-outcome:${popup}`
-    const rowsOut: Row[] = ['signed-in', 'installed', 'returned'].map((o) => {
+    const rowsOut: Row[] = POPUP_OUTCOME_TYPES.map((o) => {
       const c = measuredCoarseCount(agg, family, o)
       return { key: { outcome: o }, pageviews: c, visits: c }
     })
