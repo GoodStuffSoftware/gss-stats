@@ -6,7 +6,81 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-09-25
+
+### Fixed
+- **The overview page's "same time of day" comparisons were off by an hour around DST
+  transitions.** `vsYesterday`/`vsAvg7` used to reuse one elapsed-millisecond span computed
+  from today's own midnight for every comparison day; it's now derived from each comparison
+  day's own wall-clock time, correct on both sides of the spring-forward/fall-back
+  transitions.
+- **The overview page's KPI tiles, daily timeline, and release before/after panel now apply
+  the same household/lifecycle exclusions as the campaign scorecard** — they'd been reading
+  `hits` unfiltered, so Mike's own traffic and lifecycle-email sends could skew the numbers
+  (previously up to ~4% of all-time rows). All three sections now share one WHERE-clause
+  builder so this can't drift out of sync again.
+- **The overview page's pop-up tap rate, campaign scorecard rates, and return rate now show
+  "too few to report"** (instead of a bare "—") when they have some data but fewer than 5
+  in their denominator, matching the campaign page.
+- **Campaign definitions corrected against the Google Ads API.** The two closed campaigns
+  weren't one flight split by date — they're two different campaigns with two different
+  delivery paths: "Android launch" gets every tagged row for its uc family with no date
+  split (including returners who come back after the ads stopped), while "Play-direct" sends
+  ads straight to the Play Store listing and has no beacon rows at all, so it's now shown as
+  spend-only ("not measurable in beacon — no Install Referrer reader") rather than an empty
+  funnel. The retest campaign's start date is left unconfirmed (`null`) so its 9 existing
+  rows — pre-launch validation traffic — don't count until a real flight date is set. Spend
+  ($124.47 / $75.17) is now filled in from Google Ads' daily figures, so cost-per-arrival and
+  cost-per-auth-success compute for the Android launch flight.
+- **Flight 1's start date was off by one ET day.** It was derived from UTC-bucketed daily
+  counts; re-derived from ET-bucketed ones (the campaign's real first hit is 2026-09-02
+  ~22:56 ET, already 2026-09-03 in UTC), recovering ~150 tagged hits that fell outside every
+  flight window.
+- **Tagged hits** — every row carrying a campaign tag, as opposed to tagged *arrivals*
+  (first-ever beacon only) — is now shown on the campaign page, labeled separately, next to
+  the arrivals floor caveat.
+
 ### Added
+- **"Best Sudoku overview" page** (first in the page list) answers "how's the release
+  going, how's each campaign going, and what's happening right now": today-at-a-glance KPI
+  tiles compared against the same time yesterday and the 7-day average, a daily timeline
+  since the first Best Sudoku hit overlaid with campaign flights / release / tracking-
+  activation markers, a campaign scorecard, and a release before/after panel. Uninstrumented
+  metrics show "not yet tracking" instead of a fake 0.
+- **"Best Sudoku campaigns" page** compares the three Google Ads campaigns (Android launch,
+  Play-direct — spend-only, no beacon rows — and a new US+CA web retest) side by
+  side: a funnel (arrivals → played → completed → sign-in ask → accept → auth success →
+  install prompt → install, with "not instrumented" instead of a fake 0 for steps that
+  never happened during a flight), arrivals by ET hour of day, arrivals and the funnel by
+  country, daily + cumulative arrivals aligned by flight day so the flights overlay, cost
+  per tagged arrival/auth success (once ad spend is filled in), device mix, and — once the
+  new on-device return beacon starts reporting (v1.90.0) — a return-visit retention curve.
+  Attribution is by the beacon's own campaign tag only, with a single swappable function
+  deciding row membership; known verification/household traffic is excluded server-side.
+- **Pop-up rates never report from a tiny sample.** Every rate (tap, outcome, eligibility)
+  now needs at least 5 in its denominator — below that it shows "too few to report" instead
+  of a real-looking but noisy percentage (e.g. 1/2 reading as an alarming 50%).
+
+### Fixed
+- **The on-device return beacon (`/return/...`) is now excluded from ordinary pageview/visit
+  totals**, matching every other pop-up event path — it had been left off that exclusion list.
+
+### Added
+- **Pop-up tracking has a configurable activation date, so pre-release data can't read as
+  a baseline.** Every pop-up rate (tap, outcome, eligibility) and count widget — other than
+  the shown/day trend, which now marks the activation date with a "tracking starts" line and
+  mutes the days before it — is gated to that date; a real pre-release denominator (like the
+  22-event uncapped-placement-bug reproduction on 2026-09-19) can only ever show "—", never a
+  misleading 0%. While the date is unset the "Best Sudoku pop-ups" page carries a note:
+  "Tracking not yet active — numbers before release are not a baseline."
+- **Best Sudoku pop-up tracking page.** A new "Best Sudoku pop-ups" dashboard page (next to
+  the launch page) shows shown / accepted / dismissed counts, tap rates, outcome rates, the
+  sign-in eligibility rate, and install's real-outcome counts for every pop-up (sign-in
+  prompt, first-50 promo, upsell, install). Day trends bucket by US-Eastern calendar day
+  (DST-safe), and a rate shows "—" instead of 0%/NaN until it has real data. Pop-up event
+  beacons (`/signin-prompt`, `/signin-eligible`, `/promo-first50`, `/first50-congrats`,
+  `/upsell`, `/install`, `/popup-outcome`) no longer count toward ordinary pageview/visit
+  totals or the top-pages breakdown.
 - **Best Sudoku launch page shows campaign source / medium.** A new "Campaign source /
   medium" chart on the Best Sudoku page groups by `utm_source` (e.g. `google`), alongside
   the existing campaign chart (now labeled "Campaign (utm_campaign)") — both now cover the

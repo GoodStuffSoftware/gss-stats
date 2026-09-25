@@ -2,6 +2,7 @@ import type { ChartConfiguration } from 'chart.js'
 import type { Widget, StatsResponse, StatsRow, Metric } from '../types'
 import { COUNTRY_NAMES } from './catalog'
 import { ringDims } from './rings'
+import { TRACKING_ACTIVATION_DATE_ET } from './popupEvents'
 
 // Categorical palette: brand amber leads, with distinguishable warm/cool accents.
 export const PALETTE = [
@@ -166,6 +167,70 @@ function arcLabelsPlugin(itemsByDataset: Record<number, ArcItem[]>) {
           ctx.restore()
         })
       }
+    },
+  }
+}
+
+// ── Pop-up trend charts: "tracking starts" marker + pre-activation de-emphasis (Part A
+// hard requirement: "before activation is unmeasured, not zero" — see
+// lib/popupEvents.ts TRACKING_ACTIVATION_DATE_ET) ──────────────────────────────────
+// Index (into a zero-filled 'date' series `rows`, see seriesRows) of the boundary
+// between pre- and post-activation days: the first index on/after `activationDateEt`,
+// or `rows.length` (every plotted day is still pre-activation) when there's no such day
+// in range, or -1 when there's no activation date at all (exported for tests).
+export function activationMarkerIndex(rows: { key: { date?: string } }[], activationDateEt: string | null): number {
+  if (!activationDateEt) return -1
+  const idx = rows.findIndex((r) => (r.key.date ?? '') >= activationDateEt)
+  return idx === -1 ? rows.length : idx
+}
+
+// Vertical dashed boundary + "tracking starts" label at the activation day — only drawn
+// when the boundary actually falls within (or at the edge of) the visible chart area.
+function activationMarkerPlugin(index: number) {
+  return {
+    id: 'activationMarker',
+    afterDraw(chart: any) {
+      const { ctx, chartArea, scales } = chart
+      if (!chartArea || !scales?.x) return
+      const x = scales.x.getPixelForValue(index)
+      if (x == null || Number.isNaN(x) || x < chartArea.left || x > chartArea.right) return
+      ctx.save()
+      ctx.strokeStyle = isDark() ? 'rgba(231,226,215,0.45)' : 'rgba(26,23,21,0.35)'
+      ctx.setLineDash([4, 3])
+      ctx.lineWidth = 1.5
+      ctx.beginPath()
+      ctx.moveTo(x, chartArea.top)
+      ctx.lineTo(x, chartArea.bottom)
+      ctx.stroke()
+      ctx.setLineDash([])
+      ctx.fillStyle = tickColor()
+      ctx.font = '600 10px Inter, system-ui, sans-serif'
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'top'
+      const label = 'tracking starts'
+      const labelX = Math.min(x + 5, chartArea.right - ctx.measureText(label).width - 2)
+      ctx.fillText(label, Math.max(chartArea.left + 2, labelX), chartArea.top + 3)
+      ctx.restore()
+    },
+  }
+}
+
+// Small corner watermark shown instead of the boundary marker while
+// TRACKING_ACTIVATION_DATE_ET is still null — the WHOLE series is pre-release, so there's
+// no boundary to point at; the page-level note (App.vue) carries the full explanation.
+function notYetTrackedWatermarkPlugin() {
+  return {
+    id: 'notYetTracked',
+    afterDraw(chart: any) {
+      const { ctx, chartArea } = chart
+      if (!chartArea) return
+      ctx.save()
+      ctx.fillStyle = tickColor()
+      ctx.font = '600 10px Inter, system-ui, sans-serif'
+      ctx.textAlign = 'right'
+      ctx.textBaseline = 'top'
+      ctx.fillText('pre-release — not yet tracked', chartArea.right, chartArea.top + 3)
+      ctx.restore()
     },
   }
 }
@@ -344,7 +409,7 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
   const m = widget.metric
   const dim = widget.dimension
 
-  if (widget.type === 'stat' || widget.type === 'table' || widget.type === 'map') return null
+  if (widget.type === 'stat' || widget.type === 'table' || widget.type === 'map' || widget.type === 'rate') return null
 
   // ── Stacked bar: primary dimension × breakdown ──────────────────────────────
   if (widget.type === 'stackedBar' && widget.breakdown) {
@@ -491,6 +556,14 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
   }
 
   if (widget.type === 'line' || widget.type === 'area') {
+    // Pop-up 'date' trend charts get a "tracking starts" boundary + a muted pre-activation
+    // segment (or, while TRACKING_ACTIVATION_DATE_ET is still null, the whole line is muted
+    // with a corner watermark instead — see activationMarkerIndex above).
+    const isPopupTrend = widget.dataset === 'popup' && dim === 'date'
+    const boundary = isPopupTrend ? (TRACKING_ACTIVATION_DATE_ET ? activationMarkerIndex(rows, TRACKING_ACTIVATION_DATE_ET) : rows.length) : -1
+    const muted = isDark() ? 'rgba(231,226,215,0.35)' : 'rgba(26,23,21,0.28)'
+    const mutedFill = isDark() ? 'rgba(231,226,215,0.08)' : 'rgba(26,23,21,0.06)'
+
     // index/intersect:false + a wide point hit radius makes the tooltip appear on a tap
     // anywhere along the line — essential on touch, where hitting a 2px point is impractical.
     return {
@@ -509,6 +582,14 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
             pointHitRadius: 24,
             pointBackgroundColor: PALETTE[0],
             borderWidth: 2,
+            ...(boundary >= 0
+              ? {
+                  segment: {
+                    borderColor: (ctx: any) => (ctx.p0DataIndex < boundary ? muted : undefined),
+                    backgroundColor: (ctx: any) => (ctx.p0DataIndex < boundary ? mutedFill : undefined),
+                  },
+                }
+              : {}),
           },
         ],
       },
@@ -519,7 +600,10 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
         plugins: noLegend,
         scales: baseScales(),
       },
-    }
+      ...(isPopupTrend
+        ? { plugins: [TRACKING_ACTIVATION_DATE_ET ? activationMarkerPlugin(boundary) : notYetTrackedWatermarkPlugin()] }
+        : {}),
+    } as ChartConfiguration
   }
 
   // bar / hbar
