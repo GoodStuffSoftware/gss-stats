@@ -82,10 +82,12 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   chart-grid model) compares the three Google Ads campaigns configured in
   [`src/lib/campaigns.ts`](src/lib/campaigns.ts): a funnel per campaign, arrivals by ET
   hour of day, arrivals/funnel by country, daily + cumulative arrivals aligned by flight
-  day, cost per arrival/auth success (once spend is filled in), device mix, and an
-  on-device return-visit retention curve. Attribution is by the beacon's own campaign tag
-  only — one swappable function decides row membership, and known verification/household
-  traffic is excluded server-side.
+  day, cost per arrival/auth success (spend filled in from the Google Ads API), device mix,
+  and an on-device return-visit retention curve. Attribution is by the beacon's own
+  campaign tag only, with no date-based split — one swappable function decides row
+  membership, and known verification/household traffic is excluded server-side. One
+  campaign (Play-direct) sends its ads straight to the Play Store and so has no beacon rows
+  at all; it's shown spend-only rather than an empty funnel.
 - **Locked down** — Cloudflare Access gates the dashboard; an expired session shows a
   one-tap re-sign-in banner instead of a wall of errors.
 - Light / dark theme matching the Good Stuff Software brand.

@@ -10,6 +10,16 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **The overview page's pop-up tap rate, campaign scorecard rates, and return rate now show
   "too few to report"** (instead of a bare "—") when they have some data but fewer than 5
   in their denominator, matching the campaign page.
+- **Campaign definitions corrected against the Google Ads API.** The two closed campaigns
+  weren't one flight split by date — they're two different campaigns with two different
+  delivery paths: "Android launch" gets every tagged row for its uc family with no date
+  split (including returners who come back after the ads stopped), while "Play-direct" sends
+  ads straight to the Play Store listing and has no beacon rows at all, so it's now shown as
+  spend-only ("not measurable in beacon — no Install Referrer reader") rather than an empty
+  funnel. The retest campaign's start date is left unconfirmed (`null`) so its 9 existing
+  rows — pre-launch validation traffic — don't count until a real flight date is set. Spend
+  ($124.47 / $75.17) is now filled in from Google Ads' daily figures, so cost-per-arrival and
+  cost-per-auth-success compute for the Android launch flight.
 - **Flight 1's start date was off by one ET day.** It was derived from UTC-bucketed daily
   counts; re-derived from ET-bucketed ones (the campaign's real first hit is 2026-09-02
   ~22:56 ET, already 2026-09-03 in UTC), recovering ~150 tagged hits that fell outside every
@@ -25,8 +35,8 @@ All notable changes to **gss-stats** are documented here. The format follows
   since the first Best Sudoku hit overlaid with campaign flights / release / tracking-
   activation markers, a campaign scorecard, and a release before/after panel. Uninstrumented
   metrics show "not yet tracking" instead of a fake 0.
-- **"Best Sudoku campaigns" page** compares the three Google Ads campaigns (two closed
-  display flights sharing a tag, split by date range, plus a new US+CA web retest) side by
+- **"Best Sudoku campaigns" page** compares the three Google Ads campaigns (Android launch,
+  Play-direct — spend-only, no beacon rows — and a new US+CA web retest) side by
   side: a funnel (arrivals → played → completed → sign-in ask → accept → auth success →
   install prompt → install, with "not instrumented" instead of a fake 0 for steps that
   never happened during a flight), arrivals by ET hour of day, arrivals and the funnel by
