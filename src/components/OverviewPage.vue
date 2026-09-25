@@ -8,7 +8,7 @@ import type { ChartConfiguration } from 'chart.js'
 import type { GlobalFilters, OverviewResponse } from '../types'
 import { fetchOverview } from '../api'
 import { PALETTE } from '../lib/charts'
-import { FUNNEL_STEP_LABELS, FUNNEL_STEP_ORDER } from '../lib/campaigns'
+import { FUNNEL_STEP_LABELS, FUNNEL_STEP_ORDER, FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED, type FunnelStepKey } from '../lib/campaigns'
 import { isInsufficientCohort } from '../lib/popupEvents'
 import type { CampaignFunnelCounts } from '../types'
 import BaseChart from './charts/BaseChart.vue'
@@ -206,7 +206,13 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
               <span class="sc-label">{{ row.label }}</span>
               <span class="sc-status" :class="row.flightingToday ? 'live' : ''">{{ row.flightingToday ? 'flighting today' : row.status }}</span>
             </div>
-            <div class="sc-row"><span>Flight</span><span class="mono">{{ row.flightStart }} → {{ row.flightEnd }} ({{ row.flightDays }}d)</span></div>
+            <div class="sc-row">
+              <span>Flight</span>
+              <span class="mono">
+                <template v-if="row.flightStart == null">pending — start date not yet confirmed</template>
+                <template v-else>{{ row.flightStart }} → {{ row.flightEnd }} ({{ row.flightDays }}d)</template>
+              </span>
+            </div>
             <div class="sc-row"><span>Tagged arrivals</span><span class="mono">{{ fmt(row.taggedArrivals) }}</span></div>
             <div class="sc-row"><span>Auth successes</span><span class="mono">{{ fmt(row.authSuccess) }}</span></div>
             <div class="sc-row"><span>Installs</span><span class="mono">{{ fmt(row.install) }}</span></div>
@@ -214,7 +220,9 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
             <div class="sc-row"><span>Cost / arrival</span><span class="mono">{{ money(row.costPerArrival) }}</span></div>
             <div class="sc-rates">
               <span v-for="(rate, step) in row.funnelRates" :key="step" class="sc-rate-chip" :title="FUNNEL_STEP_LABELS[step as keyof typeof FUNNEL_STEP_LABELS]">
-                {{ FUNNEL_STEP_LABELS[step as keyof typeof FUNNEL_STEP_LABELS] }}: {{ pct(rate, prevFunnelCount(row.funnelCounts, step as keyof CampaignFunnelCounts)) }}
+                {{ FUNNEL_STEP_LABELS[step as keyof typeof FUNNEL_STEP_LABELS] }}:
+                <template v-if="FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED.has(step as FunnelStepKey)">not instrumented</template>
+                <template v-else>{{ pct(rate, prevFunnelCount(row.funnelCounts, step as keyof CampaignFunnelCounts)) }}</template>
               </span>
             </div>
           </div>

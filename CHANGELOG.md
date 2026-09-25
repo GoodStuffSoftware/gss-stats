@@ -7,6 +7,16 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **The overview page's "same time of day" comparisons were off by an hour around DST
+  transitions.** `vsYesterday`/`vsAvg7` used to reuse one elapsed-millisecond span computed
+  from today's own midnight for every comparison day; it's now derived from each comparison
+  day's own wall-clock time, correct on both sides of the spring-forward/fall-back
+  transitions.
+- **The overview page's KPI tiles, daily timeline, and release before/after panel now apply
+  the same household/lifecycle exclusions as the campaign scorecard** — they'd been reading
+  `hits` unfiltered, so Mike's own traffic and lifecycle-email sends could skew the numbers
+  (previously up to ~4% of all-time rows). All three sections now share one WHERE-clause
+  builder so this can't drift out of sync again.
 - **The overview page's pop-up tap rate, campaign scorecard rates, and return rate now show
   "too few to report"** (instead of a bare "—") when they have some data but fewer than 5
   in their denominator, matching the campaign page.

@@ -33,11 +33,12 @@ import {
   buildKpiTile,
   campaignsFlightingOn,
   computeDelta,
-  etDayElapsedMs,
   last7DatesBefore,
   notYetTrackingTile,
   releaseComparisonWindows,
   returnBeaconLiveToday,
+  sameTimeWindowMs,
+  siteWindowClause,
 } from '../../src/lib/overview'
 import { latestDatedRelease } from '../../src/lib/releases'
 
@@ -108,24 +109,27 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
 
   const nowMs = Date.now()
   const todayEt = etDateFromMs(nowMs)
-  const elapsed = etDayElapsedMs(nowMs)
   const yesterdayEt = addEtDays(todayEt, -1)
   const last7 = last7DatesBefore(todayEt)
   const earliestKpiDay = last7[last7.length - 1] // 7 days before today
   const kpiRangeStart = etMidnightUtcMs(earliestKpiDay)
 
   // ── Query 1: today-at-a-glance source rows (minute bucket, path, visitor, campaign) ────
-  const sqlKpi = `SELECT CAST(ts / 60000 AS INTEGER) AS min, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE site IN (${BEST_SUDOKU_SITES.map(() => '?').join(', ')}) AND ts >= ? AND ts < ? GROUP BY min, path, visitor, campaign`
-  const bKpi = [...BEST_SUDOKU_SITES, kpiRangeStart, nowMs]
+  // siteWindowClause applies exclusions (HIGH review finding, 2026-09-25): Mike's household +
+  // lifecycle/email traffic must be filtered here too, the same as the campaign scorecard
+  // below — this query feeds every KPI tile. ─────────────────────────────────────────────
+  const kpiClause = siteWindowClause(BEST_SUDOKU_SITES, kpiRangeStart, nowMs)
+  const sqlKpi = `SELECT CAST(ts / 60000 AS INTEGER) AS min, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE ${kpiClause.sql} GROUP BY min, path, visitor, campaign`
 
   // ── Query 2: daily timeline since first Best Sudoku hit (or the requested since/until —
-  // the "existing range control") — hour bucket is plenty for a DAILY series. ─────────────
+  // the "existing range control") — hour bucket is plenty for a DAILY series. Same
+  // exclusions requirement as query 1 — this feeds the daily timeline chart. ───────────────
   const since = safeDate(body.since, '2026-01-01') // well before any known Best Sudoku data
   const until = safeDate(body.until, new Date().toISOString())
   const sinceMs = Date.parse(since)
   const untilMs = isDateOnly(until) ? Date.parse(until) + 86_400_000 : Date.parse(until)
-  const sqlTimeline = `SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE site IN (${BEST_SUDOKU_SITES.map(() => '?').join(', ')}) AND ts >= ? AND ts < ? GROUP BY hr, path, visitor, campaign`
-  const bTimeline = [...BEST_SUDOKU_SITES, sinceMs, untilMs]
+  const timelineClause = siteWindowClause(BEST_SUDOKU_SITES, sinceMs, untilMs)
+  const sqlTimeline = `SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE ${timelineClause.sql} GROUP BY hr, path, visitor, campaign`
 
   // ── Query 3: first-ever Best Sudoku hit (for the release panel's "before" window cap). ──
   const sqlFirstHit = `SELECT MIN(ts) AS t FROM hits WHERE site IN (${BEST_SUDOKU_SITES.map(() => '?').join(', ')})`
@@ -134,8 +138,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   let rKpi: any, rTimeline: any, rFirstHit: any
   try {
     ;[rKpi, rTimeline, rFirstHit] = await Promise.all([
-      db.prepare(sqlKpi).bind(...bKpi).all(),
-      db.prepare(sqlTimeline).bind(...bTimeline).all(),
+      db.prepare(sqlKpi).bind(...kpiClause.binds).all(),
+      db.prepare(sqlTimeline).bind(...timelineClause.binds).all(),
       db.prepare(sqlFirstHit).bind(...bFirstHit).all(),
     ])
   } catch (e) {
@@ -152,8 +156,11 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
 
   // ── 1. TODAY AT A GLANCE ────────────────────────────────────────────────────────────────
   const todayWindow: [number, number] = [etMidnightUtcMs(todayEt), nowMs]
-  const yesterdayWindow: [number, number] = [etMidnightUtcMs(yesterdayEt), etMidnightUtcMs(yesterdayEt) + elapsed]
-  const avg7Windows = last7.map((d): [number, number] => [etMidnightUtcMs(d), etMidnightUtcMs(d) + elapsed])
+  // DST-safe (HIGH review finding, 2026-09-25): derives each comparison day's end from ITS
+  // OWN midnight plus today's wall-clock time, not a millisecond span reused across days —
+  // see lib/overview.ts sameTimeWindowMs's doc comment.
+  const yesterdayWindow: [number, number] = sameTimeWindowMs(yesterdayEt, nowMs)
+  const avg7Windows = last7.map((d): [number, number] => sameTimeWindowMs(d, nowMs))
 
   function windowed(pred: (r: Row) => boolean): { today: number; yesterday: number; avg7: number } {
     const today = sumInWindow(kpiRows, todayWindow[0], todayWindow[1], pred)
@@ -273,7 +280,9 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       }
       const returnRates = returnVisitRates(returnCounts as any)
       const spend = CAMPAIGN_SPEND[c.id] ?? null
-      const flightDays = Math.round((etMidnightUtcMs(c.flightEnd) - etMidnightUtcMs(c.flightStart)) / 86_400_000) + 1
+      // flightStart is nullable (a not-yet-confirmed flight, e.g. the retest — see
+      // lib/campaigns.ts CAMPAIGNS) — there's no day count to report until it's set.
+      const flightDays = c.flightStart == null ? null : Math.round((etMidnightUtcMs(c.flightEnd) - etMidnightUtcMs(c.flightStart)) / 86_400_000) + 1
       const dayIndexToday = flightDayIndex(c, todayEt)
 
       return {
@@ -304,10 +313,18 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   if (latest) {
     const windows = releaseComparisonWindows(latest.dateEt, firstHitEt, nowMs)
     if (windows) {
-      const sql = `SELECT path, visitor, campaign, COUNT(*) AS c FROM hits WHERE site IN (${BEST_SUDOKU_SITES.map(() => '?').join(', ')}) AND ts >= ? AND ts < ? GROUP BY path, visitor, campaign`
+      // siteWindowClause applies exclusions (HIGH review finding, 2026-09-25): a before/after
+      // comparison is exactly where uneven household/lifecycle traffic on either side of the
+      // release date would bias the delta — same requirement as queries 1/2 above and the
+      // scorecard. ────────────────────────────────────────────────────────────────────────
+      const releaseWindowQuery = (startMs: number, endMs: number) => {
+        const clause = siteWindowClause(BEST_SUDOKU_SITES, startMs, endMs)
+        const sql = `SELECT path, visitor, campaign, COUNT(*) AS c FROM hits WHERE ${clause.sql} GROUP BY path, visitor, campaign`
+        return db.prepare(sql).bind(...clause.binds).all()
+      }
       const [beforeRes, afterRes] = await Promise.all([
-        db.prepare(sql).bind(...BEST_SUDOKU_SITES, windows.before[0], windows.before[1]).all(),
-        db.prepare(sql).bind(...BEST_SUDOKU_SITES, windows.after[0], windows.after[1]).all(),
+        releaseWindowQuery(windows.before[0], windows.before[1]),
+        releaseWindowQuery(windows.after[0], windows.after[1]),
       ])
       const summarize = (res: any) => {
         const rows = (res.results ?? []).map((x: any) => ({ path: String(x.path ?? ''), visitor: String(x.visitor ?? ''), campaign: String(x.campaign ?? ''), c: Number(x.c) || 0 }))

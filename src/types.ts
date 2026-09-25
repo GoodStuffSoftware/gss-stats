@@ -242,7 +242,7 @@ export interface OverviewDailyPoint {
 export interface OverviewCampaignFlightMeta {
   id: string
   label: string
-  flightStart: string
+  flightStart: string | null
   flightEnd: string
   status: string
 }
@@ -250,9 +250,9 @@ export interface OverviewScorecardRow {
   id: string
   label: string
   status: string
-  flightStart: string
+  flightStart: string | null
   flightEnd: string
-  flightDays: number
+  flightDays: number | null // null while flightStart is unconfirmed — see lib/campaigns.ts CAMPAIGNS
   flightingToday: boolean
   taggedArrivals: number
   funnelRates: Partial<Record<keyof CampaignFunnelCounts, number | null>>
