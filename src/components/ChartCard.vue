@@ -227,9 +227,14 @@ const statOther = computed(() =>
 const statOtherLabel = computed(() => (props.widget.metric === 'visits' ? 'pageviews' : 'visits'))
 
 // Pop-up rate tile (widget.type === 'rate'): null (no denominator yet) renders as "—",
-// never NaN/Infinity — see lib/popupEvents.ts computeRate.
+// never NaN/Infinity — see lib/popupEvents.ts computeRate. A nonzero-but-too-small
+// denominator (MIN_COHORT — see lib/popupEvents.ts gateRate) is a THIRD state, distinct
+// from "no data at all": "too few to report", not "—".
 const rateValue = computed<number | null>(() => data.value?.rate ?? null)
-const rateDisplay = computed(() => (rateValue.value == null ? '—' : `${(rateValue.value * 100).toFixed(1)}%`))
+const rateDisplay = computed(() => {
+  if (data.value?.insufficientCohort) return 'too few to report'
+  return rateValue.value == null ? '—' : `${(rateValue.value * 100).toFixed(1)}%`
+})
 
 const tableRows = computed(() =>
   !data.value
