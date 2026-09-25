@@ -210,7 +210,23 @@ describe('emails that are not printable ASCII are refused before comparing', () 
     expect(ok.next).toHaveBeenCalledOnce()
   })
 
+  it.each([KELVIN, 'owner @example.com', 'owner@exämple.com', 'owner@exam ple.com', 'owner@example.com\t', 'ÿowner@example.com'])(
+    'the ID token check refuses %j as not plain ASCII (before any lower-casing)',
+    (email) => {
+      expect(validateIdTokenClaims(goodClaims('n', { email }), { clientId: CLIENT_ID, nonce: 'n' }, NOW)).toEqual({
+        ok: false,
+        reason: 'email is not plain ASCII',
+      })
+    },
+  )
+
   it('an allowlist entry that is not plain ASCII is a configuration error (503)', async () => {
+    for (const entry of [KELVIN, 'own er@example.com', 'owner@exämple.com']) {
+      expect(readAuthConfig({ ...ENV, ALLOWED_EMAILS: `owner@example.com, ${entry}` }), entry).toEqual({
+        ok: false,
+        problems: ['ALLOWED_EMAILS has an entry that is not a plain ASCII address'],
+      })
+    }
     const r = readAuthConfig({ ...ENV, ALLOWED_EMAILS: `owner@example.com, ${KELVIN}` })
     expect(r).toEqual({ ok: false, problems: ['ALLOWED_EMAILS has an entry that is not a plain ASCII address'] })
     const { res, next } = await gate(req('/api/sites', { cookie: await sessionCookieFor('owner@example.com') }), {
