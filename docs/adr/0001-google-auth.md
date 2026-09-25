@@ -181,5 +181,5 @@ etc.), the signature must be verified first. To keep this ruling valid:
   Settings). Pinning `sub` is the upgrade if that ever has to change.
 - Unauthenticated callers can make the callback call Google's token endpoint (with a
   junk code). The owner adds a Cloudflare rate-limiting rule on
-  `/auth/google/callback` (README rollout step 7) so a flood can't get the OAuth client
-  throttled.
+  `/auth/google/callback` (README rollout step 5, before Access is removed) so a flood
+  can't get the OAuth client throttled.
