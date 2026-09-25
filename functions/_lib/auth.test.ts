@@ -484,9 +484,10 @@ describe('Google sign-in flow', () => {
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body.get('code_verifier')!))
     expect(b64urlEncode(new Uint8Array(digest))).toBe(google.searchParams.get('code_challenge'))
     // Never follow a redirect away from the token endpoint (the unsigned-ID-token ruling
-    // rests on TLS to that exact host).
+    // rests on TLS to that exact host). 'manual', not 'error': workerd rejects 'error'
+    // outright (auth.workerd.test.ts proves the init inside the real runtime).
     expect(init!.method).toBe('POST')
-    expect(init!.redirect).toBe('error')
+    expect(init!.redirect).toBe('manual')
 
     const cookies = setCookies(res)
     const session = cookies.find((c) => c.startsWith('__Host-gss_session='))!
@@ -561,6 +562,22 @@ describe('Google sign-in flow', () => {
     )
     expect(res.status).toBe(502)
     expect(setCookies(res).some((c) => /^__Host-gss_session=[^;]/.test(c))).toBe(false)
+  })
+
+  it('a redirect from the token endpoint is refused (502, no session), never followed', async () => {
+    const { google, stateCookie } = await startLogin()
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(null, { status: 302, headers: { Location: 'https://evil.example/token' } }),
+    )
+    const { res } = await gate(
+      req(`/auth/google/callback?state=${google.searchParams.get('state')}&code=c`, { cookie: cookiePair(stateCookie) }),
+      ENV,
+      { fetch: fetchMock as unknown as typeof fetch },
+    )
+    expect(res.status).toBe(502)
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(issuesSession(res)).toBe(false)
   })
 })
 
