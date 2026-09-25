@@ -7,6 +7,12 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **"Best Sudoku overview" page** (first in the page list) answers "how's the release
+  going, how's each campaign going, and what's happening right now": today-at-a-glance KPI
+  tiles compared against the same time yesterday and the 7-day average, a daily timeline
+  since the first Best Sudoku hit overlaid with campaign flights / release / tracking-
+  activation markers, a campaign scorecard, and a release before/after panel. Uninstrumented
+  metrics show "not yet tracking" instead of a fake 0.
 - **"Best Sudoku campaigns" page** compares the three Google Ads campaigns (two closed
   display flights sharing a tag, split by date range, plus a new US+CA web retest) side by
   side: a funnel (arrivals → played → completed → sign-in ask → accept → auth success →

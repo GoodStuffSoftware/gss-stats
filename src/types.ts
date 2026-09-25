@@ -207,3 +207,77 @@ export interface CampaignCompareResponse {
   spend: number | null
   meta: { generatedAt: string }
 }
+
+// ── "Best Sudoku overview" (Part C) — see functions/api/overview.ts + lib/overview.ts. ──
+export interface OverviewDelta {
+  delta: number
+  deltaPct: number | null
+}
+export interface OverviewKpiTile {
+  key: string
+  label: string
+  today: number | null
+  vsYesterday?: OverviewDelta | null
+  vsAvg7?: OverviewDelta | null
+  notYetTracking?: boolean
+  noCampaignFlighting?: boolean
+  campaignId?: string
+  isRate?: boolean
+}
+export interface OverviewDailyPoint {
+  date: string
+  pageviews: number
+  taggedArrivals: number
+  authSuccess: number
+  install: number
+}
+export interface OverviewCampaignFlightMeta {
+  id: string
+  label: string
+  flightStart: string
+  flightEnd: string
+  status: string
+}
+export interface OverviewScorecardRow {
+  id: string
+  label: string
+  status: string
+  flightStart: string
+  flightEnd: string
+  flightDays: number
+  flightingToday: boolean
+  taggedArrivals: number
+  funnelRates: Partial<Record<keyof CampaignFunnelCounts, number | null>>
+  authSuccess: number
+  install: number
+  returnRateD2to7: number | null
+  costPerArrival: number | null
+}
+export interface OverviewReleaseWindowSummary {
+  pageviews: number
+  taggedArrivals: number
+  authSuccess: number
+  install: number
+}
+export interface OverviewReleasePanel {
+  release: { version: string; dateEt: string; note: string }
+  days: number
+  before: OverviewReleaseWindowSummary
+  after: OverviewReleaseWindowSummary
+  note: string
+}
+export interface OverviewResponse {
+  generatedAt: string
+  todayEt: string
+  kpis: OverviewKpiTile[]
+  timeline: {
+    daily: OverviewDailyPoint[]
+    campaignFlights: OverviewCampaignFlightMeta[]
+    releaseMarkers: { version: string; dateEt: string; note: string }[]
+    trackingActivationDate: string | null
+    since: string
+    until: string
+  }
+  scorecard: OverviewScorecardRow[]
+  releasePanel: OverviewReleasePanel | null
+}

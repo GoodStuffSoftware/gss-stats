@@ -41,6 +41,13 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
 
 ## Features
 
+- **"Best Sudoku overview"** — the landing page: today-at-a-glance KPI tiles (vs the same
+  time yesterday and the 7-day average), a daily timeline since the first hit overlaid with
+  campaign flights / release / tracking-activation markers, a campaign scorecard, and a
+  release before/after panel. See
+  [`src/lib/overview.ts`](src/lib/overview.ts) and
+  [`src/lib/releases.ts`](src/lib/releases.ts) (hand-entered release dates — `hits` has no
+  app-version column).
 - **Movable / composable charts** — drag the header, resize from the corner; add /
   edit / duplicate / delete charts of any type: stat, bar, horizontal bar, stacked
   bar, line, area, doughnut, nested doughnut, pie, table, and a geo point map.
@@ -96,6 +103,7 @@ Cloudflare Pages Functions  (functions/api/*.ts)
    │  - /api/popups → pop-up funnel counts/rates from the same D1 (sign-in, upsell, install, …)
    │  - /api/campaigns → Google Ads campaign comparison from the same D1 (funnel, hour-of-day,
    │                      country, daily/cumulative, device mix, return visits)
+   │  - /api/overview → today-at-a-glance KPIs, daily timeline, campaign scorecard, release panel
    │  - /api/sites  → auto-builds the merged site list (RUM + beacon, aliases folded)
    │  - /api/config → dashboard layout in KV
    ▼
