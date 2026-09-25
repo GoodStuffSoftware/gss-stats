@@ -1,7 +1,18 @@
 <script setup lang="ts">
 import { reactive, computed, watch } from 'vue'
 import type { Widget } from '../types'
-import { DIMENSIONS, GEO_DIMENSIONS, DATASETS, CHART_TYPES, METRICS, SITE_OPTIONS } from '../lib/catalog'
+import {
+  DIMENSIONS,
+  GEO_DIMENSIONS,
+  POPUP_DIMENSIONS,
+  POPUP_OPTIONS,
+  POPUP_KIND_OPTIONS,
+  POPUP_RATE_DIMENSIONS,
+  DATASETS,
+  CHART_TYPES,
+  METRICS,
+  SITE_OPTIONS,
+} from '../lib/catalog'
 import { ringDims, RING_SOFT_CAP } from '../lib/rings'
 
 const props = defineProps<{ widget: Widget; isNew: boolean }>()
@@ -14,7 +25,15 @@ watch(
 )
 
 const isGeo = computed(() => draft.dataset === 'geo')
-const dimOptions = computed(() => (isGeo.value ? GEO_DIMENSIONS : DIMENSIONS))
+const isPopup = computed(() => draft.dataset === 'popup')
+const isRate = computed(() => draft.type === 'rate')
+// A rate tile's "dimension" is a POPUP_RATE_SPECS key, not a group-by field — a wholly
+// different picker domain from the count-mode dimensions below it.
+const dimOptions = computed(() => (isRate.value ? POPUP_RATE_DIMENSIONS : isPopup.value ? POPUP_DIMENSIONS : isGeo.value ? GEO_DIMENSIONS : DIMENSIONS))
+// A count-mode popup chart ('kind'/'reason'/'date'/'outcome') needs to know WHICH pop-up
+// it's scoped to; 'reason'/'date' also need which funnel stage they break down/trend.
+const popupNeedsPopup = computed(() => isPopup.value && !isRate.value && draft.dimension !== 'eligible' && draft.dimension !== 'installOutcome')
+const popupNeedsKind = computed(() => isPopup.value && !isRate.value && (draft.dimension === 'reason' || draft.dimension === 'date'))
 
 // Switching data source: keep the dimension + breakdown valid for the new source. The
 // beacon supports a breakdown too (nested doughnut / stacked bar), so we remap rather
@@ -32,8 +51,31 @@ function onDatasetChange() {
     draft.rings = draft.rings.filter((r) => dimOptions.value.some((d) => d.key === r))
     if (!draft.rings.length) draft.rings = undefined
   }
-  if (isGeo.value) draft.metric = 'pageviews'
+  if (isGeo.value || isPopup.value) draft.metric = 'pageviews'
+  if (isPopup.value && !draft.popup) draft.popup = POPUP_OPTIONS[0]?.value
+  if (isPopup.value && !draft.popupKind) draft.popupKind = 'shown'
+  if (!isPopup.value) {
+    draft.popup = undefined
+    draft.popupKind = undefined
+  }
 }
+
+// Switching chart TYPE also switches dimension domain when it crosses into/out of
+// 'rate' (a rate tile's dimension list is a different domain — see dimOptions above).
+watch(
+  () => draft.type,
+  (t, prev) => {
+    if (t === 'rate' && draft.dataset !== 'popup') {
+      draft.dataset = 'popup'
+      onDatasetChange()
+    }
+    const wasRate = prev === 'rate'
+    const nowRate = t === 'rate'
+    if (wasRate !== nowRate && !dimOptions.value.some((d) => d.key === draft.dimension)) {
+      draft.dimension = dimOptions.value[0]?.key ?? ''
+    }
+  },
+)
 
 // ── Nested doughnut: extra rings beyond dimension + breakdown ──────────────────────────────
 // Options for a ring pick: the same per-dataset catalog the dimension/breakdown selects use,
@@ -91,6 +133,8 @@ function save() {
   if (typeDef.value && !typeDef.value.needsDimension) draft.dimension = ''
   if (typeDef.value && !typeDef.value.allowsBreakdown) draft.breakdown = undefined
   if (draft.breakdown === '') draft.breakdown = undefined
+  if (!popupNeedsPopup.value) draft.popup = undefined
+  if (!popupNeedsKind.value) draft.popupKind = undefined
   // Extra rings only make sense for a nested doughnut with a breakdown set; sanitize (drop
   // blanks/duplicates/'date') and clear them entirely otherwise.
   if (draft.type === 'nestedDoughnut' && draft.breakdown) {
@@ -129,7 +173,7 @@ function save() {
             <option v-for="t in CHART_TYPES" :key="t.value" :value="t.value">{{ t.label }}</option>
           </select>
         </div>
-        <div class="field" v-if="!isGeo">
+        <div class="field" v-if="!isGeo && !isPopup">
           <label>Metric</label>
           <select v-model="draft.metric">
             <option v-for="m in METRICS" :key="m.value" :value="m.value">{{ m.label }}</option>
@@ -139,7 +183,7 @@ function save() {
 
       <div class="row" v-if="typeDef?.needsDimension">
         <div class="field">
-          <label>Group by</label>
+          <label>{{ isRate ? 'Rate' : 'Group by' }}</label>
           <select v-model="draft.dimension">
             <option v-for="d in dimOptions" :key="d.key" :value="d.key">{{ d.label }}</option>
           </select>
@@ -149,6 +193,22 @@ function save() {
           <select v-model="draft.breakdown">
             <option :value="undefined">— none —</option>
             <option v-for="d in dimOptions" :key="d.key" :value="d.key">{{ d.label }}</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Pop-up dataset (count mode): which funnel, and (for reason/date) which stage -->
+      <div class="row" v-if="popupNeedsPopup || popupNeedsKind">
+        <div class="field" v-if="popupNeedsPopup">
+          <label>Pop-up</label>
+          <select v-model="draft.popup">
+            <option v-for="p in POPUP_OPTIONS" :key="p.value" :value="p.value">{{ p.label }}</option>
+          </select>
+        </div>
+        <div class="field" v-if="popupNeedsKind">
+          <label>Funnel stage</label>
+          <select v-model="draft.popupKind">
+            <option v-for="k in POPUP_KIND_OPTIONS" :key="k.value" :value="k.value">{{ k.label }}</option>
           </select>
         </div>
       </div>

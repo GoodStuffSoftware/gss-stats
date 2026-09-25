@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { reactive, ref, watch, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import type { DashboardConfig, DashboardPage, Widget, GlobalFilters } from './types'
-import { defaultConfig, normalizeConfig, defaultWidgetsForPage, clonePage, cryptoId, isBestSudokuLaunchPage, BEST_SUDOKU_SITES, beaconizeWidget } from './lib/defaults'
+import { defaultConfig, normalizeConfig, defaultWidgetsForPage, clonePage, cryptoId, isBestSudokuLaunchPage, isBestSudokuPopupsPage, BEST_SUDOKU_SITES, beaconizeWidget } from './lib/defaults'
 import { rangeLabel, ymdRangeToISO } from './lib/range'
 import { loadConfig, saveConfig } from './api'
 import { loadSites, sitesTree, tokenLabel } from './sitesStore'
@@ -86,9 +86,11 @@ function deletePage(id: string) {
 function restoreDefaultCharts(id: string) {
   const p = config.pages.find((x) => x.id === id) ?? activePage.value
   const launch = isBestSudokuLaunchPage(p)
+  const popups = isBestSudokuPopupsPage(p)
   // If the user has pinned any charts as defaults, restoring keeps exactly those and drops
   // the rest. Otherwise fall back to the factory set for this page. The Best Sudoku launch
-  // page additionally re-points its charts at the beacon and resets the site buckets.
+  // page additionally re-points its charts at the beacon and resets the site buckets; the
+  // pop-ups page resets its site buckets the same way (its factory set is already pop-up).
   const marked = p.widgets.filter((w) => w.isDefault)
   const msg = marked.length
     ? `Restore "${p.name}" to your default charts? Charts not set as default will be removed.`
@@ -98,10 +100,8 @@ function restoreDefaultCharts(id: string) {
   if (!confirm(msg)) return
 
   let next = marked.length ? marked : launch ? p.widgets : defaultWidgetsForPage(p)
-  if (launch) {
-    next = next.map(beaconizeWidget)
-    p.filters.siteSel = [...BEST_SUDOKU_SITES]
-  }
+  if (launch) next = next.map(beaconizeWidget)
+  if (launch || popups) p.filters.siteSel = [...BEST_SUDOKU_SITES]
   p.widgets = next
 }
 
@@ -147,7 +147,9 @@ function addChart() {
   const id = cryptoId()
   // On the Best Sudoku launch page, new charts default to the beacon dataset (its only
   // real data source) instead of Cloudflare RUM, so the whole page stays beacon-backed.
+  // The pop-ups page similarly defaults to the pop-up dataset.
   const geo = isBestSudokuLaunchPage(activePage.value)
+  const popups = isBestSudokuPopupsPage(activePage.value)
   editing.value = {
     isNew: true,
     widget: {
@@ -155,8 +157,9 @@ function addChart() {
       i: id,
       title: 'New chart',
       type: 'bar',
-      dataset: geo ? 'geo' : undefined,
-      dimension: geo ? 'region' : 'requestHost',
+      dataset: geo ? 'geo' : popups ? 'popup' : undefined,
+      dimension: geo ? 'region' : popups ? 'kind' : 'requestHost',
+      popup: popups ? 'signin-prompt' : undefined,
       metric: 'pageviews',
       limit: 10,
       x: 0,

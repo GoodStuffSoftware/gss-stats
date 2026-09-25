@@ -10,6 +10,8 @@
 //
 // Response: { sites: [ { domain, rum, geo, subs: [ { host, hosts, tag, tags, rum, geo } ] } ] }
 
+import { popupExcludeClause } from '../../src/lib/popupEvents'
+
 interface Env {
   CF_ANALYTICS_TOKEN: string
   gss_geo: D1Database
@@ -164,7 +166,12 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
 
   // ── Beacon tags (D1) → attach to the matching host ───────────────────────────
   try {
-    const r = await ctx.env.gss_geo.prepare("SELECT site, COUNT(*) c FROM hits WHERE site <> '' GROUP BY site").all()
+    // Popup/event-beacon rows (sign-in prompt, upsell, install, …) aren't screen
+    // views — exclude them so this count matches what the dashboard shows elsewhere.
+    const w = ["site <> ''"]
+    const b: unknown[] = []
+    popupExcludeClause(w, b)
+    const r = await ctx.env.gss_geo.prepare(`SELECT site, COUNT(*) c FROM hits WHERE ${w.join(' AND ')} GROUP BY site`).bind(...b).all()
     for (const row of (r.results ?? []) as any[]) {
       const tag = CANON_ALIAS[String(row.site)] ?? String(row.site)
       const host = byLabel.get(firstLabel(tag)) ?? tag

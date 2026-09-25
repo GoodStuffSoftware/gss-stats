@@ -8,7 +8,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "npm run build && wrangler pages dev",
-    "deploy": "npm run build && wrangler pages deploy"
+    "deploy": "npm run build && wrangler pages deploy",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "chart.js": "^4.4.7",
@@ -20,6 +22,7 @@
     "@vitejs/plugin-vue": "^5.2.1",
     "typescript": "^5.7.2",
     "vite": "^6.0.7",
+    "vitest": "^5.0.2",
     "wrangler": "^4.20.0"
   }
 }

@@ -7,6 +7,14 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Best Sudoku pop-up tracking page.** A new "Best Sudoku pop-ups" dashboard page (next to
+  the launch page) shows shown / accepted / dismissed counts, tap rates, outcome rates, the
+  sign-in eligibility rate, and install's real-outcome counts for every pop-up (sign-in
+  prompt, first-50 promo, upsell, install). Day trends bucket by US-Eastern calendar day
+  (DST-safe), and a rate shows "—" instead of 0%/NaN until it has real data. Pop-up event
+  beacons (`/signin-prompt`, `/signin-eligible`, `/promo-first50`, `/first50-congrats`,
+  `/upsell`, `/install`, `/popup-outcome`) no longer count toward ordinary pageview/visit
+  totals or the top-pages breakdown.
 - **Best Sudoku launch page shows campaign source / medium.** A new "Campaign source /
   medium" chart on the Best Sudoku page groups by `utm_source` (e.g. `google`), alongside
   the existing campaign chart (now labeled "Campaign (utm_campaign)") — both now cover the
