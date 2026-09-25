@@ -527,7 +527,9 @@ export async function authGate(
 ): Promise<Response> {
   const url = new URL(request.url)
   const nowMs = (deps.now ?? Date.now)()
-  const fetchImpl = deps.fetch ?? fetch
+  // Wrapped rather than passed as a bare reference, so the runtime's fetch is always
+  // invoked with the global `this` (Workers throws "Illegal invocation" otherwise).
+  const fetchImpl: typeof fetch = deps.fetch ?? ((input, init) => fetch(input, init))
   const path = url.pathname
   const method = request.method.toUpperCase()
 
