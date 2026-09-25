@@ -171,10 +171,12 @@ export interface CampaignCompareResponse {
     id: string
     label: string
     status: string
-    flightStart: string
+    flightStart: string | null
     flightEnd: string
     ucValues: string[]
     notes: string
+    measurement: 'spend-only' | null
+    measurabilityNote: string | null
   }
   funnel: {
     counts: CampaignFunnelCounts

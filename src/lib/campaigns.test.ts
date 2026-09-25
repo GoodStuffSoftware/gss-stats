@@ -22,6 +22,9 @@ import {
   returnBeaconNotInstrumented,
   sharesReturnTagWith,
   RETURN_BUCKETS,
+  CAMPAIGN_SPEND,
+  CAMPAIGN_DAILY_SPEND,
+  COMPLETED_PROXY_PATH_PREFIX,
 } from './campaigns'
 
 describe('etMidnightUtcMs / etFlightRangeMs (DST-safe ET date <-> UTC ms)', () => {
@@ -45,40 +48,50 @@ describe('etMidnightUtcMs / etFlightRangeMs (DST-safe ET date <-> UTC ms)', () =
 
 describe('flightDayIndex / isDirectionalDay', () => {
   const retest = campaignById('24279250691')!
-  it('day 1 is flightStart, counting up', () => {
-    expect(flightDayIndex(retest, '2026-09-26')).toBe(1)
-    expect(flightDayIndex(retest, '2026-09-27')).toBe(2)
-    expect(flightDayIndex(retest, '2026-10-02')).toBe(7)
+  it('null while the retest flightStart is still pending (null)', () => {
+    expect(retest.flightStart).toBeNull()
+    expect(flightDayIndex(retest, '2026-09-26')).toBeNull()
+    expect(flightDayIndex(retest, '2026-10-02')).toBeNull()
   })
-  it('null outside the flight window', () => {
-    expect(flightDayIndex(retest, '2026-09-25')).toBeNull()
-    expect(flightDayIndex(retest, '2026-10-03')).toBeNull()
+  it('day 1 is flightStart, counting up, once a start date is set', () => {
+    const confirmed = { ...retest, flightStart: '2026-09-26' }
+    expect(flightDayIndex(confirmed, '2026-09-26')).toBe(1)
+    expect(flightDayIndex(confirmed, '2026-09-27')).toBe(2)
+    expect(flightDayIndex(confirmed, '2026-10-02')).toBe(7)
+    expect(flightDayIndex(confirmed, '2026-09-25')).toBeNull()
+    expect(flightDayIndex(confirmed, '2026-10-03')).toBeNull()
   })
-  it('week 1 (days 1-7) of the retest campaign is directional; nothing else is', () => {
-    expect(isDirectionalDay(retest, '2026-09-26')).toBe(true)
-    expect(isDirectionalDay(retest, '2026-10-02')).toBe(true)
-    expect(isDirectionalDay(retest, '2026-09-25')).toBe(false) // outside the flight entirely
+  it('week 1 (days 1-7) of the retest campaign is directional once confirmed; nothing else is', () => {
+    const confirmed = { ...retest, flightStart: '2026-09-26' }
+    expect(isDirectionalDay(confirmed, '2026-09-26')).toBe(true)
+    expect(isDirectionalDay(confirmed, '2026-10-02')).toBe(true)
+    expect(isDirectionalDay(confirmed, '2026-09-25')).toBe(false) // outside the flight entirely
+    expect(isDirectionalDay(retest, '2026-09-26')).toBe(false) // still pending — flightDayIndex is always null
     const flight1 = campaignById('24215315197')!
     expect(isDirectionalDay(flight1, '2026-09-03')).toBe(false) // not the retest campaign
   })
 })
 
 describe('campaignAttributionClause (the one function deciding row membership)', () => {
-  it('binds every ucValue plus the flight-window ms bounds, in that order', () => {
-    const c = campaignById('24279250691')!
+  it('a confirmed campaign binds every ucValue plus a lower ts bound only — NO upper bound', () => {
+    const c = campaignById('24215315197')! // Android launch, flightStart = 2026-09-02
     const { sql, binds } = campaignAttributionClause(c)
-    expect(sql).toBe('campaign IN (?) AND ts >= ? AND ts < ?')
-    expect(binds).toEqual(['sudoku_funnel_retest', etMidnightUtcMs('2026-09-26'), etMidnightUtcMs('2026-10-03')])
+    expect(sql).toBe(`campaign IN (${c.ucValues.map(() => '?').join(', ')}) AND ts >= ?`)
+    expect(binds).toEqual([...c.ucValues, etMidnightUtcMs('2026-09-02')])
   })
-  it('flight 1 and flight 2 share every uc value but get DIFFERENT ms windows', () => {
-    const f1 = campaignById('24215315197')!
-    const f2 = campaignById('24234347705')!
-    expect(f1.ucValues).toEqual(expect.arrayContaining(['sudoku_tired_of_ads']))
-    expect(f2.ucValues).toEqual(expect.arrayContaining(['sudoku_tired_of_ads']))
-    const c1 = campaignAttributionClause(f1)
-    const c2 = campaignAttributionClause(f2)
-    expect(c1.binds.slice(-2)).not.toEqual(c2.binds.slice(-2)) // disjoint windows
-    expect(etMidnightUtcMs(f1.flightEnd) < etMidnightUtcMs(f2.flightStart) || f1.flightEnd < f2.flightStart).toBe(true)
+  it('a pending campaign (flightStart null) attributes nothing at all', () => {
+    const c = campaignById('24279250691')! // retest, flightStart still null
+    expect(c.flightStart).toBeNull()
+    const { sql, binds } = campaignAttributionClause(c)
+    expect(sql).toBe('campaign IN (?) AND 1 = 0')
+    expect(binds).toEqual(['sudoku_funnel_retest'])
+  })
+  it('Android launch and Play-direct now use DISJOINT ucValues — no shared tag to split by date', () => {
+    const androidLaunch = campaignById('24215315197')!
+    const playDirect = campaignById('24234347705')!
+    expect(androidLaunch.ucValues).toEqual(expect.arrayContaining(['sudoku_tired_of_ads']))
+    expect(androidLaunch.ucValues).not.toContain('sudoku_tired_of_ads_play')
+    expect(playDirect.ucValues).toEqual(['sudoku_tired_of_ads_play'])
   })
   it('every campaign in the registry is resolvable by id', () => {
     for (const c of CAMPAIGNS) expect(campaignById(c.id)).toBe(c)
@@ -213,6 +226,43 @@ describe('costPer (spend table — "—"/null until filled in)', () => {
   })
 })
 
+describe('CAMPAIGN_SPEND / CAMPAIGN_DAILY_SPEND (Google Ads API, 2026-09-25)', () => {
+  it('Android launch and Play-direct have real totals; the retest has none yet', () => {
+    expect(CAMPAIGN_SPEND['24215315197']).toBe(124.47)
+    expect(CAMPAIGN_SPEND['24234347705']).toBe(75.17)
+    expect(CAMPAIGN_SPEND['24279250691']).toBeNull()
+  })
+  it('daily lines are provenance for the totals above', () => {
+    const androidDaily = Object.values(CAMPAIGN_DAILY_SPEND['24215315197'])
+    const playDaily = Object.values(CAMPAIGN_DAILY_SPEND['24234347705'])
+    expect(androidDaily.reduce((a, b) => a + b, 0)).toBeCloseTo(124.46, 2) // 1c under Google's own total — see the doc comment
+    expect(playDaily.reduce((a, b) => a + b, 0)).toBeCloseTo(75.17, 2)
+  })
+  it('cost per arrival is now computable for Android launch (real arrivals, real spend)', () => {
+    expect(costPer(CAMPAIGN_SPEND['24215315197'], 353)).toBeCloseTo(124.47 / 353, 5)
+  })
+})
+
+describe('"Completed game" — not instrumented until the deferred proxy hook is turned on', () => {
+  it('the hook is disabled by default', () => {
+    expect(COMPLETED_PROXY_PATH_PREFIX).toBeNull()
+  })
+  it('/signin-eligible/* is not classified as "completed" while the hook is off', () => {
+    expect(classifyFunnelPath('/signin-eligible/whatever')).not.toBe('completed')
+  })
+})
+
+describe('Play-direct — spend-only campaign (no beacon rows, corrected 2026-09-25)', () => {
+  const playDirect = campaignById('24234347705')!
+  it('is flagged spend-only with the documented label', () => {
+    expect(playDirect.measurement).toBe('spend-only')
+    expect(playDirect.measurabilityNote).toMatch(/not measurable in beacon/i)
+  })
+  it('keeps its Play-referrer uc in ucValues so rows count automatically once a reader ships', () => {
+    expect(playDirect.ucValues).toEqual(['sudoku_tired_of_ads_play'])
+  })
+})
+
 describe('parseReturnPath / returnVisitRates (on-device return beacon, v1.90.0)', () => {
   it('parses every documented bucket', () => {
     for (const bucket of RETURN_BUCKETS) {
@@ -238,13 +288,8 @@ describe('parseReturnPath / returnVisitRates (on-device return beacon, v1.90.0)'
   it('returnBeaconNotInstrumented: true for any flight that ended before TRACKING_ACTIVATION_DATE_ET (currently null → always true)', () => {
     for (const c of CAMPAIGNS) expect(returnBeaconNotInstrumented(c)).toBe(true)
   })
-  it('sharesReturnTagWith: flights 1 & 2 point at each other; the retest campaign has no match', () => {
-    const f1 = campaignById('24215315197')!
-    const f2 = campaignById('24234347705')!
-    const retest = campaignById('24279250691')!
-    expect(sharesReturnTagWith(f1)?.id).toBe(f2.id)
-    expect(sharesReturnTagWith(f2)?.id).toBe(f1.id)
-    expect(sharesReturnTagWith(retest)).toBeNull()
+  it('sharesReturnTagWith: no two campaigns share a uc any more (corrected campaign definitions gave each its own tag)', () => {
+    for (const c of CAMPAIGNS) expect(sharesReturnTagWith(c)).toBeNull()
   })
 })
 
@@ -262,11 +307,14 @@ describe('FUNNEL_STEP_ORDER', () => {
   })
 })
 
-describe('flight 1 / flight 2 window invariant (HIGH review finding, 2026-09-25: ET-bucketed, not UTC)', () => {
+describe('Android launch attribution (corrected 2026-09-25: all tag-family rows go to flight 1, no date split)', () => {
   // Real ET-bucketed daily counts for `campaign = sudoku_tired_of_ads` (production D1,
-  // verified 2026-09-25 via etDateFromMs over CAST(ts/3600000 AS INTEGER) hour buckets —
-  // see the CAMPAIGNS header comment). The original UTC-day pass mis-bucketed ~150 rows
-  // from 2026-09-02 ET (which is already 2026-09-03 UTC in the evening) into the wrong day.
+  // verified 2026-09-25 via etDateFromMs over CAST(ts/3600000 AS INTEGER) hour buckets — see
+  // the CAMPAIGNS header comment). The prior pass split this family into two flights by a
+  // volume cliff; the corrected Google Ads data says there is only one campaign for this
+  // uc family (Android launch) — Play-direct uses a disjoint uc and has no beacon rows at
+  // all (see below) — so every one of these days, including the post-09-10 trickle, belongs
+  // to Android launch alone.
   const dailyCounts: [string, number][] = [
     ['2026-09-02', 150],
     ['2026-09-03', 164],
@@ -288,23 +336,19 @@ describe('flight 1 / flight 2 window invariant (HIGH review finding, 2026-09-25:
     ['2026-09-22', 1],
   ]
   const TOTAL = 1194 // the tag family's real total row count (production D1, 2026-09-25)
-  const flight1 = campaignById('24215315197')!
-  const flight2 = campaignById('24234347705')!
+  const androidLaunch = campaignById('24215315197')!
 
-  it('every ET day with tagged rows falls inside EXACTLY one of the two flight windows', () => {
-    for (const [date] of dailyCounts) {
-      const inFlight1 = flightDayIndex(flight1, date) !== null
-      const inFlight2 = flightDayIndex(flight2, date) !== null
-      expect(inFlight1 !== inFlight2).toBe(true) // exactly one — never both, never neither
-    }
+  it('androidLaunch attribution has no upper ts bound — every day in the family, including the post-09-10 trickle, is inside it', () => {
+    const { sql } = campaignAttributionClause(androidLaunch)
+    expect(sql).not.toContain('ts <') // no upper bound at all
+    const sum = dailyCounts.reduce((a, [, n]) => a + n, 0)
+    expect(sum).toBe(TOTAL) // the whole family — nothing held outside every window
   })
 
-  it('the two flight windows together cover every tagged row for this uc family — no gaps', () => {
-    const sum1 = dailyCounts.filter(([d]) => flightDayIndex(flight1, d) !== null).reduce((a, [, n]) => a + n, 0)
-    const sum2 = dailyCounts.filter(([d]) => flightDayIndex(flight2, d) !== null).reduce((a, [, n]) => a + n, 0)
-    expect(sum1).toBe(1151)
-    expect(sum2).toBe(43)
-    expect(sum1 + sum2).toBe(TOTAL)
+  it('Play-direct has a disjoint uc, so none of these sudoku_tired_of_ads rows are its concern', () => {
+    const playDirect = campaignById('24234347705')!
+    expect(playDirect.ucValues).not.toContain('sudoku_tired_of_ads')
+    expect(playDirect.measurement).toBe('spend-only')
   })
 })
 
