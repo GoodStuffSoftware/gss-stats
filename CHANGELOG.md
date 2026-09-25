@@ -7,6 +7,15 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Pop-up rates never report from a tiny sample.** Every rate (tap, outcome, eligibility)
+  now needs at least 5 in its denominator — below that it shows "too few to report" instead
+  of a real-looking but noisy percentage (e.g. 1/2 reading as an alarming 50%).
+
+### Fixed
+- **The on-device return beacon (`/return/...`) is now excluded from ordinary pageview/visit
+  totals**, matching every other pop-up event path — it had been left off that exclusion list.
+
+### Added
 - **Pop-up tracking has a configurable activation date, so pre-release data can't read as
   a baseline.** Every pop-up rate (tap, outcome, eligibility) and count widget — other than
   the shown/day trend, which now marks the activation date with a "tracking starts" line and
