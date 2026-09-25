@@ -13,8 +13,8 @@ All notable changes to **gss-stats** are documented here. The format follows
   it locks everyone out rather than opening up. The tests also run the sign-in inside
   Cloudflare's own runtime, so a request setting that runtime rejects can't ship.
 - **Sign out.** The header shows who is signed in, with a Sign out button. An expired
-  session brings up the re-sign-in banner and no longer risks saving a fallback layout
-  over your stored one.
+  session brings up the re-sign-in banner on every page, the overview and campaign pages
+  included, and no longer risks saving a fallback layout over your stored one.
 - **Stricter sign-in checks.** Only an exact, plain-ASCII match on the allowlist gets in
   (look-alike addresses are refused), Google must mark the email verified with a real
   `true`, and sign-ins or sessions dated in the future are rejected.
