@@ -149,6 +149,9 @@ export interface StatsResponse {
   // Pop-up dataset only (widget.type === 'rate'): the single computed rate, or null for
   // a zero denominator (no accepts/outcomes yet) — see lib/popupEvents.ts computeRate.
   rate?: number | null
+  // true when `rate` is null because the denominator was nonzero but under MIN_COHORT
+  // (see lib/popupEvents.ts gateRate) — render "too few to report", not "—".
+  insufficientCohort?: boolean
 }
 
 // ── "Best Sudoku campaigns" (Part B) — a dedicated response shape (not the generic

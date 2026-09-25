@@ -17,6 +17,9 @@ import {
   measuredDetailedCount,
   measuredDetailedBreakdown,
   TRACKING_ACTIVATION_DATE_ET,
+  MIN_COHORT,
+  isInsufficientCohort,
+  gateRate,
   type HourPathCount,
 } from './popupEvents'
 
@@ -90,6 +93,23 @@ describe('classifyPopupPath', () => {
 })
 
 describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
+  // Asserted against a LITERAL list, not by iterating POPUP_EVENT_PREFIXES itself — a
+  // self-referential loop can never catch an entry going missing from the array (that's
+  // exactly how '/return' was accidentally left off this list on this branch — see the
+  // 2026-09-25 review). If this ever fails, either a prefix was removed (update this
+  // literal list deliberately) or one was never added (fix the array instead).
+  it('POPUP_EVENT_PREFIXES is exactly these 8 prefixes', () => {
+    expect([...POPUP_EVENT_PREFIXES]).toEqual([
+      '/signin-prompt',
+      '/signin-eligible',
+      '/promo-first50',
+      '/first50-congrats',
+      '/upsell',
+      '/install',
+      '/popup-outcome',
+      '/return',
+    ])
+  })
   it('matches every popup prefix, exactly and as a subpath', () => {
     for (const p of POPUP_EVENT_PREFIXES) {
       expect(isPopupEventPath(p)).toBe(true)
@@ -135,6 +155,35 @@ describe('computeRate (hard requirement #4: never NaN/Infinity)', () => {
   })
   it('a zero numerator with a real denominator is a real 0, not null', () => {
     expect(computeRate(0, 10)).toBe(0)
+  })
+})
+
+describe('MIN_COHORT / isInsufficientCohort / gateRate (review addendum, 2026-09-25)', () => {
+  it('MIN_COHORT is 5', () => {
+    expect(MIN_COHORT).toBe(5)
+  })
+  it('isInsufficientCohort: true only for a NONZERO denominator under the floor', () => {
+    expect(isInsufficientCohort(0)).toBe(false) // "no data at all" is a different case
+    expect(isInsufficientCohort(1)).toBe(true)
+    expect(isInsufficientCohort(4)).toBe(true)
+    expect(isInsufficientCohort(5)).toBe(false) // the floor itself counts as enough
+    expect(isInsufficientCohort(100)).toBe(false)
+  })
+  it('a custom minCohort is respected', () => {
+    expect(isInsufficientCohort(5, 10)).toBe(true)
+    expect(isInsufficientCohort(10, 10)).toBe(false)
+  })
+
+  it('computeRate itself enforces the floor — every rate built on it inherits this for free', () => {
+    expect(computeRate(2, 3)).toBeNull() // 3 < 5, even though the division is well-defined
+    expect(computeRate(4, 5)).toBe(0.8) // 5 = the floor, computes normally
+    expect(computeRate(0, 3)).toBeNull() // a zero numerator under the floor is STILL null (not a real 0)
+  })
+
+  it('gateRate bundles the rate with WHY a null came back', () => {
+    expect(gateRate(0, 0)).toEqual({ value: null, insufficientCohort: false }) // no data at all
+    expect(gateRate(1, 3)).toEqual({ value: null, insufficientCohort: true }) // some data, too little
+    expect(gateRate(2, 10)).toEqual({ value: 0.2, insufficientCohort: false }) // a real rate
   })
 })
 
@@ -187,24 +236,24 @@ describe('aggregatePopupRows', () => {
 
   it('computePopupRate: tap rate, eligibility rate, and null before any outcome data (once measured)', () => {
     const tap = POPUP_RATE_SPECS.find((s) => s.key === 'signin-prompt:tap')!
-    expect(computePopupRate(measuredAgg, tap)).toBeCloseTo(4 / 10, 10) // 4 accepts / 10 shown
+    expect(computePopupRate(measuredAgg, tap).value).toBeCloseTo(4 / 10, 10) // 4 accepts / 10 shown
 
     const elig = POPUP_RATE_SPECS.find((s) => s.key === 'signin-eligible:rate')!
-    expect(computePopupRate(measuredAgg, elig)).toBeCloseTo(9 / 10, 10) // earned / (earned+capped+unearned)
+    expect(computePopupRate(measuredAgg, elig).value).toBeCloseTo(9 / 10, 10) // earned / (earned+capped+unearned)
 
     // No /popup-outcome rows in this fixture, but 'shown' (the denominator) is non-zero,
     // so this is a real 0 — "we showed it and got zero sign-ins" — not "no data yet".
     const outcome = POPUP_RATE_SPECS.find((s) => s.key === 'signin-prompt:outcome:signed-in')!
-    expect(computePopupRate(measuredAgg, outcome)).toBe(0)
+    expect(computePopupRate(measuredAgg, outcome).value).toBe(0)
 
     // A popup with NO shown events at all (zero denominator) is the "no data yet" case.
     const noShown = POPUP_RATE_SPECS.find((s) => s.key === 'install:tap')!
-    expect(computePopupRate(measuredAgg, noShown)).toBeNull()
+    expect(computePopupRate(measuredAgg, noShown).value).toBeNull()
   })
 
   it('an empty aggregate renders every rate as null, never 0/NaN', () => {
     const empty = aggregatePopupRows([])
-    for (const spec of POPUP_RATE_SPECS) expect(computePopupRate(empty, spec)).toBeNull()
+    for (const spec of POPUP_RATE_SPECS) expect(computePopupRate(empty, spec).value).toBeNull()
   })
 })
 
@@ -233,20 +282,20 @@ describe('activation gating (Part A hard requirement: "before activation is unme
   it('a real pre-activation denominator never produces a real 0%/NaN rate — "—" (null) instead', () => {
     const agg = aggregatePopupRows(bugRows, null) // activation not shipped yet
     expect(measuredCoarseCount(agg, 'signin-prompt', 'shown')).toBe(0) // gated out, not 22
-    expect(computePopupRate(agg, tap)).toBeNull() // NOT 0
+    expect(computePopupRate(agg, tap).value).toBeNull() // NOT 0
   })
   it('the same rows, once activation is set to a date AFTER them, still gate out', () => {
     const agg = aggregatePopupRows(bugRows, '2026-09-20')
-    expect(computePopupRate(agg, tap)).toBeNull()
+    expect(computePopupRate(agg, tap).value).toBeNull()
   })
   it('the same rows, once activation is set to their own ET day (or earlier), are measured', () => {
     const agg = aggregatePopupRows(bugRows, '2026-09-19')
-    expect(computePopupRate(agg, tap)).toBe(0) // now a REAL 0% — measured, and genuinely zero accepts
+    expect(computePopupRate(agg, tap).value).toBe(0) // now a REAL 0% — measured, and genuinely zero accepts
   })
   it('using the module default (TRACKING_ACTIVATION_DATE_ET) with no override is still null today', () => {
     expect(TRACKING_ACTIVATION_DATE_ET).toBeNull()
     const agg = aggregatePopupRows(bugRows)
-    expect(computePopupRate(agg, tap)).toBeNull()
+    expect(computePopupRate(agg, tap).value).toBeNull()
   })
 
   it('measuredDetailedCount / measuredDetailedBreakdown mirror the same gating for per-reason counts', () => {
