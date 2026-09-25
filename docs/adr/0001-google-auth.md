@@ -171,3 +171,11 @@ etc.), the signature must be verified first. To keep this ruling valid:
   because Pages variables take effect on the next deployment.
 - The Google consent screen's publishing status and test users (Google's own gate)
   apply in addition to `ALLOWED_EMAILS`.
+- Identity is the verified email alone: there is no `sub` pinning and no `hd` check.
+  Google's `email_verified` is only authoritative over time for `gmail.com` and Google
+  Workspace addresses, so `ALLOWED_EMAILS` must hold only those (README "Auth" →
+  Settings). Pinning `sub` is the upgrade if that ever has to change.
+- Unauthenticated callers can make the callback call Google's token endpoint (with a
+  junk code). The owner adds a Cloudflare rate-limiting rule on
+  `/auth/google/callback` (README rollout step 7) so a flood can't get the OAuth client
+  throttled.
