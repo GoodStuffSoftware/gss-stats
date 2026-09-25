@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-09-25
+
 ### Fixed
 - **Install pop-up outcomes now classify correctly.** The install-prompt outcome beacon
   previously failed to map to the install pop-up family at all.
