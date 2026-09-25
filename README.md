@@ -175,8 +175,8 @@ account out immediately. Rotating `SESSION_SECRET` signs everyone out.
 | `GOOGLE_CLIENT_SECRET` | yes | That client's secret |
 | `SESSION_SECRET` | yes | At least 32 random characters. Generate with `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"` |
 | `ALLOWED_EMAILS` | yes | Comma-separated, case-insensitive, exact addresses, no wildcards. Same format as deckhand's `DECKHAND_ADMIN_EMAILS`. Example: `santoro12@gmail.com` |
-| `SESSION_TTL_HOURS` | no | Session length in hours. Default `168` (7 days), maximum `720` |
-| `AUTH_DEV_BYPASS` | **never set on Pages** | Local-only escape hatch (see Local development below). It is ignored off loopback anyway |
+| `SESSION_TTL_HOURS` | no | Session length in hours: a plain number from `1` to `720`. Default `168` (7 days). Any other value (text, `0`, `1e3`, over `720`) is a configuration error, so sign-in is locked with the 503 below until it is fixed |
+| `AUTH_DEV_BYPASS` | **never set on Pages** | Local-only escape hatch (see Local development below). Only the exact value `1` turns it on, and it is ignored off loopback anyway |
 
 Set them as **secrets**, not plain variables. `wrangler.toml` is the source of truth for
 plain variables on this project, so the dashboard can't edit those, and nothing here
@@ -246,9 +246,11 @@ Never remove the app gate while Access is off.
 settings it answers 503, by design. Pick one of two setups in `.dev.vars` (see
 [`.dev.vars.example`](.dev.vars.example)):
 
-- `AUTH_DEV_BYPASS=1` skips Google. It works only when the request host is `localhost`
-  or `127.0.0.1`, so it can't open the deployed site even if it were set there. The
-  header then shows `dev@localhost`, or `AUTH_DEV_EMAIL` if you set it.
+- `AUTH_DEV_BYPASS=1` skips Google. Only the exact value `1` counts (`true`, `0` and
+  the like leave it off). It works only when the request host is `localhost` or
+  `127.0.0.1` (IPv6 `[::1]` is not served), so it can't open the deployed site even if
+  it were set there. The header then shows `dev@localhost`, or `AUTH_DEV_EMAIL` if you
+  set it.
 - For the real flow, set the four settings above in `.dev.vars` and register
   `http://localhost:8788/auth/google/callback` on the OAuth client. Plain-http loopback
   uses unprefixed, non-`Secure` cookie names; everything else behaves as in production.
@@ -256,10 +258,13 @@ settings it answers 503, by design. Pick one of two setups in `.dev.vars` (see
 `npm run dev` (Vite only) serves no Functions, so it has no auth and no `/api/*`.
 
 **Tests.** `npm test` runs the vitest suite. For auth, `functions/_lib/auth.test.ts`
-covers the allowlist, fail-closed configuration, 401 vs. redirect, tampered, expired,
-re-signed and wrong-purpose cookies, state, nonce, PKCE and ID-token checks,
-open-redirect and cross-origin guards, sign-out, the dev bypass and the host guard. No
-test calls Google.
+covers the allowlist (exact match only: superstrings, substrings and non-ASCII
+look-alikes are refused), fail-closed configuration (including a bad
+`SESSION_TTL_HOURS`), 401 vs. redirect, tampered, expired, future-dated, re-signed and
+wrong-purpose cookies, state, nonce, PKCE and ID-token checks (`email_verified` must be
+boolean `true`, multi-audience tokens need our `azp`, no future `iat`), open-redirect and
+cross-origin guards, sign-out, the dev bypass (exactly `1`, loopback only) and the host
+guard. No test calls Google.
 
 ## Security / hardening
 

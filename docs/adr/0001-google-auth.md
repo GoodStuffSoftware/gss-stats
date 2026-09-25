@@ -60,7 +60,7 @@ What we changed, and why:
 |---|---|---|
 | Sessions in SQLite, keyed by the session id's hash | **Stateless HMAC-SHA256-signed cookie** (`__Host-gss_session`) holding `{email, sub, iat, exp}` | Pages has no SQLite. There is one allowlisted owner, so a session table would only add storage and a revocation list for no benefit. |
 | Allowlist checked on first login only, and grants a role | **Allowlist re-checked on every request.** No roles: you are on the list or you are refused. | This is a single-purpose owner dashboard, not multi-user RBAC. Re-checking means that taking an email off the list locks it out immediately, even with a live cookie. |
-| Identity from userinfo, using the access token | **Identity from the ID token** returned by the token endpoint. We check `iss`, `aud`, `azp`, `exp`, `iat`, `nonce` and `email_verified`. | Saves a network round trip. It also lets us bind the login to our client (`aud`/`azp`) and to this attempt (`nonce`). |
+| Identity from userinfo, using the access token | **Identity from the ID token** returned by the token endpoint. We check `iss`, `aud`, `azp` (required to be ours when `aud` lists more than one client), `exp`, `iat` (not in the future beyond 5 minutes of skew), `nonce` and `email_verified` (only the JSON boolean `true` counts). | Saves a network round trip. It also lets us bind the login to our client (`aud`/`azp`) and to this attempt (`nonce`). |
 | No PKCE, no nonce | **PKCE S256 plus an OIDC nonce.** The PKCE verifier is derived from `state` with HMAC, so it is never stored. | Current OAuth best practice (RFC 9700), and cheap. |
 | Scope `openid email profile` | Scope **`openid email`** | We never use the profile. |
 | Redirect URI from env or loopback | **Derived from the request origin** | The host guard lets only the canonical domain and loopback reach this code, so the value is fixed, and local dev works on any port. |
@@ -83,13 +83,19 @@ Other rules:
 - **Signing.** Session and state cookies are signed with the same secret but with
   different purpose prefixes, so one can't be replayed as the other. Verification
   uses `crypto.subtle.verify`, which is constant-time.
-- **Sessions.** Default length is 7 days (`SESSION_TTL_HOURS`, capped at 30 days).
-  Lowering the setting also shortens sessions already issued. Rotating
-  `SESSION_SECRET` signs everyone out.
-- **Local dev.** With `AUTH_DEV_BYPASS=1`, the gate is skipped only when the request
-  host is loopback. On the deployed hostname the flag does nothing, so it can never
-  open production. It is off by default, and the local server without it (or without
-  Google config) returns 503.
+- **Allowlist matching.** Exact and case-insensitive, never a substring or domain match.
+  An email that isn't printable ASCII is refused before it is lower-cased, because
+  lower-casing folds some non-ASCII letters onto ASCII ones (U+212A KELVIN SIGN becomes
+  `k`). An `ALLOWED_EMAILS` entry that isn't plain ASCII is a configuration error.
+- **Sessions.** Default length is 7 days. `SESSION_TTL_HOURS` must be a plain number
+  from 1 to 720 (30 days); anything else is a configuration error (503), not a silent
+  fallback. Lowering the setting also shortens sessions already issued. A session
+  dated in the future (beyond 5 minutes of skew) is refused. Rotating `SESSION_SECRET`
+  signs everyone out.
+- **Local dev.** With `AUTH_DEV_BYPASS` set to exactly `1`, the gate is skipped only
+  when the request host is `localhost` or `127.0.0.1`. On the deployed hostname the
+  flag does nothing, so it can never open production. It is off by default, and the
+  local server without it (or without Google config) returns 503.
 - **Host guard.** Kept, so there is one origin for the cookie and the redirect URI,
   and `*.pages.dev` and preview URLs stay unreachable.
 
@@ -103,7 +109,13 @@ server-side flow. Checking against JWKS would mean fetching and caching Google's
 keys and handling key rotation, with no extra security on this channel. All the
 claim checks are still done. If identity is ever taken from a token that did **not**
 come straight from the token endpoint (implicit flow, a token passed in by the client,
-etc.), the signature must be verified first.
+etc.), the signature must be verified first. To keep this ruling valid:
+
+- The token endpoint stays a constant in the code, never a setting.
+- The token request is sent with `redirect: 'error'`, so the TLS argument can't
+  silently extend to a redirect target.
+- The unverified decoder is private to the callback and named for the token-endpoint
+  response only (`unverifiedClaimsFromTokenEndpoint`).
 
 ## Alternatives considered
 

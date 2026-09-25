@@ -94,6 +94,14 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **Sign out.** The header shows who is signed in, with a Sign out button. An expired
   session brings up the re-sign-in banner and no longer risks saving a fallback layout
   over your stored one.
+- **Stricter sign-in checks.** Only an exact, plain-ASCII match on the allowlist gets in
+  (look-alike addresses are refused), Google must mark the email verified with a real
+  `true`, and sign-ins or sessions dated in the future are rejected.
+- **A bad session-length setting locks sign-in instead of being guessed.** A session
+  length that isn't a number of hours from 1 to 720 now shows "Sign-in not configured"
+  rather than silently falling back or issuing sessions that end at once.
+- **The local sign-in bypass is harder to switch on by accident.** It now needs the exact
+  value `1` (not `true`, `0` or anything else), still only on the developer's own machine.
 
 ## [0.2.0] — 2026-07-21
 
