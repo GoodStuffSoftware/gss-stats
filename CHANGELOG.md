@@ -86,6 +86,15 @@ All notable changes to **gss-stats** are documented here. The format follows
   the Cloudflare GraphQL call with a timeout and reports a clean, retryable error instead of
   hanging until the platform returns a raw 502 page.
 
+### Security
+- **Sign in with Google.** The dashboard and every API call now need a signed-in Google
+  account on an owner-set allowlist. The app enforces this itself, so Cloudflare Access can
+  be removed once the new sign-in is verified live. If the sign-in settings are missing,
+  it locks everyone out rather than opening up.
+- **Sign out.** The header shows who is signed in, with a Sign out button. An expired
+  session brings up the re-sign-in banner and no longer risks saving a fallback layout
+  over your stored one.
+
 ## [0.2.0] — 2026-07-21
 
 ### Fixed
