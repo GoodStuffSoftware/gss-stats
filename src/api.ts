@@ -1,4 +1,4 @@
-import type { StatsResponse, Widget, GlobalFilters, DashboardConfig, Dataset, CampaignCompareResponse } from './types'
+import type { StatsResponse, Widget, GlobalFilters, DashboardConfig, Dataset, CampaignCompareResponse, OverviewResponse } from './types'
 import { resolveSelection } from './sitesStore'
 import { nativeField } from './lib/drill'
 import { queryDims } from './lib/rings'
@@ -119,6 +119,22 @@ export async function fetchCampaignCompare(campaignId: string): Promise<Campaign
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     throw new Error(`campaigns ${res.status}: ${text.slice(0, 200)}`)
+  }
+  return res.json()
+}
+
+/** Fetch the "Best Sudoku overview" page's data (today-at-a-glance KPIs, timeline,
+ * campaign scorecard, release panel — see lib/overview.ts + functions/api/overview.ts).
+ * `since`/`until` scope ONLY the timeline (the page's "existing range control"). */
+export async function fetchOverview(since?: string, until?: string): Promise<OverviewResponse> {
+  const res = await fetch('/api/overview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ since, until }),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`overview ${res.status}: ${text.slice(0, 200)}`)
   }
   return res.json()
 }

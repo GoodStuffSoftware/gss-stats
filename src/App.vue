@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { reactive, ref, watch, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import type { DashboardConfig, DashboardPage, Widget, GlobalFilters } from './types'
-import { defaultConfig, normalizeConfig, defaultWidgetsForPage, clonePage, cryptoId, isBestSudokuLaunchPage, isBestSudokuPopupsPage, isCampaignComparePage, BEST_SUDOKU_SITES, beaconizeWidget } from './lib/defaults'
+import { defaultConfig, normalizeConfig, defaultWidgetsForPage, clonePage, cryptoId, isBestSudokuLaunchPage, isBestSudokuPopupsPage, isCampaignComparePage, isOverviewPage, BEST_SUDOKU_SITES, beaconizeWidget } from './lib/defaults'
 import { rangeLabel, ymdRangeToISO } from './lib/range'
 import { loadConfig, saveConfig } from './api'
 import { loadSites, sitesTree, tokenLabel } from './sitesStore'
@@ -9,6 +9,7 @@ import { isSiteDim, semanticKey } from './lib/drill'
 import { sessionExpired, reauth } from './session'
 import { TRACKING_ACTIVATION_DATE_ET } from './lib/popupEvents'
 import CampaignComparePage from './components/CampaignComparePage.vue'
+import OverviewPage from './components/OverviewPage.vue'
 import PageBar from './components/PageBar.vue'
 import FilterBar from './components/FilterBar.vue'
 import Dashboard from './components/Dashboard.vue'
@@ -32,9 +33,13 @@ const showPopupActivationNote = computed(
   () => TRACKING_ACTIVATION_DATE_ET === null && isBestSudokuPopupsPage(activePage.value),
 )
 
-// "Best Sudoku campaigns" is a bespoke page (see CampaignComparePage.vue) — no generic
-// Widget grid, so "Add chart" / "restore default charts" don't apply to it.
+// "Best Sudoku campaigns" and "Best Sudoku overview" are bespoke pages (see
+// CampaignComparePage.vue / OverviewPage.vue) — no generic Widget grid, so "Add chart" /
+// "restore default charts" don't apply to either. The overview page DOES keep its FilterBar
+// (its timeline zooms/range-selects with it); the campaign page does not.
 const isCampaignPage = computed(() => isCampaignComparePage(activePage.value))
+const isOverviewActive = computed(() => isOverviewPage(activePage.value))
+const isBespokePage = computed(() => isCampaignPage.value || isOverviewActive.value)
 
 onMounted(async () => {
   dark.value = localStorage.getItem('gss-stats-dark') === '1'
@@ -99,7 +104,7 @@ function deletePage(id: string) {
 }
 function restoreDefaultCharts(id: string) {
   const p = config.pages.find((x) => x.id === id) ?? activePage.value
-  if (isCampaignComparePage(p)) return // bespoke page — no generic widgets to restore
+  if (isCampaignComparePage(p) || isOverviewPage(p)) return // bespoke page — no generic widgets to restore
   const launch = isBestSudokuLaunchPage(p)
   const popups = isBestSudokuPopupsPage(p)
   // If the user has pinned any charts as defaults, restoring keeps exactly those and drops
@@ -337,7 +342,7 @@ function toggleDark() {
         <button class="btn" @click="toggleDark" :title="dark ? 'Light mode' : 'Dark mode'">
           {{ dark ? '☀' : '☾' }}
         </button>
-        <button v-if="!isCampaignPage" class="btn btn-primary" @click="addChart">＋ Add chart</button>
+        <button v-if="!isBespokePage" class="btn btn-primary" @click="addChart">＋ Add chart</button>
       </div>
     </header>
 
@@ -365,7 +370,8 @@ function toggleDark() {
     </div>
 
     <main class="grid-area">
-      <CampaignComparePage v-if="isCampaignPage" />
+      <OverviewPage v-if="isOverviewActive" :filters="activePage.filters" @open-campaigns="switchPage('bsk-campaigns')" />
+      <CampaignComparePage v-else-if="isCampaignPage" />
       <template v-else>
         <Dashboard
           v-model:widgets="activePage.widgets"
