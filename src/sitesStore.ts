@@ -10,7 +10,7 @@ export async function loadSites(): Promise<void> {
   try {
     const res = await fetch('/api/sites')
     if (res.ok) {
-      const data = await res.json()
+      const data = (await res.json()) as { sites?: SiteGroup[] } | null
       if (Array.isArray(data?.sites)) sitesTree.value = data.sites
     }
   } catch {
