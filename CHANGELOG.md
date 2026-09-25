@@ -6,6 +6,19 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Pop-up tracking now matches the Best Sudoku team's final beacon path list.** The
+  `install-prompt` outcome-beacon name now correctly maps to the install pop-up family (it
+  previously wouldn't classify at all); `still-playing` (days 14-21 after shown) is a new
+  MIN_COHORT-gated outcome rate; the retired `settings-upgrade` upsell reason — and any other
+  unrecognized reason — is now counted under "other" instead of showing up as its own
+  breakdown bucket or being silently dropped; first-50 congrats, which has no outcome beacon,
+  no longer generates empty outcome-rate rows and instead shows a one-time "no outcome
+  tracking" note; and the sign-in-eligibility chart now carries a caveat that its rows are
+  deferred at least 30 minutes after the finish (so it's never a valid hour-of-day signal),
+  alongside a new standing pop-ups-page note that sign-in-correlated rates are conservative
+  for the same reason.
+
 ## [0.3.0] — 2026-09-25
 
 ### Fixed

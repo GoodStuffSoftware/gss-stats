@@ -252,6 +252,20 @@ describe('"Completed game" — not instrumented until the deferred proxy hook is
   })
 })
 
+describe('signin-eligible is never part of the funnel or hour-of-day (FINAL LIST caveat: deferred >=30min, row time != finish time)', () => {
+  it('/signin-eligible/* never classifies into any funnel step at all', () => {
+    expect(classifyFunnelPath('/signin-eligible/earned')).toBeNull()
+    expect(classifyFunnelPath('/signin-eligible/capped')).toBeNull()
+    expect(classifyFunnelPath('/signin-eligible/unearned')).toBeNull()
+  })
+  it('hourOfDayEt (functions/api/campaigns.ts) is built from arrival rows only — this module exposes no helper that would let signin-eligible feed hour-of-day bucketing', () => {
+    // classifyFunnelPath is the ONLY entry point functions/api/campaigns.ts uses to decide
+    // what counts toward the funnel; since it returns null for every signin-eligible path,
+    // there is no code path from a signin-eligible row into hourOfDayEt.
+    expect(classifyFunnelPath('/signin-eligible/earned')).toBeNull()
+  })
+})
+
 describe('Play-direct — spend-only campaign (no beacon rows, corrected 2026-09-25)', () => {
   const playDirect = campaignById('24234347705')!
   it('is flagged spend-only with the documented label', () => {
