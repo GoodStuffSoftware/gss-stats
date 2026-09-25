@@ -1,9 +1,40 @@
 import type { SiteKey, ChartType, Metric, Dataset } from '../types'
+import { POPUPS, POPUP_RATE_SPECS } from './popupEvents'
 
 export const DATASETS: { value: Dataset; label: string }[] = [
   { value: 'rum', label: 'RUM — pageviews / visits' },
   { value: 'geo', label: 'Geo beacon — region / city (bot-free)' },
+  { value: 'popup', label: 'Pop-up tracking — sign-in / promo / upsell / install' },
 ]
+
+// Pop-up dataset (dataset: 'popup'). Count-based dimensions — each needs `widget.popup`
+// (and 'reason'/'date' default `widget.popupKind` to 'shown'); 'eligible' and
+// 'installOutcome' are fixed families and ignore `widget.popup`.
+export const POPUP_DIMENSIONS: { key: string; label: string }[] = [
+  { key: 'kind', label: 'Shown / accepted / dismissed' },
+  { key: 'reason', label: 'Reason / platform breakdown' },
+  { key: 'date', label: 'Date (trend, US-Eastern days)' },
+  { key: 'outcome', label: 'Outcome (signed-in / installed / returned)' },
+  { key: 'eligible', label: 'Sign-in eligibility (earned / capped / unearned)' },
+  { key: 'installOutcome', label: 'Install real outcomes (pwa / standalone / play)' },
+]
+
+// Which pop-up a 'kind'/'reason'/'date'/'outcome' chart is scoped to (widget.popup).
+export const POPUP_OPTIONS: { value: string; label: string }[] = POPUPS.map((p) => ({ value: p.id, label: p.label }))
+
+// Funnel stage a 'reason'/'date' chart breaks down or trends (widget.popupKind).
+export const POPUP_KIND_OPTIONS: { value: string; label: string }[] = [
+  { value: 'shown', label: 'Shown' },
+  { value: 'accept', label: 'Accepted' },
+  { value: 'dismiss', label: 'Dismissed' },
+]
+
+// type: 'rate' widgets — a single computed percentage. `widget.dimension` holds the
+// POPUP_RATE_SPECS key directly (see lib/popupEvents.ts); this is its dimension-picker.
+export const POPUP_RATE_DIMENSIONS: { key: string; label: string }[] = POPUP_RATE_SPECS.map((s) => ({
+  key: s.key,
+  label: s.label,
+}))
 
 // Geo-beacon dimensions (D1-backed). Single dimension per chart; metric is count.
 export const GEO_DIMENSIONS: { key: string; label: string }[] = [
@@ -83,6 +114,7 @@ export const CHART_TYPES: { value: ChartType; label: string; needsDimension: boo
   { value: 'pie', label: 'Pie', needsDimension: true, allowsBreakdown: false },
   { value: 'map', label: 'World map (geo points · beacon only)', needsDimension: false, allowsBreakdown: false },
   { value: 'table', label: 'Table', needsDimension: true, allowsBreakdown: true },
+  { value: 'rate', label: 'Rate (% tile · pop-up dataset only)', needsDimension: true, allowsBreakdown: false },
 ]
 
 export const METRICS: { value: Metric; label: string }[] = [

@@ -1,5 +1,6 @@
 import type { DashboardConfig, DashboardPage, GlobalFilters, Widget } from '../types'
 import { parseDurationMs } from './range'
+import { POPUPS, POPUP_RATE_SPECS } from './popupEvents'
 
 export function defaultDateRange(): { since: string; until: string } {
   const until = new Date()
@@ -120,11 +121,113 @@ export function defaultBestSudokuLaunchPage(): DashboardPage {
   }
 }
 
+// "Best Sudoku pop-ups" — shown/accepted/dismissed counts, tap + outcome + eligibility
+// rates, and install's real-outcome counts, for every pop-up in lib/popupEvents.ts.
+// Bucketed by US-Eastern day (see /api/popups + lib/popupEvents.ts etDateFromMs); a rate
+// widget shows "—" instead of 0%/NaN until its denominator has data.
+function pw(p: Omit<Widget, 'i' | 'x' | 'y' | 'metric' | 'dataset'> & { w: number; h: number }): Omit<Widget, 'i' | 'x' | 'y'> {
+  return { metric: 'pageviews', dataset: 'popup', ...p }
+}
+// Packs widgets left→right into a 12-col grid (see Dashboard.vue col-num), wrapping to a
+// new row when a widget wouldn't fit — avoids hand-computing x/y for ~30 tiles.
+function flowLayout(items: (Omit<Widget, 'i' | 'x' | 'y'> & { w: number; h: number })[]): Widget[] {
+  let x = 0
+  let y = 0
+  let rowH = 0
+  const out: Widget[] = []
+  for (const it of items) {
+    if (x + it.w > 12) {
+      x = 0
+      y += rowH
+      rowH = 0
+    }
+    out.push({ ...it, x, y, i: it.id })
+    x += it.w
+    rowH = Math.max(rowH, it.h)
+  }
+  return out
+}
+// Popups whose per-reason/per-platform shown breakdown is worth a chart out of the box.
+const POPUPS_WITH_TREND = new Set(['signin-prompt', 'upsell'])
+
+export function defaultBestSudokuPopupsWidgets(): Widget[] {
+  const items: (Omit<Widget, 'i' | 'x' | 'y'> & { w: number; h: number })[] = []
+  for (const p of POPUPS) {
+    items.push(
+      pw({ id: `pu-${p.id}-kind`, title: `${p.label} — shown / accepted / dismissed`, type: 'bar', dimension: 'kind', popup: p.id, limit: 3, w: 6, h: 8 }),
+      pw({ id: `pu-${p.id}-tap`, title: `${p.label} — tap rate`, type: 'rate', dimension: `${p.id}:tap`, limit: 1, w: 3, h: 4 }),
+    )
+    if (p.hasReasonBreakdown) {
+      items.push(
+        pw({ id: `pu-${p.id}-reason`, title: `${p.label} — reason / platform breakdown`, type: 'hbar', dimension: 'reason', popup: p.id, popupKind: 'shown', limit: 12, w: 6, h: 8 }),
+      )
+    }
+    if (POPUPS_WITH_TREND.has(p.id)) {
+      items.push(
+        pw({ id: `pu-${p.id}-trend`, title: `${p.label} — shown per day (ET)`, type: 'line', dimension: 'date', popup: p.id, popupKind: 'shown', limit: 90, w: 6, h: 8 }),
+      )
+    }
+  }
+  items.push(
+    pw({ id: 'pu-eligible-bd', title: 'Sign-in eligibility — earned / capped / unearned', type: 'bar', dimension: 'eligible', limit: 3, w: 6, h: 8 }),
+    pw({ id: 'pu-eligible-rate', title: 'Sign-in eligibility rate', type: 'rate', dimension: 'signin-eligible:rate', limit: 1, w: 3, h: 4 }),
+    pw({ id: 'pu-install-outcomes', title: 'Install — real outcomes', type: 'table', dimension: 'installOutcome', limit: 3, w: 6, h: 8 }),
+  )
+  // One rate tile per (popup, outcome type) — see POPUP_RATE_SPECS. Zero data today
+  // (no /popup-outcome rows live yet) renders as "—", never 0%.
+  for (const spec of POPUP_RATE_SPECS.filter((s) => s.kind === 'outcome')) {
+    items.push(pw({ id: `pu-rate-${spec.key}`, title: spec.label, type: 'rate', dimension: spec.key, limit: 1, w: 3, h: 4 }))
+  }
+  return flowLayout(items)
+}
+
+export function defaultBestSudokuPopupsPage(): DashboardPage {
+  return {
+    id: 'bsk-popups',
+    name: 'Best Sudoku pop-ups',
+    isDefault: false,
+    filters: { ...defaultFilters(), siteSel: [...BEST_SUDOKU_SITES] },
+    widgets: defaultBestSudokuPopupsWidgets(),
+  }
+}
+export function isBestSudokuPopupsPage(p: DashboardPage): boolean {
+  return p.id === 'bsk-popups' || p.name.trim().toLowerCase() === 'best sudoku pop-ups'
+}
+
+// "Best Sudoku campaigns" — a bespoke page (no generic Widget grid; see
+// components/CampaignComparePage.vue, which App.vue renders instead of <Dashboard> for it).
+// `widgets` stays empty; it's carried only so PageBar can list/switch/rename/delete it like
+// any other page.
+export function defaultCampaignComparePage(): DashboardPage {
+  return { id: 'bsk-campaigns', name: 'Best Sudoku campaigns', isDefault: false, filters: defaultFilters(), widgets: [] }
+}
+export function isCampaignComparePage(p: DashboardPage): boolean {
+  return p.id === 'bsk-campaigns' || p.name.trim().toLowerCase() === 'best sudoku campaigns'
+}
+
+// "Best Sudoku overview" (Part C) — another bespoke page (see components/OverviewPage.vue),
+// always FIRST in the page list: "how is the release going, how is each campaign going,
+// and what's happening right now." Uses the global filter's date range for its timeline
+// (the "existing range control"), so — unlike the campaign-compare page — it keeps its own
+// real `filters`, seeded to span since well before any known Best Sudoku data.
+export function defaultOverviewPage(): DashboardPage {
+  return {
+    id: 'bsk-overview',
+    name: 'Best Sudoku overview',
+    isDefault: false,
+    filters: { ...defaultFilters(), since: '2026-01-01T00:00:00.000Z', rangeRel: '' },
+    widgets: [],
+  }
+}
+export function isOverviewPage(p: DashboardPage): boolean {
+  return p.id === 'bsk-overview' || p.name.trim().toLowerCase() === 'best sudoku overview'
+}
+
 export function defaultConfig(): DashboardConfig {
   return {
-    version: 4,
-    activePageId: 'default',
-    pages: [defaultPage(), defaultBeaconPage(), defaultBestSudokuLaunchPage()],
+    version: 6,
+    activePageId: 'bsk-overview',
+    pages: [defaultOverviewPage(), defaultPage(), defaultBeaconPage(), defaultBestSudokuLaunchPage(), defaultBestSudokuPopupsPage(), defaultCampaignComparePage()],
   }
 }
 
@@ -181,6 +284,8 @@ export function isBestSudokuLaunchPage(p: DashboardPage): boolean {
 export function defaultWidgetsForPage(p: DashboardPage): Widget[] {
   if (p.id === 'default') return defaultWidgets()
   if (p.id === 'beacon') return defaultBeaconWidgets()
+  if (p.id === 'bsk-popups') return defaultBestSudokuPopupsWidgets()
+  if (isCampaignComparePage(p) || isOverviewPage(p)) return [] // bespoke pages, no generic widgets
   const geoCount = p.widgets.filter((w) => w.dataset === 'geo').length
   return geoCount > p.widgets.length / 2 ? defaultBeaconWidgets() : defaultWidgets()
 }
@@ -208,9 +313,11 @@ function normWidget(x: any): Widget {
     i: String(x.id ?? x.i ?? cryptoId()),
     title: String(x.title ?? 'Untitled'),
     type: x.type ?? 'bar',
-    dataset: x.dataset === 'geo' ? 'geo' : undefined,
+    dataset: x.dataset === 'geo' ? 'geo' : x.dataset === 'popup' ? 'popup' : undefined,
     dimension: x.dimension ?? '',
     breakdown: x.breakdown || undefined,
+    popup: typeof x.popup === 'string' ? x.popup : undefined,
+    popupKind: typeof x.popupKind === 'string' ? x.popupKind : undefined,
     // Nested-doughnut extra rings (beyond dimension+breakdown) — see lib/rings.ts. Absent/
     // invalid on any older saved config, which is exactly the back-compat 2-ring behavior.
     rings: Array.isArray(x.rings) ? x.rings.filter((r: any) => typeof r === 'string' && r) : undefined,
@@ -263,6 +370,20 @@ export function normalizeConfig(raw: any): DashboardConfig {
         p.filters.siteSel = [...BEST_SUDOKU_SITES]
       }
     }
+    // v5 migration: add the "Best Sudoku campaigns" page ONCE. Also backfills "Best Sudoku
+    // pop-ups" for anyone who saved a config before it existed — the v4 bump above never
+    // itself migrated existing saved configs to add that page, so an already-live dashboard
+    // would otherwise never pick it up either. Both gated on version, so a later delete of
+    // either page won't keep bringing it back.
+    if ((Number(raw.version) || 0) < 5) {
+      if (!pages.some((p: DashboardPage) => isBestSudokuPopupsPage(p))) pages.push(defaultBestSudokuPopupsPage())
+      if (!pages.some((p: DashboardPage) => isCampaignComparePage(p))) pages.push(defaultCampaignComparePage())
+    }
+    // v6 migration: add "Best Sudoku overview" ONCE, and put it FIRST — the brief's own
+    // requirement, so it reads as the landing page even for an existing saved config.
+    if ((Number(raw.version) || 0) < 6 && !pages.some((p: DashboardPage) => isOverviewPage(p))) {
+      pages.unshift(defaultOverviewPage())
+    }
     // Self-heal (every load, not version-gated): the canonical pages — Overview, Beacon, and
     // the Best Sudoku launch page — must NEVER carry a persistent page-level drill. Drilling
     // always spawns a NEW page, so a drill sitting on one of these is always erroneous (e.g.
@@ -273,7 +394,7 @@ export function normalizeConfig(raw: any): DashboardConfig {
       if (canonical && p.filters.drill?.length) p.filters.drill = []
     }
     const activePageId = pages.some((p: DashboardPage) => p.id === raw.activePageId) ? raw.activePageId : pages[0].id
-    return { version: 4, activePageId, pages, syncRange: !!raw.syncRange }
+    return { version: 6, activePageId, pages, syncRange: !!raw.syncRange }
   }
   // v1 — single page; wrap as the default page
   if (raw && typeof raw === 'object' && Array.isArray(raw.widgets)) {
