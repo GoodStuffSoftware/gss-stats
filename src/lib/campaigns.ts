@@ -26,6 +26,10 @@ import { classifyPopupPath, computeRate, TRACKING_ACTIVATION_DATE_ET, etDateFrom
 
 // ET hour-of-day (0-23) for "Arrivals by ET hour of day" — same DST-safe Intl approach as
 // popupEvents.ts's etDateFromMs, just formatting the hour instead of the calendar date.
+// FINAL LIST rule (Best Sudoku team, 2026-09-25): hourOfDayEt (functions/api/campaigns.ts)
+// is built ONLY from tagged-arrival rows, never from /signin-eligible — that beacon is
+// deferred ≥30 min after the finish, so its own row time is not the finish time and would
+// skew any hour-of-day bucketing. See lib/popupEvents.ts SIGNIN_ELIGIBLE_CAVEAT.
 const ET_HOUR_FMT = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hourCycle: 'h23' })
 export function etHourFromMs(ms: number): number {
   return Number(ET_HOUR_FMT.format(new Date(ms)))

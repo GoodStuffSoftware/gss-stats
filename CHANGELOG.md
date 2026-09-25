@@ -6,6 +6,23 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-09-25
+
+### Fixed
+- **Install pop-up outcomes now classify correctly.** The install-prompt outcome beacon
+  previously failed to map to the install pop-up family at all.
+- **Retired and unrecognized upsell reasons are grouped under "other"** instead of showing
+  up as their own breakdown bucket or being silently dropped.
+- **First-50 congrats no longer shows empty outcome-rate rows.** It has no outcome beacon,
+  so it now shows a one-time "no outcome tracking" note instead.
+
+### Added
+- **New "still-playing" pop-up outcome rate**, covering days 14-21 after the pop-up was
+  shown.
+- **Sign-in-eligibility chart now carries a caveat** that its rows are measured at least 30
+  minutes after finish, so they're never a valid hour-of-day signal; the pop-ups page also
+  gets a standing note that sign-in-correlated rates are conservative for the same reason.
+
 ## [0.3.0] — 2026-09-25
 
 ### Fixed
