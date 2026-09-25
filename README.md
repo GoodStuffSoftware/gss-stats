@@ -193,7 +193,7 @@ after a redeploy (Actions → Deploy → Run workflow).
 
 ### Owner setup and rollout: order matters
 
-Do these steps in this order. The Cloudflare Access app stays on until step 5, so the
+Do these steps in this order. The Cloudflare Access app stays on until step 6, so the
 dashboard is never without a gate.
 
 1. **Create a new Google OAuth client.** Put it in the same Google Cloud project as
@@ -230,16 +230,44 @@ dashboard is never without a gate.
    - Click **Sign out**. You should see the "Signed out" page. **Sign in with Google**
      should get you back in.
    - Optional: try a different Google account. You should get **403 "Not allowed"**.
-   - If you see **"Sign-in not configured"**, a secret is missing or too short (the page
-     says which). Set it and redeploy.
+   - If you see **"Sign-in not configured"** (503), a setting is missing or invalid, and
+     the page names which one. It can be a secret that is missing or too short, a
+     `SESSION_TTL_HOURS` that isn't a plain number of hours from `1` to `720`, or an
+     `ALLOWED_EMAILS` entry that isn't a plain ASCII address (an accented or look-alike
+     character, for example). Fix it and redeploy.
+   - If you see **502 "Sign-in failed"** after choosing your account, the code exchange
+     with Google failed. **Keep Access on** and don't go on to step 5. Look in the Pages
+     Functions logs for a line that starts `auth: token exchange …`: run
+     `npx wrangler pages deployment tail --project-name gss-stats` (it follows the latest
+     production deployment) and sign in again, or open the deployment's real-time logs
+     under Workers & Pages → `gss-stats` in the dashboard.
+     - `failed: HTTP 401` usually means the client ID and secret don't belong together.
+     - `failed: HTTP 400` usually means the code expired or was already used (just sign
+       in again), or the redirect URI doesn't match step 1.
+     - `error: …` means the request to Google didn't complete at all.
    - If Google says `redirect_uri_mismatch`, the redirect URI in step 1 doesn't match
      byte for byte.
    - You may see the Access login once more in the middle of the Google round trip. That
      depends on how Access's cookie is configured and stops once Access is gone.
-5. **Only now, remove the Cloudflare Access application** for `stats.goodstuff.software`
+5. **Add a rate-limiting rule on the sign-in callback** (recommended), now, while Access
+   still covers the site. Anyone can make the app call Google's token endpoint by
+   hitting `/auth/google/callback` with a junk code, and a flood could get the OAuth
+   client throttled, which would block your own sign-in. That exposure starts when Access
+   goes in step 6, and the rule does no harm before then. In the Cloudflare dashboard,
+   on the `goodstuff.software` zone, add a WAF **rate limiting rule**:
+   - Match: URI path equals `/auth/google/callback`. On the Free plan, **Path** is the
+     only request field a rate-limiting rule can match on, so the rule also covers that
+     path on the zone's other hostnames, which is harmless at this limit. On Pro or
+     higher you can add hostname equals `stats.goodstuff.software`.
+   - Count by IP. Limit: for example 5 requests per 10 seconds. Action: **Block**, for
+     the longest time your plan allows.
+   - The Free plan allows one rate-limiting rule, with a 10-second period and a
+     10-second block; paid plans allow longer. A real sign-in makes one callback
+     request, so this never gets in your way.
+6. **Only now, remove the Cloudflare Access application** for `stats.goodstuff.software`
    (Zero Trust → Access → Applications). Remove the `*.pages.dev` one too if there is
    one; the host guard already 404s that URL.
-6. **Verify with no Access**, from a private window and a terminal (in Windows
+7. **Verify with no Access**, from a private window and a terminal (in Windows
    PowerShell 5.1, type `curl.exe`, because `curl` there is a different command):
    - https://stats.goodstuff.software should go straight to Google sign-in.
    - `curl -i https://stats.goodstuff.software/api/sites` should return `401` JSON.
@@ -247,20 +275,8 @@ dashboard is never without a gate.
    - `curl -i -X PUT https://stats.goodstuff.software/api/config -H "Origin: https://evil.example"`
      should return `403` (the cross-origin write guard).
    - `https://gss-stats.pages.dev/` should return `404`.
-7. **Add a rate-limiting rule on the sign-in callback** (recommended). Anyone can make
-   the app call Google's token endpoint by hitting `/auth/google/callback` with a junk
-   code, and a flood could get the OAuth client throttled, which would block your own
-   sign-in. In the Cloudflare dashboard, on the `goodstuff.software` zone, add a WAF
-   **rate limiting rule**:
-   - Match: hostname equals `stats.goodstuff.software` **and** URI path equals
-     `/auth/google/callback`.
-   - Count by IP. Limit: for example 5 requests per 10 seconds. Action: **Block**, for
-     the longest time your plan allows.
-   - The Free plan allows one rate-limiting rule, with a 10-second period and a
-     10-second block; paid plans allow longer. A real sign-in makes one callback
-     request, so this never gets in your way.
 
-**Rollback.** If sign-in misbehaves after step 5, first **re-create the Access
+**Rollback.** If sign-in misbehaves after step 6, first **re-create the Access
 application**, which puts the edge gate back. Then fix forward or revert the merge.
 Never remove the app gate while Access is off.
 
