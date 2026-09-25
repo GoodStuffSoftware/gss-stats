@@ -2,6 +2,7 @@ import type { StatsResponse, Widget, GlobalFilters, DashboardConfig, Dataset } f
 import { resolveSelection } from './sitesStore'
 import { nativeField } from './lib/drill'
 import { queryDims } from './lib/rings'
+import { sessionExpired } from './session'
 
 // Resolve a page's drill-downs into { field, value } pairs for one dataset. A drill
 // on a dimension the dataset lacks (e.g. region on RUM) is simply omitted.
@@ -88,8 +89,11 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters): Promis
 export async function loadConfig(): Promise<DashboardConfig | null> {
   try {
     const res = await fetch('/api/config')
-    if (!res.ok) return null
-    const data = await res.json()
+    if (!res.ok) {
+      if (res.status === 401) sessionExpired.value = true
+      return null
+    }
+    const data = (await res.json()) as any
     // Accept any real stored config: v2/v3 have a `pages` array, legacy v1 has `widgets`.
     // (The old check only looked for `widgets`, so every v2/v3 config was discarded on
     // load and the dashboard silently reverted to defaults — losing all saved state.)

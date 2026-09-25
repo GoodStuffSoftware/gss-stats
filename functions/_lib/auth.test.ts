@@ -1,0 +1,562 @@
+import { describe, it, expect, vi } from 'vitest'
+import {
+  authGate,
+  b64urlDecode,
+  b64urlEncode,
+  createSessionCookie,
+  GOOGLE_TOKEN_ENDPOINT,
+  parseAllowedEmails,
+  readAuthConfig,
+  safeNext,
+  signToken,
+  validateIdTokenClaims,
+  type AuthConfig,
+  type AuthEnv,
+} from './auth'
+import { onRequest } from '../_middleware'
+
+// ── Fixtures ─────────────────────────────────────────────────────────────────────
+
+const ORIGIN = 'https://stats.goodstuff.software'
+const NOW = Date.UTC(2026, 8, 25, 12, 0, 0)
+const CLIENT_ID = 'test-client.apps.googleusercontent.com'
+const SECRET = 'x'.repeat(48)
+
+const ENV: AuthEnv = {
+  GOOGLE_CLIENT_ID: CLIENT_ID,
+  GOOGLE_CLIENT_SECRET: 'test-client-secret',
+  SESSION_SECRET: SECRET,
+  ALLOWED_EMAILS: ' Owner@Example.com , second@example.com ',
+}
+
+function config(env: AuthEnv = ENV): AuthConfig {
+  const r = readAuthConfig(env)
+  if (!r.ok) throw new Error(r.problems.join('; '))
+  return r.config
+}
+
+const PROTECTED_BODY = 'protected content'
+
+function nextSpy() {
+  return vi.fn(async () => new Response(PROTECTED_BODY, { status: 200 }))
+}
+
+function req(path: string, init: RequestInit & { cookie?: string } = {}, origin = ORIGIN): Request {
+  const headers = new Headers(init.headers)
+  if (init.cookie) headers.set('Cookie', init.cookie)
+  return new Request(origin + path, { ...init, headers })
+}
+
+async function gate(request: Request, env: AuthEnv = ENV, deps: Parameters<typeof authGate>[3] = {}) {
+  const next = nextSpy()
+  const res = await authGate(request, env, next, { now: () => NOW, ...deps })
+  return { res, next }
+}
+
+/** `name=value` from a Set-Cookie header value. */
+function cookiePair(setCookie: string): string {
+  return setCookie.split(';')[0]
+}
+
+function setCookies(res: Response): string[] {
+  return res.headers.getSetCookie()
+}
+
+async function sessionCookieFor(email: string, opts: { nowMs?: number; env?: AuthEnv } = {}): Promise<string> {
+  const header = await createSessionCookie(new URL(ORIGIN), config(opts.env), { email, sub: 'sub-1' }, opts.nowMs ?? NOW)
+  return cookiePair(header)
+}
+
+function fakeJwt(claims: Record<string, unknown>): string {
+  const enc = (o: unknown) => b64urlEncode(new TextEncoder().encode(JSON.stringify(o)))
+  return `${enc({ alg: 'RS256', typ: 'JWT' })}.${enc(claims)}.c2lnbmF0dXJl`
+}
+
+function goodClaims(nonce: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  const now = Math.floor(NOW / 1000)
+  return {
+    iss: 'https://accounts.google.com',
+    aud: CLIENT_ID,
+    azp: CLIENT_ID,
+    sub: '1234567890',
+    email: 'OWNER@example.com',
+    email_verified: true,
+    nonce,
+    iat: now,
+    exp: now + 3600,
+    ...overrides,
+  }
+}
+
+/** Start a login: returns the state cookie pair and the Google authorize URL. */
+async function startLogin(next = '/') {
+  const { res } = await gate(req(`/auth/google/login?next=${encodeURIComponent(next)}`))
+  expect(res.status).toBe(302)
+  const google = new URL(res.headers.get('Location')!)
+  const stateCookie = setCookies(res).find((c) => c.startsWith('__Host-gss_oauth='))!
+  return { res, google, stateCookie }
+}
+
+function tokenEndpointReturning(idToken: string | null, status = 200) {
+  return vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+    new Response(JSON.stringify(idToken ? { access_token: 'at', id_token: idToken } : { access_token: 'at' }), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  )
+}
+
+async function completeLogin(opts: { claims?: (nonce: string) => Record<string, unknown>; next?: string } = {}) {
+  const { google, stateCookie } = await startLogin(opts.next)
+  const state = google.searchParams.get('state')!
+  const nonce = google.searchParams.get('nonce')!
+  const fetchMock = tokenEndpointReturning(fakeJwt((opts.claims ?? goodClaims)(nonce)))
+  const { res, next } = await gate(
+    req(`/auth/google/callback?state=${state}&code=auth-code`, { cookie: cookiePair(stateCookie) }),
+    ENV,
+    { fetch: fetchMock as unknown as typeof fetch },
+  )
+  return { res, next, fetchMock, google }
+}
+
+// ── Configuration: allowlist + fail closed ───────────────────────────────────────
+
+describe('allowlist parsing (deckhand convention)', () => {
+  it('is comma-separated, trimmed, lower-cased, exact', () => {
+    expect(parseAllowedEmails(' A@x.com,b@Y.com ,, ')).toEqual(['a@x.com', 'b@y.com'])
+    expect(parseAllowedEmails(undefined)).toEqual([])
+  })
+})
+
+describe('fail closed when configuration is missing', () => {
+  const cases: [string, AuthEnv][] = [
+    ['no config at all', {}],
+    ['GOOGLE_CLIENT_ID missing', { ...ENV, GOOGLE_CLIENT_ID: '' }],
+    ['GOOGLE_CLIENT_SECRET missing', { ...ENV, GOOGLE_CLIENT_SECRET: undefined }],
+    ['SESSION_SECRET missing', { ...ENV, SESSION_SECRET: undefined }],
+    ['SESSION_SECRET too short', { ...ENV, SESSION_SECRET: 'short' }],
+    ['ALLOWED_EMAILS empty', { ...ENV, ALLOWED_EMAILS: ' , ' }],
+  ]
+  for (const [name, env] of cases) {
+    it(`${name}: API → 503 JSON, page → 503, nothing served`, async () => {
+      // Even a cookie that is valid under the full config must not get through.
+      const cookie = await sessionCookieFor('owner@example.com')
+      const api = await gate(req('/api/stats', { method: 'POST', cookie }), env)
+      expect(api.res.status).toBe(503)
+      expect(api.res.headers.get('Content-Type')).toContain('application/json')
+      expect(((await api.res.json()) as { error: string }).error).toBe('auth_not_configured')
+      expect(api.next).not.toHaveBeenCalled()
+
+      const page = await gate(req('/', { cookie }), env)
+      expect(page.res.status).toBe(503)
+      expect(page.next).not.toHaveBeenCalled()
+
+      const login = await gate(req('/auth/google/login'), env)
+      expect(login.res.status).toBe(503)
+    })
+  }
+
+  it('names the missing variables but never their values', async () => {
+    const { res } = await gate(req('/api/config'), { ...ENV, GOOGLE_CLIENT_ID: '' })
+    const body = (await res.json()) as { problems: string[] }
+    expect(body.problems).toEqual(['GOOGLE_CLIENT_ID is not set'])
+    expect(JSON.stringify(body)).not.toContain(SECRET)
+    expect(JSON.stringify(body)).not.toContain('test-client-secret')
+  })
+})
+
+// ── 401 vs redirect ──────────────────────────────────────────────────────────────
+
+describe('unauthenticated requests', () => {
+  it('API calls get 401 JSON', async () => {
+    for (const [path, method] of [
+      ['/api/stats', 'POST'],
+      ['/api/geo', 'POST'],
+      ['/api/sites', 'GET'],
+      ['/api/config', 'GET'],
+      ['/api/config', 'PUT'],
+      ['/api/anything-added-later', 'GET'],
+    ] as const) {
+      const { res, next } = await gate(req(path, { method }))
+      expect(res.status, `${method} ${path}`).toBe(401)
+      expect(res.headers.get('Content-Type')).toContain('application/json')
+      expect(await res.json()).toEqual({ error: 'unauthenticated', signIn: '/auth/google/login' })
+      expect(next).not.toHaveBeenCalled()
+    }
+  })
+
+  it('/auth/me gets 401 JSON', async () => {
+    const { res } = await gate(req('/auth/me'))
+    expect(res.status).toBe(401)
+  })
+
+  it('page loads and static assets redirect to sign-in, keeping the return path', async () => {
+    const { res, next } = await gate(req('/?page=abc'))
+    expect(res.status).toBe(302)
+    expect(res.headers.get('Location')).toBe('/auth/google/login?next=%2F%3Fpage%3Dabc')
+    expect(next).not.toHaveBeenCalled()
+
+    const asset = await gate(req('/assets/index-abc123.js'))
+    expect(asset.res.status).toBe(302)
+    expect(asset.next).not.toHaveBeenCalled()
+  })
+
+  it('unknown /auth/* paths are 404, not a bypass', async () => {
+    const { res, next } = await gate(req('/auth/whatever'))
+    expect(res.status).toBe(404)
+    expect(next).not.toHaveBeenCalled()
+  })
+})
+
+// ── Sessions: valid, tampered, expired, de-listed ────────────────────────────────
+
+describe('session cookie', () => {
+  it('a valid session for an allowlisted email reaches pages and the API', async () => {
+    const cookie = await sessionCookieFor('owner@example.com')
+    expect(cookie.startsWith('__Host-gss_session=')).toBe(true)
+    const page = await gate(req('/', { cookie }))
+    expect(page.next).toHaveBeenCalledOnce()
+    expect(await page.res.text()).toBe(PROTECTED_BODY)
+    const api = await gate(req('/api/stats', { method: 'POST', cookie, headers: { Origin: ORIGIN } }))
+    expect(api.next).toHaveBeenCalledOnce()
+    const me = await gate(req('/auth/me', { cookie }))
+    expect(await me.res.json()).toMatchObject({ email: 'owner@example.com' })
+  })
+
+  it('rejects a tampered payload (email swapped, signature kept)', async () => {
+    const cookie = await sessionCookieFor('second@example.com')
+    const [name, value] = cookie.split('=')
+    const [payload, sig] = value.split('.')
+    const claims = JSON.parse(new TextDecoder().decode(b64urlDecode(payload)!))
+    claims.email = 'owner@example.com'
+    claims.exp += 10 * 365 * 86400
+    const forged = `${name}=${b64urlEncode(new TextEncoder().encode(JSON.stringify(claims)))}.${sig}`
+    const api = await gate(req('/api/config', { cookie: forged }))
+    expect(api.res.status).toBe(401)
+    expect(api.next).not.toHaveBeenCalled()
+    // …and the bad cookie is cleared.
+    expect(setCookies(api.res).some((c) => c.startsWith('__Host-gss_session=;') && c.includes('Max-Age=0'))).toBe(true)
+    const page = await gate(req('/', { cookie: forged }))
+    expect(page.res.status).toBe(302)
+    expect(page.next).not.toHaveBeenCalled()
+  })
+
+  it('rejects a flipped signature, garbage, and an empty cookie', async () => {
+    const cookie = await sessionCookieFor('owner@example.com')
+    const last = cookie.at(-1) === 'A' ? 'B' : 'A'
+    for (const bad of [cookie.slice(0, -1) + last, '__Host-gss_session=garbage', '__Host-gss_session=', '__Host-gss_session=a.b.c']) {
+      const { res, next } = await gate(req('/api/sites', { cookie: bad }))
+      expect(res.status, bad).toBe(401)
+      expect(next).not.toHaveBeenCalled()
+    }
+  })
+
+  it('rejects a cookie signed with a different secret (e.g. after rotation)', async () => {
+    const cookie = await sessionCookieFor('owner@example.com', { env: { ...ENV, SESSION_SECRET: 'y'.repeat(48) } })
+    const { res } = await gate(req('/api/sites', { cookie }))
+    expect(res.status).toBe(401)
+  })
+
+  it('rejects a validly signed token minted for a different purpose (state cookie replayed as session)', async () => {
+    const token = await signToken(SECRET, 'gss-stats/oauth-state/v1', {
+      v: 1,
+      email: 'owner@example.com',
+      sub: 's',
+      iat: Math.floor(NOW / 1000),
+      exp: Math.floor(NOW / 1000) + 3600,
+    })
+    const { res } = await gate(req('/api/sites', { cookie: `__Host-gss_session=${token}` }))
+    expect(res.status).toBe(401)
+  })
+
+  it('rejects an expired session', async () => {
+    const cookie = await sessionCookieFor('owner@example.com', { nowMs: NOW - 8 * 24 * 3600 * 1000 })
+    const { res } = await gate(req('/api/sites', { cookie }))
+    expect(res.status).toBe(401)
+  })
+
+  it("rejects a session past its own exp even when still inside the current TTL", async () => {
+    const now = Math.floor(NOW / 1000)
+    const token = await signToken(SECRET, 'gss-stats/session/v1', { v: 1, email: 'owner@example.com', sub: 's', iat: now - 60, exp: now - 1 })
+    const { res } = await gate(req('/api/sites', { cookie: `__Host-gss_session=${token}` }))
+    expect(res.status).toBe(401)
+    // Control: the same shape with a future exp is accepted, so the rejection above is the exp check.
+    const ok = await signToken(SECRET, 'gss-stats/session/v1', { v: 1, email: 'owner@example.com', sub: 's', iat: now - 60, exp: now + 60 })
+    expect((await gate(req('/api/sites', { cookie: `__Host-gss_session=${ok}` }))).next).toHaveBeenCalled()
+  })
+
+  it('honours a shortened SESSION_TTL_HOURS for sessions issued under a longer one', async () => {
+    const cookie = await sessionCookieFor('owner@example.com', { nowMs: NOW - 3 * 3600 * 1000 })
+    expect((await gate(req('/api/sites', { cookie }))).res.status).not.toBe(401)
+    expect((await gate(req('/api/sites', { cookie }), { ...ENV, SESSION_TTL_HOURS: '2' })).res.status).toBe(401)
+  })
+
+  it('locks out an email removed from the allowlist, even with a valid cookie', async () => {
+    const cookie = await sessionCookieFor('second@example.com')
+    expect((await gate(req('/api/sites', { cookie }))).next).toHaveBeenCalled()
+    const { res, next } = await gate(req('/api/sites', { cookie }), { ...ENV, ALLOWED_EMAILS: 'owner@example.com' })
+    expect(res.status).toBe(401)
+    expect(next).not.toHaveBeenCalled()
+  })
+})
+
+// ── The OAuth flow ───────────────────────────────────────────────────────────────
+
+describe('Google sign-in flow', () => {
+  it('login redirects to Google with state, nonce and PKCE, and sets a signed state cookie', async () => {
+    const { google, stateCookie } = await startLogin('/?x=1')
+    expect(google.origin + google.pathname).toBe('https://accounts.google.com/o/oauth2/v2/auth')
+    const p = google.searchParams
+    expect(p.get('client_id')).toBe(CLIENT_ID)
+    expect(p.get('redirect_uri')).toBe('https://stats.goodstuff.software/auth/google/callback')
+    expect(p.get('response_type')).toBe('code')
+    expect(p.get('scope')).toBe('openid email')
+    expect(p.get('code_challenge_method')).toBe('S256')
+    expect(p.get('code_challenge')).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    expect(p.get('state')).toMatch(/^[A-Za-z0-9_-]{32}$/)
+    expect(p.get('nonce')).toMatch(/^[A-Za-z0-9_-]{32}$/)
+    expect(p.get('prompt')).toBe('select_account')
+    for (const attr of ['HttpOnly', 'Secure', 'SameSite=Lax', 'Path=/', 'Max-Age=600']) expect(stateCookie).toContain(attr)
+    // The state cookie carries state + nonce + return path only: never the client secret
+    // or the PKCE verifier.
+    const payload = JSON.parse(new TextDecoder().decode(b64urlDecode(cookiePair(stateCookie).split('=')[1].split('.')[0])!))
+    expect(Object.keys(payload).sort()).toEqual(['iat', 'next', 'nonce', 'state', 'v'])
+    expect(payload.state).toBe(p.get('state'))
+    expect(payload.next).toBe('/?x=1')
+    expect(stateCookie).not.toContain('test-client-secret')
+  })
+
+  it('callback exchanges the code with the PKCE verifier and issues a hardened session cookie', async () => {
+    const { res, fetchMock, google } = await completeLogin({ next: '/?page=p2' })
+    expect(res.status).toBe(302)
+    expect(res.headers.get('Location')).toBe('/?page=p2')
+
+    // Token request: right endpoint, right params, verifier matches the challenge.
+    expect(fetchMock).toHaveBeenCalledOnce()
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(String(url)).toBe(GOOGLE_TOKEN_ENDPOINT)
+    const body = new URLSearchParams(String(init!.body))
+    expect(body.get('grant_type')).toBe('authorization_code')
+    expect(body.get('code')).toBe('auth-code')
+    expect(body.get('client_id')).toBe(CLIENT_ID)
+    expect(body.get('client_secret')).toBe('test-client-secret')
+    expect(body.get('redirect_uri')).toBe('https://stats.goodstuff.software/auth/google/callback')
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body.get('code_verifier')!))
+    expect(b64urlEncode(new Uint8Array(digest))).toBe(google.searchParams.get('code_challenge'))
+
+    const cookies = setCookies(res)
+    const session = cookies.find((c) => c.startsWith('__Host-gss_session='))!
+    for (const attr of ['HttpOnly', 'Secure', 'SameSite=Lax', 'Path=/', `Max-Age=${168 * 3600}`]) expect(session).toContain(attr)
+    expect(session).not.toContain('Domain=')
+    // State cookie is consumed.
+    expect(cookies.some((c) => c.startsWith('__Host-gss_oauth=;') && c.includes('Max-Age=0'))).toBe(true)
+
+    // And the issued cookie works.
+    const me = await gate(req('/auth/me', { cookie: cookiePair(session) }))
+    expect(await me.res.json()).toMatchObject({ email: 'owner@example.com' })
+  })
+
+  it('a verified Google account NOT on the allowlist gets 403 and no session', async () => {
+    const { res } = await completeLogin({ claims: (n) => goodClaims(n, { email: 'stranger@gmail.com' }) })
+    expect(res.status).toBe(403)
+    expect(await res.text()).toContain('stranger@gmail.com')
+    expect(setCookies(res).some((c) => /^__Host-gss_session=[^;]/.test(c))).toBe(false)
+  })
+
+  const badClaims: [string, (n: string) => Record<string, unknown>][] = [
+    ['wrong audience', (n) => goodClaims(n, { aud: 'someone-else.apps.googleusercontent.com', azp: undefined })],
+    ['wrong azp', (n) => goodClaims(n, { azp: 'someone-else' })],
+    ['wrong issuer', (n) => goodClaims(n, { iss: 'https://evil.example' })],
+    ['nonce mismatch', (n) => goodClaims(n, { nonce: n.split('').reverse().join('') })],
+    ['unverified email', (n) => goodClaims(n, { email_verified: false })],
+    ['expired ID token', (n) => goodClaims(n, { exp: Math.floor(NOW / 1000) - 3600 })],
+    ['missing email', (n) => goodClaims(n, { email: undefined })],
+  ]
+  for (const [name, claims] of badClaims) {
+    it(`rejects an ID token with ${name}`, async () => {
+      const { res } = await completeLogin({ claims })
+      expect(res.status).toBe(401)
+      expect(setCookies(res).some((c) => /^__Host-gss_session=[^;]/.test(c))).toBe(false)
+    })
+  }
+
+  it('rejects a callback whose state does not match the cookie, without calling Google', async () => {
+    const { stateCookie } = await startLogin()
+    const fetchMock = tokenEndpointReturning('unused')
+    const { res } = await gate(
+      req('/auth/google/callback?state=attacker-state&code=c', { cookie: cookiePair(stateCookie) }),
+      ENV,
+      { fetch: fetchMock as unknown as typeof fetch },
+    )
+    expect(res.status).toBe(400)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a callback with no state cookie (login CSRF), and an expired one', async () => {
+    const fetchMock = tokenEndpointReturning('unused')
+    const noCookie = await gate(req('/auth/google/callback?state=s&code=c'), ENV, { fetch: fetchMock as unknown as typeof fetch })
+    expect(noCookie.res.status).toBe(400)
+
+    const { google, stateCookie } = await startLogin()
+    const late = await gate(
+      req(`/auth/google/callback?state=${google.searchParams.get('state')}&code=c`, { cookie: cookiePair(stateCookie) }),
+      ENV,
+      { fetch: fetchMock as unknown as typeof fetch, now: () => NOW + 11 * 60 * 1000 },
+    )
+    expect(late.res.status).toBe(400)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('a failed token exchange is a 502, not a session', async () => {
+    const { google, stateCookie } = await startLogin()
+    const fetchMock = tokenEndpointReturning(null, 400)
+    const { res } = await gate(
+      req(`/auth/google/callback?state=${google.searchParams.get('state')}&code=c`, { cookie: cookiePair(stateCookie) }),
+      ENV,
+      { fetch: fetchMock as unknown as typeof fetch },
+    )
+    expect(res.status).toBe(502)
+    expect(setCookies(res).some((c) => /^__Host-gss_session=[^;]/.test(c))).toBe(false)
+  })
+})
+
+describe('validateIdTokenClaims', () => {
+  it('accepts the legacy issuer form and a string email_verified', () => {
+    const r = validateIdTokenClaims(goodClaims('n', { iss: 'accounts.google.com', email_verified: 'true' }), { clientId: CLIENT_ID, nonce: 'n' }, NOW)
+    expect(r).toEqual({ ok: true, email: 'owner@example.com', sub: '1234567890' })
+  })
+})
+
+// ── Sign-out, CSRF, open redirects, transport ────────────────────────────────────
+
+describe('sign-out', () => {
+  it('POST clears the session cookie and lands on the signed-out page', async () => {
+    const cookie = await sessionCookieFor('owner@example.com')
+    const { res } = await gate(req('/auth/logout', { method: 'POST', cookie, headers: { Origin: ORIGIN } }))
+    expect(res.status).toBe(303)
+    expect(res.headers.get('Location')).toBe('/auth/signed-out')
+    const cleared = setCookies(res).find((c) => c.startsWith('__Host-gss_session='))!
+    expect(cleared).toContain('Max-Age=0')
+    const page = await gate(req('/auth/signed-out'))
+    expect(page.res.status).toBe(200)
+    expect(page.next).not.toHaveBeenCalled()
+  })
+
+  it('GET /auth/logout is refused (405)', async () => {
+    const { res } = await gate(req('/auth/logout'))
+    expect(res.status).toBe(405)
+  })
+
+  it('a cross-origin logout is refused', async () => {
+    const { res } = await gate(req('/auth/logout', { method: 'POST', headers: { Origin: 'https://evil.example' } }))
+    expect(res.status).toBe(403)
+  })
+})
+
+describe('cross-origin writes', () => {
+  it('refuses a cross-origin PUT even with a valid session (sibling subdomain case)', async () => {
+    const cookie = await sessionCookieFor('owner@example.com')
+    const { res, next } = await gate(
+      req('/api/config', { method: 'PUT', cookie, headers: { Origin: 'https://www.goodstuff.software' }, body: '{}' }),
+    )
+    expect(res.status).toBe(403)
+    expect(next).not.toHaveBeenCalled()
+  })
+})
+
+describe('safeNext (open-redirect guard)', () => {
+  it.each([
+    ['/', '/'],
+    ['/?page=x', '/?page=x'],
+    ['//evil.example', '/'],
+    ['/\\evil.example', '/'],
+    ['https://evil.example', '/'],
+    ['javascript:alert(1)', '/'],
+    ['/auth/google/login', '/'],
+    ['/a\nb', '/'],
+    [null, '/'],
+  ])('%s → %s', (input, expected) => {
+    expect(safeNext(input as string | null)).toBe(expected)
+  })
+
+  it('login ignores a hostile next and returns to /', async () => {
+    const { google, stateCookie } = await startLogin('//evil.example/phish')
+    const fetchMock = tokenEndpointReturning(fakeJwt(goodClaims(google.searchParams.get('nonce')!)))
+    const { res } = await gate(
+      req(`/auth/google/callback?state=${google.searchParams.get('state')}&code=c`, { cookie: cookiePair(stateCookie) }),
+      ENV,
+      { fetch: fetchMock as unknown as typeof fetch },
+    )
+    expect(res.headers.get('Location')).toBe('/')
+  })
+})
+
+describe('transport', () => {
+  it('redirects plain http to https off loopback', async () => {
+    const { res, next } = await gate(req('/api/sites', {}, 'http://stats.goodstuff.software'))
+    expect(res.status).toBe(308)
+    expect(res.headers.get('Location')).toBe('https://stats.goodstuff.software/api/sites')
+    expect(next).not.toHaveBeenCalled()
+  })
+})
+
+// ── Local-dev bypass ─────────────────────────────────────────────────────────────
+
+describe('local dev bypass', () => {
+  const LOCAL = 'http://localhost:8788'
+
+  it('is OFF by default: loopback without the flag and without config is refused', async () => {
+    const { res, next } = await gate(req('/api/sites', {}, LOCAL), {})
+    expect(res.status).toBe(503)
+    expect(next).not.toHaveBeenCalled()
+  })
+
+  it('AUTH_DEV_BYPASS=1 on loopback lets requests through with no Google config', async () => {
+    const { res, next } = await gate(req('/api/sites', {}, LOCAL), { AUTH_DEV_BYPASS: '1' })
+    expect(next).toHaveBeenCalledOnce()
+    expect(res.headers.get('X-Auth-Dev-Bypass')).toBe('1')
+    const me = await gate(req('/auth/me', {}, LOCAL), { AUTH_DEV_BYPASS: '1' })
+    expect(await me.res.json()).toEqual({ email: 'dev@localhost', devBypass: true })
+  })
+
+  it('AUTH_DEV_BYPASS=1 is ignored on the production host', async () => {
+    const api = await gate(req('/api/sites'), { ...ENV, AUTH_DEV_BYPASS: '1' })
+    expect(api.res.status).toBe(401)
+    expect(api.next).not.toHaveBeenCalled()
+    const unconfigured = await gate(req('/api/sites'), { AUTH_DEV_BYPASS: '1' })
+    expect(unconfigured.res.status).toBe(503)
+  })
+
+  it('without the flag, loopback runs the real flow with non-__Host- cookies over http', async () => {
+    const { res } = await gate(req('/auth/google/login', {}, LOCAL))
+    expect(new URL(res.headers.get('Location')!).searchParams.get('redirect_uri')).toBe(
+      'http://localhost:8788/auth/google/callback',
+    )
+    const state = setCookies(res)[0]
+    expect(state.startsWith('gss_oauth=')).toBe(true)
+    expect(state).not.toContain('Secure')
+  })
+})
+
+// ── The middleware wiring (host guard → auth gate) ───────────────────────────────
+
+describe('functions/_middleware onRequest', () => {
+  function ctx(request: Request, env: AuthEnv) {
+    const next = nextSpy()
+    return { ctx: { request, env, next } as unknown as Parameters<typeof onRequest>[0], next }
+  }
+
+  it('404s non-canonical hosts (pages.dev, previews) before auth', async () => {
+    const { ctx: c, next } = ctx(new Request('https://feat-google-auth.gss-stats.pages.dev/'), ENV)
+    const res = await onRequest(c)
+    expect(res.status).toBe(404)
+    expect(next).not.toHaveBeenCalled()
+  })
+
+  it('gates the canonical host', async () => {
+    const { ctx: c, next } = ctx(new Request(`${ORIGIN}/api/stats`, { method: 'POST' }), ENV)
+    const res = await onRequest(c)
+    expect(res.status).toBe(401)
+    expect(next).not.toHaveBeenCalled()
+  })
+})
