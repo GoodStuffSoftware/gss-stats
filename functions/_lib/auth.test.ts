@@ -485,7 +485,7 @@ describe('Google sign-in flow', () => {
     expect(b64urlEncode(new Uint8Array(digest))).toBe(google.searchParams.get('code_challenge'))
     // Never follow a redirect away from the token endpoint (the unsigned-ID-token ruling
     // rests on TLS to that exact host). 'manual', not 'error': workerd rejects 'error'
-    // outright (auth.workerd.test.ts proves the init inside the real runtime).
+    // outright (auth.workerd.test.mjs proves the init inside the real runtime).
     expect(init!.method).toBe('POST')
     expect(init!.redirect).toBe('manual')
 
