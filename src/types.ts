@@ -226,6 +226,9 @@ export interface OverviewKpiTile {
   noCampaignFlighting?: boolean
   campaignId?: string
   isRate?: boolean
+  // Rate tiles only — the rate's own denominator, so the UI can tell "too few to report"
+  // (MIN_COHORT) apart from plain "—" (no data at all) for a null `today`.
+  denominator?: number
 }
 export interface OverviewDailyPoint {
   date: string
@@ -251,9 +254,11 @@ export interface OverviewScorecardRow {
   flightingToday: boolean
   taggedArrivals: number
   funnelRates: Partial<Record<keyof CampaignFunnelCounts, number | null>>
+  funnelCounts: CampaignFunnelCounts // pairs with funnelRates — see OverviewKpiTile.denominator
   authSuccess: number
   install: number
   returnRateD2to7: number | null
+  returnD0: number // pairs with returnRateD2to7
   costPerArrival: number | null
 }
 export interface OverviewReleaseWindowSummary {

@@ -8,7 +8,9 @@ import type { ChartConfiguration } from 'chart.js'
 import type { GlobalFilters, OverviewResponse } from '../types'
 import { fetchOverview } from '../api'
 import { PALETTE } from '../lib/charts'
-import { FUNNEL_STEP_LABELS } from '../lib/campaigns'
+import { FUNNEL_STEP_LABELS, FUNNEL_STEP_ORDER } from '../lib/campaigns'
+import { isInsufficientCohort } from '../lib/popupEvents'
+import type { CampaignFunnelCounts } from '../types'
 import BaseChart from './charts/BaseChart.vue'
 
 const props = defineProps<{ filters: GlobalFilters }>()
@@ -37,8 +39,17 @@ watch(() => [props.filters.since, props.filters.until], load)
 function fmt(n: number | null | undefined): string {
   return n == null ? '—' : n.toLocaleString('en-US')
 }
-function pct(n: number | null | undefined): string {
-  return n == null ? '—' : `${(n * 100).toFixed(1)}%`
+// `denominator`, when passed, distinguishes "too few to report" (MIN_COHORT — some data,
+// just not enough) from plain "—" (no data at all) for a null rate — see
+// lib/popupEvents.ts isInsufficientCohort. Every rate here is already server-gated
+// (computeRate enforces the floor itself); this is purely about which message shows.
+function pct(n: number | null | undefined, denominator?: number): string {
+  if (n == null) return denominator != null && isInsufficientCohort(denominator) ? 'too few to report' : '—'
+  return `${(n * 100).toFixed(1)}%`
+}
+function prevFunnelCount(counts: CampaignFunnelCounts, step: keyof CampaignFunnelCounts): number {
+  const idx = FUNNEL_STEP_ORDER.indexOf(step)
+  return idx > 0 ? counts[FUNNEL_STEP_ORDER[idx - 1]] : 0
 }
 function money(n: number | null | undefined): string {
   return n == null ? '—' : `$${n.toFixed(2)}`
@@ -167,7 +178,7 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
               <div class="kpi-num small">not yet tracking</div>
             </template>
             <template v-else>
-              <div class="kpi-num">{{ k.isRate ? pct(k.today) : fmt(k.today) }}</div>
+              <div class="kpi-num">{{ k.isRate ? pct(k.today, k.denominator) : fmt(k.today) }}</div>
               <div v-if="k.vsYesterday" class="kpi-delta" :class="deltaClass(k.vsYesterday)">vs yesterday {{ deltaLabel(k.vsYesterday) }}</div>
               <div v-if="k.vsAvg7" class="kpi-delta" :class="deltaClass(k.vsAvg7)">vs 7d avg {{ deltaLabel(k.vsAvg7) }}</div>
             </template>
@@ -199,11 +210,11 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
             <div class="sc-row"><span>Tagged arrivals</span><span class="mono">{{ fmt(row.taggedArrivals) }}</span></div>
             <div class="sc-row"><span>Auth successes</span><span class="mono">{{ fmt(row.authSuccess) }}</span></div>
             <div class="sc-row"><span>Installs</span><span class="mono">{{ fmt(row.install) }}</span></div>
-            <div class="sc-row"><span>Return rate (d2-7)</span><span class="mono">{{ pct(row.returnRateD2to7) }}</span></div>
+            <div class="sc-row"><span>Return rate (d2-7)</span><span class="mono">{{ pct(row.returnRateD2to7, row.returnD0) }}</span></div>
             <div class="sc-row"><span>Cost / arrival</span><span class="mono">{{ money(row.costPerArrival) }}</span></div>
             <div class="sc-rates">
               <span v-for="(rate, step) in row.funnelRates" :key="step" class="sc-rate-chip" :title="FUNNEL_STEP_LABELS[step as keyof typeof FUNNEL_STEP_LABELS]">
-                {{ FUNNEL_STEP_LABELS[step as keyof typeof FUNNEL_STEP_LABELS] }}: {{ pct(rate) }}
+                {{ FUNNEL_STEP_LABELS[step as keyof typeof FUNNEL_STEP_LABELS] }}: {{ pct(rate, prevFunnelCount(row.funnelCounts, step as keyof CampaignFunnelCounts)) }}
               </span>
             </div>
           </div>
