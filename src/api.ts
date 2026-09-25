@@ -1,4 +1,4 @@
-import type { StatsResponse, Widget, GlobalFilters, DashboardConfig, Dataset } from './types'
+import type { StatsResponse, Widget, GlobalFilters, DashboardConfig, Dataset, CampaignCompareResponse, OverviewResponse } from './types'
 import { resolveSelection } from './sitesStore'
 import { nativeField } from './lib/drill'
 import { queryDims } from './lib/rings'
@@ -20,6 +20,30 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters): Promis
   // Resolve the site selection into concrete RUM hosts + beacon tags. Empty = all
   // real sites; dev/preview hosts are never in the list, so they never count.
   const { hosts, tags } = resolveSelection(filters.siteSel)
+
+  // Pop-up funnel dataset → /api/popups (same D1 `hits` table as the beacon, but
+  // classified as sign-in/upsell/install events rather than page views).
+  if (widget.dataset === 'popup') {
+    const res = await fetch('/api/popups', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        dimension: widget.type === 'rate' ? 'rate' : widget.dimension || 'kind',
+        rateKey: widget.type === 'rate' ? widget.dimension : undefined,
+        popup: widget.popup,
+        kind: widget.popupKind,
+        since: filters.since,
+        until: filters.until,
+        limit: widget.limit ?? 50,
+        sites: tags,
+      }),
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(`popups ${res.status}: ${text.slice(0, 200)}`)
+    }
+    return res.json()
+  }
 
   // Geo beacon dataset → /api/geo (D1-backed, already bot-free).
   if (widget.dataset === 'geo') {
@@ -81,6 +105,37 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters): Promis
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     throw new Error(`stats ${res.status}: ${text.slice(0, 200)}`)
+  }
+  return res.json()
+}
+
+/** Fetch one campaign's comparison data (funnel, hour-of-day, country, daily, device mix,
+ * return visits — see lib/campaigns.ts + functions/api/campaigns.ts). */
+export async function fetchCampaignCompare(campaignId: string): Promise<CampaignCompareResponse> {
+  const res = await fetch('/api/campaigns', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ campaignId }),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`campaigns ${res.status}: ${text.slice(0, 200)}`)
+  }
+  return res.json()
+}
+
+/** Fetch the "Best Sudoku overview" page's data (today-at-a-glance KPIs, timeline,
+ * campaign scorecard, release panel — see lib/overview.ts + functions/api/overview.ts).
+ * `since`/`until` scope ONLY the timeline (the page's "existing range control"). */
+export async function fetchOverview(since?: string, until?: string): Promise<OverviewResponse> {
+  const res = await fetch('/api/overview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ since, until }),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`overview ${res.status}: ${text.slice(0, 200)}`)
   }
   return res.json()
 }

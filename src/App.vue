@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { reactive, ref, watch, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import type { DashboardConfig, DashboardPage, Widget, GlobalFilters } from './types'
-import { defaultConfig, normalizeConfig, defaultWidgetsForPage, clonePage, cryptoId, isBestSudokuLaunchPage, BEST_SUDOKU_SITES, beaconizeWidget } from './lib/defaults'
+import { defaultConfig, normalizeConfig, defaultWidgetsForPage, clonePage, cryptoId, isBestSudokuLaunchPage, isBestSudokuPopupsPage, isCampaignComparePage, isOverviewPage, BEST_SUDOKU_SITES, beaconizeWidget } from './lib/defaults'
 import { rangeLabel, ymdRangeToISO } from './lib/range'
 import { loadConfig, saveConfig } from './api'
 import { loadSites, sitesTree, tokenLabel } from './sitesStore'
 import { isSiteDim, semanticKey } from './lib/drill'
 import { sessionExpired, reauth } from './session'
+import { TRACKING_ACTIVATION_DATE_ET } from './lib/popupEvents'
+import CampaignComparePage from './components/CampaignComparePage.vue'
+import OverviewPage from './components/OverviewPage.vue'
 import PageBar from './components/PageBar.vue'
 import FilterBar from './components/FilterBar.vue'
 import Dashboard from './components/Dashboard.vue'
@@ -22,6 +25,22 @@ const saveState = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
 // The page currently being viewed/edited.
 const activePage = computed<DashboardPage>(() => config.pages.find((p) => p.id === config.activePageId) ?? config.pages[0])
 const rangeText = computed(() => rangeLabel(activePage.value.filters.since, activePage.value.filters.until))
+
+// Part A hard requirement #4: while pop-up tracking hasn't shipped yet (activation date
+// still null — see lib/popupEvents.ts), the pop-ups page carries this note so nothing on
+// it reads as a real baseline. Goes away by itself the day TRACKING_ACTIVATION_DATE_ET
+// is set to v1.90.0's release date.
+const showPopupActivationNote = computed(
+  () => TRACKING_ACTIVATION_DATE_ET === null && isBestSudokuPopupsPage(activePage.value),
+)
+
+// "Best Sudoku campaigns" and "Best Sudoku overview" are bespoke pages (see
+// CampaignComparePage.vue / OverviewPage.vue) — no generic Widget grid, so "Add chart" /
+// "restore default charts" don't apply to either. The overview page DOES keep its FilterBar
+// (its timeline zooms/range-selects with it); the campaign page does not.
+const isCampaignPage = computed(() => isCampaignComparePage(activePage.value))
+const isOverviewActive = computed(() => isOverviewPage(activePage.value))
+const isBespokePage = computed(() => isCampaignPage.value || isOverviewActive.value)
 
 onMounted(async () => {
   dark.value = localStorage.getItem('gss-stats-dark') === '1'
@@ -88,10 +107,13 @@ function deletePage(id: string) {
 }
 function restoreDefaultCharts(id: string) {
   const p = config.pages.find((x) => x.id === id) ?? activePage.value
+  if (isCampaignComparePage(p) || isOverviewPage(p)) return // bespoke page — no generic widgets to restore
   const launch = isBestSudokuLaunchPage(p)
+  const popups = isBestSudokuPopupsPage(p)
   // If the user has pinned any charts as defaults, restoring keeps exactly those and drops
   // the rest. Otherwise fall back to the factory set for this page. The Best Sudoku launch
-  // page additionally re-points its charts at the beacon and resets the site buckets.
+  // page additionally re-points its charts at the beacon and resets the site buckets; the
+  // pop-ups page resets its site buckets the same way (its factory set is already pop-up).
   const marked = p.widgets.filter((w) => w.isDefault)
   const msg = marked.length
     ? `Restore "${p.name}" to your default charts? Charts not set as default will be removed.`
@@ -101,10 +123,8 @@ function restoreDefaultCharts(id: string) {
   if (!confirm(msg)) return
 
   let next = marked.length ? marked : launch ? p.widgets : defaultWidgetsForPage(p)
-  if (launch) {
-    next = next.map(beaconizeWidget)
-    p.filters.siteSel = [...BEST_SUDOKU_SITES]
-  }
+  if (launch) next = next.map(beaconizeWidget)
+  if (launch || popups) p.filters.siteSel = [...BEST_SUDOKU_SITES]
   p.widgets = next
 }
 
@@ -150,7 +170,9 @@ function addChart() {
   const id = cryptoId()
   // On the Best Sudoku launch page, new charts default to the beacon dataset (its only
   // real data source) instead of Cloudflare RUM, so the whole page stays beacon-backed.
+  // The pop-ups page similarly defaults to the pop-up dataset.
   const geo = isBestSudokuLaunchPage(activePage.value)
+  const popups = isBestSudokuPopupsPage(activePage.value)
   editing.value = {
     isNew: true,
     widget: {
@@ -158,8 +180,9 @@ function addChart() {
       i: id,
       title: 'New chart',
       type: 'bar',
-      dataset: geo ? 'geo' : undefined,
-      dimension: geo ? 'region' : 'requestHost',
+      dataset: geo ? 'geo' : popups ? 'popup' : undefined,
+      dimension: geo ? 'region' : popups ? 'kind' : 'requestHost',
+      popup: popups ? 'signin-prompt' : undefined,
       metric: 'pageviews',
       limit: 10,
       x: 0,
@@ -322,7 +345,7 @@ function toggleDark() {
         <button class="btn" @click="toggleDark" :title="dark ? 'Light mode' : 'Dark mode'">
           {{ dark ? '☀' : '☾' }}
         </button>
-        <button class="btn btn-primary" @click="addChart">＋ Add chart</button>
+        <button v-if="!isBespokePage" class="btn btn-primary" @click="addChart">＋ Add chart</button>
         <AccountMenu />
       </div>
     </header>
@@ -339,28 +362,37 @@ function toggleDark() {
     />
 
     <FilterBar
+      v-if="!isCampaignPage"
       :filters="activePage.filters"
       :sync-range="config.syncRange"
       @change="onFiltersChange"
       @toggle-sync="onToggleSync"
     />
 
+    <div v-if="showPopupActivationNote" class="activation-note">
+      Tracking not yet active — numbers before release are not a baseline.
+    </div>
+
     <main class="grid-area">
-      <Dashboard
-        v-model:widgets="activePage.widgets"
-        :filters="activePage.filters"
-        :dark="dark"
-        :drill-open-id="drillMenu?.widgetId ?? null"
-        @edit="editChart"
-        @remove="removeWidget"
-        @duplicate="duplicateWidget"
-        @change="scheduleSave"
-        @drill="onDrill"
-      />
-      <div v-if="loaded && activePage.widgets.length === 0" class="empty">
-        <p>No charts on this page.</p>
-        <button class="btn btn-primary" @click="addChart">＋ Add a chart</button>
-      </div>
+      <OverviewPage v-if="isOverviewActive" :filters="activePage.filters" @open-campaigns="switchPage('bsk-campaigns')" />
+      <CampaignComparePage v-else-if="isCampaignPage" />
+      <template v-else>
+        <Dashboard
+          v-model:widgets="activePage.widgets"
+          :filters="activePage.filters"
+          :dark="dark"
+          :drill-open-id="drillMenu?.widgetId ?? null"
+          @edit="editChart"
+          @remove="removeWidget"
+          @duplicate="duplicateWidget"
+          @change="scheduleSave"
+          @drill="onDrill"
+        />
+        <div v-if="loaded && activePage.widgets.length === 0" class="empty">
+          <p>No charts on this page.</p>
+          <button class="btn btn-primary" @click="addChart">＋ Add a chart</button>
+        </div>
+      </template>
     </main>
 
     <ChartEditor
@@ -519,6 +551,15 @@ function toggleDark() {
   background: #fff;
   color: rgb(var(--amber));
   border: none;
+}
+.activation-note {
+  padding: 9px 14px;
+  border-radius: 10px;
+  background: rgb(var(--sunken));
+  border: 1px solid rgb(var(--line-2));
+  color: rgb(var(--ink-2));
+  font-size: 12.5px;
+  text-align: center;
 }
 .topbar {
   display: flex;

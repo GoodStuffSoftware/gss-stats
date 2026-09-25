@@ -140,7 +140,7 @@ async function load() {
   // RUM charts filter to a real-host allow-list built from /api/sites; fetching before
   // it loads would momentarily count dev/preview traffic. Wait for the tree. (Geo has
   // no dev hosts, so it needn't wait.)
-  if (props.widget.dataset !== 'geo' && !sitesLoaded.value) {
+  if (props.widget.dataset !== 'geo' && props.widget.dataset !== 'popup' && !sitesLoaded.value) {
     loading.value = true
     return
   }
@@ -168,6 +168,8 @@ const dataKey = computed(() =>
     s: props.widget.site,
     h: props.widget.host,
     e: props.widget.excludeSelfReferrals,
+    pu: props.widget.popup,
+    pk: props.widget.popupKind,
     f: effectiveFilters.value,
   }),
 )
@@ -224,6 +226,16 @@ const statOther = computed(() =>
 )
 const statOtherLabel = computed(() => (props.widget.metric === 'visits' ? 'pageviews' : 'visits'))
 
+// Pop-up rate tile (widget.type === 'rate'): null (no denominator yet) renders as "—",
+// never NaN/Infinity — see lib/popupEvents.ts computeRate. A nonzero-but-too-small
+// denominator (MIN_COHORT — see lib/popupEvents.ts gateRate) is a THIRD state, distinct
+// from "no data at all": "too few to report", not "—".
+const rateValue = computed<number | null>(() => data.value?.rate ?? null)
+const rateDisplay = computed(() => {
+  if (data.value?.insufficientCohort) return 'too few to report'
+  return rateValue.value == null ? '—' : `${(rateValue.value * 100).toFixed(1)}%`
+})
+
 const tableRows = computed(() =>
   !data.value
     ? []
@@ -235,7 +247,26 @@ const tableRows = computed(() =>
 const tableMax = computed(() => Math.max(1, ...tableRows.value.map((r) => r.value)))
 
 const isEmpty = computed(
-  () => !loading.value && !error.value && data.value && data.value.rows.length === 0 && props.widget.type !== 'map',
+  () =>
+    !loading.value &&
+    !error.value &&
+    data.value &&
+    data.value.rows.length === 0 &&
+    props.widget.type !== 'map' &&
+    props.widget.type !== 'rate', // a rate tile has no rows even when it has a real (or null) rate — never "No data"
+)
+
+// Pop-up count widgets (everything except the 'rate' tile and the 'date' trend, which
+// plot full history themselves — see functions/api/popups.ts) go "excluded" rather than
+// showing a real-looking chart of zero/pre-release counts while tracking hasn't shipped
+// yet — see lib/popupEvents.ts TRACKING_ACTIVATION_DATE_ET, hard requirement "before
+// activation is unmeasured, not zero."
+const popupNotYetActive = computed(
+  () =>
+    props.widget.dataset === 'popup' &&
+    props.widget.type !== 'rate' &&
+    props.widget.dimension !== 'date' &&
+    !!data.value?.meta?.activationPending,
 )
 
 function fmt(n: number) {
@@ -303,6 +334,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
     <div class="card-body">
       <div v-if="loading" class="state mono">Loading…</div>
       <div v-else-if="error" class="state error mono">{{ error }}</div>
+      <div v-else-if="popupNotYetActive" class="state mono">Tracking not yet active</div>
       <div v-else-if="isEmpty" class="state mono">No data in range</div>
 
       <!-- Stat tile -->
@@ -310,6 +342,12 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
         <div class="stat-num">{{ fmt(statValue) }}</div>
         <div class="stat-label overline">{{ widget.metric }}</div>
         <div class="stat-sub">{{ fmt(statOther) }} {{ statOtherLabel }}</div>
+      </div>
+
+      <!-- Pop-up rate tile: "—" for a zero denominator, never 0%/NaN -->
+      <div v-else-if="widget.type === 'rate'" class="stat">
+        <div class="stat-num">{{ rateDisplay }}</div>
+        <div class="stat-label overline">rate</div>
       </div>
 
       <!-- Table -->
