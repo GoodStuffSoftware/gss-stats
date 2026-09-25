@@ -8,6 +8,7 @@
 import { ref, computed, onMounted } from 'vue'
 import type { ChartConfiguration } from 'chart.js'
 import { CAMPAIGNS, FUNNEL_STEP_ORDER, FUNNEL_STEP_LABELS, RETURN_BUCKETS, ARRIVALS_CAVEAT, type CampaignFlight } from '../lib/campaigns'
+import { MIN_COHORT, isInsufficientCohort } from '../lib/popupEvents'
 import type { CampaignCompareResponse, CampaignFunnelCounts } from '../types'
 import { fetchCampaignCompare } from '../api'
 import { PALETTE } from '../lib/charts'
@@ -34,8 +35,17 @@ onMounted(load)
 function fmt(n: number | null | undefined): string {
   return n == null ? '—' : n.toLocaleString('en-US')
 }
-function pct(n: number | null | undefined): string {
-  return n == null ? '—' : `${(n * 100).toFixed(1)}%`
+// `denominator`, when passed, lets a null rate distinguish "too few to report" (some data,
+// under MIN_COHORT) from plain "—" (no data at all) — see lib/popupEvents.ts
+// isInsufficientCohort. Every rate here is already server-gated (computeRate enforces the
+// floor itself), so this is purely about which MESSAGE a null renders as.
+function pct(n: number | null | undefined, denominator?: number): string {
+  if (n == null) return denominator != null && isInsufficientCohort(denominator) ? 'too few to report' : '—'
+  return `${(n * 100).toFixed(1)}%`
+}
+function prevStepCount(counts: CampaignFunnelCounts, step: keyof CampaignFunnelCounts): number {
+  const idx = FUNNEL_STEP_ORDER.indexOf(step)
+  return idx > 0 ? counts[FUNNEL_STEP_ORDER[idx - 1]] : 0
 }
 function money(n: number | null | undefined): string {
   return n == null ? '—' : `$${n.toFixed(2)}`
@@ -193,13 +203,16 @@ function topShares(counts: Record<string, number>, n = 4): { label: string; valu
       <!-- Chart 1: funnel, side by side -->
       <section class="block">
         <h2>Funnel per campaign</h2>
-        <p class="caption">Arrivals: {{ ARRIVALS_CAVEAT }}</p>
+        <p class="caption">Arrivals: {{ ARRIVALS_CAVEAT }} Rates need at least {{ MIN_COHORT }} in their denominator, or they show "too few to report".</p>
         <div class="funnel-grid">
           <div v-for="(c, i) in CAMPAIGNS" :key="c.id" class="funnel-col" :style="{ '--accent': campaignColor(i) }">
             <div class="funnel-head">
               <span class="dot"></span>
               <span class="fc-label">{{ c.label }}</span>
               <span class="fc-status">{{ c.status }}</span>
+            </div>
+            <div v-if="dataByCampaign[c.id]" class="tagged-hits mono" :title="ARRIVALS_CAVEAT">
+              tagged hits: {{ fmt(dataByCampaign[c.id].taggedHits) }} (vs {{ fmt(dataByCampaign[c.id].funnel.counts.arrivals) }} arrivals)
             </div>
             <div v-if="dataByCampaign[c.id]" class="funnel-steps">
               <div v-for="step in FUNNEL_STEP_ORDER" :key="step" class="funnel-step">
@@ -215,7 +228,9 @@ function topShares(counts: Record<string, number>, n = 4): { label: string; valu
                 </div>
                 <div class="fs-rate mono">
                   <template v-if="dataByCampaign[c.id].funnel.notInstrumented.includes(step)">not instrumented</template>
-                  <template v-else-if="step !== 'arrivals'">{{ pct(dataByCampaign[c.id].funnel.rates[step]) }} of previous step</template>
+                  <template v-else-if="step !== 'arrivals'">
+                    {{ pct(dataByCampaign[c.id].funnel.rates[step], prevStepCount(dataByCampaign[c.id].funnel.counts, step)) }} of previous step
+                  </template>
                 </div>
               </div>
             </div>
@@ -312,6 +327,9 @@ function topShares(counts: Record<string, number>, n = 4): { label: string; valu
               <p v-else-if="dataByCampaign[c.id].returnVisits.sharedWithCampaignId" class="caption">
                 Shares its tag with another flight — not separable by return beacon.
               </p>
+              <p v-else-if="isInsufficientCohort(dataByCampaign[c.id].returnVisits.counts.d0)" class="state mono small">
+                too few to report (d0 = {{ fmt(dataByCampaign[c.id].returnVisits.counts.d0) }}, need {{ MIN_COHORT }})
+              </p>
               <div v-else class="chart-box small"><BaseChart v-if="returnChartConfig(c)" :config="returnChartConfig(c)!" :drill-open="false" @point="() => {}" /></div>
             </template>
           </div>
@@ -383,6 +401,11 @@ function topShares(counts: Record<string, number>, n = 4): { label: string; valu
   align-items: center;
   gap: 6px;
   margin-bottom: 10px;
+}
+.tagged-hits {
+  font-size: 10px;
+  color: rgb(var(--ink-3));
+  margin-bottom: 8px;
 }
 .dot {
   width: 9px;
