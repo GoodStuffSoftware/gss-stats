@@ -25,6 +25,7 @@ import {
   costPer,
   countryBucket,
   etHourFromMs,
+  etFlightRangeMs,
   flightDayIndex,
   funnelStepRates,
   parseReturnPath,
@@ -85,11 +86,20 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const sql2 = `SELECT os, browser, screenw, COUNT(*) AS c FROM hits WHERE ${w2.join(' AND ')} GROUP BY os, browser, screenw`
 
   // ── Query 3: which funnel-step paths existed AT ALL (any campaign, any un-tagged hit)
-  // site-wide during this flight's window — decides "not instrumented" vs a real 0. ───────
-  const [flightStartMs, flightEndMs] = [attr.binds[attr.binds.length - 2] as number, attr.binds[attr.binds.length - 1] as number]
-  const w3: string[] = ['site = ?', 'ts >= ?', 'ts < ?']
-  const b3: unknown[] = [BSK_SITE, flightStartMs, flightEndMs]
-  const sql3 = `SELECT path, COUNT(*) AS c FROM hits WHERE ${w3.join(' AND ')} GROUP BY path`
+  // site-wide during this flight's SERVING window — decides "not instrumented" vs a real 0.
+  // Computed independently from campaign.flightStart/flightEnd (the display/serving dates),
+  // NOT from the attribution clause's binds (which has no upper bound — see
+  // campaignAttributionClause). `flightStart === null` (a pending flight, e.g. the retest
+  // before its start is confirmed): there's no window to check yet, so this query is skipped
+  // entirely and every non-globally-not-instrumented step is correctly left "not
+  // instrumented" below (seenSteps stays empty). ───────────────────────────────────────────
+  const flightRange = campaign.flightStart ? etFlightRangeMs(campaign.flightStart, campaign.flightEnd) : null
+  const sql3Promise: Promise<any> = flightRange
+    ? db
+        .prepare(`SELECT path, COUNT(*) AS c FROM hits WHERE site = ? AND ts >= ? AND ts < ? GROUP BY path`)
+        .bind(BSK_SITE, flightRange[0], flightRange[1])
+        .all()
+    : Promise.resolve({ results: [] })
 
   // ── Query 4: on-device return beacon (/return/<uc>/<bucket>) — path-embedded uc, see
   // lib/campaigns.ts parseReturnPath; site-wide + NOT date-windowed (a d31-60 return can
@@ -104,7 +114,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     ;[r1, r2, r3, r4] = await Promise.all([
       db.prepare(sql1).bind(...b1).all(),
       db.prepare(sql2).bind(...b2).all(),
-      db.prepare(sql3).bind(...b3).all(),
+      sql3Promise,
       db.prepare(sql4).bind(...b4).all(),
     ])
   } catch (e) {
@@ -192,6 +202,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       flightEnd: campaign.flightEnd,
       ucValues: campaign.ucValues,
       notes: campaign.notes,
+      measurement: campaign.measurement ?? null,
+      measurabilityNote: campaign.measurabilityNote ?? null,
     },
     funnel: { counts, rates, notInstrumented, arrivalsCaveat: ARRIVALS_CAVEAT },
     taggedHits, // labeled separately from arrivals — see ARRIVALS_CAVEAT / the DEFINITION FIX comment above

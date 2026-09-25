@@ -37,82 +37,114 @@ export interface CampaignFlight {
   label: string
   /** Every `campaign` column value attributed to this flight (see ATTRIBUTION above). */
   ucValues: string[]
-  flightStart: string // ET calendar date (YYYY-MM-DD), inclusive
-  flightEnd: string // ET calendar date, inclusive
+  /** ET calendar date (YYYY-MM-DD) attribution starts from — `ts >= ET midnight of this
+   * date`. Deliberately NO upper bound: once a row carries this campaign's uc, it belongs
+   * here forever (see campaignAttributionClause) — this is what lets the Android-launch
+   * flight capture its post-flightEnd returner trickle without a second, date-split
+   * "flight 2" entry (corrected 2026-09-25 from Google Ads API data; see module header).
+   * `null` = flight start not yet confirmed — attribute NOTHING until it's set (used by the
+   * retest campaign below so its pre-launch QA rows don't count). */
+  flightStart: string | null
+  /** ET calendar date, inclusive — serving-window END, for DISPLAY and flight-day-alignment
+   * only (flightDayIndex, the "daily arrivals by flight day" chart, servingHoursEt shading).
+   * NOT used to bound attribution — see flightStart above. */
+  flightEnd: string
   status: 'closed' | 'active' | 'upcoming'
   /** [startHourEt, endHourExclusiveEt) — descriptive only; charts DON'T filter to this
    * window (a click outside serving hours is still a real click), the hour-of-day chart
    * just shades it for context. Undefined = served all day. */
   servingHoursEt?: [number, number]
+  /** Set when this campaign's ads bypass the beacon entirely (e.g. straight to a Play Store
+   * listing, no web page in between) — spend is real but the funnel/arrivals numbers will
+   * structurally read zero until something else starts tagging rows for its uc(s). The uc
+   * stays in `ucValues` regardless, so real rows count automatically the moment they exist —
+   * no code change needed here when that happens. */
+  measurement?: 'spend-only'
+  /** Shown next to the funnel/arrivals numbers when `measurement === 'spend-only'`. */
+  measurabilityNote?: string
   notes: string
 }
 
+// CORRECTED CAMPAIGN DEFINITIONS (Google Ads API via the ads session, 2026-09-25) — replaces
+// the earlier "split by date range" pass (see git history for the prior version of this
+// comment). The earlier pass treated both closed campaigns as sharing one `campaign` tag and
+// split them at a volume cliff; the real Google Ads data says otherwise: they're two
+// DIFFERENT campaigns with two different delivery mechanisms, one of which never touches the
+// beacon at all —
+//
+//   24215315197 "Android launch": served 2026-09-02..09-09 ET, $124.47 total. ALL
+//     sudoku_tired_of_ads rows belong to this campaign, including the post-09-10 trickle
+//     (returners visiting again after the campaign stopped) — there is no second flight to
+//     split it from. See flightStart's doc comment: attribution has no upper bound.
+//   24234347705 "Play-direct": served 2026-09-09..09-13 ET (stopped early; configured to run
+//     through 09-16), $75.17 total. Its ads go straight to the Play Store listing (uc
+//     sudoku_tired_of_ads_play, read from the Play Install Referrer) — there is no
+//     intermediate web page, so NO beacon rows exist for it today. Spend-only until a Play
+//     Install Referrer reader ships in bestsudoku-app; see `measurement` below.
+//   24279250691 "US+CA web retest": uc sudoku_funnel_retest. 9 rows already tagged with this
+//     uc on 2026-09-23 are pre-launch validation/QA, not real traffic — flightStart is left
+//     `null` (pending) until the flight's real start is confirmed, which excludes them (and
+//     everything else) from attribution. See flightStart's doc comment.
+//
 // Live `campaign` values seen in production D1 as of 2026-09-25 (read-only query:
 // `SELECT campaign, MIN(ts), MAX(ts), COUNT(*) FROM hits WHERE campaign IS NOT NULL AND
 // campaign<>'' GROUP BY campaign`):
-//   sudoku_tired_of_ads       1194 rows  2026-09-03 .. 2026-09-22
+//   sudoku_tired_of_ads       1194 rows  2026-09-03 .. 2026-09-22  (all → Android launch)
 //   beta_v2_tier1en            132 rows  2026-07-30 .. 2026-08-03  (an unrelated earlier
 //                                                                    beta — not one of the
 //                                                                    3 campaigns; excluded)
 //   sudoku_funnel_retest         9 rows  2026-09-23 (a few minutes) — matches campaign 3's
-//                                                                     uc; predates its
-//                                                                     stated 2026-09-26
-//                                                                     start (pre-launch QA)
+//                                                                     uc; pre-launch QA, see
+//                                                                     above
 //   webview_test                 2 rows  2026-09-21               (unrelated; excluded)
 //   sudoku_tired_of_ads_test     1 row   2026-09-02               (a QA variant of the
-//                                                                    flight-1/2 tag, within
-//                                                                    flight 1's ET window)
+//                                                                    Android-launch tag —
+//                                                                    NOT in its ucValues,
+//                                                                    same reasoning as the
+//                                                                    retest's excluded QA
+//                                                                    rows: test traffic, not
+//                                                                    real campaign
+//                                                                    performance)
 //
-// None of "sudoku_tired_of_ads_play", "tired_of_ads", or "launch_2026" (the brief's
-// expected legacy variants) appear anywhere in production D1 — they're kept in ucValues
-// below in case they start appearing later (e.g. the Play twin ships), but contribute 0
-// rows today.
-//
-// FLIGHT 1 vs FLIGHT 2 SPLIT: both closed campaigns use the exact same `campaign` value
-// (sudoku_tired_of_ads) — they can't be separated by uc, so they're split by date range
-// (task brief: "split them by date range and report how"), using daily counts BUCKETED BY
-// ET DAY (etDateFromMs — HIGH review finding, 2026-09-25: the first pass used SQLite's
-// date(ts/1000,'unixepoch'), which buckets by UTC day; the real first hit is 2026-09-02
-// ~22:56 ET, which is already 2026-09-03 UTC, so ~150 tagged hits landed one ET day early
-// under UTC bucketing):
-//   09-02..09-09 ET: 150,164,165,108,160,151,132,121/day — one clear high-volume week (8d)
-//   09-10..09-22 ET: 7,10,4,0,7,1,0,2,2,6,3,0,1/day      — a >10x volume drop, no second burst
-// The split is set at that cliff (09-09 / 09-10 ET). INVARIANT (asserted in
-// campaigns.test.ts): flight 1's window (1,151 rows) + flight 2's window (43 rows) sums to
-// exactly 1,194 — the tag family's full row count — so no tagged row for this family falls
-// outside every window. This is still a BEST-EFFORT, low-confidence split: there's no
-// visible SECOND burst in the tail that would confirm a genuine second display arm rather
-// than late/residual clicks on flight 1's creative — flag this to the owner before
-// trusting flight 2's numbers as a distinct campaign.
+// "sudoku_tired_of_ads_play" (Play-direct's uc) appears nowhere in production D1 today — by
+// design, see above. "tired_of_ads"/"launch_2026" (earlier legacy variant guesses) also
+// appear nowhere; kept in Android launch's ucValues in case they surface later, 0 rows today.
+// VERIFIED live 2026-09-25: `campaign='sudoku_tired_of_ads' AND ts >= <flightStart ET
+// midnight>` (no upper bound) → exactly 1,194 tagged hits, 353 tagged arrivals (visitor=
+// 'new') — matches the task brief's numbers exactly; the QA variant is excluded on purpose.
 export const CAMPAIGNS: CampaignFlight[] = [
   {
     id: '24215315197',
-    label: 'Display flight 1 — "tired of ads"',
-    ucValues: ['sudoku_tired_of_ads', 'sudoku_tired_of_ads_play', 'tired_of_ads', 'launch_2026', 'sudoku_tired_of_ads_test'],
+    label: 'Android launch — "tired of ads"',
+    ucValues: ['sudoku_tired_of_ads', 'tired_of_ads', 'launch_2026'],
     flightStart: '2026-09-02',
     flightEnd: '2026-09-09',
     status: 'closed',
-    notes: 'Shares its `campaign` value with flight 2 below — separated by date range, not by tag. See the module header.',
+    notes:
+      'Served 2026-09-02..09-09 ET, $124.47 total. Every row tagged with this uc family belongs here, including the post-09-10 trickle — see flightStart\'s doc comment (no upper bound on attribution). Excludes sudoku_tired_of_ads_test (1 row, 2026-09-02) — QA traffic, not real ad performance.',
   },
   {
     id: '24234347705',
-    label: 'Display flight 2 — "tired of ads" (second arm)',
-    ucValues: ['sudoku_tired_of_ads', 'sudoku_tired_of_ads_play', 'tired_of_ads', 'launch_2026'],
-    flightStart: '2026-09-10',
-    flightEnd: '2026-09-22', // last observed row as of the 2026-09-25 D1 snapshot
+    label: 'Play-direct — "tired of ads"',
+    ucValues: ['sudoku_tired_of_ads_play'],
+    flightStart: '2026-09-09',
+    flightEnd: '2026-09-13', // stopped early; configured to run through 2026-09-16
     status: 'closed',
-    notes: 'Shares its `campaign` value with flight 1 above — separated by date range, not by tag. Low confidence: see the module header.',
+    measurement: 'spend-only',
+    measurabilityNote: 'Play-direct: not measurable in beacon (no Install Referrer reader)',
+    notes:
+      'Ads go straight to the Play Store listing (uc sudoku_tired_of_ads_play, read from the Play Install Referrer) — no D1 beacon rows exist for this uc today. $75.17 total spend, stopped early at 09-13 (configured end was 09-16). The uc stays in ucValues so rows count automatically the moment bestsudoku-app ships a Play Install Referrer reader — no code change needed here when that happens.',
   },
   {
     id: '24279250691',
     label: 'US+CA web retest',
     ucValues: ['sudoku_funnel_retest'],
-    flightStart: '2026-09-26',
-    flightEnd: '2026-10-02', // 7 serving days
+    flightStart: null, // pending — set to a real ET date once the flight's actual start is confirmed
+    flightEnd: '2026-10-02', // 7 serving days once flightStart is set
     status: 'upcoming',
     servingHoursEt: [12, 23],
     notes:
-      '9 rows already tagged sudoku_funnel_retest on 2026-09-23 (pre-launch QA, 3 days before this window) fall outside flightStart..flightEnd and so are excluded — widen flightStart to include them if that QA traffic should count.',
+      '9 rows already tagged sudoku_funnel_retest on 2026-09-23 are pre-launch validation/QA, not real traffic — excluded because flightStart is still null/pending. Set flightStart to a real ET date once the flight actually begins; until then nothing is attributed to this campaign at all.',
   },
 ]
 
@@ -131,6 +163,7 @@ export function isDirectionalDay(campaign: CampaignFlight, etDate: string): bool
  * ("daily arrivals … aligned by flight day 1..N so the flights overlay"). null if
  * `etDate` falls outside the flight window. */
 export function flightDayIndex(campaign: CampaignFlight, etDate: string): number | null {
+  if (campaign.flightStart == null) return null // pending flight — no anchor to count days from
   if (etDate < campaign.flightStart || etDate > campaign.flightEnd) return null
   const start = Date.parse(campaign.flightStart + 'T00:00:00Z')
   const d = Date.parse(etDate + 'T00:00:00Z')
@@ -160,13 +193,21 @@ export function etFlightRangeMs(flightStart: string, flightEnd: string): [number
 }
 
 // ── Attribution (the ONE function deciding row membership — see module header) ─────────
+/** No upper bound, ever — a row tagged with this campaign's uc belongs to it however late it
+ * arrives (see flightStart's doc comment on CampaignFlight). `flightStart === null` means
+ * "not yet confirmed": attribute nothing (`1 = 0`) rather than guess, so pre-launch QA rows
+ * (e.g. the retest campaign's 9 rows) never count until a real date is set. */
 export function campaignAttributionClause(campaign: CampaignFlight): { sql: string; binds: unknown[] } {
-  const [startMs, endMs] = etFlightRangeMs(campaign.flightStart, campaign.flightEnd)
   const ucPlaceholders = campaign.ucValues.map(() => '?').join(', ')
-  return {
-    sql: `campaign IN (${ucPlaceholders}) AND ts >= ? AND ts < ?`,
-    binds: [...campaign.ucValues, startMs, endMs],
+  const w = [`campaign IN (${ucPlaceholders})`]
+  const binds: unknown[] = [...campaign.ucValues]
+  if (campaign.flightStart === null) {
+    w.push('1 = 0')
+  } else {
+    w.push('ts >= ?')
+    binds.push(etMidnightUtcMs(campaign.flightStart))
   }
+  return { sql: w.join(' AND '), binds }
 }
 
 // ── Exclusions (row filters — single-row predicates, never a cross-row join) ───────────
@@ -220,8 +261,21 @@ export const FUNNEL_STEP_LABELS: Record<FunnelStepKey, string> = {
 // Steps with NO matching path anywhere in production D1 (confirmed 2026-09-25 by scanning
 // every distinct path on site='bestsudoku-web', tagged or not — see task report). Always
 // "not instrumented" everywhere, never a real 0 — classifyFunnelPath below can never
-// return 'completed' for this reason (nothing to match).
+// return 'completed' for this reason (nothing to match), UNLESS the deferred proxy hook
+// right below is turned on.
 export const FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED = new Set<FunnelStepKey>(['completed'])
+
+// CONFIG HOOK (deferred, disabled by default): '/game' has no distinct "you finished a game"
+// event of its own, but '/signin-eligible/*' fires only after a game plays out — a possible
+// SIGNED-OUT proxy for "completed" (not a real completion signal, just correlated timing).
+// null = disabled (current state) — 'completed' stays globally not-instrumented and
+// classifyFunnelPath never returns it. To turn this on once product signs off: set this to
+// '/signin-eligible', remove 'completed' from FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED above,
+// and change COMPLETED_PROXY_LABEL's caller sites to show it as a labeled proxy, not a
+// real "Completed a game" count.
+export const COMPLETED_PROXY_PATH_PREFIX: string | null = null
+/** Shown instead of "Completed a game" wherever COMPLETED_PROXY_PATH_PREFIX is enabled. */
+export const COMPLETED_PROXY_LABEL = 'signed-out completions (proxy, deferred)'
 
 /** "played a game" — found live: `/game` is the dominant tagged path (1111/1194 rows for
  * flight 1/2's uc) — the ad appears to land users directly into gameplay rather than a
@@ -239,6 +293,7 @@ const AUTH_SUCCESS_PREFIX = '/auth/success/'
  * 'platformList', a bucket this function never maps to a step. */
 export function classifyFunnelPath(path: string): FunnelStepKey | null {
   if (path === PLAYED_PATH) return 'played'
+  if (COMPLETED_PROXY_PATH_PREFIX && path.startsWith(COMPLETED_PROXY_PATH_PREFIX)) return 'completed' // disabled by default — see the hook above
   if (path.startsWith(AUTH_SUCCESS_PREFIX)) return 'authSuccess'
   const ev = classifyPopupPath(path)
   if (!ev) return null
@@ -309,10 +364,35 @@ export function screenWidthBucket(w: number): ScreenBucket {
   return 'large (>1024)'
 }
 
-// ── Spend (empty until filled in — cost-per-arrival/auth-success show "—" until then) ──
+// ── Spend (Google Ads API via the ads session, 2026-09-25) — cost-per-arrival/auth-success
+// show "—" for any campaign still null here ─────────────────────────────────────────────
+/** Daily spend in USD by ET calendar date, as reported by Google Ads — kept for audit/
+ * provenance alongside the totals below. Android launch's daily lines sum to $124.46, one
+ * cent under Google Ads' own reported total of $124.47 (their own rounding, not ours);
+ * Play-direct's daily lines sum exactly to $75.17. */
+export const CAMPAIGN_DAILY_SPEND: Record<string, Record<string, number>> = {
+  '24215315197': {
+    '2026-09-02': 22.92,
+    '2026-09-03': 15.52,
+    '2026-09-04': 15.66,
+    '2026-09-05': 14.32,
+    '2026-09-06': 13.97,
+    '2026-09-07': 13.56,
+    '2026-09-08': 13.9,
+    '2026-09-09': 14.61,
+  },
+  '24234347705': {
+    '2026-09-09': 21.56,
+    '2026-09-10': 13.52,
+    '2026-09-11': 12.66,
+    '2026-09-12': 14.07,
+    '2026-09-13': 13.36,
+  },
+  '24279250691': {}, // not flighted yet — no spend
+}
 export const CAMPAIGN_SPEND: Record<string, number | null> = {
-  '24215315197': null,
-  '24234347705': null,
+  '24215315197': 124.47, // Google Ads' own reported total — see CAMPAIGN_DAILY_SPEND's doc comment
+  '24234347705': 75.17,
   '24279250691': null,
 }
 /** spend / count, or null (never NaN/Infinity/a fabricated cost) when spend is unset or
