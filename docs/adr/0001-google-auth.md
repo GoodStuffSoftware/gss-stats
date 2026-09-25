@@ -98,6 +98,13 @@ Other rules:
   local server without it (or without Google config) returns 503.
 - **Host guard.** Kept, so there is one origin for the cookie and the redirect URI,
   and `*.pages.dev` and preview URLs stay unreachable.
+- **Response headers.** Every response that passed the gate gets `Cache-Control:
+  private, no-store` (replacing Pages' `public, max-age=0, must-revalidate`), so no
+  shared cache can hold the app shell and Back after sign-out can't show it from the
+  browser's cache. It also gets `Content-Security-Policy: frame-ancestors 'none'` and
+  `X-Frame-Options: DENY`. The gate's own HTML pages are unframeable too. Sign-out adds
+  `Clear-Site-Data: "cache"`. Hashed assets are re-downloaded on each visit as a
+  result; for one owner that cost is accepted.
 
 ### Why the ID token signature is not checked
 

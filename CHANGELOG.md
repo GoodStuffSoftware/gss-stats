@@ -100,6 +100,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **A bad session-length setting locks sign-in instead of being guessed.** A session
   length that isn't a number of hours from 1 to 720 now shows "Sign-in not configured"
   rather than silently falling back or issuing sessions that end at once.
+- **Back after Sign out no longer shows the dashboard.** Dashboard pages, files and data
+  are never kept by the browser or a shared cache, Sign out also clears the site's
+  cache, and no other site can embed the dashboard in a frame.
 - **The local sign-in bypass is harder to switch on by accident.** It now needs the exact
   value `1` (not `true`, `0` or anything else), still only on the developer's own machine.
 

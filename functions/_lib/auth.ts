@@ -549,7 +549,15 @@ export async function handleCallback(
 
 export function handleLogout(request: Request): Response {
   const url = new URL(request.url)
-  return redirect(SIGNED_OUT_PATH, [clearCookie(url, sessionCookieName(url))], 303)
+  return signOutRedirect([clearCookie(url, sessionCookieName(url))])
+}
+
+/** 303 to the signed-out page. Clear-Site-Data also drops this origin's HTTP cache, so
+ *  dashboard pages or data a browser kept from before can't be shown again. */
+function signOutRedirect(cookies: string[]): Response {
+  const res = redirect(SIGNED_OUT_PATH, cookies, 303)
+  res.headers.set('Clear-Site-Data', '"cache"')
+  return res
 }
 
 // ── Gate ─────────────────────────────────────────────────────────────────────────
@@ -601,10 +609,9 @@ export async function authGate(
   if (devEmail) {
     if (path === ME_PATH) return jsonResponse(200, { email: devEmail, devBypass: true })
     if (path === LOGIN_PATH || path === CALLBACK_PATH) return redirect(safeNext(url.searchParams.get('next')))
-    if (path === LOGOUT_PATH) return redirect(SIGNED_OUT_PATH, [], 303)
+    if (path === LOGOUT_PATH) return signOutRedirect([])
     if (path === SIGNED_OUT_PATH) return signedOutPage()
-    const res = await next()
-    const out = new Response(res.body, res)
+    const out = gatedResponse(await next())
     out.headers.set('X-Auth-Dev-Bypass', '1')
     return out
   }
@@ -643,7 +650,7 @@ export async function authGate(
     return new Response('Not found', { status: 404, headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' } })
   }
 
-  if (session) return next()
+  if (session) return gatedResponse(await next())
 
   // No valid session. APIs get a machine-readable 401; page loads go to sign-in.
   if (isApiPath(path) || !(method === 'GET' || method === 'HEAD')) return unauthenticated(request, url)
@@ -652,6 +659,27 @@ export async function authGate(
 }
 
 // ── Responses ────────────────────────────────────────────────────────────────────
+
+/** Anti-framing (clickjacking): no site, same-site siblings included, may frame us.
+ *  The CSP is appended, not set, so a policy the asset already carries is kept (the
+ *  browser enforces every CSP header it gets). */
+function denyFraming(headers: Headers): void {
+  headers.append('Content-Security-Policy', "frame-ancestors 'none'")
+  headers.set('X-Frame-Options', 'DENY')
+}
+
+/** Every response that passed the gate (the app shell, its static assets, /api/*):
+ *  - `private, no-store` replaces Pages' `public, max-age=0, must-revalidate`, so no
+ *    shared cache (e.g. a zone "Cache Everything" rule) can keep it and the browser
+ *    doesn't store it, which also keeps the page out of the back/forward cache: Back
+ *    after Sign out can't bring the dashboard back;
+ *  - it can't be framed. */
+function gatedResponse(res: Response): Response {
+  const out = new Response(res.body, res)
+  out.headers.set('Cache-Control', 'private, no-store')
+  denyFraming(out.headers)
+  return out
+}
 
 function redirect(location: string, cookies: string[] = [], status = 302): Response {
   const headers = new Headers({ Location: location, 'Cache-Control': 'no-store' })
@@ -717,6 +745,7 @@ function htmlPage(
 <body><main><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p>${button}</main></body>
 </html>`
   const headers = new Headers({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
+  denyFraming(headers)
   for (const c of cookies) headers.append('Set-Cookie', c)
   return new Response(body, { status, headers })
 }
