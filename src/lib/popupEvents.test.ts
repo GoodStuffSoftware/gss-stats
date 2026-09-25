@@ -11,6 +11,11 @@ import {
   detailedBreakdown,
   computePopupRate,
   POPUP_RATE_SPECS,
+  isPreActivation,
+  measuredCoarseCount,
+  measuredDetailedCount,
+  measuredDetailedBreakdown,
+  TRACKING_ACTIVATION_DATE_ET,
   type HourPathCount,
 } from './popupEvents'
 
@@ -149,6 +154,10 @@ describe('aggregatePopupRows', () => {
     { hourStartMs: Date.parse('2026-01-15T13:00:00Z'), path: '/not-a-popup-path', count: 100 }, // must be ignored
   ]
   const agg = aggregatePopupRows(rows)
+  // Everything in `rows` is on/before 2026-01-16 — treat it all as MEASURED for the
+  // coarse/detailed/rate assertions below by activating tracking on the fixture's first
+  // day. Activation gating itself gets its own describe block further down.
+  const measuredAgg = aggregatePopupRows(rows, '2026-01-15')
 
   it('sums shown across reasons into the coarse family+kind total', () => {
     expect(coarseCount(agg, 'signin-prompt', 'shown')).toBe(3 + 2 + 5) // includes the next-day row
@@ -175,25 +184,92 @@ describe('aggregatePopupRows', () => {
     expect(coarseCount(agg, 'signin-eligible', 'unearned')).toBe(0)
   })
 
-  it('computePopupRate: tap rate, eligibility rate, and null before any outcome data', () => {
+  it('computePopupRate: tap rate, eligibility rate, and null before any outcome data (once measured)', () => {
     const tap = POPUP_RATE_SPECS.find((s) => s.key === 'signin-prompt:tap')!
-    expect(computePopupRate(agg, tap)).toBeCloseTo(4 / 10, 10) // 4 accepts / 10 shown
+    expect(computePopupRate(measuredAgg, tap)).toBeCloseTo(4 / 10, 10) // 4 accepts / 10 shown
 
     const elig = POPUP_RATE_SPECS.find((s) => s.key === 'signin-eligible:rate')!
-    expect(computePopupRate(agg, elig)).toBeCloseTo(9 / 10, 10) // earned / (earned+capped+unearned)
+    expect(computePopupRate(measuredAgg, elig)).toBeCloseTo(9 / 10, 10) // earned / (earned+capped+unearned)
 
     // No /popup-outcome rows in this fixture, but 'shown' (the denominator) is non-zero,
     // so this is a real 0 — "we showed it and got zero sign-ins" — not "no data yet".
     const outcome = POPUP_RATE_SPECS.find((s) => s.key === 'signin-prompt:outcome:signed-in')!
-    expect(computePopupRate(agg, outcome)).toBe(0)
+    expect(computePopupRate(measuredAgg, outcome)).toBe(0)
 
     // A popup with NO shown events at all (zero denominator) is the "no data yet" case.
     const noShown = POPUP_RATE_SPECS.find((s) => s.key === 'install:tap')!
-    expect(computePopupRate(agg, noShown)).toBeNull()
+    expect(computePopupRate(measuredAgg, noShown)).toBeNull()
   })
 
   it('an empty aggregate renders every rate as null, never 0/NaN', () => {
     const empty = aggregatePopupRows([])
     for (const spec of POPUP_RATE_SPECS) expect(computePopupRate(empty, spec)).toBeNull()
+  })
+})
+
+describe('activation gating (Part A hard requirement: "before activation is unmeasured, not zero")', () => {
+  it('isPreActivation: null activation date means EVERYTHING is pre-activation', () => {
+    expect(isPreActivation('2026-01-15', null)).toBe(true)
+    expect(isPreActivation('2099-12-31', null)).toBe(true) // even a date far in the future
+  })
+  it('isPreActivation: compares ET calendar dates lexically against a real activation date', () => {
+    expect(isPreActivation('2026-01-14', '2026-01-15')).toBe(true)
+    expect(isPreActivation('2026-01-15', '2026-01-15')).toBe(false) // activation day itself counts as measured
+    expect(isPreActivation('2026-01-16', '2026-01-15')).toBe(false)
+  })
+
+  // The known landmine this whole feature exists to defuse: one player's uncapped-
+  // placement-bug reproduction on 2026-09-19 produced 22 /signin-prompt/dismiss, 21
+  // /signin-prompt/placement (shown), 1 /signin-prompt/streak (shown), and 0 accepts —
+  // a real, non-null tap rate of 0/22 = 0% if it were ever allowed to compute.
+  const bugRows: HourPathCount[] = [
+    { hourStartMs: Date.parse('2026-09-19T14:00:00Z'), path: '/signin-prompt/placement', count: 21 },
+    { hourStartMs: Date.parse('2026-09-19T14:00:00Z'), path: '/signin-prompt/streak', count: 1 },
+    { hourStartMs: Date.parse('2026-09-19T15:00:00Z'), path: '/signin-prompt/dismiss', count: 22 },
+  ]
+  const tap = POPUP_RATE_SPECS.find((s) => s.key === 'signin-prompt:tap')!
+
+  it('a real pre-activation denominator never produces a real 0%/NaN rate — "—" (null) instead', () => {
+    const agg = aggregatePopupRows(bugRows, null) // activation not shipped yet
+    expect(measuredCoarseCount(agg, 'signin-prompt', 'shown')).toBe(0) // gated out, not 22
+    expect(computePopupRate(agg, tap)).toBeNull() // NOT 0
+  })
+  it('the same rows, once activation is set to a date AFTER them, still gate out', () => {
+    const agg = aggregatePopupRows(bugRows, '2026-09-20')
+    expect(computePopupRate(agg, tap)).toBeNull()
+  })
+  it('the same rows, once activation is set to their own ET day (or earlier), are measured', () => {
+    const agg = aggregatePopupRows(bugRows, '2026-09-19')
+    expect(computePopupRate(agg, tap)).toBe(0) // now a REAL 0% — measured, and genuinely zero accepts
+  })
+  it('using the module default (TRACKING_ACTIVATION_DATE_ET) with no override is still null today', () => {
+    expect(TRACKING_ACTIVATION_DATE_ET).toBeNull()
+    const agg = aggregatePopupRows(bugRows)
+    expect(computePopupRate(agg, tap)).toBeNull()
+  })
+
+  it('measuredDetailedCount / measuredDetailedBreakdown mirror the same gating for per-reason counts', () => {
+    const rows: HourPathCount[] = [
+      { hourStartMs: Date.parse('2026-01-10T13:00:00Z'), path: '/upsell/shown/cadence', count: 5 }, // pre
+      { hourStartMs: Date.parse('2026-01-20T13:00:00Z'), path: '/upsell/shown/cadence', count: 3 }, // post
+      { hourStartMs: Date.parse('2026-01-20T13:00:00Z'), path: '/upsell/shown/limit', count: 2 }, // post
+    ]
+    const agg = aggregatePopupRows(rows, '2026-01-15')
+    expect(measuredDetailedCount(agg, 'upsell', 'shown', 'cadence')).toBe(3) // not 8
+    expect(new Map(measuredDetailedBreakdown(agg, 'upsell', 'shown'))).toEqual(
+      new Map([['cadence', 3], ['limit', 2]]),
+    )
+    // The unfiltered twin still sees everything — 'measured' is additive, not a replacement.
+    expect(detailedCount(agg, 'upsell', 'shown', 'cadence')).toBe(8)
+  })
+
+  it('day-boundary split: only the ET day on/after activation is measured, the earlier one is not', () => {
+    const rows: HourPathCount[] = [
+      { hourStartMs: Date.parse('2026-01-15T20:00:00Z'), path: '/signin-prompt/accept', count: 4 }, // pre
+      { hourStartMs: Date.parse('2026-01-16T20:00:00Z'), path: '/signin-prompt/accept', count: 6 }, // post
+    ]
+    const agg = aggregatePopupRows(rows, '2026-01-16')
+    expect(coarseCount(agg, 'signin-prompt', 'accept')).toBe(10) // full history unaffected
+    expect(measuredCoarseCount(agg, 'signin-prompt', 'accept')).toBe(6) // only the measured day
   })
 })

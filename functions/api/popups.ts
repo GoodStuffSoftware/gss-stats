@@ -26,12 +26,13 @@
 import {
   POPUPS,
   POPUP_RATE_SPECS,
+  TRACKING_ACTIVATION_DATE_ET,
   aggregatePopupRows,
-  coarseCount,
   computePopupRate,
   dayCounts,
-  detailedBreakdown,
-  detailedCount,
+  measuredCoarseCount,
+  measuredDetailedBreakdown,
+  measuredDetailedCount,
   popupIncludeClause,
   type HourPathCount,
 } from '../../src/lib/popupEvents'
@@ -111,6 +112,11 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     count: Number(r.c) || 0,
   }))
   const agg = aggregatePopupRows(rows)
+  // While TRACKING_ACTIVATION_DATE_ET is null, tracking hasn't shipped yet: every count
+  // dimension below (except 'date', which plots full history with a marker) reads the
+  // activation-gated `measured*` helpers, so they're empty and the frontend shows "not
+  // yet active" instead of a real-looking (but pre-release) chart — see
+  // lib/popupEvents.ts TRACKING_ACTIVATION_DATE_ET / isPreActivation.
   const meta = {
     since,
     until,
@@ -118,6 +124,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     dimensions: [dim],
     metric: 'pageviews' as const,
     dataset: 'popup' as const,
+    activationDate: TRACKING_ACTIVATION_DATE_ET,
+    activationPending: TRACKING_ACTIVATION_DATE_ET === null,
   }
 
   // ── Rate mode: one computed number (or null for a zero denominator) ───────────────
@@ -127,19 +135,20 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     return json({ rows: [], totals: { pageviews: 0, visits: 0 }, rate, meta })
   }
 
-  // ── Sign-in eligibility breakdown (earned / capped / unearned) ────────────────────
+  // ── Sign-in eligibility breakdown (earned / capped / unearned) — activation-gated ──
   if (dim === 'eligible') {
     const rowsOut: Row[] = ['earned', 'capped', 'unearned'].map((k) => {
-      const c = coarseCount(agg, 'signin-eligible', k)
+      const c = measuredCoarseCount(agg, 'signin-eligible', k)
       return { key: { eligible: k }, pageviews: c, visits: c }
     })
     return json({ rows: rowsOut, totals: countedTotals(rowsOut), meta })
   }
 
-  // ── Install's real-outcome counts (pwa-installed / standalone-detected / play-detected) ──
+  // ── Install's real-outcome counts (pwa-installed / standalone-detected / play-detected)
+  // — activation-gated ────────────────────────────────────────────────────────────────
   if (dim === 'installOutcome') {
     const rowsOut: Row[] = ['pwa-installed', 'standalone-detected', 'play-detected'].map((k) => {
-      const c = detailedCount(agg, 'install', 'outcome', k)
+      const c = measuredDetailedCount(agg, 'install', 'outcome', k)
       return { key: { installOutcome: k }, pageviews: c, visits: c }
     })
     return json({ rows: rowsOut, totals: countedTotals(rowsOut), meta })
@@ -148,26 +157,29 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // Everything else needs a known popup family.
   if (!popup) return json({ rows: [], totals: { pageviews: 0, visits: 0 }, meta })
 
+  // 'kind' (shown/accept/dismiss) is the summary count widget for a popup — activation-gated.
   if (dim === 'kind') {
     const rowsOut: Row[] = ['shown', 'accept', 'dismiss'].map((k) => {
-      const c = coarseCount(agg, popup, k)
+      const c = measuredCoarseCount(agg, popup, k)
       return { key: { kind: k }, pageviews: c, visits: c }
     })
     return json({ rows: rowsOut, totals: countedTotals(rowsOut), meta })
   }
 
+  // 'outcome' — activation-gated.
   if (dim === 'outcome') {
     const family = `popup-outcome:${popup}`
     const rowsOut: Row[] = ['signed-in', 'installed', 'returned'].map((o) => {
-      const c = coarseCount(agg, family, o)
+      const c = measuredCoarseCount(agg, family, o)
       return { key: { outcome: o }, pageviews: c, visits: c }
     })
     return json({ rows: rowsOut, totals: countedTotals(rowsOut), meta })
   }
 
+  // 'reason' — activation-gated.
   if (dim === 'reason') {
     const k = kind || 'shown'
-    const rowsOut: Row[] = detailedBreakdown(agg, popup, k)
+    const rowsOut: Row[] = measuredDetailedBreakdown(agg, popup, k)
       .map(([reason, c]) => ({ key: { reason }, pageviews: c, visits: c }))
       .sort((a, b) => b.pageviews - a.pageviews)
       .slice(0, limit)
@@ -175,6 +187,10 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   }
 
   // dim === 'date' — US-Eastern-bucketed trend for `popup` + `kind` (default 'shown').
+  // INTENTIONALLY stays full-history (dayCounts, not activation-gated): the trend chart
+  // plots every day and marks/de-emphasizes the pre-activation portion itself (see
+  // lib/charts.ts activationMarkerIndex), so blanking it here would just hide the
+  // "before" half of the very picture that marker draws.
   const k = kind || 'shown'
   const rowsOut: Row[] = dayCounts(agg, popup, k)
     .map(([date, c]) => ({ key: { date }, pageviews: c, visits: c }))

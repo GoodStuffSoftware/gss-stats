@@ -251,6 +251,19 @@ const isEmpty = computed(
     props.widget.type !== 'rate', // a rate tile has no rows even when it has a real (or null) rate — never "No data"
 )
 
+// Pop-up count widgets (everything except the 'rate' tile and the 'date' trend, which
+// plot full history themselves — see functions/api/popups.ts) go "excluded" rather than
+// showing a real-looking chart of zero/pre-release counts while tracking hasn't shipped
+// yet — see lib/popupEvents.ts TRACKING_ACTIVATION_DATE_ET, hard requirement "before
+// activation is unmeasured, not zero."
+const popupNotYetActive = computed(
+  () =>
+    props.widget.dataset === 'popup' &&
+    props.widget.type !== 'rate' &&
+    props.widget.dimension !== 'date' &&
+    !!data.value?.meta?.activationPending,
+)
+
 function fmt(n: number) {
   return n.toLocaleString('en-US')
 }
@@ -316,6 +329,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
     <div class="card-body">
       <div v-if="loading" class="state mono">Loading…</div>
       <div v-else-if="error" class="state error mono">{{ error }}</div>
+      <div v-else-if="popupNotYetActive" class="state mono">Tracking not yet active</div>
       <div v-else-if="isEmpty" class="state mono">No data in range</div>
 
       <!-- Stat tile -->

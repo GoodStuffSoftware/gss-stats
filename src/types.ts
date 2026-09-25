@@ -141,6 +141,10 @@ export interface StatsResponse {
     until: string
     dimensions: string[]
     metric: Metric
+    // Pop-up dataset only — see lib/popupEvents.ts TRACKING_ACTIVATION_DATE_ET. `null`
+    // means tracking hasn't shipped yet, in which case activationPending is always true.
+    activationDate?: string | null
+    activationPending?: boolean
   }
   // Pop-up dataset only (widget.type === 'rate'): the single computed rate, or null for
   // a zero denominator (no accepts/outcomes yet) — see lib/popupEvents.ts computeRate.

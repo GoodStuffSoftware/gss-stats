@@ -7,6 +7,13 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Pop-up tracking has a configurable activation date, so pre-release data can't read as
+  a baseline.** Every pop-up rate (tap, outcome, eligibility) and count widget — other than
+  the shown/day trend, which now marks the activation date with a "tracking starts" line and
+  mutes the days before it — is gated to that date; a real pre-release denominator (like the
+  22-event uncapped-placement-bug reproduction on 2026-09-19) can only ever show "—", never a
+  misleading 0%. While the date is unset the "Best Sudoku pop-ups" page carries a note:
+  "Tracking not yet active — numbers before release are not a baseline."
 - **Best Sudoku pop-up tracking page.** A new "Best Sudoku pop-ups" dashboard page (next to
   the launch page) shows shown / accepted / dismissed counts, tap rates, outcome rates, the
   sign-in eligibility rate, and install's real-outcome counts for every pop-up (sign-in

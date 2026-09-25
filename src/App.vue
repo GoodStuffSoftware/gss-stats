@@ -7,6 +7,7 @@ import { loadConfig, saveConfig } from './api'
 import { loadSites, sitesTree, tokenLabel } from './sitesStore'
 import { isSiteDim, semanticKey } from './lib/drill'
 import { sessionExpired, reauth } from './session'
+import { TRACKING_ACTIVATION_DATE_ET } from './lib/popupEvents'
 import PageBar from './components/PageBar.vue'
 import FilterBar from './components/FilterBar.vue'
 import Dashboard from './components/Dashboard.vue'
@@ -21,6 +22,14 @@ const saveState = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
 // The page currently being viewed/edited.
 const activePage = computed<DashboardPage>(() => config.pages.find((p) => p.id === config.activePageId) ?? config.pages[0])
 const rangeText = computed(() => rangeLabel(activePage.value.filters.since, activePage.value.filters.until))
+
+// Part A hard requirement #4: while pop-up tracking hasn't shipped yet (activation date
+// still null — see lib/popupEvents.ts), the pop-ups page carries this note so nothing on
+// it reads as a real baseline. Goes away by itself the day TRACKING_ACTIVATION_DATE_ET
+// is set to v1.90.0's release date.
+const showPopupActivationNote = computed(
+  () => TRACKING_ACTIVATION_DATE_ET === null && isBestSudokuPopupsPage(activePage.value),
+)
 
 onMounted(async () => {
   dark.value = localStorage.getItem('gss-stats-dark') === '1'
@@ -344,6 +353,10 @@ function toggleDark() {
       @toggle-sync="onToggleSync"
     />
 
+    <div v-if="showPopupActivationNote" class="activation-note">
+      Tracking not yet active — numbers before release are not a baseline.
+    </div>
+
     <main class="grid-area">
       <Dashboard
         v-model:widgets="activePage.widgets"
@@ -518,6 +531,15 @@ function toggleDark() {
   background: #fff;
   color: rgb(var(--amber));
   border: none;
+}
+.activation-note {
+  padding: 9px 14px;
+  border-radius: 10px;
+  background: rgb(var(--sunken));
+  border: 1px solid rgb(var(--line-2));
+  color: rgb(var(--ink-2));
+  font-size: 12.5px;
+  text-align: center;
 }
 .topbar {
   display: flex;

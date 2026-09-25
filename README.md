@@ -66,7 +66,11 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   upsell and install pop-ups: shown/accepted/dismissed counts, tap rates, outcome rates,
   the sign-in eligibility rate and install's real-outcome counts, bucketed by US-Eastern day.
   See [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) for the one place every pop-up path
-  pattern is defined.
+  pattern is defined. A configurable **tracking activation date** (`TRACKING_ACTIVATION_DATE_ET`,
+  null until v1.90.0 ships) keeps pre-release data from reading as a baseline: every rate
+  and every pop-up count widget (other than the trend line, which plots full history with
+  a "tracking starts" marker) is gated to that date, so a real pre-release denominator
+  (e.g. a bug reproduction) can only ever render "—", never a misleading 0%.
 - **Locked down** — Cloudflare Access gates the dashboard; an expired session shows a
   one-tap re-sign-in banner instead of a wall of errors.
 - Light / dark theme matching the Good Stuff Software brand.
