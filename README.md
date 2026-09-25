@@ -236,8 +236,8 @@ dashboard is never without a gate.
      `ALLOWED_EMAILS` entry that isn't a plain ASCII address (an accented or look-alike
      character, for example). Fix it and redeploy.
    - If you see **502 "Sign-in failed"** after choosing your account, the code exchange
-     with Google failed. **Keep Access on** and don't go on to step 5. Look in the Pages
-     Functions logs for a line that starts `auth: token exchange …`: run
+     with Google failed. **Keep Access on** and don't go on to step 6 (removing Access).
+     Look in the Pages Functions logs for a line that starts `auth: token exchange …`: run
      `npx wrangler pages deployment tail --project-name gss-stats` (it follows the latest
      production deployment) and sign in again, or open the deployment's real-time logs
      under Workers & Pages → `gss-stats` in the dashboard.
