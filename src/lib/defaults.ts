@@ -194,11 +194,22 @@ export function isBestSudokuPopupsPage(p: DashboardPage): boolean {
   return p.id === 'bsk-popups' || p.name.trim().toLowerCase() === 'best sudoku pop-ups'
 }
 
+// "Best Sudoku campaigns" — a bespoke page (no generic Widget grid; see
+// components/CampaignComparePage.vue, which App.vue renders instead of <Dashboard> for it).
+// `widgets` stays empty; it's carried only so PageBar can list/switch/rename/delete it like
+// any other page.
+export function defaultCampaignComparePage(): DashboardPage {
+  return { id: 'bsk-campaigns', name: 'Best Sudoku campaigns', isDefault: false, filters: defaultFilters(), widgets: [] }
+}
+export function isCampaignComparePage(p: DashboardPage): boolean {
+  return p.id === 'bsk-campaigns' || p.name.trim().toLowerCase() === 'best sudoku campaigns'
+}
+
 export function defaultConfig(): DashboardConfig {
   return {
-    version: 4,
+    version: 5,
     activePageId: 'default',
-    pages: [defaultPage(), defaultBeaconPage(), defaultBestSudokuLaunchPage(), defaultBestSudokuPopupsPage()],
+    pages: [defaultPage(), defaultBeaconPage(), defaultBestSudokuLaunchPage(), defaultBestSudokuPopupsPage(), defaultCampaignComparePage()],
   }
 }
 
@@ -256,6 +267,7 @@ export function defaultWidgetsForPage(p: DashboardPage): Widget[] {
   if (p.id === 'default') return defaultWidgets()
   if (p.id === 'beacon') return defaultBeaconWidgets()
   if (p.id === 'bsk-popups') return defaultBestSudokuPopupsWidgets()
+  if (isCampaignComparePage(p)) return [] // bespoke page, no generic widgets — see CampaignComparePage.vue
   const geoCount = p.widgets.filter((w) => w.dataset === 'geo').length
   return geoCount > p.widgets.length / 2 ? defaultBeaconWidgets() : defaultWidgets()
 }
@@ -340,6 +352,15 @@ export function normalizeConfig(raw: any): DashboardConfig {
         p.filters.siteSel = [...BEST_SUDOKU_SITES]
       }
     }
+    // v5 migration: add the "Best Sudoku campaigns" page ONCE. Also backfills "Best Sudoku
+    // pop-ups" for anyone who saved a config before it existed — the v4 bump above never
+    // itself migrated existing saved configs to add that page, so an already-live dashboard
+    // would otherwise never pick it up either. Both gated on version, so a later delete of
+    // either page won't keep bringing it back.
+    if ((Number(raw.version) || 0) < 5) {
+      if (!pages.some((p: DashboardPage) => isBestSudokuPopupsPage(p))) pages.push(defaultBestSudokuPopupsPage())
+      if (!pages.some((p: DashboardPage) => isCampaignComparePage(p))) pages.push(defaultCampaignComparePage())
+    }
     // Self-heal (every load, not version-gated): the canonical pages — Overview, Beacon, and
     // the Best Sudoku launch page — must NEVER carry a persistent page-level drill. Drilling
     // always spawns a NEW page, so a drill sitting on one of these is always erroneous (e.g.
@@ -350,7 +371,7 @@ export function normalizeConfig(raw: any): DashboardConfig {
       if (canonical && p.filters.drill?.length) p.filters.drill = []
     }
     const activePageId = pages.some((p: DashboardPage) => p.id === raw.activePageId) ? raw.activePageId : pages[0].id
-    return { version: 4, activePageId, pages, syncRange: !!raw.syncRange }
+    return { version: 5, activePageId, pages, syncRange: !!raw.syncRange }
   }
   // v1 — single page; wrap as the default page
   if (raw && typeof raw === 'object' && Array.isArray(raw.widgets)) {

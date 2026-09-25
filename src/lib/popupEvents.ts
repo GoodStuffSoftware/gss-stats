@@ -27,6 +27,9 @@ export const POPUP_EVENT_PREFIXES = [
   '/upsell',
   '/install',
   '/popup-outcome',
+  // On-device, no-ID return beacon (v1.90.0, see lib/campaigns.ts RETURN_BUCKETS): paths
+  // like /return/<uc>/d0, /return/<uc>/d1, /return/<uc>/d2-7, … — an event, not a screen.
+  '/return',
 ] as const
 
 export function isPopupEventPath(path: string): boolean {

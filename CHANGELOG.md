@@ -7,6 +7,16 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **"Best Sudoku campaigns" page** compares the three Google Ads campaigns (two closed
+  display flights sharing a tag, split by date range, plus a new US+CA web retest) side by
+  side: a funnel (arrivals → played → completed → sign-in ask → accept → auth success →
+  install prompt → install, with "not instrumented" instead of a fake 0 for steps that
+  never happened during a flight), arrivals by ET hour of day, arrivals and the funnel by
+  country, daily + cumulative arrivals aligned by flight day so the flights overlay, cost
+  per tagged arrival/auth success (once ad spend is filled in), device mix, and — once the
+  new on-device return beacon starts reporting (v1.90.0) — a return-visit retention curve.
+  Attribution is by the beacon's own campaign tag only, with a single swappable function
+  deciding row membership; known verification/household traffic is excluded server-side.
 - **Pop-up tracking has a configurable activation date, so pre-release data can't read as
   a baseline.** Every pop-up rate (tap, outcome, eligibility) and count widget — other than
   the shown/day trend, which now marks the activation date with a "tracking starts" line and
