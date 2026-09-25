@@ -128,11 +128,12 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     activationPending: TRACKING_ACTIVATION_DATE_ET === null,
   }
 
-  // ── Rate mode: one computed number (or null for a zero denominator) ───────────────
+  // ── Rate mode: one computed number, or "insufficient" for a too-small cohort (MIN_COHORT
+  // — see lib/popupEvents.ts gateRate), or null for a genuine zero denominator ────────────
   if (dim === 'rate') {
     const spec = POPUP_RATE_SPECS.find((s) => s.key === rateKey)
-    const rate = spec ? computePopupRate(agg, spec) : null
-    return json({ rows: [], totals: { pageviews: 0, visits: 0 }, rate, meta })
+    const gated = spec ? computePopupRate(agg, spec) : { value: null, insufficientCohort: false }
+    return json({ rows: [], totals: { pageviews: 0, visits: 0 }, rate: gated.value, insufficientCohort: gated.insufficientCohort, meta })
   }
 
   // ── Sign-in eligibility breakdown (earned / capped / unearned) — activation-gated ──
