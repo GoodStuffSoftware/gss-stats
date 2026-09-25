@@ -167,6 +167,13 @@ The session is a signed cookie, HMAC-SHA256 under `SESSION_SECRET`. It is `HttpO
 The allowlist is checked again on every request, so removing an email locks that
 account out immediately. Rotating `SESSION_SECRET` signs everyone out.
 
+Everything behind the gate (pages, static assets, `/api/*`) is sent with
+`Cache-Control: private, no-store`, `Content-Security-Policy: frame-ancestors 'none'`
+and `X-Frame-Options: DENY`: no shared cache keeps it, the browser doesn't store it (so
+Back after **Sign out** can't bring the dashboard back), and no other site can frame it.
+Sign out also sends `Clear-Site-Data: "cache"`. Sign out only deletes this browser's
+cookie; a copied cookie stays valid until it expires (see the ADR).
+
 ### Settings (Pages project secrets, Production)
 
 | Name | Required | Value |
@@ -263,8 +270,8 @@ look-alikes are refused), fail-closed configuration (including a bad
 `SESSION_TTL_HOURS`), 401 vs. redirect, tampered, expired, future-dated, re-signed and
 wrong-purpose cookies, state, nonce, PKCE and ID-token checks (`email_verified` must be
 boolean `true`, multi-audience tokens need our `azp`, no future `iat`), open-redirect and
-cross-origin guards, sign-out, the dev bypass (exactly `1`, loopback only) and the host
-guard. No test calls Google.
+cross-origin guards, sign-out, the no-cache and anti-framing response headers, the dev
+bypass (exactly `1`, loopback only) and the host guard. No test calls Google.
 
 ## Security / hardening
 

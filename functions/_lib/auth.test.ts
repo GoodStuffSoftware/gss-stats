@@ -659,6 +659,102 @@ describe('sign-out', () => {
   })
 })
 
+describe('response headers: no caching, no framing (review F2 + F9)', () => {
+  /** What Pages' asset server sends for the app shell and hashed assets. */
+  function pagesAsset(body: string, contentType: string, extra: Record<string, string> = {}): () => Promise<Response> {
+    return async () =>
+      new Response(body, {
+        status: 200,
+        headers: { 'Content-Type': contentType, 'Cache-Control': 'public, max-age=0, must-revalidate', ETag: '"e1"', ...extra },
+      })
+  }
+
+  async function gateWith(request: Request, upstream: () => Promise<Response>, env: AuthEnv = ENV) {
+    const next = vi.fn(upstream)
+    const res = await authGate(request, env, next, { now: () => NOW })
+    return { res, next }
+  }
+
+  function expectGatedHeaders(res: Response, label: string) {
+    expect(res.headers.get('Cache-Control'), label).toBe('private, no-store')
+    expect(res.headers.get('Content-Security-Policy'), label).toContain("frame-ancestors 'none'")
+    expect(res.headers.get('X-Frame-Options'), label).toBe('DENY')
+  }
+
+  it('the app shell, a static asset and an API response are private, no-store and unframeable', async () => {
+    const cookie = await sessionCookieFor('owner@example.com')
+    const cases: [Request, () => Promise<Response>, string][] = [
+      [req('/', { cookie }), pagesAsset('<!doctype html>app', 'text/html; charset=utf-8'), 'text/html; charset=utf-8'],
+      [req('/assets/index-abc123.js', { cookie }), pagesAsset('console.log(1)', 'application/javascript'), 'application/javascript'],
+      [
+        req('/api/stats', { method: 'POST', cookie, headers: { Origin: ORIGIN } }),
+        async () => new Response('{"ok":true}', { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } }),
+        'application/json',
+      ],
+    ]
+    for (const [request, upstream, contentType] of cases) {
+      const { res, next } = await gateWith(request, upstream)
+      const label = new URL(request.url).pathname
+      expect(next, label).toHaveBeenCalledOnce()
+      expect(res.status, label).toBe(200)
+      expectGatedHeaders(res, label)
+      // Everything else about the upstream response is passed through untouched.
+      expect(res.headers.get('Content-Type'), label).toBe(contentType)
+      expect((await res.text()).length, label).toBeGreaterThan(0)
+    }
+    const shell = await gateWith(req('/', { cookie }), pagesAsset('<!doctype html>app', 'text/html'))
+    expect(shell.res.headers.get('ETag')).toBe('"e1"')
+    expect(await shell.res.text()).toBe('<!doctype html>app')
+  })
+
+  it("keeps a CSP the asset already has, adding frame-ancestors 'none' alongside it", async () => {
+    const cookie = await sessionCookieFor('owner@example.com')
+    const { res } = await gateWith(
+      req('/', { cookie }),
+      pagesAsset('<html>', 'text/html', { 'Content-Security-Policy': "default-src 'self'" }),
+    )
+    const csp = res.headers.get('Content-Security-Policy')!
+    expect(csp).toContain("default-src 'self'")
+    expect(csp).toContain("frame-ancestors 'none'")
+  })
+
+  it('works on an upstream response with immutable headers (e.g. a redirect)', async () => {
+    const cookie = await sessionCookieFor('owner@example.com')
+    const { res } = await gateWith(req('/index.html', { cookie }), async () => Response.redirect(`${ORIGIN}/`, 308))
+    expect(res.status).toBe(308)
+    expect(res.headers.get('Location')).toBe(`${ORIGIN}/`)
+    expectGatedHeaders(res, 'redirect')
+  })
+
+  it('the dev bypass sends the same headers', async () => {
+    const { res } = await gateWith(req('/', {}, 'http://localhost:8788'), pagesAsset('<html>', 'text/html'), { AUTH_DEV_BYPASS: '1' })
+    expect(res.headers.get('X-Auth-Dev-Bypass')).toBe('1')
+    expectGatedHeaders(res, 'bypass')
+  })
+
+  it('the gate’s own HTML pages (signed out, not allowed, not configured) are unframeable', async () => {
+    const signedOut = (await gate(req('/auth/signed-out'))).res
+    const notAllowed = (await completeLogin({ claims: (n) => goodClaims(n, { email: 'stranger@gmail.com' }) })).res
+    const notConfigured = (await gate(req('/'), {})).res
+    for (const [label, res] of [['signed-out', signedOut], ['403', notAllowed], ['503', notConfigured]] as const) {
+      expect(res.headers.get('Content-Type'), label).toContain('text/html')
+      expect(res.headers.get('Content-Security-Policy'), label).toContain("frame-ancestors 'none'")
+      expect(res.headers.get('X-Frame-Options'), label).toBe('DENY')
+      expect(res.headers.get('Cache-Control'), label).toBe('no-store')
+    }
+  })
+
+  it('sign-out tells the browser to drop its cache for the site (and so does the dev-bypass sign-out)', async () => {
+    const cookie = await sessionCookieFor('owner@example.com')
+    const { res } = await gate(req('/auth/logout', { method: 'POST', cookie, headers: { Origin: ORIGIN } }))
+    expect(res.status).toBe(303)
+    expect(res.headers.get('Clear-Site-Data')).toBe('"cache"')
+    const dev = await gate(req('/auth/logout', { method: 'POST' }, 'http://localhost:8788'), { AUTH_DEV_BYPASS: '1' })
+    expect(dev.res.status).toBe(303)
+    expect(dev.res.headers.get('Clear-Site-Data')).toBe('"cache"')
+  })
+})
+
 describe('cross-origin writes', () => {
   it('refuses a cross-origin PUT even with a valid session (sibling subdomain case)', async () => {
     const cookie = await sessionCookieFor('owner@example.com')
