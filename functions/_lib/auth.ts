@@ -444,6 +444,37 @@ export function validateIdTokenClaims(
   return { ok: true, email: claims.email.toLowerCase(), sub: claims.sub }
 }
 
+export interface TokenRequestParams {
+  code: string
+  clientId: string
+  clientSecret: string
+  redirectUri: string
+  codeVerifier: string
+}
+
+/** The init for the authorization-code exchange POSTed to GOOGLE_TOKEN_ENDPOINT.
+ *  `redirect: 'manual'`: the unsigned-ID-token ruling rests on TLS to THIS endpoint, so
+ *  a redirect must never be followed. With 'manual', a 3xx comes back as a response that
+ *  is not ok, and handleCallback refuses it (502, no session). Not 'error': the Workers
+ *  runtime rejects that value with a TypeError before sending anything, so every sign-in
+ *  would fail. Not omitted either: the default is 'follow'. Node accepts all three, so
+ *  auth.workerd.test.ts builds a Request and fetches from this init inside workerd. */
+export function tokenRequestInit(p: TokenRequestParams): RequestInit {
+  return {
+    method: 'POST',
+    redirect: 'manual',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      code: p.code,
+      client_id: p.clientId,
+      client_secret: p.clientSecret,
+      redirect_uri: p.redirectUri,
+      grant_type: 'authorization_code',
+      code_verifier: p.codeVerifier,
+    }).toString(),
+  }
+}
+
 export async function handleCallback(
   request: Request,
   config: AuthConfig,
@@ -487,21 +518,16 @@ export async function handleCallback(
 
   let idToken: string
   try {
-    const res = await fetchImpl(GOOGLE_TOKEN_ENDPOINT, {
-      method: 'POST',
-      // The unsigned-ID-token ruling rests on TLS to THIS endpoint; never follow a
-      // redirect to anywhere else.
-      redirect: 'error',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        code,
-        client_id: config.clientId,
-        client_secret: config.clientSecret,
-        redirect_uri: callbackUrl(url),
-        grant_type: 'authorization_code',
-        code_verifier: await pkceVerifier(config.sessionSecret, pending.state),
-      }).toString(),
+    const init = tokenRequestInit({
+      code,
+      clientId: config.clientId,
+      clientSecret: config.clientSecret,
+      redirectUri: callbackUrl(url),
+      codeVerifier: await pkceVerifier(config.sessionSecret, pending.state),
     })
+    const res = await fetchImpl(GOOGLE_TOKEN_ENDPOINT, init)
+    // A 3xx lands here too (the request is sent with redirect: 'manual'), so a redirect
+    // away from the token endpoint is refused, never followed.
     if (!res.ok) {
       console.error(`auth: token exchange failed: HTTP ${res.status}`)
       return htmlPage(502, 'Sign-in failed', 'Google rejected the sign-in (token exchange failed).', [clearState], {

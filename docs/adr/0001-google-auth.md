@@ -3,7 +3,8 @@
 - **Status:** Accepted (branch `feat/google-auth`). The rollout is manual; see README "Auth".
 - **Date:** 2026-09-25
 - **Code:** `functions/_middleware.ts` (host guard, then the auth gate),
-  `functions/_lib/auth.ts` (gate and OAuth flow), `functions/_lib/auth.test.ts`
+  `functions/_lib/auth.ts` (gate and OAuth flow), `functions/_lib/auth.test.ts`,
+  `functions/_lib/auth.workerd.test.mjs` with `auth.workerd-harness.ts` (checks run in workerd)
 
 ## Context
 
@@ -119,8 +120,11 @@ come straight from the token endpoint (implicit flow, a token passed in by the c
 etc.), the signature must be verified first. To keep this ruling valid:
 
 - The token endpoint stays a constant in the code, never a setting.
-- The token request is sent with `redirect: 'error'`, so the TLS argument can't
-  silently extend to a redirect target.
+- The token request is sent with `redirect: 'manual'`. A 3xx is not ok, so it is
+  refused (502, no session), and the TLS argument can't silently extend to a redirect
+  target. Not `'error'`: the Workers runtime rejects that value before sending anything,
+  so every sign-in would fail, while Node accepts it. `functions/_lib/auth.workerd.test.mjs`
+  checks the real request settings inside workerd.
 - The unverified decoder is private to the callback and named for the token-endpoint
   response only (`unverifiedClaimsFromTokenEndpoint`).
 

@@ -296,7 +296,12 @@ look-alikes are refused), fail-closed configuration (including a bad
 wrong-purpose cookies, state, nonce, PKCE and ID-token checks (`email_verified` must be
 boolean `true`, multi-audience tokens need our `azp`, no future `iat`), open-redirect and
 cross-origin guards, sign-out, the no-cache and anti-framing response headers, the dev
-bypass (exactly `1`, loopback only) and the host guard. No test calls Google.
+bypass (exactly `1`, loopback only) and the host guard. Node accepts some request
+settings that the Workers runtime rejects, so `functions/_lib/auth.workerd.test.mjs`
+also runs the sign-in inside workerd itself (`workerd test`, with wrangler.toml's
+compatibility date and a mock Google): the exact token-request settings, a full sign-in
+on the runtime's own `fetch`, a refused token-endpoint redirect, and Google refusing the
+exchange. No test calls Google.
 
 ## Security / hardening
 

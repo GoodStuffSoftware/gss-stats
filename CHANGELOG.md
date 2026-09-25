@@ -105,6 +105,9 @@ All notable changes to **gss-stats** are documented here. The format follows
   cache, and no other site can embed the dashboard in a frame.
 - **The local sign-in bypass is harder to switch on by accident.** It now needs the exact
   value `1` (not `true`, `0` or anything else), still only on the developer's own machine.
+- **Sign-in works on Cloudflare's runtime.** Finishing the Google sign-in no longer fails
+  with "Sign-in failed" once deployed, and the tests now also run the sign-in inside that
+  runtime, so a request setting it rejects can't ship again.
 
 ## [0.2.0] — 2026-07-21
 
