@@ -6,6 +6,15 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Flight 1's start date was off by one ET day.** It was derived from UTC-bucketed daily
+  counts; re-derived from ET-bucketed ones (the campaign's real first hit is 2026-09-02
+  ~22:56 ET, already 2026-09-03 in UTC), recovering ~150 tagged hits that fell outside every
+  flight window.
+- **Tagged hits** — every row carrying a campaign tag, as opposed to tagged *arrivals*
+  (first-ever beacon only) — is now shown on the campaign page, labeled separately, next to
+  the arrivals floor caveat.
+
 ### Added
 - **"Best Sudoku overview" page** (first in the page list) answers "how's the release
   going, how's each campaign going, and what's happening right now": today-at-a-glance KPI
@@ -23,6 +32,15 @@ All notable changes to **gss-stats** are documented here. The format follows
   new on-device return beacon starts reporting (v1.90.0) — a return-visit retention curve.
   Attribution is by the beacon's own campaign tag only, with a single swappable function
   deciding row membership; known verification/household traffic is excluded server-side.
+- **Pop-up rates never report from a tiny sample.** Every rate (tap, outcome, eligibility)
+  now needs at least 5 in its denominator — below that it shows "too few to report" instead
+  of a real-looking but noisy percentage (e.g. 1/2 reading as an alarming 50%).
+
+### Fixed
+- **The on-device return beacon (`/return/...`) is now excluded from ordinary pageview/visit
+  totals**, matching every other pop-up event path — it had been left off that exclusion list.
+
+### Added
 - **Pop-up tracking has a configurable activation date, so pre-release data can't read as
   a baseline.** Every pop-up rate (tap, outcome, eligibility) and count widget — other than
   the shown/day trend, which now marks the activation date with a "tracking starts" line and

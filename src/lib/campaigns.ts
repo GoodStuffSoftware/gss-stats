@@ -60,8 +60,8 @@ export interface CampaignFlight {
 //                                                                     start (pre-launch QA)
 //   webview_test                 2 rows  2026-09-21               (unrelated; excluded)
 //   sudoku_tired_of_ads_test     1 row   2026-09-02               (a QA variant of the
-//                                                                    flight-1/2 tag, one
-//                                                                    day before the flight)
+//                                                                    flight-1/2 tag, within
+//                                                                    flight 1's ET window)
 //
 // None of "sudoku_tired_of_ads_play", "tired_of_ads", or "launch_2026" (the brief's
 // expected legacy variants) appear anywhere in production D1 — they're kept in ucValues
@@ -70,19 +70,26 @@ export interface CampaignFlight {
 //
 // FLIGHT 1 vs FLIGHT 2 SPLIT: both closed campaigns use the exact same `campaign` value
 // (sudoku_tired_of_ads) — they can't be separated by uc, so they're split by date range
-// (task brief: "split them by date range and report how"), using daily counts:
-//   09-03..09-09: 312,166,107,161,147,136,121/day  — one clear high-volume week
-//   09-10..09-22: 8,10,4,0,7,1,0,2,2,6,3,0,1/day    — a >10x volume drop, no second burst
-// The split is set at that cliff (09-09 / 09-10). This is a BEST-EFFORT, low-confidence
-// split: there's no visible SECOND burst in the tail that would confirm a genuine second
-// display arm rather than late/residual clicks on flight 1's creative — flag this to the
-// owner before trusting flight 2's numbers as a distinct campaign.
+// (task brief: "split them by date range and report how"), using daily counts BUCKETED BY
+// ET DAY (etDateFromMs — HIGH review finding, 2026-09-25: the first pass used SQLite's
+// date(ts/1000,'unixepoch'), which buckets by UTC day; the real first hit is 2026-09-02
+// ~22:56 ET, which is already 2026-09-03 UTC, so ~150 tagged hits landed one ET day early
+// under UTC bucketing):
+//   09-02..09-09 ET: 150,164,165,108,160,151,132,121/day — one clear high-volume week (8d)
+//   09-10..09-22 ET: 7,10,4,0,7,1,0,2,2,6,3,0,1/day      — a >10x volume drop, no second burst
+// The split is set at that cliff (09-09 / 09-10 ET). INVARIANT (asserted in
+// campaigns.test.ts): flight 1's window (1,151 rows) + flight 2's window (43 rows) sums to
+// exactly 1,194 — the tag family's full row count — so no tagged row for this family falls
+// outside every window. This is still a BEST-EFFORT, low-confidence split: there's no
+// visible SECOND burst in the tail that would confirm a genuine second display arm rather
+// than late/residual clicks on flight 1's creative — flag this to the owner before
+// trusting flight 2's numbers as a distinct campaign.
 export const CAMPAIGNS: CampaignFlight[] = [
   {
     id: '24215315197',
     label: 'Display flight 1 — "tired of ads"',
     ucValues: ['sudoku_tired_of_ads', 'sudoku_tired_of_ads_play', 'tired_of_ads', 'launch_2026', 'sudoku_tired_of_ads_test'],
-    flightStart: '2026-09-03',
+    flightStart: '2026-09-02',
     flightEnd: '2026-09-09',
     status: 'closed',
     notes: 'Shares its `campaign` value with flight 2 below — separated by date range, not by tag. See the module header.',
@@ -331,11 +338,15 @@ const RETURN_BUCKET_SET = new Set<string>(RETURN_BUCKETS)
  * later, UNTAGGED sessions; the `campaign` D1 column is typically empty by then — see the
  * module header's D1-compound-select note and the coordinator's "no-joins" framing: this
  * reads one row's own path, it never correlates across rows). */
+// Review finding (2026-09-25): validate the path-embedded campaign tag's shape, not just
+// "any non-slash characters" — a malformed/adversarial path segment must never flow
+// through as if it were a real uc.
+const RETURN_UC_RE = /^[a-z][a-z0-9_]{0,39}$/
 export function parseReturnPath(path: string): ReturnEvent | null {
   const m = /^\/return\/([^/]+)\/([^/]+)$/.exec(path)
   if (!m) return null
   const [, uc, bucket] = m
-  if (!uc || !RETURN_BUCKET_SET.has(bucket)) return null
+  if (!RETURN_UC_RE.test(uc) || !RETURN_BUCKET_SET.has(bucket)) return null
   return { uc, bucket: bucket as ReturnBucket }
 }
 
