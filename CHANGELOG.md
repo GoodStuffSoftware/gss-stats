@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-09-25
+
 ### Fixed
 - **The overview page's "same time of day" comparisons were off by an hour around DST
   transitions.** `vsYesterday`/`vsAvg7` used to reuse one elapsed-millisecond span computed
