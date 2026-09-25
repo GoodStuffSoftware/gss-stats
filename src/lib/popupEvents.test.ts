@@ -12,6 +12,13 @@ import {
   detailedBreakdown,
   computePopupRate,
   POPUP_RATE_SPECS,
+  POPUP_OUTCOME_TYPES,
+  POPUP_OUTCOME_NAME_TO_FAMILY,
+  POPUPS,
+  UPSELL_REASONS,
+  NO_OUTCOME_TRACKING_NOTE,
+  SIGNIN_ELIGIBLE_CAVEAT,
+  POPUP_PAGE_NOTE,
   isPreActivation,
   measuredCoarseCount,
   measuredDetailedCount,
@@ -53,8 +60,20 @@ describe('classifyPopupPath', () => {
   it('upsell: /<kind>/<reason>, reason required', () => {
     expect(classifyPopupPath('/upsell/shown/cadence')).toEqual({ family: 'upsell', kind: 'shown', extra: 'cadence' })
     expect(classifyPopupPath('/upsell/accept/daily-locked')).toEqual({ family: 'upsell', kind: 'accept', extra: 'daily-locked' })
-    expect(classifyPopupPath('/upsell/dismiss/settings-upgrade')).toEqual({ family: 'upsell', kind: 'dismiss', extra: 'settings-upgrade' })
+    expect(classifyPopupPath('/upsell/shown/upgrade-tap')).toEqual({ family: 'upsell', kind: 'shown', extra: 'upgrade-tap' })
     expect(classifyPopupPath('/upsell/shown')).toBeNull() // no reason
+  })
+
+  it('upsell: FINAL LIST reasons are exactly cadence/limit/daily-locked/upgrade-tap — settings-upgrade removed', () => {
+    expect(UPSELL_REASONS).toEqual(['cadence', 'limit', 'daily-locked', 'upgrade-tap'])
+    expect(UPSELL_REASONS).not.toContain('settings-upgrade')
+  })
+
+  it('upsell: a removed/unknown reason is counted under "other", never dropped and never passed through raw', () => {
+    // settings-upgrade was removed from UPSELL_REASONS — a beacon still carrying it must
+    // fall into 'other', not vanish or become its own ad-hoc breakdown bucket.
+    expect(classifyPopupPath('/upsell/dismiss/settings-upgrade')).toEqual({ family: 'upsell', kind: 'dismiss', extra: 'other' })
+    expect(classifyPopupPath('/upsell/shown/some-future-reason')).toEqual({ family: 'upsell', kind: 'shown', extra: 'other' })
   })
 
   it('install: shown (by platform), accept-like, dismiss-like, real outcomes, platform list', () => {
@@ -79,9 +98,26 @@ describe('classifyPopupPath', () => {
 
   it('popup-outcome: dynamic <popup> name, fixed outcome vocabulary', () => {
     expect(classifyPopupPath('/popup-outcome/signin-prompt/signed-in')).toEqual({ family: 'popup-outcome:signin-prompt', kind: 'signed-in' })
+    expect(classifyPopupPath('/popup-outcome/promo-first50/installed')).toEqual({ family: 'popup-outcome:promo-first50', kind: 'installed' })
     expect(classifyPopupPath('/popup-outcome/upsell/installed')).toEqual({ family: 'popup-outcome:upsell', kind: 'installed' })
-    expect(classifyPopupPath('/popup-outcome/install/returned')).toEqual({ family: 'popup-outcome:install', kind: 'returned' })
-    expect(classifyPopupPath('/popup-outcome/install/bogus')).toBeNull()
+    expect(classifyPopupPath('/popup-outcome/install-prompt/returned')).toEqual({ family: 'popup-outcome:install', kind: 'returned' })
+    expect(classifyPopupPath('/popup-outcome/install-prompt/bogus')).toBeNull()
+  })
+
+  it('popup-outcome: still-playing is a valid outcome type (FINAL LIST, new)', () => {
+    expect(classifyPopupPath('/popup-outcome/signin-prompt/still-playing')).toEqual({ family: 'popup-outcome:signin-prompt', kind: 'still-playing' })
+    expect(classifyPopupPath('/popup-outcome/install-prompt/still-playing')).toEqual({ family: 'popup-outcome:install', kind: 'still-playing' })
+    expect(POPUP_OUTCOME_TYPES).toContain('still-playing')
+  })
+
+  it('popup-outcome: "install-prompt" maps to the "install" family — the bare "install" name is NOT in the wire vocabulary', () => {
+    expect(POPUP_OUTCOME_NAME_TO_FAMILY['install-prompt']).toBe('install')
+    expect(classifyPopupPath('/popup-outcome/install/returned')).toBeNull() // not a real beacon name
+  })
+
+  it('popup-outcome: <popup> is exactly {signin-prompt, promo-first50, upsell, install-prompt} — anything else does not classify', () => {
+    expect(classifyPopupPath('/popup-outcome/first50-congrats/signed-in')).toBeNull() // no outcome tracking for this popup
+    expect(classifyPopupPath('/popup-outcome/unknown-popup/signed-in')).toBeNull()
   })
 
   it('rejects paths outside every popup family, and ordinary page paths', () => {
@@ -89,6 +125,43 @@ describe('classifyPopupPath', () => {
     expect(classifyPopupPath('/play')).toBeNull()
     expect(classifyPopupPath('')).toBeNull()
     expect(classifyPopupPath('/signin-promptx/shown')).toBeNull() // must not prefix-match a look-alike path
+  })
+})
+
+describe('first50-congrats: no outcome tracking (FINAL LIST)', () => {
+  it('is flagged noOutcomeTracking in the registry', () => {
+    const def = POPUPS.find((p) => p.id === 'first50-congrats')!
+    expect(def.noOutcomeTracking).toBe(true)
+  })
+  it('every other popup is NOT flagged noOutcomeTracking', () => {
+    for (const p of POPUPS.filter((p) => p.id !== 'first50-congrats')) expect(p.noOutcomeTracking).toBeFalsy()
+  })
+  it('POPUP_RATE_SPECS has no outcome-rate spec for first50-congrats — no row and no "not instrumented" placeholder to imply one is coming', () => {
+    const outcomeSpecs = POPUP_RATE_SPECS.filter((s) => s.kind === 'outcome' && s.popup === 'first50-congrats')
+    expect(outcomeSpecs).toEqual([])
+  })
+  it('still has a tap-rate spec — shown/ack/close (accept/dismiss) are real responses, unlike outcomes', () => {
+    expect(POPUP_RATE_SPECS.find((s) => s.key === 'first50-congrats:tap')).toBeDefined()
+  })
+  it('NO_OUTCOME_TRACKING_NOTE says exactly that, once', () => {
+    expect(NO_OUTCOME_TRACKING_NOTE).toMatch(/no outcome tracking/i)
+  })
+  it('every OTHER popup still gets one outcome-rate spec per POPUP_OUTCOME_TYPES, including the new still-playing', () => {
+    for (const p of POPUPS.filter((p) => p.id !== 'first50-congrats')) {
+      for (const o of POPUP_OUTCOME_TYPES) {
+        expect(POPUP_RATE_SPECS.find((s) => s.key === `${p.id}:outcome:${o}`)).toBeDefined()
+      }
+    }
+  })
+})
+
+describe('signin-eligible caveat / pop-ups page note (FINAL LIST)', () => {
+  it('SIGNIN_ELIGIBLE_CAVEAT names the 30-minute deferral and warns off hour-of-day', () => {
+    expect(SIGNIN_ELIGIBLE_CAVEAT).toMatch(/30 min/i)
+    expect(SIGNIN_ELIGIBLE_CAVEAT).toMatch(/hour-of-day/i)
+  })
+  it('POPUP_PAGE_NOTE is the exact wording the task brief specifies', () => {
+    expect(POPUP_PAGE_NOTE).toBe('Nothing is measured within 30 minutes after a sign-in, so rates are slightly conservative.')
   })
 })
 
@@ -321,5 +394,34 @@ describe('activation gating (Part A hard requirement: "before activation is unme
     const agg = aggregatePopupRows(rows, '2026-01-16')
     expect(coarseCount(agg, 'signin-prompt', 'accept')).toBe(10) // full history unaffected
     expect(measuredCoarseCount(agg, 'signin-prompt', 'accept')).toBe(6) // only the measured day
+  })
+})
+
+describe('end-to-end: install-prompt outcome beacon + still-playing rate (FINAL LIST, MIN_COHORT-gated)', () => {
+  const rows: HourPathCount[] = [
+    { hourStartMs: Date.parse('2026-01-15T13:00:00Z'), path: '/install/prompt/android', count: 8 }, // shown
+    { hourStartMs: Date.parse('2026-01-15T13:00:00Z'), path: '/popup-outcome/install-prompt/still-playing', count: 3 },
+    { hourStartMs: Date.parse('2026-01-15T13:00:00Z'), path: '/popup-outcome/install-prompt/returned', count: 1 },
+  ]
+  const agg = aggregatePopupRows(rows, '2026-01-15')
+
+  it('a real /popup-outcome/install-prompt/* beacon lands on the "install" family via the name mapping', () => {
+    expect(measuredCoarseCount(agg, 'popup-outcome:install', 'still-playing')).toBe(3)
+    expect(measuredCoarseCount(agg, 'popup-outcome:install', 'returned')).toBe(1)
+  })
+
+  it('still-playing rate = outcome / shown (denominator = shown, which clears MIN_COHORT here)', () => {
+    const stillPlaying = POPUP_RATE_SPECS.find((s) => s.key === 'install:outcome:still-playing')!
+    expect(computePopupRate(agg, stillPlaying)).toEqual({ value: 3 / 8, insufficientCohort: false }) // 8 shown >= MIN_COHORT
+  })
+
+  it('MIN_COHORT gates on the denominator (shown), not the outcome numerator: a tiny shown count reports "insufficient" even with a real outcome count', () => {
+    const tinyRows: HourPathCount[] = [
+      { hourStartMs: Date.parse('2026-01-15T13:00:00Z'), path: '/install/prompt/android', count: 2 }, // shown < MIN_COHORT
+      { hourStartMs: Date.parse('2026-01-15T13:00:00Z'), path: '/popup-outcome/install-prompt/still-playing', count: 2 },
+    ]
+    const tinyAgg = aggregatePopupRows(tinyRows, '2026-01-15')
+    const stillPlaying = POPUP_RATE_SPECS.find((s) => s.key === 'install:outcome:still-playing')!
+    expect(computePopupRate(tinyAgg, stillPlaying)).toEqual({ value: null, insufficientCohort: true })
   })
 })
