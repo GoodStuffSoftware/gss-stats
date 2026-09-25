@@ -786,6 +786,37 @@ describe('response headers: no caching, no framing (review F2 + F9)', () => {
     expect(dev.res.status).toBe(303)
     expect(dev.res.headers.get('Clear-Site-Data')).toBe('"cache"')
   })
+
+  it('Clear-Site-Data is sent only by the sign-out redirect, never by any other response', async () => {
+    // Clearing the cache on, say, every 401 would cost the owner a full reload each time.
+    const cookie = await sessionCookieFor('owner@example.com')
+    const LOCAL = 'http://localhost:8788'
+    const BYPASS: AuthEnv = { AUTH_DEV_BYPASS: '1' }
+    const cases: [string, number, Response][] = [
+      ['API with no session (401 JSON)', 401, (await gate(req('/api/sites'))).res],
+      ['page with no session (302 to sign-in)', 302, (await gate(req('/'))).res],
+      ['page with a stale cookie (302 to sign-in)', 302, (await gate(req('/', { cookie: '__Host-gss_session=junk.junk' }))).res],
+      ['gated app shell', 200, (await gateWith(req('/', { cookie }), pagesAsset('<html>', 'text/html'))).res],
+      ['gated API', 200, (await gate(req('/api/sites', { cookie }))).res],
+      ['/auth/me signed in', 200, (await gate(req('/auth/me', { cookie }))).res],
+      ['/auth/me signed out', 401, (await gate(req('/auth/me'))).res],
+      ['login (302 to Google)', 302, (await gate(req('/auth/google/login'))).res],
+      ['callback success (302 with a session)', 302, (await completeLogin()).res],
+      ['callback, account not allowed', 403, (await completeLogin({ claims: (n) => goodClaims(n, { email: 'x@gmail.com' }) })).res],
+      ['callback with no state cookie', 400, (await gate(req('/auth/google/callback?state=s&code=c'))).res],
+      ['signed-out page', 200, (await gate(req('/auth/signed-out'))).res],
+      ['cross-origin sign-out (403)', 403, (await gate(req('/auth/logout', { method: 'POST', cookie, headers: { Origin: 'https://evil.example' } }))).res],
+      ['GET /auth/logout (405)', 405, (await gate(req('/auth/logout', { cookie }))).res],
+      ['not configured (503)', 503, (await gate(req('/'), {})).res],
+      ['dev bypass: gated page', 200, (await gate(req('/', {}, LOCAL), BYPASS)).res],
+      ['dev bypass: /auth/me', 200, (await gate(req('/auth/me', {}, LOCAL), BYPASS)).res],
+      ['dev bypass: GET /auth/logout (405)', 405, (await gate(req('/auth/logout', {}, LOCAL), BYPASS)).res],
+    ]
+    for (const [label, status, res] of cases) {
+      expect(res.status, label).toBe(status)
+      expect(res.headers.get('Clear-Site-Data'), label).toBeNull()
+    }
+  })
 })
 
 describe('cross-origin writes', () => {
@@ -892,6 +923,18 @@ describe('local dev bypass', () => {
       expect(me.res.status).toBe(503)
     },
   )
+
+  it('the dev-bypass sign-out is POST-only, as in production (GET is 405, cache untouched)', async () => {
+    const get = await gate(req('/auth/logout', {}, LOCAL), { AUTH_DEV_BYPASS: '1' })
+    expect(get.res.status).toBe(405)
+    expect(get.res.headers.get('Allow')).toBe('POST')
+    expect(get.res.headers.get('Clear-Site-Data')).toBeNull()
+    const head = await gate(req('/auth/logout', { method: 'HEAD' }, LOCAL), { AUTH_DEV_BYPASS: '1' })
+    expect(head.res.status).toBe(405)
+    const post = await gate(req('/auth/logout', { method: 'POST' }, LOCAL), { AUTH_DEV_BYPASS: '1' })
+    expect(post.res.status).toBe(303)
+    expect(post.res.headers.get('Location')).toBe('/auth/signed-out')
+  })
 
   it('IPv6 loopback ([::1]) is not treated as loopback: no bypass, no plain-http', async () => {
     const { res, next } = await gate(req('/api/sites', {}, 'http://[::1]:8788'), { AUTH_DEV_BYPASS: '1' })
