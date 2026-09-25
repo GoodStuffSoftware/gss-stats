@@ -10,10 +10,11 @@ export type ChartType =
   | 'map'
   | 'stat'
   | 'table'
+  | 'rate' // a single computed percentage (pop-up tap/outcome/eligibility rate) — see lib/popupEvents.ts
 
 export type Metric = 'pageviews' | 'visits'
 
-export type Dataset = 'rum' | 'geo'
+export type Dataset = 'rum' | 'geo' | 'popup'
 
 export type SiteKey = 'goodstuff.software' | 'goodstuffsoftware.com' | 'bestsudoku.app' | 'all'
 
@@ -42,9 +43,16 @@ export interface Widget {
   i: string // grid item id (mirrors id; required by grid-layout-plus)
   title: string
   type: ChartType
-  dataset?: Dataset // 'rum' (default) or 'geo' (beacon region/city)
-  dimension: string // primary group-by ('' for a plain total/stat)
+  dataset?: Dataset // 'rum' (default), 'geo' (beacon region/city), or 'popup' (pop-up funnels)
+  dimension: string // primary group-by ('' for a plain total/stat); for dataset 'popup' + type
+  // 'rate', this is instead a lib/popupEvents.ts POPUP_RATE_SPECS `key` (e.g. 'signin-prompt:tap')
   breakdown?: string // optional secondary dimension (stacked / grouped)
+  // dataset 'popup' only: which pop-up funnel (lib/popupEvents.ts POPUPS id, e.g.
+  // 'signin-prompt') a 'kind'/'reason'/'date'/'outcome' dimension chart is scoped to.
+  popup?: string
+  // dataset 'popup' only: which funnel stage ('shown'/'accept'/'dismiss') a 'reason' or
+  // 'date' dimension chart breaks down / trends. Defaults to 'shown' when unset.
+  popupKind?: string
   // Nested doughnut only: further outer-ring dimensions beyond `breakdown`. The full ring
   // list, innermost → outermost, is [dimension, breakdown, ...rings] (see lib/rings.ts) — so
   // an existing 2-ring chart (no `rings`) is unaffected. Order matters: it's the nesting
@@ -134,4 +142,7 @@ export interface StatsResponse {
     dimensions: string[]
     metric: Metric
   }
+  // Pop-up dataset only (widget.type === 'rate'): the single computed rate, or null for
+  // a zero denominator (no accepts/outcomes yet) — see lib/popupEvents.ts computeRate.
+  rate?: number | null
 }

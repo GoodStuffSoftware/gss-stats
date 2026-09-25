@@ -344,7 +344,7 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
   const m = widget.metric
   const dim = widget.dimension
 
-  if (widget.type === 'stat' || widget.type === 'table' || widget.type === 'map') return null
+  if (widget.type === 'stat' || widget.type === 'table' || widget.type === 'map' || widget.type === 'rate') return null
 
   // ── Stacked bar: primary dimension × breakdown ──────────────────────────────
   if (widget.type === 'stackedBar' && widget.breakdown) {

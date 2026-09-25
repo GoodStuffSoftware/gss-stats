@@ -20,6 +20,30 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters): Promis
   // real sites; dev/preview hosts are never in the list, so they never count.
   const { hosts, tags } = resolveSelection(filters.siteSel)
 
+  // Pop-up funnel dataset → /api/popups (same D1 `hits` table as the beacon, but
+  // classified as sign-in/upsell/install events rather than page views).
+  if (widget.dataset === 'popup') {
+    const res = await fetch('/api/popups', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        dimension: widget.type === 'rate' ? 'rate' : widget.dimension || 'kind',
+        rateKey: widget.type === 'rate' ? widget.dimension : undefined,
+        popup: widget.popup,
+        kind: widget.popupKind,
+        since: filters.since,
+        until: filters.until,
+        limit: widget.limit ?? 50,
+        sites: tags,
+      }),
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(`popups ${res.status}: ${text.slice(0, 200)}`)
+    }
+    return res.json()
+  }
+
   // Geo beacon dataset → /api/geo (D1-backed, already bot-free).
   if (widget.dataset === 'geo') {
     // The full nested-doughnut ring list (dimension, breakdown, then any further

@@ -12,6 +12,8 @@
 // `breakdown` for the grouped query below. Older 2-dim callers can still send just
 // { dimension, breakdown } and get the same result via a fallback.
 
+import { popupExcludeClause } from '../../src/lib/popupEvents'
+
 interface Env {
   gss_geo: D1Database
 }
@@ -140,6 +142,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   if (dim === 'points' || body.dimension === 'points') {
     const w: string[] = ['ts >= ?', 'ts < ?', "lat <> ''"]
     const b: any[] = [sinceMs, untilMs]
+    popupExcludeClause(w, b) // events, not screen views — never count toward pageviews/visits
     siteClause(w, b)
     drillClause(w, b)
     excludeOwnClause(w, b)
@@ -191,6 +194,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     const cols = ringDims.map((d, i) => `${d} AS k${i}`)
     const w: string[] = ['ts >= ?', 'ts < ?', ...ringDims.map((d) => `${d} <> ''`)]
     const b: any[] = [sinceMs, untilMs]
+    popupExcludeClause(w, b) // events, not screen views — never count toward pageviews/visits
     siteClause(w, b)
     drillClause(w, b)
     excludeOwnClause(w, b)
@@ -236,6 +240,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       : `CASE WHEN ${dim} = '' THEN '${emptyLabel}' ELSE ${dim} END`
   const where = ['ts >= ?', 'ts < ?']
   const binds: any[] = [sinceMs, untilMs]
+  popupExcludeClause(where, binds) // events, not screen views — never count toward pageviews/visits
   siteClause(where, binds)
   drillClause(where, binds)
   excludeOwnClause(where, binds)

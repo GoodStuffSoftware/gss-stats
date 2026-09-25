@@ -140,7 +140,7 @@ async function load() {
   // RUM charts filter to a real-host allow-list built from /api/sites; fetching before
   // it loads would momentarily count dev/preview traffic. Wait for the tree. (Geo has
   // no dev hosts, so it needn't wait.)
-  if (props.widget.dataset !== 'geo' && !sitesLoaded.value) {
+  if (props.widget.dataset !== 'geo' && props.widget.dataset !== 'popup' && !sitesLoaded.value) {
     loading.value = true
     return
   }
@@ -168,6 +168,8 @@ const dataKey = computed(() =>
     s: props.widget.site,
     h: props.widget.host,
     e: props.widget.excludeSelfReferrals,
+    pu: props.widget.popup,
+    pk: props.widget.popupKind,
     f: effectiveFilters.value,
   }),
 )
@@ -224,6 +226,11 @@ const statOther = computed(() =>
 )
 const statOtherLabel = computed(() => (props.widget.metric === 'visits' ? 'pageviews' : 'visits'))
 
+// Pop-up rate tile (widget.type === 'rate'): null (no denominator yet) renders as "—",
+// never NaN/Infinity — see lib/popupEvents.ts computeRate.
+const rateValue = computed<number | null>(() => data.value?.rate ?? null)
+const rateDisplay = computed(() => (rateValue.value == null ? '—' : `${(rateValue.value * 100).toFixed(1)}%`))
+
 const tableRows = computed(() =>
   !data.value
     ? []
@@ -235,7 +242,13 @@ const tableRows = computed(() =>
 const tableMax = computed(() => Math.max(1, ...tableRows.value.map((r) => r.value)))
 
 const isEmpty = computed(
-  () => !loading.value && !error.value && data.value && data.value.rows.length === 0 && props.widget.type !== 'map',
+  () =>
+    !loading.value &&
+    !error.value &&
+    data.value &&
+    data.value.rows.length === 0 &&
+    props.widget.type !== 'map' &&
+    props.widget.type !== 'rate', // a rate tile has no rows even when it has a real (or null) rate — never "No data"
 )
 
 function fmt(n: number) {
@@ -310,6 +323,12 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
         <div class="stat-num">{{ fmt(statValue) }}</div>
         <div class="stat-label overline">{{ widget.metric }}</div>
         <div class="stat-sub">{{ fmt(statOther) }} {{ statOtherLabel }}</div>
+      </div>
+
+      <!-- Pop-up rate tile: "—" for a zero denominator, never 0%/NaN -->
+      <div v-else-if="widget.type === 'rate'" class="stat">
+        <div class="stat-num">{{ rateDisplay }}</div>
+        <div class="stat-label overline">rate</div>
       </div>
 
       <!-- Table -->

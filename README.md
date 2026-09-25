@@ -19,6 +19,9 @@ npm install
 npm run preview     # build + wrangler pages dev (Functions + KV + D1 simulated) on :8788
 # or
 npm run dev         # Vite only (UI iteration; /api/* not served)
+
+npm test            # vitest — pure-logic unit tests (lib/popupEvents.ts's day bucketing, rate math, …)
+npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vue — no vue-tsc yet)
 ```
 
 `.dev.vars` is gitignored. See [`.dev.vars.example`](.dev.vars.example).
@@ -59,6 +62,11 @@ npm run dev         # Vite only (UI iteration; /api/* not served)
   exact dates.
 - **Geo beacon dataset** — region / city / ISP / new-vs-returning and a visitor map,
   from the beacon (RUM geography is country-only).
+- **Pop-up tracking** — a dedicated Best Sudoku page for the sign-in prompt, first-50 promo,
+  upsell and install pop-ups: shown/accepted/dismissed counts, tap rates, outcome rates,
+  the sign-in eligibility rate and install's real-outcome counts, bucketed by US-Eastern day.
+  See [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) for the one place every pop-up path
+  pattern is defined.
 - **Locked down** — Cloudflare Access gates the dashboard; an expired session shows a
   one-tap re-sign-in banner instead of a wall of errors.
 - Light / dark theme matching the Good Stuff Software brand.
@@ -73,6 +81,7 @@ Cloudflare Pages Functions  (functions/api/*.ts)
    │  - hold CF_ANALYTICS_TOKEN (secret) — never sent to the browser
    │  - /api/stats  → RUM GraphQL (server-side), requestHost allow-list
    │  - /api/geo    → reads the beacon's D1 (bot-free sub-country geo)
+   │  - /api/popups → pop-up funnel counts/rates from the same D1 (sign-in, upsell, install, …)
    │  - /api/sites  → auto-builds the merged site list (RUM + beacon, aliases folded)
    │  - /api/config → dashboard layout in KV
    ▼
@@ -91,6 +100,12 @@ Cloudflare GraphQL Analytics API  ·  D1 (gss-geo)  ·  KV (STATS_CONFIG)
 RUM whitelisted dimensions (server-side): `requestHost`, `requestPath`, `deviceType`,
 `countryName`, `refererHost`, `userAgentBrowser`, `userAgentOS`, `date`. **RUM
 geography is country-only** — sub-country region/city comes from the beacon.
+
+**Pop-up event beacons never count as page views.** Paths under `/signin-prompt`,
+`/signin-eligible`, `/promo-first50`, `/first50-congrats`, `/upsell`, `/install` and
+`/popup-outcome` are pop-up interaction events, not screens — `/api/geo` and `/api/sites`
+exclude them from every pageview/visit total and the top-pages breakdown (see
+[`src/lib/popupEvents.ts`](src/lib/popupEvents.ts)); `/api/popups` is where they're counted.
 
 **"Hide my own visits"** excludes the owner's browser+OS *combination* server-side
 (De Morgan `OR: [browser_neq, os_neq]`, so e.g. Chrome/Windows isn't dropped). RUM
