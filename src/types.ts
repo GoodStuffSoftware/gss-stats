@@ -10,10 +10,11 @@ export type ChartType =
   | 'map'
   | 'stat'
   | 'table'
+  | 'rate' // a single computed percentage (pop-up tap/outcome/eligibility rate) — see lib/popupEvents.ts
 
 export type Metric = 'pageviews' | 'visits'
 
-export type Dataset = 'rum' | 'geo'
+export type Dataset = 'rum' | 'geo' | 'popup'
 
 export type SiteKey = 'goodstuff.software' | 'goodstuffsoftware.com' | 'bestsudoku.app' | 'all'
 
@@ -42,9 +43,16 @@ export interface Widget {
   i: string // grid item id (mirrors id; required by grid-layout-plus)
   title: string
   type: ChartType
-  dataset?: Dataset // 'rum' (default) or 'geo' (beacon region/city)
-  dimension: string // primary group-by ('' for a plain total/stat)
+  dataset?: Dataset // 'rum' (default), 'geo' (beacon region/city), or 'popup' (pop-up funnels)
+  dimension: string // primary group-by ('' for a plain total/stat); for dataset 'popup' + type
+  // 'rate', this is instead a lib/popupEvents.ts POPUP_RATE_SPECS `key` (e.g. 'signin-prompt:tap')
   breakdown?: string // optional secondary dimension (stacked / grouped)
+  // dataset 'popup' only: which pop-up funnel (lib/popupEvents.ts POPUPS id, e.g.
+  // 'signin-prompt') a 'kind'/'reason'/'date'/'outcome' dimension chart is scoped to.
+  popup?: string
+  // dataset 'popup' only: which funnel stage ('shown'/'accept'/'dismiss') a 'reason' or
+  // 'date' dimension chart breaks down / trends. Defaults to 'shown' when unset.
+  popupKind?: string
   // Nested doughnut only: further outer-ring dimensions beyond `breakdown`. The full ring
   // list, innermost → outermost, is [dimension, breakdown, ...rings] (see lib/rings.ts) — so
   // an existing 2-ring chart (no `rings`) is unaffected. Order matters: it's the nesting
@@ -133,5 +141,153 @@ export interface StatsResponse {
     until: string
     dimensions: string[]
     metric: Metric
+    // Pop-up dataset only — see lib/popupEvents.ts TRACKING_ACTIVATION_DATE_ET. `null`
+    // means tracking hasn't shipped yet, in which case activationPending is always true.
+    activationDate?: string | null
+    activationPending?: boolean
   }
+  // Pop-up dataset only (widget.type === 'rate'): the single computed rate, or null for
+  // a zero denominator (no accepts/outcomes yet) — see lib/popupEvents.ts computeRate.
+  rate?: number | null
+  // true when `rate` is null because the denominator was nonzero but under MIN_COHORT
+  // (see lib/popupEvents.ts gateRate) — render "too few to report", not "—".
+  insufficientCohort?: boolean
+}
+
+// ── "Best Sudoku campaigns" (Part B) — a dedicated response shape (not the generic
+// Widget/StatsResponse model above): see functions/api/campaigns.ts + lib/campaigns.ts. ──
+export interface CampaignFunnelCounts {
+  arrivals: number
+  played: number
+  completed: number
+  ask: number
+  accept: number
+  authSuccess: number
+  installPrompt: number
+  install: number
+}
+export interface CampaignCompareResponse {
+  campaign: {
+    id: string
+    label: string
+    status: string
+    flightStart: string | null
+    flightEnd: string
+    ucValues: string[]
+    notes: string
+    measurement: 'spend-only' | null
+    measurabilityNote: string | null
+  }
+  funnel: {
+    counts: CampaignFunnelCounts
+    rates: Partial<Record<keyof CampaignFunnelCounts, number | null>>
+    // Steps this FLIGHT can't show a rate for — its path never appeared anywhere in D1
+    // during the flight window (or, for 'completed', anywhere at all) — see
+    // lib/campaigns.ts FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED.
+    notInstrumented: (keyof CampaignFunnelCounts)[]
+    // Show wherever `counts.arrivals` is displayed — see lib/campaigns.ts ARRIVALS_CAVEAT.
+    arrivalsCaveat: string
+  }
+  // EVERY row carrying this campaign's tag (the tag rides each beacon for its 30-min TTL) —
+  // NOT the same as arrivals (`funnel.counts.arrivals`, visitor='new' only). Label it
+  // "tagged hits" if shown at all — see the DEFINITION FIX comment in
+  // functions/api/campaigns.ts / lib/campaigns.ts.
+  taggedHits: number
+  funnelByCountry: Record<'US' | 'CA' | 'other', CampaignFunnelCounts>
+  hourOfDayEt: number[] // length 24, index = ET hour, value = arrivals
+  daily: { date: string; day: number; arrivals: number }[] // sorted by date; `day` = flightDayIndex
+  deviceMix: {
+    os: Record<string, number>
+    browser: Record<string, number>
+    screen: Record<string, number> // bucketed — see lib/campaigns.ts screenWidthBucket
+  }
+  returnVisits: {
+    counts: Record<string, number>
+    rates: Record<string, number | null>
+    notInstrumented: boolean
+    sharedWithCampaignId: string | null
+  }
+  costPerArrival: number | null
+  costPerAuthSuccess: number | null
+  spend: number | null
+  meta: { generatedAt: string }
+}
+
+// ── "Best Sudoku overview" (Part C) — see functions/api/overview.ts + lib/overview.ts. ──
+export interface OverviewDelta {
+  delta: number
+  deltaPct: number | null
+}
+export interface OverviewKpiTile {
+  key: string
+  label: string
+  today: number | null
+  vsYesterday?: OverviewDelta | null
+  vsAvg7?: OverviewDelta | null
+  notYetTracking?: boolean
+  noCampaignFlighting?: boolean
+  campaignId?: string
+  isRate?: boolean
+  // Rate tiles only — the rate's own denominator, so the UI can tell "too few to report"
+  // (MIN_COHORT) apart from plain "—" (no data at all) for a null `today`.
+  denominator?: number
+}
+export interface OverviewDailyPoint {
+  date: string
+  pageviews: number
+  taggedArrivals: number
+  authSuccess: number
+  install: number
+}
+export interface OverviewCampaignFlightMeta {
+  id: string
+  label: string
+  flightStart: string | null
+  flightEnd: string
+  status: string
+}
+export interface OverviewScorecardRow {
+  id: string
+  label: string
+  status: string
+  flightStart: string | null
+  flightEnd: string
+  flightDays: number | null // null while flightStart is unconfirmed — see lib/campaigns.ts CAMPAIGNS
+  flightingToday: boolean
+  taggedArrivals: number
+  funnelRates: Partial<Record<keyof CampaignFunnelCounts, number | null>>
+  funnelCounts: CampaignFunnelCounts // pairs with funnelRates — see OverviewKpiTile.denominator
+  authSuccess: number
+  install: number
+  returnRateD2to7: number | null
+  returnD0: number // pairs with returnRateD2to7
+  costPerArrival: number | null
+}
+export interface OverviewReleaseWindowSummary {
+  pageviews: number
+  taggedArrivals: number
+  authSuccess: number
+  install: number
+}
+export interface OverviewReleasePanel {
+  release: { version: string; dateEt: string; note: string }
+  days: number
+  before: OverviewReleaseWindowSummary
+  after: OverviewReleaseWindowSummary
+  note: string
+}
+export interface OverviewResponse {
+  generatedAt: string
+  todayEt: string
+  kpis: OverviewKpiTile[]
+  timeline: {
+    daily: OverviewDailyPoint[]
+    campaignFlights: OverviewCampaignFlightMeta[]
+    releaseMarkers: { version: string; dateEt: string; note: string }[]
+    trackingActivationDate: string | null
+    since: string
+    until: string
+  }
+  scorecard: OverviewScorecardRow[]
+  releasePanel: OverviewReleasePanel | null
 }

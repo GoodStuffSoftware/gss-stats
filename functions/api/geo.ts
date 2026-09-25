@@ -12,6 +12,9 @@
 // `breakdown` for the grouped query below. Older 2-dim callers can still send just
 // { dimension, breakdown } and get the same result via a fallback.
 
+import { popupExcludeClause } from '../../src/lib/popupEvents'
+import { excludeOwnClause as sharedExcludeOwnClause, selfReferralClause as sharedSelfReferralClause } from '../../src/lib/ownExclusion'
+
 interface Env {
   gss_geo: D1Database
 }
@@ -21,21 +24,6 @@ const GEO_DIMS = new Set([
   'referrer', 'refpath', 'path', 'site', 'device', 'browser', 'os', 'lang', 'visitor', 'date',
   'campaign', 'source', 'medium', // utm campaign tags
 ])
-
-// Hosts that count as "us" for excludeSelfReferrals — same list functions/api/stats.ts (RUM)
-// uses for its OWN_HOSTS, so the two datasets agree on what a self-referral is.
-const OWN_HOSTS = [
-  'goodstuff.software',
-  'www.goodstuff.software',
-  'starrupture.goodstuff.software',
-  'simpletile.goodstuff.software',
-  'stats.goodstuff.software',
-  'goodstuffsoftware.com',
-  'www.goodstuffsoftware.com',
-  'bestsudoku.app',
-  'www.bestsudoku.app',
-  'design-preview.goodstuffsoftware.pages.dev',
-]
 
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), {
@@ -48,11 +36,6 @@ function safeDate(v: unknown, fallback: string): string {
   return typeof v === 'string' && WHEN_RE.test(v) ? v : fallback
 }
 const isDateOnly = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v)
-
-// Sanitize a user-agent value used in a server-side exclusion filter (same regex as stats.ts).
-function safeUA(v: unknown): string {
-  return typeof v === 'string' && /^[A-Za-z0-9 ._-]{1,40}$/.test(v) ? v : ''
-}
 
 export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   let body: any
@@ -106,21 +89,10 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // "Hide my own visits" + "exclude self-referrals" — same semantics as functions/api/stats.ts
   // (RUM), applied here too so RUM and beacon charts agree on the same toggles instead of only
   // RUM honoring them (lowers beacon numbers when active — that's intended: the owner's own
-  // visits/self-referrals stop being counted, same as RUM already does).
-  //
-  // De Morgan: NOT(browser=own AND os=own) === (browser<>own OR os<>own) — exclude the owner's
-  // browser+OS COMBINATION, not all of either. Case-insensitive (beacon-collected UA strings
-  // don't necessarily share RUM's casing). Only applies when BOTH values are present — an
-  // empty ownBrowser/ownOS must not exclude everything.
+  // visits/self-referrals stop being counted, same as RUM already does). Shared with
+  // functions/api/campaigns.ts via ../../src/lib/ownExclusion.ts.
   const excludeOwn = body.excludeOwnVisits === true
-  const ownBrowser = safeUA(body.ownBrowser)
-  const ownOS = safeUA(body.ownOS)
-  const excludeOwnClause = (w: string[], b: any[]) => {
-    if (excludeOwn && ownBrowser && ownOS) {
-      w.push(`NOT (LOWER(browser) = LOWER(?) AND LOWER(os) = LOWER(?))`)
-      b.push(ownBrowser, ownOS)
-    }
-  }
+  const excludeOwnClause = (w: string[], b: any[]) => sharedExcludeOwnClause(w, b, excludeOwn, body.ownBrowser, body.ownOS)
 
   // On by default (mirrors stats.ts's `!== false`), but only actually filters a query that
   // groups by 'referrer' — mirroring stats.ts's `dims.includes('refererHost')` scoping, so a
@@ -129,17 +101,13 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // matching RUM's existing "clean external referrer list" behavior — this fix is about
   // making the two datasets AGREE, not diverging into new behavior.
   const excludeSelf = body.excludeSelfReferrals !== false
-  const selfReferralClause = (activeDims: string[], w: string[], b: any[]) => {
-    if (!excludeSelf || !activeDims.includes('referrer')) return
-    w.push(`referrer <> ''`)
-    w.push(`referrer NOT IN (${OWN_HOSTS.map(() => '?').join(', ')})`)
-    b.push(...OWN_HOSTS)
-  }
+  const selfReferralClause = (activeDims: string[], w: string[], b: any[]) => sharedSelfReferralClause(activeDims, w, b, excludeSelf)
 
   // Map mode: return one point per distinct lat/lon with a count (for globe/map charts).
   if (dim === 'points' || body.dimension === 'points') {
     const w: string[] = ['ts >= ?', 'ts < ?', "lat <> ''"]
     const b: any[] = [sinceMs, untilMs]
+    popupExcludeClause(w, b) // events, not screen views — never count toward pageviews/visits
     siteClause(w, b)
     drillClause(w, b)
     excludeOwnClause(w, b)
@@ -191,6 +159,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     const cols = ringDims.map((d, i) => `${d} AS k${i}`)
     const w: string[] = ['ts >= ?', 'ts < ?', ...ringDims.map((d) => `${d} <> ''`)]
     const b: any[] = [sinceMs, untilMs]
+    popupExcludeClause(w, b) // events, not screen views — never count toward pageviews/visits
     siteClause(w, b)
     drillClause(w, b)
     excludeOwnClause(w, b)
@@ -236,6 +205,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       : `CASE WHEN ${dim} = '' THEN '${emptyLabel}' ELSE ${dim} END`
   const where = ['ts >= ?', 'ts < ?']
   const binds: any[] = [sinceMs, untilMs]
+  popupExcludeClause(where, binds) // events, not screen views — never count toward pageviews/visits
   siteClause(where, binds)
   drillClause(where, binds)
   excludeOwnClause(where, binds)

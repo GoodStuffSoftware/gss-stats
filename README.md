@@ -19,6 +19,9 @@ npm install
 npm run preview     # build + wrangler pages dev (Functions + KV + D1 simulated) on :8788
 # or
 npm run dev         # Vite only (UI iteration; /api/* not served)
+
+npm test            # vitest — pure-logic unit tests (day bucketing, rate math, campaign attribution, …)
+npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vue — no vue-tsc yet)
 ```
 
 `.dev.vars` is gitignored. See [`.dev.vars.example`](.dev.vars.example).
@@ -38,6 +41,13 @@ npm run dev         # Vite only (UI iteration; /api/* not served)
 
 ## Features
 
+- **"Best Sudoku overview"** — the landing page: today-at-a-glance KPI tiles (vs the same
+  time yesterday and the 7-day average), a daily timeline since the first hit overlaid with
+  campaign flights / release / tracking-activation markers, a campaign scorecard, and a
+  release before/after panel. See
+  [`src/lib/overview.ts`](src/lib/overview.ts) and
+  [`src/lib/releases.ts`](src/lib/releases.ts) (hand-entered release dates — `hits` has no
+  app-version column).
 - **Movable / composable charts** — drag the header, resize from the corner; add /
   edit / duplicate / delete charts of any type: stat, bar, horizontal bar, stacked
   bar, line, area, doughnut, nested doughnut, pie, table, and a geo point map.
@@ -59,6 +69,25 @@ npm run dev         # Vite only (UI iteration; /api/* not served)
   exact dates.
 - **Geo beacon dataset** — region / city / ISP / new-vs-returning and a visitor map,
   from the beacon (RUM geography is country-only).
+- **Pop-up tracking** — a dedicated Best Sudoku page for the sign-in prompt, first-50 promo,
+  upsell and install pop-ups: shown/accepted/dismissed counts, tap rates, outcome rates,
+  the sign-in eligibility rate and install's real-outcome counts, bucketed by US-Eastern day.
+  See [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) for the one place every pop-up path
+  pattern is defined. A configurable **tracking activation date** (`TRACKING_ACTIVATION_DATE_ET`,
+  null until v1.90.0 ships) keeps pre-release data from reading as a baseline: every rate
+  and every pop-up count widget (other than the trend line, which plots full history with
+  a "tracking starts" marker) is gated to that date, so a real pre-release denominator
+  (e.g. a bug reproduction) can only ever render "—", never a misleading 0%.
+- **Campaign comparison** — a bespoke "Best Sudoku campaigns" page (not the generic
+  chart-grid model) compares the three Google Ads campaigns configured in
+  [`src/lib/campaigns.ts`](src/lib/campaigns.ts): a funnel per campaign, arrivals by ET
+  hour of day, arrivals/funnel by country, daily + cumulative arrivals aligned by flight
+  day, cost per arrival/auth success (spend filled in from the Google Ads API), device mix,
+  and an on-device return-visit retention curve. Attribution is by the beacon's own
+  campaign tag only, with no date-based split — one swappable function decides row
+  membership, and known verification/household traffic is excluded server-side. One
+  campaign (Play-direct) sends its ads straight to the Play Store and so has no beacon rows
+  at all; it's shown spend-only rather than an empty funnel.
 - **Locked down** — Cloudflare Access gates the dashboard; an expired session shows a
   one-tap re-sign-in banner instead of a wall of errors.
 - Light / dark theme matching the Good Stuff Software brand.
@@ -73,6 +102,10 @@ Cloudflare Pages Functions  (functions/api/*.ts)
    │  - hold CF_ANALYTICS_TOKEN (secret) — never sent to the browser
    │  - /api/stats  → RUM GraphQL (server-side), requestHost allow-list
    │  - /api/geo    → reads the beacon's D1 (bot-free sub-country geo)
+   │  - /api/popups → pop-up funnel counts/rates from the same D1 (sign-in, upsell, install, …)
+   │  - /api/campaigns → Google Ads campaign comparison from the same D1 (funnel, hour-of-day,
+   │                      country, daily/cumulative, device mix, return visits)
+   │  - /api/overview → today-at-a-glance KPIs, daily timeline, campaign scorecard, release panel
    │  - /api/sites  → auto-builds the merged site list (RUM + beacon, aliases folded)
    │  - /api/config → dashboard layout in KV
    ▼
@@ -91,6 +124,19 @@ Cloudflare GraphQL Analytics API  ·  D1 (gss-geo)  ·  KV (STATS_CONFIG)
 RUM whitelisted dimensions (server-side): `requestHost`, `requestPath`, `deviceType`,
 `countryName`, `refererHost`, `userAgentBrowser`, `userAgentOS`, `date`. **RUM
 geography is country-only** — sub-country region/city comes from the beacon.
+
+**Pop-up event beacons never count as page views.** Paths under `/signin-prompt`,
+`/signin-eligible`, `/promo-first50`, `/first50-congrats`, `/upsell`, `/install` and
+`/popup-outcome` are pop-up interaction events, not screens — `/api/geo` and `/api/sites`
+exclude them from every pageview/visit total and the top-pages breakdown (see
+[`src/lib/popupEvents.ts`](src/lib/popupEvents.ts)); `/api/popups` is where they're counted.
+
+**Campaign attribution is uc-only.** A row belongs to a Google Ads campaign only by its own
+`campaign` column value (D1's actual column name for what the ad tags as `utm_campaign`) —
+never by matching location/device/timestamp across different rows. See
+[`src/lib/campaigns.ts`](src/lib/campaigns.ts) `campaignAttributionClause` — the one
+function that decides row membership — plus its `EXCLUSIONS` (known verification and
+household traffic) and `classifyFunnelPath` (which paths count as which funnel step).
 
 **"Hide my own visits"** excludes the owner's browser+OS *combination* server-side
 (De Morgan `OR: [browser_neq, os_neq]`, so e.g. Chrome/Windows isn't dropped). RUM
