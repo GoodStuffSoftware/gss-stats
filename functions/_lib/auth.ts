@@ -458,7 +458,8 @@ export interface TokenRequestParams {
  *  is not ok, and handleCallback refuses it (502, no session). Not 'error': the Workers
  *  runtime rejects that value with a TypeError before sending anything, so every sign-in
  *  would fail. Not omitted either: the default is 'follow'. Node accepts all three, so
- *  auth.workerd.test.ts builds a Request and fetches from this init inside workerd. */
+ *  auth.workerd-harness.ts (run by auth.workerd.test.mjs) builds a Request and fetches
+ *  from this init inside workerd. */
 export function tokenRequestInit(p: TokenRequestParams): RequestInit {
   return {
     method: 'POST',
