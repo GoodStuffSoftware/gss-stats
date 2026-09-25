@@ -8,11 +8,16 @@ CF_ANALYTICS_TOKEN=your-cloudflare-analytics-token
 #     host is localhost/127.0.0.1, so it can never open the deployed site. Without it
 #     (and without (b)) every request gets a 503 "sign-in not configured".
 #     AUTH_DEV_EMAIL is the identity shown in the header (default dev@localhost).
+#     NEVER combine this with `wrangler pages dev --ip 0.0.0.0` (or any network-bound
+#     dev server): the loopback check trusts the Host header, so anyone on the network
+#     sending "Host: localhost" would get the bypass and your analytics data.
 AUTH_DEV_BYPASS=1
 # AUTH_DEV_EMAIL=you@example.com
 #
-# (b) Run the real Google flow locally: remove AUTH_DEV_BYPASS, fill these in, and
-#     register http://localhost:8788/auth/google/callback on the OAuth client.
+# (b) Run the real Google flow locally: remove AUTH_DEV_BYPASS and fill these in with a
+#     SEPARATE dev OAuth client whose only redirect URI is
+#     http://localhost:8788/auth/google/callback. Never put the production client's
+#     secret here (README "Auth" → Local development).
 #     SESSION_SECRET must be 32+ random characters; SESSION_TTL_HOURS, if set, a number
 #     from 1 to 720.
 # GOOGLE_CLIENT_ID=

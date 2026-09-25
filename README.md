@@ -181,7 +181,7 @@ cookie; a copied cookie stays valid until it expires (see the ADR).
 | `GOOGLE_CLIENT_ID` | yes | The OAuth client ID (`….apps.googleusercontent.com`) |
 | `GOOGLE_CLIENT_SECRET` | yes | That client's secret |
 | `SESSION_SECRET` | yes | At least 32 random characters. Generate with `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"` |
-| `ALLOWED_EMAILS` | yes | Comma-separated, case-insensitive, exact addresses, no wildcards. Same format as deckhand's `DECKHAND_ADMIN_EMAILS`. Example: `santoro12@gmail.com` |
+| `ALLOWED_EMAILS` | yes | Comma-separated, case-insensitive, exact addresses, no wildcards. Same format as deckhand's `DECKHAND_ADMIN_EMAILS`. Example: `santoro12@gmail.com`. **Only `gmail.com` or Google Workspace addresses.** A Google account registered with any other email (e.g. an ISP or work address that isn't Workspace) can show that email as "verified", but Google doesn't vouch for it later: whoever controls that mailbox afterwards can create a Google account with the same email and sign in |
 | `SESSION_TTL_HOURS` | no | Session length in hours: a plain number from `1` to `720`. Default `168` (7 days). Any other value (text, `0`, `1e3`, over `720`) is a configuration error, so sign-in is locked with the 503 below until it is fixed |
 | `AUTH_DEV_BYPASS` | **never set on Pages** | Local-only escape hatch (see Local development below). Only the exact value `1` turns it on, and it is ignored off loopback anyway |
 
@@ -203,10 +203,11 @@ dashboard is never without a gate.
    - In Google Cloud Console, go to **APIs & Services → Credentials → Create
      credentials → OAuth client ID**.
    - Choose type **Web application**, named e.g. `gss-stats`.
-   - Add this **Authorized redirect URI**, exactly:
+   - Add this **Authorized redirect URI**, exactly, and nothing else:
      `https://stats.goodstuff.software/auth/google/callback`
-   - Optionally, to try the real flow locally, also add
-     `http://localhost:8788/auth/google/callback`.
+   - **Don't add a localhost redirect URI to this client.** That would put the
+     production client secret in a dev machine's `.dev.vars`. To try the real flow
+     locally, create a **separate** dev client instead (see Local development below).
    - Leave JavaScript origins empty.
    - On the consent screen, check that `goodstuff.software` is an authorized domain. It
      should already be there for deckhand. If the app's publishing status is
@@ -238,10 +239,26 @@ dashboard is never without a gate.
 5. **Only now, remove the Cloudflare Access application** for `stats.goodstuff.software`
    (Zero Trust → Access → Applications). Remove the `*.pages.dev` one too if there is
    one; the host guard already 404s that URL.
-6. **Verify with no Access**, from a private window:
+6. **Verify with no Access**, from a private window and a terminal (in Windows
+   PowerShell 5.1, type `curl.exe`, because `curl` there is a different command):
    - https://stats.goodstuff.software should go straight to Google sign-in.
    - `curl -i https://stats.goodstuff.software/api/sites` should return `401` JSON.
+   - `curl -i https://stats.goodstuff.software/auth/me` should return `401` JSON.
+   - `curl -i -X PUT https://stats.goodstuff.software/api/config -H "Origin: https://evil.example"`
+     should return `403` (the cross-origin write guard).
    - `https://gss-stats.pages.dev/` should return `404`.
+7. **Add a rate-limiting rule on the sign-in callback** (recommended). Anyone can make
+   the app call Google's token endpoint by hitting `/auth/google/callback` with a junk
+   code, and a flood could get the OAuth client throttled, which would block your own
+   sign-in. In the Cloudflare dashboard, on the `goodstuff.software` zone, add a WAF
+   **rate limiting rule**:
+   - Match: hostname equals `stats.goodstuff.software` **and** URI path equals
+     `/auth/google/callback`.
+   - Count by IP. Limit: for example 5 requests per 10 seconds. Action: **Block**, for
+     the longest time your plan allows.
+   - The Free plan allows one rate-limiting rule, with a 10-second period and a
+     10-second block; paid plans allow longer. A real sign-in makes one callback
+     request, so this never gets in your way.
 
 **Rollback.** If sign-in misbehaves after step 5, first **re-create the Access
 application**, which puts the edge gate back. Then fix forward or revert the merge.
@@ -258,9 +275,17 @@ settings it answers 503, by design. Pick one of two setups in `.dev.vars` (see
   `127.0.0.1` (IPv6 `[::1]` is not served), so it can't open the deployed site even if
   it were set there. The header then shows `dev@localhost`, or `AUTH_DEV_EMAIL` if you
   set it.
-- For the real flow, set the four settings above in `.dev.vars` and register
-  `http://localhost:8788/auth/google/callback` on the OAuth client. Plain-http loopback
-  uses unprefixed, non-`Secure` cookie names; everything else behaves as in production.
+  - **Never combine the bypass with `--ip 0.0.0.0`** (or any other way of exposing the
+    dev server to your network). The loopback check reads the request's `Host` header,
+    so on a network-bound dev server any machine that sends `Host: localhost` gets the
+    bypass, and with it your real analytics data through `CF_ANALYTICS_TOKEN`. The
+    default `npm run preview` listens on loopback only, which is safe.
+- For the real flow, create a **separate dev OAuth client** (e.g. `gss-stats-dev`, same
+  Google Cloud project, type Web application) whose only redirect URI is
+  `http://localhost:8788/auth/google/callback`. Put that client's ID and secret, plus
+  your own `SESSION_SECRET` and `ALLOWED_EMAILS`, in `.dev.vars`. Never use the
+  production client's secret locally. Plain-http loopback uses unprefixed,
+  non-`Secure` cookie names; everything else behaves as in production.
 
 `npm run dev` (Vite only) serves no Functions, so it has no auth and no `/api/*`.
 
