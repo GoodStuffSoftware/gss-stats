@@ -6,6 +6,15 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Flight 1's start date was off by one ET day.** It was derived from UTC-bucketed daily
+  counts; re-derived from ET-bucketed ones (the campaign's real first hit is 2026-09-02
+  ~22:56 ET, already 2026-09-03 in UTC), recovering ~150 tagged hits that fell outside every
+  flight window.
+- **Tagged hits** — every row carrying a campaign tag, as opposed to tagged *arrivals*
+  (first-ever beacon only) — is now shown on the campaign page, labeled separately, next to
+  the arrivals floor caveat.
+
 ### Added
 - **"Best Sudoku campaigns" page** compares the three Google Ads campaigns (two closed
   display flights sharing a tag, split by date range, plus a new US+CA web retest) side by

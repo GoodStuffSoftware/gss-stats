@@ -261,3 +261,69 @@ describe('FUNNEL_STEP_ORDER', () => {
     expect(new Set(FUNNEL_STEP_ORDER).size).toBe(FUNNEL_STEP_ORDER.length)
   })
 })
+
+describe('flight 1 / flight 2 window invariant (HIGH review finding, 2026-09-25: ET-bucketed, not UTC)', () => {
+  // Real ET-bucketed daily counts for `campaign = sudoku_tired_of_ads` (production D1,
+  // verified 2026-09-25 via etDateFromMs over CAST(ts/3600000 AS INTEGER) hour buckets —
+  // see the CAMPAIGNS header comment). The original UTC-day pass mis-bucketed ~150 rows
+  // from 2026-09-02 ET (which is already 2026-09-03 UTC in the evening) into the wrong day.
+  const dailyCounts: [string, number][] = [
+    ['2026-09-02', 150],
+    ['2026-09-03', 164],
+    ['2026-09-04', 165],
+    ['2026-09-05', 108],
+    ['2026-09-06', 160],
+    ['2026-09-07', 151],
+    ['2026-09-08', 132],
+    ['2026-09-09', 121],
+    ['2026-09-10', 7],
+    ['2026-09-11', 10],
+    ['2026-09-12', 4],
+    ['2026-09-14', 7],
+    ['2026-09-15', 1],
+    ['2026-09-17', 2],
+    ['2026-09-18', 2],
+    ['2026-09-19', 6],
+    ['2026-09-20', 3],
+    ['2026-09-22', 1],
+  ]
+  const TOTAL = 1194 // the tag family's real total row count (production D1, 2026-09-25)
+  const flight1 = campaignById('24215315197')!
+  const flight2 = campaignById('24234347705')!
+
+  it('every ET day with tagged rows falls inside EXACTLY one of the two flight windows', () => {
+    for (const [date] of dailyCounts) {
+      const inFlight1 = flightDayIndex(flight1, date) !== null
+      const inFlight2 = flightDayIndex(flight2, date) !== null
+      expect(inFlight1 !== inFlight2).toBe(true) // exactly one — never both, never neither
+    }
+  })
+
+  it('the two flight windows together cover every tagged row for this uc family — no gaps', () => {
+    const sum1 = dailyCounts.filter(([d]) => flightDayIndex(flight1, d) !== null).reduce((a, [, n]) => a + n, 0)
+    const sum2 = dailyCounts.filter(([d]) => flightDayIndex(flight2, d) !== null).reduce((a, [, n]) => a + n, 0)
+    expect(sum1).toBe(1151)
+    expect(sum2).toBe(43)
+    expect(sum1 + sum2).toBe(TOTAL)
+  })
+})
+
+describe('parseReturnPath: uc must match ^[a-z][a-z0-9_]{0,39}$ (review finding, 2026-09-25)', () => {
+  it('accepts a well-formed lowercase/underscore uc', () => {
+    expect(parseReturnPath('/return/sudoku_funnel_retest/d0')).toEqual({ uc: 'sudoku_funnel_retest', bucket: 'd0' })
+    expect(parseReturnPath('/return/a/d1')).toEqual({ uc: 'a', bucket: 'd1' }) // single-char is valid
+  })
+  it('rejects uppercase, a leading digit, and disallowed characters', () => {
+    expect(parseReturnPath('/return/Sudoku/d0')).toBeNull()
+    expect(parseReturnPath('/return/9sudoku/d0')).toBeNull()
+    expect(parseReturnPath('/return/sudoku-tag/d0')).toBeNull() // hyphen not allowed
+    expect(parseReturnPath('/return/sudoku.tag/d0')).toBeNull()
+    expect(parseReturnPath('/return/sudoku tag/d0')).toBeNull()
+  })
+  it('rejects a uc longer than 40 characters', () => {
+    const tooLong = 'a' + 'b'.repeat(40) // 41 chars
+    expect(parseReturnPath(`/return/${tooLong}/d0`)).toBeNull()
+    const maxLen = 'a' + 'b'.repeat(39) // 40 chars — the documented max
+    expect(parseReturnPath(`/return/${maxLen}/d0`)?.uc).toBe(maxLen)
+  })
+})
