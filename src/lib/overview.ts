@@ -3,7 +3,24 @@
 // lib/popupEvents.ts, which this module builds on rather than duplicates.
 
 import { etDateFromMs, TRACKING_ACTIVATION_DATE_ET } from './popupEvents'
-import { etMidnightUtcMs, CAMPAIGNS, flightDayIndex, type CampaignFlight } from './campaigns'
+import { etMidnightUtcMs, CAMPAIGNS, flightDayIndex, applyExclusions, type CampaignFlight } from './campaigns'
+
+// ── Shared WHERE-clause builder for the KPI / timeline / release-panel D1 queries ────────
+/** `site IN (...) AND ts >= ? AND ts < ?` plus every row-exclusion rule (see
+ * lib/campaigns.ts applyExclusions) — ONE function so all three query sections in
+ * functions/api/overview.ts apply exclusions identically. HIGH review finding, 2026-09-25:
+ * three of the page's four query sections (KPI, timeline, release panel) had been reading
+ * `hits` unfiltered while only the campaign scorecard (which calls
+ * campaignAttributionClause + applyExclusions directly) excluded household/lifecycle rows —
+ * 123 of 2,913 production bestsudoku* rows matched exclusion criteria and were leaking
+ * through. Routing every section's WHERE clause through this one function makes that
+ * divergence structurally impossible going forward. */
+export function siteWindowClause(sites: string[], startMs: number, endMs: number): { sql: string; binds: unknown[] } {
+  const w: string[] = [`site IN (${sites.map(() => '?').join(', ')})`, 'ts >= ?', 'ts < ?']
+  const b: unknown[] = [...sites, startMs, endMs]
+  applyExclusions(w, b)
+  return { sql: w.join(' AND '), binds: b }
+}
 
 // ── ET calendar-date arithmetic ─────────────────────────────────────────────────────────
 /** `dateEt` shifted by `days` (negative = earlier). Pure calendar-string arithmetic (UTC
@@ -15,16 +32,56 @@ export function addEtDays(dateEt: string, days: number): string {
   return d.toISOString().slice(0, 10)
 }
 
-// ── "Today at a glance": today-so-far vs the SAME elapsed time on a comparison day ──────
-/** Milliseconds elapsed since ET midnight of `nowMs`'s own ET calendar day. */
+// ── "Today at a glance": today-so-far vs the SAME wall-clock time on a comparison day ────
+/** Milliseconds elapsed since ET midnight of `nowMs`'s own ET calendar day. Still useful on
+ * its own (e.g. for display), but NOT used to build a comparison-day window any more — see
+ * sameTimeWindowMs below for why a raw millisecond duration is wrong across a DST
+ * transition. */
 export function etDayElapsedMs(nowMs: number): number {
   return nowMs - etMidnightUtcMs(etDateFromMs(nowMs))
 }
-/** [start, end) covering the same elapsed-time-of-day window on a DIFFERENT ET date —
- * e.g. "yesterday, up to the same clock time it is right now". */
-export function sameTimeWindowMs(dateEt: string, elapsedMs: number): [number, number] {
+
+// ET wall-clock hour/minute/second of a UTC instant — DST-safe (Intl does the offset math).
+const ET_CLOCK_FMT = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/New_York',
+  hour12: false,
+  hour: 'numeric',
+  minute: '2-digit',
+  second: '2-digit',
+})
+function etClockParts(ms: number): { h: number; m: number; s: number } {
+  const parts = ET_CLOCK_FMT.formatToParts(new Date(ms))
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0)
+  return { h: get('hour') % 24, m: get('minute'), s: get('second') } // hour12:false can format midnight as "24"
+}
+
+/** [start, end) covering the SAME ET WALL-CLOCK time-of-day on a DIFFERENT ET date as
+ * `nowMs` — e.g. "yesterday, up to the same clock time it is right now". DST-safe: derives
+ * the end instant from `nowMs`'s own hour/minute/second (via Intl) re-applied to
+ * `dateEt`'s OWN midnight, rather than adding a fixed millisecond duration to it.
+ *
+ * HIGH review finding, 2026-09-25: the previous implementation computed one elapsed
+ * millisecond span from TODAY's midnight and reused it for every comparison day. That's only
+ * correct when today and the comparison day share the same UTC offset — for six days after
+ * every DST transition (the transition day is still inside "yesterday" or the 7-day
+ * lookback), it lands an hour off (e.g. comparing 3pm today against what was actually 2pm or
+ * 4pm on the transition day). This version reads the wall-clock hour/minute/second directly
+ * and re-derives the comparison instant from the comparison date's own midnight, so it's
+ * correct on both sides of a transition. */
+export function sameTimeWindowMs(dateEt: string, nowMs: number): [number, number] {
+  const { h, m, s } = etClockParts(nowMs)
   const start = etMidnightUtcMs(dateEt)
-  return [start, start + elapsedMs]
+  const targetMsIntoDay = ((h * 60 + m) * 60 + s) * 1000
+  for (const offsetHours of [5, 4]) {
+    const candidate = Date.parse(`${dateEt}T00:00:00Z`) + offsetHours * 3_600_000 + targetMsIntoDay
+    const c = etClockParts(candidate)
+    if (etDateFromMs(candidate) === dateEt && c.h === h && c.m === m && c.s === s) return [start, candidate]
+  }
+  // The wall-clock instant doesn't exist on this date (spring-forward's skipped hour, e.g.
+  // comparing against 2:30am on the day the clock jumps from 2:00 to 3:00) — fall back to
+  // the pre-transition (EST) offset rather than throw; this only affects that one skipped
+  // hour, one day a year.
+  return [start, Date.parse(`${dateEt}T00:00:00Z`) + 5 * 3_600_000 + targetMsIntoDay]
 }
 /** The 7 ET calendar dates strictly before `todayEt` (most recent first), for the "7-day
  * average at the same time of day" comparison. */
