@@ -109,12 +109,17 @@ export const callbackSignsInWithTheRuntimeFetch = {
 }
 
 /** A 3xx from the token endpoint is refused, not followed, even when the redirect target
- *  would hand back an ID token that passes every check. */
+ *  would hand back an ID token that passes every check, and even when the 3xx body
+ *  itself holds one: a 3xx is not ok. */
 export const callbackRefusesATokenEndpointRedirect = {
   async test() {
     const res = await signIn((nonce) => ({
       status: 302,
-      headers: { Location: `https://evil.example/token?reply=${encodeURIComponent(JSON.stringify(idTokenReply(nonce)))}` },
+      headers: {
+        Location: `https://evil.example/token?reply=${encodeURIComponent(JSON.stringify(idTokenReply(nonce)))}`,
+        'Content-Type': 'application/json',
+      },
+      body: idTokenReply(nonce).body,
     }))
     check(res.status === 502, `expected 502, got ${res.status} ${res.headers.get('Location')}`)
     check(!issuesSession(res), 'a session was issued from a redirected token response')

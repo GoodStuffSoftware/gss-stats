@@ -566,9 +566,11 @@ describe('Google sign-in flow', () => {
 
   it('a redirect from the token endpoint is refused (502, no session), never followed', async () => {
     const { google, stateCookie } = await startLogin()
+    // Even a 3xx whose body holds a valid ID token is refused: it is not ok.
+    const body = JSON.stringify({ id_token: fakeJwt(goodClaims(google.searchParams.get('nonce')!)) })
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) =>
-        new Response(null, { status: 302, headers: { Location: 'https://evil.example/token' } }),
+        new Response(body, { status: 302, headers: { Location: 'https://evil.example/token', 'Content-Type': 'application/json' } }),
     )
     const { res } = await gate(
       req(`/auth/google/callback?state=${google.searchParams.get('state')}&code=c`, { cookie: cookiePair(stateCookie) }),
