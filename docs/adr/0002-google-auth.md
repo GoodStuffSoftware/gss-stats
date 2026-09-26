@@ -1,6 +1,6 @@
 # ADR 0002: Google sign-in in the app, replacing Cloudflare Access
 
-- **Status:** Accepted (branch `feat/google-auth`). The rollout is manual; see README "Auth".
+- **Status:** Accepted (shipped in v0.5.0). The rollout is manual; see README "Auth".
 - **Date:** 2026-09-25
 - **Code:** `functions/_middleware.ts` (host guard, then the auth gate),
   `functions/_lib/auth.ts` (gate and OAuth flow), `functions/_lib/auth.test.ts`,

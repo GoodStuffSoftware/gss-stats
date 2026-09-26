@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-09-26
+
 ### Security
 - **Sign in with Google.** The dashboard and every API call now need a signed-in Google
   account on an owner-set allowlist. The app enforces this itself, so Cloudflare Access can
