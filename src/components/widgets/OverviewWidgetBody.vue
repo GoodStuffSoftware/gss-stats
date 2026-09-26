@@ -9,7 +9,7 @@ import type { ChartConfiguration } from 'chart.js'
 import type { GlobalFilters, Widget, OverviewResponse } from '../../types'
 import { useOverviewData } from '../../lib/overviewData'
 import { PALETTE } from '../../lib/charts'
-import { FUNNEL_STEP_LABELS, FUNNEL_STEP_ORDER, FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED, type FunnelStepKey } from '../../lib/campaigns'
+import { FUNNEL_STEP_LABELS, FUNNEL_STEP_ORDER, FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED, VALID_FUNNEL_RATE_STEPS, type FunnelStepKey } from '../../lib/campaigns'
 import { isInsufficientCohort } from '../../lib/popupEvents'
 import { noteRawText } from '../../lib/notes'
 import type { CampaignFunnelCounts } from '../../types'
@@ -62,6 +62,10 @@ function prevFunnelCount(cnts: CampaignFunnelCounts, step: keyof CampaignFunnelC
   const idx = FUNNEL_STEP_ORDER.indexOf(step)
   return idx > 0 ? cnts[FUNNEL_STEP_ORDER[idx - 1]] : 0
 }
+// Every step but 'arrivals' — the scorecard chip list. Iterated directly (not via
+// row.funnelRates, which only ever holds 'accept'/'install' now) so a plain-count step still
+// gets a chip, just with no percent — see VALID_FUNNEL_RATE_STEPS.
+const scorecardSteps = FUNNEL_STEP_ORDER.filter((s) => s !== 'arrivals')
 function money(n: number | null | undefined): string {
   return n == null ? '—' : `$${n.toFixed(2)}`
 }
@@ -260,7 +264,13 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
             <div class="sc-row"><span>Return rate (d2-7)</span><span class="mono">{{ pct(row.returnRateD2to7, row.returnD0) }} {{ counts(row.returnD2to7, row.returnD0) }}</span></div>
             <div class="sc-row"><span>Cost / arrival</span><span class="mono">{{ money(row.costPerArrival) }}</span></div>
             <div class="sc-rates">
-              <template v-for="(rate, step) in row.funnelRates" :key="step">
+              <!-- Iterates FUNNEL_STEP_ORDER, not row.funnelRates — funnelStepRates only ever
+                   populates 'accept'/'install' now (see lib/campaigns.ts
+                   VALID_FUNNEL_RATE_STEPS), but every OTHER step still shows its plain count
+                   as a chip, just with no percent (audit finding, 2026-09-26: those "rates"
+                   mixed event-row counts against arrival/other-row counts with no shared
+                   visitor id — not real percentages). -->
+              <template v-for="step in scorecardSteps" :key="step">
                 <!-- Closed campaign: a step its flight never saw ANY hit for is OMITTED, not
                      labeled "not instrumented" (owner clarification, 2026-09-26 — "closed
                      campaigns" scope). Active/upcoming: unchanged — row.notInstrumented is
@@ -272,10 +282,14 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
                 >
                   {{ FUNNEL_STEP_LABELS[step as keyof typeof FUNNEL_STEP_LABELS] }}:
                   <template v-if="FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED.has(step as FunnelStepKey)">{{ noteRawText('not-instrumented') }}</template>
-                  <template v-else
-                    >{{ pct(rate, prevFunnelCount(row.funnelCounts, step as keyof CampaignFunnelCounts)) }}
+                  <template v-else-if="step === 'install'"
+                    >{{ pct(row.funnelRates.install, row.installPromptPostFixCount) }} {{ counts(row.funnelCounts.install, row.installPromptPostFixCount) }}</template
+                  >
+                  <template v-else-if="VALID_FUNNEL_RATE_STEPS.has(step as FunnelStepKey)"
+                    >{{ pct(row.funnelRates[step as keyof CampaignFunnelCounts], prevFunnelCount(row.funnelCounts, step as keyof CampaignFunnelCounts)) }}
                     {{ counts(row.funnelCounts[step as keyof CampaignFunnelCounts], prevFunnelCount(row.funnelCounts, step as keyof CampaignFunnelCounts)) }}</template
                   >
+                  <template v-else>{{ fmt(row.funnelCounts[step as keyof CampaignFunnelCounts]) }}</template>
                 </span>
               </template>
             </div>

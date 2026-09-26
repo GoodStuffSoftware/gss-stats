@@ -6,11 +6,32 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Removed funnel/scorecard percentages that mixed incompatible units.** "Played a game",
+  "Completed a game", "Sign-in ask", "Auth success" and "Install prompt" showed a nonsense
+  percentage (e.g. "314.7%") because their numerator counted event rows while their
+  denominator counted arrivals or other rows, with no shared visitor id to make it a real
+  rate. They now show a plain count. Accept/ask, install/install-prompt (denominator
+  restricted to prompts shown after the install-outcome-gap fix), and return-visit rates are
+  unaffected — those are real ratios.
+- **Fixed the campaigns "Return visits" chart rendering broken/empty.** A campaign with zero
+  `/return/` rows so far — not yet instrumented for its flight, or simply no rows yet — used to
+  fall through to an empty, axis-only chart instead of being recognized as having no data. It's
+  now omitted from the grid, and the whole chart shows one line ("No return visits recorded
+  yet") when nothing has data at all.
+
 ### Changed
 - **Closed campaigns' scorecard no longer shows "not instrumented" chips.** A funnel step a
   closed flight's window never actually had a beacon for is left off the chip list entirely,
   instead of showing a misleading "not instrumented" label — derived from the same per-flight
   check the campaigns page already used, not a hand-written list.
+- **Closed campaigns omit uninstrumented funnel/country steps instead of labeling them.** Same
+  rule as the scorecard, applied to the campaigns page's own funnel and country-breakdown
+  views.
+- **Spend-only closed campaigns (e.g. Play-direct) no longer appear in beacon-based campaign
+  charts.** Funnel, hour-of-day, country, flight-day, device-mix and return-visit charts never
+  had real data for a campaign whose ads bypass the beacon entirely; it now shows only in the
+  spend and cost views, where its numbers are real.
 
 ### Added
 - **A raw-install de-dupe marker on the Overview timeline.** Marks when duplicate cross-tab

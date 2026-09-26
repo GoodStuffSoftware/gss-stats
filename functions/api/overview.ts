@@ -18,6 +18,7 @@ import {
   CAMPAIGNS,
   applyExclusions,
   campaignAttributionClause,
+  classifyFunnelPath,
   computeFunnelCounts,
   costPer,
   etMidnightUtcMs,
@@ -46,6 +47,7 @@ import {
   NEW_BEACONS_LIVE_AT_ET,
   NEW_BEACONS_LIVE_MARKER_LABEL,
   RAW_INSTALL_DEDUPE_LIVE_AT_ET,
+  INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS,
   POPUPS,
 } from '../../src/lib/popupEvents'
 import {
@@ -307,7 +309,10 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       const b1: unknown[] = [...attr.binds]
       applyExclusions(w1, b1)
       excludeInstallGapUnmeasured(w1, b1) // pre-fix install-gap rows are unmeasured
-      const sql1 = `SELECT path, visitor, COUNT(*) AS cnt FROM hits WHERE ${w1.join(' AND ')} GROUP BY path, visitor`
+      // Hour bucket (not just path/visitor): needed to split installPrompt rows at the
+      // install-outcome-gap fix instant for the install/installPrompt rate's real denominator
+      // — see installPromptPostFixCount below.
+      const sql1 = `SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, visitor, COUNT(*) AS cnt FROM hits WHERE ${w1.join(' AND ')} GROUP BY hr, path, visitor`
 
       const w2: string[] = ['site = ?', `(${c.ucValues.map(() => 'path LIKE ?').join(' OR ')})`]
       const b2: unknown[] = ['bestsudoku-web', ...c.ucValues.map((u) => `/return/${u}/%`)]
@@ -327,7 +332,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
         db.prepare(sql2).bind(...b2).all(),
         c.status === 'closed' ? notInstrumentedFunnelSteps(db, c) : Promise.resolve<FunnelStepKey[]>([]),
       ])
-      const rows1 = (r1.results ?? []).map((x: any) => ({ path: String(x.path ?? ''), visitor: String(x.visitor ?? ''), c: Number(x.cnt) || 0 }))
+      const rows1 = (r1.results ?? []).map((x: any) => ({ hr: Number(x.hr) || 0, path: String(x.path ?? ''), visitor: String(x.visitor ?? ''), c: Number(x.cnt) || 0 }))
       const taggedArrivals = rows1.filter((r) => r.visitor === 'new').reduce((a, r) => a + r.c, 0)
       const counts = computeFunnelCounts(
         rows1.map((r) => ({ path: r.path, count: r.c })),
@@ -338,7 +343,14 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       // rather than the permanent global default, so a flight whose window reaches
       // GAME_COMPLETE_LIVE_AT shows real completed-game rates instead of a stale "—".
       const notInstrumentedSet = c.status === 'closed' ? new Set(closedNotInstrumented) : gameCompleteNotInstrumented(c) ? FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED : new Set<FunnelStepKey>()
-      const rates = funnelStepRates(counts, notInstrumentedSet)
+      // install/installPrompt's real denominator — same rule as /api/campaigns.ts (audit
+      // finding, 2026-09-26): only prompts shown AT OR AFTER the install-outcome-gap fix.
+      const installFixAtMs = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS
+      const installPromptPostFixCount =
+        installFixAtMs == null
+          ? 0
+          : rows1.reduce((a, r) => (classifyFunnelPath(r.path) === 'installPrompt' && r.hr * 3_600_000 >= installFixAtMs ? a + r.c : a), 0)
+      const rates = funnelStepRates(counts, notInstrumentedSet, installPromptPostFixCount)
 
       const returnCounts = Object.fromEntries(['d0', 'd1', 'd2-7', 'd8-14', 'd15-30', 'd31-60'].map((b) => [b, 0])) as Record<string, number>
       for (const x of r2.results ?? []) {
@@ -367,6 +379,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
         // entirely instead of labeling them "not instrumented" (owner clarification,
         // 2026-09-26). Always [] for an active/upcoming campaign.
         notInstrumented: [...notInstrumentedSet],
+        installPromptPostFixCount,
         authSuccess: counts.authSuccess,
         install: counts.install,
         returnRateD2to7: returnRates['d2-7'],

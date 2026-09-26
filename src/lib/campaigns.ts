@@ -496,15 +496,47 @@ export function computeFunnelCounts(rows: FunnelPathCount[], taggedArrivals: num
   return counts
 }
 
-/** Step-over-previous-step conversion rate, null (never a real 0/NaN) when the previous
- * step's count is 0, OR when either step is not instrumented for this flight. */
+// Audit finding (2026-09-26): most of the funnel's "step / previous step" pairs mix units
+// that were never comparable in the first place — the numerator counts EVENT rows (e.g. every
+// `/game` page-view hit within a tagged session) while the denominator counts arrivals or
+// other rows, with no per-visitor id anywhere in `hits` to join them on. That produced numbers
+// like "Played a game: 314.7% (1111/353)" — not a real conversion rate, just two unrelated
+// counts divided. Only two step-over-step ratios in FUNNEL_STEP_ORDER are actually valid:
+//  - accept/ask — the SAME popup shown to the SAME session, tap-through is a real percentage.
+//  - install/installPrompt — real, but ONLY once installPrompt is restricted to prompts shown
+//    AT OR AFTER the install-outcome-gap fix (INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS,
+//    popupEvents.ts): a prompt shown before the fix could never have its "installed" outcome
+//    recorded at all (see that constant's own doc comment), so counting it in the denominator
+//    would understate the rate for a reason that has nothing to do with real tap-through.
+//    funnelStepRates takes this pre-computed post-fix count as a separate argument rather than
+//    deriving it from `counts` (which has no time dimension) — see functions/api/campaigns.ts
+//    and functions/api/overview.ts for how callers compute it from their own hour-bucketed rows.
+// Every other step (played, completed, ask, authSuccess, installPrompt) is a plain COUNT ONLY
+// now — funnelStepRates doesn't populate a rate for it at all (not even null), and the widget
+// bodies (CampaignsWidgetBody.vue / OverviewWidgetBody.vue) render no percent line for it.
+export const VALID_FUNNEL_RATE_STEPS = new Set<FunnelStepKey>(['accept', 'install'])
+
+/** Real conversion rates ONLY (see VALID_FUNNEL_RATE_STEPS above) — `accept` (accept/ask) and
+ * `install` (install / post-fix installPrompt, via `installPromptPostFixCount`). null (never a
+ * real 0/NaN) when the denominator is 0/insufficient, OR when either step is not instrumented
+ * for this flight. Every other FUNNEL_STEP_ORDER key is simply absent from the result — a
+ * plain count, not a rate. */
 export function funnelStepRates(
   counts: Record<FunnelStepKey, number>,
   notInstrumented: ReadonlySet<FunnelStepKey> = FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED,
+  installPromptPostFixCount?: number | null,
 ): Partial<Record<FunnelStepKey, number | null>> {
   const rates: Partial<Record<FunnelStepKey, number | null>> = {}
   for (let i = 1; i < FUNNEL_STEP_ORDER.length; i++) {
     const key = FUNNEL_STEP_ORDER[i]
+    if (!VALID_FUNNEL_RATE_STEPS.has(key)) continue
+    if (key === 'install') {
+      rates.install =
+        notInstrumented.has('install') || notInstrumented.has('installPrompt') || installPromptPostFixCount == null
+          ? null
+          : computeRate(counts.install, installPromptPostFixCount)
+      continue
+    }
     const prevKey = FUNNEL_STEP_ORDER[i - 1]
     rates[key] = notInstrumented.has(key) || notInstrumented.has(prevKey) ? null : computeRate(counts[key], counts[prevKey])
   }
