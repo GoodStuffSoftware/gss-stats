@@ -22,6 +22,7 @@
 // POST { dimension?: 'mode'|'difficulty', breakdown?: 'mode'|'difficulty', since, until, sites?, limit? }
 
 import { parseGameCompletePath } from '../../src/lib/campaigns'
+import { buildCacheKeyUrl, cachedJson, ttlSecondsFor, type CacheLike } from '../_lib/edgeCache'
 
 interface Env {
   gss_geo: D1Database
@@ -70,6 +71,25 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const rawSites: unknown[] = Array.isArray(body.sites) ? body.sites : body.site != null ? [body.site] : []
   const sites = rawSites.filter((s): s is string => typeof s === 'string' && s !== 'all' && /^[a-z0-9.\-]{1,40}$/i.test(s))
 
+  // Same per-colo edge cache as /api/geo.ts — everything that changes the SQL (and therefore
+  // the response) goes into the key; `sites` is sorted for the key only (order never changes
+  // the result). ttlSecondsFor gives a closed [since, until) range (ends before today ET) a
+  // long TTL and a still-live range a short one; cachedJson never stores a non-ok response, so
+  // a D1 failure below is never cached.
+  const cacheKeyUrl = buildCacheKeyUrl('/api/completions', {
+    dimension,
+    breakdown: breakdown ?? '',
+    since,
+    until,
+    limit,
+    sites: [...sites].sort(),
+  })
+  const ttl = ttlSecondsFor(until, new Date())
+  const cache = (caches as unknown as { default: CacheLike }).default
+
+  return cachedJson(cache, cacheKeyUrl, ttl, ctx.waitUntil.bind(ctx), computeCompletionsResponse)
+
+  async function computeCompletionsResponse(): Promise<Response> {
   const w: string[] = ['ts >= ?', 'ts < ?', `path LIKE '/game/complete/%'`]
   const b: unknown[] = [sinceMs, untilMs]
   if (sites.length) {
@@ -111,6 +131,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     totals,
     meta: { since, until, sites: sites.length ? sites.join(',') : 'all', dimensions: [dimension, ...(breakdown ? [breakdown] : [])], metric: 'pageviews' as const },
   })
+  }
 }
 
 export const onRequestGet: PagesFunction = async () =>

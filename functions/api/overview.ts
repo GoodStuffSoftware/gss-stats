@@ -47,6 +47,7 @@ import {
   NEW_BEACONS_LIVE_MARKER_LABEL,
   RAW_INSTALL_DEDUPE_LIVE_AT_ET,
   INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS,
+  rowIsPostInstallFix,
   POPUPS,
 } from '../../src/lib/popupEvents'
 import {
@@ -346,10 +347,10 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       // install/installPrompt's real denominator — same rule as /api/campaigns.ts (audit
       // finding, 2026-09-26): only prompts shown AT OR AFTER the install-outcome-gap fix.
       const installFixAtMs = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS
-      const installPromptPostFixCount =
-        installFixAtMs == null
-          ? 0
-          : rows1.reduce((a, r) => (classifyFunnelPath(r.path) === 'installPrompt' && r.hr * 3_600_000 >= installFixAtMs ? a + r.c : a), 0)
+      const installPromptPostFixCount = rows1.reduce(
+        (a, r) => (classifyFunnelPath(r.path) === 'installPrompt' && rowIsPostInstallFix({ hourStartMs: r.hr * 3_600_000, path: r.path, count: r.c }, installFixAtMs) ? a + r.c : a),
+        0,
+      )
       const rates = funnelStepRates(counts, notInstrumentedSet, installPromptPostFixCount)
 
       const returnCounts = Object.fromEntries(['d0', 'd1', 'd2-7', 'd8-14', 'd15-30', 'd31-60'].map((b) => [b, 0])) as Record<string, number>

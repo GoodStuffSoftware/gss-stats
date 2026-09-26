@@ -39,7 +39,7 @@ import {
   type FunnelPathCount,
   type FunnelStepKey,
 } from '../../src/lib/campaigns'
-import { etDateFromMs, excludeInstallGapUnmeasured, installOutcomeGapNote, TRACKING_ACTIVATION_DATE_ET, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS } from '../../src/lib/popupEvents'
+import { etDateFromMs, excludeInstallGapUnmeasured, installOutcomeGapNote, TRACKING_ACTIVATION_DATE_ET, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, rowIsPostInstallFix } from '../../src/lib/popupEvents'
 import { campaignSegmentMarker, resolveCampaignSpend, UPSELL_SIGNEDOUT_FIX_AT } from '../../src/lib/adsRules'
 import { readFreshness, readSpendSummaries } from '../../src/lib/adsStore'
 import { freshnessOf } from '../../src/lib/adsFreshness'
@@ -178,10 +178,10 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // belong in the rate's denominator. Computed from rows1 (already hour-bucketed) rather than
   // a new query.
   const installFixAtMs = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS
-  const installPromptPostFixCount =
-    installFixAtMs == null
-      ? 0
-      : rows1.reduce((a, r) => (classifyFunnelPath(r.path) === 'installPrompt' && r.hr * 3_600_000 >= installFixAtMs ? a + r.c : a), 0)
+  const installPromptPostFixCount = rows1.reduce(
+    (a, r) => (classifyFunnelPath(r.path) === 'installPrompt' && rowIsPostInstallFix({ hourStartMs: r.hr * 3_600_000, path: r.path, count: r.c }, installFixAtMs) ? a + r.c : a),
+    0,
+  )
   const rates = funnelStepRates(counts, new Set(notInstrumented), installPromptPostFixCount)
 
   // ── Device mix (query 2) ─────────────────────────────────────────────────────────────

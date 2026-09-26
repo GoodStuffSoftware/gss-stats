@@ -24,8 +24,16 @@ All notable changes to **gss-stats** are documented here. The format follows
   well after the completed-game beacon went live, because it checked a permanent constant
   instead of that campaign's actual data. Closed campaigns whose flight predates the beacon
   still omit the chip.
+- **The ads-read reports no longer show an "ask rate" percentage.** Like the funnel/scorecard
+  fix above, it divided an event count by an arrivals count with no shared visitor id — not a
+  real rate. Reports now show it as a count pair ("N asks · M arrivals"); accept rate is
+  unaffected.
 
 ### Changed
+- **Two D1-heavy per-campaign checks are now cached at the edge**, cutting repeated database
+  reads on every dashboard load: the campaigns/overview "which funnel steps has this flight
+  actually seen" check (shared by both pages, keyed by campaign + flight window, long-lived
+  once a flight is closed), and the new completions chart's own query.
 - **Closed campaigns' scorecard no longer shows "not instrumented" chips.** A funnel step a
   closed flight's window never actually had a beacon for is left off the chip list entirely,
   instead of showing a misleading "not instrumented" label — derived from the same per-flight
