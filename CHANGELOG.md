@@ -13,6 +13,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **One shared Google Ads sync (`npm run ads:sync`).** Every ads routine now fills in every
   missing day, re-checks the last three days Google may still restate, and writes only what
   changed, so running it twice in a row changes nothing.
+- **Ads data syncs on its own in Cloudflare.** A private sync worker runs the same sync every
+  hour during a flight and once a day otherwise, so spend stays current even when the local
+  routines don't run.
+- **A "Refresh data" button on the campaigns page and the readings log** syncs stale Ads data
+  on demand (at most once every 10 minutes) and updates the freshness line.
 
 ### Changed
 - **Ads readings are recorded once per day per entry.** Rerunning a read the same day no

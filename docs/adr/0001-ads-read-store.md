@@ -97,6 +97,56 @@ which writes only rows that changed.
   **Fail soft:** a missing binding, a missing table or any D1 error reads as "nothing
   stored", so spend falls back to the config and the readings widget shows an empty state.
 
+### The sync Worker: from local-only to a Cloudflare Worker (2026-09-26)
+
+**Why it moved.** Until now every Google Ads pull ran on the owner's Windows machine (the
+scheduled local routines). If that machine was asleep, offline or its routine failed, stored
+spend simply stopped at the last good day and the dashboard had no way to catch up. The owner
+asked for the data to be checked and pulled when it is missing, and approved storing the Ads
+keys in Cloudflare's secret manager (2026-09-26). So a Worker, `gss-stats-sync`
+(`workers/sync/`), now runs **the same `syncAdsData`** on a cron and on demand. The local
+routines keep their analysis, pushes and bus copies and still sync first; whichever runs second
+finds nothing to write, because the sync writes only changed rows.
+
+**Shape.**
+- D1 through a binding (`gss_stats_ads`), via the same `createSqlAdsStore` on the
+  `d1BindingAdsDb` adapter; the write guard applies unchanged.
+- Cron `5 * * * *`; `cronShouldSync` makes it hourly during a live flight (first day through
+  the day after the last) and a single 01:05 ET pass otherwise. The owner suggested hourly
+  during serving hours with a closing pass after midnight; since only closed days are stored,
+  an intraday pass mainly re-checks the restatement window, but it is cheap (two GAQL queries
+  and a few D1 reads per live campaign) and it makes a failed or missed pass recover within the
+  hour, including the one right after midnight that stores yesterday.
+- On demand: `POST /sync`, reachable **only** through the Pages Service Binding `ADS_SYNC`
+  (`workers_dev = false`, `preview_urls = false`, no route). `/api/ads/refresh` (behind the
+  sign-in gate) calls it only when a campaign is stale; both sides rate-limit to one sync per
+  10 minutes by the latest `ads_sync_runs.finished_at`.
+
+**Secrets.** Cloudflare Secrets Store (open beta; the account's single store
+`default_secrets_store`, 100-secret limit), chosen over per-Worker secrets because the account
+supports it and it keeps the keys account-level, scoped to `workers`, not readable back through
+the API or dashboard. Four secrets, named exactly like their Bitwarden keys. Bitwarden stays the
+source of truth; `npm run ads:worker-secrets` copies them bws → memory → Cloudflare (create:
+piped into `wrangler secrets-store secret create` on stdin; update: the Secrets Store API call
+wrangler itself makes, because `wrangler … update` cannot read stdin non-interactively). Nothing
+is printed, logged or written to disk. In the Worker the values are registered with `redact()`
+and the Ads client never sends `login-customer-id`.
+
+**Trade-offs.**
+- (+) Freshness no longer depends on one laptop; the dashboard can self-heal a stale day.
+- (−) The Ads credentials now also live in Cloudflare (a second place to rotate and a second
+  blast radius). Mitigations: Secrets Store scope `workers`, no public entry point, a read-only
+  client (GAQL `SELECT` only), and a one-command rotation from Bitwarden.
+- (−) The account is on **Workers Free**: 10 ms CPU per invocation, 50 external subrequests,
+  5 cron triggers per account (this Worker uses 1). A sync is I/O-bound (a handful of fetches
+  and D1 queries); if a full re-pull ever exceeds the CPU limit the run fails loudly (no
+  `ads_sync_runs` row, visible in `wrangler tail`) and the local routines still sync.
+- (−) The Worker bundles `src/lib/campaigns.ts`: a new or changed campaign needs a Worker
+  redeploy (`npm run ads:worker-deploy`) as well as the Pages deploy. Not wired into CI yet.
+- **Reversal:** remove the `[[services]]` block from `wrangler.toml` (the Refresh button then
+  reports "not available"), delete the Worker (`npx wrangler delete gss-stats-sync`) and the four
+  Secrets Store secrets (owner only). The local routines are unaffected.
+
 ## Constraints checked (2026-09-26)
 
 - The account held one D1 database (gss-geo). Worst-case Workers Free limits: 10 databases,
@@ -111,6 +161,10 @@ which writes only rows that changed.
   Edit) already deploys a D1 binding (gss_geo), so a second one needs no new permission.
 - `migrations_dir` is scoped to this database, and no `.sql` file sits at the top of
   `migrations/`, so `wrangler d1 migrations apply gss-geo` finds nothing to apply.
+- For the sync Worker (checked before deploying): no Workers Paid subscription on the account
+  (Workers Free limits above apply); 0 of 5 cron triggers in use (one other Worker, fetch-only);
+  Secrets Store available with its single store already created; the local deploy token holds
+  Workers Scripts, Secrets Store, D1 and Pages write.
 
 ## Operations
 

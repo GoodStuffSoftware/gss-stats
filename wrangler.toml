@@ -26,6 +26,13 @@ database_name = "gss-stats-ads"
 database_id = "785327a3-683c-4f85-819d-abe11efcacc9"
 migrations_dir = "migrations/gss-stats-ads"
 
+# The gss-stats-sync Worker (workers/sync/), reachable ONLY through this Service Binding: it has
+# no workers.dev URL and no route. /api/ads/refresh asks it to run the shared Ads sync when the
+# data is stale (docs/adr/0001-ads-read-store.md, "The sync Worker").
+[[services]]
+binding = "ADS_SYNC"
+service = "gss-stats-sync"
+
 # Secret (NOT here): CF_ANALYTICS_TOKEN — set per-environment via
 #   npx wrangler pages secret put CF_ANALYTICS_TOKEN
 # and locally via .dev.vars (gitignored).

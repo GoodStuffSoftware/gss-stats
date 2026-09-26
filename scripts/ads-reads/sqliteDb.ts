@@ -50,6 +50,29 @@ export function sqliteAdsDb(db: DatabaseSync): AdsDb & { writes: RecordedWrite[]
   }
 }
 
+/** A Cloudflare D1 binding's surface (prepare/bind/all/run) over node:sqlite, so the Worker's
+ * d1BindingAdsDb adapter and the dashboard readers run against real migrated SQL in tests. */
+export function sqliteD1(db: DatabaseSync) {
+  return {
+    prepare(sql: string) {
+      return {
+        bind(...values: unknown[]) {
+          const binds = values as (string | number | null)[]
+          return {
+            async all() {
+              return { results: db.prepare(sql).all(...binds) as unknown[] }
+            },
+            async run() {
+              const r = db.prepare(sql).run(...binds)
+              return { meta: { changes: Number(r.changes) } }
+            },
+          }
+        },
+      }
+    },
+  }
+}
+
 export function count(db: DatabaseSync, table: string, where = '1 = 1', ...binds: (string | number | null)[]): number {
   return Number((db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${where}`).get(...binds) as { n: number }).n)
 }

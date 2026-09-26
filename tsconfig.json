@@ -13,5 +13,5 @@
     "noEmit": true,
     "types": ["@cloudflare/workers-types"]
   },
-  "include": ["src/**/*.ts", "src/**/*.vue", "functions/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.vue", "functions/**/*.ts", "workers/**/*.ts"]
 }

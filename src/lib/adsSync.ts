@@ -379,6 +379,12 @@ export async function syncAdsData(deps: SyncDeps, opts: SyncOptions): Promise<Sy
   result.status = !sync.ok ? 'failed' : !failed.length ? 'ok' : failed.length === result.campaigns.length && failed.every((r) => !r.dailyOk) ? 'failed' : 'partial'
   const firstError = (sync.ok ? null : sync.error) ?? failed.find((r) => r.error)?.error ?? null
   result.error = firstError ? summarizeError(firstError, 300) : null
+  // An Ads client that could not be built (credentials) is reported even when nothing needed
+  // pulling this time: it is what will fail the next pull.
+  if (!deps.ads && result.status === 'ok') {
+    result.status = 'partial'
+    result.error = summarizeError(`ads: ${deps.adsInitError ?? 'Google Ads client unavailable'}`, 300)
+  }
   result.finishedAt = new Date(opts.now + Math.max(0, Date.now() - t0)).toISOString()
   if (!opts.dryRun) {
     const run: SyncRunRecord = {
@@ -406,6 +412,52 @@ export async function syncAdsData(deps: SyncDeps, opts: SyncOptions): Promise<Sy
     if (!rec.ok && !result.error) result.error = summarizeError(rec.error, 300)
   }
   return result
+}
+
+// ── The gss-stats-sync Worker's schedule and on-demand guard (workers/sync/) ──────────────
+/** Campaigns in a live flight today (ET): from the first flight day through the day after the
+ * last one (so the last day is pulled once it has closed). Closed campaigns never count. */
+export function liveFlightCampaigns(nowMs: number, campaigns: readonly CampaignFlight[] = CAMPAIGNS): CampaignFlight[] {
+  const todayEt = etDateFromMs(nowMs)
+  return campaigns.filter((c) => c.flightStart != null && c.status !== 'closed' && todayEt >= c.flightStart && todayEt <= addEtDays(c.flightEnd, 1))
+}
+/** The ET hour of the daily pass outside a flight: just after midnight, once yesterday closed. */
+export const DAILY_SYNC_ET_HOUR = 1
+/** The Worker's cron fires every hour (at :05). It syncs on every tick while a flight is live —
+ * a closed day is stored within the hour after midnight ET and a failed pass is retried the next
+ * hour; the other ticks re-check the restatement window — and once a day (01:xx ET) otherwise.
+ * A skipped tick does no I/O at all. */
+export function cronShouldSync(nowMs: number, campaigns: readonly CampaignFlight[] = CAMPAIGNS): { run: boolean; reason: string } {
+  const live = liveFlightCampaigns(nowMs, campaigns)
+  if (live.length) return { run: true, reason: `live flight: ${live.map((c) => c.id).join(', ')}` }
+  const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', hourCycle: 'h23' }).format(new Date(nowMs)))
+  return hour === DAILY_SYNC_ET_HOUR ? { run: true, reason: 'daily pass' } : { run: false, reason: `no live flight; the daily pass runs at 0${DAILY_SYNC_ET_HOUR}:xx ET` }
+}
+
+/** At most one on-demand sync per this interval (the dashboard's "Refresh data"). */
+export const ON_DEMAND_MIN_INTERVAL_MS = 10 * 60_000
+export function rateLimit(lastFinishedAt: string | null, nowMs: number, minIntervalMs: number = ON_DEMAND_MIN_INTERVAL_MS): { limited: boolean; retryAfterSec: number } {
+  const last = lastFinishedAt ? Date.parse(lastFinishedAt) : NaN
+  if (!Number.isFinite(last)) return { limited: false, retryAfterSec: 0 }
+  const wait = last + minIntervalMs - nowMs
+  return wait > 0 ? { limited: true, retryAfterSec: Math.ceil(wait / 1000) } : { limited: false, retryAfterSec: 0 }
+}
+
+/** The JSON-safe summary a Worker returns or logs: counts and ranges only, no fetched rows. */
+export function syncResultSummary(r: SyncResult) {
+  return {
+    source: r.source,
+    status: r.status,
+    startedAt: r.startedAt,
+    finishedAt: r.finishedAt,
+    daysFetched: r.daysFetched,
+    daysChanged: r.daysChanged,
+    placementRowsFetched: r.placementRowsFetched,
+    placementRowsChanged: r.placementRowsChanged,
+    runRecorded: r.runRecorded,
+    error: r.error,
+    campaigns: r.campaigns.map((c) => ({ campaignId: c.campaignId, outcome: c.outcome, fetched: c.fetched, daysChanged: c.daysChanged, placementRowsChanged: c.placementRowsChanged, spendThrough: c.spendThrough })),
+  }
 }
 
 /** One line per campaign, for CLI reports. */
