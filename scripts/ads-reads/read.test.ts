@@ -444,9 +444,16 @@ describe('reports', () => {
   it('every rate in the text shows its counts; sign-ups appear only as counts', async () => {
     const r = await runMorningRead(fixtureDeps(base(), true), opts)
     const text = formatMorningReport(r)
-    expect(text).toMatch(/ask rate 16\.7% \(5\/30\)/)
     expect(text).toMatch(/d1 too few|d1 10\.3% \(3\/29\)/)
     expect(text).toMatch(/nobody matched/)
+  })
+  // Review finding, 2026-09-26: asks/taggedArrivals mixed an event-row count against a
+  // first-beacon-only count with no shared visitor id — not a real rate. It's a count pair now.
+  it('asks show as a count pair ("N asks · M arrivals"), never a percentage', async () => {
+    const r = await runMorningRead(fixtureDeps(base(), true), opts)
+    const text = formatMorningReport(r)
+    expect(text).toMatch(/5 asks · 30 arrivals/)
+    expect(text).not.toMatch(/ask rate/)
   })
 })
 

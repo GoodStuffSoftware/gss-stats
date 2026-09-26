@@ -196,7 +196,10 @@ export interface FullRead {
   tagged: {
     summary: TaggedSummary
     funnelRates: Partial<Record<FunnelStepKey, number | null>>
-    askRate: GatedRate
+    // No askRate (review finding, 2026-09-26): asks/taggedArrivals mixes an event-row count
+    // against a first-beacon-only count with no shared visitor id — not a real rate. The
+    // report prints it as a count pair instead (summary.asks.total / summary.taggedArrivals,
+    // both already on TaggedSummary). acceptRate IS a real rate (accepts/asks).
     acceptRate: GatedRate
     costPerArrival: number | null
   } | null
@@ -392,7 +395,6 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
     tagged = {
       summary,
       funnelRates: funnelStepRates(summary.funnel),
-      askRate: gateRate(summary.asks.total, summary.taggedArrivals),
       acceptRate: gateRate(summary.accepts.total, summary.asks.total),
       costPerArrival: costPer(cumulativeSpend, summary.taggedArrivals),
     }
