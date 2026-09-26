@@ -176,3 +176,29 @@ No `CREATE INDEX`, `ALTER`, or write statement was run — every command above w
 | GitHub Actions minutes | Unlimited (public repos) | n/a | n/a | n/a | None | None needed |
 
 **Bottom line:** every Cloudflare resource has comfortable headroom **except D1 rows-read**, which sits at 29% of the account-wide 5M/day free cap today and is driven entirely by query pattern (a full-table scan on every `/api/sites` call, plus a "total + grouped" query pair per chart, against a 41-widget default dashboard) rather than by data volume. That pattern will keep costing more per query as `hits` grows, and D1 now hard-fails (not throttles) once the daily cap is hit — the two counter-measures in §4 (cache the sites-scan, merge total+grouped queries) are the highest-leverage, lowest-risk fixes and require no plan upgrade.
+
+## 6. New dimensions (feat/all-beacon-fields, 2026-09-26) — no regression
+
+"All beacon data on demand" adds `screenw` (real column), `screenwBucket` and `pathFamily`
+(both derived via a `CASE` expression in `functions/api/geo.ts`) as groupable AND filterable
+dimensions, plus a per-chart "include event beacons" opt-in that can drop the standing
+`popupExcludeClause` path-prefix filter. All four measured read-only against production
+`gss-geo` (7-day window, same `SUM(c) OVER ()` merged-query shape §4 already uses), with
+`EXPLAIN QUERY PLAN` confirming the index choice:
+
+| # | Query | WHERE columns | `rows_read` | Index used |
+|---|---|---|---|---|
+| 1 | Breakdown by `screenwBucket`, no site, event paths excluded (default) | `ts` (range) + 8 popup-prefix exclusions | **719** | `SEARCH hits USING INDEX idx_hits_ts (ts>? AND ts<?)` |
+| 2 | Breakdown by `pathFamily`, no site, **`includeEventBeacons: true`** (no path-prefix filter at all) | `ts` (range) only | **770** | `idx_hits_ts` |
+| 3 | Breakdown by `device`, filtered by the new `pathFamily = 'install'` derived-expression constraint (`(CASE …) = ?`), plus the standing exclusion | `ts` (range) + prefix exclusions + one derived-CASE equality | **382** | `idx_hits_ts` |
+| 4 | Breakdown by `screenw` (raw), site-scoped (`site = 'bestsudoku-web'`) | `site` + `ts` (range) + prefix exclusions | **605** | `SEARCH hits USING INDEX idx_hits_site_ts (site=? AND ts>? AND ts<?)` |
+
+All four land in the same range as §4's pre-existing single-dim breakdown queries (198–907
+`rows_read`) — **no full-table scan, no new index needed**. `idx_hits_ts`/`idx_hits_site_ts`
+are still the plan SQLite picks for every one of them: a `CASE` expression in the SELECT list
+or the WHERE clause (query 3's derived-dimension filter) isn't something SQLite can push into
+an index lookup, but it doesn't defeat the `ts`/`site` range-scan that already runs first — the
+same "TEMP B-TREE for GROUP BY" cost every existing breakdown query already pays, not a new
+one. Query 2 (events included) reads slightly MORE rows than query 1 (770 vs. 719) simply
+because it scans a few dozen more matching rows once the 8-prefix exclusion is lifted — not a
+different plan. No `CREATE INDEX` or write statement was run for this section either.
