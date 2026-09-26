@@ -102,6 +102,7 @@ const loadedAt = computed(() => (data.value ? Date.parse(data.value.generatedAt)
       <p v-else-if="!data.storeReadable" class="state small mono">Readings store unreadable — showing config spend only.</p>
       <p class="note">{{ SMALL_SAMPLE_NOTE }} Proposals only; the routine never changes a campaign.</p>
       <AdsRefreshButton v-if="data.storeBound && campaigns.length" :campaign-ids="campaigns.map((c) => c.campaignId)" @refreshed="onRefreshed" />
+      <p v-for="a in data.syncAlerts ?? []" :key="a.source + a.startedAt" class="sync-alert small mono">Sync alert: {{ a.message }}</p>
 
       <div v-for="c in campaigns" :key="c.campaignId" class="camp">
         <div class="camp-head">
@@ -199,6 +200,10 @@ const loadedAt = computed(() => (data.value ? Date.parse(data.value.generatedAt)
 }
 .stale {
   color: #bc4749;
+}
+.sync-alert {
+  color: #bc4749;
+  margin: 0 0 6px;
 }
 .fired {
   font-size: 11px;

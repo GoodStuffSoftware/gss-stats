@@ -50,6 +50,8 @@ All notable changes to **gss-stats** are documented here. The format follows
   read never decides on a yesterday pulled before Google's late data arrived.
 - **A day counts as final from 03:00 ET the next day.** A pull just after midnight no longer
   marks yesterday as closed, so late clicks and cost that Google adds overnight are picked up.
+- **A sync run that was cut off mid-run is reported.** The readings log shows a "Sync alert"
+  and the morning, backstop and post-flight reports print it, instead of the run vanishing.
 - **The Refresh warning about a mismatched sync Worker covers every campaign setting** (name,
   kind, budget, cap and measurement as well as the flight).
 

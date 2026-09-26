@@ -61,7 +61,10 @@ export interface SyncOptions {
   now: number
   dryRun: boolean
   source: SyncSource
-  /** Re-pull every day in the window, not just what is due (the backfill, an operator check). */
+  /** Re-pull every day in the window, not just what is due (the backfill, an operator check).
+   * NOT resumable under `maxDays` (review I3): a capped full re-pull covers the newest days
+   * only, and later runs pull only what is missing. The local CLIs pass no cap; through the
+   * Worker, give a `maxDays` (up to 31) that covers the window. */
   full?: boolean
   /** Also read today's partial numbers (returned, never stored). */
   includeToday?: boolean
@@ -717,7 +720,9 @@ export async function syncAdsData(deps: SyncDeps, opts: SyncOptions, snapshot?: 
     result.error = firstError
       ? summarizeError(firstError, 300)
       : deferred.length
-        ? `work cap: ${deferred.map((r) => r.campaignId).join(', ')} continue${deferred.length === 1 ? 's' : ''} next run`
+        ? opts.full
+          ? `work cap: the full re-pull of ${deferred.map((r) => r.campaignId).join(', ')} covered only the newest ${opts.maxDays} day(s) and is not resumed by later runs (they pull only missing days); rerun with a larger maxDays (up to 31) or locally with npm run ads:backfill`
+          : `work cap: ${deferred.map((r) => r.campaignId).join(', ')} continue${deferred.length === 1 ? 's' : ''} next run`
         : null
   }
   result.finishedAt = new Date(opts.now + Math.max(0, Date.now() - t0)).toISOString()

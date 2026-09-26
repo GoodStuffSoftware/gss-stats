@@ -308,7 +308,9 @@ The campaigns page and the readings widget show **"Spend through &lt;date&gt; ·
 &lt;relative time&gt;"** per campaign (`spendThrough`, `lastSync` from `/api/campaigns` and
 `/api/ads/readings`), and **"stale — sync pending"** when a flight day that should be stored
 by now is missing: yesterday from 09:30 ET (the 08:00 ET morning read has synced by then),
-otherwise the day before. Their **Refresh data** button posts to `/api/ads/refresh` (behind
+otherwise the day before. A sync run that claimed and never finished (killed mid-run, e.g. by
+a CPU limit) shows as a **"Sync alert"** line in the readings widget once it is 15 minutes old
+(for 7 days), and the morning, backstop and post-flight reports print it as `SYNC ALERT`. Their **Refresh data** button posts to `/api/ads/refresh` (behind
 the sign-in gate), which asks the sync Worker to run only when something is stale, at most once
 per 10 minutes. The dashboard holds no Google Ads credential and never calls the Ads API.
 
@@ -323,7 +325,10 @@ per 10 minutes. The dashboard holds no Google Ads credential and never calls the
   the Worker has no `workers.dev` URL, no preview URLs and no route. Nothing due → 200 "up to
   date". Otherwise it claims atomically (a `'running'` row, only if no run finished in the last
   10 minutes); a concurrent request loses and gets 429. Operator body: `{"full": true,
-  "campaignIds": [...], "maxDays": n}`.
+  "campaignIds": [...], "maxDays": n}`. A full re-pull through the Worker is capped like any
+  run (`maxDays`, default 7, at most 31), keeps the newest days and is **not resumed** by later
+  runs (they pull only missing days): give a `maxDays` that covers the window, or run
+  `npm run ads:backfill` / `npm run ads:sync -- --full` locally, which are uncapped.
 - **Per-run caps (Workers Free, 10 ms CPU):** at most 7 closed days (live campaigns first, the
   last 3 days before an older gap, and an older gap's newest missing days first) and 40 D1
   statements; the rest continues next run. Measured live: a no-op 1-4 ms CPU (6 ms on a

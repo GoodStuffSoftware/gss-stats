@@ -28,13 +28,19 @@ export function syncLine(s: SpendSection): string {
   return `  sync (shared): ${y.outcome}${pulled ? `, pulled ${pulled}` : ''}; ${n(y.daysChanged)} day row(s) and ${n(y.placementRowsChanged)} placement row(s) changed; stored through ${y.spendThrough ?? '—'}${s.sync && !y.runRecorded ? '; sync run not recorded' : ''}${y.warnings?.length ? `; warning: ${y.warnings.join('; ')}` : ''}`
 }
 
+/** Killed sync runs (review I2), one line each. */
+export function syncAlertLines(s: SpendSection): string[] {
+  return (s.syncAlerts ?? []).map((m) => `  SYNC ALERT: ${m}`)
+}
+
 function spendLines(s: SpendSection): string[] {
-  if (!s.ok) return [`Spend: NOT READ (${s.error})`, syncLine(s)]
+  if (!s.ok) return [`Spend: NOT READ (${s.error})`, syncLine(s), ...syncAlertLines(s)]
   const ctr = gateRate(s.cumulative.clicks, s.cumulative.impressions)
   const lines = [
     `Spend (Google Ads API, closed days through ${s.throughEt ?? 'none yet'}): yesterday ${s.yesterday ? `${money(s.yesterday.cost)} (budget ${money(s.dailyBudget)}), ${n(s.yesterday.impressions)} impr, ${n(s.yesterday.clicks)} clicks` : '—'}`,
     `  cumulative ${money(s.cumulative.cost)} of the ${money(s.hardCap)} cap over ${s.cumulative.days} day(s); CTR ${ctr.value == null ? '—' : pct(ctr.value)} (${n(s.cumulative.clicks)}/${n(s.cumulative.impressions)})${s.todayPartial ? `; today so far ${money(s.todayPartial.cost)} (partial, not counted)` : ''}`,
     syncLine(s),
+    ...syncAlertLines(s),
   ]
   for (const r of s.restated) lines.push(`  restated: ${r.date} ${money(r.before)} → ${money(r.after)}`)
   return lines
@@ -151,7 +157,7 @@ export function formatMorningReport(r: MorningResult): string {
     if (r.hardCapDaily) out.push(`Hard cap (every read): [${r.hardCapDaily.status}] ${r.hardCapDaily.detail}`)
   } else {
     out.push(r.spend.ok ? `Today so far: ${money(r.spend.todayPartial?.cost ?? 0)} (served today: ${(r.spend.todayPartial?.cost ?? 0) > 0 ? 'yes' : 'no'})` : `Spend: NOT READ (${r.spend.error})`)
-    out.push(syncLine(r.spend))
+    out.push(syncLine(r.spend), ...syncAlertLines(r.spend))
   }
   const h = r.releaseHealth
   if (!h.evaluated) out.push(`Release health: ${h.reason}`)
