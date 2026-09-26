@@ -22,7 +22,7 @@
 // with an ordinary (arbitrarily long) AND/OR WHERE clause, and functions/api/campaigns.ts
 // issues one small query per campaign rather than one UNIONed mega-query across all three.
 
-import { classifyPopupPath, computeRate, TRACKING_ACTIVATION_DATE_ET, etDateFromMs } from './popupEvents'
+import { classifyPopupPath, computeRate, TRACKING_ACTIVATION_DATE_ET, NEW_BEACONS_LIVE_AT_ET, etDateFromMs } from './popupEvents'
 
 // ET hour-of-day (0-23) for "Arrivals by ET hour of day" — same DST-safe Intl approach as
 // popupEvents.ts's etDateFromMs, just formatting the hour instead of the calendar date.
@@ -327,21 +327,32 @@ export const FUNNEL_STEP_LABELS: Record<FunnelStepKey, string> = {
   install: 'Install',
 }
 
-// Steps with NO matching path anywhere in production D1 (confirmed 2026-09-25 by scanning
-// every distinct path on site='bestsudoku-web', tagged or not — see task report). Always
-// "not instrumented" everywhere, never a real 0 — classifyFunnelPath below can never
-// return 'completed' for this reason (nothing to match), UNLESS the deferred proxy hook
-// right below is turned on.
+// Steps with NO matching path anywhere in production D1 as of 2026-09-25 (confirmed by
+// scanning every distinct path on site='bestsudoku-web', tagged or not — see task report).
+// STALE as a blanket claim since v1.95.5 (2026-09-26T19:43:02Z) added `/game/complete/...`
+// — classifyFunnelPath below DOES now return 'completed' for those rows — but this set is
+// kept as the FALLBACK "not instrumented" default for callers that don't do a per-window
+// "did this path exist yet" check (functions/api/overview.ts's scorecard; see
+// gameCompleteNotInstrumented below for the per-flight version functions/api/campaigns.ts's
+// own seenSteps query already computes empirically and correctly with no further change).
 export const FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED = new Set<FunnelStepKey>(['completed'])
 
-// CONFIG HOOK (deferred, disabled by default): '/game' has no distinct "you finished a game"
-// event of its own, but '/signin-eligible/*' fires only after a game plays out — a possible
-// SIGNED-OUT proxy for "completed" (not a real completion signal, just correlated timing).
-// null = disabled (current state) — 'completed' stays globally not-instrumented and
-// classifyFunnelPath never returns it. To turn this on once product signs off: set this to
-// '/signin-eligible', remove 'completed' from FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED above,
-// and change COMPLETED_PROXY_LABEL's caller sites to show it as a labeled proxy, not a
-// real "Completed a game" count.
+/** A campaign flight predates the game-complete beacon entirely when it's already over
+ * before NEW_BEACONS_LIVE_AT_ET (v1.95.5) — same shape as returnBeaconNotInstrumented
+ * below, reusing lib/popupEvents.ts's NEW_BEACONS_LIVE_AT_ET rather than a second constant.
+ * Callers that can't do functions/api/campaigns.ts's per-flight "did this path exist
+ * site-wide during the window" query (e.g. the overview scorecard) use this instead of the
+ * permanent FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED default once a flight's window reaches
+ * the live instant. */
+export function gameCompleteNotInstrumented(campaign: CampaignFlight): boolean {
+  return campaign.flightEnd < NEW_BEACONS_LIVE_AT_ET
+}
+
+// CONFIG HOOK (deferred, disabled by default, superseded by the real /game/complete/ beacon
+// below as of v1.95.5 — kept only in case product ever wants a SIGNED-OUT proxy for
+// pre-v1.95.5 history): '/signin-eligible/*' fires only after a game plays out — a possible
+// proxy for "completed" before the real beacon existed (not a real completion signal, just
+// correlated timing). null = disabled (current state).
 export const COMPLETED_PROXY_PATH_PREFIX: string | null = null
 /** Shown instead of "Completed a game" wherever COMPLETED_PROXY_PATH_PREFIX is enabled. */
 export const COMPLETED_PROXY_LABEL = 'signed-out completions (proxy, deferred)'
@@ -350,9 +361,29 @@ export const COMPLETED_PROXY_LABEL = 'signed-out completions (proxy, deferred)'
  * flight 1/2's uc) — the ad appears to land users directly into gameplay rather than a
  * separate marketing page, so "arrival" and "played" are close for this data. */
 const PLAYED_PATH = '/game'
-/** "auth success" — `/auth/success/<provider>`; NOT part of lib/popupEvents.ts's
+/** "completed a game" — v1.95.5 (live 2026-09-26T19:43:02Z, see lib/popupEvents.ts
+ * GAME_COMPLETE_LIVE_AT): `/game/complete/<normal|daily>/<easy|medium|hard|expert|
+ * unknown>`, one row per distinct completed game record (replays of the same puzzle
+ * aren't recounted — that dedup happens app-side, before the beacon fires). Matched by
+ * PREFIX, not the strict segment shape, same convention as every other family here — an
+ * unrecognized mode/difficulty still counts as a completion, it just isn't broken out.
+ * WITH the trailing slash — see lib/popupEvents.ts POPUP_EVENT_PREFIXES for why
+ * `/game/complete/` (not `/game` or `/game/complete`) is the exact anchor that keeps this
+ * from ever matching the `/game` page-view path itself. */
+const GAME_COMPLETE_PREFIX = '/game/complete/'
+/** "auth success" — the BASE two-segment path only, `/auth/success/<provider>`. v1.95.5
+ * (live 2026-09-26T19:43:02Z, see lib/adsRules.ts AUTH_NEW_EXISTING_LIVE_AT) added a
+ * THIRD segment, `/auth/success/<provider>/<new|existing|unknown>`, fired ALONGSIDE the
+ * base row for the SAME sign-in — matching by prefix (as this file used to) double-counts
+ * every sign-in once the new beacon is live. NOT part of lib/popupEvents.ts's
  * POPUP_EVENT_PREFIXES (an ordinary page path there), so classified here directly. */
-const AUTH_SUCCESS_PREFIX = '/auth/success/'
+export const AUTH_SUCCESS_PATHS = ['/auth/success/google', '/auth/success/email'] as const
+/** THE auth-success check everywhere in this codebase (functions/api/overview.ts,
+ * lib/adsRules.ts's summarizeTaggedRows) — exact base-path match only, never a prefix, so
+ * the new/existing suffix row (same sign-in) is never double-counted alongside it. */
+export function isAuthSuccessPath(path: string): boolean {
+  return (AUTH_SUCCESS_PATHS as readonly string[]).includes(path)
+}
 
 /** Classifies ONE path into at most one funnel step (mutually exclusive path families,
  * same design as popupEvents.ts's classifyPopupPath — reused here for the shared
@@ -362,8 +393,9 @@ const AUTH_SUCCESS_PREFIX = '/auth/success/'
  * 'platformList', a bucket this function never maps to a step. */
 export function classifyFunnelPath(path: string): FunnelStepKey | null {
   if (path === PLAYED_PATH) return 'played'
+  if (path.startsWith(GAME_COMPLETE_PREFIX)) return 'completed'
   if (COMPLETED_PROXY_PATH_PREFIX && path.startsWith(COMPLETED_PROXY_PATH_PREFIX)) return 'completed' // disabled by default — see the hook above
-  if (path.startsWith(AUTH_SUCCESS_PREFIX)) return 'authSuccess'
+  if (isAuthSuccessPath(path)) return 'authSuccess'
   const ev = classifyPopupPath(path)
   if (!ev) return null
   if ((ev.family === 'signin-prompt' || ev.family === 'promo-first50') && ev.kind === 'shown') return 'ask'

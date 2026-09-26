@@ -149,6 +149,20 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   never grays out or "unmeasures" days after it, since a low count right after submission
   is the expected shape of a staged rollout, not a tracking gap.
 
+  **v1.95.5 go-live markers** (`GAME_COMPLETE_LIVE_AT` in `lib/popupEvents.ts`,
+  `AUTH_NEW_EXISTING_LIVE_AT` in `lib/adsRules.ts` — both `2026-09-26T19:43:02Z`, the first
+  confirmed-live instant): this release added `/game/complete/<mode>/<difficulty>` (one row
+  per distinct completed game — see "Completed a game" below) and a
+  `/auth/success/<provider>/<new|existing|unknown>` beacon that fires ALONGSIDE the existing
+  base `/auth/success/<provider>` row for the same sign-in. Every auth-success count in this
+  codebase (overview KPIs/release panel, the campaign funnel, the ads-read routine) counts
+  only the base two-segment path — `AUTH_SUCCESS_PATHS` /`isAuthSuccessPath` in
+  `lib/campaigns.ts` — so the new suffix row is never double-counted. The completion beacon
+  is excluded from every page-view/visit count the same way every other pop-up/event beacon
+  is (`POPUP_EVENT_PREFIXES`), and powers a new, live "Completed a game" funnel step and
+  overview tile (previously always "not yet tracking" — nothing matched before this
+  release). A mode/difficulty completions breakdown is a planned follow-up.
+
   Because production has only 14 registered users (2026-09-26), every rate-bearing page
   (pop-ups, campaigns, overview) also carries a standing **small-sample note** ("Very small
   numbers: rates are anecdotal. Always read the counts.") and every computed rate shows its

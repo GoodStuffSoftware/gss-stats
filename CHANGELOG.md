@@ -6,6 +6,24 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-09-26
+
+### Fixed
+- **Completed-game beacons no longer inflate page views.** Best Sudoku's new per-game
+  completion beacon was being counted as an ordinary page view everywhere page views are
+  totaled; it's now excluded the same way every other event beacon is, while the real
+  "played a game" page view is unaffected.
+- **Auth successes were being double-counted.** Best Sudoku's new sign-up/sign-in
+  breakdown beacon fires alongside the existing auth-success beacon for the same event;
+  every auth-success count in the dashboard and the scheduled ads-read routine now counts
+  the event once, not twice.
+
+### Added
+- **"Completed a game" is now a real, live funnel step and overview tile** (previously
+  always shown as not-yet-tracked), backed by Best Sudoku's new per-game completion
+  beacon, with a go-live marker on the relevant charts. A mode/difficulty breakdown of
+  completions is a planned follow-up.
+
 ## [0.6.0] — 2026-09-26
 
 ### Added

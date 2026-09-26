@@ -35,6 +35,7 @@ import {
   placementId,
   SIGNUP_PROXY_NOTE,
   AUTH_SUCCESS_SPLIT_RECOMMENDATION,
+  AUTH_NEW_EXISTING_LIVE_AT,
   servingStateOf,
   canProposePause,
   noPauseNote,
@@ -397,6 +398,19 @@ describe('summarizeTaggedRows (campaign-attributed new indicators)', () => {
   it('an ET-day window keeps only that day\'s hour buckets', () => {
     const s = summarizeTaggedRows(rows, { fromMs: H('2026-09-28T04:00:00Z'), toMs: H('2026-09-29T04:00:00Z') })
     expect(s.taggedArrivals).toBe(5)
+  })
+  it('AUTH_NEW_EXISTING_LIVE_AT is the v1.95.5 go-live instant', () => {
+    expect(AUTH_NEW_EXISTING_LIVE_AT).toBe(Date.parse('2026-09-26T19:43:02Z'))
+  })
+  it('one sign-in fires a base row AND a v1.95.5 new/existing suffix row (same event) — authSuccess counts it once, not twice', () => {
+    const authRows = [
+      { hourStartMs: H('2026-09-28T18:00:00Z'), path: '/auth/success/email', visitor: 'returning', count: 2 },
+      { hourStartMs: H('2026-09-28T18:00:00Z'), path: '/auth/success/email/existing', visitor: 'returning', count: 2 },
+      { hourStartMs: H('2026-09-28T18:00:00Z'), path: '/auth/success/google', visitor: 'returning', count: 1 },
+      { hourStartMs: H('2026-09-28T18:00:00Z'), path: '/auth/success/google/new', visitor: 'returning', count: 1 },
+    ]
+    const s = summarizeTaggedRows(authRows)
+    expect(s.authSuccess).toBe(3) // 2 email + 1 google — NOT 6 (the suffixed rows must not add again)
   })
 })
 

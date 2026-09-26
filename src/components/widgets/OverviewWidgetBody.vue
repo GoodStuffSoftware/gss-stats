@@ -106,6 +106,10 @@ function timelineOverlayPlugin(resp: OverviewResponse) {
       const majors: { date: string; label: string }[] = [
         ...resp.timeline.releaseMarkers.filter((r) => r.major).map((r) => ({ date: r.dateEt, label: r.version })),
         ...(resp.timeline.trackingActivationDate ? [{ date: resp.timeline.trackingActivationDate, label: 'tracking starts' }] : []),
+        // v1.95.5 (game-complete + auth new/existing beacons) — usually the same calendar
+        // day as trackingActivationDate above; both still render (a hover-worthy overlap
+        // beats silently dropping a real go-live marker).
+        ...(resp.timeline.newBeaconsLiveAt ? [{ date: resp.timeline.newBeaconsLiveAt, label: resp.timeline.newBeaconsLiveAtLabel }] : []),
       ]
       const minors = resp.timeline.releaseMarkers.filter((r) => !r.major)
       for (const m of majors) {
