@@ -121,6 +121,13 @@ npx wrangler d1 create gss-stats-ads                       # id 785327a3-683c-4f
 npx wrangler d1 migrations apply gss-stats-ads --remote    # = npm run ads:migrate (0001, then 0002 the same day, then 0003)
 ```
 
+0003 was applied to the remote database on 2026-09-26 (row counts unchanged: 3 campaigns, 13
+day rows, 185 placement rows, 0 readings, 0 thresholds). The first live `npm run ads:sync`
+then stored 19 closed day rows (the two closed campaigns' zero-spend days through flight end
++ 3, and placement coverage on the existing ones; the 185 placement rows re-pulled identical);
+a second run made no Ads call and changed nothing, and a `--full` re-pull fetched all 19 days
+and 185 placement rows and changed nothing.
+
 The binding is in `wrangler.toml`; it takes effect on the next deploy of `main`. Sync (a no-op
 when nothing changed): `npm run ads:sync -- --cf-token-file <path>`; full re-pull with the
 config check: `npm run ads:backfill -- --cf-token-file <path>`.

@@ -84,7 +84,9 @@ export function parseD1Json(stdout: string): Record<string, unknown>[] {
 }
 /** The same, plus meta.changes (null when wrangler does not report it). */
 export function parseD1Response(stdout: string): { results: Record<string, unknown>[]; changes: number | null } {
-  const start = stdout.indexOf('[')
+  // The JSON array starts a line; a "▲ [WARNING] …" banner before it must not be mistaken for it.
+  const m = /^\[/m.exec(stdout)
+  const start = m ? m.index : -1
   if (start < 0) throw new Error('wrangler returned no JSON')
   const parsed = JSON.parse(stdout.slice(start))
   const first = Array.isArray(parsed) ? parsed[0] : parsed
