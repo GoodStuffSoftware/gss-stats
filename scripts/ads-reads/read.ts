@@ -588,6 +588,14 @@ async function appendReadings(
     if (put.ok) outcome = put.value
     else error = put.error
   }
+  // A complete threshold read that is NOT appended again (already stored today) still gets its
+  // idempotent threshold-state insert: a state row lost to an earlier partial write is restored
+  // now instead of the threshold firing again tomorrow.
+  const skippedComplete = plan.skip.map((s) => s.record).filter((r) => r.kind === 'threshold' && r.complete)
+  if (skippedComplete.length) {
+    const st = await attempt('store write (threshold state)', () => deps.store.ensureThresholdState(skippedComplete))
+    if (!st.ok && !error) error = st.error
+  }
   for (const id of outcome.ignored) {
     const r = plan.append.find((x) => x.id === id)!
     dedup.skipped.push({ kind: r.kind, entryKind: r.entryKind!, reason: 'already recorded today (stored by a concurrent run)' })
@@ -723,8 +731,12 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
   if (spend.storeError) errors.push(spend.storeError)
   if (campaignSync.fetchOk && campaignSync.placementsOk === false && campaignSync.error && !errors.includes(campaignSync.error)) errors.push(campaignSync.error)
 
-  const consumedA = await attempt('store read (threshold state)', () => deps.store.getConsumedThresholds(plan.campaignId))
+  // Consumed = the threshold-state rows PLUS any complete threshold reading (a state row lost to
+  // a partial write must never make a threshold fire twice).
+  const ledgerA = await attempt('store read (threshold state)', () => deps.store.getThresholdLedger(plan.campaignId))
+  const consumedA: Attempt<number[]> = ledgerA.ok ? { ok: true, value: [...new Set([...ledgerA.value.state, ...ledgerA.value.fromReadings])].sort((a, b) => a - b) } : ledgerA
   if (!consumedA.ok) errors.push(consumedA.error)
+  const unrecordedState = ledgerA.ok ? ledgerA.value.fromReadings.filter((t) => !ledgerA.value.state.includes(t)) : []
   // If the state is unreadable, treat nothing as consumed: a duplicate push beats a missed
   // $50 kill-rule read. The report says so.
   const consumed = consumedA.ok ? consumedA.value : []
@@ -735,12 +747,20 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
   let missedReads: string[] = []
   if (!opts.healthOnly) {
     const recent = await attempt('store read (readings)', () => deps.store.getReadings(plan.campaignId, 60))
-    if (recent.ok) missedReads = missingDailyReads(recent.value, todayEt, plan.morningReadFirstEt, plan.morningReadLastEt)
-    else errors.push(recent.error)
+    if (recent.ok) {
+      missedReads = missingDailyReads(recent.value, todayEt, plan.morningReadFirstEt, plan.morningReadLastEt)
+      // Heal: a complete threshold reading whose state row is missing (a partial write) gets it
+      // back. The ledger already counts it as consumed, so it cannot fire twice meanwhile.
+      const toHeal = recent.value.filter((r) => r.kind === 'threshold' && r.complete && r.thresholds.some((t) => unrecordedState.includes(t)))
+      if (toHeal.length && !deps.dryRun) {
+        const heal = await attempt('store write (threshold state)', () => deps.store.ensureThresholdState(toHeal))
+        if (!heal.ok) errors.push(heal.error)
+      }
+    } else errors.push(recent.error)
   }
 
   const beacon = deps.beacon
-  const taggedRows = beacon ? await attempt('beacon tagged', () => beacon.tagged(campaign)) : unavailable<TaggedRow[]>('beacon tagged', deps.beaconInitError)
+  const taggedRows = beacon ? await attempt('beacon tagged', () => beacon.tagged(campaign, deps.boundaries?.upsellFixAtMs)) : unavailable<TaggedRow[]>('beacon tagged', deps.beaconInitError)
   if (!taggedRows.ok) errors.push(taggedRows.error)
   const yStart = etMidnightUtcMs(yesterdayEt)
   const yEnd = etMidnightUtcMs(todayEt)
@@ -1138,7 +1158,7 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
   }
 
   const beacon = deps.beacon
-  const taggedRows = beacon ? await attempt('beacon tagged', () => beacon.tagged(campaign)) : unavailable<TaggedRow[]>('beacon tagged', deps.beaconInitError)
+  const taggedRows = beacon ? await attempt('beacon tagged', () => beacon.tagged(campaign, deps.boundaries?.upsellFixAtMs)) : unavailable<TaggedRow[]>('beacon tagged', deps.beaconInitError)
   const wantsCohort = COHORT_TIER_STAGES.includes(opts.stage)
   const { read } = await fullRead(deps, {
     plan,

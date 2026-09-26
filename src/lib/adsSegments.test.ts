@@ -59,13 +59,27 @@ describe('sign-ups: "at most N" until the new/existing split is live, then exact
     expect(campaignSignUps(s(2, 3, 4), 5, null)).toMatchObject({ count: 5, exact: false, exactNew: null })
     expect(campaignSignUps(s(2, 3, 4), null, null)).toMatchObject({ count: 9, exact: false })
   })
-  it('once live: /new counts exactly, /existing never counts, unsplit rows stay "at most"', () => {
-    const mixed = campaignSignUps(s(2, 3, 4), 1, LIVE)
-    expect(mixed).toMatchObject({ count: 1 + 3, exact: false, bounded: 1, exactNew: 3 })
-    expect(mixed.label).toMatch(/^at most 4 campaign sign-ups: at most 1 before the new\/existing split \(2026-09-29 12:00 ET; tagged auth successes 2; new prod accounts sitewide in the window 1\) \+ exactly 3 after it/)
+  it('once live: /new counts exactly, /existing never counts, unsplit rows stay "at most" within the accounts /new has not claimed', () => {
+    // count = min(unsplit, max(0, windowNew − exactNew)) + exactNew, exactNew capped at windowNew
+    const mixed = campaignSignUps(s(2, 3, 4), 10, LIVE)
+    expect(mixed).toMatchObject({ count: 2 + 3, exact: false, bounded: 2, exactNew: 3, newCapped: false })
+    expect(mixed.label).toMatch(
+      /^at most 5 campaign sign-ups: at most 2 before the new\/existing split \(2026-09-29 12:00 ET; tagged auth successes 2; new prod accounts sitewide in the window 10, less the 3 counted after it\) \+ exactly 3 after it/,
+    )
+    expect(campaignSignUps(s(5, 3, 0), 4, LIVE)).toMatchObject({ count: 1 + 3, bounded: 1, exactNew: 3 }) // only 4 − 3 = 1 account left for the unsplit rows
     const exact = campaignSignUps(s(0, 2, 7), 9, LIVE)
     expect(exact).toMatchObject({ count: 2, exact: true, bounded: 0, exactNew: 2 })
     expect(exact.label).toBe('2 campaign sign-ups (exact: tagged /auth/success/<provider>/new since 2026-09-29 12:00 ET)')
+  })
+  it("the reviewer's probe: 1 unsplit, 1 /new, 1 new account sitewide → 1, not 2", () => {
+    expect(campaignSignUps(s(1, 1, 0), 1, LIVE)).toMatchObject({ count: 1, exact: false, bounded: 0, exactNew: 1 })
+  })
+  it('/new rows beyond the window\'s new accounts (a repeated beacon) are capped, and the count is then an upper bound', () => {
+    const capped = campaignSignUps(s(0, 3, 0), 2, LIVE)
+    expect(capped).toMatchObject({ count: 2, exact: false, exactNew: 2, newCapped: true })
+    expect(capped.label).toBe('at most 2 campaign sign-ups (tagged /auth/success/<provider>/new rows 3, capped at the 2 new prod accounts sitewide in the window)')
+    // without the window count nothing can cap it: the /new rows stand, still exact
+    expect(campaignSignUps(s(0, 3, 0), null, LIVE)).toMatchObject({ count: 3, exact: true })
   })
   it('an exact count reads the spec rows plainly; a bound still says "at most"', () => {
     expect(decideAt100({ signUpsAtMost: 2, asks: 9, accepts: 3, exact: true }).reading).not.toMatch(/at most/i)
@@ -123,6 +137,19 @@ describe('the signed-out upsell fix as a funnel segment boundary (spec section 1
     expect(seg.post.signUps.count).toBe(1)
     expect(seg.boundaryDaySpend).toBe(11)
     expect(seg.note).toMatch(/two separate short tests/)
+  })
+  it('the split is exact at the instant when the query flags rows (SQL ts >= fix), not by hour bucket', () => {
+    // Same hour as the fix: 3 upsells before 14:26 ET, 4 after, as the beacon query's `uf` splits them.
+    const flagged = [
+      { ...row('2026-09-29T18:00:00Z', '/upsell/shown/game-limit', 3), postUpsellFix: false },
+      { ...row('2026-09-29T18:00:00Z', '/upsell/shown/game-limit', 4), postUpsellFix: true },
+      { ...row('2026-09-29T18:00:00Z', '/upsell/accept/game-limit', 1), postUpsellFix: true },
+    ]
+    const seg = splitAtBoundary({ ...base, rows: flagged, boundaryMs: FIX })!
+    expect(seg.pre.upsell).toMatchObject({ shown: 3, accept: 0 })
+    expect(seg.post.upsell).toMatchObject({ shown: 4, accept: 1 })
+    const m = campaignSegmentMarker({ flightStart: '2026-09-26', flightEnd: '2026-10-02' }, flagged, FIX)!
+    expect(m.upsell).toMatchObject({ pre: { shown: 3 }, post: { shown: 4, accept: 1 } })
   })
   it('no boundary when unset or outside the read window', () => {
     expect(splitAtBoundary({ ...base })).toBeNull() // UPSELL_SIGNEDOUT_FIX_AT is null

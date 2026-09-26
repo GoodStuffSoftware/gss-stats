@@ -14,6 +14,10 @@ const busy = ref(false)
 const message = ref<string | null>(null)
 
 function describe(r: RefreshResult): string {
+  if (r.workerConfigDrift) return `${describePlain(r)}. Note: the sync worker runs older campaign settings and needs a redeploy.`
+  return describePlain(r)
+}
+function describePlain(r: RefreshResult): string {
   if (r.reason === 'synced') return 'Synced'
   if (r.reason === 'up to date') return 'Already up to date'
   if (r.reason === 'rate-limited') return `Synced recently; try again in ${Math.max(1, Math.ceil((r.retryAfterSec ?? 60) / 60))} min`

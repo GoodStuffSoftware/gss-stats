@@ -55,6 +55,7 @@ export function createD1Store(opts: { run: WranglerRunner; dryRun: boolean; data
   return createSqlAdsStore(wranglerAdsDb(opts.run, opts.database ?? ADS_DB_NAME), { dryRun: opts.dryRun, kind: 'd1' })
 }
 
+
 /** In-memory store with the same semantics (append-only readings de-duped per campaign, ET day
  * and entry kind; fire-once thresholds; upserted metrics) for tests and --fixture runs.
  * `written` records what a real run would have written. */
@@ -80,6 +81,7 @@ export function createMemoryStore(
   let log: ReadingsLog | null = seed.readings?.length ? { v: 1, campaignId: seed.readings[0].campaignId, readings: seed.readings.map((r) => ({ ...r, entryKind: r.entryKind ?? readingEntryKind(r) })) } : null
   const consumed = new Set<number>(seed.consumed ?? consumedThresholds(seed.readings ?? []))
   const written = { campaigns: 0, metricsDays: [] as string[], placements: 0, readings: [] as ReadingRecord[], syncRuns: [] as SyncRunRecord[] }
+  const claims: { source: string; atMs: number }[] = []
   return {
     kind: 'memory',
     dryRun,
@@ -91,8 +93,25 @@ export function createMemoryStore(
       written.campaigns += c.length
       return true
     },
-    async getDailyRows(id) {
-      return [...rowsOf(id).values()].sort((a, b) => (a.date < b.date ? -1 : 1)).map((r) => ({ ...r }))
+    async getAllDailyRows() {
+      return new Map([...days.entries()].map(([id, m]) => [id, [...m.values()].sort((a, b) => (a.date < b.date ? -1 : 1)).map((r) => ({ ...r }))]))
+    },
+    async getLastPulls() {
+      const out = new Map<string, string>()
+      for (const r of [...written.syncRuns].sort((a, b) => (a.finishedAt < b.finishedAt ? 1 : -1))) for (const id of r.campaignsPulled ?? []) if (!out.has(id)) out.set(id, r.finishedAt)
+      return out
+    },
+    async claimSync(source, nowMs, windowMs) {
+      if (dryRun) return true
+      const lastFinished = Math.max(...written.syncRuns.map((r) => Date.parse(r.finishedAt)), ...claims.map((c) => c.atMs), -Infinity)
+      if (lastFinished > nowMs - windowMs) return false
+      claims.push({ source, atMs: nowMs })
+      return true
+    },
+    async ensureThresholdState(records) {
+      if (dryRun) return false
+      for (const r of records) if (r.kind === 'threshold' && r.complete) for (const t of r.thresholds) consumed.add(t)
+      return true
     },
     async putDailyRows(id, rows) {
       if (dryRun) return false
@@ -118,7 +137,10 @@ export function createMemoryStore(
       return true
     },
     async getConsumedThresholds() {
-      return [...consumed].sort((a, b) => a - b)
+      return [...new Set([...consumed, ...consumedThresholds(log?.readings ?? [])])].sort((a, b) => a - b)
+    },
+    async getThresholdLedger() {
+      return { state: [...consumed].sort((a, b) => a - b), fromReadings: consumedThresholds(log?.readings ?? []) }
     },
     async getReadings(_id, limit = 200) {
       return [...(log?.readings ?? [])].reverse().slice(0, limit)
@@ -132,13 +154,12 @@ export function createMemoryStore(
       for (const r of records) {
         const before = log?.readings.length ?? 0
         log = appendReading(log, r)
-        if ((log?.readings.length ?? 0) === before) {
-          out.ignored.push(r.id)
-          continue
+        if ((log?.readings.length ?? 0) === before) out.ignored.push(r.id)
+        else {
+          out.inserted.push(r.id)
+          written.readings.push({ ...r, entryKind: r.entryKind ?? readingEntryKind(r) })
         }
-        out.inserted.push(r.id)
-        written.readings.push({ ...r, entryKind: r.entryKind ?? readingEntryKind(r) })
-        if (r.kind === 'threshold' && r.complete) for (const t of r.thresholds) consumed.add(t)
+        if (r.kind === 'threshold' && r.complete) for (const t of r.thresholds) consumed.add(t) // idempotent, like the SQL store
       }
       return out
     },

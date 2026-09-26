@@ -558,14 +558,18 @@ describe('same-day reruns: one reading per entry, no repeated push (owner, 2026-
     expect(again.dedup.skipped.map((s) => s.entryKind)).toEqual(['postflight-wrapup'])
     expect(deps.store.written.readings).toHaveLength(1)
   })
-  it('the morning read syncs first through the shared sync: a second read the same morning pulls only the restatement window and changes nothing', async () => {
+  it('the morning read syncs first through the shared sync: a second read an hour later re-pulls no closed day (re-checked an hour ago), reads only today, and changes nothing', async () => {
     const deps = fixtureDeps(base(), false)
     const first = await runMorningRead(deps, opts)
     expect(first.spend.sync).toMatchObject({ fetched: { since: '2026-09-26', until: '2026-09-29' }, daysChanged: 4 })
     const again = await runMorningRead({ ...deps, nowMs: deps.nowMs + hour }, opts)
-    expect(again.spend.sync).toMatchObject({ fetched: { since: '2026-09-27', until: '2026-09-29' }, daysChanged: 0, placementRowsChanged: 0 })
+    expect(again.spend.sync).toMatchObject({ fetched: null, daysChanged: 0, placementRowsChanged: 0 })
+    expect(again.spend.todayPartial).toEqual(first.spend.todayPartial)
     expect(again.spend.cumulative.cost).toBe(first.spend.cumulative.cost)
+    // six hours later the restatement window is due again
+    const later = await runMorningRead({ ...deps, nowMs: deps.nowMs + 7 * hour }, opts)
+    expect(later.spend.sync).toMatchObject({ fetched: { since: '2026-09-27', until: '2026-09-29' }, daysChanged: 0 })
     expect(deps.store.dailyRows('24279250691').map((r) => r.date)).toEqual(['2026-09-26', '2026-09-27', '2026-09-28', '2026-09-29']) // never today's open day
-    expect(deps.store.written.syncRuns.map((r) => r.source)).toEqual(['morning-read', 'morning-read'])
+    expect(deps.store.written.syncRuns.map((r) => r.source)).toEqual(['morning-read', 'morning-read', 'morning-read'])
   })
 })

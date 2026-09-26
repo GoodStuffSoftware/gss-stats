@@ -101,7 +101,14 @@ describe('inlineBinds / sqlLiteral', () => {
 })
 
 describe('beacon reads are read-only and apply the shared exclusions', () => {
-  const queries = [taggedRowsQuery(retest), siteEventsQuery(0), returnRowsQuery(retest), returnSitesQuery(0)]
+  const queries = [taggedRowsQuery(retest), taggedRowsQuery(retest, Date.parse('2026-09-29T18:26:00Z')), siteEventsQuery(0), returnRowsQuery(retest), returnSitesQuery(0)]
+  it('with an upsell-fix instant, the tagged query flags each row exactly at it (uf), binding the instant first', () => {
+    const fix = Date.parse('2026-09-29T18:26:00Z')
+    const q = taggedRowsQuery(retest, fix)
+    expect(q.sql).toMatch(/^SELECT CAST\(ts \/ 3600000 AS INTEGER\) AS hr, path, visitor, \(ts >= \?\) AS uf, COUNT\(\*\) AS c FROM hits WHERE .* GROUP BY hr, path, visitor, uf$/)
+    expect(q.binds[0]).toBe(fix)
+    expect(taggedRowsQuery(retest, null).sql).not.toMatch(/\buf\b/)
+  })
   it('every beacon query passes the SELECT-only guard after inlining', () => {
     for (const q of queries) expect(() => assertReadOnlySql(inlineBinds(q.sql, q.binds))).not.toThrow()
   })
@@ -151,7 +158,7 @@ describe('ads store write guard', () => {
     const stmts = [
       ...campaignSyncStatements(CAMPAIGNS, 'x'),
       ...dailyRowUpserts('24279250691', [{ date: '2026-09-27', costMicros: 1, impressions: 1, clicks: 0, fetchedAt: 'x', placementsFetchedAt: null }]),
-      syncRunInsert({ runKey: 'k', source: 'ads-sync', startedAt: 'a', finishedAt: 'b', campaigns: ['1'], campaignsOk: [], daysFetched: 0, daysChanged: 0, placementRowsFetched: 0, placementRowsChanged: 0, status: 'failed', error: "DROP; it's", detail: {} }),
+      syncRunInsert({ runKey: 'k', source: 'ads-sync', startedAt: 'a', finishedAt: 'b', campaigns: ['1'], campaignsOk: [], campaignsPulled: [], daysFetched: 0, daysChanged: 0, placementRowsFetched: 0, placementRowsChanged: 0, status: 'failed', error: "DROP; it's", detail: {} }),
       ...placementDailyUpserts('24279250691', [{ date: '2026-09-27', placement: 'p', displayName: "it's", type: null, targetUrl: null, approved: true, costMicros: 1, impressions: 1, clicks: 0 }], 'x'),
       readingInsert(rec),
       thresholdStateInsert(rec)!,
@@ -199,7 +206,7 @@ describe('ads store write guard', () => {
     })
     expect(await store.appendReadings([rec])).toEqual({ written: false, inserted: [], ignored: [] })
     expect(await store.putDailyRows('24279250691', [{ date: '2026-09-27', costMicros: 1, impressions: 1, clicks: 0, fetchedAt: 'x', placementsFetchedAt: null }])).toBe(false)
-    expect(await store.appendSyncRun({ runKey: 'k', source: 'ads-sync', startedAt: 'a', finishedAt: 'b', campaigns: [], campaignsOk: [], daysFetched: 0, daysChanged: 0, placementRowsFetched: 0, placementRowsChanged: 0, status: 'ok', error: null, detail: {} })).toBe(false)
+    expect(await store.appendSyncRun({ runKey: 'k', source: 'ads-sync', startedAt: 'a', finishedAt: 'b', campaigns: [], campaignsOk: [], campaignsPulled: [], daysFetched: 0, daysChanged: 0, placementRowsFetched: 0, placementRowsChanged: 0, status: 'ok', error: null, detail: {} })).toBe(false)
     expect(await store.syncCampaigns(CAMPAIGNS, 'x')).toBe(false)
     expect(calls).toEqual([])
   })

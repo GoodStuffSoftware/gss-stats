@@ -112,7 +112,7 @@ export function fixtureDeps(fx: Fixture, dryRun: boolean): ReadDeps & { store: R
   const inRange = (d: string, since: string, until: string) => d >= since && d <= until
   const b: BeaconSource | null = beacon
     ? {
-        tagged: async () => beacon.tagged.map((r) => ({ hourStartMs: hourMs(r), path: r.path, visitor: r.visitor, count: r.count })),
+        tagged: async () => beacon.tagged.map((r) => ({ hourStartMs: hourMs(r), path: r.path, visitor: r.visitor, count: r.count, ...(r.postUpsellFix === undefined ? {} : { postUpsellFix: r.postUpsellFix }) })),
         siteEvents: async (sinceMs) => beacon.siteEvents.map((r) => ({ hourStartMs: hourMs(r), path: r.path, count: r.count })).filter((r) => r.hourStartMs >= sinceMs),
         returns: async () => beacon.returns,
         returnSites: async () => beacon.returnSites.map((s) => ({ site: s.site, count: s.count, firstMs: optMs(s.first, s.firstMs), lastMs: optMs(s.last, s.lastMs) })),

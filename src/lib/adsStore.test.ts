@@ -90,9 +90,11 @@ describe('write builders (routine side)', () => {
   it('threshold state is written only for a COMPLETE threshold read, pointing at its reading', () => {
     const st = thresholdStateInsert(rec({ thresholds: [25, 50] }))!
     expect(st.sql).toMatch(/INSERT INTO ads_threshold_state .* ON CONFLICT \(campaign_id, threshold_usd\) DO NOTHING/)
-    expect(st.sql).toMatch(/\(SELECT id FROM ads_readings WHERE campaign_id = \? AND et_date = \? AND entry_kind = \?\)/)
+    // by the de-dup key, else (a row from before 0003) by its reading_key
+    expect(st.sql).toMatch(/COALESCE\(\(SELECT id FROM ads_readings WHERE campaign_id = \? AND et_date = \? AND entry_kind = \?\), \(SELECT id FROM ads_readings WHERE reading_key = \?\)\)/)
     const t = '2026-09-30T12:05:00.000Z'
-    expect(st.binds).toEqual(['24279250691', 25, t, '24279250691', '2026-09-30', 'threshold-25-50', '24279250691', 50, t, '24279250691', '2026-09-30', 'threshold-25-50'])
+    const k = rec().id
+    expect(st.binds).toEqual(['24279250691', 25, t, '24279250691', '2026-09-30', 'threshold-25-50', k, '24279250691', 50, t, '24279250691', '2026-09-30', 'threshold-25-50', k])
     expect(thresholdStateInsert(rec({ complete: false }))).toBeNull()
     expect(thresholdStateInsert(rec({ kind: 'daily' }))).toBeNull()
   })

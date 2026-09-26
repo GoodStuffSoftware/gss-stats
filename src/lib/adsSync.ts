@@ -3,35 +3,43 @@
 // Every caller runs this and nothing else to fetch spend: the morning read and the backstop
 // (scripts/ads-reads/morning-read.ts), the post-flight read, the backfill, `npm run ads:sync`,
 // and the gss-stats-sync Worker (workers/sync/). Runtime-agnostic: the Ads API arrives as an
-// AdsMetricsSource (lib/adsApi.ts, plain fetch) and the database as an AdsSyncStore
-// (lib/adsStore.ts createSqlAdsStore over a wrangler-CLI or a D1-binding adapter).
+// AdsMetricsSource (lib/adsApi.ts, plain fetch) — built lazily, only when something needs
+// pulling — and the database as an AdsSyncStore (lib/adsStore.ts createSqlAdsStore over a
+// wrangler-CLI or a D1-binding adapter).
 //
-// Per campaign it:
-//  1. reads the stored day rows;
-//  2. works out the missing CLOSED ET days — from the flight's first day (or the first gap)
-//     through yesterday — plus the most recent RESTATEMENT_DAYS closed days, which Google still
-//     restates, and pulls that one range (daily metrics and placement-day rows);
-//  3. zero-fills closed days the API returns nothing for (no rows = no delivery), so the stored
-//     days are contiguous and "spend through" is simply the last stored day;
-//  4. writes ONLY rows that are new or changed (values, a day that was stored while still open,
-//     or a placement pull that had not covered the day yet). A second run in a row therefore
-//     writes no metric row at all.
-// Then it appends one ads_sync_runs row (not in --dry-run) so freshness is observable.
-//
-// Open (today's) data is never stored. `includeToday` returns today's partial numbers to the
-// caller (the backstop's "served today?" check) without writing them.
+// planSync() decides, from ONE read of the stored day rows and one of the recent sync runs,
+// what each campaign needs:
+//  - every CLOSED ET day of the flight (first day → min(yesterday, flight end)) not yet stored
+//    as closed, and every stored day whose placement pull has not covered it;
+//  - the most recent RESTATEMENT_DAYS closed days (Google restates them), but only when the
+//    campaign's last pull is older than the recheck interval (default 6 h) — so a tick right
+//    after another sync is a no-op that never builds the Ads client or refreshes a token;
+//  - today's partial numbers when the caller asks (returned, never stored).
+// syncAdsData() then pulls one range per due campaign (at most `maxDays` closed days per run
+// across campaigns — the rest wait for the next run), and:
+//  - stores a day the API returns nothing for as zero ONLY when that day was never stored and
+//    lies inside the flight: no rows = no delivery;
+//  - treats a stored day (or placement row) WITH SPEND that the response leaves out as a FAILED
+//    FETCH: nothing is written for that campaign and the run is 'partial' (an empty or truncated
+//    200 must never turn stored spend into zeros);
+//  - writes ONLY rows that are new or changed.
+// A run that pulled or read anything appends one ads_sync_runs row (not in --dry-run); a run
+// with nothing due writes nothing at all.
 
 import { CAMPAIGNS, type CampaignFlight } from './campaigns'
 import { microsToDollars, round2, type SpendDay, type StoredSpend } from './adsRules'
 import { mergePlacementDayRows, rowsToStoredSpend, type AdsSyncStore, type PlacementDayRow, type StoredDayRow, type SyncRunRecord, type SyncSource, type SyncStatus } from './adsStore'
-import { addEtDays, contiguousThrough, etDateRange, isClosedFetch } from './adsFreshness'
-import { etDateFromMs } from './popupEvents'
+import { contiguousThrough, etDateRange, isClosedFetch } from './adsFreshness'
+import { addDays, etDateFast, etHourFast } from './etTime'
 import { redact, summarizeError } from './adsRedact'
 
 /** Google restates recent days (invalid-click credits, late conversions): re-pull this many. */
 export const RESTATEMENT_DAYS = 3
-/** A closed campaign is synced through its flight end plus this many days (stray spend). */
+/** A closed campaign's window runs to its flight end plus this many days (stray spend is pulled,
+ * never zero-filled). */
 export const CLOSED_CAMPAIGN_GRACE_DAYS = 3
+/** Re-pull the restatement window at most this often per campaign. */
+export const RESTATEMENT_RECHECK_MS = 6 * 3_600_000
 
 export interface AdsMetricsSource {
   daily(campaignId: string, since: string, until: string): Promise<Record<string, SpendDay>>
@@ -45,16 +53,25 @@ export interface SyncOptions {
   now: number
   dryRun: boolean
   source: SyncSource
-  /** Re-pull every day in the window, not just gaps and the restatement window (the backfill). */
+  /** Re-pull every day in the window, not just what is due (the backfill, an operator check). */
   full?: boolean
   /** Also read today's partial numbers (returned, never stored). */
   includeToday?: boolean
   /** Default true. */
   placements?: boolean
+  /** Most closed days pulled in one run, all campaigns together; the rest wait for later runs.
+   * Default: no cap. */
+  maxDays?: number
+  /** Re-pull the restatement window only when the campaign's last pull is older than this.
+   * Default RESTATEMENT_RECHECK_MS; 0 = on every run. */
+  restatementRecheckMs?: number
 }
 export interface SyncDeps {
-  /** null when the Ads client could not be built; `adsInitError` says why. */
-  ads: AdsMetricsSource | null
+  /** An Ads source built up front (the local CLIs), or null when it could not be. */
+  ads?: AdsMetricsSource | null
+  /** Builds the Ads source lazily: called at most once, only when something needs pulling (the
+   * Worker: no secret read and no token refresh on a run with nothing due). */
+  adsFactory?: () => Promise<AdsMetricsSource>
   adsInitError?: string | null
   store: AdsSyncStore
 }
@@ -65,22 +82,26 @@ export interface SyncRange {
 }
 export interface CampaignSyncPlan {
   campaignId: string
-  /** The campaign's sync window (closed days), or null when it has none yet. */
+  /** The campaign's pull window (closed days), or null when it has none yet. */
   window: SyncRange | null
-  /** Closed days to fetch and compare (null = nothing to pull). */
+  /** Closed days to pull (null = nothing due). */
   fetch: SyncRange | null
   missingDays: string[]
   missingPlacementDays: string[]
   restatementDays: string[]
+  /** Whether the restatement window is due this run (cadence). */
+  restatementDue: boolean
   /** Today's partial read, when asked for and the campaign is not closed. */
   today: string | null
+  /** `fetch` was shortened by the per-run day cap; the rest waits for a later run. */
+  deferred: boolean
 }
 export interface CampaignSyncResult {
   campaignId: string
   label: string
   window: SyncRange | null
   fetched: SyncRange | null
-  /** 'up to date' | 'synced' | 'failed' | … — one short word or phrase for reports. */
+  /** 'up to date' | 'synced' | 'no change' | 'deferred' | 'failed' | … */
   outcome: string
   missingDays: number
   daysFetched: number
@@ -94,6 +115,9 @@ export interface CampaignSyncResult {
   fetchOk: boolean
   /** …and every changed day row was stored (or would be, in --dry-run). */
   dailyOk: boolean
+  /** The pull reached the end of the window (the restatement window was re-checked). */
+  pulled: boolean
+  deferred: boolean
   /** Last closed day stored contiguously from the flight start (after this run's writes). */
   spendThrough: string | null
   /** Stored + fetched closed days, for the reads (in --dry-run too). */
@@ -110,12 +134,14 @@ export interface SyncResult {
   startedAt: string
   finishedAt: string
   status: SyncStatus
+  /** Nothing was due: no Ads call, no write, no run row. */
+  nothingDue: boolean
   campaigns: CampaignSyncResult[]
   daysFetched: number
   daysChanged: number
   placementRowsFetched: number
   placementRowsChanged: number
-  /** The ads_campaigns upsert ran (false in --dry-run). */
+  /** The ads_campaigns upsert ran (false in --dry-run or when nothing was written). */
   campaignsSynced: boolean
   /** The ads_campaigns upsert failed: nothing that references a campaign can be written. */
   campaignSyncError: string | null
@@ -124,7 +150,8 @@ export interface SyncResult {
 }
 
 const ZERO: SpendDay = { costMicros: 0, impressions: 0, clicks: 0 }
-const min = (xs: (string | undefined)[]) => xs.filter((x): x is string => !!x).sort()[0]
+const hasDelivery = (d: SpendDay | PlacementDayRow) => d.costMicros > 0 || d.impressions > 0 || d.clicks > 0
+const firstOf = (xs: (string | undefined)[]) => xs.filter((x): x is string => !!x).sort()[0]
 
 /** Campaigns the sync covers: every configured campaign with a flight start, or the given ids
  * (an unknown id is an error — never a silent no-op). */
@@ -136,34 +163,40 @@ export function syncableCampaigns(ids?: readonly string[]): CampaignFlight[] {
   return all.filter((c) => ids.includes(c.id))
 }
 
-/** The closed ET days a campaign's data can cover at `todayEt`: flight start through yesterday
- * (a closed campaign: through flight end + CLOSED_CAMPAIGN_GRACE_DAYS). */
+/** The closed ET days a campaign's data can be pulled for at `todayEt`: flight start through
+ * yesterday (a closed campaign: through flight end + CLOSED_CAMPAIGN_GRACE_DAYS). Days after the
+ * flight end are pulled (stray spend shows up) but never zero-filled or required. */
 export function syncWindow(c: Pick<CampaignFlight, 'flightStart' | 'flightEnd' | 'status'>, todayEt: string): SyncRange | null {
   if (!c.flightStart) return null
-  const yesterday = addEtDays(todayEt, -1)
-  const cap = c.status === 'closed' ? addEtDays(c.flightEnd, CLOSED_CAMPAIGN_GRACE_DAYS) : yesterday
+  const yesterday = addDays(todayEt, -1)
+  const cap = c.status === 'closed' ? addDays(c.flightEnd, CLOSED_CAMPAIGN_GRACE_DAYS) : yesterday
   const until = cap < yesterday ? cap : yesterday
   return c.flightStart <= until ? { since: c.flightStart, until } : null
 }
 
-/** Pure: what to pull for one campaign, given its stored rows. */
+/** Pure: what to pull for one campaign, given its stored rows and its last pull. */
 export function planCampaignSync(
   c: Pick<CampaignFlight, 'id' | 'flightStart' | 'flightEnd' | 'status'>,
   rows: readonly StoredDayRow[],
   todayEt: string,
-  opts: { full?: boolean; includeToday?: boolean; placements?: boolean } = {},
+  opts: { full?: boolean; includeToday?: boolean; placements?: boolean; nowMs?: number; lastPullAt?: string | null; restatementRecheckMs?: number } = {},
 ): CampaignSyncPlan {
   const window = syncWindow(c, todayEt)
   const today = opts.includeToday && c.status !== 'closed' && c.flightStart != null && c.flightStart <= todayEt ? todayEt : null
-  if (!window) return { campaignId: c.id, window, fetch: null, missingDays: [], missingPlacementDays: [], restatementDays: [], today }
+  const none = { campaignId: c.id, window, fetch: null, missingDays: [], missingPlacementDays: [], restatementDays: [], restatementDue: false, today, deferred: false }
+  if (!window) return none
   const byDate = new Map(rows.map((r) => [r.date, r]))
-  const days = etDateRange(window.since, window.until)
-  const missingDays = days.filter((d) => !isClosedFetch(d, byDate.get(d)?.fetchedAt))
-  const missingPlacementDays = opts.placements === false ? [] : days.filter((d) => !isClosedFetch(d, byDate.get(d)?.placementsFetchedAt))
-  const restateFrom = addEtDays(todayEt, -RESTATEMENT_DAYS)
-  const restatementDays = days.filter((d) => d >= restateFrom)
-  const since = opts.full ? window.since : min([missingDays[0], missingPlacementDays[0], restatementDays[0]])
-  return { campaignId: c.id, window, fetch: since ? { since, until: window.until } : null, missingDays, missingPlacementDays, restatementDays, today }
+  const requiredUntil = window.until < c.flightEnd ? window.until : c.flightEnd
+  const required = etDateRange(window.since, requiredUntil)
+  const missingDays = required.filter((d) => !isClosedFetch(d, byDate.get(d)?.fetchedAt))
+  const missingPlacementDays = opts.placements === false ? [] : required.filter((d) => byDate.has(d) && !isClosedFetch(d, byDate.get(d)!.placementsFetchedAt))
+  const restateFrom = addDays(todayEt, -RESTATEMENT_DAYS)
+  const restatementDays = etDateRange(restateFrom > window.since ? restateFrom : window.since, window.until)
+  const recheck = opts.restatementRecheckMs ?? RESTATEMENT_RECHECK_MS
+  const last = opts.lastPullAt ? Date.parse(opts.lastPullAt) : NaN
+  const restatementDue = restatementDays.length > 0 && (!!opts.full || recheck <= 0 || !Number.isFinite(last) || (opts.nowMs ?? Date.now()) - last >= recheck)
+  const since = opts.full ? window.since : firstOf([missingDays[0], missingPlacementDays[0], restatementDue ? restatementDays[0] : undefined])
+  return { ...none, fetch: since ? { since, until: window.until } : null, missingDays, missingPlacementDays, restatementDays, restatementDue }
 }
 
 const sameDay = (a: SpendDay, b: SpendDay) => a.costMicros === b.costMicros && a.impressions === b.impressions && a.clicks === b.clicks
@@ -176,38 +209,50 @@ const samePlacement = (a: PlacementDayRow, b: PlacementDayRow) =>
   (a.type ?? null) === (b.type ?? null) &&
   (a.targetUrl ?? null) === (b.targetUrl ?? null)
 
-/** Pure: which placement rows to write. A stored row the fresh pull no longer returns (restated
- * away) is written back as zero cost, never deleted (the writer has no DELETE). */
-export function diffPlacements(stored: readonly PlacementDayRow[], fresh: readonly PlacementDayRow[]): PlacementDayRow[] {
+/** Pure: which placement rows to write, and which stored rows WITH SPEND the fresh pull left out
+ * (a failed fetch: the caller writes nothing — never zeros over stored spend). */
+export function diffPlacements(stored: readonly PlacementDayRow[], fresh: readonly PlacementDayRow[]): { changed: PlacementDayRow[]; missingStored: PlacementDayRow[] } {
   const merged = mergePlacementDayRows(fresh)
   const key = (r: PlacementDayRow) => `${r.date}\u0000${r.placement}`
   const old = new Map(stored.map((r) => [key(r), r]))
-  const out: PlacementDayRow[] = merged.filter((r) => {
+  const changed = merged.filter((r) => {
     const s = old.get(key(r))
     return !s || !samePlacement(s, r)
   })
   const freshKeys = new Set(merged.map(key))
-  for (const s of stored) {
-    if (freshKeys.has(key(s)) || (s.costMicros === 0 && s.impressions === 0 && s.clicks === 0)) continue
-    out.push({ ...s, costMicros: 0, impressions: 0, clicks: 0 })
-  }
-  return out
+  const missingStored = stored.filter((s) => !freshKeys.has(key(s)) && hasDelivery(s))
+  return { changed, missingStored }
 }
 
-/** Pure: the day rows to write after a pull, and what they change. */
+/** Pure: the day rows to write after a pull, what they change, and which stored days WITH SPEND
+ * the response left out (a failed fetch). A day the response leaves out is zero-filled only when
+ * it was never stored and lies on or before `flightEnd`. */
 export function diffDays(
   stored: readonly StoredDayRow[],
   fresh: Record<string, SpendDay>,
   range: SyncRange,
   nowIso: string,
   placementsCovered: boolean,
-): { rows: StoredDayRow[]; restated: { date: string; beforeMicros: number; afterMicros: number }[] } {
+  flightEnd: string,
+): { rows: StoredDayRow[]; restated: { date: string; beforeMicros: number; afterMicros: number }[]; missingStored: string[]; view: Record<string, SpendDay> } {
   const byDate = new Map(stored.map((r) => [r.date, r]))
   const rows: StoredDayRow[] = []
   const restated: { date: string; beforeMicros: number; afterMicros: number }[] = []
+  const missingStored: string[] = []
+  const view: Record<string, SpendDay> = {}
   for (const d of etDateRange(range.since, range.until)) {
-    const f = fresh[d] ?? ZERO
     const s = byDate.get(d)
+    let f = fresh[d]
+    if (!f) {
+      if (!s) {
+        if (d > flightEnd) continue // after the flight: nothing to store without a row
+        f = ZERO // never stored, inside the flight: no rows = no delivery
+      } else if (hasDelivery(s)) {
+        missingStored.push(d)
+        continue
+      } else f = ZERO // stored zero, still zero
+    }
+    view[d] = f
     const wasClosed = !!s && isClosedFetch(d, s.fetchedAt)
     const equal = !!s && sameDay(s, f)
     const placementsDone = !!s && isClosedFetch(d, s.placementsFetchedAt)
@@ -222,7 +267,7 @@ export function diffDays(
       placementsFetchedAt: placementsCovered ? nowIso : (s?.placementsFetchedAt ?? null),
     })
   }
-  return { rows, restated }
+  return { rows, restated, missingStored, view }
 }
 
 type Attempt<T> = { ok: true; value: T } | { ok: false; error: string }
@@ -234,14 +279,72 @@ async function attempt<T>(label: string, fn: () => Promise<T>): Promise<Attempt<
   }
 }
 
-async function syncOne(deps: SyncDeps, c: CampaignFlight, opts: SyncOptions, todayEt: string, nowIso: string, canWrite: boolean): Promise<CampaignSyncResult> {
+// ── Planning: one read of the stored days, one of the recent runs ────────────────────────
+export interface SyncSnapshot {
+  todayEt: string
+  campaigns: CampaignFlight[]
+  rows: Map<string, StoredDayRow[]>
+  lastPulls: Map<string, string>
+  plans: Map<string, CampaignSyncPlan>
+  /** Something needs pulling (or today's numbers were asked for). */
+  due: boolean
+  /** The store could not be read: nothing can be planned. */
+  error: string | null
+}
+
+export async function planSync(store: AdsSyncStore, opts: SyncOptions): Promise<SyncSnapshot> {
+  const todayEt = etDateFast(opts.now)
+  const campaigns = syncableCampaigns(opts.campaignIds)
+  const snap: SyncSnapshot = { todayEt, campaigns, rows: new Map(), lastPulls: new Map(), plans: new Map(), due: false, error: null }
+  const rows = await attempt('store read (daily metrics)', () => store.getAllDailyRows())
+  if (!rows.ok) return { ...snap, error: rows.error, due: true }
+  const pulls = await attempt('store read (sync runs)', () => store.getLastPulls())
+  snap.rows = rows.value
+  snap.lastPulls = pulls.ok ? pulls.value : new Map() // unreadable: re-check restatement (safe)
+  // Live campaigns first, so a capped run spends its budget where freshness matters.
+  const ordered = [...campaigns].sort((a, b) => Number(a.status === 'closed') - Number(b.status === 'closed'))
+  let budget = opts.maxDays != null && opts.maxDays > 0 ? Math.floor(opts.maxDays) : Infinity
+  for (const c of ordered) {
+    const plan = planCampaignSync(c, snap.rows.get(c.id) ?? [], todayEt, {
+      full: opts.full,
+      includeToday: opts.includeToday,
+      placements: opts.placements,
+      nowMs: opts.now,
+      lastPullAt: snap.lastPulls.get(c.id) ?? null,
+      restatementRecheckMs: opts.restatementRecheckMs,
+    })
+    if (plan.fetch) {
+      const days = etDateRange(plan.fetch.since, plan.fetch.until).length
+      if (budget <= 0) Object.assign(plan, { fetch: null, deferred: true })
+      else if (days > budget) Object.assign(plan, { fetch: { since: plan.fetch.since, until: addDays(plan.fetch.since, budget - 1) }, deferred: true })
+      budget -= Math.min(days, Math.max(0, budget))
+    }
+    snap.plans.set(c.id, plan)
+    if (plan.fetch || plan.today || plan.deferred) snap.due = true
+  }
+  return snap
+}
+
+// ── One campaign ──────────────────────────────────────────────────────────────────────────
+async function syncOne(
+  deps: SyncDeps,
+  getAds: () => Promise<AdsMetricsSource>,
+  ensureCampaigns: () => Promise<Attempt<boolean>>,
+  c: CampaignFlight,
+  snap: SyncSnapshot,
+  opts: SyncOptions,
+  nowIso: string,
+): Promise<CampaignSyncResult> {
+  const plan = snap.plans.get(c.id)!
+  const stored = snap.rows.get(c.id) ?? []
+  const closedStored = stored.filter((r) => isClosedFetch(r.date, r.fetchedAt))
   const res: CampaignSyncResult = {
     campaignId: c.id,
     label: c.label,
-    window: null,
+    window: plan.window,
     fetched: null,
-    outcome: 'up to date',
-    missingDays: 0,
+    outcome: plan.deferred && !plan.fetch ? 'deferred' : 'up to date',
+    missingDays: plan.missingDays.length,
     daysFetched: 0,
     daysChanged: 0,
     changedDates: [],
@@ -251,103 +354,123 @@ async function syncOne(deps: SyncDeps, c: CampaignFlight, opts: SyncOptions, tod
     placementsOk: null,
     fetchOk: true,
     dailyOk: true,
-    spendThrough: null,
-    spend: null,
+    pulled: false,
+    deferred: plan.deferred,
+    spendThrough: contiguousThrough(c.flightStart, new Set(closedStored.map((r) => r.date)), c.flightEnd),
+    spend: rowsToStoredSpend(c.id, closedStored),
     placements: [],
     today: null,
     error: null,
   }
   const fail = (error: string, outcome = 'failed') => Object.assign(res, { fetchOk: false, dailyOk: false, outcome, error })
-
-  const storedA = await attempt('store read (daily metrics)', () => deps.store.getDailyRows(c.id))
-  if (!storedA.ok) return fail(storedA.error)
-  const stored = storedA.value
-  const plan = planCampaignSync(c, stored, todayEt, opts)
-  res.window = plan.window
-  res.missingDays = plan.missingDays.length
-  const closedSet = () => new Set(stored.filter((r) => isClosedFetch(r.date, r.fetchedAt)).map((r) => r.date))
-  res.spendThrough = contiguousThrough(c.flightStart, closedSet())
-  res.spend = rowsToStoredSpend(c.id, stored.filter((r) => isClosedFetch(r.date, r.fetchedAt)))
   if (!plan.fetch && !plan.today) return res
 
-  if (!deps.ads) return fail(`ads daily: ${deps.adsInitError ?? 'Google Ads client unavailable'}`)
-  const ads = deps.ads
-  const dailySince = plan.fetch?.since ?? plan.today!
-  const dailyUntil = plan.today ?? plan.fetch!.until
-  const dailyA = await attempt('ads daily', () => ads.daily(c.id, dailySince, dailyUntil))
-  if (!dailyA.ok) return fail(dailyA.error)
-  if (plan.today) res.today = dailyA.value[plan.today] ?? { ...ZERO }
-  if (!plan.fetch) return res
-  res.fetched = plan.fetch
+  let ads: AdsMetricsSource
+  try {
+    ads = await getAds()
+  } catch (e) {
+    return fail(`ads: ${redact(e)}`)
+  }
   const range = plan.fetch
-  const freshDays: Record<string, SpendDay> = {}
-  for (const d of etDateRange(range.since, range.until)) freshDays[d] = dailyA.value[d] ?? { ...ZERO }
-  res.daysFetched = Object.keys(freshDays).length
+  // One query for the closed range and today when they are contiguous; else separate ones.
+  const joinToday = !!(range && plan.today && addDays(range.until, 1) === plan.today)
+  let freshDaily: Record<string, SpendDay> = {}
+  if (range) {
+    const a = await attempt('ads daily', () => ads.daily(c.id, range.since, joinToday ? plan.today! : range.until))
+    if (!a.ok) return fail(a.error)
+    freshDaily = a.value
+  }
+  if (plan.today) {
+    if (joinToday) res.today = freshDaily[plan.today] ?? { ...ZERO }
+    else {
+      const t = await attempt('ads daily (today)', () => ads.daily(c.id, plan.today!, plan.today!))
+      if (!t.ok) return fail(t.error)
+      res.today = t.value[plan.today] ?? { ...ZERO }
+    }
+  }
+  if (!range) return res
+  res.fetched = range
 
   // Placements first: a day's placements_fetched_at is only set once its rows are stored.
   let placementsCovered = false
+  let placementWrites: PlacementDayRow[] = []
   if (opts.placements !== false) {
-    const plA = await attempt('ads placements', () => ads.placements(c.id, range.since, range.until))
-    if (!plA.ok) {
+    const pl = await attempt('ads placements', () => ads.placements(c.id, range.since, range.until))
+    const old = pl.ok ? await attempt('store read (placements)', () => deps.store.getPlacementRows(c.id, range.since, range.until)) : null
+    if (!pl.ok || !old || !old.ok) {
       res.placementsOk = false
-      res.error = plA.error
+      res.error = !pl.ok ? pl.error : old && !old.ok ? old.error : 'placements unavailable'
     } else {
-      const merged = mergePlacementDayRows(plA.value)
+      const merged = mergePlacementDayRows(pl.value)
+      const { changed, missingStored } = diffPlacements(old.value, merged)
       res.placements = merged
       res.placementRowsFetched = merged.length
-      const oldA = await attempt('store read (placements)', () => deps.store.getPlacementRows(c.id, range.since, range.until))
-      if (!oldA.ok) {
+      if (missingStored.length) {
         res.placementsOk = false
-        res.error = oldA.error
+        res.error = `ads placements: the response left out ${missingStored.length} stored placement-day row(s) with spend (${[...new Set(missingStored.map((r) => r.date))].join(', ')}); kept the stored rows, treated as a failed fetch`
       } else {
-        const changed = diffPlacements(oldA.value, merged)
         res.placementRowsChanged = changed.length
-        const put = changed.length && canWrite ? await attempt('store write (placements)', () => deps.store.putPlacements(c.id, changed, nowIso)) : ({ ok: true, value: false } as Attempt<boolean>)
-        if (!put.ok) {
-          res.placementsOk = false
-          res.error = put.error
-        } else {
-          res.placementsOk = true
-          placementsCovered = true
-        }
+        placementWrites = changed
+        placementsCovered = true
       }
     }
   }
 
-  const { rows, restated } = diffDays(stored, freshDays, range, nowIso, placementsCovered)
-  res.daysChanged = rows.length
-  res.changedDates = rows.map((r) => r.date)
-  res.restated = restated.map((r) => ({ date: r.date, before: round2(microsToDollars(r.beforeMicros)), after: round2(microsToDollars(r.afterMicros)) }))
-  let dailyWriteError: string | null = null
-  if (rows.length && canWrite) {
-    const put = await attempt('store write (daily metrics)', () => deps.store.putDailyRows(c.id, rows))
-    if (!put.ok) dailyWriteError = put.error
+  const d = diffDays(stored, freshDaily, range, nowIso, placementsCovered, c.flightEnd)
+  res.daysFetched = etDateRange(range.since, range.until).length
+  if (d.missingStored.length) {
+    // An empty or truncated response: never overwrite stored spend with zeros.
+    res.placementRowsChanged = 0
+    return fail(`ads daily: the response left out ${d.missingStored.length} stored day(s) with spend (${d.missingStored.join(', ')}); kept the stored values, treated as a failed fetch`)
   }
-  // The view the reads use: stored closed days overlaid with this run's pull (every pulled day
-  // is closed) — the same in --dry-run, where nothing was written.
-  const after = new Map(stored.map((r) => [r.date, r]))
-  for (const [d, f] of Object.entries(freshDays)) after.set(d, { date: d, ...f, fetchedAt: nowIso, placementsFetchedAt: null })
-  const closedAfter = [...after.values()].filter((r) => isClosedFetch(r.date, r.fetchedAt))
-  res.spend = rowsToStoredSpend(c.id, closedAfter)
-  res.spendThrough = contiguousThrough(c.flightStart, new Set(closedAfter.map((r) => r.date)))
-  if (dailyWriteError) return Object.assign(res, { dailyOk: false, outcome: 'store write failed', error: dailyWriteError })
-  res.outcome = res.placementsOk === false ? 'synced (placements failed)' : rows.length || res.placementRowsChanged ? 'synced' : 'no change'
+  res.daysChanged = d.rows.length
+  res.changedDates = d.rows.map((r) => r.date)
+  res.restated = d.restated.map((r) => ({ date: r.date, before: round2(microsToDollars(r.beforeMicros)), after: round2(microsToDollars(r.afterMicros)) }))
+
+  const canWrite = !opts.dryRun && (placementWrites.length > 0 || d.rows.length > 0)
+  if (canWrite) {
+    const cs = await ensureCampaigns()
+    if (!cs.ok) return Object.assign(res, { dailyOk: false, outcome: 'not written: campaign sync failed', error: cs.error })
+    if (placementWrites.length) {
+      const put = await attempt('store write (placements)', () => deps.store.putPlacements(c.id, placementWrites, nowIso))
+      if (!put.ok) {
+        Object.assign(res, { placementsOk: false, error: put.error })
+        // The day rows must not claim placement coverage the store does not have.
+        const again = diffDays(stored, freshDaily, range, nowIso, false, c.flightEnd)
+        d.rows = again.rows
+        res.daysChanged = d.rows.length
+        res.changedDates = d.rows.map((r) => r.date)
+      }
+    }
+    if (d.rows.length) {
+      const put = await attempt('store write (daily metrics)', () => deps.store.putDailyRows(c.id, d.rows))
+      if (!put.ok) return Object.assign(res, { dailyOk: false, outcome: 'store write failed', error: put.error })
+    }
+  }
+  // The view the reads use: stored closed days overlaid with this run's pull.
+  const after = new Map(closedStored.map((r) => [r.date, r]))
+  for (const [day, f] of Object.entries(d.view)) after.set(day, { date: day, ...f, fetchedAt: nowIso, placementsFetchedAt: null })
+  res.spend = rowsToStoredSpend(c.id, [...after.values()])
+  res.spendThrough = contiguousThrough(c.flightStart, new Set(after.keys()), c.flightEnd)
+  res.pulled = !!plan.window && range.until === plan.window.until && res.placementsOk !== false
+  res.outcome = res.placementsOk === false ? 'synced (placements failed)' : plan.deferred ? 'synced (partly; the rest next run)' : d.rows.length || res.placementRowsChanged ? 'synced' : 'no change'
   return res
 }
 
 /** The shared sync. Never throws for a data problem: failures are in the result (and its
- * ads_sync_runs row); only a programming error (an unknown campaign id) throws. */
-export async function syncAdsData(deps: SyncDeps, opts: SyncOptions): Promise<SyncResult> {
+ * ads_sync_runs row); only a programming error (an unknown campaign id) throws. Pass the
+ * snapshot from planSync() to avoid reading the store twice. */
+export async function syncAdsData(deps: SyncDeps, opts: SyncOptions, snapshot?: SyncSnapshot): Promise<SyncResult> {
   const t0 = Date.now()
   const startedAt = new Date(opts.now).toISOString()
-  const todayEt = etDateFromMs(opts.now)
-  const campaigns = syncableCampaigns(opts.campaignIds)
+  const snap = snapshot ?? (await planSync(deps.store, opts))
   const result: SyncResult = {
     source: opts.source,
     dryRun: opts.dryRun,
     startedAt,
     finishedAt: startedAt,
     status: 'ok',
+    nothingDue: false,
     campaigns: [],
     daysFetched: 0,
     daysChanged: 0,
@@ -358,54 +481,90 @@ export async function syncAdsData(deps: SyncDeps, opts: SyncOptions): Promise<Sy
     runRecorded: false,
     error: null,
   }
-  // Campaign definitions first: every stored row references ads_campaigns (FOREIGN KEY). An
-  // unchanged config writes nothing.
-  const sync = await attempt('store sync (campaigns)', () => deps.store.syncCampaigns(syncableCampaigns(), startedAt))
-  result.campaignsSynced = sync.ok && sync.value
-  result.campaignSyncError = sync.ok ? null : sync.error
-  const canWrite = sync.ok && !opts.dryRun
-  for (const c of campaigns) {
-    const r = await syncOne(deps, c, opts, todayEt, startedAt, canWrite)
-    if (!sync.ok && !r.error && (r.daysChanged || r.placementRowsChanged)) Object.assign(r, { dailyOk: false, outcome: 'not written: campaign sync failed', error: sync.error })
-    result.campaigns.push(r)
-  }
-  for (const r of result.campaigns) {
-    result.daysFetched += r.daysFetched
-    result.daysChanged += r.daysChanged
-    result.placementRowsFetched += r.placementRowsFetched
-    result.placementRowsChanged += r.placementRowsChanged
-  }
-  const failed = result.campaigns.filter((r) => !r.dailyOk || r.placementsOk === false)
-  result.status = !sync.ok ? 'failed' : !failed.length ? 'ok' : failed.length === result.campaigns.length && failed.every((r) => !r.dailyOk) ? 'failed' : 'partial'
-  const firstError = (sync.ok ? null : sync.error) ?? failed.find((r) => r.error)?.error ?? null
-  result.error = firstError ? summarizeError(firstError, 300) : null
-  // An Ads client that could not be built (credentials) is reported even when nothing needed
-  // pulling this time: it is what will fail the next pull.
-  if (!deps.ads && result.status === 'ok') {
-    result.status = 'partial'
-    result.error = summarizeError(`ads: ${deps.adsInitError ?? 'Google Ads client unavailable'}`, 300)
+  if (snap.error) {
+    result.status = 'failed'
+    result.error = summarizeError(snap.error, 300)
+    for (const c of snap.campaigns) {
+      result.campaigns.push({
+        campaignId: c.id, label: c.label, window: null, fetched: null, outcome: 'failed', missingDays: 0, daysFetched: 0, daysChanged: 0, changedDates: [], restated: [],
+        placementRowsFetched: 0, placementRowsChanged: 0, placementsOk: null, fetchOk: false, dailyOk: false, pulled: false, deferred: false, spendThrough: null, spend: null, placements: [], today: null, error: snap.error,
+      })
+    }
+  } else if (!snap.due) {
+    // Nothing due: no Ads client, no token refresh, no write, no run row.
+    result.nothingDue = true
+    for (const c of snap.campaigns) {
+      const closed = (snap.rows.get(c.id) ?? []).filter((r) => isClosedFetch(r.date, r.fetchedAt))
+      result.campaigns.push({
+        campaignId: c.id, label: c.label, window: snap.plans.get(c.id)?.window ?? null, fetched: null, outcome: 'up to date', missingDays: 0, daysFetched: 0, daysChanged: 0, changedDates: [], restated: [],
+        placementRowsFetched: 0, placementRowsChanged: 0, placementsOk: null, fetchOk: true, dailyOk: true, pulled: false, deferred: false,
+        spendThrough: contiguousThrough(c.flightStart, new Set(closed.map((r) => r.date)), c.flightEnd), spend: rowsToStoredSpend(c.id, closed), placements: [], today: null, error: null,
+      })
+    }
+    return result
+  } else {
+    let adsPromise: Promise<AdsMetricsSource> | null = null
+    const getAds = () => {
+      if (!adsPromise) {
+        adsPromise = deps.ads ? Promise.resolve(deps.ads) : deps.adsFactory ? deps.adsFactory() : Promise.reject(new Error(deps.adsInitError ?? 'Google Ads client unavailable'))
+        adsPromise.catch(() => {}) // surfaced per campaign
+      }
+      return adsPromise
+    }
+    let campaignsWrite: Promise<Attempt<boolean>> | null = null
+    const ensureCampaigns = () => {
+      // Campaign definitions first: every stored row references ads_campaigns (FOREIGN KEY). An
+      // unchanged config writes nothing; a run that writes nothing never sends it.
+      if (!campaignsWrite) campaignsWrite = attempt('store sync (campaigns)', () => deps.store.syncCampaigns(syncableCampaigns(), startedAt))
+      return campaignsWrite
+    }
+    for (const c of snap.campaigns) result.campaigns.push(await syncOne(deps, getAds, ensureCampaigns, c, snap, opts, startedAt))
+    if (campaignsWrite) {
+      const cw = await (campaignsWrite as Promise<Attempt<boolean>>)
+      result.campaignsSynced = cw.ok && cw.value
+      result.campaignSyncError = cw.ok ? null : cw.error
+    }
+    for (const r of result.campaigns) {
+      result.daysFetched += r.daysFetched
+      result.daysChanged += r.daysChanged
+      result.placementRowsFetched += r.placementRowsFetched
+      result.placementRowsChanged += r.placementRowsChanged
+    }
+    const failed = result.campaigns.filter((r) => !r.dailyOk || r.placementsOk === false)
+    const deferred = result.campaigns.filter((r) => r.deferred)
+    result.status = result.campaignSyncError ? 'failed' : !failed.length ? (deferred.length ? 'partial' : 'ok') : failed.length === result.campaigns.length && failed.every((r) => !r.dailyOk) ? 'failed' : 'partial'
+    const firstError = result.campaignSyncError ?? failed.find((r) => r.error)?.error ?? null
+    result.error = firstError
+      ? summarizeError(firstError, 300)
+      : deferred.length
+        ? `work cap: ${deferred.map((r) => r.campaignId).join(', ')} continue${deferred.length === 1 ? 's' : ''} next run`
+        : null
   }
   result.finishedAt = new Date(opts.now + Math.max(0, Date.now() - t0)).toISOString()
   if (!opts.dryRun) {
     const run: SyncRunRecord = {
-      runKey: `sync:${opts.source}:${startedAt}:${campaigns.map((c) => c.id).join(',')}`,
+      runKey: `sync:${opts.source}:${startedAt}:${snap.campaigns.map((c) => c.id).join(',')}`,
       source: opts.source,
       startedAt,
       finishedAt: result.finishedAt,
-      campaigns: campaigns.map((c) => c.id),
+      campaigns: snap.campaigns.map((c) => c.id),
       campaignsOk: result.campaigns.filter((r) => r.dailyOk).map((r) => r.campaignId),
+      campaignsPulled: result.campaigns.filter((r) => r.pulled).map((r) => r.campaignId),
       daysFetched: result.daysFetched,
       daysChanged: result.daysChanged,
       placementRowsFetched: result.placementRowsFetched,
       placementRowsChanged: result.placementRowsChanged,
       status: result.status,
       error: result.error,
-      detail: Object.fromEntries(
-        result.campaigns.map((r) => [
-          r.campaignId,
-          { fetched: r.fetched, days: r.daysFetched, changed: r.daysChanged, placements: r.placementRowsFetched, placementsChanged: r.placementRowsChanged, spendThrough: r.spendThrough, outcome: r.outcome },
-        ]),
-      ),
+      detail: {
+        worker: workerInfo(),
+        ...Object.fromEntries(
+          result.campaigns.map((r) => [
+            r.campaignId,
+            { fetched: r.fetched, days: r.daysFetched, changed: r.daysChanged, placements: r.placementRowsFetched, placementsChanged: r.placementRowsChanged, spendThrough: r.spendThrough, outcome: r.outcome },
+          ]),
+        ),
+      },
     }
     const rec = await attempt('store write (sync run)', () => deps.store.appendSyncRun(run))
     result.runRecorded = rec.ok && rec.value
@@ -414,27 +573,46 @@ export async function syncAdsData(deps: SyncDeps, opts: SyncOptions): Promise<Sy
   return result
 }
 
+// ── Build identity: catches a Worker running an older campaigns.ts ────────────────────────
+let buildSha: string | null = null
+/** The deploying commit, set by the Worker from its GIT_SHA var (npm run ads:worker-deploy). */
+export function setBuildSha(sha: string | null | undefined): void {
+  buildSha = sha && /^[0-9a-f]{7,40}$/.test(sha) ? sha : null
+}
+/** FNV-1a of the campaign definitions the sync uses: the dashboard compares it with its own. */
+export function campaignsConfigHash(campaigns: readonly CampaignFlight[] = CAMPAIGNS): string {
+  const s = JSON.stringify(campaigns.map((c) => [c.id, c.flightStart, c.flightStartTimeEt ?? null, c.flightEnd, c.status, c.ucValues]))
+  let h = 0x811c9dc5
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i)
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  return h.toString(16).padStart(8, '0')
+}
+export function workerInfo(): { gitSha: string | null; campaignsHash: string } {
+  return { gitSha: buildSha, campaignsHash: campaignsConfigHash() }
+}
+
 // ── The gss-stats-sync Worker's schedule and on-demand guard (workers/sync/) ──────────────
 /** Campaigns in a live flight today (ET): from the first flight day through the day after the
  * last one (so the last day is pulled once it has closed). Closed campaigns never count. */
 export function liveFlightCampaigns(nowMs: number, campaigns: readonly CampaignFlight[] = CAMPAIGNS): CampaignFlight[] {
-  const todayEt = etDateFromMs(nowMs)
-  return campaigns.filter((c) => c.flightStart != null && c.status !== 'closed' && todayEt >= c.flightStart && todayEt <= addEtDays(c.flightEnd, 1))
+  const todayEt = etDateFast(nowMs)
+  return campaigns.filter((c) => c.flightStart != null && c.status !== 'closed' && todayEt >= c.flightStart && todayEt <= addDays(c.flightEnd, 1))
 }
 /** The ET hour of the daily pass outside a flight: just after midnight, once yesterday closed. */
 export const DAILY_SYNC_ET_HOUR = 1
-/** The Worker's cron fires every hour (at :05). It syncs on every tick while a flight is live —
- * a closed day is stored within the hour after midnight ET and a failed pass is retried the next
- * hour; the other ticks re-check the restatement window — and once a day (01:xx ET) otherwise.
- * A skipped tick does no I/O at all. */
+/** The Worker's cron fires every hour (at :05). While a flight is live every tick checks what
+ * is due (a new closed day right after midnight ET, a retry after a failure, the restatement
+ * window every RESTATEMENT_RECHECK_MS); outside a flight only the 01:xx ET tick does. A skipped
+ * tick, and a tick with nothing due, never reads a secret or calls Google. */
 export function cronShouldSync(nowMs: number, campaigns: readonly CampaignFlight[] = CAMPAIGNS): { run: boolean; reason: string } {
   const live = liveFlightCampaigns(nowMs, campaigns)
   if (live.length) return { run: true, reason: `live flight: ${live.map((c) => c.id).join(', ')}` }
-  const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', hourCycle: 'h23' }).format(new Date(nowMs)))
-  return hour === DAILY_SYNC_ET_HOUR ? { run: true, reason: 'daily pass' } : { run: false, reason: `no live flight; the daily pass runs at 0${DAILY_SYNC_ET_HOUR}:xx ET` }
+  return etHourFast(nowMs) === DAILY_SYNC_ET_HOUR ? { run: true, reason: 'daily pass' } : { run: false, reason: `no live flight; the daily pass runs at 0${DAILY_SYNC_ET_HOUR}:xx ET` }
 }
 
-/** At most one on-demand sync per this interval (the dashboard's "Refresh data"). */
+/** At most one sync (on demand or cron) per this interval; enforced atomically by the claim. */
 export const ON_DEMAND_MIN_INTERVAL_MS = 10 * 60_000
 export function rateLimit(lastFinishedAt: string | null, nowMs: number, minIntervalMs: number = ON_DEMAND_MIN_INTERVAL_MS): { limited: boolean; retryAfterSec: number } {
   const last = lastFinishedAt ? Date.parse(lastFinishedAt) : NaN
@@ -448,6 +626,7 @@ export function syncResultSummary(r: SyncResult) {
   return {
     source: r.source,
     status: r.status,
+    nothingDue: r.nothingDue,
     startedAt: r.startedAt,
     finishedAt: r.finishedAt,
     daysFetched: r.daysFetched,
@@ -462,6 +641,7 @@ export function syncResultSummary(r: SyncResult) {
 
 /** One line per campaign, for CLI reports. */
 export function syncSummaryLines(r: SyncResult): string[] {
+  if (r.nothingDue) return [`Sync (${r.source}): nothing due — every closed day is stored and the restatement window was re-checked within ${RESTATEMENT_RECHECK_MS / 3_600_000} h; no Google call, nothing written`, ...r.campaigns.map((c) => `  ${c.campaignId} ${c.label}: up to date; spend through ${c.spendThrough ?? '—'}`)]
   const lines = [
     `Sync (${r.source})${r.dryRun ? ' [DRY RUN: nothing written]' : ''}: ${r.status}; ${r.daysFetched} day(s) fetched, ${r.daysChanged} ${r.dryRun ? 'would change' : 'changed'}; ${r.placementRowsFetched} placement row(s) fetched, ${r.placementRowsChanged} ${r.dryRun ? 'would change' : 'changed'}${r.dryRun ? '' : `; run ${r.runRecorded ? 'recorded' : 'NOT recorded'}`}`,
   ]
