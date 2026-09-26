@@ -3,6 +3,7 @@ import type { Widget, StatsResponse, StatsRow, Metric } from '../types'
 import { COUNTRY_NAMES } from './catalog'
 import { ringDims } from './rings'
 import { TRACKING_ACTIVATION_DATE_ET, PLAY_TRACKING_MARKER_LABEL } from './popupEvents'
+import { datedReleases } from './releases'
 
 // Categorical palette: brand amber leads, with distinguishable warm/cool accents.
 export const PALETTE = [
@@ -242,6 +243,58 @@ export function playActivationMarkerPlugin(index: number) {
 // Small corner watermark shown instead of the boundary marker while
 // TRACKING_ACTIVATION_DATE_ET is still null — the WHOLE series is pre-release, so there's
 // no boundary to point at; the page-level note (App.vue) carries the full explanation.
+// Best Sudoku release markers (widget.markers === 'releases') on any date-dimension trend
+// chart — dashed vertical lines + version label, same visual treatment as the Overview
+// page's timeline overlay (see components/widgets/OverviewWidgetBody.vue), generalized to
+// any chart (the launch/traffic page's own trend, not just the overview page's). `rows` are
+// the chart's own plotted rows (zero-filled — see seriesRows), so the marker lands on the
+// correct category-axis INDEX, not a raw date value (the x axis here is a category axis of
+// formatted labels, not real date values — see formatKey).
+function releaseMarkersPlugin(rows: { key: { date?: string } }[]) {
+  const releases = datedReleases()
+  return {
+    id: 'releaseMarkers',
+    afterDraw(chart: any) {
+      const { ctx, chartArea, scales } = chart
+      if (!chartArea || !scales?.x || !rows.length) return
+      const first = rows[0].key.date ?? ''
+      const last = rows[rows.length - 1].key.date ?? ''
+      ctx.save()
+      for (const r of releases) {
+        if (r.dateEt < first || r.dateEt > last) continue
+        const idx = rows.findIndex((row) => (row.key.date ?? '') >= r.dateEt)
+        if (idx === -1) continue
+        const x = scales.x.getPixelForValue(idx)
+        if (x == null || Number.isNaN(x) || x < chartArea.left || x > chartArea.right) continue
+        if (!r.major) {
+          // minor release — a short unlabeled tick, so a long release history doesn't
+          // crowd out the labeled major ones (see lib/releases.ts).
+          ctx.strokeStyle = isDark() ? 'rgba(231,226,215,0.3)' : 'rgba(26,23,21,0.25)'
+          ctx.lineWidth = 2
+          ctx.beginPath()
+          ctx.moveTo(x, chartArea.top)
+          ctx.lineTo(x, chartArea.top + 6)
+          ctx.stroke()
+          continue
+        }
+        ctx.strokeStyle = isDark() ? 'rgba(231,226,215,0.4)' : 'rgba(26,23,21,0.32)'
+        ctx.setLineDash([3, 3])
+        ctx.lineWidth = 1.2
+        ctx.beginPath()
+        ctx.moveTo(x, chartArea.top)
+        ctx.lineTo(x, chartArea.bottom)
+        ctx.stroke()
+        ctx.setLineDash([])
+        ctx.font = '600 9px Inter, system-ui, sans-serif'
+        ctx.fillStyle = isDark() ? 'rgba(231,226,215,0.75)' : 'rgba(26,23,21,0.65)'
+        ctx.textAlign = 'left'
+        ctx.fillText(r.version, Math.min(x + 3, chartArea.right - 50), chartArea.top + 2)
+      }
+      ctx.restore()
+    },
+  }
+}
+
 function notYetTrackedWatermarkPlugin() {
   return {
     id: 'notYetTracked',
@@ -624,9 +677,12 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
         plugins: noLegend,
         scales: baseScales(),
       },
-      ...(isPopupTrend
-        ? { plugins: [TRACKING_ACTIVATION_DATE_ET ? activationMarkerPlugin(boundary) : notYetTrackedWatermarkPlugin()] }
-        : {}),
+      ...((isPopupTrend || (widget.markers === 'releases' && dim === 'date')) && {
+        plugins: [
+          ...(isPopupTrend ? [TRACKING_ACTIVATION_DATE_ET ? activationMarkerPlugin(boundary) : notYetTrackedWatermarkPlugin()] : []),
+          ...(widget.markers === 'releases' && dim === 'date' ? [releaseMarkersPlugin(rows)] : []),
+        ],
+      }),
     } as ChartConfiguration
   }
 

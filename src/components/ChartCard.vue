@@ -11,13 +11,25 @@ import { isMobileViewport } from '../lib/responsive'
 import BaseChart from './charts/BaseChart.vue'
 import WorldMap from './charts/WorldMap.vue'
 import FilterPopover from './FilterPopover.vue'
+import OverviewWidgetBody from './widgets/OverviewWidgetBody.vue'
+import CampaignsWidgetBody from './widgets/CampaignsWidgetBody.vue'
+import NoteWidgetBody from './widgets/NoteWidgetBody.vue'
+import AdsReadingsWidgetCard from './widgets/AdsReadingsWidgetCard.vue'
 
 const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolean; drillOpen: boolean }>()
+
+// dataset 'overview'/'campaigns'/'ads-readings' + type 'note' render their own body (own
+// data fetch or none) — no /api/stats round trip, no per-chart filter override, no drill.
+// The header (title/zoom/menu) stays generic and shared with every other widget type.
+const isBespokeBody = computed(
+  () => props.widget.dataset === 'overview' || props.widget.dataset === 'campaigns' || props.widget.dataset === 'ads-readings' || props.widget.type === 'note',
+)
 const emit = defineEmits<{
   edit: []
   remove: []
   duplicate: []
   drill: [{ widgetId: string; dimension: string; dataset: 'geo' | 'rum'; value: string; label: string; x: number; y: number }]
+  'open-campaigns': []
 }>()
 
 const baseChartRef = ref<{ suppressForDrill: () => void } | null>(null)
@@ -137,6 +149,7 @@ const effectiveFilters = computed<GlobalFilters>(() => props.widget.filters ?? p
 const hasOverride = computed(() => !!props.widget.filters)
 
 async function load() {
+  if (isBespokeBody.value) return // own data fetch (or none) — see OverviewWidgetBody/CampaignsWidgetBody/NoteWidgetBody
   // RUM charts filter to a real-host allow-list built from /api/sites; fetching before
   // it loads would momentarily count dev/preview traffic. Wait for the tree. (Geo has
   // no dev hosts, so it needn't wait.)
@@ -304,6 +317,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
       </div>
       <div class="head-actions">
         <button
+          v-if="!isBespokeBody"
           ref="filterBtn"
           class="btn-ghost icon"
           :class="{ active: hasOverride }"
@@ -322,7 +336,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
             <path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
         </button>
-        <button class="btn-ghost icon" title="Reload" @click.stop="load">↻</button>
+        <button v-if="!isBespokeBody" class="btn-ghost icon" title="Reload" @click.stop="load">↻</button>
         <div class="menu-anchor">
           <button class="btn-ghost icon" title="Options" @click.stop="menuOpen = !menuOpen">⋯</button>
           <div v-if="menuOpen" class="menu" @click.stop>
@@ -338,7 +352,14 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
     </header>
 
     <div class="card-body">
-      <div v-if="loading" class="state mono">Loading…</div>
+      <!-- Bespoke bodies: overview / campaigns / ads-readings datasets, and the note type —
+           own data fetch (or none), skip the generic loading/error/empty states above. -->
+      <OverviewWidgetBody v-if="widget.dataset === 'overview'" :widget="widget" :filters="effectiveFilters" @open-campaigns="emit('open-campaigns')" />
+      <CampaignsWidgetBody v-else-if="widget.dataset === 'campaigns'" :widget="widget" />
+      <AdsReadingsWidgetCard v-else-if="widget.dataset === 'ads-readings'" :widget="widget" />
+      <NoteWidgetBody v-else-if="widget.type === 'note'" :widget="widget" />
+
+      <div v-else-if="loading" class="state mono">Loading…</div>
       <div v-else-if="error" class="state error mono">{{ error }}</div>
       <div v-else-if="popupNotYetActive" class="state mono">Tracking not yet active</div>
       <div v-else-if="isEmpty" class="state mono">No data in range</div>

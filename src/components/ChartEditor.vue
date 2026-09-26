@@ -12,6 +12,9 @@ import {
   CHART_TYPES,
   METRICS,
   SITE_OPTIONS,
+  OVERVIEW_VIEWS,
+  CAMPAIGNS_VIEWS,
+  CAMPAIGN_OPTIONS,
 } from '../lib/catalog'
 import { ringDims, RING_SOFT_CAP } from '../lib/rings'
 
@@ -27,6 +30,26 @@ watch(
 const isGeo = computed(() => draft.dataset === 'geo')
 const isPopup = computed(() => draft.dataset === 'popup')
 const isRate = computed(() => draft.type === 'rate')
+const isNote = computed(() => draft.type === 'note')
+// The three former-bespoke datasets: no dimension/breakdown/metric/site-override — a
+// "View" picker (+ campaign multi-select for campaigns/ads-readings) replaces them.
+const isOverviewDataset = computed(() => draft.dataset === 'overview')
+const isCampaignsDataset = computed(() => draft.dataset === 'campaigns')
+const isAdsReadingsDataset = computed(() => draft.dataset === 'ads-readings')
+const isBespokeDataset = computed(() => isOverviewDataset.value || isCampaignsDataset.value || isAdsReadingsDataset.value)
+const viewOptions = computed(() => (isOverviewDataset.value ? OVERVIEW_VIEWS : isCampaignsDataset.value ? CAMPAIGNS_VIEWS : []))
+const campaignIdsValue = computed<string[]>({
+  get: () => draft.campaignIds ?? [],
+  set: (v: string[]) => {
+    draft.campaignIds = v.length ? v : undefined
+  },
+})
+function toggleCampaign(id: string, checked: boolean) {
+  const set = new Set(draft.campaignIds ?? [])
+  if (checked) set.add(id)
+  else set.delete(id)
+  campaignIdsValue.value = CAMPAIGN_OPTIONS.map((o) => o.value).filter((v) => set.has(v))
+}
 // A rate tile's "dimension" is a POPUP_RATE_SPECS key, not a group-by field — a wholly
 // different picker domain from the count-mode dimensions below it.
 const dimOptions = computed(() => (isRate.value ? POPUP_RATE_DIMENSIONS : isPopup.value ? POPUP_DIMENSIONS : isGeo.value ? GEO_DIMENSIONS : DIMENSIONS))
@@ -39,6 +62,25 @@ const popupNeedsKind = computed(() => isPopup.value && !isRate.value && (draft.d
 // beacon supports a breakdown too (nested doughnut / stacked bar), so we remap rather
 // than drop it; only the metric is beacon-agnostic (it's always a count).
 function onDatasetChange() {
+  if (isBespokeDataset.value) {
+    // No dimension/breakdown/metric/rings/site-override domain — a View picker (+ campaign
+    // multi-select) replaces them entirely. Chart type is irrelevant too (each view renders
+    // its own fixed layout), so pin it to 'table' as an inert placeholder value.
+    draft.dimension = ''
+    draft.breakdown = undefined
+    draft.rings = undefined
+    draft.popup = undefined
+    draft.popupKind = undefined
+    draft.site = undefined
+    draft.host = undefined
+    draft.metric = 'pageviews'
+    if (!draft.view || !viewOptions.value.some((v) => v.value === draft.view)) {
+      draft.view = viewOptions.value[0]?.value
+    }
+    return
+  }
+  draft.view = undefined
+  draft.campaignIds = undefined
   if (!dimOptions.value.some((d) => d.key === draft.dimension)) {
     draft.dimension = dimOptions.value[0].key
   }
@@ -121,6 +163,25 @@ watch(
   },
 )
 
+// A note carries no dataset/dimension/metric at all — just a title + body text.
+watch(
+  () => draft.type,
+  (t) => {
+    if (t === 'note') {
+      draft.dataset = undefined
+      draft.dimension = ''
+      draft.breakdown = undefined
+      draft.rings = undefined
+      draft.popup = undefined
+      draft.popupKind = undefined
+      draft.view = undefined
+      draft.campaignIds = undefined
+    } else if (draft.note != null) {
+      draft.note = undefined
+    }
+  },
+)
+
 const typeDef = computed(() => CHART_TYPES.find((t) => t.value === draft.type))
 const siteValue = computed({
   get: () => draft.site ?? 'inherit',
@@ -159,7 +220,7 @@ function save() {
         <input type="text" v-model="draft.title" placeholder="Chart title" />
       </div>
 
-      <div class="field">
+      <div class="field" v-if="!isNote">
         <label>Data source</label>
         <select v-model="draft.dataset" @change="onDatasetChange">
           <option v-for="d in DATASETS" :key="d.value" :value="d.value === 'rum' ? undefined : d.value">{{ d.label }}</option>
@@ -173,7 +234,7 @@ function save() {
             <option v-for="t in CHART_TYPES" :key="t.value" :value="t.value">{{ t.label }}</option>
           </select>
         </div>
-        <div class="field" v-if="!isGeo && !isPopup">
+        <div class="field" v-if="!isGeo && !isPopup && !isBespokeDataset && !isNote">
           <label>Metric</label>
           <select v-model="draft.metric">
             <option v-for="m in METRICS" :key="m.value" :value="m.value">{{ m.label }}</option>
@@ -181,7 +242,34 @@ function save() {
         </div>
       </div>
 
-      <div class="row" v-if="typeDef?.needsDimension">
+      <!-- Note: just a body text field -->
+      <div class="field" v-if="isNote">
+        <label>Note text</label>
+        <textarea v-model="draft.note" rows="4" placeholder="Caveat / note shown on the tile" />
+      </div>
+
+      <!-- Overview / campaigns / ads-readings datasets: a View picker replaces the
+           dimension/breakdown/metric/site-override fields below (not applicable to them). -->
+      <div class="row" v-if="isBespokeDataset">
+        <div class="field">
+          <label>View</label>
+          <select v-model="draft.view" @change="onDatasetChange">
+            <option v-if="isAdsReadingsDataset" value="log">Readings log</option>
+            <option v-for="v in viewOptions" :key="v.value" :value="v.value">{{ v.label }}</option>
+          </select>
+        </div>
+      </div>
+      <div class="field" v-if="isCampaignsDataset || isAdsReadingsDataset">
+        <label>Campaign(s) <span class="hint">— none checked = all</span></label>
+        <div class="campaign-list">
+          <label v-for="c in CAMPAIGN_OPTIONS" :key="c.value" class="campaign-row">
+            <input type="checkbox" :checked="campaignIdsValue.includes(c.value)" @change="toggleCampaign(c.value, ($event.target as HTMLInputElement).checked)" />
+            {{ c.label }}
+          </label>
+        </div>
+      </div>
+
+      <div class="row" v-if="typeDef?.needsDimension && !isBespokeDataset && !isNote">
         <div class="field">
           <label>{{ isRate ? 'Rate' : 'Group by' }}</label>
           <select v-model="draft.dimension">
@@ -241,7 +329,7 @@ function save() {
         </div>
       </div>
 
-      <div class="row">
+      <div class="row" v-if="!isBespokeDataset && !isNote">
         <div class="field">
           <label>Limit (top N)</label>
           <input type="number" v-model.number="draft.limit" min="1" max="500" />
@@ -259,6 +347,13 @@ function save() {
         <label>
           <input type="checkbox" v-model="draft.excludeSelfReferrals" />
           Exclude self-referrals &amp; direct
+        </label>
+      </div>
+
+      <div class="field check" v-if="draft.dimension === 'date' && (draft.type === 'line' || draft.type === 'area')">
+        <label>
+          <input type="checkbox" :checked="draft.markers === 'releases'" @change="draft.markers = ($event.target as HTMLInputElement).checked ? 'releases' : undefined" />
+          Show Best Sudoku release markers
         </label>
       </div>
 
@@ -304,8 +399,30 @@ h2 {
   flex: 1;
 }
 .field input,
-.field select {
+.field select,
+.field textarea {
   width: 100%;
+}
+.field textarea {
+  font-family: inherit;
+  resize: vertical;
+}
+.campaign-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+  border: 1px solid rgb(var(--line));
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+.campaign-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  cursor: pointer;
 }
 .row {
   display: flex;
