@@ -34,6 +34,7 @@ import {
 import {
   campaignById,
   computeFunnelCounts,
+  isAuthSuccessPath,
   parseReturnPath,
   RETURN_BUCKETS,
   returnVisitRates,
@@ -439,7 +440,11 @@ export function summarizeTaggedRows(rows: readonly TaggedRow[], opts: { fromMs?:
       s.accepts.byPath[r.path] += r.count
     }
     if (r.path.startsWith('/auth/redirect/')) s.authRedirect += r.count
-    if (r.path.startsWith('/auth/success/')) s.authSuccess += r.count
+    // Exact base-path match only (lib/campaigns.ts isAuthSuccessPath) — v1.95.5 added a
+    // third-segment new/existing beacon alongside the base row for the same sign-in; the
+    // scheduled morning read (scripts/ads-reads/read.ts) runs this on main and would
+    // otherwise report double the real sign-in count from go-live on.
+    if (isAuthSuccessPath(r.path)) s.authSuccess += r.count
     const ev = classifyPopupPath(r.path)
     if (!ev) continue
     if (ev.family === 'signin-prompt' && ev.kind === 'shown' && !(ASK_PATHS as readonly string[]).includes(r.path)) s.asks.otherShownReasons += r.count
@@ -695,9 +700,24 @@ export const MEASUREMENT_QUIET_NOTE = POPUP_PAGE_NOTE
  * campaign sign-ups, so their minimum is an UPPER bound — "at most N". */
 export const SIGNUP_PROXY_NOTE =
   'Sign-ups are an UPPER bound, "at most N campaign sign-ups" = min(tagged auth successes, new prod accounts sitewide in the flight window): /auth/success also fires for returning sign-ins and the account count is not campaign-attributed. Counts only, never matched to anyone.'
-/** Post-flight recommendation (a beacon change, so only after the 2026-10-02 freeze). */
+/** Post-flight recommendation (a beacon change, so only after the 2026-10-02 freeze).
+ * NOTE (2026-09-26 hotfix): v1.95.5 actually shipped `/auth/success/<provider>/<new|
+ * existing|unknown>` early (see AUTH_NEW_EXISTING_LIVE_AT below) — this recommendation's
+ * text is now stale (it still reads as "not built yet, frozen until 10-02") and the
+ * SIGNUP_PROXY_NOTE "at most N" bound above could arguably be tightened to a real count
+ * using the new split. Left AS-IS here deliberately: read.test.ts asserts this exact
+ * string, and re-deriving the sign-up bound is a real design change outside this hotfix's
+ * scope (auth-success counting is also mid-review on feat/ads-sync) — flagged as a
+ * follow-up, not fixed in this branch. */
 export const AUTH_SUCCESS_SPLIT_RECOMMENDATION =
   'Recommendation: add /auth/success/<provider>/new|existing via additionalUserInfo.isNewUser (frozen until 10-02), so a campaign sign-up can be counted instead of bounded.'
+/** v1.95.5 go-live instant (2026-09-26T19:43:02Z) for the `/auth/success/<provider>/<new|
+ * existing|unknown>` beacon — see lib/popupEvents.ts GAME_COMPLETE_LIVE_AT (same instant,
+ * same release) for why this is a millisecond epoch, not an ET date string. Kept in this
+ * file rather than lib/popupEvents.ts: this constant is a plain Date.parse literal (no
+ * Intl/module-load cost) so it stays safe to import from the ads-sync Worker's cold-started
+ * path without pulling in popupEvents.ts's heavier formatting machinery. */
+export const AUTH_NEW_EXISTING_LIVE_AT = Date.parse('2026-09-26T19:43:02Z')
 
 export interface HealthInputs {
   site: SiteEventSummary

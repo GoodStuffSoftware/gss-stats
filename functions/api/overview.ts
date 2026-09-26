@@ -28,9 +28,25 @@ import {
   CAMPAIGN_SPEND,
   isInstallPromptInstalled,
   isRawInstallSignal,
+  isAuthSuccessPath,
+  gameCompleteNotInstrumented,
+  FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED,
   RAW_INSTALL_SIGNALS_LABEL,
+  type FunnelStepKey,
 } from '../../src/lib/campaigns'
-import { classifyPopupPath, computeRate, etDateFromMs, excludeInstallGapUnmeasured, withInstallGapNote, TRACKING_ACTIVATION_DATE_ET, POPUPS } from '../../src/lib/popupEvents'
+import {
+  classifyPopupPath,
+  computeRate,
+  etDateFromMs,
+  excludeInstallGapUnmeasured,
+  isPopupEventPath,
+  withInstallGapNote,
+  TRACKING_ACTIVATION_DATE_ET,
+  GAME_COMPLETE_LIVE_AT,
+  NEW_BEACONS_LIVE_AT_ET,
+  NEW_BEACONS_LIVE_MARKER_LABEL,
+  POPUPS,
+} from '../../src/lib/popupEvents'
 import {
   addEtDays,
   buildKpiTile,
@@ -73,7 +89,10 @@ const isDateOnly = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v)
 type Row = { min: number; path: string; visitor: string; campaign: string; c: number }
 
 function isEventPath(path: string): boolean {
-  return classifyPopupPath(path) !== null || path.startsWith('/return/')
+  // isPopupEventPath (lib/popupEvents.ts POPUP_EVENT_PREFIXES) also covers `/game/complete/`
+  // (v1.95.5) — without it here, a completed-game beacon would inflate the "Page views" KPI
+  // the same way it inflated /api/geo + /api/sites before popupExcludeClause picked it up.
+  return classifyPopupPath(path) !== null || path.startsWith('/return/') || isPopupEventPath(path)
 }
 function sumInWindow(rows: Row[], startMs: number, endMs: number, pred: (r: Row) => boolean): number {
   let total = 0
@@ -88,9 +107,10 @@ function isReturnD1Plus(path: string): boolean {
   const ev = parseReturnPath(path)
   return !!ev && ev.bucket !== 'd0'
 }
-function isAuthSuccess(path: string): boolean {
-  return path.startsWith('/auth/success/')
-}
+// Exact base-path match only — see lib/campaigns.ts isAuthSuccessPath: v1.95.5 added a
+// third-segment new/existing beacon that fires ALONGSIDE the base row for the same sign-in,
+// so a prefix match here would double-count every auth success.
+const isAuthSuccess = isAuthSuccessPath
 // Installs = /popup-outcome/install-prompt/installed (once per showing), like the campaign
 // funnel; raw /install/<outcome> beacons can double-count one install and are a secondary
 // figure only (lib/campaigns.ts isInstallPromptInstalled / isRawInstallSignal).
@@ -198,7 +218,16 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     const w = windowed((r) => r.path === '/game')
     kpis.push(buildKpiTile('played', 'Games played', w.today, w.yesterday, w.avg7))
   }
-  kpis.push(notYetTrackingTile('completed', 'Games completed')) // no matching path anywhere in D1 — see lib/campaigns.ts
+  // v1.95.5 (live GAME_COMPLETE_LIVE_AT, 2026-09-26T19:43:02Z): '/game/complete/...' didn't
+  // exist before this instant, so "today"/"yesterday"/avg7 windows entirely before it are a
+  // real not-instrumented gap, not a real 0 — same convention as notYetTrackingTile's other
+  // callers (e.g. the /return/ tile below, gated on returnBeaconLiveToday()).
+  if (nowMs < GAME_COMPLETE_LIVE_AT) {
+    kpis.push(notYetTrackingTile('completed', 'Games completed'))
+  } else {
+    const w = windowed((r) => r.path.startsWith('/game/complete/'))
+    kpis.push(buildKpiTile('completed', 'Games completed', w.today, w.yesterday, w.avg7))
+  }
   {
     const shown = windowed((r) => isPopupShown(r.path))
     const accept = windowed((r) => isPopupAccept(r.path))
@@ -290,10 +319,12 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
         rows1.map((r) => ({ path: r.path, count: r.c })),
         taggedArrivals,
       )
-      // Simplified vs /api/campaigns.ts: uses the GLOBAL not-instrumented set only (skips the
-      // extra per-flight "did this path exist site-wide during the window" query) — a leaner
-      // scorecard read; the campaign's own page (/api/campaigns) is the source of truth.
-      const rates = funnelStepRates(counts)
+      // Simplified vs /api/campaigns.ts: skips the extra per-flight "did this path exist
+      // site-wide during the window" query (the campaign's own page, /api/campaigns, is the
+      // source of truth for that) — but still gates 'completed' on gameCompleteNotInstrumented
+      // (v1.95.5) rather than the permanent global default, so a flight whose window reaches
+      // GAME_COMPLETE_LIVE_AT shows real completed-game rates instead of a stale "—".
+      const rates = funnelStepRates(counts, gameCompleteNotInstrumented(c) ? FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED : new Set<FunnelStepKey>())
 
       const returnCounts = Object.fromEntries(['d0', 'd1', 'd2-7', 'd8-14', 'd15-30', 'd31-60'].map((b) => [b, 0])) as Record<string, number>
       for (const x of r2.results ?? []) {
@@ -379,6 +410,11 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       campaignFlights,
       releaseMarkers,
       trackingActivationDate: TRACKING_ACTIVATION_DATE_ET,
+      // v1.95.5 go-live (game-complete + auth new/existing beacons) — same marker
+      // convention as trackingActivationDate above, see lib/popupEvents.ts
+      // NEW_BEACONS_LIVE_AT_ET / NEW_BEACONS_LIVE_MARKER_LABEL.
+      newBeaconsLiveAt: NEW_BEACONS_LIVE_AT_ET,
+      newBeaconsLiveAtLabel: NEW_BEACONS_LIVE_MARKER_LABEL,
       since,
       until,
       // Series labels that carry data caveats, so the chart shows them whatever the layout.
