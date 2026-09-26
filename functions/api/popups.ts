@@ -133,8 +133,16 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // — see lib/popupEvents.ts gateRate), or null for a genuine zero denominator ────────────
   if (dim === 'rate') {
     const spec = POPUP_RATE_SPECS.find((s) => s.key === rateKey)
-    const gated = spec ? computePopupRate(agg, spec) : { value: null, insufficientCohort: false }
-    return json({ rows: [], totals: { pageviews: 0, visits: 0 }, rate: gated.value, insufficientCohort: gated.insufficientCohort, meta })
+    const gated = spec ? computePopupRate(agg, spec) : { value: null, insufficientCohort: false, numerator: 0, denominator: 0 }
+    return json({
+      rows: [],
+      totals: { pageviews: 0, visits: 0 },
+      rate: gated.value,
+      insufficientCohort: gated.insufficientCohort,
+      numerator: gated.numerator,
+      denominator: gated.denominator,
+      meta,
+    })
   }
 
   // ── Sign-in eligibility breakdown (earned / capped / unearned) — activation-gated ──

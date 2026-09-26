@@ -277,7 +277,7 @@ describe('Play-direct — spend-only campaign (no beacon rows, corrected 2026-09
   })
 })
 
-describe('parseReturnPath / returnVisitRates (on-device return beacon, v1.90.0)', () => {
+describe('parseReturnPath / returnVisitRates (on-device return beacon, v1.95.3)', () => {
   it('parses every documented bucket', () => {
     for (const bucket of RETURN_BUCKETS) {
       expect(parseReturnPath(`/return/sudoku_funnel_retest/${bucket}`)).toEqual({ uc: 'sudoku_funnel_retest', bucket })
@@ -299,8 +299,13 @@ describe('parseReturnPath / returnVisitRates (on-device return beacon, v1.90.0)'
     expect(zero.d1).toBeNull()
     expect(zero['d15-30']).toBeNull()
   })
-  it('returnBeaconNotInstrumented: true for any flight that ended before TRACKING_ACTIVATION_DATE_ET (currently null → always true)', () => {
-    for (const c of CAMPAIGNS) expect(returnBeaconNotInstrumented(c)).toBe(true)
+  it('returnBeaconNotInstrumented: true only for flights that ended before TRACKING_ACTIVATION_DATE_ET (now 2026-09-26)', () => {
+    // Android launch (flightEnd 2026-09-09) and Play-direct (flightEnd 2026-09-13) both
+    // closed before activation — still "not instrumented". US+CA web retest (flightEnd
+    // 2026-10-02) ends AFTER activation — it's the one flight the return beacon now covers.
+    expect(returnBeaconNotInstrumented(campaignById('24215315197')!)).toBe(true)
+    expect(returnBeaconNotInstrumented(campaignById('24234347705')!)).toBe(true)
+    expect(returnBeaconNotInstrumented(campaignById('24279250691')!)).toBe(false)
   })
   it('sharesReturnTagWith: no two campaigns share a uc any more (corrected campaign definitions gave each its own tag)', () => {
     for (const c of CAMPAIGNS) expect(sharesReturnTagWith(c)).toBeNull()

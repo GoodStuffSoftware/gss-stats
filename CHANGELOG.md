@@ -6,6 +6,24 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Pop-up and campaign-return tracking is now live** for v1.95.3 (production web,
+  2026-09-26): the "tracking not yet active" note is gone, rates and pop-up counts are
+  measured, and the release timeline shows a "tracking starts" marker. Rows from before
+  the release (including the 2026-09-19 sign-in-prompt spike) stay unmeasured and are
+  never used as a baseline.
+- **The Best Sudoku overview's release panel now shows v1.95.3** ("Pop-up +
+  campaign-return tracking live on web") instead of the placeholder v1.90.0 entry.
+- **Android/Play tracking now has its own config**, separate from the web release date.
+  v1.95.3 was submitted to the Play production track the same day, but that's a
+  review-then-staged-rollout process, not a single ship date — charts get their own
+  "submitted, reaching devices from review onward" marker and a rollout caveat instead of
+  being graphed as measured/unmeasured the way the web date is.
+- **A standing small-sample note** on the pop-ups, campaigns and overview pages
+  ("Very small numbers: rates are anecdotal. Always read the counts.") — production has
+  only 14 registered users. Every computed rate on those pages now shows its
+  numerator/denominator next to the percentage.
+
 ## [0.3.1] — 2026-09-25
 
 ### Fixed

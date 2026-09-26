@@ -1,7 +1,7 @@
 // "Best Sudoku campaigns" — comparing three Google Ads campaigns from the beacon's D1
 // (`hits`). Companion to lib/popupEvents.ts: funnel-step classification reuses
 // classifyPopupPath (signin-prompt / promo-first50 / install) directly, and the "tracking
-// not yet active" concept reuses TRACKING_ACTIVATION_DATE_ET (v1.90.0's release date, which
+// not yet active" concept reuses TRACKING_ACTIVATION_DATE_ET (v1.95.3's release date, which
 // is also when the on-device return beacon ships — see RETURN_BUCKETS below).
 //
 // D1 SCHEMA NOTE: the task brief calls the utm columns "us"/"um"/"uc". The ACTUAL `hits`
@@ -406,7 +406,7 @@ export function costPer(spend: number | null, count: number): number | null {
   return computeRate(spend, count)
 }
 
-// ── On-device return beacon (v1.90.0; see popupEvents.ts POPUP_EVENT_PREFIXES '/return')
+// ── On-device return beacon (v1.95.3; see popupEvents.ts POPUP_EVENT_PREFIXES '/return')
 // `/return/<uc>/d0` is the denominator (first tagged load); d1/d2-7/d8-14/d15-30/d31-60
 // are "came back within that window," counted at most once per bucket per the app's own
 // on-device logic (this module just parses/sums what the beacon already deduped) ──────
@@ -448,9 +448,9 @@ export function returnVisitRates(counts: Record<ReturnBucket, number>): Record<E
 }
 
 /** A flight predates the return beacon entirely when it's already over before
- * TRACKING_ACTIVATION_DATE_ET (v1.90.0's release) — see the task brief: "flights before
- * v1.90.0 show 'not instrumented'". Reuses the SAME activation date as lib/popupEvents.ts
- * (v1.90.0 ships both features at once) rather than a second constant. Also true, always,
+ * TRACKING_ACTIVATION_DATE_ET (v1.95.3's release) — see the task brief: "flights before
+ * v1.95.3 show 'not instrumented'". Reuses the SAME activation date as lib/popupEvents.ts
+ * (v1.95.3 ships both features at once) rather than a second constant. Also true, always,
  * while that date is still unset — there's no live data yet for ANY flight. */
 export function returnBeaconNotInstrumented(campaign: CampaignFlight): boolean {
   if (TRACKING_ACTIVATION_DATE_ET === null) return true

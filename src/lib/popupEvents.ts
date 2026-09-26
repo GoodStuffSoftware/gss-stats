@@ -27,7 +27,7 @@ export const POPUP_EVENT_PREFIXES = [
   '/upsell',
   '/install',
   '/popup-outcome',
-  // On-device, no-ID return beacon (v1.90.0, see lib/campaigns.ts RETURN_BUCKETS): paths
+  // On-device, no-ID return beacon (v1.95.3, see lib/campaigns.ts RETURN_BUCKETS): paths
   // like /return/<uc>/d0, /return/<uc>/d1, /return/<uc>/d2-7, … — an event, not a screen.
   '/return',
 ] as const
@@ -218,6 +218,13 @@ export function etDateFromMs(ms: number): string {
 // directly instead of a gated wrapper.
 export const MIN_COHORT = 5
 
+// Production has only 14 registered users total and 3/50 first-50 promo slots claimed
+// (2026-09-26) — MIN_COHORT already blocks any single rate under 5 in its denominator,
+// but even an ALLOWED rate (5-14) is still anecdotal at this population size. Shown once
+// per page (pop-ups, campaigns, overview) alongside every rate, not a substitute for the
+// MIN_COHORT gate above.
+export const SMALL_SAMPLE_NOTE = 'Very small numbers: rates are anecdotal. Always read the counts.'
+
 /** True when `denominator` is nonzero but under `minCohort` — the "some data, just not
  * enough" case, distinct from a true zero ("no data at all yet"). A caller that wants to
  * show "too few to report" instead of plain "—" checks this alongside computeRate's null. */
@@ -235,23 +242,35 @@ export function computeRate(numerator: number, denominator: number, minCohort: n
 export interface GatedRate {
   value: number | null // computeRate's result
   insufficientCohort: boolean // see isInsufficientCohort
+  // The raw counts behind `value` — carried alongside the computed rate (not just
+  // derivable from it) so every rate the frontend renders can show its numerator/
+  // denominator next to the percentage, even when `value` is null. See SMALL_SAMPLE_NOTE:
+  // with only 14 registered users in production, a rate without its counts reads as far
+  // more confident than the underlying sample supports.
+  numerator: number
+  denominator: number
 }
 /** computeRate bundled with WHY a null came back — the shape every rate-producing
  * function in this codebase (computePopupRate here; funnelStepRates/returnVisitRates/
  * costPer in lib/campaigns.ts) returns, so the frontend never has to re-derive the
  * distinction from a bare number. */
 export function gateRate(numerator: number, denominator: number, minCohort: number = MIN_COHORT): GatedRate {
-  return { value: computeRate(numerator, denominator, minCohort), insufficientCohort: isInsufficientCohort(denominator, minCohort) }
+  return {
+    value: computeRate(numerator, denominator, minCohort),
+    insufficientCohort: isInsufficientCohort(denominator, minCohort),
+    numerator,
+    denominator,
+  }
 }
 
 // ── Tracking activation date ("before is unmeasured, not zero") ────────────────────
-// The US-Eastern calendar date v1.90.0 ships to prod and pop-up tracking is considered
+// The US-Eastern calendar date v1.95.3 ships to prod and pop-up tracking is considered
 // LIVE. null until that release is confirmed. Every day before this date — or every day
 // at all, while this is still null — is UNMEASURED: it may hold real rows (e.g. the
 // 2026-09-19 uncapped-placement-bug reproduction: 22 /signin-prompt/dismiss, 21
 // /signin-prompt/placement, 1 /signin-prompt/streak, all from one player), but those
 // rows are not a valid baseline and must never feed a rate, a summary figure, or a
-// before/after comparison. Set this to the release date's ET calendar day when v1.90.0
+// before/after comparison. Set this to the release date's ET calendar day when v1.95.3
 // ships — nothing else needs to change: computePopupRate, the popup-count API
 // dimensions (functions/api/popups.ts), the trend-chart "tracking starts" marker
 // (lib/charts.ts), and the page note (App.vue) all read this one constant.
@@ -259,7 +278,43 @@ export function gateRate(numerator: number, denominator: number, minCohort: numb
 // Summary figures (rate tiles, stat totals) must NEVER present a before/after change
 // across the activation boundary — there is deliberately no "vs previous period" delta
 // anywhere in the pop-up dataset; don't add one without re-reading this comment.
-export const TRACKING_ACTIVATION_DATE_ET: string | null = null
+// v1.95.3 went live on production WEB 2026-09-26 (confirmed live 14:31 UTC) — pop-up +
+// campaign-return tracking is LIVE as of this ET calendar day. The Android/Play build is a
+// SEPARATE, later release — see PLAY_TRACKING_ACTIVATION_DATE_ET below; this constant is
+// web-only.
+export const TRACKING_ACTIVATION_DATE_ET: string | null = '2026-09-26'
+
+// ── Play/Android tracking activation date (separate from web, and NOT a step) ──────
+// v1.95.3 (version code 19503) was SUBMITTED to the Play production track 2026-09-26
+// 14:41 UTC — that's a SUBMISSION, not an arrival. Google reviews it first, and devices
+// then update over several days: this is a RAMP, not a single ship date like
+// TRACKING_ACTIVATION_DATE_ET above. PLAY_TRACKING_ACTIVATION_DATE_ET is the EARLIEST
+// possible date any device could have it (submission day) — never treat it as the day
+// data becomes complete, and never gate/gray out days after it the way isPreActivation
+// does for the web date: a low count the week after submission is the expected shape of
+// a staged rollout, not a tracking gap. null means "not even submitted yet" (kept for
+// completeness/tests — not this build's state).
+export const PLAY_TRACKING_ACTIVATION_DATE_ET: string | null = '2026-09-26'
+
+/** Shown wherever bestsudoku-app /return or Play-referrer data would appear, while
+ * PLAY_TRACKING_ACTIVATION_DATE_ET is still null (not even submitted). */
+export const PLAY_TRACKING_NOT_LIVE_NOTE = 'Play tracking not yet live'
+/** Chart-marker label at PLAY_TRACKING_ACTIVATION_DATE_ET — deliberately NOT "Play
+ * tracking starts" (that would claim a step that didn't happen): the submission date is
+ * the earliest possible arrival, not a live date. */
+export const PLAY_TRACKING_MARKER_LABEL = 'Play: submitted 26 Sep, reaching devices from review onward'
+/** Caveat shown alongside any Play/Android figure once PLAY_TRACKING_ACTIVATION_DATE_ET
+ * is set — explains why early counts run low without implying anything is broken or
+ * that data should be graphed as "unmeasured" the way pre-web-activation rows are. */
+export const PLAY_TRACKING_ROLLOUT_CAVEAT =
+  'Play submission is in Google review and staged rollout — early counts reflect the rollout curve, not full device coverage.'
+
+/** Human status line for wherever Play/Android data is shown — the null (not submitted)
+ * and ramp (submitted, ramping) states read very differently, so callers use this instead
+ * of re-deriving the branch themselves. */
+export function playTrackingStatusNote(activationDateEt: string | null = PLAY_TRACKING_ACTIVATION_DATE_ET): string {
+  return activationDateEt === null ? PLAY_TRACKING_NOT_LIVE_NOTE : PLAY_TRACKING_ROLLOUT_CAVEAT
+}
 
 /** True while `etDate` predates tracking — or activation hasn't happened at all yet. */
 export function isPreActivation(etDate: string, activationDateEt: string | null): boolean {
