@@ -1,5 +1,6 @@
 import type { StatsResponse, Widget, GlobalFilters, DashboardConfig, Dataset, CampaignCompareResponse, OverviewResponse } from './types'
 import type { AdsReadingsResponse } from './lib/adsStore'
+import type { RefreshResult } from './lib/adsRefresh'
 import { resolveSelection } from './sitesStore'
 import { nativeField } from './lib/drill'
 import { queryDims } from './lib/rings'
@@ -170,6 +171,23 @@ export function fetchAdsReadings(query: string): Promise<AdsReadingsResponse> {
     if (!res.ok) {
       const text = await res.text().catch(() => '')
       throw new Error(`readings ${res.status}: ${text.slice(0, 200)}`)
+    }
+    return res.json()
+  })
+}
+
+/** "Refresh data" on the ads widgets (POST /api/ads/refresh — src/lib/adsRefresh.ts): syncs
+ * stale Ads data through the gss-stats-sync Worker, rate-limited server-side. */
+export function refreshAdsData(campaignIds: readonly string[]): Promise<RefreshResult> {
+  return withSessionCheck(async () => {
+    const res = await fetch('/api/ads/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ campaignIds }),
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(`refresh ${res.status}: ${text.slice(0, 200)}`)
     }
     return res.json()
   })

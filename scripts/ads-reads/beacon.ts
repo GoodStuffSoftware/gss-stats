@@ -7,7 +7,7 @@
 
 import { applyExclusions, campaignAttributionClause, type CampaignFlight } from '../../src/lib/campaigns'
 import { excludeInstallGapUnmeasured, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, popupIncludeClause, type HourPathCount } from '../../src/lib/popupEvents'
-import type { ReturnRow, ReturnSiteStat, TaggedRow } from '../../src/lib/adsRules'
+import { UPSELL_SIGNEDOUT_FIX_AT, type ReturnRow, type ReturnSiteStat, type TaggedRow } from '../../src/lib/adsRules'
 import type { D1Select } from './d1'
 
 export const WEB_SITE = 'bestsudoku-web'
@@ -18,14 +18,20 @@ export interface Query {
   binds: unknown[]
 }
 
-/** Campaign-attributed rows, by (UTC hour, path, visitor). */
-export function taggedRowsQuery(campaign: CampaignFlight): Query {
+/** Campaign-attributed rows, by (UTC hour, path, visitor) — and, when a segment boundary is
+ * set (lib/adsRules.ts UPSELL_SIGNEDOUT_FIX_AT), by `uf` = the row is at or after it, so the
+ * pre-fix / post-fix split is exact at the instant (the same device as the install fix's `pf`). */
+export function taggedRowsQuery(campaign: CampaignFlight, upsellFixAtMs: number | null = UPSELL_SIGNEDOUT_FIX_AT): Query {
   const attr = campaignAttributionClause(campaign)
   const w = [attr.sql]
   const b: unknown[] = [...attr.binds]
   applyExclusions(w, b)
   excludeInstallGapUnmeasured(w, b) // pre-fix install-gap rows are unmeasured, not zero
-  return { sql: `SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, visitor, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY hr, path, visitor`, binds: b }
+  if (upsellFixAtMs == null) return { sql: `SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, visitor, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY hr, path, visitor`, binds: b }
+  return {
+    sql: `SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, visitor, (ts >= ?) AS uf, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY hr, path, visitor, uf`,
+    binds: [upsellFixAtMs, ...b],
+  }
 }
 
 /** Site-wide pop-up/event rows on the web site since `sinceMs`, by (UTC hour, path). NOT
@@ -65,7 +71,8 @@ export function returnSitesQuery(sinceMs: number): Query {
 }
 
 export interface BeaconSource {
-  tagged(campaign: CampaignFlight): Promise<TaggedRow[]>
+  /** `upsellFixAtMs`: undefined = the configured instant; null = no segment flag. */
+  tagged(campaign: CampaignFlight, upsellFixAtMs?: number | null): Promise<TaggedRow[]>
   siteEvents(sinceMs: number): Promise<HourPathCount[]>
   returns(campaign: CampaignFlight): Promise<ReturnRow[]>
   returnSites(sinceMs: number): Promise<ReturnSiteStat[]>
@@ -75,10 +82,16 @@ const n = (x: unknown) => Number(x) || 0
 
 export function createBeaconSource(select: D1Select): BeaconSource {
   return {
-    async tagged(campaign) {
-      const q = taggedRowsQuery(campaign)
+    async tagged(campaign, upsellFixAtMs) {
+      const q = taggedRowsQuery(campaign, upsellFixAtMs === undefined ? UPSELL_SIGNEDOUT_FIX_AT : upsellFixAtMs)
       const rows = await select<any>(q.sql, q.binds)
-      return rows.map((x) => ({ hourStartMs: n(x.hr) * 3_600_000, path: String(x.path ?? ''), visitor: String(x.visitor ?? ''), count: n(x.c) }))
+      return rows.map((x) => ({
+        hourStartMs: n(x.hr) * 3_600_000,
+        path: String(x.path ?? ''),
+        visitor: String(x.visitor ?? ''),
+        count: n(x.c),
+        ...(x.uf === undefined ? {} : { postUpsellFix: n(x.uf) === 1 }),
+      }))
     },
     async siteEvents(sinceMs) {
       const q = siteEventsQuery(sinceMs)

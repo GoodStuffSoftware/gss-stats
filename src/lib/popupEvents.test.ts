@@ -319,7 +319,7 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
   // exactly how '/return' was accidentally left off this list on this branch — see the
   // 2026-09-25 review). If this ever fails, either a prefix was removed (update this
   // literal list deliberately) or one was never added (fix the array instead).
-  it('POPUP_EVENT_PREFIXES is exactly these 9 prefixes', () => {
+  it('POPUP_EVENT_PREFIXES is exactly these 11 prefixes', () => {
     expect([...POPUP_EVENT_PREFIXES]).toEqual([
       '/signin-prompt',
       '/signin-eligible',
@@ -330,7 +330,20 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
       '/popup-outcome',
       '/return',
       '/game/complete/',
+      '/auth/success/google/',
+      '/auth/success/email/',
     ])
+  })
+  it("the new/existing auth rows are events (they ride alongside the base row); the base rows stay page views", () => {
+    for (const p of ['/auth/success/google/new', '/auth/success/google/existing', '/auth/success/email/unknown']) expect(isPopupEventPath(p)).toBe(true)
+    for (const p of ['/auth/success/google', '/auth/success/email']) expect(isPopupEventPath(p)).toBe(false)
+    const w: string[] = []
+    const b: unknown[] = []
+    popupExcludeClause(w, b)
+    expect(b).toContain('/auth/success/google/%')
+    expect(b).toContain('/auth/success/email/%')
+    expect(b).not.toContain('/auth/success/google')
+    expect(b).not.toContain('/auth/success/email')
   })
   it('matches every popup prefix, exactly and as a subpath', () => {
     for (const p of POPUP_EVENT_PREFIXES) {

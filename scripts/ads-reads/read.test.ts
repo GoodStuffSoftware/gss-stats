@@ -9,6 +9,7 @@ import { runMorningRead, runPostflightRead, type MorningOptions } from './read'
 import { formatMorningReport, formatPostflightReport, withJson } from './report'
 import { MIN_COHORT } from '../../src/lib/popupEvents'
 import { AUTH_SUCCESS_SPLIT_RECOMMENDATION } from '../../src/lib/adsRules'
+import { syncAdsData } from '../../src/lib/adsSync'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const base = (): Fixture => JSON.parse(fs.readFileSync(path.join(here, 'fixtures', 'threshold-50.json'), 'utf8'))
@@ -30,14 +31,22 @@ describe('morning-read: the $50 threshold read', () => {
     expect(deps.store.written.readings.map((x) => x.kind)).toEqual(['daily', 'threshold'])
     expect(await deps.store.getConsumedThresholds('24279250691')).toEqual([25, 50])
   })
-  it('the same read again the next morning fires nothing and pushes nothing (fire-once)', async () => {
+  it('the same read again the same morning fires nothing, pushes nothing and stores no second daily line (fire-once, de-duped)', async () => {
     const deps = fixtureDeps(base(), false)
     await runMorningRead(deps, opts)
     const again = await runMorningRead({ ...deps, nowMs: deps.nowMs + 60_000 }, opts)
     expect(again.thresholds.crossedNow).toEqual([])
     expect(again.thresholdRead).toBeNull()
     expect(again.notify.push).toBe(false)
-    expect(deps.store.written.readings.filter((x) => x.kind === 'daily')).toHaveLength(2) // append-only
+    expect(deps.store.written.readings.filter((x) => x.kind === 'daily')).toHaveLength(1) // one line per ET day
+    expect(again.dedup.skipped.map((s) => s.entryKind)).toEqual(['morning'])
+    expect(again.spend.sync).toMatchObject({ daysChanged: 0, placementRowsChanged: 0 }) // the sync is a no-op too
+  })
+  it('the next morning appends its own daily line', async () => {
+    const deps = fixtureDeps(base(), false)
+    await runMorningRead(deps, opts)
+    await runMorningRead({ ...deps, nowMs: deps.nowMs + 86_400_000 }, opts)
+    expect(deps.store.written.readings.filter((x) => x.kind === 'daily').map((x) => x.etDate)).toEqual(['2026-09-30', '2026-10-01'])
   })
   it('--dry-run reads everything and writes nothing, so the threshold stays unconsumed', async () => {
     const deps = fixtureDeps(base(), true)
@@ -206,11 +215,11 @@ describe('morning-read: quiet days, the hard cap and release health', () => {
     expect(rec.proposal).toBeNull()
     expect(rec.notes[0]).toMatch(/^no pause proposed: campaign ended/)
   })
-  it('reaching $100 runs the decision table with "at most N" sign-ups and both inputs', async () => {
+  it('reaching $100 runs the decision table with "at most N" sign-ups and both inputs (a flight before the new/existing split went live)', async () => {
     const fx = base()
     ads(fx).daily['2026-09-29'].costMicros = 70_000_000
     fx.store!.consumed = [25, 50, 75]
-    const r = await runMorningRead(fixtureDeps(fx, false), opts)
+    const r = await runMorningRead({ ...fixtureDeps(fx, false), boundaries: { authNewExistingLiveAtMs: null } }, opts)
     expect(r.thresholds.crossedNow).toEqual([100])
     expect(r.thresholdRead!.kill.tripped).toContain('hard-cap')
     expect(r.thresholdRead!.kill.proposal).toBe('PROPOSE PAUSE')
@@ -319,10 +328,10 @@ describe('postflight-read', () => {
     expect(r.due).toBe(false)
     expect(r.notify).toMatchObject({ push: true, text: 'BSK retest day15 read FAILED: Google Ads spend (OAuth refresh failed); campaign status (OAuth refresh failed).' })
   })
-  it('every post-flight read carries the /auth/success new|existing recommendation and "at most N" sign-ups', async () => {
+  it('before the new/existing split went live, a post-flight read carries its recommendation and "at most N" sign-ups', async () => {
     const fx = base()
     fx.now = '2026-10-09T13:00:00Z'
-    const deps = fixtureDeps(fx, false)
+    const deps = { ...fixtureDeps(fx, false), boundaries: { authNewExistingLiveAtMs: null } }
     const r = await runPostflightRead(deps, { campaignId: '24279250691', stage: 'wrapup', force: false })
     expect(r.recommendations).toEqual([AUTH_SUCCESS_SPLIT_RECOMMENDATION])
     const text = formatPostflightReport(r)
@@ -332,6 +341,13 @@ describe('postflight-read', () => {
     expect(deps.store.written.readings[0].notes).toContain(AUTH_SUCCESS_SPLIT_RECOMMENDATION)
     expect(r.cohort).toBeNull() // the wrap-up does not read the tier split
     expect(r.cohortNote).toBeNull()
+  })
+  it('with the split live (v1.95.5, the default now) the recommendation is gone', async () => {
+    const fx = base()
+    fx.now = '2026-10-09T13:00:00Z'
+    const r = await runPostflightRead(fixtureDeps(fx, false), { campaignId: '24279250691', stage: 'wrapup', force: false })
+    expect(r.recommendations).toEqual([])
+    expect(formatPostflightReport(r)).not.toContain('frozen until 10-02')
   })
   it('M1: continued spend on a still-serving campaign pushes PROPOSE PAUSE even before the stage is due, and never moves the wrap-up', async () => {
     const fx = base()
@@ -431,5 +447,185 @@ describe('reports', () => {
     expect(text).toMatch(/ask rate 16\.7% \(5\/30\)/)
     expect(text).toMatch(/d1 too few|d1 10\.3% \(3\/29\)/)
     expect(text).toMatch(/nobody matched/)
+  })
+})
+
+describe('mid-flight instrumentation: the upsell-fix segment boundary and exact sign-ups', () => {
+  const FIX = Date.parse('2026-09-29T18:26:00Z') // 14:26 ET on 09-29
+  const at100 = () => {
+    const fx = base()
+    ads(fx).daily['2026-09-29'].costMicros = 70_000_000
+    fx.store!.consumed = [25, 50, 75]
+    return fx
+  }
+  it('the $100 read reports pre-fix and post-fix spend, asks, accepts and sign-ups separately', async () => {
+    const deps = { ...fixtureDeps(at100(), false), boundaries: { upsellFixAtMs: FIX } }
+    const r = await runMorningRead(deps, opts)
+    const seg = r.thresholdRead!.segments!
+    expect(seg.boundaryLabel).toBe('2026-09-29 14:26 ET')
+    expect(seg.pre.asks + seg.post.asks).toBe(r.thresholdRead!.tagged!.summary.asks.total)
+    expect(seg.pre.asks).toBe(3) // /signin-prompt/placement on 09-28
+    expect(seg.post.asks).toBe(2) // /promo-first50/shown on 09-29 21:00Z, after the fix
+    expect(seg.post.accepts).toBe(1)
+    expect(seg.boundaryDay).toBe('2026-09-29')
+    const text = formatMorningReport(r)
+    expect(text).toMatch(/Segments at the signed-out upsell fix \(2026-09-29 14:26 ET\) — two separate short tests \(spec section 14a\):/)
+    expect(text).toMatch(/ {2}pre-fix: spend \$\d+\.\d\d over \d+ closed day\(s\); .*asks 3, accepts 0/)
+    expect(text).toMatch(/ {2}post-fix: .*asks 2, accepts 1/)
+    expect(text).toMatch(/fix day 2026-09-29: spend \$70\.00 \(straddles the fix/)
+    expect(r.notify.text).toMatch(/split at the upsell fix: pre-fix 3 asks\/0 sign-ups, post-fix 2 asks\/1 sign-ups/)
+    const rec = deps.store.written.readings.find((x) => x.kind === 'threshold')!
+    expect(rec.counts).toMatchObject({ preFixAsks: 3, postFixAsks: 2, postFixAccepts: 1, fixDaySpend: 70 })
+  })
+  it('the post-flight wrap-up reports the segments too', async () => {
+    const fx = base()
+    fx.now = '2026-10-09T13:00:00Z'
+    const r = await runPostflightRead({ ...fixtureDeps(fx, false), boundaries: { upsellFixAtMs: FIX } }, { campaignId: '24279250691', stage: 'wrapup', force: false })
+    expect(r.read!.segments).not.toBeNull()
+    expect(formatPostflightReport(r)).toMatch(/Segments at the signed-out upsell fix/)
+    expect(r.notify.text).toMatch(/split at the upsell fix \(see report\)/)
+  })
+  it('without a boundary (the instant is still null) nothing changes', async () => {
+    const r = await runMorningRead(fixtureDeps(at100(), false), opts)
+    expect(r.thresholdRead!.segments).toBeNull()
+    expect(formatMorningReport(r)).not.toMatch(/Segments at/)
+  })
+  it('once /new|existing is live, a tagged /new sign-up is counted exactly', async () => {
+    const fx = at100()
+    const b = fx.beacon as Extract<Fixture['beacon'], { tagged: unknown }>
+    // The new client sends the status row ALONGSIDE the base row: one sign-in, two rows.
+    const base = b.tagged.find((t) => t.path === '/auth/success/google')!
+    b.tagged = [...b.tagged, { ...base, path: '/auth/success/google/new' }]
+    const r = await runMorningRead({ ...fixtureDeps(fx, false), boundaries: { authNewExistingLiveAtMs: Date.parse('2026-09-28T16:00:00Z') } }, opts)
+    expect(r.thresholdRead!.decision).toMatchObject({ signUpsAtMost: 1, signUpsExact: true, signUpsExactNew: 1, row: 'one' })
+    expect(r.notify.text).toMatch(/1 campaign sign-up \(exact\), row one/)
+    expect(formatMorningReport(r)).toMatch(/1 campaign sign-up \(exact: tagged \/auth\/success\/<provider>\/new since 2026-09-28 12:00 ET\)/)
+  })
+})
+
+describe('same-day reruns: one reading per entry, no repeated push (owner, 2026-09-26)', () => {
+  const hour = 3_600_000
+  it('an incomplete threshold read rerun the same morning is not stored or pushed as a threshold again; the failure still pushes', async () => {
+    const fx = base()
+    fx.beacon = { error: 'wrangler unavailable' }
+    const deps = fixtureDeps(fx, false)
+    const first = await runMorningRead(deps, opts)
+    expect(first.notify).toMatchObject({ push: true, busCopy: true })
+    const again = await runMorningRead({ ...deps, nowMs: deps.nowMs + hour }, opts)
+    expect(again.thresholdRead!.complete).toBe(false)
+    expect(again.dedup.skipped.map((s) => s.entryKind)).toEqual(['morning+incomplete', 'threshold-50+incomplete'])
+    expect(deps.store.written.readings.map((x) => x.entryKind)).toEqual(['morning+incomplete', 'threshold-50+incomplete'])
+    expect(again.notify.busCopy).toBe(false) // the threshold read was already copied
+    expect(again.notify.text).toMatch(/^BSK retest morning read FAILED: beacon \(wrangler unavailable\)/)
+    expect(again.notify.text).not.toMatch(/\$50 read/)
+  })
+  it('a complete retry of an incomplete threshold read the same day IS new: stored, pushed, and it consumes the threshold', async () => {
+    const fx = base()
+    fx.beacon = { error: 'wrangler unavailable' }
+    const deps = fixtureDeps(fx, false)
+    await runMorningRead(deps, opts)
+    const healthy = fixtureDeps(base(), false)
+    const retry = await runMorningRead({ ...deps, beacon: healthy.beacon, beaconInitError: null, nowMs: deps.nowMs + hour }, opts)
+    expect(retry.thresholdRead!.complete).toBe(true)
+    expect(retry.notify).toMatchObject({ push: true, busCopy: true })
+    expect(retry.notify.text).toMatch(/^BSK retest \$50 read:/)
+    expect(deps.store.written.readings.map((x) => x.entryKind)).toEqual(['morning+incomplete', 'threshold-50+incomplete', 'morning', 'threshold-50'])
+    expect(await deps.store.getConsumedThresholds('24279250691')).toEqual([25, 50])
+  })
+  it('the hard-cap trip is pushed once per day, not on every rerun', async () => {
+    const fx = base()
+    ads(fx).daily['2026-09-29'].costMicros = 70_000_000
+    fx.store!.consumed = [25, 50, 75, 100]
+    const deps = fixtureDeps(fx, false)
+    const first = await runMorningRead(deps, opts)
+    expect(first.notify.text).toMatch(/PROPOSE PAUSE/)
+    const again = await runMorningRead({ ...deps, nowMs: deps.nowMs + hour }, opts)
+    expect(again.hardCapDaily!.status).toBe('trip')
+    expect(again.notify.push).toBe(false)
+    expect(again.notify.reason).toMatch(/already recorded and pushed today \(morning\+pause\)/)
+  })
+  it('the backstop does not re-push the same alert on a rerun the same night', async () => {
+    const fx = base()
+    fx.now = '2026-09-30T03:30:00Z'
+    const b = fx.beacon as Extract<Fixture['beacon'], { siteEvents: unknown }>
+    b.siteEvents = b.siteEvents.filter((x) => x.path !== '/popup-outcome/signin-prompt/signed-in')
+    const deps = fixtureDeps(fx, false)
+    const first = await runMorningRead(deps, { ...opts, healthOnly: true })
+    expect(first.notify.push).toBe(true)
+    const again = await runMorningRead({ ...deps, nowMs: deps.nowMs + 20 * 60_000 }, { ...opts, healthOnly: true })
+    expect(again.releaseHealth.alerts).toBe(1)
+    expect(again.notify.push).toBe(false)
+    expect(deps.store.written.readings.map((x) => x.entryKind)).toEqual(['backstop+alert-signin-prompt-outcomes'])
+  })
+  it('a post-flight stage rerun the same day is not stored, pushed or copied again', async () => {
+    const fx = base()
+    fx.now = '2026-10-09T13:00:00Z'
+    const deps = fixtureDeps(fx, false)
+    const first = await runPostflightRead(deps, { campaignId: '24279250691', stage: 'wrapup', force: false })
+    expect(first.notify).toMatchObject({ push: true, busCopy: true })
+    const again = await runPostflightRead({ ...deps, nowMs: deps.nowMs + hour }, { campaignId: '24279250691', stage: 'wrapup', force: true })
+    expect(again.notify).toMatchObject({ push: false, busCopy: false })
+    expect(again.dedup.skipped.map((s) => s.entryKind)).toEqual(['postflight-wrapup'])
+    expect(deps.store.written.readings).toHaveLength(1)
+  })
+  it('the morning read syncs first through the shared sync: a second read an hour later re-pulls only the last 3 days (review M1) and changes nothing', async () => {
+    const deps = fixtureDeps(base(), false)
+    const first = await runMorningRead(deps, opts)
+    expect(first.spend.sync).toMatchObject({ fetched: { since: '2026-09-26', until: '2026-09-29' }, daysChanged: 4 })
+    const again = await runMorningRead({ ...deps, nowMs: deps.nowMs + hour }, opts)
+    expect(again.spend.sync).toMatchObject({ fetched: { since: '2026-09-27', until: '2026-09-29' }, daysChanged: 0, placementRowsChanged: 0 })
+    expect(again.spend.todayPartial).toEqual(first.spend.todayPartial)
+    expect(again.spend.cumulative.cost).toBe(first.spend.cumulative.cost)
+    // and so does every later read
+    const later = await runMorningRead({ ...deps, nowMs: deps.nowMs + 7 * hour }, opts)
+    expect(later.spend.sync).toMatchObject({ fetched: { since: '2026-09-27', until: '2026-09-29' }, daysChanged: 0 })
+    expect(deps.store.dailyRows('24279250691').map((r) => r.date)).toEqual(['2026-09-26', '2026-09-27', '2026-09-28', '2026-09-29']) // never today's open day
+    expect(deps.store.written.syncRuns.map((r) => r.source)).toEqual(['morning-read', 'morning-read', 'morning-read'])
+  })
+})
+
+describe('review M1 (2026-09-26): the reads re-pull the restatement window every time', () => {
+  // The Worker's 00:05 and 01:05 ET runs failed; its 03:05 ET run stored yesterday (09-29) at $5
+  // as a closed day, before Google added the rest of the day's cost. The 08:05 ET read must
+  // re-pull, not trust a 5-hour-old pull because the Worker's 6 h cadence says it is recent.
+  const workerPulledEarly = async (fx: Fixture) => {
+    const deps = fixtureDeps(fx, false)
+    const truth = { ...ads(fx).daily['2026-09-29'] }
+    ads(fx).daily['2026-09-29'] = { costMicros: 5_000_000, impressions: 1900, clicks: 15 }
+    const worker = await syncAdsData({ ads: deps.ads, store: deps.store }, { campaignIds: ['24279250691'], now: Date.parse('2026-09-30T07:05:00Z'), dryRun: false, source: 'worker-cron' })
+    expect(worker.campaigns[0]).toMatchObject({ pulled: true, spendThrough: '2026-09-29' }) // closed: pulled after 03:00 ET
+    ads(fx).daily['2026-09-29'] = truth // Google's late data lands
+    return deps
+  }
+  it('the morning read reports the true $13.40 for yesterday, not the $5 the Worker stored at 03:05 ET', async () => {
+    const deps = await workerPulledEarly(base())
+    const r = await runMorningRead(deps, opts)
+    expect(r.spend.yesterday).toMatchObject({ date: '2026-09-29', cost: 13.4 })
+    expect(r.spend.restated).toEqual([{ date: '2026-09-29', before: 5, after: 13.4 }])
+    expect(r.spend.cumulative.cost).toBe(50.1)
+    expect(deps.store.dailyRows('24279250691').find((x) => x.date === '2026-09-29')!.costMicros).toBe(13_400_000)
+  })
+  it('the backstop and the post-flight read re-pull it too', async () => {
+    const fx = base()
+    const deps = await workerPulledEarly(fx)
+    const backstop = await runMorningRead({ ...deps, nowMs: Date.parse('2026-09-30T13:05:00Z') }, { ...opts, healthOnly: true })
+    expect(backstop.spend.yesterday).toMatchObject({ date: '2026-09-29', cost: 13.4 })
+    const fx2 = base()
+    const deps2 = await workerPulledEarly(fx2)
+    const post = await runPostflightRead({ ...deps2, nowMs: Date.parse('2026-09-30T12:05:00Z') }, { campaignId: '24279250691', stage: 'wrapup', force: false })
+    expect(post.spend.restated).toEqual([{ date: '2026-09-29', before: 5, after: 13.4 }])
+  })
+})
+
+describe('review I2 (2026-09-26): the reads report a sync run that was killed', () => {
+  it('a Worker claim with no finished run shows as a SYNC ALERT line in the morning report and its JSON', async () => {
+    const deps = fixtureDeps(base(), false)
+    expect(await deps.store.claimSync('worker-cron', Date.parse('2026-09-30T04:05:00Z'), 600_000)).toBe(true)
+    const r = await runMorningRead(deps, opts)
+    expect(r.spend.syncAlerts).toEqual([expect.stringMatching(/^The worker-cron sync started Sep 30 00:05 ET never finished/)])
+    expect(formatMorningReport(r)).toMatch(/^  SYNC ALERT: The worker-cron sync started Sep 30 00:05 ET never finished/m)
+    const quiet = await runMorningRead(fixtureDeps(base(), false), opts)
+    expect(quiet.spend.syncAlerts).toEqual([])
+    expect(formatMorningReport(quiet)).not.toMatch(/SYNC ALERT/)
   })
 })

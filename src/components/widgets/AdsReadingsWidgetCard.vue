@@ -13,8 +13,11 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import type { AdsReadingsCampaign, AdsReadingsResponse } from '../../lib/adsStore'
 import { proposalLabel, type ReadingRecord, type RuleResult } from '../../lib/adsRules'
+import { freshnessLine, STALE_NOTE } from '../../lib/adsFreshness'
 import { SMALL_SAMPLE_NOTE } from '../../lib/popupEvents'
 import { fetchAdsReadings } from '../../api'
+import AdsRefreshButton from '../AdsRefreshButton.vue'
+import type { RefreshResult } from '../../lib/adsRefresh'
 
 export interface AdsReadingsWidgetLike {
   view?: string
@@ -79,10 +82,16 @@ function rulesSummary(rules: RuleResult[] | null): { text: string; tone: 'trip' 
   return { text: `${clear} clear${noData ? `, ${noData} no data` : ''}`, tone: 'clear' }
 }
 function spendSource(c: AdsReadingsCampaign): string {
-  if (c.spend.source === 'google-ads-api') return `Google Ads API, through ${c.spend.lastDate ?? '—'}`
+  if (c.spend.source === 'google-ads-api') return 'Google Ads API'
   if (c.spend.source === 'config') return 'hand-entered config'
   return 'no spend on record'
 }
+// A sync that ran may have stored new days: reload so spend and the freshness line update.
+function onRefreshed(r: RefreshResult) {
+  if (r.refreshed) load()
+}
+// "Spend through <date> · synced <relative time>" — relative to when the data was loaded.
+const loadedAt = computed(() => (data.value ? Date.parse(data.value.generatedAt) : Date.now()))
 </script>
 
 <template>
@@ -93,11 +102,16 @@ function spendSource(c: AdsReadingsCampaign): string {
       <p v-if="!data.storeBound" class="state small mono">Readings store not bound (gss_stats_ads) — showing config spend only.</p>
       <p v-else-if="!data.storeReadable" class="state small mono">Readings store unreadable — showing config spend only.</p>
       <p class="note">{{ SMALL_SAMPLE_NOTE }} Proposals only; the routine never changes a campaign.</p>
+      <AdsRefreshButton v-if="data.storeBound && campaigns.length" :campaign-ids="campaigns.map((c) => c.campaignId)" @refreshed="onRefreshed" />
+      <p v-for="a in data.syncAlerts ?? []" :key="a.source + a.startedAt" class="sync-alert small mono">Sync alert: {{ a.message }}</p>
 
       <div v-for="c in campaigns" :key="c.campaignId" class="camp">
         <div class="camp-head">
           <span class="camp-label">{{ c.label }}</span>
           <span class="camp-spend mono">{{ money(c.spend.spend) }} <span class="muted">({{ spendSource(c) }})</span></span>
+        </div>
+        <div v-if="data.storeBound" class="fresh mono">
+          {{ freshnessLine(c, loadedAt) }}<span v-if="c.stale" class="stale"> · {{ STALE_NOTE }}</span>
         </div>
         <div v-if="c.thresholdsFired?.length" class="fired mono">
           fired: <span v-for="t in c.thresholdsFired" :key="t.threshold" class="chip">${{ t.threshold }} · {{ etTime(t.firedAt) }}</span>
@@ -119,7 +133,7 @@ function spendSource(c: AdsReadingsCampaign): string {
                 <td class="mono num">{{ fmt(r.counts.asks) }}</td>
                 <td class="mono num">{{ fmt(r.counts.accepts) }}</td>
                 <td class="mono num">{{ fmt(r.counts.authSuccess) }}</td>
-                <td class="mono num">{{ r.counts.signUpsAtMost == null ? '—' : `at most ${fmt(r.counts.signUpsAtMost)}` }}</td>
+                <td class="mono num">{{ r.counts.signUpsAtMost == null ? '—' : r.counts.signUpsExact === 1 ? `${fmt(r.counts.signUpsAtMost)} (exact)` : `at most ${fmt(r.counts.signUpsAtMost)}` }}</td>
               </tr>
             </tbody>
           </table>
@@ -179,6 +193,18 @@ function spendSource(c: AdsReadingsCampaign): string {
 }
 .muted {
   color: rgb(var(--ink-3));
+}
+.fresh {
+  font-size: 11px;
+  color: rgb(var(--ink-3));
+  margin-bottom: 6px;
+}
+.stale {
+  color: #bc4749;
+}
+.sync-alert {
+  color: #bc4749;
+  margin: 0 0 6px;
 }
 .fired {
   font-size: 11px;

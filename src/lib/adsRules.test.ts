@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   ADS_READ_PLANS,
   appendReading,
+  planReadingAppends,
+  readingEntryKind,
   assertKnownCampaign,
   buildHealthPairs,
   compareSpendToConfig,
@@ -573,13 +575,52 @@ describe('readings log is append-only', () => {
     counts: {},
     notes: [],
   }
-  it('a second daily line on the same day is appended, never replacing the first', () => {
+  it('a same-day rerun of the same entry is a no-op (owner, 2026-09-26: no duplicate rows); the first row is never replaced', () => {
     const second = { ...base, id: readingId('daily', '2026-09-27T14:00:00Z', undefined, RETEST_CAMPAIGN_ID), readAt: '2026-09-27T14:00:00Z' }
     const log = appendReading(appendReading(null, base), second)
-    expect(log.readings.map((r) => r.readAt)).toEqual(['2026-09-27T12:05:00Z', '2026-09-27T14:00:00Z'])
+    expect(log.readings.map((r) => r.readAt)).toEqual(['2026-09-27T12:05:00Z'])
+  })
+  it('a same-day line that carries new information (a pause proposal) is appended next to the first', () => {
+    const second = { ...base, id: readingId('daily', '2026-09-27T14:00:00Z', undefined, RETEST_CAMPAIGN_ID), readAt: '2026-09-27T14:00:00Z', proposal: 'PROPOSE PAUSE' }
+    const log = appendReading(appendReading(null, base), second)
+    expect(log.readings.map((r) => r.entryKind)).toEqual(['morning', 'morning+pause'])
+  })
+  it('the next day gets its own line', () => {
+    const next = { ...base, id: readingId('daily', '2026-09-28T12:05:00Z', undefined, RETEST_CAMPAIGN_ID), readAt: '2026-09-28T12:05:00Z', etDate: '2026-09-28' }
+    expect(appendReading(appendReading(null, base), next).readings).toHaveLength(2)
   })
   it('a retried insert of the same id is a no-op', () => {
     expect(appendReading(appendReading(null, base), base).readings).toHaveLength(1)
+  })
+  it('entry kinds: the entry plus the facts that make a rerun worth a row', () => {
+    expect(readingEntryKind(base)).toBe('morning')
+    expect(readingEntryKind({ ...base, complete: false })).toBe('morning+incomplete')
+    expect(readingEntryKind({ ...base, proposal: 'PROPOSE PAUSE' })).toBe('morning+pause')
+    expect(readingEntryKind({ ...base, kind: 'threshold', thresholds: [75, 50] })).toBe('threshold-50-75')
+    expect(readingEntryKind({ ...base, kind: 'postflight', stage: 'day15' })).toBe('postflight-day15')
+    expect(readingEntryKind({ ...base, kind: 'health', notes: ['ALERT install-accept→installed: x 6, y 0', 'ALERT signin-prompt→outcomes: a 9, b 0'] })).toBe(
+      'backstop+alert-install-accept-installed+alert-signin-prompt-outcomes',
+    )
+    expect(readingEntryKind({ ...base, kind: 'health' })).toBe('backstop')
+  })
+  it('planReadingAppends: a same-day repeat is skipped, an incomplete rerun after a complete read is skipped, new information is appended', () => {
+    const stored = [{ ...base, entryKind: 'morning' }]
+    const at = (h: string) => ({ id: `daily:${h}`, readAt: `2026-09-27T${h}:00:00Z` })
+    const plan = planReadingAppends(
+      [
+        { ...base, ...at('14') }, // same entry -> skip
+        { ...base, ...at('15'), complete: false }, // less information than the stored complete read -> skip
+        { ...base, ...at('16'), proposal: 'PROPOSE PAUSE' }, // new: a pause proposal
+        { ...base, ...at('16'), id: 'threshold:x', kind: 'threshold', thresholds: [50] }, // new entry
+      ],
+      stored,
+    )
+    expect(plan.append.map((r) => r.entryKind)).toEqual(['morning+pause', 'threshold-50'])
+    expect(plan.skip.map((s) => s.reason)).toEqual(['already recorded today (morning)', 'a complete morning read is already recorded today'])
+    // an incomplete first read, then a complete retry: the retry is new
+    expect(planReadingAppends([{ ...base, ...at('14') }], [{ ...base, complete: false }]).append).toHaveLength(1)
+    // another day never collides
+    expect(planReadingAppends([{ ...base, etDate: '2026-09-28' }], stored).append).toHaveLength(1)
   })
   it('reading keys are unique per kind, campaign, stage and instant', () => {
     expect(readingId('postflight', '2026-10-09T12:00:00Z', 'wrapup', RETEST_CAMPAIGN_ID)).toBe(`postflight:${RETEST_CAMPAIGN_ID}:wrapup:2026-10-09T12:00:00Z`)

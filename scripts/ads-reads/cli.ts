@@ -11,15 +11,15 @@ import { parseArgs } from 'node:util'
 import { RETEST_CAMPAIGN_ID, type ReadingRecord, type ReturnRow, type ReturnSiteStat, type SpendDay, type StoredSpend, type TaggedRow } from '../../src/lib/adsRules'
 import type { PlacementDayRow } from '../../src/lib/adsStore'
 import type { HourPathCount } from '../../src/lib/popupEvents'
-import { createAdsClient, fetchCampaignStatus, fetchDailySpend, fetchPlacementDaily, type AdsClient, type CampaignStatus } from './adsApi'
+import { createAdsClient, fetchCampaignStatus, fetchDailySpend, fetchPlacementDaily, fetchRangeTotal, type AdsClient, type CampaignStatus } from '../../src/lib/adsApi'
 import { createBeaconSource, type BeaconSource } from './beacon'
 import { createD1Select } from './d1'
 import { createD1Store, createMemoryStore } from './d1Store'
 import { readFirebaseCounts, type FirebaseCounts } from './firebase'
 import type { AdsSource, ReadDeps } from './read'
-import { redact, registerSecret } from './redact'
+import { redact, registerSecret } from '../../src/lib/adsRedact'
 import { loadAdsCredentials } from './secrets'
-import { createWranglerRunner, type WranglerRunner } from './wrangler'
+import { createWranglerRunner, EXTERNAL_TIMEOUT_MS, type WranglerRunner } from './wrangler'
 
 export const COMMON_OPTIONS = {
   'dry-run': { type: 'boolean', default: false },
@@ -56,7 +56,7 @@ export interface LiveGraph {
 
 export async function liveAdsClient(): Promise<{ ads: AdsClient | null; adsInitError: string | null }> {
   try {
-    return { ads: await createAdsClient(await loadAdsCredentials()), adsInitError: null }
+    return { ads: await createAdsClient(await loadAdsCredentials(), { timeoutMs: EXTERNAL_TIMEOUT_MS }), adsInitError: null }
   } catch (e) {
     return { ads: null, adsInitError: redact(e) }
   }
@@ -67,6 +67,7 @@ export function adsSource(client: AdsClient): AdsSource {
     status: (id) => fetchCampaignStatus(client, id),
     daily: (id, since, until) => fetchDailySpend(client, id, since, until),
     placements: (id, since, until) => fetchPlacementDaily(client, id, since, until),
+    rangeTotal: (id, since, until) => fetchRangeTotal(client, id, since, until),
   }
 }
 
@@ -112,7 +113,7 @@ export function fixtureDeps(fx: Fixture, dryRun: boolean): ReadDeps & { store: R
   const inRange = (d: string, since: string, until: string) => d >= since && d <= until
   const b: BeaconSource | null = beacon
     ? {
-        tagged: async () => beacon.tagged.map((r) => ({ hourStartMs: hourMs(r), path: r.path, visitor: r.visitor, count: r.count })),
+        tagged: async () => beacon.tagged.map((r) => ({ hourStartMs: hourMs(r), path: r.path, visitor: r.visitor, count: r.count, ...(r.postUpsellFix === undefined ? {} : { postUpsellFix: r.postUpsellFix }) })),
         siteEvents: async (sinceMs) => beacon.siteEvents.map((r) => ({ hourStartMs: hourMs(r), path: r.path, count: r.count })).filter((r) => r.hourStartMs >= sinceMs),
         returns: async () => beacon.returns,
         returnSites: async () => beacon.returnSites.map((s) => ({ site: s.site, count: s.count, firstMs: optMs(s.first, s.firstMs), lastMs: optMs(s.last, s.lastMs) })),
@@ -125,6 +126,10 @@ export function fixtureDeps(fx: Fixture, dryRun: boolean): ReadDeps & { store: R
           status: async () => ads.status,
           daily: async (_id, since, until) => Object.fromEntries(Object.entries(ads.daily).filter(([d]) => inRange(d, since, until))),
           placements: async (_id, since, until) => ads.placements.filter((p) => inRange(p.date, since, until)),
+          rangeTotal: async (_id, since, until) => {
+            const days = Object.entries(ads.daily).filter(([d]) => inRange(d, since, until)).map(([, v]) => v)
+            return days.length ? days.reduce((a, v) => ({ costMicros: a.costMicros + v.costMicros, impressions: a.impressions + v.impressions, clicks: a.clicks + v.clicks }), { costMicros: 0, impressions: 0, clicks: 0 }) : null
+          },
         }
       : null,
     adsInitError: fx.ads && 'error' in fx.ads ? fx.ads.error : ads ? null : 'no ads data in fixture',

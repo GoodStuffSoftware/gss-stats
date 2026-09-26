@@ -9,8 +9,11 @@
 // tags, exclusion constants, timestamps) — still escaped properly, and anything that is not a
 // finite number or a string is refused.
 
-import { redactedFirstLine } from './redact'
+import { redactedFirstLine } from '../../src/lib/adsRedact'
+import { stripSqlLiterals } from '../../src/lib/adsStore'
 import type { WranglerRunner } from './wrangler'
+
+export { stripSqlLiterals }
 
 export const BEACON_DB = 'gss-geo'
 
@@ -62,11 +65,6 @@ export function inlineBinds(sql: string, binds: readonly unknown[]): string {
   return out
 }
 
-/** SQL with every quoted literal blanked, so keyword checks never trip on a campaign tag. */
-export function stripSqlLiterals(sql: string): string {
-  return sql.replace(/'(?:[^']|'')*'/g, "''").replace(/"(?:[^"]|"")*"/g, '""')
-}
-
 const WRITE_KEYWORDS = /\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|UPSERT|ATTACH|DETACH|PRAGMA|VACUUM|REINDEX|TRUNCATE|GRANT|BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE)\b/i
 
 export function assertReadOnlySql(sql: string): void {
@@ -82,12 +80,19 @@ export type D1Select = <T = Record<string, unknown>>(sql: string, binds?: readon
 
 /** Parses `wrangler d1 execute --json` stdout: `[{"results":[…],"success":true,"meta":{…}}]`. */
 export function parseD1Json(stdout: string): Record<string, unknown>[] {
-  const start = stdout.indexOf('[')
+  return parseD1Response(stdout).results
+}
+/** The same, plus meta.changes (null when wrangler does not report it). */
+export function parseD1Response(stdout: string): { results: Record<string, unknown>[]; changes: number | null } {
+  // The JSON array starts a line; a "▲ [WARNING] …" banner before it must not be mistaken for it.
+  const m = /^\[/m.exec(stdout)
+  const start = m ? m.index : -1
   if (start < 0) throw new Error('wrangler returned no JSON')
   const parsed = JSON.parse(stdout.slice(start))
   const first = Array.isArray(parsed) ? parsed[0] : parsed
   if (!first || first.success === false) throw new Error('D1 reported the query as unsuccessful')
-  return Array.isArray(first.results) ? first.results : []
+  const changes = first.meta && typeof first.meta.changes === 'number' ? first.meta.changes : null
+  return { results: Array.isArray(first.results) ? first.results : [], changes }
 }
 
 /** SELECT-only access to a D1 database (default: the beacon's gss-geo). */

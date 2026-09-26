@@ -1,6 +1,10 @@
-// Minimal, READ-ONLY Google Ads REST client for the ads-read routine — a port of the calls
-// best-sudoku's scripts/marketing/ads-api-report.mjs makes, without the google-ads-api
-// dependency and without the best-sudoku checkout.
+// Minimal, READ-ONLY Google Ads REST client — a port of the calls best-sudoku's
+// scripts/marketing/ads-api-report.mjs makes, without the google-ads-api dependency.
+//
+// RUNTIME-AGNOSTIC: plain `fetch` + `AbortSignal.timeout`, no Node imports, so the same
+// client serves the local CLIs (scripts/ads-reads/) and the gss-stats-sync Worker
+// (workers/sync/). Credentials are handed in by the caller (Bitwarden locally, Worker
+// secrets in Cloudflare) and never leave memory.
 //
 // READ-ONLY BY CONSTRUCTION: the only endpoint this module can reach is
 // `customers/<id>/googleAds:search` (a GAQL SELECT). There is no mutate call anywhere, and
@@ -10,24 +14,34 @@
 // login-customer-id header is never sent, and GOOGLE_ADS_LOGIN_CUSTOMER_ID is never read
 // (buildHeaders asserts it).
 
-import { ADS_API_VERSION, ADS_CUSTOMER_ID, APPROVED_PLACEMENTS_BY_CAMPAIGN, assertKnownCampaign, isApprovedPlacement, readPlanFor, type SpendDay } from '../../src/lib/adsRules'
-import type { PlacementDayRow } from '../../src/lib/adsStore'
-import type { AdsCredentials } from './secrets'
-import { redact, registerSecret } from './redact'
-import { EXTERNAL_TIMEOUT_MS, TIMED_OUT_TEXT } from './wrangler'
+import { ADS_API_VERSION, ADS_CUSTOMER_ID, APPROVED_PLACEMENTS_BY_CAMPAIGN, assertKnownCampaign, isApprovedPlacement, readPlanFor, type SpendDay } from './adsRules'
+import type { PlacementDayRow } from './adsStore'
+import { redact, registerSecret } from './adsRedact'
+
+export interface AdsCredentials {
+  clientId: string
+  clientSecret: string
+  refreshToken: string
+  developerToken: string
+}
 
 export type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body?: string }) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'
+/** Every external call gives up after this long by default (review L8). */
+export const DEFAULT_EXTERNAL_TIMEOUT_MS = 60_000
+export const timedOutText = (ms: number): string => `timed out after ${Math.round(ms / 1000)}s`
 
-/** fetch with the routine's external timeout (review L8); a timeout rejects with a plain
+/** fetch with an external timeout (review L8); a timeout rejects with a plain
  * "<host> timed out after 60s" so the failure summary says what happened. */
-export const timedFetch: FetchLike = async (url, init) => {
-  try {
-    return await fetch(url, { ...init, signal: AbortSignal.timeout(EXTERNAL_TIMEOUT_MS) })
-  } catch (e) {
-    if (e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError')) throw new Error(`${new URL(url).host} ${TIMED_OUT_TEXT}`)
-    throw e
+export function createTimedFetch(timeoutMs: number = DEFAULT_EXTERNAL_TIMEOUT_MS): FetchLike {
+  return async (url, init) => {
+    try {
+      return await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) })
+    } catch (e) {
+      if (e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError')) throw new Error(`${new URL(url).host} ${timedOutText(timeoutMs)}`)
+      throw e
+    }
   }
 }
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -65,9 +79,9 @@ export interface AdsClient {
 
 export async function createAdsClient(
   creds: AdsCredentials,
-  opts: { customerId?: string; apiVersion?: string; fetchImpl?: FetchLike } = {},
+  opts: { customerId?: string; apiVersion?: string; fetchImpl?: FetchLike; timeoutMs?: number } = {},
 ): Promise<AdsClient> {
-  const fetchImpl: FetchLike = opts.fetchImpl ?? timedFetch
+  const fetchImpl: FetchLike = opts.fetchImpl ?? createTimedFetch(opts.timeoutMs)
   const tokenRes = await fetchImpl(TOKEN_URL, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -168,6 +182,27 @@ export async function fetchDailySpend(client: AdsClient, campaignId: string, sin
     }
   }
   return days
+}
+
+/** The campaign's totals over the whole range in ONE row (segments.date filtered, not selected,
+ * so Google aggregates). The sync's cross-check: before it stores a day the daily query left
+ * out as zero, the daily rows must add up to this. `null` = Google returned no row at all (no
+ * delivery in the range — or an empty answer, which the caller must not trust on its own). */
+export async function fetchRangeTotal(client: AdsClient, campaignId: string, since: string, until: string): Promise<SpendDay | null> {
+  assertKnownCampaign(campaignId)
+  checkRange(since, until)
+  const rows = await client.search(
+    `SELECT metrics.cost_micros, metrics.impressions, metrics.clicks FROM campaign WHERE campaign.id = ${campaignId} AND segments.date BETWEEN '${since}' AND '${until}'`,
+  )
+  if (!rows.length) return null
+  return rows.reduce<SpendDay>(
+    (a, r) => ({
+      costMicros: a.costMicros + Number(r.metrics?.costMicros ?? 0),
+      impressions: a.impressions + Number(r.metrics?.impressions ?? 0),
+      clicks: a.clicks + Number(r.metrics?.clicks ?? 0),
+    }),
+    { costMicros: 0, impressions: 0, clicks: 0 },
+  )
 }
 
 /** Placement-level cost PER ET DAY (group_placement_view), each row tagged approved/not

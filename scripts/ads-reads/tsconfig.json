@@ -12,5 +12,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["./**/*.ts", "../../src/lib/adsRules.ts", "../../src/lib/adsStore.ts"]
+  "include": ["./**/*.ts", "../../src/lib/adsRules.ts", "../../src/lib/adsStore.ts", "../../src/lib/adsSync.ts", "../../src/lib/adsApi.ts", "../../src/lib/adsRedact.ts", "../../src/lib/adsFreshness.ts"]
 }

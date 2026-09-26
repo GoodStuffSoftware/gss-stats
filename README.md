@@ -156,8 +156,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   `/auth/success/<provider>/<new|existing|unknown>` beacon that fires ALONGSIDE the existing
   base `/auth/success/<provider>` row for the same sign-in. Every auth-success count in this
   codebase (overview KPIs/release panel, the campaign funnel, the ads-read routine) counts
-  only the base two-segment path — `AUTH_SUCCESS_PATHS` /`isAuthSuccessPath` in
-  `lib/campaigns.ts` — so the new suffix row is never double-counted. The completion beacon
+  only the base two-segment path — `AUTH_SUCCESS_PATHS` / `isAuthSuccessBase` (alias
+  `isAuthSuccessPath`) in `lib/campaigns.ts`, the one matcher — so the new suffix row is never
+  double-counted. The completion beacon
   is excluded from every page-view/visit count the same way every other pop-up/event beacon
   is (`POPUP_EVENT_PREFIXES`), and powers a new, live "Completed a game" funnel step and
   overview tile (previously always "not yet tracking" — nothing matched before this
@@ -252,25 +253,27 @@ exclusions, MIN_COHORT and ET-day logic are the same `src/lib` code the dashboar
 the routine and the dashboard can't disagree.
 
 ```powershell
-npm run ads:morning-read -- --dry-run --cf-token-file <path-to-cf-token>   # daily read; no writes
+npm run ads:sync -- --dry-run --cf-token-file <path-to-cf-token>           # the shared sync only
+npm run ads:morning-read -- --dry-run --cf-token-file <path>               # daily read; no writes
 npm run ads:postflight-read -- --stage wrapup --dry-run --cf-token-file <path>
-npm run ads:backfill -- --dry-run --cf-token-file <path>                   # idempotent spend backfill
+npm run ads:backfill -- --dry-run --cf-token-file <path>                   # full re-pull + config check
 npm run ads:morning-read -- --fixture <file.json> --now <iso>              # offline, recorded data
 npm run typecheck:scripts
 ```
 
 - **Spend** comes from the Google Ads REST API only (customer 8726535246, no manager
-  header). Credentials are read from Bitwarden Secrets Manager with `bws` (needs
-  `BWS_ACCESS_TOKEN`) into process memory and are never printed, logged or written.
+  header), and only through the shared sync (see [Ads data freshness](#ads-data-freshness)).
+  Credentials are read from Bitwarden Secrets Manager with `bws` (needs `BWS_ACCESS_TOKEN`)
+  into process memory and are never printed, logged or written.
 - **Beacon reads** use `wrangler d1 execute gss-geo --remote --json --command`: single
   `SELECT`s only, enforced before wrangler runs.
 - **Store:** gss-stats' own D1 database `gss-stats-ads` (spend per day, placement-day cost,
   an append-only readings log and fire-once threshold state). Why and how:
   [docs/adr/0001-ads-read-store.md](docs/adr/0001-ads-read-store.md). Schema:
   [`migrations/gss-stats-ads/`](migrations/gss-stats-ads/) (`npm run ads:migrate`).
-- **morning-read** stores yesterday's and cumulative spend, fires each $25/$50/$75/$100 read
-  once (full read + kill rules), always appends a daily line, checks the hard cap on every
-  read, and notes any earlier scheduled read that never ran. The release-health check (a
+- **morning-read** syncs spend first, fires each $25/$50/$75/$100 read once (full read + kill
+  rules), appends one daily line per ET day, checks the hard cap on every read, and notes any
+  earlier scheduled read that never ran. The release-health check (a
   missing child of a non-zero parent) never runs between 01:00 and 12:00 ET, so the 08:00
   run skips it and a 23:15 ET `--release-health-only` backstop covers it on days that served
   ads. Pushes go out only on a threshold read, a kill-rule trip, a failed read, or a real
@@ -289,6 +292,109 @@ npm run typecheck:scripts
   can only make COUNT queries and one document GET, but the prod key on this machine is not
   a read-only key (it holds `roles/editor`); pointing this flag at a key with only
   `roles/datastore.viewer` is an owner step.
+- **Mid-flight instrumentation (the beacon freeze was lifted by the owner on 2026-09-26).** Two
+  instants in `src/lib/adsRules.ts`, each `null` until the release coordinator sets it:
+  `AUTH_NEW_EXISTING_LIVE_AT` (set: `2026-09-26T19:43:02Z`, v1.95.5; from then on tagged `/auth/success/<provider>/new` rows count as
+  **exact** sign-ups, `/existing` rows never count, and `unknown` rows plus sign-ins with no
+  status row stay in the "at most" part: min(those, new accounts in the window − exact new) +
+  exact new) and `UPSELL_SIGNEDOUT_FIX_AT` (a funnel **segment boundary**: the $100 read and the
+  post-flight reads report pre-fix and post-fix spend, asks, accepts and sign-ups separately,
+  per spec section 14a's "two separate short tests"; beacon rows are split at the exact
+  instant, and the fix day's spend is shown apart). **A sign-in is its base row only:** the
+  status row `/auth/success/<provider>/<new|existing|unknown>` is sent ALONGSIDE the base row
+  `/auth/success/<provider>` (providers `google` and `email`), so every auth-success count — the
+  tagged funnel, `/api/campaigns`, `/api/overview`, the sign-up bound — matches the exact base
+  shape, and the status split reads only the three-segment rows. A prefix match would count each
+  new-client sign-in twice. Kill rule 3's asks are unchanged.
+- **One reading per entry per day.** A reading is stored once per (campaign, ET day, entry
+  kind: `morning`, `backstop`, `threshold-50`, `postflight-wrapup`, …). A same-day rerun is
+  stored only when it carries new information (a complete retry of an incomplete read, a new
+  pause proposal, a new release-health alert), and a threshold, cap trip or alert already
+  pushed that day is not pushed again; a failed read always pushes. The database enforces it
+  with a UNIQUE index (migration 0003).
+
+## Ads data freshness
+
+Every path that needs Google Ads metrics runs **one** function,
+[`syncAdsData`](src/lib/adsSync.ts): the morning read, the backstop, the post-flight read,
+the backfill (`--full`), `npm run ads:sync`, and the **gss-stats-sync** Cloudflare Worker
+(cron + on demand, below). Per campaign it:
+
+1. reads the stored days from `gss-stats-ads` (one query for every campaign);
+2. pulls every **missing closed ET day** of the flight plus the **last 3 closed days**, which
+   Google still restates (daily metrics and placement-day rows), in at most two date ranges,
+   **newest first**: the last 3 days whole, then any older gap from its first missing day up to
+   them (after-flight days in between come along, so after-flight spend shows up). Each range
+   is checked and written on its own, so a bad old day never holds back newer ones. The
+   restatement window is re-checked at most every 6 hours per campaign by the Worker and
+   `ads:sync`, and on **every** morning, backstop and post-flight read (a read never decides on
+   a yesterday pulled hours earlier); only a pull of all 3 days counts as a re-check. A day counts as **closed** once it was pulled at or after 03:00
+   ET the next day (Google still adds late data just after midnight). A closed campaign is
+   covered through its flight end and then costs no API call;
+3. stores a day the API returns nothing for as zero only when Google's **range total** (one
+   aggregate query, made only when a day came back empty) agrees with the daily rows: a
+   never-stored flight day becomes $0, and a stored day Google credited in full is restated to
+   $0. When the rows and the total disagree, the range is pulled again in halves, newer half
+   first, down to single days: the bad day keeps its stored value and is reported, the days
+   around it are written. An empty response (no rows, no total) never overwrites stored spend.
+   A stored placement row with spend that a response leaves out fails the placement pull within
+   the last 3 days; on an older day it is kept as stored and reported as a warning;
+4. writes **only rows that changed**; a run with nothing due makes no Google call and writes
+   nothing at all, so a second run right after another is a true no-op;
+5. records each run that did something in `ads_sync_runs` (start/finish, campaigns, days fetched
+   and changed, status, a redacted error).
+
+Today's still-open day is never stored. The Ads client (plain `fetch`) and the store
+(`createSqlAdsStore` over a wrangler-CLI adapter locally, a D1-binding adapter in the Worker)
+are runtime-agnostic, so the local routines and the Worker run the same code; whichever runs
+second finds nothing to write.
+
+The campaigns page and the readings widget show **"Spend through &lt;date&gt; · synced
+&lt;relative time&gt;"** per campaign (`spendThrough`, `lastSync` from `/api/campaigns` and
+`/api/ads/readings`), and **"stale — sync pending"** when a flight day that should be stored
+by now is missing: yesterday from 09:30 ET (the 08:00 ET morning read has synced by then),
+otherwise the day before. A sync run that claimed and never finished (killed mid-run, e.g. by
+a CPU limit) shows as a **"Sync alert"** line in the readings widget once it is 15 minutes old
+(for 7 days), and the morning, backstop and post-flight reports print it as `SYNC ALERT`. Their **Refresh data** button posts to `/api/ads/refresh` (behind
+the sign-in gate), which asks the sync Worker to run only when something is stale, at most once
+per 10 minutes. The dashboard holds no Google Ads credential and never calls the Ads API.
+
+### The sync Worker (`workers/sync/`, `gss-stats-sync`)
+
+- **Schedule:** a cron at :05 every hour. While a flight is live (first day through the day
+  after the last) every tick checks what is due: yesterday once, at 03:05 ET (before 03:00 ET it
+  cannot close yet, so it is not due), a retry after a failure, and the restatement window once
+  its last pull is 6 h old. Outside a flight only the 03:05 ET tick checks. A tick with nothing due reads two small queries and stops: no
+  claim, no secret read, no token refresh, no write.
+- **On demand:** `POST /sync`, reachable only through the Pages Service Binding `ADS_SYNC`:
+  the Worker has no `workers.dev` URL, no preview URLs and no route. Nothing due → 200 "up to
+  date". Otherwise it claims atomically (a `'running'` row, only if no run finished in the last
+  10 minutes); a concurrent request loses and gets 429. Operator body: `{"full": true,
+  "campaignIds": [...], "maxDays": n}`. A full re-pull through the Worker is capped like any
+  run (`maxDays`, default 7, at most 31), keeps the newest days and is **not resumed** by later
+  runs (they pull only missing days): give a `maxDays` that covers the window, or run
+  `npm run ads:backfill` / `npm run ads:sync -- --full` locally, which are uncapped.
+- **Per-run caps (Workers Free, 10 ms CPU):** at most 7 closed days (live campaigns first, the
+  last 3 days before an older gap, and an older gap's newest missing days first) and 40 D1
+  statements; the rest continues next run. Measured live: a no-op 1-4 ms CPU (6 ms on a
+  fresh isolate), a 1-day pull 9-10 ms warm and 12.6 ms cold, so a cold pull can overrun Free's
+  limit (ADR 0001: what then happens, and why Workers Paid removes it).
+- **Deploy:** `npm run ads:worker-deploy -- --cf-token-file <path> [--paused]` stamps the version
+  with the git SHA (tag, message, and the `GIT_SHA` it reports with a hash of every campaign
+  field the sync writes: name, kind, flight, status, uc values, budget, cap, measurement); `--paused` deploys with no cron. The Worker bundles `src/lib/campaigns.ts`, so a
+  new campaign needs a Worker redeploy as well as a Pages deploy; the dashboard's Refresh says
+  when the Worker runs other campaign definitions, and CI bundles it on every PR
+  (`npm run ads:worker-check`).
+- **Secrets:** the four Google Ads credentials live in Cloudflare **Secrets Store** (account
+  store `default_secrets_store`, secret names = the Bitwarden key names, scope `workers`),
+  bound as `ADS_CLIENT_ID`, `ADS_CLIENT_SECRET`, `ADS_REFRESH_TOKEN`, `ADS_DEVELOPER_TOKEN`.
+  Bitwarden stays the source of truth. **Rotation:** rotate the credential in Bitwarden, then
+  run `npm run ads:worker-secrets -- --cf-token-file <path>`: it reads the values with `bws`
+  into memory and pipes a new secret into `wrangler secrets-store secret create` on stdin, or
+  updates an existing one through the same Secrets Store API call wrangler uses (wrangler's
+  `update` can't take a value on stdin non-interactively). Nothing is printed, logged or
+  written to disk; the Worker picks the new value up on its next run, no redeploy. The local
+  routines keep reading Bitwarden directly.
 
 ## Docs
 

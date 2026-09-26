@@ -13,8 +13,10 @@ import { FUNNEL_STEP_ORDER, FUNNEL_STEP_LABELS, RETURN_BUCKETS, topShares, type 
 import { MIN_COHORT, isInsufficientCohort } from '../../lib/popupEvents'
 import { noteRawText } from '../../lib/notes'
 import { PALETTE } from '../../lib/charts'
+import { freshnessLine, STALE_NOTE } from '../../lib/adsFreshness'
 import BaseChart from '../charts/BaseChart.vue'
 import NoteBlock from '../NoteBlock.vue'
+import AdsRefreshButton from '../AdsRefreshButton.vue'
 
 const props = defineProps<{ widget: Widget }>()
 
@@ -68,6 +70,8 @@ const maxFlightDay = computed(() =>
     ...campaigns.value.filter((c) => c.flightStart != null).map((c) => Math.round((Date.parse(c.flightEnd) - Date.parse(c.flightStart as string)) / 86_400_000) + 1),
   ),
 )
+// Flight days where a funnel segment boundary falls (the signed-out upsell fix), for the marker.
+const boundaryDays = computed(() => new Set(campaigns.value.map((c) => dataByCampaign[c.id]?.segments?.boundaryFlightDay).filter((d): d is number => d != null)))
 const dailyChartConfig = computed<ChartConfiguration | null>(() => {
   const cs = campaigns.value.filter((c) => dataByCampaign[c.id])
   if (!cs.length) return null
@@ -75,7 +79,7 @@ const dailyChartConfig = computed<ChartConfiguration | null>(() => {
   return {
     type: 'line',
     data: {
-      labels: days.map((d) => `Day ${d}`),
+      labels: days.map((d) => (boundaryDays.value.has(d) ? `Day ${d} ▼ upsell fix` : `Day ${d}`)),
       datasets: cs.map((c, i) => {
         const byDay = new Map(dataByCampaign[c.id].daily.map((r) => [r.day, r.arrivals]))
         return {
@@ -255,11 +259,26 @@ function shareBarWidth(row: DeviceMixShare): number {
           <div class="chart-box"><BaseChart v-if="cumulativeChartConfig" :config="cumulativeChartConfig" :drill-open="false" @point="() => {}" /></div>
         </div>
         <NoteBlock note-id="flight-day-caption" class="caption" />
+        <template v-for="c in campaigns" :key="`seg-${c.id}`">
+          <div v-if="dataByCampaign[c.id]?.segments" class="segment mono">
+            <p class="caption">
+              ▼ {{ c.label }}: signed-out upsell fix at {{ dataByCampaign[c.id].segments!.boundaryLabel }} (flight day {{ dataByCampaign[c.id].segments!.boundaryFlightDay ?? '—' }}) — a funnel segment boundary: read the two sides as separate short tests.
+            </p>
+            <table class="country-table">
+              <thead><tr><th>Tagged upsell</th><th>Shown</th><th>Accepted</th><th>Dismissed</th></tr></thead>
+              <tbody>
+                <tr><td>pre-fix</td><td>{{ dataByCampaign[c.id].segments!.upsell.pre.shown }}</td><td>{{ dataByCampaign[c.id].segments!.upsell.pre.accept }}</td><td>{{ dataByCampaign[c.id].segments!.upsell.pre.dismiss }}</td></tr>
+                <tr><td>post-fix</td><td>{{ dataByCampaign[c.id].segments!.upsell.post.shown }}</td><td>{{ dataByCampaign[c.id].segments!.upsell.post.accept }}</td><td>{{ dataByCampaign[c.id].segments!.upsell.post.dismiss }}</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
       </template>
 
       <!-- cost -->
       <template v-else-if="widget.view === 'cost'">
         <NoteBlock note-id="arrivals-caveat" class="caption" />
+        <AdsRefreshButton :campaign-ids="campaigns.map((c) => c.id)" @refreshed="(r) => r.refreshed && reload()" />
         <div class="cost-grid">
           <div v-for="c in campaigns" :key="c.id" class="cost-card">
             <div class="fc-label">{{ c.label }}</div>
@@ -267,7 +286,10 @@ function shareBarWidth(row: DeviceMixShare): number {
               <div class="cost-row"><span>Spend</span><span class="mono">{{ money(dataByCampaign[c.id].spend) }}</span></div>
               <div v-if="dataByCampaign[c.id].spendSource" class="cost-row">
                 <span>Source</span>
-                <span class="mono">{{ dataByCampaign[c.id].spendSource!.source === 'google-ads-api' ? `Ads API, through ${dataByCampaign[c.id].spendSource!.lastDate}` : dataByCampaign[c.id].spendSource!.source === 'config' ? 'hand-entered' : '—' }}</span>
+                <span class="mono">{{ dataByCampaign[c.id].spendSource!.source === 'google-ads-api' ? 'Ads API' : dataByCampaign[c.id].spendSource!.source === 'config' ? 'hand-entered' : '—' }}</span>
+              </div>
+              <div v-if="dataByCampaign[c.id].spendThrough !== undefined" class="cost-row fresh-row">
+                <span class="mono">{{ freshnessLine({ spendThrough: dataByCampaign[c.id].spendThrough ?? null, lastSync: dataByCampaign[c.id].lastSync ?? null }, Date.parse(dataByCampaign[c.id].meta.generatedAt)) }}<span v-if="dataByCampaign[c.id].stale" class="stale"> · {{ STALE_NOTE }}</span></span>
               </div>
               <div class="cost-row"><span>Per arrival</span><span class="mono">{{ money(dataByCampaign[c.id].costPerArrival) }}</span></div>
               <div class="cost-row"><span>Per auth success</span><span class="mono">{{ money(dataByCampaign[c.id].costPerAuthSuccess) }}</span></div>
@@ -497,6 +519,17 @@ function shareBarWidth(row: DeviceMixShare): number {
   display: flex;
   justify-content: space-between;
   font-size: 12px;
+}
+.segment {
+  margin-top: 8px;
+  font-size: 11.5px;
+}
+.fresh-row {
+  font-size: 11px;
+  color: rgb(var(--ink-3));
+}
+.stale {
+  color: #bc4749;
 }
 .device-block {
   margin-bottom: 10px;

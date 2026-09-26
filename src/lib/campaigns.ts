@@ -30,9 +30,12 @@ import { classifyPopupPath, computeRate, TRACKING_ACTIVATION_DATE_ET, NEW_BEACON
 // is built ONLY from tagged-arrival rows, never from /signin-eligible — that beacon is
 // deferred ≥30 min after the finish, so its own row time is not the finish time and would
 // skew any hour-of-day bucketing. See lib/popupEvents.ts SIGNIN_ELIGIBLE_CAVEAT.
-const ET_HOUR_FMT = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hourCycle: 'h23' })
+// Formatters are built on first use, not at module load (lib/popupEvents.ts etDateFromMs says
+// why); same options, same output.
+let etHourFmt: Intl.DateTimeFormat | null = null
 export function etHourFromMs(ms: number): number {
-  return Number(ET_HOUR_FMT.format(new Date(ms)))
+  etHourFmt ??= new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hourCycle: 'h23' })
+  return Number(etHourFmt.format(new Date(ms)))
 }
 
 // ── Campaign registry ────────────────────────────────────────────────────────────────
@@ -212,17 +215,19 @@ export function etMidnightUtcMs(dateEt: string): number {
 
 // ET calendar date + local clock time, minute precision — used by etTimeUtcMs's round-trip
 // check below (etMidnightUtcMs's own check is midnight-specific; this generalizes it).
-const ET_DATETIME_FMT = new Intl.DateTimeFormat('en-CA', {
-  timeZone: 'America/New_York',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-  hourCycle: 'h23',
-})
-function etDateTimeFromMs(ms: number): string {
-  const parts = Object.fromEntries(ET_DATETIME_FMT.formatToParts(new Date(ms)).map((p) => [p.type, p.value]))
+let etDateTimeFmt: Intl.DateTimeFormat | null = null
+/** "YYYY-MM-DDTHH:MM" in ET (exported for the formatter-equivalence test). */
+export function etDateTimeFromMs(ms: number): string {
+  etDateTimeFmt ??= new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  })
+  const parts = Object.fromEntries(etDateTimeFmt.formatToParts(new Date(ms)).map((p) => [p.type, p.value]))
   return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`
 }
 
@@ -371,18 +376,34 @@ const PLAYED_PATH = '/game'
  * `/game/complete/` (not `/game` or `/game/complete`) is the exact anchor that keeps this
  * from ever matching the `/game` page-view path itself. */
 const GAME_COMPLETE_PREFIX = '/game/complete/'
-/** "auth success" — the BASE two-segment path only, `/auth/success/<provider>`. v1.95.5
- * (live 2026-09-26T19:43:02Z, see lib/adsRules.ts AUTH_NEW_EXISTING_LIVE_AT) added a
- * THIRD segment, `/auth/success/<provider>/<new|existing|unknown>`, fired ALONGSIDE the
- * base row for the SAME sign-in — matching by prefix (as this file used to) double-counts
- * every sign-in once the new beacon is live. NOT part of lib/popupEvents.ts's
- * POPUP_EVENT_PREFIXES (an ordinary page path there), so classified here directly. */
+/** "auth success" — NOT part of lib/popupEvents.ts's POPUP_EVENT_PREFIXES (an ordinary page
+ * path there), so classified here directly. ONE matcher for the whole codebase.
+ *
+ * Every sign-in sends the BASE row `/auth/success/<provider>` exactly once; the provider is
+ * exactly `google` or `email`. From v1.95.5 (live 2026-09-26T19:43:02Z, lib/adsRules.ts
+ * AUTH_NEW_EXISTING_LIVE_AT) it ALSO sends `/auth/success/<provider>/<new|existing|unknown>`,
+ * alongside the base row for the SAME sign-in, never instead of it. So a sign-in is counted from
+ * the base row only (an exact match), and the new/existing split only from the three-segment
+ * rows; a prefix match would count each new-client sign-in twice. */
+export const AUTH_SUCCESS_PROVIDERS = ['google', 'email'] as const
+export const AUTH_SUCCESS_STATUSES = ['new', 'existing', 'unknown'] as const
+export type AuthSuccessStatus = (typeof AUTH_SUCCESS_STATUSES)[number]
+/** The base rows, one per sign-in (= AUTH_SUCCESS_PROVIDERS under /auth/success/). */
 export const AUTH_SUCCESS_PATHS = ['/auth/success/google', '/auth/success/email'] as const
-/** THE auth-success check everywhere in this codebase (functions/api/overview.ts,
- * lib/adsRules.ts's summarizeTaggedRows) — exact base-path match only, never a prefix, so
- * the new/existing suffix row (same sign-in) is never double-counted alongside it. */
-export function isAuthSuccessPath(path: string): boolean {
+const AUTH_STATUS_RE = /^\/auth\/success\/(google|email)\/(new|existing|unknown)$/
+/** A sign-in (the base row), never its status row: every auth-success count uses this
+ * (functions/api/overview.ts, lib/adsRules.ts summarizeTaggedRows, classifyFunnelPath). */
+export function isAuthSuccessBase(path: string): boolean {
   return (AUTH_SUCCESS_PATHS as readonly string[]).includes(path)
+}
+/** v0.6.1's name for the same matcher (kept so both call sites read the same function). */
+export const isAuthSuccessPath = isAuthSuccessBase
+/** 'base' for `/auth/success/<google|email>` (one per sign-in), the status for the suffixed row
+ * that rides alongside it, null for anything else (other providers or shapes included). */
+export function authSuccessRow(path: string): 'base' | AuthSuccessStatus | null {
+  if (isAuthSuccessBase(path)) return 'base'
+  const m = AUTH_STATUS_RE.exec(path)
+  return m ? (m[2] as AuthSuccessStatus) : null
 }
 
 /** Classifies ONE path into at most one funnel step (mutually exclusive path families,
@@ -395,7 +416,7 @@ export function classifyFunnelPath(path: string): FunnelStepKey | null {
   if (path === PLAYED_PATH) return 'played'
   if (path.startsWith(GAME_COMPLETE_PREFIX)) return 'completed'
   if (COMPLETED_PROXY_PATH_PREFIX && path.startsWith(COMPLETED_PROXY_PATH_PREFIX)) return 'completed' // disabled by default — see the hook above
-  if (isAuthSuccessPath(path)) return 'authSuccess'
+  if (isAuthSuccessBase(path)) return 'authSuccess' // the status row that rides alongside is not a second sign-in
   const ev = classifyPopupPath(path)
   if (!ev) return null
   if ((ev.family === 'signin-prompt' || ev.family === 'promo-first50') && ev.kind === 'shown') return 'ask'
