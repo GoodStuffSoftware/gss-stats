@@ -257,12 +257,12 @@ onBeforeUnmount(() => window.removeEventListener('focus', readMuteCookie))
                 @change="toggleSite(d)"
               />
               <span class="site-name">{{ d.domain }}</span>
-              <span class="site-count">{{ d.rum + d.geo }}</span>
+              <span class="site-count" title="Traffic in the last 90 days">{{ d.rum + d.geo }}</span>
             </label>
             <label v-for="s in displayedSubs(d)" :key="s.host" class="site-row sub">
               <input type="checkbox" :checked="isSubSelected(d, s)" @change="toggleSub(d, s)" />
               <span class="site-name">{{ subLabel(d, s) }}</span>
-              <span class="site-count">{{ s.rum + s.geo }}</span>
+              <span class="site-count" title="Traffic in the last 90 days">{{ s.rum + s.geo }}</span>
             </label>
           </div>
         </div>

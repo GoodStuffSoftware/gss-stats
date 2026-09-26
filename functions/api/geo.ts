@@ -14,9 +14,46 @@
 
 import { popupExcludeClause } from '../../src/lib/popupEvents'
 import { excludeOwnClause as sharedExcludeOwnClause, selfReferralClause as sharedSelfReferralClause } from '../../src/lib/ownExclusion'
+import { buildCacheKeyUrl, cachedJson, ttlSecondsFor, type CacheLike } from '../_lib/edgeCache'
 
 interface Env {
   gss_geo: D1Database
+}
+
+// ── Merged total+grouped SQL builders ───────────────────────────────────────────────
+//
+// Each chart panel used to fire TWO scans of `hits` for the same WHERE clause: one
+// `SELECT COUNT(*) ... GROUP BY` (or none, for the total) and one bare `SELECT COUNT(*)` for
+// the grand total — doubling rows_read for every chart. A single statement gets the same two
+// numbers from one scan: the inner query aggregates once, and SUM(c) OVER () sums that
+// aggregate — not the raw rows — across ALL groups (there's no PARTITION BY, so the window
+// spans the whole inner result set) BEFORE the outer ORDER BY/LIMIT truncates to the top-N.
+// That ordering (window function evaluated over the complete row set, then LIMIT applied last)
+// is standard SQL and is what makes `total` reflect every group even when LIMIT keeps only a
+// handful — verified against a real SQLite engine in geo.mergedSql.test.ts.
+//
+// Exported so that equivalence test can run the exact production SQL against a fixture DB
+// without spinning up a full PagesFunction request.
+export function breakdownColumnExpr(dim: string, emptyLabel: string): string {
+  return dim === 'date' ? "date(ts/1000,'unixepoch')" : `CASE WHEN ${dim} = '' THEN '${emptyLabel}' ELSE ${dim} END`
+}
+
+// `orderBy` should include a tiebreak (e.g. "c DESC, k ASC") — without one, which rows LIMIT
+// keeps among an exact-count tie is unspecified, and the two query PLANS being compared here
+// (a bare GROUP BY vs. one wrapped in a subquery) aren't guaranteed to break ties the same way,
+// even reading the identical data. The caller (onRequestPost below) always supplies a full order.
+export function buildMergedBreakdownSql(col: string, whereSql: string, orderBy: string): string {
+  return `SELECT k, c, SUM(c) OVER () AS total FROM (SELECT ${col} AS k, COUNT(*) AS c FROM hits WHERE ${whereSql} GROUP BY k) ORDER BY ${orderBy} LIMIT ?`
+}
+
+// `cols` (e.g. `["region AS k0", "device AS k1"]`) aliases the real columns to k0..kN for the
+// INNER aggregate only — the outer query selects the derived table's own `k0, k1, ...` (via
+// `groupBy`, which is already that same "k0, k1" list), not the original column names, since
+// only the inner subquery has `hits` in scope. Tiebreaks on the group columns themselves after
+// `c DESC` — without it, which rows LIMIT keeps among an exact-count tie is unspecified, and
+// can differ from one query PLAN to another even for the same data (see buildMergedBreakdownSql).
+export function buildMergedRingSql(cols: string[], whereSql: string, groupBy: string): string {
+  return `SELECT ${groupBy}, c, SUM(c) OVER () AS total FROM (SELECT ${cols.join(', ')}, COUNT(*) AS c FROM hits WHERE ${whereSql} GROUP BY ${groupBy}) ORDER BY c DESC, ${groupBy} LIMIT ?`
 }
 
 const GEO_DIMS = new Set([
@@ -103,8 +140,53 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const excludeSelf = body.excludeSelfReferrals !== false
   const selfReferralClause = (activeDims: string[], w: string[], b: any[]) => sharedSelfReferralClause(activeDims, w, b, excludeSelf)
 
+  const isPoints = dim === 'points' || body.dimension === 'points'
+  // N-dimension breakdown (nested doughnut / stacked bar / table on geo data). `body.dims` is
+  // the full ordered ring list a nested doughnut sends (see api.ts); a legacy 2-dim caller
+  // that only sends { dimension, breakdown } gets the same result via the fallback below.
+  // Hard-capped independent of the client's own soft cap — defense in depth against a
+  // malformed/oversized request, not a UX limit (that lives in ChartEditor.vue).
+  const RING_DIMS_HARD_CAP = 8
+  const legacyBreakdown =
+    typeof body.breakdown === 'string' && GEO_DIMS.has(body.breakdown) && body.breakdown !== dim && body.breakdown !== 'date'
+      ? body.breakdown
+      : null
+  const ringDims: string[] = (
+    Array.isArray(body.dims)
+      ? [...new Set((body.dims as unknown[]).filter((d): d is string => typeof d === 'string' && GEO_DIMS.has(d) && d !== 'date'))]
+      : legacyBreakdown
+        ? [dim, legacyBreakdown]
+        : []
+  ).slice(0, RING_DIMS_HARD_CAP)
+  const isRing = !isPoints && ringDims.length >= 2 && dim !== 'date'
+
+  // Everything that changes the SQL (and therefore the response) goes into the cache key —
+  // mode, dims/dim, the date window, site selection, drill constraints, and both exclusion
+  // toggles. `sites`/`constraints` are sorted for the key only (their order never changes the
+  // query result, so two requests differing only in array order should share a cache entry);
+  // `ringDims` keeps client order since it changes the response's ring nesting.
+  const cacheKeyUrl = buildCacheKeyUrl('/api/geo', {
+    mode: isPoints ? 'points' : isRing ? 'ring' : 'breakdown',
+    dim,
+    ringDims,
+    since,
+    until,
+    limit,
+    sites: [...sites].sort(),
+    constraints: [...constraints].sort((a, b) => (a.field + a.value).localeCompare(b.field + b.value)),
+    excludeOwn,
+    ownBrowser: excludeOwn ? String(body.ownBrowser ?? '') : '',
+    ownOS: excludeOwn ? String(body.ownOS ?? '') : '',
+    excludeSelf,
+  })
+  const ttl = ttlSecondsFor(until, new Date())
+  const cache = (caches as unknown as { default: CacheLike }).default
+
+  return cachedJson(cache, cacheKeyUrl, ttl, ctx.waitUntil.bind(ctx), () => computeGeoResponse())
+
+  async function computeGeoResponse(): Promise<Response> {
   // Map mode: return one point per distinct lat/lon with a count (for globe/map charts).
-  if (dim === 'points' || body.dimension === 'points') {
+  if (isPoints) {
     const w: string[] = ['ts >= ?', 'ts < ?', "lat <> ''"]
     const b: any[] = [sinceMs, untilMs]
     popupExcludeClause(w, b) // events, not screen views — never count toward pageviews/visits
@@ -138,24 +220,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     return json({ rows, totals, meta: { site: sites.length ? sites.join(',') : 'all', since, until, dimensions: ['points'], metric: 'pageviews', dataset: 'geo' } })
   }
 
-  // N-dimension breakdown (nested doughnut / stacked bar / table on geo data). `body.dims` is
-  // the full ordered ring list a nested doughnut sends (see api.ts); a legacy 2-dim caller
-  // that only sends { dimension, breakdown } gets the same result via the fallback below.
-  // Hard-capped independent of the client's own soft cap — defense in depth against a
-  // malformed/oversized request, not a UX limit (that lives in ChartEditor.vue).
-  const RING_DIMS_HARD_CAP = 8
-  const legacyBreakdown =
-    typeof body.breakdown === 'string' && GEO_DIMS.has(body.breakdown) && body.breakdown !== dim && body.breakdown !== 'date'
-      ? body.breakdown
-      : null
-  const ringDims: string[] = (
-    Array.isArray(body.dims)
-      ? [...new Set((body.dims as unknown[]).filter((d): d is string => typeof d === 'string' && GEO_DIMS.has(d) && d !== 'date'))]
-      : legacyBreakdown
-        ? [dim, legacyBreakdown]
-        : []
-  ).slice(0, RING_DIMS_HARD_CAP)
-  if (ringDims.length >= 2 && dim !== 'date') {
+  if (isRing) {
     const cols = ringDims.map((d, i) => `${d} AS k${i}`)
     const w: string[] = ['ts >= ?', 'ts < ?', ...ringDims.map((d) => `${d} <> ''`)]
     const b: any[] = [sinceMs, untilMs]
@@ -166,16 +231,16 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     selfReferralClause(ringDims, w, b) // inert unless 'referrer' is one of the ring dims
     const whereSql = w.join(' AND ')
     const groupBy = ringDims.map((_, i) => `k${i}`).join(', ')
-    const sql = `SELECT ${cols.join(', ')}, COUNT(*) AS c FROM hits WHERE ${whereSql} GROUP BY ${groupBy} ORDER BY c DESC LIMIT ?`
     // Each extra ring dimension multiplies the possible distinct combinations, so a 2-ring
     // request keeps its original fetch/cap exactly (identical behavior); N>2 over-fetches
     // more generously so deep rings aren't truncated before the nested grouping sees them.
     const fetchLimit =
       ringDims.length <= 2 ? Math.min(limit * 4, 1000) : Math.min(limit * 4 * (ringDims.length - 1), 4000)
+    // One statement: the inner GROUP BY scans `hits` once; SUM(c) OVER () sums every group's
+    // count (not just the fetched top-N) into `total`, replacing the old second COUNT(*) scan.
+    const sql = buildMergedRingSql(cols, whereSql, groupBy)
     let r: any
-    let totalRes: any
     try {
-      totalRes = await ctx.env.gss_geo.prepare(`SELECT COUNT(*) AS c FROM hits WHERE ${whereSql}`).bind(...b).all()
       r = await ctx.env.gss_geo.prepare(sql).bind(...b, fetchLimit).all()
     } catch (e) {
       return json({ error: 'd1 query failed', detail: String(e) }, 500)
@@ -187,7 +252,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       })
       return { key, pageviews: Number(x.c) || 0, visits: Number(x.c) || 0 }
     })
-    const total = Number(totalRes.results?.[0]?.c) || 0
+    const total = Number(r.results?.[0]?.total) || 0
     const totals = { pageviews: total, visits: total }
     return json({ rows, totals, meta: { site: sites.length ? sites.join(',') : 'all', since, until, dimensions: ringDims, metric: 'pageviews', dataset: 'geo' } })
   }
@@ -199,10 +264,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // location charts stayed full for the very same visits.
   const emptyLabel =
     dim === 'referrer' ? '(direct)' : dim === 'campaign' || dim === 'source' || dim === 'medium' ? '(untagged)' : '(none)'
-  const col =
-    dim === 'date'
-      ? "date(ts/1000,'unixepoch')"
-      : `CASE WHEN ${dim} = '' THEN '${emptyLabel}' ELSE ${dim} END`
+  const col = breakdownColumnExpr(dim, emptyLabel)
   const where = ['ts >= ?', 'ts < ?']
   const binds: any[] = [sinceMs, untilMs]
   popupExcludeClause(where, binds) // events, not screen views — never count toward pageviews/visits
@@ -212,16 +274,14 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   selfReferralClause([dim], where, binds) // inert unless this IS the referrer chart
 
   const whereSql = where.join(' AND ')
-  const orderBy = dim === 'date' ? 'k ASC' : 'c DESC'
-  const sql = `SELECT ${col} AS k, COUNT(*) AS c FROM hits WHERE ${whereSql} GROUP BY k ORDER BY ${orderBy} LIMIT ?`
+  // Tiebreak on k (see buildMergedBreakdownSql) so which rows LIMIT keeps is deterministic.
+  const orderBy = dim === 'date' ? 'k ASC' : 'c DESC, k ASC'
+  // One statement in place of the old total-COUNT(*) + grouped-COUNT(*) pair — see the
+  // buildMergedBreakdownSql doc comment for why SUM(c) OVER () gives the same grand total.
+  const sql = buildMergedBreakdownSql(col, whereSql, orderBy)
 
   let res: any
-  let totalRes: any
   try {
-    // Grand total over the WHOLE filtered set — computed before the GROUP BY + top-N
-    // truncation so a stat (or any chart) reports the real count, not just the sum of the
-    // returned rows. Mirrors the RUM endpoint, whose totals also precede its top-N cut.
-    totalRes = await ctx.env.gss_geo.prepare(`SELECT COUNT(*) AS c FROM hits WHERE ${whereSql}`).bind(...binds).all()
     res = await ctx.env.gss_geo.prepare(sql).bind(...binds, limit).all()
   } catch (e) {
     return json({ error: 'd1 query failed', detail: String(e) }, 500)
@@ -232,10 +292,11 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     pageviews: Number(r.c) || 0,
     visits: Number(r.c) || 0,
   }))
-  const total = Number(totalRes.results?.[0]?.c) || 0
+  const total = Number(res.results?.[0]?.total) || 0
   const totals = { pageviews: total, visits: total }
 
   return json({ rows, totals, meta: { site: sites.length ? sites.join(',') : 'all', since, until, dimensions: [dim], metric: 'pageviews', dataset: 'geo' } })
+  }
 }
 
 export const onRequestGet: PagesFunction<Env> = async () =>
