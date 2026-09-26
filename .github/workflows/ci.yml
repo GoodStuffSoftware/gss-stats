@@ -1,0 +1,23 @@
+name: CI
+
+# Tests + build on every pull request, so a red test is visible before merge (merging to
+# main deploys — see deploy.yml, which runs the same tests as a gate). No secrets needed.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24 # current LTS
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run build
