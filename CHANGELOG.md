@@ -52,6 +52,54 @@ All notable changes to **gss-stats** are documented here. The format follows
 - The always-visible zoom button's larger touch target now applies on any touch-capable
   device (`pointer: coarse`), not just narrow viewports.
 
+## [0.5.0] — 2026-09-26
+
+### Security
+- **Sign in with Google.** The dashboard and every API call now need a signed-in Google
+  account on an owner-set allowlist. The app enforces this itself, so Cloudflare Access can
+  be removed once the new sign-in is verified live. If the sign-in settings are missing,
+  it locks everyone out rather than opening up. The tests also run the sign-in inside
+  Cloudflare's own runtime, so a request setting that runtime rejects can't ship.
+- **Sign out.** The header shows who is signed in, with a Sign out button. An expired
+  session brings up the re-sign-in banner on every page, the overview and campaign pages
+  included, and no longer risks saving a fallback layout over your stored one.
+- **Stricter sign-in checks.** Only an exact, plain-ASCII match on the allowlist gets in
+  (look-alike addresses are refused), Google must mark the email verified with a real
+  `true`, and sign-ins or sessions dated in the future are rejected.
+- **A bad session-length setting locks sign-in instead of being guessed.** A session
+  length that isn't a number of hours from 1 to 720 now shows "Sign-in not configured"
+  rather than silently falling back or issuing sessions that end at once.
+- **Back after Sign out no longer shows the dashboard.** Dashboard pages, files and data
+  are never kept by the browser or a shared cache, Sign out also clears the site's
+  cache, and no other site can embed the dashboard in a frame.
+- **The local sign-in bypass is harder to switch on by accident.** It now needs the exact
+  value `1` (not `true`, `0` or anything else), still only on the developer's own machine.
+
+## [0.4.0] — 2026-09-26
+
+### Added
+- **Campaign spend now comes from the Google Ads API.** The campaigns page and the overview
+  scorecard read daily spend stored in the dashboard's own database, and fall back to the
+  hand-entered figures when nothing is stored.
+- **A readings log on the campaigns page** shows each ads-routine read: spend, the
+  thresholds reached, kill-rule results, the proposal and key counts. Sign-ups are shown as
+  "at most N" (an upper bound), and a campaign that has already ended shows as ended rather
+  than as a pause proposal.
+- **Scheduled ads-read tooling for the US+CA web retest.** A daily morning read and the
+  post-flight reads fetch spend from the Google Ads API, fire each spend threshold once, apply
+  the pre-registered kill rules and decision table, and only ever propose. A failed read, a
+  missed scheduled read and a real release-health alert are all surfaced rather than silent.
+
+### Changed
+- **The campaign funnel's Install step and the overview's Installs tile and timeline count
+  each install once** (the pop-up outcome), with the raw install beacons, which can
+  double-count, shown as a secondary tile and line.
+- **The pop-ups page note now says outcomes and return visits may arrive up to 30 minutes
+  late**, replacing the inaccurate "nothing is measured within 30 minutes after a sign-in".
+- **Install outcomes are measured from Best Sudoku's install fix onward** (v1.95.4, 26 Sep
+  12:26 ET): earlier install outcomes stay unmeasured, and ranges that span the fix say when it
+  went live.
+
 ## [0.3.2] — 2026-09-26
 
 ### Added

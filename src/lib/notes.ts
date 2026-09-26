@@ -168,7 +168,10 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = {
   },
   'spend-source': {
     id: 'spend-source',
-    text: 'Spend comes from Google Ads and is entered by hand in `CAMPAIGN_SPEND` (lib/campaigns.ts).',
+    // v0.4.0: spend comes from the ads-read routine's own store (Google Ads API) first,
+    // falling back to the hand-entered CAMPAIGN_SPEND (lib/campaigns.ts) only for a
+    // campaign with nothing stored yet — each campaign's own "Source" row above says which.
+    text: 'Spend comes from the Google Ads API as stored by the ads-read routine; a campaign with nothing stored falls back to the hand-entered CAMPAIGN_SPEND (lib/campaigns.ts).',
     kind: 'note',
     severity: 'info',
     scopes: ['campaigns'],

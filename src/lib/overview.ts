@@ -2,7 +2,7 @@
 // components/OverviewPage.vue. Aggregate-only, no joins — same rules as lib/campaigns.ts and
 // lib/popupEvents.ts, which this module builds on rather than duplicates.
 
-import { etDateFromMs, TRACKING_ACTIVATION_DATE_ET } from './popupEvents'
+import { etDateFromMs, excludeInstallGapUnmeasured, TRACKING_ACTIVATION_DATE_ET } from './popupEvents'
 import { etMidnightUtcMs, CAMPAIGNS, flightDayIndex, applyExclusions, type CampaignFlight } from './campaigns'
 
 // ── Shared WHERE-clause builder for the KPI / timeline / release-panel D1 queries ────────
@@ -19,6 +19,9 @@ export function siteWindowClause(sites: string[], startMs: number, endMs: number
   const w: string[] = [`site IN (${sites.map(() => '?').join(', ')})`, 'ts >= ?', 'ts < ?']
   const b: unknown[] = [...sites, startMs, endMs]
   applyExclusions(w, b)
+  // Pre-fix install-gap rows are unmeasured (lib/popupEvents.ts INSTALL_GAP_PATHS) — dropped
+  // row-exactly so the Installs tile/timeline/release panel only count measurable installs.
+  excludeInstallGapUnmeasured(w, b)
   return { sql: w.join(' AND '), binds: b }
 }
 

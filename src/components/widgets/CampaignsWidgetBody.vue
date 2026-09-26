@@ -187,10 +187,13 @@ function shareBarWidth(row: DeviceMixShare): number {
             <div v-if="dataByCampaign[c.id]" class="tagged-hits mono" :title="noteRawText('arrivals-caveat')">
               tagged hits: {{ fmt(dataByCampaign[c.id].taggedHits) }} (vs {{ fmt(dataByCampaign[c.id].funnel.counts.arrivals) }} arrivals)
             </div>
+            <div v-if="dataByCampaign[c.id]?.rawInstallSignals" class="tagged-hits mono">
+              {{ dataByCampaign[c.id].rawInstallSignals!.label }}: {{ fmt(dataByCampaign[c.id].rawInstallSignals!.count) }}
+            </div>
             <div v-if="dataByCampaign[c.id]" class="funnel-steps">
               <div v-for="step in FUNNEL_STEP_ORDER" :key="step" class="funnel-step">
                 <div class="fs-top">
-                  <span class="fs-label">{{ FUNNEL_STEP_LABELS[step] }}</span>
+                  <span class="fs-label">{{ FUNNEL_STEP_LABELS[step] }}<template v-if="step === 'install' && dataByCampaign[c.id].funnel.installNote"> ({{ dataByCampaign[c.id].funnel.installNote }})</template></span>
                   <span class="fs-count mono">
                     <template v-if="dataByCampaign[c.id].funnel.notInstrumented.includes(step)">{{ noteRawText('not-instrumented') }}</template>
                     <template v-else>{{ fmt(dataByCampaign[c.id].funnel.counts[step]) }}</template>
@@ -262,6 +265,10 @@ function shareBarWidth(row: DeviceMixShare): number {
             <div class="fc-label">{{ c.label }}</div>
             <div v-if="dataByCampaign[c.id]" class="cost-rows">
               <div class="cost-row"><span>Spend</span><span class="mono">{{ money(dataByCampaign[c.id].spend) }}</span></div>
+              <div v-if="dataByCampaign[c.id].spendSource" class="cost-row">
+                <span>Source</span>
+                <span class="mono">{{ dataByCampaign[c.id].spendSource!.source === 'google-ads-api' ? `Ads API, through ${dataByCampaign[c.id].spendSource!.lastDate}` : dataByCampaign[c.id].spendSource!.source === 'config' ? 'hand-entered' : '—' }}</span>
+              </div>
               <div class="cost-row"><span>Per arrival</span><span class="mono">{{ money(dataByCampaign[c.id].costPerArrival) }}</span></div>
               <div class="cost-row"><span>Per auth success</span><span class="mono">{{ money(dataByCampaign[c.id].costPerAuthSuccess) }}</span></div>
             </div>
@@ -269,6 +276,9 @@ function shareBarWidth(row: DeviceMixShare): number {
         </div>
         <NoteBlock v-if="campaigns.some((c) => dataByCampaign[c.id]?.spend == null)" note-id="spend-source" class="caption" />
       </template>
+      <!-- The ads-read routine's readings log is its own movable widget now (dataset
+           'ads-readings', dispatched by ChartCard.vue via AdsReadingsWidgetCard), not inline
+           here — add it from the chart menu the same as any other chart. -->
 
       <!-- deviceMix -->
       <template v-else-if="widget.view === 'deviceMix'">

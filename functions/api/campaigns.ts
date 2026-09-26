@@ -26,6 +26,8 @@ import {
   countryBucket,
   etHourFromMs,
   etFlightRangeMs,
+  etMidnightUtcMs,
+  etTimeUtcMs,
   flightDayIndex,
   funnelStepRates,
   parseReturnPath,
@@ -38,10 +40,16 @@ import {
   type FunnelPathCount,
   type FunnelStepKey,
 } from '../../src/lib/campaigns'
-import { etDateFromMs, TRACKING_ACTIVATION_DATE_ET } from '../../src/lib/popupEvents'
+import { etDateFromMs, excludeInstallGapUnmeasured, installOutcomeGapNote, TRACKING_ACTIVATION_DATE_ET } from '../../src/lib/popupEvents'
+import { resolveCampaignSpend } from '../../src/lib/adsRules'
+import { readSpendSummaries } from '../../src/lib/adsStore'
+import { isRawInstallSignal, RAW_INSTALL_SIGNALS_LABEL } from '../../src/lib/campaigns'
 
 interface Env {
   gss_geo: D1Database
+  /** gss-stats' own ads store (docs/adr/0001-ads-read-store.md). Optional: when absent or
+   * empty, spend falls back to lib/campaigns.ts CAMPAIGN_SPEND. */
+  gss_stats_ads?: D1Database
 }
 
 const json = (data: unknown, status = 200): Response =>
@@ -77,6 +85,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const w1: string[] = [attr.sql]
   const b1: unknown[] = [...attr.binds]
   applyExclusions(w1, b1)
+  excludeInstallGapUnmeasured(w1, b1) // pre-fix install-gap rows are unmeasured, not zero
   const sql1 = `SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, country, visitor, COUNT(*) AS c FROM hits WHERE ${w1.join(' AND ')} GROUP BY hr, path, country, visitor`
 
   // ── Query 2: device mix (os / browser / screen width) within the flight window. ─────────
@@ -191,7 +200,14 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const returnRates = returnVisitRates(returnCounts)
   const sharedWith = sharesReturnTagWith(campaign)
 
-  const spend = CAMPAIGN_SPEND[campaign.id] ?? null
+  // Spend: the routine's stored Google Ads API figures first (gss-stats-ads), else the
+  // hand-entered CAMPAIGN_SPEND — fail soft, see lib/adsStore.ts readSpendSummaries.
+  const stored = (await readSpendSummaries(ctx.env.gss_stats_ads))?.get(campaign.id) ?? null
+  const resolvedSpend = resolveCampaignSpend(stored, CAMPAIGN_SPEND[campaign.id] ?? null)
+  const spend = resolvedSpend.spend
+  // Raw /install/<outcome> beacons — secondary to the deduplicated install step (one install
+  // can fire two of them); see lib/campaigns.ts isRawInstallSignal.
+  const rawInstallSignals = rows1.filter((r) => isRawInstallSignal(r.path)).reduce((a, r) => a + r.c, 0)
 
   const response = {
     campaign: {
@@ -205,7 +221,18 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       measurement: campaign.measurement ?? null,
       measurabilityNote: campaign.measurabilityNote ?? null,
     },
-    funnel: { counts, rates, notInstrumented, arrivalsCaveat: ARRIVALS_CAVEAT },
+    funnel: {
+      counts,
+      rates,
+      notInstrumented,
+      arrivalsCaveat: ARRIVALS_CAVEAT,
+      // Install-fix caveat for THIS campaign's attribution range (none once it is all post-fix).
+      installNote:
+        installOutcomeGapNote({
+          startMs: campaign.flightStart ? (campaign.flightStartTimeEt ? etTimeUtcMs(campaign.flightStart, campaign.flightStartTimeEt) : etMidnightUtcMs(campaign.flightStart)) : 0,
+          endMs: Date.now(),
+        }) || null,
+    },
     taggedHits, // labeled separately from arrivals — see ARRIVALS_CAVEAT / the DEFINITION FIX comment above
     funnelByCountry,
     hourOfDayEt,
@@ -220,6 +247,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     costPerArrival: costPer(spend, counts.arrivals),
     costPerAuthSuccess: costPer(spend, counts.authSuccess),
     spend,
+    spendSource: { source: resolvedSpend.source, fetchedAt: resolvedSpend.fetchedAt, lastDate: resolvedSpend.lastDate },
+    rawInstallSignals: { count: rawInstallSignals, label: RAW_INSTALL_SIGNALS_LABEL },
     meta: { generatedAt: new Date().toISOString(), trackingActivationDate: TRACKING_ACTIVATION_DATE_ET },
   }
 
