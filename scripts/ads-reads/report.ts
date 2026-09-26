@@ -31,7 +31,7 @@ export function fullReadLines(r: FullRead, title: string): string[] {
   const out: string[] = [`=== ${title} (cumulative ${money(r.cumulativeSpend)}, closed days through ${r.spendThroughEt ?? '—'}) — ${r.complete ? 'complete' : 'INCOMPLETE, retried next run'} ===`]
   out.push('Kill rules (propose only; nothing is changed):')
   for (const rule of r.kill.rules) out.push(ruleLine(rule))
-  out.push(`Proposal: ${r.kill.proposal}`)
+  out.push(`Proposal: ${r.kill.proposal ?? `none: campaign ${r.kill.servingState === 'ended' ? 'ended' : r.kill.servingState === 'paused' ? 'paused' : 'not serving'}, nothing to pause`}`)
   if (r.placements) {
     out.push(`Placements: ${money(r.placements.approvedCost)} on approved, ${money(r.placements.itemizedCost)} itemized, of ${money(r.placements.campaignCost)}; outside share ${pct(r.placements.outsideShare)}`)
     for (const o of r.placements.offList) out.push(`  off-list: ${o.name} ${money(o.cost)}`)
@@ -77,7 +77,7 @@ export function fullReadLines(r: FullRead, title: string): string[] {
     )
   } else out.push('Accounts: not read (no --firebase-sa)')
   if (r.decision) {
-    out.push(`Decision table (spec section 13): row ${r.decision.row}; sign-ups ${r.decision.signUps} = ${r.decision.basis}`)
+    out.push(`Decision table (spec section 13): row ${r.decision.row}; ${r.decision.label}`)
     out.push(`  reading: ${r.decision.reading}`)
     out.push(`  next: ${r.decision.next}`)
   }
@@ -158,6 +158,13 @@ export function formatPostflightReport(r: PostflightResult): string {
   }
   const a = r.promoSplit.accounts
   if (a) out.push(`  accounts in the flight window: ${n(a.newInWindow)} new, ${n(a.promoClaimsInWindow)} promo claims, ~${n(a.nonPromoInWindow)} non-promo (counts only)`)
+  const c = r.cohort
+  if (c) {
+    out.push(
+      `Cohort (accounts created in the flight window; ${c.label}): ${n(c.total)} total; paid ${formatGated(c.rates.paid)}, trial active ${formatGated(c.rates.trialActive)}, expired ${formatGated(c.rates.expired)}; promo set ${formatGated(c.rates.promoSet)}, unset ${n(c.promoUnset)}${c.consistent ? '' : ' [counts do not add up: read the raw counts only]'}`,
+    )
+  } else if (r.cohortNote) out.push(`Cohort by tier: ${r.cohortNote}${r.promoSplit.accounts ? ` (plain window count: ${n(r.promoSplit.accounts.newInWindow)} new accounts, sitewide)` : ''}`)
+  for (const rec of r.recommendations) out.push(rec)
   out.push('', storeLine(r))
   out.push(`Errors: ${r.errors.length ? r.errors.join(' | ') : 'none'}`)
   out.push(`Push: ${r.notify.push ? `YES (${r.notify.reason}): ${r.notify.text}` : `no (${r.notify.reason})`}${r.notify.busCopy ? ' + bus copy' : ''}`)

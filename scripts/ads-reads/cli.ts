@@ -83,7 +83,8 @@ export async function liveDeps(opts: Record<string, string | boolean | undefined
     adsInitError,
     beacon: createBeaconSource(createD1Select(run)),
     store: createD1Store({ run, dryRun }),
-    firebase: saPath ? { counts: (s, e) => readFirebaseCounts(saPath, s, e) } : null,
+    // --firebase-sa is a plain path so the key can be swapped for a read-only one later.
+    firebase: saPath ? { counts: (s, e, at) => readFirebaseCounts(saPath, s, e, { cohortTiersAtMs: at ?? null }) } : null,
     dryRun,
   }
 }
@@ -130,7 +131,15 @@ export function fixtureDeps(fx: Fixture, dryRun: boolean): ReadDeps & { store: R
     beacon: b,
     beaconInitError: fx.beacon && 'error' in fx.beacon ? fx.beacon.error : b ? null : 'no beacon data in fixture',
     store: createMemoryStore(fx.store ?? {}, dryRun),
-    firebase: fx.firebase ? { counts: async () => fx.firebase! } : null,
+    // A fixture's cohortTiers is only handed back when the caller asked for it, like the live read.
+    firebase: fx.firebase
+      ? {
+          counts: async (_s, _e, at) => {
+            const { cohortTiers, ...rest } = fx.firebase!
+            return at != null ? { ...rest, ...(cohortTiers !== undefined ? { cohortTiers } : {}) } : rest
+          },
+        }
+      : null,
     dryRun,
   }
 }

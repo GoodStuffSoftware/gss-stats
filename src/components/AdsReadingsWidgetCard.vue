@@ -11,7 +11,7 @@
 //   widget.limit        — readings per campaign (default 30)
 import { computed, onMounted, ref, watch } from 'vue'
 import type { AdsReadingsCampaign, AdsReadingsResponse } from '../lib/adsStore'
-import type { ReadingRecord, RuleResult } from '../lib/adsRules'
+import { proposalLabel, type ReadingRecord, type RuleResult } from '../lib/adsRules'
 import { SMALL_SAMPLE_NOTE } from '../lib/popupEvents'
 
 export interface AdsReadingsWidgetLike {
@@ -105,7 +105,7 @@ function spendSource(c: AdsReadingsCampaign): string {
         <div v-else class="table-wrap">
           <table>
             <thead>
-              <tr><th>Read</th><th>Kind</th><th>Spend</th><th>Rules</th><th>Proposal</th><th>Arrivals</th><th>Asks</th><th>Accepts</th><th>Auth</th></tr>
+              <tr><th>Read</th><th>Kind</th><th>Spend</th><th>Rules</th><th>Proposal</th><th>Arrivals</th><th>Asks</th><th>Accepts</th><th>Auth</th><th title="An UPPER bound: min(tagged auth successes, new accounts sitewide in the window). Auth successes include returning sign-ins.">Sign-ups</th></tr>
             </thead>
             <tbody>
               <tr v-for="r in c.readings" :key="r.id" :class="{ incomplete: !r.complete }">
@@ -113,11 +113,12 @@ function spendSource(c: AdsReadingsCampaign): string {
                 <td>{{ kindLabel(r) }}<span v-if="!r.complete" class="muted"> (incomplete)</span></td>
                 <td class="mono">{{ money(r.cumulativeSpend) }}</td>
                 <td :class="['mono', rulesSummary(r.rules).tone]">{{ rulesSummary(r.rules).text }}</td>
-                <td :class="['mono', r.proposal === 'PROPOSE PAUSE' ? 'trip' : '']">{{ r.proposal ?? '—' }}</td>
+                <td :class="['mono', r.proposal === 'PROPOSE PAUSE' ? 'trip' : '']">{{ proposalLabel(r) }}</td>
                 <td class="mono num">{{ fmt(r.counts.taggedArrivals) }}</td>
                 <td class="mono num">{{ fmt(r.counts.asks) }}</td>
                 <td class="mono num">{{ fmt(r.counts.accepts) }}</td>
                 <td class="mono num">{{ fmt(r.counts.authSuccess) }}</td>
+                <td class="mono num">{{ r.counts.signUpsAtMost == null ? '—' : `at most ${fmt(r.counts.signUpsAtMost)}` }}</td>
               </tr>
             </tbody>
           </table>

@@ -11,7 +11,9 @@ All notable changes to **gss-stats** are documented here. The format follows
   scorecard read daily spend stored in the dashboard's own database, and fall back to the
   hand-entered figures when nothing is stored.
 - **A readings log on the campaigns page** shows each ads-routine read: spend, the
-  thresholds reached, kill-rule results, the proposal and key counts.
+  thresholds reached, kill-rule results, the proposal and key counts. Sign-ups are shown as
+  "at most N" (an upper bound), and a campaign that has already ended shows as ended rather
+  than as a pause proposal.
 - **Scheduled ads-read tooling for the US+CA web retest.** A daily morning read and the
   post-flight reads fetch spend from the Google Ads API, fire each spend threshold once, apply
   the pre-registered kill rules and decision table, and only ever propose. A failed read, a

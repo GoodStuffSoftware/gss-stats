@@ -27,7 +27,16 @@ import {
   resolveCampaignSpend,
   RETEST_APPROVED_PLACEMENTS,
   RETEST_CAMPAIGN_ID,
-  signUpsForDecision,
+  signUpsAtMost,
+  signUpsAtMostLabel,
+  SIGNUP_PROXY_NOTE,
+  AUTH_SUCCESS_SPLIT_RECOMMENDATION,
+  servingStateOf,
+  canProposePause,
+  noPauseNote,
+  proposalLabel,
+  deriveCohortTiers,
+  COHORT_TIER_STAGES,
   spendTotals,
   summarizeReturns,
   summarizeSiteEvents,
@@ -228,21 +237,90 @@ describe('evaluateKillRules (spec section 12)', () => {
 })
 
 describe('decision table at $100 (spec section 13)', () => {
-  it('2+ sign-ups / 1 / 0 declined / 0 rarely shown / 0 accepted-not-completed', () => {
-    expect(decideAt100({ signUps: 2, asks: 10, accepts: 3 }).row).toBe('two-plus')
-    expect(decideAt100({ signUps: 1, asks: 10, accepts: 3 }).row).toBe('one')
-    expect(decideAt100({ signUps: 0, asks: 12, accepts: 0 }).row).toBe('zero-declined')
-    expect(decideAt100({ signUps: 0, asks: MIN_COHORT - 1, accepts: 0 }).row).toBe('zero-rarely-shown')
-    expect(decideAt100({ signUps: 0, asks: 12, accepts: 2 }).row).toBe('zero-accepted-not-completed')
+  it('2+ (at most) / 1 (at most) / 0 declined / 0 rarely shown / 0 accepted-not-completed', () => {
+    expect(decideAt100({ signUpsAtMost: 2, asks: 10, accepts: 3 }).row).toBe('two-plus')
+    expect(decideAt100({ signUpsAtMost: 1, asks: 10, accepts: 3 }).row).toBe('one')
+    expect(decideAt100({ signUpsAtMost: 0, asks: 12, accepts: 0 }).row).toBe('zero-declined')
+    expect(decideAt100({ signUpsAtMost: 0, asks: MIN_COHORT - 1, accepts: 0 }).row).toBe('zero-rarely-shown')
+    expect(decideAt100({ signUpsAtMost: 0, asks: 12, accepts: 2 }).row).toBe('zero-accepted-not-completed')
+  })
+  it('the 2+ row says "at most", calls it an upper bound, leaves the call to Mike, and claims neither "verified" nor "1% or better"', () => {
+    const d = decideAt100({ signUpsAtMost: 3, asks: 20, accepts: 9 })
+    expect(d.reading).toMatch(/^At most 3 campaign sign-ups: an upper bound/)
+    expect(d.reading).toMatch(/Mike decides\.$/)
+    expect(`${d.reading} ${d.next}`).not.toMatch(/verified|1% or better/i)
+    expect(decideAt100({ signUpsAtMost: 1, asks: 20, accepts: 9 }).reading).toMatch(/^At most 1 campaign sign-up \(an upper bound/)
   })
   it('no row authorizes scaling on the $100 read alone', () => {
-    for (const i of [{ signUps: 5, asks: 20, accepts: 9 }, { signUps: 1, asks: 5, accepts: 1 }]) expect(decideAt100(i).next).not.toMatch(/\bscale up\b/i)
-    expect(decideAt100({ signUps: 3, asks: 20, accepts: 9 }).next).toMatch(/Hold on scaling/)
+    for (const i of [{ signUpsAtMost: 5, asks: 20, accepts: 9 }, { signUpsAtMost: 1, asks: 5, accepts: 1 }]) expect(decideAt100(i).next).not.toMatch(/\bscale up\b/i)
+    expect(decideAt100({ signUpsAtMost: 3, asks: 20, accepts: 9 }).next).toMatch(/hold on scaling/i)
+    expect(decideAt100({ signUpsAtMost: 3, asks: 20, accepts: 9 }).next).toMatch(/Do not scale display on this read/)
   })
-  it('sign-ups are bounded without matching anyone: min(tagged auth successes, window accounts)', () => {
-    expect(signUpsForDecision(3, 1)).toBe(1)
-    expect(signUpsForDecision(1, 4)).toBe(1)
-    expect(signUpsForDecision(2, null)).toBe(2)
+  it('sign-ups are an UPPER bound: min(tagged auth successes, sitewide window accounts), labelled "at most" with both inputs', () => {
+    expect(signUpsAtMost(3, 1)).toBe(1)
+    expect(signUpsAtMost(1, 4)).toBe(1)
+    expect(signUpsAtMost(2, null)).toBe(2)
+    expect(signUpsAtMostLabel(1, 3, 1)).toBe('at most 1 campaign sign-up (tagged auth successes 3; new prod accounts sitewide in the window 1)')
+    expect(signUpsAtMostLabel(2, 2, null)).toBe('at most 2 campaign sign-ups (tagged auth successes 2; new prod accounts sitewide in the window not read)')
+    expect(SIGNUP_PROXY_NOTE).toMatch(/UPPER bound/)
+    expect(SIGNUP_PROXY_NOTE).not.toMatch(/verified/i)
+  })
+  it('the post-flight recommendation names the beacon split and the freeze', () => {
+    expect(AUTH_SUCCESS_SPLIT_RECOMMENDATION).toContain('add /auth/success/<provider>/new|existing via additionalUserInfo.isNewUser (frozen until 10-02)')
+  })
+})
+
+describe('serving state: never propose pausing an ended or non-serving campaign', () => {
+  it('maps status + serving status', () => {
+    expect(servingStateOf({ status: 'ENABLED', servingStatus: 'SERVING' })).toBe('serving')
+    expect(servingStateOf({ status: 'ENABLED', servingStatus: 'ENDED' })).toBe('ended')
+    expect(servingStateOf({ status: 'PAUSED', servingStatus: 'SERVING' })).toBe('paused')
+    expect(servingStateOf({ status: 'ENABLED', servingStatus: 'PENDING' })).toBe('not-serving')
+    expect(servingStateOf({ status: 'ENABLED', servingStatus: null })).toBe('unknown')
+    expect(servingStateOf(null)).toBe('unknown')
+    expect(['serving', 'unknown'].every((s) => canProposePause(s as any))).toBe(true)
+    expect(['ended', 'paused', 'not-serving'].some((s) => canProposePause(s as any))).toBe(false)
+  })
+  it('a tripped rule on an ENDED campaign proposes nothing; the rule result still shows the trip', () => {
+    const res = evaluateKillRules(killInput({ cumulativeSpend: 100, campaignState: { status: 'ENABLED', servingStatus: 'ENDED' } }))
+    expect(res.tripped).toEqual(['hard-cap'])
+    expect(res.proposal).toBeNull()
+    expect(res.servingState).toBe('ended')
+  })
+  it('a serving campaign (or an unreadable state) still gets the pause proposal', () => {
+    expect(evaluateKillRules(killInput({ cumulativeSpend: 100, campaignState: { status: 'ENABLED', servingStatus: 'SERVING' } })).proposal).toBe('PROPOSE PAUSE')
+    expect(evaluateKillRules(killInput({ cumulativeSpend: 100, campaignState: null })).proposal).toBe('PROPOSE PAUSE')
+  })
+  it('the panel shows "ended" where no pause was proposed', () => {
+    const note = noPauseNote('ended', { status: 'ENABLED', servingStatus: 'ENDED' })
+    expect(note).toBe('no pause proposed: campaign ended (ENABLED/ENDED)')
+    expect(proposalLabel({ proposal: null, notes: [note] })).toBe('campaign ended (ENABLED/ENDED)')
+    expect(proposalLabel({ proposal: 'PROPOSE PAUSE', notes: [] })).toBe('PROPOSE PAUSE')
+    expect(proposalLabel({ proposal: null, notes: [] })).toBe('—')
+  })
+})
+
+describe('day-15/30/60 cohort by tier and promo (sitewide, not campaign-attributed)', () => {
+  it('derives tiers the way useAccess does: paid > explicitly expired > trial > expired', () => {
+    // 12 accounts: 2 paid (one also past its trial), 1 explicitly expired while its trial is
+    // still open, 4 whose trial ended (one of them paid, one of them also access-past) → expired
+    // = accessPast 1 + trialPast 4 − trialPastAndPaid 1 − trialPastAndAccessPast 0 = 4.
+    const t = deriveCohortTiers({ total: 12, paid: 2, accessPast: 1, trialPast: 4, trialPastAndPaid: 1, trialPastAndAccessPast: 0, promoSet: 5 })
+    expect(t).toMatchObject({ label: 'sitewide, not campaign-attributed', total: 12, paid: 2, expired: 4, trialActive: 6, promoSet: 5, promoUnset: 7, consistent: true })
+    expect(t.rates.paid).toEqual({ value: 2 / 12, insufficientCohort: false, numerator: 2, denominator: 12 })
+  })
+  it('MIN_COHORT gates every rate: 3 accounts report counts, not percentages', () => {
+    const t = deriveCohortTiers({ total: 3, paid: 1, accessPast: 0, trialPast: 1, trialPastAndPaid: 0, trialPastAndAccessPast: 0, promoSet: 1 })
+    for (const r of Object.values(t.rates)) expect(r).toMatchObject({ value: null, insufficientCohort: true })
+    expect(t).toMatchObject({ paid: 1, expired: 1, trialActive: 1 })
+  })
+  it('flags counts that do not add up instead of printing negatives', () => {
+    const t = deriveCohortTiers({ total: 2, paid: 2, accessPast: 1, trialPast: 1, trialPastAndPaid: 0, trialPastAndAccessPast: 0, promoSet: 0 })
+    expect(t.consistent).toBe(false)
+    expect(t.trialActive).toBe(0)
+  })
+  it('only the day-15/30/60 stages read it', () => {
+    expect(COHORT_TIER_STAGES).toEqual(['day15', 'day30', 'day60'])
   })
 })
 
