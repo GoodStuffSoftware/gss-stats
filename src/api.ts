@@ -47,6 +47,29 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters): Promis
     return res.json()
   }
 
+  // Completions dataset → /api/completions (D1-backed; mode × difficulty breakdown of
+  // /game/complete/<mode>/<difficulty>). Generic dimension/breakdown pipeline, same as
+  // 'geo'/'popup' — see functions/api/completions.ts + lib/catalog.ts COMPLETIONS_DIMENSIONS.
+  if (widget.dataset === 'completions') {
+    const res = await fetch('/api/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        dimension: widget.dimension || 'mode',
+        breakdown: widget.breakdown || undefined,
+        since: filters.since,
+        until: filters.until,
+        limit: widget.limit ?? 50,
+        sites: tags,
+      }),
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(`completions ${res.status}: ${text.slice(0, 200)}`)
+    }
+    return res.json()
+  }
+
   // Geo beacon dataset → /api/geo (D1-backed, already bot-free).
   if (widget.dataset === 'geo') {
     // The full nested-doughnut ring list (dimension, breakdown, then any further

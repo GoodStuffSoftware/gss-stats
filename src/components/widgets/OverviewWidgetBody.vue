@@ -9,7 +9,7 @@ import type { ChartConfiguration } from 'chart.js'
 import type { GlobalFilters, Widget, OverviewResponse } from '../../types'
 import { useOverviewData } from '../../lib/overviewData'
 import { PALETTE } from '../../lib/charts'
-import { FUNNEL_STEP_LABELS, FUNNEL_STEP_ORDER, FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED, type FunnelStepKey } from '../../lib/campaigns'
+import { FUNNEL_STEP_LABELS, FUNNEL_STEP_ORDER, VALID_FUNNEL_RATE_STEPS, type FunnelStepKey } from '../../lib/campaigns'
 import { isInsufficientCohort } from '../../lib/popupEvents'
 import { noteRawText } from '../../lib/notes'
 import type { CampaignFunnelCounts } from '../../types'
@@ -62,6 +62,10 @@ function prevFunnelCount(cnts: CampaignFunnelCounts, step: keyof CampaignFunnelC
   const idx = FUNNEL_STEP_ORDER.indexOf(step)
   return idx > 0 ? cnts[FUNNEL_STEP_ORDER[idx - 1]] : 0
 }
+// Every step but 'arrivals' — the scorecard chip list. Iterated directly (not via
+// row.funnelRates, which only ever holds 'accept'/'install' now) so a plain-count step still
+// gets a chip, just with no percent — see VALID_FUNNEL_RATE_STEPS.
+const scorecardSteps = FUNNEL_STEP_ORDER.filter((s) => s !== 'arrivals')
 function money(n: number | null | undefined): string {
   return n == null ? '—' : `$${n.toFixed(2)}`
 }
@@ -141,6 +145,30 @@ function timelineOverlayPlugin(resp: OverviewResponse) {
         ctx.stroke()
         ctx.restore()
       }
+      // v1.95.6 raw /install/* de-dupe (ADD, 2026-09-26) — a marker scoped to the RAW
+      // install-signal line ONLY (never the primary install count): drawn in that series' own
+      // color (PALETTE[7], see the 'Raw install signals' dataset below) and labeled at the
+      // BOTTOM of the chart area, distinct from the top-labeled release/tracking markers
+      // above, so it visually reads as "about that one line" rather than a page-wide event.
+      if (resp.timeline.rawInstallDedupeAt) {
+        const x = scales.x.getPixelForValue(resp.timeline.rawInstallDedupeAt)
+        if (x != null && !Number.isNaN(x) && x >= chartArea.left && x <= chartArea.right) {
+          ctx.save()
+          ctx.strokeStyle = PALETTE[7]
+          ctx.lineWidth = 1
+          ctx.setLineDash([2, 2])
+          ctx.beginPath()
+          ctx.moveTo(x, chartArea.top)
+          ctx.lineTo(x, chartArea.bottom)
+          ctx.stroke()
+          ctx.setLineDash([])
+          ctx.font = '600 9px Inter, system-ui, sans-serif'
+          ctx.fillStyle = PALETTE[7]
+          ctx.textAlign = 'right'
+          ctx.fillText('raw install dedupe', Math.max(x - 4, chartArea.left + 4), chartArea.bottom - 4)
+          ctx.restore()
+        }
+      }
     },
   }
 }
@@ -212,6 +240,7 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
         <NoteBlock note-id="overview-timeline-caption" class="caption" />
         <div class="chart-box"><BaseChart v-if="timelineConfig" :config="timelineConfig" :drill-open="false" @point="() => {}" /></div>
         <p v-if="!timelineConfig" class="caption">No data in range yet.</p>
+        <NoteBlock v-if="data.timeline.rawInstallDedupeAt" note-id="raw-install-dedupe" class="caption" />
       </template>
 
       <!-- scorecard -->
@@ -235,14 +264,43 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
             <div class="sc-row"><span>Return rate (d2-7)</span><span class="mono">{{ pct(row.returnRateD2to7, row.returnD0) }} {{ counts(row.returnD2to7, row.returnD0) }}</span></div>
             <div class="sc-row"><span>Cost / arrival</span><span class="mono">{{ money(row.costPerArrival) }}</span></div>
             <div class="sc-rates">
-              <span v-for="(rate, step) in row.funnelRates" :key="step" class="sc-rate-chip" :title="FUNNEL_STEP_LABELS[step as keyof typeof FUNNEL_STEP_LABELS]">
-                {{ FUNNEL_STEP_LABELS[step as keyof typeof FUNNEL_STEP_LABELS] }}:
-                <template v-if="FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED.has(step as FunnelStepKey)">{{ noteRawText('not-instrumented') }}</template>
-                <template v-else
-                  >{{ pct(rate, prevFunnelCount(row.funnelCounts, step as keyof CampaignFunnelCounts)) }}
-                  {{ counts(row.funnelCounts[step as keyof CampaignFunnelCounts], prevFunnelCount(row.funnelCounts, step as keyof CampaignFunnelCounts)) }}</template
+              <!-- Iterates FUNNEL_STEP_ORDER, not row.funnelRates — funnelStepRates only ever
+                   populates 'accept'/'install' now (see lib/campaigns.ts
+                   VALID_FUNNEL_RATE_STEPS), but every OTHER step still shows its plain count
+                   as a chip, just with no percent (audit finding, 2026-09-26: those "rates"
+                   mixed event-row counts against arrival/other-row counts with no shared
+                   visitor id — not real percentages). -->
+              <template v-for="step in scorecardSteps" :key="step">
+                <!-- Closed campaign: a step its flight never saw ANY hit for is OMITTED, not
+                     labeled "not instrumented" (owner clarification, 2026-09-26 — "closed
+                     campaigns" scope). Active/upcoming: unchanged — row.notInstrumented is
+                     always [] for them, so this condition is never true. -->
+                <span
+                  v-if="row.status !== 'closed' || !row.notInstrumented.includes(step as keyof CampaignFunnelCounts)"
+                  class="sc-rate-chip"
+                  :title="FUNNEL_STEP_LABELS[step as keyof typeof FUNNEL_STEP_LABELS]"
                 >
-              </span>
+                  {{ FUNNEL_STEP_LABELS[step as keyof typeof FUNNEL_STEP_LABELS] }}:
+                  <!-- Bug fix (owner report, 2026-09-26): this used to check the PERMANENT
+                       global FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED constant (always contains
+                       'completed'), so a campaign whose flight window is well after
+                       GAME_COMPLETE_LIVE_AT still showed "not instrumented" instead of its
+                       real count. row.notInstrumented is the ACTUAL per-row instrumentation
+                       state for every status (functions/api/overview.ts's notInstrumentedSet —
+                       the real per-flight check for a closed campaign, gameCompleteNotInstrumented
+                       for an active/upcoming one), so it reflects whether 'completed' has gone
+                       live for THIS campaign, not just whether the beacon exists at all. -->
+                  <template v-if="row.notInstrumented.includes(step as keyof CampaignFunnelCounts)">{{ noteRawText('not-instrumented') }}</template>
+                  <template v-else-if="step === 'install'"
+                    >{{ pct(row.funnelRates.install, row.installPromptPostFixCount) }} {{ counts(row.funnelCounts.install, row.installPromptPostFixCount) }}</template
+                  >
+                  <template v-else-if="VALID_FUNNEL_RATE_STEPS.has(step as FunnelStepKey)"
+                    >{{ pct(row.funnelRates[step as keyof CampaignFunnelCounts], prevFunnelCount(row.funnelCounts, step as keyof CampaignFunnelCounts)) }}
+                    {{ counts(row.funnelCounts[step as keyof CampaignFunnelCounts], prevFunnelCount(row.funnelCounts, step as keyof CampaignFunnelCounts)) }}</template
+                  >
+                  <template v-else>{{ fmt(row.funnelCounts[step as keyof CampaignFunnelCounts]) }}</template>
+                </span>
+              </template>
             </div>
           </div>
         </div>

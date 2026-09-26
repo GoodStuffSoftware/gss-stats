@@ -8,6 +8,7 @@ import {
   POPUP_OPTIONS,
   POPUP_KIND_OPTIONS,
   POPUP_RATE_DIMENSIONS,
+  COMPLETIONS_DIMENSIONS,
   DATASETS,
   CHART_TYPES,
   METRICS,
@@ -30,6 +31,7 @@ watch(
 
 const isGeo = computed(() => draft.dataset === 'geo')
 const isPopup = computed(() => draft.dataset === 'popup')
+const isCompletions = computed(() => draft.dataset === 'completions')
 const isRate = computed(() => draft.type === 'rate')
 const isNote = computed(() => draft.type === 'note')
 // The three former-bespoke datasets: no dimension/breakdown/metric/site-override — a
@@ -83,7 +85,9 @@ function toggleAttachedNote(id: string, checked: boolean) {
 }
 // A rate tile's "dimension" is a POPUP_RATE_SPECS key, not a group-by field — a wholly
 // different picker domain from the count-mode dimensions below it.
-const dimOptions = computed(() => (isRate.value ? POPUP_RATE_DIMENSIONS : isPopup.value ? POPUP_DIMENSIONS : isGeo.value ? GEO_DIMENSIONS : DIMENSIONS))
+const dimOptions = computed(() =>
+  isRate.value ? POPUP_RATE_DIMENSIONS : isPopup.value ? POPUP_DIMENSIONS : isGeo.value ? GEO_DIMENSIONS : isCompletions.value ? COMPLETIONS_DIMENSIONS : DIMENSIONS,
+)
 // A count-mode popup chart ('kind'/'reason'/'date'/'outcome') needs to know WHICH pop-up
 // it's scoped to; 'reason'/'date' also need which funnel stage they break down/trend.
 const popupNeedsPopup = computed(() => isPopup.value && !isRate.value && draft.dimension !== 'eligible' && draft.dimension !== 'installOutcome')
@@ -124,7 +128,7 @@ function onDatasetChange() {
     draft.rings = draft.rings.filter((r) => dimOptions.value.some((d) => d.key === r))
     if (!draft.rings.length) draft.rings = undefined
   }
-  if (isGeo.value || isPopup.value) draft.metric = 'pageviews'
+  if (isGeo.value || isPopup.value || isCompletions.value) draft.metric = 'pageviews'
   if (isPopup.value && !draft.popup) draft.popup = POPUP_OPTIONS[0]?.value
   if (isPopup.value && !draft.popupKind) draft.popupKind = 'shown'
   if (!isPopup.value) {

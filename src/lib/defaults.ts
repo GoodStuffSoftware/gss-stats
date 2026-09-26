@@ -36,10 +36,12 @@ function w(p: Omit<Widget, 'i'>): Widget {
   return { ...p, i: p.id }
 }
 
-// Bumped to 7 for the bespoke-page → widget conversion migration (see normalizeConfig's v7
-// block below): Overview/Campaigns went from `widgets: []` (rendered by the now-retired
-// OverviewPage.vue/CampaignComparePage.vue) to real generic widgets.
-export const CONFIG_VERSION = 7
+// Bumped to 8 for the completions-breakdown-widget migration (see normalizeConfig's v8 block
+// below): adds the mode × difficulty completions widget to "Best Sudoku overview" once, on an
+// uncustomized layout only. (Bumped to 7 for the bespoke-page → widget conversion migration —
+// see the v7 block: Overview/Campaigns went from `widgets: []` (rendered by the now-retired
+// OverviewPage.vue/CampaignComparePage.vue) to real generic widgets.)
+export const CONFIG_VERSION = 8
 
 // The default "basic charts available out of the box" — a sensible analytics
 // starting layout. Users can move/resize/add/remove from here.
@@ -343,6 +345,38 @@ export function isCampaignComparePage(p: DashboardPage): boolean {
 // OverviewPage.vue as its own movable/resizable/editable widget (dataset 'overview'; see
 // components/widgets/OverviewWidgetBody.vue). One widget per panel, reproducing the page's
 // original top-to-bottom arrangement.
+// Completions breakdown (mode × difficulty) — a plain GENERIC dataset widget (dataset
+// 'completions', dimension/breakdown), not a bespoke 'overview' panel — see
+// functions/api/completions.ts + lib/catalog.ts COMPLETIONS_DIMENSIONS. Factored into its own
+// builder so both defaultOverviewWidgets() (fresh configs) and the v8 migration below (existing
+// saved configs) build the EXACT same widget.
+function completionsWidget(): Widget {
+  return w({
+    id: 'ow-completions',
+    title: 'Completions by mode × difficulty',
+    type: 'stackedBar',
+    dataset: 'completions',
+    dimension: 'mode',
+    breakdown: 'difficulty',
+    metric: 'pageviews',
+    limit: 20,
+    x: 0,
+    y: 46,
+    w: 12,
+    h: 10,
+  })
+}
+// The exact id set defaultOverviewWidgets() produced before the completions widget existed —
+// used by the v8 migration (overviewPageIsUncustomized) to tell an untouched factory layout
+// apart from one the owner has already added/removed charts on.
+const OVERVIEW_DEFAULT_WIDGET_IDS_V7 = ['ow-note-smallsample', 'ow-kpis', 'ow-timeline', 'ow-scorecard', 'ow-release']
+/** True when a page's widget ids are EXACTLY the pre-completions factory Overview set (any
+ * order — resizing/moving is normal use, not "customisation") — i.e. the owner hasn't added,
+ * removed, or lost any of the default charts. Position/size changes don't disqualify it. */
+export function overviewPageIsUncustomized(p: DashboardPage): boolean {
+  const ids = new Set(p.widgets.map((w) => w.id))
+  return ids.size === OVERVIEW_DEFAULT_WIDGET_IDS_V7.length && OVERVIEW_DEFAULT_WIDGET_IDS_V7.every((id) => ids.has(id))
+}
 export function defaultOverviewWidgets(): Widget[] {
   return [
     w({ id: 'ow-note-smallsample', title: 'Small sample', type: 'note', dimension: '', metric: 'pageviews', limit: 1, noteId: 'small-sample', x: 0, y: 0, w: 12, h: 3 }),
@@ -350,6 +384,7 @@ export function defaultOverviewWidgets(): Widget[] {
     w({ id: 'ow-timeline', title: 'Overall timeline', type: 'table', dataset: 'overview', view: 'timeline', dimension: '', metric: 'pageviews', limit: 1, notes: ['overview-timeline-caption'], x: 0, y: 11, w: 12, h: 12 }),
     w({ id: 'ow-scorecard', title: 'Campaign scorecard', type: 'table', dataset: 'overview', view: 'scorecard', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 23, w: 12, h: 14 }),
     w({ id: 'ow-release', title: 'Release panel', type: 'table', dataset: 'overview', view: 'releasePanel', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 37, w: 12, h: 9 }),
+    completionsWidget(),
   ]
 }
 // Another bespoke-turned-widget page (see components/OverviewPage.vue — kept for reference /
@@ -467,7 +502,7 @@ function normFilters(raw: any): GlobalFilters {
   return merged
 }
 
-const KNOWN_DATASETS = new Set(['geo', 'popup', 'overview', 'campaigns', 'ads-readings'])
+const KNOWN_DATASETS = new Set(['geo', 'popup', 'overview', 'campaigns', 'ads-readings', 'completions'])
 function normWidget(x: any): Widget {
   return {
     id: String(x.id ?? cryptoId()),
@@ -593,6 +628,20 @@ export function normalizeConfig(raw: any): DashboardConfig {
                 : null
       if (kind === 'overview') p.widgets = defaultOverviewWidgets()
       else if (kind === 'campaigns') p.widgets = defaultCampaignsWidgets()
+    }
+    // v8 migration: add the completions breakdown widget (mode × difficulty) to "Best Sudoku
+    // overview" ONCE — but ONLY onto a page whose widget set still matches the exact factory
+    // v7 output (overviewPageIsUncustomized): a page the owner has already added, removed, or
+    // is missing a default chart on keeps its own curation untouched, per the brief's "don't
+    // disturb saved layouts" rule. (A brand-new config never hits this branch at all —
+    // defaultOverviewWidgets() already includes the completions widget, and the v7 block above
+    // populates from it directly when widgets.length === 0.)
+    if ((Number(raw.version) || 0) < 8) {
+      for (const p of pages) {
+        if (isOverviewPage(p) && overviewPageIsUncustomized(p) && !p.widgets.some((w: Widget) => w.dataset === 'completions')) {
+          p.widgets = [...p.widgets, completionsWidget()]
+        }
+      }
     }
     // Self-heal (every load, not version-gated): the canonical pages — Overview, Beacon, and
     // the Best Sudoku launch page — must NEVER carry a persistent page-level drill. Drilling

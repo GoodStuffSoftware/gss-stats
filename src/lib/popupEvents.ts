@@ -541,6 +541,22 @@ export const NEW_BEACONS_LIVE_MARKER_LABEL = 'game + auth breakdown live'
  * TRACKING_ACTIVATION_DATE_ET. */
 export const NEW_BEACONS_LIVE_AT_ET = '2026-09-26'
 
+// ── Raw /install/* de-dupe marker (v1.95.6, live 2026-09-26T20:23:02Z) — ADD-only, not a
+// gate: unlike GAME_COMPLETE_LIVE_AT/NEW_BEACONS_LIVE_AT_ET, nothing here excludes rows
+// before this instant — it's purely an annotation on the RAW /install/* signal line
+// (lib/campaigns.ts isRawInstallSignal / RAW_INSTALL_SIGNALS_LABEL), never the primary,
+// already-deduplicated install count (isInstallPromptInstalled = /popup-outcome/
+// install-prompt/installed), which this release doesn't touch at all. Same
+// exact-instant + separate-ET-date-string pattern as GAME_COMPLETE_LIVE_AT/
+// NEW_BEACONS_LIVE_AT_ET: the ms value for precision, the ET date literal for the
+// timeline chart's category-axis marker position (kept in sync by inspection, same as
+// NEW_BEACONS_LIVE_AT_ET's own doc comment explains).
+export const RAW_INSTALL_DEDUPE_LIVE_AT_UTC_MS = Date.parse('2026-09-26T20:23:02Z')
+export const RAW_INSTALL_DEDUPE_LIVE_AT_ET = '2026-09-26'
+export const RAW_INSTALL_DEDUPE_MARKER_LABEL = 'raw install dedupe'
+export const RAW_INSTALL_DEDUPE_NOTE =
+  'raw /install/* dedupe live — duplicate cross-tab rows no longer sent; small drop expected mainly on desktop Chrome/Edge; primary install count unaffected'
+
 // ── Aggregation ──────────────────────────────────────────────────────────────────────
 // The Function fetches one row per (UTC hour bucket, path) with its count — still an
 // aggregate query (no per-row/per-visitor data), never correlated by timestamp or

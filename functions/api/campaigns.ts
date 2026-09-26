@@ -25,7 +25,6 @@ import {
   costPer,
   countryBucket,
   etHourFromMs,
-  etFlightRangeMs,
   etMidnightUtcMs,
   etTimeUtcMs,
   flightDayIndex,
@@ -40,11 +39,12 @@ import {
   type FunnelPathCount,
   type FunnelStepKey,
 } from '../../src/lib/campaigns'
-import { etDateFromMs, excludeInstallGapUnmeasured, installOutcomeGapNote, TRACKING_ACTIVATION_DATE_ET } from '../../src/lib/popupEvents'
+import { etDateFromMs, excludeInstallGapUnmeasured, installOutcomeGapNote, TRACKING_ACTIVATION_DATE_ET, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, rowIsPostInstallFix } from '../../src/lib/popupEvents'
 import { campaignSegmentMarker, resolveCampaignSpend, UPSELL_SIGNEDOUT_FIX_AT } from '../../src/lib/adsRules'
 import { readFreshness, readSpendSummaries } from '../../src/lib/adsStore'
 import { freshnessOf } from '../../src/lib/adsFreshness'
 import { isRawInstallSignal, RAW_INSTALL_SIGNALS_LABEL } from '../../src/lib/campaigns'
+import { notInstrumentedFunnelSteps } from '../_lib/campaignInstrumentation'
 
 interface Env {
   gss_geo: D1Database
@@ -105,19 +105,11 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
 
   // ── Query 3: which funnel-step paths existed AT ALL (any campaign, any un-tagged hit)
   // site-wide during this flight's SERVING window — decides "not instrumented" vs a real 0.
-  // Computed independently from campaign.flightStart/flightEnd (the display/serving dates),
-  // NOT from the attribution clause's binds (which has no upper bound — see
-  // campaignAttributionClause). `flightStart === null` (a pending flight, e.g. the retest
-  // before its start is confirmed): there's no window to check yet, so this query is skipped
-  // entirely and every non-globally-not-instrumented step is correctly left "not
-  // instrumented" below (seenSteps stays empty). ───────────────────────────────────────────
-  const flightRange = campaign.flightStart ? etFlightRangeMs(campaign.flightStart, campaign.flightEnd) : null
-  const sql3Promise: Promise<any> = flightRange
-    ? db
-        .prepare(`SELECT path, COUNT(*) AS c FROM hits WHERE site = ? AND ts >= ? AND ts < ? GROUP BY path`)
-        .bind(BSK_SITE, flightRange[0], flightRange[1])
-        .all()
-    : Promise.resolve({ results: [] })
+  // Factored into functions/_lib/campaignInstrumentation.ts (notInstrumentedFunnelSteps) so
+  // the overview scorecard can reuse the exact same per-flight derivation instead of a
+  // simplified default — see that module for the full behavior (including the `flightStart
+  // === null` pending-flight case). ─────────────────────────────────────────────────────────
+  const notInstrumentedPromise = notInstrumentedFunnelSteps(db, campaign)
 
   // ── Query 4: on-device return beacon (/return/<uc>/<bucket>) — path-embedded uc, see
   // lib/campaigns.ts parseReturnPath; site-wide + NOT date-windowed (a d31-60 return can
@@ -127,12 +119,12 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   applyExclusions(w4, b4)
   const sql4 = `SELECT path, COUNT(*) AS c FROM hits WHERE ${w4.join(' AND ')} GROUP BY path`
 
-  let r1: any, r2: any, r3: any, r4: any
+  let r1: any, r2: any, notInstrumented: FunnelStepKey[], r4: any
   try {
-    ;[r1, r2, r3, r4] = await Promise.all([
+    ;[r1, r2, notInstrumented, r4] = await Promise.all([
       db.prepare(sql1).bind(...b1).all(),
       db.prepare(sql2).bind(...b2).all(),
-      sql3Promise,
+      notInstrumentedPromise,
       db.prepare(sql4).bind(...b4).all(),
     ])
   } catch (e) {
@@ -177,15 +169,20 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([date, arrivals]) => ({ date, day: flightDayIndex(campaign, date) ?? 0, arrivals }))
 
-  // ── Per-flight "not instrumented" (query 3): any funnel-step path with zero site-wide
-  // hits during this flight's window couldn't have been seen — not a real 0. ──────────────
-  const seenSteps = new Set<FunnelStepKey>()
-  for (const x of r3.results ?? []) {
-    const step = classifyFunnelPath(String(x.path ?? ''))
-    if (step && (Number(x.c) || 0) > 0) seenSteps.add(step)
-  }
-  const notInstrumented = FUNNEL_STEP_ORDER.filter((k) => k !== 'arrivals' && !seenSteps.has(k))
-  const rates = funnelStepRates(counts, new Set(notInstrumented))
+  // ── Per-flight "not instrumented" (query 3, via notInstrumentedFunnelSteps): any funnel-
+  // step path with zero site-wide hits during this flight's window couldn't have been seen —
+  // not a real 0. ───────────────────────────────────────────────────────────────────────────
+  // install/installPrompt's denominator (see lib/campaigns.ts funnelStepRates/
+  // VALID_FUNNEL_RATE_STEPS): only prompts shown AT OR AFTER the install-outcome-gap fix — a
+  // pre-fix prompt could never have its "installed" outcome recorded at all, so it doesn't
+  // belong in the rate's denominator. Computed from rows1 (already hour-bucketed) rather than
+  // a new query.
+  const installFixAtMs = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS
+  const installPromptPostFixCount = rows1.reduce(
+    (a, r) => (classifyFunnelPath(r.path) === 'installPrompt' && rowIsPostInstallFix({ hourStartMs: r.hr * 3_600_000, path: r.path, count: r.c }, installFixAtMs) ? a + r.c : a),
+    0,
+  )
+  const rates = funnelStepRates(counts, new Set(notInstrumented), installPromptPostFixCount)
 
   // ── Device mix (query 2) ─────────────────────────────────────────────────────────────
   const os: Record<string, number> = {}
@@ -239,6 +236,10 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       counts,
       rates,
       notInstrumented,
+      // The install/installPrompt rate's real denominator (see lib/campaigns.ts
+      // funnelStepRates) — carried alongside `counts.installPrompt` (the WHOLE-window count,
+      // still shown as its own plain count) so the UI can display the rate's actual n/d.
+      installPromptPostFixCount,
       arrivalsCaveat: ARRIVALS_CAVEAT,
       // Install-fix caveat for THIS campaign's attribution range (none once it is all post-fix).
       installNote:
