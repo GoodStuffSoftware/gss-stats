@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-09-26
+
 ### Added
 - **Best Sudoku release history, with real dates.** The overview timeline and the "Best
   Sudoku · Traffic" page's trend chart now mark every verified production release from
