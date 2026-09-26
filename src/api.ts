@@ -1,4 +1,5 @@
 import type { StatsResponse, Widget, GlobalFilters, DashboardConfig, Dataset, CampaignCompareResponse, OverviewResponse } from './types'
+import type { AdsReadingsResponse } from './lib/adsStore'
 import { resolveSelection } from './sitesStore'
 import { nativeField } from './lib/drill'
 import { queryDims } from './lib/rings'
@@ -111,8 +112,8 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters): Promis
 
 // Expired-session handling for fetches that don't go through a ChartCard. fetchStats
 // (every grid chart, pop-up charts included) throws "<name> 401: …" and ChartCard.load()
-// runs the probe; the bespoke overview and campaign pages call their fetchers directly,
-// so those get the same handling here. A 401 from the auth gate, or a network-level
+// runs the probe; the bespoke overview and campaign pages and the ads readings log call
+// their fetchers directly, so those get the same handling here. A 401 from the auth gate, or a network-level
 // failure (an expired Cloudflare Access session while Access is still in front), runs
 // the confirming probe that raises the re-sign-in banner. The error is rethrown so the
 // page still shows it.
@@ -155,6 +156,20 @@ export function fetchOverview(since?: string, until?: string): Promise<OverviewR
     if (!res.ok) {
       const text = await res.text().catch(() => '')
       throw new Error(`overview ${res.status}: ${text.slice(0, 200)}`)
+    }
+    return res.json()
+  })
+}
+
+/** Fetch the ads-read routine's readings log + stored spend (GET /api/ads/readings — see
+ * lib/adsStore.ts + functions/api/ads/readings.ts). `query` is the URL-encoded
+ * campaignId/limit query string AdsReadingsWidgetCard builds. */
+export function fetchAdsReadings(query: string): Promise<AdsReadingsResponse> {
+  return withSessionCheck(async () => {
+    const res = await fetch(`/api/ads/readings?${query}`)
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(`readings ${res.status}: ${text.slice(0, 200)}`)
     }
     return res.json()
   })
