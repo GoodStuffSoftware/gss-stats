@@ -658,8 +658,16 @@ export const PLAY_INSTALLS_HOUSEHOLD_NOTE = "Play install counts include Mike's 
 /** The same sentence the pop-ups page shows (lib/popupEvents.ts POPUP_PAGE_NOTE, corrected
  * 2026-09-26 against best-sudoku's measurementQuiet.ts) — one wording, two surfaces. */
 export const MEASUREMENT_QUIET_NOTE = POPUP_PAGE_NOTE
+/** Verified against best-sudoku origin/main (2026-09-26): reportAuthSuccess
+ * (src/services/observability/authSignals.ts) carries no new/existing flag and useAuth.ts
+ * calls it from BOTH signInWithEmail and createAccountWithEmail, so a tagged auth success can
+ * be a returning sign-in; and new accounts in the window are SITEWIDE. Each input over-counts
+ * campaign sign-ups, so their minimum is an UPPER bound — "at most N". */
 export const SIGNUP_PROXY_NOTE =
-  '/auth/success fires for new AND existing accounts, and no beacon marks a new account; sign-ups are bounded as min(tagged auth successes, new prod accounts in the flight window). Counts only, never matched to anyone.'
+  'Sign-ups are an UPPER bound, "at most N campaign sign-ups" = min(tagged auth successes, new prod accounts sitewide in the flight window): /auth/success also fires for returning sign-ins and the account count is not campaign-attributed. Counts only, never matched to anyone.'
+/** Post-flight recommendation (a beacon change, so only after the 2026-10-02 freeze). */
+export const AUTH_SUCCESS_SPLIT_RECOMMENDATION =
+  'Recommendation: add /auth/success/<provider>/new|existing via additionalUserInfo.isNewUser (frozen until 10-02), so a campaign sign-up can be counted instead of bounded.'
 
 export interface HealthInputs {
   site: SiteEventSummary
@@ -727,10 +735,42 @@ export interface RuleResult {
   limit: number
   detail: string
 }
+// ── Is there anything to pause? ──────────────────────────────────────────────────────────
+// After its end date a campaign keeps status ENABLED while serving_status becomes ENDED. A
+// pause is only ever proposed for a campaign that is actually serving (or whose state could
+// not be read, where silence would cost money); an ended, paused or otherwise non-serving
+// campaign is reported as such instead.
+export type ServingState = 'serving' | 'ended' | 'paused' | 'not-serving' | 'unknown'
+export function servingStateOf(s: { status: string | null; servingStatus: string | null } | null | undefined): ServingState {
+  if (!s || !s.status) return 'unknown'
+  if (s.status === 'PAUSED' || s.status === 'REMOVED') return 'paused'
+  if (s.servingStatus === 'ENDED') return 'ended'
+  if (s.status === 'ENABLED' && s.servingStatus === 'SERVING') return 'serving'
+  if (s.status === 'ENABLED' && !s.servingStatus) return 'unknown'
+  return 'not-serving'
+}
+export function canProposePause(state: ServingState): boolean {
+  return state === 'serving' || state === 'unknown'
+}
+/** Prefix of the reading note recorded instead of a pause proposal (the store's proposal
+ * column only holds PROPOSE PAUSE / CONTINUE). */
+export const NO_PAUSE_NOTE_PREFIX = 'no pause proposed: campaign '
+export function noPauseNote(state: ServingState, s?: { status: string | null; servingStatus: string | null } | null): string {
+  return `${NO_PAUSE_NOTE_PREFIX}${state === 'ended' ? 'ended' : state === 'paused' ? 'paused' : 'not serving'} (${s?.status ?? '?'}/${s?.servingStatus ?? '?'})`
+}
+/** What the readings panel shows in the Proposal column. */
+export function proposalLabel(r: { proposal: string | null; notes: readonly string[] }): string {
+  if (r.proposal) return r.proposal
+  const n = r.notes.find((x) => x.startsWith(NO_PAUSE_NOTE_PREFIX))
+  return n ? n.slice('no pause proposed: '.length) : '—'
+}
+
 export interface KillRuleInput {
   plan: AdsReadPlan
   /** Closed-day cumulative spend in dollars. */
   cumulativeSpend: number
+  /** Campaign status + serving status; omitted/null = unreadable (pause may still be proposed). */
+  campaignState?: { status: string | null; servingStatus: string | null } | null
   /** Cumulative impressions/clicks — null when the Ads daily read failed. */
   delivery: { impressions: number; clicks: number } | null
   /** Placement cost split — null when the placement read failed. */
@@ -741,13 +781,22 @@ export interface KillRuleInput {
 export interface KillRuleEvaluation {
   rules: RuleResult[]
   tripped: RuleId[]
-  proposal: 'PROPOSE PAUSE' | 'CONTINUE'
+  /** null = rules tripped but the campaign is not serving, so there is nothing to pause
+   * (see servingState and noPauseNote). */
+  proposal: 'PROPOSE PAUSE' | 'CONTINUE' | null
+  servingState: ServingState
 }
 /** Share of spend outside the approved placements, robust to Google's placement view summing
  * slightly ABOVE the campaign total (measured 2026-09-26: $125.37 itemized vs $124.47 for
  * week 1, $76.25 vs $75.17 for the twin). off-list = itemized − approved; un-itemized =
  * campaign − itemized when positive; the denominator is the larger of the two totals, so
- * neither side's rounding can hide a leak or invent one. */
+ * neither side's rounding invents a leak or hides a big one.
+ *
+ * KNOWN EDGE (review, 2026-09-26): because the denominator is the LARGER total, a leak just
+ * over the line can read just under it. With itemized ~1% above the campaign total, a true
+ * 10.05% leak reads ~9.95%, and anything up to roughly 10-11% can land within a point of the
+ * 10% threshold on either side. The report always prints the share with both totals, so a
+ * reading of 9-11% deserves a human look even when the rule says "clear". */
 export function placementOutsideShare(p: { campaignCost: number; approvedCost: number; itemizedCost: number }): { share: number; offList: number; unitemized: number } {
   const offList = Math.max(0, p.itemizedCost - p.approvedCost)
   const unitemized = Math.max(0, p.campaignCost - p.itemizedCost)
@@ -828,14 +877,16 @@ export function evaluateKillRules(i: KillRuleInput): KillRuleEvaluation {
   }
 
   const tripped = rules.filter((r) => r.status === 'trip').map((r) => r.id)
-  return { rules, tripped, proposal: tripped.length ? 'PROPOSE PAUSE' : 'CONTINUE' }
+  const servingState = servingStateOf(i.campaignState)
+  const proposal = !tripped.length ? 'CONTINUE' : canProposePause(servingState) ? 'PROPOSE PAUSE' : null
+  return { rules, tripped, proposal, servingState }
 }
 
 // ── Decision table at the $100 read (spec section 13) ───────────────────────────────────
 export type DecisionRow = 'two-plus' | 'one' | 'zero-declined' | 'zero-rarely-shown' | 'zero-accepted-not-completed'
 export interface DecisionInput {
-  /** Sign-ups used for the table — see signUpsForDecision. */
-  signUps: number
+  /** An UPPER bound on campaign sign-ups — see signUpsAtMost. */
+  signUpsAtMost: number
   asks: number
   accepts: number
 }
@@ -844,17 +895,23 @@ export interface DecisionResult {
   reading: string
   next: string
 }
-/** "Rarely shown" = fewer asks than MIN_COHORT — the same floor every rate uses. */
+/** "Rarely shown" = fewer asks than MIN_COHORT — the same floor every rate uses. The sign-up
+ * figure is an upper bound, so the 2+ and 1 rows can only say "at most"; a bound of 0 is a
+ * real zero. */
 export function decideAt100(i: DecisionInput): DecisionResult {
-  if (i.signUps >= 2) {
+  if (i.signUpsAtMost >= 2) {
     return {
       row: 'two-plus',
-      reading: 'The funnel converts paid display traffic at roughly 1% or better.',
-      next: 'Compute cost per sign-up. Hold on scaling until the day-15+ follow-up reports. Run O3 (Search) at the same cap against the same funnel. Do not scale display until a sign-up shows a trial-to-purchase path at day 15 or later.',
+      reading: `At most ${i.signUpsAtMost} campaign sign-ups: an upper bound (tagged auth successes include returning sign-ins; new accounts are sitewide), so the spec's 2-or-more row may or may not be met. Mike decides.`,
+      next: 'If Mike judges the bound real: compute cost per sign-up, hold on scaling until the day-15+ follow-up reports, and run O3 (Search) at the same cap against the same funnel. Do not scale display on this read.',
     }
   }
-  if (i.signUps === 1) {
-    return { row: 'one', reading: 'Inconclusive at this base.', next: "Hold. Do not scale; carry the funnel reads and that sign-up's day-15+ outcome into the next decision." }
+  if (i.signUpsAtMost === 1) {
+    return {
+      row: 'one',
+      reading: 'At most 1 campaign sign-up (an upper bound: 0 or 1). Inconclusive at this base.',
+      next: "Hold. Do not scale; carry the funnel reads and any sign-up's day-15+ outcome into the next decision.",
+    }
   }
   if (i.asks < MIN_COHORT) {
     return {
@@ -876,13 +933,72 @@ export function decideAt100(i: DecisionInput): DecisionResult {
     next: 'No pre-registered next step. Report to Mike; decide nothing on this read alone.',
   }
 }
-/** Bounded sign-up count without joining anyone: a tagged auth success can be an existing
- * account signing in, and a new account can come from anywhere, so neither alone is a
- * verified campaign sign-up. When the window count is unavailable, the tagged count stands
- * alone (and the report says so). */
-export function signUpsForDecision(taggedAuthSuccess: number, windowNewAccounts: number | null): number {
+/** "At most N campaign sign-ups" — an UPPER bound, never a verified count: a tagged auth
+ * success can be a returning sign-in, and new accounts in the window are sitewide, so each
+ * input over-counts and their minimum is still only an upper bound (see SIGNUP_PROXY_NOTE).
+ * When the window count is unavailable, the tagged count stands alone (a looser bound). */
+export function signUpsAtMost(taggedAuthSuccess: number, windowNewAccounts: number | null): number {
   return windowNewAccounts == null ? taggedAuthSuccess : Math.min(taggedAuthSuccess, windowNewAccounts)
 }
+export function signUpsAtMostLabel(atMost: number, taggedAuthSuccess: number, windowNewAccounts: number | null): string {
+  return `at most ${atMost} campaign sign-up${atMost === 1 ? '' : 's'} (tagged auth successes ${taggedAuthSuccess}; new prod accounts sitewide in the window ${windowNewAccounts ?? 'not read'})`
+}
+
+// ── Day-15/30/60 cohort: accounts created in the flight window, by tier and promo ───────
+/** Raw Firestore COUNTs over users created inside the flight window (scripts/ads-reads/
+ * firebase.ts cohortTierQueries). Sitewide, NOT campaign-attributed. */
+export interface CohortTierCounts {
+  total: number
+  /** access_expires_at in the future, or 'lifetime'. */
+  paid: number
+  /** access_expires_at a past ISO date (explicitly expired — beats the trial window). */
+  accessPast: number
+  /** trial_ends_at a past ISO date. */
+  trialPast: number
+  trialPastAndPaid: number
+  trialPastAndAccessPast: number
+  /** promo_first50_granted_at set. */
+  promoSet: number
+}
+export interface CohortTiers {
+  label: 'sitewide, not campaign-attributed'
+  total: number
+  paid: number
+  trialActive: number
+  expired: number
+  promoSet: number
+  promoUnset: number
+  rates: { paid: GatedRate; trialActive: GatedRate; expired: GatedRate; promoSet: GatedRate }
+  /** false when the counts don't add up (e.g. unparseable field values); report counts only. */
+  consistent: boolean
+}
+/** Mirrors best-sudoku useAccess.tier (admin aside): paid/lifetime > explicitly expired >
+ * trial (future or unset trial_ends_at) > expired. expired = accessPast ∪ (trialPast ∖ paid);
+ * paid and accessPast are disjoint (one field, one value). */
+export function deriveCohortTiers(c: CohortTierCounts): CohortTiers {
+  const expired = c.accessPast + c.trialPast - c.trialPastAndPaid - c.trialPastAndAccessPast
+  const trialActive = c.total - c.paid - expired
+  const promoUnset = c.total - c.promoSet
+  const consistent = [expired, trialActive, promoUnset, c.paid].every((x) => x >= 0) && c.paid + expired <= c.total
+  return {
+    label: 'sitewide, not campaign-attributed',
+    total: c.total,
+    paid: c.paid,
+    trialActive: Math.max(0, trialActive),
+    expired: Math.max(0, expired),
+    promoSet: c.promoSet,
+    promoUnset: Math.max(0, promoUnset),
+    rates: {
+      paid: gateRate(c.paid, c.total),
+      trialActive: gateRate(Math.max(0, trialActive), c.total),
+      expired: gateRate(Math.max(0, expired), c.total),
+      promoSet: gateRate(c.promoSet, c.total),
+    },
+    consistent,
+  }
+}
+/** Stages that read the cohort breakdown. */
+export const COHORT_TIER_STAGES: readonly PostflightStage[] = ['day15', 'day30', 'day60']
 
 // ── Readings log (kept in the store; also the threshold state) ──────────────────────────
 export type ReadingKind = 'daily' | 'threshold' | 'postflight' | 'health'

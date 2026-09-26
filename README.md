@@ -226,9 +226,19 @@ npm run typecheck:scripts
   ads. Pushes go out only on a threshold read, a kill-rule trip, a failed read, or a real
   release-health alert (parent at least MIN_COHORT, outcome window elapsed, child zero).
 - **postflight-read** covers the wrap-up (spend end + 7 days) and the day-15/30/60 and
-  December follow-ups, split promo vs non-promo, with the d31-60 return buckets.
-- `--firebase-sa <service-account.json>` adds read-only Firestore COUNT queries (new
-  accounts and first-50 claims in the flight window, plus `promos/first50` status).
+  December follow-ups, split promo vs non-promo, with the d31-60 return buckets. Day 15/30/60
+  add the flight-window account cohort by access tier and promo marker (sitewide, not
+  campaign-attributed; it needs Firestore composite indexes that don't exist yet, so it
+  reports "tier split unavailable: index missing" until an owner creates them).
+- **Sign-ups are an upper bound** everywhere ("at most N campaign sign-ups" =
+  min(tagged auth successes, new accounts sitewide in the window)): `/auth/success` also fires
+  for returning sign-ins. A pause is never proposed for a campaign that isn't serving (after
+  its end date it reads ENABLED/ENDED); it's reported as ended instead.
+- `--firebase-sa <service-account.json>` adds Firestore COUNT queries (new accounts and
+  first-50 claims in the flight window, `promos/first50` status, the cohort split). The code
+  can only make COUNT queries and one document GET, but the prod key on this machine is not
+  a read-only key (it holds `roles/editor`); pointing this flag at a key with only
+  `roles/datastore.viewer` is an owner step.
 
 ## Docs
 

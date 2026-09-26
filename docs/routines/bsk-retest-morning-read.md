@@ -28,6 +28,9 @@ and add nothing of your own to the rules.** Windows machine; the Bash tool is Gi
   geo, schedule or bidding change while the flight runs. Post-flight recommendations belong
   to the post-flight routine.
 - **Never touch the closed campaigns** 24215315197 and 24234347705.
+- **Sign-ups are an upper bound.** Always "at most N campaign sign-ups" with both inputs as
+  the report prints them (`/auth/success` also fires for returning sign-ins; new accounts are
+  sitewide); never "N sign-ups" or "verified".
 - **No trackers, no PII.** Report sign-ups and promo claims only as window COUNTS. Never
   join rows to individuals by device, timestamp or location. Never cross-check a sign-up
   against an arrival by /auth timing (retired).
@@ -114,8 +117,9 @@ JSON's `notify`, `errors`, `thresholds` and `thresholdRead` fields; never recomp
 - If `notify.push` is `true`, send Mike ONE push notification with the PushNotification tool
   whose text is exactly `notify.text` (it is already short, carries no error detail and no
   secret; do not add anything).
-- The CLI pushes on: a threshold read; a kill-rule trip (including the $100 cap with the
-  campaign still ENABLED); a FAILED read (Google Ads spend or status, the beacon, the
+- The CLI pushes on: a threshold read; a pause proposal (including the $100 cap with the
+  campaign still SERVING; after its end date the campaign reads ENABLED/ENDED, which is
+  reported as "ended, nothing to pause" and never proposed); a FAILED read (Google Ads spend or status, the beacon, the
   threshold state or a store write; money is at stake, so silence is worse than one extra
   ping); and, on the backstop only, a real release-health ALERT. A "watch" never pushes.
 - If `notify.push` is `false`, send NO push. A quiet day produces no push.

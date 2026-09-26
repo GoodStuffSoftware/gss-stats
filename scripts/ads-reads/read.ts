@@ -31,7 +31,15 @@ import {
   readPlanFor,
   releaseHealthGate,
   round2,
-  signUpsForDecision,
+  signUpsAtMost,
+  signUpsAtMostLabel,
+  servingStateOf,
+  canProposePause,
+  noPauseNote,
+  deriveCohortTiers,
+  COHORT_TIER_STAGES,
+  AUTH_SUCCESS_SPLIT_RECOMMENDATION,
+  type CohortTiers,
   spendTotals,
   summarizeReturns,
   summarizeSiteEvents,
@@ -79,7 +87,8 @@ export interface AdsSource {
   placements(campaignId: string, since: string, until: string): Promise<PlacementDayRow[]>
 }
 export interface FirebaseSource {
-  counts(windowStartMs: number, windowEndMs: number): Promise<FirebaseCounts>
+  /** cohortTiersAtMs: also read the day-15/30/60 cohort-by-tier COUNTs as of that instant. */
+  counts(windowStartMs: number, windowEndMs: number, cohortTiersAtMs?: number | null): Promise<FirebaseCounts>
 }
 export interface ReadDeps {
   nowMs: number
@@ -134,7 +143,8 @@ export interface FullRead {
   failedSources: string[]
   placements: { campaignCost: number; approvedCost: number; itemizedCost: number; outsideShare: number | null; offList: { name: string; cost: number }[]; stored: boolean } | null
   kill: KillRuleEvaluation
-  decision: (DecisionResult & { signUps: number; basis: string }) | null
+  /** signUpsAtMost is an UPPER bound ("at most N campaign sign-ups"), with both inputs. */
+  decision: (DecisionResult & { signUpsAtMost: number; taggedAuthSuccess: number; windowNewAccounts: number | null; label: string }) | null
   tagged: {
     summary: TaggedSummary
     funnelRates: Partial<Record<FunnelStepKey, number | null>>
@@ -272,6 +282,10 @@ interface FullReadInput {
   /** Whether to evaluate the $100 decision table regardless of spend (post-flight). */
   forceDecision: boolean
   readAt: string
+  /** Campaign status/serving status, for "is there anything to pause?" (null = unreadable). */
+  campaignState: { status: string | null; servingStatus: string | null } | null
+  /** Day-15/30/60: also read the cohort-by-tier counts as of this instant. */
+  cohortTiersAtMs?: number | null
 }
 async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullRead; siteRows: Attempt<HourPathCount[]>; returns: Attempt<ReturnSummary> }> {
   const { plan, campaign } = i
@@ -294,7 +308,7 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
   const returnRaw = beacon ? await attempt('beacon returns', () => beacon.returns(campaign)) : unavailable<ReturnRow[]>('beacon returns', deps.beaconInitError)
   const returnSites = beacon ? await attempt('beacon return sites', () => beacon.returnSites(WEB_GO_LIVE_UTC_MS)) : unavailable<ReturnSiteStat[]>('beacon return sites', deps.beaconInitError)
   const windowEnd = Math.min(deps.nowMs, flightEndExclusiveMs(campaign))
-  const fb = deps.firebase ? await attempt('firebase counts', () => deps.firebase!.counts(attributionStartMs(campaign), windowEnd)) : null
+  const fb = deps.firebase ? await attempt('firebase counts', () => deps.firebase!.counts(attributionStartMs(campaign), windowEnd, i.cohortTiersAtMs ?? null)) : null
 
   for (const a of [placementRows, i.tagged, siteRows, returnRaw, returnSites]) if (!a.ok) errors.push(a.error)
   if (fb && !fb.ok) errors.push(fb.error)
@@ -344,6 +358,7 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
   const kill = evaluateKillRules({
     plan,
     cumulativeSpend,
+    campaignState: i.campaignState,
     delivery: i.stored && i.spendThroughEt ? { impressions: totals.impressions, clicks: totals.clicks } : null,
     placements: split ? { campaignCost: cumulativeSpend, approvedCost: split.approvedCost, itemizedCost: split.itemizedCost } : null,
     beacon: tagged ? { asks: tagged.summary.asks.total, taggedArrivals: tagged.summary.taggedArrivals } : null,
@@ -352,14 +367,13 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
   let decision: FullRead['decision'] = null
   if (tagged && (i.forceDecision || cumulativeSpend >= plan.hardCap)) {
     const windowAccounts = fb && fb.ok ? fb.value.newAccountsInWindow : null
-    const signUps = signUpsForDecision(tagged.summary.authSuccess, windowAccounts)
+    const atMost = signUpsAtMost(tagged.summary.authSuccess, windowAccounts)
     decision = {
-      ...decideAt100({ signUps, asks: tagged.summary.asks.total, accepts: tagged.summary.accepts.total }),
-      signUps,
-      basis:
-        windowAccounts == null
-          ? `${tagged.summary.authSuccess} tagged auth successes (new prod accounts in the window not read)`
-          : `min(${tagged.summary.authSuccess} tagged auth successes, ${windowAccounts} new prod accounts in the flight window)`,
+      ...decideAt100({ signUpsAtMost: atMost, asks: tagged.summary.asks.total, accepts: tagged.summary.accepts.total }),
+      signUpsAtMost: atMost,
+      taggedAuthSuccess: tagged.summary.authSuccess,
+      windowNewAccounts: windowAccounts,
+      label: signUpsAtMostLabel(atMost, tagged.summary.authSuccess, windowAccounts),
     }
   }
 
@@ -367,7 +381,9 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
   const failedSources: string[] = []
   if (!placementRows.ok && i.spendThroughEt) failedSources.push('Google Ads placements')
   if (!i.tagged.ok || !siteRows.ok || !returnRaw.ok || !returnSites.ok) failedSources.push('beacon')
-  if (fb && (!fb.ok || fb.value.errors.length)) failedSources.push('Firestore counts')
+  // A missing composite index for the day-15/30/60 tier split is a known, graceful degrade
+  // ("tier split unavailable: index missing"), not a failed read.
+  if (fb && (!fb.ok || fb.value.errors.some((e) => !/composite index/.test(e)))) failedSources.push('Firestore counts')
   return {
     read: { thresholds: i.thresholds, spendThroughEt: i.spendThroughEt, cumulativeSpend, complete, errors, failedSources, placements: placementView, kill, decision, tagged, site, returns, play, firebase: fb && fb.ok ? fb.value : null },
     siteRows,
@@ -404,7 +420,7 @@ function fullReadCounts(r: FullRead): Record<string, number | null> {
     newAccountsInWindow: r.firebase?.newAccountsInWindow ?? null,
     promoClaimsInWindow: r.firebase?.promoClaimsInWindow ?? null,
     first50Claimed: r.firebase?.first50?.claimed ?? null,
-    signUpsForDecision: r.decision?.signUps ?? null,
+    signUpsAtMost: r.decision?.signUpsAtMost ?? null,
   }
 }
 
@@ -493,9 +509,10 @@ export function morningPushText(r: MorningResult): string | null {
     const bits = [`BSK retest $${Math.max(...t.thresholds)} read: ${money(t.cumulativeSpend)} spent`]
     const tc = t.tagged?.summary
     if (tc) bits.push(`${tc.taggedArrivals} tagged arrivals, ${tc.asks.total} asks, ${tc.authSuccess} auth successes`)
-    if (t.kill.tripped.length) bits.push(`PROPOSE PAUSE (${t.kill.tripped.join(', ')})`)
+    if (t.kill.tripped.length && t.kill.proposal === 'PROPOSE PAUSE') bits.push(`PROPOSE PAUSE (${t.kill.tripped.join(', ')})`)
+    else if (t.kill.tripped.length) bits.push(`rules tripped (${t.kill.tripped.join(', ')}) but campaign ${t.kill.servingState}, no pause proposed`)
     else bits.push(t.complete ? 'no kill rule tripped, continue' : 'read incomplete, will retry')
-    if (t.decision) bits.push(`decision row: ${t.decision.row}`)
+    if (t.decision) bits.push(`at most ${t.decision.signUpsAtMost} campaign sign-ups (upper bound), row ${t.decision.row}`)
     return bits.join('; ') + '.' + failed + missed
   }
   if (r.hardCapDaily?.status === 'trip') {
@@ -581,33 +598,46 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
   let thresholdRead: FullRead | null = null
   let cached: { siteRows?: Attempt<HourPathCount[]>; returns?: Attempt<ReturnSummary> } = {}
   if (crossedNow.length) {
-    const fr = await fullRead(deps, { plan, campaign, thresholds: crossedNow, spendThroughEt: spend.throughEt, stored, tagged: taggedRows, forceDecision: false, readAt })
+    const fr = await fullRead(deps, {
+      plan,
+      campaign,
+      thresholds: crossedNow,
+      spendThroughEt: spend.throughEt,
+      stored,
+      tagged: taggedRows,
+      forceDecision: false,
+      readAt,
+      campaignState: status.ok ? status.value : null,
+    })
     thresholdRead = fr.read
     cached = { siteRows: fr.siteRows, returns: fr.returns }
     for (const e of fr.read.errors) if (!errors.includes(e)) errors.push(e)
   }
 
-  // Kill rule 4 on EVERY read: at/over the cap with the campaign still enabled. A PAUSED
-  // campaign at the cap is the intended state, never a trip.
+  // Kill rule 4 on EVERY read: at/over the cap with the campaign still SERVING. A paused or
+  // ended campaign (after the end date status stays ENABLED while serving_status is ENDED) at
+  // the cap is the intended state: reported as such, never a pause proposal.
   let hardCapDaily: RuleResult | null = null
   if (spend.ok && !opts.healthOnly) {
-    const enabled = status.ok ? status.value.status === 'ENABLED' : null
+    const state = status.ok ? servingStateOf(status.value) : 'unknown'
+    const statusText = status.ok ? `${status.value.status}/${status.value.servingStatus}` : 'unreadable'
     const over = cumulative >= plan.hardCap
     hardCapDaily = {
       id: 'hard-cap',
       label: `cumulative spend at ${money(plan.hardCap)}`,
       limit: plan.hardCap,
       value: cumulative,
-      status: over ? (enabled === false ? 'clear' : enabled === null ? 'no-data' : 'trip') : 'not-armed',
-      detail: over
-        ? enabled === false
-          ? `${money(cumulative)} at the cap and the campaign reads ${status.ok ? status.value.status : '?'} (intended state)`
-          : enabled === null
-            ? `${money(cumulative)} at the cap; campaign status unreadable`
-            : `${money(cumulative)} at or over the cap and the campaign still reads ENABLED`
-        : `${money(cumulative)} of ${money(plan.hardCap)}`,
+      status: !over ? 'not-armed' : !status.ok ? 'no-data' : state === 'serving' ? 'trip' : 'clear',
+      detail: !over
+        ? `${money(cumulative)} of ${money(plan.hardCap)}`
+        : !status.ok
+          ? `${money(cumulative)} at the cap; campaign status unreadable`
+          : state === 'serving'
+            ? `${money(cumulative)} at or over the cap and the campaign is still serving (${statusText})`
+            : `${money(cumulative)} at the cap; campaign ${state === 'ended' ? 'ended' : state === 'paused' ? 'paused' : 'not serving'} (${statusText}), nothing to pause`,
     }
   }
+  const campaignServing = status.ok ? servingStateOf(status.value) : 'unknown'
 
   let play = thresholdRead?.play ?? null
   if (!play) {
@@ -681,9 +711,15 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
       proposal: thresholdRead.kill.proposal,
       decision: thresholdRead.decision,
       counts: fullReadCounts(thresholdRead),
-      notes: thresholdRead.complete ? [] : [`incomplete read, thresholds not consumed: ${thresholdRead.errors.join('; ')}`],
+      notes: [
+        ...(thresholdRead.kill.tripped.length && thresholdRead.kill.proposal === null ? [noPauseNote(thresholdRead.kill.servingState, status.ok ? status.value : null)] : []),
+        ...(thresholdRead.complete ? [] : [`incomplete read, thresholds not consumed: ${thresholdRead.errors.join('; ')}`]),
+      ],
     })
     if (!thresholdRead.complete) notes.push('The threshold read was incomplete, so it does not consume the threshold: the next run retries it.')
+  }
+  if (hardCapDaily && hardCapDaily.status === 'clear' && records[0]?.kind === 'daily' && !canProposePause(campaignServing)) {
+    records[0].notes.unshift(noPauseNote(campaignServing, status.ok ? status.value : null))
   }
   if (opts.healthOnly && health.evaluated) {
     records.push({
@@ -753,7 +789,8 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
   // Push on: a threshold read, a kill-rule trip, a failed read (money is at stake, silence is
   // worse than one extra ping), or — backstop only — a real release-health ALERT (parent at or
   // above MIN_COHORT, outcome window elapsed, child zero). A "watch" never pushes.
-  const killTrip = (thresholdRead?.kill.tripped.length ?? 0) > 0 || hardCapDaily?.status === 'trip'
+  // A pause proposal, not a bare rule trip: a tripped rule on an ended campaign proposes nothing.
+  const killTrip = thresholdRead?.kill.proposal === 'PROPOSE PAUSE' || hardCapDaily?.status === 'trip'
   const healthAlert = opts.healthOnly && health.alerts > 0
   const reasons: string[] = []
   if (thresholdRead) reasons.push(`threshold read at $${Math.max(...thresholdRead.thresholds)}`)
@@ -794,6 +831,13 @@ export interface PostflightResult {
     accounts: { newInWindow: number | null; promoClaimsInWindow: number | null; nonPromoInWindow: number | null } | null
   }
   postFlightSpend: RuleResult | null
+  /** Day-15/30/60 only: accounts created in the flight window by access tier and promo
+   * marker — Firestore COUNTs, SITEWIDE, not campaign-attributed. null = not read. */
+  cohort: CohortTiers | null
+  /** Why the cohort is missing on a stage that wants it (e.g. a composite index). */
+  cohortNote: string | null
+  /** Post-flight recommendations (proposals only; beacon changes wait for the freeze to end). */
+  recommendations: string[]
   store: StoreSection
   /** Short, secret-free names of the reads that failed. */
   failures: string[]
@@ -836,6 +880,9 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
     read: null,
     promoSplit: { beacon: null, accounts: null },
     postFlightSpend: null,
+    cohort: null,
+    cohortNote: null,
+    recommendations: [],
     failures: [],
     store: {
       kind: deps.store.kind,
@@ -862,7 +909,19 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
 
   const beacon = deps.beacon
   const taggedRows = beacon ? await attempt('beacon tagged', () => beacon.tagged(campaign)) : unavailable<TaggedRow[]>('beacon tagged', deps.beaconInitError)
-  const { read } = await fullRead(deps, { plan, campaign, thresholds: [], spendThroughEt: spend.throughEt, stored, tagged: taggedRows, forceDecision: true, readAt })
+  const wantsCohort = COHORT_TIER_STAGES.includes(opts.stage)
+  const { read } = await fullRead(deps, {
+    plan,
+    campaign,
+    thresholds: [],
+    spendThroughEt: spend.throughEt,
+    stored,
+    tagged: taggedRows,
+    forceDecision: true,
+    readAt,
+    campaignState: status.ok ? status.value : null,
+    cohortTiersAtMs: wantsCohort ? deps.nowMs : null,
+  })
   for (const e of read.errors) if (!errors.includes(e)) errors.push(e)
   base.read = read
 
@@ -880,19 +939,38 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
     const p = read.firebase.promoClaimsInWindow
     base.promoSplit.accounts = { newInWindow: n, promoClaimsInWindow: p, nonPromoInWindow: n != null && p != null ? Math.max(0, n - p) : null }
   }
+  if (wantsCohort) {
+    if (read.firebase?.cohortTiers) base.cohort = deriveCohortTiers(read.firebase.cohortTiers)
+    else {
+      // Degrade gracefully: the plain window count (Accounts line) still stands.
+      const err = read.firebase?.errors.find((e) => e.startsWith('cohort ')) ?? null
+      base.cohortNote = !deps.firebase
+        ? 'tier split not read (no --firebase-sa)'
+        : err && /composite index/.test(err)
+          ? 'tier split unavailable: index missing'
+          : `tier split unavailable${err ? `: ${err}` : ''}`
+    }
+  }
+  base.recommendations.push(AUTH_SUCCESS_SPLIT_RECOMMENDATION)
 
   // Post-flight kill check: any spend after the flight's last day with the campaign enabled.
   if (stored && spend.ok) {
     const after = Object.entries(stored.days).filter(([d, v]) => d > campaign.flightEnd && v.costMicros > 0)
     const afterCost = round2(after.reduce((a, [, v]) => a + microsToDollars(v.costMicros), 0))
-    const enabled = status.ok ? status.value.status === 'ENABLED' : null
+    // Only a campaign that is still serving (or unreadable) gets a pause proposal; after the
+    // end date it reads ENABLED/ENDED and there is nothing to pause.
+    const state = status.ok ? servingStateOf(status.value) : 'unknown'
+    const statusText = status.ok ? `${status.value.status}/${status.value.servingStatus}` : 'unreadable'
     base.postFlightSpend = {
       id: 'hard-cap',
       label: 'no spend after the flight',
       limit: 0,
       value: afterCost,
-      status: afterCost > 0 && enabled !== false ? 'trip' : 'clear',
-      detail: afterCost > 0 ? `${money(afterCost)} spent after ${campaign.flightEnd}; campaign reads ${status.ok ? status.value.status : 'unreadable'}` : `no spend after ${campaign.flightEnd}`,
+      status: afterCost > 0 && canProposePause(state) ? 'trip' : 'clear',
+      detail:
+        afterCost > 0
+          ? `${money(afterCost)} spent after ${campaign.flightEnd}; campaign ${canProposePause(state) ? `reads ${statusText}` : `${state === 'ended' ? 'ended' : state === 'paused' ? 'paused' : 'not serving'} (${statusText}), nothing to pause`}`
+          : `no spend after ${campaign.flightEnd}`,
     }
   }
 
@@ -919,7 +997,17 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
       nonPromoOutcomesStillPlaying: base.promoSplit.beacon?.nonPromo['still-playing'] ?? null,
       nonPromoAccountsInWindow: base.promoSplit.accounts?.nonPromoInWindow ?? null,
     },
-    notes: read.complete ? [] : [`incomplete: ${read.errors.join('; ')}`],
+    notes: [...(read.complete ? [] : [`incomplete: ${read.errors.join('; ')}`]), ...base.recommendations],
+  }
+  if (base.cohort) {
+    Object.assign(rec.counts, {
+      cohortTotal: base.cohort.total,
+      cohortPaid: base.cohort.paid,
+      cohortTrialActive: base.cohort.trialActive,
+      cohortExpired: base.cohort.expired,
+      cohortPromoSet: base.cohort.promoSet,
+      cohortPromoUnset: base.cohort.promoUnset,
+    })
   }
   const w = sync.ok ? await appendReadings(deps, [rec]) : { written: false, error: 'readings not written: campaign sync failed' }
   if (w.error) {
@@ -936,7 +1024,7 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
     push: true,
     busCopy: true,
     reason: `post-flight ${opts.stage} read (a scheduled spec read)${trip ? ' with spend after the flight' : ''}${base.failures.length ? `; failed read: ${base.failures.join(', ')}` : ''}`,
-    text: `BSK retest ${opts.stage} read: ${money(spend.cumulative.cost)} total, ${read.tagged?.summary.taggedArrivals ?? '?'} tagged arrivals, ${read.decision ? `sign-ups ${read.decision.signUps}, row ${read.decision.row}` : 'no decision'}${trip ? `; PROPOSE PAUSE (spend after ${campaign.flightEnd})` : ''}.${failed}`,
+    text: `BSK retest ${opts.stage} read: ${money(spend.cumulative.cost)} total, ${read.tagged?.summary.taggedArrivals ?? '?'} tagged arrivals, ${read.decision ? `at most ${read.decision.signUpsAtMost} campaign sign-ups (upper bound), row ${read.decision.row}` : 'no decision'}${trip ? `; PROPOSE PAUSE (spend after ${campaign.flightEnd})` : ''}.${failed}`,
   }
   base.notes.push(INSTALL_OUTCOME_GAP_NOTE)
   return base

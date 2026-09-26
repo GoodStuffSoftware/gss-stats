@@ -8,6 +8,7 @@ import { fixtureDeps, type Fixture } from './cli'
 import { runMorningRead, runPostflightRead, type MorningOptions } from './read'
 import { formatMorningReport, formatPostflightReport, withJson } from './report'
 import { MIN_COHORT } from '../../src/lib/popupEvents'
+import { AUTH_SUCCESS_SPLIT_RECOMMENDATION } from '../../src/lib/adsRules'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const base = (): Fixture => JSON.parse(fs.readFileSync(path.join(here, 'fixtures', 'threshold-50.json'), 'utf8'))
@@ -141,15 +142,48 @@ describe('morning-read: quiet days, the hard cap and release health', () => {
     expect(paused.hardCapDaily!.status).toBe('clear')
     expect(paused.notify.push).toBe(false)
   })
-  it('reaching $100 runs the decision table with bounded sign-ups', async () => {
+  it('after the end date (ENABLED/ENDED) the cap reads "ended": no trip, no pause proposal, no push', async () => {
+    const fx = base()
+    ads(fx).daily['2026-09-29'].costMicros = 70_000_000
+    fx.store!.consumed = [25, 50, 75, 100]
+    ads(fx).status.servingStatus = 'ENDED'
+    const deps = fixtureDeps(fx, false)
+    const r = await runMorningRead(deps, opts)
+    expect(r.hardCapDaily!.status).toBe('clear')
+    expect(r.hardCapDaily!.detail).toMatch(/campaign ended \(ENABLED\/ENDED\), nothing to pause/)
+    expect(r.notify.push).toBe(false)
+    expect(deps.store.written.readings[0].proposal).toBeNull()
+    expect(deps.store.written.readings[0].notes[0]).toBe('no pause proposed: campaign ended (ENABLED/ENDED)')
+  })
+  it('a threshold read on an ended campaign reports trips but proposes no pause', async () => {
+    const fx = base()
+    ads(fx).daily['2026-09-29'].costMicros = 70_000_000
+    fx.store!.consumed = [25, 50, 75]
+    ads(fx).status.servingStatus = 'ENDED'
+    const deps = fixtureDeps(fx, false)
+    const r = await runMorningRead(deps, opts)
+    expect(r.thresholdRead!.kill.tripped).toContain('hard-cap')
+    expect(r.thresholdRead!.kill.proposal).toBeNull()
+    expect(r.notify.text).not.toMatch(/PROPOSE PAUSE/)
+    expect(r.notify.text).toMatch(/campaign ended, no pause proposed/)
+    expect(formatMorningReport(r)).toMatch(/Proposal: none: campaign ended, nothing to pause/)
+    const rec = deps.store.written.readings.find((x) => x.kind === 'threshold')!
+    expect(rec.proposal).toBeNull()
+    expect(rec.notes[0]).toMatch(/^no pause proposed: campaign ended/)
+  })
+  it('reaching $100 runs the decision table with "at most N" sign-ups and both inputs', async () => {
     const fx = base()
     ads(fx).daily['2026-09-29'].costMicros = 70_000_000
     fx.store!.consumed = [25, 50, 75]
     const r = await runMorningRead(fixtureDeps(fx, false), opts)
     expect(r.thresholds.crossedNow).toEqual([100])
     expect(r.thresholdRead!.kill.tripped).toContain('hard-cap')
-    expect(r.thresholdRead!.decision).toMatchObject({ signUps: 1, row: 'one' })
-    expect(r.thresholdRead!.decision!.basis).toMatch(/min\(1 tagged auth successes, 1 new prod accounts/)
+    expect(r.thresholdRead!.kill.proposal).toBe('PROPOSE PAUSE')
+    expect(r.thresholdRead!.decision).toMatchObject({ signUpsAtMost: 1, taggedAuthSuccess: 1, windowNewAccounts: 1, row: 'one' })
+    expect(r.thresholdRead!.decision!.label).toBe('at most 1 campaign sign-up (tagged auth successes 1; new prod accounts sitewide in the window 1)')
+    expect(r.notify.text).toMatch(/at most 1 campaign sign-ups \(upper bound\)/)
+    expect(formatMorningReport(r)).toMatch(/at most 1 campaign sign-up \(tagged auth successes 1; new prod accounts sitewide in the window 1\)/)
+    expect(r.notify.text).not.toMatch(/verified/i)
   })
   it('release health is never evaluated at 08:00 ET', async () => {
     const r = await runMorningRead(fixtureDeps(base(), true), opts)
@@ -238,6 +272,76 @@ describe('postflight-read', () => {
     const r = await runPostflightRead(fixtureDeps(early, false), { campaignId: '24279250691', stage: 'day15', force: false })
     expect(r.due).toBe(false)
     expect(r.notify).toMatchObject({ push: true, text: 'BSK retest day15 read FAILED: Google Ads spend, campaign status unreadable. See the routine output.' })
+  })
+  it('every post-flight read carries the /auth/success new|existing recommendation and "at most N" sign-ups', async () => {
+    const fx = base()
+    fx.now = '2026-10-09T13:00:00Z'
+    const deps = fixtureDeps(fx, false)
+    const r = await runPostflightRead(deps, { campaignId: '24279250691', stage: 'wrapup', force: false })
+    expect(r.recommendations).toEqual([AUTH_SUCCESS_SPLIT_RECOMMENDATION])
+    const text = formatPostflightReport(r)
+    expect(text).toContain('add /auth/success/<provider>/new|existing via additionalUserInfo.isNewUser (frozen until 10-02)')
+    expect(text).toMatch(/at most 1 campaign sign-up \(tagged auth successes 1; new prod accounts sitewide in the window 1\)/)
+    expect(r.notify.text).toMatch(/at most 1 campaign sign-ups \(upper bound\)/)
+    expect(deps.store.written.readings[0].notes).toContain(AUTH_SUCCESS_SPLIT_RECOMMENDATION)
+    expect(r.cohort).toBeNull() // the wrap-up does not read the tier split
+    expect(r.cohortNote).toBeNull()
+  })
+  it('after-flight spend on an ENDED campaign is reported, never a pause proposal; a still-serving one is', async () => {
+    const fx = base()
+    fx.now = '2026-10-11T13:00:00Z'
+    ads(fx).daily['2026-10-03'] = { costMicros: 2_000_000, impressions: 100, clicks: 1 }
+    ads(fx).status.servingStatus = 'ENDED'
+    const ended = await runPostflightRead(fixtureDeps(fx, false), { campaignId: '24279250691', stage: 'wrapup', force: false })
+    expect(ended.postFlightSpend).toMatchObject({ status: 'clear' })
+    expect(ended.postFlightSpend!.detail).toMatch(/campaign ended \(ENABLED\/ENDED\), nothing to pause/)
+    expect(ended.notify.text).not.toMatch(/PROPOSE PAUSE/)
+    ads(fx).status.servingStatus = 'SERVING'
+    const serving = await runPostflightRead(fixtureDeps(fx, false), { campaignId: '24279250691', stage: 'wrapup', force: false })
+    expect(serving.postFlightSpend).toMatchObject({ status: 'trip' })
+    expect(serving.notify.text).toMatch(/PROPOSE PAUSE \(spend after 2026-10-02\)/)
+  })
+})
+
+describe('postflight-read: day-15/30/60 cohort by tier (Firestore COUNTs, sitewide)', () => {
+  const tiers = { total: 6, paid: 1, accessPast: 0, trialPast: 3, trialPastAndPaid: 0, trialPastAndAccessPast: 0, promoSet: 2 }
+  it('day15 reads the tier split, gates rates by MIN_COHORT, labels it sitewide, and stores the counts', async () => {
+    const fx = base()
+    fx.now = '2026-10-17T13:00:00Z'
+    fx.firebase = { ...(fx.firebase as any), cohortTiers: tiers }
+    const deps = fixtureDeps(fx, false)
+    const r = await runPostflightRead(deps, { campaignId: '24279250691', stage: 'day15', force: false })
+    expect(r.due).toBe(true)
+    expect(r.cohort).toMatchObject({ label: 'sitewide, not campaign-attributed', total: 6, paid: 1, expired: 3, trialActive: 2, promoSet: 2, promoUnset: 4, consistent: true })
+    expect(r.cohort!.rates.paid.value).toBeCloseTo(1 / 6)
+    expect(formatPostflightReport(r)).toMatch(/Cohort \(accounts created in the flight window; sitewide, not campaign-attributed\): 6 total; paid 16\.7% \(1\/6\)/)
+    expect(deps.store.written.readings[0].counts).toMatchObject({ cohortTotal: 6, cohortPaid: 1, cohortExpired: 3, cohortTrialActive: 2, cohortPromoSet: 2, cohortPromoUnset: 4 })
+  })
+  it('a cohort under MIN_COHORT shows counts, not percentages', async () => {
+    const fx = base()
+    fx.now = '2026-11-01T13:00:00Z'
+    fx.firebase = { ...(fx.firebase as any), cohortTiers: { ...tiers, total: 3, trialPast: 1, promoSet: 1 } }
+    const r = await runPostflightRead(fixtureDeps(fx, true), { campaignId: '24279250691', stage: 'day30', force: false })
+    expect(formatPostflightReport(r)).toMatch(/paid too few \(1\/3\)/)
+  })
+  it('a missing composite index degrades to "tier split unavailable: index missing" and keeps the plain window count', async () => {
+    const fx = base()
+    fx.now = '2026-12-01T14:00:00Z'
+    fx.firebase = { ...(fx.firebase as any), cohortTiers: null, errors: ['cohort paid: needs a Firestore composite index (not created; owner step)'] }
+    const r = await runPostflightRead(fixtureDeps(fx, true), { campaignId: '24279250691', stage: 'day60', force: false })
+    expect(r.cohort).toBeNull()
+    expect(r.cohortNote).toBe('tier split unavailable: index missing')
+    expect(r.failures).toEqual([]) // a known degrade, not a failed read: no "Read problems" push text
+    expect(r.notify.text).not.toMatch(/Read problems/)
+    expect(formatPostflightReport(r)).toMatch(/Cohort by tier: tier split unavailable: index missing \(plain window count: 1 new accounts, sitewide\)/)
+  })
+  it('the wrap-up and december stages never ask for the tier split', async () => {
+    const fx = base()
+    fx.now = '2026-12-03T14:00:00Z'
+    fx.firebase = { ...(fx.firebase as any), cohortTiers: tiers }
+    const r = await runPostflightRead(fixtureDeps(fx, true), { campaignId: '24279250691', stage: 'december', force: false })
+    expect(r.cohort).toBeNull()
+    expect(r.read!.firebase!.cohortTiers).toBeUndefined()
   })
 })
 

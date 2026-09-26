@@ -66,8 +66,20 @@ no push, no bus copy. (Only rerun with `--force` if Mike asks.)
 What it does: re-reads the flight's spend from the Google Ads API and stores it, then the
 full read (tagged funnel, site-wide outcome beacons, `/return/<uc>/` buckets d0 through
 d31-60 on web and app, the Play first-seen line, Firestore window counts), re-runs the $100
-decision table with bounded sign-ups, splits promo vs non-promo, checks for any spend after
-the flight, and appends one post-flight record.
+decision table, splits promo vs non-promo, checks for any spend after the flight, and appends
+one post-flight record. On day15/day30/day60 it also counts the accounts created in the
+flight window by access tier (paid / trial active / expired) and promo marker, sitewide and
+not campaign-attributed; until Firestore has the composite indexes it needs, that line reads
+"tier split unavailable: index missing" next to the plain window count, which is expected.
+
+Sign-ups are always "at most N campaign sign-ups": an upper bound, never a verified count
+(`/auth/success` also fires for returning sign-ins, and the account count is sitewide). Relay
+it with that wording and both inputs, never as "N sign-ups". The report also carries the
+recommendation to add `/auth/success/<provider>/new|existing` after the beacon freeze; relay
+it as a proposal.
+
+`--firebase-sa` is a plain path. The prod key it points at today is not read-only; if the
+lead gives you a path to a key with only `roles/datastore.viewer`, use that instead.
 
 ## Step 2: push and bus copy
 
@@ -84,8 +96,10 @@ its JSON block at all, send ONE push yourself: `BSK retest post-flight <stage> d
   `includeEphemeral: true`, subject `BSK retest post-flight <stage> <ET date>`, body = the
   human report (everything above `----- JSON -----`).
 
-If the report shows `After-flight spend: [trip]`, the campaign is still spending after
-2026-10-02: that line and its PROPOSE PAUSE lead the push text already.
+If the report shows `After-flight spend: [trip]`, the campaign is still serving and spending
+after 2026-10-02: that line and its PROPOSE PAUSE lead the push text already. A campaign
+that reads ENABLED/ENDED has ended on its own; the report says "nothing to pause" and you
+propose nothing.
 
 ## Step 3: your output
 

@@ -11,7 +11,72 @@ import { buildHeaders, createAdsClient, fetchDailySpend, fetchPlacementDaily, se
 import { BWS_KEYS, pickAdsCredentials } from './secrets'
 import type { ReadingRecord } from '../../src/lib/adsRules'
 
+import { cohortTierQueries, countWhereBody, fencedFetch, readFirebaseCounts } from './firebase'
+import { generateKeyPairSync } from 'node:crypto'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+
 const retest = campaignById('24279250691')!
+
+describe('Firestore reads: fenced, COUNT-only, degrade on a missing index', () => {
+  afterEach(() => clearRegisteredSecrets())
+  const base = 'https://firestore.googleapis.com/v1/projects/p/databases/(default)/documents'
+  it('the fence allows only the token exchange, GET promos/first50 and POST :runAggregationQuery', async () => {
+    const f = fencedFetch(async () => ({ ok: true, status: 200, text: async () => '{}' }), base)
+    await expect(f('https://oauth2.googleapis.com/token', { method: 'POST', headers: {} })).resolves.toBeTruthy()
+    await expect(f(`${base}/promos/first50`, { method: 'GET', headers: {} })).resolves.toBeTruthy()
+    await expect(f(`${base}:runAggregationQuery`, { method: 'POST', headers: {} })).resolves.toBeTruthy()
+    for (const [url, method] of [
+      [`${base}:commit`, 'POST'],
+      [`${base}:batchWrite`, 'POST'],
+      [`${base}/promos/first50`, 'PATCH'],
+      [`${base}/users/abc`, 'GET'],
+      [`${base}:runQuery`, 'POST'],
+      [`${base}/users/abc`, 'DELETE'],
+    ]) {
+      expect(() => f(url, { method, headers: {} })).toThrow(/refused/)
+    }
+  })
+  it('every cohort query is a COUNT over users created in the window; lifetime counts as paid', () => {
+    const qs = cohortTierQueries('2026-09-26T16:00:00.000Z', '2026-10-03T04:00:00.000Z', '2026-10-17T13:00:00.000Z')
+    expect(qs.map(([k]) => k)).toEqual(['total', 'paid', 'accessPast', 'trialPast', 'trialPastAndPaid', 'trialPastAndAccessPast', 'promoSet'])
+    for (const [, filters] of qs) {
+      const body = countWhereBody(filters) as any
+      expect(body.structuredAggregationQuery.aggregations).toEqual([{ alias: 'n', count: {} }])
+      expect(JSON.stringify(body)).toContain('"fieldPath":"createdAt"')
+    }
+    expect('lifetime' > '2026-10-17T13:00:00.000Z').toBe(true) // the 'paid' GREATER_THAN includes the sentinel
+  })
+  it('a missing composite index yields cohortTiers null and a readable reason; plain counts still come back', async () => {
+    const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } })
+    const sa = path.join(os.tmpdir(), `gss-test-sa-${process.pid}.json`)
+    fs.writeFileSync(sa, JSON.stringify({ project_id: 'p', client_email: 'x@p.iam.gserviceaccount.com', private_key: privateKey }))
+    const seen: string[] = []
+    try {
+      const out = await readFirebaseCounts(sa, Date.parse('2026-09-26T16:00:00Z'), Date.parse('2026-10-03T04:00:00Z'), {
+        cohortTiersAtMs: Date.parse('2026-10-17T13:00:00Z'),
+        fetchImpl: async (url, init) => {
+          seen.push(`${init.method} ${url.replace(base, '<docs>')}`)
+          if (url.includes('oauth2')) return { ok: true, status: 200, text: async () => JSON.stringify({ access_token: 'ya29.test-token' }) }
+          if (url.endsWith('/promos/first50')) return { ok: true, status: 200, text: async () => JSON.stringify({ fields: { cap: { integerValue: '50' }, claimed: { integerValue: '3' }, closed: { booleanValue: false } } }) }
+          const filters = JSON.parse(init.body!).structuredAggregationQuery.structuredQuery.where
+          const multiField = filters.compositeFilter && new Set(filters.compositeFilter.filters.map((x: any) => x.fieldFilter.field.fieldPath)).size > 1
+          if (multiField) return { ok: false, status: 400, text: async () => JSON.stringify([{ error: { status: 'FAILED_PRECONDITION', message: 'The query requires an index. You can create it here: https://console.firebase.google.com/...' } }]) }
+          return { ok: true, status: 200, text: async () => JSON.stringify([{ result: { aggregateFields: { n: { integerValue: '4' } } } }]) }
+        },
+      })
+      expect(out.newAccountsInWindow).toBe(4)
+      expect(out.cohortTiers).toBeNull()
+      expect(out.errors.join(' ')).toMatch(/cohort paid: needs a Firestore composite index \(not created; owner step\)/)
+      expect(out.errors.join(' ')).not.toMatch(/console\.firebase/)
+      expect(out.first50).toEqual({ cap: 50, claimed: 3, closed: false })
+      expect(seen.every((s) => /^POST https:\/\/oauth2|^POST <docs>:runAggregationQuery$|^GET <docs>\/promos\/first50$/.test(s))).toBe(true)
+    } finally {
+      fs.rmSync(sa, { force: true })
+    }
+  })
+})
 
 describe('inlineBinds / sqlLiteral', () => {
   it('escapes quotes, keeps numbers, renders NULL, refuses other types', () => {
