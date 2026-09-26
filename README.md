@@ -281,8 +281,9 @@ the backfill (`--full`), `npm run ads:sync`, and the **gss-stats-sync** Cloudfla
    **newest first**: the last 3 days whole, then any older gap from its first missing day up to
    them (after-flight days in between come along, so after-flight spend shows up). Each range
    is checked and written on its own, so a bad old day never holds back newer ones. The
-   restatement window is re-checked at most every 6 hours per campaign, and only a pull of all
-   3 days counts as a re-check. A day counts as **closed** once it was pulled at or after 03:00
+   restatement window is re-checked at most every 6 hours per campaign by the Worker and
+   `ads:sync`, and on **every** morning, backstop and post-flight read (a read never decides on
+   a yesterday pulled hours earlier); only a pull of all 3 days counts as a re-check. A day counts as **closed** once it was pulled at or after 03:00
    ET the next day (Google still adds late data just after midnight). A closed campaign is
    covered through its flight end and then costs no API call;
 3. stores a day the API returns nothing for as zero only when Google's **range total** (one

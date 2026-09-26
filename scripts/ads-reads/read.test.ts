@@ -9,6 +9,7 @@ import { runMorningRead, runPostflightRead, type MorningOptions } from './read'
 import { formatMorningReport, formatPostflightReport, withJson } from './report'
 import { MIN_COHORT } from '../../src/lib/popupEvents'
 import { AUTH_SUCCESS_SPLIT_RECOMMENDATION } from '../../src/lib/adsRules'
+import { syncAdsData } from '../../src/lib/adsSync'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const base = (): Fixture => JSON.parse(fs.readFileSync(path.join(here, 'fixtures', 'threshold-50.json'), 'utf8'))
@@ -560,18 +561,51 @@ describe('same-day reruns: one reading per entry, no repeated push (owner, 2026-
     expect(again.dedup.skipped.map((s) => s.entryKind)).toEqual(['postflight-wrapup'])
     expect(deps.store.written.readings).toHaveLength(1)
   })
-  it('the morning read syncs first through the shared sync: a second read an hour later re-pulls no closed day (re-checked an hour ago), reads only today, and changes nothing', async () => {
+  it('the morning read syncs first through the shared sync: a second read an hour later re-pulls only the last 3 days (review M1) and changes nothing', async () => {
     const deps = fixtureDeps(base(), false)
     const first = await runMorningRead(deps, opts)
     expect(first.spend.sync).toMatchObject({ fetched: { since: '2026-09-26', until: '2026-09-29' }, daysChanged: 4 })
     const again = await runMorningRead({ ...deps, nowMs: deps.nowMs + hour }, opts)
-    expect(again.spend.sync).toMatchObject({ fetched: null, daysChanged: 0, placementRowsChanged: 0 })
+    expect(again.spend.sync).toMatchObject({ fetched: { since: '2026-09-27', until: '2026-09-29' }, daysChanged: 0, placementRowsChanged: 0 })
     expect(again.spend.todayPartial).toEqual(first.spend.todayPartial)
     expect(again.spend.cumulative.cost).toBe(first.spend.cumulative.cost)
-    // six hours later the restatement window is due again
+    // and so does every later read
     const later = await runMorningRead({ ...deps, nowMs: deps.nowMs + 7 * hour }, opts)
     expect(later.spend.sync).toMatchObject({ fetched: { since: '2026-09-27', until: '2026-09-29' }, daysChanged: 0 })
     expect(deps.store.dailyRows('24279250691').map((r) => r.date)).toEqual(['2026-09-26', '2026-09-27', '2026-09-28', '2026-09-29']) // never today's open day
     expect(deps.store.written.syncRuns.map((r) => r.source)).toEqual(['morning-read', 'morning-read', 'morning-read'])
+  })
+})
+
+describe('review M1 (2026-09-26): the reads re-pull the restatement window every time', () => {
+  // The Worker's 00:05 and 01:05 ET runs failed; its 03:05 ET run stored yesterday (09-29) at $5
+  // as a closed day, before Google added the rest of the day's cost. The 08:05 ET read must
+  // re-pull, not trust a 5-hour-old pull because the Worker's 6 h cadence says it is recent.
+  const workerPulledEarly = async (fx: Fixture) => {
+    const deps = fixtureDeps(fx, false)
+    const truth = { ...ads(fx).daily['2026-09-29'] }
+    ads(fx).daily['2026-09-29'] = { costMicros: 5_000_000, impressions: 1900, clicks: 15 }
+    const worker = await syncAdsData({ ads: deps.ads, store: deps.store }, { campaignIds: ['24279250691'], now: Date.parse('2026-09-30T07:05:00Z'), dryRun: false, source: 'worker-cron' })
+    expect(worker.campaigns[0]).toMatchObject({ pulled: true, spendThrough: '2026-09-29' }) // closed: pulled after 03:00 ET
+    ads(fx).daily['2026-09-29'] = truth // Google's late data lands
+    return deps
+  }
+  it('the morning read reports the true $13.40 for yesterday, not the $5 the Worker stored at 03:05 ET', async () => {
+    const deps = await workerPulledEarly(base())
+    const r = await runMorningRead(deps, opts)
+    expect(r.spend.yesterday).toMatchObject({ date: '2026-09-29', cost: 13.4 })
+    expect(r.spend.restated).toEqual([{ date: '2026-09-29', before: 5, after: 13.4 }])
+    expect(r.spend.cumulative.cost).toBe(50.1)
+    expect(deps.store.dailyRows('24279250691').find((x) => x.date === '2026-09-29')!.costMicros).toBe(13_400_000)
+  })
+  it('the backstop and the post-flight read re-pull it too', async () => {
+    const fx = base()
+    const deps = await workerPulledEarly(fx)
+    const backstop = await runMorningRead({ ...deps, nowMs: Date.parse('2026-09-30T13:05:00Z') }, { ...opts, healthOnly: true })
+    expect(backstop.spend.yesterday).toMatchObject({ date: '2026-09-29', cost: 13.4 })
+    const fx2 = base()
+    const deps2 = await workerPulledEarly(fx2)
+    const post = await runPostflightRead({ ...deps2, nowMs: Date.parse('2026-09-30T12:05:00Z') }, { campaignId: '24279250691', stage: 'wrapup', force: false })
+    expect(post.spend.restated).toEqual([{ date: '2026-09-29', before: 5, after: 13.4 }])
   })
 })
