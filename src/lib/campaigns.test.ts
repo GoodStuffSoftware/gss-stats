@@ -33,6 +33,8 @@ import {
   isAuthSuccessPath,
   gameCompleteNotInstrumented,
   RAW_INSTALL_SIGNALS_LABEL,
+  VALID_FUNNEL_RATE_STEPS,
+  parseGameCompletePath,
   type CampaignFlight,
 } from './campaigns'
 import { INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS } from './popupEvents'
@@ -276,7 +278,12 @@ describe('classifyFunnelPath / computeFunnelCounts / funnelStepRates', () => {
     expect(counts.authSuccess).toBe(0)
   })
 
-  it('funnelStepRates: a real rate once both steps are instrumented and the denominator is non-zero', () => {
+  // Audit finding (2026-09-26): played/arrivals, completed/played, ask/completed,
+  // authSuccess/accept, installPrompt/authSuccess all mix an event-row numerator against an
+  // arrivals/other-row denominator with no shared visitor id — not real rates (e.g. "Played a
+  // game: 314.7% (1111/353)"). funnelStepRates only ever computes accept/ask and
+  // install/(post-fix installPrompt) now — see VALID_FUNNEL_RATE_STEPS.
+  it('funnelStepRates: only ever populates accept/ask and install/installPrompt — every other step is absent (plain count only, not even null)', () => {
     const counts = computeFunnelCounts(
       [
         { path: '/game', count: 100 },
@@ -286,19 +293,56 @@ describe('classifyFunnelPath / computeFunnelCounts / funnelStepRates', () => {
       120, // an arrivals count independent of the path rows above, per the DEFINITION FIX
     )
     const rates = funnelStepRates(counts)
-    expect(counts.arrivals).toBe(120)
-    expect(rates.played).toBeCloseTo(100 / 120, 10)
+    expect(Object.keys(rates).sort()).toEqual(['accept', 'install'])
+    expect(rates.played).toBeUndefined()
+    expect(rates.completed).toBeUndefined()
+    expect(rates.ask).toBeUndefined()
+    expect(rates.authSuccess).toBeUndefined()
+    expect(rates.installPrompt).toBeUndefined()
   })
-  it('funnelStepRates: "completed" and its successor "ask" are always null (not-instrumented propagates forward one step)', () => {
-    const counts = computeFunnelCounts([{ path: '/game', count: 100 }], 100)
+  it('funnelStepRates: accept/ask is a real rate once both are instrumented and ask is non-zero', () => {
+    const counts = computeFunnelCounts(
+      [
+        { path: '/signin-prompt/placement', count: 10 },
+        { path: '/signin-prompt/accept', count: 4 },
+      ],
+      120,
+    )
     const rates = funnelStepRates(counts)
-    expect(rates.completed).toBeNull() // completed itself is not instrumented
-    expect(rates.ask).toBeNull() // ask/completed would divide by the not-instrumented step
+    expect(rates.accept).toBeCloseTo(4 / 10, 10)
   })
-  it('funnelStepRates: null (not NaN) for a zero-denominator step that IS instrumented', () => {
+  it('funnelStepRates: accept is null when either accept or ask is not instrumented for this flight', () => {
+    const counts = computeFunnelCounts([{ path: '/signin-prompt/accept', count: 4 }], 100)
+    const rates = funnelStepRates(counts, new Set(['ask']))
+    expect(rates.accept).toBeNull()
+  })
+  it('funnelStepRates: null (not NaN) for a zero-denominator accept/ask that IS instrumented', () => {
     const counts = computeFunnelCounts([], 0) // nothing at all
     const rates = funnelStepRates(counts)
-    expect(rates.played).toBeNull()
+    expect(rates.accept).toBeNull()
+  })
+  it('funnelStepRates: install uses the POST-FIX installPrompt count as its denominator, not counts.installPrompt', () => {
+    const counts = computeFunnelCounts(
+      [
+        { path: '/install/prompt/android', count: 20 }, // whole-window installPrompt count
+        { path: '/popup-outcome/install-prompt/installed', count: 5 },
+      ],
+      100,
+    )
+    expect(counts.installPrompt).toBe(20)
+    // Only 8 of the 20 prompts were shown post-fix — the real denominator for this rate.
+    const rates = funnelStepRates(counts, undefined, 8)
+    expect(rates.install).toBeCloseTo(5 / 8, 10)
+  })
+  it('funnelStepRates: install is null when the post-fix installPrompt count is not provided', () => {
+    const counts = computeFunnelCounts([{ path: '/popup-outcome/install-prompt/installed', count: 5 }], 100)
+    const rates = funnelStepRates(counts)
+    expect(rates.install).toBeNull()
+  })
+  it('funnelStepRates: install is null when install or installPrompt is not instrumented for this flight', () => {
+    const counts = computeFunnelCounts([{ path: '/popup-outcome/install-prompt/installed', count: 5 }], 100)
+    const rates = funnelStepRates(counts, new Set(['installPrompt']), 8)
+    expect(rates.install).toBeNull()
   })
 })
 
@@ -374,6 +418,31 @@ describe('CAMPAIGN_SPEND / CAMPAIGN_DAILY_SPEND (Google Ads API, 2026-09-25)', (
   })
   it('cost per arrival is now computable for Android launch (real arrivals, real spend)', () => {
     expect(costPer(CAMPAIGN_SPEND['24215315197'], 353)).toBeCloseTo(124.47 / 353, 5)
+  })
+})
+
+describe('parseGameCompletePath (mode × difficulty breakdown, distinct from classifyFunnelPath\'s prefix-only "completed" match)', () => {
+  it('parses the two segments after the prefix', () => {
+    expect(parseGameCompletePath('/game/complete/normal/easy')).toEqual({ mode: 'normal', difficulty: 'easy' })
+    expect(parseGameCompletePath('/game/complete/daily/unknown')).toEqual({ mode: 'daily', difficulty: 'unknown' })
+  })
+  it('null for a shape that is not exactly two segments after the prefix, even though classifyFunnelPath still counts it as "completed"', () => {
+    expect(parseGameCompletePath('/game/complete/normal')).toBeNull()
+    expect(parseGameCompletePath('/game/complete/normal/easy/extra')).toBeNull()
+    expect(classifyFunnelPath('/game/complete/normal')).toBe('completed') // prefix match, unaffected
+  })
+  it('never matches the plain /game page-view path', () => {
+    expect(parseGameCompletePath('/game')).toBeNull()
+  })
+})
+
+describe('VALID_FUNNEL_RATE_STEPS (audit finding, 2026-09-26 — most step/previous-step "rates" mixed units)', () => {
+  it('is exactly accept and install — every other step is a plain count only', () => {
+    expect([...VALID_FUNNEL_RATE_STEPS].sort()).toEqual(['accept', 'install'])
+    for (const step of FUNNEL_STEP_ORDER) {
+      if (step === 'accept' || step === 'install') continue
+      expect(VALID_FUNNEL_RATE_STEPS.has(step)).toBe(false)
+    }
   })
 })
 

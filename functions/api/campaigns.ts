@@ -20,6 +20,7 @@ import {
   applyExclusions,
   campaignAttributionClause,
   campaignById,
+  classifyFunnelPath,
   computeFunnelCounts,
   costPer,
   countryBucket,
@@ -38,7 +39,7 @@ import {
   type FunnelPathCount,
   type FunnelStepKey,
 } from '../../src/lib/campaigns'
-import { etDateFromMs, excludeInstallGapUnmeasured, installOutcomeGapNote, TRACKING_ACTIVATION_DATE_ET } from '../../src/lib/popupEvents'
+import { etDateFromMs, excludeInstallGapUnmeasured, installOutcomeGapNote, TRACKING_ACTIVATION_DATE_ET, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS } from '../../src/lib/popupEvents'
 import { campaignSegmentMarker, resolveCampaignSpend, UPSELL_SIGNEDOUT_FIX_AT } from '../../src/lib/adsRules'
 import { readFreshness, readSpendSummaries } from '../../src/lib/adsStore'
 import { freshnessOf } from '../../src/lib/adsFreshness'
@@ -171,7 +172,17 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // ── Per-flight "not instrumented" (query 3, via notInstrumentedFunnelSteps): any funnel-
   // step path with zero site-wide hits during this flight's window couldn't have been seen —
   // not a real 0. ───────────────────────────────────────────────────────────────────────────
-  const rates = funnelStepRates(counts, new Set(notInstrumented))
+  // install/installPrompt's denominator (see lib/campaigns.ts funnelStepRates/
+  // VALID_FUNNEL_RATE_STEPS): only prompts shown AT OR AFTER the install-outcome-gap fix — a
+  // pre-fix prompt could never have its "installed" outcome recorded at all, so it doesn't
+  // belong in the rate's denominator. Computed from rows1 (already hour-bucketed) rather than
+  // a new query.
+  const installFixAtMs = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS
+  const installPromptPostFixCount =
+    installFixAtMs == null
+      ? 0
+      : rows1.reduce((a, r) => (classifyFunnelPath(r.path) === 'installPrompt' && r.hr * 3_600_000 >= installFixAtMs ? a + r.c : a), 0)
+  const rates = funnelStepRates(counts, new Set(notInstrumented), installPromptPostFixCount)
 
   // ── Device mix (query 2) ─────────────────────────────────────────────────────────────
   const os: Record<string, number> = {}
@@ -225,6 +236,10 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       counts,
       rates,
       notInstrumented,
+      // The install/installPrompt rate's real denominator (see lib/campaigns.ts
+      // funnelStepRates) — carried alongside `counts.installPrompt` (the WHOLE-window count,
+      // still shown as its own plain count) so the UI can display the rate's actual n/d.
+      installPromptPostFixCount,
       arrivalsCaveat: ARRIVALS_CAVEAT,
       // Install-fix caveat for THIS campaign's attribution range (none once it is all post-fix).
       installNote:

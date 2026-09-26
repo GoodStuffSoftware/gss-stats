@@ -227,6 +227,11 @@ export interface CampaignCompareResponse {
     // during the flight window (or, for 'completed', anywhere at all) — see
     // lib/campaigns.ts FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED.
     notInstrumented: (keyof CampaignFunnelCounts)[]
+    // The install/installPrompt rate's real denominator — prompts shown AT OR AFTER the
+    // install-outcome-gap fix ONLY (see lib/campaigns.ts VALID_FUNNEL_RATE_STEPS/
+    // funnelStepRates). `counts.installPrompt` is still the whole-window count, shown as its
+    // own plain count; this is specifically what `rates.install` was computed against.
+    installPromptPostFixCount: number
     // Show wherever `counts.arrivals` is displayed — see lib/campaigns.ts ARRIVALS_CAVEAT.
     arrivalsCaveat: string
     // Install-fix caveat for this campaign's range (lib/popupEvents.ts installOutcomeGapNote);
@@ -327,6 +332,9 @@ export interface OverviewScorecardRow {
   // CLOSED campaign (see functions/api/overview.ts's scorecard); always [] for active/
   // upcoming. The UI omits these chips instead of labeling them "not instrumented".
   notInstrumented: (keyof CampaignFunnelCounts)[]
+  // Same real denominator as CampaignCompareResponse.funnel.installPromptPostFixCount — see
+  // lib/campaigns.ts VALID_FUNNEL_RATE_STEPS/funnelStepRates.
+  installPromptPostFixCount: number
   authSuccess: number
   install: number
   returnRateD2to7: number | null
