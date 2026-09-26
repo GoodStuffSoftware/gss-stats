@@ -33,8 +33,85 @@ import {
   PLAY_TRACKING_ROLLOUT_CAVEAT,
   playTrackingStatusNote,
   SMALL_SAMPLE_NOTE,
+  INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS,
+  INSTALL_GAP_PATHS,
+  INSTALL_GAP_BEFORE_FIX_LABEL,
+  INSTALL_OUTCOME_GAP_LABEL,
+  INSTALL_FIX_NOTE,
+  excludeInstallGapUnmeasured,
+  installFixMarkerLabel,
+  installOutcomeGapNote,
+  isInstallGapUnmeasured,
+  rowIsPostInstallFix,
+  withInstallGapNote,
   type HourPathCount,
 } from './popupEvents'
+
+describe('install-outcome gap, fixed in v1.95.4 (first confirmed post-fix instant 2026-09-26T16:26:36Z)', () => {
+  const FIX = Date.parse('2026-09-26T16:26:36Z')
+  it('the fix instant is configured as a timestamp, not a date', () => {
+    expect(INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS).toBe(FIX)
+    expect(installFixMarkerLabel()).toBe('install fix went live 26 Sep 12:26 ET')
+  })
+  it('boundary: a gap row AT the fix instant is measured, one millisecond before is not', () => {
+    for (const p of INSTALL_GAP_PATHS) {
+      expect(isInstallGapUnmeasured(p, FIX)).toBe(false)
+      expect(isInstallGapUnmeasured(p, FIX - 1)).toBe(true)
+      expect(isInstallGapUnmeasured(p, FIX + 60_000)).toBe(false)
+    }
+    // the indeterminate window 16:25:27Z-16:26:36Z stays unmeasured
+    expect(isInstallGapUnmeasured('/popup-outcome/install-prompt/installed', Date.parse('2026-09-26T16:25:27Z'))).toBe(true)
+    // other paths are never affected, before or after
+    expect(isInstallGapUnmeasured('/install/pwa-accept', FIX - 1)).toBe(false)
+    expect(isInstallGapUnmeasured('/install/standalone-detected', FIX - 1)).toBe(false)
+    expect(isInstallGapUnmeasured('/popup-outcome/install-prompt/returned', FIX - 1)).toBe(false)
+    // unfixed: every gap row is unmeasured
+    expect(isInstallGapUnmeasured('/install/pwa-installed', FIX + 1, null)).toBe(true)
+  })
+  it('the SQL twin drops exactly the pre-fix gap rows', () => {
+    const w: string[] = []
+    const b: unknown[] = []
+    excludeInstallGapUnmeasured(w, b)
+    expect(w).toEqual(['NOT (path IN (?, ?) AND ts < ?)'])
+    expect(b).toEqual(['/popup-outcome/install-prompt/installed', '/install/pwa-installed', FIX])
+    const w2: string[] = []
+    const b2: unknown[] = []
+    excludeInstallGapUnmeasured(w2, b2, null)
+    expect(w2).toEqual(['path NOT IN (?, ?)'])
+  })
+  it('labels by range: none once all post-fix, "known gap before fix" when all before, the fix note when spanning', () => {
+    expect(installOutcomeGapNote({ startMs: FIX, endMs: FIX + 86_400_000 })).toBe('')
+    expect(installOutcomeGapNote({ startMs: FIX - 86_400_000, endMs: FIX })).toBe(INSTALL_GAP_BEFORE_FIX_LABEL)
+    expect(installOutcomeGapNote({ startMs: FIX - 1, endMs: FIX + 1 })).toBe(INSTALL_FIX_NOTE)
+    expect(INSTALL_FIX_NOTE).toMatch(/^install fix went live 26 Sep 12:26 ET; /)
+    expect(installOutcomeGapNote()).toBe(INSTALL_FIX_NOTE) // unknown range → the spanning note
+    expect(installOutcomeGapNote({ startMs: 0, endMs: 1 }, null)).toBe(INSTALL_OUTCOME_GAP_LABEL)
+    expect(withInstallGapNote('Installs', { startMs: FIX, endMs: FIX + 1 })).toBe('Installs')
+    expect(withInstallGapNote('Installs', { startMs: FIX - 1, endMs: FIX + 1 })).toBe(`Installs (${INSTALL_FIX_NOTE})`)
+  })
+  it('rowIsPostInstallFix: the row-exact flag wins; without it the hour bucket must start at/after the fix', () => {
+    expect(rowIsPostInstallFix({ hourStartMs: Date.parse('2026-09-26T16:00:00Z'), path: 'x', count: 1, postInstallFix: true })).toBe(true)
+    expect(rowIsPostInstallFix({ hourStartMs: Date.parse('2026-09-26T16:00:00Z'), path: 'x', count: 1 })).toBe(false)
+    expect(rowIsPostInstallFix({ hourStartMs: Date.parse('2026-09-26T17:00:00Z'), path: 'x', count: 1 })).toBe(true)
+  })
+  it('aggregatePopupRows: pre-fix gap rows are unmeasured; the installed rate compares post-fix outcomes with post-fix showings', () => {
+    const hr = Date.parse('2026-09-26T16:00:00Z')
+    const agg = aggregatePopupRows([
+      { hourStartMs: hr, path: '/install/prompt/android', count: 4, postInstallFix: false },
+      { hourStartMs: hr, path: '/install/prompt/android', count: 10, postInstallFix: true },
+      { hourStartMs: hr, path: '/popup-outcome/install-prompt/installed', count: 7, postInstallFix: false },
+      { hourStartMs: hr, path: '/popup-outcome/install-prompt/installed', count: 2, postInstallFix: true },
+      { hourStartMs: hr, path: '/install/pwa-installed', count: 3, postInstallFix: false },
+      { hourStartMs: hr, path: '/install/pwa-installed', count: 1, postInstallFix: true },
+    ])
+    expect(measuredCoarseCount(agg, 'popup-outcome:install', 'installed')).toBe(2)
+    expect(measuredDetailedCount(agg, 'install', 'outcome', 'pwa-installed')).toBe(1)
+    expect(measuredCoarseCount(agg, 'install', 'shown')).toBe(14) // showings themselves are always measured
+    expect(coarseCount(agg, 'popup-outcome:install', 'installed')).toBe(9) // full history keeps every row
+    const rate = computePopupRate(agg, POPUP_RATE_SPECS.find((s) => s.key === 'install:outcome:installed')!)
+    expect(rate).toEqual({ value: 0.2, insufficientCohort: false, numerator: 2, denominator: 10 })
+  })
+})
 
 describe('classifyPopupPath', () => {
   it('signin-prompt: /<reason> is shown, /accept and /dismiss are responses', () => {
@@ -166,8 +243,8 @@ describe('signin-eligible caveat / pop-ups page note (FINAL LIST)', () => {
     expect(SIGNIN_ELIGIBLE_CAVEAT).toMatch(/30 min/i)
     expect(SIGNIN_ELIGIBLE_CAVEAT).toMatch(/hour-of-day/i)
   })
-  it('POPUP_PAGE_NOTE is the exact wording the task brief specifies', () => {
-    expect(POPUP_PAGE_NOTE).toBe('Nothing is measured within 30 minutes after a sign-in, so rates are slightly conservative.')
+  it('POPUP_PAGE_NOTE is the corrected wording (2026-09-26: the quiet period delays, it does not stop measurement)', () => {
+    expect(POPUP_PAGE_NOTE).toBe('Outcomes and return visits may arrive up to 30 minutes late; a small number are lost.')
   })
 })
 

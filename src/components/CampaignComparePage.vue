@@ -13,6 +13,7 @@ import type { CampaignCompareResponse, CampaignFunnelCounts } from '../types'
 import { fetchCampaignCompare } from '../api'
 import { PALETTE } from '../lib/charts'
 import BaseChart from './charts/BaseChart.vue'
+import AdsReadingsWidgetCard from './AdsReadingsWidgetCard.vue'
 
 const loading = ref(true)
 const error = ref<string | null>(null)
@@ -219,10 +220,13 @@ function shareBarWidth(row: DeviceMixShare): number {
             <div v-if="dataByCampaign[c.id]" class="tagged-hits mono" :title="ARRIVALS_CAVEAT">
               tagged hits: {{ fmt(dataByCampaign[c.id].taggedHits) }} (vs {{ fmt(dataByCampaign[c.id].funnel.counts.arrivals) }} arrivals)
             </div>
+            <div v-if="dataByCampaign[c.id]?.rawInstallSignals" class="tagged-hits mono">
+              {{ dataByCampaign[c.id].rawInstallSignals!.label }}: {{ fmt(dataByCampaign[c.id].rawInstallSignals!.count) }}
+            </div>
             <div v-if="dataByCampaign[c.id]" class="funnel-steps">
               <div v-for="step in FUNNEL_STEP_ORDER" :key="step" class="funnel-step">
                 <div class="fs-top">
-                  <span class="fs-label">{{ FUNNEL_STEP_LABELS[step] }}</span>
+                  <span class="fs-label">{{ FUNNEL_STEP_LABELS[step] }}<template v-if="step === 'install' && dataByCampaign[c.id].funnel.installNote"> ({{ dataByCampaign[c.id].funnel.installNote }})</template></span>
                   <span class="fs-count mono">
                     <template v-if="dataByCampaign[c.id].funnel.notInstrumented.includes(step)">not instrumented</template>
                     <template v-else>{{ fmt(dataByCampaign[c.id].funnel.counts[step]) }}</template>
@@ -298,12 +302,22 @@ function shareBarWidth(row: DeviceMixShare): number {
             <div class="fc-label">{{ c.label }}</div>
             <div v-if="dataByCampaign[c.id]" class="cost-rows">
               <div class="cost-row"><span>Spend</span><span class="mono">{{ money(dataByCampaign[c.id].spend) }}</span></div>
+              <div v-if="dataByCampaign[c.id].spendSource" class="cost-row">
+                <span>Source</span>
+                <span class="mono">{{ dataByCampaign[c.id].spendSource!.source === 'google-ads-api' ? `Ads API, through ${dataByCampaign[c.id].spendSource!.lastDate}` : dataByCampaign[c.id].spendSource!.source === 'config' ? 'hand-entered' : '—' }}</span>
+              </div>
               <div class="cost-row"><span>Per arrival</span><span class="mono">{{ money(dataByCampaign[c.id].costPerArrival) }}</span></div>
               <div class="cost-row"><span>Per auth success</span><span class="mono">{{ money(dataByCampaign[c.id].costPerAuthSuccess) }}</span></div>
             </div>
           </div>
         </div>
-        <p v-if="CAMPAIGNS.some((c) => dataByCampaign[c.id]?.spend == null)" class="caption">Spend comes from Google Ads and is entered by hand in <code>CAMPAIGN_SPEND</code> (lib/campaigns.ts) — one or more campaigns above still need a value.</p>
+        <p class="caption">Spend comes from the Google Ads API as stored by the ads-read routine; campaigns with nothing stored fall back to the hand-entered <code>CAMPAIGN_SPEND</code> (lib/campaigns.ts).</p>
+      </section>
+
+      <!-- Ads-read routine readings log — a self-contained widget (fetches /api/ads/readings) -->
+      <section class="block">
+        <h2>Readings log (ads routine)</h2>
+        <AdsReadingsWidgetCard :widget="{ view: 'log' }" />
       </section>
 
       <!-- Chart 6: device mix -->

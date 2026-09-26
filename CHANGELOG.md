@@ -6,6 +6,31 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-09-26
+
+### Added
+- **Campaign spend now comes from the Google Ads API.** The campaigns page and the overview
+  scorecard read daily spend stored in the dashboard's own database, and fall back to the
+  hand-entered figures when nothing is stored.
+- **A readings log on the campaigns page** shows each ads-routine read: spend, the
+  thresholds reached, kill-rule results, the proposal and key counts. Sign-ups are shown as
+  "at most N" (an upper bound), and a campaign that has already ended shows as ended rather
+  than as a pause proposal.
+- **Scheduled ads-read tooling for the US+CA web retest.** A daily morning read and the
+  post-flight reads fetch spend from the Google Ads API, fire each spend threshold once, apply
+  the pre-registered kill rules and decision table, and only ever propose. A failed read, a
+  missed scheduled read and a real release-health alert are all surfaced rather than silent.
+
+### Changed
+- **The campaign funnel's Install step and the overview's Installs tile and timeline count
+  each install once** (the pop-up outcome), with the raw install beacons, which can
+  double-count, shown as a secondary tile and line.
+- **The pop-ups page note now says outcomes and return visits may arrive up to 30 minutes
+  late**, replacing the inaccurate "nothing is measured within 30 minutes after a sign-in".
+- **Install outcomes are measured from Best Sudoku's install fix onward** (v1.95.4, 26 Sep
+  12:26 ET): earlier install outcomes stay unmeasured, and ranges that span the fix say when it
+  went live.
+
 ## [0.3.2] — 2026-09-26
 
 ### Added

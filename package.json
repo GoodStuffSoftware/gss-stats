@@ -1,6 +1,6 @@
 {
   "name": "gss-stats",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "Private bot-free traffic dashboard for Good Stuff Software (RUM via Cloudflare GraphQL).",
@@ -10,7 +10,12 @@
     "preview": "npm run build && wrangler pages dev",
     "deploy": "npm run build && wrangler pages deploy",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:scripts": "tsc -p scripts/ads-reads/tsconfig.json --noEmit",
+    "ads:morning-read": "tsx scripts/ads-reads/morning-read.ts",
+    "ads:postflight-read": "tsx scripts/ads-reads/postflight-read.ts",
+    "ads:backfill": "tsx scripts/ads-reads/backfill.ts",
+    "ads:migrate": "wrangler d1 migrations apply gss-stats-ads --remote"
   },
   "dependencies": {
     "chart.js": "^4.4.7",
@@ -19,7 +24,9 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241218.0",
+    "@types/node": "^24.19.0",
     "@vitejs/plugin-vue": "^5.2.1",
+    "tsx": "^4.23.15",
     "typescript": "^5.7.2",
     "vite": "^6.0.7",
     "vitest": "^5.0.2",

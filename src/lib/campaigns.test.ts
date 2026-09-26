@@ -27,7 +27,12 @@ import {
   CAMPAIGN_SPEND,
   CAMPAIGN_DAILY_SPEND,
   COMPLETED_PROXY_PATH_PREFIX,
+  FUNNEL_STEP_LABELS,
+  isRawInstallSignal,
+  isInstallPromptInstalled,
+  RAW_INSTALL_SIGNALS_LABEL,
 } from './campaigns'
+import { INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS } from './popupEvents'
 
 describe('etMidnightUtcMs / etFlightRangeMs (DST-safe ET date <-> UTC ms)', () => {
   it('EST (winter, UTC-5): ET midnight is 05:00 UTC', () => {
@@ -167,9 +172,39 @@ describe('classifyFunnelPath / computeFunnelCounts / funnelStepRates', () => {
     expect(classifyFunnelPath('/promo-first50/accept')).toBe('accept')
     expect(classifyFunnelPath('/install/prompt/android')).toBe('installPrompt')
     expect(classifyFunnelPath('/install/prompt/ios')).toBe('installPrompt')
-    expect(classifyFunnelPath('/install/pwa-installed')).toBe('install')
-    expect(classifyFunnelPath('/install/standalone-detected')).toBe('install')
-    expect(classifyFunnelPath('/install/play-detected')).toBe('install')
+    // INSTALL = the deduplicated popup outcome (at most once per showing), 2026-09-26.
+    expect(classifyFunnelPath('/popup-outcome/install-prompt/installed')).toBe('install')
+  })
+  it('raw /install/<outcome> beacons are NOT the install step (one install can fire two of them); they are a secondary "raw signals" figure', () => {
+    for (const p of ['/install/pwa-installed', '/install/standalone-detected', '/install/play-detected']) {
+      expect(classifyFunnelPath(p)).toBeNull()
+      expect(isRawInstallSignal(p)).toBe(true)
+    }
+    expect(isRawInstallSignal('/install/prompt/android')).toBe(false)
+    expect(isRawInstallSignal('/popup-outcome/install-prompt/installed')).toBe(false)
+    // the one install predicate the funnel, the overview tile/timeline and the routine share
+    expect(isInstallPromptInstalled('/popup-outcome/install-prompt/installed')).toBe(true)
+    expect(isInstallPromptInstalled('/install/pwa-installed')).toBe(false)
+    expect(isInstallPromptInstalled('/popup-outcome/install-prompt/returned')).toBe(false)
+    expect(RAW_INSTALL_SIGNALS_LABEL).toMatch(/can double-count/)
+    // other install-prompt outcomes are not an install
+    expect(classifyFunnelPath('/popup-outcome/install-prompt/returned')).toBeNull()
+    expect(classifyFunnelPath('/popup-outcome/signin-prompt/installed')).toBeNull()
+  })
+  it('a cross-tab race (pwa-installed + standalone-detected for ONE install) still counts one install', () => {
+    const counts = computeFunnelCounts(
+      [
+        { path: '/install/pwa-installed', count: 1 },
+        { path: '/install/standalone-detected', count: 1 },
+        { path: '/popup-outcome/install-prompt/installed', count: 1 },
+      ],
+      0,
+    )
+    expect(counts.install).toBe(1)
+  })
+  it('the install fix shipped (v1.95.4, first confirmed post-fix instant 16:26:36Z); the step label is plain, the caveat travels per range', () => {
+    expect(INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS).toBe(Date.parse('2026-09-26T16:26:36Z'))
+    expect(FUNNEL_STEP_LABELS.install).toBe('Install')
   })
   it('never maps anything to "completed" — no matching path exists anywhere in D1', () => {
     for (const p of ['/game', '/', '/stats', '/settings', '/complete', '/game/complete', '/win']) {
