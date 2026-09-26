@@ -72,6 +72,9 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters): Promis
         excludeOwnVisits: filters.excludeOwnVisits,
         ownBrowser: filters.ownBrowser,
         ownOS: filters.ownOS,
+        // Per-chart only (no global filter-bar equivalent) — default OFF, so every existing
+        // chart keeps excluding pop-up/install/return/game-complete/auth-status rows.
+        includeEventBeacons: widget.includeEventBeacons === true,
       }),
     })
     if (!res.ok) {

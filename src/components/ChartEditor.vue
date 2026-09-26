@@ -424,6 +424,17 @@ function save() {
         </label>
       </div>
 
+      <!-- Geo beacon only: every chart excludes pop-up/install/return/game-complete/auth-status
+           event-beacon rows by default (they're events, not screen views) — this opts a single
+           chart back in, e.g. to chart the 'pathFamily' dimension or see event paths in a 'path'
+           breakdown. Default OFF keeps every existing chart's numbers unchanged. -->
+      <div class="field check" v-if="isGeo && !isNote">
+        <label>
+          <input type="checkbox" v-model="draft.includeEventBeacons" />
+          Include event beacons (pop-up / install / return / game-complete / auth-status)
+        </label>
+      </div>
+
       <div class="field check" v-if="draft.dimension === 'date' && (draft.type === 'line' || draft.type === 'area')">
         <label>
           <input type="checkbox" :checked="draft.markers === 'releases'" @change="draft.markers = ($event.target as HTMLInputElement).checked ? 'releases' : undefined" />

@@ -25,6 +25,14 @@ export const DRILL_FIELDS: Record<string, { rum: string | null; geo: string | nu
   org: { rum: null, geo: 'org' },
   lang: { rum: null, geo: 'lang' },
   visitor: { rum: null, geo: 'visitor' },
+  screenw: { rum: null, geo: 'screenw' }, // exact viewport width (px) — beacon-only, raw column
+  // screenwBucket / pathFamily are derived (CASE-expression) dimensions, not real columns —
+  // but functions/api/geo.ts's DERIVED_FILTER_EXPR wraps the SAME whitelisted CASE expression
+  // in a bound-parameter equality, so a click still turns their label into a real filter, same
+  // as any other dimension here. Only 'date' stays out of this map — a date click becomes a
+  // day RANGE client-side (App.openFilteredPage), never an equality constraint.
+  screenwBucket: { rum: null, geo: 'screenwBucket' },
+  pathFamily: { rum: null, geo: 'pathFamily' },
 }
 
 // Site dimensions are handled by the site multi-select (siteSel), not generic drill.

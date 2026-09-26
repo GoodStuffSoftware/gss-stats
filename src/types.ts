@@ -66,6 +66,11 @@ export interface Widget {
   site?: SiteKey // optional per-widget site override ('inherit' = use global)
   host?: string // optional per-widget host override
   excludeSelfReferrals?: boolean
+  // dataset 'geo' only: lift the standing exclusion of pop-up/install/return/game-complete/
+  // auth-status event-beacon paths (see lib/popupEvents.ts POPUP_EVENT_PREFIXES), so this
+  // chart can group/filter on event rows too (e.g. by the new 'pathFamily' dimension).
+  // Undefined/false = excluded, same as every chart before this option existed.
+  includeEventBeacons?: boolean
   // A date-dimension trend chart ('line'/'area'/'bar' with dimension 'date') only: overlay
   // Best Sudoku release markers (see lib/releases.ts) as dashed vertical lines, same visual
   // treatment as the Overview page's timeline. Undefined/false = no overlay.

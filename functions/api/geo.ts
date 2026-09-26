@@ -12,7 +12,7 @@
 // `breakdown` for the grouped query below. Older 2-dim callers can still send just
 // { dimension, breakdown } and get the same result via a fallback.
 
-import { popupExcludeClause } from '../../src/lib/popupEvents'
+import { popupExcludeClause, pathFamilySqlCase } from '../../src/lib/popupEvents'
 import { excludeOwnClause as sharedExcludeOwnClause, selfReferralClause as sharedSelfReferralClause } from '../../src/lib/ownExclusion'
 import { buildCacheKeyUrl, cachedJson, ttlSecondsFor, type CacheLike } from '../_lib/edgeCache'
 
@@ -34,8 +34,25 @@ interface Env {
 //
 // Exported so that equivalence test can run the exact production SQL against a fixture DB
 // without spinning up a full PagesFunction request.
+// `dim` is trusted here (GEO_DIMS already gated it before this is ever called) — never pass a
+// request-controlled string straight into this function. 'date', 'screenwBucket' and
+// 'pathFamily' are DERIVED — computed from real columns via CASE/date(), not a bare column
+// reference — so each gets its own branch; every other dim is a real TEXT/INTEGER column,
+// blank-labeled the same way they always were.
 export function breakdownColumnExpr(dim: string, emptyLabel: string): string {
-  return dim === 'date' ? "date(ts/1000,'unixepoch')" : `CASE WHEN ${dim} = '' THEN '${emptyLabel}' ELSE ${dim} END`
+  if (dim === 'date') return "date(ts/1000,'unixepoch')"
+  if (dim === 'pathFamily') return pathFamilySqlCase()
+  // screenw is INTEGER, default 0 when the client never reported a viewport width (JS
+  // blocked/failed before the measurement ran) — 0 is the "blank" sentinel here, not ''.
+  if (dim === 'screenw') return `CASE WHEN screenw = 0 THEN '${emptyLabel}' ELSE CAST(screenw AS TEXT) END`
+  if (dim === 'screenwBucket') {
+    return (
+      `CASE WHEN screenw = 0 THEN '${emptyLabel}' ` +
+      `WHEN screenw < 480 THEN '<480' WHEN screenw < 768 THEN '480-767' ` +
+      `WHEN screenw < 1024 THEN '768-1023' WHEN screenw < 1440 THEN '1024-1439' ELSE '1440+' END`
+    )
+  }
+  return `CASE WHEN ${dim} = '' THEN '${emptyLabel}' ELSE ${dim} END`
 }
 
 // `orderBy` should include a tiebreak (e.g. "c DESC, k ASC") — without one, which rows LIMIT
@@ -56,11 +73,46 @@ export function buildMergedRingSql(cols: string[], whereSql: string, groupBy: st
   return `SELECT ${groupBy}, c, SUM(c) OVER () AS total FROM (SELECT ${cols.join(', ')}, COUNT(*) AS c FROM hits WHERE ${whereSql} GROUP BY ${groupBy}) ORDER BY c DESC, ${groupBy} LIMIT ?`
 }
 
-const GEO_DIMS = new Set([
+// Every analytic column on `hits`, plus the derived (non-column) dimensions below — this Set
+// is the whitelist / security boundary: a dimension or constraint field name is NEVER used in
+// a query unless it's a member of this Set (see dim/constraints below). Deliberately excluded:
+// `id` (autoincrement row id, not analytic), `ts` (raw timestamp — only the 'date' bucket is
+// exposed, never the millisecond value), `lat`/`lon` (only usable as map-mode coordinates, not
+// a sensible group-by/filter value), and `in_app` (schema.sql / gss-beacon's migrate-in-app.sql
+// define it, but production `gss-geo` has NOT had that migration run yet — confirmed live via
+// `PRAGMA table_info(hits)` 2026-09-26, 25 columns, no `in_app`; whitelisting it now would 500
+// every query that touched it the moment someone charted it. Add it once the migration runs).
+export const GEO_DIMS = new Set([
   'country', 'region', 'city', 'postal', 'continent', 'timezone', 'colo', 'org',
   'referrer', 'refpath', 'path', 'site', 'device', 'browser', 'os', 'lang', 'visitor', 'date',
   'campaign', 'source', 'medium', // utm campaign tags
+  'screenw', 'screenwBucket', // viewport width — raw pixel value, and bucketed (see breakdownColumnExpr)
+  'pathFamily', // groups event-beacon paths (popup/install/return/game-complete/…) vs. 'page' — see popupEvents.ts
 ])
+
+// Dimensions with no real backing column — computed via CASE/date() in breakdownColumnExpr,
+// not a bare column reference. Same rule 'date' has always followed for GROUPING: usable as
+// the SOLE group-by dimension of a single-dim breakdown, but never as a ring/nested-doughnut
+// column (buildMergedRingSql aliases `${d} AS k${i}` against a real column, which a derived
+// expression isn't). screenwBucket/pathFamily ARE still filterable, though — see
+// DERIVED_FILTER_EXPR below, which wraps the same CASE expression in a bound-parameter
+// equality instead of a bare column reference. 'date' alone stays fully out of filtering too:
+// a click on a date bucket becomes a day RANGE client-side (lib/drill.ts), never an equality
+// constraint, so nothing ever sends it as one.
+export const DERIVED_ONLY_DIMS = new Set(['date', 'screenwBucket', 'pathFamily'])
+
+// screenwBucket / pathFamily as FILTERS: the exact same whitelisted CASE expression breakdown
+// mode groups by, wrapped in `(<expr>) = ?` with the value bound as a parameter — never string-
+// interpolated. Both expressions are built from GEO_DIMS-gated dimension names and this file's
+// own static prefix list (never request input), so wrapping them in a WHERE clause carries no
+// injection risk; it costs one extra CASE evaluation per row already being scanned; the WHERE
+// still leads with `ts >= ? AND ts < ?`, so the `idx_hits_ts`/`idx_hits_site_ts` range-scan
+// applies exactly as it does for every other filter here, and a CASE with no subquery isn't
+// something SQLite can push into an index anyway — see docs/capacity.md's measurement.
+const DERIVED_FILTER_EXPR: Record<string, string> = {
+  screenwBucket: breakdownColumnExpr('screenwBucket', '(unknown)'),
+  pathFamily: breakdownColumnExpr('pathFamily', ''),
+}
 
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), {
@@ -104,8 +156,11 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       b.push(...sites)
     }
   }
-  // Drill-down constraints — exact field = value on a whitelisted, real column
-  // ('date' is derived from ts, not a column, so it's excluded).
+  // Drill-down constraints — exact field = value on a whitelisted column, OR (for screenwBucket/
+  // pathFamily) the same whitelisted derived CASE expression compared to a bound parameter (see
+  // DERIVED_FILTER_EXPR above). 'date' is the one dimension excluded here: a click on a date
+  // bucket becomes a day RANGE client-side (lib/drill.ts), never an equality constraint, so it
+  // never arrives as one — excluding it is defense in depth, not something a real client sends.
   const constraints: { field: string; value: string }[] = Array.isArray(body.constraints)
     ? (body.constraints as any[])
         .filter((c) => c && GEO_DIMS.has(c.field) && c.field !== 'date' && typeof c.value === 'string')
@@ -113,8 +168,20 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     : []
   const drillClause = (w: string[], b: any[]) => {
     for (const c of constraints) {
-      // "(direct)" / "(none)" are the labels we show for blank values → match empty.
-      if (c.value === '(direct)' || c.value === '(none)') {
+      const derivedExpr = DERIVED_FILTER_EXPR[c.field]
+      if (derivedExpr) {
+        // The CASE expression already produces the exact label string for every row, including
+        // its own blank/default bucket ('(unknown)' / 'page') — a plain bound equality matches
+        // correctly with no separate blank-value branch needed.
+        w.push(`(${derivedExpr}) = ?`)
+        b.push(c.value)
+      } else if (c.field === 'screenw' && (c.value === '(unknown)' || c.value === '(direct)' || c.value === '(none)')) {
+        // screenw is INTEGER; its blank sentinel is 0, never the empty STRING '' a TEXT
+        // column's blank label maps to below — SQLite's type ordering means an INTEGER can
+        // never equal a TEXT literal, so `screenw = ''` would silently match zero rows.
+        w.push(`screenw = 0`)
+      } else if (c.value === '(direct)' || c.value === '(none)') {
+        // "(direct)" / "(none)" are the labels we show for blank TEXT-column values → match empty.
         w.push(`${c.field} = ''`)
       } else {
         w.push(`${c.field} = ?`)
@@ -140,6 +207,12 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const excludeSelf = body.excludeSelfReferrals !== false
   const selfReferralClause = (activeDims: string[], w: string[], b: any[]) => sharedSelfReferralClause(activeDims, w, b, excludeSelf)
 
+  // "Include event beacons" — per-chart opt-in (default OFF, so every existing chart keeps
+  // excluding pop-up/install/return/game-complete/auth-status rows exactly as before) to lift
+  // popupExcludeClause and chart event paths too (e.g. the new 'pathFamily' dimension, or a
+  // 'path' breakdown that should show /popup-outcome/... rows). See src/lib/popupEvents.ts.
+  const includeEventBeacons = body.includeEventBeacons === true
+
   const isPoints = dim === 'points' || body.dimension === 'points'
   // N-dimension breakdown (nested doughnut / stacked bar / table on geo data). `body.dims` is
   // the full ordered ring list a nested doughnut sends (see api.ts); a legacy 2-dim caller
@@ -148,17 +221,17 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // malformed/oversized request, not a UX limit (that lives in ChartEditor.vue).
   const RING_DIMS_HARD_CAP = 8
   const legacyBreakdown =
-    typeof body.breakdown === 'string' && GEO_DIMS.has(body.breakdown) && body.breakdown !== dim && body.breakdown !== 'date'
+    typeof body.breakdown === 'string' && GEO_DIMS.has(body.breakdown) && body.breakdown !== dim && !DERIVED_ONLY_DIMS.has(body.breakdown)
       ? body.breakdown
       : null
   const ringDims: string[] = (
     Array.isArray(body.dims)
-      ? [...new Set((body.dims as unknown[]).filter((d): d is string => typeof d === 'string' && GEO_DIMS.has(d) && d !== 'date'))]
+      ? [...new Set((body.dims as unknown[]).filter((d): d is string => typeof d === 'string' && GEO_DIMS.has(d) && !DERIVED_ONLY_DIMS.has(d)))]
       : legacyBreakdown
         ? [dim, legacyBreakdown]
         : []
   ).slice(0, RING_DIMS_HARD_CAP)
-  const isRing = !isPoints && ringDims.length >= 2 && dim !== 'date'
+  const isRing = !isPoints && ringDims.length >= 2 && !DERIVED_ONLY_DIMS.has(dim)
 
   // Everything that changes the SQL (and therefore the response) goes into the cache key —
   // mode, dims/dim, the date window, site selection, drill constraints, and both exclusion
@@ -178,6 +251,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     ownBrowser: excludeOwn ? String(body.ownBrowser ?? '') : '',
     ownOS: excludeOwn ? String(body.ownOS ?? '') : '',
     excludeSelf,
+    includeEventBeacons,
   })
   const ttl = ttlSecondsFor(until, new Date())
   const cache = (caches as unknown as { default: CacheLike }).default
@@ -189,7 +263,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   if (isPoints) {
     const w: string[] = ['ts >= ?', 'ts < ?', "lat <> ''"]
     const b: any[] = [sinceMs, untilMs]
-    popupExcludeClause(w, b) // events, not screen views — never count toward pageviews/visits
+    if (!includeEventBeacons) popupExcludeClause(w, b) // events, not screen views — excluded unless opted in
     siteClause(w, b)
     drillClause(w, b)
     excludeOwnClause(w, b)
@@ -224,7 +298,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     const cols = ringDims.map((d, i) => `${d} AS k${i}`)
     const w: string[] = ['ts >= ?', 'ts < ?', ...ringDims.map((d) => `${d} <> ''`)]
     const b: any[] = [sinceMs, untilMs]
-    popupExcludeClause(w, b) // events, not screen views — never count toward pageviews/visits
+    if (!includeEventBeacons) popupExcludeClause(w, b) // events, not screen views — excluded unless opted in
     siteClause(w, b)
     drillClause(w, b)
     excludeOwnClause(w, b)
@@ -263,11 +337,17 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // subreddit, etc. charts. Dropping blanks made attribute charts look empty while the
   // location charts stayed full for the very same visits.
   const emptyLabel =
-    dim === 'referrer' ? '(direct)' : dim === 'campaign' || dim === 'source' || dim === 'medium' ? '(untagged)' : '(none)'
+    dim === 'referrer'
+      ? '(direct)'
+      : dim === 'campaign' || dim === 'source' || dim === 'medium'
+        ? '(untagged)'
+        : dim === 'screenw' || dim === 'screenwBucket'
+          ? '(unknown)'
+          : '(none)'
   const col = breakdownColumnExpr(dim, emptyLabel)
   const where = ['ts >= ?', 'ts < ?']
   const binds: any[] = [sinceMs, untilMs]
-  popupExcludeClause(where, binds) // events, not screen views — never count toward pageviews/visits
+  if (!includeEventBeacons) popupExcludeClause(where, binds) // events, not screen views — excluded unless opted in
   siteClause(where, binds)
   drillClause(where, binds)
   excludeOwnClause(where, binds)
