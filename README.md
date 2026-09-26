@@ -362,9 +362,9 @@ per 10 minutes. The dashboard holds no Google Ads credential and never calls the
 ### The sync Worker (`workers/sync/`, `gss-stats-sync`)
 
 - **Schedule:** a cron at :05 every hour. While a flight is live (first day through the day
-  after the last) every tick checks what is due: yesterday right after midnight ET, a retry
-  after a failure, and the restatement window once its last pull is 6 h old. Outside a flight
-  only the 01:05 ET tick checks. A tick with nothing due reads two small queries and stops: no
+  after the last) every tick checks what is due: yesterday once, at 03:05 ET (before 03:00 ET it
+  cannot close yet, so it is not due), a retry after a failure, and the restatement window once
+  its last pull is 6 h old. Outside a flight only the 03:05 ET tick checks. A tick with nothing due reads two small queries and stops: no
   claim, no secret read, no token refresh, no write.
 - **On demand:** `POST /sync`, reachable only through the Pages Service Binding `ADS_SYNC`:
   the Worker has no `workers.dev` URL, no preview URLs and no route. Nothing due → 200 "up to

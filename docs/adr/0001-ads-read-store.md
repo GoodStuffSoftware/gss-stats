@@ -126,12 +126,14 @@ finds nothing to write, because the sync writes only changed rows.
 - D1 through a binding (`gss_stats_ads`), via the same `createSqlAdsStore` on the
   `d1BindingAdsDb` adapter; the write guard applies unchanged.
 - Cron `5 * * * *`; `cronShouldSync` makes it hourly during a live flight (first day through
-  the day after the last) and a single 01:05 ET pass otherwise. The owner suggested hourly
+  the day after the last) and a single 03:05 ET pass otherwise. The owner suggested hourly
   during serving hours with a closing pass after midnight. Every tick first plans from two D1
-  reads; only when something is due (a new closed day right after midnight ET, a retry after a
-  failure, or the restatement window once its last pull is 6 h old) does it claim, read the
-  secrets, refresh the token and call Google. So an hourly cron costs one Google pull every
-  ~6 h plus the post-midnight one, and a missed or failed pass is retried within the hour.
+  reads; only when something is due (yesterday once it can close, from 03:00 ET; a retry after
+  a failure; or the restatement window once its last pull is 6 h old) does it claim, read the
+  secrets, refresh the token and call Google. Before 03:00 ET yesterday is not due at all, so
+  the 00:05-02:05 ET ticks find nothing new and the day is pulled once, at 03:05 ET (final
+  review Low-1). So an hourly cron costs one Google pull every ~6 h plus the 03:05 ET one, and
+  a missed or failed pass is retried within the hour.
 - On demand: `POST /sync`, reachable **only** through the Pages Service Binding `ADS_SYNC`
   (`workers_dev = false`, `preview_urls = false`, no route). `/api/ads/refresh` (behind the
   sign-in gate) calls it only when a campaign is stale. The rate limit is atomic (migration

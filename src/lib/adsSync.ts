@@ -32,8 +32,8 @@
 import { CAMPAIGNS, type CampaignFlight } from './campaigns'
 import { microsToDollars, round2, type SpendDay, type StoredSpend } from './adsRules'
 import { mergePlacementDayRows, rowsToStoredSpend, type AdsSyncStore, type PlacementDayRow, type StoredDayRow, type SyncRunRecord, type SyncSource, type SyncStatus } from './adsStore'
-import { contiguousThrough, etDateRange, isClosedFetch } from './adsFreshness'
-import { addDays, etDateFast, etHourFast } from './etTime'
+import { CLOSED_AFTER_ET, contiguousThrough, etDateRange, isClosedFetch } from './adsFreshness'
+import { addDays, etDateFast, etHourFast, etWallTimeMs } from './etTime'
 import { redact, summarizeError } from './adsRedact'
 
 /** Google restates recent days (invalid-click credits, late conversions): re-pull this many. */
@@ -205,7 +205,14 @@ export function planCampaignSync(
   todayEt: string,
   opts: { full?: boolean; includeToday?: boolean; placements?: boolean; nowMs?: number; lastPullAt?: string | null; restatementRecheckMs?: number } = {},
 ): CampaignSyncPlan {
-  const window = syncWindow(c, todayEt)
+  // Before 03:00 ET yesterday cannot be stored as closed yet (lib/adsFreshness.ts
+  // CLOSED_AFTER_ET), so it is not due at all: a flight's hourly cron pulls it once, at 03:05 ET,
+  // instead of at 00:05, 01:05, 02:05 and again at 03:05 (final review Low-1). A read at 08:00
+  // ET is unaffected.
+  const fullWindow = syncWindow(c, todayEt)
+  const beforeClose = opts.nowMs != null && etDateFast(opts.nowMs) === todayEt && opts.nowMs < etWallTimeMs(todayEt, CLOSED_AFTER_ET)
+  const lastClosed = addDays(todayEt, beforeClose ? -2 : -1)
+  const window = fullWindow && fullWindow.until > lastClosed ? (fullWindow.since <= lastClosed ? { since: fullWindow.since, until: lastClosed } : null) : fullWindow
   const today = opts.includeToday && c.status !== 'closed' && c.flightStart != null && c.flightStart <= todayEt ? todayEt : null
   const none: CampaignSyncPlan = { campaignId: c.id, window, ranges: [], fetch: null, recheck: null, missingDays: [], missingPlacementDays: [], restatementDays: [], restatementDue: false, today, deferred: false }
   if (!window) return none
@@ -464,8 +471,9 @@ async function syncOne(
   // Each range is pulled, checked and written on its own, newest first (review L2): a range
   // that fails leaves the others alone, and nothing of a failed range is written. A range whose
   // rows do not add up is pulled again in halves (newer half first) down to single days, so one
-  // bad day never holds back the days around it; an empty response is not split (that is a
-  // broken response, not a bad day).
+  // bad day never holds back the days around it. An EMPTY daily response (no row in the range)
+  // is failed as it is, never halved: that is a broken response, not a bad day (final review
+  // Low-2).
   const after = new Map(closedStored.map((r) => [r.date, r]))
   const closedNow = new Set(closedStored.map((r) => r.date))
   const errors: string[] = []
@@ -474,7 +482,10 @@ async function syncOne(
   let placementsFailed = false
   let placementsPulled = false
   let writeFailed: string | null = null
-  const isRecent = (r: SyncRange) => !!plan.recheck && r.until === plan.recheck.until
+  // A range touching the restatement window (a half of it included) is "recent" (final review Info-1).
+  const restFirst = plan.restatementDays[0]
+  const restLast = plan.restatementDays[plan.restatementDays.length - 1]
+  const isRecent = (r: SyncRange) => !!restFirst && r.until >= restFirst && r.since <= restLast
   const queue = [...plan.ranges]
   let first = true
   const split = (r: SyncRange, why: string): boolean => {
@@ -518,7 +529,9 @@ async function syncOne(
       const total = t.value ?? ZERO
       if (!sameDay(total, sum)) {
         const why = `add up to ${dollars(sum.costMicros)} (${sum.impressions} impr, ${sum.clicks} clicks) but Google's range total is ${dollars(total.costMicros)} (${total.impressions} impr, ${total.clicks} clicks)`
-        if (!split(range, `did not add up (the daily rows ${why})`)) failRange(`ads daily: the daily rows for ${range.since}..${range.until} ${why}; nothing written for these days, treated as a failed fetch`)
+        const empty = !Object.keys(daily).some((d) => d >= range.since && d <= range.until)
+        if (empty) failRange(`ads daily: the response for ${range.since}..${range.until} was empty but Google's range total is ${dollars(total.costMicros)} (${total.impressions} impr, ${total.clicks} clicks); nothing written for these days, treated as a failed fetch`)
+        else if (!split(range, `did not add up (the daily rows ${why})`)) failRange(`ads daily: the daily rows for ${range.since}..${range.until} ${why}; nothing written for these days, treated as a failed fetch`)
         continue
       }
       // Both queries agree and the range has rows: the left-out stored days really are zero now.
@@ -788,11 +801,13 @@ export function liveFlightCampaigns(nowMs: number, campaigns: readonly CampaignF
   const todayEt = etDateFast(nowMs)
   return campaigns.filter((c) => c.flightStart != null && c.status !== 'closed' && todayEt >= c.flightStart && todayEt <= addDays(c.flightEnd, 1))
 }
-/** The ET hour of the daily pass outside a flight: just after midnight, once yesterday closed. */
-export const DAILY_SYNC_ET_HOUR = 1
+/** The ET hour of the daily pass outside a flight: 03:xx, once yesterday counts as closed
+ * (lib/adsFreshness.ts CLOSED_AFTER_ET). */
+export const DAILY_SYNC_ET_HOUR = 3
 /** The Worker's cron fires every hour (at :05). While a flight is live every tick checks what
- * is due (a new closed day right after midnight ET, a retry after a failure, the restatement
- * window every RESTATEMENT_RECHECK_MS); outside a flight only the 01:xx ET tick does. A skipped
+ * is due (yesterday once, at 03:05 ET when it has closed; a retry after a failure; the
+ * restatement window every RESTATEMENT_RECHECK_MS); outside a flight only the 03:xx ET tick
+ * does. A skipped
  * tick, and a tick with nothing due, never reads a secret or calls Google. */
 export function cronShouldSync(nowMs: number, campaigns: readonly CampaignFlight[] = CAMPAIGNS): { run: boolean; reason: string } {
   const live = liveFlightCampaigns(nowMs, campaigns)
