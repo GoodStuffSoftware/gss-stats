@@ -2,7 +2,7 @@
 //
 // Google sign-in gate for gss-stats. Every page and every /api/* route needs a
 // signed-in Google account on the ALLOWED_EMAILS allowlist. Design and alternatives:
-// docs/adr/0001-google-auth.md. Rollout order and owner setup: README "Auth".
+// docs/adr/0002-google-auth.md. Rollout order and owner setup: README "Auth".
 //
 // Shape (adapted from deckhand's core/oauth-google.mjs + routes/auth.mjs):
 //   - OAuth 2.0 authorization-code flow, confidential client (the client secret is a
