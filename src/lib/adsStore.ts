@@ -29,7 +29,7 @@ import {
   type SpendSummary,
   type StoredSpend,
 } from './adsRules'
-import { freshnessOf, isClosedFetch, spendThroughFromRows, type AdsFreshness } from './adsFreshness'
+import { freshnessOf, isClosedFetch, spendThroughFromRows, unfinishedSyncAlert, UNFINISHED_SYNC_AFTER_MS, UNFINISHED_SYNC_LOOKBACK_MS, type AdsFreshness, type SyncAlert } from './adsFreshness'
 
 export const ADS_DB_NAME = 'gss-stats-ads'
 export const ADS_DB_BINDING = 'gss_stats_ads'
@@ -324,6 +324,15 @@ export const LAST_SYNC_SQL =
   "SELECT j.value AS campaign_id, MAX(r.finished_at) AS last_sync FROM (SELECT campaigns_ok, finished_at FROM ads_sync_runs WHERE status <> 'running' ORDER BY finished_at DESC LIMIT 50) AS r, json_each(r.campaigns_ok) AS j GROUP BY j.value"
 /** When the latest sync run (any source) finished — the on-demand rate limit. */
 export const LAST_RUN_SQL = 'SELECT MAX(finished_at) AS last FROM ads_sync_runs'
+/** Sync claims with no finished run after them (review I2): a 'running' row started between the
+ * two bounds whose source and start have no non-running row. The Worker's finished row reuses
+ * its claim's source and started_at. */
+export const UNFINISHED_SYNCS_SQL =
+  "SELECT c.source AS source, c.started_at AS started_at FROM ads_sync_runs AS c WHERE c.status = 'running' AND c.started_at >= ? AND c.started_at <= ? AND NOT EXISTS (SELECT 1 FROM ads_sync_runs AS f WHERE f.status <> 'running' AND f.source = c.source AND f.started_at = c.started_at) ORDER BY c.started_at DESC LIMIT 5"
+export function unfinishedSyncBinds(nowMs: number): string[] {
+  return [new Date(nowMs - UNFINISHED_SYNC_LOOKBACK_MS).toISOString(), new Date(nowMs - UNFINISHED_SYNC_AFTER_MS).toISOString()]
+}
+const toSyncAlerts = (rows: Record<string, unknown>[]): SyncAlert[] => rows.map((r) => unfinishedSyncAlert(String(r.source ?? '?'), String(r.started_at ?? '')))
 export const RECENT_SYNC_RUNS_SQL =
   'SELECT run_key, source, started_at, finished_at, campaigns, campaigns_ok, days_fetched, days_changed, placement_rows_fetched, placement_rows_changed, status, error FROM ads_sync_runs ORDER BY id DESC LIMIT ?'
 
@@ -491,6 +500,8 @@ export interface AdsStore extends AdsSyncStore {
   getReadings(campaignId: string, limit?: number): Promise<ReadingRecord[]>
   /** The readings already stored for one campaign and ET day (the de-dup check). */
   getReadingsOn(campaignId: string, etDate: string): Promise<ReadingRecord[]>
+  /** Sync runs that claimed and never finished (killed), for the reads to report (review I2). */
+  getSyncAlerts(nowMs: number): Promise<SyncAlert[]>
   /** Appends records; a COMPLETE threshold record also marks its thresholds fired — always,
    * even when the reading itself was already stored (the state insert is idempotent). */
   appendReadings(records: readonly ReadingRecord[]): Promise<AppendOutcome>
@@ -608,6 +619,7 @@ export function createSqlAdsStore(db: AdsDb, opts: { dryRun: boolean; kind?: str
     },
     getReadings: (campaignId, limit = 200) => readings(READINGS_SQL, [campaignId, Math.max(1, Math.min(500, Math.floor(limit)))]),
     getReadingsOn: (campaignId, etDate) => readings(READINGS_ON_DAY_SQL, [campaignId, etDate]),
+    getSyncAlerts: async (nowMs) => toSyncAlerts(await select(UNFINISHED_SYNCS_SQL, unfinishedSyncBinds(nowMs))),
     async appendReadings(records) {
       const out: AppendOutcome = { written: !opts.dryRun, inserted: [], ignored: [] }
       if (opts.dryRun) return out
@@ -646,6 +658,8 @@ export interface AdsReadingsResponse {
   /** false when bound but unreadable (e.g. local D1 without the migration applied). */
   storeReadable: boolean
   campaigns: AdsReadingsCampaign[]
+  /** Sync runs that were killed mid-run in the last 7 days (review I2); absent = none. */
+  syncAlerts?: SyncAlert[]
   generatedAt: string
 }
 
@@ -707,6 +721,16 @@ export async function readLastSyncRun(db: D1Reader | undefined | null): Promise<
     return str(rows[0]?.last)
   } catch {
     return null
+  }
+}
+
+/** Killed sync runs for the dashboard (fail soft: none when unreadable). */
+export async function readSyncAlerts(db: D1Reader | undefined | null, nowMs: number): Promise<SyncAlert[]> {
+  if (!db) return []
+  try {
+    return toSyncAlerts(await allRows(db, UNFINISHED_SYNCS_SQL, unfinishedSyncBinds(nowMs)))
+  } catch {
+    return []
   }
 }
 

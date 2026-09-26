@@ -11,13 +11,14 @@
 // never a 500. Anonymous aggregates only: counts, rule results and proposals.
 //
 // Freshness per campaign (lib/adsFreshness.ts): spendThrough (last closed day stored),
-// lastSync (latest ads_sync_runs row that synced it) and stale. Read-only: this endpoint never
-// calls the Google Ads API.
+// lastSync (latest ads_sync_runs row that synced it) and stale; plus syncAlerts, sync runs that
+// claimed and never finished (killed mid-run). Read-only: this endpoint never calls the Google
+// Ads API.
 
 import { CAMPAIGNS, CAMPAIGN_SPEND } from '../../../src/lib/campaigns'
 import { resolveCampaignSpend } from '../../../src/lib/adsRules'
 import { freshnessOf } from '../../../src/lib/adsFreshness'
-import { parseCampaignIdsParam, readFreshness, readReadings, readSpendSummaries, readThresholdState, type AdsReadingsResponse } from '../../../src/lib/adsStore'
+import { parseCampaignIdsParam, readFreshness, readReadings, readSpendSummaries, readSyncAlerts, readThresholdState, type AdsReadingsResponse } from '../../../src/lib/adsStore'
 
 interface Env {
   gss_stats_ads?: D1Database
@@ -33,7 +34,7 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
   const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(500, Math.floor(limitRaw)) : 50
   const db = ctx.env.gss_stats_ads
   const nowMs = Date.now()
-  const [summaries, freshness] = await Promise.all([readSpendSummaries(db), readFreshness(db, nowMs)])
+  const [summaries, freshness, syncAlerts] = await Promise.all([readSpendSummaries(db), readFreshness(db, nowMs), readSyncAlerts(db, nowMs)])
 
   const campaigns = await Promise.all(
     ids.map(async (id) => {
@@ -50,6 +51,6 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
       }
     }),
   )
-  const body: AdsReadingsResponse = { storeBound: !!db, storeReadable: summaries !== null, campaigns, generatedAt: new Date().toISOString() }
+  const body: AdsReadingsResponse = { storeBound: !!db, storeReadable: summaries !== null, campaigns, ...(syncAlerts.length ? { syncAlerts } : {}), generatedAt: new Date().toISOString() }
   return json(body)
 }

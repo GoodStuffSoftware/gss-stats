@@ -137,7 +137,9 @@ finds nothing to write, because the sync writes only changed rows.
   sign-in gate) calls it only when a campaign is stale. The rate limit is atomic (migration
   0004): a sync first INSERTs a `'running'` claim row only if no run finished in the last 10
   minutes (one `INSERT … SELECT … WHERE NOT EXISTS`), so of two concurrent requests exactly one
-  syncs and the other gets 429. A claim with no finished row after it is a run that died.
+  syncs and the other gets 429. A claim with no finished row after it is a run that died: after
+  15 minutes `/api/ads/readings` returns it as a `syncAlerts` entry (the readings widget shows
+  it) and the reads' reports print it (review I2).
 - Work per invocation is capped: at most 7 closed days (live campaigns first, newest days
   first) and 40 D1 statements (Free allows 50); the rest continues on the next run, and the run row is always
   recorded.

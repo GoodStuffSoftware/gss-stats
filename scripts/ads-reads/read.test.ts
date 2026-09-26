@@ -609,3 +609,16 @@ describe('review M1 (2026-09-26): the reads re-pull the restatement window every
     expect(post.spend.restated).toEqual([{ date: '2026-09-29', before: 5, after: 13.4 }])
   })
 })
+
+describe('review I2 (2026-09-26): the reads report a sync run that was killed', () => {
+  it('a Worker claim with no finished run shows as a SYNC ALERT line in the morning report and its JSON', async () => {
+    const deps = fixtureDeps(base(), false)
+    expect(await deps.store.claimSync('worker-cron', Date.parse('2026-09-30T04:05:00Z'), 600_000)).toBe(true)
+    const r = await runMorningRead(deps, opts)
+    expect(r.spend.syncAlerts).toEqual([expect.stringMatching(/^The worker-cron sync started Sep 30 00:05 ET never finished/)])
+    expect(formatMorningReport(r)).toMatch(/^  SYNC ALERT: The worker-cron sync started Sep 30 00:05 ET never finished/m)
+    const quiet = await runMorningRead(fixtureDeps(base(), false), opts)
+    expect(quiet.spend.syncAlerts).toEqual([])
+    expect(formatMorningReport(quiet)).not.toMatch(/SYNC ALERT/)
+  })
+})

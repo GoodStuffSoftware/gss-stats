@@ -27,6 +27,7 @@ import {
 } from '../../src/lib/adsStore'
 import { BEACON_DB, createD1Select, inlineBinds, parseD1Response } from './d1'
 import { redactedFirstLine } from '../../src/lib/adsRedact'
+import { unfinishedSyncAlert, UNFINISHED_SYNC_AFTER_MS, UNFINISHED_SYNC_LOOKBACK_MS } from '../../src/lib/adsFreshness'
 import type { WranglerRunner } from './wrangler'
 
 export { assertAdsWriteSql }
@@ -144,6 +145,14 @@ export function createMemoryStore(
     },
     async getReadings(_id, limit = 200) {
       return [...(log?.readings ?? [])].reverse().slice(0, limit)
+    },
+    async getSyncAlerts(nowMs) {
+      return claims
+        .filter((c) => c.atMs <= nowMs - UNFINISHED_SYNC_AFTER_MS && c.atMs >= nowMs - UNFINISHED_SYNC_LOOKBACK_MS)
+        .filter((c) => !written.syncRuns.some((r) => r.source === c.source && Date.parse(r.startedAt) === c.atMs))
+        .sort((a, b) => b.atMs - a.atMs)
+        .slice(0, 5)
+        .map((c) => unfinishedSyncAlert(c.source, new Date(c.atMs).toISOString()))
     },
     async getReadingsOn(id, etDate) {
       return (log?.readings ?? []).filter((r) => r.campaignId === id && r.etDate === etDate)

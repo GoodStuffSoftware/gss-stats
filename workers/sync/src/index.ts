@@ -125,7 +125,10 @@ const json = (status: number, body: unknown): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } })
 
 /** POST /sync — on demand. Optional operator body: {"full": true, "campaignIds": [...],
- * "maxDays": n} (a full re-pull still writes only changed rows). Anything else is 404/405. */
+ * "maxDays": n} (a full re-pull still writes only changed rows). A full re-pull is capped like
+ * any run (maxDays, default WORKER_MAX_DAYS, at most 31) and keeps the newest days; it is not
+ * resumed by later runs, so give a maxDays that covers the window, or run npm run
+ * ads:backfill locally (uncapped). Anything else is 404/405. */
 export async function handleFetch(request: Request, env: Env, nowMs: number = Date.now(), opts: { fetchImpl?: FetchLike } = {}): Promise<Response> {
   const url = new URL(request.url)
   if (url.pathname !== '/sync') return json(404, { error: 'not found' })

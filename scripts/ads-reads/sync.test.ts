@@ -7,7 +7,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { SpendDay, ReadingRecord } from '../../src/lib/adsRules'
-import { createSqlAdsStore, readFreshness, type PlacementDayRow, type SqlStatement } from '../../src/lib/adsStore'
+import { createSqlAdsStore, readFreshness, readSyncAlerts, type PlacementDayRow, type SqlStatement } from '../../src/lib/adsStore'
 import { capPlan, planCampaignSync, syncAdsData, syncWindow, type AdsMetricsSource } from '../../src/lib/adsSync'
 import { campaignById } from '../../src/lib/campaigns'
 import { count, MIGRATIONS_DIR, migrationFiles, openMigratedSqlite, sqliteAdsDb, sqliteD1 } from './sqliteDb'
@@ -413,6 +413,16 @@ describe('per-run caps: finish over later runs', () => {
     expect(second.campaigns[0]).toMatchObject({ fetched: { since: '2026-09-26', until: '2026-09-27' }, pulled: false, spendThrough: '2026-09-30' })
     expect(count(sqlite, 'ads_daily_metrics')).toBe(5)
   })
+  it('I3: a capped full re-pull says it covered only the newest days and is not resumed', async () => {
+    const { store } = setup()
+    const ads = fakeAds({ [RETEST]: { '2026-09-26': day(4), '2026-09-27': day(13), '2026-09-28': day(12), '2026-09-29': day(11), '2026-09-30': day(10) } })
+    await syncAdsData({ ads: ads.src, store }, { campaignIds: [RETEST], now: nineEt('2026-10-01'), dryRun: false, source: 'ads-sync' })
+    const full = await syncAdsData({ ads: ads.src, store }, { campaignIds: [RETEST], now: nineEt('2026-10-01') + HOUR, dryRun: false, source: 'worker-on-demand', full: true, maxDays: 2 })
+    expect(full.campaigns[0]).toMatchObject({ fetched: { since: '2026-09-29', until: '2026-09-30' }, deferred: true })
+    expect(full.error).toMatch(/full re-pull of 24279250691 covered only the newest 2 day\(s\) and is not resumed/)
+    const uncapped = await syncAdsData({ ads: ads.src, store }, { campaignIds: [RETEST], now: nineEt('2026-10-01') + 2 * HOUR, dryRun: false, source: 'ads-sync', full: true })
+    expect(uncapped).toMatchObject({ status: 'ok', daysFetched: 5, error: null })
+  })
   it('the D1 statement cap stops a big run cleanly (the run row is still recorded) and the next runs finish the job', async () => {
     const { sqlite, adapter } = setup()
     const rows = Array.from({ length: 80 }, (_, i) => pl('2026-09-27', `mobileapp::2-app${i}`, 0.5))
@@ -508,6 +518,28 @@ describe('the atomic sync claim (migration 0004)', () => {
     expect(await store.claimSync('worker-cron', now + 9 * 60_000, 600_000)).toBe(false)
     expect(await store.claimSync('worker-cron', now + 11 * 60_000, 600_000)).toBe(true)
     expect(count(sqlite, 'ads_sync_runs', "status = 'running'")).toBe(2)
+  })
+})
+
+describe('killed sync runs are surfaced (review I2)', () => {
+  it("a claim with no finished run 15 min later is an alert; a finished one, a younger one or a week-old one is not", async () => {
+    const { sqlite, store } = setup()
+    const t = at('2026-09-29T04:05:00Z') // 00:05 ET
+    expect(await store.claimSync('worker-cron', t, 600_000)).toBe(true)
+    const d1 = sqliteD1(sqlite)
+    expect(await readSyncAlerts(d1, t + 14 * 60_000)).toEqual([]) // may still be running
+    const alerts = await readSyncAlerts(d1, t + 16 * 60_000)
+    expect(alerts).toEqual([{ source: 'worker-cron', startedAt: '2026-09-29T04:05:00.000Z', message: expect.stringMatching(/^The worker-cron sync started Sep 29 00:05 ET never finished \(killed mid-run/) }])
+    expect(await store.getSyncAlerts(t + 16 * 60_000)).toEqual(alerts)
+    expect(await readSyncAlerts(d1, t + 8 * 86_400_000)).toEqual([]) // older than the 7-day lookback
+    // a claim that finished (same source and start) is not an alert
+    const t2 = t + 3 * 3_600_000
+    expect(await store.claimSync('worker-on-demand', t2, 600_000)).toBe(true)
+    const ads = fakeAds({ [RETEST]: { '2026-09-26': day(4), '2026-09-27': day(13), '2026-09-28': day(12) } })
+    const r = await syncAdsData({ ads: ads.src, store }, { campaignIds: [RETEST], now: t2, dryRun: false, source: 'worker-on-demand' })
+    expect(r.runRecorded).toBe(true)
+    expect((await readSyncAlerts(d1, t2 + 20 * 60_000)).map((a) => a.source)).toEqual(['worker-cron'])
+    expect(await readSyncAlerts(undefined, t2)).toEqual([]) // no binding: fail soft
   })
 })
 

@@ -11,7 +11,7 @@
 //                 09:30 ET (the 08:00 ET morning read has synced by then), else the day before.
 
 import type { CampaignFlight } from './campaigns'
-import { addDays, etDateFast, etWallTimeMs } from './etTime'
+import { addDays, etDateFast, etHourFast, etWallTimeMs } from './etTime'
 
 /** An ET date plus `days` (same result as lib/overview.ts addEtDays). */
 export const addEtDays = addDays
@@ -87,6 +87,33 @@ export function relativeTime(iso: string | null | undefined, nowMs: number): str
   const h = Math.floor(m / 60)
   if (h < 48) return `${h}h ago`
   return `${Math.floor(h / 24)}d ago`
+}
+
+/** A sync claim (an ads_sync_runs 'running' row) with no finished row this long after it
+ * started: the run was killed mid-way (a CPU limit, a crash) — review I2. */
+export const UNFINISHED_SYNC_AFTER_MS = 15 * 60_000
+/** Killed runs older than this are no longer reported. */
+export const UNFINISHED_SYNC_LOOKBACK_MS = 7 * 86_400_000
+export interface SyncAlert {
+  source: string
+  startedAt: string
+  message: string
+}
+/** "Sep 29 00:05 ET" by arithmetic (no Intl: this module runs in the sync Worker). */
+function etStamp(iso: string): string {
+  const ms = Date.parse(iso)
+  if (!Number.isFinite(ms)) return iso
+  const d = etDateFast(ms)
+  const hh = String(etHourFast(ms)).padStart(2, '0')
+  const mm = String(new Date(ms).getUTCMinutes()).padStart(2, '0')
+  return `${MONTHS[Number(d.slice(5, 7)) - 1]} ${Number(d.slice(8, 10))} ${hh}:${mm} ET`
+}
+export function unfinishedSyncAlert(source: string, startedAt: string): SyncAlert {
+  return {
+    source,
+    startedAt,
+    message: `The ${source} sync started ${etStamp(startedAt)} never finished (killed mid-run, e.g. a CPU limit or a crash); the next run redoes whatever is still missing.`,
+  }
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']

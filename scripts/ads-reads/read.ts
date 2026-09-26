@@ -140,6 +140,8 @@ export interface SpendSection {
   storeError: string | null
   /** What the shared sync did for this campaign (src/lib/adsSync.ts). */
   sync: SyncSummary | null
+  /** Sync runs (the Worker's) that claimed and never finished in the last 7 days (review I2). */
+  syncAlerts?: string[]
 }
 export interface SyncSummary {
   status: SyncResult['status']
@@ -286,6 +288,7 @@ async function syncSpend(deps: ReadDeps, plan: AdsReadPlan, campaign: CampaignFl
     runRecorded: sync.runRecorded,
   }
   const yesterdayEt = addEtDays(todayEt, -1)
+  const alerts = await attempt('store read (sync runs)', () => deps.store.getSyncAlerts(deps.nowMs))
   const base: SpendSection = {
     ok: false,
     error: null,
@@ -299,6 +302,7 @@ async function syncSpend(deps: ReadDeps, plan: AdsReadPlan, campaign: CampaignFl
     storeWritten: false,
     storeError: null,
     sync: summary,
+    syncAlerts: alerts.ok ? alerts.value.map((a) => a.message) : [],
   }
   if (!cs.fetchOk) return { section: { ...base, error: cs.error ?? 'ads daily: failed' }, stored: null, sync, campaignSync: cs }
 
