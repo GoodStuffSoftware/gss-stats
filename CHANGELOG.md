@@ -6,6 +6,31 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Best Sudoku release history, with real dates.** The overview timeline and the "Best
+  Sudoku · Traffic" page's trend chart now mark every verified production release from
+  v1.86.4 through v1.95.3 — major releases as labeled dashed lines, minor ones as short
+  ticks — instead of a single hand-entered marker.
+- **Every Best Sudoku overview and campaigns chart is now a real widget**: movable,
+  resizable, removable, and editable from the chart menu, the same as every other chart
+  in the dashboard. A non-destructive migration converts existing saved layouts once;
+  any charts you've already customized are left exactly as they are.
+- **A "note" chart type** for the small caveats (small-sample size, attribution scope)
+  that used to be fixed page text — now their own movable/removable tile.
+- **A hidden-by-default function bar.** The page controls (tabs, filters, add chart,
+  theme) now live behind a small button in the top-right corner — hover to reveal it on
+  desktop, tap to toggle on touch, Escape or tapping outside hides it. Charts never shift
+  when it opens.
+
+### Changed
+- **Best Sudoku tabs are grouped and reordered automatically**: your own tabs first,
+  then Overview / Campaigns / Pop-ups / Traffic together in that order, then your other
+  pages — applied non-destructively on load, every load, without touching any widgets.
+- **The "Best Sudoku launch" page is now "Best Sudoku · Traffic"**, trimmed to what
+  Overview and Campaigns don't already cover (per-site/geo/referrer/device detail), and
+  its trend chart now carries release markers.
+- Every Best Sudoku tab is renamed consistently (`Best Sudoku · <name>`).
+
 ## [0.3.2] — 2026-09-26
 
 ### Added

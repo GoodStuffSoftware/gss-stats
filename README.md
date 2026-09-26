@@ -41,16 +41,27 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
 
 ## Features
 
-- **"Best Sudoku overview"** — the landing page: today-at-a-glance KPI tiles (vs the same
+- **"Best Sudoku · Overview"** — the landing page: today-at-a-glance KPI tiles (vs the same
   time yesterday and the 7-day average), a daily timeline since the first hit overlaid with
   campaign flights / release / tracking-activation markers, a campaign scorecard, and a
-  release before/after panel. See
-  [`src/lib/overview.ts`](src/lib/overview.ts) and
+  release before/after panel — each its own movable/editable widget (dataset `overview`; see
+  [`src/components/widgets/OverviewWidgetBody.vue`](src/components/widgets/OverviewWidgetBody.vue)).
+  See [`src/lib/overview.ts`](src/lib/overview.ts) and
   [`src/lib/releases.ts`](src/lib/releases.ts) (hand-entered release dates — `hits` has no
-  app-version column).
+  app-version column; major releases label the timeline, minor ones show as short ticks).
+  "Best Sudoku · Campaigns" (dataset `campaigns`; see
+  [`src/components/widgets/CampaignsWidgetBody.vue`](src/components/widgets/CampaignsWidgetBody.vue))
+  and "Best Sudoku · Traffic" (per-site/geo/referrer/device detail beyond what Overview and
+  Campaigns cover) round out the Best Sudoku tab group, which is kept together and in that
+  order — after your own tabs — by a non-destructive reorder on load (see
+  [`src/lib/defaults.ts`](src/lib/defaults.ts)'s `reorderBskGroup`).
 - **Movable / composable charts** — drag the header, resize from the corner; add /
   edit / duplicate / delete charts of any type: stat, bar, horizontal bar, stacked
-  bar, line, area, doughnut, nested doughnut, pie, table, and a geo point map.
+  bar, line, area, doughnut, nested doughnut, pie, table, a geo point map, and a static
+  note tile.
+- **A hidden-by-default function bar** — the page controls (tabs, filters, add chart,
+  theme) live behind a small top-right button: hover to reveal on desktop, tap to toggle
+  on touch, Escape or tapping outside hides it. Never shifts the chart grid.
 - **Durable, multi-page dashboards** — layout + chart definitions persist in KV (not
   `localStorage`), so they follow you across devices. Duplicate / rename / delete
   pages; a protected default page with "restore default charts"; per-page filters and
