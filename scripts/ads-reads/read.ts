@@ -264,11 +264,13 @@ interface SpendRead {
   campaignSync: CampaignSyncResult
 }
 /** Runs syncAdsData for the read's campaign (every missing closed day, plus the restatement
- * window; only changed rows are written) and today's partial numbers (never stored). */
+ * window; only changed rows are written) and today's partial numbers (never stored). The
+ * restatement window is re-pulled on EVERY read (review M1): the Worker's 6 h cadence must not
+ * let a read decide on a yesterday it pulled hours earlier, before Google's late data landed. */
 async function syncSpend(deps: ReadDeps, plan: AdsReadPlan, campaign: CampaignFlight, todayEt: string, source: SyncSource): Promise<SpendRead> {
   const sync = await syncAdsData(
     { ads: deps.ads, adsInitError: deps.adsInitError, store: deps.store },
-    { campaignIds: [plan.campaignId], now: deps.nowMs, dryRun: deps.dryRun, source, includeToday: true },
+    { campaignIds: [plan.campaignId], now: deps.nowMs, dryRun: deps.dryRun, source, includeToday: true, restatementRecheckMs: 0 },
   )
   const cs = sync.campaigns[0]
   const summary: SyncSummary = {

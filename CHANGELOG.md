@@ -45,6 +45,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **The newest Ads days sync first.** The last three days are pulled before any older gap, so
   one day that keeps failing never holds back newer ones, and the restatement re-check only
   counts when all three days were pulled.
+- **The morning read, backstop and post-flight read always re-check the last three days.**
+  They no longer skip that re-check because the sync worker pulled a few hours earlier, so a
+  read never decides on a yesterday pulled before Google's late data arrived.
 - **A day counts as final from 03:00 ET the next day.** A pull just after midnight no longer
   marks yesterday as closed, so late clicks and cost that Google adds overnight are picked up.
 - **The Refresh warning about a mismatched sync Worker covers every campaign setting** (name,
