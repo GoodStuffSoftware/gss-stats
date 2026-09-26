@@ -17,17 +17,17 @@ import { breakdownColumnExpr, buildMergedBreakdownSql, buildMergedRingSql } from
 
 let db: DatabaseSync
 
-const COLUMNS = ['ts', 'site', 'region', 'country', 'device', 'browser', 'os', 'referrer', 'campaign'] as const
+const COLUMNS = ['ts', 'site', 'region', 'country', 'device', 'browser', 'os', 'referrer', 'campaign', 'path', 'screenw'] as const
 type Row = Partial<Record<(typeof COLUMNS)[number], string | number>>
 
 function insertRow(row: Row) {
-  const cols = COLUMNS.map((c) => (row[c] === undefined ? (c === 'ts' ? Date.now() : '') : row[c]))
+  const cols = COLUMNS.map((c) => (row[c] === undefined ? (c === 'ts' ? Date.now() : c === 'screenw' ? 0 : '') : row[c]))
   db.prepare(`INSERT INTO hits (${COLUMNS.join(', ')}) VALUES (${COLUMNS.map(() => '?').join(', ')})`).run(...(cols as any[]))
 }
 
 beforeEach(() => {
   db = new DatabaseSync(':memory:')
-  db.exec(`CREATE TABLE hits (${COLUMNS.map((c) => `${c} ${c === 'ts' ? 'INTEGER' : 'TEXT'}`).join(', ')})`)
+  db.exec(`CREATE TABLE hits (${COLUMNS.map((c) => `${c} ${c === 'ts' || c === 'screenw' ? 'INTEGER' : 'TEXT'}`).join(', ')})`)
 })
 afterEach(() => db.close())
 
@@ -172,5 +172,83 @@ describe('ring (N-dimension breakdown): merged query total matches the old two-q
     const newR = newMergedRing(cols, whereSql, binds, groupBy, 8)
     expect(newR.total).toBe(oldR.total)
     expect(newR.total).toBe(150)
+  })
+})
+
+// ── New derived dimensions (feat/all-beacon-fields): screenw, screenwBucket, pathFamily ────
+//
+// Runs the real breakdownColumnExpr() output against a real SQLite engine (not a hand-rolled
+// re-implementation) to prove the blank/bucket/family labeling is correct — every hit is
+// bucketed under SOME label (nothing silently drops), and the "(unknown)"/family buckets match
+// exactly the rows a human would expect.
+describe('breakdownColumnExpr — new derived dimensions', () => {
+  it('screenw: buckets the INTEGER 0 sentinel under the blank label, everything else as its own value', () => {
+    insertRow({ screenw: 0 })
+    insertRow({ screenw: 0 })
+    insertRow({ screenw: 1024 })
+    insertRow({ screenw: 375 })
+    const col = breakdownColumnExpr('screenw', '(unknown)')
+    const rows = db.prepare(`SELECT ${col} AS k, COUNT(*) AS c FROM hits GROUP BY k ORDER BY c DESC, k ASC`).all() as any[]
+    expect(rows).toEqual([
+      { k: '(unknown)', c: 2 },
+      { k: '1024', c: 1 },
+      { k: '375', c: 1 },
+    ])
+  })
+
+  it('screenwBucket: groups raw widths into the fixed bucket set, 0 under the blank label', () => {
+    insertRow({ screenw: 0 })
+    insertRow({ screenw: 320 }) // <480
+    insertRow({ screenw: 479 }) // <480
+    insertRow({ screenw: 480 }) // 480-767
+    insertRow({ screenw: 767 }) // 480-767
+    insertRow({ screenw: 768 }) // 768-1023
+    insertRow({ screenw: 1024 }) // 1024-1439
+    insertRow({ screenw: 1439 }) // 1024-1439
+    insertRow({ screenw: 1440 }) // 1440+
+    insertRow({ screenw: 4000 }) // 1440+
+    const col = breakdownColumnExpr('screenwBucket', '(unknown)')
+    const rows = db.prepare(`SELECT ${col} AS k, COUNT(*) AS c FROM hits GROUP BY k ORDER BY k`).all() as any[]
+    expect(rows).toEqual([
+      { k: '(unknown)', c: 1 },
+      { k: '1024-1439', c: 2 },
+      { k: '1440+', c: 2 },
+      { k: '480-767', c: 2 },
+      { k: '768-1023', c: 1 },
+      { k: '<480', c: 2 },
+    ])
+  })
+
+  it('pathFamily: groups every event-beacon prefix into its own family, everything else as "page"', () => {
+    insertRow({ path: '/home' })
+    insertRow({ path: '/game' }) // NOT an event path (only /game/complete/... is)
+    insertRow({ path: '/signin-prompt/placement' })
+    insertRow({ path: '/signin-prompt/accept' })
+    insertRow({ path: '/popup-outcome/upsell/signed-in' })
+    insertRow({ path: '/return/uc123/d0' })
+    insertRow({ path: '/install/play' })
+    insertRow({ path: '/game/complete/normal/easy' })
+    insertRow({ path: '/auth/success/google' }) // base row — NOT an event path, stays 'page'
+    insertRow({ path: '/auth/success/google/new' }) // status row IS an event path
+    const col = breakdownColumnExpr('pathFamily', '')
+    const rows = db.prepare(`SELECT ${col} AS k, COUNT(*) AS c FROM hits GROUP BY k ORDER BY k`).all() as any[]
+    expect(rows).toEqual([
+      { k: 'auth-status', c: 1 },
+      { k: 'game-complete', c: 1 },
+      { k: 'install', c: 1 },
+      { k: 'page', c: 3 }, // /home, /game, /auth/success/google
+      { k: 'popup-outcome', c: 1 },
+      { k: 'return', c: 1 },
+      { k: 'signin-prompt', c: 2 },
+    ])
+  })
+
+  it('pathFamily is usable as a filter expression (DERIVED_FILTER_EXPR shape: bound equality)', () => {
+    insertRow({ path: '/home' })
+    insertRow({ path: '/install/play' })
+    insertRow({ path: '/install/web' })
+    const col = breakdownColumnExpr('pathFamily', '')
+    const row = db.prepare(`SELECT COUNT(*) AS c FROM hits WHERE (${col}) = ?`).get('install') as any
+    expect(row.c).toBe(2)
   })
 })
