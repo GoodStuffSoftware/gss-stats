@@ -86,13 +86,28 @@ const INSTALL_PROMPT_DISMISS = ['dismiss', 'dismiss-forever', 'have-it'] as cons
 export const POPUP_OUTCOME_TYPES = ['signed-in', 'installed', 'returned', 'still-playing'] as const
 
 // The /popup-outcome/<popup>/<outcome> wire vocabulary (FINAL LIST) differs from the
-// internal family id for install: the beacon's own path segment is "install-prompt", but
-// the family everywhere else in this file (POPUPS id, classifyPopupPath's 'install'
-// family) is "install". This is the ONE place that reconciles the two names — every other
-// popup's wire name already matches its internal id 1:1.
+// internal family id in two places:
+//  - install: the beacon's own path segment is "install-prompt", but the family
+//    everywhere else in this file (POPUPS id, classifyPopupPath's 'install' family) is
+//    "install".
+//  - promo-first50: BUG FOUND 2026-09-26, verified against best-sudoku origin/main
+//    (src/services/popupOutcomes.ts:79-109,299 + SignInPromptDialog.vue:361). The OUTCOME
+//    beacon's wire name is "first50-offer" (`/popup-outcome/first50-offer/<outcome>`), NOT
+//    "promo-first50" — only the separate SHOWN/accept/dismiss beacons use the literal
+//    "/promo-first50/..." path (classifyPopupPath's dedicated /promo-first50 branch above,
+//    unaffected by this). Without 'first50-offer' in this map, every real outcome row for
+//    the first-50 promo classified as unknown and was silently dropped. 'promo-first50' is
+//    kept here too as a tolerated alias (in case any historical/test data used it as the
+//    outcome name), but the name a real device actually sends is 'first50-offer'.
+// This is the ONE place that reconciles wire names to family ids — every other popup's
+// wire name already matches its internal id 1:1. Downstream consumers (lib/campaigns.ts,
+// lib/adsRules.ts, scripts/ads-reads) all read family ids off classifyPopupPath's result
+// rather than re-parsing /popup-outcome/<name> themselves, so fixing the mapping here is
+// enough — nothing else hardcodes the wire name.
 export const POPUP_OUTCOME_NAME_TO_FAMILY: Record<string, string> = {
   'signin-prompt': 'signin-prompt',
-  'promo-first50': 'promo-first50',
+  'promo-first50': 'promo-first50', // tolerated alias — real beacons send 'first50-offer'
+  'first50-offer': 'promo-first50',
   upsell: 'upsell',
   'install-prompt': 'install',
 }
@@ -251,10 +266,14 @@ export function classifyPopupPath(path: string): PopupEvent | null {
 
   if (path === '/popup-outcome' || path.startsWith('/popup-outcome/')) {
     const [name, outcome] = segments(path, '/popup-outcome')
-    // FINAL LIST: <popup> is exactly {signin-prompt, promo-first50, upsell, install-prompt}
-    // — resolved through POPUP_OUTCOME_NAME_TO_FAMILY so 'install-prompt' lands on the
-    // 'install' family (see that constant's doc comment). Any other name (including the
-    // bare 'install', which is NOT part of this wire vocabulary) doesn't classify.
+    // FINAL LIST: <popup> is exactly {signin-prompt, promo-first50, first50-offer, upsell,
+    // install-prompt} — resolved through POPUP_OUTCOME_NAME_TO_FAMILY so 'install-prompt'
+    // lands on the 'install' family, and both 'first50-offer' (the real wire name) and
+    // 'promo-first50' (a tolerated alias) land on 'promo-first50' — see that constant's doc
+    // comment for the 2026-09-26 first50-offer bug this fixed. first50-congrats
+    // deliberately has NO outcome tracking (product decision, POPUPS[].noOutcomeTracking):
+    // its rows return null here, same as any other unrecognized name, but they are still
+    // counted — never silently dropped — via aggregatePopupRows' unexpectedOutcomeRows.
     const family = name ? POPUP_OUTCOME_NAME_TO_FAMILY[name] : undefined
     if (family && outcome && (POPUP_OUTCOME_TYPES as readonly string[]).includes(outcome)) {
       return { family: `popup-outcome:${family}`, kind: outcome }
@@ -436,6 +455,15 @@ export interface PopupAggregate {
   // so the "installed" outcome rate compares post-fix outcomes with post-fix showings — a
   // pre-fix showing could never produce one.
   installPostFix: { shown: number; installed: number }
+  // Rows under /popup-outcome/ whose <popup> name classifyPopupPath doesn't recognize —
+  // first50-congrats (no outcome tracking, by product decision) or a genuinely
+  // unknown/bogus name. This is deliberately NOT mapped into a family (that would invent a
+  // rate for a popup that was never meant to have one — see NO_OUTCOME_TRACKING_NOTE), but
+  // it is never silently dropped either: this counter surfaces that the rows exist
+  // (functions/api/popups.ts includes it in `meta` when nonzero) so an operator can notice
+  // an unexpected wire name arriving, the way the 2026-09-26 first50-offer bug should have
+  // been caught sooner (see POPUP_OUTCOME_NAME_TO_FAMILY's doc comment).
+  unexpectedOutcomeRows: number
 }
 
 const coarseKey = (family: string, kind: string) => `${family}|${kind}`
@@ -456,9 +484,15 @@ export function aggregatePopupRows(
   const measuredCoarse = new Map<string, number>()
   const measuredDetailed = new Map<string, number>()
   const installPostFix = { shown: 0, installed: 0 }
+  let unexpectedOutcomeRows = 0
   for (const r of rows) {
     const ev = classifyPopupPath(r.path)
-    if (!ev) continue
+    if (!ev) {
+      // Never silently drop an unrecognized /popup-outcome/ row — count it as "unexpected"
+      // instead (see PopupAggregate.unexpectedOutcomeRows).
+      if (r.path === '/popup-outcome' || r.path.startsWith('/popup-outcome/')) unexpectedOutcomeRows += r.count
+      continue
+    }
     bump(coarse, coarseKey(ev.family, ev.kind), r.count)
     if (ev.extra) bump(detailed, detailedKey(ev.family, ev.kind, ev.extra), r.count)
     const etDate = etDateFromMs(r.hourStartMs)
@@ -472,7 +506,7 @@ export function aggregatePopupRows(
     if (postFix && ev.family === 'install' && ev.kind === 'shown') installPostFix.shown += r.count
     if (postFix && ev.family === 'popup-outcome:install' && ev.kind === 'installed') installPostFix.installed += r.count
   }
-  return { coarse, detailed, byDay, measuredCoarse, measuredDetailed, installPostFix }
+  return { coarse, detailed, byDay, measuredCoarse, measuredDetailed, installPostFix, unexpectedOutcomeRows }
 }
 
 export function coarseCount(agg: PopupAggregate, family: string, kind: string): number {
