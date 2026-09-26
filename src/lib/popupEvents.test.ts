@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest'
 import {
   classifyPopupPath,
   isPopupEventPath,
+  popupExcludeClause,
+  popupIncludeClause,
   POPUP_EVENT_PREFIXES,
+  GAME_COMPLETE_LIVE_AT,
+  NEW_BEACONS_LIVE_AT_ET,
   etDateFromMs,
   computeRate,
   aggregatePopupRows,
@@ -315,7 +319,7 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
   // exactly how '/return' was accidentally left off this list on this branch — see the
   // 2026-09-25 review). If this ever fails, either a prefix was removed (update this
   // literal list deliberately) or one was never added (fix the array instead).
-  it('POPUP_EVENT_PREFIXES is exactly these 8 prefixes', () => {
+  it('POPUP_EVENT_PREFIXES is exactly these 9 prefixes', () => {
     expect([...POPUP_EVENT_PREFIXES]).toEqual([
       '/signin-prompt',
       '/signin-eligible',
@@ -325,6 +329,7 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
       '/install',
       '/popup-outcome',
       '/return',
+      '/game/complete/',
     ])
   })
   it('matches every popup prefix, exactly and as a subpath', () => {
@@ -337,6 +342,45 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
     expect(isPopupEventPath('/')).toBe(false)
     expect(isPopupEventPath('/play')).toBe(false)
     expect(isPopupEventPath('/installer')).toBe(false) // must not prefix-match "/install" loosely
+  })
+  // v1.95.5 (2026-09-26T19:43:02Z): '/game/complete/<mode>/<difficulty>' must never count
+  // as a page view, but '/game' — the real "played a game" page view (lib/campaigns.ts
+  // PLAYED_PATH) — absolutely must keep counting. Regression coverage for both directions.
+  it('excludes every /game/complete/... completion beacon', () => {
+    expect(isPopupEventPath('/game/complete/normal/easy')).toBe(true)
+    expect(isPopupEventPath('/game/complete/daily/unknown')).toBe(true)
+  })
+  it('/game itself (the real page view) survives — only /game/complete/... is excluded', () => {
+    expect(isPopupEventPath('/game')).toBe(false)
+    expect(isPopupEventPath('/game/')).toBe(false)
+    expect(isPopupEventPath('/game/complete')).toBe(false) // no trailing slash — not a real beacon shape either
+  })
+})
+
+describe('v1.95.5 go-live markers', () => {
+  it('GAME_COMPLETE_LIVE_AT is the confirmed first-live instant; NEW_BEACONS_LIVE_AT_ET is its ET calendar day', () => {
+    expect(GAME_COMPLETE_LIVE_AT).toBe(Date.parse('2026-09-26T19:43:02Z'))
+    expect(NEW_BEACONS_LIVE_AT_ET).toBe('2026-09-26')
+  })
+})
+
+describe('popupExcludeClause / popupIncludeClause anchoring for /game/complete/ (LIKE-prefix hard requirement)', () => {
+  it('excludes /game/complete/... without excluding /game', () => {
+    const w: string[] = []
+    const b: unknown[] = []
+    popupExcludeClause(w, b)
+    // The /game/complete/ entry ends in '/' already — must produce exactly one
+    // `path NOT LIKE ?` bound to '/game/complete/%', never '/game/complete%' (which would
+    // also swallow a hypothetical unrelated '/game/completely-unrelated' path) and never
+    // '/game/complete//%' (a spurious extra slash that would exclude nothing real).
+    expect(b).toContain('/game/complete/%')
+    expect(b).not.toContain('/game/complete%')
+    expect(b).not.toContain('/game/complete//%')
+  })
+  it('popupIncludeClause is the exact inverse for the /game/complete/ entry', () => {
+    const { sql, binds } = popupIncludeClause()
+    expect(sql).toContain('path LIKE ?')
+    expect(binds).toContain('/game/complete/%')
   })
 })
 
