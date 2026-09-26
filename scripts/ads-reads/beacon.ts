@@ -6,7 +6,7 @@
 // nothing is joined across rows.
 
 import { applyExclusions, campaignAttributionClause, type CampaignFlight } from '../../src/lib/campaigns'
-import { popupIncludeClause, type HourPathCount } from '../../src/lib/popupEvents'
+import { excludeInstallGapUnmeasured, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, popupIncludeClause, type HourPathCount } from '../../src/lib/popupEvents'
 import type { ReturnRow, ReturnSiteStat, TaggedRow } from '../../src/lib/adsRules'
 import type { D1Select } from './d1'
 
@@ -24,17 +24,25 @@ export function taggedRowsQuery(campaign: CampaignFlight): Query {
   const w = [attr.sql]
   const b: unknown[] = [...attr.binds]
   applyExclusions(w, b)
+  excludeInstallGapUnmeasured(w, b) // pre-fix install-gap rows are unmeasured, not zero
   return { sql: `SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, visitor, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY hr, path, visitor`, binds: b }
 }
 
 /** Site-wide pop-up/event rows on the web site since `sinceMs`, by (UTC hour, path). NOT
  * campaign-attributed — outcome beacons fire in later, untagged sessions. */
-export function siteEventsQuery(sinceMs: number): Query {
+export function siteEventsQuery(sinceMs: number, fixedAtMs: number | null = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS): Query {
   const inc = popupIncludeClause()
   const w = ['site = ?', 'ts >= ?', inc.sql]
   const b: unknown[] = [WEB_SITE, sinceMs, ...inc.binds]
   applyExclusions(w, b)
-  return { sql: `SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY hr, path`, binds: b }
+  // `pf` splits each hour row-exactly at the install fix (lib/popupEvents.ts
+  // INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS): summarizeSiteEvents drops pre-fix gap rows and
+  // counts post-fix accepts for the install health pair.
+  const pf = fixedAtMs === null ? '0' : '(ts >= ?)'
+  return {
+    sql: `SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, ${pf} AS pf, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY hr, path, pf`,
+    binds: fixedAtMs === null ? b : [fixedAtMs, ...b],
+  }
 }
 
 /** /return/<uc>/<bucket> rows for this campaign's tags on web and app — attributed by the
@@ -75,7 +83,7 @@ export function createBeaconSource(select: D1Select): BeaconSource {
     async siteEvents(sinceMs) {
       const q = siteEventsQuery(sinceMs)
       const rows = await select<any>(q.sql, q.binds)
-      return rows.map((x) => ({ hourStartMs: n(x.hr) * 3_600_000, path: String(x.path ?? ''), count: n(x.c) }))
+      return rows.map((x) => ({ hourStartMs: n(x.hr) * 3_600_000, path: String(x.path ?? ''), count: n(x.c), postInstallFix: n(x.pf) === 1 }))
     },
     async returns(campaign) {
       const q = returnRowsQuery(campaign)

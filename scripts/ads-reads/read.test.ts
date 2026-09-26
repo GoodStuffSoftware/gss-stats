@@ -190,16 +190,26 @@ describe('morning-read: quiet days, the hard cap and release health', () => {
     expect(r.releaseHealth.evaluated).toBe(false)
     expect(r.releaseHealth.reason).toMatch(/quiet window/)
   })
-  it('the evening backstop evaluates on a day that served ads, never alerting on the install known gap', async () => {
+  it('the evening backstop evaluates on a day that served ads; 2 post-fix install accepts are only a watch', async () => {
     const fx = base()
     fx.now = '2026-09-30T03:30:00Z' // 23:30 ET on 09-29
     ads(fx).daily['2026-09-29'].costMicros = 13_400_000
     const r = await runMorningRead(fixtureDeps(fx, false), { ...opts, healthOnly: true })
     expect(r.mode).toBe('health-only')
     expect(r.releaseHealth.evaluated).toBe(true)
-    const install = r.releaseHealth.results!.find((x) => x.id === 'install-prompt→install-outcome')!
-    expect(install.status).toBe('known-gap')
+    const install = r.releaseHealth.results!.find((x) => x.id === 'install-accept→installed')!
+    expect(install).toMatchObject({ status: 'watch', parent: 2, children: 0 })
     expect(r.notify.push).toBe(false)
+  })
+  it('the backstop RAISES install accepts >= MIN_COHORT after the fix with no installed outcome', async () => {
+    const fx = base()
+    fx.now = '2026-09-30T03:30:00Z'
+    const b = fx.beacon as Extract<Fixture['beacon'], { siteEvents: unknown }>
+    b.siteEvents = b.siteEvents.map((x) => (x.path === '/install/pwa-accept' ? { ...x, count: 6 } : x))
+    const r = await runMorningRead(fixtureDeps(fx, false), { ...opts, healthOnly: true })
+    expect(r.releaseHealth.results!.find((x) => x.id === 'install-accept→installed')!.status).toBe('alert')
+    expect(r.notify.push).toBe(true)
+    expect(r.notify.text).toMatch(/release-health ALERT: install-prompt accepts \(\/install\/pwa-accept, after the fix, ≥24h old\) 6, \/popup-outcome\/install-prompt\/installed \(after the fix\) 0\./)
   })
   it('the backstop PUSHES on a real alert (parent >= MIN_COHORT, outcome window elapsed, child zero) and never on a watch', async () => {
     const fx = base()

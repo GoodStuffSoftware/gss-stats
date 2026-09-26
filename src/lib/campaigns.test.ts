@@ -32,7 +32,7 @@ import {
   isInstallPromptInstalled,
   RAW_INSTALL_SIGNALS_LABEL,
 } from './campaigns'
-import { INSTALL_ACCEPT_OUTCOME_FIXED_ET } from './popupEvents'
+import { INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS } from './popupEvents'
 
 describe('etMidnightUtcMs / etFlightRangeMs (DST-safe ET date <-> UTC ms)', () => {
   it('EST (winter, UTC-5): ET midnight is 05:00 UTC', () => {
@@ -202,9 +202,9 @@ describe('classifyFunnelPath / computeFunnelCounts / funnelStepRates', () => {
     )
     expect(counts.install).toBe(1)
   })
-  it('the install step carries the known-gap label while INSTALL_ACCEPT_OUTCOME_FIXED_ET is unset', () => {
-    expect(INSTALL_ACCEPT_OUTCOME_FIXED_ET).toBeNull()
-    expect(FUNNEL_STEP_LABELS.install).toContain('known gap: prompt-driven installs not recorded (fix pending)')
+  it('the install fix shipped (v1.95.4, first confirmed post-fix instant 16:26:36Z); the step label is plain, the caveat travels per range', () => {
+    expect(INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS).toBe(Date.parse('2026-09-26T16:26:36Z'))
+    expect(FUNNEL_STEP_LABELS.install).toBe('Install')
   })
   it('never maps anything to "completed" — no matching path exists anywhere in D1', () => {
     for (const p of ['/game', '/', '/stats', '/settings', '/complete', '/game/complete', '/win']) {

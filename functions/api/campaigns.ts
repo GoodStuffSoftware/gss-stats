@@ -26,6 +26,8 @@ import {
   countryBucket,
   etHourFromMs,
   etFlightRangeMs,
+  etMidnightUtcMs,
+  etTimeUtcMs,
   flightDayIndex,
   funnelStepRates,
   parseReturnPath,
@@ -38,7 +40,7 @@ import {
   type FunnelPathCount,
   type FunnelStepKey,
 } from '../../src/lib/campaigns'
-import { etDateFromMs, TRACKING_ACTIVATION_DATE_ET } from '../../src/lib/popupEvents'
+import { etDateFromMs, excludeInstallGapUnmeasured, installOutcomeGapNote, TRACKING_ACTIVATION_DATE_ET } from '../../src/lib/popupEvents'
 import { resolveCampaignSpend } from '../../src/lib/adsRules'
 import { readSpendSummaries } from '../../src/lib/adsStore'
 import { isRawInstallSignal, RAW_INSTALL_SIGNALS_LABEL } from '../../src/lib/campaigns'
@@ -83,6 +85,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const w1: string[] = [attr.sql]
   const b1: unknown[] = [...attr.binds]
   applyExclusions(w1, b1)
+  excludeInstallGapUnmeasured(w1, b1) // pre-fix install-gap rows are unmeasured, not zero
   const sql1 = `SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, country, visitor, COUNT(*) AS c FROM hits WHERE ${w1.join(' AND ')} GROUP BY hr, path, country, visitor`
 
   // ── Query 2: device mix (os / browser / screen width) within the flight window. ─────────
@@ -218,7 +221,18 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       measurement: campaign.measurement ?? null,
       measurabilityNote: campaign.measurabilityNote ?? null,
     },
-    funnel: { counts, rates, notInstrumented, arrivalsCaveat: ARRIVALS_CAVEAT },
+    funnel: {
+      counts,
+      rates,
+      notInstrumented,
+      arrivalsCaveat: ARRIVALS_CAVEAT,
+      // Install-fix caveat for THIS campaign's attribution range (none once it is all post-fix).
+      installNote:
+        installOutcomeGapNote({
+          startMs: campaign.flightStart ? (campaign.flightStartTimeEt ? etTimeUtcMs(campaign.flightStart, campaign.flightStartTimeEt) : etMidnightUtcMs(campaign.flightStart)) : 0,
+          endMs: Date.now(),
+        }) || null,
+    },
     taggedHits, // labeled separately from arrivals — see ARRIVALS_CAVEAT / the DEFINITION FIX comment above
     funnelByCountry,
     hourOfDayEt,

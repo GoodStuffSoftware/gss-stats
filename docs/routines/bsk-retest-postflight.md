@@ -106,5 +106,5 @@ propose nothing.
 Print the human report verbatim, then at most three lines: push and bus status, any `errors`
 in plain words, and the decision-table row with its "next" text exactly as reported. Keep the
 standing caveats the report carries (anecdotal numbers from about 14 registered users; the
-upsell signed-out bug; signin-eligible is a count; the install-outcome known gap until the fix
-date is set; Play installs include Mike's household).
+upsell signed-out bug; signin-eligible is a count; install outcomes measured only from the
+26 Sep 12:26 ET install fix; Play installs include Mike's household).

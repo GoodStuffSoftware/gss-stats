@@ -115,28 +115,71 @@ export const SIGNIN_ELIGIBLE_CAVEAT = 'Deferred ≥30 min after the finish — r
 // ads routine's report carries the same sentence (lib/adsRules.ts MEASUREMENT_QUIET_NOTE).
 export const POPUP_PAGE_NOTE = 'Outcomes and return visits may arrive up to 30 minutes late; a small number are lost.'
 
-// ── Known gap: prompt-driven installs record no install outcome (fix pending) ──────────
-// Confirmed by the Best Sudoku session 2026-09-26 (fix branch fix/install-accept-outcome,
-// not yet shipped): accepting the install prompt marks the device installed immediately, so
-// the later appinstalled / standalone handlers return early — a prompt-driven install never
-// emits /install/pwa-installed or /popup-outcome/install-prompt/installed. /install/pwa-accept
-// (the TAP) is still accurate. While this is null, every place that shows the install-prompt
-// "installed" outcome rate or the pwa-installed count carries INSTALL_OUTCOME_GAP_LABEL, and
-// the ads routine treats "install prompt shown → install outcome" as a known gap, never an
-// alert. When the fix ships to production WEB, set this to that ET date (YYYY-MM-DD): the
-// label then says the counts are only complete from that date, and the routine's health
-// check counts only prompts shown on or after it.
-export const INSTALL_ACCEPT_OUTCOME_FIXED_ET: string | null = null
+// ── Install-outcome gap, fixed in Best Sudoku v1.95.4 ──────────────────────────────────
+// Before the fix, accepting the install prompt marked the device installed immediately, so
+// the later appinstalled / standalone handlers returned early: a prompt-driven install never
+// emitted /install/pwa-installed or /popup-outcome/install-prompt/installed.
+// /install/pwa-accept (the TAP) was always accurate.
+//
+// FIXED: v1.95.4 shipped to production web. The first CONFIRMED post-fix instant is
+// 2026-09-26T16:26:36Z (12:26:36 ET); 16:25:27Z-16:26:36Z is indeterminate, so the boundary
+// sits at its end. Rows of the two gap paths (INSTALL_GAP_PATHS) with ts BEFORE this instant
+// are UNMEASURED ("known gap before fix"): they never feed a count, a rate or an alert —
+// see isInstallGapUnmeasured and excludeInstallGapUnmeasured. At or after it they are measured
+// normally and the known-gap label disappears; a range spanning it carries INSTALL_FIX_NOTE.
+// null would mean "fix not shipped" (the whole history unmeasured, pending label).
+export const INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS: number | null = Date.parse('2026-09-26T16:26:36Z')
+/** The two paths the gap affected. /install/pwa-accept (the tap) and the other outcome
+ * beacons were never affected. */
+export const INSTALL_GAP_PATHS = ['/popup-outcome/install-prompt/installed', '/install/pwa-installed'] as const
 export const INSTALL_OUTCOME_GAP_LABEL = 'known gap: prompt-driven installs not recorded (fix pending)'
-
-/** True while prompt-driven installs are still unrecorded. */
-export function installOutcomeGapOpen(fixedEt: string | null = INSTALL_ACCEPT_OUTCOME_FIXED_ET): boolean {
-  return fixedEt === null
+export const INSTALL_GAP_BEFORE_FIX_LABEL = 'known gap before fix: prompt-driven installs not recorded'
+/** "install fix went live 26 Sep 12:26 ET" — for any range that spans the fix. */
+export function installFixMarkerLabel(fixedAtMs: number | null = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS): string | null {
+  if (fixedAtMs === null) return null
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+      .formatToParts(new Date(fixedAtMs))
+      .map((x) => [x.type, x.value]),
+  )
+  return `install fix went live ${p.day} ${p.month} ${p.hour}:${p.minute} ET`
 }
-/** The label for an install-outcome figure: the gap label while open, a "complete from"
- * note once the fix date is set (earlier rows stay under-recorded). */
-export function installOutcomeGapNote(fixedEt: string | null = INSTALL_ACCEPT_OUTCOME_FIXED_ET): string {
-  return fixedEt === null ? INSTALL_OUTCOME_GAP_LABEL : `prompt-driven installs recorded from ${fixedEt} only`
+export const INSTALL_FIX_NOTE = `${installFixMarkerLabel() ?? ''}; earlier prompt-driven installs not recorded`
+
+/** True while the fix has not shipped at all. */
+export function installOutcomeGapOpen(fixedAtMs: number | null = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS): boolean {
+  return fixedAtMs === null
+}
+/** A gap-path row at `tsMs` is unmeasured when it predates the fix (boundary inclusive: a row
+ * AT the fix instant is measured). Rows of any other path are never affected. */
+export function isInstallGapUnmeasured(path: string, tsMs: number, fixedAtMs: number | null = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS): boolean {
+  if (!(INSTALL_GAP_PATHS as readonly string[]).includes(path)) return false
+  return fixedAtMs === null || tsMs < fixedAtMs
+}
+/** SQL twin of isInstallGapUnmeasured, for queries that count installs: drops pre-fix gap rows
+ * row-exactly (by `ts`), leaving everything else. */
+export function excludeInstallGapUnmeasured(w: string[], b: unknown[], fixedAtMs: number | null = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS): void {
+  if (fixedAtMs === null) {
+    w.push(`path NOT IN (${INSTALL_GAP_PATHS.map(() => '?').join(', ')})`)
+    b.push(...INSTALL_GAP_PATHS)
+  } else {
+    w.push(`NOT (path IN (${INSTALL_GAP_PATHS.map(() => '?').join(', ')}) AND ts < ?)`)
+    b.push(...INSTALL_GAP_PATHS, fixedAtMs)
+  }
+}
+/** The label for an install-outcome figure covering [startMs, endMs): nothing once the whole
+ * range is after the fix, "known gap before fix" when it is all before, the fix note when it
+ * spans the fix (or no range is known), the pending label while unfixed. */
+export function installOutcomeGapNote(range?: { startMs: number; endMs: number } | null, fixedAtMs: number | null = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS): string {
+  if (fixedAtMs === null) return INSTALL_OUTCOME_GAP_LABEL
+  if (range && range.startMs >= fixedAtMs) return ''
+  if (range && range.endMs <= fixedAtMs) return INSTALL_GAP_BEFORE_FIX_LABEL
+  return INSTALL_FIX_NOTE
+}
+/** "<text> (<note>)", or just "<text>" when there is no note for the range. */
+export function withInstallGapNote(text: string, range?: { startMs: number; endMs: number } | null, fixedAtMs: number | null = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS): string {
+  const note = installOutcomeGapNote(range, fixedAtMs)
+  return note ? `${text} (${note})` : text
 }
 /** Which figures the gap touches: the install-prompt "installed" outcome rate
  * (POPUP_RATE_SPECS key `install:outcome:installed`), the popup-outcome "installed" count for
@@ -365,6 +408,15 @@ export interface HourPathCount {
   hourStartMs: number // the UTC hour bucket's start instant
   path: string
   count: number
+  /** Row-exact "ts >= INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS" from the query, when it split on
+   * it. Absent = fall back to the hour bucket (post-fix only if the bucket starts at or after
+   * the fix — the conservative side). */
+  postInstallFix?: boolean
+}
+/** Whether an hour-bucketed row counts as on/after the install fix (see HourPathCount). */
+export function rowIsPostInstallFix(r: HourPathCount, fixedAtMs: number | null = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS): boolean {
+  if (fixedAtMs === null) return false
+  return r.postInstallFix ?? r.hourStartMs >= fixedAtMs
 }
 
 export interface PopupAggregate {
@@ -380,6 +432,10 @@ export interface PopupAggregate {
   // unfiltered — the trend chart and any full-history debugging still need them.
   measuredCoarse: Map<string, number>
   measuredDetailed: Map<string, number>
+  // Install prompt counted from the install fix on (see INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS),
+  // so the "installed" outcome rate compares post-fix outcomes with post-fix showings — a
+  // pre-fix showing could never produce one.
+  installPostFix: { shown: number; installed: number }
 }
 
 const coarseKey = (family: string, kind: string) => `${family}|${kind}`
@@ -399,6 +455,7 @@ export function aggregatePopupRows(
   const byDay = new Map<string, number>()
   const measuredCoarse = new Map<string, number>()
   const measuredDetailed = new Map<string, number>()
+  const installPostFix = { shown: 0, installed: 0 }
   for (const r of rows) {
     const ev = classifyPopupPath(r.path)
     if (!ev) continue
@@ -406,12 +463,16 @@ export function aggregatePopupRows(
     if (ev.extra) bump(detailed, detailedKey(ev.family, ev.kind, ev.extra), r.count)
     const etDate = etDateFromMs(r.hourStartMs)
     bump(byDay, dayKey(etDate, ev.family, ev.kind), r.count)
-    if (!isPreActivation(etDate, activationDateEt)) {
-      bump(measuredCoarse, coarseKey(ev.family, ev.kind), r.count)
-      if (ev.extra) bump(measuredDetailed, detailedKey(ev.family, ev.kind, ev.extra), r.count)
-    }
+    if (isPreActivation(etDate, activationDateEt)) continue
+    const postFix = rowIsPostInstallFix(r)
+    // Pre-fix rows of the two gap paths stay UNMEASURED (never a count or a rate).
+    if ((INSTALL_GAP_PATHS as readonly string[]).includes(r.path) && !postFix) continue
+    bump(measuredCoarse, coarseKey(ev.family, ev.kind), r.count)
+    if (ev.extra) bump(measuredDetailed, detailedKey(ev.family, ev.kind, ev.extra), r.count)
+    if (postFix && ev.family === 'install' && ev.kind === 'shown') installPostFix.shown += r.count
+    if (postFix && ev.family === 'popup-outcome:install' && ev.kind === 'installed') installPostFix.installed += r.count
   }
-  return { coarse, detailed, byDay, measuredCoarse, measuredDetailed }
+  return { coarse, detailed, byDay, measuredCoarse, measuredDetailed, installPostFix }
 }
 
 export function coarseCount(agg: PopupAggregate, family: string, kind: string): number {
@@ -496,7 +557,7 @@ export const POPUP_RATE_SPECS: PopupRateSpec[] = [
   ...POPUPS.filter((p) => !p.noOutcomeTracking).flatMap((p) =>
     POPUP_OUTCOME_TYPES.map((o) => ({
       key: `${p.id}:outcome:${o}`,
-      label: `${p.label} — ${o.replace('-', ' ')} rate${`${p.id}:outcome:${o}` === INSTALL_GAP_RATE_KEY ? ` (${installOutcomeGapNote()})` : ''}`,
+      label: `${p.label} — ${o.replace('-', ' ')} rate${`${p.id}:outcome:${o}` === INSTALL_GAP_RATE_KEY ? ' (from the install fix on)' : ''}`,
       kind: 'outcome' as const,
       popup: p.id,
       outcome: o,
@@ -522,6 +583,8 @@ export function computePopupRate(agg: PopupAggregate, spec: PopupRateSpec): Gate
     const unearned = measuredCoarseCount(agg, 'signin-eligible', 'unearned')
     return gateRate(earned, earned + capped + unearned)
   }
+  // Install-prompt "installed": post-fix outcomes over post-fix showings only.
+  if (spec.key === INSTALL_GAP_RATE_KEY) return gateRate(agg.installPostFix.installed, agg.installPostFix.shown)
   const shown = measuredCoarseCount(agg, spec.popup!, 'shown')
   if (spec.kind === 'tap') return gateRate(measuredCoarseCount(agg, spec.popup!, 'accept'), shown)
   // outcome

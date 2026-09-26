@@ -72,7 +72,7 @@ import {
 } from '../../src/lib/adsRules'
 import type { PlacementDayRow } from '../../src/lib/adsStore'
 import { ARRIVALS_CAVEAT, CAMPAIGNS, costPer, etMidnightUtcMs, etTimeUtcMs, funnelStepRates, type CampaignFlight, type FunnelStepKey } from '../../src/lib/campaigns'
-import { etDateFromMs, gateRate, INSTALL_ACCEPT_OUTCOME_FIXED_ET, SMALL_SAMPLE_NOTE, type GatedRate, type HourPathCount } from '../../src/lib/popupEvents'
+import { etDateFromMs, gateRate, SMALL_SAMPLE_NOTE, type GatedRate, type HourPathCount } from '../../src/lib/popupEvents'
 import { addEtDays } from '../../src/lib/overview'
 import { splitPlacements, type CampaignStatus } from './adsApi'
 import type { BeaconSource } from './beacon'
@@ -447,8 +447,7 @@ async function releaseHealth(
     return { evaluated: false, reason: `not evaluated: ${why.join('; ')}`, results: null, alerts: 0, readError: true }
   }
   const maturedBefore = deps.nowMs - opts.parentAgeHours * 3_600_000
-  const installFrom = INSTALL_ACCEPT_OUTCOME_FIXED_ET ? etMidnightUtcMs(INSTALL_ACCEPT_OUTCOME_FIXED_ET) : undefined
-  const site = summarizeSiteEvents(siteRows.value, maturedBefore, installFrom)
+  const site = summarizeSiteEvents(siteRows.value, maturedBefore)
   const arrivalsMatured = tagged.value.filter((r) => r.visitor === 'new' && r.hourStartMs + 2 * 3_600_000 <= deps.nowMs).reduce((a, r) => a + r.count, 0)
   const results = evaluateHealthPairs(buildHealthPairs({ site, taggedArrivalsMatured: arrivalsMatured, returnD0Web: returns.value.web.d0 }), opts.minParent)
   return { evaluated: true, reason: gate.reason, results, alerts: results.filter((r) => r.status === 'alert').length }
