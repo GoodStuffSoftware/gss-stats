@@ -351,8 +351,29 @@ export const COMPLETED_PROXY_LABEL = 'signed-out completions (proxy, deferred)'
  * separate marketing page, so "arrival" and "played" are close for this data. */
 const PLAYED_PATH = '/game'
 /** "auth success" — `/auth/success/<provider>`; NOT part of lib/popupEvents.ts's
- * POPUP_EVENT_PREFIXES (an ordinary page path there), so classified here directly. */
-const AUTH_SUCCESS_PREFIX = '/auth/success/'
+ * POPUP_EVENT_PREFIXES (an ordinary page path there), so classified here directly.
+ *
+ * Every sign-in sends the BASE row `/auth/success/<provider>` exactly once. From the
+ * new/existing release on it ALSO sends `/auth/success/<provider>/<status>` (status new |
+ * existing | unknown), alongside the base row, never instead of it. So a sign-in is counted from
+ * the base row only (exact shape: one provider segment), and the status split only from the
+ * three-segment rows; a prefix match would count each new-client sign-in twice. */
+export const AUTH_SUCCESS_PROVIDERS = ['google', 'email'] as const
+export const AUTH_SUCCESS_STATUSES = ['new', 'existing', 'unknown'] as const
+export type AuthSuccessStatus = (typeof AUTH_SUCCESS_STATUSES)[number]
+const AUTH_BASE_RE = /^\/auth\/success\/([a-z0-9_-]+)$/
+const AUTH_STATUS_RE = /^\/auth\/success\/([a-z0-9_-]+)\/(new|existing|unknown)$/
+/** 'base' for `/auth/success/<provider>` (one per sign-in), the status for the suffixed row that
+ * rides alongside it, null for anything else (including other shapes under /auth/success/). */
+export function authSuccessRow(path: string): 'base' | AuthSuccessStatus | null {
+  if (AUTH_BASE_RE.test(path)) return 'base'
+  const m = AUTH_STATUS_RE.exec(path)
+  return m ? (m[2] as AuthSuccessStatus) : null
+}
+/** A sign-in (the base row), never its status row: auth-success counts use this. */
+export function isAuthSuccessBase(path: string): boolean {
+  return AUTH_BASE_RE.test(path)
+}
 
 /** Classifies ONE path into at most one funnel step (mutually exclusive path families,
  * same design as popupEvents.ts's classifyPopupPath — reused here for the shared
@@ -363,7 +384,7 @@ const AUTH_SUCCESS_PREFIX = '/auth/success/'
 export function classifyFunnelPath(path: string): FunnelStepKey | null {
   if (path === PLAYED_PATH) return 'played'
   if (COMPLETED_PROXY_PATH_PREFIX && path.startsWith(COMPLETED_PROXY_PATH_PREFIX)) return 'completed' // disabled by default — see the hook above
-  if (path.startsWith(AUTH_SUCCESS_PREFIX)) return 'authSuccess'
+  if (isAuthSuccessBase(path)) return 'authSuccess' // the status row that rides alongside is not a second sign-in
   const ev = classifyPopupPath(path)
   if (!ev) return null
   if ((ev.family === 'signin-prompt' || ev.family === 'promo-first50') && ev.kind === 'shown') return 'ask'

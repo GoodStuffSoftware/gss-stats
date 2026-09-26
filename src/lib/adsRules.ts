@@ -32,11 +32,13 @@ import {
   type HourPathCount,
 } from './popupEvents'
 import {
+  authSuccessRow,
   campaignById,
   computeFunnelCounts,
   parseReturnPath,
   RETURN_BUCKETS,
   returnVisitRates,
+  type AuthSuccessStatus,
   type CampaignFlight,
   type FunnelStepKey,
   type ReturnBucket,
@@ -393,19 +395,13 @@ function emptyOutcomes(): OutcomeCounts {
   return o
 }
 
-/** `/auth/success/<provider>` → 'unsplit'; `…/<provider>/new` → 'new'; `…/<provider>/existing`
- * → 'existing'; anything else → null. Matched on the PREFIX, so every auth-success row counts
- * exactly once whatever its suffix (the same prefix lib/campaigns.ts classifyFunnelPath and
- * functions/api/overview.ts use). */
-export const AUTH_SUCCESS_PREFIX = '/auth/success/'
-export type AuthSuccessKind = 'new' | 'existing' | 'unsplit'
-export function authSuccessKind(path: string): AuthSuccessKind | null {
-  if (!path.startsWith(AUTH_SUCCESS_PREFIX)) return null
-  const parts = path.slice(AUTH_SUCCESS_PREFIX.length).split('/').filter(Boolean)
-  if (parts[1] === 'new') return 'new'
-  if (parts[1] === 'existing') return 'existing'
-  return 'unsplit'
-}
+/** `/auth/success/<provider>` → 'base' (THE sign-in, one per sign-in); the row that rides
+ * alongside it from the new/existing release, `/auth/success/<provider>/<new|existing|unknown>`,
+ * → its status; anything else → null. The same exact shapes as lib/campaigns.ts
+ * classifyFunnelPath and functions/api/overview.ts (authSuccessRow): a prefix match would count
+ * a new-client sign-in twice. */
+export type AuthSuccessKind = 'base' | AuthSuccessStatus
+export const authSuccessKind = (path: string): AuthSuccessKind | null => authSuccessRow(path)
 
 export interface TaggedRow {
   hourStartMs: number
@@ -433,11 +429,12 @@ export interface TaggedSummary {
   /** Read separately, never summed — the two dialogs dismiss differently (spec section 11). */
   dismisses: { signinPrompt: number; promoFirst50: number }
   authRedirect: number
-  /** Every /auth/success/<provider>[/…] row, matched on the PREFIX: a /new or /existing suffix
-   * is neither dropped nor counted twice (each row is one path). */
+  /** Sign-ins: the base `/auth/success/<provider>` rows only (one per sign-in). */
   authSuccess: number
-  /** The same rows by suffix (authSuccessKind): `/new`, `/existing`, or neither ("unsplit"). */
-  authSuccessSplit: Record<AuthSuccessKind, number>
+  /** The status rows that ride alongside (three-segment `/auth/success/<provider>/<status>`),
+   * plus `unsplit` = sign-ins with no status row (before the release, or an old client) =
+   * max(0, authSuccess − new − existing − unknown). */
+  authSuccessSplit: Record<AuthSuccessStatus | 'unsplit', number>
   /** installed = /popup-outcome/install-prompt/installed (at most once per showing) — THE
    * install metric; rawSignals = raw /install/<outcome> beacons, which can double-count. */
   install: { promptShown: number; taps: number; installed: number; rawSignals: number }
@@ -460,7 +457,7 @@ export function summarizeTaggedRows(rows: readonly TaggedRow[], opts: { fromMs?:
     dismisses: { signinPrompt: 0, promoFirst50: 0 },
     authRedirect: 0,
     authSuccess: 0,
-    authSuccessSplit: { new: 0, existing: 0, unsplit: 0 },
+    authSuccessSplit: { new: 0, existing: 0, unknown: 0, unsplit: 0 },
     install: { promptShown: 0, taps: 0, installed: 0, rawSignals: 0 },
     promoFirst50: { shown: 0, accept: 0, dismiss: 0 },
     upsell: { shown: 0, accept: 0, dismiss: 0 },
@@ -479,11 +476,9 @@ export function summarizeTaggedRows(rows: readonly TaggedRow[], opts: { fromMs?:
       s.accepts.byPath[r.path] += r.count
     }
     if (r.path.startsWith('/auth/redirect/')) s.authRedirect += r.count
-    const auth = authSuccessKind(r.path)
-    if (auth) {
-      s.authSuccess += r.count
-      s.authSuccessSplit[auth] += r.count
-    }
+    const auth = authSuccessRow(r.path)
+    if (auth === 'base') s.authSuccess += r.count
+    else if (auth) s.authSuccessSplit[auth] += r.count
     const ev = classifyPopupPath(r.path)
     if (!ev) continue
     if (ev.family === 'signin-prompt' && ev.kind === 'shown' && !(ASK_PATHS as readonly string[]).includes(r.path)) s.asks.otherShownReasons += r.count
@@ -504,6 +499,8 @@ export function summarizeTaggedRows(rows: readonly TaggedRow[], opts: { fromMs?:
       if ((OUTCOME_POPUPS as readonly string[]).includes(popup)) s.popupOutcomes[popup][ev.kind as OutcomeType] += r.count
     }
   }
+  const sp = s.authSuccessSplit
+  sp.unsplit = Math.max(0, s.authSuccess - sp.new - sp.existing - sp.unknown)
   s.funnel = computeFunnelCounts(
     inWindow.map((r) => ({ path: r.path, count: r.count })),
     s.taggedArrivals,
@@ -1082,8 +1079,8 @@ export interface SignUpCount {
   /** What the decision table uses: exact when `exact`, else an upper bound. */
   count: number
   exact: boolean
-  /** The "at most" part over the unsplit rows: min(unsplit, max(0, windowNew − exactNew));
-   * null when the /new|existing split is not live. */
+  /** The "at most" part over the sign-ins that may be new (no status row, or status
+   * `unknown`): min(maybeNew, max(0, windowNew − exactNew)); null when the split is not live. */
   bounded: number | null
   /** Sign-ups from tagged /auth/success/<provider>/new rows, capped at the window's new
    * accounts (null before the split). */
@@ -1093,20 +1090,22 @@ export interface SignUpCount {
   newCapped: boolean
   label: string
 }
-/** Campaign sign-ups. Until AUTH_NEW_EXISTING_LIVE_AT is set: "at most N" over EVERY tagged
- * auth-success row (prefix match, so a suffixed row still counts once). Once it is set:
+/** Campaign sign-ups. Sign-ins are the BASE rows `/auth/success/<provider>` (one per sign-in);
+ * from the new/existing release a status row `/auth/success/<provider>/<new|existing|unknown>`
+ * rides ALONGSIDE each one (never instead), so it is never added to the sign-in count.
+ *
+ * Until AUTH_NEW_EXISTING_LIVE_AT is set: "at most N" = min(sign-ins, windowNew). Once it is:
  *
  *   exactNew = min(/new rows, windowNew)
- *   count    = min(unsplit, max(0, windowNew − exactNew)) + exactNew
+ *   maybeNew = (sign-ins with no status row: before the release or an old client) + /unknown rows
+ *   count    = min(maybeNew, max(0, windowNew − exactNew)) + exactNew
  *
- * — `/existing` rows (returning sign-ins) never count; the unsplit rows (before the release, or
- * an old client still sending the bare path) stay an "at most" bound, which can only use the new
- * accounts the exact rows have not already claimed. The /new count cannot be de-duplicated per
- * person (the beacon stores anonymous hourly counts, and nothing is ever joined to an
- * individual), so a repeated /new beacon is bounded by the window's new accounts instead; the
- * count is "exact" only when there are no unsplit rows and no cap applied. Classified by path,
- * not by hour: a suffix only exists after the release, so no row is dropped or counted twice at
- * the boundary. */
+ * — `/existing` rows (returning sign-ins) never count; `unknown` (isNewUser unavailable) may be
+ * new, so it joins the "at most" part, which can only use the new accounts the exact rows have
+ * not already claimed. The /new count cannot be de-duplicated per person (the beacon stores
+ * anonymous hourly counts and nothing is ever joined to an individual), so a repeated /new
+ * beacon is bounded by the window's new accounts instead; the count is "exact" only when every
+ * sign-in has a new/existing answer and no cap applied. */
 export function campaignSignUps(
   s: Pick<TaggedSummary, 'authSuccess' | 'authSuccessSplit'>,
   windowNewAccounts: number | null,
@@ -1116,19 +1115,21 @@ export function campaignSignUps(
     const n = signUpsAtMost(s.authSuccess, windowNewAccounts)
     return { count: n, exact: false, bounded: n, exactNew: null, newCapped: false, label: signUpsAtMostLabel(n, s.authSuccess, windowNewAccounts) }
   }
-  const unsplit = s.authSuccessSplit.unsplit
-  const rawNew = s.authSuccessSplit.new
+  const sp = s.authSuccessSplit
+  const noStatus = Math.max(0, s.authSuccess - sp.new - sp.existing - sp.unknown)
+  const maybeNew = noStatus + sp.unknown
+  const rawNew = sp.new
   const exactNew = windowNewAccounts == null ? rawNew : Math.min(rawNew, windowNewAccounts)
   const newCapped = exactNew < rawNew
-  const room = windowNewAccounts == null ? unsplit : Math.max(0, windowNewAccounts - exactNew)
-  const bounded = Math.min(unsplit, room)
+  const room = windowNewAccounts == null ? maybeNew : Math.max(0, windowNewAccounts - exactNew)
+  const bounded = Math.min(maybeNew, room)
   const count = bounded + exactNew
   const since = etMinuteLabel(liveAtMs)
   const w = windowNewAccounts ?? 'not read'
-  if (unsplit === 0 && !newCapped) {
+  if (maybeNew === 0 && !newCapped) {
     return { count, exact: true, bounded: 0, exactNew, newCapped, label: `${plural(count, 'campaign sign-up')} (exact: tagged /auth/success/<provider>/new since ${since})` }
   }
-  if (unsplit === 0) {
+  if (maybeNew === 0) {
     return { count, exact: false, bounded: 0, exactNew, newCapped, label: `at most ${plural(count, 'campaign sign-up')} (tagged /auth/success/<provider>/new rows ${rawNew}, capped at the ${w} new prod accounts sitewide in the window)` }
   }
   return {
@@ -1137,7 +1138,7 @@ export function campaignSignUps(
     bounded,
     exactNew,
     newCapped,
-    label: `at most ${plural(count, 'campaign sign-up')}: at most ${bounded} before the new/existing split (${since}; tagged auth successes ${unsplit}; new prod accounts sitewide in the window ${w}, less the ${exactNew} counted after it) + ${newCapped ? `at most ${exactNew}` : `exactly ${exactNew}`} after it (tagged /auth/success/<provider>/new${newCapped ? `, ${rawNew} rows capped at the window's new accounts` : ''})`,
+    label: `at most ${plural(count, 'campaign sign-up')}: at most ${bounded} of the ${plural(maybeNew, 'sign-in')} that may be new (${noStatus} without a new/existing answer — before ${since} or an old client — and ${sp.unknown} unknown; new prod accounts sitewide in the window ${w}, less the ${exactNew} counted as new) + ${newCapped ? `at most ${exactNew}` : `exactly ${exactNew}`} new (tagged /auth/success/<provider>/new${newCapped ? `, ${rawNew} rows capped at the window's new accounts` : ''})`,
   }
 }
 

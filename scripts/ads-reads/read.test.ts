@@ -485,7 +485,9 @@ describe('mid-flight instrumentation: the upsell-fix segment boundary and exact 
   it('once /new|existing is live, a tagged /new sign-up is counted exactly', async () => {
     const fx = at100()
     const b = fx.beacon as Extract<Fixture['beacon'], { tagged: unknown }>
-    b.tagged = b.tagged.map((t) => (t.path === '/auth/success/google' ? { ...t, path: '/auth/success/google/new' } : t))
+    // The new client sends the status row ALONGSIDE the base row: one sign-in, two rows.
+    const base = b.tagged.find((t) => t.path === '/auth/success/google')!
+    b.tagged = [...b.tagged, { ...base, path: '/auth/success/google/new' }]
     const r = await runMorningRead({ ...fixtureDeps(fx, false), boundaries: { authNewExistingLiveAtMs: Date.parse('2026-09-28T16:00:00Z') } }, opts)
     expect(r.thresholdRead!.decision).toMatchObject({ signUpsAtMost: 1, signUpsExact: true, signUpsExactNew: 1, row: 'one' })
     expect(r.notify.text).toMatch(/1 campaign sign-up \(exact\), row one/)

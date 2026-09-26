@@ -1,6 +1,6 @@
 // Mid-flight instrumentation (owner override of the beacon freeze, 2026-09-26):
-// /auth/success/<provider>/new|existing, the signed-out upsell fix as a funnel segment boundary,
-// and kill rule 3's ask definition staying exactly as it was.
+// /auth/success/<provider>/<new|existing|unknown> (sent ALONGSIDE the base row), the signed-out
+// upsell fix as a funnel segment boundary, and kill rule 3's ask definition staying as it was.
 import { describe, expect, it } from 'vitest'
 import {
   ASK_PATHS,
@@ -17,64 +17,89 @@ import {
   type StoredSpend,
   type TaggedRow,
 } from './adsRules'
-import { classifyFunnelPath, computeFunnelCounts } from './campaigns'
+import { AUTH_SUCCESS_PROVIDERS, AUTH_SUCCESS_STATUSES, classifyFunnelPath, computeFunnelCounts, isAuthSuccessBase } from './campaigns'
 
 const h = (iso: string) => Date.parse(iso)
 const row = (hour: string, path: string, count = 1, visitor = 'returning'): TaggedRow => ({ hourStartMs: h(hour), path, visitor, count })
 
-describe('/auth/success: matched on the prefix, so /new and /existing are neither dropped nor double-counted', () => {
-  it('classifies the suffixes', () => {
-    expect(authSuccessKind('/auth/success/google')).toBe('unsplit')
+describe('/auth/success: one sign-in = one BASE row; the status row rides alongside and is never a second sign-in', () => {
+  it('classifies the exact shapes: base, and the three statuses; anything else is nothing', () => {
+    expect(authSuccessKind('/auth/success/google')).toBe('base')
+    expect(authSuccessKind('/auth/success/email')).toBe('base')
     expect(authSuccessKind('/auth/success/google/new')).toBe('new')
-    expect(authSuccessKind('/auth/success/apple/existing')).toBe('existing')
-    expect(authSuccessKind('/auth/success/google/new/')).toBe('new')
-    expect(authSuccessKind('/auth/successful')).toBeNull()
-    expect(authSuccessKind('/auth/redirect/google')).toBeNull()
+    expect(authSuccessKind('/auth/success/email/existing')).toBe('existing')
+    expect(authSuccessKind('/auth/success/google/unknown')).toBe('unknown')
+    expect(AUTH_SUCCESS_PROVIDERS).toEqual(['google', 'email'])
+    expect(AUTH_SUCCESS_STATUSES).toEqual(['new', 'existing', 'unknown'])
+    for (const p of ['/auth/success/google/new/', '/auth/success/google/other', '/auth/success/google/new/x', '/auth/success/', '/auth/successful', '/auth/redirect/google']) expect(authSuccessKind(p)).toBeNull()
   })
-  it('tagged sign-in outcomes count every suffixed row exactly once', () => {
+  it('a sign-in that sends both its base row and its /new row counts ONCE as auth success, and once as new', () => {
+    const rows = [row('2026-09-30T21:00:00Z', '/auth/success/google', 1), row('2026-09-30T21:00:00Z', '/auth/success/google/new', 1)]
+    const s = summarizeTaggedRows(rows)
+    expect(s.authSuccess).toBe(1)
+    expect(s.authSuccessSplit).toEqual({ new: 1, existing: 0, unknown: 0, unsplit: 0 })
+    // the funnel's auth-success step (lib/campaigns.ts, also /api/campaigns and /api/overview)
+    expect(classifyFunnelPath('/auth/success/google')).toBe('authSuccess')
+    expect(classifyFunnelPath('/auth/success/google/new')).toBeNull()
+    expect(isAuthSuccessBase('/auth/success/email/existing')).toBe(false)
+    expect(computeFunnelCounts(rows.map((r) => ({ path: r.path, count: r.count })), 10).authSuccess).toBe(1)
+    // the sign-up bound: 1 new account sitewide, before and after the split goes live
+    expect(campaignSignUps(s, 1, null)).toMatchObject({ count: 1, exact: false })
+    expect(campaignSignUps(s, 1, h('2026-09-29T16:00:00Z'))).toMatchObject({ count: 1, exact: true, exactNew: 1 })
+  })
+  it('a mixed window: base rows with and without status rows are each one sign-in', () => {
     const rows = [
-      row('2026-09-29T21:00:00Z', '/auth/success/google', 2),
-      row('2026-09-30T21:00:00Z', '/auth/success/google/new', 3),
-      row('2026-09-30T21:00:00Z', '/auth/success/apple/existing', 4),
+      row('2026-09-29T21:00:00Z', '/auth/success/google', 2), // before the release: no status rows
+      row('2026-09-30T21:00:00Z', '/auth/success/google', 3), // after: each with its status row
+      row('2026-09-30T21:00:00Z', '/auth/success/google/new', 1),
+      row('2026-09-30T21:00:00Z', '/auth/success/email', 1),
+      row('2026-09-30T21:00:00Z', '/auth/success/email/existing', 1),
+      row('2026-09-30T21:00:00Z', '/auth/success/google/unknown', 1),
+      row('2026-09-30T21:00:00Z', '/auth/success/email/existing', 1),
     ]
     const s = summarizeTaggedRows(rows)
-    expect(s.authSuccess).toBe(9)
-    expect(s.authSuccessSplit).toEqual({ unsplit: 2, new: 3, existing: 4 })
-    // the funnel's auth-success step (lib/campaigns.ts classifyFunnelPath, also used by
-    // /api/campaigns) uses the same prefix
-    expect(classifyFunnelPath('/auth/success/google/new')).toBe('authSuccess')
-    expect(classifyFunnelPath('/auth/success/apple/existing')).toBe('authSuccess')
-    expect(computeFunnelCounts(rows.map((r) => ({ path: r.path, count: r.count })), 10).authSuccess).toBe(9)
+    expect(s.authSuccess).toBe(6)
+    expect(s.authSuccessSplit).toEqual({ new: 1, existing: 2, unknown: 1, unsplit: 2 })
   })
 })
 
 describe('sign-ups: "at most N" until the new/existing split is live, then exact from /new', () => {
-  const s = (unsplit: number, n: number, existing: number) => ({ authSuccess: unsplit + n + existing, authSuccessSplit: { unsplit, new: n, existing } })
+  // A window of sign-ins: `noStatus` without a status row, then n new / e existing / u unknown,
+  // each of those with its base row too (they ride alongside).
+  const s = (noStatus: number, n: number, e: number, u = 0) => {
+    const base = noStatus + n + e + u
+    return { authSuccess: base, authSuccessSplit: { new: n, existing: e, unknown: u, unsplit: noStatus } }
+  }
   const LIVE = h('2026-09-29T16:00:00Z')
-  it('the instant is not set yet: every behaviour is unchanged', () => {
+  it('the instants are not set yet: every behaviour is unchanged', () => {
     expect(AUTH_NEW_EXISTING_LIVE_AT).toBeNull()
     expect(UPSELL_SIGNEDOUT_FIX_AT).toBeNull()
   })
-  it('before the split is live, every auth-success row (suffixed or not) feeds the upper bound', () => {
+  it('before the split is live, every sign-in (base rows only) feeds the upper bound', () => {
     expect(campaignSignUps(s(2, 3, 4), 5, null)).toMatchObject({ count: 5, exact: false, exactNew: null })
     expect(campaignSignUps(s(2, 3, 4), null, null)).toMatchObject({ count: 9, exact: false })
   })
-  it('once live: /new counts exactly, /existing never counts, unsplit rows stay "at most" within the accounts /new has not claimed', () => {
-    // count = min(unsplit, max(0, windowNew − exactNew)) + exactNew, exactNew capped at windowNew
+  it('once live: /new counts exactly, /existing never counts, the rest stays "at most" within the accounts /new has not claimed', () => {
+    // count = min(noStatus + unknown, max(0, windowNew − exactNew)) + exactNew, exactNew capped at windowNew
     const mixed = campaignSignUps(s(2, 3, 4), 10, LIVE)
     expect(mixed).toMatchObject({ count: 2 + 3, exact: false, bounded: 2, exactNew: 3, newCapped: false })
     expect(mixed.label).toMatch(
-      /^at most 5 campaign sign-ups: at most 2 before the new\/existing split \(2026-09-29 12:00 ET; tagged auth successes 2; new prod accounts sitewide in the window 10, less the 3 counted after it\) \+ exactly 3 after it/,
+      /^at most 5 campaign sign-ups: at most 2 of the 2 sign-ins that may be new \(2 without a new\/existing answer — before 2026-09-29 12:00 ET or an old client — and 0 unknown; new prod accounts sitewide in the window 10, less the 3 counted as new\) \+ exactly 3 new/,
     )
-    expect(campaignSignUps(s(5, 3, 0), 4, LIVE)).toMatchObject({ count: 1 + 3, bounded: 1, exactNew: 3 }) // only 4 − 3 = 1 account left for the unsplit rows
+    expect(campaignSignUps(s(5, 3, 0), 4, LIVE)).toMatchObject({ count: 1 + 3, bounded: 1, exactNew: 3 }) // only 4 − 3 = 1 account left
     const exact = campaignSignUps(s(0, 2, 7), 9, LIVE)
     expect(exact).toMatchObject({ count: 2, exact: true, bounded: 0, exactNew: 2 })
     expect(exact.label).toBe('2 campaign sign-ups (exact: tagged /auth/success/<provider>/new since 2026-09-29 12:00 ET)')
   })
-  it("the reviewer's probe: 1 unsplit, 1 /new, 1 new account sitewide → 1, not 2", () => {
+  it('unknown (isNewUser unavailable) is possibly new: it joins the "at most" part, never the exact part', () => {
+    const u = campaignSignUps(s(0, 1, 0, 2), 10, LIVE)
+    expect(u).toMatchObject({ count: 2 + 1, exact: false, bounded: 2, exactNew: 1 })
+    expect(campaignSignUps(s(0, 1, 0, 2), 2, LIVE)).toMatchObject({ count: 1 + 1, bounded: 1, exactNew: 1 })
+  })
+  it("the reviewer's probe: 1 sign-in without a status, 1 /new, 1 new account sitewide → 1, not 2", () => {
     expect(campaignSignUps(s(1, 1, 0), 1, LIVE)).toMatchObject({ count: 1, exact: false, bounded: 0, exactNew: 1 })
   })
-  it('/new rows beyond the window\'s new accounts (a repeated beacon) are capped, and the count is then an upper bound', () => {
+  it("/new rows beyond the window's new accounts (a repeated beacon) are capped, and the count is then an upper bound", () => {
     const capped = campaignSignUps(s(0, 3, 0), 2, LIVE)
     expect(capped).toMatchObject({ count: 2, exact: false, exactNew: 2, newCapped: true })
     expect(capped.label).toBe('at most 2 campaign sign-ups (tagged /auth/success/<provider>/new rows 3, capped at the 2 new prod accounts sitewide in the window)')

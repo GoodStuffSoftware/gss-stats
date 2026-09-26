@@ -250,13 +250,17 @@ npm run typecheck:scripts
 - **Mid-flight instrumentation (the beacon freeze was lifted by the owner on 2026-09-26).** Two
   instants in `src/lib/adsRules.ts`, both `null` until the release coordinator sets them:
   `AUTH_NEW_EXISTING_LIVE_AT` (from then on tagged `/auth/success/<provider>/new` rows count as
-  **exact** sign-ups, `/existing` rows never count, and "at most N" still bounds the unsplit
-  rows) and `UPSELL_SIGNEDOUT_FIX_AT` (a funnel **segment boundary**: the $100 read and the
+  **exact** sign-ups, `/existing` rows never count, and `unknown` rows plus sign-ins with no
+  status row stay in the "at most" part: min(those, new accounts in the window − exact new) +
+  exact new) and `UPSELL_SIGNEDOUT_FIX_AT` (a funnel **segment boundary**: the $100 read and the
   post-flight reads report pre-fix and post-fix spend, asks, accepts and sign-ups separately,
-  per spec section 14a's "two separate short tests"; the hour containing the fix counts as
-  post-fix and the fix day's spend is shown apart). Every auth-success count matches the
-  `/auth/success/<provider>` **prefix**, so suffixed rows are neither dropped nor double-counted,
-  and kill rule 3's asks are unchanged.
+  per spec section 14a's "two separate short tests"; beacon rows are split at the exact
+  instant, and the fix day's spend is shown apart). **A sign-in is its base row only:** the
+  status row `/auth/success/<provider>/<new|existing|unknown>` is sent ALONGSIDE the base row
+  `/auth/success/<provider>` (providers `google` and `email`), so every auth-success count — the
+  tagged funnel, `/api/campaigns`, `/api/overview`, the sign-up bound — matches the exact base
+  shape, and the status split reads only the three-segment rows. A prefix match would count each
+  new-client sign-in twice. Kill rule 3's asks are unchanged.
 - **One reading per entry per day.** A reading is stored once per (campaign, ET day, entry
   kind: `morning`, `backstop`, `threshold-50`, `postflight-wrapup`, …). A same-day rerun is
   stored only when it carries new information (a complete retry of an incomplete read, a new
