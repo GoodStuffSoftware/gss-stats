@@ -19,6 +19,11 @@ All notable changes to **gss-stats** are documented here. The format follows
   fall through to an empty, axis-only chart instead of being recognized as having no data. It's
   now omitted from the grid, and the whole chart shows one line ("No return visits recorded
   yet") when nothing has data at all.
+- **The overview scorecard's "Completed a game" chip now shows a campaign's real count once
+  it's live.** It used to always show "not instrumented", even for a campaign whose flight is
+  well after the completed-game beacon went live, because it checked a permanent constant
+  instead of that campaign's actual data. Closed campaigns whose flight predates the beacon
+  still omit the chip.
 
 ### Changed
 - **Closed campaigns' scorecard no longer shows "not instrumented" chips.** A funnel step a

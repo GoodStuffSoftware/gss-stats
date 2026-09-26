@@ -9,7 +9,7 @@ import type { ChartConfiguration } from 'chart.js'
 import type { GlobalFilters, Widget, OverviewResponse } from '../../types'
 import { useOverviewData } from '../../lib/overviewData'
 import { PALETTE } from '../../lib/charts'
-import { FUNNEL_STEP_LABELS, FUNNEL_STEP_ORDER, FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED, VALID_FUNNEL_RATE_STEPS, type FunnelStepKey } from '../../lib/campaigns'
+import { FUNNEL_STEP_LABELS, FUNNEL_STEP_ORDER, VALID_FUNNEL_RATE_STEPS, type FunnelStepKey } from '../../lib/campaigns'
 import { isInsufficientCohort } from '../../lib/popupEvents'
 import { noteRawText } from '../../lib/notes'
 import type { CampaignFunnelCounts } from '../../types'
@@ -281,7 +281,16 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
                   :title="FUNNEL_STEP_LABELS[step as keyof typeof FUNNEL_STEP_LABELS]"
                 >
                   {{ FUNNEL_STEP_LABELS[step as keyof typeof FUNNEL_STEP_LABELS] }}:
-                  <template v-if="FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED.has(step as FunnelStepKey)">{{ noteRawText('not-instrumented') }}</template>
+                  <!-- Bug fix (owner report, 2026-09-26): this used to check the PERMANENT
+                       global FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED constant (always contains
+                       'completed'), so a campaign whose flight window is well after
+                       GAME_COMPLETE_LIVE_AT still showed "not instrumented" instead of its
+                       real count. row.notInstrumented is the ACTUAL per-row instrumentation
+                       state for every status (functions/api/overview.ts's notInstrumentedSet —
+                       the real per-flight check for a closed campaign, gameCompleteNotInstrumented
+                       for an active/upcoming one), so it reflects whether 'completed' has gone
+                       live for THIS campaign, not just whether the beacon exists at all. -->
+                  <template v-if="row.notInstrumented.includes(step as keyof CampaignFunnelCounts)">{{ noteRawText('not-instrumented') }}</template>
                   <template v-else-if="step === 'install'"
                     >{{ pct(row.funnelRates.install, row.installPromptPostFixCount) }} {{ counts(row.funnelCounts.install, row.installPromptPostFixCount) }}</template
                   >

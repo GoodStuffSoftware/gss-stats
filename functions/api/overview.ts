@@ -30,8 +30,7 @@ import {
   isAuthSuccessBase,
   isInstallPromptInstalled,
   isRawInstallSignal,
-  gameCompleteNotInstrumented,
-  FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED,
+  scorecardNotInstrumentedSteps,
   RAW_INSTALL_SIGNALS_LABEL,
   type FunnelStepKey,
 } from '../../src/lib/campaigns'
@@ -341,8 +340,9 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       // Simplified vs /api/campaigns.ts for a non-closed flight: skips the extra per-flight
       // query above and gates 'completed' only on gameCompleteNotInstrumented (v1.95.5)
       // rather than the permanent global default, so a flight whose window reaches
-      // GAME_COMPLETE_LIVE_AT shows real completed-game rates instead of a stale "—".
-      const notInstrumentedSet = c.status === 'closed' ? new Set(closedNotInstrumented) : gameCompleteNotInstrumented(c) ? FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED : new Set<FunnelStepKey>()
+      // GAME_COMPLETE_LIVE_AT shows real completed-game rates instead of a stale "—". See
+      // lib/campaigns.ts scorecardNotInstrumentedSteps for the exact, unit-tested contract.
+      const notInstrumentedSet = scorecardNotInstrumentedSteps(c, closedNotInstrumented)
       // install/installPrompt's real denominator — same rule as /api/campaigns.ts (audit
       // finding, 2026-09-26): only prompts shown AT OR AFTER the install-outcome-gap fix.
       const installFixAtMs = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS
