@@ -162,7 +162,11 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   is excluded from every page-view/visit count the same way every other pop-up/event beacon
   is (`POPUP_EVENT_PREFIXES`), and powers a new, live "Completed a game" funnel step and
   overview tile (previously always "not yet tracking" — nothing matched before this
-  release). A mode/difficulty completions breakdown is a planned follow-up.
+  release), plus a mode × difficulty completions breakdown chart (dataset `completions`;
+  see [`functions/api/completions.ts`](functions/api/completions.ts)) — a plain generic
+  dimension/breakdown widget, same pipeline as the geo/pop-up datasets, so it's
+  configurable and movable like any other chart. Added automatically to the "Best Sudoku ·
+  Overview" page for anyone who hasn't already customised its default charts.
 
   Because production has only 14 registered users (2026-09-26), every rate-bearing page
   (pop-ups, campaigns, overview) also carries a standing **small-sample note** ("Very small
@@ -201,6 +205,7 @@ Cloudflare Pages Functions  (functions/_middleware.ts → functions/api/*.ts)
    │  - /api/stats  → RUM GraphQL (server-side), requestHost allow-list
    │  - /api/geo    → reads the beacon's D1 (bot-free sub-country geo)
    │  - /api/popups → pop-up funnel counts/rates from the same D1 (sign-in, upsell, install, …)
+   │  - /api/completions → completed-game counts from the same D1, by mode × difficulty
    │  - /api/campaigns → Google Ads campaign comparison from the same D1 (funnel, hour-of-day,
    │                      country, daily/cumulative, device mix, return visits)
    │  - /api/overview → today-at-a-glance KPIs, daily timeline, campaign scorecard, release panel

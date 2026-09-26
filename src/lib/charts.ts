@@ -413,7 +413,7 @@ export function formatKey(dimension: string, value: string): string {
     return '(none)'
   }
   if (dimension === 'countryName' || dimension === 'country') return COUNTRY_NAMES[value] ?? value
-  if (dimension === 'visitor') return value.charAt(0).toUpperCase() + value.slice(1)
+  if (dimension === 'visitor' || dimension === 'mode' || dimension === 'difficulty') return value.charAt(0).toUpperCase() + value.slice(1)
   if (dimension === 'date') {
     // YYYY-MM-DD → "Jun 24"
     const d = new Date(value + 'T00:00:00Z')

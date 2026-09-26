@@ -17,7 +17,10 @@ export type Metric = 'pageviews' | 'visits'
 
 // 'overview'/'campaigns'/'ads-readings' back the panels that used to be bespoke,
 // non-widget pages (OverviewPage.vue / CampaignComparePage.vue) — see Widget.view below.
-export type Dataset = 'rum' | 'geo' | 'popup' | 'overview' | 'campaigns' | 'ads-readings'
+// 'completions' is an ordinary GENERIC dataset (dimension/breakdown, same pipeline as
+// 'geo'/'popup') — NOT bespoke — see functions/api/completions.ts + lib/catalog.ts
+// COMPLETIONS_DIMENSIONS.
+export type Dataset = 'rum' | 'geo' | 'popup' | 'overview' | 'campaigns' | 'ads-readings' | 'completions'
 
 export type SiteKey = 'goodstuff.software' | 'goodstuffsoftware.com' | 'bestsudoku.app' | 'all'
 
