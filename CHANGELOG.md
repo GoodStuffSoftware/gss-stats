@@ -6,6 +6,29 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-09-26
+
+### Security
+- **Sign in with Google.** The dashboard and every API call now need a signed-in Google
+  account on an owner-set allowlist. The app enforces this itself, so Cloudflare Access can
+  be removed once the new sign-in is verified live. If the sign-in settings are missing,
+  it locks everyone out rather than opening up. The tests also run the sign-in inside
+  Cloudflare's own runtime, so a request setting that runtime rejects can't ship.
+- **Sign out.** The header shows who is signed in, with a Sign out button. An expired
+  session brings up the re-sign-in banner on every page, the overview and campaign pages
+  included, and no longer risks saving a fallback layout over your stored one.
+- **Stricter sign-in checks.** Only an exact, plain-ASCII match on the allowlist gets in
+  (look-alike addresses are refused), Google must mark the email verified with a real
+  `true`, and sign-ins or sessions dated in the future are rejected.
+- **A bad session-length setting locks sign-in instead of being guessed.** A session
+  length that isn't a number of hours from 1 to 720 now shows "Sign-in not configured"
+  rather than silently falling back or issuing sessions that end at once.
+- **Back after Sign out no longer shows the dashboard.** Dashboard pages, files and data
+  are never kept by the browser or a shared cache, Sign out also clears the site's
+  cache, and no other site can embed the dashboard in a frame.
+- **The local sign-in bypass is harder to switch on by accident.** It now needs the exact
+  value `1` (not `true`, `0` or anything else), still only on the developer's own machine.
+
 ## [0.4.0] — 2026-09-26
 
 ### Added

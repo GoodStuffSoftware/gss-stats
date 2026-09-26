@@ -1,7 +1,9 @@
 import type { StatsResponse, Widget, GlobalFilters, DashboardConfig, Dataset, CampaignCompareResponse, OverviewResponse } from './types'
+import type { AdsReadingsResponse } from './lib/adsStore'
 import { resolveSelection } from './sitesStore'
 import { nativeField } from './lib/drill'
 import { queryDims } from './lib/rings'
+import { sessionExpired, checkSessionExpired, isAuthError, isNetworkError } from './session'
 
 // Resolve a page's drill-downs into { field, value } pairs for one dataset. A drill
 // on a dimension the dataset lacks (e.g. region on RUM) is simply omitted.
@@ -108,43 +110,80 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters): Promis
   return res.json()
 }
 
+// Expired-session handling for fetches that don't go through a ChartCard. fetchStats
+// (every grid chart, pop-up charts included) throws "<name> 401: …" and ChartCard.load()
+// runs the probe; the bespoke overview and campaign pages and the ads readings log call
+// their fetchers directly, so those get the same handling here. A 401 from the auth gate, or a network-level
+// failure (an expired Cloudflare Access session while Access is still in front), runs
+// the confirming probe that raises the re-sign-in banner. The error is rethrown so the
+// page still shows it.
+async function withSessionCheck<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run()
+  } catch (e) {
+    if (isNetworkError(e) || isAuthError(e)) await checkSessionExpired()
+    throw e
+  }
+}
+
 /** Fetch one campaign's comparison data (funnel, hour-of-day, country, daily, device mix,
  * return visits — see lib/campaigns.ts + functions/api/campaigns.ts). */
-export async function fetchCampaignCompare(campaignId: string): Promise<CampaignCompareResponse> {
-  const res = await fetch('/api/campaigns', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ campaignId }),
+export function fetchCampaignCompare(campaignId: string): Promise<CampaignCompareResponse> {
+  return withSessionCheck(async () => {
+    const res = await fetch('/api/campaigns', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ campaignId }),
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(`campaigns ${res.status}: ${text.slice(0, 200)}`)
+    }
+    return res.json()
   })
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(`campaigns ${res.status}: ${text.slice(0, 200)}`)
-  }
-  return res.json()
 }
 
 /** Fetch the "Best Sudoku overview" page's data (today-at-a-glance KPIs, timeline,
  * campaign scorecard, release panel — see lib/overview.ts + functions/api/overview.ts).
  * `since`/`until` scope ONLY the timeline (the page's "existing range control"). */
-export async function fetchOverview(since?: string, until?: string): Promise<OverviewResponse> {
-  const res = await fetch('/api/overview', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ since, until }),
+export function fetchOverview(since?: string, until?: string): Promise<OverviewResponse> {
+  return withSessionCheck(async () => {
+    const res = await fetch('/api/overview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ since, until }),
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(`overview ${res.status}: ${text.slice(0, 200)}`)
+    }
+    return res.json()
   })
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(`overview ${res.status}: ${text.slice(0, 200)}`)
-  }
-  return res.json()
+}
+
+/** Fetch the ads-read routine's readings log + stored spend (GET /api/ads/readings — see
+ * lib/adsStore.ts + functions/api/ads/readings.ts). `query` is the URL-encoded
+ * campaignId/limit query string AdsReadingsWidgetCard builds. */
+export function fetchAdsReadings(query: string): Promise<AdsReadingsResponse> {
+  return withSessionCheck(async () => {
+    const res = await fetch(`/api/ads/readings?${query}`)
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(`readings ${res.status}: ${text.slice(0, 200)}`)
+    }
+    return res.json()
+  })
 }
 
 /** Load the durable dashboard config from KV (null = use defaults). */
 export async function loadConfig(): Promise<DashboardConfig | null> {
   try {
     const res = await fetch('/api/config')
-    if (!res.ok) return null
-    const data = await res.json()
+    if (!res.ok) {
+      if (res.status === 401) sessionExpired.value = true
+      return null
+    }
+    const data = (await res.json()) as any
     // Accept any real stored config: v2/v3 have a `pages` array, legacy v1 has `widgets`.
     // (The old check only looked for `widgets`, so every v2/v3 config was discarded on
     // load and the dashboard silently reverted to defaults — losing all saved state.)

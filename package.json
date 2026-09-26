@@ -1,6 +1,6 @@
 {
   "name": "gss-stats",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "description": "Private bot-free traffic dashboard for Good Stuff Software (RUM via Cloudflare GraphQL).",
@@ -30,6 +30,7 @@
     "typescript": "^5.7.2",
     "vite": "^6.0.7",
     "vitest": "^5.0.2",
+    "workerd": "^1.20260925.2",
     "wrangler": "^4.20.0"
   }
 }
