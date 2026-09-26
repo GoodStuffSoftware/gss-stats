@@ -36,6 +36,10 @@ All notable changes to **gss-stats** are documented here. The format follows
   Overview and Campaigns don't already cover (per-site/geo/referrer/device detail), and
   its trend chart now carries release markers.
 - Every Best Sudoku tab is renamed consistently (`Best Sudoku · <name>`).
+- **Pop-up chart titles are plain names again.** The "no outcome tracking yet" and
+  sign-in-eligibility caveats that used to be baked into a couple of pop-up chart titles
+  are now default captions instead (via the notes library above) — applied
+  non-destructively on load; a title you've already edited is left exactly as you left it.
 
 ## [0.3.2] — 2026-09-26
 
