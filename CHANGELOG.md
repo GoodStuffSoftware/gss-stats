@@ -6,6 +6,16 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Every stored geo-beacon field can now split or filter any beacon chart.** New dimensions:
+  screen width (exact pixels, and a bucketed `<480`/`480-767`/`768-1023`/`1024-1439`/`1440+`
+  view), and a "path family" dimension that groups pop-up/install/return/game-complete/
+  auth-status event beacons apart from ordinary page views — all filterable, not just
+  groupable. A new per-chart "Include event beacons" option (off by default, so every
+  existing chart's numbers are unchanged) lets a chart include those event paths instead of
+  excluding them. Drilling into an event family carries that option to the filtered page's
+  other charts too, with a caption explaining why.
+
 ## [0.7.0] — 2026-09-26
 
 ### Added

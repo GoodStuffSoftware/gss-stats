@@ -224,12 +224,36 @@ RUM whitelisted dimensions (server-side): `requestHost`, `requestPath`, `deviceT
 `countryName`, `refererHost`, `userAgentBrowser`, `userAgentOS`, `date`. **RUM
 geography is country-only** — sub-country region/city comes from the beacon.
 
-**Pop-up event beacons never count as page views.** Paths under `/signin-prompt`,
-`/signin-eligible`, `/promo-first50`, `/first50-congrats`, `/upsell`, `/install`,
-`/popup-outcome` and `/return` are pop-up interaction events, not screens — `/api/geo` and
-`/api/sites` exclude all 8 prefixes from every pageview/visit total and the top-pages
-breakdown (see [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) `POPUP_EVENT_PREFIXES`);
-`/api/popups` is where they're counted.
+**Pop-up event beacons never count as page views — unless a chart opts in.** Paths under
+`/signin-prompt`, `/signin-eligible`, `/promo-first50`, `/first50-congrats`, `/upsell`,
+`/install`, `/popup-outcome`, `/return`, `/game/complete/` and the `/auth/success/<provider>/`
+status suffix are pop-up/event beacons, not screens — `/api/geo` and `/api/sites` exclude all
+of them from every pageview/visit total and the top-pages breakdown by default (see
+[`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) `POPUP_EVENT_PREFIXES`); `/api/popups` is
+where they're counted. Each geo chart has its own **"Include event beacons"** option (off by
+default, so nothing existing changes) to lift that exclusion and chart event paths directly —
+e.g. with the **path family** dimension below. Drilling into an event-family `pathFamily`
+value (e.g. "install") carries that option onto the filtered page it opens, so every chart
+there — not just the one drilled — can show the event rows just filtered down to; the page
+carries a caption explaining why (see [`src/lib/drill.ts`](src/lib/drill.ts)
+`drillNeedsEventBeacons`).
+
+**Every stored geo-beacon column is a chartable dimension AND a filter.** `functions/api/geo.ts`
+whitelists every analytic `hits` column (`GEO_DIMS`) — region/city/postal/country/continent/
+timezone/colo/org/referrer/refpath/path/site/device/browser/os/lang/visitor/campaign/source/
+medium/date, plus **screen width** (`screenw`, exact pixels) and its bucketed form
+(`screenwBucket`: `<480` / `480-767` / `768-1023` / `1024-1439` / `1440+`), plus a derived
+**path family** dimension (`pathFamily`) that groups every event-beacon prefix above into
+`page` / `signin-prompt` / `signin-eligible` / `promo-first50` / `first50-congrats` / `upsell`
+/ `install` / `popup-outcome` / `return` / `game-complete` / `auth-status`. `screenwBucket` and
+`pathFamily` are derived (a `CASE` expression, not a real column) so they can't be a
+nested-doughnut ring dimension the way a real column can, but they filter exactly like one —
+the same whitelisted expression is bound as `(<expr>) = ?`, never string-interpolated. A
+dimension or filter field name never reaches D1 unless it's a `GEO_DIMS` member — that Set is
+the whole security boundary. **Never exposed:** `id` (row id), raw `ts` (only the `date`
+bucket), `lat`/`lon` (map-mode coordinates only), and `in_app` (declared in gss-beacon's
+schema, but its migration hasn't run against production yet — see
+[docs/capacity.md](docs/capacity.md)).
 
 **Campaign attribution is uc-only.** A row belongs to a Google Ads campaign only by its own
 `campaign` column value (D1's actual column name for what the ad tags as `utm_campaign`) —

@@ -72,6 +72,13 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters): Promis
         excludeOwnVisits: filters.excludeOwnVisits,
         ownBrowser: filters.ownBrowser,
         ownOS: filters.ownOS,
+        // Per-chart override, falling back to the page-level filter — same resolution as
+        // excludeSelfReferrals above. The page-level value is normally unset (every existing
+        // chart keeps excluding pop-up/install/return/game-complete/auth-status rows by
+        // default); App.vue's openFilteredPage sets it when a drill lands on an event-family
+        // pathFamily value, so every widget on that page — not just the one that was
+        // drilled — can actually show the event rows it just filtered down to.
+        includeEventBeacons: widget.includeEventBeacons === true || filters.includeEventBeacons === true,
       }),
     })
     if (!res.ok) {

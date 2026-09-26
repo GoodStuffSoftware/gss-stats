@@ -487,6 +487,9 @@ function normWidget(x: any): Widget {
     site: x.site,
     host: x.host,
     excludeSelfReferrals: x.excludeSelfReferrals,
+    // Per-chart geo-only opt-in (feat/all-beacon-fields) — default/absent stays false (every
+    // pre-existing saved chart keeps excluding event-beacon paths exactly as before).
+    includeEventBeacons: x.includeEventBeacons === true || undefined,
     isDefault: x.isDefault === true || undefined,
     // Per-chart override: back-fill any filter fields added since it was saved.
     filters: x.filters ? normFilters(x.filters) : undefined,

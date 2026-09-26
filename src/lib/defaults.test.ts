@@ -281,6 +281,45 @@ describe('normWidget — notes/noteId/longText round-trip (via normalizeConfig)'
   })
 })
 
+describe('normWidget — includeEventBeacons round-trip (via normalizeConfig)', () => {
+  function withWidgets(widgets: Widget[]): DashboardConfig {
+    return { version: CONFIG_VERSION, activePageId: 'user-1', pages: [page({ id: 'user-1', name: 'Mine', widgets })] }
+  }
+
+  it('a geo chart with includeEventBeacons set survives a save + normalizeConfig round-trip', () => {
+    const w = widget({ id: 'g1', type: 'hbar', dataset: 'geo', dimension: 'pathFamily', includeEventBeacons: true })
+    const norm = normalizeConfig(withWidgets([w]))
+    expect(norm.pages[0].widgets[0].includeEventBeacons).toBe(true)
+    // Round-trip again (normalizeConfig applied to its own prior output — the "save, then load
+    // again" path) to prove it isn't a one-shot pass-through that a second normalization drops.
+    const again = normalizeConfig({ version: CONFIG_VERSION, activePageId: 'user-1', pages: norm.pages })
+    expect(again.pages[0].widgets[0].includeEventBeacons).toBe(true)
+  })
+
+  it('MIGRATION DEFAULT: a widget saved before this option existed (field absent) normalizes with it undefined, not true or false', () => {
+    const legacy = { id: 'g2', title: 'x', type: 'hbar', dataset: 'geo', dimension: 'device', metric: 'pageviews', limit: 10, x: 0, y: 0, w: 4, h: 4 }
+    const norm = normalizeConfig(withWidgets([legacy as unknown as Widget]))
+    expect(norm.pages[0].widgets[0].includeEventBeacons).toBeUndefined()
+  })
+
+  it('a non-boolean saved value normalizes to undefined (fails closed to the excluding default), never to true', () => {
+    const legacy = { id: 'g3', title: 'x', type: 'hbar', dataset: 'geo', dimension: 'device', metric: 'pageviews', limit: 10, includeEventBeacons: 'yes', x: 0, y: 0, w: 4, h: 4 }
+    const norm = normalizeConfig(withWidgets([legacy as unknown as Widget]))
+    expect(norm.pages[0].widgets[0].includeEventBeacons).toBeUndefined()
+  })
+
+  it('the PAGE-level filters.includeEventBeacons (set by App.vue openFilteredPage on an event-family drill) also survives normalizeConfig', () => {
+    const cfg: DashboardConfig = {
+      version: CONFIG_VERSION,
+      activePageId: 'user-1',
+      pages: [page({ id: 'user-1', name: 'Filtered', widgets: [widget({ id: 'w1', type: 'hbar', dataset: 'geo', dimension: 'device' })] })],
+    }
+    cfg.pages[0].filters.includeEventBeacons = true
+    const norm = normalizeConfig(cfg)
+    expect(norm.pages[0].filters.includeEventBeacons).toBe(true)
+  })
+})
+
 describe('defaultBestSudokuPopupsWidgets — titles are plain, caveats are captions', () => {
   const widgets = defaultBestSudokuPopupsWidgets()
 

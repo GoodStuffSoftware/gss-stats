@@ -189,6 +189,9 @@ const dataKey = computed(() =>
     e: props.widget.excludeSelfReferrals,
     pu: props.widget.popup,
     pk: props.widget.popupKind,
+    // feat/all-beacon-fields: per-chart geo opt-in — data-affecting (changes which rows the
+    // query counts), so it belongs in the refetch key same as excludeSelfReferrals above.
+    ieb: props.widget.includeEventBeacons,
     f: effectiveFilters.value,
   }),
 )

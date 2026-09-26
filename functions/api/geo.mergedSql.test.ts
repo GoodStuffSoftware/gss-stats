@@ -13,21 +13,21 @@
 // bug that summed only the returned (post-LIMIT) rows would show up as a wrong total.
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { breakdownColumnExpr, buildMergedBreakdownSql, buildMergedRingSql } from './geo'
+import { breakdownColumnExpr, buildMergedBreakdownSql, buildMergedRingSql, emptyLabelFor, ringBlankExclusion } from './geo'
 
 let db: DatabaseSync
 
-const COLUMNS = ['ts', 'site', 'region', 'country', 'device', 'browser', 'os', 'referrer', 'campaign'] as const
+const COLUMNS = ['ts', 'site', 'region', 'country', 'device', 'browser', 'os', 'referrer', 'campaign', 'path', 'screenw'] as const
 type Row = Partial<Record<(typeof COLUMNS)[number], string | number>>
 
 function insertRow(row: Row) {
-  const cols = COLUMNS.map((c) => (row[c] === undefined ? (c === 'ts' ? Date.now() : '') : row[c]))
+  const cols = COLUMNS.map((c) => (row[c] === undefined ? (c === 'ts' ? Date.now() : c === 'screenw' ? 0 : '') : row[c]))
   db.prepare(`INSERT INTO hits (${COLUMNS.join(', ')}) VALUES (${COLUMNS.map(() => '?').join(', ')})`).run(...(cols as any[]))
 }
 
 beforeEach(() => {
   db = new DatabaseSync(':memory:')
-  db.exec(`CREATE TABLE hits (${COLUMNS.map((c) => `${c} ${c === 'ts' ? 'INTEGER' : 'TEXT'}`).join(', ')})`)
+  db.exec(`CREATE TABLE hits (${COLUMNS.map((c) => `${c} ${c === 'ts' || c === 'screenw' ? 'INTEGER' : 'TEXT'}`).join(', ')})`)
 })
 afterEach(() => db.close())
 
@@ -172,5 +172,136 @@ describe('ring (N-dimension breakdown): merged query total matches the old two-q
     const newR = newMergedRing(cols, whereSql, binds, groupBy, 8)
     expect(newR.total).toBe(oldR.total)
     expect(newR.total).toBe(150)
+  })
+})
+
+// ── New derived dimensions (feat/all-beacon-fields): screenw, screenwBucket, pathFamily ────
+//
+// Runs the real breakdownColumnExpr() output against a real SQLite engine (not a hand-rolled
+// re-implementation) to prove the blank/bucket/family labeling is correct — every hit is
+// bucketed under SOME label (nothing silently drops), and the "(unknown)"/family buckets match
+// exactly the rows a human would expect.
+describe('breakdownColumnExpr — new derived dimensions', () => {
+  it('screenw: buckets the INTEGER 0 sentinel under the blank label, everything else as its own value', () => {
+    insertRow({ screenw: 0 })
+    insertRow({ screenw: 0 })
+    insertRow({ screenw: 1024 })
+    insertRow({ screenw: 375 })
+    const col = breakdownColumnExpr('screenw', '(unknown)')
+    const rows = db.prepare(`SELECT ${col} AS k, COUNT(*) AS c FROM hits GROUP BY k ORDER BY c DESC, k ASC`).all() as any[]
+    expect(rows).toEqual([
+      { k: '(unknown)', c: 2 },
+      { k: '1024', c: 1 },
+      { k: '375', c: 1 },
+    ])
+  })
+
+  it('screenwBucket: groups raw widths into the fixed bucket set, 0 under the blank label', () => {
+    insertRow({ screenw: 0 })
+    insertRow({ screenw: 320 }) // <480
+    insertRow({ screenw: 479 }) // <480
+    insertRow({ screenw: 480 }) // 480-767
+    insertRow({ screenw: 767 }) // 480-767
+    insertRow({ screenw: 768 }) // 768-1023
+    insertRow({ screenw: 1024 }) // 1024-1439
+    insertRow({ screenw: 1439 }) // 1024-1439
+    insertRow({ screenw: 1440 }) // 1440+
+    insertRow({ screenw: 4000 }) // 1440+
+    const col = breakdownColumnExpr('screenwBucket', '(unknown)')
+    const rows = db.prepare(`SELECT ${col} AS k, COUNT(*) AS c FROM hits GROUP BY k ORDER BY k`).all() as any[]
+    expect(rows).toEqual([
+      { k: '(unknown)', c: 1 },
+      { k: '1024-1439', c: 2 },
+      { k: '1440+', c: 2 },
+      { k: '480-767', c: 2 },
+      { k: '768-1023', c: 1 },
+      { k: '<480', c: 2 },
+    ])
+  })
+
+  it('pathFamily: groups every event-beacon prefix into its own family, everything else as "page"', () => {
+    insertRow({ path: '/home' })
+    insertRow({ path: '/game' }) // NOT an event path (only /game/complete/... is)
+    insertRow({ path: '/signin-prompt/placement' })
+    insertRow({ path: '/signin-prompt/accept' })
+    insertRow({ path: '/popup-outcome/upsell/signed-in' })
+    insertRow({ path: '/return/uc123/d0' })
+    insertRow({ path: '/install/play' })
+    insertRow({ path: '/game/complete/normal/easy' })
+    insertRow({ path: '/auth/success/google' }) // base row — NOT an event path, stays 'page'
+    insertRow({ path: '/auth/success/google/new' }) // status row IS an event path
+    const col = breakdownColumnExpr('pathFamily', '')
+    const rows = db.prepare(`SELECT ${col} AS k, COUNT(*) AS c FROM hits GROUP BY k ORDER BY k`).all() as any[]
+    expect(rows).toEqual([
+      { k: 'auth-status', c: 1 },
+      { k: 'game-complete', c: 1 },
+      { k: 'install', c: 1 },
+      { k: 'page', c: 3 }, // /home, /game, /auth/success/google
+      { k: 'popup-outcome', c: 1 },
+      { k: 'return', c: 1 },
+      { k: 'signin-prompt', c: 2 },
+    ])
+  })
+
+  it('pathFamily is usable as a filter expression (DERIVED_FILTER_EXPR shape: bound equality)', () => {
+    insertRow({ path: '/home' })
+    insertRow({ path: '/install/play' })
+    insertRow({ path: '/install/web' })
+    const col = breakdownColumnExpr('pathFamily', '')
+    const row = db.prepare(`SELECT COUNT(*) AS c FROM hits WHERE (${col}) = ?`).get('install') as any
+    expect(row.c).toBe(2)
+  })
+})
+
+// ── Ring mode with screenw (INTEGER) — the reviewed bug ────────────────────────────────────
+//
+// screenw is the ring stack's only INTEGER dimension. Its blank sentinel is 0, never the
+// empty STRING every TEXT ring dimension's `<> ''` test compares against — SQLite's type
+// ordering means an INTEGER can NEVER equal a TEXT literal, so a naive `screenw <> ''` is a
+// no-op (always true) that excludes nothing, letting screenw=0 rows leak into ring results as
+// a raw "0" key instead of being dropped like every other dimension's blanks. Fixed by
+// ringBlankExclusion (type-correct per-dim test) + routing ring columns through
+// breakdownColumnExpr (same formatting/labeling as single-dim mode).
+describe('ring mode — screenw (INTEGER) blank handling', () => {
+  function ringQuery(dims: string[], whereExtra: string[] = []) {
+    const cols = dims.map((d, i) => `${breakdownColumnExpr(d, emptyLabelFor(d))} AS k${i}`)
+    const whereSql = ['1=1', ...dims.map(ringBlankExclusion), ...whereExtra].join(' AND ')
+    const groupBy = dims.map((_, i) => `k${i}`).join(', ')
+    const sql = buildMergedRingSql(cols, whereSql, groupBy)
+    return db.prepare(sql).all(50) as any[]
+  }
+
+  it('ringBlankExclusion is type-correct: screenw=0 rows are excluded, matching every TEXT dimension', () => {
+    insertRow({ region: 'CA', device: 'desktop', screenw: 0 }) // blank screenw — must be dropped
+    insertRow({ region: 'CA', device: 'desktop', screenw: 1024 })
+    insertRow({ region: 'NY', device: 'mobile', screenw: 375 })
+    const rows = ringQuery(['region', 'screenw'])
+    // Only the two non-blank screenw rows survive; the screenw=0 row never appears as "0" or
+    // under any label — ring mode drops blanks outright, same as it always has for TEXT dims.
+    expect(rows.map((r) => ({ k0: r.k0, k1: r.k1, c: r.c })).sort((a, b) => a.k1.localeCompare(b.k1))).toEqual([
+      { k0: 'CA', k1: '1024', c: 1 },
+      { k0: 'NY', k1: '375', c: 1 },
+    ])
+    expect(rows.reduce((n, r) => n + r.c, 0)).toBe(2) // NOT 3 — the blank row is gone, not mislabeled
+  })
+
+  it('REGRESSION: the old bare-column WHERE test (`screenw <> \'\'`) is a no-op and would have let the blank row through as "0"', () => {
+    insertRow({ screenw: 0 })
+    insertRow({ screenw: 1024 })
+    // Reproduce the exact bug: an INTEGER column compared to the empty TEXT literal.
+    const buggyRows = db.prepare(`SELECT screenw AS k, COUNT(*) AS c FROM hits WHERE screenw <> '' GROUP BY k`).all() as any[]
+    expect(buggyRows.length).toBe(2) // BOTH rows survive — the "exclusion" excluded nothing
+    expect(buggyRows.some((r) => String(r.k) === '0')).toBe(true) // the blank leaked through as raw "0"
+    // The fixed version drops it:
+    const fixedRows = db.prepare(`SELECT screenw AS k, COUNT(*) AS c FROM hits WHERE ${ringBlankExclusion('screenw')} GROUP BY k`).all() as any[]
+    expect(fixedRows.length).toBe(1)
+    expect(String(fixedRows[0].k)).toBe('1024')
+  })
+
+  it('ring columns route through breakdownColumnExpr: screenw is formatted as TEXT, not a raw SQLite INTEGER', () => {
+    insertRow({ screenw: 1440 })
+    const rows = ringQuery(['screenw'])
+    expect(rows).toEqual([{ k0: '1440', c: 1, total: 1 }])
+    expect(typeof rows[0].k0).toBe('string')
   })
 })
