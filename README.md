@@ -275,16 +275,19 @@ Every path that needs Google Ads metrics runs **one** function,
 the backfill (`--full`), `npm run ads:sync`, and the **gss-stats-sync** Cloudflare Worker
 (cron + on demand, below). Per campaign it:
 
-1. reads the stored days from `gss-stats-ads`;
-2. pulls every **missing closed ET day** (from the flight's first day, or the first gap,
+1. reads the stored days from `gss-stats-ads` (one query for every campaign);
+2. pulls every **missing closed ET day** of the flight (from the first day, or the first gap,
    through yesterday) plus the **last 3 closed days**, which Google still restates, as one
-   date range (daily metrics and placement-day rows). A closed campaign is covered through its
-   flight end + 3 days and then costs no API call;
-3. stores days the API returns nothing for as zero, so the stored days are contiguous;
-4. writes **only rows that changed**: a second run right after another is a no-op (it writes
-   only its own `ads_sync_runs` row);
-5. records the run in `ads_sync_runs` (start/finish, campaigns, days fetched and changed,
-   status, a redacted error).
+   date range (daily metrics and placement-day rows). The restatement window is re-checked at
+   most every 6 hours per campaign. A closed campaign is covered through its flight end and then
+   costs no API call;
+3. stores a day the API returns nothing for as zero **only if it was never stored and lies
+   inside the flight**; a stored day or placement row **with spend** that a response leaves out
+   is a failed fetch (an empty or truncated answer never overwrites stored spend);
+4. writes **only rows that changed**; a run with nothing due makes no Google call and writes
+   nothing at all, so a second run right after another is a true no-op;
+5. records each run that did something in `ads_sync_runs` (start/finish, campaigns, days fetched
+   and changed, status, a redacted error).
 
 Today's still-open day is never stored. The Ads client (plain `fetch`) and the store
 (`createSqlAdsStore` over a wrangler-CLI adapter locally, a D1-binding adapter in the Worker)
@@ -302,14 +305,24 @@ per 10 minutes. The dashboard holds no Google Ads credential and never calls the
 ### The sync Worker (`workers/sync/`, `gss-stats-sync`)
 
 - **Schedule:** a cron at :05 every hour. While a flight is live (first day through the day
-  after the last) every tick syncs: yesterday is stored within the hour after midnight ET and a
-  failed pass is retried the next hour; the other ticks re-check the restatement window. Outside
-  a flight only the 01:05 ET tick syncs. A skipped tick does no I/O.
+  after the last) every tick checks what is due: yesterday right after midnight ET, a retry
+  after a failure, and the restatement window once its last pull is 6 h old. Outside a flight
+  only the 01:05 ET tick checks. A tick with nothing due reads two small queries and stops: no
+  claim, no secret read, no token refresh, no write.
 - **On demand:** `POST /sync`, reachable only through the Pages Service Binding `ADS_SYNC`:
-  the Worker has no `workers.dev` URL, no preview URLs and no route. Rate-limited to one sync
-  per 10 minutes (any source). Body `{"full": true}` re-pulls whole windows (an operator check).
-- **Deploy:** `npm run ads:worker-deploy` (the Worker bundles `src/lib/campaigns.ts`, so a new
-  campaign needs a Worker redeploy as well as a Pages deploy).
+  the Worker has no `workers.dev` URL, no preview URLs and no route. Nothing due → 200 "up to
+  date". Otherwise it claims atomically (a `'running'` row, only if no run finished in the last
+  10 minutes); a concurrent request loses and gets 429. Operator body: `{"full": true,
+  "campaignIds": [...], "maxDays": n}`.
+- **Per-run caps (Workers Free, 10 ms CPU):** at most 7 closed days (live campaigns first) and 40
+  D1 statements; the rest continues next run. Measured live: a no-op 1-4 ms CPU, a 1-day pull
+  about 9 ms warm (ADR 0001 has the numbers and what happens if a cold run overruns).
+- **Deploy:** `npm run ads:worker-deploy -- --cf-token-file <path> [--paused]` stamps the version
+  with the git SHA (tag, message, and the `GIT_SHA` it reports with a hash of the campaign
+  definitions); `--paused` deploys with no cron. The Worker bundles `src/lib/campaigns.ts`, so a
+  new campaign needs a Worker redeploy as well as a Pages deploy; the dashboard's Refresh says
+  when the Worker runs other campaign definitions, and CI bundles it on every PR
+  (`npm run ads:worker-check`).
 - **Secrets:** the four Google Ads credentials live in Cloudflare **Secrets Store** (account
   store `default_secrets_store`, secret names = the Bitwarden key names, scope `workers`),
   bound as `ADS_CLIENT_ID`, `ADS_CLIENT_SECRET`, `ADS_REFRESH_TOKEN`, `ADS_DEVELOPER_TOKEN`.

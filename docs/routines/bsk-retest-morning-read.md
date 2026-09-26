@@ -121,10 +121,12 @@ What the CLI does, so you can explain it (do not re-implement any of it):
 1. **Syncs first, through the shared sync** (`syncAdsData` in `src/lib/adsSync.ts`, the same
    code `npm run ads:sync` and the backfill run): it checks which closed ET days gss-stats'
    own D1 database is missing, pulls all of them (from the flight's first day or the first
-   gap, through yesterday) plus the last 3 closed days that Google may still restate, and
-   writes only rows that changed. The `gss-stats-sync` Cloudflare Worker runs the same sync
-   every hour during the flight, so this step is usually a no-op; that is expected and safe.
-   The report's `sync (shared):` line says what it pulled and changed.
+   gap, through yesterday) plus the last 3 closed days that Google may still restate (at most
+   every 6 hours), and writes only rows that changed. An empty or incomplete answer from
+   Google never overwrites stored spend: it is reported as a failed read and pushes. The
+   `gss-stats-sync` Cloudflare Worker runs the same sync every hour during the flight, so this
+   step often pulls only today's partial numbers; that is expected and safe. The report's
+   `sync (shared):` line says what it pulled and changed.
 2. Fires each $25/$50/$75/$100 read once, runs the full read and the kill rules on a
    crossing, and checks the $100 cap on every read.
 3. Appends **one** daily line per ET day. Rerunning the same entry the same day stores
