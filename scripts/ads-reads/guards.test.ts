@@ -1,7 +1,7 @@
 // Safety guards: read-only beacon SQL, the ads-store write guard, bind inlining, secret
 // redaction, and the read-only Google Ads client (no manager header, SELECT only).
 import { afterEach, describe, expect, it } from 'vitest'
-import { assertReadOnlySql, createD1Select, inlineBinds, parseD1Json, sqlLiteral, stripSqlLiterals } from './d1'
+import { assertReadOnlySql, createD1Select, inlineBinds, parseD1Json, parseD1Response, sqlLiteral, stripSqlLiterals } from './d1'
 import { assertAdsWriteSql, createD1Store } from './d1Store'
 import { returnRowsQuery, returnSitesQuery, siteEventsQuery, taggedRowsQuery } from './beacon'
 import { campaignSyncStatements, dailyRowUpserts, mergePlacementDayRows, placementDailyUpserts, readingInsert, syncRunInsert, thresholdStateInsert } from '../../src/lib/adsStore'
@@ -135,6 +135,10 @@ describe('beacon reads are read-only and apply the shared exclusions', () => {
   it('parseD1Json reads the results array and refuses an unsuccessful response', () => {
     expect(parseD1Json('banner\n[{"results":[{"n":1}],"success":true}]')).toEqual([{ n: 1 }])
     expect(() => parseD1Json('[{"results":[],"success":false}]')).toThrow()
+  })
+  it('a "▲ [WARNING]" banner before the JSON is skipped, and meta.changes is read', () => {
+    expect(parseD1Response('▲ [WARNING] update available\n[{"results":[],"success":true,"meta":{"changes":0}}]')).toEqual({ results: [], changes: 0 })
+    expect(parseD1Response('[{"results":[],"success":true}]').changes).toBeNull()
   })
 })
 
