@@ -30,9 +30,12 @@ import { classifyPopupPath, computeRate, TRACKING_ACTIVATION_DATE_ET, etDateFrom
 // is built ONLY from tagged-arrival rows, never from /signin-eligible — that beacon is
 // deferred ≥30 min after the finish, so its own row time is not the finish time and would
 // skew any hour-of-day bucketing. See lib/popupEvents.ts SIGNIN_ELIGIBLE_CAVEAT.
-const ET_HOUR_FMT = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hourCycle: 'h23' })
+// Formatters are built on first use, not at module load (lib/popupEvents.ts etDateFromMs says
+// why); same options, same output.
+let etHourFmt: Intl.DateTimeFormat | null = null
 export function etHourFromMs(ms: number): number {
-  return Number(ET_HOUR_FMT.format(new Date(ms)))
+  etHourFmt ??= new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hourCycle: 'h23' })
+  return Number(etHourFmt.format(new Date(ms)))
 }
 
 // ── Campaign registry ────────────────────────────────────────────────────────────────
@@ -212,17 +215,19 @@ export function etMidnightUtcMs(dateEt: string): number {
 
 // ET calendar date + local clock time, minute precision — used by etTimeUtcMs's round-trip
 // check below (etMidnightUtcMs's own check is midnight-specific; this generalizes it).
-const ET_DATETIME_FMT = new Intl.DateTimeFormat('en-CA', {
-  timeZone: 'America/New_York',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-  hourCycle: 'h23',
-})
-function etDateTimeFromMs(ms: number): string {
-  const parts = Object.fromEntries(ET_DATETIME_FMT.formatToParts(new Date(ms)).map((p) => [p.type, p.value]))
+let etDateTimeFmt: Intl.DateTimeFormat | null = null
+/** "YYYY-MM-DDTHH:MM" in ET (exported for the formatter-equivalence test). */
+export function etDateTimeFromMs(ms: number): string {
+  etDateTimeFmt ??= new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  })
+  const parts = Object.fromEntries(etDateTimeFmt.formatToParts(new Date(ms)).map((p) => [p.type, p.value]))
   return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`
 }
 
