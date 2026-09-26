@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.2] — 2026-09-26
+
 ### Added
 - **Pop-up and campaign-return tracking is now live** for v1.95.3 (production web,
   2026-09-26): the "tracking not yet active" note is gone, rates and pop-up counts are
