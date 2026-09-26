@@ -87,6 +87,65 @@ describe('parseTextLite', () => {
     })
   })
 
+  describe('HIGH follow-up fix — control characters/whitespace stripped from the WHOLE href before classifying, not just trimmed', () => {
+    // A naive scheme check misses these because .trim() only strips the two ends, and
+    // browsers strip ASCII tab/newline/CR from a URL before parsing its scheme — so each of
+    // these reads as "not javascript:" to a pattern match but IS a live javascript: URL to
+    // the browser.
+    it('a tab inside the scheme (java\\tscript:) is neutralised, not treated as a safe relative path', () => {
+      const tokens = parseTextLite('[x](java\tscript:alert(1))')
+      expect(tokens.some((t) => t.type === 'link')).toBe(false)
+      expect(tokens[0]).toEqual({ type: 'text', value: 'x' })
+    })
+    it('a newline inside the scheme (java\\nscript:) is neutralised', () => {
+      const tokens = parseTextLite('[x](java\nscript:alert(1))')
+      expect(tokens.some((t) => t.type === 'link')).toBe(false)
+    })
+    it('a CR inside the scheme (java\\rscript:) is neutralised', () => {
+      const tokens = parseTextLite('[x](java\rscript:alert(1))')
+      expect(tokens.some((t) => t.type === 'link')).toBe(false)
+    })
+    it('a leading \\u0001 control character is neutralised, not treated as an opaque-but-harmless prefix', () => {
+      const tokens = parseTextLite('[x](\u0001javascript:alert(1))')
+      expect(tokens.some((t) => t.type === 'link')).toBe(false)
+    })
+    it('a leading \\u0000 (NUL) before javascript: is neutralised', () => {
+      const tokens = parseTextLite('[x](\u0000javascript:alert(1))')
+      expect(tokens.some((t) => t.type === 'link')).toBe(false)
+    })
+    it('an HTML-entity-encoded tab ("jav&#x09;ascript:") is never decoded — it stays inert text because we never interpret entities, so the raw "&#x09;" characters just fail the charset allowlist', () => {
+      const tokens = parseTextLite('[x](jav&#x09;ascript:alert(1))')
+      expect(tokens.some((t) => t.type === 'link')).toBe(false)
+      expect(tokens[0]).toEqual({ type: 'text', value: 'x' })
+    })
+    it('a backslash after the leading slash (/\\\\evil.com) is neutralised — some URL parsers treat /\\ as protocol-relative, same as //', () => {
+      const tokens = parseTextLite('[x](/\\evil.com)')
+      expect(tokens.some((t) => t.type === 'link')).toBe(false)
+      expect(tokens[0]).toEqual({ type: 'text', value: 'x' })
+    })
+    it('protocol-relative //evil.com is neutralised (regression: every one of its characters is individually charset-legal, so the bare-relative-path branch must never see it)', () => {
+      const tokens = parseTextLite('[x](//evil.com)')
+      expect(tokens.some((t) => t.type === 'link')).toBe(false)
+      expect(tokens[0]).toEqual({ type: 'text', value: 'x' })
+    })
+    it('a schemeless-looking "https:evil.com" (no //) is neutralised — some URL parsers normalize this to https://evil.com, so only the literal "https://" prefix form is ever accepted', () => {
+      const tokens = parseTextLite('[x](https:evil.com)')
+      expect(tokens.some((t) => t.type === 'link')).toBe(false)
+      expect(tokens[0]).toEqual({ type: 'text', value: 'x' })
+    })
+    it('mixed control characters and case together (\\u0001 + JaVaScRiPt with an embedded tab) are still neutralised', () => {
+      const tokens = parseTextLite('[x](\u0001Ja\tVaScRiPt:alert(1))')
+      expect(tokens.some((t) => t.type === 'link')).toBe(false)
+    })
+    it('a safe https:// URL survives normalization unchanged when it has no control characters', () => {
+      expect(parseTextLite('[x](https://example.com/y)')).toEqual([{ type: 'link', value: 'x', href: 'https://example.com/y' }])
+    })
+    it('the RENDERED href is the normalized value, not the raw one — a safe URL with a stray embedded tab is stripped down to the clean href rather than rejected outright', () => {
+      const tokens = parseTextLite('[x](https://exa\tmple.com/y)')
+      expect(tokens).toEqual([{ type: 'link', value: 'x', href: 'https://example.com/y' }])
+    })
+  })
+
   describe('nested / unbalanced markers', () => {
     it('an unclosed ** is left as literal text, not treated as bold', () => {
       expect(parseTextLite('a **b')).toEqual([{ type: 'text', value: 'a **b' }])

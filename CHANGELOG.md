@@ -45,12 +45,18 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **Note/text links only ever render for `https:` and same-site targets** (an absolute
   path, an in-page anchor, or a plain relative path) — any other scheme, including
   `javascript:`, `data:`, `vbscript:`, plain `http:`, and a protocol-relative `//host`
-  link, now renders as inert plain text instead of a clickable link.
+  link, now renders as inert plain text instead of a clickable link. A link href is also
+  fully stripped of control characters and whitespace from anywhere in it (not just the
+  ends) before that check, so a disguised scheme like `java` + tab + `script:` can no
+  longer slip past as "not javascript:" while still being one to the browser.
 - **A data-driven value can no longer introduce markup of its own** — note/text templates
   are parsed for **bold**/[link](url) syntax before any `{variable}` is substituted, so a
   variable's value is always rendered as plain text, never as new markup.
 - The always-visible zoom button's larger touch target now applies on any touch-capable
   device (`pointer: coarse`), not just narrow viewports.
+- **A pop-up chart's data caveat (e.g. the known install-outcome measurement gap) now
+  actually shows under the chart** — the API was already sending it, but nothing rendered
+  it.
 
 ## [0.5.2] — 2026-09-26
 

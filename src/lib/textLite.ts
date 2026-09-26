@@ -15,20 +15,50 @@ const TOKEN_RE = /\*\*(.+?)\*\*|\[([^\]]+)\]\(([^)]+)\)/g
 // ever rendered as a real `<a href>` — everything else, including plain `http:` (registry
 // text should never need it), is neutralised to plain text: the link survives as readable
 // content, but is never a clickable/navigable element pointing somewhere unsafe.
-function isSafeHref(href: string): boolean {
-  const h = href.trim()
-  if (!h) return false
-  if (h.startsWith('#')) return true // in-page anchor
-  if (h.startsWith('//')) return false // protocol-relative — inherits whatever scheme the page loads over, but still leaves the app; reject
-  if (h.startsWith('/')) return true // absolute path, same origin
-  if (/^[a-z][a-z0-9+.-]*:/i.test(h)) return h.toLowerCase().startsWith('https://') // an explicit scheme — https only
-  return true // no scheme, no leading slash: a plain relative path/filename
+//
+// HIGH follow-up fix (2026-09-26, second review): the first version above did a scheme
+// check on the TRIMMED-only href, and `.trim()` only strips whitespace from the two ends —
+// it does nothing to a C0 control character (\u0000-\u001F, \u007F) or to one embedded in
+// the MIDDLE of the string. Browsers strip ASCII tab/newline/CR from a URL before parsing
+// its scheme (a WHATWG URL-parsing quirk), so `[x](java\tscript:alert(1))` or
+// `[x](java\nscript:alert(1))` read as inert text to a naive `/^[a-z][a-z0-9+.-]*:/i` check
+// but are a live `javascript:` URL to the browser; a leading \u0001 or an embedded CR is the
+// same trick. Rewritten as strip-then-strict-allowlist instead of an unsafe-pattern
+// blocklist: normalize the ENTIRE string first (strip every control character and every
+// whitespace character from anywhere in it, not just the ends), then classify the
+// NORMALIZED value against an explicit allowlist, and render that normalized value — never
+// the raw one — so a control character can never survive into the actual `href` either.
+function safeHref(rawHref: string): string | null {
+  const h = rawHref.replace(/[\u0000-\u001F\u007F\s]/g, '')
+  if (!h) return null
+  if (h.toLowerCase().startsWith('https://')) return h // https: only, and only the real double-slash form (bare "https:evil.com" is NOT this — some URL parsers normalize it to https://evil.com, so it must fail every branch below too)
+  if (h.startsWith('#')) return h // in-page anchor
+  if (h.startsWith('/')) {
+    // Anything slash-prefixed is EITHER a safe same-origin absolute path, or an attempt at
+    // a protocol-relative (//host) or backslash-confusable (/\host, which some URL parsers
+    // also treat as protocol-relative) target — decide it right here and never let it fall
+    // through to the more permissive bare-relative-path branch below, which would otherwise
+    // wrongly accept "//evil.com" (its characters are all individually charset-legal).
+    return h.startsWith('//') || h.startsWith('/\\') ? null : h
+  }
+  // A bare relative path/filename: no leading slash, no scheme at all. Reject up front if a
+  // ':' appears before the first path delimiter (catches a disguised/partial scheme even
+  // before the charset check below would); then require the WHOLE value to be built only
+  // from an explicit safe charset — no ':', no '\', nothing left that any parser could
+  // reinterpret as a scheme or a protocol-relative target.
+  const firstDelim = h.search(/[/?#]/)
+  const schemeCandidate = firstDelim === -1 ? h : h.slice(0, firstDelim)
+  if (schemeCandidate.includes(':')) return null
+  return /^[A-Za-z0-9._~/-]+$/.test(h) ? h : null
 }
 
 /** Tokenize a template into plain data — no interpolation happens here (see
  * tokenizeAndInterpolate below for the safe combined operation). An unsafe link href (see
- * isSafeHref) is neutralised to a plain text token carrying just the link's visible label,
- * never its href — the dangerous URL is dropped, not merely de-activated. */
+ * safeHref) is neutralised to a plain text token carrying just the link's visible label,
+ * never its href — the dangerous URL is dropped, not merely de-activated. A SAFE href is
+ * rendered as the value safeHref returned (the normalized one), never the raw captured
+ * group — a control character or stray whitespace inside an otherwise-safe URL must not
+ * survive into the actual `href` either. */
 export function parseTextLite(input: string): TextToken[] {
   const tokens: TextToken[] = []
   let last = 0
@@ -39,7 +69,8 @@ export function parseTextLite(input: string): TextToken[] {
     if (m[1] !== undefined) {
       tokens.push({ type: 'bold', value: m[1] })
     } else if (m[2] !== undefined) {
-      tokens.push(isSafeHref(m[3]) ? { type: 'link', value: m[2], href: m[3] } : { type: 'text', value: m[2] })
+      const href = safeHref(m[3])
+      tokens.push(href !== null ? { type: 'link', value: m[2], href } : { type: 'text', value: m[2] })
     }
     last = TOKEN_RE.lastIndex
   }
