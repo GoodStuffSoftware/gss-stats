@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-09-26
+
 ### Added
 - **Campaign spend now comes from the Google Ads API.** The campaigns page and the overview
   scorecard read daily spend stored in the dashboard's own database, and fall back to the
