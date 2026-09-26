@@ -14,6 +14,7 @@ import PageBar from './components/PageBar.vue'
 import FilterBar from './components/FilterBar.vue'
 import Dashboard from './components/Dashboard.vue'
 import ChartEditor from './components/ChartEditor.vue'
+import AccountMenu from './components/AccountMenu.vue'
 
 const config = reactive<DashboardConfig>(defaultConfig())
 const loaded = ref(false)
@@ -72,7 +73,9 @@ onMounted(async () => {
 // ── Persistence (debounced) ───────────────────────────────────────────────────
 let saveTimer: number | undefined
 function scheduleSave() {
-  if (!loaded.value) return
+  // Never save while signed out: a config that fell back to defaults because the load
+  // was refused must not overwrite the stored one.
+  if (!loaded.value || sessionExpired.value) return
   saveState.value = 'saving'
   clearTimeout(saveTimer)
   saveTimer = window.setTimeout(async () => {
@@ -417,6 +420,12 @@ function toggleDark() {
           <h1>Stats</h1>
           <span class="overline">Good Stuff Software · bot-free RUM</span>
         </div>
+      </div>
+      <!-- AccountMenu (signed-in email + Sign out) stays visible in the header at all times —
+           unlike save-state/theme/add-chart, which live in the hidden function bar below,
+           this is identity/auth chrome, not page-modification chrome (owner requirement). -->
+      <div class="top-actions">
+        <AccountMenu />
       </div>
     </header>
 
