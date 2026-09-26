@@ -16,6 +16,8 @@
     "ads:postflight-read": "tsx scripts/ads-reads/postflight-read.ts",
     "ads:backfill": "tsx scripts/ads-reads/backfill.ts",
     "ads:sync": "tsx scripts/ads-reads/sync.ts",
+    "ads:worker-secrets": "tsx scripts/ads-reads/worker-secrets.ts",
+    "ads:worker-deploy": "wrangler deploy -c workers/sync/wrangler.toml",
     "ads:migrate": "wrangler d1 migrations apply gss-stats-ads --remote"
   },
   "dependencies": {

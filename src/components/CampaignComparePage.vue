@@ -15,6 +15,7 @@ import { PALETTE } from '../lib/charts'
 import BaseChart from './charts/BaseChart.vue'
 import AdsReadingsWidgetCard from './AdsReadingsWidgetCard.vue'
 import { freshnessLine, STALE_NOTE } from '../lib/adsFreshness'
+import AdsRefreshButton from './AdsRefreshButton.vue'
 
 const loading = ref(true)
 const error = ref<string | null>(null)
@@ -298,6 +299,7 @@ function shareBarWidth(row: DeviceMixShare): number {
       <section class="block">
         <h2>Cost per tagged arrival / auth success</h2>
         <p class="caption">{{ ARRIVALS_CAVEAT }}</p>
+        <AdsRefreshButton :campaign-ids="CAMPAIGNS.map((c) => c.id)" @refreshed="(r) => r.refreshed && load()" />
         <div class="cost-grid">
           <div v-for="c in CAMPAIGNS" :key="c.id" class="cost-card">
             <div class="fc-label">{{ c.label }}</div>

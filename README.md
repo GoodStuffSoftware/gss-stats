@@ -258,8 +258,8 @@ npm run typecheck:scripts
 
 Every path that needs Google Ads metrics runs **one** function,
 [`syncAdsData`](src/lib/adsSync.ts): the morning read, the backstop, the post-flight read,
-the backfill (`--full`), `npm run ads:sync`, and later a Cloudflare Worker cron. Per campaign
-it:
+the backfill (`--full`), `npm run ads:sync`, and the **gss-stats-sync** Cloudflare Worker
+(cron + on demand, below). Per campaign it:
 
 1. reads the stored days from `gss-stats-ads`;
 2. pulls every **missing closed ET day** (from the flight's first day, or the first gap,
@@ -273,14 +273,39 @@ it:
    status, a redacted error).
 
 Today's still-open day is never stored. The Ads client (plain `fetch`) and the store
-(`createSqlAdsStore` over a wrangler-CLI adapter today, a D1-binding adapter for a Worker) are
-runtime-agnostic.
+(`createSqlAdsStore` over a wrangler-CLI adapter locally, a D1-binding adapter in the Worker)
+are runtime-agnostic, so the local routines and the Worker run the same code; whichever runs
+second finds nothing to write.
 
 The campaigns page and the readings widget show **"Spend through &lt;date&gt; · synced
 &lt;relative time&gt;"** per campaign (`spendThrough`, `lastSync` from `/api/campaigns` and
 `/api/ads/readings`), and **"stale — sync pending"** when a flight day that should be stored
 by now is missing: yesterday from 09:30 ET (the 08:00 ET morning read has synced by then),
-otherwise the day before. The dashboard never calls the Google Ads API itself.
+otherwise the day before. Their **Refresh data** button posts to `/api/ads/refresh` (behind
+the sign-in gate), which asks the sync Worker to run only when something is stale, at most once
+per 10 minutes. The dashboard holds no Google Ads credential and never calls the Ads API.
+
+### The sync Worker (`workers/sync/`, `gss-stats-sync`)
+
+- **Schedule:** a cron at :05 every hour. While a flight is live (first day through the day
+  after the last) every tick syncs: yesterday is stored within the hour after midnight ET and a
+  failed pass is retried the next hour; the other ticks re-check the restatement window. Outside
+  a flight only the 01:05 ET tick syncs. A skipped tick does no I/O.
+- **On demand:** `POST /sync`, reachable only through the Pages Service Binding `ADS_SYNC`:
+  the Worker has no `workers.dev` URL, no preview URLs and no route. Rate-limited to one sync
+  per 10 minutes (any source). Body `{"full": true}` re-pulls whole windows (an operator check).
+- **Deploy:** `npm run ads:worker-deploy` (the Worker bundles `src/lib/campaigns.ts`, so a new
+  campaign needs a Worker redeploy as well as a Pages deploy).
+- **Secrets:** the four Google Ads credentials live in Cloudflare **Secrets Store** (account
+  store `default_secrets_store`, secret names = the Bitwarden key names, scope `workers`),
+  bound as `ADS_CLIENT_ID`, `ADS_CLIENT_SECRET`, `ADS_REFRESH_TOKEN`, `ADS_DEVELOPER_TOKEN`.
+  Bitwarden stays the source of truth. **Rotation:** rotate the credential in Bitwarden, then
+  run `npm run ads:worker-secrets -- --cf-token-file <path>`: it reads the values with `bws`
+  into memory and pipes a new secret into `wrangler secrets-store secret create` on stdin, or
+  updates an existing one through the same Secrets Store API call wrangler uses (wrangler's
+  `update` can't take a value on stdin non-interactively). Nothing is printed, logged or
+  written to disk; the Worker picks the new value up on its next run, no redeploy. The local
+  routines keep reading Bitwarden directly.
 
 ## Docs
 

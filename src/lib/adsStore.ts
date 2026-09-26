@@ -293,6 +293,8 @@ export const READINGS_ON_DAY_SQL = `SELECT ${READING_COLS} FROM ads_readings WHE
 export const COVERAGE_ROWS_SQL = 'SELECT campaign_id, date, fetched_at FROM ads_daily_metrics ORDER BY campaign_id, date'
 /** Latest successful sync per campaign. */
 export const LAST_SYNC_SQL = 'SELECT j.value AS campaign_id, MAX(r.finished_at) AS last_sync FROM ads_sync_runs AS r, json_each(r.campaigns_ok) AS j GROUP BY j.value'
+/** When the latest sync run (any source) finished — the on-demand rate limit. */
+export const LAST_RUN_SQL = 'SELECT MAX(finished_at) AS last FROM ads_sync_runs'
 export const RECENT_SYNC_RUNS_SQL =
   'SELECT run_key, source, started_at, finished_at, campaigns, campaigns_ok, days_fetched, days_changed, placement_rows_fetched, placement_rows_changed, status, error FROM ads_sync_runs ORDER BY id DESC LIMIT ?'
 
@@ -569,6 +571,17 @@ export async function readThresholdState(db: D1Reader | undefined | null, campai
   try {
     const rows = await allRows(db, THRESHOLD_STATE_SQL, [campaignId])
     return rows.map((r) => ({ threshold: num(r.threshold_usd), firedAt: String(r.fired_at ?? '') }))
+  } catch {
+    return null
+  }
+}
+
+/** Finish time of the latest sync run of any source; null when none (or unreadable). */
+export async function readLastSyncRun(db: D1Reader | undefined | null): Promise<string | null> {
+  if (!db) return null
+  try {
+    const rows = await allRows(db, LAST_RUN_SQL, [])
+    return str(rows[0]?.last)
   } catch {
     return null
   }

@@ -1,0 +1,50 @@
+# gss-stats-sync — runs the shared Google Ads sync (src/lib/adsSync.ts) on a cron, and on
+# demand for the gss-stats dashboard through a Service Binding. See src/index.ts and
+# docs/adr/0001-ads-read-store.md ("The sync Worker").
+#
+# Deploy (from the repo root):  npx wrangler deploy -c workers/sync/wrangler.toml
+# Secrets (Secrets Store, from Bitwarden, never printed):  npm run ads:worker-secrets
+name = "gss-stats-sync"
+main = "src/index.ts"
+compatibility_date = "2026-09-26"
+
+# NOT public: no workers.dev URL, no preview URLs, no route. The only way in is the
+# gss-stats Pages project's Service Binding (binding ADS_SYNC in the root wrangler.toml).
+workers_dev = false
+preview_urls = false
+
+# Hourly at :05 UTC. The code decides what a tick does (src/lib/adsSync.ts cronShouldSync):
+# every tick while a flight is live, one daily pass at 01:xx ET otherwise.
+[triggers]
+crons = ["5 * * * *"]
+
+[observability]
+enabled = true
+
+# gss-stats' own ads store (the same database the local routines write).
+[[d1_databases]]
+binding = "gss_stats_ads"
+database_name = "gss-stats-ads"
+database_id = "785327a3-683c-4f85-819d-abe11efcacc9"
+
+# Google Ads API credentials: account-level Secrets Store (store "default_secrets_store"),
+# secret names = the Bitwarden key names, so the two line up one to one.
+[[secrets_store_secrets]]
+binding = "ADS_CLIENT_ID"
+store_id = "deb0011dfe80443091c08d92874ddf06"
+secret_name = "google-ads-api-rep-client-id"
+
+[[secrets_store_secrets]]
+binding = "ADS_CLIENT_SECRET"
+store_id = "deb0011dfe80443091c08d92874ddf06"
+secret_name = "google-ads-api-rep-client-secret"
+
+[[secrets_store_secrets]]
+binding = "ADS_REFRESH_TOKEN"
+store_id = "deb0011dfe80443091c08d92874ddf06"
+secret_name = "google-ads-api-rep-refresh-token"
+
+[[secrets_store_secrets]]
+binding = "ADS_DEVELOPER_TOKEN"
+store_id = "deb0011dfe80443091c08d92874ddf06"
+secret_name = "google-ads-api-rep-developer-token"

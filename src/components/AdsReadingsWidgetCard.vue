@@ -15,6 +15,8 @@ import { proposalLabel, type ReadingRecord, type RuleResult } from '../lib/adsRu
 import { freshnessLine, STALE_NOTE } from '../lib/adsFreshness'
 import { SMALL_SAMPLE_NOTE } from '../lib/popupEvents'
 import { fetchAdsReadings } from '../api'
+import AdsRefreshButton from './AdsRefreshButton.vue'
+import type { RefreshResult } from '../lib/adsRefresh'
 
 export interface AdsReadingsWidgetLike {
   view?: string
@@ -83,6 +85,10 @@ function spendSource(c: AdsReadingsCampaign): string {
   if (c.spend.source === 'config') return 'hand-entered config'
   return 'no spend on record'
 }
+// A sync that ran may have stored new days: reload so spend and the freshness line update.
+function onRefreshed(r: RefreshResult) {
+  if (r.refreshed) load()
+}
 // "Spend through <date> · synced <relative time>" — relative to when the data was loaded.
 const loadedAt = computed(() => (data.value ? Date.parse(data.value.generatedAt) : Date.now()))
 </script>
@@ -95,6 +101,7 @@ const loadedAt = computed(() => (data.value ? Date.parse(data.value.generatedAt)
       <p v-if="!data.storeBound" class="state small mono">Readings store not bound (gss_stats_ads) — showing config spend only.</p>
       <p v-else-if="!data.storeReadable" class="state small mono">Readings store unreadable — showing config spend only.</p>
       <p class="note">{{ SMALL_SAMPLE_NOTE }} Proposals only; the routine never changes a campaign.</p>
+      <AdsRefreshButton v-if="data.storeBound && campaigns.length" :campaign-ids="campaigns.map((c) => c.campaignId)" @refreshed="onRefreshed" />
 
       <div v-for="c in campaigns" :key="c.campaignId" class="camp">
         <div class="camp-head">
