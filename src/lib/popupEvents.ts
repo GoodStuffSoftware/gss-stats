@@ -30,25 +30,46 @@ export const POPUP_EVENT_PREFIXES = [
   // On-device, no-ID return beacon (v1.95.3, see lib/campaigns.ts RETURN_BUCKETS): paths
   // like /return/<uc>/d0, /return/<uc>/d1, /return/<uc>/d2-7, … — an event, not a screen.
   '/return',
+  // v1.95.5 (live 2026-09-26T19:43:02Z, see GAME_COMPLETE_LIVE_AT below): one row per
+  // distinct completed game, `/game/complete/<normal|daily>/<easy|medium|hard|expert|
+  // unknown>`. WITH the trailing slash, unlike every other entry above — `/game` itself
+  // (the real "played a game" page view, see lib/campaigns.ts PLAYED_PATH) must keep
+  // counting as a page view, and this entry must anchor on the full `/game/complete/`
+  // segment, never a bare `/game` or `/game/complete` prefix (which would also swallow
+  // `/game` and any future unrelated `/game/completely-*`-shaped path). Entries ending in
+  // '/' are matched as a raw prefix below (isPopupEventPath/popupExcludeClause/
+  // popupIncludeClause), not the exact-or-prefix-plus-slash shape the other entries use.
+  '/game/complete/',
 ] as const
 
 export function isPopupEventPath(path: string): boolean {
-  return POPUP_EVENT_PREFIXES.some((p) => path === p || path.startsWith(p + '/'))
+  return POPUP_EVENT_PREFIXES.some((p) => (p.endsWith('/') ? path.startsWith(p) : path === p || path.startsWith(p + '/')))
 }
 
-/** Appends `path <> ? AND path NOT LIKE ?` (ANDed) for every prefix — excludes all popup-event rows. */
+/** Appends `path <> ? AND path NOT LIKE ?` (ANDed) for every prefix — excludes all popup-event rows.
+ * A prefix that already ends in '/' (see POPUP_EVENT_PREFIXES' `/game/complete/`) is matched
+ * with a single `path NOT LIKE ?` against `${prefix}%` — never `${prefix}/%`, which would
+ * require a spurious extra slash and never exclude anything. */
 export function popupExcludeClause(w: string[], b: unknown[]): void {
   for (const prefix of POPUP_EVENT_PREFIXES) {
-    w.push(`path <> ? AND path NOT LIKE ?`)
-    b.push(prefix, `${prefix}/%`)
+    if (prefix.endsWith('/')) {
+      w.push(`path NOT LIKE ?`)
+      b.push(`${prefix}%`)
+    } else {
+      w.push(`path <> ? AND path NOT LIKE ?`)
+      b.push(prefix, `${prefix}/%`)
+    }
   }
 }
 
 /** The inverse of popupExcludeClause: one OR'd fragment matching ANY popup-event row. */
 export function popupIncludeClause(): { sql: string; binds: string[] } {
-  const sql = `(${POPUP_EVENT_PREFIXES.map(() => 'path = ? OR path LIKE ?').join(' OR ')})`
+  const sql = `(${POPUP_EVENT_PREFIXES.map((p) => (p.endsWith('/') ? 'path LIKE ?' : 'path = ? OR path LIKE ?')).join(' OR ')})`
   const binds: string[] = []
-  for (const p of POPUP_EVENT_PREFIXES) binds.push(p, `${p}/%`)
+  for (const p of POPUP_EVENT_PREFIXES) {
+    if (p.endsWith('/')) binds.push(`${p}%`)
+    else binds.push(p, `${p}/%`)
+  }
   return { sql, binds }
 }
 
@@ -415,6 +436,36 @@ export function playTrackingStatusNote(activationDateEt: string | null = PLAY_TR
 export function isPreActivation(etDate: string, activationDateEt: string | null): boolean {
   return activationDateEt === null || etDate < activationDateEt
 }
+
+// ── v1.95.5 go-live markers (2026-09-26T19:43:02Z — first definitely-live instant, per the
+// deploy window 19:42:51-19:43:02Z) ─────────────────────────────────────────────────────
+// Two new beacon families shipped together in this release: `/game/complete/<mode>/
+// <difficulty>` (POPUP_EVENT_PREFIXES above) and `/auth/success/<provider>/<new|existing|
+// unknown>` (fires ALONGSIDE the existing base `/auth/success/<provider>` row — see
+// lib/campaigns.ts's auth-success counting, which must count the base row only; that
+// beacon's own go-live constant, AUTH_NEW_EXISTING_LIVE_AT, lives in lib/adsRules.ts
+// instead of here — this module is imported by the ads-sync Worker's cold-started path,
+// which never touches the new/existing split, so it stays out of this file). Unlike
+// TRACKING_ACTIVATION_DATE_ET/PLAY_TRACKING_ACTIVATION_DATE_ET above (an ET calendar date,
+// set once the release is CONFIRMED live), this is an exact UTC instant known from the
+// deploy log at hotfix time, so there's no null/"not shipped yet" state to model — it is
+// live as of this file landing. Millisecond epoch (not an ET date string) because a
+// go-live instant, unlike a whole-day activation date, needs sub-day precision: v1.95.5
+// shipped mid-day ET, not at ET midnight.
+export const GAME_COMPLETE_LIVE_AT = Date.parse('2026-09-26T19:43:02Z')
+/** Chart-marker label at GAME_COMPLETE_LIVE_AT (and lib/adsRules.ts's
+ * AUTH_NEW_EXISTING_LIVE_AT — the same instant): both land at the same instant, so callers
+ * draw one combined marker rather than two overlapping ones. */
+export const NEW_BEACONS_LIVE_MARKER_LABEL = 'game + auth breakdown live'
+/** The ET calendar day GAME_COMPLETE_LIVE_AT falls on — a plain string LITERAL, not derived
+ * via etDateFromMs/Intl at module load (this file is on the ads-sync Worker's cold-start
+ * path — see the block comment above): kept in exact sync with GAME_COMPLETE_LIVE_AT by
+ * inspection, the same way TRACKING_ACTIVATION_DATE_ET/PLAY_TRACKING_ACTIVATION_DATE_ET
+ * above are literals rather than computed. Callers (e.g. lib/campaigns.ts's per-flight
+ * "not instrumented" checks) compare it against a CampaignFlight's day-granularity
+ * flightStart/flightEnd, the same way returnBeaconNotInstrumented compares against
+ * TRACKING_ACTIVATION_DATE_ET. */
+export const NEW_BEACONS_LIVE_AT_ET = '2026-09-26'
 
 // ── Aggregation ──────────────────────────────────────────────────────────────────────
 // The Function fetches one row per (UTC hour bucket, path) with its count — still an

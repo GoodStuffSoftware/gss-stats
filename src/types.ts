@@ -340,6 +340,10 @@ export interface OverviewResponse {
     campaignFlights: OverviewCampaignFlightMeta[]
     releaseMarkers: { version: string; dateEt: string; note: string; major?: boolean }[]
     trackingActivationDate: string | null
+    /** v1.95.5 go-live (game-complete + auth new/existing beacons) — see
+     * lib/popupEvents.ts NEW_BEACONS_LIVE_AT_ET. */
+    newBeaconsLiveAt?: string
+    newBeaconsLiveAtLabel?: string
     since: string
     until: string
     seriesLabels?: { install: string; rawInstallSignals: string }
