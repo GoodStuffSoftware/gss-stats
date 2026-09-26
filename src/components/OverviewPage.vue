@@ -139,7 +139,8 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
         { label: 'Page views', data: resp.timeline.daily.map((d) => d.pageviews), borderColor: PALETTE[0], backgroundColor: PALETTE[0], yAxisID: 'y', tension: 0.2, pointRadius: 0 },
         { label: 'Tagged arrivals', data: resp.timeline.daily.map((d) => d.taggedArrivals), borderColor: PALETTE[1], backgroundColor: PALETTE[1], yAxisID: 'y', tension: 0.2, pointRadius: 0 },
         { label: 'Auth successes', data: resp.timeline.daily.map((d) => d.authSuccess), borderColor: PALETTE[3], backgroundColor: PALETTE[3], yAxisID: 'y2', tension: 0.2, pointRadius: 0, borderDash: [3, 2] },
-        { label: 'Installs', data: resp.timeline.daily.map((d) => d.install), borderColor: PALETTE[4], backgroundColor: PALETTE[4], yAxisID: 'y2', tension: 0.2, pointRadius: 0, borderDash: [3, 2] },
+        { label: resp.timeline.seriesLabels?.install ?? 'Installs', data: resp.timeline.daily.map((d) => d.install), borderColor: PALETTE[4], backgroundColor: PALETTE[4], yAxisID: 'y2', tension: 0.2, pointRadius: 0, borderDash: [3, 2] },
+        { label: resp.timeline.seriesLabels?.rawInstallSignals ?? 'Raw install signals', data: resp.timeline.daily.map((d) => d.rawInstallSignals ?? 0), borderColor: PALETTE[7], backgroundColor: PALETTE[7], yAxisID: 'y2', tension: 0.2, pointRadius: 0, borderDash: [1, 3], borderWidth: 1 },
       ],
     },
     options: {
