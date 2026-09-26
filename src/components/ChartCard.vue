@@ -419,9 +419,15 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
 
     <!-- Attached captions (owner requirement, 2026-09-26): registry notes shown under the
          chart, through the SAME NoteBlock every inline caveat/note-type-widget uses — see
-         lib/notes.ts. `widget.notes`, or the dataset's own scope defaults when unset. -->
-    <div v-if="captionNoteIds.length" class="card-captions">
+         lib/notes.ts. `widget.notes`, or the dataset's own scope defaults when unset.
+         Pop-up dataset only: `data.note` (informational review fix, 2026-09-26) — a data
+         caveat that travels with the API RESPONSE itself (functions/api/popups.ts, e.g. the
+         known install-outcome gap), computed per-request rather than being static config
+         like the registry captions above, so it has to be rendered from `data` here rather
+         than looked up by id — previously fetched but never rendered anywhere. -->
+    <div v-if="captionNoteIds.length || data?.note" class="card-captions">
       <NoteBlock v-for="id in captionNoteIds" :key="id" :note-id="id" />
+      <NoteBlock v-if="data?.note" :text="data.note" />
     </div>
 
     <Teleport to="body">
