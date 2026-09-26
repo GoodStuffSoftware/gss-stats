@@ -440,6 +440,8 @@ export function summarizeTaggedRows(rows: readonly TaggedRow[], opts: { fromMs?:
     inWindow.map((r) => ({ path: r.path, count: r.count })),
     s.taggedArrivals,
   )
+  // THE install metric = the deduplicated popup outcome (same as the funnel's install step).
+  s.install.installed = s.popupOutcomes.install.installed
   return s
 }
 
@@ -720,6 +722,18 @@ export interface KillRuleEvaluation {
   tripped: RuleId[]
   proposal: 'PROPOSE PAUSE' | 'CONTINUE'
 }
+/** Share of spend outside the approved placements, robust to Google's placement view summing
+ * slightly ABOVE the campaign total (measured 2026-09-26: $125.37 itemized vs $124.47 for
+ * week 1, $76.25 vs $75.17 for the twin). off-list = itemized − approved; un-itemized =
+ * campaign − itemized when positive; the denominator is the larger of the two totals, so
+ * neither side's rounding can hide a leak or invent one. */
+export function placementOutsideShare(p: { campaignCost: number; approvedCost: number; itemizedCost: number }): { share: number; offList: number; unitemized: number } {
+  const offList = Math.max(0, p.itemizedCost - p.approvedCost)
+  const unitemized = Math.max(0, p.campaignCost - p.itemizedCost)
+  const denom = Math.max(p.campaignCost, p.itemizedCost)
+  return { share: denom > 0 ? (offList + unitemized) / denom : 0, offList, unitemized }
+}
+
 const pctStr = (x: number, dp = 2) => `${(x * 100).toFixed(dp)}%`
 const usd = (x: number) => `$${x.toFixed(2)}`
 
@@ -737,18 +751,15 @@ export function evaluateKillRules(i: KillRuleInput): KillRuleEvaluation {
     if (!armed) rules.push({ ...base, status: 'not-armed', value: null, detail: `armed at ${usd(plan.killRulesFrom)}` })
     else if (!i.placements || !(i.placements.campaignCost > 0)) rules.push({ ...base, status: 'no-data', value: null, detail: 'placement read returned no data' })
     else {
-      const { campaignCost, approvedCost, itemizedCost } = i.placements
-      const outside = Math.max(0, campaignCost - approvedCost)
-      const unitemized = Math.max(0, campaignCost - itemizedCost)
-      const itemizedOutside = Math.max(0, outside - unitemized)
-      const share = outside / campaignCost
+      const { campaignCost, itemizedCost } = i.placements
+      const { share, offList: itemizedOutside, unitemized } = placementOutsideShare(i.placements)
       const trip = share > plan.placementLeakMaxShare
       const caveat = trip && unitemized > itemizedOutside ? ' Most of it is un-itemized; Google often itemizes it to approved placements within ~2 days, so confirm before pausing.' : ''
       rules.push({
         ...base,
         status: trip ? 'trip' : 'clear',
         value: share,
-        detail: `${pctStr(share)} outside (${usd(itemizedOutside)} itemized off-list + ${usd(unitemized)} un-itemized, of ${usd(campaignCost)}).${caveat}`,
+        detail: `${pctStr(share)} outside (${usd(itemizedOutside)} itemized off-list + ${usd(unitemized)} un-itemized; campaign ${usd(campaignCost)}, itemized ${usd(itemizedCost)}).${caveat}`,
       })
     }
   }

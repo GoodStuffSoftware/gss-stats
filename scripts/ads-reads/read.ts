@@ -23,6 +23,7 @@ import {
   newlyCrossedThresholds,
   nextThreshold,
   outcomeRates,
+  placementOutsideShare,
   playReturnStatus,
   postflightDueDate,
   readingId,
@@ -323,7 +324,10 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
         campaignCost: cumulativeSpend,
         approvedCost: round2(split.approvedCost),
         itemizedCost: round2(split.itemizedCost),
-        outsideShare: cumulativeSpend > 0 ? Math.max(0, cumulativeSpend - split.approvedCost) / cumulativeSpend : null,
+        outsideShare:
+          cumulativeSpend > 0 || split.itemizedCost > 0
+            ? placementOutsideShare({ campaignCost: cumulativeSpend, approvedCost: split.approvedCost, itemizedCost: split.itemizedCost }).share
+            : null,
         offList: split.byPlacement
           .filter((p) => p.approved === false && p.costMicros > 0)
           .slice(0, 5)
