@@ -14,7 +14,7 @@ workers_dev = false
 preview_urls = false
 
 # Hourly at :05 UTC. The code decides what a tick does (src/lib/adsSync.ts cronShouldSync):
-# every tick while a flight is live, one daily pass at 01:xx ET otherwise.
+# every tick while a flight is live, one daily pass at 03:xx ET otherwise.
 [triggers]
 crons = ["5 * * * *"]
 

@@ -42,6 +42,13 @@ export const POPUP_EVENT_PREFIXES = [
   // '/' are matched as a raw prefix below (isPopupEventPath/popupExcludeClause/
   // popupIncludeClause), not the exact-or-prefix-plus-slash shape the other entries use.
   '/game/complete/',
+  // v1.95.5 (same instant): the new/existing/unknown row `/auth/success/<provider>/<status>`
+  // fires ALONGSIDE the base `/auth/success/<provider>` row for the same sign-in, so it is an
+  // event, not a second screen view. Anchored per provider WITH the trailing slash, so the base
+  // rows themselves (which stay page views, as before) never match. Providers: lib/campaigns.ts
+  // AUTH_SUCCESS_PROVIDERS.
+  '/auth/success/google/',
+  '/auth/success/email/',
 ] as const
 
 export function isPopupEventPath(path: string): boolean {

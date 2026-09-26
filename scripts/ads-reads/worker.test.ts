@@ -162,13 +162,14 @@ describe('build identity: the campaigns hash (review I1)', () => {
 })
 
 describe('gss-stats-sync Worker: the cron', () => {
-  it('the gate: every hour while a flight is live (through the day after the flight), 01:xx ET otherwise', () => {
+  it('the gate: every hour while a flight is live (through the day after the flight), 03:xx ET otherwise', () => {
     expect(liveFlightCampaigns(at('2026-09-27T17:05:00Z')).map((c) => c.id)).toEqual([RETEST])
     expect(cronShouldSync(at('2026-09-27T17:05:00Z')).run).toBe(true)
     expect(cronShouldSync(at('2026-10-03T17:05:00Z')).run).toBe(true) // 10-03 ET: the day after the flight
     expect(cronShouldSync(at('2026-10-05T17:05:00Z'))).toMatchObject({ run: false })
-    expect(cronShouldSync(at('2026-10-05T05:05:00Z'))).toMatchObject({ run: true, reason: 'daily pass' }) // 01:05 EDT
-    expect(cronShouldSync(at('2026-12-05T06:05:00Z'))).toMatchObject({ run: true, reason: 'daily pass' }) // 01:05 EST
+    expect(cronShouldSync(at('2026-10-05T05:05:00Z'))).toMatchObject({ run: false }) // 01:05 EDT: yesterday not closed yet
+    expect(cronShouldSync(at('2026-10-05T07:05:00Z'))).toMatchObject({ run: true, reason: 'daily pass' }) // 03:05 EDT
+    expect(cronShouldSync(at('2026-12-05T08:05:00Z'))).toMatchObject({ run: true, reason: 'daily pass' }) // 03:05 EST
   })
   it('a gated tick does no I/O; a due tick claims and syncs; the next tick finds nothing due and writes nothing', async () => {
     const { sqlite, env, fetchImpl, calls, secretReads } = setup()
@@ -183,14 +184,15 @@ describe('gss-stats-sync Worker: the cron', () => {
     const next = await handleScheduled({ scheduledTime: tick + 3_600_000, cron: '5 * * * *' }, env, { fetchImpl, nowMs: tick + 3_600_000 })
     expect(next).toBeNull()
     expect([calls.length, secretReads.n, count(sqlite, 'ads_sync_runs')]).toEqual([c0, s0, runs0])
-    // after midnight ET a new day has ended: the tick claims and pulls it, but a pull before
-    // 03:00 ET does not close it (Google still adds late data), so spend-through stays put
+    // after midnight ET the restatement window is 6 h old, so the tick claims and re-checks it,
+    // but not yesterday: before 03:00 ET it cannot close (Google still adds late data), so it is
+    // not due yet and spend-through stays put (final review Low-1)
     const afterMidnight = at('2026-09-29T04:05:00Z')
     const due = await handleScheduled({ scheduledTime: afterMidnight, cron: '5 * * * *' }, env, { fetchImpl, nowMs: afterMidnight })
     expect(due).not.toBeNull()
     expect(due!.campaigns.find((c) => c.campaignId === RETEST)).toMatchObject({ spendThrough: '2026-09-27' })
     expect(count(sqlite, 'ads_sync_runs', "source = 'worker-cron' AND status = 'running'")).toBe(1)
-    // the 03:05 ET tick pulls it again and closes it
+    // the 03:05 ET tick pulls yesterday once and closes it
     const closing = at('2026-09-29T07:05:00Z')
     const closed = await handleScheduled({ scheduledTime: closing, cron: '5 * * * *' }, env, { fetchImpl, nowMs: closing })
     expect(closed!.campaigns.find((c) => c.campaignId === RETEST)).toMatchObject({ spendThrough: '2026-09-28' })

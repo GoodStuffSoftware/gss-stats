@@ -44,7 +44,11 @@ All notable changes to **gss-stats** are documented here. The format follows
   They no longer skip that re-check because the sync worker pulled a few hours earlier, so a
   read never decides on a yesterday pulled before Google's late data arrived.
 - **A day counts as final from 03:00 ET the next day.** A pull just after midnight no longer
-  marks yesterday as closed, so late clicks and cost that Google adds overnight are picked up.
+  marks yesterday as closed, so late clicks and cost that Google adds overnight are picked up;
+  the sync worker pulls yesterday once, at 03:05 ET, instead of every hour after midnight.
+- **Page views no longer count the new/existing sign-in beacon.** It fires alongside the
+  ordinary sign-in beacon, so it is now excluded from page-view and visit totals like every
+  other event beacon; the sign-in page view itself still counts.
 - **A sync run that was cut off mid-run is reported.** The readings log shows a "Sync alert"
   and the morning, backstop and post-flight reports print it, instead of the run vanishing.
 - **The Refresh warning about a mismatched sync Worker covers every campaign setting** (name,

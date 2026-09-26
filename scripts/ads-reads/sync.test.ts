@@ -367,7 +367,7 @@ describe('an empty or partial Ads response never turns stored spend into zeros (
     const r = await syncAdsData({ ads: ads.src, store }, { campaignIds: [RETEST], now: nineEt('2026-09-29') + HOUR, dryRun: false, source: 'ads-sync', restatementRecheckMs: 0 })
     expect(r.status).toBe('partial')
     expect(r.campaigns[0]).toMatchObject({ fetchOk: true, dailyOk: false, pulled: false })
-    expect(r.error).toMatch(/daily rows for 2026-09-27\.\.2026-09-27 add up to \$0\.00 .* range total is \$69\.00/)
+    expect(r.error).toMatch(/response for 2026-09-27\.\.2026-09-27 was empty but Google's range total is \$69\.00/)
     expect(costOf(sqlite, RETEST, '2026-09-27')).toBe(69_000_000) // kept
     expect(costOf(sqlite, RETEST, '2026-09-28')).toBe(2_000_000) // its own pull added up
     expect(r.campaigns[0].warnings.join(' ')).toMatch(/pulled again in halves/)
@@ -453,7 +453,7 @@ describe('review L1-L3 (2026-09-26): never a false $0, no starving, a re-check o
     ads.state.total = (_id, since, until) => sumTruth(truth, since, until)
     const r = await syncAdsData({ ads: ads.src, store }, { campaignIds: [RETEST], now: nineEt('2026-09-29'), dryRun: false, source: 'worker-cron' })
     expect(r.status).toBe('partial')
-    expect(r.error).toMatch(/2026-09-28\.\.2026-09-28 add up to \$0\.00 .* range total is \$11\.00/)
+    expect(r.error).toMatch(/response for 2026-09-28\.\.2026-09-28 was empty but Google's range total is \$11\.00/)
     expect(costOf(sqlite, RETEST, '2026-09-28')).toBeUndefined() // no false $0 day
     expect(costOf(sqlite, RETEST, '2026-09-27')).toBe(13_000_000)
     expect(r.campaigns[0]).toMatchObject({ pulled: false, spendThrough: '2026-09-27' })
@@ -518,6 +518,65 @@ describe('the atomic sync claim (migration 0004)', () => {
     expect(await store.claimSync('worker-cron', now + 9 * 60_000, 600_000)).toBe(false)
     expect(await store.claimSync('worker-cron', now + 11 * 60_000, 600_000)).toBe(true)
     expect(count(sqlite, 'ads_sync_runs', "status = 'running'")).toBe(2)
+  })
+})
+
+describe('final review (2026-09-26): Low-1, Low-2, Info-1', () => {
+  it('Low-1: before 03:00 ET yesterday is not due at all; at 03:05 ET it is pulled once and closes', async () => {
+    const { store } = setup()
+    const ads = fakeAds({ [RETEST]: { '2026-09-26': day(4), '2026-09-27': day(13), '2026-09-28': day(12) } })
+    // the sync ran and re-checked everything the evening before
+    await syncAdsData({ ads: ads.src, store }, { campaignIds: [RETEST], now: at('2026-09-29T01:00:00Z'), dryRun: false, source: 'worker-cron' }) // 21:00 ET on 09-28
+    const rows = (await store.getAllDailyRows()).get(RETEST)!
+    for (const hhmm of ['00:05', '01:05', '02:05', '02:59']) {
+      const nowMs = at(`2026-09-29T0${Number(hhmm.slice(0, 2)) + 4}:${hhmm.slice(3)}:00Z`)
+      const plan = planCampaignSync(campaignById(RETEST)!, rows, '2026-09-29', { nowMs, lastPullAt: '2026-09-29T01:00:00.000Z' })
+      expect(plan.window).toEqual({ since: '2026-09-26', until: '2026-09-27' }) // 09-28 not closable yet
+      expect(plan.ranges).toEqual([])
+    }
+    ads.calls.length = 0
+    const early = await syncAdsData({ ads: ads.src, store }, { campaignIds: [RETEST], now: at('2026-09-29T05:05:00Z'), dryRun: false, source: 'worker-cron' }) // 01:05 ET
+    expect(early.nothingDue).toBe(true)
+    expect(ads.calls).toEqual([])
+    const closing = await syncAdsData({ ads: ads.src, store }, { campaignIds: [RETEST], now: at('2026-09-29T07:05:00Z'), dryRun: false, source: 'worker-cron' }) // 03:05 ET
+    expect(closing.campaigns[0]).toMatchObject({ spendThrough: '2026-09-28', pulled: true })
+    expect(ads.calls.filter((c) => c.kind === 'daily')).toEqual([{ kind: 'daily', id: RETEST, since: '2026-09-26', until: '2026-09-28' }])
+    // a read at 08:00 ET still re-pulls the restatement window (its restatementRecheckMs is 0)
+    const read = planCampaignSync(campaignById(RETEST)!, (await store.getAllDailyRows()).get(RETEST)!, '2026-09-29', { nowMs: at('2026-09-29T12:00:00Z'), lastPullAt: '2026-09-29T07:05:00.000Z', restatementRecheckMs: 0 })
+    expect(read.ranges).toEqual([{ since: '2026-09-26', until: '2026-09-28' }])
+  })
+  it('Low-2: an empty daily response over several days is failed as it is, never halved', async () => {
+    const { sqlite, adapter, store } = setup()
+    await store.syncCampaigns([campaignById(RETEST)!], 'x')
+    const ads = fakeAds({ [RETEST]: {} })
+    ads.state.total = () => ({ costMicros: 29_000_000, impressions: 3000, clicks: 30 }) // Google does have spend
+    const r = await syncAdsData({ ads: ads.src, store }, { campaignIds: [RETEST], now: nineEt('2026-09-29'), dryRun: false, source: 'worker-cron' })
+    expect(r.status).toBe('failed')
+    expect(r.error).toMatch(/response for 2026-09-26\.\.2026-09-28 was empty but Google's range total is \$29\.00/)
+    expect(ads.calls.filter((c) => c.kind === 'daily')).toHaveLength(1) // no halving
+    expect(r.campaigns[0].warnings).toEqual([])
+    expect(count(sqlite, 'ads_daily_metrics')).toBe(0)
+    expect(metricWrites(adapter.writes)).toEqual([])
+  })
+  it('Info-1: a half of the recent window is still "recent": a stored placement row it leaves out fails the pull', async () => {
+    const { sqlite, store } = setup()
+    await store.syncCampaigns([campaignById(RETEST)!], 'x')
+    const closedAt = '2026-09-29T13:00:00.000Z'
+    await store.putDailyRows(RETEST, [
+      { date: '2026-09-26', ...day(4), fetchedAt: closedAt, placementsFetchedAt: closedAt },
+      { date: '2026-09-27', ...day(13), fetchedAt: closedAt, placementsFetchedAt: closedAt },
+      { date: '2026-09-28', ...day(12), fetchedAt: closedAt, placementsFetchedAt: closedAt },
+    ])
+    await store.putPlacements(RETEST, [pl('2026-09-26', 'mobileapp::2-a', 4)], closedAt)
+    // 09-28 is left out of the daily rows but not of Google's total: the window is halved, and
+    // the older half (09-26..09-27, which does not end at the window end) drops a stored placement
+    const truth = { '2026-09-26': day(4), '2026-09-27': day(13), '2026-09-28': day(12) }
+    const ads = fakeAds({ [RETEST]: { '2026-09-26': day(4), '2026-09-27': day(13) } }, { [RETEST]: [] })
+    ads.state.total = (_id, since, until) => sumTruth(truth, since, until)
+    const r = await syncAdsData({ ads: ads.src, store }, { campaignIds: [RETEST], now: nineEt('2026-09-29') + HOUR, dryRun: false, source: 'ads-sync', restatementRecheckMs: 0 })
+    expect(r.campaigns[0].placementsOk).toBe(false)
+    expect(r.campaigns[0].warnings.join(' ')).not.toMatch(/no longer returns/)
+    expect((sqlite.prepare("SELECT cost_micros FROM ads_placement_daily WHERE placement = 'mobileapp::2-a'").get() as { cost_micros: number }).cost_micros).toBe(4_000_000)
   })
 })
 
