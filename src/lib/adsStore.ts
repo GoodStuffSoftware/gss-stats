@@ -13,7 +13,7 @@
 // and nothing here ever reads or writes the beacon's gss-geo database.
 
 import type { CampaignFlight } from './campaigns'
-import { microsToDollars, round2, type ReadingKind, type ReadingRecord, type ResolvedSpend, type SpendDay, type SpendSummary, type StoredSpend } from './adsRules'
+import { microsToDollars, round2, stripLocalPaths, type ReadingKind, type ReadingRecord, type ResolvedSpend, type SpendDay, type SpendSummary, type StoredSpend } from './adsRules'
 import { etDateFromMs } from './popupEvents'
 
 export const ADS_DB_NAME = 'gss-stats-ads'
@@ -81,8 +81,29 @@ export interface PlacementDayRow {
   impressions: number
   clicks: number
 }
+/** group_placement_view can return one row per ad group for the same (date, placement); an
+ * upsert of both would keep only the last (review L5). Sums them first — cost, impressions and
+ * clicks — keeping the first row's labels; approved is true if either row says so. */
+export function mergePlacementDayRows(rows: readonly PlacementDayRow[]): PlacementDayRow[] {
+  const byKey = new Map<string, PlacementDayRow>()
+  for (const r of rows) {
+    if (!r.placement || !r.date) continue
+    const k = `${r.date}\u0000${r.placement}`
+    const prev = byKey.get(k)
+    if (!prev) {
+      byKey.set(k, { ...r })
+      continue
+    }
+    prev.costMicros += r.costMicros
+    prev.impressions += r.impressions
+    prev.clicks += r.clicks
+    prev.approved = prev.approved === true || r.approved === true ? true : prev.approved ?? r.approved
+  }
+  return [...byKey.values()]
+}
+
 export function placementDailyUpserts(campaignId: string, rows: readonly PlacementDayRow[], fetchedAt: string): SqlStatement[] {
-  const usable = rows.filter((r) => r.placement && r.date)
+  const usable = mergePlacementDayRows(rows)
   return chunk(usable, 40).map((part) => ({
     sql:
       `INSERT INTO ads_placement_daily (campaign_id, date, placement, display_name, placement_type, target_url, approved, cost_micros, impressions, clicks, fetched_at) VALUES ${part.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ')} ` +
@@ -124,7 +145,7 @@ export function readingInsert(rec: ReadingRecord, routineVersion: string = ROUTI
       rec.proposal === 'PROPOSE PAUSE' || rec.proposal === 'CONTINUE' ? rec.proposal : null,
       rec.decision == null ? null : JSON.stringify(rec.decision),
       JSON.stringify(rec.counts),
-      JSON.stringify(rec.notes),
+      JSON.stringify(rec.notes.map(stripLocalPaths)), // no local paths in stored notes (review L10)
       routineVersion,
     ],
   }

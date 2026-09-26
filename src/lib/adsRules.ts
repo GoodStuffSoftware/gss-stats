@@ -829,12 +829,40 @@ export interface KillRuleEvaluation {
  * 10.05% leak reads ~9.95%, and anything up to roughly 10-11% can land within a point of the
  * 10% threshold on either side. The report always prints the share with both totals, so a
  * reading of 9-11% deserves a human look even when the rule says "clear". */
-export function placementOutsideShare(p: { campaignCost: number; approvedCost: number; itemizedCost: number }): { share: number; offList: number; unitemized: number } {
-  const offList = Math.max(0, p.itemizedCost - p.approvedCost)
-  const unitemized = Math.max(0, p.campaignCost - p.itemizedCost)
-  const denom = Math.max(p.campaignCost, p.itemizedCost)
-  return { share: denom > 0 ? (offList + unitemized) / denom : 0, offList, unitemized }
+export function placementOutsideShare(p: { campaignCost: number; approvedCost: number; itemizedCost: number }): {
+  share: number
+  offList: number
+  unitemized: number
+  outsideMicros: number
+  denomMicros: number
+} {
+  // Integer micros throughout (review L1): no floating-point residue can turn an exact 10.0%
+  // into 10.000000001% and trip the rule.
+  const m = (usd: number) => Math.round(usd * 1_000_000)
+  const offListMicros = Math.max(0, m(p.itemizedCost) - m(p.approvedCost))
+  const unitemizedMicros = Math.max(0, m(p.campaignCost) - m(p.itemizedCost))
+  const denomMicros = Math.max(m(p.campaignCost), m(p.itemizedCost))
+  const outsideMicros = offListMicros + unitemizedMicros
+  return {
+    share: denomMicros > 0 ? outsideMicros / denomMicros : 0,
+    offList: offListMicros / 1_000_000,
+    unitemized: unitemizedMicros / 1_000_000,
+    outsideMicros,
+    denomMicros,
+  }
 }
+/** MORE than `maxShare` outside, decided in integers (parts per million) — exactly at the line
+ * does not trip. */
+export function placementShareOver(outsideMicros: number, denomMicros: number, maxShare: number): boolean {
+  return denomMicros > 0 && outsideMicros * 1_000_000 > denomMicros * Math.round(maxShare * 1_000_000)
+}
+/** The 9-11% band around the 10% line (review L2): given the denominator edge above, a share
+ * in it deserves a look at the placement view whatever the rule says. */
+export const PLACEMENT_BORDERLINE_BAND: readonly [number, number] = [0.09, 0.11]
+export function isPlacementBorderline(share: number | null | undefined): boolean {
+  return share != null && share >= PLACEMENT_BORDERLINE_BAND[0] && share <= PLACEMENT_BORDERLINE_BAND[1]
+}
+export const PLACEMENT_BORDERLINE_NOTE = 'borderline, check the placement view'
 
 const pctStr = (x: number, dp = 2) => `${(x * 100).toFixed(dp)}%`
 const usd = (x: number) => `$${x.toFixed(2)}`
@@ -854,14 +882,15 @@ export function evaluateKillRules(i: KillRuleInput): KillRuleEvaluation {
     else if (!i.placements || !(i.placements.campaignCost > 0)) rules.push({ ...base, status: 'no-data', value: null, detail: 'placement read returned no data' })
     else {
       const { campaignCost, itemizedCost } = i.placements
-      const { share, offList: itemizedOutside, unitemized } = placementOutsideShare(i.placements)
-      const trip = share > plan.placementLeakMaxShare
+      const { share, offList: itemizedOutside, unitemized, outsideMicros, denomMicros } = placementOutsideShare(i.placements)
+      const trip = placementShareOver(outsideMicros, denomMicros, plan.placementLeakMaxShare)
       const caveat = trip && unitemized > itemizedOutside ? ' Most of it is un-itemized; Google often itemizes it to approved placements within ~2 days, so confirm before pausing.' : ''
+      const borderline = isPlacementBorderline(share) ? ` BORDERLINE (9-11%): ${PLACEMENT_BORDERLINE_NOTE}.` : ''
       rules.push({
         ...base,
         status: trip ? 'trip' : 'clear',
         value: share,
-        detail: `${pctStr(share)} outside (${usd(itemizedOutside)} itemized off-list + ${usd(unitemized)} un-itemized; campaign ${usd(campaignCost)}, itemized ${usd(itemizedCost)}).${caveat}`,
+        detail: `${pctStr(share)} outside (${usd(itemizedOutside)} itemized off-list + ${usd(unitemized)} un-itemized; campaign ${usd(campaignCost)}, itemized ${usd(itemizedCost)}).${caveat}${borderline}`,
       })
     }
   }
@@ -1106,6 +1135,24 @@ export function postflightDueDate(stage: PostflightStage, flightEndEt: string): 
       return d > '2026-12-01' ? d : '2026-12-01'
     }
   }
+}
+
+// ── Text hygiene for stored notes and outgoing copies ────────────────────────────────────
+/** Local filesystem paths never belong in a stored note, a push or a bus copy (review L10):
+ * Windows (C:\… or C:/…), Git Bash (/c/…) and home-rooted POSIX paths become "<path>". */
+export function stripLocalPaths(s: string): string {
+  return s
+    .replace(/\b[A-Za-z]:[\\/][^\s'"`,;)]*/g, '<path>')
+    .replace(/(^|[\s('"`=])\/(?:[a-z]\/|Users\/|home\/|tmp\/|var\/|private\/)[^\s'"`,;)]*/g, '$1<path>')
+}
+/** A placement's machine id for outgoing copies (review L11): the app package for a mobile-app
+ * placement ("mobileapp::2-com.example.app" → "com.example.app"), else the placement string,
+ * reduced to identifier characters. Display names are advertiser-controlled text and never go
+ * into a push or a bus copy. */
+export function placementId(placement: string | null | undefined): string {
+  const raw = String(placement ?? '')
+  const m = /^mobileapp::\d+-(.+)$/.exec(raw)
+  return (m ? m[1] : raw).replace(/[^A-Za-z0-9._:/-]/g, '').slice(0, 80) || '(unknown placement)'
 }
 
 // ── Formatting helpers shared by the report and the dashboard panel ─────────────────────

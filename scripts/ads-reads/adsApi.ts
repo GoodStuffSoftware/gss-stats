@@ -14,10 +14,22 @@ import { ADS_API_VERSION, ADS_CUSTOMER_ID, APPROVED_PLACEMENTS_BY_CAMPAIGN, asse
 import type { PlacementDayRow } from '../../src/lib/adsStore'
 import type { AdsCredentials } from './secrets'
 import { redact, registerSecret } from './redact'
+import { EXTERNAL_TIMEOUT_MS, TIMED_OUT_TEXT } from './wrangler'
 
 export type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body?: string }) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'
+
+/** fetch with the routine's external timeout (review L8); a timeout rejects with a plain
+ * "<host> timed out after 60s" so the failure summary says what happened. */
+export const timedFetch: FetchLike = async (url, init) => {
+  try {
+    return await fetch(url, { ...init, signal: AbortSignal.timeout(EXTERNAL_TIMEOUT_MS) })
+  } catch (e) {
+    if (e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError')) throw new Error(`${new URL(url).host} ${TIMED_OUT_TEXT}`)
+    throw e
+  }
+}
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
 export function buildHeaders(accessToken: string, developerToken: string): Record<string, string> {
@@ -55,7 +67,7 @@ export async function createAdsClient(
   creds: AdsCredentials,
   opts: { customerId?: string; apiVersion?: string; fetchImpl?: FetchLike } = {},
 ): Promise<AdsClient> {
-  const fetchImpl: FetchLike = opts.fetchImpl ?? ((url, init) => fetch(url, init))
+  const fetchImpl: FetchLike = opts.fetchImpl ?? timedFetch
   const tokenRes = await fetchImpl(TOKEN_URL, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },

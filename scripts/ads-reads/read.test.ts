@@ -57,7 +57,8 @@ describe('morning-read: the $50 threshold read', () => {
     expect(r.thresholdRead!.kill.rules.find((x) => x.id === 'funnel-reach')!.status).toBe('no-data')
     expect(await deps.store.getConsumedThresholds('24279250691')).toEqual([25])
     expect(r.notify.text).toMatch(/incomplete/)
-    expect(r.notify.text).toMatch(/Read problems: beacon\./)
+    expect(r.notify.text).toContain('Read problems: beacon (wrangler unavailable).')
+    expect(r.failures).toContain('beacon') // L6: a threshold read's own failures are listed
   })
   it('a CTR under 0.15% at $50 proposes a pause', async () => {
     const fx = base()
@@ -81,10 +82,13 @@ describe('morning-read: the $50 threshold read', () => {
     expect(r.thresholds.crossedNow).toEqual([])
     expect(r.failures).toEqual(['Google Ads spend', 'campaign status'])
     expect(r.notify).toMatchObject({ push: true, busCopy: false })
-    expect(r.notify.text).toMatch(/^BSK retest morning read FAILED: Google Ads spend, campaign status unreadable/)
-    expect(r.notify.text).not.toMatch(/Bitwarden|developer-token/) // details stay in the report, never the push
+    // L9: a useful one-line reason per failure, redacted, no paths, no secrets
+    expect(r.notify.text).toBe(
+      'BSK retest morning read FAILED: Google Ads spend (Bitwarden is missing: google-ads-api-rep-developer-token); campaign status (Bitwarden is missing: google-ads-api-rep-developer-token). Thresholds and the $100 cap were not fully checked.',
+    )
+    expect(r.failureDetails).toHaveLength(2)
     expect(r.errors.join(' ')).toMatch(/developer-token/)
-    expect(formatMorningReport(r)).toMatch(/READ FAILED: Google Ads spend, campaign status/)
+    expect(formatMorningReport(r)).toContain('READ FAILED: Google Ads spend (Bitwarden is missing: google-ads-api-rep-developer-token); campaign status')
   })
   it('a beacon failure on a quiet day also pushes', async () => {
     const fx = base()
@@ -93,6 +97,37 @@ describe('morning-read: the $50 threshold read', () => {
     const r = await runMorningRead(fixtureDeps(fx, false), opts)
     expect(r.failures).toEqual(['beacon'])
     expect(r.notify.push).toBe(true)
+  })
+})
+
+describe('morning-read: review lows', () => {
+  it('L6: a Firestore failure at the $100 read makes it incomplete (not consumed) and is listed in failures', async () => {
+    const fx = base()
+    ads(fx).daily['2026-09-29'].costMicros = 70_000_000
+    fx.store!.consumed = [25, 50, 75]
+    fx.firebase = { ...(fx.firebase as any), newAccountsInWindow: null, errors: ['newAccountsInWindow: runAggregationQuery HTTP 503'] }
+    const deps = fixtureDeps(fx, false)
+    const r = await runMorningRead(deps, opts)
+    expect(r.thresholdRead!.complete).toBe(false)
+    expect(r.failures).toContain('Firestore counts')
+    expect(r.notify.text).toContain('Firestore counts (newAccountsInWindow: runAggregationQuery HTTP 503)')
+    expect(await deps.store.getConsumedThresholds('24279250691')).toEqual([25, 50, 75]) // $100 retried next run
+  })
+  it('L2: a borderline placement share is flagged in the push and the report', async () => {
+    const fx = base()
+    // off-list placement raised so the outside share lands at 5.00 / 53.50 = ~9.3% (clear, but borderline)
+    const pl = ads(fx).placements.find((p) => p.placement === 'mobileapp::2-com.example.puzzle')!
+    pl.costMicros = 5_000_000
+    const r = await runMorningRead(fixtureDeps(fx, true), opts)
+    expect(r.thresholdRead!.placements!.outsideShare).toBeGreaterThanOrEqual(0.09)
+    expect(r.notify.text).toMatch(/Placement share \d+\.\d% is borderline, check the placement view\./)
+    expect(formatMorningReport(r)).toMatch(/\(borderline, check the placement view\)/)
+  })
+  it('L11: the report (the bus copy) names off-list placements by package id, never the display name', async () => {
+    const r = await runMorningRead(fixtureDeps(base(), true), opts)
+    const text = formatMorningReport(r)
+    expect(text).toContain('off-list: com.example.puzzle $1.20')
+    expect(text).not.toContain('Some Other Puzzle App')
   })
 })
 
@@ -277,12 +312,12 @@ describe('postflight-read', () => {
     fx.now = '2026-10-09T13:00:00Z'
     fx.beacon = { error: 'wrangler unavailable' }
     const due = await runPostflightRead(fixtureDeps(fx, false), { campaignId: '24279250691', stage: 'wrapup', force: false })
-    expect(due.notify.text).toMatch(/Read problems: beacon\.$/)
+    expect(due.notify.text).toMatch(/Read problems: beacon \(wrangler unavailable\)\.$/)
     const early = base()
     early.ads = { error: 'OAuth refresh failed' }
     const r = await runPostflightRead(fixtureDeps(early, false), { campaignId: '24279250691', stage: 'day15', force: false })
     expect(r.due).toBe(false)
-    expect(r.notify).toMatchObject({ push: true, text: 'BSK retest day15 read FAILED: Google Ads spend, campaign status unreadable. See the routine output.' })
+    expect(r.notify).toMatchObject({ push: true, text: 'BSK retest day15 read FAILED: Google Ads spend (OAuth refresh failed); campaign status (OAuth refresh failed).' })
   })
   it('every post-flight read carries the /auth/success new|existing recommendation and "at most N" sign-ups', async () => {
     const fx = base()

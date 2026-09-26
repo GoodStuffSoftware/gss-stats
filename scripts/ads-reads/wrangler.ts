@@ -21,13 +21,19 @@ export interface WranglerResult {
 }
 export type WranglerRunner = (args: string[]) => Promise<WranglerResult>
 
-export function createWranglerRunner(opts: { cfToken?: string | null; root?: string } = {}): WranglerRunner {
+/** Every external call the routine makes (wrangler, bws, fetch) gives up after this long
+ * (review L8), and the failure pushes like any other failed read. */
+export const EXTERNAL_TIMEOUT_MS = Number(process.env.ADS_READS_TIMEOUT_MS) > 0 ? Number(process.env.ADS_READS_TIMEOUT_MS) : 60_000
+export const TIMED_OUT_TEXT = `timed out after ${Math.round(EXTERNAL_TIMEOUT_MS / 1000)}s`
+
+export function createWranglerRunner(opts: { cfToken?: string | null; root?: string; timeoutMs?: number } = {}): WranglerRunner {
   const root = opts.root ?? repoRoot()
   const entry = path.join(root, 'node_modules', 'wrangler', 'bin', 'wrangler.js')
+  const timeoutMs = opts.timeoutMs ?? EXTERNAL_TIMEOUT_MS
   return (args: string[]) =>
     new Promise((resolve) => {
       if (!fs.existsSync(entry)) {
-        resolve({ code: 127, stdout: '', stderr: `wrangler not installed at ${entry} (run npm ci)` })
+        resolve({ code: 127, stdout: '', stderr: 'wrangler is not installed in this checkout (run npm ci)' })
         return
       }
       const env: NodeJS.ProcessEnv = { ...process.env, WRANGLER_SEND_METRICS: 'false', NO_COLOR: '1', FORCE_COLOR: '0' }
@@ -35,9 +41,26 @@ export function createWranglerRunner(opts: { cfToken?: string | null; root?: str
       const child = spawn(process.execPath, [entry, ...args], { cwd: root, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
       let stdout = ''
       let stderr = ''
+      let settled = false
+      let timedOut = false
+      const timedOutResult = (): WranglerResult => ({ code: 124, stdout, stderr: `wrangler ${args.slice(0, 2).join(' ')} ${TIMED_OUT_TEXT}` })
+      const done = (r: WranglerResult) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        clearTimeout(grace)
+        resolve(r)
+      }
+      let grace: ReturnType<typeof setTimeout> | undefined
+      const timer = setTimeout(() => {
+        timedOut = true
+        child.kill()
+        // Resolve when the child has actually exited; give up waiting after a short grace.
+        grace = setTimeout(() => done(timedOutResult()), 5_000)
+      }, timeoutMs)
       child.stdout.on('data', (d) => (stdout += d))
       child.stderr.on('data', (d) => (stderr += d))
-      child.on('error', (e) => resolve({ code: 1, stdout, stderr: stderr + String(e) }))
-      child.on('close', (code) => resolve({ code: code ?? 1, stdout, stderr }))
+      child.on('error', (e) => done(timedOut ? timedOutResult() : { code: 1, stdout, stderr: stderr + String(e) }))
+      child.on('close', (code) => done(timedOut ? timedOutResult() : { code: code ?? 1, stdout, stderr }))
     })
 }

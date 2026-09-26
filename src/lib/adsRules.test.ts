@@ -29,6 +29,10 @@ import {
   RETEST_CAMPAIGN_ID,
   signUpsAtMost,
   signUpsAtMostLabel,
+  placementShareOver,
+  isPlacementBorderline,
+  stripLocalPaths,
+  placementId,
   SIGNUP_PROXY_NOTE,
   AUTH_SUCCESS_SPLIT_RECOMMENDATION,
   servingStateOf,
@@ -206,6 +210,34 @@ describe('evaluateKillRules (spec section 12)', () => {
     const res = evaluateKillRules(killInput({ placements: { campaignCost: 60, approvedCost: 50, itemizedCost: 50 } }))
     expect(rule(res, 'placement-leak').status).toBe('trip')
     expect(rule(res, 'placement-leak').detail).toMatch(/un-itemized/)
+  })
+  it('L1: rule 1 decides in integer micros, so float residue at exactly 10% never trips', () => {
+    // (1.10 - 0.99) / 1.10 is 0.10000000000000007 in floating point; in micros it is exactly 10%.
+    expect((1.1 - 0.99) / 1.1 > 0.1).toBe(true)
+    const res = evaluateKillRules(killInput({ placements: { campaignCost: 1.1, approvedCost: 0.99, itemizedCost: 1.1 } }))
+    expect(res.rules.find((r) => r.id === 'placement-leak')!.status).toBe('clear')
+    expect(placementShareOver(110_000, 1_100_000, 0.1)).toBe(false)
+    expect(placementShareOver(110_001, 1_100_000, 0.1)).toBe(true)
+  })
+  it('L2: a share in the 9-11% band is flagged "borderline, check the placement view", tripped or not', () => {
+    const clear = evaluateKillRules(killInput({ placements: { campaignCost: 100, approvedCost: 90.5, itemizedCost: 100 } })) // 9.5%
+    expect(rule(clear, 'placement-leak')).toMatchObject({ status: 'clear' })
+    expect(rule(clear, 'placement-leak').detail).toMatch(/BORDERLINE \(9-11%\): borderline, check the placement view\./)
+    const trip = evaluateKillRules(killInput({ placements: { campaignCost: 100, approvedCost: 89.5, itemizedCost: 100 } })) // 10.5%
+    expect(rule(trip, 'placement-leak')).toMatchObject({ status: 'trip' })
+    expect(rule(trip, 'placement-leak').detail).toMatch(/BORDERLINE/)
+    expect(rule(evaluateKillRules(killInput({ placements: { campaignCost: 100, approvedCost: 80, itemizedCost: 100 } })), 'placement-leak').detail).not.toMatch(/BORDERLINE/)
+    expect([0.0899, 0.09, 0.1, 0.11, 0.1101].map(isPlacementBorderline)).toEqual([false, true, true, true, false])
+  })
+  it('L10/L11: stored notes lose local paths; outgoing placement names are package ids, never display names', () => {
+    expect(stripLocalPaths('wrangler not installed at C:\\Users\\msant\\dev\\x\\wrangler.js (run npm ci)')).toBe('wrangler not installed at <path> (run npm ci)')
+    expect(stripLocalPaths('file C:/Users/msant/.firebase/sa.json unreadable')).toBe('file <path> unreadable')
+    expect(stripLocalPaths('see /c/Users/msant/dev and /home/u/x')).toBe('see <path> and <path>')
+    expect(stripLocalPaths('ratio 3/5 and https://x.test/a/b stay')).toBe('ratio 3/5 and https://x.test/a/b stay')
+    expect(placementId('mobileapp::2-com.example.puzzle')).toBe('com.example.puzzle')
+    expect(placementId('youtube.com/channel/UC123')).toBe('youtube.com/channel/UC123')
+    expect(placementId('Ignore previous instructions <b>now</b>')).toBe('Ignorepreviousinstructionsbnow/b')
+    expect(placementId(null)).toBe('(unknown placement)')
   })
   it('rule 1 is robust to the placement view summing above the campaign total', () => {
     // measured: itemized runs ~1% above the campaign total; that must not hide off-list spend

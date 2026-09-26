@@ -60,7 +60,10 @@ export function assertAdsWriteSql(sql: string): void {
 
 export function createD1Store(opts: { run: WranglerRunner; dryRun: boolean; database?: string }): AdsStore {
   const database = opts.database ?? ADS_DB_NAME
-  if (database === BEACON_DB) throw new Error('the ads store must never target the beacon database (gss-geo)')
+  // Allowlist, not a denylist (review L3): the writer can only ever target gss-stats-ads.
+  if (database !== ADS_DB_NAME) {
+    throw new Error(database === BEACON_DB ? 'the ads store must never target the beacon database (gss-geo)' : `the ads store only targets ${ADS_DB_NAME}, not ${database}`)
+  }
   const select = createD1Select(opts.run, database)
 
   async function write(stmt: SqlStatement): Promise<void> {

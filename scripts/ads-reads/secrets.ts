@@ -8,6 +8,7 @@
 
 import { execFile } from 'node:child_process'
 import { registerSecret, redactedFirstLine } from './redact'
+import { EXTERNAL_TIMEOUT_MS, TIMED_OUT_TEXT } from './wrangler'
 
 export interface AdsCredentials {
   clientId: string
@@ -42,9 +43,14 @@ export function pickAdsCredentials(list: unknown): { creds: AdsCredentials | nul
 function runBws(args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
   const bin = process.env.BWS_BIN || 'bws'
   return new Promise((resolve) => {
-    execFile(bin, args, { maxBuffer: 32 * 1024 * 1024, windowsHide: true, env: process.env }, (err, stdout, stderr) => {
-      const code = err ? (typeof (err as any).code === 'number' ? (err as any).code : 1) : 0
-      resolve({ code, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') + (err && (err as any).code === 'ENOENT' ? `bws binary not found (${bin})` : '') })
+    execFile(bin, args, { maxBuffer: 32 * 1024 * 1024, windowsHide: true, env: process.env, timeout: EXTERNAL_TIMEOUT_MS }, (err, stdout, stderr) => {
+      const e = err as (NodeJS.ErrnoException & { killed?: boolean; signal?: string }) | null
+      if (e && e.killed) {
+        resolve({ code: 124, stdout: '', stderr: `bws ${TIMED_OUT_TEXT}` })
+        return
+      }
+      const code = e ? (typeof e.code === 'number' ? e.code : 1) : 0
+      resolve({ code, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') + (e && e.code === 'ENOENT' ? 'bws binary not found on PATH' : '') })
     })
   })
 }

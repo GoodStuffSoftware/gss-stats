@@ -3,6 +3,8 @@
 // process's stderr — goes through redact() before it reaches stdout, stderr or the JSON
 // block. Two layers: exact known secret values, then anything shaped like a credential.
 
+import { stripLocalPaths } from '../../src/lib/adsRules'
+
 const known = new Set<string>()
 
 /** Register a secret value so redact() masks it anywhere it appears. */
@@ -39,6 +41,17 @@ export function redact(input: unknown): string {
     s = s.replace(re, (_m: string, p1: unknown) => (typeof p1 === 'string' ? `${p1}<redacted>` : '<redacted>'))
   }
   return s
+}
+
+/** A short, useful reason for a failure summary (review L9): the error's first line without
+ * its "<read label>: " prefix, redacted, local paths stripped, whitespace collapsed, capped.
+ * Safe to put in a push or a bus copy. */
+export function summarizeError(e: unknown, max = 70): string {
+  const text = typeof e === 'string' ? e : e instanceof Error ? e.message : String(e)
+  const line = (text.split(/\r?\n/).find((l) => l.trim()) ?? '').trim()
+  const noLabel = line.replace(/^(?:ads|beacon|store|firebase)[\w ()-]*?: /i, '')
+  const clean = stripLocalPaths(redact(noLabel)).replace(/\s+/g, ' ').trim()
+  return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean || 'unknown error'
 }
 
 /** First line of a child process's stderr, redacted and capped — enough to say what failed. */
