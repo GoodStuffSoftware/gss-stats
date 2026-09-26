@@ -11,8 +11,10 @@ import { useOverviewData } from '../../lib/overviewData'
 import { PALETTE } from '../../lib/charts'
 import { FUNNEL_STEP_LABELS, FUNNEL_STEP_ORDER, FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED, type FunnelStepKey } from '../../lib/campaigns'
 import { isInsufficientCohort } from '../../lib/popupEvents'
+import { noteRawText } from '../../lib/notes'
 import type { CampaignFunnelCounts } from '../../types'
 import BaseChart from '../charts/BaseChart.vue'
+import NoteBlock from '../NoteBlock.vue'
 
 const props = defineProps<{ widget: Widget; filters: GlobalFilters }>()
 const emit = defineEmits<{ 'open-campaigns': [] }>()
@@ -46,8 +48,11 @@ function relTime(d: Date | null): string {
 function fmt(n: number | null | undefined): string {
   return n == null ? '—' : n.toLocaleString('en-US')
 }
+// Short inline labels stay helper functions (owner requirement) — their TEXT comes from the
+// notes registry (lib/notes.ts), not a literal string, so "too few to report"/"not
+// instrumented" have exactly one source of truth across every widget that shows them.
 function pct(n: number | null | undefined, denominator?: number): string {
-  if (n == null) return denominator != null && isInsufficientCohort(denominator) ? 'too few to report' : '—'
+  if (n == null) return denominator != null && isInsufficientCohort(denominator) ? noteRawText('too-few-to-report') : '—'
   return `${(n * 100).toFixed(1)}%`
 }
 function counts(numerator: number | null | undefined, denominator: number | null | undefined): string {
@@ -199,7 +204,7 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
 
       <!-- timeline -->
       <template v-else-if="widget.view === 'timeline'">
-        <p class="caption">Shaded bands = campaign flights. Dashed labeled lines = major releases / tracking-activation. Short ticks = other releases (see lib/releases.ts for versions).</p>
+        <NoteBlock note-id="overview-timeline-caption" class="caption" />
         <div class="chart-box"><BaseChart v-if="timelineConfig" :config="timelineConfig" :drill-open="false" @point="() => {}" /></div>
         <p v-if="!timelineConfig" class="caption">No data in range yet.</p>
       </template>
@@ -227,7 +232,7 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
             <div class="sc-rates">
               <span v-for="(rate, step) in row.funnelRates" :key="step" class="sc-rate-chip" :title="FUNNEL_STEP_LABELS[step as keyof typeof FUNNEL_STEP_LABELS]">
                 {{ FUNNEL_STEP_LABELS[step as keyof typeof FUNNEL_STEP_LABELS] }}:
-                <template v-if="FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED.has(step as FunnelStepKey)">not instrumented</template>
+                <template v-if="FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED.has(step as FunnelStepKey)">{{ noteRawText('not-instrumented') }}</template>
                 <template v-else
                   >{{ pct(rate, prevFunnelCount(row.funnelCounts, step as keyof CampaignFunnelCounts)) }}
                   {{ counts(row.funnelCounts[step as keyof CampaignFunnelCounts], prevFunnelCount(row.funnelCounts, step as keyof CampaignFunnelCounts)) }}</template

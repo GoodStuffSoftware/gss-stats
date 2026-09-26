@@ -15,8 +15,10 @@ import OverviewWidgetBody from './widgets/OverviewWidgetBody.vue'
 import CampaignsWidgetBody from './widgets/CampaignsWidgetBody.vue'
 import NoteWidgetBody from './widgets/NoteWidgetBody.vue'
 import AdsReadingsWidgetCard from './widgets/AdsReadingsWidgetCard.vue'
+import NoteBlock from './NoteBlock.vue'
+import { widgetCaptionNoteIds } from '../lib/notes'
 
-const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolean; drillOpen: boolean }>()
+const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolean; drillOpen: boolean; forceControls?: boolean }>()
 
 // dataset 'overview'/'campaigns'/'ads-readings' + type 'note' render their own body (own
 // data fetch or none) — no /api/stats round trip, no per-chart filter override, no drill.
@@ -24,6 +26,10 @@ const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolea
 const isBespokeBody = computed(
   () => props.widget.dataset === 'overview' || props.widget.dataset === 'campaigns' || props.widget.dataset === 'ads-readings' || props.widget.type === 'note',
 )
+
+// Attached captions — see lib/notes.ts widgetCaptionNoteIds for the full rule (pulled out
+// as a pure function so it's unit-testable without mounting this component).
+const captionNoteIds = computed<string[]>(() => widgetCaptionNoteIds(props.widget))
 const emit = defineEmits<{
   edit: []
   remove: []
@@ -306,7 +312,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
 
 <template>
   <Teleport to="body" :disabled="!zoomed">
-    <div ref="cardEl" class="chart-card" :class="{ zoomed }" :style="zoomed ? { '--ar': aspect } : undefined">
+    <div ref="cardEl" class="chart-card" :class="{ zoomed, 'controls-revealed': forceControls }" :style="zoomed ? { '--ar': aspect } : undefined">
     <header class="card-head">
       <div class="title-wrap">
         <span v-if="widget.isDefault" class="pin" title="A default chart on this page — kept when you restore defaults">★</span>
@@ -316,10 +322,12 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
         >
       </div>
       <div class="head-actions">
+        <!-- Modification chrome — hidden by default (owner clarification, 2026-09-26): shown
+             only while the function bar is open (forceControls) or this card is hovered. -->
         <button
           v-if="!isBespokeBody"
           ref="filterBtn"
-          class="btn-ghost icon"
+          class="btn-ghost icon hide-until-revealed"
           :class="{ active: hasOverride }"
           title="Filter this chart"
           @click.stop="openFilter"
@@ -328,7 +336,17 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
             <path d="M1.5 2.5h13l-5 6v4.2l-3 1.5V8.5z" fill="currentColor" />
           </svg>
         </button>
-        <button class="btn-ghost icon" :title="zoomed ? 'Zoom out' : 'Zoom in'" @click.stop="toggleZoom()">
+        <button v-if="!isBespokeBody" class="btn-ghost icon hide-until-revealed" title="Reload" @click.stop="load">↻</button>
+        <!-- Zoom — ALWAYS visible (owner: "two clicks to zoom is too much"), just
+             low-contrast until hovered/focused, so it stays a single click without
+             revealing the bar. A note tile has nothing to zoom, so it's omitted there. -->
+        <button
+          v-if="widget.type !== 'note'"
+          class="zoom-btn"
+          :title="zoomed ? 'Zoom out' : 'Zoom in'"
+          :aria-label="zoomed ? 'Zoom out' : 'Zoom in'"
+          @click.stop="toggleZoom()"
+        >
           <svg v-if="!zoomed" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
             <path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
@@ -336,8 +354,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
             <path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
         </button>
-        <button v-if="!isBespokeBody" class="btn-ghost icon" title="Reload" @click.stop="load">↻</button>
-        <div class="menu-anchor">
+        <div class="menu-anchor hide-until-revealed">
           <button class="btn-ghost icon" title="Options" @click.stop="menuOpen = !menuOpen">⋯</button>
           <div v-if="menuOpen" class="menu" @click.stop>
             <button @click="emit('edit'); menuOpen = false">Edit</button>
@@ -400,6 +417,13 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
       <BaseChart v-else-if="chartConfig" ref="baseChartRef" :config="chartConfig" :drill-open="drillOpen" @point="onPoint" />
     </div>
 
+    <!-- Attached captions (owner requirement, 2026-09-26): registry notes shown under the
+         chart, through the SAME NoteBlock every inline caveat/note-type-widget uses — see
+         lib/notes.ts. `widget.notes`, or the dataset's own scope defaults when unset. -->
+    <div v-if="captionNoteIds.length" class="card-captions">
+      <NoteBlock v-for="id in captionNoteIds" :key="id" :note-id="id" />
+    </div>
+
     <Teleport to="body">
       <div v-if="filterOpen" class="fp-backdrop" @click="filterOpen = false">
         <div class="fp-anchor" :style="popoverStyle" @click.stop>
@@ -440,12 +464,23 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
   gap: 8px;
   padding: 9px 10px 9px 14px;
   border-bottom: 1px solid rgb(var(--line));
-  cursor: grab;
   user-select: none;
   background: rgb(var(--surface));
 }
 .card-head:active {
   cursor: grabbing;
+}
+/* Drag affordance: only look draggable once modification chrome is revealed (clean look
+   by default, owner clarification 2026-09-26). The card remains functionally draggable
+   throughout — this is cosmetic only, matching the resize grip's own hover-reveal. */
+@media (hover: hover) and (pointer: fine) {
+  .card-head {
+    cursor: default;
+  }
+  .chart-card:hover .card-head,
+  .chart-card.controls-revealed .card-head {
+    cursor: grab;
+  }
 }
 .title-wrap {
   display: flex;
@@ -504,6 +539,65 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
 .btn-ghost.icon:hover {
   background: rgb(var(--sunken));
   color: rgb(var(--ink));
+}
+/* Modification chrome (filter/reload/options-menu) — clean look by default (owner
+   clarification, 2026-09-26): hidden until the function bar is open (.controls-revealed,
+   driven by Dashboard's forceControls prop) or this specific card is hovered/focused-within.
+   Hover-hiding only applies on devices that actually have hover + a precise pointer — a
+   touchscreen never matches this media query, so these stay visible there (no hover to
+   reveal them with, and menuOpen already needs a tap either way). */
+@media (hover: hover) and (pointer: fine) {
+  .hide-until-revealed {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s ease;
+  }
+  .chart-card:hover .hide-until-revealed,
+  .chart-card:focus-within .hide-until-revealed,
+  .chart-card.controls-revealed .hide-until-revealed {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+/* Zoom — ALWAYS visible and clickable (owner: "two clicks to zoom is too much"), just
+   low-contrast until the card is hovered/focused, so it reads as unobtrusive without
+   costing an extra click. */
+.zoom-btn {
+  border: none;
+  background: transparent;
+  color: rgb(var(--ink-3));
+  font-size: 16px;
+  line-height: 1;
+  padding: 4px 7px;
+  border-radius: 7px;
+  opacity: 0.55;
+  transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+.zoom-btn:hover,
+.zoom-btn:focus-visible {
+  opacity: 1;
+  background: rgb(var(--sunken));
+  color: rgb(var(--ink));
+}
+.chart-card:hover .zoom-btn,
+.chart-card:focus-within .zoom-btn,
+.chart-card.controls-revealed .zoom-btn {
+  opacity: 1 !important;
+}
+.zoom-btn svg {
+  display: block;
+}
+/* 44px touch target on mobile — the icon itself stays the same visual size; only the
+   hit area grows (padding), so the header doesn't get visually heavier. */
+@media (max-width: 700px) {
+  .zoom-btn {
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 1; /* no hover on touch — always fully visible, not just always clickable */
+  }
 }
 .menu-anchor {
   position: relative;

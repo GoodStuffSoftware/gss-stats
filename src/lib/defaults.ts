@@ -1,6 +1,6 @@
 import type { DashboardConfig, DashboardPage, GlobalFilters, Widget } from '../types'
 import { parseDurationMs } from './range'
-import { POPUPS, POPUP_RATE_SPECS, NO_OUTCOME_TRACKING_NOTE, SIGNIN_ELIGIBLE_CAVEAT, SMALL_SAMPLE_NOTE } from './popupEvents'
+import { POPUPS, POPUP_RATE_SPECS, NO_OUTCOME_TRACKING_NOTE, SIGNIN_ELIGIBLE_CAVEAT } from './popupEvents'
 
 export function defaultDateRange(): { since: string; until: string } {
   const until = new Date()
@@ -227,13 +227,13 @@ export function isBestSudokuPopupsPage(p: DashboardPage): boolean {
 // undefined = all CAMPAIGNS, same as the page's original always-every-campaign behavior.
 export function defaultCampaignsWidgets(): Widget[] {
   return [
-    w({ id: 'cw-funnel', title: 'Funnel per campaign', type: 'table', dataset: 'campaigns', view: 'funnel', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 0, w: 12, h: 14 }),
-    w({ id: 'cw-hour', title: 'Arrivals by ET hour of day', type: 'table', dataset: 'campaigns', view: 'hourOfDay', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 14, w: 12, h: 8 }),
+    w({ id: 'cw-funnel', title: 'Funnel per campaign', type: 'table', dataset: 'campaigns', view: 'funnel', dimension: '', metric: 'pageviews', limit: 1, notes: ['arrivals-caveat', 'min-cohort-caveat'], x: 0, y: 0, w: 12, h: 14 }),
+    w({ id: 'cw-hour', title: 'Arrivals by ET hour of day', type: 'table', dataset: 'campaigns', view: 'hourOfDay', dimension: '', metric: 'pageviews', limit: 1, notes: ['arrivals-caveat'], x: 0, y: 14, w: 12, h: 8 }),
     w({ id: 'cw-country', title: 'Arrivals & funnel by country', type: 'table', dataset: 'campaigns', view: 'country', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 22, w: 12, h: 10 }),
-    w({ id: 'cw-flightday', title: 'Daily arrivals by flight day', type: 'table', dataset: 'campaigns', view: 'flightDay', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 32, w: 12, h: 10 }),
-    w({ id: 'cw-cost', title: 'Cost per arrival / auth success', type: 'table', dataset: 'campaigns', view: 'cost', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 42, w: 12, h: 9 }),
+    w({ id: 'cw-flightday', title: 'Daily arrivals by flight day', type: 'table', dataset: 'campaigns', view: 'flightDay', dimension: '', metric: 'pageviews', limit: 1, notes: ['arrivals-caveat', 'flight-day-caption'], x: 0, y: 32, w: 12, h: 10 }),
+    w({ id: 'cw-cost', title: 'Cost per arrival / auth success', type: 'table', dataset: 'campaigns', view: 'cost', dimension: '', metric: 'pageviews', limit: 1, notes: ['arrivals-caveat', 'spend-source'], x: 0, y: 42, w: 12, h: 9 }),
     w({ id: 'cw-devicemix', title: 'Device mix', type: 'table', dataset: 'campaigns', view: 'deviceMix', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 51, w: 12, h: 12 }),
-    w({ id: 'cw-returns', title: 'Return visits', type: 'table', dataset: 'campaigns', view: 'returns', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 63, w: 12, h: 11 }),
+    w({ id: 'cw-returns', title: 'Return visits', type: 'table', dataset: 'campaigns', view: 'returns', dimension: '', metric: 'pageviews', limit: 1, notes: ['play-tracking-status', 'return-rate-caption'], x: 0, y: 63, w: 12, h: 11 }),
     w({
       id: 'cw-note-attrib',
       title: 'Attribution note',
@@ -241,7 +241,8 @@ export function defaultCampaignsWidgets(): Widget[] {
       dimension: '',
       metric: 'pageviews',
       limit: 1,
-      note: 'Attribution is by campaign tag only (see lib/campaigns.ts) — no device/location/timestamp correlation across rows. Funnel steps are counted within tagged sessions. Verification and household traffic are excluded server-side.',
+      longText: true,
+      noteId: 'campaigns-attribution-scope',
       x: 0,
       y: 74,
       w: 9,
@@ -254,7 +255,7 @@ export function defaultCampaignsWidgets(): Widget[] {
       dimension: '',
       metric: 'pageviews',
       limit: 1,
-      note: SMALL_SAMPLE_NOTE,
+      noteId: 'small-sample',
       x: 9,
       y: 74,
       w: 3,
@@ -278,9 +279,9 @@ export function isCampaignComparePage(p: DashboardPage): boolean {
 // original top-to-bottom arrangement.
 export function defaultOverviewWidgets(): Widget[] {
   return [
-    w({ id: 'ow-note-smallsample', title: 'Small sample', type: 'note', dimension: '', metric: 'pageviews', limit: 1, note: SMALL_SAMPLE_NOTE, x: 0, y: 0, w: 12, h: 3 }),
+    w({ id: 'ow-note-smallsample', title: 'Small sample', type: 'note', dimension: '', metric: 'pageviews', limit: 1, noteId: 'small-sample', x: 0, y: 0, w: 12, h: 3 }),
     w({ id: 'ow-kpis', title: 'Today at a glance', type: 'table', dataset: 'overview', view: 'kpis', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 3, w: 12, h: 8 }),
-    w({ id: 'ow-timeline', title: 'Overall timeline', type: 'table', dataset: 'overview', view: 'timeline', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 11, w: 12, h: 12 }),
+    w({ id: 'ow-timeline', title: 'Overall timeline', type: 'table', dataset: 'overview', view: 'timeline', dimension: '', metric: 'pageviews', limit: 1, notes: ['overview-timeline-caption'], x: 0, y: 11, w: 12, h: 12 }),
     w({ id: 'ow-scorecard', title: 'Campaign scorecard', type: 'table', dataset: 'overview', view: 'scorecard', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 23, w: 12, h: 14 }),
     w({ id: 'ow-release', title: 'Release panel', type: 'table', dataset: 'overview', view: 'releasePanel', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 37, w: 12, h: 9 }),
   ]
@@ -426,8 +427,16 @@ function normWidget(x: any): Widget {
     // dataset 'overview'/'campaigns'/'ads-readings': which panel + which campaign(s).
     view: typeof x.view === 'string' ? x.view : undefined,
     campaignIds: Array.isArray(x.campaignIds) ? x.campaignIds.filter((c: any) => typeof c === 'string' && c) : undefined,
-    // type 'note': the note body.
+    // type 'note': the note body (custom text) and/or a notes-registry id — see
+    // lib/notes.ts. Both pass through untouched/absent when unset: an existing note widget
+    // saved before the registry shipped keeps rendering its own custom text exactly as
+    // before (the migration default for this field is simply "stay absent").
     note: typeof x.note === 'string' ? x.note : undefined,
+    noteId: typeof x.noteId === 'string' ? x.noteId : undefined,
+    longText: x.longText === true || undefined,
+    // Attached captions (lib/notes.ts) — absent stays absent (no scope-default notes get
+    // injected for a widget that predates this feature; see ChartCard.vue's own comment).
+    notes: Array.isArray(x.notes) ? x.notes.filter((n: any) => typeof n === 'string' && n) : undefined,
     // date-dimension trend charts: release-marker overlay.
     markers: x.markers === 'releases' ? 'releases' : undefined,
     x: Number(x.x) || 0,

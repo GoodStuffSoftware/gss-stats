@@ -9,10 +9,12 @@ import { computed } from 'vue'
 import type { ChartConfiguration } from 'chart.js'
 import type { Widget, CampaignFunnelCounts } from '../../types'
 import { useCampaignsData } from '../../lib/campaignsData'
-import { FUNNEL_STEP_ORDER, FUNNEL_STEP_LABELS, RETURN_BUCKETS, ARRIVALS_CAVEAT, topShares, type CampaignFlight, type DeviceMixShare } from '../../lib/campaigns'
-import { MIN_COHORT, isInsufficientCohort, PLAY_TRACKING_ACTIVATION_DATE_ET, PLAY_TRACKING_MARKER_LABEL, playTrackingStatusNote } from '../../lib/popupEvents'
+import { FUNNEL_STEP_ORDER, FUNNEL_STEP_LABELS, RETURN_BUCKETS, topShares, type CampaignFlight, type DeviceMixShare } from '../../lib/campaigns'
+import { MIN_COHORT, isInsufficientCohort } from '../../lib/popupEvents'
+import { noteRawText } from '../../lib/notes'
 import { PALETTE } from '../../lib/charts'
 import BaseChart from '../charts/BaseChart.vue'
+import NoteBlock from '../NoteBlock.vue'
 
 const props = defineProps<{ widget: Widget }>()
 
@@ -21,8 +23,10 @@ const { campaigns, dataByCampaign, loading, error, reload } = useCampaignsData((
 function fmt(n: number | null | undefined): string {
   return n == null ? '—' : n.toLocaleString('en-US')
 }
+// Short inline labels stay helper functions (owner requirement) — their TEXT comes from the
+// notes registry (lib/notes.ts), not a literal string.
 function pct(n: number | null | undefined, denominator?: number): string {
-  if (n == null) return denominator != null && isInsufficientCohort(denominator) ? 'too few to report' : '—'
+  if (n == null) return denominator != null && isInsufficientCohort(denominator) ? noteRawText('too-few-to-report') : '—'
   return `${(n * 100).toFixed(1)}%`
 }
 function prevStepCount(cnts: CampaignFunnelCounts, step: keyof CampaignFunnelCounts): number {
@@ -170,7 +174,8 @@ function shareBarWidth(row: DeviceMixShare): number {
 
       <!-- funnel -->
       <template v-if="widget.view === 'funnel'">
-        <p class="caption">{{ ARRIVALS_CAVEAT }} Rates need at least {{ MIN_COHORT }} in their denominator, or they show "too few to report".</p>
+        <NoteBlock note-id="arrivals-caveat" class="caption" />
+        <NoteBlock note-id="min-cohort-caveat" class="caption" />
         <div class="funnel-grid">
           <div v-for="(c, i) in campaigns" :key="c.id" class="funnel-col" :style="{ '--accent': campaignColor(i) }">
             <div class="funnel-head">
@@ -179,7 +184,7 @@ function shareBarWidth(row: DeviceMixShare): number {
               <span class="fc-status">{{ c.status }}</span>
             </div>
             <p v-if="c.measurement === 'spend-only'" class="state mono small">{{ c.measurabilityNote }}</p>
-            <div v-if="dataByCampaign[c.id]" class="tagged-hits mono" :title="ARRIVALS_CAVEAT">
+            <div v-if="dataByCampaign[c.id]" class="tagged-hits mono" :title="noteRawText('arrivals-caveat')">
               tagged hits: {{ fmt(dataByCampaign[c.id].taggedHits) }} (vs {{ fmt(dataByCampaign[c.id].funnel.counts.arrivals) }} arrivals)
             </div>
             <div v-if="dataByCampaign[c.id]" class="funnel-steps">
@@ -187,7 +192,7 @@ function shareBarWidth(row: DeviceMixShare): number {
                 <div class="fs-top">
                   <span class="fs-label">{{ FUNNEL_STEP_LABELS[step] }}</span>
                   <span class="fs-count mono">
-                    <template v-if="dataByCampaign[c.id].funnel.notInstrumented.includes(step)">not instrumented</template>
+                    <template v-if="dataByCampaign[c.id].funnel.notInstrumented.includes(step)">{{ noteRawText('not-instrumented') }}</template>
                     <template v-else>{{ fmt(dataByCampaign[c.id].funnel.counts[step]) }}</template>
                   </span>
                 </div>
@@ -199,7 +204,7 @@ function shareBarWidth(row: DeviceMixShare): number {
                   ></span>
                 </div>
                 <div class="fs-rate mono">
-                  <template v-if="dataByCampaign[c.id].funnel.notInstrumented.includes(step)">not instrumented</template>
+                  <template v-if="dataByCampaign[c.id].funnel.notInstrumented.includes(step)">{{ noteRawText('not-instrumented') }}</template>
                   <template v-else-if="step !== 'arrivals'">
                     {{ pct(dataByCampaign[c.id].funnel.rates[step], prevStepCount(dataByCampaign[c.id].funnel.counts, step)) }} of previous step
                     ({{ fmt(dataByCampaign[c.id].funnel.counts[step]) }}/{{ fmt(prevStepCount(dataByCampaign[c.id].funnel.counts, step)) }})
@@ -213,7 +218,7 @@ function shareBarWidth(row: DeviceMixShare): number {
 
       <!-- hourOfDay -->
       <template v-else-if="widget.view === 'hourOfDay'">
-        <p class="caption">{{ ARRIVALS_CAVEAT }}</p>
+        <NoteBlock note-id="arrivals-caveat" class="caption" />
         <div class="chart-box"><BaseChart v-if="hourChartConfig" :config="hourChartConfig" :drill-open="false" @point="() => {}" /></div>
       </template>
 
@@ -241,17 +246,17 @@ function shareBarWidth(row: DeviceMixShare): number {
 
       <!-- flightDay -->
       <template v-else-if="widget.view === 'flightDay'">
-        <p class="caption">{{ ARRIVALS_CAVEAT }}</p>
+        <NoteBlock note-id="arrivals-caveat" class="caption" />
         <div class="two-col">
           <div class="chart-box"><BaseChart v-if="dailyChartConfig" :config="dailyChartConfig" :drill-open="false" @point="() => {}" /></div>
           <div class="chart-box"><BaseChart v-if="cumulativeChartConfig" :config="cumulativeChartConfig" :drill-open="false" @point="() => {}" /></div>
         </div>
-        <p class="caption">Left: arrivals per flight day. Right: cumulative arrivals per flight day (dashed).</p>
+        <NoteBlock note-id="flight-day-caption" class="caption" />
       </template>
 
       <!-- cost -->
       <template v-else-if="widget.view === 'cost'">
-        <p class="caption">{{ ARRIVALS_CAVEAT }}</p>
+        <NoteBlock note-id="arrivals-caveat" class="caption" />
         <div class="cost-grid">
           <div v-for="c in campaigns" :key="c.id" class="cost-card">
             <div class="fc-label">{{ c.label }}</div>
@@ -262,7 +267,7 @@ function shareBarWidth(row: DeviceMixShare): number {
             </div>
           </div>
         </div>
-        <p v-if="campaigns.some((c) => dataByCampaign[c.id]?.spend == null)" class="caption">Spend comes from Google Ads and is entered by hand in <code>CAMPAIGN_SPEND</code> (lib/campaigns.ts).</p>
+        <NoteBlock v-if="campaigns.some((c) => dataByCampaign[c.id]?.spend == null)" note-id="spend-source" class="caption" />
       </template>
 
       <!-- deviceMix -->
@@ -286,15 +291,15 @@ function shareBarWidth(row: DeviceMixShare): number {
 
       <!-- returns -->
       <template v-else-if="widget.view === 'returns'">
-        <p class="caption">Android/Play: {{ PLAY_TRACKING_ACTIVATION_DATE_ET ? PLAY_TRACKING_MARKER_LABEL : '' }} {{ playTrackingStatusNote() }}</p>
+        <p class="caption">Android/Play: {{ noteRawText('play-tracking-marker') }} {{ noteRawText('play-tracking-status') }}</p>
         <div class="return-grid">
           <div v-for="c in campaigns" :key="c.id" class="return-col">
             <div class="fc-label">{{ c.label }}</div>
             <template v-if="dataByCampaign[c.id]">
-              <p v-if="dataByCampaign[c.id].returnVisits.notInstrumented" class="state mono small">not instrumented</p>
-              <p v-else-if="dataByCampaign[c.id].returnVisits.sharedWithCampaignId" class="caption">Shares its tag with another flight — not separable by return beacon.</p>
+              <p v-if="dataByCampaign[c.id].returnVisits.notInstrumented" class="state mono small">{{ noteRawText('not-instrumented') }}</p>
+              <NoteBlock v-else-if="dataByCampaign[c.id].returnVisits.sharedWithCampaignId" note-id="return-shared-tag" class="caption" />
               <p v-else-if="isInsufficientCohort(dataByCampaign[c.id].returnVisits.counts.d0)" class="state mono small">
-                too few to report (d0 = {{ fmt(dataByCampaign[c.id].returnVisits.counts.d0) }}, need {{ MIN_COHORT }})
+                {{ noteRawText('too-few-to-report') }} (d0 = {{ fmt(dataByCampaign[c.id].returnVisits.counts.d0) }}, need {{ MIN_COHORT }})
               </p>
               <template v-else>
                 <div class="chart-box small"><BaseChart v-if="returnChartConfig(c)" :config="returnChartConfig(c)!" :drill-open="false" @point="() => {}" /></div>
@@ -309,7 +314,7 @@ function shareBarWidth(row: DeviceMixShare): number {
             </template>
           </div>
         </div>
-        <p class="caption">Rate per bucket = bucket count / d0 (first tagged load).</p>
+        <NoteBlock note-id="return-rate-caption" class="caption" />
       </template>
 
       <p v-else class="state mono">Unknown campaigns panel "{{ widget.view }}"</p>

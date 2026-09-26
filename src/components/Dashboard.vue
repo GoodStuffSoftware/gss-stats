@@ -13,7 +13,11 @@ const widgets = defineModel<Widget[]>('widgets', { required: true })
 // not a blanket "some menu is open somewhere" flag. Only that widget's ChartCard gets
 // `drill-open="true"`, so a suppressed/stuck tooltip is scoped to the chart the menu actually
 // belongs to, never every chart on the page.
-defineProps<{ filters: GlobalFilters; dark: boolean; drillOpenId: string | null }>()
+// `controlsVisible` (App.vue's function-bar `barOpen`): when true, every card's own
+// modification chrome (edit/zoom/menu icons, drag handle, resize grip) is shown regardless
+// of hover — otherwise each card only reveals its own chrome on :hover (see ChartCard.vue
+// and the resize-grip CSS below). Titles/values/notes are never affected by this.
+defineProps<{ filters: GlobalFilters; dark: boolean; drillOpenId: string | null; controlsVisible: boolean }>()
 const emit = defineEmits<{
   edit: [Widget]
   remove: [string]
@@ -50,47 +54,68 @@ const dragEnabled = computed(() => !isMobile.value && !touchCapable)
 </script>
 
 <template>
-  <GridLayout
-    v-model:layout="widgets"
-    :col-num="12"
-    :row-height="40"
-    :margin="[14, 14]"
-    :is-draggable="dragEnabled"
-    :is-resizable="dragEnabled"
-    :vertical-compact="true"
-    :use-css-transforms="true"
-    @layout-updated="emit('change')"
-  >
-    <GridItem
-      v-for="item in widgets"
-      :key="item.i"
-      :i="item.i"
-      :x="item.x"
-      :y="item.y"
-      :w="item.w"
-      :h="item.h"
-      :min-w="2"
-      :min-h="3"
-      drag-allow-from=".card-head"
+  <div class="stats-grid" :class="{ 'controls-revealed': controlsVisible }">
+    <GridLayout
+      v-model:layout="widgets"
+      :col-num="12"
+      :row-height="40"
+      :margin="[14, 14]"
+      :is-draggable="dragEnabled"
+      :is-resizable="dragEnabled"
+      :vertical-compact="true"
+      :use-css-transforms="true"
+      @layout-updated="emit('change')"
     >
-      <ChartCard
-        :widget="item"
-        :filters="filters"
-        :dark="dark"
-        :drill-open="drillOpenId === item.id"
-        @edit="emit('edit', item)"
-        @remove="emit('remove', item.id)"
-        @duplicate="emit('duplicate', item)"
-        @drill="emit('drill', $event)"
-        @open-campaigns="emit('open-campaigns')"
-      />
-    </GridItem>
-  </GridLayout>
+      <GridItem
+        v-for="item in widgets"
+        :key="item.i"
+        :i="item.i"
+        :x="item.x"
+        :y="item.y"
+        :w="item.w"
+        :h="item.h"
+        :min-w="2"
+        :min-h="3"
+        drag-allow-from=".card-head"
+      >
+        <ChartCard
+          :widget="item"
+          :filters="filters"
+          :dark="dark"
+          :drill-open="drillOpenId === item.id"
+          :force-controls="controlsVisible"
+          @edit="emit('edit', item)"
+          @remove="emit('remove', item.id)"
+          @duplicate="emit('duplicate', item)"
+          @drill="emit('drill', $event)"
+          @open-campaigns="emit('open-campaigns')"
+        />
+      </GridItem>
+    </GridLayout>
+  </div>
 </template>
 
 <style scoped>
 :deep(.vgl-layout) {
   margin: 0 -7px;
+}
+
+/* Resize grip (bottom-right corner drag handle) — clean look by default (owner
+   clarification, 2026-09-26): hidden unless the function bar is open OR that specific
+   card is hovered. Hover-only on devices that actually have hover + a precise pointer —
+   a touchscreen never matches this media query, so grips stay visible there (no hover to
+   reveal them with). */
+@media (hover: hover) and (pointer: fine) {
+  :deep(.vgl-item__resizer) {
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+  :deep(.vgl-item:hover .vgl-item__resizer) {
+    opacity: 1;
+  }
+  .stats-grid.controls-revealed :deep(.vgl-item__resizer) {
+    opacity: 1;
+  }
 }
 
 /* Phone: drop absolute positioning and stack cards vertically. The underlying

@@ -17,10 +17,16 @@ All notable changes to **gss-stats** are documented here. The format follows
   any charts you've already customized are left exactly as they are.
 - **A "note" chart type** for the small caveats (small-sample size, attribution scope)
   that used to be fixed page text — now their own movable/removable tile.
-- **A hidden-by-default function bar.** The page controls (tabs, filters, add chart,
-  theme) now live behind a small button in the top-right corner — hover to reveal it on
-  desktop, tap to toggle on touch, Escape or tapping outside hides it. Charts never shift
-  when it opens.
+- **A hidden-by-default function bar** for filters and chart controls (range, sites,
+  exclusions, add chart, theme) — hover a small top-right icon on desktop, or tap it on
+  touch, to reveal it; Escape or tapping outside hides it again. Page tabs stay always
+  visible. Every chart's zoom button is now a single click, always there, just
+  low-contrast until you hover that chart; its edit/remove/drag/resize controls tuck
+  away the same way as the filter bar.
+- **A shared notes/text library.** Every caveat, definition, and explanatory paragraph
+  the dashboard shows — small-sample warnings, attribution notes, "how to read this"
+  captions, and more — now comes from one place, can be attached to any chart as a
+  caption, and is editable from the chart menu (pick from the library or write your own).
 
 ### Changed
 - **Best Sudoku tabs are grouped and reordered automatically**: your own tabs first,

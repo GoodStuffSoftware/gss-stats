@@ -17,6 +17,7 @@ import {
   CAMPAIGN_OPTIONS,
 } from '../lib/catalog'
 import { ringDims, RING_SOFT_CAP } from '../lib/rings'
+import { noteOptions, defaultNoteIdsForScope, type NoteScope } from '../lib/notes'
 
 const props = defineProps<{ widget: Widget; isNew: boolean }>()
 const emit = defineEmits<{ save: [Widget]; cancel: []; remove: [] }>()
@@ -49,6 +50,36 @@ function toggleCampaign(id: string, checked: boolean) {
   if (checked) set.add(id)
   else set.delete(id)
   campaignIdsValue.value = CAMPAIGN_OPTIONS.map((o) => o.value).filter((v) => set.has(v))
+}
+
+// ── Notes/text registry (lib/notes.ts) — 'note' widgets pick a registry entry OR type
+// custom text; every OTHER widget can attach registry notes as captions. ──────────────────
+const NOTE_OPTIONS = noteOptions()
+const isCustomNote = computed({
+  get: () => !draft.noteId,
+  set: (custom: boolean) => {
+    draft.noteId = custom ? undefined : NOTE_OPTIONS[0]?.value
+    if (!custom) draft.note = undefined
+  },
+})
+// The dataset scope an attached-notes picker should default from — mirrors lib/notes.ts's
+// NoteScope union; a widget with no recognizable scope (plain RUM) gets no defaults, only
+// whatever the user explicitly attaches.
+const draftScope = computed<NoteScope | null>(() => {
+  const d = draft.dataset
+  return d === 'overview' || d === 'campaigns' || d === 'popup' || d === 'geo' || d === 'ads-readings' ? d : null
+})
+const attachedNotesValue = computed<string[]>({
+  get: () => draft.notes ?? (draftScope.value ? defaultNoteIdsForScope(draftScope.value) : []),
+  set: (v: string[]) => {
+    draft.notes = v
+  },
+})
+function toggleAttachedNote(id: string, checked: boolean) {
+  const set = new Set(attachedNotesValue.value)
+  if (checked) set.add(id)
+  else set.delete(id)
+  attachedNotesValue.value = NOTE_OPTIONS.map((o) => o.value).filter((v) => set.has(v))
 }
 // A rate tile's "dimension" is a POPUP_RATE_SPECS key, not a group-by field — a wholly
 // different picker domain from the count-mode dimensions below it.
@@ -176,8 +207,11 @@ watch(
       draft.popupKind = undefined
       draft.view = undefined
       draft.campaignIds = undefined
-    } else if (draft.note != null) {
-      draft.note = undefined
+      if (draft.notes != null) draft.notes = undefined // captions attach to a CHART, not a note
+    } else {
+      if (draft.note != null) draft.note = undefined
+      if (draft.noteId != null) draft.noteId = undefined
+      if (draft.longText != null) draft.longText = undefined
     }
   },
 )
@@ -191,6 +225,11 @@ const siteValue = computed({
 })
 
 function save() {
+  // Freeze whatever the "Captions" checkboxes currently show (scope defaults, or the
+  // user's own edit) into draft.notes, so what the editor DISPLAYED is exactly what gets
+  // saved — ChartCard.vue only ever reads widget.notes directly, never recomputes scope
+  // defaults at render time (see its own comment).
+  if (draft.type !== 'note') draft.notes = attachedNotesValue.value
   if (typeDef.value && !typeDef.value.needsDimension) draft.dimension = ''
   if (typeDef.value && !typeDef.value.allowsBreakdown) draft.breakdown = undefined
   if (draft.breakdown === '') draft.breakdown = undefined
@@ -242,10 +281,45 @@ function save() {
         </div>
       </div>
 
-      <!-- Note: just a body text field -->
-      <div class="field" v-if="isNote">
-        <label>Note text</label>
-        <textarea v-model="draft.note" rows="4" placeholder="Caveat / note shown on the tile" />
+      <!-- Note: pick a registry entry, or write custom text (owner requirement, 2026-09-26:
+           every note/caveat/explanatory block goes through the shared registry — see
+           lib/notes.ts — with a custom-text escape hatch for anything not worth registering). -->
+      <template v-if="isNote">
+        <div class="field">
+          <label>Source</label>
+          <select v-model="isCustomNote">
+            <option :value="false">From the notes library</option>
+            <option :value="true">Custom text</option>
+          </select>
+        </div>
+        <div class="field" v-if="!isCustomNote">
+          <label>Note</label>
+          <select v-model="draft.noteId">
+            <option v-for="o in NOTE_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+          </select>
+        </div>
+        <div class="field" v-else>
+          <label>Note text</label>
+          <textarea v-model="draft.note" rows="4" placeholder="Caveat / note shown on the tile — **bold** and [links](https://…) supported" />
+        </div>
+        <div class="field check">
+          <label>
+            <input type="checkbox" v-model="draft.longText" />
+            Longer text (multi-paragraph, rendered larger)
+          </label>
+        </div>
+      </template>
+
+      <!-- Any OTHER widget: attach registry notes as a caption under the chart. Defaults to
+           the dataset's own scope defaults until the user picks their own set. -->
+      <div class="field" v-if="!isNote">
+        <label>Captions <span class="hint">— shown under the chart; defaults per data source</span></label>
+        <div class="campaign-list">
+          <label v-for="o in NOTE_OPTIONS" :key="o.value" class="campaign-row">
+            <input type="checkbox" :checked="attachedNotesValue.includes(o.value)" @change="toggleAttachedNote(o.value, ($event.target as HTMLInputElement).checked)" />
+            {{ o.label }}
+          </label>
+        </div>
       </div>
 
       <!-- Overview / campaigns / ads-readings datasets: a View picker replaces the

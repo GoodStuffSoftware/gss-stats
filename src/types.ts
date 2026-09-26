@@ -87,8 +87,22 @@ export interface Widget {
   // dataset 'campaigns' / 'ads-readings': which campaign(s) to include. Empty/undefined =
   // all campaigns (CAMPAIGNS in lib/campaigns.ts) — same as the pre-widget bespoke pages.
   campaignIds?: string[]
-  // type 'note': the note's body text. `title` is still the widget title as normal.
+  // type 'note': the note's body text (custom/free text). `title` is still the widget
+  // title as normal. Ignored when `noteId` is set (the registry note wins).
   note?: string
+  // type 'note': a lib/notes.ts registry id — the note/text picked from the shared
+  // registry (ChartEditor's "pick a note" dropdown) rather than typed by hand. Takes
+  // priority over `note` when both are set.
+  noteId?: string
+  // type 'note' only: render via TextBlock.vue (longer/multi-paragraph prose) instead of
+  // NoteBlock.vue (a single short caveat line). Undefined/false = NoteBlock.
+  longText?: boolean
+  // ANY widget: registry note ids to show as an attached caption under this chart (see
+  // lib/notes.ts, components/NoteBlock.vue). Undefined = the dataset's scope defaults
+  // (lib/notes.ts defaultNoteIdsForScope); an explicit [] means "no captions", even if the
+  // scope has defaults — set once (e.g. by ChartEditor or a default layout), never
+  // recomputed out from under a user's choice.
+  notes?: string[]
   // grid geometry (managed by grid-layout-plus)
   x: number
   y: number
