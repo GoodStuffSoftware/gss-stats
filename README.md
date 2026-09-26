@@ -43,16 +43,46 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
 
 ## Features
 
-- **"Best Sudoku overview"** — the landing page: today-at-a-glance KPI tiles (vs the same
+- **"Best Sudoku · Overview"** — the landing page: today-at-a-glance KPI tiles (vs the same
   time yesterday and the 7-day average), a daily timeline since the first hit overlaid with
   campaign flights / release / tracking-activation markers, a campaign scorecard, and a
-  release before/after panel. See
-  [`src/lib/overview.ts`](src/lib/overview.ts) and
+  release before/after panel — each its own movable/editable widget (dataset `overview`; see
+  [`src/components/widgets/OverviewWidgetBody.vue`](src/components/widgets/OverviewWidgetBody.vue)).
+  See [`src/lib/overview.ts`](src/lib/overview.ts) and
   [`src/lib/releases.ts`](src/lib/releases.ts) (hand-entered release dates — `hits` has no
-  app-version column).
+  app-version column; major releases label the timeline, minor ones show as short ticks).
+  "Best Sudoku · Campaigns" (dataset `campaigns`; see
+  [`src/components/widgets/CampaignsWidgetBody.vue`](src/components/widgets/CampaignsWidgetBody.vue))
+  and "Best Sudoku · Traffic" (per-site/geo/referrer/device detail beyond what Overview and
+  Campaigns cover) round out the Best Sudoku tab group, which is kept together and in that
+  order — after your own tabs — by a non-destructive reorder on load (see
+  [`src/lib/defaults.ts`](src/lib/defaults.ts)'s `reorderBskGroup`).
 - **Movable / composable charts** — drag the header, resize from the corner; add /
   edit / duplicate / delete charts of any type: stat, bar, horizontal bar, stacked
-  bar, line, area, doughnut, nested doughnut, pie, table, and a geo point map.
+  bar, line, area, doughnut, nested doughnut, pie, table, a geo point map, and a
+  note/text tile. Zoom is a single click, always available on every chart; its other
+  modification chrome (edit/remove/drag/resize) tucks away until you hover that chart
+  or open the function bar below.
+  **Known gap:** the resize grip (drag-to-resize corner) isn't keyboard-operable — it's a
+  [`grid-layout-plus`](https://www.npmjs.com/package/grid-layout-plus) limitation, not a
+  regression from this app's own code. Resizing a chart currently needs a mouse or touch;
+  every other chart action (edit, remove, zoom, duplicate, set-as-default) has a real
+  button and works from the keyboard.
+- **A hidden-by-default function bar** — filters and chart controls (range, sites,
+  exclusions, add chart, theme) live behind a small top-right button: hover to reveal
+  on desktop, tap to toggle on touch, Escape or tapping outside hides it. Never shifts
+  the chart grid. Page tabs stay always visible above it.
+- **A shared notes/text library** ([`src/lib/notes.ts`](src/lib/notes.ts)) — every
+  caveat, definition, and explanatory paragraph the dashboard shows (small-sample
+  warnings, attribution scope, "how to read this" captions, …) is a registry entry with
+  an id, a severity, which dataset(s) it defaults for, and an optional gate (e.g. "only
+  while tracking hasn't shipped yet"). Rendered through
+  [`NoteBlock.vue`](src/components/NoteBlock.vue) (short caveats) or
+  [`TextBlock.vue`](src/components/TextBlock.vue) (longer prose) — both support
+  **bold** and [links](https://example.com) via a small safe tokenizer
+  ([`src/lib/textLite.ts`](src/lib/textLite.ts), never `v-html`) — and attachable to
+  any chart as a caption (`widget.notes`) or as its own movable 'note' widget
+  (`widget.noteId`), editable from the chart menu either way.
 - **Durable, multi-page dashboards** — layout + chart definitions persist in KV (not
   `localStorage`), so they follow you across devices. Duplicate / rename / delete
   pages; a protected default page with "restore default charts"; per-page filters and

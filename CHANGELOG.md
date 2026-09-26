@@ -6,6 +6,60 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-09-26
+
+### Added
+- **Best Sudoku release history, with real dates.** The overview timeline and the "Best
+  Sudoku · Traffic" page's trend chart now mark every verified production release from
+  v1.86.4 through v1.95.3 — major releases as labeled dashed lines, minor ones as short
+  ticks — instead of a single hand-entered marker.
+- **Every Best Sudoku overview and campaigns chart is now a real widget**: movable,
+  resizable, removable, and editable from the chart menu, the same as every other chart
+  in the dashboard. A non-destructive migration converts existing saved layouts once;
+  any charts you've already customized are left exactly as they are.
+- **A "note" chart type** for the small caveats (small-sample size, attribution scope)
+  that used to be fixed page text — now their own movable/removable tile.
+- **A hidden-by-default function bar** for filters and chart controls (range, sites,
+  exclusions, add chart, theme) — hover a small top-right icon on desktop, or tap it on
+  touch, to reveal it; Escape or tapping outside hides it again. Page tabs stay always
+  visible. Every chart's zoom button is now a single click, always there, just
+  low-contrast until you hover that chart; its edit/remove/drag/resize controls tuck
+  away the same way as the filter bar.
+- **A shared notes/text library.** Every caveat, definition, and explanatory paragraph
+  the dashboard shows — small-sample warnings, attribution notes, "how to read this"
+  captions, and more — now comes from one place, can be attached to any chart as a
+  caption, and is editable from the chart menu (pick from the library or write your own).
+
+### Changed
+- **Best Sudoku tabs are grouped and reordered automatically**: your own tabs first,
+  then Overview / Campaigns / Pop-ups / Traffic together in that order, then your other
+  pages — applied non-destructively on load, every load, without touching any widgets.
+- **The "Best Sudoku launch" page is now "Best Sudoku · Traffic"**, trimmed to what
+  Overview and Campaigns don't already cover (per-site/geo/referrer/device detail), and
+  its trend chart now carries release markers.
+- Every Best Sudoku tab is renamed consistently (`Best Sudoku · <name>`).
+- **Pop-up chart titles are plain names again.** The "no outcome tracking yet" and
+  sign-in-eligibility caveats that used to be baked into a couple of pop-up chart titles
+  are now default captions instead (via the notes library above) — applied
+  non-destructively on load; a title you've already edited is left exactly as you left it.
+
+### Fixed
+- **Note/text links only ever render for `https:` and same-site targets** (an absolute
+  path, an in-page anchor, or a plain relative path) — any other scheme, including
+  `javascript:`, `data:`, `vbscript:`, plain `http:`, and a protocol-relative `//host`
+  link, now renders as inert plain text instead of a clickable link. A link href is also
+  fully stripped of control characters and whitespace from anywhere in it (not just the
+  ends) before that check, so a disguised scheme like `java` + tab + `script:` can no
+  longer slip past as "not javascript:" while still being one to the browser.
+- **A data-driven value can no longer introduce markup of its own** — note/text templates
+  are parsed for **bold**/[link](url) syntax before any `{variable}` is substituted, so a
+  variable's value is always rendered as plain text, never as new markup.
+- The always-visible zoom button's larger touch target now applies on any touch-capable
+  device (`pointer: coarse`), not just narrow viewports.
+- **A pop-up chart's data caveat (e.g. the known install-outcome measurement gap) now
+  actually shows under the chart** — the API was already sending it, but nothing rendered
+  it.
+
 ## [0.5.2] — 2026-09-26
 
 ### Changed

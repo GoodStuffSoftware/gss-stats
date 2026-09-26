@@ -43,7 +43,7 @@ import {
   sameTimeWindowMs,
   siteWindowClause,
 } from '../../src/lib/overview'
-import { latestDatedRelease } from '../../src/lib/releases'
+import { latestDatedRelease, datedReleases } from '../../src/lib/releases'
 import { resolveCampaignSpend } from '../../src/lib/adsRules'
 import { readSpendSummaries } from '../../src/lib/adsStore'
 
@@ -258,7 +258,11 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // Overlay data for the timeline chart: campaign flights (shaded bands), release markers,
   // and the tracking-activation marker — all config-driven, no extra queries needed.
   const campaignFlights = CAMPAIGNS.map((c) => ({ id: c.id, label: c.label, flightStart: c.flightStart, flightEnd: c.flightEnd, status: c.status }))
-  const releaseMarkers = latestDatedRelease() ? [latestDatedRelease()] : [] // see releasePanel below for "no dated release yet"
+  // Every dated release, not just the latest — the timeline overlay labels 'major' ones and
+  // draws the rest as unlabeled ticks (see components/widgets/OverviewWidgetBody.vue), so a
+  // growing release history doesn't clutter the chart. releasePanel (below) still keys off
+  // just the LATEST dated release for its own "no dated release yet" fallback.
+  const releaseMarkers = datedReleases().map((r) => ({ version: r.version, dateEt: r.dateEt, note: r.note, major: r.major }))
 
   // Stored Google Ads spend (gss-stats-ads) beats the hand-entered config — the same rule as
   // /api/campaigns (lib/adsRules.ts resolveCampaignSpend), read once for every campaign.

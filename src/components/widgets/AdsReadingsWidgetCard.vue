@@ -2,7 +2,8 @@
 // Ads-read routine readings log — a SELF-CONTAINED widget body. It fetches its own endpoint
 // (GET /api/ads/readings, functions/api/ads/readings.ts) and depends on nothing else on the
 // page, so the grid layout can drop it in for dataset 'ads-readings' (ChartCard dispatches
-// here with :widget). Also mounted directly on the campaigns page for now.
+// here with :widget). The real implementation, replacing the feat/bsk-tabs placeholder
+// stub of the same name/path (merge from origin/main, 2026-09-26).
 //
 // Props follow the grid widget shape, typed locally (a structural subset of types.ts Widget)
 // so this file never has to touch the shared Dataset union:
@@ -10,10 +11,10 @@
 //   widget.campaignIds  — empty/undefined = every campaign
 //   widget.limit        — readings per campaign (default 30)
 import { computed, onMounted, ref, watch } from 'vue'
-import type { AdsReadingsCampaign, AdsReadingsResponse } from '../lib/adsStore'
-import { proposalLabel, type ReadingRecord, type RuleResult } from '../lib/adsRules'
-import { SMALL_SAMPLE_NOTE } from '../lib/popupEvents'
-import { fetchAdsReadings } from '../api'
+import type { AdsReadingsCampaign, AdsReadingsResponse } from '../../lib/adsStore'
+import { proposalLabel, type ReadingRecord, type RuleResult } from '../../lib/adsRules'
+import { SMALL_SAMPLE_NOTE } from '../../lib/popupEvents'
+import { fetchAdsReadings } from '../../api'
 
 export interface AdsReadingsWidgetLike {
   view?: string
