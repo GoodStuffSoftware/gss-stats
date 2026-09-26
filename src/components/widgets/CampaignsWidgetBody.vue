@@ -9,7 +9,7 @@ import { computed } from 'vue'
 import type { ChartConfiguration } from 'chart.js'
 import type { Widget, CampaignFunnelCounts } from '../../types'
 import { useCampaignsData } from '../../lib/campaignsData'
-import { FUNNEL_STEP_ORDER, FUNNEL_STEP_LABELS, RETURN_BUCKETS, topShares, type CampaignFlight, type DeviceMixShare } from '../../lib/campaigns'
+import { FUNNEL_STEP_ORDER, FUNNEL_STEP_LABELS, RETURN_BUCKETS, VALID_FUNNEL_RATE_STEPS, topShares, type CampaignFlight, type DeviceMixShare } from '../../lib/campaigns'
 import { MIN_COHORT, isInsufficientCohort } from '../../lib/popupEvents'
 import { noteRawText } from '../../lib/notes'
 import { PALETTE } from '../../lib/charts'
@@ -21,6 +21,13 @@ import AdsRefreshButton from '../AdsRefreshButton.vue'
 const props = defineProps<{ widget: Widget }>()
 
 const { campaigns, dataByCampaign, loading, error, reload } = useCampaignsData(() => props.widget.campaignIds)
+
+// Beacon-based views (funnel / hourOfDay / country / flightDay / deviceMix / returns) never
+// show a `measurement: 'spend-only'` campaign (owner requirement, 2026-09-26) — its ads bypass
+// the beacon entirely, so every number here would structurally read zero, not a real
+// measurement. It stays in `campaigns` (unfiltered) for the 'cost' view, where its spend is
+// real data. A future spend-only campaign gets this for free — no per-campaign list to update.
+const beaconCampaigns = computed(() => campaigns.value.filter((c) => c.measurement !== 'spend-only'))
 
 function fmt(n: number | null | undefined): string {
   return n == null ? '—' : n.toLocaleString('en-US')
@@ -42,7 +49,7 @@ const campaignColor = (i: number) => PALETTE[i % PALETTE.length]
 const funnelMax = (cnts: CampaignFunnelCounts) => Math.max(1, ...FUNNEL_STEP_ORDER.map((k) => cnts[k]))
 
 const hourChartConfig = computed<ChartConfiguration | null>(() => {
-  const cs = campaigns.value.filter((c) => dataByCampaign[c.id])
+  const cs = beaconCampaigns.value.filter((c) => dataByCampaign[c.id])
   if (!cs.length) return null
   return {
     type: 'bar',
@@ -67,13 +74,13 @@ const hourChartConfig = computed<ChartConfiguration | null>(() => {
 const maxFlightDay = computed(() =>
   Math.max(
     1,
-    ...campaigns.value.filter((c) => c.flightStart != null).map((c) => Math.round((Date.parse(c.flightEnd) - Date.parse(c.flightStart as string)) / 86_400_000) + 1),
+    ...beaconCampaigns.value.filter((c) => c.flightStart != null).map((c) => Math.round((Date.parse(c.flightEnd) - Date.parse(c.flightStart as string)) / 86_400_000) + 1),
   ),
 )
 // Flight days where a funnel segment boundary falls (the signed-out upsell fix), for the marker.
-const boundaryDays = computed(() => new Set(campaigns.value.map((c) => dataByCampaign[c.id]?.segments?.boundaryFlightDay).filter((d): d is number => d != null)))
+const boundaryDays = computed(() => new Set(beaconCampaigns.value.map((c) => dataByCampaign[c.id]?.segments?.boundaryFlightDay).filter((d): d is number => d != null)))
 const dailyChartConfig = computed<ChartConfiguration | null>(() => {
-  const cs = campaigns.value.filter((c) => dataByCampaign[c.id])
+  const cs = beaconCampaigns.value.filter((c) => dataByCampaign[c.id])
   if (!cs.length) return null
   const days = Array.from({ length: maxFlightDay.value }, (_, i) => i + 1)
   return {
@@ -102,7 +109,7 @@ const dailyChartConfig = computed<ChartConfiguration | null>(() => {
   }
 })
 const cumulativeChartConfig = computed<ChartConfiguration | null>(() => {
-  const cs = campaigns.value.filter((c) => dataByCampaign[c.id])
+  const cs = beaconCampaigns.value.filter((c) => dataByCampaign[c.id])
   if (!cs.length) return null
   const days = Array.from({ length: maxFlightDay.value }, (_, i) => i + 1)
   return {
@@ -130,6 +137,22 @@ const cumulativeChartConfig = computed<ChartConfiguration | null>(() => {
 })
 
 const RETURN_RATE_KEYS = RETURN_BUCKETS.filter((b) => b !== 'd0') as Exclude<(typeof RETURN_BUCKETS)[number], 'd0'>[]
+// Bug fix (owner report, 2026-09-26): `isInsufficientCohort(d0)` is false for an EXACT zero —
+// it only flags 0 < d0 < MIN_COHORT (see lib/popupEvents.ts) — so the old template fell
+// through to rendering the line chart even with d0 === 0 (no /return/ rows yet at all: the
+// return beacon just went live and the first possible window is d1), drawing an empty/all-null
+// chart. A campaign with genuinely no return-beacon rows yet is omitted entirely here (not
+// drawn, not labeled) rather than rendered broken; a campaign with SOME rows but under
+// MIN_COHORT still gets the existing "too few to report" treatment. Spend-only closed
+// campaigns are already excluded via beaconCampaigns; a closed campaign whose flight predates
+// the return beacon (returnVisits.notInstrumented) never has real d0 rows either, so it's
+// excluded by the same d0 > 0 check — no separate closed-campaign special case needed here.
+const returnCampaigns = computed(() =>
+  beaconCampaigns.value.filter((c) => {
+    const d = dataByCampaign[c.id]
+    return !!d && !d.returnVisits.notInstrumented && d.returnVisits.counts.d0 > 0
+  }),
+)
 function returnChartConfig(c: CampaignFlight): ChartConfiguration | null {
   const d = dataByCampaign[c.id]
   if (!d || d.returnVisits.notInstrumented) return null
@@ -181,43 +204,60 @@ function shareBarWidth(row: DeviceMixShare): number {
         <NoteBlock note-id="arrivals-caveat" class="caption" />
         <NoteBlock note-id="min-cohort-caveat" class="caption" />
         <div class="funnel-grid">
-          <div v-for="(c, i) in campaigns" :key="c.id" class="funnel-col" :style="{ '--accent': campaignColor(i) }">
+          <div v-for="(c, i) in beaconCampaigns" :key="c.id" class="funnel-col" :style="{ '--accent': campaignColor(i) }">
             <div class="funnel-head">
               <span class="dot"></span>
               <span class="fc-label">{{ c.label }}</span>
               <span class="fc-status">{{ c.status }}</span>
             </div>
-            <p v-if="c.measurement === 'spend-only'" class="state mono small">{{ c.measurabilityNote }}</p>
             <div v-if="dataByCampaign[c.id]" class="tagged-hits mono" :title="noteRawText('arrivals-caveat')">
               tagged hits: {{ fmt(dataByCampaign[c.id].taggedHits) }} (vs {{ fmt(dataByCampaign[c.id].funnel.counts.arrivals) }} arrivals)
             </div>
             <div v-if="dataByCampaign[c.id]?.rawInstallSignals" class="tagged-hits mono">
               {{ dataByCampaign[c.id].rawInstallSignals!.label }}: {{ fmt(dataByCampaign[c.id].rawInstallSignals!.count) }}
             </div>
+            <!-- A closed flight's step that its OWN window never saw any hit for is OMITTED
+                 (not labeled "not instrumented") — owner requirement, 2026-09-26: remove
+                 rather than mark uninstrumented parts of closed campaigns. Active/upcoming
+                 campaigns are unchanged (dataByCampaign[c.id].funnel.notInstrumented is the
+                 same per-flight, empirically-derived list either way — see
+                 functions/api/campaigns.ts — only the RENDERING differs by status). -->
             <div v-if="dataByCampaign[c.id]" class="funnel-steps">
-              <div v-for="step in FUNNEL_STEP_ORDER" :key="step" class="funnel-step">
-                <div class="fs-top">
-                  <span class="fs-label">{{ FUNNEL_STEP_LABELS[step] }}<template v-if="step === 'install' && dataByCampaign[c.id].funnel.installNote"> ({{ dataByCampaign[c.id].funnel.installNote }})</template></span>
-                  <span class="fs-count mono">
+              <template v-for="step in FUNNEL_STEP_ORDER" :key="step">
+                <div v-if="c.status !== 'closed' || !dataByCampaign[c.id].funnel.notInstrumented.includes(step)" class="funnel-step">
+                  <div class="fs-top">
+                    <span class="fs-label">{{ FUNNEL_STEP_LABELS[step] }}<template v-if="step === 'install' && dataByCampaign[c.id].funnel.installNote"> ({{ dataByCampaign[c.id].funnel.installNote }})</template></span>
+                    <span class="fs-count mono">
+                      <template v-if="dataByCampaign[c.id].funnel.notInstrumented.includes(step)">{{ noteRawText('not-instrumented') }}</template>
+                      <template v-else>{{ fmt(dataByCampaign[c.id].funnel.counts[step]) }}</template>
+                    </span>
+                  </div>
+                  <div class="fs-bar-wrap">
+                    <span
+                      v-if="!dataByCampaign[c.id].funnel.notInstrumented.includes(step)"
+                      class="fs-bar"
+                      :style="{ width: (dataByCampaign[c.id].funnel.counts[step] / funnelMax(dataByCampaign[c.id].funnel.counts)) * 100 + '%' }"
+                    ></span>
+                  </div>
+                  <!-- Audit finding (2026-09-26): most step/previous-step "rates" mixed event-
+                       row counts against arrival/other-row counts with no shared visitor id —
+                       not real percentages (e.g. "Played a game: 314.7%"). Only accept/ask and
+                       install/(post-fix installPrompt) are real ratios — see lib/campaigns.ts
+                       VALID_FUNNEL_RATE_STEPS. Every other step shows its plain count only
+                       (already in .fs-count above); no rate line at all. -->
+                  <div v-if="dataByCampaign[c.id].funnel.notInstrumented.includes(step) || VALID_FUNNEL_RATE_STEPS.has(step)" class="fs-rate mono">
                     <template v-if="dataByCampaign[c.id].funnel.notInstrumented.includes(step)">{{ noteRawText('not-instrumented') }}</template>
-                    <template v-else>{{ fmt(dataByCampaign[c.id].funnel.counts[step]) }}</template>
-                  </span>
+                    <template v-else-if="step === 'install'">
+                      {{ pct(dataByCampaign[c.id].funnel.rates.install, dataByCampaign[c.id].funnel.installPromptPostFixCount) }} of prompts shown post-fix
+                      ({{ fmt(dataByCampaign[c.id].funnel.counts.install) }}/{{ fmt(dataByCampaign[c.id].funnel.installPromptPostFixCount) }})
+                    </template>
+                    <template v-else>
+                      {{ pct(dataByCampaign[c.id].funnel.rates[step], prevStepCount(dataByCampaign[c.id].funnel.counts, step)) }} of previous step
+                      ({{ fmt(dataByCampaign[c.id].funnel.counts[step]) }}/{{ fmt(prevStepCount(dataByCampaign[c.id].funnel.counts, step)) }})
+                    </template>
+                  </div>
                 </div>
-                <div class="fs-bar-wrap">
-                  <span
-                    v-if="!dataByCampaign[c.id].funnel.notInstrumented.includes(step)"
-                    class="fs-bar"
-                    :style="{ width: (dataByCampaign[c.id].funnel.counts[step] / funnelMax(dataByCampaign[c.id].funnel.counts)) * 100 + '%' }"
-                  ></span>
-                </div>
-                <div class="fs-rate mono">
-                  <template v-if="dataByCampaign[c.id].funnel.notInstrumented.includes(step)">{{ noteRawText('not-instrumented') }}</template>
-                  <template v-else-if="step !== 'arrivals'">
-                    {{ pct(dataByCampaign[c.id].funnel.rates[step], prevStepCount(dataByCampaign[c.id].funnel.counts, step)) }} of previous step
-                    ({{ fmt(dataByCampaign[c.id].funnel.counts[step]) }}/{{ fmt(prevStepCount(dataByCampaign[c.id].funnel.counts, step)) }})
-                  </template>
-                </div>
-              </div>
+              </template>
             </div>
           </div>
         </div>
@@ -232,19 +272,23 @@ function shareBarWidth(row: DeviceMixShare): number {
       <!-- country -->
       <template v-else-if="widget.view === 'country'">
         <div class="country-grid">
-          <div v-for="(c, i) in campaigns" :key="c.id" class="country-col" :style="{ '--accent': campaignColor(i) }">
+          <div v-for="(c, i) in beaconCampaigns" :key="c.id" class="country-col" :style="{ '--accent': campaignColor(i) }">
             <div class="fc-label">{{ c.label }}</div>
             <table v-if="dataByCampaign[c.id]" class="country-table">
               <thead>
                 <tr><th>Step</th><th>US</th><th>CA</th><th>Other</th></tr>
               </thead>
               <tbody>
-                <tr v-for="step in FUNNEL_STEP_ORDER" :key="step">
-                  <td>{{ FUNNEL_STEP_LABELS[step] }}</td>
-                  <td class="mono">{{ fmt(dataByCampaign[c.id].funnelByCountry.US[step]) }}</td>
-                  <td class="mono">{{ fmt(dataByCampaign[c.id].funnelByCountry.CA[step]) }}</td>
-                  <td class="mono">{{ fmt(dataByCampaign[c.id].funnelByCountry.other[step]) }}</td>
-                </tr>
+                <!-- Same closed-campaign step omission as the funnel view above, driven by the
+                     same per-flight notInstrumented list. -->
+                <template v-for="step in FUNNEL_STEP_ORDER" :key="step">
+                  <tr v-if="c.status !== 'closed' || !dataByCampaign[c.id].funnel.notInstrumented.includes(step)">
+                    <td>{{ FUNNEL_STEP_LABELS[step] }}</td>
+                    <td class="mono">{{ fmt(dataByCampaign[c.id].funnelByCountry.US[step]) }}</td>
+                    <td class="mono">{{ fmt(dataByCampaign[c.id].funnelByCountry.CA[step]) }}</td>
+                    <td class="mono">{{ fmt(dataByCampaign[c.id].funnelByCountry.other[step]) }}</td>
+                  </tr>
+                </template>
               </tbody>
             </table>
           </div>
@@ -259,7 +303,7 @@ function shareBarWidth(row: DeviceMixShare): number {
           <div class="chart-box"><BaseChart v-if="cumulativeChartConfig" :config="cumulativeChartConfig" :drill-open="false" @point="() => {}" /></div>
         </div>
         <NoteBlock note-id="flight-day-caption" class="caption" />
-        <template v-for="c in campaigns" :key="`seg-${c.id}`">
+        <template v-for="c in beaconCampaigns" :key="`seg-${c.id}`">
           <div v-if="dataByCampaign[c.id]?.segments" class="segment mono">
             <p class="caption">
               ▼ {{ c.label }}: signed-out upsell fix at {{ dataByCampaign[c.id].segments!.boundaryLabel }} (flight day {{ dataByCampaign[c.id].segments!.boundaryFlightDay ?? '—' }}) — a funnel segment boundary: read the two sides as separate short tests.
@@ -282,6 +326,12 @@ function shareBarWidth(row: DeviceMixShare): number {
         <div class="cost-grid">
           <div v-for="c in campaigns" :key="c.id" class="cost-card">
             <div class="fc-label">{{ c.label }}</div>
+            <!-- Spend-only campaigns (e.g. Play-direct) are excluded from every BEACON chart
+                 above (funnel/hourOfDay/country/flightDay/deviceMix/returns) — real ad spend
+                 with no beacon data would just read as all-zero there. This is the one place
+                 they still show up, so the reason they're spend-only travels with the number
+                 instead of being silently dropped. -->
+            <p v-if="c.measurement === 'spend-only'" class="state mono small">{{ c.measurabilityNote }}</p>
             <div v-if="dataByCampaign[c.id]" class="cost-rows">
               <div class="cost-row"><span>Spend</span><span class="mono">{{ money(dataByCampaign[c.id].spend) }}</span></div>
               <div v-if="dataByCampaign[c.id].spendSource" class="cost-row">
@@ -305,7 +355,7 @@ function shareBarWidth(row: DeviceMixShare): number {
       <!-- deviceMix -->
       <template v-else-if="widget.view === 'deviceMix'">
         <div class="device-grid">
-          <div v-for="c in campaigns" :key="c.id" class="device-col">
+          <div v-for="c in beaconCampaigns" :key="c.id" class="device-col">
             <div class="fc-label">{{ c.label }}</div>
             <template v-if="dataByCampaign[c.id]">
               <div v-for="(rows, kind) in { OS: dataByCampaign[c.id].deviceMix.os, Browser: dataByCampaign[c.id].deviceMix.browser, Screen: dataByCampaign[c.id].deviceMix.screen }" :key="kind" class="device-block">
@@ -324,29 +374,33 @@ function shareBarWidth(row: DeviceMixShare): number {
       <!-- returns -->
       <template v-else-if="widget.view === 'returns'">
         <NoteBlock note-id="play-tracking-status" class="caption" />
-        <div class="return-grid">
-          <div v-for="c in campaigns" :key="c.id" class="return-col">
+        <!-- A campaign with no /return/ rows AT ALL yet (not instrumented for its flight, or
+             instrumented but genuinely zero rows so far — d0 is the beacon's own first-load
+             denominator) is not drawn, rather than rendered as an empty/broken chart (owner
+             bug report, 2026-09-26: isInsufficientCohort(0) is false — it only flags 0 < d0 <
+             MIN_COHORT — so the old code fell through to the chart branch even at d0 === 0).
+             When NOTHING has data yet, one compact line replaces the whole grid. -->
+        <p v-if="!returnCampaigns.length" class="state mono small">{{ noteRawText('no-return-visits-yet') }}</p>
+        <div v-else class="return-grid">
+          <div v-for="c in returnCampaigns" :key="c.id" class="return-col">
             <div class="fc-label">{{ c.label }}</div>
-            <template v-if="dataByCampaign[c.id]">
-              <p v-if="dataByCampaign[c.id].returnVisits.notInstrumented" class="state mono small">{{ noteRawText('not-instrumented') }}</p>
-              <NoteBlock v-else-if="dataByCampaign[c.id].returnVisits.sharedWithCampaignId" note-id="return-shared-tag" class="caption" />
-              <p v-else-if="isInsufficientCohort(dataByCampaign[c.id].returnVisits.counts.d0)" class="state mono small">
-                {{ noteRawText('too-few-to-report') }} (d0 = {{ fmt(dataByCampaign[c.id].returnVisits.counts.d0) }}, need {{ MIN_COHORT }})
+            <NoteBlock v-if="dataByCampaign[c.id].returnVisits.sharedWithCampaignId" note-id="return-shared-tag" class="caption" />
+            <p v-else-if="isInsufficientCohort(dataByCampaign[c.id].returnVisits.counts.d0)" class="state mono small">
+              {{ noteRawText('too-few-to-report') }} (d0 = {{ fmt(dataByCampaign[c.id].returnVisits.counts.d0) }}, need {{ MIN_COHORT }})
+            </p>
+            <template v-else>
+              <div class="chart-box small"><BaseChart v-if="returnChartConfig(c)" :config="returnChartConfig(c)!" :drill-open="false" @point="() => {}" /></div>
+              <p class="caption mono small return-counts">
+                d0={{ fmt(dataByCampaign[c.id].returnVisits.counts.d0) }}
+                <span v-for="k in RETURN_RATE_KEYS" :key="k">
+                  · {{ k }}={{ pct(dataByCampaign[c.id].returnVisits.rates[k], dataByCampaign[c.id].returnVisits.counts.d0) }}
+                  ({{ fmt(dataByCampaign[c.id].returnVisits.counts[k]) }}/{{ fmt(dataByCampaign[c.id].returnVisits.counts.d0) }})
+                </span>
               </p>
-              <template v-else>
-                <div class="chart-box small"><BaseChart v-if="returnChartConfig(c)" :config="returnChartConfig(c)!" :drill-open="false" @point="() => {}" /></div>
-                <p class="caption mono small return-counts">
-                  d0={{ fmt(dataByCampaign[c.id].returnVisits.counts.d0) }}
-                  <span v-for="k in RETURN_RATE_KEYS" :key="k">
-                    · {{ k }}={{ pct(dataByCampaign[c.id].returnVisits.rates[k], dataByCampaign[c.id].returnVisits.counts.d0) }}
-                    ({{ fmt(dataByCampaign[c.id].returnVisits.counts[k]) }}/{{ fmt(dataByCampaign[c.id].returnVisits.counts.d0) }})
-                  </span>
-                </p>
-              </template>
             </template>
           </div>
         </div>
-        <NoteBlock note-id="return-rate-caption" class="caption" />
+        <NoteBlock v-if="returnCampaigns.length" note-id="return-rate-caption" class="caption" />
       </template>
 
       <p v-else class="state mono">Unknown campaigns panel "{{ widget.view }}"</p>

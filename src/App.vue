@@ -5,7 +5,7 @@ import { defaultConfig, normalizeConfig, defaultWidgetsForPage, clonePage, crypt
 import { rangeLabel, ymdRangeToISO } from './lib/range'
 import { loadConfig, saveConfig } from './api'
 import { loadSites, sitesTree, tokenLabel } from './sitesStore'
-import { isSiteDim, semanticKey } from './lib/drill'
+import { isSiteDim, semanticKey, drillNeedsEventBeacons } from './lib/drill'
 import { sessionExpired, reauth } from './session'
 import { isTouchDevice } from './lib/responsive'
 import { TRACKING_ACTIVATION_DATE_ET } from './lib/popupEvents'
@@ -317,6 +317,32 @@ function openFilteredPage() {
         const existing = (clone.filters.drill ?? []).filter((d) => d.key !== key)
         clone.filters.drill = [...existing, { key, value: p.value, label: p.label }]
       }
+      // Drilling into an event-family pathFamily value (e.g. 'install') needs every widget on
+      // the new page to include event beacons too — otherwise a widget with no per-chart
+      // override applies the standing exclusion together with the new constraint, which can
+      // never match a row, and renders silently empty instead of showing the drilled-into
+      // data (see lib/drill.ts drillNeedsEventBeacons). A caption note explains why.
+      if (drillNeedsEventBeacons(p.dimension, p.dataset, p.value)) {
+        clone.filters.includeEventBeacons = true
+        const noteWidgetId = cryptoId()
+        clone.widgets = [
+          {
+            id: noteWidgetId,
+            i: noteWidgetId,
+            title: 'Includes event beacons',
+            type: 'note',
+            dimension: '',
+            metric: 'pageviews',
+            limit: 1,
+            noteId: 'event-family-drill',
+            x: 0,
+            y: 0,
+            w: 12,
+            h: 3,
+          },
+          ...clone.widgets.map((w) => ({ ...w, y: w.y + 3 })), // make room above every existing widget
+        ]
+      }
     }
     clone.name = drillTitle(clone.filters)
   }
@@ -367,6 +393,17 @@ function onBarToggleActivate() {
   else openBar()
 }
 function onBarAreaEnter() {
+  if (!touchCapable) openBar()
+}
+// Reviewer-flagged lockout (2026-09-26): a real touch tap fires `focus` BEFORE `click`
+// (touchstart -> touchend -> mouseover/mousemove/mousedown -> focus -> mouseup -> click). The
+// toggle button used to open unconditionally on focus, then onBarToggleActivate's touch branch
+// immediately toggled it back closed on the very same tap's click — since this toggle is now
+// the ONLY way to reach the controls on touch (fix/clean-look), that was a full lockout, not
+// just a cosmetic flicker. Gated the same way as onBarAreaEnter/Leave: focus only opens on a
+// device that isn't touch-capable (keyboard/assistive nav there); on touch, the click handler's
+// own toggle is what opens it.
+function onBarToggleFocus() {
   if (!touchCapable) openBar()
 }
 function onBarAreaLeave() {
@@ -455,7 +492,7 @@ function toggleDark() {
         :aria-controls="fbPanelId"
         aria-label="Show page controls"
         @mouseenter="onBarAreaEnter"
-        @focus="openBar"
+        @focus="onBarToggleFocus"
         @click="onBarToggleActivate"
         @keydown.escape="closeBarAndReturnFocus"
       >

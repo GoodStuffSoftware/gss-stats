@@ -11,6 +11,7 @@ import {
   isCampaignComparePage,
   isBestSudokuPopupsPage,
   isBestSudokuLaunchPage,
+  overviewPageIsUncustomized,
   CONFIG_VERSION,
 } from './defaults'
 import { NO_OUTCOME_TRACKING_NOTE, SIGNIN_ELIGIBLE_CAVEAT } from './popupEvents'
@@ -171,6 +172,74 @@ describe('normalizeConfig — v7 bespoke → widget migration', () => {
   })
 })
 
+describe('overviewPageIsUncustomized', () => {
+  it('true for the exact pre-completions factory widget id set, in any order', () => {
+    const ids = ['ow-note-smallsample', 'ow-kpis', 'ow-timeline', 'ow-scorecard', 'ow-release']
+    const p = page({ id: 'bsk-overview', name: 'Best Sudoku · Overview', widgets: [...ids].reverse().map((id) => widget({ id })) })
+    expect(overviewPageIsUncustomized(p)).toBe(true)
+  })
+  it('false when a default chart is missing (the owner removed one)', () => {
+    const p = page({ id: 'bsk-overview', name: 'Best Sudoku · Overview', widgets: ['ow-note-smallsample', 'ow-kpis', 'ow-timeline', 'ow-scorecard'].map((id) => widget({ id })) })
+    expect(overviewPageIsUncustomized(p)).toBe(false)
+  })
+  it('false when an extra chart has been added', () => {
+    const ids = ['ow-note-smallsample', 'ow-kpis', 'ow-timeline', 'ow-scorecard', 'ow-release', 'my-extra-chart']
+    const p = page({ id: 'bsk-overview', name: 'Best Sudoku · Overview', widgets: ids.map((id) => widget({ id })) })
+    expect(overviewPageIsUncustomized(p)).toBe(false)
+  })
+})
+
+describe('normalizeConfig — v8 completions-widget migration', () => {
+  it('adds the completions widget once to an untouched factory Overview layout on an old-version config', () => {
+    const ids = ['ow-note-smallsample', 'ow-kpis', 'ow-timeline', 'ow-scorecard', 'ow-release']
+    const raw: any = {
+      version: 7,
+      activePageId: 'bsk-overview',
+      pages: [page({ id: 'default', name: 'Overview', isDefault: true }), page({ id: 'bsk-overview', name: 'Best Sudoku · Overview', widgets: ids.map((id) => widget({ id })) })],
+    }
+    const norm = normalizeConfig(raw)
+    const ov = norm.pages.find((p) => isOverviewPage(p))!
+    expect(ov.widgets.some((w) => w.dataset === 'completions')).toBe(true)
+    expect(ov.widgets).toHaveLength(6)
+    expect(norm.version).toBe(CONFIG_VERSION)
+  })
+  it('does NOT add it to a customised Overview layout (owner already added/removed a chart)', () => {
+    const customWidget = widget({ id: 'my-custom-overview-widget', dataset: 'overview', view: 'kpis' })
+    const raw: any = {
+      version: 7,
+      activePageId: 'bsk-overview',
+      pages: [page({ id: 'default', name: 'Overview', isDefault: true }), page({ id: 'bsk-overview', name: 'Best Sudoku · Overview', widgets: [customWidget] })],
+    }
+    const norm = normalizeConfig(raw)
+    const ov = norm.pages.find((p) => isOverviewPage(p))!
+    expect(ov.widgets).toEqual([customWidget]) // untouched — no completions widget forced onto it
+  })
+  it('running the migration twice on the same v7 config does not duplicate the widget', () => {
+    const ids = ['ow-note-smallsample', 'ow-kpis', 'ow-timeline', 'ow-scorecard', 'ow-release']
+    const raw: any = {
+      version: 7,
+      activePageId: 'bsk-overview',
+      pages: [page({ id: 'default', name: 'Overview', isDefault: true }), page({ id: 'bsk-overview', name: 'Best Sudoku · Overview', widgets: ids.map((id) => widget({ id })) })],
+    }
+    const once = normalizeConfig(raw)
+    const twice = normalizeConfig(once)
+    const ov = twice.pages.find((p) => isOverviewPage(p))!
+    expect(ov.widgets.filter((w) => w.dataset === 'completions')).toHaveLength(1)
+  })
+  it('does not duplicate the completions widget on a second run (already-migrated config)', () => {
+    const raw: any = { version: CONFIG_VERSION, activePageId: 'bsk-overview', pages: [page({ id: 'default', name: 'Overview', isDefault: true }), page({ id: 'bsk-overview', name: 'Best Sudoku · Overview', widgets: defaultOverviewWidgets() })] }
+    const once = normalizeConfig(raw)
+    const twice = normalizeConfig(once)
+    const ov = twice.pages.find((p) => isOverviewPage(p))!
+    expect(ov.widgets.filter((w) => w.dataset === 'completions')).toHaveLength(1)
+  })
+  it('a brand-new default config gets the completions widget straight from defaultOverviewWidgets(), not the migration', () => {
+    const norm = normalizeConfig(defaultConfig())
+    const ov = norm.pages.find((p) => isOverviewPage(p))!
+    expect(ov.widgets.filter((w) => w.dataset === 'completions')).toHaveLength(1)
+  })
+})
+
 describe('normalizeConfig — fixtures', () => {
   it('a fresh default config: GSS first, BSK group in order, all BSK-named consistently', () => {
     const norm = normalizeConfig(defaultConfig())
@@ -278,6 +347,45 @@ describe('normWidget — notes/noteId/longText round-trip (via normalizeConfig)'
     const legacy = { id: 'old2', title: 'x', type: 'hbar', dimension: '', metric: 'pageviews', limit: 1, notes: 'not-an-array', x: 0, y: 0, w: 4, h: 4 }
     const norm = normalizeConfig(withWidgets([legacy as unknown as Widget]))
     expect(norm.pages[0].widgets[0].notes).toBeUndefined()
+  })
+})
+
+describe('normWidget — includeEventBeacons round-trip (via normalizeConfig)', () => {
+  function withWidgets(widgets: Widget[]): DashboardConfig {
+    return { version: CONFIG_VERSION, activePageId: 'user-1', pages: [page({ id: 'user-1', name: 'Mine', widgets })] }
+  }
+
+  it('a geo chart with includeEventBeacons set survives a save + normalizeConfig round-trip', () => {
+    const w = widget({ id: 'g1', type: 'hbar', dataset: 'geo', dimension: 'pathFamily', includeEventBeacons: true })
+    const norm = normalizeConfig(withWidgets([w]))
+    expect(norm.pages[0].widgets[0].includeEventBeacons).toBe(true)
+    // Round-trip again (normalizeConfig applied to its own prior output — the "save, then load
+    // again" path) to prove it isn't a one-shot pass-through that a second normalization drops.
+    const again = normalizeConfig({ version: CONFIG_VERSION, activePageId: 'user-1', pages: norm.pages })
+    expect(again.pages[0].widgets[0].includeEventBeacons).toBe(true)
+  })
+
+  it('MIGRATION DEFAULT: a widget saved before this option existed (field absent) normalizes with it undefined, not true or false', () => {
+    const legacy = { id: 'g2', title: 'x', type: 'hbar', dataset: 'geo', dimension: 'device', metric: 'pageviews', limit: 10, x: 0, y: 0, w: 4, h: 4 }
+    const norm = normalizeConfig(withWidgets([legacy as unknown as Widget]))
+    expect(norm.pages[0].widgets[0].includeEventBeacons).toBeUndefined()
+  })
+
+  it('a non-boolean saved value normalizes to undefined (fails closed to the excluding default), never to true', () => {
+    const legacy = { id: 'g3', title: 'x', type: 'hbar', dataset: 'geo', dimension: 'device', metric: 'pageviews', limit: 10, includeEventBeacons: 'yes', x: 0, y: 0, w: 4, h: 4 }
+    const norm = normalizeConfig(withWidgets([legacy as unknown as Widget]))
+    expect(norm.pages[0].widgets[0].includeEventBeacons).toBeUndefined()
+  })
+
+  it('the PAGE-level filters.includeEventBeacons (set by App.vue openFilteredPage on an event-family drill) also survives normalizeConfig', () => {
+    const cfg: DashboardConfig = {
+      version: CONFIG_VERSION,
+      activePageId: 'user-1',
+      pages: [page({ id: 'user-1', name: 'Filtered', widgets: [widget({ id: 'w1', type: 'hbar', dataset: 'geo', dimension: 'device' })] })],
+    }
+    cfg.pages[0].filters.includeEventBeacons = true
+    const norm = normalizeConfig(cfg)
+    expect(norm.pages[0].filters.includeEventBeacons).toBe(true)
   })
 })
 

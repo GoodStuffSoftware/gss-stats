@@ -9,14 +9,14 @@ import type { ChartConfiguration } from 'chart.js'
 import type { GlobalFilters, Widget, OverviewResponse } from '../../types'
 import { useOverviewData } from '../../lib/overviewData'
 import { PALETTE } from '../../lib/charts'
-import { FUNNEL_STEP_LABELS, FUNNEL_STEP_ORDER, FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED, type FunnelStepKey } from '../../lib/campaigns'
-import { isInsufficientCohort } from '../../lib/popupEvents'
+import { FUNNEL_STEP_LABELS, FUNNEL_STEP_ORDER, VALID_FUNNEL_RATE_STEPS, type FunnelStepKey } from '../../lib/campaigns'
 import { noteRawText } from '../../lib/notes'
+import { fmtCount as fmt, pct, counts, money, deltaLabel, deltaClass, kpiComparisonGate } from '../../lib/kpiFormat'
+import { layoutMarkerLabels } from '../../lib/markerLayout'
 import type { CampaignFunnelCounts } from '../../types'
 import BaseChart from '../charts/BaseChart.vue'
-import NoteBlock from '../NoteBlock.vue'
 
-const props = defineProps<{ widget: Widget; filters: GlobalFilters }>()
+const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark?: boolean }>()
 const emit = defineEmits<{ 'open-campaigns': [] }>()
 
 const { data, loading, error, reload } = useOverviewData(
@@ -45,41 +45,38 @@ function relTime(d: Date | null): string {
   return `${Math.round(s / 60)}m ago`
 }
 
-function fmt(n: number | null | undefined): string {
-  return n == null ? '—' : n.toLocaleString('en-US')
-}
-// Short inline labels stay helper functions (owner requirement) — their TEXT comes from the
-// notes registry (lib/notes.ts), not a literal string, so "too few to report"/"not
-// instrumented" have exactly one source of truth across every widget that shows them.
-function pct(n: number | null | undefined, denominator?: number): string {
-  if (n == null) return denominator != null && isInsufficientCohort(denominator) ? noteRawText('too-few-to-report') : '—'
-  return `${(n * 100).toFixed(1)}%`
-}
-function counts(numerator: number | null | undefined, denominator: number | null | undefined): string {
-  return numerator == null || denominator == null ? '' : `(${numerator}/${denominator})`
-}
+// fmt/pct/counts/money/deltaLabel/deltaClass now live in lib/kpiFormat.ts (pure, unit-tested —
+// fix/clean-look, 2026-09-26: pulled out so the delta-rounding fix doesn't need a mounted
+// component to verify). `noteRawText` stays a direct dependency here for the funnel-step
+// "not instrumented" label below.
 function prevFunnelCount(cnts: CampaignFunnelCounts, step: keyof CampaignFunnelCounts): number {
   const idx = FUNNEL_STEP_ORDER.indexOf(step)
   return idx > 0 ? cnts[FUNNEL_STEP_ORDER[idx - 1]] : 0
 }
-function money(n: number | null | undefined): string {
-  return n == null ? '—' : `$${n.toFixed(2)}`
-}
-function deltaLabel(d: { delta: number; deltaPct: number | null } | null | undefined): string {
-  if (!d) return ''
-  const sign = d.delta > 0 ? '+' : ''
-  const pctPart = d.deltaPct == null ? '' : ` (${sign}${(d.deltaPct * 100).toFixed(0)}%)`
-  return `${sign}${d.delta.toLocaleString('en-US')}${pctPart}`
-}
-function deltaClass(d: { delta: number } | null | undefined): string {
-  if (!d || d.delta === 0) return ''
-  return d.delta > 0 ? 'up' : 'down'
+// Every step but 'arrivals' — the scorecard chip list. Iterated directly (not via
+// row.funnelRates, which only ever holds 'accept'/'install' now) so a plain-count step still
+// gets a chip, just with no percent — see VALID_FUNNEL_RATE_STEPS.
+const scorecardSteps = FUNNEL_STEP_ORDER.filter((s) => s !== 'arrivals')
+
+// Go-live-boundary gating (coordinator addition, 2026-09-26 — see lib/kpiFormat.ts
+// kpiComparisonGate): a tile whose metric only started existing partway through its own
+// "vs yesterday"/"vs 7d avg" window reads as nonsense (e.g. Games completed, gated on
+// GAME_COMPLETE_LIVE_AT, comparing today's real count against days before the beacon existed).
+function gateFor(k: { key: string }) {
+  return kpiComparisonGate(k.key, data.value?.todayEt ?? '')
 }
 
 // ── Timeline chart: pageviews + tagged arrivals (left axis), auth success + install (right
 // axis) — shaded campaign-flight bands, release + activation markers. Unchanged from
 // OverviewPage.vue. ─────────────────────────────────────────────────────────────────────
-function timelineOverlayPlugin(resp: OverviewResponse) {
+// Marker line/label colors need to flip for dark theme (fix/clean-look, 2026-09-26 review
+// finding): the original rgba(26,23,21,…) is near-black, invisible against a dark background
+// — this plugin never received a `dark` flag before, so it always drew that one (light-theme)
+// color regardless of theme.
+function timelineOverlayPlugin(resp: OverviewResponse, dark: boolean) {
+  const lineColor = dark ? 'rgba(240,238,233,0.45)' : 'rgba(26,23,21,0.45)'
+  const labelColor = dark ? 'rgba(240,238,233,0.75)' : 'rgba(26,23,21,0.7)'
+  const tickColor = dark ? 'rgba(240,238,233,0.3)' : 'rgba(26,23,21,0.3)'
   return {
     id: 'overviewOverlay',
     beforeDatasetsDraw(chart: any) {
@@ -112,28 +109,47 @@ function timelineOverlayPlugin(resp: OverviewResponse) {
         ...(resp.timeline.newBeaconsLiveAt ? [{ date: resp.timeline.newBeaconsLiveAt, label: resp.timeline.newBeaconsLiveAtLabel }] : []),
       ]
       const minors = resp.timeline.releaseMarkers.filter((r) => !r.major)
-      for (const m of majors) {
-        const x = scales.x.getPixelForValue(m.date)
-        if (x == null || Number.isNaN(x) || x < chartArea.left || x > chartArea.right) continue
+
+      // Every major still gets its full dashed line regardless of whether its label fits
+      // anywhere (owner-reported regression, 2026-09-26: "v1.86.40v1.87.0" / jumbled text —
+      // two markers close together both drew their label at the same fixed (x+4, top) with no
+      // overlap check at all). The chart legend lives in its own area below the plot (Chart.js
+      // draws it outside chartArea), so it can never collide with these regardless.
+      const resolvedMajors = majors
+        .map((m) => ({ ...m, x: scales.x.getPixelForValue(m.date) }))
+        .filter((m) => m.x != null && !Number.isNaN(m.x) && m.x >= chartArea.left && m.x <= chartArea.right)
+      for (const m of resolvedMajors) {
         ctx.save()
-        ctx.strokeStyle = 'rgba(26,23,21,0.45)'
+        ctx.strokeStyle = lineColor
         ctx.setLineDash([4, 3])
         ctx.beginPath()
-        ctx.moveTo(x, chartArea.top)
-        ctx.lineTo(x, chartArea.bottom)
+        ctx.moveTo(m.x, chartArea.top)
+        ctx.lineTo(m.x, chartArea.bottom)
         ctx.stroke()
         ctx.setLineDash([])
+        ctx.restore()
+      }
+      // The actual collision avoidance (stagger into rows, drop a label that still doesn't fit
+      // anywhere) is the pure, unit-tested layoutMarkerLabels (lib/markerLayout.ts) — this just
+      // supplies it a real Canvas2D text-measurer and draws whatever it decides to place.
+      ctx.font = '600 10px Inter, system-ui, sans-serif'
+      const placedLabels = layoutMarkerLabels(
+        resolvedMajors.map((m) => ({ x: m.x, label: m.label })),
+        { measureWidth: (s) => ctx.measureText(s).width, areaLeft: chartArea.left, areaRight: chartArea.right },
+      )
+      for (const p of placedLabels) {
+        ctx.save()
         ctx.font = '600 10px Inter, system-ui, sans-serif'
-        ctx.fillStyle = 'rgba(26,23,21,0.7)'
+        ctx.fillStyle = labelColor
         ctx.textAlign = 'left'
-        ctx.fillText(m.label, Math.min(x + 4, chartArea.right - 60), chartArea.top + 3)
+        ctx.fillText(p.label, p.x, chartArea.top + 3 + p.y)
         ctx.restore()
       }
       for (const r of minors) {
         const x = scales.x.getPixelForValue(r.dateEt)
         if (x == null || Number.isNaN(x) || x < chartArea.left || x > chartArea.right) continue
         ctx.save()
-        ctx.strokeStyle = 'rgba(26,23,21,0.3)'
+        ctx.strokeStyle = tickColor
         ctx.lineWidth = 2
         ctx.beginPath()
         ctx.moveTo(x, chartArea.top)
@@ -141,11 +157,36 @@ function timelineOverlayPlugin(resp: OverviewResponse) {
         ctx.stroke()
         ctx.restore()
       }
+      // v1.95.6 raw /install/* de-dupe (ADD, 2026-09-26) — a marker scoped to the RAW
+      // install-signal line ONLY (never the primary install count): drawn in that series' own
+      // color (PALETTE[7], see the 'Raw install signals' dataset below) and labeled at the
+      // BOTTOM of the chart area, distinct from the top-labeled release/tracking markers
+      // above, so it visually reads as "about that one line" rather than a page-wide event.
+      if (resp.timeline.rawInstallDedupeAt) {
+        const x = scales.x.getPixelForValue(resp.timeline.rawInstallDedupeAt)
+        if (x != null && !Number.isNaN(x) && x >= chartArea.left && x <= chartArea.right) {
+          ctx.save()
+          ctx.strokeStyle = PALETTE[7]
+          ctx.lineWidth = 1
+          ctx.setLineDash([2, 2])
+          ctx.beginPath()
+          ctx.moveTo(x, chartArea.top)
+          ctx.lineTo(x, chartArea.bottom)
+          ctx.stroke()
+          ctx.setLineDash([])
+          ctx.font = '600 9px Inter, system-ui, sans-serif'
+          ctx.fillStyle = PALETTE[7]
+          ctx.textAlign = 'right'
+          ctx.fillText('raw install dedupe', Math.max(x - 4, chartArea.left + 4), chartArea.bottom - 4)
+          ctx.restore()
+        }
+      }
     },
   }
 }
 const timelineConfig = computed<ChartConfiguration | null>(() => {
   const resp = data.value
+  void props.dark // recompute marker colors on theme toggle
   if (!resp || !resp.timeline.daily.length) return null
   const labels = resp.timeline.daily.map((d) => d.date)
   return {
@@ -164,6 +205,9 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
       responsive: true,
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
+      // Room for up to 3 staggered rows of major-release labels (see timelineOverlayPlugin's
+      // collision avoidance below) so they never sit on top of the plotted lines.
+      layout: { padding: { top: 34 } },
       plugins: { legend: { display: true, position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } } },
       scales: {
         x: { type: 'category' },
@@ -171,7 +215,7 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
         y2: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: 'auth / installs' } },
       },
     },
-    plugins: [timelineOverlayPlugin(resp)],
+    plugins: [timelineOverlayPlugin(resp, !!props.dark)],
   } as ChartConfiguration
 })
 </script>
@@ -190,7 +234,7 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
         </div>
       <div class="kpi-grid">
         <div v-for="k in data.kpis" :key="k.key" class="kpi-tile">
-          <div class="kpi-label">{{ k.label }}</div>
+          <div class="kpi-label" :title="k.label">{{ k.label }}</div>
           <template v-if="k.noCampaignFlighting">
             <div class="kpi-num small">no campaign flighting today</div>
           </template>
@@ -200,18 +244,28 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
           <template v-else>
             <div class="kpi-num">{{ k.isRate ? pct(k.today, k.denominator) : fmt(k.today) }}</div>
             <div v-if="k.isRate && k.denominator != null" class="kpi-sub mono">{{ counts(k.numerator, k.denominator) }}</div>
-            <div v-if="k.vsYesterday" class="kpi-delta" :class="deltaClass(k.vsYesterday)">vs yesterday {{ deltaLabel(k.vsYesterday) }}</div>
-            <div v-if="k.vsAvg7" class="kpi-delta" :class="deltaClass(k.vsAvg7)">vs 7d avg {{ deltaLabel(k.vsAvg7) }}</div>
+            <!-- Go-live gating: a metric with no valid comparison day at all yet (e.g. "Games
+                 completed" the day it shipped) says so plainly instead of hiding the row
+                 outright or showing a nonsense delta across the go-live boundary. -->
+            <div v-if="gateFor(k).newToday" class="kpi-delta new">new today</div>
+            <template v-else>
+              <div v-if="k.vsYesterday && !gateFor(k).hideVsYesterday" class="kpi-delta" :class="deltaClass(k.vsYesterday)">vs yesterday {{ deltaLabel(k.vsYesterday) }}</div>
+              <div v-if="k.vsAvg7 && !gateFor(k).hideVsAvg7" class="kpi-delta" :class="deltaClass(k.vsAvg7)">vs 7d avg {{ deltaLabel(k.vsAvg7) }}</div>
+            </template>
           </template>
         </div>
       </div>
       </template>
 
-      <!-- timeline -->
+      <!-- timeline — the "Shaded bands = campaign flights…" caption is NOT rendered here: the
+           widget's own `notes: ['overview-timeline-caption']` (lib/defaults.ts) already reaches
+           the registry caption through ChartCard.vue's generic attached-caption system (same
+           NoteBlock, same note id), which was duplicating this inline copy verbatim
+           (coordinator-flagged regression, 2026-09-26). One rendering, not two. -->
       <template v-else-if="widget.view === 'timeline'">
-        <NoteBlock note-id="overview-timeline-caption" class="caption" />
         <div class="chart-box"><BaseChart v-if="timelineConfig" :config="timelineConfig" :drill-open="false" @point="() => {}" /></div>
         <p v-if="!timelineConfig" class="caption">No data in range yet.</p>
+        <NoteBlock v-if="data.timeline.rawInstallDedupeAt" note-id="raw-install-dedupe" class="caption" />
       </template>
 
       <!-- scorecard -->
@@ -235,14 +289,43 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
             <div class="sc-row"><span>Return rate (d2-7)</span><span class="mono">{{ pct(row.returnRateD2to7, row.returnD0) }} {{ counts(row.returnD2to7, row.returnD0) }}</span></div>
             <div class="sc-row"><span>Cost / arrival</span><span class="mono">{{ money(row.costPerArrival) }}</span></div>
             <div class="sc-rates">
-              <span v-for="(rate, step) in row.funnelRates" :key="step" class="sc-rate-chip" :title="FUNNEL_STEP_LABELS[step as keyof typeof FUNNEL_STEP_LABELS]">
-                {{ FUNNEL_STEP_LABELS[step as keyof typeof FUNNEL_STEP_LABELS] }}:
-                <template v-if="FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED.has(step as FunnelStepKey)">{{ noteRawText('not-instrumented') }}</template>
-                <template v-else
-                  >{{ pct(rate, prevFunnelCount(row.funnelCounts, step as keyof CampaignFunnelCounts)) }}
-                  {{ counts(row.funnelCounts[step as keyof CampaignFunnelCounts], prevFunnelCount(row.funnelCounts, step as keyof CampaignFunnelCounts)) }}</template
+              <!-- Iterates FUNNEL_STEP_ORDER, not row.funnelRates — funnelStepRates only ever
+                   populates 'accept'/'install' now (see lib/campaigns.ts
+                   VALID_FUNNEL_RATE_STEPS), but every OTHER step still shows its plain count
+                   as a chip, just with no percent (audit finding, 2026-09-26: those "rates"
+                   mixed event-row counts against arrival/other-row counts with no shared
+                   visitor id — not real percentages). -->
+              <template v-for="step in scorecardSteps" :key="step">
+                <!-- Closed campaign: a step its flight never saw ANY hit for is OMITTED, not
+                     labeled "not instrumented" (owner clarification, 2026-09-26 — "closed
+                     campaigns" scope). Active/upcoming: unchanged — row.notInstrumented is
+                     always [] for them, so this condition is never true. -->
+                <span
+                  v-if="row.status !== 'closed' || !row.notInstrumented.includes(step as keyof CampaignFunnelCounts)"
+                  class="sc-rate-chip"
+                  :title="FUNNEL_STEP_LABELS[step as keyof typeof FUNNEL_STEP_LABELS]"
                 >
-              </span>
+                  {{ FUNNEL_STEP_LABELS[step as keyof typeof FUNNEL_STEP_LABELS] }}:
+                  <!-- Bug fix (owner report, 2026-09-26): this used to check the PERMANENT
+                       global FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED constant (always contains
+                       'completed'), so a campaign whose flight window is well after
+                       GAME_COMPLETE_LIVE_AT still showed "not instrumented" instead of its
+                       real count. row.notInstrumented is the ACTUAL per-row instrumentation
+                       state for every status (functions/api/overview.ts's notInstrumentedSet —
+                       the real per-flight check for a closed campaign, gameCompleteNotInstrumented
+                       for an active/upcoming one), so it reflects whether 'completed' has gone
+                       live for THIS campaign, not just whether the beacon exists at all. -->
+                  <template v-if="row.notInstrumented.includes(step as keyof CampaignFunnelCounts)">{{ noteRawText('not-instrumented') }}</template>
+                  <template v-else-if="step === 'install'"
+                    >{{ pct(row.funnelRates.install, row.installPromptPostFixCount) }} {{ counts(row.funnelCounts.install, row.installPromptPostFixCount) }}</template
+                  >
+                  <template v-else-if="VALID_FUNNEL_RATE_STEPS.has(step as FunnelStepKey)"
+                    >{{ pct(row.funnelRates[step as keyof CampaignFunnelCounts], prevFunnelCount(row.funnelCounts, step as keyof CampaignFunnelCounts)) }}
+                    {{ counts(row.funnelCounts[step as keyof CampaignFunnelCounts], prevFunnelCount(row.funnelCounts, step as keyof CampaignFunnelCounts)) }}</template
+                  >
+                  <template v-else>{{ fmt(row.funnelCounts[step as keyof CampaignFunnelCounts]) }}</template>
+                </span>
+              </template>
             </div>
           </div>
         </div>
@@ -279,7 +362,16 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
 
 <style scoped>
 .ow-body {
+  /* flex column, not a plain block with height:100% (fix/clean-look, 2026-09-26): a
+     percentage height on .chart-box below needs its ancestor chain to resolve to a
+     DEFINITE pixel size at every step, and on mobile — where the card's own height now
+     comes from its content (Dashboard.vue's height:auto) rather than a fixed box — that
+     chain broke, leaving Chart.js's canvas stuck at its hard-coded 150px fallback height
+     instead of actually filling the card. flex:1 on .chart-box sizes it against the
+     flex container's real resolved height instead, which doesn't have that failure mode. */
   height: 100%;
+  display: flex;
+  flex-direction: column;
   overflow: auto;
 }
 .state {
@@ -338,9 +430,13 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
   font-size: 11px;
   color: rgb(var(--ink-3));
   margin-bottom: 4px;
+  /* Wrap up to 2 lines instead of truncating a whole clause to "…" (owner-reported
+     regression, 2026-09-26: "Tagged arrivals — US+CA …" / "Installs (install fix went live …"
+     were unreadable) — the full label is still one tap/hover away via the title attribute. */
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 .kpi-num {
   font-family: 'Space Grotesk', sans-serif;
@@ -370,8 +466,11 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
 .kpi-delta.down {
   color: #bc4749;
 }
+.kpi-delta.new {
+  color: rgb(var(--amber-hover));
+}
 .chart-box {
-  height: 100%;
+  flex: 1;
   min-height: 220px;
 }
 .scorecard-grid {

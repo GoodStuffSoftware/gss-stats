@@ -101,16 +101,19 @@ const dragEnabled = computed(() => !isMobile.value && !touchCapable)
 }
 
 /* Resize grip (bottom-right corner drag handle) — clean look by default (owner
-   clarification, 2026-09-26): hidden unless the function bar is open OR that specific
-   card is hovered. Hover-only on devices that actually have hover + a precise pointer —
-   a touchscreen never matches this media query, so grips stay visible there (no hover to
-   reveal them with). */
+   clarification, 2026-09-26): hidden unless the function bar (page edit mode) is open, that
+   specific card's own reveal is toggled on, or that card is hovered. Drag/resize are
+   desktop-only (ChartCard's dragEnabled disables both on touch), so this stays inside the
+   hover+fine-pointer media query — a touchscreen never matches it, and never shows a grip at
+   all, matching dragEnabled. `:has()` reaches into the GridItem to see its ChartCard's own
+   `.revealed` class (a sibling of this resizer, not an ancestor/descendant of it). */
 @media (hover: hover) and (pointer: fine) {
   :deep(.vgl-item__resizer) {
     opacity: 0;
     transition: opacity 0.15s ease;
   }
-  :deep(.vgl-item:hover .vgl-item__resizer) {
+  :deep(.vgl-item:hover .vgl-item__resizer),
+  :deep(.vgl-item:has(.chart-card.revealed) .vgl-item__resizer) {
     opacity: 1;
   }
   .stats-grid.controls-revealed :deep(.vgl-item__resizer) {
@@ -135,7 +138,27 @@ const dragEnabled = computed(() => !isMobile.value && !touchCapable)
   :deep(.vgl-item__resizer) {
     display: none !important;
   }
+  /* Height comes from CONTENT now, not a fixed box (owner-reported regression, 2026-09-26): a
+     hard-coded 300px forced every widget into the same box regardless of what it held — a KPI
+     grid with a dozen tiles got an internal scrollbar and a clipped "Updated ..." row, while a
+     one-line note got a big mostly-empty card. A min-height keeps small/chart widgets from
+     collapsing (ChartCard.vue's own .card-body min-height is the real floor for a canvas —
+     see there); everything else just grows to fit. */
   :deep(.vgl-item .chart-card) {
+    height: auto;
+    min-height: 160px;
+  }
+  /* Note widgets have no chart/canvas needing a pixel floor — let them size down to a
+     one-line caption instead of leaving blank space under it. */
+  :deep(.vgl-item .chart-card.note-card) {
+    min-height: 0;
+  }
+  /* Chart.js needs a DEFINITE (not just min-height-floored) container height to size its
+     canvas against — see ChartCard.vue's needsChartHeight comment for why a plain min-height
+     silently produced a 150px-tall chart here. A fixed height only for the widgets that
+     actually hold a canvas; every content-driven widget (KPI grid, note, scorecard, tables)
+     keeps growing to fit above. */
+  :deep(.vgl-item .chart-card.needs-chart-height) {
     height: 300px;
   }
 }

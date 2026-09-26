@@ -1,0 +1,123 @@
+import { describe, expect, it } from 'vitest'
+import { deltaLabel, deltaClass, fmtCount, pct, counts, money, kpiComparisonGate } from './kpiFormat'
+import { addEtDays } from './overview'
+import { GAME_COMPLETE_LIVE_AT, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, TRACKING_ACTIVATION_DATE_ET, etDateFromMs } from './popupEvents'
+
+describe('deltaLabel', () => {
+  // Owner-reported regression, 2026-09-26: "vs 7d avg +102.143 (+941%)" — a 7-day AVERAGE is
+  // inherently fractional, and the raw delta went straight to the screen unrounded.
+  it('rounds a fractional delta (vs-7d-avg) to an integer', () => {
+    expect(deltaLabel({ delta: 102.142857, deltaPct: 9.41 })).toBe('+102 (+941%)')
+  })
+  it('rounds a fractional negative delta', () => {
+    expect(deltaLabel({ delta: -1.857, deltaPct: -1 })).toBe('-2 (-100%)')
+  })
+  it('an integer delta (vs-yesterday) is unaffected', () => {
+    expect(deltaLabel({ delta: 106, deltaPct: 15.14 })).toBe('+106 (+1514%)')
+  })
+  it('a delta that rounds to exactly 0 gets no + sign', () => {
+    expect(deltaLabel({ delta: 0.3, deltaPct: 0.01 })).toBe('0 (+1%)')
+  })
+  it('null/undefined delta is an empty string', () => {
+    expect(deltaLabel(null)).toBe('')
+    expect(deltaLabel(undefined)).toBe('')
+  })
+  it('no percent part when deltaPct is null (a zero compare value)', () => {
+    expect(deltaLabel({ delta: 5, deltaPct: null })).toBe('+5')
+  })
+})
+
+describe('deltaClass', () => {
+  it('up/down/neutral', () => {
+    expect(deltaClass({ delta: 5, deltaPct: 1 })).toBe('up')
+    expect(deltaClass({ delta: -5, deltaPct: -1 })).toBe('down')
+    expect(deltaClass({ delta: 0, deltaPct: 0 })).toBe('')
+    expect(deltaClass(null)).toBe('')
+  })
+})
+
+describe('fmtCount / pct / counts / money', () => {
+  it('fmtCount', () => {
+    expect(fmtCount(1234)).toBe('1,234')
+    expect(fmtCount(null)).toBe('—')
+    expect(fmtCount(undefined)).toBe('—')
+  })
+  it('pct formats to one decimal', () => {
+    expect(pct(0.4109)).toBe('41.1%')
+    expect(pct(null)).toBe('—')
+  })
+  it('counts pairs numerator/denominator', () => {
+    expect(counts(3, 10)).toBe('(3/10)')
+    expect(counts(null, 10)).toBe('')
+  })
+  it('money formats to two decimals with a leading $', () => {
+    expect(money(4.5)).toBe('$4.50')
+    expect(money(null)).toBe('—')
+  })
+})
+
+describe('kpiComparisonGate (coordinator addition, 2026-09-26 — go-live-boundary gating)', () => {
+  // GAME_COMPLETE_LIVE_AT is 2026-09-26T19:43:02Z -> ET date 2026-09-26. Both constants are
+  // typed `number | null` upstream (pre-launch they can still be unset) — this suite asserts
+  // the gating behavior that applies once they're set, same as popupEvents.test.ts does for
+  // the constants themselves.
+  if (GAME_COMPLETE_LIVE_AT == null || INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS == null) {
+    it.skip('go-live instants are not set in this build — gating tests skipped', () => {})
+    return
+  }
+  const gameCompleteEt = etDateFromMs(GAME_COMPLETE_LIVE_AT)
+  const installFixEt = etDateFromMs(INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS)
+
+  it('a metric with no go-live entry (e.g. page views) is never gated', () => {
+    const g = kpiComparisonGate('pageviews', gameCompleteEt)
+    expect(g).toEqual({ hideVsYesterday: false, hideVsAvg7: false, newToday: false })
+  })
+
+  it('"Games completed" on its own go-live day: both comparisons hidden, "new today"', () => {
+    const g = kpiComparisonGate('completed', gameCompleteEt)
+    expect(g.hideVsYesterday).toBe(true)
+    expect(g.hideVsAvg7).toBe(true)
+    expect(g.newToday).toBe(true)
+  })
+
+  it('"Games completed" a week after go-live: both comparisons are valid again', () => {
+    const todayEt = addEtDays(gameCompleteEt, 8) // well past both the 1-day and 7-day windows
+    const g = kpiComparisonGate('completed', todayEt)
+    expect(g).toEqual({ hideVsYesterday: false, hideVsAvg7: false, newToday: false })
+  })
+
+  it('"Installs" the day after the fix: vs-yesterday still crosses the boundary, vs-7d-avg does too', () => {
+    const dayAfter = addEtDays(installFixEt, 1)
+    const g = kpiComparisonGate('install', dayAfter)
+    // yesterday (= installFixEt) is the fix day itself -> still partly pre-fix -> hidden
+    expect(g.hideVsYesterday).toBe(true)
+    expect(g.hideVsAvg7).toBe(true)
+  })
+
+  it('"Installs" 3 days after the fix: vs-yesterday is clean, vs-7d-avg still spans the fix day', () => {
+    const todayEt = addEtDays(installFixEt, 3)
+    const g = kpiComparisonGate('install', todayEt)
+    expect(g.hideVsYesterday).toBe(false) // yesterday = installFixEt + 2, fully post-fix
+    expect(g.hideVsAvg7).toBe(true) // the 7-day window's earliest day is installFixEt - 4, still pre-fix
+  })
+
+  it('"Installs" 8+ days after the fix: both comparisons are clean', () => {
+    const todayEt = addEtDays(installFixEt, 8)
+    const g = kpiComparisonGate('install', todayEt)
+    expect(g).toEqual({ hideVsYesterday: false, hideVsAvg7: false, newToday: false })
+  })
+
+  it('pop-up tiles gate on TRACKING_ACTIVATION_DATE_ET when it is set', () => {
+    if (!TRACKING_ACTIVATION_DATE_ET) return // module constant, currently set in this repo
+    const g = kpiComparisonGate('popupShown', TRACKING_ACTIVATION_DATE_ET)
+    expect(g.newToday).toBe(true)
+    const gAccept = kpiComparisonGate('popupAccept', TRACKING_ACTIVATION_DATE_ET)
+    expect(gAccept.newToday).toBe(true)
+    const gReturns = kpiComparisonGate('returns', TRACKING_ACTIVATION_DATE_ET)
+    expect(gReturns.newToday).toBe(true)
+  })
+
+  it('an empty todayEt never gates (defensive default, e.g. data not loaded yet)', () => {
+    expect(kpiComparisonGate('completed', '')).toEqual({ hideVsYesterday: false, hideVsAvg7: false, newToday: false })
+  })
+})
