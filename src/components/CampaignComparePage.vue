@@ -7,7 +7,7 @@
 // single-dimension/metric shape every other chart in this app uses.
 import { ref, computed, onMounted } from 'vue'
 import type { ChartConfiguration } from 'chart.js'
-import { CAMPAIGNS, FUNNEL_STEP_ORDER, FUNNEL_STEP_LABELS, RETURN_BUCKETS, ARRIVALS_CAVEAT, type CampaignFlight } from '../lib/campaigns'
+import { CAMPAIGNS, FUNNEL_STEP_ORDER, FUNNEL_STEP_LABELS, RETURN_BUCKETS, ARRIVALS_CAVEAT, topShares, type CampaignFlight, type DeviceMixShare } from '../lib/campaigns'
 import { MIN_COHORT, isInsufficientCohort, SMALL_SAMPLE_NOTE, PLAY_TRACKING_ACTIVATION_DATE_ET, PLAY_TRACKING_MARKER_LABEL, playTrackingStatusNote } from '../lib/popupEvents'
 import type { CampaignCompareResponse, CampaignFunnelCounts } from '../types'
 import { fetchCampaignCompare } from '../api'
@@ -182,15 +182,11 @@ function returnChartConfig(c: CampaignFlight): ChartConfiguration | null {
   }
 }
 
-// ── Device mix: top-3 shares per breakdown, as percentage bars ─────────────────────────
-// `total` rides along with each row so the template can show n/total next to every share
-// — a share computed over a handful of hits reads very differently from one over hundreds.
-function topShares(counts: Record<string, number>, n = 4): { label: string; value: number; pct: number; total: number }[] {
-  const total = Object.values(counts).reduce((a, b) => a + b, 0) || 1
-  return Object.entries(counts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, n)
-    .map(([label, value]) => ({ label, value, pct: value / total, total }))
+// Device mix top-N shares: MIN_COHORT-gated (see lib/campaigns.ts topShares/DeviceMixShare
+// — moved there, 2026-09-26 review fix, so the gating logic is unit-testable; this used to
+// compute value/total directly here and bypass MIN_COHORT entirely).
+function shareBarWidth(row: DeviceMixShare): number {
+  return row.total ? (row.value / row.total) * 100 : 0
 }
 </script>
 
@@ -321,8 +317,8 @@ function topShares(counts: Record<string, number>, n = 4): { label: string; valu
                 <div class="device-kind overline">{{ kind }}</div>
                 <div v-for="row in topShares(rows)" :key="row.label" class="share-row">
                   <span class="share-label">{{ row.label }}</span>
-                  <span class="share-bar-wrap"><span class="share-bar" :style="{ width: row.pct * 100 + '%' }"></span></span>
-                  <span class="share-pct mono">{{ pct(row.pct) }} ({{ fmt(row.value) }}/{{ fmt(row.total) }})</span>
+                  <span class="share-bar-wrap"><span class="share-bar" :style="{ width: shareBarWidth(row) + '%' }"></span></span>
+                  <span class="share-pct mono">{{ pct(row.rate, row.total) }} ({{ fmt(row.value) }}/{{ fmt(row.total) }})</span>
                 </div>
               </div>
             </template>

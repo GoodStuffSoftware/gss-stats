@@ -454,6 +454,29 @@ export function costPer(spend: number | null, count: number): number | null {
   return computeRate(spend, count)
 }
 
+// ── Device mix shares (top-N breakdown of a device/OS/browser/screen count map) ────────
+export interface DeviceMixShare {
+  label: string
+  value: number
+  total: number
+  // MIN_COHORT-gated via computeRate — NOT a bare value/total division. A raw division
+  // would print e.g. "100.0% (1/1)" for a total of 1, which reads as far more confident
+  // than a single-device sample supports (review fix, 2026-09-26: CampaignComparePage.vue
+  // used to compute this share directly, bypassing MIN_COHORT entirely). null means "too
+  // few to report" (0 < total < MIN_COHORT) or "—" (total === 0) — see
+  // popupEvents.ts isInsufficientCohort for telling those apart; `value`/`total` are still
+  // returned either way so the raw counts can always be shown alongside.
+  rate: number | null
+}
+/** Top-N shares of a device-mix breakdown, by count descending. */
+export function topShares(counts: Record<string, number>, n = 4): DeviceMixShare[] {
+  const total = Object.values(counts).reduce((a, b) => a + b, 0)
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, n)
+    .map(([label, value]) => ({ label, value, total, rate: computeRate(value, total) }))
+}
+
 // ── On-device return beacon (v1.95.3; see popupEvents.ts POPUP_EVENT_PREFIXES '/return')
 // `/return/<uc>/d0` is the denominator (first tagged load); d1/d2-7/d8-14/d15-30/d31-60
 // are "came back within that window," counted at most once per bucket per the app's own
