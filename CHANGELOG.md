@@ -6,6 +6,17 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.2] — 2026-09-26
+
+### Changed
+- **Far fewer D1 reads per dashboard load.** The site-filter list's traffic count now covers
+  the last 90 days (labeled as such) instead of scanning the whole visit history on every
+  load, each chart now reads the database once instead of twice for its total, and geo/stats
+  chart responses are cached briefly (or, for date ranges that are already fully in the past,
+  much longer) so repeat views of the same chart don't re-query at all. No numbers you rely on
+  change — this only cuts the traffic-database work behind the scenes. See
+  [docs/capacity.md](docs/capacity.md).
+
 ## [0.5.1] — 2026-09-26
 
 ### Fixed

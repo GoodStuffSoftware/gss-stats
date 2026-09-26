@@ -6,17 +6,36 @@
 // (3xx Location) or declares <link rel="canonical"> pointing elsewhere has its
 // traffic (RUM hosts + beacon tags + counts) merged into the canonical host. Results
 // group by registrable domain; dev/preview/infra hosts are dropped. The alias lookup
-// is cached in KV (24h) so it isn't an HTTP call on every dashboard load.
+// is cached in KV (24h) so it isn't an HTTP call on every dashboard load. The `geo` count is
+// bounded to a rolling 90-day window (not all-time — see GEO_COUNT_WINDOW_MS below), and the
+// whole response is cached via the Cache API for a few minutes (RESPONSE_CACHE_TTL_SECONDS).
 //
 // Response: { sites: [ { domain, rum, geo, subs: [ { host, hosts, tag, tags, rum, geo } ] } ] }
+// `geo`/`rum` are last-90-days counts, not all-time.
 
 import { popupExcludeClause } from '../../src/lib/popupEvents'
+import { cachedJson, type CacheLike } from '../_lib/edgeCache'
 
 interface Env {
   CF_ANALYTICS_TOKEN: string
   gss_geo: D1Database
   STATS_CONFIG: KVNamespace
 }
+
+// This endpoint's own response cache (distinct from the alias-map KV cache above): the whole
+// GET has no request params, so there is exactly one cache entry, keyed by a fixed URL. Short
+// TTL — it's a UI convenience list, not a number anyone needs real-time, and correctness only
+// requires it to catch up within a few dashboard loads. Cache API, not KV: KV's Free-plan write
+// cap is 1,000/day account-wide (shared with the dashboard's own layout-save writes), while the
+// Cache API has no write-count cap — see docs/capacity.md.
+const RESPONSE_CACHE_KEY = 'https://edge-cache.internal/api/sites'
+const RESPONSE_CACHE_TTL_SECONDS = 300 // 5 min
+
+// The site-tag counts badge only needs to reflect recent activity (it's a sort/relevance signal
+// in the filter picker, not an all-time total) — bounding it to the same rolling window as the
+// RUM query above lets SQLite use idx_hits_ts instead of scanning the whole table on every call,
+// and keeps this endpoint bounded as `hits` grows. See docs/capacity.md.
+const GEO_COUNT_WINDOW_MS = 90 * 86_400_000
 
 const ACCOUNT_ID = 'a32bba62c77df5e8f6bd33d04478ec34'
 const GQL_ENDPOINT = 'https://api.cloudflare.com/client/v4/graphql'
@@ -124,6 +143,11 @@ interface Sub {
 }
 
 export const onRequestGet: PagesFunction<Env> = async (ctx) => {
+  const cache = (caches as unknown as { default: CacheLike }).default
+  return cachedJson(cache, RESPONSE_CACHE_KEY, RESPONSE_CACHE_TTL_SECONDS, ctx.waitUntil.bind(ctx), () => computeSitesResponse(ctx))
+}
+
+async function computeSitesResponse(ctx: Parameters<PagesFunction<Env>>[0]): Promise<Response> {
   const raw = new Map<string, Raw>() // host → raw counts before folding
   const get = (host: string): Raw => {
     let e = raw.get(host)
@@ -168,8 +192,11 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
   try {
     // Popup/event-beacon rows (sign-in prompt, upsell, install, …) aren't screen
     // views — exclude them so this count matches what the dashboard shows elsewhere.
-    const w = ["site <> ''"]
-    const b: unknown[] = []
+    // Bounded to a rolling window (see GEO_COUNT_WINDOW_MS above) so this is a SEARCH on
+    // idx_hits_ts instead of a full-table SCAN — this used to read every row in `hits` on
+    // every single dashboard load regardless of date range (docs/capacity.md §4).
+    const w = ["site <> ''", 'ts >= ?']
+    const b: unknown[] = [Date.now() - GEO_COUNT_WINDOW_MS]
     popupExcludeClause(w, b)
     const r = await ctx.env.gss_geo.prepare(`SELECT site, COUNT(*) c FROM hits WHERE ${w.join(' AND ')} GROUP BY site`).bind(...b).all()
     for (const row of (r.results ?? []) as any[]) {

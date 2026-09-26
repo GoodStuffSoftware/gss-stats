@@ -1,0 +1,178 @@
+# gss-stats capacity audit — 2026-09-26
+
+> **Status (perf/d1-reads, 2026-09-26):** the two "clear waste" items this audit identifies
+> — `/api/sites`'s unbounded full-table scan (§4.2) and the total+grouped query pair on every
+> chart (§4.3) — have been fixed: see the "Capacity" section of [README.md](../README.md) and
+> `functions/_lib/edgeCache.ts`, `functions/api/geo.ts`, `functions/api/sites.ts`. Everything
+> below is the original read-only findings, kept as-is for the record.
+
+Read-only. No plan, setting, schema or data was changed. All figures pulled live via
+the Cloudflare REST API, the GraphQL Analytics API, and read-only `wrangler d1 execute`
+`SELECT`/`EXPLAIN QUERY PLAN` statements against `gss-geo`. Non-Cloudflare figures
+(Google Ads API, Firestore) are inferred from routine docs/ADRs checked into
+`gss-stats` worktrees (not merged to `main`) — flagged as such below.
+
+## 1. Account plan(s)
+
+| Scope | Plan | Evidence |
+|---|---|---|
+| Workers/Pages (account) | **Free** — no Workers Paid subscription exists | `GET /accounts/:id/subscriptions` returns only a `teams_free` (Zero Trust) line item; no `workers.*` rate plan present |
+| Zone `goodstuff.software` | **Free Website** | `GET /zones?name=goodstuff.software` → `plan.legacy_id: "free"` |
+| Zero Trust / Access | Teams Free (50 users) | Same subscriptions call |
+| Secrets Store | Beta, 1 store/account, 100 secrets/account | `default_secrets_store` exists with 4 secrets (Stripe keys, unrelated to gss-stats) |
+
+Everything below is scoped to the **Workers Free** plan's limits unless noted.
+
+## 2. Cloudflare resource usage vs. limits
+
+### D1
+
+Two databases exist, both bound in `wrangler.toml`/planned bindings:
+- **gss-geo** (`fa0b2929-…`) — the beacon's shared store, created 2026-06-25, 2 tables (`hits`, `excluded_ips`).
+- **gss-stats-ads** (`785327a3-…`) — created 2026-09-26 per `docs/adr/0001-ads-read-store.md` (on a feature branch, not yet in `main`, but the live D1 resource already exists and is being written to).
+
+D1's **rows-read/rows-written caps are account-wide**, shared across every database.
+
+| Metric | gss-geo (24h) | gss-stats-ads (24h) | Combined (24h) | Free limit | Headroom |
+|---|---|---|---|---|---|
+| Rows read | 1,458,916 | 1,722 | **1,460,638** | 5,000,000/day | **70.8%** |
+| Rows written | 680 | 636 | **1,316** | 100,000/day | 98.7% |
+| Read queries | 614 | 86 | 700 | 50/invocation (not aggregate) | n/a |
+| Write queries | 170 | 27 | 197 | — | — |
+
+| Metric | gss-geo (7d) | gss-stats-ads (7d, ~3h old) |
+|---|---|---|
+| Rows read | 4,439,975 | 1,938 |
+| Rows written | 1,628 | 636 |
+| Read queries | 1,907 | 88 |
+| Write queries | 407 | 27 |
+
+Storage (account-wide cap 5 GB total / 500 MB per DB, 10 DB max):
+
+| DB | Size now | Size 7d ago | Δ/week | Days to 500 MB (per-DB) |
+|---|---|---|---|---|
+| gss-geo | 1,216,512 B (1.16 MB) | 1,118,208 B | +98,304 B (+8.8%) | ~102 years at current rate — **no storage risk** |
+| gss-stats-ads | 139,264 B | n/a (created today) | one-time migration+backfill, not a daily rate | negligible |
+
+Databases used: **2 / 10**. Total storage: **1.36 MB / 5 GB** (0.03%).
+
+**`hits` row count: only 4,887 rows** (site created 2026-06-06; min `ts` ≈ 2026-06, max ≈ today). The table is tiny — the read-cap pressure is **100% a query-pattern problem, not a data-volume problem** (detail in §4).
+
+### Workers / Pages Functions
+
+Requests to Pages Functions bill against the same Workers Free **100,000 requests/day** account-wide pool (confirmed in Cloudflare docs: "Requests to your Pages Functions count towards your quota for the Workers Free plan").
+
+| Script | Requests (24h) | Requests (7d) | Errors |
+|---|---|---|---|
+| gss-stats prod Function | 202 | 652 (8 days sampled) | 0 |
+| gss-beacon prod Function | 197 | 921 (5 days sampled) | 0 |
+| **Combined** | **399 / 100,000 (0.4%)** | — | 0 |
+
+No standalone `workersInvocationsAdaptive` rows at all — the account's only standalone Worker is `goodstuffsoftware-mailer` (unrelated), with **0 cron triggers** registered. Free-plan account caps relevant to the **planned `gss-stats-sync` Worker** (hourly cron during flights + on-demand sync):
+
+| Limit | Free cap | Current use | Planned addition |
+|---|---|---|---|
+| Cron triggers/account | 5 | 0 | +1 (hourly) — comfortable |
+| Workers/account | 100 | 1 (mailer) | +1 — comfortable |
+| CPU time/invocation | 10 ms | not directly measured (no errors observed; D1/GraphQL waits don't count as CPU) | a GAQL fetch + a couple of D1 upserts is unlikely to approach 10ms CPU, but not directly measured this session |
+| Subrequests/invocation | 50 | n/a | an hourly sync doing OAuth refresh + a few GAQL calls + a few D1 writes stays well under 50 |
+
+### KV (`STATS_CONFIG`)
+
+Free cap: 100,000 reads/day, **1,000 writes/day**, 1,000 deletes/day, 1,000 list/day, 1 GB stored.
+
+| | 24h | 7d total | Peak single day (7d) |
+|---|---|---|---|
+| Writes | 18 | 62 | 34 (2026-09-25) |
+| Reads | 4 | 32 | 10 |
+| Lists | 1 | 1 | 1 |
+
+Peak observed write day (34) = **3.4% of the 1,000/day cap**. `App.vue`'s `scheduleSave()` (line 44) debounces every layout change (drag/resize/edit) to a single `PUT /api/config` 700 ms after the last change — so even an intense single-owner editing session collapses to a handful of writes; exhausting 1,000/day would need a save roughly every 86 seconds non-stop for 24h. **Low risk** for the current single-owner usage pattern; would need re-checking if a second collaborator is added or the debounce regresses. Only 2 keys stored (`dashboard:default`, `site-alias-map`), both tiny — no risk to the 1 GB cap.
+
+### Pages
+
+- **Builds/month cap: 500 (Free).** The deploy workflow uses `wrangler pages deploy dist` (a **direct upload** from a GitHub Actions build), not Cloudflare's own git-integrated build pipeline — so this project likely doesn't draw against the "Builds" quota the same way a Cloudflare-built project would. Either way, observed cadence is **6 deployments in the last 30 days** (1.2% of 500 even if it did count) — no risk.
+- **Functions requests count toward the Workers request quota** — confirmed above (§ Workers/Pages Functions), already reported together.
+
+### Secrets Store
+
+Beta, 1 store per account (exists), 100 secrets/account cap. **4/100 secrets used**, all Stripe keys for an unrelated project — gss-stats doesn't use Secrets Store (its `CF_ANALYTICS_TOKEN` is a plain Pages secret, not a Secrets Store binding). No risk, no action needed.
+
+### GraphQL Analytics API
+
+- Rate limit (per-token, default tier): **300 queries / 5 minutes** (~1/sec sustained, or a 300-query burst). The dashboard has **no polling/auto-refresh** (grepped the codebase — none found); every GraphQL call is user-triggered (load / filter change / drill). A full 41-widget default dashboard load fires at most ~20 RUM chart queries in a few seconds — well inside the 300/5min budget even with several tabs open at once.
+- Data retention/window for **this account's** `rumPageloadEventsAdaptiveGroups` node (queried directly via the GraphQL `settings` introspection, not assumed):
+  - `notOlderThan`: 15,897,600 s = **~184 days (~6 months)** of RUM history available.
+  - `maxDuration`: 8,035,200 s = **~93 days** max span per single query.
+  - `maxPageSize`: 10,000; `maxNumberOfFields`: 30 (the dashboard caps itself to 4 dims — far under).
+- Same introspection for `d1AnalyticsAdaptiveGroups` / `d1StorageAdaptiveGroups` / `kvOperationsAdaptiveGroups` / `pagesFunctionsInvocationsAdaptiveGroups`: `notOlderThan` = 7,776,000 s (90 days), `maxDuration` = 2,764,800 s (32 days) — plenty for this audit's 24h/7d windows and for any future trend dashboard.
+
+No GraphQL Analytics API risk identified.
+
+## 3. Non-Cloudflare dependencies
+
+These aren't verifiable from the gss-stats Cloudflare account; figures come from `docs/adr/0001-ads-read-store.md` and `docs/routines/bsk-retest-morning-read.md` (present only on `feat/ads-read-routines` / other worktree branches, not `main`).
+
+- **Google Ads API developer-token/project access level.** As of the Sept 9, 2026 sunset, quota attaches to the **Google Cloud project**, not a developer token. Current tiers: **Explorer 2,880 ops/day**, **Basic 15,000 ops/day**, Standard higher. Which tier this project holds isn't visible from this session (Google Cloud Console access, not Cloudflare) — **flag for owner to confirm**. Estimated usage: the morning-read + backstop routine does a handful of GAQL `SELECT`s (campaign status, daily metrics, optionally placement view) at most twice a day per active campaign; the **planned** `gss-stats-sync` hourly cron during flights adds ~24 more small read bursts/day. Realistic combined load is on the order of a few hundred operations/day — **under 10% even of the lowest (Explorer) tier**. Low risk regardless of tier, pending owner confirmation of which tier is active.
+- **Firestore (best-sudoku project) free tier.** Spark plan: 50,000 reads/day, 20,000 writes/day, 1 GiB stored. Used only for a COUNT aggregation at the **$100 threshold read** (an infrequent, not-daily event per campaign/flight), per the routine doc. Negligible against the daily cap — **low risk**, but unverified beyond what the routine doc states (best-sudoku isn't checked out in this session).
+- **GitHub Actions minutes.** Both `GoodStuffSoftware/gss-stats` and `GoodStuffSoftware/gss-beacon` are **public repositories** (confirmed via `gh api`) — Actions minutes are unlimited/free on public repos. **Not a constraint.** The ads-read routines themselves run locally on the owner's Windows machine via scheduled tasks, not GitHub Actions, so they don't draw from any Actions minutes budget either.
+
+## 4. Every query against `gss-geo.hits`, WHERE columns, and measured cost
+
+Schema (`hits`): `id, ts, site, path, referrer, country, region, city, postal, continent, timezone, lat, lon, colo, org, device, browser, os, lang, screenw, visitor, refpath, source, medium, campaign`.
+
+Existing indexes (read-only `SELECT name, sql FROM sqlite_master WHERE type='index'`):
+```
+idx_hits_ts       ON hits (ts)
+idx_hits_site_ts  ON hits (site, ts)
+sqlite_autoindex_excluded_ips_1   (unrelated table)
+```
+
+All `hits` SQL lives in **`functions/api/geo.ts`** and **`functions/api/sites.ts`** (nothing in `src/lib/*.ts` builds SQL — those files only shape the request body sent to these two endpoints).
+
+| # | Endpoint / mode | WHERE columns | GROUP BY | Measured `rows_read` | EXPLAIN QUERY PLAN |
+|---|---|---|---|---|---|
+| 1 | `geo.ts` single-dim breakdown, **no site filter**, 7d range | `ts` (range) | 1 dim (e.g. `region`) | **873** (of 4,887 total) | `SEARCH hits USING INDEX idx_hits_ts (ts>? AND ts<?)`; `TEMP B-TREE` for GROUP BY + ORDER BY |
+| 2 | `geo.ts` single-dim breakdown, **with site filter**, 7d range | `ts` (range) + `site IN (...)` | 1 dim | **198** | `SEARCH hits USING INDEX idx_hits_site_ts (site=? AND ts>? AND ts<?)` |
+| 3 | `geo.ts` map/points mode, 7d, no site | `ts` (range) + `lat<>''` | `lat, lon` | **907** | same `idx_hits_ts` search pattern + TEMP B-TREE |
+| 4 | `geo.ts` nested doughnut, 3-ring (`country`,`region`,`device`), 7d, no site | `ts` (range) + 3× `<>''` | 3 dims | **882** | same `idx_hits_ts` search + TEMP B-TREE (ring count doesn't change the scan, only the grouping cost) |
+| 5 | **`sites.ts`** site-tag counts — runs on every `/api/sites` load | `site<>''` — **no `ts` filter at all** | `site` | **4,887 (100% of the table, every call)** | `SCAN hits USING COVERING INDEX idx_hits_site_ts` — a full covering-index scan because there's no date predicate to narrow it |
+
+Every drill-down constraint (`constraints: [{field, value}]`), the "hide my own visits" exclusion (`browser`/`os`, case-insensitive `LOWER()` — never indexed, never will be usefully), and the self-referral exclusion (`referrer`) add to the `WHERE` clause but don't change which index SQLite picks — the planner already uses `idx_hits_ts` or `idx_hits_site_ts` for the `ts`/`site` predicate in every case observed. Additionally, **every** chart panel fires a second, near-identical query for the grand total (`SELECT COUNT(*) FROM hits WHERE <same WHERE, no GROUP BY>`) — so a chart panel's real cost is roughly **2× the numbers above**.
+
+### Why gss-geo is at 29% of the daily read cap despite a 4,887-row table
+
+Rows-read scales with **(queries per dashboard load) × (rows touched per query)**, not with data volume. A single load of the default dashboard (41 widgets across 3 pages, roughly half geo-backed) can issue on the order of 20–40 D1 queries; `/api/sites` alone burns a full 4,887-row scan on **every** load regardless of date range. That reconciles with the known baseline (~1.08M rows/24h across 286 queries) and today's measured 1,458,916 rows/614 read queries (~2,376 rows/query average) — consistent with mostly-unfiltered or lightly-filtered scans of a small table, repeated often.
+
+### Proposed index set — **not created**
+
+Given the measurements above, the honest minimal-index answer is nuanced:
+
+1. **No new index meaningfully reduces `rows_read` for the breakdown/nested queries.** SQLite/D1 already picks the best of the two existing indexes for every `ts`/`site` predicate observed (queries 1–4). `GROUP BY` over the matched rows requires a temp B-tree regardless of any index on the group-by column itself (no covering index exists that also removes the aggregation step), so adding e.g. an index on `region` or `device` would not appear in any `EXPLAIN QUERY PLAN` here and would only add write cost (each index adds a written row per insert, i.e. multiplies `rows_written` for gss-beacon's own ingestion — currently small, but not worth paying for zero read benefit).
+2. **Query #5 (`/api/sites`) is the one clear waste** — a full-table scan on every dashboard load with no date filter — but no index fixes it (it's already scanning the narrowest available covering index; SQLite must touch every row to enumerate distinct `site` values). The fix here is a **code-level cache**, not a schema change: the same 24h-TTL KV cache pattern `sites.ts` already uses for the alias map (`getAliasMap`) should wrap this per-site count aggregate too. That alone removes one guaranteed full-table read per load.
+3. **Combine the "total" + "grouped" query pair** into one `SELECT ... COUNT(*) OVER() AS total, COUNT(*) AS c FROM hits WHERE ... GROUP BY ...` statement — halves `rows_read` for every chart panel with no index changes.
+4. **If/when `hits` grows past the low tens of thousands of rows**, revisit with a small daily-rollup/summary table maintained by the beacon writer (pre-aggregated counts by day×dimension) — that's the durable structural fix for "many small-but-frequent full-ish scans," not a single index. Not needed yet at 4,887 rows.
+
+No `CREATE INDEX`, `ALTER`, or write statement was run — every command above was a read-only `SELECT` or `EXPLAIN QUERY PLAN`.
+
+## 5. Risk table
+
+| Resource | Limit | Current usage | Headroom | Trend | Risk | Recommended fix |
+|---|---|---|---|---|---|---|
+| **D1 rows read (account, all DBs)** | 5,000,000/day | 1,460,638 (24h) | **29.2% used / 70.8% headroom** | 7d total 4.44M read (gss-geo alone); today's 24h figure (1.46M) is ~2.3× the 7-day daily average and ~35% above the ADR's same-day earlier reading (1.08M) — bursty, session-driven, and will scale up as `hits` itself grows (+8.8%/week in size) | **HIGH — flagged: >50% swing risk within a single active day; hard failure (not throttling) since 2026-09-01** | Cache `/api/sites`'s full scan (§4.2); merge total+grouped queries (§4.3); add response caching per query signature; revisit with a rollup table as `hits` grows |
+| D1 rows written (account) | 100,000/day | 1,316 (24h) | 98.7% headroom | Flat, low | Low | None needed |
+| D1 storage (per-DB / total) | 500 MB / 5 GB | 1.36 MB combined | >99.9% headroom | +8.8%/week on gss-geo ≈ 102 years to 500 MB | None | None needed |
+| D1 databases | 10 | 2 | 80% headroom | +1 planned (none — gss-stats-ads already created) | None | None needed |
+| Workers/Pages requests (account) | 100,000/day | ~399/day | 99.6% headroom | Flat | None | None needed |
+| Cron triggers (account) | 5 | 0 (1 planned) | 80%+ headroom | — | None | None needed |
+| KV writes (STATS_CONFIG) | 1,000/day | 34 peak day | 96.6% headroom | Flat, debounced | Low | Re-check if a second collaborator/session is added |
+| KV reads/lists/stored data | 100,000/day, 1,000/day, 1 GB | 10, 1, ~tens of KB | >99% headroom | Flat | None | None needed |
+| Pages builds/month | 500 | 6/30d (likely doesn't even count — direct upload) | >98% headroom | Flat | None | None needed |
+| Secrets Store | 100/account | 4 (unrelated project) | 96% headroom | Flat | None | None needed |
+| GraphQL Analytics API rate limit | 300 queries/5min | ~20/load, no polling | High headroom | Flat (no auto-refresh) | None | None needed |
+| RUM data retention (this account) | ~184 days history, ~93-day query window | n/a | — | — | None | None needed |
+| Google Ads API ops/day (inferred) | 2,880–15,000/day depending on tier | Est. low hundreds/day incl. planned hourly sync | High headroom either tier | Rising with planned sync | Low | Confirm actual Google Cloud project access tier (not visible from here) |
+| Firestore reads/day (inferred) | 50,000/day | Infrequent ($100-threshold only) | High headroom | Flat | Low | None needed |
+| GitHub Actions minutes | Unlimited (public repos) | n/a | n/a | n/a | None | None needed |
+
+**Bottom line:** every Cloudflare resource has comfortable headroom **except D1 rows-read**, which sits at 29% of the account-wide 5M/day free cap today and is driven entirely by query pattern (a full-table scan on every `/api/sites` call, plus a "total + grouped" query pair per chart, against a 41-widget default dashboard) rather than by data volume. That pattern will keep costing more per query as `hits` grows, and D1 now hard-fails (not throttles) once the daily cap is hit — the two counter-measures in §4 (cache the sites-scan, merge total+grouped queries) are the highest-leverage, lowest-risk fixes and require no plan upgrade.
