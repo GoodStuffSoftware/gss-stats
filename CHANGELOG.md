@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-09-26
+
 ### Fixed
 - **Completed-game beacons no longer inflate page views.** Best Sudoku's new per-game
   completion beacon was being counted as an ordinary page view everywhere page views are
