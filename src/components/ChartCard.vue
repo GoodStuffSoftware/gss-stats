@@ -40,6 +40,43 @@ const emit = defineEmits<{
 
 const baseChartRef = ref<{ suppressForDrill: () => void } | null>(null)
 
+// Note widgets render as a bare compact caption (owner clarification, 2026-09-26: "these bars
+// are supposed to be invisible... I wanted it to look just like it did" — v0.5.2's bespoke
+// pages rendered a small-sample note as a plain <p class="caption">, no title, no box). See the
+// .note-card styling below — it drops the border/background/title row entirely and floats the
+// edit-mode menu as a small absolute overlay instead of a header row.
+const isNoteWidget = computed(() => props.widget.type === 'note')
+
+// Which widgets hold a real canvas that sizes itself via CSS height:100% (BaseChart.vue's
+// Chart.js — responsive:true, maintainAspectRatio:false, see lib/charts.ts — or
+// WorldMap.vue's own canvas) and so need a DEFINITE pixel height on mobile, not just a
+// min-height floor (regression found while verifying fix/clean-look, 2026-09-26): a
+// percentage height only resolves against an ancestor whose own height is CSS-definite —
+// min-height on an otherwise-auto-height box doesn't count, per spec — so once Dashboard.vue's
+// mobile CSS stopped giving every card a fixed height, both canvases lost their sizing
+// reference (Chart.js silently falls back to its hard-coded 150px default; WorldMap likewise
+// collapsed). Content-driven bespoke views (kpis/scorecard/releasePanel/campaigns/
+// ads-readings/note) and the non-canvas widget types (stat/rate/table) never had that
+// problem, so only the canvas-bearing cases below get a fixed mobile height (Dashboard.vue's
+// .needs-chart-height).
+const CHART_CANVAS_TYPES = new Set(['bar', 'hbar', 'stackedBar', 'line', 'area', 'doughnut', 'nestedDoughnut', 'pie', 'map'])
+const needsChartHeight = computed(() => {
+  if (props.widget.dataset === 'overview') return props.widget.view === 'timeline' // the only overview panel with a real chart
+  if (props.widget.dataset === 'campaigns' || props.widget.dataset === 'ads-readings' || isNoteWidget.value) return false
+  return CHART_CANVAS_TYPES.has(props.widget.type)
+})
+
+// Double-tap-to-zoom (owner: "allow a double-tap on the chart to zoom if that's easy") — the
+// explicit zoom button is touch-hidden until edit mode (see CSS), so this is touch's one-step
+// equivalent. Ignore taps that land on an actual control (menu, its buttons, a link) so they
+// keep their own behavior instead of also triggering a zoom.
+function onCardBodyDblClick(e: MouseEvent) {
+  if (isNoteWidget.value) return // nothing to zoom
+  const target = e.target as HTMLElement | null
+  if (target?.closest('button, .menu, a, input, select, textarea')) return
+  toggleZoom()
+}
+
 // A click on a chart element → hand the parent the raw dimension value so it can offer to
 // open a page filtered to it. Only for dimensions that are actually drillable — tapping a
 // non-drillable point leaves its tooltip up so the value stays readable, which is the only
@@ -315,9 +352,9 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
 
 <template>
   <Teleport to="body" :disabled="!zoomed">
-    <div ref="cardEl" class="chart-card" :class="{ zoomed, 'controls-revealed': forceControls }" :style="zoomed ? { '--ar': aspect } : undefined">
-    <header class="card-head">
-      <div class="title-wrap">
+    <div ref="cardEl" class="chart-card" :class="{ zoomed, 'controls-revealed': forceControls, 'note-card': isNoteWidget, 'needs-chart-height': needsChartHeight }" :style="zoomed ? { '--ar': aspect } : undefined">
+    <header class="card-head" :class="{ 'note-head': isNoteWidget }">
+      <div class="title-wrap" v-if="!isNoteWidget">
         <span v-if="widget.isDefault" class="pin" title="A default chart on this page — kept when you restore defaults">★</span>
         <span class="title" :title="widget.title">{{ widget.title }}</span>
         <span v-if="overrideSummary" class="ovr" :title="'Filter override: ' + overrideSummary"
@@ -340,9 +377,12 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
           </svg>
         </button>
         <button v-if="!isBespokeBody" class="btn-ghost icon hide-until-revealed" title="Reload" @click.stop="load">↻</button>
-        <!-- Zoom — ALWAYS visible (owner: "two clicks to zoom is too much"), just
-             low-contrast until hovered/focused, so it stays a single click without
-             revealing the bar. A note tile has nothing to zoom, so it's omitted there. -->
+        <!-- Zoom — a small floating corner icon, never its own bar (owner: "two clicks to
+             zoom is too much"). Desktop: low-contrast once the card is hovered/focused, full
+             contrast on direct hover, so it's reachable without revealing the whole bar.
+             Touch: hidden until edit mode, same as the rest of the modification chrome
+             (fix/clean-look, 2026-09-26) — double-tapping the chart body zooms it instead, see
+             onCardBodyDblClick. A note tile has nothing to zoom, so it's omitted there. -->
         <button
           v-if="widget.type !== 'note'"
           class="zoom-btn"
@@ -371,10 +411,10 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
       </div>
     </header>
 
-    <div class="card-body">
+    <div class="card-body" @dblclick="onCardBodyDblClick">
       <!-- Bespoke bodies: overview / campaigns / ads-readings datasets, and the note type —
            own data fetch (or none), skip the generic loading/error/empty states above. -->
-      <OverviewWidgetBody v-if="widget.dataset === 'overview'" :widget="widget" :filters="effectiveFilters" @open-campaigns="emit('open-campaigns')" />
+      <OverviewWidgetBody v-if="widget.dataset === 'overview'" :widget="widget" :filters="effectiveFilters" :dark="dark" @open-campaigns="emit('open-campaigns')" />
       <CampaignsWidgetBody v-else-if="widget.dataset === 'campaigns'" :widget="widget" />
       <AdsReadingsWidgetCard v-else-if="widget.dataset === 'ads-readings'" :widget="widget" />
       <NoteWidgetBody v-else-if="widget.type === 'note'" :widget="widget" />
@@ -471,10 +511,12 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 9px 10px 9px 14px;
-  border-bottom: 1px solid rgb(var(--line));
+  /* No divider/strip (owner clarification, 2026-09-26 — "these bars are supposed to be
+     invisible"): a plain heading directly above the content, like the old bespoke pages'
+     <h2>, not a bordered bar. */
+  padding: 10px 10px 4px 14px;
   user-select: none;
-  background: rgb(var(--surface));
+  background: transparent;
 }
 .card-head:active {
   cursor: grabbing;
@@ -551,26 +593,33 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
 }
 /* Modification chrome (filter/reload/options-menu) — clean look by default (owner
    clarification, 2026-09-26): hidden until the function bar is open (.controls-revealed,
-   driven by Dashboard's forceControls prop) or this specific card is hovered/focused-within.
-   Hover-hiding only applies on devices that actually have hover + a precise pointer — a
-   touchscreen never matches this media query, so these stay visible there (no hover to
-   reveal them with, and menuOpen already needs a tap either way). */
+   driven by Dashboard's forceControls prop, i.e. edit mode) or, on a device that actually has
+   hover + a precise pointer, this specific card is hovered/focused-within. Hidden is the BASE
+   rule for every device, including touch — a touchscreen never matches the hover media query
+   below, so without a device-agnostic base rule it would stay permanently visible there, which
+   is exactly the "always visible on touch" bug the owner reported (2026-09-26 screenshot). */
+.hide-until-revealed {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+.chart-card.controls-revealed .hide-until-revealed {
+  opacity: 1;
+  pointer-events: auto;
+}
 @media (hover: hover) and (pointer: fine) {
-  .hide-until-revealed {
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.12s ease;
-  }
   .chart-card:hover .hide-until-revealed,
-  .chart-card:focus-within .hide-until-revealed,
-  .chart-card.controls-revealed .hide-until-revealed {
+  .chart-card:focus-within .hide-until-revealed {
     opacity: 1;
     pointer-events: auto;
   }
 }
-/* Zoom — ALWAYS visible and clickable (owner: "two clicks to zoom is too much"), just
-   low-contrast until the card is hovered/focused, so it reads as unobtrusive without
-   costing an extra click. */
+/* Zoom — a small borderless floating corner icon, never its own bar. Desktop: always
+   reachable at low contrast once the card is hovered/focused (owner: "two clicks to zoom is
+   too much"), full contrast on direct hover of the icon itself. Touch: hidden until edit mode
+   like the rest of the modification chrome (double-tap the chart body zooms instead — see
+   onCardBodyDblClick) — the previous "always visible on touch" behavior was the same bug as
+   the rest of the header chrome. */
 .zoom-btn {
   border: none;
   background: transparent;
@@ -579,29 +628,34 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
   line-height: 1;
   padding: 4px 7px;
   border-radius: 7px;
-  opacity: 0.55;
+  opacity: 0;
+  pointer-events: none;
   transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
 }
-.zoom-btn:hover,
-.zoom-btn:focus-visible {
-  opacity: 1;
-  background: rgb(var(--sunken));
-  color: rgb(var(--ink));
-}
-.chart-card:hover .zoom-btn,
-.chart-card:focus-within .zoom-btn,
 .chart-card.controls-revealed .zoom-btn {
-  opacity: 1 !important;
+  opacity: 1;
+  pointer-events: auto;
+}
+@media (hover: hover) and (pointer: fine) {
+  .zoom-btn {
+    opacity: 0.55;
+    pointer-events: auto;
+  }
+  .zoom-btn:hover,
+  .zoom-btn:focus-visible {
+    opacity: 1;
+    background: rgb(var(--sunken));
+    color: rgb(var(--ink));
+  }
 }
 .zoom-btn svg {
   display: block;
 }
-/* 44px touch target on any touch-capable device — gated on (pointer: coarse), not a
-   viewport-width breakpoint (delta review, 2026-09-26: a tablet can easily be wider than
-   700px and still have a coarse/touch pointer, and a narrow window on a mouse-driven
-   desktop shouldn't get a touch-sized target it doesn't need). The icon itself stays the
-   same visual size; only the hit area grows (padding), so the header doesn't get visually
-   heavier. */
+/* 44px touch target once the button is actually shown (edit mode) — gated on (pointer:
+   coarse), not a viewport-width breakpoint (a tablet can be wider than 700px and still have a
+   coarse/touch pointer, and a narrow window on a mouse-driven desktop shouldn't get a
+   touch-sized target it doesn't need). The icon itself stays the same visual size; only the
+   hit area grows (padding). */
 @media (pointer: coarse) {
   .zoom-btn {
     min-width: 44px;
@@ -609,8 +663,28 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    opacity: 1; /* no hover on touch — always fully visible, not just always clickable */
   }
+}
+/* Note widgets: a bare compact caption, matching v0.5.2's bespoke <p class="caption"> — no
+   border, no background, no title row. The edit-mode menu floats as a small absolute overlay
+   instead of reserving a header row, so it never adds visual weight when hidden. */
+.chart-card.note-card {
+  position: relative; /* anchors .note-head's absolute overlay */
+  border: none;
+  background: transparent;
+  border-radius: 0;
+}
+.card-head.note-head {
+  position: absolute;
+  top: 0;
+  right: 0;
+  padding: 2px;
+  z-index: 2;
+  width: auto;
+}
+.note-card .card-body {
+  padding: 4px 6px;
+  min-height: 0;
 }
 .menu-anchor {
   position: relative;
@@ -650,6 +724,21 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
   min-height: 0;
   padding: 12px 14px 14px;
   position: relative;
+}
+/* Mobile only (matches Dashboard.vue's stacking breakpoint — lib/responsive.ts
+   MOBILE_MAX_WIDTH): the card's own height there is `auto` so it can grow to fit content
+   instead of scrolling internally, but a Chart.js canvas/map still needs a percentage-height
+   ancestor with a DEFINITE size (chart-wrap is height:100%). This min-height is that floor —
+   content that needs more (KPI grids, tables, notes) simply grows past it. Desktop keeps
+   relying on the grid's own explicit per-widget pixel height (unchanged, so small stat tiles
+   stay small — saved layouts keep their proportions). */
+@media (max-width: 700px) {
+  .card-body {
+    min-height: 220px;
+  }
+  .note-card .card-body {
+    min-height: 0;
+  }
 }
 .state {
   height: 100%;

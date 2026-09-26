@@ -135,7 +135,27 @@ const dragEnabled = computed(() => !isMobile.value && !touchCapable)
   :deep(.vgl-item__resizer) {
     display: none !important;
   }
+  /* Height comes from CONTENT now, not a fixed box (owner-reported regression, 2026-09-26): a
+     hard-coded 300px forced every widget into the same box regardless of what it held — a KPI
+     grid with a dozen tiles got an internal scrollbar and a clipped "Updated ..." row, while a
+     one-line note got a big mostly-empty card. A min-height keeps small/chart widgets from
+     collapsing (ChartCard.vue's own .card-body min-height is the real floor for a canvas —
+     see there); everything else just grows to fit. */
   :deep(.vgl-item .chart-card) {
+    height: auto;
+    min-height: 160px;
+  }
+  /* Note widgets have no chart/canvas needing a pixel floor — let them size down to a
+     one-line caption instead of leaving blank space under it. */
+  :deep(.vgl-item .chart-card.note-card) {
+    min-height: 0;
+  }
+  /* Chart.js needs a DEFINITE (not just min-height-floored) container height to size its
+     canvas against — see ChartCard.vue's needsChartHeight comment for why a plain min-height
+     silently produced a 150px-tall chart here. A fixed height only for the widgets that
+     actually hold a canvas; every content-driven widget (KPI grid, note, scorecard, tables)
+     keeps growing to fit above. */
+  :deep(.vgl-item .chart-card.needs-chart-height) {
     height: 300px;
   }
 }
