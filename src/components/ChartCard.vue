@@ -374,9 +374,12 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
           </svg>
         </button>
         <button v-if="!isBespokeBody" class="btn-ghost icon hide-until-revealed" title="Reload" @click.stop="load">↻</button>
-        <!-- Zoom — ALWAYS visible (owner: "two clicks to zoom is too much"), just
-             low-contrast until hovered/focused, so it stays a single click without
-             revealing the bar. A note tile has nothing to zoom, so it's omitted there. -->
+        <!-- Zoom — a small floating corner icon, never its own bar (owner: "two clicks to
+             zoom is too much"). Desktop: low-contrast once the card is hovered/focused, full
+             contrast on direct hover, so it's reachable without revealing the whole bar.
+             Touch: hidden until edit mode, same as the rest of the modification chrome
+             (fix/clean-look, 2026-09-26) — double-tapping the chart body zooms it instead, see
+             onCardBodyDblClick. A note tile has nothing to zoom, so it's omitted there. -->
         <button
           v-if="widget.type !== 'note'"
           class="zoom-btn"
