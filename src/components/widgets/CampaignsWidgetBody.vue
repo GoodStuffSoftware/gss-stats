@@ -1,65 +1,46 @@
 <script setup lang="ts">
-// "Best Sudoku campaigns" — a dedicated, bespoke page (NOT the generic Widget/grid model
-// the rest of the dashboard uses — see App.vue's isCampaignComparePage branch). It fetches
-// each campaign's comparison data directly (see src/lib/campaigns.ts + functions/api/
-// campaigns.ts) rather than going through fetchStats/ChartCard, because its charts (a
-// side-by-side funnel, flight-day-aligned overlays, a retention curve) don't fit the
-// single-dimension/metric shape every other chart in this app uses.
-import { ref, computed, onMounted } from 'vue'
+// dataset 'campaigns' widget body — renders ONE panel of the former bespoke
+// CampaignComparePage.vue (widget.view selects which; widget.campaignIds narrows which
+// campaigns show, empty/undefined = all), so each panel is now independently
+// movable/resizable/removable/re-addable like any other widget. Data fetching + all
+// formatting/chart-building logic is unchanged, shared across widgets via
+// lib/campaignsData.ts instead of fetched per page-mount.
+import { computed } from 'vue'
 import type { ChartConfiguration } from 'chart.js'
-import { CAMPAIGNS, FUNNEL_STEP_ORDER, FUNNEL_STEP_LABELS, RETURN_BUCKETS, ARRIVALS_CAVEAT, topShares, type CampaignFlight, type DeviceMixShare } from '../lib/campaigns'
-import { MIN_COHORT, isInsufficientCohort, SMALL_SAMPLE_NOTE, PLAY_TRACKING_ACTIVATION_DATE_ET, PLAY_TRACKING_MARKER_LABEL, playTrackingStatusNote } from '../lib/popupEvents'
-import type { CampaignCompareResponse, CampaignFunnelCounts } from '../types'
-import { fetchCampaignCompare } from '../api'
-import { PALETTE } from '../lib/charts'
-import BaseChart from './charts/BaseChart.vue'
-import AdsReadingsWidgetCard from './AdsReadingsWidgetCard.vue'
+import type { Widget, CampaignFunnelCounts } from '../../types'
+import { useCampaignsData } from '../../lib/campaignsData'
+import { FUNNEL_STEP_ORDER, FUNNEL_STEP_LABELS, RETURN_BUCKETS, topShares, type CampaignFlight, type DeviceMixShare } from '../../lib/campaigns'
+import { MIN_COHORT, isInsufficientCohort } from '../../lib/popupEvents'
+import { noteRawText } from '../../lib/notes'
+import { PALETTE } from '../../lib/charts'
+import BaseChart from '../charts/BaseChart.vue'
+import NoteBlock from '../NoteBlock.vue'
 
-const loading = ref(true)
-const error = ref<string | null>(null)
-const dataByCampaign = ref<Record<string, CampaignCompareResponse>>({})
+const props = defineProps<{ widget: Widget }>()
 
-async function load() {
-  loading.value = true
-  error.value = null
-  try {
-    const pairs = await Promise.all(CAMPAIGNS.map(async (c) => [c.id, await fetchCampaignCompare(c.id)] as const))
-    dataByCampaign.value = Object.fromEntries(pairs)
-  } catch (e: any) {
-    error.value = e?.message ?? 'Failed to load'
-  } finally {
-    loading.value = false
-  }
-}
-onMounted(load)
+const { campaigns, dataByCampaign, loading, error, reload } = useCampaignsData(() => props.widget.campaignIds)
 
 function fmt(n: number | null | undefined): string {
   return n == null ? '—' : n.toLocaleString('en-US')
 }
-// `denominator`, when passed, lets a null rate distinguish "too few to report" (some data,
-// under MIN_COHORT) from plain "—" (no data at all) — see lib/popupEvents.ts
-// isInsufficientCohort. Every rate here is already server-gated (computeRate enforces the
-// floor itself), so this is purely about which MESSAGE a null renders as.
+// Short inline labels stay helper functions (owner requirement) — their TEXT comes from the
+// notes registry (lib/notes.ts), not a literal string.
 function pct(n: number | null | undefined, denominator?: number): string {
-  if (n == null) return denominator != null && isInsufficientCohort(denominator) ? 'too few to report' : '—'
+  if (n == null) return denominator != null && isInsufficientCohort(denominator) ? noteRawText('too-few-to-report') : '—'
   return `${(n * 100).toFixed(1)}%`
 }
-function prevStepCount(counts: CampaignFunnelCounts, step: keyof CampaignFunnelCounts): number {
+function prevStepCount(cnts: CampaignFunnelCounts, step: keyof CampaignFunnelCounts): number {
   const idx = FUNNEL_STEP_ORDER.indexOf(step)
-  return idx > 0 ? counts[FUNNEL_STEP_ORDER[idx - 1]] : 0
+  return idx > 0 ? cnts[FUNNEL_STEP_ORDER[idx - 1]] : 0
 }
 function money(n: number | null | undefined): string {
   return n == null ? '—' : `$${n.toFixed(2)}`
 }
-
 const campaignColor = (i: number) => PALETTE[i % PALETTE.length]
+const funnelMax = (cnts: CampaignFunnelCounts) => Math.max(1, ...FUNNEL_STEP_ORDER.map((k) => cnts[k]))
 
-// ── Chart 1: funnel, side by side ───────────────────────────────────────────────────────
-const funnelMax = (counts: CampaignFunnelCounts) => Math.max(1, ...FUNNEL_STEP_ORDER.map((k) => counts[k]))
-
-// ── Chart 2: arrivals by ET hour of day, one dataset per campaign ──────────────────────
 const hourChartConfig = computed<ChartConfiguration | null>(() => {
-  const cs = CAMPAIGNS.filter((c) => dataByCampaign.value[c.id])
+  const cs = campaigns.value.filter((c) => dataByCampaign[c.id])
   if (!cs.length) return null
   return {
     type: 'bar',
@@ -67,7 +48,7 @@ const hourChartConfig = computed<ChartConfiguration | null>(() => {
       labels: Array.from({ length: 24 }, (_, h) => `${h}:00`),
       datasets: cs.map((c, i) => ({
         label: c.label,
-        data: dataByCampaign.value[c.id].hourOfDayEt,
+        data: dataByCampaign[c.id].hourOfDayEt,
         backgroundColor: campaignColor(i),
         borderRadius: 3,
       })),
@@ -81,15 +62,14 @@ const hourChartConfig = computed<ChartConfiguration | null>(() => {
   }
 })
 
-// ── Chart 4: daily arrivals + cumulative, aligned by flight day 1..N ───────────────────
 const maxFlightDay = computed(() =>
   Math.max(
     1,
-    ...CAMPAIGNS.filter((c) => c.flightStart != null).map((c) => Math.round((Date.parse(c.flightEnd) - Date.parse(c.flightStart as string)) / 86_400_000) + 1),
+    ...campaigns.value.filter((c) => c.flightStart != null).map((c) => Math.round((Date.parse(c.flightEnd) - Date.parse(c.flightStart as string)) / 86_400_000) + 1),
   ),
 )
 const dailyChartConfig = computed<ChartConfiguration | null>(() => {
-  const cs = CAMPAIGNS.filter((c) => dataByCampaign.value[c.id])
+  const cs = campaigns.value.filter((c) => dataByCampaign[c.id])
   if (!cs.length) return null
   const days = Array.from({ length: maxFlightDay.value }, (_, i) => i + 1)
   return {
@@ -97,7 +77,7 @@ const dailyChartConfig = computed<ChartConfiguration | null>(() => {
     data: {
       labels: days.map((d) => `Day ${d}`),
       datasets: cs.map((c, i) => {
-        const byDay = new Map(dataByCampaign.value[c.id].daily.map((r) => [r.day, r.arrivals]))
+        const byDay = new Map(dataByCampaign[c.id].daily.map((r) => [r.day, r.arrivals]))
         return {
           label: c.label,
           data: days.map((d) => byDay.get(d) ?? 0),
@@ -118,7 +98,7 @@ const dailyChartConfig = computed<ChartConfiguration | null>(() => {
   }
 })
 const cumulativeChartConfig = computed<ChartConfiguration | null>(() => {
-  const cs = CAMPAIGNS.filter((c) => dataByCampaign.value[c.id])
+  const cs = campaigns.value.filter((c) => dataByCampaign[c.id])
   if (!cs.length) return null
   const days = Array.from({ length: maxFlightDay.value }, (_, i) => i + 1)
   return {
@@ -126,21 +106,13 @@ const cumulativeChartConfig = computed<ChartConfiguration | null>(() => {
     data: {
       labels: days.map((d) => `Day ${d}`),
       datasets: cs.map((c, i) => {
-        const byDay = new Map(dataByCampaign.value[c.id].daily.map((r) => [r.day, r.arrivals]))
+        const byDay = new Map(dataByCampaign[c.id].daily.map((r) => [r.day, r.arrivals]))
         let running = 0
         const cum = days.map((d) => {
           running += byDay.get(d) ?? 0
           return running
         })
-        return {
-          label: c.label,
-          data: cum,
-          borderColor: campaignColor(i),
-          backgroundColor: 'transparent',
-          borderDash: [5, 3],
-          tension: 0.2,
-          pointRadius: 0,
-        }
+        return { label: c.label, data: cum, borderColor: campaignColor(i), backgroundColor: 'transparent', borderDash: [5, 3], tension: 0.2, pointRadius: 0 }
       }),
     },
     options: {
@@ -153,10 +125,9 @@ const cumulativeChartConfig = computed<ChartConfiguration | null>(() => {
   }
 })
 
-// ── Chart 7: return-visit retention curve per campaign ──────────────────────────────────
 const RETURN_RATE_KEYS = RETURN_BUCKETS.filter((b) => b !== 'd0') as Exclude<(typeof RETURN_BUCKETS)[number], 'd0'>[]
 function returnChartConfig(c: CampaignFlight): ChartConfiguration | null {
-  const d = dataByCampaign.value[c.id]
+  const d = dataByCampaign[c.id]
   if (!d || d.returnVisits.notInstrumented) return null
   return {
     type: 'line',
@@ -182,42 +153,38 @@ function returnChartConfig(c: CampaignFlight): ChartConfiguration | null {
     },
   }
 }
-
-// Device mix top-N shares: MIN_COHORT-gated (see lib/campaigns.ts topShares/DeviceMixShare
-// — moved there, 2026-09-26 review fix, so the gating logic is unit-testable; this used to
-// compute value/total directly here and bypass MIN_COHORT entirely).
 function shareBarWidth(row: DeviceMixShare): number {
   return row.total ? (row.value / row.total) * 100 : 0
 }
 </script>
 
 <template>
-  <div class="campaign-page">
-    <p class="lede">
-      Attribution is by <code>campaign</code> tag only (see
-      <a href="https://github.com/GoodStuffSoftware/gss-stats/blob/main/src/lib/campaigns.ts" target="_blank" rel="noopener">lib/campaigns.ts</a>) —
-      no device/location/timestamp correlation across rows. Funnel steps are counted <em>within tagged sessions</em>.
-      Verification and household traffic are excluded server-side.
-    </p>
-    <p class="lede small-sample-note">{{ SMALL_SAMPLE_NOTE }}</p>
-
-    <div v-if="loading" class="state mono">Loading…</div>
+  <div class="cw-body">
+    <div v-if="loading && !Object.keys(dataByCampaign).length" class="state mono">Loading…</div>
     <div v-else-if="error" class="state error mono">{{ error }}</div>
 
     <template v-else>
-      <!-- Chart 1: funnel, side by side -->
-      <section class="block">
-        <h2>Funnel per campaign</h2>
-        <p class="caption">Arrivals: {{ ARRIVALS_CAVEAT }} Rates need at least {{ MIN_COHORT }} in their denominator, or they show "too few to report".</p>
+      <!-- LOW review suggestion: give campaigns widgets the same manual-refresh control
+           Overview's kpis view has (ChartCard's generic reload button is hidden for this
+           dataset — see ChartCard.vue's isBespokeBody). One per widget; reload() re-fetches
+           every campaign this widget covers via the shared cache. -->
+      <div class="cw-head">
+        <button class="btn-ghost icon" title="Refresh" @click="reload">↻</button>
+      </div>
+
+      <!-- funnel -->
+      <template v-if="widget.view === 'funnel'">
+        <NoteBlock note-id="arrivals-caveat" class="caption" />
+        <NoteBlock note-id="min-cohort-caveat" class="caption" />
         <div class="funnel-grid">
-          <div v-for="(c, i) in CAMPAIGNS" :key="c.id" class="funnel-col" :style="{ '--accent': campaignColor(i) }">
+          <div v-for="(c, i) in campaigns" :key="c.id" class="funnel-col" :style="{ '--accent': campaignColor(i) }">
             <div class="funnel-head">
               <span class="dot"></span>
               <span class="fc-label">{{ c.label }}</span>
               <span class="fc-status">{{ c.status }}</span>
             </div>
             <p v-if="c.measurement === 'spend-only'" class="state mono small">{{ c.measurabilityNote }}</p>
-            <div v-if="dataByCampaign[c.id]" class="tagged-hits mono" :title="ARRIVALS_CAVEAT">
+            <div v-if="dataByCampaign[c.id]" class="tagged-hits mono" :title="noteRawText('arrivals-caveat')">
               tagged hits: {{ fmt(dataByCampaign[c.id].taggedHits) }} (vs {{ fmt(dataByCampaign[c.id].funnel.counts.arrivals) }} arrivals)
             </div>
             <div v-if="dataByCampaign[c.id]?.rawInstallSignals" class="tagged-hits mono">
@@ -228,7 +195,7 @@ function shareBarWidth(row: DeviceMixShare): number {
                 <div class="fs-top">
                   <span class="fs-label">{{ FUNNEL_STEP_LABELS[step] }}<template v-if="step === 'install' && dataByCampaign[c.id].funnel.installNote"> ({{ dataByCampaign[c.id].funnel.installNote }})</template></span>
                   <span class="fs-count mono">
-                    <template v-if="dataByCampaign[c.id].funnel.notInstrumented.includes(step)">not instrumented</template>
+                    <template v-if="dataByCampaign[c.id].funnel.notInstrumented.includes(step)">{{ noteRawText('not-instrumented') }}</template>
                     <template v-else>{{ fmt(dataByCampaign[c.id].funnel.counts[step]) }}</template>
                   </span>
                 </div>
@@ -240,7 +207,7 @@ function shareBarWidth(row: DeviceMixShare): number {
                   ></span>
                 </div>
                 <div class="fs-rate mono">
-                  <template v-if="dataByCampaign[c.id].funnel.notInstrumented.includes(step)">not instrumented</template>
+                  <template v-if="dataByCampaign[c.id].funnel.notInstrumented.includes(step)">{{ noteRawText('not-instrumented') }}</template>
                   <template v-else-if="step !== 'arrivals'">
                     {{ pct(dataByCampaign[c.id].funnel.rates[step], prevStepCount(dataByCampaign[c.id].funnel.counts, step)) }} of previous step
                     ({{ fmt(dataByCampaign[c.id].funnel.counts[step]) }}/{{ fmt(prevStepCount(dataByCampaign[c.id].funnel.counts, step)) }})
@@ -250,20 +217,18 @@ function shareBarWidth(row: DeviceMixShare): number {
             </div>
           </div>
         </div>
-      </section>
+      </template>
 
-      <!-- Chart 2: arrivals by ET hour of day -->
-      <section class="block">
-        <h2>Arrivals by ET hour of day</h2>
-        <p class="caption">{{ ARRIVALS_CAVEAT }}</p>
+      <!-- hourOfDay -->
+      <template v-else-if="widget.view === 'hourOfDay'">
+        <NoteBlock note-id="arrivals-caveat" class="caption" />
         <div class="chart-box"><BaseChart v-if="hourChartConfig" :config="hourChartConfig" :drill-open="false" @point="() => {}" /></div>
-      </section>
+      </template>
 
-      <!-- Chart 3: arrivals + funnel by country -->
-      <section class="block">
-        <h2>Arrivals &amp; funnel by country (US / CA / other)</h2>
+      <!-- country -->
+      <template v-else-if="widget.view === 'country'">
         <div class="country-grid">
-          <div v-for="(c, i) in CAMPAIGNS" :key="c.id" class="country-col" :style="{ '--accent': campaignColor(i) }">
+          <div v-for="(c, i) in campaigns" :key="c.id" class="country-col" :style="{ '--accent': campaignColor(i) }">
             <div class="fc-label">{{ c.label }}</div>
             <table v-if="dataByCampaign[c.id]" class="country-table">
               <thead>
@@ -280,25 +245,23 @@ function shareBarWidth(row: DeviceMixShare): number {
             </table>
           </div>
         </div>
-      </section>
+      </template>
 
-      <!-- Chart 4: daily arrivals + cumulative, aligned by flight day -->
-      <section class="block">
-        <h2>Daily arrivals by flight day (1..N, overlaid)</h2>
-        <p class="caption">{{ ARRIVALS_CAVEAT }}</p>
+      <!-- flightDay -->
+      <template v-else-if="widget.view === 'flightDay'">
+        <NoteBlock note-id="arrivals-caveat" class="caption" />
         <div class="two-col">
           <div class="chart-box"><BaseChart v-if="dailyChartConfig" :config="dailyChartConfig" :drill-open="false" @point="() => {}" /></div>
           <div class="chart-box"><BaseChart v-if="cumulativeChartConfig" :config="cumulativeChartConfig" :drill-open="false" @point="() => {}" /></div>
         </div>
-        <p class="caption">Left: arrivals per flight day. Right: cumulative arrivals per flight day (dashed).</p>
-      </section>
+        <NoteBlock note-id="flight-day-caption" class="caption" />
+      </template>
 
-      <!-- Chart 5: cost per tagged arrival and per auth success -->
-      <section class="block">
-        <h2>Cost per tagged arrival / auth success</h2>
-        <p class="caption">{{ ARRIVALS_CAVEAT }}</p>
+      <!-- cost -->
+      <template v-else-if="widget.view === 'cost'">
+        <NoteBlock note-id="arrivals-caveat" class="caption" />
         <div class="cost-grid">
-          <div v-for="c in CAMPAIGNS" :key="c.id" class="cost-card">
+          <div v-for="c in campaigns" :key="c.id" class="cost-card">
             <div class="fc-label">{{ c.label }}</div>
             <div v-if="dataByCampaign[c.id]" class="cost-rows">
               <div class="cost-row"><span>Spend</span><span class="mono">{{ money(dataByCampaign[c.id].spend) }}</span></div>
@@ -311,20 +274,16 @@ function shareBarWidth(row: DeviceMixShare): number {
             </div>
           </div>
         </div>
-        <p class="caption">Spend comes from the Google Ads API as stored by the ads-read routine; campaigns with nothing stored fall back to the hand-entered <code>CAMPAIGN_SPEND</code> (lib/campaigns.ts).</p>
-      </section>
+        <NoteBlock v-if="campaigns.some((c) => dataByCampaign[c.id]?.spend == null)" note-id="spend-source" class="caption" />
+      </template>
+      <!-- The ads-read routine's readings log is its own movable widget now (dataset
+           'ads-readings', dispatched by ChartCard.vue via AdsReadingsWidgetCard), not inline
+           here — add it from the chart menu the same as any other chart. -->
 
-      <!-- Ads-read routine readings log — a self-contained widget (fetches /api/ads/readings) -->
-      <section class="block">
-        <h2>Readings log (ads routine)</h2>
-        <AdsReadingsWidgetCard :widget="{ view: 'log' }" />
-      </section>
-
-      <!-- Chart 6: device mix -->
-      <section class="block">
-        <h2>Device mix</h2>
+      <!-- deviceMix -->
+      <template v-else-if="widget.view === 'deviceMix'">
         <div class="device-grid">
-          <div v-for="c in CAMPAIGNS" :key="c.id" class="device-col">
+          <div v-for="c in campaigns" :key="c.id" class="device-col">
             <div class="fc-label">{{ c.label }}</div>
             <template v-if="dataByCampaign[c.id]">
               <div v-for="(rows, kind) in { OS: dataByCampaign[c.id].deviceMix.os, Browser: dataByCampaign[c.id].deviceMix.browser, Screen: dataByCampaign[c.id].deviceMix.screen }" :key="kind" class="device-block">
@@ -338,24 +297,19 @@ function shareBarWidth(row: DeviceMixShare): number {
             </template>
           </div>
         </div>
-      </section>
+      </template>
 
-      <!-- Return visits (aggregate-only, on-device beacon — see lib/campaigns.ts) -->
-      <section class="block">
-        <h2>Return visits (on-device, web only)</h2>
-        <p class="caption">
-          Android/Play: {{ PLAY_TRACKING_ACTIVATION_DATE_ET ? PLAY_TRACKING_MARKER_LABEL : '' }} {{ playTrackingStatusNote() }}
-        </p>
+      <!-- returns -->
+      <template v-else-if="widget.view === 'returns'">
+        <NoteBlock note-id="play-tracking-status" class="caption" />
         <div class="return-grid">
-          <div v-for="c in CAMPAIGNS" :key="c.id" class="return-col">
+          <div v-for="c in campaigns" :key="c.id" class="return-col">
             <div class="fc-label">{{ c.label }}</div>
             <template v-if="dataByCampaign[c.id]">
-              <p v-if="dataByCampaign[c.id].returnVisits.notInstrumented" class="state mono small">not instrumented</p>
-              <p v-else-if="dataByCampaign[c.id].returnVisits.sharedWithCampaignId" class="caption">
-                Shares its tag with another flight — not separable by return beacon.
-              </p>
+              <p v-if="dataByCampaign[c.id].returnVisits.notInstrumented" class="state mono small">{{ noteRawText('not-instrumented') }}</p>
+              <NoteBlock v-else-if="dataByCampaign[c.id].returnVisits.sharedWithCampaignId" note-id="return-shared-tag" class="caption" />
               <p v-else-if="isInsufficientCohort(dataByCampaign[c.id].returnVisits.counts.d0)" class="state mono small">
-                too few to report (d0 = {{ fmt(dataByCampaign[c.id].returnVisits.counts.d0) }}, need {{ MIN_COHORT }})
+                {{ noteRawText('too-few-to-report') }} (d0 = {{ fmt(dataByCampaign[c.id].returnVisits.counts.d0) }}, need {{ MIN_COHORT }})
               </p>
               <template v-else>
                 <div class="chart-box small"><BaseChart v-if="returnChartConfig(c)" :config="returnChartConfig(c)!" :drill-open="false" @point="() => {}" /></div>
@@ -370,29 +324,39 @@ function shareBarWidth(row: DeviceMixShare): number {
             </template>
           </div>
         </div>
-        <p class="caption">Rate per bucket = bucket count / d0 (first tagged load). "not yet observable" until enough time has passed.</p>
-      </section>
+        <NoteBlock note-id="return-rate-caption" class="caption" />
+      </template>
+
+      <p v-else class="state mono">Unknown campaigns panel "{{ widget.view }}"</p>
     </template>
   </div>
 </template>
 
 <style scoped>
-.campaign-page {
+.cw-body {
+  height: 100%;
+  overflow: auto;
+}
+.cw-head {
   display: flex;
-  flex-direction: column;
-  gap: 22px;
+  justify-content: flex-end;
+  margin-bottom: 4px;
 }
-.lede {
-  font-size: 12.5px;
-  color: rgb(var(--ink-2));
-  max-width: 900px;
+.btn-ghost.icon {
+  border: none;
+  background: transparent;
+  color: rgb(var(--ink-3));
+  font-size: 15px;
+  padding: 3px 7px;
+  border-radius: 7px;
+  cursor: pointer;
 }
-.lede code {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11.5px;
+.btn-ghost.icon:hover {
+  background: rgb(var(--sunken));
+  color: rgb(var(--ink));
 }
 .state {
-  padding: 40px 0;
+  padding: 20px 0;
   text-align: center;
   color: rgb(var(--ink-3));
 }
@@ -402,16 +366,13 @@ function shareBarWidth(row: DeviceMixShare): number {
 .state.error {
   color: #bc4749;
 }
-.block h2 {
-  font-family: 'Space Grotesk', sans-serif;
-  font-size: 15px;
-  font-weight: 600;
-  margin-bottom: 10px;
-}
 .caption {
   font-size: 11.5px;
   color: rgb(var(--ink-3));
-  margin-top: 6px;
+  margin: 0 0 10px;
+}
+.caption code {
+  font-family: 'JetBrains Mono', monospace;
 }
 .funnel-grid,
 .country-grid,
@@ -494,15 +455,17 @@ function shareBarWidth(row: DeviceMixShare): number {
   color: rgb(var(--ink-3));
 }
 .chart-box {
-  height: 280px;
+  height: 100%;
+  min-height: 200px;
 }
 .chart-box.small {
-  height: 180px;
+  min-height: 150px;
 }
 .two-col {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
+  height: 100%;
 }
 @media (max-width: 700px) {
   .two-col {
