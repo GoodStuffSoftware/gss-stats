@@ -147,6 +147,16 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = {
     severity: 'info',
     scopes: ['campaigns', 'popup', 'overview'],
   },
+  // Shown on a page opened by drilling into an event-family 'pathFamily' value (e.g.
+  // 'install') — see lib/drill.ts drillNeedsEventBeacons, App.vue openFilteredPage. Explains
+  // why every chart on this page includes rows every OTHER page excludes by default.
+  'event-family-drill': {
+    id: 'event-family-drill',
+    text: 'This filtered view includes pop-up/install/return/game-complete/auth-status event beacons — every other page excludes them by default, but you drilled into one, so this page carries "Include event beacons" for every chart.',
+    kind: 'note',
+    severity: 'info',
+    scopes: ['geo'],
+  },
   // ── Longer prose (kind: 'text') — definitions, "how to read this" captions, section
   // intros. Converted from hard-coded <p>/lede markup in the (now-retired) bespoke pages
   // and the current widget bodies — see the conversion notes in this branch's final report
