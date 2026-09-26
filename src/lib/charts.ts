@@ -2,7 +2,7 @@ import type { ChartConfiguration } from 'chart.js'
 import type { Widget, StatsResponse, StatsRow, Metric } from '../types'
 import { COUNTRY_NAMES } from './catalog'
 import { ringDims } from './rings'
-import { TRACKING_ACTIVATION_DATE_ET } from './popupEvents'
+import { TRACKING_ACTIVATION_DATE_ET, PLAY_TRACKING_MARKER_LABEL } from './popupEvents'
 
 // Categorical palette: brand amber leads, with distinguishable warm/cool accents.
 export const PALETTE = [
@@ -184,11 +184,15 @@ export function activationMarkerIndex(rows: { key: { date?: string } }[], activa
   return idx === -1 ? rows.length : idx
 }
 
-// Vertical dashed boundary + "tracking starts" label at the activation day — only drawn
+// Vertical dashed boundary + a "tracking starts" label at the activation day — only drawn
 // when the boundary actually falls within (or at the edge of) the visible chart area.
-function activationMarkerPlugin(index: number) {
+// `label`/`id` are parameterized so the SAME plugin draws either the web "tracking starts"
+// marker (TRACKING_ACTIVATION_DATE_ET) or the Play/Android one (PLAY_TRACKING_ACTIVATION_
+// DATE_ET, see lib/popupEvents.ts) — two distinct, independently-gated boundaries a chart
+// may need to draw at once, so they can't share a Chart.js plugin id.
+function activationMarkerPlugin(index: number, label = 'tracking starts', id = 'activationMarker') {
   return {
-    id: 'activationMarker',
+    id,
     afterDraw(chart: any) {
       const { ctx, chartArea, scales } = chart
       if (!chartArea || !scales?.x) return
@@ -207,12 +211,32 @@ function activationMarkerPlugin(index: number) {
       ctx.font = '600 10px Inter, system-ui, sans-serif'
       ctx.textAlign = 'left'
       ctx.textBaseline = 'top'
-      const label = 'tracking starts'
       const labelX = Math.min(x + 5, chartArea.right - ctx.measureText(label).width - 2)
       ctx.fillText(label, Math.max(chartArea.left + 2, labelX), chartArea.top + 3)
       ctx.restore()
     },
   }
+}
+
+/** The Play/Android twin of the web activation marker above — draws
+ * PLAY_TRACKING_MARKER_LABEL at PLAY_TRACKING_ACTIVATION_DATE_ET's boundary. That date is
+ * the Play production-track SUBMISSION day, not an arrival — see lib/popupEvents.ts — so,
+ * unlike the web marker, this is a "reaching devices from here" flag, not a hard
+ * before/after step; nothing after this boundary should be treated as unmeasured or
+ * grayed out. Exported (unlike the web marker, which stays module-private) because it's
+ * opt-in per chart: only a chart that actually plots bestsudoku-app /return or
+ * Play-referrer data should add it.
+ *
+ * UNUSED as of this commit (review note, 2026-09-26) — no chart plots a bestsudoku-app
+ * `/return` or Play-referrer date-axis series yet, so nothing calls this. It's kept ready
+ * for when one exists; wire it in the same way the web marker is wired into the pop-up
+ * 'date' trend (see seriesRows/ChartCard.vue's `boundary`/`plugins` computation). If a
+ * chart ever needs BOTH markers at once (a web date-axis series that also has Play data),
+ * this plugin's label needs a vertical offset from the web marker's — right now both draw
+ * their label at the same `chartArea.top + 3`, so two boundaries close together would
+ * overlap illegibly. */
+export function playActivationMarkerPlugin(index: number) {
+  return activationMarkerPlugin(index, PLAY_TRACKING_MARKER_LABEL, 'playActivationMarker')
 }
 
 // Small corner watermark shown instead of the boundary marker while

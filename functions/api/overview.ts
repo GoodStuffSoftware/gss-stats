@@ -26,8 +26,11 @@ import {
   parseReturnPath,
   returnVisitRates,
   CAMPAIGN_SPEND,
+  isInstallPromptInstalled,
+  isRawInstallSignal,
+  RAW_INSTALL_SIGNALS_LABEL,
 } from '../../src/lib/campaigns'
-import { classifyPopupPath, computeRate, etDateFromMs, TRACKING_ACTIVATION_DATE_ET, POPUPS } from '../../src/lib/popupEvents'
+import { classifyPopupPath, computeRate, etDateFromMs, excludeInstallGapUnmeasured, withInstallGapNote, TRACKING_ACTIVATION_DATE_ET, POPUPS } from '../../src/lib/popupEvents'
 import {
   addEtDays,
   buildKpiTile,
@@ -41,9 +44,13 @@ import {
   siteWindowClause,
 } from '../../src/lib/overview'
 import { latestDatedRelease } from '../../src/lib/releases'
+import { resolveCampaignSpend } from '../../src/lib/adsRules'
+import { readSpendSummaries } from '../../src/lib/adsStore'
 
 interface Env {
   gss_geo: D1Database
+  /** gss-stats' own ads store — optional; spend falls back to CAMPAIGN_SPEND. */
+  gss_stats_ads?: D1Database
 }
 
 const json = (data: unknown, status = 200): Response =>
@@ -84,10 +91,12 @@ function isReturnD1Plus(path: string): boolean {
 function isAuthSuccess(path: string): boolean {
   return path.startsWith('/auth/success/')
 }
-function isInstallOutcome(path: string): boolean {
-  const ev = classifyPopupPath(path)
-  return !!ev && ev.family === 'install' && ev.kind === 'outcome'
-}
+// Installs = /popup-outcome/install-prompt/installed (once per showing), like the campaign
+// funnel; raw /install/<outcome> beacons can double-count one install and are a secondary
+// figure only (lib/campaigns.ts isInstallPromptInstalled / isRawInstallSignal).
+const isInstallOutcome = isInstallPromptInstalled
+/** "Installs", plus the install-fix caveat for the range shown (none once it is all post-fix). */
+const installsLabel = (startMs: number, endMs: number) => withInstallGapNote('Installs', { startMs, endMs })
 function isPopupShown(path: string): boolean {
   const ev = classifyPopupPath(path)
   return !!ev && ev.kind === 'shown' && POPUPS.some((p) => p.id === ev.family)
@@ -200,6 +209,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       label: 'Pop-up tap rate',
       today: computeRate(accept.today, shown.today), // null ("—"/"too few", never 0%/NaN — see MIN_COHORT
       denominator: shown.today, // lets the UI tell "too few to report" apart from "—"
+      numerator: accept.today, // shown next to the rate — see SMALL_SAMPLE_NOTE
       notYetTracking: false,
       isRate: true,
     })
@@ -210,7 +220,9 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   }
   {
     const w = windowed((r) => isInstallOutcome(r.path))
-    kpis.push(buildKpiTile('install', 'Installs', w.today, w.yesterday, w.avg7))
+    kpis.push(buildKpiTile('install', installsLabel(kpiRangeStart, nowMs), w.today, w.yesterday, w.avg7))
+    const raw = windowed((r) => isRawInstallSignal(r.path))
+    kpis.push(buildKpiTile('installRaw', RAW_INSTALL_SIGNALS_LABEL, raw.today, raw.yesterday, raw.avg7))
   }
   if (!returnBeaconLiveToday()) {
     kpis.push(notYetTrackingTile('returns', '/return/ d1+ returns'))
@@ -227,15 +239,16 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     campaign: String(x.campaign ?? ''),
     c: Number(x.c) || 0,
   }))
-  const dailyMap = new Map<string, { pageviews: number; taggedArrivals: number; authSuccess: number; install: number }>()
+  const dailyMap = new Map<string, { pageviews: number; taggedArrivals: number; authSuccess: number; install: number; rawInstallSignals: number }>()
   for (const r of timelineRows) {
     const ms = r.min * 60_000
     const d = etDateFromMs(ms)
-    const bucket = dailyMap.get(d) ?? { pageviews: 0, taggedArrivals: 0, authSuccess: 0, install: 0 }
+    const bucket = dailyMap.get(d) ?? { pageviews: 0, taggedArrivals: 0, authSuccess: 0, install: 0, rawInstallSignals: 0 }
     if (!isEventPath(r.path)) bucket.pageviews += r.c
     if (r.visitor === 'new' && r.campaign) bucket.taggedArrivals += r.c
     if (isAuthSuccess(r.path)) bucket.authSuccess += r.c
     if (isInstallOutcome(r.path)) bucket.install += r.c
+    if (isRawInstallSignal(r.path)) bucket.rawInstallSignals += r.c
     dailyMap.set(d, bucket)
   }
   const daily = [...dailyMap.entries()]
@@ -247,6 +260,10 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const campaignFlights = CAMPAIGNS.map((c) => ({ id: c.id, label: c.label, flightStart: c.flightStart, flightEnd: c.flightEnd, status: c.status }))
   const releaseMarkers = latestDatedRelease() ? [latestDatedRelease()] : [] // see releasePanel below for "no dated release yet"
 
+  // Stored Google Ads spend (gss-stats-ads) beats the hand-entered config — the same rule as
+  // /api/campaigns (lib/adsRules.ts resolveCampaignSpend), read once for every campaign.
+  const storedSpend = await readSpendSummaries(ctx.env.gss_stats_ads)
+
   // ── 3. CAMPAIGN SCORECARD ───────────────────────────────────────────────────────────────
   const scorecard = await Promise.all(
     CAMPAIGNS.map(async (c) => {
@@ -254,6 +271,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       const w1: string[] = [attr.sql]
       const b1: unknown[] = [...attr.binds]
       applyExclusions(w1, b1)
+      excludeInstallGapUnmeasured(w1, b1) // pre-fix install-gap rows are unmeasured
       const sql1 = `SELECT path, visitor, COUNT(*) AS cnt FROM hits WHERE ${w1.join(' AND ')} GROUP BY path, visitor`
 
       const w2: string[] = ['site = ?', `(${c.ucValues.map(() => 'path LIKE ?').join(' OR ')})`]
@@ -279,7 +297,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
         if (ev && c.ucValues.includes(ev.uc)) returnCounts[ev.bucket] += Number(x.cnt) || 0
       }
       const returnRates = returnVisitRates(returnCounts as any)
-      const spend = CAMPAIGN_SPEND[c.id] ?? null
+      const spend = resolveCampaignSpend(storedSpend?.get(c.id) ?? null, CAMPAIGN_SPEND[c.id] ?? null).spend
       // flightStart is nullable (a not-yet-confirmed flight, e.g. the retest — see
       // lib/campaigns.ts CAMPAIGNS) — there's no day count to report until it's set.
       const flightDays = c.flightStart == null ? null : Math.round((etMidnightUtcMs(c.flightEnd) - etMidnightUtcMs(c.flightStart)) / 86_400_000) + 1
@@ -300,6 +318,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
         install: counts.install,
         returnRateD2to7: returnRates['d2-7'],
         returnD0: returnCounts.d0, // same reason as funnelCounts, for returnRateD2to7
+        returnD2to7: returnCounts['d2-7'], // numerator for returnRateD2to7 — see SMALL_SAMPLE_NOTE
         costPerArrival: costPer(spend, taggedArrivals),
       }
     }),
@@ -351,7 +370,16 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     generatedAt: new Date().toISOString(),
     todayEt,
     kpis,
-    timeline: { daily, campaignFlights, releaseMarkers, trackingActivationDate: TRACKING_ACTIVATION_DATE_ET, since, until },
+    timeline: {
+      daily,
+      campaignFlights,
+      releaseMarkers,
+      trackingActivationDate: TRACKING_ACTIVATION_DATE_ET,
+      since,
+      until,
+      // Series labels that carry data caveats, so the chart shows them whatever the layout.
+      seriesLabels: { install: installsLabel(sinceMs, untilMs), rawInstallSignals: RAW_INSTALL_SIGNALS_LABEL },
+    },
     scorecard,
     releasePanel,
   })

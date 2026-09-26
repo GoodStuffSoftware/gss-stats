@@ -9,7 +9,7 @@ import type { GlobalFilters, OverviewResponse } from '../types'
 import { fetchOverview } from '../api'
 import { PALETTE } from '../lib/charts'
 import { FUNNEL_STEP_LABELS, FUNNEL_STEP_ORDER, FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED, type FunnelStepKey } from '../lib/campaigns'
-import { isInsufficientCohort } from '../lib/popupEvents'
+import { isInsufficientCohort, SMALL_SAMPLE_NOTE } from '../lib/popupEvents'
 import type { CampaignFunnelCounts } from '../types'
 import BaseChart from './charts/BaseChart.vue'
 
@@ -46,6 +46,11 @@ function fmt(n: number | null | undefined): string {
 function pct(n: number | null | undefined, denominator?: number): string {
   if (n == null) return denominator != null && isInsufficientCohort(denominator) ? 'too few to report' : '—'
   return `${(n * 100).toFixed(1)}%`
+}
+// Numerator/denominator shown next to every rate — see lib/popupEvents.ts SMALL_SAMPLE_NOTE:
+// with only 14 registered users in production, a bare percentage overstates confidence.
+function counts(numerator: number | null | undefined, denominator: number | null | undefined): string {
+  return numerator == null || denominator == null ? '' : `(${numerator}/${denominator})`
 }
 function prevFunnelCount(counts: CampaignFunnelCounts, step: keyof CampaignFunnelCounts): number {
   const idx = FUNNEL_STEP_ORDER.indexOf(step)
@@ -134,7 +139,8 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
         { label: 'Page views', data: resp.timeline.daily.map((d) => d.pageviews), borderColor: PALETTE[0], backgroundColor: PALETTE[0], yAxisID: 'y', tension: 0.2, pointRadius: 0 },
         { label: 'Tagged arrivals', data: resp.timeline.daily.map((d) => d.taggedArrivals), borderColor: PALETTE[1], backgroundColor: PALETTE[1], yAxisID: 'y', tension: 0.2, pointRadius: 0 },
         { label: 'Auth successes', data: resp.timeline.daily.map((d) => d.authSuccess), borderColor: PALETTE[3], backgroundColor: PALETTE[3], yAxisID: 'y2', tension: 0.2, pointRadius: 0, borderDash: [3, 2] },
-        { label: 'Installs', data: resp.timeline.daily.map((d) => d.install), borderColor: PALETTE[4], backgroundColor: PALETTE[4], yAxisID: 'y2', tension: 0.2, pointRadius: 0, borderDash: [3, 2] },
+        { label: resp.timeline.seriesLabels?.install ?? 'Installs', data: resp.timeline.daily.map((d) => d.install), borderColor: PALETTE[4], backgroundColor: PALETTE[4], yAxisID: 'y2', tension: 0.2, pointRadius: 0, borderDash: [3, 2] },
+        { label: resp.timeline.seriesLabels?.rawInstallSignals ?? 'Raw install signals', data: resp.timeline.daily.map((d) => d.rawInstallSignals ?? 0), borderColor: PALETTE[7], backgroundColor: PALETTE[7], yAxisID: 'y2', tension: 0.2, pointRadius: 0, borderDash: [1, 3], borderWidth: 1 },
       ],
     },
     options: {
@@ -155,6 +161,7 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
 
 <template>
   <div class="overview-page">
+    <p class="caption small-sample-note">{{ SMALL_SAMPLE_NOTE }}</p>
     <div v-if="loading && !data" class="state mono">Loading…</div>
     <div v-else-if="error" class="state error mono">{{ error }}</div>
 
@@ -179,6 +186,7 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
             </template>
             <template v-else>
               <div class="kpi-num">{{ k.isRate ? pct(k.today, k.denominator) : fmt(k.today) }}</div>
+              <div v-if="k.isRate && k.denominator != null" class="kpi-sub mono">{{ counts(k.numerator, k.denominator) }}</div>
               <div v-if="k.vsYesterday" class="kpi-delta" :class="deltaClass(k.vsYesterday)">vs yesterday {{ deltaLabel(k.vsYesterday) }}</div>
               <div v-if="k.vsAvg7" class="kpi-delta" :class="deltaClass(k.vsAvg7)">vs 7d avg {{ deltaLabel(k.vsAvg7) }}</div>
             </template>
@@ -216,13 +224,16 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
             <div class="sc-row"><span>Tagged arrivals</span><span class="mono">{{ fmt(row.taggedArrivals) }}</span></div>
             <div class="sc-row"><span>Auth successes</span><span class="mono">{{ fmt(row.authSuccess) }}</span></div>
             <div class="sc-row"><span>Installs</span><span class="mono">{{ fmt(row.install) }}</span></div>
-            <div class="sc-row"><span>Return rate (d2-7)</span><span class="mono">{{ pct(row.returnRateD2to7, row.returnD0) }}</span></div>
+            <div class="sc-row"><span>Return rate (d2-7)</span><span class="mono">{{ pct(row.returnRateD2to7, row.returnD0) }} {{ counts(row.returnD2to7, row.returnD0) }}</span></div>
             <div class="sc-row"><span>Cost / arrival</span><span class="mono">{{ money(row.costPerArrival) }}</span></div>
             <div class="sc-rates">
               <span v-for="(rate, step) in row.funnelRates" :key="step" class="sc-rate-chip" :title="FUNNEL_STEP_LABELS[step as keyof typeof FUNNEL_STEP_LABELS]">
                 {{ FUNNEL_STEP_LABELS[step as keyof typeof FUNNEL_STEP_LABELS] }}:
                 <template v-if="FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED.has(step as FunnelStepKey)">not instrumented</template>
-                <template v-else>{{ pct(rate, prevFunnelCount(row.funnelCounts, step as keyof CampaignFunnelCounts)) }}</template>
+                <template v-else
+                  >{{ pct(rate, prevFunnelCount(row.funnelCounts, step as keyof CampaignFunnelCounts)) }}
+                  {{ counts(row.funnelCounts[step as keyof CampaignFunnelCounts], prevFunnelCount(row.funnelCounts, step as keyof CampaignFunnelCounts)) }}</template
+                >
               </span>
             </div>
           </div>
@@ -251,7 +262,7 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
             </div>
           </div>
         </template>
-        <p v-else class="caption">No dated release yet — set a release date in <code>src/lib/releases.ts</code> (or ship v1.90.0 and set <code>TRACKING_ACTIVATION_DATE_ET</code>) to populate this panel.</p>
+        <p v-else class="caption">No dated release yet — set a release date in <code>src/lib/releases.ts</code> (or ship v1.95.3 and set <code>TRACKING_ACTIVATION_DATE_ET</code>) to populate this panel.</p>
       </section>
     </template>
   </div>
@@ -363,6 +374,11 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
   font-size: 10.5px;
   color: rgb(var(--ink-3));
   margin-top: 2px;
+}
+.kpi-sub {
+  font-size: 10.5px;
+  color: rgb(var(--ink-3));
+  margin-top: 1px;
 }
 .kpi-delta.up {
   color: #6a994e;

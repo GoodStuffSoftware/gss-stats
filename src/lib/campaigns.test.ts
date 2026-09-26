@@ -4,6 +4,7 @@ import {
   campaignById,
   campaignAttributionClause,
   etMidnightUtcMs,
+  etTimeUtcMs,
   etFlightRangeMs,
   flightDayIndex,
   isDirectionalDay,
@@ -17,6 +18,7 @@ import {
   countryBucket,
   screenWidthBucket,
   costPer,
+  topShares,
   parseReturnPath,
   returnVisitRates,
   returnBeaconNotInstrumented,
@@ -25,7 +27,12 @@ import {
   CAMPAIGN_SPEND,
   CAMPAIGN_DAILY_SPEND,
   COMPLETED_PROXY_PATH_PREFIX,
+  FUNNEL_STEP_LABELS,
+  isRawInstallSignal,
+  isInstallPromptInstalled,
+  RAW_INSTALL_SIGNALS_LABEL,
 } from './campaigns'
+import { INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS } from './popupEvents'
 
 describe('etMidnightUtcMs / etFlightRangeMs (DST-safe ET date <-> UTC ms)', () => {
   it('EST (winter, UTC-5): ET midnight is 05:00 UTC', () => {
@@ -46,29 +53,52 @@ describe('etMidnightUtcMs / etFlightRangeMs (DST-safe ET date <-> UTC ms)', () =
   })
 })
 
+describe('etTimeUtcMs (DST-safe ET date + clock time <-> UTC ms — general form of etMidnightUtcMs)', () => {
+  it('EST (winter, UTC-5): noon ET is 17:00 UTC', () => {
+    expect(etTimeUtcMs('2026-01-15', '12:00')).toBe(Date.parse('2026-01-15T17:00:00Z'))
+  })
+  it('EDT (summer, UTC-4): noon ET is 16:00 UTC', () => {
+    expect(etTimeUtcMs('2026-07-04', '12:00')).toBe(Date.parse('2026-07-04T16:00:00Z'))
+  })
+  it('agrees with etMidnightUtcMs at 00:00', () => {
+    expect(etTimeUtcMs('2026-09-26', '00:00')).toBe(etMidnightUtcMs('2026-09-26'))
+  })
+  it('11:59 vs 12:00 ET boundary — the retest\'s ad-schedule cutoff (EDT, 2026-09-26)', () => {
+    const at1159 = etTimeUtcMs('2026-09-26', '11:59')
+    const at1200 = etTimeUtcMs('2026-09-26', '12:00')
+    expect(at1200 - at1159).toBe(60_000) // exactly one minute apart
+    expect(at1159).toBe(Date.parse('2026-09-26T15:59:00Z')) // EDT = UTC-4
+    expect(at1200).toBe(Date.parse('2026-09-26T16:00:00Z'))
+  })
+})
+
 describe('flightDayIndex / isDirectionalDay', () => {
+  // Corrected 2026-09-26 (ads session): the retest is now confirmed and serving —
+  // flightStart = '2026-09-26', flightEnd = '2026-10-02'. Previously flightStart was left
+  // null/pending; see git history for that version of this describe block.
   const retest = campaignById('24279250691')!
-  it('null while the retest flightStart is still pending (null)', () => {
-    expect(retest.flightStart).toBeNull()
-    expect(flightDayIndex(retest, '2026-09-26')).toBeNull()
-    expect(flightDayIndex(retest, '2026-10-02')).toBeNull()
+  it('the retest\'s flightStart is confirmed (no longer pending)', () => {
+    expect(retest.flightStart).toBe('2026-09-26')
+    expect(retest.flightEnd).toBe('2026-10-02')
   })
-  it('day 1 is flightStart, counting up, once a start date is set', () => {
-    const confirmed = { ...retest, flightStart: '2026-09-26' }
-    expect(flightDayIndex(confirmed, '2026-09-26')).toBe(1)
-    expect(flightDayIndex(confirmed, '2026-09-27')).toBe(2)
-    expect(flightDayIndex(confirmed, '2026-10-02')).toBe(7)
-    expect(flightDayIndex(confirmed, '2026-09-25')).toBeNull()
-    expect(flightDayIndex(confirmed, '2026-10-03')).toBeNull()
+  it('day 1 is flightStart, counting up', () => {
+    expect(flightDayIndex(retest, '2026-09-26')).toBe(1)
+    expect(flightDayIndex(retest, '2026-09-27')).toBe(2)
+    expect(flightDayIndex(retest, '2026-10-02')).toBe(7)
+    expect(flightDayIndex(retest, '2026-09-25')).toBeNull()
+    expect(flightDayIndex(retest, '2026-10-03')).toBeNull()
   })
-  it('week 1 (days 1-7) of the retest campaign is directional once confirmed; nothing else is', () => {
-    const confirmed = { ...retest, flightStart: '2026-09-26' }
-    expect(isDirectionalDay(confirmed, '2026-09-26')).toBe(true)
-    expect(isDirectionalDay(confirmed, '2026-10-02')).toBe(true)
-    expect(isDirectionalDay(confirmed, '2026-09-25')).toBe(false) // outside the flight entirely
-    expect(isDirectionalDay(retest, '2026-09-26')).toBe(false) // still pending — flightDayIndex is always null
+  it('week 1 (days 1-7) of the retest campaign is directional; nothing outside its flight is', () => {
+    expect(isDirectionalDay(retest, '2026-09-26')).toBe(true)
+    expect(isDirectionalDay(retest, '2026-10-02')).toBe(true)
+    expect(isDirectionalDay(retest, '2026-09-25')).toBe(false) // outside the flight entirely
     const flight1 = campaignById('24215315197')!
     expect(isDirectionalDay(flight1, '2026-09-03')).toBe(false) // not the retest campaign
+  })
+  it('a still-pending flight (simulated) has no flight day at all', () => {
+    const pending = { ...retest, flightStart: null }
+    expect(flightDayIndex(pending, '2026-09-26')).toBeNull()
+    expect(isDirectionalDay(pending, '2026-09-26')).toBe(false)
   })
 })
 
@@ -79,12 +109,20 @@ describe('campaignAttributionClause (the one function deciding row membership)',
     expect(sql).toBe(`campaign IN (${c.ucValues.map(() => '?').join(', ')}) AND ts >= ?`)
     expect(binds).toEqual([...c.ucValues, etMidnightUtcMs('2026-09-02')])
   })
-  it('a pending campaign (flightStart null) attributes nothing at all', () => {
-    const c = campaignById('24279250691')! // retest, flightStart still null
-    expect(c.flightStart).toBeNull()
+  it('a pending campaign (flightStart null, simulated) attributes nothing at all', () => {
+    const c = { ...campaignById('24279250691')!, flightStart: null }
     const { sql, binds } = campaignAttributionClause(c)
     expect(sql).toBe('campaign IN (?) AND 1 = 0')
     expect(binds).toEqual(['sudoku_funnel_retest'])
+  })
+  it('the retest (now confirmed, flightStartTimeEt = 12:00) binds the noon-ET cutoff, NOT ET midnight', () => {
+    const c = campaignById('24279250691')!
+    expect(c.flightStart).toBe('2026-09-26')
+    expect(c.flightStartTimeEt).toBe('12:00')
+    const { sql, binds } = campaignAttributionClause(c)
+    expect(sql).toBe('campaign IN (?) AND ts >= ?')
+    expect(binds).toEqual(['sudoku_funnel_retest', etTimeUtcMs('2026-09-26', '12:00')])
+    expect(binds[1]).not.toBe(etMidnightUtcMs('2026-09-26')) // the whole point: NOT midnight
   })
   it('Android launch and Play-direct now use DISJOINT ucValues — no shared tag to split by date', () => {
     const androidLaunch = campaignById('24215315197')!
@@ -134,9 +172,39 @@ describe('classifyFunnelPath / computeFunnelCounts / funnelStepRates', () => {
     expect(classifyFunnelPath('/promo-first50/accept')).toBe('accept')
     expect(classifyFunnelPath('/install/prompt/android')).toBe('installPrompt')
     expect(classifyFunnelPath('/install/prompt/ios')).toBe('installPrompt')
-    expect(classifyFunnelPath('/install/pwa-installed')).toBe('install')
-    expect(classifyFunnelPath('/install/standalone-detected')).toBe('install')
-    expect(classifyFunnelPath('/install/play-detected')).toBe('install')
+    // INSTALL = the deduplicated popup outcome (at most once per showing), 2026-09-26.
+    expect(classifyFunnelPath('/popup-outcome/install-prompt/installed')).toBe('install')
+  })
+  it('raw /install/<outcome> beacons are NOT the install step (one install can fire two of them); they are a secondary "raw signals" figure', () => {
+    for (const p of ['/install/pwa-installed', '/install/standalone-detected', '/install/play-detected']) {
+      expect(classifyFunnelPath(p)).toBeNull()
+      expect(isRawInstallSignal(p)).toBe(true)
+    }
+    expect(isRawInstallSignal('/install/prompt/android')).toBe(false)
+    expect(isRawInstallSignal('/popup-outcome/install-prompt/installed')).toBe(false)
+    // the one install predicate the funnel, the overview tile/timeline and the routine share
+    expect(isInstallPromptInstalled('/popup-outcome/install-prompt/installed')).toBe(true)
+    expect(isInstallPromptInstalled('/install/pwa-installed')).toBe(false)
+    expect(isInstallPromptInstalled('/popup-outcome/install-prompt/returned')).toBe(false)
+    expect(RAW_INSTALL_SIGNALS_LABEL).toMatch(/can double-count/)
+    // other install-prompt outcomes are not an install
+    expect(classifyFunnelPath('/popup-outcome/install-prompt/returned')).toBeNull()
+    expect(classifyFunnelPath('/popup-outcome/signin-prompt/installed')).toBeNull()
+  })
+  it('a cross-tab race (pwa-installed + standalone-detected for ONE install) still counts one install', () => {
+    const counts = computeFunnelCounts(
+      [
+        { path: '/install/pwa-installed', count: 1 },
+        { path: '/install/standalone-detected', count: 1 },
+        { path: '/popup-outcome/install-prompt/installed', count: 1 },
+      ],
+      0,
+    )
+    expect(counts.install).toBe(1)
+  })
+  it('the install fix shipped (v1.95.4, first confirmed post-fix instant 16:26:36Z); the step label is plain, the caveat travels per range', () => {
+    expect(INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS).toBe(Date.parse('2026-09-26T16:26:36Z'))
+    expect(FUNNEL_STEP_LABELS.install).toBe('Install')
   })
   it('never maps anything to "completed" — no matching path exists anywhere in D1', () => {
     for (const p of ['/game', '/', '/stats', '/settings', '/complete', '/game/complete', '/win']) {
@@ -226,6 +294,34 @@ describe('costPer (spend table — "—"/null until filled in)', () => {
   })
 })
 
+describe('topShares (device-mix breakdown — MIN_COHORT-gated, review fix 2026-09-26)', () => {
+  it('a real rate once the total clears MIN_COHORT', () => {
+    const shares = topShares({ Chrome: 6, Safari: 4 })
+    expect(shares).toEqual([
+      { label: 'Chrome', value: 6, total: 10, rate: 0.6 },
+      { label: 'Safari', value: 4, total: 10, rate: 0.4 },
+    ])
+  })
+  it('a total under MIN_COHORT (but nonzero) reports null, NOT a bare value/total division', () => {
+    // The bug this fixes: value/total directly would have given 1/1 = 100%, reading as a
+    // confident rate off a single device — this must gate through computeRate instead.
+    const shares = topShares({ Chrome: 1 })
+    expect(shares).toEqual([{ label: 'Chrome', value: 1, total: 1, rate: null }])
+  })
+  it('a total of exactly MIN_COHORT (5) is measured, one below is not', () => {
+    expect(topShares({ Chrome: 5 })[0].rate).toBe(1)
+    expect(topShares({ Chrome: 4 })[0].rate).toBeNull()
+  })
+  it('an empty breakdown (total 0) reports null for every row, never NaN/Infinity', () => {
+    const shares = topShares({ Chrome: 0, Safari: 0 })
+    expect(shares.every((s) => s.rate === null)).toBe(true)
+  })
+  it('sorts by count descending and caps at n (default 4)', () => {
+    const shares = topShares({ a: 1, b: 5, c: 3, d: 2, e: 4 })
+    expect(shares.map((s) => s.label)).toEqual(['b', 'e', 'c', 'd'])
+  })
+})
+
 describe('CAMPAIGN_SPEND / CAMPAIGN_DAILY_SPEND (Google Ads API, 2026-09-25)', () => {
   it('Android launch and Play-direct have real totals; the retest has none yet', () => {
     expect(CAMPAIGN_SPEND['24215315197']).toBe(124.47)
@@ -252,6 +348,20 @@ describe('"Completed game" — not instrumented until the deferred proxy hook is
   })
 })
 
+describe('signin-eligible is never part of the funnel or hour-of-day (FINAL LIST caveat: deferred >=30min, row time != finish time)', () => {
+  it('/signin-eligible/* never classifies into any funnel step at all', () => {
+    expect(classifyFunnelPath('/signin-eligible/earned')).toBeNull()
+    expect(classifyFunnelPath('/signin-eligible/capped')).toBeNull()
+    expect(classifyFunnelPath('/signin-eligible/unearned')).toBeNull()
+  })
+  it('hourOfDayEt (functions/api/campaigns.ts) is built from arrival rows only — this module exposes no helper that would let signin-eligible feed hour-of-day bucketing', () => {
+    // classifyFunnelPath is the ONLY entry point functions/api/campaigns.ts uses to decide
+    // what counts toward the funnel; since it returns null for every signin-eligible path,
+    // there is no code path from a signin-eligible row into hourOfDayEt.
+    expect(classifyFunnelPath('/signin-eligible/earned')).toBeNull()
+  })
+})
+
 describe('Play-direct — spend-only campaign (no beacon rows, corrected 2026-09-25)', () => {
   const playDirect = campaignById('24234347705')!
   it('is flagged spend-only with the documented label', () => {
@@ -263,7 +373,7 @@ describe('Play-direct — spend-only campaign (no beacon rows, corrected 2026-09
   })
 })
 
-describe('parseReturnPath / returnVisitRates (on-device return beacon, v1.90.0)', () => {
+describe('parseReturnPath / returnVisitRates (on-device return beacon, v1.95.3)', () => {
   it('parses every documented bucket', () => {
     for (const bucket of RETURN_BUCKETS) {
       expect(parseReturnPath(`/return/sudoku_funnel_retest/${bucket}`)).toEqual({ uc: 'sudoku_funnel_retest', bucket })
@@ -285,8 +395,13 @@ describe('parseReturnPath / returnVisitRates (on-device return beacon, v1.90.0)'
     expect(zero.d1).toBeNull()
     expect(zero['d15-30']).toBeNull()
   })
-  it('returnBeaconNotInstrumented: true for any flight that ended before TRACKING_ACTIVATION_DATE_ET (currently null → always true)', () => {
-    for (const c of CAMPAIGNS) expect(returnBeaconNotInstrumented(c)).toBe(true)
+  it('returnBeaconNotInstrumented: true only for flights that ended before TRACKING_ACTIVATION_DATE_ET (now 2026-09-26)', () => {
+    // Android launch (flightEnd 2026-09-09) and Play-direct (flightEnd 2026-09-13) both
+    // closed before activation — still "not instrumented". US+CA web retest (flightEnd
+    // 2026-10-02) ends AFTER activation — it's the one flight the return beacon now covers.
+    expect(returnBeaconNotInstrumented(campaignById('24215315197')!)).toBe(true)
+    expect(returnBeaconNotInstrumented(campaignById('24234347705')!)).toBe(true)
+    expect(returnBeaconNotInstrumented(campaignById('24279250691')!)).toBe(false)
   })
   it('sharesReturnTagWith: no two campaigns share a uc any more (corrected campaign definitions gave each its own tag)', () => {
     for (const c of CAMPAIGNS) expect(sharesReturnTagWith(c)).toBeNull()

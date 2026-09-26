@@ -235,6 +235,12 @@ const rateDisplay = computed(() => {
   if (data.value?.insufficientCohort) return 'too few to report'
   return rateValue.value == null ? '—' : `${(rateValue.value * 100).toFixed(1)}%`
 })
+// n/d next to every rate — see lib/popupEvents.ts GatedRate.numerator/denominator. Shown
+// whenever the API sent a denominator at all (including 0, so "no data yet" still reads
+// as "0/0" rather than silently omitting the counts).
+const rateCounts = computed(() =>
+  data.value?.denominator == null ? null : `${data.value.numerator ?? 0}/${data.value.denominator}`,
+)
 
 const tableRows = computed(() =>
   !data.value
@@ -348,6 +354,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
       <div v-else-if="widget.type === 'rate'" class="stat">
         <div class="stat-num">{{ rateDisplay }}</div>
         <div class="stat-label overline">rate</div>
+        <div v-if="rateCounts" class="stat-sub mono">{{ rateCounts }}</div>
       </div>
 
       <!-- Table -->

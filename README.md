@@ -38,6 +38,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
 | RUM data | Cloudflare GraphQL Analytics API (`rumPageloadEventsAdaptiveGroups`) |
 | Geo data | Cloudflare D1 (shared with [gss-beacon](https://github.com/GoodStuffSoftware/gss-beacon)) |
 | Config store | Cloudflare KV (`STATS_CONFIG`) |
+| Ads store | Cloudflare D1 `gss-stats-ads` (gss-stats' own: Google Ads spend, readings log, threshold state) |
 | Auth | Google sign-in (OAuth 2.0 / OIDC) in the Pages middleware, email allowlist |
 
 ## Features
@@ -74,17 +75,66 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   upsell and install pop-ups: shown/accepted/dismissed counts, tap rates, outcome rates,
   the sign-in eligibility rate and install's real-outcome counts, bucketed by US-Eastern day.
   See [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) for the one place every pop-up path
-  pattern is defined. A configurable **tracking activation date** (`TRACKING_ACTIVATION_DATE_ET`,
-  null until v1.90.0 ships) keeps pre-release data from reading as a baseline: every rate
-  and every pop-up count widget (other than the trend line, which plots full history with
-  a "tracking starts" marker) is gated to that date, so a real pre-release denominator
-  (e.g. a bug reproduction) can only ever render "—", never a misleading 0%.
+  pattern is defined, matching the Best Sudoku team's final beacon path list (2026-09-25):
+  - Upsell reasons are exactly `cadence` / `limit` / `daily-locked` / `upgrade-tap`; any
+    other reason (e.g. the retired `settings-upgrade`) is counted under "other", never
+    dropped.
+  - Outcome types are `signed-in` / `installed` / `returned` / `still-playing` (new — days
+    14-21 after shown), one MIN_COHORT-gated rate per pop-up × outcome.
+  - `/popup-outcome/<popup>/…`'s wire vocabulary is `signin-prompt` / `promo-first50` /
+    `upsell` / `install-prompt` — `install-prompt` maps to the `install` family internally
+    (`POPUP_OUTCOME_NAME_TO_FAMILY`).
+  - `first50-congrats` has no outcome beacon at all — its charts carry a one-time "no
+    outcome tracking" note instead of an outcome-rate row or a "not instrumented"
+    placeholder.
+  - `/signin-eligible` (the sign-in denominator) is deferred at least 30 minutes after the
+    finish, so its row time is not the finish time — every chart of it carries that caveat,
+    and it's never used to bucket by hour of day (see `SIGNIN_ELIGIBLE_CAVEAT`). The pop-ups
+    page also carries a standing note (`POPUP_PAGE_NOTE`): "Outcomes and return visits may
+    arrive up to 30 minutes late; a small number are lost." (after a sign-in the app holds
+    outcome, eligibility and return beacons for 30 minutes and sends them on a later
+    navigation).
+  - **Install outcomes, fixed in Best Sudoku v1.95.4:** before the fix, prompt-driven installs
+    recorded no install outcome. `INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS` (2026-09-26 16:26:36
+    UTC, the first confirmed post-fix instant) splits every install count row-exactly: earlier
+    `/popup-outcome/install-prompt/installed` and `/install/pwa-installed` rows are unmeasured
+    ("known gap before fix"), later ones are measured normally, and a range that spans the fix
+    carries an "install fix went live 26 Sep 12:26 ET" note. The installed rate compares
+    post-fix outcomes with post-fix showings.
+
+  A configurable **tracking activation date** (`TRACKING_ACTIVATION_DATE_ET`, set to
+  2026-09-26 — v1.95.3's confirmed production WEB release, 14:31 UTC) keeps pre-release
+  data from reading as a baseline: every rate and every pop-up count widget (other than the
+  trend line, which plots full history with a "tracking starts" marker) is gated to that
+  date, so a real pre-release denominator (e.g. the 2026-09-19 uncapped-placement-bug
+  reproduction) can only ever render "—", never a misleading 0%.
+
+  A **separate Play/Android tracking config** (`PLAY_TRACKING_ACTIVATION_DATE_ET`, in the
+  same file) tracks the Android build independently — it's on its own, later release
+  schedule. v1.95.3 was *submitted* to the Play production track 2026-09-26, but a
+  submission is a review-then-staged-rollout process, not a single ship date, so this
+  constant is treated as a RAMP rather than a hard step: it draws its own chart marker
+  ("Play: submitted 26 Sep, reaching devices from review onward") and a rollout caveat next
+  to any bestsudoku-app `/return` or Play-referrer figure, but — unlike the web date — it
+  never grays out or "unmeasures" days after it, since a low count right after submission
+  is the expected shape of a staged rollout, not a tracking gap.
+
+  Because production has only 14 registered users (2026-09-26), every rate-bearing page
+  (pop-ups, campaigns, overview) also carries a standing **small-sample note** ("Very small
+  numbers: rates are anecdotal. Always read the counts.") and every computed rate shows its
+  underlying numerator/denominator next to the percentage — MIN_COHORT (5) still blocks any
+  rate computed from too small a denominator outright; the note covers everything above
+  that floor, which is still a small population.
 - **Campaign comparison** — a bespoke "Best Sudoku campaigns" page (not the generic
   chart-grid model) compares the three Google Ads campaigns configured in
   [`src/lib/campaigns.ts`](src/lib/campaigns.ts): a funnel per campaign, arrivals by ET
   hour of day, arrivals/funnel by country, daily + cumulative arrivals aligned by flight
-  day, cost per arrival/auth success (spend filled in from the Google Ads API), device mix,
-  and an on-device return-visit retention curve. Attribution is by the beacon's own
+  day, cost per arrival/auth success (spend read from the Google Ads API figures the ads
+  routine stores, falling back to the hand-entered `CAMPAIGN_SPEND`), device mix, an
+  on-device return-visit retention curve, and the ads routine's **readings log**. The
+  funnel's Install step counts `/popup-outcome/install-prompt/installed` (once per showing);
+  raw `/install/*` outcome beacons, which can double-count one install, are shown only as a
+  secondary "raw install signals" line. Attribution is by the beacon's own
   campaign tag only, with no date-based split — one swappable function decides row
   membership, and known verification/household traffic is excluded server-side. One
   campaign (Play-direct) sends its ads straight to the Play Store and so has no beacon rows
@@ -109,10 +159,11 @@ Cloudflare Pages Functions  (functions/_middleware.ts → functions/api/*.ts)
    │  - /api/campaigns → Google Ads campaign comparison from the same D1 (funnel, hour-of-day,
    │                      country, daily/cumulative, device mix, return visits)
    │  - /api/overview → today-at-a-glance KPIs, daily timeline, campaign scorecard, release panel
+   │  - /api/ads/readings → the ads routine's readings log + stored spend (D1 gss-stats-ads)
    │  - /api/sites  → auto-builds the merged site list (RUM + beacon, aliases folded)
    │  - /api/config → dashboard layout in KV
    ▼
-Cloudflare GraphQL Analytics API  ·  D1 (gss-geo)  ·  KV (STATS_CONFIG)
+Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats-ads)  ·  KV (STATS_CONFIG)
 ```
 
 - **Two datasets, one dashboard.** RUM (sampled, human-only) and the beacon (every
@@ -129,10 +180,11 @@ RUM whitelisted dimensions (server-side): `requestHost`, `requestPath`, `deviceT
 geography is country-only** — sub-country region/city comes from the beacon.
 
 **Pop-up event beacons never count as page views.** Paths under `/signin-prompt`,
-`/signin-eligible`, `/promo-first50`, `/first50-congrats`, `/upsell`, `/install` and
-`/popup-outcome` are pop-up interaction events, not screens — `/api/geo` and `/api/sites`
-exclude them from every pageview/visit total and the top-pages breakdown (see
-[`src/lib/popupEvents.ts`](src/lib/popupEvents.ts)); `/api/popups` is where they're counted.
+`/signin-eligible`, `/promo-first50`, `/first50-congrats`, `/upsell`, `/install`,
+`/popup-outcome` and `/return` are pop-up interaction events, not screens — `/api/geo` and
+`/api/sites` exclude all 8 prefixes from every pageview/visit total and the top-pages
+breakdown (see [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) `POPUP_EVENT_PREFIXES`);
+`/api/popups` is where they're counted.
 
 **Campaign attribution is uc-only.** A row belongs to a Google Ads campaign only by its own
 `campaign` column value (D1's actual column name for what the ad tags as `utm_campaign`) —
@@ -146,6 +198,54 @@ household traffic) and `classifyFunnelPath` (which paths count as which funnel s
 exposes no client IP or visitor ID, so a UA combo is the only self-exclusion proxy on
 that dataset; the beacon adds a precise per-device/per-network opt-out.
 
+## Ads-read routines (Best Sudoku)
+
+Node tooling in [`scripts/ads-reads/`](scripts/ads-reads/) that the scheduled routines in
+[`docs/routines/`](docs/routines/) run from this checkout. It **proposes only** — it can't
+change a campaign (the Google Ads client can only run GAQL `SELECT`s). The rules, thresholds,
+exclusions, MIN_COHORT and ET-day logic are the same `src/lib` code the dashboard uses
+([`src/lib/adsRules.ts`](src/lib/adsRules.ts) on top of `campaigns.ts` / `popupEvents.ts`), so
+the routine and the dashboard can't disagree.
+
+```powershell
+npm run ads:morning-read -- --dry-run --cf-token-file <path-to-cf-token>   # daily read; no writes
+npm run ads:postflight-read -- --stage wrapup --dry-run --cf-token-file <path>
+npm run ads:backfill -- --dry-run --cf-token-file <path>                   # idempotent spend backfill
+npm run ads:morning-read -- --fixture <file.json> --now <iso>              # offline, recorded data
+npm run typecheck:scripts
+```
+
+- **Spend** comes from the Google Ads REST API only (customer 8726535246, no manager
+  header). Credentials are read from Bitwarden Secrets Manager with `bws` (needs
+  `BWS_ACCESS_TOKEN`) into process memory and are never printed, logged or written.
+- **Beacon reads** use `wrangler d1 execute gss-geo --remote --json --command`: single
+  `SELECT`s only, enforced before wrangler runs.
+- **Store:** gss-stats' own D1 database `gss-stats-ads` (spend per day, placement-day cost,
+  an append-only readings log and fire-once threshold state). Why and how:
+  [docs/adr/0001-ads-read-store.md](docs/adr/0001-ads-read-store.md). Schema:
+  [`migrations/gss-stats-ads/`](migrations/gss-stats-ads/) (`npm run ads:migrate`).
+- **morning-read** stores yesterday's and cumulative spend, fires each $25/$50/$75/$100 read
+  once (full read + kill rules), always appends a daily line, checks the hard cap on every
+  read, and notes any earlier scheduled read that never ran. The release-health check (a
+  missing child of a non-zero parent) never runs between 01:00 and 12:00 ET, so the 08:00
+  run skips it and a 23:15 ET `--release-health-only` backstop covers it on days that served
+  ads. Pushes go out only on a threshold read, a kill-rule trip, a failed read, or a real
+  release-health alert (parent at least MIN_COHORT, outcome window elapsed, child zero).
+- **postflight-read** covers the wrap-up (flight end + 7 days; spend after the flight and the cap are checked first on every run) and the day-15/30/60 and
+  December follow-ups, split promo vs non-promo, with the d31-60 return buckets. Day 15/30/60
+  add the flight-window account cohort by access tier and promo marker (sitewide, not
+  campaign-attributed; it needs Firestore composite indexes that don't exist yet, so it
+  reports "tier split unavailable: index missing" until an owner creates them).
+- **Sign-ups are an upper bound** everywhere ("at most N campaign sign-ups" =
+  min(tagged auth successes, new accounts sitewide in the window)): `/auth/success` also fires
+  for returning sign-ins. A pause is never proposed for a campaign that isn't serving (after
+  its end date it reads ENABLED/ENDED); it's reported as ended instead.
+- `--firebase-sa <service-account.json>` adds Firestore COUNT queries (new accounts and
+  first-50 claims in the flight window, `promos/first50` status, the cohort split). The code
+  can only make COUNT queries and one document GET, but the prod key on this machine is not
+  a read-only key (it holds `roles/editor`); pointing this flag at a key with only
+  `roles/datastore.viewer` is an owner step.
+
 ## Docs
 
 | Area | Entry point |
@@ -153,6 +253,8 @@ that dataset; the beacon adds a precise per-device/per-network opt-out.
 | Changelog | [CHANGELOG.md](CHANGELOG.md) |
 | Contributing / conventions | [CLAUDE.md](CLAUDE.md) |
 | Auth design (ADR) | [docs/adr/0001-google-auth.md](docs/adr/0001-google-auth.md) |
+| Ads store decision | [docs/adr/0001-ads-read-store.md](docs/adr/0001-ads-read-store.md) |
+| Ads routine prompts | [docs/routines/](docs/routines/) |
 | Geo beacon (companion) | [GoodStuffSoftware/gss-beacon](https://github.com/GoodStuffSoftware/gss-beacon) |
 
 ## Deploy
