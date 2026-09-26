@@ -412,6 +412,15 @@ export interface TaggedRow {
   path: string
   visitor: string
   count: number
+  /** Row-exact side of the signed-out upsell fix (SQL `ts >= UPSELL_SIGNEDOUT_FIX_AT`, like the
+   * install fix's `pf`); absent (recorded fixtures) = decided by the row's hour bucket. */
+  postUpsellFix?: boolean
+}
+/** Which side of a segment boundary a tagged row is on: the SQL flag when the query carried
+ * one (exact at the instant), else its hour bucket (the bucket containing the instant is
+ * post-fix). */
+export function isPostBoundary(r: TaggedRow, boundaryMs: number): boolean {
+  return r.postUpsellFix ?? r.hourStartMs >= Math.floor(boundaryMs / 3_600_000) * 3_600_000
 }
 export interface TaggedSummary {
   /** Every tagged row — NOT arrivals (the tag rides every beacon for its 30-min TTL). */
@@ -1073,19 +1082,31 @@ export interface SignUpCount {
   /** What the decision table uses: exact when `exact`, else an upper bound. */
   count: number
   exact: boolean
-  /** The "at most" part: min(unsplit tagged auth successes, window new accounts); null when
-   * the /new|existing split is not live. */
+  /** The "at most" part over the unsplit rows: min(unsplit, max(0, windowNew − exactNew));
+   * null when the /new|existing split is not live. */
   bounded: number | null
-  /** Exact sign-ups from tagged /auth/success/<provider>/new rows (null before the split). */
+  /** Sign-ups from tagged /auth/success/<provider>/new rows, capped at the window's new
+   * accounts (null before the split). */
   exactNew: number | null
+  /** The /new rows exceeded the window's new accounts (a repeated beacon): capped, so the
+   * count is an upper bound, not exact. */
+  newCapped: boolean
   label: string
 }
 /** Campaign sign-ups. Until AUTH_NEW_EXISTING_LIVE_AT is set: "at most N" over EVERY tagged
- * auth-success row (prefix match, so a suffixed row still counts once). Once it is set: the
- * tagged `/new` rows are counted EXACTLY, `/existing` rows (returning sign-ins) never count, and
- * "at most" still bounds the unsplit rows — the part of the window before the release, plus any
- * old client that still sends the bare path. Classified by path, not by hour: a suffix only
- * exists after the release, so no row is dropped or counted twice at the boundary. */
+ * auth-success row (prefix match, so a suffixed row still counts once). Once it is set:
+ *
+ *   exactNew = min(/new rows, windowNew)
+ *   count    = min(unsplit, max(0, windowNew − exactNew)) + exactNew
+ *
+ * — `/existing` rows (returning sign-ins) never count; the unsplit rows (before the release, or
+ * an old client still sending the bare path) stay an "at most" bound, which can only use the new
+ * accounts the exact rows have not already claimed. The /new count cannot be de-duplicated per
+ * person (the beacon stores anonymous hourly counts, and nothing is ever joined to an
+ * individual), so a repeated /new beacon is bounded by the window's new accounts instead; the
+ * count is "exact" only when there are no unsplit rows and no cap applied. Classified by path,
+ * not by hour: a suffix only exists after the release, so no row is dropped or counted twice at
+ * the boundary. */
 export function campaignSignUps(
   s: Pick<TaggedSummary, 'authSuccess' | 'authSuccessSplit'>,
   windowNewAccounts: number | null,
@@ -1093,21 +1114,30 @@ export function campaignSignUps(
 ): SignUpCount {
   if (liveAtMs == null) {
     const n = signUpsAtMost(s.authSuccess, windowNewAccounts)
-    return { count: n, exact: false, bounded: n, exactNew: null, label: signUpsAtMostLabel(n, s.authSuccess, windowNewAccounts) }
+    return { count: n, exact: false, bounded: n, exactNew: null, newCapped: false, label: signUpsAtMostLabel(n, s.authSuccess, windowNewAccounts) }
   }
   const unsplit = s.authSuccessSplit.unsplit
-  const bounded = unsplit > 0 ? signUpsAtMost(unsplit, windowNewAccounts) : 0
-  const exactNew = s.authSuccessSplit.new
+  const rawNew = s.authSuccessSplit.new
+  const exactNew = windowNewAccounts == null ? rawNew : Math.min(rawNew, windowNewAccounts)
+  const newCapped = exactNew < rawNew
+  const room = windowNewAccounts == null ? unsplit : Math.max(0, windowNewAccounts - exactNew)
+  const bounded = Math.min(unsplit, room)
+  const count = bounded + exactNew
   const since = etMinuteLabel(liveAtMs)
+  const w = windowNewAccounts ?? 'not read'
+  if (unsplit === 0 && !newCapped) {
+    return { count, exact: true, bounded: 0, exactNew, newCapped, label: `${plural(count, 'campaign sign-up')} (exact: tagged /auth/success/<provider>/new since ${since})` }
+  }
   if (unsplit === 0) {
-    return { count: exactNew, exact: true, bounded: 0, exactNew, label: `${plural(exactNew, 'campaign sign-up')} (exact: tagged /auth/success/<provider>/new since ${since})` }
+    return { count, exact: false, bounded: 0, exactNew, newCapped, label: `at most ${plural(count, 'campaign sign-up')} (tagged /auth/success/<provider>/new rows ${rawNew}, capped at the ${w} new prod accounts sitewide in the window)` }
   }
   return {
-    count: bounded + exactNew,
+    count,
     exact: false,
     bounded,
     exactNew,
-    label: `at most ${plural(bounded + exactNew, 'campaign sign-up')}: at most ${bounded} before the new/existing split (${since}; tagged auth successes ${unsplit}; new prod accounts sitewide in the window ${windowNewAccounts ?? 'not read'}) + exactly ${exactNew} after it (tagged /auth/success/<provider>/new)`,
+    newCapped,
+    label: `at most ${plural(count, 'campaign sign-up')}: at most ${bounded} before the new/existing split (${since}; tagged auth successes ${unsplit}; new prod accounts sitewide in the window ${w}, less the ${exactNew} counted after it) + ${newCapped ? `at most ${exactNew}` : `exactly ${exactNew}`} after it (tagged /auth/success/<provider>/new${newCapped ? `, ${rawNew} rows capped at the window's new accounts` : ''})`,
   }
 }
 
@@ -1138,11 +1168,11 @@ export interface FunnelSegments {
   note: string
 }
 export const SEGMENT_NOTE =
-  'A behaviour change shipped mid-flight (the signed-out upsell fix), so per spec section 14a the flight reads as two separate short tests: compare each segment on its own, never the totals. The hour bucket containing the fix counts as post-fix, and the fix day\'s spend is shown apart because Ads spend is per ET day.'
+  'A behaviour change shipped mid-flight (the signed-out upsell fix), so per spec section 14a the flight reads as two separate short tests: compare each segment on its own, never the totals. Beacon rows are split at the exact instant of the fix; the fix day\'s spend is shown apart because Ads spend is per ET day.'
 
 /** For the campaign charts (functions/api/campaigns.ts): where the upsell-fix boundary falls
- * in a campaign's flight, and the tagged upsell shown/accept/dismiss on each side (hour buckets;
- * the bucket containing the fix counts as post-fix). null when unset or outside the flight. */
+ * in a campaign's flight, and the tagged upsell shown/accept/dismiss on each side (split at the
+ * instant by the query's flag — isPostBoundary). null when unset or outside the flight. */
 export interface CampaignSegmentMarker {
   boundaryMs: number
   boundaryLabel: string
@@ -1157,18 +1187,20 @@ export function campaignSegmentMarker(
   if (boundaryMs == null || !c.flightStart) return null
   const date = etDateFromMs(boundaryMs)
   if (date < c.flightStart || date > c.flightEnd) return null
-  const cut = Math.floor(boundaryMs / 3_600_000) * 3_600_000
   return {
     boundaryMs,
     boundaryLabel: etMinuteLabel(boundaryMs),
     boundaryDate: date,
-    upsell: { pre: { ...summarizeTaggedRows(rows, { toMs: cut }).upsell }, post: { ...summarizeTaggedRows(rows, { fromMs: cut }).upsell } },
+    upsell: {
+      pre: { ...summarizeTaggedRows(rows.filter((r) => !isPostBoundary(r, boundaryMs))).upsell },
+      post: { ...summarizeTaggedRows(rows.filter((r) => isPostBoundary(r, boundaryMs))).upsell },
+    },
   }
 }
 
-/** Splits a read at a boundary instant: tagged rows by hour bucket (the bucket containing the
- * instant goes to post-fix), closed-day spend by ET day (the boundary day apart). null when the
- * boundary is unset or outside [startMs, endMs). */
+/** Splits a read at a boundary instant: tagged rows at the exact instant (the query's
+ * postUpsellFix flag; a row without one falls back to its hour bucket), closed-day spend by ET
+ * day (the boundary day apart). null when the boundary is unset or outside [startMs, endMs). */
 export function splitAtBoundary(i: {
   rows: readonly TaggedRow[]
   stored: StoredSpend | null
@@ -1181,7 +1213,6 @@ export function splitAtBoundary(i: {
 }): FunnelSegments | null {
   const b = i.boundaryMs === undefined ? UPSELL_SIGNEDOUT_FIX_AT : i.boundaryMs
   if (b == null || b <= i.startMs || b >= i.endMs) return null
-  const cut = Math.floor(b / 3_600_000) * 3_600_000
   const boundaryDay = etDateFromMs(b)
   const days = Object.entries(i.stored?.days ?? {}).filter(([d]) => i.throughEt != null && d <= i.throughEt)
   const spendOf = (pred: (d: string) => boolean) => {
@@ -1189,8 +1220,8 @@ export function splitAtBoundary(i: {
     return { spend: round2(microsToDollars(sel.reduce((a, [, v]) => a + v.costMicros, 0))), spendDays: sel.length }
   }
   const figures = (fromMs: number, toMs: number, side: 'pre' | 'post'): SegmentFigures => {
-    // The rows are already window-filtered (SQL attribution clause): split only at the cut.
-    const s = summarizeTaggedRows(i.rows, side === 'pre' ? { toMs: cut } : { fromMs: cut })
+    // The rows are already window-filtered (SQL attribution clause): split only at the boundary.
+    const s = summarizeTaggedRows(i.rows.filter((r) => isPostBoundary(r, b) === (side === 'post')))
     return {
       fromMs,
       toMs,
@@ -1209,8 +1240,8 @@ export function splitAtBoundary(i: {
     boundaryLabel: etMinuteLabel(b),
     boundaryDay,
     boundaryDaySpend: dayRow ? round2(microsToDollars(dayRow[1].costMicros)) : null,
-    pre: figures(i.startMs, cut, 'pre'),
-    post: figures(cut, i.endMs, 'post'),
+    pre: figures(i.startMs, b, 'pre'),
+    post: figures(b, i.endMs, 'post'),
     note: SEGMENT_NOTE,
   }
 }

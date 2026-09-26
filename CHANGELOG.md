@@ -31,7 +31,9 @@ All notable changes to **gss-stats** are documented here. The format follows
   longer adds a duplicate row or repeats a push for the same threshold, cap trip or alert; a
   rerun is recorded only when it carries new information, and a failed read still pushes.
 - **Stored spend covers closed days only.** Today's still-open numbers are no longer stored;
-  days with no delivery are stored as zero so the stored days have no gaps.
+  flight days with no delivery are stored as zero so the stored days have no gaps, and an empty
+  or incomplete answer from Google is treated as a failed read that never overwrites stored
+  spend.
 
 ## [0.5.1] — 2026-09-26
 

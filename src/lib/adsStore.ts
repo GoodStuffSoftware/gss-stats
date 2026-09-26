@@ -224,16 +224,17 @@ export function readingInsert(rec: ReadingRecord, routineVersion: string = ROUTI
 export function thresholdStateInsert(rec: ReadingRecord): SqlStatement | null {
   if (rec.kind !== 'threshold' || !rec.complete || !rec.thresholds.length) return null
   const ek = rec.entryKind ?? readingEntryKind(rec)
+  // The reading is found by its de-dup key, or by its reading_key for a row stored before 0003.
   return {
     sql:
       `INSERT INTO ads_threshold_state (campaign_id, threshold_usd, fired_at, reading_id) VALUES ${rec.thresholds
-        .map(() => '(?, ?, ?, (SELECT id FROM ads_readings WHERE campaign_id = ? AND et_date = ? AND entry_kind = ?))')
+        .map(() => '(?, ?, ?, COALESCE((SELECT id FROM ads_readings WHERE campaign_id = ? AND et_date = ? AND entry_kind = ?), (SELECT id FROM ads_readings WHERE reading_key = ?)))')
         .join(', ')} ON CONFLICT (campaign_id, threshold_usd) DO NOTHING`,
-    binds: rec.thresholds.flatMap((t) => [rec.campaignId, Math.round(t), rec.readAt, rec.campaignId, rec.etDate, ek]),
+    binds: rec.thresholds.flatMap((t) => [rec.campaignId, Math.round(t), rec.readAt, rec.campaignId, rec.etDate, ek, rec.id]),
   }
 }
 
-// ── Sync runs (ads_sync_runs, migration 0003) ─────────────────────────────────────────────
+// ── Sync runs (ads_sync_runs, migrations 0003 + 0004) ─────────────────────────────────────
 export const SYNC_SOURCES = ['ads-sync', 'morning-read', 'backstop', 'postflight-read', 'backfill', 'worker-cron', 'worker-on-demand'] as const
 export type SyncSource = (typeof SYNC_SOURCES)[number]
 export type SyncStatus = 'ok' | 'partial' | 'failed'
@@ -246,6 +247,9 @@ export interface SyncRunRecord {
   campaigns: string[]
   /** The ones whose daily metrics synced (lastSync is read from here). */
   campaignsOk: string[]
+  /** The ones whose closed days were pulled through the end of their window (the restatement
+   * window was re-checked): the recheck cadence reads this. */
+  campaignsPulled: string[]
   daysFetched: number
   daysChanged: number
   placementRowsFetched: number
@@ -259,8 +263,8 @@ export interface SyncRunRecord {
 export function syncRunInsert(r: SyncRunRecord): SqlStatement {
   return {
     sql:
-      'INSERT INTO ads_sync_runs (run_key, source, started_at, finished_at, campaigns, campaigns_ok, days_fetched, days_changed, placement_rows_fetched, placement_rows_changed, status, error, detail) ' +
-      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING',
+      'INSERT INTO ads_sync_runs (run_key, source, started_at, finished_at, campaigns, campaigns_ok, days_fetched, days_changed, placement_rows_fetched, placement_rows_changed, status, error, detail, campaigns_pulled) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING',
     binds: [
       r.runKey,
       r.source,
@@ -275,7 +279,23 @@ export function syncRunInsert(r: SyncRunRecord): SqlStatement {
       r.status,
       r.error == null ? null : stripLocalPaths(r.error).slice(0, 500),
       JSON.stringify(r.detail),
+      JSON.stringify(r.campaignsPulled ?? []),
     ],
+  }
+}
+
+/** The atomic claim a Worker sync makes BEFORE it syncs (migration 0004): a 'running' row,
+ * inserted only when no sync run (claim or finished) ended inside the last `windowMs`. One
+ * statement, so of two concurrent requests exactly one inserts (changes = 1) and the other gets
+ * changes = 0. A claim that is never followed by a finished row is a run that died (e.g. out of
+ * CPU) — visible in the table, and it only blocks for one window. */
+export function syncClaimStatement(source: SyncSource, nowMs: number, windowMs: number): SqlStatement {
+  const now = new Date(nowMs).toISOString()
+  return {
+    sql:
+      "INSERT INTO ads_sync_runs (run_key, source, started_at, finished_at, campaigns, campaigns_ok, days_fetched, days_changed, placement_rows_fetched, placement_rows_changed, status, error, detail, campaigns_pulled) " +
+      "SELECT ?, ?, ?, ?, '[]', '[]', 0, 0, 0, 0, 'running', NULL, '{}', '[]' WHERE NOT EXISTS (SELECT 1 FROM ads_sync_runs WHERE finished_at > ?) ON CONFLICT DO NOTHING",
+    binds: [`claim:${source}:${now}`, source, now, now, new Date(nowMs - windowMs).toISOString()],
   }
 }
 
@@ -283,6 +303,13 @@ export function syncRunInsert(r: SyncRunRecord): SqlStatement {
 export const SPEND_SUMMARY_SQL =
   'SELECT campaign_id, SUM(cost_micros) AS cost_micros, SUM(impressions) AS impressions, SUM(clicks) AS clicks, COUNT(*) AS days, MIN(date) AS first_date, MAX(date) AS last_date, MAX(fetched_at) AS fetched_at FROM ads_daily_metrics GROUP BY campaign_id'
 export const DAILY_ROWS_SQL = 'SELECT date, cost_micros, impressions, clicks, fetched_at, placements_fetched_at FROM ads_daily_metrics WHERE campaign_id = ? ORDER BY date'
+/** Every campaign's day rows in ONE query (the sync's plan; a few hundred rows at most). */
+export const ALL_DAILY_ROWS_SQL = 'SELECT campaign_id, date, cost_micros, impressions, clicks, fetched_at, placements_fetched_at FROM ads_daily_metrics ORDER BY campaign_id, date'
+/** The latest runs that pulled campaigns through their window (index on finished_at). */
+export const LAST_PULLS_SQL = "SELECT campaigns_pulled, finished_at FROM ads_sync_runs WHERE campaigns_pulled <> '[]' ORDER BY finished_at DESC LIMIT 30"
+/** Thresholds consumed by a COMPLETE threshold reading (the log is the source of truth; the
+ * threshold-state table is its index). */
+export const CONSUMED_FROM_READINGS_SQL = "SELECT thresholds FROM ads_readings WHERE campaign_id = ? AND kind = 'threshold' AND complete = 1"
 export const PLACEMENT_ROWS_SQL =
   'SELECT date, placement, display_name, placement_type, target_url, approved, cost_micros, impressions, clicks FROM ads_placement_daily WHERE campaign_id = ? AND date >= ? AND date <= ? ORDER BY date, placement'
 export const THRESHOLD_STATE_SQL = 'SELECT threshold_usd, fired_at FROM ads_threshold_state WHERE campaign_id = ? ORDER BY threshold_usd'
@@ -291,8 +318,10 @@ export const READINGS_SQL = `SELECT ${READING_COLS} FROM ads_readings WHERE camp
 export const READINGS_ON_DAY_SQL = `SELECT ${READING_COLS} FROM ads_readings WHERE campaign_id = ? AND et_date = ? ORDER BY id`
 /** Coverage rows for spendThrough (every campaign; a few hundred rows at most). */
 export const COVERAGE_ROWS_SQL = 'SELECT campaign_id, date, fetched_at FROM ads_daily_metrics ORDER BY campaign_id, date'
-/** Latest successful sync per campaign. */
-export const LAST_SYNC_SQL = 'SELECT j.value AS campaign_id, MAX(r.finished_at) AS last_sync FROM ads_sync_runs AS r, json_each(r.campaigns_ok) AS j GROUP BY j.value'
+/** Latest successful sync per campaign, from the 50 newest finished runs only (index on
+ * finished_at), so the cost stays flat as the log grows. */
+export const LAST_SYNC_SQL =
+  "SELECT j.value AS campaign_id, MAX(r.finished_at) AS last_sync FROM (SELECT campaigns_ok, finished_at FROM ads_sync_runs WHERE status <> 'running' ORDER BY finished_at DESC LIMIT 50) AS r, json_each(r.campaigns_ok) AS j GROUP BY j.value"
 /** When the latest sync run (any source) finished — the on-demand rate limit. */
 export const LAST_RUN_SQL = 'SELECT MAX(finished_at) AS last FROM ads_sync_runs'
 export const RECENT_SYNC_RUNS_SQL =
@@ -434,37 +463,74 @@ export interface AppendOutcome {
   ignored: string[]
 }
 
-/** What the shared sync (lib/adsSync.ts) needs — all a future Worker has to provide. */
+/** What the shared sync (lib/adsSync.ts) needs — all a Worker has to provide. */
 export interface AdsSyncStore {
   readonly kind: string
   readonly dryRun: boolean
   syncCampaigns(campaigns: readonly CampaignFlight[], syncedAt: string): Promise<boolean>
-  getDailyRows(campaignId: string): Promise<StoredDayRow[]>
+  /** Every campaign's day rows, by campaign id (one query). */
+  getAllDailyRows(): Promise<Map<string, StoredDayRow[]>>
+  /** When each campaign was last pulled through its window (recent runs' campaigns_pulled). */
+  getLastPulls(): Promise<Map<string, string>>
   /** Upserts exactly these rows (the sync writes only rows that changed). */
   putDailyRows(campaignId: string, rows: readonly StoredDayRow[]): Promise<boolean>
   getPlacementRows(campaignId: string, since: string, until: string): Promise<PlacementDayRow[]>
   putPlacements(campaignId: string, rows: readonly PlacementDayRow[], fetchedAt: string): Promise<boolean>
   appendSyncRun(run: SyncRunRecord): Promise<boolean>
+  /** The atomic claim (syncClaimStatement): true only for the one caller that inserted it. */
+  claimSync(source: SyncSource, nowMs: number, windowMs: number): Promise<boolean>
 }
 /** Everything the reads use on top of the sync. */
 export interface AdsStore extends AdsSyncStore {
+  /** Thresholds already fired: the threshold-state rows plus any COMPLETE threshold reading
+   * (so a state row lost to a partial write can never make a threshold fire twice). */
   getConsumedThresholds(campaignId: string): Promise<number[]>
+  /** The two sources of getConsumedThresholds apart: `fromReadings` minus `state` are fired
+   * thresholds whose state row is missing (to heal). */
+  getThresholdLedger(campaignId: string): Promise<{ state: number[]; fromReadings: number[] }>
   getReadings(campaignId: string, limit?: number): Promise<ReadingRecord[]>
   /** The readings already stored for one campaign and ET day (the de-dup check). */
   getReadingsOn(campaignId: string, etDate: string): Promise<ReadingRecord[]>
-  /** Appends records; a COMPLETE threshold record also marks its thresholds fired. */
+  /** Appends records; a COMPLETE threshold record also marks its thresholds fired — always,
+   * even when the reading itself was already stored (the state insert is idempotent). */
   appendReadings(records: readonly ReadingRecord[]): Promise<AppendOutcome>
+  /** The idempotent threshold-state insert for COMPLETE threshold records already stored (a
+   * same-day rerun that is not appended again, or a heal after a partial write). */
+  ensureThresholdState(records: readonly ReadingRecord[]): Promise<boolean>
+}
+
+export class QueryBudgetError extends Error {
+  constructor(used: number) {
+    super(`D1 query budget reached (${used} statements this run); the rest continues next run`)
+    this.name = 'QueryBudgetError'
+  }
 }
 
 /** The one SQL store, over any AdsDb. Every write passes assertAdsWriteSql; --dry-run sends
- * no write at all (reads still happen). */
-export function createSqlAdsStore(db: AdsDb, opts: { dryRun: boolean; kind?: string }): AdsStore {
+ * no write at all (reads still happen). `maxStatements` caps the statements one run may send
+ * (D1 allows 50 per Worker invocation on Workers Free); the last two are kept for the sync-run
+ * row, so a capped run still records itself. */
+export function createSqlAdsStore(db: AdsDb, opts: { dryRun: boolean; kind?: string; maxStatements?: number }): AdsStore & { statementsUsed(): number } {
+  let used = 0
+  const RESERVE = 2
+  const budget = (final = false) => {
+    if (opts.maxStatements == null) return
+    if (used >= opts.maxStatements - (final ? 0 : RESERVE)) throw new QueryBudgetError(used)
+    used++
+  }
+  const count = () => {
+    if (opts.maxStatements == null) used++
+  }
   const select = async (sql: string, binds: unknown[]) => {
     assertAdsReadSql(sql)
+    budget()
+    count()
     return db.all({ sql, binds })
   }
-  const exec = async (s: SqlStatement) => {
+  const exec = async (s: SqlStatement, final = false) => {
     assertAdsWriteSql(s.sql)
+    budget(final)
+    count()
     return db.run(s)
   }
   async function writeAll(stmts: readonly (SqlStatement | null)[]): Promise<boolean> {
@@ -473,18 +539,72 @@ export function createSqlAdsStore(db: AdsDb, opts: { dryRun: boolean; kind?: str
     return true
   }
   const readings = async (sql: string, binds: unknown[]) => (await select(sql, binds)).map(mapReadingRow).filter((r): r is ReadingRecord => r !== null)
+  const stateFor = async (records: readonly ReadingRecord[]) => {
+    for (const rec of records) {
+      const th = thresholdStateInsert({ ...rec, entryKind: rec.entryKind ?? readingEntryKind(rec) })
+      if (th) await exec(th)
+    }
+  }
   return {
     kind: opts.kind ?? 'd1',
     dryRun: opts.dryRun,
+    statementsUsed: () => used,
     syncCampaigns: (campaigns, syncedAt) => writeAll(campaignSyncStatements(campaigns, syncedAt)),
-    getDailyRows: async (campaignId) => (await select(DAILY_ROWS_SQL, [campaignId])).map(mapDailyRow),
+    async getAllDailyRows() {
+      const out = new Map<string, StoredDayRow[]>()
+      for (const r of await select(ALL_DAILY_ROWS_SQL, [])) {
+        const id = String(r.campaign_id)
+        if (!out.has(id)) out.set(id, [])
+        out.get(id)!.push(mapDailyRow(r))
+      }
+      return out
+    },
+    async getLastPulls() {
+      const out = new Map<string, string>()
+      for (const r of await select(LAST_PULLS_SQL, [])) {
+        let ids: unknown = []
+        try {
+          ids = JSON.parse(String(r.campaigns_pulled ?? '[]'))
+        } catch {
+          ids = []
+        }
+        for (const id of Array.isArray(ids) ? ids : []) if (!out.has(String(id))) out.set(String(id), String(r.finished_at))
+      }
+      return out
+    },
     putDailyRows: (campaignId, rows) => writeAll(dailyRowUpserts(campaignId, rows)),
     getPlacementRows: async (campaignId, since, until) => (await select(PLACEMENT_ROWS_SQL, [campaignId, since, until])).map(mapPlacementRow),
     putPlacements: (campaignId, rows, fetchedAt) => writeAll(placementDailyUpserts(campaignId, rows, fetchedAt)),
-    appendSyncRun: (run) => writeAll([syncRunInsert(run)]),
+    async appendSyncRun(run) {
+      if (opts.dryRun) return false
+      await exec(syncRunInsert(run), true)
+      return true
+    },
+    async claimSync(source, nowMs, windowMs) {
+      if (opts.dryRun) return true
+      const res = await exec(syncClaimStatement(source, nowMs, windowMs), true)
+      return res.changes === 1
+    },
+    async getThresholdLedger(campaignId) {
+      const state = new Set<number>()
+      for (const r of await select(THRESHOLD_STATE_SQL, [campaignId])) {
+        const n = Number(r.threshold_usd)
+        if (Number.isFinite(n)) state.add(n)
+      }
+      const fromReadings = new Set<number>()
+      for (const r of await select(CONSUMED_FROM_READINGS_SQL, [campaignId])) {
+        try {
+          for (const t of JSON.parse(String(r.thresholds ?? '[]')) as unknown[]) if (Number.isFinite(Number(t))) fromReadings.add(Number(t))
+        } catch {
+          /* a malformed row consumes nothing */
+        }
+      }
+      const sorted = (s: Set<number>) => [...s].sort((a, b) => a - b)
+      return { state: sorted(state), fromReadings: sorted(fromReadings) }
+    },
     async getConsumedThresholds(campaignId) {
-      const rows = await select(THRESHOLD_STATE_SQL, [campaignId])
-      return rows.map((r) => Number(r.threshold_usd)).filter((n) => Number.isFinite(n))
+      const l = await this.getThresholdLedger(campaignId)
+      return [...new Set([...l.state, ...l.fromReadings])].sort((a, b) => a - b)
     },
     getReadings: (campaignId, limit = 200) => readings(READINGS_SQL, [campaignId, Math.max(1, Math.min(500, Math.floor(limit)))]),
     getReadingsOn: (campaignId, etDate) => readings(READINGS_ON_DAY_SQL, [campaignId, etDate]),
@@ -494,15 +614,18 @@ export function createSqlAdsStore(db: AdsDb, opts: { dryRun: boolean; kind?: str
       for (const rec of records) {
         const withKey = { ...rec, entryKind: rec.entryKind ?? readingEntryKind(rec) }
         const res = await exec(readingInsert(withKey))
-        if (res.changes === 0) {
-          out.ignored.push(rec.id)
-          continue
-        }
-        out.inserted.push(rec.id)
-        const th = thresholdStateInsert(withKey)
-        if (th) await exec(th)
+        if (res.changes === 0) out.ignored.push(rec.id)
+        else out.inserted.push(rec.id)
+        // Idempotent, and run even when the reading was already there: a state row lost to an
+        // earlier partial write is restored instead of the threshold firing again.
+        await stateFor([withKey])
       }
       return out
+    },
+    async ensureThresholdState(records) {
+      if (opts.dryRun) return false
+      await stateFor(records)
+      return true
     },
   }
 }
@@ -609,7 +732,7 @@ export async function readFreshness(db: D1Reader | undefined | null, nowMs: numb
   const out = new Map<string, AdsFreshness>()
   for (const c of campaigns) {
     const rows = coverage.filter((r) => String(r.campaign_id) === c.id).map((r) => ({ date: String(r.date), fetchedAt: str(r.fetched_at) }))
-    out.set(c.id, freshnessOf(c, spendThroughFromRows(c.flightStart, rows), lastSync.get(c.id) ?? null, nowMs))
+    out.set(c.id, freshnessOf(c, spendThroughFromRows(c.flightStart, rows, c.flightEnd), lastSync.get(c.id) ?? null, nowMs))
   }
   return out
 }
