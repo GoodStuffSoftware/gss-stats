@@ -49,6 +49,13 @@ export interface CampaignFlight {
    * `null` = flight start not yet confirmed — attribute NOTHING until it's set (used by the
    * retest campaign below so its pre-launch QA rows don't count). */
   flightStart: string | null
+  /** Optional local ET time-of-day (HH:MM, 24h) the ad schedule actually starts at on
+   * `flightStart` — when set, campaignAttributionClause's lower `ts` bound is `flightStart`
+   * at THIS time (DST-safe, via etTimeUtcMs), not ET midnight. Use this when ads start
+   * mid-day (e.g. the retest's noon-ET schedule) so same-day pre-schedule rows (validation
+   * traffic, QA) don't count as real attribution. Undefined = bound at ET midnight, same as
+   * before. */
+  flightStartTimeEt?: string
   /** ET calendar date, inclusive — serving-window END, for DISPLAY and flight-day-alignment
    * only (flightDayIndex, the "daily arrivals by flight day" chart, servingHoursEt shading).
    * NOT used to bound attribution — see flightStart above. */
@@ -85,10 +92,11 @@ export interface CampaignFlight {
 //     sudoku_tired_of_ads_play, read from the Play Install Referrer) — there is no
 //     intermediate web page, so NO beacon rows exist for it today. Spend-only until a Play
 //     Install Referrer reader ships in bestsudoku-app; see `measurement` below.
-//   24279250691 "US+CA web retest": uc sudoku_funnel_retest. 9 rows already tagged with this
-//     uc on 2026-09-23 are pre-launch validation/QA, not real traffic — flightStart is left
-//     `null` (pending) until the flight's real start is confirmed, which excludes them (and
-//     everything else) from attribution. See flightStart's doc comment.
+//   24279250691 "US+CA web retest": uc sudoku_funnel_retest. Now serving 2026-09-26..10-02
+//     ET, ad schedule starting 12:00 ET (ads session, 2026-09-26; $13/day budget, $100 hard
+//     stop). The 9 rows already tagged with this uc on 2026-09-23, plus anything tagged
+//     before 2026-09-26 12:00 ET, are pre-launch validation/QA, not real traffic — excluded
+//     via flightStartTimeEt. See flightStart's/flightStartTimeEt's doc comments.
 //
 // Live `campaign` values seen in production D1 as of 2026-09-25 (read-only query:
 // `SELECT campaign, MIN(ts), MAX(ts), COUNT(*) FROM hits WHERE campaign IS NOT NULL AND
@@ -143,12 +151,13 @@ export const CAMPAIGNS: CampaignFlight[] = [
     id: '24279250691',
     label: 'US+CA web retest',
     ucValues: ['sudoku_funnel_retest'],
-    flightStart: null, // pending — set to a real ET date once the flight's actual start is confirmed
-    flightEnd: '2026-10-02', // 7 serving days once flightStart is set
-    status: 'upcoming',
+    flightStart: '2026-09-26', // confirmed — now serving (ads session, 2026-09-26)
+    flightStartTimeEt: '12:00', // the ad schedule's actual start — see campaignAttributionClause
+    flightEnd: '2026-10-02', // 7 serving days
+    status: 'active',
     servingHoursEt: [12, 23],
     notes:
-      '9 rows already tagged sudoku_funnel_retest on 2026-09-23 are pre-launch validation/QA, not real traffic — excluded because flightStart is still null/pending. Set flightStart to a real ET date once the flight actually begins; until then nothing is attributed to this campaign at all.',
+      'Now serving as of 2026-09-26. Budget: $13/day, $100 hard stop (ads session, 2026-09-26) — see CAMPAIGN_DAILY_SPEND\'s entry for this id, left empty (and CAMPAIGN_SPEND left null) until real daily spend numbers arrive from the Google Ads API; both stay configurable per-day, same as the other two campaigns. The 9 rows tagged sudoku_funnel_retest on 2026-09-23, plus anything tagged before 2026-09-26 12:00 ET, are pre-launch validation/QA, not real traffic — excluded via flightStartTimeEt (the schedule\'s real noon-ET start), not just the calendar date.',
   },
 ]
 
@@ -185,6 +194,38 @@ export function etMidnightUtcMs(dateEt: string): number {
   }
   return Date.parse(`${dateEt}T00:00:00Z`) // unreachable for a valid YYYY-MM-DD; safe fallback
 }
+
+// ET calendar date + local clock time, minute precision — used by etTimeUtcMs's round-trip
+// check below (etMidnightUtcMs's own check is midnight-specific; this generalizes it).
+const ET_DATETIME_FMT = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/New_York',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+})
+function etDateTimeFromMs(ms: number): string {
+  const parts = Object.fromEntries(ET_DATETIME_FMT.formatToParts(new Date(ms)).map((p) => [p.type, p.value]))
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`
+}
+
+/** DST-safe: the UTC instant denoted by ET calendar date `dateEt` (YYYY-MM-DD) at local ET
+ * clock time `timeEt` (HH:MM, 24h) — the general form of etMidnightUtcMs above (which is
+ * just `etTimeUtcMs(dateEt, '00:00')` in spirit, kept as its own function for its stronger
+ * exact-boundary check). Tries both possible ET UTC offsets (EST -5h / EDT -4h) and picks
+ * whichever one round-trips back to `${dateEt}T${timeEt}` when reformatted in
+ * America/New_York. Used for CampaignFlight.flightStartTimeEt — e.g. an ad schedule that
+ * starts mid-day rather than at ET midnight. */
+export function etTimeUtcMs(dateEt: string, timeEt: string): number {
+  for (const offsetHours of [5, 4]) {
+    const candidate = Date.parse(`${dateEt}T${timeEt}:00Z`) + offsetHours * 3_600_000
+    if (etDateTimeFromMs(candidate) === `${dateEt}T${timeEt}`) return candidate
+  }
+  return Date.parse(`${dateEt}T${timeEt}:00Z`) // unreachable for a valid date/time; safe fallback
+}
+
 function nextEtDate(dateEt: string): string {
   const d = new Date(dateEt + 'T00:00:00Z')
   d.setUTCDate(d.getUTCDate() + 1)
@@ -200,7 +241,10 @@ export function etFlightRangeMs(flightStart: string, flightEnd: string): [number
 /** No upper bound, ever — a row tagged with this campaign's uc belongs to it however late it
  * arrives (see flightStart's doc comment on CampaignFlight). `flightStart === null` means
  * "not yet confirmed": attribute nothing (`1 = 0`) rather than guess, so pre-launch QA rows
- * (e.g. the retest campaign's 9 rows) never count until a real date is set. */
+ * (e.g. the retest campaign's 9 rows) never count until a real date is set. The lower `ts`
+ * bound is ET midnight of `flightStart` UNLESS `flightStartTimeEt` is set, in which case
+ * it's `flightStart` at that local ET time instead (DST-safe, via etTimeUtcMs) — e.g. the
+ * retest's ad schedule starts at noon ET, so same-day pre-schedule rows don't count. */
 export function campaignAttributionClause(campaign: CampaignFlight): { sql: string; binds: unknown[] } {
   const ucPlaceholders = campaign.ucValues.map(() => '?').join(', ')
   const w = [`campaign IN (${ucPlaceholders})`]
@@ -209,7 +253,11 @@ export function campaignAttributionClause(campaign: CampaignFlight): { sql: stri
     w.push('1 = 0')
   } else {
     w.push('ts >= ?')
-    binds.push(etMidnightUtcMs(campaign.flightStart))
+    binds.push(
+      campaign.flightStartTimeEt
+        ? etTimeUtcMs(campaign.flightStart, campaign.flightStartTimeEt)
+        : etMidnightUtcMs(campaign.flightStart),
+    )
   }
   return { sql: w.join(' AND '), binds }
 }
@@ -392,7 +440,7 @@ export const CAMPAIGN_DAILY_SPEND: Record<string, Record<string, number>> = {
     '2026-09-12': 14.07,
     '2026-09-13': 13.36,
   },
-  '24279250691': {}, // not flighted yet — no spend
+  '24279250691': {}, // serving as of 2026-09-26 ($13/day budget, $100 hard stop) — left empty until real daily spend numbers arrive from the Google Ads API
 }
 export const CAMPAIGN_SPEND: Record<string, number | null> = {
   '24215315197': 124.47, // Google Ads' own reported total — see CAMPAIGN_DAILY_SPEND's doc comment
