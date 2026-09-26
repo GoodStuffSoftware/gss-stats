@@ -1,6 +1,6 @@
 import type { DashboardConfig, DashboardPage, GlobalFilters, Widget } from '../types'
 import { parseDurationMs } from './range'
-import { POPUPS, POPUP_RATE_SPECS, NO_OUTCOME_TRACKING_NOTE, SIGNIN_ELIGIBLE_CAVEAT } from './popupEvents'
+import { POPUPS, POPUP_RATE_SPECS, NO_OUTCOME_TRACKING_NOTE, SIGNIN_ELIGIBLE_CAVEAT, SMALL_SAMPLE_NOTE } from './popupEvents'
 
 export function defaultDateRange(): { since: string; until: string } {
   const until = new Date()
@@ -35,6 +35,11 @@ export function migrateSiteSel(raw: any): string[] {
 function w(p: Omit<Widget, 'i'>): Widget {
   return { ...p, i: p.id }
 }
+
+// Bumped to 7 for the bespoke-page → widget conversion migration (see normalizeConfig's v7
+// block below): Overview/Campaigns went from `widgets: []` (rendered by the now-retired
+// OverviewPage.vue/CampaignComparePage.vue) to real generic widgets.
+export const CONFIG_VERSION = 7
 
 // The default "basic charts available out of the box" — a sensible analytics
 // starting layout. Users can move/resize/add/remove from here.
@@ -86,13 +91,31 @@ export function defaultBeaconPage(): DashboardPage {
   return { id: 'beacon', name: 'Beacon', isDefault: false, filters: defaultFilters(), widgets: defaultBeaconWidgets() }
 }
 
-// "Best Sudoku launch" — a beacon page pre-filtered to the Best Sudoku traffic
-// (web + app), focused on where visitors come from (referrers + subreddit) and geo.
+// "Best Sudoku · Traffic" (formerly "Best Sudoku launch") — a beacon page pre-filtered to
+// the Best Sudoku traffic (web + app). Refined 2026-09-26 now that the Overview, Campaigns,
+// and Pop-ups pages exist (see App.vue's former isBespokePage / OverviewPage.vue /
+// CampaignComparePage.vue history): every chart here is something those three pages don't
+// already cover — per-site/geo/referrer/device detail on ALL Best Sudoku traffic, not just
+// tagged campaign arrivals. Removed vs the pre-refinement set:
+//  - 'Campaign (utm_campaign)' and 'Campaign source / medium' hbars — shallow, ungated raw
+//    beacon-tag counts across ALL traffic. The Campaigns page now covers this properly, per
+//    FLIGHT, with MIN_COHORT gating, funnel context, and real attribution (lib/campaigns.ts)
+//    — keeping the raw version here would just be a worse duplicate.
+// Kept because nothing else shows it: per-site pageviews/new-vs-returning/web-vs-app split,
+// device split, full geo breakdown (country/region/city/map — Campaigns' "country" view is
+// tagged-arrivals-only, narrower), referrers + subreddit, and top pages/screens.
+// The trend chart now carries release markers (lib/releases.ts) via widget.markers —
+// 'releases', the same overlay the Overview timeline uses (see lib/charts.ts
+// releaseMarkersPlugin) — so a traffic bump/dip can be read against what shipped.
+// Event paths (pop-up/return beacons — see lib/popupEvents.ts isPopupEventPath) are excluded
+// from every one of these queries at the API layer (functions/api/geo.ts's
+// popupExcludeClause, applied to all three of its query shapes), so they never inflate
+// pageviews/visits or leak into 'Top screens / pages' here — verified, not changed.
 export function defaultBestSudokuLaunchWidgets(): Widget[] {
   return [
     gw({ id: 'bsk-views', title: 'Pageviews', type: 'stat', dimension: 'site', limit: 10, x: 0, y: 0, w: 3, h: 3 }),
     gw({ id: 'bsk-visitor', title: 'New vs returning', type: 'doughnut', dimension: 'visitor', limit: 5, x: 0, y: 3, w: 3, h: 6 }),
-    gw({ id: 'bsk-trend', title: 'Visits over time', type: 'area', dimension: 'date', limit: 90, x: 3, y: 0, w: 9, h: 8 }),
+    gw({ id: 'bsk-trend', title: 'Visits over time', type: 'area', dimension: 'date', limit: 90, markers: 'releases', x: 3, y: 0, w: 9, h: 8 }),
     gw({ id: 'bsk-ref', title: 'Where they come from (referrers)', type: 'hbar', dimension: 'referrer', limit: 12, x: 0, y: 9, w: 6, h: 8 }),
     gw({ id: 'bsk-refpath', title: 'Which subreddit / section', type: 'hbar', dimension: 'refpath', limit: 12, x: 6, y: 8, w: 6, h: 8 }),
     gw({ id: 'bsk-webapp', title: 'Web vs app', type: 'doughnut', dimension: 'site', limit: 5, x: 0, y: 17, w: 3, h: 7 }),
@@ -101,9 +124,7 @@ export function defaultBestSudokuLaunchWidgets(): Widget[] {
     gw({ id: 'bsk-region', title: 'By region / state', type: 'hbar', dimension: 'region', limit: 12, x: 0, y: 24, w: 6, h: 8 }),
     gw({ id: 'bsk-city', title: 'Top cities', type: 'hbar', dimension: 'city', limit: 12, x: 6, y: 24, w: 6, h: 8 }),
     gw({ id: 'bsk-path', title: 'Top screens / pages', type: 'hbar', dimension: 'path', limit: 12, x: 0, y: 32, w: 6, h: 8 }),
-    gw({ id: 'bsk-campaign', title: 'Campaign (utm_campaign)', type: 'hbar', dimension: 'campaign', limit: 12, x: 6, y: 32, w: 6, h: 8 }),
-    gw({ id: 'bsk-map', title: 'Visitor map', type: 'map', dimension: '', limit: 2000, x: 0, y: 40, w: 12, h: 9 }),
-    gw({ id: 'bsk-source', title: 'Campaign source / medium', type: 'hbar', dimension: 'source', limit: 12, x: 0, y: 49, w: 6, h: 8 }),
+    gw({ id: 'bsk-map', title: 'Visitor map', type: 'map', dimension: '', limit: 2000, x: 6, y: 32, w: 6, h: 8 }),
   ]
 }
 // The beacon site tags for Best Sudoku traffic. The web build tags itself
@@ -114,7 +135,7 @@ export const BEST_SUDOKU_SITES = ['bestsudoku-web', 'bestsudoku', 'bestsudoku-ap
 export function defaultBestSudokuLaunchPage(): DashboardPage {
   return {
     id: 'bsk-launch',
-    name: 'Best Sudoku launch',
+    name: 'Best Sudoku · Traffic',
     isDefault: false,
     filters: { ...defaultFilters(), siteSel: [...BEST_SUDOKU_SITES] },
     widgets: defaultBestSudokuLaunchWidgets(),
@@ -190,50 +211,109 @@ export function defaultBestSudokuPopupsWidgets(): Widget[] {
 export function defaultBestSudokuPopupsPage(): DashboardPage {
   return {
     id: 'bsk-popups',
-    name: 'Best Sudoku pop-ups',
+    name: 'Best Sudoku · Pop-ups',
     isDefault: false,
     filters: { ...defaultFilters(), siteSel: [...BEST_SUDOKU_SITES] },
     widgets: defaultBestSudokuPopupsWidgets(),
   }
 }
 export function isBestSudokuPopupsPage(p: DashboardPage): boolean {
-  return p.id === 'bsk-popups' || p.name.trim().toLowerCase() === 'best sudoku pop-ups'
+  return p.id === 'bsk-popups' || p.name.trim().toLowerCase() === 'best sudoku pop-ups' || p.name.trim().toLowerCase() === 'best sudoku · pop-ups'
 }
 
-// "Best Sudoku campaigns" — a bespoke page (no generic Widget grid; see
-// components/CampaignComparePage.vue, which App.vue renders instead of <Dashboard> for it).
-// `widgets` stays empty; it's carried only so PageBar can list/switch/rename/delete it like
-// any other page.
+// "Best Sudoku campaigns" widgets — every panel of the former bespoke
+// CampaignComparePage.vue as its own movable/resizable/editable widget (dataset
+// 'campaigns'; see components/widgets/CampaignsWidgetBody.vue). campaignIds left
+// undefined = all CAMPAIGNS, same as the page's original always-every-campaign behavior.
+export function defaultCampaignsWidgets(): Widget[] {
+  return [
+    w({ id: 'cw-funnel', title: 'Funnel per campaign', type: 'table', dataset: 'campaigns', view: 'funnel', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 0, w: 12, h: 14 }),
+    w({ id: 'cw-hour', title: 'Arrivals by ET hour of day', type: 'table', dataset: 'campaigns', view: 'hourOfDay', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 14, w: 12, h: 8 }),
+    w({ id: 'cw-country', title: 'Arrivals & funnel by country', type: 'table', dataset: 'campaigns', view: 'country', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 22, w: 12, h: 10 }),
+    w({ id: 'cw-flightday', title: 'Daily arrivals by flight day', type: 'table', dataset: 'campaigns', view: 'flightDay', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 32, w: 12, h: 10 }),
+    w({ id: 'cw-cost', title: 'Cost per arrival / auth success', type: 'table', dataset: 'campaigns', view: 'cost', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 42, w: 12, h: 9 }),
+    w({ id: 'cw-devicemix', title: 'Device mix', type: 'table', dataset: 'campaigns', view: 'deviceMix', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 51, w: 12, h: 12 }),
+    w({ id: 'cw-returns', title: 'Return visits', type: 'table', dataset: 'campaigns', view: 'returns', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 63, w: 12, h: 11 }),
+    w({
+      id: 'cw-note-attrib',
+      title: 'Attribution note',
+      type: 'note',
+      dimension: '',
+      metric: 'pageviews',
+      limit: 1,
+      note: 'Attribution is by campaign tag only (see lib/campaigns.ts) — no device/location/timestamp correlation across rows. Funnel steps are counted within tagged sessions. Verification and household traffic are excluded server-side.',
+      x: 0,
+      y: 74,
+      w: 9,
+      h: 4,
+    }),
+    w({
+      id: 'cw-note-smallsample',
+      title: 'Small sample',
+      type: 'note',
+      dimension: '',
+      metric: 'pageviews',
+      limit: 1,
+      note: SMALL_SAMPLE_NOTE,
+      x: 9,
+      y: 74,
+      w: 3,
+      h: 4,
+    }),
+  ]
+}
+// Another bespoke-turned-widget page (see components/CampaignComparePage.vue — kept for
+// reference / git history only, no longer mounted by App.vue). Second in the Best Sudoku
+// group's tab order.
 export function defaultCampaignComparePage(): DashboardPage {
-  return { id: 'bsk-campaigns', name: 'Best Sudoku campaigns', isDefault: false, filters: defaultFilters(), widgets: [] }
+  return { id: 'bsk-campaigns', name: 'Best Sudoku · Campaigns', isDefault: false, filters: defaultFilters(), widgets: defaultCampaignsWidgets() }
 }
 export function isCampaignComparePage(p: DashboardPage): boolean {
-  return p.id === 'bsk-campaigns' || p.name.trim().toLowerCase() === 'best sudoku campaigns'
+  return p.id === 'bsk-campaigns' || p.name.trim().toLowerCase() === 'best sudoku campaigns' || p.name.trim().toLowerCase() === 'best sudoku · campaigns'
 }
 
-// "Best Sudoku overview" (Part C) — another bespoke page (see components/OverviewPage.vue),
-// always FIRST in the page list: "how is the release going, how is each campaign going,
-// and what's happening right now." Uses the global filter's date range for its timeline
-// (the "existing range control"), so — unlike the campaign-compare page — it keeps its own
-// real `filters`, seeded to span since well before any known Best Sudoku data.
+// "Best Sudoku overview" (Part C) widgets — every panel of the former bespoke
+// OverviewPage.vue as its own movable/resizable/editable widget (dataset 'overview'; see
+// components/widgets/OverviewWidgetBody.vue). One widget per panel, reproducing the page's
+// original top-to-bottom arrangement.
+export function defaultOverviewWidgets(): Widget[] {
+  return [
+    w({ id: 'ow-note-smallsample', title: 'Small sample', type: 'note', dimension: '', metric: 'pageviews', limit: 1, note: SMALL_SAMPLE_NOTE, x: 0, y: 0, w: 12, h: 3 }),
+    w({ id: 'ow-kpis', title: 'Today at a glance', type: 'table', dataset: 'overview', view: 'kpis', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 3, w: 12, h: 8 }),
+    w({ id: 'ow-timeline', title: 'Overall timeline', type: 'table', dataset: 'overview', view: 'timeline', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 11, w: 12, h: 12 }),
+    w({ id: 'ow-scorecard', title: 'Campaign scorecard', type: 'table', dataset: 'overview', view: 'scorecard', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 23, w: 12, h: 14 }),
+    w({ id: 'ow-release', title: 'Release panel', type: 'table', dataset: 'overview', view: 'releasePanel', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 37, w: 12, h: 9 }),
+  ]
+}
+// Another bespoke-turned-widget page (see components/OverviewPage.vue — kept for reference /
+// git history only, no longer mounted by App.vue), always FIRST among the Best Sudoku group:
+// "how is the release going, how is each campaign going, and what's happening right now."
+// Uses the global filter's date range for its timeline (the "existing range control"), so —
+// unlike the campaign-compare page — it keeps its own real `filters`, seeded to span since
+// well before any known Best Sudoku data.
 export function defaultOverviewPage(): DashboardPage {
   return {
     id: 'bsk-overview',
-    name: 'Best Sudoku overview',
+    name: 'Best Sudoku · Overview',
     isDefault: false,
     filters: { ...defaultFilters(), since: '2026-01-01T00:00:00.000Z', rangeRel: '' },
-    widgets: [],
+    widgets: defaultOverviewWidgets(),
   }
 }
 export function isOverviewPage(p: DashboardPage): boolean {
-  return p.id === 'bsk-overview' || p.name.trim().toLowerCase() === 'best sudoku overview'
+  return p.id === 'bsk-overview' || p.name.trim().toLowerCase() === 'best sudoku overview' || p.name.trim().toLowerCase() === 'best sudoku · overview'
 }
 
+// The GSS pages (id-identified, always first in tab order — see reorderBskGroup) and the
+// Best Sudoku group in its required tab order: Overview, Campaigns, Pop-ups, Launch/Traffic.
+// reorderBskGroup is idempotent, so running it over an already-correct list is a no-op —
+// applied here too rather than hand-ordering, so defaultConfig() can never drift out of sync
+// with what normalizeConfig() enforces on every load.
 export function defaultConfig(): DashboardConfig {
   return {
-    version: 6,
+    version: CONFIG_VERSION,
     activePageId: 'bsk-overview',
-    pages: [defaultOverviewPage(), defaultPage(), defaultBeaconPage(), defaultBestSudokuLaunchPage(), defaultBestSudokuPopupsPage(), defaultCampaignComparePage()],
+    pages: reorderBskGroup([defaultPage(), defaultBeaconPage(), defaultOverviewPage(), defaultCampaignComparePage(), defaultBestSudokuPopupsPage(), defaultBestSudokuLaunchPage()]),
   }
 }
 
@@ -278,7 +358,12 @@ export function beaconizeWidget(wd: Widget): Widget {
 // The launch page, whether it's the auto-added one (id 'bsk-launch') or one the user
 // built by duplicating another page and renaming it.
 export function isBestSudokuLaunchPage(p: DashboardPage): boolean {
-  return p.id === 'bsk-launch' || p.name.trim().toLowerCase() === 'best sudoku launch'
+  return (
+    p.id === 'bsk-launch' ||
+    p.name.trim().toLowerCase() === 'best sudoku launch' ||
+    p.name.trim().toLowerCase() === 'best sudoku · traffic' ||
+    p.name.trim().toLowerCase() === 'best sudoku traffic'
+  )
 }
 
 // The right "factory" chart set for a page when restoring defaults. The two canonical
@@ -291,7 +376,9 @@ export function defaultWidgetsForPage(p: DashboardPage): Widget[] {
   if (p.id === 'default') return defaultWidgets()
   if (p.id === 'beacon') return defaultBeaconWidgets()
   if (p.id === 'bsk-popups') return defaultBestSudokuPopupsWidgets()
-  if (isCampaignComparePage(p) || isOverviewPage(p)) return [] // bespoke pages, no generic widgets
+  if (isOverviewPage(p)) return defaultOverviewWidgets()
+  if (isCampaignComparePage(p)) return defaultCampaignsWidgets()
+  if (isBestSudokuLaunchPage(p)) return defaultBestSudokuLaunchWidgets()
   const geoCount = p.widgets.filter((w) => w.dataset === 'geo').length
   return geoCount > p.widgets.length / 2 ? defaultBeaconWidgets() : defaultWidgets()
 }
@@ -313,13 +400,14 @@ function normFilters(raw: any): GlobalFilters {
   return merged
 }
 
+const KNOWN_DATASETS = new Set(['geo', 'popup', 'overview', 'campaigns', 'ads-readings'])
 function normWidget(x: any): Widget {
   return {
     id: String(x.id ?? cryptoId()),
     i: String(x.id ?? x.i ?? cryptoId()),
     title: String(x.title ?? 'Untitled'),
     type: x.type ?? 'bar',
-    dataset: x.dataset === 'geo' ? 'geo' : x.dataset === 'popup' ? 'popup' : undefined,
+    dataset: KNOWN_DATASETS.has(x.dataset) ? x.dataset : undefined,
     dimension: x.dimension ?? '',
     breakdown: x.breakdown || undefined,
     popup: typeof x.popup === 'string' ? x.popup : undefined,
@@ -335,6 +423,13 @@ function normWidget(x: any): Widget {
     isDefault: x.isDefault === true || undefined,
     // Per-chart override: back-fill any filter fields added since it was saved.
     filters: x.filters ? normFilters(x.filters) : undefined,
+    // dataset 'overview'/'campaigns'/'ads-readings': which panel + which campaign(s).
+    view: typeof x.view === 'string' ? x.view : undefined,
+    campaignIds: Array.isArray(x.campaignIds) ? x.campaignIds.filter((c: any) => typeof c === 'string' && c) : undefined,
+    // type 'note': the note body.
+    note: typeof x.note === 'string' ? x.note : undefined,
+    // date-dimension trend charts: release-marker overlay.
+    markers: x.markers === 'releases' ? 'releases' : undefined,
     x: Number(x.x) || 0,
     y: Number(x.y) || 0,
     w: Number(x.w) || 4,
@@ -390,6 +485,17 @@ export function normalizeConfig(raw: any): DashboardConfig {
     if ((Number(raw.version) || 0) < 6 && !pages.some((p: DashboardPage) => isOverviewPage(p))) {
       pages.unshift(defaultOverviewPage())
     }
+    // v7 migration: convert the bespoke Overview/Campaigns pages to real widgets (see
+    // components/widgets/OverviewWidgetBody.vue / CampaignsWidgetBody.vue — the old
+    // OverviewPage.vue/CampaignComparePage.vue bespoke renderers are retired). Gated on
+    // `widgets.length === 0` rather than only the version number, so it's non-destructive AND
+    // idempotent even outside a clean version progression: a page that already has widgets
+    // (this migration having already run, or a user who somehow added widgets before this
+    // shipped) is left completely alone — never dropped, never re-populated, never duplicated.
+    for (const p of pages) {
+      if (isOverviewPage(p) && p.widgets.length === 0) p.widgets = defaultOverviewWidgets()
+      if (isCampaignComparePage(p) && p.widgets.length === 0) p.widgets = defaultCampaignsWidgets()
+    }
     // Self-heal (every load, not version-gated): the canonical pages — Overview, Beacon, and
     // the Best Sudoku launch page — must NEVER carry a persistent page-level drill. Drilling
     // always spawns a NEW page, so a drill sitting on one of these is always erroneous (e.g.
@@ -399,8 +505,14 @@ export function normalizeConfig(raw: any): DashboardConfig {
       const canonical = p.id === 'default' || p.id === 'beacon' || isBestSudokuLaunchPage(p)
       if (canonical && p.filters.drill?.length) p.filters.drill = []
     }
-    const activePageId = pages.some((p: DashboardPage) => p.id === raw.activePageId) ? raw.activePageId : pages[0].id
-    return { version: 6, activePageId, pages, syncRange: !!raw.syncRange }
+    // Tab-order reorder + rename (every load, not version-gated — see reorderBskGroup):
+    // GSS pages first, then the Best Sudoku group in fixed order (Overview, Campaigns,
+    // Pop-ups, Launch/Traffic), then every user-created page in its existing relative
+    // order. Pure reordering + a consistent-name rename — never drops, renames, or edits
+    // a widget.
+    const ordered = reorderBskGroup(pages)
+    const activePageId = ordered.some((p: DashboardPage) => p.id === raw.activePageId) ? raw.activePageId : ordered[0].id
+    return { version: CONFIG_VERSION, activePageId, pages: ordered, syncRange: !!raw.syncRange }
   }
   // v1 — single page; wrap as the default page
   if (raw && typeof raw === 'object' && Array.isArray(raw.widgets)) {
@@ -414,6 +526,44 @@ export function normalizeConfig(raw: any): DashboardConfig {
     return { version: 2, activePageId: 'default', pages: [page] }
   }
   return defaultConfig()
+}
+
+// ── Tab order (Part D): GSS tab(s) first, then the Best Sudoku group together, in a fixed
+// order, then every user-created page in its existing relative order. Idempotent (running it
+// twice — or over an already-correct list, e.g. a fresh defaultConfig()) produces the exact
+// same order) and non-destructive: it only ever reorders + renames pages, it never adds,
+// drops, or touches a page's widgets/filters. ────────────────────────────────────────────
+const GSS_PAGE_IDS = new Set(['default', 'beacon'])
+const BSK_PAGE_ORDER = ['bsk-overview', 'bsk-campaigns', 'bsk-popups', 'bsk-launch']
+// Old default names this migration will rename FROM, so a page the user deliberately
+// renamed to something else entirely is left alone (only its position changes).
+const BSK_RENAME: Record<string, { from: string[]; to: string }> = {
+  'bsk-overview': { from: ['best sudoku overview', 'best sudoku · overview'], to: 'Best Sudoku · Overview' },
+  'bsk-campaigns': { from: ['best sudoku campaigns', 'best sudoku · campaigns'], to: 'Best Sudoku · Campaigns' },
+  'bsk-popups': { from: ['best sudoku pop-ups', 'best sudoku · pop-ups'], to: 'Best Sudoku · Pop-ups' },
+  'bsk-launch': { from: ['best sudoku launch', 'best sudoku · traffic', 'best sudoku traffic'], to: 'Best Sudoku · Traffic' },
+}
+function renameBskPage(p: DashboardPage): DashboardPage {
+  const r = BSK_RENAME[p.id]
+  if (!r) return p
+  const cur = p.name.trim().toLowerCase()
+  if (cur === r.to.toLowerCase()) return p // already the consistent name — no-op
+  if (!r.from.includes(cur)) return p // user renamed it to something else — leave it
+  return { ...p, name: r.to }
+}
+export function reorderBskGroup(pages: DashboardPage[]): DashboardPage[] {
+  const renamed = pages.map(renameBskPage)
+  const isBsk = (p: DashboardPage) => BSK_PAGE_ORDER.includes(p.id)
+  const gss = renamed.filter((p) => GSS_PAGE_IDS.has(p.id))
+  const bskFound = new Map(renamed.filter(isBsk).map((p) => [p.id, p]))
+  const bsk = BSK_PAGE_ORDER.map((id) => bskFound.get(id)).filter((p): p is DashboardPage => !!p)
+  const rest = renamed.filter((p) => !GSS_PAGE_IDS.has(p.id) && !isBsk(p))
+  const next = [...gss, ...bsk, ...rest]
+  // Idempotency fast-path: if nothing moved or was renamed, return the ORIGINAL array (same
+  // page objects) rather than a freshly-built one, so an already-ordered config round-trips
+  // with no spurious diff.
+  if (next.length === pages.length && next.every((p, i) => p === pages[i])) return pages
+  return next
 }
 
 export function cryptoId(): string {

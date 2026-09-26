@@ -20,6 +20,7 @@ const emit = defineEmits<{
   duplicate: [Widget]
   change: []
   drill: [{ widgetId: string; dimension: string; dataset: 'geo' | 'rum'; value: string; label: string; x: number; y: number }]
+  'open-campaigns': []
 }>()
 
 // On phones we stack cards via CSS (preserving the desktop layout data) and
@@ -81,6 +82,7 @@ const dragEnabled = computed(() => !isMobile.value && !touchCapable)
         @remove="emit('remove', item.id)"
         @duplicate="emit('duplicate', item)"
         @drill="emit('drill', $event)"
+        @open-campaigns="emit('open-campaigns')"
       />
     </GridItem>
   </GridLayout>

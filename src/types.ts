@@ -11,10 +11,13 @@ export type ChartType =
   | 'stat'
   | 'table'
   | 'rate' // a single computed percentage (pop-up tap/outcome/eligibility rate) — see lib/popupEvents.ts
+  | 'note' // a static text tile (caveats/notes carried over from a bespoke page) — no data fetch
 
 export type Metric = 'pageviews' | 'visits'
 
-export type Dataset = 'rum' | 'geo' | 'popup'
+// 'overview'/'campaigns'/'ads-readings' back the panels that used to be bespoke,
+// non-widget pages (OverviewPage.vue / CampaignComparePage.vue) — see Widget.view below.
+export type Dataset = 'rum' | 'geo' | 'popup' | 'overview' | 'campaigns' | 'ads-readings'
 
 export type SiteKey = 'goodstuff.software' | 'goodstuffsoftware.com' | 'bestsudoku.app' | 'all'
 
@@ -63,6 +66,10 @@ export interface Widget {
   site?: SiteKey // optional per-widget site override ('inherit' = use global)
   host?: string // optional per-widget host override
   excludeSelfReferrals?: boolean
+  // A date-dimension trend chart ('line'/'area'/'bar' with dimension 'date') only: overlay
+  // Best Sudoku release markers (see lib/releases.ts) as dashed vertical lines, same visual
+  // treatment as the Overview page's timeline. Undefined/false = no overlay.
+  markers?: 'releases'
   // Marked by the user as one of this page's default charts. "Restore default charts"
   // keeps the marked charts and drops the rest (falling back to the factory set when
   // nothing is marked). Undefined/false = not a default.
@@ -70,6 +77,18 @@ export interface Widget {
   // Full per-chart filter override. When set, this chart ignores the global
   // filter bar and uses these instead. Undefined = follow the global filter.
   filters?: GlobalFilters | null
+  // dataset 'overview': which panel this widget renders — 'kpis' | 'timeline' | 'scorecard'
+  // | 'releasePanel' (see components/widgets/OverviewWidgetBody.vue).
+  // dataset 'campaigns': which panel — 'funnel' | 'hourOfDay' | 'country' | 'flightDay' |
+  // 'cost' | 'deviceMix' | 'returns' (see components/widgets/CampaignsWidgetBody.vue).
+  // dataset 'ads-readings': the ads-routines worker's own view value(s) (e.g. 'log') — see
+  // components/widgets/AdsReadingsWidgetCard.vue.
+  view?: string
+  // dataset 'campaigns' / 'ads-readings': which campaign(s) to include. Empty/undefined =
+  // all campaigns (CAMPAIGNS in lib/campaigns.ts) — same as the pre-widget bespoke pages.
+  campaignIds?: string[]
+  // type 'note': the note's body text. `title` is still the widget title as normal.
+  note?: string
   // grid geometry (managed by grid-layout-plus)
   x: number
   y: number
@@ -291,7 +310,7 @@ export interface OverviewResponse {
   timeline: {
     daily: OverviewDailyPoint[]
     campaignFlights: OverviewCampaignFlightMeta[]
-    releaseMarkers: { version: string; dateEt: string; note: string }[]
+    releaseMarkers: { version: string; dateEt: string; note: string; major?: boolean }[]
     trackingActivationDate: string | null
     since: string
     until: string

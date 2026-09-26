@@ -1,60 +1,40 @@
 <script setup lang="ts">
-// "Best Sudoku overview" (Part C) — a bespoke page, same shape as CampaignComparePage.vue:
-// fetches its own data from /api/overview instead of going through the generic Widget/
-// ChartCard pipeline, because none of its sections (KPI deltas, an overlaid timeline, a
-// campaign scorecard, a release before/after panel) fit the single-dimension chart model.
-import { ref, computed, watch, onMounted } from 'vue'
+// dataset 'overview' widget body — renders ONE panel of the former bespoke OverviewPage.vue
+// (widget.view selects which: 'kpis' | 'timeline' | 'scorecard' | 'releasePanel'), so each
+// panel is now independently movable/resizable/removable/re-addable like any other widget.
+// Data fetching + all formatting/chart-building logic is unchanged from OverviewPage.vue,
+// just shared across widgets via lib/overviewData.ts instead of fetched per page-mount.
+import { computed } from 'vue'
 import type { ChartConfiguration } from 'chart.js'
-import type { GlobalFilters, OverviewResponse } from '../types'
-import { fetchOverview } from '../api'
-import { PALETTE } from '../lib/charts'
-import { FUNNEL_STEP_LABELS, FUNNEL_STEP_ORDER, FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED, type FunnelStepKey } from '../lib/campaigns'
-import { isInsufficientCohort, SMALL_SAMPLE_NOTE } from '../lib/popupEvents'
-import type { CampaignFunnelCounts } from '../types'
-import BaseChart from './charts/BaseChart.vue'
+import type { GlobalFilters, Widget, OverviewResponse } from '../../types'
+import { useOverviewData } from '../../lib/overviewData'
+import { PALETTE } from '../../lib/charts'
+import { FUNNEL_STEP_LABELS, FUNNEL_STEP_ORDER, FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED, type FunnelStepKey } from '../../lib/campaigns'
+import { isInsufficientCohort } from '../../lib/popupEvents'
+import type { CampaignFunnelCounts } from '../../types'
+import BaseChart from '../charts/BaseChart.vue'
 
-const props = defineProps<{ filters: GlobalFilters }>()
+const props = defineProps<{ widget: Widget; filters: GlobalFilters }>()
 const emit = defineEmits<{ 'open-campaigns': [] }>()
 
-const data = ref<OverviewResponse | null>(null)
-const loading = ref(true)
-const error = ref<string | null>(null)
-const lastUpdated = ref<Date | null>(null)
-
-async function load() {
-  loading.value = true
-  error.value = null
-  try {
-    data.value = await fetchOverview(props.filters.since, props.filters.until)
-    lastUpdated.value = new Date()
-  } catch (e: any) {
-    error.value = e?.message ?? 'Failed to load'
-  } finally {
-    loading.value = false
-  }
-}
-onMounted(load)
-watch(() => [props.filters.since, props.filters.until], load)
+const { data, loading, error } = useOverviewData(
+  () => props.filters.since,
+  () => props.filters.until,
+)
 
 function fmt(n: number | null | undefined): string {
   return n == null ? '—' : n.toLocaleString('en-US')
 }
-// `denominator`, when passed, distinguishes "too few to report" (MIN_COHORT — some data,
-// just not enough) from plain "—" (no data at all) for a null rate — see
-// lib/popupEvents.ts isInsufficientCohort. Every rate here is already server-gated
-// (computeRate enforces the floor itself); this is purely about which message shows.
 function pct(n: number | null | undefined, denominator?: number): string {
   if (n == null) return denominator != null && isInsufficientCohort(denominator) ? 'too few to report' : '—'
   return `${(n * 100).toFixed(1)}%`
 }
-// Numerator/denominator shown next to every rate — see lib/popupEvents.ts SMALL_SAMPLE_NOTE:
-// with only 14 registered users in production, a bare percentage overstates confidence.
 function counts(numerator: number | null | undefined, denominator: number | null | undefined): string {
   return numerator == null || denominator == null ? '' : `(${numerator}/${denominator})`
 }
-function prevFunnelCount(counts: CampaignFunnelCounts, step: keyof CampaignFunnelCounts): number {
+function prevFunnelCount(cnts: CampaignFunnelCounts, step: keyof CampaignFunnelCounts): number {
   const idx = FUNNEL_STEP_ORDER.indexOf(step)
-  return idx > 0 ? counts[FUNNEL_STEP_ORDER[idx - 1]] : 0
+  return idx > 0 ? cnts[FUNNEL_STEP_ORDER[idx - 1]] : 0
 }
 function money(n: number | null | undefined): string {
   return n == null ? '—' : `$${n.toFixed(2)}`
@@ -69,19 +49,10 @@ function deltaClass(d: { delta: number } | null | undefined): string {
   if (!d || d.delta === 0) return ''
   return d.delta > 0 ? 'up' : 'down'
 }
-function relTime(d: Date | null): string {
-  if (!d) return ''
-  const s = Math.round((Date.now() - d.getTime()) / 1000)
-  if (s < 5) return 'just now'
-  if (s < 60) return `${s}s ago`
-  return `${Math.round(s / 60)}m ago`
-}
 
 // ── Timeline chart: pageviews + tagged arrivals (left axis), auth success + install (right
-// axis) — shaded campaign-flight bands, release + activation markers. ─────────────────────
-function ymdToUtcMs(ymd: string): number {
-  return Date.parse(ymd + 'T00:00:00Z')
-}
+// axis) — shaded campaign-flight bands, release + activation markers. Unchanged from
+// OverviewPage.vue. ─────────────────────────────────────────────────────────────────────
 function timelineOverlayPlugin(resp: OverviewResponse) {
   return {
     id: 'overviewOverlay',
@@ -89,7 +60,6 @@ function timelineOverlayPlugin(resp: OverviewResponse) {
       const { ctx, chartArea, scales } = chart
       if (!chartArea || !scales?.x) return
       ctx.save()
-      // Campaign flight bands
       for (let i = 0; i < resp.timeline.campaignFlights.length; i++) {
         const f = resp.timeline.campaignFlights[i]
         const x0 = scales.x.getPixelForValue(f.flightStart)
@@ -102,12 +72,17 @@ function timelineOverlayPlugin(resp: OverviewResponse) {
         ctx.fillRect(left, chartArea.top, right - left, chartArea.bottom - chartArea.top)
       }
       ctx.restore()
-      // Release + activation markers (vertical dashed lines)
-      const markers: { date: string; label: string }[] = [
-        ...resp.timeline.releaseMarkers.map((r) => ({ date: r.dateEt, label: r.version })),
+      // Release markers — 'major' ones (a real user-facing Added/Changed entry; see
+      // lib/releases.ts) get a full dashed line + version label; everything else renders as
+      // a short unlabeled tick at the top of the chart area, so a growing release history
+      // doesn't crowd out the labels that matter. The tracking-activation marker is always
+      // labeled (there's only ever one).
+      const majors: { date: string; label: string }[] = [
+        ...resp.timeline.releaseMarkers.filter((r) => r.major).map((r) => ({ date: r.dateEt, label: r.version })),
         ...(resp.timeline.trackingActivationDate ? [{ date: resp.timeline.trackingActivationDate, label: 'tracking starts' }] : []),
       ]
-      for (const m of markers) {
+      const minors = resp.timeline.releaseMarkers.filter((r) => !r.major)
+      for (const m of majors) {
         const x = scales.x.getPixelForValue(m.date)
         if (x == null || Number.isNaN(x) || x < chartArea.left || x > chartArea.right) continue
         ctx.save()
@@ -122,6 +97,18 @@ function timelineOverlayPlugin(resp: OverviewResponse) {
         ctx.fillStyle = 'rgba(26,23,21,0.7)'
         ctx.textAlign = 'left'
         ctx.fillText(m.label, Math.min(x + 4, chartArea.right - 60), chartArea.top + 3)
+        ctx.restore()
+      }
+      for (const r of minors) {
+        const x = scales.x.getPixelForValue(r.dateEt)
+        if (x == null || Number.isNaN(x) || x < chartArea.left || x > chartArea.right) continue
+        ctx.save()
+        ctx.strokeStyle = 'rgba(26,23,21,0.3)'
+        ctx.lineWidth = 2
+        ctx.beginPath()
+        ctx.moveTo(x, chartArea.top)
+        ctx.lineTo(x, chartArea.top + 6)
+        ctx.stroke()
         ctx.restore()
       }
     },
@@ -159,54 +146,39 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
 </script>
 
 <template>
-  <div class="overview-page">
-    <p class="caption small-sample-note">{{ SMALL_SAMPLE_NOTE }}</p>
+  <div class="ow-body">
     <div v-if="loading && !data" class="state mono">Loading…</div>
     <div v-else-if="error" class="state error mono">{{ error }}</div>
 
     <template v-else-if="data">
-      <!-- 1. Today at a glance -->
-      <section class="block">
-        <div class="block-head">
-          <h2>Today at a glance <span class="overline">({{ data.todayEt }} ET, so far)</span></h2>
-          <div class="head-actions">
-            <span v-if="lastUpdated" class="last-updated mono">Updated {{ relTime(lastUpdated) }}</span>
-            <button class="btn-ghost icon" title="Refresh" @click="load">↻</button>
-          </div>
+      <!-- kpis -->
+      <div v-if="widget.view === 'kpis'" class="kpi-grid">
+        <div v-for="k in data.kpis" :key="k.key" class="kpi-tile">
+          <div class="kpi-label">{{ k.label }}</div>
+          <template v-if="k.noCampaignFlighting">
+            <div class="kpi-num small">no campaign flighting today</div>
+          </template>
+          <template v-else-if="k.notYetTracking">
+            <div class="kpi-num small">not yet tracking</div>
+          </template>
+          <template v-else>
+            <div class="kpi-num">{{ k.isRate ? pct(k.today, k.denominator) : fmt(k.today) }}</div>
+            <div v-if="k.isRate && k.denominator != null" class="kpi-sub mono">{{ counts(k.numerator, k.denominator) }}</div>
+            <div v-if="k.vsYesterday" class="kpi-delta" :class="deltaClass(k.vsYesterday)">vs yesterday {{ deltaLabel(k.vsYesterday) }}</div>
+            <div v-if="k.vsAvg7" class="kpi-delta" :class="deltaClass(k.vsAvg7)">vs 7d avg {{ deltaLabel(k.vsAvg7) }}</div>
+          </template>
         </div>
-        <div class="kpi-grid">
-          <div v-for="k in data.kpis" :key="k.key" class="kpi-tile">
-            <div class="kpi-label">{{ k.label }}</div>
-            <template v-if="k.noCampaignFlighting">
-              <div class="kpi-num small">no campaign flighting today</div>
-            </template>
-            <template v-else-if="k.notYetTracking">
-              <div class="kpi-num small">not yet tracking</div>
-            </template>
-            <template v-else>
-              <div class="kpi-num">{{ k.isRate ? pct(k.today, k.denominator) : fmt(k.today) }}</div>
-              <div v-if="k.isRate && k.denominator != null" class="kpi-sub mono">{{ counts(k.numerator, k.denominator) }}</div>
-              <div v-if="k.vsYesterday" class="kpi-delta" :class="deltaClass(k.vsYesterday)">vs yesterday {{ deltaLabel(k.vsYesterday) }}</div>
-              <div v-if="k.vsAvg7" class="kpi-delta" :class="deltaClass(k.vsAvg7)">vs 7d avg {{ deltaLabel(k.vsAvg7) }}</div>
-            </template>
-          </div>
-        </div>
-      </section>
+      </div>
 
-      <!-- 2. Overall timeline -->
-      <section class="block">
-        <h2>Overall timeline</h2>
-        <p class="caption">Shaded bands = campaign flights. Dashed lines = release / tracking-activation markers. Use the date range above to zoom.</p>
+      <!-- timeline -->
+      <template v-else-if="widget.view === 'timeline'">
+        <p class="caption">Shaded bands = campaign flights. Dashed labeled lines = major releases / tracking-activation. Short ticks = other releases (see lib/releases.ts for versions).</p>
         <div class="chart-box"><BaseChart v-if="timelineConfig" :config="timelineConfig" :drill-open="false" @point="() => {}" /></div>
         <p v-if="!timelineConfig" class="caption">No data in range yet.</p>
-      </section>
+      </template>
 
-      <!-- 3. Campaign scorecard -->
-      <section class="block">
-        <div class="block-head">
-          <h2>Campaign scorecard</h2>
-          <button class="btn-ghost link" @click="emit('open-campaigns')">Open campaigns page →</button>
-        </div>
+      <!-- scorecard -->
+      <template v-else-if="widget.view === 'scorecard'">
         <div class="scorecard-grid">
           <div v-for="row in data.scorecard" class="scorecard-card" :key="row.id" role="button" tabindex="0" @click="emit('open-campaigns')" @keyup.enter="emit('open-campaigns')">
             <div class="sc-head">
@@ -237,11 +209,10 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
             </div>
           </div>
         </div>
-      </section>
+      </template>
 
-      <!-- 4. Release panel -->
-      <section class="block">
-        <h2>Release panel</h2>
+      <!-- releasePanel -->
+      <template v-else-if="widget.view === 'releasePanel'">
         <template v-if="data.releasePanel">
           <p class="caption">{{ data.releasePanel.release.version }} ({{ data.releasePanel.release.dateEt }}) — {{ data.releasePanel.days }} days before vs after. {{ data.releasePanel.note }}</p>
           <div class="release-grid">
@@ -261,82 +232,35 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
             </div>
           </div>
         </template>
-        <p v-else class="caption">No dated release yet — set a release date in <code>src/lib/releases.ts</code> (or ship v1.95.3 and set <code>TRACKING_ACTIVATION_DATE_ET</code>) to populate this panel.</p>
-      </section>
+        <p v-else class="caption">No dated release yet — set a release date in <code>src/lib/releases.ts</code> to populate this panel.</p>
+      </template>
+
+      <p v-else class="state mono">Unknown overview panel "{{ widget.view }}"</p>
     </template>
   </div>
 </template>
 
 <style scoped>
-.overview-page {
-  display: flex;
-  flex-direction: column;
-  gap: 22px;
+.ow-body {
+  height: 100%;
+  overflow: auto;
 }
 .state {
-  padding: 40px 0;
+  padding: 20px 0;
   text-align: center;
   color: rgb(var(--ink-3));
 }
 .state.error {
   color: #bc4749;
 }
-.block-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-bottom: 10px;
-}
-.block h2 {
-  font-family: 'Space Grotesk', sans-serif;
-  font-size: 15px;
-  font-weight: 600;
-}
-.block-head h2 {
-  margin-bottom: 0;
-}
 .caption {
   font-size: 11.5px;
   color: rgb(var(--ink-3));
-  margin: 4px 0 10px;
+  margin: 0 0 10px;
 }
 .caption code {
   font-family: 'JetBrains Mono', monospace;
 }
-.head-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.last-updated {
-  font-size: 11px;
-  color: rgb(var(--ink-3));
-}
-.btn-ghost.icon {
-  border: none;
-  background: transparent;
-  color: rgb(var(--ink-3));
-  font-size: 15px;
-  padding: 3px 7px;
-  border-radius: 7px;
-  cursor: pointer;
-}
-.btn-ghost.icon:hover {
-  background: rgb(var(--sunken));
-  color: rgb(var(--ink));
-}
-.btn-ghost.link {
-  border: none;
-  background: transparent;
-  color: rgb(var(--amber-hover));
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-/* KPI tiles — wrap, never scroll horizontally (phone-readable) */
 .kpi-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -385,12 +309,10 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
 .kpi-delta.down {
   color: #bc4749;
 }
-
 .chart-box {
-  height: 300px;
+  height: 100%;
+  min-height: 220px;
 }
-
-/* Scorecard — a card grid, never a wide table (no horizontal scroll on phone) */
 .scorecard-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
@@ -445,7 +367,6 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
   padding: 2px 6px;
   color: rgb(var(--ink-3));
 }
-
 .release-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
