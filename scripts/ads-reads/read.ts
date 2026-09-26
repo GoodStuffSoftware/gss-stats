@@ -20,6 +20,7 @@ import {
   lastSpendDate,
   mergeSpend,
   microsToDollars,
+  missingDailyReads,
   newlyCrossedThresholds,
   nextThreshold,
   outcomeRates,
@@ -129,6 +130,8 @@ export interface FullRead {
   cumulativeSpend: number
   complete: boolean
   errors: string[]
+  /** Short, secret-free names of the reads that failed (pushes on post-flight runs). */
+  failedSources: string[]
   placements: { campaignCost: number; approvedCost: number; itemizedCost: number; outsideShare: number | null; offList: { name: string; cost: number }[]; stored: boolean } | null
   kill: KillRuleEvaluation
   decision: (DecisionResult & { signUps: number; basis: string }) | null
@@ -149,6 +152,8 @@ export interface HealthSection {
   reason: string
   results: HealthResult[] | null
   alerts: number
+  /** true when a beacon read the check needed failed (not a gate or a no-ads day). */
+  readError?: boolean
 }
 export interface Notify {
   push: boolean
@@ -359,8 +364,12 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
   }
 
   const complete = placementRows.ok && i.tagged.ok && siteRows.ok && returnRaw.ok && returnSites.ok && i.stored != null
+  const failedSources: string[] = []
+  if (!placementRows.ok && i.spendThroughEt) failedSources.push('Google Ads placements')
+  if (!i.tagged.ok || !siteRows.ok || !returnRaw.ok || !returnSites.ok) failedSources.push('beacon')
+  if (fb && (!fb.ok || fb.value.errors.length)) failedSources.push('Firestore counts')
   return {
-    read: { thresholds: i.thresholds, spendThroughEt: i.spendThroughEt, cumulativeSpend, complete, errors, placements: placementView, kill, decision, tagged, site, returns, play, firebase: fb && fb.ok ? fb.value : null },
+    read: { thresholds: i.thresholds, spendThroughEt: i.spendThroughEt, cumulativeSpend, complete, errors, failedSources, placements: placementView, kill, decision, tagged, site, returns, play, firebase: fb && fb.ok ? fb.value : null },
     siteRows,
     returns: returns ? { ok: true, value: returns } : { ok: false, error: returnRaw.ok ? 'returns unavailable' : returnRaw.error },
   }
@@ -419,7 +428,7 @@ async function releaseHealth(
     (beacon ? await attempt('beacon returns', async () => summarizeReturns(await beacon.returns(campaign), campaign.ucValues)) : unavailable<ReturnSummary>('beacon', deps.beaconInitError))
   if (!siteRows.ok || !returns.ok || !tagged.ok) {
     const why = [siteRows, returns, tagged].filter((a) => !a.ok).map((a) => (a as { error: string }).error)
-    return { evaluated: false, reason: `not evaluated: ${why.join('; ')}`, results: null, alerts: 0 }
+    return { evaluated: false, reason: `not evaluated: ${why.join('; ')}`, results: null, alerts: 0, readError: true }
   }
   const maturedBefore = deps.nowMs - opts.parentAgeHours * 3_600_000
   const installFrom = INSTALL_ACCEPT_OUTCOME_FIXED_ET ? etMidnightUtcMs(INSTALL_ACCEPT_OUTCOME_FIXED_ET) : undefined
@@ -463,12 +472,22 @@ export interface MorningResult {
   releaseHealth: HealthSection
   play: PlayReturnStatus | null
   store: StoreSection
+  /** Short names of the reads that failed this run (never error details) — any entry pushes. */
+  failures: string[]
+  /** ET dates inside the routine window with no daily reading since the last one on record
+   * (a scheduled run that never started can't report itself; the next one does). */
+  missedReads: string[]
   notify: Notify
   errors: string[]
   notes: string[]
 }
 
+/** The push text for a morning or backstop run, or null for a quiet run. Built only from
+ * counts, rule ids and short read names — never an error message, so nothing secret-shaped
+ * can reach a notification. */
 export function morningPushText(r: MorningResult): string | null {
+  const missed = r.missedReads.length ? ` Previous scheduled read missing: ${r.missedReads.join(', ')}.` : ''
+  const failed = r.failures.length ? ` Read problems: ${r.failures.join(', ')}.` : ''
   if (r.thresholdRead) {
     const t = r.thresholdRead
     const bits = [`BSK retest $${Math.max(...t.thresholds)} read: ${money(t.cumulativeSpend)} spent`]
@@ -477,12 +496,41 @@ export function morningPushText(r: MorningResult): string | null {
     if (t.kill.tripped.length) bits.push(`PROPOSE PAUSE (${t.kill.tripped.join(', ')})`)
     else bits.push(t.complete ? 'no kill rule tripped, continue' : 'read incomplete, will retry')
     if (t.decision) bits.push(`decision row: ${t.decision.row}`)
-    return bits.join('; ') + '.'
+    return bits.join('; ') + '.' + failed + missed
   }
   if (r.hardCapDaily?.status === 'trip') {
-    return `BSK retest: ${money(r.spend.cumulative.cost)} spent, at or over the ${money(r.spend.hardCap)} cap, campaign still ${r.status?.status ?? 'ENABLED'}. PROPOSE PAUSE.`
+    return `BSK retest: ${money(r.spend.cumulative.cost)} spent, at or over the ${money(r.spend.hardCap)} cap, campaign still ${r.status?.status ?? 'ENABLED'}. PROPOSE PAUSE.${failed}${missed}`
+  }
+  const alerts = r.mode === 'health-only' ? (r.releaseHealth.results ?? []).filter((h) => h.status === 'alert') : []
+  if (alerts.length) {
+    return `BSK retest release-health ALERT: ${alerts.map((h) => `${h.parentLabel} ${h.parent}, ${h.childLabel} 0`).join('; ')}.${failed}`
+  }
+  if (r.failures.length) {
+    return `BSK retest ${r.mode === 'health-only' ? 'release-health backstop' : 'morning read'} FAILED: ${r.failures.join(', ')} unreadable; thresholds and the $${r.spend.hardCap} cap were not fully checked. See the routine output.${missed}`
   }
   return null
+}
+
+/** Short, secret-free names of the reads that failed. Gate skips (quiet window, a day with
+ * no ads served) and --dry-run's skipped writes are not failures. */
+export function morningFailures(i: {
+  healthOnly: boolean
+  dryRun: boolean
+  statusOk: boolean
+  spendOk: boolean
+  taggedOk: boolean
+  thresholdStateOk: boolean
+  storeErrors: number
+  healthReadError: boolean
+}): string[] {
+  const out: string[] = []
+  if (!i.spendOk) out.push('Google Ads spend')
+  if (!i.statusOk) out.push('campaign status')
+  if (!i.healthOnly && !i.taggedOk) out.push('beacon')
+  if (i.healthOnly && i.healthReadError) out.push('beacon')
+  if (!i.healthOnly && !i.thresholdStateOk) out.push('threshold state')
+  if (!i.dryRun && i.storeErrors > 0) out.push('store write')
+  return out
 }
 
 export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Promise<MorningResult> {
@@ -509,6 +557,14 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
   const consumed = consumedA.ok ? consumedA.value : []
   const cumulative = spend.cumulative.cost
   const crossedNow = spend.ok && !opts.healthOnly ? newlyCrossedThresholds(cumulative, plan.thresholds, consumed) : []
+
+  // Scheduled reads that never ran (read BEFORE this run appends its own line).
+  let missedReads: string[] = []
+  if (!opts.healthOnly) {
+    const recent = await attempt('store read (readings)', () => deps.store.getReadings(plan.campaignId, 60))
+    if (recent.ok) missedReads = missingDailyReads(recent.value, todayEt, plan.morningReadFirstEt, plan.morningReadLastEt)
+    else errors.push(recent.error)
+  }
 
   const beacon = deps.beacon
   const taggedRows = beacon ? await attempt('beacon tagged', () => beacon.tagged(campaign)) : unavailable<TaggedRow[]>('beacon tagged', deps.beaconInitError)
@@ -602,7 +658,11 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
         taggedArrivalsYesterday: tagged.yesterday?.taggedArrivals ?? null,
         asksYesterday: tagged.yesterday?.asks ?? null,
       },
-      notes: [status.ok ? `campaign ${status.value.status}/${status.value.servingStatus}` : 'campaign status unreadable', ...(play ? [play.line] : [])],
+      notes: [
+        status.ok ? `campaign ${status.value.status}/${status.value.servingStatus}` : 'campaign status unreadable',
+        ...(play ? [play.line] : []),
+        ...(missedReads.length ? [`previous scheduled read missing: ${missedReads.join(', ')}`] : []),
+      ],
     })
   }
   if (thresholdRead) {
@@ -645,8 +705,10 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
     })
   }
   if (!consumedA.ok && crossedNow.length) notes.push('Threshold state was unreadable, so every crossed threshold was treated as new (a duplicate push is possible).')
+  if (missedReads.length) notes.unshift(`Previous scheduled read missing: ${missedReads.join(', ')} (no daily reading on record for those ET dates).`)
   const w = sync.ok ? await appendReadings(deps, records) : { written: false, error: records.length ? 'readings not written: campaign sync failed' : null }
   if (w.error) errors.push(w.error)
+  const storeErrors = [sync.ok ? null : sync.error, spend.storeError, w.error].filter((e): e is string => !!e)
 
   const result: MorningResult = {
     tool: 'morning-read',
@@ -671,20 +733,35 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
       campaignsSynced: sync.ok && sync.value,
       spendWritten: spend.storeWritten,
       readingsWritten: w.written,
-      errors: [sync.ok ? null : sync.error, spend.storeError, w.error].filter((e): e is string => !!e),
+      errors: storeErrors,
     },
-    notify: { push: false, busCopy: false, reason: 'quiet day: no threshold crossed, no kill rule tripped', text: null },
+    failures: morningFailures({
+      healthOnly: opts.healthOnly,
+      dryRun: deps.dryRun,
+      statusOk: status.ok,
+      spendOk: spend.ok,
+      taggedOk: taggedRows.ok,
+      thresholdStateOk: consumedA.ok,
+      storeErrors: storeErrors.length,
+      healthReadError: !!health.readError,
+    }),
+    missedReads,
+    notify: { push: false, busCopy: false, reason: opts.healthOnly ? 'no release-health alert' : 'quiet day: no threshold crossed, no kill rule tripped', text: null },
     errors,
     notes: [...notes, ...STANDING_NOTES, ...(thresholdRead ? [INSTALL_OUTCOME_GAP_NOTE] : [])],
   }
+  // Push on: a threshold read, a kill-rule trip, a failed read (money is at stake, silence is
+  // worse than one extra ping), or — backstop only — a real release-health ALERT (parent at or
+  // above MIN_COHORT, outcome window elapsed, child zero). A "watch" never pushes.
   const killTrip = (thresholdRead?.kill.tripped.length ?? 0) > 0 || hardCapDaily?.status === 'trip'
-  if (thresholdRead || killTrip) {
-    result.notify = {
-      push: true,
-      busCopy: !!thresholdRead,
-      reason: thresholdRead ? `threshold read at $${Math.max(...thresholdRead.thresholds)}${killTrip ? ' with a kill-rule trip' : ''}` : 'kill-rule trip (hard cap, campaign still enabled)',
-      text: morningPushText(result),
-    }
+  const healthAlert = opts.healthOnly && health.alerts > 0
+  const reasons: string[] = []
+  if (thresholdRead) reasons.push(`threshold read at $${Math.max(...thresholdRead.thresholds)}`)
+  if (killTrip) reasons.push(thresholdRead ? 'kill-rule trip' : 'kill-rule trip (hard cap, campaign still enabled)')
+  if (healthAlert) reasons.push(`release-health alert (${health.alerts})`)
+  if (result.failures.length) reasons.push(`failed read: ${result.failures.join(', ')}`)
+  if (reasons.length) {
+    result.notify = { push: true, busCopy: !!thresholdRead, reason: reasons.join('; '), text: morningPushText(result) }
   }
   return result
 }
@@ -718,6 +795,8 @@ export interface PostflightResult {
   }
   postFlightSpend: RuleResult | null
   store: StoreSection
+  /** Short, secret-free names of the reads that failed. */
+  failures: string[]
   notify: Notify
   errors: string[]
   notes: string[]
@@ -757,6 +836,7 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
     read: null,
     promoSplit: { beacon: null, accounts: null },
     postFlightSpend: null,
+    failures: [],
     store: {
       kind: deps.store.kind,
       dryRun: deps.dryRun,
@@ -769,8 +849,14 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
     errors,
     notes: [...STANDING_NOTES],
   }
+  if (!spend.ok) base.failures.push('Google Ads spend')
+  if (!status.ok) base.failures.push('campaign status')
   if (!due && !opts.force) {
     base.notify.reason = `not due until ${dueEt} ET; nothing recorded`
+    // A failed read still pushes (it may be why the due date looks wrong).
+    if (base.failures.length) {
+      base.notify = { push: true, busCopy: false, reason: `failed read: ${base.failures.join(', ')}`, text: `BSK retest ${opts.stage} read FAILED: ${base.failures.join(', ')} unreadable. See the routine output.` }
+    }
     return base
   }
 
@@ -843,11 +929,14 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
   base.store.readingsWritten = w.written
 
   const trip = base.postFlightSpend?.status === 'trip'
+  for (const f of read.failedSources) if (!base.failures.includes(f)) base.failures.push(f)
+  if (!base.store.dryRun && base.store.errors.length) base.failures.push('store write')
+  const failed = base.failures.length ? ` Read problems: ${base.failures.join(', ')}.` : ''
   base.notify = {
     push: true,
     busCopy: true,
-    reason: `post-flight ${opts.stage} read (a scheduled spec read)${trip ? ' with spend after the flight' : ''}`,
-    text: `BSK retest ${opts.stage} read: ${money(spend.cumulative.cost)} total, ${read.tagged?.summary.taggedArrivals ?? '?'} tagged arrivals, ${read.decision ? `sign-ups ${read.decision.signUps}, row ${read.decision.row}` : 'no decision'}${trip ? `; PROPOSE PAUSE (spend after ${campaign.flightEnd})` : ''}.`,
+    reason: `post-flight ${opts.stage} read (a scheduled spec read)${trip ? ' with spend after the flight' : ''}${base.failures.length ? `; failed read: ${base.failures.join(', ')}` : ''}`,
+    text: `BSK retest ${opts.stage} read: ${money(spend.cumulative.cost)} total, ${read.tagged?.summary.taggedArrivals ?? '?'} tagged arrivals, ${read.decision ? `sign-ups ${read.decision.signUps}, row ${read.decision.row}` : 'no decision'}${trip ? `; PROPOSE PAUSE (spend after ${campaign.flightEnd})` : ''}.${failed}`,
   }
   base.notes.push(INSTALL_OUTCOME_GAP_NOTE)
   return base

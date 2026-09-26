@@ -14,11 +14,13 @@ All notable changes to **gss-stats** are documented here. The format follows
   thresholds reached, kill-rule results, the proposal and key counts.
 - **Scheduled ads-read tooling for the US+CA web retest.** A daily morning read and the
   post-flight reads fetch spend from the Google Ads API, fire each spend threshold once, apply
-  the pre-registered kill rules and decision table, and only ever propose.
+  the pre-registered kill rules and decision table, and only ever propose. A failed read, a
+  missed scheduled read and a real release-health alert are all surfaced rather than silent.
 
 ### Changed
-- **The campaign funnel's Install step counts each install once** (the pop-up outcome),
-  with the raw install beacons, which can double-count, shown as a secondary line.
+- **The campaign funnel's Install step and the overview's Installs tile and timeline count
+  each install once** (the pop-up outcome), with the raw install beacons, which can
+  double-count, shown as a secondary tile and line.
 - **The pop-ups page note now says outcomes and return visits may arrive up to 30 minutes
   late**, replacing the inaccurate "nothing is measured within 30 minutes after a sign-in".
 - **Install outcome figures carry a "known gap" label** until Best Sudoku's install-accept

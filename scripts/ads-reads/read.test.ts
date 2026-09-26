@@ -56,6 +56,7 @@ describe('morning-read: the $50 threshold read', () => {
     expect(r.thresholdRead!.kill.rules.find((x) => x.id === 'funnel-reach')!.status).toBe('no-data')
     expect(await deps.store.getConsumedThresholds('24279250691')).toEqual([25])
     expect(r.notify.text).toMatch(/incomplete/)
+    expect(r.notify.text).toMatch(/Read problems: beacon\./)
   })
   it('a CTR under 0.15% at $50 proposes a pause', async () => {
     const fx = base()
@@ -71,14 +72,50 @@ describe('morning-read: the $50 threshold read', () => {
     const r = await runMorningRead(fixtureDeps(fx, false), opts)
     expect(r.thresholdRead!.kill.tripped).toContain('funnel-reach')
   })
-  it('an Ads API failure evaluates nothing, fires nothing, and says why', async () => {
+  it('an Ads API failure evaluates nothing and fires nothing, but PUSHES a short failure notice with no error detail', async () => {
     const fx = base()
     fx.ads = { error: 'Bitwarden is missing: google-ads-api-rep-developer-token' }
     const r = await runMorningRead(fixtureDeps(fx, false), opts)
     expect(r.spend.ok).toBe(false)
     expect(r.thresholds.crossedNow).toEqual([])
-    expect(r.notify.push).toBe(false)
+    expect(r.failures).toEqual(['Google Ads spend', 'campaign status'])
+    expect(r.notify).toMatchObject({ push: true, busCopy: false })
+    expect(r.notify.text).toMatch(/^BSK retest morning read FAILED: Google Ads spend, campaign status unreadable/)
+    expect(r.notify.text).not.toMatch(/Bitwarden|developer-token/) // details stay in the report, never the push
     expect(r.errors.join(' ')).toMatch(/developer-token/)
+    expect(formatMorningReport(r)).toMatch(/READ FAILED: Google Ads spend, campaign status/)
+  })
+  it('a beacon failure on a quiet day also pushes', async () => {
+    const fx = base()
+    fx.store!.consumed = [25, 50]
+    fx.beacon = { error: 'wrangler unavailable' }
+    const r = await runMorningRead(fixtureDeps(fx, false), opts)
+    expect(r.failures).toEqual(['beacon'])
+    expect(r.notify.push).toBe(true)
+  })
+})
+
+describe('morning-read: a scheduled read that never ran', () => {
+  it('the next read notes the missing ET dates (report, record, and any push), without pushing on its own', async () => {
+    const fx = base()
+    fx.store!.consumed = [25, 50]
+    fx.store!.readings = fx.store!.readings!.filter((x) => x.etDate !== '2026-09-28' && x.etDate !== '2026-09-29')
+    const deps = fixtureDeps(fx, false)
+    const r = await runMorningRead(deps, opts)
+    expect(r.missedReads).toEqual(['2026-09-28', '2026-09-29'])
+    expect(r.notify.push).toBe(false)
+    expect(formatMorningReport(r)).toMatch(/Previous scheduled read missing: 2026-09-28, 2026-09-29/)
+    expect(deps.store.written.readings[0].notes.join(' ')).toMatch(/previous scheduled read missing: 2026-09-28, 2026-09-29/)
+  })
+  it('a push that happens anyway carries the note', async () => {
+    const fx = base()
+    fx.store!.readings = fx.store!.readings!.filter((x) => x.etDate !== '2026-09-29')
+    const r = await runMorningRead(fixtureDeps(fx, false), opts)
+    expect(r.notify.text).toMatch(/Previous scheduled read missing: 2026-09-29\.$/)
+  })
+  it('nothing is missing when every day has its line', async () => {
+    const r = await runMorningRead(fixtureDeps(base(), true), opts)
+    expect(r.missedReads).toEqual([])
   })
 })
 
@@ -130,6 +167,32 @@ describe('morning-read: quiet days, the hard cap and release health', () => {
     expect(install.status).toBe('known-gap')
     expect(r.notify.push).toBe(false)
   })
+  it('the backstop PUSHES on a real alert (parent >= MIN_COHORT, outcome window elapsed, child zero) and never on a watch', async () => {
+    const fx = base()
+    fx.now = '2026-09-30T03:30:00Z'
+    const b = fx.beacon as Extract<Fixture['beacon'], { siteEvents: unknown }>
+    // drop the sign-in prompt's outcome: 9 matured shown, 0 outcomes -> alert
+    b.siteEvents = b.siteEvents.filter((x) => x.path !== '/popup-outcome/signin-prompt/signed-in')
+    const alert = await runMorningRead(fixtureDeps(fx, false), { ...opts, healthOnly: true })
+    expect(alert.releaseHealth.alerts).toBe(1)
+    expect(alert.notify).toMatchObject({ push: true, busCopy: false })
+    expect(alert.notify.text).toMatch(/^BSK retest release-health ALERT: sign-in prompt shown \(≥24h old\) 9, \/popup-outcome\/signin-prompt\/\* 0\.$/)
+    // only 3 shown -> watch -> no push
+    b.siteEvents = b.siteEvents.map((x) => (x.path === '/signin-prompt/placement' ? { ...x, count: 3 } : x))
+    const watch = await runMorningRead(fixtureDeps(fx, false), { ...opts, healthOnly: true })
+    expect(watch.releaseHealth.results!.find((x) => x.id === 'signin-prompt→outcomes')!.status).toBe('watch')
+    expect(watch.notify.push).toBe(false)
+  })
+  it('a shown event younger than the outcome window is not an alert parent', async () => {
+    const fx = base()
+    fx.now = '2026-09-28T03:30:00Z' // 23:30 ET on 09-27; the 18:00Z shown rows on 09-27 are < 24h old
+    const b = fx.beacon as Extract<Fixture['beacon'], { siteEvents: unknown }>
+    b.siteEvents = b.siteEvents.filter((x) => !x.path.startsWith('/popup-outcome/'))
+    ads(fx).daily['2026-09-27'].costMicros = 13_200_000
+    const r = await runMorningRead(fixtureDeps(fx, false), { ...opts, healthOnly: true })
+    expect(r.releaseHealth.alerts).toBe(0)
+    expect(r.notify.push).toBe(false)
+  })
   it('the backstop does not evaluate on a day with no ads served', async () => {
     const fx = base()
     fx.now = '2026-09-30T03:30:00Z'
@@ -161,7 +224,20 @@ describe('postflight-read', () => {
     expect(r.read!.returns!.web['d31-60']).toBe(0)
     expect(deps.store.written.readings.map((x) => [x.kind, x.stage])).toEqual([['postflight', 'wrapup']])
     expect(r.notify).toMatchObject({ push: true, busCopy: true })
+    expect(r.failures).toEqual([])
     expect(formatPostflightReport(r)).toMatch(/Promo vs non-promo/)
+  })
+  it('a failed read is named in the post-flight push; a failed read before the due date still pushes', async () => {
+    const fx = base()
+    fx.now = '2026-10-09T13:00:00Z'
+    fx.beacon = { error: 'wrangler unavailable' }
+    const due = await runPostflightRead(fixtureDeps(fx, false), { campaignId: '24279250691', stage: 'wrapup', force: false })
+    expect(due.notify.text).toMatch(/Read problems: beacon\.$/)
+    const early = base()
+    early.ads = { error: 'OAuth refresh failed' }
+    const r = await runPostflightRead(fixtureDeps(early, false), { campaignId: '24279250691', stage: 'day15', force: false })
+    expect(r.due).toBe(false)
+    expect(r.notify).toMatchObject({ push: true, text: 'BSK retest day15 read FAILED: Google Ads spend, campaign status unreadable. See the routine output.' })
   })
 })
 

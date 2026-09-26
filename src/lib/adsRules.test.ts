@@ -14,6 +14,7 @@ import {
   lastSpendDate,
   MEASUREMENT_QUIET_NOTE,
   mergeSpend,
+  missingDailyReads,
   newlyCrossedThresholds,
   nextThreshold,
   outcomeRates,
@@ -409,6 +410,31 @@ describe('readings log is append-only', () => {
   })
   it('reading keys are unique per kind, campaign, stage and instant', () => {
     expect(readingId('postflight', '2026-10-09T12:00:00Z', 'wrapup', RETEST_CAMPAIGN_ID)).toBe(`postflight:${RETEST_CAMPAIGN_ID}:wrapup:2026-10-09T12:00:00Z`)
+  })
+})
+
+describe('missingDailyReads (a scheduled read that never ran)', () => {
+  const daily = (etDate: string): ReadingRecord => ({
+    v: 1, id: `daily:${etDate}`, campaignId: RETEST_CAMPAIGN_ID, kind: 'daily', readAt: `${etDate}T12:05:00Z`, etDate,
+    spendThroughEt: null, cumulativeSpend: null, thresholds: [], complete: true, rules: null, proposal: null, decision: null, counts: {}, notes: [],
+  })
+  const W = [plan.morningReadFirstEt, plan.morningReadLastEt] as const
+  it('the window is the routine schedule', () => {
+    expect(W).toEqual(['2026-09-27', '2026-10-03'])
+  })
+  it('the first scheduled run has nothing to miss', () => {
+    expect(missingDailyReads([], '2026-09-27', ...W)).toEqual([])
+  })
+  it('lists the dates since the last daily line, up to yesterday', () => {
+    expect(missingDailyReads([daily('2026-09-27')], '2026-09-30', ...W)).toEqual(['2026-09-28', '2026-09-29'])
+    expect(missingDailyReads([], '2026-09-29', ...W)).toEqual(['2026-09-27', '2026-09-28'])
+  })
+  it('older gaps are not repeated once a later read landed; non-daily records do not count', () => {
+    expect(missingDailyReads([daily('2026-09-27'), daily('2026-09-29')], '2026-09-30', ...W)).toEqual([])
+    expect(missingDailyReads([daily('2026-09-28'), { ...daily('2026-09-29'), kind: 'threshold' }], '2026-09-30', ...W)).toEqual(['2026-09-29'])
+  })
+  it('stops at the end of the window', () => {
+    expect(missingDailyReads([daily('2026-10-02')], '2026-10-06', ...W)).toEqual(['2026-10-03'])
   })
 })
 

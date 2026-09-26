@@ -29,6 +29,7 @@ import {
   COMPLETED_PROXY_PATH_PREFIX,
   FUNNEL_STEP_LABELS,
   isRawInstallSignal,
+  isInstallPromptInstalled,
   RAW_INSTALL_SIGNALS_LABEL,
 } from './campaigns'
 import { INSTALL_ACCEPT_OUTCOME_FIXED_ET } from './popupEvents'
@@ -181,6 +182,10 @@ describe('classifyFunnelPath / computeFunnelCounts / funnelStepRates', () => {
     }
     expect(isRawInstallSignal('/install/prompt/android')).toBe(false)
     expect(isRawInstallSignal('/popup-outcome/install-prompt/installed')).toBe(false)
+    // the one install predicate the funnel, the overview tile/timeline and the routine share
+    expect(isInstallPromptInstalled('/popup-outcome/install-prompt/installed')).toBe(true)
+    expect(isInstallPromptInstalled('/install/pwa-installed')).toBe(false)
+    expect(isInstallPromptInstalled('/popup-outcome/install-prompt/returned')).toBe(false)
     expect(RAW_INSTALL_SIGNALS_LABEL).toMatch(/can double-count/)
     // other install-prompt outcomes are not an install
     expect(classifyFunnelPath('/popup-outcome/install-prompt/returned')).toBeNull()

@@ -254,7 +254,8 @@ export interface OverviewDailyPoint {
   pageviews: number
   taggedArrivals: number
   authSuccess: number
-  install: number
+  install: number // /popup-outcome/install-prompt/installed (once per showing)
+  rawInstallSignals?: number // raw /install/<outcome> beacons — can double-count
 }
 export interface OverviewCampaignFlightMeta {
   id: string
@@ -305,6 +306,7 @@ export interface OverviewResponse {
     trackingActivationDate: string | null
     since: string
     until: string
+    seriesLabels?: { install: string; rawInstallSignals: string }
   }
   scorecard: OverviewScorecardRow[]
   releasePanel: OverviewReleasePanel | null

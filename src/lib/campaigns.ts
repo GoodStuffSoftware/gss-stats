@@ -375,8 +375,15 @@ export function classifyFunnelPath(path: string): FunnelStepKey | null {
   // standalone-detected). The raw signals are a secondary figure — isRawInstallSignal below —
   // never this step. Until INSTALL_ACCEPT_OUTCOME_FIXED_ET is set, prompt-driven installs
   // don't reach this step at all (FUNNEL_STEP_LABELS.install carries the known-gap label).
-  if (ev.family === 'popup-outcome:install' && ev.kind === 'installed') return 'install'
+  if (isInstallPromptInstalled(path)) return 'install'
   return null
+}
+
+/** THE install count everywhere (campaign funnel, overview tile/timeline, ads routine):
+ * /popup-outcome/install-prompt/installed, at most once per showing. */
+export function isInstallPromptInstalled(path: string): boolean {
+  const ev = classifyPopupPath(path)
+  return !!ev && ev.family === 'popup-outcome:install' && ev.kind === 'installed'
 }
 
 /** Raw /install/pwa-installed | standalone-detected | play-detected — "raw install signals

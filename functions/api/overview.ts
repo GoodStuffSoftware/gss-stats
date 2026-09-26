@@ -26,8 +26,11 @@ import {
   parseReturnPath,
   returnVisitRates,
   CAMPAIGN_SPEND,
+  isInstallPromptInstalled,
+  isRawInstallSignal,
+  RAW_INSTALL_SIGNALS_LABEL,
 } from '../../src/lib/campaigns'
-import { classifyPopupPath, computeRate, etDateFromMs, TRACKING_ACTIVATION_DATE_ET, POPUPS } from '../../src/lib/popupEvents'
+import { classifyPopupPath, computeRate, etDateFromMs, installOutcomeGapNote, TRACKING_ACTIVATION_DATE_ET, POPUPS } from '../../src/lib/popupEvents'
 import {
   addEtDays,
   buildKpiTile,
@@ -88,10 +91,11 @@ function isReturnD1Plus(path: string): boolean {
 function isAuthSuccess(path: string): boolean {
   return path.startsWith('/auth/success/')
 }
-function isInstallOutcome(path: string): boolean {
-  const ev = classifyPopupPath(path)
-  return !!ev && ev.family === 'install' && ev.kind === 'outcome'
-}
+// Installs = /popup-outcome/install-prompt/installed (once per showing), like the campaign
+// funnel; raw /install/<outcome> beacons can double-count one install and are a secondary
+// figure only (lib/campaigns.ts isInstallPromptInstalled / isRawInstallSignal).
+const isInstallOutcome = isInstallPromptInstalled
+const INSTALLS_LABEL = `Installs (${installOutcomeGapNote()})`
 function isPopupShown(path: string): boolean {
   const ev = classifyPopupPath(path)
   return !!ev && ev.kind === 'shown' && POPUPS.some((p) => p.id === ev.family)
@@ -215,7 +219,9 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   }
   {
     const w = windowed((r) => isInstallOutcome(r.path))
-    kpis.push(buildKpiTile('install', 'Installs', w.today, w.yesterday, w.avg7))
+    kpis.push(buildKpiTile('install', INSTALLS_LABEL, w.today, w.yesterday, w.avg7))
+    const raw = windowed((r) => isRawInstallSignal(r.path))
+    kpis.push(buildKpiTile('installRaw', RAW_INSTALL_SIGNALS_LABEL, raw.today, raw.yesterday, raw.avg7))
   }
   if (!returnBeaconLiveToday()) {
     kpis.push(notYetTrackingTile('returns', '/return/ d1+ returns'))
@@ -232,15 +238,16 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     campaign: String(x.campaign ?? ''),
     c: Number(x.c) || 0,
   }))
-  const dailyMap = new Map<string, { pageviews: number; taggedArrivals: number; authSuccess: number; install: number }>()
+  const dailyMap = new Map<string, { pageviews: number; taggedArrivals: number; authSuccess: number; install: number; rawInstallSignals: number }>()
   for (const r of timelineRows) {
     const ms = r.min * 60_000
     const d = etDateFromMs(ms)
-    const bucket = dailyMap.get(d) ?? { pageviews: 0, taggedArrivals: 0, authSuccess: 0, install: 0 }
+    const bucket = dailyMap.get(d) ?? { pageviews: 0, taggedArrivals: 0, authSuccess: 0, install: 0, rawInstallSignals: 0 }
     if (!isEventPath(r.path)) bucket.pageviews += r.c
     if (r.visitor === 'new' && r.campaign) bucket.taggedArrivals += r.c
     if (isAuthSuccess(r.path)) bucket.authSuccess += r.c
     if (isInstallOutcome(r.path)) bucket.install += r.c
+    if (isRawInstallSignal(r.path)) bucket.rawInstallSignals += r.c
     dailyMap.set(d, bucket)
   }
   const daily = [...dailyMap.entries()]
@@ -361,7 +368,16 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     generatedAt: new Date().toISOString(),
     todayEt,
     kpis,
-    timeline: { daily, campaignFlights, releaseMarkers, trackingActivationDate: TRACKING_ACTIVATION_DATE_ET, since, until },
+    timeline: {
+      daily,
+      campaignFlights,
+      releaseMarkers,
+      trackingActivationDate: TRACKING_ACTIVATION_DATE_ET,
+      since,
+      until,
+      // Series labels that carry data caveats, so the chart shows them whatever the layout.
+      seriesLabels: { install: INSTALLS_LABEL, rawInstallSignals: RAW_INSTALL_SIGNALS_LABEL },
+    },
     scorecard,
     releasePanel,
   })

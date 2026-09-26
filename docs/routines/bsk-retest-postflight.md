@@ -72,7 +72,11 @@ the flight, and appends one post-flight record.
 ## Step 2: push and bus copy
 
 The JSON after `----- JSON -----` carries `notify`. Each stage is one of the spec's scheduled
-reads, so the CLI sets `notify.push` and `notify.busCopy` to `true` when the stage ran:
+reads, so the CLI sets `notify.push` and `notify.busCopy` to `true` when the stage ran. A
+failed read (Google Ads, the beacon, Firestore counts, a store write) is named in the push
+text, and a failed read pushes even when the stage is not due yet. If the CLI did not run to
+its JSON block at all, send ONE push yourself: `BSK retest post-flight <stage> did not run:
+<one short reason, no paths or secrets>`.
 
 - push: ONE PushNotification to Mike with exactly `notify.text`;
 - bus: `agent_send` (found by bare name with ToolSearch under any prefix; REST fallback per

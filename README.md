@@ -220,9 +220,11 @@ npm run typecheck:scripts
   [`migrations/gss-stats-ads/`](migrations/gss-stats-ads/) (`npm run ads:migrate`).
 - **morning-read** stores yesterday's and cumulative spend, fires each $25/$50/$75/$100 read
   once (full read + kill rules), always appends a daily line, checks the hard cap on every
-  read, and runs the release-health check (a missing child of a non-zero parent; never
-  between 01:00 and 12:00 ET, so the 08:00 run skips it and `--release-health-only` is the
-  evening backstop).
+  read, and notes any earlier scheduled read that never ran. The release-health check (a
+  missing child of a non-zero parent) never runs between 01:00 and 12:00 ET, so the 08:00
+  run skips it and a 23:15 ET `--release-health-only` backstop covers it on days that served
+  ads. Pushes go out only on a threshold read, a kill-rule trip, a failed read, or a real
+  release-health alert (parent at least MIN_COHORT, outcome window elapsed, child zero).
 - **postflight-read** covers the wrap-up (spend end + 7 days) and the day-15/30/60 and
   December follow-ups, split promo vs non-promo, with the d31-60 return buckets.
 - `--firebase-sa <service-account.json>` adds read-only Firestore COUNT queries (new
