@@ -101,16 +101,19 @@ const dragEnabled = computed(() => !isMobile.value && !touchCapable)
 }
 
 /* Resize grip (bottom-right corner drag handle) — clean look by default (owner
-   clarification, 2026-09-26): hidden unless the function bar is open OR that specific
-   card is hovered. Hover-only on devices that actually have hover + a precise pointer —
-   a touchscreen never matches this media query, so grips stay visible there (no hover to
-   reveal them with). */
+   clarification, 2026-09-26): hidden unless the function bar (page edit mode) is open, that
+   specific card's own reveal is toggled on, or that card is hovered. Drag/resize are
+   desktop-only (ChartCard's dragEnabled disables both on touch), so this stays inside the
+   hover+fine-pointer media query — a touchscreen never matches it, and never shows a grip at
+   all, matching dragEnabled. `:has()` reaches into the GridItem to see its ChartCard's own
+   `.revealed` class (a sibling of this resizer, not an ancestor/descendant of it). */
 @media (hover: hover) and (pointer: fine) {
   :deep(.vgl-item__resizer) {
     opacity: 0;
     transition: opacity 0.15s ease;
   }
-  :deep(.vgl-item:hover .vgl-item__resizer) {
+  :deep(.vgl-item:hover .vgl-item__resizer),
+  :deep(.vgl-item:has(.chart-card.revealed) .vgl-item__resizer) {
     opacity: 1;
   }
   .stats-grid.controls-revealed :deep(.vgl-item__resizer) {

@@ -63,9 +63,11 @@ All notable changes to **gss-stats** are documented here. The format follows
   real rate. Reports now show it as a count pair ("N asks · M arrivals"); accept rate is
   unaffected.
 - **Widgets look like the old bespoke pages again, with customization tucked away.** Every
-  chart's title bar, zoom and menu icons now stay hidden until you turn on edit mode or hover
-  it on desktop — including on touch, which previously showed them all the time. Double-tapping
-  a chart zooms it in without needing edit mode.
+  chart's title bar is gone — just a plain heading, with two small icons in the corner: zoom
+  (one tap) and reveal, which shows that chart's own filter/reload/menu controls until you tap
+  it again, press Escape, or tap elsewhere. Desktop hover still reveals a chart's controls too,
+  and the page's own edit-mode toggle reveals every chart at once. Double-tapping a chart also
+  zooms it. A note widget shows only the reveal icon, since it has nothing to zoom.
 - **Notes render as a plain caption line**, not a boxed card with its own title bar.
 - **"Today at a glance" and other content-heavy widgets size to their content** instead of
   clipping their top row or scrolling inside a fixed box.
