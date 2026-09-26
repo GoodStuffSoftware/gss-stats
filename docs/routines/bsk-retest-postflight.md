@@ -1,12 +1,12 @@
 ---
 name: bsk-retest-postflight
-description: One-time post-flight reads for the Best Sudoku US+CA web retest (campaign 24279250691): the wrap-up about 2026-10-09 (spend end + 7 days), then the day-15, day-30 and day-60 follow-ups and an early-December read for the d31-60 return buckets. Runs the gss-stats postflight-read CLI, pushes Mike and copies the report to the deckhand bus. Proposes only.
+description: One-time post-flight reads for the Best Sudoku US+CA web retest (campaign 24279250691): the wrap-up on 2026-10-09 (flight end + 7 days), then the day-15, day-30 and day-60 follow-ups and an early-December read for the d31-60 return buckets. Runs the gss-stats postflight-read CLI, pushes Mike and copies the report to the deckhand bus. Proposes only.
 ---
 
 <!--
 Schedule (the lead creates each one-time trigger after review; this file never creates one),
 about 09:00 America/New_York, each with its --stage:
-  2026-10-09  --stage wrapup     (spend end + 7; the CLI checks the real spend end)
+  2026-10-09  --stage wrapup     (flight end 2026-10-02 + 7)
   2026-10-17  --stage day15      (flight end 2026-10-02 + 15)
   2026-11-01  --stage day30
   2026-12-01  --stage day60
@@ -60,11 +60,14 @@ From `C:\Users\msant\dev\gss-stats-ads-routine`, with this run's stage:
 npm run -s ads:postflight-read -- --stage <wrapup|day15|day30|day60|december> --cf-token-file C:/Users/msant/dev/cf-token.txt --firebase-sa C:/Users/msant/.firebase/service-accounts/best-sudoku-prod.json
 ```
 
-If the report says the stage is **not due yet**, print that line and its due date and stop:
-no push, no bus copy. (Only rerun with `--force` if Mike asks.)
+If the report says the stage is **not due yet** → stop, unless `notify.push` is true: then
+send that push (Step 2, push only, no bus copy) and stop. A not-due run pushes only for an
+after-flight spend or cap trip on a still-serving campaign, or a failed read; otherwise it
+prints the due date and stops with no push. (Only rerun with `--force` if Mike asks.) Every
+stage is keyed to the flight end (2026-10-02), so continued spend never moves a due date.
 
-What it does: re-reads the flight's spend from the Google Ads API and stores it, then the
-full read (tagged funnel, site-wide outcome beacons, `/return/<uc>/` buckets d0 through
+What it does: re-reads the flight's spend from the Google Ads API and stores it, checks FIRST
+for spend after the flight and for the $100 cap (on every run, due or not), then the full read (tagged funnel, site-wide outcome beacons, `/return/<uc>/` buckets d0 through
 d31-60 on web and app, the Play first-seen line, Firestore window counts), re-runs the $100
 decision table, splits promo vs non-promo, checks for any spend after the flight, and appends
 one post-flight record. On day15/day30/day60 it also counts the accounts created in the

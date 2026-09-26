@@ -251,7 +251,8 @@ describe('postflight-read', () => {
     const deps = fixtureDeps(base(), false)
     const r = await runPostflightRead(deps, { campaignId: '24279250691', stage: 'wrapup', force: false })
     expect(r.due).toBe(false)
-    expect(r.dueEt).toBe('2026-10-06') // last spend day in the fixture is 2026-09-29
+    expect(r.dueEt).toBe('2026-10-09') // flight end 2026-10-02 + 7, whatever the last spend day
+    expect(r.notify.push).toBe(false)
     expect(r.read).toBeNull()
     expect(deps.store.written.readings).toEqual([])
   })
@@ -296,6 +297,32 @@ describe('postflight-read', () => {
     expect(deps.store.written.readings[0].notes).toContain(AUTH_SUCCESS_SPLIT_RECOMMENDATION)
     expect(r.cohort).toBeNull() // the wrap-up does not read the tier split
     expect(r.cohortNote).toBeNull()
+  })
+  it('M1: continued spend on a still-serving campaign pushes PROPOSE PAUSE even before the stage is due, and never moves the wrap-up', async () => {
+    const fx = base()
+    fx.now = '2026-10-05T13:00:00Z'
+    ads(fx).daily['2026-10-03'] = { costMicros: 9_000_000, impressions: 100, clicks: 1 }
+    ads(fx).daily['2026-10-04'] = { costMicros: 9_000_000, impressions: 100, clicks: 1 }
+    const deps = fixtureDeps(fx, false)
+    const r = await runPostflightRead(deps, { campaignId: '24279250691', stage: 'wrapup', force: false })
+    expect(r.due).toBe(false)
+    expect(r.dueEt).toBe('2026-10-09')
+    expect(r.postFlightSpend).toMatchObject({ status: 'trip', value: 18 })
+    expect(r.notify).toMatchObject({ push: true, busCopy: false })
+    expect(r.notify.text).toMatch(/^BSK retest after the flight: \$18\.00 spent after 2026-10-02; campaign reads ENABLED\/SERVING.*PROPOSE PAUSE\.$/)
+    expect(deps.store.written.readings).toEqual([]) // the stage itself still waits for its date
+  })
+  it('M1: the $100 cap is re-checked post-flight and pushes for a campaign still serving', async () => {
+    const fx = base()
+    fx.now = '2026-10-05T13:00:00Z'
+    ads(fx).daily['2026-09-29'].costMicros = 70_000_000
+    const r = await runPostflightRead(fixtureDeps(fx, true), { campaignId: '24279250691', stage: 'wrapup', force: false })
+    expect(r.hardCap).toMatchObject({ status: 'trip' })
+    expect(r.notify.text).toMatch(/at or over the cap.*PROPOSE PAUSE\.$/)
+    ads(fx).status.servingStatus = 'ENDED'
+    const ended = await runPostflightRead(fixtureDeps(fx, true), { campaignId: '24279250691', stage: 'wrapup', force: false })
+    expect(ended.hardCap).toMatchObject({ status: 'clear' })
+    expect(ended.notify.push).toBe(false)
   })
   it('after-flight spend on an ENDED campaign is reported, never a pause proposal; a still-serving one is', async () => {
     const fx = base()

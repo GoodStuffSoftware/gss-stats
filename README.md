@@ -228,7 +228,7 @@ npm run typecheck:scripts
   run skips it and a 23:15 ET `--release-health-only` backstop covers it on days that served
   ads. Pushes go out only on a threshold read, a kill-rule trip, a failed read, or a real
   release-health alert (parent at least MIN_COHORT, outcome window elapsed, child zero).
-- **postflight-read** covers the wrap-up (spend end + 7 days) and the day-15/30/60 and
+- **postflight-read** covers the wrap-up (flight end + 7 days; spend after the flight and the cap are checked first on every run) and the day-15/30/60 and
   December follow-ups, split promo vs non-promo, with the d31-60 return buckets. Day 15/30/60
   add the flight-window account cohort by access tier and promo marker (sitewide, not
   campaign-attributed; it needs Firestore composite indexes that don't exist yet, so it

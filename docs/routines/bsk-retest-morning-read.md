@@ -6,11 +6,20 @@ description: Ads reads for the Best Sudoku US+CA web retest (Google Ads campaign
 <!--
 Schedules (the lead creates the triggers after review; this file never creates one):
   A. MORNING READ   daily 08:00 America/New_York, 2026-09-27 through 2026-10-03.
+                    Trigger prompt: "Run ENTRY A (morning read) of docs/routines/bsk-retest-morning-read.md."
   B. BACKSTOP       daily 23:15 America/New_York, 2026-09-26 through 2026-10-02 (flight days).
+                    Trigger prompt: "Run ENTRY B (release-health backstop) of docs/routines/bsk-retest-morning-read.md."
                     The CLI itself skips a day that served no ads, so B needs no date logic.
-The run tells which entry it is by the ET clock: before 12:00 ET = A, after 23:00 ET = B.
+Each trigger names its entry explicitly; the run never infers it from the clock.
 Replaces the retired local tasks best-sudoku-ads-play-twin-daily / -evening.
 -->
+
+## Which entry you are running
+
+Your trigger's prompt names the entry: **ENTRY A (morning read)** or **ENTRY B
+(release-health backstop)**. Run only that entry's commands below. If the prompt names
+neither (or both), do not guess from the time of day: push `BSK retest routine did not run:
+trigger named no entry` and stop.
 
 You are the morning ads-read agent for the Best Sudoku US+CA web retest. The numbers, the
 thresholds, the kill rules and the decision table all live in gss-stats code
@@ -48,10 +57,10 @@ and add nothing of your own to the rules.** Windows machine; the Bash tool is Gi
 
 ## Window
 
-- Morning entry (A): if today's ET date is after **2026-10-03**, print "past the morning-read
-  window (2026-09-27..2026-10-03), ask the lead to retire this task" and stop.
-- Backstop entry (B): if today's ET date is after **2026-10-02**, print "past the flight,
-  ask the lead to retire the backstop" and stop.
+- ENTRY A (morning read): if today's ET date is after **2026-10-03**, print "past the
+  morning-read window (2026-09-27..2026-10-03), ask the lead to retire this task" and stop.
+- ENTRY B (backstop): if today's ET date is after **2026-10-02**, print "past the flight, ask
+  the lead to retire the backstop" and stop.
 
 Never delete or edit a scheduled task yourself.
 
@@ -77,13 +86,13 @@ npm --prefix C:/Users/msant/dev/gss-stats-ads-routine ci --no-audit --no-fund
 
 From `C:\Users\msant\dev\gss-stats-ads-routine`.
 
-Morning entry (A):
+ENTRY A (morning read):
 
 ```bash
 npm run -s ads:morning-read -- --cf-token-file C:/Users/msant/dev/cf-token.txt --firebase-sa C:/Users/msant/.firebase/service-accounts/best-sudoku-prod.json
 ```
 
-Backstop entry (B), the release-health check only:
+ENTRY B (release-health backstop), the release-health check only:
 
 ```bash
 npm run -s ads:morning-read -- --release-health-only --cf-token-file C:/Users/msant/dev/cf-token.txt

@@ -224,9 +224,9 @@ describe('Google Ads client: read-only, no manager header', () => {
     }
     return { f, calls }
   }
-  it('builds headers without login-customer-id and targets googleAds:search on customer 8726535246, API v22', () => {
+  it('builds headers without login-customer-id and targets googleAds:search on customer 8726535246, API v25', () => {
     expect(Object.keys(buildHeaders('a', 'b')).map((k) => k.toLowerCase())).not.toContain('login-customer-id')
-    expect(searchUrl()).toBe('https://googleads.googleapis.com/v22/customers/8726535246/googleAds:search')
+    expect(searchUrl()).toBe('https://googleads.googleapis.com/v25/customers/8726535246/googleAds:search')
   })
   it('refreshes the token, sends only authorization + developer-token, follows pagination', async () => {
     process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID = '2775673007' // must be ignored
