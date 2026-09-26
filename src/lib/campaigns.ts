@@ -353,6 +353,21 @@ export function gameCompleteNotInstrumented(campaign: CampaignFlight): boolean {
   return campaign.flightEnd < NEW_BEACONS_LIVE_AT_ET
 }
 
+/** The overview scorecard's per-row notInstrumented set (functions/api/overview.ts): the
+ * full per-flight "did this path exist site-wide during the window" check for a CLOSED
+ * campaign (`closedNotInstrumented` — computed server-side via a D1 query, functions/_lib/
+ * campaignInstrumentation.ts, so it can't live in this pure module), or just the
+ * gameCompleteNotInstrumented gate for an active/upcoming one. Exported so the actual
+ * contract driving the scorecard UI — "a campaign's 'completed' chip shows its real count,
+ * not a stale label, once its flight reaches GAME_COMPLETE_LIVE_AT" — is unit-testable
+ * without a database (bug fix, 2026-09-26: the scorecard template used to check the
+ * PERMANENT FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED constant directly instead of this
+ * per-row result, so an active campaign's real completed-game count never showed). */
+export function scorecardNotInstrumentedSteps(campaign: CampaignFlight, closedNotInstrumented: readonly FunnelStepKey[]): Set<FunnelStepKey> {
+  if (campaign.status === 'closed') return new Set(closedNotInstrumented)
+  return gameCompleteNotInstrumented(campaign) ? new Set(FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED) : new Set()
+}
+
 // CONFIG HOOK (deferred, disabled by default, superseded by the real /game/complete/ beacon
 // below as of v1.95.5 — kept only in case product ever wants a SIGNED-OUT proxy for
 // pre-v1.95.5 history): '/signin-eligible/*' fires only after a game plays out — a possible
