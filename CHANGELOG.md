@@ -6,6 +6,15 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-09-26
+
+### Fixed
+- **First-50 promo outcome beacons were being dropped.** The promo's sign-in/install/
+  return/still-playing outcomes use a different wire name than its shown/accept/dismiss
+  beacons; the dashboard now recognizes both, so those outcomes count instead of vanishing.
+  A congrats-popup beacon that has no outcome tracking is now surfaced as an "unexpected"
+  count instead of disappearing silently.
+
 ## [0.5.0] — 2026-09-26
 
 ### Security

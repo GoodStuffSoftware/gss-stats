@@ -138,6 +138,11 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     dataset: 'popup' as const,
     activationDate: TRACKING_ACTIVATION_DATE_ET,
     activationPending: TRACKING_ACTIVATION_DATE_ET === null,
+    // Rows under /popup-outcome/ with an unrecognized <popup> name (e.g. first50-congrats,
+    // which has no outcome tracking by product decision, or a genuinely unknown wire name)
+    // — never silently dropped, only surfaced when present. See lib/popupEvents.ts
+    // PopupAggregate.unexpectedOutcomeRows.
+    ...(agg.unexpectedOutcomeRows ? { unexpectedOutcomeRows: agg.unexpectedOutcomeRows } : {}),
   }
 
   // ── Rate mode: one computed number, or "insufficient" for a too-small cohort (MIN_COHORT
