@@ -22,6 +22,10 @@ All notable changes to **gss-stats** are documented here. The format follows
   theme, where they used to be unreadably dark-on-dark.
 - **The Overall timeline's caption no longer repeats itself** — it rendered twice (once inline,
   once through the shared caption system).
+- **The page-controls toggle could get stuck closed on a touchscreen** — a tap opened it and
+  immediately closed it again on the same touch, so once it became the only way to reach edit
+  mode on touch, the controls were unreachable there. One tap now reliably opens it, a second
+  closes it.
 
 ## [0.7.0] — 2026-09-26
 

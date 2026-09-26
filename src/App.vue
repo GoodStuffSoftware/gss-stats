@@ -369,6 +369,17 @@ function onBarToggleActivate() {
 function onBarAreaEnter() {
   if (!touchCapable) openBar()
 }
+// Reviewer-flagged lockout (2026-09-26): a real touch tap fires `focus` BEFORE `click`
+// (touchstart -> touchend -> mouseover/mousemove/mousedown -> focus -> mouseup -> click). The
+// toggle button used to open unconditionally on focus, then onBarToggleActivate's touch branch
+// immediately toggled it back closed on the very same tap's click — since this toggle is now
+// the ONLY way to reach the controls on touch (fix/clean-look), that was a full lockout, not
+// just a cosmetic flicker. Gated the same way as onBarAreaEnter/Leave: focus only opens on a
+// device that isn't touch-capable (keyboard/assistive nav there); on touch, the click handler's
+// own toggle is what opens it.
+function onBarToggleFocus() {
+  if (!touchCapable) openBar()
+}
 function onBarAreaLeave() {
   if (!touchCapable) scheduleCloseBar()
 }
@@ -455,7 +466,7 @@ function toggleDark() {
         :aria-controls="fbPanelId"
         aria-label="Show page controls"
         @mouseenter="onBarAreaEnter"
-        @focus="openBar"
+        @focus="onBarToggleFocus"
         @click="onBarToggleActivate"
         @keydown.escape="closeBarAndReturnFocus"
       >

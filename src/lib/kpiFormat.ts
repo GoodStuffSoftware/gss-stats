@@ -68,6 +68,10 @@ const KPI_GO_LIVE_ET_DATE: Record<string, string> = {
   ...(INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS != null
     ? { install: etDateFromMs(INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS) } // install-outcome fix
     : {}),
+  // 'installRaw' (raw install signals) is deliberately NOT gated here: isRawInstallSignal
+  // matches a separate `/install/<outcome>` beacon family that fired before and after the fix
+  // — the fix was specifically about the deduplicated popup-outcome install step ('install'
+  // above) never recording an outcome for prompt-driven installs, not about these raw signals.
   ...(TRACKING_ACTIVATION_DATE_ET
     ? {
         popupShown: TRACKING_ACTIVATION_DATE_ET,
