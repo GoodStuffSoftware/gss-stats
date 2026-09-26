@@ -286,6 +286,30 @@ npm run typecheck:scripts
 | Ads store decision | [docs/adr/0001-ads-read-store.md](docs/adr/0001-ads-read-store.md) |
 | Ads routine prompts | [docs/routines/](docs/routines/) |
 | Geo beacon (companion) | [GoodStuffSoftware/gss-beacon](https://github.com/GoodStuffSoftware/gss-beacon) |
+| Capacity / free-plan limits | [docs/capacity.md](docs/capacity.md) |
+
+## Capacity
+
+The account runs on **Workers Free**, where D1 caps reads at **5,000,000 rows/day, account-wide**
+(a hard failure, not throttling, once hit) — shared by `gss-geo` and `gss-stats-ads`. A 2026-09-26
+audit ([docs/capacity.md](docs/capacity.md)) found usage at ~29% of that cap on an ordinary day,
+driven entirely by query pattern against a table of well under 5,000 rows: `/api/sites` full-
+scanned `hits` on every dashboard load, and every chart fired a "total" query plus a "grouped"
+query. Mitigations (`functions/_lib/edgeCache.ts`, `functions/api/geo.ts`, `functions/api/sites.ts`):
+
+- `/api/sites`'s beacon-count query is bounded to a rolling 90-day window (it's a UI relevance
+  badge, not an all-time total — see the "last 90 days" tooltip in the filter picker) and its
+  whole response is cached via the Workers **Cache API** (`caches.default`, not KV — KV's
+  Free-plan write cap is 1,000/day account-wide) for a few minutes.
+- Each geo chart's total-count and grouped-breakdown queries are merged into one statement
+  (`GROUP BY` subquery + `SUM(c) OVER ()`), halving the D1 reads per chart.
+- `/api/geo` and `/api/stats` responses are cached (Cache API, keyed by the full normalized
+  query) with a long TTL for date ranges that end before today (immutable — they can't change)
+  and a short TTL for ranges that include today.
+
+No index changes and no schema/data writes were needed — see docs/capacity.md §4 for why (the
+`hits` table is too small for an index to matter, and `GROUP BY` requires a temp b-tree
+regardless).
 
 ## Deploy
 

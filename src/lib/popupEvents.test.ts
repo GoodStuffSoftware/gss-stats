@@ -198,9 +198,46 @@ describe('classifyPopupPath', () => {
     expect(classifyPopupPath('/popup-outcome/install/returned')).toBeNull() // not a real beacon name
   })
 
-  it('popup-outcome: <popup> is exactly {signin-prompt, promo-first50, upsell, install-prompt} — anything else does not classify', () => {
+  it('popup-outcome: <popup> is exactly {signin-prompt, promo-first50, first50-offer, upsell, install-prompt} — anything else does not classify', () => {
     expect(classifyPopupPath('/popup-outcome/first50-congrats/signed-in')).toBeNull() // no outcome tracking for this popup
     expect(classifyPopupPath('/popup-outcome/unknown-popup/signed-in')).toBeNull()
+  })
+
+  // BUG FOUND 2026-09-26, verified against best-sudoku origin/main
+  // (src/services/popupOutcomes.ts:79-109,299 + SignInPromptDialog.vue:361): the first-50
+  // promo's OUTCOME beacon kind is 'first50-offer', NOT 'promo-first50' — the SHOWN beacon
+  // stays literally '/promo-first50/shown' (a completely different path pattern, handled by
+  // the dedicated /promo-first50 branch above and unaffected by this). Before this fix,
+  // POPUP_OUTCOME_NAME_TO_FAMILY had no 'first50-offer' entry, so every real
+  // /popup-outcome/first50-offer/* row classified as unknown and was silently dropped.
+  it("popup-outcome: 'first50-offer' (the real wire name) lands on the promo-first50 family, for every outcome type", () => {
+    for (const outcome of POPUP_OUTCOME_TYPES) {
+      expect(classifyPopupPath(`/popup-outcome/first50-offer/${outcome}`)).toEqual({ family: 'popup-outcome:promo-first50', kind: outcome })
+    }
+  })
+  it("popup-outcome: 'promo-first50' still classifies too, as a tolerated alias of the same family", () => {
+    for (const outcome of POPUP_OUTCOME_TYPES) {
+      expect(classifyPopupPath(`/popup-outcome/promo-first50/${outcome}`)).toEqual({ family: 'popup-outcome:promo-first50', kind: outcome })
+    }
+  })
+  it('popup-outcome: every FINAL LIST wire name classifies for every outcome type — full cross product, real path strings', () => {
+    // <popup> wire name -> expected internal family (best-sudoku src/services/popupOutcomes.ts:79-109)
+    const wireNameToFamily: Record<string, string> = {
+      'signin-prompt': 'signin-prompt',
+      'first50-offer': 'promo-first50',
+      upsell: 'upsell',
+      'install-prompt': 'install',
+    }
+    for (const [wireName, family] of Object.entries(wireNameToFamily)) {
+      for (const outcome of POPUP_OUTCOME_TYPES) {
+        expect(classifyPopupPath(`/popup-outcome/${wireName}/${outcome}`)).toEqual({ family: `popup-outcome:${family}`, kind: outcome })
+      }
+    }
+  })
+  it('popup-outcome: first50-congrats classifies to null for every outcome type — no outcome tracking, by product decision', () => {
+    for (const outcome of POPUP_OUTCOME_TYPES) {
+      expect(classifyPopupPath(`/popup-outcome/first50-congrats/${outcome}`)).toBeNull()
+    }
   })
 
   it('rejects paths outside every popup family, and ordinary page paths', () => {
@@ -228,6 +265,30 @@ describe('first50-congrats: no outcome tracking (FINAL LIST)', () => {
   })
   it('NO_OUTCOME_TRACKING_NOTE says exactly that, once', () => {
     expect(NO_OUTCOME_TRACKING_NOTE).toMatch(/no outcome tracking/i)
+  })
+  it('aggregatePopupRows counts first50-congrats outcome rows as unexpected — visible, never silently dropped', () => {
+    const hr = Date.parse('2026-01-15T13:00:00Z')
+    const agg = aggregatePopupRows([
+      { hourStartMs: hr, path: '/popup-outcome/first50-congrats/signed-in', count: 3 },
+      { hourStartMs: hr, path: '/popup-outcome/first50-congrats/installed', count: 2 },
+    ])
+    expect(agg.unexpectedOutcomeRows).toBe(5)
+    // still not classified into any family/rate — the product decision stands
+    expect(coarseCount(agg, 'popup-outcome:first50-congrats', 'signed-in')).toBe(0)
+  })
+  it('aggregatePopupRows also counts a genuinely unknown /popup-outcome/ name as unexpected, not silently dropped', () => {
+    const hr = Date.parse('2026-01-15T13:00:00Z')
+    const agg = aggregatePopupRows([{ hourStartMs: hr, path: '/popup-outcome/some-future-popup/signed-in', count: 4 }])
+    expect(agg.unexpectedOutcomeRows).toBe(4)
+  })
+  it('aggregatePopupRows: unexpectedOutcomeRows stays 0 when every popup-outcome row classifies normally', () => {
+    const hr = Date.parse('2026-01-15T13:00:00Z')
+    const agg = aggregatePopupRows([
+      { hourStartMs: hr, path: '/popup-outcome/first50-offer/signed-in', count: 3 },
+      { hourStartMs: hr, path: '/popup-outcome/signin-prompt/installed', count: 2 },
+    ])
+    expect(agg.unexpectedOutcomeRows).toBe(0)
+    expect(coarseCount(agg, 'popup-outcome:promo-first50', 'signed-in')).toBe(3)
   })
   it('every OTHER popup still gets one outcome-rate spec per POPUP_OUTCOME_TYPES, including the new still-playing', () => {
     for (const p of POPUPS.filter((p) => p.id !== 'first50-congrats')) {
