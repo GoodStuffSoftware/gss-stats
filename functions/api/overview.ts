@@ -26,6 +26,7 @@ import {
   parseReturnPath,
   returnVisitRates,
   CAMPAIGN_SPEND,
+  isAuthSuccessBase,
   isInstallPromptInstalled,
   isRawInstallSignal,
   RAW_INSTALL_SIGNALS_LABEL,
@@ -88,9 +89,9 @@ function isReturnD1Plus(path: string): boolean {
   const ev = parseReturnPath(path)
   return !!ev && ev.bucket !== 'd0'
 }
-function isAuthSuccess(path: string): boolean {
-  return path.startsWith('/auth/success/')
-}
+// One per sign-in: the base row only (lib/campaigns.ts isAuthSuccessBase), never the
+// /auth/success/<provider>/<new|existing|unknown> row that rides alongside it.
+const isAuthSuccess = isAuthSuccessBase
 // Installs = /popup-outcome/install-prompt/installed (once per showing), like the campaign
 // funnel; raw /install/<outcome> beacons can double-count one install and are a secondary
 // figure only (lib/campaigns.ts isInstallPromptInstalled / isRawInstallSignal).

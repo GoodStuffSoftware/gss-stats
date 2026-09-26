@@ -23,8 +23,13 @@ All notable changes to **gss-stats** are documented here. The format follows
   separately (two separate short tests), and the campaigns page marks the fix day and shows the
   campaign's upsell shown/accepted on each side.
 - **Exact campaign sign-ups once the new/existing sign-in beacons are live.** From their go-live
-  time, sign-ups from the new-account sign-in beacon are counted exactly; earlier ones stay an
-  "at most" upper bound, and returning sign-ins never count.
+  time, sign-ups from the new-account sign-in beacon are counted exactly; earlier ones and
+  "unknown" answers stay an "at most" upper bound, and returning sign-ins never count.
+
+### Fixed
+- **Auth successes are counted once per sign-in.** The upcoming new/existing sign-in beacon is
+  sent alongside the existing one, so the funnel, the overview and the sign-up bound now count
+  only the base sign-in beacon; without this every new-client sign-in would have counted twice.
 
 ### Changed
 - **Ads readings are recorded once per day per entry.** Rerunning a read the same day no

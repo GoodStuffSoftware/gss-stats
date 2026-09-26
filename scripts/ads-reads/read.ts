@@ -525,6 +525,7 @@ function fullReadCounts(r: FullRead): Record<string, number | null> {
     signUpsAtMost: r.decision?.signUpsAtMost ?? null,
     signUpsExact: r.decision ? (r.decision.signUpsExact ? 1 : 0) : null,
     authSuccessNew: t?.authSuccessSplit.new ?? null,
+    authSuccessUnknown: t?.authSuccessSplit.unknown ?? null,
     authSuccessExisting: t?.authSuccessSplit.existing ?? null,
     ...segmentCounts(r.segments),
   }
