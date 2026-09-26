@@ -62,6 +62,25 @@ All notable changes to **gss-stats** are documented here. The format follows
   fix above, it divided an event count by an arrivals count with no shared visitor id — not a
   real rate. Reports now show it as a count pair ("N asks · M arrivals"); accept rate is
   unaffected.
+- **Widgets look like the old bespoke pages again, with customization tucked away.** Every
+  chart's title bar, zoom and menu icons now stay hidden until you turn on edit mode or hover
+  it on desktop — including on touch, which previously showed them all the time. Double-tapping
+  a chart zooms it in without needing edit mode.
+- **Notes render as a plain caption line**, not a boxed card with its own title bar.
+- **"Today at a glance" and other content-heavy widgets size to their content** instead of
+  clipping their top row or scrolling inside a fixed box.
+- **KPI comparisons show sensible precision** (whole numbers, not raw decimals), wrap their
+  label instead of truncating it, and a metric with no valid comparison yet (just gone live)
+  says "new today" instead of a nonsense percentage.
+- **Overlapping release-marker labels on the Overall timeline** now stagger onto separate rows,
+  or drop the label (keeping the tick) rather than run into each other — and are visible in dark
+  theme, where they used to be unreadably dark-on-dark.
+- **The Overall timeline's caption no longer repeats itself** — it rendered twice (once inline,
+  once through the shared caption system).
+- **The page-controls toggle could get stuck closed on a touchscreen** — a tap opened it and
+  immediately closed it again on the same touch, so once it became the only way to reach edit
+  mode on touch, the controls were unreachable there. One tap now reliably opens it, a second
+  closes it.
 
 ## [0.7.0] — 2026-09-26
 
