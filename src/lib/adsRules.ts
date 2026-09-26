@@ -632,17 +632,20 @@ export interface PlayReturnStatus {
   webContinuing: boolean
   line: string
 }
-const ET_HOUR_LABEL = new Intl.DateTimeFormat('en-CA', {
-  timeZone: 'America/New_York',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  hourCycle: 'h23',
-})
+// Formatters are built on first use, not at module load (lib/popupEvents.ts etDateFromMs says
+// why); same options, same output.
+let etHourLabelFmt: Intl.DateTimeFormat | null = null
 /** "YYYY-MM-DD HH:00 ET" — hour precision is plenty for a first-seen marker. */
 export function etHourLabel(ms: number): string {
-  const p = Object.fromEntries(ET_HOUR_LABEL.formatToParts(new Date(ms)).map((x) => [x.type, x.value]))
+  etHourLabelFmt ??= new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    hourCycle: 'h23',
+  })
+  const p = Object.fromEntries(etHourLabelFmt.formatToParts(new Date(ms)).map((x) => [x.type, x.value]))
   return `${p.year}-${p.month}-${p.day} ${p.hour}:00 ET`
 }
 /** No expected Play date is encoded anywhere (coordinator addendum, 2026-09-26): the app is
@@ -665,9 +668,10 @@ export function playReturnStatus(stats: readonly ReturnSiteStat[], nowMs: number
 
 // ── Release health: missing child of a non-zero parent (coordinator addendum) ────────────
 export const HEALTH_QUIET_WINDOW_ET: readonly [number, number] = [1, 12] // [start, end) ET hours
-const ET_HOUR_FMT = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hourCycle: 'h23' })
+let etHourOfFmt: Intl.DateTimeFormat | null = null
 export function etHourOf(ms: number): number {
-  return Number(ET_HOUR_FMT.format(new Date(ms))) % 24
+  etHourOfFmt ??= new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hourCycle: 'h23' })
+  return Number(etHourOfFmt.format(new Date(ms))) % 24
 }
 /** Never evaluated between 01:00 and 12:00 ET. */
 export function releaseHealthGate(nowMs: number): { evaluate: boolean; reason: string } {

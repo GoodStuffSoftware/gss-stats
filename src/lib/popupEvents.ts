@@ -16,6 +16,8 @@
 // any live rows yet, so the rest of this file follows the spec as given (see the task
 // report's "open questions" for what's still unconfirmed).
 
+import { etOffsetHours } from './etTime'
+
 // ── Exclusion: every prefix below is an EVENT beacon, not a screen view. Every existing
 // page-view / visit / path count (geo.ts totals + breakdowns, sites.ts site counts) must
 // exclude them — hard requirement #2 in the task brief.
@@ -152,13 +154,15 @@ export const INSTALL_GAP_BEFORE_FIX_LABEL = 'known gap before fix: prompt-driven
 /** "install fix went live 26 Sep 12:26 ET" — for any range that spans the fix. */
 export function installFixMarkerLabel(fixedAtMs: number | null = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS): string | null {
   if (fixedAtMs === null) return null
-  const p = Object.fromEntries(
-    new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
-      .formatToParts(new Date(fixedAtMs))
-      .map((x) => [x.type, x.value]),
-  )
-  return `install fix went live ${p.day} ${p.month} ${p.hour}:${p.minute} ET`
+  // Plain ET arithmetic (lib/etTime.ts), not Intl: this runs at module load (INSTALL_FIX_NOTE
+  // and lib/adsRules.ts INSTALL_OUTCOME_GAP_NOTE). Byte-identical to the former en-US
+  // { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }
+  // parts (popupEvents.test.ts compares them).
+  const et = new Date(fixedAtMs + etOffsetHours(fixedAtMs) * 3_600_000)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `install fix went live ${et.getUTCDate()} ${SHORT_MONTHS[et.getUTCMonth()]} ${pad(et.getUTCHours())}:${pad(et.getUTCMinutes())} ET`
 }
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 export const INSTALL_FIX_NOTE = `${installFixMarkerLabel() ?? ''}; earlier prompt-driven installs not recorded`
 
 /** True while the fix has not shipped at all. */
@@ -292,15 +296,19 @@ export function classifyPopupPath(path: string): PopupEvent | null {
 // number of hours (-4 EDT / -5 EST), so ET midnight always falls exactly on a UTC-hour
 // boundary — true even on the two DST-transition nights (the repeated/skipped local hour
 // still sits inside one UTC hour).
-const ET_DATE_FMT = new Intl.DateTimeFormat('en-CA', {
-  timeZone: 'America/New_York',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-})
+// Built on first use, not at module load: constructing an Intl formatter is the most expensive
+// thing a fresh isolate does, and the gss-stats-sync Worker (10 ms CPU on Workers Free) bundles
+// this module without ever calling it. Same options as before, so the output is unchanged.
+let etDateFmt: Intl.DateTimeFormat | null = null
 /** The America/New_York calendar date (YYYY-MM-DD) containing the given instant. */
 export function etDateFromMs(ms: number): string {
-  return ET_DATE_FMT.format(new Date(ms)) // en-CA formats as YYYY-MM-DD directly
+  etDateFmt ??= new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+  return etDateFmt.format(new Date(ms)) // en-CA formats as YYYY-MM-DD directly
 }
 
 // ── Rate math (hard requirement #4) ─────────────────────────────────────────────────
