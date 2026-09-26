@@ -11,10 +11,13 @@ export type ChartType =
   | 'stat'
   | 'table'
   | 'rate' // a single computed percentage (pop-up tap/outcome/eligibility rate) — see lib/popupEvents.ts
+  | 'note' // a static text tile (caveats/notes carried over from a bespoke page) — no data fetch
 
 export type Metric = 'pageviews' | 'visits'
 
-export type Dataset = 'rum' | 'geo' | 'popup'
+// 'overview'/'campaigns'/'ads-readings' back the panels that used to be bespoke,
+// non-widget pages (OverviewPage.vue / CampaignComparePage.vue) — see Widget.view below.
+export type Dataset = 'rum' | 'geo' | 'popup' | 'overview' | 'campaigns' | 'ads-readings'
 
 export type SiteKey = 'goodstuff.software' | 'goodstuffsoftware.com' | 'bestsudoku.app' | 'all'
 
@@ -63,6 +66,10 @@ export interface Widget {
   site?: SiteKey // optional per-widget site override ('inherit' = use global)
   host?: string // optional per-widget host override
   excludeSelfReferrals?: boolean
+  // A date-dimension trend chart ('line'/'area'/'bar' with dimension 'date') only: overlay
+  // Best Sudoku release markers (see lib/releases.ts) as dashed vertical lines, same visual
+  // treatment as the Overview page's timeline. Undefined/false = no overlay.
+  markers?: 'releases'
   // Marked by the user as one of this page's default charts. "Restore default charts"
   // keeps the marked charts and drops the rest (falling back to the factory set when
   // nothing is marked). Undefined/false = not a default.
@@ -70,6 +77,32 @@ export interface Widget {
   // Full per-chart filter override. When set, this chart ignores the global
   // filter bar and uses these instead. Undefined = follow the global filter.
   filters?: GlobalFilters | null
+  // dataset 'overview': which panel this widget renders — 'kpis' | 'timeline' | 'scorecard'
+  // | 'releasePanel' (see components/widgets/OverviewWidgetBody.vue).
+  // dataset 'campaigns': which panel — 'funnel' | 'hourOfDay' | 'country' | 'flightDay' |
+  // 'cost' | 'deviceMix' | 'returns' (see components/widgets/CampaignsWidgetBody.vue).
+  // dataset 'ads-readings': the ads-routines worker's own view value(s) (e.g. 'log') — see
+  // components/widgets/AdsReadingsWidgetCard.vue.
+  view?: string
+  // dataset 'campaigns' / 'ads-readings': which campaign(s) to include. Empty/undefined =
+  // all campaigns (CAMPAIGNS in lib/campaigns.ts) — same as the pre-widget bespoke pages.
+  campaignIds?: string[]
+  // type 'note': the note's body text (custom/free text). `title` is still the widget
+  // title as normal. Ignored when `noteId` is set (the registry note wins).
+  note?: string
+  // type 'note': a lib/notes.ts registry id — the note/text picked from the shared
+  // registry (ChartEditor's "pick a note" dropdown) rather than typed by hand. Takes
+  // priority over `note` when both are set.
+  noteId?: string
+  // type 'note' only: render via TextBlock.vue (longer/multi-paragraph prose) instead of
+  // NoteBlock.vue (a single short caveat line). Undefined/false = NoteBlock.
+  longText?: boolean
+  // ANY widget: registry note ids to show as an attached caption under this chart (see
+  // lib/notes.ts, components/NoteBlock.vue). Undefined = the dataset's scope defaults
+  // (lib/notes.ts defaultNoteIdsForScope); an explicit [] means "no captions", even if the
+  // scope has defaults — set once (e.g. by ChartEditor or a default layout), never
+  // recomputed out from under a user's choice.
+  notes?: string[]
   // grid geometry (managed by grid-layout-plus)
   x: number
   y: number
@@ -317,8 +350,12 @@ export interface OverviewResponse {
   timeline: {
     daily: OverviewDailyPoint[]
     campaignFlights: OverviewCampaignFlightMeta[]
-    releaseMarkers: { version: string; dateEt: string; note: string }[]
+    releaseMarkers: { version: string; dateEt: string; note: string; major?: boolean }[]
     trackingActivationDate: string | null
+    /** v1.95.5 go-live (game-complete + auth new/existing beacons) — see
+     * lib/popupEvents.ts NEW_BEACONS_LIVE_AT_ET. */
+    newBeaconsLiveAt?: string
+    newBeaconsLiveAtLabel?: string
     since: string
     until: string
     seriesLabels?: { install: string; rawInstallSignals: string }

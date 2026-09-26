@@ -30,7 +30,10 @@ import {
   FUNNEL_STEP_LABELS,
   isRawInstallSignal,
   isInstallPromptInstalled,
+  isAuthSuccessPath,
+  gameCompleteNotInstrumented,
   RAW_INSTALL_SIGNALS_LABEL,
+  type CampaignFlight,
 } from './campaigns'
 import { INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS } from './popupEvents'
 
@@ -164,7 +167,11 @@ describe('classifyFunnelPath / computeFunnelCounts / funnelStepRates', () => {
   it('maps the documented paths to their funnel step', () => {
     expect(classifyFunnelPath('/game')).toBe('played')
     expect(classifyFunnelPath('/auth/success/google')).toBe('authSuccess')
-    expect(classifyFunnelPath('/auth/success/apple')).toBe('authSuccess')
+    expect(classifyFunnelPath('/auth/success/email')).toBe('authSuccess')
+    // v1.95.5 exact-shape fix: only the two real base providers count — a look-alike
+    // provider (never shipped) and the new/existing suffix are NOT authSuccess.
+    expect(classifyFunnelPath('/auth/success/apple')).toBeNull()
+    expect(classifyFunnelPath('/auth/success/google/new')).toBeNull()
     expect(classifyFunnelPath('/signin-prompt/placement')).toBe('ask')
     expect(classifyFunnelPath('/signin-prompt/streak')).toBe('ask')
     expect(classifyFunnelPath('/promo-first50/shown')).toBe('ask')
@@ -206,11 +213,23 @@ describe('classifyFunnelPath / computeFunnelCounts / funnelStepRates', () => {
     expect(INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS).toBe(Date.parse('2026-09-26T16:26:36Z'))
     expect(FUNNEL_STEP_LABELS.install).toBe('Install')
   })
-  it('never maps anything to "completed" — no matching path exists anywhere in D1', () => {
+  it('maps /game/complete/... (v1.95.5, live 2026-09-26T19:43:02Z) to "completed"; nothing else is', () => {
+    expect(classifyFunnelPath('/game/complete/normal/easy')).toBe('completed')
+    expect(classifyFunnelPath('/game/complete/daily/expert')).toBe('completed')
+    expect(classifyFunnelPath('/game/complete/normal/unknown')).toBe('completed') // an unrecognized difficulty still counts
     for (const p of ['/game', '/', '/stats', '/settings', '/complete', '/game/complete', '/win']) {
       expect(classifyFunnelPath(p)).not.toBe('completed')
     }
+    // FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED is still the pre-go-live/fallback default —
+    // see gameCompleteNotInstrumented for the per-flight version that goes live at the instant.
     expect(FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED.has('completed')).toBe(true)
+  })
+  it('gameCompleteNotInstrumented: true for a flight entirely before go-live, false once its window reaches it', () => {
+    const base = campaignById('24215315197')! // real flight, closed 2026-09-09 — well before go-live
+    const before: CampaignFlight = { ...base, flightEnd: '2026-09-25' }
+    const spanning: CampaignFlight = { ...base, flightEnd: '2026-09-26' } // reaches the go-live ET day
+    expect(gameCompleteNotInstrumented(before)).toBe(true)
+    expect(gameCompleteNotInstrumented(spanning)).toBe(false)
   })
   it('excludes /install/platforms/* (explicit task-brief exclusion) — classifyPopupPath gives it kind "platformList"', () => {
     expect(classifyFunnelPath('/install/platforms/web')).toBeNull()
@@ -219,6 +238,25 @@ describe('classifyFunnelPath / computeFunnelCounts / funnelStepRates', () => {
   it('an unrecognized path is not part of the funnel', () => {
     expect(classifyFunnelPath('/settings')).toBeNull()
     expect(classifyFunnelPath('/about')).toBeNull()
+  })
+
+  it('isAuthSuccessPath: exact base path only — v1.95.5\'s new/existing suffix is NOT a second auth success', () => {
+    expect(isAuthSuccessPath('/auth/success/google')).toBe(true)
+    expect(isAuthSuccessPath('/auth/success/email')).toBe(true)
+    expect(isAuthSuccessPath('/auth/success/google/new')).toBe(false)
+    expect(isAuthSuccessPath('/auth/success/email/existing')).toBe(false)
+    expect(isAuthSuccessPath('/auth/success/email/unknown')).toBe(false)
+    expect(isAuthSuccessPath('/auth/success/apple')).toBe(false) // not a real provider, still not a prefix match
+  })
+  it('one sign-in fires a base row AND a new/existing suffix row (same event, v1.95.5) — authSuccess counts it once', () => {
+    const counts = computeFunnelCounts(
+      [
+        { path: '/auth/success/email', count: 1 },
+        { path: '/auth/success/email/existing', count: 1 },
+      ],
+      0,
+    )
+    expect(counts.authSuccess).toBe(1)
   })
 
   it('computeFunnelCounts: arrivals = the passed-in taggedArrivals (visitor=\'new\' only), NOT a sum of the rows', () => {
