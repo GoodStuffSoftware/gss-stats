@@ -166,8 +166,8 @@ describe('signin-eligible caveat / pop-ups page note (FINAL LIST)', () => {
     expect(SIGNIN_ELIGIBLE_CAVEAT).toMatch(/30 min/i)
     expect(SIGNIN_ELIGIBLE_CAVEAT).toMatch(/hour-of-day/i)
   })
-  it('POPUP_PAGE_NOTE is the exact wording the task brief specifies', () => {
-    expect(POPUP_PAGE_NOTE).toBe('Nothing is measured within 30 minutes after a sign-in, so rates are slightly conservative.')
+  it('POPUP_PAGE_NOTE is the corrected wording (2026-09-26: the quiet period delays, it does not stop measurement)', () => {
+    expect(POPUP_PAGE_NOTE).toBe('Outcomes and return visits may arrive up to 30 minutes late; a small number are lost.')
   })
 })
 

@@ -105,11 +105,44 @@ export const POPUP_OUTCOME_NAME_TO_FAMILY: Record<string, string> = {
 // never from signin-eligible, for exactly this reason).
 export const SIGNIN_ELIGIBLE_CAVEAT = 'Deferred ≥30 min after the finish — row time is not the finish time; never use for hour-of-day.'
 
-// FINAL LIST page note (Best Sudoku team, 2026-09-25): the 30-minute sign-in deferral above
-// means any rate correlating a sign-in with a nearby event is conservative by construction
-// (a same-session follow-on action can land just outside the window). Shown once on the
-// pop-ups page, not per-chart.
-export const POPUP_PAGE_NOTE = 'Nothing is measured within 30 minutes after a sign-in, so rates are slightly conservative.'
+// Pop-ups page note — CORRECTED 2026-09-26 against best-sudoku origin/main
+// (src/services/measurementQuiet.ts, confirmed by the Best Sudoku session): the 30-minute
+// quiet period after a sign-in DELAYS popup outcomes, /signin-eligible and /return/ beacons
+// (they go out on a later navigation), it does not drop them; shown/accept/dismiss, /auth/
+// and /install/ beacons still fire inside it. A held item is lost only if the player never
+// navigates again before the 7-day queue expiry. The earlier wording ("Nothing is measured
+// within 30 minutes after a sign-in") overstated it. Shown once on the pop-ups page, and the
+// ads routine's report carries the same sentence (lib/adsRules.ts MEASUREMENT_QUIET_NOTE).
+export const POPUP_PAGE_NOTE = 'Outcomes and return visits may arrive up to 30 minutes late; a small number are lost.'
+
+// ── Known gap: prompt-driven installs record no install outcome (fix pending) ──────────
+// Confirmed by the Best Sudoku session 2026-09-26 (fix branch fix/install-accept-outcome,
+// not yet shipped): accepting the install prompt marks the device installed immediately, so
+// the later appinstalled / standalone handlers return early — a prompt-driven install never
+// emits /install/pwa-installed or /popup-outcome/install-prompt/installed. /install/pwa-accept
+// (the TAP) is still accurate. While this is null, every place that shows the install-prompt
+// "installed" outcome rate or the pwa-installed count carries INSTALL_OUTCOME_GAP_LABEL, and
+// the ads routine treats "install prompt shown → install outcome" as a known gap, never an
+// alert. When the fix ships to production WEB, set this to that ET date (YYYY-MM-DD): the
+// label then says the counts are only complete from that date, and the routine's health
+// check counts only prompts shown on or after it.
+export const INSTALL_ACCEPT_OUTCOME_FIXED_ET: string | null = null
+export const INSTALL_OUTCOME_GAP_LABEL = 'known gap: prompt-driven installs not recorded (fix pending)'
+
+/** True while prompt-driven installs are still unrecorded. */
+export function installOutcomeGapOpen(fixedEt: string | null = INSTALL_ACCEPT_OUTCOME_FIXED_ET): boolean {
+  return fixedEt === null
+}
+/** The label for an install-outcome figure: the gap label while open, a "complete from"
+ * note once the fix date is set (earlier rows stay under-recorded). */
+export function installOutcomeGapNote(fixedEt: string | null = INSTALL_ACCEPT_OUTCOME_FIXED_ET): string {
+  return fixedEt === null ? INSTALL_OUTCOME_GAP_LABEL : `prompt-driven installs recorded from ${fixedEt} only`
+}
+/** Which figures the gap touches: the install-prompt "installed" outcome rate
+ * (POPUP_RATE_SPECS key `install:outcome:installed`), the popup-outcome "installed" count for
+ * the install popup, and the pwa-installed real-outcome count. */
+export const INSTALL_GAP_RATE_KEY = 'install:outcome:installed'
+export const INSTALL_GAP_OUTCOME_KEY = 'pwa-installed'
 
 export function classifyPopupPath(path: string): PopupEvent | null {
   if (!path) return null
@@ -463,7 +496,7 @@ export const POPUP_RATE_SPECS: PopupRateSpec[] = [
   ...POPUPS.filter((p) => !p.noOutcomeTracking).flatMap((p) =>
     POPUP_OUTCOME_TYPES.map((o) => ({
       key: `${p.id}:outcome:${o}`,
-      label: `${p.label} — ${o.replace('-', ' ')} rate`,
+      label: `${p.label} — ${o.replace('-', ' ')} rate${`${p.id}:outcome:${o}` === INSTALL_GAP_RATE_KEY ? ` (${installOutcomeGapNote()})` : ''}`,
       kind: 'outcome' as const,
       popup: p.id,
       outcome: o,

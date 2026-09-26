@@ -22,7 +22,7 @@
 // with an ordinary (arbitrarily long) AND/OR WHERE clause, and functions/api/campaigns.ts
 // issues one small query per campaign rather than one UNIONed mega-query across all three.
 
-import { classifyPopupPath, computeRate, TRACKING_ACTIVATION_DATE_ET, etDateFromMs } from './popupEvents'
+import { classifyPopupPath, computeRate, TRACKING_ACTIVATION_DATE_ET, etDateFromMs, installOutcomeGapNote } from './popupEvents'
 
 // ET hour-of-day (0-23) for "Arrivals by ET hour of day" — same DST-safe Intl approach as
 // popupEvents.ts's etDateFromMs, just formatting the hour instead of the calendar date.
@@ -73,6 +73,13 @@ export interface CampaignFlight {
   measurement?: 'spend-only'
   /** Shown next to the funnel/arrivals numbers when `measurement === 'spend-only'`. */
   measurabilityNote?: string
+  /** Where the ad sends people: a web page (beacon-measurable) or straight to the Play
+   * listing. Synced into the gss-stats-ads `ads_campaigns` table (lib/adsStore.ts). */
+  kind: 'web' | 'play-direct'
+  /** Google Ads daily budget in USD, as built (for pacing lines only). */
+  dailyBudgetUsd?: number
+  /** Cumulative-spend hard stop in USD, when the build spec set one. */
+  hardCapUsd?: number
   notes: string
 }
 
@@ -132,6 +139,9 @@ export const CAMPAIGNS: CampaignFlight[] = [
     flightStart: '2026-09-02',
     flightEnd: '2026-09-09',
     status: 'closed',
+    kind: 'web',
+    dailyBudgetUsd: 14.29, // best-sudoku web-retest build spec section 7 ("the week-1 campaign's ($14.29)")
+    hardCapUsd: 100, // same spec: "Mike pauses the campaign at $100 ... exactly as the week-1 build required"
     notes:
       'Served 2026-09-02..09-09 ET, $124.47 total. Every row tagged with this uc family belongs here, including the post-09-10 trickle — see flightStart\'s doc comment (no upper bound on attribution). Excludes sudoku_tired_of_ads_test (1 row, 2026-09-02) — QA traffic, not real ad performance.',
   },
@@ -142,6 +152,8 @@ export const CAMPAIGNS: CampaignFlight[] = [
     flightStart: '2026-09-09',
     flightEnd: '2026-09-13', // stopped early; configured to run through 2026-09-16
     status: 'closed',
+    kind: 'play-direct',
+    dailyBudgetUsd: 14.29, // best-sudoku web-retest build spec section 7 ("the twin's ($14.29)"); no hard cap on record
     measurement: 'spend-only',
     measurabilityNote: 'Play-direct: not measurable in beacon (no Install Referrer reader)',
     notes:
@@ -155,6 +167,9 @@ export const CAMPAIGNS: CampaignFlight[] = [
     flightStartTimeEt: '12:00', // the ad schedule's actual start — see campaignAttributionClause
     flightEnd: '2026-10-02', // 7 serving days
     status: 'active',
+    kind: 'web',
+    dailyBudgetUsd: 13,
+    hardCapUsd: 100,
     servingHoursEt: [12, 23],
     notes:
       'Now serving as of 2026-09-26. Budget: $13/day, $100 hard stop (ads session, 2026-09-26) — see CAMPAIGN_DAILY_SPEND\'s entry for this id, left empty (and CAMPAIGN_SPEND left null) until real daily spend numbers arrive from the Google Ads API; both stay configurable per-day, same as the other two campaigns. The 9 rows tagged sudoku_funnel_retest on 2026-09-23, plus anything tagged before 2026-09-26 12:00 ET, are pre-launch validation/QA, not real traffic — excluded via flightStartTimeEt (the schedule\'s real noon-ET start), not just the calendar date.',
@@ -307,7 +322,9 @@ export const FUNNEL_STEP_LABELS: Record<FunnelStepKey, string> = {
   accept: 'Accept',
   authSuccess: 'Auth success',
   installPrompt: 'Install prompt',
-  install: 'Install',
+  // Known gap until the install-accept fix ships (lib/popupEvents.ts
+  // INSTALL_ACCEPT_OUTCOME_FIXED_ET): the label says so wherever the funnel is shown.
+  install: `Install — ${installOutcomeGapNote()}`,
 }
 
 // Steps with NO matching path anywhere in production D1 (confirmed 2026-09-25 by scanning
@@ -352,9 +369,23 @@ export function classifyFunnelPath(path: string): FunnelStepKey | null {
   if ((ev.family === 'signin-prompt' || ev.family === 'promo-first50') && ev.kind === 'shown') return 'ask'
   if ((ev.family === 'signin-prompt' || ev.family === 'promo-first50') && ev.kind === 'accept') return 'accept'
   if (ev.family === 'install' && ev.kind === 'shown') return 'installPrompt' // /install/prompt/{android,ios,desktop}
-  if (ev.family === 'install' && ev.kind === 'outcome') return 'install' // pwa-installed/standalone-detected/play-detected
+  // INSTALL = /popup-outcome/install-prompt/installed (coordinator, 2026-09-26): the popup
+  // outcome counts AT MOST ONCE per showing, while the raw /install/<outcome> beacons can
+  // double-count one install (a cross-tab race can fire pwa-installed AND
+  // standalone-detected). The raw signals are a secondary figure — isRawInstallSignal below —
+  // never this step. Until INSTALL_ACCEPT_OUTCOME_FIXED_ET is set, prompt-driven installs
+  // don't reach this step at all (FUNNEL_STEP_LABELS.install carries the known-gap label).
+  if (ev.family === 'popup-outcome:install' && ev.kind === 'installed') return 'install'
   return null
 }
+
+/** Raw /install/pwa-installed | standalone-detected | play-detected — "raw install signals
+ * (can double-count)", shown only as a secondary line next to the deduplicated install step. */
+export function isRawInstallSignal(path: string): boolean {
+  const ev = classifyPopupPath(path)
+  return !!ev && ev.family === 'install' && ev.kind === 'outcome'
+}
+export const RAW_INSTALL_SIGNALS_LABEL = 'raw install signals (can double-count)'
 
 export interface FunnelPathCount {
   path: string

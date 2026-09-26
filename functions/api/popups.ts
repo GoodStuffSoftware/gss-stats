@@ -31,6 +31,9 @@ import {
   aggregatePopupRows,
   computePopupRate,
   dayCounts,
+  installOutcomeGapNote,
+  INSTALL_GAP_OUTCOME_KEY,
+  INSTALL_GAP_RATE_KEY,
   measuredCoarseCount,
   measuredDetailedBreakdown,
   measuredDetailedCount,
@@ -141,6 +144,9 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       insufficientCohort: gated.insufficientCohort,
       numerator: gated.numerator,
       denominator: gated.denominator,
+      // Known install-outcome gap (lib/popupEvents.ts INSTALL_ACCEPT_OUTCOME_FIXED_ET) —
+      // travels with the DATA, so saved widgets with older titles still show it.
+      ...(rateKey === INSTALL_GAP_RATE_KEY ? { note: installOutcomeGapNote() } : {}),
       meta,
     })
   }
@@ -161,7 +167,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       const c = measuredDetailedCount(agg, 'install', 'outcome', k)
       return { key: { installOutcome: k }, pageviews: c, visits: c }
     })
-    return json({ rows: rowsOut, totals: countedTotals(rowsOut), meta })
+    return json({ rows: rowsOut, totals: countedTotals(rowsOut), note: `${INSTALL_GAP_OUTCOME_KEY}: ${installOutcomeGapNote()}`, meta })
   }
 
   // Everything else needs a known popup family.
@@ -185,7 +191,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       const c = measuredCoarseCount(agg, family, o)
       return { key: { outcome: o }, pageviews: c, visits: c }
     })
-    return json({ rows: rowsOut, totals: countedTotals(rowsOut), meta })
+    const note = popup === 'install' ? { note: `installed: ${installOutcomeGapNote()}` } : {}
+    return json({ rows: rowsOut, totals: countedTotals(rowsOut), ...note, meta })
   }
 
   // 'reason' — activation-gated.
