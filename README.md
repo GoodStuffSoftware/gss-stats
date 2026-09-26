@@ -315,8 +315,9 @@ per 10 minutes. The dashboard holds no Google Ads credential and never calls the
   10 minutes); a concurrent request loses and gets 429. Operator body: `{"full": true,
   "campaignIds": [...], "maxDays": n}`.
 - **Per-run caps (Workers Free, 10 ms CPU):** at most 7 closed days (live campaigns first) and 40
-  D1 statements; the rest continues next run. Measured live: a no-op 1-4 ms CPU, a 1-day pull
-  about 9 ms warm (ADR 0001 has the numbers and what happens if a cold run overruns).
+  D1 statements; the rest continues next run. Measured live: a no-op 1-4 ms CPU (6 ms on a
+  fresh isolate), a 1-day pull 9-10 ms warm and 12.6 ms cold, so a cold pull can overrun Free's
+  limit (ADR 0001: what then happens, and why Workers Paid removes it).
 - **Deploy:** `npm run ads:worker-deploy -- --cf-token-file <path> [--paused]` stamps the version
   with the git SHA (tag, message, and the `GIT_SHA` it reports with a hash of the campaign
   definitions); `--paused` deploys with no cron. The Worker bundles `src/lib/campaigns.ts`, so a
