@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { timedOutText } from '../../src/lib/adsApi'
 
 export function repoRoot(): string {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -24,7 +25,7 @@ export type WranglerRunner = (args: string[]) => Promise<WranglerResult>
 /** Every external call the routine makes (wrangler, bws, fetch) gives up after this long
  * (review L8), and the failure pushes like any other failed read. */
 export const EXTERNAL_TIMEOUT_MS = Number(process.env.ADS_READS_TIMEOUT_MS) > 0 ? Number(process.env.ADS_READS_TIMEOUT_MS) : 60_000
-export const TIMED_OUT_TEXT = `timed out after ${Math.round(EXTERNAL_TIMEOUT_MS / 1000)}s`
+export const TIMED_OUT_TEXT = timedOutText(EXTERNAL_TIMEOUT_MS)
 
 export function createWranglerRunner(opts: { cfToken?: string | null; root?: string; timeoutMs?: number } = {}): WranglerRunner {
   const root = opts.root ?? repoRoot()

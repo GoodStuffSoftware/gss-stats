@@ -6,6 +6,21 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Campaign spend shows how fresh it is.** The campaigns page and the readings log show
+  "Spend through &lt;date&gt; · synced &lt;time ago&gt;" for each campaign, and flag
+  "stale — sync pending" when a flight day that should be stored by now is missing.
+- **One shared Google Ads sync (`npm run ads:sync`).** Every ads routine now fills in every
+  missing day, re-checks the last three days Google may still restate, and writes only what
+  changed, so running it twice in a row changes nothing.
+
+### Changed
+- **Ads readings are recorded once per day per entry.** Rerunning a read the same day no
+  longer adds a duplicate row or repeats a push for the same threshold, cap trip or alert; a
+  rerun is recorded only when it carries new information, and a failed read still pushes.
+- **Stored spend covers closed days only.** Today's still-open numbers are no longer stored;
+  days with no delivery are stored as zero so the stored days have no gaps.
+
 ## [0.4.0] — 2026-09-26
 
 ### Added

@@ -7,15 +7,11 @@
 // redact() so it is masked if it ever shows up in an error string.
 
 import { execFile } from 'node:child_process'
-import { registerSecret, redactedFirstLine } from './redact'
+import { registerSecret, redactedFirstLine } from '../../src/lib/adsRedact'
 import { EXTERNAL_TIMEOUT_MS, TIMED_OUT_TEXT } from './wrangler'
+import type { AdsCredentials } from '../../src/lib/adsApi'
 
-export interface AdsCredentials {
-  clientId: string
-  clientSecret: string
-  refreshToken: string
-  developerToken: string
-}
+export type { AdsCredentials }
 
 export const BWS_KEYS: Record<keyof AdsCredentials, string> = {
   clientId: 'google-ads-api-rep-client-id',

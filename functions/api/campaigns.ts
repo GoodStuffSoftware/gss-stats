@@ -42,7 +42,8 @@ import {
 } from '../../src/lib/campaigns'
 import { etDateFromMs, excludeInstallGapUnmeasured, installOutcomeGapNote, TRACKING_ACTIVATION_DATE_ET } from '../../src/lib/popupEvents'
 import { resolveCampaignSpend } from '../../src/lib/adsRules'
-import { readSpendSummaries } from '../../src/lib/adsStore'
+import { readFreshness, readSpendSummaries } from '../../src/lib/adsStore'
+import { freshnessOf } from '../../src/lib/adsFreshness'
 import { isRawInstallSignal, RAW_INSTALL_SIGNALS_LABEL } from '../../src/lib/campaigns'
 
 interface Env {
@@ -202,8 +203,12 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
 
   // Spend: the routine's stored Google Ads API figures first (gss-stats-ads), else the
   // hand-entered CAMPAIGN_SPEND — fail soft, see lib/adsStore.ts readSpendSummaries.
-  const stored = (await readSpendSummaries(ctx.env.gss_stats_ads))?.get(campaign.id) ?? null
+  const nowMs = Date.now()
+  const [summaries, freshnessAll] = await Promise.all([readSpendSummaries(ctx.env.gss_stats_ads), readFreshness(ctx.env.gss_stats_ads, nowMs, [campaign])])
+  const stored = summaries?.get(campaign.id) ?? null
   const resolvedSpend = resolveCampaignSpend(stored, CAMPAIGN_SPEND[campaign.id] ?? null)
+  // spendThrough / lastSync / stale (lib/adsFreshness.ts) — read-only, never an Ads API call.
+  const freshness = freshnessAll.get(campaign.id) ?? freshnessOf(campaign, null, null, nowMs)
   const spend = resolvedSpend.spend
   // Raw /install/<outcome> beacons — secondary to the deduplicated install step (one install
   // can fire two of them); see lib/campaigns.ts isRawInstallSignal.
@@ -248,6 +253,9 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     costPerAuthSuccess: costPer(spend, counts.authSuccess),
     spend,
     spendSource: { source: resolvedSpend.source, fetchedAt: resolvedSpend.fetchedAt, lastDate: resolvedSpend.lastDate },
+    spendThrough: freshness.spendThrough,
+    lastSync: freshness.lastSync,
+    stale: freshness.stale,
     rawInstallSignals: { count: rawInstallSignals, label: RAW_INSTALL_SIGNALS_LABEL },
     meta: { generatedAt: new Date().toISOString(), trackingActivationDate: TRACKING_ACTIVATION_DATE_ET },
   }

@@ -205,25 +205,27 @@ exclusions, MIN_COHORT and ET-day logic are the same `src/lib` code the dashboar
 the routine and the dashboard can't disagree.
 
 ```powershell
-npm run ads:morning-read -- --dry-run --cf-token-file <path-to-cf-token>   # daily read; no writes
+npm run ads:sync -- --dry-run --cf-token-file <path-to-cf-token>           # the shared sync only
+npm run ads:morning-read -- --dry-run --cf-token-file <path>               # daily read; no writes
 npm run ads:postflight-read -- --stage wrapup --dry-run --cf-token-file <path>
-npm run ads:backfill -- --dry-run --cf-token-file <path>                   # idempotent spend backfill
+npm run ads:backfill -- --dry-run --cf-token-file <path>                   # full re-pull + config check
 npm run ads:morning-read -- --fixture <file.json> --now <iso>              # offline, recorded data
 npm run typecheck:scripts
 ```
 
 - **Spend** comes from the Google Ads REST API only (customer 8726535246, no manager
-  header). Credentials are read from Bitwarden Secrets Manager with `bws` (needs
-  `BWS_ACCESS_TOKEN`) into process memory and are never printed, logged or written.
+  header), and only through the shared sync (see [Ads data freshness](#ads-data-freshness)).
+  Credentials are read from Bitwarden Secrets Manager with `bws` (needs `BWS_ACCESS_TOKEN`)
+  into process memory and are never printed, logged or written.
 - **Beacon reads** use `wrangler d1 execute gss-geo --remote --json --command`: single
   `SELECT`s only, enforced before wrangler runs.
 - **Store:** gss-stats' own D1 database `gss-stats-ads` (spend per day, placement-day cost,
   an append-only readings log and fire-once threshold state). Why and how:
   [docs/adr/0001-ads-read-store.md](docs/adr/0001-ads-read-store.md). Schema:
   [`migrations/gss-stats-ads/`](migrations/gss-stats-ads/) (`npm run ads:migrate`).
-- **morning-read** stores yesterday's and cumulative spend, fires each $25/$50/$75/$100 read
-  once (full read + kill rules), always appends a daily line, checks the hard cap on every
-  read, and notes any earlier scheduled read that never ran. The release-health check (a
+- **morning-read** syncs spend first, fires each $25/$50/$75/$100 read once (full read + kill
+  rules), appends one daily line per ET day, checks the hard cap on every read, and notes any
+  earlier scheduled read that never ran. The release-health check (a
   missing child of a non-zero parent) never runs between 01:00 and 12:00 ET, so the 08:00
   run skips it and a 23:15 ET `--release-health-only` backstop covers it on days that served
   ads. Pushes go out only on a threshold read, a kill-rule trip, a failed read, or a real
@@ -242,6 +244,40 @@ npm run typecheck:scripts
   can only make COUNT queries and one document GET, but the prod key on this machine is not
   a read-only key (it holds `roles/editor`); pointing this flag at a key with only
   `roles/datastore.viewer` is an owner step.
+- **One reading per entry per day.** A reading is stored once per (campaign, ET day, entry
+  kind: `morning`, `backstop`, `threshold-50`, `postflight-wrapup`, …). A same-day rerun is
+  stored only when it carries new information (a complete retry of an incomplete read, a new
+  pause proposal, a new release-health alert), and a threshold, cap trip or alert already
+  pushed that day is not pushed again; a failed read always pushes. The database enforces it
+  with a UNIQUE index (migration 0003).
+
+## Ads data freshness
+
+Every path that needs Google Ads metrics runs **one** function,
+[`syncAdsData`](src/lib/adsSync.ts): the morning read, the backstop, the post-flight read,
+the backfill (`--full`), `npm run ads:sync`, and later a Cloudflare Worker cron. Per campaign
+it:
+
+1. reads the stored days from `gss-stats-ads`;
+2. pulls every **missing closed ET day** (from the flight's first day, or the first gap,
+   through yesterday) plus the **last 3 closed days**, which Google still restates, as one
+   date range (daily metrics and placement-day rows). A closed campaign is covered through its
+   flight end + 3 days and then costs no API call;
+3. stores days the API returns nothing for as zero, so the stored days are contiguous;
+4. writes **only rows that changed**: a second run right after another is a no-op (it writes
+   only its own `ads_sync_runs` row);
+5. records the run in `ads_sync_runs` (start/finish, campaigns, days fetched and changed,
+   status, a redacted error).
+
+Today's still-open day is never stored. The Ads client (plain `fetch`) and the store
+(`createSqlAdsStore` over a wrangler-CLI adapter today, a D1-binding adapter for a Worker) are
+runtime-agnostic.
+
+The campaigns page and the readings widget show **"Spend through &lt;date&gt; · synced
+&lt;relative time&gt;"** per campaign (`spendThrough`, `lastSync` from `/api/campaigns` and
+`/api/ads/readings`), and **"stale — sync pending"** when a flight day that should be stored
+by now is missing: yesterday from 09:30 ET (the 08:00 ET morning read has synced by then),
+otherwise the day before. The dashboard never calls the Google Ads API itself.
 
 ## Docs
 

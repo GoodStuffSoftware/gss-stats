@@ -225,6 +225,10 @@ export interface CampaignCompareResponse {
   // Where `spend` came from: the ads routine's stored Google Ads API figures (gss-stats-ads),
   // the hand-entered CAMPAIGN_SPEND config, or nothing — lib/adsRules.ts resolveCampaignSpend.
   spendSource?: { source: 'google-ads-api' | 'config' | 'none'; fetchedAt: string | null; lastDate: string | null }
+  // Ads data freshness (lib/adsFreshness.ts): last closed day stored, last sync, stale flag.
+  spendThrough?: string | null
+  lastSync?: string | null
+  stale?: boolean
   // Raw /install/<outcome> beacons — secondary to the deduplicated install step (one install
   // can fire two of them); see lib/campaigns.ts isRawInstallSignal.
   rawInstallSignals?: { count: number; label: string }
