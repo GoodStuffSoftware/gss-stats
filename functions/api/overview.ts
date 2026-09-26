@@ -29,9 +29,24 @@ import {
   isAuthSuccessBase,
   isInstallPromptInstalled,
   isRawInstallSignal,
+  gameCompleteNotInstrumented,
+  FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED,
   RAW_INSTALL_SIGNALS_LABEL,
+  type FunnelStepKey,
 } from '../../src/lib/campaigns'
-import { classifyPopupPath, computeRate, etDateFromMs, excludeInstallGapUnmeasured, withInstallGapNote, TRACKING_ACTIVATION_DATE_ET, POPUPS } from '../../src/lib/popupEvents'
+import {
+  classifyPopupPath,
+  computeRate,
+  etDateFromMs,
+  excludeInstallGapUnmeasured,
+  isPopupEventPath,
+  withInstallGapNote,
+  TRACKING_ACTIVATION_DATE_ET,
+  GAME_COMPLETE_LIVE_AT,
+  NEW_BEACONS_LIVE_AT_ET,
+  NEW_BEACONS_LIVE_MARKER_LABEL,
+  POPUPS,
+} from '../../src/lib/popupEvents'
 import {
   addEtDays,
   buildKpiTile,
@@ -44,7 +59,7 @@ import {
   sameTimeWindowMs,
   siteWindowClause,
 } from '../../src/lib/overview'
-import { latestDatedRelease } from '../../src/lib/releases'
+import { latestDatedRelease, datedReleases } from '../../src/lib/releases'
 import { resolveCampaignSpend } from '../../src/lib/adsRules'
 import { readSpendSummaries } from '../../src/lib/adsStore'
 
@@ -74,7 +89,10 @@ const isDateOnly = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v)
 type Row = { min: number; path: string; visitor: string; campaign: string; c: number }
 
 function isEventPath(path: string): boolean {
-  return classifyPopupPath(path) !== null || path.startsWith('/return/')
+  // isPopupEventPath (lib/popupEvents.ts POPUP_EVENT_PREFIXES) also covers `/game/complete/`
+  // (v1.95.5) — without it here, a completed-game beacon would inflate the "Page views" KPI
+  // the same way it inflated /api/geo + /api/sites before popupExcludeClause picked it up.
+  return classifyPopupPath(path) !== null || path.startsWith('/return/') || isPopupEventPath(path)
 }
 function sumInWindow(rows: Row[], startMs: number, endMs: number, pred: (r: Row) => boolean): number {
   let total = 0
@@ -89,8 +107,9 @@ function isReturnD1Plus(path: string): boolean {
   const ev = parseReturnPath(path)
   return !!ev && ev.bucket !== 'd0'
 }
-// One per sign-in: the base row only (lib/campaigns.ts isAuthSuccessBase), never the
-// /auth/success/<provider>/<new|existing|unknown> row that rides alongside it.
+// One per sign-in: the base row only (lib/campaigns.ts isAuthSuccessBase, alias
+// isAuthSuccessPath: the one matcher), never the /auth/success/<provider>/<new|existing|unknown>
+// row v1.95.5 sends alongside it for the same sign-in (a prefix match would double-count).
 const isAuthSuccess = isAuthSuccessBase
 // Installs = /popup-outcome/install-prompt/installed (once per showing), like the campaign
 // funnel; raw /install/<outcome> beacons can double-count one install and are a secondary
@@ -199,7 +218,16 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     const w = windowed((r) => r.path === '/game')
     kpis.push(buildKpiTile('played', 'Games played', w.today, w.yesterday, w.avg7))
   }
-  kpis.push(notYetTrackingTile('completed', 'Games completed')) // no matching path anywhere in D1 — see lib/campaigns.ts
+  // v1.95.5 (live GAME_COMPLETE_LIVE_AT, 2026-09-26T19:43:02Z): '/game/complete/...' didn't
+  // exist before this instant, so "today"/"yesterday"/avg7 windows entirely before it are a
+  // real not-instrumented gap, not a real 0 — same convention as notYetTrackingTile's other
+  // callers (e.g. the /return/ tile below, gated on returnBeaconLiveToday()).
+  if (nowMs < GAME_COMPLETE_LIVE_AT) {
+    kpis.push(notYetTrackingTile('completed', 'Games completed'))
+  } else {
+    const w = windowed((r) => r.path.startsWith('/game/complete/'))
+    kpis.push(buildKpiTile('completed', 'Games completed', w.today, w.yesterday, w.avg7))
+  }
   {
     const shown = windowed((r) => isPopupShown(r.path))
     const accept = windowed((r) => isPopupAccept(r.path))
@@ -259,7 +287,11 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // Overlay data for the timeline chart: campaign flights (shaded bands), release markers,
   // and the tracking-activation marker — all config-driven, no extra queries needed.
   const campaignFlights = CAMPAIGNS.map((c) => ({ id: c.id, label: c.label, flightStart: c.flightStart, flightEnd: c.flightEnd, status: c.status }))
-  const releaseMarkers = latestDatedRelease() ? [latestDatedRelease()] : [] // see releasePanel below for "no dated release yet"
+  // Every dated release, not just the latest — the timeline overlay labels 'major' ones and
+  // draws the rest as unlabeled ticks (see components/widgets/OverviewWidgetBody.vue), so a
+  // growing release history doesn't clutter the chart. releasePanel (below) still keys off
+  // just the LATEST dated release for its own "no dated release yet" fallback.
+  const releaseMarkers = datedReleases().map((r) => ({ version: r.version, dateEt: r.dateEt, note: r.note, major: r.major }))
 
   // Stored Google Ads spend (gss-stats-ads) beats the hand-entered config — the same rule as
   // /api/campaigns (lib/adsRules.ts resolveCampaignSpend), read once for every campaign.
@@ -287,10 +319,12 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
         rows1.map((r) => ({ path: r.path, count: r.c })),
         taggedArrivals,
       )
-      // Simplified vs /api/campaigns.ts: uses the GLOBAL not-instrumented set only (skips the
-      // extra per-flight "did this path exist site-wide during the window" query) — a leaner
-      // scorecard read; the campaign's own page (/api/campaigns) is the source of truth.
-      const rates = funnelStepRates(counts)
+      // Simplified vs /api/campaigns.ts: skips the extra per-flight "did this path exist
+      // site-wide during the window" query (the campaign's own page, /api/campaigns, is the
+      // source of truth for that) — but still gates 'completed' on gameCompleteNotInstrumented
+      // (v1.95.5) rather than the permanent global default, so a flight whose window reaches
+      // GAME_COMPLETE_LIVE_AT shows real completed-game rates instead of a stale "—".
+      const rates = funnelStepRates(counts, gameCompleteNotInstrumented(c) ? FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED : new Set<FunnelStepKey>())
 
       const returnCounts = Object.fromEntries(['d0', 'd1', 'd2-7', 'd8-14', 'd15-30', 'd31-60'].map((b) => [b, 0])) as Record<string, number>
       for (const x of r2.results ?? []) {
@@ -376,6 +410,11 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       campaignFlights,
       releaseMarkers,
       trackingActivationDate: TRACKING_ACTIVATION_DATE_ET,
+      // v1.95.5 go-live (game-complete + auth new/existing beacons) — same marker
+      // convention as trackingActivationDate above, see lib/popupEvents.ts
+      // NEW_BEACONS_LIVE_AT_ET / NEW_BEACONS_LIVE_MARKER_LABEL.
+      newBeaconsLiveAt: NEW_BEACONS_LIVE_AT_ET,
+      newBeaconsLiveAtLabel: NEW_BEACONS_LIVE_MARKER_LABEL,
       since,
       until,
       // Series labels that carry data caveats, so the chart shows them whatever the layout.

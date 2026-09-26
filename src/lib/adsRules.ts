@@ -63,10 +63,13 @@ export const WEB_GO_LIVE_UTC_MS = Date.parse('2026-09-26T14:25:00Z')
 // ── Mid-flight instrumentation (owner override of the spec section 14a beacon freeze, 2026-09-26)
 // Each instant is set (UTC ms) by the release coordinator once the release is live; null = not
 // live yet, and every read behaves exactly as before.
-/** When `/auth/success/<provider>/new|existing` went live. From then on campaign sign-ups are
- * counted EXACTLY from tagged `/new` rows; "at most N" still bounds the unsplit rows (before the
- * release, or from an old client). See campaignSignUps. */
-export const AUTH_NEW_EXISTING_LIVE_AT: number | null = null
+/** When `/auth/success/<provider>/<new|existing|unknown>` went live: v1.95.5, 2026-09-26T19:43:02Z
+ * (the same instant as lib/popupEvents.ts GAME_COMPLETE_LIVE_AT). From then on campaign sign-ups
+ * are counted EXACTLY from tagged `/new` rows; "at most N" still bounds the unsplit and
+ * `unknown` rows (before the release, or from an old client). See campaignSignUps. A plain
+ * Date.parse literal, no Intl at module load: the ads-sync Worker imports this module. The ONE
+ * definition (v0.6.1 set the same instant). */
+export const AUTH_NEW_EXISTING_LIVE_AT: number | null = Date.parse('2026-09-26T19:43:02Z')
 /** When the signed-out upsell fix went live. A BEHAVIOUR change, so a funnel SEGMENT
  * BOUNDARY: the $100 read and the post-flight reads report pre-fix and post-fix figures
  * separately (spec section 14a: "two separate short tests"). See splitAtBoundary. */
@@ -476,6 +479,9 @@ export function summarizeTaggedRows(rows: readonly TaggedRow[], opts: { fromMs?:
       s.accepts.byPath[r.path] += r.count
     }
     if (r.path.startsWith('/auth/redirect/')) s.authRedirect += r.count
+    // The base row only counts a sign-in (lib/campaigns.ts authSuccessRow, the one auth-success
+    // matcher): v1.95.5 sends the new/existing row ALONGSIDE the base row for the same sign-in,
+    // so it only feeds the split; counting it too would double every sign-in from go-live on.
     const auth = authSuccessRow(r.path)
     if (auth === 'base') s.authSuccess += r.count
     else if (auth) s.authSuccessSplit[auth] += r.count
@@ -740,7 +746,10 @@ export const MEASUREMENT_QUIET_NOTE = POPUP_PAGE_NOTE
  * campaign sign-ups, so their minimum is an UPPER bound — "at most N". */
 export const SIGNUP_PROXY_NOTE =
   'Sign-ups are an UPPER bound, "at most N campaign sign-ups" = min(tagged auth successes, new prod accounts sitewide in the flight window): /auth/success also fires for returning sign-ins and the account count is not campaign-attributed. Counts only, never matched to anyone.'
-/** Post-flight recommendation (a beacon change, so only after the 2026-10-02 freeze). */
+/** Post-flight recommendation (a beacon change, so only after the 2026-10-02 freeze). v1.95.5
+ * shipped the beacon early (AUTH_NEW_EXISTING_LIVE_AT), so the post-flight read adds this only
+ * while AUTH_NEW_EXISTING_LIVE_AT is null, and sign-ups are counted exactly from the live
+ * instant on (campaignSignUps). */
 export const AUTH_SUCCESS_SPLIT_RECOMMENDATION =
   'Recommendation: add /auth/success/<provider>/new|existing via additionalUserInfo.isNewUser (frozen until 10-02), so a campaign sign-up can be counted instead of bounded.'
 

@@ -215,11 +215,11 @@ describe('morning-read: quiet days, the hard cap and release health', () => {
     expect(rec.proposal).toBeNull()
     expect(rec.notes[0]).toMatch(/^no pause proposed: campaign ended/)
   })
-  it('reaching $100 runs the decision table with "at most N" sign-ups and both inputs', async () => {
+  it('reaching $100 runs the decision table with "at most N" sign-ups and both inputs (a flight before the new/existing split went live)', async () => {
     const fx = base()
     ads(fx).daily['2026-09-29'].costMicros = 70_000_000
     fx.store!.consumed = [25, 50, 75]
-    const r = await runMorningRead(fixtureDeps(fx, false), opts)
+    const r = await runMorningRead({ ...fixtureDeps(fx, false), boundaries: { authNewExistingLiveAtMs: null } }, opts)
     expect(r.thresholds.crossedNow).toEqual([100])
     expect(r.thresholdRead!.kill.tripped).toContain('hard-cap')
     expect(r.thresholdRead!.kill.proposal).toBe('PROPOSE PAUSE')
@@ -328,10 +328,10 @@ describe('postflight-read', () => {
     expect(r.due).toBe(false)
     expect(r.notify).toMatchObject({ push: true, text: 'BSK retest day15 read FAILED: Google Ads spend (OAuth refresh failed); campaign status (OAuth refresh failed).' })
   })
-  it('every post-flight read carries the /auth/success new|existing recommendation and "at most N" sign-ups', async () => {
+  it('before the new/existing split went live, a post-flight read carries its recommendation and "at most N" sign-ups', async () => {
     const fx = base()
     fx.now = '2026-10-09T13:00:00Z'
-    const deps = fixtureDeps(fx, false)
+    const deps = { ...fixtureDeps(fx, false), boundaries: { authNewExistingLiveAtMs: null } }
     const r = await runPostflightRead(deps, { campaignId: '24279250691', stage: 'wrapup', force: false })
     expect(r.recommendations).toEqual([AUTH_SUCCESS_SPLIT_RECOMMENDATION])
     const text = formatPostflightReport(r)
@@ -341,6 +341,13 @@ describe('postflight-read', () => {
     expect(deps.store.written.readings[0].notes).toContain(AUTH_SUCCESS_SPLIT_RECOMMENDATION)
     expect(r.cohort).toBeNull() // the wrap-up does not read the tier split
     expect(r.cohortNote).toBeNull()
+  })
+  it('with the split live (v1.95.5, the default now) the recommendation is gone', async () => {
+    const fx = base()
+    fx.now = '2026-10-09T13:00:00Z'
+    const r = await runPostflightRead(fixtureDeps(fx, false), { campaignId: '24279250691', stage: 'wrapup', force: false })
+    expect(r.recommendations).toEqual([])
+    expect(formatPostflightReport(r)).not.toContain('frozen until 10-02')
   })
   it('M1: continued spend on a still-serving campaign pushes PROPOSE PAUSE even before the stage is due, and never moves the wrap-up', async () => {
     const fx = base()

@@ -1,11 +1,38 @@
 import type { SiteKey, ChartType, Metric, Dataset } from '../types'
 import { POPUPS, POPUP_RATE_SPECS } from './popupEvents'
+import { CAMPAIGNS } from './campaigns'
 
 export const DATASETS: { value: Dataset; label: string }[] = [
   { value: 'rum', label: 'RUM — pageviews / visits' },
   { value: 'geo', label: 'Geo beacon — region / city (bot-free)' },
   { value: 'popup', label: 'Pop-up tracking — sign-in / promo / upsell / install' },
+  { value: 'overview', label: 'Best Sudoku overview — KPIs / timeline / scorecard / release panel' },
+  { value: 'campaigns', label: 'Best Sudoku campaigns — funnel / hour-of-day / country / …' },
+  { value: 'ads-readings', label: 'Best Sudoku ads readings log' },
 ]
+
+// dataset 'overview' — which panel a widget renders (widget.view).
+export const OVERVIEW_VIEWS: { value: string; label: string }[] = [
+  { value: 'kpis', label: 'Today at a glance (KPI tiles)' },
+  { value: 'timeline', label: 'Overall timeline' },
+  { value: 'scorecard', label: 'Campaign scorecard' },
+  { value: 'releasePanel', label: 'Release before/after panel' },
+]
+
+// dataset 'campaigns' — which panel a widget renders (widget.view).
+export const CAMPAIGNS_VIEWS: { value: string; label: string }[] = [
+  { value: 'funnel', label: 'Funnel per campaign' },
+  { value: 'hourOfDay', label: 'Arrivals by ET hour of day' },
+  { value: 'country', label: 'Arrivals & funnel by country' },
+  { value: 'flightDay', label: 'Daily arrivals by flight day (+ cumulative)' },
+  { value: 'cost', label: 'Cost per arrival / auth success' },
+  { value: 'deviceMix', label: 'Device mix' },
+  { value: 'returns', label: 'Return visits' },
+]
+
+// dataset 'campaigns' / 'ads-readings' — which campaign(s) a widget covers (widget.campaignIds).
+// Empty selection = all campaigns, same as the pre-widget bespoke campaigns page.
+export const CAMPAIGN_OPTIONS: { value: string; label: string }[] = CAMPAIGNS.map((c) => ({ value: c.id, label: c.label }))
 
 // Pop-up dataset (dataset: 'popup'). Count-based dimensions — each needs `widget.popup`
 // (and 'reason'/'date' default `widget.popupKind` to 'shown'); 'eligible' and
@@ -115,6 +142,7 @@ export const CHART_TYPES: { value: ChartType; label: string; needsDimension: boo
   { value: 'map', label: 'World map (geo points · beacon only)', needsDimension: false, allowsBreakdown: false },
   { value: 'table', label: 'Table', needsDimension: true, allowsBreakdown: true },
   { value: 'rate', label: 'Rate (% tile · pop-up dataset only)', needsDimension: true, allowsBreakdown: false },
+  { value: 'note', label: 'Note (static text tile)', needsDimension: false, allowsBreakdown: false },
 ]
 
 export const METRICS: { value: Metric; label: string }[] = [

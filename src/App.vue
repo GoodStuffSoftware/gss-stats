@@ -1,15 +1,15 @@
 <script setup lang="ts">
 import { reactive, ref, watch, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import type { DashboardConfig, DashboardPage, Widget, GlobalFilters } from './types'
-import { defaultConfig, normalizeConfig, defaultWidgetsForPage, clonePage, cryptoId, isBestSudokuLaunchPage, isBestSudokuPopupsPage, isCampaignComparePage, isOverviewPage, BEST_SUDOKU_SITES, beaconizeWidget } from './lib/defaults'
+import { defaultConfig, normalizeConfig, defaultWidgetsForPage, clonePage, cryptoId, isBestSudokuLaunchPage, isBestSudokuPopupsPage, isCampaignComparePage, BEST_SUDOKU_SITES, beaconizeWidget } from './lib/defaults'
 import { rangeLabel, ymdRangeToISO } from './lib/range'
 import { loadConfig, saveConfig } from './api'
 import { loadSites, sitesTree, tokenLabel } from './sitesStore'
 import { isSiteDim, semanticKey } from './lib/drill'
 import { sessionExpired, reauth } from './session'
-import { TRACKING_ACTIVATION_DATE_ET, POPUP_PAGE_NOTE, SMALL_SAMPLE_NOTE } from './lib/popupEvents'
-import CampaignComparePage from './components/CampaignComparePage.vue'
-import OverviewPage from './components/OverviewPage.vue'
+import { isTouchDevice } from './lib/responsive'
+import { TRACKING_ACTIVATION_DATE_ET } from './lib/popupEvents'
+import NoteBlock from './components/NoteBlock.vue'
 import PageBar from './components/PageBar.vue'
 import FilterBar from './components/FilterBar.vue'
 import Dashboard from './components/Dashboard.vue'
@@ -44,13 +44,14 @@ const showPopupDeferredNote = computed(() => isBestSudokuPopupsPage(activePage.v
 // replacement for it.
 const showSmallSampleNote = computed(() => isBestSudokuPopupsPage(activePage.value))
 
-// "Best Sudoku campaigns" and "Best Sudoku overview" are bespoke pages (see
-// CampaignComparePage.vue / OverviewPage.vue) — no generic Widget grid, so "Add chart" /
-// "restore default charts" don't apply to either. The overview page DOES keep its FilterBar
-// (its timeline zooms/range-selects with it); the campaign page does not.
+// "Best Sudoku campaigns" and "Best Sudoku overview" used to be bespoke pages (see git
+// history for the retired OverviewPage.vue / CampaignComparePage.vue) — now they're regular
+// widget grids like every other page (dataset 'overview'/'campaigns' — see
+// components/widgets/OverviewWidgetBody.vue / CampaignsWidgetBody.vue), so "Add chart" /
+// "restore default charts" apply to them too. The campaign page still hides the global
+// FilterBar (its widgets aren't filter-driven — each covers its own fixed campaign flight
+// window; see lib/campaignsData.ts).
 const isCampaignPage = computed(() => isCampaignComparePage(activePage.value))
-const isOverviewActive = computed(() => isOverviewPage(activePage.value))
-const isBespokePage = computed(() => isCampaignPage.value || isOverviewActive.value)
 
 onMounted(async () => {
   dark.value = localStorage.getItem('gss-stats-dark') === '1'
@@ -117,7 +118,6 @@ function deletePage(id: string) {
 }
 function restoreDefaultCharts(id: string) {
   const p = config.pages.find((x) => x.id === id) ?? activePage.value
-  if (isCampaignComparePage(p) || isOverviewPage(p)) return // bespoke page — no generic widgets to restore
   const launch = isBestSudokuLaunchPage(p)
   const popups = isBestSudokuPopupsPage(p)
   // If the user has pinned any charts as defaults, restoring keeps exactly those and drops
@@ -325,6 +325,77 @@ function openFilteredPage() {
   closeDrill()
 }
 
+// ── Function bar (filters: range/sites/exclusions; modification: add chart, theme) — hidden
+// by default, revealed via a small fixed top-right button (owner request, 2026-09-26; scope
+// clarified 2026-09-26: page TABS are wayfinding, not "modification" chrome, so PageBar stays
+// always visible and lives outside this bar — see the template). An overlay/dropdown
+// (position: fixed), never a layout shift — the grid below never moves when it opens.
+// `barOpen` also drives per-chart modification chrome (ChartCard's edit/zoom/menu icons,
+// drag handles, resize grips): those stay hidden until this bar is open OR that specific
+// card is hovered — see Dashboard.vue's `controlsVisible` prop / ChartCard.vue. ───────────
+const barOpen = ref(false)
+const fbAnchor = ref<HTMLElement | null>(null)
+const fbToggleBtn = ref<HTMLButtonElement | null>(null)
+const fbPanelId = 'fb-panel'
+const touchCapable = isTouchDevice()
+let barHideTimer: number | undefined
+
+function openBar() {
+  clearTimeout(barHideTimer)
+  barOpen.value = true
+}
+function scheduleCloseBar() {
+  clearTimeout(barHideTimer)
+  barHideTimer = window.setTimeout(() => {
+    barOpen.value = false
+  }, 350) // small delay so moving from the button to the panel doesn't flicker it shut
+}
+function closeBarNow() {
+  clearTimeout(barHideTimer)
+  barOpen.value = false
+}
+// Escape returns focus to the toggle button — without this, focus is left on whatever was
+// inside the now-hidden panel (or lost entirely), stranding a keyboard user (LOW a11y fix).
+function closeBarAndReturnFocus() {
+  closeBarNow()
+  fbToggleBtn.value?.focus()
+}
+function onBarToggleActivate() {
+  // Touch has no hover — the button just toggles. Desktop/mouse reveals on hover instead
+  // (the click still works there too, e.g. for keyboard/assistive activation).
+  if (touchCapable) barOpen.value = !barOpen.value
+  else openBar()
+}
+function onBarAreaEnter() {
+  if (!touchCapable) openBar()
+}
+function onBarAreaLeave() {
+  if (!touchCapable) scheduleCloseBar()
+}
+// Close as soon as focus leaves the anchor/panel entirely (e.g. Tabbing past the last
+// control) — relatedTarget is the element gaining focus; null when focus leaves the
+// document (e.g. to the browser chrome), which we also treat as "left" (LOW a11y fix).
+function onBarFocusOut(e: FocusEvent) {
+  const next = e.relatedTarget as Node | null
+  if (!fbAnchor.value) return
+  if (!next || !fbAnchor.value.contains(next)) closeBarNow()
+}
+function onDocumentClickForBar(e: MouseEvent) {
+  if (!touchCapable || !barOpen.value) return
+  if (fbAnchor.value && !fbAnchor.value.contains(e.target as Node)) closeBarNow()
+}
+function onGlobalKeyForBar(e: KeyboardEvent) {
+  if (e.key === 'Escape' && barOpen.value) closeBarAndReturnFocus()
+}
+onMounted(() => {
+  document.addEventListener('click', onDocumentClickForBar)
+  document.addEventListener('keydown', onGlobalKeyForBar)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('click', onDocumentClickForBar)
+  document.removeEventListener('keydown', onGlobalKeyForBar)
+})
+
 // ── Theme ─────────────────────────────────────────────────────────────────────
 function applyDark() {
   document.documentElement.classList.toggle('dark', dark.value)
@@ -350,16 +421,17 @@ function toggleDark() {
           <span class="overline">Good Stuff Software · bot-free RUM</span>
         </div>
       </div>
+      <!-- AccountMenu (signed-in email + Sign out) stays visible in the header at all times —
+           unlike save-state/theme/add-chart, which live in the hidden function bar below,
+           this is identity/auth chrome, not page-modification chrome (owner requirement). -->
       <div class="top-actions">
-        <span v-if="saveLabel" class="save-state mono" :class="saveState">{{ saveLabel }}</span>
-        <button class="btn" @click="toggleDark" :title="dark ? 'Light mode' : 'Dark mode'">
-          {{ dark ? '☀' : '☾' }}
-        </button>
-        <button v-if="!isBespokePage" class="btn btn-primary" @click="addChart">＋ Add chart</button>
         <AccountMenu />
       </div>
     </header>
 
+    <!-- Page tabs — ALWAYS visible (owner clarification, 2026-09-26): unlike the rest of the
+         page chrome, navigating between pages is core wayfinding, not "modification" chrome,
+         so it never hides. -->
     <PageBar
       :pages="config.pages"
       :active-page-id="config.activePageId"
@@ -371,44 +443,69 @@ function toggleDark() {
       @restore="restoreDefaultCharts"
     />
 
-    <FilterBar
-      v-if="!isCampaignPage"
-      :filters="activePage.filters"
-      :sync-range="config.syncRange"
-      @change="onFiltersChange"
-      @toggle-sync="onToggleSync"
-    />
+    <!-- Function bar: range/filters/add-chart/theme — hidden by default, revealed on hover
+         (desktop) or tap (touch); Escape or tapping outside hides it. Fixed top-right,
+         overlays the page rather than shifting the grid below. -->
+    <div ref="fbAnchor" class="fb-anchor" @mouseenter="onBarAreaEnter" @mouseleave="onBarAreaLeave" @focusout="onBarFocusOut">
+      <button
+        ref="fbToggleBtn"
+        type="button"
+        class="fb-toggle"
+        :aria-expanded="barOpen"
+        :aria-controls="fbPanelId"
+        aria-label="Show page controls"
+        @mouseenter="onBarAreaEnter"
+        @focus="openBar"
+        @click="onBarToggleActivate"
+        @keydown.escape="closeBarAndReturnFocus"
+      >
+        <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
+          <path d="M3 6h14M3 10h14M3 14h14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+        </svg>
+      </button>
+      <Transition name="fb-fade">
+        <div v-if="barOpen" :id="fbPanelId" class="fb-panel">
+          <div class="fb-row top-actions">
+            <span v-if="saveLabel" class="save-state mono" :class="saveState">{{ saveLabel }}</span>
+            <button class="btn" @click="toggleDark" :title="dark ? 'Light mode' : 'Dark mode'">
+              {{ dark ? '☀' : '☾' }}
+            </button>
+            <button class="btn btn-primary" @click="addChart">＋ Add chart</button>
+          </div>
 
-    <div v-if="showPopupActivationNote" class="activation-note">
-      Tracking not yet active — numbers before release are not a baseline.
+          <FilterBar
+            v-if="!isCampaignPage"
+            :filters="activePage.filters"
+            :sync-range="config.syncRange"
+            @change="onFiltersChange"
+            @toggle-sync="onToggleSync"
+          />
+        </div>
+      </Transition>
     </div>
-    <div v-if="showPopupDeferredNote" class="activation-note">
-      {{ POPUP_PAGE_NOTE }}
-    </div>
-    <div v-if="showSmallSampleNote" class="activation-note small-sample-note">
-      {{ SMALL_SAMPLE_NOTE }}
-    </div>
+
+    <NoteBlock v-if="showPopupActivationNote" note-id="tracking-not-yet-active" class="activation-note" />
+    <NoteBlock v-if="showPopupDeferredNote" note-id="popup-deferred-signin" class="activation-note" />
+    <NoteBlock v-if="showSmallSampleNote" note-id="small-sample" class="activation-note small-sample-note" />
 
     <main class="grid-area">
-      <OverviewPage v-if="isOverviewActive" :filters="activePage.filters" @open-campaigns="switchPage('bsk-campaigns')" />
-      <CampaignComparePage v-else-if="isCampaignPage" />
-      <template v-else>
-        <Dashboard
-          v-model:widgets="activePage.widgets"
-          :filters="activePage.filters"
-          :dark="dark"
-          :drill-open-id="drillMenu?.widgetId ?? null"
-          @edit="editChart"
-          @remove="removeWidget"
-          @duplicate="duplicateWidget"
-          @change="scheduleSave"
-          @drill="onDrill"
-        />
-        <div v-if="loaded && activePage.widgets.length === 0" class="empty">
-          <p>No charts on this page.</p>
-          <button class="btn btn-primary" @click="addChart">＋ Add a chart</button>
-        </div>
-      </template>
+      <Dashboard
+        v-model:widgets="activePage.widgets"
+        :filters="activePage.filters"
+        :dark="dark"
+        :drill-open-id="drillMenu?.widgetId ?? null"
+        :controls-visible="barOpen"
+        @edit="editChart"
+        @remove="removeWidget"
+        @duplicate="duplicateWidget"
+        @change="scheduleSave"
+        @drill="onDrill"
+        @open-campaigns="switchPage('bsk-campaigns')"
+      />
+      <div v-if="loaded && activePage.widgets.length === 0" class="empty">
+        <p>No charts on this page.</p>
+        <button class="btn btn-primary" @click="addChart">＋ Add a chart</button>
+      </div>
     </main>
 
     <ChartEditor
@@ -583,6 +680,73 @@ function toggleDark() {
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
+}
+.fb-anchor {
+  position: fixed;
+  top: 16px;
+  right: 18px;
+  /* Above EVERYTHING else that can overlay the page, including a zoomed ChartCard
+     (z-index 1000/1001 — see ChartCard.vue) and the drill-down menu (1100 below) — the
+     toggle must stay reachable no matter what's on screen (MEDIUM review fix). */
+  z-index: 1200;
+}
+.fb-toggle {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(var(--line-2));
+  border-radius: 10px;
+  background: rgb(var(--surface));
+  color: rgb(var(--ink-2));
+  box-shadow: 0 2px 10px rgb(0 0 0 / 0.12);
+  cursor: pointer;
+}
+.fb-toggle:hover,
+.fb-toggle:focus-visible {
+  color: rgb(var(--ink));
+  border-color: rgb(var(--amber));
+}
+.fb-panel {
+  position: absolute;
+  top: 42px;
+  right: 0;
+  width: min(94vw, 640px);
+  max-height: 82vh;
+  overflow: auto;
+  background: rgb(var(--surface));
+  border: 1px solid rgb(var(--line-2));
+  border-radius: 14px;
+  box-shadow: 0 16px 44px rgb(0 0 0 / 0.28);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.fb-row.top-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.fb-fade-enter-active,
+.fb-fade-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.fb-fade-enter-from,
+.fb-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+@media (max-width: 700px) {
+  .fb-anchor {
+    top: 10px;
+    right: 12px;
+  }
+  .fb-panel {
+    width: min(94vw, 420px);
+  }
 }
 .brand {
   display: flex;

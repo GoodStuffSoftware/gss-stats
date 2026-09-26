@@ -126,7 +126,8 @@ What the CLI does, so you can explain it (do not re-implement any of it):
    incomplete answer from Google never overwrites stored spend: it is reported as a failed
    read and pushes. The `gss-stats-sync` Cloudflare Worker runs the same sync every hour
    during the flight, so this step usually changes nothing; that is expected and safe. The report's
-   `sync (shared):` line says what it pulled and changed.
+   `sync (shared):` line says what it pulled and changed. A `SYNC ALERT:` line means a sync run
+   (usually the Worker) was killed mid-run; relay it as printed (the next run redoes the work).
 2. Fires each $25/$50/$75/$100 read once, runs the full read and the kill rules on a
    crossing, and checks the $100 cap on every read.
 3. Appends **one** daily line per ET day. Rerunning the same entry the same day stores

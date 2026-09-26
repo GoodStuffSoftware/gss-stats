@@ -17,7 +17,7 @@ import {
   type StoredSpend,
   type TaggedRow,
 } from './adsRules'
-import { AUTH_SUCCESS_PROVIDERS, AUTH_SUCCESS_STATUSES, classifyFunnelPath, computeFunnelCounts, isAuthSuccessBase } from './campaigns'
+import { AUTH_SUCCESS_PATHS, AUTH_SUCCESS_PROVIDERS, AUTH_SUCCESS_STATUSES, classifyFunnelPath, computeFunnelCounts, isAuthSuccessBase, isAuthSuccessPath } from './campaigns'
 
 const h = (iso: string) => Date.parse(iso)
 const row = (hour: string, path: string, count = 1, visitor = 'returning'): TaggedRow => ({ hourStartMs: h(hour), path, visitor, count })
@@ -32,6 +32,12 @@ describe('/auth/success: one sign-in = one BASE row; the status row rides alongs
     expect(AUTH_SUCCESS_PROVIDERS).toEqual(['google', 'email'])
     expect(AUTH_SUCCESS_STATUSES).toEqual(['new', 'existing', 'unknown'])
     for (const p of ['/auth/success/google/new/', '/auth/success/google/other', '/auth/success/google/new/x', '/auth/success/', '/auth/successful', '/auth/redirect/google']) expect(authSuccessKind(p)).toBeNull()
+    // providers are exactly google and email, for the base row and the status row alike
+    for (const p of ['/auth/success/apple', '/auth/success/apple/new', '/auth/success/Google']) expect(authSuccessKind(p)).toBeNull()
+  })
+  it('ONE matcher: v0.6.1 isAuthSuccessPath is the same function, over the same paths as the providers', () => {
+    expect(isAuthSuccessPath).toBe(isAuthSuccessBase)
+    expect([...AUTH_SUCCESS_PATHS]).toEqual(AUTH_SUCCESS_PROVIDERS.map((p) => `/auth/success/${p}`))
   })
   it('a sign-in that sends both its base row and its /new row counts ONCE as auth success, and once as new', () => {
     const rows = [row('2026-09-30T21:00:00Z', '/auth/success/google', 1), row('2026-09-30T21:00:00Z', '/auth/success/google/new', 1)]
@@ -71,8 +77,8 @@ describe('sign-ups: "at most N" until the new/existing split is live, then exact
     return { authSuccess: base, authSuccessSplit: { new: n, existing: e, unknown: u, unsplit: noStatus } }
   }
   const LIVE = h('2026-09-29T16:00:00Z')
-  it('the instants are not set yet: every behaviour is unchanged', () => {
-    expect(AUTH_NEW_EXISTING_LIVE_AT).toBeNull()
+  it('the new/existing split is live since v1.95.5 (one definition); the upsell fix instant is not set yet', () => {
+    expect(AUTH_NEW_EXISTING_LIVE_AT).toBe(Date.parse('2026-09-26T19:43:02Z'))
     expect(UPSELL_SIGNEDOUT_FIX_AT).toBeNull()
   })
   it('before the split is live, every sign-in (base rows only) feeds the upper bound', () => {

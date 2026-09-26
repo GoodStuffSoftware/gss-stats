@@ -43,16 +43,46 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
 
 ## Features
 
-- **"Best Sudoku overview"** — the landing page: today-at-a-glance KPI tiles (vs the same
+- **"Best Sudoku · Overview"** — the landing page: today-at-a-glance KPI tiles (vs the same
   time yesterday and the 7-day average), a daily timeline since the first hit overlaid with
   campaign flights / release / tracking-activation markers, a campaign scorecard, and a
-  release before/after panel. See
-  [`src/lib/overview.ts`](src/lib/overview.ts) and
+  release before/after panel — each its own movable/editable widget (dataset `overview`; see
+  [`src/components/widgets/OverviewWidgetBody.vue`](src/components/widgets/OverviewWidgetBody.vue)).
+  See [`src/lib/overview.ts`](src/lib/overview.ts) and
   [`src/lib/releases.ts`](src/lib/releases.ts) (hand-entered release dates — `hits` has no
-  app-version column).
+  app-version column; major releases label the timeline, minor ones show as short ticks).
+  "Best Sudoku · Campaigns" (dataset `campaigns`; see
+  [`src/components/widgets/CampaignsWidgetBody.vue`](src/components/widgets/CampaignsWidgetBody.vue))
+  and "Best Sudoku · Traffic" (per-site/geo/referrer/device detail beyond what Overview and
+  Campaigns cover) round out the Best Sudoku tab group, which is kept together and in that
+  order — after your own tabs — by a non-destructive reorder on load (see
+  [`src/lib/defaults.ts`](src/lib/defaults.ts)'s `reorderBskGroup`).
 - **Movable / composable charts** — drag the header, resize from the corner; add /
   edit / duplicate / delete charts of any type: stat, bar, horizontal bar, stacked
-  bar, line, area, doughnut, nested doughnut, pie, table, and a geo point map.
+  bar, line, area, doughnut, nested doughnut, pie, table, a geo point map, and a
+  note/text tile. Zoom is a single click, always available on every chart; its other
+  modification chrome (edit/remove/drag/resize) tucks away until you hover that chart
+  or open the function bar below.
+  **Known gap:** the resize grip (drag-to-resize corner) isn't keyboard-operable — it's a
+  [`grid-layout-plus`](https://www.npmjs.com/package/grid-layout-plus) limitation, not a
+  regression from this app's own code. Resizing a chart currently needs a mouse or touch;
+  every other chart action (edit, remove, zoom, duplicate, set-as-default) has a real
+  button and works from the keyboard.
+- **A hidden-by-default function bar** — filters and chart controls (range, sites,
+  exclusions, add chart, theme) live behind a small top-right button: hover to reveal
+  on desktop, tap to toggle on touch, Escape or tapping outside hides it. Never shifts
+  the chart grid. Page tabs stay always visible above it.
+- **A shared notes/text library** ([`src/lib/notes.ts`](src/lib/notes.ts)) — every
+  caveat, definition, and explanatory paragraph the dashboard shows (small-sample
+  warnings, attribution scope, "how to read this" captions, …) is a registry entry with
+  an id, a severity, which dataset(s) it defaults for, and an optional gate (e.g. "only
+  while tracking hasn't shipped yet"). Rendered through
+  [`NoteBlock.vue`](src/components/NoteBlock.vue) (short caveats) or
+  [`TextBlock.vue`](src/components/TextBlock.vue) (longer prose) — both support
+  **bold** and [links](https://example.com) via a small safe tokenizer
+  ([`src/lib/textLite.ts`](src/lib/textLite.ts), never `v-html`) — and attachable to
+  any chart as a caption (`widget.notes`) or as its own movable 'note' widget
+  (`widget.noteId`), editable from the chart menu either way.
 - **Durable, multi-page dashboards** — layout + chart definitions persist in KV (not
   `localStorage`), so they follow you across devices. Duplicate / rename / delete
   pages; a protected default page with "restore default charts"; per-page filters and
@@ -118,6 +148,21 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   to any bestsudoku-app `/return` or Play-referrer figure, but — unlike the web date — it
   never grays out or "unmeasures" days after it, since a low count right after submission
   is the expected shape of a staged rollout, not a tracking gap.
+
+  **v1.95.5 go-live markers** (`GAME_COMPLETE_LIVE_AT` in `lib/popupEvents.ts`,
+  `AUTH_NEW_EXISTING_LIVE_AT` in `lib/adsRules.ts` — both `2026-09-26T19:43:02Z`, the first
+  confirmed-live instant): this release added `/game/complete/<mode>/<difficulty>` (one row
+  per distinct completed game — see "Completed a game" below) and a
+  `/auth/success/<provider>/<new|existing|unknown>` beacon that fires ALONGSIDE the existing
+  base `/auth/success/<provider>` row for the same sign-in. Every auth-success count in this
+  codebase (overview KPIs/release panel, the campaign funnel, the ads-read routine) counts
+  only the base two-segment path — `AUTH_SUCCESS_PATHS` / `isAuthSuccessBase` (alias
+  `isAuthSuccessPath`) in `lib/campaigns.ts`, the one matcher — so the new suffix row is never
+  double-counted. The completion beacon
+  is excluded from every page-view/visit count the same way every other pop-up/event beacon
+  is (`POPUP_EVENT_PREFIXES`), and powers a new, live "Completed a game" funnel step and
+  overview tile (previously always "not yet tracking" — nothing matched before this
+  release). A mode/difficulty completions breakdown is a planned follow-up.
 
   Because production has only 14 registered users (2026-09-26), every rate-bearing page
   (pop-ups, campaigns, overview) also carries a standing **small-sample note** ("Very small
@@ -248,8 +293,8 @@ npm run typecheck:scripts
   a read-only key (it holds `roles/editor`); pointing this flag at a key with only
   `roles/datastore.viewer` is an owner step.
 - **Mid-flight instrumentation (the beacon freeze was lifted by the owner on 2026-09-26).** Two
-  instants in `src/lib/adsRules.ts`, both `null` until the release coordinator sets them:
-  `AUTH_NEW_EXISTING_LIVE_AT` (from then on tagged `/auth/success/<provider>/new` rows count as
+  instants in `src/lib/adsRules.ts`, each `null` until the release coordinator sets it:
+  `AUTH_NEW_EXISTING_LIVE_AT` (set: `2026-09-26T19:43:02Z`, v1.95.5; from then on tagged `/auth/success/<provider>/new` rows count as
   **exact** sign-ups, `/existing` rows never count, and `unknown` rows plus sign-ins with no
   status row stay in the "at most" part: min(those, new accounts in the window − exact new) +
   exact new) and `UPSELL_SIGNEDOUT_FIX_AT` (a funnel **segment boundary**: the $100 read and the
@@ -361,6 +406,30 @@ per 10 minutes. The dashboard holds no Google Ads credential and never calls the
 | Ads store decision | [docs/adr/0001-ads-read-store.md](docs/adr/0001-ads-read-store.md) |
 | Ads routine prompts | [docs/routines/](docs/routines/) |
 | Geo beacon (companion) | [GoodStuffSoftware/gss-beacon](https://github.com/GoodStuffSoftware/gss-beacon) |
+| Capacity / free-plan limits | [docs/capacity.md](docs/capacity.md) |
+
+## Capacity
+
+The account runs on **Workers Free**, where D1 caps reads at **5,000,000 rows/day, account-wide**
+(a hard failure, not throttling, once hit) — shared by `gss-geo` and `gss-stats-ads`. A 2026-09-26
+audit ([docs/capacity.md](docs/capacity.md)) found usage at ~29% of that cap on an ordinary day,
+driven entirely by query pattern against a table of well under 5,000 rows: `/api/sites` full-
+scanned `hits` on every dashboard load, and every chart fired a "total" query plus a "grouped"
+query. Mitigations (`functions/_lib/edgeCache.ts`, `functions/api/geo.ts`, `functions/api/sites.ts`):
+
+- `/api/sites`'s beacon-count query is bounded to a rolling 90-day window (it's a UI relevance
+  badge, not an all-time total — see the "last 90 days" tooltip in the filter picker) and its
+  whole response is cached via the Workers **Cache API** (`caches.default`, not KV — KV's
+  Free-plan write cap is 1,000/day account-wide) for a few minutes.
+- Each geo chart's total-count and grouped-breakdown queries are merged into one statement
+  (`GROUP BY` subquery + `SUM(c) OVER ()`), halving the D1 reads per chart.
+- `/api/geo` and `/api/stats` responses are cached (Cache API, keyed by the full normalized
+  query) with a long TTL for date ranges that end before today (immutable — they can't change)
+  and a short TTL for ranges that include today.
+
+No index changes and no schema/data writes were needed — see docs/capacity.md §4 for why (the
+`hits` table is too small for an index to matter, and `GROUP BY` requires a temp b-tree
+regardless).
 
 ## Deploy
 
