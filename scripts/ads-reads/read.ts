@@ -145,6 +145,10 @@ export interface SyncSummary {
   status: SyncResult['status']
   outcome: string
   fetched: { since: string; until: string } | null
+  /** Each range pulled (newest first); `fetched` is their span. */
+  ranges?: { since: string; until: string }[]
+  /** Non-fatal findings (e.g. an old placement row Google no longer returns, kept as stored). */
+  warnings?: string[]
   daysFetched: number
   daysChanged: number
   placementRowsChanged: number
@@ -271,6 +275,8 @@ async function syncSpend(deps: ReadDeps, plan: AdsReadPlan, campaign: CampaignFl
     status: sync.status,
     outcome: cs.outcome,
     fetched: cs.fetched,
+    ranges: cs.ranges,
+    warnings: cs.warnings,
     daysFetched: cs.daysFetched,
     daysChanged: cs.daysChanged,
     placementRowsChanged: cs.placementRowsChanged,
@@ -328,8 +334,8 @@ async function placementRowsFor(deps: ReadDeps, campaign: CampaignFlight, cs: Ca
   if (cs.placementsOk === false) return { ok: false, error: cs.error ?? 'ads placements: failed' }
   const stored = await attempt('store read (placements)', () => deps.store.getPlacementRows(campaign.id, campaign.flightStart!, throughEt))
   if (!stored.ok) return stored
-  const f = cs.fetched
-  const rows = f ? [...stored.value.filter((r) => r.date < f.since || r.date > f.until), ...cs.placements.filter((r) => r.date <= throughEt)] : stored.value
+  const pulled = (d: string) => cs.ranges.some((r) => d >= r.since && d <= r.until)
+  const rows = cs.ranges.length ? [...stored.value.filter((r) => !pulled(r.date)), ...cs.placements.filter((r) => r.date <= throughEt)] : stored.value
   return { ok: true, value: rows }
 }
 

@@ -21,7 +21,7 @@
 // Deliberately free of Workers ambient types (minimal local interfaces instead), so the same
 // file typechecks under the dashboard's config and the Node test config.
 
-import { createAdsClient, fetchDailySpend, fetchPlacementDaily, type AdsClient, type AdsCredentials, type FetchLike } from '../../../src/lib/adsApi'
+import { createAdsClient, fetchDailySpend, fetchPlacementDaily, fetchRangeTotal, type AdsClient, type AdsCredentials, type FetchLike } from '../../../src/lib/adsApi'
 import { redact, registerSecret } from '../../../src/lib/adsRedact'
 import { createSqlAdsStore, d1BindingAdsDb, readLastSyncRun, type D1Like, type SyncSource } from '../../../src/lib/adsStore'
 import {
@@ -94,6 +94,7 @@ function adsFactory(env: Env, nowMs: number, fetchImpl?: FetchLike): () => Promi
     return {
       daily: (id, since, until) => fetchDailySpend(client, id, since, until),
       placements: (id, since, until) => fetchPlacementDaily(client, id, since, until),
+      rangeTotal: (id, since, until) => fetchRangeTotal(client, id, since, until),
     }
   }
 }

@@ -276,14 +276,23 @@ the backfill (`--full`), `npm run ads:sync`, and the **gss-stats-sync** Cloudfla
 (cron + on demand, below). Per campaign it:
 
 1. reads the stored days from `gss-stats-ads` (one query for every campaign);
-2. pulls every **missing closed ET day** of the flight (from the first day, or the first gap,
-   through yesterday) plus the **last 3 closed days**, which Google still restates, as one
-   date range (daily metrics and placement-day rows). The restatement window is re-checked at
-   most every 6 hours per campaign. A closed campaign is covered through its flight end and then
-   costs no API call;
-3. stores a day the API returns nothing for as zero **only if it was never stored and lies
-   inside the flight**; a stored day or placement row **with spend** that a response leaves out
-   is a failed fetch (an empty or truncated answer never overwrites stored spend);
+2. pulls every **missing closed ET day** of the flight plus the **last 3 closed days**, which
+   Google still restates (daily metrics and placement-day rows), in at most two date ranges,
+   **newest first**: the last 3 days whole, then any older gap from its first missing day up to
+   them (after-flight days in between come along, so after-flight spend shows up). Each range
+   is checked and written on its own, so a bad old day never holds back newer ones. The
+   restatement window is re-checked at most every 6 hours per campaign, and only a pull of all
+   3 days counts as a re-check. A day counts as **closed** once it was pulled at or after 03:00
+   ET the next day (Google still adds late data just after midnight). A closed campaign is
+   covered through its flight end and then costs no API call;
+3. stores a day the API returns nothing for as zero only when Google's **range total** (one
+   aggregate query, made only when a day came back empty) agrees with the daily rows: a
+   never-stored flight day becomes $0, and a stored day Google credited in full is restated to
+   $0. When the rows and the total disagree, the range is pulled again in halves, newer half
+   first, down to single days: the bad day keeps its stored value and is reported, the days
+   around it are written. An empty response (no rows, no total) never overwrites stored spend.
+   A stored placement row with spend that a response leaves out fails the placement pull within
+   the last 3 days; on an older day it is kept as stored and reported as a warning;
 4. writes **only rows that changed**; a run with nothing due makes no Google call and writes
    nothing at all, so a second run right after another is a true no-op;
 5. records each run that did something in `ads_sync_runs` (start/finish, campaigns, days fetched
@@ -314,13 +323,14 @@ per 10 minutes. The dashboard holds no Google Ads credential and never calls the
   date". Otherwise it claims atomically (a `'running'` row, only if no run finished in the last
   10 minutes); a concurrent request loses and gets 429. Operator body: `{"full": true,
   "campaignIds": [...], "maxDays": n}`.
-- **Per-run caps (Workers Free, 10 ms CPU):** at most 7 closed days (live campaigns first) and 40
-  D1 statements; the rest continues next run. Measured live: a no-op 1-4 ms CPU (6 ms on a
+- **Per-run caps (Workers Free, 10 ms CPU):** at most 7 closed days (live campaigns first, the
+  last 3 days before an older gap, and an older gap's newest missing days first) and 40 D1
+  statements; the rest continues next run. Measured live: a no-op 1-4 ms CPU (6 ms on a
   fresh isolate), a 1-day pull 9-10 ms warm and 12.6 ms cold, so a cold pull can overrun Free's
   limit (ADR 0001: what then happens, and why Workers Paid removes it).
 - **Deploy:** `npm run ads:worker-deploy -- --cf-token-file <path> [--paused]` stamps the version
-  with the git SHA (tag, message, and the `GIT_SHA` it reports with a hash of the campaign
-  definitions); `--paused` deploys with no cron. The Worker bundles `src/lib/campaigns.ts`, so a
+  with the git SHA (tag, message, and the `GIT_SHA` it reports with a hash of every campaign
+  field the sync writes: name, kind, flight, status, uc values, budget, cap, measurement); `--paused` deploys with no cron. The Worker bundles `src/lib/campaigns.ts`, so a
   new campaign needs a Worker redeploy as well as a Pages deploy; the dashboard's Refresh says
   when the Worker runs other campaign definitions, and CI bundles it on every PR
   (`npm run ads:worker-check`).

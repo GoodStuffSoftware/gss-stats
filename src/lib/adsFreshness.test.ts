@@ -10,9 +10,14 @@ const et = (d: string, hhmm: string) => {
 }
 
 describe('closed days and spendThrough', () => {
-  it('a day is closed only when it was fetched on a later ET day', () => {
-    expect(isClosedFetch('2026-09-26', '2026-09-27T04:30:00Z')).toBe(true) // 00:30 ET on 09-27
+  it('a day is closed only when it was fetched at or after 03:00 ET the next day (Google still adds late data just after midnight)', () => {
+    expect(isClosedFetch('2026-09-26', '2026-09-27T07:00:00Z')).toBe(true) // 03:00 ET on 09-27
+    expect(isClosedFetch('2026-09-26', '2026-09-27T12:05:00Z')).toBe(true) // the 08:05 ET morning read
+    expect(isClosedFetch('2026-09-26', '2026-09-27T06:59:59Z')).toBe(false) // 02:59 ET: still settling
+    expect(isClosedFetch('2026-09-26', '2026-09-27T04:30:00Z')).toBe(false) // 00:30 ET
     expect(isClosedFetch('2026-09-26', '2026-09-27T03:30:00Z')).toBe(false) // 23:30 ET on 09-26
+    expect(isClosedFetch('2026-11-01', '2026-11-02T08:00:00Z')).toBe(true) // 03:00 EST after the switch
+    expect(isClosedFetch('2026-11-01', '2026-11-02T07:59:00Z')).toBe(false)
     expect(isClosedFetch('2026-09-26', null)).toBe(false)
   })
   it('spendThrough is the end of the contiguous closed run from the flight start (a gap stops it)', () => {

@@ -15,13 +15,16 @@
 //    campaign's last pull is older than the recheck interval (default 6 h) — so a tick right
 //    after another sync is a no-op that never builds the Ads client or refreshes a token;
 //  - today's partial numbers when the caller asks (returned, never stored).
-// syncAdsData() then pulls one range per due campaign (at most `maxDays` closed days per run
-// across campaigns — the rest wait for the next run), and:
-//  - stores a day the API returns nothing for as zero ONLY when that day was never stored and
-//    lies inside the flight: no rows = no delivery;
-//  - treats a stored day (or placement row) WITH SPEND that the response leaves out as a FAILED
-//    FETCH: nothing is written for that campaign and the run is 'partial' (an empty or truncated
-//    200 must never turn stored spend into zeros);
+// syncAdsData() then pulls at most two ranges per due campaign, NEWEST FIRST: the restatement
+// window whole, then any older gap (at most `maxDays` closed days per run across campaigns,
+// newest kept; the rest wait for the next run). Each range is checked and written on its own:
+//  - a day the API returns nothing for is stored as zero only when Google's range total agrees
+//    with the daily rows (a never-stored flight day; or a stored day credited in full, when the
+//    total is non-empty). Rows and total disagreeing = a partial response: the range is pulled
+//    again in halves (newer first) down to single days, so one bad day never blocks the rest;
+//  - an empty response never turns stored spend into zeros (the range fails, 'partial');
+//  - a stored placement row with spend left out fails the placement pull in the restatement
+//    window; on an older day it is kept as stored and reported as a warning;
 //  - writes ONLY rows that are new or changed.
 // A run that pulled or read anything appends one ads_sync_runs row (not in --dry-run); a run
 // with nothing due writes nothing at all.
@@ -44,6 +47,11 @@ export const RESTATEMENT_RECHECK_MS = 6 * 3_600_000
 export interface AdsMetricsSource {
   daily(campaignId: string, since: string, until: string): Promise<Record<string, SpendDay>>
   placements(campaignId: string, since: string, until: string): Promise<PlacementDayRow[]>
+  /** The range's totals in one aggregated row (null = Google returned none). The cross-check
+   * before a day the daily query left out is stored as zero (lib/adsApi.ts fetchRangeTotal).
+   * Without it the sync only zero-fills never-stored days and never accepts a stored day
+   * dropping to zero. */
+  rangeTotal?(campaignId: string, since: string, until: string): Promise<SpendDay | null>
 }
 
 export interface SyncOptions {
@@ -84,8 +92,16 @@ export interface CampaignSyncPlan {
   campaignId: string
   /** The campaign's pull window (closed days), or null when it has none yet. */
   window: SyncRange | null
-  /** Closed days to pull (null = nothing due). */
+  /** Closed-day ranges to pull, NEWEST FIRST: the recent window (the restatement days through
+   * the end of the window, whole, so a pull of it re-checks every restatable day) and an older
+   * gap. Each is pulled and checked on its own, so a stuck old day cannot hold up the recent
+   * one. Empty = nothing due. */
+  ranges: SyncRange[]
+  /** The span of `ranges` (for reports), or null. */
   fetch: SyncRange | null
+  /** The full recent window [restatementDays[0], window.until] when it is part of this run's
+   * pull; a pull counts as a restatement re-check only if it covered all of it (review L3). */
+  recheck: SyncRange | null
   missingDays: string[]
   missingPlacementDays: string[]
   restatementDays: string[]
@@ -93,14 +109,19 @@ export interface CampaignSyncPlan {
   restatementDue: boolean
   /** Today's partial read, when asked for and the campaign is not closed. */
   today: string | null
-  /** `fetch` was shortened by the per-run day cap; the rest waits for a later run. */
+  /** The per-run day cap shortened `ranges` (newest days kept); the rest waits for a later run. */
   deferred: boolean
 }
 export interface CampaignSyncResult {
   campaignId: string
   label: string
   window: SyncRange | null
+  /** The span of what was pulled (for reports); `ranges` has each range. */
   fetched: SyncRange | null
+  ranges: SyncRange[]
+  /** Non-fatal findings, e.g. stored placement rows on an old day that Google no longer returns
+   * (kept as stored, not retried). */
+  warnings: string[]
   /** 'up to date' | 'synced' | 'no change' | 'deferred' | 'failed' | … */
   outcome: string
   missingDays: number
@@ -183,7 +204,7 @@ export function planCampaignSync(
 ): CampaignSyncPlan {
   const window = syncWindow(c, todayEt)
   const today = opts.includeToday && c.status !== 'closed' && c.flightStart != null && c.flightStart <= todayEt ? todayEt : null
-  const none = { campaignId: c.id, window, fetch: null, missingDays: [], missingPlacementDays: [], restatementDays: [], restatementDue: false, today, deferred: false }
+  const none: CampaignSyncPlan = { campaignId: c.id, window, ranges: [], fetch: null, recheck: null, missingDays: [], missingPlacementDays: [], restatementDays: [], restatementDue: false, today, deferred: false }
   if (!window) return none
   const byDate = new Map(rows.map((r) => [r.date, r]))
   const requiredUntil = window.until < c.flightEnd ? window.until : c.flightEnd
@@ -195,8 +216,57 @@ export function planCampaignSync(
   const recheck = opts.restatementRecheckMs ?? RESTATEMENT_RECHECK_MS
   const last = opts.lastPullAt ? Date.parse(opts.lastPullAt) : NaN
   const restatementDue = restatementDays.length > 0 && (!!opts.full || recheck <= 0 || !Number.isFinite(last) || (opts.nowMs ?? Date.now()) - last >= recheck)
-  const since = opts.full ? window.since : firstOf([missingDays[0], missingPlacementDays[0], restatementDue ? restatementDays[0] : undefined])
-  return { ...none, fetch: since ? { since, until: window.until } : null, missingDays, missingPlacementDays, restatementDays, restatementDue }
+  const recentStart = restatementDays[0] // undefined once the window has ended long ago
+  const needed = [...new Set([...missingDays, ...missingPlacementDays])].sort()
+  // The recent window is pulled WHOLE whenever any of it is due: the same two queries either
+  // way, and then the pull is a real re-check of every restatable day.
+  const recentDue = !!recentStart && (restatementDue || needed.some((d) => d >= recentStart))
+  const recentRange = recentDue ? { since: recentStart!, until: window.until } : null
+  // An older gap is pulled from its first day up to the recent window (or the window end), like
+  // one span: days after the flight end in between are pulled too, so after-flight spend shows up.
+  const olderUntil = recentStart ? addDays(recentStart, -1) : window.until
+  const olderNeeded = needed.filter((d) => !recentStart || d < recentStart)
+  const olderSince = opts.full ? window.since : olderNeeded[0]
+  const olderRange = olderSince && olderSince <= olderUntil ? { since: olderSince, until: olderUntil } : null
+  const ranges = [recentRange, olderRange].filter((r): r is SyncRange => !!r)
+  return {
+    ...none,
+    ranges,
+    fetch: ranges.length ? { since: firstOf(ranges.map((r) => r.since))!, until: ranges.map((r) => r.until).sort().at(-1)! } : null,
+    recheck: recentRange,
+    missingDays,
+    missingPlacementDays,
+    restatementDays,
+    restatementDue,
+  }
+}
+
+/** The per-run day cap, NEWEST FIRST (review L2): the recent window before any older gap, and
+ * within a range its newest days, so an old day that keeps failing never starves newer ones.
+ * An older range is cut back to its newest NEEDED day first (the after-flight days past it are
+ * never required, so they go first). Returns what is left of the budget. */
+export function capPlan(plan: CampaignSyncPlan, budget: number): number {
+  const kept: SyncRange[] = []
+  const needed = [...plan.missingDays, ...plan.missingPlacementDays]
+  for (const r of plan.ranges) {
+    const days = etDateRange(r.since, r.until).length
+    const take = Math.min(days, Math.max(0, budget))
+    budget -= take
+    if (take === days) {
+      kept.push(r)
+      continue
+    }
+    plan.deferred = true
+    if (take === 0) continue
+    const recent = !!plan.recheck && r.until === plan.recheck.until
+    const lastNeeded = recent ? undefined : needed.filter((d) => d >= r.since && d <= r.until).sort().at(-1)
+    const end = lastNeeded ?? r.until
+    // Every needed day fits: take them all plus the first after-flight days. Else the newest.
+    kept.push(etDateRange(r.since, end).length <= take ? { since: r.since, until: addDays(r.since, take - 1) } : { since: addDays(end, -(take - 1)), until: end })
+  }
+  plan.ranges = kept
+  plan.fetch = kept.length ? { since: firstOf(kept.map((r) => r.since))!, until: kept.map((r) => r.until).sort().at(-1)! } : null
+  return budget
 }
 
 const sameDay = (a: SpendDay, b: SpendDay) => a.costMicros === b.costMicros && a.impressions === b.impressions && a.clicks === b.clicks
@@ -234,11 +304,12 @@ export function diffDays(
   nowIso: string,
   placementsCovered: boolean,
   flightEnd: string,
-): { rows: StoredDayRow[]; restated: { date: string; beforeMicros: number; afterMicros: number }[]; missingStored: string[]; view: Record<string, SpendDay> } {
+): { rows: StoredDayRow[]; restated: { date: string; beforeMicros: number; afterMicros: number }[]; missingStored: string[]; zeroFilled: string[]; view: Record<string, SpendDay> } {
   const byDate = new Map(stored.map((r) => [r.date, r]))
   const rows: StoredDayRow[] = []
   const restated: { date: string; beforeMicros: number; afterMicros: number }[] = []
   const missingStored: string[] = []
+  const zeroFilled: string[] = []
   const view: Record<string, SpendDay> = {}
   for (const d of etDateRange(range.since, range.until)) {
     const s = byDate.get(d)
@@ -247,6 +318,7 @@ export function diffDays(
       if (!s) {
         if (d > flightEnd) continue // after the flight: nothing to store without a row
         f = ZERO // never stored, inside the flight: no rows = no delivery
+        zeroFilled.push(d)
       } else if (hasDelivery(s)) {
         missingStored.push(d)
         continue
@@ -267,8 +339,14 @@ export function diffDays(
       placementsFetchedAt: placementsCovered ? nowIso : (s?.placementsFetchedAt ?? null),
     })
   }
-  return { rows, restated, missingStored, view }
+  return { rows, restated, missingStored, zeroFilled, view }
 }
+
+const sumDays = (days: Record<string, SpendDay>, range: SyncRange): SpendDay =>
+  Object.entries(days)
+    .filter(([d]) => d >= range.since && d <= range.until)
+    .reduce<SpendDay>((a, [, v]) => ({ costMicros: a.costMicros + v.costMicros, impressions: a.impressions + v.impressions, clicks: a.clicks + v.clicks }), { ...ZERO })
+const dollars = (micros: number) => `$${(micros / 1e6).toFixed(2)}`
 
 type Attempt<T> = { ok: true; value: T } | { ok: false; error: string }
 async function attempt<T>(label: string, fn: () => Promise<T>): Promise<Attempt<T>> {
@@ -313,12 +391,7 @@ export async function planSync(store: AdsSyncStore, opts: SyncOptions): Promise<
       lastPullAt: snap.lastPulls.get(c.id) ?? null,
       restatementRecheckMs: opts.restatementRecheckMs,
     })
-    if (plan.fetch) {
-      const days = etDateRange(plan.fetch.since, plan.fetch.until).length
-      if (budget <= 0) Object.assign(plan, { fetch: null, deferred: true })
-      else if (days > budget) Object.assign(plan, { fetch: { since: plan.fetch.since, until: addDays(plan.fetch.since, budget - 1) }, deferred: true })
-      budget -= Math.min(days, Math.max(0, budget))
-    }
+    if (plan.ranges.length && budget !== Infinity) budget = capPlan(plan, budget)
     snap.plans.set(c.id, plan)
     if (plan.fetch || plan.today || plan.deferred) snap.due = true
   }
@@ -326,6 +399,10 @@ export async function planSync(store: AdsSyncStore, opts: SyncOptions): Promise<
 }
 
 // ── One campaign ──────────────────────────────────────────────────────────────────────────
+const spanOf = (ranges: readonly SyncRange[]): SyncRange | null =>
+  ranges.length ? { since: firstOf(ranges.map((r) => r.since))!, until: ranges.map((r) => r.until).sort().at(-1)! } : null
+const datesOf = (rows: readonly { date: string }[]) => [...new Set(rows.map((r) => r.date))].sort().join(', ')
+
 async function syncOne(
   deps: SyncDeps,
   getAds: () => Promise<AdsMetricsSource>,
@@ -343,7 +420,9 @@ async function syncOne(
     label: c.label,
     window: plan.window,
     fetched: null,
-    outcome: plan.deferred && !plan.fetch ? 'deferred' : 'up to date',
+    ranges: [],
+    warnings: [],
+    outcome: plan.deferred && !plan.ranges.length ? 'deferred' : 'up to date',
     missingDays: plan.missingDays.length,
     daysFetched: 0,
     daysChanged: 0,
@@ -363,7 +442,7 @@ async function syncOne(
     error: null,
   }
   const fail = (error: string, outcome = 'failed') => Object.assign(res, { fetchOk: false, dailyOk: false, outcome, error })
-  if (!plan.fetch && !plan.today) return res
+  if (!plan.ranges.length && !plan.today) return res
 
   let ads: AdsMetricsSource
   try {
@@ -371,89 +450,190 @@ async function syncOne(
   } catch (e) {
     return fail(`ads: ${redact(e)}`)
   }
-  const range = plan.fetch
-  // One query for the closed range and today when they are contiguous; else separate ones.
-  const joinToday = !!(range && plan.today && addDays(range.until, 1) === plan.today)
-  let freshDaily: Record<string, SpendDay> = {}
-  if (range) {
-    const a = await attempt('ads daily', () => ads.daily(c.id, range.since, joinToday ? plan.today! : range.until))
-    if (!a.ok) return fail(a.error)
-    freshDaily = a.value
-  }
-  if (plan.today) {
-    if (joinToday) res.today = freshDaily[plan.today] ?? { ...ZERO }
-    else {
-      const t = await attempt('ads daily (today)', () => ads.daily(c.id, plan.today!, plan.today!))
-      if (!t.ok) return fail(t.error)
-      res.today = t.value[plan.today] ?? { ...ZERO }
-    }
-  }
-  if (!range) return res
-  res.fetched = range
-
-  // Placements first: a day's placements_fetched_at is only set once its rows are stored.
-  let placementsCovered = false
-  let placementWrites: PlacementDayRow[] = []
-  if (opts.placements !== false) {
-    const pl = await attempt('ads placements', () => ads.placements(c.id, range.since, range.until))
-    const old = pl.ok ? await attempt('store read (placements)', () => deps.store.getPlacementRows(c.id, range.since, range.until)) : null
-    if (!pl.ok || !old || !old.ok) {
-      res.placementsOk = false
-      res.error = !pl.ok ? pl.error : old && !old.ok ? old.error : 'placements unavailable'
-    } else {
-      const merged = mergePlacementDayRows(pl.value)
-      const { changed, missingStored } = diffPlacements(old.value, merged)
-      res.placements = merged
-      res.placementRowsFetched = merged.length
-      if (missingStored.length) {
-        res.placementsOk = false
-        res.error = `ads placements: the response left out ${missingStored.length} stored placement-day row(s) with spend (${[...new Set(missingStored.map((r) => r.date))].join(', ')}); kept the stored rows, treated as a failed fetch`
-      } else {
-        res.placementRowsChanged = changed.length
-        placementWrites = changed
-        placementsCovered = true
-      }
-    }
+  // Today rides on the newest range's query when they are contiguous; else its own query, first.
+  const joinToday = !!(plan.today && plan.ranges[0] && addDays(plan.ranges[0].until, 1) === plan.today)
+  if (plan.today && !joinToday) {
+    const t = await attempt('ads daily (today)', () => ads.daily(c.id, plan.today!, plan.today!))
+    if (!t.ok) return fail(t.error)
+    res.today = t.value[plan.today] ?? { ...ZERO }
   }
 
-  const d = diffDays(stored, freshDaily, range, nowIso, placementsCovered, c.flightEnd)
-  res.daysFetched = etDateRange(range.since, range.until).length
-  if (d.missingStored.length) {
-    // An empty or truncated response: never overwrite stored spend with zeros.
-    res.placementRowsChanged = 0
-    return fail(`ads daily: the response left out ${d.missingStored.length} stored day(s) with spend (${d.missingStored.join(', ')}); kept the stored values, treated as a failed fetch`)
-  }
-  res.daysChanged = d.rows.length
-  res.changedDates = d.rows.map((r) => r.date)
-  res.restated = d.restated.map((r) => ({ date: r.date, before: round2(microsToDollars(r.beforeMicros)), after: round2(microsToDollars(r.afterMicros)) }))
-
-  const canWrite = !opts.dryRun && (placementWrites.length > 0 || d.rows.length > 0)
-  if (canWrite) {
-    const cs = await ensureCampaigns()
-    if (!cs.ok) return Object.assign(res, { dailyOk: false, outcome: 'not written: campaign sync failed', error: cs.error })
-    if (placementWrites.length) {
-      const put = await attempt('store write (placements)', () => deps.store.putPlacements(c.id, placementWrites, nowIso))
-      if (!put.ok) {
-        Object.assign(res, { placementsOk: false, error: put.error })
-        // The day rows must not claim placement coverage the store does not have.
-        const again = diffDays(stored, freshDaily, range, nowIso, false, c.flightEnd)
-        d.rows = again.rows
-        res.daysChanged = d.rows.length
-        res.changedDates = d.rows.map((r) => r.date)
-      }
-    }
-    if (d.rows.length) {
-      const put = await attempt('store write (daily metrics)', () => deps.store.putDailyRows(c.id, d.rows))
-      if (!put.ok) return Object.assign(res, { dailyOk: false, outcome: 'store write failed', error: put.error })
-    }
-  }
-  // The view the reads use: stored closed days overlaid with this run's pull.
+  // Each range is pulled, checked and written on its own, newest first (review L2): a range
+  // that fails leaves the others alone, and nothing of a failed range is written. A range whose
+  // rows do not add up is pulled again in halves (newer half first) down to single days, so one
+  // bad day never holds back the days around it; an empty response is not split (that is a
+  // broken response, not a bad day).
   const after = new Map(closedStored.map((r) => [r.date, r]))
-  for (const [day, f] of Object.entries(d.view)) after.set(day, { date: day, ...f, fetchedAt: nowIso, placementsFetchedAt: null })
-  res.spend = rowsToStoredSpend(c.id, [...after.values()])
-  res.spendThrough = contiguousThrough(c.flightStart, new Set(after.keys()), c.flightEnd)
-  res.pulled = !!plan.window && range.until === plan.window.until && res.placementsOk !== false
-  res.outcome = res.placementsOk === false ? 'synced (placements failed)' : plan.deferred ? 'synced (partly; the rest next run)' : d.rows.length || res.placementRowsChanged ? 'synced' : 'no change'
+  const closedNow = new Set(closedStored.map((r) => r.date))
+  const errors: string[] = []
+  let attempted = 0
+  let failedRanges = 0
+  let placementsFailed = false
+  let placementsPulled = false
+  let writeFailed: string | null = null
+  const isRecent = (r: SyncRange) => !!plan.recheck && r.until === plan.recheck.until
+  const queue = [...plan.ranges]
+  let first = true
+  const split = (r: SyncRange, why: string): boolean => {
+    const days = etDateRange(r.since, r.until)
+    if (days.length < 2) return false
+    const mid = days[Math.floor((days.length - 1) / 2)]
+    queue.unshift({ since: addDays(mid, 1), until: r.until }, { since: r.since, until: mid })
+    res.warnings.push(`ads daily: ${r.since}..${r.until} ${why}; pulled again in halves to find the day`)
+    return true
+  }
+  const failRange = (error: string) => {
+    attempted++
+    failedRanges++
+    errors.push(error)
+  }
+  while (queue.length) {
+    const range = queue.shift()!
+    const withToday = first && joinToday
+    first = false
+    const a = await attempt('ads daily', () => ads.daily(c.id, range.since, withToday ? plan.today! : range.until))
+    if (!a.ok) {
+      if (withToday) return fail(a.error) // today was asked for: the read has nothing fresh
+      failRange(a.error)
+      continue
+    }
+    const daily = a.value
+    if (withToday) res.today = daily[plan.today!] ?? { ...ZERO }
+
+    // A day the daily query left out: zero-filled (never stored) or a stored day that went to
+    // zero. Either is accepted only when Google's range total agrees with the daily rows
+    // (review L1): a partial response must never store a real day as $0.
+    const pre = diffDays(stored, daily, range, nowIso, false, c.flightEnd)
+    const zeroOk = new Set<string>()
+    if ((pre.zeroFilled.length || pre.missingStored.length) && ads.rangeTotal) {
+      const t = await attempt('ads range total', () => ads.rangeTotal!(c.id, range.since, range.until))
+      if (!t.ok) {
+        failRange(t.error)
+        continue
+      }
+      const sum = sumDays(daily, range)
+      const total = t.value ?? ZERO
+      if (!sameDay(total, sum)) {
+        const why = `add up to ${dollars(sum.costMicros)} (${sum.impressions} impr, ${sum.clicks} clicks) but Google's range total is ${dollars(total.costMicros)} (${total.impressions} impr, ${total.clicks} clicks)`
+        if (!split(range, `did not add up (the daily rows ${why})`)) failRange(`ads daily: the daily rows for ${range.since}..${range.until} ${why}; nothing written for these days, treated as a failed fetch`)
+        continue
+      }
+      // Both queries agree and the range has rows: the left-out stored days really are zero now.
+      if (t.value && hasDelivery(t.value)) for (const d of pre.missingStored) zeroOk.add(d)
+    }
+    if (pre.missingStored.length > zeroOk.size) {
+      // An empty response (or, without a range total to check against, a truncated one): never
+      // overwrite stored spend with zeros, and write nothing else from it either.
+      failRange(`ads daily: the response left out ${pre.missingStored.length} stored day(s) with spend (${pre.missingStored.join(', ')}); kept the stored values, treated as a failed fetch`)
+      continue
+    }
+    attempted++
+    const fresh = zeroOk.size ? { ...daily, ...Object.fromEntries([...zeroOk].map((d) => [d, { ...ZERO }])) } : daily
+
+    // Placements. A day's placements_fetched_at is only set once its rows are stored.
+    let placementsCovered = false
+    let placementWrites: PlacementDayRow[] = []
+    let rangePlacements: PlacementDayRow[] = []
+    if (opts.placements !== false) {
+      const pl = await attempt('ads placements', () => ads.placements(c.id, range.since, range.until))
+      const old = pl.ok ? await attempt('store read (placements)', () => deps.store.getPlacementRows(c.id, range.since, range.until)) : null
+      if (!pl.ok || !old || !old.ok) {
+        placementsFailed = true
+        errors.push(!pl.ok ? pl.error : old && !old.ok ? old.error : 'placements unavailable')
+      } else {
+        const merged = mergePlacementDayRows(pl.value)
+        const { changed, missingStored } = diffPlacements(old.value, merged)
+        // On a day confirmed zero (above), a left-out placement row is zero too.
+        const zeroed = missingStored.filter((r) => zeroOk.has(r.date)).map((r) => ({ ...r, costMicros: 0, impressions: 0, clicks: 0 }))
+        const missing = missingStored.filter((r) => !zeroOk.has(r.date))
+        res.placementRowsFetched += merged.length
+        if (missing.length && isRecent(range)) {
+          placementsFailed = true
+          errors.push(`ads placements: the response left out ${missing.length} stored placement-day row(s) with spend (${datesOf(missing)}); kept the stored rows, treated as a failed fetch`)
+        } else {
+          // Older than the restatement window: Google dropping a small placement is not a reason
+          // to re-pull the range on every run. Kept as stored, and reported.
+          if (missing.length) res.warnings.push(`ads placements: Google no longer returns ${missing.length} stored placement-day row(s) with spend (${datesOf(missing)}); kept as stored`)
+          placementWrites = [...changed, ...zeroed]
+          rangePlacements = [...merged, ...zeroed, ...missing]
+          placementsCovered = true
+          placementsPulled = true
+        }
+      }
+    }
+
+    let d = diffDays(stored, fresh, range, nowIso, placementsCovered, c.flightEnd)
+    if (!opts.dryRun && (placementWrites.length || d.rows.length)) {
+      const cs = await ensureCampaigns()
+      if (!cs.ok) {
+        writeFailed = 'not written: campaign sync failed'
+        errors.push(cs.error)
+        break // nothing that references a campaign can be written this run
+      }
+      if (placementWrites.length) {
+        const put = await attempt('store write (placements)', () => deps.store.putPlacements(c.id, placementWrites, nowIso))
+        if (!put.ok) {
+          placementsFailed = true
+          placementsCovered = false
+          errors.push(put.error)
+          // The day rows must not claim placement coverage the store does not have.
+          d = diffDays(stored, fresh, range, nowIso, false, c.flightEnd)
+          placementWrites = []
+        }
+      }
+      if (d.rows.length) {
+        const put = await attempt('store write (daily metrics)', () => deps.store.putDailyRows(c.id, d.rows))
+        if (!put.ok) {
+          // Not stored: the range does not count as pulled, and the reads keep the stored view.
+          writeFailed = 'store write failed'
+          errors.push(put.error)
+          res.placementRowsChanged += placementWrites.length
+          continue
+        }
+      }
+    }
+    res.ranges.push(range)
+    res.daysFetched += etDateRange(range.since, range.until).length
+    res.daysChanged += d.rows.length
+    res.changedDates.push(...d.rows.map((r) => r.date))
+    res.restated.push(...d.restated.map((r) => ({ date: r.date, before: round2(microsToDollars(r.beforeMicros)), after: round2(microsToDollars(r.afterMicros)) })))
+    res.placementRowsChanged += placementWrites.length
+    res.placements.push(...rangePlacements)
+    // The view the reads use: stored closed days overlaid with this range's pull.
+    for (const [day, f] of Object.entries(d.view)) {
+      after.set(day, { date: day, ...f, fetchedAt: nowIso, placementsFetchedAt: null })
+      if (isClosedFetch(day, nowIso)) closedNow.add(day)
+    }
+    // Only a pull of the WHOLE recent window re-checks the restatement days (review L3).
+    if (plan.recheck && range.since === plan.recheck.since && range.until === plan.recheck.until && (opts.placements === false || placementsCovered)) res.pulled = true
+  }
+
+  res.fetched = spanOf(res.ranges)
+  res.error = errors[0] ?? null
+  res.changedDates.sort()
+  if (res.ranges.length) {
+    res.spend = rowsToStoredSpend(c.id, [...after.values()])
+    res.spendThrough = contiguousThrough(c.flightStart, closedNow, c.flightEnd)
+  }
+  if (opts.placements !== false && (placementsPulled || placementsFailed)) res.placementsOk = !placementsFailed
+  res.fetchOk = attempted === 0 || failedRanges < attempted
+  res.dailyOk = res.fetchOk && failedRanges === 0 && !writeFailed
+  const changed = res.daysChanged > 0 || res.placementRowsChanged > 0
+  res.outcome = writeFailed
+    ? writeFailed
+    : !res.fetchOk
+      ? 'failed'
+      : failedRanges
+        ? `synced partly (${failedRanges} of ${attempted} ranges failed)`
+        : placementsFailed
+          ? 'synced (placements failed)'
+          : plan.deferred
+            ? 'synced (partly; the rest next run)'
+            : changed
+              ? 'synced'
+              : plan.ranges.length
+                ? 'no change'
+                : 'up to date'
   return res
 }
 
@@ -486,7 +666,7 @@ export async function syncAdsData(deps: SyncDeps, opts: SyncOptions, snapshot?: 
     result.error = summarizeError(snap.error, 300)
     for (const c of snap.campaigns) {
       result.campaigns.push({
-        campaignId: c.id, label: c.label, window: null, fetched: null, outcome: 'failed', missingDays: 0, daysFetched: 0, daysChanged: 0, changedDates: [], restated: [],
+        campaignId: c.id, label: c.label, window: null, fetched: null, ranges: [], warnings: [], outcome: 'failed', missingDays: 0, daysFetched: 0, daysChanged: 0, changedDates: [], restated: [],
         placementRowsFetched: 0, placementRowsChanged: 0, placementsOk: null, fetchOk: false, dailyOk: false, pulled: false, deferred: false, spendThrough: null, spend: null, placements: [], today: null, error: snap.error,
       })
     }
@@ -496,7 +676,7 @@ export async function syncAdsData(deps: SyncDeps, opts: SyncOptions, snapshot?: 
     for (const c of snap.campaigns) {
       const closed = (snap.rows.get(c.id) ?? []).filter((r) => isClosedFetch(r.date, r.fetchedAt))
       result.campaigns.push({
-        campaignId: c.id, label: c.label, window: snap.plans.get(c.id)?.window ?? null, fetched: null, outcome: 'up to date', missingDays: 0, daysFetched: 0, daysChanged: 0, changedDates: [], restated: [],
+        campaignId: c.id, label: c.label, window: snap.plans.get(c.id)?.window ?? null, fetched: null, ranges: [], warnings: [], outcome: 'up to date', missingDays: 0, daysFetched: 0, daysChanged: 0, changedDates: [], restated: [],
         placementRowsFetched: 0, placementRowsChanged: 0, placementsOk: null, fetchOk: true, dailyOk: true, pulled: false, deferred: false,
         spendThrough: contiguousThrough(c.flightStart, new Set(closed.map((r) => r.date)), c.flightEnd), spend: rowsToStoredSpend(c.id, closed), placements: [], today: null, error: null,
       })
@@ -532,7 +712,7 @@ export async function syncAdsData(deps: SyncDeps, opts: SyncOptions, snapshot?: 
     }
     const failed = result.campaigns.filter((r) => !r.dailyOk || r.placementsOk === false)
     const deferred = result.campaigns.filter((r) => r.deferred)
-    result.status = result.campaignSyncError ? 'failed' : !failed.length ? (deferred.length ? 'partial' : 'ok') : failed.length === result.campaigns.length && failed.every((r) => !r.dailyOk) ? 'failed' : 'partial'
+    result.status = result.campaignSyncError ? 'failed' : !failed.length ? (deferred.length ? 'partial' : 'ok') : failed.length === result.campaigns.length && failed.every((r) => !r.dailyOk && !r.ranges.length) ? 'failed' : 'partial'
     const firstError = result.campaignSyncError ?? failed.find((r) => r.error)?.error ?? null
     result.error = firstError
       ? summarizeError(firstError, 300)
@@ -561,7 +741,7 @@ export async function syncAdsData(deps: SyncDeps, opts: SyncOptions, snapshot?: 
         ...Object.fromEntries(
           result.campaigns.map((r) => [
             r.campaignId,
-            { fetched: r.fetched, days: r.daysFetched, changed: r.daysChanged, placements: r.placementRowsFetched, placementsChanged: r.placementRowsChanged, spendThrough: r.spendThrough, outcome: r.outcome },
+            { fetched: r.fetched, ranges: r.ranges, days: r.daysFetched, changed: r.daysChanged, placements: r.placementRowsFetched, placementsChanged: r.placementRowsChanged, spendThrough: r.spendThrough, outcome: r.outcome, ...(r.warnings.length ? { warnings: r.warnings } : {}) },
           ]),
         ),
       },
@@ -579,9 +759,12 @@ let buildSha: string | null = null
 export function setBuildSha(sha: string | null | undefined): void {
   buildSha = sha && /^[0-9a-f]{7,40}$/.test(sha) ? sha : null
 }
-/** FNV-1a of the campaign definitions the sync uses: the dashboard compares it with its own. */
+/** FNV-1a of the campaign definitions the sync uses, over every field it writes to ads_campaigns
+ * (review I1): the dashboard compares it with its own and flags a Worker built from other ones. */
 export function campaignsConfigHash(campaigns: readonly CampaignFlight[] = CAMPAIGNS): string {
-  const s = JSON.stringify(campaigns.map((c) => [c.id, c.flightStart, c.flightStartTimeEt ?? null, c.flightEnd, c.status, c.ucValues]))
+  const s = JSON.stringify(
+    campaigns.map((c) => [c.id, c.label, c.kind, c.flightStart, c.flightStartTimeEt ?? null, c.flightEnd, c.status, c.ucValues, c.dailyBudgetUsd ?? null, c.hardCapUsd ?? null, c.measurement ?? null]),
+  )
   let h = 0x811c9dc5
   for (let i = 0; i < s.length; i++) {
     h ^= s.charCodeAt(i)
@@ -635,7 +818,7 @@ export function syncResultSummary(r: SyncResult) {
     placementRowsChanged: r.placementRowsChanged,
     runRecorded: r.runRecorded,
     error: r.error,
-    campaigns: r.campaigns.map((c) => ({ campaignId: c.campaignId, outcome: c.outcome, fetched: c.fetched, daysChanged: c.daysChanged, placementRowsChanged: c.placementRowsChanged, spendThrough: c.spendThrough })),
+    campaigns: r.campaigns.map((c) => ({ campaignId: c.campaignId, outcome: c.outcome, fetched: c.fetched, ranges: c.ranges, daysChanged: c.daysChanged, placementRowsChanged: c.placementRowsChanged, spendThrough: c.spendThrough, warnings: c.warnings })),
   }
 }
 
@@ -647,7 +830,7 @@ export function syncSummaryLines(r: SyncResult): string[] {
   ]
   for (const c of r.campaigns) {
     lines.push(
-      `  ${c.campaignId} ${c.label}: ${c.outcome}${c.fetched ? ` (${c.fetched.since}..${c.fetched.until})` : ''}; spend through ${c.spendThrough ?? '—'}${c.missingDays ? `; ${c.missingDays} day(s) were missing` : ''}${c.restated.length ? `; restated ${c.restated.map((x) => `${x.date} $${x.before.toFixed(2)}→$${x.after.toFixed(2)}`).join(', ')}` : ''}${c.error ? `; error: ${c.error}` : ''}`,
+      `  ${c.campaignId} ${c.label}: ${c.outcome}${c.ranges.length ? ` (${c.ranges.map((x) => `${x.since}..${x.until}`).join(', ')})` : ''}; spend through ${c.spendThrough ?? '—'}${c.missingDays ? `; ${c.missingDays} day(s) were missing` : ''}${c.restated.length ? `; restated ${c.restated.map((x) => `${x.date} $${x.before.toFixed(2)}→$${x.after.toFixed(2)}`).join(', ')}` : ''}${c.error ? `; error: ${c.error}` : ''}${c.warnings.length ? `; warning: ${c.warnings.join('; ')}` : ''}`,
     )
   }
   return lines

@@ -8,7 +8,7 @@ import { campaignSyncStatements, dailyRowUpserts, mergePlacementDayRows, placeme
 import { CAMPAIGNS, campaignById } from '../../src/lib/campaigns'
 import { clearRegisteredSecrets, redact, redactedFirstLine, registerSecret, summarizeError } from '../../src/lib/adsRedact'
 import { createWranglerRunner, repoRoot } from './wrangler'
-import { buildHeaders, createAdsClient, fetchDailySpend, fetchPlacementDaily, searchUrl, splitPlacements, type FetchLike } from '../../src/lib/adsApi'
+import { buildHeaders, createAdsClient, fetchDailySpend, fetchPlacementDaily, fetchRangeTotal, searchUrl, splitPlacements, type FetchLike } from '../../src/lib/adsApi'
 import { BWS_KEYS, pickAdsCredentials } from './secrets'
 import type { ReadingRecord } from '../../src/lib/adsRules'
 
@@ -309,6 +309,15 @@ describe('Google Ads client: read-only, no manager header', () => {
     } finally {
       delete process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID
     }
+  })
+  it('the range total (review L1) is one SELECT without segments.date in the SELECT list; null when Google returns no row', async () => {
+    const { f, calls } = fakeFetch([{ results: [{ metrics: { costMicros: '17300000', impressions: '7700', clicks: '61' } }] }, { results: [] }])
+    const client = await createAdsClient(creds, { fetchImpl: f })
+    expect(await fetchRangeTotal(client, '24279250691', '2026-09-26', '2026-09-27')).toEqual({ costMicros: 17_300_000, impressions: 7700, clicks: 61 })
+    expect(await fetchRangeTotal(client, '24279250691', '2026-09-28', '2026-09-28')).toBeNull()
+    const q = JSON.parse(calls.filter((c) => c.url.includes('googleAds:search'))[0].body!).query as string
+    expect(q).toBe("SELECT metrics.cost_micros, metrics.impressions, metrics.clicks FROM campaign WHERE campaign.id = 24279250691 AND segments.date BETWEEN '2026-09-26' AND '2026-09-27'")
+    await expect(fetchRangeTotal(client, '111111111', '2026-09-26', '2026-09-27')).rejects.toThrow()
   })
   it('refuses anything that is not a GAQL SELECT', async () => {
     const client = await createAdsClient(creds, { fetchImpl: fakeFetch([]).f })

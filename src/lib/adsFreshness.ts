@@ -3,8 +3,8 @@
 // only the fast ET arithmetic of lib/etTime.ts (the sync runs on a tight CPU budget).
 //
 //   spendThrough  the last ET day stored as CLOSED, contiguously from the flight's first day,
-//                 and never past the flight end (a day counts as closed when it was fetched on
-//                 a later ET day — Google keeps adding to an open day);
+//                 and never past the flight end (a day counts as closed when it was fetched at
+//                 or after 03:00 ET the next day — Google keeps adding to a day for a while);
 //   lastSync      the finish time of the latest sync run that synced the campaign
 //                 (ads_sync_runs.campaigns_ok);
 //   stale         a flight day that should be stored by now is not: yesterday once it is
@@ -29,11 +29,15 @@ export interface AdsFreshness {
   stale: boolean
 }
 
-/** True when a row for `date` was fetched after that ET day had ended. */
+/** A day counts as closed only when it was fetched this long after the next ET midnight:
+ * Google keeps adding late clicks and cost to a day for a while after it ends, so a pull at
+ * 00:05 ET must not be taken as the day's final number (review M1, 2026-09-26). */
+export const CLOSED_AFTER_ET = '03:00'
+/** True when a row for `date` was fetched at or after 03:00 ET on a later ET day. */
 export function isClosedFetch(date: string, fetchedAt: string | null | undefined): boolean {
   if (!fetchedAt) return false
   const ms = Date.parse(fetchedAt)
-  return Number.isFinite(ms) && etDateFast(ms) > date
+  return Number.isFinite(ms) && ms >= etWallTimeMs(addDays(date, 1), CLOSED_AFTER_ET)
 }
 
 /** Every ET date from `since` to `until` inclusive (empty when since > until). */

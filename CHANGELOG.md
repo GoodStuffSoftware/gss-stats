@@ -39,6 +39,16 @@ All notable changes to **gss-stats** are documented here. The format follows
   flight days with no delivery are stored as zero so the stored days have no gaps, and an empty
   or incomplete answer from Google is treated as a failed read that never overwrites stored
   spend.
+- **A day with no rows from Google is stored as $0 only when Google's range total agrees.**
+  A partial answer can no longer record a real spend day as $0; the day it left out keeps its
+  stored value and is reported, while the days around it are still stored.
+- **The newest Ads days sync first.** The last three days are pulled before any older gap, so
+  one day that keeps failing never holds back newer ones, and the restatement re-check only
+  counts when all three days were pulled.
+- **A day counts as final from 03:00 ET the next day.** A pull just after midnight no longer
+  marks yesterday as closed, so late clicks and cost that Google adds overnight are picked up.
+- **The Refresh warning about a mismatched sync Worker covers every campaign setting** (name,
+  kind, budget, cap and measurement as well as the flight).
 
 ## [0.5.1] — 2026-09-26
 
