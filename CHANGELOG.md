@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-09-26
+
 ### Added
 - **Every stored geo-beacon field can now split or filter any beacon chart.** New dimensions:
   screen width (exact pixels, and a bucketed `<480`/`480-767`/`768-1023`/`1024-1439`/`1440+`
