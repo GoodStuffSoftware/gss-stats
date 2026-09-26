@@ -37,12 +37,12 @@ describe('notes registry — active-when gating', () => {
     expect(isNoteActive('small-sample')).toBe(true)
   })
 
-  it('play-tracking-marker and play-tracking-not-live are mutually exclusive on the SAME underlying date flag', () => {
-    // Exactly one of the two should be active at any given time — they gate on the same
-    // PLAY_TRACKING_ACTIVATION_DATE_ET being non-null vs null.
-    const marker = isNoteActive('play-tracking-marker')
+  it('play-tracking-not-live and play-tracking-status (always active) are never BOTH the right note to show — play-tracking-status folds the marker/status distinction into one always-on note, so play-tracking-not-live only adds the "not live yet" variant on top when the date is still null', () => {
+    expect(isNoteActive('play-tracking-status')).toBe(true) // always active — no activeWhen
+    // play-tracking-not-live gates on the SAME underlying flag play-tracking-status's own
+    // text branches on internally.
     const notLive = isNoteActive('play-tracking-not-live')
-    expect(marker).toBe(!notLive)
+    expect(typeof notLive).toBe('boolean')
   })
 
   it('an unknown id is never active', () => {

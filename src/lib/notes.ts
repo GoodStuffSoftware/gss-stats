@@ -19,8 +19,10 @@
 //    scope via its own `notes` list.
 //  - activeWhen: optional gate (e.g. only while a tracking date is still null) — an
 //    inactive note is simply not returned by defaultNoteIdsForScope/isNoteActive.
-//  - vars: optional default template vars (see lib/textLite.ts interpolate) — a caller can
-//    still pass its own vars to override/extend at render time (see NoteBlock/TextBlock).
+//  - vars: optional default template vars (see lib/textLite.ts tokenizeAndInterpolate) — a
+//    caller can still pass its own vars to override/extend at render time (see
+//    NoteBlock/TextBlock, which call noteTokens — never noteRawText, which is plain-text
+//    only; see that function's own doc comment).
 import {
   SMALL_SAMPLE_NOTE,
   POPUP_PAGE_NOTE,
@@ -35,7 +37,7 @@ import {
   MIN_COHORT,
 } from './popupEvents'
 import { ARRIVALS_CAVEAT } from './campaigns'
-import { interpolate } from './textLite'
+import { tokenizeAndInterpolate, toPlainText } from './textLite'
 
 export type NoteSeverity = 'info' | 'caveat' | 'warning'
 export type NoteKind = 'note' | 'text'
@@ -90,19 +92,13 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = {
   'play-tracking-status': {
     id: 'play-tracking-status',
     // Dynamic: reflects PLAY_TRACKING_ACTIVATION_DATE_ET at render time, same as the old
-    // inline `{{ playTrackingStatusNote() }}` call — never cached/stale.
-    text: () => playTrackingStatusNote(),
+    // inline `{{ playTrackingStatusNote() }}` call — never cached/stale. The "Android/Play:"
+    // prefix used to be hard-coded in the .vue template (delta review, 2026-09-26) — it's
+    // part of the registry text now, same as everything else this note carries.
+    text: () => `Android/Play: ${PLAY_TRACKING_ACTIVATION_DATE_ET ? `${PLAY_TRACKING_MARKER_LABEL} ` : ''}${playTrackingStatusNote()}`,
     kind: 'note',
     severity: 'caveat',
     scopes: ['campaigns'],
-  },
-  'play-tracking-marker': {
-    id: 'play-tracking-marker',
-    text: () => (PLAY_TRACKING_ACTIVATION_DATE_ET ? PLAY_TRACKING_MARKER_LABEL : ''),
-    kind: 'note',
-    severity: 'info',
-    scopes: ['campaigns'],
-    activeWhen: () => PLAY_TRACKING_ACTIVATION_DATE_ET !== null,
   },
   'play-tracking-not-live': {
     id: 'play-tracking-not-live',
@@ -211,14 +207,35 @@ export function getNote(id: string): NoteDef | undefined {
   return NOTES_REGISTRY[id]
 }
 
-/** The note's text, interpolated against `vars` (falling back to the note's own default
- * `vars`, if any) — but NOT yet parsed for bold/links; render it through
- * NoteBlock.vue/TextBlock.vue, which call parseTextLite themselves. */
+/** The note's RAW template text — no tokenizing, no interpolation. Only needed for
+ * paragraph-splitting a longer note BEFORE tokenizing each paragraph separately (see
+ * TextBlock.vue, which needs paragraph boundaries from the untouched template); every other
+ * caller should use noteTokens (safe markup) or noteRawText (safe plain text) instead. */
+export function noteTemplate(id: string): string {
+  const n = NOTES_REGISTRY[id]
+  return n ? resolveText(n) : ''
+}
+
+/** The note's markup, tokenized + interpolated the SAFE way (template tokenized first, vars
+ * substituted only into text tokens — see lib/textLite.ts tokenizeAndInterpolate) — render
+ * these through NoteBlock.vue/TextBlock.vue (or any <template v-for> over bold/link/text),
+ * never by joining them back into a string and re-parsing. */
+export function noteTokens(id: string, vars?: Record<string, string | number>): import('./textLite').TextToken[] {
+  const n = NOTES_REGISTRY[id]
+  if (!n) return []
+  return tokenizeAndInterpolate(resolveText(n), { ...n.vars, ...vars })
+}
+
+/** PLAIN-TEXT rendering only (delta review, 2026-09-26) — for call sites that can't render
+ * tokens: a `:title` attribute, a bare `{{ }}` interpolation, a table cell. Never returns
+ * raw bold/link markup syntax as literal on-screen text — a bold segment keeps only its
+ * text, a link keeps only its visible label. If you're about to write
+ * `{{ noteRawText(...) }}` inside markup-capable markup (a <p>, a caption area), use
+ * <NoteBlock>/<TextBlock> instead so bold/link markup actually renders as such. */
 export function noteRawText(id: string, vars?: Record<string, string | number>): string {
   const n = NOTES_REGISTRY[id]
   if (!n) return ''
-  const text = resolveText(n)
-  return vars || n.vars ? interpolate(text, { ...n.vars, ...vars }) : text
+  return toPlainText(resolveText(n), { ...n.vars, ...vars })
 }
 
 export function isNoteActive(id: string): boolean {

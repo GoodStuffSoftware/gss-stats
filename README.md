@@ -61,6 +61,11 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   note/text tile. Zoom is a single click, always available on every chart; its other
   modification chrome (edit/remove/drag/resize) tucks away until you hover that chart
   or open the function bar below.
+  **Known gap:** the resize grip (drag-to-resize corner) isn't keyboard-operable — it's a
+  [`grid-layout-plus`](https://www.npmjs.com/package/grid-layout-plus) limitation, not a
+  regression from this app's own code. Resizing a chart currently needs a mouse or touch;
+  every other chart action (edit, remove, zoom, duplicate, set-as-default) has a real
+  button and works from the keyboard.
 - **A hidden-by-default function bar** — filters and chart controls (range, sites,
   exclusions, add chart, theme) live behind a small top-right button: hover to reveal
   on desktop, tap to toggle on touch, Escape or tapping outside hides it. Never shifts

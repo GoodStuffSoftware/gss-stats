@@ -41,6 +41,17 @@ All notable changes to **gss-stats** are documented here. The format follows
   are now default captions instead (via the notes library above) — applied
   non-destructively on load; a title you've already edited is left exactly as you left it.
 
+### Fixed
+- **Note/text links only ever render for `https:` and same-site targets** (an absolute
+  path, an in-page anchor, or a plain relative path) — any other scheme, including
+  `javascript:`, `data:`, `vbscript:`, plain `http:`, and a protocol-relative `//host`
+  link, now renders as inert plain text instead of a clickable link.
+- **A data-driven value can no longer introduce markup of its own** — note/text templates
+  are parsed for **bold**/[link](url) syntax before any `{variable}` is substituted, so a
+  variable's value is always rendered as plain text, never as new markup.
+- The always-visible zoom button's larger touch target now applies on any touch-capable
+  device (`pointer: coarse`), not just narrow viewports.
+
 ## [0.3.2] — 2026-09-26
 
 ### Added

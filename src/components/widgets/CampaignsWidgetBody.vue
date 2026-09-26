@@ -291,7 +291,7 @@ function shareBarWidth(row: DeviceMixShare): number {
 
       <!-- returns -->
       <template v-else-if="widget.view === 'returns'">
-        <p class="caption">Android/Play: {{ noteRawText('play-tracking-marker') }} {{ noteRawText('play-tracking-status') }}</p>
+        <NoteBlock note-id="play-tracking-status" class="caption" />
         <div class="return-grid">
           <div v-for="c in campaigns" :key="c.id" class="return-col">
             <div class="fc-label">{{ c.label }}</div>

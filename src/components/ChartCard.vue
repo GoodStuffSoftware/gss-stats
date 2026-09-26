@@ -587,9 +587,13 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
 .zoom-btn svg {
   display: block;
 }
-/* 44px touch target on mobile — the icon itself stays the same visual size; only the
-   hit area grows (padding), so the header doesn't get visually heavier. */
-@media (max-width: 700px) {
+/* 44px touch target on any touch-capable device — gated on (pointer: coarse), not a
+   viewport-width breakpoint (delta review, 2026-09-26: a tablet can easily be wider than
+   700px and still have a coarse/touch pointer, and a narrow window on a mouse-driven
+   desktop shouldn't get a touch-sized target it doesn't need). The icon itself stays the
+   same visual size; only the hit area grows (padding), so the header doesn't get visually
+   heavier. */
+@media (pointer: coarse) {
   .zoom-btn {
     min-width: 44px;
     min-height: 44px;
