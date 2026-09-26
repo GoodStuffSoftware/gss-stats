@@ -57,11 +57,25 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   [`src/lib/defaults.ts`](src/lib/defaults.ts)'s `reorderBskGroup`).
 - **Movable / composable charts** — drag the header, resize from the corner; add /
   edit / duplicate / delete charts of any type: stat, bar, horizontal bar, stacked
-  bar, line, area, doughnut, nested doughnut, pie, table, a geo point map, and a static
-  note tile.
-- **A hidden-by-default function bar** — the page controls (tabs, filters, add chart,
-  theme) live behind a small top-right button: hover to reveal on desktop, tap to toggle
-  on touch, Escape or tapping outside hides it. Never shifts the chart grid.
+  bar, line, area, doughnut, nested doughnut, pie, table, a geo point map, and a
+  note/text tile. Zoom is a single click, always available on every chart; its other
+  modification chrome (edit/remove/drag/resize) tucks away until you hover that chart
+  or open the function bar below.
+- **A hidden-by-default function bar** — filters and chart controls (range, sites,
+  exclusions, add chart, theme) live behind a small top-right button: hover to reveal
+  on desktop, tap to toggle on touch, Escape or tapping outside hides it. Never shifts
+  the chart grid. Page tabs stay always visible above it.
+- **A shared notes/text library** ([`src/lib/notes.ts`](src/lib/notes.ts)) — every
+  caveat, definition, and explanatory paragraph the dashboard shows (small-sample
+  warnings, attribution scope, "how to read this" captions, …) is a registry entry with
+  an id, a severity, which dataset(s) it defaults for, and an optional gate (e.g. "only
+  while tracking hasn't shipped yet"). Rendered through
+  [`NoteBlock.vue`](src/components/NoteBlock.vue) (short caveats) or
+  [`TextBlock.vue`](src/components/TextBlock.vue) (longer prose) — both support
+  **bold** and [links](https://example.com) via a small safe tokenizer
+  ([`src/lib/textLite.ts`](src/lib/textLite.ts), never `v-html`) — and attachable to
+  any chart as a caption (`widget.notes`) or as its own movable 'note' widget
+  (`widget.noteId`), editable from the chart menu either way.
 - **Durable, multi-page dashboards** — layout + chart definitions persist in KV (not
   `localStorage`), so they follow you across devices. Duplicate / rename / delete
   pages; a protected default page with "restore default charts"; per-page filters and

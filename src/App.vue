@@ -8,7 +8,8 @@ import { loadSites, sitesTree, tokenLabel } from './sitesStore'
 import { isSiteDim, semanticKey } from './lib/drill'
 import { sessionExpired, reauth } from './session'
 import { isTouchDevice } from './lib/responsive'
-import { TRACKING_ACTIVATION_DATE_ET, POPUP_PAGE_NOTE, SMALL_SAMPLE_NOTE } from './lib/popupEvents'
+import { TRACKING_ACTIVATION_DATE_ET } from './lib/popupEvents'
+import NoteBlock from './components/NoteBlock.vue'
 import PageBar from './components/PageBar.vue'
 import FilterBar from './components/FilterBar.vue'
 import Dashboard from './components/Dashboard.vue'
@@ -321,10 +322,14 @@ function openFilteredPage() {
   closeDrill()
 }
 
-// ── Function bar (page controls: range/filters/add chart/rename-duplicate-delete/theme) —
-// hidden by default, revealed via a small fixed top-right button (owner request,
-// 2026-09-26). An overlay/dropdown (position: fixed), never a layout shift — the grid below
-// never moves when it opens. ─────────────────────────────────────────────────────────────
+// ── Function bar (filters: range/sites/exclusions; modification: add chart, theme) — hidden
+// by default, revealed via a small fixed top-right button (owner request, 2026-09-26; scope
+// clarified 2026-09-26: page TABS are wayfinding, not "modification" chrome, so PageBar stays
+// always visible and lives outside this bar — see the template). An overlay/dropdown
+// (position: fixed), never a layout shift — the grid below never moves when it opens.
+// `barOpen` also drives per-chart modification chrome (ChartCard's edit/zoom/menu icons,
+// drag handles, resize grips): those stay hidden until this bar is open OR that specific
+// card is hovered — see Dashboard.vue's `controlsVisible` prop / ChartCard.vue. ───────────
 const barOpen = ref(false)
 const fbAnchor = ref<HTMLElement | null>(null)
 const fbToggleBtn = ref<HTMLButtonElement | null>(null)
@@ -415,9 +420,23 @@ function toggleDark() {
       </div>
     </header>
 
-    <!-- Function bar: range/filters/add-chart/page rename-duplicate-delete/theme — hidden by
-         default, revealed on hover (desktop) or tap (touch); Escape or tapping outside hides
-         it. Fixed top-right, overlays the page rather than shifting the grid below. -->
+    <!-- Page tabs — ALWAYS visible (owner clarification, 2026-09-26): unlike the rest of the
+         page chrome, navigating between pages is core wayfinding, not "modification" chrome,
+         so it never hides. -->
+    <PageBar
+      :pages="config.pages"
+      :active-page-id="config.activePageId"
+      @switch="switchPage"
+      @add="addPage"
+      @rename="renamePage"
+      @duplicate="duplicatePage"
+      @delete="deletePage"
+      @restore="restoreDefaultCharts"
+    />
+
+    <!-- Function bar: range/filters/add-chart/theme — hidden by default, revealed on hover
+         (desktop) or tap (touch); Escape or tapping outside hides it. Fixed top-right,
+         overlays the page rather than shifting the grid below. -->
     <div ref="fbAnchor" class="fb-anchor" @mouseenter="onBarAreaEnter" @mouseleave="onBarAreaLeave" @focusout="onBarFocusOut">
       <button
         ref="fbToggleBtn"
@@ -445,17 +464,6 @@ function toggleDark() {
             <button class="btn btn-primary" @click="addChart">＋ Add chart</button>
           </div>
 
-          <PageBar
-            :pages="config.pages"
-            :active-page-id="config.activePageId"
-            @switch="switchPage"
-            @add="addPage"
-            @rename="renamePage"
-            @duplicate="duplicatePage"
-            @delete="deletePage"
-            @restore="restoreDefaultCharts"
-          />
-
           <FilterBar
             v-if="!isCampaignPage"
             :filters="activePage.filters"
@@ -467,15 +475,9 @@ function toggleDark() {
       </Transition>
     </div>
 
-    <div v-if="showPopupActivationNote" class="activation-note">
-      Tracking not yet active — numbers before release are not a baseline.
-    </div>
-    <div v-if="showPopupDeferredNote" class="activation-note">
-      {{ POPUP_PAGE_NOTE }}
-    </div>
-    <div v-if="showSmallSampleNote" class="activation-note small-sample-note">
-      {{ SMALL_SAMPLE_NOTE }}
-    </div>
+    <NoteBlock v-if="showPopupActivationNote" note-id="tracking-not-yet-active" class="activation-note" />
+    <NoteBlock v-if="showPopupDeferredNote" note-id="popup-deferred-signin" class="activation-note" />
+    <NoteBlock v-if="showSmallSampleNote" note-id="small-sample" class="activation-note small-sample-note" />
 
     <main class="grid-area">
       <Dashboard
@@ -483,6 +485,7 @@ function toggleDark() {
         :filters="activePage.filters"
         :dark="dark"
         :drill-open-id="drillMenu?.widgetId ?? null"
+        :controls-visible="barOpen"
         @edit="editChart"
         @remove="removeWidget"
         @duplicate="duplicateWidget"

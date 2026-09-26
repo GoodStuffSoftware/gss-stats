@@ -33,6 +33,16 @@ async function ensureLoaded(since: string, until: string, force: boolean): Promi
     if (inflight.has(key)) await inflight.get(key)
     return e
   }
+  // Delta review fix (2026-09-26): without this, a forced reload (the Refresh button) while
+  // a fetch for the SAME key is already in flight (e.g. a filter change kicked one off,
+  // then Refresh is clicked before it lands) would start a SECOND concurrent fetch. The
+  // second one's `inflight.set(key, p)` below overwrites the first's map entry, so the
+  // first fetch's own `finally` deletes an entry that belongs to the second — and whichever
+  // response lands LAST wins, which is a race, not necessarily the freshest data. Waiting
+  // for any existing in-flight request first (even when forced) means "force" always starts
+  // its own fetch only after the previous one has fully settled — never two at once for the
+  // same key.
+  if (inflight.has(key)) await inflight.get(key)
   const p = (async () => {
     e.loading.value = true
     e.error.value = null

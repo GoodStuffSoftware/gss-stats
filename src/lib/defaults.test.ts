@@ -227,4 +227,53 @@ describe('defaultOverviewWidgets / defaultCampaignsWidgets', () => {
       .map((w) => w.view)
     expect(new Set(campaignsViews)).toEqual(new Set(['funnel', 'hourOfDay', 'country', 'flightDay', 'cost', 'deviceMix', 'returns']))
   })
+
+  it('the note-type widgets point at registry ids (noteId), not baked-in literal text', () => {
+    const notes = [...defaultOverviewWidgets(), ...defaultCampaignsWidgets()].filter((w) => w.type === 'note')
+    expect(notes.length).toBeGreaterThan(0)
+    for (const n of notes) {
+      expect(n.noteId).toBeTruthy()
+      expect(n.note).toBeUndefined() // registry id, not custom text, for every shipped default
+    }
+  })
+
+  it('chart widgets carry sensible attached-caption defaults from the registry (per view)', () => {
+    const funnel = defaultCampaignsWidgets().find((w) => w.view === 'funnel')!
+    expect(funnel.notes).toEqual(expect.arrayContaining(['arrivals-caveat', 'min-cohort-caveat']))
+  })
+})
+
+describe('normWidget — notes/noteId/longText round-trip (via normalizeConfig)', () => {
+  function withWidgets(widgets: Widget[]): DashboardConfig {
+    return { version: CONFIG_VERSION, activePageId: 'user-1', pages: [page({ id: 'user-1', name: 'Mine', widgets })] }
+  }
+
+  it('preserves a new-style note widget\'s noteId/longText/notes fields exactly', () => {
+    const w = widget({ id: 'n1', type: 'note', noteId: 'small-sample', longText: false })
+    const norm = normalizeConfig(withWidgets([w]))
+    const out = norm.pages[0].widgets[0]
+    expect(out.noteId).toBe('small-sample')
+    expect(out.note).toBeUndefined()
+  })
+
+  it('preserves a chart widget\'s explicit `notes` (attached captions) list', () => {
+    const w = widget({ id: 'c1', type: 'hbar', dataset: 'campaigns', notes: ['arrivals-caveat'] })
+    const norm = normalizeConfig(withWidgets([w]))
+    expect(norm.pages[0].widgets[0].notes).toEqual(['arrivals-caveat'])
+  })
+
+  it('MIGRATION DEFAULT: a widget saved before noteId/notes existed (plain object with neither field) normalizes with both absent — never backfilled to a guessed value', () => {
+    const legacy = { id: 'old1', title: 'Old note', type: 'note', dimension: '', metric: 'pageviews', limit: 1, note: 'Some custom text from before the registry shipped', x: 0, y: 0, w: 4, h: 4 }
+    const norm = normalizeConfig(withWidgets([legacy as unknown as Widget]))
+    const out = norm.pages[0].widgets[0]
+    expect(out.note).toBe('Some custom text from before the registry shipped') // custom text: untouched
+    expect(out.noteId).toBeUndefined()
+    expect(out.notes).toBeUndefined()
+  })
+
+  it('drops a non-string/non-array notes value rather than crashing', () => {
+    const legacy = { id: 'old2', title: 'x', type: 'hbar', dimension: '', metric: 'pageviews', limit: 1, notes: 'not-an-array', x: 0, y: 0, w: 4, h: 4 }
+    const norm = normalizeConfig(withWidgets([legacy as unknown as Widget]))
+    expect(norm.pages[0].widgets[0].notes).toBeUndefined()
+  })
 })
