@@ -22,6 +22,8 @@
 // conservatively; the geo/beacon dataset (functions/api/geo.ts, exact SQL GROUP BY, no row-
 // limit-vs-cardinality tradeoff) is the intended path for charts wanting more rings than this.
 
+import { buildCacheKeyUrl, cachedJson, ttlSecondsFor, type CacheLike } from '../_lib/edgeCache'
+
 interface Env {
   CF_ANALYTICS_TOKEN: string
   STATS_CONFIG: KVNamespace
@@ -179,6 +181,36 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
         .join('')
     : ''
 
+  // Everything that changes the GraphQL query (and therefore the response) goes into the cache
+  // key. `hostList`/constraints are sorted for the key only — their order never changes the
+  // result — while `dims` keeps client order (it changes the response's key-field order, which
+  // callers may rely on for date-series charts).
+  const cacheKeyUrl = buildCacheKeyUrl('/api/stats', {
+    site,
+    host,
+    hostList: [...hostList].sort(),
+    dims,
+    metric,
+    since,
+    until,
+    limit,
+    constraints: Array.isArray(body.constraints)
+      ? [...(body.constraints as any[])]
+          .filter((c) => c && DIM_WHITELIST.has(c.field) && c.field !== 'date' && typeof c.value === 'string')
+          .map((c) => ({ field: String(c.field), value: String(c.value) }))
+          .sort((a, b) => (a.field + a.value).localeCompare(b.field + b.value))
+      : [],
+    excludeSelf,
+    excludeOwn,
+    ownBrowser: excludeOwn ? ownBrowser : '',
+    ownOS: excludeOwn ? ownOS : '',
+  })
+  const ttl = ttlSecondsFor(until, new Date())
+  const cache = (caches as unknown as { default: CacheLike }).default
+
+  return cachedJson(cache, cacheKeyUrl, ttl, ctx.waitUntil.bind(ctx), computeStatsResponse)
+
+  async function computeStatsResponse(): Promise<Response> {
   // Day values expand to full-day bounds; full ISO datetimes are used as-is.
   const datetimeGeq = isDateOnly(since) ? `${since}T00:00:00Z` : since
   const datetimeLeq = isDateOnly(until) ? `${nextDay(until)}T00:00:00Z` : until
@@ -298,6 +330,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     totals,
     meta: { site, host, since, until, dimensions: dims, metric },
   })
+  }
  } catch (e) {
   // Belt-and-suspenders: any unhandled error becomes a readable JSON 500 instead of a raw
   // Cloudflare HTML 502, so the dashboard shows the real message and we can see what failed.
