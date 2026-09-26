@@ -141,6 +141,30 @@ function timelineOverlayPlugin(resp: OverviewResponse) {
         ctx.stroke()
         ctx.restore()
       }
+      // v1.95.6 raw /install/* de-dupe (ADD, 2026-09-26) — a marker scoped to the RAW
+      // install-signal line ONLY (never the primary install count): drawn in that series' own
+      // color (PALETTE[7], see the 'Raw install signals' dataset below) and labeled at the
+      // BOTTOM of the chart area, distinct from the top-labeled release/tracking markers
+      // above, so it visually reads as "about that one line" rather than a page-wide event.
+      if (resp.timeline.rawInstallDedupeAt) {
+        const x = scales.x.getPixelForValue(resp.timeline.rawInstallDedupeAt)
+        if (x != null && !Number.isNaN(x) && x >= chartArea.left && x <= chartArea.right) {
+          ctx.save()
+          ctx.strokeStyle = PALETTE[7]
+          ctx.lineWidth = 1
+          ctx.setLineDash([2, 2])
+          ctx.beginPath()
+          ctx.moveTo(x, chartArea.top)
+          ctx.lineTo(x, chartArea.bottom)
+          ctx.stroke()
+          ctx.setLineDash([])
+          ctx.font = '600 9px Inter, system-ui, sans-serif'
+          ctx.fillStyle = PALETTE[7]
+          ctx.textAlign = 'right'
+          ctx.fillText('raw install dedupe', Math.max(x - 4, chartArea.left + 4), chartArea.bottom - 4)
+          ctx.restore()
+        }
+      }
     },
   }
 }
@@ -212,6 +236,7 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
         <NoteBlock note-id="overview-timeline-caption" class="caption" />
         <div class="chart-box"><BaseChart v-if="timelineConfig" :config="timelineConfig" :drill-open="false" @point="() => {}" /></div>
         <p v-if="!timelineConfig" class="caption">No data in range yet.</p>
+        <NoteBlock v-if="data.timeline.rawInstallDedupeAt" note-id="raw-install-dedupe" class="caption" />
       </template>
 
       <!-- scorecard -->
@@ -235,14 +260,24 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
             <div class="sc-row"><span>Return rate (d2-7)</span><span class="mono">{{ pct(row.returnRateD2to7, row.returnD0) }} {{ counts(row.returnD2to7, row.returnD0) }}</span></div>
             <div class="sc-row"><span>Cost / arrival</span><span class="mono">{{ money(row.costPerArrival) }}</span></div>
             <div class="sc-rates">
-              <span v-for="(rate, step) in row.funnelRates" :key="step" class="sc-rate-chip" :title="FUNNEL_STEP_LABELS[step as keyof typeof FUNNEL_STEP_LABELS]">
-                {{ FUNNEL_STEP_LABELS[step as keyof typeof FUNNEL_STEP_LABELS] }}:
-                <template v-if="FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED.has(step as FunnelStepKey)">{{ noteRawText('not-instrumented') }}</template>
-                <template v-else
-                  >{{ pct(rate, prevFunnelCount(row.funnelCounts, step as keyof CampaignFunnelCounts)) }}
-                  {{ counts(row.funnelCounts[step as keyof CampaignFunnelCounts], prevFunnelCount(row.funnelCounts, step as keyof CampaignFunnelCounts)) }}</template
+              <template v-for="(rate, step) in row.funnelRates" :key="step">
+                <!-- Closed campaign: a step its flight never saw ANY hit for is OMITTED, not
+                     labeled "not instrumented" (owner clarification, 2026-09-26 — "closed
+                     campaigns" scope). Active/upcoming: unchanged — row.notInstrumented is
+                     always [] for them, so this condition is never true. -->
+                <span
+                  v-if="row.status !== 'closed' || !row.notInstrumented.includes(step as keyof CampaignFunnelCounts)"
+                  class="sc-rate-chip"
+                  :title="FUNNEL_STEP_LABELS[step as keyof typeof FUNNEL_STEP_LABELS]"
                 >
-              </span>
+                  {{ FUNNEL_STEP_LABELS[step as keyof typeof FUNNEL_STEP_LABELS] }}:
+                  <template v-if="FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED.has(step as FunnelStepKey)">{{ noteRawText('not-instrumented') }}</template>
+                  <template v-else
+                    >{{ pct(rate, prevFunnelCount(row.funnelCounts, step as keyof CampaignFunnelCounts)) }}
+                    {{ counts(row.funnelCounts[step as keyof CampaignFunnelCounts], prevFunnelCount(row.funnelCounts, step as keyof CampaignFunnelCounts)) }}</template
+                  >
+                </span>
+              </template>
             </div>
           </div>
         </div>

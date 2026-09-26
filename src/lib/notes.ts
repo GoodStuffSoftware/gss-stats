@@ -35,6 +35,7 @@ import {
   PLAY_TRACKING_ACTIVATION_DATE_ET,
   TRACKING_ACTIVATION_DATE_ET,
   MIN_COHORT,
+  RAW_INSTALL_DEDUPE_NOTE,
 } from './popupEvents'
 import { ARRIVALS_CAVEAT } from './campaigns'
 import { tokenizeAndInterpolate, toPlainText } from './textLite'
@@ -203,6 +204,20 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = {
     kind: 'note',
     severity: 'info',
     scopes: ['overview'],
+  },
+  'raw-install-dedupe': {
+    id: 'raw-install-dedupe',
+    text: RAW_INSTALL_DEDUPE_NOTE,
+    kind: 'note',
+    severity: 'info',
+    scopes: ['overview'],
+  },
+  'no-return-visits-yet': {
+    id: 'no-return-visits-yet',
+    text: 'No return visits recorded yet.',
+    kind: 'note',
+    severity: 'info',
+    scopes: ['campaigns'],
   },
 }
 

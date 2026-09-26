@@ -376,6 +376,24 @@ const PLAYED_PATH = '/game'
  * `/game/complete/` (not `/game` or `/game/complete`) is the exact anchor that keeps this
  * from ever matching the `/game` page-view path itself. */
 const GAME_COMPLETE_PREFIX = '/game/complete/'
+// Any two non-slash segments after the prefix — same "don't overfit the exact enum" stance
+// as GAME_COMPLETE_PREFIX's own doc comment (an unrecognized mode/difficulty still counts as
+// a completion via the prefix match above; this just also buckets it, under its raw string,
+// rather than requiring it match the known easy/medium/hard/expert/unknown set exactly).
+const GAME_COMPLETE_SEGMENTS_RE = /^\/game\/complete\/([^/]+)\/([^/]+)$/
+export const GAME_COMPLETE_MODES = ['normal', 'daily'] as const
+export const GAME_COMPLETE_DIFFICULTIES = ['easy', 'medium', 'hard', 'expert', 'unknown'] as const
+/** Parses `/game/complete/<mode>/<difficulty>` into its two segments — for the completions
+ * BREAKDOWN widget (mode × difficulty; functions/api/completions.ts), a different job from
+ * classifyFunnelPath's aggregate "completed" count above (prefix match only, no shape
+ * check — see GAME_COMPLETE_PREFIX's doc comment for why). A path with the right prefix but
+ * not exactly two more segments (or a corrupted beacon) returns null; the caller buckets
+ * that under its own "(other)" label rather than dropping it, so the breakdown's total never
+ * silently disagrees with the funnel's prefix-matched "completed" count. */
+export function parseGameCompletePath(path: string): { mode: string; difficulty: string } | null {
+  const m = GAME_COMPLETE_SEGMENTS_RE.exec(path)
+  return m ? { mode: m[1], difficulty: m[2] } : null
+}
 /** "auth success" — NOT part of lib/popupEvents.ts's POPUP_EVENT_PREFIXES (an ordinary page
  * path there), so classified here directly. ONE matcher for the whole codebase.
  *
