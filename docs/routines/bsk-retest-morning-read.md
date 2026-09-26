@@ -37,9 +37,14 @@ and add nothing of your own to the rules.** Windows machine; the Bash tool is Gi
   geo, schedule or bidding change while the flight runs. Post-flight recommendations belong
   to the post-flight routine.
 - **Never touch the closed campaigns** 24215315197 and 24234347705.
-- **Sign-ups are an upper bound.** Always "at most N campaign sign-ups" with both inputs as
-  the report prints them (`/auth/success` also fires for returning sign-ins; new accounts are
-  sitewide); never "N sign-ups" or "verified".
+- **Sign-ups are an upper bound** unless the report says "exact". Relay the sign-up line
+  exactly as the report prints it: "at most N campaign sign-ups" with both inputs
+  (`/auth/success` also fires for returning sign-ins; new accounts are sitewide), or, once the
+  new/existing sign-in beacons are live, "N campaign sign-ups (exact …)" or the "at most … +
+  exactly …" split. Never upgrade a bound to "N sign-ups" or "verified" yourself.
+- **Segments.** If the report has a "Segments at the signed-out upsell fix" block, the flight
+  reads as two separate short tests (spec section 14a): relay pre-fix and post-fix figures
+  separately and never add them into one verdict.
 - **No trackers, no PII.** Report sign-ups and promo claims only as window COUNTS. Never
   join rows to individuals by device, timestamp or location. Never cross-check a sign-up
   against an arrival by /auth timing (retired).
@@ -106,17 +111,35 @@ pair is an ordinary pair: install-prompt accepts (`/install/pwa-accept`) after t
 5 and at least 24 h old, with no `/popup-outcome/install-prompt/installed` is a real ALERT and
 pushes; a continued zero is raised, not treated as quiet. It appends a `health` record.
 
-Not `--dry-run`: this run is the one that stores spend, appends the daily line and marks a
-fired threshold. `BWS_ACCESS_TOKEN` is already in the environment. If the service-account
+Not `--dry-run`: this run is the one that syncs spend, appends the daily line and marks a
+fired threshold. Never run `npm run ads:sync` before it "to be safe": the read syncs itself. `BWS_ACCESS_TOKEN` is already in the environment. If the service-account
 file is missing, drop `--firebase-sa` (the account counts then read "not read"); never go
 looking for other credentials.
 
-What the CLI does, so you can explain it (do not re-implement any of it): fetches yesterday's
-and cumulative spend from the Google Ads API (closed ET days only), stores it in gss-stats'
-own D1 database, fires each $25/$50/$75/$100 read once, runs the full read and the kill rules
-on a crossing, checks the $100 cap on every read, always appends a daily line, notes any
-earlier scheduled read that never ran, and skips release health because 08:00 ET is inside
-its 01:00-12:00 quiet window (entry B covers it).
+What the CLI does, so you can explain it (do not re-implement any of it):
+
+1. **Syncs first, through the shared sync** (`syncAdsData` in `src/lib/adsSync.ts`, the same
+   code `npm run ads:sync` and the backfill run): it checks which closed ET days gss-stats'
+   own D1 database is missing, pulls all of them (newest first, through yesterday) plus the
+   last 3 closed days that Google may still restate (on every read, so yesterday's number is
+   never one the Worker pulled hours earlier), and writes only rows that changed. An empty or
+   incomplete answer from Google never overwrites stored spend: it is reported as a failed
+   read and pushes. The `gss-stats-sync` Cloudflare Worker runs the same sync every hour
+   during the flight, so this step usually changes nothing; that is expected and safe. The report's
+   `sync (shared):` line says what it pulled and changed. A `SYNC ALERT:` line means a sync run
+   (usually the Worker) was killed mid-run; relay it as printed (the next run redoes the work).
+2. Fires each $25/$50/$75/$100 read once, runs the full read and the kill rules on a
+   crossing, and checks the $100 cap on every read.
+3. Appends **one** daily line per ET day. Rerunning the same entry the same day stores
+   nothing new and does not repeat a threshold, cap or alert push (the report says
+   "Already recorded today"); only a rerun that carries new information (a complete retry of
+   an incomplete read, a new pause proposal, a new alert) is stored and pushed. A failed read
+   always pushes.
+4. Notes any earlier scheduled read that never ran, and skips release health because
+   08:00 ET is inside its 01:00-12:00 quiet window (entry B covers it).
+
+ENTRY B runs the same sync first (it also stores the closed days), then reads today's partial
+spend only to decide whether ads served today; today's open day is never stored.
 
 ## Step 2: read the result
 

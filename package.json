@@ -1,6 +1,6 @@
 {
   "name": "gss-stats",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "description": "Private bot-free traffic dashboard for Good Stuff Software (RUM via Cloudflare GraphQL).",
@@ -15,6 +15,10 @@
     "ads:morning-read": "tsx scripts/ads-reads/morning-read.ts",
     "ads:postflight-read": "tsx scripts/ads-reads/postflight-read.ts",
     "ads:backfill": "tsx scripts/ads-reads/backfill.ts",
+    "ads:sync": "tsx scripts/ads-reads/sync.ts",
+    "ads:worker-secrets": "tsx scripts/ads-reads/worker-secrets.ts",
+    "ads:worker-deploy": "tsx scripts/ads-reads/worker-deploy.ts",
+    "ads:worker-check": "wrangler deploy --dry-run -c workers/sync/wrangler.toml --outdir .wrangler/worker-check",
     "ads:migrate": "wrangler d1 migrations apply gss-stats-ads --remote"
   },
   "dependencies": {

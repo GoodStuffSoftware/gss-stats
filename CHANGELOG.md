@@ -6,6 +6,56 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-09-26
+
+### Added
+- **Campaign spend shows how fresh it is.** The campaigns page and the readings log show
+  "Spend through &lt;date&gt; · synced &lt;time ago&gt;" for each campaign, and flag
+  "stale — sync pending" when a flight day that should be stored by now is missing.
+- **One shared Google Ads sync (`npm run ads:sync`).** Every ads routine now fills in every
+  missing day, re-checks the last three days Google may still restate, and writes only what
+  changed, so running it twice in a row changes nothing.
+- **Ads data syncs on its own in Cloudflare.** A private sync worker runs the same sync every
+  hour during a flight and once a day otherwise, so spend stays current even when the local
+  routines don't run.
+- **A "Refresh data" button on the campaigns page and the readings log** syncs stale Ads data
+  on demand (at most once every 10 minutes) and updates the freshness line.
+- **Reads split at the signed-out upsell fix.** Once its go-live time is set, the $100 read and
+  the post-flight reads report spend, asks, accepts and sign-ups before and after the fix
+  separately (two separate short tests), and the campaigns page marks the fix day and shows the
+  campaign's upsell shown/accepted on each side.
+- **Exact campaign sign-ups from the new/existing sign-in beacon.** Since that beacon went live
+  (v1.95.5), the reads count sign-ups from new accounts exactly; earlier sign-ins and "unknown"
+  answers stay an "at most" upper bound, and returning sign-ins never count.
+
+### Changed
+- **Ads readings are recorded once per day per entry.** Rerunning a read the same day no
+  longer adds a duplicate row or repeats a push for the same threshold, cap trip or alert; a
+  rerun is recorded only when it carries new information, and a failed read still pushes.
+- **Stored spend covers closed days only.** Today's still-open numbers are no longer stored;
+  flight days with no delivery are stored as zero so the stored days have no gaps, and an empty
+  or incomplete answer from Google is treated as a failed read that never overwrites stored
+  spend.
+- **A day with no rows from Google is stored as $0 only when Google's range total agrees.**
+  A partial answer can no longer record a real spend day as $0; the day it left out keeps its
+  stored value and is reported, while the days around it are still stored.
+- **The newest Ads days sync first.** The last three days are pulled before any older gap, so
+  one day that keeps failing never holds back newer ones, and the restatement re-check only
+  counts when all three days were pulled.
+- **The morning read, backstop and post-flight read always re-check the last three days.**
+  They no longer skip that re-check because the sync worker pulled a few hours earlier, so a
+  read never decides on a yesterday pulled before Google's late data arrived.
+- **A day counts as final from 03:00 ET the next day.** A pull just after midnight no longer
+  marks yesterday as closed, so late clicks and cost that Google adds overnight are picked up;
+  the sync worker pulls yesterday once, at 03:05 ET, instead of every hour after midnight.
+- **Page views no longer count the new/existing sign-in beacon.** It fires alongside the
+  ordinary sign-in beacon, so it is now excluded from page-view and visit totals like every
+  other event beacon; the sign-in page view itself still counts.
+- **A sync run that was cut off mid-run is reported.** The readings log shows a "Sync alert"
+  and the morning, backstop and post-flight reports print it, instead of the run vanishing.
+- **The Refresh warning about a mismatched sync Worker covers every campaign setting** (name,
+  kind, budget, cap and measurement as well as the flight).
+
 ## [0.6.1] — 2026-09-26
 
 ### Fixed

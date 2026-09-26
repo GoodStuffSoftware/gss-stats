@@ -1,14 +1,14 @@
 // Safety guards: read-only beacon SQL, the ads-store write guard, bind inlining, secret
 // redaction, and the read-only Google Ads client (no manager header, SELECT only).
 import { afterEach, describe, expect, it } from 'vitest'
-import { assertReadOnlySql, createD1Select, inlineBinds, parseD1Json, sqlLiteral, stripSqlLiterals } from './d1'
+import { assertReadOnlySql, createD1Select, inlineBinds, parseD1Json, parseD1Response, sqlLiteral, stripSqlLiterals } from './d1'
 import { assertAdsWriteSql, createD1Store } from './d1Store'
 import { returnRowsQuery, returnSitesQuery, siteEventsQuery, taggedRowsQuery } from './beacon'
-import { campaignSyncStatement, dailyMetricsUpserts, mergePlacementDayRows, placementDailyUpserts, readingInsert, thresholdStateInsert } from '../../src/lib/adsStore'
+import { campaignSyncStatements, dailyRowUpserts, mergePlacementDayRows, placementDailyUpserts, readingInsert, syncRunInsert, thresholdStateInsert } from '../../src/lib/adsStore'
 import { CAMPAIGNS, campaignById } from '../../src/lib/campaigns'
-import { clearRegisteredSecrets, redact, redactedFirstLine, registerSecret, summarizeError } from './redact'
-import { createWranglerRunner } from './wrangler'
-import { buildHeaders, createAdsClient, fetchDailySpend, fetchPlacementDaily, searchUrl, splitPlacements, type FetchLike } from './adsApi'
+import { clearRegisteredSecrets, redact, redactedFirstLine, registerSecret, summarizeError } from '../../src/lib/adsRedact'
+import { createWranglerRunner, repoRoot } from './wrangler'
+import { buildHeaders, createAdsClient, fetchDailySpend, fetchPlacementDaily, fetchRangeTotal, searchUrl, splitPlacements, type FetchLike } from '../../src/lib/adsApi'
 import { BWS_KEYS, pickAdsCredentials } from './secrets'
 import type { ReadingRecord } from '../../src/lib/adsRules'
 
@@ -101,7 +101,14 @@ describe('inlineBinds / sqlLiteral', () => {
 })
 
 describe('beacon reads are read-only and apply the shared exclusions', () => {
-  const queries = [taggedRowsQuery(retest), siteEventsQuery(0), returnRowsQuery(retest), returnSitesQuery(0)]
+  const queries = [taggedRowsQuery(retest), taggedRowsQuery(retest, Date.parse('2026-09-29T18:26:00Z')), siteEventsQuery(0), returnRowsQuery(retest), returnSitesQuery(0)]
+  it('with an upsell-fix instant, the tagged query flags each row exactly at it (uf), binding the instant first', () => {
+    const fix = Date.parse('2026-09-29T18:26:00Z')
+    const q = taggedRowsQuery(retest, fix)
+    expect(q.sql).toMatch(/^SELECT CAST\(ts \/ 3600000 AS INTEGER\) AS hr, path, visitor, \(ts >= \?\) AS uf, COUNT\(\*\) AS c FROM hits WHERE .* GROUP BY hr, path, visitor, uf$/)
+    expect(q.binds[0]).toBe(fix)
+    expect(taggedRowsQuery(retest, null).sql).not.toMatch(/\buf\b/)
+  })
   it('every beacon query passes the SELECT-only guard after inlining', () => {
     for (const q of queries) expect(() => assertReadOnlySql(inlineBinds(q.sql, q.binds))).not.toThrow()
   })
@@ -136,6 +143,10 @@ describe('beacon reads are read-only and apply the shared exclusions', () => {
     expect(parseD1Json('banner\n[{"results":[{"n":1}],"success":true}]')).toEqual([{ n: 1 }])
     expect(() => parseD1Json('[{"results":[],"success":false}]')).toThrow()
   })
+  it('a "▲ [WARNING]" banner before the JSON is skipped, and meta.changes is read', () => {
+    expect(parseD1Response('▲ [WARNING] update available\n[{"results":[],"success":true,"meta":{"changes":0}}]')).toEqual({ results: [], changes: 0 })
+    expect(parseD1Response('[{"results":[],"success":true}]').changes).toBeNull()
+  })
 })
 
 describe('ads store write guard', () => {
@@ -145,8 +156,9 @@ describe('ads store write guard', () => {
   }
   it('accepts every statement the shared builders produce', () => {
     const stmts = [
-      campaignSyncStatement(CAMPAIGNS, 'x'),
-      ...dailyMetricsUpserts('24279250691', { '2026-09-27': { costMicros: 1, impressions: 1, clicks: 0 } }, 'x'),
+      ...campaignSyncStatements(CAMPAIGNS, 'x'),
+      ...dailyRowUpserts('24279250691', [{ date: '2026-09-27', costMicros: 1, impressions: 1, clicks: 0, fetchedAt: 'x', placementsFetchedAt: null }]),
+      syncRunInsert({ runKey: 'k', source: 'ads-sync', startedAt: 'a', finishedAt: 'b', campaigns: ['1'], campaignsOk: [], campaignsPulled: [], daysFetched: 0, daysChanged: 0, placementRowsFetched: 0, placementRowsChanged: 0, status: 'failed', error: "DROP; it's", detail: {} }),
       ...placementDailyUpserts('24279250691', [{ date: '2026-09-27', placement: 'p', displayName: "it's", type: null, targetUrl: null, approved: true, costMicros: 1, impressions: 1, clicks: 0 }], 'x'),
       readingInsert(rec),
       thresholdStateInsert(rec)!,
@@ -192,8 +204,9 @@ describe('ads store write guard', () => {
       },
       dryRun: true,
     })
-    expect(await store.appendReadings([rec])).toBe(false)
-    expect(await store.putDailyMetrics('24279250691', { '2026-09-27': { costMicros: 1, impressions: 1, clicks: 0 } }, 'x')).toBe(false)
+    expect(await store.appendReadings([rec])).toEqual({ written: false, inserted: [], ignored: [] })
+    expect(await store.putDailyRows('24279250691', [{ date: '2026-09-27', costMicros: 1, impressions: 1, clicks: 0, fetchedAt: 'x', placementsFetchedAt: null }])).toBe(false)
+    expect(await store.appendSyncRun({ runKey: 'k', source: 'ads-sync', startedAt: 'a', finishedAt: 'b', campaigns: [], campaignsOk: [], campaignsPulled: [], daysFetched: 0, daysChanged: 0, placementRowsFetched: 0, placementRowsChanged: 0, status: 'ok', error: null, detail: {} })).toBe(false)
     expect(await store.syncCampaigns(CAMPAIGNS, 'x')).toBe(false)
     expect(calls).toEqual([])
   })
@@ -297,6 +310,15 @@ describe('Google Ads client: read-only, no manager header', () => {
       delete process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID
     }
   })
+  it('the range total (review L1) is one SELECT without segments.date in the SELECT list; null when Google returns no row', async () => {
+    const { f, calls } = fakeFetch([{ results: [{ metrics: { costMicros: '17300000', impressions: '7700', clicks: '61' } }] }, { results: [] }])
+    const client = await createAdsClient(creds, { fetchImpl: f })
+    expect(await fetchRangeTotal(client, '24279250691', '2026-09-26', '2026-09-27')).toEqual({ costMicros: 17_300_000, impressions: 7700, clicks: 61 })
+    expect(await fetchRangeTotal(client, '24279250691', '2026-09-28', '2026-09-28')).toBeNull()
+    const q = JSON.parse(calls.filter((c) => c.url.includes('googleAds:search'))[0].body!).query as string
+    expect(q).toBe("SELECT metrics.cost_micros, metrics.impressions, metrics.clicks FROM campaign WHERE campaign.id = 24279250691 AND segments.date BETWEEN '2026-09-26' AND '2026-09-27'")
+    await expect(fetchRangeTotal(client, '111111111', '2026-09-26', '2026-09-27')).rejects.toThrow()
+  })
   it('refuses anything that is not a GAQL SELECT', async () => {
     const client = await createAdsClient(creds, { fetchImpl: fakeFetch([]).f })
     await expect(client.search('mutate campaign')).rejects.toThrow(/SELECT/)
@@ -332,5 +354,33 @@ describe('Google Ads client: read-only, no manager header', () => {
     const client = await createAdsClient(creds, { fetchImpl: f })
     await expect(fetchDailySpend(client, '111111111', '2026-09-26', '2026-09-27')).rejects.toThrow()
     expect(calls.filter((c) => c.url.includes('googleAds:search'))).toHaveLength(0)
+  })
+})
+
+describe('ONE fetch path: only the shared sync pulls Ads metrics (owner, 2026-09-26)', () => {
+  const root = repoRoot()
+  const listTs = (dir: string): string[] => {
+    const abs = path.join(root, dir)
+    if (!fs.existsSync(abs)) return []
+    return fs.readdirSync(abs, { withFileTypes: true }).flatMap((e) => {
+      const rel = path.posix.join(dir, e.name)
+      if (e.isDirectory()) return e.name === 'node_modules' ? [] : listTs(rel)
+      return /\.(ts|vue)$/.test(e.name) && !/\.test\.ts$/.test(e.name) ? [rel] : []
+    })
+  }
+  const files = [...listTs('scripts/ads-reads'), ...listTs('src'), ...listTs('functions'), ...listTs('workers')]
+  it('no module but src/lib/adsSync.ts calls a metrics source (.daily / .placements)', () => {
+    expect(files).toContain('src/lib/adsSync.ts')
+    for (const f of files) {
+      if (f === 'src/lib/adsSync.ts') continue
+      expect([f, /\.(daily|placements)\(/.test(fs.readFileSync(path.join(root, f), 'utf8'))]).toEqual([f, false])
+    }
+  })
+  it('the raw Ads fetchers are only wrapped into a source by the adapters, never called by a read', () => {
+    const allowed = ['src/lib/adsApi.ts', 'scripts/ads-reads/cli.ts', 'workers/sync/src/index.ts']
+    for (const f of files) {
+      if (allowed.includes(f)) continue
+      expect([f, /fetch(DailySpend|PlacementDaily)\(/.test(fs.readFileSync(path.join(root, f), 'utf8'))]).toEqual([f, false])
+    }
   })
 })

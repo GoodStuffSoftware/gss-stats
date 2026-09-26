@@ -41,8 +41,9 @@ import {
   type FunnelStepKey,
 } from '../../src/lib/campaigns'
 import { etDateFromMs, excludeInstallGapUnmeasured, installOutcomeGapNote, TRACKING_ACTIVATION_DATE_ET } from '../../src/lib/popupEvents'
-import { resolveCampaignSpend } from '../../src/lib/adsRules'
-import { readSpendSummaries } from '../../src/lib/adsStore'
+import { campaignSegmentMarker, resolveCampaignSpend, UPSELL_SIGNEDOUT_FIX_AT } from '../../src/lib/adsRules'
+import { readFreshness, readSpendSummaries } from '../../src/lib/adsStore'
+import { freshnessOf } from '../../src/lib/adsFreshness'
 import { isRawInstallSignal, RAW_INSTALL_SIGNALS_LABEL } from '../../src/lib/campaigns'
 
 interface Env {
@@ -86,7 +87,15 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const b1: unknown[] = [...attr.binds]
   applyExclusions(w1, b1)
   excludeInstallGapUnmeasured(w1, b1) // pre-fix install-gap rows are unmeasured, not zero
-  const sql1 = `SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, country, visitor, COUNT(*) AS c FROM hits WHERE ${w1.join(' AND ')} GROUP BY hr, path, country, visitor`
+  // `uf` (only while UPSELL_SIGNEDOUT_FIX_AT is set): the row is at or after the signed-out
+  // upsell fix, so the segment breakdown below splits exactly at the instant. Every other use
+  // of these rows sums `c`, so the extra grouping changes nothing else.
+  const upsellFixAt = UPSELL_SIGNEDOUT_FIX_AT
+  const sql1 =
+    upsellFixAt == null
+      ? `SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, country, visitor, COUNT(*) AS c FROM hits WHERE ${w1.join(' AND ')} GROUP BY hr, path, country, visitor`
+      : `SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, country, visitor, (ts >= ?) AS uf, COUNT(*) AS c FROM hits WHERE ${w1.join(' AND ')} GROUP BY hr, path, country, visitor, uf`
+  if (upsellFixAt != null) b1.unshift(upsellFixAt)
 
   // ── Query 2: device mix (os / browser / screen width) within the flight window. ─────────
   const w2: string[] = [attr.sql]
@@ -131,12 +140,13 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   }
 
   // ── Funnel + funnel-by-country + hour-of-day + daily arrivals, all from r1 ───────────────
-  const rows1: { hr: number; path: string; country: string; visitor: string; c: number }[] = (r1.results ?? []).map((x: any) => ({
+  const rows1: { hr: number; path: string; country: string; visitor: string; c: number; uf?: boolean }[] = (r1.results ?? []).map((x: any) => ({
     hr: Number(x.hr) || 0,
     path: String(x.path ?? ''),
     country: String(x.country ?? ''),
     visitor: String(x.visitor ?? ''),
     c: Number(x.c) || 0,
+    ...(x.uf === undefined ? {} : { uf: Number(x.uf) === 1 }),
   }))
   const taggedHits = rows1.reduce((a, r) => a + r.c, 0) // EVERY tagged row — NOT arrivals, see above
   const arrivalRows = rows1.filter((r) => r.visitor === 'new')
@@ -202,8 +212,12 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
 
   // Spend: the routine's stored Google Ads API figures first (gss-stats-ads), else the
   // hand-entered CAMPAIGN_SPEND — fail soft, see lib/adsStore.ts readSpendSummaries.
-  const stored = (await readSpendSummaries(ctx.env.gss_stats_ads))?.get(campaign.id) ?? null
+  const nowMs = Date.now()
+  const [summaries, freshnessAll] = await Promise.all([readSpendSummaries(ctx.env.gss_stats_ads), readFreshness(ctx.env.gss_stats_ads, nowMs, [campaign])])
+  const stored = summaries?.get(campaign.id) ?? null
   const resolvedSpend = resolveCampaignSpend(stored, CAMPAIGN_SPEND[campaign.id] ?? null)
+  // spendThrough / lastSync / stale (lib/adsFreshness.ts) — read-only, never an Ads API call.
+  const freshness = freshnessAll.get(campaign.id) ?? freshnessOf(campaign, null, null, nowMs)
   const spend = resolvedSpend.spend
   // Raw /install/<outcome> beacons — secondary to the deduplicated install step (one install
   // can fire two of them); see lib/campaigns.ts isRawInstallSignal.
@@ -248,6 +262,18 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     costPerAuthSuccess: costPer(spend, counts.authSuccess),
     spend,
     spendSource: { source: resolvedSpend.source, fetchedAt: resolvedSpend.fetchedAt, lastDate: resolvedSpend.lastDate },
+    spendThrough: freshness.spendThrough,
+    lastSync: freshness.lastSync,
+    stale: freshness.stale,
+    // The signed-out upsell fix as a funnel segment boundary (lib/adsRules.ts
+    // UPSELL_SIGNEDOUT_FIX_AT; null until set): marker + tagged upsell by segment.
+    segments: (() => {
+      const m = campaignSegmentMarker(
+        campaign,
+        rows1.map((r) => ({ hourStartMs: r.hr * 3_600_000, path: r.path, visitor: r.visitor, count: r.c, ...(r.uf === undefined ? {} : { postUpsellFix: r.uf }) })),
+      )
+      return m ? { ...m, boundaryFlightDay: flightDayIndex(campaign, m.boundaryDate) } : null
+    })(),
     rawInstallSignals: { count: rawInstallSignals, label: RAW_INSTALL_SIGNALS_LABEL },
     meta: { generatedAt: new Date().toISOString(), trackingActivationDate: TRACKING_ACTIVATION_DATE_ET },
   }

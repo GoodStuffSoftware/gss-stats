@@ -32,12 +32,13 @@ import {
   type HourPathCount,
 } from './popupEvents'
 import {
+  authSuccessRow,
   campaignById,
   computeFunnelCounts,
-  isAuthSuccessPath,
   parseReturnPath,
   RETURN_BUCKETS,
   returnVisitRates,
+  type AuthSuccessStatus,
   type CampaignFlight,
   type FunnelStepKey,
   type ReturnBucket,
@@ -58,6 +59,21 @@ export const CLOSED_CAMPAIGN_IDS: readonly string[] = ['24215315197', '242343477
  * every site-wide new-indicator read. lib/popupEvents.ts TRACKING_ACTIVATION_DATE_ET is the
  * ET calendar day of the same release; this is the instant. */
 export const WEB_GO_LIVE_UTC_MS = Date.parse('2026-09-26T14:25:00Z')
+
+// ── Mid-flight instrumentation (owner override of the spec section 14a beacon freeze, 2026-09-26)
+// Each instant is set (UTC ms) by the release coordinator once the release is live; null = not
+// live yet, and every read behaves exactly as before.
+/** When `/auth/success/<provider>/<new|existing|unknown>` went live: v1.95.5, 2026-09-26T19:43:02Z
+ * (the same instant as lib/popupEvents.ts GAME_COMPLETE_LIVE_AT). From then on campaign sign-ups
+ * are counted EXACTLY from tagged `/new` rows; "at most N" still bounds the unsplit and
+ * `unknown` rows (before the release, or from an old client). See campaignSignUps. A plain
+ * Date.parse literal, no Intl at module load: the ads-sync Worker imports this module. The ONE
+ * definition (v0.6.1 set the same instant). */
+export const AUTH_NEW_EXISTING_LIVE_AT: number | null = Date.parse('2026-09-26T19:43:02Z')
+/** When the signed-out upsell fix went live. A BEHAVIOUR change, so a funnel SEGMENT
+ * BOUNDARY: the $100 read and the post-flight reads report pre-fix and post-fix figures
+ * separately (spec section 14a: "two separate short tests"). See splitAtBoundary. */
+export const UPSELL_SIGNEDOUT_FIX_AT: number | null = null
 
 // The 17 approved placements (spec section 5): 1 in "Sudoku.com placement", 16 in "Other
 // Sudoku placements". Android package ids, matched against the Ads API's placement strings
@@ -382,11 +398,28 @@ function emptyOutcomes(): OutcomeCounts {
   return o
 }
 
+/** `/auth/success/<provider>` → 'base' (THE sign-in, one per sign-in); the row that rides
+ * alongside it from the new/existing release, `/auth/success/<provider>/<new|existing|unknown>`,
+ * → its status; anything else → null. The same exact shapes as lib/campaigns.ts
+ * classifyFunnelPath and functions/api/overview.ts (authSuccessRow): a prefix match would count
+ * a new-client sign-in twice. */
+export type AuthSuccessKind = 'base' | AuthSuccessStatus
+export const authSuccessKind = (path: string): AuthSuccessKind | null => authSuccessRow(path)
+
 export interface TaggedRow {
   hourStartMs: number
   path: string
   visitor: string
   count: number
+  /** Row-exact side of the signed-out upsell fix (SQL `ts >= UPSELL_SIGNEDOUT_FIX_AT`, like the
+   * install fix's `pf`); absent (recorded fixtures) = decided by the row's hour bucket. */
+  postUpsellFix?: boolean
+}
+/** Which side of a segment boundary a tagged row is on: the SQL flag when the query carried
+ * one (exact at the instant), else its hour bucket (the bucket containing the instant is
+ * post-fix). */
+export function isPostBoundary(r: TaggedRow, boundaryMs: number): boolean {
+  return r.postUpsellFix ?? r.hourStartMs >= Math.floor(boundaryMs / 3_600_000) * 3_600_000
 }
 export interface TaggedSummary {
   /** Every tagged row — NOT arrivals (the tag rides every beacon for its 30-min TTL). */
@@ -399,7 +432,12 @@ export interface TaggedSummary {
   /** Read separately, never summed — the two dialogs dismiss differently (spec section 11). */
   dismisses: { signinPrompt: number; promoFirst50: number }
   authRedirect: number
+  /** Sign-ins: the base `/auth/success/<provider>` rows only (one per sign-in). */
   authSuccess: number
+  /** The status rows that ride alongside (three-segment `/auth/success/<provider>/<status>`),
+   * plus `unsplit` = sign-ins with no status row (before the release, or an old client) =
+   * max(0, authSuccess − new − existing − unknown). */
+  authSuccessSplit: Record<AuthSuccessStatus | 'unsplit', number>
   /** installed = /popup-outcome/install-prompt/installed (at most once per showing) — THE
    * install metric; rawSignals = raw /install/<outcome> beacons, which can double-count. */
   install: { promptShown: number; taps: number; installed: number; rawSignals: number }
@@ -422,6 +460,7 @@ export function summarizeTaggedRows(rows: readonly TaggedRow[], opts: { fromMs?:
     dismisses: { signinPrompt: 0, promoFirst50: 0 },
     authRedirect: 0,
     authSuccess: 0,
+    authSuccessSplit: { new: 0, existing: 0, unknown: 0, unsplit: 0 },
     install: { promptShown: 0, taps: 0, installed: 0, rawSignals: 0 },
     promoFirst50: { shown: 0, accept: 0, dismiss: 0 },
     upsell: { shown: 0, accept: 0, dismiss: 0 },
@@ -440,11 +479,12 @@ export function summarizeTaggedRows(rows: readonly TaggedRow[], opts: { fromMs?:
       s.accepts.byPath[r.path] += r.count
     }
     if (r.path.startsWith('/auth/redirect/')) s.authRedirect += r.count
-    // Exact base-path match only (lib/campaigns.ts isAuthSuccessPath) — v1.95.5 added a
-    // third-segment new/existing beacon alongside the base row for the same sign-in; the
-    // scheduled morning read (scripts/ads-reads/read.ts) runs this on main and would
-    // otherwise report double the real sign-in count from go-live on.
-    if (isAuthSuccessPath(r.path)) s.authSuccess += r.count
+    // The base row only counts a sign-in (lib/campaigns.ts authSuccessRow, the one auth-success
+    // matcher): v1.95.5 sends the new/existing row ALONGSIDE the base row for the same sign-in,
+    // so it only feeds the split; counting it too would double every sign-in from go-live on.
+    const auth = authSuccessRow(r.path)
+    if (auth === 'base') s.authSuccess += r.count
+    else if (auth) s.authSuccessSplit[auth] += r.count
     const ev = classifyPopupPath(r.path)
     if (!ev) continue
     if (ev.family === 'signin-prompt' && ev.kind === 'shown' && !(ASK_PATHS as readonly string[]).includes(r.path)) s.asks.otherShownReasons += r.count
@@ -465,6 +505,8 @@ export function summarizeTaggedRows(rows: readonly TaggedRow[], opts: { fromMs?:
       if ((OUTCOME_POPUPS as readonly string[]).includes(popup)) s.popupOutcomes[popup][ev.kind as OutcomeType] += r.count
     }
   }
+  const sp = s.authSuccessSplit
+  sp.unsplit = Math.max(0, s.authSuccess - sp.new - sp.existing - sp.unknown)
   s.funnel = computeFunnelCounts(
     inWindow.map((r) => ({ path: r.path, count: r.count })),
     s.taggedArrivals,
@@ -596,17 +638,20 @@ export interface PlayReturnStatus {
   webContinuing: boolean
   line: string
 }
-const ET_HOUR_LABEL = new Intl.DateTimeFormat('en-CA', {
-  timeZone: 'America/New_York',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  hourCycle: 'h23',
-})
+// Formatters are built on first use, not at module load (lib/popupEvents.ts etDateFromMs says
+// why); same options, same output.
+let etHourLabelFmt: Intl.DateTimeFormat | null = null
 /** "YYYY-MM-DD HH:00 ET" — hour precision is plenty for a first-seen marker. */
 export function etHourLabel(ms: number): string {
-  const p = Object.fromEntries(ET_HOUR_LABEL.formatToParts(new Date(ms)).map((x) => [x.type, x.value]))
+  etHourLabelFmt ??= new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    hourCycle: 'h23',
+  })
+  const p = Object.fromEntries(etHourLabelFmt.formatToParts(new Date(ms)).map((x) => [x.type, x.value]))
   return `${p.year}-${p.month}-${p.day} ${p.hour}:00 ET`
 }
 /** No expected Play date is encoded anywhere (coordinator addendum, 2026-09-26): the app is
@@ -629,9 +674,10 @@ export function playReturnStatus(stats: readonly ReturnSiteStat[], nowMs: number
 
 // ── Release health: missing child of a non-zero parent (coordinator addendum) ────────────
 export const HEALTH_QUIET_WINDOW_ET: readonly [number, number] = [1, 12] // [start, end) ET hours
-const ET_HOUR_FMT = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hourCycle: 'h23' })
+let etHourOfFmt: Intl.DateTimeFormat | null = null
 export function etHourOf(ms: number): number {
-  return Number(ET_HOUR_FMT.format(new Date(ms))) % 24
+  etHourOfFmt ??= new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hourCycle: 'h23' })
+  return Number(etHourOfFmt.format(new Date(ms))) % 24
 }
 /** Never evaluated between 01:00 and 12:00 ET. */
 export function releaseHealthGate(nowMs: number): { evaluate: boolean; reason: string } {
@@ -700,24 +746,12 @@ export const MEASUREMENT_QUIET_NOTE = POPUP_PAGE_NOTE
  * campaign sign-ups, so their minimum is an UPPER bound — "at most N". */
 export const SIGNUP_PROXY_NOTE =
   'Sign-ups are an UPPER bound, "at most N campaign sign-ups" = min(tagged auth successes, new prod accounts sitewide in the flight window): /auth/success also fires for returning sign-ins and the account count is not campaign-attributed. Counts only, never matched to anyone.'
-/** Post-flight recommendation (a beacon change, so only after the 2026-10-02 freeze).
- * NOTE (2026-09-26 hotfix): v1.95.5 actually shipped `/auth/success/<provider>/<new|
- * existing|unknown>` early (see AUTH_NEW_EXISTING_LIVE_AT below) — this recommendation's
- * text is now stale (it still reads as "not built yet, frozen until 10-02") and the
- * SIGNUP_PROXY_NOTE "at most N" bound above could arguably be tightened to a real count
- * using the new split. Left AS-IS here deliberately: read.test.ts asserts this exact
- * string, and re-deriving the sign-up bound is a real design change outside this hotfix's
- * scope (auth-success counting is also mid-review on feat/ads-sync) — flagged as a
- * follow-up, not fixed in this branch. */
+/** Post-flight recommendation (a beacon change, so only after the 2026-10-02 freeze). v1.95.5
+ * shipped the beacon early (AUTH_NEW_EXISTING_LIVE_AT), so the post-flight read adds this only
+ * while AUTH_NEW_EXISTING_LIVE_AT is null, and sign-ups are counted exactly from the live
+ * instant on (campaignSignUps). */
 export const AUTH_SUCCESS_SPLIT_RECOMMENDATION =
   'Recommendation: add /auth/success/<provider>/new|existing via additionalUserInfo.isNewUser (frozen until 10-02), so a campaign sign-up can be counted instead of bounded.'
-/** v1.95.5 go-live instant (2026-09-26T19:43:02Z) for the `/auth/success/<provider>/<new|
- * existing|unknown>` beacon — see lib/popupEvents.ts GAME_COMPLETE_LIVE_AT (same instant,
- * same release) for why this is a millisecond epoch, not an ET date string. Kept in this
- * file rather than lib/popupEvents.ts: this constant is a plain Date.parse literal (no
- * Intl/module-load cost) so it stays safe to import from the ads-sync Worker's cold-started
- * path without pulling in popupEvents.ts's heavier formatting machinery. */
-export const AUTH_NEW_EXISTING_LIVE_AT = Date.parse('2026-09-26T19:43:02Z')
 
 export interface HealthInputs {
   site: SiteEventSummary
@@ -969,10 +1003,12 @@ export function evaluateKillRules(i: KillRuleInput): KillRuleEvaluation {
 // ── Decision table at the $100 read (spec section 13) ───────────────────────────────────
 export type DecisionRow = 'two-plus' | 'one' | 'zero-declined' | 'zero-rarely-shown' | 'zero-accepted-not-completed'
 export interface DecisionInput {
-  /** An UPPER bound on campaign sign-ups — see signUpsAtMost. */
+  /** Campaign sign-ups: an UPPER bound (signUpsAtMost) unless `exact` (campaignSignUps). */
   signUpsAtMost: number
   asks: number
   accepts: number
+  /** true when the count is exact (every sign-up came from a tagged /auth/success/…/new row). */
+  exact?: boolean
 }
 export interface DecisionResult {
   row: DecisionRow
@@ -983,6 +1019,20 @@ export interface DecisionResult {
  * figure is an upper bound, so the 2+ and 1 rows can only say "at most"; a bound of 0 is a
  * real zero. */
 export function decideAt100(i: DecisionInput): DecisionResult {
+  if (i.exact && i.signUpsAtMost >= 2) {
+    return {
+      row: 'two-plus',
+      reading: `${i.signUpsAtMost} campaign sign-ups (exact: tagged /auth/success/<provider>/new): the funnel converts paid display traffic at roughly 1% or better.`,
+      next: 'Compute cost per sign-up. Hold on scaling until the day-15+ follow-up reports. Run O3 (Search) at the same cap against the same funnel to compare intent. Do not scale display until a sign-up shows a trial-to-purchase path measured at day 15 or later.',
+    }
+  }
+  if (i.exact && i.signUpsAtMost === 1) {
+    return {
+      row: 'one',
+      reading: '1 campaign sign-up (exact). Inconclusive at this base.',
+      next: "Hold. Do not scale; carry the funnel reads and that sign-up's day-15+ outcome into the next decision.",
+    }
+  }
   if (i.signUpsAtMost >= 2) {
     return {
       row: 'two-plus',
@@ -1026,6 +1076,188 @@ export function signUpsAtMost(taggedAuthSuccess: number, windowNewAccounts: numb
 }
 export function signUpsAtMostLabel(atMost: number, taggedAuthSuccess: number, windowNewAccounts: number | null): string {
   return `at most ${atMost} campaign sign-up${atMost === 1 ? '' : 's'} (tagged auth successes ${taggedAuthSuccess}; new prod accounts sitewide in the window ${windowNewAccounts ?? 'not read'})`
+}
+
+const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`
+function etMinuteLabel(ms: number): string {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+      .formatToParts(new Date(ms))
+      .map((x) => [x.type, x.value]),
+  )
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute} ET`
+}
+
+export interface SignUpCount {
+  /** What the decision table uses: exact when `exact`, else an upper bound. */
+  count: number
+  exact: boolean
+  /** The "at most" part over the sign-ins that may be new (no status row, or status
+   * `unknown`): min(maybeNew, max(0, windowNew − exactNew)); null when the split is not live. */
+  bounded: number | null
+  /** Sign-ups from tagged /auth/success/<provider>/new rows, capped at the window's new
+   * accounts (null before the split). */
+  exactNew: number | null
+  /** The /new rows exceeded the window's new accounts (a repeated beacon): capped, so the
+   * count is an upper bound, not exact. */
+  newCapped: boolean
+  label: string
+}
+/** Campaign sign-ups. Sign-ins are the BASE rows `/auth/success/<provider>` (one per sign-in);
+ * from the new/existing release a status row `/auth/success/<provider>/<new|existing|unknown>`
+ * rides ALONGSIDE each one (never instead), so it is never added to the sign-in count.
+ *
+ * Until AUTH_NEW_EXISTING_LIVE_AT is set: "at most N" = min(sign-ins, windowNew). Once it is:
+ *
+ *   exactNew = min(/new rows, windowNew)
+ *   maybeNew = (sign-ins with no status row: before the release or an old client) + /unknown rows
+ *   count    = min(maybeNew, max(0, windowNew − exactNew)) + exactNew
+ *
+ * — `/existing` rows (returning sign-ins) never count; `unknown` (isNewUser unavailable) may be
+ * new, so it joins the "at most" part, which can only use the new accounts the exact rows have
+ * not already claimed. The /new count cannot be de-duplicated per person (the beacon stores
+ * anonymous hourly counts and nothing is ever joined to an individual), so a repeated /new
+ * beacon is bounded by the window's new accounts instead; the count is "exact" only when every
+ * sign-in has a new/existing answer and no cap applied. */
+export function campaignSignUps(
+  s: Pick<TaggedSummary, 'authSuccess' | 'authSuccessSplit'>,
+  windowNewAccounts: number | null,
+  liveAtMs: number | null = AUTH_NEW_EXISTING_LIVE_AT,
+): SignUpCount {
+  if (liveAtMs == null) {
+    const n = signUpsAtMost(s.authSuccess, windowNewAccounts)
+    return { count: n, exact: false, bounded: n, exactNew: null, newCapped: false, label: signUpsAtMostLabel(n, s.authSuccess, windowNewAccounts) }
+  }
+  const sp = s.authSuccessSplit
+  const noStatus = Math.max(0, s.authSuccess - sp.new - sp.existing - sp.unknown)
+  const maybeNew = noStatus + sp.unknown
+  const rawNew = sp.new
+  const exactNew = windowNewAccounts == null ? rawNew : Math.min(rawNew, windowNewAccounts)
+  const newCapped = exactNew < rawNew
+  const room = windowNewAccounts == null ? maybeNew : Math.max(0, windowNewAccounts - exactNew)
+  const bounded = Math.min(maybeNew, room)
+  const count = bounded + exactNew
+  const since = etMinuteLabel(liveAtMs)
+  const w = windowNewAccounts ?? 'not read'
+  if (maybeNew === 0 && !newCapped) {
+    return { count, exact: true, bounded: 0, exactNew, newCapped, label: `${plural(count, 'campaign sign-up')} (exact: tagged /auth/success/<provider>/new since ${since})` }
+  }
+  if (maybeNew === 0) {
+    return { count, exact: false, bounded: 0, exactNew, newCapped, label: `at most ${plural(count, 'campaign sign-up')} (tagged /auth/success/<provider>/new rows ${rawNew}, capped at the ${w} new prod accounts sitewide in the window)` }
+  }
+  return {
+    count,
+    exact: false,
+    bounded,
+    exactNew,
+    newCapped,
+    label: `at most ${plural(count, 'campaign sign-up')}: at most ${bounded} of the ${plural(maybeNew, 'sign-in')} that may be new (${noStatus} without a new/existing answer — before ${since} or an old client — and ${sp.unknown} unknown; new prod accounts sitewide in the window ${w}, less the ${exactNew} counted as new) + ${newCapped ? `at most ${exactNew}` : `exactly ${exactNew}`} new (tagged /auth/success/<provider>/new${newCapped ? `, ${rawNew} rows capped at the window's new accounts` : ''})`,
+  }
+}
+
+// ── Funnel segments: a behaviour change mid-flight splits the read (spec section 14a) ─────
+export interface SegmentFigures {
+  /** Tagged rows in hour buckets [fromMs, toMs). */
+  fromMs: number
+  toMs: number
+  /** Closed-day spend strictly on this side of the boundary day (the boundary day itself is
+   * reported apart: Ads spend is per ET day and cannot be split at an instant). */
+  spend: number
+  spendDays: number
+  taggedArrivals: number
+  asks: number
+  accepts: number
+  authSuccess: number
+  signUps: SignUpCount
+  upsell: { shown: number; accept: number; dismiss: number }
+}
+export interface FunnelSegments {
+  boundaryMs: number
+  boundaryLabel: string
+  /** ET date the boundary falls on; its spend straddles the two segments. */
+  boundaryDay: string
+  boundaryDaySpend: number | null
+  pre: SegmentFigures
+  post: SegmentFigures
+  note: string
+}
+export const SEGMENT_NOTE =
+  'A behaviour change shipped mid-flight (the signed-out upsell fix), so per spec section 14a the flight reads as two separate short tests: compare each segment on its own, never the totals. Beacon rows are split at the exact instant of the fix; the fix day\'s spend is shown apart because Ads spend is per ET day.'
+
+/** For the campaign charts (functions/api/campaigns.ts): where the upsell-fix boundary falls
+ * in a campaign's flight, and the tagged upsell shown/accept/dismiss on each side (split at the
+ * instant by the query's flag — isPostBoundary). null when unset or outside the flight. */
+export interface CampaignSegmentMarker {
+  boundaryMs: number
+  boundaryLabel: string
+  boundaryDate: string
+  upsell: { pre: { shown: number; accept: number; dismiss: number }; post: { shown: number; accept: number; dismiss: number } }
+}
+export function campaignSegmentMarker(
+  c: Pick<CampaignFlight, 'flightStart' | 'flightEnd'>,
+  rows: readonly TaggedRow[],
+  boundaryMs: number | null = UPSELL_SIGNEDOUT_FIX_AT,
+): CampaignSegmentMarker | null {
+  if (boundaryMs == null || !c.flightStart) return null
+  const date = etDateFromMs(boundaryMs)
+  if (date < c.flightStart || date > c.flightEnd) return null
+  return {
+    boundaryMs,
+    boundaryLabel: etMinuteLabel(boundaryMs),
+    boundaryDate: date,
+    upsell: {
+      pre: { ...summarizeTaggedRows(rows.filter((r) => !isPostBoundary(r, boundaryMs))).upsell },
+      post: { ...summarizeTaggedRows(rows.filter((r) => isPostBoundary(r, boundaryMs))).upsell },
+    },
+  }
+}
+
+/** Splits a read at a boundary instant: tagged rows at the exact instant (the query's
+ * postUpsellFix flag; a row without one falls back to its hour bucket), closed-day spend by ET
+ * day (the boundary day apart). null when the boundary is unset or outside [startMs, endMs). */
+export function splitAtBoundary(i: {
+  rows: readonly TaggedRow[]
+  stored: StoredSpend | null
+  throughEt: string | null
+  startMs: number
+  endMs: number
+  windowNewAccounts: number | null
+  boundaryMs?: number | null
+  authLiveAtMs?: number | null
+}): FunnelSegments | null {
+  const b = i.boundaryMs === undefined ? UPSELL_SIGNEDOUT_FIX_AT : i.boundaryMs
+  if (b == null || b <= i.startMs || b >= i.endMs) return null
+  const boundaryDay = etDateFromMs(b)
+  const days = Object.entries(i.stored?.days ?? {}).filter(([d]) => i.throughEt != null && d <= i.throughEt)
+  const spendOf = (pred: (d: string) => boolean) => {
+    const sel = days.filter(([d]) => pred(d))
+    return { spend: round2(microsToDollars(sel.reduce((a, [, v]) => a + v.costMicros, 0))), spendDays: sel.length }
+  }
+  const figures = (fromMs: number, toMs: number, side: 'pre' | 'post'): SegmentFigures => {
+    // The rows are already window-filtered (SQL attribution clause): split only at the boundary.
+    const s = summarizeTaggedRows(i.rows.filter((r) => isPostBoundary(r, b) === (side === 'post')))
+    return {
+      fromMs,
+      toMs,
+      ...spendOf((d) => (side === 'pre' ? d < boundaryDay : d > boundaryDay)),
+      taggedArrivals: s.taggedArrivals,
+      asks: s.asks.total,
+      accepts: s.accepts.total,
+      authSuccess: s.authSuccess,
+      signUps: campaignSignUps(s, i.windowNewAccounts, i.authLiveAtMs === undefined ? AUTH_NEW_EXISTING_LIVE_AT : i.authLiveAtMs),
+      upsell: { ...s.upsell },
+    }
+  }
+  const dayRow = days.find(([d]) => d === boundaryDay)
+  return {
+    boundaryMs: b,
+    boundaryLabel: etMinuteLabel(b),
+    boundaryDay,
+    boundaryDaySpend: dayRow ? round2(microsToDollars(dayRow[1].costMicros)) : null,
+    pre: figures(i.startMs, b, 'pre'),
+    post: figures(b, i.endMs, 'post'),
+    note: SEGMENT_NOTE,
+  }
 }
 
 // ── Day-15/30/60 cohort: accounts created in the flight window, by tier and promo ───────
@@ -1106,20 +1338,91 @@ export interface ReadingRecord {
   /** Key counts — anonymous aggregates only. null = not read. */
   counts: Record<string, number | null>
   notes: string[]
+  /** The de-dup key within (campaign, etDate) — readingEntryKind(). Derived when absent (rows
+   * written before migration 0003). */
+  entryKind?: string
 }
 export interface ReadingsLog {
   v: 1
   campaignId: string
   readings: ReadingRecord[]
 }
+
+// ── Readings de-dup (migration 0003: UNIQUE (campaign_id, et_date, entry_kind)) ──────────
+const slug = (s: string): string =>
+  s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+const ALERT_NOTE_RE = /^ALERT ([^:]+):/
+
+/** What a reading IS, for de-dup within one campaign and ET day: the entry (`morning`,
+ * `backstop`, `threshold-50`, `postflight-wrapup`) plus the facts that make a same-day rerun
+ * worth a second row: `+incomplete`, `+pause` (a pause proposal), `+alert-<pair>` (a
+ * release-health alert). Deterministic from the stored fields, so rows written before the
+ * column existed get the same key. */
+export function readingEntryKind(rec: Pick<ReadingRecord, 'kind' | 'stage' | 'thresholds' | 'complete' | 'proposal' | 'notes'>): string {
+  const base =
+    rec.kind === 'daily'
+      ? 'morning'
+      : rec.kind === 'health'
+        ? 'backstop'
+        : rec.kind === 'threshold'
+          ? `threshold-${[...rec.thresholds].sort((a, b) => a - b).map((t) => Math.round(t)).join('-') || 'none'}`
+          : `postflight-${slug(rec.stage ?? '') || 'unknown'}`
+  const q: string[] = []
+  if (!rec.complete) q.push('incomplete')
+  if (rec.proposal === 'PROPOSE PAUSE') q.push('pause')
+  if (rec.kind === 'health') {
+    const alerts = [...new Set(rec.notes.map((n) => ALERT_NOTE_RE.exec(n)?.[1]).filter((x): x is string => !!x).map(slug))].sort()
+    for (const a of alerts) q.push(`alert-${a}`)
+  }
+  return [base, ...q].join('+').slice(0, 160)
+}
+export const entryBase = (entryKind: string): string => entryKind.split('+')[0]
+const entryComplete = (entryKind: string): boolean => !entryKind.split('+').includes('incomplete')
+
+export interface ReadingAppendPlan {
+  append: ReadingRecord[]
+  /** Same-day reruns that carry nothing new: not written, and never pushed again. */
+  skip: { record: ReadingRecord; reason: string }[]
+}
+/** Decides which records a run may append, given the rows already stored for the same
+ * campaign and ET day. A record is skipped when (a) the same entry kind is already stored (the
+ * UNIQUE index would ignore it anyway), or (b) it is incomplete and a complete read of the same
+ * entry is already stored (a failed rerun adds nothing). Anything else — a first read, a
+ * complete retry of an incomplete one, a newly proposed pause, a new alert — is appended. */
+export function planReadingAppends(records: readonly ReadingRecord[], storedToday: readonly ReadingRecord[]): ReadingAppendPlan {
+  const plan: ReadingAppendPlan = { append: [], skip: [] }
+  const seen = new Map<string, string[]>() // "<campaign>|<etDate>" -> entry kinds
+  const kindsFor = (r: ReadingRecord) => {
+    const k = `${r.campaignId}|${r.etDate}`
+    if (!seen.has(k)) seen.set(k, storedToday.filter((s) => s.campaignId === r.campaignId && s.etDate === r.etDate).map((s) => s.entryKind ?? readingEntryKind(s)))
+    return seen.get(k)!
+  }
+  for (const r of records) {
+    const ek = r.entryKind ?? readingEntryKind(r)
+    const kinds = kindsFor(r)
+    if (kinds.includes(ek)) plan.skip.push({ record: r, reason: `already recorded today (${ek})` })
+    else if (!entryComplete(ek) && kinds.some((k) => entryBase(k) === entryBase(ek) && entryComplete(k))) plan.skip.push({ record: r, reason: `a complete ${entryBase(ek)} read is already recorded today` })
+    else {
+      plan.append.push({ ...r, entryKind: ek })
+      kinds.push(ek)
+    }
+  }
+  return plan
+}
+
 /** APPEND-ONLY, like the ads_readings table (whose triggers forbid UPDATE/DELETE): a re-run
- * adds a row, it never replaces one. A retried insert of the SAME id is a no-op. Sorted by
- * readAt. The in-memory twin of what lib/adsStore.ts writes. */
+ * adds a row, it never replaces one. A retried insert of the SAME id — or a second row for the
+ * same (etDate, entry kind), which the UNIQUE index ignores — is a no-op. Sorted by readAt.
+ * The in-memory twin of what lib/adsStore.ts writes. */
 export function appendReading(log: ReadingsLog | null, rec: ReadingRecord): ReadingsLog {
   if (log && log.campaignId !== rec.campaignId) throw new Error('appendReading: campaign id mismatch')
   const existing = log?.readings ?? []
-  if (existing.some((r) => r.id === rec.id)) return { v: 1, campaignId: rec.campaignId, readings: [...existing] }
-  const readings = [...existing, rec].sort((a, b) => (a.readAt < b.readAt ? -1 : a.readAt > b.readAt ? 1 : 0))
+  const ek = rec.entryKind ?? readingEntryKind(rec)
+  if (existing.some((r) => r.id === rec.id || (r.etDate === rec.etDate && (r.entryKind ?? readingEntryKind(r)) === ek))) return { v: 1, campaignId: rec.campaignId, readings: [...existing] }
+  const readings = [...existing, { ...rec, entryKind: ek }].sort((a, b) => (a.readAt < b.readAt ? -1 : a.readAt > b.readAt ? 1 : 0))
   return { v: 1, campaignId: rec.campaignId, readings }
 }
 

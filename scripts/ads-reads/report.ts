@@ -20,12 +20,27 @@ const money = (x: number | null | undefined) => (x == null ? '—' : `$${x.toFix
 const n = (x: number | null | undefined) => (x == null ? '—' : x.toLocaleString('en-US'))
 const pct = (x: number | null | undefined, dp = 2) => (x == null ? '—' : `${(x * 100).toFixed(dp)}%`)
 
+/** What the shared sync (src/lib/adsSync.ts) did before the read. */
+export function syncLine(s: SpendSection): string {
+  const y = s.sync
+  if (!y) return '  sync: not run'
+  const pulled = y.ranges?.length ? y.ranges.map((r) => `${r.since}..${r.until}`).join(', ') : y.fetched ? `${y.fetched.since}..${y.fetched.until}` : null
+  return `  sync (shared): ${y.outcome}${pulled ? `, pulled ${pulled}` : ''}; ${n(y.daysChanged)} day row(s) and ${n(y.placementRowsChanged)} placement row(s) changed; stored through ${y.spendThrough ?? '—'}${s.sync && !y.runRecorded ? '; sync run not recorded' : ''}${y.warnings?.length ? `; warning: ${y.warnings.join('; ')}` : ''}`
+}
+
+/** Killed sync runs (review I2), one line each. */
+export function syncAlertLines(s: SpendSection): string[] {
+  return (s.syncAlerts ?? []).map((m) => `  SYNC ALERT: ${m}`)
+}
+
 function spendLines(s: SpendSection): string[] {
-  if (!s.ok) return [`Spend: NOT READ (${s.error})`]
+  if (!s.ok) return [`Spend: NOT READ (${s.error})`, syncLine(s), ...syncAlertLines(s)]
   const ctr = gateRate(s.cumulative.clicks, s.cumulative.impressions)
   const lines = [
     `Spend (Google Ads API, closed days through ${s.throughEt ?? 'none yet'}): yesterday ${s.yesterday ? `${money(s.yesterday.cost)} (budget ${money(s.dailyBudget)}), ${n(s.yesterday.impressions)} impr, ${n(s.yesterday.clicks)} clicks` : '—'}`,
     `  cumulative ${money(s.cumulative.cost)} of the ${money(s.hardCap)} cap over ${s.cumulative.days} day(s); CTR ${ctr.value == null ? '—' : pct(ctr.value)} (${n(s.cumulative.clicks)}/${n(s.cumulative.impressions)})${s.todayPartial ? `; today so far ${money(s.todayPartial.cost)} (partial, not counted)` : ''}`,
+    syncLine(s),
+    ...syncAlertLines(s),
   ]
   for (const r of s.restated) lines.push(`  restated: ${r.date} ${money(r.before)} → ${money(r.after)}`)
   return lines
@@ -91,6 +106,17 @@ export function fullReadLines(r: FullRead, title: string): string[] {
     out.push(`  reading: ${r.decision.reading}`)
     out.push(`  next: ${r.decision.next}`)
   }
+  if (r.segments) {
+    const s = r.segments
+    out.push(`Segments at the signed-out upsell fix (${s.boundaryLabel}) — two separate short tests (spec section 14a):`)
+    for (const [name, f] of [['pre-fix', s.pre], ['post-fix', s.post]] as const) {
+      out.push(
+        `  ${name}: spend ${money(f.spend)} over ${f.spendDays} closed day(s); ${n(f.taggedArrivals)} tagged arrivals; asks ${n(f.asks)}, accepts ${n(f.accepts)} (accept rate ${formatGated(gateRate(f.accepts, f.asks))}); ${f.signUps.label}; upsell shown ${n(f.upsell.shown)}, accepted ${n(f.upsell.accept)}`,
+      )
+    }
+    out.push(`  fix day ${s.boundaryDay}: spend ${money(s.boundaryDaySpend)} (straddles the fix; Ads spend is per ET day)`)
+    out.push(`  ${s.note}`)
+  }
   if (r.errors.length) out.push(`Read errors: ${r.errors.join(' | ')}`)
   return out
 }
@@ -131,6 +157,7 @@ export function formatMorningReport(r: MorningResult): string {
     if (r.hardCapDaily) out.push(`Hard cap (every read): [${r.hardCapDaily.status}] ${r.hardCapDaily.detail}`)
   } else {
     out.push(r.spend.ok ? `Today so far: ${money(r.spend.todayPartial?.cost ?? 0)} (served today: ${(r.spend.todayPartial?.cost ?? 0) > 0 ? 'yes' : 'no'})` : `Spend: NOT READ (${r.spend.error})`)
+    out.push(syncLine(r.spend), ...syncAlertLines(r.spend))
   }
   const h = r.releaseHealth
   if (!h.evaluated) out.push(`Release health: ${h.reason}`)
@@ -149,8 +176,9 @@ export function formatMorningReport(r: MorningResult): string {
 
 function storeLine(r: MorningResult | PostflightResult): string {
   const s = r.store
-  if (s.dryRun) return `Store (${s.kind}): dry run, nothing written`
-  return `Store (${s.kind}): campaigns ${s.campaignsSynced ? 'synced' : 'NOT synced'}, spend ${s.spendWritten ? 'written' : 'NOT written'}, readings ${s.readingsWritten ? 'written' : 'NOT written'}${s.errors.length ? ` [${s.errors.join(' | ')}]` : ''}`
+  const dup = r.dedup?.skipped.length ? `; already recorded today, not stored again: ${r.dedup.skipped.map((x) => x.entryKind).join(', ')}` : ''
+  if (s.dryRun) return `Store (${s.kind}): dry run, nothing written${dup}`
+  return `Store (${s.kind}): campaigns ${s.campaignsSynced ? 'synced' : 'NOT synced'}, spend ${s.spendWritten ? 'up to date' : 'NOT stored'}, readings ${s.readingsWritten ? 'written' : 'NOT written'}${dup}${s.errors.length ? ` [${s.errors.join(' | ')}]` : ''}`
 }
 
 export function formatPostflightReport(r: PostflightResult): string {

@@ -26,9 +26,9 @@ import {
   parseReturnPath,
   returnVisitRates,
   CAMPAIGN_SPEND,
+  isAuthSuccessBase,
   isInstallPromptInstalled,
   isRawInstallSignal,
-  isAuthSuccessPath,
   gameCompleteNotInstrumented,
   FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED,
   RAW_INSTALL_SIGNALS_LABEL,
@@ -107,10 +107,10 @@ function isReturnD1Plus(path: string): boolean {
   const ev = parseReturnPath(path)
   return !!ev && ev.bucket !== 'd0'
 }
-// Exact base-path match only — see lib/campaigns.ts isAuthSuccessPath: v1.95.5 added a
-// third-segment new/existing beacon that fires ALONGSIDE the base row for the same sign-in,
-// so a prefix match here would double-count every auth success.
-const isAuthSuccess = isAuthSuccessPath
+// One per sign-in: the base row only (lib/campaigns.ts isAuthSuccessBase, alias
+// isAuthSuccessPath: the one matcher), never the /auth/success/<provider>/<new|existing|unknown>
+// row v1.95.5 sends alongside it for the same sign-in (a prefix match would double-count).
+const isAuthSuccess = isAuthSuccessBase
 // Installs = /popup-outcome/install-prompt/installed (once per showing), like the campaign
 // funnel; raw /install/<outcome> beacons can double-count one install and are a secondary
 // figure only (lib/campaigns.ts isInstallPromptInstalled / isRawInstallSignal).

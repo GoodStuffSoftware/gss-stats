@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
-  campaignSyncStatement,
-  dailyMetricsUpserts,
+  campaignSyncStatements,
+  dailyRowUpserts,
+  MAX_BINDS,
   mapReadingRow,
   parseCampaignIdsParam,
   placementDailyUpserts,
@@ -38,21 +39,27 @@ const rec = (over: Partial<ReadingRecord> = {}): ReadingRecord => ({
 
 describe('write builders (routine side)', () => {
   it('campaign sync upserts every configured campaign with micros money and its kind', () => {
-    const st = campaignSyncStatement(CAMPAIGNS, '2026-09-26T16:00:00Z')
+    const [st, ...more] = campaignSyncStatements(CAMPAIGNS, '2026-09-26T16:00:00Z')
+    expect(more).toEqual([])
     expect(st.sql).toMatch(/^INSERT INTO ads_campaigns \(/)
     expect(st.sql).toMatch(/ON CONFLICT \(id\) DO UPDATE SET name = excluded\.name/)
+    // An unchanged definition is a no-op: the update fires only when a field (not synced_at) differs.
+    expect(st.sql).toMatch(/ WHERE ads_campaigns\.name IS NOT excluded\.name OR /)
+    expect(st.sql).not.toMatch(/synced_at IS NOT/)
     expect(st.binds).toHaveLength(CAMPAIGNS.length * 12)
     const retest = st.binds.slice(24, 36)
     expect(retest).toEqual(['24279250691', 'US+CA web retest', '["sudoku_funnel_retest"]', 'web', '2026-09-26', '12:00', '2026-10-02', 'active', 13_000_000, 100_000_000, 'beacon', '2026-09-26T16:00:00Z'])
     expect(st.binds.slice(12, 24)).toContain('play-direct')
     expect(st.binds.slice(12, 24)).toContain('spend-only')
   })
-  it('daily metrics are upsert-idempotent and chunked', () => {
-    const days = Object.fromEntries(Array.from({ length: 120 }, (_, i) => [`2026-10-${String((i % 28) + 1).padStart(2, '0')}-${i}`, { costMicros: 1, impressions: 1, clicks: 0 }]))
-    const stmts = dailyMetricsUpserts('24279250691', days, 'x')
-    expect(stmts).toHaveLength(3)
+  it('daily rows are upserts, chunked under D1\'s 100 bound parameters, and carry the placement coverage', () => {
+    const rows = Array.from({ length: 30 }, (_, i) => ({ date: `2026-10-${String(i + 1).padStart(2, '0')}`, costMicros: 1, impressions: 1, clicks: 0, fetchedAt: 'x', placementsFetchedAt: i % 2 ? 'y' : null }))
+    const stmts = dailyRowUpserts('24279250691', rows)
+    expect(stmts).toHaveLength(3) // 12 rows x 8 binds per statement
     expect(stmts[0].sql).toMatch(/ON CONFLICT \(campaign_id, date\) DO UPDATE SET cost_micros = excluded\.cost_micros/)
-    expect(stmts[0].binds.length).toBe(50 * 7)
+    expect(stmts[0].sql).toMatch(/placements_fetched_at = excluded\.placements_fetched_at$/)
+    for (const st of stmts) expect(st.binds.length).toBeLessThanOrEqual(MAX_BINDS)
+    expect(stmts[0].binds.slice(0, 8)).toEqual(['24279250691', '2026-10-01', 1, 1, 0, 'google-ads-api', 'x', null])
   })
   it('placement rows carry approved as 1/0/NULL', () => {
     const [st] = placementDailyUpserts(
@@ -68,7 +75,9 @@ describe('write builders (routine side)', () => {
   })
   it('a reading is one append with JSON columns and micros spend; a retry is a no-op', () => {
     const st = readingInsert(rec(), 'ads-reads/test')
-    expect(st.sql).toMatch(/^INSERT INTO ads_readings .* ON CONFLICT \(reading_key\) DO NOTHING$/)
+    // No conflict target: covers both the reading_key retry and the 0003 (campaign, day, entry) key.
+    expect(st.sql).toMatch(/^INSERT INTO ads_readings .* ON CONFLICT DO NOTHING$/)
+    expect(st.binds[16]).toBe('threshold-50')
     expect(st.binds[7]).toBe(50_100_000)
     expect(JSON.parse(st.binds[8] as string)).toEqual([50])
     expect(st.binds[9]).toBe(1)
@@ -81,12 +90,16 @@ describe('write builders (routine side)', () => {
   it('threshold state is written only for a COMPLETE threshold read, pointing at its reading', () => {
     const st = thresholdStateInsert(rec({ thresholds: [25, 50] }))!
     expect(st.sql).toMatch(/INSERT INTO ads_threshold_state .* ON CONFLICT \(campaign_id, threshold_usd\) DO NOTHING/)
-    expect(st.binds).toEqual(['24279250691', 25, '2026-09-30T12:05:00.000Z', rec().id, '24279250691', 50, '2026-09-30T12:05:00.000Z', rec().id])
+    // by the de-dup key, else (a row from before 0003) by its reading_key
+    expect(st.sql).toMatch(/COALESCE\(\(SELECT id FROM ads_readings WHERE campaign_id = \? AND et_date = \? AND entry_kind = \?\), \(SELECT id FROM ads_readings WHERE reading_key = \?\)\)/)
+    const t = '2026-09-30T12:05:00.000Z'
+    const k = rec().id
+    expect(st.binds).toEqual(['24279250691', 25, t, '24279250691', '2026-09-30', 'threshold-25-50', k, '24279250691', 50, t, '24279250691', '2026-09-30', 'threshold-25-50', k])
     expect(thresholdStateInsert(rec({ complete: false }))).toBeNull()
     expect(thresholdStateInsert(rec({ kind: 'daily' }))).toBeNull()
   })
   it('no builder emits a compound SELECT (D1 caps those at 5 terms)', () => {
-    const all = [campaignSyncStatement(CAMPAIGNS, 'x'), ...dailyMetricsUpserts('1', { '2026-01-01': { costMicros: 0, impressions: 0, clicks: 0 } }, 'x'), readingInsert(rec()), thresholdStateInsert(rec())!]
+    const all = [...campaignSyncStatements(CAMPAIGNS, 'x'), ...dailyRowUpserts('1', [{ date: '2026-01-01', costMicros: 0, impressions: 0, clicks: 0, fetchedAt: 'x', placementsFetchedAt: null }]), readingInsert(rec()), thresholdStateInsert(rec())!]
     for (const s of all) expect(s.sql).not.toMatch(/\bUNION\b|\bINTERSECT\b|\bEXCEPT\b/i)
   })
 })
@@ -103,9 +116,11 @@ describe('row mapping', () => {
   })
   it('mapReadingRow round-trips a stored row and tolerates bad JSON', () => {
     const st = readingInsert(rec())
-    const cols = ['reading_key', 'campaign_id', 'kind', 'stage', 'read_at', 'et_date', 'spend_through_et', 'cumulative_spend_micros', 'thresholds', 'complete', 'rules', 'proposal', 'decision', 'counts', 'notes', 'routine_version']
+    const cols = ['reading_key', 'campaign_id', 'kind', 'stage', 'read_at', 'et_date', 'spend_through_et', 'cumulative_spend_micros', 'thresholds', 'complete', 'rules', 'proposal', 'decision', 'counts', 'notes', 'routine_version', 'entry_kind']
     const row = Object.fromEntries(cols.map((c, i) => [c, st.binds[i]]))
-    expect(mapReadingRow(row)).toEqual(rec())
+    expect(mapReadingRow(row)).toEqual({ ...rec(), entryKind: 'threshold-50' })
+    // A row from before migration 0003 (no entry_kind) gets the same key, derived.
+    expect(mapReadingRow({ ...row, entry_kind: null })!.entryKind).toBe('threshold-50')
     expect(mapReadingRow({ ...row, counts: '{broken' })!.counts).toEqual({})
     expect(mapReadingRow({ ...row, kind: 'nope' })).toBeNull()
   })
