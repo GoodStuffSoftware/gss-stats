@@ -30,6 +30,8 @@
     "@cloudflare/workers-types": "^4.20241218.0",
     "@types/node": "^24.19.0",
     "@vitejs/plugin-vue": "^5.2.1",
+    "@vue/test-utils": "^2.5.1",
+    "happy-dom": "^20.14.5",
     "tsx": "^4.23.15",
     "typescript": "^5.7.2",
     "vite": "^6.0.7",
