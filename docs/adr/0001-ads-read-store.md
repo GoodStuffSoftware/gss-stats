@@ -73,10 +73,18 @@ routine… make sure we're not duplicating data"):
 
 Every new column is nullable, so the v0.4.0 writers keep working against a 0003 database.
 
+Migration `0004_sync_claims.sql` (review of the sync Worker, 2026-09-26) is a single rebuild of
+`ads_sync_runs` only (create new, copy every row with its id, drop, rename, recreate the index
+and triggers): status `'running'` for the atomic claim, and `campaigns_pulled` (the campaigns
+whose closed days were pulled through the end of their window) for the restatement recheck
+cadence. D1 runs the whole file and its `d1_migrations` row as one request, all or nothing.
+
 Since 0003, `ads_daily_metrics` holds **closed ET days only**, zero-filled where the API
-returns no row (no delivery), so the stored days are contiguous and "spend through" is the
-last stored day. It is written by exactly one function, `syncAdsData` (`src/lib/adsSync.ts`),
-which writes only rows that changed.
+returns no row — only for days never stored and only inside the flight — so the stored flight
+days are contiguous and "spend through" is the last of them (never past the flight end). A
+stored day or placement row with spend that a response leaves out is a failed fetch, never a
+zero. It is written by exactly one function, `syncAdsData` (`src/lib/adsSync.ts`), which writes
+only rows that changed.
 
 ### How each side uses it
 
@@ -113,14 +121,20 @@ finds nothing to write, because the sync writes only changed rows.
   `d1BindingAdsDb` adapter; the write guard applies unchanged.
 - Cron `5 * * * *`; `cronShouldSync` makes it hourly during a live flight (first day through
   the day after the last) and a single 01:05 ET pass otherwise. The owner suggested hourly
-  during serving hours with a closing pass after midnight; since only closed days are stored,
-  an intraday pass mainly re-checks the restatement window, but it is cheap (two GAQL queries
-  and a few D1 reads per live campaign) and it makes a failed or missed pass recover within the
-  hour, including the one right after midnight that stores yesterday.
+  during serving hours with a closing pass after midnight. Every tick first plans from two D1
+  reads; only when something is due (a new closed day right after midnight ET, a retry after a
+  failure, or the restatement window once its last pull is 6 h old) does it claim, read the
+  secrets, refresh the token and call Google. So an hourly cron costs one Google pull every
+  ~6 h plus the post-midnight one, and a missed or failed pass is retried within the hour.
 - On demand: `POST /sync`, reachable **only** through the Pages Service Binding `ADS_SYNC`
   (`workers_dev = false`, `preview_urls = false`, no route). `/api/ads/refresh` (behind the
-  sign-in gate) calls it only when a campaign is stale; both sides rate-limit to one sync per
-  10 minutes by the latest `ads_sync_runs.finished_at`.
+  sign-in gate) calls it only when a campaign is stale. The rate limit is atomic (migration
+  0004): a sync first INSERTs a `'running'` claim row only if no run finished in the last 10
+  minutes (one `INSERT … SELECT … WHERE NOT EXISTS`), so of two concurrent requests exactly one
+  syncs and the other gets 429. A claim with no finished row after it is a run that died.
+- Work per invocation is capped: at most 7 closed days (live campaigns first) and 40 D1
+  statements (Free allows 50); the rest continues on the next run, and the run row is always
+  recorded.
 
 **Secrets.** Cloudflare Secrets Store (open beta; the account's single store
 `default_secrets_store`, 100-secret limit), chosen over per-Worker secrets because the account
@@ -138,11 +152,29 @@ and the Ads client never sends `login-customer-id`.
   blast radius). Mitigations: Secrets Store scope `workers`, no public entry point, a read-only
   client (GAQL `SELECT` only), and a one-command rotation from Bitwarden.
 - (−) The account is on **Workers Free**: 10 ms CPU per invocation, 50 external subrequests,
-  5 cron triggers per account (this Worker uses 1). A sync is I/O-bound (a handful of fetches
-  and D1 queries); if a full re-pull ever exceeds the CPU limit the run fails loudly (no
-  `ads_sync_runs` row, visible in `wrangler tail`) and the local routines still sync.
+  5 cron triggers per account (this Worker uses 1). **Correction (review, 2026-09-26):** the
+  first version claimed a sync was "I/O-bound" and would "fail loudly". Measured, it was not:
+  every run read the secrets and refreshed the token even with nothing to pull, and the bundle
+  built Intl formatters at module load. A no-op took 9.7 ms and a full re-pull 33 ms (it
+  succeeded only because Free tolerates occasional overruns). After the fixes (plan first and
+  stop when nothing is due; lazy Ads client and token reuse; no Intl on the Worker path; per-run
+  caps), live `wrangler tail` cpuTime on the deployed Worker:
+  - a no-op: 1-4 ms warm;
+  - the first call on a fresh isolate: 6 ms;
+  - a 1-day pull: 9 ms warm (4 secret reads, a token refresh, two GAQL queries, three D1
+    statements).
+  A due run on a cold isolate can still reach or pass 10 ms. On Free the platform may then end
+  the invocation. That is visible (a `'running'` claim with no finished row, `exceededCpu` in
+  `wrangler tail`) and safe: writes are idempotent, the next tick continues, and the local
+  routines still sync. Workers Paid (5 min CPU) removes the concern; the code needs no change
+  either way.
 - (−) The Worker bundles `src/lib/campaigns.ts`: a new or changed campaign needs a Worker
-  redeploy (`npm run ads:worker-deploy`) as well as the Pages deploy. Not wired into CI yet.
+  redeploy as well as the Pages deploy. `npm run ads:worker-deploy` stamps the version with the
+  git SHA (tag, message, and the `GIT_SHA` var the Worker reports in every run row and
+  response, with a hash of the campaign definitions); the dashboard's Refresh flags a Worker
+  built from other definitions, and CI bundles the Worker on every PR (`npm run
+  ads:worker-check`). Deploying it stays manual: the CI token has no Workers or Secrets Store
+  permission.
 - **Reversal:** remove the `[[services]]` block from `wrangler.toml` (the Refresh button then
   reports "not available"), delete the Worker (`npx wrangler delete gss-stats-sync`) and the four
   Secrets Store secrets (owner only). The local routines are unaffected.
@@ -172,7 +204,7 @@ Done on 2026-09-26 (owner-authorized; nothing else was created or changed):
 
 ```powershell
 npx wrangler d1 create gss-stats-ads                       # id 785327a3-683c-4f85-819d-abe11efcacc9
-npx wrangler d1 migrations apply gss-stats-ads --remote    # = npm run ads:migrate (0001, then 0002 the same day, then 0003)
+npx wrangler d1 migrations apply gss-stats-ads --remote    # = npm run ads:migrate (0001, then 0002 the same day, then 0003, then 0004)
 ```
 
 0003 was applied to the remote database on 2026-09-26 (row counts unchanged: 3 campaigns, 13
@@ -180,7 +212,17 @@ day rows, 185 placement rows, 0 readings, 0 thresholds). The first live `npm run
 then stored 19 closed day rows (the two closed campaigns' zero-spend days through flight end
 + 3, and placement coverage on the existing ones; the 185 placement rows re-pulled identical);
 a second run made no Ads call and changed nothing, and a `--full` re-pull fetched all 19 days
-and 185 placement rows and changed nothing.
+and 185 placement rows and changed nothing. (Six of those 19 rows are zero rows after the
+closed campaigns' flight ends, from the first version; since the review the sync zero-fills
+only inside the flight and spend-through stops at the flight end, and the writer cannot delete
+them. They are harmless zeros.)
+
+0004 was applied to the remote database on 2026-09-26 after a read-only backup of
+`ads_sync_runs` (`migrations/gss-stats-ads/backups/pre-0004-ads_sync_runs.json`, 5 rows) and a
+local rehearsal on 0001-0003 with those 5 rows (every value identical after the rebuild). After
+the remote apply every `ads_*` table kept its row count (3 / 19 / 185 / 0 / 0 / 5), the five rows
+matched the backup value for value, and every 0002/0003 trigger, the unique index and the
+`ads_sync_runs` triggers and index were present in `sqlite_master`.
 
 The binding is in `wrangler.toml`; it takes effect on the next deploy of `main`. Sync (a no-op
 when nothing changed): `npm run ads:sync -- --cf-token-file <path>`; full re-pull with the
