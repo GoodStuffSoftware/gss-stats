@@ -44,7 +44,7 @@ import {
 
 // ── Accounts and campaigns ───────────────────────────────────────────────────────────────
 /** Google Ads REST API version the routine speaks. */
-export const ADS_API_VERSION = 'v22'
+export const ADS_API_VERSION = 'v25'
 /** The Best Sudoku Ads account (872-653-5246). Queried directly — NEVER through a manager
  * account: no login-customer-id header is ever sent (see scripts/ads-reads/adsApi.ts). */
 export const ADS_CUSTOMER_ID = '8726535246'
@@ -1084,14 +1084,17 @@ function addDays(dateEt: string, days: number): string {
   d.setUTCDate(d.getUTCDate() + days)
   return d.toISOString().slice(0, 10)
 }
-/** ET date each stage is due. wrap-up = spend end + 7; day 15/30/60 are counted from the
- * flight's LAST serving day so every sign-up in it has reached that day; december = the
- * later of day 60 + 2 and 2026-12-01, when every d31-60 return window has closed. */
-export function postflightDueDate(stage: PostflightStage, spendEndEt: string, flightEndEt: string): string {
-  const last = spendEndEt > flightEndEt ? spendEndEt : flightEndEt
+/** ET date each stage is due, keyed to the FLIGHT END date (review M1, 2026-09-26): keying to
+ * the last spend date let continued spend push the wrap-up away indefinitely. wrap-up =
+ * flight end + 7; day 15/30/60 = flight end + N, so every sign-up in the flight has reached
+ * that day; december = the later of flight end + 62 and 2026-12-01, when every d31-60 return
+ * window has closed. Spend after the flight is caught by the after-flight check instead,
+ * which runs before the due check. */
+export function postflightDueDate(stage: PostflightStage, flightEndEt: string): string {
+  const last = flightEndEt
   switch (stage) {
     case 'wrapup':
-      return addDays(spendEndEt, 7)
+      return addDays(last, 7)
     case 'day15':
       return addDays(last, 15)
     case 'day30':

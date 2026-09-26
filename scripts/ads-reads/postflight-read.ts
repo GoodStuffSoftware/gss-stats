@@ -4,7 +4,7 @@
 //                                  [--dry-run] [--cf-token-file <path>] [--firebase-sa <path>]
 //                                  [--fixture <file.json> [--now <iso>]] [--json-only]
 //
-// wrapup = spend end + 7 days; day15/30/60 are counted from the flight's last serving day;
+// wrapup = flight end + 7 days; day15/30/60 are counted from the flight end (never the last spend day);
 // december = when every d31-60 return window has closed. A stage that is not due yet reports
 // its due date and records nothing unless --force. Promo vs non-promo is split from the
 // anonymous outcome beacons (and, with --firebase-sa, Firestore window COUNTS). PROPOSES only.

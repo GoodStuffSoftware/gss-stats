@@ -830,6 +830,8 @@ export interface PostflightResult {
     accounts: { newInWindow: number | null; promoClaimsInWindow: number | null; nonPromoInWindow: number | null } | null
   }
   postFlightSpend: RuleResult | null
+  /** The $100 cap, re-checked post-flight (a pause only for a campaign still serving). */
+  hardCap: RuleResult | null
   /** Day-15/30/60 only: accounts created in the flight window by access tier and promo
    * marker — Firestore COUNTs, SITEWIDE, not campaign-attributed. null = not read. */
   cohort: CohortTiers | null
@@ -860,7 +862,7 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
   if (spend.storeError) errors.push(spend.storeError)
 
   const spendEndEt = stored ? lastSpendDate(stored) : null
-  const dueEt = postflightDueDate(opts.stage, spendEndEt ?? campaign.flightEnd, campaign.flightEnd)
+  const dueEt = postflightDueDate(opts.stage, campaign.flightEnd)
   const due = todayEt >= dueEt
   const base: PostflightResult = {
     tool: 'postflight-read',
@@ -879,6 +881,7 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
     read: null,
     promoSplit: { beacon: null, accounts: null },
     postFlightSpend: null,
+    hardCap: null,
     cohort: null,
     cohortNote: null,
     recommendations: [],
@@ -897,10 +900,53 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
   }
   if (!spend.ok) base.failures.push('Google Ads spend')
   if (!status.ok) base.failures.push('campaign status')
+
+  // The after-flight spend and cap checks run FIRST, on every post-flight run, due or not
+  // (review M1): continued spend must never be silenced by a stage that is not due yet.
+  if (stored && spend.ok) {
+    const after = Object.entries(stored.days).filter(([d, v]) => d > campaign.flightEnd && v.costMicros > 0)
+    const afterCost = round2(after.reduce((a, [, v]) => a + microsToDollars(v.costMicros), 0))
+    // Only a campaign that is still serving (or unreadable) gets a pause proposal; after the
+    // end date it reads ENABLED/ENDED and there is nothing to pause.
+    const state = status.ok ? servingStateOf(status.value) : 'unknown'
+    const statusText = status.ok ? `${status.value.status}/${status.value.servingStatus}` : 'unreadable'
+    const notServing = `${state === 'ended' ? 'ended' : state === 'paused' ? 'paused' : 'not serving'} (${statusText}), nothing to pause`
+    base.postFlightSpend = {
+      id: 'hard-cap',
+      label: 'no spend after the flight',
+      limit: 0,
+      value: afterCost,
+      status: afterCost > 0 && canProposePause(state) ? 'trip' : 'clear',
+      detail:
+        afterCost > 0
+          ? `${money(afterCost)} spent after ${campaign.flightEnd}; campaign ${canProposePause(state) ? `reads ${statusText}` : notServing}`
+          : `no spend after ${campaign.flightEnd}`,
+    }
+    const cum = spend.cumulative.cost
+    base.hardCap = {
+      id: 'hard-cap',
+      label: `cumulative spend at ${money(plan.hardCap)}`,
+      limit: plan.hardCap,
+      value: cum,
+      status: cum < plan.hardCap ? 'not-armed' : canProposePause(state) ? 'trip' : 'clear',
+      detail:
+        cum < plan.hardCap
+          ? `${money(cum)} of ${money(plan.hardCap)}`
+          : canProposePause(state)
+            ? `${money(cum)} at or over the cap and the campaign reads ${statusText}`
+            : `${money(cum)} at the cap; campaign ${notServing}`,
+    }
+  }
+  const spendTrip = base.postFlightSpend?.status === 'trip' || base.hardCap?.status === 'trip'
+  const spendTripText = () =>
+    `BSK retest after the flight: ${[base.postFlightSpend?.status === 'trip' ? base.postFlightSpend.detail : null, base.hardCap?.status === 'trip' ? base.hardCap.detail : null].filter(Boolean).join('; ')}. PROPOSE PAUSE.`
+
   if (!due && !opts.force) {
     base.notify.reason = `not due until ${dueEt} ET; nothing recorded`
-    // A failed read still pushes (it may be why the due date looks wrong).
-    if (base.failures.length) {
+    // A spend trip or a failed read still pushes (the stage itself waits for its date).
+    if (spendTrip) {
+      base.notify = { push: true, busCopy: false, reason: `after-flight spend or cap trip (stage not due until ${dueEt})`, text: spendTripText() }
+    } else if (base.failures.length) {
       base.notify = { push: true, busCopy: false, reason: `failed read: ${base.failures.join(', ')}`, text: `BSK retest ${opts.stage} read FAILED: ${base.failures.join(', ')} unreadable. See the routine output.` }
     }
     return base
@@ -952,27 +998,6 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
   }
   base.recommendations.push(AUTH_SUCCESS_SPLIT_RECOMMENDATION)
 
-  // Post-flight kill check: any spend after the flight's last day with the campaign enabled.
-  if (stored && spend.ok) {
-    const after = Object.entries(stored.days).filter(([d, v]) => d > campaign.flightEnd && v.costMicros > 0)
-    const afterCost = round2(after.reduce((a, [, v]) => a + microsToDollars(v.costMicros), 0))
-    // Only a campaign that is still serving (or unreadable) gets a pause proposal; after the
-    // end date it reads ENABLED/ENDED and there is nothing to pause.
-    const state = status.ok ? servingStateOf(status.value) : 'unknown'
-    const statusText = status.ok ? `${status.value.status}/${status.value.servingStatus}` : 'unreadable'
-    base.postFlightSpend = {
-      id: 'hard-cap',
-      label: 'no spend after the flight',
-      limit: 0,
-      value: afterCost,
-      status: afterCost > 0 && canProposePause(state) ? 'trip' : 'clear',
-      detail:
-        afterCost > 0
-          ? `${money(afterCost)} spent after ${campaign.flightEnd}; campaign ${canProposePause(state) ? `reads ${statusText}` : `${state === 'ended' ? 'ended' : state === 'paused' ? 'paused' : 'not serving'} (${statusText}), nothing to pause`}`
-          : `no spend after ${campaign.flightEnd}`,
-    }
-  }
-
   const rec: ReadingRecord = {
     v: 1,
     id: readingId('postflight', readAt, opts.stage, plan.campaignId),
@@ -985,8 +1010,8 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
     cumulativeSpend: spend.ok ? spend.cumulative.cost : null,
     thresholds: [],
     complete: read.complete,
-    rules: base.postFlightSpend ? [base.postFlightSpend] : null,
-    proposal: base.postFlightSpend?.status === 'trip' ? 'PROPOSE PAUSE' : null,
+    rules: [base.postFlightSpend, base.hardCap].filter((x): x is RuleResult => !!x),
+    proposal: spendTrip ? 'PROPOSE PAUSE' : null,
     decision: read.decision,
     counts: {
       ...fullReadCounts(read),
@@ -1015,7 +1040,7 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
   }
   base.store.readingsWritten = w.written
 
-  const trip = base.postFlightSpend?.status === 'trip'
+  const trip = spendTrip
   for (const f of read.failedSources) if (!base.failures.includes(f)) base.failures.push(f)
   if (!base.store.dryRun && base.store.errors.length) base.failures.push('store write')
   const failed = base.failures.length ? ` Read problems: ${base.failures.join(', ')}.` : ''
@@ -1023,7 +1048,7 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
     push: true,
     busCopy: true,
     reason: `post-flight ${opts.stage} read (a scheduled spec read)${trip ? ' with spend after the flight' : ''}${base.failures.length ? `; failed read: ${base.failures.join(', ')}` : ''}`,
-    text: `BSK retest ${opts.stage} read: ${money(spend.cumulative.cost)} total, ${read.tagged?.summary.taggedArrivals ?? '?'} tagged arrivals, ${read.decision ? `at most ${read.decision.signUpsAtMost} campaign sign-ups (upper bound), row ${read.decision.row}` : 'no decision'}${trip ? `; PROPOSE PAUSE (spend after ${campaign.flightEnd})` : ''}.${failed}`,
+    text: `BSK retest ${opts.stage} read: ${money(spend.cumulative.cost)} total, ${read.tagged?.summary.taggedArrivals ?? '?'} tagged arrivals, ${read.decision ? `at most ${read.decision.signUpsAtMost} campaign sign-ups (upper bound), row ${read.decision.row}` : 'no decision'}${trip ? `; PROPOSE PAUSE (${base.postFlightSpend?.status === 'trip' ? `spend after ${campaign.flightEnd}` : 'at the cap'})` : ''}.${failed}`,
   }
   base.notes.push(INSTALL_OUTCOME_GAP_NOTE)
   return base

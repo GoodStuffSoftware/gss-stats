@@ -149,6 +149,7 @@ export function formatPostflightReport(r: PostflightResult): string {
   out.push(...spendLines(r.spend))
   out.push(`Spend ended ${r.spendEndEt ?? '—'}; this stage is due ${r.dueEt ?? '—'} (${r.due ? 'due' : 'NOT due yet'})`)
   if (r.postFlightSpend) out.push(`After-flight spend: [${r.postFlightSpend.status}] ${r.postFlightSpend.detail}`)
+  if (r.hardCap) out.push(`Hard cap: [${r.hardCap.status}] ${r.hardCap.detail}`)
   if (r.read) out.push('', ...fullReadLines(r.read, `POST-FLIGHT ${r.stage.toUpperCase()}`))
   const b = r.promoSplit.beacon
   if (b) {

@@ -103,7 +103,7 @@ describe('spend: merge, restatement, totals', () => {
     v: 1,
     campaignId: RETEST_CAMPAIGN_ID,
     source: 'google-ads-api',
-    apiVersion: 'v22',
+    apiVersion: 'v25',
     customerId: '8726535246',
     fetchedAt,
     closedThroughEt,
@@ -566,13 +566,12 @@ describe('missingDailyReads (a scheduled read that never ran)', () => {
 })
 
 describe('post-flight schedule', () => {
-  it('wrap-up is spend end + 7; follow-ups count from the last serving day; december waits for d31-60', () => {
-    expect(postflightDueDate('wrapup', '2026-10-02', '2026-10-02')).toBe('2026-10-09')
-    expect(postflightDueDate('wrapup', '2026-09-30', '2026-10-02')).toBe('2026-10-07') // cap hit early
-    expect(postflightDueDate('day15', '2026-10-02', '2026-10-02')).toBe('2026-10-17')
-    expect(postflightDueDate('day30', '2026-10-02', '2026-10-02')).toBe('2026-11-01')
-    expect(postflightDueDate('day60', '2026-10-02', '2026-10-02')).toBe('2026-12-01')
-    expect(postflightDueDate('december', '2026-10-02', '2026-10-02')).toBe('2026-12-03')
+  it('every stage is keyed to the FLIGHT END (10-02), so continued spend can never push it away', () => {
+    expect(postflightDueDate('wrapup', '2026-10-02')).toBe('2026-10-09')
+    expect(postflightDueDate('day15', '2026-10-02')).toBe('2026-10-17')
+    expect(postflightDueDate('day30', '2026-10-02')).toBe('2026-11-01')
+    expect(postflightDueDate('day60', '2026-10-02')).toBe('2026-12-01')
+    expect(postflightDueDate('december', '2026-10-02')).toBe('2026-12-03')
   })
 })
 
