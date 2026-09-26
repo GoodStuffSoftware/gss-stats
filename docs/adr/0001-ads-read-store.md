@@ -161,9 +161,10 @@ and the Ads client never sends `login-customer-id`.
   caps), live `wrangler tail` cpuTime on the deployed Worker:
   - a no-op: 1-4 ms warm;
   - the first call on a fresh isolate: 6 ms;
-  - a 1-day pull: 9 ms warm (4 secret reads, a token refresh, two GAQL queries, three D1
-    statements).
-  A due run on a cold isolate can still reach or pass 10 ms. On Free the platform may then end
+  - a 1-day pull: 9-10 ms warm and 12.6 ms on a cold isolate (4 secret reads, a token
+    refresh, two GAQL queries, three D1 statements; Workers analytics agree).
+  So a due run on a cold isolate (what an hourly cron usually gets) passes 10 ms: it ran to
+  completion in every test, because Free tolerates occasional overruns, but on Free the platform may end
   the invocation. That is visible (a `'running'` claim with no finished row, `exceededCpu` in
   `wrangler tail`) and safe: writes are idempotent, the next tick continues, and the local
   routines still sync. Workers Paid (5 min CPU) removes the concern; the code needs no change
