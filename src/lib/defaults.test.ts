@@ -11,6 +11,7 @@ import {
   isCampaignComparePage,
   isBestSudokuPopupsPage,
   isBestSudokuLaunchPage,
+  overviewPageIsUncustomized,
   CONFIG_VERSION,
 } from './defaults'
 import { NO_OUTCOME_TRACKING_NOTE, SIGNIN_ELIGIBLE_CAVEAT } from './popupEvents'
@@ -168,6 +169,74 @@ describe('normalizeConfig — v7 bespoke → widget migration', () => {
     const p = norm.pages.find((x) => x.id === 'bsk-overview')!
     expect(p.widgets.some((w) => w.dataset === 'overview')).toBe(true)
     expect(p.widgets.some((w) => w.dataset === 'campaigns')).toBe(false)
+  })
+})
+
+describe('overviewPageIsUncustomized', () => {
+  it('true for the exact pre-completions factory widget id set, in any order', () => {
+    const ids = ['ow-note-smallsample', 'ow-kpis', 'ow-timeline', 'ow-scorecard', 'ow-release']
+    const p = page({ id: 'bsk-overview', name: 'Best Sudoku · Overview', widgets: [...ids].reverse().map((id) => widget({ id })) })
+    expect(overviewPageIsUncustomized(p)).toBe(true)
+  })
+  it('false when a default chart is missing (the owner removed one)', () => {
+    const p = page({ id: 'bsk-overview', name: 'Best Sudoku · Overview', widgets: ['ow-note-smallsample', 'ow-kpis', 'ow-timeline', 'ow-scorecard'].map((id) => widget({ id })) })
+    expect(overviewPageIsUncustomized(p)).toBe(false)
+  })
+  it('false when an extra chart has been added', () => {
+    const ids = ['ow-note-smallsample', 'ow-kpis', 'ow-timeline', 'ow-scorecard', 'ow-release', 'my-extra-chart']
+    const p = page({ id: 'bsk-overview', name: 'Best Sudoku · Overview', widgets: ids.map((id) => widget({ id })) })
+    expect(overviewPageIsUncustomized(p)).toBe(false)
+  })
+})
+
+describe('normalizeConfig — v8 completions-widget migration', () => {
+  it('adds the completions widget once to an untouched factory Overview layout on an old-version config', () => {
+    const ids = ['ow-note-smallsample', 'ow-kpis', 'ow-timeline', 'ow-scorecard', 'ow-release']
+    const raw: any = {
+      version: 7,
+      activePageId: 'bsk-overview',
+      pages: [page({ id: 'default', name: 'Overview', isDefault: true }), page({ id: 'bsk-overview', name: 'Best Sudoku · Overview', widgets: ids.map((id) => widget({ id })) })],
+    }
+    const norm = normalizeConfig(raw)
+    const ov = norm.pages.find((p) => isOverviewPage(p))!
+    expect(ov.widgets.some((w) => w.dataset === 'completions')).toBe(true)
+    expect(ov.widgets).toHaveLength(6)
+    expect(norm.version).toBe(CONFIG_VERSION)
+  })
+  it('does NOT add it to a customised Overview layout (owner already added/removed a chart)', () => {
+    const customWidget = widget({ id: 'my-custom-overview-widget', dataset: 'overview', view: 'kpis' })
+    const raw: any = {
+      version: 7,
+      activePageId: 'bsk-overview',
+      pages: [page({ id: 'default', name: 'Overview', isDefault: true }), page({ id: 'bsk-overview', name: 'Best Sudoku · Overview', widgets: [customWidget] })],
+    }
+    const norm = normalizeConfig(raw)
+    const ov = norm.pages.find((p) => isOverviewPage(p))!
+    expect(ov.widgets).toEqual([customWidget]) // untouched — no completions widget forced onto it
+  })
+  it('running the migration twice on the same v7 config does not duplicate the widget', () => {
+    const ids = ['ow-note-smallsample', 'ow-kpis', 'ow-timeline', 'ow-scorecard', 'ow-release']
+    const raw: any = {
+      version: 7,
+      activePageId: 'bsk-overview',
+      pages: [page({ id: 'default', name: 'Overview', isDefault: true }), page({ id: 'bsk-overview', name: 'Best Sudoku · Overview', widgets: ids.map((id) => widget({ id })) })],
+    }
+    const once = normalizeConfig(raw)
+    const twice = normalizeConfig(once)
+    const ov = twice.pages.find((p) => isOverviewPage(p))!
+    expect(ov.widgets.filter((w) => w.dataset === 'completions')).toHaveLength(1)
+  })
+  it('does not duplicate the completions widget on a second run (already-migrated config)', () => {
+    const raw: any = { version: CONFIG_VERSION, activePageId: 'bsk-overview', pages: [page({ id: 'default', name: 'Overview', isDefault: true }), page({ id: 'bsk-overview', name: 'Best Sudoku · Overview', widgets: defaultOverviewWidgets() })] }
+    const once = normalizeConfig(raw)
+    const twice = normalizeConfig(once)
+    const ov = twice.pages.find((p) => isOverviewPage(p))!
+    expect(ov.widgets.filter((w) => w.dataset === 'completions')).toHaveLength(1)
+  })
+  it('a brand-new default config gets the completions widget straight from defaultOverviewWidgets(), not the migration', () => {
+    const norm = normalizeConfig(defaultConfig())
+    const ov = norm.pages.find((p) => isOverviewPage(p))!
+    expect(ov.widgets.filter((w) => w.dataset === 'completions')).toHaveLength(1)
   })
 })
 
