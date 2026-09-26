@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchCampaignCompare, fetchOverview, fetchStats } from './api'
+import { fetchAdsReadings, fetchCampaignCompare, fetchOverview, fetchStats } from './api'
 import { isAuthError, sessionExpired } from './session'
 import type { GlobalFilters, Widget } from './types'
 
@@ -40,10 +40,11 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('bespoke-page fetchers raise the re-sign-in banner on an expired session', () => {
+describe('bespoke-page and readings-log fetchers raise the re-sign-in banner on an expired session', () => {
   it.each([
     ['overview', () => fetchOverview(filters.since, filters.until), '/api/overview'],
     ['campaigns', () => fetchCampaignCompare('bsk-search'), '/api/campaigns'],
+    ['readings', () => fetchAdsReadings('limit=30'), '/api/ads/readings?limit=30'],
   ] as const)('%s: a 401 from the gate probes and sets sessionExpired, then rethrows', async (name, call, url) => {
     stubFetch(unauthorized(), unauthorized())
     await expect(call()).rejects.toThrow(new RegExp(`^${name} 401:`))
@@ -55,6 +56,7 @@ describe('bespoke-page fetchers raise the re-sign-in banner on an expired sessio
   it.each([
     ['overview', () => fetchOverview()],
     ['campaigns', () => fetchCampaignCompare('bsk-search')],
+    ['readings', () => fetchAdsReadings('limit=30')],
   ] as const)('%s: an expired Access session (network error + opaque redirect) also sets it', async (_name, call) => {
     stubFetch(new TypeError('Failed to fetch'), { type: 'opaqueredirect', status: 0 })
     await expect(call()).rejects.toThrow(TypeError)
@@ -65,6 +67,7 @@ describe('bespoke-page fetchers raise the re-sign-in banner on an expired sessio
   it.each([
     ['overview', () => fetchOverview()],
     ['campaigns', () => fetchCampaignCompare('bsk-search')],
+    ['readings', () => fetchAdsReadings('limit=30')],
   ] as const)('%s: a server error neither probes nor signs out', async (name, call) => {
     stubFetch(new Response('boom', { status: 500 }), unauthorized())
     await expect(call()).rejects.toThrow(new RegExp(`^${name} 500:`))
