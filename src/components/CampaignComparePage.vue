@@ -226,7 +226,7 @@ function shareBarWidth(row: DeviceMixShare): number {
             <div v-if="dataByCampaign[c.id]" class="funnel-steps">
               <div v-for="step in FUNNEL_STEP_ORDER" :key="step" class="funnel-step">
                 <div class="fs-top">
-                  <span class="fs-label">{{ FUNNEL_STEP_LABELS[step] }}</span>
+                  <span class="fs-label">{{ FUNNEL_STEP_LABELS[step] }}<template v-if="step === 'install' && dataByCampaign[c.id].funnel.installNote"> ({{ dataByCampaign[c.id].funnel.installNote }})</template></span>
                   <span class="fs-count mono">
                     <template v-if="dataByCampaign[c.id].funnel.notInstrumented.includes(step)">not instrumented</template>
                     <template v-else>{{ fmt(dataByCampaign[c.id].funnel.counts[step]) }}</template>

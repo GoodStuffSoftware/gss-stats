@@ -25,8 +25,9 @@ All notable changes to **gss-stats** are documented here. The format follows
   double-count, shown as a secondary tile and line.
 - **The pop-ups page note now says outcomes and return visits may arrive up to 30 minutes
   late**, replacing the inaccurate "nothing is measured within 30 minutes after a sign-in".
-- **Install outcome figures carry a "known gap" label** until Best Sudoku's install-accept
-  fix ships: prompt-driven installs are not recorded yet.
+- **Install outcomes are measured from Best Sudoku's install fix onward** (v1.95.4, 26 Sep
+  12:26 ET): earlier install outcomes stay unmeasured, and ranges that span the fix say when it
+  went live.
 
 ## [0.3.2] — 2026-09-26
 

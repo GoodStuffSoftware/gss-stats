@@ -32,6 +32,7 @@ import {
   computePopupRate,
   dayCounts,
   installOutcomeGapNote,
+  INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS,
   INSTALL_GAP_OUTCOME_KEY,
   INSTALL_GAP_RATE_KEY,
   measuredCoarseCount,
@@ -103,10 +104,15 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   w.push(inc.sql)
   b.push(...inc.binds)
 
-  const sql = `SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY hr, path`
+  // `pf` splits each hour bucket row-exactly at the install fix instant (lib/popupEvents.ts
+  // INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS), so pre-fix gap rows stay unmeasured without
+  // dropping post-fix rows that share their hour.
+  const fixAt = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS
+  const pfSql = fixAt === null ? '0' : '(ts >= ?)'
+  const sql = `SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, ${pfSql} AS pf, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY hr, path, pf`
   let res: any
   try {
-    res = await ctx.env.gss_geo.prepare(sql).bind(...b).all()
+    res = await ctx.env.gss_geo.prepare(sql).bind(...(fixAt === null ? [] : [fixAt]), ...b).all()
   } catch (e) {
     return json({ error: 'd1 query failed', detail: String(e) }, 500)
   }
@@ -114,7 +120,9 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     hourStartMs: Number(r.hr) * 3_600_000,
     path: String(r.path ?? ''),
     count: Number(r.c) || 0,
+    postInstallFix: Number(r.pf) === 1,
   }))
+  const range = { startMs: sinceMs, endMs: untilMs }
   const agg = aggregatePopupRows(rows)
   // While TRACKING_ACTIVATION_DATE_ET is null, tracking hasn't shipped yet: every count
   // dimension below (except 'date', which plots full history with a marker) reads the
@@ -146,7 +154,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       denominator: gated.denominator,
       // Known install-outcome gap (lib/popupEvents.ts INSTALL_ACCEPT_OUTCOME_FIXED_ET) —
       // travels with the DATA, so saved widgets with older titles still show it.
-      ...(rateKey === INSTALL_GAP_RATE_KEY ? { note: installOutcomeGapNote() } : {}),
+      ...(rateKey === INSTALL_GAP_RATE_KEY && installOutcomeGapNote(range) ? { note: installOutcomeGapNote(range) } : {}),
       meta,
     })
   }
@@ -167,7 +175,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       const c = measuredDetailedCount(agg, 'install', 'outcome', k)
       return { key: { installOutcome: k }, pageviews: c, visits: c }
     })
-    return json({ rows: rowsOut, totals: countedTotals(rowsOut), note: `${INSTALL_GAP_OUTCOME_KEY}: ${installOutcomeGapNote()}`, meta })
+    const gapNote = installOutcomeGapNote(range)
+    return json({ rows: rowsOut, totals: countedTotals(rowsOut), ...(gapNote ? { note: `${INSTALL_GAP_OUTCOME_KEY}: ${gapNote}` } : {}), meta })
   }
 
   // Everything else needs a known popup family.
@@ -191,7 +200,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       const c = measuredCoarseCount(agg, family, o)
       return { key: { outcome: o }, pageviews: c, visits: c }
     })
-    const note = popup === 'install' ? { note: `installed: ${installOutcomeGapNote()}` } : {}
+    const note = popup === 'install' && installOutcomeGapNote(range) ? { note: `installed: ${installOutcomeGapNote(range)}` } : {}
     return json({ rows: rowsOut, totals: countedTotals(rowsOut), ...note, meta })
   }
 

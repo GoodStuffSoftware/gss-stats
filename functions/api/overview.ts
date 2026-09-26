@@ -30,7 +30,7 @@ import {
   isRawInstallSignal,
   RAW_INSTALL_SIGNALS_LABEL,
 } from '../../src/lib/campaigns'
-import { classifyPopupPath, computeRate, etDateFromMs, installOutcomeGapNote, TRACKING_ACTIVATION_DATE_ET, POPUPS } from '../../src/lib/popupEvents'
+import { classifyPopupPath, computeRate, etDateFromMs, excludeInstallGapUnmeasured, withInstallGapNote, TRACKING_ACTIVATION_DATE_ET, POPUPS } from '../../src/lib/popupEvents'
 import {
   addEtDays,
   buildKpiTile,
@@ -95,7 +95,8 @@ function isAuthSuccess(path: string): boolean {
 // funnel; raw /install/<outcome> beacons can double-count one install and are a secondary
 // figure only (lib/campaigns.ts isInstallPromptInstalled / isRawInstallSignal).
 const isInstallOutcome = isInstallPromptInstalled
-const INSTALLS_LABEL = `Installs (${installOutcomeGapNote()})`
+/** "Installs", plus the install-fix caveat for the range shown (none once it is all post-fix). */
+const installsLabel = (startMs: number, endMs: number) => withInstallGapNote('Installs', { startMs, endMs })
 function isPopupShown(path: string): boolean {
   const ev = classifyPopupPath(path)
   return !!ev && ev.kind === 'shown' && POPUPS.some((p) => p.id === ev.family)
@@ -219,7 +220,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   }
   {
     const w = windowed((r) => isInstallOutcome(r.path))
-    kpis.push(buildKpiTile('install', INSTALLS_LABEL, w.today, w.yesterday, w.avg7))
+    kpis.push(buildKpiTile('install', installsLabel(kpiRangeStart, nowMs), w.today, w.yesterday, w.avg7))
     const raw = windowed((r) => isRawInstallSignal(r.path))
     kpis.push(buildKpiTile('installRaw', RAW_INSTALL_SIGNALS_LABEL, raw.today, raw.yesterday, raw.avg7))
   }
@@ -270,6 +271,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       const w1: string[] = [attr.sql]
       const b1: unknown[] = [...attr.binds]
       applyExclusions(w1, b1)
+      excludeInstallGapUnmeasured(w1, b1) // pre-fix install-gap rows are unmeasured
       const sql1 = `SELECT path, visitor, COUNT(*) AS cnt FROM hits WHERE ${w1.join(' AND ')} GROUP BY path, visitor`
 
       const w2: string[] = ['site = ?', `(${c.ucValues.map(() => 'path LIKE ?').join(' OR ')})`]
@@ -376,7 +378,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       since,
       until,
       // Series labels that carry data caveats, so the chart shows them whatever the layout.
-      seriesLabels: { install: INSTALLS_LABEL, rawInstallSignals: RAW_INSTALL_SIGNALS_LABEL },
+      seriesLabels: { install: installsLabel(sinceMs, untilMs), rawInstallSignals: RAW_INSTALL_SIGNALS_LABEL },
     },
     scorecard,
     releasePanel,

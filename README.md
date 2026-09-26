@@ -93,10 +93,13 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
     arrive up to 30 minutes late; a small number are lost." (after a sign-in the app holds
     outcome, eligibility and return beacons for 30 minutes and sends them on a later
     navigation).
-  - **Known gap, install outcomes:** prompt-driven installs don't record an install outcome
-    yet (fix pending in Best Sudoku). While `INSTALL_ACCEPT_OUTCOME_FIXED_ET` is unset, the
-    install-prompt "installed" rate, the `pwa-installed` count and the campaign funnel's
-    Install step carry a "known gap" label; set it to the fix's ET release date to clear it.
+  - **Install outcomes, fixed in Best Sudoku v1.95.4:** before the fix, prompt-driven installs
+    recorded no install outcome. `INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS` (2026-09-26 16:26:36
+    UTC, the first confirmed post-fix instant) splits every install count row-exactly: earlier
+    `/popup-outcome/install-prompt/installed` and `/install/pwa-installed` rows are unmeasured
+    ("known gap before fix"), later ones are measured normally, and a range that spans the fix
+    carries an "install fix went live 26 Sep 12:26 ET" note. The installed rate compares
+    post-fix outcomes with post-fix showings.
 
   A configurable **tracking activation date** (`TRACKING_ACTIVATION_DATE_ET`, set to
   2026-09-26 — v1.95.3's confirmed production WEB release, 14:31 UTC) keeps pre-release

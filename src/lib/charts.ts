@@ -2,7 +2,7 @@ import type { ChartConfiguration } from 'chart.js'
 import type { Widget, StatsResponse, StatsRow, Metric } from '../types'
 import { COUNTRY_NAMES } from './catalog'
 import { ringDims } from './rings'
-import { TRACKING_ACTIVATION_DATE_ET, PLAY_TRACKING_MARKER_LABEL, INSTALL_GAP_OUTCOME_KEY, installOutcomeGapNote } from './popupEvents'
+import { TRACKING_ACTIVATION_DATE_ET, PLAY_TRACKING_MARKER_LABEL } from './popupEvents'
 
 // Categorical palette: brand amber leads, with distinguishable warm/cool accents.
 export const PALETTE = [
@@ -360,9 +360,6 @@ export function formatKey(dimension: string, value: string): string {
     return '(none)'
   }
   if (dimension === 'countryName' || dimension === 'country') return COUNTRY_NAMES[value] ?? value
-  // Known install-outcome gap (lib/popupEvents.ts INSTALL_ACCEPT_OUTCOME_FIXED_ET): the
-  // pwa-installed count is labeled wherever it is charted, whatever the saved widget title.
-  if (dimension === 'installOutcome' && value === INSTALL_GAP_OUTCOME_KEY) return `${value} (${installOutcomeGapNote()})`
   if (dimension === 'visitor') return value.charAt(0).toUpperCase() + value.slice(1)
   if (dimension === 'date') {
     // YYYY-MM-DD → "Jun 24"

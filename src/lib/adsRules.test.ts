@@ -383,9 +383,37 @@ describe('site-wide events and MIN_COHORT on every rate', () => {
     expect(s.shownMatured['signin-prompt']).toBe(4)
     expect(s.rawInstallSignals).toBe(2)
   })
-  it('installShownFromMs keeps pre-fix install prompts out of the parent', () => {
-    const s = summarizeSiteEvents(rows, now, H('2026-09-29T04:00:00Z'))
-    expect(s.shownMatured.install).toBe(0)
+  it('install gap rows before the fix are unmeasured; the boundary instant itself is measured', () => {
+    const FIX = H('2026-09-26T16:26:36Z')
+    const s = summarizeSiteEvents(
+      [
+        // same hour, row-exact split from the query: 3 before the fix, 2 at/after it
+        { hourStartMs: H('2026-09-26T16:00:00Z'), path: '/popup-outcome/install-prompt/installed', count: 3, postInstallFix: false },
+        { hourStartMs: H('2026-09-26T16:00:00Z'), path: '/popup-outcome/install-prompt/installed', count: 2, postInstallFix: true },
+        { hourStartMs: H('2026-09-26T16:00:00Z'), path: '/install/pwa-installed', count: 4, postInstallFix: false },
+        { hourStartMs: H('2026-09-26T16:00:00Z'), path: '/install/pwa-accept', count: 5, postInstallFix: false },
+        { hourStartMs: H('2026-09-26T16:00:00Z'), path: '/install/pwa-accept', count: 6, postInstallFix: true },
+        { hourStartMs: H('2026-09-26T15:00:00Z'), path: '/install/standalone-detected', count: 1 }, // not a gap path: always measured
+      ],
+      now,
+      FIX,
+    )
+    expect(s.outcomes.install.installed).toBe(2)
+    expect(s.rawInstallSignals).toBe(1) // pre-fix pwa-installed dropped, standalone kept
+    expect(s.installAcceptPostFix).toBe(6)
+    expect(s.installAcceptPostFixMatured).toBe(6)
+  })
+  it('without a row-exact flag the hour bucket decides, conservatively (the fix hour counts as pre-fix)', () => {
+    const FIX = H('2026-09-26T16:26:36Z')
+    const s = summarizeSiteEvents(
+      [
+        { hourStartMs: H('2026-09-26T16:00:00Z'), path: '/install/pwa-accept', count: 7 },
+        { hourStartMs: H('2026-09-26T17:00:00Z'), path: '/install/pwa-accept', count: 1 },
+      ],
+      now,
+      FIX,
+    )
+    expect(s.installAcceptPostFix).toBe(1)
   })
   it('outcome rates are gated: a 1/4 outcome reports "too few", never 25%', () => {
     const s = summarizeSiteEvents(rows.slice(0, 1).concat(rows[2]), now)
@@ -446,12 +474,33 @@ describe('release health (missing child of a non-zero parent)', () => {
     ])
     expect(res.map((r) => r.status)).toEqual(['parent-zero', 'ok', 'watch', 'alert', 'known-gap'])
   })
-  it('install prompt → installed is a KNOWN GAP while the fix date is unset, and alerts normally once it is set', () => {
-    const site = summarizeSiteEvents([{ hourStartMs: H('2026-09-27T18:00:00Z'), path: '/install/prompt/android', count: 9 }], H('2026-09-30T00:00:00Z'))
-    const open = evaluateHealthPairs(buildHealthPairs({ site, taggedArrivalsMatured: 0, returnD0Web: 0 }))
-    expect(open.find((r) => r.id === 'install-prompt→install-outcome')!.status).toBe('known-gap')
-    const fixed = evaluateHealthPairs(buildHealthPairs({ site, taggedArrivalsMatured: 0, returnD0Web: 0, installFixedEt: '2026-09-27' }))
-    expect(fixed.find((r) => r.id === 'install-prompt→install-outcome')!.status).toBe('alert')
+  it('since the fix, install ACCEPTS >= MIN_COHORT with no installed outcome is a real ALERT (a continued zero is raised)', () => {
+    const accepts = (count: number, postInstallFix = true) =>
+      summarizeSiteEvents([{ hourStartMs: H('2026-09-27T18:00:00Z'), path: '/install/pwa-accept', count, postInstallFix }], H('2026-09-30T00:00:00Z'))
+    const pair = (site: ReturnType<typeof summarizeSiteEvents>, installFixedAtMs?: number | null) =>
+      evaluateHealthPairs(buildHealthPairs({ site, taggedArrivalsMatured: 0, returnD0Web: 0, ...(installFixedAtMs !== undefined ? { installFixedAtMs } : {}) })).find((r) => r.id === 'install-accept→installed')!
+    expect(pair(accepts(MIN_COHORT))).toMatchObject({ status: 'alert', parent: MIN_COHORT, children: 0 })
+    expect(pair(accepts(MIN_COHORT - 1)).status).toBe('watch')
+    expect(pair(accepts(9, false)).status).toBe('parent-zero') // pre-fix accepts never count
+    expect(pair(accepts(9)).parentLabel).toMatch(/\/install\/pwa-accept/)
+    // install PROMPT shown is no longer the parent
+    const shownOnly = summarizeSiteEvents([{ hourStartMs: H('2026-09-27T18:00:00Z'), path: '/install/prompt/android', count: 9 }], H('2026-09-30T00:00:00Z'))
+    expect(pair(shownOnly).status).toBe('parent-zero')
+    // an installed outcome after the fix clears it
+    const cleared = summarizeSiteEvents(
+      [
+        { hourStartMs: H('2026-09-27T18:00:00Z'), path: '/install/pwa-accept', count: 9, postInstallFix: true },
+        { hourStartMs: H('2026-09-27T19:00:00Z'), path: '/popup-outcome/install-prompt/installed', count: 1, postInstallFix: true },
+      ],
+      H('2026-09-30T00:00:00Z'),
+    )
+    expect(pair(cleared).status).toBe('ok')
+    // only while the fix is unset (null) is it a known gap
+    expect(pair(accepts(9), null).status).toBe('known-gap')
+  })
+  it('an accept younger than the outcome window is not yet a parent', () => {
+    const site = summarizeSiteEvents([{ hourStartMs: H('2026-09-29T23:00:00Z'), path: '/install/pwa-accept', count: 9, postInstallFix: true }], H('2026-09-29T20:00:00Z'))
+    expect(evaluateHealthPairs(buildHealthPairs({ site, taggedArrivalsMatured: 0, returnD0Web: 0 })).find((r) => r.id === 'install-accept→installed')!.status).toBe('parent-zero')
   })
   it('tagged arrivals with no /return/ d0 at all alert (the landing load fires d0)', () => {
     const site = summarizeSiteEvents([], 0)

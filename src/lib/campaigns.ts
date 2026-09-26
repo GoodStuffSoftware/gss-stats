@@ -22,7 +22,7 @@
 // with an ordinary (arbitrarily long) AND/OR WHERE clause, and functions/api/campaigns.ts
 // issues one small query per campaign rather than one UNIONed mega-query across all three.
 
-import { classifyPopupPath, computeRate, TRACKING_ACTIVATION_DATE_ET, etDateFromMs, installOutcomeGapNote } from './popupEvents'
+import { classifyPopupPath, computeRate, TRACKING_ACTIVATION_DATE_ET, etDateFromMs } from './popupEvents'
 
 // ET hour-of-day (0-23) for "Arrivals by ET hour of day" — same DST-safe Intl approach as
 // popupEvents.ts's etDateFromMs, just formatting the hour instead of the calendar date.
@@ -322,9 +322,9 @@ export const FUNNEL_STEP_LABELS: Record<FunnelStepKey, string> = {
   accept: 'Accept',
   authSuccess: 'Auth success',
   installPrompt: 'Install prompt',
-  // Known gap until the install-accept fix ships (lib/popupEvents.ts
-  // INSTALL_ACCEPT_OUTCOME_FIXED_ET): the label says so wherever the funnel is shown.
-  install: `Install — ${installOutcomeGapNote()}`,
+  // Range-specific install-fix caveats travel with the data instead (functions/api/campaigns.ts
+  // funnel.installNote, from lib/popupEvents.ts installOutcomeGapNote).
+  install: 'Install',
 }
 
 // Steps with NO matching path anywhere in production D1 (confirmed 2026-09-25 by scanning
@@ -373,8 +373,8 @@ export function classifyFunnelPath(path: string): FunnelStepKey | null {
   // outcome counts AT MOST ONCE per showing, while the raw /install/<outcome> beacons can
   // double-count one install (a cross-tab race can fire pwa-installed AND
   // standalone-detected). The raw signals are a secondary figure — isRawInstallSignal below —
-  // never this step. Until INSTALL_ACCEPT_OUTCOME_FIXED_ET is set, prompt-driven installs
-  // don't reach this step at all (FUNNEL_STEP_LABELS.install carries the known-gap label).
+  // never this step. Rows before the install fix (INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS) are
+  // unmeasured: the queries drop them (excludeInstallGapUnmeasured) before they get here.
   if (isInstallPromptInstalled(path)) return 'install'
   return null
 }

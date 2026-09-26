@@ -196,6 +196,9 @@ export interface CampaignCompareResponse {
     notInstrumented: (keyof CampaignFunnelCounts)[]
     // Show wherever `counts.arrivals` is displayed — see lib/campaigns.ts ARRIVALS_CAVEAT.
     arrivalsCaveat: string
+    // Install-fix caveat for this campaign's range (lib/popupEvents.ts installOutcomeGapNote);
+    // null once the whole range is after the fix.
+    installNote?: string | null
   }
   // EVERY row carrying this campaign's tag (the tag rides each beacon for its 30-min TTL) —
   // NOT the same as arrivals (`funnel.counts.arrivals`, visitor='new' only). Label it

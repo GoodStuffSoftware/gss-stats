@@ -92,8 +92,10 @@ npm run -s ads:morning-read -- --release-health-only --cf-token-file C:/Users/ms
 The backstop evaluates only on a day that actually served ads, and alerts only on a missing
 child of a non-zero parent: the parent at or above MIN_COHORT (5), its outcome window elapsed
 (shown at least 24 h earlier), and the child at zero. A smaller parent is a "watch", never an
-alert; a zero parent never alerts; the install-prompt pair is a known gap until Best Sudoku's
-install-accept fix ships and never alerts. It appends a `health` record.
+alert; a zero parent never alerts. Since the v1.95.4 install fix (26 Sep 12:26 ET) the install
+pair is an ordinary pair: install-prompt accepts (`/install/pwa-accept`) after the fix, at least
+5 and at least 24 h old, with no `/popup-outcome/install-prompt/installed` is a real ALERT and
+pushes; a continued zero is raised, not treated as quiet. It appends a `health` record.
 
 Not `--dry-run`: this run is the one that stores spend, appends the daily line and marks a
 fired threshold. `BWS_ACCESS_TOKEN` is already in the environment. If the service-account
@@ -151,7 +153,7 @@ the kill-rule results exactly as the report states them. Standing reading notes,
 in the report: every rate is MIN_COHORT-gated and shown with its counts; production has about
 14 registered users, so everything is anecdotal; upsell near-zero for signed-out traffic is a
 known bug, not broken instrumentation; signin-eligible is a count, never a denominator;
-install outcomes carry a known gap until Best Sudoku's install-accept fix ships; Play reads
+install outcomes are measured only from the 26 Sep 12:26 ET install fix on; Play reads
 "not yet seen" until the first app `/return/` row; Play installs include Mike's household.
 
 If the report starts with `READ FAILED`, say so first: which reads failed, that thresholds

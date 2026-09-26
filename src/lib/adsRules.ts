@@ -20,9 +20,12 @@ import {
   classifyPopupPath,
   etDateFromMs,
   gateRate,
-  INSTALL_ACCEPT_OUTCOME_FIXED_ET,
+  INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS,
+  INSTALL_GAP_PATHS,
+  installFixMarkerLabel,
   installOutcomeGapNote,
   installOutcomeGapOpen,
+  rowIsPostInstallFix,
   POPUP_OUTCOME_TYPES,
   POPUP_PAGE_NOTE,
   type GatedRate,
@@ -480,12 +483,22 @@ export interface SiteEventSummary {
   signinEligible: { earned: number; capped: number; unearned: number }
   promoFirst50: { shown: number; accept: number; dismiss: number }
   upsell: { shown: number; accept: number; dismiss: number }
+  /** /install/pwa-accept taps on or after the install fix (all / hour ended before
+   * `maturedBeforeMs`) — the parent of the install health pair. */
+  installAcceptPostFix: number
+  installAcceptPostFixMatured: number
 }
 
-/** `installShownFromMs`: count install-prompt shown rows into `shownMatured.install` only at
- * or after this instant — used once INSTALL_ACCEPT_OUTCOME_FIXED_ET is set, so prompts shown
- * before the fix (which could never produce an outcome) don't feed the health check. */
-export function summarizeSiteEvents(rows: readonly HourPathCount[], maturedBeforeMs: number, installShownFromMs?: number): SiteEventSummary {
+/** Pre-fix rows of the install-gap paths (lib/popupEvents.ts INSTALL_GAP_PATHS) are dropped
+ * here — unmeasured, never a count, a rate or an alert. A row's side of the fix comes from its
+ * row-exact `postInstallFix` flag when the query split on it (scripts/ads-reads/beacon.ts
+ * siteEventsQuery does), else from its hour bucket (post-fix only if the bucket starts at or
+ * after the fix). */
+export function summarizeSiteEvents(
+  rows: readonly HourPathCount[],
+  maturedBeforeMs: number,
+  fixedAtMs: number | null = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS,
+): SiteEventSummary {
   const zero = () => Object.fromEntries(OUTCOME_POPUPS.map((p) => [p, 0])) as Record<OutcomePopup, number>
   const s: SiteEventSummary = {
     shown: zero(),
@@ -495,15 +508,23 @@ export function summarizeSiteEvents(rows: readonly HourPathCount[], maturedBefor
     signinEligible: { earned: 0, capped: 0, unearned: 0 },
     promoFirst50: { shown: 0, accept: 0, dismiss: 0 },
     upsell: { shown: 0, accept: 0, dismiss: 0 },
+    installAcceptPostFix: 0,
+    installAcceptPostFixMatured: 0,
   }
   for (const r of rows) {
     const ev = classifyPopupPath(r.path)
     if (!ev) continue
+    const postFix = rowIsPostInstallFix(r, fixedAtMs)
+    if ((INSTALL_GAP_PATHS as readonly string[]).includes(r.path) && !postFix) continue // unmeasured
+    const matured = r.hourStartMs + 3_600_000 <= maturedBeforeMs
     if (ev.kind === 'shown' && (OUTCOME_POPUPS as readonly string[]).includes(ev.family)) {
       const fam = ev.family as OutcomePopup
       s.shown[fam] += r.count
-      const afterFix = fam !== 'install' || installShownFromMs == null || r.hourStartMs >= installShownFromMs
-      if (r.hourStartMs + 3_600_000 <= maturedBeforeMs && afterFix) s.shownMatured[fam] += r.count
+      if (matured) s.shownMatured[fam] += r.count
+    }
+    if (r.path === INSTALL_PWA_ACCEPT_PATH && postFix) {
+      s.installAcceptPostFix += r.count
+      if (matured) s.installAcceptPostFixMatured += r.count
     }
     if (ev.family === 'install' && ev.kind === 'outcome') s.rawInstallSignals += r.count
     if (ev.family === 'signin-eligible' && (ev.kind === 'earned' || ev.kind === 'capped' || ev.kind === 'unearned')) s.signinEligible[ev.kind] += r.count
@@ -642,12 +663,21 @@ export function evaluateHealthPairs(pairs: readonly HealthPair[], minParent: num
   })
 }
 
-/** The install-outcome gap (confirmed 2026-09-26, fix pending — see lib/popupEvents.ts
- * INSTALL_ACCEPT_OUTCOME_FIXED_ET): prompt-driven installs emit no /install/pwa-installed
- * and no /popup-outcome/install-prompt/installed; /install/pwa-accept (the tap) is accurate.
- * A Play install also has no web-side outcome until /install/play-detected on a later visit. */
-export function installOutcomeGapReportNote(fixedEt: string | null = INSTALL_ACCEPT_OUTCOME_FIXED_ET): string {
-  return `Install outcomes: ${installOutcomeGapNote(fixedEt)}. The install tap (/install/pwa-accept) is accurate; a Play install has no web-side outcome until a later play-detected visit.`
+/** The install tap the install health pair is keyed to (the coordinator, 2026-09-26: the
+ * parent is the ACCEPT, not "shown"). */
+export const INSTALL_PWA_ACCEPT_PATH = '/install/pwa-accept'
+
+/** The install-outcome gap, fixed in Best Sudoku v1.95.4 (lib/popupEvents.ts
+ * INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS): before the fix, prompt-driven installs emitted no
+ * /install/pwa-installed and no /popup-outcome/install-prompt/installed; those rows stay
+ * unmeasured. /install/pwa-accept (the tap) was always accurate. A Play install has no
+ * web-side outcome until /install/play-detected on a later visit. */
+export function installOutcomeGapReportNote(fixedAtMs: number | null = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS): string {
+  const status =
+    fixedAtMs === null
+      ? installOutcomeGapNote(null, null)
+      : `${installFixMarkerLabel(fixedAtMs)} (Best Sudoku v1.95.4); install counts before it are unmeasured, after it they come from /popup-outcome/install-prompt/installed`
+  return `Install outcomes: ${status}. The install tap (/install/pwa-accept) is accurate; a Play install has no web-side outcome until a later play-detected visit.`
 }
 export const INSTALL_OUTCOME_GAP_NOTE = installOutcomeGapReportNote()
 export const UPSELL_KNOWN_BUG_NOTE =
@@ -674,8 +704,9 @@ export interface HealthInputs {
   /** Tagged arrivals whose hour ended at least an hour ago (d0 fires on the landing load). */
   taggedArrivalsMatured: number
   returnD0Web: number
-  /** lib/popupEvents.ts INSTALL_ACCEPT_OUTCOME_FIXED_ET — null = the gap is still open. */
-  installFixedEt?: string | null
+  /** lib/popupEvents.ts INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS — null = the gap is still open
+   * (then the install pair is a known gap and never alerts). Omitted = the configured value. */
+  installFixedAtMs?: number | null
 }
 export function buildHealthPairs(i: HealthInputs): HealthPair[] {
   const outcomes = (p: OutcomePopup) => outcomeTotal(i.site.outcomes, p)
@@ -709,16 +740,17 @@ export function buildHealthPairs(i: HealthInputs): HealthPair[] {
       children: outcomes('upsell'),
     },
     {
-      id: 'install-prompt→install-outcome',
-      parentLabel: 'install prompt shown (≥24h old)',
-      parent: i.site.shownMatured.install,
-      childLabel: '/popup-outcome/install-prompt/installed',
+      // Since the v1.95.4 fix this is an ordinary pair (release coordinator, 2026-09-26: a
+      // continued zero must be RAISED — no real device install has been observed yet). The
+      // parent is the ACCEPT tap (/install/pwa-accept) on or after the fix, at least the
+      // outcome-window age old; the child is the deduplicated installed outcome, post-fix only.
+      id: 'install-accept→installed',
+      parentLabel: 'install-prompt accepts (/install/pwa-accept, after the fix, ≥24h old)',
+      parent: i.site.installAcceptPostFixMatured,
+      childLabel: '/popup-outcome/install-prompt/installed (after the fix)',
       children: i.site.outcomes.install.installed,
-      // While the fix is pending this pair is a KNOWN GAP and never alerts (coordinator,
-      // 2026-09-26). Once the fix date is set, the caller passes only post-fix prompts as
-      // the parent (summarizeSiteEvents' installShownFromMs) and the pair alerts normally.
-      ...(installOutcomeGapOpen(i.installFixedEt === undefined ? INSTALL_ACCEPT_OUTCOME_FIXED_ET : i.installFixedEt)
-        ? { knownGap: installOutcomeGapReportNote(i.installFixedEt === undefined ? INSTALL_ACCEPT_OUTCOME_FIXED_ET : i.installFixedEt) }
+      ...(installOutcomeGapOpen(i.installFixedAtMs === undefined ? INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS : i.installFixedAtMs)
+        ? { knownGap: installOutcomeGapReportNote(null) }
         : {}),
     },
   ]
