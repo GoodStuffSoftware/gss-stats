@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, watch, computed, onMounted, onBeforeUnmount, nextTick, useId } from 'vue'
 import type { Widget, GlobalFilters, StatsResponse } from '../types'
 import { fetchStats } from '../api'
 import { sitesLoaded } from '../sitesStore'
@@ -66,16 +66,37 @@ const needsChartHeight = computed(() => {
   return CHART_CANVAS_TYPES.has(props.widget.type)
 })
 
-// Double-tap-to-zoom (owner: "allow a double-tap on the chart to zoom if that's easy") — the
-// explicit zoom button is touch-hidden until edit mode (see CSS), so this is touch's one-step
-// equivalent. Ignore taps that land on an actual control (menu, its buttons, a link) so they
-// keep their own behavior instead of also triggering a zoom.
+// Double-tap-to-zoom (owner: "allow a double-tap on the chart to zoom if that's easy") — an
+// extra shortcut alongside the always-visible zoom button (see below), not a substitute for
+// it. Ignore taps that land on an actual control (menu, its buttons, a link) so they keep
+// their own behavior instead of also triggering a zoom.
 function onCardBodyDblClick(e: MouseEvent) {
   if (isNoteWidget.value) return // nothing to zoom
   const target = e.target as HTMLElement | null
   if (target?.closest('button, .menu, a, input, select, textarea')) return
   toggleZoom()
 }
+
+// ── Reveal: a per-card disclosure toggle (owner clarification, 2026-09-26 — "hide the bar for
+// each chart and have a reveal button and zoom button only by default... tapping REVEAL shows
+// THAT chart's controls"). Every card shows exactly two small, low-contrast, always-visible
+// icons — zoom and reveal — on every device, including touch; everything else (filter/reload/
+// options menu, plus the drag-handle/resize-grip affordances in the CSS below) stays hidden
+// until: this card's own reveal is on, the page's edit mode is on (`forceControls`), or (desktop
+// only) the card is hovered/focused-within. `revealId` gives the revealed-controls group a
+// stable id for the reveal button's aria-controls (Vue 3.5's useId — unique per component
+// instance, so multiple cards on one page never collide).
+const revealed = ref(false)
+const revealId = useId()
+function toggleRevealed(e?: Event) {
+  e?.stopPropagation() // don't let this bubble to the outside-click closer below
+  revealed.value = !revealed.value
+}
+function closeRevealed() {
+  revealed.value = false
+}
+onMounted(() => document.addEventListener('click', closeRevealed))
+onBeforeUnmount(() => document.removeEventListener('click', closeRevealed))
 
 // A click on a chart element → hand the parent the raw dimension value so it can offer to
 // open a page filtered to it. Only for dimensions that are actually drillable — tapping a
@@ -177,6 +198,7 @@ async function toggleZoom(next: boolean = !zoomed.value) {
 
 function onKey(e: KeyboardEvent) {
   if (e.key === 'Escape' && zoomed.value) toggleZoom(false)
+  if (e.key === 'Escape' && revealed.value) closeRevealed()
 }
 onMounted(() => document.addEventListener('keydown', onKey))
 onBeforeUnmount(() => document.removeEventListener('keydown', onKey))
@@ -349,7 +371,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
 
 <template>
   <Teleport to="body" :disabled="!zoomed">
-    <div ref="cardEl" class="chart-card" :class="{ zoomed, 'controls-revealed': forceControls, 'note-card': isNoteWidget, 'needs-chart-height': needsChartHeight }" :style="zoomed ? { '--ar': aspect } : undefined">
+    <div ref="cardEl" class="chart-card" :class="{ zoomed, revealed, 'controls-revealed': forceControls, 'note-card': isNoteWidget, 'needs-chart-height': needsChartHeight }" :style="zoomed ? { '--ar': aspect } : undefined">
     <header class="card-head" :class="{ 'note-head': isNoteWidget }">
       <div class="title-wrap" v-if="!isNoteWidget">
         <span v-if="widget.isDefault" class="pin" title="A default chart on this page — kept when you restore defaults">★</span>
@@ -359,27 +381,41 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
         >
       </div>
       <div class="head-actions">
-        <!-- Modification chrome — hidden by default (owner clarification, 2026-09-26): shown
-             only while the function bar is open (forceControls) or this card is hovered. -->
-        <button
-          v-if="!isBespokeBody"
-          ref="filterBtn"
-          class="btn-ghost icon hide-until-revealed"
-          :class="{ active: hasOverride }"
-          title="Filter this chart"
-          @click.stop="openFilter"
-        >
-          <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
-            <path d="M1.5 2.5h13l-5 6v4.2l-3 1.5V8.5z" fill="currentColor" />
-          </svg>
-        </button>
-        <button v-if="!isBespokeBody" class="btn-ghost icon hide-until-revealed" title="Reload" @click.stop="load">↻</button>
-        <!-- Zoom — a small floating corner icon, never its own bar (owner: "two clicks to
-             zoom is too much"). Desktop: low-contrast once the card is hovered/focused, full
-             contrast on direct hover, so it's reachable without revealing the whole bar.
-             Touch: hidden until edit mode, same as the rest of the modification chrome
-             (fix/clean-look, 2026-09-26) — double-tapping the chart body zooms it instead, see
-             onCardBodyDblClick. A note tile has nothing to zoom, so it's omitted there. -->
+        <!-- Revealed controls (owner clarification, 2026-09-26): filter/reload/options-menu
+             stay hidden until this card's own reveal is toggled on, the page's edit mode is on
+             (forceControls), or — desktop only — the card is hovered/focused-within. -->
+        <div :id="revealId" class="revealed-controls hide-until-revealed">
+          <button
+            v-if="!isBespokeBody"
+            ref="filterBtn"
+            class="btn-ghost icon"
+            :class="{ active: hasOverride }"
+            title="Filter this chart"
+            @click.stop="openFilter"
+          >
+            <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+              <path d="M1.5 2.5h13l-5 6v4.2l-3 1.5V8.5z" fill="currentColor" />
+            </svg>
+          </button>
+          <button v-if="!isBespokeBody" class="btn-ghost icon" title="Reload" @click.stop="load">↻</button>
+          <div class="menu-anchor">
+            <button class="btn-ghost icon" title="Options" @click.stop="menuOpen = !menuOpen">⋯</button>
+            <div v-if="menuOpen" class="menu" @click.stop>
+              <button @click="emit('edit'); menuOpen = false">Edit</button>
+              <button @click="emit('duplicate'); menuOpen = false">Duplicate</button>
+              <button @click="toggleDefault(); menuOpen = false">
+                {{ widget.isDefault ? 'Remove from default' : 'Set as default' }}
+              </button>
+              <button class="danger" @click="emit('remove'); menuOpen = false">Delete</button>
+            </div>
+          </div>
+        </div>
+        <!-- Zoom + reveal — exactly two small, borderless, low-contrast icons, ALWAYS visible
+             on every device including touch (owner: "hide the bar for each chart and have a
+             reveal button and zoom button only by default"). Zoom is one tap/click; a note
+             tile has nothing to zoom, so it's omitted there (owner: "Note widgets show only
+             the reveal icon"). Double-tapping the chart body also zooms — see
+             onCardBodyDblClick — as an extra shortcut, not a substitute. -->
         <button
           v-if="widget.type !== 'note'"
           class="zoom-btn"
@@ -394,17 +430,25 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
             <path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
         </button>
-        <div class="menu-anchor hide-until-revealed">
-          <button class="btn-ghost icon" title="Options" @click.stop="menuOpen = !menuOpen">⋯</button>
-          <div v-if="menuOpen" class="menu" @click.stop>
-            <button @click="emit('edit'); menuOpen = false">Edit</button>
-            <button @click="emit('duplicate'); menuOpen = false">Duplicate</button>
-            <button @click="toggleDefault(); menuOpen = false">
-              {{ widget.isDefault ? 'Remove from default' : 'Set as default' }}
-            </button>
-            <button class="danger" @click="emit('remove'); menuOpen = false">Delete</button>
-          </div>
-        </div>
+        <!-- Reveal — toggles the .revealed-controls group above for THIS card only. Tapping it
+             again, Escape, or a click outside the card closes it (toggleRevealed/closeRevealed/
+             onKey in the script). -->
+        <button
+          class="reveal-btn"
+          :class="{ 'is-open': revealed }"
+          title="Show chart controls"
+          aria-label="Show chart controls"
+          :aria-expanded="revealed"
+          :aria-controls="revealId"
+          @click.stop="toggleRevealed"
+        >
+          <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+            <path d="M2 4h4M10 4h4M2 8h1M7 8h7M2 12h6M12 12h2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+            <circle cx="7" cy="4" r="1.6" fill="currentColor" />
+            <circle cx="4" cy="8" r="1.6" fill="currentColor" />
+            <circle cx="9" cy="12" r="1.6" fill="currentColor" />
+          </svg>
+        </button>
       </div>
     </header>
 
@@ -526,7 +570,8 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
     cursor: default;
   }
   .chart-card:hover .card-head,
-  .chart-card.controls-revealed .card-head {
+  .chart-card.controls-revealed .card-head,
+  .chart-card.revealed .card-head {
     cursor: grab;
   }
 }
@@ -575,6 +620,11 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
   gap: 2px;
   flex-shrink: 0;
 }
+.revealed-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
 .btn-ghost.icon {
   border: none;
   background: transparent;
@@ -588,19 +638,20 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
   background: rgb(var(--sunken));
   color: rgb(var(--ink));
 }
-/* Modification chrome (filter/reload/options-menu) — clean look by default (owner
-   clarification, 2026-09-26): hidden until the function bar is open (.controls-revealed,
-   driven by Dashboard's forceControls prop, i.e. edit mode) or, on a device that actually has
-   hover + a precise pointer, this specific card is hovered/focused-within. Hidden is the BASE
-   rule for every device, including touch — a touchscreen never matches the hover media query
-   below, so without a device-agnostic base rule it would stay permanently visible there, which
-   is exactly the "always visible on touch" bug the owner reported (2026-09-26 screenshot). */
+/* Revealed controls (filter/reload/options-menu) — hidden by default on every device (owner
+   clarification, 2026-09-26: "hide the bar for each chart"), shown once: this card's own
+   reveal is toggled on (.revealed — see the reveal button below), the page's edit mode is on
+   (.controls-revealed, Dashboard's forceControls), or — desktop only, hover+fine-pointer — the
+   card is hovered/focused-within. Hidden is the BASE rule for every device including touch, so
+   a touchscreen (which never matches the hover media query) doesn't leak them permanently
+   visible. */
 .hide-until-revealed {
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.12s ease;
 }
-.chart-card.controls-revealed .hide-until-revealed {
+.chart-card.controls-revealed .hide-until-revealed,
+.chart-card.revealed .hide-until-revealed {
   opacity: 1;
   pointer-events: auto;
 }
@@ -611,13 +662,14 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
     pointer-events: auto;
   }
 }
-/* Zoom — a small borderless floating corner icon, never its own bar. Desktop: always
-   reachable at low contrast once the card is hovered/focused (owner: "two clicks to zoom is
-   too much"), full contrast on direct hover of the icon itself. Touch: hidden until edit mode
-   like the rest of the modification chrome (double-tap the chart body zooms instead — see
-   onCardBodyDblClick) — the previous "always visible on touch" behavior was the same bug as
-   the rest of the header chrome. */
-.zoom-btn {
+/* Zoom + reveal — exactly two small, borderless, low-contrast icons, ALWAYS visible on every
+   device including touch (owner clarification, 2026-09-26: "have a reveal button and zoom
+   button only by default" — reversing the earlier "hidden on touch until edit mode" behavior
+   for these two specifically; that hiding still applies to everything else, see
+   .hide-until-revealed above). Low contrast at rest, full contrast on hover/focus (desktop) or
+   while open/on (edit mode, or — for reveal — its own toggled-on state). */
+.zoom-btn,
+.reveal-btn {
   border: none;
   background: transparent;
   color: rgb(var(--ink-3));
@@ -625,36 +677,37 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
   line-height: 1;
   padding: 4px 7px;
   border-radius: 7px;
-  opacity: 0;
-  pointer-events: none;
+  opacity: 0.55;
   transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
 }
-.chart-card.controls-revealed .zoom-btn {
+.zoom-btn:hover,
+.zoom-btn:focus-visible,
+.reveal-btn:hover,
+.reveal-btn:focus-visible {
   opacity: 1;
-  pointer-events: auto;
+  background: rgb(var(--sunken));
+  color: rgb(var(--ink));
 }
-@media (hover: hover) and (pointer: fine) {
-  .zoom-btn {
-    opacity: 0.55;
-    pointer-events: auto;
-  }
-  .zoom-btn:hover,
-  .zoom-btn:focus-visible {
-    opacity: 1;
-    background: rgb(var(--sunken));
-    color: rgb(var(--ink));
-  }
+.chart-card.controls-revealed .zoom-btn,
+.chart-card.controls-revealed .reveal-btn,
+.reveal-btn.is-open {
+  opacity: 1;
 }
-.zoom-btn svg {
+.reveal-btn.is-open {
+  color: rgb(var(--amber-hover));
+}
+.zoom-btn svg,
+.reveal-btn svg {
   display: block;
 }
-/* 44px touch target once the button is actually shown (edit mode) — gated on (pointer:
-   coarse), not a viewport-width breakpoint (a tablet can be wider than 700px and still have a
-   coarse/touch pointer, and a narrow window on a mouse-driven desktop shouldn't get a
-   touch-sized target it doesn't need). The icon itself stays the same visual size; only the
-   hit area grows (padding). */
+/* 36-44px touch target on any touch-capable device — gated on (pointer: coarse), not a
+   viewport-width breakpoint (a tablet can be wider than 700px and still have a coarse/touch
+   pointer, and a narrow window on a mouse-driven desktop shouldn't get a touch-sized target it
+   doesn't need). The icon itself stays the same visual size; only the hit area grows
+   (padding) — owner: "staying visually small". */
 @media (pointer: coarse) {
-  .zoom-btn {
+  .zoom-btn,
+  .reveal-btn {
     min-width: 44px;
     min-height: 44px;
     display: inline-flex;
