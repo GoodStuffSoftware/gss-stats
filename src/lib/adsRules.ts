@@ -729,7 +729,10 @@ export function buildHealthPairs(i: HealthInputs): HealthPair[] {
       id: 'promo-first50→outcomes',
       parentLabel: 'first-50 promo shown (≥24h old)',
       parent: i.site.shownMatured['promo-first50'],
-      childLabel: '/popup-outcome/promo-first50/*',
+      // Real beacons send /popup-outcome/first50-offer/* (lib/popupEvents.ts
+      // POPUP_OUTCOME_NAME_TO_FAMILY — 'promo-first50' is only a tolerated alias); both
+      // names land in `outcomes('promo-first50')` below.
+      childLabel: '/popup-outcome/first50-offer/* (or /promo-first50/*)',
       children: outcomes('promo-first50'),
     },
     {
