@@ -1,4 +1,4 @@
-# ADR 0001: Google sign-in in the app, replacing Cloudflare Access
+# ADR 0002: Google sign-in in the app, replacing Cloudflare Access
 
 - **Status:** Accepted (branch `feat/google-auth`). The rollout is manual; see README "Auth".
 - **Date:** 2026-09-25

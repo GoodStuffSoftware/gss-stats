@@ -252,7 +252,7 @@ npm run typecheck:scripts
 |---|---|
 | Changelog | [CHANGELOG.md](CHANGELOG.md) |
 | Contributing / conventions | [CLAUDE.md](CLAUDE.md) |
-| Auth design (ADR) | [docs/adr/0001-google-auth.md](docs/adr/0001-google-auth.md) |
+| Auth design (ADR) | [docs/adr/0002-google-auth.md](docs/adr/0002-google-auth.md) |
 | Ads store decision | [docs/adr/0001-ads-read-store.md](docs/adr/0001-ads-read-store.md) |
 | Ads routine prompts | [docs/routines/](docs/routines/) |
 | Geo beacon (companion) | [GoodStuffSoftware/gss-beacon](https://github.com/GoodStuffSoftware/gss-beacon) |
@@ -281,7 +281,7 @@ Single Cloudflare account — no account-ID env needed. Pages project: **gss-sta
 
 The app does its own sign-in, the same way deckhand does: Google OAuth plus an email
 allowlist. Design, alternatives and the deckhand comparison are in
-[ADR 0001](docs/adr/0001-google-auth.md). Code: `functions/_middleware.ts` and
+[ADR 0002](docs/adr/0002-google-auth.md). Code: `functions/_middleware.ts` and
 `functions/_lib/auth.ts`.
 
 **What happens on a request.** `functions/_middleware.ts` runs on every request: pages,

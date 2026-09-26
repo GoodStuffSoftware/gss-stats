@@ -11,7 +11,7 @@
 //
 // 2. Google sign-in gate (functions/_lib/auth.ts). Every page and every /api/* route
 //    needs a signed-in Google account on ALLOWED_EMAILS. Fails closed when unconfigured.
-//    See docs/adr/0001-google-auth.md and README "Auth".
+//    See docs/adr/0002-google-auth.md and README "Auth".
 
 import { authGate, type AuthEnv } from './_lib/auth'
 
