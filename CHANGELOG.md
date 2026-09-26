@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.2] — 2026-09-26
+
 ### Changed
 - **Far fewer D1 reads per dashboard load.** The site-filter list's traffic count now covers
   the last 90 days (labeled as such) instead of scanning the whole visit history on every
