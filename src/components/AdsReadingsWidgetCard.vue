@@ -14,6 +14,7 @@ import type { AdsReadingsCampaign, AdsReadingsResponse } from '../lib/adsStore'
 import { proposalLabel, type ReadingRecord, type RuleResult } from '../lib/adsRules'
 import { freshnessLine, STALE_NOTE } from '../lib/adsFreshness'
 import { SMALL_SAMPLE_NOTE } from '../lib/popupEvents'
+import { fetchAdsReadings } from '../api'
 
 export interface AdsReadingsWidgetLike {
   view?: string
@@ -40,9 +41,8 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const res = await fetch(`/api/ads/readings?${query.value}`)
-    if (!res.ok) throw new Error(`readings ${res.status}`)
-    data.value = (await res.json()) as AdsReadingsResponse
+    // Through api.ts so an expired session raises the re-sign-in banner (see withSessionCheck).
+    data.value = await fetchAdsReadings(query.value)
   } catch (e: any) {
     error.value = e?.message ?? 'Failed to load'
   } finally {

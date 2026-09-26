@@ -14,6 +14,7 @@ import PageBar from './components/PageBar.vue'
 import FilterBar from './components/FilterBar.vue'
 import Dashboard from './components/Dashboard.vue'
 import ChartEditor from './components/ChartEditor.vue'
+import AccountMenu from './components/AccountMenu.vue'
 
 const config = reactive<DashboardConfig>(defaultConfig())
 const loaded = ref(false)
@@ -71,7 +72,9 @@ onMounted(async () => {
 // ── Persistence (debounced) ───────────────────────────────────────────────────
 let saveTimer: number | undefined
 function scheduleSave() {
-  if (!loaded.value) return
+  // Never save while signed out: a config that fell back to defaults because the load
+  // was refused must not overwrite the stored one.
+  if (!loaded.value || sessionExpired.value) return
   saveState.value = 'saving'
   clearTimeout(saveTimer)
   saveTimer = window.setTimeout(async () => {
@@ -353,6 +356,7 @@ function toggleDark() {
           {{ dark ? '☀' : '☾' }}
         </button>
         <button v-if="!isBespokePage" class="btn btn-primary" @click="addChart">＋ Add chart</button>
+        <AccountMenu />
       </div>
     </header>
 
