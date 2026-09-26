@@ -3,7 +3,7 @@ import { ref, watch, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import type { Widget, GlobalFilters, StatsResponse } from '../types'
 import { fetchStats } from '../api'
 import { sitesLoaded } from '../sitesStore'
-import { checkSessionExpired, isNetworkError } from '../session'
+import { checkSessionExpired, isAuthError, isNetworkError } from '../session'
 import { buildChartConfig, formatKey, metricValue, nestedDoughnutClickValue, seriesRows } from '../lib/charts'
 import { rangeLabel } from '../lib/range'
 import { isSiteDim, semanticKey } from '../lib/drill'
@@ -152,7 +152,7 @@ async function load() {
     if (my === reqId) data.value = r
   } catch (e: any) {
     if (my === reqId) error.value = e?.message ?? 'Failed to load'
-    if (isNetworkError(e)) checkSessionExpired() // probe for an expired Access session
+    if (isNetworkError(e) || isAuthError(e)) checkSessionExpired() // probe for an expired session
   } finally {
     if (my === reqId) loading.value = false
   }
