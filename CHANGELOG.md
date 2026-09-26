@@ -6,6 +6,17 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Closed campaigns' scorecard no longer shows "not instrumented" chips.** A funnel step a
+  closed flight's window never actually had a beacon for is left off the chip list entirely,
+  instead of showing a misleading "not instrumented" label — derived from the same per-flight
+  check the campaigns page already used, not a hand-written list.
+
+### Added
+- **A raw-install de-dupe marker on the Overview timeline.** Marks when duplicate cross-tab
+  `/install/*` rows stopped being sent — shown only on the raw install-signal line, never the
+  primary (already deduplicated) install count.
+
 ## [0.7.0] — 2026-09-26
 
 ### Added

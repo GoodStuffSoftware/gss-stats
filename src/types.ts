@@ -323,6 +323,10 @@ export interface OverviewScorecardRow {
   taggedArrivals: number
   funnelRates: Partial<Record<keyof CampaignFunnelCounts, number | null>>
   funnelCounts: CampaignFunnelCounts // pairs with funnelRates — see OverviewKpiTile.denominator
+  // Steps this campaign's flight never saw ANY hit for site-wide — only ever populated for a
+  // CLOSED campaign (see functions/api/overview.ts's scorecard); always [] for active/
+  // upcoming. The UI omits these chips instead of labeling them "not instrumented".
+  notInstrumented: (keyof CampaignFunnelCounts)[]
   authSuccess: number
   install: number
   returnRateD2to7: number | null
@@ -356,6 +360,9 @@ export interface OverviewResponse {
      * lib/popupEvents.ts NEW_BEACONS_LIVE_AT_ET. */
     newBeaconsLiveAt?: string
     newBeaconsLiveAtLabel?: string
+    /** v1.95.6 raw /install/* de-dupe go-live (ET date) — see lib/popupEvents.ts
+     * RAW_INSTALL_DEDUPE_LIVE_AT_ET. Annotates the raw install-signal line ONLY. */
+    rawInstallDedupeAt?: string
     since: string
     until: string
     seriesLabels?: { install: string; rawInstallSignals: string }

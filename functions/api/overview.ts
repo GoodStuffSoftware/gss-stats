@@ -45,6 +45,7 @@ import {
   GAME_COMPLETE_LIVE_AT,
   NEW_BEACONS_LIVE_AT_ET,
   NEW_BEACONS_LIVE_MARKER_LABEL,
+  RAW_INSTALL_DEDUPE_LIVE_AT_ET,
   POPUPS,
 } from '../../src/lib/popupEvents'
 import {
@@ -62,6 +63,7 @@ import {
 import { latestDatedRelease, datedReleases } from '../../src/lib/releases'
 import { resolveCampaignSpend } from '../../src/lib/adsRules'
 import { readSpendSummaries } from '../../src/lib/adsStore'
+import { notInstrumentedFunnelSteps } from '../_lib/campaignInstrumentation'
 
 interface Env {
   gss_geo: D1Database
@@ -312,19 +314,31 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       applyExclusions(w2, b2)
       const sql2 = `SELECT path, COUNT(*) AS cnt FROM hits WHERE ${w2.join(' AND ')} GROUP BY path`
 
-      const [r1, r2] = await Promise.all([db.prepare(sql1).bind(...b1).all(), db.prepare(sql2).bind(...b2).all()])
+      // CLOSED-campaign notInstrumented: the same per-flight "did this path exist site-wide
+      // during the window" derivation /api/campaigns.ts uses (functions/_lib/
+      // campaignInstrumentation.ts), so the scorecard's chip list can OMIT a closed flight's
+      // never-instrumented steps instead of showing a false-zero rate for them (owner
+      // clarification, 2026-09-26 — "closed campaigns" scope). Kept OFF for the active/
+      // upcoming campaign(s) on purpose: the simplified gameCompleteNotInstrumented-only gate
+      // below is what the scorecard has always shown for them, and the owner asked to leave
+      // that campaign's rendering exactly as it is.
+      const [r1, r2, closedNotInstrumented] = await Promise.all([
+        db.prepare(sql1).bind(...b1).all(),
+        db.prepare(sql2).bind(...b2).all(),
+        c.status === 'closed' ? notInstrumentedFunnelSteps(db, c) : Promise.resolve<FunnelStepKey[]>([]),
+      ])
       const rows1 = (r1.results ?? []).map((x: any) => ({ path: String(x.path ?? ''), visitor: String(x.visitor ?? ''), c: Number(x.cnt) || 0 }))
       const taggedArrivals = rows1.filter((r) => r.visitor === 'new').reduce((a, r) => a + r.c, 0)
       const counts = computeFunnelCounts(
         rows1.map((r) => ({ path: r.path, count: r.c })),
         taggedArrivals,
       )
-      // Simplified vs /api/campaigns.ts: skips the extra per-flight "did this path exist
-      // site-wide during the window" query (the campaign's own page, /api/campaigns, is the
-      // source of truth for that) — but still gates 'completed' on gameCompleteNotInstrumented
-      // (v1.95.5) rather than the permanent global default, so a flight whose window reaches
+      // Simplified vs /api/campaigns.ts for a non-closed flight: skips the extra per-flight
+      // query above and gates 'completed' only on gameCompleteNotInstrumented (v1.95.5)
+      // rather than the permanent global default, so a flight whose window reaches
       // GAME_COMPLETE_LIVE_AT shows real completed-game rates instead of a stale "—".
-      const rates = funnelStepRates(counts, gameCompleteNotInstrumented(c) ? FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED : new Set<FunnelStepKey>())
+      const notInstrumentedSet = c.status === 'closed' ? new Set(closedNotInstrumented) : gameCompleteNotInstrumented(c) ? FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED : new Set<FunnelStepKey>()
+      const rates = funnelStepRates(counts, notInstrumentedSet)
 
       const returnCounts = Object.fromEntries(['d0', 'd1', 'd2-7', 'd8-14', 'd15-30', 'd31-60'].map((b) => [b, 0])) as Record<string, number>
       for (const x of r2.results ?? []) {
@@ -349,6 +363,10 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
         taggedArrivals,
         funnelRates: rates,
         funnelCounts: counts, // lets the UI tell "too few to report" (MIN_COHORT) apart from "—"
+        // Closed campaigns only (see notInstrumentedSet above) — the UI omits these chips
+        // entirely instead of labeling them "not instrumented" (owner clarification,
+        // 2026-09-26). Always [] for an active/upcoming campaign.
+        notInstrumented: [...notInstrumentedSet],
         authSuccess: counts.authSuccess,
         install: counts.install,
         returnRateD2to7: returnRates['d2-7'],
@@ -415,6 +433,10 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       // NEW_BEACONS_LIVE_AT_ET / NEW_BEACONS_LIVE_MARKER_LABEL.
       newBeaconsLiveAt: NEW_BEACONS_LIVE_AT_ET,
       newBeaconsLiveAtLabel: NEW_BEACONS_LIVE_MARKER_LABEL,
+      // v1.95.6 raw /install/* de-dupe (ADD-only — never gates any count; see
+      // lib/popupEvents.ts RAW_INSTALL_DEDUPE_LIVE_AT_ET's own comment): annotates the raw
+      // install-signal line ONLY, never the primary (already deduplicated) install count.
+      rawInstallDedupeAt: RAW_INSTALL_DEDUPE_LIVE_AT_ET,
       since,
       until,
       // Series labels that carry data caveats, so the chart shows them whatever the layout.
