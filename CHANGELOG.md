@@ -37,6 +37,10 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **A raw-install de-dupe marker on the Overview timeline.** Marks when duplicate cross-tab
   `/install/*` rows stopped being sent — shown only on the raw install-signal line, never the
   primary (already deduplicated) install count.
+- **A completions chart (mode × difficulty).** Shows distinct completed games broken down by
+  normal/daily and difficulty, live from the game-complete beacon's go-live. Added to the
+  Best Sudoku Overview page automatically for anyone who hasn't customised it; a configurable,
+  movable chart like any other, buildable on any page from the chart menu.
 
 ## [0.7.0] — 2026-09-26
 
