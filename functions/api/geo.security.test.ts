@@ -232,3 +232,22 @@ describe('onRequestPost — blank-value labels for the new dimensions', () => {
     expect(body.rows).toEqual([{ key: { pathFamily: 'page' }, pageviews: 1, visits: 1 }])
   })
 })
+
+describe('onRequestPost — ring mode with screenw (INTEGER), including 0', () => {
+  it('a ring including screenw drops screenw=0 rows instead of showing a raw "0" key (real handler, real SQL)', async () => {
+    const { gss_geo, db } = makeFakeD1()
+    const now = Date.now()
+    db.exec(`INSERT INTO hits (ts, path, region, screenw) VALUES
+      (${now}, '/home', 'CA', 0),
+      (${now}, '/home', 'CA', 1024),
+      (${now}, '/home', 'NY', 375)`)
+    const res: any = await post(
+      { dims: ['region', 'screenw'], since: new Date(now - 1000).toISOString(), until: new Date(now + 1000).toISOString() },
+      { gss_geo },
+    )
+    const body = await res.json()
+    expect(body.totals.pageviews).toBe(2) // the screenw=0 row is excluded, not mislabeled "0"
+    expect(body.rows.every((r: any) => r.key.screenw !== '0')).toBe(true)
+    expect(body.rows.map((r: any) => r.key.screenw).sort()).toEqual(['1024', '375'])
+  })
+})

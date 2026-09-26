@@ -232,7 +232,11 @@ of them from every pageview/visit total and the top-pages breakdown by default (
 [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) `POPUP_EVENT_PREFIXES`); `/api/popups` is
 where they're counted. Each geo chart has its own **"Include event beacons"** option (off by
 default, so nothing existing changes) to lift that exclusion and chart event paths directly —
-e.g. with the **path family** dimension below.
+e.g. with the **path family** dimension below. Drilling into an event-family `pathFamily`
+value (e.g. "install") carries that option onto the filtered page it opens, so every chart
+there — not just the one drilled — can show the event rows just filtered down to; the page
+carries a caption explaining why (see [`src/lib/drill.ts`](src/lib/drill.ts)
+`drillNeedsEventBeacons`).
 
 **Every stored geo-beacon column is a chartable dimension AND a filter.** `functions/api/geo.ts`
 whitelists every analytic `hits` column (`GEO_DIMS`) — region/city/postal/country/continent/

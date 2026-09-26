@@ -307,6 +307,17 @@ describe('normWidget — includeEventBeacons round-trip (via normalizeConfig)', 
     const norm = normalizeConfig(withWidgets([legacy as unknown as Widget]))
     expect(norm.pages[0].widgets[0].includeEventBeacons).toBeUndefined()
   })
+
+  it('the PAGE-level filters.includeEventBeacons (set by App.vue openFilteredPage on an event-family drill) also survives normalizeConfig', () => {
+    const cfg: DashboardConfig = {
+      version: CONFIG_VERSION,
+      activePageId: 'user-1',
+      pages: [page({ id: 'user-1', name: 'Filtered', widgets: [widget({ id: 'w1', type: 'hbar', dataset: 'geo', dimension: 'device' })] })],
+    }
+    cfg.pages[0].filters.includeEventBeacons = true
+    const norm = normalizeConfig(cfg)
+    expect(norm.pages[0].filters.includeEventBeacons).toBe(true)
+  })
 })
 
 describe('defaultBestSudokuPopupsWidgets — titles are plain, caveats are captions', () => {

@@ -13,7 +13,7 @@
 // bug that summed only the returned (post-LIMIT) rows would show up as a wrong total.
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { breakdownColumnExpr, buildMergedBreakdownSql, buildMergedRingSql } from './geo'
+import { breakdownColumnExpr, buildMergedBreakdownSql, buildMergedRingSql, emptyLabelFor, ringBlankExclusion } from './geo'
 
 let db: DatabaseSync
 
@@ -250,5 +250,58 @@ describe('breakdownColumnExpr — new derived dimensions', () => {
     const col = breakdownColumnExpr('pathFamily', '')
     const row = db.prepare(`SELECT COUNT(*) AS c FROM hits WHERE (${col}) = ?`).get('install') as any
     expect(row.c).toBe(2)
+  })
+})
+
+// ── Ring mode with screenw (INTEGER) — the reviewed bug ────────────────────────────────────
+//
+// screenw is the ring stack's only INTEGER dimension. Its blank sentinel is 0, never the
+// empty STRING every TEXT ring dimension's `<> ''` test compares against — SQLite's type
+// ordering means an INTEGER can NEVER equal a TEXT literal, so a naive `screenw <> ''` is a
+// no-op (always true) that excludes nothing, letting screenw=0 rows leak into ring results as
+// a raw "0" key instead of being dropped like every other dimension's blanks. Fixed by
+// ringBlankExclusion (type-correct per-dim test) + routing ring columns through
+// breakdownColumnExpr (same formatting/labeling as single-dim mode).
+describe('ring mode — screenw (INTEGER) blank handling', () => {
+  function ringQuery(dims: string[], whereExtra: string[] = []) {
+    const cols = dims.map((d, i) => `${breakdownColumnExpr(d, emptyLabelFor(d))} AS k${i}`)
+    const whereSql = ['1=1', ...dims.map(ringBlankExclusion), ...whereExtra].join(' AND ')
+    const groupBy = dims.map((_, i) => `k${i}`).join(', ')
+    const sql = buildMergedRingSql(cols, whereSql, groupBy)
+    return db.prepare(sql).all(50) as any[]
+  }
+
+  it('ringBlankExclusion is type-correct: screenw=0 rows are excluded, matching every TEXT dimension', () => {
+    insertRow({ region: 'CA', device: 'desktop', screenw: 0 }) // blank screenw — must be dropped
+    insertRow({ region: 'CA', device: 'desktop', screenw: 1024 })
+    insertRow({ region: 'NY', device: 'mobile', screenw: 375 })
+    const rows = ringQuery(['region', 'screenw'])
+    // Only the two non-blank screenw rows survive; the screenw=0 row never appears as "0" or
+    // under any label — ring mode drops blanks outright, same as it always has for TEXT dims.
+    expect(rows.map((r) => ({ k0: r.k0, k1: r.k1, c: r.c })).sort((a, b) => a.k1.localeCompare(b.k1))).toEqual([
+      { k0: 'CA', k1: '1024', c: 1 },
+      { k0: 'NY', k1: '375', c: 1 },
+    ])
+    expect(rows.reduce((n, r) => n + r.c, 0)).toBe(2) // NOT 3 — the blank row is gone, not mislabeled
+  })
+
+  it('REGRESSION: the old bare-column WHERE test (`screenw <> \'\'`) is a no-op and would have let the blank row through as "0"', () => {
+    insertRow({ screenw: 0 })
+    insertRow({ screenw: 1024 })
+    // Reproduce the exact bug: an INTEGER column compared to the empty TEXT literal.
+    const buggyRows = db.prepare(`SELECT screenw AS k, COUNT(*) AS c FROM hits WHERE screenw <> '' GROUP BY k`).all() as any[]
+    expect(buggyRows.length).toBe(2) // BOTH rows survive — the "exclusion" excluded nothing
+    expect(buggyRows.some((r) => String(r.k) === '0')).toBe(true) // the blank leaked through as raw "0"
+    // The fixed version drops it:
+    const fixedRows = db.prepare(`SELECT screenw AS k, COUNT(*) AS c FROM hits WHERE ${ringBlankExclusion('screenw')} GROUP BY k`).all() as any[]
+    expect(fixedRows.length).toBe(1)
+    expect(String(fixedRows[0].k)).toBe('1024')
+  })
+
+  it('ring columns route through breakdownColumnExpr: screenw is formatted as TEXT, not a raw SQLite INTEGER', () => {
+    insertRow({ screenw: 1440 })
+    const rows = ringQuery(['screenw'])
+    expect(rows).toEqual([{ k0: '1440', c: 1, total: 1 }])
+    expect(typeof rows[0].k0).toBe('string')
   })
 })
