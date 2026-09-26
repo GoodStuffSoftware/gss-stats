@@ -102,6 +102,8 @@ function header(r: MorningResult | PostflightResult, kind: string): string[] {
 
 export function formatMorningReport(r: MorningResult): string {
   const out = header(r, r.mode === 'health-only' ? 'release-health backstop' : 'morning read')
+  if (r.failures.length) out.push(`READ FAILED: ${r.failures.join(', ')} (details under Errors)`)
+  if (r.missedReads.length) out.push(`Previous scheduled read missing: ${r.missedReads.join(', ')}`)
   if (r.mode === 'morning') {
     out.push(...spendLines(r.spend))
     const t = r.tagged
@@ -143,6 +145,7 @@ function storeLine(r: MorningResult | PostflightResult): string {
 
 export function formatPostflightReport(r: PostflightResult): string {
   const out = header(r, `post-flight ${r.stage} read`)
+  if (r.failures.length) out.push(`READ FAILED: ${r.failures.join(', ')} (details under Errors)`)
   out.push(...spendLines(r.spend))
   out.push(`Spend ended ${r.spendEndEt ?? '—'}; this stage is due ${r.dueEt ?? '—'} (${r.due ? 'due' : 'NOT due yet'})`)
   if (r.postFlightSpend) out.push(`After-flight spend: [${r.postFlightSpend.status}] ${r.postFlightSpend.detail}`)

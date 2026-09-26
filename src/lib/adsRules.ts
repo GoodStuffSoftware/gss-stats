@@ -103,6 +103,10 @@ export interface AdsReadPlan {
   /** Kill rule 2: propose pause when cumulative CTR is BELOW this. */
   ctrFloor: number
   approvedPlacements: readonly string[]
+  /** ET dates the scheduled morning read runs (docs/routines/bsk-retest-morning-read.md) —
+   * used to notice a scheduled read that never ran. */
+  morningReadFirstEt: string
+  morningReadLastEt: string
 }
 
 // Budget and cap come from lib/campaigns.ts (the one campaign definition); only the read
@@ -118,7 +122,24 @@ export const ADS_READ_PLANS: Record<string, AdsReadPlan> = {
     placementLeakMaxShare: 0.1,
     ctrFloor: 0.0015,
     approvedPlacements: RETEST_APPROVED_PLACEMENTS,
+    morningReadFirstEt: '2026-09-27',
+    morningReadLastEt: '2026-10-03',
   },
+}
+
+/** A scheduled morning read that never ran can't report itself, so the next read that does
+ * run lists the ET dates with no daily reading since the last one on record (only dates
+ * inside the routine's window, up to yesterday). */
+export function missingDailyReads(readings: readonly ReadingRecord[], todayEt: string, firstEt: string, lastEt: string): string[] {
+  const dailyDates = readings.filter((r) => r.kind === 'daily' && r.etDate < todayEt).map((r) => r.etDate)
+  const lastSeen = dailyDates.sort().at(-1) ?? null
+  const out: string[] = []
+  let d = lastSeen && lastSeen >= firstEt ? addDays(lastSeen, 1) : firstEt
+  while (d < todayEt && d <= lastEt) {
+    if (!dailyDates.includes(d)) out.push(d)
+    d = addDays(d, 1)
+  }
+  return out
 }
 
 /** Metric READS (spend, impressions, clicks, placements) may cover any configured campaign,

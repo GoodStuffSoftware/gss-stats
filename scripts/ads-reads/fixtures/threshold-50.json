@@ -53,6 +53,9 @@
   "store": {
     "consumed": [25],
     "readings": [
+      { "v": 1, "id": "daily:24279250691:2026-09-27T12:05:00.000Z", "campaignId": "24279250691", "kind": "daily", "readAt": "2026-09-27T12:05:00.000Z", "etDate": "2026-09-27", "spendThroughEt": "2026-09-26", "cumulativeSpend": 10.5, "thresholds": [], "complete": true, "rules": null, "proposal": null, "decision": null, "counts": {}, "notes": [] },
+      { "v": 1, "id": "daily:24279250691:2026-09-28T12:05:00.000Z", "campaignId": "24279250691", "kind": "daily", "readAt": "2026-09-28T12:05:00.000Z", "etDate": "2026-09-28", "spendThroughEt": "2026-09-27", "cumulativeSpend": 23.7, "thresholds": [], "complete": true, "rules": null, "proposal": null, "decision": null, "counts": {}, "notes": [] },
+      { "v": 1, "id": "daily:24279250691:2026-09-29T12:05:00.000Z", "campaignId": "24279250691", "kind": "daily", "readAt": "2026-09-29T12:05:00.000Z", "etDate": "2026-09-29", "spendThroughEt": "2026-09-28", "cumulativeSpend": 36.7, "thresholds": [], "complete": true, "rules": null, "proposal": null, "decision": null, "counts": {}, "notes": [] },
       {
         "v": 1, "id": "threshold:24279250691:2026-09-29T12:05:00.000Z", "campaignId": "24279250691", "kind": "threshold",
         "readAt": "2026-09-29T12:05:00.000Z", "etDate": "2026-09-29", "spendThroughEt": "2026-09-28", "cumulativeSpend": 36.7,
