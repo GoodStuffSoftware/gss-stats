@@ -442,6 +442,57 @@ describe('reports', () => {
   })
 })
 
+describe('mid-flight instrumentation: the upsell-fix segment boundary and exact sign-ups', () => {
+  const FIX = Date.parse('2026-09-29T18:26:00Z') // 14:26 ET on 09-29
+  const at100 = () => {
+    const fx = base()
+    ads(fx).daily['2026-09-29'].costMicros = 70_000_000
+    fx.store!.consumed = [25, 50, 75]
+    return fx
+  }
+  it('the $100 read reports pre-fix and post-fix spend, asks, accepts and sign-ups separately', async () => {
+    const deps = { ...fixtureDeps(at100(), false), boundaries: { upsellFixAtMs: FIX } }
+    const r = await runMorningRead(deps, opts)
+    const seg = r.thresholdRead!.segments!
+    expect(seg.boundaryLabel).toBe('2026-09-29 14:26 ET')
+    expect(seg.pre.asks + seg.post.asks).toBe(r.thresholdRead!.tagged!.summary.asks.total)
+    expect(seg.pre.asks).toBe(3) // /signin-prompt/placement on 09-28
+    expect(seg.post.asks).toBe(2) // /promo-first50/shown on 09-29 21:00Z, after the fix
+    expect(seg.post.accepts).toBe(1)
+    expect(seg.boundaryDay).toBe('2026-09-29')
+    const text = formatMorningReport(r)
+    expect(text).toMatch(/Segments at the signed-out upsell fix \(2026-09-29 14:26 ET\) — two separate short tests \(spec section 14a\):/)
+    expect(text).toMatch(/ {2}pre-fix: spend \$\d+\.\d\d over \d+ closed day\(s\); .*asks 3, accepts 0/)
+    expect(text).toMatch(/ {2}post-fix: .*asks 2, accepts 1/)
+    expect(text).toMatch(/fix day 2026-09-29: spend \$70\.00 \(straddles the fix/)
+    expect(r.notify.text).toMatch(/split at the upsell fix: pre-fix 3 asks\/0 sign-ups, post-fix 2 asks\/1 sign-ups/)
+    const rec = deps.store.written.readings.find((x) => x.kind === 'threshold')!
+    expect(rec.counts).toMatchObject({ preFixAsks: 3, postFixAsks: 2, postFixAccepts: 1, fixDaySpend: 70 })
+  })
+  it('the post-flight wrap-up reports the segments too', async () => {
+    const fx = base()
+    fx.now = '2026-10-09T13:00:00Z'
+    const r = await runPostflightRead({ ...fixtureDeps(fx, false), boundaries: { upsellFixAtMs: FIX } }, { campaignId: '24279250691', stage: 'wrapup', force: false })
+    expect(r.read!.segments).not.toBeNull()
+    expect(formatPostflightReport(r)).toMatch(/Segments at the signed-out upsell fix/)
+    expect(r.notify.text).toMatch(/split at the upsell fix \(see report\)/)
+  })
+  it('without a boundary (the instant is still null) nothing changes', async () => {
+    const r = await runMorningRead(fixtureDeps(at100(), false), opts)
+    expect(r.thresholdRead!.segments).toBeNull()
+    expect(formatMorningReport(r)).not.toMatch(/Segments at/)
+  })
+  it('once /new|existing is live, a tagged /new sign-up is counted exactly', async () => {
+    const fx = at100()
+    const b = fx.beacon as Extract<Fixture['beacon'], { tagged: unknown }>
+    b.tagged = b.tagged.map((t) => (t.path === '/auth/success/google' ? { ...t, path: '/auth/success/google/new' } : t))
+    const r = await runMorningRead({ ...fixtureDeps(fx, false), boundaries: { authNewExistingLiveAtMs: Date.parse('2026-09-28T16:00:00Z') } }, opts)
+    expect(r.thresholdRead!.decision).toMatchObject({ signUpsAtMost: 1, signUpsExact: true, signUpsExactNew: 1, row: 'one' })
+    expect(r.notify.text).toMatch(/1 campaign sign-up \(exact\), row one/)
+    expect(formatMorningReport(r)).toMatch(/1 campaign sign-up \(exact: tagged \/auth\/success\/<provider>\/new since 2026-09-28 12:00 ET\)/)
+  })
+})
+
 describe('same-day reruns: one reading per entry, no repeated push (owner, 2026-09-26)', () => {
   const hour = 3_600_000
   it('an incomplete threshold read rerun the same morning is not stored or pushed as a threshold again; the failure still pushes', async () => {

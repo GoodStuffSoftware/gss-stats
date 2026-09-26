@@ -131,7 +131,7 @@ const loadedAt = computed(() => (data.value ? Date.parse(data.value.generatedAt)
                 <td class="mono num">{{ fmt(r.counts.asks) }}</td>
                 <td class="mono num">{{ fmt(r.counts.accepts) }}</td>
                 <td class="mono num">{{ fmt(r.counts.authSuccess) }}</td>
-                <td class="mono num">{{ r.counts.signUpsAtMost == null ? '—' : `at most ${fmt(r.counts.signUpsAtMost)}` }}</td>
+                <td class="mono num">{{ r.counts.signUpsAtMost == null ? '—' : r.counts.signUpsExact === 1 ? `${fmt(r.counts.signUpsAtMost)} (exact)` : `at most ${fmt(r.counts.signUpsAtMost)}` }}</td>
               </tr>
             </tbody>
           </table>

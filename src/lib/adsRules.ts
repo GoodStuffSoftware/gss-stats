@@ -58,6 +58,18 @@ export const CLOSED_CAMPAIGN_IDS: readonly string[] = ['24215315197', '242343477
  * ET calendar day of the same release; this is the instant. */
 export const WEB_GO_LIVE_UTC_MS = Date.parse('2026-09-26T14:25:00Z')
 
+// ── Mid-flight instrumentation (owner override of the spec section 14a beacon freeze, 2026-09-26)
+// Each instant is set (UTC ms) by the release coordinator once the release is live; null = not
+// live yet, and every read behaves exactly as before.
+/** When `/auth/success/<provider>/new|existing` went live. From then on campaign sign-ups are
+ * counted EXACTLY from tagged `/new` rows; "at most N" still bounds the unsplit rows (before the
+ * release, or from an old client). See campaignSignUps. */
+export const AUTH_NEW_EXISTING_LIVE_AT: number | null = null
+/** When the signed-out upsell fix went live. A BEHAVIOUR change, so a funnel SEGMENT
+ * BOUNDARY: the $100 read and the post-flight reads report pre-fix and post-fix figures
+ * separately (spec section 14a: "two separate short tests"). See splitAtBoundary. */
+export const UPSELL_SIGNEDOUT_FIX_AT: number | null = null
+
 // The 17 approved placements (spec section 5): 1 in "Sudoku.com placement", 16 in "Other
 // Sudoku placements". Android package ids, matched against the Ads API's placement strings
 // (e.g. "mobileapp::2-com.easybrain.sudoku.android") by isApprovedPlacement below.
@@ -381,6 +393,20 @@ function emptyOutcomes(): OutcomeCounts {
   return o
 }
 
+/** `/auth/success/<provider>` → 'unsplit'; `…/<provider>/new` → 'new'; `…/<provider>/existing`
+ * → 'existing'; anything else → null. Matched on the PREFIX, so every auth-success row counts
+ * exactly once whatever its suffix (the same prefix lib/campaigns.ts classifyFunnelPath and
+ * functions/api/overview.ts use). */
+export const AUTH_SUCCESS_PREFIX = '/auth/success/'
+export type AuthSuccessKind = 'new' | 'existing' | 'unsplit'
+export function authSuccessKind(path: string): AuthSuccessKind | null {
+  if (!path.startsWith(AUTH_SUCCESS_PREFIX)) return null
+  const parts = path.slice(AUTH_SUCCESS_PREFIX.length).split('/').filter(Boolean)
+  if (parts[1] === 'new') return 'new'
+  if (parts[1] === 'existing') return 'existing'
+  return 'unsplit'
+}
+
 export interface TaggedRow {
   hourStartMs: number
   path: string
@@ -398,7 +424,11 @@ export interface TaggedSummary {
   /** Read separately, never summed — the two dialogs dismiss differently (spec section 11). */
   dismisses: { signinPrompt: number; promoFirst50: number }
   authRedirect: number
+  /** Every /auth/success/<provider>[/…] row, matched on the PREFIX: a /new or /existing suffix
+   * is neither dropped nor counted twice (each row is one path). */
   authSuccess: number
+  /** The same rows by suffix (authSuccessKind): `/new`, `/existing`, or neither ("unsplit"). */
+  authSuccessSplit: Record<AuthSuccessKind, number>
   /** installed = /popup-outcome/install-prompt/installed (at most once per showing) — THE
    * install metric; rawSignals = raw /install/<outcome> beacons, which can double-count. */
   install: { promptShown: number; taps: number; installed: number; rawSignals: number }
@@ -421,6 +451,7 @@ export function summarizeTaggedRows(rows: readonly TaggedRow[], opts: { fromMs?:
     dismisses: { signinPrompt: 0, promoFirst50: 0 },
     authRedirect: 0,
     authSuccess: 0,
+    authSuccessSplit: { new: 0, existing: 0, unsplit: 0 },
     install: { promptShown: 0, taps: 0, installed: 0, rawSignals: 0 },
     promoFirst50: { shown: 0, accept: 0, dismiss: 0 },
     upsell: { shown: 0, accept: 0, dismiss: 0 },
@@ -439,7 +470,11 @@ export function summarizeTaggedRows(rows: readonly TaggedRow[], opts: { fromMs?:
       s.accepts.byPath[r.path] += r.count
     }
     if (r.path.startsWith('/auth/redirect/')) s.authRedirect += r.count
-    if (r.path.startsWith('/auth/success/')) s.authSuccess += r.count
+    const auth = authSuccessKind(r.path)
+    if (auth) {
+      s.authSuccess += r.count
+      s.authSuccessSplit[auth] += r.count
+    }
     const ev = classifyPopupPath(r.path)
     if (!ev) continue
     if (ev.family === 'signin-prompt' && ev.kind === 'shown' && !(ASK_PATHS as readonly string[]).includes(r.path)) s.asks.otherShownReasons += r.count
@@ -946,10 +981,12 @@ export function evaluateKillRules(i: KillRuleInput): KillRuleEvaluation {
 // ── Decision table at the $100 read (spec section 13) ───────────────────────────────────
 export type DecisionRow = 'two-plus' | 'one' | 'zero-declined' | 'zero-rarely-shown' | 'zero-accepted-not-completed'
 export interface DecisionInput {
-  /** An UPPER bound on campaign sign-ups — see signUpsAtMost. */
+  /** Campaign sign-ups: an UPPER bound (signUpsAtMost) unless `exact` (campaignSignUps). */
   signUpsAtMost: number
   asks: number
   accepts: number
+  /** true when the count is exact (every sign-up came from a tagged /auth/success/…/new row). */
+  exact?: boolean
 }
 export interface DecisionResult {
   row: DecisionRow
@@ -960,6 +997,20 @@ export interface DecisionResult {
  * figure is an upper bound, so the 2+ and 1 rows can only say "at most"; a bound of 0 is a
  * real zero. */
 export function decideAt100(i: DecisionInput): DecisionResult {
+  if (i.exact && i.signUpsAtMost >= 2) {
+    return {
+      row: 'two-plus',
+      reading: `${i.signUpsAtMost} campaign sign-ups (exact: tagged /auth/success/<provider>/new): the funnel converts paid display traffic at roughly 1% or better.`,
+      next: 'Compute cost per sign-up. Hold on scaling until the day-15+ follow-up reports. Run O3 (Search) at the same cap against the same funnel to compare intent. Do not scale display until a sign-up shows a trial-to-purchase path measured at day 15 or later.',
+    }
+  }
+  if (i.exact && i.signUpsAtMost === 1) {
+    return {
+      row: 'one',
+      reading: '1 campaign sign-up (exact). Inconclusive at this base.',
+      next: "Hold. Do not scale; carry the funnel reads and that sign-up's day-15+ outcome into the next decision.",
+    }
+  }
   if (i.signUpsAtMost >= 2) {
     return {
       row: 'two-plus',
@@ -1003,6 +1054,162 @@ export function signUpsAtMost(taggedAuthSuccess: number, windowNewAccounts: numb
 }
 export function signUpsAtMostLabel(atMost: number, taggedAuthSuccess: number, windowNewAccounts: number | null): string {
   return `at most ${atMost} campaign sign-up${atMost === 1 ? '' : 's'} (tagged auth successes ${taggedAuthSuccess}; new prod accounts sitewide in the window ${windowNewAccounts ?? 'not read'})`
+}
+
+const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`
+function etMinuteLabel(ms: number): string {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+      .formatToParts(new Date(ms))
+      .map((x) => [x.type, x.value]),
+  )
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute} ET`
+}
+
+export interface SignUpCount {
+  /** What the decision table uses: exact when `exact`, else an upper bound. */
+  count: number
+  exact: boolean
+  /** The "at most" part: min(unsplit tagged auth successes, window new accounts); null when
+   * the /new|existing split is not live. */
+  bounded: number | null
+  /** Exact sign-ups from tagged /auth/success/<provider>/new rows (null before the split). */
+  exactNew: number | null
+  label: string
+}
+/** Campaign sign-ups. Until AUTH_NEW_EXISTING_LIVE_AT is set: "at most N" over EVERY tagged
+ * auth-success row (prefix match, so a suffixed row still counts once). Once it is set: the
+ * tagged `/new` rows are counted EXACTLY, `/existing` rows (returning sign-ins) never count, and
+ * "at most" still bounds the unsplit rows — the part of the window before the release, plus any
+ * old client that still sends the bare path. Classified by path, not by hour: a suffix only
+ * exists after the release, so no row is dropped or counted twice at the boundary. */
+export function campaignSignUps(
+  s: Pick<TaggedSummary, 'authSuccess' | 'authSuccessSplit'>,
+  windowNewAccounts: number | null,
+  liveAtMs: number | null = AUTH_NEW_EXISTING_LIVE_AT,
+): SignUpCount {
+  if (liveAtMs == null) {
+    const n = signUpsAtMost(s.authSuccess, windowNewAccounts)
+    return { count: n, exact: false, bounded: n, exactNew: null, label: signUpsAtMostLabel(n, s.authSuccess, windowNewAccounts) }
+  }
+  const unsplit = s.authSuccessSplit.unsplit
+  const bounded = unsplit > 0 ? signUpsAtMost(unsplit, windowNewAccounts) : 0
+  const exactNew = s.authSuccessSplit.new
+  const since = etMinuteLabel(liveAtMs)
+  if (unsplit === 0) {
+    return { count: exactNew, exact: true, bounded: 0, exactNew, label: `${plural(exactNew, 'campaign sign-up')} (exact: tagged /auth/success/<provider>/new since ${since})` }
+  }
+  return {
+    count: bounded + exactNew,
+    exact: false,
+    bounded,
+    exactNew,
+    label: `at most ${plural(bounded + exactNew, 'campaign sign-up')}: at most ${bounded} before the new/existing split (${since}; tagged auth successes ${unsplit}; new prod accounts sitewide in the window ${windowNewAccounts ?? 'not read'}) + exactly ${exactNew} after it (tagged /auth/success/<provider>/new)`,
+  }
+}
+
+// ── Funnel segments: a behaviour change mid-flight splits the read (spec section 14a) ─────
+export interface SegmentFigures {
+  /** Tagged rows in hour buckets [fromMs, toMs). */
+  fromMs: number
+  toMs: number
+  /** Closed-day spend strictly on this side of the boundary day (the boundary day itself is
+   * reported apart: Ads spend is per ET day and cannot be split at an instant). */
+  spend: number
+  spendDays: number
+  taggedArrivals: number
+  asks: number
+  accepts: number
+  authSuccess: number
+  signUps: SignUpCount
+  upsell: { shown: number; accept: number; dismiss: number }
+}
+export interface FunnelSegments {
+  boundaryMs: number
+  boundaryLabel: string
+  /** ET date the boundary falls on; its spend straddles the two segments. */
+  boundaryDay: string
+  boundaryDaySpend: number | null
+  pre: SegmentFigures
+  post: SegmentFigures
+  note: string
+}
+export const SEGMENT_NOTE =
+  'A behaviour change shipped mid-flight (the signed-out upsell fix), so per spec section 14a the flight reads as two separate short tests: compare each segment on its own, never the totals. The hour bucket containing the fix counts as post-fix, and the fix day\'s spend is shown apart because Ads spend is per ET day.'
+
+/** For the campaign charts (functions/api/campaigns.ts): where the upsell-fix boundary falls
+ * in a campaign's flight, and the tagged upsell shown/accept/dismiss on each side (hour buckets;
+ * the bucket containing the fix counts as post-fix). null when unset or outside the flight. */
+export interface CampaignSegmentMarker {
+  boundaryMs: number
+  boundaryLabel: string
+  boundaryDate: string
+  upsell: { pre: { shown: number; accept: number; dismiss: number }; post: { shown: number; accept: number; dismiss: number } }
+}
+export function campaignSegmentMarker(
+  c: Pick<CampaignFlight, 'flightStart' | 'flightEnd'>,
+  rows: readonly TaggedRow[],
+  boundaryMs: number | null = UPSELL_SIGNEDOUT_FIX_AT,
+): CampaignSegmentMarker | null {
+  if (boundaryMs == null || !c.flightStart) return null
+  const date = etDateFromMs(boundaryMs)
+  if (date < c.flightStart || date > c.flightEnd) return null
+  const cut = Math.floor(boundaryMs / 3_600_000) * 3_600_000
+  return {
+    boundaryMs,
+    boundaryLabel: etMinuteLabel(boundaryMs),
+    boundaryDate: date,
+    upsell: { pre: { ...summarizeTaggedRows(rows, { toMs: cut }).upsell }, post: { ...summarizeTaggedRows(rows, { fromMs: cut }).upsell } },
+  }
+}
+
+/** Splits a read at a boundary instant: tagged rows by hour bucket (the bucket containing the
+ * instant goes to post-fix), closed-day spend by ET day (the boundary day apart). null when the
+ * boundary is unset or outside [startMs, endMs). */
+export function splitAtBoundary(i: {
+  rows: readonly TaggedRow[]
+  stored: StoredSpend | null
+  throughEt: string | null
+  startMs: number
+  endMs: number
+  windowNewAccounts: number | null
+  boundaryMs?: number | null
+  authLiveAtMs?: number | null
+}): FunnelSegments | null {
+  const b = i.boundaryMs === undefined ? UPSELL_SIGNEDOUT_FIX_AT : i.boundaryMs
+  if (b == null || b <= i.startMs || b >= i.endMs) return null
+  const cut = Math.floor(b / 3_600_000) * 3_600_000
+  const boundaryDay = etDateFromMs(b)
+  const days = Object.entries(i.stored?.days ?? {}).filter(([d]) => i.throughEt != null && d <= i.throughEt)
+  const spendOf = (pred: (d: string) => boolean) => {
+    const sel = days.filter(([d]) => pred(d))
+    return { spend: round2(microsToDollars(sel.reduce((a, [, v]) => a + v.costMicros, 0))), spendDays: sel.length }
+  }
+  const figures = (fromMs: number, toMs: number, side: 'pre' | 'post'): SegmentFigures => {
+    // The rows are already window-filtered (SQL attribution clause): split only at the cut.
+    const s = summarizeTaggedRows(i.rows, side === 'pre' ? { toMs: cut } : { fromMs: cut })
+    return {
+      fromMs,
+      toMs,
+      ...spendOf((d) => (side === 'pre' ? d < boundaryDay : d > boundaryDay)),
+      taggedArrivals: s.taggedArrivals,
+      asks: s.asks.total,
+      accepts: s.accepts.total,
+      authSuccess: s.authSuccess,
+      signUps: campaignSignUps(s, i.windowNewAccounts, i.authLiveAtMs === undefined ? AUTH_NEW_EXISTING_LIVE_AT : i.authLiveAtMs),
+      upsell: { ...s.upsell },
+    }
+  }
+  const dayRow = days.find(([d]) => d === boundaryDay)
+  return {
+    boundaryMs: b,
+    boundaryLabel: etMinuteLabel(b),
+    boundaryDay,
+    boundaryDaySpend: dayRow ? round2(microsToDollars(dayRow[1].costMicros)) : null,
+    pre: figures(i.startMs, cut, 'pre'),
+    post: figures(cut, i.endMs, 'post'),
+    note: SEGMENT_NOTE,
+  }
 }
 
 // ── Day-15/30/60 cohort: accounts created in the flight window, by tier and promo ───────

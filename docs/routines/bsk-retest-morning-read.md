@@ -37,9 +37,14 @@ and add nothing of your own to the rules.** Windows machine; the Bash tool is Gi
   geo, schedule or bidding change while the flight runs. Post-flight recommendations belong
   to the post-flight routine.
 - **Never touch the closed campaigns** 24215315197 and 24234347705.
-- **Sign-ups are an upper bound.** Always "at most N campaign sign-ups" with both inputs as
-  the report prints them (`/auth/success` also fires for returning sign-ins; new accounts are
-  sitewide); never "N sign-ups" or "verified".
+- **Sign-ups are an upper bound** unless the report says "exact". Relay the sign-up line
+  exactly as the report prints it: "at most N campaign sign-ups" with both inputs
+  (`/auth/success` also fires for returning sign-ins; new accounts are sitewide), or, once the
+  new/existing sign-in beacons are live, "N campaign sign-ups (exact …)" or the "at most … +
+  exactly …" split. Never upgrade a bound to "N sign-ups" or "verified" yourself.
+- **Segments.** If the report has a "Segments at the signed-out upsell fix" block, the flight
+  reads as two separate short tests (spec section 14a): relay pre-fix and post-fix figures
+  separately and never add them into one verdict.
 - **No trackers, no PII.** Report sign-ups and promo claims only as window COUNTS. Never
   join rows to individuals by device, timestamp or location. Never cross-check a sign-up
   against an arrival by /auth timing (retired).

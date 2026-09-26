@@ -80,11 +80,15 @@ flight window by access tier (paid / trial active / expired) and promo marker, s
 not campaign-attributed; until Firestore has the composite indexes it needs, that line reads
 "tier split unavailable: index missing" next to the plain window count, which is expected.
 
-Sign-ups are always "at most N campaign sign-ups": an upper bound, never a verified count
-(`/auth/success` also fires for returning sign-ins, and the account count is sitewide). Relay
-it with that wording and both inputs, never as "N sign-ups". The report also carries the
-recommendation to add `/auth/success/<provider>/new|existing` after the beacon freeze; relay
-it as a proposal.
+Sign-ups are "at most N campaign sign-ups" (an upper bound: `/auth/success` also fires for
+returning sign-ins, and the account count is sitewide) unless the report says "exact": once
+the `/auth/success/<provider>/new|existing` beacons are live, sign-ups after their go-live are
+counted exactly from `/new` and the report prints "N campaign sign-ups (exact …)" or an
+"at most … + exactly …" split. Relay the line exactly as printed, never upgrading a bound
+yourself. If the report has a "Segments at the signed-out upsell fix" block, relay pre-fix and
+post-fix figures separately: per spec section 14a the flight reads as two separate short
+tests. The report still carries the `/auth/success/<provider>/new|existing` recommendation
+until the instant is set; relay it as a proposal.
 
 `--firebase-sa` is a plain path. The prod key it points at today is not read-only; if the
 lead gives you a path to a key with only `roles/datastore.viewer`, use that instead.
