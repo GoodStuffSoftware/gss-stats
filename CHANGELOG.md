@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-09-26
+
 ### Added
 - **Campaign spend shows how fresh it is.** The campaigns page and the readings log show
   "Spend through &lt;date&gt; · synced &lt;time ago&gt;" for each campaign, and flag
