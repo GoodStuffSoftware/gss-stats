@@ -24,7 +24,8 @@ const pct = (x: number | null | undefined, dp = 2) => (x == null ? '—' : `${(x
 export function syncLine(s: SpendSection): string {
   const y = s.sync
   if (!y) return '  sync: not run'
-  return `  sync (shared): ${y.outcome}${y.fetched ? `, pulled ${y.fetched.since}..${y.fetched.until}` : ''}; ${n(y.daysChanged)} day row(s) and ${n(y.placementRowsChanged)} placement row(s) changed; stored through ${y.spendThrough ?? '—'}${s.sync && !y.runRecorded ? '; sync run not recorded' : ''}`
+  const pulled = y.ranges?.length ? y.ranges.map((r) => `${r.since}..${r.until}`).join(', ') : y.fetched ? `${y.fetched.since}..${y.fetched.until}` : null
+  return `  sync (shared): ${y.outcome}${pulled ? `, pulled ${pulled}` : ''}; ${n(y.daysChanged)} day row(s) and ${n(y.placementRowsChanged)} placement row(s) changed; stored through ${y.spendThrough ?? '—'}${s.sync && !y.runRecorded ? '; sync run not recorded' : ''}${y.warnings?.length ? `; warning: ${y.warnings.join('; ')}` : ''}`
 }
 
 function spendLines(s: SpendSection): string[] {

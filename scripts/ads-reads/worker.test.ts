@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { clearRegisteredSecrets } from '../../src/lib/adsRedact'
 import { refreshAds } from '../../src/lib/adsRefresh'
 import { campaignsConfigHash, cronShouldSync, liveFlightCampaigns } from '../../src/lib/adsSync'
+import { CAMPAIGNS } from '../../src/lib/campaigns'
 import type { FetchLike } from '../../src/lib/adsApi'
 import worker, { handleFetch, handleScheduled, resetClientCache, WORKER_MAX_DAYS, type Env } from '../../workers/sync/src/index'
 import { count, openMigratedSqlite, sqliteD1 } from './sqliteDb'
@@ -149,6 +150,17 @@ describe('gss-stats-sync Worker: on-demand sync (Service Binding only)', () => {
   })
 })
 
+describe('build identity: the campaigns hash (review I1)', () => {
+  it('changes with every field the sync writes to ads_campaigns, not only the flight', () => {
+    const base = campaignsConfigHash(CAMPAIGNS)
+    const c = CAMPAIGNS.find((x) => x.id === RETEST)!
+    const other = (over: Partial<typeof c>) => campaignsConfigHash(CAMPAIGNS.map((x) => (x.id === RETEST ? { ...x, ...over } : x)))
+    for (const over of [{ label: 'renamed' }, { kind: 'play-direct' as const }, { dailyBudgetUsd: (c.dailyBudgetUsd ?? 0) + 1 }, { hardCapUsd: (c.hardCapUsd ?? 0) + 1 }, { measurement: 'spend-only' as const }, { flightEnd: '2026-10-03' }, { ucValues: ['x'] }])
+      expect(other(over)).not.toBe(base)
+    expect(other({ notes: 'notes are not synced' })).toBe(base)
+  })
+})
+
 describe('gss-stats-sync Worker: the cron', () => {
   it('the gate: every hour while a flight is live (through the day after the flight), 01:xx ET otherwise', () => {
     expect(liveFlightCampaigns(at('2026-09-27T17:05:00Z')).map((c) => c.id)).toEqual([RETEST])
@@ -171,12 +183,17 @@ describe('gss-stats-sync Worker: the cron', () => {
     const next = await handleScheduled({ scheduledTime: tick + 3_600_000, cron: '5 * * * *' }, env, { fetchImpl, nowMs: tick + 3_600_000 })
     expect(next).toBeNull()
     expect([calls.length, secretReads.n, count(sqlite, 'ads_sync_runs')]).toEqual([c0, s0, runs0])
-    // after midnight ET a new closed day is due: the tick claims and syncs it
+    // after midnight ET a new day has ended: the tick claims and pulls it, but a pull before
+    // 03:00 ET does not close it (Google still adds late data), so spend-through stays put
     const afterMidnight = at('2026-09-29T04:05:00Z')
     const due = await handleScheduled({ scheduledTime: afterMidnight, cron: '5 * * * *' }, env, { fetchImpl, nowMs: afterMidnight })
     expect(due).not.toBeNull()
-    expect(due!.campaigns.find((c) => c.campaignId === RETEST)).toMatchObject({ spendThrough: '2026-09-28' })
+    expect(due!.campaigns.find((c) => c.campaignId === RETEST)).toMatchObject({ spendThrough: '2026-09-27' })
     expect(count(sqlite, 'ads_sync_runs', "source = 'worker-cron' AND status = 'running'")).toBe(1)
+    // the 03:05 ET tick pulls it again and closes it
+    const closing = at('2026-09-29T07:05:00Z')
+    const closed = await handleScheduled({ scheduledTime: closing, cron: '5 * * * *' }, env, { fetchImpl, nowMs: closing })
+    expect(closed!.campaigns.find((c) => c.campaignId === RETEST)).toMatchObject({ spendThrough: '2026-09-28' })
   })
 })
 

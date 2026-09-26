@@ -79,11 +79,17 @@ and triggers): status `'running'` for the atomic claim, and `campaigns_pulled` (
 whose closed days were pulled through the end of their window) for the restatement recheck
 cadence. D1 runs the whole file and its `d1_migrations` row as one request, all or nothing.
 
-Since 0003, `ads_daily_metrics` holds **closed ET days only**, zero-filled where the API
-returns no row — only for days never stored and only inside the flight — so the stored flight
-days are contiguous and "spend through" is the last of them (never past the flight end). A
-stored day or placement row with spend that a response leaves out is a failed fetch, never a
-zero. It is written by exactly one function, `syncAdsData` (`src/lib/adsSync.ts`), which writes
+Since 0003, `ads_daily_metrics` holds **closed ET days only** (a day is closed once it was
+pulled at or after 03:00 ET the next day: Google still adds late data just after midnight),
+zero-filled where the API returns no row — only for days never stored, only inside the flight,
+and only when Google's range total agrees with the daily rows — so the stored flight days are
+contiguous and "spend through" is the last of them (never past the flight end). A stored day
+with spend that the daily rows leave out is restated to zero only when a non-empty range total
+agrees; an empty response never zeroes stored spend. When the rows and the total disagree the
+range is re-pulled in halves (newer first) down to single days, so one bad day is isolated and
+the rest written. The sync pulls newest first, in at most two ranges per campaign (the last 3
+days whole, then an older gap), each checked and written on its own (review L1-L3,
+2026-09-26). It is written by exactly one function, `syncAdsData` (`src/lib/adsSync.ts`), which writes
 only rows that changed.
 
 ### How each side uses it
@@ -132,8 +138,8 @@ finds nothing to write, because the sync writes only changed rows.
   0004): a sync first INSERTs a `'running'` claim row only if no run finished in the last 10
   minutes (one `INSERT … SELECT … WHERE NOT EXISTS`), so of two concurrent requests exactly one
   syncs and the other gets 429. A claim with no finished row after it is a run that died.
-- Work per invocation is capped: at most 7 closed days (live campaigns first) and 40 D1
-  statements (Free allows 50); the rest continues on the next run, and the run row is always
+- Work per invocation is capped: at most 7 closed days (live campaigns first, newest days
+  first) and 40 D1 statements (Free allows 50); the rest continues on the next run, and the run row is always
   recorded.
 
 **Secrets.** Cloudflare Secrets Store (open beta; the account's single store

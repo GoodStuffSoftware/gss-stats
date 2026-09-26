@@ -8,7 +8,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { SpendDay, ReadingRecord } from '../../src/lib/adsRules'
 import { createSqlAdsStore, readFreshness, type PlacementDayRow, type SqlStatement } from '../../src/lib/adsStore'
-import { planCampaignSync, syncAdsData, syncWindow, type AdsMetricsSource } from '../../src/lib/adsSync'
+import { capPlan, planCampaignSync, syncAdsData, syncWindow, type AdsMetricsSource } from '../../src/lib/adsSync'
 import { campaignById } from '../../src/lib/campaigns'
 import { count, MIGRATIONS_DIR, migrationFiles, openMigratedSqlite, sqliteAdsDb, sqliteD1 } from './sqliteDb'
 
@@ -21,9 +21,19 @@ const HOUR = 3_600_000
 const day = (usd: number, impressions = 1000, clicks = 10): SpendDay => ({ costMicros: Math.round(usd * 1e6), impressions, clicks })
 
 function fakeAds(daily: Record<string, Record<string, SpendDay>>, placements: Record<string, PlacementDayRow[]> = {}) {
-  const calls: { kind: 'daily' | 'placements'; id: string; since: string; until: string }[] = []
-  const state = { failPlacements: false, failDaily: false, emptyDaily: false }
+  const calls: { kind: 'daily' | 'placements' | 'total'; id: string; since: string; until: string }[] = []
+  // total: Google's range total, by default the sum of the daily map (null when it has no row);
+  // a test overrides it to model a daily response that does not add up.
+  const state = { failPlacements: false, failDaily: false, emptyDaily: false, total: null as null | ((id: string, since: string, until: string) => SpendDay | null) }
+  const sumOf = (id: string, since: string, until: string) => {
+    const days = Object.entries(daily[id] ?? {}).filter(([d]) => d >= since && d <= until).map(([, v]) => v)
+    return days.length ? days.reduce((a, v) => ({ costMicros: a.costMicros + v.costMicros, impressions: a.impressions + v.impressions, clicks: a.clicks + v.clicks }), { costMicros: 0, impressions: 0, clicks: 0 }) : null
+  }
   const src: AdsMetricsSource = {
+    async rangeTotal(id, since, until) {
+      calls.push({ kind: 'total', id, since, until })
+      return state.total ? state.total(id, since, until) : sumOf(id, since, until)
+    },
     async daily(id, since, until) {
       calls.push({ kind: 'daily', id, since, until })
       if (state.failDaily) throw new Error('Google Ads search failed, HTTP 500: backend error')
@@ -37,6 +47,10 @@ function fakeAds(daily: Record<string, Record<string, SpendDay>>, placements: Re
     },
   }
   return { src, calls, state, daily, placements }
+}
+const sumTruth = (truth: Record<string, SpendDay>, since: string, until: string): SpendDay | null => {
+  const days = Object.entries(truth).filter(([d]) => d >= since && d <= until).map(([, v]) => v)
+  return days.length ? days.reduce((a, v) => ({ costMicros: a.costMicros + v.costMicros, impressions: a.impressions + v.impressions, clicks: a.clicks + v.clicks }), { costMicros: 0, impressions: 0, clicks: 0 }) : null
 }
 const pl = (date: string, placement: string, usd: number, approved: boolean | null = true): PlacementDayRow => ({
   date,
@@ -129,7 +143,13 @@ describe('syncAdsData: gap fill, restatements, the no-op rerun', () => {
     const ads = fakeAds({ [RETEST]: { '2026-09-26': day(4.2), '2026-09-27': day(13.1), '2026-09-29': day(12.9), '2026-09-30': day(3) } })
     const r = await syncAdsData({ ads: ads.src, store }, { campaignIds: [RETEST], now: nineEt('2026-09-30'), dryRun: false, source: 'ads-sync' })
     expect(r.status).toBe('ok')
-    expect(ads.calls.filter((c) => c.kind === 'daily')).toEqual([{ kind: 'daily', id: RETEST, since: '2026-09-26', until: '2026-09-29' }])
+    // newest first (review L2): the recent window whole, then the older gap
+    expect(ads.calls.filter((c) => c.kind === 'daily')).toEqual([
+      { kind: 'daily', id: RETEST, since: '2026-09-27', until: '2026-09-29' },
+      { kind: 'daily', id: RETEST, since: '2026-09-26', until: '2026-09-26' },
+    ])
+    // 09-28 came back empty: zero-filled only after Google's range total agreed (review L1)
+    expect(ads.calls.filter((c) => c.kind === 'total')).toEqual([{ kind: 'total', id: RETEST, since: '2026-09-27', until: '2026-09-29' }])
     const rows = sqlite.prepare('SELECT date, cost_micros FROM ads_daily_metrics WHERE campaign_id = ? ORDER BY date').all(RETEST) as { date: string; cost_micros: number }[]
     expect(rows.map((x) => [x.date, x.cost_micros])).toEqual([
       ['2026-09-26', 4_200_000],
@@ -329,14 +349,37 @@ describe('an empty or partial Ads response never turns stored spend into zeros (
     const run = sqlite.prepare("SELECT status, campaigns_ok FROM ads_sync_runs WHERE status <> 'running'").get() as Record<string, string>
     expect(run).toEqual({ status: 'failed', campaigns_ok: '[]' })
   })
-  it('a partial response (one stored day with spend missing) writes nothing for that campaign', async () => {
+  it('without a range total to check against, a partial response writes nothing for that campaign', async () => {
     const { sqlite, adapter, store } = await stored69()
     const ads = fakeAds({ [RETEST]: { '2026-09-26': day(4), '2026-09-28': day(2) } }) // 09-27 missing
-    const r = await syncAdsData({ ads: ads.src, store }, { campaignIds: [RETEST], now: nineEt('2026-09-29') + HOUR, dryRun: false, source: 'ads-sync', restatementRecheckMs: 0 })
+    const noTotal: AdsMetricsSource = { daily: ads.src.daily, placements: ads.src.placements }
+    const r = await syncAdsData({ ads: noTotal, store }, { campaignIds: [RETEST], now: nineEt('2026-09-29') + HOUR, dryRun: false, source: 'ads-sync', restatementRecheckMs: 0 })
     expect(r.campaigns[0].fetchOk).toBe(false)
     expect(costOf(sqlite, RETEST, '2026-09-27')).toBe(69_000_000)
     expect(costOf(sqlite, RETEST, '2026-09-28')).toBe(0) // not updated either: the whole response is suspect
     expect(metricWrites(adapter.writes)).toEqual([])
+  })
+  it('a partial response that does not add up is re-pulled in halves: the day it left out is kept, the days around it (each checked) are written', async () => {
+    const { sqlite, store } = await stored69()
+    const ads = fakeAds({ [RETEST]: { '2026-09-26': day(4), '2026-09-28': day(2) } }) // 09-27 left out
+    const truth = { '2026-09-26': day(4), '2026-09-27': day(69), '2026-09-28': day(2) }
+    ads.state.total = (_id, since, until) => sumTruth(truth, since, until) // Google's total still has the $69
+    const r = await syncAdsData({ ads: ads.src, store }, { campaignIds: [RETEST], now: nineEt('2026-09-29') + HOUR, dryRun: false, source: 'ads-sync', restatementRecheckMs: 0 })
+    expect(r.status).toBe('partial')
+    expect(r.campaigns[0]).toMatchObject({ fetchOk: true, dailyOk: false, pulled: false })
+    expect(r.error).toMatch(/daily rows for 2026-09-27\.\.2026-09-27 add up to \$0\.00 .* range total is \$69\.00/)
+    expect(costOf(sqlite, RETEST, '2026-09-27')).toBe(69_000_000) // kept
+    expect(costOf(sqlite, RETEST, '2026-09-28')).toBe(2_000_000) // its own pull added up
+    expect(r.campaigns[0].warnings.join(' ')).toMatch(/pulled again in halves/)
+  })
+  it('a stored day Google credited in full (the range total agrees) is restated to zero, placements with it', async () => {
+    const { sqlite, store } = await stored69()
+    const ads = fakeAds({ [RETEST]: { '2026-09-26': day(4) } }) // Google's total agrees: 09-27 is $0 now (09-28 was $0 already)
+    const r = await syncAdsData({ ads: ads.src, store }, { campaignIds: [RETEST], now: nineEt('2026-09-29') + HOUR, dryRun: false, source: 'ads-sync', restatementRecheckMs: 0 })
+    expect(r.status).toBe('ok')
+    expect(r.campaigns[0].restated).toEqual([{ date: '2026-09-27', before: 69, after: 0 }])
+    expect(costOf(sqlite, RETEST, '2026-09-27')).toBe(0)
+    expect((sqlite.prepare("SELECT SUM(cost_micros) AS c FROM ads_placement_daily WHERE date = '2026-09-27'").get() as { c: number }).c).toBe(0)
   })
   it('a stored ZERO day missing from the response is consistent (still zero), not a failure', async () => {
     const { store } = await stored69()
@@ -356,17 +399,18 @@ describe('an empty or partial Ads response never turns stored spend into zeros (
 })
 
 describe('per-run caps: finish over later runs', () => {
-  it('maxDays pulls the oldest missing days first and leaves the rest for the next run', async () => {
+  it('maxDays pulls the NEWEST days first (review L2) and leaves the older gap for the next run', async () => {
     const { sqlite, store } = setup()
     const ads = fakeAds({ [RETEST]: { '2026-09-26': day(4), '2026-09-27': day(13), '2026-09-28': day(12), '2026-09-29': day(11), '2026-09-30': day(10) } })
     const first = await syncAdsData({ ads: ads.src, store }, { campaignIds: [RETEST], now: nineEt('2026-10-01'), dryRun: false, source: 'worker-cron', maxDays: 3 })
     expect(first).toMatchObject({ status: 'partial' })
     expect(first.error).toMatch(/^work cap: 24279250691 continues next run$/)
-    expect(first.campaigns[0]).toMatchObject({ fetched: { since: '2026-09-26', until: '2026-09-28' }, deferred: true, pulled: false, spendThrough: '2026-09-28' })
+    // the recent window whole (so it counts as the restatement re-check); 09-26..09-27 wait
+    expect(first.campaigns[0]).toMatchObject({ fetched: { since: '2026-09-28', until: '2026-09-30' }, deferred: true, pulled: true, spendThrough: null })
     const second = await syncAdsData({ ads: ads.src, store }, { campaignIds: [RETEST], now: nineEt('2026-10-01') + 60_000, dryRun: false, source: 'worker-cron', maxDays: 3 })
     expect(second).toMatchObject({ status: 'ok' })
-    // the rest, plus the restatement window (never re-checked yet), still within the cap
-    expect(second.campaigns[0]).toMatchObject({ fetched: { since: '2026-09-28', until: '2026-09-30' }, pulled: true, spendThrough: '2026-09-30' })
+    // the older gap; the recent window was re-checked a minute ago, so it is not due
+    expect(second.campaigns[0]).toMatchObject({ fetched: { since: '2026-09-26', until: '2026-09-27' }, pulled: false, spendThrough: '2026-09-30' })
     expect(count(sqlite, 'ads_daily_metrics')).toBe(5)
   })
   it('the D1 statement cap stops a big run cleanly (the run row is still recorded) and the next runs finish the job', async () => {
@@ -388,6 +432,70 @@ describe('per-run caps: finish over later runs', () => {
     expect(runs).toBeGreaterThan(1)
     expect(count(sqlite, 'ads_placement_daily')).toBe(80)
     expect(count(sqlite, 'ads_daily_metrics', 'placements_fetched_at IS NOT NULL')).toBe(2)
+  })
+})
+
+describe('review L1-L3 (2026-09-26): never a false $0, no starving, a re-check only when whole', () => {
+  it('L1: a never-stored day a partial response left out is never saved as $0; the next good pull stores it', async () => {
+    const { sqlite, store } = setup()
+    const truth = { '2026-09-26': day(4), '2026-09-27': day(13), '2026-09-28': day(11) }
+    const ads = fakeAds({ [RETEST]: { '2026-09-26': day(4), '2026-09-27': day(13) } }) // 09-28 left out
+    ads.state.total = (_id, since, until) => sumTruth(truth, since, until)
+    const r = await syncAdsData({ ads: ads.src, store }, { campaignIds: [RETEST], now: nineEt('2026-09-29'), dryRun: false, source: 'worker-cron' })
+    expect(r.status).toBe('partial')
+    expect(r.error).toMatch(/2026-09-28\.\.2026-09-28 add up to \$0\.00 .* range total is \$11\.00/)
+    expect(costOf(sqlite, RETEST, '2026-09-28')).toBeUndefined() // no false $0 day
+    expect(costOf(sqlite, RETEST, '2026-09-27')).toBe(13_000_000)
+    expect(r.campaigns[0]).toMatchObject({ pulled: false, spendThrough: '2026-09-27' })
+    ads.daily[RETEST]['2026-09-28'] = day(11)
+    const again = await syncAdsData({ ads: ads.src, store }, { campaignIds: [RETEST], now: nineEt('2026-09-29') + HOUR, dryRun: false, source: 'worker-cron' })
+    expect(again.status).toBe('ok')
+    expect(costOf(sqlite, RETEST, '2026-09-28')).toBe(11_000_000)
+    expect(again.campaigns[0]).toMatchObject({ pulled: true, spendThrough: '2026-09-28' })
+  })
+  it('L2: a stuck old day never starves the days after it, under the Worker cap too', async () => {
+    const { sqlite, store } = setup()
+    await store.syncCampaigns([campaignById(RETEST)!], 'x')
+    // 09-26 was stored while still open; Google's daily rows now leave it out, its total does not
+    await store.putDailyRows(RETEST, [{ date: '2026-09-26', ...day(4), fetchedAt: '2026-09-26T20:00:00.000Z', placementsFetchedAt: null }])
+    const daily = { '2026-09-27': day(13), '2026-09-28': day(12), '2026-09-29': day(11), '2026-09-30': day(10), '2026-10-01': day(9), '2026-10-02': day(8) }
+    const ads = fakeAds({ [RETEST]: { ...daily } })
+    ads.state.total = (_id, since, until) => sumTruth({ ...daily, '2026-09-26': day(4) }, since, until)
+    const r = await syncAdsData({ ads: ads.src, store }, { campaignIds: [RETEST], now: nineEt('2026-10-03'), dryRun: false, source: 'worker-cron', maxDays: 7 })
+    expect(r.status).toBe('partial')
+    expect(r.error).toMatch(/2026-09-26\.\.2026-09-26/)
+    for (const [d, v] of Object.entries(daily)) expect(costOf(sqlite, RETEST, d)).toBe(v.costMicros)
+    expect(costOf(sqlite, RETEST, '2026-09-26')).toBe(4_000_000) // kept as stored
+    expect(r.campaigns[0]).toMatchObject({ pulled: true, fetchOk: true, dailyOk: false })
+    // the recent window was pulled first, before the older gap
+    expect(ads.calls.find((c) => c.kind === 'daily')).toMatchObject({ since: '2026-09-30', until: '2026-10-02' })
+  })
+  it('L2: under a cap the newest needed days go first, and after-flight days past them go last', async () => {
+    const { store } = setup()
+    const rows = await store.getAllDailyRows()
+    // retest flight ends 10-02; on 10-12 the window runs to 10-11
+    const plan = planCampaignSync(campaignById(RETEST)!, rows.get(RETEST) ?? [], '2026-10-12')
+    expect(plan.ranges).toEqual([
+      { since: '2026-10-09', until: '2026-10-11' },
+      { since: '2026-09-26', until: '2026-10-08' },
+    ])
+    capPlan(plan, 5)
+    // 3 recent days, then the 2 newest NEEDED days (flight days), not after-flight days
+    expect(plan.ranges).toEqual([
+      { since: '2026-10-09', until: '2026-10-11' },
+      { since: '2026-10-01', until: '2026-10-02' },
+    ])
+    expect(plan.deferred).toBe(true)
+  })
+  it('L3: a capped pull of the recent window is not a restatement re-check (nothing marked pulled)', async () => {
+    const { sqlite, store } = setup()
+    const ads = fakeAds({ [RETEST]: { '2026-09-26': day(4), '2026-09-27': day(13), '2026-09-28': day(12), '2026-09-29': day(11), '2026-09-30': day(10) } })
+    const r = await syncAdsData({ ads: ads.src, store }, { campaignIds: [RETEST], now: nineEt('2026-10-01'), dryRun: false, source: 'worker-cron', maxDays: 2 })
+    expect(r.campaigns[0]).toMatchObject({ fetched: { since: '2026-09-29', until: '2026-09-30' }, pulled: false, deferred: true })
+    expect((sqlite.prepare("SELECT campaigns_pulled AS p FROM ads_sync_runs WHERE status <> 'running'").get() as { p: string }).p).toBe('[]')
+    // so the next run still owes the whole recent window
+    const next = planCampaignSync(campaignById(RETEST)!, (await store.getAllDailyRows()).get(RETEST)!, '2026-10-01', { nowMs: nineEt('2026-10-01') + 60_000, lastPullAt: null })
+    expect(next.recheck).toEqual({ since: '2026-09-28', until: '2026-09-30' })
   })
 })
 

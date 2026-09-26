@@ -184,6 +184,27 @@ export async function fetchDailySpend(client: AdsClient, campaignId: string, sin
   return days
 }
 
+/** The campaign's totals over the whole range in ONE row (segments.date filtered, not selected,
+ * so Google aggregates). The sync's cross-check: before it stores a day the daily query left
+ * out as zero, the daily rows must add up to this. `null` = Google returned no row at all (no
+ * delivery in the range — or an empty answer, which the caller must not trust on its own). */
+export async function fetchRangeTotal(client: AdsClient, campaignId: string, since: string, until: string): Promise<SpendDay | null> {
+  assertKnownCampaign(campaignId)
+  checkRange(since, until)
+  const rows = await client.search(
+    `SELECT metrics.cost_micros, metrics.impressions, metrics.clicks FROM campaign WHERE campaign.id = ${campaignId} AND segments.date BETWEEN '${since}' AND '${until}'`,
+  )
+  if (!rows.length) return null
+  return rows.reduce<SpendDay>(
+    (a, r) => ({
+      costMicros: a.costMicros + Number(r.metrics?.costMicros ?? 0),
+      impressions: a.impressions + Number(r.metrics?.impressions ?? 0),
+      clicks: a.clicks + Number(r.metrics?.clicks ?? 0),
+    }),
+    { costMicros: 0, impressions: 0, clicks: 0 },
+  )
+}
+
 /** Placement-level cost PER ET DAY (group_placement_view), each row tagged approved/not
  * against the campaign's approved list (lib/adsRules.ts APPROVED_PLACEMENTS_BY_CAMPAIGN;
  * null when none is on record). Stored in ads_placement_daily and summed by splitPlacements
