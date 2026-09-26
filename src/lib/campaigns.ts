@@ -353,6 +353,21 @@ export function gameCompleteNotInstrumented(campaign: CampaignFlight): boolean {
   return campaign.flightEnd < NEW_BEACONS_LIVE_AT_ET
 }
 
+/** The overview scorecard's per-row notInstrumented set (functions/api/overview.ts): the
+ * full per-flight "did this path exist site-wide during the window" check for a CLOSED
+ * campaign (`closedNotInstrumented` — computed server-side via a D1 query, functions/_lib/
+ * campaignInstrumentation.ts, so it can't live in this pure module), or just the
+ * gameCompleteNotInstrumented gate for an active/upcoming one. Exported so the actual
+ * contract driving the scorecard UI — "a campaign's 'completed' chip shows its real count,
+ * not a stale label, once its flight reaches GAME_COMPLETE_LIVE_AT" — is unit-testable
+ * without a database (bug fix, 2026-09-26: the scorecard template used to check the
+ * PERMANENT FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED constant directly instead of this
+ * per-row result, so an active campaign's real completed-game count never showed). */
+export function scorecardNotInstrumentedSteps(campaign: CampaignFlight, closedNotInstrumented: readonly FunnelStepKey[]): Set<FunnelStepKey> {
+  if (campaign.status === 'closed') return new Set(closedNotInstrumented)
+  return gameCompleteNotInstrumented(campaign) ? new Set(FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED) : new Set()
+}
+
 // CONFIG HOOK (deferred, disabled by default, superseded by the real /game/complete/ beacon
 // below as of v1.95.5 — kept only in case product ever wants a SIGNED-OUT proxy for
 // pre-v1.95.5 history): '/signin-eligible/*' fires only after a game plays out — a possible
@@ -376,6 +391,24 @@ const PLAYED_PATH = '/game'
  * `/game/complete/` (not `/game` or `/game/complete`) is the exact anchor that keeps this
  * from ever matching the `/game` page-view path itself. */
 const GAME_COMPLETE_PREFIX = '/game/complete/'
+// Any two non-slash segments after the prefix — same "don't overfit the exact enum" stance
+// as GAME_COMPLETE_PREFIX's own doc comment (an unrecognized mode/difficulty still counts as
+// a completion via the prefix match above; this just also buckets it, under its raw string,
+// rather than requiring it match the known easy/medium/hard/expert/unknown set exactly).
+const GAME_COMPLETE_SEGMENTS_RE = /^\/game\/complete\/([^/]+)\/([^/]+)$/
+export const GAME_COMPLETE_MODES = ['normal', 'daily'] as const
+export const GAME_COMPLETE_DIFFICULTIES = ['easy', 'medium', 'hard', 'expert', 'unknown'] as const
+/** Parses `/game/complete/<mode>/<difficulty>` into its two segments — for the completions
+ * BREAKDOWN widget (mode × difficulty; functions/api/completions.ts), a different job from
+ * classifyFunnelPath's aggregate "completed" count above (prefix match only, no shape
+ * check — see GAME_COMPLETE_PREFIX's doc comment for why). A path with the right prefix but
+ * not exactly two more segments (or a corrupted beacon) returns null; the caller buckets
+ * that under its own "(other)" label rather than dropping it, so the breakdown's total never
+ * silently disagrees with the funnel's prefix-matched "completed" count. */
+export function parseGameCompletePath(path: string): { mode: string; difficulty: string } | null {
+  const m = GAME_COMPLETE_SEGMENTS_RE.exec(path)
+  return m ? { mode: m[1], difficulty: m[2] } : null
+}
 /** "auth success" — NOT part of lib/popupEvents.ts's POPUP_EVENT_PREFIXES (an ordinary page
  * path there), so classified here directly. ONE matcher for the whole codebase.
  *
@@ -478,15 +511,47 @@ export function computeFunnelCounts(rows: FunnelPathCount[], taggedArrivals: num
   return counts
 }
 
-/** Step-over-previous-step conversion rate, null (never a real 0/NaN) when the previous
- * step's count is 0, OR when either step is not instrumented for this flight. */
+// Audit finding (2026-09-26): most of the funnel's "step / previous step" pairs mix units
+// that were never comparable in the first place — the numerator counts EVENT rows (e.g. every
+// `/game` page-view hit within a tagged session) while the denominator counts arrivals or
+// other rows, with no per-visitor id anywhere in `hits` to join them on. That produced numbers
+// like "Played a game: 314.7% (1111/353)" — not a real conversion rate, just two unrelated
+// counts divided. Only two step-over-step ratios in FUNNEL_STEP_ORDER are actually valid:
+//  - accept/ask — the SAME popup shown to the SAME session, tap-through is a real percentage.
+//  - install/installPrompt — real, but ONLY once installPrompt is restricted to prompts shown
+//    AT OR AFTER the install-outcome-gap fix (INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS,
+//    popupEvents.ts): a prompt shown before the fix could never have its "installed" outcome
+//    recorded at all (see that constant's own doc comment), so counting it in the denominator
+//    would understate the rate for a reason that has nothing to do with real tap-through.
+//    funnelStepRates takes this pre-computed post-fix count as a separate argument rather than
+//    deriving it from `counts` (which has no time dimension) — see functions/api/campaigns.ts
+//    and functions/api/overview.ts for how callers compute it from their own hour-bucketed rows.
+// Every other step (played, completed, ask, authSuccess, installPrompt) is a plain COUNT ONLY
+// now — funnelStepRates doesn't populate a rate for it at all (not even null), and the widget
+// bodies (CampaignsWidgetBody.vue / OverviewWidgetBody.vue) render no percent line for it.
+export const VALID_FUNNEL_RATE_STEPS = new Set<FunnelStepKey>(['accept', 'install'])
+
+/** Real conversion rates ONLY (see VALID_FUNNEL_RATE_STEPS above) — `accept` (accept/ask) and
+ * `install` (install / post-fix installPrompt, via `installPromptPostFixCount`). null (never a
+ * real 0/NaN) when the denominator is 0/insufficient, OR when either step is not instrumented
+ * for this flight. Every other FUNNEL_STEP_ORDER key is simply absent from the result — a
+ * plain count, not a rate. */
 export function funnelStepRates(
   counts: Record<FunnelStepKey, number>,
   notInstrumented: ReadonlySet<FunnelStepKey> = FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED,
+  installPromptPostFixCount?: number | null,
 ): Partial<Record<FunnelStepKey, number | null>> {
   const rates: Partial<Record<FunnelStepKey, number | null>> = {}
   for (let i = 1; i < FUNNEL_STEP_ORDER.length; i++) {
     const key = FUNNEL_STEP_ORDER[i]
+    if (!VALID_FUNNEL_RATE_STEPS.has(key)) continue
+    if (key === 'install') {
+      rates.install =
+        notInstrumented.has('install') || notInstrumented.has('installPrompt') || installPromptPostFixCount == null
+          ? null
+          : computeRate(counts.install, installPromptPostFixCount)
+      continue
+    }
     const prevKey = FUNNEL_STEP_ORDER[i - 1]
     rates[key] = notInstrumented.has(key) || notInstrumented.has(prevKey) ? null : computeRate(counts[key], counts[prevKey])
   }

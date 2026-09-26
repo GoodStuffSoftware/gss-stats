@@ -17,7 +17,10 @@ export type Metric = 'pageviews' | 'visits'
 
 // 'overview'/'campaigns'/'ads-readings' back the panels that used to be bespoke,
 // non-widget pages (OverviewPage.vue / CampaignComparePage.vue) — see Widget.view below.
-export type Dataset = 'rum' | 'geo' | 'popup' | 'overview' | 'campaigns' | 'ads-readings'
+// 'completions' is an ordinary GENERIC dataset (dimension/breakdown, same pipeline as
+// 'geo'/'popup') — NOT bespoke — see functions/api/completions.ts + lib/catalog.ts
+// COMPLETIONS_DIMENSIONS.
+export type Dataset = 'rum' | 'geo' | 'popup' | 'overview' | 'campaigns' | 'ads-readings' | 'completions'
 
 export type SiteKey = 'goodstuff.software' | 'goodstuffsoftware.com' | 'bestsudoku.app' | 'all'
 
@@ -66,6 +69,11 @@ export interface Widget {
   site?: SiteKey // optional per-widget site override ('inherit' = use global)
   host?: string // optional per-widget host override
   excludeSelfReferrals?: boolean
+  // dataset 'geo' only: lift the standing exclusion of pop-up/install/return/game-complete/
+  // auth-status event-beacon paths (see lib/popupEvents.ts POPUP_EVENT_PREFIXES), so this
+  // chart can group/filter on event rows too (e.g. by the new 'pathFamily' dimension).
+  // Undefined/false = excluded, same as every chart before this option existed.
+  includeEventBeacons?: boolean
   // A date-dimension trend chart ('line'/'area'/'bar' with dimension 'date') only: overlay
   // Best Sudoku release markers (see lib/releases.ts) as dashed vertical lines, same visual
   // treatment as the Overview page's timeline. Undefined/false = no overlay.
@@ -137,6 +145,14 @@ export interface GlobalFilters {
   excludeOwnVisits: boolean
   ownBrowser: string
   ownOS: string
+  // Page-level fallback for widget.includeEventBeacons (see Widget) — a geo chart with no
+  // per-widget override inherits this. Set automatically when opening a filtered page from a
+  // drill into an event-family pathFamily value (see lib/drill.ts drillNeedsEventBeacons,
+  // App.vue openFilteredPage): without it, every OTHER widget on that page would apply the
+  // standing event-beacon exclusion together with the new pathFamily constraint, which can
+  // never match a row, and would render silently empty instead of showing the drilled-into
+  // data. Undefined/false = excluded, same as before this field existed.
+  includeEventBeacons?: boolean
 }
 
 // A single dashboard page: its own global filters + its own widgets (each of which
@@ -227,6 +243,11 @@ export interface CampaignCompareResponse {
     // during the flight window (or, for 'completed', anywhere at all) — see
     // lib/campaigns.ts FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED.
     notInstrumented: (keyof CampaignFunnelCounts)[]
+    // The install/installPrompt rate's real denominator — prompts shown AT OR AFTER the
+    // install-outcome-gap fix ONLY (see lib/campaigns.ts VALID_FUNNEL_RATE_STEPS/
+    // funnelStepRates). `counts.installPrompt` is still the whole-window count, shown as its
+    // own plain count; this is specifically what `rates.install` was computed against.
+    installPromptPostFixCount: number
     // Show wherever `counts.arrivals` is displayed — see lib/campaigns.ts ARRIVALS_CAVEAT.
     arrivalsCaveat: string
     // Install-fix caveat for this campaign's range (lib/popupEvents.ts installOutcomeGapNote);
@@ -323,6 +344,13 @@ export interface OverviewScorecardRow {
   taggedArrivals: number
   funnelRates: Partial<Record<keyof CampaignFunnelCounts, number | null>>
   funnelCounts: CampaignFunnelCounts // pairs with funnelRates — see OverviewKpiTile.denominator
+  // Steps this campaign's flight never saw ANY hit for site-wide — only ever populated for a
+  // CLOSED campaign (see functions/api/overview.ts's scorecard); always [] for active/
+  // upcoming. The UI omits these chips instead of labeling them "not instrumented".
+  notInstrumented: (keyof CampaignFunnelCounts)[]
+  // Same real denominator as CampaignCompareResponse.funnel.installPromptPostFixCount — see
+  // lib/campaigns.ts VALID_FUNNEL_RATE_STEPS/funnelStepRates.
+  installPromptPostFixCount: number
   authSuccess: number
   install: number
   returnRateD2to7: number | null
@@ -356,6 +384,9 @@ export interface OverviewResponse {
      * lib/popupEvents.ts NEW_BEACONS_LIVE_AT_ET. */
     newBeaconsLiveAt?: string
     newBeaconsLiveAtLabel?: string
+    /** v1.95.6 raw /install/* de-dupe go-live (ET date) — see lib/popupEvents.ts
+     * RAW_INSTALL_DEDUPE_LIVE_AT_ET. Annotates the raw install-signal line ONLY. */
+    rawInstallDedupeAt?: string
     since: string
     until: string
     seriesLabels?: { install: string; rawInstallSignals: string }

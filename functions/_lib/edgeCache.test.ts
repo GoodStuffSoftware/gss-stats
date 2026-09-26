@@ -22,12 +22,19 @@ describe('buildCacheKeyUrl — completeness', () => {
     ownBrowser: '',
     ownOS: '',
     excludeSelf: true,
+    // "All beacon fields on demand" (feat/all-beacon-fields): the per-chart "Include event
+    // beacons" opt-in changes which rows the query counts (lifts popupExcludeClause) without
+    // changing anything else in this param object — it MUST be its own cache-key field, or a
+    // chart with it off would serve a chart with it on's cached response (or vice versa).
+    includeEventBeacons: false,
   }
   const key = (over: Partial<typeof base>) => buildCacheKeyUrl('/api/geo', { ...base, ...over })
 
   const variants: [string, Partial<typeof base>][] = [
     ['mode', { mode: 'ring' }],
     ['dim', { dim: 'city' }],
+    ['dim (new derived dim: screenwBucket)', { dim: 'screenwBucket' }],
+    ['dim (new derived dim: pathFamily)', { dim: 'pathFamily' }],
     ['ringDims (added)', { ringDims: ['country', 'device'] }],
     ['since', { since: '2026-08-25' }],
     ['until', { until: '2026-09-08' }],
@@ -36,9 +43,11 @@ describe('buildCacheKeyUrl — completeness', () => {
     ['sites (added)', { sites: ['goodstuff', 'simpletile'] }],
     ['sites (all)', { sites: [] }],
     ['constraints (added)', { constraints: [{ field: 'device', value: 'mobile' }] }],
+    ['constraints (new derived-dim filter: screenwBucket)', { constraints: [{ field: 'screenwBucket', value: '768-1023' }] }],
     ['excludeOwn', { excludeOwn: true, ownBrowser: 'Chrome', ownOS: 'Windows' }],
     ['ownBrowser (same excludeOwn)', { excludeOwn: true, ownBrowser: 'Firefox', ownOS: 'Windows' }],
     ['excludeSelf', { excludeSelf: false }],
+    ['includeEventBeacons', { includeEventBeacons: true }],
   ]
 
   it.each(variants)('changing %s produces a different key than the base', (_label, over) => {

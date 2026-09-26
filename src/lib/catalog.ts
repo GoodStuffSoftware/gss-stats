@@ -9,6 +9,13 @@ export const DATASETS: { value: Dataset; label: string }[] = [
   { value: 'overview', label: 'Best Sudoku overview — KPIs / timeline / scorecard / release panel' },
   { value: 'campaigns', label: 'Best Sudoku campaigns — funnel / hour-of-day / country / …' },
   { value: 'ads-readings', label: 'Best Sudoku ads readings log' },
+  { value: 'completions', label: 'Best Sudoku completions — mode × difficulty' },
+]
+
+// dataset 'completions' — the only two dimensions a completed-game beacon carries.
+export const COMPLETIONS_DIMENSIONS: { key: string; label: string }[] = [
+  { key: 'mode', label: 'Mode (normal / daily)' },
+  { key: 'difficulty', label: 'Difficulty' },
 ]
 
 // dataset 'overview' — which panel a widget renders (widget.view).
@@ -85,6 +92,9 @@ export const GEO_DIMENSIONS: { key: string; label: string }[] = [
   { key: 'os', label: 'Operating system' },
   { key: 'lang', label: 'Language' },
   { key: 'visitor', label: 'New vs returning' },
+  { key: 'screenw', label: 'Screen width (px, exact)' },
+  { key: 'screenwBucket', label: 'Screen width (bucketed)' },
+  { key: 'pathFamily', label: 'Path family (page vs. event beacons)' },
   { key: 'date', label: 'Date (trend)' },
 ]
 

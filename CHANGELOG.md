@@ -6,6 +6,86 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-09-26
+
+### Added
+- **Every stored geo-beacon field can now split or filter any beacon chart.** New dimensions:
+  screen width (exact pixels, and a bucketed `<480`/`480-767`/`768-1023`/`1024-1439`/`1440+`
+  view), and a "path family" dimension that groups pop-up/install/return/game-complete/
+  auth-status event beacons apart from ordinary page views — all filterable, not just
+  groupable. A new per-chart "Include event beacons" option (off by default, so every
+  existing chart's numbers are unchanged) lets a chart include those event paths instead of
+  excluding them. Drilling into an event family carries that option to the filtered page's
+  other charts too, with a caption explaining why.
+- **A raw-install de-dupe marker on the Overview timeline.** Marks when duplicate cross-tab
+  `/install/*` rows stopped being sent — shown only on the raw install-signal line, never the
+  primary (already deduplicated) install count.
+- **A completions chart (mode × difficulty).** Shows distinct completed games broken down by
+  normal/daily and difficulty, live from the game-complete beacon's go-live. Added to the
+  Best Sudoku Overview page automatically for anyone who hasn't customised it; a configurable,
+  movable chart like any other, buildable on any page from the chart menu.
+
+### Changed
+- **Two D1-heavy per-campaign checks are now cached at the edge**, cutting repeated database
+  reads on every dashboard load: the campaigns/overview "which funnel steps has this flight
+  actually seen" check (shared by both pages, keyed by campaign + flight window, long-lived
+  once a flight is closed), and the new completions chart's own query.
+- **Closed campaigns' scorecard no longer shows "not instrumented" chips.** A funnel step a
+  closed flight's window never actually had a beacon for is left off the chip list entirely,
+  instead of showing a misleading "not instrumented" label — derived from the same per-flight
+  check the campaigns page already used, not a hand-written list.
+- **Closed campaigns omit uninstrumented funnel/country steps instead of labeling them.** Same
+  rule as the scorecard, applied to the campaigns page's own funnel and country-breakdown
+  views.
+- **Spend-only closed campaigns (e.g. Play-direct) no longer appear in beacon-based campaign
+  charts.** Funnel, hour-of-day, country, flight-day, device-mix and return-visit charts never
+  had real data for a campaign whose ads bypass the beacon entirely; it now shows only in the
+  spend and cost views, where its numbers are real.
+
+### Fixed
+- **Removed funnel/scorecard percentages that mixed incompatible units.** "Played a game",
+  "Completed a game", "Sign-in ask", "Auth success" and "Install prompt" showed a nonsense
+  percentage (e.g. "314.7%") because their numerator counted event rows while their
+  denominator counted arrivals or other rows, with no shared visitor id to make it a real
+  rate. They now show a plain count. Accept/ask, install/install-prompt (denominator
+  restricted to prompts shown after the install-outcome-gap fix), and return-visit rates are
+  unaffected — those are real ratios.
+- **Fixed the campaigns "Return visits" chart rendering broken/empty.** A campaign with zero
+  `/return/` rows so far — not yet instrumented for its flight, or simply no rows yet — used to
+  fall through to an empty, axis-only chart instead of being recognized as having no data. It's
+  now omitted from the grid, and the whole chart shows one line ("No return visits recorded
+  yet") when nothing has data at all.
+- **The overview scorecard's "Completed a game" chip now shows a campaign's real count once
+  it's live.** It used to always show "not instrumented", even for a campaign whose flight is
+  well after the completed-game beacon went live, because it checked a permanent constant
+  instead of that campaign's actual data. Closed campaigns whose flight predates the beacon
+  still omit the chip.
+- **The ads-read reports no longer show an "ask rate" percentage.** Like the funnel/scorecard
+  fix above, it divided an event count by an arrivals count with no shared visitor id — not a
+  real rate. Reports now show it as a count pair ("N asks · M arrivals"); accept rate is
+  unaffected.
+- **Widgets look like the old bespoke pages again, with customization tucked away.** Every
+  chart's title bar is gone — just a plain heading, with two small icons in the corner: zoom
+  (one tap) and reveal, which shows that chart's own filter/reload/menu controls until you tap
+  it again, press Escape, or tap elsewhere. Desktop hover still reveals a chart's controls too,
+  and the page's own edit-mode toggle reveals every chart at once. Double-tapping a chart also
+  zooms it. A note widget shows only the reveal icon, since it has nothing to zoom.
+- **Notes render as a plain caption line**, not a boxed card with its own title bar.
+- **"Today at a glance" and other content-heavy widgets size to their content** instead of
+  clipping their top row or scrolling inside a fixed box.
+- **KPI comparisons show sensible precision** (whole numbers, not raw decimals), wrap their
+  label instead of truncating it, and a metric with no valid comparison yet (just gone live)
+  says "new today" instead of a nonsense percentage.
+- **Overlapping release-marker labels on the Overall timeline** now stagger onto separate rows,
+  or drop the label (keeping the tick) rather than run into each other — and are visible in dark
+  theme, where they used to be unreadably dark-on-dark.
+- **The Overall timeline's caption no longer repeats itself** — it rendered twice (once inline,
+  once through the shared caption system).
+- **The page-controls toggle could get stuck closed on a touchscreen** — a tap opened it and
+  immediately closed it again on the same touch, so once it became the only way to reach edit
+  mode on touch, the controls were unreachable there. One tap now reliably opens it, a second
+  closes it.
+
 ## [0.7.0] — 2026-09-26
 
 ### Added
