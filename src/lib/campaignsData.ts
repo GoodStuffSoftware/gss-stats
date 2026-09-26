@@ -28,12 +28,13 @@ function getEntry(id: string): Entry {
   return e
 }
 
-async function ensureLoaded(id: string): Promise<Entry> {
+async function ensureLoaded(id: string, force = false): Promise<Entry> {
   const e = getEntry(id)
-  if (e.data.value || inflight.has(id)) {
+  if (!force && (e.data.value || inflight.has(id))) {
     if (inflight.has(id)) await inflight.get(id)
     return e
   }
+  if (inflight.has(id)) await inflight.get(id) // don't overlap an in-flight request even when forced
   const p = (async () => {
     e.loading.value = true
     e.error.value = null
@@ -54,7 +55,19 @@ async function ensureLoaded(id: string): Promise<Entry> {
 /** `getIds` is a getter returning widget.campaignIds — empty/undefined means every campaign
  * (CAMPAIGNS), matching the pre-widget bespoke campaigns page's "always all campaigns"
  * behavior. Reacts to campaignIds changing (e.g. via ChartEditor) since the getter is
- * re-evaluated inside a computed. */
+ * re-evaluated inside a computed.
+ *
+ * HIGH review fix (2026-09-26): a per-campaign `watch(e.data, …)` used to be created INSIDE
+ * `load()`, an async function, after an `await` — by the time that line ran, Vue's active
+ * effect scope (set only synchronously during a component's setup()/an `effectScope.run()`
+ * callback) had already been torn down, so the watcher was registered in NO scope at all.
+ * It was never tied to the calling widget and never stopped on unmount — every mount leaked
+ * one watcher per campaign, forever, growing without bound across tab switches. Fixed by
+ * moving watcher creation into the callback of a watch(campaigns, …) registered
+ * SYNCHRONOUSLY at this function's top level (so it — and everything it creates — belongs
+ * to the calling component's effect scope and IS auto-stopped on unmount), and disposing
+ * the per-campaign watchers via that same watcher's `onCleanup` whenever the campaign list
+ * changes or the component unmounts. */
 export function useCampaignsData(getIds: () => string[] | undefined) {
   const campaigns = computed<CampaignFlight[]>(() => {
     const ids = getIds()
@@ -64,30 +77,49 @@ export function useCampaignsData(getIds: () => string[] | undefined) {
   const loading = ref(true)
   const error = ref<string | null>(null)
 
-  async function load() {
+  // Populates the shared MODULE-level cache only (ensureLoaded) plus this composable's own
+  // loading/error state — it never writes into `dataByCampaign` itself. Every write to
+  // `dataByCampaign` goes through the properly-scoped per-campaign watchers below instead,
+  // so scope.stop() (component unmount) reliably cuts off ALL of them, including a fetch
+  // that was still in flight at unmount time — a plain `.then()` write here would ignore
+  // scope disposal entirely and keep writing into a dead component's data.
+  function kickOffFetches(list: CampaignFlight[], force = false) {
     loading.value = true
     error.value = null
-    try {
-      await Promise.all(
-        campaigns.value.map(async (c) => {
-          const e = await ensureLoaded(c.id)
-          if (e.data.value) dataByCampaign[c.id] = e.data.value
-          watch(e.data, (d) => {
-            if (d) dataByCampaign[c.id] = d
-          })
-        }),
-      )
-    } catch (err: any) {
-      error.value = err?.message ?? 'Failed to load'
-    } finally {
-      loading.value = false
-    }
+    Promise.all(list.map((c) => ensureLoaded(c.id, force)))
+      .catch((err: any) => {
+        error.value = err?.message ?? 'Failed to load'
+      })
+      .finally(() => {
+        loading.value = false
+      })
   }
+
   watch(
-    () => campaigns.value.map((c) => c.id).join(','),
-    () => load(),
+    campaigns,
+    (list, _prev, onCleanup) => {
+      kickOffFetches(list)
+      // One watcher per campaign currently in view — `immediate: true` covers a campaign
+      // another widget already fetched/cached, and the callback covers one that resolves
+      // later. Registered here, synchronously, inside this outer watcher's own
+      // (properly-scoped) callback — never inside an async continuation.
+      const stops = list.map((c) =>
+        watch(
+          getEntry(c.id).data,
+          (d) => {
+            if (d) dataByCampaign[c.id] = d
+          },
+          { immediate: true },
+        ),
+      )
+      onCleanup(() => stops.forEach((stop) => stop()))
+    },
     { immediate: true },
   )
 
-  return { campaigns, dataByCampaign, loading, error, reload: load }
+  function reload() {
+    kickOffFetches(campaigns.value, true)
+  }
+
+  return { campaigns, dataByCampaign, loading, error, reload }
 }

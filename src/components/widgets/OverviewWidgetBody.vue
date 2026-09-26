@@ -4,7 +4,7 @@
 // panel is now independently movable/resizable/removable/re-addable like any other widget.
 // Data fetching + all formatting/chart-building logic is unchanged from OverviewPage.vue,
 // just shared across widgets via lib/overviewData.ts instead of fetched per page-mount.
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { ChartConfiguration } from 'chart.js'
 import type { GlobalFilters, Widget, OverviewResponse } from '../../types'
 import { useOverviewData } from '../../lib/overviewData'
@@ -17,10 +17,31 @@ import BaseChart from '../charts/BaseChart.vue'
 const props = defineProps<{ widget: Widget; filters: GlobalFilters }>()
 const emit = defineEmits<{ 'open-campaigns': [] }>()
 
-const { data, loading, error } = useOverviewData(
+const { data, loading, error, reload } = useOverviewData(
   () => props.filters.since,
   () => props.filters.until,
 )
+
+// LOW review fix: the old bespoke "Today at a glance" section had its own refresh button +
+// "Updated Xs ago" indicator (independent of ChartCard's generic reload button, which is
+// hidden for this dataset — see ChartCard.vue's isBespokeBody). Restored here, scoped to the
+// 'kpis' view specifically (the one panel that benefits most from an at-a-glance freshness
+// check), wired to the shared composable's reload().
+const lastUpdated = ref<Date | null>(null)
+watch(
+  data,
+  (d) => {
+    if (d) lastUpdated.value = new Date()
+  },
+  { immediate: true },
+)
+function relTime(d: Date | null): string {
+  if (!d) return ''
+  const s = Math.round((Date.now() - d.getTime()) / 1000)
+  if (s < 5) return 'just now'
+  if (s < 60) return `${s}s ago`
+  return `${Math.round(s / 60)}m ago`
+}
 
 function fmt(n: number | null | undefined): string {
   return n == null ? '—' : n.toLocaleString('en-US')
@@ -152,7 +173,12 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
 
     <template v-else-if="data">
       <!-- kpis -->
-      <div v-if="widget.view === 'kpis'" class="kpi-grid">
+      <template v-if="widget.view === 'kpis'">
+        <div class="kpi-head">
+          <span v-if="lastUpdated" class="last-updated mono">Updated {{ relTime(lastUpdated) }}</span>
+          <button class="btn-ghost icon" title="Refresh" @click="reload">↻</button>
+        </div>
+      <div class="kpi-grid">
         <div v-for="k in data.kpis" :key="k.key" class="kpi-tile">
           <div class="kpi-label">{{ k.label }}</div>
           <template v-if="k.noCampaignFlighting">
@@ -169,6 +195,7 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
           </template>
         </div>
       </div>
+      </template>
 
       <!-- timeline -->
       <template v-else-if="widget.view === 'timeline'">
@@ -260,6 +287,30 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
 }
 .caption code {
   font-family: 'JetBrains Mono', monospace;
+}
+.kpi-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.last-updated {
+  font-size: 11px;
+  color: rgb(var(--ink-3));
+}
+.btn-ghost.icon {
+  border: none;
+  background: transparent;
+  color: rgb(var(--ink-3));
+  font-size: 15px;
+  padding: 3px 7px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.btn-ghost.icon:hover {
+  background: rgb(var(--sunken));
+  color: rgb(var(--ink));
 }
 .kpi-grid {
   display: grid;
