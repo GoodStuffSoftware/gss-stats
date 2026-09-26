@@ -171,15 +171,21 @@ function flowLayout(items: (Omit<Widget, 'i' | 'x' | 'y'> & { w: number; h: numb
 // Popups whose per-reason/per-platform shown breakdown is worth a chart out of the box.
 const POPUPS_WITH_TREND = new Set(['signin-prompt', 'upsell'])
 
+// The OLD generated titles baked SIGNIN_ELIGIBLE_CAVEAT/NO_OUTCOME_TRACKING_NOTE directly
+// into the string (pre notes-registry). Titles are plain names now; the caveats are default
+// CAPTIONS (widget.notes) instead — see migratePopupCaveatTitles below for the one-time,
+// exact-string-matched migration of anyone's already-saved config.
+const POPUP_KIND_TITLE_OLD_SUFFIX = ` (${NO_OUTCOME_TRACKING_NOTE})`
+const SIGNIN_ELIGIBLE_TITLE_OLD_SUFFIX = ` (${SIGNIN_ELIGIBLE_CAVEAT})`
+
 export function defaultBestSudokuPopupsWidgets(): Widget[] {
   const items: (Omit<Widget, 'i' | 'x' | 'y'> & { w: number; h: number })[] = []
   for (const p of POPUPS) {
     // FINAL LIST: first50-congrats has no /popup-outcome beacon — no outcome-rate tile is
-    // generated for it below (POPUP_RATE_SPECS already excludes it), and this title carries
-    // the one-time "no outcome tracking" note instead of a placeholder implying one's coming.
-    const kindTitle = `${p.label} — shown / accepted / dismissed${p.noOutcomeTracking ? ` (${NO_OUTCOME_TRACKING_NOTE})` : ''}`
+    // generated for it below (POPUP_RATE_SPECS already excludes it); its "no outcome
+    // tracking" note is now a default caption (not baked into the title — see above).
     items.push(
-      pw({ id: `pu-${p.id}-kind`, title: kindTitle, type: 'bar', dimension: 'kind', popup: p.id, limit: 3, w: 6, h: 8 }),
+      pw({ id: `pu-${p.id}-kind`, title: `${p.label} — shown / accepted / dismissed`, type: 'bar', dimension: 'kind', popup: p.id, limit: 3, notes: p.noOutcomeTracking ? ['no-outcome-tracking'] : undefined, w: 6, h: 8 }),
       pw({ id: `pu-${p.id}-tap`, title: `${p.label} — tap rate`, type: 'rate', dimension: `${p.id}:tap`, limit: 1, w: 3, h: 4 }),
     )
     if (p.hasReasonBreakdown) {
@@ -194,10 +200,10 @@ export function defaultBestSudokuPopupsWidgets(): Widget[] {
     }
   }
   items.push(
-    // FINAL LIST caveat: signin-eligible rows are deferred ≥30 min after the finish — see
-    // SIGNIN_ELIGIBLE_CAVEAT — surfaced on every chart that charts it.
-    pw({ id: 'pu-eligible-bd', title: `Sign-in eligibility — earned / capped / unearned (${SIGNIN_ELIGIBLE_CAVEAT})`, type: 'bar', dimension: 'eligible', limit: 3, w: 6, h: 8 }),
-    pw({ id: 'pu-eligible-rate', title: `Sign-in eligibility rate (${SIGNIN_ELIGIBLE_CAVEAT})`, type: 'rate', dimension: 'signin-eligible:rate', limit: 1, w: 3, h: 4 }),
+    // FINAL LIST caveat: signin-eligible rows are deferred ≥30 min after the finish — now a
+    // default caption (lib/notes.ts 'signin-eligible-caveat') instead of baked into the title.
+    pw({ id: 'pu-eligible-bd', title: 'Sign-in eligibility — earned / capped / unearned', type: 'bar', dimension: 'eligible', limit: 3, notes: ['signin-eligible-caveat'], w: 6, h: 8 }),
+    pw({ id: 'pu-eligible-rate', title: 'Sign-in eligibility rate', type: 'rate', dimension: 'signin-eligible:rate', limit: 1, notes: ['signin-eligible-caveat'], w: 3, h: 4 }),
     pw({ id: 'pu-install-outcomes', title: 'Install — real outcomes', type: 'table', dimension: 'installOutcome', limit: 3, w: 6, h: 8 }),
   )
   // One rate tile per (popup, outcome type) — see POPUP_RATE_SPECS. Zero data today
@@ -206,6 +212,66 @@ export function defaultBestSudokuPopupsWidgets(): Widget[] {
     items.push(pw({ id: `pu-rate-${spec.key}`, title: spec.label, type: 'rate', dimension: spec.key, limit: 1, w: 3, h: 4 }))
   }
   return flowLayout(items)
+}
+
+interface PopupTitleMigration {
+  id: string
+  oldTitle: string
+  newTitle: string
+  noteId: string
+}
+function popupTitleMigrations(): PopupTitleMigration[] {
+  const migrations: PopupTitleMigration[] = []
+  for (const p of POPUPS) {
+    if (p.noOutcomeTracking) {
+      migrations.push({
+        id: `pu-${p.id}-kind`,
+        oldTitle: `${p.label} — shown / accepted / dismissed${POPUP_KIND_TITLE_OLD_SUFFIX}`,
+        newTitle: `${p.label} — shown / accepted / dismissed`,
+        noteId: 'no-outcome-tracking',
+      })
+    }
+  }
+  migrations.push(
+    {
+      id: 'pu-eligible-bd',
+      oldTitle: `Sign-in eligibility — earned / capped / unearned${SIGNIN_ELIGIBLE_TITLE_OLD_SUFFIX}`,
+      newTitle: 'Sign-in eligibility — earned / capped / unearned',
+      noteId: 'signin-eligible-caveat',
+    },
+    {
+      id: 'pu-eligible-rate',
+      oldTitle: `Sign-in eligibility rate${SIGNIN_ELIGIBLE_TITLE_OLD_SUFFIX}`,
+      newTitle: 'Sign-in eligibility rate',
+      noteId: 'signin-eligible-caveat',
+    },
+  )
+  return migrations
+}
+
+/** Non-destructive, idempotent, runs on every load (like reorderBskGroup — not version-
+ * gated): moves SIGNIN_ELIGIBLE_CAVEAT/NO_OUTCOME_TRACKING_NOTE text that used to be baked
+ * into these generated pop-up widget TITLES into a default CAPTION (widget.notes) instead,
+ * restoring the plain name. Matched by widget id AND an EXACT old-title string — a title the
+ * user has since edited, even by one character, no longer matches and is left completely
+ * untouched. Idempotent because the new title never matches `oldTitle` on a second run. */
+export function migratePopupCaveatTitles(pages: DashboardPage[]): DashboardPage[] {
+  const migrations = popupTitleMigrations()
+  let anyPageChanged = false
+  const next = pages.map((p) => {
+    let pageChanged = false
+    const widgets = p.widgets.map((w) => {
+      const m = migrations.find((m) => m.id === w.id && w.title === m.oldTitle)
+      if (!m) return w
+      pageChanged = true
+      const notes = w.notes ?? []
+      return { ...w, title: m.newTitle, notes: notes.includes(m.noteId) ? notes : [...notes, m.noteId] }
+    })
+    if (!pageChanged) return p
+    anyPageChanged = true
+    return { ...p, widgets }
+  })
+  return anyPageChanged ? next : pages
 }
 
 export function defaultBestSudokuPopupsPage(): DashboardPage {
@@ -534,12 +600,18 @@ export function normalizeConfig(raw: any): DashboardConfig {
       const canonical = p.id === 'default' || p.id === 'beacon' || isBestSudokuLaunchPage(p)
       if (canonical && p.filters.drill?.length) p.filters.drill = []
     }
+    // Pop-up widget title/caption migration (every load, not version-gated — see
+    // migratePopupCaveatTitles): restores the plain generated title on any pop-up widget
+    // whose title is STILL EXACTLY the old "name + caveat" string, moving the caveat to a
+    // default caption instead. A title the user has since edited never matches, so it's
+    // left untouched.
+    const withCaptionsMigrated = migratePopupCaveatTitles(pages)
     // Tab-order reorder + rename (every load, not version-gated — see reorderBskGroup):
     // GSS pages first, then the Best Sudoku group in fixed order (Overview, Campaigns,
     // Pop-ups, Launch/Traffic), then every user-created page in its existing relative
     // order. Pure reordering + a consistent-name rename — never drops, renames, or edits
     // a widget.
-    const ordered = reorderBskGroup(pages)
+    const ordered = reorderBskGroup(withCaptionsMigrated)
     const activePageId = ordered.some((p: DashboardPage) => p.id === raw.activePageId) ? raw.activePageId : ordered[0].id
     return { version: CONFIG_VERSION, activePageId, pages: ordered, syncRange: !!raw.syncRange }
   }

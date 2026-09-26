@@ -5,12 +5,15 @@ import {
   reorderBskGroup,
   defaultOverviewWidgets,
   defaultCampaignsWidgets,
+  defaultBestSudokuPopupsWidgets,
+  migratePopupCaveatTitles,
   isOverviewPage,
   isCampaignComparePage,
   isBestSudokuPopupsPage,
   isBestSudokuLaunchPage,
   CONFIG_VERSION,
 } from './defaults'
+import { NO_OUTCOME_TRACKING_NOTE, SIGNIN_ELIGIBLE_CAVEAT } from './popupEvents'
 import type { DashboardConfig, DashboardPage, Widget } from '../types'
 
 // Minimal widget fixture — only the fields tests actually inspect matter; the rest are
@@ -275,5 +278,121 @@ describe('normWidget — notes/noteId/longText round-trip (via normalizeConfig)'
     const legacy = { id: 'old2', title: 'x', type: 'hbar', dimension: '', metric: 'pageviews', limit: 1, notes: 'not-an-array', x: 0, y: 0, w: 4, h: 4 }
     const norm = normalizeConfig(withWidgets([legacy as unknown as Widget]))
     expect(norm.pages[0].widgets[0].notes).toBeUndefined()
+  })
+})
+
+describe('defaultBestSudokuPopupsWidgets — titles are plain, caveats are captions', () => {
+  const widgets = defaultBestSudokuPopupsWidgets()
+
+  it('the first50-congrats "kind" widget has a plain title and the no-outcome-tracking caption', () => {
+    const w = widgets.find((w) => w.id === 'pu-first50-congrats-kind')!
+    expect(w.title).toBe('First 50 congrats — shown / accepted / dismissed')
+    expect(w.title).not.toContain(NO_OUTCOME_TRACKING_NOTE)
+    expect(w.notes).toEqual(['no-outcome-tracking'])
+  })
+
+  it('a popup WITHOUT noOutcomeTracking never gets that caption', () => {
+    const w = widgets.find((w) => w.id === 'pu-signin-prompt-kind')!
+    expect(w.notes ?? []).not.toContain('no-outcome-tracking')
+  })
+
+  it('the sign-in eligibility widgets have plain titles and the signin-eligible-caveat caption', () => {
+    const bd = widgets.find((w) => w.id === 'pu-eligible-bd')!
+    const rate = widgets.find((w) => w.id === 'pu-eligible-rate')!
+    expect(bd.title).toBe('Sign-in eligibility — earned / capped / unearned')
+    expect(bd.title).not.toContain(SIGNIN_ELIGIBLE_CAVEAT)
+    expect(bd.notes).toEqual(['signin-eligible-caveat'])
+    expect(rate.title).toBe('Sign-in eligibility rate')
+    expect(rate.notes).toEqual(['signin-eligible-caveat'])
+  })
+})
+
+describe('migratePopupCaveatTitles', () => {
+  function popupPage(widgets: Widget[]): DashboardPage {
+    return page({ id: 'bsk-popups', name: 'Best Sudoku · Pop-ups', widgets })
+  }
+
+  it('restores the plain title and adds the caption for a widget with EXACTLY the old generated title', () => {
+    const oldKind = widget({
+      id: 'pu-first50-congrats-kind',
+      title: `First 50 congrats — shown / accepted / dismissed (${NO_OUTCOME_TRACKING_NOTE})`,
+      type: 'bar',
+      dataset: 'popup',
+    })
+    const [out] = migratePopupCaveatTitles([popupPage([oldKind])])
+    const w = out.widgets[0]
+    expect(w.title).toBe('First 50 congrats — shown / accepted / dismissed')
+    expect(w.notes).toEqual(['no-outcome-tracking'])
+  })
+
+  it('migrates both sign-in-eligibility widgets from their old caveat-suffixed titles', () => {
+    const bd = widget({ id: 'pu-eligible-bd', title: `Sign-in eligibility — earned / capped / unearned (${SIGNIN_ELIGIBLE_CAVEAT})`, type: 'bar', dataset: 'popup' })
+    const rate = widget({ id: 'pu-eligible-rate', title: `Sign-in eligibility rate (${SIGNIN_ELIGIBLE_CAVEAT})`, type: 'rate', dataset: 'popup' })
+    const [out] = migratePopupCaveatTitles([popupPage([bd, rate])])
+    expect(out.widgets[0].title).toBe('Sign-in eligibility — earned / capped / unearned')
+    expect(out.widgets[0].notes).toEqual(['signin-eligible-caveat'])
+    expect(out.widgets[1].title).toBe('Sign-in eligibility rate')
+    expect(out.widgets[1].notes).toEqual(['signin-eligible-caveat'])
+  })
+
+  it('leaves a USER-EDITED title (no longer an exact match) completely untouched', () => {
+    const edited = widget({
+      id: 'pu-eligible-bd',
+      title: 'My custom eligibility chart', // user renamed it — does not match the old string
+      type: 'bar',
+      dataset: 'popup',
+    })
+    const [out] = migratePopupCaveatTitles([popupPage([edited])])
+    expect(out.widgets[0].title).toBe('My custom eligibility chart')
+    expect(out.widgets[0].notes ?? []).toEqual([])
+  })
+
+  it('leaves an ALREADY-plain title (already migrated, or a fresh default widget) untouched — idempotent', () => {
+    const already = widget({ id: 'pu-eligible-rate', title: 'Sign-in eligibility rate', type: 'rate', dataset: 'popup', notes: ['signin-eligible-caveat'] })
+    const [out] = migratePopupCaveatTitles([popupPage([already])])
+    expect(out.widgets[0]).toEqual(already)
+  })
+
+  it('does not duplicate the caption if the widget somehow already has it', () => {
+    const oldTitleAlreadyTagged = widget({
+      id: 'pu-eligible-rate',
+      title: `Sign-in eligibility rate (${SIGNIN_ELIGIBLE_CAVEAT})`,
+      type: 'rate',
+      dataset: 'popup',
+      notes: ['signin-eligible-caveat'],
+    })
+    const [out] = migratePopupCaveatTitles([popupPage([oldTitleAlreadyTagged])])
+    expect(out.widgets[0].notes).toEqual(['signin-eligible-caveat'])
+  })
+
+  it('is a no-op (same array reference) when nothing on the page matches', () => {
+    const pages = [popupPage([widget({ id: 'pu-eligible-rate', title: 'Sign-in eligibility rate', type: 'rate', dataset: 'popup' })])]
+    const out = migratePopupCaveatTitles(pages)
+    expect(out).toBe(pages)
+  })
+
+  it('running it twice in a row is idempotent (second pass changes nothing further)', () => {
+    const oldKind = widget({ id: 'pu-first50-congrats-kind', title: `First 50 congrats — shown / accepted / dismissed (${NO_OUTCOME_TRACKING_NOTE})`, type: 'bar', dataset: 'popup' })
+    const once = migratePopupCaveatTitles([popupPage([oldKind])])
+    const twice = migratePopupCaveatTitles(once)
+    expect(twice[0].widgets[0]).toEqual(once[0].widgets[0])
+  })
+
+  it('end to end via normalizeConfig: an old-shape pop-ups page in a full config gets migrated on load', () => {
+    const raw: any = {
+      version: 6,
+      activePageId: 'bsk-popups',
+      pages: [
+        page({ id: 'default', name: 'Overview', isDefault: true }),
+        popupPage([
+          widget({ id: 'pu-eligible-bd', title: `Sign-in eligibility — earned / capped / unearned (${SIGNIN_ELIGIBLE_CAVEAT})`, type: 'bar', dataset: 'popup' }),
+        ]),
+      ],
+    }
+    const norm = normalizeConfig(raw)
+    const popupsPage = norm.pages.find((p) => isBestSudokuPopupsPage(p))!
+    const w = popupsPage.widgets.find((w) => w.id === 'pu-eligible-bd')!
+    expect(w.title).toBe('Sign-in eligibility — earned / capped / unearned')
+    expect(w.notes).toEqual(['signin-eligible-caveat'])
   })
 })
