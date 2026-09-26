@@ -53,3 +53,17 @@ export function nativeField(key: string, dataset: Dataset): string | null {
   const ds = dataset === 'geo' ? 'geo' : 'rum'
   return DRILL_FIELDS[key]?.[ds] ?? null
 }
+
+// Whether opening a filtered page from this drill should carry `includeEventBeacons: true`
+// forward onto the new page (GlobalFilters.includeEventBeacons, App.vue openFilteredPage).
+// Only geo's 'pathFamily' dimension can select an EVENT value at all — every other
+// dimension's values are ordinary page-view attributes, never event-specific — and 'page' is
+// the one pathFamily value that ISN'T an event, so a drill onto it doesn't need this. Without
+// it, drilling into e.g. 'install' would land on a page whose OTHER widgets (any that don't
+// set their own includeEventBeacons) apply the standing event-beacon exclusion AND the new
+// pathFamily='install' constraint together — which can never match a single row, since an
+// install-family row is by definition excluded by that same standing filter, so those widgets
+// would render silently empty instead of showing the same drilled-into data.
+export function drillNeedsEventBeacons(dimension: string, dataset: Dataset, value: string): boolean {
+  return dataset === 'geo' && dimension === 'pathFamily' && value !== 'page'
+}

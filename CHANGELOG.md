@@ -13,9 +13,10 @@ All notable changes to **gss-stats** are documented here. The format follows
   auth-status event beacons apart from ordinary page views — all filterable, not just
   groupable. A new per-chart "Include event beacons" option (off by default, so every
   existing chart's numbers are unchanged) lets a chart include those event paths instead of
-  excluding them.
+  excluding them. Drilling into an event family carries that option to the filtered page's
+  other charts too, with a caption explaining why.
 
-
+## [0.7.0] — 2026-09-26
 
 ### Added
 - **Campaign spend shows how fresh it is.** The campaigns page and the readings log show

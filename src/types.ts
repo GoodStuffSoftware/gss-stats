@@ -142,6 +142,14 @@ export interface GlobalFilters {
   excludeOwnVisits: boolean
   ownBrowser: string
   ownOS: string
+  // Page-level fallback for widget.includeEventBeacons (see Widget) — a geo chart with no
+  // per-widget override inherits this. Set automatically when opening a filtered page from a
+  // drill into an event-family pathFamily value (see lib/drill.ts drillNeedsEventBeacons,
+  // App.vue openFilteredPage): without it, every OTHER widget on that page would apply the
+  // standing event-beacon exclusion together with the new pathFamily constraint, which can
+  // never match a row, and would render silently empty instead of showing the drilled-into
+  // data. Undefined/false = excluded, same as before this field existed.
+  includeEventBeacons?: boolean
 }
 
 // A single dashboard page: its own global filters + its own widgets (each of which

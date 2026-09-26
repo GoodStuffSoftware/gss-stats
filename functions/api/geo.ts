@@ -55,6 +55,27 @@ export function breakdownColumnExpr(dim: string, emptyLabel: string): string {
   return `CASE WHEN ${dim} = '' THEN '${emptyLabel}' ELSE ${dim} END`
 }
 
+// The blank-value label a dimension's rows get bucketed under — one place both the single-dim
+// breakdown path and the ring (N-dimension) path read, so they can never disagree about what
+// "blank" is called for a given dim. `dim` is trusted (see breakdownColumnExpr above).
+export function emptyLabelFor(dim: string): string {
+  if (dim === 'referrer') return '(direct)'
+  if (dim === 'campaign' || dim === 'source' || dim === 'medium') return '(untagged)'
+  if (dim === 'screenw' || dim === 'screenwBucket') return '(unknown)'
+  return '(none)'
+}
+
+// The WHERE-clause fragment that excludes a ring dimension's blank rows — ring mode has always
+// excluded blanks outright (never bucketed them under a label the way single-dim breakdown
+// does), so a ring never nests an "(unknown)"/"(none)" branch. `screenw` is INTEGER; its blank
+// sentinel is 0, never the empty STRING every TEXT column's blank test (`= ''`) compares
+// against — SQLite's type ordering means an INTEGER can never equal a TEXT literal, so
+// `screenw <> ''` is a no-op (always true, excludes nothing), letting blank rows leak into the
+// ring as a raw "0" key instead of being dropped like every other dimension's blanks.
+export function ringBlankExclusion(dim: string): string {
+  return dim === 'screenw' ? 'screenw <> 0' : `${dim} <> ''`
+}
+
 // `orderBy` should include a tiebreak (e.g. "c DESC, k ASC") — without one, which rows LIMIT
 // keeps among an exact-count tie is unspecified, and the two query PLANS being compared here
 // (a bare GROUP BY vs. one wrapped in a subquery) aren't guaranteed to break ties the same way,
@@ -295,8 +316,17 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   }
 
   if (isRing) {
-    const cols = ringDims.map((d, i) => `${d} AS k${i}`)
-    const w: string[] = ['ts >= ?', 'ts < ?', ...ringDims.map((d) => `${d} <> ''`)]
+    // Route every ring column through breakdownColumnExpr (same as single-dim mode) rather
+    // than a bare column reference — a real column's own formatting (e.g. screenw's
+    // CAST(... AS TEXT)) is applied uniformly, and if a blank row were ever to reach here
+    // (it shouldn't: ringBlankExclusion below drops them first) it would still render as its
+    // proper label instead of a raw column value.
+    const cols = ringDims.map((d, i) => `${breakdownColumnExpr(d, emptyLabelFor(d))} AS k${i}`)
+    // Ring mode has always EXCLUDED a dimension's blank rows outright (never bucketed them
+    // under a label the way single-dim breakdown does) — ringBlankExclusion is the
+    // type-correct version of that per-dim test (screenw is INTEGER; every other ring
+    // dimension is TEXT).
+    const w: string[] = ['ts >= ?', 'ts < ?', ...ringDims.map(ringBlankExclusion)]
     const b: any[] = [sinceMs, untilMs]
     if (!includeEventBeacons) popupExcludeClause(w, b) // events, not screen views — excluded unless opted in
     siteClause(w, b)
@@ -336,15 +366,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // that appears on the map also appears (as "(direct)"/"(none)") in the referrer,
   // subreddit, etc. charts. Dropping blanks made attribute charts look empty while the
   // location charts stayed full for the very same visits.
-  const emptyLabel =
-    dim === 'referrer'
-      ? '(direct)'
-      : dim === 'campaign' || dim === 'source' || dim === 'medium'
-        ? '(untagged)'
-        : dim === 'screenw' || dim === 'screenwBucket'
-          ? '(unknown)'
-          : '(none)'
-  const col = breakdownColumnExpr(dim, emptyLabel)
+  const col = breakdownColumnExpr(dim, emptyLabelFor(dim))
   const where = ['ts >= ?', 'ts < ?']
   const binds: any[] = [sinceMs, untilMs]
   if (!includeEventBeacons) popupExcludeClause(where, binds) // events, not screen views — excluded unless opted in
