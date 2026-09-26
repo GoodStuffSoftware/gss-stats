@@ -436,6 +436,7 @@ per 10 minutes. The dashboard holds no Google Ads credential and never calls the
 | Contributing / conventions | [CLAUDE.md](CLAUDE.md) |
 | Auth design (ADR) | [docs/adr/0002-google-auth.md](docs/adr/0002-google-auth.md) |
 | Ads store decision | [docs/adr/0001-ads-read-store.md](docs/adr/0001-ads-read-store.md) |
+| Metric components design (ADR, proposed) | [docs/adr/0003-metric-components.md](docs/adr/0003-metric-components.md) |
 | Ads routine prompts | [docs/routines/](docs/routines/) |
 | Geo beacon (companion) | [GoodStuffSoftware/gss-beacon](https://github.com/GoodStuffSoftware/gss-beacon) |
 | Capacity / free-plan limits | [docs/capacity.md](docs/capacity.md) |
