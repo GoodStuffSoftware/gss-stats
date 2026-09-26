@@ -41,9 +41,13 @@ import {
   siteWindowClause,
 } from '../../src/lib/overview'
 import { latestDatedRelease } from '../../src/lib/releases'
+import { resolveCampaignSpend } from '../../src/lib/adsRules'
+import { readSpendSummaries } from '../../src/lib/adsStore'
 
 interface Env {
   gss_geo: D1Database
+  /** gss-stats' own ads store — optional; spend falls back to CAMPAIGN_SPEND. */
+  gss_stats_ads?: D1Database
 }
 
 const json = (data: unknown, status = 200): Response =>
@@ -248,6 +252,10 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const campaignFlights = CAMPAIGNS.map((c) => ({ id: c.id, label: c.label, flightStart: c.flightStart, flightEnd: c.flightEnd, status: c.status }))
   const releaseMarkers = latestDatedRelease() ? [latestDatedRelease()] : [] // see releasePanel below for "no dated release yet"
 
+  // Stored Google Ads spend (gss-stats-ads) beats the hand-entered config — the same rule as
+  // /api/campaigns (lib/adsRules.ts resolveCampaignSpend), read once for every campaign.
+  const storedSpend = await readSpendSummaries(ctx.env.gss_stats_ads)
+
   // ── 3. CAMPAIGN SCORECARD ───────────────────────────────────────────────────────────────
   const scorecard = await Promise.all(
     CAMPAIGNS.map(async (c) => {
@@ -280,7 +288,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
         if (ev && c.ucValues.includes(ev.uc)) returnCounts[ev.bucket] += Number(x.cnt) || 0
       }
       const returnRates = returnVisitRates(returnCounts as any)
-      const spend = CAMPAIGN_SPEND[c.id] ?? null
+      const spend = resolveCampaignSpend(storedSpend?.get(c.id) ?? null, CAMPAIGN_SPEND[c.id] ?? null).spend
       // flightStart is nullable (a not-yet-confirmed flight, e.g. the retest — see
       // lib/campaigns.ts CAMPAIGNS) — there's no day count to report until it's set.
       const flightDays = c.flightStart == null ? null : Math.round((etMidnightUtcMs(c.flightEnd) - etMidnightUtcMs(c.flightStart)) / 86_400_000) + 1

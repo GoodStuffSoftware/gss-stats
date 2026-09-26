@@ -37,6 +37,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
 | RUM data | Cloudflare GraphQL Analytics API (`rumPageloadEventsAdaptiveGroups`) |
 | Geo data | Cloudflare D1 (shared with [gss-beacon](https://github.com/GoodStuffSoftware/gss-beacon)) |
 | Config store | Cloudflare KV (`STATS_CONFIG`) |
+| Ads store | Cloudflare D1 `gss-stats-ads` (gss-stats' own: Google Ads spend, readings log, threshold state) |
 | Auth | Cloudflare Access (Zero Trust), owner-only |
 
 ## Features
@@ -88,8 +89,14 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   - `/signin-eligible` (the sign-in denominator) is deferred at least 30 minutes after the
     finish, so its row time is not the finish time — every chart of it carries that caveat,
     and it's never used to bucket by hour of day (see `SIGNIN_ELIGIBLE_CAVEAT`). The pop-ups
-    page also carries a standing note that rates correlated with a sign-in are
-    conservative for the same reason.
+    page also carries a standing note (`POPUP_PAGE_NOTE`): "Outcomes and return visits may
+    arrive up to 30 minutes late; a small number are lost." (after a sign-in the app holds
+    outcome, eligibility and return beacons for 30 minutes and sends them on a later
+    navigation).
+  - **Known gap, install outcomes:** prompt-driven installs don't record an install outcome
+    yet (fix pending in Best Sudoku). While `INSTALL_ACCEPT_OUTCOME_FIXED_ET` is unset, the
+    install-prompt "installed" rate, the `pwa-installed` count and the campaign funnel's
+    Install step carry a "known gap" label; set it to the fix's ET release date to clear it.
 
   A configurable **tracking activation date** (`TRACKING_ACTIVATION_DATE_ET`, set to
   2026-09-26 — v1.95.3's confirmed production WEB release, 14:31 UTC) keeps pre-release
@@ -118,8 +125,12 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   chart-grid model) compares the three Google Ads campaigns configured in
   [`src/lib/campaigns.ts`](src/lib/campaigns.ts): a funnel per campaign, arrivals by ET
   hour of day, arrivals/funnel by country, daily + cumulative arrivals aligned by flight
-  day, cost per arrival/auth success (spend filled in from the Google Ads API), device mix,
-  and an on-device return-visit retention curve. Attribution is by the beacon's own
+  day, cost per arrival/auth success (spend read from the Google Ads API figures the ads
+  routine stores, falling back to the hand-entered `CAMPAIGN_SPEND`), device mix, an
+  on-device return-visit retention curve, and the ads routine's **readings log**. The
+  funnel's Install step counts `/popup-outcome/install-prompt/installed` (once per showing);
+  raw `/install/*` outcome beacons, which can double-count one install, are shown only as a
+  secondary "raw install signals" line. Attribution is by the beacon's own
   campaign tag only, with no date-based split — one swappable function decides row
   membership, and known verification/household traffic is excluded server-side. One
   campaign (Play-direct) sends its ads straight to the Play Store and so has no beacon rows
@@ -142,10 +153,11 @@ Cloudflare Pages Functions  (functions/api/*.ts)
    │  - /api/campaigns → Google Ads campaign comparison from the same D1 (funnel, hour-of-day,
    │                      country, daily/cumulative, device mix, return visits)
    │  - /api/overview → today-at-a-glance KPIs, daily timeline, campaign scorecard, release panel
+   │  - /api/ads/readings → the ads routine's readings log + stored spend (D1 gss-stats-ads)
    │  - /api/sites  → auto-builds the merged site list (RUM + beacon, aliases folded)
    │  - /api/config → dashboard layout in KV
    ▼
-Cloudflare GraphQL Analytics API  ·  D1 (gss-geo)  ·  KV (STATS_CONFIG)
+Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats-ads)  ·  KV (STATS_CONFIG)
 ```
 
 - **Two datasets, one dashboard.** RUM (sampled, human-only) and the beacon (every
@@ -180,12 +192,50 @@ household traffic) and `classifyFunnelPath` (which paths count as which funnel s
 exposes no client IP or visitor ID, so a UA combo is the only self-exclusion proxy on
 that dataset; the beacon adds a precise per-device/per-network opt-out.
 
+## Ads-read routines (Best Sudoku)
+
+Node tooling in [`scripts/ads-reads/`](scripts/ads-reads/) that the scheduled routines in
+[`docs/routines/`](docs/routines/) run from this checkout. It **proposes only** — it can't
+change a campaign (the Google Ads client can only run GAQL `SELECT`s). The rules, thresholds,
+exclusions, MIN_COHORT and ET-day logic are the same `src/lib` code the dashboard uses
+([`src/lib/adsRules.ts`](src/lib/adsRules.ts) on top of `campaigns.ts` / `popupEvents.ts`), so
+the routine and the dashboard can't disagree.
+
+```powershell
+npm run ads:morning-read -- --dry-run --cf-token-file <path-to-cf-token>   # daily read; no writes
+npm run ads:postflight-read -- --stage wrapup --dry-run --cf-token-file <path>
+npm run ads:backfill -- --dry-run --cf-token-file <path>                   # idempotent spend backfill
+npm run ads:morning-read -- --fixture <file.json> --now <iso>              # offline, recorded data
+npm run typecheck:scripts
+```
+
+- **Spend** comes from the Google Ads REST API only (customer 8726535246, no manager
+  header). Credentials are read from Bitwarden Secrets Manager with `bws` (needs
+  `BWS_ACCESS_TOKEN`) into process memory and are never printed, logged or written.
+- **Beacon reads** use `wrangler d1 execute gss-geo --remote --json --command`: single
+  `SELECT`s only, enforced before wrangler runs.
+- **Store:** gss-stats' own D1 database `gss-stats-ads` (spend per day, placement-day cost,
+  an append-only readings log and fire-once threshold state). Why and how:
+  [docs/adr/0001-ads-read-store.md](docs/adr/0001-ads-read-store.md). Schema:
+  [`migrations/gss-stats-ads/`](migrations/gss-stats-ads/) (`npm run ads:migrate`).
+- **morning-read** stores yesterday's and cumulative spend, fires each $25/$50/$75/$100 read
+  once (full read + kill rules), always appends a daily line, checks the hard cap on every
+  read, and runs the release-health check (a missing child of a non-zero parent; never
+  between 01:00 and 12:00 ET, so the 08:00 run skips it and `--release-health-only` is the
+  evening backstop).
+- **postflight-read** covers the wrap-up (spend end + 7 days) and the day-15/30/60 and
+  December follow-ups, split promo vs non-promo, with the d31-60 return buckets.
+- `--firebase-sa <service-account.json>` adds read-only Firestore COUNT queries (new
+  accounts and first-50 claims in the flight window, plus `promos/first50` status).
+
 ## Docs
 
 | Area | Entry point |
 |---|---|
 | Changelog | [CHANGELOG.md](CHANGELOG.md) |
 | Contributing / conventions | [CLAUDE.md](CLAUDE.md) |
+| Ads store decision | [docs/adr/0001-ads-read-store.md](docs/adr/0001-ads-read-store.md) |
+| Ads routine prompts | [docs/routines/](docs/routines/) |
 | Geo beacon (companion) | [GoodStuffSoftware/gss-beacon](https://github.com/GoodStuffSoftware/gss-beacon) |
 
 ## Deploy
