@@ -99,6 +99,17 @@ export function fullReadLines(r: FullRead, title: string): string[] {
     out.push(`  reading: ${r.decision.reading}`)
     out.push(`  next: ${r.decision.next}`)
   }
+  if (r.segments) {
+    const s = r.segments
+    out.push(`Segments at the signed-out upsell fix (${s.boundaryLabel}) — two separate short tests (spec section 14a):`)
+    for (const [name, f] of [['pre-fix', s.pre], ['post-fix', s.post]] as const) {
+      out.push(
+        `  ${name}: spend ${money(f.spend)} over ${f.spendDays} closed day(s); ${n(f.taggedArrivals)} tagged arrivals; asks ${n(f.asks)}, accepts ${n(f.accepts)} (accept rate ${formatGated(gateRate(f.accepts, f.asks))}); ${f.signUps.label}; upsell shown ${n(f.upsell.shown)}, accepted ${n(f.upsell.accept)}`,
+      )
+    }
+    out.push(`  fix day ${s.boundaryDay}: spend ${money(s.boundaryDaySpend)} (straddles the fix; Ads spend is per ET day)`)
+    out.push(`  ${s.note}`)
+  }
   if (r.errors.length) out.push(`Read errors: ${r.errors.join(' | ')}`)
   return out
 }

@@ -229,6 +229,14 @@ export interface CampaignCompareResponse {
   spendThrough?: string | null
   lastSync?: string | null
   stale?: boolean
+  // The signed-out upsell fix as a funnel segment boundary (null until its instant is set).
+  segments?: {
+    boundaryMs: number
+    boundaryLabel: string
+    boundaryDate: string
+    boundaryFlightDay: number | null
+    upsell: { pre: { shown: number; accept: number; dismiss: number }; post: { shown: number; accept: number; dismiss: number } }
+  } | null
   // Raw /install/<outcome> beacons — secondary to the deduplicated install step (one install
   // can fire two of them); see lib/campaigns.ts isRawInstallSignal.
   rawInstallSignals?: { count: number; label: string }

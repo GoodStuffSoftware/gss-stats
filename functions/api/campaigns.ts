@@ -41,7 +41,7 @@ import {
   type FunnelStepKey,
 } from '../../src/lib/campaigns'
 import { etDateFromMs, excludeInstallGapUnmeasured, installOutcomeGapNote, TRACKING_ACTIVATION_DATE_ET } from '../../src/lib/popupEvents'
-import { resolveCampaignSpend } from '../../src/lib/adsRules'
+import { campaignSegmentMarker, resolveCampaignSpend } from '../../src/lib/adsRules'
 import { readFreshness, readSpendSummaries } from '../../src/lib/adsStore'
 import { freshnessOf } from '../../src/lib/adsFreshness'
 import { isRawInstallSignal, RAW_INSTALL_SIGNALS_LABEL } from '../../src/lib/campaigns'
@@ -256,6 +256,15 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     spendThrough: freshness.spendThrough,
     lastSync: freshness.lastSync,
     stale: freshness.stale,
+    // The signed-out upsell fix as a funnel segment boundary (lib/adsRules.ts
+    // UPSELL_SIGNEDOUT_FIX_AT; null until set): marker + tagged upsell by segment.
+    segments: (() => {
+      const m = campaignSegmentMarker(
+        campaign,
+        rows1.map((r) => ({ hourStartMs: r.hr * 3_600_000, path: r.path, visitor: r.visitor, count: r.c })),
+      )
+      return m ? { ...m, boundaryFlightDay: flightDayIndex(campaign, m.boundaryDate) } : null
+    })(),
     rawInstallSignals: { count: rawInstallSignals, label: RAW_INSTALL_SIGNALS_LABEL },
     meta: { generatedAt: new Date().toISOString(), trackingActivationDate: TRACKING_ACTIVATION_DATE_ET },
   }

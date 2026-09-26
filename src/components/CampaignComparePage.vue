@@ -90,6 +90,8 @@ const maxFlightDay = computed(() =>
     ...CAMPAIGNS.filter((c) => c.flightStart != null).map((c) => Math.round((Date.parse(c.flightEnd) - Date.parse(c.flightStart as string)) / 86_400_000) + 1),
   ),
 )
+// Flight days where a funnel segment boundary falls (the signed-out upsell fix), for the marker.
+const boundaryDays = computed(() => new Set(CAMPAIGNS.map((c) => dataByCampaign.value[c.id]?.segments?.boundaryFlightDay).filter((d): d is number => d != null)))
 const dailyChartConfig = computed<ChartConfiguration | null>(() => {
   const cs = CAMPAIGNS.filter((c) => dataByCampaign.value[c.id])
   if (!cs.length) return null
@@ -97,7 +99,7 @@ const dailyChartConfig = computed<ChartConfiguration | null>(() => {
   return {
     type: 'line',
     data: {
-      labels: days.map((d) => `Day ${d}`),
+      labels: days.map((d) => (boundaryDays.value.has(d) ? `Day ${d} ▼ upsell fix` : `Day ${d}`)),
       datasets: cs.map((c, i) => {
         const byDay = new Map(dataByCampaign.value[c.id].daily.map((r) => [r.day, r.arrivals]))
         return {
@@ -293,6 +295,20 @@ function shareBarWidth(row: DeviceMixShare): number {
           <div class="chart-box"><BaseChart v-if="cumulativeChartConfig" :config="cumulativeChartConfig" :drill-open="false" @point="() => {}" /></div>
         </div>
         <p class="caption">Left: arrivals per flight day. Right: cumulative arrivals per flight day (dashed).</p>
+        <template v-for="c in CAMPAIGNS" :key="`seg-${c.id}`">
+          <div v-if="dataByCampaign[c.id]?.segments" class="segment mono">
+            <p class="caption">
+              ▼ {{ c.label }}: signed-out upsell fix at {{ dataByCampaign[c.id].segments!.boundaryLabel }} (flight day {{ dataByCampaign[c.id].segments!.boundaryFlightDay ?? '—' }}) — a funnel segment boundary: read the two sides as separate short tests.
+            </p>
+            <table class="country-table">
+              <thead><tr><th>Tagged upsell</th><th>Shown</th><th>Accepted</th><th>Dismissed</th></tr></thead>
+              <tbody>
+                <tr><td>pre-fix</td><td>{{ dataByCampaign[c.id].segments!.upsell.pre.shown }}</td><td>{{ dataByCampaign[c.id].segments!.upsell.pre.accept }}</td><td>{{ dataByCampaign[c.id].segments!.upsell.pre.dismiss }}</td></tr>
+                <tr><td>post-fix</td><td>{{ dataByCampaign[c.id].segments!.upsell.post.shown }}</td><td>{{ dataByCampaign[c.id].segments!.upsell.post.accept }}</td><td>{{ dataByCampaign[c.id].segments!.upsell.post.dismiss }}</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
       </section>
 
       <!-- Chart 5: cost per tagged arrival and per auth success -->
@@ -540,6 +556,10 @@ function shareBarWidth(row: DeviceMixShare): number {
   display: flex;
   justify-content: space-between;
   font-size: 12px;
+}
+.segment {
+  margin-top: 8px;
+  font-size: 11.5px;
 }
 .fresh-row {
   font-size: 11px;

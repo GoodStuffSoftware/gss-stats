@@ -39,8 +39,10 @@ import {
   readPlanFor,
   releaseHealthGate,
   round2,
-  signUpsAtMost,
-  signUpsAtMostLabel,
+  AUTH_NEW_EXISTING_LIVE_AT,
+  campaignSignUps,
+  splitAtBoundary,
+  type FunnelSegments,
   servingStateOf,
   canProposePause,
   noPauseNote,
@@ -108,6 +110,9 @@ export interface ReadDeps {
   store: AdsStore
   firebase: FirebaseSource | null
   dryRun: boolean
+  /** Overrides for the mid-flight instrumentation instants (tests and --fixture); unset = the
+   * lib/adsRules.ts constants AUTH_NEW_EXISTING_LIVE_AT / UPSELL_SIGNEDOUT_FIX_AT. */
+  boundaries?: { authNewExistingLiveAtMs?: number | null; upsellFixAtMs?: number | null }
 }
 
 type Attempt<T> = { ok: true; value: T } | { ok: false; error: string }
@@ -166,7 +171,22 @@ export interface FullRead {
   placements: { campaignCost: number; approvedCost: number; itemizedCost: number; outsideShare: number | null; offList: { name: string; cost: number }[]; stored: boolean } | null
   kill: KillRuleEvaluation
   /** signUpsAtMost is an UPPER bound ("at most N campaign sign-ups"), with both inputs. */
-  decision: (DecisionResult & { signUpsAtMost: number; taggedAuthSuccess: number; windowNewAccounts: number | null; label: string }) | null
+  decision:
+    | (DecisionResult & {
+        /** The sign-up count the table used: an upper bound unless signUpsExact. */
+        signUpsAtMost: number
+        signUpsExact: boolean
+        /** The "at most" part and the exact /new part once the split is live (else null). */
+        signUpsBounded: number | null
+        signUpsExactNew: number | null
+        taggedAuthSuccess: number
+        windowNewAccounts: number | null
+        label: string
+      })
+    | null
+  /** Pre-fix / post-fix figures when a behaviour change (the signed-out upsell fix) landed
+   * inside this read's window (spec section 14a: two separate short tests). */
+  segments: FunnelSegments | null
   tagged: {
     summary: TaggedSummary
     funnelRates: Partial<Record<FunnelStepKey, number | null>>
@@ -404,18 +424,36 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
     beacon: tagged ? { asks: tagged.summary.asks.total, taggedArrivals: tagged.summary.taggedArrivals } : null,
   })
 
+  const authLiveAt = deps.boundaries?.authNewExistingLiveAtMs === undefined ? AUTH_NEW_EXISTING_LIVE_AT : deps.boundaries.authNewExistingLiveAtMs
+  const windowAccounts = fb && fb.ok ? fb.value.newAccountsInWindow : null
   let decision: FullRead['decision'] = null
   if (tagged && (i.forceDecision || cumulativeSpend >= plan.hardCap)) {
-    const windowAccounts = fb && fb.ok ? fb.value.newAccountsInWindow : null
-    const atMost = signUpsAtMost(tagged.summary.authSuccess, windowAccounts)
+    const su = campaignSignUps(tagged.summary, windowAccounts, authLiveAt)
     decision = {
-      ...decideAt100({ signUpsAtMost: atMost, asks: tagged.summary.asks.total, accepts: tagged.summary.accepts.total }),
-      signUpsAtMost: atMost,
+      ...decideAt100({ signUpsAtMost: su.count, asks: tagged.summary.asks.total, accepts: tagged.summary.accepts.total, exact: su.exact }),
+      signUpsAtMost: su.count,
+      signUpsExact: su.exact,
+      signUpsBounded: su.bounded,
+      signUpsExactNew: su.exactNew,
       taggedAuthSuccess: tagged.summary.authSuccess,
       windowNewAccounts: windowAccounts,
-      label: signUpsAtMostLabel(atMost, tagged.summary.authSuccess, windowAccounts),
+      label: su.label,
     }
   }
+  // A behaviour change inside the window splits the read (spec section 14a).
+  const segments =
+    i.tagged.ok
+      ? splitAtBoundary({
+          rows: i.tagged.value,
+          stored: i.stored,
+          throughEt: i.spendThroughEt,
+          startMs: attributionStartMs(campaign),
+          endMs: windowEnd,
+          windowNewAccounts: windowAccounts,
+          boundaryMs: deps.boundaries?.upsellFixAtMs,
+          authLiveAtMs: authLiveAt,
+        })
+      : null
 
   const failedDetails: { name: string; reason: string }[] = []
   if (!placementRows.ok && i.spendThroughEt) failedDetails.push({ name: 'Google Ads placements', reason: summarizeError(placementRows.error) })
@@ -430,10 +468,29 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
   // makes it incomplete (review L6): the sign-up bound would silently loosen without it.
   const complete = placementRows.ok && i.tagged.ok && siteRows.ok && returnRaw.ok && returnSites.ok && i.stored != null && !(decision && fbErr)
   return {
-    read: { thresholds: i.thresholds, spendThroughEt: i.spendThroughEt, cumulativeSpend, complete, errors, failedSources, failedDetails, placements: placementView, kill, decision, tagged, site, returns, play, firebase: fb && fb.ok ? fb.value : null },
+    read: { thresholds: i.thresholds, spendThroughEt: i.spendThroughEt, cumulativeSpend, complete, errors, failedSources, failedDetails, placements: placementView, kill, decision, segments, tagged, site, returns, play, firebase: fb && fb.ok ? fb.value : null },
     siteRows,
     returns: returns ? { ok: true, value: returns } : { ok: false, error: returnRaw.ok ? 'returns unavailable' : returnRaw.error },
   }
+}
+
+/** Pre-fix / post-fix figures for the stored record (anonymous counts and dollars only). */
+function segmentCounts(s: FunnelSegments | null): Record<string, number | null> {
+  if (!s) return {}
+  const side = (p: 'preFix' | 'postFix', f: FunnelSegments['pre']) => ({
+    [`${p}Spend`]: f.spend,
+    [`${p}Asks`]: f.asks,
+    [`${p}Accepts`]: f.accepts,
+    [`${p}AuthSuccess`]: f.authSuccess,
+    [`${p}SignUps`]: f.signUps.count,
+    [`${p}UpsellShown`]: f.upsell.shown,
+    [`${p}UpsellAccept`]: f.upsell.accept,
+  })
+  return { segmentBoundaryMs: s.boundaryMs, fixDaySpend: s.boundaryDaySpend, ...side('preFix', s.pre), ...side('postFix', s.post) }
+}
+/** "at most N campaign sign-ups (upper bound)" or "N campaign sign-ups (exact)". */
+export function signUpsPhrase(d: { signUpsAtMost: number; signUpsExact?: boolean }): string {
+  return d.signUpsExact ? `${d.signUpsAtMost} campaign sign-up${d.signUpsAtMost === 1 ? '' : 's'} (exact)` : `at most ${d.signUpsAtMost} campaign sign-ups (upper bound)`
 }
 
 function fullReadCounts(r: FullRead): Record<string, number | null> {
@@ -466,6 +523,10 @@ function fullReadCounts(r: FullRead): Record<string, number | null> {
     promoClaimsInWindow: r.firebase?.promoClaimsInWindow ?? null,
     first50Claimed: r.firebase?.first50?.claimed ?? null,
     signUpsAtMost: r.decision?.signUpsAtMost ?? null,
+    signUpsExact: r.decision ? (r.decision.signUpsExact ? 1 : 0) : null,
+    authSuccessNew: t?.authSuccessSplit.new ?? null,
+    authSuccessExisting: t?.authSuccessSplit.existing ?? null,
+    ...segmentCounts(r.segments),
   }
 }
 
@@ -597,7 +658,8 @@ export function morningPushText(r: MorningResult): string | null {
     if (t.kill.tripped.length && t.kill.proposal === 'PROPOSE PAUSE') bits.push(`PROPOSE PAUSE (${t.kill.tripped.join(', ')})`)
     else if (t.kill.tripped.length) bits.push(`rules tripped (${t.kill.tripped.join(', ')}) but campaign ${t.kill.servingState}, no pause proposed`)
     else bits.push(t.complete ? 'no kill rule tripped, continue' : 'read incomplete, will retry')
-    if (t.decision) bits.push(`at most ${t.decision.signUpsAtMost} campaign sign-ups (upper bound), row ${t.decision.row}`)
+    if (t.decision) bits.push(`${signUpsPhrase(t.decision)}, row ${t.decision.row}`)
+    if (t.segments) bits.push(`split at the upsell fix: pre-fix ${t.segments.pre.asks} asks/${t.segments.pre.signUps.count} sign-ups, post-fix ${t.segments.post.asks} asks/${t.segments.post.signUps.count} sign-ups`)
     const share = t.placements?.outsideShare
     const borderline = isPlacementBorderline(share) ? ` Placement share ${((share ?? 0) * 100).toFixed(1)}% is ${PLACEMENT_BORDERLINE_NOTE}.` : ''
     return bits.join('; ') + '.' + borderline + failed + missed
@@ -1120,7 +1182,9 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
           : `tier split unavailable${err ? `: ${err}` : ''}`
     }
   }
-  base.recommendations.push(AUTH_SUCCESS_SPLIT_RECOMMENDATION)
+  // Moot once /auth/success/<provider>/new|existing is live.
+  const authLiveAt = deps.boundaries?.authNewExistingLiveAtMs === undefined ? AUTH_NEW_EXISTING_LIVE_AT : deps.boundaries.authNewExistingLiveAtMs
+  if (authLiveAt == null) base.recommendations.push(AUTH_SUCCESS_SPLIT_RECOMMENDATION)
 
   const rec: ReadingRecord = {
     v: 1,
@@ -1191,7 +1255,7 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
     push: true,
     busCopy: true,
     reason: `post-flight ${opts.stage} read (a scheduled spec read)${trip ? ' with spend after the flight' : ''}${base.failures.length ? `; failed read: ${base.failures.join(', ')}` : ''}`,
-    text: `BSK retest ${opts.stage} read: ${money(spend.cumulative.cost)} total, ${read.tagged?.summary.taggedArrivals ?? '?'} tagged arrivals, ${read.decision ? `at most ${read.decision.signUpsAtMost} campaign sign-ups (upper bound), row ${read.decision.row}` : 'no decision'}${trip ? `; PROPOSE PAUSE (${base.postFlightSpend?.status === 'trip' ? `spend after ${campaign.flightEnd}` : 'at the cap'})` : ''}.${failed}`,
+    text: `BSK retest ${opts.stage} read: ${money(spend.cumulative.cost)} total, ${read.tagged?.summary.taggedArrivals ?? '?'} tagged arrivals, ${read.decision ? `${signUpsPhrase(read.decision)}, row ${read.decision.row}` : 'no decision'}${read.segments ? '; split at the upsell fix (see report)' : ''}${trip ? `; PROPOSE PAUSE (${base.postFlightSpend?.status === 'trip' ? `spend after ${campaign.flightEnd}` : 'at the cap'})` : ''}.${failed}`,
   }
   base.notes.push(INSTALL_OUTCOME_GAP_NOTE)
   return base

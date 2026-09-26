@@ -18,6 +18,13 @@ All notable changes to **gss-stats** are documented here. The format follows
   routines don't run.
 - **A "Refresh data" button on the campaigns page and the readings log** syncs stale Ads data
   on demand (at most once every 10 minutes) and updates the freshness line.
+- **Reads split at the signed-out upsell fix.** Once its go-live time is set, the $100 read and
+  the post-flight reads report spend, asks, accepts and sign-ups before and after the fix
+  separately (two separate short tests), and the campaigns page marks the fix day and shows the
+  campaign's upsell shown/accepted on each side.
+- **Exact campaign sign-ups once the new/existing sign-in beacons are live.** From their go-live
+  time, sign-ups from the new-account sign-in beacon are counted exactly; earlier ones stay an
+  "at most" upper bound, and returning sign-ins never count.
 
 ### Changed
 - **Ads readings are recorded once per day per entry.** Rerunning a read the same day no
