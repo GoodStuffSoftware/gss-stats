@@ -24,6 +24,9 @@ import {
   newlyCrossedThresholds,
   nextThreshold,
   outcomeRates,
+  placementId,
+  isPlacementBorderline,
+  PLACEMENT_BORDERLINE_NOTE,
   placementOutsideShare,
   playReturnStatus,
   postflightDueDate,
@@ -78,7 +81,7 @@ import { splitPlacements, type CampaignStatus } from './adsApi'
 import type { BeaconSource } from './beacon'
 import type { AdsStore } from './d1Store'
 import type { FirebaseCounts } from './firebase'
-import { redact } from './redact'
+import { redact, summarizeError } from './redact'
 
 // ── Dependencies ─────────────────────────────────────────────────────────────────────────
 export interface AdsSource {
@@ -141,6 +144,8 @@ export interface FullRead {
   errors: string[]
   /** Short, secret-free names of the reads that failed (pushes on post-flight runs). */
   failedSources: string[]
+  /** The same with a one-line reason each (review L9). */
+  failedDetails: { name: string; reason: string }[]
   placements: { campaignCost: number; approvedCost: number; itemizedCost: number; outsideShare: number | null; offList: { name: string; cost: number }[]; stored: boolean } | null
   kill: KillRuleEvaluation
   /** signUpsAtMost is an UPPER bound ("at most N campaign sign-ups"), with both inputs. */
@@ -350,7 +355,7 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
         offList: split.byPlacement
           .filter((p) => p.approved === false && p.costMicros > 0)
           .slice(0, 5)
-          .map((p) => ({ name: String(p.displayName ?? p.placement), cost: round2(p.costMicros / 1e6) })),
+          .map((p) => ({ name: placementId(p.placement), cost: round2(p.costMicros / 1e6) })), // package id, never the display name (L11)
         stored: placementsStored,
       }
     : null
@@ -377,15 +382,20 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
     }
   }
 
-  const complete = placementRows.ok && i.tagged.ok && siteRows.ok && returnRaw.ok && returnSites.ok && i.stored != null
-  const failedSources: string[] = []
-  if (!placementRows.ok && i.spendThroughEt) failedSources.push('Google Ads placements')
-  if (!i.tagged.ok || !siteRows.ok || !returnRaw.ok || !returnSites.ok) failedSources.push('beacon')
+  const failedDetails: { name: string; reason: string }[] = []
+  if (!placementRows.ok && i.spendThroughEt) failedDetails.push({ name: 'Google Ads placements', reason: summarizeError(placementRows.error) })
+  const beaconErr = [i.tagged, siteRows, returnRaw, returnSites].find((a) => !a.ok) as { error: string } | undefined
+  if (beaconErr) failedDetails.push({ name: 'beacon', reason: summarizeError(beaconErr.error) })
   // A missing composite index for the day-15/30/60 tier split is a known, graceful degrade
   // ("tier split unavailable: index missing"), not a failed read.
-  if (fb && (!fb.ok || fb.value.errors.some((e) => !/composite index/.test(e)))) failedSources.push('Firestore counts')
+  const fbErr = fb ? (!fb.ok ? fb.error : fb.value.errors.find((e) => !/composite index/.test(e)) ?? null) : null
+  if (fbErr) failedDetails.push({ name: 'Firestore counts', reason: summarizeError(fbErr) })
+  const failedSources = failedDetails.map((f) => f.name)
+  // A Firestore failure on a read that runs the decision table (the $100 read, post-flight)
+  // makes it incomplete (review L6): the sign-up bound would silently loosen without it.
+  const complete = placementRows.ok && i.tagged.ok && siteRows.ok && returnRaw.ok && returnSites.ok && i.stored != null && !(decision && fbErr)
   return {
-    read: { thresholds: i.thresholds, spendThroughEt: i.spendThroughEt, cumulativeSpend, complete, errors, failedSources, placements: placementView, kill, decision, tagged, site, returns, play, firebase: fb && fb.ok ? fb.value : null },
+    read: { thresholds: i.thresholds, spendThroughEt: i.spendThroughEt, cumulativeSpend, complete, errors, failedSources, failedDetails, placements: placementView, kill, decision, tagged, site, returns, play, firebase: fb && fb.ok ? fb.value : null },
     siteRows,
     returns: returns ? { ok: true, value: returns } : { ok: false, error: returnRaw.ok ? 'returns unavailable' : returnRaw.error },
   }
@@ -487,8 +497,10 @@ export interface MorningResult {
   releaseHealth: HealthSection
   play: PlayReturnStatus | null
   store: StoreSection
-  /** Short names of the reads that failed this run (never error details) — any entry pushes. */
+  /** Short names of the reads that failed this run — any entry pushes. */
   failures: string[]
+  /** "<name> (<one-line reason>)" for each failure: redacted, no local paths (review L9). */
+  failureDetails: string[]
   /** ET dates inside the routine window with no daily reading since the last one on record
    * (a scheduled run that never started can't report itself; the next one does). */
   missedReads: string[]
@@ -502,7 +514,7 @@ export interface MorningResult {
  * can reach a notification. */
 export function morningPushText(r: MorningResult): string | null {
   const missed = r.missedReads.length ? ` Previous scheduled read missing: ${r.missedReads.join(', ')}.` : ''
-  const failed = r.failures.length ? ` Read problems: ${r.failures.join(', ')}.` : ''
+  const failed = r.failureDetails.length ? ` Read problems: ${r.failureDetails.join('; ')}.` : ''
   if (r.thresholdRead) {
     const t = r.thresholdRead
     const bits = [`BSK retest $${Math.max(...t.thresholds)} read: ${money(t.cumulativeSpend)} spent`]
@@ -512,7 +524,9 @@ export function morningPushText(r: MorningResult): string | null {
     else if (t.kill.tripped.length) bits.push(`rules tripped (${t.kill.tripped.join(', ')}) but campaign ${t.kill.servingState}, no pause proposed`)
     else bits.push(t.complete ? 'no kill rule tripped, continue' : 'read incomplete, will retry')
     if (t.decision) bits.push(`at most ${t.decision.signUpsAtMost} campaign sign-ups (upper bound), row ${t.decision.row}`)
-    return bits.join('; ') + '.' + failed + missed
+    const share = t.placements?.outsideShare
+    const borderline = isPlacementBorderline(share) ? ` Placement share ${((share ?? 0) * 100).toFixed(1)}% is ${PLACEMENT_BORDERLINE_NOTE}.` : ''
+    return bits.join('; ') + '.' + borderline + failed + missed
   }
   if (r.hardCapDaily?.status === 'trip') {
     return `BSK retest: ${money(r.spend.cumulative.cost)} spent, at or over the ${money(r.spend.hardCap)} cap, campaign still ${r.status?.status ?? 'ENABLED'}. PROPOSE PAUSE.${failed}${missed}`
@@ -522,7 +536,7 @@ export function morningPushText(r: MorningResult): string | null {
     return `BSK retest release-health ALERT: ${alerts.map((h) => `${h.parentLabel} ${h.parent}, ${h.childLabel} 0`).join('; ')}.${failed}`
   }
   if (r.failures.length) {
-    return `BSK retest ${r.mode === 'health-only' ? 'release-health backstop' : 'morning read'} FAILED: ${r.failures.join(', ')} unreadable; thresholds and the $${r.spend.hardCap} cap were not fully checked. See the routine output.${missed}`
+    return `BSK retest ${r.mode === 'health-only' ? 'release-health backstop' : 'morning read'} FAILED: ${r.failureDetails.join('; ')}. Thresholds and the $${r.spend.hardCap} cap were not fully checked.${missed}`
   }
   return null
 }
@@ -532,21 +546,28 @@ export function morningPushText(r: MorningResult): string | null {
 export function morningFailures(i: {
   healthOnly: boolean
   dryRun: boolean
-  statusOk: boolean
-  spendOk: boolean
-  taggedOk: boolean
-  thresholdStateOk: boolean
-  storeErrors: number
-  healthReadError: boolean
-}): string[] {
-  const out: string[] = []
-  if (!i.spendOk) out.push('Google Ads spend')
-  if (!i.statusOk) out.push('campaign status')
-  if (!i.healthOnly && !i.taggedOk) out.push('beacon')
-  if (i.healthOnly && i.healthReadError) out.push('beacon')
-  if (!i.healthOnly && !i.thresholdStateOk) out.push('threshold state')
-  if (!i.dryRun && i.storeErrors > 0) out.push('store write')
-  return out
+  /** Each is the read's error text, or null when it worked. */
+  statusError: string | null
+  spendError: string | null
+  taggedError: string | null
+  thresholdStateError: string | null
+  storeErrors: readonly string[]
+  healthReadError: string | null
+  /** A threshold read's own failed sources (review L6), already summarized. */
+  thresholdReadFailures?: readonly { name: string; reason: string }[]
+}): { names: string[]; details: string[] } {
+  const found: { name: string; reason: string }[] = []
+  const add = (name: string, err: string | null | undefined) => {
+    if (err && !found.some((f) => f.name === name)) found.push({ name, reason: summarizeError(err) })
+  }
+  add('Google Ads spend', i.spendError)
+  add('campaign status', i.statusError)
+  if (!i.healthOnly) add('beacon', i.taggedError)
+  if (i.healthOnly) add('beacon', i.healthReadError)
+  if (!i.healthOnly) add('threshold state', i.thresholdStateError)
+  if (!i.dryRun && i.storeErrors.length) add('store write', i.storeErrors[0])
+  for (const f of i.thresholdReadFailures ?? []) if (!found.some((x) => x.name === f.name)) found.push(f)
+  return { names: found.map((f) => f.name), details: found.map((f) => `${f.name} (${f.reason})`) }
 }
 
 export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Promise<MorningResult> {
@@ -745,6 +766,17 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
   if (w.error) errors.push(w.error)
   const storeErrors = [sync.ok ? null : sync.error, spend.storeError, w.error].filter((e): e is string => !!e)
 
+  const failed = morningFailures({
+    healthOnly: opts.healthOnly,
+    dryRun: deps.dryRun,
+    statusError: status.ok ? null : status.error,
+    spendError: spend.ok ? null : spend.error,
+    taggedError: taggedRows.ok ? null : taggedRows.error,
+    thresholdStateError: consumedA.ok ? null : consumedA.error,
+    storeErrors,
+    healthReadError: health.readError ? health.reason : null,
+    thresholdReadFailures: thresholdRead?.failedDetails,
+  })
   const result: MorningResult = {
     tool: 'morning-read',
     version: 1,
@@ -770,16 +802,8 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
       readingsWritten: w.written,
       errors: storeErrors,
     },
-    failures: morningFailures({
-      healthOnly: opts.healthOnly,
-      dryRun: deps.dryRun,
-      statusOk: status.ok,
-      spendOk: spend.ok,
-      taggedOk: taggedRows.ok,
-      thresholdStateOk: consumedA.ok,
-      storeErrors: storeErrors.length,
-      healthReadError: !!health.readError,
-    }),
+    failures: failed.names,
+    failureDetails: failed.details,
     missedReads,
     notify: { push: false, busCopy: false, reason: opts.healthOnly ? 'no release-health alert' : 'quiet day: no threshold crossed, no kill rule tripped', text: null },
     errors,
@@ -842,6 +866,8 @@ export interface PostflightResult {
   store: StoreSection
   /** Short, secret-free names of the reads that failed. */
   failures: string[]
+  /** "<name> (<one-line reason>)" for each failure (review L9). */
+  failureDetails: string[]
   notify: Notify
   errors: string[]
   notes: string[]
@@ -886,6 +912,7 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
     cohortNote: null,
     recommendations: [],
     failures: [],
+    failureDetails: [],
     store: {
       kind: deps.store.kind,
       dryRun: deps.dryRun,
@@ -898,8 +925,13 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
     errors,
     notes: [...STANDING_NOTES],
   }
-  if (!spend.ok) base.failures.push('Google Ads spend')
-  if (!status.ok) base.failures.push('campaign status')
+  const addFailure = (name: string, err: string | null | undefined) => {
+    if (!err || base.failures.includes(name)) return
+    base.failures.push(name)
+    base.failureDetails.push(`${name} (${summarizeError(err)})`)
+  }
+  addFailure('Google Ads spend', spend.ok ? null : spend.error)
+  addFailure('campaign status', status.ok ? null : status.error)
 
   // The after-flight spend and cap checks run FIRST, on every post-flight run, due or not
   // (review M1): continued spend must never be silenced by a stage that is not due yet.
@@ -947,7 +979,7 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
     if (spendTrip) {
       base.notify = { push: true, busCopy: false, reason: `after-flight spend or cap trip (stage not due until ${dueEt})`, text: spendTripText() }
     } else if (base.failures.length) {
-      base.notify = { push: true, busCopy: false, reason: `failed read: ${base.failures.join(', ')}`, text: `BSK retest ${opts.stage} read FAILED: ${base.failures.join(', ')} unreadable. See the routine output.` }
+      base.notify = { push: true, busCopy: false, reason: `failed read: ${base.failures.join(', ')}`, text: `BSK retest ${opts.stage} read FAILED: ${base.failureDetails.join('; ')}.` }
     }
     return base
   }
@@ -1041,9 +1073,13 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
   base.store.readingsWritten = w.written
 
   const trip = spendTrip
-  for (const f of read.failedSources) if (!base.failures.includes(f)) base.failures.push(f)
-  if (!base.store.dryRun && base.store.errors.length) base.failures.push('store write')
-  const failed = base.failures.length ? ` Read problems: ${base.failures.join(', ')}.` : ''
+  for (const f of read.failedDetails) {
+    if (base.failures.includes(f.name)) continue
+    base.failures.push(f.name)
+    base.failureDetails.push(`${f.name} (${f.reason})`)
+  }
+  if (!base.store.dryRun && base.store.errors.length) addFailure('store write', base.store.errors[0])
+  const failed = base.failureDetails.length ? ` Read problems: ${base.failureDetails.join('; ')}.` : ''
   base.notify = {
     push: true,
     busCopy: true,

@@ -3,7 +3,15 @@
 // text shows. Every rate is printed with its counts (formatGated) and MIN_COHORT-gated;
 // sign-ups and promo claims appear only as window COUNTS.
 
-import { formatGated, SIGNIN_ELIGIBLE_COUNT_NOTE, UPSELL_KNOWN_BUG_NOTE, type OutcomePopup, type RuleResult } from '../../src/lib/adsRules'
+import {
+  formatGated,
+  isPlacementBorderline,
+  PLACEMENT_BORDERLINE_NOTE,
+  SIGNIN_ELIGIBLE_COUNT_NOTE,
+  UPSELL_KNOWN_BUG_NOTE,
+  type OutcomePopup,
+  type RuleResult,
+} from '../../src/lib/adsRules'
 import { POPUP_OUTCOME_TYPES, gateRate, installOutcomeGapNote } from '../../src/lib/popupEvents'
 import { RAW_INSTALL_SIGNALS_LABEL } from '../../src/lib/campaigns'
 import type { FullRead, MorningResult, PostflightResult, SpendSection } from './read'
@@ -33,7 +41,9 @@ export function fullReadLines(r: FullRead, title: string): string[] {
   for (const rule of r.kill.rules) out.push(ruleLine(rule))
   out.push(`Proposal: ${r.kill.proposal ?? `none: campaign ${r.kill.servingState === 'ended' ? 'ended' : r.kill.servingState === 'paused' ? 'paused' : 'not serving'}, nothing to pause`}`)
   if (r.placements) {
-    out.push(`Placements: ${money(r.placements.approvedCost)} on approved, ${money(r.placements.itemizedCost)} itemized, of ${money(r.placements.campaignCost)}; outside share ${pct(r.placements.outsideShare)}`)
+    out.push(
+      `Placements: ${money(r.placements.approvedCost)} on approved, ${money(r.placements.itemizedCost)} itemized, of ${money(r.placements.campaignCost)}; outside share ${pct(r.placements.outsideShare)}${isPlacementBorderline(r.placements.outsideShare) ? ` (${PLACEMENT_BORDERLINE_NOTE})` : ''}`,
+    )
     for (const o of r.placements.offList) out.push(`  off-list: ${o.name} ${money(o.cost)}`)
   }
   const t = r.tagged
@@ -102,7 +112,7 @@ function header(r: MorningResult | PostflightResult, kind: string): string[] {
 
 export function formatMorningReport(r: MorningResult): string {
   const out = header(r, r.mode === 'health-only' ? 'release-health backstop' : 'morning read')
-  if (r.failures.length) out.push(`READ FAILED: ${r.failures.join(', ')} (details under Errors)`)
+  if (r.failures.length) out.push(`READ FAILED: ${r.failureDetails.join("; ")}`)
   if (r.missedReads.length) out.push(`Previous scheduled read missing: ${r.missedReads.join(', ')}`)
   if (r.mode === 'morning') {
     out.push(...spendLines(r.spend))
@@ -145,7 +155,7 @@ function storeLine(r: MorningResult | PostflightResult): string {
 
 export function formatPostflightReport(r: PostflightResult): string {
   const out = header(r, `post-flight ${r.stage} read`)
-  if (r.failures.length) out.push(`READ FAILED: ${r.failures.join(', ')} (details under Errors)`)
+  if (r.failures.length) out.push(`READ FAILED: ${r.failureDetails.join("; ")}`)
   out.push(...spendLines(r.spend))
   out.push(`Spend ended ${r.spendEndEt ?? '—'}; this stage is due ${r.dueEt ?? '—'} (${r.due ? 'due' : 'NOT due yet'})`)
   if (r.postFlightSpend) out.push(`After-flight spend: [${r.postFlightSpend.status}] ${r.postFlightSpend.detail}`)

@@ -55,12 +55,19 @@ spend-only). Money is integer micros; dates are ET calendar dates (the Ads accou
 CHECK constraints guard formats, non-negative money and counts, enum values and JSON validity.
 Foreign keys (enforced by D1) tie every row to `ads_campaigns`.
 
+Migration `0002_no_replace.sql` (review L4) adds BEFORE INSERT triggers that turn an insert
+whose key already exists into a silent no-op on `ads_readings` and `ads_threshold_state`, so an
+`INSERT OR REPLACE` can no longer rewrite a stored reading or a fired threshold (REPLACE deletes
+the old row without firing the append-only DELETE triggers). Ordinary writes are unchanged:
+they already use `ON CONFLICT … DO NOTHING`.
+
 ### How each side uses it
 
 - **Routine writer:** `wrangler d1 execute gss-stats-ads --remote --json --command "<INSERT…>"`,
   one statement per call. A guard refuses anything other than a single `INSERT INTO ads_*`
-  (upserts use `ON CONFLICT … DO UPDATE / DO NOTHING`), and the target can never be gss-geo.
-  `--dry-run` skips every write.
+  (upserts use `ON CONFLICT … DO UPDATE / DO NOTHING`), and the store is an allowlist: it only
+  ever targets `gss-stats-ads`. `--dry-run` skips every write. Stored notes have local paths
+  stripped.
 - **Dashboard reader:** the `gss_stats_ads` binding. `/api/campaigns` and `/api/overview`
   prefer stored spend over `CAMPAIGN_SPEND`; `/api/ads/readings` serves the readings widget.
   **Fail soft:** a missing binding, a missing table or any D1 error reads as "nothing
@@ -87,7 +94,7 @@ Done on 2026-09-26 (owner-authorized; nothing else was created or changed):
 
 ```powershell
 npx wrangler d1 create gss-stats-ads                       # id 785327a3-683c-4f85-819d-abe11efcacc9
-npx wrangler d1 migrations apply gss-stats-ads --remote    # = npm run ads:migrate
+npx wrangler d1 migrations apply gss-stats-ads --remote    # = npm run ads:migrate (0001, then 0002 the same day)
 ```
 
 The binding is in `wrangler.toml`; it takes effect on the next deploy of `main`. Backfill

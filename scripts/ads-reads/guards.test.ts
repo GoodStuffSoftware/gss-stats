@@ -4,9 +4,10 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { assertReadOnlySql, createD1Select, inlineBinds, parseD1Json, sqlLiteral, stripSqlLiterals } from './d1'
 import { assertAdsWriteSql, createD1Store } from './d1Store'
 import { returnRowsQuery, returnSitesQuery, siteEventsQuery, taggedRowsQuery } from './beacon'
-import { campaignSyncStatement, dailyMetricsUpserts, placementDailyUpserts, readingInsert, thresholdStateInsert } from '../../src/lib/adsStore'
+import { campaignSyncStatement, dailyMetricsUpserts, mergePlacementDayRows, placementDailyUpserts, readingInsert, thresholdStateInsert } from '../../src/lib/adsStore'
 import { CAMPAIGNS, campaignById } from '../../src/lib/campaigns'
-import { clearRegisteredSecrets, redact, redactedFirstLine, registerSecret } from './redact'
+import { clearRegisteredSecrets, redact, redactedFirstLine, registerSecret, summarizeError } from './redact'
+import { createWranglerRunner } from './wrangler'
 import { buildHeaders, createAdsClient, fetchDailySpend, fetchPlacementDaily, searchUrl, splitPlacements, type FetchLike } from './adsApi'
 import { BWS_KEYS, pickAdsCredentials } from './secrets'
 import type { ReadingRecord } from '../../src/lib/adsRules'
@@ -167,6 +168,21 @@ describe('ads store write guard', () => {
   it('the store refuses to target the beacon database', () => {
     expect(() => createD1Store({ run: async () => ({ code: 0, stdout: '', stderr: '' }), dryRun: true, database: 'gss-geo' })).toThrow(/gss-geo/)
   })
+  it('L3: the store is an allowlist — any database other than gss-stats-ads is refused', () => {
+    expect(() => createD1Store({ run: async () => ({ code: 0, stdout: '', stderr: '' }), dryRun: true, database: 'gss-stats-ads-copy' })).toThrow(/only targets gss-stats-ads/)
+    expect(() => createD1Store({ run: async () => ({ code: 0, stdout: '', stderr: '' }), dryRun: true })).not.toThrow()
+  })
+  it('L5: duplicate (date, placement) rows are summed before the upsert', () => {
+    const merged = mergePlacementDayRows([
+      { date: '2026-09-27', placement: 'mobileapp::2-a', displayName: 'A', type: null, targetUrl: null, approved: true, costMicros: 1_000_000, impressions: 10, clicks: 1 },
+      { date: '2026-09-27', placement: 'mobileapp::2-a', displayName: 'A', type: null, targetUrl: null, approved: true, costMicros: 2_500_000, impressions: 5, clicks: 0 },
+      { date: '2026-09-28', placement: 'mobileapp::2-a', displayName: 'A', type: null, targetUrl: null, approved: true, costMicros: 1, impressions: 1, clicks: 0 },
+    ])
+    expect(merged).toHaveLength(2)
+    expect(merged[0]).toMatchObject({ date: '2026-09-27', costMicros: 3_500_000, impressions: 15, clicks: 1 })
+    const [st] = placementDailyUpserts('24279250691', merged.concat(merged), 'x')
+    expect(st.binds.length).toBe(2 * 11) // one row per key reaches the upsert
+  })
   it('--dry-run spawns no write at all', async () => {
     const calls: string[][] = []
     const store = createD1Store({
@@ -180,6 +196,38 @@ describe('ads store write guard', () => {
     expect(await store.putDailyMetrics('24279250691', { '2026-09-27': { costMicros: 1, impressions: 1, clicks: 0 } }, 'x')).toBe(false)
     expect(await store.syncCampaigns(CAMPAIGNS, 'x')).toBe(false)
     expect(calls).toEqual([])
+  })
+})
+
+describe('L8/L9/L10: timeouts, failure summaries, stored notes', () => {
+  afterEach(() => clearRegisteredSecrets())
+  it('a wrangler call that runs past the timeout is killed and reported as timed out', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gss-wr-'))
+    const bin = path.join(root, 'node_modules', 'wrangler', 'bin')
+    fs.mkdirSync(bin, { recursive: true })
+    fs.writeFileSync(path.join(bin, 'wrangler.js'), 'setTimeout(() => {}, 30000)\n')
+    try {
+      const run = createWranglerRunner({ root, timeoutMs: 300 })
+      const res = await run(['d1', 'execute', 'gss-geo'])
+      expect(res.code).toBe(124)
+      expect(res.stderr).toMatch(/^wrangler d1 execute timed out after \d+s$/)
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+    }
+  })
+  it('summarizeError gives a useful, redacted, path-free first line without the read label', () => {
+    registerSecret('super-secret-developer-token-123')
+    expect(summarizeError('ads daily: Google Ads search failed, HTTP 403: denied super-secret-developer-token-123\nstack…')).toBe('Google Ads search failed, HTTP 403: denied <redacted>')
+    expect(summarizeError('beacon tagged: wrangler d1 execute failed (exit 1): at C:\\Users\\msant\\dev\\x.js')).toBe('wrangler d1 execute failed (exit 1): at <path>')
+    expect(summarizeError('store write (readings): ' + 'x'.repeat(200)).length).toBeLessThanOrEqual(70)
+    expect(summarizeError('')).toBe('unknown error')
+  })
+  it('stored reading notes never carry a local path', () => {
+    const st = readingInsert({
+      v: 1, id: 'k', campaignId: '24279250691', kind: 'daily', readAt: 'x', etDate: '2026-09-30', spendThroughEt: null, cumulativeSpend: null,
+      thresholds: [], complete: false, rules: null, proposal: null, decision: null, counts: {}, notes: ['incomplete: wrangler not installed at C:\\Users\\msant\\dev\\gss\\node_modules\\wrangler\\bin\\wrangler.js'],
+    })
+    expect(JSON.parse(st.binds[14] as string)).toEqual(['incomplete: wrangler not installed at <path>'])
   })
 })
 

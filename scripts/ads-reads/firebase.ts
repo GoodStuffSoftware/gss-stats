@@ -26,7 +26,7 @@ import fs from 'node:fs'
 import { createSign } from 'node:crypto'
 import type { CohortTierCounts } from '../../src/lib/adsRules'
 import { redact, registerSecret } from './redact'
-import type { FetchLike } from './adsApi'
+import { timedFetch, type FetchLike } from './adsApi'
 
 export interface FirebaseCounts {
   projectId: string | null
@@ -137,7 +137,7 @@ export async function readFirebaseCounts(
   windowEndMs: number,
   opts: { fetchImpl?: FetchLike; cohortTiersAtMs?: number | null } = {},
 ): Promise<FirebaseCounts> {
-  const raw: FetchLike = opts.fetchImpl ?? ((url, init) => fetch(url, init))
+  const raw: FetchLike = opts.fetchImpl ?? timedFetch
   const out: FirebaseCounts = {
     projectId: null,
     newAccountsInWindow: null,

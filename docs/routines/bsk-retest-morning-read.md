@@ -130,9 +130,12 @@ JSON's `notify`, `errors`, `thresholds` and `thresholdRead` fields; never recomp
   secret; do not add anything).
 - The CLI pushes on: a threshold read; a pause proposal (including the $100 cap with the
   campaign still SERVING; after its end date the campaign reads ENABLED/ENDED, which is
-  reported as "ended, nothing to pause" and never proposed); a FAILED read (Google Ads spend or status, the beacon, the
-  threshold state or a store write; money is at stake, so silence is worse than one extra
-  ping); and, on the backstop only, a real release-health ALERT. A "watch" never pushes.
+  reported as "ended, nothing to pause" and never proposed); a FAILED read (Google Ads spend
+  or status, the beacon, the threshold state, Firestore at the $100 read, or a store write,
+  including any call that runs past the 60 s timeout; the push names each failed read with a
+  one-line reason; money is at stake, so silence is worse than one extra ping); a placement
+  share in the 9-11% band is flagged "borderline, check the placement view"; and, on the
+  backstop only, a real release-health ALERT. A "watch" never pushes.
 - If `notify.push` is `false`, send NO push. A quiet day produces no push.
 - If the CLI itself did not run to its JSON block (it crashed, `npm ci` failed, the checkout
   was dirty), send ONE push: `BSK retest <morning read|backstop> did not run: <one short
