@@ -3,8 +3,8 @@
 // definitions, "how to read this" captions, section intros. Same safe **bold**/[link](url)
 // tokenizer (lib/textLite.ts), split into paragraphs on a blank line; never v-html.
 import { computed } from 'vue'
-import { isNoteActive, noteRawText } from '../lib/notes'
-import { parseTextLite, interpolate, splitParagraphs } from '../lib/textLite'
+import { getNote, isNoteActive, noteTemplate } from '../lib/notes'
+import { tokenizeAndInterpolate, splitParagraphs, type TextToken } from '../lib/textLite'
 
 const props = defineProps<{
   noteId?: string
@@ -13,17 +13,24 @@ const props = defineProps<{
   vars?: Record<string, string | number>
 }>()
 
+const def = computed(() => (props.noteId ? getNote(props.noteId) : undefined))
 const active = computed(() => !props.noteId || isNoteActive(props.noteId))
-const rawText = computed(() => {
-  if (props.text) return interpolate(props.text, props.vars)
-  if (props.noteId) return noteRawText(props.noteId, props.vars)
-  return ''
+// Split on the RAW template first (pure whitespace splitting — safe regardless of what a
+// var's value contains), THEN tokenize + interpolate each paragraph separately (delta
+// review, 2026-09-26: the template is tokenized before vars are substituted — see
+// lib/textLite.ts tokenizeAndInterpolate — so a var's own value can never become markup).
+const rawTemplate = computed(() => props.text ?? (props.noteId ? noteTemplate(props.noteId) : ''))
+const mergedVars = computed<Record<string, string | number> | undefined>(() => {
+  const defVars = def.value?.vars
+  if (!defVars && !props.vars) return undefined
+  return { ...(defVars as Record<string, string | number> | undefined), ...props.vars }
 })
-const paragraphs = computed(() => splitParagraphs(rawText.value).map((p) => parseTextLite(p)))
+const paragraphs = computed<TextToken[][]>(() => splitParagraphs(rawTemplate.value).map((p) => tokenizeAndInterpolate(p, mergedVars.value)))
+const hasContent = computed(() => paragraphs.value.some((tokens) => tokens.some((t) => t.value)))
 </script>
 
 <template>
-  <div v-if="active && rawText" class="text-block">
+  <div v-if="active && hasContent" class="text-block">
     <div v-if="title" class="text-block-title">{{ title }}</div>
     <p v-for="(tokens, pi) in paragraphs" :key="pi">
       <template v-for="(t, i) in tokens" :key="i">
