@@ -23,6 +23,12 @@ All notable changes to **gss-stats** are documented here. The format follows
   ("Very small numbers: rates are anecdotal. Always read the counts.") — production has
   only 14 registered users. Every computed rate on those pages now shows its
   numerator/denominator next to the percentage.
+- **The US+CA web retest campaign is now confirmed and serving** (2026-09-26 through
+  2026-10-02, $13/day budget with a $100 hard stop). Its ad schedule starts at noon ET, so
+  attribution now excludes same-day validation/QA traffic tagged before that time, not just
+  traffic from earlier calendar days — campaign flights can optionally set a start TIME
+  (not just a start date), converted DST-safely the same way every other ET boundary in
+  this app is.
 
 ## [0.3.1] — 2026-09-25
 

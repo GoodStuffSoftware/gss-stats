@@ -136,11 +136,14 @@ describe('campaignsFlightingOn', () => {
     expect(campaignsFlightingOn('2026-09-05').map((c) => c.id)).toContain('24215315197')
     expect(campaignsFlightingOn('2026-01-01')).toEqual([])
   })
-  it('the retest never shows as flighting while its flightStart is still null/pending', () => {
-    // Corrected 2026-09-25: the retest's start date is deliberately left unconfirmed so its
-    // pre-launch QA rows don't count — see lib/campaigns.ts CAMPAIGNS. flightDayIndex (which
-    // this is built on) returns null unconditionally for a null flightStart.
-    expect(campaignsFlightingOn('2026-09-26').map((c) => c.id)).not.toContain('24279250691')
+  it('the retest is now confirmed and serving (2026-09-26..10-02) — it shows as flighting within that window, not outside it', () => {
+    // Corrected 2026-09-26 (ads session): flightStart is no longer null/pending — see
+    // lib/campaigns.ts CAMPAIGNS. Previously this asserted the opposite (never flighting
+    // while pending); see git history for that version.
+    expect(campaignsFlightingOn('2026-09-26').map((c) => c.id)).toContain('24279250691')
+    expect(campaignsFlightingOn('2026-10-02').map((c) => c.id)).toContain('24279250691')
+    expect(campaignsFlightingOn('2026-09-25').map((c) => c.id)).not.toContain('24279250691')
+    expect(campaignsFlightingOn('2026-10-03').map((c) => c.id)).not.toContain('24279250691')
   })
 })
 

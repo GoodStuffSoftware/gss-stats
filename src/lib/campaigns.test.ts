@@ -4,6 +4,7 @@ import {
   campaignById,
   campaignAttributionClause,
   etMidnightUtcMs,
+  etTimeUtcMs,
   etFlightRangeMs,
   flightDayIndex,
   isDirectionalDay,
@@ -46,29 +47,52 @@ describe('etMidnightUtcMs / etFlightRangeMs (DST-safe ET date <-> UTC ms)', () =
   })
 })
 
+describe('etTimeUtcMs (DST-safe ET date + clock time <-> UTC ms — general form of etMidnightUtcMs)', () => {
+  it('EST (winter, UTC-5): noon ET is 17:00 UTC', () => {
+    expect(etTimeUtcMs('2026-01-15', '12:00')).toBe(Date.parse('2026-01-15T17:00:00Z'))
+  })
+  it('EDT (summer, UTC-4): noon ET is 16:00 UTC', () => {
+    expect(etTimeUtcMs('2026-07-04', '12:00')).toBe(Date.parse('2026-07-04T16:00:00Z'))
+  })
+  it('agrees with etMidnightUtcMs at 00:00', () => {
+    expect(etTimeUtcMs('2026-09-26', '00:00')).toBe(etMidnightUtcMs('2026-09-26'))
+  })
+  it('11:59 vs 12:00 ET boundary — the retest\'s ad-schedule cutoff (EDT, 2026-09-26)', () => {
+    const at1159 = etTimeUtcMs('2026-09-26', '11:59')
+    const at1200 = etTimeUtcMs('2026-09-26', '12:00')
+    expect(at1200 - at1159).toBe(60_000) // exactly one minute apart
+    expect(at1159).toBe(Date.parse('2026-09-26T15:59:00Z')) // EDT = UTC-4
+    expect(at1200).toBe(Date.parse('2026-09-26T16:00:00Z'))
+  })
+})
+
 describe('flightDayIndex / isDirectionalDay', () => {
+  // Corrected 2026-09-26 (ads session): the retest is now confirmed and serving —
+  // flightStart = '2026-09-26', flightEnd = '2026-10-02'. Previously flightStart was left
+  // null/pending; see git history for that version of this describe block.
   const retest = campaignById('24279250691')!
-  it('null while the retest flightStart is still pending (null)', () => {
-    expect(retest.flightStart).toBeNull()
-    expect(flightDayIndex(retest, '2026-09-26')).toBeNull()
-    expect(flightDayIndex(retest, '2026-10-02')).toBeNull()
+  it('the retest\'s flightStart is confirmed (no longer pending)', () => {
+    expect(retest.flightStart).toBe('2026-09-26')
+    expect(retest.flightEnd).toBe('2026-10-02')
   })
-  it('day 1 is flightStart, counting up, once a start date is set', () => {
-    const confirmed = { ...retest, flightStart: '2026-09-26' }
-    expect(flightDayIndex(confirmed, '2026-09-26')).toBe(1)
-    expect(flightDayIndex(confirmed, '2026-09-27')).toBe(2)
-    expect(flightDayIndex(confirmed, '2026-10-02')).toBe(7)
-    expect(flightDayIndex(confirmed, '2026-09-25')).toBeNull()
-    expect(flightDayIndex(confirmed, '2026-10-03')).toBeNull()
+  it('day 1 is flightStart, counting up', () => {
+    expect(flightDayIndex(retest, '2026-09-26')).toBe(1)
+    expect(flightDayIndex(retest, '2026-09-27')).toBe(2)
+    expect(flightDayIndex(retest, '2026-10-02')).toBe(7)
+    expect(flightDayIndex(retest, '2026-09-25')).toBeNull()
+    expect(flightDayIndex(retest, '2026-10-03')).toBeNull()
   })
-  it('week 1 (days 1-7) of the retest campaign is directional once confirmed; nothing else is', () => {
-    const confirmed = { ...retest, flightStart: '2026-09-26' }
-    expect(isDirectionalDay(confirmed, '2026-09-26')).toBe(true)
-    expect(isDirectionalDay(confirmed, '2026-10-02')).toBe(true)
-    expect(isDirectionalDay(confirmed, '2026-09-25')).toBe(false) // outside the flight entirely
-    expect(isDirectionalDay(retest, '2026-09-26')).toBe(false) // still pending — flightDayIndex is always null
+  it('week 1 (days 1-7) of the retest campaign is directional; nothing outside its flight is', () => {
+    expect(isDirectionalDay(retest, '2026-09-26')).toBe(true)
+    expect(isDirectionalDay(retest, '2026-10-02')).toBe(true)
+    expect(isDirectionalDay(retest, '2026-09-25')).toBe(false) // outside the flight entirely
     const flight1 = campaignById('24215315197')!
     expect(isDirectionalDay(flight1, '2026-09-03')).toBe(false) // not the retest campaign
+  })
+  it('a still-pending flight (simulated) has no flight day at all', () => {
+    const pending = { ...retest, flightStart: null }
+    expect(flightDayIndex(pending, '2026-09-26')).toBeNull()
+    expect(isDirectionalDay(pending, '2026-09-26')).toBe(false)
   })
 })
 
@@ -79,12 +103,20 @@ describe('campaignAttributionClause (the one function deciding row membership)',
     expect(sql).toBe(`campaign IN (${c.ucValues.map(() => '?').join(', ')}) AND ts >= ?`)
     expect(binds).toEqual([...c.ucValues, etMidnightUtcMs('2026-09-02')])
   })
-  it('a pending campaign (flightStart null) attributes nothing at all', () => {
-    const c = campaignById('24279250691')! // retest, flightStart still null
-    expect(c.flightStart).toBeNull()
+  it('a pending campaign (flightStart null, simulated) attributes nothing at all', () => {
+    const c = { ...campaignById('24279250691')!, flightStart: null }
     const { sql, binds } = campaignAttributionClause(c)
     expect(sql).toBe('campaign IN (?) AND 1 = 0')
     expect(binds).toEqual(['sudoku_funnel_retest'])
+  })
+  it('the retest (now confirmed, flightStartTimeEt = 12:00) binds the noon-ET cutoff, NOT ET midnight', () => {
+    const c = campaignById('24279250691')!
+    expect(c.flightStart).toBe('2026-09-26')
+    expect(c.flightStartTimeEt).toBe('12:00')
+    const { sql, binds } = campaignAttributionClause(c)
+    expect(sql).toBe('campaign IN (?) AND ts >= ?')
+    expect(binds).toEqual(['sudoku_funnel_retest', etTimeUtcMs('2026-09-26', '12:00')])
+    expect(binds[1]).not.toBe(etMidnightUtcMs('2026-09-26')) // the whole point: NOT midnight
   })
   it('Android launch and Play-direct now use DISJOINT ucValues — no shared tag to split by date', () => {
     const androidLaunch = campaignById('24215315197')!
