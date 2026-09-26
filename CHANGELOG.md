@@ -27,6 +27,76 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **The local sign-in bypass is harder to switch on by accident.** It now needs the exact
   value `1` (not `true`, `0` or anything else), still only on the developer's own machine.
 
+## [0.4.0] — 2026-09-26
+
+### Added
+- **Campaign spend now comes from the Google Ads API.** The campaigns page and the overview
+  scorecard read daily spend stored in the dashboard's own database, and fall back to the
+  hand-entered figures when nothing is stored.
+- **A readings log on the campaigns page** shows each ads-routine read: spend, the
+  thresholds reached, kill-rule results, the proposal and key counts. Sign-ups are shown as
+  "at most N" (an upper bound), and a campaign that has already ended shows as ended rather
+  than as a pause proposal.
+- **Scheduled ads-read tooling for the US+CA web retest.** A daily morning read and the
+  post-flight reads fetch spend from the Google Ads API, fire each spend threshold once, apply
+  the pre-registered kill rules and decision table, and only ever propose. A failed read, a
+  missed scheduled read and a real release-health alert are all surfaced rather than silent.
+
+### Changed
+- **The campaign funnel's Install step and the overview's Installs tile and timeline count
+  each install once** (the pop-up outcome), with the raw install beacons, which can
+  double-count, shown as a secondary tile and line.
+- **The pop-ups page note now says outcomes and return visits may arrive up to 30 minutes
+  late**, replacing the inaccurate "nothing is measured within 30 minutes after a sign-in".
+- **Install outcomes are measured from Best Sudoku's install fix onward** (v1.95.4, 26 Sep
+  12:26 ET): earlier install outcomes stay unmeasured, and ranges that span the fix say when it
+  went live.
+
+## [0.3.2] — 2026-09-26
+
+### Added
+- **Pop-up and campaign-return tracking is now live** for v1.95.3 (production web,
+  2026-09-26): the "tracking not yet active" note is gone, rates and pop-up counts are
+  measured, and the release timeline shows a "tracking starts" marker. Rows from before
+  the release (including the 2026-09-19 sign-in-prompt spike) stay unmeasured and are
+  never used as a baseline.
+- **The Best Sudoku overview's release panel now shows v1.95.3** ("Pop-up +
+  campaign-return tracking live on web") instead of the placeholder v1.90.0 entry.
+- **Android/Play tracking now has its own config**, separate from the web release date.
+  v1.95.3 was submitted to the Play production track the same day, but that's a
+  review-then-staged-rollout process, not a single ship date — charts get their own
+  "submitted, reaching devices from review onward" marker and a rollout caveat instead of
+  being graphed as measured/unmeasured the way the web date is.
+- **A standing small-sample note** on the pop-ups, campaigns and overview pages
+  ("Very small numbers: rates are anecdotal. Always read the counts.") — production has
+  only 14 registered users. Every computed rate on those pages, including the campaign
+  page's device-mix breakdown, now shows its numerator/denominator next to the percentage
+  and is gated the same way every other rate in this app is (a share computed over fewer
+  than 5 devices reports "too few to report" instead of a bare, overconfident percentage).
+- **The US+CA web retest campaign is now confirmed and serving** (2026-09-26 through
+  2026-10-02, $13/day budget with a $100 hard stop). Its ad schedule starts at noon ET, so
+  attribution now excludes same-day validation/QA traffic tagged before that time, not just
+  traffic from earlier calendar days — campaign flights can optionally set a start TIME
+  (not just a start date), converted DST-safely the same way every other ET boundary in
+  this app is.
+
+## [0.3.1] — 2026-09-25
+
+### Fixed
+- **Install pop-up outcomes now classify correctly.** The install-prompt outcome beacon
+  previously failed to map to the install pop-up family at all.
+- **Retired and unrecognized upsell reasons are grouped under "other"** instead of showing
+  up as their own breakdown bucket or being silently dropped.
+- **First-50 congrats no longer shows empty outcome-rate rows.** It has no outcome beacon,
+  so it now shows a one-time "no outcome tracking" note instead.
+
+### Added
+- **New "still-playing" pop-up outcome rate**, covering days 14-21 after the pop-up was
+  shown.
+- **Sign-in-eligibility chart now carries a caveat** that its rows are measured at least 30
+  minutes after finish, so they're never a valid hour-of-day signal; the pop-ups page also
+  gets a standing note that sign-in-correlated rates are conservative for the same reason.
+
 ## [0.3.0] — 2026-09-25
 
 ### Fixed

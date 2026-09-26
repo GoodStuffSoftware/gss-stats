@@ -15,6 +15,17 @@ binding = "gss_geo"
 database_name = "gss-geo"
 database_id = "fa0b2929-0086-479e-ae10-50509c34ebf8"
 
+# gss-stats' OWN ads-read store (docs/adr/0001-ads-read-store.md): Google Ads spend, the
+# readings log and threshold state, written by scripts/ads-reads/ and read by /api/campaigns,
+# /api/overview and /api/ads-readings. Schema: migrations/gss-stats-ads/, applied with
+#   npx wrangler d1 migrations apply gss-stats-ads --remote
+# migrations_dir is scoped to this database only, so `migrations apply gss-geo` finds nothing.
+[[d1_databases]]
+binding = "gss_stats_ads"
+database_name = "gss-stats-ads"
+database_id = "785327a3-683c-4f85-819d-abe11efcacc9"
+migrations_dir = "migrations/gss-stats-ads"
+
 # Secret (NOT here): CF_ANALYTICS_TOKEN — set per-environment via
 #   npx wrangler pages secret put CF_ANALYTICS_TOKEN
 # and locally via .dev.vars (gitignored).

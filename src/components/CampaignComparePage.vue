@@ -7,12 +7,13 @@
 // single-dimension/metric shape every other chart in this app uses.
 import { ref, computed, onMounted } from 'vue'
 import type { ChartConfiguration } from 'chart.js'
-import { CAMPAIGNS, FUNNEL_STEP_ORDER, FUNNEL_STEP_LABELS, RETURN_BUCKETS, ARRIVALS_CAVEAT, type CampaignFlight } from '../lib/campaigns'
-import { MIN_COHORT, isInsufficientCohort } from '../lib/popupEvents'
+import { CAMPAIGNS, FUNNEL_STEP_ORDER, FUNNEL_STEP_LABELS, RETURN_BUCKETS, ARRIVALS_CAVEAT, topShares, type CampaignFlight, type DeviceMixShare } from '../lib/campaigns'
+import { MIN_COHORT, isInsufficientCohort, SMALL_SAMPLE_NOTE, PLAY_TRACKING_ACTIVATION_DATE_ET, PLAY_TRACKING_MARKER_LABEL, playTrackingStatusNote } from '../lib/popupEvents'
 import type { CampaignCompareResponse, CampaignFunnelCounts } from '../types'
 import { fetchCampaignCompare } from '../api'
 import { PALETTE } from '../lib/charts'
 import BaseChart from './charts/BaseChart.vue'
+import AdsReadingsWidgetCard from './AdsReadingsWidgetCard.vue'
 
 const loading = ref(true)
 const error = ref<string | null>(null)
@@ -182,13 +183,11 @@ function returnChartConfig(c: CampaignFlight): ChartConfiguration | null {
   }
 }
 
-// ── Device mix: top-3 shares per breakdown, as percentage bars ─────────────────────────
-function topShares(counts: Record<string, number>, n = 4): { label: string; value: number; pct: number }[] {
-  const total = Object.values(counts).reduce((a, b) => a + b, 0) || 1
-  return Object.entries(counts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, n)
-    .map(([label, value]) => ({ label, value, pct: value / total }))
+// Device mix top-N shares: MIN_COHORT-gated (see lib/campaigns.ts topShares/DeviceMixShare
+// — moved there, 2026-09-26 review fix, so the gating logic is unit-testable; this used to
+// compute value/total directly here and bypass MIN_COHORT entirely).
+function shareBarWidth(row: DeviceMixShare): number {
+  return row.total ? (row.value / row.total) * 100 : 0
 }
 </script>
 
@@ -200,6 +199,7 @@ function topShares(counts: Record<string, number>, n = 4): { label: string; valu
       no device/location/timestamp correlation across rows. Funnel steps are counted <em>within tagged sessions</em>.
       Verification and household traffic are excluded server-side.
     </p>
+    <p class="lede small-sample-note">{{ SMALL_SAMPLE_NOTE }}</p>
 
     <div v-if="loading" class="state mono">Loading…</div>
     <div v-else-if="error" class="state error mono">{{ error }}</div>
@@ -220,10 +220,13 @@ function topShares(counts: Record<string, number>, n = 4): { label: string; valu
             <div v-if="dataByCampaign[c.id]" class="tagged-hits mono" :title="ARRIVALS_CAVEAT">
               tagged hits: {{ fmt(dataByCampaign[c.id].taggedHits) }} (vs {{ fmt(dataByCampaign[c.id].funnel.counts.arrivals) }} arrivals)
             </div>
+            <div v-if="dataByCampaign[c.id]?.rawInstallSignals" class="tagged-hits mono">
+              {{ dataByCampaign[c.id].rawInstallSignals!.label }}: {{ fmt(dataByCampaign[c.id].rawInstallSignals!.count) }}
+            </div>
             <div v-if="dataByCampaign[c.id]" class="funnel-steps">
               <div v-for="step in FUNNEL_STEP_ORDER" :key="step" class="funnel-step">
                 <div class="fs-top">
-                  <span class="fs-label">{{ FUNNEL_STEP_LABELS[step] }}</span>
+                  <span class="fs-label">{{ FUNNEL_STEP_LABELS[step] }}<template v-if="step === 'install' && dataByCampaign[c.id].funnel.installNote"> ({{ dataByCampaign[c.id].funnel.installNote }})</template></span>
                   <span class="fs-count mono">
                     <template v-if="dataByCampaign[c.id].funnel.notInstrumented.includes(step)">not instrumented</template>
                     <template v-else>{{ fmt(dataByCampaign[c.id].funnel.counts[step]) }}</template>
@@ -240,6 +243,7 @@ function topShares(counts: Record<string, number>, n = 4): { label: string; valu
                   <template v-if="dataByCampaign[c.id].funnel.notInstrumented.includes(step)">not instrumented</template>
                   <template v-else-if="step !== 'arrivals'">
                     {{ pct(dataByCampaign[c.id].funnel.rates[step], prevStepCount(dataByCampaign[c.id].funnel.counts, step)) }} of previous step
+                    ({{ fmt(dataByCampaign[c.id].funnel.counts[step]) }}/{{ fmt(prevStepCount(dataByCampaign[c.id].funnel.counts, step)) }})
                   </template>
                 </div>
               </div>
@@ -298,12 +302,22 @@ function topShares(counts: Record<string, number>, n = 4): { label: string; valu
             <div class="fc-label">{{ c.label }}</div>
             <div v-if="dataByCampaign[c.id]" class="cost-rows">
               <div class="cost-row"><span>Spend</span><span class="mono">{{ money(dataByCampaign[c.id].spend) }}</span></div>
+              <div v-if="dataByCampaign[c.id].spendSource" class="cost-row">
+                <span>Source</span>
+                <span class="mono">{{ dataByCampaign[c.id].spendSource!.source === 'google-ads-api' ? `Ads API, through ${dataByCampaign[c.id].spendSource!.lastDate}` : dataByCampaign[c.id].spendSource!.source === 'config' ? 'hand-entered' : '—' }}</span>
+              </div>
               <div class="cost-row"><span>Per arrival</span><span class="mono">{{ money(dataByCampaign[c.id].costPerArrival) }}</span></div>
               <div class="cost-row"><span>Per auth success</span><span class="mono">{{ money(dataByCampaign[c.id].costPerAuthSuccess) }}</span></div>
             </div>
           </div>
         </div>
-        <p v-if="CAMPAIGNS.some((c) => dataByCampaign[c.id]?.spend == null)" class="caption">Spend comes from Google Ads and is entered by hand in <code>CAMPAIGN_SPEND</code> (lib/campaigns.ts) — one or more campaigns above still need a value.</p>
+        <p class="caption">Spend comes from the Google Ads API as stored by the ads-read routine; campaigns with nothing stored fall back to the hand-entered <code>CAMPAIGN_SPEND</code> (lib/campaigns.ts).</p>
+      </section>
+
+      <!-- Ads-read routine readings log — a self-contained widget (fetches /api/ads/readings) -->
+      <section class="block">
+        <h2>Readings log (ads routine)</h2>
+        <AdsReadingsWidgetCard :widget="{ view: 'log' }" />
       </section>
 
       <!-- Chart 6: device mix -->
@@ -317,8 +331,8 @@ function topShares(counts: Record<string, number>, n = 4): { label: string; valu
                 <div class="device-kind overline">{{ kind }}</div>
                 <div v-for="row in topShares(rows)" :key="row.label" class="share-row">
                   <span class="share-label">{{ row.label }}</span>
-                  <span class="share-bar-wrap"><span class="share-bar" :style="{ width: row.pct * 100 + '%' }"></span></span>
-                  <span class="share-pct mono">{{ pct(row.pct) }}</span>
+                  <span class="share-bar-wrap"><span class="share-bar" :style="{ width: shareBarWidth(row) + '%' }"></span></span>
+                  <span class="share-pct mono">{{ pct(row.rate, row.total) }} ({{ fmt(row.value) }}/{{ fmt(row.total) }})</span>
                 </div>
               </div>
             </template>
@@ -329,6 +343,9 @@ function topShares(counts: Record<string, number>, n = 4): { label: string; valu
       <!-- Return visits (aggregate-only, on-device beacon — see lib/campaigns.ts) -->
       <section class="block">
         <h2>Return visits (on-device, web only)</h2>
+        <p class="caption">
+          Android/Play: {{ PLAY_TRACKING_ACTIVATION_DATE_ET ? PLAY_TRACKING_MARKER_LABEL : '' }} {{ playTrackingStatusNote() }}
+        </p>
         <div class="return-grid">
           <div v-for="c in CAMPAIGNS" :key="c.id" class="return-col">
             <div class="fc-label">{{ c.label }}</div>
@@ -340,7 +357,16 @@ function topShares(counts: Record<string, number>, n = 4): { label: string; valu
               <p v-else-if="isInsufficientCohort(dataByCampaign[c.id].returnVisits.counts.d0)" class="state mono small">
                 too few to report (d0 = {{ fmt(dataByCampaign[c.id].returnVisits.counts.d0) }}, need {{ MIN_COHORT }})
               </p>
-              <div v-else class="chart-box small"><BaseChart v-if="returnChartConfig(c)" :config="returnChartConfig(c)!" :drill-open="false" @point="() => {}" /></div>
+              <template v-else>
+                <div class="chart-box small"><BaseChart v-if="returnChartConfig(c)" :config="returnChartConfig(c)!" :drill-open="false" @point="() => {}" /></div>
+                <p class="caption mono small return-counts">
+                  d0={{ fmt(dataByCampaign[c.id].returnVisits.counts.d0) }}
+                  <span v-for="k in RETURN_RATE_KEYS" :key="k">
+                    · {{ k }}={{ pct(dataByCampaign[c.id].returnVisits.rates[k], dataByCampaign[c.id].returnVisits.counts.d0) }}
+                    ({{ fmt(dataByCampaign[c.id].returnVisits.counts[k]) }}/{{ fmt(dataByCampaign[c.id].returnVisits.counts.d0) }})
+                  </span>
+                </p>
+              </template>
             </template>
           </div>
         </div>

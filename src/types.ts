@@ -152,6 +152,15 @@ export interface StatsResponse {
   // true when `rate` is null because the denominator was nonzero but under MIN_COHORT
   // (see lib/popupEvents.ts gateRate) — render "too few to report", not "—".
   insufficientCohort?: boolean
+  // The raw counts behind `rate` — see lib/popupEvents.ts GatedRate. Shown next to every
+  // rate tile (numerator/denominator) regardless of insufficientCohort, so a viewer always
+  // sees the sample size a percentage came from.
+  numerator?: number
+  denominator?: number
+  // Pop-up dataset only: a data caveat that travels with the response (e.g. the known
+  // install-outcome gap, lib/popupEvents.ts INSTALL_ACCEPT_OUTCOME_FIXED_ET), rendered under
+  // the chart so saved widgets with older titles still show it.
+  note?: string
 }
 
 // ── "Best Sudoku campaigns" (Part B) — a dedicated response shape (not the generic
@@ -187,6 +196,9 @@ export interface CampaignCompareResponse {
     notInstrumented: (keyof CampaignFunnelCounts)[]
     // Show wherever `counts.arrivals` is displayed — see lib/campaigns.ts ARRIVALS_CAVEAT.
     arrivalsCaveat: string
+    // Install-fix caveat for this campaign's range (lib/popupEvents.ts installOutcomeGapNote);
+    // null once the whole range is after the fix.
+    installNote?: string | null
   }
   // EVERY row carrying this campaign's tag (the tag rides each beacon for its 30-min TTL) —
   // NOT the same as arrivals (`funnel.counts.arrivals`, visitor='new' only). Label it
@@ -210,6 +222,12 @@ export interface CampaignCompareResponse {
   costPerArrival: number | null
   costPerAuthSuccess: number | null
   spend: number | null
+  // Where `spend` came from: the ads routine's stored Google Ads API figures (gss-stats-ads),
+  // the hand-entered CAMPAIGN_SPEND config, or nothing — lib/adsRules.ts resolveCampaignSpend.
+  spendSource?: { source: 'google-ads-api' | 'config' | 'none'; fetchedAt: string | null; lastDate: string | null }
+  // Raw /install/<outcome> beacons — secondary to the deduplicated install step (one install
+  // can fire two of them); see lib/campaigns.ts isRawInstallSignal.
+  rawInstallSignals?: { count: number; label: string }
   meta: { generatedAt: string }
 }
 
@@ -231,13 +249,16 @@ export interface OverviewKpiTile {
   // Rate tiles only — the rate's own denominator, so the UI can tell "too few to report"
   // (MIN_COHORT) apart from plain "—" (no data at all) for a null `today`.
   denominator?: number
+  // Rate tiles only — pairs with `denominator` so the UI can show n/d next to the rate.
+  numerator?: number
 }
 export interface OverviewDailyPoint {
   date: string
   pageviews: number
   taggedArrivals: number
   authSuccess: number
-  install: number
+  install: number // /popup-outcome/install-prompt/installed (once per showing)
+  rawInstallSignals?: number // raw /install/<outcome> beacons — can double-count
 }
 export interface OverviewCampaignFlightMeta {
   id: string
@@ -260,7 +281,8 @@ export interface OverviewScorecardRow {
   authSuccess: number
   install: number
   returnRateD2to7: number | null
-  returnD0: number // pairs with returnRateD2to7
+  returnD0: number // pairs with returnRateD2to7 (denominator)
+  returnD2to7: number // pairs with returnRateD2to7 (numerator)
   costPerArrival: number | null
 }
 export interface OverviewReleaseWindowSummary {
@@ -287,6 +309,7 @@ export interface OverviewResponse {
     trackingActivationDate: string | null
     since: string
     until: string
+    seriesLabels?: { install: string; rawInstallSignals: string }
   }
   scorecard: OverviewScorecardRow[]
   releasePanel: OverviewReleasePanel | null

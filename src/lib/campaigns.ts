@@ -1,7 +1,7 @@
 // "Best Sudoku campaigns" — comparing three Google Ads campaigns from the beacon's D1
 // (`hits`). Companion to lib/popupEvents.ts: funnel-step classification reuses
 // classifyPopupPath (signin-prompt / promo-first50 / install) directly, and the "tracking
-// not yet active" concept reuses TRACKING_ACTIVATION_DATE_ET (v1.90.0's release date, which
+// not yet active" concept reuses TRACKING_ACTIVATION_DATE_ET (v1.95.3's release date, which
 // is also when the on-device return beacon ships — see RETURN_BUCKETS below).
 //
 // D1 SCHEMA NOTE: the task brief calls the utm columns "us"/"um"/"uc". The ACTUAL `hits`
@@ -26,6 +26,10 @@ import { classifyPopupPath, computeRate, TRACKING_ACTIVATION_DATE_ET, etDateFrom
 
 // ET hour-of-day (0-23) for "Arrivals by ET hour of day" — same DST-safe Intl approach as
 // popupEvents.ts's etDateFromMs, just formatting the hour instead of the calendar date.
+// FINAL LIST rule (Best Sudoku team, 2026-09-25): hourOfDayEt (functions/api/campaigns.ts)
+// is built ONLY from tagged-arrival rows, never from /signin-eligible — that beacon is
+// deferred ≥30 min after the finish, so its own row time is not the finish time and would
+// skew any hour-of-day bucketing. See lib/popupEvents.ts SIGNIN_ELIGIBLE_CAVEAT.
 const ET_HOUR_FMT = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hourCycle: 'h23' })
 export function etHourFromMs(ms: number): number {
   return Number(ET_HOUR_FMT.format(new Date(ms)))
@@ -45,6 +49,13 @@ export interface CampaignFlight {
    * `null` = flight start not yet confirmed — attribute NOTHING until it's set (used by the
    * retest campaign below so its pre-launch QA rows don't count). */
   flightStart: string | null
+  /** Optional local ET time-of-day (HH:MM, 24h) the ad schedule actually starts at on
+   * `flightStart` — when set, campaignAttributionClause's lower `ts` bound is `flightStart`
+   * at THIS time (DST-safe, via etTimeUtcMs), not ET midnight. Use this when ads start
+   * mid-day (e.g. the retest's noon-ET schedule) so same-day pre-schedule rows (validation
+   * traffic, QA) don't count as real attribution. Undefined = bound at ET midnight, same as
+   * before. */
+  flightStartTimeEt?: string
   /** ET calendar date, inclusive — serving-window END, for DISPLAY and flight-day-alignment
    * only (flightDayIndex, the "daily arrivals by flight day" chart, servingHoursEt shading).
    * NOT used to bound attribution — see flightStart above. */
@@ -62,6 +73,13 @@ export interface CampaignFlight {
   measurement?: 'spend-only'
   /** Shown next to the funnel/arrivals numbers when `measurement === 'spend-only'`. */
   measurabilityNote?: string
+  /** Where the ad sends people: a web page (beacon-measurable) or straight to the Play
+   * listing. Synced into the gss-stats-ads `ads_campaigns` table (lib/adsStore.ts). */
+  kind: 'web' | 'play-direct'
+  /** Google Ads daily budget in USD, as built (for pacing lines only). */
+  dailyBudgetUsd?: number
+  /** Cumulative-spend hard stop in USD, when the build spec set one. */
+  hardCapUsd?: number
   notes: string
 }
 
@@ -81,10 +99,11 @@ export interface CampaignFlight {
 //     sudoku_tired_of_ads_play, read from the Play Install Referrer) — there is no
 //     intermediate web page, so NO beacon rows exist for it today. Spend-only until a Play
 //     Install Referrer reader ships in bestsudoku-app; see `measurement` below.
-//   24279250691 "US+CA web retest": uc sudoku_funnel_retest. 9 rows already tagged with this
-//     uc on 2026-09-23 are pre-launch validation/QA, not real traffic — flightStart is left
-//     `null` (pending) until the flight's real start is confirmed, which excludes them (and
-//     everything else) from attribution. See flightStart's doc comment.
+//   24279250691 "US+CA web retest": uc sudoku_funnel_retest. Now serving 2026-09-26..10-02
+//     ET, ad schedule starting 12:00 ET (ads session, 2026-09-26; $13/day budget, $100 hard
+//     stop). The 9 rows already tagged with this uc on 2026-09-23, plus anything tagged
+//     before 2026-09-26 12:00 ET, are pre-launch validation/QA, not real traffic — excluded
+//     via flightStartTimeEt. See flightStart's/flightStartTimeEt's doc comments.
 //
 // Live `campaign` values seen in production D1 as of 2026-09-25 (read-only query:
 // `SELECT campaign, MIN(ts), MAX(ts), COUNT(*) FROM hits WHERE campaign IS NOT NULL AND
@@ -120,6 +139,9 @@ export const CAMPAIGNS: CampaignFlight[] = [
     flightStart: '2026-09-02',
     flightEnd: '2026-09-09',
     status: 'closed',
+    kind: 'web',
+    dailyBudgetUsd: 14.29, // best-sudoku web-retest build spec section 7 ("the week-1 campaign's ($14.29)")
+    hardCapUsd: 100, // same spec: "Mike pauses the campaign at $100 ... exactly as the week-1 build required"
     notes:
       'Served 2026-09-02..09-09 ET, $124.47 total. Every row tagged with this uc family belongs here, including the post-09-10 trickle — see flightStart\'s doc comment (no upper bound on attribution). Excludes sudoku_tired_of_ads_test (1 row, 2026-09-02) — QA traffic, not real ad performance.',
   },
@@ -130,6 +152,8 @@ export const CAMPAIGNS: CampaignFlight[] = [
     flightStart: '2026-09-09',
     flightEnd: '2026-09-13', // stopped early; configured to run through 2026-09-16
     status: 'closed',
+    kind: 'play-direct',
+    dailyBudgetUsd: 14.29, // best-sudoku web-retest build spec section 7 ("the twin's ($14.29)"); no hard cap on record
     measurement: 'spend-only',
     measurabilityNote: 'Play-direct: not measurable in beacon (no Install Referrer reader)',
     notes:
@@ -139,12 +163,16 @@ export const CAMPAIGNS: CampaignFlight[] = [
     id: '24279250691',
     label: 'US+CA web retest',
     ucValues: ['sudoku_funnel_retest'],
-    flightStart: null, // pending — set to a real ET date once the flight's actual start is confirmed
-    flightEnd: '2026-10-02', // 7 serving days once flightStart is set
-    status: 'upcoming',
+    flightStart: '2026-09-26', // confirmed — now serving (ads session, 2026-09-26)
+    flightStartTimeEt: '12:00', // the ad schedule's actual start — see campaignAttributionClause
+    flightEnd: '2026-10-02', // 7 serving days
+    status: 'active',
+    kind: 'web',
+    dailyBudgetUsd: 13,
+    hardCapUsd: 100,
     servingHoursEt: [12, 23],
     notes:
-      '9 rows already tagged sudoku_funnel_retest on 2026-09-23 are pre-launch validation/QA, not real traffic — excluded because flightStart is still null/pending. Set flightStart to a real ET date once the flight actually begins; until then nothing is attributed to this campaign at all.',
+      'Now serving as of 2026-09-26. Budget: $13/day, $100 hard stop (ads session, 2026-09-26) — see CAMPAIGN_DAILY_SPEND\'s entry for this id, left empty (and CAMPAIGN_SPEND left null) until real daily spend numbers arrive from the Google Ads API; both stay configurable per-day, same as the other two campaigns. The 9 rows tagged sudoku_funnel_retest on 2026-09-23, plus anything tagged before 2026-09-26 12:00 ET, are pre-launch validation/QA, not real traffic — excluded via flightStartTimeEt (the schedule\'s real noon-ET start), not just the calendar date.',
   },
 ]
 
@@ -181,6 +209,38 @@ export function etMidnightUtcMs(dateEt: string): number {
   }
   return Date.parse(`${dateEt}T00:00:00Z`) // unreachable for a valid YYYY-MM-DD; safe fallback
 }
+
+// ET calendar date + local clock time, minute precision — used by etTimeUtcMs's round-trip
+// check below (etMidnightUtcMs's own check is midnight-specific; this generalizes it).
+const ET_DATETIME_FMT = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/New_York',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+})
+function etDateTimeFromMs(ms: number): string {
+  const parts = Object.fromEntries(ET_DATETIME_FMT.formatToParts(new Date(ms)).map((p) => [p.type, p.value]))
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`
+}
+
+/** DST-safe: the UTC instant denoted by ET calendar date `dateEt` (YYYY-MM-DD) at local ET
+ * clock time `timeEt` (HH:MM, 24h) — the general form of etMidnightUtcMs above (which is
+ * just `etTimeUtcMs(dateEt, '00:00')` in spirit, kept as its own function for its stronger
+ * exact-boundary check). Tries both possible ET UTC offsets (EST -5h / EDT -4h) and picks
+ * whichever one round-trips back to `${dateEt}T${timeEt}` when reformatted in
+ * America/New_York. Used for CampaignFlight.flightStartTimeEt — e.g. an ad schedule that
+ * starts mid-day rather than at ET midnight. */
+export function etTimeUtcMs(dateEt: string, timeEt: string): number {
+  for (const offsetHours of [5, 4]) {
+    const candidate = Date.parse(`${dateEt}T${timeEt}:00Z`) + offsetHours * 3_600_000
+    if (etDateTimeFromMs(candidate) === `${dateEt}T${timeEt}`) return candidate
+  }
+  return Date.parse(`${dateEt}T${timeEt}:00Z`) // unreachable for a valid date/time; safe fallback
+}
+
 function nextEtDate(dateEt: string): string {
   const d = new Date(dateEt + 'T00:00:00Z')
   d.setUTCDate(d.getUTCDate() + 1)
@@ -196,7 +256,10 @@ export function etFlightRangeMs(flightStart: string, flightEnd: string): [number
 /** No upper bound, ever — a row tagged with this campaign's uc belongs to it however late it
  * arrives (see flightStart's doc comment on CampaignFlight). `flightStart === null` means
  * "not yet confirmed": attribute nothing (`1 = 0`) rather than guess, so pre-launch QA rows
- * (e.g. the retest campaign's 9 rows) never count until a real date is set. */
+ * (e.g. the retest campaign's 9 rows) never count until a real date is set. The lower `ts`
+ * bound is ET midnight of `flightStart` UNLESS `flightStartTimeEt` is set, in which case
+ * it's `flightStart` at that local ET time instead (DST-safe, via etTimeUtcMs) — e.g. the
+ * retest's ad schedule starts at noon ET, so same-day pre-schedule rows don't count. */
 export function campaignAttributionClause(campaign: CampaignFlight): { sql: string; binds: unknown[] } {
   const ucPlaceholders = campaign.ucValues.map(() => '?').join(', ')
   const w = [`campaign IN (${ucPlaceholders})`]
@@ -205,7 +268,11 @@ export function campaignAttributionClause(campaign: CampaignFlight): { sql: stri
     w.push('1 = 0')
   } else {
     w.push('ts >= ?')
-    binds.push(etMidnightUtcMs(campaign.flightStart))
+    binds.push(
+      campaign.flightStartTimeEt
+        ? etTimeUtcMs(campaign.flightStart, campaign.flightStartTimeEt)
+        : etMidnightUtcMs(campaign.flightStart),
+    )
   }
   return { sql: w.join(' AND '), binds }
 }
@@ -255,6 +322,8 @@ export const FUNNEL_STEP_LABELS: Record<FunnelStepKey, string> = {
   accept: 'Accept',
   authSuccess: 'Auth success',
   installPrompt: 'Install prompt',
+  // Range-specific install-fix caveats travel with the data instead (functions/api/campaigns.ts
+  // funnel.installNote, from lib/popupEvents.ts installOutcomeGapNote).
   install: 'Install',
 }
 
@@ -300,9 +369,30 @@ export function classifyFunnelPath(path: string): FunnelStepKey | null {
   if ((ev.family === 'signin-prompt' || ev.family === 'promo-first50') && ev.kind === 'shown') return 'ask'
   if ((ev.family === 'signin-prompt' || ev.family === 'promo-first50') && ev.kind === 'accept') return 'accept'
   if (ev.family === 'install' && ev.kind === 'shown') return 'installPrompt' // /install/prompt/{android,ios,desktop}
-  if (ev.family === 'install' && ev.kind === 'outcome') return 'install' // pwa-installed/standalone-detected/play-detected
+  // INSTALL = /popup-outcome/install-prompt/installed (coordinator, 2026-09-26): the popup
+  // outcome counts AT MOST ONCE per showing, while the raw /install/<outcome> beacons can
+  // double-count one install (a cross-tab race can fire pwa-installed AND
+  // standalone-detected). The raw signals are a secondary figure — isRawInstallSignal below —
+  // never this step. Rows before the install fix (INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS) are
+  // unmeasured: the queries drop them (excludeInstallGapUnmeasured) before they get here.
+  if (isInstallPromptInstalled(path)) return 'install'
   return null
 }
+
+/** THE install count everywhere (campaign funnel, overview tile/timeline, ads routine):
+ * /popup-outcome/install-prompt/installed, at most once per showing. */
+export function isInstallPromptInstalled(path: string): boolean {
+  const ev = classifyPopupPath(path)
+  return !!ev && ev.family === 'popup-outcome:install' && ev.kind === 'installed'
+}
+
+/** Raw /install/pwa-installed | standalone-detected | play-detected — "raw install signals
+ * (can double-count)", shown only as a secondary line next to the deduplicated install step. */
+export function isRawInstallSignal(path: string): boolean {
+  const ev = classifyPopupPath(path)
+  return !!ev && ev.family === 'install' && ev.kind === 'outcome'
+}
+export const RAW_INSTALL_SIGNALS_LABEL = 'raw install signals (can double-count)'
 
 export interface FunnelPathCount {
   path: string
@@ -388,7 +478,7 @@ export const CAMPAIGN_DAILY_SPEND: Record<string, Record<string, number>> = {
     '2026-09-12': 14.07,
     '2026-09-13': 13.36,
   },
-  '24279250691': {}, // not flighted yet — no spend
+  '24279250691': {}, // serving as of 2026-09-26 ($13/day budget, $100 hard stop) — left empty until real daily spend numbers arrive from the Google Ads API
 }
 export const CAMPAIGN_SPEND: Record<string, number | null> = {
   '24215315197': 124.47, // Google Ads' own reported total — see CAMPAIGN_DAILY_SPEND's doc comment
@@ -402,7 +492,30 @@ export function costPer(spend: number | null, count: number): number | null {
   return computeRate(spend, count)
 }
 
-// ── On-device return beacon (v1.90.0; see popupEvents.ts POPUP_EVENT_PREFIXES '/return')
+// ── Device mix shares (top-N breakdown of a device/OS/browser/screen count map) ────────
+export interface DeviceMixShare {
+  label: string
+  value: number
+  total: number
+  // MIN_COHORT-gated via computeRate — NOT a bare value/total division. A raw division
+  // would print e.g. "100.0% (1/1)" for a total of 1, which reads as far more confident
+  // than a single-device sample supports (review fix, 2026-09-26: CampaignComparePage.vue
+  // used to compute this share directly, bypassing MIN_COHORT entirely). null means "too
+  // few to report" (0 < total < MIN_COHORT) or "—" (total === 0) — see
+  // popupEvents.ts isInsufficientCohort for telling those apart; `value`/`total` are still
+  // returned either way so the raw counts can always be shown alongside.
+  rate: number | null
+}
+/** Top-N shares of a device-mix breakdown, by count descending. */
+export function topShares(counts: Record<string, number>, n = 4): DeviceMixShare[] {
+  const total = Object.values(counts).reduce((a, b) => a + b, 0)
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, n)
+    .map(([label, value]) => ({ label, value, total, rate: computeRate(value, total) }))
+}
+
+// ── On-device return beacon (v1.95.3; see popupEvents.ts POPUP_EVENT_PREFIXES '/return')
 // `/return/<uc>/d0` is the denominator (first tagged load); d1/d2-7/d8-14/d15-30/d31-60
 // are "came back within that window," counted at most once per bucket per the app's own
 // on-device logic (this module just parses/sums what the beacon already deduped) ──────
@@ -444,9 +557,9 @@ export function returnVisitRates(counts: Record<ReturnBucket, number>): Record<E
 }
 
 /** A flight predates the return beacon entirely when it's already over before
- * TRACKING_ACTIVATION_DATE_ET (v1.90.0's release) — see the task brief: "flights before
- * v1.90.0 show 'not instrumented'". Reuses the SAME activation date as lib/popupEvents.ts
- * (v1.90.0 ships both features at once) rather than a second constant. Also true, always,
+ * TRACKING_ACTIVATION_DATE_ET (v1.95.3's release) — see the task brief: "flights before
+ * v1.95.3 show 'not instrumented'". Reuses the SAME activation date as lib/popupEvents.ts
+ * (v1.95.3 ships both features at once) rather than a second constant. Also true, always,
  * while that date is still unset — there's no live data yet for ANY flight. */
 export function returnBeaconNotInstrumented(campaign: CampaignFlight): boolean {
   if (TRACKING_ACTIVATION_DATE_ET === null) return true
