@@ -492,9 +492,29 @@ export function normalizeConfig(raw: any): DashboardConfig {
     // idempotent even outside a clean version progression: a page that already has widgets
     // (this migration having already run, or a user who somehow added widgets before this
     // shipped) is left completely alone — never dropped, never re-populated, never duplicated.
+    //
+    // Decide the page's kind ONCE, by id FIRST: isOverviewPage/isCampaignComparePage also
+    // match by NAME as a fallback (for a page that predates the id-based canonical scheme),
+    // so a page id'd 'bsk-campaigns' but somehow named "Best Sudoku overview" (stale/manual
+    // edit) used to match BOTH predicates — the id branch ran first, got real widgets, then
+    // the name-fallback branch's `widgets.length === 0` check was already false, silently
+    // skipping it, so a campaigns-id'd page ended up with OVERVIEW widgets. Resolving to a
+    // single `kind` per page (id checked before name, mutually exclusive) makes that
+    // impossible: a page is converted as exactly one of 'overview' | 'campaigns' | neither.
     for (const p of pages) {
-      if (isOverviewPage(p) && p.widgets.length === 0) p.widgets = defaultOverviewWidgets()
-      if (isCampaignComparePage(p) && p.widgets.length === 0) p.widgets = defaultCampaignsWidgets()
+      if (p.widgets.length !== 0) continue
+      const kind: 'overview' | 'campaigns' | null =
+        p.id === 'bsk-overview'
+          ? 'overview'
+          : p.id === 'bsk-campaigns'
+            ? 'campaigns'
+            : isOverviewPage(p)
+              ? 'overview'
+              : isCampaignComparePage(p)
+                ? 'campaigns'
+                : null
+      if (kind === 'overview') p.widgets = defaultOverviewWidgets()
+      else if (kind === 'campaigns') p.widgets = defaultCampaignsWidgets()
     }
     // Self-heal (every load, not version-gated): the canonical pages — Overview, Beacon, and
     // the Best Sudoku launch page — must NEVER carry a persistent page-level drill. Drilling

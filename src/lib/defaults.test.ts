@@ -134,6 +134,38 @@ describe('normalizeConfig — v7 bespoke → widget migration', () => {
     const ov2 = twice.pages.find((p) => isOverviewPage(p))!
     expect(ov2.widgets).toEqual([customWidget]) // still untouched — idempotent
   })
+
+  it('MEDIUM regression: a page id\'d bsk-campaigns but named like the overview page (stale/manual-edit mismatch) gets CAMPAIGNS widgets, matched by id first', () => {
+    // isOverviewPage/isCampaignComparePage both match by NAME as a fallback, so a page
+    // whose id says one thing and whose name says another used to satisfy BOTH predicates —
+    // the migration loop ran the overview branch first, filled p.widgets, and the campaigns
+    // branch's `widgets.length === 0` guard was then already false, silently skipping it.
+    const raw: any = {
+      version: 6,
+      activePageId: 'default',
+      pages: [
+        page({ id: 'default', name: 'Overview', isDefault: true }),
+        // id says campaigns; name says overview.
+        page({ id: 'bsk-campaigns', name: 'Best Sudoku overview', widgets: [] }),
+      ],
+    }
+    const norm = normalizeConfig(raw)
+    const p = norm.pages.find((x) => x.id === 'bsk-campaigns')!
+    expect(p.widgets.some((w) => w.dataset === 'campaigns')).toBe(true)
+    expect(p.widgets.some((w) => w.dataset === 'overview')).toBe(false)
+  })
+
+  it('MEDIUM regression: the reverse mismatch — id bsk-overview, name like campaigns — gets OVERVIEW widgets', () => {
+    const raw: any = {
+      version: 6,
+      activePageId: 'default',
+      pages: [page({ id: 'default', name: 'Overview', isDefault: true }), page({ id: 'bsk-overview', name: 'Best Sudoku campaigns', widgets: [] })],
+    }
+    const norm = normalizeConfig(raw)
+    const p = norm.pages.find((x) => x.id === 'bsk-overview')!
+    expect(p.widgets.some((w) => w.dataset === 'overview')).toBe(true)
+    expect(p.widgets.some((w) => w.dataset === 'campaigns')).toBe(false)
+  })
 })
 
 describe('normalizeConfig — fixtures', () => {

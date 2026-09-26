@@ -16,7 +16,7 @@ import BaseChart from '../charts/BaseChart.vue'
 
 const props = defineProps<{ widget: Widget }>()
 
-const { campaigns, dataByCampaign, loading, error } = useCampaignsData(() => props.widget.campaignIds)
+const { campaigns, dataByCampaign, loading, error, reload } = useCampaignsData(() => props.widget.campaignIds)
 
 function fmt(n: number | null | undefined): string {
   return n == null ? '—' : n.toLocaleString('en-US')
@@ -160,6 +160,14 @@ function shareBarWidth(row: DeviceMixShare): number {
     <div v-else-if="error" class="state error mono">{{ error }}</div>
 
     <template v-else>
+      <!-- LOW review suggestion: give campaigns widgets the same manual-refresh control
+           Overview's kpis view has (ChartCard's generic reload button is hidden for this
+           dataset — see ChartCard.vue's isBespokeBody). One per widget; reload() re-fetches
+           every campaign this widget covers via the shared cache. -->
+      <div class="cw-head">
+        <button class="btn-ghost icon" title="Refresh" @click="reload">↻</button>
+      </div>
+
       <!-- funnel -->
       <template v-if="widget.view === 'funnel'">
         <p class="caption">{{ ARRIVALS_CAVEAT }} Rates need at least {{ MIN_COHORT }} in their denominator, or they show "too few to report".</p>
@@ -313,6 +321,24 @@ function shareBarWidth(row: DeviceMixShare): number {
 .cw-body {
   height: 100%;
   overflow: auto;
+}
+.cw-head {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 4px;
+}
+.btn-ghost.icon {
+  border: none;
+  background: transparent;
+  color: rgb(var(--ink-3));
+  font-size: 15px;
+  padding: 3px 7px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.btn-ghost.icon:hover {
+  background: rgb(var(--sunken));
+  color: rgb(var(--ink));
 }
 .state {
   padding: 20px 0;

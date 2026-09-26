@@ -327,6 +327,8 @@ function openFilteredPage() {
 // never moves when it opens. ─────────────────────────────────────────────────────────────
 const barOpen = ref(false)
 const fbAnchor = ref<HTMLElement | null>(null)
+const fbToggleBtn = ref<HTMLButtonElement | null>(null)
+const fbPanelId = 'fb-panel'
 const touchCapable = isTouchDevice()
 let barHideTimer: number | undefined
 
@@ -344,6 +346,12 @@ function closeBarNow() {
   clearTimeout(barHideTimer)
   barOpen.value = false
 }
+// Escape returns focus to the toggle button — without this, focus is left on whatever was
+// inside the now-hidden panel (or lost entirely), stranding a keyboard user (LOW a11y fix).
+function closeBarAndReturnFocus() {
+  closeBarNow()
+  fbToggleBtn.value?.focus()
+}
 function onBarToggleActivate() {
   // Touch has no hover — the button just toggles. Desktop/mouse reveals on hover instead
   // (the click still works there too, e.g. for keyboard/assistive activation).
@@ -356,12 +364,20 @@ function onBarAreaEnter() {
 function onBarAreaLeave() {
   if (!touchCapable) scheduleCloseBar()
 }
+// Close as soon as focus leaves the anchor/panel entirely (e.g. Tabbing past the last
+// control) — relatedTarget is the element gaining focus; null when focus leaves the
+// document (e.g. to the browser chrome), which we also treat as "left" (LOW a11y fix).
+function onBarFocusOut(e: FocusEvent) {
+  const next = e.relatedTarget as Node | null
+  if (!fbAnchor.value) return
+  if (!next || !fbAnchor.value.contains(next)) closeBarNow()
+}
 function onDocumentClickForBar(e: MouseEvent) {
   if (!touchCapable || !barOpen.value) return
   if (fbAnchor.value && !fbAnchor.value.contains(e.target as Node)) closeBarNow()
 }
 function onGlobalKeyForBar(e: KeyboardEvent) {
-  if (e.key === 'Escape' && barOpen.value) closeBarNow()
+  if (e.key === 'Escape' && barOpen.value) closeBarAndReturnFocus()
 }
 onMounted(() => {
   document.addEventListener('click', onDocumentClickForBar)
@@ -402,23 +418,25 @@ function toggleDark() {
     <!-- Function bar: range/filters/add-chart/page rename-duplicate-delete/theme — hidden by
          default, revealed on hover (desktop) or tap (touch); Escape or tapping outside hides
          it. Fixed top-right, overlays the page rather than shifting the grid below. -->
-    <div ref="fbAnchor" class="fb-anchor" @mouseenter="onBarAreaEnter" @mouseleave="onBarAreaLeave">
+    <div ref="fbAnchor" class="fb-anchor" @mouseenter="onBarAreaEnter" @mouseleave="onBarAreaLeave" @focusout="onBarFocusOut">
       <button
+        ref="fbToggleBtn"
         type="button"
         class="fb-toggle"
         :aria-expanded="barOpen"
+        :aria-controls="fbPanelId"
         aria-label="Show page controls"
         @mouseenter="onBarAreaEnter"
         @focus="openBar"
         @click="onBarToggleActivate"
-        @keydown.escape="closeBarNow"
+        @keydown.escape="closeBarAndReturnFocus"
       >
         <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
           <path d="M3 6h14M3 10h14M3 14h14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
         </svg>
       </button>
       <Transition name="fb-fade">
-        <div v-if="barOpen" class="fb-panel">
+        <div v-if="barOpen" :id="fbPanelId" class="fb-panel">
           <div class="fb-row top-actions">
             <span v-if="saveLabel" class="save-state mono" :class="saveState">{{ saveLabel }}</span>
             <button class="btn" @click="toggleDark" :title="dark ? 'Light mode' : 'Dark mode'">
@@ -655,7 +673,10 @@ function toggleDark() {
   position: fixed;
   top: 16px;
   right: 18px;
-  z-index: 500;
+  /* Above EVERYTHING else that can overlay the page, including a zoomed ChartCard
+     (z-index 1000/1001 — see ChartCard.vue) and the drill-down menu (1100 below) — the
+     toggle must stay reachable no matter what's on screen (MEDIUM review fix). */
+  z-index: 1200;
 }
 .fb-toggle {
   width: 34px;
