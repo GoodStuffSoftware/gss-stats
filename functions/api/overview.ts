@@ -200,6 +200,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       label: 'Pop-up tap rate',
       today: computeRate(accept.today, shown.today), // null ("—"/"too few", never 0%/NaN — see MIN_COHORT
       denominator: shown.today, // lets the UI tell "too few to report" apart from "—"
+      numerator: accept.today, // shown next to the rate — see SMALL_SAMPLE_NOTE
       notYetTracking: false,
       isRate: true,
     })
@@ -300,6 +301,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
         install: counts.install,
         returnRateD2to7: returnRates['d2-7'],
         returnD0: returnCounts.d0, // same reason as funnelCounts, for returnRateD2to7
+        returnD2to7: returnCounts['d2-7'], // numerator for returnRateD2to7 — see SMALL_SAMPLE_NOTE
         costPerArrival: costPer(spend, taggedArrivals),
       }
     }),

@@ -2,13 +2,13 @@
 //
 // `hits` has NO app-version column (confirmed via `PRAGMA table_info(hits)` — see
 // lib/campaigns.ts's header for the same check) — so a release's date can't be DERIVED
-// from D1 and has to be entered here by hand. Seeded with what's known from the task brief:
-// v1.90.0 ships pop-up tracking, campaign tracking, and the on-device return beacon
-// together — the SAME date as lib/popupEvents.ts's TRACKING_ACTIVATION_DATE_ET, so this
-// reads that constant rather than duplicating it. It's null (unset) until that release
-// actually ships; until then this release has no dated marker (see datedReleases below —
-// the overview timeline and release panel simply skip an undated entry rather than
-// guessing, or lying with a 0).
+// from D1 and has to be entered here by hand. v1.95.3 shipped pop-up tracking, campaign
+// tracking, and the on-device return beacon together to production WEB 2026-09-26
+// (confirmed live 14:31 UTC) — the SAME date as lib/popupEvents.ts's
+// TRACKING_ACTIVATION_DATE_ET, so this reads that constant rather than duplicating it.
+// The Android/Play build is separate and not live yet — see
+// PLAY_TRACKING_ACTIVATION_DATE_ET in popupEvents.ts; it gets its own release entry once
+// dated.
 import { TRACKING_ACTIVATION_DATE_ET } from './popupEvents'
 
 export interface ReleaseMarker {
@@ -19,9 +19,9 @@ export interface ReleaseMarker {
 
 export const RELEASES: ReleaseMarker[] = [
   {
-    version: 'v1.90.0',
+    version: 'v1.95.3',
     dateEt: TRACKING_ACTIVATION_DATE_ET,
-    note: 'Pop-up tracking, campaign tracking, and the on-device return beacon ship together. Fixes the uncapped-placement bug behind the 2026-09-19 sign-in-prompt spike.',
+    note: 'Pop-up + campaign-return tracking live on web',
   },
 ]
 

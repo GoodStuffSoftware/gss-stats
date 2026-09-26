@@ -7,7 +7,7 @@ import { loadConfig, saveConfig } from './api'
 import { loadSites, sitesTree, tokenLabel } from './sitesStore'
 import { isSiteDim, semanticKey } from './lib/drill'
 import { sessionExpired, reauth } from './session'
-import { TRACKING_ACTIVATION_DATE_ET, POPUP_PAGE_NOTE } from './lib/popupEvents'
+import { TRACKING_ACTIVATION_DATE_ET, POPUP_PAGE_NOTE, SMALL_SAMPLE_NOTE } from './lib/popupEvents'
 import CampaignComparePage from './components/CampaignComparePage.vue'
 import OverviewPage from './components/OverviewPage.vue'
 import PageBar from './components/PageBar.vue'
@@ -28,7 +28,7 @@ const rangeText = computed(() => rangeLabel(activePage.value.filters.since, acti
 // Part A hard requirement #4: while pop-up tracking hasn't shipped yet (activation date
 // still null — see lib/popupEvents.ts), the pop-ups page carries this note so nothing on
 // it reads as a real baseline. Goes away by itself the day TRACKING_ACTIVATION_DATE_ET
-// is set to v1.90.0's release date.
+// is set to v1.95.3's release date.
 const showPopupActivationNote = computed(
   () => TRACKING_ACTIVATION_DATE_ET === null && isBestSudokuPopupsPage(activePage.value),
 )
@@ -37,6 +37,11 @@ const showPopupActivationNote = computed(
 // it's active, independent of the activation-pending note above — even once tracking is
 // live, the 30-minute sign-in deferral still makes every correlated rate conservative.
 const showPopupDeferredNote = computed(() => isBestSudokuPopupsPage(activePage.value))
+
+// Production is tiny (14 registered users total, 2026-09-26) — every rate on the pop-ups
+// page is anecdotal even once "measured". Shown alongside the deferred note above, not a
+// replacement for it.
+const showSmallSampleNote = computed(() => isBestSudokuPopupsPage(activePage.value))
 
 // "Best Sudoku campaigns" and "Best Sudoku overview" are bespoke pages (see
 // CampaignComparePage.vue / OverviewPage.vue) — no generic Widget grid, so "Add chart" /
@@ -375,6 +380,9 @@ function toggleDark() {
     </div>
     <div v-if="showPopupDeferredNote" class="activation-note">
       {{ POPUP_PAGE_NOTE }}
+    </div>
+    <div v-if="showSmallSampleNote" class="activation-note small-sample-note">
+      {{ SMALL_SAMPLE_NOTE }}
     </div>
 
     <main class="grid-area">
