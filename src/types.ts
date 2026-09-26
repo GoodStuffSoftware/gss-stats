@@ -152,6 +152,11 @@ export interface StatsResponse {
   // true when `rate` is null because the denominator was nonzero but under MIN_COHORT
   // (see lib/popupEvents.ts gateRate) — render "too few to report", not "—".
   insufficientCohort?: boolean
+  // The raw counts behind `rate` — see lib/popupEvents.ts GatedRate. Shown next to every
+  // rate tile (numerator/denominator) regardless of insufficientCohort, so a viewer always
+  // sees the sample size a percentage came from.
+  numerator?: number
+  denominator?: number
 }
 
 // ── "Best Sudoku campaigns" (Part B) — a dedicated response shape (not the generic
@@ -231,6 +236,8 @@ export interface OverviewKpiTile {
   // Rate tiles only — the rate's own denominator, so the UI can tell "too few to report"
   // (MIN_COHORT) apart from plain "—" (no data at all) for a null `today`.
   denominator?: number
+  // Rate tiles only — pairs with `denominator` so the UI can show n/d next to the rate.
+  numerator?: number
 }
 export interface OverviewDailyPoint {
   date: string
@@ -260,7 +267,8 @@ export interface OverviewScorecardRow {
   authSuccess: number
   install: number
   returnRateD2to7: number | null
-  returnD0: number // pairs with returnRateD2to7
+  returnD0: number // pairs with returnRateD2to7 (denominator)
+  returnD2to7: number // pairs with returnRateD2to7 (numerator)
   costPerArrival: number | null
 }
 export interface OverviewReleaseWindowSummary {

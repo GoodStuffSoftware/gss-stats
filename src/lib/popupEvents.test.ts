@@ -27,6 +27,12 @@ import {
   MIN_COHORT,
   isInsufficientCohort,
   gateRate,
+  PLAY_TRACKING_ACTIVATION_DATE_ET,
+  PLAY_TRACKING_NOT_LIVE_NOTE,
+  PLAY_TRACKING_MARKER_LABEL,
+  PLAY_TRACKING_ROLLOUT_CAVEAT,
+  playTrackingStatusNote,
+  SMALL_SAMPLE_NOTE,
   type HourPathCount,
 } from './popupEvents'
 
@@ -254,9 +260,13 @@ describe('MIN_COHORT / isInsufficientCohort / gateRate (review addendum, 2026-09
   })
 
   it('gateRate bundles the rate with WHY a null came back', () => {
-    expect(gateRate(0, 0)).toEqual({ value: null, insufficientCohort: false }) // no data at all
-    expect(gateRate(1, 3)).toEqual({ value: null, insufficientCohort: true }) // some data, too little
-    expect(gateRate(2, 10)).toEqual({ value: 0.2, insufficientCohort: false }) // a real rate
+    expect(gateRate(0, 0)).toEqual({ value: null, insufficientCohort: false, numerator: 0, denominator: 0 }) // no data at all
+    expect(gateRate(1, 3)).toEqual({ value: null, insufficientCohort: true, numerator: 1, denominator: 3 }) // some data, too little
+    expect(gateRate(2, 10)).toEqual({ value: 0.2, insufficientCohort: false, numerator: 2, denominator: 10 }) // a real rate
+  })
+  it('gateRate carries the raw numerator/denominator alongside the computed rate — see SMALL_SAMPLE_NOTE', () => {
+    expect(gateRate(2, 10).numerator).toBe(2)
+    expect(gateRate(2, 10).denominator).toBe(10)
   })
 })
 
@@ -365,8 +375,8 @@ describe('activation gating (Part A hard requirement: "before activation is unme
     const agg = aggregatePopupRows(bugRows, '2026-09-19')
     expect(computePopupRate(agg, tap).value).toBe(0) // now a REAL 0% — measured, and genuinely zero accepts
   })
-  it('using the module default (TRACKING_ACTIVATION_DATE_ET) with no override is still null today', () => {
-    expect(TRACKING_ACTIVATION_DATE_ET).toBeNull()
+  it('using the module default (TRACKING_ACTIVATION_DATE_ET, now 2026-09-26) still gates out the 2026-09-19 bug rows — they stay unmeasured, never a baseline', () => {
+    expect(TRACKING_ACTIVATION_DATE_ET).toBe('2026-09-26')
     const agg = aggregatePopupRows(bugRows)
     expect(computePopupRate(agg, tap).value).toBeNull()
   })
@@ -412,7 +422,7 @@ describe('end-to-end: install-prompt outcome beacon + still-playing rate (FINAL 
 
   it('still-playing rate = outcome / shown (denominator = shown, which clears MIN_COHORT here)', () => {
     const stillPlaying = POPUP_RATE_SPECS.find((s) => s.key === 'install:outcome:still-playing')!
-    expect(computePopupRate(agg, stillPlaying)).toEqual({ value: 3 / 8, insufficientCohort: false }) // 8 shown >= MIN_COHORT
+    expect(computePopupRate(agg, stillPlaying)).toEqual({ value: 3 / 8, insufficientCohort: false, numerator: 3, denominator: 8 }) // 8 shown >= MIN_COHORT
   })
 
   it('MIN_COHORT gates on the denominator (shown), not the outcome numerator: a tiny shown count reports "insufficient" even with a real outcome count', () => {
@@ -422,6 +432,44 @@ describe('end-to-end: install-prompt outcome beacon + still-playing rate (FINAL 
     ]
     const tinyAgg = aggregatePopupRows(tinyRows, '2026-01-15')
     const stillPlaying = POPUP_RATE_SPECS.find((s) => s.key === 'install:outcome:still-playing')!
-    expect(computePopupRate(tinyAgg, stillPlaying)).toEqual({ value: null, insufficientCohort: true })
+    expect(computePopupRate(tinyAgg, stillPlaying)).toEqual({ value: null, insufficientCohort: true, numerator: 2, denominator: 2 })
+  })
+})
+
+describe('Play/Android tracking (separate from web, and a ramp, not a step)', () => {
+  it('is currently set to v1.95.3\'s Play production-track SUBMISSION day — the earliest possible arrival, not a live date', () => {
+    expect(PLAY_TRACKING_ACTIVATION_DATE_ET).toBe('2026-09-26')
+  })
+
+  it('playTrackingStatusNote: null (not submitted) reads "not yet live"', () => {
+    expect(playTrackingStatusNote(null)).toBe(PLAY_TRACKING_NOT_LIVE_NOTE)
+    expect(playTrackingStatusNote(null)).toMatch(/not yet live/i)
+  })
+
+  it('playTrackingStatusNote: a set date (submitted, ramping) reads the rollout caveat, NOT a "live"/"starts" claim', () => {
+    expect(playTrackingStatusNote('2026-09-26')).toBe(PLAY_TRACKING_ROLLOUT_CAVEAT)
+    expect(playTrackingStatusNote('2026-09-26')).not.toMatch(/tracking starts/i)
+  })
+
+  it('using the module default (currently set) matches the ramp branch, not the null branch', () => {
+    expect(playTrackingStatusNote()).toBe(PLAY_TRACKING_ROLLOUT_CAVEAT)
+  })
+
+  it('the marker label describes a submission reaching devices over time, never "tracking starts" (that would claim a step that did not happen)', () => {
+    expect(PLAY_TRACKING_MARKER_LABEL).toMatch(/submitted/i)
+    expect(PLAY_TRACKING_MARKER_LABEL).not.toBe('tracking starts')
+    expect(PLAY_TRACKING_MARKER_LABEL).not.toMatch(/tracking starts/i)
+  })
+
+  it('the rollout caveat explains low early counts without implying anything is broken or unmeasured', () => {
+    expect(PLAY_TRACKING_ROLLOUT_CAVEAT).toMatch(/rollout/i)
+    expect(PLAY_TRACKING_ROLLOUT_CAVEAT).not.toMatch(/unmeasured|not tracked|broken/i)
+  })
+})
+
+describe('SMALL_SAMPLE_NOTE', () => {
+  it('names both the small-population caveat and the fix (read the counts)', () => {
+    expect(SMALL_SAMPLE_NOTE).toMatch(/small/i)
+    expect(SMALL_SAMPLE_NOTE).toMatch(/counts/i)
   })
 })

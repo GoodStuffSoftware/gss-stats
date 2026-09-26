@@ -91,11 +91,29 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
     page also carries a standing note that rates correlated with a sign-in are
     conservative for the same reason.
 
-  A configurable **tracking activation date** (`TRACKING_ACTIVATION_DATE_ET`,
-  null until v1.90.0 ships) keeps pre-release data from reading as a baseline: every rate
-  and every pop-up count widget (other than the trend line, which plots full history with
-  a "tracking starts" marker) is gated to that date, so a real pre-release denominator
-  (e.g. a bug reproduction) can only ever render "—", never a misleading 0%.
+  A configurable **tracking activation date** (`TRACKING_ACTIVATION_DATE_ET`, set to
+  2026-09-26 — v1.95.3's confirmed production WEB release, 14:31 UTC) keeps pre-release
+  data from reading as a baseline: every rate and every pop-up count widget (other than the
+  trend line, which plots full history with a "tracking starts" marker) is gated to that
+  date, so a real pre-release denominator (e.g. the 2026-09-19 uncapped-placement-bug
+  reproduction) can only ever render "—", never a misleading 0%.
+
+  A **separate Play/Android tracking config** (`PLAY_TRACKING_ACTIVATION_DATE_ET`, in the
+  same file) tracks the Android build independently — it's on its own, later release
+  schedule. v1.95.3 was *submitted* to the Play production track 2026-09-26, but a
+  submission is a review-then-staged-rollout process, not a single ship date, so this
+  constant is treated as a RAMP rather than a hard step: it draws its own chart marker
+  ("Play: submitted 26 Sep, reaching devices from review onward") and a rollout caveat next
+  to any bestsudoku-app `/return` or Play-referrer figure, but — unlike the web date — it
+  never grays out or "unmeasures" days after it, since a low count right after submission
+  is the expected shape of a staged rollout, not a tracking gap.
+
+  Because production has only 14 registered users (2026-09-26), every rate-bearing page
+  (pop-ups, campaigns, overview) also carries a standing **small-sample note** ("Very small
+  numbers: rates are anecdotal. Always read the counts.") and every computed rate shows its
+  underlying numerator/denominator next to the percentage — MIN_COHORT (5) still blocks any
+  rate computed from too small a denominator outright; the note covers everything above
+  that floor, which is still a small population.
 - **Campaign comparison** — a bespoke "Best Sudoku campaigns" page (not the generic
   chart-grid model) compares the three Google Ads campaigns configured in
   [`src/lib/campaigns.ts`](src/lib/campaigns.ts): a funnel per campaign, arrivals by ET
