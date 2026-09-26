@@ -21,8 +21,10 @@ All notable changes to **gss-stats** are documented here. The format follows
   being graphed as measured/unmeasured the way the web date is.
 - **A standing small-sample note** on the pop-ups, campaigns and overview pages
   ("Very small numbers: rates are anecdotal. Always read the counts.") — production has
-  only 14 registered users. Every computed rate on those pages now shows its
-  numerator/denominator next to the percentage.
+  only 14 registered users. Every computed rate on those pages, including the campaign
+  page's device-mix breakdown, now shows its numerator/denominator next to the percentage
+  and is gated the same way every other rate in this app is (a share computed over fewer
+  than 5 devices reports "too few to report" instead of a bare, overconfident percentage).
 - **The US+CA web retest campaign is now confirmed and serving** (2026-09-26 through
   2026-10-02, $13/day budget with a $100 hard stop). Its ad schedule starts at noon ET, so
   attribution now excludes same-day validation/QA traffic tagged before that time, not just

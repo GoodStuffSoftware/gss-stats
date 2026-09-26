@@ -225,7 +225,16 @@ function activationMarkerPlugin(index: number, label = 'tracking starts', id = '
  * before/after step; nothing after this boundary should be treated as unmeasured or
  * grayed out. Exported (unlike the web marker, which stays module-private) because it's
  * opt-in per chart: only a chart that actually plots bestsudoku-app /return or
- * Play-referrer data should add it. */
+ * Play-referrer data should add it.
+ *
+ * UNUSED as of this commit (review note, 2026-09-26) — no chart plots a bestsudoku-app
+ * `/return` or Play-referrer date-axis series yet, so nothing calls this. It's kept ready
+ * for when one exists; wire it in the same way the web marker is wired into the pop-up
+ * 'date' trend (see seriesRows/ChartCard.vue's `boundary`/`plugins` computation). If a
+ * chart ever needs BOTH markers at once (a web date-axis series that also has Play data),
+ * this plugin's label needs a vertical offset from the web marker's — right now both draw
+ * their label at the same `chartArea.top + 3`, so two boundaries close together would
+ * overlap illegibly. */
 export function playActivationMarkerPlugin(index: number) {
   return activationMarkerPlugin(index, PLAY_TRACKING_MARKER_LABEL, 'playActivationMarker')
 }
