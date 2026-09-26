@@ -66,11 +66,16 @@ after-flight spend or cap trip on a still-serving campaign, or a failed read; ot
 prints the due date and stops with no push. (Only rerun with `--force` if Mike asks.) Every
 stage is keyed to the flight end (2026-10-02), so continued spend never moves a due date.
 
-What it does: re-reads the flight's spend from the Google Ads API and stores it, checks FIRST
-for spend after the flight and for the $100 cap (on every run, due or not), then the full read (tagged funnel, site-wide outcome beacons, `/return/<uc>/` buckets d0 through
-d31-60 on web and app, the Play first-seen line, Firestore window counts), re-runs the $100
-decision table, splits promo vs non-promo, checks for any spend after the flight, and appends
-one post-flight record. On day15/day30/day60 it also counts the accounts created in the
+What it does: syncs spend first through the shared sync (`syncAdsData` in
+`src/lib/adsSync.ts`, the same code as the morning read and `npm run ads:sync`: every missing
+closed day plus the last 3 closed days, only changed rows written, a no-op if something just
+synced), checks FIRST for spend after the flight (including today's partial numbers, which
+are never stored) and for the $100 cap (on every run, due or not), then the full read (tagged
+funnel, site-wide outcome beacons, `/return/<uc>/` buckets d0 through d31-60 on web and app,
+the Play first-seen line, Firestore window counts), re-runs the $100 decision table, splits
+promo vs non-promo, and appends one post-flight record. A rerun of the same stage on the same
+day stores nothing new and sends no second push or bus copy (the report says it was already
+recorded); a failed read still pushes. On day15/day30/day60 it also counts the accounts created in the
 flight window by access tier (paid / trial active / expired) and promo marker, sitewide and
 not campaign-attributed; until Firestore has the composite indexes it needs, that line reads
 "tier split unavailable: index missing" next to the plain window count, which is expected.

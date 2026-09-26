@@ -25,8 +25,9 @@
 import fs from 'node:fs'
 import { createSign } from 'node:crypto'
 import type { CohortTierCounts } from '../../src/lib/adsRules'
-import { redact, registerSecret } from './redact'
-import { timedFetch, type FetchLike } from './adsApi'
+import { redact, registerSecret } from '../../src/lib/adsRedact'
+import { createTimedFetch, type FetchLike } from '../../src/lib/adsApi'
+import { EXTERNAL_TIMEOUT_MS } from './wrangler'
 
 export interface FirebaseCounts {
   projectId: string | null
@@ -137,7 +138,7 @@ export async function readFirebaseCounts(
   windowEndMs: number,
   opts: { fetchImpl?: FetchLike; cohortTiersAtMs?: number | null } = {},
 ): Promise<FirebaseCounts> {
-  const raw: FetchLike = opts.fetchImpl ?? timedFetch
+  const raw: FetchLike = opts.fetchImpl ?? createTimedFetch(EXTERNAL_TIMEOUT_MS)
   const out: FirebaseCounts = {
     projectId: null,
     newAccountsInWindow: null,

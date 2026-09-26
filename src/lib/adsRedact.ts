@@ -1,9 +1,10 @@
-// Secret hygiene for everything the ads-read scripts print. Secrets live in process memory
+// Secret hygiene for everything the ads-read code prints (the local CLIs in scripts/ads-reads/
+// and the gss-stats-sync Worker). Runtime-agnostic: no Node imports. Secrets live in memory
 // only (see secrets.ts); any string that might carry one — an HTTP error body, a child
 // process's stderr — goes through redact() before it reaches stdout, stderr or the JSON
 // block. Two layers: exact known secret values, then anything shaped like a credential.
 
-import { stripLocalPaths } from '../../src/lib/adsRules'
+import { stripLocalPaths } from './adsRules'
 
 const known = new Set<string>()
 

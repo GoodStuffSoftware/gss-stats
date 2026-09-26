@@ -4,11 +4,11 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { assertReadOnlySql, createD1Select, inlineBinds, parseD1Json, sqlLiteral, stripSqlLiterals } from './d1'
 import { assertAdsWriteSql, createD1Store } from './d1Store'
 import { returnRowsQuery, returnSitesQuery, siteEventsQuery, taggedRowsQuery } from './beacon'
-import { campaignSyncStatement, dailyMetricsUpserts, mergePlacementDayRows, placementDailyUpserts, readingInsert, thresholdStateInsert } from '../../src/lib/adsStore'
+import { campaignSyncStatements, dailyRowUpserts, mergePlacementDayRows, placementDailyUpserts, readingInsert, syncRunInsert, thresholdStateInsert } from '../../src/lib/adsStore'
 import { CAMPAIGNS, campaignById } from '../../src/lib/campaigns'
-import { clearRegisteredSecrets, redact, redactedFirstLine, registerSecret, summarizeError } from './redact'
-import { createWranglerRunner } from './wrangler'
-import { buildHeaders, createAdsClient, fetchDailySpend, fetchPlacementDaily, searchUrl, splitPlacements, type FetchLike } from './adsApi'
+import { clearRegisteredSecrets, redact, redactedFirstLine, registerSecret, summarizeError } from '../../src/lib/adsRedact'
+import { createWranglerRunner, repoRoot } from './wrangler'
+import { buildHeaders, createAdsClient, fetchDailySpend, fetchPlacementDaily, searchUrl, splitPlacements, type FetchLike } from '../../src/lib/adsApi'
 import { BWS_KEYS, pickAdsCredentials } from './secrets'
 import type { ReadingRecord } from '../../src/lib/adsRules'
 
@@ -145,8 +145,9 @@ describe('ads store write guard', () => {
   }
   it('accepts every statement the shared builders produce', () => {
     const stmts = [
-      campaignSyncStatement(CAMPAIGNS, 'x'),
-      ...dailyMetricsUpserts('24279250691', { '2026-09-27': { costMicros: 1, impressions: 1, clicks: 0 } }, 'x'),
+      ...campaignSyncStatements(CAMPAIGNS, 'x'),
+      ...dailyRowUpserts('24279250691', [{ date: '2026-09-27', costMicros: 1, impressions: 1, clicks: 0, fetchedAt: 'x', placementsFetchedAt: null }]),
+      syncRunInsert({ runKey: 'k', source: 'ads-sync', startedAt: 'a', finishedAt: 'b', campaigns: ['1'], campaignsOk: [], daysFetched: 0, daysChanged: 0, placementRowsFetched: 0, placementRowsChanged: 0, status: 'failed', error: "DROP; it's", detail: {} }),
       ...placementDailyUpserts('24279250691', [{ date: '2026-09-27', placement: 'p', displayName: "it's", type: null, targetUrl: null, approved: true, costMicros: 1, impressions: 1, clicks: 0 }], 'x'),
       readingInsert(rec),
       thresholdStateInsert(rec)!,
@@ -192,8 +193,9 @@ describe('ads store write guard', () => {
       },
       dryRun: true,
     })
-    expect(await store.appendReadings([rec])).toBe(false)
-    expect(await store.putDailyMetrics('24279250691', { '2026-09-27': { costMicros: 1, impressions: 1, clicks: 0 } }, 'x')).toBe(false)
+    expect(await store.appendReadings([rec])).toEqual({ written: false, inserted: [], ignored: [] })
+    expect(await store.putDailyRows('24279250691', [{ date: '2026-09-27', costMicros: 1, impressions: 1, clicks: 0, fetchedAt: 'x', placementsFetchedAt: null }])).toBe(false)
+    expect(await store.appendSyncRun({ runKey: 'k', source: 'ads-sync', startedAt: 'a', finishedAt: 'b', campaigns: [], campaignsOk: [], daysFetched: 0, daysChanged: 0, placementRowsFetched: 0, placementRowsChanged: 0, status: 'ok', error: null, detail: {} })).toBe(false)
     expect(await store.syncCampaigns(CAMPAIGNS, 'x')).toBe(false)
     expect(calls).toEqual([])
   })
@@ -332,5 +334,33 @@ describe('Google Ads client: read-only, no manager header', () => {
     const client = await createAdsClient(creds, { fetchImpl: f })
     await expect(fetchDailySpend(client, '111111111', '2026-09-26', '2026-09-27')).rejects.toThrow()
     expect(calls.filter((c) => c.url.includes('googleAds:search'))).toHaveLength(0)
+  })
+})
+
+describe('ONE fetch path: only the shared sync pulls Ads metrics (owner, 2026-09-26)', () => {
+  const root = repoRoot()
+  const listTs = (dir: string): string[] => {
+    const abs = path.join(root, dir)
+    if (!fs.existsSync(abs)) return []
+    return fs.readdirSync(abs, { withFileTypes: true }).flatMap((e) => {
+      const rel = path.posix.join(dir, e.name)
+      if (e.isDirectory()) return e.name === 'node_modules' ? [] : listTs(rel)
+      return /\.(ts|vue)$/.test(e.name) && !/\.test\.ts$/.test(e.name) ? [rel] : []
+    })
+  }
+  const files = [...listTs('scripts/ads-reads'), ...listTs('src'), ...listTs('functions'), ...listTs('workers')]
+  it('no module but src/lib/adsSync.ts calls a metrics source (.daily / .placements)', () => {
+    expect(files).toContain('src/lib/adsSync.ts')
+    for (const f of files) {
+      if (f === 'src/lib/adsSync.ts') continue
+      expect([f, /\.(daily|placements)\(/.test(fs.readFileSync(path.join(root, f), 'utf8'))]).toEqual([f, false])
+    }
+  })
+  it('the raw Ads fetchers are only wrapped into a source by the adapters, never called by a read', () => {
+    const allowed = ['src/lib/adsApi.ts', 'scripts/ads-reads/cli.ts', 'workers/sync/src/index.ts']
+    for (const f of files) {
+      if (allowed.includes(f)) continue
+      expect([f, /fetch(DailySpend|PlacementDaily)\(/.test(fs.readFileSync(path.join(root, f), 'utf8'))]).toEqual([f, false])
+    }
   })
 })

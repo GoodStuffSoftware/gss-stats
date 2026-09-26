@@ -12,6 +12,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import type { AdsReadingsCampaign, AdsReadingsResponse } from '../lib/adsStore'
 import { proposalLabel, type ReadingRecord, type RuleResult } from '../lib/adsRules'
+import { freshnessLine, STALE_NOTE } from '../lib/adsFreshness'
 import { SMALL_SAMPLE_NOTE } from '../lib/popupEvents'
 
 export interface AdsReadingsWidgetLike {
@@ -78,10 +79,12 @@ function rulesSummary(rules: RuleResult[] | null): { text: string; tone: 'trip' 
   return { text: `${clear} clear${noData ? `, ${noData} no data` : ''}`, tone: 'clear' }
 }
 function spendSource(c: AdsReadingsCampaign): string {
-  if (c.spend.source === 'google-ads-api') return `Google Ads API, through ${c.spend.lastDate ?? '—'}`
+  if (c.spend.source === 'google-ads-api') return 'Google Ads API'
   if (c.spend.source === 'config') return 'hand-entered config'
   return 'no spend on record'
 }
+// "Spend through <date> · synced <relative time>" — relative to when the data was loaded.
+const loadedAt = computed(() => (data.value ? Date.parse(data.value.generatedAt) : Date.now()))
 </script>
 
 <template>
@@ -97,6 +100,9 @@ function spendSource(c: AdsReadingsCampaign): string {
         <div class="camp-head">
           <span class="camp-label">{{ c.label }}</span>
           <span class="camp-spend mono">{{ money(c.spend.spend) }} <span class="muted">({{ spendSource(c) }})</span></span>
+        </div>
+        <div v-if="data.storeBound" class="fresh mono">
+          {{ freshnessLine(c, loadedAt) }}<span v-if="c.stale" class="stale"> · {{ STALE_NOTE }}</span>
         </div>
         <div v-if="c.thresholdsFired?.length" class="fired mono">
           fired: <span v-for="t in c.thresholdsFired" :key="t.threshold" class="chip">${{ t.threshold }} · {{ etTime(t.firedAt) }}</span>
@@ -178,6 +184,14 @@ function spendSource(c: AdsReadingsCampaign): string {
 }
 .muted {
   color: rgb(var(--ink-3));
+}
+.fresh {
+  font-size: 11px;
+  color: rgb(var(--ink-3));
+  margin-bottom: 6px;
+}
+.stale {
+  color: #bc4749;
 }
 .fired {
   font-size: 11px;

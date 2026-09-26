@@ -6,19 +6,22 @@
 //
 // Invariants:
 //  - PROPOSE only. Nothing here can change a campaign; proposals are strings.
+//  - Spend comes ONLY from the shared sync (src/lib/adsSync.ts syncAdsData), the same code the
+//    gss-stats-sync Worker and `npm run ads:sync` run: it fills every missing closed day,
+//    re-pulls the last few (Google restates them) and writes only what changed, so running it
+//    right after another sync is a no-op.
 //  - A rule is evaluated only on data that came back (`no-data` otherwise), and a threshold
 //    is consumed only by a COMPLETE read, so a failed read is retried next run.
+//  - A reading is stored once per (campaign, ET day, entry kind); a same-day rerun appends only
+//    when it carries new information, and never re-pushes the same threshold or alert.
 //  - --dry-run: every read happens, no store write does.
 
 import {
-  ADS_API_VERSION,
-  ADS_CUSTOMER_ID,
   buildHealthPairs,
   decideAt100,
   evaluateHealthPairs,
   evaluateKillRules,
   lastSpendDate,
-  mergeSpend,
   microsToDollars,
   missingDailyReads,
   newlyCrossedThresholds,
@@ -29,7 +32,9 @@ import {
   PLACEMENT_BORDERLINE_NOTE,
   placementOutsideShare,
   playReturnStatus,
+  planReadingAppends,
   postflightDueDate,
+  readingEntryKind,
   readingId,
   readPlanFor,
   releaseHealthGate,
@@ -73,21 +78,21 @@ import {
   type TaggedRow,
   type TaggedSummary,
 } from '../../src/lib/adsRules'
-import type { PlacementDayRow } from '../../src/lib/adsStore'
-import { ARRIVALS_CAVEAT, CAMPAIGNS, costPer, etMidnightUtcMs, etTimeUtcMs, funnelStepRates, type CampaignFlight, type FunnelStepKey } from '../../src/lib/campaigns'
+import type { AdsStore, AppendOutcome, PlacementDayRow } from '../../src/lib/adsStore'
+import { ARRIVALS_CAVEAT, costPer, etMidnightUtcMs, etTimeUtcMs, funnelStepRates, type CampaignFlight, type FunnelStepKey } from '../../src/lib/campaigns'
 import { etDateFromMs, gateRate, SMALL_SAMPLE_NOTE, type GatedRate, type HourPathCount } from '../../src/lib/popupEvents'
 import { addEtDays } from '../../src/lib/overview'
-import { splitPlacements, type CampaignStatus } from './adsApi'
+import { splitPlacements, type CampaignStatus } from '../../src/lib/adsApi'
+import { syncAdsData, type AdsMetricsSource, type CampaignSyncResult, type SyncResult } from '../../src/lib/adsSync'
+import type { SyncSource } from '../../src/lib/adsStore'
 import type { BeaconSource } from './beacon'
-import type { AdsStore } from './d1Store'
 import type { FirebaseCounts } from './firebase'
-import { redact, summarizeError } from './redact'
+import { redact, summarizeError } from '../../src/lib/adsRedact'
 
 // ── Dependencies ─────────────────────────────────────────────────────────────────────────
-export interface AdsSource {
+/** The Ads API as the reads see it: the metrics the shared sync pulls, plus campaign status. */
+export interface AdsSource extends AdsMetricsSource {
   status(campaignId: string): Promise<CampaignStatus>
-  daily(campaignId: string, since: string, until: string): Promise<Record<string, SpendDay>>
-  placements(campaignId: string, since: string, until: string): Promise<PlacementDayRow[]>
 }
 export interface FirebaseSource {
   /** cohortTiersAtMs: also read the day-15/30/60 cohort-by-tier COUNTs as of that instant. */
@@ -128,6 +133,18 @@ export interface SpendSection {
   restated: { date: string; before: number; after: number }[]
   storeWritten: boolean
   storeError: string | null
+  /** What the shared sync did for this campaign (src/lib/adsSync.ts). */
+  sync: SyncSummary | null
+}
+export interface SyncSummary {
+  status: SyncResult['status']
+  outcome: string
+  fetched: { since: string; until: string } | null
+  daysFetched: number
+  daysChanged: number
+  placementRowsChanged: number
+  spendThrough: string | null
+  runRecorded: boolean
 }
 export interface TaggedCounts {
   taggedArrivals: number
@@ -214,25 +231,37 @@ function flightEndExclusiveMs(c: CampaignFlight): number {
 const dayDollars = (d: SpendDay | undefined) => (d ? { cost: round2(microsToDollars(d.costMicros)), impressions: d.impressions, clicks: d.clicks } : null)
 const money = (x: number) => `$${x.toFixed(2)}`
 
-/** Upserts every configured campaign so stored rows can reference it (FOREIGN KEY). */
-async function syncCampaigns(deps: ReadDeps, readAt: string): Promise<Attempt<boolean>> {
-  return attempt('store sync (campaigns)', () => deps.store.syncCampaigns(CAMPAIGNS.filter((c) => c.flightStart != null), readAt))
+// ── Spend: the shared sync (src/lib/adsSync.ts), then the read's view of it ──────────────
+interface SpendRead {
+  section: SpendSection
+  /** Closed days (synced) plus today's partial day, like the Ads API returns them. */
+  stored: StoredSpend | null
+  sync: SyncResult
+  campaignSync: CampaignSyncResult
 }
-
-// ── Spend: fetch from the Ads API, upsert into the store ────────────────────────────────
-async function fetchSpend(
-  deps: ReadDeps,
-  plan: AdsReadPlan,
-  campaign: CampaignFlight,
-  todayEt: string,
-  write: boolean,
-): Promise<{ section: SpendSection; stored: StoredSpend | null }> {
+/** Runs syncAdsData for the read's campaign (every missing closed day, plus the restatement
+ * window; only changed rows are written) and today's partial numbers (never stored). */
+async function syncSpend(deps: ReadDeps, plan: AdsReadPlan, campaign: CampaignFlight, todayEt: string, source: SyncSource): Promise<SpendRead> {
+  const sync = await syncAdsData(
+    { ads: deps.ads, adsInitError: deps.adsInitError, store: deps.store },
+    { campaignIds: [plan.campaignId], now: deps.nowMs, dryRun: deps.dryRun, source, includeToday: true },
+  )
+  const cs = sync.campaigns[0]
+  const summary: SyncSummary = {
+    status: sync.status,
+    outcome: cs.outcome,
+    fetched: cs.fetched,
+    daysFetched: cs.daysFetched,
+    daysChanged: cs.daysChanged,
+    placementRowsChanged: cs.placementRowsChanged,
+    spendThrough: cs.spendThrough,
+    runRecorded: sync.runRecorded,
+  }
   const yesterdayEt = addEtDays(todayEt, -1)
-  const closedThroughEt = yesterdayEt >= campaign.flightStart! ? yesterdayEt : null
   const base: SpendSection = {
     ok: false,
     error: null,
-    throughEt: closedThroughEt,
+    throughEt: yesterdayEt >= campaign.flightStart! ? yesterdayEt : null,
     yesterday: null,
     cumulative: { cost: 0, impressions: 0, clicks: 0, days: 0 },
     todayPartial: null,
@@ -241,35 +270,47 @@ async function fetchSpend(
     restated: [],
     storeWritten: false,
     storeError: null,
+    sync: summary,
   }
-  const daily = deps.ads ? await attempt('ads daily', () => deps.ads!.daily(plan.campaignId, campaign.flightStart!, todayEt)) : unavailable<Record<string, SpendDay>>('ads daily', deps.adsInitError)
-  if (!daily.ok) return { section: { ...base, error: daily.error }, stored: null }
+  if (!cs.fetchOk) return { section: { ...base, error: cs.error ?? 'ads daily: failed' }, stored: null, sync, campaignSync: cs }
 
-  const fetchedAt = new Date(deps.nowMs).toISOString()
-  const existing = await attempt('store read (spend)', () => deps.store.getSpend(plan.campaignId))
-  const incoming: StoredSpend = { v: 1, campaignId: plan.campaignId, source: 'google-ads-api', apiVersion: ADS_API_VERSION, customerId: ADS_CUSTOMER_ID, fetchedAt, closedThroughEt, days: daily.value }
-  const { merged, restated } = mergeSpend(existing.ok ? existing.value : null, incoming)
-  let storeWritten = false
-  let storeError: string | null = existing.ok ? null : existing.error
-  if (write) {
-    const put = await attempt('store write (daily metrics)', () => deps.store.putDailyMetrics(plan.campaignId, daily.value, fetchedAt))
-    if (put.ok) storeWritten = put.value
-    else storeError = put.error
+  const throughEt = cs.spendThrough
+  const stored: StoredSpend = {
+    ...(cs.spend ?? { v: 1, campaignId: plan.campaignId, source: 'google-ads-api', apiVersion: '', customerId: '', fetchedAt: sync.startedAt, closedThroughEt: null, days: {} }),
   }
-  const cum = spendTotals(merged, closedThroughEt ?? addEtDays(campaign.flightStart!, -1))
+  if (cs.today) stored.days = { ...stored.days, [todayEt]: cs.today }
+  const cum = spendTotals(stored, throughEt ?? addEtDays(campaign.flightStart!, -1))
+  const storeError = sync.campaignSyncError ?? (!cs.dailyOk ? cs.error : null)
   return {
-    stored: merged,
+    stored,
+    sync,
+    campaignSync: cs,
     section: {
       ...base,
       ok: true,
-      yesterday: closedThroughEt ? { date: closedThroughEt, ...(dayDollars(merged.days[closedThroughEt]) ?? { cost: 0, impressions: 0, clicks: 0 }) } : null,
+      throughEt,
+      yesterday: throughEt ? { date: throughEt, ...(dayDollars(stored.days[throughEt]) ?? { cost: 0, impressions: 0, clicks: 0 }) } : null,
       cumulative: { cost: cum.cost, impressions: cum.impressions, clicks: cum.clicks, days: cum.days },
-      todayPartial: dayDollars(merged.days[todayEt]),
-      restated: restated.map((r) => ({ date: r.date, before: round2(microsToDollars(r.beforeMicros)), after: round2(microsToDollars(r.afterMicros)) })),
-      storeWritten,
+      todayPartial: dayDollars(cs.today ?? undefined),
+      restated: cs.restated,
+      storeWritten: !deps.dryRun && !storeError,
       storeError,
     },
   }
+}
+
+/** Placement-day rows through `throughEt` for kill rule 1: the stored rows, overlaid with this
+ * run's pull (identical once written; the only copy in --dry-run). A failed placement pull makes
+ * the rule no-data rather than trusting rows that may be missing the latest days. */
+async function placementRowsFor(deps: ReadDeps, campaign: CampaignFlight, cs: CampaignSyncResult | null, throughEt: string | null): Promise<Attempt<PlacementDayRow[]>> {
+  if (!throughEt) return unavailable('ads placements', 'no closed spend day yet')
+  if (!cs || !cs.fetchOk) return unavailable('ads placements', cs?.error ?? deps.adsInitError)
+  if (cs.placementsOk === false) return { ok: false, error: cs.error ?? 'ads placements: failed' }
+  const stored = await attempt('store read (placements)', () => deps.store.getPlacementRows(campaign.id, campaign.flightStart!, throughEt))
+  if (!stored.ok) return stored
+  const f = cs.fetched
+  const rows = f ? [...stored.value.filter((r) => r.date < f.since || r.date > f.until), ...cs.placements.filter((r) => r.date <= throughEt)] : stored.value
+  return { ok: true, value: rows }
 }
 
 function taggedCounts(s: TaggedSummary): TaggedCounts {
@@ -283,6 +324,8 @@ interface FullReadInput {
   thresholds: number[]
   spendThroughEt: string | null
   stored: StoredSpend | null
+  /** This run's sync of the campaign (its placement pull feeds kill rule 1). */
+  campaignSync: CampaignSyncResult | null
   tagged: Attempt<TaggedRow[]>
   /** Whether to evaluate the $100 decision table regardless of spend (post-flight). */
   forceDecision: boolean
@@ -298,16 +341,8 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
   const totals = spendTotals(i.stored, i.spendThroughEt ?? addEtDays(campaign.flightStart!, -1))
   const cumulativeSpend = totals.cost
 
-  const placementRows =
-    deps.ads && i.spendThroughEt
-      ? await attempt('ads placements', () => deps.ads!.placements(plan.campaignId, campaign.flightStart!, i.spendThroughEt!))
-      : unavailable<PlacementDayRow[]>('ads placements', deps.ads ? 'no closed spend day yet' : deps.adsInitError)
-  let placementsStored = false
-  if (placementRows.ok) {
-    const put = await attempt('store write (placements)', () => deps.store.putPlacements(plan.campaignId, placementRows.value, i.readAt))
-    if (put.ok) placementsStored = put.value
-    else errors.push(put.error)
-  }
+  const placementRows = await placementRowsFor(deps, campaign, i.campaignSync, i.spendThroughEt)
+  const placementsStored = placementRows.ok && !deps.dryRun && i.campaignSync?.placementsOk !== false
   const beacon = deps.beacon
   const siteRows = beacon ? await attempt('beacon site events', () => beacon.siteEvents(WEB_GO_LIVE_UTC_MS)) : unavailable<HourPathCount[]>('beacon site events', deps.beaconInitError)
   const returnRaw = beacon ? await attempt('beacon returns', () => beacon.returns(campaign)) : unavailable<ReturnRow[]>('beacon returns', deps.beaconInitError)
@@ -463,10 +498,41 @@ async function releaseHealth(
   return { evaluated: true, reason: gate.reason, results, alerts: results.filter((r) => r.status === 'alert').length }
 }
 
-async function appendReadings(deps: ReadDeps, records: ReadingRecord[]): Promise<{ written: boolean; error: string | null }> {
-  if (!records.length) return { written: false, error: null }
-  const put = await attempt('store write (readings)', () => deps.store.appendReadings(records))
-  return put.ok ? { written: put.value, error: null } : { written: false, error: put.error }
+export interface DedupSection {
+  /** Records not appended: a same-day rerun of the same entry that carries nothing new. */
+  skipped: { kind: ReadingRecord['kind']; entryKind: string; reason: string }[]
+  /** Set when today's stored readings could not be read (then everything counts as new). */
+  checkError: string | null
+}
+/** Appends the run's records once per (campaign, ET day, entry kind): today's stored readings
+ * are read first (lib/adsRules.ts planReadingAppends), and the UNIQUE index backs it up. */
+async function appendReadings(
+  deps: ReadDeps,
+  campaignId: string,
+  todayEt: string,
+  records: ReadingRecord[],
+): Promise<{ written: boolean; error: string | null; dedup: DedupSection; isNew: (id: string) => boolean }> {
+  const dedup: DedupSection = { skipped: [], checkError: null }
+  if (!records.length) return { written: false, error: null, dedup, isNew: () => false }
+  const today = await attempt('store read (today’s readings)', () => deps.store.getReadingsOn(campaignId, todayEt))
+  // Unreadable: treat everything as new — a duplicate push beats a missed one; the index still
+  // refuses a duplicate row.
+  const plan = today.ok ? planReadingAppends(records, today.value) : { append: records.map((r) => ({ ...r, entryKind: readingEntryKind(r) })), skip: [] }
+  if (!today.ok) dedup.checkError = today.error
+  for (const s of plan.skip) dedup.skipped.push({ kind: s.record.kind, entryKind: s.record.entryKind ?? readingEntryKind(s.record), reason: s.reason })
+  let outcome: AppendOutcome = { written: false, inserted: [], ignored: [] }
+  let error: string | null = null
+  if (plan.append.length) {
+    const put = await attempt('store write (readings)', () => deps.store.appendReadings(plan.append))
+    if (put.ok) outcome = put.value
+    else error = put.error
+  }
+  for (const id of outcome.ignored) {
+    const r = plan.append.find((x) => x.id === id)!
+    dedup.skipped.push({ kind: r.kind, entryKind: r.entryKind!, reason: 'already recorded today (stored by a concurrent run)' })
+  }
+  const appended = new Set(plan.append.map((r) => r.id).filter((id) => !outcome.ignored.includes(id)))
+  return { written: outcome.written && !error, error, dedup, isNew: (id) => appended.has(id) }
 }
 
 // ── morning-read ─────────────────────────────────────────────────────────────────────────
@@ -504,18 +570,26 @@ export interface MorningResult {
   /** ET dates inside the routine window with no daily reading since the last one on record
    * (a scheduled run that never started can't report itself; the next one does). */
   missedReads: string[]
+  /** Same-day reruns of an entry that carry nothing new: not stored, not pushed again. */
+  dedup: DedupSection
   notify: Notify
   errors: string[]
   notes: string[]
 }
 
+/** True when this run's record of that kind repeated one already stored today. */
+export function repeatedToday(r: { dedup?: DedupSection }, kind: ReadingRecord['kind']): boolean {
+  return (r.dedup?.skipped ?? []).some((s) => s.kind === kind)
+}
+
 /** The push text for a morning or backstop run, or null for a quiet run. Built only from
  * counts, rule ids and short read names — never an error message, so nothing secret-shaped
- * can reach a notification. */
+ * can reach a notification. A threshold read, a cap trip or an alert already recorded (and so
+ * already pushed) today is not pushed again; a failed read still is. */
 export function morningPushText(r: MorningResult): string | null {
   const missed = r.missedReads.length ? ` Previous scheduled read missing: ${r.missedReads.join(', ')}.` : ''
   const failed = r.failureDetails.length ? ` Read problems: ${r.failureDetails.join('; ')}.` : ''
-  if (r.thresholdRead) {
+  if (r.thresholdRead && !repeatedToday(r, 'threshold')) {
     const t = r.thresholdRead
     const bits = [`BSK retest $${Math.max(...t.thresholds)} read: ${money(t.cumulativeSpend)} spent`]
     const tc = t.tagged?.summary
@@ -528,10 +602,10 @@ export function morningPushText(r: MorningResult): string | null {
     const borderline = isPlacementBorderline(share) ? ` Placement share ${((share ?? 0) * 100).toFixed(1)}% is ${PLACEMENT_BORDERLINE_NOTE}.` : ''
     return bits.join('; ') + '.' + borderline + failed + missed
   }
-  if (r.hardCapDaily?.status === 'trip') {
+  if (r.hardCapDaily?.status === 'trip' && !repeatedToday(r, 'daily')) {
     return `BSK retest: ${money(r.spend.cumulative.cost)} spent, at or over the ${money(r.spend.hardCap)} cap, campaign still ${r.status?.status ?? 'ENABLED'}. PROPOSE PAUSE.${failed}${missed}`
   }
-  const alerts = r.mode === 'health-only' ? (r.releaseHealth.results ?? []).filter((h) => h.status === 'alert') : []
+  const alerts = r.mode === 'health-only' && !repeatedToday(r, 'health') ? (r.releaseHealth.results ?? []).filter((h) => h.status === 'alert') : []
   if (alerts.length) {
     return `BSK retest release-health ALERT: ${alerts.map((h) => `${h.parentLabel} ${h.parent}, ${h.childLabel} 0`).join('; ')}.${failed}`
   }
@@ -560,7 +634,7 @@ export function morningFailures(i: {
   const add = (name: string, err: string | null | undefined) => {
     if (err && !found.some((f) => f.name === name)) found.push({ name, reason: summarizeError(err) })
   }
-  add('Google Ads spend', i.spendError)
+  add(i.spendError && /^store /.test(i.spendError) ? 'store read' : 'Google Ads spend', i.spendError)
   add('campaign status', i.statusError)
   if (!i.healthOnly) add('beacon', i.taggedError)
   if (i.healthOnly) add('beacon', i.healthReadError)
@@ -577,15 +651,15 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
   const yesterdayEt = addEtDays(todayEt, -1)
   const errors: string[] = []
 
-  const sync = opts.healthOnly ? ({ ok: true, value: false } as Attempt<boolean>) : await syncCampaigns(deps, readAt)
-  if (!sync.ok) errors.push(sync.error)
-
   const status = deps.ads ? await attempt('ads status', () => deps.ads!.status(plan.campaignId)) : unavailable<CampaignStatus>('ads status', deps.adsInitError)
   if (!status.ok) errors.push(status.error)
 
-  const { section: spend, stored } = await fetchSpend(deps, plan, campaign, todayEt, !opts.healthOnly && sync.ok)
+  // The shared sync first (morning read and backstop alike): fills every missing closed day,
+  // re-pulls the restatement window, writes only changes. A no-op right after another sync.
+  const { section: spend, stored, sync, campaignSync } = await syncSpend(deps, plan, campaign, todayEt, opts.healthOnly ? 'backstop' : 'morning-read')
   if (spend.error) errors.push(spend.error)
   if (spend.storeError) errors.push(spend.storeError)
+  if (campaignSync.fetchOk && campaignSync.placementsOk === false && campaignSync.error && !errors.includes(campaignSync.error)) errors.push(campaignSync.error)
 
   const consumedA = await attempt('store read (threshold state)', () => deps.store.getConsumedThresholds(plan.campaignId))
   if (!consumedA.ok) errors.push(consumedA.error)
@@ -624,6 +698,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
       thresholds: crossedNow,
       spendThroughEt: spend.throughEt,
       stored,
+      campaignSync,
       tagged: taggedRows,
       forceDecision: false,
       readAt,
@@ -762,9 +837,15 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
   }
   if (!consumedA.ok && crossedNow.length) notes.push('Threshold state was unreadable, so every crossed threshold was treated as new (a duplicate push is possible).')
   if (missedReads.length) notes.unshift(`Previous scheduled read missing: ${missedReads.join(', ')} (no daily reading on record for those ET dates).`)
-  const w = sync.ok ? await appendReadings(deps, records) : { written: false, error: records.length ? 'readings not written: campaign sync failed' : null }
+  const campaignSyncError = sync.campaignSyncError
+  if (campaignSyncError && !errors.includes(campaignSyncError)) errors.push(campaignSyncError)
+  const w = !campaignSyncError
+    ? await appendReadings(deps, plan.campaignId, todayEt, records)
+    : { written: false, error: records.length ? 'readings not written: campaign sync failed' : null, dedup: { skipped: [], checkError: null } as DedupSection, isNew: () => true }
   if (w.error) errors.push(w.error)
-  const storeErrors = [sync.ok ? null : sync.error, spend.storeError, w.error].filter((e): e is string => !!e)
+  if (w.dedup.checkError) errors.push(w.dedup.checkError)
+  if (w.dedup.skipped.length) notes.unshift(`Already recorded today, not stored or pushed again: ${w.dedup.skipped.map((s) => s.entryKind).join(', ')}.`)
+  const storeErrors = [campaignSyncError, spend.storeError, w.error].filter((e): e is string => !!e)
 
   const failed = morningFailures({
     healthOnly: opts.healthOnly,
@@ -797,7 +878,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
     store: {
       kind: deps.store.kind,
       dryRun: deps.dryRun,
-      campaignsSynced: sync.ok && sync.value,
+      campaignsSynced: sync.campaignsSynced,
       spendWritten: spend.storeWritten,
       readingsWritten: w.written,
       errors: storeErrors,
@@ -805,6 +886,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
     failures: failed.names,
     failureDetails: failed.details,
     missedReads,
+    dedup: w.dedup,
     notify: { push: false, busCopy: false, reason: opts.healthOnly ? 'no release-health alert' : 'quiet day: no threshold crossed, no kill rule tripped', text: null },
     errors,
     notes: [...notes, ...STANDING_NOTES, ...(thresholdRead ? [INSTALL_OUTCOME_GAP_NOTE] : [])],
@@ -813,15 +895,21 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
   // worse than one extra ping), or — backstop only — a real release-health ALERT (parent at or
   // above MIN_COHORT, outcome window elapsed, child zero). A "watch" never pushes.
   // A pause proposal, not a bare rule trip: a tripped rule on an ended campaign proposes nothing.
-  const killTrip = thresholdRead?.kill.proposal === 'PROPOSE PAUSE' || hardCapDaily?.status === 'trip'
-  const healthAlert = opts.healthOnly && health.alerts > 0
+  // A same-day rerun whose record repeats one already stored (and so already pushed) does not
+  // push that threshold, trip or alert again; a failed read always pushes.
+  const newThreshold = !!thresholdRead && !repeatedToday(result, 'threshold')
+  const newCapTrip = hardCapDaily?.status === 'trip' && !repeatedToday(result, 'daily')
+  const killTrip = (newThreshold && thresholdRead?.kill.proposal === 'PROPOSE PAUSE') || newCapTrip
+  const healthAlert = opts.healthOnly && health.alerts > 0 && !repeatedToday(result, 'health')
   const reasons: string[] = []
-  if (thresholdRead) reasons.push(`threshold read at $${Math.max(...thresholdRead.thresholds)}`)
-  if (killTrip) reasons.push(thresholdRead ? 'kill-rule trip' : 'kill-rule trip (hard cap, campaign still enabled)')
+  if (newThreshold) reasons.push(`threshold read at $${Math.max(...thresholdRead!.thresholds)}`)
+  if (killTrip) reasons.push(newThreshold ? 'kill-rule trip' : 'kill-rule trip (hard cap, campaign still enabled)')
   if (healthAlert) reasons.push(`release-health alert (${health.alerts})`)
   if (result.failures.length) reasons.push(`failed read: ${result.failures.join(', ')}`)
   if (reasons.length) {
-    result.notify = { push: true, busCopy: !!thresholdRead, reason: reasons.join('; '), text: morningPushText(result) }
+    result.notify = { push: true, busCopy: newThreshold, reason: reasons.join('; '), text: morningPushText(result) }
+  } else if (w.dedup.skipped.length) {
+    result.notify.reason = `already recorded and pushed today (${w.dedup.skipped.map((s) => s.entryKind).join(', ')}); not pushed again`
   }
   return result
 }
@@ -868,6 +956,8 @@ export interface PostflightResult {
   failures: string[]
   /** "<name> (<one-line reason>)" for each failure (review L9). */
   failureDetails: string[]
+  /** A same-day rerun of a stage already recorded: not stored, not pushed or copied again. */
+  dedup: DedupSection
   notify: Notify
   errors: string[]
   notes: string[]
@@ -879,13 +969,13 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
   const todayEt = etDateFromMs(deps.nowMs)
   const errors: string[] = []
 
-  const sync = await syncCampaigns(deps, readAt)
-  if (!sync.ok) errors.push(sync.error)
   const status = deps.ads ? await attempt('ads status', () => deps.ads!.status(plan.campaignId)) : unavailable<CampaignStatus>('ads status', deps.adsInitError)
   if (!status.ok) errors.push(status.error)
-  const { section: spend, stored } = await fetchSpend(deps, plan, campaign, todayEt, sync.ok)
+  // The shared sync first; `stored` also carries today's partial day for the after-flight check.
+  const { section: spend, stored, sync, campaignSync } = await syncSpend(deps, plan, campaign, todayEt, 'postflight-read')
   if (spend.error) errors.push(spend.error)
   if (spend.storeError) errors.push(spend.storeError)
+  if (sync.campaignSyncError && !errors.includes(sync.campaignSyncError)) errors.push(sync.campaignSyncError)
 
   const spendEndEt = stored ? lastSpendDate(stored) : null
   const dueEt = postflightDueDate(opts.stage, campaign.flightEnd)
@@ -913,13 +1003,14 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
     recommendations: [],
     failures: [],
     failureDetails: [],
+    dedup: { skipped: [], checkError: null },
     store: {
       kind: deps.store.kind,
       dryRun: deps.dryRun,
-      campaignsSynced: sync.ok && sync.value,
+      campaignsSynced: sync.campaignsSynced,
       spendWritten: spend.storeWritten,
       readingsWritten: false,
-      errors: [sync.ok ? null : sync.error, spend.storeError].filter((e): e is string => !!e),
+      errors: [sync.campaignSyncError, spend.storeError].filter((e): e is string => !!e),
     },
     notify: { push: false, busCopy: false, reason: '', text: null },
     errors,
@@ -930,7 +1021,7 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
     base.failures.push(name)
     base.failureDetails.push(`${name} (${summarizeError(err)})`)
   }
-  addFailure('Google Ads spend', spend.ok ? null : spend.error)
+  addFailure(!spend.ok && /^store /.test(spend.error ?? '') ? 'store read' : 'Google Ads spend', spend.ok ? null : spend.error)
   addFailure('campaign status', status.ok ? null : status.error)
 
   // The after-flight spend and cap checks run FIRST, on every post-flight run, due or not
@@ -993,6 +1084,7 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
     thresholds: [],
     spendThroughEt: spend.throughEt,
     stored,
+    campaignSync,
     tagged: taggedRows,
     forceDecision: true,
     readAt,
@@ -1065,11 +1157,15 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
       cohortPromoUnset: base.cohort.promoUnset,
     })
   }
-  const w = sync.ok ? await appendReadings(deps, [rec]) : { written: false, error: 'readings not written: campaign sync failed' }
+  const w = !sync.campaignSyncError
+    ? await appendReadings(deps, plan.campaignId, todayEt, [rec])
+    : { written: false, error: 'readings not written: campaign sync failed', dedup: { skipped: [], checkError: null } as DedupSection, isNew: () => true }
   if (w.error) {
     errors.push(w.error)
     base.store.errors.push(w.error)
   }
+  if (w.dedup.checkError) errors.push(w.dedup.checkError)
+  base.dedup = w.dedup
   base.store.readingsWritten = w.written
 
   const trip = spendTrip
@@ -1080,6 +1176,17 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
   }
   if (!base.store.dryRun && base.store.errors.length) addFailure('store write', base.store.errors[0])
   const failed = base.failureDetails.length ? ` Read problems: ${base.failureDetails.join('; ')}.` : ''
+  if (!w.isNew(rec.id)) {
+    // A same-day rerun of a stage already recorded (and pushed): nothing new to send, unless a
+    // read failed.
+    const already = `post-flight ${opts.stage} already recorded and pushed today (${w.dedup.skipped.map((s) => s.entryKind).join(', ')})`
+    base.notes.unshift(`${already}; this rerun was not stored.`)
+    base.notify = base.failures.length
+      ? { push: true, busCopy: false, reason: `${already}; failed read: ${base.failures.join(', ')}`, text: `BSK retest ${opts.stage} read FAILED: ${base.failureDetails.join('; ')}.` }
+      : { push: false, busCopy: false, reason: `${already}; not pushed again`, text: null }
+    base.notes.push(INSTALL_OUTCOME_GAP_NOTE)
+    return base
+  }
   base.notify = {
     push: true,
     busCopy: true,

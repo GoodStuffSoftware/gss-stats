@@ -11,15 +11,15 @@ import { parseArgs } from 'node:util'
 import { RETEST_CAMPAIGN_ID, type ReadingRecord, type ReturnRow, type ReturnSiteStat, type SpendDay, type StoredSpend, type TaggedRow } from '../../src/lib/adsRules'
 import type { PlacementDayRow } from '../../src/lib/adsStore'
 import type { HourPathCount } from '../../src/lib/popupEvents'
-import { createAdsClient, fetchCampaignStatus, fetchDailySpend, fetchPlacementDaily, type AdsClient, type CampaignStatus } from './adsApi'
+import { createAdsClient, fetchCampaignStatus, fetchDailySpend, fetchPlacementDaily, type AdsClient, type CampaignStatus } from '../../src/lib/adsApi'
 import { createBeaconSource, type BeaconSource } from './beacon'
 import { createD1Select } from './d1'
 import { createD1Store, createMemoryStore } from './d1Store'
 import { readFirebaseCounts, type FirebaseCounts } from './firebase'
 import type { AdsSource, ReadDeps } from './read'
-import { redact, registerSecret } from './redact'
+import { redact, registerSecret } from '../../src/lib/adsRedact'
 import { loadAdsCredentials } from './secrets'
-import { createWranglerRunner, type WranglerRunner } from './wrangler'
+import { createWranglerRunner, EXTERNAL_TIMEOUT_MS, type WranglerRunner } from './wrangler'
 
 export const COMMON_OPTIONS = {
   'dry-run': { type: 'boolean', default: false },
@@ -56,7 +56,7 @@ export interface LiveGraph {
 
 export async function liveAdsClient(): Promise<{ ads: AdsClient | null; adsInitError: string | null }> {
   try {
-    return { ads: await createAdsClient(await loadAdsCredentials()), adsInitError: null }
+    return { ads: await createAdsClient(await loadAdsCredentials(), { timeoutMs: EXTERNAL_TIMEOUT_MS }), adsInitError: null }
   } catch (e) {
     return { ads: null, adsInitError: redact(e) }
   }

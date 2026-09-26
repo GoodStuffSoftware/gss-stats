@@ -14,6 +14,7 @@ import { fetchCampaignCompare } from '../api'
 import { PALETTE } from '../lib/charts'
 import BaseChart from './charts/BaseChart.vue'
 import AdsReadingsWidgetCard from './AdsReadingsWidgetCard.vue'
+import { freshnessLine, STALE_NOTE } from '../lib/adsFreshness'
 
 const loading = ref(true)
 const error = ref<string | null>(null)
@@ -304,7 +305,10 @@ function shareBarWidth(row: DeviceMixShare): number {
               <div class="cost-row"><span>Spend</span><span class="mono">{{ money(dataByCampaign[c.id].spend) }}</span></div>
               <div v-if="dataByCampaign[c.id].spendSource" class="cost-row">
                 <span>Source</span>
-                <span class="mono">{{ dataByCampaign[c.id].spendSource!.source === 'google-ads-api' ? `Ads API, through ${dataByCampaign[c.id].spendSource!.lastDate}` : dataByCampaign[c.id].spendSource!.source === 'config' ? 'hand-entered' : '—' }}</span>
+                <span class="mono">{{ dataByCampaign[c.id].spendSource!.source === 'google-ads-api' ? 'Ads API' : dataByCampaign[c.id].spendSource!.source === 'config' ? 'hand-entered' : '—' }}</span>
+              </div>
+              <div v-if="dataByCampaign[c.id].spendThrough !== undefined" class="cost-row fresh-row">
+                <span class="mono">{{ freshnessLine({ spendThrough: dataByCampaign[c.id].spendThrough ?? null, lastSync: dataByCampaign[c.id].lastSync ?? null }, Date.parse(dataByCampaign[c.id].meta.generatedAt)) }}<span v-if="dataByCampaign[c.id].stale" class="stale"> · {{ STALE_NOTE }}</span></span>
               </div>
               <div class="cost-row"><span>Per arrival</span><span class="mono">{{ money(dataByCampaign[c.id].costPerArrival) }}</span></div>
               <div class="cost-row"><span>Per auth success</span><span class="mono">{{ money(dataByCampaign[c.id].costPerAuthSuccess) }}</span></div>
@@ -534,6 +538,13 @@ function shareBarWidth(row: DeviceMixShare): number {
   display: flex;
   justify-content: space-between;
   font-size: 12px;
+}
+.fresh-row {
+  font-size: 11px;
+  color: rgb(var(--ink-3));
+}
+.stale {
+  color: #bc4749;
 }
 .device-block {
   margin-bottom: 10px;

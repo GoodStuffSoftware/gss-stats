@@ -61,15 +61,39 @@ whose key already exists into a silent no-op on `ads_readings` and `ads_threshol
 the old row without firing the append-only DELETE triggers). Ordinary writes are unchanged:
 they already use `ON CONFLICT … DO NOTHING`.
 
+Migration `0003_sync_and_dedup.sql` (2026-09-26, owner requirement: "check if it has the most
+recent data and if it doesn't, poll for the data… they should both be using the same
+routine… make sure we're not duplicating data"):
+
+| Change | Why |
+|---|---|
+| `ads_daily_metrics.placements_fetched_at` (nullable) | Placement rows only exist on days with placement spend, so a day's metrics row records when its placement pull succeeded; the sync re-pulls days where it is missing. |
+| `ads_readings.entry_kind` (nullable) + `UNIQUE (campaign_id, et_date, entry_kind)` + a BEFORE INSERT no-replace trigger on that key | One reading per campaign, ET day and entry (`morning`, `backstop`, `threshold-50`, `postflight-wrapup`, with `+incomplete` / `+pause` / `+alert-<pair>` qualifiers). A same-day rerun is stored only when its entry kind differs, i.e. it carries new information. Rows from before 0003 are NULL (NULLs never collide) and get the same key derived in code. |
+| `ads_sync_runs` (append-only, no-replace) | One row per completed sync run: source, start/finish, campaigns and the ones that synced, days fetched/changed, placement rows fetched/changed, status, a redacted error. `lastSync` on the dashboard comes from here. |
+
+Every new column is nullable, so the v0.4.0 writers keep working against a 0003 database.
+
+Since 0003, `ads_daily_metrics` holds **closed ET days only**, zero-filled where the API
+returns no row (no delivery), so the stored days are contiguous and "spend through" is the
+last stored day. It is written by exactly one function, `syncAdsData` (`src/lib/adsSync.ts`),
+which writes only rows that changed.
+
 ### How each side uses it
 
+- **One store, several adapters:** every statement is built in `src/lib/adsStore.ts`, and
+  `createSqlAdsStore` runs them over an `AdsDb` adapter: `wranglerAdsDb`
+  (`scripts/ads-reads/d1Store.ts`, the local CLIs), `d1BindingAdsDb` (a Worker or Pages
+  Function) or a `node:sqlite` one in the tests (migrations applied for real). The write
+  guard runs before any adapter sees a statement.
 - **Routine writer:** `wrangler d1 execute gss-stats-ads --remote --json --command "<INSERT…>"`,
   one statement per call. A guard refuses anything other than a single `INSERT INTO ads_*`
   (upserts use `ON CONFLICT … DO UPDATE / DO NOTHING`), and the store is an allowlist: it only
   ever targets `gss-stats-ads`. `--dry-run` skips every write. Stored notes have local paths
-  stripped.
+  stripped. No statement binds more than 100 parameters (D1's cap for bound statements).
 - **Dashboard reader:** the `gss_stats_ads` binding. `/api/campaigns` and `/api/overview`
   prefer stored spend over `CAMPAIGN_SPEND`; `/api/ads/readings` serves the readings widget.
+  `/api/campaigns` and `/api/ads/readings` also return `spendThrough`, `lastSync` and `stale`
+  (`src/lib/adsFreshness.ts`); they never call the Google Ads API.
   **Fail soft:** a missing binding, a missing table or any D1 error reads as "nothing
   stored", so spend falls back to the config and the readings widget shows an empty state.
 
@@ -94,11 +118,12 @@ Done on 2026-09-26 (owner-authorized; nothing else was created or changed):
 
 ```powershell
 npx wrangler d1 create gss-stats-ads                       # id 785327a3-683c-4f85-819d-abe11efcacc9
-npx wrangler d1 migrations apply gss-stats-ads --remote    # = npm run ads:migrate (0001, then 0002 the same day)
+npx wrangler d1 migrations apply gss-stats-ads --remote    # = npm run ads:migrate (0001, then 0002 the same day, then 0003)
 ```
 
-The binding is in `wrangler.toml`; it takes effect on the next deploy of `main`. Backfill
-(idempotent, rerunnable): `npm run ads:backfill -- --cf-token-file <path>`.
+The binding is in `wrangler.toml`; it takes effect on the next deploy of `main`. Sync (a no-op
+when nothing changed): `npm run ads:sync -- --cf-token-file <path>`; full re-pull with the
+config check: `npm run ads:backfill -- --cf-token-file <path>`.
 
 A future schema change is a new numbered file in `migrations/gss-stats-ads/`, applied with
 `npm run ads:migrate`.

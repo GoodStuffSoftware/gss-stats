@@ -9,10 +9,15 @@
 // FAIL SOFT: no binding, a missing table or a D1 error returns storeBound/storeReadable
 // flags and empty readings, with spend falling back to lib/campaigns.ts CAMPAIGN_SPEND —
 // never a 500. Anonymous aggregates only: counts, rule results and proposals.
+//
+// Freshness per campaign (lib/adsFreshness.ts): spendThrough (last closed day stored),
+// lastSync (latest ads_sync_runs row that synced it) and stale. Read-only: this endpoint never
+// calls the Google Ads API.
 
 import { CAMPAIGNS, CAMPAIGN_SPEND } from '../../../src/lib/campaigns'
 import { resolveCampaignSpend } from '../../../src/lib/adsRules'
-import { parseCampaignIdsParam, readReadings, readSpendSummaries, readThresholdState, type AdsReadingsResponse } from '../../../src/lib/adsStore'
+import { freshnessOf } from '../../../src/lib/adsFreshness'
+import { parseCampaignIdsParam, readFreshness, readReadings, readSpendSummaries, readThresholdState, type AdsReadingsResponse } from '../../../src/lib/adsStore'
 
 interface Env {
   gss_stats_ads?: D1Database
@@ -27,7 +32,8 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
   const limitRaw = Number(url.searchParams.get('limit'))
   const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(500, Math.floor(limitRaw)) : 50
   const db = ctx.env.gss_stats_ads
-  const summaries = await readSpendSummaries(db)
+  const nowMs = Date.now()
+  const [summaries, freshness] = await Promise.all([readSpendSummaries(db), readFreshness(db, nowMs)])
 
   const campaigns = await Promise.all(
     ids.map(async (id) => {
@@ -38,6 +44,7 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
         label: c.label,
         status: c.status,
         spend: resolveCampaignSpend(summaries?.get(id) ?? null, CAMPAIGN_SPEND[id] ?? null),
+        ...(freshness.get(id) ?? freshnessOf(c, null, null, nowMs)),
         thresholdsFired: fired,
         readings: readings ?? [],
       }

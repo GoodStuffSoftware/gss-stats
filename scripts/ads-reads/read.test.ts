@@ -30,14 +30,22 @@ describe('morning-read: the $50 threshold read', () => {
     expect(deps.store.written.readings.map((x) => x.kind)).toEqual(['daily', 'threshold'])
     expect(await deps.store.getConsumedThresholds('24279250691')).toEqual([25, 50])
   })
-  it('the same read again the next morning fires nothing and pushes nothing (fire-once)', async () => {
+  it('the same read again the same morning fires nothing, pushes nothing and stores no second daily line (fire-once, de-duped)', async () => {
     const deps = fixtureDeps(base(), false)
     await runMorningRead(deps, opts)
     const again = await runMorningRead({ ...deps, nowMs: deps.nowMs + 60_000 }, opts)
     expect(again.thresholds.crossedNow).toEqual([])
     expect(again.thresholdRead).toBeNull()
     expect(again.notify.push).toBe(false)
-    expect(deps.store.written.readings.filter((x) => x.kind === 'daily')).toHaveLength(2) // append-only
+    expect(deps.store.written.readings.filter((x) => x.kind === 'daily')).toHaveLength(1) // one line per ET day
+    expect(again.dedup.skipped.map((s) => s.entryKind)).toEqual(['morning'])
+    expect(again.spend.sync).toMatchObject({ daysChanged: 0, placementRowsChanged: 0 }) // the sync is a no-op too
+  })
+  it('the next morning appends its own daily line', async () => {
+    const deps = fixtureDeps(base(), false)
+    await runMorningRead(deps, opts)
+    await runMorningRead({ ...deps, nowMs: deps.nowMs + 86_400_000 }, opts)
+    expect(deps.store.written.readings.filter((x) => x.kind === 'daily').map((x) => x.etDate)).toEqual(['2026-09-30', '2026-10-01'])
   })
   it('--dry-run reads everything and writes nothing, so the threshold stays unconsumed', async () => {
     const deps = fixtureDeps(base(), true)
@@ -431,5 +439,82 @@ describe('reports', () => {
     expect(text).toMatch(/ask rate 16\.7% \(5\/30\)/)
     expect(text).toMatch(/d1 too few|d1 10\.3% \(3\/29\)/)
     expect(text).toMatch(/nobody matched/)
+  })
+})
+
+describe('same-day reruns: one reading per entry, no repeated push (owner, 2026-09-26)', () => {
+  const hour = 3_600_000
+  it('an incomplete threshold read rerun the same morning is not stored or pushed as a threshold again; the failure still pushes', async () => {
+    const fx = base()
+    fx.beacon = { error: 'wrangler unavailable' }
+    const deps = fixtureDeps(fx, false)
+    const first = await runMorningRead(deps, opts)
+    expect(first.notify).toMatchObject({ push: true, busCopy: true })
+    const again = await runMorningRead({ ...deps, nowMs: deps.nowMs + hour }, opts)
+    expect(again.thresholdRead!.complete).toBe(false)
+    expect(again.dedup.skipped.map((s) => s.entryKind)).toEqual(['morning+incomplete', 'threshold-50+incomplete'])
+    expect(deps.store.written.readings.map((x) => x.entryKind)).toEqual(['morning+incomplete', 'threshold-50+incomplete'])
+    expect(again.notify.busCopy).toBe(false) // the threshold read was already copied
+    expect(again.notify.text).toMatch(/^BSK retest morning read FAILED: beacon \(wrangler unavailable\)/)
+    expect(again.notify.text).not.toMatch(/\$50 read/)
+  })
+  it('a complete retry of an incomplete threshold read the same day IS new: stored, pushed, and it consumes the threshold', async () => {
+    const fx = base()
+    fx.beacon = { error: 'wrangler unavailable' }
+    const deps = fixtureDeps(fx, false)
+    await runMorningRead(deps, opts)
+    const healthy = fixtureDeps(base(), false)
+    const retry = await runMorningRead({ ...deps, beacon: healthy.beacon, beaconInitError: null, nowMs: deps.nowMs + hour }, opts)
+    expect(retry.thresholdRead!.complete).toBe(true)
+    expect(retry.notify).toMatchObject({ push: true, busCopy: true })
+    expect(retry.notify.text).toMatch(/^BSK retest \$50 read:/)
+    expect(deps.store.written.readings.map((x) => x.entryKind)).toEqual(['morning+incomplete', 'threshold-50+incomplete', 'morning', 'threshold-50'])
+    expect(await deps.store.getConsumedThresholds('24279250691')).toEqual([25, 50])
+  })
+  it('the hard-cap trip is pushed once per day, not on every rerun', async () => {
+    const fx = base()
+    ads(fx).daily['2026-09-29'].costMicros = 70_000_000
+    fx.store!.consumed = [25, 50, 75, 100]
+    const deps = fixtureDeps(fx, false)
+    const first = await runMorningRead(deps, opts)
+    expect(first.notify.text).toMatch(/PROPOSE PAUSE/)
+    const again = await runMorningRead({ ...deps, nowMs: deps.nowMs + hour }, opts)
+    expect(again.hardCapDaily!.status).toBe('trip')
+    expect(again.notify.push).toBe(false)
+    expect(again.notify.reason).toMatch(/already recorded and pushed today \(morning\+pause\)/)
+  })
+  it('the backstop does not re-push the same alert on a rerun the same night', async () => {
+    const fx = base()
+    fx.now = '2026-09-30T03:30:00Z'
+    const b = fx.beacon as Extract<Fixture['beacon'], { siteEvents: unknown }>
+    b.siteEvents = b.siteEvents.filter((x) => x.path !== '/popup-outcome/signin-prompt/signed-in')
+    const deps = fixtureDeps(fx, false)
+    const first = await runMorningRead(deps, { ...opts, healthOnly: true })
+    expect(first.notify.push).toBe(true)
+    const again = await runMorningRead({ ...deps, nowMs: deps.nowMs + 20 * 60_000 }, { ...opts, healthOnly: true })
+    expect(again.releaseHealth.alerts).toBe(1)
+    expect(again.notify.push).toBe(false)
+    expect(deps.store.written.readings.map((x) => x.entryKind)).toEqual(['backstop+alert-signin-prompt-outcomes'])
+  })
+  it('a post-flight stage rerun the same day is not stored, pushed or copied again', async () => {
+    const fx = base()
+    fx.now = '2026-10-09T13:00:00Z'
+    const deps = fixtureDeps(fx, false)
+    const first = await runPostflightRead(deps, { campaignId: '24279250691', stage: 'wrapup', force: false })
+    expect(first.notify).toMatchObject({ push: true, busCopy: true })
+    const again = await runPostflightRead({ ...deps, nowMs: deps.nowMs + hour }, { campaignId: '24279250691', stage: 'wrapup', force: true })
+    expect(again.notify).toMatchObject({ push: false, busCopy: false })
+    expect(again.dedup.skipped.map((s) => s.entryKind)).toEqual(['postflight-wrapup'])
+    expect(deps.store.written.readings).toHaveLength(1)
+  })
+  it('the morning read syncs first through the shared sync: a second read the same morning pulls only the restatement window and changes nothing', async () => {
+    const deps = fixtureDeps(base(), false)
+    const first = await runMorningRead(deps, opts)
+    expect(first.spend.sync).toMatchObject({ fetched: { since: '2026-09-26', until: '2026-09-29' }, daysChanged: 4 })
+    const again = await runMorningRead({ ...deps, nowMs: deps.nowMs + hour }, opts)
+    expect(again.spend.sync).toMatchObject({ fetched: { since: '2026-09-27', until: '2026-09-29' }, daysChanged: 0, placementRowsChanged: 0 })
+    expect(again.spend.cumulative.cost).toBe(first.spend.cumulative.cost)
+    expect(deps.store.dailyRows('24279250691').map((r) => r.date)).toEqual(['2026-09-26', '2026-09-27', '2026-09-28', '2026-09-29']) // never today's open day
+    expect(deps.store.written.syncRuns.map((r) => r.source)).toEqual(['morning-read', 'morning-read'])
   })
 })

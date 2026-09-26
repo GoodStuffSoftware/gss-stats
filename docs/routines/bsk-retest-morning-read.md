@@ -106,17 +106,31 @@ pair is an ordinary pair: install-prompt accepts (`/install/pwa-accept`) after t
 5 and at least 24 h old, with no `/popup-outcome/install-prompt/installed` is a real ALERT and
 pushes; a continued zero is raised, not treated as quiet. It appends a `health` record.
 
-Not `--dry-run`: this run is the one that stores spend, appends the daily line and marks a
-fired threshold. `BWS_ACCESS_TOKEN` is already in the environment. If the service-account
+Not `--dry-run`: this run is the one that syncs spend, appends the daily line and marks a
+fired threshold. Never run `npm run ads:sync` before it "to be safe": the read syncs itself. `BWS_ACCESS_TOKEN` is already in the environment. If the service-account
 file is missing, drop `--firebase-sa` (the account counts then read "not read"); never go
 looking for other credentials.
 
-What the CLI does, so you can explain it (do not re-implement any of it): fetches yesterday's
-and cumulative spend from the Google Ads API (closed ET days only), stores it in gss-stats'
-own D1 database, fires each $25/$50/$75/$100 read once, runs the full read and the kill rules
-on a crossing, checks the $100 cap on every read, always appends a daily line, notes any
-earlier scheduled read that never ran, and skips release health because 08:00 ET is inside
-its 01:00-12:00 quiet window (entry B covers it).
+What the CLI does, so you can explain it (do not re-implement any of it):
+
+1. **Syncs first, through the shared sync** (`syncAdsData` in `src/lib/adsSync.ts`, the same
+   code `npm run ads:sync` and the backfill run): it checks which closed ET days gss-stats'
+   own D1 database is missing, pulls all of them (from the flight's first day or the first
+   gap, through yesterday) plus the last 3 closed days that Google may still restate, and
+   writes only rows that changed. If something else synced a moment ago this step is a no-op;
+   the report's `sync (shared):` line says what it pulled and changed.
+2. Fires each $25/$50/$75/$100 read once, runs the full read and the kill rules on a
+   crossing, and checks the $100 cap on every read.
+3. Appends **one** daily line per ET day. Rerunning the same entry the same day stores
+   nothing new and does not repeat a threshold, cap or alert push (the report says
+   "Already recorded today"); only a rerun that carries new information (a complete retry of
+   an incomplete read, a new pause proposal, a new alert) is stored and pushed. A failed read
+   always pushes.
+4. Notes any earlier scheduled read that never ran, and skips release health because
+   08:00 ET is inside its 01:00-12:00 quiet window (entry B covers it).
+
+ENTRY B runs the same sync first (it also stores the closed days), then reads today's partial
+spend only to decide whether ads served today; today's open day is never stored.
 
 ## Step 2: read the result
 

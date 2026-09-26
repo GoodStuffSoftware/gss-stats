@@ -1083,20 +1083,91 @@ export interface ReadingRecord {
   /** Key counts — anonymous aggregates only. null = not read. */
   counts: Record<string, number | null>
   notes: string[]
+  /** The de-dup key within (campaign, etDate) — readingEntryKind(). Derived when absent (rows
+   * written before migration 0003). */
+  entryKind?: string
 }
 export interface ReadingsLog {
   v: 1
   campaignId: string
   readings: ReadingRecord[]
 }
+
+// ── Readings de-dup (migration 0003: UNIQUE (campaign_id, et_date, entry_kind)) ──────────
+const slug = (s: string): string =>
+  s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+const ALERT_NOTE_RE = /^ALERT ([^:]+):/
+
+/** What a reading IS, for de-dup within one campaign and ET day: the entry (`morning`,
+ * `backstop`, `threshold-50`, `postflight-wrapup`) plus the facts that make a same-day rerun
+ * worth a second row: `+incomplete`, `+pause` (a pause proposal), `+alert-<pair>` (a
+ * release-health alert). Deterministic from the stored fields, so rows written before the
+ * column existed get the same key. */
+export function readingEntryKind(rec: Pick<ReadingRecord, 'kind' | 'stage' | 'thresholds' | 'complete' | 'proposal' | 'notes'>): string {
+  const base =
+    rec.kind === 'daily'
+      ? 'morning'
+      : rec.kind === 'health'
+        ? 'backstop'
+        : rec.kind === 'threshold'
+          ? `threshold-${[...rec.thresholds].sort((a, b) => a - b).map((t) => Math.round(t)).join('-') || 'none'}`
+          : `postflight-${slug(rec.stage ?? '') || 'unknown'}`
+  const q: string[] = []
+  if (!rec.complete) q.push('incomplete')
+  if (rec.proposal === 'PROPOSE PAUSE') q.push('pause')
+  if (rec.kind === 'health') {
+    const alerts = [...new Set(rec.notes.map((n) => ALERT_NOTE_RE.exec(n)?.[1]).filter((x): x is string => !!x).map(slug))].sort()
+    for (const a of alerts) q.push(`alert-${a}`)
+  }
+  return [base, ...q].join('+').slice(0, 160)
+}
+export const entryBase = (entryKind: string): string => entryKind.split('+')[0]
+const entryComplete = (entryKind: string): boolean => !entryKind.split('+').includes('incomplete')
+
+export interface ReadingAppendPlan {
+  append: ReadingRecord[]
+  /** Same-day reruns that carry nothing new: not written, and never pushed again. */
+  skip: { record: ReadingRecord; reason: string }[]
+}
+/** Decides which records a run may append, given the rows already stored for the same
+ * campaign and ET day. A record is skipped when (a) the same entry kind is already stored (the
+ * UNIQUE index would ignore it anyway), or (b) it is incomplete and a complete read of the same
+ * entry is already stored (a failed rerun adds nothing). Anything else — a first read, a
+ * complete retry of an incomplete one, a newly proposed pause, a new alert — is appended. */
+export function planReadingAppends(records: readonly ReadingRecord[], storedToday: readonly ReadingRecord[]): ReadingAppendPlan {
+  const plan: ReadingAppendPlan = { append: [], skip: [] }
+  const seen = new Map<string, string[]>() // "<campaign>|<etDate>" -> entry kinds
+  const kindsFor = (r: ReadingRecord) => {
+    const k = `${r.campaignId}|${r.etDate}`
+    if (!seen.has(k)) seen.set(k, storedToday.filter((s) => s.campaignId === r.campaignId && s.etDate === r.etDate).map((s) => s.entryKind ?? readingEntryKind(s)))
+    return seen.get(k)!
+  }
+  for (const r of records) {
+    const ek = r.entryKind ?? readingEntryKind(r)
+    const kinds = kindsFor(r)
+    if (kinds.includes(ek)) plan.skip.push({ record: r, reason: `already recorded today (${ek})` })
+    else if (!entryComplete(ek) && kinds.some((k) => entryBase(k) === entryBase(ek) && entryComplete(k))) plan.skip.push({ record: r, reason: `a complete ${entryBase(ek)} read is already recorded today` })
+    else {
+      plan.append.push({ ...r, entryKind: ek })
+      kinds.push(ek)
+    }
+  }
+  return plan
+}
+
 /** APPEND-ONLY, like the ads_readings table (whose triggers forbid UPDATE/DELETE): a re-run
- * adds a row, it never replaces one. A retried insert of the SAME id is a no-op. Sorted by
- * readAt. The in-memory twin of what lib/adsStore.ts writes. */
+ * adds a row, it never replaces one. A retried insert of the SAME id — or a second row for the
+ * same (etDate, entry kind), which the UNIQUE index ignores — is a no-op. Sorted by readAt.
+ * The in-memory twin of what lib/adsStore.ts writes. */
 export function appendReading(log: ReadingsLog | null, rec: ReadingRecord): ReadingsLog {
   if (log && log.campaignId !== rec.campaignId) throw new Error('appendReading: campaign id mismatch')
   const existing = log?.readings ?? []
-  if (existing.some((r) => r.id === rec.id)) return { v: 1, campaignId: rec.campaignId, readings: [...existing] }
-  const readings = [...existing, rec].sort((a, b) => (a.readAt < b.readAt ? -1 : a.readAt > b.readAt ? 1 : 0))
+  const ek = rec.entryKind ?? readingEntryKind(rec)
+  if (existing.some((r) => r.id === rec.id || (r.etDate === rec.etDate && (r.entryKind ?? readingEntryKind(r)) === ek))) return { v: 1, campaignId: rec.campaignId, readings: [...existing] }
+  const readings = [...existing, { ...rec, entryKind: ek }].sort((a, b) => (a.readAt < b.readAt ? -1 : a.readAt > b.readAt ? 1 : 0))
   return { v: 1, campaignId: rec.campaignId, readings }
 }
 
