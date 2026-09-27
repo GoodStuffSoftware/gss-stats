@@ -5,6 +5,7 @@ import { ringDims } from './rings'
 import { TRACKING_ACTIVATION_DATE_ET, PLAY_TRACKING_MARKER_LABEL, POPUPS, POPUP_FAMILY_ORDER, POPUP_OUTCOME_ORDER, POPUP_OUTCOME_LABELS } from './popupEvents'
 import { GAME_COMPLETE_MODES, GAME_COMPLETE_DIFFICULTIES, CAMPAIGNS } from './campaigns'
 import { datedReleases } from './releases'
+import { isMobileViewport } from './responsive'
 
 // Categorical palette: brand amber leads, with distinguishable warm/cool accents.
 export const PALETTE = [
@@ -570,6 +571,7 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
       // Grouped: an axis value with no row for this series leaves no gap (Chart.js skipNull).
       skipNull: true,
     }))
+    const narrow = isMobileViewport()
     const axis = (stacked: boolean) => ({ stacked, grid: { color: gridColor() }, ticks: { color: tickColor(), font: { family: 'Inter', size: 11 } } })
     return {
       type: 'bar',
@@ -580,7 +582,10 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
         // A tap anywhere over an axis value shows every series' count for it (touch-friendly).
         interaction: { mode: 'index', intersect: false },
         plugins: {
-          legend: { display: true, labels: { color: tickColor(), font: { family: 'Inter', size: 11 }, boxWidth: 12 } },
+          // Phone width: a compact legend under the bars, so the series names don't eat the plot.
+          legend: narrow
+            ? { display: true, position: 'bottom', labels: { color: tickColor(), font: { family: 'Inter', size: 10 }, boxWidth: 8, boxHeight: 8, padding: 6 } }
+            : { display: true, labels: { color: tickColor(), font: { family: 'Inter', size: 11 }, boxWidth: 12 } },
           tooltip: { filter: (item: any) => item.raw != null },
         },
         scales: { x: axis(model.stacked), y: { ...axis(model.stacked), beginAtZero: true } },

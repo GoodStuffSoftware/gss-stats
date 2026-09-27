@@ -183,8 +183,8 @@ export function defaultBestSudokuPopupsWidgets(): Widget[] {
       w: 12,
       h: 11,
     }),
-    w({ id: 'pu-rates', title: 'Rates (valid ratios only)', type: 'rateTable', dataset: 'popup', dimension: '', metric: 'pageviews', limit: 1, notes: ['min-cohort-caveat'], x: 0, y: 11, w: 8, h: 8 }),
-    w({ id: 'pu-eligible-bd', title: 'Sign-in eligibility — earned / capped / unearned', type: 'bar', dataset: 'popup', dimension: 'eligible', metric: 'pageviews', limit: 3, notes: ['signin-eligible-caveat'], x: 8, y: 11, w: 4, h: 8 }),
+    w({ id: 'pu-rates', title: 'Rates (valid ratios only)', type: 'rateTable', dataset: 'popup', dimension: '', metric: 'pageviews', limit: 1, notes: ['min-cohort-caveat'], x: 0, y: 11, w: 8, h: 7 }),
+    w({ id: 'pu-eligible-bd', title: 'Sign-in eligibility — earned / capped / unearned', type: 'bar', dataset: 'popup', dimension: 'eligible', metric: 'pageviews', limit: 3, notes: ['signin-eligible-caveat'], x: 8, y: 11, w: 4, h: 7 }),
   ]
 }
 
@@ -206,19 +206,26 @@ export function popupsPageV8FactoryIds(): string[] {
 const POPUPS_V9_KEPT_IDS = new Set(['pu-eligible-bd'])
 
 /** v9: rebuild a saved Pop-ups page. Removes the pre-v9 generated tiles (by id, the owner's
- * request: the page "makes no sense"), adds the new bar chart + rate table on top, and keeps
- * every other widget — the eligibility bar and anything the owner added — with its size and
+ * request: the page "makes no sense") and adds the new bar chart + rate table on top. The kept
+ * eligibility bar (if the owner still has it) takes its new slot beside the rate table, with its
+ * title/captions untouched; every other widget (anything the owner added) keeps its size, x and
  * relative order, moved down below the new block. Idempotent: a second run finds no v8 tile to
  * remove and both new widgets already present, and returns the page unchanged. */
 export function migratePopupsPageV9(page: DashboardPage): DashboardPage {
   const removable = new Set(popupsPageV8FactoryIds().filter((id) => !POPUPS_V9_KEPT_IDS.has(id)))
-  const kept = page.widgets.filter((wd) => !removable.has(wd.id))
-  const fresh = defaultBestSudokuPopupsWidgets().filter((wd) => !POPUPS_V9_KEPT_IDS.has(wd.id) && !kept.some((k) => k.id === wd.id))
-  if (kept.length === page.widgets.length && fresh.length === 0) return page
-  const blockH = fresh.reduce((m, wd) => Math.max(m, wd.y + wd.h), 0)
-  const minKeptY = kept.reduce((m, wd) => Math.min(m, wd.y), Infinity)
-  const shifted = kept.map((wd) => ({ ...wd, y: blockH + (wd.y - (Number.isFinite(minKeptY) ? minKeptY : 0)) }))
-  return { ...page, widgets: [...fresh, ...shifted] }
+  const survivors = page.widgets.filter((wd) => !removable.has(wd.id))
+  const defaults = defaultBestSudokuPopupsWidgets()
+  const fresh = defaults.filter((wd) => !POPUPS_V9_KEPT_IDS.has(wd.id) && !survivors.some((k) => k.id === wd.id))
+  if (survivors.length === page.widgets.length && fresh.length === 0) return page
+  const slot = (id: string) => defaults.find((d) => d.id === id)!
+  const keptFactory = survivors
+    .filter((wd) => POPUPS_V9_KEPT_IDS.has(wd.id))
+    .map((wd) => ({ ...wd, x: slot(wd.id).x, y: slot(wd.id).y, w: slot(wd.id).w, h: slot(wd.id).h }))
+  const own = survivors.filter((wd) => !POPUPS_V9_KEPT_IDS.has(wd.id))
+  const blockH = [...fresh, ...keptFactory].reduce((m, wd) => Math.max(m, wd.y + wd.h), 0)
+  const minOwnY = own.reduce((m, wd) => Math.min(m, wd.y), Infinity)
+  const shifted = own.map((wd) => ({ ...wd, y: blockH + (wd.y - (Number.isFinite(minOwnY) ? minOwnY : 0)) }))
+  return { ...page, widgets: [...fresh, ...keptFactory, ...shifted] }
 }
 
 // The OLD generated titles baked SIGNIN_ELIGIBLE_CAVEAT/NO_OUTCOME_TRACKING_NOTE directly

@@ -66,6 +66,10 @@ const needsChartHeight = computed(() => {
   return CHART_CANVAS_TYPES.has(props.widget.type)
 })
 
+// A breakdown bar carries a legend plus rotated axis labels, so the fixed phone chart height
+// (Dashboard.vue's .needs-chart-height) leaves almost no plot; give it more room there.
+const tallOnPhone = computed(() => props.widget.type === 'breakdownBar')
+
 // Double-tap-to-zoom (owner: "allow a double-tap on the chart to zoom if that's easy") — an
 // extra shortcut alongside the always-visible zoom button (see below), not a substitute for
 // it. Ignore taps that land on an actual control (menu, its buttons, a link) so they keep
@@ -279,12 +283,17 @@ function onUseGlobal() {
 const overrideSummary = computed(() => {
   const f = props.widget.filters
   if (!f) return ''
+  // An override built from the current filter model carries `siteSel` and no legacy `site`
+  // (e.g. the campaign device mix's rolling-year override) — summarize that instead of
+  // assuming the legacy single-site field is set.
   const site =
-    f.site === 'all'
+    f.site === 'all' || (!f.site && !f.host && !f.siteSel?.length)
       ? 'all sites'
       : f.host
         ? f.host.replace('.goodstuff.software', '')
-        : f.site.replace('goodstuff.software', 'gs').replace('.com', '')
+        : f.site
+          ? f.site.replace('goodstuff.software', 'gs').replace('.com', '')
+          : f.siteSel.join(', ')
   const flags: string[] = []
   if (f.excludeOwnVisits) flags.push('−me')
   return [site, rangeLabel(f.since, f.until), ...flags].join(' · ')
@@ -389,7 +398,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
 
 <template>
   <Teleport to="body" :disabled="!zoomed">
-    <div ref="cardEl" class="chart-card" :class="{ zoomed, revealed, 'controls-revealed': forceControls, 'note-card': isNoteWidget, 'needs-chart-height': needsChartHeight }" :style="zoomed ? { '--ar': aspect } : undefined">
+    <div ref="cardEl" class="chart-card" :class="{ zoomed, revealed, 'controls-revealed': forceControls, 'note-card': isNoteWidget, 'needs-chart-height': needsChartHeight, 'tall-on-phone': tallOnPhone }" :style="zoomed ? { '--ar': aspect } : undefined">
     <header class="card-head" :class="{ 'note-head': isNoteWidget }">
       <div class="title-wrap" v-if="!isNoteWidget">
         <span v-if="widget.isDefault" class="pin" title="A default chart on this page — kept when you restore defaults">★</span>
@@ -889,6 +898,18 @@ td {
 }
 .t-bar {
   width: 40%;
+}
+@media (max-width: 700px) {
+  .chart-card.chart-card.needs-chart-height.tall-on-phone {
+    height: 420px;
+  }
+}
+/* Attached captions: inside the card's own padding, and a long word or path wraps instead of
+   running past the rounded border (it used to sit flush left and be clipped at phone width). */
+.card-captions {
+  padding: 0 14px 10px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .rate-table th {
   font-weight: 600;

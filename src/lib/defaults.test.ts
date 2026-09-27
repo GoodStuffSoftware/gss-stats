@@ -454,11 +454,11 @@ describe('normalizeConfig — v9 migration (Pop-ups page + device mix)', () => {
     expect(pu.widgets.map((w) => w.id)).toEqual(['pu-bars', 'pu-rates', 'pu-eligible-bd', 'my-popup-chart'])
     const mine = pu.widgets.find((w) => w.id === 'my-popup-chart')!
     expect(mine).toMatchObject({ title: 'My upsell reasons', x: 3, w: 5, h: 7, dimension: 'reason', popup: 'upsell' })
-    // kept widgets sit below the new block, in their original relative order
-    const blockBottom = Math.max(...pu.widgets.slice(0, 2).map((w) => w.y + w.h))
-    const kept = pu.widgets.slice(2)
-    for (const k of kept) expect(k.y).toBeGreaterThanOrEqual(blockBottom)
-    expect(kept[0].y).toBeLessThan(kept[1].y)
+    // the kept eligibility bar takes its new slot beside the table; the owner's chart sits below
+    const elig = pu.widgets.find((w) => w.id === 'pu-eligible-bd')!
+    expect({ x: elig.x, y: elig.y, w: elig.w, h: elig.h }).toEqual({ x: 8, y: 11, w: 4, h: 7 })
+    const blockBottom = Math.max(...pu.widgets.slice(0, 3).map((w) => w.y + w.h))
+    expect(mine.y).toBeGreaterThanOrEqual(blockBottom)
   })
 
   it('swaps the bespoke device mix for the nested doughnut in place, keeping id, position, size, title and default mark', () => {
