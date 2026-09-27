@@ -265,7 +265,7 @@ describe('review fixes: arrivals, raw signals, date limit, request caps', () => 
     expect(got).toEqual(['', 'raw-install-signal', 'raw-install-signal', 'raw-install-signal', 'install', ''])
   })
 
-  it("the timeline's tagged-arrivals total per flight equals /api/campaigns' taggedArrivals", async () => {
+  it("the timeline's tagged-arrivals total per flight equals the registry's campaign.taggedArrivals (the campaigns endpoint's count)", async () => {
     const retest = CAMPAIGNS.find((c) => c.flightStartTimeEt)!
     const start = etWallTimeMs(retest.flightStart!, retest.flightStartTimeEt)
     // First-ever beacons for the retest: page views AND event beacons (e.g. an install prompt as
@@ -287,12 +287,15 @@ describe('review fixes: arrivals, raw signals, date limit, request caps', () => 
     const { body: series } = await post({ dimension: 'dateEt', constraints: [{ field: 'arrival', value: 'tagged' }], limit: 400, ...range, since: '2026-09-01', until: '2026-10-05' })
     const timelineTotal = series.rows.reduce((a: number, r: any) => a + r.pageviews, 0)
 
-    const { onRequestPost: campaignsPost } = await import('./campaigns')
+    // The registry's campaign.taggedArrivals counts what /api/campaigns counted (functions/api/
+    // metrics.equivalence.test.ts pins the two against each other on a shared fixture).
+    const { onRequestPost: metricsPost } = await import('./metrics')
     const { gss_geo } = fakeD1()
-    const res = await campaignsPost({ request: { json: async () => ({ campaignId: retest.id }) }, env: { gss_geo }, waitUntil: () => {} } as any)
-    const camp: any = await res.json()
-    expect(camp.funnel.counts.arrivals).toBe(11)
-    expect(timelineTotal).toBe(camp.funnel.counts.arrivals)
+    const body = JSON.stringify({ v: 1, requests: [{ key: 'a', metric: 'campaign.taggedArrivals', params: { campaignId: retest.id } }] })
+    const res = await metricsPost({ request: new Request('https://stats.goodstuff.software/api/metrics', { method: 'POST', body }), env: { gss_geo }, waitUntil: () => {} } as any)
+    const arrivals = ((await res.json()) as any).results.a.value
+    expect(arrivals).toBe(11)
+    expect(timelineTotal).toBe(arrivals)
   })
 
   it('a date axis keeps the most recent `limit` days, returned oldest first', async () => {

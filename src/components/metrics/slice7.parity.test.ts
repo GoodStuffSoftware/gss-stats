@@ -6,6 +6,11 @@
 // panel needs that the shared fixture lacks), asserting the same visible numbers. Every visible
 // difference is listed next to the panel and asserted as itself, so none can appear silently.
 //
+// THE OLD SIDE. Each old rendering is read through `golden(key, live)`: `live` mounts the old body
+// over its old endpoint on this fixture, and its result must equal the stored golden
+// (__fixtures__/slice7.golden.json; SLICE7_CAPTURE=1 rewrites it). When the bodies and endpoints
+// are retired, `live` goes and the golden — captured from them, on this fixture — stays.
+//
 // Release panel (overview 'releasePanel' → preset release-before-after):
 //   R1  "Installs" in the Before window: the old panel counted 0, because every install outcome
 //       before the install fix (26 Sep, 12:26 ET, after the release's midnight) is dropped as
@@ -109,6 +114,21 @@ import { insertHits, installCaches, memoryCache, openHitsDb, pagesContext, postJ
 import { bskFixture, FIXTURE_NOW } from '../../../functions/_lib/testing/bskFixture'
 import { defaultFilters } from '../../lib/defaults'
 import type { Widget } from '../../types'
+import { writeFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import GOLDEN_FILE from './__fixtures__/slice7.golden.json'
+
+const GOLDEN_PATH = resolve(process.cwd(), 'src/components/metrics/__fixtures__/slice7.golden.json')
+const CAPTURE = process.env.SLICE7_CAPTURE === '1'
+const GOLDEN: Record<string, unknown> = { ...(GOLDEN_FILE as Record<string, unknown>) }
+const captured: Record<string, unknown> = {}
+/** The old side of a comparison: the live old rendering, checked against its stored golden. */
+async function golden<T>(key: string, live: () => Promise<T> | T): Promise<T> {
+  const value = JSON.parse(JSON.stringify(await live())) as T
+  if (CAPTURE) captured[key] = value
+  else expect(value, `live old rendering ≡ golden "${key}"`).toEqual(GOLDEN[key])
+  return value
+}
 
 /** Rows the shared fixture lacks: the owner's own visits (Opera on Windows), which "hide my own
  * visits" must drop from the pop-up figures on both paths. */
@@ -169,6 +189,7 @@ afterEach(() => {
   vi.setSystemTime(FIXTURE_NOW)
 })
 afterAll(() => {
+  if (CAPTURE) writeFileSync(GOLDEN_PATH, JSON.stringify({ ...GOLDEN, ...captured }, null, 2) + '\n')
   undoCaches()
   vi.unstubAllGlobals()
   vi.useRealTimers()
@@ -219,10 +240,10 @@ describe('release-before-after ≡ the bespoke release panel', () => {
     await settle()
     return w
   }
-  function oldPanel(w: VueWrapper): { caption: string; cols: Map<string, Map<string, string>> } {
-    const cols = new Map<string, Map<string, string>>()
+  function oldPanel(w: VueWrapper): { caption: string; cols: Record<string, Record<string, string>> } {
+    const cols: Record<string, Record<string, string>> = {}
     for (const col of w.findAll('.release-col')) {
-      cols.set(text(col.find('.fc-label').element), new Map(col.findAll('.rel-row').map((r) => [text(r.findAll('span')[0].element), text(r.findAll('span')[1].element)])))
+      cols[text(col.find('.fc-label').element)] = Object.fromEntries(col.findAll('.rel-row').map((r) => [text(r.findAll('span')[0].element), text(r.findAll('span')[1].element)]))
     }
     return { caption: text(w.find('.caption').element), cols }
   }
@@ -230,7 +251,7 @@ describe('release-before-after ≡ the bespoke release panel', () => {
   it('two days after the release: the same four counts on each side, except R1', async () => {
     const now = Date.parse('2026-09-28T16:00:00Z')
     vi.setSystemTime(now)
-    const old = oldPanel(await mountOld(now))
+    const old = await golden('release.twoDaysAfter', async () => oldPanel(await mountOld(now)))
     expect(old.caption).toMatch(/^v1\.95\.3 \(2026-09-26\) — 2 days before vs after\. before = partially instrumented/)
     const card = await mountCard('release-before-after', now)
     const r = rows(card)
@@ -240,7 +261,7 @@ describe('release-before-after ≡ the bespoke release panel', () => {
     expect([...t.keys()]).toEqual(LABELS)
     for (const side of ['Before', 'After']) {
       for (const label of LABELS) {
-        const was = old.cols.get(side)!.get(label)
+        const was = old.cols[side][label]
         const now = t.get(label)!.get(side)
         if (side === 'Before' && label === 'Installs') {
           expect(was, 'R1 old').toBe('0')
@@ -251,16 +272,16 @@ describe('release-before-after ≡ the bespoke release panel', () => {
       }
     }
     // The fixture exercises real numbers on both sides.
-    expect(Number(old.cols.get('Before')!.get('Page views')!.replace(/,/g, ''))).toBeGreaterThan(0)
-    expect(Number(old.cols.get('After')!.get('Installs'))).toBeGreaterThan(0)
-    expect(Number(old.cols.get('After')!.get('Tagged arrivals'))).toBeGreaterThan(0)
+    expect(Number(old.cols.Before['Page views'].replace(/,/g, ''))).toBeGreaterThan(0)
+    expect(Number(old.cols.After.Installs)).toBeGreaterThan(0)
+    expect(Number(old.cols.After['Tagged arrivals'])).toBeGreaterThan(0)
     // The note under the panel is unchanged (L1).
     expect(text(card.find('.mc-captions').element)).toBe(old.caption.slice(old.caption.indexOf('before = ')))
   })
 
   it('R2: on the release day itself (no full day after it), both say there is nothing to compare yet', async () => {
-    const old = await mountOld(FIXTURE_NOW)
-    expect(text(old.find('.caption').element)).toBe('No dated release yet. This panel fills in once a release has a date.')
+    const old = await golden('release.releaseDay', async () => text((await mountOld(FIXTURE_NOW)).find('.caption').element))
+    expect(old).toBe('No dated release yet. This panel fills in once a release has a date.')
     const card = await mountCard('release-before-after', FIXTURE_NOW)
     const r = rows(card)
     expect(r.get('Release')).toBe('v1.95.3 (2026-09-26)')
@@ -298,13 +319,14 @@ describe('the Pop-ups page panels ≡ their /api/popups renderings', () => {
   }
 
   it('popup-rates: every old rate row, same label, same rate and n/d (L2), the install caveat in Notes (N3)', async () => {
-    const old = await mountChart(rateTable)
-    const oldRows = old.findAll('table.rate-table tbody tr').map((tr) => {
-      const [label, pct, nd] = tr.findAll('td')
-      const noteEl = label.find('.rate-note')
-      const full = text(label.element)
-      return { label: noteEl.exists() ? norm(full.slice(0, full.length - text(noteEl.element).length)) : full, value: `${text(pct.element)} (${text(nd.element)})`, note: noteEl.exists() ? text(noteEl.element) : '' }
-    })
+    const oldRows = await golden('popups.rateTable', async () =>
+      (await mountChart(rateTable)).findAll('table.rate-table tbody tr').map((tr) => {
+        const [label, pct, nd] = tr.findAll('td')
+        const noteEl = label.find('.rate-note')
+        const full = text(label.element)
+        return { label: noteEl.exists() ? norm(full.slice(0, full.length - text(noteEl.element).length)) : full, value: `${text(pct.element)} (${text(nd.element)})`, note: noteEl.exists() ? text(noteEl.element) : '' }
+      }),
+    )
     expect(oldRows.length).toBe(6)
     const card = await mountCard('popup-rates', FIXTURE_NOW, { since: filters.since, until: filters.until, sites: [...BEST_SUDOKU_SITES], excludeOwnVisits: true, ownBrowser: 'Opera', ownOS: 'Windows' })
     const newRows = [...rows(card)].map(([label, value]) => ({ label, value }))
@@ -321,9 +343,10 @@ describe('the Pop-ups page panels ≡ their /api/popups renderings', () => {
   })
 
   it('signin-eligibility: the chart bars are the card bars (L3), plus the rate (A1)', async () => {
-    const resp = await fetchStats(eligible, filters)
-    const cfg = buildChartConfig(eligible, resp)!
-    const oldBars = (cfg.data.labels as string[]).map((l, i) => [l, String(cfg.data.datasets[0].data[i])])
+    const oldBars = await golden('popups.eligibility', async () => {
+      const cfg = buildChartConfig(eligible, await fetchStats(eligible, filters))!
+      return (cfg.data.labels as string[]).map((l, i) => [l, String(cfg.data.datasets[0].data[i])])
+    })
     expect(oldBars).toEqual([['earned', '4'], ['capped', '2'], ['unearned', '1']]) // Opera's 2 left out
     const card = await mountCard('signin-eligibility', FIXTURE_NOW, { since: filters.since, until: filters.until, sites: [...BEST_SUDOKU_SITES], excludeOwnVisits: true, ownBrowser: 'Opera', ownOS: 'Windows' })
     const r = [...rows(card)]
@@ -350,17 +373,23 @@ async function mountOldCampaigns(view: string, fresh = false) {
 
 describe('campaign-cost ≡ the bespoke cost panel', () => {
   it('same campaigns, spend, source, freshness and costs, except L4, C1, C2 (A2: the refresh action)', async () => {
-    const old = await mountOldCampaigns('cost')
-    const oldCards = old.findAll('.cost-card').map((c) => ({
-      title: text(c.find('.fc-label').element),
-      why: c.find('p.state').exists() ? text(c.find('p.state').element) : '',
-      rows: new Map(c.findAll('.cost-row:not(.fresh-row)').map((r) => [text(r.findAll('span')[0].element), text(r.findAll('span')[1].element)])),
-      fresh: text(c.find('.fresh-row').element),
-    }))
+    const oldSide = await golden('campaigns.cost', async () => {
+      const old = await mountOldCampaigns('cost', true)
+      return {
+        refresh: old.find('.ads-refresh button').exists(),
+        cards: old.findAll('.cost-card').map((c) => ({
+          title: text(c.find('.fc-label').element),
+          why: c.find('p.state').exists() ? text(c.find('p.state').element) : '',
+          rows: Object.fromEntries(c.findAll('.cost-row:not(.fresh-row)').map((r) => [text(r.findAll('span')[0].element), text(r.findAll('span')[1].element)])) as Record<string, string>,
+          fresh: text(c.find('.fresh-row').element),
+        })),
+      }
+    })
+    const oldCards = oldSide.cards
     expect(oldCards.map((c) => c.title)).toHaveLength(3)
     const card = await mountCard('campaign-cost', FIXTURE_NOW)
     expect(card.find('.mc-actions .ads-refresh button').exists()).toBe(true) // A2
-    expect(old.find('.ads-refresh button').exists()).toBe(true)
+    expect(oldSide.refresh).toBe(true)
     const newCards = card.findAll('.metric-card').map((c) => ({
       title: text(c.find('.mc-title').element),
       why: c.find('.section-title').exists() ? text(c.find('.section-title').element) : '',
@@ -372,15 +401,15 @@ describe('campaign-cost ≡ the bespoke cost panel', () => {
     for (const o of oldCards) {
       const n = newCards.find((c) => c.title === o.title)!
       expect(n.why, `${o.title}: L4 spend-only reason`).toBe(o.why)
-      expect(n.rows.get('Spend'), o.title).toBe(o.rows.get('Spend'))
-      expect(n.rows.get('Source'), o.title).toBe(o.rows.get('Source'))
+      expect(n.rows.get('Spend'), o.title).toBe(o.rows.Spend)
+      expect(n.rows.get('Source'), o.title).toBe(o.rows.Source)
       // L4: the freshness line, from the two rows (and the stale line under the date).
       const through = n.rows.get('Spend through')!
       const synced = n.rows.get('Synced')!
       const line = `${through === 'no closed spend day stored yet' ? 'No closed spend day stored yet' : `Spend through ${through}`} · ${synced === 'not synced yet' ? 'not synced yet' : `synced ${synced}`}${n.stale ? ` · ${n.stale}` : ''}`
       expect(line, `${o.title}: L4`).toBe(o.fresh)
       for (const label of ['Per arrival', 'Per auth success']) {
-        const was = o.rows.get(label)
+        const was = o.rows[label]
         const now = n.rows.get(label)
         if (o.why) {
           expect([was, now], `${o.title} ${label}: C1`).toEqual(['—', undefined])
@@ -403,28 +432,24 @@ describe('campaign-funnel ≡ the bespoke funnel panel', () => {
   interface Col {
     status: string
     lines: string[]
-    steps: Map<string, { count: string; rate: string }>
+    steps: [string, { count: string; rate: string }][]
   }
-  function oldFunnel(w: VueWrapper): Map<string, Col> {
-    return new Map(
-      w.findAll('.funnel-col').map((c) => [
-        text(c.find('.fc-label').element),
-        {
-          status: text(c.find('.fc-status').element),
-          lines: c.findAll('.tagged-hits').map((l) => text(l.element)),
-          steps: new Map(
-            c.findAll('.funnel-step').map((st) => [
-              text(st.find('.fs-label').element).replace(/ \(.*\)$/, ''),
-              { count: text(st.find('.fs-count').element), rate: st.find('.fs-rate').exists() ? text(st.find('.fs-rate').element) : '' },
-            ]),
-          ),
-        },
-      ]),
-    )
+  function oldFunnel(w: VueWrapper): [string, Col][] {
+    return w.findAll('.funnel-col').map((c) => [
+      text(c.find('.fc-label').element),
+      {
+        status: text(c.find('.fc-status').element),
+        lines: c.findAll('.tagged-hits').map((l) => text(l.element)),
+        steps: c.findAll('.funnel-step').map((st) => [
+          text(st.find('.fs-label').element).replace(/ \(.*\)$/, ''),
+          { count: text(st.find('.fs-count').element), rate: st.find('.fs-rate').exists() ? text(st.find('.fs-rate').element) : '' },
+        ]),
+      },
+    ])
   }
 
   it('same beacon campaigns, status, counts and valid rates, except F1-F3, D1, D2', async () => {
-    const old = oldFunnel(await mountOldCampaigns('funnel'))
+    const old = new Map((await golden('campaigns.funnel', async () => oldFunnel(await mountOldCampaigns('funnel', true)))).map(([t, c]) => [t, { ...c, steps: new Map(c.steps) }]))
     const card = await mountCard('campaign-funnel', FIXTURE_NOW)
     const cards = new Map(card.findAll('.metric-card').map((c) => [text(c.find('.mc-title').element), c]))
     expect([...cards.keys()]).toEqual([...old.keys()]) // the spend-only campaign is in neither
@@ -484,13 +509,14 @@ describe('campaign-funnel ≡ the bespoke funnel panel', () => {
 
 describe('campaign-country ≡ the bespoke country panel', () => {
   it('same campaigns, same step rows, same US / CA / Other counts', async () => {
-    const old = await mountOldCampaigns('country')
     const oldTables = new Map(
-      old.findAll('.country-col').map((c) => {
-        const heads = c.findAll('thead th').map((th) => text(th.element))
-        const body = c.findAll('tbody tr').map((tr) => tr.findAll('td').map((td) => text(td.element)))
-        return [text(c.find('.fc-label').element), [heads, ...body]] as const
-      }),
+      await golden('campaigns.country', async () =>
+        (await mountOldCampaigns('country', true)).findAll('.country-col').map((c) => {
+          const heads = c.findAll('thead th').map((th) => text(th.element))
+          const body = c.findAll('tbody tr').map((tr) => tr.findAll('td').map((td) => text(td.element)))
+          return [text(c.find('.fc-label').element), [heads, ...body]] as [string, string[][]]
+        }),
+      ),
     )
     expect(oldTables.size).toBe(2)
     const card = await mountCard('campaign-country', FIXTURE_NOW)
@@ -549,8 +575,7 @@ describe('campaign-returns ≡ the bespoke return-visits panel', () => {
   }
 
   it('RV1: the same campaigns, d0 and every bucket\'s rate with its n/d, as bars in bucket order', async () => {
-    const old = await mountOldCampaigns('returns')
-    const oldCols = old.findAll('.return-col').map((c) => ({ title: text(c.find('.fc-label').element), counts: text(c.find('.return-counts').element) }))
+    const oldCols = await golden('campaigns.returns', async () => (await mountOldCampaigns('returns', true)).findAll('.return-col').map((c) => ({ title: text(c.find('.fc-label').element), counts: text(c.find('.return-counts').element) })))
     expect(oldCols.map((c) => c.title)).toEqual(['US+CA web retest']) // Android's flight predates the beacon
     const card = await mountCard('campaign-returns', FIXTURE_NOW)
     const got = newReturns(card)
@@ -567,8 +592,8 @@ describe('campaign-returns ≡ the bespoke return-visits panel', () => {
   it('RV2: fewer than MIN_COHORT first loads — the d0 row and "too few to report (n/d)" on each bar', async () => {
     const few = () => bskFixture().map((r) => (String(r.path).startsWith('/return/sudoku_funnel_retest/d0') ? { ...r, n: 3 } : r))
     await withDb(few, async () => {
-      const old = await mountOldCampaigns('returns', true)
-      expect(text(old.find('.return-col .state').element)).toBe('too few to report (d0 = 3, need 5)')
+      const old = await golden('campaigns.returns.tooFew', async () => text((await mountOldCampaigns('returns', true)).find('.return-col .state').element))
+      expect(old).toBe('too few to report (d0 = 3, need 5)')
       __resetMetricsStateForTests()
       cache.clear()
       const card = await mountCard('campaign-returns', FIXTURE_NOW)
@@ -581,8 +606,8 @@ describe('campaign-returns ≡ the bespoke return-visits panel', () => {
   it('none left: "No return visits recorded yet." on both', async () => {
     const none = () => bskFixture().filter((r) => !String(r.path).startsWith('/return/'))
     await withDb(none, async () => {
-      const old = await mountOldCampaigns('returns', true)
-      expect(text(old.find('p.state').element)).toBe('No return visits recorded yet.')
+      const old = await golden('campaigns.returns.none', async () => text((await mountOldCampaigns('returns', true)).find('p.state').element))
+      expect(old).toBe('No return visits recorded yet.')
       __resetMetricsStateForTests()
       cache.clear()
       const card = await mountCard('campaign-returns', FIXTURE_NOW)
@@ -595,13 +620,21 @@ describe('campaign-returns ≡ the bespoke return-visits panel', () => {
 describe('the campaign arrivals charts ≡ their bespoke panels', () => {
   const stub = { global: { stubs: { BaseChart: { name: 'BaseChart', props: ['config', 'drillOpen'], template: '<div class="chart-stub" />' } } } }
   const configs = (w: VueWrapper) => w.findAllComponents({ name: 'BaseChart' }).map((c) => c.props('config') as ChartConfiguration)
-  async function mountOldChart(view: string) {
-    const w = mount(CampaignsWidgetBody, { props: { widget: campaignsWidget(view) }, ...stub })
-    mounted.push(w)
-    await settle()
-    await w.find('.cw-head button').trigger('click') // re-read: the old body caches per module
-    await settle()
-    return configs(w)
+  /** What an old chart drew: its axis labels and each dataset's label and values. */
+  interface Drawn {
+    labels: string[]
+    series: [string, number[]][]
+  }
+  const drawn = (cfg: ChartConfiguration): Drawn => ({ labels: cfg.data.labels as string[], series: series(cfg).map(([l, d]) => [String(l), [...d]]) })
+  async function mountOldChart(view: string): Promise<Drawn[]> {
+    return golden(`campaigns.${view}.chart`, async () => {
+      const w = mount(CampaignsWidgetBody, { props: { widget: campaignsWidget(view) }, ...stub })
+      mounted.push(w)
+      await settle()
+      await w.find('.cw-head button').trigger('click') // re-read: the old body caches per module
+      await settle()
+      return configs(w).map(drawn)
+    })
   }
   async function mountNewChart(widget: Widget) {
     const w = mount(ChartCard, { props: { widget, filters: defaultFilters(), dark: false, drillOpen: false }, ...stub })
@@ -615,22 +648,22 @@ describe('the campaign arrivals charts ≡ their bespoke panels', () => {
     const [old] = await mountOldChart('hourOfDay')
     const [neu] = await mountNewChart(hourOfDayWidget({ x: 0, y: 0, w: 12, h: 8 }))
     expect(neu.type).toBe('bar')
-    expect(neu.data.labels).toEqual(old.data.labels)
-    expect(new Map(series(neu))).toEqual(new Map(series(old)))
-    expect(series(old).length).toBe(2)
-    expect(series(old).every(([, d]) => d.some((v) => v > 0))).toBe(true)
+    expect(neu.data.labels).toEqual(old.labels)
+    expect(new Map(series(neu))).toEqual(new Map(old.series))
+    expect(old.series.length).toBe(2)
+    expect(old.series.every(([, d]) => d.some((v) => v > 0))).toBe(true)
   })
 
   it('flight day: the same days, daily arrivals and running totals, on one chart (FD1)', async () => {
     const [oldDaily, oldCum] = await mountOldChart('flightDay')
     const [neu] = await mountNewChart(flightDayWidget({ x: 0, y: 0, w: 12, h: 10 }))
     expect(neu.type).toBe('line')
-    expect(neu.data.labels).toEqual(oldDaily.data.labels)
-    expect(neu.data.labels).toEqual(oldCum.data.labels)
+    expect(neu.data.labels).toEqual(oldDaily.labels)
+    expect(neu.data.labels).toEqual(oldCum.labels)
     const daily = neu.data.datasets.filter((d) => (d as { yAxisID?: string }).yAxisID === 'y')
     const cum = neu.data.datasets.filter((d) => (d as { yAxisID?: string }).yAxisID === 'y1')
-    expect(new Map(daily.map((d) => [d.label, d.data]))).toEqual(new Map(series(oldDaily)))
-    expect(new Map(cum.map((d) => [String(d.label).replace(/ \(cumulative\)$/, ''), d.data]))).toEqual(new Map(series(oldCum)))
+    expect(new Map(daily.map((d) => [d.label, d.data]))).toEqual(new Map(oldDaily.series))
+    expect(new Map(cum.map((d) => [String(d.label).replace(/ \(cumulative\)$/, ''), d.data]))).toEqual(new Map(oldCum.series))
     expect(cum.every((d) => Array.isArray((d as { borderDash?: number[] }).borderDash))).toBe(true)
     expect(neu.data.labels).toHaveLength(8) // Day 1 to the longest flight (Android, 8 days)
   })
@@ -664,12 +697,18 @@ describe('the arrivals charts: numbers per bucket, /api/geo against /api/campaig
     vi.setSystemTime(NOW)
     cache.clear()
     try {
-      const old = new Map<string, any>()
-      for (const c of beacon) {
-        const waited: Promise<unknown>[] = []
-        const res = await campaignsPost(pagesContext(postJson('/api/campaigns', { campaignId: c.id }), { gss_geo: sqliteD1(db) } as never, waited) as never)
-        old.set(c.id, await res.json())
-      }
+      const old = new Map<string, { hourOfDayEt: number[]; daily: { day: number; arrivals: number }[] }>(
+        await golden('campaigns.arrivals.edges', async () => {
+          const out: [string, { hourOfDayEt: number[]; daily: { day: number; arrivals: number }[] }][] = []
+          for (const c of beacon) {
+            const waited: Promise<unknown>[] = []
+            const res = await campaignsPost(pagesContext(postJson('/api/campaigns', { campaignId: c.id }), { gss_geo: sqliteD1(db) } as never, waited) as never)
+            const body = (await res.json()) as { hourOfDayEt: number[]; daily: { day: number; arrivals: number }[] }
+            out.push([c.id, { hourOfDayEt: body.hourOfDayEt, daily: body.daily.map(({ day, arrivals }) => ({ day, arrivals })) }])
+          }
+          return out
+        }),
+      )
       const hourW = hourOfDayWidget({ x: 0, y: 0, w: 12, h: 8 })
       const dayW = flightDayWidget({ x: 0, y: 0, w: 12, h: 10 })
       const hour = await fetchStats(hourW, hourW.filters!)
@@ -684,7 +723,7 @@ describe('the arrivals charts: numbers per bucket, /api/geo against /api/campaig
   it('hour of day: every campaign, every ET hour, the same arrivals — DST days included', async () => {
     const { old, hour, hourCfg } = await both()
     for (const c of beacon) {
-      const want: number[] = old.get(c.id).hourOfDayEt
+      const want: number[] = old.get(c.id)!.hourOfDayEt
       const got = Array.from({ length: 24 }, (_, h) => cell(hour.rows, 'hourEt', String(h), c.id))
       expect(got, c.label).toEqual(want)
       const drawn = hourCfg.data.datasets.find((d) => d.label === c.label)!
@@ -692,17 +731,17 @@ describe('the arrivals charts: numbers per bucket, /api/geo against /api/campaig
     }
     // The edges landed where they should: both 01:00 ET buckets of the fall-back day, and 01:00
     // and 03:00 on the spring-forward day, on Android; the retest's noon arrivals at 12:00.
-    const android = old.get('24215315197').hourOfDayEt
+    const android = old.get('24215315197')!.hourOfDayEt
     expect(android[1]).toBeGreaterThanOrEqual(4 + 5 + 6)
     expect(android[3]).toBeGreaterThanOrEqual(7)
-    expect(old.get('24279250691').hourOfDayEt[11]).toBe(0) // 11:59 ET is before attribution
+    expect(old.get('24279250691')!.hourOfDayEt[11]).toBe(0) // 11:59 ET is before attribution
   })
 
   it('flight day: every campaign, every day, the same daily arrivals and running totals', async () => {
     const { old, day, dayCfg } = await both()
     const labels = dayCfg.data.labels as string[]
     for (const c of beacon) {
-      const daily: { day: number; arrivals: number }[] = old.get(c.id).daily
+      const daily: { day: number; arrivals: number }[] = old.get(c.id)!.daily
       const byDay = new Map<number, number>()
       for (const r of daily) if (r.day > 0) byDay.set(r.day, (byDay.get(r.day) ?? 0) + r.arrivals)
       const want = labels.map((_, i) => byDay.get(i + 1) ?? 0)
@@ -714,7 +753,7 @@ describe('the arrivals charts: numbers per bucket, /api/geo against /api/campaig
       const cumulative = want.map((v) => (run += v))
       expect(dayCfg.data.datasets.find((d) => d.label === `${c.label} (cumulative)`)!.data, `${c.label} cumulative`).toEqual(cumulative)
     }
-    const retest = old.get('24279250691').daily as { day: number; arrivals: number }[]
+    const retest = old.get('24279250691')!.daily as { day: number; arrivals: number }[]
     expect(retest.find((r) => r.day === 1)!.arrivals).toBe(7 + 3) // fixture's 7 plus the 12:00 ET 3, not the 11:59 2
     expect(labels).toHaveLength(8)
   })

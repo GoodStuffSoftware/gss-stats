@@ -21,6 +21,22 @@ import { insertHits, installCaches, memoryCache, openHitsDb, pagesContext, postJ
 import { bskFixture, FIXTURE_NOW } from '../../../functions/_lib/testing/bskFixture'
 import { UPSELL_SIGNEDOUT_FIX_AT } from '../../lib/adsRules'
 import type { Widget } from '../../types'
+import { writeFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import GOLDEN_FILE from './__fixtures__/slice7.upsell.golden.json'
+
+// The old table is read through `golden` (as in slice7.parity.test.ts): the live old flight-day
+// body while it exists, checked against its stored copy (SLICE7_CAPTURE=1 rewrites it).
+const GOLDEN_PATH = resolve(process.cwd(), 'src/components/metrics/__fixtures__/slice7.upsell.golden.json')
+const CAPTURE = process.env.SLICE7_CAPTURE === '1'
+const GOLDEN: Record<string, unknown> = { ...(GOLDEN_FILE as Record<string, unknown>) }
+const captured: Record<string, unknown> = {}
+async function golden<T>(key: string, live: () => Promise<T> | T): Promise<T> {
+  const value = JSON.parse(JSON.stringify(await live())) as T
+  if (CAPTURE) captured[key] = value
+  else expect(value, `live old rendering ≡ golden "${key}"`).toEqual(GOLDEN[key])
+  return value
+}
 
 const RETEST = { site: 'bestsudoku-web', campaign: 'sudoku_funnel_retest', visitor: 'returning' }
 /** Tagged upsell rows on both sides of the fix, one pair in the fix's own minute. */
@@ -56,6 +72,7 @@ afterEach(() => {
   __resetMetricsStateForTests()
 })
 afterAll(() => {
+  if (CAPTURE) writeFileSync(GOLDEN_PATH, JSON.stringify({ ...GOLDEN, ...captured }, null, 2) + '\n')
   undoCaches()
   vi.unstubAllGlobals()
   vi.useRealTimers()
@@ -75,13 +92,15 @@ describe('the upsell-fix segment section, with the fix set', () => {
 
   it('appears on the retest card only, with the old table\'s shown / accepted / dismissed on each side', async () => {
     const widget: Widget = { id: 'cw-flightday', i: 'cw-flightday', title: 'x', type: 'table', dataset: 'campaigns', view: 'flightDay', dimension: '', metric: 'pageviews', limit: 1, notes: ['arrivals-caveat', 'flight-day-caption'], x: 0, y: 0, w: 12, h: 10 }
-    const old = mount(CampaignsWidgetBody, { props: { widget } })
-    mounted.push(old)
-    await settle()
-    const segs = old.findAll('.segment')
-    expect(segs).toHaveLength(1) // the fix falls in the retest's flight only
-    expect(norm(segs[0].find('p').text())).toMatch(/^▼ US\+CA web retest: signed-out upsell fix at 2026-09-26 14:00 ET \(flight day 1\) — a funnel segment boundary/)
-    const oldRows = segs[0].findAll('tbody tr').map((tr) => tr.findAll('td').map((td) => norm(td.text())))
+    const old = await golden('flightDay.segments', async () => {
+      const w = mount(CampaignsWidgetBody, { props: { widget } })
+      mounted.push(w)
+      await settle()
+      return w.findAll('.segment').map((seg) => ({ caption: norm(seg.find('p').text()), rows: seg.findAll('tbody tr').map((tr) => tr.findAll('td').map((td) => norm(td.text()))) }))
+    })
+    expect(old).toHaveLength(1) // the fix falls in the retest's flight only
+    expect(old[0].caption).toMatch(/^▼ US\+CA web retest: signed-out upsell fix at 2026-09-26 14:00 ET \(flight day 1\) — a funnel segment boundary/)
+    const oldRows = old[0].rows
     expect(oldRows).toEqual([
       ['pre-fix', '5', '2', '1'],
       ['post-fix', '4', '0', '3'],

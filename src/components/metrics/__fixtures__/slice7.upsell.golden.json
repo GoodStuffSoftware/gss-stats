@@ -1,0 +1,21 @@
+{
+  "flightDay.segments": [
+    {
+      "caption": "▼ US+CA web retest: signed-out upsell fix at 2026-09-26 14:00 ET (flight day 1) — a funnel segment boundary: read the two sides as separate short tests.",
+      "rows": [
+        [
+          "pre-fix",
+          "5",
+          "2",
+          "1"
+        ],
+        [
+          "post-fix",
+          "4",
+          "0",
+          "3"
+        ]
+      ]
+    }
+  ]
+}

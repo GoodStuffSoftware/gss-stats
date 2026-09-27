@@ -22,8 +22,15 @@
 // (The /api/overview KPI and scorecard comparisons retired with those sections in CONFIG_VERSION
 // 10; the cards that replaced them are pinned against a golden of the retired bespoke body in
 // src/components/metrics/presets.parity.test.ts, which lists D1, D3, D4 and D5 there.)
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+//
+// /api/campaigns' side is read through `campaignsGolden`: the live handler while it exists, checked
+// against __fixtures__/campaigns.golden.json (SLICE7_CAPTURE=1 rewrites it), then — once the
+// endpoint retires with slice 7 — that stored response, captured from it on this fixture.
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { onRequestPost as campaignsPost } from './campaigns'
+import { writeFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import CAMPAIGNS_GOLDEN_FILE from './__fixtures__/campaigns.golden.json'
 import { onRequestPost as popupsPost } from './popups'
 import { onRequestPost as metricsPost } from './metrics'
 import { insertHits, installCaches, memoryCache, openHitsDb, pagesContext, postJson, sqliteD1 } from '../_lib/testing/hitsDb'
@@ -36,6 +43,22 @@ const PLAY = '24234347705'
 const RETEST = '24279250691'
 let db: ReturnType<typeof openHitsDb>
 let undoCaches: () => void
+
+const GOLDEN_PATH = resolve(process.cwd(), 'functions/api/__fixtures__/campaigns.golden.json')
+const CAPTURE = process.env.SLICE7_CAPTURE === '1'
+const GOLDEN: Record<string, unknown> = { ...(CAMPAIGNS_GOLDEN_FILE as Record<string, unknown>) }
+const captured: Record<string, unknown> = {}
+/** /api/campaigns' response for one campaign on the fixture (its `meta` left out). */
+async function campaignsGolden(id: string): Promise<any> {
+  const { meta: _meta, ...live } = await call(campaignsPost, '/api/campaigns', { campaignId: id })
+  const value = JSON.parse(JSON.stringify(live))
+  if (CAPTURE) captured[id] = value
+  else expect(value, `live /api/campaigns ≡ golden ${id}`).toEqual(GOLDEN[id])
+  return value
+}
+afterAll(() => {
+  if (CAPTURE) writeFileSync(GOLDEN_PATH, JSON.stringify({ ...GOLDEN, ...captured }, null, 2) + '\n')
+})
 
 beforeAll(() => {
   db = openHitsDb()
@@ -75,7 +98,7 @@ const STEPS = Object.keys(STEP_METRIC) as (keyof typeof STEP_METRIC)[]
 
 describe('/api/metrics ≡ /api/campaigns', () => {
   it.each(CAMPAIGNS.filter((c) => c.measurement !== 'spend-only').map((c) => [c.label, c.id] as const))('%s: counts, rates, returns, costs', async (_label, id) => {
-    const cmp = await call(campaignsPost, '/api/campaigns', { campaignId: id })
+    const cmp = await campaignsGolden(id)
     const p = { campaignId: id }
     const r = await metrics([
       { key: 'hits', metric: 'campaign.taggedHits', params: p },
@@ -120,7 +143,7 @@ describe('/api/metrics ≡ /api/campaigns', () => {
   })
 
   it('D2: the retest has no sign-in accept yet; /api/campaigns says "not instrumented", the registry says 0 of 6', async () => {
-    const cmp = await call(campaignsPost, '/api/campaigns', { campaignId: RETEST })
+    const cmp = await campaignsGolden(RETEST)
     const { accept } = await metrics([{ key: 'accept', ratio: 'campaign.acceptPerAsk', params: { campaignId: RETEST } }])
     expect(cmp.funnel.notInstrumented).toContain('accept')
     expect(cmp.funnel.rates.accept).toBeNull()
@@ -128,14 +151,14 @@ describe('/api/metrics ≡ /api/campaigns', () => {
   })
 
   it('D1: the install rate — same numerator, row-exact denominator', async () => {
-    const cmp = await call(campaignsPost, '/api/campaigns', { campaignId: RETEST })
+    const cmp = await campaignsGolden(RETEST)
     const { rate } = await metrics([{ key: 'rate', ratio: 'campaign.installPerPrompt', params: { campaignId: RETEST } }])
     expect(cmp.funnel.installPromptPostFixCount).toBe(4)
     expect(rate).toMatchObject({ numerator: cmp.funnel.counts.install, denominator: 9 })
   })
 
   it('D4: the spend-only campaign — spend matches, every beacon metric is unmeasured', async () => {
-    const cmp = await call(campaignsPost, '/api/campaigns', { campaignId: PLAY })
+    const cmp = await campaignsGolden(PLAY)
     const p = { campaignId: PLAY }
     const r = await metrics([
       { key: 'spend', metric: 'campaign.spend', params: p },
