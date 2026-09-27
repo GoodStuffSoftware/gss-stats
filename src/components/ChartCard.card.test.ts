@@ -74,12 +74,30 @@ describe('ChartCard × metric card', () => {
     expect(Date.parse(until!) - Date.parse(since!)).toBeLessThanOrEqual(399 * 86_400_000)
   })
 
-  it("the header's ↻ reloads the card: a fresh batch", async () => {
-    const w = mountCard()
+  it("one reload control per card: the scorecard (no freshness line) uses the header's ↻, which reloads the card", async () => {
+    const w = mountCard({ ...kpiWidget, id: 'ow-scorecard', i: 'ow-scorecard', view: 'scorecard', card: { preset: 'campaign-scorecard' } })
     await settle()
+    expect(w.findAll('button[title="Reload"]')).toHaveLength(1)
+    expect(w.find('button.mc-reload').exists()).toBe(false)
     await w.find('button[title="Reload"]').trigger('click')
     await settle()
     expect(bodies.some((b) => b.fresh === true)).toBe(true)
+  })
+
+  it("one reload control per card: the KPI card shows its own \"Updated ↻\", so the header's ↻ is hidden", async () => {
+    const w = mountCard()
+    await settle()
+    expect(w.find('button[title="Reload"]').exists()).toBe(false)
+    expect(w.findAll('button.mc-reload')).toHaveLength(1)
+    await w.find('button.mc-reload').trigger('click')
+    await settle()
+    expect(bodies.some((b) => b.fresh === true)).toBe(true)
+  })
+
+  it("an untitled card's Notes toggle is named after the widget", async () => {
+    const w = mountCard()
+    await settle()
+    expect(w.find('button.mc-notes-toggle').attributes('aria-label')).toBe('Notes: Today at a glance')
   })
 
   it('keeps zoom and reveal, and has no per-chart filter button', async () => {

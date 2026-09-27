@@ -16,6 +16,7 @@ import FilterPopover from './FilterPopover.vue'
 import OverviewWidgetBody from './widgets/OverviewWidgetBody.vue'
 import MetricCard from './metrics/MetricCard.vue'
 import { metricsContextFor } from '../lib/metrics/pageContext'
+import { presetById } from '../lib/metrics/presets'
 import CampaignsWidgetBody from './widgets/CampaignsWidgetBody.vue'
 import NoteWidgetBody from './widgets/NoteWidgetBody.vue'
 import AdsReadingsWidgetCard from './widgets/AdsReadingsWidgetCard.vue'
@@ -41,6 +42,14 @@ const metricsContext = computed(() => {
   return metricsContextFor({ since: f.since, until: f.until }, resolveSelection(props.widget.siteSel ?? f.siteSel).tags)
 })
 const metricCard = ref<{ reload(): void } | null>(null)
+/** A card that shows its own "Updated … ↻" (CardSpec.showUpdated) has its reload there; the
+ * header's ↻ would be a second control for the same action, so it is hidden for that card. */
+const cardHasOwnReload = computed(() => {
+  const c = props.widget.card
+  if (!c) return false
+  const spec = 'preset' in c ? presetById(c.preset) : c.spec
+  return !!spec?.showUpdated
+})
 function reloadThis() {
   if (isCard.value) metricCard.value?.reload()
   else load()
@@ -479,7 +488,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
               <path d="M1.5 2.5h13l-5 6v4.2l-3 1.5V8.5z" fill="currentColor" />
             </svg>
           </button>
-          <button v-if="!isBespokeBody || isCard" class="btn-ghost icon" title="Reload" @click.stop="reloadThis">↻</button>
+          <button v-if="!isBespokeBody || (isCard && !cardHasOwnReload)" class="btn-ghost icon" title="Reload" @click.stop="reloadThis">↻</button>
           <div class="menu-anchor">
             <button class="btn-ghost icon" title="Options" @click.stop="menuOpen = !menuOpen">⋯</button>
             <div v-if="menuOpen" class="menu" @click.stop>
@@ -537,7 +546,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
     <div class="card-body" @dblclick="onCardBodyDblClick">
       <!-- Bespoke bodies: overview / campaigns / ads-readings datasets, and the note type —
            own data fetch (or none), skip the generic loading/error/empty states above. -->
-      <MetricCard v-if="widget.card" ref="metricCard" :card-ref="widget.card" :context="metricsContext" @open-campaigns="emit('open-campaigns')" />
+      <MetricCard v-if="widget.card" ref="metricCard" :card-ref="widget.card" :context="metricsContext" :fallback-title="widget.title" @open-campaigns="emit('open-campaigns')" />
       <OverviewWidgetBody v-else-if="widget.dataset === 'overview'" :widget="widget" :filters="effectiveFilters" :dark="dark" />
       <CampaignsWidgetBody v-else-if="widget.dataset === 'campaigns'" :widget="widget" />
       <AdsReadingsWidgetCard v-else-if="widget.dataset === 'ads-readings'" :widget="widget" />

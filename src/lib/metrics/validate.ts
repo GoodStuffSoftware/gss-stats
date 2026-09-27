@@ -91,6 +91,7 @@ export function validateCard(spec: CardSpec): string[] {
     const k = kindOf(b)
     if (!k) return void errors.push(`${where}: unknown data id`)
     if (!DISPLAYS_FOR[k].includes(d.as)) errors.push(`${where}: display '${d.as}' not allowed for a ${k}`)
+    if (d.as === 'percent' && d.decimals !== undefined && !(Number.isInteger(d.decimals) && d.decimals >= 0 && d.decimals <= 4)) errors.push(`${where}: decimals must be an integer from 0 to 4`)
     if ('field' in b) return
     const isMetric = 'metric' in b
     const allowedParams = isMetric ? METRICS.get(b.metric)!.params : ratioParamsOf(RATIOS.get(b.ratio)!)

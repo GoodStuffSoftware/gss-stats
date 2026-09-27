@@ -1114,8 +1114,12 @@ callback, which is the v0.8.0 `campaignsData` leak this module exists to avoid.
   honours and the server would refuse if malformed). Its header ↻ calls the card's `reload()`;
   zoom and reveal are unchanged; the per-chart filter button stays hidden, as for the panels.
 - The KV backup needed no change: `functions/api/config.ts` already copies the stored layout to
-  `dashboard:default:backup:v<stored>` on the first save of a newer version, so the first v10
-  save writes `backup:v9`; its 400/409 guards read `CONFIG_VERSION`.
+  `dashboard:default:backup:v<stored>` on the first save of a newer version; its 400/409 guards
+  read `CONFIG_VERSION`. The key is named after the version that was stored, not the previous
+  release: production was still stored at v8 with no backup keys (review, 2026-09-27), so unless
+  a v0.9.0 save happens first, the first v10 save writes `backup:v8`. A code rollback to v0.9.0
+  also needs that layout restored, since v0.9.0 gets 409 on a v10 layout (README, "Restoring a
+  layout backup").
 - Retired with the panels: the `kpis` and `scorecard` branches of `OverviewWidgetBody`, the KPI
   and scorecard sections of `/api/overview` (its minute-bucket KPI query and the per-campaign
   scorecard queries; the endpoint now serves only the release panel), `OverviewKpiTile`,

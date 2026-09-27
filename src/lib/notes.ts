@@ -368,6 +368,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'counted-from': 'counted from {from}',
     'install-fix-note': INSTALL_FIX_NOTE,
     'new-today': 'new today',
+    'no-comparison-yet': 'no comparison yet (first day partial)',
     'metric-unavailable': 'unavailable',
     'not-started': 'not started',
     'no-tracked-campaign-flighting': 'no beacon-tracked campaign flighting today',
