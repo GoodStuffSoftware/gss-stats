@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-09-27
+
 ### Changed
 - **The main filter bar is back**, always visible in normal flow under the page tabs, exactly
   as it was before it was hidden behind a top-right toggle. If it scrolls out of view, a small
