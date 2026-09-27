@@ -25,7 +25,6 @@ import {
   postflightDueDate,
   readingId,
   readPlanFor,
-  releaseHealthGate,
   resolveCampaignSpend,
   RETEST_APPROVED_PLACEMENTS,
   RETEST_CAMPAIGN_ID,
@@ -504,14 +503,13 @@ describe('Play "not yet seen" (no expected date encoded)', () => {
 })
 
 describe('release health (missing child of a non-zero parent)', () => {
-  it('never evaluates between 01:00 and 12:00 ET', () => {
-    expect(releaseHealthGate(H('2026-09-27T12:00:00Z')).evaluate).toBe(false) // 08:00 ET
-    expect(releaseHealthGate(H('2026-09-27T05:00:00Z')).evaluate).toBe(false) // 01:00 ET
-    expect(releaseHealthGate(H('2026-09-27T15:59:00Z')).evaluate).toBe(false) // 11:59 ET
-    expect(releaseHealthGate(H('2026-09-27T16:00:00Z')).evaluate).toBe(true) // 12:00 ET
-    expect(releaseHealthGate(H('2026-09-28T03:30:00Z')).evaluate).toBe(true) // 23:30 ET
-    expect(releaseHealthGate(H('2026-09-28T04:30:00Z')).evaluate).toBe(true) // 00:30 ET
-  })
+  // The [1, 12) ET "quiet window" gate (releaseHealthGate/HEALTH_QUIET_WINDOW_ET) was RETIRED
+  // 2026-09-27 when the 23:15 ET backstop entry was folded into a single daily morning read:
+  // it existed only to defer evaluation from an 08:00 run to a separate 23:15 run, and with
+  // one run left it would have silently suppressed release health forever at whatever hour
+  // that run is scheduled (08:00, then moved same-day to 06:00). Maturity is enforced
+  // independently below via parentAgeHours against event timestamps, not the clock — see
+  // scripts/ads-reads/read.test.ts for the end-to-end "evaluates regardless of hour" case.
   it('parent zero never alerts; a child clears; small parents only watch; big parents with no child alert', () => {
     const res = evaluateHealthPairs([
       { id: 'a', parentLabel: 'p', parent: 0, childLabel: 'c', children: 0 },

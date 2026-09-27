@@ -14,7 +14,7 @@
 // login-customer-id header is never sent, and GOOGLE_ADS_LOGIN_CUSTOMER_ID is never read
 // (buildHeaders asserts it).
 
-import { ADS_API_VERSION, ADS_CUSTOMER_ID, APPROVED_PLACEMENTS_BY_CAMPAIGN, assertKnownCampaign, isApprovedPlacement, readPlanFor, type SpendDay } from './adsRules'
+import { ADS_API_VERSION, ADS_CUSTOMER_ID, APPROVED_PLACEMENTS_BY_CAMPAIGN, assertKnownCampaign, isApprovedPlacement, readPlanFor, round2, microsToDollars, type SpendDay } from './adsRules'
 import type { PlacementDayRow } from './adsStore'
 import { redact, registerSecret } from './adsRedact'
 
@@ -264,4 +264,199 @@ export function splitPlacements(rows: readonly PlacementDayRow[], throughEt: str
     agg.set(r.placement, a)
   }
   return { itemizedCost: itemized / 1e6, approvedCost: approved / 1e6, byPlacement: [...agg.values()].sort((a, b) => b.costMicros - a.costMicros) }
+}
+
+// ── Diagnostic depth (informational only — REPORT LINES, never a kill rule or an automatic
+// action; contract sections 12-13 are frozen). Ported from best-sudoku's
+// scripts/marketing/ads-api-report.mjs (the old campaigns' `hourly`/`geo`/`devices`/
+// `targeting` sub-reads), onto this REST client. A failure in any of these is caught by the
+// caller (scripts/ads-reads/read.ts wraps each in `attempt()`) and reported as an
+// unavailable diagnostic; it never blocks the spend/kill-rule read these sit alongside. ─────
+
+export interface HourlyRow {
+  date: string
+  hour: number // 0-23, account time zone (America/New_York for this account)
+  impressions: number
+  clicks: number
+  ctr: number
+  cost: number // dollars
+}
+/** Per (day, hour) delivery in ACCOUNT time zone. Diagnostic depth restored for the closed
+ * day (R2): pass since === until === the closed ET day being reported on. */
+export async function fetchHourly(client: AdsClient, campaignId: string, since: string, until: string): Promise<HourlyRow[]> {
+  assertKnownCampaign(campaignId)
+  checkRange(since, until)
+  const rows = await client.search(
+    `SELECT segments.date, segments.hour, metrics.impressions, metrics.clicks, metrics.ctr, metrics.cost_micros FROM campaign WHERE campaign.id = ${campaignId} AND segments.date BETWEEN '${since}' AND '${until}' ORDER BY segments.date, segments.hour`,
+  )
+  return rows
+    .map((r): HourlyRow => ({
+      date: r.segments?.date,
+      hour: Number(r.segments?.hour ?? 0),
+      impressions: Number(r.metrics?.impressions ?? 0),
+      clicks: Number(r.metrics?.clicks ?? 0),
+      ctr: Number(r.metrics?.ctr ?? 0),
+      cost: microsToDollars(r.metrics?.costMicros ?? 0),
+    }))
+    .filter((r) => typeof r.date === 'string' && DATE_RE.test(r.date) && (r.impressions > 0 || r.cost > 0))
+}
+
+export interface GeoRow {
+  criterionId: string
+  country: string
+  countryCode: string
+  impressions: number
+  clicks: number
+  ctr: number
+  cost: number // dollars
+  /** A live location bid-modifier check: 0.25 means minus 75%; null = no adjustment on record. */
+  bidModifier: number | null
+  bidAdjustmentPct: number | null
+}
+/** Per-country delivery, joined to the LIVE location bid modifier (campaign_criterion, not the
+ * report row itself — Ads reports these separately). Diagnostic depth restored for the closed
+ * day (R2); also the live location bid-modifier check. */
+export async function fetchGeo(client: AdsClient, campaignId: string, since: string, until: string): Promise<GeoRow[]> {
+  assertKnownCampaign(campaignId)
+  checkRange(since, until)
+  const rows = await client.search(
+    `SELECT campaign.id, geographic_view.country_criterion_id, metrics.impressions, metrics.clicks, metrics.ctr, metrics.cost_micros FROM geographic_view WHERE campaign.id = ${campaignId} AND segments.date BETWEEN '${since}' AND '${until}'`,
+  )
+  const crits = await client.search(
+    `SELECT campaign.id, campaign_criterion.location.geo_target_constant, campaign_criterion.bid_modifier, campaign_criterion.negative FROM campaign_criterion WHERE campaign.id = ${campaignId} AND campaign_criterion.type = LOCATION`,
+  )
+  const modifiers = new Map<string, number | undefined>()
+  for (const c of crits) {
+    const id = String(c.campaignCriterion?.location?.geoTargetConstant ?? '').split('/').pop()
+    if (id) modifiers.set(id, c.campaignCriterion?.bidModifier)
+  }
+
+  const ids = [...new Set(rows.map((r) => String(r.geographicView?.countryCriterionId)))].filter((id) => id && id !== 'undefined')
+  const names = new Map<string, { name: string; code: string }>()
+  if (ids.length) {
+    const consts = await client.search(
+      `SELECT geo_target_constant.id, geo_target_constant.name, geo_target_constant.country_code FROM geo_target_constant WHERE geo_target_constant.id IN (${ids.join(',')})`,
+    )
+    for (const g of consts) {
+      names.set(String(g.geoTargetConstant?.id), { name: g.geoTargetConstant?.name ?? '', code: g.geoTargetConstant?.countryCode ?? '' })
+    }
+  }
+
+  const agg = new Map<string, { impressions: number; clicks: number; cost: number }>()
+  for (const r of rows) {
+    const id = String(r.geographicView?.countryCriterionId)
+    const a = agg.get(id) ?? { impressions: 0, clicks: 0, cost: 0 }
+    a.impressions += Number(r.metrics?.impressions ?? 0)
+    a.clicks += Number(r.metrics?.clicks ?? 0)
+    a.cost += microsToDollars(r.metrics?.costMicros ?? 0)
+    agg.set(id, a)
+  }
+
+  return [...agg]
+    .map(([id, a]): GeoRow => {
+      const mod = modifiers.get(id)
+      return {
+        criterionId: id,
+        country: names.get(id)?.name || id,
+        countryCode: names.get(id)?.code || '',
+        impressions: a.impressions,
+        clicks: a.clicks,
+        ctr: a.impressions ? a.clicks / a.impressions : 0,
+        cost: round2(a.cost),
+        bidModifier: mod === undefined || mod === null ? null : Number(mod),
+        bidAdjustmentPct: mod === undefined || mod === null ? null : Math.round((Number(mod) - 1) * 100),
+      }
+    })
+    .sort((a, b) => b.cost - a.cost)
+}
+
+export interface DeviceRow {
+  device: string // MOBILE | TABLET | DESKTOP | CONNECTED_TV | OTHER (REST API returns the enum name directly)
+  impressions: number
+  clicks: number
+  ctr: number
+  cost: number // dollars
+}
+/** Per-device delivery. Computers (DESKTOP) and Connected TV must read zero for a mobile-app
+ * placement campaign (R2); the caller flags otherwise, never this function. */
+export async function fetchDevices(client: AdsClient, campaignId: string, since: string, until: string): Promise<DeviceRow[]> {
+  assertKnownCampaign(campaignId)
+  checkRange(since, until)
+  const rows = await client.search(
+    `SELECT segments.device, metrics.impressions, metrics.clicks, metrics.ctr, metrics.cost_micros FROM campaign WHERE campaign.id = ${campaignId} AND segments.date BETWEEN '${since}' AND '${until}'`,
+  )
+  const agg = new Map<string, { impressions: number; clicks: number; cost: number }>()
+  for (const r of rows) {
+    const d = String(r.segments?.device ?? 'UNSPECIFIED')
+    const a = agg.get(d) ?? { impressions: 0, clicks: 0, cost: 0 }
+    a.impressions += Number(r.metrics?.impressions ?? 0)
+    a.clicks += Number(r.metrics?.clicks ?? 0)
+    a.cost += microsToDollars(r.metrics?.costMicros ?? 0)
+    agg.set(d, a)
+  }
+  return [...agg].map(([device, a]): DeviceRow => ({
+    device,
+    impressions: a.impressions,
+    clicks: a.clicks,
+    ctr: a.impressions ? a.clicks / a.impressions : 0,
+    cost: round2(a.cost),
+  }))
+}
+
+export interface TargetingRow {
+  adGroup: string
+  status: string | null
+  /** PLACEMENT + MOBILE_APPLICATION criteria (these ad groups target apps, which come back as
+   * MOBILE_APPLICATION, not PLACEMENT — counting only PLACEMENT silently reads zero). */
+  placements: number
+  /** Optimized targeting shows up as the audience dimension's bid_only flag going false
+   * (Google's "observation" setting is bid_only === true). null = no audience restriction row
+   * on record (nothing to read either way). */
+  audienceBidOnly: boolean | null
+}
+/** Ad-group targeting verification (R2): optimized targeting off, live placement counts. Reads
+ * the setting without opening the Ads UI targeting editor (the old routine's LEARNED (20): the
+ * editor itself risked Google flipping Optimized targeting back on on Save). */
+export async function fetchTargeting(client: AdsClient, campaignId: string): Promise<TargetingRow[]> {
+  assertKnownCampaign(campaignId)
+  const rows = await client.search(
+    `SELECT ad_group.id, ad_group.name, ad_group.status, ad_group.targeting_setting.target_restrictions FROM ad_group WHERE campaign.id = ${campaignId}`,
+  )
+  const counts = await client.search(
+    `SELECT campaign.id, ad_group.name, ad_group_criterion.criterion_id, ad_group_criterion.type FROM ad_group_criterion WHERE campaign.id = ${campaignId} AND ad_group_criterion.negative = false AND ad_group_criterion.type IN (PLACEMENT, MOBILE_APPLICATION)`,
+  )
+  const placementCount = new Map<string, number>()
+  for (const c of counts) {
+    const n = c.adGroup?.name
+    if (n) placementCount.set(n, (placementCount.get(n) ?? 0) + 1)
+  }
+  return rows.map((r): TargetingRow => {
+    const restrictions: any[] = r.adGroup?.targetingSetting?.targetRestrictions ?? []
+    const audience = restrictions.find((t) => String(t.targetingDimension ?? '').includes('AUDIENCE'))
+    return {
+      adGroup: r.adGroup?.name ?? '',
+      status: r.adGroup?.status ?? null,
+      placements: placementCount.get(r.adGroup?.name) ?? 0,
+      audienceBidOnly: audience ? Boolean(audience.bidOnly) : null,
+    }
+  })
+}
+
+export interface RecommendationRow {
+  type: string | null
+  resourceName: string | null
+}
+/** Lists the Google Ads Recommendations queued for this campaign (R3), read-only. Applies and
+ * dismisses NOTHING — there is no mutate call in this module by construction. The standing
+ * verdicts (never re-derived, never applied) are documented alongside where this is reported:
+ * scripts/ads-reads/report.ts RECOMMENDATION_STANDING_VERDICTS. The recommendation resource is
+ * queried unfiltered and matched client-side against this campaign's resource name, since its
+ * filterable fields are not documented as including campaign.id. */
+export async function fetchRecommendations(client: AdsClient, customerId: string, campaignId: string): Promise<RecommendationRow[]> {
+  assertKnownCampaign(campaignId)
+  const rows = await client.search(`SELECT recommendation.resource_name, recommendation.type, recommendation.campaign FROM recommendation`)
+  const campaignResource = `customers/${customerId}/campaigns/${campaignId}`
+  return rows
+    .filter((r) => r.recommendation?.campaign === campaignResource)
+    .map((r): RecommendationRow => ({ type: r.recommendation?.type ?? null, resourceName: r.recommendation?.resourceName ?? null }))
 }

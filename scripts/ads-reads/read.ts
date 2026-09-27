@@ -37,7 +37,7 @@ import {
   readingEntryKind,
   readingId,
   readPlanFor,
-  releaseHealthGate,
+  RETEST_AD_GROUP_PLACEMENT_COUNTS,
   round2,
   AUTH_NEW_EXISTING_LIVE_AT,
   campaignSignUps,
@@ -84,7 +84,7 @@ import type { AdsStore, AppendOutcome, PlacementDayRow } from '../../src/lib/ads
 import { ARRIVALS_CAVEAT, costPer, etMidnightUtcMs, etTimeUtcMs, funnelStepRates, type CampaignFlight, type FunnelStepKey } from '../../src/lib/campaigns'
 import { etDateFromMs, gateRate, SMALL_SAMPLE_NOTE, type GatedRate, type HourPathCount } from '../../src/lib/popupEvents'
 import { addEtDays } from '../../src/lib/overview'
-import { splitPlacements, type CampaignStatus } from '../../src/lib/adsApi'
+import { splitPlacements, type CampaignStatus, type DeviceRow, type GeoRow, type HourlyRow, type RecommendationRow, type TargetingRow } from '../../src/lib/adsApi'
 import { syncAdsData, type AdsMetricsSource, type CampaignSyncResult, type SyncResult } from '../../src/lib/adsSync'
 import type { SyncSource } from '../../src/lib/adsStore'
 import type { BeaconSource } from './beacon'
@@ -92,9 +92,17 @@ import type { FirebaseCounts } from './firebase'
 import { redact, summarizeError } from '../../src/lib/adsRedact'
 
 // ── Dependencies ─────────────────────────────────────────────────────────────────────────
-/** The Ads API as the reads see it: the metrics the shared sync pulls, plus campaign status. */
+/** The Ads API as the reads see it: the metrics the shared sync pulls, plus campaign status.
+ * The five diagnostic methods (R2/R3) are OPTIONAL: a fixture or an older AdsSource without
+ * them simply reports that diagnostic as unavailable (diagnosticsRead() below), never fails
+ * the read they sit alongside. */
 export interface AdsSource extends AdsMetricsSource {
   status(campaignId: string): Promise<CampaignStatus>
+  hourly?(campaignId: string, since: string, until: string): Promise<HourlyRow[]>
+  geo?(campaignId: string, since: string, until: string): Promise<GeoRow[]>
+  devices?(campaignId: string, since: string, until: string): Promise<DeviceRow[]>
+  targeting?(campaignId: string): Promise<TargetingRow[]>
+  recommendations?(campaignId: string): Promise<RecommendationRow[]>
 }
 export interface FirebaseSource {
   /** cohortTiersAtMs: also read the day-15/30/60 cohort-by-tier COUNTs as of that instant. */
@@ -215,6 +223,29 @@ export interface HealthSection {
   alerts: number
   /** true when a beacon read the check needed failed (not a gate or a no-ads day). */
   readError?: boolean
+}
+// ── Diagnostic depth (R2/R3/R5/R8): every field below is a REPORT LINE only — none of it
+// feeds a kill rule or an automatic proposal (contract sections 12-13 are frozen). Each
+// sub-read is independently best-effort: one failing (a GAQL syntax issue, a missing
+// credential, a beacon timeout) is recorded in `errors` and never blocks the others or the
+// spend/kill-rule read this section sits alongside.
+export interface DiagnosticsSection {
+  /** The closed ET day these Ads sub-reads cover (null when there is no closed day yet). */
+  spendThroughEt: string | null
+  hourly: HourlyRow[] | null
+  geo: GeoRow[] | null
+  devices: DeviceRow[] | null
+  /** null entries: build-spec expected count (RETEST_AD_GROUP_PLACEMENT_COUNTS), for the
+   * "placement count matches the build spec" check (R2) — never for an unknown ad group. */
+  targeting: (TargetingRow & { expectedPlacements: number | null })[] | null
+  recommendations: RecommendationRow[] | null
+  /** Beacon-attributed arrivals by country, aggregate counts only (R5). */
+  countryCounts: { country: string; count: number }[] | null
+  /** R8: a same-day cross-check of Firestore's new-account COUNT for the closed ET day against
+   * the beacon's /auth/success/*\/new count for the same day. Both are counts; never joined to
+   * an individual. null when --firebase-sa was not given or the cohort code path is blocked. */
+  accountCrossCheck: { etDate: string; firestoreNewAccounts: number | null; beaconAuthSuccessNew: number | null; note: string } | null
+  errors: string[]
 }
 export interface Notify {
   push: boolean
@@ -553,8 +584,8 @@ async function releaseHealth(
   cached: { siteRows?: Attempt<HourPathCount[]>; returns?: Attempt<ReturnSummary> },
   opts: { minParent: number; parentAgeHours: number; servedToday: boolean | null; requireServedToday: boolean },
 ): Promise<HealthSection> {
-  const gate = releaseHealthGate(deps.nowMs)
-  if (!gate.evaluate) return { evaluated: false, reason: gate.reason, results: null, alerts: 0 }
+  // No time-of-day gate (retired 2026-09-27, src/lib/adsRules.ts): parent/child maturity is
+  // enforced below by parentAgeHours against event timestamps, not the clock.
   if (opts.requireServedToday && opts.servedToday !== true) {
     return { evaluated: false, reason: opts.servedToday === false ? 'not evaluated: no ads served today' : 'not evaluated: could not tell whether ads served today', results: null, alerts: 0 }
   }
@@ -571,7 +602,70 @@ async function releaseHealth(
   const site = summarizeSiteEvents(siteRows.value, maturedBefore)
   const arrivalsMatured = tagged.value.filter((r) => r.visitor === 'new' && r.hourStartMs + 2 * 3_600_000 <= deps.nowMs).reduce((a, r) => a + r.count, 0)
   const results = evaluateHealthPairs(buildHealthPairs({ site, taggedArrivalsMatured: arrivalsMatured, returnD0Web: returns.value.web.d0 }), opts.minParent)
-  return { evaluated: true, reason: gate.reason, results, alerts: results.filter((r) => r.status === 'alert').length }
+  return { evaluated: true, reason: 'evaluated', results, alerts: results.filter((r) => r.status === 'alert').length }
+}
+
+/** R2/R3/R5/R8: informational-only diagnostic depth for the closed ET day. Every sub-read is
+ * independently best-effort (attempt()); a failure is recorded in `errors` and reported, never
+ * thrown, and never affects the spend/kill-rule read or `notify`. Skipped entirely in
+ * health-only (backstop) mode. */
+async function diagnosticsRead(
+  deps: ReadDeps,
+  campaign: CampaignFlight,
+  campaignId: string,
+  spendThroughEt: string | null,
+  taggedRows: Attempt<TaggedRow[]>,
+): Promise<DiagnosticsSection> {
+  const errors: string[] = []
+  const ads = deps.ads
+  const since = spendThroughEt
+  const until = spendThroughEt
+
+  const hourly = ads?.hourly && since && until ? await attempt('ads hourly', () => ads.hourly!(campaignId, since, until)) : null
+  if (hourly && !hourly.ok) errors.push(hourly.error)
+  const geo = ads?.geo && since && until ? await attempt('ads geo', () => ads.geo!(campaignId, since, until)) : null
+  if (geo && !geo.ok) errors.push(geo.error)
+  const devices = ads?.devices && since && until ? await attempt('ads devices', () => ads.devices!(campaignId, since, until)) : null
+  if (devices && !devices.ok) errors.push(devices.error)
+  const targeting = ads?.targeting ? await attempt('ads targeting', () => ads.targeting!(campaignId)) : null
+  if (targeting && !targeting.ok) errors.push(targeting.error)
+  const recommendations = ads?.recommendations ? await attempt('ads recommendations', () => ads.recommendations!(campaignId)) : null
+  if (recommendations && !recommendations.ok) errors.push(recommendations.error)
+
+  const beacon = deps.beacon
+  const country = beacon?.countryCounts ? await attempt('beacon country', () => beacon.countryCounts!(campaign)) : null
+  if (country && !country.ok) errors.push(country.error)
+
+  let accountCrossCheck: DiagnosticsSection['accountCrossCheck'] = null
+  if (spendThroughEt && deps.firebase) {
+    const dayStart = etMidnightUtcMs(spendThroughEt)
+    const dayEnd = etMidnightUtcMs(addEtDays(spendThroughEt, 1))
+    const fb = await attempt('firebase day cross-check', () => deps.firebase!.counts(dayStart, dayEnd))
+    if (!fb.ok) errors.push(fb.error)
+    else {
+      const beaconNew = taggedRows.ok ? summarizeTaggedRows(taggedRows.value, { fromMs: dayStart, toMs: dayEnd }).authSuccessSplit.new : null
+      accountCrossCheck = {
+        etDate: spendThroughEt,
+        firestoreNewAccounts: fb.value.newAccountsInWindow,
+        beaconAuthSuccessNew: beaconNew,
+        note: 'counts only, never joined to an individual; the beacon count is campaign-attributed, the Firestore count is sitewide, so the Firestore count is always >= the beacon count',
+      }
+    }
+  } else if (spendThroughEt && !deps.firebase) {
+    errors.push('account cross-check: not read (--firebase-sa not given)')
+  }
+
+  return {
+    spendThroughEt,
+    hourly: hourly?.ok ? hourly.value : null,
+    geo: geo?.ok ? geo.value : null,
+    devices: devices?.ok ? devices.value : null,
+    targeting: targeting?.ok ? targeting.value.map((t) => ({ ...t, expectedPlacements: RETEST_AD_GROUP_PLACEMENT_COUNTS[t.adGroup] ?? null })) : null,
+    recommendations: recommendations?.ok ? recommendations.value : null,
+    countryCounts: country?.ok ? country.value : null,
+    accountCrossCheck,
+    errors,
+  }
 }
 
 export interface DedupSection {
@@ -622,9 +716,10 @@ async function appendReadings(
 // ── morning-read ─────────────────────────────────────────────────────────────────────────
 export interface MorningOptions {
   campaignId: string
-  /** 'auto' evaluates release health when the ET clock allows; 'skip' never does. */
+  /** 'auto' evaluates release health unconditionally (no time-of-day gate since 2026-09-27); 'skip' never does. */
   releaseHealth: 'auto' | 'skip'
-  /** Backstop mode: status + today's spend + release health only (run after 23:00 ET). */
+  /** Manual/diagnostic mode retained from the retired 23:15 ET backstop entry: status + today's
+   * spend + release health only. No longer scheduled (folded into the single daily read). */
   healthOnly: boolean
   healthMinParent: number
   healthParentAgeHours: number
@@ -645,6 +740,7 @@ export interface MorningResult {
   thresholdRead: FullRead | null
   hardCapDaily: RuleResult | null
   releaseHealth: HealthSection
+  diagnostics: DiagnosticsSection
   play: PlayReturnStatus | null
   store: StoreSection
   /** Short names of the reads that failed this run — any entry pushes. */
@@ -838,6 +934,10 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
     else if (!errors.includes(rs.error)) errors.push(rs.error)
   }
 
+  const diagnostics: DiagnosticsSection = opts.healthOnly
+    ? { spendThroughEt: null, hourly: null, geo: null, devices: null, targeting: null, recommendations: null, countryCounts: null, accountCrossCheck: null, errors: [] }
+    : await diagnosticsRead(deps, campaign, plan.campaignId, spend.throughEt, taggedRows)
+
   const servedToday = spend.ok ? (spend.todayPartial?.cost ?? 0) > 0 : null
   const health: HealthSection =
     opts.releaseHealth === 'skip'
@@ -971,6 +1071,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
     thresholdRead,
     hardCapDaily,
     releaseHealth: health,
+    diagnostics,
     play,
     store: {
       kind: deps.store.kind,
