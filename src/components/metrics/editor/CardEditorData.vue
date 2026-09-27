@@ -3,7 +3,7 @@
 // searchable, unit shown), a ratio (ONLY registered ratios — so an invalid percentage literally
 // cannot be built), or a scope field. Params inherited from a repeat show as a chip with an
 // override; the window select lists only the binding's own allowed windows.
-import { computed, ref } from 'vue'
+import { computed, ref, useId } from 'vue'
 import {
   CAMPAIGN_ID_OPTIONS,
   dataBindingKind,
@@ -19,13 +19,19 @@ import {
 } from '../../../lib/metrics/editorModel'
 import { metricWindows, type MetricParam } from '../../../lib/metrics/metrics'
 import { ratioParamsOf, ratioWindowsOf } from '../../../lib/metrics/ratios'
-import type { DataBinding, ParamValue, RepeatSpec, ScopePath, WindowSpec } from '../../../lib/metrics/types'
+import type { DataBinding, ParamValue, RepeatSpec, ScopePath, WindowName } from '../../../lib/metrics/types'
 
 // Vue casts an absent, optional BOOLEAN prop to `false` (not `undefined`) — the same rule native
 // HTML boolean attributes follow — so `allowField`'s "default true" needs `withDefaults`, not an
 // inline `?? true` (which would never fire: `false ?? true` is `false`).
 const props = withDefaults(defineProps<{ repeatOver?: RepeatSpec['over']; allowField?: boolean; fieldOnly?: boolean }>(), { allowField: true })
 const data = defineModel<DataBinding>({ required: true })
+
+const groupId = useId()
+const metricSearchId = useId()
+const ratioSearchId = useId()
+const fieldSelectId = useId()
+const windowId = useId()
 
 const kind = computed<DataBindingKind>(() => (props.fieldOnly ? 'field' : dataBindingKind(data.value)))
 const scopeOptions = computed(() => scopePathOptions(props.repeatOver))
@@ -84,7 +90,11 @@ function optionsFor(p: MetricParam) {
 }
 
 // ── window ───────────────────────────────────────────────────────────────────────────────────
-const windowChoices = computed<WindowSpec[]>(() => {
+// The registry only ever SERVES these three named windows (metricWindows/ratioWindowsOf both
+// return WindowName[]) — DataBinding.window's broader WindowSpec (which also allows the
+// `{ scope: 'window' }` marker and reserved names like 'flight') is a wire-shape concession the
+// editor never needs to construct itself.
+const windowChoices = computed<WindowName[]>(() => {
   if (kind.value === 'metric' && 'metric' in data.value) {
     const def = metricDef(data.value.metric)
     return def ? metricWindows(def) : []
@@ -95,11 +105,14 @@ const windowChoices = computed<WindowSpec[]>(() => {
   }
   return []
 })
-const windowValue = computed<string>({
-  get: () => ('window' in data.value && data.value.window ? String(data.value.window) : (windowChoices.value[0] ?? '')),
-  set: (v) => {
+const windowValue = computed<WindowName | ''>({
+  get: () => {
+    const w = 'window' in data.value ? data.value.window : undefined
+    return typeof w === 'string' ? (w as WindowName) : (windowChoices.value[0] ?? '')
+  },
+  set: (v: WindowName | '') => {
     if (!('metric' in data.value || 'ratio' in data.value)) return
-    data.value = { ...data.value, window: (v || undefined) as WindowSpec | undefined } as DataBinding
+    data.value = { ...data.value, window: v || undefined } as DataBinding
   },
 })
 
@@ -113,9 +126,9 @@ const fieldPath = computed<ScopePath>({
 </script>
 
 <template>
-  <div class="field">
-    <label>Data</label>
-    <div v-if="!props.fieldOnly" class="tabs" role="tablist">
+  <div class="field" role="group" :aria-labelledby="groupId">
+    <label :id="groupId">Data</label>
+    <div v-if="!props.fieldOnly" class="tabs" role="tablist" aria-label="Data kind">
       <button type="button" class="tab" :class="{ active: kind === 'metric' }" @click="setKind('metric')">Metric</button>
       <button type="button" class="tab" :class="{ active: kind === 'ratio' }" @click="setKind('ratio')">Ratio</button>
       <button v-if="props.allowField" type="button" class="tab" :class="{ active: kind === 'field' }" :disabled="!scopeOptions.length" @click="setKind('field')">Field</button>
@@ -123,7 +136,8 @@ const fieldPath = computed<ScopePath>({
     <p v-else class="hint">A badge always binds a scope field.</p>
 
     <template v-if="kind === 'metric'">
-      <input class="search-input" type="text" v-model="metricSearch" placeholder="Search metrics…" />
+      <label class="visually-hidden" :for="metricSearchId">Search metrics</label>
+      <input :id="metricSearchId" class="search-input" type="text" v-model="metricSearch" placeholder="Search metrics…" />
       <div class="option-list">
         <template v-for="[family, opts] in metricGroups" :key="family">
           <p class="chip" style="margin: 4px 6px">{{ family }}</p>
@@ -137,7 +151,8 @@ const fieldPath = computed<ScopePath>({
     </template>
 
     <template v-else-if="kind === 'ratio'">
-      <input class="search-input" type="text" v-model="ratioSearch" placeholder="Search ratios…" />
+      <label class="visually-hidden" :for="ratioSearchId">Search ratios</label>
+      <input :id="ratioSearchId" class="search-input" type="text" v-model="ratioSearch" placeholder="Search ratios…" />
       <div class="option-list">
         <button v-for="o in ratioChoices" :key="o.id" type="button" class="option-row" :class="{ selected: o.id === currentRatioId }" @click="pickRatio(o.id)">
           <span>{{ o.label }} <span class="hint">— {{ o.summary }}</span></span>
@@ -148,7 +163,8 @@ const fieldPath = computed<ScopePath>({
     </template>
 
     <template v-else-if="kind === 'field'">
-      <select v-model="fieldPath">
+      <label class="visually-hidden" :for="fieldSelectId">Field</label>
+      <select :id="fieldSelectId" v-model="fieldPath">
         <option v-for="o in scopeOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
       </select>
     </template>
@@ -156,9 +172,9 @@ const fieldPath = computed<ScopePath>({
     <template v-if="kind !== 'field' && allowedParams.length">
       <div class="row" v-for="p in allowedParams" :key="p">
         <div class="field">
-          <label>{{ p === 'campaignId' ? 'Campaign' : 'Pop-up' }}</label>
+          <label :for="`${groupId}-param-${p}`">{{ p === 'campaignId' ? 'Campaign' : 'Pop-up' }}</label>
           <span v-if="!paramIsPinned(paramValue(p)) && scopeProvides(p)" class="chip">from repeat scope</span>
-          <select :value="paramValue(p) ?? ''" @change="setParam(p, ($event.target as HTMLSelectElement).value || undefined)">
+          <select :id="`${groupId}-param-${p}`" :value="paramValue(p) ?? ''" @change="setParam(p, ($event.target as HTMLSelectElement).value || undefined)">
             <option value="" :disabled="!scopeProvides(p)">{{ scopeProvides(p) ? '(from repeat scope)' : 'Choose…' }}</option>
             <option v-for="o in optionsFor(p)" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
@@ -167,8 +183,8 @@ const fieldPath = computed<ScopePath>({
     </template>
 
     <div class="field" v-if="kind !== 'field' && windowChoices.length > 1">
-      <label>Window</label>
-      <select v-model="windowValue">
+      <label :for="windowId">Window</label>
+      <select :id="windowId" v-model="windowValue">
         <option v-for="w in windowChoices" :key="String(w)" :value="w">{{ w }}</option>
       </select>
       <p v-if="windowValue && windowValue !== 'page'" class="hint">Ignores the page's date range.</p>

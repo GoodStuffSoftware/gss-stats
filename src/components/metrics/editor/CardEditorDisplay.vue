@@ -4,12 +4,15 @@
 // editorModel's displayOptionsFor) — a percent can never be offered for a pair. Percent always
 // shows "(n/d)"; there is no toggle to hide it (ADR: "no toggle to hide it"). Sparkline is
 // listed but disabled ("coming soon"): MetricValue carries no per-day series yet.
-import { computed } from 'vue'
+import { computed, useId } from 'vue'
 import { dataKindOf, displayOptionsFor, makeDisplay, metricDef } from '../../../lib/metrics/editorModel'
 import type { DataBinding, Display, DisplayAs } from '../../../lib/metrics/types'
 
 const props = defineProps<{ binding: DataBinding }>()
 const display = defineModel<Display>({ required: true })
+
+const groupId = useId()
+const decimalsId = useId()
 
 const options = computed(() => displayOptionsFor(props.binding))
 const kind = computed(() => dataKindOf(props.binding))
@@ -58,8 +61,8 @@ const dateRangeDays = computed<boolean>({
 </script>
 
 <template>
-  <div class="field">
-    <label>Display</label>
+  <div class="field" role="group" :aria-labelledby="groupId">
+    <label :id="groupId">Display</label>
     <p v-if="!options.length" class="hint">Pick a metric, ratio or field first.</p>
     <div v-else class="tabs" role="radiogroup" aria-label="Display type">
       <button
@@ -88,8 +91,8 @@ const dateRangeDays = computed<boolean>({
 
     <template v-else-if="display.as === 'percent'">
       <div class="field">
-        <label>Decimals</label>
-        <select v-model.number="decimals">
+        <label :for="decimalsId">Decimals</label>
+        <select :id="decimalsId" v-model.number="decimals">
           <option :value="0">0</option>
           <option :value="1">1</option>
           <option :value="2">2</option>

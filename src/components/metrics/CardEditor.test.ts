@@ -8,6 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import CardEditor from './CardEditor.vue'
+import MetricCard from './MetricCard.vue'
 import { __resetMetricsStateForTests } from '../../composables/useMetrics'
 import { validateCard } from '../../lib/metrics/validate'
 import { RATIOS } from '../../lib/metrics/ratios'
@@ -336,5 +337,89 @@ describe('every emitted value passes validateCard, across a mixed sequence of ed
     await flushPromises()
     assertEveryEmissionValid(wrapper)
     expect((wrapper.emitted('update:modelValue') ?? []).length).toBeGreaterThan(1)
+  })
+})
+
+describe('context prop', () => {
+  it('is forwarded to the live preview (the same page filters a saved card would see)', async () => {
+    const context = { since: '2026-09-01', until: '2026-09-27', sites: ['bestsudoku-web'] }
+    const wrapper = mount(CardEditor, { props: { modelValue: { preset: 'campaign-scorecard' } as CardRef, context } })
+    mounted.push(wrapper)
+    await flushPromises()
+    expect(wrapper.findComponent(MetricCard).props('context')).toEqual(context)
+
+    const changed = { since: '2026-09-10', until: '2026-09-27' }
+    await wrapper.setProps({ context: changed })
+    await flushPromises()
+    expect(wrapper.findComponent(MetricCard).props('context')).toEqual(changed)
+  })
+})
+
+describe('a11y: every form control has an accessible name', () => {
+  /** Every visible text-entry control (input/select/textarea) must resolve a name via one of:
+   * aria-label, aria-labelledby (pointing at real, non-empty text), a wrapping <label>, or
+   * for/id pairing with some <label> in the document — the same rule axe-core's
+   * "label"/"select-name" checks apply. Buttons are excluded: a <button>'s own text IS its
+   * accessible name (every tab/reorder/duplicate/remove control here has visible text). */
+  function accessibleNameProblems(wrapper: VueWrapper): string[] {
+    const root = wrapper.element as HTMLElement
+    const problems: string[] = []
+    for (const el of root.querySelectorAll('input, select, textarea')) {
+      if ((el as HTMLInputElement).type === 'hidden') continue
+      const ariaLabel = el.getAttribute('aria-label')
+      if (ariaLabel?.trim()) continue
+      const labelledBy = el.getAttribute('aria-labelledby')
+      if (labelledBy && labelledBy.split(/\s+/).every((id) => (document.getElementById(id) ?? root.querySelector(`#${CSS.escape(id)}`))?.textContent?.trim())) continue
+      const id = el.getAttribute('id')
+      if (id && root.querySelector(`label[for="${CSS.escape(id)}"]`)) continue
+      if (el.closest('label')) continue
+      const path = (() => {
+        const bits: string[] = []
+        let n: Element | null = el
+        while (n && bits.length < 4) {
+          bits.unshift(n.tagName.toLowerCase() + (n.getAttribute('class') ? `.${n.getAttribute('class')!.split(' ')[0]}` : ''))
+          n = n.parentElement
+        }
+        return bits.join(' > ')
+      })()
+      problems.push(`${path} (name="${(el as HTMLInputElement).name || ''}" placeholder="${el.getAttribute('placeholder') || ''}")`)
+    }
+    return problems
+  }
+
+  it('a fully-expanded editor (badge on, item open, "more" open, whenEmpty=note) has no unnamed control', async () => {
+    const spec: CardSpec = {
+      v: 1,
+      repeat: { over: 'campaigns' },
+      title: 'US+CA web retest',
+      badge: { data: { field: 'campaign.statusToday' }, display: { as: 'badge' } },
+      captions: ['small-sample'],
+      sections: [
+        {
+          layout: 'rows',
+          title: 'Funnel',
+          items: [
+            {
+              id: 'a',
+              label: 'Arrivals',
+              caption: { note: 'small-sample' },
+              data: { metric: 'campaign.taggedArrivals' },
+              display: { as: 'number' },
+              gating: { whenUnmeasured: 'label', whenEmpty: { note: 'small-sample' }, minCohort: 10 },
+            },
+          ],
+        },
+      ],
+    }
+    const wrapper = mountEditor({ spec })
+    await flushPromises()
+    await wrapper.find('.ce-item-summary').trigger('click') // expand the item
+    await flushPromises()
+    const more = wrapper.find('details.more')
+    ;(more.element as HTMLDetailsElement).open = true
+    await flushPromises()
+
+    const problems = accessibleNameProblems(wrapper)
+    expect(problems).toEqual([])
   })
 })
