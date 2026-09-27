@@ -33,6 +33,12 @@ All notable changes to **gss-stats** are documented here. The format follows
   card's edge and get clipped at narrow widths.
 - **A chart with its own filter no longer fails to draw** when that filter was set up from the
   current site picker rather than the old single-site one.
+- **Captions and notes read as plain language.** None of them names a source file any more.
+- **Each note shows once per card.** The Campaigns cards no longer repeat a caveat at the top
+  and again under the chart.
+- **The Return visits chart fits its card.** Its plot used to stretch far below the card, so
+  only the top of the axis showed.
+- **The sign-in eligibility chart has a short title** that fits its card.
 
 ## [0.8.0] — 2026-09-26
 

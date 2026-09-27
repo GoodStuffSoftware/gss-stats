@@ -410,7 +410,7 @@ describe('defaultBestSudokuPopupsWidgets — one bar chart, a valid-rates table,
 
   it('the eligibility bar keeps its plain title and the signin-eligible-caveat caption', () => {
     const bd = widgets.find((w) => w.id === 'pu-eligible-bd')!
-    expect(bd.title).toBe('Sign-in eligibility — earned / capped / unearned')
+    expect(bd.title).toBe('Sign-in eligibility')
     expect(bd.title).not.toContain(SIGNIN_ELIGIBLE_CAVEAT)
     expect(bd.notes).toEqual(['signin-eligible-caveat'])
   })
@@ -457,6 +457,9 @@ describe('normalizeConfig — v9 migration (Pop-ups page + device mix)', () => {
     // the kept eligibility bar takes its new slot beside the table; the owner's chart sits below
     const elig = pu.widgets.find((w) => w.id === 'pu-eligible-bd')!
     expect({ x: elig.x, y: elig.y, w: elig.w, h: elig.h }).toEqual({ x: 8, y: 11, w: 4, h: 7 })
+    expect(elig.title).toBe('x') // the fixture's own (owner-edited) title is kept
+    const oldTitled = migratePopupsPageV9(page({ id: 'bsk-popups', name: 'P', widgets: [widget({ id: 'pu-eligible-bd', title: 'Sign-in eligibility — earned / capped / unearned' })] }))
+    expect(oldTitled.widgets.find((w) => w.id === 'pu-eligible-bd')!.title).toBe('Sign-in eligibility')
     const blockBottom = Math.max(...pu.widgets.slice(0, 3).map((w) => w.y + w.h))
     expect(mine.y).toBeGreaterThanOrEqual(blockBottom)
   })
@@ -576,7 +579,7 @@ describe('migratePopupCaveatTitles', () => {
     const bd = widget({ id: 'pu-eligible-bd', title: `Sign-in eligibility — earned / capped / unearned (${SIGNIN_ELIGIBLE_CAVEAT})`, type: 'bar', dataset: 'popup' })
     const rate = widget({ id: 'pu-eligible-rate', title: `Sign-in eligibility rate (${SIGNIN_ELIGIBLE_CAVEAT})`, type: 'rate', dataset: 'popup' })
     const [out] = migratePopupCaveatTitles([popupPage([bd, rate])])
-    expect(out.widgets[0].title).toBe('Sign-in eligibility — earned / capped / unearned')
+    expect(out.widgets[0].title).toBe('Sign-in eligibility')
     expect(out.widgets[0].notes).toEqual(['signin-eligible-caveat'])
     expect(out.widgets[1].title).toBe('Sign-in eligibility rate')
     expect(out.widgets[1].notes).toEqual(['signin-eligible-caveat'])
@@ -639,7 +642,7 @@ describe('migratePopupCaveatTitles', () => {
     const norm = normalizeConfig(raw)
     const popupsPage = norm.pages.find((p) => isBestSudokuPopupsPage(p))!
     const w = popupsPage.widgets.find((w) => w.id === 'pu-eligible-bd')!
-    expect(w.title).toBe('Sign-in eligibility — earned / capped / unearned')
+    expect(w.title).toBe('Sign-in eligibility')
     expect(w.notes).toEqual(['signin-eligible-caveat'])
   })
 })

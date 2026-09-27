@@ -184,7 +184,7 @@ export function defaultBestSudokuPopupsWidgets(): Widget[] {
       h: 11,
     }),
     w({ id: 'pu-rates', title: 'Rates (valid ratios only)', type: 'rateTable', dataset: 'popup', dimension: '', metric: 'pageviews', limit: 1, notes: ['min-cohort-caveat'], x: 0, y: 11, w: 8, h: 7 }),
-    w({ id: 'pu-eligible-bd', title: 'Sign-in eligibility — earned / capped / unearned', type: 'bar', dataset: 'popup', dimension: 'eligible', metric: 'pageviews', limit: 3, notes: ['signin-eligible-caveat'], x: 8, y: 11, w: 4, h: 7 }),
+    w({ id: 'pu-eligible-bd', title: 'Sign-in eligibility', type: 'bar', dataset: 'popup', dimension: 'eligible', metric: 'pageviews', limit: 3, notes: ['signin-eligible-caveat'], x: 8, y: 11, w: 4, h: 7 }),
   ]
 }
 
@@ -204,6 +204,7 @@ export function popupsPageV8FactoryIds(): string[] {
   return ids
 }
 const POPUPS_V9_KEPT_IDS = new Set(['pu-eligible-bd'])
+const POPUPS_V8_ELIGIBILITY_TITLE = 'Sign-in eligibility — earned / capped / unearned'
 
 /** v9: rebuild a saved Pop-ups page. Removes the pre-v9 generated tiles (by id, the owner's
  * request: the page "makes no sense") and adds the new bar chart + rate table on top. The kept
@@ -220,7 +221,15 @@ export function migratePopupsPageV9(page: DashboardPage): DashboardPage {
   const slot = (id: string) => defaults.find((d) => d.id === id)!
   const keptFactory = survivors
     .filter((wd) => POPUPS_V9_KEPT_IDS.has(wd.id))
-    .map((wd) => ({ ...wd, x: slot(wd.id).x, y: slot(wd.id).y, w: slot(wd.id).w, h: slot(wd.id).h }))
+    .map((wd) => ({
+      ...wd,
+      // The old generated title truncated in its narrower slot; a title the owner edited stays.
+      title: wd.title === POPUPS_V8_ELIGIBILITY_TITLE ? slot(wd.id).title : wd.title,
+      x: slot(wd.id).x,
+      y: slot(wd.id).y,
+      w: slot(wd.id).w,
+      h: slot(wd.id).h,
+    }))
   const own = survivors.filter((wd) => !POPUPS_V9_KEPT_IDS.has(wd.id))
   const blockH = [...fresh, ...keptFactory].reduce((m, wd) => Math.max(m, wd.y + wd.h), 0)
   const minOwnY = own.reduce((m, wd) => Math.min(m, wd.y), Infinity)
@@ -257,7 +266,7 @@ function popupTitleMigrations(): PopupTitleMigration[] {
     {
       id: 'pu-eligible-bd',
       oldTitle: `Sign-in eligibility — earned / capped / unearned${SIGNIN_ELIGIBLE_TITLE_OLD_SUFFIX}`,
-      newTitle: 'Sign-in eligibility — earned / capped / unearned',
+      newTitle: 'Sign-in eligibility',
       noteId: 'signin-eligible-caveat',
     },
     {
