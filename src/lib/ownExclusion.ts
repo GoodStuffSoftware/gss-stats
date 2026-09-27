@@ -1,8 +1,8 @@
 // Shared "hide my own visits" / "hide self-referrals" clause-builders for the beacon's D1
 // (`hits`). Extracted from functions/api/geo.ts (which used to define these as request-scoped
-// closures) so a second beacon-backed endpoint — functions/api/campaigns.ts — can reuse the
-// EXACT same semantics instead of re-implementing the same De Morgan logic a second time. Pure
-// refactor: geo.ts's behavior is unchanged, just re-homed so it's importable.
+// closures) so every beacon-backed reader — functions/api/popups.ts and the metrics facts
+// (lib/metrics/facts.ts) as well as geo.ts — uses the EXACT same semantics instead of
+// re-implementing the same De Morgan logic. Pure refactor: geo.ts's behavior is unchanged.
 
 // Hosts that count as "us" for excludeSelfReferrals — same list functions/api/stats.ts (RUM)
 // uses for its OWN_HOSTS, so every dataset agrees on what a self-referral is.

@@ -43,6 +43,8 @@ export const DRILL_FIELDS: Record<string, { rum: string | null; geo: string | nu
   campaignFlight: { rum: null, geo: 'campaignFlight' },
   arrival: { rum: null, geo: 'arrival' },
   keyEvent: { rum: null, geo: 'keyEvent' },
+  hourEt: { rum: null, geo: 'hourEt' },
+  flightDay: { rum: null, geo: 'flightDay' },
 }
 
 // Site dimensions are handled by the site multi-select (siteSel), not generic drill.

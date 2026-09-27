@@ -36,12 +36,11 @@ const panel = (id: string, view: string, extra: Partial<Widget> = {}): Partial<W
 describe('v10: the real default layout', () => {
   it('ships the two panels as cards, and survives a load/save round trip unchanged', () => {
     const d = defaultConfig()
-    expect(d.version).toBe(10)
-    expect(CONFIG_VERSION).toBe(10)
+    expect(d.version).toBe(CONFIG_VERSION)
     const ov = d.pages.find((p) => p.id === 'bsk-overview')!
     expect(ov.widgets.find((w) => w.id === 'ow-kpis')!.card).toEqual({ preset: 'bsk-kpis' })
     expect(ov.widgets.find((w) => w.id === 'ow-scorecard')!.card).toEqual({ preset: 'campaign-scorecard' })
-    expect(ov.widgets.find((w) => w.id === 'ow-release')!.card).toBeUndefined() // stays bespoke
+    expect(ov.widgets.find((w) => w.id === 'ow-release')!.card).toEqual({ preset: 'release-before-after' }) // v11
     const once = normalizeConfig(clone(d))
     expect(stable(once)).toEqual(stable(normalizeConfig(clone(d))))
     expect(stable(normalizeConfig(clone(once)))).toEqual(stable(once))
@@ -59,18 +58,38 @@ describe('v10: the production layout (sanitised)', () => {
     expect(JSON.stringify(PROD_V8)).not.toMatch(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}/) // no emails
   })
 
-  it('v9 → v10 changes exactly two widgets, by adding a card, and nothing else', () => {
+  // The card panels on production and the preset each gains (v10: the first two; v11: the rest).
+  const CARDED: Record<string, string> = {
+    'bsk-overview/ow-kpis': 'bsk-kpis',
+    'bsk-overview/ow-scorecard': 'campaign-scorecard',
+    'bsk-overview/ow-release': 'release-before-after',
+    'bsk-popups/pu-rates': 'popup-rates',
+    'bsk-popups/pu-eligible-bd': 'signin-eligibility',
+    'bsk-campaigns/cw-cost': 'campaign-cost',
+    'bsk-campaigns/cw-funnel': 'campaign-funnel',
+    'bsk-campaigns/cw-country': 'campaign-country',
+    'bsk-campaigns/cw-returns': 'campaign-returns',
+  }
+  // The panels that became standard charts on production, swapped in place (v11).
+  const CHARTED = ['bsk-campaigns/cw-hour', 'bsk-campaigns/cw-flightday'] as const
+  it('v9 → current changes exactly the panels, by adding a card, and nothing else', () => {
     const before = widgetsById(PROD_V9 as unknown as DashboardConfig)
     const after = widgetsById(v10FromV9)
     expect([...after.keys()]).toEqual([...before.keys()]) // no widget added, removed or reordered
     // Compared by content: key order and absent-vs-undefined fields don't count (normWidget
     // re-orders a widget's keys on every load).
     const canon = (w: unknown) => sorted(stable({ pages: [{ filters: {}, widgets: [w] }] } as any))
-    const changed = [...after].filter(([k, w]) => canon(w) !== canon(before.get(k)))
-    expect(changed.map(([k]) => k)).toEqual(['bsk-overview/ow-kpis', 'bsk-overview/ow-scorecard'])
+    const changed = [...after].filter(([k, w]) => canon(w) !== canon(before.get(k)) && !(CHARTED as readonly string[]).includes(k))
+    expect(changed.map(([k]) => k).sort()).toEqual(Object.keys(CARDED).sort())
+    for (const k of CHARTED) {
+      const was = before.get(k)!
+      const now = after.get(k)!
+      expect(now.dataset, k).toBe('geo')
+      expect([now.id, now.title, now.x, now.y, now.w, now.h, now.notes], k).toEqual([was.id, was.title, was.x, was.y, was.w, was.h, was.notes])
+    }
     for (const [k, w] of changed) {
       const { card, ...rest } = w
-      expect(card, k).toEqual({ preset: k.endsWith('ow-kpis') ? 'bsk-kpis' : 'campaign-scorecard' })
+      expect(card, k).toEqual({ preset: CARDED[k] })
       expect(rest, k).toEqual(before.get(k)) // id, title, dataset/view, x/y/w/h, notes: all kept
     }
     expect(v10FromV9.pages.map((p) => [p.id, p.name])).toEqual((PROD_V9 as any).pages.map((p: DashboardPage) => [p.id, p.name]))
@@ -109,7 +128,7 @@ describe('v10: custom, deleted and renamed variants', () => {
   })
 
   it('a widget titled like a panel but not one (another dataset or view) is left alone', () => {
-    const out = load([page('p', [{ ...panel('a', 'releasePanel'), title: 'Today at a glance' }, { id: 'b', title: 'Campaign scorecard', type: 'bar', dataset: 'geo', dimension: 'site', metric: 'pageviews', limit: 5, x: 0, y: 0, w: 4, h: 4 }])])
+    const out = load([page('p', [{ ...panel('a', 'timeline'), title: 'Today at a glance' }, { id: 'b', title: 'Campaign scorecard', type: 'bar', dataset: 'geo', dimension: 'site', metric: 'pageviews', limit: 5, x: 0, y: 0, w: 4, h: 4 }])])
     for (const w of out.pages[0].widgets) expect(w.card, w.id).toBeUndefined()
   })
 
@@ -202,9 +221,9 @@ describe('the chart editor keeps the card in step with the view', () => {
   it('into a card panel: gets the card; away from it: loses the preset card that came with the old view', () => {
     const w = panel('a', 'kpis') as Widget
     expect(syncCardWithView(w).card).toEqual({ preset: 'bsk-kpis' })
-    const moved = { ...withCardForView(w), view: 'releasePanel' }
+    const moved = { ...withCardForView(w), view: 'timeline' }
     expect(syncCardWithView(moved).card).toBeUndefined()
-    const custom = { ...(panel('b', 'releasePanel') as Widget), card: { spec: {} as any } }
+    const custom = { ...(panel('b', 'timeline') as Widget), card: { spec: {} as any } }
     expect(syncCardWithView(custom).card).toEqual({ spec: {} }) // a customised card is not the view's
   })
   it('migrateCardsV10 returns the same page object when there is nothing to do', () => {

@@ -6,7 +6,8 @@
 import type { TextToken } from '../../lib/textLite'
 import MetricLabel from './MetricLabel.vue'
 
-defineProps<{ labelTokens: TextToken[]; textTokens: TextToken[]; frame: 'row' | 'pill' | 'tile' }>()
+// A 'column' placeholder reads as a row: a bar with no value would say nothing.
+defineProps<{ labelTokens: TextToken[]; textTokens: TextToken[]; frame: 'row' | 'pill' | 'tile' | 'column' }>()
 </script>
 
 <template>

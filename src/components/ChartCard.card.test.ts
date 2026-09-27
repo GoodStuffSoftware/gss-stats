@@ -53,8 +53,20 @@ describe('ChartCard × metric card', () => {
     await settle()
     expect(w.find('.metric-card-plain').exists()).toBe(true)
     expect(w.find('.kpi-grid').exists()).toBe(false)
-    expect(bodies[0].context).toEqual({ since: filters.since, until: filters.until })
-    expect(JSON.stringify(bodies[0].context)).not.toMatch(/Firefox|Linux|excludeOwn/) // no own-visit fields
+    // "Hide my own visits" travels with the range (slice 7: the pop-up facts honour it, as
+    // /api/popups does), as the exact values the server's sanitizer accepts.
+    expect(bodies[0].context).toEqual({ since: filters.since, until: filters.until, excludeOwnVisits: true, ownBrowser: 'Firefox', ownOS: 'Linux' })
+  })
+
+  it('never sends own-visit fields when the filter is off or a value is not a plain name', async () => {
+    mountCard(kpiWidget, { ...filters, excludeOwnVisits: false })
+    await settle()
+    expect(JSON.stringify(bodies[0].context)).not.toMatch(/Firefox|Linux|excludeOwn/)
+    for (const w of mounted.splice(0)) w.unmount()
+    bodies.length = 0
+    mountCard(kpiWidget, { ...filters, ownBrowser: 'Fire"fox' })
+    await settle()
+    expect(JSON.stringify(bodies[0]?.context ?? {})).not.toMatch(/excludeOwn|Linux/)
   })
 
   it('follows a filter-bar change: one new batch with the new range', async () => {

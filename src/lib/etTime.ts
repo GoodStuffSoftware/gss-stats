@@ -38,12 +38,23 @@ export function etOffsetHours(ms: number): -4 | -5 {
  * only, never request input); a row outside those years falls back to EST. Used by the
  * geo 'dateEt' dimension (functions/api/geo.ts). */
 export function etDateSql(fromYear = 2024, toYear = 2040): string {
+  return `date(${etShiftedSecondsSql(fromYear, toYear)}, 'unixepoch')`
+}
+
+/** SQL expression giving a row's ET wall-clock hour of day ('0'..'23', as text) — the SQL twin of
+ * etHourFast, the same DST rule as etDateSql. Used by the geo 'hourEt' dimension. */
+export function etHourSql(fromYear = 2024, toYear = 2040): string {
+  return `CAST(CAST(strftime('%H', ${etShiftedSecondsSql(fromYear, toYear)}, 'unixepoch') AS INTEGER) AS TEXT)`
+}
+
+/** `ts` shifted to ET wall-clock time, in whole seconds (integer division of integer ms). */
+function etShiftedSecondsSql(fromYear: number, toYear: number): string {
   const windows: string[] = []
   for (let y = fromYear; y <= toYear; y++) {
     const [start, end] = dstBounds(y)
     windows.push(`(ts >= ${start} AND ts < ${end})`)
   }
-  return `date((ts + CASE WHEN ${windows.join(' OR ')} THEN ${-4 * HOUR} ELSE ${-5 * HOUR} END) / 1000, 'unixepoch')`
+  return `(ts + CASE WHEN ${windows.join(' OR ')} THEN ${-4 * HOUR} ELSE ${-5 * HOUR} END) / 1000`
 }
 
 const pad = (n: number) => (n < 10 ? `0${n}` : String(n))

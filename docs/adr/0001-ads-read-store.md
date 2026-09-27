@@ -104,10 +104,11 @@ only rows that changed.
   (upserts use `ON CONFLICT … DO UPDATE / DO NOTHING`), and the store is an allowlist: it only
   ever targets `gss-stats-ads`. `--dry-run` skips every write. Stored notes have local paths
   stripped. No statement binds more than 100 parameters (D1's cap for bound statements).
-- **Dashboard reader:** the `gss_stats_ads` binding. `/api/campaigns` and `/api/overview`
-  prefer stored spend over `CAMPAIGN_SPEND`; `/api/ads/readings` serves the readings widget.
-  `/api/campaigns` and `/api/ads/readings` also return `spendThrough`, `lastSync` and `stale`
-  (`src/lib/adsFreshness.ts`); they never call the Google Ads API.
+- **Dashboard reader:** the `gss_stats_ads` binding. The metrics registry's ads facts
+  (`adsSpend`, `adsCoverage`, `adsLastSync`, which replaced `/api/campaigns` and `/api/overview`,
+  ADR 0003) prefer stored spend over `CAMPAIGN_SPEND`; `/api/ads/readings` serves the readings
+  widget. Both also report `spendThrough`, `lastSync` and `stale` (`src/lib/adsFreshness.ts`);
+  they never call the Google Ads API.
   **Fail soft:** a missing binding, a missing table or any D1 error reads as "nothing
   stored", so spend falls back to the config and the readings widget shows an empty state.
 

@@ -7,9 +7,10 @@
 // - since/until only as a pair of real instants, the range capped at MAX_RANGE_DAYS (the
 //   server's own limit) by moving `since` forward;
 // - site tags that pass the server's tag rule, at most its maximum;
-// - no own-visit fields: no fact honours them yet, and the server refuses a user-agent value it
-//   does not recognise.
+// - "hide my own visits" only when it is on with a browser and an OS the server's sanitizer
+//   keeps unchanged (it refuses any other value); the pop-up facts honour it, as /api/popups does.
 import { SITE_TAG_RE } from '../range'
+import { safeUA } from '../ownExclusion'
 import { MAX_RANGE_DAYS } from './validate'
 import type { MetricsContext } from './types'
 
@@ -28,7 +29,13 @@ function instantMs(v: string): number {
   return Date.parse(DATE_ONLY_RE.test(v) ? `${v}T00:00:00Z` : v)
 }
 
-export function metricsContextFor(range: PageRange, siteTags: readonly string[]): MetricsContext {
+export interface OwnVisits {
+  excludeOwnVisits?: boolean
+  ownBrowser?: string
+  ownOS?: string
+}
+
+export function metricsContextFor(range: PageRange, siteTags: readonly string[], own: OwnVisits = {}): MetricsContext {
   const out: MetricsContext = {}
   const { since, until } = range
   if (typeof since === 'string' && typeof until === 'string') {
@@ -48,5 +55,11 @@ export function metricsContextFor(range: PageRange, siteTags: readonly string[])
   }
   const sites = [...new Set(siteTags.filter((t) => typeof t === 'string' && SITE_TAG_RE.test(t)))].slice(0, MAX_SITES)
   if (sites.length) out.sites = sites
+  const ok = (v: unknown): v is string => typeof v === 'string' && v !== '' && safeUA(v) === v
+  if (own.excludeOwnVisits === true && ok(own.ownBrowser) && ok(own.ownOS)) {
+    out.excludeOwnVisits = true
+    out.ownBrowser = own.ownBrowser
+    out.ownOS = own.ownOS
+  }
   return out
 }

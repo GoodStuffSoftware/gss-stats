@@ -265,6 +265,15 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     severity: 'info',
     scopes: ['campaigns'],
   },
+  // The release panel (lib/metrics/presets.ts release-before-after): why the before window reads
+  // low. Plain wording, as the panel's own line had it.
+  'release-before-partial': {
+    id: 'release-before-partial',
+    text: 'before = partially instrumented — auth success, install, and campaign tagging are new paths this release adds; the "before" window predates them.',
+    kind: 'note',
+    severity: 'caveat',
+    scopes: ['overview'],
+  },
   'no-return-visits-yet': {
     id: 'no-return-visits-yet',
     text: 'No return visits recorded yet.',
@@ -285,8 +294,8 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.funnel.accept': 'Accept',
     'label.funnel.authSuccess': 'Auth success',
     'label.funnel.installPrompt': 'Install prompt',
-    // Range-specific install-fix caveats travel with the data instead (functions/api/campaigns.ts
-    // funnel.installNote, from lib/popupEvents.ts installOutcomeGapNote).
+    // Range-specific install-fix caveats travel with the value instead (the install metric's
+    // install-fix note, in a card's Notes).
     'label.funnel.install': 'Install',
 
     // Metrics (lib/metrics/metrics.ts) — one `label.<metricId>` each.
@@ -325,6 +334,16 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.popup.outcomeStillPlaying': 'Still playing',
     'label.popup.eligibleEarned': 'Eligible finishes (earned)',
     'label.popup.eligibleFinishes': 'Signed-out finishes',
+    'label.popup.eligibleCapped': 'Capped',
+    'label.popup.eligibleUnearned': 'Unearned',
+    'label.bsk.taggedArrivals': 'Tagged arrivals',
+    'label.release.windowDays': 'Days on each side',
+    'label.campaign.upsellShown': 'Shown',
+    'label.campaign.upsellAccepts': 'Accepted',
+    'label.campaign.upsellDismisses': 'Dismissed',
+    'label.campaign.spendSource': 'Source',
+    'label.campaign.spendThrough': 'Spend through',
+    'label.campaign.lastSync': 'Synced',
 
     // Ratios (lib/metrics/ratios.ts).
     'label.campaign.acceptPerAsk': 'Accept rate',
@@ -359,6 +378,9 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'unit.usd': 'USD',
     'unit.day': 'days',
     'unit.arrivals': 'arrivals',
+    'unit.instant': 'time',
+    'unit.hits': 'hits',
+    'unit.code': 'kind',
 
     // Status words and gating messages (MetricValue.status / noteIds).
     'flight-pending': 'pending — start date not yet confirmed',
@@ -372,6 +394,12 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'metric-unavailable': 'unavailable',
     'not-started': 'not started',
     'no-tracked-campaign-flighting': 'no beacon-tracked campaign flighting today',
+    'release-pending': 'no release window yet',
+    'spend-source.ads-api': 'Ads API',
+    'spend-source.config': 'hand-entered',
+    'ads-stale': 'stale — sync pending',
+    'no-spend-day-yet': 'no closed spend day stored yet',
+    'not-synced-yet': 'not synced yet',
 
     // Card labels that are not a metric's own name (lib/metrics/presets.ts).
     'label.card.flight': 'Flight',
@@ -385,6 +413,30 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.card.retry': 'Retry',
     'label.card.invalid': "This card's saved settings could not be read, so it can't be shown. Edit it or restore the default charts.",
     'label.card.openCampaigns': 'Open the Campaigns page',
+    'label.card.release': 'Release',
+    'label.card.retiredPanel': 'This panel has been replaced by a card or a chart. Edit it, or restore the default charts.',
+    'label.card.step': 'Step',
+    'label.card.returnTag': 'Return beacons',
+    'label.card.return.d1': 'd1',
+    'label.card.return.d2-7': 'd2-7',
+    'label.card.return.d8-14': 'd8-14',
+    'label.card.return.d15-30': 'd15-30',
+    'label.card.return.d31-60': 'd31-60',
+    'label.card.acceptOfAsks': 'Accept of asks',
+    'label.card.installOfPrompts': 'Install of prompts shown post-fix',
+    'label.card.upsellSegment': '▼ Signed-out upsell fix at {at} (flight day {day}) — a funnel segment boundary: read the two sides as separate short tests.',
+    'label.card.taggedUpsell': 'Tagged upsell',
+    'label.card.shown': 'Shown',
+    'label.card.accepted': 'Accepted',
+    'label.card.dismissed': 'Dismissed',
+    'label.card.perArrival': 'Per arrival',
+    'label.card.perAuthSuccess': 'Per auth success',
+    'label.card.popupTapRate': '{popup} — tap rate (accept / shown)',
+    'label.card.installedRateFromFix': 'Install prompt — installed rate (from the install fix on)',
+    'label.card.eligible.earned': 'earned',
+    'label.card.eligible.capped': 'capped',
+    'label.card.eligible.unearned': 'unearned',
+    'release-none': 'No dated release yet. This panel fills in once a release has a date.',
 
     // Preset names + one-line descriptions for CardEditor's "Start from" picker
     // (lib/metrics/editorModel.ts presetOptions) — never the raw preset id (review fix,
@@ -393,6 +445,20 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.preset.campaign-scorecard.description': 'One card per campaign: flight dates, arrivals, auth successes, installs, return rate, cost, and the funnel pills.',
     'label.preset.bsk-kpis': 'Today at a glance (KPI tiles)',
     'label.preset.bsk-kpis.description': 'Site-wide KPI tiles for today so far, each compared with yesterday and the 7-day average.',
+    'label.preset.release-before-after': 'Release before/after',
+    'label.preset.popup-rates': 'Pop-up rates (valid ratios only)',
+    'label.preset.popup-rates.description': 'Each pop-up\'s tap rate, and the install prompt\'s installed rate from the install fix on, each with its counts.',
+    'label.preset.signin-eligibility': 'Sign-in eligibility',
+    'label.preset.signin-eligibility.description': 'Signed-out finishes that earned a sign-in ask, hit the cap, or did not earn one, and the eligibility rate.',
+    'label.preset.campaign-funnel': 'Funnel per campaign',
+    'label.preset.campaign-funnel.description': 'One card per beacon-tracked campaign: every funnel step as a bar, the valid accept and install rates, and the upsell-fix segments once that fix ships.',
+    'label.preset.campaign-returns': 'Return visits',
+    'label.preset.campaign-returns.description': 'One card per campaign with return beacons: first tagged loads (d0) and each later window\'s return rate, left to right.',
+    'label.preset.campaign-country': 'Arrivals and funnel by country',
+    'label.preset.campaign-country.description': 'One card per beacon-tracked campaign: each funnel step split into US, CA and every other country.',
+    'label.preset.campaign-cost': 'Campaign cost',
+    'label.preset.campaign-cost.description': 'One card per campaign: spend, where it came from and how fresh it is, and the cost per arrival and per auth success.',
+    'label.preset.release-before-after.description': 'The latest dated release: page views, tagged arrivals, auth successes and installs over the same number of days before and after it.',
   }),
 })
 

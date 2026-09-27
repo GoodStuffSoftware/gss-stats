@@ -1,0 +1,616 @@
+{
+  "release.twoDaysAfter": {
+    "caption": "v1.95.3 (2026-09-26) — 2 days before vs after. before = partially instrumented — auth success, install, and campaign tagging are new paths this release adds; the \"before\" window predates them.",
+    "cols": {
+      "Before": {
+        "Page views": "207",
+        "Tagged arrivals": "0",
+        "Auth successes": "1",
+        "Installs": "0"
+      },
+      "After": {
+        "Page views": "86",
+        "Tagged arrivals": "10",
+        "Auth successes": "6",
+        "Installs": "6"
+      }
+    }
+  },
+  "release.releaseDay": "No dated release yet. This panel fills in once a release has a date.",
+  "popups.rateTable": [
+    {
+      "label": "Sign-in prompt — tap rate (accept / shown)",
+      "value": "0.0% (0/6)",
+      "note": ""
+    },
+    {
+      "label": "First 50 promo — tap rate (accept / shown)",
+      "value": "— (0/0)",
+      "note": ""
+    },
+    {
+      "label": "First 50 congrats — tap rate (accept / shown)",
+      "value": "— (0/0)",
+      "note": ""
+    },
+    {
+      "label": "Upsell — tap rate (accept / shown)",
+      "value": "36.4% (4/11)",
+      "note": ""
+    },
+    {
+      "label": "Install prompt — tap rate (accept / shown)",
+      "value": "4.2% (1/24)",
+      "note": ""
+    },
+    {
+      "label": "Install prompt — installed rate (from the install fix on)",
+      "value": "30.0% (6/20)",
+      "note": "install fix went live 26 Sep 12:26 ET; earlier prompt-driven installs not recorded"
+    }
+  ],
+  "popups.eligibility": [
+    [
+      "earned",
+      "4"
+    ],
+    [
+      "capped",
+      "2"
+    ],
+    [
+      "unearned",
+      "1"
+    ]
+  ],
+  "campaigns.cost": {
+    "refresh": true,
+    "cards": [
+      {
+        "title": "Android launch — \"tired of ads\"",
+        "why": "",
+        "rows": {
+          "Spend": "$120.00",
+          "Source": "Ads API",
+          "Per arrival": "$2.40",
+          "Per auth success": "$24.00"
+        },
+        "fresh": "Spend through Sep 9 · synced 1h ago"
+      },
+      {
+        "title": "Play-direct — \"tired of ads\"",
+        "why": "Play-direct: not measurable in beacon (no Install Referrer reader)",
+        "rows": {
+          "Spend": "$75.17",
+          "Source": "hand-entered",
+          "Per arrival": "—",
+          "Per auth success": "—"
+        },
+        "fresh": "No closed spend day stored yet · not synced yet · stale — sync pending"
+      },
+      {
+        "title": "US+CA web retest",
+        "why": "",
+        "rows": {
+          "Spend": "$5.00",
+          "Source": "Ads API",
+          "Per arrival": "$0.71",
+          "Per auth success": "—"
+        },
+        "fresh": "No closed spend day stored yet · synced 1h ago"
+      }
+    ]
+  },
+  "campaigns.funnel": [
+    [
+      "Android launch — \"tired of ads\"",
+      {
+        "status": "closed",
+        "lines": [
+          "tagged hits: 151 (vs 50 arrivals)",
+          "raw install signals (can double-count): 1"
+        ],
+        "steps": [
+          [
+            "Arrivals",
+            {
+              "count": "50",
+              "rate": ""
+            }
+          ],
+          [
+            "Game-screen views",
+            {
+              "count": "100",
+              "rate": ""
+            }
+          ],
+          [
+            "Sign-in ask",
+            {
+              "count": "15",
+              "rate": ""
+            }
+          ],
+          [
+            "Accept",
+            {
+              "count": "4",
+              "rate": "26.7% of previous step (4/15)"
+            }
+          ],
+          [
+            "Auth success",
+            {
+              "count": "5",
+              "rate": ""
+            }
+          ],
+          [
+            "Install prompt",
+            {
+              "count": "13",
+              "rate": ""
+            }
+          ]
+        ]
+      }
+    ],
+    [
+      "US+CA web retest",
+      {
+        "status": "active",
+        "lines": [
+          "tagged hits: 46 (vs 7 arrivals)",
+          "raw install signals (can double-count): 0"
+        ],
+        "steps": [
+          [
+            "Arrivals",
+            {
+              "count": "7",
+              "rate": ""
+            }
+          ],
+          [
+            "Game-screen views",
+            {
+              "count": "21",
+              "rate": ""
+            }
+          ],
+          [
+            "Completed a game",
+            {
+              "count": "3",
+              "rate": ""
+            }
+          ],
+          [
+            "Sign-in ask",
+            {
+              "count": "6",
+              "rate": ""
+            }
+          ],
+          [
+            "Accept",
+            {
+              "count": "not instrumented",
+              "rate": "not instrumented"
+            }
+          ],
+          [
+            "Auth success",
+            {
+              "count": "2",
+              "rate": ""
+            }
+          ],
+          [
+            "Install prompt",
+            {
+              "count": "9",
+              "rate": ""
+            }
+          ],
+          [
+            "Install",
+            {
+              "count": "2",
+              "rate": "too few to report of prompts shown post-fix (2/4)"
+            }
+          ]
+        ]
+      }
+    ]
+  ],
+  "campaigns.country": [
+    [
+      "Android launch — \"tired of ads\"",
+      [
+        [
+          "Step",
+          "US",
+          "CA",
+          "Other"
+        ],
+        [
+          "Arrivals",
+          "40",
+          "10",
+          "0"
+        ],
+        [
+          "Game-screen views",
+          "100",
+          "0",
+          "0"
+        ],
+        [
+          "Sign-in ask",
+          "0",
+          "0",
+          "15"
+        ],
+        [
+          "Accept",
+          "0",
+          "0",
+          "4"
+        ],
+        [
+          "Auth success",
+          "0",
+          "0",
+          "5"
+        ],
+        [
+          "Install prompt",
+          "0",
+          "0",
+          "13"
+        ]
+      ]
+    ],
+    [
+      "US+CA web retest",
+      [
+        [
+          "Step",
+          "US",
+          "CA",
+          "Other"
+        ],
+        [
+          "Arrivals",
+          "7",
+          "0",
+          "0"
+        ],
+        [
+          "Game-screen views",
+          "21",
+          "0",
+          "0"
+        ],
+        [
+          "Completed a game",
+          "0",
+          "0",
+          "3"
+        ],
+        [
+          "Sign-in ask",
+          "0",
+          "0",
+          "6"
+        ],
+        [
+          "Accept",
+          "0",
+          "0",
+          "0"
+        ],
+        [
+          "Auth success",
+          "0",
+          "0",
+          "2"
+        ],
+        [
+          "Install prompt",
+          "0",
+          "0",
+          "9"
+        ],
+        [
+          "Install",
+          "0",
+          "0",
+          "2"
+        ]
+      ]
+    ]
+  ],
+  "campaigns.returns": [
+    {
+      "title": "US+CA web retest",
+      "counts": "d0=6 · d1=0.0% (0/6) · d2-7=0.0% (0/6) · d8-14=0.0% (0/6) · d15-30=0.0% (0/6) · d31-60=0.0% (0/6)"
+    }
+  ],
+  "campaigns.returns.tooFew": "too few to report (d0 = 3, need 5)",
+  "campaigns.returns.none": "No return visits recorded yet.",
+  "campaigns.hourOfDay.chart": [
+    {
+      "labels": [
+        "0:00",
+        "1:00",
+        "2:00",
+        "3:00",
+        "4:00",
+        "5:00",
+        "6:00",
+        "7:00",
+        "8:00",
+        "9:00",
+        "10:00",
+        "11:00",
+        "12:00",
+        "13:00",
+        "14:00",
+        "15:00",
+        "16:00",
+        "17:00",
+        "18:00",
+        "19:00",
+        "20:00",
+        "21:00",
+        "22:00",
+        "23:00"
+      ],
+      "series": [
+        [
+          "Android launch — \"tired of ads\"",
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            10,
+            0,
+            40,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ],
+        [
+          "US+CA web retest",
+          [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            7,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      ]
+    }
+  ],
+  "campaigns.flightDay.chart": [
+    {
+      "labels": [
+        "Day 1",
+        "Day 2",
+        "Day 3",
+        "Day 4",
+        "Day 5",
+        "Day 6",
+        "Day 7",
+        "Day 8"
+      ],
+      "series": [
+        [
+          "Android launch — \"tired of ads\"",
+          [
+            0,
+            40,
+            10,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ],
+        [
+          "US+CA web retest",
+          [
+            7,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      ]
+    },
+    {
+      "labels": [
+        "Day 1",
+        "Day 2",
+        "Day 3",
+        "Day 4",
+        "Day 5",
+        "Day 6",
+        "Day 7",
+        "Day 8"
+      ],
+      "series": [
+        [
+          "Android launch — \"tired of ads\"",
+          [
+            0,
+            40,
+            50,
+            50,
+            50,
+            50,
+            50,
+            50
+          ]
+        ],
+        [
+          "US+CA web retest",
+          [
+            7,
+            7,
+            7,
+            7,
+            7,
+            7,
+            7,
+            7
+          ]
+        ]
+      ]
+    }
+  ],
+  "campaigns.arrivals.edges": [
+    [
+      "24215315197",
+      {
+        "hourOfDayEt": [
+          0,
+          15,
+          0,
+          7,
+          0,
+          0,
+          0,
+          0,
+          0,
+          10,
+          2,
+          40,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "daily": [
+          {
+            "day": 2,
+            "arrivals": 40
+          },
+          {
+            "day": 3,
+            "arrivals": 10
+          },
+          {
+            "day": 4,
+            "arrivals": 2
+          },
+          {
+            "day": 0,
+            "arrivals": 9
+          },
+          {
+            "day": 0,
+            "arrivals": 13
+          }
+        ]
+      }
+    ],
+    [
+      "24279250691",
+      {
+        "hourOfDayEt": [
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          3,
+          7,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1
+        ],
+        "daily": [
+          {
+            "day": 1,
+            "arrivals": 10
+          },
+          {
+            "day": 6,
+            "arrivals": 1
+          },
+          {
+            "day": 0,
+            "arrivals": 1
+          }
+        ]
+      }
+    ]
+  ]
+}

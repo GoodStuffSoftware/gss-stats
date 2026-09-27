@@ -30,11 +30,15 @@ export interface RatioVerdict {
   reason: string
 }
 
-/** The validity rule (the prototype's, unchanged). */
+const NOT_COUNTS: ReadonlySet<string> = new Set(['instant', 'code'])
+
+/** The validity rule (the prototype's), plus: a time or a category is never a side. */
 export function ratioVerdict(r: Pick<RatioDef, 'kind' | 'num' | 'den'>, metrics: ReadonlyMap<string, MetricDef> = METRICS): RatioVerdict {
   const n = metrics.get(r.num)
   const d = metrics.get(r.den)
   if (!n || !d) return { ok: false, reason: 'unknown metric' }
+  // A time or a category is not a count: no ratio of any kind can use one.
+  if (NOT_COUNTS.has(n.unit) || NOT_COUNTS.has(d.unit)) return { ok: false, reason: `unit ${NOT_COUNTS.has(n.unit) ? n.unit : d.unit} is not a count` }
   if (r.kind === 'pair') return { ok: true, reason: 'counts only' }
   if (r.kind === 'cost') return n.unit === 'usd' && d.unit !== 'usd' ? { ok: true, reason: 'money per ' + d.unit } : { ok: false, reason: 'cost needs usd over a count' }
   if (r.kind !== 'proportion') return { ok: false, reason: `unknown kind ${String(r.kind)}` } // a registration from untyped data

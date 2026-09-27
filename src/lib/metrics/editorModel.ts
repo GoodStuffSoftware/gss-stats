@@ -11,7 +11,7 @@
 // this directly). Item/section ids are generated here too, never typed by the user, for the
 // same reason.
 import { CAMPAIGNS } from '../campaigns'
-import { hasNote, noteOptions, noteRawText } from '../notes'
+import { getNote, hasNote, NOTES_REGISTRY, noteOptions, noteRawText } from '../notes'
 import { POPUPS } from '../popupEvents'
 import { METRICS, type MetricDef } from './metrics'
 import { RATIOS, type RatioDef } from './ratios'
@@ -132,12 +132,19 @@ export const SCOPE_PATH_OPTIONS: Record<RepeatSpec['over'], { value: ScopePath; 
     { value: 'campaign.statusToday', label: 'Status (today)' },
     { value: 'campaign.flight', label: 'Flight dates' },
     { value: 'campaign.measurabilityNote', label: 'Measurability note' },
+    { value: 'campaign.upsellFixAt', label: 'Upsell fix time' },
+    { value: 'campaign.upsellFixFlightDay', label: 'Upsell fix flight day' },
+    { value: 'campaign.returnTagShared', label: 'Shared return tag note' },
   ],
   popups: [
     { value: 'popup.id', label: 'Pop-up id' },
     { value: 'popup.label', label: 'Pop-up name' },
   ],
-  windows: [{ value: 'window.label', label: 'Window label (Before / After)' }],
+  windows: [
+    { value: 'window.label', label: 'Window label (Before / After)' },
+    { value: 'release.label', label: 'Release (version and date)' },
+  ],
+  countries: [{ value: 'country.label', label: 'Country (US / CA / Other)' }],
   readings: [
     { value: 'reading.readAt', label: 'Read at' },
     { value: 'reading.kind', label: 'Reading kind' },
@@ -170,6 +177,27 @@ export function noteLabelOptions(): NoteOption[] {
 }
 export function isKnownNote(id: string): boolean {
   return hasNote(id)
+}
+/** A note's plain-text name for the editor, of ANY kind (a caption or a label entry such as a
+ * funnel step's name), `{vars}` shown as "…"; null for an id that is not a note. The item summary
+ * line and the pickers read it, so a preset's label notes never show as "Unknown note". */
+export function notePreview(id: string): string | null {
+  if (!hasNote(id)) return null
+  return (noteRawText(id) || id).replace(/\{[A-Za-z0-9_.]+\}/g, '…')
+}
+/** The note picker for a LABEL (an item's label, a section or card title): the caption notes plus
+ * the label entries (metric and funnel-step names, card labels; not the preset names or the unit
+ * words), and always `current` when it is a real note, so an existing pick is never blank. */
+export function labelNoteOptions(current?: string): NoteOption[] {
+  const out = noteLabelOptions()
+  const seen = new Set(out.map((o) => o.value))
+  for (const n of Object.values(NOTES_REGISTRY)) {
+    if (n.kind !== 'label' || n.id.startsWith('label.preset.') || n.id.startsWith('unit.') || seen.has(n.id)) continue
+    seen.add(n.id)
+    out.push({ value: n.id, preview: notePreview(n.id)! })
+  }
+  if (current && !seen.has(current) && getNote(current)) out.push({ value: current, preview: notePreview(current)! })
+  return out
 }
 
 // ── Data kind ──────────────────────────────────────────────────────────────────────────────
@@ -291,6 +319,9 @@ const DISPLAY_AS_LABELS: Record<DisplayAs, string> = {
   bar: 'Bar',
   sparkline: 'Sparkline',
   text: 'Text',
+  date: 'Date',
+  ago: 'Time ago',
+  status: 'Label',
 }
 export function displayAsLabel(as: DisplayAs): string {
   return DISPLAY_AS_LABELS[as] ?? as

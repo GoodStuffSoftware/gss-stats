@@ -18,10 +18,11 @@ const vm = useMetricItemViewModel(
 </script>
 
 <template>
-  <span v-if="vm.visible" class="mtc mono">
+  <span v-if="vm.visible" class="mtc mono" :class="{ muted: vm.muted }">
     {{ vm.primary }}
     <span v-for="(d, i) in vm.deltaLines" :key="i" class="mtc-delta" :class="d.cls">{{ d.text }}</span>
-    <MetricLabel v-if="vm.captionTokens.length" class="mtc-caption" :tokens="vm.captionTokens" />
+    <!-- captionMode 'compact': listed behind the card's one Notes toggle instead (MetricCardInstance). -->
+    <MetricLabel v-if="vm.captionTokens.length && item.captionMode !== 'compact'" class="mtc-caption" :tokens="vm.captionTokens" />
   </span>
   <span v-else class="mtc mono">—</span>
 </template>
@@ -29,6 +30,10 @@ const vm = useMetricItemViewModel(
 <style scoped>
 .mono {
   font-family: 'JetBrains Mono', monospace;
+}
+.muted {
+  font-style: italic;
+  color: rgb(var(--ink-3));
 }
 .mtc {
   font-size: 11.5px;

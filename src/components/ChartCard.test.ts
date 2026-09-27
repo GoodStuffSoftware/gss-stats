@@ -14,21 +14,15 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import ChartCard from './ChartCard.vue'
-import type { Widget, GlobalFilters, OverviewResponse } from '../types'
+import type { Widget, GlobalFilters } from '../types'
 
-// Only fetchOverview is overridden (a minimal, synchronous-ish fixture) — everything else in
-// '../api' stays real, so this doesn't have to track every export it has.
-const MINIMAL_OVERVIEW_RESPONSE: OverviewResponse = {
-  generatedAt: '2026-09-26T12:00:00Z',
-  todayEt: '2026-09-26',
-  releasePanel: null,
-}
+// Only fetchSeriesStats is overridden (a minimal fixture) — everything else in '../api' stays real,
+// so this doesn't have to track every export it has.
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>()
   const statsFor = () => ({ rows: [{ key: { date: '2026-09-26' }, pageviews: 5, visits: 5 }], totals: { pageviews: 5, visits: 5 }, meta: { site: 'all', host: null, since: '2026-09-26', until: '2026-09-27', dimensions: ['date'], metric: 'pageviews' } })
   return {
     ...actual,
-    fetchOverview: vi.fn(async () => MINIMAL_OVERVIEW_RESPONSE),
     fetchSeriesStats: vi.fn(async (w: Widget) => (w.series ?? []).map(statsFor)),
   }
 })

@@ -1,6 +1,6 @@
 # ADR 0003: Metric components: one configurable card, a metrics registry, one batched endpoint
 
-- **Status:** Accepted (owner-approved 2026-09-26). Slices 1-3 are implemented on
+- **Status:** Accepted (owner-approved 2026-09-26). Slices 1-7 are implemented (slice 7: see [its notes](#implementation-notes-slice-7)). Slices 1-3 were implemented on
   `feat/metrics-core`; see [Implementation notes](#implementation-notes-slices-1-3) for where the
   code differs from this design and why.
 - **Date:** 2026-09-26
@@ -871,9 +871,11 @@ users, and a review gate.
   so.
 - Closed campaigns get shorter, quieter cards: steps that were never measured disappear instead of
   reading "not instrumented" or "— (0/0)".
-- `OverviewResponse.kpis/scorecard` and much of `CampaignCompareResponse` become dead weight and are
-  removed in slice 7. The timeline, hour-of-day, flight-day, country and device-mix charts keep their
-  endpoints until series metrics exist.
+- `OverviewResponse.kpis/scorecard` and much of `CampaignCompareResponse` become dead weight. (As
+  built: both endpoints were removed in slice 7. The timeline and device mix had become standard
+  charts in layout version 9; hour-of-day and flight-day became standard `/api/geo` charts over
+  new `hourEt` and `flightDay` dimensions rather than waiting for series metrics, and country a
+  card.)
 - `lib/metrics/` becomes a second shared domain module next to `popupEvents.ts` and `campaigns.ts`.
   Their classifiers stay the single source, and the registry only composes them.
 - The ads routine (`scripts/ads-reads`) can later read the same registry for its reports, which
@@ -1132,3 +1134,56 @@ callback, which is the v0.8.0 `campaignsData` leak this module exists to avoid.
   `prodLayout.v8.json` plus its v9 normalisation), on custom, deleted and renamed variants, and on
   an already-v10 layout. On production, v9 → v10 changes exactly two widgets, `ow-kpis` and
   `ow-scorecard` on "Best Sudoku · Overview", by adding their card.
+
+## Implementation notes (slice 7)
+
+**The rest of the panels (`CONFIG_VERSION` 11).** Every remaining bespoke panel is a card preset
+or a standard chart, swapped in place by `migratePanelsV11` (`lib/defaults.ts`) on every load:
+matched by what the widget is (`panelKey`: dataset and view, and for the pop-up dataset its
+`rateTable` type or `eligible` dimension), never by its title or page; id, position, size, title,
+captions and default mark kept; nothing added, removed or reordered; a card already set is left
+alone. On production, v9 → v11 changes eleven widgets: the two v10 cards, seven v11 cards and two
+charts (`defaults.v11.test.ts`).
+
+| Panel | Becomes |
+|---|---|
+| `overview` / `releasePanel` | preset `release-before-after`: a column table (Before / After) of four counts |
+| `campaigns` / `funnel` | preset `campaign-funnel`, with the upsell-fix segment table as a section |
+| `campaigns` / `country` | preset `campaign-country`: steps as rows, US / CA / Other as columns |
+| `campaigns` / `cost` | preset `campaign-cost`, with the ads refresh button as a card action |
+| `campaigns` / `returns` | preset `campaign-returns`: d0 and dN/d0 as bars side by side |
+| `campaigns` / `hourOfDay` | a breakdown bar, `hourEt` × `campaignFlight`, arrival = tagged |
+| `campaigns` / `flightDay` | a line, `flightDay` × `campaignFlight`, arrival = tagged, `cumulative` |
+| `popup` rate table | preset `popup-rates` |
+| `popup` / `eligible` | preset `signin-eligibility` (plus the eligibility rate) |
+
+Registry and component additions (all generic):
+- Windows `before` / `after` (the latest dated release, sized as `releaseComparisonWindows` from
+  one cached first-hit read the endpoint makes before planning) and `upsellPre` / `upsellPost`
+  (a campaign's attribution window split at `UPSELL_SIGNEDOUT_FIX_AT`; a `boundaryInFlight` rule
+  keeps them unmeasured while it is unset or outside the flight). `{ scope: 'window' }` binds an
+  item to the window of the repeat or column it sits in.
+- An optional `country` param on campaign-fact metrics (the fact now groups by a US / CA / other
+  bucket); units `instant` and `code` (never a ratio side); displays `date`, `ago`, `status` and
+  `bar` on a rate; `Gating.whenZero`; `Gating.whenNotStarted` (`'label'` keeps a not-yet-begun
+  flight's item as "not started", even with no start date, where it would be omitted; `'zero'`
+  shows a count that cannot have happened yet as 0): the funnel and country cards show an
+  upcoming flight as the old panels did (Arrivals 0, every other step "not started"), while the
+  scorecard keeps omitting a pending flight's steps.
+- Nested scopes (a repeat keeps the instance it sits in), repeats over countries and over
+  beacon-tracked campaigns only, a column repeat on `table` sections (`columns`, `columnLabel`,
+  `rowsLabel`), a `columns` section layout, card `actions` and rendered card `captions`; a
+  repeated instance with nothing visible is hidden, and the repeat's `empty` text shows when all
+  are.
+- The pop-up fact honours "hide my own visits" (the page context now carries it), as
+  `/api/popups` did.
+- A widget's `campaignIds` narrows a card whose top-level repeat is over campaigns (MetricCard
+  `campaignIds`, `narrowToCampaigns`), as it narrowed the old campaign panels; the chart editor
+  shows the Campaign(s) picker for such a card.
+
+Retired: both bespoke bodies, `/api/campaigns`, `/api/overview`, `/api/popups`' `rates` and
+`eligible` sections, `lib/campaignsData`, `lib/overviewData`, `functions/_lib/campaignInstrumentation`.
+Parity: `slice7.parity.test.ts` and `slice7.upsell.test.ts` compare every panel's visible numbers
+with the old body over its old endpoint on one `node:sqlite` fixture, each difference listed and
+asserted; the old side was captured and checked live in commit `76caad5`, and is a golden since.
+Measured cost: `docs/capacity.md` §8.

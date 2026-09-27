@@ -9,7 +9,7 @@
 //      gameCompleteNotInstrumented, which this reproduces — instrumentation.test.ts checks both)
 //   3. unmeasuredBefore   the fact already drops earlier rows (the install gap); I starts there
 //   4. seenInFlightWindow  a CLOSED flight whose serving window never saw the metric's paths
-//      site-wide → unmeasured 'not-seen-in-flight' (the per-flight check /api/campaigns runs;
+//      site-wide → unmeasured 'not-seen-in-flight' (the per-flight check /api/campaigns ran;
 //      an active or upcoming flight's window is still open, so it stays live)
 //   5. annotateAt   a marker, never a gate: the note travels with a window that spans it
 //
@@ -36,6 +36,10 @@ export type InstrumentationRule =
   | { kind: 'beaconMeasurable' }
   /** A marker, never a gate (the raw-install de-dupe). */
   | { kind: 'annotateAt'; atMs: number; noteId: string }
+  /** A gate, never a shift: a window split at this instant (the upsell fix's pre/post-fix
+   * segments) exists only once it is set (null = not live) and falls inside the campaign's
+   * flight, as lib/adsRules.ts campaignSegmentMarker decides. */
+  | { kind: 'boundaryInFlight'; atMs: number | null; source: string }
 
 export interface MeasuredInterval {
   status: 'measured' | 'partial' | 'unmeasured'
@@ -130,6 +134,15 @@ export function measuredInterval({ rules, window, campaign, seenInFlight }: Inte
       case 'annotateAt':
         if (rule.atMs > a && rule.atMs < b) noteIds.push(rule.noteId)
         continue
+      case 'boundaryInFlight': {
+        if (rule.atMs === null) return unmeasured('not-live')
+        if (campaign) {
+          if (!campaign.flightStart) return unmeasured('flight-pending')
+          const day = etDateOfMs(rule.atMs)
+          if (day < campaign.flightStart || day > campaign.flightEnd) return unmeasured('outside-flight')
+        }
+        continue
+      }
     }
     if (goLiveEt === null || et! > goLiveEt) goLiveEt = et
     if (at! > from) {
@@ -177,8 +190,9 @@ export interface PathCount {
 }
 
 /** Funnel steps (excluding 'arrivals', always instrumented) with no hit at all in a flight's
- * flightPathsSeen rows — the legacy per-flight "not instrumented" list /api/campaigns and the
- * overview scorecard use. */
+ * flightPathsSeen rows — the legacy per-flight "not instrumented" list the retired
+ * /api/campaigns and overview scorecard used, kept for the tests that compare it with the
+ * seenInFlightWindow rule. */
 export function notInstrumentedStepsFromRows(rows: readonly PathCount[]): FunnelStepKey[] {
   const seen = new Set<FunnelStepKey>()
   for (const r of rows) {

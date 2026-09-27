@@ -20,7 +20,7 @@
 //        fresh?: true, requests: [{ key, metric | ratio, params?, window?, deltas?, minCohort? }] }
 
 import { etDateFast } from '../../src/lib/etTime'
-import { deriveBatch, newSideMemo, planBatch } from '../../src/lib/metrics/engine'
+import { deriveBatch, factKeyString, needsReleaseWindows, newSideMemo, planBatch, releaseWindowsFor, type BatchEnv, type FactResult, type Plan } from '../../src/lib/metrics/engine'
 import { prewarm } from '../../src/lib/metrics/prewarm'
 import { MAX_BODY_BYTES, MAX_STATEMENTS, validateMetricsRequest } from '../../src/lib/metrics/validate'
 import type { MetricsResponseBody } from '../../src/lib/metrics/types'
@@ -74,24 +74,41 @@ export const onRequestPost: PagesFunction<MetricFactsEnv> = async (ctx) => {
   if (!ctx.env.gss_geo) return json({ error: 'geo DB not bound' }, 500)
 
   const nowMs = Date.now()
-  const env = { context: batch.context, nowMs, todayEt: etDateFast(nowMs), hasAdsDb: !!ctx.env.gss_stats_ads }
+  const env: BatchEnv = { context: batch.context, nowMs, todayEt: etDateFast(nowMs), hasAdsDb: !!ctx.env.gss_stats_ads }
+  const valid = batch.requests.flatMap((r) => (r.ok ? [r.req] : []))
+  const cache = (caches as unknown as { default: CacheLike }).default
+  const opts = { nowMs, todayEt: env.todayEt, fresh: batch.fresh, cache, waitUntil: (p: Promise<unknown>) => ctx.waitUntil(p) }
+
+  // Release windows (before/after) are sized by the first Best Sudoku hit, so that one cached
+  // aggregate is read first; every other fact is planned with the windows known. A failed read
+  // leaves env.release undefined, and those requests answer `error`.
+  const facts = new Map<string, FactResult>()
+  let cacheHits = 0
+  let statements = 0
+  if (needsReleaseWindows(valid)) {
+    const first: Plan = { facts: [{ key: factKeyString('bskFirstHit', {}), id: 'bskFirstHit', params: {}, statements: 1 }], statements: 1 }
+    const got = await fetchFacts(first, ctx.env, opts)
+    const f = got.facts.get(first.facts[0].key)
+    if (f?.ok && f.rows.kind === 'scalar') env.release = releaseWindowsFor(f.rows.value, nowMs)
+    for (const [k, v] of got.facts) facts.set(k, v)
+    cacheHits += got.cacheHits
+    statements += got.statements
+  }
+
   const memo = newSideMemo() // each request side is resolved once, for planning and derivation
-  const plan = planBatch(
-    batch.requests.flatMap((r) => (r.ok ? [r.req] : [])),
-    env,
-    memo,
-  )
+  const plan = planBatch(valid, env, memo)
   if (plan.statements > MAX_STATEMENTS) {
     return json({ error: 'batch needs more statements than one request may run; split it', maxStatements: MAX_STATEMENTS, statements: plan.statements }, 413)
   }
 
-  const cache = (caches as unknown as { default: CacheLike }).default
-  const fetched = await fetchFacts(plan, ctx.env, { nowMs, todayEt: env.todayEt, fresh: batch.fresh, cache, waitUntil: (p) => ctx.waitUntil(p) })
+  const rest = plan.facts.filter((f) => !facts.has(f.key))
+  const fetched = await fetchFacts({ facts: rest, statements: rest.reduce((a, f) => a + f.statements, 0) }, ctx.env, opts)
+  for (const [k, v] of fetched.facts) facts.set(k, v)
   const body: MetricsResponseBody = {
     v: 1,
     generatedAt: new Date(nowMs).toISOString(),
-    results: deriveBatch(batch.requests, { ...env, facts: fetched.facts }, memo),
-    meta: { facts: plan.facts.length, cacheHits: fetched.cacheHits, statements: fetched.statements },
+    results: deriveBatch(batch.requests, { ...env, facts }, memo),
+    meta: { facts: plan.facts.length, cacheHits: cacheHits + fetched.cacheHits, statements: statements + fetched.statements },
   }
   return json(body)
 }

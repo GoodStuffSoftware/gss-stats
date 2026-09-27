@@ -26,6 +26,7 @@ const LAYOUTS: { value: Section['layout']; label: string }[] = [
   { value: 'pills', label: 'Pills' },
   { value: 'tiles', label: 'Tiles' },
   { value: 'bars', label: 'Bars' },
+  { value: 'columns', label: 'Columns (bars side by side)' },
   { value: 'table', label: 'Table' },
 ]
 
@@ -43,6 +44,13 @@ const repeatModel = computed({
   get: () => section.value.repeat,
   set: (v) => {
     section.value = { ...section.value, repeat: v }
+  },
+})
+/** A table's column repeat (Section.columns): items become rows, these instances columns. */
+const columnsModel = computed({
+  get: () => section.value.columns,
+  set: (v) => {
+    section.value = { ...section.value, columns: v }
   },
 })
 
@@ -91,7 +99,8 @@ function removeAt(i: number) {
     </div>
     <CardEditorLabel v-if="hasTitle" v-model="titleModel" :has-data="false" :repeat-over="cardRepeatOver" placeholder="Section title" heading="Section title" />
 
-    <CardEditorRepeat v-model="repeatModel" :allow="['campaigns', 'popups', 'windows', 'readings']" label="Repeat this section" />
+    <CardEditorRepeat v-if="!section.columns" v-model="repeatModel" :allow="['campaigns', 'popups', 'windows', 'readings', 'countries']" label="Repeat this section" />
+    <CardEditorRepeat v-if="section.layout === 'table' && !section.repeat" v-model="columnsModel" :allow="['windows', 'countries', 'campaigns', 'popups']" label="Columns (each item becomes a row)" />
 
     <ul class="ce-items">
       <CardEditorItem

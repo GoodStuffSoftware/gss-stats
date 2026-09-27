@@ -1,5 +1,5 @@
-// Ads data freshness — pure helpers shared by the sync (lib/adsSync.ts), the dashboard's
-// Pages Functions (/api/campaigns, /api/ads/readings) and the ads widgets. No I/O here, and
+// Ads data freshness — pure helpers shared by the sync (lib/adsSync.ts), the metrics registry
+// (the cost card's freshness rows), /api/ads/readings and the ads widgets. No I/O here, and
 // only the fast ET arithmetic of lib/etTime.ts (the sync runs on a tight CPU budget).
 //
 //   spendThrough  the last ET day stored as CLOSED, contiguously from the flight's first day,

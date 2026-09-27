@@ -22,6 +22,8 @@ import { BEST_SUDOKU_SITES, syncCardWithView } from '../lib/defaults'
 import { noteOptions, defaultNoteIdsForScope, type NoteScope } from '../lib/notes'
 import CardEditor from './metrics/CardEditor.vue'
 import { metricsContextFor } from '../lib/metrics/pageContext'
+import { presetById } from '../lib/metrics/presets'
+import { selectsCampaigns } from '../lib/metrics/scope'
 import { resolveSelection } from '../sitesStore'
 import type { MetricsContext } from '../lib/metrics/types'
 
@@ -100,8 +102,6 @@ const isGeo = computed(() => draft.dataset === 'geo')
 const isPopup = computed(() => draft.dataset === 'popup')
 const isCompletions = computed(() => draft.dataset === 'completions')
 const isRate = computed(() => draft.type === 'rate')
-// A rate table needs no dimension or pop-up: it always shows every VALID rate.
-const isRateTable = computed(() => draft.type === 'rateTable')
 const isNote = computed(() => draft.type === 'note')
 // The three former-bespoke datasets: no dimension/breakdown/metric/site-override — a
 // "View" picker (+ campaign multi-select for campaigns/ads-readings) replaces them.
@@ -159,8 +159,8 @@ const dimOptions = computed(() =>
 )
 // A count-mode popup chart ('kind'/'reason'/'date'/'outcome') needs to know WHICH pop-up
 // it's scoped to; 'reason'/'date' also need which funnel stage they break down/trend.
-const popupNeedsPopup = computed(() => isPopup.value && !isRate.value && !isRateTable.value && draft.dimension !== 'eligible' && draft.dimension !== 'installOutcome')
-const popupNeedsKind = computed(() => isPopup.value && !isRate.value && !isRateTable.value && (draft.dimension === 'reason' || draft.dimension === 'date'))
+const popupNeedsPopup = computed(() => isPopup.value && !isRate.value && draft.dimension !== 'installOutcome')
+const popupNeedsKind = computed(() => isPopup.value && !isRate.value && (draft.dimension === 'reason' || draft.dimension === 'date'))
 
 // Switching data source: keep the dimension + breakdown valid for the new source. The
 // beacon supports a breakdown too (nested doughnut / stacked bar), so we remap rather
@@ -211,7 +211,7 @@ function onDatasetChange() {
 watch(
   () => draft.type,
   (t, prev) => {
-    if ((t === 'rate' || t === 'rateTable') && draft.dataset !== 'popup') {
+    if (t === 'rate' && draft.dataset !== 'popup') {
       draft.dataset = 'popup'
       onDatasetChange()
     }
@@ -259,6 +259,10 @@ function moveRing(idx: number, dir: -1 | 1) {
 // ── Line/area charts on a date axis: overlay toggles, and (beacon data) a series list — each
 // series its own date query narrowed by one filter, on the left or right axis. ─────────────────
 const isDateLine = computed(() => (draft.type === 'line' || draft.type === 'area') && isDateDim(draft.dimension))
+// A line over a non-date axis may break down into one line per value (lib/charts.ts); a date
+// axis draws its lines from `series` instead, so it offers no breakdown there.
+const breakdownAllowed = computed(() => !!typeDef.value?.allowsBreakdown && !isDateLine.value)
+const isBreakdownLine = computed(() => (draft.type === 'line' || draft.type === 'area') && !isDateLine.value && !!draft.breakdown)
 const canUseSeries = computed(() => isDateLine.value && isGeo.value)
 const SERIES_FIELDS = GEO_DIMENSIONS.filter((d) => !isDateDim(d.key))
 function addSeries() {
@@ -324,6 +328,11 @@ watch(
 // ChartType value (that would touch the shared ChartType union / CHART_TYPES catalog, outside
 // this integration's file list).
 const isCardWidget = computed(() => !!draft.card)
+/** The card's own spec (preset or inline), for what the form around CardEditor offers. */
+const cardSpec = computed(() => (draft.card ? ('preset' in draft.card ? presetById(draft.card.preset) ?? null : draft.card.spec) : null))
+/** A card repeated over campaigns takes the widget's campaign selection (MetricCard
+ * campaignIds, lib/metrics/scope.ts narrowToCampaigns): the Campaign(s) picker shows for it. */
+const cardSelectsCampaigns = computed(() => selectsCampaigns(cardSpec.value?.repeat))
 const CARD_DEFAULT_PRESET = 'campaign-scorecard'
 /** "Add chart" → "Metric card": the button below sets a default preset the owner can then
  * customize (CardEditor's own preset → Customize… flow). */
@@ -347,7 +356,7 @@ const cardModel = computed<import('../lib/metrics/types').CardRef>({
 const cardContext = computed<MetricsContext>(() => {
   const f = draft.filters ?? props.filters
   if (!f) return {}
-  return metricsContextFor({ since: f.since, until: f.until }, resolveSelection(draft.siteSel ?? f.siteSel).tags)
+  return metricsContextFor({ since: f.since, until: f.until }, resolveSelection(draft.siteSel ?? f.siteSel).tags, f)
 })
 // CardEditor's own `errors` event (review fix, 2026-09-27): the only way this form learns a
 // metric card is currently invalid, since CardEditor's `update:modelValue` simply never fires
@@ -387,7 +396,8 @@ function save() {
   // defaults at render time (see its own comment).
   if (draft.type !== 'note') draft.notes = attachedNotesValue.value
   if (typeDef.value && !typeDef.value.needsDimension) draft.dimension = ''
-  if (typeDef.value && !typeDef.value.allowsBreakdown) draft.breakdown = undefined
+  if (!breakdownAllowed.value) draft.breakdown = undefined
+  if (!isBreakdownLine.value) draft.cumulative = undefined
   if (draft.breakdown === '') draft.breakdown = undefined
   if (!popupNeedsPopup.value) draft.popup = undefined
   if (!popupNeedsKind.value) draft.popupKind = undefined
@@ -464,7 +474,16 @@ function save() {
       <template v-if="isCardWidget">
         <p class="hint">This chart is a metric card.</p>
         <button type="button" class="btn" @click="leaveCardMode">Switch to a regular chart</button>
-        <CardEditor v-model="cardModel" :context="cardContext" @errors="cardErrors = $event" />
+        <div class="field" v-if="cardSelectsCampaigns">
+          <label>Campaign(s) <span class="hint">— none checked = every campaign the card shows</span></label>
+          <div class="campaign-list">
+            <label v-for="c in CAMPAIGN_OPTIONS" :key="c.value" class="campaign-row">
+              <input type="checkbox" :checked="campaignIdsValue.includes(c.value)" @change="toggleCampaign(c.value, ($event.target as HTMLInputElement).checked)" />
+              {{ c.label }}
+            </label>
+          </div>
+        </div>
+        <CardEditor v-model="cardModel" :context="cardContext" :campaign-ids="cardSelectsCampaigns ? draft.campaignIds : undefined" @errors="cardErrors = $event" />
       </template>
 
       <!-- Note: pick a registry entry, or write custom text (owner requirement, 2026-09-26:
@@ -537,13 +556,18 @@ function save() {
             <option v-for="d in dimOptions" :key="d.key" :value="d.key">{{ d.label }}</option>
           </select>
         </div>
-        <div class="field" v-if="typeDef?.allowsBreakdown">
-          <label>{{ draft.type === 'breakdownBar' ? 'Series (break down by)' : 'Break down by' }}</label>
+        <div class="field" v-if="breakdownAllowed">
+          <label>{{ draft.type === 'breakdownBar' ? 'Series (break down by)' : draft.type === 'line' || draft.type === 'area' ? 'One line per' : 'Break down by' }}</label>
           <select v-model="draft.breakdown">
             <option :value="undefined">— none —</option>
             <option v-for="d in dimOptions" :key="d.key" :value="d.key">{{ d.label }}</option>
           </select>
         </div>
+      </div>
+
+      <!-- Line with a breakdown: also each line's running total, dashed on a right-hand axis -->
+      <div class="field check" v-if="isBreakdownLine">
+        <label><input type="checkbox" :checked="!!draft.cumulative" @change="draft.cumulative = ($event.target as HTMLInputElement).checked || undefined" /> Add cumulative lines (dashed, right axis)</label>
       </div>
 
       <!-- Breakdown bar: series side by side, or stacked into one bar per axis value -->

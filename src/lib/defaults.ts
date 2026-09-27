@@ -1,5 +1,5 @@
 import type { DashboardConfig, DashboardPage, GlobalFilters, LineSeries, Widget } from '../types'
-import { parseDurationMs } from './range'
+import { relativeRange, SINCE_FIRST_CAMPAIGN } from './range'
 import { POPUPS, POPUP_RATE_SPECS, NO_OUTCOME_TRACKING_NOTE, SIGNIN_ELIGIBLE_CAVEAT } from './popupEvents'
 import { CAMPAIGNS } from './campaigns'
 import { BEST_SUDOKU_SITES } from './bestSudokuSites'
@@ -39,10 +39,14 @@ function w(p: Omit<Widget, 'i'>): Widget {
   return { ...p, i: p.id }
 }
 
-// Bumped to 10 for metric cards (ADR 0003 slice 5, see migrateCardsV10): the Overview's bespoke
+// Bumped to 11 for the rest of the panels (ADR 0003 slice 7, see migratePanelsV11): every
+// remaining bespoke panel becomes a card preset (the release panel; the campaign funnel, country,
+// cost and returns panels; the Pop-ups rate table and sign-in eligibility) or a standard chart
+// (arrivals by ET hour, daily arrivals by flight day), swapped in place. functions/api/config.ts
+// backs the stored layout up to `dashboard:default:backup:v<stored>` on the first v11 save.
+// (Bumped to 10 for metric cards (ADR 0003 slice 5, see migrateCardsV10): the Overview's bespoke
 // 'kpis' and 'scorecard' panels gain `card: { preset }` and render as MetricCard; nothing else
-// about them changes. functions/api/config.ts backs the stored v9 layout up to
-// `dashboard:default:backup:v9` on the first v10 save.
+// about them changes.)
 // (Bumped to 9 for the Pop-ups page rebuild, the campaign device-mix swap and the Overview
 // timeline swap (see normalizeConfig's v9 block): the Pop-ups page's ~25 generated tiles become
 // one breakdown bar + a valid-rates table, the bespoke campaigns 'deviceMix' table becomes the
@@ -53,7 +57,7 @@ function w(p: Omit<Widget, 'i'>): Widget {
 // uncustomized layout only. (Bumped to 7 for the bespoke-page → widget conversion migration —
 // see the v7 block: Overview/Campaigns went from `widgets: []` (rendered by the now-retired
 // OverviewPage.vue/CampaignComparePage.vue) to real generic widgets.)
-export const CONFIG_VERSION = 10
+export const CONFIG_VERSION = 11
 
 // The default "basic charts available out of the box" — a sensible analytics
 // starting layout. Users can move/resize/add/remove from here.
@@ -189,8 +193,8 @@ export function defaultBestSudokuPopupsWidgets(): Widget[] {
       w: 12,
       h: 11,
     }),
-    w({ id: 'pu-rates', title: 'Rates (valid ratios only)', type: 'rateTable', dataset: 'popup', dimension: '', metric: 'pageviews', limit: 1, notes: ['min-cohort-caveat'], x: 0, y: 11, w: 8, h: 7 }),
-    w({ id: 'pu-eligible-bd', title: 'Sign-in eligibility', type: 'bar', dataset: 'popup', dimension: 'eligible', metric: 'pageviews', limit: 3, notes: ['signin-eligible-caveat'], x: 8, y: 11, w: 4, h: 7 }),
+    w({ id: 'pu-rates', title: 'Rates (valid ratios only)', type: 'rateTable', dataset: 'popup', dimension: '', card: { preset: 'popup-rates' }, metric: 'pageviews', limit: 1, notes: ['min-cohort-caveat'], x: 0, y: 11, w: 8, h: 7 }),
+    w({ id: 'pu-eligible-bd', title: 'Sign-in eligibility', type: 'bar', dataset: 'popup', dimension: 'eligible', card: { preset: 'signin-eligibility' }, metric: 'pageviews', limit: 3, notes: ['signin-eligible-caveat'], x: 8, y: 11, w: 4, h: 7 }),
   ]
 }
 
@@ -330,18 +334,19 @@ export function isBestSudokuPopupsPage(p: DashboardPage): boolean {
 }
 
 // "Best Sudoku campaigns" widgets — every panel of the former bespoke
-// CampaignComparePage.vue as its own movable/resizable/editable widget (dataset
-// 'campaigns'; see components/widgets/CampaignsWidgetBody.vue). campaignIds left
-// undefined = all CAMPAIGNS, same as the page's original always-every-campaign behavior.
+// CampaignComparePage.vue as its own movable/resizable/editable widget: metric cards (dataset
+// 'campaigns', `view` naming the panel, `card` its preset) and standard geo charts. campaignIds
+// left undefined = every campaign the card repeats over (MetricCard campaignIds), same as the
+// page's original always-every-campaign behavior.
 export function defaultCampaignsWidgets(): Widget[] {
   return [
-    w({ id: 'cw-funnel', title: 'Funnel per campaign', type: 'table', dataset: 'campaigns', view: 'funnel', dimension: '', metric: 'pageviews', limit: 1, notes: ['arrivals-caveat', 'min-cohort-caveat'], x: 0, y: 0, w: 12, h: 14 }),
-    w({ id: 'cw-hour', title: 'Arrivals by ET hour of day', type: 'table', dataset: 'campaigns', view: 'hourOfDay', dimension: '', metric: 'pageviews', limit: 1, notes: ['arrivals-caveat'], x: 0, y: 14, w: 12, h: 8 }),
-    w({ id: 'cw-country', title: 'Arrivals & funnel by country', type: 'table', dataset: 'campaigns', view: 'country', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 22, w: 12, h: 10 }),
-    w({ id: 'cw-flightday', title: 'Daily arrivals by flight day', type: 'table', dataset: 'campaigns', view: 'flightDay', dimension: '', metric: 'pageviews', limit: 1, notes: ['arrivals-caveat', 'flight-day-caption'], x: 0, y: 32, w: 12, h: 10 }),
-    w({ id: 'cw-cost', title: 'Cost per arrival / auth success', type: 'table', dataset: 'campaigns', view: 'cost', dimension: '', metric: 'pageviews', limit: 1, notes: ['arrivals-caveat', 'spend-source'], x: 0, y: 42, w: 12, h: 9 }),
+    w({ id: 'cw-funnel', title: 'Funnel per campaign', type: 'table', dataset: 'campaigns', view: 'funnel', card: { preset: 'campaign-funnel' }, dimension: '', metric: 'pageviews', limit: 1, notes: ['arrivals-caveat', 'min-cohort-caveat'], x: 0, y: 0, w: 12, h: 14 }),
+    hourOfDayWidget({ x: 0, y: 14, w: 12, h: 8 }),
+    w({ id: 'cw-country', title: 'Arrivals & funnel by country', type: 'table', dataset: 'campaigns', view: 'country', card: { preset: 'campaign-country' }, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 22, w: 12, h: 10 }),
+    flightDayWidget({ x: 0, y: 32, w: 12, h: 10 }),
+    w({ id: 'cw-cost', title: 'Cost per arrival / auth success', type: 'table', dataset: 'campaigns', view: 'cost', card: { preset: 'campaign-cost' }, dimension: '', metric: 'pageviews', limit: 1, notes: ['arrivals-caveat', 'spend-source'], x: 0, y: 42, w: 12, h: 9 }),
     deviceMixWidget({ x: 0, y: 51, w: 12, h: 12 }),
-    w({ id: 'cw-returns', title: 'Return visits', type: 'table', dataset: 'campaigns', view: 'returns', dimension: '', metric: 'pageviews', limit: 1, notes: ['play-tracking-status', 'return-rate-caption'], x: 0, y: 63, w: 12, h: 11 }),
+    w({ id: 'cw-returns', title: 'Return visits', type: 'table', dataset: 'campaigns', view: 'returns', card: { preset: 'campaign-returns' }, dimension: '', metric: 'pageviews', limit: 1, notes: ['play-tracking-status', 'return-rate-caption'], x: 0, y: 63, w: 12, h: 11 }),
     w({
       id: 'cw-note-attrib',
       title: 'Attribution note',
@@ -401,6 +406,45 @@ export function deviceMixWidget(geom: { x: number; y: number; w: number; h: numb
     ...geom,
   }
 }
+// Campaign arrivals charts (CONFIG_VERSION 11, ADR 0003 slice 7): the bespoke hour-of-day and
+// flight-day panels as STANDARD geo charts. Both count tagged arrivals exactly as /api/campaigns
+// did: the 'arrival' = tagged filter (a device's first-ever beacon, attributed by
+// campaignAttributionClause with the same EXCLUSIONS, pre-fix install-gap rows left out), one
+// series per beacon-tracked campaign flight ('campaignFlight', lib/charts.ts
+// campaignFlightDomain: a campaign with no arrivals yet at 0), since the first campaign's start
+// (a range that grows, so no flight's early days ever drop off, and every arrival the funnel card
+// counts is on the charts), and without "hide my visits", which the campaigns endpoint never
+// applied.
+function campaignArrivalsFilters(): GlobalFilters {
+  return normFilters({ ...defaultFilters(), siteSel: [], rangeRel: SINCE_FIRST_CAMPAIGN, excludeOwnVisits: false, drill: [{ key: 'arrival', value: 'tagged', label: 'Tagged' }] })
+}
+/** Arrivals by ET hour of day: bars per hour 0:00-23:00, one per campaign (grouped). */
+export function hourOfDayWidget(geom: { x: number; y: number; w: number; h: number }, id = 'cw-hour', title = 'Arrivals by ET hour of day'): Widget {
+  return { id, i: id, title, type: 'breakdownBar', dataset: 'geo', dimension: 'hourEt', breakdown: 'campaignFlight', metric: 'pageviews', limit: 500, includeEventBeacons: true, filters: campaignArrivalsFilters(), notes: ['arrivals-caveat'], ...geom }
+}
+/** Daily arrivals by flight day: a line per campaign over its flight days (day 1 = its first ET
+ * day), with each campaign's running total dashed on a right-hand axis. */
+export function flightDayWidget(geom: { x: number; y: number; w: number; h: number }, id = 'cw-flightday', title = 'Daily arrivals by flight day'): Widget {
+  return { id, i: id, title, type: 'line', dataset: 'geo', dimension: 'flightDay', breakdown: 'campaignFlight', cumulative: true, metric: 'pageviews', limit: 500, includeEventBeacons: true, filters: campaignArrivalsFilters(), notes: ['arrivals-caveat', 'flight-day-caption'], ...geom }
+}
+const CAMPAIGN_CHART_FOR_VIEW: Readonly<Record<string, typeof hourOfDayWidget>> = Object.freeze(
+  Object.assign(Object.create(null) as Record<string, typeof hourOfDayWidget>, { hourOfDay: hourOfDayWidget, flightDay: flightDayWidget }),
+)
+/** One bespoke campaign chart panel as its standard chart: same id, grid position, size, title,
+ * captions and default mark. A panel scoped to ONE campaign keeps that scope as a campaignFlight
+ * filter; one scoped to several (not all) shows every flight (each is its own series). */
+function campaignChartFromBespoke(wd: Widget, make: typeof hourOfDayWidget): Widget {
+  const next = make({ x: wd.x, y: wd.y, w: wd.w, h: wd.h }, wd.id, wd.title)
+  next.isDefault = wd.isDefault
+  if (wd.notes) next.notes = [...wd.notes]
+  const ids = (wd.campaignIds ?? []).filter((id) => CAMPAIGNS.some((c) => c.id === id))
+  if (ids.length === 1) {
+    const c = CAMPAIGNS.find((x) => x.id === ids[0])!
+    next.filters = { ...next.filters!, drill: [...(next.filters!.drill ?? []), { key: 'campaignFlight', value: c.id, label: c.label }] }
+  }
+  return next
+}
+
 /** A saved widget that is the retired bespoke device-mix table (any page, any id). */
 export function isBespokeDeviceMix(wd: Widget): boolean {
   return wd.dataset === 'campaigns' && wd.view === 'deviceMix'
@@ -445,9 +489,9 @@ export function isCampaignComparePage(p: DashboardPage): boolean {
 }
 
 // "Best Sudoku overview" (Part C) widgets — every panel of the former bespoke
-// OverviewPage.vue as its own movable/resizable/editable widget (dataset 'overview'; see
-// components/widgets/OverviewWidgetBody.vue). One widget per panel, reproducing the page's
-// original top-to-bottom arrangement.
+// OverviewPage.vue as its own movable/resizable/editable widget: metric cards (dataset
+// 'overview', `view` naming the panel) and the standard timeline chart. One widget per panel,
+// reproducing the page's original top-to-bottom arrangement.
 // Completions breakdown (mode × difficulty) — a plain GENERIC dataset widget (dataset
 // 'completions', dimension/breakdown), not a bespoke 'overview' panel — see
 // functions/api/completions.ts + lib/catalog.ts COMPLETIONS_DIMENSIONS. Factored into its own
@@ -537,41 +581,76 @@ export function migrateTimelineV9(page: DashboardPage): DashboardPage {
   }
 }
 
-// Metric cards (CONFIG_VERSION 10, ADR 0003 slice 5): the Overview panels a card preset now
-// renders. The widget keeps its dataset/view (an older build still recognises it) and gains
-// `card: { preset }`; ChartCard renders MetricCard whenever `card` is set.
-export const CARD_PRESET_FOR_OVERVIEW_VIEW: Readonly<Record<string, string>> = Object.freeze(
-  Object.assign(Object.create(null) as Record<string, string>, { kpis: 'bsk-kpis', scorecard: 'campaign-scorecard' }),
+// Metric cards (CONFIG_VERSION 10 and 11, ADR 0003 slices 5 and 7): the panels a card preset now
+// renders, keyed by what the widget IS (panelKey) — dataset and view for the overview and
+// campaigns panels, and for the pop-up dataset its rate table (type 'rateTable') and its
+// sign-in eligibility chart (dimension 'eligible', any chart type). The widget keeps its
+// dataset/view/type (an older build still recognises it) and gains `card: { preset }`;
+// ChartCard renders MetricCard whenever `card` is set.
+export const CARD_PRESET_FOR_PANEL: Readonly<Record<string, string>> = Object.freeze(
+  Object.assign(Object.create(null) as Record<string, string>, {
+    'overview:kpis': 'bsk-kpis',
+    'overview:scorecard': 'campaign-scorecard',
+    'overview:releasePanel': 'release-before-after',
+    'popup:rates': 'popup-rates',
+    'popup:eligible': 'signin-eligibility',
+    'campaigns:cost': 'campaign-cost',
+    'campaigns:funnel': 'campaign-funnel',
+    'campaigns:country': 'campaign-country',
+    'campaigns:returns': 'campaign-returns',
+  }),
 )
-const CARD_PRESETS_FROM_VIEWS = new Set(Object.values(CARD_PRESET_FOR_OVERVIEW_VIEW))
-/** A widget that is (or was) one of those panels — matched by what it IS (dataset + view), on
- * any page, never by its title or its page's name. */
+const CARD_PRESETS_FROM_PANELS = new Set(Object.values(CARD_PRESET_FOR_PANEL))
+/** What a widget IS, as a CARD_PRESET_FOR_PANEL key: never its title or its page's name. */
+export function panelKey(wd: Pick<Widget, 'dataset' | 'view' | 'type' | 'dimension'>): string | null {
+  if ((wd.dataset === 'overview' || wd.dataset === 'campaigns') && typeof wd.view === 'string') return `${wd.dataset}:${wd.view}`
+  if (wd.dataset === 'popup' && wd.type === 'rateTable') return 'popup:rates'
+  if (wd.dataset === 'popup' && wd.dimension === 'eligible' && wd.type !== 'rate') return 'popup:eligible'
+  return null
+}
+/** A widget that is (or was) one of those panels, on any page. */
 export function isCardPanel(wd: Widget): boolean {
-  return wd.dataset === 'overview' && typeof wd.view === 'string' && Object.hasOwn(CARD_PRESET_FOR_OVERVIEW_VIEW, wd.view)
+  const k = panelKey(wd)
+  return k !== null && Object.hasOwn(CARD_PRESET_FOR_PANEL, k)
 }
 /** The panel with its card: adds `card: { preset }` when absent and keeps everything else (id,
- * position, size, title, notes, default mark). A card already set — a preset or a customised
- * spec — is left as it is. Returns the same object when nothing changes. */
+ * position, size, title, notes, default mark, campaign selection — which still narrows the
+ * card's campaigns: MetricCard `campaignIds`, as it narrowed the old panel's). A card already
+ * set — a preset or a customised spec — is left as it is. Returns the same object when nothing
+ * changes. */
 export function withCardForView(wd: Widget): Widget {
   if (!isCardPanel(wd) || wd.card) return wd
-  return { ...wd, card: { preset: CARD_PRESET_FOR_OVERVIEW_VIEW[wd.view!] } }
+  return { ...wd, card: { preset: CARD_PRESET_FOR_PANEL[panelKey(wd)!] } }
 }
 /** For the chart editor's save: a widget edited INTO one of the panels gets its card; one
- * edited away from them (another overview view) loses the preset card that came with the old
- * view, so it renders as what it now is. */
+ * edited away from them (another view, dimension or type) loses the preset card that came with
+ * the old panel, so it renders as what it now is. */
 export function syncCardWithView(wd: Widget): Widget {
   if (isCardPanel(wd)) return withCardForView(wd)
-  if (wd.dataset === 'overview' && wd.card && 'preset' in wd.card && CARD_PRESETS_FROM_VIEWS.has(wd.card.preset)) {
+  if ((wd.dataset === 'overview' || wd.dataset === 'campaigns' || wd.dataset === 'popup') && wd.card && 'preset' in wd.card && CARD_PRESETS_FROM_PANELS.has(wd.card.preset)) {
     const { card: _drop, ...rest } = wd
     return rest as Widget
   }
   return wd
 }
-/** v10: every panel on the page gets its card (withCardForView). Idempotent, and never adds,
+/** Every card panel on the page gets its card (withCardForView). Idempotent, and never adds,
  * removes or moves a widget, so a panel the owner deleted stays deleted. */
 export function migrateCardsV10(page: DashboardPage): DashboardPage {
   if (!page.widgets.some((wd) => withCardForView(wd) !== wd)) return page
   return { ...page, widgets: page.widgets.map(withCardForView) }
+}
+/** v11 (every load): the chart swaps (swapPanelChart), then every card panel's card. */
+export function migratePanelsV11(page: DashboardPage): DashboardPage {
+  const swapped = page.widgets.some((wd) => swapPanelChart(wd) !== wd) ? { ...page, widgets: page.widgets.map(swapPanelChart) } : page
+  return migrateCardsV10(swapped)
+}
+/** The bespoke panels that became STANDARD charts (not cards), swapped in place: same id, grid
+ * position, size, title, captions and default mark (campaignChartFromBespoke). Matched by what
+ * the widget is (dataset 'campaigns' and its view), never by name. The same object when it is
+ * not one, so a second run changes nothing. */
+export function swapPanelChart(wd: Widget): Widget {
+  if (wd.dataset !== 'campaigns' || typeof wd.view !== 'string' || !Object.hasOwn(CAMPAIGN_CHART_FOR_VIEW, wd.view)) return wd
+  return campaignChartFromBespoke(wd, CAMPAIGN_CHART_FOR_VIEW[wd.view])
 }
 
 export function defaultOverviewWidgets(): Widget[] {
@@ -580,7 +659,7 @@ export function defaultOverviewWidgets(): Widget[] {
     w({ id: 'ow-kpis', title: 'Today at a glance', type: 'table', dataset: 'overview', view: 'kpis', card: { preset: 'bsk-kpis' }, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 3, w: 12, h: 8 }),
     timelineWidget({ x: 0, y: 11, w: 12, h: 12 }),
     w({ id: 'ow-scorecard', title: 'Campaign scorecard', type: 'table', dataset: 'overview', view: 'scorecard', card: { preset: 'campaign-scorecard' }, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 23, w: 12, h: 14 }),
-    w({ id: 'ow-release', title: 'Release panel', type: 'table', dataset: 'overview', view: 'releasePanel', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 37, w: 12, h: 9 }),
+    w({ id: 'ow-release', title: 'Release panel', type: 'table', dataset: 'overview', view: 'releasePanel', card: { preset: 'release-before-after' }, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 37, w: 12, h: 9 }),
     completionsWidget(),
   ]
 }
@@ -689,12 +768,12 @@ function normFilters(raw: any): GlobalFilters {
   // Relative ranges are stored as a token and recomputed to a fresh now-relative window on
   // load, so "last 7d" always means the last 7 days (not a frozen window). An empty
   // rangeRel means an absolute (calendar) range — keep the stored since/until as-is.
+  // A token relativeRange reads: a duration ("7d") or "since first campaign" (lib/range.ts).
   const rel = typeof merged.rangeRel === 'string' ? merged.rangeRel : ''
-  const ms = rel ? parseDurationMs(rel) : null
-  if (ms && ms > 0) {
-    const until = new Date()
-    merged.since = new Date(until.getTime() - ms).toISOString()
-    merged.until = until.toISOString()
+  const r = rel ? relativeRange(rel) : null
+  if (r) {
+    merged.since = r.since
+    merged.until = r.until
   }
   return merged
 }
@@ -748,6 +827,8 @@ function normWidget(x: any): Widget {
     markers: x.markers === 'releases' ? 'releases' : undefined,
     goLiveMarkers: x.goLiveMarkers === true || undefined,
     flightBands: x.flightBands === true || undefined,
+    // A line with a breakdown: also each series' running total (dashed, right axis).
+    cumulative: x.cumulative === true || undefined,
     // Per-chart site override (Widget.siteSel): site tokens only.
     siteSel: Array.isArray(x.siteSel) ? x.siteSel.filter((t: any) => typeof t === 'string' && /^[a-z0-9.\-]{1,60}$/i.test(t)) : undefined,
     // Series line chart (Widget.series): label + optional field=value filters + axis/style.
@@ -833,9 +914,9 @@ export function normalizeConfig(raw: any): DashboardConfig {
     if ((Number(raw.version) || 0) < 6 && !pages.some((p: DashboardPage) => isOverviewPage(p))) {
       pages.unshift(defaultOverviewPage())
     }
-    // v7 migration: convert the bespoke Overview/Campaigns pages to real widgets (see
-    // components/widgets/OverviewWidgetBody.vue / CampaignsWidgetBody.vue — the old
-    // OverviewPage.vue/CampaignComparePage.vue bespoke renderers are retired). Gated on
+    // v7 migration: convert the bespoke Overview/Campaigns pages to real widgets (the old
+    // OverviewPage.vue/CampaignComparePage.vue renderers are retired; the panel widgets it adds
+    // become metric cards and standard charts in the later steps, up to v11). Gated on
     // `widgets.length === 0` rather than only the version number, so it's non-destructive AND
     // idempotent even outside a clean version progression: a page that already has widgets
     // (this migration having already run, or a user who somehow added widgets before this
@@ -893,11 +974,11 @@ export function normalizeConfig(raw: any): DashboardConfig {
         pages[i] = p
       }
     }
-    // v10 (see CONFIG_VERSION), run on every load: the Overview's 'kpis' and 'scorecard' panels
-    // render as metric cards (migrateCardsV10). Not version-gated, because their bespoke bodies
-    // are retired: a panel added later (the chart editor still offers both views) must get its
-    // card too. Idempotent; it only ever adds `card` to those panels.
-    for (let i = 0; i < pages.length; i++) pages[i] = migrateCardsV10(pages[i])
+    // v10 and v11 (see CONFIG_VERSION), run on every load: every former bespoke panel renders as
+    // a metric card or a standard chart (migratePanelsV11). Not version-gated, because the bespoke
+    // bodies are retired: a panel a stale tab or an older build saves later must be swapped too.
+    // Idempotent; it swaps panels in place and never adds, removes or moves a widget.
+    for (let i = 0; i < pages.length; i++) pages[i] = migratePanelsV11(pages[i])
     // Self-heal (every load, not version-gated): the canonical pages — Overview, Beacon, and
     // the Best Sudoku launch page — must NEVER carry a persistent page-level drill. Drilling
     // always spawns a NEW page, so a drill sitting on one of these is always erroneous (e.g.

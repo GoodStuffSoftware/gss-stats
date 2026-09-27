@@ -14,7 +14,8 @@ export type ChartType =
   | 'stat'
   | 'table'
   | 'rate' // a single computed percentage (pop-up tap/outcome/eligibility rate) — see lib/popupEvents.ts
-  // A compact table of the VALID pop-up rates only (lib/popupEvents.ts POPUP_RATE_TABLE_KEYS),
+  // A compact table of the VALID pop-up rates only (lib/popupEvents.ts POPUP_RATE_TABLE_KEYS) —
+  // a stored type only since layout version 11: the widget renders its card (popup-rates),
   // each with its n/d and "too few to report" gating — pop-up dataset only.
   | 'rateTable'
   | 'note' // a static text tile (caveats/notes carried over from a bespoke page) — no data fetch
@@ -99,6 +100,9 @@ export interface Widget {
   // marker and band is listed, with its date and note, under the chart.
   goLiveMarkers?: boolean
   flightBands?: boolean
+  // type 'line' with a breakdown: also draw each series' running total as a dashed line on a
+  // right-hand axis (the campaigns flight-day chart's cumulative view).
+  cumulative?: boolean
   // A beacon (geo) line/area chart on the date axis: draw these series instead of one line. Each
   // series is its own date query narrowed by `filter` (native geo field = value pairs, e.g.
   // keyEvent = 'install'; none = every page view), on the left or right y-axis.
@@ -112,12 +116,11 @@ export interface Widget {
   // Full per-chart filter override. When set, this chart ignores the global
   // filter bar and uses these instead. Undefined = follow the global filter.
   filters?: GlobalFilters | null
-  // dataset 'overview': which panel this widget renders — 'kpis' | 'scorecard' | 'releasePanel'
-  // (see components/widgets/OverviewWidgetBody.vue). The former 'timeline' panel is the
-  // standard line chart now (CONFIG_VERSION 9, lib/defaults.ts timelineWidget).
-  // dataset 'campaigns': which panel — 'funnel' | 'hourOfDay' | 'country' | 'flightDay' |
-  // 'cost' | 'returns' (see components/widgets/CampaignsWidgetBody.vue). The former 'deviceMix'
-  // view is the standard nested doughnut now (CONFIG_VERSION 9, lib/defaults.ts deviceMixWidget).
+  // dataset 'overview' / 'campaigns': which former bespoke panel this widget is ('kpis' |
+  // 'scorecard' | 'releasePanel'; 'funnel' | 'country' | 'cost' | 'returns'). Each is a metric
+  // card (`card`, its preset — lib/defaults.ts CARD_PRESET_FOR_PANEL) since layout version 11;
+  // the view only names the panel for the layout migrations. The former 'timeline', 'deviceMix',
+  // 'hourOfDay' and 'flightDay' panels are standard charts (CONFIG_VERSION 9 and 11).
   // dataset 'ads-readings': the ads-routines worker's own view value(s) (e.g. 'log') — see
   // components/widgets/AdsReadingsWidgetCard.vue.
   view?: string
@@ -254,118 +257,8 @@ export interface StatsResponse {
   // install-outcome gap, lib/popupEvents.ts INSTALL_ACCEPT_OUTCOME_FIXED_ET), rendered under
   // the chart so saved widgets with older titles still show it.
   note?: string
-  // Pop-up dataset, dimension 'rates' (type 'rateTable'): one row per valid rate.
-  rateRows?: RateTableRow[]
 }
 
-/** One row of a 'rateTable' widget — a lib/popupEvents.ts GatedRate plus its label/caveat. */
-export interface RateTableRow {
-  key: string
-  label: string
-  value: number | null
-  insufficientCohort: boolean
-  numerator: number
-  denominator: number
-  note?: string
-}
-
-// ── "Best Sudoku campaigns" (Part B) — a dedicated response shape (not the generic
-// Widget/StatsResponse model above): see functions/api/campaigns.ts + lib/campaigns.ts. ──
-export interface CampaignFunnelCounts {
-  arrivals: number
-  played: number
-  completed: number
-  ask: number
-  accept: number
-  authSuccess: number
-  installPrompt: number
-  install: number
-}
-export interface CampaignCompareResponse {
-  campaign: {
-    id: string
-    label: string
-    status: string
-    flightStart: string | null
-    flightEnd: string
-    ucValues: string[]
-    notes: string
-    measurement: 'spend-only' | null
-    measurabilityNote: string | null
-  }
-  funnel: {
-    counts: CampaignFunnelCounts
-    rates: Partial<Record<keyof CampaignFunnelCounts, number | null>>
-    // Steps this FLIGHT can't show a rate for — its path never appeared anywhere in D1
-    // during the flight window (or, for 'completed', anywhere at all) — see
-    // lib/campaigns.ts FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED.
-    notInstrumented: (keyof CampaignFunnelCounts)[]
-    // The install/installPrompt rate's real denominator — prompts shown AT OR AFTER the
-    // install-outcome-gap fix ONLY (see lib/campaigns.ts VALID_FUNNEL_RATE_STEPS/
-    // funnelStepRates). `counts.installPrompt` is still the whole-window count, shown as its
-    // own plain count; this is specifically what `rates.install` was computed against.
-    installPromptPostFixCount: number
-    // Show wherever `counts.arrivals` is displayed — see lib/campaigns.ts ARRIVALS_CAVEAT.
-    arrivalsCaveat: string
-    // Install-fix caveat for this campaign's range (lib/popupEvents.ts installOutcomeGapNote);
-    // null once the whole range is after the fix.
-    installNote?: string | null
-  }
-  // EVERY row carrying this campaign's tag (the tag rides each beacon for its 30-min TTL) —
-  // NOT the same as arrivals (`funnel.counts.arrivals`, visitor='new' only). Label it
-  // "tagged hits" if shown at all — see the DEFINITION FIX comment in
-  // functions/api/campaigns.ts / lib/campaigns.ts.
-  taggedHits: number
-  funnelByCountry: Record<'US' | 'CA' | 'other', CampaignFunnelCounts>
-  hourOfDayEt: number[] // length 24, index = ET hour, value = arrivals
-  daily: { date: string; day: number; arrivals: number }[] // sorted by date; `day` = flightDayIndex
-  returnVisits: {
-    counts: Record<string, number>
-    rates: Record<string, number | null>
-    notInstrumented: boolean
-    sharedWithCampaignId: string | null
-  }
-  costPerArrival: number | null
-  costPerAuthSuccess: number | null
-  spend: number | null
-  // Where `spend` came from: the ads routine's stored Google Ads API figures (gss-stats-ads),
-  // the hand-entered CAMPAIGN_SPEND config, or nothing — lib/adsRules.ts resolveCampaignSpend.
-  spendSource?: { source: 'google-ads-api' | 'config' | 'none'; fetchedAt: string | null; lastDate: string | null }
-  // Ads data freshness (lib/adsFreshness.ts): last closed day stored, last sync, stale flag.
-  spendThrough?: string | null
-  lastSync?: string | null
-  stale?: boolean
-  // The signed-out upsell fix as a funnel segment boundary (null until its instant is set).
-  segments?: {
-    boundaryMs: number
-    boundaryLabel: string
-    boundaryDate: string
-    boundaryFlightDay: number | null
-    upsell: { pre: { shown: number; accept: number; dismiss: number }; post: { shown: number; accept: number; dismiss: number } }
-  } | null
-  // Raw /install/<outcome> beacons — secondary to the deduplicated install step (one install
-  // can fire two of them); see lib/campaigns.ts isRawInstallSignal.
-  rawInstallSignals?: { count: number; label: string }
-  meta: { generatedAt: string }
-}
-
-// ── "Best Sudoku overview" — the release panel (functions/api/overview.ts). The KPI tiles and
-// the campaign scorecard are metric cards since CONFIG_VERSION 10 (POST /api/metrics). ──
-export interface OverviewReleaseWindowSummary {
-  pageviews: number
-  taggedArrivals: number
-  authSuccess: number
-  install: number
-}
-export interface OverviewReleasePanel {
-  release: { version: string; dateEt: string; note: string }
-  days: number
-  before: OverviewReleaseWindowSummary
-  after: OverviewReleaseWindowSummary
-  note: string
-}
-export interface OverviewResponse {
-  generatedAt: string
-  todayEt: string
-  releasePanel: OverviewReleasePanel | null
-}
+// (The bespoke "Best Sudoku campaigns" and "Best Sudoku overview" response shapes — /api/campaigns
+// and /api/overview — and the pop-up rate table's rows retired with those panels in layout
+// version 11: every one of them is a metric card or a standard chart now.)

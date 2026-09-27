@@ -5,7 +5,7 @@
 // item's `label` and its `caption` (both are `Label`) — `allowMetricOwn` hides the "metric's own
 // name" option for a caption, which has no natural registry counterpart.
 import { computed, ref, useId } from 'vue'
-import { isKnownNote, labelKind, makeLabel, noteLabelOptions, scopePathOptions, type LabelKind } from '../../../lib/metrics/editorModel'
+import { isKnownNote, labelKind, labelNoteOptions, makeLabel, scopePathOptions, type LabelKind } from '../../../lib/metrics/editorModel'
 import type { Label, RepeatSpec, ScopePath } from '../../../lib/metrics/types'
 
 const props = withDefaults(
@@ -57,7 +57,8 @@ const noteId = computed<string>({
 const noteSearch = ref('')
 const noteChoices = computed(() => {
   const q = noteSearch.value.trim().toLowerCase()
-  const all = noteLabelOptions()
+  // Label entries too (a preset's step names and titles), and always the current pick.
+  const all = labelNoteOptions(noteId.value || undefined)
   return q ? all.filter((o) => o.preview.toLowerCase().includes(q) || o.value.toLowerCase().includes(q)) : all
 })
 const noteInvalid = computed(() => !!noteId.value && !isKnownNote(noteId.value))

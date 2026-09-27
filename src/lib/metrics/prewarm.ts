@@ -15,7 +15,7 @@ import { CAMPAIGNS } from '../campaigns'
 import { POPUPS } from '../popupEvents'
 import { etDateFast } from '../etTime'
 import { buildFact, deriveBatch, planBatch, type FactResult } from './engine'
-import { FACTS } from './facts'
+import { FACTS, releaseSidesMs } from './facts'
 import { METRIC_DEFS, metricWindows } from './metrics'
 import { RATIO_DEFS, ratioParamsOf, ratioWindowsOf } from './ratios'
 import { MAX_REQUESTS, validateMetricsRequest } from './validate'
@@ -84,7 +84,8 @@ function warmChunk(requests: MetricRequest[]): boolean {
   try {
     const batch = validateMetricsRequest(JSON.stringify({ v: 1, context: { since: '2026-09-20', until: '2026-09-26', sites: ['bestsudoku-web'] }, requests }))
     if (!batch.ok || batch.requests.some((r) => !r.ok)) return false
-    const env = { context: batch.context, nowMs: NOW, todayEt: etDateFast(NOW), hasAdsDb: true }
+    // A release window too, so the before/after sides compile like every other.
+    const env = { context: batch.context, nowMs: NOW, todayEt: etDateFast(NOW), hasAdsDb: true, release: { dateEt: '2026-09-24', days: 2, ...releaseSidesMs('2026-09-24', 2) } }
     const plan = planBatch(batch.requests.flatMap((r) => (r.ok ? [r.req] : [])), env)
     const facts = new Map<string, FactResult>()
     for (const f of plan.facts) {
@@ -92,7 +93,13 @@ function warmChunk(requests: MetricRequest[]): boolean {
       const raw =
         f.id === 'adsSpend'
           ? CAMPAIGNS.map((c) => ({ campaign_id: c.id, cost_micros: 1_000_000, days: 1, first_date: '2026-09-20', last_date: '2026-09-20', fetched_at: '2026-09-20T12:00:00Z' }))
-          : SAMPLE_PATHS.map((path, i) => ({ path, visitor: i % 2 ? 'new' : 'returning', campaign: CAMPAIGNS[i % CAMPAIGNS.length].ucValues[0], d: i % 8, s: i % 3, pf: i % 2, c: i + 1 }))
+          : f.id === 'adsCoverage'
+            ? CAMPAIGNS.map((c) => ({ campaign_id: c.id, date: '2026-09-20', fetched_at: '2026-09-21T12:00:00Z' }))
+            : f.id === 'adsLastSync'
+              ? CAMPAIGNS.map((c) => ({ campaign_id: c.id, last_sync: '2026-09-21T12:00:00Z' }))
+              : f.id === 'bskFirstHit'
+                ? [{ t: Date.parse('2026-09-01T12:00:00Z') }]
+                : SAMPLE_PATHS.map((path, i) => ({ path, visitor: i % 2 ? 'new' : 'returning', campaign: CAMPAIGNS[i % CAMPAIGNS.length].ucValues[0], d: i % 8, s: i % 3, pf: i % 2, cb: ['US', 'CA', 'other'][i % 3], c: i + 1 }))
       facts.set(f.key, { ok: true, rows: FACTS[f.id].parse(raw), asOfMs: NOW })
     }
     JSON.stringify(deriveBatch(batch.requests, { ...env, facts }))

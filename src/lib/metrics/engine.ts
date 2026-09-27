@@ -25,11 +25,13 @@
 import { CAMPAIGNS, campaignAttributionClause, campaignAttributionStartMs, campaignById, type CampaignAttribution, type CampaignFlight } from '../campaigns'
 
 import { gateRate, INSTALL_GAP_PATHS, POPUPS, rowIsPostInstallFix } from '../popupEvents'
-import { computeDelta } from '../overview'
+import { computeDelta, releaseComparisonWindows } from '../overview'
+import { latestDatedRelease } from '../releases'
+import { UPSELL_SIGNEDOUT_FIX_AT } from '../adsRules'
 import { FACTS, factKey, rangeMs, type BeaconRow, type FactId, type FactParams, type FactRows, type FactStatement } from './facts'
 import { METRICS, rulesOf, type MetricCtx, type MetricDef } from './metrics'
 import { RATIOS, type RatioDef } from './ratios'
-import { deltasAllowed, etMidnightMs, isProvisional, laterEtDate, measuredInterval, seenInFlightRequired, servingEndMs, type InstrumentationRule, type MeasuredInterval } from './instrumentation'
+import { deltasAllowed, etDateOfMs, etMidnightMs, isProvisional, laterEtDate, measuredInterval, seenInFlightRequired, servingEndMs, type InstrumentationRule, type MeasuredInterval } from './instrumentation'
 import type { MetricDelta, MetricValue, WindowName } from './types'
 import type { RequestCheck, ResolvedRequest, ValidContext } from './validate'
 
@@ -51,8 +53,35 @@ export interface BatchEnv {
   nowMs: number
   /** ET calendar date of nowMs (the KPI fact's anchor). */
   todayEt: string
-  /** Whether the gss_stats_ads binding exists (adsSpend costs nothing without it). */
+  /** Whether the gss_stats_ads binding exists (an ads-store fact costs nothing without it). */
   hasAdsDb: boolean
+  /** The release panel's windows (releaseWindowsFor), resolved from the first Best Sudoku hit
+   * before planning; null when there is no window (no dated release, or no full day on a side),
+   * undefined when the batch asks for no before/after window. */
+  release?: ReleaseWindows | null
+}
+
+/** The latest dated release's before/after windows: `days` whole days on each side of its ET
+ * midnight (lib/overview.ts releaseComparisonWindows, the release panel's own rule). */
+export interface ReleaseWindows {
+  dateEt: string
+  days: number
+  before: [number, number]
+  after: [number, number]
+}
+const RELEASE_SIDES: ReadonlySet<WindowName> = new Set(['before', 'after'])
+const UPSELL_SIDES: ReadonlySet<WindowName> = new Set(['upsellPre', 'upsellPost'])
+/** Whether any request reads a release window: the batch then needs the first-hit fact first. */
+export function needsReleaseWindows(requests: readonly ResolvedRequest[]): boolean {
+  return requests.some((r) => RELEASE_SIDES.has(r.window))
+}
+/** The release windows from the first Best Sudoku hit (null when there is none: every day before
+ * the release is then unavailable, as the release panel read `MIN(ts)` of nothing as now). */
+export function releaseWindowsFor(firstHitMs: number | null, nowMs: number): ReleaseWindows | null {
+  const latest = latestDatedRelease()
+  if (!latest) return null
+  const w = releaseComparisonWindows(latest.dateEt, etDateOfMs(firstHitMs ?? nowMs), nowMs)
+  return w ? { dateEt: latest.dateEt, days: w.days, before: w.before, after: w.after } : null
 }
 
 export function factKeyString(id: FactId, p: FactParams): string {
@@ -70,9 +99,16 @@ function factParamsFor(factId: FactId, req: Pick<ResolvedRequest, 'params'>, env
       return { todayEt: env.todayEt }
     case 'bskRangePath':
       return { since: env.context.since, until: env.context.until }
-    case 'popupRangePath':
-      return { since: env.context.since, until: env.context.until, sites: env.context.sites }
+    case 'popupRangePath': {
+      const own = env.context.excludeOwnVisits && env.context.ownBrowser && env.context.ownOS ? { ownBrowser: env.context.ownBrowser, ownOS: env.context.ownOS } : {}
+      return { since: env.context.since, until: env.context.until, sites: env.context.sites, ...own }
+    }
+    case 'bskReleaseSides':
+      return env.release ? { releaseDateEt: env.release.dateEt, days: env.release.days } : {}
+    case 'bskFirstHit':
     case 'adsSpend':
+    case 'adsCoverage':
+    case 'adsLastSync':
       return {}
   }
 }
@@ -101,11 +137,17 @@ function metricCtx(def: MetricDef, req: Pick<ResolvedRequest, 'params' | 'window
 
 type Static = MeasuredInterval & { needsSeen: boolean }
 
+/** Store facts: a campaign's config-only reads (spend and its freshness), measurable even before
+ * its flight has a start date. */
+const STORE_FACTS: ReadonlySet<FactId> = new Set(['adsSpend', 'adsCoverage', 'adsLastSync'])
+
 /** The measured interval from config alone (optimistic about seenInFlightWindow), plus whether
- * the flightPathsSeen evidence is needed. */
-function sideStatic(def: MetricDef, ctx: MetricCtx, window: readonly [number, number]): Static {
+ * the flightPathsSeen evidence is needed. A null window is a release window the batch could not
+ * resolve (no dated release, or no full day on a side). */
+function sideStatic(def: MetricDef, ctx: MetricCtx, window: readonly [number, number] | null): Static {
   const factId = def.windows[ctx.window]!
-  if (ctx.campaign && ctx.campaign.flightStart === null && factId !== 'adsSpend') {
+  if (window === null) return { status: 'unmeasured', from: Infinity, reason: 'no-release-window', noteIds: ['release-pending'], goLiveEt: null, needsSeen: false }
+  if (ctx.campaign && ctx.campaign.flightStart === null && !STORE_FACTS.has(factId)) {
     return { status: 'unmeasured', from: Infinity, reason: 'flight-pending', noteIds: ['flight-pending'], goLiveEt: null, needsSeen: false }
   }
   const rules = rulesOf(def, ctx)
@@ -118,24 +160,36 @@ function sideStatic(def: MetricDef, ctx: MetricCtx, window: readonly [number, nu
 interface Clock {
   todayStartMs: number
   pageRange: [number, number] | null
+  release: ReleaseWindows | null
 }
 function clockOf(env: BatchEnv): Clock {
   return {
     todayStartMs: etMidnightMs(env.todayEt),
     pageRange: env.context.since !== undefined && env.context.until !== undefined ? rangeMs(env.context.since, env.context.until) : null,
+    release: env.release ?? null,
   }
 }
 
 /** W = [a, b) for a request window. `endMs` is "now" (the KPI fact's own as-of instant for
- * today-so-far, so every window of one fact shares one clock). */
-function windowOf(ctx: MetricCtx, clock: Clock, endMs: number): [number, number] {
+ * today-so-far, so every window of one fact shares one clock). null: a release window the batch
+ * has none of. The upsell sides split the attribution window at the fix (while it is unset the
+ * boundary rule leaves them unmeasured, whatever this returns). */
+function windowOf(ctx: MetricCtx, clock: Clock, endMs: number): [number, number] | null {
+  const attrStart = () => (ctx.campaign ? (attributionOf(ctx.campaign).startMs ?? endMs) : endMs)
   switch (ctx.window) {
     case 'attribution':
-      return [ctx.campaign ? (attributionOf(ctx.campaign).startMs ?? endMs) : endMs, endMs]
+      return [attrStart(), endMs]
     case 'todaySoFar':
       return [clock.todayStartMs, endMs]
     case 'page':
       return clock.pageRange!
+    case 'before':
+    case 'after':
+      return clock.release ? clock.release[ctx.window] : null
+    case 'upsellPre':
+      return [attrStart(), UPSELL_SIGNEDOUT_FIX_AT ?? endMs]
+    case 'upsellPost':
+      return [UPSELL_SIGNEDOUT_FIX_AT ?? endMs, endMs]
   }
 }
 
@@ -146,7 +200,7 @@ export function newSideMemo(): SideMemo {
   return new Map()
 }
 function resolveStatic(memo: SideMemo, def: MetricDef, req: Pick<ResolvedRequest, 'params' | 'window'>, clock: Clock, endMs: number): { ctx: MetricCtx; stat: Static } {
-  const key = `${def.id}|${req.params.campaignId ?? ''}|${req.params.popup ?? ''}|${req.window}|${endMs}`
+  const key = `${def.id}|${req.params.campaignId ?? ''}|${req.params.popup ?? ''}|${req.params.country ?? ''}|${req.window}|${endMs}`
   let v = memo.get(key)
   if (!v) {
     const ctx = metricCtx(def, req)
@@ -171,11 +225,11 @@ export function planBatch(requests: readonly ResolvedRequest[], env: BatchEnv, m
   const seenSides = new Set<string>()
   const add = (id: FactId, p: FactParams) => {
     const key = factKeyString(id, p)
-    if (!facts.has(key)) facts.set(key, { key, id, params: factKey(id, p).params as FactParams, statements: id === 'adsSpend' && !env.hasAdsDb ? 0 : 1 })
+    if (!facts.has(key)) facts.set(key, { key, id, params: factKey(id, p).params as FactParams, statements: FACTS[id].db === 'gss_stats_ads' && !env.hasAdsDb ? 0 : 1 })
   }
   for (const req of requests) {
     for (const def of sidesOf(req)) {
-      const sideKey = `${def.id}|${req.params.campaignId ?? ''}|${req.params.popup ?? ''}|${req.window}`
+      const sideKey = `${def.id}|${req.params.campaignId ?? ''}|${req.params.popup ?? ''}|${req.params.country ?? ''}|${req.window}`
       if (seenSides.has(sideKey)) continue
       seenSides.add(sideKey)
       const { ctx, stat: side } = resolveStatic(memo, def, req, clock, env.nowMs)
@@ -211,6 +265,8 @@ interface FactIndex {
   gCampaign: Int32Array
   gDay: Int8Array
   gPf: Int8Array // 1 at/after the fact's split, 0 before, -1 unknown
+  gUf: Int8Array // 1 at/after the upsell fix, 0 before, -1 not split
+  gCountry: Int8Array // COUNTRY_CODES index, -1 not split
   gSeg: Int32Array
   gCount: Float64Array
   /** The fact's sorted cuts (factCuts): a group's seg = how many of them its bucket start reached. */
@@ -223,6 +279,7 @@ function isUnmeasuredGapRow(r: BeaconRow): boolean {
   return (INSTALL_GAP_PATHS as readonly string[]).includes(r.path) && !rowIsPostInstallFix({ hourStartMs: 0, path: r.path, count: r.c, postInstallFix: r.pf ?? false })
 }
 
+const COUNTRY_CODES: Readonly<Record<string, number>> = { US: 0, CA: 1, other: 2 }
 function buildIndex(rows: readonly BeaconRow[], cuts: readonly number[], dropGap: boolean): FactIndex {
   const n = rows.length
   const pathIds = new Map<string, number>()
@@ -234,6 +291,8 @@ function buildIndex(rows: readonly BeaconRow[], cuts: readonly number[], dropGap
   const gCampaign = new Int32Array(n)
   const gDay = new Int8Array(n)
   const gPf = new Int8Array(n)
+  const gUf = new Int8Array(n)
+  const gCountry = new Int8Array(n)
   const gSeg = new Int32Array(n)
   const gCount = new Float64Array(n)
   let g = 0
@@ -255,6 +314,8 @@ function buildIndex(rows: readonly BeaconRow[], cuts: readonly number[], dropGap
     gCampaign[g] = c
     gDay[g] = r.day
     gPf[g] = r.pf === null ? -1 : r.pf ? 1 : 0
+    gUf[g] = r.uf === null ? -1 : r.uf ? 1 : 0
+    gCountry[g] = COUNTRY_CODES[r.cb] ?? -1
     gSeg[g] = r.seg
     gCount[g] = r.c
     g++
@@ -265,7 +326,7 @@ function buildIndex(rows: readonly BeaconRow[], cuts: readonly number[], dropGap
     byPath[gPath[k]].push(k)
     pathTotal[gPath[k]] += gCount[k]
   }
-  return { paths, byPath, pathTotal, campaigns, gVisitorNew, gCampaign, gDay, gPf, gSeg, gCount, cuts }
+  return { paths, byPath, pathTotal, campaigns, gVisitorNew, gCampaign, gDay, gPf, gUf, gCountry, gSeg, gCount, cuts }
 }
 
 // ── Cuts: the instants a timed fact is segmented at ──────────────────────────────────────
@@ -377,6 +438,12 @@ interface SidePlan {
   alignPf: boolean
   cannotAlign: boolean
   alignFromMs: number | null
+  /** A release window: only rows of this side (0 before, 1 after), counted as the window's own. */
+  onlyDay: number | null
+  /** An upsell side: only rows on this side of the fix (0 before, 1 at/after). */
+  onlyUf: number | null
+  /** A country bucket (COUNTRY_CODES), or null for every country. */
+  country: number | null
   result?: Side
 }
 
@@ -408,7 +475,7 @@ class Batch {
   /** Resolves (and memoizes) one side. `alignFromMs` restricts the denominator of an aligned
    * proportion to where its numerator is measured. */
   side(def: MetricDef, req: ResolvedRequest, alignFromMs: number | null): SidePlan {
-    const key = `${def.id}|${req.params.campaignId ?? ''}|${req.params.popup ?? ''}|${req.window}|${alignFromMs ?? ''}`
+    const key = `${def.id}|${req.params.campaignId ?? ''}|${req.params.popup ?? ''}|${req.params.country ?? ''}|${req.window}|${alignFromMs ?? ''}`
     let plan = this.sides.get(key)
     if (plan) return plan
     const factId = def.windows[req.window]!
@@ -438,7 +505,10 @@ class Batch {
       else if (bucket !== null) day0FromMs = Math.max(day0FromMs ?? -Infinity, alignFromMs)
       else cannotAlign = true
     }
-    plan = { def, ctx, factId, factKey, fact, asOfMs, stat, day0FromMs, allFromMs, tags, alignPf, cannotAlign, alignFromMs }
+    const onlyDay = req.window === 'before' ? 0 : req.window === 'after' ? 1 : null
+    const onlyUf = req.window === 'upsellPre' ? 0 : req.window === 'upsellPost' ? 1 : null
+    const country = req.params.country !== undefined ? (COUNTRY_CODES[req.params.country] ?? -2) : null
+    plan = { def, ctx, factId, factKey, fact, asOfMs, stat, day0FromMs, allFromMs, tags, alignPf, cannotAlign, alignFromMs, onlyDay, onlyUf, country }
     this.sides.set(key, plan)
     return plan
   }
@@ -477,6 +547,8 @@ class Batch {
 
   private evaluateOnce(plan: SidePlan): Side {
     const { def, ctx, stat, fact } = plan
+    // The first-hit read that sizes the release windows failed: an error, never "no window".
+    if (RELEASE_SIDES.has(ctx.window) && this.env.release === undefined) return { status: 'error', value: null, reason: 'fact-failed', noteIds: [] }
     if (stat.status === 'unmeasured') return { status: 'unmeasured', value: null, reason: stat.reason, noteIds: stat.noteIds }
     // seenInFlightWindow: a closed flight whose serving window never saw this metric's paths.
     let m: MeasuredInterval = stat
@@ -488,26 +560,37 @@ class Batch {
       const mask = idx ? this.mask(idx, seenKey, def, ctx) : new Uint8Array(0)
       let saw = false
       for (let p = 0; idx && p < idx.paths.length && !saw; p++) saw = mask[p] === 1 && idx.pathTotal[p] > 0
-      m = measuredInterval({ rules: rulesOf(def, ctx), window: windowOf(ctx, this.clock, ctx.window === 'todaySoFar' ? plan.asOfMs : this.env.nowMs), campaign: ctx.campaign, seenInFlight: saw })
+      m = measuredInterval({ rules: rulesOf(def, ctx), window: windowOf(ctx, this.clock, ctx.window === 'todaySoFar' ? plan.asOfMs : this.env.nowMs)!, campaign: ctx.campaign, seenInFlight: saw })
       if (m.status === 'unmeasured') return { status: 'unmeasured', value: null, reason: m.reason, noteIds: m.noteIds }
     }
     if (!fact || !fact.ok) return { status: 'error', value: null, reason: 'fact-failed', noteIds: [] }
     if (plan.cannotAlign) return { status: 'error', value: null, reason: 'cannot-align', noteIds: [] }
     const noteIds = def.caveats?.length ? [...new Set([...m.noteIds, ...def.caveats])] : m.noteIds
     const status = m.status === 'partial' ? 'partial' : 'ok'
-    if (fact.rows.kind === 'spend') return { status, value: def.spend ? def.spend(fact.rows.rows, ctx) : null, m, noteIds, asOfMs: plan.asOfMs }
+    if (fact.rows.kind !== 'beacon') {
+      if (def.store) {
+        const r = def.store(fact.rows, ctx, { nowMs: this.env.nowMs, releaseDays: this.env.release?.days ?? null })
+        const ids = r.noteIds?.length ? [...new Set([...noteIds, ...r.noteIds])] : noteIds
+        return { status, value: r.value, m, noteIds: ids, asOfMs: plan.asOfMs }
+      }
+      return { status, value: fact.rows.kind === 'spend' && def.spend ? def.spend(fact.rows.rows, ctx) : null, m, noteIds, asOfMs: plan.asOfMs }
+    }
 
     const idx = this.index(plan.factId, plan.factKey, fact)!
     const mask = this.mask(idx, plan.factKey, def, ctx)
     const needAll = this.rank(idx, plan.allFromMs)
     const need0 = Math.max(needAll, this.rank(idx, plan.day0FromMs))
     let tagOk: Uint8Array | null = null
-    if (plan.tags) {
+    if (plan.tags || def.anyTag) {
       tagOk = new Uint8Array(idx.campaigns.length)
-      for (let c = 0; c < idx.campaigns.length; c++) tagOk[c] = plan.tags.has(idx.campaigns[c]) ? 1 : 0
+      for (let c = 0; c < idx.campaigns.length; c++) {
+        const tag = idx.campaigns[c]
+        tagOk[c] = (!plan.tags || plan.tags.has(tag)) && (!def.anyTag || tag !== '') ? 1 : 0
+      }
     }
     const onlyNew = def.visitor === 'new'
     const today = ctx.window === 'todaySoFar'
+    const { onlyDay, onlyUf, country } = plan
     const sums = new Array<number>(today ? 8 : 1).fill(0)
     for (let p = 0; p < idx.paths.length; p++) {
       if (!mask[p]) continue
@@ -516,7 +599,15 @@ class Batch {
         const g = groups[k]
         if (onlyNew && !idx.gVisitorNew[g]) continue
         if (tagOk && !tagOk[idx.gCampaign[g]]) continue
+        if (country !== null && idx.gCountry[g] !== country) continue
+        if (onlyUf !== null && idx.gUf[g] !== onlyUf) continue
         const day = idx.gDay[g]
+        if (onlyDay !== null) {
+          // A release side is its own window: only its rows, cut at a partial interval's start.
+          if (day !== onlyDay || idx.gSeg[g] < need0) continue
+          sums[0] += idx.gCount[g]
+          continue
+        }
         if (day === 0) {
           if (idx.gSeg[g] < need0) continue
           if (plan.alignPf && idx.gPf[g] !== 1) continue
@@ -539,8 +630,9 @@ class Batch {
    * window's end. */
   lagStopMs(req: ResolvedRequest, def: MetricDef, side: Side): number {
     const campaign = def.params.includes('campaignId') && req.params.campaignId ? campaignById(req.params.campaignId) : undefined
-    if (req.window === 'attribution' && campaign) return servingEndMs(campaign)
+    if ((req.window === 'attribution' || UPSELL_SIDES.has(req.window)) && campaign) return servingEndMs(campaign)
     if (req.window === 'page') return this.clock.pageRange![1]
+    if (RELEASE_SIDES.has(req.window) && this.clock.release) return this.clock.release[req.window as 'before' | 'after'][1]
     return side.asOfMs ?? this.env.nowMs
   }
 }
@@ -653,7 +745,7 @@ export function deriveBatch(checks: readonly RequestCheck[], env: DeriveEnv, mem
       continue
     }
     const r = c.req
-    const sig = `${r.kind}|${r.id}|${r.params.campaignId ?? ''}|${r.params.popup ?? ''}|${r.window}|${r.deltas.join(',')}|${r.minCohort}`
+    const sig = `${r.kind}|${r.id}|${r.params.campaignId ?? ''}|${r.params.popup ?? ''}|${r.params.country ?? ''}|${r.window}|${r.deltas.join(',')}|${r.minCohort}`
     let v = same.get(sig)
     if (!v) {
       try {

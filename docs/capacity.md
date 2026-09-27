@@ -288,3 +288,65 @@ What changed (review finding #8):
   `src/lib/metrics/prewarm.ts` runs the whole derivation once over synthetic facts at module scope,
   and the config-fixed facts' cache keys are hashed then too. That costs about 10 ms of start-up CPU
   per isolate (Node estimate), against Workers' separate 1-second start-up limit.
+
+## 8. The Campaigns page as cards and charts (ADR 0003 slice 7, 2026-09-27) — rows read and CPU
+
+Since layout version 11 the Campaigns page has no bespoke panel: its funnel, country, cost and
+return-visits panels are metric cards (one `POST /api/metrics` batch for all four) and its two
+arrivals panels are standard `/api/geo` charts. `/api/campaigns` is retired. Measured read-only
+against production with `npx tsx scripts/metrics/capture-facts.ts --cf-token-file <path> --batch
+campaigns` (the batch is built by `scripts/metrics/presetBatch.ts` with the same scope and request
+code `MetricCard` runs; each `SELECT` runs through `wrangler d1 execute --remote --json --command`,
+never `--file`, never a write), at 2026-09-27T12:22Z.
+
+**The batch:** 112 distinct requests (the four presets over the three campaigns, the country cells
+split US / CA / Other), planned into 7 facts. Nothing is read for what a campaign's config rules
+out (the spend-only Play-direct campaign plans no beacon fact; the Android launch plans no return
+read, its flight predating the return beacon).
+
+| Read | Params | Rows returned | `rows_read` | Cached for |
+|---|---|---|---|---|
+| `campaignPathVisitor` (now split by country bucket) | Android launch (closed) | 15 | 3,360 | 15 min |
+| `flightPathsSeen` | Android launch (closed) | 10 | 2,621 | 24 h |
+| `campaignPathVisitor` | US+CA retest (active) | 22 | 333 | 90 s |
+| `campaignReturns` | US+CA retest (active) | 1 | 2,954 | 90 s |
+| `adsSpend` (gss-stats-ads) | — | 3 | 20 | 5 min |
+| `adsCoverage` (gss-stats-ads) | — | 20 | 20 | 5 min |
+| `adsLastSync` (gss-stats-ads) | — | 3 | 61 | 60 s |
+| **Metrics batch, every fact a miss** | | 74 | **9,369** | |
+| `/api/geo` hour of day (`hourEt` × `campaignFlight`, arrival = tagged, since the first campaign) | | 25 | 5,415 | `/api/geo` cache |
+| `/api/geo` flight day (`flightDay` × `campaignFlight`, same filter) | | 9 | 5,361 | `/api/geo` cache |
+| **Page total, nothing cached** | | | **20,145** | |
+
+For comparison, the retired `/api/campaigns` ran, for **every** campaign on **every** load and
+uncached, its attribution scan, its flight-window check and its return scan (the same `WHERE`
+clauses as `campaignPathVisitor`, `flightPathsSeen` and `campaignReturns`): 3,360 + 2,621 + 2,921
+(Android launch), 925 + 465 + 2,921 (Play-direct), 333 + 409 + 2,954 (retest) = **16,909**, plus
+three ads-store reads per campaign (about 300): about **17,200 rows per load**. The card batch
+reads 9,369 once and then serves every card, page and colo visit from its fact cache (15 minutes
+to 24 hours for the closed flight); the two arrivals charts scan `hits` by `ts` from the first
+campaign's start (they cannot use an index on `campaign`, as the old attribution scan could not
+either; that window grows with every day, as the old scan's did), so a
+page with nothing cached reads about 2,900 more rows than the old one, and a cached page reads
+none for the cards. `campaignReturns` still scans every `bestsudoku-web` row (§7); bounding it is
+the same owner decision.
+
+The release panel (Overview) reads the first Best Sudoku hit (6 rows, an indexed `MIN`, cached
+6 hours) and both windows in ONE statement (394 rows for the 2026-09-26 release, one day each
+side), where `/api/overview` read the first hit and each window separately (6 + 24 + 376 = 406).
+The Pop-ups page's rate table and eligibility card share one `popupRangePath` fact, where
+`/api/popups` answered each with its own scan.
+
+### CPU
+
+`npx tsx scripts/metrics/profile-metrics.ts --batch campaigns [--seed <captured.json>]` (§7's
+harness: the real handler end to end in Node against a fake D1, a fresh cache per call):
+
+| Batch | First call (cold) | Warm, every fact a miss | Warm, every fact cached |
+|---|---|---|---|
+| Campaigns page, production rows (112 requests, 7 facts, 74 fact rows) | 4.97–5.29 ms | 1.84 ms mean (max 3.15) | 1.47–1.55 ms mean |
+| Campaigns page, fixture rows | 4.11–4.38 ms | 1.81–1.93 ms mean | 1.40 ms mean |
+
+Every figure is under the 10 ms per-request limit with room to spare. The request path for the new
+windows, facts and store metrics is compiled at isolate start-up too (`prewarm.ts` now warms a
+release window, the country split and the ads-store facts).
