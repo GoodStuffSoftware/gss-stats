@@ -74,10 +74,24 @@ export function cloneSpec(spec: CardSpec): CardSpec {
 export function specFromPresetId(id: string): CardSpec {
   return cloneSpec(presetById(id) ?? emptySpec())
 }
-/** Preset ids, humanized — own keys only (PRESETS is null-prototype; Object.keys is already
- * own-key-safe). */
-export function presetOptions(): { value: string; label: string }[] {
-  return Object.keys(PRESETS).map((id) => ({ value: id, label: id.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) }))
+export interface PresetOption {
+  value: string
+  label: string
+  description: string
+}
+/** Preset ids, with their plain-language name and one-line description from the notes registry
+ * (`label.preset.<id>` / `label.preset.<id>.description`) — never the raw id, and never an
+ * auto-humanized guess at one (review fix, 2026-09-27: the picker used to show "Bsk Kpis").
+ * Every preset in lib/metrics/presets.ts PRESETS needs both entries registered in notes.ts; a
+ * preset without one falls back to its id here rather than crashing, but that is a registry gap
+ * to fix, not a supported permanent state — own keys only (PRESETS is null-prototype;
+ * Object.keys is already own-key-safe). */
+export function presetOptions(): PresetOption[] {
+  return Object.keys(PRESETS).map((id) => ({
+    value: id,
+    label: hasNote(`label.preset.${id}`) ? noteRawText(`label.preset.${id}`) : id,
+    description: hasNote(`label.preset.${id}.description`) ? noteRawText(`label.preset.${id}.description`) : '',
+  }))
 }
 
 // ── Label kind ─────────────────────────────────────────────────────────────────────────────

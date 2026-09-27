@@ -115,7 +115,7 @@ describe('"Add chart" -> "Metric card"', () => {
     await makeCardBtn.trigger('click')
     await flushPromises()
     expect(w.find('.ce-root').exists()).toBe(true)
-    expect(w.text()).toContain('Campaign Scorecard') // the default preset, pre-selected
+    expect(w.text()).toContain('Campaign scorecard') // the default preset, pre-selected, by its plain name
 
     await w.find('button.btn-primary').trigger('click')
     const saved = w.emitted('save')![0][0] as Widget
