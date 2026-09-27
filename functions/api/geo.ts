@@ -19,6 +19,12 @@ import { etDateSql, etHourSql } from '../../src/lib/etTime'
 import { isDateDim } from '../../src/lib/rings'
 import { buildCacheKeyUrl, cachedJson, ttlSecondsFor, type CacheLike } from '../_lib/edgeCache'
 import { WHEN_RE, SITE_TAG_RE } from '../../src/lib/range'
+// Request-size guards (MAX_SITES/MAX_CONSTRAINTS/MAX_BOUND_PARAMS/MAX_SQL_BYTES/
+// statementTooLarge) — shared with functions/api/popups.ts, see src/lib/queryLimits.ts for why
+// this moved out of this file. Re-exported here so any existing import of these names from
+// './geo' (this file used to define them) keeps working.
+export { MAX_SITES, MAX_CONSTRAINTS, MAX_BOUND_PARAMS, MAX_SQL_BYTES, statementTooLarge } from '../../src/lib/queryLimits'
+import { MAX_SITES, MAX_CONSTRAINTS, statementTooLarge } from '../../src/lib/queryLimits'
 
 interface Env {
   gss_geo: D1Database
@@ -200,25 +206,6 @@ const DERIVED_FILTER_EXPR: Record<string, string> = {
   keyEvent: breakdownColumnExpr('keyEvent', ''),
   hourEt: breakdownColumnExpr('hourEt', ''),
   flightDay: breakdownColumnExpr('flightDay', ''),
-}
-
-export const MAX_SITES = 50
-export const MAX_CONSTRAINTS = 16
-// D1's own statement limits: 100 bound parameters per query, and a SQL text cap (100 KB). A
-// statement over either is refused here with a clear 400 BEFORE it reaches D1, so the chart
-// says what to change instead of surfacing a database error. 90,000 bytes leaves headroom.
-export const MAX_BOUND_PARAMS = 100
-export const MAX_SQL_BYTES = 90_000
-/** A clear 400 when a statement would exceed D1's limits, else null. */
-export function statementTooLarge(sql: string, bindCount: number): Response | null {
-  if (bindCount > MAX_BOUND_PARAMS) {
-    return json({ error: `this chart's filters are too many to query at once (${bindCount} values; at most ${MAX_BOUND_PARAMS}): select fewer sites or filters` }, 400)
-  }
-  const bytes = new TextEncoder().encode(sql).length
-  if (bytes > MAX_SQL_BYTES) {
-    return json({ error: `this chart's filters make the query too large (${bytes} bytes; at most ${MAX_SQL_BYTES}): use fewer pop-up filters` }, 400)
-  }
-  return null
 }
 
 const json = (data: unknown, status = 200): Response =>

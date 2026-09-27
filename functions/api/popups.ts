@@ -46,6 +46,7 @@ import {
 } from '../../src/lib/popupEvents'
 import { WHEN_RE, SITE_TAG_RE } from '../../src/lib/range'
 import { excludeOwnClause } from '../../src/lib/ownExclusion'
+import { MAX_SITES, statementTooLarge } from '../../src/lib/queryLimits'
 
 interface Env {
   gss_geo: D1Database
@@ -96,6 +97,12 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const untilMs = isDateOnly(until) ? Date.parse(until) + 86_400_000 : Date.parse(until)
 
   const rawSites: unknown[] = Array.isArray(body.sites) ? body.sites : body.site != null ? [body.site] : []
+  // Same cap functions/api/geo.ts enforces (src/lib/queryLimits.ts MAX_SITES) — a clear 400
+  // BEFORE building the query, not a raw D1 error after `site IN (...)` grows past its bind
+  // budget. This endpoint had no cap at all until the 2026-09-27 D1 bind-ceiling review round:
+  // an oversized `sites` array here fell through to the generic try/catch below as a 500,
+  // never naming what to change. See that commit's message for the full finding.
+  if (rawSites.length > MAX_SITES) return json({ error: `too many sites (at most ${MAX_SITES})` }, 400)
   const sites = rawSites.filter((s): s is string => typeof s === 'string' && s !== 'all' && SITE_TAG_RE.test(s))
 
   const popup = typeof body.popup === 'string' && POPUP_IDS.has(body.popup) ? body.popup : ''
@@ -123,9 +130,14 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const fixAt = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS
   const pfSql = fixAt === null ? '0' : '(ts >= ?)'
   const sql = `SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, ${pfSql} AS pf, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY hr, path, pf`
+  const allBinds = [...(fixAt === null ? [] : [fixAt]), ...b]
+  // Same D1-bound-parameter guard functions/api/geo.ts applies (src/lib/queryLimits.ts) — a
+  // clear 400 naming what to change, never a raw D1 error surfacing as the generic 500 below.
+  const tooLarge = statementTooLarge(sql, allBinds.length)
+  if (tooLarge) return tooLarge
   let res: any
   try {
-    res = await ctx.env.gss_geo.prepare(sql).bind(...(fixAt === null ? [] : [fixAt]), ...b).all()
+    res = await ctx.env.gss_geo.prepare(sql).bind(...allBinds).all()
   } catch (e) {
     return json({ error: 'd1 query failed', detail: String(e) }, 500)
   }

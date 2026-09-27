@@ -88,6 +88,14 @@ export const BSK_KPIS: CardSpec = {
         { id: 'popupAccept', label: { metric: true }, data: { metric: 'bsk.popupAccepts', window: 'todaySoFar' }, display: TODAY, ...COMPACT },
         { id: 'popupTapRate', label: { metric: true }, data: { ratio: 'bsk.popupTapRate', window: 'todaySoFar' }, display: { as: 'percent', decimals: 1 }, ...COMPACT },
         { id: 'authSuccess', label: { metric: true }, data: { metric: 'bsk.authSuccess', window: 'todaySoFar' }, display: TODAY, ...COMPACT },
+        // The new/existing/unknown split (A2, review round 2026-09-27): 'new' is the exact
+        // sign-up count the current ad flight is judged on. Gated on the 19:43:02Z go-live
+        // (lib/metrics/metrics.ts AUTH_NEW_EXISTING) — a range reaching back before it reads
+        // "counted from 2026-09-26 15:43 ET" instead of a false zero. Counts only, next to the
+        // base Auth successes tile above.
+        { id: 'authSuccessNew', label: { metric: true }, data: { metric: 'bsk.authSuccessNew', window: 'todaySoFar' }, display: TODAY, ...COMPACT },
+        { id: 'authSuccessExisting', label: { metric: true }, data: { metric: 'bsk.authSuccessExisting', window: 'todaySoFar' }, display: TODAY, ...COMPACT },
+        { id: 'authSuccessUnknown', label: { metric: true }, data: { metric: 'bsk.authSuccessUnknown', window: 'todaySoFar' }, display: TODAY, ...COMPACT },
         { id: 'authErrors', label: { metric: true }, data: { metric: 'bsk.authErrors', window: 'todaySoFar' }, display: TODAY, ...COMPACT },
         { id: 'authRedirects', label: { metric: true }, data: { metric: 'bsk.authRedirects', window: 'todaySoFar' }, display: TODAY, ...COMPACT },
         { id: 'install', label: { metric: true }, data: { metric: 'bsk.installs', window: 'todaySoFar' }, display: TODAY, ...COMPACT },
@@ -150,6 +158,38 @@ export const POPUP_RATES: CardSpec = {
           label: { note: 'label.card.installedRateFromFix' },
           data: { ratio: 'popup.installedRate', params: { popup: 'install' }, window: 'page' },
           display: { as: 'percent', decimals: 1 },
+          ...COMPACT,
+        },
+        // Counts, not rates — signed-in/returned/still-playing are lagged cohorts (see this
+        // file's header comment on the rate-validity rule), so unlike 'installed' above they
+        // never get a percentage here; the per-outcome breakdown already lives in the 'pu-bars'
+        // breakdown chart (popupFamily x popupOutcome), but that chart draws nothing when a
+        // combination has zero rows — indistinguishable from "not wired up" (A2's hard
+        // requirement). These three rows give every pop-up an explicit-zero, gated exactly like
+        // every other counted tile on this page (whenUnmeasured reads "counted from", never a
+        // blank or a hidden row) — added 2026-09-27, review round for PR #21.
+        {
+          id: 'signedIn',
+          label: { note: 'label.card.popupOutcomeSignedIn', vars: { popup: 'popup.label' } },
+          data: { metric: 'popup.outcomeSignedIn', window: 'page' },
+          display: { as: 'number' },
+          repeat: { over: 'popups' },
+          ...COMPACT,
+        },
+        {
+          id: 'returned',
+          label: { note: 'label.card.popupOutcomeReturned', vars: { popup: 'popup.label' } },
+          data: { metric: 'popup.outcomeReturned', window: 'page' },
+          display: { as: 'number' },
+          repeat: { over: 'popups' },
+          ...COMPACT,
+        },
+        {
+          id: 'stillPlaying',
+          label: { note: 'label.card.popupOutcomeStillPlaying', vars: { popup: 'popup.label' } },
+          data: { metric: 'popup.outcomeStillPlaying', window: 'page' },
+          display: { as: 'number' },
+          repeat: { over: 'popups' },
           ...COMPACT,
         },
       ],
