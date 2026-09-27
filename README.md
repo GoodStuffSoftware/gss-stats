@@ -59,8 +59,10 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   `date` dimension is a UTC day.
   [`src/lib/releases.ts`](src/lib/releases.ts) holds the hand-entered release dates (`hits` has
   no app-version column; major releases get a labelled line, minor ones a short tick).
-  "Best Sudoku · Campaigns" (its funnel and cost panels are metric cards, presets
-  `campaign-funnel` and `campaign-cost`; the funnel card also carries the signed-out upsell
+  "Best Sudoku · Campaigns" (its funnel, country and cost panels are metric cards, presets
+  `campaign-funnel`, `campaign-country` — a table with the funnel steps as rows and US / CA /
+  Other as columns, each cell a campaign metric with the registry's optional `country` param —
+  and `campaign-cost`; the funnel card also carries the signed-out upsell
   fix's pre/post-fix segment table, which appears on its own once `UPSELL_SIGNEDOUT_FIX_AT` is
   set; the other panels are dataset `campaigns`, see
   [`src/components/widgets/CampaignsWidgetBody.vue`](src/components/widgets/CampaignsWidgetBody.vue))

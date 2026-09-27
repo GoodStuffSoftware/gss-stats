@@ -67,6 +67,7 @@ describe('v10: the production layout (sanitised)', () => {
     'bsk-popups/pu-eligible-bd': 'signin-eligibility',
     'bsk-campaigns/cw-cost': 'campaign-cost',
     'bsk-campaigns/cw-funnel': 'campaign-funnel',
+    'bsk-campaigns/cw-country': 'campaign-country',
   }
   it('v9 → current changes exactly the panels, by adding a card, and nothing else', () => {
     const before = widgetsById(PROD_V9 as unknown as DashboardConfig)

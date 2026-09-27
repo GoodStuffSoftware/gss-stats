@@ -51,6 +51,11 @@
 //   M1  The upsell-fix segment table moved here from the flight-day panel (that panel is a
 //       standard chart now); it stays hidden until lib/adsRules.ts UPSELL_SIGNEDOUT_FIX_AT is
 //       set — slice7.upsell.test.ts sets it and compares both.
+//
+// Arrivals & funnel by country (campaigns 'country' → preset campaign-country):
+//   No visible difference: the same steps as rows, US / CA / Other as columns, the same counts,
+//   a closed flight's unmeasured steps omitted. (An active flight's not-yet-seen step reads its
+//   live count on both, as the old table never labelled it.)
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import MetricCard from './MetricCard.vue'
@@ -433,5 +438,50 @@ describe('campaign-funnel ≡ the bespoke funnel panel', () => {
     const card = await mountCard('campaign-funnel', FIXTURE_NOW)
     expect(card.findAll('.metric-section.layout-table')).toHaveLength(0)
     expect(card.text()).not.toMatch(/upsell fix/)
+  })
+})
+
+describe('campaign-country ≡ the bespoke country panel', () => {
+  it('same campaigns, same step rows, same US / CA / Other counts', async () => {
+    const old = await mountOldCampaigns('country')
+    const oldTables = new Map(
+      old.findAll('.country-col').map((c) => {
+        const heads = c.findAll('thead th').map((th) => text(th.element))
+        const body = c.findAll('tbody tr').map((tr) => tr.findAll('td').map((td) => text(td.element)))
+        return [text(c.find('.fc-label').element), [heads, ...body]] as const
+      }),
+    )
+    expect(oldTables.size).toBe(2)
+    const card = await mountCard('campaign-country', FIXTURE_NOW)
+    const newTables = new Map(
+      card.findAll('.metric-card').map((c) => {
+        const t = c.find('table.metric-table.columns')
+        const heads = t.findAll('thead th').map((th) => text(th.element))
+        const body = t.findAll('tbody tr').map((tr) => [text(tr.find('th').element), ...tr.findAll('td').map((td) => text(td.element))])
+        return [text(c.find('.mc-title').element), [heads, ...body]] as const
+      }),
+    )
+    expect([...newTables.keys()]).toEqual([...oldTables.keys()])
+    for (const [title, rowsOld] of oldTables) expect(newTables.get(title), title).toEqual(rowsOld)
+    // The fixture splits a campaign across countries, and a closed flight drops steps.
+    const android = oldTables.get([...oldTables.keys()][0])!
+    expect(android.length - 1).toBeLessThan(8)
+    expect(android.some((r) => r[1] !== '0' && r[2] !== '0' && r[1] !== 'US')).toBe(true)
+  })
+
+  it('asks the server for each cell with a country param, all from one campaign fact', async () => {
+    const d1 = sqliteD1(db)
+    const res = await metricsPost(pagesContext(postJson('/api/metrics', { v: 1, requests: [
+      { key: 'us', metric: 'campaign.taggedArrivals', params: { campaignId: '24215315197', country: 'US' } },
+      { key: 'ca', metric: 'campaign.taggedArrivals', params: { campaignId: '24215315197', country: 'CA' } },
+      { key: 'all', metric: 'campaign.taggedArrivals', params: { campaignId: '24215315197' } },
+      { key: 'bad', metric: 'campaign.taggedArrivals', params: { campaignId: '24215315197', country: 'FR' } },
+      { key: 'kpi', metric: 'campaign.taggedArrivals', params: { campaignId: '24215315197', country: 'US' }, window: 'todaySoFar' },
+    ] }), { gss_geo: d1 } as never) as never)
+    const body = (await res.json()) as { results: Record<string, { status: string; value?: number; reason?: string }> }
+    expect(body.results.us.value! + body.results.ca.value!).toBe(body.results.all.value)
+    expect(body.results.bad).toMatchObject({ status: 'error', reason: 'bad-param' })
+    expect(body.results.kpi).toMatchObject({ status: 'error', reason: 'bad-param' }) // no country split on the KPI fact
+    expect(d1.statements.filter((s) => s.includes('AS cb'))).toHaveLength(1)
   })
 })
