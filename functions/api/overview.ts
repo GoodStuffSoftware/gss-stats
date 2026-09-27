@@ -31,19 +31,14 @@ import {
   isInstallPromptInstalled,
   isRawInstallSignal,
   scorecardNotInstrumentedSteps,
-  RAW_INSTALL_SIGNALS_LABEL,
   type FunnelStepKey,
 } from '../../src/lib/campaigns'
 import {
   computeRate,
   etDateFromMs,
   excludeInstallGapUnmeasured,
-  withInstallGapNote,
-  TRACKING_ACTIVATION_DATE_ET,
+  installOutcomeGapNote,
   GAME_COMPLETE_LIVE_AT,
-  NEW_BEACONS_LIVE_AT_ET,
-  NEW_BEACONS_LIVE_MARKER_LABEL,
-  RAW_INSTALL_DEDUPE_LIVE_AT_ET,
   INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS,
   rowIsPostInstallFix,
 } from '../../src/lib/popupEvents'
@@ -63,7 +58,7 @@ import {
   sameTimeWindowMs,
   siteWindowClause,
 } from '../../src/lib/overview'
-import { latestDatedRelease, datedReleases } from '../../src/lib/releases'
+import { latestDatedRelease } from '../../src/lib/releases'
 import { resolveCampaignSpend } from '../../src/lib/adsRules'
 import { readSpendSummaries } from '../../src/lib/adsStore'
 import { notInstrumentedFunnelSteps } from '../_lib/campaignInstrumentation'
@@ -71,7 +66,6 @@ import { noteRawText } from '../../src/lib/notes'
 // lib/defaults.ts is plain TypeScript (no Vue imports), so the Function shares its site list
 // instead of keeping a copy; the metrics registry's facts read the same constant.
 import { BEST_SUDOKU_SITES } from '../../src/lib/defaults'
-import { WHEN_RE } from '../../src/lib/range'
 
 interface Env {
   gss_geo: D1Database
@@ -86,10 +80,6 @@ const json = (data: unknown, status = 200): Response =>
   })
 
 
-function safeDate(v: unknown, fallback: string): string {
-  return typeof v === 'string' && WHEN_RE.test(v) ? v : fallback
-}
-const isDateOnly = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v)
 
 type Row = { min: number; path: string; visitor: string; campaign: string; c: number }
 
@@ -111,7 +101,6 @@ const isAuthSuccess = isAuthSuccessBase
 // figure only (lib/campaigns.ts isInstallPromptInstalled / isRawInstallSignal).
 const isInstallOutcome = isInstallPromptInstalled
 /** "Installs", plus the install-fix caveat for the range shown (none once it is all post-fix). */
-const installsLabel = (startMs: number, endMs: number) => withInstallGapNote('Installs', { startMs, endMs })
 
 export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   let body: any
@@ -137,25 +126,17 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const kpiClause = siteWindowClause(BEST_SUDOKU_SITES, kpiRangeStart, nowMs)
   const sqlKpi = `SELECT CAST(ts / 60000 AS INTEGER) AS min, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE ${kpiClause.sql} GROUP BY min, path, visitor, campaign`
 
-  // ── Query 2: daily timeline since first Best Sudoku hit (or the requested since/until —
-  // the "existing range control") — hour bucket is plenty for a DAILY series. Same
-  // exclusions requirement as query 1 — this feeds the daily timeline chart. ───────────────
-  const since = safeDate(body.since, '2026-01-01') // well before any known Best Sudoku data
-  const until = safeDate(body.until, new Date().toISOString())
-  const sinceMs = Date.parse(since)
-  const untilMs = isDateOnly(until) ? Date.parse(until) + 86_400_000 : Date.parse(until)
-  const timelineClause = siteWindowClause(BEST_SUDOKU_SITES, sinceMs, untilMs)
-  const sqlTimeline = `SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE ${timelineClause.sql} GROUP BY hr, path, visitor, campaign`
+  // (Query 2, the daily timeline, is gone: "Overall timeline" is the standard line chart over
+  // /api/geo now — lib/defaults.ts timelineWidget.)
 
   // ── Query 3: first-ever Best Sudoku hit (for the release panel's "before" window cap). ──
   const sqlFirstHit = `SELECT MIN(ts) AS t FROM hits WHERE site IN (${BEST_SUDOKU_SITES.map(() => '?').join(', ')})`
   const bFirstHit = [...BEST_SUDOKU_SITES]
 
-  let rKpi: any, rTimeline: any, rFirstHit: any
+  let rKpi: any, rFirstHit: any
   try {
-    ;[rKpi, rTimeline, rFirstHit] = await Promise.all([
+    ;[rKpi, rFirstHit] = await Promise.all([
       db.prepare(sqlKpi).bind(...kpiClause.binds).all(),
-      db.prepare(sqlTimeline).bind(...timelineClause.binds).all(),
       db.prepare(sqlFirstHit).bind(...bFirstHit).all(),
     ])
   } catch (e) {
@@ -243,49 +224,17 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   }
   {
     const w = windowed((r) => isInstallOutcome(r.path))
-    kpis.push(buildKpiTile('install', installsLabel(kpiRangeStart, nowMs), w.today, w.yesterday, w.avg7))
+    const installNote = installOutcomeGapNote({ startMs: kpiRangeStart, endMs: nowMs })
+    kpis.push({ ...buildKpiTile('install', 'Installs', w.today, w.yesterday, w.avg7), ...(installNote ? { note: installNote } : {}) })
     const raw = windowed((r) => isRawInstallSignal(r.path))
-    kpis.push(buildKpiTile('installRaw', RAW_INSTALL_SIGNALS_LABEL, raw.today, raw.yesterday, raw.avg7))
+    kpis.push({ ...buildKpiTile('installRaw', 'Raw install signals', raw.today, raw.yesterday, raw.avg7), note: 'can double-count' })
   }
   if (!returnBeaconLiveToday()) {
-    kpis.push(notYetTrackingTile('returns', '/return/ d1+ returns'))
+    kpis.push(notYetTrackingTile('returns', 'Return visits (day 1+)'))
   } else {
     const w = windowed((r) => isReturnD1Plus(r.path))
-    kpis.push(buildKpiTile('returns', '/return/ d1+ returns', w.today, w.yesterday, w.avg7))
+    kpis.push(buildKpiTile('returns', 'Return visits (day 1+)', w.today, w.yesterday, w.avg7))
   }
-
-  // ── 2. OVERALL TIMELINE (daily ET series) ───────────────────────────────────────────────
-  const timelineRows: Row[] = (rTimeline.results ?? []).map((x: any) => ({
-    min: (Number(x.hr) || 0) * 60, // reuse the same `min` field/sumInWindow helper (hr*3600000 === (hr*60)*60000)
-    path: String(x.path ?? ''),
-    visitor: String(x.visitor ?? ''),
-    campaign: String(x.campaign ?? ''),
-    c: Number(x.c) || 0,
-  }))
-  const dailyMap = new Map<string, { pageviews: number; taggedArrivals: number; authSuccess: number; install: number; rawInstallSignals: number }>()
-  for (const r of timelineRows) {
-    const ms = r.min * 60_000
-    const d = etDateFromMs(ms)
-    const bucket = dailyMap.get(d) ?? { pageviews: 0, taggedArrivals: 0, authSuccess: 0, install: 0, rawInstallSignals: 0 }
-    if (!isEventPath(r.path)) bucket.pageviews += r.c
-    if (r.visitor === 'new' && r.campaign) bucket.taggedArrivals += r.c
-    if (isAuthSuccess(r.path)) bucket.authSuccess += r.c
-    if (isInstallOutcome(r.path)) bucket.install += r.c
-    if (isRawInstallSignal(r.path)) bucket.rawInstallSignals += r.c
-    dailyMap.set(d, bucket)
-  }
-  const daily = [...dailyMap.entries()]
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([date, v]) => ({ date, ...v }))
-
-  // Overlay data for the timeline chart: campaign flights (shaded bands), release markers,
-  // and the tracking-activation marker — all config-driven, no extra queries needed.
-  const campaignFlights = CAMPAIGNS.map((c) => ({ id: c.id, label: c.label, flightStart: c.flightStart, flightEnd: c.flightEnd, status: c.status }))
-  // Every dated release, not just the latest — the timeline overlay labels 'major' ones and
-  // draws the rest as unlabeled ticks (see components/widgets/OverviewWidgetBody.vue), so a
-  // growing release history doesn't clutter the chart. releasePanel (below) still keys off
-  // just the LATEST dated release for its own "no dated release yet" fallback.
-  const releaseMarkers = datedReleases().map((r) => ({ version: r.version, dateEt: r.dateEt, note: r.note, major: r.major }))
 
   // Stored Google Ads spend (gss-stats-ads) beats the hand-entered config — the same rule as
   // /api/campaigns (lib/adsRules.ts resolveCampaignSpend), read once for every campaign.
@@ -427,25 +376,6 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     generatedAt: new Date().toISOString(),
     todayEt,
     kpis,
-    timeline: {
-      daily,
-      campaignFlights,
-      releaseMarkers,
-      trackingActivationDate: TRACKING_ACTIVATION_DATE_ET,
-      // v1.95.5 go-live (game-complete + auth new/existing beacons) — same marker
-      // convention as trackingActivationDate above, see lib/popupEvents.ts
-      // NEW_BEACONS_LIVE_AT_ET / NEW_BEACONS_LIVE_MARKER_LABEL.
-      newBeaconsLiveAt: NEW_BEACONS_LIVE_AT_ET,
-      newBeaconsLiveAtLabel: NEW_BEACONS_LIVE_MARKER_LABEL,
-      // v1.95.6 raw /install/* de-dupe (ADD-only — never gates any count; see
-      // lib/popupEvents.ts RAW_INSTALL_DEDUPE_LIVE_AT_ET's own comment): annotates the raw
-      // install-signal line ONLY, never the primary (already deduplicated) install count.
-      rawInstallDedupeAt: RAW_INSTALL_DEDUPE_LIVE_AT_ET,
-      since,
-      until,
-      // Series labels that carry data caveats, so the chart shows them whatever the layout.
-      seriesLabels: { install: installsLabel(sinceMs, untilMs), rawInstallSignals: RAW_INSTALL_SIGNALS_LABEL },
-    },
     scorecard,
     releasePanel,
   })

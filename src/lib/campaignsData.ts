@@ -1,7 +1,7 @@
 // Shared, cached fetch of /api/campaigns (per campaign id) for the "Best Sudoku campaigns"
 // widget cards (see components/widgets/CampaignsWidgetBody.vue). Before the bespoke-page →
 // widget conversion, CampaignComparePage.vue fetched every campaign once per page mount; now
-// up to 7 separate widgets (funnel / hourOfDay / country / flightDay / cost / deviceMix /
+// up to 6 separate widgets (funnel / hourOfDay / country / flightDay / cost /
 // returns), each possibly scoped to a subset of campaigns via widget.campaignIds, can sit on
 // the same page — this composable keys the fetch by campaign id, so the same campaign is
 // never fetched twice regardless of how many widgets reference it.

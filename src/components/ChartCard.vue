@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, watch, computed, onMounted, onBeforeUnmount, nextTick, useId } from 'vue'
 import type { Widget, GlobalFilters, StatsResponse } from '../types'
-import { fetchStats } from '../api'
+import { fetchStats, fetchSeriesStats } from '../api'
 import { sitesLoaded } from '../sitesStore'
 import { checkSessionExpired, isAuthError, isNetworkError } from '../session'
-import { buildChartConfig, formatKey, metricValue, nestedDoughnutClickValue, seriesRows } from '../lib/charts'
+import { buildChartConfig, formatKey, metricValue, nestedDoughnutClickValue, seriesRows, hasLineSeries, widgetHasOverlay, widgetOverlayOptions } from '../lib/charts'
+import { overlayItems, itemsInRange } from '../lib/timelineOverlay'
+import { isDateDim } from '../lib/rings'
 import { rangeLabel } from '../lib/range'
 import { isSiteDim, semanticKey } from '../lib/drill'
 import { isMobileViewport } from '../lib/responsive'
@@ -59,12 +61,17 @@ const isNoteWidget = computed(() => props.widget.type === 'note')
 // ads-readings/note) and the non-canvas widget types (stat/rate/table) never had that
 // problem, so only the canvas-bearing cases below get a fixed mobile height (Dashboard.vue's
 // .needs-chart-height).
-const CHART_CANVAS_TYPES = new Set(['bar', 'hbar', 'stackedBar', 'line', 'area', 'doughnut', 'nestedDoughnut', 'pie', 'map'])
+const CHART_CANVAS_TYPES = new Set(['bar', 'hbar', 'stackedBar', 'breakdownBar', 'line', 'area', 'doughnut', 'nestedDoughnut', 'pie', 'map'])
 const needsChartHeight = computed(() => {
-  if (props.widget.dataset === 'overview') return props.widget.view === 'timeline' // the only overview panel with a real chart
+  if (props.widget.dataset === 'overview') return false // content-driven panels (the timeline is a standard line chart now)
   if (props.widget.dataset === 'campaigns' || props.widget.dataset === 'ads-readings' || isNoteWidget.value) return false
   return CHART_CANVAS_TYPES.has(props.widget.type)
 })
+
+// A breakdown bar (legend + rotated axis labels) and a line chart with series or overlays
+// (legend, marker labels, the markers list, captions) don't fit Dashboard.vue's fixed phone chart
+// height: on a phone these cards size to their content, with a fixed-height plot area instead.
+const tallOnPhone = computed(() => props.widget.type === 'breakdownBar' || hasLineSeries(props.widget) || (isDateDim(props.widget.dimension) && widgetHasOverlay(props.widget)))
 
 // Double-tap-to-zoom (owner: "allow a double-tap on the chart to zoom if that's easy") — an
 // extra shortcut alongside the always-visible zoom button (see below), not a substitute for
@@ -204,6 +211,7 @@ onMounted(() => document.addEventListener('keydown', onKey))
 onBeforeUnmount(() => document.removeEventListener('keydown', onKey))
 
 const data = ref<StatsResponse | null>(null)
+const seriesData = ref<StatsResponse[] | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
 const menuOpen = ref(false)
@@ -226,8 +234,21 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const r = await fetchStats(props.widget, effectiveFilters.value)
-    if (my === reqId) data.value = r
+    // A series line chart fetches one date query per series; the first also stands in as `data`
+    // for the generic empty/loaded states.
+    if (hasLineSeries(props.widget)) {
+      const all = await fetchSeriesStats(props.widget, effectiveFilters.value)
+      if (my === reqId) {
+        seriesData.value = all
+        data.value = { ...all[0], rows: all.flatMap((r) => r.rows) }
+      }
+    } else {
+      const r = await fetchStats(props.widget, effectiveFilters.value)
+      if (my === reqId) {
+        seriesData.value = null
+        data.value = r
+      }
+    }
   } catch (e: any) {
     if (my === reqId) error.value = e?.message ?? 'Failed to load'
     if (isNetworkError(e) || isAuthError(e)) checkSessionExpired() // probe for an expired session
@@ -244,6 +265,7 @@ const dataKey = computed(() =>
     m: props.widget.metric,
     l: props.widget.limit,
     s: props.widget.site,
+    ss: props.widget.siteSel,
     h: props.widget.host,
     e: props.widget.excludeSelfReferrals,
     pu: props.widget.popup,
@@ -251,6 +273,10 @@ const dataKey = computed(() =>
     // feat/all-beacon-fields: per-chart geo opt-in — data-affecting (changes which rows the
     // query counts), so it belongs in the refetch key same as excludeSelfReferrals above.
     ieb: props.widget.includeEventBeacons,
+    ekt: props.widget.excludeKnownTraffic,
+    // A series line chart's series list (labels/axes/styles change only the drawing, but it's
+    // simplest and cheap to refetch — each series query is edge-cached).
+    ser: props.widget.series,
     f: effectiveFilters.value,
   }),
 )
@@ -279,12 +305,17 @@ function onUseGlobal() {
 const overrideSummary = computed(() => {
   const f = props.widget.filters
   if (!f) return ''
+  // An override built from the current filter model carries `siteSel` and no legacy `site`
+  // (e.g. the campaign device mix's rolling-year override) — summarize that instead of
+  // assuming the legacy single-site field is set.
   const site =
-    f.site === 'all'
+    f.site === 'all' || (!f.site && !f.host && !f.siteSel?.length)
       ? 'all sites'
       : f.host
         ? f.host.replace('.goodstuff.software', '')
-        : f.site.replace('goodstuff.software', 'gs').replace('.com', '')
+        : f.site
+          ? f.site.replace('goodstuff.software', 'gs').replace('.com', '')
+          : f.siteSel.join(', ')
   const flags: string[] = []
   if (f.excludeOwnVisits) flags.push('−me')
   return [site, rangeLabel(f.since, f.until), ...flags].join(' · ')
@@ -293,10 +324,26 @@ watch(dataKey, load)
 watch(sitesLoaded, (ready) => ready && load()) // fetch RUM charts once the allow-list is ready
 onMounted(load)
 
+// Every overlay item (release, go-live, campaign flight) the chart can draw inside the plotted
+// range — listed under the chart in a collapsed disclosure, so each marker's and band's date,
+// name and note are reachable by keyboard and touch, not only by hovering the canvas.
+const overlayList = computed(() => {
+  if (!isDateDim(props.widget.dimension) || !widgetHasOverlay(props.widget) || !data.value) return []
+  const first = String(data.value.meta.since).slice(0, 10)
+  const last = String(data.value.meta.until).slice(0, 10)
+  return itemsInRange(overlayItems(widgetOverlayOptions(props.widget)), first, last).map((it) => ({
+    key: `${it.kind}|${it.date}|${it.label}`,
+    when: it.kind === 'flight' ? `${it.date} to ${it.openEnded ? 'now' : it.endDate}` : it.date,
+    kind: it.kind === 'flight' ? 'Campaign flight' : it.kind === 'go-live' ? 'Go-live' : 'Release',
+    label: it.label,
+    note: it.note,
+  }))
+})
+
 const chartConfig = computed(() => {
   if (!data.value) return null
   void props.dark // recompute colors on theme toggle
-  return buildChartConfig(props.widget, data.value)
+  return buildChartConfig(props.widget, data.value, seriesData.value ?? undefined)
 })
 
 const statValue = computed(() =>
@@ -333,6 +380,19 @@ const tableRows = computed(() =>
 )
 const tableMax = computed(() => Math.max(1, ...tableRows.value.map((r) => r.value)))
 
+// Rate table (widget.type === 'rateTable'): the VALID pop-up rates only, each shown the same
+// way a rate tile shows one — the percentage (or "too few to report" under MIN_COHORT, or "—"
+// with no denominator at all) and always its n/d, plus any caveat that travels with the data.
+const rateTableRows = computed(() =>
+  (data.value?.rateRows ?? []).map((r) => ({
+    key: r.key,
+    label: r.label,
+    display: r.insufficientCohort ? 'too few to report' : r.value == null ? '—' : `${(r.value * 100).toFixed(1)}%`,
+    counts: `${r.numerator}/${r.denominator}`,
+    note: r.note ?? '',
+  })),
+)
+
 const isEmpty = computed(
   () =>
     !loading.value &&
@@ -340,7 +400,8 @@ const isEmpty = computed(
     data.value &&
     data.value.rows.length === 0 &&
     props.widget.type !== 'map' &&
-    props.widget.type !== 'rate', // a rate tile has no rows even when it has a real (or null) rate — never "No data"
+    props.widget.type !== 'rate' && // a rate tile has no rows even when it has a real (or null) rate — never "No data"
+    props.widget.type !== 'rateTable', // same for the rate table (its rows travel as rateRows)
 )
 
 // Pop-up count widgets (everything except the 'rate' tile and the 'date' trend, which
@@ -352,6 +413,7 @@ const popupNotYetActive = computed(
   () =>
     props.widget.dataset === 'popup' &&
     props.widget.type !== 'rate' &&
+    props.widget.type !== 'rateTable' &&
     props.widget.dimension !== 'date' &&
     !!data.value?.meta?.activationPending,
 )
@@ -374,7 +436,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
 
 <template>
   <Teleport to="body" :disabled="!zoomed">
-    <div ref="cardEl" class="chart-card" :class="{ zoomed, revealed, 'controls-revealed': forceControls, 'note-card': isNoteWidget, 'needs-chart-height': needsChartHeight }" :style="zoomed ? { '--ar': aspect } : undefined">
+    <div ref="cardEl" class="chart-card" :class="{ zoomed, revealed, 'controls-revealed': forceControls, 'note-card': isNoteWidget, 'needs-chart-height': needsChartHeight, 'tall-on-phone': tallOnPhone }" :style="zoomed ? { '--ar': aspect } : undefined">
     <header class="card-head" :class="{ 'note-head': isNoteWidget }">
       <div class="title-wrap" v-if="!isNoteWidget">
         <span v-if="widget.isDefault" class="pin" title="A default chart on this page — kept when you restore defaults">★</span>
@@ -482,6 +544,29 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
         <div v-if="rateCounts" class="stat-sub mono">{{ rateCounts }}</div>
       </div>
 
+      <!-- Rate table: valid pop-up rates, each with its n/d -->
+      <div v-else-if="widget.type === 'rateTable'" class="table-wrap">
+        <table class="rate-table">
+          <thead>
+            <tr>
+              <th class="t-label">Rate</th>
+              <th class="t-val">%</th>
+              <th class="t-val">n / d</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="r in rateTableRows" :key="r.key">
+              <td class="t-label wrap">
+                {{ r.label }}
+                <span v-if="r.note" class="rate-note">{{ r.note }}</span>
+              </td>
+              <td class="t-val mono rate-val">{{ r.display }}</td>
+              <td class="t-val mono">{{ r.counts }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
       <!-- Table -->
       <div v-else-if="widget.type === 'table'" class="table-wrap">
         <table>
@@ -512,6 +597,17 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
          known install-outcome gap), computed per-request rather than being static config
          like the registry captions above, so it has to be rendered from `data` here rather
          than looked up by id — previously fetched but never rendered anywhere. -->
+    <details v-if="overlayList.length" class="overlay-list">
+      <summary>Markers and bands ({{ overlayList.length }})</summary>
+      <ul>
+        <li v-for="o in overlayList" :key="o.key">
+          <span class="ol-when mono">{{ o.when }}</span>
+          <span class="ol-kind">{{ o.kind }}</span>
+          <strong>{{ o.label }}</strong>
+          <span class="ol-note">{{ o.note }}</span>
+        </li>
+      </ul>
+    </details>
     <div v-if="captionNoteIds.length || data?.note" class="card-captions">
       <NoteBlock v-for="id in captionNoteIds" :key="id" :note-id="id" />
       <NoteBlock v-if="data?.note" :text="data.note" />
@@ -851,6 +947,90 @@ td {
 }
 .t-bar {
   width: 40%;
+}
+@media (max-width: 700px) {
+  .chart-card.chart-card.needs-chart-height.tall-on-phone {
+    height: auto;
+  }
+  .chart-card.tall-on-phone .card-body {
+    flex: none;
+    height: 360px;
+  }
+}
+.overlay-list {
+  padding: 0 14px 6px;
+  font-size: 12px;
+  color: rgb(var(--ink-2));
+  min-width: 0;
+}
+.overlay-list summary {
+  cursor: pointer;
+  color: rgb(var(--ink-3));
+  font-size: 11.5px;
+  padding: 4px 0;
+}
+.overlay-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 150px;
+  overflow-y: auto;
+}
+.overlay-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  padding: 4px 0;
+  border-top: 1px solid rgb(var(--line));
+  overflow-wrap: anywhere;
+}
+.ol-when {
+  color: rgb(var(--ink-3));
+  font-size: 11px;
+}
+.ol-kind {
+  color: rgb(var(--ink-3));
+  font-size: 11px;
+}
+.ol-note {
+  flex-basis: 100%;
+  color: rgb(var(--ink-2));
+}
+/* Attached captions: inside the card's own padding, and a long word or path wraps instead of
+   running past the rounded border (it used to sit flush left and be clipped at phone width). */
+.card-captions {
+  padding: 0 14px 10px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.rate-table th {
+  font-weight: 600;
+  font-size: 11px;
+  color: rgb(var(--ink-3));
+  text-align: left;
+  padding: 2px 6px 6px;
+}
+.rate-table th.t-val {
+  text-align: right;
+}
+.rate-table td {
+  border-top: 1px solid rgb(var(--line));
+  padding: 6px;
+}
+.rate-table .t-label.wrap {
+  white-space: normal;
+  width: auto;
+  max-width: none;
+}
+.rate-table .rate-val {
+  color: rgb(var(--ink));
+  font-weight: 600;
+}
+.rate-note {
+  display: block;
+  font-size: 11px;
+  color: rgb(var(--ink-3));
+  margin-top: 2px;
 }
 .t-bar .bar {
   display: block;
