@@ -201,9 +201,15 @@ describe('bsk-kpis ≡ the bespoke "Today at a glance" tiles', () => {
       deltas: t.findAll('.mi-tile-delta').map((d) => text(d.element)),
     }))
 
+  // Tiles added after the bespoke panel was retired — no golden equivalent exists for these, so
+  // they are excluded from the strict before/after comparison below (which is a parity check
+  // against the retired code, not a frozen list of every tile bsk-kpis may ever show). Each one
+  // gets its own coverage elsewhere (see the auth-error/auth-redirect describe block).
+  const ADDED_AFTER_RETIREMENT = new Set(['Sign-in failures', 'Sign-in redirect fallbacks'])
+
   it('same tiles in the same order, same values and the same delta lines ("new today" included)', async () => {
     const before = oldTiles()
-    const after = newTiles(await mountNew('bsk-kpis'))
+    const after = newTiles(await mountNew('bsk-kpis')).filter((t) => !ADDED_AFTER_RETIREMENT.has(t.label))
     expect(after.map((t) => t.label)).toEqual(before.map((t) => t.label))
     expect(after.map((t) => t.value)).toEqual(before.map((t) => t.value))
     expect(after.map((t) => t.deltas)).toEqual(before.map((t) => t.deltas))
@@ -217,6 +223,22 @@ describe('bsk-kpis ≡ the bespoke "Today at a glance" tiles', () => {
     const neu = await mountNew('bsk-kpis')
     expect(text(neu.find('.mc-updated').element)).toBe(GOLDEN.updated)
     expect(neu.find('button.mc-reload').exists()).toBe(true)
+  })
+
+  it('auth-error / auth-redirect tiles: present, next to Auth successes, reading an explicit zero (not blank/hidden) — the fixture has no rows for either yet', async () => {
+    const after = newTiles(await mountNew('bsk-kpis'))
+    const labels = after.map((t) => t.label)
+    const authIdx = labels.indexOf('Auth successes')
+    expect(authIdx).toBeGreaterThanOrEqual(0)
+    expect(labels[authIdx + 1]).toBe('Sign-in failures')
+    expect(labels[authIdx + 2]).toBe('Sign-in redirect fallbacks')
+    const errors = after.find((t) => t.label === 'Sign-in failures')!
+    const redirects = after.find((t) => t.label === 'Sign-in redirect fallbacks')!
+    // A real, visible "0" — go-live (2026-09-22) predates the fixture's "today", so this reads
+    // as a measured zero, not the muted "not yet tracking" gated text a pre-go-live window
+    // would show (lib/metrics/render.ts applyUnmeasuredGating).
+    expect(errors.value).toBe('0')
+    expect(redirects.value).toBe('0')
   })
 
   it('no-campaign days: the arrivals placeholder is a tile, as before', async () => {

@@ -28,6 +28,10 @@ All notable changes to **gss-stats** are documented here. The format follows
   since it would otherwise silently suppress release health forever at whatever hour the one
   remaining run is scheduled. Parent/child maturity is unaffected: it was already enforced by an
   independent 24h event-age cutoff, not the clock.
+- **Sign-in failures and redirect fallbacks now show on the Best Sudoku dashboard**, next to
+  the existing auth-success numbers on "Today at a glance". Both read a real zero (not a blank
+  or a hidden tile) once tracking is live, so "no failures yet" reads differently from "not
+  wired up".
 
 ## [0.12.1] — 2026-09-27
 

@@ -321,12 +321,17 @@ describe('review fixes: arrivals, raw signals, date limit, request caps', () => 
     expect(ok.body.error).toBeUndefined()
   })
 
-  it('refuses a statement over D1\'s 100 bound parameters with a clear 400 (50 sites + 16 path filters + a referrer ring)', async () => {
+  // 46 sites, not 50: two more event-beacon prefixes (lib/popupEvents.ts POPUP_EVENT_PREFIXES,
+  // auth-error/auth-redirect) each add a `path <> ? AND path NOT LIKE ?` pair to the standing
+  // exclusion every query here carries, so the site count is trimmed by 4 to keep this fixture
+  // landing on the same round total (110) it always has — the boundary being tested is D1's own
+  // 100-param cap, not this repo's current exclusion-clause size.
+  it('refuses a statement over D1\'s 100 bound parameters with a clear 400 (46 sites + 16 path filters + a referrer ring)', async () => {
     const { body, calls } = await post({
       dimension: 'referrer',
       breakdown: 'device',
       dims: ['referrer', 'device'],
-      sites: Array.from({ length: 50 }, (_, i) => `s${i}`),
+      sites: Array.from({ length: 46 }, (_, i) => `s${i}`),
       constraints: Array.from({ length: 16 }, (_, i) => ({ field: 'path', value: `/p${i}` })),
       excludeOwnVisits: true,
       ownBrowser: 'Opera',
@@ -343,7 +348,7 @@ describe('review fixes: arrivals, raw signals, date limit, request caps', () => 
       dimension: 'referrer',
       breakdown: 'device',
       dims: ['referrer', 'device'],
-      sites: Array.from({ length: 50 }, (_, i) => `s${i}`),
+      sites: Array.from({ length: 46 }, (_, i) => `s${i}`),
       constraints: Array.from({ length: 16 }, (_, i) => ({ field: 'path', value: `/p${i}` })),
       excludeOwnVisits: true,
       ownBrowser: 'Opera',
