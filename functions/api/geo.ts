@@ -12,8 +12,11 @@
 // `breakdown` for the grouped query below. Older 2-dim callers can still send just
 // { dimension, breakdown } and get the same result via a fallback.
 
-import { popupExcludeClause, pathFamilySqlCase } from '../../src/lib/popupEvents'
+import { popupExcludeClause, pathFamilySqlCase, popupDimSqlCase, popupDimPrefilter } from '../../src/lib/popupEvents'
+import { gameDimSqlCase, gameDimPrefilter, campaignFlightSqlCase, campaignFlightPrefilter, arrivalSqlCase, keyEventSqlCase, applyExclusions } from '../../src/lib/campaigns'
 import { excludeOwnClause as sharedExcludeOwnClause, selfReferralClause as sharedSelfReferralClause } from '../../src/lib/ownExclusion'
+import { etDateSql } from '../../src/lib/etTime'
+import { isDateDim } from '../../src/lib/rings'
 import { buildCacheKeyUrl, cachedJson, ttlSecondsFor, type CacheLike } from '../_lib/edgeCache'
 import { WHEN_RE, SITE_TAG_RE } from '../../src/lib/range'
 
@@ -42,7 +45,17 @@ interface Env {
 // blank-labeled the same way they always were.
 export function breakdownColumnExpr(dim: string, emptyLabel: string): string {
   if (dim === 'date') return "date(ts/1000,'unixepoch')"
+  // US-Eastern calendar day (DST-aware), matching how the Best Sudoku code buckets ET days.
+  if (dim === 'dateEt') return etDateSql()
   if (dim === 'pathFamily') return pathFamilySqlCase()
+  // Pop-up / completion / campaign-flight dims: CASE expressions over path (and ts/campaign),
+  // built only from lib/popupEvents.ts + lib/campaigns.ts constants (never request input); see
+  // those modules for each dimension's meaning and why its literals are inlined.
+  if (dim === 'popupFamily' || dim === 'popupOutcome') return popupDimSqlCase(dim, emptyLabel)
+  if (dim === 'gameMode' || dim === 'gameDifficulty') return gameDimSqlCase(dim, emptyLabel)
+  if (dim === 'campaignFlight') return campaignFlightSqlCase(emptyLabel)
+  if (dim === 'arrival') return arrivalSqlCase(emptyLabel)
+  if (dim === 'keyEvent') return keyEventSqlCase(emptyLabel)
   // screenw is INTEGER, default 0 when the client never reported a viewport width (JS
   // blocked/failed before the measurement ran) — 0 is the "blank" sentinel here, not ''.
   if (dim === 'screenw') return `CASE WHEN screenw = 0 THEN '${emptyLabel}' ELSE CAST(screenw AS TEXT) END`
@@ -73,7 +86,11 @@ export function emptyLabelFor(dim: string): string {
 // against — SQLite's type ordering means an INTEGER can never equal a TEXT literal, so
 // `screenw <> ''` is a no-op (always true, excludes nothing), letting blank rows leak into the
 // ring as a raw "0" key instead of being dropped like every other dimension's blanks.
+// A DERIVED dimension has no column to test, so its blank test is the expression itself with an
+// empty blank label, compared against '' (screenwBucket: a 0-width row; the pop-up/completion/
+// flight dims: a row they don't describe; pathFamily is never blank).
 export function ringBlankExclusion(dim: string): string {
+  if (DERIVED_ONLY_DIMS.has(dim)) return `(${breakdownColumnExpr(dim, '')}) <> ''`
   return dim === 'screenw' ? 'screenw <> 0' : `${dim} <> ''`
 }
 
@@ -106,10 +123,14 @@ export function buildMergedRingSql(cols: string[], whereSql: string, groupBy: st
 // every query that touched it the moment someone charted it. Add it once the migration runs).
 export const GEO_DIMS = new Set([
   'country', 'region', 'city', 'postal', 'continent', 'timezone', 'colo', 'org',
-  'referrer', 'refpath', 'path', 'site', 'device', 'browser', 'os', 'lang', 'visitor', 'date',
+  'referrer', 'refpath', 'path', 'site', 'device', 'browser', 'os', 'lang', 'visitor', 'date', 'dateEt',
   'campaign', 'source', 'medium', // utm campaign tags
   'screenw', 'screenwBucket', // viewport width — raw pixel value, and bucketed (see breakdownColumnExpr)
   'pathFamily', // groups event-beacon paths (popup/install/return/game-complete/…) vs. 'page' — see popupEvents.ts
+  'popupFamily', 'popupOutcome', // which pop-up / shown-tap-outcome — see popupEvents.ts popupDimSqlCase
+  'gameMode', 'gameDifficulty', // /game/complete/<mode>/<difficulty> — see campaigns.ts gameDimSqlCase
+  'campaignFlight', // campaign flight by campaignAttributionClause — see campaigns.ts campaignFlightSqlCase
+  'arrival', 'keyEvent', // first-ever beacon tagged/untagged; sign-in/install/completion rows — see campaigns.ts
 ])
 
 // Dimensions with no real backing column — computed via CASE/date() in breakdownColumnExpr,
@@ -121,7 +142,36 @@ export const GEO_DIMS = new Set([
 // equality instead of a bare column reference. 'date' alone stays fully out of filtering too:
 // a click on a date bucket becomes a day RANGE client-side (lib/drill.ts), never an equality
 // constraint, so nothing ever sends it as one.
-export const DERIVED_ONLY_DIMS = new Set(['date', 'screenwBucket', 'pathFamily'])
+export const DERIVED_ONLY_DIMS = new Set(['date', 'dateEt', 'screenwBucket', 'pathFamily', 'popupFamily', 'popupOutcome', 'gameMode', 'gameDifficulty', 'campaignFlight', 'arrival', 'keyEvent'])
+// Of those, only 'date' stays out of multi-dimension (ring / breakdown-bar) queries: every other
+// derived dim groups like a column (its CASE runs per row in the inner SELECT, and
+// ringBlankExclusion drops its blank rows). A date axis is a trend, which lib/rings.ts
+// queryDims already keeps to single-dim charts.
+export const RING_EXCLUDED_DIMS = new Set(['date', 'dateEt'])
+
+// Dimensions that describe EVENT-beacon rows only. A chart grouping by one (or a drill filtering
+// on one) cannot also apply the standing event-beacon exclusion (it would remove every row the
+// dimension describes), so the exclusion is lifted for that chart and the dimension's own bound
+// prefilter applies instead (only rows of that event family). Their blank rows are dropped even
+// in single-dim mode, so a page view never shows up as a "(none)" bar.
+export const EVENT_DIMS = new Set(['popupFamily', 'popupOutcome', 'gameMode', 'gameDifficulty', 'keyEvent'])
+// Dims whose charts/filters lift the standing event-beacon exclusion: the event dims, plus
+// 'arrival' — a device's first-ever beacon can itself be an event row (e.g. an install prompt),
+// and /api/campaigns counts it as a tagged arrival, so the timeline's arrivals line must too.
+export const EXCLUSION_LIFTING_DIMS = new Set([...EVENT_DIMS, 'arrival'])
+
+// Bound WHERE prefilters for dims that only describe a subset of rows (cheap, and keeps the CASE
+// evaluation to rows that can carry a value). campaignFlight is not an event dim: a tagged row
+// is often a page view, so it keeps the chart's own event-beacon setting.
+const DIM_PREFILTERS: Record<string, (w: string[], b: unknown[]) => void> = {
+  popupFamily: popupDimPrefilter,
+  popupOutcome: popupDimPrefilter,
+  gameMode: gameDimPrefilter,
+  gameDifficulty: gameDimPrefilter,
+  campaignFlight: campaignFlightPrefilter,
+}
+// Dims whose blank rows are dropped in single-dim mode too (see EVENT_DIMS above).
+const BLANK_DROPPED_DIMS = new Set([...EVENT_DIMS, 'campaignFlight', 'arrival'])
 
 // screenwBucket / pathFamily as FILTERS: the exact same whitelisted CASE expression breakdown
 // mode groups by, wrapped in `(<expr>) = ?` with the value bound as a parameter — never string-
@@ -134,6 +184,32 @@ export const DERIVED_ONLY_DIMS = new Set(['date', 'screenwBucket', 'pathFamily']
 const DERIVED_FILTER_EXPR: Record<string, string> = {
   screenwBucket: breakdownColumnExpr('screenwBucket', '(unknown)'),
   pathFamily: breakdownColumnExpr('pathFamily', ''),
+  popupFamily: breakdownColumnExpr('popupFamily', ''),
+  popupOutcome: breakdownColumnExpr('popupOutcome', ''),
+  gameMode: breakdownColumnExpr('gameMode', ''),
+  gameDifficulty: breakdownColumnExpr('gameDifficulty', ''),
+  campaignFlight: breakdownColumnExpr('campaignFlight', ''),
+  arrival: breakdownColumnExpr('arrival', ''),
+  keyEvent: breakdownColumnExpr('keyEvent', ''),
+}
+
+export const MAX_SITES = 50
+export const MAX_CONSTRAINTS = 16
+// D1's own statement limits: 100 bound parameters per query, and a SQL text cap (100 KB). A
+// statement over either is refused here with a clear 400 BEFORE it reaches D1, so the chart
+// says what to change instead of surfacing a database error. 90,000 bytes leaves headroom.
+export const MAX_BOUND_PARAMS = 100
+export const MAX_SQL_BYTES = 90_000
+/** A clear 400 when a statement would exceed D1's limits, else null. */
+export function statementTooLarge(sql: string, bindCount: number): Response | null {
+  if (bindCount > MAX_BOUND_PARAMS) {
+    return json({ error: `this chart's filters are too many to query at once (${bindCount} values; at most ${MAX_BOUND_PARAMS}): select fewer sites or filters` }, 400)
+  }
+  const bytes = new TextEncoder().encode(sql).length
+  if (bytes > MAX_SQL_BYTES) {
+    return json({ error: `this chart's filters make the query too large (${bytes} bytes; at most ${MAX_SQL_BYTES}): use fewer pop-up filters` }, 400)
+  }
+  return null
 }
 
 const json = (data: unknown, status = 200): Response =>
@@ -168,6 +244,12 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // "goodstuff"]) mapped from the Site/Subdomain selectors, or a single legacy
   // `site`. Empty / "all" = no filter.
   const rawSites: unknown[] = Array.isArray(body.sites) ? body.sites : body.site != null ? [body.site] : []
+  // Hard caps on request size (defense in depth: every site and constraint becomes a bound
+  // parameter, and D1 allows 100 per query). A clear 400, never a D1 error.
+  if (rawSites.length > MAX_SITES) return json({ error: `too many sites (at most ${MAX_SITES})` }, 400)
+  if (Array.isArray(body.constraints) && body.constraints.length > MAX_CONSTRAINTS) {
+    return json({ error: `too many filters (at most ${MAX_CONSTRAINTS})` }, 400)
+  }
   const sites = rawSites.filter(
     (s): s is string => typeof s === 'string' && s !== 'all' && SITE_TAG_RE.test(s),
   )
@@ -184,7 +266,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // never arrives as one — excluding it is defense in depth, not something a real client sends.
   const constraints: { field: string; value: string }[] = Array.isArray(body.constraints)
     ? (body.constraints as any[])
-        .filter((c) => c && GEO_DIMS.has(c.field) && c.field !== 'date' && typeof c.value === 'string')
+        .filter((c) => c && GEO_DIMS.has(c.field) && !isDateDim(c.field) && typeof c.value === 'string')
         .map((c) => ({ field: String(c.field), value: String(c.value) }))
     : []
   const drillClause = (w: string[], b: any[]) => {
@@ -234,6 +316,15 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // 'path' breakdown that should show /popup-outcome/... rows). See src/lib/popupEvents.ts.
   const includeEventBeacons = body.includeEventBeacons === true
 
+  // "Hide known test and household traffic" — per-chart opt-in (default off): applies
+  // lib/campaigns.ts EXCLUSIONS (lifecycle email, deckhand verification, the owner's household),
+  // the same row filters the campaigns and overview endpoints apply, so a beacon chart can match
+  // their numbers (the Overview timeline sets it).
+  const excludeKnownTraffic = body.excludeKnownTraffic === true
+  const knownTrafficClause = (w: string[], b: any[]) => {
+    if (excludeKnownTraffic) applyExclusions(w, b)
+  }
+
   const isPoints = dim === 'points' || body.dimension === 'points'
   // N-dimension breakdown (nested doughnut / stacked bar / table on geo data). `body.dims` is
   // the full ordered ring list a nested doughnut sends (see api.ts); a legacy 2-dim caller
@@ -242,17 +333,33 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // malformed/oversized request, not a UX limit (that lives in ChartEditor.vue).
   const RING_DIMS_HARD_CAP = 8
   const legacyBreakdown =
-    typeof body.breakdown === 'string' && GEO_DIMS.has(body.breakdown) && body.breakdown !== dim && !DERIVED_ONLY_DIMS.has(body.breakdown)
+    typeof body.breakdown === 'string' && GEO_DIMS.has(body.breakdown) && body.breakdown !== dim && !RING_EXCLUDED_DIMS.has(body.breakdown)
       ? body.breakdown
       : null
   const ringDims: string[] = (
     Array.isArray(body.dims)
-      ? [...new Set((body.dims as unknown[]).filter((d): d is string => typeof d === 'string' && GEO_DIMS.has(d) && !DERIVED_ONLY_DIMS.has(d)))]
+      ? [...new Set((body.dims as unknown[]).filter((d): d is string => typeof d === 'string' && GEO_DIMS.has(d) && !RING_EXCLUDED_DIMS.has(d)))]
       : legacyBreakdown
         ? [dim, legacyBreakdown]
         : []
   ).slice(0, RING_DIMS_HARD_CAP)
-  const isRing = !isPoints && ringDims.length >= 2 && !DERIVED_ONLY_DIMS.has(dim)
+  const isRing = !isPoints && ringDims.length >= 2 && !RING_EXCLUDED_DIMS.has(dim)
+  // The dims this query groups by (none in points mode). They decide the event-beacon exclusion
+  // lift and which prefilters apply (see EVENT_DIMS / DIM_PREFILTERS above). A drill on an event
+  // dim lifts the exclusion too, for the same reason.
+  const activeDims: string[] = isPoints ? [] : isRing ? ringDims : [dim]
+  const eventDimActive = [...activeDims, ...constraints.map((c) => c.field)].some((d) => EXCLUSION_LIFTING_DIMS.has(d))
+  const eventRowsClause = (w: string[], b: any[]) => {
+    if (!includeEventBeacons && !eventDimActive) popupExcludeClause(w, b) // events, not screen views: excluded unless opted in
+    const seen = new Set<(w: string[], b: unknown[]) => void>()
+    for (const d of activeDims) {
+      const pre = DIM_PREFILTERS[d]
+      if (pre && !seen.has(pre)) {
+        seen.add(pre)
+        pre(w, b)
+      }
+    }
+  }
 
   // Everything that changes the SQL (and therefore the response) goes into the cache key —
   // mode, dims/dim, the date window, site selection, drill constraints, and both exclusion
@@ -273,6 +380,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     ownOS: excludeOwn ? String(body.ownOS ?? '') : '',
     excludeSelf,
     includeEventBeacons,
+    excludeKnownTraffic,
   })
   const ttl = ttlSecondsFor(until, new Date())
   const cache = (caches as unknown as { default: CacheLike }).default
@@ -284,18 +392,22 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   if (isPoints) {
     const w: string[] = ['ts >= ?', 'ts < ?', "lat <> ''"]
     const b: any[] = [sinceMs, untilMs]
-    if (!includeEventBeacons) popupExcludeClause(w, b) // events, not screen views — excluded unless opted in
+    eventRowsClause(w, b) // events, not screen views — excluded unless opted in
+    knownTrafficClause(w, b)
     siteClause(w, b)
     drillClause(w, b)
     excludeOwnClause(w, b)
     selfReferralClause([], w, b) // points mode has no group-by dim, so this is always inert
     const sql = `SELECT lat, lon, city, region, country, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY lat, lon ORDER BY c DESC LIMIT ?`
     b.push(Math.min(limit, 2000))
+    const tooLarge = statementTooLarge(sql, b.length)
+    if (tooLarge) return tooLarge
     let r: any
     try {
       r = await ctx.env.gss_geo.prepare(sql).bind(...b).all()
     } catch (e) {
-      return json({ error: 'd1 query failed', detail: String(e) }, 500)
+      console.error('geo: d1 query failed', e)
+      return json({ error: 'd1 query failed' }, 500)
     }
     const rows = (r.results ?? []).map((x: any) => ({
       key: {
@@ -328,7 +440,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     // dimension is TEXT).
     const w: string[] = ['ts >= ?', 'ts < ?', ...ringDims.map(ringBlankExclusion)]
     const b: any[] = [sinceMs, untilMs]
-    if (!includeEventBeacons) popupExcludeClause(w, b) // events, not screen views — excluded unless opted in
+    eventRowsClause(w, b) // events excluded unless opted in, or the dims describe events
+    knownTrafficClause(w, b)
     siteClause(w, b)
     drillClause(w, b)
     excludeOwnClause(w, b)
@@ -343,11 +456,14 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     // One statement: the inner GROUP BY scans `hits` once; SUM(c) OVER () sums every group's
     // count (not just the fetched top-N) into `total`, replacing the old second COUNT(*) scan.
     const sql = buildMergedRingSql(cols, whereSql, groupBy)
+    const tooLarge = statementTooLarge(sql, b.length + 1)
+    if (tooLarge) return tooLarge
     let r: any
     try {
       r = await ctx.env.gss_geo.prepare(sql).bind(...b, fetchLimit).all()
     } catch (e) {
-      return json({ error: 'd1 query failed', detail: String(e) }, 500)
+      console.error('geo: d1 query failed', e)
+      return json({ error: 'd1 query failed' }, 500)
     }
     const rows = (r.results ?? []).map((x: any) => {
       const key: Record<string, string> = {}
@@ -369,7 +485,9 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const col = breakdownColumnExpr(dim, emptyLabelFor(dim))
   const where = ['ts >= ?', 'ts < ?']
   const binds: any[] = [sinceMs, untilMs]
-  if (!includeEventBeacons) popupExcludeClause(where, binds) // events, not screen views — excluded unless opted in
+  if (BLANK_DROPPED_DIMS.has(dim)) where.push(ringBlankExclusion(dim)) // see EVENT_DIMS
+  eventRowsClause(where, binds) // events excluded unless opted in, or the dim describes events
+  knownTrafficClause(where, binds)
   siteClause(where, binds)
   drillClause(where, binds)
   excludeOwnClause(where, binds)
@@ -377,16 +495,21 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
 
   const whereSql = where.join(' AND ')
   // Tiebreak on k (see buildMergedBreakdownSql) so which rows LIMIT keeps is deterministic.
-  const orderBy = dim === 'date' ? 'k ASC' : 'c DESC, k ASC'
+  // A date axis keeps the most RECENT `limit` days (newest first under LIMIT, then put back in
+  // date order below) — ascending would silently keep the oldest ones on a long range.
+  const orderBy = isDateDim(dim) ? 'k DESC' : 'c DESC, k ASC'
   // One statement in place of the old total-COUNT(*) + grouped-COUNT(*) pair — see the
   // buildMergedBreakdownSql doc comment for why SUM(c) OVER () gives the same grand total.
   const sql = buildMergedBreakdownSql(col, whereSql, orderBy)
+  const tooLarge = statementTooLarge(sql, binds.length + 1)
+  if (tooLarge) return tooLarge
 
   let res: any
   try {
     res = await ctx.env.gss_geo.prepare(sql).bind(...binds, limit).all()
   } catch (e) {
-    return json({ error: 'd1 query failed', detail: String(e) }, 500)
+    console.error('geo: d1 query failed', e)
+    return json({ error: 'd1 query failed' }, 500)
   }
 
   const rows = (res.results ?? []).map((r: any) => ({
@@ -394,6 +517,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     pageviews: Number(r.c) || 0,
     visits: Number(r.c) || 0,
   }))
+  if (isDateDim(dim)) rows.reverse()
   const total = Number(res.results?.[0]?.total) || 0
   const totals = { pageviews: total, visits: total }
 

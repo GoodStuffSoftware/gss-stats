@@ -22,7 +22,7 @@
 // with an ordinary (arbitrarily long) AND/OR WHERE clause, and functions/api/campaigns.ts
 // issues one small query per campaign rather than one UNIONed mega-query across all three.
 
-import { classifyPopupPath, computeRate, TRACKING_ACTIVATION_DATE_ET, NEW_BEACONS_LIVE_AT_ET, etDateFromMs } from './popupEvents'
+import { classifyPopupPath, computeRate, TRACKING_ACTIVATION_DATE_ET, NEW_BEACONS_LIVE_AT_ET, etDateFromMs, sqlLit, sqlInt, INSTALL_OUTCOMES, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, INSTALL_GAP_PATHS, isInstallGapUnmeasured, pathSegmentsSql } from './popupEvents'
 
 // ET hour-of-day (0-23) for "Arrivals by ET hour of day" — same DST-safe Intl approach as
 // popupEvents.ts's etDateFromMs, just formatting the hour instead of the calendar date.
@@ -336,6 +336,96 @@ export function applyExclusions(w: string[], b: unknown[]): void {
   for (const rule of EXCLUSIONS) rule.clause(w, b)
 }
 
+// ── Derived dimension campaignFlight (functions/api/geo.ts) ────────────────────────────
+// Which campaign FLIGHT a row belongs to, decided by the SAME campaignAttributionClause and
+// EXCLUSIONS functions/api/campaigns.ts applies (not the raw `campaign` utm column, which also
+// carries unrelated betas, QA variants and pre-launch validation rows). Value = the Google Ads
+// campaign id (lib/charts.ts formatKey shows its label); '' → `emptyLabel` for every row no
+// flight claims. Built by inlining those functions' own bound parameters as checked literals
+// (see lib/popupEvents.ts sqlLit): the clauses stay the ONE definition of attribution, and the
+// expression stays well inside D1's bound-parameter cap when a chart evaluates it twice.
+function inlineBinds(sql: string, binds: unknown[]): string {
+  let i = 0
+  const out = sql.replace(/\?/g, () => {
+    const v = binds[i++]
+    if (typeof v === 'number') return String(sqlInt(v))
+    if (typeof v === 'string') return sqlLit(v)
+    throw new Error(`cannot inline bind ${String(v)}`)
+  })
+  if (i !== binds.length) throw new Error('bind count mismatch')
+  return out
+}
+export function campaignFlightSqlCase(emptyLabel: string): string {
+  const ew: string[] = []
+  const eb: unknown[] = []
+  applyExclusions(ew, eb)
+  const excluded = `NOT (${inlineBinds(ew.join(' AND '), eb)})`
+  const whens = CAMPAIGNS.map((c) => {
+    const attr = campaignAttributionClause(c)
+    return `WHEN ${inlineBinds(attr.sql, attr.binds)} THEN ${sqlLit(c.id)}`
+  })
+  return `CASE WHEN ${excluded} THEN ${sqlLit(emptyLabel)} ${whens.join(' ')} ELSE ${sqlLit(emptyLabel)} END`
+}
+// ── Derived dimensions arrival / keyEvent (functions/api/geo.ts) — what the Overview timeline's
+// series count, as generic dims any chart can use (a line series is a date query filtered on
+// one of these; see Widget.series). Same literal rules as campaignFlightSqlCase above.
+//   arrival  — a device's first-ever beacon (visitor = 'new'): 'tagged' when a campaign flight
+//              claims it (campaignFlightSqlCase), else 'untagged'; '' for every other row.
+//   keyEvent — 'auth-success' (the base /auth/success/<provider> row, one per sign-in),
+//              'install' (/popup-outcome/install-prompt/installed from the install fix on — the
+//              deduplicated install count; earlier rows are unmeasured), 'raw-install-signal'
+//              (/install/<pwa-installed|standalone-detected|play-detected>, can double-count),
+//              'game-complete' (/game/complete/…); '' for everything else.
+/** A pre-fix row of one of the two install-gap paths (unmeasured everywhere; see
+ * lib/popupEvents.ts isInstallGapUnmeasured), as SQL. */
+function installGapUnmeasuredSql(fixedAtMs: number | null): string {
+  const paths = INSTALL_GAP_PATHS.map(sqlLit).join(', ')
+  return fixedAtMs === null ? `path IN (${paths})` : `(path IN (${paths}) AND ts < ${sqlInt(fixedAtMs)})`
+}
+export function arrivalSqlCase(emptyLabel: string, fixedAtMs: number | null = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS): string {
+  // Same rows /api/campaigns counts as tagged arrivals: first-ever beacons (any path, event
+  // beacons included), minus pre-fix install-gap rows, attributed by campaignFlightSqlCase.
+  const E = sqlLit(emptyLabel)
+  return `CASE WHEN visitor <> 'new' THEN ${E} WHEN ${installGapUnmeasuredSql(fixedAtMs)} THEN ${E} WHEN (${campaignFlightSqlCase('')}) <> '' THEN 'tagged' ELSE 'untagged' END`
+}
+export function keyEventSqlCase(emptyLabel: string, fixedAtMs: number | null = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS): string {
+  const E = sqlLit(emptyLabel)
+  const list = (xs: readonly string[]) => xs.map(sqlLit).join(', ')
+  // Segment parsing exactly as classifyPopupPath does it (isInstallPromptInstalled and
+  // isRawInstallSignal are built on it), so off-vocabulary shapes agree with the JS.
+  const po = pathSegmentsSql('/popup-outcome')
+  const ins = pathSegmentsSql('/install')
+  const installed = fixedAtMs === null ? E : `CASE WHEN ts >= ${sqlInt(fixedAtMs)} THEN 'install' ELSE ${E} END`
+  return (
+    `CASE WHEN path IN (${list(AUTH_SUCCESS_PATHS)}) THEN 'auth-success' ` +
+    `WHEN ${po.match} AND ${po.s1} = 'install-prompt' AND ${po.s2} = 'installed' THEN ${installed} ` +
+    `WHEN ${ins.match} AND ${ins.s1} IN (${list(INSTALL_OUTCOMES)}) THEN CASE WHEN ${installGapUnmeasuredSql(fixedAtMs)} THEN ${E} ELSE 'raw-install-signal' END ` +
+    `WHEN substr(path, 1, ${sqlInt(GAME_COMPLETE_PREFIX.length)}) = ${sqlLit(GAME_COMPLETE_PREFIX)} THEN 'game-complete' ` +
+    `ELSE ${E} END`
+  )
+}
+/** JS readings of the two dims, from the canonical matchers (tests compare them to the SQL). */
+export function arrivalOf(visitor: string, attributedFlightId: string): string {
+  if (visitor !== 'new') return ''
+  return attributedFlightId ? 'tagged' : 'untagged'
+}
+export function keyEventOf(path: string, tsMs: number, fixedAtMs: number | null = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS): string {
+  if (isAuthSuccessBase(path)) return 'auth-success'
+  // Installs count from the install fix on (a pre-fix showing could never record one).
+  if (isInstallPromptInstalled(path)) return fixedAtMs !== null && tsMs >= fixedAtMs ? 'install' : ''
+  // Raw signals: the pre-fix /install/pwa-installed rows are unmeasured, like everywhere else.
+  if (isRawInstallSignal(path)) return isInstallGapUnmeasured(path, tsMs, fixedAtMs) ? '' : 'raw-install-signal'
+  if (path.startsWith(GAME_COMPLETE_PREFIX)) return 'game-complete'
+  return ''
+}
+
+/** Bound prefilter for a campaignFlight query: rows carrying any flight's uc value. */
+export function campaignFlightPrefilter(w: string[], b: unknown[]): void {
+  const ucs = [...new Set(CAMPAIGNS.flatMap((c) => c.ucValues))]
+  w.push(`campaign IN (${ucs.map(() => '?').join(', ')})`)
+  b.push(...ucs)
+}
+
 // ── Funnel steps ─────────────────────────────────────────────────────────────────────
 export type FunnelStepKey = 'arrivals' | 'played' | 'completed' | 'ask' | 'accept' | 'authSuccess' | 'installPrompt' | 'install'
 
@@ -423,6 +513,37 @@ export const GAME_COMPLETE_DIFFICULTIES = ['easy', 'medium', 'hard', 'expert', '
 export function parseGameCompletePath(path: string): { mode: string; difficulty: string } | null {
   const m = GAME_COMPLETE_SEGMENTS_RE.exec(path)
   return m ? { mode: m[1], difficulty: m[2] } : null
+}
+
+// ── Derived dimensions gameMode / gameDifficulty (functions/api/geo.ts) ────────────────
+// The two segments of /game/complete/<mode>/<difficulty>, as generic geo dimensions — the SQL
+// twin of parseGameCompletePath, with the same "(other)" bucket functions/api/completions.ts
+// uses for a right-prefix-wrong-shape row, and no value ('' → `emptyLabel`) for every row
+// that isn't a completion at all. Values come from the row itself; the SQL here contains only
+// this module's constants (see lib/popupEvents.ts sqlLit for why they're literals).
+export const GAME_OTHER_BUCKET = '(other)'
+export function gameDimSqlCase(dim: 'gameMode' | 'gameDifficulty', emptyLabel: string): string {
+  const P = GAME_COMPLETE_PREFIX
+  const rest = `substr(path, ${sqlInt(P.length + 1)})`
+  const slash = `instr(${rest}, '/')`
+  const tail = `substr(${rest}, ${slash} + 1)`
+  // Exactly two non-empty, slash-free segments: a slash that isn't first, something after it,
+  // and no further slash in what follows.
+  const wellFormed = `(${slash} > 1 AND length(${tail}) > 0 AND instr(${tail}, '/') = 0)`
+  const value = dim === 'gameMode' ? `substr(${rest}, 1, ${slash} - 1)` : tail
+  return `CASE WHEN substr(path, 1, ${sqlInt(P.length)}) <> ${sqlLit(P)} THEN ${sqlLit(emptyLabel)} WHEN ${wellFormed} THEN ${value} ELSE ${sqlLit(GAME_OTHER_BUCKET)} END`
+}
+/** Bound prefilter for a gameMode/gameDifficulty query: completion rows only. */
+export function gameDimPrefilter(w: string[], b: unknown[]): void {
+  w.push('path LIKE ?')
+  b.push(`${GAME_COMPLETE_PREFIX}%`)
+}
+/** JS reading of the gameMode / gameDifficulty dimension ('' = not a completion). */
+export function gameDimOf(dim: 'gameMode' | 'gameDifficulty', path: string): string {
+  if (!path.startsWith(GAME_COMPLETE_PREFIX)) return ''
+  const parsed = parseGameCompletePath(path)
+  if (!parsed) return GAME_OTHER_BUCKET
+  return dim === 'gameMode' ? parsed.mode : parsed.difficulty
 }
 /** "auth success" — NOT part of lib/popupEvents.ts's POPUP_EVENT_PREFIXES (an ordinary page
  * path there), so classified here directly. ONE matcher for the whole codebase.
@@ -579,14 +700,6 @@ export function countryBucket(country: string): CountryBucket {
   return country === 'US' || country === 'CA' ? country : 'other'
 }
 
-// ── Device mix buckets (screen width) ───────────────────────────────────────────────────
-export type ScreenBucket = 'small (<480)' | 'medium (480-1024)' | 'large (>1024)'
-export function screenWidthBucket(w: number): ScreenBucket {
-  if (!w || w < 480) return 'small (<480)'
-  if (w <= 1024) return 'medium (480-1024)'
-  return 'large (>1024)'
-}
-
 // ── Spend (Google Ads API via the ads session, 2026-09-25) — cost-per-arrival/auth-success
 // show "—" for any campaign still null here ─────────────────────────────────────────────
 /** Daily spend in USD by ET calendar date, as reported by Google Ads — kept for audit/
@@ -623,29 +736,6 @@ export const CAMPAIGN_SPEND: Record<string, number | null> = {
 export function costPer(spend: number | null, count: number): number | null {
   if (spend == null) return null
   return computeRate(spend, count)
-}
-
-// ── Device mix shares (top-N breakdown of a device/OS/browser/screen count map) ────────
-export interface DeviceMixShare {
-  label: string
-  value: number
-  total: number
-  // MIN_COHORT-gated via computeRate — NOT a bare value/total division. A raw division
-  // would print e.g. "100.0% (1/1)" for a total of 1, which reads as far more confident
-  // than a single-device sample supports (review fix, 2026-09-26: CampaignComparePage.vue
-  // used to compute this share directly, bypassing MIN_COHORT entirely). null means "too
-  // few to report" (0 < total < MIN_COHORT) or "—" (total === 0) — see
-  // popupEvents.ts isInsufficientCohort for telling those apart; `value`/`total` are still
-  // returned either way so the raw counts can always be shown alongside.
-  rate: number | null
-}
-/** Top-N shares of a device-mix breakdown, by count descending. */
-export function topShares(counts: Record<string, number>, n = 4): DeviceMixShare[] {
-  const total = Object.values(counts).reduce((a, b) => a + b, 0)
-  return Object.entries(counts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, n)
-    .map(([label, value]) => ({ label, value, total, rate: computeRate(value, total) }))
 }
 
 // ── On-device return beacon (v1.95.3; see popupEvents.ts POPUP_EVENT_PREFIXES '/return')

@@ -88,7 +88,7 @@ export const BSK_KPIS: CardSpec = {
         { id: 'popupTapRate', label: { metric: true }, data: { ratio: 'bsk.popupTapRate', window: 'todaySoFar' }, display: { as: 'percent', decimals: 1 }, ...COMPACT },
         { id: 'authSuccess', label: { metric: true }, data: { metric: 'bsk.authSuccess', window: 'todaySoFar' }, display: TODAY, ...COMPACT },
         { id: 'install', label: { metric: true }, data: { metric: 'bsk.installs', window: 'todaySoFar' }, display: TODAY, ...COMPACT },
-        { id: 'installRaw', label: { metric: true }, data: { metric: 'bsk.rawInstallSignals', window: 'todaySoFar' }, display: TODAY, ...COMPACT },
+        { id: 'installRaw', label: { metric: true }, data: { metric: 'bsk.rawInstallSignals', window: 'todaySoFar' }, display: TODAY, caption: { note: 'raw-install-double-count' }, ...COMPACT },
         { id: 'returns', label: { metric: true }, data: { metric: 'bsk.returnsD1plus', window: 'todaySoFar' }, display: TODAY, caption: { note: 'returns-d1plus-caveat' }, ...COMPACT },
       ],
     },

@@ -19,10 +19,9 @@
 //       body omitted the Install pill but still showed the row's count; the card omits both.
 //   S1  (slice-1 fix) "Game-screen views" is a pair: "100 views · 50 arrivals", never a rate.
 //       The old pill showed the count alone.
-//   L1  (owner ruling) The Installs KPI label no longer carries the install-fix caveat; the
-//       caveat is in the card's notes while the value is partial.
-//   L2  (owner-approved) "/return/ d1+ returns" is renamed "Return visits (day 1+)"; what it
-//       counts moved to the card's notes (no beacon paths in visible text).
+//   N2  The old tiles' one-line notes under the label (the install-fix gap on "Installs",
+//       "can double-count" on "Raw install signals") are in the card's Notes instead, as
+//       "<label>: <caveat>" (owner ruling: no visible caveat lines).
 //   N1  Caveats (arrivals floor, install fix, counted-from, still arriving, raw-install dedupe,
 //       the returns definition) are new text, but only behind each card's one collapsed
 //       "Notes" toggle, as "<label>: <caveat>" — no caption line is visible until it is opened.
@@ -224,22 +223,17 @@ describe('bsk-kpis ≡ the bespoke "Today at a glance" tiles', () => {
       value: norm(`${text((t.find('.mi-tile-num').exists() ? t.find('.mi-tile-num') : t.find('.mp-tile-text')).element)} ${t.find('.mi-tile-sub').exists() ? text(t.find('.mi-tile-sub').element) : ''}`),
       deltas: t.findAll('.mi-tile-delta').map((d) => text(d.element)),
     }))
-  const LABEL_DIFFS: Record<string, [newLabel: string, why: string]> = {
-    'Installs (install fix went live 26 Sep 12:26 ET; earlier prompt-driven installs not recorded)': ['Installs', 'L1'],
-    '/return/ d1+ returns': ['Return visits (day 1+)', 'L2'],
-  }
 
   it('same tiles in the same order, same values and the same delta lines ("new today" included)', async () => {
     const before = oldTiles(await mountOld('kpis'))
     const after = newTiles(await mountNew('bsk-kpis'))
-    expect(after.map((t) => t.label)).toEqual(before.map((t) => LABEL_DIFFS[t.label]?.[0] ?? t.label))
+    expect(after.map((t) => t.label)).toEqual(before.map((t) => t.label))
     expect(after.map((t) => t.value)).toEqual(before.map((t) => t.value))
     expect(after.map((t) => t.deltas)).toEqual(before.map((t) => t.deltas))
     // The fixture exercises both delta states and a rate tile.
     expect(before.filter((t) => t.deltas[0] === 'new today').length).toBeGreaterThanOrEqual(5)
     expect(before.filter((t) => t.deltas[0]?.startsWith('vs yesterday')).length).toBeGreaterThanOrEqual(3)
     expect(after.find((t) => t.label === 'Pop-up tap rate')!.value).toMatch(/^\d+\.\d% \(\d+\/\d+\)$/)
-    expect(Object.keys(LABEL_DIFFS).every((l) => before.some((t) => t.label === l)), 'every documented label difference still occurs').toBe(true)
   })
 
   it('the freshness line and reload control stay: "Updated just now" and ↻, as before', async () => {
@@ -276,11 +270,15 @@ describe('N1: caveats never add a visible line', () => {
     expect(w.emitted('open-campaigns')).toBeUndefined() // the toggle never opens the Campaigns page
   })
 
-  it('bsk-kpis: the notes carry what the old labels said (L1, L2)', async () => {
+  it('N2: every old tile note has a line in the card Notes, under the same label', async () => {
+    const old = await mountOld('kpis')
+    const oldNotes = old.findAll('.kpi-tile').flatMap((t) => (t.find('.kpi-note').exists() ? [[text(t.find('.kpi-label').element), text(t.find('.kpi-note').element)] as const] : []))
+    expect(oldNotes.map(([l]) => l)).toEqual(['Installs', 'Raw install signals'])
     const w = await mountNew('bsk-kpis')
     await w.find('button.mc-notes-toggle').trigger('click')
     const lines = w.findAll('.mc-notes li').map((li) => norm(li.text()))
     expect(lines.some((l) => l.startsWith('Installs: install fix went live'))).toBe(true)
+    expect(lines.some((l) => l.startsWith('Raw install signals: ') && l.includes('double-count'))).toBe(true)
     expect(lines.some((l) => l.startsWith('Return visits (day 1+): Devices that first arrived'))).toBe(true)
   })
 })

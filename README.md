@@ -44,14 +44,19 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
 ## Features
 
 - **"Best Sudoku · Overview"** — the landing page: today-at-a-glance KPI tiles (vs the same
-  time yesterday and the 7-day average; a campaign's "Tagged arrivals" tile uses the same
-  attribution rule as its scorecard card, `campaignAttributionClause`), a daily timeline since the first hit overlaid with
-  campaign flights / release / tracking-activation markers, a campaign scorecard, and a
-  release before/after panel — each its own movable/editable widget (dataset `overview`; see
-  [`src/components/widgets/OverviewWidgetBody.vue`](src/components/widgets/OverviewWidgetBody.vue)).
-  See [`src/lib/overview.ts`](src/lib/overview.ts) and
-  [`src/lib/releases.ts`](src/lib/releases.ts) (hand-entered release dates — `hits` has no
-  app-version column; major releases label the timeline, minor ones show as short ticks).
+  time yesterday and the 7-day average), the **Overall timeline**, a campaign scorecard, and a
+  release before/after panel — each its own movable/editable widget. The KPI tiles, scorecard
+  and release panel are dataset `overview` (see
+  [`src/components/widgets/OverviewWidgetBody.vue`](src/components/widgets/OverviewWidgetBody.vue)
+  and [`src/lib/overview.ts`](src/lib/overview.ts)). The Overall timeline is a **standard line
+  chart** (see *Line charts* below) with five series — page views and tagged arrivals on the left
+  axis, auth successes, installs and raw install signals on the right — over the page's date
+  range and Best Sudoku sites, with campaign-flight bands, release markers and go-live markers
+  on. It buckets by **US-Eastern day** (the `dateEt` beacon dimension, "Date (trend, ET)":
+  DST-aware, the same days as `etDateFast` and the flight bands and markers), where the plain
+  `date` dimension is a UTC day.
+  [`src/lib/releases.ts`](src/lib/releases.ts) holds the hand-entered release dates (`hits` has
+  no app-version column; major releases get a labelled line, minor ones a short tick).
   "Best Sudoku · Campaigns" (dataset `campaigns`; see
   [`src/components/widgets/CampaignsWidgetBody.vue`](src/components/widgets/CampaignsWidgetBody.vue))
   and "Best Sudoku · Traffic" (per-site/geo/referrer/device detail beyond what Overview and
@@ -60,19 +65,26 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   [`src/lib/defaults.ts`](src/lib/defaults.ts)'s `reorderBskGroup`).
 - **Movable / composable charts** — drag the header, resize from the corner; add /
   edit / duplicate / delete charts of any type: stat, bar, horizontal bar, stacked
-  bar, line, area, doughnut, nested doughnut, pie, table, a geo point map, and a
-  note/text tile. Zoom is a single click, always available on every chart; its other
+  bar, **breakdown bar** (one dimension on the axis × another as the series, grouped or
+  stacked — `Widget.barMode`), line, area, doughnut, nested doughnut, pie, table, a geo point
+  map, and a note/text tile. Zoom is a single click, always available on every chart; its other
   modification chrome (edit/remove/drag/resize) tucks away until you hover that chart
-  or open the function bar below.
+  — or tap that chart's own reveal icon on touch, which has no hover.
   **Known gap:** the resize grip (drag-to-resize corner) isn't keyboard-operable — it's a
   [`grid-layout-plus`](https://www.npmjs.com/package/grid-layout-plus) limitation, not a
   regression from this app's own code. Resizing a chart currently needs a mouse or touch;
   every other chart action (edit, remove, zoom, duplicate, set-as-default) has a real
   button and works from the keyboard.
-- **A hidden-by-default function bar** — filters and chart controls (range, sites,
-  exclusions, add chart, theme) live behind a small top-right button: hover to reveal
-  on desktop, tap to toggle on touch, Escape or tapping outside hides it. Never shifts
-  the chart grid. Page tabs stay always visible above it.
+- **The main filter bar is always visible**, in normal flow directly under the page
+  tabs (range, sites, exclusions, sync-across-pages). If it scrolls out of view, a
+  small "show filters" button appears top-right — see the IntersectionObserver on
+  `barSectionEl` in [`src/App.vue`](src/App.vue) — and pins the same bar at the top of
+  the viewport until you dismiss it (the button again, Escape, or clicking outside) or
+  scroll back to where the in-flow bar is visible. Page tabs stay always visible above
+  it either way. Hidden only on the campaign page, whose widgets aren't filter-driven.
+  The button stays keyboard-reachable at all times (never `tabindex="-1"`, revealed on
+  real keyboard focus even while visually hidden); activating it while the in-flow bar
+  is already on screen just moves focus to the bar's first control.
 - **A shared notes/text library** ([`src/lib/notes.ts`](src/lib/notes.ts)) — every
   caveat, definition, and explanatory paragraph the dashboard shows (small-sample
   warnings, attribution scope, "how to read this" captions, …) is a registry entry with
@@ -89,7 +101,11 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
 - **Durable, multi-page dashboards** — layout + chart definitions persist in KV (not
   `localStorage`), so they follow you across devices. Duplicate / rename / delete
   pages; a protected default page with "restore default charts"; per-page filters and
-  per-chart filter overrides.
+  per-chart filter overrides. A saved layout is migrated forward on load
+  ([`src/lib/defaults.ts`](src/lib/defaults.ts) `normalizeConfig`, `CONFIG_VERSION`), and the
+  first save of a newer version first copies the previous stored layout to
+  `dashboard:default:backup:v<old version>` in KV ([`functions/api/config.ts`](functions/api/config.ts)),
+  once, so a migration can be rolled back by copying that key over `dashboard:default`.
 - **Auto-built site filter** — a single multi-select of your sites and subdomains,
   built live from the data. It merges each site's RUM host and beacon tag into one
   entry, groups subdomains under their site, folds **alias hosts** (an HTTP redirect
@@ -100,13 +116,34 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
 - **Exclusions** (global across pages) — hide self-referrals, hide your own visits by
   browser+OS, and an **"exclude this device"** opt-out that works on every site (see
   [gss-beacon](https://github.com/GoodStuffSoftware/gss-beacon)).
+- **Per-chart site pick** — "Site override" in the chart editor (`Widget.siteSel`) narrows one
+  chart to a site (e.g. Best Sudoku's web + app beacon tags) instead of the page's site pick;
+  dates, drills and the other page filters still apply.
+- **Line charts** — on a date axis, any line/area chart can draw release markers, go-live
+  markers (tracking activation, the game-complete/auth beacons, the install fix, the raw-install
+  de-dupe) and shaded campaign-flight bands (an active flight's band runs to the axis end), each
+  a checkbox in the chart editor ([`src/lib/timelineOverlay.ts`](src/lib/timelineOverlay.ts)).
+  Close labels stagger into rows and drop out rather than overprint (fewer rows at phone width);
+  hovering or tapping a marker line or a band's name shows its date and note, and a collapsed
+  "Markers and bands" list under the chart holds every item in range for keyboard and touch. A
+  beacon line chart can also draw several **series** (`Widget.series`): each is its own date
+  query narrowed by one field = value filter (e.g. `keyEvent = install`), on the left or right
+  axis, solid/dashed/dotted, with optional axis titles. "Hide known test and household traffic"
+  (`excludeKnownTraffic`) applies the campaigns endpoint's `EXCLUSIONS` to a beacon chart.
 - **Smart date range** — type spans like `7d` / `24h` / `2w` / `last 3d`, or pick
   exact dates.
 - **Geo beacon dataset** — region / city / ISP / new-vs-returning and a visitor map,
   from the beacon (RUM geography is country-only).
-- **Pop-up tracking** — a dedicated Best Sudoku page for the sign-in prompt, first-50 promo,
-  upsell and install pop-ups: shown/accepted/dismissed counts, tap rates, outcome rates,
-  the sign-in eligibility rate and install's real-outcome counts, bucketed by US-Eastern day.
+- **Pop-up tracking** — a Best Sudoku page for the sign-in prompt, first-50 promo, upsell
+  and install pop-ups. It holds ONE breakdown bar chart (every pop-up on the axis — the
+  `popupFamily` beacon dimension — and shown, taps, dismissals, each outcome and install's raw
+  signals as the series — `popupOutcome`, where the shown row counts as outcome `shown`), a
+  **rate table** with only the valid ratios (each pop-up's taps over its showings, and install
+  over post-fix install prompts — `POPUP_RATE_TABLE_KEYS`; each with its n/d and "too few to
+  report" under `MIN_COHORT`), and the sign-in eligibility counts. Outcome-over-shown rates are
+  not shown as percentages: outcomes land days after the showing, so a range mixes cohorts.
+  Every other pop-up chart (reason/platform breakdowns, per-day trends, single rate tiles) is
+  still available from the chart editor's "Pop-up tracking" data source.
   See [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) for the one place every pop-up path
   pattern is defined, matching the Best Sudoku team's final beacon path list (2026-09-25):
   - Upsell reasons are exactly `cadence` / `limit` / `daily-locked` / `upgrade-tap`; any
@@ -182,7 +219,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   [`src/lib/campaigns.ts`](src/lib/campaigns.ts): a funnel per campaign, arrivals by ET
   hour of day, arrivals/funnel by country, daily + cumulative arrivals aligned by flight
   day, cost per arrival/auth success (spend read from the Google Ads API figures the ads
-  routine stores, falling back to the hand-entered `CAMPAIGN_SPEND`), device mix, an
+  routine stores, falling back to the hand-entered `CAMPAIGN_SPEND`), a device mix (the
+  standard nested doughnut over the beacon: campaign flight → device → OS, share of tagged
+  hits), an
   on-device return-visit retention curve, and the ads routine's **readings log**. The
   funnel's Install step counts `/popup-outcome/install-prompt/installed` (once per showing);
   raw `/install/*` outcome beacons, which can double-count one install, are shown only as a
@@ -210,12 +249,12 @@ Cloudflare Pages Functions  (functions/_middleware.ts → functions/api/*.ts)
    │  - /api/popups → pop-up funnel counts/rates from the same D1 (sign-in, upsell, install, …)
    │  - /api/completions → completed-game counts from the same D1, by mode × difficulty
    │  - /api/campaigns → Google Ads campaign comparison from the same D1 (funnel, hour-of-day,
-   │                      country, daily/cumulative, device mix, return visits)
-   │  - /api/overview → today-at-a-glance KPIs, daily timeline, campaign scorecard, release panel
+   │                      country, daily/cumulative, return visits)
+   │  - /api/overview → today-at-a-glance KPIs, campaign scorecard, release panel
    │  - /api/metrics  → one batch of registry metrics/ratios by id (ADR 0003; for the card components)
    │  - /api/ads/readings → the ads routine's readings log + stored spend (D1 gss-stats-ads)
    │  - /api/sites  → auto-builds the merged site list (RUM + beacon, aliases folded)
-   │  - /api/config → dashboard layout in KV
+   │  - /api/config → dashboard layout in KV (backed up once per layout-version bump)
    ▼
 Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats-ads)  ·  KV (STATS_CONFIG)
 ```
@@ -264,10 +303,25 @@ medium/date, plus **screen width** (`screenw`, exact pixels) and its bucketed fo
 (`screenwBucket`: `<480` / `480-767` / `768-1023` / `1024-1439` / `1440+`), plus a derived
 **path family** dimension (`pathFamily`) that groups every event-beacon prefix above into
 `page` / `signin-prompt` / `signin-eligible` / `promo-first50` / `first50-congrats` / `upsell`
-/ `install` / `popup-outcome` / `return` / `game-complete` / `auth-status`. `screenwBucket` and
-`pathFamily` are derived (a `CASE` expression, not a real column) so they can't be a
-nested-doughnut ring dimension the way a real column can, but they filter exactly like one —
-the same whitelisted expression is bound as `(<expr>) = ?`, never string-interpolated. A
+/ `install` / `popup-outcome` / `return` / `game-complete` / `auth-status`. More derived
+dimensions: **pop-up** (`popupFamily`) and **pop-up outcome** (`popupOutcome`), measured rows
+only (from the tracking activation day; pre-fix install-gap rows get no value — see
+[`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) `popupDimSqlCase`, where
+`/popup-outcome/first50-offer/…` resolves to the first-50 promo); a completed game's **mode**
+and **difficulty** (`gameMode` / `gameDifficulty`, from `/game/complete/<mode>/<difficulty>`,
+malformed rows as `(other)`); **campaign flight** (`campaignFlight`, decided by the same
+`campaignAttributionClause` + `EXCLUSIONS` the campaigns endpoint uses); **arrival** (`arrival`:
+a first-ever beacon, `tagged` when a flight claims it, else `untagged`); and **key event**
+(`keyEvent`: `auth-success` base rows, `install` from the install fix on, `raw-install-signal`,
+`game-complete`). A chart grouping by
+one of the pop-up or completion dimensions counts those event rows without needing "Include
+event beacons" (the standing exclusion would remove every row it describes), and never shows
+unrelated rows as a "(none)" bar. Every derived dimension except `date` can be one of several
+dimensions (a nested-doughnut ring, a breakdown bar's series); they're `CASE` expressions over
+the row, built only from those modules' own constants — never request input — with every
+literal passed through `sqlLit` (inlined rather than bound because a two-dimension chart would
+otherwise pass D1's 100-bound-parameter cap). They filter exactly like a column — the same
+whitelisted expression is compared as `(<expr>) = ?`, the value always bound. A
 dimension or filter field name never reaches D1 unless it's a `GEO_DIMS` member — that Set is
 the whole security boundary. **Never exposed:** `id` (row id), raw `ts` (only the `date`
 bucket), `lat`/`lon` (map-mode coordinates only), and `in_app` (declared in gss-beacon's
@@ -499,6 +553,33 @@ npm run deploy      # = vite build && wrangler pages deploy
 ```
 
 Single Cloudflare account — no account-ID env needed. Pages project: **gss-stats**.
+
+### Restoring a layout backup
+
+The saved dashboard layout lives in KV (`STATS_CONFIG`, key `dashboard:default`). Each time a
+release bumps the layout version (`CONFIG_VERSION` in `src/lib/defaults.ts`), the first save
+of the migrated layout first copies the previous one to `dashboard:default:backup:v<old>`,
+once, and never overwrites that copy (`functions/api/config.ts`; if the backup can't be
+written, the save fails and the old layout stays). A tab still running older code gets `409`
+("This tab is out of date, reload") instead of overwriting a newer layout.
+
+To put a backup back (e.g. the v8 layout after a bad v9 migration):
+
+1. **Close every dashboard tab**, on every device. An open tab saves its in-memory layout on the
+   next change and would overwrite what you restore.
+2. **Roll back or fix the code first.** If the deployed code still has the bad migration, the
+   next load migrates the restored layout again. Either redeploy the previous release (its
+   `CONFIG_VERSION` matches the backup) or ship the fixed migration.
+3. Keep a copy of what's there now, then restore (namespace id from `wrangler.toml`; a token
+   with Workers KV Storage: Edit):
+
+   ```bash
+   npx wrangler kv key get "dashboard:default" --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-current.json
+   npx wrangler kv key get "dashboard:default:backup:v8" --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-v8.json
+   npx wrangler kv key put "dashboard:default" --path layout-v8.json --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote
+   ```
+
+4. Open one tab and check the layout before opening any others.
 
 ## Auth
 
