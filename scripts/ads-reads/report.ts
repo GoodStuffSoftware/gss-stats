@@ -8,7 +8,7 @@ import {
   isPlacementBorderline,
   PLACEMENT_BORDERLINE_NOTE,
   SIGNIN_ELIGIBLE_COUNT_NOTE,
-  UPSELL_KNOWN_BUG_NOTE,
+  UPSELL_SIGNEDOUT_EXPECTED_NOTE,
   type OutcomePopup,
   type RuleResult,
 } from '../../src/lib/adsRules'
@@ -95,7 +95,7 @@ export function fullReadLines(r: FullRead, title: string): string[] {
     }
     out.push(`  promo accept/dismiss ${n(s.promoFirst50.accept)}/${n(s.promoFirst50.dismiss)}; upsell accept/dismiss ${n(s.upsell.accept)}/${n(s.upsell.dismiss)}; install-prompt installed ${n(s.outcomes.install.installed)} [${installOutcomeGapNote()}]; ${RAW_INSTALL_SIGNALS_LABEL} ${n(s.rawInstallSignals)}`)
     out.push(`  signin-eligible: earned ${n(s.signinEligible.earned)}, capped ${n(s.signinEligible.capped)}, unearned ${n(s.signinEligible.unearned)} (${SIGNIN_ELIGIBLE_COUNT_NOTE})`)
-    if (s.upsell.shown <= 1) out.push(`  ${UPSELL_KNOWN_BUG_NOTE}`)
+    if (s.upsell.shown <= 1) out.push(`  ${UPSELL_SIGNEDOUT_EXPECTED_NOTE}`)
   }
   if (r.returns) {
     const fmt = (c: Record<string, number>, rates: Record<string, number | null>) =>

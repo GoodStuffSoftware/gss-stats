@@ -324,10 +324,12 @@ push. If a $50/$75 Play-install checkpoint (Step 4a) reads anything other than "
 crossed", name it too, explicitly as informational, never a proposal or a push. Standing
 reading notes, all already in the report: every rate is MIN_COHORT-gated and shown with its
 counts; production has about 14 registered users, so everything is anecdotal; upsell near-zero
-for signed-out traffic is a known bug, not broken instrumentation; signin-eligible is a count,
-never a denominator; install outcomes are measured only from the 26 Sep 12:26 ET install fix
-on; Play reads "not yet seen" until the first app `/return/` row; Play installs (both the
-`/return/`-derived line and the Step 4a bulk-reports figures) include Mike's household.
+for signed-out traffic is EXPECTED BY DESIGN (signed-out visitors are never shown the paywall;
+the trial starts only once a signed-in player plays), not broken instrumentation; signin-eligible
+is a count, never a denominator; install outcomes are measured only from the 26 Sep 12:26 ET
+install fix on; Play reads "not yet seen" until the first app `/return/` row; Play installs
+(both the `/return/`-derived line and the Step 4a bulk-reports figures) include Mike's
+household.
 
 If the report starts with `READ FAILED`, say so first: which reads failed, that thresholds
 and the cap were not fully checked, and that the next run retries automatically. If a

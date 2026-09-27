@@ -629,6 +629,21 @@ describe('mid-flight instrumentation: the upsell-fix segment boundary and exact 
     expect(r.notify.text).toMatch(/1 campaign sign-up \(exact\), row one/)
     expect(formatMorningReport(r)).toMatch(/1 campaign sign-up \(exact: tagged \/auth\/success\/<provider>\/new since 2026-09-28 12:00 ET\)/)
   })
+  it('a mixed window (one exact /new sign-up, one unresolved sign-in) shows BOTH segments in the sign-up line, never collapsed to one bound', async () => {
+    const fx = at100()
+    fx.firebase = { ...(fx.firebase as any), newAccountsInWindow: 2 }
+    const b = fx.beacon as Extract<Fixture['beacon'], { tagged: unknown }>
+    const base = b.tagged.find((t) => t.path === '/auth/success/google')!
+    b.tagged = [
+      ...b.tagged,
+      { ...base, path: '/auth/success/google/new' }, // status row alongside the existing sign-in: exact new
+      { ...base, hour: '2026-09-29T22:00:00Z', visitor: 'second' }, // a second sign-in with no status row: unresolved
+    ]
+    const r = await runMorningRead({ ...fixtureDeps(fx, false), boundaries: { authNewExistingLiveAtMs: Date.parse('2026-09-28T16:00:00Z') } }, opts)
+    expect(r.thresholdRead!.decision).toMatchObject({ signUpsAtMost: 2, signUpsExact: false, signUpsBounded: 1, signUpsExactNew: 1 })
+    expect(r.notify.text).toMatch(/at most 2 campaign sign-ups \(at most 1 \+ exactly 1\)/)
+    expect(formatMorningReport(r)).toMatch(/at most 2 campaign sign-ups: at most 1 of the 1 sign-in that may be new .* \+ exactly 1 new/)
+  })
 })
 
 describe('same-day reruns: one reading per entry, no repeated push (owner, 2026-09-26)', () => {
