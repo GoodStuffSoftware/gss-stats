@@ -899,8 +899,8 @@ that code rather than copying it.
 
 **Slice 2 (the registry, `src/lib/metrics/`).**
 - `metrics.ts` declares the fact **per window** (`windows: { attribution: 'campaignPathVisitor',
-  todaySoFar: 'bskKpiMinutes' }`) instead of one `fact`: `campaign.taggedArrivals` is served from
-  either, and the site-wide metrics from `bskKpiMinutes` (today so far) or `bskHourPath` (a page
+  todaySoFar: 'bskKpiDays' }`) instead of one `fact`: `campaign.taggedArrivals` is served from
+  either, and the site-wide metrics from `bskKpiDays` (today so far) or `bskRangePath` (a page
   range). A metric is a row test (`path`, `visitor`) over its fact rather than a free-form
   `reduce`; spend is the one `spend()` reducer.
 - Pop-up ratios take the pop-up as a param (`popup.tapRate` with `{ popup }`, …) instead of one id
@@ -951,3 +951,16 @@ that code rather than copying it.
 - Worth an owner decision: bounding `campaignReturns` by the attribution start would cut its
   `rows_read` from a full `bestsudoku-web` scan to the flight's own rows, and would drop pre-launch
   QA return beacons, which the current queries count.
+
+**Review fixes (2026-09-27).** An adversarial review passed slices 1-3 with fixes:
+- **CPU (#8).** The timed facts are renamed for what they now return: `bskKpiMinutes` →
+  `bskKpiDays`, `bskHourPath` → `bskRangePath`, `popupHourPath` → `popupRangePath`. They are
+  aggregated by SQL into ET day windows (the KPI fact) and time segments — the bucket's position
+  against the fact's cuts (`engine.ts` `factCuts`: every go-live, attribution start and alignment
+  instant a metric on it can filter on, derived from the registry) — instead of one row per minute
+  or hour, comparing the bucket start exactly as the engine did per row, so counts are unchanged
+  and a fact's size no longer grows with traffic or range. The engine indexes each fact once per
+  batch, classifies each path once, resolves each side once (planning and derivation share a
+  `SideMemo`), and shares results between identical requests. ET date maths uses
+  `lib/etTime.ts` (plain DST arithmetic) instead of `Intl` per call, and the request path is
+  compiled at isolate start-up (`lib/metrics/prewarm.ts`). Numbers: `docs/capacity.md` §7.

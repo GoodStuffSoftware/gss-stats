@@ -12,9 +12,9 @@
 import fs from 'node:fs'
 import { createWranglerRunner } from '../ads-reads/wrangler'
 import { assertReadOnlySql, inlineBinds } from '../ads-reads/d1'
-import { planBatch } from '../../src/lib/metrics/engine'
+import { buildFact, planBatch } from '../../src/lib/metrics/engine'
 import { validateMetricsRequest } from '../../src/lib/metrics/validate'
-import { FACTS, factKey, type FactId, type FactParams } from '../../src/lib/metrics/facts'
+import { factKey, type FactId, type FactParams } from '../../src/lib/metrics/facts'
 import { CAMPAIGNS } from '../../src/lib/campaigns'
 import { etDateFromMs } from '../../src/lib/popupEvents'
 import { overviewBatch } from './overviewBatch'
@@ -49,7 +49,7 @@ async function main() {
   const plan = planBatch(batch.requests.flatMap((r) => (r.ok ? [r.req] : [])), { context: batch.context, nowMs, todayEt: etDateFromMs(nowMs), hasAdsDb: true })
 
   const read = async (id: FactId, params: FactParams): Promise<SeedFact> => {
-    const stmt = FACTS[id].build(params, nowMs)
+    const stmt = buildFact({ id, params }, nowMs)
     const final = inlineBinds(stmt.sql, stmt.binds)
     assertReadOnlySql(final)
     const database = stmt.db === 'gss_geo' ? 'gss-geo' : 'gss-stats-ads'

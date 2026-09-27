@@ -18,9 +18,8 @@
 //
 // Every instant is an EXISTING constant (lib/popupEvents.ts, lib/campaigns.ts) — never a copy.
 
-import { classifyFunnelPath, etFlightRangeMs, etMidnightUtcMs, FUNNEL_STEP_ORDER, type CampaignFlight, type FunnelStepKey } from '../campaigns'
-import { etDateFromMs } from '../popupEvents'
-import { addEtDays } from '../overview'
+import { classifyFunnelPath, etFlightRangeMs, FUNNEL_STEP_ORDER, type CampaignFlight, type FunnelStepKey } from '../campaigns'
+import { addDays, etDateFast, etWallTimeMs } from '../etTime'
 import { comparisonGateForGoLive } from '../kpiFormat'
 
 export type InstrumentationRule =
@@ -64,86 +63,78 @@ export function seenInFlightRequired(campaign: CampaignFlight | undefined): bool
   return !!campaign && campaign.status === 'closed'
 }
 
-// ET date <-> instant conversions format through Intl on every call (tens of µs each), and one
-// batch asks for the same handful of go-live dates and flight bounds hundreds of times. They are
-// pure functions of their input, so they are memoized here (bounded; cleared if it ever grows).
-const midnightMemo = new Map<string, number>()
-const etDateMemo = new Map<number, string>()
-/** lib/campaigns.ts etMidnightUtcMs, memoized. */
+// ET date <-> instant conversions: the engine asks for the same handful of go-live dates and
+// flight bounds hundreds of times per batch, inside a 10 ms CPU budget, so it uses lib/etTime.ts's
+// plain DST arithmetic (checked against Intl hour by hour in etTime.test.ts) instead of
+// lib/campaigns.ts etMidnightUtcMs / lib/popupEvents.ts etDateFromMs, which format through Intl
+// on every call (and whose first use in a fresh isolate is slower still). Same results.
+/** lib/campaigns.ts etMidnightUtcMs, without Intl. */
 export function etMidnightMs(dateEt: string): number {
-  let v = midnightMemo.get(dateEt)
-  if (v === undefined) {
-    if (midnightMemo.size > 2_000) midnightMemo.clear()
-    midnightMemo.set(dateEt, (v = etMidnightUtcMs(dateEt)))
-  }
-  return v
+  return etWallTimeMs(dateEt)
 }
-/** lib/popupEvents.ts etDateFromMs, memoized (only ever called with fixed go-live instants). */
+/** lib/popupEvents.ts etDateFromMs, without Intl. */
 export function etDateOfMs(ms: number): string {
-  let v = etDateMemo.get(ms)
-  if (v === undefined) {
-    if (etDateMemo.size > 2_000) etDateMemo.clear()
-    etDateMemo.set(ms, (v = etDateFromMs(ms)))
-  }
-  return v
+  return etDateFast(ms)
 }
 
 /** The end (exclusive, epoch ms) of a campaign's serving window: the ET midnight after flightEnd. */
 export function servingEndMs(campaign: CampaignFlight): number {
-  return etMidnightMs(addEtDays(campaign.flightEnd, 1))
+  return etWallTimeMs(addDays(campaign.flightEnd, 1))
 }
 
 const unmeasured = (reason: string, goLiveEt: string | null = null): MeasuredInterval => ({ status: 'unmeasured', from: Number.POSITIVE_INFINITY, reason, noteIds: [], goLiveEt })
 
 export function measuredInterval({ rules, window, campaign, seenInFlight }: IntervalInput): MeasuredInterval {
-  const [a, b] = window
+  // No closures in here: it runs for every request side, and the production bundle names every
+  // named closure (esbuild keepNames) at each creation.
+  const a = window[0]
+  const b = window[1]
   let from = a
   let goLiveEt: string | null = null
   let partialNote: string | null = null
   const noteIds: string[] = []
-  const bumpGoLive = (et: string) => {
-    if (goLiveEt === null || et > goLiveEt) goLiveEt = et
-  }
-  const startAt = (t: number, noteId: string | undefined) => {
-    if (t > from) {
-      from = t
-      partialNote = noteId ?? null
-    }
-  }
   for (const rule of rules) {
+    let at: number | null = null // the instant this rule starts the interval at, if any
+    let et: string | null = null // its ET go-live date (delta gating)
+    let note: string | undefined
     switch (rule.kind) {
       case 'beaconMeasurable':
         if (campaign?.measurement === 'spend-only') return unmeasured('spend-only')
-        break
-      case 'liveAt': {
+        continue
+      case 'liveAt':
         if (rule.atMs === null) return unmeasured(rule.reason ?? 'not-live')
         if (rule.against === 'flight' && campaign && servingEndMs(campaign) <= rule.atMs) return unmeasured(rule.reason ?? 'not-live')
-        bumpGoLive(etDateOfMs(rule.atMs))
-        startAt(rule.atMs, rule.noteId)
+        at = rule.atMs
+        et = etDateOfMs(rule.atMs)
+        note = rule.noteId
         break
-      }
-      case 'liveOnEtDate': {
+      case 'liveOnEtDate':
         if (rule.dateEt === null) return unmeasured('not-live')
         if (rule.against === 'flight' && campaign && campaign.flightEnd < rule.dateEt) return unmeasured('not-live')
-        bumpGoLive(rule.dateEt)
-        startAt(etMidnightMs(rule.dateEt), rule.noteId)
+        at = etMidnightMs(rule.dateEt)
+        et = rule.dateEt
+        note = rule.noteId
         break
-      }
-      case 'unmeasuredBefore': {
+      case 'unmeasuredBefore':
         if (rule.atMs === null) return unmeasured('not-live')
-        bumpGoLive(etDateOfMs(rule.atMs))
-        startAt(rule.atMs, rule.noteId)
+        at = rule.atMs
+        et = etDateOfMs(rule.atMs)
+        note = rule.noteId
         break
-      }
       case 'seenInFlightWindow':
         if (seenInFlightRequired(campaign)) {
           if (!campaign!.flightStart) return unmeasured('flight-pending')
           if (seenInFlight === false) return unmeasured('not-seen-in-flight')
         }
-        break
+        continue
       case 'annotateAt':
         if (rule.atMs > a && rule.atMs < b) noteIds.push(rule.noteId)
-        break
+        continue
+    }
+    if (goLiveEt === null || et! > goLiveEt) goLiveEt = et
+    if (at! > from) {
+      from = at!
+      partialNote = note ?? null
     }
   }
   if (from >= b) return unmeasured('not-live', goLiveEt)
