@@ -116,12 +116,11 @@ export interface Widget {
   // Full per-chart filter override. When set, this chart ignores the global
   // filter bar and uses these instead. Undefined = follow the global filter.
   filters?: GlobalFilters | null
-  // dataset 'overview': which panel this widget renders — 'kpis' | 'scorecard' | 'releasePanel'
-  // (see components/widgets/OverviewWidgetBody.vue). The former 'timeline' panel is the
-  // standard line chart now (CONFIG_VERSION 9, lib/defaults.ts timelineWidget).
-  // dataset 'campaigns': which panel — 'funnel' | 'hourOfDay' | 'country' | 'flightDay' |
-  // 'cost' | 'returns' (see components/widgets/CampaignsWidgetBody.vue). The former 'deviceMix'
-  // view is the standard nested doughnut now (CONFIG_VERSION 9, lib/defaults.ts deviceMixWidget).
+  // dataset 'overview' / 'campaigns': which former bespoke panel this widget is ('kpis' |
+  // 'scorecard' | 'releasePanel'; 'funnel' | 'country' | 'cost' | 'returns'). Each is a metric
+  // card (`card`, its preset — lib/defaults.ts CARD_PRESET_FOR_PANEL) since layout version 11;
+  // the view only names the panel for the layout migrations. The former 'timeline', 'deviceMix',
+  // 'hourOfDay' and 'flightDay' panels are standard charts (CONFIG_VERSION 9 and 11).
   // dataset 'ads-readings': the ads-routines worker's own view value(s) (e.g. 'log') — see
   // components/widgets/AdsReadingsWidgetCard.vue.
   view?: string

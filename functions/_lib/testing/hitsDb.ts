@@ -2,8 +2,8 @@
 // D1 binding's prepare/bind/all surface, plus an in-memory Cache API. Lets a test call a Pages
 // Function's real handler (functions/api/*.ts onRequestPost) end to end: the handler builds its
 // SQL exactly as in production and SQLite runs it, so nothing about the query is mocked.
-// Same approach as functions/api/geo.mergedSql.test.ts, shared so the /api/overview,
-// /api/campaigns and /api/metrics tests read one fixture.
+// Same approach as functions/api/geo.mergedSql.test.ts, shared so the /api/metrics, /api/geo
+// and /api/popups tests read one fixture.
 
 import { DatabaseSync } from 'node:sqlite'
 import type { CacheLike } from '../edgeCache'

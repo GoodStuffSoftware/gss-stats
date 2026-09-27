@@ -1,8 +1,8 @@
 // Beacon (D1 gss-geo `hits`) reads for the ads routine. Every WHERE clause is built from the
 // SAME lib functions the dashboard's Pages Functions use — campaignAttributionClause (row
 // membership), applyExclusions (household / Reston verification / lifecycle email),
-// popupIncludeClause (event paths) — so the routine and /api/campaigns cannot disagree about
-// which rows count. Aggregate GROUP BY queries only: no row is ever fetched on its own, and
+// popupIncludeClause (event paths) — so the routine and the dashboard's campaign cards and
+// charts cannot disagree about which rows count. Aggregate GROUP BY queries only: no row is ever fetched on its own, and
 // nothing is joined across rows.
 
 import { applyExclusions, campaignAttributionClause, type CampaignFlight } from '../../src/lib/campaigns'

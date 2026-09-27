@@ -263,9 +263,8 @@ export function playActivationMarkerPlugin(index: number) {
 // TRACKING_ACTIVATION_DATE_ET is still null — the WHOLE series is pre-release, so there's
 // no boundary to point at; the page-level note (App.vue) carries the full explanation.
 // Best Sudoku release markers (widget.markers === 'releases') on any date-dimension trend
-// chart — dashed vertical lines + version label, same visual treatment as the Overview
-// page's timeline overlay (see components/widgets/OverviewWidgetBody.vue), generalized to
-// any chart (the launch/traffic page's own trend, not just the overview page's). `rows` are
+// chart — dashed vertical lines + version label, on the Overview timeline and on any other
+// trend (the launch/traffic page's own, for one). `rows` are
 // the chart's own plotted rows (zero-filled — see seriesRows), so the marker lands on the
 // correct category-axis INDEX, not a raw date value (the x axis here is a category axis of
 // formatted labels, not real date values — see formatKey).

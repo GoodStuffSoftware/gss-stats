@@ -162,7 +162,8 @@ export const RING_EXCLUDED_DIMS = new Set(['date', 'dateEt'])
 export const EVENT_DIMS = new Set(['popupFamily', 'popupOutcome', 'gameMode', 'gameDifficulty', 'keyEvent'])
 // Dims whose charts/filters lift the standing event-beacon exclusion: the event dims, plus
 // 'arrival' — a device's first-ever beacon can itself be an event row (e.g. an install prompt),
-// and /api/campaigns counts it as a tagged arrival, so the timeline's arrivals line must too.
+// and the metrics registry counts it as a tagged arrival (campaign.taggedArrivals), so the
+// timeline's arrivals line and the campaign arrivals charts must too.
 export const EXCLUSION_LIFTING_DIMS = new Set([...EVENT_DIMS, 'arrival'])
 
 // Bound WHERE prefilters for dims that only describe a subset of rows (cheap, and keeps the CASE
@@ -305,7 +306,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // (RUM), applied here too so RUM and beacon charts agree on the same toggles instead of only
   // RUM honoring them (lowers beacon numbers when active — that's intended: the owner's own
   // visits/self-referrals stop being counted, same as RUM already does). Shared with
-  // functions/api/campaigns.ts via ../../src/lib/ownExclusion.ts.
+  // functions/api/popups.ts and the metrics facts via ../../src/lib/ownExclusion.ts.
   const excludeOwn = body.excludeOwnVisits === true
   const excludeOwnClause = (w: string[], b: any[]) => sharedExcludeOwnClause(w, b, excludeOwn, body.ownBrowser, body.ownOS)
 

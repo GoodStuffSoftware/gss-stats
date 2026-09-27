@@ -5,13 +5,14 @@
 // many metrics share one statement and one cache entry (functions/_lib/metricFacts.ts runs and
 // caches them; lib/metrics/engine.ts derives the metrics).
 //
-// Builders only: this module never touches D1. Each builder REUSES the clause helpers the
-// existing endpoints use (campaignAttributionClause, applyExclusions, excludeInstallGapUnmeasured,
-// siteWindowClause, popupIncludeClause) so a fact counts exactly the rows its endpoint counts:
+// Builders only: this module never touches D1. Each builder REUSES the shared clause helpers
+// (campaignAttributionClause, applyExclusions, excludeInstallGapUnmeasured, siteWindowClause,
+// popupIncludeClause) so a fact counts exactly the rows the query it replaced counted (the
+// endpoints named below; /api/overview and /api/campaigns are retired):
 //   campaignPathVisitor ← /api/overview scorecard + /api/campaigns query 1 (minus their hour /
 //                         country split), plus the row-exact install-fix split `pf`
 //   campaignReturns     ← the /return/<uc>/* query both endpoints run
-//   flightPathsSeen     ← functions/_lib/campaignInstrumentation.ts (now built from here)
+//   flightPathsSeen     ← functions/_lib/campaignInstrumentation.ts (retired; moved here)
 //   bskKpiDays          ← /api/overview's KPI query (same WHERE)
 //   bskRangePath        ← /api/overview's timeline query (same WHERE)
 //   popupRangePath      ← /api/popups' query (same WHERE, same `pf` split)
@@ -135,7 +136,7 @@ export interface FactDef {
   /** The normalized params that identify one instance (its cache key and dedupe key). */
   keyParams: (keyof FactParams)[]
   /** The page filters this fact honours. Campaign facts use attribution windows and honour
-   * none, as /api/overview and /api/campaigns do today. */
+   * none, as the retired /api/overview and /api/campaigns did. */
   honors: ('range' | 'sites' | 'excludeOwn')[]
   /** Bucket size in ms whose START the segments (and KPI days) compare (60 000 or 3 600 000),
    * or null for an untimed fact. */
@@ -201,7 +202,7 @@ function segmentColumn(bucketMs: number, cuts: readonly number[]): { sql: string
 }
 
 /** The KPI day windows: [0] today so far, [1..7] the same ET clock time on each of the 7 days
- * before — /api/overview's own windows (lib/overview.ts sameTimeWindowMs), computed without Intl
+ * before — the retired /api/overview's windows (lib/overview.ts sameTimeWindowMs), computed without Intl
  * (lib/etTime.ts etSameTimeWindow; facts.test.ts checks they are identical). */
 export function kpiDayWindows(todayEt: string, nowMs: number): [number, number][] {
   return [[etMidnightMs(todayEt), nowMs], ...last7DatesBefore(todayEt).map((d) => etSameTimeWindow(d, nowMs))]
@@ -468,8 +469,8 @@ export const FACTS: Record<FactId, FactDef> = {
 
 /** "Which paths existed AT ALL (any campaign, tagged or not) site-wide during this flight's
  * SERVING window" — the per-flight instrumentation check (lib/metrics/instrumentation.ts
- * seenInFlightWindow). Moved here from functions/_lib/campaignInstrumentation.ts, which now
- * runs this builder. Requires a confirmed flightStart. */
+ * seenInFlightWindow). Moved here from the retired functions/_lib/campaignInstrumentation.ts.
+ * Requires a confirmed flightStart. */
 export function flightPathsSeenStatement(campaign: CampaignFlight): FactStatement {
   if (!campaign.flightStart) throw new Error('flightPathsSeen needs a confirmed flightStart')
   const [startMs, endMs] = etFlightRangeMs(campaign.flightStart, campaign.flightEnd)

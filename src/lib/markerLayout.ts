@@ -1,5 +1,5 @@
-// Pure collision-avoidance for the Overall-timeline chart's major-release labels
-// (OverviewWidgetBody.vue's Chart.js overlay plugin) — pulled out so the algorithm is
+// Pure collision-avoidance for a trend chart's major-release labels (lib/charts.ts
+// releaseMarkersPlugin, a Chart.js plugin) — pulled out so the algorithm is
 // unit-testable without a canvas (fix/clean-look, 2026-09-26: two markers close together used
 // to draw their labels on top of each other, e.g. "v1.86.40v1.87.0"). The plugin still owns
 // all actual drawing (ctx.fillText, dashed lines); this just decides WHERE each label goes, or
