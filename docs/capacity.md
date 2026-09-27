@@ -297,7 +297,12 @@ arrivals panels are standard `/api/geo` charts. `/api/campaigns` is retired. Mea
 against production with `npx tsx scripts/metrics/capture-facts.ts --cf-token-file <path> --batch
 campaigns` (the batch is built by `scripts/metrics/presetBatch.ts` with the same scope and request
 code `MetricCard` runs; each `SELECT` runs through `wrangler d1 execute --remote --json --command`,
-never `--file`, never a write), at 2026-09-27T12:22Z.
+never `--file`, never a write), at 2026-09-27T14:00Z — re-measured for v0.12.1. The previous
+2026-09-27T12:22Z capture (commit 2c8003e) labeled its two `/api/geo` chart rows "since the first
+campaign" but was actually taken before that range replaced the old rolling-12-month default
+(d147fe1, ~55 minutes later) and was never rerun after — its 5,415 / 5,361 figures were still the
+year-wide scan, not the ~25-day one the label described. This capture is the first against the
+range the charts actually use.
 
 **The batch:** 112 distinct requests (the four presets over the three campaigns, the country cells
 split US / CA / Other), planned into 7 facts. Nothing is read for what a campaign's config rules
@@ -306,30 +311,50 @@ read, its flight predating the return beacon).
 
 | Read | Params | Rows returned | `rows_read` | Cached for |
 |---|---|---|---|---|
-| `campaignPathVisitor` (now split by country bucket) | Android launch (closed) | 15 | 3,360 | 15 min |
+| `campaignPathVisitor` (now split by country bucket) | Android launch (closed) | 15 | 3,363 | 15 min |
 | `flightPathsSeen` | Android launch (closed) | 10 | 2,621 | 24 h |
-| `campaignPathVisitor` | US+CA retest (active) | 22 | 333 | 90 s |
-| `campaignReturns` | US+CA retest (active) | 1 | 2,954 | 90 s |
+| `campaignPathVisitor` | US+CA retest (active) | 22 | 336 | 90 s |
+| `campaignReturns` | US+CA retest (active) | 1 | 2,955 | 90 s |
 | `adsSpend` (gss-stats-ads) | — | 3 | 20 | 5 min |
 | `adsCoverage` (gss-stats-ads) | — | 20 | 20 | 5 min |
 | `adsLastSync` (gss-stats-ads) | — | 3 | 61 | 60 s |
-| **Metrics batch, every fact a miss** | | 74 | **9,369** | |
-| `/api/geo` hour of day (`hourEt` × `campaignFlight`, arrival = tagged, since the first campaign) | | 25 | 5,415 | `/api/geo` cache |
-| `/api/geo` flight day (`flightDay` × `campaignFlight`, same filter) | | 9 | 5,361 | `/api/geo` cache |
-| **Page total, nothing cached** | | | **20,145** | |
+| **Metrics batch, every fact a miss** | | 74 | **9,376** | |
+| `/api/geo` hour of day (`hourEt` × `campaignFlight`, arrival = tagged, since the first campaign) | | 25 | 2,623 | `/api/geo` cache |
+| `/api/geo` flight day (`flightDay` × `campaignFlight`, same filter, until last campaign ends — new-chart default, below) | | 9 | 2,569 | `/api/geo` cache |
+| **Page total, nothing cached** | | | **14,568** | |
 
 For comparison, the retired `/api/campaigns` ran, for **every** campaign on **every** load and
 uncached, its attribution scan, its flight-window check and its return scan (the same `WHERE`
-clauses as `campaignPathVisitor`, `flightPathsSeen` and `campaignReturns`): 3,360 + 2,621 + 2,921
-(Android launch), 925 + 465 + 2,921 (Play-direct), 333 + 409 + 2,954 (retest) = **16,909**, plus
-three ads-store reads per campaign (about 300): about **17,200 rows per load**. The card batch
-reads 9,369 once and then serves every card, page and colo visit from its fact cache (15 minutes
-to 24 hours for the closed flight); the two arrivals charts scan `hits` by `ts` from the first
-campaign's start (they cannot use an index on `campaign`, as the old attribution scan could not
-either; that window grows with every day, as the old scan's did), so a
-page with nothing cached reads about 2,900 more rows than the old one, and a cached page reads
-none for the cards. `campaignReturns` still scans every `bestsudoku-web` row (§7); bounding it is
-the same owner decision.
+clauses as `campaignPathVisitor`, `flightPathsSeen` and `campaignReturns`): 3,363 + 2,621 + 2,922
+(Android launch), 928 + 465 + 2,922 (Play-direct), 336 + 411 + 2,955 (retest) = **16,923**, plus
+three ads-store reads per campaign (about 300): about **17,200 rows per load**, essentially
+unchanged from the last capture (the ads-store and per-campaign figures barely moved). The card
+batch reads 9,376 once and then serves every card, page and colo visit from its fact cache (15
+minutes to 24 hours for the closed flight); the two arrivals charts scan `hits` by `ts` from the
+first campaign's start (they cannot use an index on `campaign`, as the old attribution scan could
+not either), so a page with nothing cached now reads about **2,650 fewer** rows than the old
+`/api/campaigns` page did — the opposite of what the stale 20,145 figure implied — and a cached
+page reads none for the cards. `campaignReturns` still scans every `bestsudoku-web` row (§7);
+bounding it is the same owner decision.
+
+**A newly added flight-day chart's range closes once every flight is over (v0.12.1,
+lib/range.ts):** the hour-of-day chart's window keeps growing forever (`since first campaign`,
+until = now — every load rescans a few more hours, so its `rows_read` rises slowly over time and
+its `/api/geo` cache key changes on every load). The `flightDayWidget` factory instead defaults a
+newly built flight-day chart to `since first campaign until last campaign ends` — until = now too,
+while the retest (the last-configured flight, through 2026-10-02) is still open, so the two charts
+read almost the same 2,623 / 2,569 rows above (this capture calls the factory directly, so it
+measures that new default). Once the retest ends, that chart's `until` freezes at ET midnight of
+2026-10-03 instead of continuing to track "now": its scanned window (and so its `rows_read` and
+its `/api/geo` cache key) stops changing from that day forward, while the hour-of-day chart's
+keeps growing and re-scanning on every load indefinitely.
+
+This is a new-chart default only — there is no v12 migration, so a flight-day chart already saved
+in a production layout (CONFIG_VERSION 11, which production is on) keeps whatever `rangeRel` it
+was saved with, `since first campaign`, and its range will keep tracking "now" forever like the
+hour-of-day chart's, exactly as it does today. It opts into the closed range only if someone types
+`since first campaign until last campaign ends` into that chart's own date range field (lib/range.ts
+`SINCE_FIRST_UNTIL_LAST_CAMPAIGN`), or the panel is deleted and re-added from the chart picker.
 
 The release panel (Overview) reads the first Best Sudoku hit (6 rows, an indexed `MIN`, cached
 6 hours) and both windows in ONE statement (394 rows for the 2026-09-26 release, one day each

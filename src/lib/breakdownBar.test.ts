@@ -124,11 +124,14 @@ describe('labels for the derived dims', () => {
   })
 })
 
-// A campaignFlight breakdown (the campaign arrivals charts) draws every beacon-tracked campaign
-// with a start date, rows or not, as the old campaign charts did: a campaign with no arrivals keeps
-// its legend entry at 0, and the flight-day axis runs to the longest of those flights.
+// A campaignFlight breakdown (the campaign arrivals charts) draws every beacon-tracked campaign,
+// rows or not, as the old campaign charts did — including one with no start date yet, which can
+// never be attributed any rows (campaignAttributionClause) so it draws at 0 like any other
+// campaign with no arrivals: its legend entry stays at 0, and the flight-day axis runs to the
+// longest of the DATED flights (a flight with no start has flightLength 0, lib/charts.ts, so it
+// never stretches the axis).
 describe('campaignFlight breakdown: every tracked campaign, zero-filled', () => {
-  const TRACKED = CAMPAIGNS.filter((c) => c.measurement !== 'spend-only' && c.flightStart != null)
+  const TRACKED = CAMPAIGNS.filter((c) => c.measurement !== 'spend-only')
   const android = TRACKED.find((c) => c.flightStart === '2026-09-02')!
   const retest = TRACKED.find((c) => c.flightStart === '2026-09-26')!
   const flight = (c: (typeof CAMPAIGNS)[number]) => Math.round((Date.parse(c.flightEnd) - Date.parse(c.flightStart!)) / 86_400_000) + 1
@@ -178,5 +181,25 @@ describe('campaignFlight breakdown: every tracked campaign, zero-filled', () => 
   it('other breakdowns keep only the values the response has', () => {
     const m = breakdownBarModel(widget(), resp(ROWS))
     expect(m.series).not.toContain(android.id)
+  })
+
+  it('a campaign with no start date yet is still a series (at 0), and never stretches the flight-day axis', () => {
+    const pending = { ...retest, id: '99999999999', label: 'Upcoming test flight', flightStart: null }
+    CAMPAIGNS.push(pending)
+    try {
+      const w = widget({ type: 'line', dimension: 'flightDay', breakdown: 'campaignFlight', cumulative: true })
+      const r = resp([['1', retest.id, 5]], ['flightDay', 'campaignFlight'])
+      const m = breakdownBarModel({ ...w, type: 'breakdownBar', barMode: 'stacked' }, r)
+      expect(m.series).toEqual([android.id, retest.id, pending.id])
+      expect(m.axis).toEqual(Array.from({ length: maxFlight }, (_, i) => String(i + 1))) // unchanged: still 1..8
+      expect(m.values[m.series.indexOf(pending.id)]).toEqual(Array(maxFlight).fill(0))
+
+      const hourW = widget({ dimension: 'hourEt', breakdown: 'campaignFlight' })
+      const cfg: any = buildChartConfig(hourW, resp([['9', android.id, 4]], ['hourEt', 'campaignFlight']))
+      expect(cfg.data.datasets.map((d: any) => d.label)).toContain(pending.label)
+      expect(cfg.data.datasets.find((d: any) => d.label === pending.label).data).toEqual(Array(24).fill(0))
+    } finally {
+      CAMPAIGNS.splice(CAMPAIGNS.indexOf(pending), 1)
+    }
   })
 })
