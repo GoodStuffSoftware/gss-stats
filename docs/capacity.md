@@ -320,7 +320,7 @@ read, its flight predating the return beacon).
 | `adsLastSync` (gss-stats-ads) | — | 3 | 61 | 60 s |
 | **Metrics batch, every fact a miss** | | 74 | **9,376** | |
 | `/api/geo` hour of day (`hourEt` × `campaignFlight`, arrival = tagged, since the first campaign) | | 25 | 2,623 | `/api/geo` cache |
-| `/api/geo` flight day (`flightDay` × `campaignFlight`, same filter, until last campaign ends) | | 9 | 2,569 | `/api/geo` cache |
+| `/api/geo` flight day (`flightDay` × `campaignFlight`, same filter, until last campaign ends — new-chart default, below) | | 9 | 2,569 | `/api/geo` cache |
 | **Page total, nothing cached** | | | **14,568** | |
 
 For comparison, the retired `/api/campaigns` ran, for **every** campaign on **every** load and
@@ -337,16 +337,24 @@ not either), so a page with nothing cached now reads about **2,650 fewer** rows 
 page reads none for the cards. `campaignReturns` still scans every `bestsudoku-web` row (§7);
 bounding it is the same owner decision.
 
-**The flight-day chart's range closes once every flight is over (v0.12.1, lib/range.ts):** the
-hour-of-day chart's window keeps growing forever (`since first campaign`, until = now — every
-load rescans a few more hours, so its `rows_read` rises slowly over time and its `/api/geo` cache
-key changes on every load). The flight-day chart instead reads `since first campaign until last
-campaign ends` — until = now too, while the retest (the last-configured flight, through
-2026-10-02) is still open, so the two charts read almost the same 2,623 / 2,569 rows above. Once
-the retest ends, the flight-day chart's `until` freezes at ET midnight of 2026-10-03 instead of
-continuing to track "now": its scanned window (and so its `rows_read` and its `/api/geo` cache
-key) stops changing from that day forward, while the hour-of-day chart's keeps growing and
-re-scanning on every load indefinitely.
+**A newly added flight-day chart's range closes once every flight is over (v0.12.1,
+lib/range.ts):** the hour-of-day chart's window keeps growing forever (`since first campaign`,
+until = now — every load rescans a few more hours, so its `rows_read` rises slowly over time and
+its `/api/geo` cache key changes on every load). The `flightDayWidget` factory instead defaults a
+newly built flight-day chart to `since first campaign until last campaign ends` — until = now too,
+while the retest (the last-configured flight, through 2026-10-02) is still open, so the two charts
+read almost the same 2,623 / 2,569 rows above (this capture calls the factory directly, so it
+measures that new default). Once the retest ends, that chart's `until` freezes at ET midnight of
+2026-10-03 instead of continuing to track "now": its scanned window (and so its `rows_read` and
+its `/api/geo` cache key) stops changing from that day forward, while the hour-of-day chart's
+keeps growing and re-scanning on every load indefinitely.
+
+This is a new-chart default only — there is no v12 migration, so a flight-day chart already saved
+in a production layout (CONFIG_VERSION 11, which production is on) keeps whatever `rangeRel` it
+was saved with, `since first campaign`, and its range will keep tracking "now" forever like the
+hour-of-day chart's, exactly as it does today. It opts into the closed range only if someone types
+`since first campaign until last campaign ends` into that chart's own date range field (lib/range.ts
+`SINCE_FIRST_UNTIL_LAST_CAMPAIGN`), or the panel is deleted and re-added from the chart picker.
 
 The release panel (Overview) reads the first Best Sudoku hit (6 rows, an indexed `MIN`, cached
 6 hours) and both windows in ONE statement (394 rows for the 2026-09-26 release, one day each

@@ -13,10 +13,12 @@ All notable changes to **gss-stats** are documented here. The format follows
   its flight hasn't been scheduled yet.
 
 ### Changed
-- **The flight-day chart's date range stops growing once every campaign flight is over.** It
-  still starts from the first campaign, same as the hour-of-day chart, but once every flight has
-  run its course the range settles on a fixed end date instead of always reaching to "now" — so
-  the chart's cached data stays valid for longer once nothing is still active.
+- **A newly added flight-day chart's date range stops growing once every campaign flight is
+  over.** It still starts from the first campaign, same as the hour-of-day chart, but once every
+  flight has run its course the range settles on a fixed end date instead of always reaching to
+  "now" — so its cached data stays valid for longer once nothing is still active. An existing
+  flight-day chart keeps its current range until you type "since first campaign until last
+  campaign ends" into its own date range field.
 
 ## [0.12.0] — 2026-09-27
 
