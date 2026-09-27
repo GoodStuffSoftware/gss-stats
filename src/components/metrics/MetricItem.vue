@@ -53,7 +53,7 @@ const showCaption = computed(() => vm.value.captionTokens.length > 0 && props.it
     </template>
 
     <template v-else-if="frame === 'pill'">
-      <span class="mi-pill" :title="plainLabel"><MetricLabel :tokens="vm.labelTokens" />: {{ vm.primary }}</span>
+      <span class="mi-pill" :title="plainLabel"><MetricLabel :tokens="vm.labelTokens" />: <span class="mi-pill-value" :class="{ muted: vm.muted }">{{ vm.primary }}</span></span>
       <span v-if="showCaption" class="mi-pill-caption"><MetricLabel :tokens="vm.captionTokens" /></span>
     </template>
 
@@ -189,7 +189,13 @@ const showCaption = computed(() => vm.value.captionTokens.length > 0 && props.it
   color: rgb(var(--ink-3));
   font-family: Inter, sans-serif;
 }
+/* A status word in a pill ("unavailable", "not yet tracking") must not read as a value. */
+.mi-pill-value.muted {
+  font-style: italic;
+  opacity: 0.75;
+}
 .mi-value.muted {
+  font-style: italic;
   color: rgb(var(--ink-3));
 }
 .mi-delta.new,

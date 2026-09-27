@@ -263,7 +263,7 @@ describe('N1: caveats never add a visible line', () => {
   it.each(['campaign-scorecard', 'bsk-kpis'])('%s: every caveat is behind the card\'s one collapsed Notes toggle', async (preset) => {
     const w = await mountNew(preset)
     expect(w.findAll('.mi-caption, .mi-tile-caption, .mi-pill-caption')).toHaveLength(0)
-    expect(w.find('.mc-notes').exists()).toBe(false)
+    for (const l of w.findAll('.mc-notes')) expect((l.element as HTMLElement).style.display).toBe('none')
     const toggles = w.findAll('button.mc-notes-toggle')
     expect(toggles.length).toBeGreaterThan(0)
     for (const b of toggles) expect(b.attributes('aria-expanded')).toBe('false')

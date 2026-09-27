@@ -116,7 +116,7 @@ describe('MetricCard — card notes', () => {
     const toggle = retest.find('button.mc-notes-toggle')
     expect(toggle.text()).toBe('Notes')
     expect(toggle.attributes('aria-expanded')).toBe('false')
-    expect(retest.find('.mc-notes').exists()).toBe(false)
+    expect((retest.find('.mc-notes').element as HTMLElement).style.display).toBe('none') // collapsed, but in the DOM for aria-controls
     await toggle.trigger('click')
     const lines = retest.findAll('.mc-notes li').map((li) => li.text().replace(/\s+/g, ' '))
     expect(lines[0]).toMatch(/^Tagged arrivals: Floor/)
@@ -252,5 +252,106 @@ describe('MetricCard — following the page context and the ET day', () => {
     vi.advanceTimersByTime(15_000) // the card's clock tick
     await settle()
     expect(kpis.find('.mp-tile-text').text()).toBe('no campaign flighting today')
+  })
+})
+
+describe('MetricCard — verification fixes', () => {
+  const untitled = (showUpdated?: CardSpec['showUpdated']): CardSpec => ({
+    v: 1,
+    ...(showUpdated !== undefined ? { showUpdated } : {}),
+    sections: [{ layout: 'tiles', items: [{ id: 'pv', label: { metric: true }, data: { metric: 'bsk.pageviews', window: 'todaySoFar' }, display: { as: 'number' } }] }],
+  })
+
+  it("an untitled footer card whose reload fails keeps Retry visible, and Retry recovers", async () => {
+    const w = mountCard({ cardRef: { spec: untitled('footer') }, nowMs: NOW })
+    await settle()
+    expect(w.find('.mc-footer .mc-updated').text()).toBe('Updated just now')
+    failNext = true
+    await w.find('.mc-footer button.mc-reload').trigger('click')
+    await settle()
+    expect(w.find('.mc-footer .mc-error').text()).toBe('Some numbers could not be loaded.')
+    const retry = w.find('.mc-footer button.mc-retry')
+    expect(retry.exists()).toBe(true)
+    failNext = false
+    await retry.trigger('click')
+    await settle()
+    expect(w.find('.mc-error').exists()).toBe(false)
+    expect(w.find('.mc-footer .mc-updated').text()).toBe('Updated just now')
+    expect(w.find('.mi-tile-num').text()).toBe('42')
+  })
+
+  it('an untitled card with no freshness line, no badge and no notes still shows its error line', async () => {
+    answer = () => ({ status: 'error', reason: 'fact-failed' })
+    const w = mountCard({ cardRef: { spec: untitled() }, nowMs: NOW })
+    await settle()
+    expect(w.find('.mc-head .mc-error').text()).toBe('Some numbers could not be loaded.')
+    expect(w.find('button.mc-retry').exists()).toBe(true)
+  })
+
+  it('the live region is in the DOM, empty, from mount, and is filled when a value fails', async () => {
+    answer = (r) => (r.metric === 'bsk.pageviews' && bodies.length > 1 ? { status: 'error', reason: 'fact-failed' } : { status: 'ok', value: 1 })
+    const w = mountCard({ cardRef: { preset: 'bsk-kpis' }, nowMs: NOW })
+    const live = () => w.find('[role="status"]')
+    expect(live().exists()).toBe(true)
+    expect(live().text()).toBe('')
+    expect(live().attributes('aria-live')).toBe('polite')
+    await settle()
+    expect(live().text()).toBe('')
+    w.findComponent(MetricCard).vm.reload()
+    await settle()
+    expect(live().text()).toBe('Some numbers could not be loaded.')
+    expect(w.findAll('[role="status"]')).toHaveLength(1) // the visible error line is not a second region
+  })
+
+  it('a status word in a pill is muted, not styled as a value', async () => {
+    answer = (r) => (r.metric === 'campaign.asks' ? { status: 'error', reason: 'fact-failed' } : { status: 'ok', value: 3 })
+    const w = mountCard({ cardRef: { preset: 'campaign-scorecard' }, nowMs: NOW })
+    await settle()
+    const ask = w.findAll('.mi-pill').find((p) => p.text().startsWith('Sign-in ask'))!
+    expect(ask.find('.mi-pill-value').text()).toBe('unavailable')
+    expect(ask.find('.mi-pill-value').classes()).toContain('muted')
+    const auth = w.findAll('.mi-pill').find((p) => p.text().startsWith('Auth success'))!
+    expect(auth.find('.mi-pill-value').classes()).not.toContain('muted')
+  })
+
+  it('each Notes toggle names its card and controls its list', async () => {
+    answer = (r) => (r.metric === 'campaign.taggedArrivals' ? { status: 'ok', value: 7, noteIds: ['arrivals-caveat'] } : { status: 'ok', value: 1 })
+    const w = mountCard({ cardRef: { preset: 'campaign-scorecard' }, nowMs: NOW })
+    await settle()
+    const toggles = w.findAll('button.mc-notes-toggle')
+    expect(toggles.map((t) => t.attributes('aria-label'))).toContain('Notes: US+CA web retest')
+    const ids = new Set<string>()
+    for (const t of toggles) {
+      const id = t.attributes('aria-controls')!
+      expect(w.find(`#${id}`).exists(), id).toBe(true)
+      ids.add(id)
+    }
+    expect(ids.size).toBe(toggles.length) // one list per card
+  })
+
+  it('an untitled card\'s toggle is plain "Notes"', async () => {
+    answer = () => ({ status: 'ok', value: 1, noteIds: ['arrivals-caveat'] })
+    const w = mountCard({ cardRef: { preset: 'bsk-kpis' }, nowMs: NOW })
+    await settle()
+    expect(w.find('button.mc-notes-toggle').attributes('aria-label')).toBe('Notes')
+  })
+
+  it('a day when only a spend-only campaign flights: the arrivals placeholder says why, and nothing is requested for it', async () => {
+    const w = mountCard({ cardRef: { preset: 'bsk-kpis' }, nowMs: Date.parse('2026-09-11T16:00:00Z') })
+    await settle()
+    expect(w.find('.mp-tile-label').text()).toBe('Tagged arrivals')
+    expect(w.find('.mp-tile-text').text()).toBe('no beacon-tracked campaign flighting today')
+    expect(bodies.flatMap((b) => b.requests).some((r) => r.params?.campaignId === PLAY)).toBe(false)
+  })
+
+  it('"not started": the retest before its 12:00 ET start reads a muted "not started" on its card', async () => {
+    answer = (r) => (r.params?.campaignId === RETEST ? { status: 'unmeasured', reason: 'not-started', noteIds: ['not-started'] } : { status: 'ok', value: 1 })
+    const w = mountCard({ cardRef: { preset: 'campaign-scorecard' }, nowMs: Date.parse('2026-09-26T15:59:00Z') })
+    await settle()
+    const retest = w.findAll('.metric-card').find((c) => c.find('.mc-title').text() === 'US+CA web retest')!
+    const arrivals = retest.findAll('.mi-row').find((r) => r.find('.mi-label').text() === 'Tagged arrivals')!
+    expect(arrivals.find('.mi-value').text()).toBe('not started')
+    expect(arrivals.find('.mi-value').classes()).toContain('muted')
+    expect(retest.text()).not.toContain('not yet tracking')
   })
 })
