@@ -219,6 +219,12 @@ Cloudflare Pages Functions  (functions/_middleware.ts → functions/api/*.ts)
 Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats-ads)  ·  KV (STATS_CONFIG)
 ```
 
+- **One metrics registry** ([`src/lib/metrics/`](src/lib/metrics), ADR 0003) defines every
+  dashboard number once: its unit, the aggregate "fact" (a fixed, code-reviewed `COUNT(*) …
+  GROUP BY` statement) it is counted from, its params, windows and go-live rules. A percentage is
+  registered only when numerator and denominator share a unit and the numerator is a declared
+  subset of the denominator; an invalid ratio fails at import. Labels are notes-registry entries.
+  Card components that read it through one batched endpoint come in later slices.
 - **Two datasets, one dashboard.** RUM (sampled, human-only) and the beacon (every
   real load, sub-country geo) are charted side by side; they're independent and never
   summed.
@@ -436,7 +442,7 @@ per 10 minutes. The dashboard holds no Google Ads credential and never calls the
 | Contributing / conventions | [CLAUDE.md](CLAUDE.md) |
 | Auth design (ADR) | [docs/adr/0002-google-auth.md](docs/adr/0002-google-auth.md) |
 | Ads store decision | [docs/adr/0001-ads-read-store.md](docs/adr/0001-ads-read-store.md) |
-| Metric components design (ADR, proposed) | [docs/adr/0003-metric-components.md](docs/adr/0003-metric-components.md) |
+| Metric components design (ADR; registry built, cards pending) | [docs/adr/0003-metric-components.md](docs/adr/0003-metric-components.md) |
 | Ads routine prompts | [docs/routines/](docs/routines/) |
 | Geo beacon (companion) | [GoodStuffSoftware/gss-beacon](https://github.com/GoodStuffSoftware/gss-beacon) |
 | Capacity / free-plan limits | [docs/capacity.md](docs/capacity.md) |

@@ -39,8 +39,9 @@ import {
   TRACKING_ACTIVATION_DATE_ET,
   MIN_COHORT,
   RAW_INSTALL_DEDUPE_NOTE,
+  INSTALL_FIX_NOTE,
 } from './popupEvents'
-import { ARRIVALS_CAVEAT, type FunnelStepKey } from './campaigns'
+import { ARRIVALS_CAVEAT, RAW_INSTALL_SIGNALS_LABEL, type FunnelStepKey } from './campaigns'
 import { tokenizeAndInterpolate, toPlainText } from './textLite'
 
 export type NoteSeverity = 'info' | 'caveat' | 'warning'
@@ -249,6 +250,83 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = {
     // Range-specific install-fix caveats travel with the data instead (functions/api/campaigns.ts
     // funnel.installNote, from lib/popupEvents.ts installOutcomeGapNote).
     'label.funnel.install': 'Install',
+
+    // Metrics (lib/metrics/metrics.ts) — one `label.<metricId>` each.
+    'label.campaign.taggedHits': 'Tagged hits',
+    'label.campaign.taggedArrivals': 'Tagged arrivals',
+    'label.campaign.completions': 'Completed games',
+    'label.campaign.asks': 'Sign-in asks',
+    'label.campaign.accepts': 'Sign-in accepts',
+    'label.campaign.signedInAfterAsk': 'Signed in after ask',
+    'label.campaign.authSuccess': 'Auth successes',
+    'label.campaign.installPrompts': 'Install prompts',
+    'label.campaign.installs': 'Installs',
+    'label.campaign.rawInstallSignals': RAW_INSTALL_SIGNALS_LABEL,
+    'label.campaign.returnD0': 'First tagged loads (d0)',
+    'label.campaign.returnD1': 'Came back on day 1',
+    'label.campaign.returnD2to7': 'Came back on days 2-7',
+    'label.campaign.returnD8to14': 'Came back on days 8-14',
+    'label.campaign.returnD15to30': 'Came back on days 15-30',
+    'label.campaign.returnD31to60': 'Came back on days 31-60',
+    'label.campaign.spend': 'Spend',
+    'label.bsk.pageviews': 'Page views',
+    'label.bsk.completions': 'Games completed',
+    'label.bsk.popupShown': 'Pop-ups shown',
+    'label.bsk.popupAccepts': 'Pop-ups accepted',
+    'label.bsk.authSuccess': 'Auth successes',
+    'label.bsk.installs': 'Installs',
+    'label.bsk.rawInstallSignals': RAW_INSTALL_SIGNALS_LABEL,
+    'label.bsk.returnsD1plus': '/return/ d1+ returns',
+    'label.popup.shown': 'Shown',
+    'label.popup.accepts': 'Accepted',
+    'label.popup.outcomeSignedIn': 'Signed in',
+    'label.popup.outcomeInstalled': 'Installed',
+    'label.popup.outcomeReturned': 'Returned',
+    'label.popup.outcomeStillPlaying': 'Still playing',
+    'label.popup.eligibleEarned': 'Eligible finishes (earned)',
+    'label.popup.eligibleFinishes': 'Signed-out finishes',
+
+    // Ratios (lib/metrics/ratios.ts).
+    'label.campaign.acceptPerAsk': 'Accept rate',
+    'label.campaign.signedInPerAsk': 'Signed in after ask',
+    'label.campaign.installPerPrompt': 'Install rate',
+    'label.campaign.returnD1PerD0': 'Return rate (d1)',
+    'label.campaign.returnD2to7PerD0': 'Return rate (d2-7)',
+    'label.campaign.returnD8to14PerD0': 'Return rate (d8-14)',
+    'label.campaign.returnD15to30PerD0': 'Return rate (d15-30)',
+    'label.campaign.returnD31to60PerD0': 'Return rate (d31-60)',
+    'label.campaign.costPerArrival': 'Cost / arrival',
+    'label.campaign.costPerSignin': 'Cost / sign-in',
+    'label.campaign.gameViewsVsArrivals': 'Game-screen views vs arrivals',
+    'label.campaign.taggedHitsVsArrivals': 'Tagged hits vs arrivals',
+    'label.bsk.popupTapRate': 'Pop-up tap rate',
+    'label.popup.tapRate': 'Tap rate',
+    'label.popup.signedInRate': 'Signed-in rate',
+    'label.popup.installedRate': 'Installed rate',
+    'label.popup.returnedRate': 'Returned rate',
+    'label.popup.stillPlayingRate': 'Still-playing rate',
+    'label.popup.eligibility': 'Sign-in eligibility rate',
+
+    // Unit words (lib/metrics/units.ts unitLabelId, MetricDef.unitLabel) — the "counts"
+    // display reads "1,111 views · 353 arrivals".
+    'unit.device': 'devices',
+    'unit.row': 'rows',
+    'unit.pageview': 'views',
+    'unit.completion': 'completions',
+    'unit.showing': 'showings',
+    'unit.signin': 'sign-ins',
+    'unit.finish': 'finishes',
+    'unit.usd': 'USD',
+    'unit.day': 'days',
+    'unit.arrivals': 'arrivals',
+
+    // Status words and gating messages (MetricValue.status / noteIds).
+    'flight-pending': 'pending — start date not yet confirmed',
+    'no-campaign-flighting': 'no campaign flighting today',
+    'not-yet-tracking': 'not yet tracking',
+    'still-arriving': 'still arriving',
+    'counted-from': 'counted from {from}',
+    'install-fix-note': INSTALL_FIX_NOTE,
   }),
 }
 

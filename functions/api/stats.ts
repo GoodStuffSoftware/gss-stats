@@ -23,6 +23,7 @@
 // limit-vs-cardinality tradeoff) is the intended path for charts wanting more rings than this.
 
 import { buildCacheKeyUrl, cachedJson, ttlSecondsFor, type CacheLike } from '../_lib/edgeCache'
+import { WHEN_RE } from '../../src/lib/range'
 
 interface Env {
   CF_ANALYTICS_TOKEN: string
@@ -98,7 +99,6 @@ const json = (data: unknown, status = 200): Response =>
   })
 
 // Accept a date (YYYY-MM-DD) or a full ISO datetime; fall back if malformed.
-const WHEN_RE = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?(\.\d+)?Z?)?$/
 function safeDate(v: unknown, fallback: string): string {
   return typeof v === 'string' && WHEN_RE.test(v) ? v : fallback
 }

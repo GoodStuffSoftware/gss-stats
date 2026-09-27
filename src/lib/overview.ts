@@ -2,8 +2,34 @@
 // components/OverviewPage.vue. Aggregate-only, no joins — same rules as lib/campaigns.ts and
 // lib/popupEvents.ts, which this module builds on rather than duplicates.
 
-import { etDateFromMs, excludeInstallGapUnmeasured, TRACKING_ACTIVATION_DATE_ET } from './popupEvents'
-import { etMidnightUtcMs, CAMPAIGNS, flightDayIndex, applyExclusions, type CampaignFlight } from './campaigns'
+import { classifyPopupPath, etDateFromMs, excludeInstallGapUnmeasured, isPopupEventPath, POPUPS, TRACKING_ACTIVATION_DATE_ET } from './popupEvents'
+import { etMidnightUtcMs, CAMPAIGNS, flightDayIndex, applyExclusions, parseReturnPath, type CampaignFlight } from './campaigns'
+
+// ── Row classifiers shared by /api/overview and the metrics registry (lib/metrics/) ───────
+// Moved here from functions/api/overview.ts (ADR 0003 slice 2) so the registry reuses them
+// instead of copying them. Behaviour unchanged.
+/** An event beacon, not a screen view — never counts as a page view. isPopupEventPath
+ * (lib/popupEvents.ts POPUP_EVENT_PREFIXES) also covers `/game/complete/` (v1.95.5): without
+ * it, a completed-game beacon would inflate "Page views" the same way it inflated /api/geo
+ * and /api/sites before popupExcludeClause picked it up. */
+export function isEventPath(path: string): boolean {
+  return classifyPopupPath(path) !== null || path.startsWith('/return/') || isPopupEventPath(path)
+}
+/** A `/return/<uc>/<bucket>` row for any bucket after d0. */
+export function isReturnD1Plus(path: string): boolean {
+  const ev = parseReturnPath(path)
+  return !!ev && ev.bucket !== 'd0'
+}
+/** A "shown" row of any registered pop-up (lib/popupEvents.ts POPUPS). */
+export function isPopupShown(path: string): boolean {
+  const ev = classifyPopupPath(path)
+  return !!ev && ev.kind === 'shown' && POPUPS.some((p) => p.id === ev.family)
+}
+/** An "accept" row of any registered pop-up. */
+export function isPopupAccept(path: string): boolean {
+  const ev = classifyPopupPath(path)
+  return !!ev && ev.kind === 'accept' && POPUPS.some((p) => p.id === ev.family)
+}
 
 // ── Shared WHERE-clause builder for the KPI / timeline / release-panel D1 queries ────────
 /** `site IN (...) AND ts >= ? AND ts < ?` plus every row-exclusion rule (see

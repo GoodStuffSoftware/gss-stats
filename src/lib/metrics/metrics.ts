@@ -1,0 +1,303 @@
+// The metric catalog (ADR 0003 section 2, "The initial metric catalog"). A metric is a
+// reducer over ONE fact's rows (lib/metrics/facts.ts): a row test (path family, visitor, …)
+// whose matching rows' counts are summed, plus its unit, its declared subset (ratio validity,
+// lib/metrics/ratios.ts), the params and windows it accepts, and its instrumentation rules
+// (lib/metrics/instrumentation.ts).
+//
+// Every row test is an EXISTING classifier — lib/campaigns.ts classifyFunnelPath /
+// isInstallPromptInstalled / isRawInstallSignal / isAuthSuccessBase / parseReturnPath,
+// lib/popupEvents.ts classifyPopupPath, lib/overview.ts isEventPath / isPopupShown /
+// isPopupAccept / isReturnD1Plus — so a metric counts exactly what today's endpoint counts.
+// A new metric is a new entry here over an existing fact; a new fact is a code-reviewed SQL
+// builder. Labels are notes-registry ids (`label.<id>`, lib/notes.ts).
+
+import {
+  CAMPAIGN_SPEND,
+  classifyFunnelPath,
+  isAuthSuccessBase,
+  isInstallPromptInstalled,
+  isRawInstallSignal,
+  parseReturnPath,
+  type CampaignAttribution,
+  type CampaignFlight,
+  type FunnelStepKey,
+  type ReturnBucket,
+} from '../campaigns'
+import {
+  classifyPopupPath,
+  GAME_COMPLETE_LIVE_AT,
+  INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS,
+  POPUPS,
+  RAW_INSTALL_DEDUPE_LIVE_AT_UTC_MS,
+  TRACKING_ACTIVATION_DATE_ET,
+  type PopupEvent,
+} from '../popupEvents'
+import { isEventPath, isPopupAccept, isPopupShown, isReturnD1Plus } from '../overview'
+import { resolveCampaignSpend, type SpendSummary } from '../adsRules'
+import type { BeaconRow, FactId } from './facts'
+import type { InstrumentationRule } from './instrumentation'
+import type { WindowName } from './types'
+import type { Unit } from './units'
+
+export type MetricParam = 'campaignId' | 'popup'
+
+/** What a reducer knows about the request it is serving. */
+export interface MetricCtx {
+  params: { campaignId?: string; popup?: string }
+  campaign?: CampaignFlight
+  /** campaignAttributionClause(campaign) — applied in JS when a campaign metric reads a
+   * site-wide fact (campaign.taggedArrivals over the KPI minute rows). */
+  attribution?: CampaignAttribution
+  window: WindowName
+}
+
+export interface MetricDef {
+  id: string
+  /** Notes-registry label id (always `label.<id>`). */
+  label: string
+  /** Notes-registry id of the unit word, when more specific than `unit.<unit>`. */
+  unitLabel?: string
+  unit: Unit
+  /** Each counted thing maps to a DISTINCT counted thing of that metric (ratio validity). */
+  subsetOf?: string
+  params: MetricParam[]
+  /** The fact each allowed window reads. The FIRST key is the default window. */
+  windows: Partial<Record<WindowName, FactId>>
+  /** Beacon metrics: the path test (memoized per path; also the seenInFlightWindow evidence). */
+  path?: (path: string, ctx: MetricCtx) => boolean
+  /** Beacon metrics: only rows of this visitor kind ('new' = a device's first-ever beacon). */
+  visitor?: 'new'
+  /** Spend metrics: the value from the stored-spend summaries (null = no spend known). */
+  spend?: (rows: readonly SpendSummary[], ctx: MetricCtx) => number | null
+  instrumented: readonly InstrumentationRule[] | ((ctx: MetricCtx) => readonly InstrumentationRule[])
+  /** Outcome beacons that arrive after the event they describe: [min, max] days. */
+  lagDays?: [number, number]
+  /** Note ids that travel with every value. */
+  caveats?: string[]
+}
+
+// ── Memoized classifiers (a fact has few distinct paths and many rows) ───────────────────
+function memo<T>(fn: (path: string) => T): (path: string) => T {
+  const cache = new Map<string, T>()
+  return (path) => {
+    if (cache.has(path)) return cache.get(path) as T
+    const v = fn(path)
+    if (cache.size > 20_000) cache.clear()
+    cache.set(path, v)
+    return v
+  }
+}
+const stepOf = memo<FunnelStepKey | null>(classifyFunnelPath)
+const popupEventOf = memo<PopupEvent | null>(classifyPopupPath)
+const returnOf = memo(parseReturnPath)
+const step = (k: FunnelStepKey) => (path: string) => stepOf(path) === k
+
+// ── Shared rules ─────────────────────────────────────────────────────────────────────────
+const BEACON: InstrumentationRule = { kind: 'beaconMeasurable' }
+const SEEN: InstrumentationRule = { kind: 'seenInFlightWindow' }
+const TRACKING: InstrumentationRule = { kind: 'liveOnEtDate', dateEt: TRACKING_ACTIVATION_DATE_ET, source: 'TRACKING_ACTIVATION_DATE_ET' }
+const TRACKING_VS_FLIGHT: InstrumentationRule = { ...TRACKING, against: 'flight' } as InstrumentationRule
+const GAME_COMPLETE: InstrumentationRule = { kind: 'liveAt', atMs: GAME_COMPLETE_LIVE_AT, source: 'GAME_COMPLETE_LIVE_AT' }
+const INSTALL_FIX: InstrumentationRule = { kind: 'unmeasuredBefore', atMs: INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, source: 'INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS', noteId: 'install-fix-note' }
+const RAW_DEDUPE: InstrumentationRule = { kind: 'annotateAt', atMs: RAW_INSTALL_DEDUPE_LIVE_AT_UTC_MS, noteId: 'raw-install-dedupe' }
+
+const CAMPAIGN_WINDOWS = { attribution: 'campaignPathVisitor' } as const
+const BSK_WINDOWS = { todaySoFar: 'bskKpiMinutes', page: 'bskHourPath' } as const
+const POPUP_WINDOWS = { page: 'popupHourPath' } as const
+
+function campaignMetric(def: Omit<MetricDef, 'label' | 'params' | 'windows'> & Partial<Pick<MetricDef, 'windows'>>): MetricDef {
+  return { label: `label.${def.id}`, params: ['campaignId'], windows: CAMPAIGN_WINDOWS, ...def }
+}
+function bskMetric(def: Omit<MetricDef, 'label' | 'params' | 'windows'>): MetricDef {
+  return { label: `label.${def.id}`, params: [], windows: BSK_WINDOWS, ...def }
+}
+function popupMetric(def: Omit<MetricDef, 'label' | 'windows'>): MetricDef {
+  return { label: `label.${def.id}`, windows: POPUP_WINDOWS, ...def }
+}
+
+// ── Return buckets (lib/campaigns.ts RETURN_BUCKETS) ────────────────────────────────────
+// The lag is the bucket's own window: a d2-7 return cannot fire before day 2 or after day 7.
+const RETURN_METRICS: { id: string; bucket: ReturnBucket; lag?: [number, number] }[] = [
+  { id: 'campaign.returnD0', bucket: 'd0' },
+  { id: 'campaign.returnD1', bucket: 'd1', lag: [1, 1] },
+  { id: 'campaign.returnD2to7', bucket: 'd2-7', lag: [2, 7] },
+  { id: 'campaign.returnD8to14', bucket: 'd8-14', lag: [8, 14] },
+  { id: 'campaign.returnD15to30', bucket: 'd15-30', lag: [15, 30] },
+  { id: 'campaign.returnD31to60', bucket: 'd31-60', lag: [31, 60] },
+]
+
+// ── Pop-up outcomes (lib/popupEvents.ts POPUP_OUTCOME_TYPES; the app's own windows) ──────
+const OUTCOME_METRICS: { id: string; outcome: string; lag: [number, number] }[] = [
+  { id: 'popup.outcomeSignedIn', outcome: 'signed-in', lag: [0, 1] },
+  { id: 'popup.outcomeInstalled', outcome: 'installed', lag: [0, 7] },
+  { id: 'popup.outcomeReturned', outcome: 'returned', lag: [1, 7] },
+  { id: 'popup.outcomeStillPlaying', outcome: 'still-playing', lag: [14, 21] },
+]
+const noOutcomeTracking = (popup: string | undefined) => !!POPUPS.find((p) => p.id === popup)?.noOutcomeTracking
+
+export const METRIC_DEFS: MetricDef[] = [
+  // ── Campaign (one campaignPathVisitor statement per campaign) ────────────────────────────
+  campaignMetric({ id: 'campaign.taggedHits', unit: 'row', instrumented: [BEACON] }),
+  campaignMetric({
+    id: 'campaign.taggedArrivals',
+    unit: 'device',
+    unitLabel: 'unit.arrivals',
+    visitor: 'new',
+    // 'todaySoFar' reads the KPI minute rows through campaignAttributionClause's JS twin, so the
+    // KPI tile and the campaign card can never disagree (ADR 0003 rate audit).
+    windows: { attribution: 'campaignPathVisitor', todaySoFar: 'bskKpiMinutes' },
+    instrumented: [BEACON],
+    caveats: ['arrivals-caveat'],
+  }),
+  campaignMetric({ id: 'campaign.gameViews', unit: 'pageview', path: step('played'), instrumented: [BEACON, SEEN] }),
+  campaignMetric({ id: 'campaign.completions', unit: 'completion', path: step('completed'), instrumented: [BEACON, { ...GAME_COMPLETE, against: 'flight' } as InstrumentationRule, SEEN] }),
+  campaignMetric({ id: 'campaign.asks', unit: 'showing', path: step('ask'), instrumented: [BEACON, SEEN] }),
+  campaignMetric({ id: 'campaign.accepts', unit: 'showing', subsetOf: 'campaign.asks', path: step('accept'), instrumented: [BEACON, SEEN] }),
+  campaignMetric({
+    id: 'campaign.signedInAfterAsk',
+    unit: 'showing',
+    subsetOf: 'campaign.asks',
+    path: (p) => {
+      const ev = popupEventOf(p)
+      return !!ev && (ev.family === 'popup-outcome:signin-prompt' || ev.family === 'popup-outcome:promo-first50') && ev.kind === 'signed-in'
+    },
+    instrumented: [BEACON, TRACKING, SEEN],
+    lagDays: [0, 1],
+  }),
+  campaignMetric({ id: 'campaign.authSuccess', unit: 'signin', path: step('authSuccess'), instrumented: [BEACON, SEEN] }),
+  campaignMetric({ id: 'campaign.installPrompts', unit: 'showing', path: step('installPrompt'), instrumented: [BEACON, SEEN] }),
+  campaignMetric({ id: 'campaign.installs', unit: 'showing', subsetOf: 'campaign.installPrompts', path: step('install'), instrumented: [BEACON, INSTALL_FIX, SEEN], lagDays: [0, 7] }),
+  campaignMetric({ id: 'campaign.rawInstallSignals', unit: 'row', path: isRawInstallSignal, instrumented: [BEACON, RAW_DEDUPE], caveats: ['raw-install-dedupe'] }),
+  ...RETURN_METRICS.map(({ id, bucket, lag }) =>
+    campaignMetric({
+      id,
+      unit: 'device',
+      ...(bucket === 'd0' ? {} : { subsetOf: 'campaign.returnD0', lagDays: lag }),
+      windows: { attribution: 'campaignReturns' },
+      path: (p, ctx) => {
+        const ev = returnOf(p)
+        return !!ev && ev.bucket === bucket && !!ctx.campaign?.ucValues.includes(ev.uc)
+      },
+      instrumented: [BEACON, TRACKING_VS_FLIGHT],
+    }),
+  ),
+  campaignMetric({
+    id: 'campaign.spend',
+    unit: 'usd',
+    windows: { attribution: 'adsSpend' },
+    // Stored Google Ads spend first, else the hand-entered CAMPAIGN_SPEND (lib/adsRules.ts).
+    spend: (rows, ctx) => resolveCampaignSpend(rows.find((r) => r.campaignId === ctx.params.campaignId) ?? null, CAMPAIGN_SPEND[ctx.params.campaignId ?? ''] ?? null).spend,
+    instrumented: [],
+  }),
+
+  // ── Best Sudoku site-wide (bskKpiMinutes for today so far; bskHourPath for a page range) ──
+  bskMetric({ id: 'bsk.pageviews', unit: 'pageview', path: (p) => !isEventPath(p), instrumented: [] }),
+  bskMetric({ id: 'bsk.gameViews', unit: 'pageview', path: step('played'), instrumented: [] }),
+  bskMetric({ id: 'bsk.completions', unit: 'completion', path: step('completed'), instrumented: [GAME_COMPLETE] }),
+  bskMetric({ id: 'bsk.popupShown', unit: 'showing', path: isPopupShown, instrumented: [TRACKING] }),
+  bskMetric({ id: 'bsk.popupAccepts', unit: 'showing', subsetOf: 'bsk.popupShown', path: isPopupAccept, instrumented: [TRACKING] }),
+  bskMetric({ id: 'bsk.authSuccess', unit: 'signin', path: isAuthSuccessBase, instrumented: [] }),
+  bskMetric({ id: 'bsk.installs', unit: 'showing', path: isInstallPromptInstalled, instrumented: [INSTALL_FIX], lagDays: [0, 7] }),
+  bskMetric({ id: 'bsk.rawInstallSignals', unit: 'row', path: isRawInstallSignal, instrumented: [RAW_DEDUPE], caveats: ['raw-install-dedupe'] }),
+  bskMetric({ id: 'bsk.returnsD1plus', unit: 'row', path: isReturnD1Plus, instrumented: [TRACKING] }),
+
+  // ── Pop-ups (popupHourPath over the page range, activation-gated like /api/popups) ────────
+  popupMetric({
+    id: 'popup.shown',
+    unit: 'showing',
+    params: ['popup'],
+    path: (p, ctx) => {
+      const ev = popupEventOf(p)
+      return !!ev && ev.family === ctx.params.popup && ev.kind === 'shown'
+    },
+    instrumented: [TRACKING],
+  }),
+  popupMetric({
+    id: 'popup.accepts',
+    unit: 'showing',
+    subsetOf: 'popup.shown',
+    params: ['popup'],
+    path: (p, ctx) => {
+      const ev = popupEventOf(p)
+      return !!ev && ev.family === ctx.params.popup && ev.kind === 'accept'
+    },
+    instrumented: [TRACKING],
+  }),
+  ...OUTCOME_METRICS.map(({ id, outcome, lag }) =>
+    popupMetric({
+      id,
+      unit: 'showing',
+      subsetOf: 'popup.shown',
+      params: ['popup'],
+      path: (p, ctx) => {
+        const ev = popupEventOf(p)
+        return !!ev && ev.family === `popup-outcome:${ctx.params.popup}` && ev.kind === outcome
+      },
+      instrumented: (ctx) =>
+        noOutcomeTracking(ctx.params.popup)
+          ? [{ kind: 'liveAt', atMs: null, source: 'POPUPS.noOutcomeTracking', reason: 'no-outcome-tracking' }]
+          : // The install prompt's "installed" outcome: pre-fix rows are unmeasured (dropped
+            // row-exactly, as /api/popups does), so it is counted from the install fix on.
+            ctx.params.popup === 'install' && outcome === 'installed'
+            ? [TRACKING, INSTALL_FIX]
+            : [TRACKING],
+      lagDays: lag,
+    }),
+  ),
+  popupMetric({
+    id: 'popup.eligibleEarned',
+    unit: 'finish',
+    subsetOf: 'popup.eligibleFinishes',
+    params: [],
+    path: (p) => {
+      const ev = popupEventOf(p)
+      return !!ev && ev.family === 'signin-eligible' && ev.kind === 'earned'
+    },
+    instrumented: [TRACKING],
+    caveats: ['signin-eligible-caveat'],
+  }),
+  popupMetric({
+    id: 'popup.eligibleFinishes',
+    unit: 'finish',
+    params: [],
+    path: (p) => {
+      const ev = popupEventOf(p)
+      return !!ev && ev.family === 'signin-eligible' && (ev.kind === 'earned' || ev.kind === 'capped' || ev.kind === 'unearned')
+    },
+    instrumented: [TRACKING],
+    caveats: ['signin-eligible-caveat'],
+  }),
+]
+
+export const METRICS: ReadonlyMap<string, MetricDef> = (() => {
+  const m = new Map<string, MetricDef>()
+  for (const d of METRIC_DEFS) {
+    if (m.has(d.id)) throw new Error(`duplicate metric id ${d.id}`)
+    if (d.label !== `label.${d.id}`) throw new Error(`metric ${d.id}: label must be label.${d.id}`)
+    if (!Object.keys(d.windows).length) throw new Error(`metric ${d.id}: no windows`)
+    if (!d.path && !d.visitor && !d.spend && Object.values(d.windows).some((f) => f === 'adsSpend')) throw new Error(`metric ${d.id}: a spend fact needs spend()`)
+    m.set(d.id, d)
+  }
+  for (const d of METRIC_DEFS) if (d.subsetOf && !m.has(d.subsetOf)) throw new Error(`metric ${d.id}: subsetOf unknown metric ${d.subsetOf}`)
+  return m
+})()
+
+export function metricWindows(def: MetricDef): WindowName[] {
+  return Object.keys(def.windows) as WindowName[]
+}
+export function rulesOf(def: MetricDef, ctx: MetricCtx): readonly InstrumentationRule[] {
+  return typeof def.instrumented === 'function' ? def.instrumented(ctx) : def.instrumented
+}
+/** The metric's row test over a beacon row (path + visitor; attribution is the engine's job). */
+export function rowMatcher(def: MetricDef, ctx: MetricCtx): (r: BeaconRow) => boolean {
+  const pathTest = def.path
+  const visitor = def.visitor
+  if (!pathTest) return visitor ? (r) => r.visitor === visitor : () => true
+  const byPath = new Map<string, boolean>()
+  const test = (p: string) => {
+    let v = byPath.get(p)
+    if (v === undefined) byPath.set(p, (v = pathTest(p, ctx)))
+    return v
+  }
+  return visitor ? (r) => r.visitor === visitor && test(r.path) : (r) => test(r.path)
+}
