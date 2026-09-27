@@ -635,6 +635,7 @@ function toggleDark() {
       v-if="editing"
       :widget="editing.widget"
       :is-new="editing.isNew"
+      :filters="activePage.filters"
       @save="onEditorSave"
       @cancel="editing = null"
       @remove="onEditorRemove"

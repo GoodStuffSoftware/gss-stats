@@ -6,6 +6,14 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Metric cards are now editable.** "Add chart" offers a metric card alongside the usual chart
+  types, and editing an existing one — including "Today at a glance" and the campaign scorecard —
+  opens a builder instead of the chart fields: start from a preset or a blank card, pick each
+  row's label, its number, and how it displays, arrange sections, and see it update live before
+  saving. A save that would produce an invalid card (an impossible percentage, a broken pick) is
+  refused inline instead of being allowed onto the page.
+
 ## [0.10.0] — 2026-09-27
 
 ### Added
