@@ -19,14 +19,13 @@ import {
   FUNNEL_STEP_ORDER,
   applyExclusions,
   campaignAttributionClause,
+  campaignAttributionStartMs,
   campaignById,
   classifyFunnelPath,
   computeFunnelCounts,
   costPer,
   countryBucket,
   etHourFromMs,
-  etMidnightUtcMs,
-  etTimeUtcMs,
   flightDayIndex,
   funnelStepRates,
   parseReturnPath,
@@ -226,7 +225,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       // Install-fix caveat for THIS campaign's attribution range (none once it is all post-fix).
       installNote:
         installOutcomeGapNote({
-          startMs: campaign.flightStart ? (campaign.flightStartTimeEt ? etTimeUtcMs(campaign.flightStart, campaign.flightStartTimeEt) : etMidnightUtcMs(campaign.flightStart)) : 0,
+          startMs: campaignAttributionStartMs(campaign) ?? 0,
           endMs: Date.now(),
         }) || null,
     },

@@ -1,6 +1,6 @@
 {
   "name": "gss-stats",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "private": true,
   "type": "module",
   "description": "Private bot-free traffic dashboard for Good Stuff Software (RUM via Cloudflare GraphQL).",
@@ -11,7 +11,7 @@
     "deploy": "npm run build && wrangler pages deploy",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "typecheck:scripts": "tsc -p scripts/ads-reads/tsconfig.json --noEmit",
+    "typecheck:scripts": "tsc -p scripts/ads-reads/tsconfig.json --noEmit && tsc -p scripts/metrics/tsconfig.json --noEmit",
     "ads:morning-read": "tsx scripts/ads-reads/morning-read.ts",
     "ads:postflight-read": "tsx scripts/ads-reads/postflight-read.ts",
     "ads:backfill": "tsx scripts/ads-reads/backfill.ts",
@@ -19,7 +19,9 @@
     "ads:worker-secrets": "tsx scripts/ads-reads/worker-secrets.ts",
     "ads:worker-deploy": "tsx scripts/ads-reads/worker-deploy.ts",
     "ads:worker-check": "wrangler deploy --dry-run -c workers/sync/wrangler.toml --outdir .wrangler/worker-check",
-    "ads:migrate": "wrangler d1 migrations apply gss-stats-ads --remote"
+    "ads:migrate": "wrangler d1 migrations apply gss-stats-ads --remote",
+    "metrics:capture": "tsx scripts/metrics/capture-facts.ts",
+    "metrics:profile": "tsx scripts/metrics/profile-metrics.ts"
   },
   "dependencies": {
     "chart.js": "^4.4.7",

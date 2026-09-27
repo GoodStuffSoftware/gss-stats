@@ -18,6 +18,7 @@ import { excludeOwnClause as sharedExcludeOwnClause, selfReferralClause as share
 import { etDateSql } from '../../src/lib/etTime'
 import { isDateDim } from '../../src/lib/rings'
 import { buildCacheKeyUrl, cachedJson, ttlSecondsFor, type CacheLike } from '../_lib/edgeCache'
+import { WHEN_RE, SITE_TAG_RE } from '../../src/lib/range'
 
 interface Env {
   gss_geo: D1Database
@@ -217,7 +218,6 @@ const json = (data: unknown, status = 200): Response =>
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
   })
 
-const WHEN_RE = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?(\.\d+)?Z?)?$/
 function safeDate(v: unknown, fallback: string): string {
   return typeof v === 'string' && WHEN_RE.test(v) ? v : fallback
 }
@@ -251,7 +251,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     return json({ error: `too many filters (at most ${MAX_CONSTRAINTS})` }, 400)
   }
   const sites = rawSites.filter(
-    (s): s is string => typeof s === 'string' && s !== 'all' && /^[a-z0-9.\-]{1,40}$/i.test(s),
+    (s): s is string => typeof s === 'string' && s !== 'all' && SITE_TAG_RE.test(s),
   )
   const siteClause = (w: string[], b: any[]) => {
     if (sites.length) {

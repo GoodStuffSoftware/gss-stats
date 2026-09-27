@@ -43,6 +43,7 @@ import {
   popupIncludeClause,
   type HourPathCount,
 } from '../../src/lib/popupEvents'
+import { WHEN_RE, SITE_TAG_RE } from '../../src/lib/range'
 import { excludeOwnClause } from '../../src/lib/ownExclusion'
 
 interface Env {
@@ -55,7 +56,6 @@ const json = (data: unknown, status = 200): Response =>
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
   })
 
-const WHEN_RE = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?(\.\d+)?Z?)?$/
 function safeDate(v: unknown, fallback: string): string {
   return typeof v === 'string' && WHEN_RE.test(v) ? v : fallback
 }
@@ -89,7 +89,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const untilMs = isDateOnly(until) ? Date.parse(until) + 86_400_000 : Date.parse(until)
 
   const rawSites: unknown[] = Array.isArray(body.sites) ? body.sites : body.site != null ? [body.site] : []
-  const sites = rawSites.filter((s): s is string => typeof s === 'string' && s !== 'all' && /^[a-z0-9.\-]{1,40}$/i.test(s))
+  const sites = rawSites.filter((s): s is string => typeof s === 'string' && s !== 'all' && SITE_TAG_RE.test(s))
 
   const popup = typeof body.popup === 'string' && POPUP_IDS.has(body.popup) ? body.popup : ''
   const kind = typeof body.kind === 'string' && /^[a-z0-9-]{1,30}$/i.test(body.kind) ? body.kind : ''

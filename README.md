@@ -45,8 +45,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
 
 - **"Best Sudoku · Overview"** — the landing page: today-at-a-glance KPI tiles (vs the same
   time yesterday and the 7-day average), the **Overall timeline**, a campaign scorecard, and a
-  release before/after panel — each its own movable/editable widget. The KPI tiles, scorecard
-  and release panel are dataset `overview` (see
+  release before/after panel — each its own movable/editable widget. The KPI tiles and the
+  scorecard are **metric cards** (presets `bsk-kpis` and `campaign-scorecard`, see *One metrics
+  registry* below); the release panel is dataset `overview` (see
   [`src/components/widgets/OverviewWidgetBody.vue`](src/components/widgets/OverviewWidgetBody.vue)
   and [`src/lib/overview.ts`](src/lib/overview.ts)). The Overall timeline is a **standard line
   chart** (see *Line charts* below) with five series — page views and tagged arrivals on the left
@@ -95,7 +96,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   **bold** and [links](https://example.com) via a small safe tokenizer
   ([`src/lib/textLite.ts`](src/lib/textLite.ts), never `v-html`) — and attachable to
   any chart as a caption (`widget.notes`) or as its own movable 'note' widget
-  (`widget.noteId`), editable from the chart menu either way.
+  (`widget.noteId`), editable from the chart menu either way. Short UI names (metric and
+  funnel-step labels such as "Game-screen views") are registry entries too, of kind `label`:
+  never a caption and never offered in the caption pickers.
 - **Durable, multi-page dashboards** — layout + chart definitions persist in KV (not
   `localStorage`), so they follow you across devices. Duplicate / rename / delete
   pages; a protected default page with "restore default charts"; per-page filters and
@@ -248,7 +251,8 @@ Cloudflare Pages Functions  (functions/_middleware.ts → functions/api/*.ts)
    │  - /api/completions → completed-game counts from the same D1, by mode × difficulty
    │  - /api/campaigns → Google Ads campaign comparison from the same D1 (funnel, hour-of-day,
    │                      country, daily/cumulative, return visits)
-   │  - /api/overview → today-at-a-glance KPIs, campaign scorecard, release panel
+   │  - /api/overview → the release before/after panel
+   │  - /api/metrics  → one batch of registry metrics/ratios by id (ADR 0003; for the card components)
    │  - /api/ads/readings → the ads routine's readings log + stored spend (D1 gss-stats-ads)
    │  - /api/sites  → auto-builds the merged site list (RUM + beacon, aliases folded)
    │  - /api/config → dashboard layout in KV (backed up once per layout-version bump)
@@ -256,6 +260,21 @@ Cloudflare Pages Functions  (functions/_middleware.ts → functions/api/*.ts)
 Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats-ads)  ·  KV (STATS_CONFIG)
 ```
 
+- **One metrics registry** ([`src/lib/metrics/`](src/lib/metrics), ADR 0003) defines every
+  dashboard number once: its unit, the aggregate "fact" (a fixed, code-reviewed `COUNT(*) …
+  GROUP BY` statement) it is counted from, its params, windows and go-live rules. A percentage is
+  registered only when numerator and denominator share a unit and the numerator is a declared
+  subset of the denominator; an invalid ratio fails at import. Labels are notes-registry entries.
+  `POST /api/metrics` answers a batch of registry ids and params (never SQL): it validates every
+  id and param against the registry, plans the distinct facts (at most 40 statements, else `413`
+  with `maxStatements`), caches each fact on its own in the Cache API, and derives every value in
+  JS with its status (`ok`, `too-few`, `no-data`, `unmeasured`, `partial`), n/d, deltas and a
+  provisional flag for lagged outcomes. **Metric cards** render it: a widget with `card`
+  (`{ preset }` from [`src/lib/metrics/presets.ts`](src/lib/metrics/presets.ts), or a saved spec)
+  shows `MetricCard` ([`src/components/metrics/`](src/components/metrics)) — one batched request
+  per page, following the page's date range and sites, with each card's caveats behind one
+  collapsed "Notes" link and "Updated Xs ago" with ↻ where the card asks for it. The Overview's
+  "Today at a glance" and campaign scorecard are cards since layout version 10.
 - **Two datasets, one dashboard.** RUM (sampled, human-only) and the beacon (every
   real load, sub-country geo) are charted side by side; they're independent and never
   summed.
@@ -488,6 +507,7 @@ per 10 minutes. The dashboard holds no Google Ads credential and never calls the
 | Contributing / conventions | [CLAUDE.md](CLAUDE.md) |
 | Auth design (ADR) | [docs/adr/0002-google-auth.md](docs/adr/0002-google-auth.md) |
 | Ads store decision | [docs/adr/0001-ads-read-store.md](docs/adr/0001-ads-read-store.md) |
+| Metric components design (ADR; registry and endpoint built, cards pending) | [docs/adr/0003-metric-components.md](docs/adr/0003-metric-components.md) |
 | Ads routine prompts | [docs/routines/](docs/routines/) |
 | Geo beacon (companion) | [GoodStuffSoftware/gss-beacon](https://github.com/GoodStuffSoftware/gss-beacon) |
 | Capacity / free-plan limits | [docs/capacity.md](docs/capacity.md) |
@@ -510,6 +530,11 @@ query. Mitigations (`functions/_lib/edgeCache.ts`, `functions/api/geo.ts`, `func
 - `/api/geo` and `/api/stats` responses are cached (Cache API, keyed by the full normalized
   query) with a long TTL for date ranges that end before today (immutable — they can't change)
   and a short TTL for ranges that include today.
+
+- `/api/metrics` caches per fact (90 s while live, 15 min for a closed campaign, 24 h for a closed
+  flight window), so one fact read serves every card and page that shows it; a representative
+  Overview batch reads about 10,000 rows uncached against about 14,100 for the same sections of
+  `/api/overview` (docs/capacity.md §7).
 
 No index changes and no schema/data writes were needed — see docs/capacity.md §4 for why (the
 `hits` table is too small for an index to matter, and `GROUP BY` requires a temp b-tree
@@ -539,28 +564,44 @@ Single Cloudflare account — no account-ID env needed. Pages project: **gss-sta
 
 The saved dashboard layout lives in KV (`STATS_CONFIG`, key `dashboard:default`). Each time a
 release bumps the layout version (`CONFIG_VERSION` in `src/lib/defaults.ts`), the first save
-of the migrated layout first copies the previous one to `dashboard:default:backup:v<old>`,
-once, and never overwrites that copy (`functions/api/config.ts`; if the backup can't be
-written, the save fails and the old layout stays). A tab still running older code gets `409`
-("This tab is out of date, reload") instead of overwriting a newer layout.
+of the migrated layout first copies the layout that was stored until then to
+`dashboard:default:backup:v<stored version>`, once, and never overwrites that copy
+(`functions/api/config.ts`; if the backup can't be written, the save fails and the old layout
+stays). The backup is named after the version that was **stored**, not the one before the new
+code: a layout still stored at v8 when v10 ships is backed up as `backup:v8`. A tab still
+running older code gets `409` ("This tab is out of date, reload") instead of overwriting a
+newer layout.
 
-To put a backup back (e.g. the v8 layout after a bad v9 migration):
+**Rolling the code back needs the layout rolled back too.** An older release refuses to save
+over a newer stored layout (409), so after rolling back to v0.9.0 (layout v9), for example,
+every save fails until the stored layout is back at the version that release writes.
+
+To put a backup back, in this order:
 
 1. **Close every dashboard tab**, on every device. An open tab saves its in-memory layout on the
    next change and would overwrite what you restore.
 2. **Roll back or fix the code first.** If the deployed code still has the bad migration, the
-   next load migrates the restored layout again. Either redeploy the previous release (its
-   `CONFIG_VERSION` matches the backup) or ship the fixed migration.
-3. Keep a copy of what's there now, then restore (namespace id from `wrangler.toml`; a token
-   with Workers KV Storage: Edit):
+   next load migrates the restored layout again. Either redeploy the previous release or ship
+   the fixed migration.
+3. **Find the backup to restore**: list the backup keys, and pick the version that was stored
+   before the upgrade (the highest one below the current `CONFIG_VERSION`; on production today
+   that is `backup:v8`). Namespace id from `wrangler.toml`; a token with Workers KV Storage: Edit.
+
+   ```bash
+   npx wrangler kv key list --remote --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --prefix "dashboard:default:backup:"
+   ```
+
+4. **Download it, keep a copy of what's there now, and check the file before writing it back**:
+   it must be non-empty, valid JSON with a `pages` array. Only then put it.
 
    ```bash
    npx wrangler kv key get "dashboard:default" --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-current.json
-   npx wrangler kv key get "dashboard:default:backup:v8" --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-v8.json
-   npx wrangler kv key put "dashboard:default" --path layout-v8.json --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote
+   npx wrangler kv key get "dashboard:default:backup:v8" --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-backup.json
+   node -e "const c=JSON.parse(require('fs').readFileSync('layout-backup.json','utf8')); if(!Array.isArray(c.pages)||!c.pages.length) throw new Error('not a layout'); console.log('ok: version', c.version, '-', c.pages.length, 'pages')"
+   npx wrangler kv key put "dashboard:default" --path layout-backup.json --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote
    ```
 
-4. Open one tab and check the layout before opening any others.
+5. Open one tab and check the layout before opening any others.
 
 ## Auth
 

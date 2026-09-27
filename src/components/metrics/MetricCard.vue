@@ -1,0 +1,190 @@
+<script setup lang="ts">
+// The metric-card family's entry point (ADR 0003 section 1, "Rendering"): resolves a widget's
+// `card: CardRef` — `{ preset }` through the preset registry, or an inline `{ spec }` — into a
+// CardSpec, expands its top-level `repeat` (one card per campaign/pop-up/window/reading, or a
+// single unrepeated instance such as the KPI tiles), and renders each through
+// MetricCardInstance. A repeated card gets the scorecard's bordered box; an unrepeated one
+// renders its sections directly, since its tiles are the boxes.
+//
+// It also owns what belongs to the whole card:
+// - the ET day. `todayEt` follows a clock (or the `nowMs` seam), not the first render: when the
+//   day changes, the body remounts (repeats such as "flighting today" re-expand, every item
+//   rebuilds its request), and "today so far" values are re-requested (the day is part of the
+//   client cache key, useMetrics' `epoch`);
+// - freshness (CardSpec.showUpdated): "Updated Xs ago" from the card's latest successful load
+//   plus a reload control, in the header (default) or a footer;
+// - errors: while any value on the card failed to load, "Updated" gives way to an error line
+//   with Retry, whether or not showUpdated is set.
+import { computed, effectScope, onBeforeUnmount, onMounted, onScopeDispose, ref, shallowRef, watch, type EffectScope } from 'vue'
+import { useMetrics, type MetricRequestSpec, type UseMetrics } from '../../composables/useMetrics'
+import { noteRawText } from '../../lib/notes'
+import { resolveLabelTokens } from '../../lib/metrics/render'
+import { presetById } from '../../lib/metrics/presets'
+import { INVALID_CARD_PRESET } from '../../lib/metrics/validate'
+import { buildRequestSpec, flattenSectionItems, ROOT_SCOPE, resolveRepeat, todayEtFrom, type ReadingScope, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
+import type { CardRef, CardSpec, MetricsContext } from '../../lib/metrics/types'
+import MetricCardInstance from './MetricCardInstance.vue'
+import MetricCardStatus from './MetricCardStatus.vue'
+import MetricLabel from './MetricLabel.vue'
+
+const props = defineProps<{
+  cardRef: CardRef
+  context?: MetricsContext
+  readings?: ReadingScope[]
+  /** Test/preview seam — defaults to the real clock. */
+  nowMs?: number
+  /** The widget's own title (ChartCard): names the card for a screen reader when the spec has
+   * no title of its own ("Notes: Today at a glance"). */
+  fallbackTitle?: string
+}>()
+const emit = defineEmits<{ 'open-campaigns': [] }>()
+
+const spec = computed<CardSpec | null>(() => ('preset' in props.cardRef ? (presetById(props.cardRef.preset) ?? null) : props.cardRef.spec))
+
+// ── The clock: freshness text and the ET day ────────────────────────────────────────────────
+const clock = ref(Date.now())
+let ticker: ReturnType<typeof setInterval> | null = null
+onMounted(() => {
+  ticker = setInterval(() => (clock.value = Date.now()), 15_000)
+})
+onBeforeUnmount(() => {
+  if (ticker) clearInterval(ticker)
+})
+const nowMs = computed(() => props.nowMs ?? clock.value)
+const todayEt = computed(() => todayEtFrom(nowMs.value))
+const ctx = computed<RepeatContext>(() => ({ todayEt: todayEt.value, readings: props.readings }))
+const instances = computed<ScopeInstance[]>(() => (spec.value ? resolveRepeat(spec.value.repeat, ctx.value) : []))
+
+// ── Card-level requests (freshness, errors, reload) ─────────────────────────────────────────
+// The card holds its own reference on every request its items make (content-equal requests
+// share one entry, so this costs no fetch). The list depends on the day (a "flighting today"
+// repeat), so it lives in its own effect scope, rebuilt when the day changes and stopped with
+// the component — nothing reactive is ever created loose in a callback.
+function cardRequestSpecs(): MetricRequestSpec[] {
+  const s = spec.value
+  if (!s) return []
+  const out: MetricRequestSpec[] = []
+  for (const scope of instances.value) {
+    for (const section of s.sections) {
+      const pairs =
+        section.layout === 'table'
+          ? resolveRepeat(section.repeat, ctx.value).flatMap((row) => section.items.map((item) => ({ item, scope: row })))
+          : flattenSectionItems(section, scope, ctx.value).filter((fi) => !fi.emptyOf)
+      for (const { item, scope: sc } of pairs) {
+        const r = buildRequestSpec(item, sc)
+        if (r) out.push(r)
+      }
+    }
+  }
+  return out
+}
+const cardMetrics = shallowRef<UseMetrics | null>(null)
+let dayScope: EffectScope | null = null
+function buildCardRequests() {
+  dayScope?.stop()
+  dayScope = effectScope(true)
+  cardMetrics.value = dayScope.run(() => {
+    const m = useMetrics(() => props.context, () => todayEt.value)
+    for (const r of cardRequestSpecs()) m.request(r)
+    return m
+  })!
+}
+buildCardRequests()
+watch(todayEt, buildCardRequests)
+onScopeDispose(() => dayScope?.stop())
+
+/** Refetches every value on this card, bypassing the server cache (ChartCard's reload control
+ * calls this through the component ref too). */
+function reload() {
+  cardMetrics.value?.reloadAll()
+}
+defineExpose({ reload })
+
+const hasError = computed(() => !!cardMetrics.value?.hasError.value)
+const updatedPlacement = computed<'header' | 'footer' | null>(() => {
+  const v = spec.value?.showUpdated
+  return v === true ? 'header' : v === 'header' || v === 'footer' ? v : null
+})
+const updatedText = computed(() => {
+  const at = cardMetrics.value?.lastUpdated.value
+  if (at == null) return ''
+  // Freshness is wall-clock time (the nowMs seam only pins the ET day).
+  const s = Math.max(0, Math.round((Math.max(clock.value, at) - at) / 1000))
+  if (s < 5) return noteRawText('label.card.updatedJustNow')
+  if (s < 60) return noteRawText('label.card.updatedSecondsAgo', { n: s })
+  return noteRawText('label.card.updatedMinutesAgo', { n: Math.round(s / 60) })
+})
+const failedText = noteRawText('label.card.loadFailed')
+const invalidText = noteRawText('label.card.invalid')
+/** Where the status line goes: where showUpdated puts freshness, and in the header when the
+ * card shows no freshness but has an error. Header: an unrepeated card's own header row
+ * (top-right, above the tiles, where the old KPI panel had it), a repeated card above its grid.
+ * Footer: under the card — an error in a footer card shows there too, so Retry is never lost. */
+const statusPlacement = computed<'header' | 'footer' | null>(() => updatedPlacement.value ?? (hasError.value ? 'header' : null))
+const statusInInstanceHeader = computed(() => !spec.value?.repeat && statusPlacement.value === 'header')
+const statusAboveGrid = computed(() => !!spec.value?.repeat && statusPlacement.value === 'header')
+</script>
+
+<template>
+  <!-- A saved card that failed validation on load (normCardRef) is a placeholder, never a crash. -->
+  <p v-if="'preset' in cardRef && cardRef.preset === INVALID_CARD_PRESET" class="metric-card-error">{{ invalidText }}</p>
+  <p v-else-if="!spec" class="metric-card-error">Unknown card{{ 'preset' in cardRef ? ` preset "${cardRef.preset}"` : '' }}.</p>
+  <div v-else class="metric-card-root">
+    <!-- Present from mount and empty until an error, so screen readers announce the change. -->
+    <span class="mc-live" role="status" aria-live="polite">{{ hasError ? failedText : '' }}</span>
+    <div v-if="statusAboveGrid" class="mc-status-row">
+      <MetricCardStatus :has-error="hasError" :updated-text="updatedText" @reload="reload" />
+    </div>
+
+    <!-- Keyed on the ET day: a new day remounts the body, so every repeat and request rebuilds. -->
+    <div v-if="spec.repeat" :key="todayEt" class="metric-card-grid" :style="{ '--mc-min-width': `${spec.minWidth ?? 230}px` }">
+      <MetricCardInstance v-for="(scope, i) in instances" :key="i" :spec="spec" :scope="scope" :ctx="ctx" :context="context" :boxed="true" @open="emit('open-campaigns')" />
+      <p v-if="!instances.length && spec.repeat.empty" class="metric-card-empty">
+        <MetricLabel :tokens="resolveLabelTokens(spec.repeat.empty.label, ROOT_SCOPE, undefined, todayEt)" />
+        <MetricLabel :tokens="resolveLabelTokens(spec.repeat.empty.text, ROOT_SCOPE, undefined, todayEt)" />
+      </p>
+    </div>
+    <MetricCardInstance v-else :key="todayEt" class="metric-card-plain" :spec="spec" :scope="ROOT_SCOPE" :ctx="ctx" :context="context" :boxed="false" :fallback-title="fallbackTitle" @open="emit('open-campaigns')">
+      <template v-if="statusInInstanceHeader" #status>
+        <MetricCardStatus :has-error="hasError" :updated-text="updatedText" @reload="reload" />
+      </template>
+    </MetricCardInstance>
+
+    <div v-if="statusPlacement === 'footer'" class="mc-status-row mc-footer">
+      <MetricCardStatus :has-error="hasError" :updated-text="updatedText" @reload="reload" />
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.metric-card-error {
+  color: rgb(var(--ink-3));
+  font-size: 11.5px;
+}
+.metric-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--mc-min-width, 230px), 1fr));
+  gap: 14px;
+}
+.metric-card-empty {
+  font-size: 11.5px;
+  color: rgb(var(--ink-3));
+}
+.mc-status-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+.mc-footer {
+  margin: 8px 0 0;
+}
+/* The live region: in the accessibility tree, not on screen. */
+.mc-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+</style>

@@ -22,12 +22,16 @@
 // campaign's window (which CAN gain a newly-seen step as its flight runs) doesn't get pinned
 // stale.
 
-import { classifyFunnelPath, etFlightRangeMs, FUNNEL_STEP_ORDER, type CampaignFlight, type FunnelStepKey } from '../../src/lib/campaigns'
-import { buildCacheKeyUrl, ttlSecondsFor, type CacheLike } from './edgeCache'
+//
+// ADR 0003 slice 2: the SQL and the row classification moved into the metrics registry
+// (src/lib/metrics/facts.ts flightPathsSeenStatement, src/lib/metrics/instrumentation.ts
+// notInstrumentedStepsFromRows), where the flightPathsSeen fact and the seenInFlightWindow rule
+// use them too. This thin executor keeps only the D1 call and its cache. Behaviour unchanged.
 
-// The return beacon / funnel-step beacons are web-only (see lib/campaigns.ts module header
-// and BSK_SITE in functions/api/campaigns.ts) — same site scope both callers already used.
-const BSK_SITE = 'bestsudoku-web'
+import { FUNNEL_STEP_ORDER, type CampaignFlight, type FunnelStepKey } from '../../src/lib/campaigns'
+import { flightPathsSeenStatement } from '../../src/lib/metrics/facts'
+import { notInstrumentedStepsFromRows } from '../../src/lib/metrics/instrumentation'
+import { buildCacheKeyUrl, ttlSecondsFor, type CacheLike } from './edgeCache'
 
 /** Funnel steps (excluding 'arrivals', which is always instrumented) that this flight's own
  * serving window never saw ANY hit for, anywhere on site — i.e. genuinely not instrumented
@@ -49,17 +53,9 @@ export async function notInstrumentedFunnelSteps(db: D1Database, campaign: Campa
   const hit = await cache.match(key)
   if (hit) return (await hit.json()) as FunnelStepKey[]
 
-  const [startMs, endMs] = etFlightRangeMs(campaign.flightStart, campaign.flightEnd)
-  const r = await db
-    .prepare(`SELECT path, COUNT(*) AS c FROM hits WHERE site = ? AND ts >= ? AND ts < ? GROUP BY path`)
-    .bind(BSK_SITE, startMs, endMs)
-    .all()
-  const seen = new Set<FunnelStepKey>()
-  for (const x of r.results ?? []) {
-    const step = classifyFunnelPath(String((x as any).path ?? ''))
-    if (step && (Number((x as any).c) || 0) > 0) seen.add(step)
-  }
-  const steps = FUNNEL_STEP_ORDER.filter((k) => k !== 'arrivals' && !seen.has(k))
+  const stmt = flightPathsSeenStatement(campaign)
+  const r = await db.prepare(stmt.sql).bind(...stmt.binds).all()
+  const steps = notInstrumentedStepsFromRows((r.results ?? []).map((x: any) => ({ path: String(x.path ?? ''), c: Number(x.c) || 0 })))
 
   const ttl = ttlSecondsFor(campaign.flightEnd, new Date())
   await cache.put(key, new Response(JSON.stringify(steps), { headers: { 'Content-Type': 'application/json', 'Cache-Control': `max-age=${ttl}` } }))

@@ -6,14 +6,9 @@ import {
   siteWindowClause,
   last7DatesBefore,
   computeDelta,
-  buildKpiTile,
-  notYetTrackingTile,
-  campaignsFlightingOn,
-  returnBeaconLiveToday,
   releaseComparisonWindows,
 } from './overview'
 import { etMidnightUtcMs } from './campaigns'
-import { TRACKING_ACTIVATION_DATE_ET } from './popupEvents'
 
 describe('addEtDays', () => {
   it('shifts forward and backward across a month boundary', () => {
@@ -114,45 +109,6 @@ describe('computeDelta', () => {
   it('deltaPct is null (never Infinity) for a zero comparison, but delta is still real', () => {
     expect(computeDelta(5, 0)).toEqual({ delta: 5, deltaPct: null })
     expect(computeDelta(0, 0)).toEqual({ delta: 0, deltaPct: null })
-  })
-})
-
-describe('buildKpiTile / notYetTrackingTile', () => {
-  it('a tracked metric carries real numbers and both deltas', () => {
-    const tile = buildKpiTile('pv', 'Page views', 42, 30, 35)
-    expect(tile.notYetTracking).toBe(false)
-    expect(tile.today).toBe(42)
-    expect(tile.vsYesterday).toEqual({ delta: 12, deltaPct: 0.4 })
-    expect(tile.vsAvg7?.delta).toBeCloseTo(7, 10)
-  })
-  it('an uninstrumented metric has no numbers at all — never a fake 0', () => {
-    const tile = notYetTrackingTile('completed', 'Games completed')
-    expect(tile.notYetTracking).toBe(true)
-    expect(tile.today).toBeNull()
-    expect(tile.vsYesterday).toBeNull()
-    expect(tile.vsAvg7).toBeNull()
-  })
-})
-
-describe('campaignsFlightingOn', () => {
-  it('finds the Android-launch flight on its own flight days, nobody outside any confirmed flight', () => {
-    expect(campaignsFlightingOn('2026-09-05').map((c) => c.id)).toContain('24215315197')
-    expect(campaignsFlightingOn('2026-01-01')).toEqual([])
-  })
-  it('the retest is now confirmed and serving (2026-09-26..10-02) — it shows as flighting within that window, not outside it', () => {
-    // Corrected 2026-09-26 (ads session): flightStart is no longer null/pending — see
-    // lib/campaigns.ts CAMPAIGNS. Previously this asserted the opposite (never flighting
-    // while pending); see git history for that version.
-    expect(campaignsFlightingOn('2026-09-26').map((c) => c.id)).toContain('24279250691')
-    expect(campaignsFlightingOn('2026-10-02').map((c) => c.id)).toContain('24279250691')
-    expect(campaignsFlightingOn('2026-09-25').map((c) => c.id)).not.toContain('24279250691')
-    expect(campaignsFlightingOn('2026-10-03').map((c) => c.id)).not.toContain('24279250691')
-  })
-})
-
-describe('returnBeaconLiveToday', () => {
-  it('matches TRACKING_ACTIVATION_DATE_ET being set (currently null -> false)', () => {
-    expect(returnBeaconLiveToday()).toBe(TRACKING_ACTIVATION_DATE_ET !== null)
   })
 })
 

@@ -1,9 +1,35 @@
 // "Best Sudoku overview" page (Part C) — pure logic shared by functions/api/overview.ts and
-// components/OverviewPage.vue. Aggregate-only, no joins — same rules as lib/campaigns.ts and
+// the metrics registry. Aggregate-only, no joins — same rules as lib/campaigns.ts and
 // lib/popupEvents.ts, which this module builds on rather than duplicates.
 
-import { etDateFromMs, excludeInstallGapUnmeasured, TRACKING_ACTIVATION_DATE_ET } from './popupEvents'
-import { etMidnightUtcMs, CAMPAIGNS, flightDayIndex, applyExclusions, type CampaignFlight } from './campaigns'
+import { classifyPopupPath, etDateFromMs, excludeInstallGapUnmeasured, isPopupEventPath, POPUPS } from './popupEvents'
+import { etMidnightUtcMs, applyExclusions, parseReturnPath } from './campaigns'
+
+// ── Row classifiers shared by /api/overview and the metrics registry (lib/metrics/) ───────
+// Moved here from functions/api/overview.ts (ADR 0003 slice 2) so the registry reuses them
+// instead of copying them. Behaviour unchanged.
+/** An event beacon, not a screen view — never counts as a page view. isPopupEventPath
+ * (lib/popupEvents.ts POPUP_EVENT_PREFIXES) also covers `/game/complete/` (v1.95.5): without
+ * it, a completed-game beacon would inflate "Page views" the same way it inflated /api/geo
+ * and /api/sites before popupExcludeClause picked it up. */
+export function isEventPath(path: string): boolean {
+  return classifyPopupPath(path) !== null || path.startsWith('/return/') || isPopupEventPath(path)
+}
+/** A `/return/<uc>/<bucket>` row for any bucket after d0. */
+export function isReturnD1Plus(path: string): boolean {
+  const ev = parseReturnPath(path)
+  return !!ev && ev.bucket !== 'd0'
+}
+/** A "shown" row of any registered pop-up (lib/popupEvents.ts POPUPS). */
+export function isPopupShown(path: string): boolean {
+  const ev = classifyPopupPath(path)
+  return !!ev && ev.kind === 'shown' && POPUPS.some((p) => p.id === ev.family)
+}
+/** An "accept" row of any registered pop-up. */
+export function isPopupAccept(path: string): boolean {
+  const ev = classifyPopupPath(path)
+  return !!ev && ev.kind === 'accept' && POPUPS.some((p) => p.id === ev.family)
+}
 
 // ── Shared WHERE-clause builder for the KPI / timeline / release-panel D1 queries ────────
 /** `site IN (...) AND ts >= ? AND ts < ?` plus every row-exclusion rule (see
@@ -99,41 +125,6 @@ export interface Delta {
 }
 export function computeDelta(today: number, compare: number): Delta {
   return { delta: today - compare, deltaPct: compare === 0 ? null : (today - compare) / compare }
-}
-
-// ── KPI tile shape ───────────────────────────────────────────────────────────────────────
-export interface KpiTile {
-  key: string
-  label: string
-  today: number | null // null = notYetTracking
-  vsYesterday: Delta | null
-  vsAvg7: Delta | null
-  notYetTracking: boolean
-}
-export function buildKpiTile(key: string, label: string, today: number, yesterday: number, avg7: number): KpiTile {
-  return {
-    key,
-    label,
-    today,
-    vsYesterday: computeDelta(today, yesterday),
-    vsAvg7: computeDelta(today, avg7),
-    notYetTracking: false,
-  }
-}
-export function notYetTrackingTile(key: string, label: string): KpiTile {
-  return { key, label, today: null, vsYesterday: null, vsAvg7: null, notYetTracking: true }
-}
-
-// ── Which campaigns are actually flighting on a given ET date (dynamic — never a stale
-// hand-set `status` field going out of date) ────────────────────────────────────────────
-export function campaignsFlightingOn(etDate: string): CampaignFlight[] {
-  return CAMPAIGNS.filter((c) => flightDayIndex(c, etDate) !== null)
-}
-
-// ── Return beacon instrumentation (site-wide, not per-campaign — see
-// lib/campaigns.ts returnBeaconNotInstrumented for the per-campaign version) ─────────────
-export function returnBeaconLiveToday(): boolean {
-  return TRACKING_ACTIVATION_DATE_ET !== null
 }
 
 // ── Release panel: N-day window after vs before a release date, N capped by how much

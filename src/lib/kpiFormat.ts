@@ -1,51 +1,18 @@
-// Pure display-formatting helpers for OverviewWidgetBody.vue's "Today at a glance" KPI tiles
-// (fix/clean-look, 2026-09-26) — pulled out of the component so the delta-rounding fix is
-// independently unit-testable without mounting a Vue component. Not shared with
-// CampaignsWidgetBody.vue's own formatters (separate widget, separate ownership area).
-import type { Delta } from './overview'
+// fmtCount (the Overview release panel) and the go-live comparison gate the metrics registry
+// uses for "vs yesterday" / "vs 7d avg" (comparisonGateForGoLive; kpiComparisonGate maps a
+// former KPI tile key to it and is kept as the registry's reference in its tests). The KPI
+// tiles' own formatters retired with the tiles (CONFIG_VERSION 10: the 'bsk-kpis' card).
 import { addEtDays } from './overview'
-import {
-  isInsufficientCohort,
+import {
   etDateFromMs,
   GAME_COMPLETE_LIVE_AT,
   INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS,
   TRACKING_ACTIVATION_DATE_ET,
 } from './popupEvents'
-import { noteRawText } from './notes'
+import { campaignById } from './campaigns'
 
 export function fmtCount(n: number | null | undefined): string {
   return n == null ? '—' : n.toLocaleString('en-US')
-}
-
-export function pct(n: number | null | undefined, denominator?: number): string {
-  if (n == null) return denominator != null && isInsufficientCohort(denominator) ? noteRawText('too-few-to-report') : '—'
-  return `${(n * 100).toFixed(1)}%`
-}
-
-export function counts(numerator: number | null | undefined, denominator: number | null | undefined): string {
-  return numerator == null || denominator == null ? '' : `(${numerator}/${denominator})`
-}
-
-export function money(n: number | null | undefined): string {
-  return n == null ? '—' : `$${n.toFixed(2)}`
-}
-
-// KPI deltas are always a difference of COUNTS (page views, arrivals, …) — including
-// vs-7d-avg, where the average itself is fractional (e.g. 102.142857…), so the raw delta is
-// too unless rounded. Owner-reported regression, 2026-09-26: "vs 7d avg +102.143 (+941%)" read
-// the raw decimal straight through. Sensible precision for a count is an integer; the percent
-// part already rounds to 0 decimals.
-export function deltaLabel(d: Delta | null | undefined): string {
-  if (!d) return ''
-  const rounded = Math.round(d.delta)
-  const sign = rounded > 0 ? '+' : ''
-  const pctPart = d.deltaPct == null ? '' : ` (${d.delta > 0 ? '+' : ''}${(d.deltaPct * 100).toFixed(0)}%)`
-  return `${sign}${rounded.toLocaleString('en-US')}${pctPart}`
-}
-
-export function deltaClass(d: Delta | null | undefined): '' | 'up' | 'down' {
-  if (!d || d.delta === 0) return ''
-  return d.delta > 0 ? 'up' : 'down'
 }
 
 // ── Go-live-boundary gating for "vs yesterday" / "vs 7d avg" (coordinator addition,
@@ -89,6 +56,15 @@ export interface KpiComparisonGate {
   newToday: boolean
 }
 
+/** A per-campaign "Tagged arrivals" tile (`arrivals-<campaignId>`, functions/api/overview.ts) is
+ * gated on its flight's start date: attribution starts there (campaignAttributionClause), so a
+ * comparison day before it is 0 by construction, and the start day itself is partial (the retest
+ * starts at 12:00 ET). Same boundary rule as the go-live constants above (ADR 0003 row 15). */
+function arrivalsTileFlightStart(key: string): string | undefined {
+  if (!key.startsWith('arrivals-')) return undefined
+  return campaignById(key.slice('arrivals-'.length))?.flightStart ?? undefined
+}
+
 const NO_GATE: KpiComparisonGate = { hideVsYesterday: false, hideVsAvg7: false, newToday: false }
 
 /** `todayEt` is the response's own `OverviewResponse.todayEt` (an ET calendar date string —
@@ -96,7 +72,13 @@ const NO_GATE: KpiComparisonGate = { hideVsYesterday: false, hideVsAvg7: false, 
  * KPI_GO_LIVE_ET_DATE (an established metric with no go-live gap, e.g. page views) is never
  * gated. */
 export function kpiComparisonGate(key: string, todayEt: string): KpiComparisonGate {
-  const goLiveEt = KPI_GO_LIVE_ET_DATE[key]
+  return comparisonGateForGoLive((Object.hasOwn(KPI_GO_LIVE_ET_DATE, key) ? KPI_GO_LIVE_ET_DATE[key] : undefined) ?? arrivalsTileFlightStart(key), todayEt)
+}
+
+/** The boundary rule itself, for any go-live ET date: shared with the metrics registry
+ * (lib/metrics/instrumentation.ts), which derives `goLiveEt` from a metric's instrumentation
+ * rules instead of a tile key. undefined/null = never gated. */
+export function comparisonGateForGoLive(goLiveEt: string | null | undefined, todayEt: string): KpiComparisonGate {
   if (!goLiveEt || !todayEt) return NO_GATE
   const yesterdayEt = addEtDays(todayEt, -1)
   const avg7StartEt = addEtDays(todayEt, -7) // earliest day folded into the 7-day average
