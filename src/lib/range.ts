@@ -1,6 +1,6 @@
 // Smart date-range helpers. The filter `since`/`until` are ISO datetime strings
 // (with back-compat for legacy "YYYY-MM-DD" day values).
-import { CAMPAIGNS, etMidnightUtcMs } from './campaigns'
+import { CAMPAIGNS, etMidnightUtcMs, etFlightRangeMs } from './campaigns'
 
 /** A since/until value every API accepts: a YYYY-MM-DD day or an ISO datetime. One copy for
  * every endpoint (functions/api/*) and the metrics request validator (lib/metrics/validate.ts). */
@@ -53,9 +53,45 @@ export function firstCampaignStartMs(): number | null {
   return starts.length ? etMidnightUtcMs(starts[0]) : null
 }
 
-/** Relative token → {since, until} ISO datetimes (until = now): a duration ("7d", "12mo") or
- * SINCE_FIRST_CAMPAIGN. */
+/** The end-side range token, paired with SINCE_FIRST_CAMPAIGN's start: closes the range once
+ * every configured flight is over, instead of always ending "now" — so a chart over every
+ * campaign (the flight-day chart) stops rescanning a growing window and its cache key stops
+ * changing on every load, once there's nothing left to grow. The hour-of-day chart doesn't use
+ * this — it stays open-ended (SINCE_FIRST_CAMPAIGN alone). Typed as "since first campaign until
+ * last campaign ends" in a range field; stored as SINCE_FIRST_UNTIL_LAST_CAMPAIGN in `rangeRel`. */
+export const UNTIL_LAST_CAMPAIGN_ENDS = 'until last campaign ends'
+export const SINCE_FIRST_UNTIL_LAST_CAMPAIGN = `${SINCE_FIRST_CAMPAIGN} ${UNTIL_LAST_CAMPAIGN_ENDS}`
+export function isSinceFirstUntilLastCampaign(input: string | undefined | null): boolean {
+  return (input || '').trim().toLowerCase() === SINCE_FIRST_UNTIL_LAST_CAMPAIGN
+}
+/** ET midnight of the day after the LATEST configured flight's end, or null while any flight is
+ * open-ended (no confirmed start — can't bound it) or hasn't reached its own end yet (active or
+ * upcoming as of now) — i.e. not every flight is over. Recomputed on every call from the current
+ * time, so it flips from null (range stays open, ending "now") to a fixed instant (range closes)
+ * the moment the last flight's window ends, with no manual step (e.g. flipping a campaign's
+ * `status`) required. */
+export function lastCampaignEndMs(): number | null {
+  const now = Date.now()
+  let latest: number | null = null
+  for (const c of CAMPAIGNS) {
+    if (c.flightStart == null) return null // open-ended: no window to close on
+    const endBoundMs = etFlightRangeMs(c.flightStart, c.flightEnd)[1] // ET midnight, day after flightEnd
+    if (now < endBoundMs) return null // still active/upcoming: keep the range growing
+    if (latest == null || endBoundMs > latest) latest = endBoundMs
+  }
+  return latest
+}
+
+/** Relative token → {since, until} ISO datetimes: a duration ("7d", "12mo"), SINCE_FIRST_CAMPAIGN
+ * (until = now), or SINCE_FIRST_UNTIL_LAST_CAMPAIGN (until = now while any flight is open-ended
+ * or still running, else the fixed instant every flight has ended by). */
 export function relativeRange(input: string): { since: string; until: string } | null {
+  if (isSinceFirstUntilLastCampaign(input)) {
+    const start = firstCampaignStartMs()
+    if (start == null) return null
+    const end = lastCampaignEndMs()
+    return { since: new Date(start).toISOString(), until: new Date(end ?? Date.now()).toISOString() }
+  }
   if (isSinceFirstCampaign(input)) {
     const start = firstCampaignStartMs()
     return start == null ? null : { since: new Date(start).toISOString(), until: new Date().toISOString() }
@@ -87,7 +123,7 @@ export function ymdRangeToISO(fromYmd: string, toYmd: string): { since: string; 
 /** Human label for a range: "Last 24h" / "Last 7d" when it ends ~now, else "Jun 1 – Jun 26";
  * "Since first campaign" when the stored relative token (`rel`) is that range. */
 export function rangeLabel(since: string, until: string, rel?: string): string {
-  if (isSinceFirstCampaign(rel)) return 'Since first campaign'
+  if (isSinceFirstCampaign(rel) || isSinceFirstUntilLastCampaign(rel)) return 'Since first campaign'
   const s = new Date(since).getTime()
   const u = new Date(until).getTime()
   if (!isFinite(s) || !isFinite(u)) return ''
