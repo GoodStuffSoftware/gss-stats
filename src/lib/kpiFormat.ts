@@ -106,7 +106,7 @@ const NO_GATE: KpiComparisonGate = { hideVsYesterday: false, hideVsAvg7: false, 
  * KPI_GO_LIVE_ET_DATE (an established metric with no go-live gap, e.g. page views) is never
  * gated. */
 export function kpiComparisonGate(key: string, todayEt: string): KpiComparisonGate {
-  return comparisonGateForGoLive(KPI_GO_LIVE_ET_DATE[key] ?? arrivalsTileFlightStart(key), todayEt)
+  return comparisonGateForGoLive((Object.hasOwn(KPI_GO_LIVE_ET_DATE, key) ? KPI_GO_LIVE_ET_DATE[key] : undefined) ?? arrivalsTileFlightStart(key), todayEt)
 }
 
 /** The boundary rule itself, for any go-live ET date: shared with the metrics registry

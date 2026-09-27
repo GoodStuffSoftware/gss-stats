@@ -76,3 +76,8 @@ export const PRESETS: Readonly<Record<string, CardSpec>> = {
   'campaign-scorecard': CAMPAIGN_SCORECARD,
   'bsk-kpis': BSK_KPIS,
 }
+
+/** A preset by id — an own key only, so a stored `{ preset: 'constructor' }` is simply unknown. */
+export function presetById(id: string): CardSpec | undefined {
+  return typeof id === 'string' && Object.hasOwn(PRESETS, id) ? PRESETS[id] : undefined
+}
