@@ -20,7 +20,7 @@ const props = defineProps<{
   barMax?: number
 }>()
 
-const vm = useMetricItemViewModel(props.item, props.scope, props.context, props.todayEt)
+const vm = useMetricItemViewModel(props.item, props.scope, () => props.context, props.todayEt)
 
 const barPct = computed(() => {
   if (props.item.display.as !== 'bar' || !props.barMax) return 0

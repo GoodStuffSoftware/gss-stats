@@ -5,14 +5,22 @@
 // one cache entry and one fetch, and a request that no consumer wants any more is dropped from
 // a batch that hasn't gone out yet or aborted if its POST is already in flight.
 //
-// No watcher is created here. The v0.8.0 campaignsData leak (lib/campaignsData.ts) was a
+// Effect-scope discipline. The v0.8.0 campaignsData leak (lib/campaignsData.ts) was a
 // `watch()` registered inside an async continuation, after Vue's synchronous effect-scope
 // tracking had already closed — so it was never tied to the calling component and never
-// stopped on unmount. This composable sidesteps the whole class of bug: cleanup is a single
-// `onScopeDispose` callback per request, registered synchronously in `request()`'s own call
-// (which must happen during a component's `setup()`, exactly like `campaignsData`'s outer
-// `watch(campaigns, ...)` does) — never inside a `.then()`/`async` continuation.
-import { getCurrentScope, onScopeDispose, shallowRef, type ShallowRef } from 'vue'
+// stopped on unmount. Everything reactive here — the one context watcher, the per-request
+// `computed`, the one `onScopeDispose` — is created synchronously inside `useMetrics()` or
+// `request()`, which must run during a component's `setup()`. A context change re-points each
+// consumer at a different cache entry; it never creates a watcher.
+//
+// Page context (since/until/sites/…) may be a ref or a getter: when it changes after mount,
+// every request this instance holds is re-planned against the new context (new cache keys,
+// one new coalesced batch) and the old entries are released, so a card follows the page's
+// main filter bar. Stale responses are dropped at the entry: only the POST most recently
+// dispatched for an entry may write it (`entry.inflight === inflight`), so a slow ordinary
+// fetch resolving after a reload, or after a context flip A → B → A, can never overwrite a
+// fresher value.
+import { computed, getCurrentScope, onScopeDispose, shallowRef, toValue, watch, type MaybeRefOrGetter, type Ref, type ShallowRef } from 'vue'
 import { etMidnightUtcMs } from '../lib/campaigns'
 import { addEtDays } from '../lib/overview'
 import type { MetricsContext, MetricsRequestBody, MetricsResponseBody, MetricValue } from '../lib/metrics/types'
@@ -118,13 +126,16 @@ export function safeResultLookup(results: Record<string, MetricValue>, key: stri
 // MetricCard on the page, not per-component). ─────────────────────────────────────────────
 interface Inflight {
   controller: AbortController
-  liveKeys: Set<string> // cache keys this in-flight POST still has a live consumer for
+  liveKeys: Set<string> // cache keys this in-flight POST still has a live claim on
 }
 interface CacheEntry {
   spec: MetricRequestSpec
   value: ShallowRef<MetricValue | undefined>
+  /** When this entry last received a successful response (epoch ms), for "Updated Xs ago". */
+  loadedAt: ShallowRef<number | null>
   status: 'pending' | 'ok' | 'error'
   refCount: number
+  /** The POST most recently dispatched for this entry — the only one allowed to write it. */
   inflight?: Inflight
 }
 interface Batch {
@@ -169,6 +180,18 @@ async function flush(batch: Batch) {
   }
 }
 
+/** Points `entry` at a newly dispatched POST. The POST it pointed at before loses its claim on
+ * the entry (its response is stale for it now), and is aborted once nothing else wants it. */
+function claimEntry(entry: CacheEntry, cKey: string, inflight: Inflight) {
+  const prev = entry.inflight
+  if (prev && prev !== inflight) {
+    prev.liveKeys.delete(cKey)
+    if (prev.liveKeys.size === 0) prev.controller.abort()
+  }
+  entry.inflight = inflight
+  inflight.liveKeys.add(cKey)
+}
+
 async function sendChunk(batch: Batch, reqKeys: string[]) {
   const controller = new AbortController()
   const inflight: Inflight = { controller, liveKeys: new Set() }
@@ -177,8 +200,7 @@ async function sendChunk(batch: Batch, reqKeys: string[]) {
     const cKey = cacheKeyOf(batch.contextKey, reqKey)
     const entry = cache.get(cKey)
     if (!entry || entry.refCount <= 0) continue
-    entry.inflight = inflight
-    inflight.liveKeys.add(cKey)
+    claimEntry(entry, cKey, inflight)
     requests.push({
       key: reqKey,
       ...(entry.spec.metric !== undefined ? { metric: entry.spec.metric } : { ratio: entry.spec.ratio }),
@@ -190,96 +212,186 @@ async function sendChunk(batch: Batch, reqKeys: string[]) {
   }
   if (!requests.length) return // every consumer unmounted before this chunk was built
 
+  // The stale-response guard, checked BEFORE any write: only entries this POST still owns may
+  // be written. A later dispatch for the same entry (a reload, or a context flip back to this
+  // key) replaced `entry.inflight`; an entry released and re-created is a different object.
+  const ownedEntries = (): [string, CacheEntry][] => {
+    const out: [string, CacheEntry][] = []
+    for (const reqKey of reqKeys) {
+      const entry = cache.get(cacheKeyOf(batch.contextKey, reqKey))
+      if (entry && entry.inflight === inflight) out.push([reqKey, entry])
+    }
+    return out
+  }
   const body: MetricsRequestBody = { v: 1, requests, ...(batch.context ? { context: batch.context } : {}), ...(batch.fresh ? { fresh: true } : {}) }
   try {
     const res = await fetch(ENDPOINT, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal })
     if (!res.ok) throw new Error(`metrics request failed: ${res.status}`)
     const json = (await res.json()) as MetricsResponseBody
-    for (const reqKey of reqKeys) {
-      const cKey = cacheKeyOf(batch.contextKey, reqKey)
-      const entry = cache.get(cKey)
-      if (!entry) continue
+    const now = Date.now()
+    for (const [reqKey, entry] of ownedEntries()) {
       const result = safeResultLookup(json.results, reqKey)
       entry.value.value = result
       entry.status = result ? 'ok' : 'error'
-      if (entry.inflight === inflight) entry.inflight = undefined
+      if (result) entry.loadedAt.value = now
+      entry.inflight = undefined
     }
   } catch (err) {
     if ((err as { name?: string })?.name === 'AbortError') return // aborted: nobody wants it any more
-    for (const reqKey of reqKeys) {
-      const cKey = cacheKeyOf(batch.contextKey, reqKey)
-      const entry = cache.get(cKey)
-      if (!entry) continue
+    for (const [, entry] of ownedEntries()) {
       entry.status = 'error'
       entry.value.value = { status: 'error', reason: 'fetch-failed' }
-      if (entry.inflight === inflight) entry.inflight = undefined
+      entry.inflight = undefined
     }
   }
+}
+
+function queueFetch(entry: CacheEntry, ctxKey: string, context: MetricsContext | undefined, reqKey: string, fresh: boolean) {
+  entry.status = 'pending'
+  const batch = ensureBatch(ctxKey, context, fresh)
+  batch.keys.add(reqKey)
+  scheduleFlush(batch)
+}
+
+/** Takes one reference on the entry for (context, request), creating it and queueing its fetch
+ * when it is new. */
+function acquireKey(ctxKey: string, context: MetricsContext | undefined, reqKey: string, spec: MetricRequestSpec): CacheEntry {
+  const cKey = cacheKeyOf(ctxKey, reqKey)
+  let entry = cache.get(cKey)
+  if (!entry) {
+    entry = { spec, value: shallowRef(undefined), loadedAt: shallowRef(null), status: 'pending', refCount: 0 }
+    cache.set(cKey, entry)
+    queueFetch(entry, ctxKey, context, reqKey, false)
+  }
+  entry.refCount++
+  return entry
+}
+
+/** Drops one reference; the last one removes the entry, unqueues it and aborts its POST once
+ * that POST has no other live claim. */
+function releaseKey(cKey: string) {
+  const entry = cache.get(cKey)
+  if (!entry) return
+  entry.refCount = Math.max(0, entry.refCount - 1)
+  if (entry.refCount > 0) return
+  const reqKey = reqKeyFromCacheKey(cKey)
+  const ctxKey = cKey.slice(0, cKey.indexOf('::'))
+  for (const batch of batches.values()) if (batch.contextKey === ctxKey) batch.keys.delete(reqKey)
+  if (entry.inflight) {
+    entry.inflight.liveKeys.delete(cKey)
+    if (entry.inflight.liveKeys.size === 0) entry.inflight.controller.abort()
+    entry.inflight = undefined
+  }
+  cache.delete(cKey)
 }
 
 export interface UseMetrics {
   /** Request one metric/ratio value, batched with every other `request()` call across every
    * card on the page. Returns a shared, reactive result — a second card asking for the exact
-   * same request (content-equal, same page context) gets the SAME ref and never triggers a
-   * second fetch. Must be called synchronously during a component's `setup()` (a `MetricItem`
-   * mounted via `v-for` gets its own effect scope, same as any other component). */
-  request(spec: MetricRequestSpec): ShallowRef<MetricValue | undefined>
+   * same request (content-equal, same page context) reads the SAME value and never triggers a
+   * second fetch. It follows the page context: after a context change it reads the new
+   * context's value (undefined while that loads). Must be called synchronously during a
+   * component's `setup()` (a `MetricItem` mounted via `v-for` gets its own effect scope, same
+   * as any other component). */
+  request(spec: MetricRequestSpec): Readonly<Ref<MetricValue | undefined>>
   /** Force a fresh fetch for exactly these specs, bypassing the server's Cache API entry
-   * (`fresh: true`) — ChartCard's reload control, never automatic. Always its own batch, so it
-   * never drags an unrelated pending request into `fresh: true` with it. */
+   * (`fresh: true`) — a reload control, never automatic. Always its own batch, so it never
+   * drags an unrelated pending request into `fresh: true` with it. */
   reload(specs: MetricRequestSpec[]): void
+  /** `reload()` over every spec this instance has requested. */
+  reloadAll(): void
+  /** The latest successful load among this instance's current requests (epoch ms), or null
+   * while none has loaded — MetricCard's "Updated Xs ago". */
+  lastUpdated: Readonly<Ref<number | null>>
 }
 
-export function useMetrics(rawContext?: MetricsContext): UseMetrics {
-  // Normalized ONCE, here, so the context key used for caching/batching and the context object
-  // actually sent in the POST body can never disagree with each other.
-  const context = normalizeContext(rawContext)
-  const ctxKey = contextKey(context)
+interface Consumer {
+  spec: MetricRequestSpec
+  reqKey: string
+  /** The cache entry for the CURRENT context — swapped (never watched) on a context change. */
+  entry: ShallowRef<CacheEntry>
+  /** That entry's cache key, for release. */
+  cKey: string
+}
+
+export function useMetrics(rawContext?: MaybeRefOrGetter<MetricsContext | undefined>): UseMetrics {
+  // Normalized ONCE per context value, so the context key used for caching/batching and the
+  // context object actually sent in the POST body can never disagree with each other.
+  const readContext = () => {
+    const context = normalizeContext(toValue(rawContext))
+    return { context, ctxKey: contextKey(context) }
+  }
+  let current = readContext()
   const scope = getCurrentScope()
-  const owned = new Set<string>() // cache keys this useMetrics() instance holds a refcount on
+  const byReqKey = new Map<string, Consumer>()
+  // Reactive only so lastUpdated re-reads when a consumer is added; the list itself is small.
+  const consumers = shallowRef<Consumer[]>([])
+  let disposed = false
 
-  function release(cKey: string) {
-    const entry = cache.get(cKey)
-    if (!entry) return
-    entry.refCount = Math.max(0, entry.refCount - 1)
-    if (entry.refCount > 0) return
-    const reqKey = reqKeyFromCacheKey(cKey)
-    for (const batch of batches.values()) batch.keys.delete(reqKey)
-    if (entry.inflight) {
-      entry.inflight.liveKeys.delete(cKey)
-      if (entry.inflight.liveKeys.size === 0) entry.inflight.controller.abort()
-    }
-    cache.delete(cKey)
-  }
-
-  function acquire(spec: MetricRequestSpec, fresh: boolean): ShallowRef<MetricValue | undefined> {
+  function addConsumer(spec: MetricRequestSpec): Consumer {
     const reqKey = requestKey(spec)
-    const cKey = cacheKeyOf(ctxKey, reqKey)
-    let entry = cache.get(cKey)
-    const needsFetch = fresh || !entry
-    if (!entry) {
-      entry = { spec, value: shallowRef(undefined), status: 'pending', refCount: 0 }
-      cache.set(cKey, entry)
-    }
-    if (!owned.has(cKey)) {
-      entry.refCount++
-      owned.add(cKey)
-      if (scope) onScopeDispose(() => release(cKey))
-    }
-    if (needsFetch) {
-      entry.status = 'pending'
-      const batch = ensureBatch(ctxKey, context, fresh)
-      batch.keys.add(reqKey)
-      scheduleFlush(batch)
-    }
-    return entry.value
+    const existing = byReqKey.get(reqKey)
+    if (existing) return existing
+    const entry = acquireKey(current.ctxKey, current.context, reqKey, spec)
+    const c: Consumer = { spec, reqKey, entry: shallowRef(entry), cKey: cacheKeyOf(current.ctxKey, reqKey) }
+    byReqKey.set(reqKey, c)
+    consumers.value = [...consumers.value, c]
+    return c
   }
+
+  if (scope) {
+    // Re-plan on a context change: acquire every consumer's entry under the new context first
+    // (so they share one coalesced batch), then release the old ones. Keyed on the normalized
+    // context's stable key, so a new-but-equal context object is not a change.
+    watch(
+      () => readContext().ctxKey,
+      (ctxKey) => {
+        if (disposed || ctxKey === current.ctxKey) return
+        current = readContext()
+        for (const c of consumers.value) {
+          const oldKey = c.cKey
+          c.entry.value = acquireKey(current.ctxKey, current.context, c.reqKey, c.spec)
+          c.cKey = cacheKeyOf(current.ctxKey, c.reqKey)
+          releaseKey(oldKey)
+        }
+      },
+      { flush: 'sync' },
+    )
+    onScopeDispose(() => {
+      disposed = true
+      for (const c of consumers.value) releaseKey(c.cKey)
+      consumers.value = []
+      byReqKey.clear()
+    })
+  }
+
+  function reload(specs: MetricRequestSpec[]) {
+    for (const spec of specs) {
+      const existing = byReqKey.get(requestKey(spec))
+      const c = existing ?? addConsumer(spec)
+      // A brand-new entry has already queued an ordinary fetch; the reload replaces it.
+      if (!existing) for (const b of batches.values()) if (b.contextKey === current.ctxKey && !b.fresh) b.keys.delete(c.reqKey)
+      queueFetch(c.entry.value, current.ctxKey, current.context, c.reqKey, true)
+    }
+  }
+
+  const lastUpdated = computed<number | null>(() => {
+    let max: number | null = null
+    for (const c of consumers.value) {
+      const t = c.entry.value.loadedAt.value
+      if (t != null && (max === null || t > max)) max = t
+    }
+    return max
+  })
 
   return {
-    request: (spec) => acquire(spec, false),
-    reload: (specs) => {
-      for (const spec of specs) acquire(spec, true)
+    request: (spec) => {
+      const c = addConsumer(spec)
+      return computed(() => c.entry.value.value.value)
     },
+    reload,
+    reloadAll: () => reload(consumers.value.map((c) => c.spec)),
+    lastUpdated,
   }
 }
 

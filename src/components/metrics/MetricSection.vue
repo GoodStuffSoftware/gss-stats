@@ -30,7 +30,7 @@ const flatItems = computed<FlatItem[]>(() => (props.section.layout === 'table' ?
 // via the SAME shared useMetrics() cache each MetricItem uses (content-equal requests dedupe
 // and share one fetch) — never inside a computed getter, since request() has side effects
 // (refcounting + onScopeDispose registration) that must run exactly once.
-const { request: requestForMax } = useMetrics(props.context)
+const { request: requestForMax } = useMetrics(() => props.context)
 const barRefs =
   props.section.layout === 'bars'
     ? flattenSectionItems(props.section, props.outerScope, props.ctx)
