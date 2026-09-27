@@ -274,7 +274,7 @@ async function listObjects(f: BinaryFetchLike, bucket: string, token: string, pr
   for (let page = 0; page < 50; page += 1) {
     const qs = new URLSearchParams({ prefix })
     if (pageToken) qs.set('pageToken', pageToken)
-    const res = await f(`${STORAGE_API}/${encodeURIComponent(bucket)}/o?${qs}`, { method: 'GET', headers: {} })
+    const res = await f(`${STORAGE_API}/${encodeURIComponent(bucket)}/o?${qs}`, { method: 'GET', headers: { Authorization: `Bearer ${token}` } })
     const text = await res.text()
     if (!res.ok) throw new Error(`GCS list HTTP ${res.status}: ${text.slice(0, 200)}`)
     const json = JSON.parse(text)
@@ -285,7 +285,7 @@ async function listObjects(f: BinaryFetchLike, bucket: string, token: string, pr
   return items
 }
 async function downloadObject(f: BinaryFetchLike, bucket: string, token: string, name: string): Promise<Buffer> {
-  const res = await f(`${STORAGE_API}/${encodeURIComponent(bucket)}/o/${encodeURIComponent(name)}?alt=media`, { method: 'GET', headers: {} })
+  const res = await f(`${STORAGE_API}/${encodeURIComponent(bucket)}/o/${encodeURIComponent(name)}?alt=media`, { method: 'GET', headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) throw new Error(`GCS download HTTP ${res.status} for ${name.split('/').pop()}`)
   return Buffer.from(await res.arrayBuffer())
 }
