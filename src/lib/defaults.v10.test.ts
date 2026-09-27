@@ -68,6 +68,7 @@ describe('v10: the production layout (sanitised)', () => {
     'bsk-campaigns/cw-cost': 'campaign-cost',
     'bsk-campaigns/cw-funnel': 'campaign-funnel',
     'bsk-campaigns/cw-country': 'campaign-country',
+    'bsk-campaigns/cw-returns': 'campaign-returns',
   }
   it('v9 → current changes exactly the panels, by adding a card, and nothing else', () => {
     const before = widgetsById(PROD_V9 as unknown as DashboardConfig)

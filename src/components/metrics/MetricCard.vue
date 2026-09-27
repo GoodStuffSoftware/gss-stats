@@ -18,7 +18,7 @@
 // - its actions (CardSpec.actions): code-reviewed controls in the status row, e.g. the ads
 //   "Refresh data" button, which reloads the card once a sync ran;
 // - its captions (CardSpec.captions): registry notes under the whole card.
-import { computed, effectScope, onBeforeUnmount, onMounted, onScopeDispose, ref, shallowRef, watch, type EffectScope } from 'vue'
+import { computed, effectScope, onBeforeUnmount, onMounted, onScopeDispose, reactive, ref, shallowRef, watch, type EffectScope } from 'vue'
 import { useMetrics, type MetricRequestSpec, type UseMetrics } from '../../composables/useMetrics'
 import { noteRawText } from '../../lib/notes'
 import { resolveLabelTokens } from '../../lib/metrics/render'
@@ -138,6 +138,16 @@ function onAdsRefreshed(r: RefreshResult) {
   if (r.refreshed) reload()
 }
 const captionIds = computed(() => spec.value?.captions ?? [])
+
+// Repeated instances with nothing to show (MetricCardInstance's `hidden`), by index; reset when
+// the instances are re-expanded (a new day, a new spec).
+const hiddenInstances = reactive(new Set<number>())
+watch(instances, () => hiddenInstances.clear())
+function onHidden(i: number, h: boolean) {
+  if (h) hiddenInstances.add(i)
+  else hiddenInstances.delete(i)
+}
+const allHidden = computed(() => instances.value.length > 0 && instances.value.every((_, i) => hiddenInstances.has(i)))
 </script>
 
 <template>
@@ -156,8 +166,8 @@ const captionIds = computed(() => spec.value?.captions ?? [])
 
     <!-- Keyed on the ET day: a new day remounts the body, so every repeat and request rebuilds. -->
     <div v-if="spec.repeat" :key="todayEt" class="metric-card-grid" :style="{ '--mc-min-width': `${spec.minWidth ?? 230}px` }">
-      <MetricCardInstance v-for="(scope, i) in instances" :key="i" :spec="spec" :scope="scope" :ctx="ctx" :context="context" :boxed="true" @open="emit('open-campaigns')" />
-      <p v-if="!instances.length && spec.repeat.empty" class="metric-card-empty">
+      <MetricCardInstance v-for="(scope, i) in instances" v-show="!hiddenInstances.has(i)" :key="i" :spec="spec" :scope="scope" :ctx="ctx" :context="context" :boxed="true" @open="emit('open-campaigns')" @hidden="(h: boolean) => onHidden(i, h)" />
+      <p v-if="(!instances.length || allHidden) && spec.repeat.empty" class="metric-card-empty">
         <MetricLabel :tokens="resolveLabelTokens(spec.repeat.empty.label, ROOT_SCOPE, undefined, todayEt)" />
         <MetricLabel :tokens="resolveLabelTokens(spec.repeat.empty.text, ROOT_SCOPE, undefined, todayEt)" />
       </p>

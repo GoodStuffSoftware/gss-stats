@@ -5,7 +5,8 @@
 // scope when left unset. Pure functions only — MetricCard.vue and MetricSection.vue call
 // these to decide what to render and what to request, so the expansion is unit-testable
 // without mounting a component.
-import { CAMPAIGNS, campaignById, flightDayIndex, type CampaignFlight } from '../campaigns'
+import { CAMPAIGNS, campaignById, flightDayIndex, sharesReturnTagWith, type CampaignFlight } from '../campaigns'
+import { noteRawText } from '../notes'
 import { etDateFromMs, POPUPS, type PopupDef } from '../popupEvents'
 import { campaignSegmentMarker, UPSELL_SIGNEDOUT_FIX_AT } from '../adsRules'
 import { latestDatedRelease } from '../releases'
@@ -133,6 +134,8 @@ export function scopeField(scope: ScopeInstance, path: ScopePath, todayEt: strin
       const d = m && campaign ? flightDayIndex(campaign, m.boundaryDate) : null
       return d == null ? null : String(d)
     }
+    case 'campaign.returnTagShared':
+      return campaign && sharesReturnTagWith(campaign) ? noteRawText('return-shared-tag') : null
     case 'popup.id':
       return popup ? popup.id : null
     case 'popup.label':

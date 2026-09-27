@@ -20,6 +20,9 @@ export type ScopePath =
    * its flight day, when it falls in this campaign's flight (null otherwise, or while unset). */
   | 'campaign.upsellFixAt'
   | 'campaign.upsellFixFlightDay'
+  /** The shared-tag note when another flight uses the same tag (its return beacons can't be told
+   * apart); null otherwise. */
+  | 'campaign.returnTagShared'
   | 'popup.id'
   | 'popup.label'
   | 'window.label'
@@ -91,6 +94,8 @@ export interface Gating {
   minCohort?: number // may only RAISE the MIN_COHORT floor
   whenUnmeasured?: 'auto' | 'omit' | 'label' // auto = omit for a closed campaign, label otherwise
   whenEmpty?: 'dash' | 'omit' | { note: string } // a field or series with no value
+  /** 'omit': a measured count of exactly 0 is left out (a campaign with no return beacons yet). */
+  whenZero?: 'omit'
 }
 
 export interface RepeatSpec {
@@ -114,12 +119,15 @@ export interface MetricItem {
    * 'inline' (default) as a line under the value; 'compact' behind a small notes toggle next
    * to the label, collapsed by default, so the card keeps its compact look. */
   captionMode?: 'inline' | 'compact'
-  frame?: 'row' | 'pill' | 'tile' // overrides the section layout for this item
+  frame?: 'row' | 'pill' | 'tile' | 'column' // overrides the section layout for this item
   repeat?: RepeatSpec // expands in place, e.g. one tile per flighting campaign
 }
 
 export interface Section {
-  layout: 'rows' | 'pills' | 'tiles' | 'bars' | 'table' // 'table': items are columns, repeat instances are rows
+  /** 'bars': one horizontal bar per row; 'columns': bars side by side, read left to right as a
+   * curve (a value over its bar, the label under it); 'table': items are columns, repeat
+   * instances are rows (or the other way round with `columns`). */
+  layout: 'rows' | 'pills' | 'tiles' | 'bars' | 'columns' | 'table'
   title?: Label
   repeat?: RepeatSpec
   /** 'table' only: the other orientation — items are ROWS (their label in the first cell) and

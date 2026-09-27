@@ -56,6 +56,16 @@
 //   No visible difference: the same steps as rows, US / CA / Other as columns, the same counts,
 //   a closed flight's unmeasured steps omitted. (An active flight's not-yet-seen step reads its
 //   live count on both, as the old table never labelled it.)
+//
+// Return visits (campaigns 'returns' → preset campaign-returns):
+//   RV1 The per-campaign line chart of return rates is a row of bars side by side, d1 to d31-60,
+//       each with its rate and (n/d) (the old counts line "d0=6 · d1=0.0% (0/6) · …" split
+//       onto the bars); d0 is its own row.
+//   RV2 Fewer than MIN_COHORT first tagged loads: the old one line "too few to report (d0 = 3,
+//       need 5)" is the d0 row (3) and "too few to report (n/3)" on each bar.
+//   Same: the same campaigns (a flight that ended before the return beacon existed, and a
+//   campaign with no return beacons yet, are left out); none left → "No return visits recorded
+//   yet."; the rates' lag note is in the card's Notes.
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import MetricCard from './MetricCard.vue'
@@ -300,10 +310,16 @@ describe('the Pop-ups page panels ≡ their /api/popups renderings', () => {
 
 // ── Campaigns page ────────────────────────────────────────────────────────────────────────
 const campaignsWidget = (view: string): Widget => ({ id: `cw-${view}`, i: `cw-${view}`, title: view, type: 'table', dataset: 'campaigns', view, dimension: '', metric: 'pageviews', limit: 1, notes: ['arrivals-caveat', 'spend-source'], x: 0, y: 0, w: 12, h: 10 })
-async function mountOldCampaigns(view: string) {
+async function mountOldCampaigns(view: string, fresh = false) {
   const w = mount(CampaignsWidgetBody, { props: { widget: campaignsWidget(view) } })
   mounted.push(w)
   await settle()
+  // The old body caches /api/campaigns per campaign for the whole module; its own refresh
+  // control re-reads it (after the test swapped the hits table).
+  if (fresh) {
+    await w.find('.cw-head button').trigger('click')
+    await settle()
+  }
   return w
 }
 
@@ -483,5 +499,70 @@ describe('campaign-country ≡ the bespoke country panel', () => {
     expect(body.results.bad).toMatchObject({ status: 'error', reason: 'bad-param' })
     expect(body.results.kpi).toMatchObject({ status: 'error', reason: 'bad-param' }) // no country split on the KPI fact
     expect(d1.statements.filter((s) => s.includes('AS cb'))).toHaveLength(1)
+  })
+})
+
+describe('campaign-returns ≡ the bespoke return-visits panel', () => {
+  const visible = (w: VueWrapper) => w.findAll('.metric-card').filter((c) => (c.element as HTMLElement).style.display !== 'none')
+  function newReturns(w: VueWrapper) {
+    return visible(w).map((c) => ({
+      title: text(c.find('.mc-title').element),
+      d0: [...rows(c as unknown as VueWrapper)].find(([l]) => l === 'First tagged loads (d0)')?.[1],
+      cols: c.findAll('.mi-col').map((col) => [text(col.find('.mi-col-label').element), `${text(col.find('.mi-col-num').element)}${col.find('.mi-col-sub').exists() ? ` ${text(col.find('.mi-col-sub').element)}` : ''}`]),
+    }))
+  }
+  /** Runs `fn` against another hits table (the rest of the fixture, other return rows). */
+  async function withDb<T>(rowsOf: typeof bskFixture, fn: () => Promise<T>): Promise<T> {
+    const saved = db
+    db = openHitsDb()
+    insertHits(db, rowsOf())
+    try {
+      return await fn()
+    } finally {
+      db = saved
+    }
+  }
+
+  it('RV1: the same campaigns, d0 and every bucket\'s rate with its n/d, as bars in bucket order', async () => {
+    const old = await mountOldCampaigns('returns')
+    const oldCols = old.findAll('.return-col').map((c) => ({ title: text(c.find('.fc-label').element), counts: text(c.find('.return-counts').element) }))
+    expect(oldCols.map((c) => c.title)).toEqual(['US+CA web retest']) // Android's flight predates the beacon
+    const card = await mountCard('campaign-returns', FIXTURE_NOW)
+    const got = newReturns(card)
+    expect(got.map((c) => c.title)).toEqual(oldCols.map((c) => c.title))
+    for (const o of oldCols) {
+      const n = got.find((c) => c.title === o.title)!
+      const parts = o.counts.split(' · ')
+      expect(parts[0]).toBe(`d0=${n.d0}`)
+      expect(n.cols.map(([l, v]) => `${l}=${v}`)).toEqual(parts.slice(1))
+      expect(n.cols.map(([l]) => l)).toEqual(['d1', 'd2-7', 'd8-14', 'd15-30', 'd31-60'])
+    }
+  })
+
+  it('RV2: fewer than MIN_COHORT first loads — the d0 row and "too few to report (n/d)" on each bar', async () => {
+    const few = () => bskFixture().map((r) => (String(r.path).startsWith('/return/sudoku_funnel_retest/d0') ? { ...r, n: 3 } : r))
+    await withDb(few, async () => {
+      const old = await mountOldCampaigns('returns', true)
+      expect(text(old.find('.return-col .state').element)).toBe('too few to report (d0 = 3, need 5)')
+      __resetMetricsStateForTests()
+      cache.clear()
+      const card = await mountCard('campaign-returns', FIXTURE_NOW)
+      const [n] = newReturns(card)
+      expect(n.d0).toBe('3')
+      for (const [, v] of n.cols) expect(v).toMatch(/^too few to report \(\d+\/3\)$/)
+    })
+  })
+
+  it('none left: "No return visits recorded yet." on both', async () => {
+    const none = () => bskFixture().filter((r) => !String(r.path).startsWith('/return/'))
+    await withDb(none, async () => {
+      const old = await mountOldCampaigns('returns', true)
+      expect(text(old.find('p.state').element)).toBe('No return visits recorded yet.')
+      __resetMetricsStateForTests()
+      cache.clear()
+      const card = await mountCard('campaign-returns', FIXTURE_NOW)
+      expect(visible(card)).toHaveLength(0)
+      expect(text(card.find('.metric-card-empty').element)).toBe('No return visits recorded yet.')
+    })
   })
 })

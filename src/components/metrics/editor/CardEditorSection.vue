@@ -26,6 +26,7 @@ const LAYOUTS: { value: Section['layout']; label: string }[] = [
   { value: 'pills', label: 'Pills' },
   { value: 'tiles', label: 'Tiles' },
   { value: 'bars', label: 'Bars' },
+  { value: 'columns', label: 'Columns (bars side by side)' },
   { value: 'table', label: 'Table' },
 ]
 

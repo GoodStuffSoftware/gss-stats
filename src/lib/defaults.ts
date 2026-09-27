@@ -345,7 +345,7 @@ export function defaultCampaignsWidgets(): Widget[] {
     w({ id: 'cw-flightday', title: 'Daily arrivals by flight day', type: 'table', dataset: 'campaigns', view: 'flightDay', dimension: '', metric: 'pageviews', limit: 1, notes: ['arrivals-caveat', 'flight-day-caption'], x: 0, y: 32, w: 12, h: 10 }),
     w({ id: 'cw-cost', title: 'Cost per arrival / auth success', type: 'table', dataset: 'campaigns', view: 'cost', card: { preset: 'campaign-cost' }, dimension: '', metric: 'pageviews', limit: 1, notes: ['arrivals-caveat', 'spend-source'], x: 0, y: 42, w: 12, h: 9 }),
     deviceMixWidget({ x: 0, y: 51, w: 12, h: 12 }),
-    w({ id: 'cw-returns', title: 'Return visits', type: 'table', dataset: 'campaigns', view: 'returns', dimension: '', metric: 'pageviews', limit: 1, notes: ['play-tracking-status', 'return-rate-caption'], x: 0, y: 63, w: 12, h: 11 }),
+    w({ id: 'cw-returns', title: 'Return visits', type: 'table', dataset: 'campaigns', view: 'returns', card: { preset: 'campaign-returns' }, dimension: '', metric: 'pageviews', limit: 1, notes: ['play-tracking-status', 'return-rate-caption'], x: 0, y: 63, w: 12, h: 11 }),
     w({
       id: 'cw-note-attrib',
       title: 'Attribution note',
@@ -557,6 +557,7 @@ export const CARD_PRESET_FOR_PANEL: Readonly<Record<string, string>> = Object.fr
     'campaigns:cost': 'campaign-cost',
     'campaigns:funnel': 'campaign-funnel',
     'campaigns:country': 'campaign-country',
+    'campaigns:returns': 'campaign-returns',
   }),
 )
 const CARD_PRESETS_FROM_PANELS = new Set(Object.values(CARD_PRESET_FOR_PANEL))
