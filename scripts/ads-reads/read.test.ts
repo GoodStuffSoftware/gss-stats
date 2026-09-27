@@ -300,6 +300,61 @@ describe('morning-read: quiet days, the hard cap and release health', () => {
     expect(r.spend.ok).toBe(true)
     expect(r.errors).toEqual([]) // diagnostic failures are their own section, never the top-level errors
   })
+  it('playReports (R4): "not read" when --play-sa was not given (deps.playReports absent), and null in health-only mode', async () => {
+    const r = await runMorningRead(fixtureDeps(base(), true), opts)
+    expect(r.playReports).toMatchObject({ ok: false, error: 'not read (--play-sa not given)' })
+    expect(r.playReports!.retentionNote).toMatch(/NOT available/)
+    expect(r.playReports!.checkpoints).toEqual([])
+    const health = await runMorningRead(fixtureDeps(base(), false), { ...opts, healthOnly: true })
+    expect(health.playReports).toBeNull()
+  })
+  it('playReports (R4): populates installs/acquisition/checkpoints when the source reads, using the campaign flightStart as `since`', async () => {
+    const deps = fixtureDeps(base(), true)
+    let seenOpts: { since: string; until: string; flightStart: string; cumulativeSpend: number } | null = null
+    const withPlay = {
+      ...deps,
+      playReports: {
+        read: async (o: { since: string; until: string; flightStart: string; cumulativeSpend: number }) => {
+          seenOpts = o
+          return {
+            ok: true,
+            error: null,
+            bucket: 'pubsite_prod_test',
+            installsThrough: '2026-09-27',
+            storePerformanceThrough: '2026-09-26',
+            installsLagDays: 2,
+            storePerformanceLagDays: 3,
+            installsByDay: [{ date: '2026-09-27', deviceInstalls: 4, userInstalls: 4, deviceUninstalls: 0, activeDeviceInstalls: 20 }],
+            acquisitionByCountry: [{ date: '2026-09-26', dimension: 'US', visitors: 10, acquisitions: 2, conversionRate: 0.2 }],
+            acquisitionBySource: [{ date: '2026-09-26', dimension: 'Google Ads', visitors: 8, acquisitions: 1, conversionRate: 0.125 }],
+            retentionNote: 'day-1/day-7 retention is NOT available from Play bulk reports: test note',
+            householdNote: "Play device/install counts include the developer's own household devices",
+            checkpoints: [{ threshold: 50, crossed: false, status: 'not yet crossed' as const, detail: 'cumulative spend $36.70 has not reached $50 yet' }],
+            errors: [],
+          }
+        },
+      },
+    }
+    const r = await runMorningRead(withPlay, opts)
+    expect(seenOpts).toMatchObject({ since: '2026-09-26', flightStart: '2026-09-26' }) // campaign's own flight start, not a rolling window
+    expect(r.playReports).toMatchObject({ ok: true, bucket: 'pubsite_prod_test', installsThrough: '2026-09-27' })
+    expect(r.playReports!.installsByDay).toEqual([{ date: '2026-09-27', deviceInstalls: 4, userInstalls: 4, deviceUninstalls: 0, activeDeviceInstalls: 20 }])
+    const text = formatMorningReport(r)
+    expect(text).toMatch(/installs by day, horizon 2026-09-27 \(2-day lag, includes the developer's own household devices/)
+    expect(text).toMatch(/2026-09-27: 4 device installs, 4 user installs, 0 uninstalls, 20 active devices/)
+    expect(text).toMatch(/\$50 cumulative-spend Play-install checkpoint \(informational, never a kill rule\): \[not yet crossed\]/)
+    expect(text).toMatch(/day-1\/day-7 retention: day-1\/day-7 retention is NOT available/)
+    expect(r.notify).toEqual((await runMorningRead(deps, opts)).notify) // Play data never changes notify.push/busCopy/reason/text
+  })
+  it('playReports (R4): a source that throws is caught and reported as a failed read, never blocking the rest of the morning read', async () => {
+    const deps = fixtureDeps(base(), true)
+    const withFailingPlay = { ...deps, playReports: { read: async () => { throw new Error('GCS 403') } } }
+    const r = await runMorningRead(withFailingPlay, opts)
+    expect(r.playReports).toMatchObject({ ok: false })
+    expect(r.playReports!.error).toMatch(/GCS 403/)
+    expect(r.spend.ok).toBe(true)
+    expect(r.errors).toEqual([]) // a failed Play read is its own section, never the top-level errors
+  })
   it('the evening backstop evaluates on a day that served ads; 2 post-fix install accepts are only a watch', async () => {
     const fx = base()
     fx.now = '2026-09-30T03:30:00Z' // 23:30 ET on 09-29
