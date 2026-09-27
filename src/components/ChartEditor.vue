@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { reactive, computed, watch } from 'vue'
-import type { Widget, LineSeries } from '../types'
+import type { Widget, LineSeries, GlobalFilters } from '../types'
 import {
   DIMENSIONS,
   GEO_DIMENSIONS,
@@ -20,8 +20,17 @@ import {
 import { ringDims, RING_SOFT_CAP, isDateDim } from '../lib/rings'
 import { BEST_SUDOKU_SITES, syncCardWithView } from '../lib/defaults'
 import { noteOptions, defaultNoteIdsForScope, type NoteScope } from '../lib/notes'
+import CardEditor from './metrics/CardEditor.vue'
+import { metricsContextFor } from '../lib/metrics/pageContext'
+import { resolveSelection } from '../sitesStore'
+import type { MetricsContext } from '../lib/metrics/types'
 
-const props = defineProps<{ widget: Widget; isNew: boolean }>()
+// `filters` is the page's main filter bar (App.vue's `activePage.filters`) — used ONLY to build
+// the metric-card preview's context (the same range/sites a saved card would read); every other
+// field here is unaffected by it, same as before this prop existed.
+// `filters` is optional defensively (a caller that hasn't wired it yet still gets a working
+// editor — the card preview just has no page range for a `window: 'page'` item until it does).
+const props = defineProps<{ widget: Widget; isNew: boolean; filters?: GlobalFilters }>()
 const emit = defineEmits<{ save: [Widget]; cancel: []; remove: [] }>()
 
 // Series/axis titles are nested objects: copy them, so Cancel leaves the saved widget untouched.
@@ -254,6 +263,42 @@ watch(
   },
 )
 
+// ── Metric card (ADR 0003, phase B): a widget with `card` set replaces every chart-only field
+// below with CardEditor. Gated on `!!draft.card`, the SAME condition ChartCard.vue's own
+// dispatch uses (`v-if="widget.card"`) — never on `draft.type`, which a card widget's renderer
+// ignores entirely — so a widget migrated from the old bespoke Overview panels (still
+// `type: 'table'`, `dataset: 'overview'`, `card` set by the v10 migration) opens as a card here
+// too, whatever its own stored type says. `draft.type` is deliberately left untouched by any of
+// this: ChartCard never reads it for a card widget, so there is no need for a dedicated 'card'
+// ChartType value (that would touch the shared ChartType union / CHART_TYPES catalog, outside
+// this integration's file list).
+const isCardWidget = computed(() => !!draft.card)
+const CARD_DEFAULT_PRESET = 'campaign-scorecard'
+/** "Add chart" → "Metric card": the button below sets a default preset the owner can then
+ * customize (CardEditor's own preset → Customize… flow). */
+function makeCardWidget() {
+  draft.card = { preset: CARD_DEFAULT_PRESET }
+}
+function leaveCardMode() {
+  draft.card = undefined
+}
+/** CardEditor needs a non-optional CardRef; the template only mounts it while isCardWidget is
+ * true, which is exactly when draft.card is set — the `!` reflects that guarantee. */
+const cardModel = computed<import('../lib/metrics/types').CardRef>({
+  get: () => draft.card!,
+  set: (v) => {
+    draft.card = v
+  },
+})
+/** The same page-context shape ChartCard.vue builds for a saved card (lib/metrics/pageContext.ts
+ * metricsContextFor) — the widget's own site override if set, else the page's filter bar — so
+ * the live preview reads the same window a saved card would. */
+const cardContext = computed<MetricsContext>(() => {
+  const f = draft.filters ?? props.filters
+  if (!f) return {}
+  return metricsContextFor({ since: f.since, until: f.until }, resolveSelection(draft.siteSel ?? f.siteSel).tags)
+})
+
 const typeDef = computed(() => CHART_TYPES.find((t) => t.value === draft.type))
 // "Site override" = Widget.siteSel: this chart's own site pick, replacing the page's (dates and
 // every other page filter still apply). Best Sudoku is its beacon tags (web + app).
@@ -325,27 +370,43 @@ function save() {
         <input type="text" v-model="draft.title" placeholder="Chart title" />
       </div>
 
-      <div class="field" v-if="!isNote">
-        <label>Data source</label>
-        <select v-model="draft.dataset" @change="onDatasetChange">
-          <option v-for="d in DATASETS" :key="d.value" :value="d.value === 'rum' ? undefined : d.value">{{ d.label }}</option>
-        </select>
-      </div>
+      <template v-if="!isCardWidget">
+        <div class="field" v-if="!isNote">
+          <label>Data source</label>
+          <select v-model="draft.dataset" @change="onDatasetChange">
+            <option v-for="d in DATASETS" :key="d.value" :value="d.value === 'rum' ? undefined : d.value">{{ d.label }}</option>
+          </select>
+        </div>
 
-      <div class="row">
-        <div class="field">
-          <label>Chart type</label>
-          <select v-model="draft.type">
-            <option v-for="t in CHART_TYPES" :key="t.value" :value="t.value">{{ t.label }}</option>
-          </select>
+        <div class="row">
+          <div class="field">
+            <label>Chart type</label>
+            <select v-model="draft.type">
+              <option v-for="t in CHART_TYPES" :key="t.value" :value="t.value">{{ t.label }}</option>
+            </select>
+          </div>
+          <div class="field" v-if="!isGeo && !isPopup && !isBespokeDataset && !isNote">
+            <label>Metric</label>
+            <select v-model="draft.metric">
+              <option v-for="m in METRICS" :key="m.value" :value="m.value">{{ m.label }}</option>
+            </select>
+          </div>
         </div>
-        <div class="field" v-if="!isGeo && !isPopup && !isBespokeDataset && !isNote">
-          <label>Metric</label>
-          <select v-model="draft.metric">
-            <option v-for="m in METRICS" :key="m.value" :value="m.value">{{ m.label }}</option>
-          </select>
+
+        <!-- "Add chart" → "Metric card" (ADR 0003, phase B): reusable, configurable stat/table
+             cards, distinct from the fixed chart types above — see CardEditor.vue. -->
+        <div class="field" v-if="!isNote">
+          <button type="button" class="btn" @click="makeCardWidget">Make this a metric card instead</button>
         </div>
-      </div>
+      </template>
+
+      <!-- A metric card (ADR 0003, phase B) replaces every chart-only field below it: label/
+           data/display per item, sections, live preview — see CardEditor.vue. -->
+      <template v-if="isCardWidget">
+        <p class="hint">This chart is a metric card.</p>
+        <button type="button" class="btn" @click="leaveCardMode">Switch to a regular chart</button>
+        <CardEditor v-model="cardModel" :context="cardContext" />
+      </template>
 
       <!-- Note: pick a registry entry, or write custom text (owner requirement, 2026-09-26:
            every note/caveat/explanatory block goes through the shared registry — see
@@ -388,6 +449,7 @@ function save() {
         </div>
       </div>
 
+      <template v-if="!isCardWidget">
       <!-- Overview / campaigns / ads-readings datasets: a View picker replaces the
            dimension/breakdown/metric/site-override fields below (not applicable to them). -->
       <div class="row" v-if="isBespokeDataset">
@@ -573,6 +635,7 @@ function save() {
           <input type="text" :value="axisTitlesValue('right')" @input="setAxisTitle('right', ($event.target as HTMLInputElement).value)" />
         </div>
       </div>
+      </template>
 
       <div class="actions">
         <button v-if="!isNew" class="btn danger" @click="emit('remove')">Delete</button>
