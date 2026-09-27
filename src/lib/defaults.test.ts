@@ -557,7 +557,7 @@ describe('normalizeConfig — v9 migration (Overview timeline → standard line 
     const ov = norm.pages.find((p) => p.id === 'bsk-overview')!
     expect(ov.widgets.map((w) => w.id)).toEqual(['ow-kpis', 'ow-timeline', 'mine'])
     const tl = ov.widgets[1]
-    expect(tl).toMatchObject({ type: 'line', dataset: 'geo', dimension: 'date', title: 'My timeline', x: 1, y: 11, w: 10, h: 13, isDefault: true, markers: 'releases', goLiveMarkers: true, flightBands: true })
+    expect(tl).toMatchObject({ type: 'line', dataset: 'geo', dimension: 'dateEt', title: 'My timeline', x: 1, y: 11, w: 10, h: 13, isDefault: true, markers: 'releases', goLiveMarkers: true, flightBands: true })
     expect(tl.view).toBeUndefined()
     expect(tl.series?.length).toBe(5)
     expect(tl.notes).toEqual(['overview-timeline-caption'])

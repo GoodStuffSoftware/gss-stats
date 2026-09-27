@@ -31,6 +31,21 @@ export function etOffsetHours(ms: number): -4 | -5 {
   return ms >= start && ms < end ? -4 : -5
 }
 
+/** SQL expression giving a row's ET calendar date (YYYY-MM-DD) from its `ts` column (UTC ms) —
+ * the SQL twin of etDateFast, with the same US DST rule: EDT (-4 h) inside each year's
+ * [second Sunday of March 07:00Z, first Sunday of November 06:00Z), EST (-5 h) otherwise. The
+ * EDT windows are computed here for `fromYear`..`toYear` and inlined as integers (constants
+ * only, never request input); a row outside those years falls back to EST. Used by the
+ * geo 'dateEt' dimension (functions/api/geo.ts). */
+export function etDateSql(fromYear = 2024, toYear = 2040): string {
+  const windows: string[] = []
+  for (let y = fromYear; y <= toYear; y++) {
+    const [start, end] = dstBounds(y)
+    windows.push(`(ts >= ${start} AND ts < ${end})`)
+  }
+  return `date((ts + CASE WHEN ${windows.join(' OR ')} THEN ${-4 * HOUR} ELSE ${-5 * HOUR} END) / 1000, 'unixepoch')`
+}
+
 const pad = (n: number) => (n < 10 ? `0${n}` : String(n))
 function ymd(d: Date): string {
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`

@@ -102,6 +102,7 @@ export const GEO_DIMENSIONS: { key: string; label: string }[] = [
   { key: 'arrival', label: 'Arrival (first visit): tagged / untagged' },
   { key: 'keyEvent', label: 'Key event (sign-in / install / raw install / completion)' },
   { key: 'date', label: 'Date (trend)' },
+  { key: 'dateEt', label: 'Date (trend, ET)' },
 ]
 
 // Client-side mirror of the server's site registry (the Function has its own copy

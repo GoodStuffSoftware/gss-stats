@@ -15,6 +15,8 @@
 import { popupExcludeClause, pathFamilySqlCase, popupDimSqlCase, popupDimPrefilter } from '../../src/lib/popupEvents'
 import { gameDimSqlCase, gameDimPrefilter, campaignFlightSqlCase, campaignFlightPrefilter, arrivalSqlCase, keyEventSqlCase, applyExclusions } from '../../src/lib/campaigns'
 import { excludeOwnClause as sharedExcludeOwnClause, selfReferralClause as sharedSelfReferralClause } from '../../src/lib/ownExclusion'
+import { etDateSql } from '../../src/lib/etTime'
+import { isDateDim } from '../../src/lib/rings'
 import { buildCacheKeyUrl, cachedJson, ttlSecondsFor, type CacheLike } from '../_lib/edgeCache'
 
 interface Env {
@@ -42,6 +44,8 @@ interface Env {
 // blank-labeled the same way they always were.
 export function breakdownColumnExpr(dim: string, emptyLabel: string): string {
   if (dim === 'date') return "date(ts/1000,'unixepoch')"
+  // US-Eastern calendar day (DST-aware), matching how the Best Sudoku code buckets ET days.
+  if (dim === 'dateEt') return etDateSql()
   if (dim === 'pathFamily') return pathFamilySqlCase()
   // Pop-up / completion / campaign-flight dims: CASE expressions over path (and ts/campaign),
   // built only from lib/popupEvents.ts + lib/campaigns.ts constants (never request input); see
@@ -118,7 +122,7 @@ export function buildMergedRingSql(cols: string[], whereSql: string, groupBy: st
 // every query that touched it the moment someone charted it. Add it once the migration runs).
 export const GEO_DIMS = new Set([
   'country', 'region', 'city', 'postal', 'continent', 'timezone', 'colo', 'org',
-  'referrer', 'refpath', 'path', 'site', 'device', 'browser', 'os', 'lang', 'visitor', 'date',
+  'referrer', 'refpath', 'path', 'site', 'device', 'browser', 'os', 'lang', 'visitor', 'date', 'dateEt',
   'campaign', 'source', 'medium', // utm campaign tags
   'screenw', 'screenwBucket', // viewport width — raw pixel value, and bucketed (see breakdownColumnExpr)
   'pathFamily', // groups event-beacon paths (popup/install/return/game-complete/…) vs. 'page' — see popupEvents.ts
@@ -137,12 +141,12 @@ export const GEO_DIMS = new Set([
 // equality instead of a bare column reference. 'date' alone stays fully out of filtering too:
 // a click on a date bucket becomes a day RANGE client-side (lib/drill.ts), never an equality
 // constraint, so nothing ever sends it as one.
-export const DERIVED_ONLY_DIMS = new Set(['date', 'screenwBucket', 'pathFamily', 'popupFamily', 'popupOutcome', 'gameMode', 'gameDifficulty', 'campaignFlight', 'arrival', 'keyEvent'])
+export const DERIVED_ONLY_DIMS = new Set(['date', 'dateEt', 'screenwBucket', 'pathFamily', 'popupFamily', 'popupOutcome', 'gameMode', 'gameDifficulty', 'campaignFlight', 'arrival', 'keyEvent'])
 // Of those, only 'date' stays out of multi-dimension (ring / breakdown-bar) queries: every other
 // derived dim groups like a column (its CASE runs per row in the inner SELECT, and
 // ringBlankExclusion drops its blank rows). A date axis is a trend, which lib/rings.ts
 // queryDims already keeps to single-dim charts.
-export const RING_EXCLUDED_DIMS = new Set(['date'])
+export const RING_EXCLUDED_DIMS = new Set(['date', 'dateEt'])
 
 // Dimensions that describe EVENT-beacon rows only. A chart grouping by one (or a drill filtering
 // on one) cannot also apply the standing event-beacon exclusion (it would remove every row the
@@ -232,7 +236,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // never arrives as one — excluding it is defense in depth, not something a real client sends.
   const constraints: { field: string; value: string }[] = Array.isArray(body.constraints)
     ? (body.constraints as any[])
-        .filter((c) => c && GEO_DIMS.has(c.field) && c.field !== 'date' && typeof c.value === 'string')
+        .filter((c) => c && GEO_DIMS.has(c.field) && !isDateDim(c.field) && typeof c.value === 'string')
         .map((c) => ({ field: String(c.field), value: String(c.value) }))
     : []
   const drillClause = (w: string[], b: any[]) => {
@@ -455,7 +459,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
 
   const whereSql = where.join(' AND ')
   // Tiebreak on k (see buildMergedBreakdownSql) so which rows LIMIT keeps is deterministic.
-  const orderBy = dim === 'date' ? 'k ASC' : 'c DESC, k ASC'
+  const orderBy = isDateDim(dim) ? 'k ASC' : 'c DESC, k ASC'
   // One statement in place of the old total-COUNT(*) + grouped-COUNT(*) pair — see the
   // buildMergedBreakdownSql doc comment for why SUM(c) OVER () gives the same grand total.
   const sql = buildMergedBreakdownSql(col, whereSql, orderBy)
