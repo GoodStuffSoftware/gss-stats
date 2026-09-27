@@ -405,6 +405,24 @@ onBeforeUnmount(() => barObserver?.disconnect())
 function togglePinned() {
   pinned.value = !pinned.value
 }
+// Reviewer fix (2026-09-27): the toggle stays in the tab order ALWAYS now (see the template —
+// no more `tabindex="-1"` while the in-flow bar is visible), so a keyboard user can reach it
+// even after tabbing past it earlier in the page. But there's nothing to pin while the in-flow
+// bar is already on screen — activating it there instead jumps focus straight to the bar's
+// first control, which is more useful than toggling a pin nobody can see the point of.
+function activateToggle() {
+  if (barVisible.value) {
+    focusFirstBarControl()
+    return
+  }
+  togglePinned()
+}
+function focusFirstBarControl() {
+  const el = barSectionEl.value?.querySelector<HTMLElement>(
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+  )
+  el?.focus()
+}
 function closePinned() {
   pinned.value = false
 }
@@ -443,6 +461,7 @@ function closePinnedAndReturnFocus() {
 function onToggleFocus(e: FocusEvent) {
   if (suppressNextFocusOpen) return
   if (touchCapable) return
+  if (barVisible.value) return // nothing to pin — the in-flow bar is already on screen
   const el = e.target as HTMLElement
   if (el.matches(':focus-visible')) pinned.value = true
 }
@@ -473,11 +492,12 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', onGlobalKeyForPinned)
 })
 
-// "Reveal all chart controls" — v0.8's per-chart edit/zoom/menu icons (ChartCard.vue) normally
-// show on hover, which touch can't do. That capability used to ride along with opening the old
-// hidden function bar (see Dashboard.vue's `controlsVisible` prop). Now that the main bar is
-// always visible in flow, it gets its own small always-reachable toggle in the header instead
-// (see template) so touch users keep a direct path to every card's controls at once.
+// "Reveal all chart controls" — used to ride along with opening the old hidden function bar
+// (see Dashboard.vue's `controlsVisible` prop). Reviewer call (2026-09-27): the header must
+// match the pre-v0.6 layout EXACTLY, so there's no header control for this any more — ChartCard's
+// own per-chart reveal icon + zoom (v0.8) is the supported way to reach a chart's controls,
+// including on touch. Kept wired to Dashboard's `controls-visible` prop (stays false; cheap to
+// leave in place rather than unwind the prop) in case a future non-header trigger needs it.
 const revealAllControls = ref(false)
 
 // ── Theme ─────────────────────────────────────────────────────────────────────
@@ -505,30 +525,15 @@ function toggleDark() {
           <span class="overline">Good Stuff Software · bot-free RUM</span>
         </div>
       </div>
-      <!-- Restored to the pre-v0.6 layout (commit 8692b0f): save-state/theme/add-chart live
-           here in the header again, not behind a hidden panel. -->
+      <!-- Restored to the pre-v0.6 layout EXACTLY (commit 8692b0f, reviewer-confirmed
+           2026-09-27): save-state, theme, add-chart, AccountMenu — in that order, nothing
+           else. No "reveal chart controls" button here — per-chart reveal + zoom (ChartCard.vue,
+           v0.8) is the way to show a chart's controls; `revealAllControls` below stays wired to
+           Dashboard's `controls-visible` prop (cheap to keep) but has no header UI to set it. -->
       <div class="top-actions">
         <span v-if="saveLabel" class="save-state mono" :class="saveState">{{ saveLabel }}</span>
         <button class="btn" @click="toggleDark" :title="dark ? 'Light mode' : 'Dark mode'">
           {{ dark ? '☀' : '☾' }}
-        </button>
-        <button
-          type="button"
-          class="btn"
-          :class="{ 'btn-active': revealAllControls }"
-          :aria-pressed="revealAllControls"
-          title="Reveal every chart's controls (edit/zoom/menu)"
-          @click="revealAllControls = !revealAllControls"
-        >
-          <svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true">
-            <path
-              d="M10 4.5c-4 0-6.6 3-7.5 5.5.9 2.5 3.5 5.5 7.5 5.5s6.6-3 7.5-5.5c-.9-2.5-3.5-5.5-7.5-5.5Z"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.5"
-            />
-            <circle cx="10" cy="10" r="2.4" fill="none" stroke="currentColor" stroke-width="1.5" />
-          </svg>
         </button>
         <button class="btn btn-primary" @click="addChart">＋ Add chart</button>
         <AccountMenu />
@@ -561,24 +566,27 @@ function toggleDark() {
       />
     </div>
 
-    <!-- "Show filters" pin — hidden while the in-flow bar above is visible (see barVisible /
-         the IntersectionObserver on barSectionEl). Appears once it scrolls out of view;
-         clicking it pins the same FilterBar, fixed at the top of the viewport, until dismissed
-         (this button again, Esc, or a click outside it) or until scrolling back to where the
-         in-flow bar is visible again. -->
+    <!-- "Show filters" pin — visually hidden while the in-flow bar above is visible (see
+         barVisible / the IntersectionObserver on barSectionEl), but ALWAYS in the tab order
+         (reviewer fix, 2026-09-27: a keyboard user who tabbed past it earlier must still be able
+         to reach it — no `tabindex="-1"`) and never `aria-hidden` (it's always focusable, so it's
+         never truly hidden from assistive tech). Keyboard focus while merely visually hidden
+         reveals it via `:focus-visible` in CSS. Once out of view, clicking/activating it pins
+         the same FilterBar, fixed at the top of the viewport, until dismissed (this button
+         again, Esc, or a click outside it) or until scrolling back to where the in-flow bar is
+         visible again; while the in-flow bar IS visible, activating it just moves focus to the
+         bar's first control instead (nothing to pin — see activateToggle). -->
     <div v-if="!isCampaignPage" class="fb-anchor">
       <button
         ref="fbToggleBtn"
         type="button"
         class="fb-toggle"
         :class="{ 'fb-toggle-hidden': barVisible }"
-        :tabindex="barVisible ? -1 : 0"
-        :aria-hidden="barVisible"
         :aria-expanded="pinned"
         :aria-controls="fbPanelId"
         aria-label="Show filters"
         @focus="onToggleFocus"
-        @click="togglePinned"
+        @click="activateToggle"
         @keydown.escape="closePinnedAndReturnFocus"
       >
         <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
@@ -835,12 +843,18 @@ function toggleDark() {
   color: rgb(var(--ink));
   border-color: rgb(var(--amber));
 }
-/* Hidden while the in-flow bar is visible (req #3) — kept in the DOM (not v-if'd away) so it
-   never causes a layout shift when it appears, and stays out of the tab order (`tabindex="-1"`,
-   bound alongside this in the template) without being unmountable mid-interaction. */
+/* Visually hidden while the in-flow bar is visible (req #3) — kept in the DOM (not v-if'd away)
+   so it never causes a layout shift when it appears. It STAYS in the tab order even while
+   hidden this way (reviewer fix, 2026-09-27 — see the template, no `tabindex="-1"`), so a
+   keyboard user tabbing through the page still reaches it; the override below reveals it the
+   moment it gets real keyboard focus, even though the bar is on screen. */
 .fb-toggle-hidden {
   opacity: 0;
   pointer-events: none;
+}
+.fb-toggle-hidden:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
 }
 .fb-pinned {
   position: fixed;
@@ -923,12 +937,6 @@ function toggleDark() {
 }
 .save-state.error {
   color: #bc4749;
-}
-/* "Reveal chart controls" toggle, engaged state. */
-.btn-active {
-  color: rgb(var(--amber-hover));
-  border-color: rgb(var(--amber));
-  background: rgb(var(--amber-tint));
 }
 .grid-area {
   position: relative;

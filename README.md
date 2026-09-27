@@ -62,8 +62,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   bar, line, area, doughnut, nested doughnut, pie, table, a geo point map, and a
   note/text tile. Zoom is a single click, always available on every chart; its other
   modification chrome (edit/remove/drag/resize) tucks away until you hover that chart
-  — or reveal it for every chart at once with the header's "reveal chart controls"
-  toggle (handy on touch, which has no hover).
+  — or tap that chart's own reveal icon on touch, which has no hover.
   **Known gap:** the resize grip (drag-to-resize corner) isn't keyboard-operable — it's a
   [`grid-layout-plus`](https://www.npmjs.com/package/grid-layout-plus) limitation, not a
   regression from this app's own code. Resizing a chart currently needs a mouse or touch;
@@ -76,6 +75,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   the viewport until you dismiss it (the button again, Escape, or clicking outside) or
   scroll back to where the in-flow bar is visible. Page tabs stay always visible above
   it either way. Hidden only on the campaign page, whose widgets aren't filter-driven.
+  The button stays keyboard-reachable at all times (never `tabindex="-1"`, revealed on
+  real keyboard focus even while visually hidden); activating it while the in-flow bar
+  is already on screen just moves focus to the bar's first control.
 - **A shared notes/text library** ([`src/lib/notes.ts`](src/lib/notes.ts)) — every
   caveat, definition, and explanatory paragraph the dashboard shows (small-sample
   warnings, attribution scope, "how to read this" captions, …) is a registry entry with
