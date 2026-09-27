@@ -24,7 +24,7 @@ const saveState = ref<'idle' | 'saving' | 'saved' | 'error' | 'stale'>('idle')
 
 // The page currently being viewed/edited.
 const activePage = computed<DashboardPage>(() => config.pages.find((p) => p.id === config.activePageId) ?? config.pages[0])
-const rangeText = computed(() => rangeLabel(activePage.value.filters.since, activePage.value.filters.until))
+const rangeText = computed(() => rangeLabel(activePage.value.filters.since, activePage.value.filters.until, activePage.value.filters.rangeRel))
 
 // Part A hard requirement #4: while pop-up tracking hasn't shipped yet (activation date
 // still null — see lib/popupEvents.ts), the pop-ups page carries this note so nothing on
@@ -46,11 +46,10 @@ const showSmallSampleNote = computed(() => isBestSudokuPopupsPage(activePage.val
 
 // "Best Sudoku campaigns" and "Best Sudoku overview" used to be bespoke pages (see git
 // history for the retired OverviewPage.vue / CampaignComparePage.vue) — now they're regular
-// widget grids like every other page (dataset 'overview'/'campaigns' — see
-// components/widgets/OverviewWidgetBody.vue / CampaignsWidgetBody.vue), so "Add chart" /
-// "restore default charts" apply to them too. The campaign page still hides the global
-// FilterBar (its widgets aren't filter-driven — each covers its own fixed campaign flight
-// window; see lib/campaignsData.ts).
+// widget grids like every other page: metric cards (lib/metrics/presets.ts) and standard
+// charts, so "Add chart" / "restore default charts" apply to them too. The campaign page still
+// hides the global FilterBar (its widgets aren't filter-driven: each card reads its campaign's
+// own attribution window, and each chart carries its own range — lib/defaults.ts).
 const isCampaignPage = computed(() => isCampaignComparePage(activePage.value))
 
 onMounted(async () => {

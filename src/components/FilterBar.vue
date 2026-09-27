@@ -16,7 +16,7 @@ const rangeInput = ref('')
 const fromYmd = ref('')
 const toYmd = ref('')
 function syncRange() {
-  rangeInput.value = rangeLabel(local.since, local.until)
+  rangeInput.value = rangeLabel(local.since, local.until, local.rangeRel)
   fromYmd.value = isoToYmd(local.since)
   toYmd.value = isoToYmd(local.until)
   const idx = currentStepIdx()

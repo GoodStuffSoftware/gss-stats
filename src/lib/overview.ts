@@ -1,11 +1,11 @@
-// "Best Sudoku overview" page (Part C) — pure logic shared by functions/api/overview.ts and
-// the metrics registry. Aggregate-only, no joins — same rules as lib/campaigns.ts and
+// "Best Sudoku overview" page (Part C) — pure logic the metrics registry builds on (it began in
+// the retired functions/api/overview.ts). Aggregate-only, no joins — same rules as lib/campaigns.ts and
 // lib/popupEvents.ts, which this module builds on rather than duplicates.
 
 import { classifyPopupPath, etDateFromMs, excludeInstallGapUnmeasured, isPopupEventPath, POPUPS } from './popupEvents'
 import { etMidnightUtcMs, applyExclusions, parseReturnPath } from './campaigns'
 
-// ── Row classifiers shared by /api/overview and the metrics registry (lib/metrics/) ───────
+// ── Row classifiers for the metrics registry (lib/metrics/) ─────────────────────────────
 // Moved here from functions/api/overview.ts (ADR 0003 slice 2) so the registry reuses them
 // instead of copying them. Behaviour unchanged.
 /** An event beacon, not a screen view — never counts as a page view. isPopupEventPath
@@ -33,8 +33,9 @@ export function isPopupAccept(path: string): boolean {
 
 // ── Shared WHERE-clause builder for the KPI / timeline / release-panel D1 queries ────────
 /** `site IN (...) AND ts >= ? AND ts < ?` plus every row-exclusion rule (see
- * lib/campaigns.ts applyExclusions) — ONE function so all three query sections in
- * functions/api/overview.ts apply exclusions identically. HIGH review finding, 2026-09-25:
+ * lib/campaigns.ts applyExclusions) — ONE function so every site-wide query (the registry's
+ * KPI, range and release facts; once the three sections of the retired /api/overview) applies
+ * exclusions identically. HIGH review finding, 2026-09-25:
  * three of the page's four query sections (KPI, timeline, release panel) had been reading
  * `hits` unfiltered while only the campaign scorecard (which calls
  * campaignAttributionClause + applyExclusions directly) excluded household/lifecycle rows —

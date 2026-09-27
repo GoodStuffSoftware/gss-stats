@@ -8,7 +8,7 @@
 //    (d1BindingAdsDb below) — the same createSqlAdsStore on a different AdsDb adapter;
 //  - the dashboard's Pages Functions run the readers through the binding, FAIL SOFT: a
 //    missing binding, a missing table (a fresh local `wrangler pages dev`) or any D1 error
-//    reads as "no stored data", so /api/campaigns falls back to lib/campaigns.ts
+//    reads as "no stored data", so the campaign spend metric falls back to lib/campaigns.ts
 //    CAMPAIGN_SPEND and the readings panel shows an empty state instead of an error.
 //
 // Money is integer micros. No statement here is a compound SELECT (D1 caps those at 5 terms),

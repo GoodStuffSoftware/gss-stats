@@ -1,10 +1,11 @@
-// The Pop-ups page's rate table ('rates' dimension of functions/api/popups.ts, rendered by a
-// 'rateTable' widget): VALID ratios only (numerator a declared subset of the denominator), each
-// with n/d and MIN_COHORT gating.
+// The Pop-ups page's rate table — since layout version 11 the metric card `popup-rates` over POST
+// /api/metrics (the 'rates' dimension of /api/popups retired with the bespoke table): VALID ratios
+// only (numerator a declared subset of the denominator), each with n/d and MIN_COHORT gating.
 // Runs the real handler over a node:sqlite-backed fake D1.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
-import { onRequestPost } from './popups'
+import { onRequestPost } from './metrics'
+import { PRESETS } from '../../src/lib/metrics/presets'
 import {
   INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS,
   INSTALL_GAP_RATE_KEY,
@@ -34,16 +35,34 @@ function add(path: string, n: number, ts = FIX + 3_600_000) {
 const fakeGeo = () => ({
   prepare: (sql: string) => ({ bind: (...b: unknown[]) => ({ all: async () => ({ results: db.prepare(sql).all(...(b as any[])) }) }) }),
 })
-async function rates(extra: Record<string, unknown> = {}) {
-  const gss_geo = fakeGeo()
-  const body = { dimension: 'rates', since: '2026-09-20', until: '2026-10-01', ...extra }
-  const res = await onRequestPost({ request: { json: async () => body }, env: { gss_geo }, waitUntil: () => {} } as any)
-  return ((await res.json()) as any).rateRows as any[]
+beforeEach(() => {
+  ;(globalThis as any).caches = { default: { match: async () => undefined, put: async () => {} } }
+})
+afterEach(() => {
+  delete (globalThis as any).caches
+})
+/** Every rate the card asks for, keyed like POPUP_RATE_TABLE_KEYS ("<popup>:tap", and the install
+ * prompt's installed rate), with its value, n/d, status and notes. */
+async function rates(context: Record<string, unknown> = {}) {
+  const requests = [
+    ...POPUPS.map((p) => ({ key: `${p.id}:tap`, ratio: 'popup.tapRate', params: { popup: p.id } })),
+    { key: INSTALL_GAP_RATE_KEY, ratio: 'popup.installedRate', params: { popup: 'install' } },
+  ]
+  const body = JSON.stringify({ v: 1, context: { since: '2026-09-20', until: '2026-10-01', ...context }, requests })
+  const res = await onRequestPost({ request: new Request('https://stats.goodstuff.software/api/metrics', { method: 'POST', body }), env: { gss_geo: fakeGeo() }, waitUntil: () => {} } as any)
+  const results = ((await res.json()) as any).results
+  return requests.map((r) => ({ key: r.key, ...results[r.key] }))
 }
 
 describe('POPUP_RATE_TABLE_KEYS: valid ratios only', () => {
   it('is exactly every pop-up tap rate plus install over post-fix install prompts', () => {
     expect(POPUP_RATE_TABLE_KEYS).toEqual([...POPUPS.map((p) => `${p.id}:tap`), INSTALL_GAP_RATE_KEY])
+  })
+  it('the popup-rates card asks for exactly these: a tap rate per pop-up, and install over post-fix prompts', () => {
+    const items = PRESETS['popup-rates'].sections.flatMap((s) => s.items)
+    expect(items.map((i) => ('ratio' in i.data ? i.data.ratio : ''))).toEqual(['popup.tapRate', 'popup.installedRate'])
+    expect(items[0].repeat).toEqual({ over: 'popups' })
+    expect(items[1].data).toMatchObject({ params: { popup: 'install' } })
   })
   it('contains no lagged outcome rate and no eligibility rate', () => {
     for (const key of POPUP_RATE_TABLE_KEYS) {
@@ -57,7 +76,7 @@ describe('POPUP_RATE_TABLE_KEYS: valid ratios only', () => {
   })
 })
 
-describe("the 'rates' response", () => {
+describe("the card's rates", () => {
   it('one row per valid rate, with n/d, a rate, "too few" gating and the no-data state', async () => {
     add('/signin-prompt/placement', 10)
     add('/signin-prompt/accept', 3)
@@ -66,12 +85,13 @@ describe("the 'rates' response", () => {
     const rows = await rates()
     expect(rows.map((r) => r.key)).toEqual(POPUP_RATE_TABLE_KEYS)
     const signin = rows.find((r) => r.key === 'signin-prompt:tap')
-    expect(signin).toMatchObject({ numerator: 3, denominator: 10, value: 0.3, insufficientCohort: false })
+    // 'partial': the range starts before pop-up tracking went live, so it is counted from then.
+    expect(signin).toMatchObject({ numerator: 3, denominator: 10, value: 0.3, status: 'partial' })
     const upsell = rows.find((r) => r.key === 'upsell:tap')
-    expect(upsell).toMatchObject({ numerator: 1, denominator: 3, value: null, insufficientCohort: true })
+    expect(upsell).toMatchObject({ numerator: 1, denominator: 3, value: null, status: 'too-few' })
     expect(3).toBeLessThan(MIN_COHORT)
     const promo = rows.find((r) => r.key === 'promo-first50:tap')
-    expect(promo).toMatchObject({ numerator: 0, denominator: 0, value: null, insufficientCohort: false })
+    expect(promo).toMatchObject({ numerator: 0, denominator: 0, value: null, status: 'no-data' })
   })
 
   it('install counts post-fix prompts only in its denominator, and carries the fix note when the range spans it', async () => {
@@ -81,11 +101,11 @@ describe("the 'rates' response", () => {
     const install = (await rates()).find((r) => r.key === INSTALL_GAP_RATE_KEY)
     expect(install).toMatchObject({ numerator: 2, denominator: 6 })
     expect(install.value).toBeCloseTo(2 / 6)
-    expect(install.note).toMatch(/install fix went live/)
+    expect(install.noteIds).toContain('install-fix-note') // "install fix went live …", in the card's Notes
   })
 })
 
-describe('"Hide my visits" applies to the rate table exactly as it does to the pop-up bar chart', () => {
+describe('"Hide my visits" applies to the rate card exactly as it does to the pop-up bar chart', () => {
   const own = { excludeOwnVisits: true, ownBrowser: 'Opera', ownOS: 'Windows' }
   function addOwned(path: string, total: number, owner: number) {
     for (let i = 0; i < total; i++) {
@@ -101,7 +121,6 @@ describe('"Hide my visits" applies to the rate table exactly as it does to the p
     const mineHidden = (await rates(own)).find((r) => r.key === 'signin-prompt:tap')
     expect(mineHidden).toMatchObject({ numerator: 8, denominator: 16 })
 
-    ;(globalThis as any).caches = { default: { match: async () => undefined, put: async () => {} } }
     const { onRequestPost: geoPost } = await import('./geo')
     const res = await geoPost({
       request: { json: async () => ({ dimension: 'popupFamily', breakdown: 'popupOutcome', dims: ['popupFamily', 'popupOutcome'], since: '2026-09-20', until: '2026-10-01', limit: 100, ...own }) },
@@ -109,7 +128,6 @@ describe('"Hide my visits" applies to the rate table exactly as it does to the p
       waitUntil: () => {},
     } as any)
     const bar: any = await res.json()
-    delete (globalThis as any).caches
     const cell = (o: string) => bar.rows.find((r: any) => r.key.popupFamily === 'signin-prompt' && r.key.popupOutcome === o)?.pageviews
     expect([cell('accept'), cell('shown')]).toEqual([mineHidden.numerator, mineHidden.denominator])
   })

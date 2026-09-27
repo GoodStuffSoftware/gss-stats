@@ -1,0 +1,424 @@
+{
+  "24215315197": {
+    "campaign": {
+      "id": "24215315197",
+      "label": "Android launch — \"tired of ads\"",
+      "status": "closed",
+      "flightStart": "2026-09-02",
+      "flightEnd": "2026-09-09",
+      "ucValues": [
+        "sudoku_tired_of_ads",
+        "tired_of_ads",
+        "launch_2026"
+      ],
+      "notes": "Served 2026-09-02..09-09 ET, $124.47 total. Every row tagged with this uc family belongs here, including the post-09-10 trickle — see flightStart's doc comment (no upper bound on attribution). Excludes sudoku_tired_of_ads_test (1 row, 2026-09-02) — QA traffic, not real ad performance.",
+      "measurement": null,
+      "measurabilityNote": null
+    },
+    "funnel": {
+      "counts": {
+        "arrivals": 50,
+        "played": 100,
+        "completed": 0,
+        "ask": 15,
+        "accept": 4,
+        "authSuccess": 5,
+        "installPrompt": 13,
+        "install": 1
+      },
+      "rates": {
+        "accept": 0.26666666666666666,
+        "install": null
+      },
+      "notInstrumented": [
+        "completed",
+        "install"
+      ],
+      "installPromptPostFixCount": 2,
+      "arrivalsCaveat": "Floor — devices that used the app before clicking an ad count as returning and are excluded.",
+      "installNote": "install fix went live 26 Sep 12:26 ET; earlier prompt-driven installs not recorded"
+    },
+    "taggedHits": 151,
+    "funnelByCountry": {
+      "US": {
+        "arrivals": 40,
+        "played": 100,
+        "completed": 0,
+        "ask": 0,
+        "accept": 0,
+        "authSuccess": 0,
+        "installPrompt": 0,
+        "install": 0
+      },
+      "CA": {
+        "arrivals": 10,
+        "played": 0,
+        "completed": 0,
+        "ask": 0,
+        "accept": 0,
+        "authSuccess": 0,
+        "installPrompt": 0,
+        "install": 0
+      },
+      "other": {
+        "arrivals": 0,
+        "played": 0,
+        "completed": 0,
+        "ask": 15,
+        "accept": 4,
+        "authSuccess": 5,
+        "installPrompt": 13,
+        "install": 1
+      }
+    },
+    "hourOfDayEt": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      10,
+      0,
+      40,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "daily": [
+      {
+        "date": "2026-09-03",
+        "day": 2,
+        "arrivals": 40
+      },
+      {
+        "date": "2026-09-04",
+        "day": 3,
+        "arrivals": 10
+      }
+    ],
+    "returnVisits": {
+      "counts": {
+        "d0": 20,
+        "d1": 5,
+        "d2-7": 2,
+        "d8-14": 0,
+        "d15-30": 0,
+        "d31-60": 0
+      },
+      "rates": {
+        "d1": 0.25,
+        "d2-7": 0.1,
+        "d8-14": 0,
+        "d15-30": 0,
+        "d31-60": 0
+      },
+      "notInstrumented": true,
+      "sharedWithCampaignId": null
+    },
+    "costPerArrival": 2.4894,
+    "costPerAuthSuccess": 24.894,
+    "spend": 124.47,
+    "spendSource": {
+      "source": "config",
+      "fetchedAt": null,
+      "lastDate": null
+    },
+    "spendThrough": null,
+    "lastSync": null,
+    "stale": true,
+    "segments": null,
+    "rawInstallSignals": {
+      "count": 1,
+      "label": "raw install signals (can double-count)"
+    }
+  },
+  "24279250691": {
+    "campaign": {
+      "id": "24279250691",
+      "label": "US+CA web retest",
+      "status": "active",
+      "flightStart": "2026-09-26",
+      "flightEnd": "2026-10-02",
+      "ucValues": [
+        "sudoku_funnel_retest"
+      ],
+      "notes": "Now serving as of 2026-09-26. Budget: $13/day, $100 hard stop (ads session, 2026-09-26) — see CAMPAIGN_DAILY_SPEND's entry for this id, left empty (and CAMPAIGN_SPEND left null) until real daily spend numbers arrive from the Google Ads API; both stay configurable per-day, same as the other two campaigns. The 9 rows tagged sudoku_funnel_retest on 2026-09-23, plus anything tagged before 2026-09-26 12:00 ET, are pre-launch validation/QA, not real traffic — excluded via flightStartTimeEt (the schedule's real noon-ET start), not just the calendar date.",
+      "measurement": null,
+      "measurabilityNote": null
+    },
+    "funnel": {
+      "counts": {
+        "arrivals": 7,
+        "played": 21,
+        "completed": 3,
+        "ask": 6,
+        "accept": 0,
+        "authSuccess": 2,
+        "installPrompt": 9,
+        "install": 2
+      },
+      "rates": {
+        "accept": null,
+        "install": null
+      },
+      "notInstrumented": [
+        "accept"
+      ],
+      "installPromptPostFixCount": 4,
+      "arrivalsCaveat": "Floor — devices that used the app before clicking an ad count as returning and are excluded.",
+      "installNote": "install fix went live 26 Sep 12:26 ET; earlier prompt-driven installs not recorded"
+    },
+    "taggedHits": 46,
+    "funnelByCountry": {
+      "US": {
+        "arrivals": 7,
+        "played": 21,
+        "completed": 0,
+        "ask": 0,
+        "accept": 0,
+        "authSuccess": 0,
+        "installPrompt": 0,
+        "install": 0
+      },
+      "CA": {
+        "arrivals": 0,
+        "played": 0,
+        "completed": 0,
+        "ask": 0,
+        "accept": 0,
+        "authSuccess": 0,
+        "installPrompt": 0,
+        "install": 0
+      },
+      "other": {
+        "arrivals": 0,
+        "played": 0,
+        "completed": 3,
+        "ask": 6,
+        "accept": 0,
+        "authSuccess": 2,
+        "installPrompt": 9,
+        "install": 2
+      }
+    },
+    "hourOfDayEt": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      7,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "daily": [
+      {
+        "date": "2026-09-26",
+        "day": 1,
+        "arrivals": 7
+      }
+    ],
+    "returnVisits": {
+      "counts": {
+        "d0": 6,
+        "d1": 0,
+        "d2-7": 0,
+        "d8-14": 0,
+        "d15-30": 0,
+        "d31-60": 0
+      },
+      "rates": {
+        "d1": 0,
+        "d2-7": 0,
+        "d8-14": 0,
+        "d15-30": 0,
+        "d31-60": 0
+      },
+      "notInstrumented": false,
+      "sharedWithCampaignId": null
+    },
+    "costPerArrival": null,
+    "costPerAuthSuccess": null,
+    "spend": null,
+    "spendSource": {
+      "source": "none",
+      "fetchedAt": null,
+      "lastDate": null
+    },
+    "spendThrough": null,
+    "lastSync": null,
+    "stale": false,
+    "segments": null,
+    "rawInstallSignals": {
+      "count": 0,
+      "label": "raw install signals (can double-count)"
+    }
+  },
+  "24234347705": {
+    "campaign": {
+      "id": "24234347705",
+      "label": "Play-direct — \"tired of ads\"",
+      "status": "closed",
+      "flightStart": "2026-09-09",
+      "flightEnd": "2026-09-13",
+      "ucValues": [
+        "sudoku_tired_of_ads_play"
+      ],
+      "notes": "Ads go straight to the Play Store listing (uc sudoku_tired_of_ads_play, read from the Play Install Referrer) — no D1 beacon rows exist for this uc today. $75.17 total spend, stopped early at 09-13 (configured end was 09-16). The uc stays in ucValues so rows count automatically the moment bestsudoku-app ships a Play Install Referrer reader — no code change needed here when that happens.",
+      "measurement": "spend-only",
+      "measurabilityNote": "Play-direct: not measurable in beacon (no Install Referrer reader)"
+    },
+    "funnel": {
+      "counts": {
+        "arrivals": 0,
+        "played": 0,
+        "completed": 0,
+        "ask": 0,
+        "accept": 0,
+        "authSuccess": 0,
+        "installPrompt": 0,
+        "install": 0
+      },
+      "rates": {
+        "accept": null,
+        "install": null
+      },
+      "notInstrumented": [
+        "played",
+        "completed",
+        "ask",
+        "accept",
+        "authSuccess",
+        "installPrompt",
+        "install"
+      ],
+      "installPromptPostFixCount": 0,
+      "arrivalsCaveat": "Floor — devices that used the app before clicking an ad count as returning and are excluded.",
+      "installNote": "install fix went live 26 Sep 12:26 ET; earlier prompt-driven installs not recorded"
+    },
+    "taggedHits": 0,
+    "funnelByCountry": {
+      "US": {
+        "arrivals": 0,
+        "played": 0,
+        "completed": 0,
+        "ask": 0,
+        "accept": 0,
+        "authSuccess": 0,
+        "installPrompt": 0,
+        "install": 0
+      },
+      "CA": {
+        "arrivals": 0,
+        "played": 0,
+        "completed": 0,
+        "ask": 0,
+        "accept": 0,
+        "authSuccess": 0,
+        "installPrompt": 0,
+        "install": 0
+      },
+      "other": {
+        "arrivals": 0,
+        "played": 0,
+        "completed": 0,
+        "ask": 0,
+        "accept": 0,
+        "authSuccess": 0,
+        "installPrompt": 0,
+        "install": 0
+      }
+    },
+    "hourOfDayEt": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "daily": [],
+    "returnVisits": {
+      "counts": {
+        "d0": 0,
+        "d1": 0,
+        "d2-7": 0,
+        "d8-14": 0,
+        "d15-30": 0,
+        "d31-60": 0
+      },
+      "rates": {
+        "d1": null,
+        "d2-7": null,
+        "d8-14": null,
+        "d15-30": null,
+        "d31-60": null
+      },
+      "notInstrumented": true,
+      "sharedWithCampaignId": null
+    },
+    "costPerArrival": null,
+    "costPerAuthSuccess": null,
+    "spend": 75.17,
+    "spendSource": {
+      "source": "config",
+      "fetchedAt": null,
+      "lastDate": null
+    },
+    "spendThrough": null,
+    "lastSync": null,
+    "stale": true,
+    "segments": null,
+    "rawInstallSignals": {
+      "count": 0,
+      "label": "raw install signals (can double-count)"
+    }
+  }
+}

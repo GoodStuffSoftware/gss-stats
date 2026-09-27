@@ -351,7 +351,8 @@ export interface ResolvedSpend {
   fetchedAt: string | null
   lastDate: string | null
 }
-/** /api/campaigns and /api/overview use this: the store's Google Ads API spend when it holds
+/** The campaign spend metric (lib/metrics/metrics.ts) and /api/ads/readings use this: the
+ * store's Google Ads API spend when it holds
  * at least one day for the campaign, else lib/campaigns.ts CAMPAIGN_SPEND, else nothing ("—"
  * in the UI, never a fabricated cost). */
 export function resolveCampaignSpend(stored: SpendSummary | null, configSpend: number | null): ResolvedSpend {
@@ -401,7 +402,7 @@ function emptyOutcomes(): OutcomeCounts {
 /** `/auth/success/<provider>` → 'base' (THE sign-in, one per sign-in); the row that rides
  * alongside it from the new/existing release, `/auth/success/<provider>/<new|existing|unknown>`,
  * → its status; anything else → null. The same exact shapes as lib/campaigns.ts
- * classifyFunnelPath and functions/api/overview.ts (authSuccessRow): a prefix match would count
+ * classifyFunnelPath and authSuccessRow (which this wraps): a prefix match would count
  * a new-client sign-in twice. */
 export type AuthSuccessKind = 'base' | AuthSuccessStatus
 export const authSuccessKind = (path: string): AuthSuccessKind | null => authSuccessRow(path)
@@ -1184,7 +1185,8 @@ export interface FunnelSegments {
 export const SEGMENT_NOTE =
   'A behaviour change shipped mid-flight (the signed-out upsell fix), so per spec section 14a the flight reads as two separate short tests: compare each segment on its own, never the totals. Beacon rows are split at the exact instant of the fix; the fix day\'s spend is shown apart because Ads spend is per ET day.'
 
-/** For the campaign charts (functions/api/campaigns.ts): where the upsell-fix boundary falls
+/** For the funnel card's upsell segment and the flight-day chart's day label (lib/metrics
+ * scope.ts and instrumentation.ts, lib/charts.ts): where the upsell-fix boundary falls
  * in a campaign's flight, and the tagged upsell shown/accept/dismiss on each side (split at the
  * instant by the query's flag — isPostBoundary). null when unset or outside the flight. */
 export interface CampaignSegmentMarker {

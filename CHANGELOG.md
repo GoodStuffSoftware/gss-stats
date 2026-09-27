@@ -6,6 +6,77 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-09-27
+
+### Changed
+- **The release panel is a metric card.** It shows the same four counts, with Before and After
+  as the columns of one table, names the release and how many days each side covers, and keeps
+  its "partially instrumented" note. Installs in the Before window read "not yet tracking"
+  instead of a 0 nobody could have measured, and on the release day itself the card says there
+  is no window yet instead of "No dated release yet".
+- **The Pop-ups rate table and sign-in eligibility are metric cards.** The rate table lists the
+  same valid rates with their counts ("36.4% (4/11)"), with the install-fix caveat in its Notes;
+  the eligibility panel shows earned, capped and unearned as bars and adds the eligibility rate
+  under them. Both still follow the page's range, sites and "hide my own visits".
+- **The campaign cost panel is a metric card.** Each campaign keeps its spend, where the spend
+  came from, how far it is stored and when it last synced ("stale — sync pending" when a day is
+  missing), and its cost per arrival and per auth success; "Refresh data" is still above the
+  cards. A cost over fewer than 5 arrivals or sign-ins now says "too few to report", and the
+  spend-only Play-direct card no longer shows two costs it can never have.
+- **The funnel per campaign is a metric card.** Each beacon-tracked campaign keeps its tagged
+  hits against its arrivals, its raw install signals, every funnel step as a bar, and the two
+  valid rates (accept of asks, install of prompts shown after the fix). The install-fix caveat
+  moved into the card's Notes, and the bars use the cards' standard colour. The upsell-fix
+  segment table (pre-fix and post-fix tagged upsell) now lives on this card and appears by
+  itself once that fix ships.
+- **Arrivals & funnel by country is a metric card**, with the same table as before: the funnel
+  steps down the side, US, CA and Other across the top, the same counts in every cell.
+- **An upcoming campaign has its funnel and country cards.** Before its flight starts (or while
+  it has no start date yet) the funnel card shows Arrivals 0 and every other step "not started",
+  and the country card lists every step as "not started", as the old panels did.
+- **Return visits is a metric card.** Each campaign with return beacons shows its first tagged
+  loads (d0) and the return rate of every later window as bars side by side, d1 to d31-60, each
+  with its counts, where the line chart and its counts line were. Under 5 first loads, each bar
+  says "too few to report" with its counts.
+- **Arrivals by ET hour of day and daily arrivals by flight day are standard charts.** The hour
+  chart is a breakdown bar (one bar per campaign in every hour, 0:00 to 23:00), and the flight-day
+  chart is one line chart: each campaign's daily arrivals, and its running total dashed on a
+  right-hand axis, where there used to be two charts side by side. Both count the same tagged
+  arrivals, and both can be edited like any other chart. They read every arrival since the first
+  campaign began (not a rolling year), and every tracked campaign keeps its series, at 0 when it
+  has no arrivals yet.
+
+### Removed
+- **The old bespoke panels and their data endpoints.** Every Overview, Campaigns and Pop-ups
+  panel is a metric card or a standard chart now, so the old panel code and the two endpoints
+  only it used are gone; a saved layout's panels are swapped in place the first time it loads.
+  The chart editor no longer offers the old rate-table chart type or the pop-up "sign-in
+  eligibility" dimension (both are cards: "Pop-up rates" and "Sign-in eligibility").
+- **Reload any dashboard tab that was open during this update.** A tab loaded before it still
+  asks for the retired panels' data, so those panels show an error until the page is reloaded
+  (the old rate table and sign-in eligibility name the card that replaced them) instead of
+  quietly showing "No data".
+
+### Added
+- **A "Since first campaign" date range.** Type it in any range field, or pick the chip in a
+  chart's own filter: from the first ad campaign's start to now, growing each day.
+- **Two new beacon dimensions, "Hour of day (ET)" and "Campaign flight day"**, and line charts
+  can now draw one line per value of a second dimension, with an optional running-total line for
+  each.
+
+### Fixed
+- **The card builder names every preset row.** Customizing a preset no longer shows "Unknown
+  note" for rows labelled with a step or title name (most of the funnel's), and their label
+  pickers show the current name instead of coming up blank.
+- **A card's Notes name each row once.** A table row repeated in several columns (a count under
+  US, CA and Other, or under Before and After) is listed once in front of its note.
+- **A campaign card keeps its chosen campaigns.** A card with one box per campaign (funnel,
+  country, cost, returns, the scorecard) shows only the campaigns picked in its chart settings,
+  as the old panels did, and the editor offers that picker for it.
+- **A chart's own date range survives a reload.** A span picked in a chart's filter (a chip or a
+  typed "2w") stays that rolling span after the page reloads, and a calendar range stays fixed,
+  instead of reverting to the span the chart was saved with.
+
 ## [0.11.0] — 2026-09-27
 
 ### Added

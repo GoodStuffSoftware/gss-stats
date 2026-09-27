@@ -1,10 +1,9 @@
 // Code-reviewed card presets (ADR 0003 section 1). A widget stores `card: { preset }`, so an
 // improvement here reaches every widget that has not been customized. validate.test.ts runs
-// validateCard over every one, and presets.parity.test.ts renders each against the bespoke
-// Overview body it replaces, over the same SQLite fixture.
+// validateCard over every one, and presets.parity.test.ts / slice7.parity.test.ts compare each
+// with the retired bespoke panel it replaced (a golden of its rendering on the same fixture).
 //
-// Each preset reproduces what the bespoke body shows today (OverviewWidgetBody.vue, views
-// 'scorecard' and 'kpis'), with only the documented changes: the ratio rule (a count or a pair
+// Each preset reproduces what the retired panel showed, with only the documented changes: the ratio rule (a count or a pair
 // where a percentage would be invalid), closed campaigns omitting what their flight could not
 // measure, and the registry differences D1-D5 (functions/api/metrics.equivalence.test.ts).
 //
@@ -17,6 +16,8 @@
 import type { CardSpec, Display, MetricItem } from './types'
 
 const COMPACT = { captionMode: 'compact' } as const satisfies Partial<MetricItem>
+/** An upcoming flight's funnel steps: kept, reading "not started" (compact captions). */
+const NOT_STARTED_LABEL = { ...COMPACT, gating: { whenNotStarted: 'label' } } as const satisfies Partial<MetricItem>
 
 /** The Overview campaign scorecard: one card per campaign (OverviewWidgetBody 'scorecard'). */
 export const CAMPAIGN_SCORECARD: CardSpec = {
@@ -95,12 +96,254 @@ export const BSK_KPIS: CardSpec = {
   ],
 }
 
+/** The release panel (OverviewWidgetBody 'releasePanel'): the latest dated release, how many
+ * days each side covers, and a table of the four counts with Before and After as its columns.
+ * Each window is `days` whole days on its side of the release's ET midnight, bounded by the
+ * first Best Sudoku hit and by today (lib/overview.ts releaseComparisonWindows). A count the
+ * window could not measure (installs before the install fix) says so instead of reading 0. */
+export const RELEASE_BEFORE_AFTER: CardSpec = {
+  v: 1,
+  sections: [
+    {
+      layout: 'rows',
+      items: [
+        { id: 'release', label: { note: 'label.card.release' }, data: { field: 'release.label' }, display: { as: 'text' }, gating: { whenEmpty: { note: 'release-none' } } },
+        { id: 'days', label: { metric: true }, data: { metric: 'release.windowDays', window: 'after' }, display: { as: 'number' }, gating: { whenUnmeasured: 'label' }, ...COMPACT },
+      ],
+    },
+    {
+      layout: 'table',
+      columns: { over: 'windows', ids: ['before', 'after'] },
+      items: [
+        { id: 'pageviews', label: { metric: true }, data: { metric: 'bsk.pageviews', window: { scope: 'window' } }, display: { as: 'number' }, gating: { whenUnmeasured: 'label' }, ...COMPACT },
+        { id: 'arrivals', label: { metric: true }, data: { metric: 'bsk.taggedArrivals', window: { scope: 'window' } }, display: { as: 'number' }, gating: { whenUnmeasured: 'label' }, ...COMPACT },
+        { id: 'auth', label: { metric: true }, data: { metric: 'bsk.authSuccess', window: { scope: 'window' } }, display: { as: 'number' }, gating: { whenUnmeasured: 'label' }, ...COMPACT },
+        { id: 'installs', label: { metric: true }, data: { metric: 'bsk.installs', window: { scope: 'window' } }, display: { as: 'number' }, gating: { whenUnmeasured: 'label' }, ...COMPACT },
+      ],
+    },
+  ],
+  captions: ['release-before-partial'],
+}
+
+/** The Pop-ups page's rate table (type 'rateTable'): the VALID pop-up rates only (lib/popupEvents.ts
+ * POPUP_RATE_TABLE_KEYS) — each pop-up's taps over its showings, and the install prompt's
+ * "installed" outcome over the prompts shown from the install fix on — each with its (n/d) and
+ * "too few to report" under MIN_COHORT. Over the page's date range, sites and own-visit filter. */
+export const POPUP_RATES: CardSpec = {
+  v: 1,
+  sections: [
+    {
+      layout: 'rows',
+      items: [
+        {
+          id: 'tap',
+          label: { note: 'label.card.popupTapRate', vars: { popup: 'popup.label' } },
+          data: { ratio: 'popup.tapRate', window: 'page' },
+          display: { as: 'percent', decimals: 1 },
+          repeat: { over: 'popups' },
+          ...COMPACT,
+        },
+        {
+          id: 'installed',
+          label: { note: 'label.card.installedRateFromFix' },
+          data: { ratio: 'popup.installedRate', params: { popup: 'install' }, window: 'page' },
+          display: { as: 'percent', decimals: 1 },
+          ...COMPACT,
+        },
+      ],
+    },
+  ],
+}
+
+/** Sign-in eligibility (the Pop-ups page's 'eligible' chart): signed-out finishes that earned a
+ * sign-in ask, hit the cap, or did not earn one, as bars, and the eligibility rate (earned over
+ * all three, a partition). Its caveat (rows arrive at least 30 minutes after the finish) is the
+ * widget's own caption, as before. */
+export const SIGNIN_ELIGIBILITY: CardSpec = {
+  v: 1,
+  sections: [
+    {
+      layout: 'bars',
+      items: [
+        { id: 'earned', label: { note: 'label.card.eligible.earned' }, data: { metric: 'popup.eligibleEarned', window: 'page' }, display: { as: 'bar' }, ...COMPACT },
+        { id: 'capped', label: { note: 'label.card.eligible.capped' }, data: { metric: 'popup.eligibleCapped', window: 'page' }, display: { as: 'bar' }, ...COMPACT },
+        { id: 'unearned', label: { note: 'label.card.eligible.unearned' }, data: { metric: 'popup.eligibleUnearned', window: 'page' }, display: { as: 'bar' }, ...COMPACT },
+      ],
+    },
+    {
+      layout: 'rows',
+      items: [{ id: 'rate', label: { metric: true }, data: { ratio: 'popup.eligibility', window: 'page' }, display: { as: 'percent', decimals: 1 }, ...COMPACT }],
+    },
+  ],
+}
+
+/** Cost per arrival / auth success (CampaignsWidgetBody 'cost'): one card per campaign, spend-only
+ * ones included (their spend is real; the section title says why nothing else is measured), with
+ * the ads store's figures — spend, where it came from, how far it is stored and when it last
+ * synced (a "stale" line while a closed day is missing) — and the two costs. The card's action
+ * asks the ads sync for fresh spend and reloads the card once one ran. */
+export const CAMPAIGN_COST: CardSpec = {
+  v: 1,
+  repeat: { over: 'campaigns' },
+  minWidth: 230,
+  title: { bind: 'campaign.label' },
+  actions: ['ads-refresh'],
+  sections: [
+    {
+      layout: 'rows',
+      title: { bind: 'campaign.measurabilityNote' },
+      items: [
+        { id: 'spend', label: { metric: true }, data: { metric: 'campaign.spend' }, display: { as: 'currency' }, ...COMPACT },
+        { id: 'source', label: { metric: true }, data: { metric: 'campaign.spendSource' }, display: { as: 'status' }, ...COMPACT },
+        // Inline on purpose: "stale — sync pending" stays visible under the date, as it was.
+        { id: 'through', label: { metric: true }, data: { metric: 'campaign.spendThrough' }, display: { as: 'date' }, gating: { whenEmpty: { note: 'no-spend-day-yet' } }, captionMode: 'inline' },
+        { id: 'synced', label: { metric: true }, data: { metric: 'campaign.lastSync' }, display: { as: 'ago' }, gating: { whenEmpty: { note: 'not-synced-yet' } }, ...COMPACT },
+        { id: 'cpa', label: { note: 'label.card.perArrival' }, data: { ratio: 'campaign.costPerArrival' }, display: { as: 'currency' }, ...COMPACT },
+        { id: 'cps', label: { note: 'label.card.perAuthSuccess' }, data: { ratio: 'campaign.costPerSignin' }, display: { as: 'currency' }, ...COMPACT },
+      ],
+    },
+  ],
+}
+
+/** The funnel per campaign (CampaignsWidgetBody 'funnel'): one card per beacon-tracked campaign,
+ * its tagged hits read against its arrivals (counts, never a rate), the raw install signals, every
+ * funnel step as a bar (counts: most step-over-step "rates" mix units), and the two proportions
+ * the rate rule allows — accept over asks, and install over the prompts shown from the install fix
+ * on. A closed flight omits what it could not measure; an active one keeps a not-yet-seen step at
+ * its live count; an upcoming one (no start date yet, or before its start) shows Arrivals 0 and
+ * every other step "not started" (whenNotStarted), as the old panel did. Last, the signed-out upsell fix as a funnel segment boundary: tagged upsell
+ * shown/accepted/dismissed before and after it, which appears only once lib/adsRules.ts
+ * UPSELL_SIGNEDOUT_FIX_AT is set and falls in the campaign's flight (the boundaryInFlight rule). */
+export const CAMPAIGN_FUNNEL: CardSpec = {
+  v: 1,
+  repeat: { over: 'campaigns', tracked: true },
+  minWidth: 230,
+  title: { bind: 'campaign.label' },
+  badge: { data: { field: 'campaign.status' }, display: { as: 'badge' } },
+  sections: [
+    {
+      layout: 'rows',
+      items: [
+        { id: 'hits', label: { metric: true }, data: { ratio: 'campaign.taggedHitsVsArrivals' }, display: { as: 'counts' }, ...NOT_STARTED_LABEL },
+        { id: 'raw', label: { metric: true }, data: { metric: 'campaign.rawInstallSignals' }, display: { as: 'number' }, ...NOT_STARTED_LABEL },
+      ],
+    },
+    {
+      layout: 'bars',
+      items: [
+        { id: 'arrivals', label: { note: 'label.funnel.arrivals' }, data: { metric: 'campaign.taggedArrivals' }, display: { as: 'bar' }, ...COMPACT, gating: { whenNotStarted: 'zero' } },
+        { id: 'played', label: { note: 'label.campaign.gameViews' }, data: { metric: 'campaign.gameViews' }, display: { as: 'bar' }, ...NOT_STARTED_LABEL },
+        { id: 'completed', label: { note: 'label.funnel.completed' }, data: { metric: 'campaign.completions' }, display: { as: 'bar' }, ...NOT_STARTED_LABEL },
+        { id: 'ask', label: { note: 'label.funnel.ask' }, data: { metric: 'campaign.asks' }, display: { as: 'bar' }, ...NOT_STARTED_LABEL },
+        { id: 'accept', label: { note: 'label.funnel.accept' }, data: { metric: 'campaign.accepts' }, display: { as: 'bar' }, ...NOT_STARTED_LABEL },
+        { id: 'authSuccess', label: { note: 'label.funnel.authSuccess' }, data: { metric: 'campaign.authSuccess' }, display: { as: 'bar' }, ...NOT_STARTED_LABEL },
+        { id: 'installPrompt', label: { note: 'label.funnel.installPrompt' }, data: { metric: 'campaign.installPrompts' }, display: { as: 'bar' }, ...NOT_STARTED_LABEL },
+        { id: 'install', label: { note: 'label.funnel.install' }, data: { metric: 'campaign.installs' }, display: { as: 'bar' }, ...NOT_STARTED_LABEL },
+      ],
+    },
+    {
+      layout: 'pills',
+      items: [
+        { id: 'acceptRate', label: { note: 'label.card.acceptOfAsks' }, data: { ratio: 'campaign.acceptPerAsk' }, display: { as: 'percent', decimals: 1 }, ...NOT_STARTED_LABEL },
+        { id: 'installRate', label: { note: 'label.card.installOfPrompts' }, data: { ratio: 'campaign.installPerPrompt' }, display: { as: 'percent', decimals: 1 }, ...NOT_STARTED_LABEL },
+      ],
+    },
+    {
+      layout: 'table',
+      title: { note: 'label.card.upsellSegment', vars: { at: 'campaign.upsellFixAt', day: 'campaign.upsellFixFlightDay' } },
+      repeat: { over: 'windows', ids: ['upsellPre', 'upsellPost'] },
+      items: [
+        { id: 'side', label: { note: 'label.card.taggedUpsell' }, data: { field: 'window.label' }, display: { as: 'text' } },
+        { id: 'shown', label: { note: 'label.card.shown' }, data: { metric: 'campaign.upsellShown', window: { scope: 'window' } }, display: { as: 'number' }, gating: { whenUnmeasured: 'omit' }, ...COMPACT },
+        { id: 'accepted', label: { note: 'label.card.accepted' }, data: { metric: 'campaign.upsellAccepts', window: { scope: 'window' } }, display: { as: 'number' }, gating: { whenUnmeasured: 'omit' }, ...COMPACT },
+        { id: 'dismissed', label: { note: 'label.card.dismissed' }, data: { metric: 'campaign.upsellDismisses', window: { scope: 'window' } }, display: { as: 'number' }, gating: { whenUnmeasured: 'omit' }, ...COMPACT },
+      ],
+    },
+  ],
+}
+
+/** Arrivals and funnel by country (CampaignsWidgetBody 'country'): one card per beacon-tracked
+ * campaign, a table with its funnel steps as rows and US / CA / Other as columns — every cell a
+ * campaign metric split by the campaign fact's country bucket. A closed flight omits a step it
+ * could not measure (every cell gated out drops the row); an upcoming one shows every cell "not
+ * started" (whenNotStarted). */
+export const CAMPAIGN_COUNTRY: CardSpec = {
+  v: 1,
+  repeat: { over: 'campaigns', tracked: true },
+  minWidth: 230,
+  title: { bind: 'campaign.label' },
+  sections: [
+    {
+      layout: 'table',
+      columns: { over: 'countries' },
+      rowsLabel: { note: 'label.card.step' },
+      items: [
+        { id: 'arrivals', label: { note: 'label.funnel.arrivals' }, data: { metric: 'campaign.taggedArrivals' }, display: { as: 'number' }, ...NOT_STARTED_LABEL },
+        { id: 'played', label: { note: 'label.campaign.gameViews' }, data: { metric: 'campaign.gameViews' }, display: { as: 'number' }, ...NOT_STARTED_LABEL },
+        { id: 'completed', label: { note: 'label.funnel.completed' }, data: { metric: 'campaign.completions' }, display: { as: 'number' }, ...NOT_STARTED_LABEL },
+        { id: 'ask', label: { note: 'label.funnel.ask' }, data: { metric: 'campaign.asks' }, display: { as: 'number' }, ...NOT_STARTED_LABEL },
+        { id: 'accept', label: { note: 'label.funnel.accept' }, data: { metric: 'campaign.accepts' }, display: { as: 'number' }, ...NOT_STARTED_LABEL },
+        { id: 'authSuccess', label: { note: 'label.funnel.authSuccess' }, data: { metric: 'campaign.authSuccess' }, display: { as: 'number' }, ...NOT_STARTED_LABEL },
+        { id: 'installPrompt', label: { note: 'label.funnel.installPrompt' }, data: { metric: 'campaign.installPrompts' }, display: { as: 'number' }, ...NOT_STARTED_LABEL },
+        { id: 'install', label: { note: 'label.funnel.install' }, data: { metric: 'campaign.installs' }, display: { as: 'number' }, ...NOT_STARTED_LABEL },
+      ],
+    },
+  ],
+}
+
+/** Return visits (CampaignsWidgetBody 'returns'): one card per beacon-tracked campaign with return
+ * beacons, its first tagged loads (d0) and the return rate of each later window (dN over d0, the
+ * device-deduplicated beacon's own buckets) as bars side by side, d1 to d31-60, each with its
+ * (n/d): the old curve. A flight that ended before the return beacon existed (closed, unmeasured)
+ * and a campaign with no return beacons yet (d0 = 0) are left out; with none left, one line says
+ * so. A lagged rate is provisional ("still arriving", in the card's Notes). */
+const RETURN_BUCKETS_ITEMS: { id: string; ratio: string }[] = [
+  { id: 'd1', ratio: 'campaign.returnD1PerD0' },
+  { id: 'd2-7', ratio: 'campaign.returnD2to7PerD0' },
+  { id: 'd8-14', ratio: 'campaign.returnD8to14PerD0' },
+  { id: 'd15-30', ratio: 'campaign.returnD15to30PerD0' },
+  { id: 'd31-60', ratio: 'campaign.returnD31to60PerD0' },
+]
+export const CAMPAIGN_RETURNS: CardSpec = {
+  v: 1,
+  repeat: { over: 'campaigns', tracked: true, empty: { label: '', text: { note: 'no-return-visits-yet' } } },
+  minWidth: 230,
+  title: { bind: 'campaign.label' },
+  sections: [
+    {
+      layout: 'rows',
+      items: [
+        { id: 'shared', label: { note: 'label.card.returnTag' }, data: { field: 'campaign.returnTagShared' }, display: { as: 'text' }, gating: { whenEmpty: 'omit' } },
+        { id: 'd0', label: { metric: true }, data: { metric: 'campaign.returnD0' }, display: { as: 'number' }, gating: { whenZero: 'omit' }, ...COMPACT },
+      ],
+    },
+    {
+      layout: 'columns',
+      items: RETURN_BUCKETS_ITEMS.map(({ id, ratio }) => ({
+        id,
+        label: { note: `label.card.return.${id}` },
+        data: { ratio },
+        display: { as: 'bar' as const },
+        gating: { whenEmpty: 'omit' as const },
+        ...COMPACT,
+      })),
+    },
+  ],
+}
+
 /** Every preset by id. A null prototype, so an id such as 'constructor' or 'toString' is
  * simply not a preset — read through presetById, never a bare bracket lookup. */
 export const PRESETS: Readonly<Record<string, CardSpec>> = Object.freeze(
   Object.assign(Object.create(null) as Record<string, CardSpec>, {
     'campaign-scorecard': CAMPAIGN_SCORECARD,
     'bsk-kpis': BSK_KPIS,
+    'release-before-after': RELEASE_BEFORE_AFTER,
+    'popup-rates': POPUP_RATES,
+    'signin-eligibility': SIGNIN_ELIGIBILITY,
+    'campaign-cost': CAMPAIGN_COST,
+    'campaign-funnel': CAMPAIGN_FUNNEL,
+    'campaign-country': CAMPAIGN_COUNTRY,
+    'campaign-returns': CAMPAIGN_RETURNS,
   }),
 )
 

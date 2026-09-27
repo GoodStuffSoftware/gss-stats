@@ -5,17 +5,25 @@
 // many metrics share one statement and one cache entry (functions/_lib/metricFacts.ts runs and
 // caches them; lib/metrics/engine.ts derives the metrics).
 //
-// Builders only: this module never touches D1. Each builder REUSES the clause helpers the
-// existing endpoints use (campaignAttributionClause, applyExclusions, excludeInstallGapUnmeasured,
-// siteWindowClause, popupIncludeClause) so a fact counts exactly the rows its endpoint counts:
+// Builders only: this module never touches D1. Each builder REUSES the shared clause helpers
+// (campaignAttributionClause, applyExclusions, excludeInstallGapUnmeasured, siteWindowClause,
+// popupIncludeClause) so a fact counts exactly the rows the query it replaced counted (the
+// endpoints named below; /api/overview and /api/campaigns are retired):
 //   campaignPathVisitor ← /api/overview scorecard + /api/campaigns query 1 (minus their hour /
 //                         country split), plus the row-exact install-fix split `pf`
 //   campaignReturns     ← the /return/<uc>/* query both endpoints run
-//   flightPathsSeen     ← functions/_lib/campaignInstrumentation.ts (now built from here)
+//   flightPathsSeen     ← functions/_lib/campaignInstrumentation.ts (retired; moved here)
 //   bskKpiDays          ← /api/overview's KPI query (same WHERE)
 //   bskRangePath        ← /api/overview's timeline query (same WHERE)
 //   popupRangePath      ← /api/popups' query (same WHERE, same `pf` split)
 //   adsSpend            ← lib/adsStore.ts SPEND_SUMMARY_SQL (gss-stats' own store)
+//   adsCoverage, adsLastSync ← lib/adsStore.ts readFreshness's two reads (the same store)
+//   bskFirstHit         ← /api/overview's first-hit query (the release panel's lower bound)
+//   bskReleaseSides     ← /api/overview's release-panel query, both windows in one statement
+//
+// The campaign fact also splits by COUNTRY BUCKET (US / CA / other — lib/campaigns.ts
+// countryBucket, the /api/campaigns country view) and, once lib/adsRules.ts
+// UPSELL_SIGNEDOUT_FIX_AT is set, at that instant (`uf`, row-exact like `pf`).
 //
 // TIMED FACTS ARE BUCKETED IN SQL, not per minute or hour (review finding #8): a fact's row count
 // must not grow with traffic or with the range's length, because the Workers CPU budget is per
@@ -37,11 +45,23 @@ import { excludeInstallGapUnmeasured, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, po
 import { last7DatesBefore, siteWindowClause } from '../overview'
 import { addDays as addEtDays, etSameTimeWindow } from '../etTime'
 import { BEST_SUDOKU_SITES } from '../bestSudokuSites'
-import { mapSpendSummary, SPEND_SUMMARY_SQL } from '../adsStore'
-import type { SpendSummary } from '../adsRules'
+import { COVERAGE_ROWS_SQL, LAST_SYNC_SQL, mapSpendSummary, SPEND_SUMMARY_SQL } from '../adsStore'
+import { UPSELL_SIGNEDOUT_FIX_AT, type SpendSummary } from '../adsRules'
 import { etMidnightMs } from './instrumentation'
+import { excludeOwnClause } from '../ownExclusion'
 
-export type FactId = 'campaignPathVisitor' | 'campaignReturns' | 'flightPathsSeen' | 'bskKpiDays' | 'bskRangePath' | 'popupRangePath' | 'adsSpend'
+export type FactId =
+  | 'campaignPathVisitor'
+  | 'campaignReturns'
+  | 'flightPathsSeen'
+  | 'bskKpiDays'
+  | 'bskRangePath'
+  | 'popupRangePath'
+  | 'bskFirstHit'
+  | 'bskReleaseSides'
+  | 'adsSpend'
+  | 'adsCoverage'
+  | 'adsLastSync'
 
 /** Normalized fact params. Which ones identify an instance is FactDef.keyParams. */
 export interface FactParams {
@@ -51,6 +71,13 @@ export interface FactParams {
   since?: string
   until?: string
   sites?: string[]
+  /** The release windows' anchor (an ET date) and how many days each side covers. */
+  releaseDateEt?: string
+  days?: number
+  /** "Hide my own visits" (lib/ownExclusion.ts), set only when the page turns it on with a
+   * browser and an OS: rows from that browser on that OS are left out. */
+  ownBrowser?: string
+  ownOS?: string
 }
 
 export interface FactStatement {
@@ -59,9 +86,11 @@ export interface FactStatement {
   binds: unknown[]
 }
 
-/** One aggregate row of a beacon fact. `day` is the KPI fact's ET day window (0 for every other
- * fact); `seg` is the row's segment against the fact's cuts (0 for an untimed fact); `pf` is the
- * row-exact split at FactDef.splitAt (null when the fact has none). `c` is the COUNT(*). */
+/** One aggregate row of a beacon fact. `day` is the KPI fact's ET day window, or the release
+ * fact's side (0 before, 1 after; 0 for every other fact); `seg` is the row's segment against the
+ * fact's cuts (0 for an untimed fact); `pf` is the row-exact split at FactDef.splitAt (null when
+ * the fact has none); `cb` the country bucket ('' when the fact has none); `uf` the row-exact
+ * side of the upsell fix (null when unset or not split). `c` is the COUNT(*). */
 export interface BeaconRow {
   path: string
   visitor: string
@@ -69,10 +98,30 @@ export interface BeaconRow {
   day: number
   seg: number
   pf: boolean | null
+  cb: string
+  uf: boolean | null
   c: number
 }
 
-export type FactRows = { kind: 'beacon'; rows: BeaconRow[] } | { kind: 'spend'; rows: SpendSummary[] }
+/** The ads store's freshness reads (lib/adsStore.ts readFreshness): each campaign's stored day
+ * rows, and its latest successful sync. gss-stats' own records, never beacon rows. */
+export interface CoverageRow {
+  campaignId: string
+  date: string
+  fetchedAt: string | null
+}
+export interface LastSyncRow {
+  campaignId: string
+  lastSync: string | null
+}
+
+export type FactRows =
+  | { kind: 'beacon'; rows: BeaconRow[] }
+  | { kind: 'spend'; rows: SpendSummary[] }
+  | { kind: 'coverage'; rows: CoverageRow[] }
+  | { kind: 'lastSync'; rows: LastSyncRow[] }
+  /** A single aggregate (the first Best Sudoku hit, epoch ms), null when there is none. */
+  | { kind: 'scalar'; value: number | null }
 
 /** How long a fact's cache entry lives (functions/_lib/metricFacts.ts turns it into seconds):
  *  - 'range': a page range — long once it ends before today (ET), short while it includes today
@@ -87,7 +136,7 @@ export interface FactDef {
   /** The normalized params that identify one instance (its cache key and dedupe key). */
   keyParams: (keyof FactParams)[]
   /** The page filters this fact honours. Campaign facts use attribution windows and honour
-   * none, as /api/overview and /api/campaigns do today. */
+   * none, as the retired /api/overview and /api/campaigns did. */
   honors: ('range' | 'sites' | 'excludeOwn')[]
   /** Bucket size in ms whose START the segments (and KPI days) compare (60 000 or 3 600 000),
    * or null for an untimed fact. */
@@ -153,7 +202,7 @@ function segmentColumn(bucketMs: number, cuts: readonly number[]): { sql: string
 }
 
 /** The KPI day windows: [0] today so far, [1..7] the same ET clock time on each of the 7 days
- * before — /api/overview's own windows (lib/overview.ts sameTimeWindowMs), computed without Intl
+ * before — the retired /api/overview's windows (lib/overview.ts sameTimeWindowMs), computed without Intl
  * (lib/etTime.ts etSameTimeWindow; facts.test.ts checks they are identical). */
 export function kpiDayWindows(todayEt: string, nowMs: number): [number, number][] {
   return [[etMidnightMs(todayEt), nowMs], ...last7DatesBefore(todayEt).map((d) => etSameTimeWindow(d, nowMs))]
@@ -175,8 +224,34 @@ const pfOf = (r: Record<string, unknown>): boolean | null => (INSTALL_FIX === nu
 const noPf = (): null => null
 const beacon = (raw: Record<string, unknown>[], pf: (r: Record<string, unknown>) => boolean | null): FactRows => ({
   kind: 'beacon',
-  rows: raw.map((r) => ({ path: str(r.path), visitor: str(r.visitor), campaign: str(r.campaign), day: num(r.d), seg: num(r.s), pf: pf(r), c: num(r.c) })),
+  rows: raw.map((r) => ({
+    path: str(r.path),
+    visitor: str(r.visitor),
+    campaign: str(r.campaign),
+    day: num(r.d),
+    seg: num(r.s),
+    pf: pf(r),
+    cb: str(r.cb),
+    uf: r.uf === undefined || r.uf === null ? null : num(r.uf) === 1,
+    c: num(r.c),
+  })),
 })
+
+/** The country bucket (lib/campaigns.ts countryBucket) as a CASE over the `country` column with
+ * literal outputs only: US, CA, and everything else (blank included) as 'other'. */
+export const COUNTRY_BUCKET_SQL = "CASE country WHEN 'US' THEN 'US' WHEN 'CA' THEN 'CA' ELSE 'other' END"
+/** `(ts >= ?) AS uf` at the signed-out upsell fix, only while it is set (lib/adsRules.ts
+ * UPSELL_SIGNEDOUT_FIX_AT): until then the statement is unchanged and every row reads uf null. */
+function ufColumn(fixAt: number | null = UPSELL_SIGNEDOUT_FIX_AT): { select: string; group: string; binds: unknown[] } {
+  return fixAt === null ? { select: '', group: '', binds: [] } : { select: ', (ts >= ?) AS uf', group: ', uf', binds: [fixAt] }
+}
+const DAY_MS = 86_400_000
+/** The release windows (lib/overview.ts releaseComparisonWindows): `days` whole days before and
+ * after the release's ET midnight. */
+export function releaseSidesMs(releaseDateEt: string, days: number): { before: [number, number]; after: [number, number] } {
+  const r = etMidnightMs(releaseDateEt)
+  return { before: [r - days * DAY_MS, r], after: [r, r + days * DAY_MS] }
+}
 
 export const FACTS: Record<FactId, FactDef> = {
   campaignPathVisitor: {
@@ -194,10 +269,11 @@ export const FACTS: Record<FactId, FactDef> = {
       applyExclusions(w, b)
       excludeInstallGapUnmeasured(w, b) // pre-fix install-gap rows are unmeasured, not zero
       const pf = pfColumn()
+      const uf = ufColumn()
       return {
         db: 'gss_geo',
-        sql: `SELECT path, visitor, ${pf.sql} AS pf, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY path, visitor, pf`,
-        binds: [...pf.binds, ...b],
+        sql: `SELECT path, visitor, ${pf.sql} AS pf, ${COUNTRY_BUCKET_SQL} AS cb${uf.select}, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY path, visitor, pf, cb${uf.group}`,
+        binds: [...pf.binds, ...uf.binds, ...b],
       }
     },
     parse: (raw) => beacon(raw, pfOf),
@@ -285,8 +361,8 @@ export const FACTS: Record<FactId, FactDef> = {
   popupRangePath: {
     id: 'popupRangePath',
     db: 'gss_geo',
-    keyParams: ['since', 'until', 'sites'],
-    honors: ['range', 'sites'],
+    keyParams: ['since', 'until', 'sites', 'ownBrowser', 'ownOS'],
+    honors: ['range', 'sites', 'excludeOwn'],
     bucketMs: 3_600_000,
     splitAt: INSTALL_FIX,
     ttl: 'range',
@@ -298,6 +374,8 @@ export const FACTS: Record<FactId, FactDef> = {
         w.push(`site IN (${p.sites.map(() => '?').join(', ')})`)
         b.push(...p.sites)
       }
+      // "Hide my own visits", exactly as /api/popups applies it (lib/ownExclusion.ts).
+      excludeOwnClause(w, b, !!(p.ownBrowser && p.ownOS), p.ownBrowser, p.ownOS)
       const inc = popupIncludeClause()
       w.push(inc.sql)
       b.push(...inc.binds)
@@ -312,6 +390,46 @@ export const FACTS: Record<FactId, FactDef> = {
     parse: (raw) => beacon(raw, pfOf),
   },
 
+  bskFirstHit: {
+    id: 'bskFirstHit',
+    db: 'gss_geo',
+    keyParams: [],
+    honors: [],
+    bucketMs: null,
+    splitAt: null,
+    // The first Best Sudoku hit only moves if old rows are ever removed.
+    ttl: { seconds: 6 * 60 * 60 },
+    build: () => ({ db: 'gss_geo', sql: `SELECT MIN(ts) AS t FROM hits WHERE site IN (${BEST_SUDOKU_SITES.map(() => '?').join(', ')})`, binds: [...BEST_SUDOKU_SITES] }),
+    parse: (raw) => {
+      const t = raw[0]?.t
+      return { kind: 'scalar', value: t === null || t === undefined || !Number.isFinite(Number(t)) ? null : Number(t) }
+    },
+  },
+
+  bskReleaseSides: {
+    id: 'bskReleaseSides',
+    db: 'gss_geo',
+    keyParams: ['releaseDateEt', 'days'],
+    honors: [],
+    bucketMs: 60_000,
+    splitAt: null,
+    // Both windows end at or before now (the after window is whole days since the release).
+    ttl: { seconds: 60 * 60 },
+    build(p, _nowMs, cuts = []) {
+      if (!p.releaseDateEt || !p.days) throw new Error('bskReleaseSides needs releaseDateEt and days')
+      const { before, after } = releaseSidesMs(p.releaseDateEt, p.days)
+      // siteWindowClause applies the exclusions, as the release panel's own query did.
+      const clause = siteWindowClause(BEST_SUDOKU_SITES, before[0], after[1])
+      const seg = segmentColumn(60_000, cuts)
+      return {
+        db: 'gss_geo',
+        sql: `SELECT (ts >= ?) AS d, ${seg.sql} AS s, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE ${clause.sql} GROUP BY d, s, path, visitor, campaign`,
+        binds: [after[0], ...seg.binds, ...clause.binds],
+      }
+    },
+    parse: (raw) => beacon(raw, noPf),
+  },
+
   adsSpend: {
     id: 'adsSpend',
     db: 'gss_stats_ads',
@@ -323,12 +441,36 @@ export const FACTS: Record<FactId, FactDef> = {
     build: () => ({ db: 'gss_stats_ads', sql: SPEND_SUMMARY_SQL, binds: [] }),
     parse: (raw) => ({ kind: 'spend', rows: raw.map(mapSpendSummary) }),
   },
+
+  adsCoverage: {
+    id: 'adsCoverage',
+    db: 'gss_stats_ads',
+    keyParams: [],
+    honors: [],
+    bucketMs: null,
+    splitAt: null,
+    ttl: { seconds: 300 },
+    build: () => ({ db: 'gss_stats_ads', sql: COVERAGE_ROWS_SQL, binds: [] }),
+    parse: (raw) => ({ kind: 'coverage', rows: raw.map((r) => ({ campaignId: str(r.campaign_id), date: str(r.date), fetchedAt: r.fetched_at == null ? null : str(r.fetched_at) })) }),
+  },
+
+  adsLastSync: {
+    id: 'adsLastSync',
+    db: 'gss_stats_ads',
+    keyParams: [],
+    honors: [],
+    bucketMs: null,
+    splitAt: null,
+    ttl: { seconds: 60 },
+    build: () => ({ db: 'gss_stats_ads', sql: LAST_SYNC_SQL, binds: [] }),
+    parse: (raw) => ({ kind: 'lastSync', rows: raw.map((r) => ({ campaignId: str(r.campaign_id), lastSync: r.last_sync == null ? null : str(r.last_sync) })) }),
+  },
 }
 
 /** "Which paths existed AT ALL (any campaign, tagged or not) site-wide during this flight's
  * SERVING window" — the per-flight instrumentation check (lib/metrics/instrumentation.ts
- * seenInFlightWindow). Moved here from functions/_lib/campaignInstrumentation.ts, which now
- * runs this builder. Requires a confirmed flightStart. */
+ * seenInFlightWindow). Moved here from the retired functions/_lib/campaignInstrumentation.ts.
+ * Requires a confirmed flightStart. */
 export function flightPathsSeenStatement(campaign: CampaignFlight): FactStatement {
   if (!campaign.flightStart) throw new Error('flightPathsSeen needs a confirmed flightStart')
   const [startMs, endMs] = etFlightRangeMs(campaign.flightStart, campaign.flightEnd)

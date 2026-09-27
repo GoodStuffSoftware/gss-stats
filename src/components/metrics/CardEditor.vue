@@ -49,6 +49,8 @@ const props = defineProps<{
    * reads the same window a saved card would (a `window: 'page'` item's preview otherwise has no
    * range to ask for). Never mutated here. */
   context?: MetricsContext
+  /** The widget's campaign selection, so the preview shows the campaigns a saved card would. */
+  campaignIds?: string[]
 }>()
 // `errors` fires whenever the current draft's validity changes (immediate, so a caller has the
 // answer synchronously from mount) — how a host like ChartEditor.vue knows to disable its own
@@ -332,7 +334,7 @@ function removeSection(i: number) {
 
       <div class="ce-preview">
         <h3>Preview</h3>
-        <MetricCard :card-ref="previewCardRef" :context="context" />
+        <MetricCard :card-ref="previewCardRef" :context="context" :campaign-ids="campaignIds" />
       </div>
     </div>
   </div>

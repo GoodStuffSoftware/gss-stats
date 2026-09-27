@@ -118,6 +118,44 @@ describe('decided from the campaign config, on the client (spend-only, flight pe
   })
 })
 
+describe('whenNotStarted: an upcoming flight keeps its items', () => {
+  const pending: ScopeInstance = { kind: 'campaign', campaign: { ...campaignById('24279250691')!, flightStart: null, status: 'upcoming' } }
+  const spendOnly: ScopeInstance = { kind: 'campaign', campaign: campaignById('24234347705')! }
+  const notOpen: MetricValue = { status: 'unmeasured', reason: 'not-started', noteIds: ['not-started'] }
+  const bar = (o: Partial<MetricItem> = {}) => numberItem({ display: { as: 'bar' }, ...o })
+
+  it('no start date yet: "label" reads "not started", "zero" a 0 bar; neither is ever requested', () => {
+    const label = numberItem({ gating: { whenNotStarted: 'label' } })
+    const zero = bar({ gating: { whenNotStarted: 'zero' } })
+    expect(unmeasuredByConfig(label.data, pending, label.gating)).toBe(false)
+    expect(buildRequestSpec(label, pending)).toBeNull()
+    expect(buildRequestSpec(zero, pending)).toBeNull()
+    expect(itemViewModel(label, undefined, pending, opts)).toMatchObject({ visible: true, primary: 'not started', muted: true })
+    expect(itemViewModel(percentItem({ gating: { whenNotStarted: 'label' } }), undefined, pending, opts)).toMatchObject({ visible: true, primary: 'not started' })
+    expect(itemViewModel(zero, undefined, pending, opts)).toMatchObject({ visible: true, primary: '0', barValue: 0 })
+  })
+  it('a window that opens later: "zero" turns the server\'s "not started" into 0; "label" and no gating keep it', () => {
+    const scope: ScopeInstance = { kind: 'campaign', campaign: campaignById('24279250691')! }
+    expect(itemViewModel(bar({ gating: { whenNotStarted: 'zero' } }), notOpen, scope, opts)).toMatchObject({ visible: true, primary: '0', barValue: 0 })
+    expect(itemViewModel(bar({ gating: { whenNotStarted: 'label' } }), notOpen, scope, opts).primary).toBe('not started')
+    expect(itemViewModel(bar(), notOpen, scope, opts).primary).toBe('not started')
+  })
+  it('without it a pending flight still omits the item (the scorecard), and a spend-only campaign always does', () => {
+    expect(itemViewModel(numberItem(), undefined, pending, opts).visible).toBe(false)
+    for (const whenNotStarted of ['label', 'zero'] as const) {
+      const item = numberItem({ gating: { whenNotStarted } })
+      expect(unmeasuredByConfig(item.data, spendOnly, item.gating)).toBe(true)
+      expect(itemViewModel(item, undefined, spendOnly, opts).visible).toBe(false)
+    }
+  })
+  it('validateCard accepts only "label" or "zero"', () => {
+    const card = (g: unknown): CardSpec => ({ v: 1, repeat: { over: 'campaigns' }, sections: [{ layout: 'rows', items: [numberItem({ gating: g as MetricItem['gating'] })] }] })
+    expect(validateCard(card({ whenNotStarted: 'label' }))).toEqual([])
+    expect(validateCard(card({ whenNotStarted: 'zero' }))).toEqual([])
+    expect(validateCard(card({ whenNotStarted: 'omit' })).join()).toMatch(/whenNotStarted must be/)
+  })
+})
+
 describe('comparisons hidden after the first, partial day', () => {
   const retest = campaignById('24279250691')! // flight starts 2026-09-26 at 12:00 ET
   const arrivals: MetricItem = { id: 'a', label: 'Arrivals', data: { metric: 'campaign.taggedArrivals', window: 'todaySoFar' }, display: { as: 'number', deltas: ['yesterday', 'avg7'] } }

@@ -47,9 +47,10 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   time yesterday and the 7-day average), the **Overall timeline**, a campaign scorecard, and a
   release before/after panel — each its own movable/editable widget. The KPI tiles and the
   scorecard are **metric cards** (presets `bsk-kpis` and `campaign-scorecard`, see *One metrics
-  registry* below); the release panel is dataset `overview` (see
-  [`src/components/widgets/OverviewWidgetBody.vue`](src/components/widgets/OverviewWidgetBody.vue)
-  and [`src/lib/overview.ts`](src/lib/overview.ts)). The Overall timeline is a **standard line
+  registry* below), and so is the release panel (preset `release-before-after`: the latest dated
+  release's before and after windows, `days` whole days on each side of its ET midnight, bounded
+  by the first Best Sudoku hit, as [`src/lib/overview.ts`](src/lib/overview.ts)
+  `releaseComparisonWindows` decides). The Overall timeline is a **standard line
   chart** (see *Line charts* below) with five series — page views and tagged arrivals on the left
   axis, auth successes, installs and raw install signals on the right — over the page's date
   range and Best Sudoku sites, with campaign-flight bands, release markers and go-live markers
@@ -58,8 +59,21 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   `date` dimension is a UTC day.
   [`src/lib/releases.ts`](src/lib/releases.ts) holds the hand-entered release dates (`hits` has
   no app-version column; major releases get a labelled line, minor ones a short tick).
-  "Best Sudoku · Campaigns" (dataset `campaigns`; see
-  [`src/components/widgets/CampaignsWidgetBody.vue`](src/components/widgets/CampaignsWidgetBody.vue))
+  "Best Sudoku · Campaigns" (its funnel, country, cost and return-visits panels are metric
+  cards, presets `campaign-funnel`, `campaign-country` — a table with the funnel steps as rows
+  and US / CA / Other as columns, each cell a campaign metric with the registry's optional
+  `country` param — `campaign-cost` and `campaign-returns` — d0 and each return window's rate,
+  dN over d0 with its n/d, as bars side by side. "Arrivals by ET hour of day" and "Daily
+  arrivals by flight day" are standard geo charts over the same tagged arrivals (filter
+  `arrival` = tagged): a breakdown bar of `hourEt` × `campaignFlight`, and a line of
+  `flightDay` × `campaignFlight` with `cumulative` running totals dashed on a right-hand axis.
+  A `campaignFlight` breakdown draws every beacon-tracked campaign with a start date, one with
+  no arrivals yet at 0, and the flight-day axis runs to the longest of those flights.
+  The funnel card also carries the signed-out upsell fix's pre/post-fix segment table, which
+  appears on its own once `UPSELL_SIGNEDOUT_FIX_AT` is set. Since layout version 11 no page has a
+  bespoke panel left: the former panel bodies and their endpoints (`/api/campaigns`,
+  `/api/overview`) are retired, and a saved layout's panels are swapped in place on load — see
+  [`src/lib/defaults.ts`](src/lib/defaults.ts) `migratePanelsV11`)
   and "Best Sudoku · Traffic" (per-site/geo/referrer/device detail beyond what Overview and
   Campaigns cover) round out the Best Sudoku tab group, which is kept together and in that
   order — after your own tabs — by a non-destructive reorder on load (see
@@ -67,7 +81,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
 - **Movable / composable charts** — drag the header, resize from the corner; add /
   edit / duplicate / delete charts of any type: stat, bar, horizontal bar, stacked
   bar, **breakdown bar** (one dimension on the axis × another as the series, grouped or
-  stacked — `Widget.barMode`), line, area, doughnut, nested doughnut, pie, table, a geo point
+  stacked — `Widget.barMode`), line (over a non-date axis, a breakdown draws one line per
+  value, and `Widget.cumulative` adds each one's running total dashed on a right-hand axis),
+  area, doughnut, nested doughnut, pie, table, a geo point
   map, and a note/text tile. Zoom is a single click, always available on every chart; its other
   modification chrome (edit/remove/drag/resize) tucks away until you hover that chart
   — or tap that chart's own reveal icon on touch, which has no hover.
@@ -98,7 +114,8 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   any chart as a caption (`widget.notes`) or as its own movable 'note' widget
   (`widget.noteId`), editable from the chart menu either way. Short UI names (metric and
   funnel-step labels such as "Game-screen views") are registry entries too, of kind `label`:
-  never a caption and never offered in the caption pickers.
+  never a caption and never offered in the caption pickers (the card builder's label pickers
+  list them).
 - **Durable, multi-page dashboards** — layout + chart definitions persist in KV (not
   `localStorage`), so they follow you across devices. Duplicate / rename / delete
   pages; a protected default page with "restore default charts"; per-page filters and
@@ -132,7 +149,10 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   axis, solid/dashed/dotted, with optional axis titles. "Hide known test and household traffic"
   (`excludeKnownTraffic`) applies the campaigns endpoint's `EXCLUSIONS` to a beacon chart.
 - **Smart date range** — type spans like `7d` / `24h` / `2w` / `last 3d`, or pick
-  exact dates.
+  exact dates. `since first campaign` (also a chip in a chart's own filter) runs from ET
+  midnight of the earliest configured campaign flight's start to now, a window that grows
+  instead of rolling ([`src/lib/range.ts`](src/lib/range.ts)); the two campaign arrivals charts
+  use it, so a flight's first days never drop off.
 - **Geo beacon dataset** — region / city / ISP / new-vs-returning and a visitor map,
   from the beacon (RUM geography is country-only).
 - **Pop-up tracking** — a Best Sudoku page for the sign-in prompt, first-50 promo, upsell
@@ -141,7 +161,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   signals as the series — `popupOutcome`, where the shown row counts as outcome `shown`), a
   **rate table** with only the valid ratios (each pop-up's taps over its showings, and install
   over post-fix install prompts — `POPUP_RATE_TABLE_KEYS`; each with its n/d and "too few to
-  report" under `MIN_COHORT`), and the sign-in eligibility counts. Outcome-over-shown rates are
+  report" under `MIN_COHORT`), and the sign-in eligibility counts with their rate. The rate table
+  and the eligibility panel are metric cards (presets `popup-rates` and `signin-eligibility`, since
+  layout version 11), over the page's range, sites and "hide my own visits", as before. Outcome-over-shown rates are
   not shown as percentages: outcomes land days after the showing, so a range mixes cohorts.
   Every other pop-up chart (reason/platform breakdowns, per-day trends, single rate tiles) is
   still available from the chart editor's "Pop-up tracking" data source.
@@ -249,10 +271,8 @@ Cloudflare Pages Functions  (functions/_middleware.ts → functions/api/*.ts)
    │  - /api/geo    → reads the beacon's D1 (bot-free sub-country geo)
    │  - /api/popups → pop-up funnel counts/rates from the same D1 (sign-in, upsell, install, …)
    │  - /api/completions → completed-game counts from the same D1, by mode × difficulty
-   │  - /api/campaigns → Google Ads campaign comparison from the same D1 (funnel, hour-of-day,
-   │                      country, daily/cumulative, return visits)
-   │  - /api/overview → the release before/after panel
-   │  - /api/metrics  → one batch of registry metrics/ratios by id (ADR 0003; for the card components)
+   │  - /api/metrics  → one batch of registry metrics/ratios by id (ADR 0003): every metric card
+   │                      (Overview, Campaigns, Pop-ups), from the same D1 and the ads store
    │  - /api/ads/readings → the ads routine's readings log + stored spend (D1 gss-stats-ads)
    │  - /api/sites  → auto-builds the merged site list (RUM + beacon, aliases folded)
    │  - /api/config → dashboard layout in KV (backed up once per layout-version bump)
@@ -269,7 +289,10 @@ Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats
   id and param against the registry, plans the distinct facts (at most 40 statements, else `413`
   with `maxStatements`), caches each fact on its own in the Cache API, and derives every value in
   JS with its status (`ok`, `too-few`, `no-data`, `unmeasured`, `partial`), n/d, deltas and a
-  provisional flag for lagged outcomes. **Metric cards** render it: a widget with `card`
+  provisional flag for lagged outcomes. Windows are the campaign's attribution window, today so
+  far, the page range, the latest release's before/after windows (sized by one cached first-hit
+  read), and a campaign's pre/post segments at the signed-out upsell fix (only once that fix is
+  set and falls in the flight). **Metric cards** render it: a widget with `card`
   (`{ preset }` from [`src/lib/metrics/presets.ts`](src/lib/metrics/presets.ts), or a saved spec)
   shows `MetricCard` ([`src/components/metrics/`](src/components/metrics)) — one batched request
   per page, following the page's date range and sites, with each card's caveats behind one
@@ -326,7 +349,11 @@ malformed rows as `(other)`); **campaign flight** (`campaignFlight`, decided by 
 `campaignAttributionClause` + `EXCLUSIONS` the campaigns endpoint uses); **arrival** (`arrival`:
 a first-ever beacon, `tagged` when a flight claims it, else `untagged`); and **key event**
 (`keyEvent`: `auth-success` base rows, `install` from the install fix on, `raw-install-signal`,
-`game-complete`). A chart grouping by
+`game-complete`); the **ET hour of day** (`hourEt`, `0`-`23`, DST-aware like `dateEt`); and the
+**campaign flight day** (`flightDay`: `1` for the first ET day of the flight the row is
+attributed to, as `campaignFlight` decides it, blank outside that flight's serving days). A
+chart on `hourEt` shows all 24 hours, and one on `flightDay` by `campaignFlight` every day up
+to the longest of its flights, so an empty bucket still has its place. A chart grouping by
 one of the pop-up or completion dimensions counts those event rows without needing "Include
 event beacons" (the standing exclusion would remove every row it describes), and never shows
 unrelated rows as a "(none)" bar. Every derived dimension except `date` can be one of several
@@ -413,7 +440,7 @@ npm run typecheck:scripts
   instant, and the fix day's spend is shown apart). **A sign-in is its base row only:** the
   status row `/auth/success/<provider>/<new|existing|unknown>` is sent ALONGSIDE the base row
   `/auth/success/<provider>` (providers `google` and `email`), so every auth-success count — the
-  tagged funnel, `/api/campaigns`, `/api/overview`, the sign-up bound — matches the exact base
+  tagged funnel, the campaign and Overview cards (`/api/metrics`), the sign-up bound — matches the exact base
   shape, and the status split reads only the three-segment rows. A prefix match would count each
   new-client sign-in twice. Kill rule 3's asks are unchanged.
 - **One reading per entry per day.** A reading is stored once per (campaign, ET day, entry
@@ -459,9 +486,10 @@ Today's still-open day is never stored. The Ads client (plain `fetch`) and the s
 are runtime-agnostic, so the local routines and the Worker run the same code; whichever runs
 second finds nothing to write.
 
-The campaigns page and the readings widget show **"Spend through &lt;date&gt; · synced
-&lt;relative time&gt;"** per campaign (`spendThrough`, `lastSync` from `/api/campaigns` and
-`/api/ads/readings`), and **"stale — sync pending"** when a flight day that should be stored
+The campaigns page's cost card (preset `campaign-cost`: registry metrics `campaign.spendThrough`
+and `campaign.lastSync` over the facts `adsCoverage` and `adsLastSync`, the same two reads) and
+the readings widget (`/api/ads/readings`) show **"Spend through &lt;date&gt;"** and **"synced
+&lt;relative time&gt;"** per campaign, and **"stale — sync pending"** when a flight day that should be stored
 by now is missing: yesterday from 09:30 ET (the 08:00 ET morning read has synced by then),
 otherwise the day before. A sync run that claimed and never finished (killed mid-run, e.g. by
 a CPU limit) shows as a **"Sync alert"** line in the readings widget once it is 15 minutes old
@@ -541,7 +569,7 @@ query. Mitigations (`functions/_lib/edgeCache.ts`, `functions/api/geo.ts`, `func
 - `/api/metrics` caches per fact (90 s while live, 15 min for a closed campaign, 24 h for a closed
   flight window), so one fact read serves every card and page that shows it; a representative
   Overview batch reads about 10,000 rows uncached against about 14,100 for the same sections of
-  `/api/overview` (docs/capacity.md §7).
+  the retired `/api/overview`, and a full Campaigns page batch is measured in docs/capacity.md §8.
 
 No index changes and no schema/data writes were needed — see docs/capacity.md §4 for why (the
 `hits` table is too small for an index to matter, and `GROUP BY` requires a temp b-tree
@@ -575,7 +603,8 @@ of the migrated layout first copies the layout that was stored until then to
 `dashboard:default:backup:v<stored version>`, once, and never overwrites that copy
 (`functions/api/config.ts`; if the backup can't be written, the save fails and the old layout
 stays). The backup is named after the version that was **stored**, not the one before the new
-code: a layout still stored at v8 when v10 ships is backed up as `backup:v8`. A tab still
+code: a layout still stored at v8 when v11 ships is backed up as `backup:v8`, one stored at v10
+as `backup:v10`. A tab still
 running older code gets `409` ("This tab is out of date, reload") instead of overwriting a
 newer layout.
 
@@ -591,8 +620,9 @@ To put a backup back, in this order:
    next load migrates the restored layout again. Either redeploy the previous release or ship
    the fixed migration.
 3. **Find the backup to restore**: list the backup keys, and pick the version that was stored
-   before the upgrade (the highest one below the current `CONFIG_VERSION`; on production today
-   that is `backup:v8`). Namespace id from `wrangler.toml`; a token with Workers KV Storage: Edit.
+   before the upgrade (the highest one below the current `CONFIG_VERSION`: `backup:v8` if
+   production was still stored at v8, `backup:v10` if a v10 save happened first). Namespace id
+   from `wrangler.toml`; a token with Workers KV Storage: Edit.
 
    ```bash
    npx wrangler kv key list --remote --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --prefix "dashboard:default:backup:"

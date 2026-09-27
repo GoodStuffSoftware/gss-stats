@@ -3,7 +3,8 @@
 // former KPI tile key to it and is kept as the registry's reference in its tests). The KPI
 // tiles' own formatters retired with the tiles (CONFIG_VERSION 10: the 'bsk-kpis' card).
 import { addEtDays } from './overview'
-import {
+import {
+
   etDateFromMs,
   GAME_COMPLETE_LIVE_AT,
   INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS,
@@ -56,8 +57,9 @@ export interface KpiComparisonGate {
   newToday: boolean
 }
 
-/** A per-campaign "Tagged arrivals" tile (`arrivals-<campaignId>`, functions/api/overview.ts) is
- * gated on its flight's start date: attribution starts there (campaignAttributionClause), so a
+/** A per-campaign "Tagged arrivals" tile (`arrivals-<campaignId>`, a key of the retired
+ * /api/overview KPI section, which kpiComparisonGate still reads) is gated on its flight's start
+ * date: attribution starts there (campaignAttributionClause), so a
  * comparison day before it is 0 by construction, and the start day itself is partial (the retest
  * starts at 12:00 ET). Same boundary rule as the go-live constants above (ADR 0003 row 15). */
 function arrivalsTileFlightStart(key: string): string | undefined {
@@ -67,10 +69,11 @@ function arrivalsTileFlightStart(key: string): string | undefined {
 
 const NO_GATE: KpiComparisonGate = { hideVsYesterday: false, hideVsAvg7: false, newToday: false }
 
-/** `todayEt` is the response's own `OverviewResponse.todayEt` (an ET calendar date string —
- * lexical comparison is chronological for 'YYYY-MM-DD'). A tile with no entry in
- * KPI_GO_LIVE_ET_DATE (an established metric with no go-live gap, e.g. page views) is never
- * gated. */
+/** The per-tile gate of the retired KPI section, kept as the reference the metrics registry's
+ * instrumentation rules are tested against (lib/metrics/instrumentation.test.ts); the cards use
+ * comparisonGateForGoLive below. `todayEt` is an ET calendar date string (lexical comparison is
+ * chronological for 'YYYY-MM-DD'). A tile with no entry in KPI_GO_LIVE_ET_DATE (an established
+ * metric with no go-live gap, e.g. page views) is never gated. */
 export function kpiComparisonGate(key: string, todayEt: string): KpiComparisonGate {
   return comparisonGateForGoLive((Object.hasOwn(KPI_GO_LIVE_ET_DATE, key) ? KPI_GO_LIVE_ET_DATE[key] : undefined) ?? arrivalsTileFlightStart(key), todayEt)
 }

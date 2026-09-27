@@ -16,9 +16,19 @@ export type ScopePath =
   | 'campaign.statusToday'
   | 'campaign.flight'
   | 'campaign.measurabilityNote'
+  /** The signed-out upsell fix (lib/adsRules.ts UPSELL_SIGNEDOUT_FIX_AT) as an ET minute, and
+   * its flight day, when it falls in this campaign's flight (null otherwise, or while unset). */
+  | 'campaign.upsellFixAt'
+  | 'campaign.upsellFixFlightDay'
+  /** The shared-tag note when another flight uses the same tag (its return beacons can't be told
+   * apart); null otherwise. */
+  | 'campaign.returnTagShared'
   | 'popup.id'
   | 'popup.label'
   | 'window.label'
+  | 'country.label'
+  /** The latest dated release (lib/releases.ts): "v1.95.3 (2026-09-26)". Config, not a query. */
+  | 'release.label'
   | 'reading.readAt'
   | 'reading.kind'
   | 'reading.spend'
@@ -33,16 +43,29 @@ export type Label =
   | { metric: true } // the data binding's own registry label
 
 /** (b) DATA: a registry id plus params. Never SQL, never an endpoint path. */
-export type ParamValue = string | { scope: 'campaignId' | 'popup' }
+export type ParamValue = string | { scope: 'campaignId' | 'popup' | 'country' }
 export interface Params {
   campaignId?: ParamValue
   popup?: ParamValue
+  /** A country bucket (COUNTRY_BUCKETS): optional wherever a metric declares it. */
+  country?: ParamValue
 }
-/** The windows a card may ask for. The registry serves 'attribution', 'todaySoFar' and 'page'
- * today; the others are reserved for later slices (flight, release before/after). */
-export type WindowSpec = 'page' | 'attribution' | 'flight' | 'todaySoFar' | 'allTime' | 'before' | 'after' | { scope: 'window' }
+/** The country buckets the campaign funnel splits by (lib/campaigns.ts countryBucket). */
+export const COUNTRY_BUCKETS = ['US', 'CA', 'other'] as const
+export type CountryBucket = (typeof COUNTRY_BUCKETS)[number]
+/** The windows a card may ask for. `{ scope: 'window' }` takes the window from a repeat over
+ * windows (RepeatSpec.over 'windows'). 'flight' and 'allTime' are reserved. */
+export type WindowSpec = 'page' | 'attribution' | 'flight' | 'todaySoFar' | 'allTime' | ReleaseSide | UpsellSide | { scope: 'window' }
+/** The latest dated release's before/after windows: the same number of days on each side of its
+ * ET date, bounded by the first Best Sudoku hit (lib/overview.ts releaseComparisonWindows). */
+export type ReleaseSide = 'before' | 'after'
+/** A campaign's attribution window split at the signed-out upsell fix (a funnel segment
+ * boundary, lib/adsRules.ts UPSELL_SIGNEDOUT_FIX_AT). */
+export type UpsellSide = 'upsellPre' | 'upsellPost'
+export type WindowSide = ReleaseSide | UpsellSide
+export const WINDOW_SIDES: readonly WindowSide[] = ['before', 'after', 'upsellPre', 'upsellPost']
 /** The windows the registry can compute (lib/metrics/metrics.ts MetricDef.windows). */
-export type WindowName = 'attribution' | 'todaySoFar' | 'page'
+export type WindowName = 'attribution' | 'todaySoFar' | 'page' | ReleaseSide | UpsellSide
 export type DeltaName = 'yesterday' | 'avg7'
 
 export type DataBinding =
@@ -59,7 +82,10 @@ export type Display =
   | { as: 'dateRange'; days?: boolean }
   | { as: 'datetime' }
   | { as: 'badge'; tones?: Record<string, 'neutral' | 'live' | 'warn'> }
-  | { as: 'bar' } // funnel bar, scaled to the section's largest count
+  | { as: 'bar' } // a bar scaled to the section's largest value: a count, or a rate with its (n/d)
+  | { as: 'date' } // a day (a 'time' metric): "Sep 26"
+  | { as: 'ago' } // an instant (a 'time' metric), relative: "3h ago"
+  | { as: 'status' } // the label note the value carries (e.g. where a spend figure came from), not the number
   | { as: 'sparkline'; series: 'daily' }
   | { as: 'text' }
 export type DisplayAs = Display['as']
@@ -68,12 +94,22 @@ export interface Gating {
   minCohort?: number // may only RAISE the MIN_COHORT floor
   whenUnmeasured?: 'auto' | 'omit' | 'label' // auto = omit for a closed campaign, label otherwise
   whenEmpty?: 'dash' | 'omit' | { note: string } // a field or series with no value
+  /** 'omit': a measured count of exactly 0 is left out (a campaign with no return beacons yet). */
+  whenZero?: 'omit'
+  /** A campaign flight that has not begun: no start date yet, or its attribution window opens
+   * later. By default the first is omitted (a scorecard shows only what a flight can have) and the
+   * second reads "not started". 'label': "not started" in both cases (the item stays, so an
+   * upcoming flight's card shows its funnel); 'zero': a measured 0, for a count that cannot have
+   * happened yet (an upcoming flight's arrivals). */
+  whenNotStarted?: 'label' | 'zero'
 }
 
 export interface RepeatSpec {
-  over: 'campaigns' | 'popups' | 'windows' | 'readings'
-  ids?: string[] // campaigns or popups; for windows: 'before' | 'after'
+  over: 'campaigns' | 'popups' | 'windows' | 'readings' | 'countries'
+  ids?: string[] // campaigns, popups, countries (COUNTRY_BUCKETS); windows: WINDOW_SIDES
   status?: ('closed' | 'active' | 'upcoming')[]
+  /** Campaigns only: beacon-tracked ones (not `measurement: 'spend-only'`). */
+  tracked?: boolean
   flightingToday?: boolean
   empty?: { label: Label; text: Label } // shown once when the repeat yields nothing
 }
@@ -89,16 +125,30 @@ export interface MetricItem {
    * 'inline' (default) as a line under the value; 'compact' behind a small notes toggle next
    * to the label, collapsed by default, so the card keeps its compact look. */
   captionMode?: 'inline' | 'compact'
-  frame?: 'row' | 'pill' | 'tile' // overrides the section layout for this item
+  frame?: 'row' | 'pill' | 'tile' | 'column' // overrides the section layout for this item
   repeat?: RepeatSpec // expands in place, e.g. one tile per flighting campaign
 }
 
 export interface Section {
-  layout: 'rows' | 'pills' | 'tiles' | 'bars' | 'table' // 'table': items are columns, repeat instances are rows
+  /** 'bars': one horizontal bar per row; 'columns': bars side by side, read left to right as a
+   * curve (a value over its bar, the label under it); 'table': items are columns, repeat
+   * instances are rows (or the other way round with `columns`). */
+  layout: 'rows' | 'pills' | 'tiles' | 'bars' | 'columns' | 'table'
   title?: Label
   repeat?: RepeatSpec
+  /** 'table' only: the other orientation — items are ROWS (their label in the first cell) and
+   * these repeat instances are the COLUMNS (headed by `columnLabel`, default the instance's own
+   * name). Each cell's scope is the column instance inside the card's instance, so a campaign
+   * card can split its funnel steps by country. */
+  columns?: RepeatSpec
+  columnLabel?: Label
+  /** With `columns`: the heading over the item-label column (e.g. "Step"). */
+  rowsLabel?: Label
   items: MetricItem[]
 }
+
+/** A control a card can host (CardSpec.actions): a code-reviewed component, never markup. */
+export type CardAction = 'ads-refresh'
 
 /** The container: a Card (one instance) or, with `repeat`, a StatList of N identical instances. */
 export interface CardSpec {
@@ -110,6 +160,9 @@ export interface CardSpec {
   captions?: string[] // note ids under the whole card
   link?: 'campaigns-page' // click-through; replaces the scorecard's emit('open-campaigns')
   minWidth?: number // grid minimum per instance (230 px today)
+  /** Controls in the card's status row: 'ads-refresh' syncs the campaigns' Google Ads spend now
+   * (the ads refresh flow) and reloads the card. */
+  actions?: CardAction[]
   /** "Updated Xs ago" (the card's latest successful load) with a reload control: top-right in
    * the card's header (`true` or 'header', where the old KPI panel had it) or in a footer. */
   showUpdated?: boolean | 'header' | 'footer'
@@ -139,7 +192,7 @@ export interface MetricRequest {
   key: string
   metric?: string
   ratio?: string
-  params?: { campaignId?: string; popup?: string }
+  params?: { campaignId?: string; popup?: string; country?: string }
   window?: string
   deltas?: DeltaName[]
   /** May only RAISE MIN_COHORT for a proportion or cost (Gating.minCohort); the server clamps. */

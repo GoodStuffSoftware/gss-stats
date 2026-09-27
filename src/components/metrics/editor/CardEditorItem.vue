@@ -6,7 +6,7 @@
 // pattern (ChartEditor.vue) so it works with a keyboard and on touch.
 import { computed, ref, useId, watch } from 'vue'
 import { MIN_COHORT } from '../../../lib/popupEvents'
-import { dataKindOf, dataSummaryLabel, displayAsLabel, firstDisplayFor, isDisplaySelectable, isKnownNote, makeDisplay, noteLabelOptions, scopePathLabel } from '../../../lib/metrics/editorModel'
+import { dataKindOf, dataSummaryLabel, displayAsLabel, firstDisplayFor, isDisplaySelectable, isKnownNote, labelNoteOptions, makeDisplay, notePreview, scopePathLabel } from '../../../lib/metrics/editorModel'
 import type { MetricItem, RepeatSpec } from '../../../lib/metrics/types'
 import CardEditorData from './CardEditorData.vue'
 import CardEditorDisplay from './CardEditorDisplay.vue'
@@ -27,6 +27,7 @@ const open = ref(false)
 const innermostOver = computed<RepeatSpec['over'] | undefined>(() => item.value.repeat?.over ?? props.sectionRepeatOver ?? props.cardRepeatOver)
 
 const whenUnmeasuredId = useId()
+const whenNotStartedId = useId()
 const minCohortId = useId()
 const whenEmptyId = useId()
 const whenEmptyNoteSearchId = useId()
@@ -52,7 +53,8 @@ watch(
 const summaryLabel = computed(() => {
   const l = item.value.label
   if (typeof l === 'string') return l || '(no label)'
-  if ('note' in l) return l.note ? (noteLabelOptions().find((o) => o.value === l.note)?.preview ?? 'Unknown note') : '(no note chosen)'
+  // Any kind of note, a label entry included (a preset's funnel step names are label notes).
+  if ('note' in l) return l.note ? (notePreview(l.note) ?? 'Unknown note') : '(no note chosen)'
   if ('bind' in l) return scopePathLabel(l.bind)
   return "metric's own"
 })
@@ -70,6 +72,12 @@ const whenUnmeasured = computed<NonNullable<MetricItem['gating']>['whenUnmeasure
   get: () => item.value.gating?.whenUnmeasured ?? 'auto',
   set: (v) => {
     item.value = { ...item.value, gating: { ...item.value.gating, whenUnmeasured: v === 'auto' ? undefined : v } }
+  },
+})
+const whenNotStarted = computed<'default' | 'label' | 'zero'>({
+  get: () => item.value.gating?.whenNotStarted ?? 'default',
+  set: (v) => {
+    item.value = { ...item.value, gating: { ...item.value.gating, whenNotStarted: v === 'default' ? undefined : v } }
   },
 })
 const whenEmptyKind = computed<'dash' | 'omit' | 'note'>({
@@ -101,7 +109,7 @@ const whenEmptyNote = computed<string>({
 const whenEmptyNoteSearch = ref('')
 const whenEmptyNoteChoices = computed(() => {
   const q = whenEmptyNoteSearch.value.trim().toLowerCase()
-  const all = noteLabelOptions()
+  const all = labelNoteOptions(whenEmptyNote.value || undefined)
   return q ? all.filter((o) => o.preview.toLowerCase().includes(q) || o.value.toLowerCase().includes(q)) : all
 })
 const whenEmptyNoteInvalid = computed(() => !!whenEmptyNote.value && !isKnownNote(whenEmptyNote.value))
@@ -162,6 +170,14 @@ const itemRepeatModel = computed({
             </select>
           </div>
           <div class="field">
+            <label :for="whenNotStartedId">Before the flight starts</label>
+            <select :id="whenNotStartedId" v-model="whenNotStarted">
+              <option value="default">Default — omit with no start date, else "not started"</option>
+              <option value="label">Always "not started"</option>
+              <option value="zero">Show 0</option>
+            </select>
+          </div>
+          <div class="field">
             <label :for="minCohortId">Minimum cohort</label>
             <input :id="minCohortId" type="number" :min="MIN_COHORT" :value="minCohort ?? ''" placeholder="(default)" @change="minCohort = ($event.target as HTMLInputElement).valueAsNumber || undefined" />
           </div>
@@ -186,7 +202,7 @@ const itemRepeatModel = computed({
           <p v-if="whenEmptyNoteInvalid" class="hint">Unknown note id "{{ whenEmptyNote }}".</p>
         </template>
 
-        <CardEditorRepeat v-model="itemRepeatModel" :allow="['campaigns', 'popups', 'windows', 'readings']" label="Repeat this item" />
+        <CardEditorRepeat v-model="itemRepeatModel" :allow="['campaigns', 'popups', 'windows', 'readings', 'countries']" label="Repeat this item" />
 
         <CardEditorLabel v-model="item.caption" :has-data="hasData" :repeat-over="innermostOver" :allow-metric-own="false" placeholder="Caption text" heading="Caption" />
         <div class="row">

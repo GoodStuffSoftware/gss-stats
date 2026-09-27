@@ -19,16 +19,17 @@
 //     'reason'         — reason/platform breakdown for `popup` + `kind` (default 'shown')
 //     'date'           — US-Eastern day trend for `popup` + `kind` (default 'shown')
 //     'outcome'        — popup-outcome counts (signed-in/installed/returned/still-playing) for `popup`
-//     'eligible'       — sign-in-eligible earned/capped/unearned counts (no popup needed)
 //     'installOutcome' — install's real-outcome counts (no popup needed)
 //     'rate'           — one computed rate, selected by `rateKey` (see POPUP_RATE_SPECS)
-//     'rates'          — every VALID rate (POPUP_RATE_TABLE_KEYS) as `rateRows`, for a rateTable widget
+// (The rate table ('rates') and sign-in eligibility ('eligible') are metric cards since layout
+// version 11 — presets popup-rates and signin-eligibility over POST /api/metrics. Asking for either
+// is a 400 naming the card, not a silent fallback to 'kind', so a tab loaded before the update
+// shows an error on those panels instead of "No data".)
 
 import {
   POPUPS,
   POPUP_OUTCOME_TYPES,
   POPUP_RATE_SPECS,
-  POPUP_RATE_TABLE_KEYS,
   TRACKING_ACTIVATION_DATE_ET,
   aggregatePopupRows,
   computePopupRate,
@@ -61,8 +62,10 @@ function safeDate(v: unknown, fallback: string): string {
 }
 const isDateOnly = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v)
 
-const POPUP_DIMS = new Set(['kind', 'reason', 'date', 'outcome', 'eligible', 'installOutcome', 'rate', 'rates'])
+const POPUP_DIMS = new Set(['kind', 'reason', 'date', 'outcome', 'installOutcome', 'rate'])
 const POPUP_IDS = new Set(POPUPS.map((p) => p.id))
+/** Dimensions retired in layout version 11, with the card that replaced each. */
+export const RETIRED_POPUP_DIMS: Record<string, string> = { rates: 'Pop-up rates', eligible: 'Sign-in eligibility' }
 
 type Row = { key: Record<string, string>; pageviews: number; visits: number }
 const countedTotals = (rows: Row[]) => {
@@ -79,6 +82,10 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   }
   if (!ctx.env.gss_geo) return json({ error: 'geo DB not bound' }, 500)
 
+  if (typeof body.dimension === 'string' && Object.hasOwn(RETIRED_POPUP_DIMS, body.dimension)) {
+    const card = RETIRED_POPUP_DIMS[body.dimension]
+    return json({ error: `The "${body.dimension}" pop-up dimension was retired; it is the "${card}" card now. Reload the page to update this dashboard.`, retired: body.dimension }, 400)
+  }
   const dim: string = POPUP_DIMS.has(body.dimension) ? body.dimension : 'kind'
   const limit = Math.min(Math.max(Number(body.limit) || 50, 1), 500)
   const today = new Date().toISOString().slice(0, 10)
@@ -168,27 +175,6 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       ...(rateKey === INSTALL_GAP_RATE_KEY && installOutcomeGapNote(range) ? { note: installOutcomeGapNote(range) } : {}),
       meta,
     })
-  }
-
-  // ── Rate table: every VALID pop-up rate (POPUP_RATE_TABLE_KEYS) in one response, each with
-  // its n/d, MIN_COHORT gating and any range caveat (the install fix note) ─────────────────
-  if (dim === 'rates') {
-    const rateRows = POPUP_RATE_TABLE_KEYS.map((key) => {
-      const spec = POPUP_RATE_SPECS.find((s) => s.key === key)!
-      const gated = computePopupRate(agg, spec)
-      const note = key === INSTALL_GAP_RATE_KEY ? installOutcomeGapNote(range) : ''
-      return { key, label: spec.label, ...gated, ...(note ? { note } : {}) }
-    })
-    return json({ rows: [], totals: { pageviews: 0, visits: 0 }, rateRows, meta })
-  }
-
-  // ── Sign-in eligibility breakdown (earned / capped / unearned) — activation-gated ──
-  if (dim === 'eligible') {
-    const rowsOut: Row[] = ['earned', 'capped', 'unearned'].map((k) => {
-      const c = measuredCoarseCount(agg, 'signin-eligible', k)
-      return { key: { eligible: k }, pageviews: c, visits: c }
-    })
-    return json({ rows: rowsOut, totals: countedTotals(rowsOut), meta })
   }
 
   // ── Install's real-outcome counts (pwa-installed / standalone-detected / play-detected)

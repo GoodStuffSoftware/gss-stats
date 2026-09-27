@@ -12,11 +12,11 @@
 // The click-through (`link`) is the title, a real button — never a role="button" wrapper
 // around other controls. The rest of the box stays clickable for a pointer only (no role, not
 // focusable), matching the old scorecard card.
-import { computed, ref, useId } from 'vue'
+import { computed, ref, useId, watch } from 'vue'
 import { useMetrics } from '../../composables/useMetrics'
 import { noteRawText } from '../../lib/notes'
 import { badgeViewModel, itemViewModel, resolveLabelTokens } from '../../lib/metrics/render'
-import { buildRequestSpec, flattenSectionItems, resolveRepeat, scopeField, type FlatItem, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
+import { buildRequestSpec, scopeField, sectionCells, type FlatItem, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
 import type { CardSpec, MetricsContext } from '../../lib/metrics/types'
 import type { TextToken } from '../../lib/textLite'
 import MetricLabel from './MetricLabel.vue'
@@ -32,7 +32,7 @@ const props = defineProps<{
   /** Names the card (Notes toggle) when the spec has no title: the widget's own title. */
   fallbackTitle?: string
 }>()
-const emit = defineEmits<{ open: [] }>()
+const emit = defineEmits<{ open: []; hidden: [boolean] }>()
 
 const todayEt = props.ctx.todayEt
 const titleTokens = computed(() => (props.spec.title !== undefined ? resolveLabelTokens(props.spec.title, props.scope, undefined, todayEt) : []))
@@ -45,11 +45,7 @@ const linked = computed(() => props.spec.link === 'campaigns-page')
 
 // ── Card notes ─────────────────────────────────────────────────────────────────────────────
 const { request } = useMetrics(() => props.context, todayEt)
-const noteItems: FlatItem[] = props.spec.sections.flatMap((section) =>
-  section.layout === 'table'
-    ? resolveRepeat(section.repeat, props.ctx).flatMap((row) => section.items.map((item) => ({ item, scope: row })))
-    : flattenSectionItems(section, props.scope, props.ctx).filter((fi) => !fi.emptyOf),
-)
+const noteItems: FlatItem[] = props.spec.sections.flatMap((section) => sectionCells(section, props.scope, props.ctx))
 const compactItems = noteItems
   .filter((fi) => fi.item.captionMode === 'compact')
   .map((fi) => {
@@ -60,18 +56,33 @@ const compactItems = noteItems
 // arrivals" and on the game-screen views pair, the install fix on "Installs" and "Install") are
 // listed together in front of it, "Tagged arrivals, Game-screen views: Floor — …".
 const notes = computed(() => {
-  const byCaption = new Map<string, { key: string; labels: TextToken[][]; captionTokens: TextToken[] }>()
+  const byCaption = new Map<string, { key: string; labels: TextToken[][]; names: Set<string>; captionTokens: TextToken[] }>()
   compactItems.forEach((fi, i) => {
     const vm = itemViewModel(fi.item, fi.value?.value, fi.scope, { todayEt })
     if (!vm.visible || !vm.captionTokens.length) return
     const text = vm.captionTokens.map((t) => t.value).join('')
     const entry = byCaption.get(text)
-    if (entry) entry.labels.push(vm.labelTokens)
-    else byCaption.set(text, { key: `${fi.item.id}-${i}`, labels: [vm.labelTokens], captionTokens: vm.captionTokens })
+    // Each label once: a table row repeats its item in every column (Arrivals in US, CA, Other).
+    const name = vm.labelTokens.map((t) => t.value).join('')
+    if (entry) {
+      if (!entry.names.has(name)) {
+        entry.names.add(name)
+        entry.labels.push(vm.labelTokens)
+      }
+    } else byCaption.set(text, { key: `${fi.item.id}-${i}`, labels: [vm.labelTokens], names: new Set([name]), captionTokens: vm.captionTokens })
   })
   const SEP: TextToken = { type: 'text', value: ', ' }
   return [...byCaption.values()].map((e) => ({ key: e.key, labelTokens: e.labels.flatMap((l, i) => (i ? [SEP, ...l] : l)), captionTokens: e.captionTokens }))
 })
+// A repeated instance with nothing to show (every cell gated out, e.g. a campaign with no return
+// beacons yet) is hidden by MetricCard; it reports it here. While a value loads it is visible.
+const allCells = noteItems.map((fi) => {
+  const spec = buildRequestSpec(fi.item, fi.scope)
+  return { ...fi, value: spec ? request(spec) : null }
+})
+const nothingVisible = computed(() => allCells.length > 0 && allCells.every((fi) => !itemViewModel(fi.item, fi.value?.value, fi.scope, { todayEt }).visible))
+watch(nothingVisible, (h) => emit('hidden', h), { immediate: true })
+
 const notesOpen = ref(false)
 const notesLabel = noteRawText('label.card.notes')
 const openLabel = noteRawText('label.card.openCampaigns')

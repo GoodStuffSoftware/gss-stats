@@ -5,7 +5,7 @@
 // lookups, derivation, the JSON response — against a fake D1 that answers each planned statement
 // from a seed of fact rows, re-parsed from JSON on every call as a D1 result would be.
 //
-//   npx tsx scripts/metrics/profile-metrics.ts [--seed <seed.json>] [--reps 50]
+//   npx tsx scripts/metrics/profile-metrics.ts [--seed <seed.json>] [--reps 50] [--batch overview|campaigns]
 //                                              [--profile-cold <cold.cpuprofile>] [--profile <warm.cpuprofile>] [--print]
 //
 // --seed: fact rows captured from production by capture-facts.ts (anonymous aggregates). Without
@@ -17,6 +17,9 @@
 import fs from 'node:fs'
 import type { Seed } from './capture-facts'
 import { overviewBatch } from './overviewBatch'
+import { CAMPAIGNS_PAGE_PRESETS, presetBatch } from './presetBatch'
+
+const batchFor = (nowMs: number) => (process.argv.includes('--batch') && process.argv[process.argv.indexOf('--batch') + 1] === 'campaigns' ? presetBatch(CAMPAIGNS_PAGE_PRESETS, nowMs) : overviewBatch(nowMs))
 
 const arg = (name: string): string | undefined => {
   const i = process.argv.indexOf(name)
@@ -32,13 +35,13 @@ async function syntheticSeed(nowMs: number): Promise<Seed> {
   const { etDateFromMs } = await import('../../src/lib/popupEvents')
   const db = openHitsDb()
   insertHits(db, bskFixture())
-  const batch = validateMetricsRequest(JSON.stringify({ v: 1, requests: overviewBatch(nowMs) }))
+  const batch = validateMetricsRequest(JSON.stringify({ v: 1, requests: batchFor(nowMs) }))
   if (!batch.ok) throw new Error(batch.error)
   const plan = planBatch(batch.requests.flatMap((r) => (r.ok ? [r.req] : [])), { context: batch.context, nowMs, todayEt: etDateFromMs(nowMs), hasAdsDb: false })
   return {
     nowMs,
     // No ads store in the synthetic case: spend falls back to CAMPAIGN_SPEND without a query.
-    facts: plan.facts.filter((f) => f.id !== 'adsSpend').map((f) => {
+    facts: plan.facts.filter((f) => f.id !== 'adsSpend' && f.id !== 'adsCoverage' && f.id !== 'adsLastSync').map((f) => {
       const stmt = buildFact(f, nowMs)
       return { key: f.key, id: f.id, sql: stmt.sql, binds: stmt.binds, rows: db.prepare(stmt.sql).all(...(stmt.binds as (string | number)[])) as Record<string, unknown>[], rowsRead: null }
     }),
@@ -75,8 +78,8 @@ async function main() {
   const realNow = Date.now
   Date.now = () => seed.nowMs // the KPI fact binds "now"; replay the instant the seed was read at
   const reps = Number(arg('--reps')) || 50
-  const body = JSON.stringify({ v: 1, requests: overviewBatch(seed.nowMs) })
-  const env = { gss_geo: fakeD1(seed), ...(seed.facts.some((f) => f.id === 'adsSpend') ? { gss_stats_ads: fakeD1(seed) } : {}) }
+  const body = JSON.stringify({ v: 1, requests: batchFor(seed.nowMs) })
+  const env = { gss_geo: fakeD1(seed), ...(seed.facts.some((f) => f.id.startsWith('ads')) ? { gss_stats_ads: fakeD1(seed) } : {}) }
 
   const call = async (cache: ReturnType<typeof memoryCache>) => {
     const undo = installCaches(cache)

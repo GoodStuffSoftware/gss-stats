@@ -31,7 +31,7 @@
 // between v1.86.4 and v1.95.3, so it's treated as production too. `major` marks a release
 // with a real user-facing Added/Changed section (shown as a labeled line in the timeline);
 // everything else renders as an unlabeled tick (hover for its version) — see
-// lib/charts.ts releaseMarkersPlugin / components/widgets/OverviewWidgetBody.vue's overlay.
+// lib/charts.ts releaseMarkersPlugin.
 //
 // OPEN QUESTIONS (not included above — verify before extending this list backward):
 //  - v1.86.0–v1.86.3 (2026-08-25 to 2026-08-29): each has its own CHANGELOG entry, but no
