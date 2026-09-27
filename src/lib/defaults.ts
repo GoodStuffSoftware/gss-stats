@@ -613,8 +613,10 @@ export function isCardPanel(wd: Widget): boolean {
   return k !== null && Object.hasOwn(CARD_PRESET_FOR_PANEL, k)
 }
 /** The panel with its card: adds `card: { preset }` when absent and keeps everything else (id,
- * position, size, title, notes, default mark, campaign selection). A card already set — a
- * preset or a customised spec — is left as it is. Returns the same object when nothing changes. */
+ * position, size, title, notes, default mark, campaign selection — which still narrows the
+ * card's campaigns: MetricCard `campaignIds`, as it narrowed the old panel's). A card already
+ * set — a preset or a customised spec — is left as it is. Returns the same object when nothing
+ * changes. */
 export function withCardForView(wd: Widget): Widget {
   if (!isCardPanel(wd) || wd.card) return wd
   return { ...wd, card: { preset: CARD_PRESET_FOR_PANEL[panelKey(wd)!] } }

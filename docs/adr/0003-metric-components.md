@@ -1175,6 +1175,9 @@ Registry and component additions (all generic):
   are.
 - The pop-up fact honours "hide my own visits" (the page context now carries it), as
   `/api/popups` did.
+- A widget's `campaignIds` narrows a card whose top-level repeat is over campaigns (MetricCard
+  `campaignIds`, `narrowToCampaigns`), as it narrowed the old campaign panels; the chart editor
+  shows the Campaign(s) picker for such a card.
 
 Retired: both bespoke bodies, `/api/campaigns`, `/api/overview`, `/api/popups`' `rates` and
 `eligible` sections, `lib/campaignsData`, `lib/overviewData`, `functions/_lib/campaignInstrumentation`.

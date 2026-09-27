@@ -532,7 +532,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
     <div class="card-body" @dblclick="onCardBodyDblClick">
       <!-- Bespoke bodies: overview / campaigns / ads-readings datasets, and the note type —
            own data fetch (or none), skip the generic loading/error/empty states above. -->
-      <MetricCard v-if="widget.card" ref="metricCard" :card-ref="widget.card" :context="metricsContext" :fallback-title="widget.title" @open-campaigns="emit('open-campaigns')" />
+      <MetricCard v-if="widget.card" ref="metricCard" :card-ref="widget.card" :context="metricsContext" :campaign-ids="widget.campaignIds" :fallback-title="widget.title" @open-campaigns="emit('open-campaigns')" />
       <p v-else-if="widget.dataset === 'overview' || widget.dataset === 'campaigns'" class="state mono">{{ retiredPanelText }}</p>
       <AdsReadingsWidgetCard v-else-if="widget.dataset === 'ads-readings'" :widget="widget" />
       <NoteWidgetBody v-else-if="widget.type === 'note'" :widget="widget" />

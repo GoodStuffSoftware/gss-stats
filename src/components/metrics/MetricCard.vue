@@ -24,7 +24,7 @@ import { noteRawText } from '../../lib/notes'
 import { resolveLabelTokens } from '../../lib/metrics/render'
 import { presetById } from '../../lib/metrics/presets'
 import { INVALID_CARD_PRESET } from '../../lib/metrics/validate'
-import { buildRequestSpec, campaignOfScope, ROOT_SCOPE, resolveRepeat, sectionCells, todayEtFrom, type ReadingScope, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
+import { buildRequestSpec, campaignOfScope, narrowToCampaigns, ROOT_SCOPE, resolveRepeat, sectionCells, todayEtFrom, type ReadingScope, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
 import { CAMPAIGNS } from '../../lib/campaigns'
 import type { CardRef, CardSpec, MetricsContext } from '../../lib/metrics/types'
 import type { RefreshResult } from '../../lib/adsRefresh'
@@ -43,6 +43,9 @@ const props = defineProps<{
   /** The widget's own title (ChartCard): names the card for a screen reader when the spec has
    * no title of its own ("Notes: Today at a glance"). */
   fallbackTitle?: string
+  /** The widget's campaign selection (Widget.campaignIds): narrows a card-level campaign repeat
+   * to those campaigns; none selected = the repeat as it is. */
+  campaignIds?: string[]
 }>()
 const emit = defineEmits<{ 'open-campaigns': [] }>()
 
@@ -60,7 +63,7 @@ onBeforeUnmount(() => {
 const nowMs = computed(() => props.nowMs ?? clock.value)
 const todayEt = computed(() => todayEtFrom(nowMs.value))
 const ctx = computed<RepeatContext>(() => ({ todayEt: todayEt.value, readings: props.readings }))
-const instances = computed<ScopeInstance[]>(() => (spec.value ? resolveRepeat(spec.value.repeat, ctx.value) : []))
+const instances = computed<ScopeInstance[]>(() => (spec.value ? narrowToCampaigns(resolveRepeat(spec.value.repeat, ctx.value), spec.value.repeat, props.campaignIds) : []))
 
 // ── Card-level requests (freshness, errors, reload) ─────────────────────────────────────────
 // The card holds its own reference on every request its items make (content-equal requests

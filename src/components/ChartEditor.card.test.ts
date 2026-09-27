@@ -195,3 +195,45 @@ describe('Cancel leaves the widget unchanged', () => {
     expect(original).toEqual(before) // the prop object itself was never mutated
   })
 })
+
+// Widget.campaignIds narrows a card repeated over campaigns (MetricCard campaignIds), as it
+// narrowed the old campaign panels; the Campaign(s) picker shows for such a card only.
+describe('a campaign card honours the widget\'s campaign selection', () => {
+  const funnelWidget: Widget = { id: 'cw-funnel', i: 'cw-funnel', title: 'Funnel per campaign', type: 'table', dataset: 'campaigns', view: 'funnel', card: { preset: 'campaign-funnel' }, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 0, w: 12, h: 10 }
+  const RETEST = '24279250691'
+  const campaignBoxes = (w: VueWrapper) => w.findAll('.campaign-list .campaign-row').filter((r) => /Android launch|US\+CA web retest|Play-direct/.test(r.text()))
+  const titles = (w: VueWrapper) => w.findAll('.metric-card .mc-title').map((t) => t.text())
+
+  it('the picker shows for a campaign-repeated card, not for the KPI tiles', async () => {
+    const kpi = mountEditor(kpiWidget)
+    await flushPromises()
+    expect(kpi.text()).not.toContain('Campaign(s)')
+    const funnel = mountEditor(funnelWidget)
+    await flushPromises()
+    expect(funnel.text()).toContain('Campaign(s)')
+    expect(campaignBoxes(funnel).length).toBeGreaterThanOrEqual(3)
+  })
+
+  it('checking one campaign narrows the preview and is saved on the widget', async () => {
+    const w = mountEditor(funnelWidget)
+    await flushPromises()
+    expect(titles(w)).toEqual(['Android launch — "tired of ads"', 'US+CA web retest'])
+    const retestBox = campaignBoxes(w).find((r) => r.text().includes('US+CA web retest'))!.find('input')
+    await retestBox.setValue(true)
+    await flushPromises()
+    expect(titles(w)).toEqual(['US+CA web retest'])
+    await w.find('button.btn-primary').trigger('click')
+    const widget = w.emitted('save')![0][0] as Widget
+    expect(widget.campaignIds).toEqual([RETEST])
+    expect(widget.card).toEqual({ preset: 'campaign-funnel' })
+  })
+
+  it('a saved selection narrows the rendered card (ChartCard → MetricCard)', async () => {
+    const all = mount(ChartCard, { props: { widget: funnelWidget, filters, dark: false, drillOpen: false } })
+    const one = mount(ChartCard, { props: { widget: { ...funnelWidget, campaignIds: [RETEST] }, filters, dark: false, drillOpen: false } })
+    mounted.push(all, one)
+    await flushPromises()
+    expect(titles(all)).toEqual(['Android launch — "tired of ads"', 'US+CA web retest'])
+    expect(titles(one)).toEqual(['US+CA web retest'])
+  })
+})
