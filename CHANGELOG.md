@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-09-27
+
 ### Added
 - **One batched metrics request.** A single request returns many dashboard numbers with their
   counts and measurement status, reads each underlying query once and caches it, and refuses any
