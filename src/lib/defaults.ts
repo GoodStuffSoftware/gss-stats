@@ -499,7 +499,9 @@ export function timelineWidget(geom: { x: number; y: number; w: number; h: numbe
     // US-Eastern days, the same days its flight bands and go-live markers are dated in.
     dimension: 'dateEt',
     metric: 'pageviews',
-    limit: 400,
+    // The server keeps the newest `limit` days (500 is its cap); a longer range starts the axis
+    // at the oldest day it returned rather than zero-filling unknown days.
+    limit: 500,
     markers: 'releases',
     goLiveMarkers: true,
     flightBands: true,
