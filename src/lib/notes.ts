@@ -382,6 +382,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.card.notes': 'Notes',
     'label.card.loadFailed': 'Some numbers could not be loaded.',
     'label.card.retry': 'Retry',
+    'label.card.invalid': "This card's saved settings could not be read, so it can't be shown. Edit it or restore the default charts.",
     'label.card.openCampaigns': 'Open the Campaigns page',
   }),
 })

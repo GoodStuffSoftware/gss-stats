@@ -21,8 +21,6 @@ import type { Widget, GlobalFilters, OverviewResponse } from '../types'
 const MINIMAL_OVERVIEW_RESPONSE: OverviewResponse = {
   generatedAt: '2026-09-26T12:00:00Z',
   todayEt: '2026-09-26',
-  kpis: [],
-  scorecard: [],
   releasePanel: null,
 }
 vi.mock('../api', async (importOriginal) => {

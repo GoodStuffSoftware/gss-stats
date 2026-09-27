@@ -121,6 +121,12 @@ export interface Widget {
   // dataset 'ads-readings': the ads-routines worker's own view value(s) (e.g. 'log') — see
   // components/widgets/AdsReadingsWidgetCard.vue.
   view?: string
+  // A metric card (ADR 0003): when set, ChartCard renders MetricCard from this reference and
+  // ignores dataset/view/dimension/metric. `{ preset }` names a code-reviewed CardSpec
+  // (lib/metrics/presets.ts); `{ spec }` is a saved spec. The v10 migration adds
+  // `{ preset }` to the Overview's former bespoke 'kpis' and 'scorecard' panels and keeps their
+  // dataset/view, so an older build still recognises them. Normalised by normCardRef on load.
+  card?: import('./lib/metrics/types').CardRef
   // dataset 'campaigns' / 'ads-readings': which campaign(s) to include. Empty/undefined =
   // all campaigns (CAMPAIGNS in lib/campaigns.ts) — same as the pre-widget bespoke pages.
   campaignIds?: string[]
@@ -343,55 +349,8 @@ export interface CampaignCompareResponse {
   meta: { generatedAt: string }
 }
 
-// ── "Best Sudoku overview" (Part C) — see functions/api/overview.ts + lib/overview.ts. ──
-export interface OverviewDelta {
-  delta: number
-  deltaPct: number | null
-}
-export interface OverviewKpiTile {
-  key: string
-  label: string
-  today: number | null
-  vsYesterday?: OverviewDelta | null
-  vsAvg7?: OverviewDelta | null
-  notYetTracking?: boolean
-  noCampaignFlighting?: boolean
-  campaignId?: string
-  isRate?: boolean
-  // A short caveat shown under the tile's label (e.g. the install-fix note), so the label
-  // itself stays short.
-  note?: string
-  // Rate tiles only — the rate's own denominator, so the UI can tell "too few to report"
-  // (MIN_COHORT) apart from plain "—" (no data at all) for a null `today`.
-  denominator?: number
-  // Rate tiles only — pairs with `denominator` so the UI can show n/d next to the rate.
-  numerator?: number
-}
-export interface OverviewScorecardRow {
-  id: string
-  label: string
-  status: string
-  flightStart: string | null
-  flightEnd: string
-  flightDays: number | null // null while flightStart is unconfirmed — see lib/campaigns.ts CAMPAIGNS
-  flightingToday: boolean
-  taggedArrivals: number
-  funnelRates: Partial<Record<keyof CampaignFunnelCounts, number | null>>
-  funnelCounts: CampaignFunnelCounts // pairs with funnelRates — see OverviewKpiTile.denominator
-  // Steps this campaign's flight never saw ANY hit for site-wide — only ever populated for a
-  // CLOSED campaign (see functions/api/overview.ts's scorecard); always [] for active/
-  // upcoming. The UI omits these chips instead of labeling them "not instrumented".
-  notInstrumented: (keyof CampaignFunnelCounts)[]
-  // Same real denominator as CampaignCompareResponse.funnel.installPromptPostFixCount — see
-  // lib/campaigns.ts VALID_FUNNEL_RATE_STEPS/funnelStepRates.
-  installPromptPostFixCount: number
-  authSuccess: number
-  install: number
-  returnRateD2to7: number | null
-  returnD0: number // pairs with returnRateD2to7 (denominator)
-  returnD2to7: number // pairs with returnRateD2to7 (numerator)
-  costPerArrival: number | null
-}
+// ── "Best Sudoku overview" — the release panel (functions/api/overview.ts). The KPI tiles and
+// the campaign scorecard are metric cards since CONFIG_VERSION 10 (POST /api/metrics). ──
 export interface OverviewReleaseWindowSummary {
   pageviews: number
   taggedArrivals: number
@@ -408,7 +367,5 @@ export interface OverviewReleasePanel {
 export interface OverviewResponse {
   generatedAt: string
   todayEt: string
-  kpis: OverviewKpiTile[]
-  scorecard: OverviewScorecardRow[]
   releasePanel: OverviewReleasePanel | null
 }

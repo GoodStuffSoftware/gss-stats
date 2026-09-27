@@ -45,8 +45,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
 
 - **"Best Sudoku · Overview"** — the landing page: today-at-a-glance KPI tiles (vs the same
   time yesterday and the 7-day average), the **Overall timeline**, a campaign scorecard, and a
-  release before/after panel — each its own movable/editable widget. The KPI tiles, scorecard
-  and release panel are dataset `overview` (see
+  release before/after panel — each its own movable/editable widget. The KPI tiles and the
+  scorecard are **metric cards** (presets `bsk-kpis` and `campaign-scorecard`, see *One metrics
+  registry* below); the release panel is dataset `overview` (see
   [`src/components/widgets/OverviewWidgetBody.vue`](src/components/widgets/OverviewWidgetBody.vue)
   and [`src/lib/overview.ts`](src/lib/overview.ts)). The Overall timeline is a **standard line
   chart** (see *Line charts* below) with five series — page views and tagged arrivals on the left
@@ -250,7 +251,7 @@ Cloudflare Pages Functions  (functions/_middleware.ts → functions/api/*.ts)
    │  - /api/completions → completed-game counts from the same D1, by mode × difficulty
    │  - /api/campaigns → Google Ads campaign comparison from the same D1 (funnel, hour-of-day,
    │                      country, daily/cumulative, return visits)
-   │  - /api/overview → today-at-a-glance KPIs, campaign scorecard, release panel
+   │  - /api/overview → the release before/after panel
    │  - /api/metrics  → one batch of registry metrics/ratios by id (ADR 0003; for the card components)
    │  - /api/ads/readings → the ads routine's readings log + stored spend (D1 gss-stats-ads)
    │  - /api/sites  → auto-builds the merged site list (RUM + beacon, aliases folded)
@@ -268,7 +269,12 @@ Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats
   id and param against the registry, plans the distinct facts (at most 40 statements, else `413`
   with `maxStatements`), caches each fact on its own in the Cache API, and derives every value in
   JS with its status (`ok`, `too-few`, `no-data`, `unmeasured`, `partial`), n/d, deltas and a
-  provisional flag for lagged outcomes. The card components that call it come in later slices.
+  provisional flag for lagged outcomes. **Metric cards** render it: a widget with `card`
+  (`{ preset }` from [`src/lib/metrics/presets.ts`](src/lib/metrics/presets.ts), or a saved spec)
+  shows `MetricCard` ([`src/components/metrics/`](src/components/metrics)) — one batched request
+  per page, following the page's date range and sites, with each card's caveats behind one
+  collapsed "Notes" link and "Updated Xs ago" with ↻ where the card asks for it. The Overview's
+  "Today at a glance" and campaign scorecard are cards since layout version 10.
 - **Two datasets, one dashboard.** RUM (sampled, human-only) and the beacon (every
   real load, sub-country geo) are charted side by side; they're independent and never
   summed.
@@ -563,7 +569,7 @@ once, and never overwrites that copy (`functions/api/config.ts`; if the backup c
 written, the save fails and the old layout stays). A tab still running older code gets `409`
 ("This tab is out of date, reload") instead of overwriting a newer layout.
 
-To put a backup back (e.g. the v8 layout after a bad v9 migration):
+To put a backup back (e.g. the v9 layout after a bad v10 migration):
 
 1. **Close every dashboard tab**, on every device. An open tab saves its in-memory layout on the
    next change and would overwrite what you restore.
@@ -575,8 +581,8 @@ To put a backup back (e.g. the v8 layout after a bad v9 migration):
 
    ```bash
    npx wrangler kv key get "dashboard:default" --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-current.json
-   npx wrangler kv key get "dashboard:default:backup:v8" --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-v8.json
-   npx wrangler kv key put "dashboard:default" --path layout-v8.json --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote
+   npx wrangler kv key get "dashboard:default:backup:v9" --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-v9.json
+   npx wrangler kv key put "dashboard:default" --path layout-v9.json --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote
    ```
 
 4. Open one tab and check the layout before opening any others.

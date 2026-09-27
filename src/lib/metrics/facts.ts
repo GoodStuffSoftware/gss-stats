@@ -36,7 +36,7 @@ import { applyExclusions, CAMPAIGNS, campaignAttributionClause, campaignById, et
 import { excludeInstallGapUnmeasured, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, popupIncludeClause } from '../popupEvents'
 import { last7DatesBefore, siteWindowClause } from '../overview'
 import { addDays as addEtDays, etSameTimeWindow } from '../etTime'
-import { BEST_SUDOKU_SITES } from '../defaults'
+import { BEST_SUDOKU_SITES } from '../bestSudokuSites'
 import { mapSpendSummary, SPEND_SUMMARY_SQL } from '../adsStore'
 import type { SpendSummary } from '../adsRules'
 import { etMidnightMs } from './instrumentation'

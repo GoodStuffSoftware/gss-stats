@@ -1,5 +1,5 @@
 // EQUIVALENCE (ADR 0003 slice 3): the same node:sqlite `hits` fixture gives the same counts
-// through POST /api/metrics as through /api/overview, /api/campaigns and /api/popups — every
+// through POST /api/metrics as through /api/campaigns and /api/popups — every
 // handler runs its own SQL against one real SQLite database. Where the registry deliberately
 // differs, the test asserts the difference itself, so it is documented and cannot drift:
 //
@@ -19,14 +19,15 @@
 //   D6  A bare YYYY-MM-DD page range is an ET day for the registry (review #13), like every other
 //       day on the dashboard; /api/popups (and /api/geo) still read it as a UTC day. The
 //       dashboard's range control always sends datetimes, which both read identically.
+// (The /api/overview KPI and scorecard comparisons retired with those sections in CONFIG_VERSION
+// 10; the cards that replaced them are pinned against a golden of the retired bespoke body in
+// src/components/metrics/presets.parity.test.ts, which lists D1, D3, D4 and D5 there.)
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { onRequestPost as overviewPost } from './overview'
 import { onRequestPost as campaignsPost } from './campaigns'
 import { onRequestPost as popupsPost } from './popups'
 import { onRequestPost as metricsPost } from './metrics'
 import { insertHits, installCaches, memoryCache, openHitsDb, pagesContext, postJson, sqliteD1 } from '../_lib/testing/hitsDb'
 import { bskFixture, FIXTURE_NOW } from '../_lib/testing/bskFixture'
-import { kpiComparisonGate } from '../../src/lib/kpiFormat'
 import { CAMPAIGNS, type FunnelStepKey } from '../../src/lib/campaigns'
 import type { MetricRequest, MetricValue, MetricsResponseBody } from '../../src/lib/metrics/types'
 
@@ -71,102 +72,6 @@ const STEP_METRIC: Record<Exclude<FunnelStepKey, 'arrivals'>, string> = {
   install: 'campaign.installs',
 }
 const STEPS = Object.keys(STEP_METRIC) as (keyof typeof STEP_METRIC)[]
-
-describe('/api/metrics ≡ /api/overview "Today at a glance"', () => {
-  const TILES: [kpiKey: string, req: Omit<MetricRequest, 'key'>][] = [
-    ['pageviews', { metric: 'bsk.pageviews', window: 'todaySoFar', deltas: ['yesterday', 'avg7'] }],
-    [`arrivals-${RETEST}`, { metric: 'campaign.taggedArrivals', params: { campaignId: RETEST }, window: 'todaySoFar', deltas: ['yesterday', 'avg7'] }],
-    ['played', { metric: 'bsk.gameViews', window: 'todaySoFar', deltas: ['yesterday', 'avg7'] }],
-    ['completed', { metric: 'bsk.completions', window: 'todaySoFar', deltas: ['yesterday', 'avg7'] }],
-    ['popupShown', { metric: 'bsk.popupShown', window: 'todaySoFar', deltas: ['yesterday', 'avg7'] }],
-    ['popupAccept', { metric: 'bsk.popupAccepts', window: 'todaySoFar', deltas: ['yesterday', 'avg7'] }],
-    ['authSuccess', { metric: 'bsk.authSuccess', window: 'todaySoFar', deltas: ['yesterday', 'avg7'] }],
-    ['install', { metric: 'bsk.installs', window: 'todaySoFar', deltas: ['yesterday', 'avg7'] }],
-    ['installRaw', { metric: 'bsk.rawInstallSignals', window: 'todaySoFar', deltas: ['yesterday', 'avg7'] }],
-    ['returns', { metric: 'bsk.returnsD1plus', window: 'todaySoFar', deltas: ['yesterday', 'avg7'] }],
-  ]
-
-  it('every count tile: the same value today, and the same deltas wherever the tile shows one', async () => {
-    const overview = await call(overviewPost, '/api/overview', {})
-    const results = await metrics(TILES.map(([k, r]) => ({ key: k.toLowerCase(), ...r })))
-    let deltasCompared = 0
-    for (const [kpiKey] of TILES) {
-      const tile = overview.kpis.find((k: any) => k.key === kpiKey)
-      const got = results[kpiKey.toLowerCase()]
-      expect(tile, kpiKey).toBeDefined()
-      expect(got.value, kpiKey).toBe(tile.today)
-      expect(tile.today, kpiKey).toBeGreaterThan(0) // the fixture exercises every tile
-      const gate = kpiComparisonGate(kpiKey, overview.todayEt)
-      for (const [name, field, hidden] of [['yesterday', 'vsYesterday', gate.hideVsYesterday], ['avg7', 'vsAvg7', gate.hideVsAvg7]] as const) {
-        const d = got.deltas?.[name]
-        if (hidden) {
-          expect(d, `${kpiKey} ${name} should be omitted across a go-live`).toBeUndefined()
-        } else {
-          expect(d?.delta, `${kpiKey} ${name}`).toBeCloseTo(tile[field].delta, 9)
-          expect(d?.deltaPct ?? null, `${kpiKey} ${name} %`).toBe(tile[field].deltaPct)
-          deltasCompared++
-        }
-      }
-    }
-    expect(deltasCompared).toBeGreaterThanOrEqual(8) // page views, game views, auth, raw installs: both deltas
-  })
-
-  it('the pop-up tap-rate tile: same rate, numerator and denominator', async () => {
-    const overview = await call(overviewPost, '/api/overview', {})
-    const tile = overview.kpis.find((k: any) => k.key === 'popupTapRate')
-    const { tap } = await metrics([{ key: 'tap', ratio: 'bsk.popupTapRate', window: 'todaySoFar' }])
-    expect(tap).toMatchObject({ value: tile.today, numerator: tile.numerator, denominator: tile.denominator })
-  })
-})
-
-describe('/api/metrics ≡ /api/overview campaign scorecard', () => {
-  it.each([ANDROID, RETEST])('campaign %s: arrivals, sign-ins, installs, funnel counts, accept rate, cost per arrival', async (id) => {
-    const overview = await call(overviewPost, '/api/overview', {})
-    const row = overview.scorecard.find((r: any) => r.id === id)
-    const p = { campaignId: id }
-    const r = await metrics([
-      { key: 'arrivals', metric: 'campaign.taggedArrivals', params: p },
-      { key: 'accept', ratio: 'campaign.acceptPerAsk', params: p },
-      { key: 'cpa', ratio: 'campaign.costPerArrival', params: p },
-      ...STEPS.map((s) => ({ key: `s.${s.toLowerCase()}`, metric: STEP_METRIC[s], params: p })),
-    ])
-    expect(r.arrivals.value).toBe(row.taggedArrivals)
-    for (const s of STEPS) {
-      const got = r[`s.${s.toLowerCase()}`]
-      if (row.notInstrumented.includes(s)) expect(got.status, `${s}: D5`).toBe('unmeasured')
-      else expect(got.value, s).toBe(row.funnelCounts[s])
-    }
-    if (!row.notInstrumented.includes('authSuccess')) expect(r['s.authsuccess'].value).toBe(row.authSuccess)
-    if (!row.notInstrumented.includes('install')) expect(r['s.install'].value).toBe(row.install)
-    if (!row.notInstrumented.includes('accept')) expect(r.accept.value ?? null).toBe(row.funnelRates.accept)
-    expect(r.cpa.value ?? null).toBe(row.costPerArrival)
-  })
-
-  it('D1: the install-rate denominator is row-exact at the fix; the scorecard\'s is hour-bucketed', async () => {
-    const overview = await call(overviewPost, '/api/overview', {})
-    const row = overview.scorecard.find((r: any) => r.id === RETEST)
-    const { rate } = await metrics([{ key: 'rate', ratio: 'campaign.installPerPrompt', params: { campaignId: RETEST } }])
-    // 4 prompts in a later hour count both ways; the 5 at 16:30Z (after the 16:26:36Z fix, in its hour) only row-exactly.
-    expect(row.installPromptPostFixCount).toBe(4)
-    expect(rate).toMatchObject({ numerator: row.funnelCounts.install, denominator: 4 + 5, status: 'partial' })
-  })
-
-  it('D3: a flight that ended before the return beacon existed — the scorecard shows a rate, the registry says unmeasured', async () => {
-    const overview = await call(overviewPost, '/api/overview', {})
-    const row = overview.scorecard.find((r: any) => r.id === ANDROID)
-    const { ret } = await metrics([{ key: 'ret', ratio: 'campaign.returnD2to7PerD0', params: { campaignId: ANDROID } }])
-    expect(row.returnD0).toBe(20)
-    expect(ret).toEqual({ status: 'unmeasured', reason: 'not-live' })
-  })
-
-  it('the retest\'s return rate matches the scorecard, and is provisional (d2-7 cannot fire yet)', async () => {
-    const overview = await call(overviewPost, '/api/overview', {})
-    const row = overview.scorecard.find((r: any) => r.id === RETEST)
-    const { ret } = await metrics([{ key: 'ret', ratio: 'campaign.returnD2to7PerD0', params: { campaignId: RETEST } }])
-    expect(ret).toMatchObject({ value: row.returnRateD2to7, numerator: row.returnD2to7, denominator: row.returnD0, provisional: true })
-    expect(ret.noteIds).toContain('still-arriving')
-  })
-})
 
 describe('/api/metrics ≡ /api/campaigns', () => {
   it.each(CAMPAIGNS.filter((c) => c.measurement !== 'spend-only').map((c) => [c.label, c.id] as const))('%s: counts, rates, returns, costs', async (_label, id) => {

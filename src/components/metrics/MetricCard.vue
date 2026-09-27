@@ -20,6 +20,7 @@ import { useMetrics, type MetricRequestSpec, type UseMetrics } from '../../compo
 import { noteRawText } from '../../lib/notes'
 import { resolveLabelTokens } from '../../lib/metrics/render'
 import { presetById } from '../../lib/metrics/presets'
+import { INVALID_CARD_PRESET } from '../../lib/metrics/validate'
 import { buildRequestSpec, flattenSectionItems, ROOT_SCOPE, resolveRepeat, todayEtFrom, type ReadingScope, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
 import type { CardRef, CardSpec, MetricsContext } from '../../lib/metrics/types'
 import MetricCardInstance from './MetricCardInstance.vue'
@@ -111,6 +112,7 @@ const updatedText = computed(() => {
   return noteRawText('label.card.updatedMinutesAgo', { n: Math.round(s / 60) })
 })
 const failedText = noteRawText('label.card.loadFailed')
+const invalidText = noteRawText('label.card.invalid')
 /** Where the status line goes: where showUpdated puts freshness, and in the header when the
  * card shows no freshness but has an error. Header: an unrepeated card's own header row
  * (top-right, above the tiles, where the old KPI panel had it), a repeated card above its grid.
@@ -121,7 +123,9 @@ const statusAboveGrid = computed(() => !!spec.value?.repeat && statusPlacement.v
 </script>
 
 <template>
-  <p v-if="!spec" class="metric-card-error">Unknown card{{ 'preset' in cardRef ? ` preset "${cardRef.preset}"` : '' }}.</p>
+  <!-- A saved card that failed validation on load (normCardRef) is a placeholder, never a crash. -->
+  <p v-if="'preset' in cardRef && cardRef.preset === INVALID_CARD_PRESET" class="metric-card-error">{{ invalidText }}</p>
+  <p v-else-if="!spec" class="metric-card-error">Unknown card{{ 'preset' in cardRef ? ` preset "${cardRef.preset}"` : '' }}.</p>
   <div v-else class="metric-card-root">
     <!-- Present from mount and empty until an error, so screen readers announce the change. -->
     <span class="mc-live" role="status" aria-live="polite">{{ hasError ? failedText : '' }}</span>
