@@ -59,6 +59,7 @@ exports[`fact SQL snapshots > bskKpiDays {"todayEt":"2026-09-26"} 1`] = `
     1790439960000,
     1790438400000,
     1790395200000,
+    1790049600000,
     1788926400000,
     1788321600000,
     "bestsudoku-web",
@@ -81,7 +82,7 @@ exports[`fact SQL snapshots > bskKpiDays {"todayEt":"2026-09-26"} 1`] = `
     1790439996000,
   ],
   "db": "gss_geo",
-  "sql": "SELECT CASE WHEN ts >= ? AND ts < ? THEN 0 WHEN ts >= ? AND ts < ? THEN 1 WHEN ts >= ? AND ts < ? THEN 2 WHEN ts >= ? AND ts < ? THEN 3 WHEN ts >= ? AND ts < ? THEN 4 WHEN ts >= ? AND ts < ? THEN 5 WHEN ts >= ? AND ts < ? THEN 6 WHEN ts >= ? AND ts < ? THEN 7 ELSE -1 END AS d, CASE WHEN ts >= ? THEN 6 WHEN ts >= ? THEN 5 WHEN ts >= ? THEN 4 WHEN ts >= ? THEN 3 WHEN ts >= ? THEN 2 WHEN ts >= ? THEN 1 ELSE 0 END AS s, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE site IN (?, ?, ?) AND ts >= ? AND ts < ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY d, s, path, visitor, campaign HAVING d >= 0",
+  "sql": "SELECT CASE WHEN ts >= ? AND ts < ? THEN 0 WHEN ts >= ? AND ts < ? THEN 1 WHEN ts >= ? AND ts < ? THEN 2 WHEN ts >= ? AND ts < ? THEN 3 WHEN ts >= ? AND ts < ? THEN 4 WHEN ts >= ? AND ts < ? THEN 5 WHEN ts >= ? AND ts < ? THEN 6 WHEN ts >= ? AND ts < ? THEN 7 ELSE -1 END AS d, CASE WHEN ts >= ? THEN 7 WHEN ts >= ? THEN 6 WHEN ts >= ? THEN 5 WHEN ts >= ? THEN 4 WHEN ts >= ? THEN 3 WHEN ts >= ? THEN 2 WHEN ts >= ? THEN 1 ELSE 0 END AS s, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE site IN (?, ?, ?) AND ts >= ? AND ts < ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY d, s, path, visitor, campaign HAVING d >= 0",
 }
 `;
 
@@ -91,6 +92,7 @@ exports[`fact SQL snapshots > bskRangePath {"since":"2026-09-20","until":"2026-0
     1790449200000,
     1790438400000,
     1790395200000,
+    1790049600000,
     "bestsudoku-web",
     "bestsudoku",
     "bestsudoku-app",
@@ -111,7 +113,7 @@ exports[`fact SQL snapshots > bskRangePath {"since":"2026-09-20","until":"2026-0
     1790439996000,
   ],
   "db": "gss_geo",
-  "sql": "SELECT CASE WHEN ts >= ? THEN 3 WHEN ts >= ? THEN 2 WHEN ts >= ? THEN 1 ELSE 0 END AS s, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE site IN (?, ?, ?) AND ts >= ? AND ts < ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY s, path, visitor, campaign",
+  "sql": "SELECT CASE WHEN ts >= ? THEN 4 WHEN ts >= ? THEN 3 WHEN ts >= ? THEN 2 WHEN ts >= ? THEN 1 ELSE 0 END AS s, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE site IN (?, ?, ?) AND ts >= ? AND ts < ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY s, path, visitor, campaign",
 }
 `;
 
@@ -120,6 +122,7 @@ exports[`fact SQL snapshots > bskReleaseSides {"releaseDateEt":"2026-09-26","day
   "binds": [
     1790395200000,
     1790439960000,
+    1790049600000,
     "bestsudoku-web",
     "bestsudoku",
     "bestsudoku-app",
@@ -140,7 +143,7 @@ exports[`fact SQL snapshots > bskReleaseSides {"releaseDateEt":"2026-09-26","day
     1790439996000,
   ],
   "db": "gss_geo",
-  "sql": "SELECT (ts >= ?) AS d, CASE WHEN ts >= ? THEN 1 ELSE 0 END AS s, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE site IN (?, ?, ?) AND ts >= ? AND ts < ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY d, s, path, visitor, campaign",
+  "sql": "SELECT (ts >= ?) AS d, CASE WHEN ts >= ? THEN 2 WHEN ts >= ? THEN 1 ELSE 0 END AS s, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE site IN (?, ?, ?) AND ts >= ? AND ts < ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY d, s, path, visitor, campaign",
 }
 `;
 
@@ -350,9 +353,13 @@ exports[`fact SQL snapshots > popupRangePath {"since":"2026-09-20","until":"2026
     "/game/complete/%",
     "/auth/success/google/%",
     "/auth/success/email/%",
+    "/auth/error",
+    "/auth/error/%",
+    "/auth/redirect",
+    "/auth/redirect/%",
   ],
   "db": "gss_geo",
-  "sql": "SELECT CASE WHEN ts >= ? THEN 3 WHEN ts >= ? THEN 2 WHEN ts >= ? THEN 1 ELSE 0 END AS s, path, (ts >= ?) AS pf, COUNT(*) AS c FROM hits WHERE ts >= ? AND ts < ? AND (path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path LIKE ? OR path LIKE ? OR path LIKE ?) GROUP BY s, path, pf",
+  "sql": "SELECT CASE WHEN ts >= ? THEN 3 WHEN ts >= ? THEN 2 WHEN ts >= ? THEN 1 ELSE 0 END AS s, path, (ts >= ?) AS pf, COUNT(*) AS c FROM hits WHERE ts >= ? AND ts < ? AND (path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path LIKE ? OR path LIKE ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ?) GROUP BY s, path, pf",
 }
 `;
 
@@ -386,8 +393,12 @@ exports[`fact SQL snapshots > popupRangePath {"since":"2026-09-20T00:00:00Z","un
     "/game/complete/%",
     "/auth/success/google/%",
     "/auth/success/email/%",
+    "/auth/error",
+    "/auth/error/%",
+    "/auth/redirect",
+    "/auth/redirect/%",
   ],
   "db": "gss_geo",
-  "sql": "SELECT CASE WHEN ts >= ? THEN 3 WHEN ts >= ? THEN 2 WHEN ts >= ? THEN 1 ELSE 0 END AS s, path, (ts >= ?) AS pf, COUNT(*) AS c FROM hits WHERE ts >= ? AND ts < ? AND site IN (?, ?) AND (path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path LIKE ? OR path LIKE ? OR path LIKE ?) GROUP BY s, path, pf",
+  "sql": "SELECT CASE WHEN ts >= ? THEN 3 WHEN ts >= ? THEN 2 WHEN ts >= ? THEN 1 ELSE 0 END AS s, path, (ts >= ?) AS pf, COUNT(*) AS c FROM hits WHERE ts >= ? AND ts < ? AND site IN (?, ?) AND (path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path LIKE ? OR path LIKE ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ?) GROUP BY s, path, pf",
 }
 `;
