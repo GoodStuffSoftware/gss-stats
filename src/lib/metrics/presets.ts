@@ -17,6 +17,8 @@
 import type { CardSpec, Display, MetricItem } from './types'
 
 const COMPACT = { captionMode: 'compact' } as const satisfies Partial<MetricItem>
+/** An upcoming flight's funnel steps: kept, reading "not started" (compact captions). */
+const NOT_STARTED_LABEL = { ...COMPACT, gating: { whenNotStarted: 'label' } } as const satisfies Partial<MetricItem>
 
 /** The Overview campaign scorecard: one card per campaign (OverviewWidgetBody 'scorecard'). */
 export const CAMPAIGN_SCORECARD: CardSpec = {
@@ -209,7 +211,8 @@ export const CAMPAIGN_COST: CardSpec = {
  * funnel step as a bar (counts: most step-over-step "rates" mix units), and the two proportions
  * the rate rule allows — accept over asks, and install over the prompts shown from the install fix
  * on. A closed flight omits what it could not measure; an active one keeps a not-yet-seen step at
- * its live count. Last, the signed-out upsell fix as a funnel segment boundary: tagged upsell
+ * its live count; an upcoming one (no start date yet, or before its start) shows Arrivals 0 and
+ * every other step "not started" (whenNotStarted), as the old panel did. Last, the signed-out upsell fix as a funnel segment boundary: tagged upsell
  * shown/accepted/dismissed before and after it, which appears only once lib/adsRules.ts
  * UPSELL_SIGNEDOUT_FIX_AT is set and falls in the campaign's flight (the boundaryInFlight rule). */
 export const CAMPAIGN_FUNNEL: CardSpec = {
@@ -222,28 +225,28 @@ export const CAMPAIGN_FUNNEL: CardSpec = {
     {
       layout: 'rows',
       items: [
-        { id: 'hits', label: { metric: true }, data: { ratio: 'campaign.taggedHitsVsArrivals' }, display: { as: 'counts' }, ...COMPACT },
-        { id: 'raw', label: { metric: true }, data: { metric: 'campaign.rawInstallSignals' }, display: { as: 'number' }, ...COMPACT },
+        { id: 'hits', label: { metric: true }, data: { ratio: 'campaign.taggedHitsVsArrivals' }, display: { as: 'counts' }, ...NOT_STARTED_LABEL },
+        { id: 'raw', label: { metric: true }, data: { metric: 'campaign.rawInstallSignals' }, display: { as: 'number' }, ...NOT_STARTED_LABEL },
       ],
     },
     {
       layout: 'bars',
       items: [
-        { id: 'arrivals', label: { note: 'label.funnel.arrivals' }, data: { metric: 'campaign.taggedArrivals' }, display: { as: 'bar' }, ...COMPACT },
-        { id: 'played', label: { note: 'label.campaign.gameViews' }, data: { metric: 'campaign.gameViews' }, display: { as: 'bar' }, ...COMPACT },
-        { id: 'completed', label: { note: 'label.funnel.completed' }, data: { metric: 'campaign.completions' }, display: { as: 'bar' }, ...COMPACT },
-        { id: 'ask', label: { note: 'label.funnel.ask' }, data: { metric: 'campaign.asks' }, display: { as: 'bar' }, ...COMPACT },
-        { id: 'accept', label: { note: 'label.funnel.accept' }, data: { metric: 'campaign.accepts' }, display: { as: 'bar' }, ...COMPACT },
-        { id: 'authSuccess', label: { note: 'label.funnel.authSuccess' }, data: { metric: 'campaign.authSuccess' }, display: { as: 'bar' }, ...COMPACT },
-        { id: 'installPrompt', label: { note: 'label.funnel.installPrompt' }, data: { metric: 'campaign.installPrompts' }, display: { as: 'bar' }, ...COMPACT },
-        { id: 'install', label: { note: 'label.funnel.install' }, data: { metric: 'campaign.installs' }, display: { as: 'bar' }, ...COMPACT },
+        { id: 'arrivals', label: { note: 'label.funnel.arrivals' }, data: { metric: 'campaign.taggedArrivals' }, display: { as: 'bar' }, ...COMPACT, gating: { whenNotStarted: 'zero' } },
+        { id: 'played', label: { note: 'label.campaign.gameViews' }, data: { metric: 'campaign.gameViews' }, display: { as: 'bar' }, ...NOT_STARTED_LABEL },
+        { id: 'completed', label: { note: 'label.funnel.completed' }, data: { metric: 'campaign.completions' }, display: { as: 'bar' }, ...NOT_STARTED_LABEL },
+        { id: 'ask', label: { note: 'label.funnel.ask' }, data: { metric: 'campaign.asks' }, display: { as: 'bar' }, ...NOT_STARTED_LABEL },
+        { id: 'accept', label: { note: 'label.funnel.accept' }, data: { metric: 'campaign.accepts' }, display: { as: 'bar' }, ...NOT_STARTED_LABEL },
+        { id: 'authSuccess', label: { note: 'label.funnel.authSuccess' }, data: { metric: 'campaign.authSuccess' }, display: { as: 'bar' }, ...NOT_STARTED_LABEL },
+        { id: 'installPrompt', label: { note: 'label.funnel.installPrompt' }, data: { metric: 'campaign.installPrompts' }, display: { as: 'bar' }, ...NOT_STARTED_LABEL },
+        { id: 'install', label: { note: 'label.funnel.install' }, data: { metric: 'campaign.installs' }, display: { as: 'bar' }, ...NOT_STARTED_LABEL },
       ],
     },
     {
       layout: 'pills',
       items: [
-        { id: 'acceptRate', label: { note: 'label.card.acceptOfAsks' }, data: { ratio: 'campaign.acceptPerAsk' }, display: { as: 'percent', decimals: 1 }, ...COMPACT },
-        { id: 'installRate', label: { note: 'label.card.installOfPrompts' }, data: { ratio: 'campaign.installPerPrompt' }, display: { as: 'percent', decimals: 1 }, ...COMPACT },
+        { id: 'acceptRate', label: { note: 'label.card.acceptOfAsks' }, data: { ratio: 'campaign.acceptPerAsk' }, display: { as: 'percent', decimals: 1 }, ...NOT_STARTED_LABEL },
+        { id: 'installRate', label: { note: 'label.card.installOfPrompts' }, data: { ratio: 'campaign.installPerPrompt' }, display: { as: 'percent', decimals: 1 }, ...NOT_STARTED_LABEL },
       ],
     },
     {
@@ -263,7 +266,8 @@ export const CAMPAIGN_FUNNEL: CardSpec = {
 /** Arrivals and funnel by country (CampaignsWidgetBody 'country'): one card per beacon-tracked
  * campaign, a table with its funnel steps as rows and US / CA / Other as columns — every cell a
  * campaign metric split by the campaign fact's country bucket. A closed flight omits a step it
- * could not measure (every cell gated out drops the row). */
+ * could not measure (every cell gated out drops the row); an upcoming one shows every cell "not
+ * started" (whenNotStarted). */
 export const CAMPAIGN_COUNTRY: CardSpec = {
   v: 1,
   repeat: { over: 'campaigns', tracked: true },
@@ -275,14 +279,14 @@ export const CAMPAIGN_COUNTRY: CardSpec = {
       columns: { over: 'countries' },
       rowsLabel: { note: 'label.card.step' },
       items: [
-        { id: 'arrivals', label: { note: 'label.funnel.arrivals' }, data: { metric: 'campaign.taggedArrivals' }, display: { as: 'number' }, ...COMPACT },
-        { id: 'played', label: { note: 'label.campaign.gameViews' }, data: { metric: 'campaign.gameViews' }, display: { as: 'number' }, ...COMPACT },
-        { id: 'completed', label: { note: 'label.funnel.completed' }, data: { metric: 'campaign.completions' }, display: { as: 'number' }, ...COMPACT },
-        { id: 'ask', label: { note: 'label.funnel.ask' }, data: { metric: 'campaign.asks' }, display: { as: 'number' }, ...COMPACT },
-        { id: 'accept', label: { note: 'label.funnel.accept' }, data: { metric: 'campaign.accepts' }, display: { as: 'number' }, ...COMPACT },
-        { id: 'authSuccess', label: { note: 'label.funnel.authSuccess' }, data: { metric: 'campaign.authSuccess' }, display: { as: 'number' }, ...COMPACT },
-        { id: 'installPrompt', label: { note: 'label.funnel.installPrompt' }, data: { metric: 'campaign.installPrompts' }, display: { as: 'number' }, ...COMPACT },
-        { id: 'install', label: { note: 'label.funnel.install' }, data: { metric: 'campaign.installs' }, display: { as: 'number' }, ...COMPACT },
+        { id: 'arrivals', label: { note: 'label.funnel.arrivals' }, data: { metric: 'campaign.taggedArrivals' }, display: { as: 'number' }, ...NOT_STARTED_LABEL },
+        { id: 'played', label: { note: 'label.campaign.gameViews' }, data: { metric: 'campaign.gameViews' }, display: { as: 'number' }, ...NOT_STARTED_LABEL },
+        { id: 'completed', label: { note: 'label.funnel.completed' }, data: { metric: 'campaign.completions' }, display: { as: 'number' }, ...NOT_STARTED_LABEL },
+        { id: 'ask', label: { note: 'label.funnel.ask' }, data: { metric: 'campaign.asks' }, display: { as: 'number' }, ...NOT_STARTED_LABEL },
+        { id: 'accept', label: { note: 'label.funnel.accept' }, data: { metric: 'campaign.accepts' }, display: { as: 'number' }, ...NOT_STARTED_LABEL },
+        { id: 'authSuccess', label: { note: 'label.funnel.authSuccess' }, data: { metric: 'campaign.authSuccess' }, display: { as: 'number' }, ...NOT_STARTED_LABEL },
+        { id: 'installPrompt', label: { note: 'label.funnel.installPrompt' }, data: { metric: 'campaign.installPrompts' }, display: { as: 'number' }, ...NOT_STARTED_LABEL },
+        { id: 'install', label: { note: 'label.funnel.install' }, data: { metric: 'campaign.installs' }, display: { as: 'number' }, ...NOT_STARTED_LABEL },
       ],
     },
   ],

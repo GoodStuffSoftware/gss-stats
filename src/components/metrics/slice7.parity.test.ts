@@ -61,6 +61,12 @@
 //   a closed flight's unmeasured steps omitted. (An active flight's not-yet-seen step reads its
 //   live count on both, as the old table never labelled it.)
 //
+// An upcoming flight (before its start, or with no start date yet), on both cards:
+//   U1  Shown, as the old panels showed every beacon-tracked campaign: the funnel card with
+//       Arrivals 0 and every other step "not started" (old: "not instrumented"), the country
+//       card with every cell "not started" (old: 0, a count it could not have measured). A flight
+//       with no start date is never queried.
+//
 // Return visits (campaigns 'returns' → preset campaign-returns):
 //   RV1 The per-campaign line chart of return rates is a row of bars side by side, d1 to d31-60,
 //       each with its rate and (n/d) (the old counts line "d0=6 · d1=0.0% (0/6) · …" split
@@ -421,6 +427,57 @@ describe('campaign-funnel ≡ the bespoke funnel panel', () => {
     const card = await mountCard('campaign-funnel', FIXTURE_NOW)
     expect(card.findAll('.metric-section.layout-table')).toHaveLength(0)
     expect(card.text()).not.toMatch(/upsell fix/)
+  })
+})
+
+describe('an upcoming flight: its funnel and country cards show, as the old panels did', () => {
+  // The old panels drew every beacon-tracked campaign: an upcoming one had its arrivals at 0 and
+  // every other step unmeasured. The cards match: Arrivals 0, every other step "not started" (a
+  // flight whose window opens later, or with no start date yet), and the country card too.
+  const STEPS = ['Game-screen views', 'Completed a game', 'Sign-in ask', 'Accept', 'Auth success', 'Install prompt', 'Install']
+  const byTitle = (w: VueWrapper) => new Map(w.findAll('.metric-card').filter((c) => (c.element as HTMLElement).style.display !== 'none').map((c) => [text(c.find('.mc-title').element), c]))
+  const barsOf = (c: ReturnType<VueWrapper['find']>) => new Map(c.findAll('.metric-section.layout-bars .mi-row').map((r) => [text(r.find('.mi-label').element), text(r.find('.mi-value').element)]))
+  function expectUpcomingFunnel(c: ReturnType<VueWrapper['find']>, title: string) {
+    const bars = barsOf(c)
+    expect(bars.get('Arrivals'), title).toBe('0')
+    for (const step of STEPS) expect(bars.get(step), `${title} ${step}`).toBe('not started')
+    expect(text(c.find('.metric-section.layout-rows').element), title).toMatch(/not started/)
+    for (const pill of c.findAll('.mi-pill')) expect(text(pill.element), title).toMatch(/: not started$/)
+  }
+  function expectUpcomingCountry(c: ReturnType<VueWrapper['find']>, title: string) {
+    const t = c.find('table.metric-table.columns')
+    const body = t.findAll('tbody tr').map((tr) => [text(tr.find('th').element), ...tr.findAll('td').map((td) => text(td.element))])
+    expect(body.map((r) => r[0]), title).toEqual(['Arrivals', ...STEPS])
+    for (const r of body) expect(r.slice(1), `${title} ${r[0]}`).toEqual(['not started', 'not started', 'not started'])
+  }
+
+  it('before its start date (the retest on 2026-09-20)', async () => {
+    const now = Date.parse('2026-09-20T16:00:00Z')
+    vi.setSystemTime(now)
+    const funnel = byTitle(await mountCard('campaign-funnel', now))
+    const retest = CAMPAIGNS.find((c) => c.id === '24279250691')!
+    expect([...funnel.keys()]).toContain(retest.label)
+    expectUpcomingFunnel(funnel.get(retest.label)!, retest.label)
+    const country = byTitle(await mountCard('campaign-country', now))
+    expectUpcomingCountry(country.get(retest.label)!, retest.label)
+  })
+
+  it('with no start date yet (a pending flight): never asked, the same card; the scorecard still omits its steps', async () => {
+    const retest = CAMPAIGNS.find((c) => c.id === '24279250691')!
+    const pending = { ...retest, id: '99999999999', label: 'Upcoming test flight', status: 'upcoming' as const, flightStart: null, flightStartTimeEt: undefined }
+    CAMPAIGNS.push(pending)
+    try {
+      const funnel = byTitle(await mountCard('campaign-funnel', FIXTURE_NOW))
+      expectUpcomingFunnel(funnel.get(pending.label)!, pending.label)
+      const country = byTitle(await mountCard('campaign-country', FIXTURE_NOW))
+      expectUpcomingCountry(country.get(pending.label)!, pending.label)
+      const scorecard = byTitle(await mountCard('campaign-scorecard', FIXTURE_NOW))
+      expect(text(scorecard.get(pending.label)!.element)).not.toMatch(/not started|Arrivals/)
+      const asked = (vi.mocked(fetch).mock.calls as [string, RequestInit][]).flatMap(([, init]) => JSON.parse(String(init.body ?? '{}')).requests ?? [])
+      expect(asked.filter((r: { params?: { campaignId?: string } }) => r.params?.campaignId === pending.id).map((r: { metric?: string; ratio?: string }) => r.metric ?? r.ratio ?? '').filter((m) => !m.startsWith('campaign.spend') && m !== 'campaign.lastSync')).toEqual([])
+    } finally {
+      CAMPAIGNS.splice(CAMPAIGNS.indexOf(pending), 1)
+    }
   })
 })
 

@@ -12,7 +12,7 @@ import { campaignSegmentMarker, UPSELL_SIGNEDOUT_FIX_AT } from '../adsRules'
 import { latestDatedRelease } from '../releases'
 import { metricWindows, METRICS, rulesOf, type MetricDef, type MetricParam } from './metrics'
 import { ratioParamsOf, ratioWindowsOf, RATIOS, type RatioDef } from './ratios'
-import { COUNTRY_BUCKETS, WINDOW_SIDES, type CountryBucket, type DataBinding, type DeltaName, type Label, type MetricItem, type ParamValue, type RepeatSpec, type ScopePath, type Section, type WindowSide } from './types'
+import { COUNTRY_BUCKETS, WINDOW_SIDES, type CountryBucket, type DataBinding, type DeltaName, type Gating, type Label, type MetricItem, type ParamValue, type RepeatSpec, type ScopePath, type Section, type WindowSide } from './types'
 
 /** A stored ads-readings-log row (ADR 0003 slice 8 — the fact/type don't exist yet). Kept as
  * a minimal, forward-compatible shape so `RepeatSpec.over: 'readings'` and the `reading.*`
@@ -253,7 +253,7 @@ export function flattenSectionItems(section: Section, outerScope: ScopeInstance,
       // Instances the campaign's own config rules out (a spend-only campaign) are dropped here, so
       // a repeat left with only those shows its empty placeholder — saying why — instead of
       // silently losing the tile.
-      const itemScopes = allScopes.filter((s) => !unmeasuredByConfig(item.data, s))
+      const itemScopes = allScopes.filter((s) => !unmeasuredByConfig(item.data, s, item.gating))
       if (!itemScopes.length) {
         if (item.repeat.empty) {
           const untracked = allScopes.length > 0 && item.repeat.over === 'campaigns' && !!item.repeat.flightingToday
@@ -320,22 +320,30 @@ export interface MetricRequestSpec {
  * (`measurement: 'spend-only'`) never has beacon data. Such an item is omitted whatever the
  * campaign's status, and never requested, so a card shows no "…" for it and never labels it
  * "not yet tracking" (it never will be tracked). */
-export function unmeasuredByConfig(binding: DataBinding, scope: ScopeInstance): boolean {
+export function unmeasuredByConfig(binding: DataBinding, scope: ScopeInstance, gating?: Gating): boolean {
+  const ruling = configRuling(binding, scope)
+  // A flight with no start date keeps an item whose gating says how to show "not started".
+  return ruling === 'spend-only' || (ruling === 'flight-pending' && !gating?.whenNotStarted)
+}
+/** Why the campaign's own config rules a binding out, or null: 'flight-pending' (no start date
+ * yet: nothing but spend can be read) or 'spend-only' (never any beacon data). Such a binding is
+ * never requested (buildRequestSpec); unmeasuredByConfig says whether its item is omitted. */
+export function configRuling(binding: DataBinding, scope: ScopeInstance): 'flight-pending' | 'spend-only' | null {
   const campaign = campaignOfScope(scope)
-  if (!campaign || 'field' in binding) return false
+  if (!campaign || 'field' in binding) return null
   const resolved = resolveBinding(binding, scope)
-  if (!resolved || resolved.kind === 'field' || !resolved.window) return false
+  if (!resolved || resolved.kind === 'field' || !resolved.window) return null
   const window = resolved.window as keyof MetricDef['windows']
   const sides = resolved.kind === 'metric' ? [resolved.def as MetricDef] : [METRICS.get((resolved.def as RatioDef).num), METRICS.get((resolved.def as RatioDef).den)]
   for (const def of sides) {
     if (!def || !def.params.includes('campaignId') || resolved.params.campaignId !== campaign.id) continue
     const fact = def.windows[window]
-    // The ads store's reads (spend and its freshness) need no flight date, only a campaign.
-    if (campaign.flightStart === null && fact !== 'adsSpend' && fact !== 'adsCoverage' && fact !== 'adsLastSync') return true
     const rules = rulesOf(def, { params: resolved.params, campaign, window: window as never })
-    if (campaign.measurement === 'spend-only' && rules.some((r) => r.kind === 'beaconMeasurable')) return true
+    if (campaign.measurement === 'spend-only' && rules.some((r) => r.kind === 'beaconMeasurable')) return 'spend-only'
+    // The ads store's reads (spend and its freshness) need no flight date, only a campaign.
+    if (campaign.flightStart === null && fact !== 'adsSpend' && fact !== 'adsCoverage' && fact !== 'adsLastSync') return 'flight-pending'
   }
-  return false
+  return null
 }
 
 /** The request a MetricItem's data binding resolves to against a scope, or `null` for a
@@ -344,7 +352,7 @@ export function unmeasuredByConfig(binding: DataBinding, scope: ScopeInstance): 
 export function buildRequestSpec(item: MetricItem, scope: ScopeInstance): MetricRequestSpec | null {
   const resolved = resolveBinding(item.data, scope)
   if (!resolved || resolved.kind === 'field') return null
-  if (unmeasuredByConfig(item.data, scope)) return null // never asked: the answer is known
+  if (configRuling(item.data, scope)) return null // never asked: the answer is known
   const spec: MetricRequestSpec = {}
   if (resolved.kind === 'metric') spec.metric = (item.data as { metric: string }).metric
   else spec.ratio = (item.data as { ratio: string }).ratio

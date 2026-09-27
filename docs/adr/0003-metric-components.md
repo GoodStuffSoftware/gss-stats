@@ -1163,7 +1163,11 @@ Registry and component additions (all generic):
   item to the window of the repeat or column it sits in.
 - An optional `country` param on campaign-fact metrics (the fact now groups by a US / CA / other
   bucket); units `instant` and `code` (never a ratio side); displays `date`, `ago`, `status` and
-  `bar` on a rate; `Gating.whenZero`.
+  `bar` on a rate; `Gating.whenZero`; `Gating.whenNotStarted` (`'label'` keeps a not-yet-begun
+  flight's item as "not started", even with no start date, where it would be omitted; `'zero'`
+  shows a count that cannot have happened yet as 0): the funnel and country cards show an
+  upcoming flight as the old panels did (Arrivals 0, every other step "not started"), while the
+  scorecard keeps omitting a pending flight's steps.
 - Nested scopes (a repeat keeps the instance it sits in), repeats over countries and over
   beacon-tracked campaigns only, a column repeat on `table` sections (`columns`, `columnLabel`,
   `rowsLabel`), a `columns` section layout, card `actions` and rendered card `captions`; a

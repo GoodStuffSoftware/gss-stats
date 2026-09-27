@@ -19,7 +19,7 @@ import { relativeTime } from '../adsFreshness'
 import { tokenizeAndInterpolate, type TextToken } from '../textLite'
 import { METRICS, rulesOf, type MetricDef } from './metrics'
 import { RATIOS, type RatioDef } from './ratios'
-import { campaignOfScope, resolveBinding, scopeField, scopeVars, unmeasuredByConfig, type ScopeInstance } from './scope'
+import { campaignOfScope, configRuling, resolveBinding, scopeField, scopeVars, unmeasuredByConfig, type ScopeInstance } from './scope'
 import type { Display, Gating, Label, MetricItem, MetricValue } from './types'
 import { unitLabelId } from './units'
 
@@ -295,7 +295,11 @@ function fieldViewModel(item: MetricItem, raw: string | null, labelTokens: TextT
   return { visible: true, labelTokens, primary: raw, deltaLines: [], captionTokens }
 }
 
+/** A flight that has not begun, as the server reports a window that has not opened yet. */
+const NOT_STARTED: MetricValue = { status: 'unmeasured', reason: 'not-started', noteIds: ['not-started'] }
 function metricViewModel(item: MetricItem, value: MetricValue, def: MetricDef | RatioDef, labelTokens: TextToken[], scope: ScopeInstance, todayEt: string, nowMs: number): ItemViewModel {
+  // whenNotStarted 'zero': a count that cannot have happened yet reads a measured 0.
+  if (value.status === 'unmeasured' && value.reason === 'not-started' && item.gating?.whenNotStarted === 'zero') value = { status: 'ok', value: 0 }
   if (value.status === 'error') {
     // A status word, never a dash: a dash reads as "no value", an error means "not loaded".
     return { visible: true, labelTokens, primary: noteRawText('metric-unavailable'), deltaLines: [], captionTokens: itemCaptionOnly(item, scope, todayEt), muted: true, error: true }
@@ -351,8 +355,11 @@ export function itemViewModel(item: MetricItem, value: MetricValue | undefined, 
     return fieldViewModel(item, resolved.fieldValue ?? null, labelTokens, scope, opts.todayEt)
   }
   // Ruled out by the campaign's own config (spend-only, or no flight start yet): omitted
-  // whatever the status, and never requested (scope.ts unmeasuredByConfig).
-  if (unmeasuredByConfig(item.data, scope)) return { visible: false, labelTokens, primary: '', deltaLines: [], captionTokens: [] }
+  // whatever the status, and never requested (scope.ts unmeasuredByConfig), unless the item's
+  // whenNotStarted gating keeps a not-yet-started flight's item: then it reads as the server
+  // would answer a window that has not opened yet.
+  if (unmeasuredByConfig(item.data, scope, item.gating)) return { visible: false, labelTokens, primary: '', deltaLines: [], captionTokens: [] }
+  if (configRuling(item.data, scope) === 'flight-pending') value = NOT_STARTED
   if (!value) {
     return { visible: true, labelTokens, primary: '…', deltaLines: [], captionTokens: [] }
   }

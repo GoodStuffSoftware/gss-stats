@@ -27,6 +27,7 @@ const open = ref(false)
 const innermostOver = computed<RepeatSpec['over'] | undefined>(() => item.value.repeat?.over ?? props.sectionRepeatOver ?? props.cardRepeatOver)
 
 const whenUnmeasuredId = useId()
+const whenNotStartedId = useId()
 const minCohortId = useId()
 const whenEmptyId = useId()
 const whenEmptyNoteSearchId = useId()
@@ -71,6 +72,12 @@ const whenUnmeasured = computed<NonNullable<MetricItem['gating']>['whenUnmeasure
   get: () => item.value.gating?.whenUnmeasured ?? 'auto',
   set: (v) => {
     item.value = { ...item.value, gating: { ...item.value.gating, whenUnmeasured: v === 'auto' ? undefined : v } }
+  },
+})
+const whenNotStarted = computed<'default' | 'label' | 'zero'>({
+  get: () => item.value.gating?.whenNotStarted ?? 'default',
+  set: (v) => {
+    item.value = { ...item.value, gating: { ...item.value.gating, whenNotStarted: v === 'default' ? undefined : v } }
   },
 })
 const whenEmptyKind = computed<'dash' | 'omit' | 'note'>({
@@ -160,6 +167,14 @@ const itemRepeatModel = computed({
               <option value="auto">Auto — omit for a closed campaign, else show a label</option>
               <option value="omit">Always omit</option>
               <option value="label">Always show a label</option>
+            </select>
+          </div>
+          <div class="field">
+            <label :for="whenNotStartedId">Before the flight starts</label>
+            <select :id="whenNotStartedId" v-model="whenNotStarted">
+              <option value="default">Default — omit with no start date, else "not started"</option>
+              <option value="label">Always "not started"</option>
+              <option value="zero">Show 0</option>
             </select>
           </div>
           <div class="field">

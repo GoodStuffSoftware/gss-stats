@@ -534,3 +534,25 @@ describe('every preset, customised: labels read as their names, never "Unknown n
     if (id === 'campaign-funnel') expect(pickers).toBeGreaterThanOrEqual(14)
   })
 })
+
+describe('"Before the flight starts" (gating.whenNotStarted)', () => {
+  it('shows each funnel item\'s setting, and a change reaches the card', async () => {
+    const wrapper = mountEditor({ preset: 'campaign-funnel' })
+    await flushPromises()
+    await wrapper.find('button.btn').trigger('click') // Customize…
+    await flushPromises()
+    for (const b of wrapper.findAll('.ce-item-summary')) await b.trigger('click')
+    await flushPromises()
+    const selects = wrapper.findAll('select').filter((sel) => [...(sel.element as HTMLSelectElement).options].some((o) => o.value === 'zero'))
+    const values = selects.map((sel) => (sel.element as HTMLSelectElement).value)
+    expect(values.filter((v) => v === 'zero')).toHaveLength(1) // Arrivals
+    expect(values.filter((v) => v === 'label')).toHaveLength(11) // the other rows, bars and pills
+    const first = selects.find((sel) => (sel.element as HTMLSelectElement).value === 'label')!
+    await first.setValue('default')
+    await flushPromises()
+    const spec = (lastEmitted(wrapper) as { spec: CardSpec }).spec
+    const items = spec.sections.flatMap((sec) => sec.items)
+    expect(items.filter((it) => it.gating?.whenNotStarted === 'label').length).toBe(values.filter((v) => v === 'label').length - 1)
+    expect(items.find((it) => it.id === 'arrivals')!.gating).toEqual({ whenNotStarted: 'zero' })
+  })
+})
