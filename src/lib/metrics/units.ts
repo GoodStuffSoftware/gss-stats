@@ -6,7 +6,9 @@
 // registry. A metric can name a more specific word (campaign.taggedArrivals counts devices,
 // shown as "arrivals") through MetricDef.unitLabel.
 
-export const UNITS = ['device', 'row', 'pageview', 'completion', 'showing', 'signin', 'finish', 'usd', 'day'] as const
+// 'instant' (an epoch-ms time: when spend was last synced) and 'code' (a category shown as its
+// label: where a spend figure came from) are never counts: no ratio can use them.
+export const UNITS = ['device', 'row', 'pageview', 'completion', 'showing', 'signin', 'finish', 'usd', 'day', 'instant', 'code'] as const
 export type Unit = (typeof UNITS)[number]
 
 /** The notes-registry label id for a unit's display word. */

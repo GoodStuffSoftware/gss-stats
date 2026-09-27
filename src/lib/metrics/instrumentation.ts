@@ -36,6 +36,10 @@ export type InstrumentationRule =
   | { kind: 'beaconMeasurable' }
   /** A marker, never a gate (the raw-install de-dupe). */
   | { kind: 'annotateAt'; atMs: number; noteId: string }
+  /** A gate, never a shift: a window split at this instant (the upsell fix's pre/post-fix
+   * segments) exists only once it is set (null = not live) and falls inside the campaign's
+   * flight, as lib/adsRules.ts campaignSegmentMarker decides. */
+  | { kind: 'boundaryInFlight'; atMs: number | null; source: string }
 
 export interface MeasuredInterval {
   status: 'measured' | 'partial' | 'unmeasured'
@@ -130,6 +134,15 @@ export function measuredInterval({ rules, window, campaign, seenInFlight }: Inte
       case 'annotateAt':
         if (rule.atMs > a && rule.atMs < b) noteIds.push(rule.noteId)
         continue
+      case 'boundaryInFlight': {
+        if (rule.atMs === null) return unmeasured('not-live')
+        if (campaign) {
+          if (!campaign.flightStart) return unmeasured('flight-pending')
+          const day = etDateOfMs(rule.atMs)
+          if (day < campaign.flightStart || day > campaign.flightEnd) return unmeasured('outside-flight')
+        }
+        continue
+      }
     }
     if (goLiveEt === null || et! > goLiveEt) goLiveEt = et
     if (at! > from) {

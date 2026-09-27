@@ -8,7 +8,7 @@ import { POPUPS } from '../popupEvents'
 import { METRICS } from './metrics'
 import { RATIOS } from './ratios'
 import { DISPLAYS_FOR, kindOf, validateCard } from './validate'
-import { CAMPAIGN_SCORECARD } from './presets'
+import { CAMPAIGN_SCORECARD, PRESETS } from './presets'
 import type { CardSpec, Display, DisplayAs, Label } from './types'
 import {
   CAMPAIGN_ID_OPTIONS,
@@ -178,7 +178,9 @@ describe('display compatibility matrix (DISPLAYS_FOR, via displayOptionsFor)', (
   const cases: { binding: Parameters<typeof kindOf>[0]; expectAllowed: DisplayAs[]; expectDisallowed: DisplayAs[] }[] = [
     { binding: { metric: 'campaign.taggedArrivals' }, expectAllowed: ['number', 'bar'], expectDisallowed: ['percent', 'currency', 'counts'] },
     { binding: { metric: 'campaign.spend' }, expectAllowed: ['currency'], expectDisallowed: ['percent', 'number', 'counts'] },
-    { binding: { ratio: 'campaign.acceptPerAsk' }, expectAllowed: ['percent', 'counts'], expectDisallowed: ['number', 'currency', 'bar'] },
+    { binding: { ratio: 'campaign.acceptPerAsk' }, expectAllowed: ['percent', 'counts', 'bar'], expectDisallowed: ['number', 'currency', 'date', 'status'] },
+    { binding: { metric: 'campaign.lastSync' }, expectAllowed: ['date', 'ago'], expectDisallowed: ['number', 'currency', 'percent', 'bar'] },
+    { binding: { metric: 'campaign.spendSource' }, expectAllowed: ['status'], expectDisallowed: ['number', 'currency', 'date'] },
     { binding: { ratio: 'campaign.costPerArrival' }, expectAllowed: ['currency'], expectDisallowed: ['percent', 'counts'] },
     { binding: { ratio: 'campaign.gameViewsVsArrivals' }, expectAllowed: ['counts'], expectDisallowed: ['percent', 'number', 'currency', 'bar'] },
     { binding: { field: 'campaign.flight' }, expectAllowed: ['dateRange', 'datetime', 'badge', 'text', 'number', 'currency'], expectDisallowed: ['percent', 'counts', 'bar'] },
@@ -296,7 +298,8 @@ describe('default drafts and duplication', () => {
 describe('presetOptions', () => {
   it('lists every real preset id, and nothing from Object.prototype', () => {
     const opts = presetOptions()
-    expect(opts.map((o) => o.value).sort()).toEqual(['bsk-kpis', 'campaign-scorecard'])
+    expect(opts.map((o) => o.value).sort()).toEqual(Object.keys(PRESETS).sort())
+    expect(opts.length).toBeGreaterThanOrEqual(3)
     expect(opts.find((o) => o.value === 'constructor')).toBeUndefined()
   })
   it('gives every preset a plain-language name and description from the notes registry — never its raw id', () => {

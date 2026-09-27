@@ -4,7 +4,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it } from 'vitest'
 import { buildFact, deriveBatch, factCuts, newSideMemo, planBatch, type FactResult } from './engine'
-import { FACTS, type FactId } from './facts'
+import { FACTS, releaseSidesMs, type FactId } from './facts'
 import { METRIC_DEFS, metricWindows } from './metrics'
 import { RATIO_DEFS, ratioParamsOf, ratioWindowsOf } from './ratios'
 import { MAX_REQUESTS, validateMetricsRequest } from './validate'
@@ -54,7 +54,8 @@ describe('every request side is served by its fact', () => {
       const batch = validateMetricsRequest(JSON.stringify({ v: 1, context: CONTEXT, requests: requests.slice(i, i + 200) }))
       if (!batch.ok) throw new Error(batch.error)
       expect(batch.requests.filter((r) => !r.ok)).toEqual([])
-      const env = { context: batch.context, nowMs: NOW, todayEt: TODAY, hasAdsDb: true }
+      // A release window two days either side of 2026-09-24, so the release sides derive too.
+      const env = { context: batch.context, nowMs: NOW, todayEt: TODAY, hasAdsDb: true, release: { dateEt: '2026-09-24', days: 2, ...releaseSidesMs('2026-09-24', 2) } }
       const memo = newSideMemo()
       const plan = planBatch(batch.requests.flatMap((r) => (r.ok ? [r.req] : [])), env, memo)
       const results = deriveBatch(batch.requests, { ...env, facts: syntheticFacts(plan) }, memo)

@@ -84,6 +84,8 @@ function canonicalSpec(spec: MetricRequestSpec) {
     id: spec.metric ?? spec.ratio ?? '',
     campaignId: spec.params?.campaignId ?? null,
     popup: spec.params?.popup ?? null,
+    // Only when set, so every request key made before the country split existed is unchanged.
+    ...(spec.params?.country !== undefined ? { country: spec.params.country } : {}),
     window: spec.window ?? null,
     deltas: spec.deltas?.length ? [...new Set(spec.deltas)].sort() : [],
     minCohort: spec.minCohort ?? null,

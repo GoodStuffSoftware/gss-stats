@@ -16,7 +16,7 @@ import { computed, ref, useId } from 'vue'
 import { useMetrics } from '../../composables/useMetrics'
 import { noteRawText } from '../../lib/notes'
 import { badgeViewModel, itemViewModel, resolveLabelTokens } from '../../lib/metrics/render'
-import { buildRequestSpec, flattenSectionItems, resolveRepeat, scopeField, type FlatItem, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
+import { buildRequestSpec, scopeField, sectionCells, type FlatItem, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
 import type { CardSpec, MetricsContext } from '../../lib/metrics/types'
 import type { TextToken } from '../../lib/textLite'
 import MetricLabel from './MetricLabel.vue'
@@ -45,11 +45,7 @@ const linked = computed(() => props.spec.link === 'campaigns-page')
 
 // ── Card notes ─────────────────────────────────────────────────────────────────────────────
 const { request } = useMetrics(() => props.context, todayEt)
-const noteItems: FlatItem[] = props.spec.sections.flatMap((section) =>
-  section.layout === 'table'
-    ? resolveRepeat(section.repeat, props.ctx).flatMap((row) => section.items.map((item) => ({ item, scope: row })))
-    : flattenSectionItems(section, props.scope, props.ctx).filter((fi) => !fi.emptyOf),
-)
+const noteItems: FlatItem[] = props.spec.sections.flatMap((section) => sectionCells(section, props.scope, props.ctx))
 const compactItems = noteItems
   .filter((fi) => fi.item.captionMode === 'compact')
   .map((fi) => {

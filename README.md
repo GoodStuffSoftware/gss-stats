@@ -47,9 +47,10 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   time yesterday and the 7-day average), the **Overall timeline**, a campaign scorecard, and a
   release before/after panel — each its own movable/editable widget. The KPI tiles and the
   scorecard are **metric cards** (presets `bsk-kpis` and `campaign-scorecard`, see *One metrics
-  registry* below); the release panel is dataset `overview` (see
-  [`src/components/widgets/OverviewWidgetBody.vue`](src/components/widgets/OverviewWidgetBody.vue)
-  and [`src/lib/overview.ts`](src/lib/overview.ts)). The Overall timeline is a **standard line
+  registry* below), and so is the release panel (preset `release-before-after`: the latest dated
+  release's before and after windows, `days` whole days on each side of its ET midnight, bounded
+  by the first Best Sudoku hit, as [`src/lib/overview.ts`](src/lib/overview.ts)
+  `releaseComparisonWindows` decides). The Overall timeline is a **standard line
   chart** (see *Line charts* below) with five series — page views and tagged arrivals on the left
   axis, auth successes, installs and raw install signals on the right — over the page's date
   range and Best Sudoku sites, with campaign-flight bands, release markers and go-live markers
@@ -269,7 +270,10 @@ Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats
   id and param against the registry, plans the distinct facts (at most 40 statements, else `413`
   with `maxStatements`), caches each fact on its own in the Cache API, and derives every value in
   JS with its status (`ok`, `too-few`, `no-data`, `unmeasured`, `partial`), n/d, deltas and a
-  provisional flag for lagged outcomes. **Metric cards** render it: a widget with `card`
+  provisional flag for lagged outcomes. Windows are the campaign's attribution window, today so
+  far, the page range, the latest release's before/after windows (sized by one cached first-hit
+  read), and a campaign's pre/post segments at the signed-out upsell fix (only once that fix is
+  set and falls in the flight). **Metric cards** render it: a widget with `card`
   (`{ preset }` from [`src/lib/metrics/presets.ts`](src/lib/metrics/presets.ts), or a saved spec)
   shows `MetricCard` ([`src/components/metrics/`](src/components/metrics)) — one batched request
   per page, following the page's date range and sites, with each card's caveats behind one

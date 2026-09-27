@@ -5,7 +5,7 @@
 // (node:sqlite, D1's dialect) and snapshotted, so any change to a statement is a reviewed diff.
 import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it } from 'vitest'
-import { FACTS, factKey, flightPathsSeenStatement, kpiDayWindows, rangeMs, type FactId, type FactParams } from './facts'
+import { COUNTRY_BUCKET_SQL, FACTS, factKey, flightPathsSeenStatement, kpiDayWindows, rangeMs, type FactId, type FactParams } from './facts'
 import { buildFact, factCuts } from './engine'
 import { CAMPAIGNS, campaignAttributionClause, campaignById, etMidnightUtcMs } from '../campaigns'
 import { SPEND_SUMMARY_SQL } from '../adsStore'
@@ -21,7 +21,11 @@ const SAMPLE_PARAMS: Record<FactId, FactParams[]> = {
     { since: '2026-09-20', until: '2026-09-26', sites: [] },
     { since: '2026-09-20T00:00:00Z', until: '2026-09-26T12:00:00Z', sites: ['bestsudoku', 'bestsudoku-web'] },
   ],
+  bskFirstHit: [{}],
+  bskReleaseSides: [{ releaseDateEt: '2026-09-26', days: 2 }],
   adsSpend: [{}],
+  adsCoverage: [{}],
+  adsLastSync: [{}],
 }
 const ALL = (Object.keys(FACTS) as FactId[]).flatMap((id) => SAMPLE_PARAMS[id].map((p) => ({ id, p, stmt: buildFact({ id, params: p }, NOW) })))
 
@@ -54,7 +58,12 @@ function isBandCase(item: string): boolean {
 }
 
 describe('every fact is an anonymous aggregate', () => {
-  it.each(ALL.map((x) => [`${x.id} ${JSON.stringify(x.p)}`, x] as const))('%s', (_name, { stmt }) => {
+  // The ads store's facts read gss-stats' own records (spend, sync runs), never a beacon row.
+  it.each(ALL.filter((x) => x.stmt.db === 'gss_stats_ads').map((x) => [x.id, x] as const))('%s reads only the ads store', (_name, { stmt }) => {
+    expect(stmt.sql).not.toMatch(/\bhits\b/)
+    expect(stmt.sql).toMatch(/\bFROM (ads_daily_metrics|ads_sync_runs)\b/)
+  })
+  it.each(ALL.filter((x) => x.stmt.db === 'gss_geo').map((x) => [`${x.id} ${JSON.stringify(x.p)}`, x] as const))('%s', (_name, { stmt }) => {
     const sql = stmt.sql
     expect(sql).not.toMatch(/\bJOIN\b/i)
     expect(sql).not.toMatch(/\bUNION\b/i)
@@ -67,7 +76,8 @@ describe('every fact is an anonymous aggregate', () => {
     for (const item of items) {
       if (AGGREGATE.test(item)) continue
       if (isBandCase(item)) continue // a segment or day index, never a raw ts
-      if (item === '(ts >= ?)' || item === '0') continue // the boolean install-fix split (or no segments)
+      if (item === '(ts >= ?)' || item === '0') continue // a boolean split (install fix, upsell fix, release side) or no segments
+      if (item === COUNTRY_BUCKET_SQL) continue // US / CA / other, literal outputs only
       expect(item, `select item "${item}"`).toMatch(/^[a-z_]+$/)
       expect(['ts', 'id']).not.toContain(item)
     }
@@ -129,6 +139,7 @@ describe('each fact runs on SQLite and reuses the endpoint clause helpers', () =
       "CREATE TABLE hits (id INTEGER PRIMARY KEY, ts INTEGER, site TEXT DEFAULT '', path TEXT DEFAULT '', referrer TEXT DEFAULT '', country TEXT DEFAULT '', region TEXT DEFAULT '', city TEXT DEFAULT '', org TEXT DEFAULT '', device TEXT DEFAULT '', browser TEXT DEFAULT '', os TEXT DEFAULT '', screenw INTEGER DEFAULT 0, visitor TEXT DEFAULT 'new', source TEXT DEFAULT '', medium TEXT DEFAULT '', campaign TEXT DEFAULT '')",
     )
     db.exec('CREATE TABLE ads_daily_metrics (campaign_id TEXT, date TEXT, cost_micros INTEGER, impressions INTEGER, clicks INTEGER, fetched_at TEXT)')
+    db.exec('CREATE TABLE ads_sync_runs (campaigns_ok TEXT, finished_at TEXT, status TEXT)')
     return db
   }
   it.each(ALL.map((x) => [`${x.id} ${JSON.stringify(x.p)}`, x] as const))('%s executes', (_name, { stmt }) => {

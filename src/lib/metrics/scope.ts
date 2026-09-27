@@ -7,9 +7,11 @@
 // without mounting a component.
 import { CAMPAIGNS, campaignById, flightDayIndex, type CampaignFlight } from '../campaigns'
 import { etDateFromMs, POPUPS, type PopupDef } from '../popupEvents'
+import { campaignSegmentMarker } from '../adsRules'
+import { latestDatedRelease } from '../releases'
 import { metricWindows, METRICS, rulesOf, type MetricDef, type MetricParam } from './metrics'
 import { ratioParamsOf, ratioWindowsOf, RATIOS, type RatioDef } from './ratios'
-import type { DataBinding, DeltaName, Label, MetricItem, ParamValue, RepeatSpec, ScopePath, Section } from './types'
+import { COUNTRY_BUCKETS, WINDOW_SIDES, type CountryBucket, type DataBinding, type DeltaName, type Label, type MetricItem, type ParamValue, type RepeatSpec, type ScopePath, type Section, type WindowSide } from './types'
 
 /** A stored ads-readings-log row (ADR 0003 slice 8 — the fact/type don't exist yet). Kept as
  * a minimal, forward-compatible shape so `RepeatSpec.over: 'readings'` and the `reading.*`
@@ -23,14 +25,37 @@ export interface ReadingScope {
   proposal?: string
 }
 
-export type ScopeInstance =
+/** One object a card, section, item or table column is bound to. A nested repeat's instance
+ * keeps the instance it sits in as its `parent` (a country column inside a campaign card), and
+ * every lookup (a param, a field, a label variable) walks that chain, nearest first. */
+export type ScopeInstance = (
   | { kind: 'root' }
   | { kind: 'campaign'; campaign: CampaignFlight }
   | { kind: 'popup'; popup: PopupDef }
-  | { kind: 'window'; window: 'before' | 'after' }
+  | { kind: 'window'; window: WindowSide }
+  | { kind: 'country'; country: CountryBucket }
   | { kind: 'reading'; reading: ReadingScope }
+) & { parent?: ScopeInstance }
 
 export const ROOT_SCOPE: ScopeInstance = { kind: 'root' }
+
+type ScopeOf<K extends ScopeInstance['kind']> = Extract<ScopeInstance, { kind: K }>
+/** The nearest instance of this kind in the scope's chain (itself first). */
+export function scopeOfKind<K extends ScopeInstance['kind']>(scope: ScopeInstance | undefined, kind: K): ScopeOf<K> | undefined {
+  for (let s = scope; s; s = s.parent) if (s.kind === kind) return s as ScopeOf<K>
+  return undefined
+}
+/** The campaign a scope is bound to, directly or through a parent. */
+export function campaignOfScope(scope: ScopeInstance | undefined): CampaignFlight | undefined {
+  return scopeOfKind(scope, 'campaign')?.campaign
+}
+/** `inner` nested inside `outer` (a section, item or column repeat inside a card instance). */
+export function nestScope(inner: ScopeInstance, outer: ScopeInstance): ScopeInstance {
+  return outer.kind === 'root' && !outer.parent ? inner : { ...inner, parent: outer }
+}
+
+const COUNTRY_LABELS: Record<CountryBucket, string> = { US: 'US', CA: 'CA', other: 'Other' }
+const WINDOW_LABELS: Record<WindowSide, string> = { before: 'Before', after: 'After', upsellPre: 'pre-fix', upsellPost: 'post-fix' }
 
 export interface RepeatContext {
   todayEt: string
@@ -45,16 +70,21 @@ export function resolveRepeat(repeat: RepeatSpec | undefined, ctx: RepeatContext
     case 'campaigns': {
       let list = repeat.ids?.length ? repeat.ids.map((id) => campaignById(id)).filter((c): c is CampaignFlight => !!c) : CAMPAIGNS
       if (repeat.status?.length) list = list.filter((c) => repeat.status!.includes(c.status))
+      if (repeat.tracked) list = list.filter((c) => c.measurement !== 'spend-only')
       if (repeat.flightingToday) list = list.filter((c) => flightDayIndex(c, ctx.todayEt) != null)
       return list.map((campaign) => ({ kind: 'campaign', campaign }))
+    }
+    case 'countries': {
+      const ids = (repeat.ids?.length ? repeat.ids : COUNTRY_BUCKETS) as CountryBucket[]
+      return ids.filter((c) => (COUNTRY_BUCKETS as readonly string[]).includes(c)).map((country) => ({ kind: 'country', country }))
     }
     case 'popups': {
       const list = repeat.ids?.length ? repeat.ids.map((id) => POPUPS.find((p) => p.id === id)).filter((p): p is PopupDef => !!p) : POPUPS
       return list.map((popup) => ({ kind: 'popup', popup }))
     }
     case 'windows': {
-      const ids = (repeat.ids?.length ? repeat.ids : ['before', 'after']) as ('before' | 'after')[]
-      return ids.filter((w) => w === 'before' || w === 'after').map((window) => ({ kind: 'window', window }))
+      const ids = (repeat.ids?.length ? repeat.ids : ['before', 'after']) as WindowSide[]
+      return ids.filter((w) => WINDOW_SIDES.includes(w)).map((window) => ({ kind: 'window', window }))
     }
     case 'readings':
       return (ctx.readings ?? []).map((reading) => ({ kind: 'reading', reading }))
@@ -74,39 +104,57 @@ export function todayEtFrom(nowMs: number): string {
  * kind). `null` means the field has no value for this scope (an unconfirmed flight, a
  * non-campaign scope asked for a campaign field, …) — the caller applies `Gating.whenEmpty`. */
 export function scopeField(scope: ScopeInstance, path: ScopePath, todayEt: string = todayEtFrom(Date.now())): string | null {
+  const campaign = campaignOfScope(scope)
+  const popup = scopeOfKind(scope, 'popup')?.popup
+  const window = scopeOfKind(scope, 'window')?.window
+  const country = scopeOfKind(scope, 'country')?.country
+  const reading = scopeOfKind(scope, 'reading')?.reading
   switch (path) {
     case 'campaign.id':
-      return scope.kind === 'campaign' ? scope.campaign.id : null
+      return campaign ? campaign.id : null
     case 'campaign.label':
-      return scope.kind === 'campaign' ? scope.campaign.label : null
+      return campaign ? campaign.label : null
     case 'campaign.status':
-      return scope.kind === 'campaign' ? scope.campaign.status : null
+      return campaign ? campaign.status : null
     case 'campaign.statusToday':
-      if (scope.kind !== 'campaign') return null
-      return flightDayIndex(scope.campaign, todayEt) != null ? 'flighting today' : scope.campaign.status
+      if (!campaign) return null
+      return flightDayIndex(campaign, todayEt) != null ? 'flighting today' : campaign.status
     case 'campaign.flight':
       // The dateRange renderer wants both bounds; encode as "start|end" and let it split, so
       // this function's signature stays a single ScopePath -> string | null.
-      if (scope.kind !== 'campaign' || scope.campaign.flightStart == null) return null
-      return `${scope.campaign.flightStart}|${scope.campaign.flightEnd}`
+      if (!campaign || campaign.flightStart == null) return null
+      return `${campaign.flightStart}|${campaign.flightEnd}`
     case 'campaign.measurabilityNote':
-      return scope.kind === 'campaign' ? (scope.campaign.measurabilityNote ?? null) : null
+      return campaign ? (campaign.measurabilityNote ?? null) : null
+    case 'campaign.upsellFixAt':
+      return campaign ? (campaignSegmentMarker(campaign, [])?.boundaryLabel ?? null) : null
+    case 'campaign.upsellFixFlightDay': {
+      const m = campaign ? campaignSegmentMarker(campaign, []) : null
+      const d = m && campaign ? flightDayIndex(campaign, m.boundaryDate) : null
+      return d == null ? null : String(d)
+    }
     case 'popup.id':
-      return scope.kind === 'popup' ? scope.popup.id : null
+      return popup ? popup.id : null
     case 'popup.label':
-      return scope.kind === 'popup' ? scope.popup.label : null
+      return popup ? popup.label : null
     case 'window.label':
-      return scope.kind === 'window' ? (scope.window === 'before' ? 'Before' : 'After') : null
+      return window ? WINDOW_LABELS[window] : null
+    case 'country.label':
+      return country ? COUNTRY_LABELS[country] : null
+    case 'release.label': {
+      const r = latestDatedRelease()
+      return r ? `${r.version} (${r.dateEt})` : null
+    }
     case 'reading.readAt':
-      return scope.kind === 'reading' ? scope.reading.readAt : null
+      return reading ? reading.readAt : null
     case 'reading.kind':
-      return scope.kind === 'reading' ? scope.reading.kind : null
+      return reading ? reading.kind : null
     case 'reading.spend':
-      return scope.kind === 'reading' ? String(scope.reading.spend) : null
+      return reading ? String(reading.spend) : null
     case 'reading.rules':
-      return scope.kind === 'reading' ? (scope.reading.rules ?? null) : null
+      return reading ? (reading.rules ?? null) : null
     case 'reading.proposal':
-      return scope.kind === 'reading' ? (scope.reading.proposal ?? null) : null
+      return reading ? (reading.proposal ?? null) : null
     default:
       return null
   }
@@ -118,20 +166,23 @@ export function scopeField(scope: ScopeInstance, path: ScopePath, todayEt: strin
  * scope data that isn't already going through the same safe-text path as everything else. */
 export function scopeVars(scope: ScopeInstance, todayEt: string = todayEtFrom(Date.now())): Record<string, Record<string, string>> {
   const vars: Record<string, Record<string, string>> = {}
-  if (scope.kind === 'campaign') {
+  const campaign = campaignOfScope(scope)
+  if (campaign) {
     vars.campaign = {
-      id: scope.campaign.id,
-      label: scope.campaign.label,
-      status: scope.campaign.status,
-      statusToday: scopeField(scope, 'campaign.statusToday', todayEt) ?? scope.campaign.status,
+      id: campaign.id,
+      label: campaign.label,
+      status: campaign.status,
+      statusToday: scopeField(scope, 'campaign.statusToday', todayEt) ?? campaign.status,
     }
-  } else if (scope.kind === 'popup') {
-    vars.popup = { id: scope.popup.id, label: scope.popup.label }
-  } else if (scope.kind === 'window') {
-    vars.window = { label: scope.window === 'before' ? 'Before' : 'After' }
-  } else if (scope.kind === 'reading') {
-    vars.reading = { readAt: scope.reading.readAt, kind: scope.reading.kind }
   }
+  const popup = scopeOfKind(scope, 'popup')?.popup
+  if (popup) vars.popup = { id: popup.id, label: popup.label }
+  const window = scopeOfKind(scope, 'window')?.window
+  if (window) vars.window = { label: WINDOW_LABELS[window] }
+  const country = scopeOfKind(scope, 'country')?.country
+  if (country) vars.country = { label: COUNTRY_LABELS[country] }
+  const reading = scopeOfKind(scope, 'reading')?.reading
+  if (reading) vars.reading = { readAt: reading.readAt, kind: reading.kind }
   return vars
 }
 
@@ -144,7 +195,7 @@ function resolveParamValue(pv: ParamValue | undefined, scopeVal: string | undefi
 export interface ResolvedBinding {
   kind: 'metric' | 'ratio' | 'field'
   def?: MetricDef | RatioDef
-  params: { campaignId?: string; popup?: string }
+  params: { campaignId?: string; popup?: string; country?: string }
   window?: string
   fieldValue?: string | null
 }
@@ -160,14 +211,16 @@ export function resolveBinding(binding: DataBinding, scope: ScopeInstance): Reso
   const def: MetricDef | RatioDef | undefined = isMetric ? METRICS.get(id) : RATIOS.get(id)
   if (!def) return null
   const allowedParams: MetricParam[] = isMetric ? (def as MetricDef).params : ratioParamsOf(def as RatioDef)
-  const params: { campaignId?: string; popup?: string } = {}
+  const params: { campaignId?: string; popup?: string; country?: string } = {}
   for (const p of allowedParams) {
-    const scopeVal = p === 'campaignId' ? (scope.kind === 'campaign' ? scope.campaign.id : undefined) : scope.kind === 'popup' ? scope.popup.id : undefined
+    const scopeVal = p === 'campaignId' ? campaignOfScope(scope)?.id : p === 'popup' ? scopeOfKind(scope, 'popup')?.popup.id : scopeOfKind(scope, 'country')?.country
     const v = resolveParamValue(binding.params?.[p], scopeVal)
     if (v !== undefined) params[p] = v
   }
   const windows = isMetric ? metricWindows(def as MetricDef) : ratioWindowsOf(def as RatioDef)
-  const window = (binding.window as string | undefined) ?? windows[0]
+  // `{ scope: 'window' }`: the window of the repeat this item sits in (a before/after column).
+  const bw = binding.window
+  const window = typeof bw === 'object' && bw !== null ? scopeOfKind(scope, 'window')?.window : ((bw as string | undefined) ?? windows[0])
   return { kind: isMetric ? 'metric' : 'ratio', def, params, window }
 }
 
@@ -182,7 +235,7 @@ export interface FlatItem {
 }
 
 export function flattenSectionItems(section: Section, outerScope: ScopeInstance, ctx: RepeatContext): FlatItem[] {
-  const sectionScopes = section.repeat ? resolveRepeat(section.repeat, ctx) : [outerScope]
+  const sectionScopes = section.repeat ? resolveRepeat(section.repeat, ctx).map((s) => nestScope(s, outerScope)) : [outerScope]
   if (section.repeat && !sectionScopes.length) {
     return section.repeat.empty ? [{ item: emptyPlaceholderItem(section.items[0]?.id ?? 'empty'), scope: outerScope, emptyOf: section.repeat.empty }] : []
   }
@@ -193,7 +246,7 @@ export function flattenSectionItems(section: Section, outerScope: ScopeInstance,
         out.push({ item, scope: sScope })
         continue
       }
-      const allScopes = resolveRepeat(item.repeat, ctx)
+      const allScopes = resolveRepeat(item.repeat, ctx).map((s) => nestScope(s, sScope))
       // Instances the campaign's own config rules out (a spend-only campaign) are dropped here, so
       // a repeat left with only those shows its empty placeholder — saying why — instead of
       // silently losing the tile.
@@ -211,6 +264,37 @@ export function flattenSectionItems(section: Section, outerScope: ScopeInstance,
   return out
 }
 
+/** Every (item, scope) pair a section renders, whatever its layout: a 'table' with a row
+ * repeat is rows × items; a 'table' with `columns` is items × columns (each cell inside the
+ * outer instance); every other layout is flattenSectionItems. MetricCard and MetricCardInstance
+ * collect a card's requests and notes from this, so they cannot miss a cell. */
+export function sectionCells(section: Section, outerScope: ScopeInstance, ctx: RepeatContext): FlatItem[] {
+  if (section.layout !== 'table') return flattenSectionItems(section, outerScope, ctx).filter((fi) => !fi.emptyOf)
+  if (section.columns) {
+    const cols = resolveRepeat(section.columns, ctx).map((c) => nestScope(c, outerScope))
+    return section.items.flatMap((item) => cols.map((scope) => ({ item, scope })))
+  }
+  return resolveRepeat(section.repeat, ctx).flatMap((row) => section.items.map((item) => ({ item, scope: nestScope(row, outerScope) })))
+}
+
+/** The default heading of a table column: the column instance's own name. */
+export function columnDefaultLabel(scope: ScopeInstance): Label {
+  switch (scope.kind) {
+    case 'campaign':
+      return { bind: 'campaign.label' }
+    case 'popup':
+      return { bind: 'popup.label' }
+    case 'window':
+      return { bind: 'window.label' }
+    case 'country':
+      return { bind: 'country.label' }
+    case 'reading':
+      return { bind: 'reading.readAt' }
+    default:
+      return ''
+  }
+}
+
 function emptyPlaceholderItem(id: string): MetricItem {
   return { id: `${id}-empty`, label: '', data: { field: 'campaign.label' }, display: { as: 'text' } }
 }
@@ -221,7 +305,7 @@ function emptyPlaceholderItem(id: string): MetricItem {
 export interface MetricRequestSpec {
   metric?: string
   ratio?: string
-  params?: { campaignId?: string; popup?: string }
+  params?: { campaignId?: string; popup?: string; country?: string }
   window?: string
   deltas?: DeltaName[]
   minCohort?: number
@@ -234,10 +318,10 @@ export interface MetricRequestSpec {
  * campaign's status, and never requested, so a card shows no "…" for it and never labels it
  * "not yet tracking" (it never will be tracked). */
 export function unmeasuredByConfig(binding: DataBinding, scope: ScopeInstance): boolean {
-  if (scope.kind !== 'campaign' || 'field' in binding) return false
+  const campaign = campaignOfScope(scope)
+  if (!campaign || 'field' in binding) return false
   const resolved = resolveBinding(binding, scope)
   if (!resolved || resolved.kind === 'field' || !resolved.window) return false
-  const campaign = scope.campaign
   const window = resolved.window as keyof MetricDef['windows']
   const sides = resolved.kind === 'metric' ? [resolved.def as MetricDef] : [METRICS.get((resolved.def as RatioDef).num), METRICS.get((resolved.def as RatioDef).den)]
   for (const def of sides) {

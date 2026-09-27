@@ -17,7 +17,7 @@ import {
   scopePathOptions,
   type DataBindingKind,
 } from '../../../lib/metrics/editorModel'
-import { metricWindows, type MetricParam } from '../../../lib/metrics/metrics'
+import { metricWindows, OPTIONAL_PARAMS, type MetricParam } from '../../../lib/metrics/metrics'
 import { ratioParamsOf, ratioWindowsOf } from '../../../lib/metrics/ratios'
 import type { DataBinding, ParamValue, RepeatSpec, ScopePath, WindowName } from '../../../lib/metrics/types'
 
@@ -74,7 +74,15 @@ const allowedParams = computed<MetricParam[]>(() => {
   }
   return []
 })
-const scopeProvides = (p: MetricParam): boolean => (p === 'campaignId' && props.repeatOver === 'campaigns') || (p === 'popup' && props.repeatOver === 'popups')
+const scopeProvides = (p: MetricParam): boolean => (p === 'campaignId' && props.repeatOver === 'campaigns') || (p === 'popup' && props.repeatOver === 'popups') || (p === 'country' && props.repeatOver === 'countries')
+/** An optional param (the country split): left unset, the metric counts every country. */
+const optional = (p: MetricParam): boolean => OPTIONAL_PARAMS.has(p)
+const COUNTRY_OPTIONS = [
+  { value: 'US', label: 'US' },
+  { value: 'CA', label: 'CA' },
+  { value: 'other', label: 'Other' },
+]
+const PARAM_LABELS: Record<MetricParam, string> = { campaignId: 'Campaign', popup: 'Pop-up', country: 'Country' }
 function paramValue(p: MetricParam): ParamValue | undefined {
   return 'params' in data.value ? data.value.params?.[p] : undefined
 }
@@ -86,7 +94,7 @@ function setParam(p: MetricParam, v: string | undefined) {
   data.value = { ...data.value, params: Object.keys(params).length ? params : undefined } as DataBinding
 }
 function optionsFor(p: MetricParam) {
-  return p === 'campaignId' ? CAMPAIGN_ID_OPTIONS : POPUP_ID_OPTIONS
+  return p === 'campaignId' ? CAMPAIGN_ID_OPTIONS : p === 'popup' ? POPUP_ID_OPTIONS : COUNTRY_OPTIONS
 }
 
 // ── window ───────────────────────────────────────────────────────────────────────────────────
@@ -105,16 +113,28 @@ const windowChoices = computed<WindowName[]>(() => {
   }
   return []
 })
-const windowValue = computed<WindowName | ''>({
+/** '@repeat': the window of the repeat or table column the item sits in (`{ scope: 'window' }`). */
+const windowValue = computed<WindowName | '' | '@repeat'>({
   get: () => {
     const w = 'window' in data.value ? data.value.window : undefined
+    if (typeof w === 'object' && w !== null) return '@repeat'
     return typeof w === 'string' ? (w as WindowName) : (windowChoices.value[0] ?? '')
   },
-  set: (v: WindowName | '') => {
+  set: (v: WindowName | '' | '@repeat') => {
     if (!('metric' in data.value || 'ratio' in data.value)) return
-    data.value = { ...data.value, window: v || undefined } as DataBinding
+    data.value = { ...data.value, window: v === '@repeat' ? { scope: 'window' } : v || undefined } as DataBinding
   },
 })
+/** Plain names for the windows (never the internal ids). */
+const WINDOW_NAMES: Record<WindowName, string> = {
+  attribution: 'Campaign attribution',
+  todaySoFar: 'Today so far',
+  page: "The page's date range",
+  before: 'Release: before',
+  after: 'Release: after',
+  upsellPre: 'Before the upsell fix',
+  upsellPost: 'After the upsell fix',
+}
 
 // ── field ────────────────────────────────────────────────────────────────────────────────────
 const fieldPath = computed<ScopePath>({
@@ -172,10 +192,10 @@ const fieldPath = computed<ScopePath>({
     <template v-if="kind !== 'field' && allowedParams.length">
       <div class="row" v-for="p in allowedParams" :key="p">
         <div class="field">
-          <label :for="`${groupId}-param-${p}`">{{ p === 'campaignId' ? 'Campaign' : 'Pop-up' }}</label>
+          <label :for="`${groupId}-param-${p}`">{{ PARAM_LABELS[p] }}</label>
           <span v-if="!paramIsPinned(paramValue(p)) && scopeProvides(p)" class="chip">from repeat scope</span>
           <select :id="`${groupId}-param-${p}`" :value="paramValue(p) ?? ''" @change="setParam(p, ($event.target as HTMLSelectElement).value || undefined)">
-            <option value="" :disabled="!scopeProvides(p)">{{ scopeProvides(p) ? '(from repeat scope)' : 'Choose…' }}</option>
+            <option value="" :disabled="!scopeProvides(p) && !optional(p)">{{ scopeProvides(p) ? '(from repeat scope)' : optional(p) ? 'All countries' : 'Choose…' }}</option>
             <option v-for="o in optionsFor(p)" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
         </div>
@@ -185,7 +205,8 @@ const fieldPath = computed<ScopePath>({
     <div class="field" v-if="kind !== 'field' && windowChoices.length > 1">
       <label :for="windowId">Window</label>
       <select :id="windowId" v-model="windowValue">
-        <option v-for="w in windowChoices" :key="String(w)" :value="w">{{ w }}</option>
+        <option v-for="w in windowChoices" :key="String(w)" :value="w">{{ WINDOW_NAMES[w] ?? w }}</option>
+        <option value="@repeat">From the repeat or column (before/after)</option>
       </select>
       <p v-if="windowValue && windowValue !== 'page'" class="hint">Ignores the page's date range.</p>
     </div>

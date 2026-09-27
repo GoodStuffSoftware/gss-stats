@@ -15,6 +15,7 @@
 //   error            an em dash; the item's own caption still renders if set.
 import { getNote, NOTES_REGISTRY, noteRawText, noteTokens } from '../notes'
 import { etDateFromMs } from '../popupEvents'
+import { relativeTime } from '../adsFreshness'
 import { tokenizeAndInterpolate, type TextToken } from '../textLite'
 import { METRICS, rulesOf, type MetricDef } from './metrics'
 import { RATIOS, type RatioDef } from './ratios'
@@ -55,10 +56,14 @@ export interface ItemViewModel {
   split?: { main: string; sub: string }
   /** The value failed to load (the server's per-request error, or the batch failed). */
   error?: boolean
+  /** A 'bar' display's length: the count, or the rate as a fraction. */
+  barValue?: number
 }
 
 export interface ItemViewOptions {
   todayEt: string
+  /** "Now" for a relative time ('ago'); the real clock when absent. */
+  nowMs?: number
 }
 
 // ── Label resolution (ADR section 1, "Labels") ────────────────────────────────────────────
@@ -125,6 +130,17 @@ function deltaLinesFor(value: MetricValue, deltas: readonly ('yesterday' | 'avg7
   }
   return out
 }
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+/** An instant's ET day, "Sep 26" (the ads freshness line's own format). */
+function fmtEtDay(ms: unknown): string {
+  if (!finite(ms)) return '—'
+  const d = etDateFromMs(ms)
+  return `${MONTHS[Number(d.slice(5, 7)) - 1]} ${Number(d.slice(8, 10))}`
+}
+/** The first label note a value carries (a category's own name), or null. */
+function statusNoteOf(value: MetricValue): string | null {
+  return value.noteIds?.find((id) => hasNote(id) && getNote(id)?.kind === 'label') ?? null
+}
 function rangeDays(start: string, end: string): number {
   return Math.round((Date.parse(end + 'T00:00:00Z') - Date.parse(start + 'T00:00:00Z')) / 86_400_000) + 1
 }
@@ -151,7 +167,7 @@ function formatBadge(raw: string | null, display: Extract<Display, { as: 'badge'
 }
 
 // ── Metric/ratio value formatting by display kind ─────────────────────────────────────────
-function formatMetricOrRatioValue(display: Display, value: MetricValue, def: MetricDef | RatioDef): { primary: string; deltaLines: DeltaLine[]; split?: { main: string; sub: string } } {
+function formatMetricOrRatioValue(display: Display, value: MetricValue, def: MetricDef | RatioDef, nowMs: number): { primary: string; deltaLines: DeltaLine[]; split?: { main: string; sub: string } } {
   switch (display.as) {
     case 'number':
       if (value.status === 'too-few') return { primary: noteRawText('too-few-to-report'), deltaLines: [] }
@@ -175,7 +191,20 @@ function formatMetricOrRatioValue(display: Display, value: MetricValue, def: Met
       return { primary: `${fmtCount(value.numerator)} ${numWord} · ${fmtCount(value.denominator)} ${denWord}`.trim(), deltaLines: [] }
     }
     case 'bar':
+      // A rate as a bar keeps its (n/d): the reader always sees what the bar is made of.
+      if (!('unit' in def) && def.kind === 'proportion') {
+        const main = value.status === 'too-few' ? noteRawText('too-few-to-report') : fmtPercent(value.value, 1)
+        return { primary: `${main}${ndSuffix(value)}`, deltaLines: [] }
+      }
       return { primary: fmtCount(value.value ?? value.numerator), deltaLines: [] }
+    case 'date':
+      return { primary: fmtEtDay(value.value), deltaLines: [] }
+    case 'ago':
+      return { primary: finite(value.value) ? relativeTime(new Date(value.value).toISOString(), nowMs) : '—', deltaLines: [] }
+    case 'status': {
+      const id = statusNoteOf(value)
+      return { primary: id ? noteRawText(id) : '—', deltaLines: [] }
+    }
     case 'sparkline':
       // GAP (flagged to main): MetricValue carries only the latest value, no per-day series —
       // there is nothing here for `{ as: 'sparkline'; series: 'daily' }` to draw. Falls back
@@ -220,8 +249,10 @@ function itemCaptionOnly(item: MetricItem, scope: ScopeInstance, todayEt: string
 const CAPTION_SEPARATOR: TextToken = { type: 'text', value: ' · ' }
 function valueCaptionTokens(item: MetricItem, value: MetricValue, scope: ScopeInstance, todayEt: string): TextToken[] {
   const groups: TextToken[][] = []
+  // A 'status' display already shows its note as the value: never again as a caption.
+  const shown = item.display.as === 'status' ? statusNoteOf(value) : null
   for (const id of value.noteIds ?? []) {
-    if (!hasNote(id)) continue
+    if (!hasNote(id) || id === shown) continue
     const vars = id === 'counted-from' && value.measuredFrom != null ? { from: etDateFromMs(value.measuredFrom) } : undefined
     groups.push(noteTokens(id, vars))
   }
@@ -263,7 +294,7 @@ function fieldViewModel(item: MetricItem, raw: string | null, labelTokens: TextT
   return { visible: true, labelTokens, primary: raw, deltaLines: [], captionTokens }
 }
 
-function metricViewModel(item: MetricItem, value: MetricValue, def: MetricDef | RatioDef, labelTokens: TextToken[], scope: ScopeInstance, todayEt: string): ItemViewModel {
+function metricViewModel(item: MetricItem, value: MetricValue, def: MetricDef | RatioDef, labelTokens: TextToken[], scope: ScopeInstance, todayEt: string, nowMs: number): ItemViewModel {
   if (value.status === 'error') {
     // A status word, never a dash: a dash reads as "no value", an error means "not loaded".
     return { visible: true, labelTokens, primary: noteRawText('metric-unavailable'), deltaLines: [], captionTokens: itemCaptionOnly(item, scope, todayEt), muted: true, error: true }
@@ -280,7 +311,7 @@ function metricViewModel(item: MetricItem, value: MetricValue, def: MetricDef | 
     return { visible, labelTokens, primary, deltaLines: [], captionTokens: itemCaptionOnly(item, scope, todayEt), muted: true }
   }
   // 'ok' | 'partial' | 'too-few'
-  const { primary, deltaLines, split } = formatMetricOrRatioValue(item.display, value, def)
+  const { primary, deltaLines, split } = formatMetricOrRatioValue(item.display, value, def, nowMs)
   if (isNewToday(item, value, def)) {
     // Comparisons are hidden while yesterday or the 7-day window reaches back to the go-live day
     // (or a campaign's first, partial day). On that day itself it is "new today"; on the days
@@ -288,7 +319,9 @@ function metricViewModel(item: MetricItem, value: MetricValue, def: MetricDef | 
     const goLive = goLiveEtFor(def as MetricDef, scope)
     deltaLines.push(goLive && goLive < todayEt ? { text: noteRawText('no-comparison-yet'), cls: '' } : { text: noteRawText('new-today'), cls: 'new' })
   }
-  return { visible: true, labelTokens, primary, deltaLines, captionTokens: valueCaptionTokens(item, value, scope, todayEt), ...(split ? { split } : {}), ...(value.status === 'too-few' && item.display.as !== 'percent' ? { muted: true } : {}) }
+  const bar = item.display.as === 'bar' ? { barValue: finite(value.value) ? value.value : finite(value.numerator) ? value.numerator : 0 } : {}
+  const mutedTooFew = value.status === 'too-few' && item.display.as !== 'percent' && item.display.as !== 'bar'
+  return { visible: true, labelTokens, primary, deltaLines, captionTokens: valueCaptionTokens(item, value, scope, todayEt), ...(split ? { split } : {}), ...bar, ...(mutedTooFew ? { muted: true } : {}) }
 }
 
 /** An item's label alone, resolved against its scope — used by a 'table' section's header row,
@@ -320,7 +353,7 @@ export function itemViewModel(item: MetricItem, value: MetricValue | undefined, 
   if (!value) {
     return { visible: true, labelTokens, primary: '…', deltaLines: [], captionTokens: [] }
   }
-  return metricViewModel(item, value, resolved.def as MetricDef | RatioDef, labelTokens, scope, opts.todayEt)
+  return metricViewModel(item, value, resolved.def as MetricDef | RatioDef, labelTokens, scope, opts.todayEt, opts.nowMs ?? Date.now())
 }
 
 /** The badge's own view (always a `field` binding — validateCard rejects anything else). */

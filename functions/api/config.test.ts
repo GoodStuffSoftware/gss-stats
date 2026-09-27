@@ -94,24 +94,31 @@ describe('config PUT backs up the stored config on a version bump', () => {
   })
 })
 
-describe('the v9 → v10 upgrade (metric cards)', () => {
-  it('this code writes layout version 10', () => {
-    expect(CONFIG_VERSION).toBe(10)
+describe('the v10 → v11 upgrade (the rest of the panels as cards and charts)', () => {
+  it('this code writes layout version 11', () => {
+    expect(CONFIG_VERSION).toBe(11)
   })
-  it('the first v10 save over a stored v9 layout backs it up to backup:v9, once', async () => {
-    const v9 = JSON.stringify(cfg(9, 'v9 layout'))
-    const { kv, store } = fakeKv({ 'dashboard:default': v9 })
-    expect((await put(kv, cfg(10, 'first v10'))).status).toBe(200)
-    expect(backupKeyFor(9)).toBe('dashboard:default:backup:v9')
-    expect(store.get('dashboard:default:backup:v9')).toBe(v9)
-    await put(kv, cfg(10, 'second v10'))
-    expect(store.get('dashboard:default:backup:v9')).toBe(v9) // never overwritten
-    expect(JSON.parse(store.get('dashboard:default')!).pages[0].tag).toBe('second v10')
+  it('the first v11 save over a stored v10 layout backs it up to backup:v10, once', async () => {
+    const v10 = JSON.stringify(cfg(10, 'v10 layout'))
+    const { kv, store } = fakeKv({ 'dashboard:default': v10 })
+    expect((await put(kv, cfg(11, 'first v11'))).status).toBe(200)
+    expect(backupKeyFor(10)).toBe('dashboard:default:backup:v10')
+    expect(store.get('dashboard:default:backup:v10')).toBe(v10)
+    await put(kv, cfg(11, 'second v11'))
+    expect(store.get('dashboard:default:backup:v10')).toBe(v10) // never overwritten
+    expect(JSON.parse(store.get('dashboard:default')!).pages[0].tag).toBe('second v11')
   })
-  it('a v9 tab saving over a stored v10 layout gets 409; a v11 body gets 400', async () => {
-    const { kv, puts } = fakeKv({ 'dashboard:default': JSON.stringify(cfg(10)) })
-    expect((await put(kv, cfg(9, 'old tab'))).status).toBe(409)
-    expect((await put(kv, cfg(11, 'crafted'))).status).toBe(400)
+  it('production is still stored at v8: the first v11 save backs up v8, never a later version', async () => {
+    const v8 = JSON.stringify(cfg(8, 'v8 layout'))
+    const { kv, store } = fakeKv({ 'dashboard:default': v8 })
+    expect((await put(kv, cfg(11, 'first v11'))).status).toBe(200)
+    expect(store.get('dashboard:default:backup:v8')).toBe(v8)
+    expect([...store.keys()].filter((k) => k.includes('backup'))).toEqual(['dashboard:default:backup:v8'])
+  })
+  it('a v10 tab saving over a stored v11 layout gets 409; a v12 body gets 400', async () => {
+    const { kv, puts } = fakeKv({ 'dashboard:default': JSON.stringify(cfg(11)) })
+    expect((await put(kv, cfg(10, 'old tab'))).status).toBe(409)
+    expect((await put(kv, cfg(12, 'crafted'))).status).toBe(400)
     expect(puts).toEqual([])
   })
 })

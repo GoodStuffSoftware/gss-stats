@@ -33,17 +33,28 @@ import {
   type PopupEvent,
 } from '../popupEvents'
 import { isEventPath, isPopupAccept, isPopupShown, isReturnD1Plus } from '../overview'
-import { resolveCampaignSpend, type SpendSummary } from '../adsRules'
-import type { BeaconRow, FactId } from './facts'
-import type { InstrumentationRule } from './instrumentation'
+import { resolveCampaignSpend, UPSELL_SIGNEDOUT_FIX_AT, type SpendSummary } from '../adsRules'
+import { freshnessOf, spendThroughFromRows } from '../adsFreshness'
+import type { BeaconRow, FactId, FactRows } from './facts'
+import { etMidnightMs, type InstrumentationRule } from './instrumentation'
 import type { WindowName } from './types'
 import type { Unit } from './units'
 
-export type MetricParam = 'campaignId' | 'popup'
+/** `country` (a COUNTRY_BUCKETS value) is OPTIONAL wherever a metric declares it: unset, the
+ * metric counts every country; set, only that bucket (the campaign fact's `cb` split). */
+export type MetricParam = 'campaignId' | 'popup' | 'country'
+export const OPTIONAL_PARAMS: ReadonlySet<MetricParam> = new Set(['country'])
+
+/** What a store reducer (MetricDef.store) sees besides the fact's rows. */
+export interface StoreEnv {
+  nowMs: number
+  /** The release windows' size in days (the release metrics), null when there is no window. */
+  releaseDays: number | null
+}
 
 /** What a reducer knows about the request it is serving. */
 export interface MetricCtx {
-  params: { campaignId?: string; popup?: string }
+  params: { campaignId?: string; popup?: string; country?: string }
   campaign?: CampaignFlight
   /** campaignAttributionClause(campaign) — applied in JS when a campaign metric reads a
    * site-wide fact (campaign.taggedArrivals over the KPI fact). */
@@ -67,8 +78,13 @@ export interface MetricDef {
   path?: (path: string, ctx: MetricCtx) => boolean
   /** Beacon metrics: only rows of this visitor kind ('new' = a device's first-ever beacon). */
   visitor?: 'new'
+  /** Beacon metrics: only rows carrying some campaign tag (any tag at all, unattributed). */
+  anyTag?: true
   /** Spend metrics: the value from the stored-spend summaries (null = no spend known). */
   spend?: (rows: readonly SpendSummary[], ctx: MetricCtx) => number | null
+  /** Any other non-beacon fact (the ads store's freshness reads, the first Best Sudoku hit): the
+   * value, and the registry notes that travel with it. */
+  store?: (rows: FactRows, ctx: MetricCtx, env: StoreEnv) => { value: number | null; noteIds?: string[] }
   instrumented: readonly InstrumentationRule[] | ((ctx: MetricCtx) => readonly InstrumentationRule[])
   /** Outcome beacons that arrive after the event they describe: [min, max] days. */
   lagDays?: [number, number]
@@ -100,15 +116,21 @@ const TRACKING_VS_FLIGHT: InstrumentationRule = { ...TRACKING, against: 'flight'
 const GAME_COMPLETE: InstrumentationRule = { kind: 'liveAt', atMs: GAME_COMPLETE_LIVE_AT, source: 'GAME_COMPLETE_LIVE_AT' }
 const INSTALL_FIX: InstrumentationRule = { kind: 'unmeasuredBefore', atMs: INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, source: 'INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS', noteId: 'install-fix-note' }
 const RAW_DEDUPE: InstrumentationRule = { kind: 'annotateAt', atMs: RAW_INSTALL_DEDUPE_LIVE_AT_UTC_MS, noteId: 'raw-install-dedupe' }
+/** The signed-out upsell fix as a funnel segment boundary: a pre/post-fix window exists only
+ * once it is set and falls inside the campaign's flight (lib/adsRules.ts campaignSegmentMarker). */
+const UPSELL_BOUNDARY: InstrumentationRule = { kind: 'boundaryInFlight', atMs: UPSELL_SIGNEDOUT_FIX_AT, source: 'UPSELL_SIGNEDOUT_FIX_AT' }
 
 const CAMPAIGN_WINDOWS = { attribution: 'campaignPathVisitor' } as const
 const BSK_WINDOWS = { todaySoFar: 'bskKpiDays', page: 'bskRangePath' } as const
+/** The release panel's before/after windows (lib/metrics/facts.ts bskReleaseSides). */
+const RELEASE_WINDOWS = { before: 'bskReleaseSides', after: 'bskReleaseSides' } as const
 const POPUP_WINDOWS = { page: 'popupRangePath' } as const
 
-function campaignMetric(def: Omit<MetricDef, 'label' | 'params' | 'windows'> & Partial<Pick<MetricDef, 'windows'>>): MetricDef {
-  return { label: `label.${def.id}`, params: ['campaignId'], windows: CAMPAIGN_WINDOWS, ...def }
+/** Campaign metrics over the campaign fact take an optional country bucket (its `cb` split). */
+function campaignMetric(def: Omit<MetricDef, 'label' | 'params' | 'windows'> & Partial<Pick<MetricDef, 'windows' | 'params'>>): MetricDef {
+  return { label: `label.${def.id}`, params: ['campaignId', 'country'], windows: CAMPAIGN_WINDOWS, ...def }
 }
-function bskMetric(def: Omit<MetricDef, 'label' | 'params' | 'windows'>): MetricDef {
+function bskMetric(def: Omit<MetricDef, 'label' | 'params' | 'windows'> & Partial<Pick<MetricDef, 'windows'>>): MetricDef {
   return { label: `label.${def.id}`, params: [], windows: BSK_WINDOWS, ...def }
 }
 function popupMetric(def: Omit<MetricDef, 'label' | 'windows'>): MetricDef {
@@ -134,6 +156,37 @@ const OUTCOME_METRICS: { id: string; outcome: string; lag: [number, number] }[] 
   { id: 'popup.outcomeStillPlaying', outcome: 'still-playing', lag: [14, 21] },
 ]
 const noOutcomeTracking = (popup: string | undefined) => !!POPUPS.find((p) => p.id === popup)?.noOutcomeTracking
+
+// ── Tagged upsell showings, split at the upsell fix (lib/adsRules.ts summarizeTaggedRows' upsell) ─
+const UPSELL_METRICS: { id: string; kind: 'shown' | 'accept' | 'dismiss' }[] = [
+  { id: 'campaign.upsellShown', kind: 'shown' },
+  { id: 'campaign.upsellAccepts', kind: 'accept' },
+  { id: 'campaign.upsellDismisses', kind: 'dismiss' },
+]
+const UPSELL_WINDOWS = { attribution: 'campaignPathVisitor', upsellPre: 'campaignPathVisitor', upsellPost: 'campaignPathVisitor' } as const
+
+// ── The ads store's freshness (lib/adsStore.ts readFreshness), per campaign ────────────────
+/** 'spend-source.<source>': where campaign.spend's figure comes from (lib/adsRules.ts
+ * resolveCampaignSpend). The value is a code (1 the Ads API, 0 hand-entered) shown as its label. */
+function spendSourceOf(rows: FactRows, ctx: MetricCtx): { value: number | null; noteIds?: string[] } {
+  if (rows.kind !== 'spend') return { value: null }
+  const r = resolveCampaignSpend(rows.rows.find((x) => x.campaignId === ctx.params.campaignId) ?? null, CAMPAIGN_SPEND[ctx.params.campaignId ?? ''] ?? null)
+  if (r.source === 'none') return { value: null }
+  return { value: r.source === 'google-ads-api' ? 1 : 0, noteIds: [r.source === 'google-ads-api' ? 'spend-source.ads-api' : 'spend-source.config'] }
+}
+function spendThroughOf(rows: FactRows, ctx: MetricCtx, env: StoreEnv): { value: number | null; noteIds?: string[] } {
+  if (rows.kind !== 'coverage' || !ctx.campaign) return { value: null }
+  const c = ctx.campaign
+  const through = spendThroughFromRows(c.flightStart, rows.rows.filter((r) => r.campaignId === c.id), c.flightEnd)
+  const stale = freshnessOf(c, through, null, env.nowMs).stale
+  return { value: through === null ? null : etMidnightMs(through), ...(stale ? { noteIds: ['ads-stale'] } : {}) }
+}
+function lastSyncOf(rows: FactRows, ctx: MetricCtx): { value: number | null } {
+  if (rows.kind !== 'lastSync') return { value: null }
+  const iso = rows.rows.find((r) => r.campaignId === ctx.params.campaignId)?.lastSync ?? null
+  const ms = iso === null ? NaN : Date.parse(iso)
+  return { value: Number.isFinite(ms) ? ms : null }
+}
 
 export const METRIC_DEFS: MetricDef[] = [
   // ── Campaign (one campaignPathVisitor statement per campaign) ────────────────────────────
@@ -175,6 +228,7 @@ export const METRIC_DEFS: MetricDef[] = [
       id,
       unit: 'device',
       ...(bucket === 'd0' ? {} : { subsetOf: 'campaign.returnD0', lagDays: lag }),
+      params: ['campaignId'],
       windows: { attribution: 'campaignReturns' },
       path: (p, ctx) => {
         const ev = returnOf(p)
@@ -183,9 +237,47 @@ export const METRIC_DEFS: MetricDef[] = [
       instrumented: [BEACON, TRACKING_VS_FLIGHT],
     }),
   ),
+  ...UPSELL_METRICS.map(({ id, kind }) =>
+    campaignMetric({
+      id,
+      unit: 'showing',
+      ...(kind === 'shown' ? {} : { subsetOf: 'campaign.upsellShown' }),
+      windows: UPSELL_WINDOWS,
+      path: (p) => {
+        const ev = popupEventOf(p)
+        return !!ev && ev.family === 'upsell' && ev.kind === kind
+      },
+      instrumented: (ctx) => (ctx.window === 'upsellPre' || ctx.window === 'upsellPost' ? [BEACON, UPSELL_BOUNDARY] : [BEACON]),
+    }),
+  ),
+  campaignMetric({
+    id: 'campaign.spendSource',
+    unit: 'code',
+    params: ['campaignId'],
+    windows: { attribution: 'adsSpend' },
+    store: spendSourceOf,
+    instrumented: [],
+  }),
+  campaignMetric({
+    id: 'campaign.spendThrough',
+    unit: 'instant',
+    params: ['campaignId'],
+    windows: { attribution: 'adsCoverage' },
+    store: spendThroughOf,
+    instrumented: [],
+  }),
+  campaignMetric({
+    id: 'campaign.lastSync',
+    unit: 'instant',
+    params: ['campaignId'],
+    windows: { attribution: 'adsLastSync' },
+    store: lastSyncOf,
+    instrumented: [],
+  }),
   campaignMetric({
     id: 'campaign.spend',
     unit: 'usd',
+    params: ['campaignId'],
     windows: { attribution: 'adsSpend' },
     // Stored Google Ads spend first, else the hand-entered CAMPAIGN_SPEND (lib/adsRules.ts).
     spend: (rows, ctx) => resolveCampaignSpend(rows.find((r) => r.campaignId === ctx.params.campaignId) ?? null, CAMPAIGN_SPEND[ctx.params.campaignId ?? ''] ?? null).spend,
@@ -193,13 +285,27 @@ export const METRIC_DEFS: MetricDef[] = [
   }),
 
   // ── Best Sudoku site-wide (bskKpiDays for today so far; bskRangePath for a page range) ──
-  bskMetric({ id: 'bsk.pageviews', unit: 'pageview', path: (p) => !isEventPath(p), instrumented: [] }),
+  bskMetric({ id: 'bsk.pageviews', unit: 'pageview', path: (p) => !isEventPath(p), windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [] }),
+  // Any tagged first-ever beacon, whatever its campaign (the release panel's "Tagged arrivals":
+  // no attribution window, unlike campaign.taggedArrivals).
+  bskMetric({ id: 'bsk.taggedArrivals', unit: 'device', unitLabel: 'unit.arrivals', visitor: 'new', anyTag: true, windows: { page: 'bskRangePath', ...RELEASE_WINDOWS }, instrumented: [], caveats: ['arrivals-caveat'] }),
+  // How many days each release window covers (the latest dated release, bounded by the first
+  // Best Sudoku hit and by today: lib/overview.ts releaseComparisonWindows).
+  {
+    id: 'release.windowDays',
+    label: 'label.release.windowDays',
+    unit: 'day',
+    params: [],
+    windows: { before: 'bskFirstHit', after: 'bskFirstHit' },
+    store: (_rows, _ctx, env) => ({ value: env.releaseDays }),
+    instrumented: [],
+  },
   bskMetric({ id: 'bsk.gameViews', unit: 'pageview', path: step('played'), instrumented: [] }),
   bskMetric({ id: 'bsk.completions', unit: 'completion', path: step('completed'), instrumented: [GAME_COMPLETE] }),
   bskMetric({ id: 'bsk.popupShown', unit: 'showing', path: isPopupShown, instrumented: [TRACKING] }),
   bskMetric({ id: 'bsk.popupAccepts', unit: 'showing', subsetOf: 'bsk.popupShown', path: isPopupAccept, instrumented: [TRACKING] }),
-  bskMetric({ id: 'bsk.authSuccess', unit: 'signin', path: isAuthSuccessBase, instrumented: [] }),
-  bskMetric({ id: 'bsk.installs', unit: 'showing', path: isInstallPromptInstalled, instrumented: [INSTALL_FIX], lagDays: [0, 7] }),
+  bskMetric({ id: 'bsk.authSuccess', unit: 'signin', path: isAuthSuccessBase, windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [] }),
+  bskMetric({ id: 'bsk.installs', unit: 'showing', path: isInstallPromptInstalled, windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [INSTALL_FIX], lagDays: [0, 7] }),
   bskMetric({ id: 'bsk.rawInstallSignals', unit: 'row', path: isRawInstallSignal, instrumented: [RAW_DEDUPE], caveats: ['raw-install-dedupe'] }),
   bskMetric({ id: 'bsk.returnsD1plus', unit: 'row', path: isReturnD1Plus, instrumented: [TRACKING] }),
 
@@ -258,6 +364,20 @@ export const METRIC_DEFS: MetricDef[] = [
     instrumented: [TRACKING],
     caveats: ['signin-eligible-caveat'],
   }),
+  ...(['capped', 'unearned'] as const).map((k) =>
+    popupMetric({
+      id: k === 'capped' ? 'popup.eligibleCapped' : 'popup.eligibleUnearned',
+      unit: 'finish',
+      subsetOf: 'popup.eligibleFinishes',
+      params: [],
+      path: (p) => {
+        const ev = popupEventOf(p)
+        return !!ev && ev.family === 'signin-eligible' && ev.kind === k
+      },
+      instrumented: [TRACKING],
+      caveats: ['signin-eligible-caveat'],
+    }),
+  ),
   popupMetric({
     id: 'popup.eligibleFinishes',
     unit: 'finish',
@@ -277,7 +397,8 @@ export const METRICS: ReadonlyMap<string, MetricDef> = (() => {
     if (m.has(d.id)) throw new Error(`duplicate metric id ${d.id}`)
     if (d.label !== `label.${d.id}`) throw new Error(`metric ${d.id}: label must be label.${d.id}`)
     if (!Object.keys(d.windows).length) throw new Error(`metric ${d.id}: no windows`)
-    if (!d.path && !d.visitor && !d.spend && Object.values(d.windows).some((f) => f === 'adsSpend')) throw new Error(`metric ${d.id}: a spend fact needs spend()`)
+    if (!d.path && !d.visitor && !d.spend && !d.store && Object.values(d.windows).some((f) => f === 'adsSpend')) throw new Error(`metric ${d.id}: a spend fact needs spend() or store()`)
+    if (!d.store && Object.values(d.windows).some((f) => f === 'adsCoverage' || f === 'adsLastSync' || f === 'bskFirstHit')) throw new Error(`metric ${d.id}: a store fact needs store()`)
     // The engine buckets the KPI fact's rows into ET days once per batch (lib/metrics/engine.ts),
     // which holds only while that fact serves exactly the today-so-far window and nothing else.
     for (const [w, f] of Object.entries(d.windows)) {
@@ -303,6 +424,10 @@ export function rulesOf(def: MetricDef, ctx: MetricCtx): readonly Instrumentatio
 export function rowMatcher(def: MetricDef, ctx: MetricCtx): (r: BeaconRow) => boolean {
   const pathTest = def.path
   const visitor = def.visitor
+  if (def.anyTag) {
+    const inner = rowMatcher({ ...def, anyTag: undefined }, ctx)
+    return (r) => r.campaign !== '' && inner(r)
+  }
   if (!pathTest) return visitor ? (r) => r.visitor === visitor : () => true
   const byPath = new Map<string, boolean>()
   const test = (p: string) => {
