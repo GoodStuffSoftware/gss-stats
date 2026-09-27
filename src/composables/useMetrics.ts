@@ -13,6 +13,8 @@
 // (which must happen during a component's `setup()`, exactly like `campaignsData`'s outer
 // `watch(campaigns, ...)` does) — never inside a `.then()`/`async` continuation.
 import { getCurrentScope, onScopeDispose, shallowRef, type ShallowRef } from 'vue'
+import { etMidnightUtcMs } from '../lib/campaigns'
+import { addEtDays } from '../lib/overview'
 import type { MetricsContext, MetricsRequestBody, MetricsResponseBody, MetricValue } from '../lib/metrics/types'
 import { MAX_REQUESTS } from '../lib/metrics/validate'
 import type { MetricRequestSpec } from '../lib/metrics/scope'
@@ -21,6 +23,29 @@ export type { MetricRequestSpec }
 
 const ENDPOINT = '/api/metrics'
 const COALESCE_MS = 10
+
+// ── Page-range windows: always explicit ET-bounded ISO instants (review finding, 2026-09-27):
+// `Date.parse('2026-09-26')` reads a bare YYYY-MM-DD as UTC midnight, not ET midnight, four or
+// five hours off the actual ET calendar day the caller meant — and the server is moving to
+// either reinterpret a bare date as an ET day itself or reject it outright. Normalizing here,
+// at the one place that talks to the wire, is correct either way: a caller may still hand
+// `useMetrics()` a bare ET date (the natural shape a date-range picker produces) and it always
+// goes out as an unambiguous instant. Normalized ONCE per call so the context key used for
+// caching and the context actually sent can never disagree. ──────────────────────────────────
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/
+function normalizeContext(context: MetricsContext | undefined): MetricsContext | undefined {
+  if (!context) return context
+  const sinceIsDate = context.since !== undefined && DATE_ONLY_RE.test(context.since)
+  const untilIsDate = context.until !== undefined && DATE_ONLY_RE.test(context.until)
+  if (!sinceIsDate && !untilIsDate) return context
+  return {
+    ...context,
+    ...(sinceIsDate ? { since: new Date(etMidnightUtcMs(context.since!)).toISOString() } : {}),
+    // `until` stays the ADR's [since, until) convention: the ET day AFTER the given date, so an
+    // inclusive-until-that-day range keeps meaning what it always meant.
+    ...(untilIsDate ? { until: new Date(etMidnightUtcMs(addEtDays(context.until!, 1))).toISOString() } : {}),
+  }
+}
 
 // ── Stable keys ────────────────────────────────────────────────────────────────────────────
 // validate.ts's KEY_RE (^[a-z0-9_.:-]{1,64}$) is lowercase-only, but a metric/ratio id carries
@@ -75,6 +100,18 @@ function cacheKeyOf(ctxKey: string, reqKey: string): string {
 }
 function reqKeyFromCacheKey(cKey: string): string {
   return cKey.slice(cKey.indexOf('::') + 2)
+}
+
+/** `results[key]`, but never through the prototype chain (review finding, 2026-09-27): `results`
+ * is ordinary `JSON.parse` output — a real `{}`, not the server's own `Object.create(null)`
+ * (`deriveBatch`); that guarantee doesn't survive the wire. A bracket read for a key like
+ * 'constructor' or '__proto__' that isn't one of `results`' OWN properties resolves through
+ * `Object.prototype` instead of coming back `undefined`, handing a Function through as if it
+ * were a MetricValue. Our own request keys can never literally collide with one (`requestKey`
+ * always returns `k<base36 hash>`), but the read pattern is checked here regardless, once, so
+ * every caller gets it for free. */
+export function safeResultLookup(results: Record<string, MetricValue>, key: string): MetricValue | undefined {
+  return Object.hasOwn(results, key) ? results[key] : undefined
 }
 
 // ── Module state (intentionally module-level: it's what makes results shared across every
@@ -162,7 +199,7 @@ async function sendChunk(batch: Batch, reqKeys: string[]) {
       const cKey = cacheKeyOf(batch.contextKey, reqKey)
       const entry = cache.get(cKey)
       if (!entry) continue
-      const result = json.results[reqKey]
+      const result = safeResultLookup(json.results, reqKey)
       entry.value.value = result
       entry.status = result ? 'ok' : 'error'
       if (entry.inflight === inflight) entry.inflight = undefined
@@ -193,7 +230,10 @@ export interface UseMetrics {
   reload(specs: MetricRequestSpec[]): void
 }
 
-export function useMetrics(context?: MetricsContext): UseMetrics {
+export function useMetrics(rawContext?: MetricsContext): UseMetrics {
+  // Normalized ONCE, here, so the context key used for caching/batching and the context object
+  // actually sent in the POST body can never disagree with each other.
+  const context = normalizeContext(rawContext)
   const ctxKey = contextKey(context)
   const scope = getCurrentScope()
   const owned = new Set<string>() // cache keys this useMetrics() instance holds a refcount on
