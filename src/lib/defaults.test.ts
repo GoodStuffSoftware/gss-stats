@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   withCardForView,
+  swapPanelChart,
   defaultConfig,
   normalizeConfig,
   reorderBskGroup,
@@ -281,8 +282,9 @@ describe('normalizeConfig — fixtures', () => {
     const norm = normalizeConfig(raw)
     const order = norm.pages.map((p) => p.id)
     expect(order).toEqual(['default', 'bsk-overview', 'bsk-campaigns', 'bsk-popups', 'bsk-launch', 'user-a', 'user-b'])
-    // the user's pinned widget on Campaigns survives untouched (not replaced by the factory set)
-    expect(norm.pages.find((p) => p.id === 'bsk-campaigns')!.widgets).toEqual([pinnedWidget])
+    // the user's pinned widget on Campaigns survives (not replaced by the factory set), its only
+    // change the card the v11 migration gives every former bespoke panel
+    expect(norm.pages.find((p) => p.id === 'bsk-campaigns')!.widgets).toEqual([withCardForView(pinnedWidget)])
     // activePageId is preserved through the reorder
     expect(norm.activePageId).toBe('bsk-campaigns')
   })
@@ -511,8 +513,9 @@ describe('normalizeConfig — v9 migration (Pop-ups page + device mix)', () => {
     const norm = normalizeConfig(raw)
     expect(norm.pages.find((p) => p.id === 'default')!.widgets).toEqual(raw.pages[0].widgets)
     const cw = norm.pages.find((p) => p.id === 'bsk-campaigns')!.widgets
-    expect(cw[0]).toEqual(raw.pages[1].widgets[0])
-    expect(cw[2]).toEqual(raw.pages[1].widgets[2])
+    // (v11 swaps every former bespoke panel in place: a card, or a standard chart)
+    expect(cw[0]).toEqual(withCardForView(swapPanelChart(raw.pages[1].widgets[0])))
+    expect(cw[2]).toEqual(withCardForView(swapPanelChart(raw.pages[1].widgets[2])))
   })
 
   it('is idempotent: normalizing the migrated config again changes no widget', () => {

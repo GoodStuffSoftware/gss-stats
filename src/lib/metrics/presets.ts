@@ -204,6 +204,62 @@ export const CAMPAIGN_COST: CardSpec = {
   ],
 }
 
+/** The funnel per campaign (CampaignsWidgetBody 'funnel'): one card per beacon-tracked campaign,
+ * its tagged hits read against its arrivals (counts, never a rate), the raw install signals, every
+ * funnel step as a bar (counts: most step-over-step "rates" mix units), and the two proportions
+ * the rate rule allows — accept over asks, and install over the prompts shown from the install fix
+ * on. A closed flight omits what it could not measure; an active one keeps a not-yet-seen step at
+ * its live count. Last, the signed-out upsell fix as a funnel segment boundary: tagged upsell
+ * shown/accepted/dismissed before and after it, which appears only once lib/adsRules.ts
+ * UPSELL_SIGNEDOUT_FIX_AT is set and falls in the campaign's flight (the boundaryInFlight rule). */
+export const CAMPAIGN_FUNNEL: CardSpec = {
+  v: 1,
+  repeat: { over: 'campaigns', tracked: true },
+  minWidth: 230,
+  title: { bind: 'campaign.label' },
+  badge: { data: { field: 'campaign.status' }, display: { as: 'badge' } },
+  sections: [
+    {
+      layout: 'rows',
+      items: [
+        { id: 'hits', label: { metric: true }, data: { ratio: 'campaign.taggedHitsVsArrivals' }, display: { as: 'counts' }, ...COMPACT },
+        { id: 'raw', label: { metric: true }, data: { metric: 'campaign.rawInstallSignals' }, display: { as: 'number' }, ...COMPACT },
+      ],
+    },
+    {
+      layout: 'bars',
+      items: [
+        { id: 'arrivals', label: { note: 'label.funnel.arrivals' }, data: { metric: 'campaign.taggedArrivals' }, display: { as: 'bar' }, ...COMPACT },
+        { id: 'played', label: { note: 'label.campaign.gameViews' }, data: { metric: 'campaign.gameViews' }, display: { as: 'bar' }, ...COMPACT },
+        { id: 'completed', label: { note: 'label.funnel.completed' }, data: { metric: 'campaign.completions' }, display: { as: 'bar' }, ...COMPACT },
+        { id: 'ask', label: { note: 'label.funnel.ask' }, data: { metric: 'campaign.asks' }, display: { as: 'bar' }, ...COMPACT },
+        { id: 'accept', label: { note: 'label.funnel.accept' }, data: { metric: 'campaign.accepts' }, display: { as: 'bar' }, ...COMPACT },
+        { id: 'authSuccess', label: { note: 'label.funnel.authSuccess' }, data: { metric: 'campaign.authSuccess' }, display: { as: 'bar' }, ...COMPACT },
+        { id: 'installPrompt', label: { note: 'label.funnel.installPrompt' }, data: { metric: 'campaign.installPrompts' }, display: { as: 'bar' }, ...COMPACT },
+        { id: 'install', label: { note: 'label.funnel.install' }, data: { metric: 'campaign.installs' }, display: { as: 'bar' }, ...COMPACT },
+      ],
+    },
+    {
+      layout: 'pills',
+      items: [
+        { id: 'acceptRate', label: { note: 'label.card.acceptOfAsks' }, data: { ratio: 'campaign.acceptPerAsk' }, display: { as: 'percent', decimals: 1 }, ...COMPACT },
+        { id: 'installRate', label: { note: 'label.card.installOfPrompts' }, data: { ratio: 'campaign.installPerPrompt' }, display: { as: 'percent', decimals: 1 }, ...COMPACT },
+      ],
+    },
+    {
+      layout: 'table',
+      title: { note: 'label.card.upsellSegment', vars: { at: 'campaign.upsellFixAt', day: 'campaign.upsellFixFlightDay' } },
+      repeat: { over: 'windows', ids: ['upsellPre', 'upsellPost'] },
+      items: [
+        { id: 'side', label: { note: 'label.card.taggedUpsell' }, data: { field: 'window.label' }, display: { as: 'text' } },
+        { id: 'shown', label: { note: 'label.card.shown' }, data: { metric: 'campaign.upsellShown', window: { scope: 'window' } }, display: { as: 'number' }, gating: { whenUnmeasured: 'omit' }, ...COMPACT },
+        { id: 'accepted', label: { note: 'label.card.accepted' }, data: { metric: 'campaign.upsellAccepts', window: { scope: 'window' } }, display: { as: 'number' }, gating: { whenUnmeasured: 'omit' }, ...COMPACT },
+        { id: 'dismissed', label: { note: 'label.card.dismissed' }, data: { metric: 'campaign.upsellDismisses', window: { scope: 'window' } }, display: { as: 'number' }, gating: { whenUnmeasured: 'omit' }, ...COMPACT },
+      ],
+    },
+  ],
+}
+
 /** Every preset by id. A null prototype, so an id such as 'constructor' or 'toString' is
  * simply not a preset — read through presetById, never a bare bracket lookup. */
 export const PRESETS: Readonly<Record<string, CardSpec>> = Object.freeze(
@@ -214,6 +270,7 @@ export const PRESETS: Readonly<Record<string, CardSpec>> = Object.freeze(
     'popup-rates': POPUP_RATES,
     'signin-eligibility': SIGNIN_ELIGIBILITY,
     'campaign-cost': CAMPAIGN_COST,
+    'campaign-funnel': CAMPAIGN_FUNNEL,
   }),
 )
 

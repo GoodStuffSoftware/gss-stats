@@ -252,6 +252,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       const m = campaignSegmentMarker(
         campaign,
         rows1.map((r) => ({ hourStartMs: r.hr * 3_600_000, path: r.path, visitor: r.visitor, count: r.c, ...(r.uf === undefined ? {} : { postUpsellFix: r.uf }) })),
+        upsellFixAt,
       )
       return m ? { ...m, boundaryFlightDay: flightDayIndex(campaign, m.boundaryDate) } : null
     })(),

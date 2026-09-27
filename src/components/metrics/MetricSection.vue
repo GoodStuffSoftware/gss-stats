@@ -33,8 +33,8 @@ const isColumnTable = computed(() => props.section.layout === 'table' && !!props
 // A column table's cells are items × columns (sectionCells), in row-major order, so the value of
 // row r, column c is flatItems[r * columns + c].
 const flatItems = computed<FlatItem[]>(() => {
-  if (isColumnTable.value) return sectionCells(props.section, props.outerScope, props.ctx)
-  return props.section.layout === 'table' ? [] : flattenSectionItems(props.section, props.outerScope, props.ctx)
+  if (props.section.layout === 'table') return sectionCells(props.section, props.outerScope, props.ctx)
+  return flattenSectionItems(props.section, props.outerScope, props.ctx)
 })
 
 // barMax (a 'bars' section scales every bar to the section's largest value) and anyVisible (a
@@ -105,7 +105,10 @@ const columnRows = computed(() => {
 })
 
 const anyVisible = computed(() => {
-  if (props.section.layout === 'table') return !isColumnTable.value || columnRows.value.length > 0
+  if (isColumnTable.value) return columnRows.value.length > 0
+  // A row table is shown while any of its data cells is (a field column, such as a row's own
+  // name, never keeps it on its own): a gated-out segment table disappears whole.
+  if (props.section.layout === 'table') return flatItems.value.some((fi, i) => !('field' in fi.item.data) && visibleAt(i))
   return flatItems.value.some((_, i) => visibleAt(i))
 })
 </script>

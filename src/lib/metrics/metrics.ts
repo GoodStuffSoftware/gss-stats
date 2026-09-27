@@ -190,7 +190,7 @@ function lastSyncOf(rows: FactRows, ctx: MetricCtx): { value: number | null } {
 
 export const METRIC_DEFS: MetricDef[] = [
   // ── Campaign (one campaignPathVisitor statement per campaign) ────────────────────────────
-  campaignMetric({ id: 'campaign.taggedHits', unit: 'row', instrumented: [BEACON] }),
+  campaignMetric({ id: 'campaign.taggedHits', unit: 'row', unitLabel: 'unit.hits', instrumented: [BEACON] }),
   campaignMetric({
     id: 'campaign.taggedArrivals',
     unit: 'device',

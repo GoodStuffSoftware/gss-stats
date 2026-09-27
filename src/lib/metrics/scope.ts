@@ -7,7 +7,7 @@
 // without mounting a component.
 import { CAMPAIGNS, campaignById, flightDayIndex, type CampaignFlight } from '../campaigns'
 import { etDateFromMs, POPUPS, type PopupDef } from '../popupEvents'
-import { campaignSegmentMarker } from '../adsRules'
+import { campaignSegmentMarker, UPSELL_SIGNEDOUT_FIX_AT } from '../adsRules'
 import { latestDatedRelease } from '../releases'
 import { metricWindows, METRICS, rulesOf, type MetricDef, type MetricParam } from './metrics'
 import { ratioParamsOf, ratioWindowsOf, RATIOS, type RatioDef } from './ratios'
@@ -127,9 +127,9 @@ export function scopeField(scope: ScopeInstance, path: ScopePath, todayEt: strin
     case 'campaign.measurabilityNote':
       return campaign ? (campaign.measurabilityNote ?? null) : null
     case 'campaign.upsellFixAt':
-      return campaign ? (campaignSegmentMarker(campaign, [])?.boundaryLabel ?? null) : null
+      return campaign ? (campaignSegmentMarker(campaign, [], UPSELL_SIGNEDOUT_FIX_AT)?.boundaryLabel ?? null) : null
     case 'campaign.upsellFixFlightDay': {
-      const m = campaign ? campaignSegmentMarker(campaign, []) : null
+      const m = campaign ? campaignSegmentMarker(campaign, [], UPSELL_SIGNEDOUT_FIX_AT) : null
       const d = m && campaign ? flightDayIndex(campaign, m.boundaryDate) : null
       return d == null ? null : String(d)
     }
