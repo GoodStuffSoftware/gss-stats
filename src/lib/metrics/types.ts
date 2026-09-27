@@ -96,6 +96,12 @@ export interface Gating {
   whenEmpty?: 'dash' | 'omit' | { note: string } // a field or series with no value
   /** 'omit': a measured count of exactly 0 is left out (a campaign with no return beacons yet). */
   whenZero?: 'omit'
+  /** A campaign flight that has not begun: no start date yet, or its attribution window opens
+   * later. By default the first is omitted (a scorecard shows only what a flight can have) and the
+   * second reads "not started". 'label': "not started" in both cases (the item stays, so an
+   * upcoming flight's card shows its funnel); 'zero': a measured 0, for a count that cannot have
+   * happened yet (an upcoming flight's arrivals). */
+  whenNotStarted?: 'label' | 'zero'
 }
 
 export interface RepeatSpec {
