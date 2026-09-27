@@ -13,7 +13,7 @@
 // to its correct America/New_York calendar day (see etDateFromMs) — it is still a
 // COUNT(*) GROUP BY, not a row fetch.
 //
-// POST { dimension, since, until, sites?, popup?, kind?, rateKey?, limit? }
+// POST { dimension, since, until, sites?, popup?, kind?, rateKey?, limit?, excludeOwnVisits?, ownBrowser?, ownOS? }
 //   dimension:
 //     'kind'           — shown/accept/dismiss counts for `popup` (required)
 //     'reason'         — reason/platform breakdown for `popup` + `kind` (default 'shown')
@@ -43,6 +43,7 @@ import {
   popupIncludeClause,
   type HourPathCount,
 } from '../../src/lib/popupEvents'
+import { excludeOwnClause } from '../../src/lib/ownExclusion'
 
 interface Env {
   gss_geo: D1Database
@@ -102,6 +103,9 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     w.push(`site IN (${sites.map(() => '?').join(', ')})`)
     b.push(...sites)
   }
+  // "Hide my own visits" — the same browser+OS exclusion /api/geo applies, so the pop-up bar
+  // chart (geo), the rate table and the eligibility counts (both here) always agree.
+  excludeOwnClause(w, b, body.excludeOwnVisits === true, body.ownBrowser, body.ownOS)
   const inc = popupIncludeClause()
   w.push(inc.sql)
   b.push(...inc.binds)

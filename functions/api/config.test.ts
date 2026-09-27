@@ -49,6 +49,31 @@ describe('config PUT backs up the stored config on a version bump', () => {
     expect(puts).toEqual(['dashboard:default'])
   })
 
+  it('refuses a save from an OLDER layout version with 409 and a clear message, without touching KV', async () => {
+    const newer = JSON.stringify(cfg(9, 'migrated'))
+    const { kv, store, puts } = fakeKv({ 'dashboard:default': newer })
+    const res = await put(kv, cfg(8, 'old tab'))
+    expect(res.status).toBe(409)
+    const body: any = await res.json()
+    expect(body.message).toMatch(/out of date, reload/)
+    expect(puts).toEqual([])
+    expect(store.get('dashboard:default')).toBe(newer)
+  })
+
+  it('fails closed: if the backup write fails, the stored layout is left untouched', async () => {
+    const old = JSON.stringify(cfg(8, 'old'))
+    const store = new Map([['dashboard:default', old]])
+    const kv = {
+      get: async (k: string) => store.get(k) ?? null,
+      put: async (k: string, v: string) => {
+        if (k.includes(':backup:')) throw new Error('KV write failed')
+        store.set(k, v)
+      },
+    }
+    await expect(put(kv, cfg(9, 'new'))).rejects.toThrow()
+    expect(store.get('dashboard:default')).toBe(old)
+  })
+
   it('still rejects a body with no pages or widgets, without touching KV', async () => {
     const { kv, puts } = fakeKv({ 'dashboard:default': JSON.stringify(cfg(8)) })
     const res = await put(kv, { version: 9 })

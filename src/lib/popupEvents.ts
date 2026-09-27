@@ -924,9 +924,9 @@ export const POPUP_RATE_SPECS: PopupRateSpec[] = [
   { key: 'signin-eligible:rate', label: 'Sign-in eligibility rate (earned / total)', kind: 'eligibility' as const },
 ]
 
-// ── The Pop-ups page's rate table: VALID ratios only (docs/adr/0003, "the rule this ADR
-// encodes": a percentage only where the numerator is a declared subset of the denominator,
-// same unit, same instrumented window). That leaves exactly: each pop-up's taps (accepts) over
+// ── The Pop-ups page's rate table: VALID ratios only (the rate-validity rule: a percentage
+// only where the numerator is a declared subset of the denominator, same unit, same
+// instrumented window). That leaves exactly: each pop-up's taps (accepts) over
 // its showings, and the install prompt's "installed" outcome over post-fix showings (the
 // denominator counted from INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS on — see computePopupRate).
 // Everything else on the page is a count. A test pins this list, so a new key can't slip in.

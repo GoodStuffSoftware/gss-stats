@@ -233,7 +233,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = {
     scopes: ['popup'],
   },
   // Caption for the campaign device-mix doughnut: the population is tagged hits, not people
-  // (docs/adr/0003 rate audit, row 14).
+  // (a heavy user weighs more — shares of rows, not of devices).
   'device-mix-population': {
     id: 'device-mix-population',
     text: 'Shares of **tagged hits** (every beacon a tagged visit sent), not of people: a heavy user weighs more.',
@@ -304,7 +304,8 @@ export function defaultNoteIdsForScope(scope: NoteScope): string[] {
 /** Options for a "pick a note" dropdown (ChartEditor) — id + a short preview of its text. */
 export function noteOptions(): { value: string; label: string }[] {
   return Object.values(NOTES_REGISTRY).map((n) => {
-    const t = resolveText(n)
+    // Plain text, as rendered: markup stripped and {vars} filled in (not the raw template).
+    const t = noteRawText(n.id)
     return { value: n.id, label: t.length > 64 ? t.slice(0, 61) + '…' : t }
   })
 }

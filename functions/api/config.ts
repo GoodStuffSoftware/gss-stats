@@ -9,8 +9,9 @@
 // (src/lib/defaults.ts normalizeConfig, CONFIG_VERSION) and saves the result back here. Before
 // the first save of a NEWER version overwrites an older stored config, the older value is copied
 // once to `dashboard:default:backup:v<old version>` (never overwritten after that), so a bad
-// migration is recoverable by copying that key back. One KV write per version bump — well
-// inside the Free plan's 1,000 writes a day.
+// migration is recoverable by copying that key back (README "Restoring a layout backup"). One
+// KV write per version bump — well inside the Free plan's 1,000 writes a day. A save from an
+// OLDER layout version than the stored one is refused with 409 (see onRequestPut).
 
 interface Env {
   STATS_CONFIG: KVNamespace
@@ -61,7 +62,17 @@ export const onRequestPut: PagesFunction<Env> = async (ctx) => {
   const kv = ctx.env.STATS_CONFIG
   const stored = await kv.get(KEY)
   const storedVersion = versionOf(stored)
+  // A tab still running OLDER code (a lower layout version) must never overwrite a newer layout:
+  // it would silently undo a migration. It gets 409, which the client shows as "This tab is out
+  // of date, reload".
+  if (stored && incomingVersion < storedVersion) {
+    return json(JSON.stringify({ error: 'stale', message: 'This tab is out of date, reload to get the latest layout.', storedVersion, incomingVersion }), 409)
+  }
   if (stored && incomingVersion > storedVersion) {
+    // FAIL-CLOSED on purpose: the backup is written BEFORE the new layout, and nothing here
+    // catches a failure of either write — if the backup read or put throws, the request fails
+    // and the stored layout stays exactly as it was (the tab shows "Save failed" and retries on
+    // its next change). A layout upgrade is never saved without its backup in place.
     const backupKey = backupKeyFor(storedVersion)
     if ((await kv.get(backupKey)) === null) await kv.put(backupKey, stored)
   }
