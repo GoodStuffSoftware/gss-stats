@@ -248,6 +248,49 @@ describe('morning-read: quiet days, the hard cap and release health', () => {
     expect(r.releaseHealth.evaluated).toBe(true)
     expect(r.releaseHealth.reason).not.toMatch(/quiet window/)
   })
+  it('diagnostics (R2/R3/R5/R8) degrade gracefully to unavailable when the AdsSource/BeaconSource has none of the optional methods, and never appear in health-only mode', async () => {
+    const r = await runMorningRead(fixtureDeps(base(), true), opts)
+    expect(r.diagnostics).toMatchObject({ hourly: null, geo: null, devices: null, targeting: null, recommendations: null, countryCounts: null })
+    expect(r.diagnostics.spendThroughEt).toBe(r.spend.throughEt)
+    // errors is an ordinary array of best-effort notes; it never sets r.errors or blocks the read
+    expect(r.spend.ok).toBe(true)
+    const health = await runMorningRead(fixtureDeps(base(), false), { ...opts, healthOnly: true })
+    expect(health.diagnostics).toEqual({ spendThroughEt: null, hourly: null, geo: null, devices: null, targeting: null, recommendations: null, countryCounts: null, accountCrossCheck: null, errors: [] })
+  })
+  it('diagnostics: hourly/geo/devices/targeting/recommendations/country/account-cross-check all populate when the AdsSource and BeaconSource implement them', async () => {
+    const fx = base()
+    const deps = fixtureDeps(fx, true)
+    const withDiagnostics = {
+      ...deps,
+      ads: {
+        ...deps.ads!,
+        hourly: async () => [{ date: '2026-09-29', hour: 13, impressions: 10, clicks: 1, ctr: 0.1, cost: 0.5 }],
+        geo: async () => [{ criterionId: '2840', country: 'United States', countryCode: 'US', impressions: 10, clicks: 1, ctr: 0.1, cost: 0.5, bidModifier: null, bidAdjustmentPct: null }],
+        devices: async () => [{ device: 'DESKTOP', impressions: 3, clicks: 0, ctr: 0, cost: 0 }],
+        targeting: async () => [{ adGroup: 'Other Sudoku placements', status: 'ENABLED', placements: 15, audienceBidOnly: true }],
+        recommendations: async () => [{ type: 'MAXIMIZE_CONVERSIONS_OPT_IN', resourceName: 'customers/8726535246/recommendations/1' }],
+      },
+      beacon: { ...deps.beacon!, countryCounts: async () => [{ country: 'US', count: 5 }] },
+      firebase: { counts: async () => ({ projectId: 'best-sudoku', newAccountsInWindow: 2, accountsWithCreatedAt: 14, promoClaimsInWindow: 0, promoClaimsTotal: 0, first50: null, errors: [] }) },
+    }
+    const r = await runMorningRead(withDiagnostics, opts)
+    expect(r.diagnostics.hourly).toEqual([{ date: '2026-09-29', hour: 13, impressions: 10, clicks: 1, ctr: 0.1, cost: 0.5 }])
+    expect(r.diagnostics.devices).toEqual([{ device: 'DESKTOP', impressions: 3, clicks: 0, ctr: 0, cost: 0 }]) // DESKTOP nonzero — a REPORT LINE, never a kill rule
+    expect(r.diagnostics.targeting).toEqual([{ adGroup: 'Other Sudoku placements', status: 'ENABLED', placements: 15, audienceBidOnly: true, expectedPlacements: 16 }])
+    expect(r.diagnostics.recommendations).toEqual([{ type: 'MAXIMIZE_CONVERSIONS_OPT_IN', resourceName: 'customers/8726535246/recommendations/1' }])
+    expect(r.diagnostics.countryCounts).toEqual([{ country: 'US', count: 5 }])
+    expect(r.diagnostics.accountCrossCheck).toMatchObject({ etDate: r.spend.throughEt, firestoreNewAccounts: 2 })
+    expect(r.diagnostics.errors).toEqual([])
+  })
+  it('diagnostics: a failed sub-read is recorded in diagnostics.errors and never blocks the others or the spend/kill-rule read', async () => {
+    const deps = fixtureDeps(base(), true)
+    const withFailingHourly = { ...deps, ads: { ...deps.ads!, hourly: async () => { throw new Error('GAQL syntax error') }, devices: async () => [{ device: 'MOBILE', impressions: 1, clicks: 0, ctr: 0, cost: 0 }] } }
+    const r = await runMorningRead(withFailingHourly, opts)
+    expect(r.diagnostics.errors.join(' ')).toMatch(/GAQL syntax error/)
+    expect(r.diagnostics.devices).toEqual([{ device: 'MOBILE', impressions: 1, clicks: 0, ctr: 0, cost: 0 }])
+    expect(r.spend.ok).toBe(true)
+    expect(r.errors).toEqual([]) // diagnostic failures are their own section, never the top-level errors
+  })
   it('the evening backstop evaluates on a day that served ads; 2 post-fix install accepts are only a watch', async () => {
     const fx = base()
     fx.now = '2026-09-30T03:30:00Z' // 23:30 ET on 09-29

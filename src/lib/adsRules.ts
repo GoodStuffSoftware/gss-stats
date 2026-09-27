@@ -108,6 +108,16 @@ export const APPROVED_PLACEMENTS_BY_CAMPAIGN: Record<string, readonly string[]> 
   '24215315197': [...RETEST_APPROVED_PLACEMENTS, 'com.icenta.sudoku.ui', 'com.openmygame.games.android.sudokumaster'],
 }
 
+/** Build-spec section 5/6 expected ad-group placement counts (the retest campaign carries the
+ * twin's structure over exactly: campaign-build-spec-web-retest-2026-09.md sections 5-6). Used
+ * only to VERIFY the live `targeting` diagnostic read (scripts/ads-reads/read.ts) against the
+ * build spec — an informational report line, never a kill rule (contract sections 12-13 are
+ * frozen; see docs/routines/bsk-retest-morning-read.md). */
+export const RETEST_AD_GROUP_PLACEMENT_COUNTS: Record<string, number> = {
+  'Sudoku.com placement': 1,
+  'Other Sudoku placements': 16,
+}
+
 export interface AdsReadPlan {
   campaignId: string
   /** $/day, for pacing lines only (Google may overdeliver a day; never a finding). */
