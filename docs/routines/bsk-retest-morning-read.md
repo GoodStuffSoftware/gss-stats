@@ -1,25 +1,20 @@
 ---
 name: bsk-retest-morning-read
-description: Ads reads for the Best Sudoku US+CA web retest (Google Ads campaign 24279250691, uc sudoku_funnel_retest). Two schedule entries: the 08:00 ET morning read (2026-09-27..2026-10-03) and the 23:15 ET release-health backstop on flight days (2026-09-26..2026-10-02). Runs the gss-stats CLI; pushes Mike only on a threshold read, a kill-rule trip, a failed read, or a real release-health alert; copies threshold reads to the deckhand bus. Proposes only; never changes a campaign.
+description: Single daily 06:00 ET read for the Best Sudoku US+CA web retest (Google Ads campaign 24279250691, uc sudoku_funnel_retest), 2026-09-27..2026-10-03. Folds the old 23:15 ET release-health backstop in (evaluated on every run, at any hour). Full diagnostic depth (Ads hourly/geo/device/targeting, Recommendations, beacon country breakdown, an account-count cross-check), a daily narrative, and an audit-trail commit. Runs the gss-stats CLI; pushes Mike only on a threshold read, a kill-rule trip, a failed read, or a real release-health alert; copies threshold reads and the daily narrative to the deckhand bus. Proposes only; never changes a campaign.
 ---
 
 <!--
-Schedules (the lead creates the triggers after review; this file never creates one):
-  A. MORNING READ   daily 08:00 America/New_York, 2026-09-27 through 2026-10-03.
-                    Trigger prompt: "Run ENTRY A (morning read) of docs/routines/bsk-retest-morning-read.md."
-  B. BACKSTOP       daily 23:15 America/New_York, 2026-09-26 through 2026-10-02 (flight days).
-                    Trigger prompt: "Run ENTRY B (release-health backstop) of docs/routines/bsk-retest-morning-read.md."
-                    The CLI itself skips a day that served no ads, so B needs no date logic.
-Each trigger names its entry explicitly; the run never infers it from the clock.
+Schedule (the lead creates the trigger after review; this file never creates one):
+  daily 06:00 America/New_York, 2026-09-27 through 2026-10-03.
+  Trigger prompt: "Run the morning read in docs/routines/bsk-retest-morning-read.md."
+Retired 2026-09-27: the 23:15 ET release-health backstop (task bsk-retest-backstop) is
+DISABLED, never deleted — its check now runs inside this single daily read (the clock-based
+"01:00-12:00 ET quiet window" that used to gate release health at 08:00 was removed; parent/
+child maturity is independently enforced by a 24h event-age cutoff, not the clock, so it is
+safe to evaluate at 06:00 too). If bsk-retest-backstop is ever re-enabled, ask the lead why
+first — it would double-evaluate the same check this file already runs.
 Replaces the retired local tasks best-sudoku-ads-play-twin-daily / -evening.
 -->
-
-## Which entry you are running
-
-Your trigger's prompt names the entry: **ENTRY A (morning read)** or **ENTRY B
-(release-health backstop)**. Run only that entry's commands below. If the prompt names
-neither (or both), do not guess from the time of day: push `BSK retest routine did not run:
-trigger named no entry` and stop.
 
 You are the morning ads-read agent for the Best Sudoku US+CA web retest. The numbers, the
 thresholds, the kill rules and the decision table all live in gss-stats code
@@ -62,10 +57,8 @@ and add nothing of your own to the rules.** Windows machine; the Bash tool is Gi
 
 ## Window
 
-- ENTRY A (morning read): if today's ET date is after **2026-10-03**, print "past the
-  morning-read window (2026-09-27..2026-10-03), ask the lead to retire this task" and stop.
-- ENTRY B (backstop): if today's ET date is after **2026-10-02**, print "past the flight, ask
-  the lead to retire the backstop" and stop.
+If today's ET date is after **2026-10-03**, print "past the morning-read window
+(2026-09-27..2026-10-03), ask the lead to retire this task" and stop.
 
 Never delete or edit a scheduled task yourself.
 
@@ -89,27 +82,24 @@ npm --prefix C:/Users/msant/dev/gss-stats-ads-routine ci --no-audit --no-fund
 
 ## Step 1: run the read
 
-From `C:\Users\msant\dev\gss-stats-ads-routine`.
-
-ENTRY A (morning read):
+From `C:\Users\msant\dev\gss-stats-ads-routine`:
 
 ```bash
 npm run -s ads:morning-read -- --cf-token-file C:/Users/msant/dev/cf-token.txt --firebase-sa C:/Users/msant/.firebase/service-accounts/best-sudoku-prod.json
 ```
 
-ENTRY B (release-health backstop), the release-health check only:
+This single run replaces both of the old two-entry system's runs. It evaluates release health
+on every run, at any hour: the parent at or above MIN_COHORT (5), its outcome window elapsed
+(shown at least 24 h earlier), and the child at zero is an ALERT; a smaller parent is a
+"watch", never an alert; a zero parent never alerts. Since the v1.95.4 install fix (26 Sep
+12:26 ET) the install pair is an ordinary pair: install-prompt accepts (`/install/pwa-accept`)
+after the fix, at least 5 and at least 24 h old, with no
+`/popup-outcome/install-prompt/installed` is a real ALERT and pushes; a continued zero is
+raised, not treated as quiet. It appends a `health` record.
 
-```bash
-npm run -s ads:morning-read -- --release-health-only --cf-token-file C:/Users/msant/dev/cf-token.txt
-```
-
-The backstop evaluates only on a day that actually served ads, and alerts only on a missing
-child of a non-zero parent: the parent at or above MIN_COHORT (5), its outcome window elapsed
-(shown at least 24 h earlier), and the child at zero. A smaller parent is a "watch", never an
-alert; a zero parent never alerts. Since the v1.95.4 install fix (26 Sep 12:26 ET) the install
-pair is an ordinary pair: install-prompt accepts (`/install/pwa-accept`) after the fix, at least
-5 and at least 24 h old, with no `/popup-outcome/install-prompt/installed` is a real ALERT and
-pushes; a continued zero is raised, not treated as quiet. It appends a `health` record.
+`--release-health-only` still exists in the CLI (health check only, no spend sync or store
+write) for a manual/debug run, but the scheduled trigger never passes it — the daily run
+above already covers release health.
 
 Not `--dry-run`: this run is the one that syncs spend, appends the daily line and marks a
 fired threshold. Never run `npm run ads:sync` before it "to be safe": the read syncs itself. `BWS_ACCESS_TOKEN` is already in the environment. If the service-account
@@ -135,16 +125,18 @@ What the CLI does, so you can explain it (do not re-implement any of it):
    "Already recorded today"); only a rerun that carries new information (a complete retry of
    an incomplete read, a new pause proposal, a new alert) is stored and pushed. A failed read
    always pushes.
-4. Notes any earlier scheduled read that never ran, and skips release health because
-   08:00 ET is inside its 01:00-12:00 quiet window (entry B covers it).
-
-ENTRY B runs the same sync first (it also stores the closed days), then reads today's partial
-spend only to decide whether ads served today; today's open day is never stored.
+4. Notes any earlier scheduled read that never ran.
+5. Runs the R2/R3/R5/R8 diagnostic depth for the closed ET day: Ads hourly/geo/device/
+   targeting, Google Ads Recommendations (read-only), a beacon country breakdown, and a
+   same-day Firestore-vs-beacon account-count cross-check. Every one of these sub-reads is
+   independently best-effort: a failure is recorded and printed, never thrown, and never
+   blocks the others, the spend read, or a kill rule.
 
 ## Step 2: read the result
 
 The output is a short human report, then a line `----- JSON -----`, then JSON. Use the
 JSON's `notify`, `errors`, `thresholds` and `thresholdRead` fields; never recompute a rule.
+The report's "Diagnostics for ..." block (R2/R3/R5/R8) is informational only — see Step 4.
 
 ## Step 3: push (the CLI decides; you relay)
 
@@ -157,43 +149,136 @@ JSON's `notify`, `errors`, `thresholds` and `thresholdRead` fields; never recomp
   or status, the beacon, the threshold state, Firestore at the $100 read, or a store write,
   including any call that runs past the 60 s timeout; the push names each failed read with a
   one-line reason; money is at stake, so silence is worse than one extra ping); a placement
-  share in the 9-11% band is flagged "borderline, check the placement view"; and, on the
-  backstop only, a real release-health ALERT. A "watch" never pushes.
+  share in the 9-11% band is flagged "borderline, check the placement view"; and a real
+  release-health ALERT (evaluated on every run now, not only a separate backstop entry). A
+  "watch" never pushes. **A diagnostics ANOMALY line (Step 4) never sets `notify.push` — it
+  is a report line only; relay it in your output, never as its own push.**
 - If `notify.push` is `false`, send NO push. A quiet day produces no push.
 - If the CLI itself did not run to its JSON block (it crashed, `npm ci` failed, the checkout
-  was dirty), send ONE push: `BSK retest <morning read|backstop> did not run: <one short
-  reason, no paths or secrets>`. That is the only push you ever write yourself.
+  was dirty), send ONE push: `BSK retest morning read did not run: <one short reason, no
+  paths or secrets>`. That is the only push you ever write yourself.
 - A scheduled run that never started can't push. The next run that does lists the ET dates
   with no daily reading as "Previous scheduled read missing: …" in the report, its record and
   any push; relay that line in your output.
 
-## Step 4: bus copy (threshold reads only)
+## Step 4: diagnostic depth (R2/R3/R5/R8) — report lines only
 
-If `notify.busCopy` is `true`, copy the human report (everything above `----- JSON -----`)
-to the deckhand bus:
+The report's `Diagnostics for <ET date> (informational only; never a kill rule or an
+automatic action):` block covers Ads hourly/geo/device/targeting, Recommendations, a beacon
+country breakdown, and the account-count cross-check. Relay it in your output as printed.
+
+- A line tagged `ANOMALY: ... propose to Mike` (a nonzero DESKTOP/CONNECTED_TV device read, a
+  targeting placement count that does not match the build spec, or the Firestore account
+  count reading below the beacon count) is a proposal for Mike to look at, in your own output
+  text — **never** a push, a bus copy, a kill rule, or any change you make yourself. If you
+  see one, say so plainly in your Step 8 output, phrased as a proposal ("propose Mike check
+  ...").
+- Standing Recommendations verdicts (never re-derived, never applied, never dismissed even if
+  Mike asks you to on this task): Maximize Conversions REJECT; conversion tracking REJECT
+  PERMANENTLY; Customer Match REJECT; Optimized targeting REJECT. The report prints these
+  every run next to whatever recommendations are currently queued.
+- A `not read` diagnostic line (missing `--firebase-sa`, a GAQL error, a beacon timeout) is
+  informational: it never blocks the spend/kill-rule read above it, and never itself pushes.
+  Relay it in your output as `diagnostic read errors` if the report's `errors` field lists any.
+
+## Step 5: daily narrative (R6)
+
+Compose a narrative using the report's own numbers — never invent a number, never round past
+what the report prints. Format:
+
+```
+**Day N: <headline>**
+Working: <1-2 bullets, what the numbers show is going well>
+Not working: <1-2 bullets, what the numbers show is weak or absent>
+So what: <1-2 bullets, the implication for Mike — hold, watch, or a specific proposal>
+```
+
+~150 words total. Day N = the closed ET date's day-number since the campaign's flight start
+(JSON `campaign.flightStart`; flight start itself is Day 1). **A report with the headline
+alone is a failed run** — Working/Not working/So what are not optional, even on a quiet day
+with nothing dramatic to say (a quiet day's "Working" can be "delivery is steady, no
+anomalies"). Put this narrative at the top of your Step 8 output, before the raw report, and
+include it in the Step 6 bus copy and the Step 7 audit-trail entry.
+
+## Step 6: bus copy
+
+If `notify.busCopy` is `true`, copy the Step 5 narrative followed by the human report
+(everything above `----- JSON -----`) to the deckhand bus:
 
 - tool `agent_send`, found by bare name with ToolSearch under any prefix;
-- `from`: `gss-stats`, `to`: `best-sudoku-cfd49662`, `includeEphemeral`: `true`;
+- `from`: `gss-stats`, `to`: `best-sudoku-ads-retest-followup`, `includeEphemeral`: `true`;
 - subject: `BSK retest $<highest crossed threshold> read <ET date>`.
 
 If no `agent_send` tool exists under any prefix, use the deckhand REST path described by the
 `deckhand:refresh-tools` skill. If that fails too, say so in your output; never invent
 another channel.
 
-## Step 5: your output
+## Step 7: audit trail (R7)
 
-Print the human report verbatim, then at most three lines of your own: whether a push and a
-bus copy went out, any `errors` in plain words, and (on a threshold read) the proposal and
-the kill-rule results exactly as the report states them. Standing reading notes, all already
-in the report: every rate is MIN_COHORT-gated and shown with its counts; production has about
-14 registered users, so everything is anecdotal; upsell near-zero for signed-out traffic is a
-known bug, not broken instrumentation; signin-eligible is a count, never a denominator;
-install outcomes are measured only from the 26 Sep 12:26 ET install fix on; Play reads
-"not yet seen" until the first app `/return/` row; Play installs include Mike's household.
+Two records, both required, in this order. If either step fails, stop and push Mike
+`BSK retest morning read: audit trail write failed: <one short reason>` — never silently
+skip it, and never retry more than once.
+
+1. **Raw JSON.** Write the run's full `----- JSON -----` block to
+   `C:\Users\msant\dev\best-sudoku-ads-next\docs\marketing\google-ads\retest\data\<ET
+   date>.json` in the worktree below (create the `data/` directory if it does not exist yet).
+2. **Review doc entry.** Append one dated entry to
+   `docs/marketing/google-ads/retest/review-2026-09.md` in the same worktree, in the same
+   format as the week-1/week-2 review docs (a dated heading, the Step 5 narrative, then the
+   report's headline numbers) — read the existing file first and match its structure exactly;
+   do not invent a new format.
+
+Both files live in the worktree `C:\Users\msant\dev\best-sudoku-ads-next`, branch
+`docs/ads-next-campaign`. Before writing:
+
+```bash
+git -C C:/Users/msant/dev/best-sudoku-ads-next status --porcelain
+```
+
+If that prints anything NOT under `docs/marketing/google-ads/retest/`, stop and report
+"ads-next-campaign worktree has unrelated local changes" — never discard them, never write
+into a dirty tree outside your own path. Otherwise:
+
+```bash
+git -C C:/Users/msant/dev/best-sudoku-ads-next pull --ff-only origin docs/ads-next-campaign
+```
+
+Write both files, then stage ONLY the two files you just wrote (never `git add -A` or `git
+add .` in this worktree):
+
+```bash
+git -C C:/Users/msant/dev/best-sudoku-ads-next add docs/marketing/google-ads/retest/data/<ET date>.json docs/marketing/google-ads/retest/review-2026-09.md
+git -C C:/Users/msant/dev/best-sudoku-ads-next commit -F <a temp file with the commit message>
+git -C C:/Users/msant/dev/best-sudoku-ads-next push origin docs/ads-next-campaign
+```
+
+Commit message: `docs(ads): retest audit trail <ET date>` with the Step 5 narrative headline
+as the body. If the push is rejected (non-fast-forward), `pull --ff-only` again and retry the
+push once; a second failure is the "audit trail write failed" push above, and you leave the
+local commit in place for the next run or the lead to sort out — never force-push.
+
+This is in addition to, not instead of, the CLI's own D1 store write (Step "Store" line in
+the report) — the D1 store and this git-committed audit trail are two independent records of
+the same run.
+
+## Step 8: your output
+
+Lead with the Step 5 narrative. Then print the human report verbatim, then at most three more
+lines of your own: whether a push and a bus copy went out, whether the Step 7 audit-trail
+commit succeeded (with its commit sha), any `errors` in plain words, and (on a threshold read)
+the proposal and the kill-rule results exactly as the report states them. If a diagnostics
+ANOMALY line appeared (Step 4), name it explicitly as a proposal for Mike, separate from any
+push. Standing reading notes, all already in the report: every rate is MIN_COHORT-gated and
+shown with its counts; production has about 14 registered users, so everything is anecdotal;
+upsell near-zero for signed-out traffic is a known bug, not broken instrumentation;
+signin-eligible is a count, never a denominator; install outcomes are measured only from the
+26 Sep 12:26 ET install fix on; Play reads "not yet seen" until the first app `/return/` row;
+Play installs include Mike's household.
 
 If the report starts with `READ FAILED`, say so first: which reads failed, that thresholds
-and the cap were not fully checked, and that the next run retries automatically. On the
-backstop, lead with any `ALERT` line and its parent and child counts exactly as reported.
+and the cap were not fully checked, and that the next run retries automatically. If a
+release-health `ALERT` line appears, lead with it and its parent and child counts exactly as
+reported, ahead of the narrative.
 
 ## One-time setup (lead, before the first run)
 
