@@ -28,6 +28,12 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **A saved dashboard is backed up before a layout upgrade.** The first save after an upgrade
   keeps a copy of the previous layout, so an upgrade can be undone.
 
+### Fixed
+- **Chart captions stay inside their card on phones.** They used to sit flush against the
+  card's edge and get clipped at narrow widths.
+- **A chart with its own filter no longer fails to draw** when that filter was set up from the
+  current site picker rather than the old single-site one.
+
 ## [0.8.0] — 2026-09-26
 
 ### Added
