@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { reactive, computed, watch } from 'vue'
-import type { Widget } from '../types'
+import type { Widget, LineSeries } from '../types'
 import {
   DIMENSIONS,
   GEO_DIMENSIONS,
@@ -12,27 +12,36 @@ import {
   DATASETS,
   CHART_TYPES,
   METRICS,
-  SITE_OPTIONS,
   OVERVIEW_VIEWS,
   CAMPAIGNS_VIEWS,
   CAMPAIGN_OPTIONS,
+  BAR_MODES,
 } from '../lib/catalog'
-import { ringDims, RING_SOFT_CAP } from '../lib/rings'
+import { ringDims, RING_SOFT_CAP, isDateDim } from '../lib/rings'
+import { BEST_SUDOKU_SITES } from '../lib/defaults'
 import { noteOptions, defaultNoteIdsForScope, type NoteScope } from '../lib/notes'
 
 const props = defineProps<{ widget: Widget; isNew: boolean }>()
 const emit = defineEmits<{ save: [Widget]; cancel: []; remove: [] }>()
 
-const draft = reactive<Widget>({ ...props.widget })
+// Series/axis titles are nested objects: copy them, so Cancel leaves the saved widget untouched.
+const copyWidget = (w: Widget): Widget => ({
+  ...w,
+  series: w.series?.map((x) => ({ ...x, filter: x.filter?.map((f) => ({ ...f })) })),
+  axisTitles: w.axisTitles ? { ...w.axisTitles } : undefined,
+})
+const draft = reactive<Widget>(copyWidget(props.widget))
 watch(
   () => props.widget,
-  (w) => Object.assign(draft, w),
+  (w) => Object.assign(draft, copyWidget(w)),
 )
 
 const isGeo = computed(() => draft.dataset === 'geo')
 const isPopup = computed(() => draft.dataset === 'popup')
 const isCompletions = computed(() => draft.dataset === 'completions')
 const isRate = computed(() => draft.type === 'rate')
+// A rate table needs no dimension or pop-up: it always shows every VALID rate.
+const isRateTable = computed(() => draft.type === 'rateTable')
 const isNote = computed(() => draft.type === 'note')
 // The three former-bespoke datasets: no dimension/breakdown/metric/site-override — a
 // "View" picker (+ campaign multi-select for campaigns/ads-readings) replaces them.
@@ -90,8 +99,8 @@ const dimOptions = computed(() =>
 )
 // A count-mode popup chart ('kind'/'reason'/'date'/'outcome') needs to know WHICH pop-up
 // it's scoped to; 'reason'/'date' also need which funnel stage they break down/trend.
-const popupNeedsPopup = computed(() => isPopup.value && !isRate.value && draft.dimension !== 'eligible' && draft.dimension !== 'installOutcome')
-const popupNeedsKind = computed(() => isPopup.value && !isRate.value && (draft.dimension === 'reason' || draft.dimension === 'date'))
+const popupNeedsPopup = computed(() => isPopup.value && !isRate.value && !isRateTable.value && draft.dimension !== 'eligible' && draft.dimension !== 'installOutcome')
+const popupNeedsKind = computed(() => isPopup.value && !isRate.value && !isRateTable.value && (draft.dimension === 'reason' || draft.dimension === 'date'))
 
 // Switching data source: keep the dimension + breakdown valid for the new source. The
 // beacon supports a breakdown too (nested doughnut / stacked bar), so we remap rather
@@ -142,7 +151,7 @@ function onDatasetChange() {
 watch(
   () => draft.type,
   (t, prev) => {
-    if (t === 'rate' && draft.dataset !== 'popup') {
+    if ((t === 'rate' || t === 'rateTable') && draft.dataset !== 'popup') {
       draft.dataset = 'popup'
       onDatasetChange()
     }
@@ -163,7 +172,7 @@ function ringOptionsFor(idx: number) {
   const used = new Set(ringDims(draft))
   const current = draft.rings?.[idx]
   if (current) used.delete(current) // keep this ring's own current value selectable
-  return dimOptions.value.filter((d) => d.key !== 'date' && !used.has(d.key))
+  return dimOptions.value.filter((d) => !isDateDim(d.key) && !used.has(d.key))
 }
 const canAddRing = computed(() => ringOptionsFor((draft.rings ?? []).length).length > 0)
 const totalRingCount = computed(() => ringDims(draft).length)
@@ -185,6 +194,31 @@ function moveRing(idx: number, dir: -1 | 1) {
   const j = idx + dir
   if (j < 0 || j >= list.length) return
   ;[list[idx], list[j]] = [list[j], list[idx]]
+}
+
+// ── Line/area charts on a date axis: overlay toggles, and (beacon data) a series list — each
+// series its own date query narrowed by one filter, on the left or right axis. ─────────────────
+const isDateLine = computed(() => (draft.type === 'line' || draft.type === 'area') && isDateDim(draft.dimension))
+const canUseSeries = computed(() => isDateLine.value && isGeo.value)
+const SERIES_FIELDS = GEO_DIMENSIONS.filter((d) => !isDateDim(d.key))
+function addSeries() {
+  const list: LineSeries[] = (draft.series ??= [])
+  list.push({ label: `Series ${list.length + 1}`, axis: 'left', style: 'solid' })
+}
+function removeSeries(idx: number) {
+  draft.series?.splice(idx, 1)
+  if (!draft.series?.length) draft.series = undefined
+}
+function setSeriesFilter(idx: number, part: 'field' | 'value', v: string) {
+  const s = draft.series?.[idx]
+  if (!s) return
+  const cur = s.filter?.[0] ?? { field: '', value: '' }
+  const next = { ...cur, [part]: v }
+  s.filter = next.field ? [next] : undefined
+}
+const axisTitlesValue = (side: 'left' | 'right') => draft.axisTitles?.[side] ?? ''
+function setAxisTitle(side: 'left' | 'right', v: string) {
+  draft.axisTitles = { ...(draft.axisTitles ?? {}), [side]: v || undefined }
 }
 
 // The world map is geo-only.
@@ -221,10 +255,24 @@ watch(
 )
 
 const typeDef = computed(() => CHART_TYPES.find((t) => t.value === draft.type))
+// "Site override" = Widget.siteSel: this chart's own site pick, replacing the page's (dates and
+// every other page filter still apply). Best Sudoku is its beacon tags (web + app).
+const SITE_OVERRIDES: { value: string; label: string; sel: string[] }[] = [
+  { value: 'all', label: 'All sites', sel: [] },
+  { value: 'bestsudoku', label: 'Best Sudoku (web + app)', sel: [...BEST_SUDOKU_SITES] },
+  { value: 'goodstuff.software', label: 'goodstuff.software (Star Rupture + Simple Tile)', sel: ['goodstuff.software'] },
+  { value: 'goodstuffsoftware.com', label: 'goodstuffsoftware.com', sel: ['goodstuffsoftware.com'] },
+]
 const siteValue = computed({
-  get: () => draft.site ?? 'inherit',
+  get: () => {
+    if (!draft.siteSel) return 'inherit'
+    const key = JSON.stringify([...draft.siteSel].sort())
+    return SITE_OVERRIDES.find((o) => JSON.stringify([...o.sel].sort()) === key)?.value ?? 'custom'
+  },
   set: (v: string) => {
-    draft.site = v === 'inherit' ? undefined : (v as any)
+    if (v === 'custom') return
+    const o = SITE_OVERRIDES.find((x) => x.value === v)
+    draft.siteSel = o ? [...o.sel] : undefined
   },
 })
 
@@ -239,11 +287,24 @@ function save() {
   if (draft.breakdown === '') draft.breakdown = undefined
   if (!popupNeedsPopup.value) draft.popup = undefined
   if (!popupNeedsKind.value) draft.popupKind = undefined
+  if (draft.type !== 'breakdownBar') draft.barMode = undefined
+  // Overlays need a date axis; series need a beacon date axis. A series with no label gets one.
+  if (!isDateLine.value) {
+    draft.markers = undefined
+    draft.goLiveMarkers = undefined
+    draft.flightBands = undefined
+  }
+  if (!canUseSeries.value || !draft.series?.length) {
+    draft.series = undefined
+    draft.axisTitles = undefined
+  } else {
+    draft.series = draft.series.map((s, i) => ({ ...s, label: s.label.trim() || `Series ${i + 1}` }))
+  }
   // Extra rings only make sense for a nested doughnut with a breakdown set; sanitize (drop
   // blanks/duplicates/'date') and clear them entirely otherwise.
   if (draft.type === 'nestedDoughnut' && draft.breakdown) {
     const rings = (draft.rings ?? []).filter(
-      (r, i, arr) => r && r !== 'date' && r !== draft.dimension && r !== draft.breakdown && arr.indexOf(r) === i,
+      (r, i, arr) => r && !isDateDim(r) && r !== draft.dimension && r !== draft.breakdown && arr.indexOf(r) === i,
     )
     draft.rings = rings.length ? rings : undefined
   } else {
@@ -349,16 +410,26 @@ function save() {
 
       <div class="row" v-if="typeDef?.needsDimension && !isBespokeDataset && !isNote">
         <div class="field">
-          <label>{{ isRate ? 'Rate' : 'Group by' }}</label>
+          <label>{{ isRate ? 'Rate' : draft.type === 'breakdownBar' ? 'Axis (group by)' : 'Group by' }}</label>
           <select v-model="draft.dimension">
             <option v-for="d in dimOptions" :key="d.key" :value="d.key">{{ d.label }}</option>
           </select>
         </div>
         <div class="field" v-if="typeDef?.allowsBreakdown">
-          <label>Break down by</label>
+          <label>{{ draft.type === 'breakdownBar' ? 'Series (break down by)' : 'Break down by' }}</label>
           <select v-model="draft.breakdown">
             <option :value="undefined">— none —</option>
             <option v-for="d in dimOptions" :key="d.key" :value="d.key">{{ d.label }}</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Breakdown bar: series side by side, or stacked into one bar per axis value -->
+      <div class="row" v-if="draft.type === 'breakdownBar'">
+        <div class="field">
+          <label>Bars</label>
+          <select :value="draft.barMode ?? 'grouped'" @change="draft.barMode = ($event.target as HTMLSelectElement).value as 'grouped' | 'stacked'">
+            <option v-for="m in BAR_MODES" :key="m.value" :value="m.value">{{ m.label }}</option>
           </select>
         </div>
       </div>
@@ -415,8 +486,9 @@ function save() {
         <div class="field">
           <label>Site override</label>
           <select v-model="siteValue">
-            <option value="inherit">Inherit global</option>
-            <option v-for="o in SITE_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+            <option value="inherit">Inherit the page's sites</option>
+            <option v-for="o in SITE_OVERRIDES" :key="o.value" :value="o.value">{{ o.label }}</option>
+            <option v-if="siteValue === 'custom'" value="custom">Custom ({{ draft.siteSel?.join(', ') }})</option>
           </select>
         </div>
       </div>
@@ -437,13 +509,68 @@ function save() {
           <input type="checkbox" v-model="draft.includeEventBeacons" />
           Include event beacons (pop-up / install / return / game-complete / auth-status)
         </label>
+        <label>
+          <input type="checkbox" :checked="!!draft.excludeKnownTraffic" @change="draft.excludeKnownTraffic = ($event.target as HTMLInputElement).checked || undefined" />
+          Hide known test and household traffic
+        </label>
       </div>
 
-      <div class="field check" v-if="draft.dimension === 'date' && (draft.type === 'line' || draft.type === 'area')">
+      <div class="field check" v-if="isDateLine">
         <label>
           <input type="checkbox" :checked="draft.markers === 'releases'" @change="draft.markers = ($event.target as HTMLInputElement).checked ? 'releases' : undefined" />
           Show Best Sudoku release markers
         </label>
+        <label>
+          <input type="checkbox" :checked="!!draft.goLiveMarkers" @change="draft.goLiveMarkers = ($event.target as HTMLInputElement).checked || undefined" />
+          Show go-live markers (tracking starts, new beacons, install fix)
+        </label>
+        <label>
+          <input type="checkbox" :checked="!!draft.flightBands" @change="draft.flightBands = ($event.target as HTMLInputElement).checked || undefined" />
+          Show campaign flights as shaded bands
+        </label>
+      </div>
+
+      <!-- Beacon line chart on dates: draw several series, each narrowed by one filter. -->
+      <div class="field" v-if="canUseSeries">
+        <label>Series <span class="hint">— none = one line of everything the chart counts</span></label>
+        <div class="series-list">
+          <div v-for="(s, idx) in draft.series ?? []" :key="idx" class="series-row">
+            <input type="text" v-model="s.label" placeholder="Label" aria-label="Series label" />
+            <select :value="s.filter?.[0]?.field ?? ''" aria-label="Series filter field" @change="setSeriesFilter(idx, 'field', ($event.target as HTMLSelectElement).value)">
+              <option value="">(all page views)</option>
+              <option v-for="d in SERIES_FIELDS" :key="d.key" :value="d.key">{{ d.label }}</option>
+            </select>
+            <input
+              v-if="s.filter?.[0]?.field"
+              type="text"
+              :value="s.filter?.[0]?.value ?? ''"
+              placeholder="value"
+              aria-label="Series filter value"
+              @input="setSeriesFilter(idx, 'value', ($event.target as HTMLInputElement).value)"
+            />
+            <select v-model="s.axis" aria-label="Axis">
+              <option value="left">Left axis</option>
+              <option value="right">Right axis</option>
+            </select>
+            <select v-model="s.style" aria-label="Line style">
+              <option value="solid">Solid</option>
+              <option value="dashed">Dashed</option>
+              <option value="dotted">Dotted</option>
+            </select>
+            <button type="button" class="btn ring-btn danger" title="Remove series" @click="removeSeries(idx)">✕</button>
+          </div>
+          <button type="button" class="btn" @click="addSeries">+ Add series</button>
+        </div>
+      </div>
+      <div class="row" v-if="canUseSeries && draft.series?.length">
+        <div class="field">
+          <label>Left axis title</label>
+          <input type="text" :value="axisTitlesValue('left')" @input="setAxisTitle('left', ($event.target as HTMLInputElement).value)" />
+        </div>
+        <div class="field">
+          <label>Right axis title</label>
+          <input type="text" :value="axisTitlesValue('right')" @input="setAxisTitle('right', ($event.target as HTMLInputElement).value)" />
+        </div>
       </div>
 
       <div class="actions">
@@ -457,6 +584,33 @@ function save() {
 </template>
 
 <style scoped>
+.series-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.series-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 6px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid rgb(var(--line));
+  border-radius: 10px;
+}
+/* label on its own row (with the remove button), then field + value, then axis + style */
+.series-row > input:first-child {
+  grid-column: 1 / 3;
+}
+.series-row > button {
+  grid-column: 3;
+  grid-row: 1;
+}
+.series-row input,
+.series-row select {
+  min-width: 0;
+  width: 100%;
+}
 .overlay {
   position: fixed;
   inset: 0;
@@ -495,6 +649,18 @@ h2 {
 .field textarea {
   font-family: inherit;
   resize: vertical;
+}
+/* A checkbox keeps its own size, directly left of its label text (the full-width rule above
+   stretched it and pushed the text far to the right); the whole label stays the click target. */
+.field input[type='checkbox'] {
+  width: auto;
+  flex: none;
+  margin: 0;
+}
+.field.check label,
+.campaign-row {
+  justify-content: flex-start;
+  text-align: left;
 }
 .campaign-list {
   display: flex;

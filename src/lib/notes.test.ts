@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { NOTES_REGISTRY, getNote, noteRawText, isNoteActive, defaultNoteIdsForScope, noteOptions, widgetCaptionNoteIds } from './notes'
-import { MIN_COHORT } from './popupEvents'
+import { MIN_COHORT, INSTALL_FIX_NOTE, INSTALL_OUTCOME_GAP_LABEL, INSTALL_GAP_BEFORE_FIX_LABEL, installOutcomeGapNote, POPUP_PAGE_NOTE, SMALL_SAMPLE_NOTE, SIGNIN_ELIGIBLE_CAVEAT, POPUP_RATE_SPECS } from './popupEvents'
 
 describe('notes registry — lookups', () => {
   it('getNote returns the definition for a known id, undefined for an unknown one', () => {
@@ -112,5 +112,46 @@ describe('noteOptions — ChartEditor picker', () => {
       expect(typeof o.label).toBe('string')
       expect(o.label.length).toBeGreaterThan(0)
     }
+  })
+})
+
+// User-facing text never names code: no module paths, no source files, no backtick code spans
+// (owner review, 2026-09-27: "see lib/releases.ts" and "(lib/campaigns.ts)" showed on screen).
+describe('notes registry — plain language only', () => {
+  const CODE_LIKE = /\blib\/|\.ts\b|`/
+  // …and no raw beacon path (e.g. "/return/ d1+"), which reads as code to the owner.
+  const RAW_PATH = /(^|[\s(])\/(popup-outcome|install|return|auth|game|signin|promo|upsell)\b/
+  it('no registry note text names a file, a module path, a code span or a raw beacon path', () => {
+    for (const id of Object.keys(NOTES_REGISTRY)) {
+      expect(noteRawText(id), id).not.toMatch(CODE_LIKE)
+      expect(noteRawText(id), id).not.toMatch(RAW_PATH)
+    }
+  })
+  it('the guard itself catches a raw path', () => {
+    expect('/return/ d1+ returns').toMatch(RAW_PATH)
+    expect('Return visits (day 1+)').not.toMatch(RAW_PATH)
+  })
+  it('nor does any caption that travels with API data', () => {
+    const texts = [
+      INSTALL_FIX_NOTE,
+      INSTALL_OUTCOME_GAP_LABEL,
+      INSTALL_GAP_BEFORE_FIX_LABEL,
+      installOutcomeGapNote({ startMs: 0, endMs: Date.now() }),
+      POPUP_PAGE_NOTE,
+      SMALL_SAMPLE_NOTE,
+      SIGNIN_ELIGIBLE_CAVEAT,
+      ...POPUP_RATE_SPECS.map((s) => s.label),
+    ]
+    for (const t of texts) {
+      expect(t).not.toMatch(CODE_LIKE)
+      expect(t).not.toMatch(RAW_PATH)
+    }
+  })
+})
+
+describe('noteOptions — the picker shows plain text, not markup or placeholders', () => {
+  it('no ** and no {var} in any option label', () => {
+    for (const o of noteOptions()) expect(o.label, o.value).not.toMatch(/\*\*|\{\w+\}/)
+    expect(noteOptions().find((o) => o.value === 'min-cohort-caveat')!.label).toContain(`at least ${MIN_COHORT}`)
   })
 })

@@ -13,7 +13,7 @@
 // to its correct America/New_York calendar day (see etDateFromMs) — it is still a
 // COUNT(*) GROUP BY, not a row fetch.
 //
-// POST { dimension, since, until, sites?, popup?, kind?, rateKey?, limit? }
+// POST { dimension, since, until, sites?, popup?, kind?, rateKey?, limit?, excludeOwnVisits?, ownBrowser?, ownOS? }
 //   dimension:
 //     'kind'           — shown/accept/dismiss counts for `popup` (required)
 //     'reason'         — reason/platform breakdown for `popup` + `kind` (default 'shown')
@@ -22,11 +22,13 @@
 //     'eligible'       — sign-in-eligible earned/capped/unearned counts (no popup needed)
 //     'installOutcome' — install's real-outcome counts (no popup needed)
 //     'rate'           — one computed rate, selected by `rateKey` (see POPUP_RATE_SPECS)
+//     'rates'          — every VALID rate (POPUP_RATE_TABLE_KEYS) as `rateRows`, for a rateTable widget
 
 import {
   POPUPS,
   POPUP_OUTCOME_TYPES,
   POPUP_RATE_SPECS,
+  POPUP_RATE_TABLE_KEYS,
   TRACKING_ACTIVATION_DATE_ET,
   aggregatePopupRows,
   computePopupRate,
@@ -41,6 +43,7 @@ import {
   popupIncludeClause,
   type HourPathCount,
 } from '../../src/lib/popupEvents'
+import { excludeOwnClause } from '../../src/lib/ownExclusion'
 
 interface Env {
   gss_geo: D1Database
@@ -58,7 +61,7 @@ function safeDate(v: unknown, fallback: string): string {
 }
 const isDateOnly = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v)
 
-const POPUP_DIMS = new Set(['kind', 'reason', 'date', 'outcome', 'eligible', 'installOutcome', 'rate'])
+const POPUP_DIMS = new Set(['kind', 'reason', 'date', 'outcome', 'eligible', 'installOutcome', 'rate', 'rates'])
 const POPUP_IDS = new Set(POPUPS.map((p) => p.id))
 
 type Row = { key: Record<string, string>; pageviews: number; visits: number }
@@ -100,6 +103,9 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     w.push(`site IN (${sites.map(() => '?').join(', ')})`)
     b.push(...sites)
   }
+  // "Hide my own visits" — the same browser+OS exclusion /api/geo applies, so the pop-up bar
+  // chart (geo), the rate table and the eligibility counts (both here) always agree.
+  excludeOwnClause(w, b, body.excludeOwnVisits === true, body.ownBrowser, body.ownOS)
   const inc = popupIncludeClause()
   w.push(inc.sql)
   b.push(...inc.binds)
@@ -162,6 +168,18 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       ...(rateKey === INSTALL_GAP_RATE_KEY && installOutcomeGapNote(range) ? { note: installOutcomeGapNote(range) } : {}),
       meta,
     })
+  }
+
+  // ── Rate table: every VALID pop-up rate (POPUP_RATE_TABLE_KEYS) in one response, each with
+  // its n/d, MIN_COHORT gating and any range caveat (the install fix note) ─────────────────
+  if (dim === 'rates') {
+    const rateRows = POPUP_RATE_TABLE_KEYS.map((key) => {
+      const spec = POPUP_RATE_SPECS.find((s) => s.key === key)!
+      const gated = computePopupRate(agg, spec)
+      const note = key === INSTALL_GAP_RATE_KEY ? installOutcomeGapNote(range) : ''
+      return { key, label: spec.label, ...gated, ...(note ? { note } : {}) }
+    })
+    return json({ rows: [], totals: { pageviews: 0, visits: 0 }, rateRows, meta })
   }
 
   // ── Sign-in eligibility breakdown (earned / capped / unearned) — activation-gated ──
