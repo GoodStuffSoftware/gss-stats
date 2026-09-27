@@ -564,28 +564,44 @@ Single Cloudflare account — no account-ID env needed. Pages project: **gss-sta
 
 The saved dashboard layout lives in KV (`STATS_CONFIG`, key `dashboard:default`). Each time a
 release bumps the layout version (`CONFIG_VERSION` in `src/lib/defaults.ts`), the first save
-of the migrated layout first copies the previous one to `dashboard:default:backup:v<old>`,
-once, and never overwrites that copy (`functions/api/config.ts`; if the backup can't be
-written, the save fails and the old layout stays). A tab still running older code gets `409`
-("This tab is out of date, reload") instead of overwriting a newer layout.
+of the migrated layout first copies the layout that was stored until then to
+`dashboard:default:backup:v<stored version>`, once, and never overwrites that copy
+(`functions/api/config.ts`; if the backup can't be written, the save fails and the old layout
+stays). The backup is named after the version that was **stored**, not the one before the new
+code: a layout still stored at v8 when v10 ships is backed up as `backup:v8`. A tab still
+running older code gets `409` ("This tab is out of date, reload") instead of overwriting a
+newer layout.
 
-To put a backup back (e.g. the v9 layout after a bad v10 migration):
+**Rolling the code back needs the layout rolled back too.** An older release refuses to save
+over a newer stored layout (409), so after rolling back to v0.9.0 (layout v9), for example,
+every save fails until the stored layout is back at the version that release writes.
+
+To put a backup back, in this order:
 
 1. **Close every dashboard tab**, on every device. An open tab saves its in-memory layout on the
    next change and would overwrite what you restore.
 2. **Roll back or fix the code first.** If the deployed code still has the bad migration, the
-   next load migrates the restored layout again. Either redeploy the previous release (its
-   `CONFIG_VERSION` matches the backup) or ship the fixed migration.
-3. Keep a copy of what's there now, then restore (namespace id from `wrangler.toml`; a token
-   with Workers KV Storage: Edit):
+   next load migrates the restored layout again. Either redeploy the previous release or ship
+   the fixed migration.
+3. **Find the backup to restore**: list the backup keys, and pick the version that was stored
+   before the upgrade (the highest one below the current `CONFIG_VERSION`; on production today
+   that is `backup:v8`). Namespace id from `wrangler.toml`; a token with Workers KV Storage: Edit.
+
+   ```bash
+   npx wrangler kv key list --remote --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --prefix "dashboard:default:backup:"
+   ```
+
+4. **Download it, keep a copy of what's there now, and check the file before writing it back**:
+   it must be non-empty, valid JSON with a `pages` array. Only then put it.
 
    ```bash
    npx wrangler kv key get "dashboard:default" --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-current.json
-   npx wrangler kv key get "dashboard:default:backup:v9" --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-v9.json
-   npx wrangler kv key put "dashboard:default" --path layout-v9.json --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote
+   npx wrangler kv key get "dashboard:default:backup:v8" --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-backup.json
+   node -e "const c=JSON.parse(require('fs').readFileSync('layout-backup.json','utf8')); if(!Array.isArray(c.pages)||!c.pages.length) throw new Error('not a layout'); console.log('ok: version', c.version, '-', c.pages.length, 'pages')"
+   npx wrangler kv key put "dashboard:default" --path layout-backup.json --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote
    ```
 
-4. Open one tab and check the layout before opening any others.
+5. Open one tab and check the layout before opening any others.
 
 ## Auth
 

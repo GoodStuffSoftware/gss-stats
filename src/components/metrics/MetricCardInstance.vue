@@ -18,6 +18,7 @@ import { noteRawText } from '../../lib/notes'
 import { badgeViewModel, itemViewModel, resolveLabelTokens } from '../../lib/metrics/render'
 import { buildRequestSpec, flattenSectionItems, resolveRepeat, scopeField, type FlatItem, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
 import type { CardSpec, MetricsContext } from '../../lib/metrics/types'
+import type { TextToken } from '../../lib/textLite'
 import MetricLabel from './MetricLabel.vue'
 import MetricSection from './MetricSection.vue'
 
@@ -28,6 +29,8 @@ const props = defineProps<{
   context?: MetricsContext
   /** A repeated card: the bordered box of the old scorecard. */
   boxed: boolean
+  /** Names the card (Notes toggle) when the spec has no title: the widget's own title. */
+  fallbackTitle?: string
 }>()
 const emit = defineEmits<{ open: [] }>()
 
@@ -53,12 +56,22 @@ const compactItems = noteItems
     const spec = buildRequestSpec(fi.item, fi.scope)
     return { ...fi, value: spec ? request(spec) : null }
   })
-const notes = computed(() =>
-  compactItems.flatMap((fi, i) => {
+// One line per caveat, not per item: items that share a caveat (the arrivals floor on "Tagged
+// arrivals" and on the game-screen views pair, the install fix on "Installs" and "Install") are
+// listed together in front of it, "Tagged arrivals, Game-screen views: Floor — …".
+const notes = computed(() => {
+  const byCaption = new Map<string, { key: string; labels: TextToken[][]; captionTokens: TextToken[] }>()
+  compactItems.forEach((fi, i) => {
     const vm = itemViewModel(fi.item, fi.value?.value, fi.scope, { todayEt })
-    return vm.visible && vm.captionTokens.length ? [{ key: `${fi.item.id}-${i}`, labelTokens: vm.labelTokens, captionTokens: vm.captionTokens }] : []
-  }),
-)
+    if (!vm.visible || !vm.captionTokens.length) return
+    const text = vm.captionTokens.map((t) => t.value).join('')
+    const entry = byCaption.get(text)
+    if (entry) entry.labels.push(vm.labelTokens)
+    else byCaption.set(text, { key: `${fi.item.id}-${i}`, labels: [vm.labelTokens], captionTokens: vm.captionTokens })
+  })
+  const SEP: TextToken = { type: 'text', value: ', ' }
+  return [...byCaption.values()].map((e) => ({ key: e.key, labelTokens: e.labels.flatMap((l, i) => (i ? [SEP, ...l] : l)), captionTokens: e.captionTokens }))
+})
 const notesOpen = ref(false)
 const notesLabel = noteRawText('label.card.notes')
 const openLabel = noteRawText('label.card.openCampaigns')
@@ -67,7 +80,7 @@ const openLabel = noteRawText('label.card.openCampaigns')
 // computed is not, and an untitled card would never show its error line.
 const hasOwnHead = computed(() => titleTokens.value.length > 0 || !!badge.value || notes.value.length > 0)
 const notesId = `mc-notes-${useId()}`
-const plainTitle = computed(() => titleTokens.value.map((t) => t.value).join(''))
+const plainTitle = computed(() => titleTokens.value.map((t) => t.value).join('') || props.fallbackTitle || '')
 /** "Notes: US+CA web retest" — which card's notes, for a screen reader moving between cards. */
 const notesAria = computed(() => (plainTitle.value ? `${notesLabel}: ${plainTitle.value}` : notesLabel))
 
