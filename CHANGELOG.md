@@ -14,6 +14,15 @@ All notable changes to **gss-stats** are documented here. The format follows
   saving. A save that would produce an invalid card (an impossible percentage, a broken pick) is
   refused inline instead of being allowed onto the page.
 
+### Fixed
+- **The card builder opens at the top on a phone, not mid-scroll.** Its fields — title, then the
+  card itself, then the live preview — are reachable from the top of the sheet, the way they're
+  meant to be, instead of the sheet opening centered on whatever content happened to land in the
+  middle.
+- **A live 'bars' card's scale, and a section's show/hide, now follow an edit.** Editing a bars
+  card's rows, or adding/removing a section's rows, used to leave the bar widths reading an old
+  scale and could leave a section shown or hidden based on data from before the edit.
+
 ## [0.10.0] — 2026-09-27
 
 ### Added
