@@ -99,8 +99,10 @@ function factParamsFor(factId: FactId, req: Pick<ResolvedRequest, 'params'>, env
       return { todayEt: env.todayEt }
     case 'bskRangePath':
       return { since: env.context.since, until: env.context.until }
-    case 'popupRangePath':
-      return { since: env.context.since, until: env.context.until, sites: env.context.sites }
+    case 'popupRangePath': {
+      const own = env.context.excludeOwnVisits && env.context.ownBrowser && env.context.ownOS ? { ownBrowser: env.context.ownBrowser, ownOS: env.context.ownOS } : {}
+      return { since: env.context.since, until: env.context.until, sites: env.context.sites, ...own }
+    }
     case 'bskReleaseSides':
       return env.release ? { releaseDateEt: env.release.dateEt, days: env.release.days } : {}
     case 'bskFirstHit':

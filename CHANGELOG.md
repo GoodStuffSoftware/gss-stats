@@ -12,6 +12,10 @@ All notable changes to **gss-stats** are documented here. The format follows
   its "partially instrumented" note. Installs in the Before window read "not yet tracking"
   instead of a 0 nobody could have measured, and on the release day itself the card says there
   is no window yet instead of "No dated release yet".
+- **The Pop-ups rate table and sign-in eligibility are metric cards.** The rate table lists the
+  same valid rates with their counts ("36.4% (4/11)"), with the install-fix caveat in its Notes;
+  the eligibility panel shows earned, capped and unearned as bars and adds the eligibility rate
+  under them. Both still follow the page's range, sites and "hide my own visits".
 
 ## [0.11.0] — 2026-09-27
 

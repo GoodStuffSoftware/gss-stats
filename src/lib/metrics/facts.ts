@@ -47,6 +47,7 @@ import { BEST_SUDOKU_SITES } from '../bestSudokuSites'
 import { COVERAGE_ROWS_SQL, LAST_SYNC_SQL, mapSpendSummary, SPEND_SUMMARY_SQL } from '../adsStore'
 import { UPSELL_SIGNEDOUT_FIX_AT, type SpendSummary } from '../adsRules'
 import { etMidnightMs } from './instrumentation'
+import { excludeOwnClause } from '../ownExclusion'
 
 export type FactId =
   | 'campaignPathVisitor'
@@ -72,6 +73,10 @@ export interface FactParams {
   /** The release windows' anchor (an ET date) and how many days each side covers. */
   releaseDateEt?: string
   days?: number
+  /** "Hide my own visits" (lib/ownExclusion.ts), set only when the page turns it on with a
+   * browser and an OS: rows from that browser on that OS are left out. */
+  ownBrowser?: string
+  ownOS?: string
 }
 
 export interface FactStatement {
@@ -355,8 +360,8 @@ export const FACTS: Record<FactId, FactDef> = {
   popupRangePath: {
     id: 'popupRangePath',
     db: 'gss_geo',
-    keyParams: ['since', 'until', 'sites'],
-    honors: ['range', 'sites'],
+    keyParams: ['since', 'until', 'sites', 'ownBrowser', 'ownOS'],
+    honors: ['range', 'sites', 'excludeOwn'],
     bucketMs: 3_600_000,
     splitAt: INSTALL_FIX,
     ttl: 'range',
@@ -368,6 +373,8 @@ export const FACTS: Record<FactId, FactDef> = {
         w.push(`site IN (${p.sites.map(() => '?').join(', ')})`)
         b.push(...p.sites)
       }
+      // "Hide my own visits", exactly as /api/popups applies it (lib/ownExclusion.ts).
+      excludeOwnClause(w, b, !!(p.ownBrowser && p.ownOS), p.ownBrowser, p.ownOS)
       const inc = popupIncludeClause()
       w.push(inc.sql)
       b.push(...inc.binds)

@@ -16,6 +16,15 @@
 //   L1  Layout: the old "v1.95.3 (2026-09-26) — 2 days before vs after." line is two rows
 //       ("Release", "Days on each side"); the Before and After boxes are one table with Before and
 //       After as its columns. The "before = partially instrumented" note is unchanged, under it.
+//
+// Pop-ups rate table (popup 'rateTable' → preset popup-rates):
+//   L2  Layout: each old row's "%" and "n / d" cells read as one value, "36.4% (4/11)"; the
+//       labels are the old ones, in the old order.
+//   N3  The install fix caveat the old table printed under the installed-rate label is in the
+//       card's Notes (the registry's install-fix note), as every other card's caveats are.
+// Sign-in eligibility (popup 'eligible' bar chart → preset signin-eligibility):
+//   L3  The three counts are the card's bars (labels and values as the chart's bars).
+//   A1  Added: the eligibility rate (earned over all three, a valid partition ratio) under them.
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import MetricCard from './MetricCard.vue'
@@ -23,11 +32,23 @@ import OverviewWidgetBody from '../widgets/OverviewWidgetBody.vue'
 import { __resetMetricsStateForTests } from '../../composables/useMetrics'
 import { onRequestPost as metricsPost } from '../../../functions/api/metrics'
 import { onRequestPost as overviewPost } from '../../../functions/api/overview'
+import { onRequestPost as popupsPost } from '../../../functions/api/popups'
+import ChartCard from '../ChartCard.vue'
+import { fetchStats } from '../../api'
+import { buildChartConfig } from '../../lib/charts'
+import { BEST_SUDOKU_SITES } from '../../lib/bestSudokuSites'
 import { insertHits, installCaches, memoryCache, openHitsDb, pagesContext, postJson, sqliteD1 } from '../../../functions/_lib/testing/hitsDb'
 import { bskFixture, FIXTURE_NOW } from '../../../functions/_lib/testing/bskFixture'
 import { defaultFilters } from '../../lib/defaults'
 import type { Widget } from '../../types'
 
+/** Rows the shared fixture lacks: the owner's own visits (Opera on Windows), which "hide my own
+ * visits" must drop from the pop-up figures on both paths. */
+const PARITY_EXTRA = [
+  { ts: Date.parse('2026-09-26T14:30:00Z'), site: 'bestsudoku-web', path: '/upsell/shown/limit', visitor: 'returning', browser: 'Opera', os: 'Windows', n: 3 },
+  { ts: Date.parse('2026-09-26T14:31:00Z'), site: 'bestsudoku-web', path: '/upsell/accept/limit', visitor: 'returning', browser: 'Opera', os: 'Windows', n: 3 },
+  { ts: Date.parse('2026-09-26T14:32:00Z'), site: 'bestsudoku-web', path: '/signin-eligible/earned', visitor: 'returning', browser: 'Opera', os: 'Windows', n: 2 },
+]
 let db: ReturnType<typeof openHitsDb>
 let cache: ReturnType<typeof memoryCache>
 let undoCaches: () => void
@@ -36,6 +57,7 @@ const mounted: VueWrapper[] = []
 const HANDLERS: Record<string, (ctx: any) => Response | Promise<Response>> = {
   '/api/metrics': metricsPost,
   '/api/overview': overviewPost,
+  '/api/popups': popupsPost,
 }
 async function route(url: string, init: RequestInit): Promise<Response> {
   const path = new URL(url, 'https://stats.goodstuff.software').pathname
@@ -49,7 +71,7 @@ async function route(url: string, init: RequestInit): Promise<Response> {
 
 beforeAll(() => {
   db = openHitsDb()
-  insertHits(db, bskFixture())
+  insertHits(db, [...bskFixture(), ...PARITY_EXTRA])
   vi.useFakeTimers({ now: FIXTURE_NOW, toFake: ['Date'] })
   cache = memoryCache()
   undoCaches = installCaches(cache)
@@ -175,5 +197,53 @@ describe('release-before-after ≡ the bespoke release panel', () => {
     expect(body.meta.statements).toBe(2)
     expect(d1.statements.filter((s) => s.includes('MIN(ts)'))).toHaveLength(1)
     expect(body.results.c.value).toBe(2)
+  })
+})
+
+// ── Pop-ups page ──────────────────────────────────────────────────────────────────────────
+describe('the Pop-ups page panels ≡ their /api/popups renderings', () => {
+  const filters = { ...defaultFilters(), siteSel: [...BEST_SUDOKU_SITES], since: '2026-09-20T04:00:00.000Z', until: '2026-09-27T04:00:00.000Z', rangeRel: '', excludeOwnVisits: true, ownBrowser: 'Opera', ownOS: 'Windows' }
+  const rateTable: Widget = { id: 'pu-rates', i: 'pu-rates', title: 'Rates (valid ratios only)', type: 'rateTable', dataset: 'popup', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 0, w: 8, h: 7 }
+  const eligible: Widget = { id: 'pu-eligible-bd', i: 'pu-eligible-bd', title: 'Sign-in eligibility', type: 'bar', dataset: 'popup', dimension: 'eligible', metric: 'pageviews', limit: 3, x: 0, y: 0, w: 4, h: 7 }
+  async function mountChart(widget: Widget) {
+    const w = mount(ChartCard, { props: { widget, filters, dark: false, drillOpen: false } })
+    mounted.push(w)
+    await settle()
+    return w
+  }
+
+  it('popup-rates: every old rate row, same label, same rate and n/d (L2), the install caveat in Notes (N3)', async () => {
+    const old = await mountChart(rateTable)
+    const oldRows = old.findAll('table.rate-table tbody tr').map((tr) => {
+      const [label, pct, nd] = tr.findAll('td')
+      const noteEl = label.find('.rate-note')
+      const full = text(label.element)
+      return { label: noteEl.exists() ? norm(full.slice(0, full.length - text(noteEl.element).length)) : full, value: `${text(pct.element)} (${text(nd.element)})`, note: noteEl.exists() ? text(noteEl.element) : '' }
+    })
+    expect(oldRows.length).toBe(6)
+    const card = await mountCard('popup-rates', FIXTURE_NOW, { since: filters.since, until: filters.until, sites: [...BEST_SUDOKU_SITES], excludeOwnVisits: true, ownBrowser: 'Opera', ownOS: 'Windows' })
+    const newRows = [...rows(card)].map(([label, value]) => ({ label, value }))
+    expect(newRows).toEqual(oldRows.map(({ label, value }) => ({ label, value })))
+    // Real rates, a zero one, and the owner's own taps left out on both sides (4/11, not 7/14).
+    expect(newRows.find((r) => r.label.startsWith('Upsell'))!.value).toBe('36.4% (4/11)')
+    expect(newRows.some((r) => r.value.startsWith('0.0% ('))).toBe(true)
+    // N3: the old inline caveat, now a Notes line for the installed rate.
+    const oldNote = oldRows.find((r) => r.label.startsWith('Install prompt — installed'))!.note
+    expect(oldNote).toMatch(/install fix/i)
+    await card.find('button.mc-notes-toggle').trigger('click')
+    const notes = card.findAll('.mc-notes li').map((li) => text(li.element))
+    expect(notes.some((l) => l.startsWith('Install prompt — installed rate (from the install fix on): ') && /install fix/i.test(l))).toBe(true)
+  })
+
+  it('signin-eligibility: the chart bars are the card bars (L3), plus the rate (A1)', async () => {
+    const resp = await fetchStats(eligible, filters)
+    const cfg = buildChartConfig(eligible, resp)!
+    const oldBars = (cfg.data.labels as string[]).map((l, i) => [l, String(cfg.data.datasets[0].data[i])])
+    expect(oldBars).toEqual([['earned', '4'], ['capped', '2'], ['unearned', '1']]) // Opera's 2 left out
+    const card = await mountCard('signin-eligibility', FIXTURE_NOW, { since: filters.since, until: filters.until, sites: [...BEST_SUDOKU_SITES], excludeOwnVisits: true, ownBrowser: 'Opera', ownOS: 'Windows' })
+    const r = [...rows(card)]
+    expect(r.slice(0, 3)).toEqual(oldBars)
+    expect(card.findAll('.mi-bar-fill').map((b) => (b.element as HTMLElement).style.width)).toEqual(['100%', '50%', '25%'])
+    expect(r[3]).toEqual(['Sign-in eligibility rate', '57.1% (4/7)']) // A1
   })
 })
