@@ -12,7 +12,7 @@ import MetricCard from './MetricCard.vue'
 import { __resetMetricsStateForTests } from '../../composables/useMetrics'
 import { validateCard } from '../../lib/metrics/validate'
 import { RATIOS } from '../../lib/metrics/ratios'
-import { CAMPAIGN_SCORECARD } from '../../lib/metrics/presets'
+import { CAMPAIGN_SCORECARD, PRESETS } from '../../lib/metrics/presets'
 import type { CardRef, CardSpec } from '../../lib/metrics/types'
 
 const mounted: VueWrapper[] = []
@@ -508,5 +508,29 @@ describe('preset names: never a raw id', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Customized from "Campaign scorecard"')
     expect(wrapper.text()).not.toMatch(/\bcampaign-scorecard\b/)
+  })
+})
+
+describe('every preset, customised: labels read as their names, never "Unknown note"', () => {
+  it.each(Object.keys(PRESETS))('%s', async (id) => {
+    const wrapper = mountEditor({ preset: id })
+    await flushPromises()
+    await wrapper.find('button.btn').trigger('click') // Customize…
+    await flushPromises()
+    const summaries = wrapper.findAll('.ce-item-summary-text').map((s) => s.text())
+    expect(summaries.length).toBeGreaterThan(0)
+    for (const s of summaries) expect(s, `${id}: ${s}`).not.toMatch(/Unknown note|\(no note chosen\)/)
+    // Every note picker (item labels, section and card titles) shows its current pick, not blank.
+    for (const b of wrapper.findAll('.ce-item-summary')) await b.trigger('click')
+    await flushPromises()
+    let pickers = 0
+    for (const sel of wrapper.findAll('select')) {
+      const el = sel.element as HTMLSelectElement
+      if (![...el.options].some((o) => o.textContent?.includes('Choose a note'))) continue
+      pickers++
+      expect(el.value, `${id}: a note picker is blank`).not.toBe('')
+      expect(el.selectedOptions[0]?.textContent ?? '', id).not.toMatch(/^\s*$/)
+    }
+    if (id === 'campaign-funnel') expect(pickers).toBeGreaterThanOrEqual(14)
   })
 })

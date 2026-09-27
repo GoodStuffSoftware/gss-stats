@@ -6,7 +6,7 @@
 // pattern (ChartEditor.vue) so it works with a keyboard and on touch.
 import { computed, ref, useId, watch } from 'vue'
 import { MIN_COHORT } from '../../../lib/popupEvents'
-import { dataKindOf, dataSummaryLabel, displayAsLabel, firstDisplayFor, isDisplaySelectable, isKnownNote, makeDisplay, noteLabelOptions, scopePathLabel } from '../../../lib/metrics/editorModel'
+import { dataKindOf, dataSummaryLabel, displayAsLabel, firstDisplayFor, isDisplaySelectable, isKnownNote, labelNoteOptions, makeDisplay, notePreview, scopePathLabel } from '../../../lib/metrics/editorModel'
 import type { MetricItem, RepeatSpec } from '../../../lib/metrics/types'
 import CardEditorData from './CardEditorData.vue'
 import CardEditorDisplay from './CardEditorDisplay.vue'
@@ -52,7 +52,8 @@ watch(
 const summaryLabel = computed(() => {
   const l = item.value.label
   if (typeof l === 'string') return l || '(no label)'
-  if ('note' in l) return l.note ? (noteLabelOptions().find((o) => o.value === l.note)?.preview ?? 'Unknown note') : '(no note chosen)'
+  // Any kind of note, a label entry included (a preset's funnel step names are label notes).
+  if ('note' in l) return l.note ? (notePreview(l.note) ?? 'Unknown note') : '(no note chosen)'
   if ('bind' in l) return scopePathLabel(l.bind)
   return "metric's own"
 })
@@ -101,7 +102,7 @@ const whenEmptyNote = computed<string>({
 const whenEmptyNoteSearch = ref('')
 const whenEmptyNoteChoices = computed(() => {
   const q = whenEmptyNoteSearch.value.trim().toLowerCase()
-  const all = noteLabelOptions()
+  const all = labelNoteOptions(whenEmptyNote.value || undefined)
   return q ? all.filter((o) => o.preview.toLowerCase().includes(q) || o.value.toLowerCase().includes(q)) : all
 })
 const whenEmptyNoteInvalid = computed(() => !!whenEmptyNote.value && !isKnownNote(whenEmptyNote.value))
