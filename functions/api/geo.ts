@@ -194,6 +194,22 @@ const DERIVED_FILTER_EXPR: Record<string, string> = {
 
 export const MAX_SITES = 50
 export const MAX_CONSTRAINTS = 16
+// D1's own statement limits: 100 bound parameters per query, and a SQL text cap (100 KB). A
+// statement over either is refused here with a clear 400 BEFORE it reaches D1, so the chart
+// says what to change instead of surfacing a database error. 90,000 bytes leaves headroom.
+export const MAX_BOUND_PARAMS = 100
+export const MAX_SQL_BYTES = 90_000
+/** A clear 400 when a statement would exceed D1's limits, else null. */
+export function statementTooLarge(sql: string, bindCount: number): Response | null {
+  if (bindCount > MAX_BOUND_PARAMS) {
+    return json({ error: `this chart's filters are too many to query at once (${bindCount} values; at most ${MAX_BOUND_PARAMS}): select fewer sites or filters` }, 400)
+  }
+  const bytes = new TextEncoder().encode(sql).length
+  if (bytes > MAX_SQL_BYTES) {
+    return json({ error: `this chart's filters make the query too large (${bytes} bytes; at most ${MAX_SQL_BYTES}): use fewer pop-up filters` }, 400)
+  }
+  return null
+}
 
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), {
@@ -384,6 +400,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     selfReferralClause([], w, b) // points mode has no group-by dim, so this is always inert
     const sql = `SELECT lat, lon, city, region, country, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY lat, lon ORDER BY c DESC LIMIT ?`
     b.push(Math.min(limit, 2000))
+    const tooLarge = statementTooLarge(sql, b.length)
+    if (tooLarge) return tooLarge
     let r: any
     try {
       r = await ctx.env.gss_geo.prepare(sql).bind(...b).all()
@@ -438,6 +456,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     // One statement: the inner GROUP BY scans `hits` once; SUM(c) OVER () sums every group's
     // count (not just the fetched top-N) into `total`, replacing the old second COUNT(*) scan.
     const sql = buildMergedRingSql(cols, whereSql, groupBy)
+    const tooLarge = statementTooLarge(sql, b.length + 1)
+    if (tooLarge) return tooLarge
     let r: any
     try {
       r = await ctx.env.gss_geo.prepare(sql).bind(...b, fetchLimit).all()
@@ -481,6 +501,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // One statement in place of the old total-COUNT(*) + grouped-COUNT(*) pair — see the
   // buildMergedBreakdownSql doc comment for why SUM(c) OVER () gives the same grand total.
   const sql = buildMergedBreakdownSql(col, whereSql, orderBy)
+  const tooLarge = statementTooLarge(sql, binds.length + 1)
+  if (tooLarge) return tooLarge
 
   let res: any
   try {

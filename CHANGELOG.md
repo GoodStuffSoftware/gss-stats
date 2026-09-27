@@ -69,11 +69,13 @@ All notable changes to **gss-stats** are documented here. The format follows
   count.
 - **Pop-up charts read unusual beacon paths the same way the rest of the dashboard does**
   (a trailing or doubled slash, an extra segment).
-- **An oversized chart request gets a clear error** instead of a database message.
+- **An oversized chart request gets a clear error** instead of a database message: too many
+  sites or filters, or a combination too large for one query, says what to cut back.
 - **"Hide my visits" applies to the pop-up rate table and eligibility counts too,** so they
   agree with the pop-up bar chart.
-- **A tab left open on older code can't overwrite a newer layout.** Its save is refused and it
-  says "This tab is out of date, reload".
+- **A tab left open on older code can't overwrite a newer layout.** Its save is refused, so the
+  layout is protected either way. A tab that loaded this version says "This tab is out of date,
+  reload"; a tab still open on v0.8.x just shows "Save failed" (reload it).
 - **The notes picker in the chart editor shows plain text,** without markup or placeholders.
 
 ## [0.8.1] — 2026-09-27

@@ -2,6 +2,7 @@
 // older stored config (see its header). A Map stands in for the STATS_CONFIG namespace.
 import { describe, expect, it } from 'vitest'
 import { onRequestPut, backupKeyFor } from './config'
+import { CONFIG_VERSION } from '../../src/lib/defaults'
 
 function fakeKv(initial: Record<string, string> = {}) {
   const store = new Map(Object.entries(initial))
@@ -72,6 +73,17 @@ describe('config PUT backs up the stored config on a version bump', () => {
     }
     await expect(put(kv, cfg(9, 'new'))).rejects.toThrow()
     expect(store.get('dashboard:default')).toBe(old)
+  })
+
+  it('refuses a version above the code\'s CONFIG_VERSION with 400, so a crafted body cannot lock tabs out', async () => {
+    const current = JSON.stringify(cfg(CONFIG_VERSION))
+    const { kv, store, puts } = fakeKv({ 'dashboard:default': current })
+    const res = await put(kv, { ...cfg(1e9), version: 1e9 })
+    expect(res.status).toBe(400)
+    expect(puts).toEqual([])
+    expect(store.get('dashboard:default')).toBe(current)
+    // and a real tab can still save afterwards
+    expect((await put(kv, cfg(CONFIG_VERSION, 'real'))).status).toBe(200)
   })
 
   it('still rejects a body with no pages or widgets, without touching KV', async () => {

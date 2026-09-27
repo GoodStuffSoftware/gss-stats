@@ -13,6 +13,8 @@
 // KV write per version bump — well inside the Free plan's 1,000 writes a day. A save from an
 // OLDER layout version than the stored one is refused with 409 (see onRequestPut).
 
+import { CONFIG_VERSION } from '../../src/lib/defaults'
+
 interface Env {
   STATS_CONFIG: KVNamespace
 }
@@ -58,6 +60,11 @@ export const onRequestPut: PagesFunction<Env> = async (ctx) => {
     incomingVersion = Number(parsed.version) || 0
   } catch {
     return json('{"error":"invalid JSON"}', 400)
+  }
+  // A version above anything this code writes can't be a real layout (a crafted or corrupted
+  // body): refuse it, or the 409 below would lock every real tab out afterwards.
+  if (incomingVersion > CONFIG_VERSION) {
+    return json(JSON.stringify({ error: `layout version ${incomingVersion} is newer than this site supports (${CONFIG_VERSION})` }), 400)
   }
   const kv = ctx.env.STATS_CONFIG
   const stored = await kv.get(KEY)
