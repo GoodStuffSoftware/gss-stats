@@ -327,7 +327,9 @@ function deriveRatio(req: ResolvedRequest, env: DeriveEnv): MetricValue {
 
 /** Every request's result, keyed by its key. Invalid requests carry their validation reason. */
 export function deriveBatch(checks: readonly RequestCheck[], env: DeriveEnv): Record<string, MetricValue> {
-  const out: Record<string, MetricValue> = {}
+  // No prototype: a client key such as "__proto__" (it passes KEY_RE) must be an ordinary own
+  // property of the results, never a prototype assignment that silently drops it.
+  const out: Record<string, MetricValue> = Object.create(null)
   for (const c of checks) {
     if (!c.ok) {
       out[c.key] = { status: 'error', reason: c.reason }
