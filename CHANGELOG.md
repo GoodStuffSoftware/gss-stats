@@ -45,6 +45,10 @@ All notable changes to **gss-stats** are documented here. The format follows
   only it used are gone; a saved layout's panels are swapped in place the first time it loads.
   The chart editor no longer offers the old rate-table chart type or the pop-up "sign-in
   eligibility" dimension (both are cards: "Pop-up rates" and "Sign-in eligibility").
+- **Reload any dashboard tab that was open during this update.** A tab loaded before it still
+  asks for the retired panels' data, so those panels show an error until the page is reloaded
+  (the old rate table and sign-in eligibility name the card that replaced them) instead of
+  quietly showing "No data".
 
 ### Added
 - **Two new beacon dimensions, "Hour of day (ET)" and "Campaign flight day"**, and line charts
