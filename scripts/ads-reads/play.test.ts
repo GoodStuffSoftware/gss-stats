@@ -160,6 +160,13 @@ describe('readPlayReports — end to end against a fake GCS harness', () => {
     const installsBuf = csvBuf(installsCsv)
     const countryBuf = csvBuf(countryCsv)
     const sourceBuf = csvBuf(sourceCsv)
+    // Regression: a live probe (2026-09-27) found listObjects/downloadObject built their
+    // requests with `headers: {}`, silently dropping the bearer token — GCS then answers
+    // every list/download with 401 "Anonymous caller", even though accessToken() itself
+    // succeeded. The mocks above never inspected headers, so this shipped and only surfaced
+    // against the real bucket. Every non-oauth request's Authorization header is captured and
+    // asserted below so this class of bug fails a unit test, not a live run.
+    const seenAuth: (string | undefined)[] = []
     try {
       const out = await readPlayReports(sa, {
         since: '2026-09-01',
@@ -169,6 +176,7 @@ describe('readPlayReports — end to end against a fake GCS harness', () => {
         bucket: 'pubsite_prod_test',
         fetchImpl: async (url, init) => {
           if (url.includes('oauth2')) return { ok: true, status: 200, text: async () => JSON.stringify({ access_token: 'ya29.test' }), arrayBuffer: async () => new ArrayBuffer(0) }
+          seenAuth.push(init.headers.Authorization)
           if (url.includes('/o?') && url.includes('installs_com.bestsudoku.app_')) return { ok: true, status: 200, text: async () => JSON.stringify({ items: [{ name: 'stats/installs/installs_com.bestsudoku.app_202609_overview.csv', updated: '2026-09-26T16:10:00Z' }] }), arrayBuffer: async () => new ArrayBuffer(0) }
           if (url.includes('/o?') && url.includes('store_performance_com.bestsudoku.app_')) return { ok: true, status: 200, text: async () => JSON.stringify({ items: [{ name: 'stats/store_performance/store_performance_com.bestsudoku.app_202609_country.csv' }, { name: 'stats/store_performance/store_performance_com.bestsudoku.app_202609_traffic_source.csv' }] }), arrayBuffer: async () => new ArrayBuffer(0) }
           if (url.includes('_overview.csv')) return { ok: true, status: 200, text: async () => '', arrayBuffer: async () => toArrayBuffer(installsBuf) }
@@ -177,6 +185,8 @@ describe('readPlayReports — end to end against a fake GCS harness', () => {
           throw new Error(`unexpected URL in test: ${url}`)
         },
       })
+      expect(seenAuth.length).toBeGreaterThan(0)
+      expect(seenAuth.every((a) => a === 'Bearer ya29.test')).toBe(true) // every list/download call, never anonymous
       expect(out.ok).toBe(true)
       expect(out.bucket).toBe('pubsite_prod_test')
       expect(out.installsByDay).toEqual([{ date: '2026-09-20', deviceInstalls: 1, userInstalls: 1, deviceUninstalls: 0, activeDeviceInstalls: 10 }])
