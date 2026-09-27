@@ -265,21 +265,43 @@ export function etFlightRangeMs(flightStart: string, flightEnd: string): [number
  * bound is ET midnight of `flightStart` UNLESS `flightStartTimeEt` is set, in which case
  * it's `flightStart` at that local ET time instead (DST-safe, via etTimeUtcMs) — e.g. the
  * retest's ad schedule starts at noon ET, so same-day pre-schedule rows don't count. */
-export function campaignAttributionClause(campaign: CampaignFlight): { sql: string; binds: unknown[] } {
+export function campaignAttributionClause(campaign: CampaignFlight): CampaignAttribution {
   const ucPlaceholders = campaign.ucValues.map(() => '?').join(', ')
   const w = [`campaign IN (${ucPlaceholders})`]
   const binds: unknown[] = [...campaign.ucValues]
-  if (campaign.flightStart === null) {
+  const startMs = campaignAttributionStartMs(campaign)
+  if (startMs === null) {
     w.push('1 = 0')
   } else {
     w.push('ts >= ?')
-    binds.push(
-      campaign.flightStartTimeEt
-        ? etTimeUtcMs(campaign.flightStart, campaign.flightStartTimeEt)
-        : etMidnightUtcMs(campaign.flightStart),
-    )
+    binds.push(startMs)
   }
-  return { sql: w.join(' AND '), binds }
+  return {
+    sql: w.join(' AND '),
+    binds,
+    // The same rule in JS, for callers that already hold aggregate rows (the overview KPI's
+    // minute buckets) instead of running their own attribution query. `rowStartMs` is the
+    // bucket's start instant: the lower bound is always a whole ET minute (ET offsets are whole
+    // hours, flightStartTimeEt is HH:MM), so for minute buckets "bucket start >= bound" is
+    // row-exact — every row in the bucket is on the same side of it.
+    matches: (campaignTag, rowStartMs) => startMs !== null && campaign.ucValues.includes(campaignTag) && rowStartMs >= startMs,
+  }
+}
+
+/** campaignAttributionClause's result: the SQL fragment plus its JS twin. */
+export interface CampaignAttribution {
+  sql: string
+  binds: unknown[]
+  /** True when a row with this `campaign` tag, in a bucket starting at `rowStartMs`, belongs to
+   * the campaign. Exact for buckets of a minute or less (see campaignAttributionClause). */
+  matches(campaignTag: string, rowStartMs: number): boolean
+}
+
+/** The attribution window's lower bound (epoch ms), or null while flightStart is unconfirmed
+ * (attribute nothing). flightStart at flightStartTimeEt when set, else ET midnight. */
+export function campaignAttributionStartMs(campaign: CampaignFlight): number | null {
+  if (campaign.flightStart === null) return null
+  return campaign.flightStartTimeEt ? etTimeUtcMs(campaign.flightStart, campaign.flightStartTimeEt) : etMidnightUtcMs(campaign.flightStart)
 }
 
 // ── Exclusions (row filters — single-row predicates, never a cross-row join) ───────────
@@ -409,18 +431,11 @@ export type FunnelStepKey = 'arrivals' | 'played' | 'completed' | 'ask' | 'accep
 
 export const FUNNEL_STEP_ORDER: FunnelStepKey[] = ['arrivals', 'played', 'completed', 'ask', 'accept', 'authSuccess', 'installPrompt', 'install']
 
-export const FUNNEL_STEP_LABELS: Record<FunnelStepKey, string> = {
-  arrivals: 'Arrivals',
-  played: 'Played a game',
-  completed: 'Completed a game',
-  ask: 'Sign-in ask',
-  accept: 'Accept',
-  authSuccess: 'Auth success',
-  installPrompt: 'Install prompt',
-  // Range-specific install-fix caveats travel with the data instead (functions/api/campaigns.ts
-  // funnel.installNote, from lib/popupEvents.ts installOutcomeGapNote).
-  install: 'Install',
-}
+// Step LABELS live in the notes registry (lib/notes.ts FUNNEL_STEP_LABEL_IDS / funnelStepLabel,
+// NoteKind 'label'), not here: every visible string goes through that one registry (ADR 0003),
+// and this module can't import it (notes.ts imports ARRIVALS_CAVEAT from here, and the
+// gss-stats-sync Worker bundles this file). 'played' counts `/game` PAGE VIEWS, not games, so
+// its label is "Game-screen views" (ADR 0003 rate audit).
 
 // Steps with NO matching path anywhere in production D1 as of 2026-09-25 (confirmed by
 // scanning every distinct path on site='bestsudoku-web', tagged or not — see task report).
@@ -443,28 +458,13 @@ export function gameCompleteNotInstrumented(campaign: CampaignFlight): boolean {
   return campaign.flightEnd < NEW_BEACONS_LIVE_AT_ET
 }
 
-/** The overview scorecard's per-row notInstrumented set (functions/api/overview.ts): the
- * full per-flight "did this path exist site-wide during the window" check for a CLOSED
- * campaign (`closedNotInstrumented` — computed server-side via a D1 query, functions/_lib/
- * campaignInstrumentation.ts, so it can't live in this pure module), or just the
- * gameCompleteNotInstrumented gate for an active/upcoming one. Exported so the actual
- * contract driving the scorecard UI — "a campaign's 'completed' chip shows its real count,
- * not a stale label, once its flight reaches GAME_COMPLETE_LIVE_AT" — is unit-testable
- * without a database (bug fix, 2026-09-26: the scorecard template used to check the
- * PERMANENT FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED constant directly instead of this
- * per-row result, so an active campaign's real completed-game count never showed). */
-export function scorecardNotInstrumentedSteps(campaign: CampaignFlight, closedNotInstrumented: readonly FunnelStepKey[]): Set<FunnelStepKey> {
-  if (campaign.status === 'closed') return new Set(closedNotInstrumented)
-  return gameCompleteNotInstrumented(campaign) ? new Set(FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED) : new Set()
-}
-
 // CONFIG HOOK (deferred, disabled by default, superseded by the real /game/complete/ beacon
 // below as of v1.95.5 — kept only in case product ever wants a SIGNED-OUT proxy for
 // pre-v1.95.5 history): '/signin-eligible/*' fires only after a game plays out — a possible
 // proxy for "completed" before the real beacon existed (not a real completion signal, just
 // correlated timing). null = disabled (current state).
 export const COMPLETED_PROXY_PATH_PREFIX: string | null = null
-/** Shown instead of "Completed a game" wherever COMPLETED_PROXY_PATH_PREFIX is enabled. */
+/** Shown instead of the 'completed' step label wherever COMPLETED_PROXY_PATH_PREFIX is enabled. */
 export const COMPLETED_PROXY_LABEL = 'signed-out completions (proxy, deferred)'
 
 /** "played a game" — found live: `/game` is the dominant tagged path (1111/1194 rows for

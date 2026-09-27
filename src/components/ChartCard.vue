@@ -2,7 +2,7 @@
 import { ref, watch, computed, onMounted, onBeforeUnmount, nextTick, useId } from 'vue'
 import type { Widget, GlobalFilters, StatsResponse } from '../types'
 import { fetchStats, fetchSeriesStats } from '../api'
-import { sitesLoaded } from '../sitesStore'
+import { resolveSelection, sitesLoaded } from '../sitesStore'
 import { checkSessionExpired, isAuthError, isNetworkError } from '../session'
 import { buildChartConfig, formatKey, metricValue, nestedDoughnutClickValue, seriesRows, hasLineSeries, widgetHasOverlay, widgetOverlayOptions } from '../lib/charts'
 import { overlayItems, itemsInRange } from '../lib/timelineOverlay'
@@ -14,6 +14,9 @@ import BaseChart from './charts/BaseChart.vue'
 import WorldMap from './charts/WorldMap.vue'
 import FilterPopover from './FilterPopover.vue'
 import OverviewWidgetBody from './widgets/OverviewWidgetBody.vue'
+import MetricCard from './metrics/MetricCard.vue'
+import { metricsContextFor } from '../lib/metrics/pageContext'
+import { presetById } from '../lib/metrics/presets'
 import CampaignsWidgetBody from './widgets/CampaignsWidgetBody.vue'
 import NoteWidgetBody from './widgets/NoteWidgetBody.vue'
 import AdsReadingsWidgetCard from './widgets/AdsReadingsWidgetCard.vue'
@@ -26,8 +29,31 @@ const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolea
 // data fetch or none) — no /api/stats round trip, no per-chart filter override, no drill.
 // The header (title/zoom/menu) stays generic and shared with every other widget type.
 const isBespokeBody = computed(
-  () => props.widget.dataset === 'overview' || props.widget.dataset === 'campaigns' || props.widget.dataset === 'ads-readings' || props.widget.type === 'note',
+  () => !!props.widget.card || props.widget.dataset === 'overview' || props.widget.dataset === 'campaigns' || props.widget.dataset === 'ads-readings' || props.widget.type === 'note',
 )
+
+// A metric card (ADR 0003, Widget.card): MetricCard renders it from the card reference and the
+// page context — the filter bar's range and sites, or this widget's own override — which it
+// follows as they change (useMetrics re-plans on a context change). Its reload is the card's
+// own (a fresh refetch of every value on it), wired to this header's ↻.
+const isCard = computed(() => !!props.widget.card)
+const metricsContext = computed(() => {
+  const f = effectiveFilters.value
+  return metricsContextFor({ since: f.since, until: f.until }, resolveSelection(props.widget.siteSel ?? f.siteSel).tags)
+})
+const metricCard = ref<{ reload(): void } | null>(null)
+/** A card that shows its own "Updated … ↻" (CardSpec.showUpdated) has its reload there; the
+ * header's ↻ would be a second control for the same action, so it is hidden for that card. */
+const cardHasOwnReload = computed(() => {
+  const c = props.widget.card
+  if (!c) return false
+  const spec = 'preset' in c ? presetById(c.preset) : c.spec
+  return !!spec?.showUpdated
+})
+function reloadThis() {
+  if (isCard.value) metricCard.value?.reload()
+  else load()
+}
 
 // Attached captions — see lib/notes.ts widgetCaptionNoteIds for the full rule (pulled out
 // as a pure function so it's unit-testable without mounting this component).
@@ -462,7 +488,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
               <path d="M1.5 2.5h13l-5 6v4.2l-3 1.5V8.5z" fill="currentColor" />
             </svg>
           </button>
-          <button v-if="!isBespokeBody" class="btn-ghost icon" title="Reload" @click.stop="load">↻</button>
+          <button v-if="!isBespokeBody || (isCard && !cardHasOwnReload)" class="btn-ghost icon" title="Reload" @click.stop="reloadThis">↻</button>
           <div class="menu-anchor">
             <button class="btn-ghost icon" title="Options" @click.stop="menuOpen = !menuOpen">⋯</button>
             <div v-if="menuOpen" class="menu" @click.stop>
@@ -520,7 +546,8 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
     <div class="card-body" @dblclick="onCardBodyDblClick">
       <!-- Bespoke bodies: overview / campaigns / ads-readings datasets, and the note type —
            own data fetch (or none), skip the generic loading/error/empty states above. -->
-      <OverviewWidgetBody v-if="widget.dataset === 'overview'" :widget="widget" :filters="effectiveFilters" :dark="dark" @open-campaigns="emit('open-campaigns')" />
+      <MetricCard v-if="widget.card" ref="metricCard" :card-ref="widget.card" :context="metricsContext" :fallback-title="widget.title" @open-campaigns="emit('open-campaigns')" />
+      <OverviewWidgetBody v-else-if="widget.dataset === 'overview'" :widget="widget" :filters="effectiveFilters" :dark="dark" />
       <CampaignsWidgetBody v-else-if="widget.dataset === 'campaigns'" :widget="widget" />
       <AdsReadingsWidgetCard v-else-if="widget.dataset === 'ads-readings'" :widget="widget" />
       <NoteWidgetBody v-else-if="widget.type === 'note'" :widget="widget" />

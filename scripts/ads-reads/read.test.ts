@@ -132,6 +132,12 @@ describe('morning-read: review lows', () => {
     expect(r.notify.text).toMatch(/Placement share \d+\.\d% is borderline, check the placement view\./)
     expect(formatMorningReport(r)).toMatch(/\(borderline, check the placement view\)/)
   })
+  it('review #6: the tagged-funnel line says "game-screen views" (the registry label), never "played"', async () => {
+    const r = await runMorningRead(fixtureDeps(base(), true), opts)
+    const line = formatMorningReport(r).split('\n').find((l) => l.startsWith('Tagged funnel'))!
+    expect(line).toMatch(/hits; game-screen views \d+; asks/)
+    expect(line).not.toMatch(/\bplayed\b/)
+  })
   it('L11: the report (the bus copy) names off-list placements by package id, never the display name', async () => {
     const r = await runMorningRead(fixtureDeps(base(), true), opts)
     const text = formatMorningReport(r)

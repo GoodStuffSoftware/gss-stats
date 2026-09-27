@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { NOTES_REGISTRY, getNote, noteRawText, isNoteActive, defaultNoteIdsForScope, noteOptions, widgetCaptionNoteIds } from './notes'
+import { NOTES_REGISTRY, getNote, noteRawText, isNoteActive, defaultNoteIdsForScope, noteOptions, widgetCaptionNoteIds, FUNNEL_STEP_LABEL_IDS, funnelStepLabel } from './notes'
+import { FUNNEL_STEP_ORDER } from './campaigns'
 import { MIN_COHORT, INSTALL_FIX_NOTE, INSTALL_OUTCOME_GAP_LABEL, INSTALL_GAP_BEFORE_FIX_LABEL, installOutcomeGapNote, POPUP_PAGE_NOTE, SMALL_SAMPLE_NOTE, SIGNIN_ELIGIBLE_CAVEAT, POPUP_RATE_SPECS } from './popupEvents'
 
 describe('notes registry — lookups', () => {
@@ -27,7 +28,9 @@ describe('notes registry — lookups', () => {
   it('every registry entry has a non-empty id matching its own key', () => {
     for (const [key, def] of Object.entries(NOTES_REGISTRY)) {
       expect(def.id).toBe(key)
-      expect(def.scopes.length).toBeGreaterThan(0)
+      // A caption ('note'/'text') is a default somewhere; a 'label' never is.
+      if (def.kind === 'label') expect(def.scopes).toEqual([])
+      else expect(def.scopes.length).toBeGreaterThan(0)
     }
   })
 })
@@ -104,9 +107,10 @@ describe('widgetCaptionNoteIds — per-widget overrides + migration default', ()
 })
 
 describe('noteOptions — ChartEditor picker', () => {
-  it('returns one option per registry entry, each with a value and a label', () => {
+  it('returns one option per caption entry (labels excluded), each with a value and a label', () => {
     const opts = noteOptions()
-    expect(opts.length).toBe(Object.keys(NOTES_REGISTRY).length)
+    expect(opts.length).toBe(Object.values(NOTES_REGISTRY).filter((n) => n.kind !== 'label').length)
+    expect(opts.some((o) => NOTES_REGISTRY[o.value].kind === 'label')).toBe(false)
     for (const o of opts) {
       expect(typeof o.value).toBe('string')
       expect(typeof o.label).toBe('string')
@@ -115,6 +119,30 @@ describe('noteOptions — ChartEditor picker', () => {
   })
 })
 
+describe("labels (NoteKind 'label', ADR 0003)", () => {
+  it('"Games played" / "Played a game" are "Game-screen views": `/game` rows are page views, not games', () => {
+    expect(noteRawText('label.bsk.gameViews')).toBe('Game-screen views')
+    expect(noteRawText('label.campaign.gameViews')).toBe('Game-screen views')
+    expect(funnelStepLabel('played')).toBe('Game-screen views')
+    const all = Object.values(NOTES_REGISTRY).map((n) => (typeof n.text === 'string' ? n.text : n.text()))
+    expect(all).not.toContain('Played a game')
+    expect(all).not.toContain('Games played')
+  })
+
+  it('every funnel step has a registry label, and every one of those is a label entry', () => {
+    for (const step of FUNNEL_STEP_ORDER) {
+      const def = getNote(FUNNEL_STEP_LABEL_IDS[step])
+      expect(def?.kind).toBe('label')
+      expect(funnelStepLabel(step).length).toBeGreaterThan(0)
+    }
+  })
+
+  it('labels are never scope defaults (so they never become a widget caption)', () => {
+    for (const scope of ['overview', 'campaigns', 'popup', 'geo', 'rum', 'ads-readings'] as const) {
+      for (const id of defaultNoteIdsForScope(scope)) expect(NOTES_REGISTRY[id].kind).not.toBe('label')
+    }
+  })
+})
 // User-facing text never names code: no module paths, no source files, no backtick code spans
 // (owner review, 2026-09-27: "see lib/releases.ts" and "(lib/campaigns.ts)" showed on screen).
 describe('notes registry — plain language only', () => {

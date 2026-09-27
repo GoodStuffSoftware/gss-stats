@@ -76,3 +76,21 @@ export function addDays(dateEt: string, days: number): string {
   const [y, m, d] = dateEt.split('-').map(Number)
   return ymd(new Date(Date.UTC(y, m - 1, d) + days * DAY))
 }
+
+/** lib/overview.ts sameTimeWindowMs without Intl: [ET midnight of `dateEt`, the same ET wall-clock
+ * time (to the second) as `nowMs` on `dateEt`). DST-safe the same way: the wall-clock time is
+ * re-applied to the date's own offset, and a time the date skips (spring forward) falls back to
+ * the EST reading. Checked against sameTimeWindowMs in etTime.test.ts. */
+export function etSameTimeWindow(dateEt: string, nowMs: number): [number, number] {
+  const wall = new Date(nowMs + etOffsetHours(nowMs) * HOUR)
+  const target = ((wall.getUTCHours() * 60 + wall.getUTCMinutes()) * 60 + wall.getUTCSeconds()) * 1000
+  const [y, m, d] = dateEt.split('-').map(Number)
+  const dayUtc = Date.UTC(y, m - 1, d)
+  const start = etWallTimeMs(dateEt)
+  for (const offsetHours of [5, 4]) {
+    const candidate = dayUtc + offsetHours * HOUR + target
+    const local = candidate + etOffsetHours(candidate) * HOUR
+    if (local - dayUtc === target) return [start, candidate] // same date, same wall clock
+  }
+  return [start, dayUtc + 5 * HOUR + target]
+}

@@ -1,0 +1,50 @@
+<script setup lang="ts">
+// One cell of a 'table' section (Section.layout === 'table': "items are columns, repeat
+// instances are rows" — ADR 0003 section 1). The column header is the item's label
+// (MetricSection.vue renders that once); this is just the value + delta + caption, the same
+// view model MetricItem.vue uses for a row/pill/tile.
+import { useMetricItemViewModel } from '../../composables/useMetricItem'
+import type { ScopeInstance } from '../../lib/metrics/scope'
+import type { MetricItem, MetricsContext } from '../../lib/metrics/types'
+import MetricLabel from './MetricLabel.vue'
+
+const props = defineProps<{ item: MetricItem; scope: ScopeInstance; todayEt: string; context?: MetricsContext }>()
+const vm = useMetricItemViewModel(props.item, props.scope, () => props.context, props.todayEt)
+</script>
+
+<template>
+  <span v-if="vm.visible" class="mtc mono">
+    {{ vm.primary }}
+    <span v-for="(d, i) in vm.deltaLines" :key="i" class="mtc-delta" :class="d.cls">{{ d.text }}</span>
+    <MetricLabel v-if="vm.captionTokens.length" class="mtc-caption" :tokens="vm.captionTokens" />
+  </span>
+  <span v-else class="mtc mono">—</span>
+</template>
+
+<style scoped>
+.mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+.mtc {
+  font-size: 11.5px;
+  color: rgb(var(--ink-2));
+  white-space: nowrap;
+}
+.mtc-delta {
+  font-size: 10px;
+  color: rgb(var(--ink-3));
+  margin-left: 4px;
+}
+.mtc-delta.up {
+  color: #6a994e;
+}
+.mtc-delta.down {
+  color: #bc4749;
+}
+.mtc-caption {
+  display: block;
+  font-size: 10px;
+  color: rgb(var(--ink-3));
+  white-space: normal;
+}
+</style>

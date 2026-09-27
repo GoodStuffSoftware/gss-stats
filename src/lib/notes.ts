@@ -13,6 +13,9 @@
 //  - kind: 'note' (short caveat — NoteBlock's default styling) or 'text' (longer prose —
 //    TextBlock's default styling); either component can still render either kind, this is
 //    just which one a bare `noteId` picks by default in ChartEditor's "Add chart" flow.
+//    'label' (ADR 0003): a short, single-line UI label — a metric/funnel-step name, a unit
+//    word, a status word. Never a scope default and never offered as a caption (see
+//    defaultNoteIdsForScope / noteOptions), so the caption pickers don't fill up with labels.
 //  - severity: cosmetic only (info/caveat/warning) — never changes what data means.
 //  - scopes: which dataset/view combinations this note is a DEFAULT for (see
 //    defaultNoteIdsForScope) — a widget can still opt into/out of any note regardless of
@@ -35,12 +38,13 @@ import {
   PLAY_TRACKING_ACTIVATION_DATE_ET,
   TRACKING_ACTIVATION_DATE_ET,
   MIN_COHORT,
+  INSTALL_FIX_NOTE,
 } from './popupEvents'
-import { ARRIVALS_CAVEAT } from './campaigns'
+import { ARRIVALS_CAVEAT, RAW_INSTALL_SIGNALS_LABEL, type FunnelStepKey } from './campaigns'
 import { tokenizeAndInterpolate, toPlainText } from './textLite'
 
 export type NoteSeverity = 'info' | 'caveat' | 'warning'
-export type NoteKind = 'note' | 'text'
+export type NoteKind = 'note' | 'text' | 'label'
 // Which dataset/view combinations a note is a scope-default for — see
 // defaultNoteIdsForScope. Deliberately coarse (dataset-level, not one tag per view): most
 // notes apply to a whole page's worth of widgets, not one chart specifically.
@@ -51,6 +55,7 @@ export interface NoteDef {
   text: string | (() => string)
   kind: NoteKind
   severity: NoteSeverity
+  /** Empty for a 'label' (labels are never scope defaults). */
   scopes: NoteScope[]
   activeWhen?: () => boolean
   vars?: Record<string, string | number>
@@ -60,7 +65,10 @@ function resolveText(n: NoteDef): string {
   return typeof n.text === 'function' ? n.text() : n.text
 }
 
-export const NOTES_REGISTRY: Record<string, NoteDef> = {
+// A null-prototype object (review finding #1): an id such as 'constructor', 'toString' or
+// '__proto__' is simply not a note, never an inherited Object member. Look ids up with getNote /
+// hasNote (Object.hasOwn), never with `in`.
+export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.create(null) as Record<string, NoteDef>, {
   'small-sample': {
     id: 'small-sample',
     text: SMALL_SAMPLE_NOTE,
@@ -223,6 +231,22 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = {
     severity: 'info',
     scopes: ['overview'],
   },
+  // The "Return visits (day 1+)" KPI tile (lib/metrics/presets.ts bsk-kpis): what it counts.
+  'returns-d1plus-caveat': {
+    id: 'returns-d1plus-caveat',
+    text: 'Devices that first arrived through a tagged campaign link and came back on day 1 or later. Each device counts at most once per return window (day 1, days 2-7, 8-14, 15-30, 31-60), so one device can count once in each window.',
+    kind: 'note',
+    severity: 'info',
+    scopes: ['overview'],
+  },
+  // The "Raw install signals" KPI tile: why it is secondary to the install count.
+  'raw-install-double-count': {
+    id: 'raw-install-double-count',
+    text: 'Can double-count: one install can send more than one raw signal.',
+    kind: 'note',
+    severity: 'info',
+    scopes: ['overview'],
+  },
   // Caption for the Pop-ups page's breakdown bar (and any chart on the pop-up dimensions):
   // what the counts include. Plain wording, no code paths.
   'popup-bars-measured': {
@@ -248,10 +272,149 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = {
     severity: 'info',
     scopes: ['campaigns'],
   },
+  // ── Labels (kind 'label', ADR 0003) — short single-line UI names. `label.<metricId>` names a
+  // metric; `label.funnel.<step>` names a legacy funnel step that has no metric of its own. ──
+  ...labels({
+    // `/game` rows are PAGE VIEWS (any visitor, many per device), not games played — ADR 0003
+    // rate audit, rows 1-2. One name for the site-wide KPI and the campaign funnel step.
+    'label.bsk.gameViews': 'Game-screen views',
+    'label.campaign.gameViews': 'Game-screen views',
+    'label.funnel.arrivals': 'Arrivals',
+    'label.funnel.completed': 'Completed a game',
+    'label.funnel.ask': 'Sign-in ask',
+    'label.funnel.accept': 'Accept',
+    'label.funnel.authSuccess': 'Auth success',
+    'label.funnel.installPrompt': 'Install prompt',
+    // Range-specific install-fix caveats travel with the data instead (functions/api/campaigns.ts
+    // funnel.installNote, from lib/popupEvents.ts installOutcomeGapNote).
+    'label.funnel.install': 'Install',
+
+    // Metrics (lib/metrics/metrics.ts) — one `label.<metricId>` each.
+    'label.campaign.taggedHits': 'Tagged hits',
+    'label.campaign.taggedArrivals': 'Tagged arrivals',
+    'label.campaign.completions': 'Completed games',
+    'label.campaign.asks': 'Sign-in asks',
+    'label.campaign.accepts': 'Sign-in accepts',
+    'label.campaign.signedInAfterAsk': 'Signed in after ask',
+    'label.campaign.authSuccess': 'Auth successes',
+    'label.campaign.installPrompts': 'Install prompts',
+    'label.campaign.installs': 'Installs',
+    'label.campaign.rawInstallSignals': RAW_INSTALL_SIGNALS_LABEL,
+    'label.campaign.returnD0': 'First tagged loads (d0)',
+    'label.campaign.returnD1': 'Came back on day 1',
+    'label.campaign.returnD2to7': 'Came back on days 2-7',
+    'label.campaign.returnD8to14': 'Came back on days 8-14',
+    'label.campaign.returnD15to30': 'Came back on days 15-30',
+    'label.campaign.returnD31to60': 'Came back on days 31-60',
+    'label.campaign.spend': 'Spend',
+    'label.bsk.pageviews': 'Page views',
+    'label.bsk.completions': 'Games completed',
+    'label.bsk.popupShown': 'Pop-ups shown',
+    'label.bsk.popupAccepts': 'Pop-ups accepted',
+    'label.bsk.authSuccess': 'Auth successes',
+    'label.bsk.installs': 'Installs',
+    // Short and plain, as the Overview tile reads; the caveat is 'raw-install-double-count'.
+    'label.bsk.rawInstallSignals': 'Raw install signals',
+    // What the /return/ d1+ beacons count; the caveat lives in 'returns-d1plus-caveat'.
+    'label.bsk.returnsD1plus': 'Return visits (day 1+)',
+    'label.popup.shown': 'Shown',
+    'label.popup.accepts': 'Accepted',
+    'label.popup.outcomeSignedIn': 'Signed in',
+    'label.popup.outcomeInstalled': 'Installed',
+    'label.popup.outcomeReturned': 'Returned',
+    'label.popup.outcomeStillPlaying': 'Still playing',
+    'label.popup.eligibleEarned': 'Eligible finishes (earned)',
+    'label.popup.eligibleFinishes': 'Signed-out finishes',
+
+    // Ratios (lib/metrics/ratios.ts).
+    'label.campaign.acceptPerAsk': 'Accept rate',
+    'label.campaign.signedInPerAsk': 'Signed in after ask',
+    'label.campaign.installPerPrompt': 'Install rate',
+    'label.campaign.returnD1PerD0': 'Return rate (d1)',
+    'label.campaign.returnD2to7PerD0': 'Return rate (d2-7)',
+    'label.campaign.returnD8to14PerD0': 'Return rate (d8-14)',
+    'label.campaign.returnD15to30PerD0': 'Return rate (d15-30)',
+    'label.campaign.returnD31to60PerD0': 'Return rate (d31-60)',
+    'label.campaign.costPerArrival': 'Cost / arrival',
+    'label.campaign.costPerSignin': 'Cost / sign-in',
+    'label.campaign.gameViewsVsArrivals': 'Game-screen views vs arrivals',
+    'label.campaign.taggedHitsVsArrivals': 'Tagged hits vs arrivals',
+    'label.bsk.popupTapRate': 'Pop-up tap rate',
+    'label.popup.tapRate': 'Tap rate',
+    'label.popup.signedInRate': 'Signed-in rate',
+    'label.popup.installedRate': 'Installed rate',
+    'label.popup.returnedRate': 'Returned rate',
+    'label.popup.stillPlayingRate': 'Still-playing rate',
+    'label.popup.eligibility': 'Sign-in eligibility rate',
+
+    // Unit words (lib/metrics/units.ts unitLabelId, MetricDef.unitLabel) — the "counts"
+    // display reads "1,111 views · 353 arrivals".
+    'unit.device': 'devices',
+    'unit.row': 'rows',
+    'unit.pageview': 'views',
+    'unit.completion': 'completions',
+    'unit.showing': 'showings',
+    'unit.signin': 'sign-ins',
+    'unit.finish': 'finishes',
+    'unit.usd': 'USD',
+    'unit.day': 'days',
+    'unit.arrivals': 'arrivals',
+
+    // Status words and gating messages (MetricValue.status / noteIds).
+    'flight-pending': 'pending — start date not yet confirmed',
+    'no-campaign-flighting': 'no campaign flighting today',
+    'not-yet-tracking': 'not yet tracking',
+    'still-arriving': 'still arriving',
+    'counted-from': 'counted from {from}',
+    'install-fix-note': INSTALL_FIX_NOTE,
+    'new-today': 'new today',
+    'no-comparison-yet': 'no comparison yet (first day partial)',
+    'metric-unavailable': 'unavailable',
+    'not-started': 'not started',
+    'no-tracked-campaign-flighting': 'no beacon-tracked campaign flighting today',
+
+    // Card labels that are not a metric's own name (lib/metrics/presets.ts).
+    'label.card.flight': 'Flight',
+    'label.card.taggedArrivalsFor': 'Tagged arrivals — {campaign}',
+    'label.card.updatedJustNow': 'Updated just now',
+    'label.card.updatedSecondsAgo': 'Updated {n}s ago',
+    'label.card.updatedMinutesAgo': 'Updated {n}m ago',
+    'label.card.refresh': 'Refresh',
+    'label.card.notes': 'Notes',
+    'label.card.loadFailed': 'Some numbers could not be loaded.',
+    'label.card.retry': 'Retry',
+    'label.card.invalid': "This card's saved settings could not be read, so it can't be shown. Edit it or restore the default charts.",
+    'label.card.openCampaigns': 'Open the Campaigns page',
+  }),
+})
+
+function labels(entries: Record<string, string>): Record<string, NoteDef> {
+  return Object.fromEntries(Object.entries(entries).map(([id, text]) => [id, { id, text, kind: 'label' as const, severity: 'info' as const, scopes: [] }]))
+}
+
+/** The registry label for each legacy funnel step (the campaigns funnel/country views and the
+ * overview scorecard chips). 'played' is the campaign game-screen-views metric's own label. */
+export const FUNNEL_STEP_LABEL_IDS: Record<FunnelStepKey, string> = {
+  arrivals: 'label.funnel.arrivals',
+  played: 'label.campaign.gameViews',
+  completed: 'label.funnel.completed',
+  ask: 'label.funnel.ask',
+  accept: 'label.funnel.accept',
+  authSuccess: 'label.funnel.authSuccess',
+  installPrompt: 'label.funnel.installPrompt',
+  install: 'label.funnel.install',
+}
+export function funnelStepLabel(step: FunnelStepKey): string {
+  return noteRawText(FUNNEL_STEP_LABEL_IDS[step])
+}
+
+/** Whether `id` is a registry entry (an own key — never an inherited Object member). */
+export function hasNote(id: string): boolean {
+  return typeof id === 'string' && Object.hasOwn(NOTES_REGISTRY, id)
 }
 
 export function getNote(id: string): NoteDef | undefined {
-  return NOTES_REGISTRY[id]
+  return hasNote(id) ? NOTES_REGISTRY[id] : undefined
 }
 
 /** The note's RAW template text — no tokenizing, no interpolation. Only needed for
@@ -259,7 +422,7 @@ export function getNote(id: string): NoteDef | undefined {
  * TextBlock.vue, which needs paragraph boundaries from the untouched template); every other
  * caller should use noteTokens (safe markup) or noteRawText (safe plain text) instead. */
 export function noteTemplate(id: string): string {
-  const n = NOTES_REGISTRY[id]
+  const n = getNote(id)
   return n ? resolveText(n) : ''
 }
 
@@ -268,7 +431,7 @@ export function noteTemplate(id: string): string {
  * these through NoteBlock.vue/TextBlock.vue (or any <template v-for> over bold/link/text),
  * never by joining them back into a string and re-parsing. */
 export function noteTokens(id: string, vars?: Record<string, string | number>): import('./textLite').TextToken[] {
-  const n = NOTES_REGISTRY[id]
+  const n = getNote(id)
   if (!n) return []
   return tokenizeAndInterpolate(resolveText(n), { ...n.vars, ...vars })
 }
@@ -280,13 +443,13 @@ export function noteTokens(id: string, vars?: Record<string, string | number>): 
  * `{{ noteRawText(...) }}` inside markup-capable markup (a <p>, a caption area), use
  * <NoteBlock>/<TextBlock> instead so bold/link markup actually renders as such. */
 export function noteRawText(id: string, vars?: Record<string, string | number>): string {
-  const n = NOTES_REGISTRY[id]
+  const n = getNote(id)
   if (!n) return ''
   return toPlainText(resolveText(n), { ...n.vars, ...vars })
 }
 
 export function isNoteActive(id: string): boolean {
-  const n = NOTES_REGISTRY[id]
+  const n = getNote(id)
   if (!n) return false
   return !n.activeWhen || n.activeWhen()
 }
@@ -297,17 +460,20 @@ export function isNoteActive(id: string): boolean {
  * ChartEditor.vue) — this is only the fallback. */
 export function defaultNoteIdsForScope(scope: NoteScope): string[] {
   return Object.values(NOTES_REGISTRY)
-    .filter((n) => n.scopes.includes(scope) && isNoteActive(n.id))
+    .filter((n) => n.kind !== 'label' && n.scopes.includes(scope) && isNoteActive(n.id))
     .map((n) => n.id)
 }
 
-/** Options for a "pick a note" dropdown (ChartEditor) — id + a short preview of its text. */
+/** Options for a "pick a note" dropdown (ChartEditor) — id + a short preview of its text.
+ * Captions only: 'label' entries are UI names, never offered as a caption. */
 export function noteOptions(): { value: string; label: string }[] {
-  return Object.values(NOTES_REGISTRY).map((n) => {
-    // Plain text, as rendered: markup stripped and {vars} filled in (not the raw template).
-    const t = noteRawText(n.id)
-    return { value: n.id, label: t.length > 64 ? t.slice(0, 61) + '…' : t }
-  })
+  return Object.values(NOTES_REGISTRY)
+    .filter((n) => n.kind !== 'label')
+    .map((n) => {
+      // Plain text, as rendered: markup stripped and {vars} filled in (not the raw template).
+      const t = noteRawText(n.id)
+      return { value: n.id, label: t.length > 64 ? t.slice(0, 61) + '…' : t }
+    })
 }
 
 /** Resolve which registry note ids a chart widget's attached captions should show — pulled
