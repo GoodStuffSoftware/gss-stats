@@ -352,7 +352,7 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
             </div>
           </div>
         </template>
-        <p v-else class="caption">No dated release yet — set a release date in <code>src/lib/releases.ts</code> to populate this panel.</p>
+        <p v-else class="caption">No dated release yet. This panel fills in once a release has a date.</p>
       </template>
 
       <p v-else class="state mono">Unknown overview panel "{{ widget.view }}"</p>

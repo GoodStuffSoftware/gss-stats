@@ -19,6 +19,9 @@ import NoteBlock from '../NoteBlock.vue'
 import AdsRefreshButton from '../AdsRefreshButton.vue'
 
 const props = defineProps<{ widget: Widget }>()
+// A note the card already shows as an attached caption (widget.notes, rendered by ChartCard.vue)
+// is not repeated inline here: each note appears once per card.
+const inCaptions = (noteId: string) => (props.widget.notes ?? []).includes(noteId)
 
 const { campaigns, dataByCampaign, loading, error, reload } = useCampaignsData(() => props.widget.campaignIds)
 
@@ -198,8 +201,8 @@ function returnChartConfig(c: CampaignFlight): ChartConfiguration | null {
 
       <!-- funnel -->
       <template v-if="widget.view === 'funnel'">
-        <NoteBlock note-id="arrivals-caveat" class="caption" />
-        <NoteBlock note-id="min-cohort-caveat" class="caption" />
+        <NoteBlock v-if="!inCaptions('arrivals-caveat')" note-id="arrivals-caveat" class="caption" />
+        <NoteBlock v-if="!inCaptions('min-cohort-caveat')" note-id="min-cohort-caveat" class="caption" />
         <div class="funnel-grid">
           <div v-for="(c, i) in beaconCampaigns" :key="c.id" class="funnel-col" :style="{ '--accent': campaignColor(i) }">
             <div class="funnel-head">
@@ -262,7 +265,7 @@ function returnChartConfig(c: CampaignFlight): ChartConfiguration | null {
 
       <!-- hourOfDay -->
       <template v-else-if="widget.view === 'hourOfDay'">
-        <NoteBlock note-id="arrivals-caveat" class="caption" />
+        <NoteBlock v-if="!inCaptions('arrivals-caveat')" note-id="arrivals-caveat" class="caption" />
         <div class="chart-box"><BaseChart v-if="hourChartConfig" :config="hourChartConfig" :drill-open="false" @point="() => {}" /></div>
       </template>
 
@@ -294,12 +297,12 @@ function returnChartConfig(c: CampaignFlight): ChartConfiguration | null {
 
       <!-- flightDay -->
       <template v-else-if="widget.view === 'flightDay'">
-        <NoteBlock note-id="arrivals-caveat" class="caption" />
+        <NoteBlock v-if="!inCaptions('arrivals-caveat')" note-id="arrivals-caveat" class="caption" />
         <div class="two-col">
           <div class="chart-box"><BaseChart v-if="dailyChartConfig" :config="dailyChartConfig" :drill-open="false" @point="() => {}" /></div>
           <div class="chart-box"><BaseChart v-if="cumulativeChartConfig" :config="cumulativeChartConfig" :drill-open="false" @point="() => {}" /></div>
         </div>
-        <NoteBlock note-id="flight-day-caption" class="caption" />
+        <NoteBlock v-if="!inCaptions('flight-day-caption')" note-id="flight-day-caption" class="caption" />
         <template v-for="c in beaconCampaigns" :key="`seg-${c.id}`">
           <div v-if="dataByCampaign[c.id]?.segments" class="segment mono">
             <p class="caption">
@@ -318,7 +321,7 @@ function returnChartConfig(c: CampaignFlight): ChartConfiguration | null {
 
       <!-- cost -->
       <template v-else-if="widget.view === 'cost'">
-        <NoteBlock note-id="arrivals-caveat" class="caption" />
+        <NoteBlock v-if="!inCaptions('arrivals-caveat')" note-id="arrivals-caveat" class="caption" />
         <AdsRefreshButton :campaign-ids="campaigns.map((c) => c.id)" @refreshed="(r) => r.refreshed && reload()" />
         <div class="cost-grid">
           <div v-for="c in campaigns" :key="c.id" class="cost-card">
@@ -343,7 +346,7 @@ function returnChartConfig(c: CampaignFlight): ChartConfiguration | null {
             </div>
           </div>
         </div>
-        <NoteBlock v-if="campaigns.some((c) => dataByCampaign[c.id]?.spend == null)" note-id="spend-source" class="caption" />
+        <NoteBlock v-if="!inCaptions('spend-source') && campaigns.some((c) => dataByCampaign[c.id]?.spend == null)" note-id="spend-source" class="caption" />
       </template>
       <!-- The ads-read routine's readings log is its own movable widget now (dataset
            'ads-readings', dispatched by ChartCard.vue via AdsReadingsWidgetCard), not inline
@@ -351,7 +354,7 @@ function returnChartConfig(c: CampaignFlight): ChartConfiguration | null {
 
       <!-- returns -->
       <template v-else-if="widget.view === 'returns'">
-        <NoteBlock note-id="play-tracking-status" class="caption" />
+        <NoteBlock v-if="!inCaptions('play-tracking-status')" note-id="play-tracking-status" class="caption" />
         <!-- A campaign with no /return/ rows AT ALL yet (not instrumented for its flight, or
              instrumented but genuinely zero rows so far — d0 is the beacon's own first-load
              denominator) is not drawn, rather than rendered as an empty/broken chart (owner
@@ -378,7 +381,7 @@ function returnChartConfig(c: CampaignFlight): ChartConfiguration | null {
             </template>
           </div>
         </div>
-        <NoteBlock v-if="returnCampaigns.length" note-id="return-rate-caption" class="caption" />
+        <NoteBlock v-if="!inCaptions('return-rate-caption') && returnCampaigns.length" note-id="return-rate-caption" class="caption" />
       </template>
 
       <p v-else class="state mono">Unknown campaigns panel "{{ widget.view }}"</p>
@@ -510,8 +513,12 @@ function returnChartConfig(c: CampaignFlight): ChartConfiguration | null {
   height: 100%;
   min-height: 200px;
 }
+/* A definite height: inside a return-visits column (an auto-height grid item) `height: 100%`
+   resolves to auto, and a responsive Chart.js canvas then keeps growing with its own box, so
+   the plot stretched far below the card and only the top of the y-axis showed. */
 .chart-box.small {
-  min-height: 150px;
+  height: 180px;
+  min-height: 0;
 }
 .two-col {
   display: grid;
