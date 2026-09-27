@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-09-27
+
 ### Changed
 - **The release panel is a metric card.** It shows the same four counts, with Before and After
   as the columns of one table, names the release and how many days each side covers, and keeps
