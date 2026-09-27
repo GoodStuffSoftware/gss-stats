@@ -9,8 +9,8 @@ import type { ChartConfiguration } from 'chart.js'
 import type { GlobalFilters, Widget, OverviewResponse } from '../../types'
 import { useOverviewData } from '../../lib/overviewData'
 import { PALETTE } from '../../lib/charts'
-import { FUNNEL_STEP_LABELS, FUNNEL_STEP_ORDER, VALID_FUNNEL_RATE_STEPS, type FunnelStepKey } from '../../lib/campaigns'
-import { noteRawText } from '../../lib/notes'
+import { FUNNEL_STEP_ORDER, VALID_FUNNEL_RATE_STEPS, type FunnelStepKey } from '../../lib/campaigns'
+import { noteRawText, funnelStepLabel } from '../../lib/notes'
 import { fmtCount as fmt, pct, counts, money, deltaLabel, deltaClass, kpiComparisonGate } from '../../lib/kpiFormat'
 import { layoutMarkerLabels } from '../../lib/markerLayout'
 import type { CampaignFunnelCounts } from '../../types'
@@ -303,9 +303,9 @@ const timelineConfig = computed<ChartConfiguration | null>(() => {
                 <span
                   v-if="row.status !== 'closed' || !row.notInstrumented.includes(step as keyof CampaignFunnelCounts)"
                   class="sc-rate-chip"
-                  :title="FUNNEL_STEP_LABELS[step as keyof typeof FUNNEL_STEP_LABELS]"
+                  :title="funnelStepLabel(step as FunnelStepKey)"
                 >
-                  {{ FUNNEL_STEP_LABELS[step as keyof typeof FUNNEL_STEP_LABELS] }}:
+                  {{ funnelStepLabel(step as FunnelStepKey) }}:
                   <!-- Bug fix (owner report, 2026-09-26): this used to check the PERMANENT
                        global FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED constant (always contains
                        'completed'), so a campaign whose flight window is well after

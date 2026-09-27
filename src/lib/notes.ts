@@ -13,6 +13,9 @@
 //  - kind: 'note' (short caveat — NoteBlock's default styling) or 'text' (longer prose —
 //    TextBlock's default styling); either component can still render either kind, this is
 //    just which one a bare `noteId` picks by default in ChartEditor's "Add chart" flow.
+//    'label' (ADR 0003): a short, single-line UI label — a metric/funnel-step name, a unit
+//    word, a status word. Never a scope default and never offered as a caption (see
+//    defaultNoteIdsForScope / noteOptions), so the caption pickers don't fill up with labels.
 //  - severity: cosmetic only (info/caveat/warning) — never changes what data means.
 //  - scopes: which dataset/view combinations this note is a DEFAULT for (see
 //    defaultNoteIdsForScope) — a widget can still opt into/out of any note regardless of
@@ -37,11 +40,11 @@ import {
   MIN_COHORT,
   RAW_INSTALL_DEDUPE_NOTE,
 } from './popupEvents'
-import { ARRIVALS_CAVEAT } from './campaigns'
+import { ARRIVALS_CAVEAT, type FunnelStepKey } from './campaigns'
 import { tokenizeAndInterpolate, toPlainText } from './textLite'
 
 export type NoteSeverity = 'info' | 'caveat' | 'warning'
-export type NoteKind = 'note' | 'text'
+export type NoteKind = 'note' | 'text' | 'label'
 // Which dataset/view combinations a note is a scope-default for — see
 // defaultNoteIdsForScope. Deliberately coarse (dataset-level, not one tag per view): most
 // notes apply to a whole page's worth of widgets, not one chart specifically.
@@ -52,6 +55,7 @@ export interface NoteDef {
   text: string | (() => string)
   kind: NoteKind
   severity: NoteSeverity
+  /** Empty for a 'label' (labels are never scope defaults). */
   scopes: NoteScope[]
   activeWhen?: () => boolean
   vars?: Record<string, string | number>
@@ -229,6 +233,43 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = {
     severity: 'info',
     scopes: ['campaigns'],
   },
+  // ── Labels (kind 'label', ADR 0003) — short single-line UI names. `label.<metricId>` names a
+  // metric; `label.funnel.<step>` names a legacy funnel step that has no metric of its own. ──
+  ...labels({
+    // `/game` rows are PAGE VIEWS (any visitor, many per device), not games played — ADR 0003
+    // rate audit, rows 1-2. One name for the site-wide KPI and the campaign funnel step.
+    'label.bsk.gameViews': 'Game-screen views',
+    'label.campaign.gameViews': 'Game-screen views',
+    'label.funnel.arrivals': 'Arrivals',
+    'label.funnel.completed': 'Completed a game',
+    'label.funnel.ask': 'Sign-in ask',
+    'label.funnel.accept': 'Accept',
+    'label.funnel.authSuccess': 'Auth success',
+    'label.funnel.installPrompt': 'Install prompt',
+    // Range-specific install-fix caveats travel with the data instead (functions/api/campaigns.ts
+    // funnel.installNote, from lib/popupEvents.ts installOutcomeGapNote).
+    'label.funnel.install': 'Install',
+  }),
+}
+
+function labels(entries: Record<string, string>): Record<string, NoteDef> {
+  return Object.fromEntries(Object.entries(entries).map(([id, text]) => [id, { id, text, kind: 'label' as const, severity: 'info' as const, scopes: [] }]))
+}
+
+/** The registry label for each legacy funnel step (the campaigns funnel/country views and the
+ * overview scorecard chips). 'played' is the campaign game-screen-views metric's own label. */
+export const FUNNEL_STEP_LABEL_IDS: Record<FunnelStepKey, string> = {
+  arrivals: 'label.funnel.arrivals',
+  played: 'label.campaign.gameViews',
+  completed: 'label.funnel.completed',
+  ask: 'label.funnel.ask',
+  accept: 'label.funnel.accept',
+  authSuccess: 'label.funnel.authSuccess',
+  installPrompt: 'label.funnel.installPrompt',
+  install: 'label.funnel.install',
+}
+export function funnelStepLabel(step: FunnelStepKey): string {
+  return noteRawText(FUNNEL_STEP_LABEL_IDS[step])
 }
 
 export function getNote(id: string): NoteDef | undefined {
@@ -278,16 +319,19 @@ export function isNoteActive(id: string): boolean {
  * ChartEditor.vue) — this is only the fallback. */
 export function defaultNoteIdsForScope(scope: NoteScope): string[] {
   return Object.values(NOTES_REGISTRY)
-    .filter((n) => n.scopes.includes(scope) && isNoteActive(n.id))
+    .filter((n) => n.kind !== 'label' && n.scopes.includes(scope) && isNoteActive(n.id))
     .map((n) => n.id)
 }
 
-/** Options for a "pick a note" dropdown (ChartEditor) — id + a short preview of its text. */
+/** Options for a "pick a note" dropdown (ChartEditor) — id + a short preview of its text.
+ * Captions only: 'label' entries are UI names, never offered as a caption. */
 export function noteOptions(): { value: string; label: string }[] {
-  return Object.values(NOTES_REGISTRY).map((n) => {
-    const t = resolveText(n)
-    return { value: n.id, label: t.length > 64 ? t.slice(0, 61) + '…' : t }
-  })
+  return Object.values(NOTES_REGISTRY)
+    .filter((n) => n.kind !== 'label')
+    .map((n) => {
+      const t = resolveText(n)
+      return { value: n.id, label: t.length > 64 ? t.slice(0, 61) + '…' : t }
+    })
 }
 
 /** Resolve which registry note ids a chart widget's attached captions should show — pulled

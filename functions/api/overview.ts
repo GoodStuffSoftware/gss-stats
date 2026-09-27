@@ -66,6 +66,7 @@ import { latestDatedRelease, datedReleases } from '../../src/lib/releases'
 import { resolveCampaignSpend } from '../../src/lib/adsRules'
 import { readSpendSummaries } from '../../src/lib/adsStore'
 import { notInstrumentedFunnelSteps } from '../_lib/campaignInstrumentation'
+import { noteRawText } from '../../src/lib/notes'
 
 interface Env {
   gss_geo: D1Database
@@ -213,14 +214,21 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       kpis.push({ key: 'taggedArrivals', label: 'Tagged arrivals', noCampaignFlighting: true })
     } else {
       for (const c of flighting) {
-        const w = windowed((r) => r.visitor === 'new' && c.ucValues.includes(r.campaign))
+        // The SAME membership rule as the campaign scorecard and /api/campaigns
+        // (campaignAttributionClause, applied in JS to the minute rows), including
+        // flightStartTimeEt — so pre-launch QA rows (the retest's before 12:00 ET on its first
+        // day, and its 2026-09-23 rows inside the 7-day average) never count here either. It
+        // used to filter on ucValues alone (ADR 0003 rate audit, "Label findings").
+        const attr = campaignAttributionClause(c)
+        const w = windowed((r) => r.visitor === 'new' && attr.matches(r.campaign, r.min * 60_000))
         kpis.push({ ...buildKpiTile(`arrivals-${c.id}`, `Tagged arrivals — ${c.label}`, w.today, w.yesterday, w.avg7), campaignId: c.id })
       }
     }
   }
   {
     const w = windowed((r) => r.path === '/game')
-    kpis.push(buildKpiTile('played', 'Games played', w.today, w.yesterday, w.avg7))
+    // `/game` rows are page views, not games (ADR 0003 rate audit): the registry's label.
+    kpis.push(buildKpiTile('played', noteRawText('label.bsk.gameViews'), w.today, w.yesterday, w.avg7))
   }
   // v1.95.5 (live GAME_COMPLETE_LIVE_AT, 2026-09-26T19:43:02Z): '/game/complete/...' didn't
   // exist before this instant, so "today"/"yesterday"/avg7 windows entirely before it are a

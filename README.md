@@ -44,7 +44,8 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
 ## Features
 
 - **"Best Sudoku · Overview"** — the landing page: today-at-a-glance KPI tiles (vs the same
-  time yesterday and the 7-day average), a daily timeline since the first hit overlaid with
+  time yesterday and the 7-day average; a campaign's "Tagged arrivals" tile uses the same
+  attribution rule as its scorecard card, `campaignAttributionClause`), a daily timeline since the first hit overlaid with
   campaign flights / release / tracking-activation markers, a campaign scorecard, and a
   release before/after panel — each its own movable/editable widget (dataset `overview`; see
   [`src/components/widgets/OverviewWidgetBody.vue`](src/components/widgets/OverviewWidgetBody.vue)).
@@ -82,7 +83,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   **bold** and [links](https://example.com) via a small safe tokenizer
   ([`src/lib/textLite.ts`](src/lib/textLite.ts), never `v-html`) — and attachable to
   any chart as a caption (`widget.notes`) or as its own movable 'note' widget
-  (`widget.noteId`), editable from the chart menu either way.
+  (`widget.noteId`), editable from the chart menu either way. Short UI names (metric and
+  funnel-step labels such as "Game-screen views") are registry entries too, of kind `label`:
+  never a caption and never offered in the caption pickers.
 - **Durable, multi-page dashboards** — layout + chart definitions persist in KV (not
   `localStorage`), so they follow you across devices. Duplicate / rename / delete
   pages; a protected default page with "restore default charts"; per-page filters and

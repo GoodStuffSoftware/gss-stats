@@ -117,6 +117,19 @@ describe('kpiComparisonGate (coordinator addition, 2026-09-26 — go-live-bounda
     expect(gReturns.newToday).toBe(true)
   })
 
+  it('a campaign "Tagged arrivals" tile gates on its flight start (attribution starts there; ADR 0003)', () => {
+    // US+CA web retest: flightStart 2026-09-26, attribution from 12:00 ET that day.
+    const day1 = kpiComparisonGate('arrivals-24279250691', '2026-09-26')
+    expect(day1).toEqual({ hideVsYesterday: true, hideVsAvg7: true, newToday: true })
+    const day2 = kpiComparisonGate('arrivals-24279250691', '2026-09-27')
+    expect(day2.hideVsYesterday).toBe(true) // yesterday = the partial start day
+    expect(day2.hideVsAvg7).toBe(true)
+    const day9 = kpiComparisonGate('arrivals-24279250691', '2026-10-04')
+    expect(day9).toEqual({ hideVsYesterday: false, hideVsAvg7: false, newToday: false })
+    // An unknown campaign id is never gated (no flight to gate on).
+    expect(kpiComparisonGate('arrivals-000', '2026-09-26')).toEqual({ hideVsYesterday: false, hideVsAvg7: false, newToday: false })
+  })
+
   it('an empty todayEt never gates (defensive default, e.g. data not loaded yet)', () => {
     expect(kpiComparisonGate('completed', '')).toEqual({ hideVsYesterday: false, hideVsAvg7: false, newToday: false })
   })

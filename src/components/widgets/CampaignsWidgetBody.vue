@@ -9,9 +9,9 @@ import { computed } from 'vue'
 import type { ChartConfiguration } from 'chart.js'
 import type { Widget, CampaignFunnelCounts } from '../../types'
 import { useCampaignsData } from '../../lib/campaignsData'
-import { FUNNEL_STEP_ORDER, FUNNEL_STEP_LABELS, RETURN_BUCKETS, VALID_FUNNEL_RATE_STEPS, topShares, type CampaignFlight, type DeviceMixShare } from '../../lib/campaigns'
+import { FUNNEL_STEP_ORDER, RETURN_BUCKETS, VALID_FUNNEL_RATE_STEPS, topShares, type CampaignFlight, type DeviceMixShare } from '../../lib/campaigns'
 import { MIN_COHORT, isInsufficientCohort } from '../../lib/popupEvents'
-import { noteRawText } from '../../lib/notes'
+import { noteRawText, funnelStepLabel } from '../../lib/notes'
 import { PALETTE } from '../../lib/charts'
 import { freshnessLine, STALE_NOTE } from '../../lib/adsFreshness'
 import BaseChart from '../charts/BaseChart.vue'
@@ -226,7 +226,7 @@ function shareBarWidth(row: DeviceMixShare): number {
               <template v-for="step in FUNNEL_STEP_ORDER" :key="step">
                 <div v-if="c.status !== 'closed' || !dataByCampaign[c.id].funnel.notInstrumented.includes(step)" class="funnel-step">
                   <div class="fs-top">
-                    <span class="fs-label">{{ FUNNEL_STEP_LABELS[step] }}<template v-if="step === 'install' && dataByCampaign[c.id].funnel.installNote"> ({{ dataByCampaign[c.id].funnel.installNote }})</template></span>
+                    <span class="fs-label">{{ funnelStepLabel(step) }}<template v-if="step === 'install' && dataByCampaign[c.id].funnel.installNote"> ({{ dataByCampaign[c.id].funnel.installNote }})</template></span>
                     <span class="fs-count mono">
                       <template v-if="dataByCampaign[c.id].funnel.notInstrumented.includes(step)">{{ noteRawText('not-instrumented') }}</template>
                       <template v-else>{{ fmt(dataByCampaign[c.id].funnel.counts[step]) }}</template>
@@ -241,7 +241,7 @@ function shareBarWidth(row: DeviceMixShare): number {
                   </div>
                   <!-- Audit finding (2026-09-26): most step/previous-step "rates" mixed event-
                        row counts against arrival/other-row counts with no shared visitor id —
-                       not real percentages (e.g. "Played a game: 314.7%"). Only accept/ask and
+                       not real percentages (e.g. the old "Played a game: 314.7%"). Only accept/ask and
                        install/(post-fix installPrompt) are real ratios — see lib/campaigns.ts
                        VALID_FUNNEL_RATE_STEPS. Every other step shows its plain count only
                        (already in .fs-count above); no rate line at all. -->
@@ -283,7 +283,7 @@ function shareBarWidth(row: DeviceMixShare): number {
                      same per-flight notInstrumented list. -->
                 <template v-for="step in FUNNEL_STEP_ORDER" :key="step">
                   <tr v-if="c.status !== 'closed' || !dataByCampaign[c.id].funnel.notInstrumented.includes(step)">
-                    <td>{{ FUNNEL_STEP_LABELS[step] }}</td>
+                    <td>{{ funnelStepLabel(step) }}</td>
                     <td class="mono">{{ fmt(dataByCampaign[c.id].funnelByCountry.US[step]) }}</td>
                     <td class="mono">{{ fmt(dataByCampaign[c.id].funnelByCountry.CA[step]) }}</td>
                     <td class="mono">{{ fmt(dataByCampaign[c.id].funnelByCountry.other[step]) }}</td>
