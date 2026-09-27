@@ -106,7 +106,13 @@ const NO_GATE: KpiComparisonGate = { hideVsYesterday: false, hideVsAvg7: false, 
  * KPI_GO_LIVE_ET_DATE (an established metric with no go-live gap, e.g. page views) is never
  * gated. */
 export function kpiComparisonGate(key: string, todayEt: string): KpiComparisonGate {
-  const goLiveEt = KPI_GO_LIVE_ET_DATE[key] ?? arrivalsTileFlightStart(key)
+  return comparisonGateForGoLive(KPI_GO_LIVE_ET_DATE[key] ?? arrivalsTileFlightStart(key), todayEt)
+}
+
+/** The boundary rule itself, for any go-live ET date: shared with the metrics registry
+ * (lib/metrics/instrumentation.ts), which derives `goLiveEt` from a metric's instrumentation
+ * rules instead of a tile key. undefined/null = never gated. */
+export function comparisonGateForGoLive(goLiveEt: string | null | undefined, todayEt: string): KpiComparisonGate {
   if (!goLiveEt || !todayEt) return NO_GATE
   const yesterdayEt = addEtDays(todayEt, -1)
   const avg7StartEt = addEtDays(todayEt, -7) // earliest day folded into the 7-day average

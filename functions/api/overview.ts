@@ -35,11 +35,9 @@ import {
   type FunnelStepKey,
 } from '../../src/lib/campaigns'
 import {
-  classifyPopupPath,
   computeRate,
   etDateFromMs,
   excludeInstallGapUnmeasured,
-  isPopupEventPath,
   withInstallGapNote,
   TRACKING_ACTIVATION_DATE_ET,
   GAME_COMPLETE_LIVE_AT,
@@ -48,11 +46,14 @@ import {
   RAW_INSTALL_DEDUPE_LIVE_AT_ET,
   INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS,
   rowIsPostInstallFix,
-  POPUPS,
 } from '../../src/lib/popupEvents'
 import {
   addEtDays,
   buildKpiTile,
+  isEventPath,
+  isPopupAccept,
+  isPopupShown,
+  isReturnD1Plus,
   campaignsFlightingOn,
   computeDelta,
   last7DatesBefore,
@@ -67,6 +68,10 @@ import { resolveCampaignSpend } from '../../src/lib/adsRules'
 import { readSpendSummaries } from '../../src/lib/adsStore'
 import { notInstrumentedFunnelSteps } from '../_lib/campaignInstrumentation'
 import { noteRawText } from '../../src/lib/notes'
+// lib/defaults.ts is plain TypeScript (no Vue imports), so the Function shares its site list
+// instead of keeping a copy; the metrics registry's facts read the same constant.
+import { BEST_SUDOKU_SITES } from '../../src/lib/defaults'
+import { WHEN_RE } from '../../src/lib/range'
 
 interface Env {
   gss_geo: D1Database
@@ -80,12 +85,7 @@ const json = (data: unknown, status = 200): Response =>
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
   })
 
-// Same beacon site tags lib/defaults.ts's BEST_SUDOKU_SITES uses — duplicated here (a
-// Pages Function compiles separately from the app bundle, same reason functions/api/geo.ts
-// keeps its own OWN_HOSTS instead of importing from a Vue-side file).
-const BEST_SUDOKU_SITES = ['bestsudoku-web', 'bestsudoku', 'bestsudoku-app']
 
-const WHEN_RE = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?(\.\d+)?Z?)?$/
 function safeDate(v: unknown, fallback: string): string {
   return typeof v === 'string' && WHEN_RE.test(v) ? v : fallback
 }
@@ -93,12 +93,6 @@ const isDateOnly = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v)
 
 type Row = { min: number; path: string; visitor: string; campaign: string; c: number }
 
-function isEventPath(path: string): boolean {
-  // isPopupEventPath (lib/popupEvents.ts POPUP_EVENT_PREFIXES) also covers `/game/complete/`
-  // (v1.95.5) — without it here, a completed-game beacon would inflate the "Page views" KPI
-  // the same way it inflated /api/geo + /api/sites before popupExcludeClause picked it up.
-  return classifyPopupPath(path) !== null || path.startsWith('/return/') || isPopupEventPath(path)
-}
 function sumInWindow(rows: Row[], startMs: number, endMs: number, pred: (r: Row) => boolean): number {
   let total = 0
   for (const r of rows) {
@@ -107,10 +101,6 @@ function sumInWindow(rows: Row[], startMs: number, endMs: number, pred: (r: Row)
     total += r.c
   }
   return total
-}
-function isReturnD1Plus(path: string): boolean {
-  const ev = parseReturnPath(path)
-  return !!ev && ev.bucket !== 'd0'
 }
 // One per sign-in: the base row only (lib/campaigns.ts isAuthSuccessBase, alias
 // isAuthSuccessPath: the one matcher), never the /auth/success/<provider>/<new|existing|unknown>
@@ -122,14 +112,6 @@ const isAuthSuccess = isAuthSuccessBase
 const isInstallOutcome = isInstallPromptInstalled
 /** "Installs", plus the install-fix caveat for the range shown (none once it is all post-fix). */
 const installsLabel = (startMs: number, endMs: number) => withInstallGapNote('Installs', { startMs, endMs })
-function isPopupShown(path: string): boolean {
-  const ev = classifyPopupPath(path)
-  return !!ev && ev.kind === 'shown' && POPUPS.some((p) => p.id === ev.family)
-}
-function isPopupAccept(path: string): boolean {
-  const ev = classifyPopupPath(path)
-  return !!ev && ev.kind === 'accept' && POPUPS.some((p) => p.id === ev.family)
-}
 
 export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   let body: any

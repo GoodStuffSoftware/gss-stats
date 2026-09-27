@@ -1,6 +1,8 @@
 # ADR 0003: Metric components: one configurable card, a metrics registry, one batched endpoint
 
-- **Status:** Proposed. Design only; nothing here is implemented yet.
+- **Status:** Accepted (owner-approved 2026-09-26). Slices 1-2 are implemented on
+  `feat/metrics-core`; see [Implementation notes](#implementation-notes-slices-1-3) for where the
+  code differs from this design and why.
 - **Date:** 2026-09-26
 - **Branch:** `design/metric-components` (from `origin/main` v0.7.0, `1f69930`)
 - **Prototype:** [`0003-metric-components.prototype.ts`](0003-metric-components.prototype.ts), a
@@ -876,3 +878,45 @@ users, and a review gate.
   Their classifiers stay the single source, and the registry only composes them.
 - The ads routine (`scripts/ads-reads`) can later read the same registry for its reports, which
   removes the last separate copy of the funnel-rate logic.
+
+## Implementation notes (slices 1-3)
+
+Written against `origin/main` v0.8.0 (`0bc08fe`), which had already shipped much of slice 1
+(invalid funnel rates as counts, delta gating across go-live, the post-fix install denominator,
+the ads "ask rate" removal, closed campaigns omitting uninstrumented steps). The registry absorbs
+that code rather than copying it.
+
+**Slice 1 (the remainder).**
+- `campaignAttributionClause` returns a JS twin, `matches(tag, rowStartMs)`, built on the same
+  lower bound (`campaignAttributionStartMs`). The KPI "Tagged arrivals" tile uses it on its minute
+  rows. The bound is always a whole ET minute, so minute buckets are row-exact.
+- `kpiComparisonGate` also gates an `arrivals-<campaignId>` tile on its flight start: comparison
+  days before it are zero by construction, and the start day is partial. (An extension of this
+  ADR's row 15, approved with the plan.)
+- Funnel-step labels moved from `lib/campaigns.ts` into the notes registry
+  (`FUNNEL_STEP_LABEL_IDS`, `funnelStepLabel`). `campaigns.ts` cannot import `notes.ts` (a cycle:
+  `notes.ts` imports `ARRIVALS_CAVEAT`), and the sync Worker bundles `campaigns.ts`.
+
+**Slice 2 (the registry, `src/lib/metrics/`).**
+- `metrics.ts` declares the fact **per window** (`windows: { attribution: 'campaignPathVisitor',
+  todaySoFar: 'bskKpiMinutes' }`) instead of one `fact`: `campaign.taggedArrivals` is served from
+  either, and the site-wide metrics from `bskKpiMinutes` (today so far) or `bskHourPath` (a page
+  range). A metric is a row test (`path`, `visitor`) over its fact rather than a free-form
+  `reduce`; spend is the one `spend()` reducer.
+- Pop-up ratios take the pop-up as a param (`popup.tapRate` with `{ popup }`, …) instead of one id
+  per pop-up (`popup.<id>.tap`), so one item repeated over pop-ups covers them all.
+- `seenInFlightWindow` marks only a **closed** flight unmeasured (its serving window is final); an
+  active or upcoming flight stays live (lead's ruling). `/api/campaigns` also marks an active
+  flight's unseen steps "not instrumented"; the equivalence test lists that difference.
+- `adsSpend` is one statement (`SPEND_SUMMARY_SQL`); no registered metric needs `readFreshness`.
+  `adsReadings` (slice 8) and `normCardRef` (slice 5, where it is wired into `normWidget`) are not
+  built yet.
+- The rows every endpoint needs moved into shared modules rather than being copied:
+  `isEventPath`, `isPopupShown`, `isPopupAccept`, `isReturnD1Plus` (`lib/overview.ts`),
+  `WHEN_RE`/`SITE_TAG_RE` (`lib/range.ts`), the `flightPathsSeen` SQL and its classifier
+  (`functions/_lib/campaignInstrumentation.ts` now runs them), and `comparisonGateForGoLive`
+  (`lib/kpiFormat.ts`, shared by the KPI tiles and the registry's deltas).
+- Delta gating is day-level, exactly as `kpiComparisonGate`: a go-live on or after a comparison
+  day hides that comparison (the go-live day itself is partial).
+- Gating messages and unit words are notes of kind `label` (never a caption, never a scope
+  default); a partial value carries `counted-from` (or the rule's own note, e.g. the install fix).

@@ -1,6 +1,12 @@
 // Smart date-range helpers. The filter `since`/`until` are ISO datetime strings
 // (with back-compat for legacy "YYYY-MM-DD" day values).
 
+/** A since/until value every API accepts: a YYYY-MM-DD day or an ISO datetime. One copy for
+ * every endpoint (functions/api/*) and the metrics request validator (lib/metrics/validate.ts). */
+export const WHEN_RE = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?(\.\d+)?Z?)?$/
+/** A site tag in a request's site filter (beacon `site` values and RUM hosts). */
+export const SITE_TAG_RE = /^[a-z0-9.\-]{1,40}$/i
+
 const UNIT_MS: Record<string, number> = {
   m: 60_000,
   min: 60_000,
