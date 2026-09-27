@@ -177,6 +177,8 @@ export function formatMorningReport(r: MorningResult): string {
   if (r.play) out.push(r.play.line)
   const diag = diagnosticsLines(r.diagnostics)
   if (diag.length) out.push('', ...diag)
+  const playLines = playReportsLines(r.playReports)
+  if (playLines.length) out.push('', ...playLines)
   if (r.thresholdRead) out.push('', ...fullReadLines(r.thresholdRead, `THRESHOLD READ at $${Math.max(...r.thresholdRead.thresholds)}`))
   out.push('', storeLine(r))
   out.push(`Errors: ${r.errors.length ? r.errors.join(' | ') : 'none'}`)
@@ -233,6 +235,37 @@ function diagnosticsLines(d: DiagnosticsSection): string[] {
     out.push(`  account cross-check (${cc.etDate}): Firestore new accounts ${n(cc.firestoreNewAccounts)} vs beacon /auth/success new ${n(cc.beaconAuthSuccessNew)}${below ? ' — ANOMALY: Firestore count below the beacon count, propose to Mike' : ''}`)
   } else out.push('  account cross-check: not read')
   if (d.errors.length) out.push(`  diagnostic read errors (best-effort; did not block the read above): ${d.errors.join(' | ')}`)
+  return out
+}
+
+/** R4: Play Console bulk-reports, informational only (never a kill rule, never `notify`; the
+ * $50/$75 lines below are report text, never a pause proposal — see checkpoint() in play.ts).
+ * Bulk reports lag a day or more, so every figure names the date it covers, and the household
+ * caveat is repeated on each data line rather than stated once (coordinator's instruction: say
+ * it in the report line, not behind one shared footnote). */
+function playReportsLines(p: MorningResult['playReports']): string[] {
+  if (!p) return []
+  const out = ['Play Console bulk reports (informational only; never a kill rule or an automatic action):']
+  if (!p.ok) {
+    out.push(`  Play reports: ${p.error ?? 'not read'}`)
+    return out
+  }
+  const household = "includes the developer's own household devices; not attributable to any one campaign"
+  if (p.installsByDay?.length) {
+    out.push(`  installs by day, horizon ${p.installsThrough} (${p.installsLagDays}-day lag, ${household}):`)
+    for (const d of p.installsByDay) out.push(`    ${d.date}: ${n(d.deviceInstalls)} device installs, ${n(d.userInstalls)} user installs, ${n(d.deviceUninstalls)} uninstalls, ${n(d.activeDeviceInstalls)} active devices`)
+  } else out.push(`  installs by day: no rows for the requested window (horizon ${p.installsThrough ?? 'no data yet'}, ${household})`)
+  if (p.acquisitionBySource?.length) {
+    out.push(`  acquisition by source (store listing visitors/acquisitions), horizon ${p.storePerformanceThrough} (${p.storePerformanceLagDays}-day lag, ${household}):`)
+    for (const s of p.acquisitionBySource) out.push(`    ${s.date} ${s.dimension ?? 'unknown source'}: ${n(s.visitors)} store listing visitors, ${n(s.acquisitions)} acquisitions, ${pct(s.conversionRate)} conversion`)
+  } else out.push(`  acquisition by source: no rows for the requested window (horizon ${p.storePerformanceThrough ?? 'no data yet'})`)
+  if (p.acquisitionByCountry?.length) {
+    out.push(`  store listing visitors by country, horizon ${p.storePerformanceThrough} (${household}):`)
+    for (const c of p.acquisitionByCountry) out.push(`    ${c.date} ${c.dimension ?? 'unknown country'}: ${n(c.visitors)} visitors, ${n(c.acquisitions)} acquisitions, ${pct(c.conversionRate)} conversion`)
+  } else out.push(`  store listing visitors by country: no rows for the requested window (horizon ${p.storePerformanceThrough ?? 'no data yet'})`)
+  out.push(`  day-1/day-7 retention: ${p.retentionNote}`)
+  for (const c of p.checkpoints) out.push(`  $${c.threshold} cumulative-spend Play-install checkpoint (informational, never a kill rule): [${c.status}] ${c.detail}`)
+  if (p.errors.length) out.push(`  Play read errors (best-effort; did not block the read above): ${p.errors.join(' | ')}`)
   return out
 }
 
