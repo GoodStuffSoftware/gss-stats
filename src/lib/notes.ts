@@ -42,6 +42,26 @@ import {
 } from './popupEvents'
 import { ARRIVALS_CAVEAT, RAW_INSTALL_SIGNALS_LABEL, type FunnelStepKey } from './campaigns'
 import { tokenizeAndInterpolate, toPlainText } from './textLite'
+// Read-only: notes.ts is dashboard-only (never bundled into the ads-sync Worker, unlike
+// lib/popupEvents.ts — see that file's own comment on why it keeps AUTH_NEW_EXISTING_LIVE_AT
+// out of itself), so importing the constant from lib/adsRules.ts here is fine.
+import { AUTH_NEW_EXISTING_LIVE_AT } from './adsRules'
+import { etOffsetHours } from './etTime'
+
+// "counted from 2026-09-26 15:43 ET" — AUTH_NEW_EXISTING_LIVE_AT's own ET wall time, for the
+// new/existing/unknown sign-up tiles' partial-window note (lib/metrics/metrics.ts
+// AUTH_NEW_EXISTING rule) — a range reaching back before this go-live must read "counted from
+// ..." instead of a false zero (A2, review round 2026-09-27). Plain ET arithmetic
+// (etOffsetHours), the same non-Intl approach lib/popupEvents.ts installFixMarkerLabel uses for
+// the same reason: cheap at module load, computed once, not a live function (the instant is a
+// fixed historical constant, same as INSTALL_FIX_NOTE just below).
+function formatCountedFromEt(atMs: number | null): string {
+  if (atMs === null) return ''
+  const et = new Date(atMs + etOffsetHours(atMs) * 3_600_000)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `counted from ${et.getUTCFullYear()}-${pad(et.getUTCMonth() + 1)}-${pad(et.getUTCDate())} ${pad(et.getUTCHours())}:${pad(et.getUTCMinutes())} ET`
+}
+const AUTH_NEW_EXISTING_COUNTED_FROM_NOTE = formatCountedFromEt(AUTH_NEW_EXISTING_LIVE_AT)
 
 export type NoteSeverity = 'info' | 'caveat' | 'warning'
 export type NoteKind = 'note' | 'text' | 'label'
@@ -321,6 +341,12 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.bsk.popupShown': 'Pop-ups shown',
     'label.bsk.popupAccepts': 'Pop-ups accepted',
     'label.bsk.authSuccess': 'Auth successes',
+    // The new/existing/unknown split that rides alongside every base auth-success row (A2,
+    // review round 2026-09-27 — see lib/metrics/metrics.ts AUTH_NEW_EXISTING). "New" is the
+    // exact sign-up count the ad flight is judged on.
+    'label.bsk.authSuccessNew': 'Auth successes — new',
+    'label.bsk.authSuccessExisting': 'Auth successes — existing',
+    'label.bsk.authSuccessUnknown': 'Auth successes — unknown',
     'label.bsk.authErrors': 'Sign-in failures',
     'label.bsk.authRedirects': 'Sign-in redirect fallbacks',
     'label.bsk.installs': 'Installs',
@@ -391,6 +417,11 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'still-arriving': 'still arriving',
     'counted-from': 'counted from {from}',
     'install-fix-note': INSTALL_FIX_NOTE,
+    // Time-precise (unlike the generic 'counted-from' {date} template above): the new/existing/
+    // unknown sign-up split's own go-live is known to the second (lib/adsRules.ts
+    // AUTH_NEW_EXISTING_LIVE_AT, the deploy-log instant), so its note carries the ET clock time
+    // the same way lib/popupEvents.ts INSTALL_FIX_NOTE does for the install fix.
+    'auth-new-existing-note': AUTH_NEW_EXISTING_COUNTED_FROM_NOTE,
     'new-today': 'new today',
     'no-comparison-yet': 'no comparison yet (first day partial)',
     'metric-unavailable': 'unavailable',
@@ -435,6 +466,9 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.card.perAuthSuccess': 'Per auth success',
     'label.card.popupTapRate': '{popup} — tap rate (accept / shown)',
     'label.card.installedRateFromFix': 'Install prompt — installed rate (from the install fix on)',
+    'label.card.popupOutcomeSignedIn': '{popup} — signed in',
+    'label.card.popupOutcomeReturned': '{popup} — returned',
+    'label.card.popupOutcomeStillPlaying': '{popup} — still playing',
     'label.card.eligible.earned': 'earned',
     'label.card.eligible.capped': 'capped',
     'label.card.eligible.unearned': 'unearned',

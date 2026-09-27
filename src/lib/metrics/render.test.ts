@@ -140,6 +140,23 @@ describe('itemViewModel — status × gating', () => {
     expect(vm.primary).toBe('no campaign flighting today')
   })
 
+  // A2c (review round 2026-09-27): a measured zero is never blank by default — only an item
+  // that opts in with gating.whenZero: 'omit' (the per-campaign d0 return row and the upsell
+  // rows, presets.ts) hides itself at 0. The site-wide "Return visits (day 1+)" tile
+  // (presets.ts bsk.returnsD1plus) carries no gating override, so it follows this default:
+  // a real, visible "0" for a range with no matching rows, same as the untouched auth-error/
+  // auth-redirect tiles already prove for their own metrics.
+  it('ok + value 0, no gating override: shows an explicit "0", never blank or hidden', () => {
+    const vm = itemViewModel(numberItem(), { status: 'ok', value: 0 }, activeScope, opts)
+    expect(vm.visible).toBe(true)
+    expect(vm.primary).toBe('0')
+  })
+
+  it('ok + value 0, gating.whenZero "omit": hides the item (the documented, opt-in exception)', () => {
+    const vm = itemViewModel(numberItem({ gating: { whenZero: 'omit' } }), { status: 'ok', value: 0 }, activeScope, opts)
+    expect(vm.visible).toBe(false)
+  })
+
   it('unmeasured: auto + closed campaign omits the item', () => {
     const vm = itemViewModel(numberItem(), { status: 'unmeasured', reason: 'not-seen-in-flight' }, closedScope, opts)
     expect(vm.visible).toBe(false)

@@ -58,11 +58,26 @@ describe('POPUP_RATE_TABLE_KEYS: valid ratios only', () => {
   it('is exactly every pop-up tap rate plus install over post-fix install prompts', () => {
     expect(POPUP_RATE_TABLE_KEYS).toEqual([...POPUPS.map((p) => `${p.id}:tap`), INSTALL_GAP_RATE_KEY])
   })
-  it('the popup-rates card asks for exactly these: a tap rate per pop-up, and install over post-fix prompts', () => {
+  it('the popup-rates card asks for exactly these VALID RATIOS: a tap rate per pop-up, and install over post-fix prompts', () => {
     const items = PRESETS['popup-rates'].sections.flatMap((s) => s.items)
-    expect(items.map((i) => ('ratio' in i.data ? i.data.ratio : ''))).toEqual(['popup.tapRate', 'popup.installedRate'])
-    expect(items[0].repeat).toEqual({ over: 'popups' })
-    expect(items[1].data).toMatchObject({ params: { popup: 'install' } })
+    const ratioItems = items.filter((i) => 'ratio' in i.data)
+    expect(ratioItems.map((i) => ('ratio' in i.data ? i.data.ratio : ''))).toEqual(['popup.tapRate', 'popup.installedRate'])
+    expect(ratioItems[0].repeat).toEqual({ over: 'popups' })
+    expect(ratioItems[1].data).toMatchObject({ params: { popup: 'install' } })
+  })
+  // Added 2026-09-27 (review round, A2): the lagged pop-up outcomes (signed-in/returned/
+  // still-playing) are COUNTS here, never a rate — see this file's own comment above on why
+  // (numerator not a valid subset of a same-window denominator) — but they still need an
+  // explicit-zero tile so a chart-only view of the outcome breakdown (which draws nothing for a
+  // zero-row combination) never reads as "not wired up".
+  it('also asks for signed-in/returned/still-playing as COUNTS (never a ratio), one row per pop-up each', () => {
+    const items = PRESETS['popup-rates'].sections.flatMap((s) => s.items)
+    const metricItems = items.filter((i) => 'metric' in i.data)
+    expect(metricItems.map((i) => ('metric' in i.data ? i.data.metric : ''))).toEqual(['popup.outcomeSignedIn', 'popup.outcomeReturned', 'popup.outcomeStillPlaying'])
+    for (const i of metricItems) {
+      expect(i.repeat).toEqual({ over: 'popups' })
+      expect(i.display).toEqual({ as: 'number' })
+    }
   })
   it('contains no lagged outcome rate and no eligibility rate', () => {
     for (const key of POPUP_RATE_TABLE_KEYS) {

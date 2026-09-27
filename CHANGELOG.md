@@ -20,6 +20,11 @@ All notable changes to **gss-stats** are documented here. The format follows
   never joined to an individual. Every sub-read is independently best-effort: one failing is
   recorded and reported, never thrown, and never blocks the others or the spend/kill-rule read —
   none of this feeds a kill rule or an automatic action; it is report lines only.
+- **Sign-ins now split by new vs. existing vs. unknown right next to the existing sign-in
+  count** on "Today at a glance", with the split's own go-live called out so an early range
+  reads as "counted from" a specific time rather than a false zero. Counts only.
+- **Pop-up outcomes (signed in, returned, still playing) now show alongside the existing
+  install rate** on the Pop-ups page, as counts.
 
 ### Changed
 - **The retest ads routine's release-health check now runs every morning read, at any hour.**

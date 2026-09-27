@@ -205,7 +205,13 @@ describe('bsk-kpis ≡ the bespoke "Today at a glance" tiles', () => {
   // they are excluded from the strict before/after comparison below (which is a parity check
   // against the retired code, not a frozen list of every tile bsk-kpis may ever show). Each one
   // gets its own coverage elsewhere (see the auth-error/auth-redirect describe block).
-  const ADDED_AFTER_RETIREMENT = new Set(['Sign-in failures', 'Sign-in redirect fallbacks'])
+  const ADDED_AFTER_RETIREMENT = new Set([
+    'Sign-in failures',
+    'Sign-in redirect fallbacks',
+    'Auth successes — new',
+    'Auth successes — existing',
+    'Auth successes — unknown',
+  ])
 
   it('same tiles in the same order, same values and the same delta lines ("new today" included)', async () => {
     const before = oldTiles()
@@ -230,8 +236,11 @@ describe('bsk-kpis ≡ the bespoke "Today at a glance" tiles', () => {
     const labels = after.map((t) => t.label)
     const authIdx = labels.indexOf('Auth successes')
     expect(authIdx).toBeGreaterThanOrEqual(0)
-    expect(labels[authIdx + 1]).toBe('Sign-in failures')
-    expect(labels[authIdx + 2]).toBe('Sign-in redirect fallbacks')
+    expect(labels[authIdx + 1]).toBe('Auth successes — new')
+    expect(labels[authIdx + 2]).toBe('Auth successes — existing')
+    expect(labels[authIdx + 3]).toBe('Auth successes — unknown')
+    expect(labels[authIdx + 4]).toBe('Sign-in failures')
+    expect(labels[authIdx + 5]).toBe('Sign-in redirect fallbacks')
     const errors = after.find((t) => t.label === 'Sign-in failures')!
     const redirects = after.find((t) => t.label === 'Sign-in redirect fallbacks')!
     // A real, visible "0" — go-live (2026-09-22) predates the fixture's "today", so this reads
@@ -239,6 +248,20 @@ describe('bsk-kpis ≡ the bespoke "Today at a glance" tiles', () => {
     // would show (lib/metrics/render.ts applyUnmeasuredGating).
     expect(errors.value).toBe('0')
     expect(redirects.value).toBe('0')
+  })
+
+  it('auth-success new/existing/unknown tiles: present, next to Auth successes, reading real counts including an explicit zero (A2, review round 2026-09-27)', async () => {
+    const after = newTiles(await mountNew('bsk-kpis'))
+    const byLabel = new Map(after.map((t) => [t.label, t]))
+    // FIXTURE_NOW (2026-09-26T21:00:00Z) is inside the go-live day but AFTER go-live
+    // (19:43:02Z), so "today so far" is a PARTIAL window: a real count, not a false zero and
+    // not the muted "not yet tracking" a window entirely before go-live would show.
+    expect(byLabel.get('Auth successes — new')!.value).toBe('0') // explicit zero, never blank
+    expect(byLabel.get('Auth successes — existing')!.value).toBe('4') // a real, nonzero count
+    expect(byLabel.get('Auth successes — unknown')!.value).toBe('0') // explicit zero, never blank
+    // Existing + new + unknown (4+0+0=4) is at most the base Auth successes count (6) — the
+    // base metric predates the split and counts sign-ins with no status row too.
+    expect(Number(byLabel.get('Auth successes')!.value)).toBeGreaterThanOrEqual(4)
   })
 
   it('no-campaign days: the arrivals placeholder is a tile, as before', async () => {
