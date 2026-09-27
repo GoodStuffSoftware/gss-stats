@@ -6,7 +6,8 @@ import { campaignById } from '../campaigns'
 import { itemViewModel } from './render'
 import { buildRequestSpec, flattenSectionItems, unmeasuredByConfig } from './scope'
 import type { ScopeInstance } from './scope'
-import type { MetricItem, MetricValue } from './types'
+import type { CardSpec, MetricItem, MetricValue } from './types'
+import { validateCard } from './validate'
 
 const activeScope: ScopeInstance = { kind: 'campaign', campaign: campaignById('24279250691')! }
 const rootScope: ScopeInstance = { kind: 'root' }
@@ -114,6 +115,41 @@ describe('decided from the campaign config, on the client (spend-only, flight pe
   it('an ordinary active campaign and site-wide items are unaffected', () => {
     expect(unmeasuredByConfig(numberItem().data, activeScope)).toBe(false)
     expect(unmeasuredByConfig(kpi().data, spendOnly)).toBe(false) // no campaign param: site-wide
+  })
+})
+
+describe('comparisons hidden after the first, partial day', () => {
+  const retest = campaignById('24279250691')! // flight starts 2026-09-26 at 12:00 ET
+  const arrivals: MetricItem = { id: 'a', label: 'Arrivals', data: { metric: 'campaign.taggedArrivals', window: 'todaySoFar' }, display: { as: 'number', deltas: ['yesterday', 'avg7'] } }
+  const scope: ScopeInstance = { kind: 'campaign', campaign: retest }
+  it('on the first day itself: "new today"', () => {
+    expect(itemViewModel(arrivals, { status: 'ok', value: 7 }, scope, { todayEt: '2026-09-26' }).deltaLines).toEqual([{ text: 'new today', cls: 'new' }])
+  })
+  it('on the days after: "no comparison yet (first day partial)", never "new today"', () => {
+    expect(itemViewModel(arrivals, { status: 'ok', value: 7 }, scope, { todayEt: '2026-09-27' }).deltaLines).toEqual([{ text: 'no comparison yet (first day partial)', cls: '' }])
+  })
+  it('a site-wide metric the day after its go-live reads the same way', () => {
+    // Games completed went live on 2026-09-26 (GAME_COMPLETE_LIVE_AT).
+    const done: MetricItem = { id: 'c', label: 'Games completed', data: { metric: 'bsk.completions', window: 'todaySoFar' }, display: { as: 'number', deltas: ['yesterday', 'avg7'] } }
+    expect(itemViewModel(done, { status: 'ok', value: 3 }, rootScope, { todayEt: '2026-09-27' }).deltaLines).toEqual([{ text: 'no comparison yet (first day partial)', cls: '' }])
+    expect(itemViewModel(done, { status: 'ok', value: 3 }, rootScope, { todayEt: '2026-09-26' }).deltaLines).toEqual([{ text: 'new today', cls: 'new' }])
+  })
+})
+
+describe('percent decimals', () => {
+  it('are clamped to an integer from 0 to 4 when rendering, so a bad saved value never throws', () => {
+    for (const decimals of [1000, -3, 2.7, NaN, Infinity]) {
+      const item = { ...percentItem(), display: { as: 'percent', decimals } } as unknown as MetricItem
+      expect(() => itemViewModel(item, { status: 'ok', value: 0.5, numerator: 1, denominator: 2 }, activeScope, opts)).not.toThrow()
+    }
+    const at = (decimals: number) => itemViewModel({ ...percentItem(), display: { as: 'percent', decimals } } as unknown as MetricItem, { status: 'ok', value: 1 / 3, numerator: 1, denominator: 3 }, activeScope, opts).primary
+    expect(at(1000)).toBe('33.3333% (1/3)')
+    expect(at(-3)).toBe('33% (1/3)')
+  })
+  it('validateCard accepts 0 to 4 and refuses anything else', () => {
+    const card = (decimals: unknown) => ({ v: 1, repeat: { over: 'campaigns' }, sections: [{ layout: 'rows', items: [{ id: 'a', label: 'A', data: { ratio: 'campaign.acceptPerAsk' }, display: { as: 'percent', decimals } }] }] }) as unknown as CardSpec
+    for (const d of [0, 1, 4]) expect(validateCard(card(d))).toEqual([])
+    for (const d of [5, 1000, -1, 1.5, '2']) expect(validateCard(card(d)).join('\n')).toMatch(/decimals must be an integer from 0 to 4/)
   })
 })
 

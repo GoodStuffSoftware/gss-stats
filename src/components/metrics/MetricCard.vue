@@ -33,6 +33,9 @@ const props = defineProps<{
   readings?: ReadingScope[]
   /** Test/preview seam — defaults to the real clock. */
   nowMs?: number
+  /** The widget's own title (ChartCard): names the card for a screen reader when the spec has
+   * no title of its own ("Notes: Today at a glance"). */
+  fallbackTitle?: string
 }>()
 const emit = defineEmits<{ 'open-campaigns': [] }>()
 
@@ -141,7 +144,7 @@ const statusAboveGrid = computed(() => !!spec.value?.repeat && statusPlacement.v
         <MetricLabel :tokens="resolveLabelTokens(spec.repeat.empty.text, ROOT_SCOPE, undefined, todayEt)" />
       </p>
     </div>
-    <MetricCardInstance v-else :key="todayEt" class="metric-card-plain" :spec="spec" :scope="ROOT_SCOPE" :ctx="ctx" :context="context" :boxed="false" @open="emit('open-campaigns')">
+    <MetricCardInstance v-else :key="todayEt" class="metric-card-plain" :spec="spec" :scope="ROOT_SCOPE" :ctx="ctx" :context="context" :boxed="false" :fallback-title="fallbackTitle" @open="emit('open-campaigns')">
       <template v-if="statusInInstanceHeader" #status>
         <MetricCardStatus :has-error="hasError" :updated-text="updatedText" @reload="reload" />
       </template>

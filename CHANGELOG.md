@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-09-27
+
 ### Added
 - **One batched metrics request.** A single request returns many dashboard numbers with their
   counts and measurement status, reads each underlying query once and caches it, and refuses any
@@ -16,9 +18,10 @@ All notable changes to **gss-stats** are documented here. The format follows
   numbers, except where the rate audit changed them: game-screen views read against arrivals
   instead of alone, the install rate counts prompts from the install fix to the minute, and a
   closed or spend-only campaign drops what its flight could not measure. Each card keeps its
-  caveats behind one "Notes" link, follows the page's dates and sites, and says so with Retry
-  when a number fails to load. Saved layouts are updated automatically, and the previous layout
-  is backed up first.
+  caveats behind one "Notes" link, refreshes when the filter bar changes (the two cards always
+  show today and the Best Sudoku sites), and says so with Retry when a number fails to load.
+  Saved layouts are updated automatically, and the previous layout is backed up first. A tab
+  left open on the previous version shows empty KPI and scorecard panels until it is reloaded.
 - **"Games played" and "Played a game" are now "Game-screen views".** Both count visits to the
   game screen (page views, several per device), not games played; the Overview tile, the
   campaign funnel step and the ads-read report now say so.

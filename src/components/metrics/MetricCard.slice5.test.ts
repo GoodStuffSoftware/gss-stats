@@ -104,6 +104,23 @@ describe('MetricCard — preset lookup and structure', () => {
   })
 })
 
+describe('MetricCard — card notes, one line per caveat', () => {
+  it('a caveat shared by several items is listed once, with every label in front of it', async () => {
+    answer = (r) =>
+      r.metric === 'campaign.taggedArrivals' || r.ratio === 'campaign.gameViewsVsArrivals'
+        ? { status: 'ok', value: 7, numerator: 21, denominator: 7, noteIds: ['arrivals-caveat'] }
+        : { status: 'ok', value: 1 }
+    const w = mountCard({ cardRef: { preset: 'campaign-scorecard' }, nowMs: NOW })
+    await settle()
+    const retest = w.findAll('.metric-card').find((c) => c.find('.mc-title').text() === 'US+CA web retest')!
+    await retest.find('button.mc-notes-toggle').trigger('click')
+    const lines = retest.findAll('.mc-notes li').map((li) => li.text().replace(/\s+/g, ' '))
+    const floor = lines.filter((l) => l.includes('Floor'))
+    expect(floor).toHaveLength(1)
+    expect(floor[0]).toMatch(/^Tagged arrivals, Game-screen views: Floor/)
+  })
+})
+
 describe('MetricCard — card notes', () => {
   it('one Notes toggle per card, collapsed by default, listing "<label>: <caveat>"; no per-item toggles or caption lines', async () => {
     answer = (r) =>

@@ -16,7 +16,7 @@
 import { getNote, NOTES_REGISTRY, noteRawText, noteTokens } from '../notes'
 import { etDateFromMs } from '../popupEvents'
 import { tokenizeAndInterpolate, type TextToken } from '../textLite'
-import { METRICS, type MetricDef } from './metrics'
+import { METRICS, rulesOf, type MetricDef } from './metrics'
 import { RATIOS, type RatioDef } from './ratios'
 import { resolveBinding, scopeField, scopeVars, unmeasuredByConfig, type ScopeInstance } from './scope'
 import type { Display, Gating, Label, MetricItem, MetricValue } from './types'
@@ -89,8 +89,13 @@ function fmtCount(n: number | null | undefined): string {
 function fmtMoney(n: number | null | undefined): string {
   return finite(n) ? `$${n.toFixed(2)}` : '—'
 }
+/** Decimals for a percent: an integer 0-4 (validateCard enforces it; a hand-edited saved card
+ * is clamped here, so toFixed can never throw a RangeError). */
+export function percentDecimals(d: unknown): number {
+  return typeof d === 'number' && Number.isFinite(d) ? Math.min(4, Math.max(0, Math.trunc(d))) : 1
+}
 function fmtPercent(fraction: number | null | undefined, decimals: number): string {
-  return finite(fraction) ? `${(fraction * 100).toFixed(decimals)}%` : '—'
+  return finite(fraction) ? `${(fraction * 100).toFixed(percentDecimals(decimals))}%` : '—'
 }
 /** A percent's " (n/d)": always shown when either side came back, a missing or non-finite
  * side as "?"; empty only when the server sent neither. */
@@ -193,6 +198,22 @@ function isNewToday(item: MetricItem, value: MetricValue, def: MetricDef | Ratio
   return window === 'todaySoFar'
 }
 
+/** The latest ET day that gates a metric's comparisons, as the engine derives it: its
+ * instrumentation rules' go-live days and, for a campaign metric, the flight's start. */
+function goLiveEtFor(def: MetricDef, scope: ScopeInstance): string | null {
+  const campaign = scope.kind === 'campaign' ? scope.campaign : undefined
+  let best: string | null = null
+  const take = (d: string | null | undefined) => {
+    if (d && (best === null || d > best)) best = d
+  }
+  for (const r of rulesOf(def, { params: campaign ? { campaignId: campaign.id } : {}, campaign, window: 'todaySoFar' })) {
+    if ((r.kind === 'liveAt' || r.kind === 'unmeasuredBefore') && r.atMs != null) take(etDateFromMs(r.atMs))
+    else if (r.kind === 'liveOnEtDate') take(r.dateEt)
+  }
+  if (campaign && def.params.includes('campaignId')) take(campaign.flightStart)
+  return best
+}
+
 function itemCaptionOnly(item: MetricItem, scope: ScopeInstance, todayEt: string): TextToken[] {
   return item.caption ? resolveLabelTokens(item.caption, scope, undefined, todayEt) : []
 }
@@ -260,7 +281,13 @@ function metricViewModel(item: MetricItem, value: MetricValue, def: MetricDef | 
   }
   // 'ok' | 'partial' | 'too-few'
   const { primary, deltaLines, split } = formatMetricOrRatioValue(item.display, value, def)
-  if (isNewToday(item, value, def)) deltaLines.push({ text: noteRawText('new-today'), cls: 'new' })
+  if (isNewToday(item, value, def)) {
+    // Comparisons are hidden while yesterday or the 7-day window reaches back to the go-live day
+    // (or a campaign's first, partial day). On that day itself it is "new today"; on the days
+    // after, the metric is not new any more: there is simply no full day to compare with yet.
+    const goLive = goLiveEtFor(def as MetricDef, scope)
+    deltaLines.push(goLive && goLive < todayEt ? { text: noteRawText('no-comparison-yet'), cls: '' } : { text: noteRawText('new-today'), cls: 'new' })
+  }
   return { visible: true, labelTokens, primary, deltaLines, captionTokens: valueCaptionTokens(item, value, scope, todayEt), ...(split ? { split } : {}), ...(value.status === 'too-few' && item.display.as !== 'percent' ? { muted: true } : {}) }
 }
 
