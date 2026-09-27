@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.12.1] — 2026-09-27
+
 ### Fixed
 - **A campaign with no confirmed start date now shows on the hour-of-day and flight-day charts.**
   It draws at zero, keeping its place in the legend, the same as it already did on the funnel and
