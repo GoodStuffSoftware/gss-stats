@@ -102,6 +102,13 @@ describe('per-request errors never sink the batch', () => {
     expect(statements).toHaveLength(1) // only the valid request's fact ran
     expect(statements.join(' ')).not.toMatch(/UNION|OR 1=1/)
   })
+  it('a key named like an Object prototype member is answered as an ordinary key', async () => {
+    const { res, json } = await post({ v: 1, requests: [{ key: '__proto__', metric: 'bsk.pageviews' }, { key: 'constructor', metric: 'bsk.nope' }] })
+    expect(res.status).toBe(200)
+    expect(Object.keys(json.results).sort()).toEqual(['__proto__', 'constructor'])
+    expect(json.results.constructor).toEqual({ status: 'error', reason: 'unknown-id' })
+    expect(({}).constructor).toBe(Object) // nothing global was touched
+  })
   it('the response carries numbers, enums and note ids only — never label text', async () => {
     const { json } = await post({ v: 1, requests: [{ key: 'a', metric: 'campaign.taggedArrivals', params: { campaignId: RETEST } }, { key: 'b', ratio: 'campaign.installPerPrompt', params: { campaignId: RETEST } }] })
     const text = JSON.stringify(json.results)
