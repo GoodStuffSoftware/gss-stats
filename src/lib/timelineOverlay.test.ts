@@ -2,7 +2,7 @@
 // buildSeriesLineConfig) that together replace the Overview's bespoke timeline panel.
 import { describe, expect, it } from 'vitest'
 import { flightItems, goLiveItems, itemsInRange, layoutFlightBands, markerIndex, overlayItems, releaseItems, type OverlayItem } from './timelineOverlay'
-import { buildSeriesLineConfig, buildChartConfig, hasLineSeries } from './charts'
+import { buildSeriesLineConfig, buildChartConfig, hasLineSeries, truncatedFrom, seriesRows } from './charts'
 import { timelineWidget, TIMELINE_SERIES } from './defaults'
 import type { CampaignFlight } from './campaigns'
 import type { StatsResponse } from '../types'
@@ -138,6 +138,28 @@ describe('series line chart (the Overall timeline as a standard line chart)', ()
     expect(cfg.data.datasets[4].borderDash).toEqual([1, 3])
     // the overlay plugin rides along when any overlay is on
     expect(cfg.plugins.map((p: any) => p.id)).toEqual(['timelineOverlay'])
+  })
+
+  it('a range longer than the limit (the server kept the newest days) starts the axis at the oldest returned day, never zero-filling unknown days', () => {
+    // 450 days in range; the server returned only the newest 400 (their sum < the grand total).
+    const since = '2025-01-01T12:00:00Z'
+    const until = new Date(Date.parse(since) + 449 * 86_400_000).toISOString()
+    const allDays = Array.from({ length: 450 }, (_, i) => new Date(Date.parse(since) + i * 86_400_000).toISOString().slice(0, 10))
+    const kept = allDays.slice(50)
+    const cut: StatsResponse = {
+      rows: kept.map((d) => ({ key: { dateEt: d }, pageviews: 1, visits: 1 })),
+      totals: { pageviews: 450, visits: 450 },
+      meta: { site: 'all', host: null, since, until, dimensions: ['dateEt'], metric: 'pageviews' },
+    }
+    const full: StatsResponse = { ...cut, rows: allDays.map((d) => ({ key: { dateEt: d }, pageviews: 1, visits: 1 })) }
+    const one = { ...w, series: [{ label: 'Page views' }, { label: 'x', filter: [{ field: 'keyEvent', value: 'install' }] }] }
+    const cfg: any = buildSeriesLineConfig(one, [cut, full])
+    expect(cfg.data.labels).toHaveLength(400)
+    expect(cfg.data.datasets[0].data.every((v: number) => v === 1)).toBe(true) // no fake zeros
+    expect(truncatedFrom('dateEt', cut)).toBe(kept[0])
+    expect(truncatedFrom('dateEt', full)).toBeNull()
+    // the single-series path does the same
+    expect(seriesRows('dateEt', cut)).toHaveLength(400)
   })
 
   it('no right-axis series → no second axis; buildChartConfig routes series widgets here', () => {

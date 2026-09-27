@@ -452,7 +452,10 @@ export function buildSeriesLineConfig(widget: Widget, responses: StatsResponse[]
   // The axis starts at the first day any series has data (a long range, e.g. "since January",
   // would otherwise open with months of flat zeros); every later empty day still plots as 0.
   const firstData = allDays.findIndex((d) => byDay.some((m) => (m.get(d) ?? 0) > 0))
-  const buckets = firstData > 0 ? allDays.slice(firstData) : allDays
+  // A series the server cut to its limit only covers its newest days: start there too.
+  const cuts = responses.map((r) => truncatedFrom(dim, r)).filter((c): c is string => !!c)
+  const cutFrom = cuts.length ? cuts.reduce((a, b) => (a > b ? a : b)) : ''
+  const buckets = (firstData > 0 ? allDays.slice(firstData) : allDays).filter((d) => d >= cutFrom)
   const hasRight = series.some((s) => s.axis === 'right')
   const narrow = isMobileViewport()
   const items = overlayItems(widgetOverlayOptions(widget))
@@ -682,10 +685,21 @@ function dayBucketsInRange(since: string, until: string, et = false): string[] |
 // clicked point index always resolves to the value drawn there: with zero-fill the chart can
 // have more points than the response has rows, and indexing the raw rows would drill into the
 // wrong day (or miss entirely).
+/** The first day a date response actually covers when the server cut it to its `limit` (it keeps
+ * the NEWEST days — functions/api/geo.ts): the rows then sum to less than the grand total. Days
+ * before it are unknown, not zero, so a chart must not zero-fill them. null = not truncated. */
+export function truncatedFrom(dim: string, resp: StatsResponse): string | null {
+  const shown = resp.rows.reduce((a, r) => a + (r.pageviews || 0), 0)
+  if (!resp.rows.length || shown >= (resp.totals?.pageviews ?? 0)) return null
+  return resp.rows.reduce((min, r) => (r.key[dim] && (min === null || r.key[dim] < min) ? r.key[dim] : min), null as string | null)
+}
+
 export function seriesRows(dim: string, resp: StatsResponse): StatsRow[] {
   if (!isDateDim(dim)) return resp.rows
-  const buckets = dayBucketsInRange(resp.meta.since, resp.meta.until, dim === 'dateEt')
-  if (!buckets) return resp.rows
+  const all = dayBucketsInRange(resp.meta.since, resp.meta.until, dim === 'dateEt')
+  if (!all) return resp.rows
+  const cut = truncatedFrom(dim, resp)
+  const buckets = cut ? all.filter((d) => d >= cut) : all
   const byDay = new Map(resp.rows.map((r) => [r.key[dim] ?? '', r]))
   return buckets.map((day) => byDay.get(day) ?? { key: { [dim]: day }, pageviews: 0, visits: 0 })
 }
