@@ -69,6 +69,14 @@ describe('overlay items', () => {
     expect(items[1].endDate).toBeUndefined()
   })
 
+  it('an active flight is open-ended only while today (ET) is on or before its flightEnd', () => {
+    const active = [{ id: '2', label: 'active', flightStart: '2026-09-26', flightEnd: '2026-10-02', status: 'active' }] as unknown as CampaignFlight[]
+    expect(flightItems(active, '2026-10-02')[0]).toMatchObject({ openEnded: true })
+    const past = flightItems(active, '2026-10-03')[0]
+    expect(past.openEnded).toBeUndefined()
+    expect(past.endDate).toBe('2026-10-02')
+  })
+
   it('releases split into labelled majors and minor ticks; go-live markers carry plain notes', () => {
     const rel = releaseItems()
     expect(rel.some((r) => r.kind === 'release')).toBe(true)
@@ -115,7 +123,8 @@ describe('series line chart (the Overall timeline as a standard line chart)', ()
   it('is a standard line widget with series, overlays and the known-traffic filter on', () => {
     expect(w).toMatchObject({ type: 'line', dataset: 'geo', dimension: 'dateEt', markers: 'releases', goLiveMarkers: true, flightBands: true, excludeKnownTraffic: true })
     expect(hasLineSeries(w)).toBe(true)
-    expect(w.series!.map((s) => s.label)).toEqual(['Page views', 'Tagged arrivals', 'Auth successes', 'Installs', 'Raw install signals'])
+    expect(w.series!.map((s) => s.label)).toEqual(['Page views', 'Tagged arrivals', 'Auth successes', 'Installs', 'Raw install signals (can double-count)'])
+    expect(w.siteSel).toEqual(['bestsudoku-web', 'bestsudoku', 'bestsudoku-app'])
   })
 
   it('one dataset per series, zero-filled over the range, on its own axis', () => {

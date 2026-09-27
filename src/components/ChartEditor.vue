@@ -12,13 +12,13 @@ import {
   DATASETS,
   CHART_TYPES,
   METRICS,
-  SITE_OPTIONS,
   OVERVIEW_VIEWS,
   CAMPAIGNS_VIEWS,
   CAMPAIGN_OPTIONS,
   BAR_MODES,
 } from '../lib/catalog'
 import { ringDims, RING_SOFT_CAP, isDateDim } from '../lib/rings'
+import { BEST_SUDOKU_SITES } from '../lib/defaults'
 import { noteOptions, defaultNoteIdsForScope, type NoteScope } from '../lib/notes'
 
 const props = defineProps<{ widget: Widget; isNew: boolean }>()
@@ -255,10 +255,24 @@ watch(
 )
 
 const typeDef = computed(() => CHART_TYPES.find((t) => t.value === draft.type))
+// "Site override" = Widget.siteSel: this chart's own site pick, replacing the page's (dates and
+// every other page filter still apply). Best Sudoku is its beacon tags (web + app).
+const SITE_OVERRIDES: { value: string; label: string; sel: string[] }[] = [
+  { value: 'all', label: 'All sites', sel: [] },
+  { value: 'bestsudoku', label: 'Best Sudoku (web + app)', sel: [...BEST_SUDOKU_SITES] },
+  { value: 'goodstuff.software', label: 'goodstuff.software (Star Rupture + Simple Tile)', sel: ['goodstuff.software'] },
+  { value: 'goodstuffsoftware.com', label: 'goodstuffsoftware.com', sel: ['goodstuffsoftware.com'] },
+]
 const siteValue = computed({
-  get: () => draft.site ?? 'inherit',
+  get: () => {
+    if (!draft.siteSel) return 'inherit'
+    const key = JSON.stringify([...draft.siteSel].sort())
+    return SITE_OVERRIDES.find((o) => JSON.stringify([...o.sel].sort()) === key)?.value ?? 'custom'
+  },
   set: (v: string) => {
-    draft.site = v === 'inherit' ? undefined : (v as any)
+    if (v === 'custom') return
+    const o = SITE_OVERRIDES.find((x) => x.value === v)
+    draft.siteSel = o ? [...o.sel] : undefined
   },
 })
 
@@ -472,8 +486,9 @@ function save() {
         <div class="field">
           <label>Site override</label>
           <select v-model="siteValue">
-            <option value="inherit">Inherit global</option>
-            <option v-for="o in SITE_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+            <option value="inherit">Inherit the page's sites</option>
+            <option v-for="o in SITE_OVERRIDES" :key="o.value" :value="o.value">{{ o.label }}</option>
+            <option v-if="siteValue === 'custom'" value="custom">Custom ({{ draft.siteSel?.join(', ') }})</option>
           </select>
         </div>
       </div>

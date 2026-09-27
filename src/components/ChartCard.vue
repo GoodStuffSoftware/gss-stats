@@ -265,6 +265,7 @@ const dataKey = computed(() =>
     m: props.widget.metric,
     l: props.widget.limit,
     s: props.widget.site,
+    ss: props.widget.siteSel,
     h: props.widget.host,
     e: props.widget.excludeSelfReferrals,
     pu: props.widget.popup,
