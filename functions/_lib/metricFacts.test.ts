@@ -6,7 +6,10 @@ import { describe, expect, it } from 'vitest'
 import { deriveBatch, planBatch } from '../../src/lib/metrics/engine'
 import { validateMetricsRequest } from '../../src/lib/metrics/validate'
 import { etDateFromMs } from '../../src/lib/popupEvents'
-import { fetchFacts, factTtlSeconds } from './metricFacts'
+import { fetchFacts, factCacheKeyUrl, factTtlSeconds, KEY_NOW, statementCacheKeyUrl } from './metricFacts'
+import { FACTS } from '../../src/lib/metrics/facts'
+import { campaignById } from '../../src/lib/campaigns'
+import { factCuts } from '../../src/lib/metrics/engine'
 import { insertHits, memoryCache, openHitsDb, sqliteD1 } from './testing/hitsDb'
 
 const NOW = Date.parse('2026-09-26T21:00:00Z')
@@ -71,16 +74,58 @@ describe('spend and costs', () => {
 })
 
 describe('cache lifetimes', () => {
-  const now = new Date(NOW)
+  const today = '2026-09-26'
   it('a closed campaign\'s rows live 15 minutes, an active one\'s 90 seconds', () => {
-    expect(factTtlSeconds('campaign', { params: { campaignId: ANDROID } }, now)).toBe(900)
-    expect(factTtlSeconds('campaign', { params: { campaignId: RETEST } }, now)).toBe(90)
+    expect(factTtlSeconds('campaign', { params: { campaignId: ANDROID } }, today)).toBe(900)
+    expect(factTtlSeconds('campaign', { params: { campaignId: RETEST } }, today)).toBe(90)
   })
   it('a finished serving window lives a day; an open one 90 seconds; a page range by its end', () => {
-    expect(factTtlSeconds('flightWindow', { params: { campaignId: ANDROID } }, now)).toBe(86_400)
-    expect(factTtlSeconds('flightWindow', { params: { campaignId: RETEST } }, now)).toBe(90)
-    expect(factTtlSeconds('range', { params: { until: '2026-09-20' } }, now)).toBe(86_400)
-    expect(factTtlSeconds('range', { params: { until: '2026-09-26' } }, now)).toBe(90)
-    expect(factTtlSeconds({ seconds: 300 }, { params: {} }, now)).toBe(300)
+    expect(factTtlSeconds('flightWindow', { params: { campaignId: ANDROID } }, today)).toBe(86_400)
+    expect(factTtlSeconds('flightWindow', { params: { campaignId: RETEST } }, today)).toBe(90)
+    expect(factTtlSeconds('range', { params: { since: '2026-09-14', until: '2026-09-20' } }, today)).toBe(86_400)
+    expect(factTtlSeconds('range', { params: { since: '2026-09-14', until: '2026-09-25' } }, today)).toBe(86_400) // ends at today's ET midnight
+    expect(factTtlSeconds('range', { params: { since: '2026-09-20', until: '2026-09-26' } }, today)).toBe(90)
+    expect(factTtlSeconds('range', { params: { since: '2026-09-20T00:00:00Z', until: '2026-09-26T03:59:59Z' } }, today)).toBe(86_400) // before ET midnight
+    expect(factTtlSeconds('range', { params: { since: '2026-09-20T00:00:00Z', until: '2026-09-26T04:00:01Z' } }, today)).toBe(90)
+    expect(factTtlSeconds({ seconds: 300 }, { params: {} }, today)).toBe(300)
+  })
+})
+
+describe('cache keys (review finding #9): SQL and bound values, never the live "now"', () => {
+  const keyFor = (id: 'campaignPathVisitor' | 'flightPathsSeen' | 'campaignReturns', campaignId: string) =>
+    statementCacheKeyUrl({ id, params: { campaignId } }, FACTS[id].build({ campaignId }, KEY_NOW, factCuts(id)))
+  it('changing a campaign\'s flightStartTimeEt, flightStart, flightEnd or tags changes its facts\' keys', () => {
+    const retest = campaignById(RETEST)!
+    const saved = { ...retest }
+    const before = { pv: keyFor('campaignPathVisitor', RETEST), seen: keyFor('flightPathsSeen', RETEST), ret: keyFor('campaignReturns', RETEST) }
+    try {
+      retest.flightStartTimeEt = '13:00'
+      expect(keyFor('campaignPathVisitor', RETEST)).not.toBe(before.pv)
+      Object.assign(retest, saved, { flightStart: '2026-09-25' })
+      expect(keyFor('campaignPathVisitor', RETEST)).not.toBe(before.pv)
+      expect(keyFor('flightPathsSeen', RETEST)).not.toBe(before.seen)
+      Object.assign(retest, saved, { flightEnd: '2026-10-03' })
+      expect(keyFor('flightPathsSeen', RETEST)).not.toBe(before.seen)
+      Object.assign(retest, saved, { ucValues: ['sudoku_funnel_retest', 'sudoku_funnel_retest_2'] })
+      expect(keyFor('campaignPathVisitor', RETEST)).not.toBe(before.pv)
+      expect(keyFor('campaignReturns', RETEST)).not.toBe(before.ret)
+    } finally {
+      Object.assign(retest, saved)
+    }
+    expect(keyFor('campaignPathVisitor', RETEST)).toBe(before.pv) // restored config, same key
+  })
+  it('the KPI fact keys on its day, not on "now": two fetches of one day share an entry, another day does not', () => {
+    const a = factCacheKeyUrl({ id: 'bskKpiDays', params: { todayEt: '2026-09-26' } })
+    expect(factCacheKeyUrl({ id: 'bskKpiDays', params: { todayEt: '2026-09-26' } })).toBe(a)
+    expect(factCacheKeyUrl({ id: 'bskKpiDays', params: { todayEt: '2026-09-27' } })).not.toBe(a)
+    // What is hashed is the statement built at KEY_NOW, so the live bounds never enter it.
+    const live1 = FACTS.bskKpiDays.build({ todayEt: '2026-09-26' }, NOW, factCuts('bskKpiDays'))
+    const live2 = FACTS.bskKpiDays.build({ todayEt: '2026-09-26' }, NOW + 60_000, factCuts('bskKpiDays'))
+    expect(live1.binds).not.toEqual(live2.binds)
+  })
+  it('a key carries the entry format version and a statement hash', () => {
+    const url = decodeURIComponent(factCacheKeyUrl({ id: 'adsSpend', params: {} }))
+    expect(url).toMatch(/"v":2/)
+    expect(url).toMatch(/"h":"[0-9a-f]{8}"/)
   })
 })

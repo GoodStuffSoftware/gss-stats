@@ -26,9 +26,9 @@ const arg = (name: string): string | undefined => {
 async function syntheticSeed(nowMs: number): Promise<Seed> {
   const { openHitsDb, insertHits } = await import('../../functions/_lib/testing/hitsDb')
   const { bskFixture } = await import('../../functions/_lib/testing/bskFixture')
-  const { planBatch } = await import('../../src/lib/metrics/engine')
+  const { buildFact, planBatch } = await import('../../src/lib/metrics/engine')
   const { validateMetricsRequest } = await import('../../src/lib/metrics/validate')
-  const { FACTS } = await import('../../src/lib/metrics/facts')
+
   const { etDateFromMs } = await import('../../src/lib/popupEvents')
   const db = openHitsDb()
   insertHits(db, bskFixture())
@@ -39,7 +39,7 @@ async function syntheticSeed(nowMs: number): Promise<Seed> {
     nowMs,
     // No ads store in the synthetic case: spend falls back to CAMPAIGN_SPEND without a query.
     facts: plan.facts.filter((f) => f.id !== 'adsSpend').map((f) => {
-      const stmt = FACTS[f.id].build(f.params, nowMs)
+      const stmt = buildFact(f, nowMs)
       return { key: f.key, id: f.id, sql: stmt.sql, binds: stmt.binds, rows: db.prepare(stmt.sql).all(...(stmt.binds as (string | number)[])) as Record<string, unknown>[], rowsRead: null }
     }),
   }

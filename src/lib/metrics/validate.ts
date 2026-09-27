@@ -192,50 +192,53 @@ function validateContext(raw: unknown): ValidContext | string {
   }
 }
 
+function failed(key: string, reason: string): RequestCheck {
+  return { key, ok: false, reason }
+}
+
 function checkRequest(raw: Record<string, unknown>, key: string, context: ValidContext): RequestCheck {
-  const fail = (reason: string): RequestCheck => ({ key, ok: false, reason })
-  if (only(raw, ['key', 'metric', 'ratio', 'params', 'window', 'deltas', 'minCohort'])) return fail('bad-request')
+  if (only(raw, ['key', 'metric', 'ratio', 'params', 'window', 'deltas', 'minCohort'])) return failed(key, 'bad-request')
   const hasMetric = raw.metric !== undefined
   const hasRatio = raw.ratio !== undefined
-  if (hasMetric === hasRatio) return fail('bad-request') // exactly one of metric | ratio
+  if (hasMetric === hasRatio) return failed(key, 'bad-request') // exactly one of metric | ratio
   const id = hasMetric ? raw.metric : raw.ratio
-  if (typeof id !== 'string') return fail('unknown-id')
+  if (typeof id !== 'string') return failed(key, 'unknown-id')
   const metric = hasMetric ? METRICS.get(id) : undefined
   const ratio = hasRatio ? RATIOS.get(id) : undefined
-  if (!metric && !ratio) return fail('unknown-id') // a Map lookup; never reaches SQL
+  if (!metric && !ratio) return failed(key, 'unknown-id') // a Map lookup; never reaches SQL
   const allowedParams = metric ? metric.params : ratioParamsOf(ratio!)
   const windows = metric ? metricWindows(metric) : ratioWindowsOf(ratio!)
   const kind: 'count' | 'money' | 'proportion' | 'cost' | 'pair' = metric ? (metricKind(metric) as 'count' | 'money') : ratio!.kind
 
   const params: ResolvedRequest['params'] = {}
   if (raw.params !== undefined) {
-    if (!isObj(raw.params)) return fail('bad-param')
+    if (!isObj(raw.params)) return failed(key, 'bad-param')
     for (const [name, v] of Object.entries(raw.params)) {
-      if (!allowedParams.includes(name as MetricParam)) return fail('bad-param')
-      if (typeof v !== 'string' || !(name === 'campaignId' ? CAMPAIGN_IDS : POPUP_IDS).has(v)) return fail('bad-param')
+      if (!allowedParams.includes(name as MetricParam)) return failed(key, 'bad-param')
+      if (typeof v !== 'string' || !(name === 'campaignId' ? CAMPAIGN_IDS : POPUP_IDS).has(v)) return failed(key, 'bad-param')
       params[name as MetricParam] = v
     }
   }
-  for (const p of allowedParams) if (params[p] === undefined) return fail('missing-param')
+  for (const p of allowedParams) if (params[p] === undefined) return failed(key, 'missing-param')
 
   let window = windows[0]
   if (raw.window !== undefined) {
-    if (typeof raw.window !== 'string' || !windows.includes(raw.window as WindowName)) return fail('bad-window')
+    if (typeof raw.window !== 'string' || !windows.includes(raw.window as WindowName)) return failed(key, 'bad-window')
     window = raw.window as WindowName
   }
-  if (window === 'page' && (context.since === undefined || context.until === undefined)) return fail('missing-range')
+  if (window === 'page' && (context.since === undefined || context.until === undefined)) return failed(key, 'missing-range')
 
   let deltas: DeltaName[] = []
   if (raw.deltas !== undefined) {
-    if (!Array.isArray(raw.deltas) || !raw.deltas.every((d) => DELTA_NAMES.includes(d as DeltaName))) return fail('bad-deltas')
+    if (!Array.isArray(raw.deltas) || !raw.deltas.every((d) => DELTA_NAMES.includes(d as DeltaName))) return failed(key, 'bad-deltas')
     deltas = [...new Set(raw.deltas as DeltaName[])]
-    if (deltas.length && (kind !== 'count' || window !== 'todaySoFar')) return fail('bad-deltas')
+    if (deltas.length && (kind !== 'count' || window !== 'todaySoFar')) return failed(key, 'bad-deltas')
   }
 
   let minCohort = MIN_COHORT
   if (raw.minCohort !== undefined) {
-    if (typeof raw.minCohort !== 'number' || !Number.isInteger(raw.minCohort) || raw.minCohort < 1 || raw.minCohort > 1_000_000) return fail('bad-param')
-    if (kind !== 'proportion' && kind !== 'cost') return fail('bad-param')
+    if (typeof raw.minCohort !== 'number' || !Number.isInteger(raw.minCohort) || raw.minCohort < 1 || raw.minCohort > 1_000_000) return failed(key, 'bad-param')
+    if (kind !== 'proportion' && kind !== 'cost') return failed(key, 'bad-param')
     minCohort = Math.max(MIN_COHORT, raw.minCohort) // may only RAISE the floor
   }
   return { key, ok: true, req: { key, kind: metric ? 'metric' : 'ratio', id, params, window, deltas, minCohort } }

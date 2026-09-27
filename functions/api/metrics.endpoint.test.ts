@@ -138,7 +138,7 @@ describe('planning and caching', () => {
     // Android launch (closed): campaignPathVisitor + flightPathsSeen — its return rate is
     // unmeasured from config alone (the flight ended before the return beacon), so its
     // campaignReturns is never read. Retest: campaignPathVisitor + campaignReturns. Shared:
-    // bskKpiMinutes, and adsSpend (0 statements without the ads binding).
+    // bskKpiDays, and adsSpend (0 statements without the ads binding).
     expect(body.meta).toEqual({ facts: 6, cacheHits: 0, statements: 5 })
     expect(statements).toHaveLength(5)
     expect(new Set(statements).size).toBe(statements.length) // no statement ran twice
