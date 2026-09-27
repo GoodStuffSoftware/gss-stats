@@ -46,7 +46,7 @@ export interface MetricCtx {
   params: { campaignId?: string; popup?: string }
   campaign?: CampaignFlight
   /** campaignAttributionClause(campaign) — applied in JS when a campaign metric reads a
-   * site-wide fact (campaign.taggedArrivals over the KPI minute rows). */
+   * site-wide fact (campaign.taggedArrivals over the KPI fact). */
   attribution?: CampaignAttribution
   window: WindowName
 }
@@ -102,8 +102,8 @@ const INSTALL_FIX: InstrumentationRule = { kind: 'unmeasuredBefore', atMs: INSTA
 const RAW_DEDUPE: InstrumentationRule = { kind: 'annotateAt', atMs: RAW_INSTALL_DEDUPE_LIVE_AT_UTC_MS, noteId: 'raw-install-dedupe' }
 
 const CAMPAIGN_WINDOWS = { attribution: 'campaignPathVisitor' } as const
-const BSK_WINDOWS = { todaySoFar: 'bskKpiMinutes', page: 'bskHourPath' } as const
-const POPUP_WINDOWS = { page: 'popupHourPath' } as const
+const BSK_WINDOWS = { todaySoFar: 'bskKpiDays', page: 'bskRangePath' } as const
+const POPUP_WINDOWS = { page: 'popupRangePath' } as const
 
 function campaignMetric(def: Omit<MetricDef, 'label' | 'params' | 'windows'> & Partial<Pick<MetricDef, 'windows'>>): MetricDef {
   return { label: `label.${def.id}`, params: ['campaignId'], windows: CAMPAIGN_WINDOWS, ...def }
@@ -143,9 +143,11 @@ export const METRIC_DEFS: MetricDef[] = [
     unit: 'device',
     unitLabel: 'unit.arrivals',
     visitor: 'new',
-    // 'todaySoFar' reads the KPI minute rows through campaignAttributionClause's JS twin, so the
-    // KPI tile and the campaign card can never disagree (ADR 0003 rate audit).
-    windows: { attribution: 'campaignPathVisitor', todaySoFar: 'bskKpiMinutes' },
+    // 'todaySoFar' reads the KPI fact through campaignAttributionClause's rule, so the KPI tile and
+    // the campaign card count the same rows — as long as a campaign's tagged rows are all on the
+    // Best Sudoku sites, which the KPI fact filters on and the campaign fact does not (review #2:
+    // production had none elsewhere on 2026-09-27; see the ADR's implementation notes).
+    windows: { attribution: 'campaignPathVisitor', todaySoFar: 'bskKpiDays' },
     instrumented: [BEACON],
     caveats: ['arrivals-caveat'],
   }),
@@ -190,7 +192,7 @@ export const METRIC_DEFS: MetricDef[] = [
     instrumented: [],
   }),
 
-  // ── Best Sudoku site-wide (bskKpiMinutes for today so far; bskHourPath for a page range) ──
+  // ── Best Sudoku site-wide (bskKpiDays for today so far; bskRangePath for a page range) ──
   bskMetric({ id: 'bsk.pageviews', unit: 'pageview', path: (p) => !isEventPath(p), instrumented: [] }),
   bskMetric({ id: 'bsk.gameViews', unit: 'pageview', path: step('played'), instrumented: [] }),
   bskMetric({ id: 'bsk.completions', unit: 'completion', path: step('completed'), instrumented: [GAME_COMPLETE] }),
@@ -201,7 +203,7 @@ export const METRIC_DEFS: MetricDef[] = [
   bskMetric({ id: 'bsk.rawInstallSignals', unit: 'row', path: isRawInstallSignal, instrumented: [RAW_DEDUPE], caveats: ['raw-install-dedupe'] }),
   bskMetric({ id: 'bsk.returnsD1plus', unit: 'row', path: isReturnD1Plus, instrumented: [TRACKING] }),
 
-  // ── Pop-ups (popupHourPath over the page range, activation-gated like /api/popups) ────────
+  // ── Pop-ups (popupRangePath over the page range, activation-gated like /api/popups) ────────
   popupMetric({
     id: 'popup.shown',
     unit: 'showing',
@@ -276,14 +278,23 @@ export const METRICS: ReadonlyMap<string, MetricDef> = (() => {
     if (d.label !== `label.${d.id}`) throw new Error(`metric ${d.id}: label must be label.${d.id}`)
     if (!Object.keys(d.windows).length) throw new Error(`metric ${d.id}: no windows`)
     if (!d.path && !d.visitor && !d.spend && Object.values(d.windows).some((f) => f === 'adsSpend')) throw new Error(`metric ${d.id}: a spend fact needs spend()`)
+    // The engine buckets the KPI fact's rows into ET days once per batch (lib/metrics/engine.ts),
+    // which holds only while that fact serves exactly the today-so-far window and nothing else.
+    for (const [w, f] of Object.entries(d.windows)) {
+      if ((w === 'todaySoFar') !== (f === 'bskKpiDays')) throw new Error(`metric ${d.id}: todaySoFar must read bskKpiDays, and only it`)
+    }
     m.set(d.id, d)
   }
   for (const d of METRIC_DEFS) if (d.subsetOf && !m.has(d.subsetOf)) throw new Error(`metric ${d.id}: subsetOf unknown metric ${d.subsetOf}`)
   return m
 })()
 
+const windowsMemo = new WeakMap<MetricDef, WindowName[]>()
+/** The windows a metric accepts; the first is its default. */
 export function metricWindows(def: MetricDef): WindowName[] {
-  return Object.keys(def.windows) as WindowName[]
+  let w = windowsMemo.get(def)
+  if (!w) windowsMemo.set(def, (w = Object.keys(def.windows) as WindowName[]))
+  return w
 }
 export function rulesOf(def: MetricDef, ctx: MetricCtx): readonly InstrumentationRule[] {
   return typeof def.instrumented === 'function' ? def.instrumented(ctx) : def.instrumented

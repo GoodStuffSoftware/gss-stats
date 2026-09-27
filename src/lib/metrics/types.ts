@@ -150,9 +150,11 @@ export interface MetricsRequestBody {
 
 export type MetricStatus = 'ok' | 'too-few' | 'no-data' | 'unmeasured' | 'partial' | 'error'
 
+/** A comparison. Both numbers are always finite (JSON has no Infinity/NaN); `deltaPct` is absent
+ * when there is no percentage (the comparison value is zero). */
 export interface MetricDelta {
   delta: number
-  deltaPct: number | null
+  deltaPct?: number
 }
 
 export interface MetricValue {

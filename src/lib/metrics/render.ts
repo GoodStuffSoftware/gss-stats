@@ -102,7 +102,7 @@ function ndSuffix(value: MetricValue): string {
 function unitWord(def: MetricDef): string {
   return noteRawText(def.unitLabel ?? unitLabelId(def.unit))
 }
-function deltaText(d: { delta: number; deltaPct: number | null }): string {
+function deltaText(d: { delta: number; deltaPct?: number | null }): string {
   const rounded = Math.round(d.delta)
   const sign = rounded > 0 ? '+' : ''
   const pctPart = typeof d.deltaPct !== 'number' || !Number.isFinite(d.deltaPct) ? '' : ` (${d.delta > 0 ? '+' : ''}${(d.deltaPct * 100).toFixed(0)}%)`

@@ -8,36 +8,31 @@ exports[`fact SQL snapshots > adsSpend {} 1`] = `
 }
 `;
 
-exports[`fact SQL snapshots > bskHourPath {"since":"2026-09-20","until":"2026-09-26"} 1`] = `
+exports[`fact SQL snapshots > bskKpiDays {"todayEt":"2026-09-26"} 1`] = `
 {
   "binds": [
-    "bestsudoku-web",
-    "bestsudoku",
-    "bestsudoku-app",
-    1789862400000,
-    1790467200000,
-    "lifecycle",
-    "email_%",
-    "Virginia",
-    "Reston",
-    "Verizon Business",
-    "desktop",
-    "Windows",
-    "Chrome",
-    1280,
-    "North Carolina",
-    "/popup-outcome/install-prompt/installed",
-    "/install/pwa-installed",
-    1790439996000,
-  ],
-  "db": "gss_geo",
-  "sql": "SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE site IN (?, ?, ?) AND ts >= ? AND ts < ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY hr, path, visitor, campaign",
-}
-`;
-
-exports[`fact SQL snapshots > bskKpiMinutes {"todayEt":"2026-09-26"} 1`] = `
-{
-  "binds": [
+    1790395200000,
+    1790456400000,
+    1790308800000,
+    1790370000000,
+    1790222400000,
+    1790283600000,
+    1790136000000,
+    1790197200000,
+    1790049600000,
+    1790110800000,
+    1789963200000,
+    1790024400000,
+    1789876800000,
+    1789938000000,
+    1789790400000,
+    1789851600000,
+    1790451780000,
+    1790439960000,
+    1790438400000,
+    1790395200000,
+    1788926400000,
+    1788321600000,
     "bestsudoku-web",
     "bestsudoku",
     "bestsudoku-app",
@@ -58,7 +53,37 @@ exports[`fact SQL snapshots > bskKpiMinutes {"todayEt":"2026-09-26"} 1`] = `
     1790439996000,
   ],
   "db": "gss_geo",
-  "sql": "SELECT CAST(ts / 60000 AS INTEGER) AS min, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE site IN (?, ?, ?) AND ts >= ? AND ts < ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY min, path, visitor, campaign",
+  "sql": "SELECT CASE WHEN ts >= ? AND ts < ? THEN 0 WHEN ts >= ? AND ts < ? THEN 1 WHEN ts >= ? AND ts < ? THEN 2 WHEN ts >= ? AND ts < ? THEN 3 WHEN ts >= ? AND ts < ? THEN 4 WHEN ts >= ? AND ts < ? THEN 5 WHEN ts >= ? AND ts < ? THEN 6 WHEN ts >= ? AND ts < ? THEN 7 ELSE -1 END AS d, CASE WHEN ts >= ? THEN 6 WHEN ts >= ? THEN 5 WHEN ts >= ? THEN 4 WHEN ts >= ? THEN 3 WHEN ts >= ? THEN 2 WHEN ts >= ? THEN 1 ELSE 0 END AS s, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE site IN (?, ?, ?) AND ts >= ? AND ts < ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY d, s, path, visitor, campaign HAVING d >= 0",
+}
+`;
+
+exports[`fact SQL snapshots > bskRangePath {"since":"2026-09-20","until":"2026-09-26"} 1`] = `
+{
+  "binds": [
+    1790449200000,
+    1790438400000,
+    1790395200000,
+    "bestsudoku-web",
+    "bestsudoku",
+    "bestsudoku-app",
+    1789876800000,
+    1790481600000,
+    "lifecycle",
+    "email_%",
+    "Virginia",
+    "Reston",
+    "Verizon Business",
+    "desktop",
+    "Windows",
+    "Chrome",
+    1280,
+    "North Carolina",
+    "/popup-outcome/install-prompt/installed",
+    "/install/pwa-installed",
+    1790439996000,
+  ],
+  "db": "gss_geo",
+  "sql": "SELECT CASE WHEN ts >= ? THEN 3 WHEN ts >= ? THEN 2 WHEN ts >= ? THEN 1 ELSE 0 END AS s, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE site IN (?, ?, ?) AND ts >= ? AND ts < ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY s, path, visitor, campaign",
 }
 `;
 
@@ -240,12 +265,15 @@ exports[`fact SQL snapshots > flightPathsSeen {"campaignId":"24279250691"} 1`] =
 }
 `;
 
-exports[`fact SQL snapshots > popupHourPath {"since":"2026-09-20","until":"2026-09-26","sites":[]} 1`] = `
+exports[`fact SQL snapshots > popupRangePath {"since":"2026-09-20","until":"2026-09-26","sites":[]} 1`] = `
 {
   "binds": [
+    1790438400000,
+    1790395200000,
+    1790395200000,
     1790439996000,
-    1789862400000,
-    1790467200000,
+    1789876800000,
+    1790481600000,
     "/signin-prompt",
     "/signin-prompt/%",
     "/signin-eligible",
@@ -267,13 +295,16 @@ exports[`fact SQL snapshots > popupHourPath {"since":"2026-09-20","until":"2026-
     "/auth/success/email/%",
   ],
   "db": "gss_geo",
-  "sql": "SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, (ts >= ?) AS pf, COUNT(*) AS c FROM hits WHERE ts >= ? AND ts < ? AND (path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path LIKE ? OR path LIKE ? OR path LIKE ?) GROUP BY hr, path, pf",
+  "sql": "SELECT CASE WHEN ts >= ? THEN 3 WHEN ts >= ? THEN 2 WHEN ts >= ? THEN 1 ELSE 0 END AS s, path, (ts >= ?) AS pf, COUNT(*) AS c FROM hits WHERE ts >= ? AND ts < ? AND (path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path LIKE ? OR path LIKE ? OR path LIKE ?) GROUP BY s, path, pf",
 }
 `;
 
-exports[`fact SQL snapshots > popupHourPath {"since":"2026-09-20T00:00:00Z","until":"2026-09-26T12:00:00Z","sites":["bestsudoku","bestsudoku-web"]} 1`] = `
+exports[`fact SQL snapshots > popupRangePath {"since":"2026-09-20T00:00:00Z","until":"2026-09-26T12:00:00Z","sites":["bestsudoku","bestsudoku-web"]} 1`] = `
 {
   "binds": [
+    1790438400000,
+    1790395200000,
+    1790395200000,
     1790439996000,
     1789862400000,
     1790424000000,
@@ -300,6 +331,6 @@ exports[`fact SQL snapshots > popupHourPath {"since":"2026-09-20T00:00:00Z","unt
     "/auth/success/email/%",
   ],
   "db": "gss_geo",
-  "sql": "SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, (ts >= ?) AS pf, COUNT(*) AS c FROM hits WHERE ts >= ? AND ts < ? AND site IN (?, ?) AND (path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path LIKE ? OR path LIKE ? OR path LIKE ?) GROUP BY hr, path, pf",
+  "sql": "SELECT CASE WHEN ts >= ? THEN 3 WHEN ts >= ? THEN 2 WHEN ts >= ? THEN 1 ELSE 0 END AS s, path, (ts >= ?) AS pf, COUNT(*) AS c FROM hits WHERE ts >= ? AND ts < ? AND site IN (?, ?) AND (path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path = ? OR path LIKE ? OR path LIKE ? OR path LIKE ? OR path LIKE ?) GROUP BY s, path, pf",
 }
 `;
