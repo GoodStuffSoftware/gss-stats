@@ -135,12 +135,16 @@ describe('context dates are real and ordered (review #10)', () => {
     ['an empty range', '2026-09-26T12:00:00Z', '2026-09-26T12:00:00Z', 'context.since must be before context.until'],
     ['1970 to 9999', '1970-01-01', '9999-12-31', 'context range is longer than 400 days'],
     ['401 days', '2025-09-01', '2026-10-06', 'context range is longer than 400 days'],
+    ['401 calendar days spanning one extra fall-back', '2025-10-01', '2026-11-05', 'context range is longer than 400 days'],
+    ['400 days and a minute of datetimes', '2025-10-01T04:00:00Z', '2026-11-05T04:01:00Z', 'context range is longer than 400 days'],
   ])('%s is a 400', (_n, since, until, error) => {
     expect(ctx(since, until)).toMatchObject({ ok: false, status: 400, error })
   })
   it.each([
     ['one ET day', '2026-09-26', '2026-09-26'],
     ['400 days exactly', '2025-08-22', '2026-09-25'],
+    // Two fall-backs (2025-11-02, 2026-11-01) and one spring-forward: 400 days + 1 h in ms.
+    ['400 calendar days spanning one extra fall-back', '2025-10-01', '2026-11-04'],
     ['datetimes, with and without a zone', '2026-09-20T00:00:00Z', '2026-09-26T12:30'],
     ['the leap day', '2028-02-29', '2028-03-01'],
   ])('%s is accepted', (_n, since, until) => {

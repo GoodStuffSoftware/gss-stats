@@ -946,6 +946,12 @@ that code rather than copying it.
   fix (the `pf` split, as `/api/popups`), where `/api/overview` and `/api/campaigns` bucket by
   hour; an active flight's not-yet-seen step stays live (as above); and a step or return rate the
   endpoints still count for a flight that could not measure it is `unmeasured`.
+- Beside D1-D6, two KPI differences existed on 2026-09-26 only, the day both go-lives fell on:
+  "Games completed" today-so-far counted from `GAME_COMPLETE_LIVE_AT` (the registry's `partial`,
+  where `/api/overview` showed "not yet tracking" until that instant), and "Installs" was
+  `unmeasured` before the install fix (`INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS`) that day. Both
+  go-lives are in the past, so every later today-so-far window starts after them and neither
+  difference can recur.
 - ET date conversions and each campaign's attribution are memoized within the engine: without that
   a batch spent most of its CPU formatting the same few dates through `Intl`.
 - Worth an owner decision: bounding `campaignReturns` by the attribution start would cut its
@@ -1072,6 +1078,12 @@ callback, which is the v0.8.0 `campaignsData` leak this module exists to avoid.
 - Text: the "/return/ d1+ returns" tile is "Return visits (day 1+)" (owner-approved), with what
   it counts in the `returns-d1plus-caveat` note; the raw-install de-dupe note no longer names a
   beacon path.
+- Follow-ups from the metrics-core re-review, landed here: at exactly ET midnight the
+  today-so-far window is empty and now reads as a measured 0, not `unmeasured` (tiles never
+  flash "not yet tracking" at midnight); the 400-day range cap counts calendar days when both
+  ends are bare dates, so an extra fall-back hour no longer refuses a 400-day range; and
+  `prewarm()` returns whether it succeeded and warms every registry request in
+  `MAX_REQUESTS`-sized chunks instead of truncating to the first 200.
 - Phase B (not started): the `CONFIG_VERSION` 10 step (`normWidget` → `normCardRef`, the KV
   backup on the bump) swaps the Overview `kpis` and `scorecard` widgets to `card: { preset }`,
   then the bespoke branches retire. It waits for `CONFIG_VERSION` 9 on `main`.
