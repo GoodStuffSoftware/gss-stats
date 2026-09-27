@@ -104,9 +104,9 @@ its JSON block at all, send ONE push yourself: `BSK retest post-flight <stage> d
 
 - push: ONE PushNotification to Mike with exactly `notify.text`;
 - bus: `agent_send` (found by bare name with ToolSearch under any prefix; REST fallback per
-  the `deckhand:refresh-tools` skill) from `gss-stats` to `best-sudoku-cfd49662` with
-  `includeEphemeral: true`, subject `BSK retest post-flight <stage> <ET date>`, body = the
-  human report (everything above `----- JSON -----`).
+  the `deckhand:refresh-tools` skill) from `gss-stats` to `best-sudoku-ads-retest-followup`
+  with `includeEphemeral: true`, subject `BSK retest post-flight <stage> <ET date>`, body =
+  the human report (everything above `----- JSON -----`).
 
 If the report shows `After-flight spend: [trip]`, the campaign is still serving and spending
 after 2026-10-02: that line and its PROPOSE PAUSE lead the push text already. A campaign
