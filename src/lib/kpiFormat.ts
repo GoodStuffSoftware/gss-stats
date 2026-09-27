@@ -12,6 +12,7 @@ import {
   TRACKING_ACTIVATION_DATE_ET,
 } from './popupEvents'
 import { noteRawText } from './notes'
+import { campaignById } from './campaigns'
 
 export function fmtCount(n: number | null | undefined): string {
   return n == null ? '—' : n.toLocaleString('en-US')
@@ -89,6 +90,15 @@ export interface KpiComparisonGate {
   newToday: boolean
 }
 
+/** A per-campaign "Tagged arrivals" tile (`arrivals-<campaignId>`, functions/api/overview.ts) is
+ * gated on its flight's start date: attribution starts there (campaignAttributionClause), so a
+ * comparison day before it is 0 by construction, and the start day itself is partial (the retest
+ * starts at 12:00 ET). Same boundary rule as the go-live constants above (ADR 0003 row 15). */
+function arrivalsTileFlightStart(key: string): string | undefined {
+  if (!key.startsWith('arrivals-')) return undefined
+  return campaignById(key.slice('arrivals-'.length))?.flightStart ?? undefined
+}
+
 const NO_GATE: KpiComparisonGate = { hideVsYesterday: false, hideVsAvg7: false, newToday: false }
 
 /** `todayEt` is the response's own `OverviewResponse.todayEt` (an ET calendar date string —
@@ -96,7 +106,7 @@ const NO_GATE: KpiComparisonGate = { hideVsYesterday: false, hideVsAvg7: false, 
  * KPI_GO_LIVE_ET_DATE (an established metric with no go-live gap, e.g. page views) is never
  * gated. */
 export function kpiComparisonGate(key: string, todayEt: string): KpiComparisonGate {
-  const goLiveEt = KPI_GO_LIVE_ET_DATE[key]
+  const goLiveEt = KPI_GO_LIVE_ET_DATE[key] ?? arrivalsTileFlightStart(key)
   if (!goLiveEt || !todayEt) return NO_GATE
   const yesterdayEt = addEtDays(todayEt, -1)
   const avg7StartEt = addEtDays(todayEt, -7) // earliest day folded into the 7-day average

@@ -6,6 +6,18 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **"Games played" and "Played a game" are now "Game-screen views".** Both count visits to the
+  game screen (page views, several per device), not games played; the Overview tile and the
+  campaign funnel step now say so.
+
+### Fixed
+- **The Overview "Tagged arrivals" tile now counts a campaign exactly like its scorecard card.**
+  It uses the campaign's own attribution window, including a mid-day start, so the US+CA
+  retest's pre-launch test rows (before 12:00 ET on its first day, and on 2026-09-23) no longer
+  count on the tile or in its 7-day average. Its "vs yesterday" and "vs 7d avg" comparisons stay
+  hidden until the flight has full days to compare against.
+
 ## [0.8.0] — 2026-09-26
 
 ### Added
