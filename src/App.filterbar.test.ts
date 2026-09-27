@@ -62,7 +62,6 @@ vi.mock('./api', async (importOriginal) => {
     ...actual,
     loadConfig: vi.fn(async () => null),
     saveConfig: vi.fn(async () => true),
-    fetchOverview: vi.fn(async () => null as any),
   }
 })
 vi.mock('./sitesStore', async (importOriginal) => {

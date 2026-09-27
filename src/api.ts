@@ -1,4 +1,4 @@
-import type { StatsResponse, Widget, GlobalFilters, DashboardConfig, Dataset, CampaignCompareResponse, OverviewResponse } from './types'
+import type { StatsResponse, Widget, GlobalFilters, DashboardConfig, Dataset } from './types'
 import type { AdsReadingsResponse } from './lib/adsStore'
 import type { RefreshResult } from './lib/adsRefresh'
 import { resolveSelection } from './sitesStore'
@@ -38,8 +38,8 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters, extraCo
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        // A rate tile asks for one rate; a rate table asks for every valid rate ('rates').
-        dimension: widget.type === 'rate' ? 'rate' : widget.type === 'rateTable' ? 'rates' : widget.dimension || 'kind',
+        // A rate tile asks for one rate. (The rate table is a metric card since layout version 11.)
+        dimension: widget.type === 'rate' ? 'rate' : widget.dimension || 'kind',
         rateKey: widget.type === 'rate' ? widget.dimension : undefined,
         popup: widget.popup,
         kind: widget.popupKind,
@@ -171,41 +171,6 @@ async function withSessionCheck<T>(run: () => Promise<T>): Promise<T> {
     if (isNetworkError(e) || isAuthError(e)) await checkSessionExpired()
     throw e
   }
-}
-
-/** Fetch one campaign's comparison data (funnel, hour-of-day, country, daily, device mix,
- * return visits — see lib/campaigns.ts + functions/api/campaigns.ts). */
-export function fetchCampaignCompare(campaignId: string): Promise<CampaignCompareResponse> {
-  return withSessionCheck(async () => {
-    const res = await fetch('/api/campaigns', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ campaignId }),
-    })
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      throw new Error(`campaigns ${res.status}: ${text.slice(0, 200)}`)
-    }
-    return res.json()
-  })
-}
-
-/** Fetch the "Best Sudoku overview" page's data (today-at-a-glance KPIs, timeline,
- * campaign scorecard, release panel — see lib/overview.ts + functions/api/overview.ts).
- * `since`/`until` scope ONLY the timeline (the page's "existing range control"). */
-export function fetchOverview(since?: string, until?: string): Promise<OverviewResponse> {
-  return withSessionCheck(async () => {
-    const res = await fetch('/api/overview', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ since, until }),
-    })
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      throw new Error(`overview ${res.status}: ${text.slice(0, 200)}`)
-    }
-    return res.json()
-  })
 }
 
 /** Fetch the ads-read routine's readings log + stored spend (GET /api/ads/readings — see

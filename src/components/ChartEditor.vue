@@ -100,8 +100,6 @@ const isGeo = computed(() => draft.dataset === 'geo')
 const isPopup = computed(() => draft.dataset === 'popup')
 const isCompletions = computed(() => draft.dataset === 'completions')
 const isRate = computed(() => draft.type === 'rate')
-// A rate table needs no dimension or pop-up: it always shows every VALID rate.
-const isRateTable = computed(() => draft.type === 'rateTable')
 const isNote = computed(() => draft.type === 'note')
 // The three former-bespoke datasets: no dimension/breakdown/metric/site-override — a
 // "View" picker (+ campaign multi-select for campaigns/ads-readings) replaces them.
@@ -159,8 +157,8 @@ const dimOptions = computed(() =>
 )
 // A count-mode popup chart ('kind'/'reason'/'date'/'outcome') needs to know WHICH pop-up
 // it's scoped to; 'reason'/'date' also need which funnel stage they break down/trend.
-const popupNeedsPopup = computed(() => isPopup.value && !isRate.value && !isRateTable.value && draft.dimension !== 'eligible' && draft.dimension !== 'installOutcome')
-const popupNeedsKind = computed(() => isPopup.value && !isRate.value && !isRateTable.value && (draft.dimension === 'reason' || draft.dimension === 'date'))
+const popupNeedsPopup = computed(() => isPopup.value && !isRate.value && draft.dimension !== 'installOutcome')
+const popupNeedsKind = computed(() => isPopup.value && !isRate.value && (draft.dimension === 'reason' || draft.dimension === 'date'))
 
 // Switching data source: keep the dimension + breakdown valid for the new source. The
 // beacon supports a breakdown too (nested doughnut / stacked bar), so we remap rather
@@ -211,7 +209,7 @@ function onDatasetChange() {
 watch(
   () => draft.type,
   (t, prev) => {
-    if ((t === 'rate' || t === 'rateTable') && draft.dataset !== 'popup') {
+    if (t === 'rate' && draft.dataset !== 'popup') {
       draft.dataset = 'popup'
       onDatasetChange()
     }

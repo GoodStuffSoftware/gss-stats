@@ -13,29 +13,20 @@ const { FIX_AT } = vi.hoisted(() => ({ FIX_AT: Date.parse('2026-09-26T18:00:00Z'
 vi.mock('../../lib/adsRules', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../lib/adsRules')>()), UPSELL_SIGNEDOUT_FIX_AT: FIX_AT }))
 
 import MetricCard from './MetricCard.vue'
-import CampaignsWidgetBody from '../widgets/CampaignsWidgetBody.vue'
 import { __resetMetricsStateForTests } from '../../composables/useMetrics'
 import { onRequestPost as metricsPost } from '../../../functions/api/metrics'
-import { onRequestPost as campaignsPost } from '../../../functions/api/campaigns'
 import { insertHits, installCaches, memoryCache, openHitsDb, pagesContext, postJson, sqliteD1 } from '../../../functions/_lib/testing/hitsDb'
 import { bskFixture, FIXTURE_NOW } from '../../../functions/_lib/testing/bskFixture'
 import { UPSELL_SIGNEDOUT_FIX_AT } from '../../lib/adsRules'
 import type { Widget } from '../../types'
-import { writeFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import GOLDEN_FILE from './__fixtures__/slice7.upsell.golden.json'
 
-// The old table is read through `golden` (as in slice7.parity.test.ts): the live old flight-day
-// body while it exists, checked against its stored copy (SLICE7_CAPTURE=1 rewrites it).
-const GOLDEN_PATH = resolve(process.cwd(), 'src/components/metrics/__fixtures__/slice7.upsell.golden.json')
-const CAPTURE = process.env.SLICE7_CAPTURE === '1'
-const GOLDEN: Record<string, unknown> = { ...(GOLDEN_FILE as Record<string, unknown>) }
-const captured: Record<string, unknown> = {}
-async function golden<T>(key: string, live: () => Promise<T> | T): Promise<T> {
-  const value = JSON.parse(JSON.stringify(await live())) as T
-  if (CAPTURE) captured[key] = value
-  else expect(value, `live old rendering ≡ golden "${key}"`).toEqual(GOLDEN[key])
-  return value
+// The old flight-day segment table, as captured from the retired body mounted over the retired
+// /api/campaigns on this fixture with the fix set (checked live against this file in 76caad5).
+const GOLDEN = GOLDEN_FILE as Record<string, unknown>
+function fromGolden<T = any>(key: string): T {
+  if (!Object.hasOwn(GOLDEN, key)) throw new Error(`no golden for "${key}"`)
+  return JSON.parse(JSON.stringify(GOLDEN[key])) as T
 }
 
 const RETEST = { site: 'bestsudoku-web', campaign: 'sudoku_funnel_retest', visitor: 'returning' }
@@ -53,7 +44,7 @@ let undoCaches: () => void
 const mounted: VueWrapper[] = []
 async function route(url: string, init: RequestInit): Promise<Response> {
   const path = new URL(url, 'https://stats.goodstuff.software').pathname
-  const handler = path === '/api/metrics' ? metricsPost : path === '/api/campaigns' ? campaignsPost : null
+  const handler = path === '/api/metrics' ? metricsPost : null
   if (!handler) throw new Error(`unexpected fetch ${path}`)
   const waited: Promise<unknown>[] = []
   const res = await handler(pagesContext(postJson(path, JSON.parse(String(init.body))), { gss_geo: sqliteD1(db) } as never, waited) as never)
@@ -72,7 +63,6 @@ afterEach(() => {
   __resetMetricsStateForTests()
 })
 afterAll(() => {
-  if (CAPTURE) writeFileSync(GOLDEN_PATH, JSON.stringify({ ...GOLDEN, ...captured }, null, 2) + '\n')
   undoCaches()
   vi.unstubAllGlobals()
   vi.useRealTimers()
@@ -91,13 +81,7 @@ describe('the upsell-fix segment section, with the fix set', () => {
   })
 
   it('appears on the retest card only, with the old table\'s shown / accepted / dismissed on each side', async () => {
-    const widget: Widget = { id: 'cw-flightday', i: 'cw-flightday', title: 'x', type: 'table', dataset: 'campaigns', view: 'flightDay', dimension: '', metric: 'pageviews', limit: 1, notes: ['arrivals-caveat', 'flight-day-caption'], x: 0, y: 0, w: 12, h: 10 }
-    const old = await golden('flightDay.segments', async () => {
-      const w = mount(CampaignsWidgetBody, { props: { widget } })
-      mounted.push(w)
-      await settle()
-      return w.findAll('.segment').map((seg) => ({ caption: norm(seg.find('p').text()), rows: seg.findAll('tbody tr').map((tr) => tr.findAll('td').map((td) => norm(td.text()))) }))
-    })
+    const old = fromGolden<{ caption: string; rows: string[][] }[]>('flightDay.segments')
     expect(old).toHaveLength(1) // the fix falls in the retest's flight only
     expect(old[0].caption).toMatch(/^▼ US\+CA web retest: signed-out upsell fix at 2026-09-26 14:00 ET \(flight day 1\) — a funnel segment boundary/)
     const oldRows = old[0].rows

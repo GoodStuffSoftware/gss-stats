@@ -39,6 +39,13 @@ All notable changes to **gss-stats** are documented here. The format follows
   right-hand axis, where there used to be two charts side by side. Both count the same tagged
   arrivals, and both can be edited like any other chart.
 
+### Removed
+- **The old bespoke panels and their data endpoints.** Every Overview, Campaigns and Pop-ups
+  panel is a metric card or a standard chart now, so the old panel code and the two endpoints
+  only it used are gone; a saved layout's panels are swapped in place the first time it loads.
+  The chart editor no longer offers the old rate-table chart type or the pop-up "sign-in
+  eligibility" dimension (both are cards: "Pop-up rates" and "Sign-in eligibility").
+
 ### Added
 - **Two new beacon dimensions, "Hour of day (ET)" and "Campaign flight day"**, and line charts
   can now draw one line per value of a second dimension, with an optional running-total line for

@@ -13,21 +13,22 @@ import { isMobileViewport } from '../lib/responsive'
 import BaseChart from './charts/BaseChart.vue'
 import WorldMap from './charts/WorldMap.vue'
 import FilterPopover from './FilterPopover.vue'
-import OverviewWidgetBody from './widgets/OverviewWidgetBody.vue'
 import MetricCard from './metrics/MetricCard.vue'
 import { metricsContextFor } from '../lib/metrics/pageContext'
 import { presetById } from '../lib/metrics/presets'
-import CampaignsWidgetBody from './widgets/CampaignsWidgetBody.vue'
 import NoteWidgetBody from './widgets/NoteWidgetBody.vue'
 import AdsReadingsWidgetCard from './widgets/AdsReadingsWidgetCard.vue'
 import NoteBlock from './NoteBlock.vue'
-import { widgetCaptionNoteIds } from '../lib/notes'
+import { noteRawText, widgetCaptionNoteIds } from '../lib/notes'
 
 const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolean; drillOpen: boolean; forceControls?: boolean }>()
 
-// dataset 'overview'/'campaigns'/'ads-readings' + type 'note' render their own body (own
-// data fetch or none) — no /api/stats round trip, no per-chart filter override, no drill.
+// A metric card, dataset 'ads-readings' and type 'note' render their own body (own data fetch
+// or none) — no /api/stats round trip, no per-chart filter override, no drill. The datasets
+// 'overview' and 'campaigns' are card panels since layout version 11 (their bespoke bodies are
+// retired); one without a card — a panel the migration does not know — says so.
 // The header (title/zoom/menu) stays generic and shared with every other widget type.
+const retiredPanelText = noteRawText('label.card.retiredPanel')
 const isBespokeBody = computed(
   () => !!props.widget.card || props.widget.dataset === 'overview' || props.widget.dataset === 'campaigns' || props.widget.dataset === 'ads-readings' || props.widget.type === 'note',
 )
@@ -248,7 +249,7 @@ const effectiveFilters = computed<GlobalFilters>(() => props.widget.filters ?? p
 const hasOverride = computed(() => !!props.widget.filters)
 
 async function load() {
-  if (isBespokeBody.value) return // own data fetch (or none) — see OverviewWidgetBody/CampaignsWidgetBody/NoteWidgetBody
+  if (isBespokeBody.value) return // own data fetch (or none) — see MetricCard/AdsReadingsWidgetCard/NoteWidgetBody
   // RUM charts filter to a real-host allow-list built from /api/sites; fetching before
   // it loads would momentarily count dev/preview traffic. Wait for the tree. (Geo has
   // no dev hosts, so it needn't wait.)
@@ -406,19 +407,6 @@ const tableRows = computed(() =>
 )
 const tableMax = computed(() => Math.max(1, ...tableRows.value.map((r) => r.value)))
 
-// Rate table (widget.type === 'rateTable'): the VALID pop-up rates only, each shown the same
-// way a rate tile shows one — the percentage (or "too few to report" under MIN_COHORT, or "—"
-// with no denominator at all) and always its n/d, plus any caveat that travels with the data.
-const rateTableRows = computed(() =>
-  (data.value?.rateRows ?? []).map((r) => ({
-    key: r.key,
-    label: r.label,
-    display: r.insufficientCohort ? 'too few to report' : r.value == null ? '—' : `${(r.value * 100).toFixed(1)}%`,
-    counts: `${r.numerator}/${r.denominator}`,
-    note: r.note ?? '',
-  })),
-)
-
 const isEmpty = computed(
   () =>
     !loading.value &&
@@ -426,8 +414,7 @@ const isEmpty = computed(
     data.value &&
     data.value.rows.length === 0 &&
     props.widget.type !== 'map' &&
-    props.widget.type !== 'rate' && // a rate tile has no rows even when it has a real (or null) rate — never "No data"
-    props.widget.type !== 'rateTable', // same for the rate table (its rows travel as rateRows)
+    props.widget.type !== 'rate', // a rate tile has no rows even when it has a real (or null) rate — never "No data"
 )
 
 // Pop-up count widgets (everything except the 'rate' tile and the 'date' trend, which
@@ -439,7 +426,6 @@ const popupNotYetActive = computed(
   () =>
     props.widget.dataset === 'popup' &&
     props.widget.type !== 'rate' &&
-    props.widget.type !== 'rateTable' &&
     props.widget.dimension !== 'date' &&
     !!data.value?.meta?.activationPending,
 )
@@ -547,8 +533,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
       <!-- Bespoke bodies: overview / campaigns / ads-readings datasets, and the note type —
            own data fetch (or none), skip the generic loading/error/empty states above. -->
       <MetricCard v-if="widget.card" ref="metricCard" :card-ref="widget.card" :context="metricsContext" :fallback-title="widget.title" @open-campaigns="emit('open-campaigns')" />
-      <OverviewWidgetBody v-else-if="widget.dataset === 'overview'" :widget="widget" :filters="effectiveFilters" :dark="dark" />
-      <CampaignsWidgetBody v-else-if="widget.dataset === 'campaigns'" :widget="widget" />
+      <p v-else-if="widget.dataset === 'overview' || widget.dataset === 'campaigns'" class="state mono">{{ retiredPanelText }}</p>
       <AdsReadingsWidgetCard v-else-if="widget.dataset === 'ads-readings'" :widget="widget" />
       <NoteWidgetBody v-else-if="widget.type === 'note'" :widget="widget" />
 
@@ -569,29 +554,6 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
         <div class="stat-num">{{ rateDisplay }}</div>
         <div class="stat-label overline">rate</div>
         <div v-if="rateCounts" class="stat-sub mono">{{ rateCounts }}</div>
-      </div>
-
-      <!-- Rate table: valid pop-up rates, each with its n/d -->
-      <div v-else-if="widget.type === 'rateTable'" class="table-wrap">
-        <table class="rate-table">
-          <thead>
-            <tr>
-              <th class="t-label">Rate</th>
-              <th class="t-val">%</th>
-              <th class="t-val">n / d</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="r in rateTableRows" :key="r.key">
-              <td class="t-label wrap">
-                {{ r.label }}
-                <span v-if="r.note" class="rate-note">{{ r.note }}</span>
-              </td>
-              <td class="t-val mono rate-val">{{ r.display }}</td>
-              <td class="t-val mono">{{ r.counts }}</td>
-            </tr>
-          </tbody>
-        </table>
       </div>
 
       <!-- Table -->
@@ -1029,35 +991,6 @@ td {
   padding: 0 14px 10px;
   min-width: 0;
   overflow-wrap: anywhere;
-}
-.rate-table th {
-  font-weight: 600;
-  font-size: 11px;
-  color: rgb(var(--ink-3));
-  text-align: left;
-  padding: 2px 6px 6px;
-}
-.rate-table th.t-val {
-  text-align: right;
-}
-.rate-table td {
-  border-top: 1px solid rgb(var(--line));
-  padding: 6px;
-}
-.rate-table .t-label.wrap {
-  white-space: normal;
-  width: auto;
-  max-width: none;
-}
-.rate-table .rate-val {
-  color: rgb(var(--ink));
-  font-weight: 600;
-}
-.rate-note {
-  display: block;
-  font-size: 11px;
-  color: rgb(var(--ink-3));
-  margin-top: 2px;
 }
 .t-bar .bar {
   display: block;

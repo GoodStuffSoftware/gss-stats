@@ -23,13 +23,10 @@
 // 10; the cards that replaced them are pinned against a golden of the retired bespoke body in
 // src/components/metrics/presets.parity.test.ts, which lists D1, D3, D4 and D5 there.)
 //
-// /api/campaigns' side is read through `campaignsGolden`: the live handler while it exists, checked
-// against __fixtures__/campaigns.golden.json (SLICE7_CAPTURE=1 rewrites it), then — once the
-// endpoint retires with slice 7 — that stored response, captured from it on this fixture.
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { onRequestPost as campaignsPost } from './campaigns'
-import { writeFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+// /api/campaigns retired with slice 7 (CONFIG_VERSION 11): its side is its response for each
+// campaign on this same fixture (__fixtures__/campaigns.golden.json), captured from the live
+// handler and checked live against that file in commit 76caad5, the commit before it was removed.
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import CAMPAIGNS_GOLDEN_FILE from './__fixtures__/campaigns.golden.json'
 import { onRequestPost as popupsPost } from './popups'
 import { onRequestPost as metricsPost } from './metrics'
@@ -44,21 +41,12 @@ const RETEST = '24279250691'
 let db: ReturnType<typeof openHitsDb>
 let undoCaches: () => void
 
-const GOLDEN_PATH = resolve(process.cwd(), 'functions/api/__fixtures__/campaigns.golden.json')
-const CAPTURE = process.env.SLICE7_CAPTURE === '1'
-const GOLDEN: Record<string, unknown> = { ...(CAMPAIGNS_GOLDEN_FILE as Record<string, unknown>) }
-const captured: Record<string, unknown> = {}
-/** /api/campaigns' response for one campaign on the fixture (its `meta` left out). */
+const CAMPAIGNS_GOLDEN = CAMPAIGNS_GOLDEN_FILE as Record<string, unknown>
+/** The retired /api/campaigns' response for one campaign on the fixture (its `meta` left out). */
 async function campaignsGolden(id: string): Promise<any> {
-  const { meta: _meta, ...live } = await call(campaignsPost, '/api/campaigns', { campaignId: id })
-  const value = JSON.parse(JSON.stringify(live))
-  if (CAPTURE) captured[id] = value
-  else expect(value, `live /api/campaigns ≡ golden ${id}`).toEqual(GOLDEN[id])
-  return value
+  if (!Object.hasOwn(CAMPAIGNS_GOLDEN, id)) throw new Error(`no golden for ${id}`)
+  return JSON.parse(JSON.stringify(CAMPAIGNS_GOLDEN[id]))
 }
-afterAll(() => {
-  if (CAPTURE) writeFileSync(GOLDEN_PATH, JSON.stringify({ ...GOLDEN, ...captured }, null, 2) + '\n')
-})
 
 beforeAll(() => {
   db = openHitsDb()

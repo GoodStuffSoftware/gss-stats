@@ -6,8 +6,8 @@ export const DATASETS: { value: Dataset; label: string }[] = [
   { value: 'rum', label: 'RUM — pageviews / visits' },
   { value: 'geo', label: 'Geo beacon — region / city (bot-free)' },
   { value: 'popup', label: 'Pop-up tracking — sign-in / promo / upsell / install' },
-  { value: 'overview', label: 'Best Sudoku overview — KPIs / scorecard / release panel' },
-  { value: 'campaigns', label: 'Best Sudoku campaigns — funnel / hour-of-day / country / …' },
+  { value: 'overview', label: 'Best Sudoku overview cards — KPIs / scorecard / release panel' },
+  { value: 'campaigns', label: 'Best Sudoku campaign cards — funnel / country / cost / returns' },
   { value: 'ads-readings', label: 'Best Sudoku ads readings log' },
   { value: 'completions', label: 'Best Sudoku completions — mode × difficulty' },
 ]
@@ -25,12 +25,12 @@ export const OVERVIEW_VIEWS: { value: string; label: string }[] = [
   { value: 'releasePanel', label: 'Release before/after panel' },
 ]
 
-// dataset 'campaigns' — which panel a widget renders (widget.view).
+// dataset 'campaigns' — which panel a widget renders (widget.view). Each is a metric card
+// (lib/defaults.ts CARD_PRESET_FOR_PANEL); arrivals by ET hour and by flight day are standard
+// geo charts since layout version 11 (hourEt / flightDay × campaignFlight), not views.
 export const CAMPAIGNS_VIEWS: { value: string; label: string }[] = [
   { value: 'funnel', label: 'Funnel per campaign' },
-  { value: 'hourOfDay', label: 'Arrivals by ET hour of day' },
   { value: 'country', label: 'Arrivals & funnel by country' },
-  { value: 'flightDay', label: 'Daily arrivals by flight day (+ cumulative)' },
   { value: 'cost', label: 'Cost per arrival / auth success' },
   { value: 'returns', label: 'Return visits' },
 ]
@@ -40,14 +40,14 @@ export const CAMPAIGNS_VIEWS: { value: string; label: string }[] = [
 export const CAMPAIGN_OPTIONS: { value: string; label: string }[] = CAMPAIGNS.map((c) => ({ value: c.id, label: c.label }))
 
 // Pop-up dataset (dataset: 'popup'). Count-based dimensions — each needs `widget.popup`
-// (and 'reason'/'date' default `widget.popupKind` to 'shown'); 'eligible' and
-// 'installOutcome' are fixed families and ignore `widget.popup`.
+// (and 'reason'/'date' default `widget.popupKind` to 'shown'); 'installOutcome' is a fixed
+// family and ignores `widget.popup`. (Sign-in eligibility is a metric card since layout
+// version 11: preset signin-eligibility.)
 export const POPUP_DIMENSIONS: { key: string; label: string }[] = [
   { key: 'kind', label: 'Shown / accepted / dismissed' },
   { key: 'reason', label: 'Reason / platform breakdown' },
   { key: 'date', label: 'Date (trend, US-Eastern days)' },
   { key: 'outcome', label: 'Outcome (signed-in / installed / returned)' },
-  { key: 'eligible', label: 'Sign-in eligibility (earned / capped / unearned)' },
   { key: 'installOutcome', label: 'Install real outcomes (pwa / standalone / play)' },
 ]
 
@@ -162,7 +162,6 @@ export const CHART_TYPES: { value: ChartType; label: string; needsDimension: boo
   { value: 'map', label: 'World map (geo points · beacon only)', needsDimension: false, allowsBreakdown: false },
   { value: 'table', label: 'Table', needsDimension: true, allowsBreakdown: true },
   { value: 'rate', label: 'Rate (% tile · pop-up dataset only)', needsDimension: true, allowsBreakdown: false },
-  { value: 'rateTable', label: 'Rate table (valid pop-up rates · pop-up dataset only)', needsDimension: false, allowsBreakdown: false },
   { value: 'note', label: 'Note (static text tile)', needsDimension: false, allowsBreakdown: false },
 ]
 
