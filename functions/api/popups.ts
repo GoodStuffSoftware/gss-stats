@@ -22,7 +22,9 @@
 //     'installOutcome' — install's real-outcome counts (no popup needed)
 //     'rate'           — one computed rate, selected by `rateKey` (see POPUP_RATE_SPECS)
 // (The rate table ('rates') and sign-in eligibility ('eligible') are metric cards since layout
-// version 11 — presets popup-rates and signin-eligibility over POST /api/metrics.)
+// version 11 — presets popup-rates and signin-eligibility over POST /api/metrics. Asking for either
+// is a 400 naming the card, not a silent fallback to 'kind', so a tab loaded before the update
+// shows an error on those panels instead of "No data".)
 
 import {
   POPUPS,
@@ -62,6 +64,8 @@ const isDateOnly = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v)
 
 const POPUP_DIMS = new Set(['kind', 'reason', 'date', 'outcome', 'installOutcome', 'rate'])
 const POPUP_IDS = new Set(POPUPS.map((p) => p.id))
+/** Dimensions retired in layout version 11, with the card that replaced each. */
+export const RETIRED_POPUP_DIMS: Record<string, string> = { rates: 'Pop-up rates', eligible: 'Sign-in eligibility' }
 
 type Row = { key: Record<string, string>; pageviews: number; visits: number }
 const countedTotals = (rows: Row[]) => {
@@ -78,6 +82,10 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   }
   if (!ctx.env.gss_geo) return json({ error: 'geo DB not bound' }, 500)
 
+  if (typeof body.dimension === 'string' && Object.hasOwn(RETIRED_POPUP_DIMS, body.dimension)) {
+    const card = RETIRED_POPUP_DIMS[body.dimension]
+    return json({ error: `The "${body.dimension}" pop-up dimension was retired; it is the "${card}" card now. Reload the page to update this dashboard.`, retired: body.dimension }, 400)
+  }
   const dim: string = POPUP_DIMS.has(body.dimension) ? body.dimension : 'kind'
   const limit = Math.min(Math.max(Number(body.limit) || 50, 1), 500)
   const today = new Date().toISOString().slice(0, 10)
