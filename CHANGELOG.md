@@ -25,6 +25,15 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **The card builder no longer leaves a gap between the fields and the preview on a phone**, and
   the "Start from" list shows each preset's plain name and a one-line description, never its raw
   id.
+- **"Reset to preset" on a saved, customized card no longer risks swapping in the wrong preset.**
+  It now always names — and asks to confirm before replacing your edits with — the actual preset
+  the card was customized from, and the button no longer appears at all for a card where that
+  isn't known.
+- **The chart editor behaves like a proper dialog.** Opening it moves keyboard focus to the Title
+  field, Tab stays inside it instead of leaking onto the page behind it, Escape closes it, and
+  focus returns to whatever you clicked to open it. Saving a metric card is disabled, with a
+  reason shown, until its errors are fixed. Every field in a card's item list now shows plain
+  names — never a raw metric or ratio id.
 
 ## [0.10.0] — 2026-09-27
 

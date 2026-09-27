@@ -135,6 +135,46 @@ describe('"Add chart" -> "Metric card"', () => {
   })
 })
 
+describe('Save is disabled while the card is invalid (review fix, 2026-09-27)', () => {
+  it('disables Save with a visible reason while CardEditor reports errors, and re-enables once valid', async () => {
+    const w = mountEditor(kpiWidget) // starts valid: { preset: 'bsk-kpis' }
+    await flushPromises()
+    const saveBtn = () => w.findAll('button').find((b) => b.text() === 'Save')!
+    expect(saveBtn().attributes('disabled')).toBeUndefined()
+    expect(w.find('.save-reason').exists()).toBe(false)
+
+    // "Blank card" with no Customize yet is CardEditor's own invalid state (no CardRef of its
+    // own) — drives errors non-empty without needing to fabricate anything.
+    await w.find('select').setValue('')
+    await flushPromises()
+    expect(saveBtn().attributes('disabled')).toBeDefined()
+    expect(w.find('.save-reason').exists()).toBe(true)
+    expect(w.find('.save-reason').text()).toBe('Fix the highlighted fields to save.')
+
+    // Clicking Save while disabled must be a no-op: no new emission past whatever the last
+    // VALID state emitted (there was none here, so still nothing).
+    await saveBtn().trigger('click')
+    expect(w.emitted('save')).toBeUndefined()
+
+    await w.find('select').setValue('bsk-kpis')
+    await flushPromises()
+    expect(saveBtn().attributes('disabled')).toBeUndefined()
+    expect(w.find('.save-reason').exists()).toBe(false)
+  })
+})
+
+describe('Save gating never affects a non-card chart (review fix, 2026-09-27)', () => {
+  it('a plain chart\'s Save is never disabled by the card validity mechanism', async () => {
+    const plainWidget: Widget = { id: 'plain1', i: 'plain1', title: 'A bar chart', type: 'bar', dataset: undefined, dimension: 'requestHost', metric: 'pageviews', limit: 10, x: 0, y: 0, w: 6, h: 8 }
+    const w = mountEditor(plainWidget)
+    await flushPromises()
+    const saveBtn = w.findAll('button').find((b) => b.text() === 'Save')!
+    expect(saveBtn.attributes('disabled')).toBeUndefined()
+    expect(w.find('.save-reason').exists()).toBe(false)
+    expect(w.find('.ce-root').exists()).toBe(false) // CardEditor never even mounts for this widget
+  })
+})
+
 describe('Cancel leaves the widget unchanged', () => {
   it('emits cancel, never save, and never mutates the original widget prop', async () => {
     const original: Widget = { ...kpiWidget }

@@ -12,6 +12,7 @@ import MetricCard from './MetricCard.vue'
 import { __resetMetricsStateForTests } from '../../composables/useMetrics'
 import { validateCard } from '../../lib/metrics/validate'
 import { RATIOS } from '../../lib/metrics/ratios'
+import { CAMPAIGN_SCORECARD } from '../../lib/metrics/presets'
 import type { CardRef, CardSpec } from '../../lib/metrics/types'
 
 const mounted: VueWrapper[] = []
@@ -95,7 +96,9 @@ describe('preset -> customize -> edit -> emit', () => {
     assertEveryEmissionValid(wrapper)
   })
 
-  it('Reset to preset discards the customization', async () => {
+  it('Reset to preset asks for confirmation, names the RIGHT preset, and discards the customization', async () => {
+    const confirmSpy = vi.fn().mockReturnValue(true)
+    vi.stubGlobal('confirm', confirmSpy)
     const wrapper = mountEditor({ preset: 'bsk-kpis' })
     await flushPromises()
     await wrapper.find('button.btn').trigger('click') // Customize…
@@ -108,8 +111,66 @@ describe('preset -> customize -> edit -> emit', () => {
     const resetBtn = wrapper.findAll('button').find((b) => b.text() === 'Reset to preset')!
     await resetBtn.trigger('click')
     await flushPromises()
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('Today at a glance (KPI tiles)'))
     const afterReset = lastEmitted(wrapper) as { spec: CardSpec }
     expect(afterReset.spec.title).toBeUndefined()
+  })
+
+  it('Reset to preset does nothing if the confirmation is declined', async () => {
+    const confirmSpy = vi.fn().mockReturnValue(false)
+    vi.stubGlobal('confirm', confirmSpy)
+    const wrapper = mountEditor({ preset: 'bsk-kpis' })
+    await flushPromises()
+    await wrapper.find('button.btn').trigger('click') // Customize…
+    await flushPromises()
+    await wrapper.findAll('.field.check input[type=checkbox]')[0].setValue(true)
+    await flushPromises()
+    const beforeReset = lastEmitted(wrapper) as { spec: CardSpec }
+    expect(beforeReset.spec.title).toBe('')
+
+    const resetBtn = wrapper.findAll('button').find((b) => b.text() === 'Reset to preset')!
+    await resetBtn.trigger('click')
+    await flushPromises()
+    expect(confirmSpy).toHaveBeenCalled()
+    const afterDeclined = lastEmitted(wrapper) as { spec: CardSpec }
+    expect(afterDeclined.spec.title).toBe('') // unchanged: the decline was honoured
+  })
+
+  it('Reset restores the RIGHT preset\'s content — the actual data-loss bug this fixes', async () => {
+    vi.stubGlobal('confirm', vi.fn().mockReturnValue(true))
+    // A saved custom card whose `from` names campaign-scorecard, but whose CURRENT content
+    // looks nothing like it (the bug: without `from`, Reset used to guess PRESET_OPTIONS[0],
+    // which could easily be the WRONG preset — bsk-kpis, say — for a card actually related to
+    // campaign-scorecard).
+    const custom: CardSpec = { v: 1, sections: [{ layout: 'rows', items: [{ id: 'z', label: 'Unrelated', data: { field: 'campaign.label' }, display: { as: 'text' } }] }] }
+    const wrapper = mountEditor({ spec: custom, from: 'campaign-scorecard' })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Customized from "Campaign scorecard"')
+
+    const resetBtn = wrapper.findAll('button').find((b) => b.text() === 'Reset to preset')!
+    await resetBtn.trigger('click')
+    await flushPromises()
+    const after = (lastEmitted(wrapper) as { spec: CardSpec }).spec
+    expect(after).toEqual(CAMPAIGN_SCORECARD) // the RIGHT preset, not an arbitrary default
+  })
+
+  it('no Reset button, and no "from X" wording, when `from` is unknown', async () => {
+    const custom: CardSpec = { v: 1, sections: [{ layout: 'rows', items: [{ id: 'z', label: 'X', data: { field: 'campaign.label' }, display: { as: 'text' } }] }] }
+    const wrapper = mountEditor({ spec: custom }) // no `from` at all
+    await flushPromises()
+    expect(wrapper.findAll('button').find((b) => b.text() === 'Reset to preset')).toBeUndefined()
+    expect(wrapper.text()).toContain('Customized.')
+    expect(wrapper.text()).not.toContain('Customized from')
+  })
+
+  it('an untrusted/unresolvable `from` on the incoming modelValue is never honoured, even if CardEditor is fed one directly', async () => {
+    const custom: CardSpec = { v: 1, sections: [{ layout: 'rows', items: [{ id: 'z', label: 'X', data: { field: 'campaign.label' }, display: { as: 'text' } }] }] }
+    for (const from of ['not-a-real-preset', 'constructor', '__proto__']) {
+      const wrapper = mountEditor({ spec: custom, from } as CardRef)
+      await flushPromises()
+      expect(wrapper.findAll('button').find((b) => b.text() === 'Reset to preset')).toBeUndefined()
+      expect(wrapper.text()).not.toContain(from)
+    }
   })
 })
 
@@ -209,8 +270,8 @@ describe('display compatibility matrix, as seen through the UI', () => {
 
     const displayTabs = wrapper.findAll('[role="radiogroup"] .tab')
     const asValues = displayTabs.map((t) => t.text().replace(' (coming soon)', ''))
-    expect(asValues).toEqual(['counts'])
-    expect(asValues).not.toContain('percent')
+    expect(asValues).toEqual(['Counts']) // the display's plain name, never the raw 'counts' type value
+    expect(asValues).not.toContain('Percent')
 
     const spec = (lastEmitted(wrapper) as { spec: CardSpec }).spec
     expect(spec.sections[0].items[0].display.as).toBe('counts')
