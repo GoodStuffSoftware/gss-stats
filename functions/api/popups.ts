@@ -22,11 +22,13 @@
 //     'eligible'       — sign-in-eligible earned/capped/unearned counts (no popup needed)
 //     'installOutcome' — install's real-outcome counts (no popup needed)
 //     'rate'           — one computed rate, selected by `rateKey` (see POPUP_RATE_SPECS)
+//     'rates'          — every VALID rate (POPUP_RATE_TABLE_KEYS) as `rateRows`, for a rateTable widget
 
 import {
   POPUPS,
   POPUP_OUTCOME_TYPES,
   POPUP_RATE_SPECS,
+  POPUP_RATE_TABLE_KEYS,
   TRACKING_ACTIVATION_DATE_ET,
   aggregatePopupRows,
   computePopupRate,
@@ -58,7 +60,7 @@ function safeDate(v: unknown, fallback: string): string {
 }
 const isDateOnly = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v)
 
-const POPUP_DIMS = new Set(['kind', 'reason', 'date', 'outcome', 'eligible', 'installOutcome', 'rate'])
+const POPUP_DIMS = new Set(['kind', 'reason', 'date', 'outcome', 'eligible', 'installOutcome', 'rate', 'rates'])
 const POPUP_IDS = new Set(POPUPS.map((p) => p.id))
 
 type Row = { key: Record<string, string>; pageviews: number; visits: number }
@@ -162,6 +164,18 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       ...(rateKey === INSTALL_GAP_RATE_KEY && installOutcomeGapNote(range) ? { note: installOutcomeGapNote(range) } : {}),
       meta,
     })
+  }
+
+  // ── Rate table: every VALID pop-up rate (POPUP_RATE_TABLE_KEYS) in one response, each with
+  // its n/d, MIN_COHORT gating and any range caveat (the install fix note) ─────────────────
+  if (dim === 'rates') {
+    const rateRows = POPUP_RATE_TABLE_KEYS.map((key) => {
+      const spec = POPUP_RATE_SPECS.find((s) => s.key === key)!
+      const gated = computePopupRate(agg, spec)
+      const note = key === INSTALL_GAP_RATE_KEY ? installOutcomeGapNote(range) : ''
+      return { key, label: spec.label, ...gated, ...(note ? { note } : {}) }
+    })
+    return json({ rows: [], totals: { pageviews: 0, visits: 0 }, rateRows, meta })
   }
 
   // ── Sign-in eligibility breakdown (earned / capped / unearned) — activation-gated ──

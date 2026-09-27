@@ -6,6 +6,28 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **A breakdown bar chart for any two dimensions.** Put one dimension on the axis and another
+  as the series, grouped side by side or stacked, from the normal chart editor; movable,
+  zoomable and editable like every other chart.
+- **Pop-up, completed-game and campaign-flight dimensions for beacon charts.** Chart or filter
+  by which pop-up, what happened to it (shown, tapped, dismissed, or an outcome), a completed
+  game's mode and difficulty, and which campaign flight a visit belongs to. Pop-up counts
+  start the day tracking went live and skip installs from before the install fix.
+
+### Changed
+- **The Best Sudoku Pop-ups page is now one bar chart.** Every pop-up sits on the axis with
+  shown, taps, dismissals and each outcome as the series. A small table below lists only the
+  rates that are valid (taps over showings, and installs over install prompts since the
+  install fix), each with its counts and "too few to report" under five. Sign-in eligibility
+  stays; the other tiles are gone. Saved layouts are updated automatically; charts you added
+  to the page are kept.
+- **The campaign device mix uses the standard nested pie.** Campaign flight, then device, then
+  operating system, on the same chart the other pages use for site and device, labelled as a
+  share of tagged hits. Saved layouts keep its place, size and title.
+- **A saved dashboard is backed up before a layout upgrade.** The first save after an upgrade
+  keeps a copy of the previous layout, so an upgrade can be undone.
+
 ## [0.8.0] — 2026-09-26
 
 ### Added

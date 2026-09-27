@@ -59,8 +59,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   [`src/lib/defaults.ts`](src/lib/defaults.ts)'s `reorderBskGroup`).
 - **Movable / composable charts** — drag the header, resize from the corner; add /
   edit / duplicate / delete charts of any type: stat, bar, horizontal bar, stacked
-  bar, line, area, doughnut, nested doughnut, pie, table, a geo point map, and a
-  note/text tile. Zoom is a single click, always available on every chart; its other
+  bar, **breakdown bar** (one dimension on the axis × another as the series, grouped or
+  stacked — `Widget.barMode`), line, area, doughnut, nested doughnut, pie, table, a geo point
+  map, and a note/text tile. Zoom is a single click, always available on every chart; its other
   modification chrome (edit/remove/drag/resize) tucks away until you hover that chart
   or open the function bar below.
   **Known gap:** the resize grip (drag-to-resize corner) isn't keyboard-operable — it's a
@@ -86,7 +87,11 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
 - **Durable, multi-page dashboards** — layout + chart definitions persist in KV (not
   `localStorage`), so they follow you across devices. Duplicate / rename / delete
   pages; a protected default page with "restore default charts"; per-page filters and
-  per-chart filter overrides.
+  per-chart filter overrides. A saved layout is migrated forward on load
+  ([`src/lib/defaults.ts`](src/lib/defaults.ts) `normalizeConfig`, `CONFIG_VERSION`), and the
+  first save of a newer version first copies the previous stored layout to
+  `dashboard:default:backup:v<old version>` in KV ([`functions/api/config.ts`](functions/api/config.ts)),
+  once, so a migration can be rolled back by copying that key over `dashboard:default`.
 - **Auto-built site filter** — a single multi-select of your sites and subdomains,
   built live from the data. It merges each site's RUM host and beacon tag into one
   entry, groups subdomains under their site, folds **alias hosts** (an HTTP redirect
@@ -101,9 +106,16 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   exact dates.
 - **Geo beacon dataset** — region / city / ISP / new-vs-returning and a visitor map,
   from the beacon (RUM geography is country-only).
-- **Pop-up tracking** — a dedicated Best Sudoku page for the sign-in prompt, first-50 promo,
-  upsell and install pop-ups: shown/accepted/dismissed counts, tap rates, outcome rates,
-  the sign-in eligibility rate and install's real-outcome counts, bucketed by US-Eastern day.
+- **Pop-up tracking** — a Best Sudoku page for the sign-in prompt, first-50 promo, upsell
+  and install pop-ups. It holds ONE breakdown bar chart (every pop-up on the axis — the
+  `popupFamily` beacon dimension — and shown, taps, dismissals, each outcome and install's raw
+  signals as the series — `popupOutcome`, where the shown row counts as outcome `shown`), a
+  **rate table** with only the valid ratios (each pop-up's taps over its showings, and install
+  over post-fix install prompts — `POPUP_RATE_TABLE_KEYS`; each with its n/d and "too few to
+  report" under `MIN_COHORT`), and the sign-in eligibility counts. Outcome-over-shown rates are
+  not shown as percentages: outcomes land days after the showing, so a range mixes cohorts.
+  Every other pop-up chart (reason/platform breakdowns, per-day trends, single rate tiles) is
+  still available from the chart editor's "Pop-up tracking" data source.
   See [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) for the one place every pop-up path
   pattern is defined, matching the Best Sudoku team's final beacon path list (2026-09-25):
   - Upsell reasons are exactly `cadence` / `limit` / `daily-locked` / `upgrade-tap`; any
@@ -179,7 +191,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   [`src/lib/campaigns.ts`](src/lib/campaigns.ts): a funnel per campaign, arrivals by ET
   hour of day, arrivals/funnel by country, daily + cumulative arrivals aligned by flight
   day, cost per arrival/auth success (spend read from the Google Ads API figures the ads
-  routine stores, falling back to the hand-entered `CAMPAIGN_SPEND`), device mix, an
+  routine stores, falling back to the hand-entered `CAMPAIGN_SPEND`), a device mix (the
+  standard nested doughnut over the beacon: campaign flight → device → OS, share of tagged
+  hits), an
   on-device return-visit retention curve, and the ads routine's **readings log**. The
   funnel's Install step counts `/popup-outcome/install-prompt/installed` (once per showing);
   raw `/install/*` outcome beacons, which can double-count one install, are shown only as a
@@ -207,11 +221,11 @@ Cloudflare Pages Functions  (functions/_middleware.ts → functions/api/*.ts)
    │  - /api/popups → pop-up funnel counts/rates from the same D1 (sign-in, upsell, install, …)
    │  - /api/completions → completed-game counts from the same D1, by mode × difficulty
    │  - /api/campaigns → Google Ads campaign comparison from the same D1 (funnel, hour-of-day,
-   │                      country, daily/cumulative, device mix, return visits)
+   │                      country, daily/cumulative, return visits)
    │  - /api/overview → today-at-a-glance KPIs, daily timeline, campaign scorecard, release panel
    │  - /api/ads/readings → the ads routine's readings log + stored spend (D1 gss-stats-ads)
    │  - /api/sites  → auto-builds the merged site list (RUM + beacon, aliases folded)
-   │  - /api/config → dashboard layout in KV
+   │  - /api/config → dashboard layout in KV (backed up once per layout-version bump)
    ▼
 Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats-ads)  ·  KV (STATS_CONFIG)
 ```
@@ -250,10 +264,22 @@ medium/date, plus **screen width** (`screenw`, exact pixels) and its bucketed fo
 (`screenwBucket`: `<480` / `480-767` / `768-1023` / `1024-1439` / `1440+`), plus a derived
 **path family** dimension (`pathFamily`) that groups every event-beacon prefix above into
 `page` / `signin-prompt` / `signin-eligible` / `promo-first50` / `first50-congrats` / `upsell`
-/ `install` / `popup-outcome` / `return` / `game-complete` / `auth-status`. `screenwBucket` and
-`pathFamily` are derived (a `CASE` expression, not a real column) so they can't be a
-nested-doughnut ring dimension the way a real column can, but they filter exactly like one —
-the same whitelisted expression is bound as `(<expr>) = ?`, never string-interpolated. A
+/ `install` / `popup-outcome` / `return` / `game-complete` / `auth-status`. More derived
+dimensions: **pop-up** (`popupFamily`) and **pop-up outcome** (`popupOutcome`), measured rows
+only (from the tracking activation day; pre-fix install-gap rows get no value — see
+[`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) `popupDimSqlCase`, where
+`/popup-outcome/first50-offer/…` resolves to the first-50 promo); a completed game's **mode**
+and **difficulty** (`gameMode` / `gameDifficulty`, from `/game/complete/<mode>/<difficulty>`,
+malformed rows as `(other)`); and **campaign flight** (`campaignFlight`, decided by the same
+`campaignAttributionClause` + `EXCLUSIONS` the campaigns endpoint uses). A chart grouping by
+one of the pop-up or completion dimensions counts those event rows without needing "Include
+event beacons" (the standing exclusion would remove every row it describes), and never shows
+unrelated rows as a "(none)" bar. Every derived dimension except `date` can be one of several
+dimensions (a nested-doughnut ring, a breakdown bar's series); they're `CASE` expressions over
+the row, built only from those modules' own constants — never request input — with every
+literal passed through `sqlLit` (inlined rather than bound because a two-dimension chart would
+otherwise pass D1's 100-bound-parameter cap). They filter exactly like a column — the same
+whitelisted expression is compared as `(<expr>) = ?`, the value always bound. A
 dimension or filter field name never reaches D1 unless it's a `GEO_DIMS` member — that Set is
 the whole security boundary. **Never exposed:** `id` (row id), raw `ts` (only the `date`
 bucket), `lat`/`lon` (map-mode coordinates only), and `in_app` (declared in gss-beacon's

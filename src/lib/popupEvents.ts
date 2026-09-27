@@ -16,7 +16,7 @@
 // any live rows yet, so the rest of this file follows the spec as given (see the task
 // report's "open questions" for what's still unconfirmed).
 
-import { etOffsetHours } from './etTime'
+import { etOffsetHours, etWallTimeMs } from './etTime'
 
 // ── Exclusion: every prefix below is an EVENT beacon, not a screen view. Every existing
 // page-view / visit / path count (geo.ts totals + breakdowns, sites.ts site counts) must
@@ -164,7 +164,7 @@ export const UPSELL_REASONS = ['cadence', 'limit', 'daily-locked', 'upgrade-tap'
 export const INSTALL_SHOWN_PLATFORMS = ['android', 'ios', 'desktop'] as const
 export const INSTALL_PLATFORM_LIST = ['web', 'play', 'app-store'] as const
 export const INSTALL_OUTCOMES = ['pwa-installed', 'standalone-detected', 'play-detected'] as const
-const INSTALL_PROMPT_DISMISS = ['dismiss', 'dismiss-forever', 'have-it'] as const
+export const INSTALL_PROMPT_DISMISS = ['dismiss', 'dismiss-forever', 'have-it'] as const
 // FINAL LIST outcome vocabulary + windows (Best Sudoku team, 2026-09-25) — the window is
 // enforced app-side (the app decides when to fire each outcome beacon); this module only
 // classifies/aggregates whatever already arrived:
@@ -727,6 +727,181 @@ export interface PopupRateSpec {
   outcome?: string
 }
 
+// ── Derived dimensions popupFamily / popupOutcome (functions/api/geo.ts) ────────────────
+// Two generic geo dimensions so ANY chart (e.g. the breakdown bar on the Pop-ups page) can put
+// pop-ups on one axis and what happened to them on another, over the ordinary filtered geo
+// query path instead of a bespoke pop-up panel:
+//   popupFamily  — which pop-up: signin-prompt | promo-first50 | first50-congrats | upsell |
+//                  install. An outcome beacon resolves through POPUP_OUTCOME_NAME_TO_FAMILY,
+//                  so /popup-outcome/first50-offer/<o> lands on promo-first50.
+//   popupOutcome — what the row records: the SHOWN row counts as outcome 'shown', then
+//                  'accept' / 'dismiss', the /popup-outcome/ types (POPUP_OUTCOME_TYPES), and
+//                  install's raw signals (INSTALL_OUTCOMES, e.g. 'pwa-installed').
+// Both are MEASURED values only, the same rows aggregatePopupRows' `measuredCoarse` counts:
+// a row before TRACKING_ACTIVATION_DATE_ET (ET midnight) or a pre-fix install-gap row
+// (INSTALL_GAP_PATHS before INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS) gets NO value (''), and
+// neither does anything that isn't a pop-up row (page views, /signin-eligible, install's
+// platform list, an unknown outcome name). geo.ts drops blank rows for these dims.
+//
+// The canonical classifier is classifyPopupPath; popupFamilyOf/popupOutcomeOf below are thin
+// JS readings of it, and popupDimSqlCase is its SQL twin for the exact wire vocabulary (checked
+// row-for-row against classifyPopupPath in derivedDims.sql.test.ts on a real SQLite engine).
+//
+// WHY LITERALS, NOT `?` PARAMETERS: every value in these CASE expressions comes from this
+// module's own constants, never from a request (geo.ts's GEO_DIMS whitelist decides which
+// expression runs; a filter VALUE compared against one is always bound). Binding each literal
+// would cost ~50 parameters per expression, and a 2-dim chart evaluates two of them in SELECT
+// plus a blank test in WHERE — past D1's 100-bound-parameter cap per query. Each literal goes
+// through sqlLit, which refuses anything outside a plain path/label alphabet (no quotes), so a
+// future constant can't break out of the string even by accident.
+const SQL_LIT_RE = /^[A-Za-z0-9 _%./()+-]*$/
+/** A constant as a SQL string literal. Throws on anything outside SQL_LIT_RE (never quotes). */
+export function sqlLit(value: string): string {
+  if (!SQL_LIT_RE.test(value)) throw new Error(`unsafe SQL literal: ${JSON.stringify(value)}`)
+  return `'${value}'`
+}
+/** A constant as a SQL integer literal (timestamps, lengths). Throws on a non-integer. */
+export function sqlInt(value: number): number {
+  if (!Number.isSafeInteger(value)) throw new Error(`unsafe SQL integer: ${value}`)
+  return value
+}
+const sqlList = (values: readonly string[]) => values.map(sqlLit).join(', ')
+/** `substr(path, 1, len(prefix)) = prefix` — a case-sensitive prefix test (LIKE is ASCII-case-
+ * insensitive in SQLite, unlike classifyPopupPath's startsWith), plus "something follows it". */
+const pathHasPrefix = (prefix: string) => `(substr(path, 1, ${sqlInt(prefix.length)}) = ${sqlLit(prefix)} AND length(path) > ${sqlInt(prefix.length)})`
+
+/** UTC ms of ET midnight starting TRACKING_ACTIVATION_DATE_ET — the instant from which
+ * aggregatePopupRows counts a row as measured (its ET day is on/after the activation date).
+ * null while activation is unset: every row is unmeasured. */
+export function trackingActivationStartMs(activationDateEt: string | null = TRACKING_ACTIVATION_DATE_ET): number | null {
+  return activationDateEt === null ? null : etWallTimeMs(activationDateEt)
+}
+
+/** Measurement gate as a SQL condition: TRUE for rows that must get no value (pre-activation,
+ * or a pre-fix install-gap row). Mirrors aggregatePopupRows' measured* skip rules. */
+function popupUnmeasuredSql(): string {
+  const act = trackingActivationStartMs()
+  const fix = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS
+  const preAct = act === null ? '1 = 1' : `ts < ${sqlInt(act)}`
+  const gap = fix === null ? `path IN (${sqlList(INSTALL_GAP_PATHS)})` : `(path IN (${sqlList(INSTALL_GAP_PATHS)}) AND ts < ${sqlInt(fix)})`
+  return `(${preAct} OR ${gap})`
+}
+
+interface PopupDimRule {
+  when: string // SQL condition over `path`
+  family: string // SQL expression (usually a literal)
+  outcome: string // SQL expression (usually a literal)
+}
+// Order matters (first match wins, like a CASE): exact accept/dismiss paths before the
+// signin-prompt catch-all that makes every other /signin-prompt/<reason> a showing.
+function popupDimRules(): PopupDimRule[] {
+  const rules: PopupDimRule[] = []
+  const lit = sqlLit
+  // signin-prompt: accept / dismiss are reserved; any other /signin-prompt/<reason> is shown.
+  rules.push({ when: `path = ${lit('/signin-prompt/accept')}`, family: lit('signin-prompt'), outcome: lit('accept') })
+  rules.push({ when: `path = ${lit('/signin-prompt/dismiss')}`, family: lit('signin-prompt'), outcome: lit('dismiss') })
+  rules.push({ when: pathHasPrefix('/signin-prompt/'), family: lit('signin-prompt'), outcome: lit('shown') })
+  // promo-first50: /promo-first50/<shown|accept|dismiss> — the segment IS the outcome.
+  rules.push({
+    when: `path IN (${sqlList(['shown', 'accept', 'dismiss'].map((k) => `/promo-first50/${k}`))})`,
+    family: lit('promo-first50'),
+    outcome: `substr(path, ${sqlInt('/promo-first50/'.length + 1)})`,
+  })
+  // first50-congrats: shown / ack (= accept) / close (= dismiss).
+  for (const [seg, kind] of [['shown', 'shown'], ['ack', 'accept'], ['close', 'dismiss']] as const) {
+    rules.push({ when: `path = ${lit(`/first50-congrats/${seg}`)}`, family: lit('first50-congrats'), outcome: lit(kind) })
+  }
+  // upsell: /upsell/<shown|accept|dismiss>/<reason> — a reason segment is required.
+  for (const kind of ['shown', 'accept', 'dismiss'] as const) {
+    rules.push({ when: pathHasPrefix(`/upsell/${kind}/`), family: lit('upsell'), outcome: lit(kind) })
+  }
+  // install: prompt platforms are showings; the prompt dismissals and pwa-decline are dismissals;
+  // play / pwa-accept / app-store are accepts; INSTALL_OUTCOMES are raw outcome signals, kept
+  // under their own names. /install/platforms/* (the platform LIST) is not an outcome: no value.
+  rules.push({ when: `path IN (${sqlList(INSTALL_SHOWN_PLATFORMS.map((p) => `/install/prompt/${p}`))})`, family: lit('install'), outcome: lit('shown') })
+  rules.push({
+    when: `path IN (${sqlList([...INSTALL_PROMPT_DISMISS.map((d) => `/install/prompt/${d}`), '/install/pwa-decline'])})`,
+    family: lit('install'),
+    outcome: lit('dismiss'),
+  })
+  rules.push({ when: `path IN (${sqlList(['/install/play', '/install/pwa-accept', '/install/app-store'])})`, family: lit('install'), outcome: lit('accept') })
+  rules.push({
+    when: `path IN (${sqlList(INSTALL_OUTCOMES.map((o) => `/install/${o}`))})`,
+    family: lit('install'),
+    outcome: `substr(path, ${sqlInt('/install/'.length + 1)})`,
+  })
+  // /popup-outcome/<name>/<outcome>: <name> resolves through POPUP_OUTCOME_NAME_TO_FAMILY (so
+  // first50-offer → promo-first50, install-prompt → install); <outcome> must be a known type.
+  const P = '/popup-outcome/'
+  const rest = `substr(path, ${sqlInt(P.length + 1)})`
+  const name = `substr(${rest}, 1, instr(${rest}, '/') - 1)`
+  const outcome = `substr(${rest}, instr(${rest}, '/') + 1)`
+  const names = Object.keys(POPUP_OUTCOME_NAME_TO_FAMILY)
+  rules.push({
+    when: `(substr(path, 1, ${sqlInt(P.length)}) = ${sqlLit(P)} AND ${name} IN (${sqlList(names)}) AND ${outcome} IN (${sqlList(POPUP_OUTCOME_TYPES)}))`,
+    family: `CASE ${name} ${names.map((n) => `WHEN ${sqlLit(n)} THEN ${sqlLit(POPUP_OUTCOME_NAME_TO_FAMILY[n])}`).join(' ')} END`,
+    outcome,
+  })
+  return rules
+}
+
+/** SQL CASE expression for the popupFamily / popupOutcome derived dimension; `emptyLabel` is
+ * what a non-pop-up or unmeasured row gets (geo.ts passes '' so its blank test drops them). */
+export function popupDimSqlCase(dim: 'popupFamily' | 'popupOutcome', emptyLabel: string): string {
+  const empty = sqlLit(emptyLabel)
+  const whens = popupDimRules().map((r) => `WHEN ${r.when} THEN ${dim === 'popupFamily' ? r.family : r.outcome}`)
+  return `CASE WHEN ${popupUnmeasuredSql()} THEN ${empty} ${whens.join(' ')} ELSE ${empty} END`
+}
+
+/** The SQL prefilter a popupFamily/popupOutcome query adds (bound, cheap): only pop-up event
+ * rows can ever carry a value. Replaces geo.ts's standing event-beacon exclusion for such a
+ * chart, which would otherwise remove every row these dimensions describe. */
+export function popupDimPrefilter(w: string[], b: unknown[]): void {
+  const inc = popupIncludeClause()
+  w.push(inc.sql)
+  b.push(...inc.binds)
+}
+
+function measuredPopupEvent(path: string, tsMs: number): PopupEvent | null {
+  const act = trackingActivationStartMs()
+  if (act === null || tsMs < act) return null
+  if (isInstallGapUnmeasured(path, tsMs)) return null
+  return classifyPopupPath(path)
+}
+const POPUP_FAMILY_IDS = new Set(['signin-prompt', 'promo-first50', 'first50-congrats', 'upsell', 'install'])
+/** JS reading of the popupFamily dimension, from classifyPopupPath ('' = no value). */
+export function popupFamilyOf(path: string, tsMs: number): string {
+  const ev = measuredPopupEvent(path, tsMs)
+  if (!ev || ev.kind === 'platformList') return ''
+  const fam = ev.family.startsWith('popup-outcome:') ? ev.family.slice('popup-outcome:'.length) : ev.family
+  return POPUP_FAMILY_IDS.has(fam) ? fam : ''
+}
+/** JS reading of the popupOutcome dimension, from classifyPopupPath ('' = no value). */
+export function popupOutcomeOf(path: string, tsMs: number): string {
+  if (!popupFamilyOf(path, tsMs)) return ''
+  const ev = classifyPopupPath(path)!
+  if (ev.family === 'install' && ev.kind === 'outcome') return ev.extra ?? ''
+  return ev.kind
+}
+
+// Display order + labels for the two dimensions' values (lib/charts.ts formatKey / series
+// order): the pop-ups in POPUPS order; shown first, then taps, then outcomes, then install's
+// raw signals.
+export const POPUP_FAMILY_ORDER: string[] = POPUPS.map((p) => p.id)
+export const POPUP_OUTCOME_ORDER: string[] = ['shown', 'accept', 'dismiss', ...POPUP_OUTCOME_TYPES, ...INSTALL_OUTCOMES]
+export const POPUP_OUTCOME_LABELS: Record<string, string> = {
+  shown: 'Shown',
+  accept: 'Tapped / accepted',
+  dismiss: 'Dismissed',
+  'signed-in': 'Signed in',
+  installed: 'Installed',
+  returned: 'Returned',
+  'still-playing': 'Still playing',
+  'pwa-installed': 'PWA installed (raw)',
+  'standalone-detected': 'Standalone detected (raw)',
+  'play-detected': 'Play detected (raw)',
+}
+
 export const POPUP_RATE_SPECS: PopupRateSpec[] = [
   ...POPUPS.map((p) => ({ key: `${p.id}:tap`, label: `${p.label} — tap rate (accept / shown)`, kind: 'tap' as const, popup: p.id })),
   ...POPUPS.filter((p) => !p.noOutcomeTracking).flatMap((p) =>
@@ -740,6 +915,14 @@ export const POPUP_RATE_SPECS: PopupRateSpec[] = [
   ),
   { key: 'signin-eligible:rate', label: 'Sign-in eligibility rate (earned / total)', kind: 'eligibility' as const },
 ]
+
+// ── The Pop-ups page's rate table: VALID ratios only (docs/adr/0003, "the rule this ADR
+// encodes": a percentage only where the numerator is a declared subset of the denominator,
+// same unit, same instrumented window). That leaves exactly: each pop-up's taps (accepts) over
+// its showings, and the install prompt's "installed" outcome over post-fix showings (the
+// denominator counted from INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS on — see computePopupRate).
+// Everything else on the page is a count. A test pins this list, so a new key can't slip in.
+export const POPUP_RATE_TABLE_KEYS: string[] = [...POPUPS.map((p) => `${p.id}:tap`), INSTALL_GAP_RATE_KEY]
 
 // Every rate reads the ACTIVATION-GATED (measuredCoarse) counts, never the raw
 // full-history `coarse` counts — see isPreActivation / TRACKING_ACTIVATION_DATE_ET.

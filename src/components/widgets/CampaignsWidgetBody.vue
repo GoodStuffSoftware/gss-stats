@@ -9,7 +9,7 @@ import { computed } from 'vue'
 import type { ChartConfiguration } from 'chart.js'
 import type { Widget, CampaignFunnelCounts } from '../../types'
 import { useCampaignsData } from '../../lib/campaignsData'
-import { FUNNEL_STEP_ORDER, FUNNEL_STEP_LABELS, RETURN_BUCKETS, VALID_FUNNEL_RATE_STEPS, topShares, type CampaignFlight, type DeviceMixShare } from '../../lib/campaigns'
+import { FUNNEL_STEP_ORDER, FUNNEL_STEP_LABELS, RETURN_BUCKETS, VALID_FUNNEL_RATE_STEPS, type CampaignFlight } from '../../lib/campaigns'
 import { MIN_COHORT, isInsufficientCohort } from '../../lib/popupEvents'
 import { noteRawText } from '../../lib/notes'
 import { PALETTE } from '../../lib/charts'
@@ -22,7 +22,7 @@ const props = defineProps<{ widget: Widget }>()
 
 const { campaigns, dataByCampaign, loading, error, reload } = useCampaignsData(() => props.widget.campaignIds)
 
-// Beacon-based views (funnel / hourOfDay / country / flightDay / deviceMix / returns) never
+// Beacon-based views (funnel / hourOfDay / country / flightDay / returns) never
 // show a `measurement: 'spend-only'` campaign (owner requirement, 2026-09-26) — its ads bypass
 // the beacon entirely, so every number here would structurally read zero, not a real
 // measurement. It stays in `campaigns` (unfiltered) for the 'cost' view, where its spend is
@@ -180,9 +180,6 @@ function returnChartConfig(c: CampaignFlight): ChartConfiguration | null {
     },
   }
 }
-function shareBarWidth(row: DeviceMixShare): number {
-  return row.total ? (row.value / row.total) * 100 : 0
-}
 </script>
 
 <template>
@@ -327,7 +324,7 @@ function shareBarWidth(row: DeviceMixShare): number {
           <div v-for="c in campaigns" :key="c.id" class="cost-card">
             <div class="fc-label">{{ c.label }}</div>
             <!-- Spend-only campaigns (e.g. Play-direct) are excluded from every BEACON chart
-                 above (funnel/hourOfDay/country/flightDay/deviceMix/returns) — real ad spend
+                 above (funnel/hourOfDay/country/flightDay/returns) — real ad spend
                  with no beacon data would just read as all-zero there. This is the one place
                  they still show up, so the reason they're spend-only travels with the number
                  instead of being silently dropped. -->
@@ -351,25 +348,6 @@ function shareBarWidth(row: DeviceMixShare): number {
       <!-- The ads-read routine's readings log is its own movable widget now (dataset
            'ads-readings', dispatched by ChartCard.vue via AdsReadingsWidgetCard), not inline
            here — add it from the chart menu the same as any other chart. -->
-
-      <!-- deviceMix -->
-      <template v-else-if="widget.view === 'deviceMix'">
-        <div class="device-grid">
-          <div v-for="c in beaconCampaigns" :key="c.id" class="device-col">
-            <div class="fc-label">{{ c.label }}</div>
-            <template v-if="dataByCampaign[c.id]">
-              <div v-for="(rows, kind) in { OS: dataByCampaign[c.id].deviceMix.os, Browser: dataByCampaign[c.id].deviceMix.browser, Screen: dataByCampaign[c.id].deviceMix.screen }" :key="kind" class="device-block">
-                <div class="device-kind overline">{{ kind }}</div>
-                <div v-for="row in topShares(rows)" :key="row.label" class="share-row">
-                  <span class="share-label">{{ row.label }}</span>
-                  <span class="share-bar-wrap"><span class="share-bar" :style="{ width: shareBarWidth(row) + '%' }"></span></span>
-                  <span class="share-pct mono">{{ pct(row.rate, row.total) }} ({{ fmt(row.value) }}/{{ fmt(row.total) }})</span>
-                </div>
-              </div>
-            </template>
-          </div>
-        </div>
-      </template>
 
       <!-- returns -->
       <template v-else-if="widget.view === 'returns'">
@@ -453,7 +431,6 @@ function shareBarWidth(row: DeviceMixShare): number {
 .funnel-grid,
 .country-grid,
 .cost-grid,
-.device-grid,
 .return-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
@@ -462,7 +439,6 @@ function shareBarWidth(row: DeviceMixShare): number {
 .funnel-col,
 .country-col,
 .cost-card,
-.device-col,
 .return-col {
   border: 1px solid rgb(var(--line));
   border-radius: 12px;
@@ -584,41 +560,5 @@ function shareBarWidth(row: DeviceMixShare): number {
 }
 .stale {
   color: #bc4749;
-}
-.device-block {
-  margin-bottom: 10px;
-}
-.device-kind {
-  margin-bottom: 4px;
-}
-.share-row {
-  display: grid;
-  grid-template-columns: 90px 1fr 44px;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  margin-bottom: 3px;
-}
-.share-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: rgb(var(--ink-2));
-}
-.share-bar-wrap {
-  height: 6px;
-  border-radius: 3px;
-  background: rgb(var(--sunken));
-  overflow: hidden;
-}
-.share-bar {
-  display: block;
-  height: 100%;
-  background: rgb(var(--amber));
-  min-width: 2px;
-}
-.share-pct {
-  text-align: right;
-  color: rgb(var(--ink-2));
 }
 </style>

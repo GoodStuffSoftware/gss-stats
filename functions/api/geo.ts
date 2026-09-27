@@ -12,7 +12,8 @@
 // `breakdown` for the grouped query below. Older 2-dim callers can still send just
 // { dimension, breakdown } and get the same result via a fallback.
 
-import { popupExcludeClause, pathFamilySqlCase } from '../../src/lib/popupEvents'
+import { popupExcludeClause, pathFamilySqlCase, popupDimSqlCase, popupDimPrefilter } from '../../src/lib/popupEvents'
+import { gameDimSqlCase, gameDimPrefilter, campaignFlightSqlCase, campaignFlightPrefilter } from '../../src/lib/campaigns'
 import { excludeOwnClause as sharedExcludeOwnClause, selfReferralClause as sharedSelfReferralClause } from '../../src/lib/ownExclusion'
 import { buildCacheKeyUrl, cachedJson, ttlSecondsFor, type CacheLike } from '../_lib/edgeCache'
 
@@ -42,6 +43,12 @@ interface Env {
 export function breakdownColumnExpr(dim: string, emptyLabel: string): string {
   if (dim === 'date') return "date(ts/1000,'unixepoch')"
   if (dim === 'pathFamily') return pathFamilySqlCase()
+  // Pop-up / completion / campaign-flight dims: CASE expressions over path (and ts/campaign),
+  // built only from lib/popupEvents.ts + lib/campaigns.ts constants (never request input); see
+  // those modules for each dimension's meaning and why its literals are inlined.
+  if (dim === 'popupFamily' || dim === 'popupOutcome') return popupDimSqlCase(dim, emptyLabel)
+  if (dim === 'gameMode' || dim === 'gameDifficulty') return gameDimSqlCase(dim, emptyLabel)
+  if (dim === 'campaignFlight') return campaignFlightSqlCase(emptyLabel)
   // screenw is INTEGER, default 0 when the client never reported a viewport width (JS
   // blocked/failed before the measurement ran) — 0 is the "blank" sentinel here, not ''.
   if (dim === 'screenw') return `CASE WHEN screenw = 0 THEN '${emptyLabel}' ELSE CAST(screenw AS TEXT) END`
@@ -72,7 +79,11 @@ export function emptyLabelFor(dim: string): string {
 // against — SQLite's type ordering means an INTEGER can never equal a TEXT literal, so
 // `screenw <> ''` is a no-op (always true, excludes nothing), letting blank rows leak into the
 // ring as a raw "0" key instead of being dropped like every other dimension's blanks.
+// A DERIVED dimension has no column to test, so its blank test is the expression itself with an
+// empty blank label, compared against '' (screenwBucket: a 0-width row; the pop-up/completion/
+// flight dims: a row they don't describe; pathFamily is never blank).
 export function ringBlankExclusion(dim: string): string {
+  if (DERIVED_ONLY_DIMS.has(dim)) return `(${breakdownColumnExpr(dim, '')}) <> ''`
   return dim === 'screenw' ? 'screenw <> 0' : `${dim} <> ''`
 }
 
@@ -109,6 +120,9 @@ export const GEO_DIMS = new Set([
   'campaign', 'source', 'medium', // utm campaign tags
   'screenw', 'screenwBucket', // viewport width — raw pixel value, and bucketed (see breakdownColumnExpr)
   'pathFamily', // groups event-beacon paths (popup/install/return/game-complete/…) vs. 'page' — see popupEvents.ts
+  'popupFamily', 'popupOutcome', // which pop-up / shown-tap-outcome — see popupEvents.ts popupDimSqlCase
+  'gameMode', 'gameDifficulty', // /game/complete/<mode>/<difficulty> — see campaigns.ts gameDimSqlCase
+  'campaignFlight', // campaign flight by campaignAttributionClause — see campaigns.ts campaignFlightSqlCase
 ])
 
 // Dimensions with no real backing column — computed via CASE/date() in breakdownColumnExpr,
@@ -120,7 +134,31 @@ export const GEO_DIMS = new Set([
 // equality instead of a bare column reference. 'date' alone stays fully out of filtering too:
 // a click on a date bucket becomes a day RANGE client-side (lib/drill.ts), never an equality
 // constraint, so nothing ever sends it as one.
-export const DERIVED_ONLY_DIMS = new Set(['date', 'screenwBucket', 'pathFamily'])
+export const DERIVED_ONLY_DIMS = new Set(['date', 'screenwBucket', 'pathFamily', 'popupFamily', 'popupOutcome', 'gameMode', 'gameDifficulty', 'campaignFlight'])
+// Of those, only 'date' stays out of multi-dimension (ring / breakdown-bar) queries: every other
+// derived dim groups like a column (its CASE runs per row in the inner SELECT, and
+// ringBlankExclusion drops its blank rows). A date axis is a trend, which lib/rings.ts
+// queryDims already keeps to single-dim charts.
+export const RING_EXCLUDED_DIMS = new Set(['date'])
+
+// Dimensions that describe EVENT-beacon rows only. A chart grouping by one (or a drill filtering
+// on one) cannot also apply the standing event-beacon exclusion (it would remove every row the
+// dimension describes), so the exclusion is lifted for that chart and the dimension's own bound
+// prefilter applies instead (only rows of that event family). Their blank rows are dropped even
+// in single-dim mode, so a page view never shows up as a "(none)" bar.
+export const EVENT_DIMS = new Set(['popupFamily', 'popupOutcome', 'gameMode', 'gameDifficulty'])
+// Bound WHERE prefilters for dims that only describe a subset of rows (cheap, and keeps the CASE
+// evaluation to rows that can carry a value). campaignFlight is not an event dim: a tagged row
+// is often a page view, so it keeps the chart's own event-beacon setting.
+const DIM_PREFILTERS: Record<string, (w: string[], b: unknown[]) => void> = {
+  popupFamily: popupDimPrefilter,
+  popupOutcome: popupDimPrefilter,
+  gameMode: gameDimPrefilter,
+  gameDifficulty: gameDimPrefilter,
+  campaignFlight: campaignFlightPrefilter,
+}
+// Dims whose blank rows are dropped in single-dim mode too (see EVENT_DIMS above).
+const BLANK_DROPPED_DIMS = new Set([...EVENT_DIMS, 'campaignFlight'])
 
 // screenwBucket / pathFamily as FILTERS: the exact same whitelisted CASE expression breakdown
 // mode groups by, wrapped in `(<expr>) = ?` with the value bound as a parameter — never string-
@@ -133,6 +171,11 @@ export const DERIVED_ONLY_DIMS = new Set(['date', 'screenwBucket', 'pathFamily']
 const DERIVED_FILTER_EXPR: Record<string, string> = {
   screenwBucket: breakdownColumnExpr('screenwBucket', '(unknown)'),
   pathFamily: breakdownColumnExpr('pathFamily', ''),
+  popupFamily: breakdownColumnExpr('popupFamily', ''),
+  popupOutcome: breakdownColumnExpr('popupOutcome', ''),
+  gameMode: breakdownColumnExpr('gameMode', ''),
+  gameDifficulty: breakdownColumnExpr('gameDifficulty', ''),
+  campaignFlight: breakdownColumnExpr('campaignFlight', ''),
 }
 
 const json = (data: unknown, status = 200): Response =>
@@ -242,17 +285,33 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // malformed/oversized request, not a UX limit (that lives in ChartEditor.vue).
   const RING_DIMS_HARD_CAP = 8
   const legacyBreakdown =
-    typeof body.breakdown === 'string' && GEO_DIMS.has(body.breakdown) && body.breakdown !== dim && !DERIVED_ONLY_DIMS.has(body.breakdown)
+    typeof body.breakdown === 'string' && GEO_DIMS.has(body.breakdown) && body.breakdown !== dim && !RING_EXCLUDED_DIMS.has(body.breakdown)
       ? body.breakdown
       : null
   const ringDims: string[] = (
     Array.isArray(body.dims)
-      ? [...new Set((body.dims as unknown[]).filter((d): d is string => typeof d === 'string' && GEO_DIMS.has(d) && !DERIVED_ONLY_DIMS.has(d)))]
+      ? [...new Set((body.dims as unknown[]).filter((d): d is string => typeof d === 'string' && GEO_DIMS.has(d) && !RING_EXCLUDED_DIMS.has(d)))]
       : legacyBreakdown
         ? [dim, legacyBreakdown]
         : []
   ).slice(0, RING_DIMS_HARD_CAP)
-  const isRing = !isPoints && ringDims.length >= 2 && !DERIVED_ONLY_DIMS.has(dim)
+  const isRing = !isPoints && ringDims.length >= 2 && !RING_EXCLUDED_DIMS.has(dim)
+  // The dims this query groups by (none in points mode). They decide the event-beacon exclusion
+  // lift and which prefilters apply (see EVENT_DIMS / DIM_PREFILTERS above). A drill on an event
+  // dim lifts the exclusion too, for the same reason.
+  const activeDims: string[] = isPoints ? [] : isRing ? ringDims : [dim]
+  const eventDimActive = [...activeDims, ...constraints.map((c) => c.field)].some((d) => EVENT_DIMS.has(d))
+  const eventRowsClause = (w: string[], b: any[]) => {
+    if (!includeEventBeacons && !eventDimActive) popupExcludeClause(w, b) // events, not screen views: excluded unless opted in
+    const seen = new Set<(w: string[], b: unknown[]) => void>()
+    for (const d of activeDims) {
+      const pre = DIM_PREFILTERS[d]
+      if (pre && !seen.has(pre)) {
+        seen.add(pre)
+        pre(w, b)
+      }
+    }
+  }
 
   // Everything that changes the SQL (and therefore the response) goes into the cache key —
   // mode, dims/dim, the date window, site selection, drill constraints, and both exclusion
@@ -284,7 +343,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   if (isPoints) {
     const w: string[] = ['ts >= ?', 'ts < ?', "lat <> ''"]
     const b: any[] = [sinceMs, untilMs]
-    if (!includeEventBeacons) popupExcludeClause(w, b) // events, not screen views — excluded unless opted in
+    eventRowsClause(w, b) // events, not screen views — excluded unless opted in
     siteClause(w, b)
     drillClause(w, b)
     excludeOwnClause(w, b)
@@ -328,7 +387,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     // dimension is TEXT).
     const w: string[] = ['ts >= ?', 'ts < ?', ...ringDims.map(ringBlankExclusion)]
     const b: any[] = [sinceMs, untilMs]
-    if (!includeEventBeacons) popupExcludeClause(w, b) // events, not screen views — excluded unless opted in
+    eventRowsClause(w, b) // events excluded unless opted in, or the dims describe events
     siteClause(w, b)
     drillClause(w, b)
     excludeOwnClause(w, b)
@@ -369,7 +428,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const col = breakdownColumnExpr(dim, emptyLabelFor(dim))
   const where = ['ts >= ?', 'ts < ?']
   const binds: any[] = [sinceMs, untilMs]
-  if (!includeEventBeacons) popupExcludeClause(where, binds) // events, not screen views — excluded unless opted in
+  if (BLANK_DROPPED_DIMS.has(dim)) where.push(ringBlankExclusion(dim)) // see EVENT_DIMS
+  eventRowsClause(where, binds) // events excluded unless opted in, or the dim describes events
   siteClause(where, binds)
   drillClause(where, binds)
   excludeOwnClause(where, binds)

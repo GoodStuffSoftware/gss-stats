@@ -32,7 +32,6 @@ import {
   parseReturnPath,
   returnBeaconNotInstrumented,
   returnVisitRates,
-  screenWidthBucket,
   sharesReturnTagWith,
   CAMPAIGN_SPEND,
   RETURN_BUCKETS,
@@ -97,11 +96,9 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       : `SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, country, visitor, (ts >= ?) AS uf, COUNT(*) AS c FROM hits WHERE ${w1.join(' AND ')} GROUP BY hr, path, country, visitor, uf`
   if (upsellFixAt != null) b1.unshift(upsellFixAt)
 
-  // ── Query 2: device mix (os / browser / screen width) within the flight window. ─────────
-  const w2: string[] = [attr.sql]
-  const b2: unknown[] = [...attr.binds]
-  applyExclusions(w2, b2)
-  const sql2 = `SELECT os, browser, screenw, COUNT(*) AS c FROM hits WHERE ${w2.join(' AND ')} GROUP BY os, browser, screenw`
+  // (Query 2, the device mix, is gone: the campaigns page's device mix is the standard nested
+  // doughnut over /api/geo now, by the 'campaignFlight' dimension — lib/defaults.ts
+  // deviceMixWidget — attributing rows with the same campaignAttributionClause + EXCLUSIONS.)
 
   // ── Query 3: which funnel-step paths existed AT ALL (any campaign, any un-tagged hit)
   // site-wide during this flight's SERVING window — decides "not instrumented" vs a real 0.
@@ -119,11 +116,10 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   applyExclusions(w4, b4)
   const sql4 = `SELECT path, COUNT(*) AS c FROM hits WHERE ${w4.join(' AND ')} GROUP BY path`
 
-  let r1: any, r2: any, notInstrumented: FunnelStepKey[], r4: any
+  let r1: any, notInstrumented: FunnelStepKey[], r4: any
   try {
-    ;[r1, r2, notInstrumented, r4] = await Promise.all([
+    ;[r1, notInstrumented, r4] = await Promise.all([
       db.prepare(sql1).bind(...b1).all(),
-      db.prepare(sql2).bind(...b2).all(),
       notInstrumentedPromise,
       db.prepare(sql4).bind(...b4).all(),
     ])
@@ -184,20 +180,6 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   )
   const rates = funnelStepRates(counts, new Set(notInstrumented), installPromptPostFixCount)
 
-  // ── Device mix (query 2) ─────────────────────────────────────────────────────────────
-  const os: Record<string, number> = {}
-  const browser: Record<string, number> = {}
-  const screen: Record<string, number> = {}
-  for (const x of r2.results ?? []) {
-    const c = Number(x.c) || 0
-    const o = String(x.os ?? '') || '(unknown)'
-    const br = String(x.browser ?? '') || '(unknown)'
-    const sb = screenWidthBucket(Number(x.screenw) || 0)
-    os[o] = (os[o] ?? 0) + c
-    browser[br] = (browser[br] ?? 0) + c
-    screen[sb] = (screen[sb] ?? 0) + c
-  }
-
   // ── Return visits (query 4) ──────────────────────────────────────────────────────────
   const returnCounts = Object.fromEntries(RETURN_BUCKETS.map((b) => [b, 0])) as Record<(typeof RETURN_BUCKETS)[number], number>
   for (const x of r4.results ?? []) {
@@ -252,7 +234,6 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     funnelByCountry,
     hourOfDayEt,
     daily,
-    deviceMix: { os, browser, screen },
     returnVisits: {
       counts: returnCounts,
       rates: returnRates,

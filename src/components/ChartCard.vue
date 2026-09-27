@@ -59,7 +59,7 @@ const isNoteWidget = computed(() => props.widget.type === 'note')
 // ads-readings/note) and the non-canvas widget types (stat/rate/table) never had that
 // problem, so only the canvas-bearing cases below get a fixed mobile height (Dashboard.vue's
 // .needs-chart-height).
-const CHART_CANVAS_TYPES = new Set(['bar', 'hbar', 'stackedBar', 'line', 'area', 'doughnut', 'nestedDoughnut', 'pie', 'map'])
+const CHART_CANVAS_TYPES = new Set(['bar', 'hbar', 'stackedBar', 'breakdownBar', 'line', 'area', 'doughnut', 'nestedDoughnut', 'pie', 'map'])
 const needsChartHeight = computed(() => {
   if (props.widget.dataset === 'overview') return props.widget.view === 'timeline' // the only overview panel with a real chart
   if (props.widget.dataset === 'campaigns' || props.widget.dataset === 'ads-readings' || isNoteWidget.value) return false
@@ -333,6 +333,19 @@ const tableRows = computed(() =>
 )
 const tableMax = computed(() => Math.max(1, ...tableRows.value.map((r) => r.value)))
 
+// Rate table (widget.type === 'rateTable'): the VALID pop-up rates only, each shown the same
+// way a rate tile shows one — the percentage (or "too few to report" under MIN_COHORT, or "—"
+// with no denominator at all) and always its n/d, plus any caveat that travels with the data.
+const rateTableRows = computed(() =>
+  (data.value?.rateRows ?? []).map((r) => ({
+    key: r.key,
+    label: r.label,
+    display: r.insufficientCohort ? 'too few to report' : r.value == null ? '—' : `${(r.value * 100).toFixed(1)}%`,
+    counts: `${r.numerator}/${r.denominator}`,
+    note: r.note ?? '',
+  })),
+)
+
 const isEmpty = computed(
   () =>
     !loading.value &&
@@ -340,7 +353,8 @@ const isEmpty = computed(
     data.value &&
     data.value.rows.length === 0 &&
     props.widget.type !== 'map' &&
-    props.widget.type !== 'rate', // a rate tile has no rows even when it has a real (or null) rate — never "No data"
+    props.widget.type !== 'rate' && // a rate tile has no rows even when it has a real (or null) rate — never "No data"
+    props.widget.type !== 'rateTable', // same for the rate table (its rows travel as rateRows)
 )
 
 // Pop-up count widgets (everything except the 'rate' tile and the 'date' trend, which
@@ -352,6 +366,7 @@ const popupNotYetActive = computed(
   () =>
     props.widget.dataset === 'popup' &&
     props.widget.type !== 'rate' &&
+    props.widget.type !== 'rateTable' &&
     props.widget.dimension !== 'date' &&
     !!data.value?.meta?.activationPending,
 )
@@ -480,6 +495,29 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
         <div class="stat-num">{{ rateDisplay }}</div>
         <div class="stat-label overline">rate</div>
         <div v-if="rateCounts" class="stat-sub mono">{{ rateCounts }}</div>
+      </div>
+
+      <!-- Rate table: valid pop-up rates, each with its n/d -->
+      <div v-else-if="widget.type === 'rateTable'" class="table-wrap">
+        <table class="rate-table">
+          <thead>
+            <tr>
+              <th class="t-label">Rate</th>
+              <th class="t-val">%</th>
+              <th class="t-val">n / d</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="r in rateTableRows" :key="r.key">
+              <td class="t-label wrap">
+                {{ r.label }}
+                <span v-if="r.note" class="rate-note">{{ r.note }}</span>
+              </td>
+              <td class="t-val mono rate-val">{{ r.display }}</td>
+              <td class="t-val mono">{{ r.counts }}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <!-- Table -->
@@ -851,6 +889,35 @@ td {
 }
 .t-bar {
   width: 40%;
+}
+.rate-table th {
+  font-weight: 600;
+  font-size: 11px;
+  color: rgb(var(--ink-3));
+  text-align: left;
+  padding: 2px 6px 6px;
+}
+.rate-table th.t-val {
+  text-align: right;
+}
+.rate-table td {
+  border-top: 1px solid rgb(var(--line));
+  padding: 6px;
+}
+.rate-table .t-label.wrap {
+  white-space: normal;
+  width: auto;
+  max-width: none;
+}
+.rate-table .rate-val {
+  color: rgb(var(--ink));
+  font-weight: 600;
+}
+.rate-note {
+  display: block;
+  font-size: 11px;
+  color: rgb(var(--ink-3));
+  margin-top: 2px;
 }
 .t-bar .bar {
   display: block;

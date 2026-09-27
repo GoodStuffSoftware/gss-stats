@@ -16,6 +16,7 @@ import {
   OVERVIEW_VIEWS,
   CAMPAIGNS_VIEWS,
   CAMPAIGN_OPTIONS,
+  BAR_MODES,
 } from '../lib/catalog'
 import { ringDims, RING_SOFT_CAP } from '../lib/rings'
 import { noteOptions, defaultNoteIdsForScope, type NoteScope } from '../lib/notes'
@@ -33,6 +34,8 @@ const isGeo = computed(() => draft.dataset === 'geo')
 const isPopup = computed(() => draft.dataset === 'popup')
 const isCompletions = computed(() => draft.dataset === 'completions')
 const isRate = computed(() => draft.type === 'rate')
+// A rate table needs no dimension or pop-up: it always shows every VALID rate.
+const isRateTable = computed(() => draft.type === 'rateTable')
 const isNote = computed(() => draft.type === 'note')
 // The three former-bespoke datasets: no dimension/breakdown/metric/site-override — a
 // "View" picker (+ campaign multi-select for campaigns/ads-readings) replaces them.
@@ -90,8 +93,8 @@ const dimOptions = computed(() =>
 )
 // A count-mode popup chart ('kind'/'reason'/'date'/'outcome') needs to know WHICH pop-up
 // it's scoped to; 'reason'/'date' also need which funnel stage they break down/trend.
-const popupNeedsPopup = computed(() => isPopup.value && !isRate.value && draft.dimension !== 'eligible' && draft.dimension !== 'installOutcome')
-const popupNeedsKind = computed(() => isPopup.value && !isRate.value && (draft.dimension === 'reason' || draft.dimension === 'date'))
+const popupNeedsPopup = computed(() => isPopup.value && !isRate.value && !isRateTable.value && draft.dimension !== 'eligible' && draft.dimension !== 'installOutcome')
+const popupNeedsKind = computed(() => isPopup.value && !isRate.value && !isRateTable.value && (draft.dimension === 'reason' || draft.dimension === 'date'))
 
 // Switching data source: keep the dimension + breakdown valid for the new source. The
 // beacon supports a breakdown too (nested doughnut / stacked bar), so we remap rather
@@ -142,7 +145,7 @@ function onDatasetChange() {
 watch(
   () => draft.type,
   (t, prev) => {
-    if (t === 'rate' && draft.dataset !== 'popup') {
+    if ((t === 'rate' || t === 'rateTable') && draft.dataset !== 'popup') {
       draft.dataset = 'popup'
       onDatasetChange()
     }
@@ -239,6 +242,7 @@ function save() {
   if (draft.breakdown === '') draft.breakdown = undefined
   if (!popupNeedsPopup.value) draft.popup = undefined
   if (!popupNeedsKind.value) draft.popupKind = undefined
+  if (draft.type !== 'breakdownBar') draft.barMode = undefined
   // Extra rings only make sense for a nested doughnut with a breakdown set; sanitize (drop
   // blanks/duplicates/'date') and clear them entirely otherwise.
   if (draft.type === 'nestedDoughnut' && draft.breakdown) {
@@ -349,16 +353,26 @@ function save() {
 
       <div class="row" v-if="typeDef?.needsDimension && !isBespokeDataset && !isNote">
         <div class="field">
-          <label>{{ isRate ? 'Rate' : 'Group by' }}</label>
+          <label>{{ isRate ? 'Rate' : draft.type === 'breakdownBar' ? 'Axis (group by)' : 'Group by' }}</label>
           <select v-model="draft.dimension">
             <option v-for="d in dimOptions" :key="d.key" :value="d.key">{{ d.label }}</option>
           </select>
         </div>
         <div class="field" v-if="typeDef?.allowsBreakdown">
-          <label>Break down by</label>
+          <label>{{ draft.type === 'breakdownBar' ? 'Series (break down by)' : 'Break down by' }}</label>
           <select v-model="draft.breakdown">
             <option :value="undefined">— none —</option>
             <option v-for="d in dimOptions" :key="d.key" :value="d.key">{{ d.label }}</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Breakdown bar: series side by side, or stacked into one bar per axis value -->
+      <div class="row" v-if="draft.type === 'breakdownBar'">
+        <div class="field">
+          <label>Bars</label>
+          <select :value="draft.barMode ?? 'grouped'" @change="draft.barMode = ($event.target as HTMLSelectElement).value as 'grouped' | 'stacked'">
+            <option v-for="m in BAR_MODES" :key="m.value" :value="m.value">{{ m.label }}</option>
           </select>
         </div>
       </div>

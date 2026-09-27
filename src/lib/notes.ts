@@ -222,6 +222,24 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = {
     severity: 'info',
     scopes: ['overview'],
   },
+  // Caption for the Pop-ups page's breakdown bar (and any chart on the pop-up dimensions):
+  // what the counts include. Plain wording, no code paths.
+  'popup-bars-measured': {
+    id: 'popup-bars-measured',
+    text: 'Counts start the day pop-up tracking went live. Installs before the install fix are not counted. First-50 congrats has no outcome tracking.',
+    kind: 'note',
+    severity: 'info',
+    scopes: ['popup'],
+  },
+  // Caption for the campaign device-mix doughnut: the population is tagged hits, not people
+  // (docs/adr/0003 rate audit, row 14).
+  'device-mix-population': {
+    id: 'device-mix-population',
+    text: 'Shares of **tagged hits** (every beacon a tagged visit sent), not of people: a heavy user weighs more.',
+    kind: 'note',
+    severity: 'info',
+    scopes: ['campaigns'],
+  },
   'no-return-visits-yet': {
     id: 'no-return-visits-yet',
     text: 'No return visits recorded yet.',
