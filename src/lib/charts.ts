@@ -1,5 +1,5 @@
 import type { ChartConfiguration } from 'chart.js'
-import type { Widget, StatsResponse, StatsRow, Metric } from '../types'
+import type { DrillConstraint, GlobalFilters, Widget, StatsResponse, StatsRow, Metric } from '../types'
 import { COUNTRY_NAMES } from './catalog'
 import { ringDims, isDateDim } from './rings'
 import { etDateFast } from './etTime'
@@ -748,13 +748,22 @@ function upsellFixFlightDays(): Set<number> {
 function flightLength(c: CampaignFlight): number {
   return c.flightStart ? Math.round((Date.parse(c.flightEnd + 'T00:00:00Z') - Date.parse(c.flightStart + 'T00:00:00Z')) / 86_400_000) + 1 : 0
 }
+/** The campaigns a campaignFlight breakdown always draws, rows or not: every beacon-tracked
+ * campaign (not spend-only: its ads bypass the beacon) with a start date, in configured order,
+ * narrowed by any campaignFlight drill in effect. A campaign with no arrivals yet keeps its
+ * series (at 0) and its place in the legend, as on the old campaign charts. */
+function campaignFlightDomain(drill: DrillConstraint[] | undefined): CampaignFlight[] {
+  const picked = (drill ?? []).filter((d) => d.key === 'campaignFlight').map((d) => d.value)
+  return CAMPAIGNS.filter((c) => c.measurement !== 'spend-only' && c.flightStart != null && picked.every((v) => v === c.id))
+}
 /** The whole axis for a dimension with a known domain, so an empty bucket still shows: every
  * hour of the day, and every flight day up to the longest flight among the chart's campaigns
- * (the old flight-day chart's axis). Other dimensions keep the values the response has. */
-function fullAxis(dim: string, seen: string[], breakdown: string, seriesSeen: string[]): string[] {
+ * (the old flight-day chart's axis: every drawn campaign's length, whether or not it has rows).
+ * Other dimensions keep the values the response has. */
+function fullAxis(dim: string, seen: string[], breakdown: string, series: string[]): string[] {
   if (dim === 'hourEt') return Array.from({ length: 24 }, (_, h) => String(h))
   if (dim === 'flightDay') {
-    const flights = breakdown === 'campaignFlight' ? CAMPAIGNS.filter((c) => seriesSeen.includes(c.id)) : []
+    const flights = breakdown === 'campaignFlight' ? CAMPAIGNS.filter((c) => series.includes(c.id)) : []
     const max = Math.max(0, ...seen.map(Number).filter(Number.isFinite), ...flights.map(flightLength))
     return Array.from({ length: max }, (_, i) => String(i + 1))
   }
@@ -771,7 +780,7 @@ export interface BreakdownBarModel {
  * always stacked): one bar group per axis value, one series per breakdown value, summed from the
  * response's (axis, series) rows. A missing combination is null when grouped (so Chart.js leaves
  * no empty slot) and 0 when stacked (so the stack still totals). */
-export function breakdownBarModel(widget: Pick<Widget, 'type' | 'dimension' | 'breakdown' | 'barMode' | 'metric'>, resp: StatsResponse): BreakdownBarModel {
+export function breakdownBarModel(widget: Pick<Widget, 'type' | 'dimension' | 'breakdown' | 'barMode' | 'metric' | 'filters'>, resp: StatsResponse, drill?: DrillConstraint[]): BreakdownBarModel {
   const dim = widget.dimension
   const bd = widget.breakdown ?? ''
   const stacked = widget.type === 'stackedBar' || widget.barMode === 'stacked'
@@ -785,9 +794,12 @@ export function breakdownBarModel(widget: Pick<Widget, 'type' | 'dimension' | 'b
     if (!seriesSeen.includes(b)) seriesSeen.push(b)
     cell.set(`${a}||${b}`, (cell.get(`${a}||${b}`) ?? 0) + metricValue(r, widget.metric))
   }
-  const axis = orderDimValues(dim, fullAxis(dim, axisSeen, bd, seriesSeen))
-  const series = orderDimValues(bd, seriesSeen)
-  const values = series.map((b) => axis.map((a) => cell.get(`${a}||${b}`) ?? (stacked ? 0 : null)))
+  // A campaign breakdown draws its whole domain (campaignFlightDomain), then any other value seen.
+  const domain = bd === 'campaignFlight' ? campaignFlightDomain(drill ?? widget.filters?.drill).map((c) => c.id) : []
+  const series = domain.length ? [...domain, ...seriesSeen.filter((b) => !domain.includes(b))] : orderDimValues(bd, seriesSeen)
+  const axis = orderDimValues(dim, fullAxis(dim, axisSeen, bd, series))
+  // A series with no rows at all is 0 throughout (drawn, and in the tooltip), not missing.
+  const values = series.map((b) => axis.map((a) => cell.get(`${a}||${b}`) ?? (stacked || !seriesSeen.includes(b) ? 0 : null)))
   return { axis, series, values, stacked }
 }
 
@@ -795,7 +807,8 @@ export function breakdownBarModel(widget: Pick<Widget, 'type' | 'dimension' | 'b
  * Build a Chart.js configuration from a widget + its data. Returns null for
  * non-Chart.js widget types (stat / table) which the card renders itself.
  */
-export function buildChartConfig(widget: Widget, resp: StatsResponse, seriesResponses?: StatsResponse[]): ChartConfiguration | null {
+export function buildChartConfig(widget: Widget, resp: StatsResponse, seriesResponses?: StatsResponse[], filters?: GlobalFilters): ChartConfiguration | null {
+  const drill = (filters ?? widget.filters ?? undefined)?.drill
   const m = widget.metric
   const dim = widget.dimension
   if (hasLineSeries(widget)) return seriesResponses ? buildSeriesLineConfig(widget, seriesResponses) : null
@@ -804,7 +817,7 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse, seriesResp
 
   // ── Breakdown bar (and the older stacked bar): axis dimension × series (breakdown) ──
   if ((widget.type === 'breakdownBar' || widget.type === 'stackedBar') && widget.breakdown) {
-    const model = breakdownBarModel(widget, resp)
+    const model = breakdownBarModel(widget, resp, drill)
     const datasets = model.series.map((b, i) => ({
       label: formatKey(widget.breakdown!, b),
       data: model.values[i],
@@ -839,7 +852,7 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse, seriesResp
   // dimension, an empty bucket at 0; with `cumulative`, each value's running total too, dashed,
   // on a right-hand axis (the campaigns flight-day chart). ─────────────────────────────────────
   if ((widget.type === 'line' || widget.type === 'area') && widget.breakdown && !isDateDim(dim)) {
-    const model = breakdownBarModel({ ...widget, type: 'breakdownBar', barMode: 'stacked' }, resp)
+    const model = breakdownBarModel({ ...widget, type: 'breakdownBar', barMode: 'stacked' }, resp, drill)
     const color = (b: string, i: number) => stableColor(widget.breakdown!, b) ?? PALETTE[i % PALETTE.length]
     const daily = model.series.map((b, i) => ({
       label: formatKey(widget.breakdown!, b),

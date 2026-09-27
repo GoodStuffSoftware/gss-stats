@@ -1,5 +1,5 @@
 import type { DashboardConfig, DashboardPage, GlobalFilters, LineSeries, Widget } from '../types'
-import { parseDurationMs } from './range'
+import { relativeRange, SINCE_FIRST_CAMPAIGN } from './range'
 import { POPUPS, POPUP_RATE_SPECS, NO_OUTCOME_TRACKING_NOTE, SIGNIN_ELIGIBLE_CAVEAT } from './popupEvents'
 import { CAMPAIGNS } from './campaigns'
 import { BEST_SUDOKU_SITES } from './bestSudokuSites'
@@ -409,11 +409,13 @@ export function deviceMixWidget(geom: { x: number; y: number; w: number; h: numb
 // flight-day panels as STANDARD geo charts. Both count tagged arrivals exactly as /api/campaigns
 // did: the 'arrival' = tagged filter (a device's first-ever beacon, attributed by
 // campaignAttributionClause with the same EXCLUSIONS, pre-fix install-gap rows left out), one
-// series per campaign flight ('campaignFlight'), over a rolling year (attribution itself bounds
-// each flight from below) and without "hide my visits", which the campaigns endpoint never
-// applied. The spend-only campaign has no tagged rows, so it never appears.
+// series per beacon-tracked campaign flight ('campaignFlight', lib/charts.ts
+// campaignFlightDomain: a campaign with no arrivals yet at 0), since the first campaign's start
+// (a range that grows, so no flight's early days ever drop off, and every arrival the funnel card
+// counts is on the charts), and without "hide my visits", which the campaigns endpoint never
+// applied.
 function campaignArrivalsFilters(): GlobalFilters {
-  return normFilters({ ...defaultFilters(), siteSel: [], rangeRel: '12mo', excludeOwnVisits: false, drill: [{ key: 'arrival', value: 'tagged', label: 'Tagged' }] })
+  return normFilters({ ...defaultFilters(), siteSel: [], rangeRel: SINCE_FIRST_CAMPAIGN, excludeOwnVisits: false, drill: [{ key: 'arrival', value: 'tagged', label: 'Tagged' }] })
 }
 /** Arrivals by ET hour of day: bars per hour 0:00-23:00, one per campaign (grouped). */
 export function hourOfDayWidget(geom: { x: number; y: number; w: number; h: number }, id = 'cw-hour', title = 'Arrivals by ET hour of day'): Widget {
@@ -763,12 +765,12 @@ function normFilters(raw: any): GlobalFilters {
   // Relative ranges are stored as a token and recomputed to a fresh now-relative window on
   // load, so "last 7d" always means the last 7 days (not a frozen window). An empty
   // rangeRel means an absolute (calendar) range — keep the stored since/until as-is.
+  // A token relativeRange reads: a duration ("7d") or "since first campaign" (lib/range.ts).
   const rel = typeof merged.rangeRel === 'string' ? merged.rangeRel : ''
-  const ms = rel ? parseDurationMs(rel) : null
-  if (ms && ms > 0) {
-    const until = new Date()
-    merged.since = new Date(until.getTime() - ms).toISOString()
-    merged.until = until.toISOString()
+  const r = rel ? relativeRange(rel) : null
+  if (r) {
+    merged.since = r.since
+    merged.until = r.until
   }
   return merged
 }

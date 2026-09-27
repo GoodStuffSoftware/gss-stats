@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { reactive, watch, ref } from 'vue'
+import { computed, reactive, watch, ref } from 'vue'
 import type { GlobalFilters } from '../types'
-import { relativeRange, lastDays, isoToYmd, ymdRangeToISO, rangeLabel, isLastDays } from '../lib/range'
+import { relativeRange, lastDays, isoToYmd, ymdRangeToISO, rangeLabel, isLastDays, isSinceFirstCampaign, SINCE_FIRST_CAMPAIGN } from '../lib/range'
 
 const props = defineProps<{ start: GlobalFilters; active: boolean }>()
 const emit = defineEmits<{ apply: [GlobalFilters]; useGlobal: []; close: [] }>()
@@ -11,8 +11,10 @@ const local = reactive<GlobalFilters>({ ...props.start })
 const rangeInput = ref('')
 const fromYmd = ref('')
 const toYmd = ref('')
+// `rangeRel` records the relative span so it is recomputed on load, as the page filter bar does:
+// a typed token or chip keeps it; a calendar range clears it.
 function syncRange() {
-  rangeInput.value = rangeLabel(local.since, local.until)
+  rangeInput.value = rangeLabel(local.since, local.until, local.rangeRel)
   fromYmd.value = isoToYmd(local.since)
   toYmd.value = isoToYmd(local.until)
 }
@@ -36,6 +38,7 @@ function applyRange() {
   if (r) {
     local.since = r.since
     local.until = r.until
+    local.rangeRel = isSinceFirstCampaign(rangeInput.value) ? SINCE_FIRST_CAMPAIGN : rangeInput.value.trim().replace(/^(last|past)\s+/i, '')
     rangeOk.value = true
     commit()
     syncRange()
@@ -50,11 +53,22 @@ function setDays(n: number) {
   const r = lastDays(n)
   local.since = r.since
   local.until = r.until
+  local.rangeRel = `${n}d`
   commit()
   syncRange()
 }
 function isPreset(n: number) {
-  return isLastDays(local.since, local.until, n)
+  return !isSinceFirstCampaign(local.rangeRel) && isLastDays(local.since, local.until, n)
+}
+const sinceFirstOn = computed(() => isSinceFirstCampaign(local.rangeRel))
+function setSinceFirstCampaign() {
+  const r = relativeRange(SINCE_FIRST_CAMPAIGN)
+  if (!r) return
+  local.since = r.since
+  local.until = r.until
+  local.rangeRel = SINCE_FIRST_CAMPAIGN
+  commit()
+  syncRange()
 }
 function applyCal() {
   if (!fromYmd.value || !toYmd.value) return
@@ -62,6 +76,7 @@ function applyCal() {
   const r = ymdRangeToISO(a, b)
   local.since = r.since
   local.until = r.until
+  local.rangeRel = '' // absolute (calendar) range: keep exactly these dates
   commit()
   rangeInput.value = rangeLabel(local.since, local.until)
 }
@@ -89,6 +104,7 @@ function applyCal() {
         <button :class="['chip', { on: isPreset(1) }]" @click="setDays(1)">1d</button>
         <button :class="['chip', { on: isPreset(7) }]" @click="setDays(7)">7d</button>
         <button :class="['chip', { on: isPreset(30) }]" @click="setDays(30)">30d</button>
+        <button :class="['chip', { on: sinceFirstOn }]" title="From the first ad campaign's start to now" @click="setSinceFirstCampaign">Since first campaign</button>
       </div>
     </div>
 
