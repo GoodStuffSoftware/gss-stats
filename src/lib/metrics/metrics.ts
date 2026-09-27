@@ -24,9 +24,12 @@ import {
   type ReturnBucket,
 } from '../campaigns'
 import {
+  AUTH_ERROR_REDIRECT_LIVE_AT_ET,
   classifyPopupPath,
   GAME_COMPLETE_LIVE_AT,
   INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS,
+  isAuthErrorPath,
+  isAuthRedirectPath,
   POPUPS,
   RAW_INSTALL_DEDUPE_LIVE_AT_UTC_MS,
   TRACKING_ACTIVATION_DATE_ET,
@@ -116,6 +119,7 @@ const TRACKING_VS_FLIGHT: InstrumentationRule = { ...TRACKING, against: 'flight'
 const GAME_COMPLETE: InstrumentationRule = { kind: 'liveAt', atMs: GAME_COMPLETE_LIVE_AT, source: 'GAME_COMPLETE_LIVE_AT' }
 const INSTALL_FIX: InstrumentationRule = { kind: 'unmeasuredBefore', atMs: INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, source: 'INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS', noteId: 'install-fix-note' }
 const RAW_DEDUPE: InstrumentationRule = { kind: 'annotateAt', atMs: RAW_INSTALL_DEDUPE_LIVE_AT_UTC_MS, noteId: 'raw-install-dedupe' }
+const AUTH_ERROR_REDIRECT: InstrumentationRule = { kind: 'liveOnEtDate', dateEt: AUTH_ERROR_REDIRECT_LIVE_AT_ET, source: 'AUTH_ERROR_REDIRECT_LIVE_AT_ET' }
 /** The signed-out upsell fix as a funnel segment boundary: a pre/post-fix window exists only
  * once it is set and falls inside the campaign's flight (lib/adsRules.ts campaignSegmentMarker). */
 const UPSELL_BOUNDARY: InstrumentationRule = { kind: 'boundaryInFlight', atMs: UPSELL_SIGNEDOUT_FIX_AT, source: 'UPSELL_SIGNEDOUT_FIX_AT' }
@@ -305,6 +309,13 @@ export const METRIC_DEFS: MetricDef[] = [
   bskMetric({ id: 'bsk.popupShown', unit: 'showing', path: isPopupShown, instrumented: [TRACKING] }),
   bskMetric({ id: 'bsk.popupAccepts', unit: 'showing', subsetOf: 'bsk.popupShown', path: isPopupAccept, instrumented: [TRACKING] }),
   bskMetric({ id: 'bsk.authSuccess', unit: 'signin', path: isAuthSuccessBase, windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [] }),
+  // v1.89.0 (live 2026-09-22): sign-in FAILURES (/auth/error/<slug>, any slug) and the
+  // popup-to-redirect fallback (/auth/redirect/<provider>) — see lib/popupEvents.ts
+  // AUTH_ERROR_REDIRECT_LIVE_AT_ET. Gated (unlike bsk.authSuccess above, which predates this
+  // convention) so a window reaching back before go-live reads "counted from" rather than a
+  // misleading full-history zero.
+  bskMetric({ id: 'bsk.authErrors', unit: 'row', path: isAuthErrorPath, windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [AUTH_ERROR_REDIRECT] }),
+  bskMetric({ id: 'bsk.authRedirects', unit: 'row', path: isAuthRedirectPath, windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [AUTH_ERROR_REDIRECT] }),
   bskMetric({ id: 'bsk.installs', unit: 'showing', path: isInstallPromptInstalled, windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [INSTALL_FIX], lagDays: [0, 7] }),
   bskMetric({ id: 'bsk.rawInstallSignals', unit: 'row', path: isRawInstallSignal, instrumented: [RAW_DEDUPE], caveats: ['raw-install-dedupe'] }),
   bskMetric({ id: 'bsk.returnsD1plus', unit: 'row', path: isReturnD1Plus, instrumented: [TRACKING] }),
