@@ -193,8 +193,8 @@ export function defaultBestSudokuPopupsWidgets(): Widget[] {
       w: 12,
       h: 11,
     }),
-    w({ id: 'pu-rates', title: 'Rates (valid ratios only)', type: 'rateTable', dataset: 'popup', dimension: '', metric: 'pageviews', limit: 1, notes: ['min-cohort-caveat'], x: 0, y: 11, w: 8, h: 7 }),
-    w({ id: 'pu-eligible-bd', title: 'Sign-in eligibility', type: 'bar', dataset: 'popup', dimension: 'eligible', metric: 'pageviews', limit: 3, notes: ['signin-eligible-caveat'], x: 8, y: 11, w: 4, h: 7 }),
+    w({ id: 'pu-rates', title: 'Rates (valid ratios only)', type: 'rateTable', dataset: 'popup', dimension: '', card: { preset: 'popup-rates' }, metric: 'pageviews', limit: 1, notes: ['min-cohort-caveat'], x: 0, y: 11, w: 8, h: 7 }),
+    w({ id: 'pu-eligible-bd', title: 'Sign-in eligibility', type: 'bar', dataset: 'popup', dimension: 'eligible', card: { preset: 'signin-eligibility' }, metric: 'pageviews', limit: 3, notes: ['signin-eligible-caveat'], x: 8, y: 11, w: 4, h: 7 }),
   ]
 }
 
@@ -552,6 +552,8 @@ export const CARD_PRESET_FOR_PANEL: Readonly<Record<string, string>> = Object.fr
     'overview:kpis': 'bsk-kpis',
     'overview:scorecard': 'campaign-scorecard',
     'overview:releasePanel': 'release-before-after',
+    'popup:rates': 'popup-rates',
+    'popup:eligible': 'signin-eligibility',
   }),
 )
 const CARD_PRESETS_FROM_PANELS = new Set(Object.values(CARD_PRESET_FOR_PANEL))

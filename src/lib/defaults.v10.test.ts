@@ -63,6 +63,8 @@ describe('v10: the production layout (sanitised)', () => {
     'bsk-overview/ow-kpis': 'bsk-kpis',
     'bsk-overview/ow-scorecard': 'campaign-scorecard',
     'bsk-overview/ow-release': 'release-before-after',
+    'bsk-popups/pu-rates': 'popup-rates',
+    'bsk-popups/pu-eligible-bd': 'signin-eligibility',
   }
   it('v9 → current changes exactly the panels, by adding a card, and nothing else', () => {
     const before = widgetsById(PROD_V9 as unknown as DashboardConfig)

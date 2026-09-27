@@ -413,6 +413,11 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.card.invalid': "This card's saved settings could not be read, so it can't be shown. Edit it or restore the default charts.",
     'label.card.openCampaigns': 'Open the Campaigns page',
     'label.card.release': 'Release',
+    'label.card.popupTapRate': '{popup} — tap rate (accept / shown)',
+    'label.card.installedRateFromFix': 'Install prompt — installed rate (from the install fix on)',
+    'label.card.eligible.earned': 'earned',
+    'label.card.eligible.capped': 'capped',
+    'label.card.eligible.unearned': 'unearned',
     'release-none': 'No dated release yet. This panel fills in once a release has a date.',
 
     // Preset names + one-line descriptions for CardEditor's "Start from" picker
@@ -423,6 +428,10 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.preset.bsk-kpis': 'Today at a glance (KPI tiles)',
     'label.preset.bsk-kpis.description': 'Site-wide KPI tiles for today so far, each compared with yesterday and the 7-day average.',
     'label.preset.release-before-after': 'Release before/after',
+    'label.preset.popup-rates': 'Pop-up rates (valid ratios only)',
+    'label.preset.popup-rates.description': 'Each pop-up\'s tap rate, and the install prompt\'s installed rate from the install fix on, each with its counts.',
+    'label.preset.signin-eligibility': 'Sign-in eligibility',
+    'label.preset.signin-eligibility.description': 'Signed-out finishes that earned a sign-in ask, hit the cap, or did not earn one, and the eligibility rate.',
     'label.preset.release-before-after.description': 'The latest dated release: page views, tagged arrivals, auth successes and installs over the same number of days before and after it.',
   }),
 })

@@ -347,7 +347,7 @@ const cardModel = computed<import('../lib/metrics/types').CardRef>({
 const cardContext = computed<MetricsContext>(() => {
   const f = draft.filters ?? props.filters
   if (!f) return {}
-  return metricsContextFor({ since: f.since, until: f.until }, resolveSelection(draft.siteSel ?? f.siteSel).tags)
+  return metricsContextFor({ since: f.since, until: f.until }, resolveSelection(draft.siteSel ?? f.siteSel).tags, f)
 })
 // CardEditor's own `errors` event (review fix, 2026-09-27): the only way this form learns a
 // metric card is currently invalid, since CardEditor's `update:modelValue` simply never fires

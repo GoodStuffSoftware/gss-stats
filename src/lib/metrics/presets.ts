@@ -124,6 +124,58 @@ export const RELEASE_BEFORE_AFTER: CardSpec = {
   captions: ['release-before-partial'],
 }
 
+/** The Pop-ups page's rate table (type 'rateTable'): the VALID pop-up rates only (lib/popupEvents.ts
+ * POPUP_RATE_TABLE_KEYS) — each pop-up's taps over its showings, and the install prompt's
+ * "installed" outcome over the prompts shown from the install fix on — each with its (n/d) and
+ * "too few to report" under MIN_COHORT. Over the page's date range, sites and own-visit filter. */
+export const POPUP_RATES: CardSpec = {
+  v: 1,
+  sections: [
+    {
+      layout: 'rows',
+      items: [
+        {
+          id: 'tap',
+          label: { note: 'label.card.popupTapRate', vars: { popup: 'popup.label' } },
+          data: { ratio: 'popup.tapRate', window: 'page' },
+          display: { as: 'percent', decimals: 1 },
+          repeat: { over: 'popups' },
+          ...COMPACT,
+        },
+        {
+          id: 'installed',
+          label: { note: 'label.card.installedRateFromFix' },
+          data: { ratio: 'popup.installedRate', params: { popup: 'install' }, window: 'page' },
+          display: { as: 'percent', decimals: 1 },
+          ...COMPACT,
+        },
+      ],
+    },
+  ],
+}
+
+/** Sign-in eligibility (the Pop-ups page's 'eligible' chart): signed-out finishes that earned a
+ * sign-in ask, hit the cap, or did not earn one, as bars, and the eligibility rate (earned over
+ * all three, a partition). Its caveat (rows arrive at least 30 minutes after the finish) is the
+ * widget's own caption, as before. */
+export const SIGNIN_ELIGIBILITY: CardSpec = {
+  v: 1,
+  sections: [
+    {
+      layout: 'bars',
+      items: [
+        { id: 'earned', label: { note: 'label.card.eligible.earned' }, data: { metric: 'popup.eligibleEarned', window: 'page' }, display: { as: 'bar' }, ...COMPACT },
+        { id: 'capped', label: { note: 'label.card.eligible.capped' }, data: { metric: 'popup.eligibleCapped', window: 'page' }, display: { as: 'bar' }, ...COMPACT },
+        { id: 'unearned', label: { note: 'label.card.eligible.unearned' }, data: { metric: 'popup.eligibleUnearned', window: 'page' }, display: { as: 'bar' }, ...COMPACT },
+      ],
+    },
+    {
+      layout: 'rows',
+      items: [{ id: 'rate', label: { metric: true }, data: { ratio: 'popup.eligibility', window: 'page' }, display: { as: 'percent', decimals: 1 }, ...COMPACT }],
+    },
+  ],
+}
+
 /** Every preset by id. A null prototype, so an id such as 'constructor' or 'toString' is
  * simply not a preset — read through presetById, never a bare bracket lookup. */
 export const PRESETS: Readonly<Record<string, CardSpec>> = Object.freeze(
@@ -131,6 +183,8 @@ export const PRESETS: Readonly<Record<string, CardSpec>> = Object.freeze(
     'campaign-scorecard': CAMPAIGN_SCORECARD,
     'bsk-kpis': BSK_KPIS,
     'release-before-after': RELEASE_BEFORE_AFTER,
+    'popup-rates': POPUP_RATES,
+    'signin-eligibility': SIGNIN_ELIGIBILITY,
   }),
 )
 

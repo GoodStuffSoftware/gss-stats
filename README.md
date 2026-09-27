@@ -142,7 +142,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   signals as the series — `popupOutcome`, where the shown row counts as outcome `shown`), a
   **rate table** with only the valid ratios (each pop-up's taps over its showings, and install
   over post-fix install prompts — `POPUP_RATE_TABLE_KEYS`; each with its n/d and "too few to
-  report" under `MIN_COHORT`), and the sign-in eligibility counts. Outcome-over-shown rates are
+  report" under `MIN_COHORT`), and the sign-in eligibility counts with their rate. The rate table
+  and the eligibility panel are metric cards (presets `popup-rates` and `signin-eligibility`, since
+  layout version 11), over the page's range, sites and "hide my own visits", as before. Outcome-over-shown rates are
   not shown as percentages: outcomes land days after the showing, so a range mixes cohorts.
   Every other pop-up chart (reason/platform breakdowns, per-day trends, single rate tiles) is
   still available from the chart editor's "Pop-up tracking" data source.

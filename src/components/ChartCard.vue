@@ -39,7 +39,7 @@ const isBespokeBody = computed(
 const isCard = computed(() => !!props.widget.card)
 const metricsContext = computed(() => {
   const f = effectiveFilters.value
-  return metricsContextFor({ since: f.since, until: f.until }, resolveSelection(props.widget.siteSel ?? f.siteSel).tags)
+  return metricsContextFor({ since: f.since, until: f.until }, resolveSelection(props.widget.siteSel ?? f.siteSel).tags, f)
 })
 const metricCard = ref<{ reload(): void } | null>(null)
 /** A card that shows its own "Updated … ↻" (CardSpec.showUpdated) has its reload there; the
