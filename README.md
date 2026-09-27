@@ -409,12 +409,16 @@ npm run typecheck:scripts
   [docs/adr/0001-ads-read-store.md](docs/adr/0001-ads-read-store.md). Schema:
   [`migrations/gss-stats-ads/`](migrations/gss-stats-ads/) (`npm run ads:migrate`).
 - **morning-read** syncs spend first, fires each $25/$50/$75/$100 read once (full read + kill
-  rules), appends one daily line per ET day, checks the hard cap on every read, and notes any
-  earlier scheduled read that never ran. The release-health check (a
-  missing child of a non-zero parent) never runs between 01:00 and 12:00 ET, so the 08:00
-  run skips it and a 23:15 ET `--release-health-only` backstop covers it on days that served
-  ads. Pushes go out only on a threshold read, a kill-rule trip, a failed read, or a real
-  release-health alert (parent at least MIN_COHORT, outcome window elapsed, child zero).
+  rules), appends one daily line per ET day, checks the hard cap on every read, notes any
+  earlier scheduled read that never ran, and evaluates release health (a missing child of a
+  non-zero parent) every run — there is no longer a time-of-day gate on it. RETIRED
+  2026-09-27: release health used to be skipped between 01:00 and 12:00 ET so the run could
+  defer to a separate 23:15 ET `--release-health-only` backstop entry; the two entries are now
+  one daily run, and the `--release-health-only` flag survives only as a manual/diagnostic
+  mode. Parent/child maturity is enforced by the run-independent `parentAgeHours` cutoff (event
+  timestamps, not the clock), so removing the gate does not weaken it. Pushes go out only on a
+  threshold read, a kill-rule trip, a failed read, or a real release-health alert (parent at
+  least MIN_COHORT, outcome window elapsed, child zero).
 - **postflight-read** covers the wrap-up (flight end + 7 days; spend after the flight and the cap are checked first on every run) and the day-15/30/60 and
   December follow-ups, split promo vs non-promo, with the d31-60 return buckets. Day 15/30/60
   add the flight-window account cohort by access tier and promo marker (sitewide, not

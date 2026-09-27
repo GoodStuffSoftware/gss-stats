@@ -6,6 +6,29 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **The retest ads routine's morning read regains full diagnostic depth for the closed day,
+  informational only.** Hourly delivery (account time zone), geo (country/region plus a live
+  location bid-modifier check), device split (computers/Connected TV flagged if nonzero for a
+  mobile-app placement campaign), and ad-group targeting (optimized-targeting-off and placement
+  count vs. the build spec) restore the old routine's Ads API read depth via read-only GAQL.
+  Google Ads Recommendations and enabled auto-apply subscriptions are listed read-only alongside
+  the carried standing verdicts (Maximize Conversions, conversion tracking, Customer Match,
+  optimized targeting: all REJECT). A beacon country breakdown (aggregate counts only) runs
+  alongside the existing funnel reads. A same-day cross-check compares Firestore's new-account
+  count against the beacon's `/auth/success/*/new` count for the closed ET day, counts only,
+  never joined to an individual. Every sub-read is independently best-effort: one failing is
+  recorded and reported, never thrown, and never blocks the others or the spend/kill-rule read —
+  none of this feeds a kill rule or an automatic action; it is report lines only.
+
+### Changed
+- **The retest ads routine's release-health check now runs every morning read, at any hour.**
+  The 23:15 ET backstop entry is folded into the single daily morning read (moved 08:00 → 06:00
+  ET); the clock-based "01:00-12:00 ET quiet window" that used to suppress the check is retired,
+  since it would otherwise silently suppress release health forever at whatever hour the one
+  remaining run is scheduled. Parent/child maturity is unaffected: it was already enforced by an
+  independent 24h event-age cutoff, not the clock.
+
 ## [0.12.1] — 2026-09-27
 
 ### Fixed

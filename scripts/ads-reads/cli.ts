@@ -8,10 +8,23 @@
 
 import fs from 'node:fs'
 import { parseArgs } from 'node:util'
-import { RETEST_CAMPAIGN_ID, type ReadingRecord, type ReturnRow, type ReturnSiteStat, type SpendDay, type StoredSpend, type TaggedRow } from '../../src/lib/adsRules'
+import { ADS_CUSTOMER_ID, RETEST_CAMPAIGN_ID, type ReadingRecord, type ReturnRow, type ReturnSiteStat, type SpendDay, type StoredSpend, type TaggedRow } from '../../src/lib/adsRules'
 import type { PlacementDayRow } from '../../src/lib/adsStore'
 import type { HourPathCount } from '../../src/lib/popupEvents'
-import { createAdsClient, fetchCampaignStatus, fetchDailySpend, fetchPlacementDaily, fetchRangeTotal, type AdsClient, type CampaignStatus } from '../../src/lib/adsApi'
+import {
+  createAdsClient,
+  fetchCampaignStatus,
+  fetchDailySpend,
+  fetchDevices,
+  fetchGeo,
+  fetchHourly,
+  fetchPlacementDaily,
+  fetchRangeTotal,
+  fetchRecommendations,
+  fetchTargeting,
+  type AdsClient,
+  type CampaignStatus,
+} from '../../src/lib/adsApi'
 import { createBeaconSource, type BeaconSource } from './beacon'
 import { createD1Select } from './d1'
 import { createD1Store, createMemoryStore } from './d1Store'
@@ -68,6 +81,12 @@ export function adsSource(client: AdsClient): AdsSource {
     daily: (id, since, until) => fetchDailySpend(client, id, since, until),
     placements: (id, since, until) => fetchPlacementDaily(client, id, since, until),
     rangeTotal: (id, since, until) => fetchRangeTotal(client, id, since, until),
+    // R2/R3 diagnostic depth (informational only; see src/lib/adsApi.ts).
+    hourly: (id, since, until) => fetchHourly(client, id, since, until),
+    geo: (id, since, until) => fetchGeo(client, id, since, until),
+    devices: (id, since, until) => fetchDevices(client, id, since, until),
+    targeting: (id) => fetchTargeting(client, id),
+    recommendations: (id) => fetchRecommendations(client, ADS_CUSTOMER_ID, id),
   }
 }
 

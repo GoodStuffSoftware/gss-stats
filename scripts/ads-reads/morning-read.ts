@@ -8,7 +8,9 @@
 // Fetches yesterday's and cumulative spend from the Google Ads API → stores it in gss-stats-ads
 // → detects newly crossed thresholds ($25/$50/$75/$100, each fires once) → on a crossing runs
 // the full read and the kill rules → always appends a daily reading line → release health
-// (never between 01:00 and 12:00 ET). Prints a short report, then a JSON block. PROPOSES only.
+// (evaluated every run; no time-of-day gate — the retired 23:15 ET backstop entry is folded
+// into this single daily read as of 2026-09-27). Prints a short report, then a JSON block.
+// PROPOSES only.
 
 import { MIN_COHORT } from '../../src/lib/popupEvents'
 import { fail, fixtureDeps, liveDeps, loadFixture, parseCli } from './cli'
