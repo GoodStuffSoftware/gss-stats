@@ -423,3 +423,29 @@ describe('a11y: every form control has an accessible name', () => {
     expect(problems).toEqual([])
   })
 })
+
+describe('preset names: never a raw id', () => {
+  it('"Start from" shows a plain name and a one-line description, never the preset id', async () => {
+    const wrapper = mountEditor({ preset: 'bsk-kpis' })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Today at a glance (KPI tiles)')
+    expect(wrapper.text()).not.toMatch(/\bbsk-kpis\b/)
+    expect(wrapper.text()).not.toContain('Bsk Kpis')
+    const description = wrapper.findAll('.hint').map((p) => p.text())
+    expect(description.some((t) => t.toLowerCase().includes('kpi tiles') || t.toLowerCase().includes('today so far'))).toBe(true)
+
+    await wrapper.find('select').setValue('campaign-scorecard')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Campaign scorecard')
+    expect(wrapper.text()).not.toMatch(/\bcampaign-scorecard\b/)
+  })
+
+  it('"Customized from" names the preset, never its id', async () => {
+    const wrapper = mountEditor({ preset: 'campaign-scorecard' })
+    await flushPromises()
+    await wrapper.find('button.btn').trigger('click') // Customize…
+    await flushPromises()
+    expect(wrapper.text()).toContain('Customized from "Campaign scorecard"')
+    expect(wrapper.text()).not.toMatch(/\bcampaign-scorecard\b/)
+  })
+})

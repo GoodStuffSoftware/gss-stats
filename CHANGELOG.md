@@ -22,6 +22,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **A live 'bars' card's scale, and a section's show/hide, now follow an edit.** Editing a bars
   card's rows, or adding/removing a section's rows, used to leave the bar widths reading an old
   scale and could leave a section shown or hidden based on data from before the edit.
+- **The card builder no longer leaves a gap between the fields and the preview on a phone**, and
+  the "Start from" list shows each preset's plain name and a one-line description, never its raw
+  id.
 
 ## [0.10.0] — 2026-09-27
 

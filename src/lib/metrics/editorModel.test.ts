@@ -294,10 +294,17 @@ describe('default drafts and duplication', () => {
 })
 
 describe('presetOptions', () => {
-  it('lists every real preset id, humanized, and nothing from Object.prototype', () => {
+  it('lists every real preset id, and nothing from Object.prototype', () => {
     const opts = presetOptions()
     expect(opts.map((o) => o.value).sort()).toEqual(['bsk-kpis', 'campaign-scorecard'])
     expect(opts.find((o) => o.value === 'constructor')).toBeUndefined()
+  })
+  it('gives every preset a plain-language name and description from the notes registry — never its raw id', () => {
+    for (const o of presetOptions()) {
+      expect(o.label).not.toBe(o.value) // never the bare id
+      expect(o.label).not.toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/) // never a dashed-id-shaped string either
+      expect(o.description.length).toBeGreaterThan(0)
+    }
   })
 })
 

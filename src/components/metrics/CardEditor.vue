@@ -47,6 +47,13 @@ const props = defineProps<{
 const emit = defineEmits<{ 'update:modelValue': [CardRef] }>()
 
 const PRESET_OPTIONS = presetOptions()
+/** The preset's plain name — never its raw id (review fix, 2026-09-27) — for "Customized from
+ * […]" and anywhere else a chosen preset needs to be named back to the owner. Falls back to the
+ * id only for a preset that has gone missing from the registry entirely (an editing widget's
+ * saved preset was removed), which is already a degraded state worth surfacing plainly. */
+function presetLabel(id: string): string {
+  return PRESET_OPTIONS.find((p) => p.value === id)?.label ?? id
+}
 
 // Every label below is paired with its control via for/id (useId()) — a label that only sits
 // beside a <select>/<input> as a visual sibling gives a screen reader no name for that control.
@@ -80,6 +87,7 @@ function resetToPreset() {
 function useDifferentPreset() {
   mode.value = 'preset'
 }
+const selectedPresetDescription = computed(() => PRESET_OPTIONS.find((p) => p.value === presetId.value)?.description ?? '')
 
 // ── Validity ─────────────────────────────────────────────────────────────────────────────────
 // A "Blank card" preset selection ('') has no valid CardRef of its own — it only becomes a real
@@ -215,10 +223,11 @@ function removeSection(i: number) {
             <option value="">Blank card</option>
             <option v-for="p in PRESET_OPTIONS" :key="p.value" :value="p.value">{{ p.label }}</option>
           </select>
+          <p v-if="selectedPresetDescription" class="hint">{{ selectedPresetDescription }}</p>
           <button type="button" class="btn" @click="customize">Customize…</button>
         </div>
         <div class="field" v-else>
-          <p class="hint">Customized{{ customizedFrom ? ` from "${customizedFrom}"` : '' }}.</p>
+          <p class="hint">Customized{{ customizedFrom ? ` from "${presetLabel(customizedFrom)}"` : '' }}.</p>
           <div class="row">
             <button v-if="customizedFrom" type="button" class="btn" @click="resetToPreset">Reset to preset</button>
             <button type="button" class="btn" @click="useDifferentPreset">Use a preset instead</button>
@@ -347,6 +356,16 @@ h3 {
   }
   .ce-columns {
     flex-direction: column;
+    align-items: stretch;
+  }
+  /* flex-basis is a HEIGHT once the axis flips to column (review fix, 2026-09-27): the desktop
+     values above (480px / 260px, meant as column WIDTHS) were reserving that much vertical
+     space for each stacked block regardless of its actual content — a large empty gap between a
+     short "Start from" state and the Preview heading below it. `flex: none` sizes each block to
+     its own content instead. */
+  .ce-controls,
+  .ce-preview {
+    flex: none;
   }
   .ce-preview {
     position: static;
