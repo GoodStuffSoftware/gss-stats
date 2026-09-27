@@ -79,6 +79,12 @@
 //       Same days (Day 1 to the longest flight), same counts, same running totals.
 //   M1  (above) the upsell-fix segment table is on the funnel card; the "▼ upsell fix" day label
 //       stays on this chart's axis (lib/charts.ts formatKey, once the fix is set).
+//   Numbers: the /api/geo rows against /api/campaigns' own hourOfDayEt and daily series, per
+//   campaign, per hour and per flight day, plus the running totals, with rows on both DST
+//   changes and at the retest's 12:00 ET attribution start — no difference.
+//   R12 The charts read a rolling 12 months (as the device mix does); /api/campaigns had no upper
+//       or lower bound past each flight's attribution start. An arrival more than a year old
+//       would drop off the hour chart (none exists: the first flight began 2026-09-02).
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import MetricCard from './MetricCard.vue'
@@ -91,6 +97,8 @@ import { onRequestPost as campaignsPost } from '../../../functions/api/campaigns
 import { onRequestPost as geoPost } from '../../../functions/api/geo'
 import { flightDayWidget, hourOfDayWidget } from '../../lib/defaults'
 import type { ChartConfiguration } from 'chart.js'
+import { CAMPAIGNS } from '../../lib/campaigns'
+const CAMPAIGNS_LIST = () => CAMPAIGNS
 import CampaignsWidgetBody from '../widgets/CampaignsWidgetBody.vue'
 import { DatabaseSync } from 'node:sqlite'
 import ChartCard from '../ChartCard.vue'
@@ -625,5 +633,89 @@ describe('the campaign arrivals charts ≡ their bespoke panels', () => {
     expect(new Map(cum.map((d) => [String(d.label).replace(/ \(cumulative\)$/, ''), d.data]))).toEqual(new Map(series(oldCum)))
     expect(cum.every((d) => Array.isArray((d as { borderDash?: number[] }).borderDash))).toBe(true)
     expect(neu.data.labels).toHaveLength(8) // Day 1 to the longest flight (Android, 8 days)
+  })
+})
+
+describe('the arrivals charts: numbers per bucket, /api/geo against /api/campaigns', () => {
+  const RETEST = { site: 'bestsudoku-web', campaign: 'sudoku_funnel_retest', visitor: 'new' }
+  const ANDROID = { site: 'bestsudoku-web', campaign: 'sudoku_tired_of_ads', visitor: 'new' }
+  const at = (iso: string) => Date.parse(iso)
+  /** Edge rows: the retest's noon-ET attribution start (11:59 ET not attributed, 12:00 ET day 1),
+   * the fall-back hour (01:30 EDT and 01:30 EST on 2026-11-01), the spring-forward day
+   * (2027-03-14, 01:30 EST then 03:30 EDT), and a late arrival long after the flights ended. */
+  const EDGES = [
+    { ...RETEST, ts: at('2026-09-26T15:59:00Z'), path: '/', n: 2 }, // 11:59 ET: before attribution
+    { ...RETEST, ts: at('2026-09-26T16:00:00Z'), path: '/', n: 3 }, // 12:00 ET: flight day 1
+    { ...RETEST, ts: at('2026-10-02T03:30:00Z'), path: '/', n: 1 }, // 23:30 ET on 10-01: day 6
+    { ...RETEST, ts: at('2026-10-03T04:10:00Z'), path: '/', n: 1 }, // 00:10 ET on 10-03: after the flight
+    { ...ANDROID, ts: at('2026-11-01T05:30:00Z'), path: '/', n: 4 }, // 01:30 EDT
+    { ...ANDROID, ts: at('2026-11-01T06:30:00Z'), path: '/', n: 5 }, // 01:30 EST (the repeated hour)
+    { ...ANDROID, ts: at('2027-03-14T06:30:00Z'), path: '/', n: 6 }, // 01:30 EST
+    { ...ANDROID, ts: at('2027-03-14T07:30:00Z'), path: '/', n: 7 }, // 03:30 EDT (02:xx skipped)
+    { ...ANDROID, ts: at('2026-09-05T14:00:00Z'), path: '/install/prompt/android', n: 2 }, // an event row as a first beacon
+  ]
+  const NOW = at('2027-03-20T16:00:00Z')
+  const beacon = CAMPAIGNS_LIST().filter((c) => c.measurement !== 'spend-only')
+
+  async function both() {
+    const saved = db
+    db = openHitsDb()
+    insertHits(db, [...bskFixture(), ...EDGES])
+    vi.setSystemTime(NOW)
+    cache.clear()
+    try {
+      const old = new Map<string, any>()
+      for (const c of beacon) {
+        const waited: Promise<unknown>[] = []
+        const res = await campaignsPost(pagesContext(postJson('/api/campaigns', { campaignId: c.id }), { gss_geo: sqliteD1(db) } as never, waited) as never)
+        old.set(c.id, await res.json())
+      }
+      const hourW = hourOfDayWidget({ x: 0, y: 0, w: 12, h: 8 })
+      const dayW = flightDayWidget({ x: 0, y: 0, w: 12, h: 10 })
+      const hour = await fetchStats(hourW, hourW.filters!)
+      const day = await fetchStats(dayW, dayW.filters!)
+      return { old, hour, day, hourCfg: buildChartConfig(hourW, hour)!, dayCfg: buildChartConfig(dayW, day)! }
+    } finally {
+      db = saved
+    }
+  }
+  const cell = (rows: { key: Record<string, string>; pageviews: number }[], dim: string, v: string, c: string) => rows.filter((r) => r.key[dim] === v && r.key.campaignFlight === c).reduce((a, r) => a + r.pageviews, 0)
+
+  it('hour of day: every campaign, every ET hour, the same arrivals — DST days included', async () => {
+    const { old, hour, hourCfg } = await both()
+    for (const c of beacon) {
+      const want: number[] = old.get(c.id).hourOfDayEt
+      const got = Array.from({ length: 24 }, (_, h) => cell(hour.rows, 'hourEt', String(h), c.id))
+      expect(got, c.label).toEqual(want)
+      const drawn = hourCfg.data.datasets.find((d) => d.label === c.label)!
+      expect((drawn.data as (number | null)[]).map((v) => v ?? 0), `${c.label} drawn`).toEqual(want)
+    }
+    // The edges landed where they should: both 01:00 ET buckets of the fall-back day, and 01:00
+    // and 03:00 on the spring-forward day, on Android; the retest's noon arrivals at 12:00.
+    const android = old.get('24215315197').hourOfDayEt
+    expect(android[1]).toBeGreaterThanOrEqual(4 + 5 + 6)
+    expect(android[3]).toBeGreaterThanOrEqual(7)
+    expect(old.get('24279250691').hourOfDayEt[11]).toBe(0) // 11:59 ET is before attribution
+  })
+
+  it('flight day: every campaign, every day, the same daily arrivals and running totals', async () => {
+    const { old, day, dayCfg } = await both()
+    const labels = dayCfg.data.labels as string[]
+    for (const c of beacon) {
+      const daily: { day: number; arrivals: number }[] = old.get(c.id).daily
+      const byDay = new Map<number, number>()
+      for (const r of daily) if (r.day > 0) byDay.set(r.day, (byDay.get(r.day) ?? 0) + r.arrivals)
+      const want = labels.map((_, i) => byDay.get(i + 1) ?? 0)
+      const got = labels.map((_, i) => cell(day.rows, 'flightDay', String(i + 1), c.id))
+      expect(got, c.label).toEqual(want)
+      const drawn = dayCfg.data.datasets.find((d) => d.label === c.label)!
+      expect(drawn.data, `${c.label} drawn`).toEqual(want)
+      let run = 0
+      const cumulative = want.map((v) => (run += v))
+      expect(dayCfg.data.datasets.find((d) => d.label === `${c.label} (cumulative)`)!.data, `${c.label} cumulative`).toEqual(cumulative)
+    }
+    const retest = old.get('24279250691').daily as { day: number; arrivals: number }[]
+    expect(retest.find((r) => r.day === 1)!.arrivals).toBe(7 + 3) // fixture's 7 plus the 12:00 ET 3, not the 11:59 2
+    expect(labels).toHaveLength(8)
   })
 })
