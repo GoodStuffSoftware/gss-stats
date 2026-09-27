@@ -383,13 +383,17 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
   it("the new/existing auth rows are events (they ride alongside the base row); the base rows stay page views", () => {
     for (const p of ['/auth/success/google/new', '/auth/success/google/existing', '/auth/success/email/unknown']) expect(isPopupEventPath(p)).toBe(true)
     for (const p of ['/auth/success/google', '/auth/success/email']) expect(isPopupEventPath(p)).toBe(false)
+    // Literal-not-bind (see popupExcludeClause's doc comment): the values are inlined into the
+    // WHERE fragments themselves now, never pushed onto the bind array.
     const w: string[] = []
     const b: unknown[] = []
     popupExcludeClause(w, b)
-    expect(b).toContain('/auth/success/google/%')
-    expect(b).toContain('/auth/success/email/%')
-    expect(b).not.toContain('/auth/success/google')
-    expect(b).not.toContain('/auth/success/email')
+    expect(b).toEqual([]) // zero binds — every prefix is an escaped SQL literal, not a `?`
+    const whereSql = w.join(' AND ')
+    expect(whereSql).toContain("path NOT LIKE '/auth/success/google/%'")
+    expect(whereSql).toContain("path NOT LIKE '/auth/success/email/%'")
+    expect(whereSql).not.toContain("'/auth/success/google'")
+    expect(whereSql).not.toContain("'/auth/success/email'")
   })
   it('matches every popup prefix, exactly and as a subpath', () => {
     for (const p of POPUP_EVENT_PREFIXES) {
@@ -428,18 +432,20 @@ describe('popupExcludeClause / popupIncludeClause anchoring for /game/complete/ 
     const w: string[] = []
     const b: unknown[] = []
     popupExcludeClause(w, b)
+    expect(b).toEqual([]) // literal, not bound — see popupExcludeClause's doc comment
     // The /game/complete/ entry ends in '/' already — must produce exactly one
-    // `path NOT LIKE ?` bound to '/game/complete/%', never '/game/complete%' (which would
-    // also swallow a hypothetical unrelated '/game/completely-unrelated' path) and never
+    // `path NOT LIKE '/game/complete/%'`, never '/game/complete%' (which would also swallow
+    // a hypothetical unrelated '/game/completely-unrelated' path) and never
     // '/game/complete//%' (a spurious extra slash that would exclude nothing real).
-    expect(b).toContain('/game/complete/%')
-    expect(b).not.toContain('/game/complete%')
-    expect(b).not.toContain('/game/complete//%')
+    const whereSql = w.join(' AND ')
+    expect(whereSql).toContain("path NOT LIKE '/game/complete/%'")
+    expect(whereSql).not.toContain("'/game/complete%'")
+    expect(whereSql).not.toContain("'/game/complete//%'")
   })
   it('popupIncludeClause is the exact inverse for the /game/complete/ entry', () => {
     const { sql, binds } = popupIncludeClause()
-    expect(sql).toContain('path LIKE ?')
-    expect(binds).toContain('/game/complete/%')
+    expect(binds).toEqual([]) // literal, not bound
+    expect(sql).toContain("path LIKE '/game/complete/%'")
   })
 })
 

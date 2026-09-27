@@ -36,6 +36,11 @@ All notable changes to **gss-stats** are documented here. The format follows
   never joined to an individual. Every sub-read is independently best-effort: one failing is
   recorded and reported, never thrown, and never blocks the others or the spend/kill-rule read —
   none of this feeds a kill rule or an automatic action; it is report lines only.
+- **Sign-ins now split by new vs. existing vs. unknown right next to the existing sign-in
+  count** on "Today at a glance", with the split's own go-live called out so an early range
+  reads as "counted from" a specific time rather than a false zero. Counts only.
+- **Pop-up outcomes (signed in, returned, still playing) now show alongside the existing
+  install rate** on the Pop-ups page, as counts.
 
 ### Changed
 - **The retest ads routine's release-health check now runs every morning read, at any hour.**
@@ -48,6 +53,11 @@ All notable changes to **gss-stats** are documented here. The format follows
   the existing auth-success numbers on "Today at a glance". Both read a real zero (not a blank
   or a hidden tile) once tracking is live, so "no failures yet" reads differently from "not
   wired up".
+
+### Fixed
+- **Chart queries with many sites and pop-up filters no longer refuse to run.** The dashboard's
+  documented maximums (50 sites, 16 path filters) work together again without hitting the
+  underlying database's per-query parameter ceiling.
 
 ## [0.12.1] — 2026-09-27
 
