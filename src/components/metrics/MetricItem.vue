@@ -2,7 +2,8 @@
 // One MetricItem, rendered in whatever frame its section (or its own `frame` override) picks —
 // row (label left, value right, like the scorecard's Flight/Tagged arrivals rows), pill (a
 // compact "Label: value" chip, like the funnel pills), or tile (label/number/delta stacked,
-// like the KPI tiles). The 'table' layout doesn't use this component — see
+// like the KPI tiles), or column (a vertical bar with its value over it and its label under it,
+// for a 'columns' section read left to right). The 'table' layout doesn't use this component — see
 // MetricTableCell.vue, which is a column cell, not a labeled row/pill/tile.
 import { computed } from 'vue'
 import { useMetricItemViewModel } from '../../composables/useMetricItem'
@@ -13,7 +14,7 @@ import MetricLabel from './MetricLabel.vue'
 const props = defineProps<{
   item: MetricItemSpec
   scope: ScopeInstance
-  frame: 'row' | 'pill' | 'tile'
+  frame: 'row' | 'pill' | 'tile' | 'column'
   todayEt: string
   context?: MetricsContext
   /** The largest value in this item's section — a 'bar' display scales its width against it. */
@@ -54,6 +55,16 @@ const showCaption = computed(() => vm.value.captionTokens.length > 0 && props.it
       </div>
       <div v-if="item.display.as === 'bar'" class="mi-bar-track"><div class="mi-bar-fill" :style="{ width: barPct + '%' }" /></div>
       <p v-if="showCaption" class="mi-caption"><MetricLabel :tokens="vm.captionTokens" /></p>
+    </template>
+
+    <template v-else-if="frame === 'column'">
+      <div class="mi-col" role="group" :aria-label="ariaLabel">
+        <div class="mi-col-num mono" :class="{ muted: vm.muted }">{{ vm.split ? vm.split.main : vm.primary }}</div>
+        <div v-if="vm.split" class="mi-col-sub mono">{{ vm.split.sub }}</div>
+        <div class="mi-col-track"><div class="mi-col-fill" :style="{ height: barPct + '%' }" /></div>
+        <div class="mi-col-label" :title="plainLabel"><MetricLabel :tokens="vm.labelTokens" /></div>
+        <p v-if="showCaption" class="mi-caption"><MetricLabel :tokens="vm.captionTokens" /></p>
+      </div>
     </template>
 
     <template v-else-if="frame === 'pill'">
@@ -175,6 +186,47 @@ const showCaption = computed(() => vm.value.captionTokens.length > 0 && props.it
   height: 100%;
   background: rgb(var(--amber-hover));
   border-radius: 3px;
+}
+.mi-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  min-width: 0;
+  height: 100%;
+}
+.mi-col-num {
+  font-size: 11.5px;
+  color: rgb(var(--ink));
+}
+.mi-col-num.muted {
+  font-style: italic;
+  color: rgb(var(--ink-3));
+}
+.mi-col-sub {
+  font-size: 10px;
+  color: rgb(var(--ink-3));
+}
+.mi-col-track {
+  flex: 1;
+  min-height: 60px;
+  width: 60%;
+  max-width: 44px;
+  display: flex;
+  align-items: flex-end;
+  background: rgb(var(--sunken));
+  border-radius: 4px 4px 0 0;
+  margin: 4px 0;
+  overflow: hidden;
+}
+.mi-col-fill {
+  width: 100%;
+  background: rgb(var(--amber-hover));
+  border-radius: 4px 4px 0 0;
+}
+.mi-col-label {
+  font-size: 11px;
+  color: rgb(var(--ink-2));
 }
 .mi-pill-caption {
   display: block;

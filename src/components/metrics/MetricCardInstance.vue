@@ -12,7 +12,7 @@
 // The click-through (`link`) is the title, a real button — never a role="button" wrapper
 // around other controls. The rest of the box stays clickable for a pointer only (no role, not
 // focusable), matching the old scorecard card.
-import { computed, ref, useId } from 'vue'
+import { computed, ref, useId, watch } from 'vue'
 import { useMetrics } from '../../composables/useMetrics'
 import { noteRawText } from '../../lib/notes'
 import { badgeViewModel, itemViewModel, resolveLabelTokens } from '../../lib/metrics/render'
@@ -32,7 +32,7 @@ const props = defineProps<{
   /** Names the card (Notes toggle) when the spec has no title: the widget's own title. */
   fallbackTitle?: string
 }>()
-const emit = defineEmits<{ open: [] }>()
+const emit = defineEmits<{ open: []; hidden: [boolean] }>()
 
 const todayEt = props.ctx.todayEt
 const titleTokens = computed(() => (props.spec.title !== undefined ? resolveLabelTokens(props.spec.title, props.scope, undefined, todayEt) : []))
@@ -68,6 +68,15 @@ const notes = computed(() => {
   const SEP: TextToken = { type: 'text', value: ', ' }
   return [...byCaption.values()].map((e) => ({ key: e.key, labelTokens: e.labels.flatMap((l, i) => (i ? [SEP, ...l] : l)), captionTokens: e.captionTokens }))
 })
+// A repeated instance with nothing to show (every cell gated out, e.g. a campaign with no return
+// beacons yet) is hidden by MetricCard; it reports it here. While a value loads it is visible.
+const allCells = noteItems.map((fi) => {
+  const spec = buildRequestSpec(fi.item, fi.scope)
+  return { ...fi, value: spec ? request(spec) : null }
+})
+const nothingVisible = computed(() => allCells.length > 0 && allCells.every((fi) => !itemViewModel(fi.item, fi.value?.value, fi.scope, { todayEt }).visible))
+watch(nothingVisible, (h) => emit('hidden', h), { immediate: true })
+
 const notesOpen = ref(false)
 const notesLabel = noteRawText('label.card.notes')
 const openLabel = noteRawText('label.card.openCampaigns')

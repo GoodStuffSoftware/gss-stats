@@ -29,6 +29,10 @@ All notable changes to **gss-stats** are documented here. The format follows
   itself once that fix ships.
 - **Arrivals & funnel by country is a metric card**, with the same table as before: the funnel
   steps down the side, US, CA and Other across the top, the same counts in every cell.
+- **Return visits is a metric card.** Each campaign with return beacons shows its first tagged
+  loads (d0) and the return rate of every later window as bars side by side, d1 to d31-60, each
+  with its counts, where the line chart and its counts line were. Under 5 first loads, each bar
+  says "too few to report" with its counts.
 
 ## [0.11.0] — 2026-09-27
 

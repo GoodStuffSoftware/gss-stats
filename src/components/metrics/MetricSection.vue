@@ -23,7 +23,8 @@ const props = defineProps<{
   context?: MetricsContext
 }>()
 
-const defaultFrame = computed<'row' | 'pill' | 'tile'>(() => (props.section.layout === 'pills' ? 'pill' : props.section.layout === 'tiles' ? 'tile' : 'row'))
+const defaultFrame = computed<'row' | 'pill' | 'tile' | 'column'>(() => (props.section.layout === 'pills' ? 'pill' : props.section.layout === 'tiles' ? 'tile' : props.section.layout === 'columns' ? 'column' : 'row'))
+const scaled = computed(() => props.section.layout === 'bars' || props.section.layout === 'columns')
 
 const titleTokens = computed(() => (props.section.title !== undefined ? resolveLabelTokens(props.section.title, props.outerScope, undefined, props.ctx.todayEt) : []))
 
@@ -78,7 +79,7 @@ const visibleAt = (i: number): boolean => {
 }
 
 const barMax = computed(() => {
-  if (props.section.layout !== 'bars') return 0
+  if (!scaled.value) return 0
   const items = flatItems.value
   const refs = activeRefs.value
   const nums = items.flatMap((fi, i) => {
@@ -160,7 +161,7 @@ const anyVisible = computed(() => {
           :text-tokens="resolveLabelTokens(fi.emptyOf.text, fi.scope, undefined, ctx.todayEt)"
           :frame="fi.item.frame ?? defaultFrame"
         />
-        <MetricItem v-else :item="fi.item" :scope="fi.scope" :frame="fi.item.frame ?? defaultFrame" :today-et="ctx.todayEt" :context="context" :bar-max="section.layout === 'bars' ? barMax : undefined" />
+        <MetricItem v-else :item="fi.item" :scope="fi.scope" :frame="fi.item.frame ?? defaultFrame" :today-et="ctx.todayEt" :context="context" :bar-max="scaled ? barMax : undefined" />
       </template>
     </div>
   </div>
@@ -194,6 +195,14 @@ const anyVisible = computed(() => {
 .layout-bars .items-wrap {
   display: flex;
   flex-direction: column;
+}
+/* Bars side by side, in item order: a curve read left to right. */
+.layout-columns .items-wrap {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 6px;
+  min-height: 150px;
 }
 /* A wide table scrolls inside its card on a phone instead of widening the page. */
 .metric-table-wrap {

@@ -134,6 +134,7 @@ export const SCOPE_PATH_OPTIONS: Record<RepeatSpec['over'], { value: ScopePath; 
     { value: 'campaign.measurabilityNote', label: 'Measurability note' },
     { value: 'campaign.upsellFixAt', label: 'Upsell fix time' },
     { value: 'campaign.upsellFixFlightDay', label: 'Upsell fix flight day' },
+    { value: 'campaign.returnTagShared', label: 'Shared return tag note' },
   ],
   popups: [
     { value: 'popup.id', label: 'Pop-up id' },

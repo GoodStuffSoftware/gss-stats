@@ -288,6 +288,46 @@ export const CAMPAIGN_COUNTRY: CardSpec = {
   ],
 }
 
+/** Return visits (CampaignsWidgetBody 'returns'): one card per beacon-tracked campaign with return
+ * beacons, its first tagged loads (d0) and the return rate of each later window (dN over d0, the
+ * device-deduplicated beacon's own buckets) as bars side by side, d1 to d31-60, each with its
+ * (n/d): the old curve. A flight that ended before the return beacon existed (closed, unmeasured)
+ * and a campaign with no return beacons yet (d0 = 0) are left out; with none left, one line says
+ * so. A lagged rate is provisional ("still arriving", in the card's Notes). */
+const RETURN_BUCKETS_ITEMS: { id: string; ratio: string }[] = [
+  { id: 'd1', ratio: 'campaign.returnD1PerD0' },
+  { id: 'd2-7', ratio: 'campaign.returnD2to7PerD0' },
+  { id: 'd8-14', ratio: 'campaign.returnD8to14PerD0' },
+  { id: 'd15-30', ratio: 'campaign.returnD15to30PerD0' },
+  { id: 'd31-60', ratio: 'campaign.returnD31to60PerD0' },
+]
+export const CAMPAIGN_RETURNS: CardSpec = {
+  v: 1,
+  repeat: { over: 'campaigns', tracked: true, empty: { label: '', text: { note: 'no-return-visits-yet' } } },
+  minWidth: 230,
+  title: { bind: 'campaign.label' },
+  sections: [
+    {
+      layout: 'rows',
+      items: [
+        { id: 'shared', label: { note: 'label.card.returnTag' }, data: { field: 'campaign.returnTagShared' }, display: { as: 'text' }, gating: { whenEmpty: 'omit' } },
+        { id: 'd0', label: { metric: true }, data: { metric: 'campaign.returnD0' }, display: { as: 'number' }, gating: { whenZero: 'omit' }, ...COMPACT },
+      ],
+    },
+    {
+      layout: 'columns',
+      items: RETURN_BUCKETS_ITEMS.map(({ id, ratio }) => ({
+        id,
+        label: { note: `label.card.return.${id}` },
+        data: { ratio },
+        display: { as: 'bar' as const },
+        gating: { whenEmpty: 'omit' as const },
+        ...COMPACT,
+      })),
+    },
+  ],
+}
+
 /** Every preset by id. A null prototype, so an id such as 'constructor' or 'toString' is
  * simply not a preset — read through presetById, never a bare bracket lookup. */
 export const PRESETS: Readonly<Record<string, CardSpec>> = Object.freeze(
@@ -300,6 +340,7 @@ export const PRESETS: Readonly<Record<string, CardSpec>> = Object.freeze(
     'campaign-cost': CAMPAIGN_COST,
     'campaign-funnel': CAMPAIGN_FUNNEL,
     'campaign-country': CAMPAIGN_COUNTRY,
+    'campaign-returns': CAMPAIGN_RETURNS,
   }),
 )
 

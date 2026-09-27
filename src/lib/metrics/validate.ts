@@ -168,6 +168,7 @@ export function validateCard(spec: CardSpec): string[] {
   }
   spec.sections?.forEach((s, si) => {
     const where = `sections[${si}]`
+    if (!['rows', 'pills', 'tiles', 'bars', 'columns', 'table'].includes(s.layout)) errors.push(`${where}: unknown layout '${String(s.layout)}'`)
     checkRepeat(where, s.repeat)
     checkLabel(`${where}.title`, s.title, false)
     if (s.columns !== undefined || s.columnLabel !== undefined) {
@@ -193,6 +194,8 @@ export function validateCard(spec: CardSpec): string[] {
       if (it.captionMode !== undefined && it.captionMode !== 'inline' && it.captionMode !== 'compact') errors.push(`${w}: captionMode must be 'inline' or 'compact'`)
       const empty = it.gating?.whenEmpty
       if (empty && typeof empty === 'object') checkNote(`${w}.gating.whenEmpty`, empty.note)
+      if (it.gating?.whenZero !== undefined && it.gating.whenZero !== 'omit') errors.push(`${w}: whenZero must be 'omit'`)
+      if (it.frame !== undefined && !['row', 'pill', 'tile', 'column'].includes(it.frame)) errors.push(`${w}: unknown frame '${String(it.frame)}'`)
     }
   })
   return errors

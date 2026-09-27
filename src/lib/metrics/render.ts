@@ -194,7 +194,8 @@ function formatMetricOrRatioValue(display: Display, value: MetricValue, def: Met
       // A rate as a bar keeps its (n/d): the reader always sees what the bar is made of.
       if (!('unit' in def) && def.kind === 'proportion') {
         const main = value.status === 'too-few' ? noteRawText('too-few-to-report') : fmtPercent(value.value, 1)
-        return { primary: `${main}${ndSuffix(value)}`, deltaLines: [] }
+        const nd = ndSuffix(value)
+        return { primary: `${main}${nd}`, deltaLines: [], ...(nd ? { split: { main, sub: nd.trim() } } : {}) }
       }
       return { primary: fmtCount(value.value ?? value.numerator), deltaLines: [] }
     case 'date':
@@ -312,6 +313,7 @@ function metricViewModel(item: MetricItem, value: MetricValue, def: MetricDef | 
     return { visible, labelTokens, primary, deltaLines: [], captionTokens: itemCaptionOnly(item, scope, todayEt), muted: true }
   }
   // 'ok' | 'partial' | 'too-few'
+  if (item.gating?.whenZero === 'omit' && value.value === 0 && value.status !== 'too-few') return { visible: false, labelTokens, primary: '0', deltaLines: [], captionTokens: [] }
   const { primary, deltaLines, split } = formatMetricOrRatioValue(item.display, value, def, nowMs)
   if (isNewToday(item, value, def)) {
     // Comparisons are hidden while yesterday or the 7-day window reaches back to the go-live day
