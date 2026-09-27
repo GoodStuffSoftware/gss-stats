@@ -68,6 +68,9 @@ All notable changes to **gss-stats** are documented here. The format follows
   pickers show the current name instead of coming up blank.
 - **A card's Notes name each row once.** A table row repeated in several columns (a count under
   US, CA and Other, or under Before and After) is listed once in front of its note.
+- **A campaign card keeps its chosen campaigns.** A card with one box per campaign (funnel,
+  country, cost, returns, the scorecard) shows only the campaigns picked in its chart settings,
+  as the old panels did, and the editor offers that picker for it.
 - **A chart's own date range survives a reload.** A span picked in a chart's filter (a chip or a
   typed "2w") stays that rolling span after the page reloads, and a calendar range stays fixed,
   instead of reverting to the span the chart was saved with.

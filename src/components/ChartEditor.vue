@@ -22,6 +22,8 @@ import { BEST_SUDOKU_SITES, syncCardWithView } from '../lib/defaults'
 import { noteOptions, defaultNoteIdsForScope, type NoteScope } from '../lib/notes'
 import CardEditor from './metrics/CardEditor.vue'
 import { metricsContextFor } from '../lib/metrics/pageContext'
+import { presetById } from '../lib/metrics/presets'
+import { selectsCampaigns } from '../lib/metrics/scope'
 import { resolveSelection } from '../sitesStore'
 import type { MetricsContext } from '../lib/metrics/types'
 
@@ -326,6 +328,11 @@ watch(
 // ChartType value (that would touch the shared ChartType union / CHART_TYPES catalog, outside
 // this integration's file list).
 const isCardWidget = computed(() => !!draft.card)
+/** The card's own spec (preset or inline), for what the form around CardEditor offers. */
+const cardSpec = computed(() => (draft.card ? ('preset' in draft.card ? presetById(draft.card.preset) ?? null : draft.card.spec) : null))
+/** A card repeated over campaigns takes the widget's campaign selection (MetricCard
+ * campaignIds, lib/metrics/scope.ts narrowToCampaigns): the Campaign(s) picker shows for it. */
+const cardSelectsCampaigns = computed(() => selectsCampaigns(cardSpec.value?.repeat))
 const CARD_DEFAULT_PRESET = 'campaign-scorecard'
 /** "Add chart" → "Metric card": the button below sets a default preset the owner can then
  * customize (CardEditor's own preset → Customize… flow). */
@@ -467,7 +474,16 @@ function save() {
       <template v-if="isCardWidget">
         <p class="hint">This chart is a metric card.</p>
         <button type="button" class="btn" @click="leaveCardMode">Switch to a regular chart</button>
-        <CardEditor v-model="cardModel" :context="cardContext" @errors="cardErrors = $event" />
+        <div class="field" v-if="cardSelectsCampaigns">
+          <label>Campaign(s) <span class="hint">— none checked = every campaign the card shows</span></label>
+          <div class="campaign-list">
+            <label v-for="c in CAMPAIGN_OPTIONS" :key="c.value" class="campaign-row">
+              <input type="checkbox" :checked="campaignIdsValue.includes(c.value)" @change="toggleCampaign(c.value, ($event.target as HTMLInputElement).checked)" />
+              {{ c.label }}
+            </label>
+          </div>
+        </div>
+        <CardEditor v-model="cardModel" :context="cardContext" :campaign-ids="cardSelectsCampaigns ? draft.campaignIds : undefined" @errors="cardErrors = $event" />
       </template>
 
       <!-- Note: pick a registry entry, or write custom text (owner requirement, 2026-09-26:

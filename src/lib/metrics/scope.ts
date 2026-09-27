@@ -63,6 +63,19 @@ export interface RepeatContext {
   readings?: ReadingScope[]
 }
 
+/** A widget's campaign selection (Widget.campaignIds) applies to a card whose top-level repeat
+ * is over campaigns: it narrows that repeat (after its own ids/status/tracked filters). */
+export function selectsCampaigns(repeat: RepeatSpec | undefined): boolean {
+  return repeat?.over === 'campaigns'
+}
+/** The card-level instances for a widget's campaign selection: `instances` narrowed to the
+ * selected campaigns, in the repeat's own order; unchanged when nothing is selected or the
+ * repeat is not over campaigns. */
+export function narrowToCampaigns(instances: ScopeInstance[], repeat: RepeatSpec | undefined, campaignIds: readonly string[] | undefined): ScopeInstance[] {
+  if (!selectsCampaigns(repeat) || !campaignIds?.length) return instances
+  return instances.filter((s) => s.kind === 'campaign' && campaignIds.includes(s.campaign.id))
+}
+
 /** The instances a RepeatSpec expands to, in a stable order. `undefined` (no repeat) always
  * yields exactly one root-scoped instance — the "just render this once" case (KPI tiles). */
 export function resolveRepeat(repeat: RepeatSpec | undefined, ctx: RepeatContext): ScopeInstance[] {
