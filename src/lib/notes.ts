@@ -337,6 +337,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = {
     'counted-from': 'counted from {from}',
     'install-fix-note': INSTALL_FIX_NOTE,
     'new-today': 'new today',
+    'metric-unavailable': 'unavailable',
 
     // Card labels that are not a metric's own name (lib/metrics/presets.ts).
     'label.card.flight': 'Flight',
@@ -346,6 +347,9 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = {
     'label.card.updatedMinutesAgo': 'Updated {n}m ago',
     'label.card.refresh': 'Refresh',
     'label.card.notes': 'Notes',
+    'label.card.loadFailed': 'Some numbers could not be loaded.',
+    'label.card.retry': 'Retry',
+    'label.card.openCampaigns': 'Open the Campaigns page',
   }),
 }
 

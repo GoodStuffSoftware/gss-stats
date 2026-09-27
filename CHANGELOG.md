@@ -13,8 +13,9 @@ All notable changes to **gss-stats** are documented here. The format follows
   dashboard does not use it yet.
 - **Groundwork for configurable metric cards: the Overview scorecard and "Today at a glance"
   as ready-made cards.** They show today's numbers, apart from the rate fixes, follow the page's
-  date and site filters, keep their notes behind a small toggle, and show when they last updated.
-  The dashboard does not use them yet.
+  date and site filters and the change of day, keep their notes behind one "Notes" link, show
+  when they last updated, and say so when a number fails to load. The dashboard does not use
+  them yet.
 
 ### Changed
 - **The raw-install de-duplication note is plain language.** It says what changed and from

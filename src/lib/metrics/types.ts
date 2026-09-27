@@ -110,8 +110,9 @@ export interface CardSpec {
   captions?: string[] // note ids under the whole card
   link?: 'campaigns-page' // click-through; replaces the scorecard's emit('open-campaigns')
   minWidth?: number // grid minimum per instance (230 px today)
-  /** A footer with "Updated Xs ago" (the card's latest successful load) and a reload control. */
-  showUpdated?: boolean
+  /** "Updated Xs ago" (the card's latest successful load) with a reload control: top-right in
+   * the card's header (`true` or 'header', where the old KPI panel had it) or in a footer. */
+  showUpdated?: boolean | 'header' | 'footer'
 }
 
 /** What a Widget stores. A preset is a code-reviewed CardSpec in lib/metrics/presets.ts. */

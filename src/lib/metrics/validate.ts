@@ -108,7 +108,7 @@ export function validateCard(spec: CardSpec): string[] {
   }
   const scopeOf = (...repeats: (RepeatSpec | undefined)[]) => new Set(repeats.map((r) => (r ? SCOPE_PARAM[r.over] : null)).filter((p): p is MetricParam => !!p))
 
-  if (spec.showUpdated !== undefined && typeof spec.showUpdated !== 'boolean') errors.push('card: showUpdated must be a boolean')
+  if (spec.showUpdated !== undefined && typeof spec.showUpdated !== 'boolean' && spec.showUpdated !== 'header' && spec.showUpdated !== 'footer') errors.push("card: showUpdated must be a boolean, 'header' or 'footer'")
   checkRepeat('card', spec.repeat)
   checkLabel('card.title', spec.title, false)
   for (const id of spec.captions ?? []) checkNote('card.captions', id)

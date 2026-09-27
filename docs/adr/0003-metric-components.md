@@ -1000,19 +1000,41 @@ callback, which is the v0.8.0 `campaignsData` leak this module exists to avoid.
   views. `presets.parity.test.ts` mounts the old body over `/api/overview` and the preset over
   `/api/metrics` against one `node:sqlite` fixture, compares every title, badge, row, pill,
   tile, value and delta line, and lists each difference: D1, D3, D4 and D5 from slice 3, the
-  game-screen-views pair (slice 1), two relabelled KPI tiles, the tap-rate tile's `(n/d)` on
-  one line, and caveats that now sit behind a notes toggle.
+  game-screen-views pair (slice 1), two relabelled KPI tiles, and caveats that now sit behind
+  the card's Notes toggle.
+- D5 stays by design: the closed Android flight's "Installs" row is omitted although the old
+  body showed a count of 1. The flight never saw the installed outcome while it served, and the
+  owner's rule for closed campaigns is to omit what the flight could not measure, not to show a
+  count that only the post-flight trickle produced.
 - Parity rather than the ADR example for the pills: they keep the bespoke body's step names and
   its "Auth success" count, and do not add a "Signed in after ask" rate (lead's ruling).
-- Render additions the presets needed, all generic: a "new today" delta line when a today-so-far
-  count asked for deltas and every comparison predates its go-live; muted status words ("not
-  yet tracking"); `MetricItem.captionMode: 'compact'`, which puts the caption and the value's
-  notes behind a small toggle next to the label, collapsed by default (the owner wants no new
-  visible lines); `CardSpec.showUpdated`, a footer with "Updated Xs ago" from the card's latest
-  successful load and a reload control (also exposed as `reload()` for `ChartCard`); and a
-  section with no visible item after gating is omitted, title included.
-- Text: the "/return/ d1+ returns" tile is "Return visits (day 1+)", with what it counts in the
-  `returns-d1plus-caveat` note; the raw-install de-dupe note no longer names a beacon path.
+- The owner's look, kept: a rate tile shows the rate big and its `(n/d)` as a small line under
+  it (`ItemViewModel.split`; rows and pills keep it inline); "Updated Xs ago" and the reload
+  control sit top-right above the tiles (`CardSpec.showUpdated`: `'header'`, the default for
+  `true`, or `'footer'`; `reload()` is also exposed for `ChartCard`); and caveats add no visible
+  line. Items with `captionMode: 'compact'` show no caption; each card instance
+  (`MetricCardInstance`) has one "Notes" toggle in its header, collapsed by default, listing
+  them as "<label>: <caveat>". The click-through is the title, a real button, so no
+  `role="button"` wraps other controls.
+- Other generic render additions: a "new today" delta line when a today-so-far count asked for
+  deltas and every comparison predates its go-live; muted status words ("not yet tracking");
+  and a section with no visible item after gating is omitted, title included.
+- Errors never look like data: an error value is the muted word "unavailable", not a dash, and
+  while any value on a card is in error (`useMetrics().hasError`), "Updated" gives way to "Some
+  numbers could not be loaded." with Retry, on every card whether or not it shows freshness.
+- Decided on the client from the campaign's own config (`unmeasuredByConfig`, the same two
+  checks as the engine's `sideStatic`): a spend-only campaign's beacon items and a flight
+  without a start date's non-spend items are omitted whatever the status, and never requested.
+  So the Play-direct card is its Flight row from the first render, with no "…" and no "not yet
+  tracking", and "pending — start date not yet confirmed" appears only in the Flight row.
+- The ET day follows the clock (or the `nowMs` seam), not the first render. The day is part of
+  every request's client cache key (`useMetrics`' `epoch`, never sent), and the card body is
+  keyed on it: at midnight "flighting today" repeats re-expand, badges change, and today-so-far
+  values are re-requested instead of served from yesterday's entry. The card's own request list
+  lives in an effect scope rebuilt per day and stopped with the component.
+- Text: the "/return/ d1+ returns" tile is "Return visits (day 1+)" (owner-approved), with what
+  it counts in the `returns-d1plus-caveat` note; the raw-install de-dupe note no longer names a
+  beacon path.
 - Phase B (not started): the `CONFIG_VERSION` 10 step (`normWidget` → `normCardRef`, the KV
   backup on the bump) swaps the Overview `kpis` and `scorecard` widgets to `card: { preset }`,
   then the bespoke branches retire. It waits for `CONFIG_VERSION` 9 on `main`.

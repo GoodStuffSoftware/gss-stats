@@ -20,14 +20,15 @@
 //   S1  (slice-1 fix) "Game-screen views" is a pair: "100 views · 50 arrivals", never a rate.
 //       The old pill showed the count alone.
 //   L1  (owner ruling) The Installs KPI label no longer carries the install-fix caveat; the
-//       caveat is in the tile's notes while the value is partial.
-//   L2  "/return/ d1+ returns" is renamed "Return visits (day 1+)"; what it counts moved to
-//       the tile's notes (no beacon paths in visible text).
-//   F1  (formatting, same numbers) The tap-rate tile shows "12.2% (5/41)" on one line; the old
-//       tile split it over two ("12.2%" and "(5/41)").
+//       caveat is in the card's notes while the value is partial.
+//   L2  (owner-approved) "/return/ d1+ returns" is renamed "Return visits (day 1+)"; what it
+//       counts moved to the card's notes (no beacon paths in visible text).
 //   N1  Caveats (arrivals floor, install fix, counted-from, still arriving, raw-install dedupe,
-//       the returns definition) are new, but only behind each item's collapsed notes toggle —
-//       no caption line is visible until it is opened.
+//       the returns definition) are new text, but only behind each card's one collapsed
+//       "Notes" toggle, as "<label>: <caveat>" — no caption line is visible until it is opened.
+//
+// Not differences: a rate tile shows its rate big and "(n/d)" as a small line under it, as the
+// old tile did; "Updated just now" and the reload control sit top-right above the tiles.
 //
 // D2 (an active flight's unseen step stays live) does not show here: the fixture's active
 // flight has seen every step. The KPI arrivals tile already uses campaign attribution on both
@@ -213,14 +214,14 @@ describe('bsk-kpis ≡ the bespoke "Today at a glance" tiles', () => {
   const oldTiles = (w: VueWrapper): Tile[] =>
     w.findAll('.kpi-tile').map((t) => ({
       label: text(t.find('.kpi-label').element),
-      // F1: the old tile split a rate and its (n/d) over two lines.
+      // A rate and its (n/d) on two lines, on both sides.
       value: norm(`${text(t.find('.kpi-num').element)} ${t.find('.kpi-sub').exists() ? text(t.find('.kpi-sub').element) : ''}`),
       deltas: t.findAll('.kpi-delta').map((d) => text(d.element)),
     }))
   const newTiles = (w: VueWrapper): Tile[] =>
     w.findAll('.mi-tile, .mp-tile').map((t) => ({
       label: text((t.find('.mi-tile-label').exists() ? t.find('.mi-tile-label') : t.find('.mp-tile-label')).element),
-      value: text((t.find('.mi-tile-num').exists() ? t.find('.mi-tile-num') : t.find('.mp-tile-text')).element),
+      value: norm(`${text((t.find('.mi-tile-num').exists() ? t.find('.mi-tile-num') : t.find('.mp-tile-text')).element)} ${t.find('.mi-tile-sub').exists() ? text(t.find('.mi-tile-sub').element) : ''}`),
       deltas: t.findAll('.mi-tile-delta').map((d) => text(d.element)),
     }))
   const LABEL_DIFFS: Record<string, [newLabel: string, why: string]> = {
@@ -259,16 +260,27 @@ describe('bsk-kpis ≡ the bespoke "Today at a glance" tiles', () => {
 })
 
 describe('N1: caveats never add a visible line', () => {
-  it.each(['campaign-scorecard', 'bsk-kpis'])('%s: every caption is behind a collapsed notes toggle', async (preset) => {
+  it.each(['campaign-scorecard', 'bsk-kpis'])('%s: every caveat is behind the card\'s one collapsed Notes toggle', async (preset) => {
     const w = await mountNew(preset)
     expect(w.findAll('.mi-caption, .mi-tile-caption, .mi-pill-caption')).toHaveLength(0)
-    const toggles = w.findAll('button.mi-notes-btn')
+    expect(w.find('.mc-notes').exists()).toBe(false)
+    const toggles = w.findAll('button.mc-notes-toggle')
     expect(toggles.length).toBeGreaterThan(0)
     for (const b of toggles) expect(b.attributes('aria-expanded')).toBe('false')
-    // Opening one shows its caption, and no raw beacon path ever reaches visible text.
     await toggles[0].trigger('click')
-    expect(w.findAll('.mi-caption, .mi-tile-caption, .mi-pill-caption')).toHaveLength(1)
+    const lines = w.findAll('.mc-notes li').map((li) => norm(li.text()))
+    expect(lines.length).toBeGreaterThan(0)
+    for (const l of lines) expect(l).toMatch(/^[^:]+: \S/) // "<label>: <caveat>"
+    // No raw beacon path in anything the card can show, notes included.
     expect(w.text()).not.toMatch(/\/(return|install|game|popup-outcome|auth)\//)
     expect(w.emitted('open-campaigns')).toBeUndefined() // the toggle never opens the Campaigns page
+  })
+
+  it('bsk-kpis: the notes carry what the old labels said (L1, L2)', async () => {
+    const w = await mountNew('bsk-kpis')
+    await w.find('button.mc-notes-toggle').trigger('click')
+    const lines = w.findAll('.mc-notes li').map((li) => norm(li.text()))
+    expect(lines.some((l) => l.startsWith('Installs: install fix went live'))).toBe(true)
+    expect(lines.some((l) => l.startsWith('Return visits (day 1+): Devices that first arrived'))).toBe(true)
   })
 })

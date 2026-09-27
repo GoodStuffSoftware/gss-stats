@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest'
 import { campaignById } from '../campaigns'
 import { itemViewModel } from './render'
+import { buildRequestSpec, unmeasuredByConfig } from './scope'
 import type { ScopeInstance } from './scope'
 import type { MetricItem, MetricValue } from './types'
 
@@ -76,5 +77,42 @@ describe('captions and status words', () => {
   it('a status word in place of a value is muted (small, like the old "not yet tracking" tile)', () => {
     expect(itemViewModel(kpi(), { status: 'unmeasured', reason: 'not-live' }, rootScope, opts)).toMatchObject({ primary: 'not yet tracking', muted: true })
     expect(itemViewModel(kpi(), { status: 'ok', value: 3 }, rootScope, opts).muted).toBeUndefined()
+  })
+  it('an error is the muted status word "unavailable", flagged as an error — never a dash', () => {
+    expect(itemViewModel(numberItem(), { status: 'error', reason: 'fetch-failed' }, activeScope, opts)).toMatchObject({ primary: 'unavailable', muted: true, error: true, visible: true })
+  })
+  it('a tile gets a percent split: the rate, and its (n/d) for the small line', () => {
+    expect(itemViewModel(percentItem(), { status: 'ok', value: 5 / 41, numerator: 5, denominator: 41 }, activeScope, opts).split).toEqual({ main: '12.2%', sub: '(5/41)' })
+    expect(itemViewModel(percentItem(), { status: 'too-few', value: null, numerator: 1, denominator: 3 }, activeScope, opts).split).toEqual({ main: 'too few to report', sub: '(1/3)' })
+    expect(itemViewModel(percentItem(), { status: 'no-data', value: null, numerator: 0, denominator: 0 }, activeScope, opts).split).toEqual({ main: '—', sub: '(0/0)' })
+    expect(itemViewModel(numberItem(), { status: 'ok', value: 3 }, activeScope, opts).split).toBeUndefined()
+  })
+})
+
+describe('decided from the campaign config, on the client (spend-only, flight pending)', () => {
+  const spendOnly: ScopeInstance = { kind: 'campaign', campaign: campaignById('24234347705')! }
+  const pending: ScopeInstance = { kind: 'campaign', campaign: { ...campaignById('24279250691')!, flightStart: null, status: 'upcoming' } }
+  const spend = (o: Partial<MetricItem> = {}): MetricItem => ({ id: 's', label: 'Spend', data: { metric: 'campaign.spend' }, display: { as: 'currency' }, ...o })
+  const flight: MetricItem = { id: 'f', label: 'Flight', data: { field: 'campaign.flight' }, display: { as: 'dateRange', days: true }, gating: { whenEmpty: { note: 'flight-pending' } } }
+
+  it('beacon items are omitted and never requested, whatever the status, even before any value arrives', () => {
+    for (const scope of [spendOnly, pending]) {
+      for (const item of [numberItem(), percentItem(), costItem(), countsItem()]) {
+        expect(unmeasuredByConfig(item.data, scope), `${scope.kind} ${item.data}`).toBe(true)
+        expect(buildRequestSpec(item, scope)).toBeNull()
+        expect(itemViewModel(item, undefined, scope, opts).visible).toBe(false) // no "…" flash
+        expect(itemViewModel(item, { status: 'unmeasured', reason: 'spend-only' }, scope, opts).visible).toBe(false) // never "not yet tracking"
+      }
+    }
+  })
+  it('spend itself stays measurable; the Flight row alone says "pending"', () => {
+    expect(unmeasuredByConfig(spend().data, spendOnly)).toBe(false)
+    expect(unmeasuredByConfig(spend().data, pending)).toBe(false)
+    expect(buildRequestSpec(spend(), spendOnly)).not.toBeNull()
+    expect(itemViewModel(flight, undefined, pending, opts).primary).toBe('pending — start date not yet confirmed')
+  })
+  it('an ordinary active campaign and site-wide items are unaffected', () => {
+    expect(unmeasuredByConfig(numberItem().data, activeScope)).toBe(false)
+    expect(unmeasuredByConfig(kpi().data, spendOnly)).toBe(false) // no campaign param: site-wide
   })
 })

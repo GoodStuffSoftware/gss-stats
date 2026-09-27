@@ -59,8 +59,8 @@ describe('presets', () => {
     }
   })
 
-  it('the KPI tiles show freshness, and every caveat-carrying item keeps it behind the compact notes toggle', () => {
-    expect(BSK_KPIS.showUpdated).toBe(true)
+  it('the KPI tiles show freshness in the header, and every caveat-carrying item hands it to the card notes', () => {
+    expect(BSK_KPIS.showUpdated).toBe('header')
     for (const spec of Object.values(PRESETS)) {
       for (const it of items(spec)) if (!('field' in it.data)) expect(it.captionMode, it.id).toBe('compact')
     }
@@ -77,12 +77,13 @@ describe('presets', () => {
 
 describe('validateCard: the slice-5 fields', () => {
   const base: CardSpec = { v: 1, sections: [{ layout: 'tiles', items: [{ id: 'x', label: { metric: true }, data: { metric: 'bsk.pageviews', window: 'todaySoFar' }, display: { as: 'number' } }] }] }
-  it('accepts captionMode inline/compact and a boolean showUpdated', () => {
+  it("accepts captionMode inline/compact and showUpdated true, 'header' or 'footer'", () => {
+    for (const showUpdated of [true, false, 'header', 'footer'] as const) expect(validateCard({ ...base, showUpdated })).toEqual([])
     expect(validateCard({ ...base, showUpdated: true, sections: [{ ...base.sections[0], items: [{ ...base.sections[0].items[0], captionMode: 'compact' }] }] })).toEqual([])
     expect(validateCard({ ...base, sections: [{ ...base.sections[0], items: [{ ...base.sections[0].items[0], captionMode: 'inline' }] }] })).toEqual([])
   })
   it('rejects anything else', () => {
-    expect(validateCard({ ...base, showUpdated: 'yes' } as unknown as CardSpec)).toContain('card: showUpdated must be a boolean')
+    expect(validateCard({ ...base, showUpdated: 'yes' } as unknown as CardSpec)).toContain("card: showUpdated must be a boolean, 'header' or 'footer'")
     expect(validateCard({ ...base, sections: [{ ...base.sections[0], items: [{ ...base.sections[0].items[0], captionMode: 'tooltip' }] }] } as unknown as CardSpec).join('\n')).toMatch(/captionMode must be 'inline' or 'compact'/)
   })
 })

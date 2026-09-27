@@ -2,19 +2,28 @@
 // The metric-card family's entry point (ADR 0003 section 1, "Rendering"): resolves a widget's
 // `card: CardRef` — `{ preset }` through the preset registry, or an inline `{ spec }` — into a
 // CardSpec, expands its top-level `repeat` (one card per campaign/pop-up/window/reading, or a
-// single unrepeated instance for something like the KPI tiles), and renders each instance's
-// title, badge and sections. A repeated card gets the scorecard's bordered, clickable box
-// (matching OverviewWidgetBody.vue's `.scorecard-card` look); an unrepeated card (KPI tiles)
-// renders its sections directly, since the tiles themselves are the boxed elements.
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useMetrics, type MetricRequestSpec } from '../../composables/useMetrics'
+// single unrepeated instance such as the KPI tiles), and renders each through
+// MetricCardInstance. A repeated card gets the scorecard's bordered box; an unrepeated one
+// renders its sections directly, since its tiles are the boxes.
+//
+// It also owns what belongs to the whole card:
+// - the ET day. `todayEt` follows a clock (or the `nowMs` seam), not the first render: when the
+//   day changes, the body remounts (repeats such as "flighting today" re-expand, every item
+//   rebuilds its request), and "today so far" values are re-requested (the day is part of the
+//   client cache key, useMetrics' `epoch`);
+// - freshness (CardSpec.showUpdated): "Updated Xs ago" from the card's latest successful load
+//   plus a reload control, in the header (default) or a footer;
+// - errors: while any value on the card failed to load, "Updated" gives way to an error line
+//   with Retry, whether or not showUpdated is set.
+import { computed, effectScope, onBeforeUnmount, onMounted, onScopeDispose, ref, shallowRef, watch, type EffectScope } from 'vue'
+import { useMetrics, type MetricRequestSpec, type UseMetrics } from '../../composables/useMetrics'
 import { noteRawText } from '../../lib/notes'
-import { badgeViewModel, resolveLabelTokens } from '../../lib/metrics/render'
+import { resolveLabelTokens } from '../../lib/metrics/render'
 import { presetById } from '../../lib/metrics/presets'
-import { buildRequestSpec, flattenSectionItems, ROOT_SCOPE, resolveRepeat, scopeField, todayEtFrom, type ReadingScope, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
+import { buildRequestSpec, flattenSectionItems, ROOT_SCOPE, resolveRepeat, todayEtFrom, type ReadingScope, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
 import type { CardRef, CardSpec, MetricsContext } from '../../lib/metrics/types'
+import MetricCardInstance from './MetricCardInstance.vue'
 import MetricLabel from './MetricLabel.vue'
-import MetricSection from './MetricSection.vue'
 
 const props = defineProps<{
   cardRef: CardRef
@@ -26,28 +35,26 @@ const props = defineProps<{
 const emit = defineEmits<{ 'open-campaigns': [] }>()
 
 const spec = computed<CardSpec | null>(() => ('preset' in props.cardRef ? (presetById(props.cardRef.preset) ?? null) : props.cardRef.spec))
-const todayEt = computed(() => todayEtFrom(props.nowMs ?? Date.now()))
+
+// ── The clock: freshness text and the ET day ────────────────────────────────────────────────
+const clock = ref(Date.now())
+let ticker: ReturnType<typeof setInterval> | null = null
+onMounted(() => {
+  ticker = setInterval(() => (clock.value = Date.now()), 15_000)
+})
+onBeforeUnmount(() => {
+  if (ticker) clearInterval(ticker)
+})
+const nowMs = computed(() => props.nowMs ?? clock.value)
+const todayEt = computed(() => todayEtFrom(nowMs.value))
 const ctx = computed<RepeatContext>(() => ({ todayEt: todayEt.value, readings: props.readings }))
 const instances = computed<ScopeInstance[]>(() => (spec.value ? resolveRepeat(spec.value.repeat, ctx.value) : []))
 
-function titleTokens(scope: ScopeInstance) {
-  return spec.value?.title !== undefined ? resolveLabelTokens(spec.value.title, scope, undefined, todayEt.value) : []
-}
-function badgeInfo(scope: ScopeInstance) {
-  const b = spec.value?.badge
-  if (!b || !('field' in b.data)) return null
-  return badgeViewModel(b.display, scopeField(scope, b.data.field, todayEt.value))
-}
-function onCardClick() {
-  if (spec.value?.link === 'campaigns-page') emit('open-campaigns')
-}
-
-// ── Freshness footer (CardSpec.showUpdated) and reload ──────────────────────────────────────
+// ── Card-level requests (freshness, errors, reload) ─────────────────────────────────────────
 // The card holds its own reference on every request its items make (content-equal requests
-// share one entry, so this costs no extra fetch): that gives it the latest successful load for
-// "Updated Xs ago", and one reload() that refetches the whole card fresh. Collected once, at
-// setup, like every other useMetrics request (see useMetrics.ts, effect-scope discipline).
-const cardMetrics = useMetrics(() => props.context)
+// share one entry, so this costs no fetch). The list depends on the day (a "flighting today"
+// repeat), so it lives in its own effect scope, rebuilt when the day changes and stopped with
+// the component — nothing reactive is ever created loose in a callback.
 function cardRequestSpecs(): MetricRequestSpec[] {
   const s = spec.value
   if (!s) return []
@@ -66,71 +73,96 @@ function cardRequestSpecs(): MetricRequestSpec[] {
   }
   return out
 }
-for (const r of cardRequestSpecs()) cardMetrics.request(r)
-/** Refetches every value on this card, bypassing the server cache (ChartCard's reload
- * control calls this through the component ref too). */
+const cardMetrics = shallowRef<UseMetrics | null>(null)
+let dayScope: EffectScope | null = null
+function buildCardRequests() {
+  dayScope?.stop()
+  dayScope = effectScope(true)
+  cardMetrics.value = dayScope.run(() => {
+    const m = useMetrics(() => props.context, () => todayEt.value)
+    for (const r of cardRequestSpecs()) m.request(r)
+    return m
+  })!
+}
+buildCardRequests()
+watch(todayEt, buildCardRequests)
+onScopeDispose(() => dayScope?.stop())
+
+/** Refetches every value on this card, bypassing the server cache (ChartCard's reload control
+ * calls this through the component ref too). */
 function reload() {
-  cardMetrics.reloadAll()
+  cardMetrics.value?.reloadAll()
 }
 defineExpose({ reload })
 
-const nowTick = ref(Date.now())
-let ticker: ReturnType<typeof setInterval> | null = null
-onMounted(() => {
-  if (spec.value?.showUpdated) ticker = setInterval(() => (nowTick.value = Date.now()), 5_000)
-})
-onBeforeUnmount(() => {
-  if (ticker) clearInterval(ticker)
+const hasError = computed(() => !!cardMetrics.value?.hasError.value)
+const updatedPlacement = computed<'header' | 'footer' | null>(() => {
+  const v = spec.value?.showUpdated
+  return v === true ? 'header' : v === 'header' || v === 'footer' ? v : null
 })
 const updatedText = computed(() => {
-  const at = cardMetrics.lastUpdated.value
+  const at = cardMetrics.value?.lastUpdated.value
   if (at == null) return ''
-  const s = Math.max(0, Math.round((Math.max(nowTick.value, at) - at) / 1000))
+  // Freshness is wall-clock time (the nowMs seam only pins the ET day).
+  const s = Math.max(0, Math.round((Math.max(clock.value, at) - at) / 1000))
   if (s < 5) return noteRawText('label.card.updatedJustNow')
   if (s < 60) return noteRawText('label.card.updatedSecondsAgo', { n: s })
   return noteRawText('label.card.updatedMinutesAgo', { n: Math.round(s / 60) })
 })
-const refreshLabel = noteRawText('label.card.refresh')
+const L = {
+  refresh: noteRawText('label.card.refresh'),
+  failed: noteRawText('label.card.loadFailed'),
+  retry: noteRawText('label.card.retry'),
+}
+/** Where the status line goes: an unrepeated card puts it in its own header row (top-right,
+ * above the tiles, where the old KPI panel had it); a repeated card above its grid. */
+const statusInInstanceHeader = computed(() => !spec.value?.repeat && (hasError.value || updatedPlacement.value === 'header'))
+const statusAboveGrid = computed(() => !!spec.value?.repeat && (hasError.value || updatedPlacement.value === 'header'))
 </script>
 
 <template>
   <p v-if="!spec" class="metric-card-error">Unknown card{{ 'preset' in cardRef ? ` preset "${cardRef.preset}"` : '' }}.</p>
-
-  <!-- Repeated: N bordered, clickable cards in a grid (the scorecard shape). -->
-  <div v-else-if="spec.repeat" class="metric-card-grid" :style="{ '--mc-min-width': `${spec.minWidth ?? 230}px` }">
-    <div
-      v-for="(scope, i) in instances"
-      :key="i"
-      class="metric-card"
-      :class="{ clickable: spec.link === 'campaigns-page' }"
-      :role="spec.link === 'campaigns-page' ? 'button' : undefined"
-      :tabindex="spec.link === 'campaigns-page' ? 0 : undefined"
-      @click="onCardClick"
-      @keyup.enter="onCardClick"
-    >
-      <div v-if="titleTokens(scope).length || badgeInfo(scope)" class="mc-head">
-        <span class="mc-title"><MetricLabel :tokens="titleTokens(scope)" /></span>
-        <span v-if="badgeInfo(scope)" class="mc-badge" :class="`tone-${badgeInfo(scope)!.tone}`">{{ badgeInfo(scope)!.primary }}</span>
-      </div>
-      <MetricSection v-for="(section, si) in spec.sections" :key="si" :section="section" :outer-scope="scope" :ctx="ctx" :context="context" />
+  <div v-else class="metric-card-root">
+    <div v-if="statusAboveGrid" class="mc-status-row">
+      <span class="mc-status">
+        <template v-if="hasError"
+          ><span class="mc-error" role="status">{{ L.failed }}</span> <button type="button" class="mc-retry" @click="reload">{{ L.retry }}</button></template
+        >
+        <template v-else>
+          <span v-if="updatedText" class="mc-updated">{{ updatedText }}</span>
+          <button type="button" class="mc-reload" :title="L.refresh" :aria-label="L.refresh" @click="reload">↻</button>
+        </template>
+      </span>
     </div>
-    <p v-if="!instances.length && spec.repeat.empty" class="metric-card-empty">
-      <MetricLabel :tokens="resolveLabelTokens(spec.repeat.empty.label, ROOT_SCOPE, undefined, todayEt)" />
-      <MetricLabel :tokens="resolveLabelTokens(spec.repeat.empty.text, ROOT_SCOPE, undefined, todayEt)" />
-    </p>
-  </div>
 
-  <!-- Unrepeated: one card, no box (e.g. the KPI tiles — the tiles themselves are the boxes). -->
-  <div v-else class="metric-card-plain">
-    <div v-if="titleTokens(ROOT_SCOPE).length || badgeInfo(ROOT_SCOPE)" class="mc-head">
-      <span class="mc-title"><MetricLabel :tokens="titleTokens(ROOT_SCOPE)" /></span>
-      <span v-if="badgeInfo(ROOT_SCOPE)" class="mc-badge" :class="`tone-${badgeInfo(ROOT_SCOPE)!.tone}`">{{ badgeInfo(ROOT_SCOPE)!.primary }}</span>
+    <!-- Keyed on the ET day: a new day remounts the body, so every repeat and request rebuilds. -->
+    <div v-if="spec.repeat" :key="todayEt" class="metric-card-grid" :style="{ '--mc-min-width': `${spec.minWidth ?? 230}px` }">
+      <MetricCardInstance v-for="(scope, i) in instances" :key="i" :spec="spec" :scope="scope" :ctx="ctx" :context="context" :boxed="true" @open="emit('open-campaigns')" />
+      <p v-if="!instances.length && spec.repeat.empty" class="metric-card-empty">
+        <MetricLabel :tokens="resolveLabelTokens(spec.repeat.empty.label, ROOT_SCOPE, undefined, todayEt)" />
+        <MetricLabel :tokens="resolveLabelTokens(spec.repeat.empty.text, ROOT_SCOPE, undefined, todayEt)" />
+      </p>
     </div>
-    <MetricSection v-for="(section, si) in spec.sections" :key="si" :section="section" :outer-scope="ROOT_SCOPE" :ctx="ctx" :context="context" />
-  </div>
-  <div v-if="spec?.showUpdated" class="mc-footer">
-    <span v-if="updatedText" class="mc-updated mono">{{ updatedText }}</span>
-    <button type="button" class="mc-reload" :title="refreshLabel" :aria-label="refreshLabel" @click="reload">↻</button>
+    <MetricCardInstance v-else :key="todayEt" class="metric-card-plain" :spec="spec" :scope="ROOT_SCOPE" :ctx="ctx" :context="context" :boxed="false" @open="emit('open-campaigns')">
+      <template v-if="statusInInstanceHeader" #status>
+        <span class="mc-status">
+          <template v-if="hasError"
+            ><span class="mc-error" role="status">{{ L.failed }}</span> <button type="button" class="mc-retry" @click="reload">{{ L.retry }}</button></template
+          >
+          <template v-else>
+            <span v-if="updatedText" class="mc-updated">{{ updatedText }}</span>
+            <button type="button" class="mc-reload" :title="L.refresh" :aria-label="L.refresh" @click="reload">↻</button>
+          </template>
+        </span>
+      </template>
+    </MetricCardInstance>
+
+    <div v-if="updatedPlacement === 'footer' && !hasError" class="mc-status-row mc-footer">
+      <span class="mc-status">
+        <span v-if="updatedText" class="mc-updated">{{ updatedText }}</span>
+        <button type="button" class="mc-reload" :title="L.refresh" :aria-label="L.refresh" @click="reload">↻</button>
+      </span>
+    </div>
   </div>
 </template>
 
@@ -144,56 +176,40 @@ const refreshLabel = noteRawText('label.card.refresh')
   grid-template-columns: repeat(auto-fit, minmax(var(--mc-min-width, 230px), 1fr));
   gap: 14px;
 }
-.metric-card {
-  border: 1px solid rgb(var(--line));
-  border-radius: 12px;
-  padding: 12px 14px;
-  background: rgb(var(--surface));
-}
-.metric-card.clickable {
-  cursor: pointer;
-}
-.metric-card.clickable:hover {
-  border-color: rgb(var(--amber));
-}
 .metric-card-empty {
   font-size: 11.5px;
   color: rgb(var(--ink-3));
 }
-.mc-head {
+.mc-status-row {
   display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 6px;
+  justify-content: flex-end;
   margin-bottom: 8px;
 }
-.mc-title {
-  font-weight: 600;
-  font-size: 12.5px;
-}
-.mc-badge {
-  font-size: 10px;
-  text-transform: uppercase;
-  color: rgb(var(--ink-3));
-}
-.mc-badge.tone-live {
-  color: rgb(var(--amber-hover));
-}
-.mc-badge.tone-warn {
-  color: #bc4749;
-}
-/* The freshness footer: "Updated Xs ago" and the reload control, right-aligned, quiet. */
 .mc-footer {
-  display: flex;
+  margin: 8px 0 0;
+}
+.mc-status {
+  display: inline-flex;
   align-items: center;
-  justify-content: flex-end;
   gap: 8px;
-  margin-top: 8px;
 }
 .mc-updated {
   font-size: 11px;
   color: rgb(var(--ink-3));
   font-family: 'JetBrains Mono', monospace;
+}
+.mc-error {
+  font-size: 11px;
+  color: #bc4749;
+}
+.mc-retry {
+  border: 1px solid rgb(var(--line));
+  background: transparent;
+  color: rgb(var(--ink-2));
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 7px;
+  cursor: pointer;
 }
 .mc-reload {
   border: none;
@@ -204,7 +220,8 @@ const refreshLabel = noteRawText('label.card.refresh')
   border-radius: 7px;
   cursor: pointer;
 }
-.mc-reload:hover {
+.mc-reload:hover,
+.mc-retry:hover {
   background: rgb(var(--sunken));
   color: rgb(var(--ink));
 }

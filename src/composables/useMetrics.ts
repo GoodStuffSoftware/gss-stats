@@ -303,6 +303,9 @@ export interface UseMetrics {
   /** The latest successful load among this instance's current requests (epoch ms), or null
    * while none has loaded — MetricCard's "Updated Xs ago". */
   lastUpdated: Readonly<Ref<number | null>>
+  /** True while any current request's value is an error (a failed batch, or the server's
+   * per-request error) — MetricCard then says so instead of "Updated just now". */
+  hasError: Readonly<Ref<boolean>>
 }
 
 interface Consumer {
@@ -314,12 +317,16 @@ interface Consumer {
   cKey: string
 }
 
-export function useMetrics(rawContext?: MaybeRefOrGetter<MetricsContext | undefined>): UseMetrics {
+/** `epoch` is a client-only part of the cache key, never sent: MetricCard passes today's ET
+ * date, so at midnight every "today so far" value is re-requested instead of being served
+ * from yesterday's entry (the request itself is identical across days). */
+export function useMetrics(rawContext?: MaybeRefOrGetter<MetricsContext | undefined>, rawEpoch?: MaybeRefOrGetter<string | undefined>): UseMetrics {
   // Normalized ONCE per context value, so the context key used for caching/batching and the
   // context object actually sent in the POST body can never disagree with each other.
   const readContext = () => {
     const context = normalizeContext(toValue(rawContext))
-    return { context, ctxKey: contextKey(context) }
+    const epoch = toValue(rawEpoch)
+    return { context, ctxKey: epoch ? `${contextKey(context)}@${epoch}` : contextKey(context) }
   }
   let current = readContext()
   const scope = getCurrentScope()
@@ -384,6 +391,8 @@ export function useMetrics(rawContext?: MaybeRefOrGetter<MetricsContext | undefi
     return max
   })
 
+  const hasError = computed(() => consumers.value.some((c) => c.entry.value.value.value?.status === 'error'))
+
   return {
     request: (spec) => {
       const c = addConsumer(spec)
@@ -392,6 +401,7 @@ export function useMetrics(rawContext?: MaybeRefOrGetter<MetricsContext | undefi
     reload,
     reloadAll: () => reload(consumers.value.map((c) => c.spec)),
     lastUpdated,
+    hasError,
   }
 }
 

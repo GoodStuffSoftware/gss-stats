@@ -229,4 +229,50 @@ describe('useMetrics — freshness', () => {
     expect(m.lastUpdated.value).toBeGreaterThan(first!)
     scope.stop()
   })
+
+  it('hasError is true while any current value failed, and clears when a retry succeeds', async () => {
+    const { fn, calls } = controllableFetch()
+    vi.stubGlobal('fetch', fn)
+    const scope = effectScope()
+    const m = scope.run(() => useMetrics(A))!
+    scope.run(() => m.request(spec))
+    await vi.advanceTimersByTimeAsync(15)
+    calls[0].respond({ 'bsk.pageviews': 1 })
+    await settle()
+    expect(m.hasError.value).toBe(false)
+    m.reloadAll()
+    await vi.advanceTimersByTimeAsync(15)
+    calls[1].fail()
+    await settle()
+    expect(m.hasError.value).toBe(true)
+    m.reloadAll()
+    await vi.advanceTimersByTimeAsync(15)
+    calls[2].respond({ 'bsk.pageviews': 2 })
+    await settle()
+    expect(m.hasError.value).toBe(false)
+    scope.stop()
+  })
+})
+
+describe('useMetrics — the epoch (client-only cache key part)', () => {
+  it('a new epoch re-requests the identical request, and the epoch is never sent', async () => {
+    const { fn, calls } = controllableFetch()
+    vi.stubGlobal('fetch', fn)
+    const day = ref('2026-10-02')
+    const scope = effectScope()
+    const pv = scope.run(() => useMetrics(undefined, day).request({ metric: 'bsk.pageviews', window: 'todaySoFar' }))!
+    await vi.advanceTimersByTimeAsync(15)
+    calls[0].respond({ 'bsk.pageviews': 100 })
+    await settle()
+    expect(pv.value?.value).toBe(100)
+    day.value = '2026-10-03'
+    expect(pv.value).toBeUndefined() // never yesterday's value under today's key
+    await vi.advanceTimersByTimeAsync(15)
+    expect(calls).toHaveLength(2)
+    expect(JSON.stringify(calls[1].body)).not.toContain('2026-10-03')
+    calls[1].respond({ 'bsk.pageviews': 3 })
+    await settle()
+    expect(pv.value?.value).toBe(3)
+    scope.stop()
+  })
 })

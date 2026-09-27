@@ -4,11 +4,10 @@
 // compact "Label: value" chip, like the funnel pills), or tile (label/number/delta stacked,
 // like the KPI tiles). The 'table' layout doesn't use this component — see
 // MetricTableCell.vue, which is a column cell, not a labeled row/pill/tile.
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useMetricItemViewModel } from '../../composables/useMetricItem'
 import type { ScopeInstance } from '../../lib/metrics/scope'
 import type { MetricItem as MetricItemSpec, MetricsContext } from '../../lib/metrics/types'
-import { noteRawText } from '../../lib/notes'
 import MetricLabel from './MetricLabel.vue'
 
 const props = defineProps<{
@@ -33,38 +32,17 @@ const plainLabel = computed(() => vm.value.labelTokens.map((t) => t.value).join(
 /** "Tagged arrivals: 353, vs yesterday +12 (+4%)" — one accessible name for a row or tile. */
 const ariaLabel = computed(() => [`${plainLabel.value}: ${vm.value.primary}`, ...vm.value.deltaLines.map((d) => d.text)].join(', '))
 
-// captionMode 'compact': the caption and the value's own notes sit behind a small toggle next
-// to the label, collapsed by default (hover/focus shows them as a tooltip), so a card keeps
-// its compact look. 'inline' (the default) keeps them as a line under the value.
-const compact = computed(() => props.item.captionMode === 'compact')
-const notesOpen = ref(false)
-const plainCaption = computed(() => vm.value.captionTokens.map((t) => t.value).join(''))
-const showCaption = computed(() => vm.value.captionTokens.length > 0 && (!compact.value || notesOpen.value))
-const notesLabel = noteRawText('label.card.notes')
-function toggleNotes(e: Event) {
-  e.stopPropagation() // a scorecard card is itself clickable
-  notesOpen.value = !notesOpen.value
-}
+// captionMode 'compact': the item shows no caption of its own; MetricCard lists it, with every
+// other compact caption, behind the card's one collapsed "Notes" toggle (the clean look).
+// 'inline' (the default) keeps the caption as a line under the value.
+const showCaption = computed(() => vm.value.captionTokens.length > 0 && props.item.captionMode !== 'compact')
 </script>
 
 <template>
   <div v-if="vm.visible" class="metric-item" :data-frame="frame">
     <template v-if="frame === 'row'">
       <div class="mi-row" role="group" :aria-label="ariaLabel">
-        <span class="mi-label"
-          ><MetricLabel :tokens="vm.labelTokens" /><button
-            v-if="compact && vm.captionTokens.length"
-            type="button"
-            class="mi-notes-btn"
-            :title="plainCaption"
-            :aria-label="notesLabel"
-            :aria-expanded="notesOpen"
-            @click="toggleNotes"
-            @keyup.enter.stop
-          >
-            i
-          </button></span
-        >
+        <span class="mi-label"><MetricLabel :tokens="vm.labelTokens" /></span>
         <span class="mi-value mono" :class="{ muted: vm.muted }">
           {{ vm.primary }}
           <span v-for="(d, i) in vm.deltaLines" :key="i" class="mi-delta" :class="d.cls">{{ d.text }}</span>
@@ -75,41 +53,19 @@ function toggleNotes(e: Event) {
     </template>
 
     <template v-else-if="frame === 'pill'">
-      <span class="mi-pill" :title="compact && plainCaption ? `${plainLabel} — ${plainCaption}` : plainLabel"
-        ><MetricLabel :tokens="vm.labelTokens" />: {{ vm.primary
-        }}<button
-          v-if="compact && vm.captionTokens.length"
-          type="button"
-          class="mi-notes-btn"
-          :aria-label="notesLabel"
-          :aria-expanded="notesOpen"
-          @click="toggleNotes"
-          @keyup.enter.stop
-        >
-          i
-        </button></span
-      >
+      <span class="mi-pill" :title="plainLabel"><MetricLabel :tokens="vm.labelTokens" />: {{ vm.primary }}</span>
       <span v-if="showCaption" class="mi-pill-caption"><MetricLabel :tokens="vm.captionTokens" /></span>
     </template>
 
     <template v-else>
       <div class="mi-tile" :class="item.display.as === 'badge' ? `tone-${vm.badgeTone}` : ''" role="group" :aria-label="ariaLabel">
-        <div class="mi-tile-head">
-          <div class="mi-tile-label" :title="plainLabel"><MetricLabel :tokens="vm.labelTokens" /></div>
-          <button
-            v-if="compact && vm.captionTokens.length"
-            type="button"
-            class="mi-notes-btn"
-            :title="plainCaption"
-            :aria-label="notesLabel"
-            :aria-expanded="notesOpen"
-            @click="toggleNotes"
-            @keyup.enter.stop
-          >
-            i
-          </button>
-        </div>
-        <div class="mi-tile-num" :class="{ muted: vm.muted }">{{ vm.primary }}</div>
+        <div class="mi-tile-label" :title="plainLabel"><MetricLabel :tokens="vm.labelTokens" /></div>
+        <!-- A rate: big, with its (n/d) as a small line under it (the old KPI tile's look). -->
+        <template v-if="vm.split">
+          <div class="mi-tile-num" :class="{ muted: vm.muted }">{{ vm.split.main }}</div>
+          <div class="mi-tile-sub mono">{{ vm.split.sub }}</div>
+        </template>
+        <div v-else class="mi-tile-num" :class="{ muted: vm.muted }">{{ vm.primary }}</div>
         <div v-for="(d, i) in vm.deltaLines" :key="i" class="mi-tile-delta" :class="d.cls">{{ d.text }}</div>
         <div v-if="item.display.as === 'bar'" class="mi-bar-track"><div class="mi-bar-fill" :style="{ width: barPct + '%' }" /></div>
         <p v-if="showCaption" class="mi-tile-caption"><MetricLabel :tokens="vm.captionTokens" /></p>
@@ -145,6 +101,12 @@ function toggleNotes(e: Event) {
 }
 .mi-delta.down {
   color: #bc4749;
+}
+/* A pill's wrapper is a flex column, so the pill is blockified and adds no line box: pill rows
+   keep the old scorecard's 4px spacing instead of a full line of height each. */
+.metric-item[data-frame='pill'] {
+  display: flex;
+  flex-direction: column;
 }
 .mi-pill {
   font-size: 9.5px;
@@ -210,40 +172,16 @@ function toggleNotes(e: Event) {
   background: rgb(var(--amber-hover));
   border-radius: 3px;
 }
-/* The compact-notes toggle (captionMode 'compact'): a small circled "i" next to the label. */
-.mi-notes-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 13px;
-  height: 13px;
-  margin-left: 4px;
-  padding: 0;
-  border: 1px solid rgb(var(--line));
-  border-radius: 50%;
-  background: transparent;
-  color: rgb(var(--ink-3));
-  font: italic 600 9px/1 Inter, system-ui, sans-serif;
-  cursor: pointer;
-  vertical-align: middle;
-  flex: none;
-}
-.mi-notes-btn:hover,
-.mi-notes-btn[aria-expanded='true'] {
-  color: rgb(var(--ink));
-  border-color: rgb(var(--ink-3));
-}
-.mi-tile-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 4px;
-}
 .mi-pill-caption {
   display: block;
   font-size: 9.5px;
   color: rgb(var(--ink-3));
   margin: 2px 0 0;
+}
+.mi-tile-sub {
+  font-size: 10.5px;
+  color: rgb(var(--ink-3));
+  margin-top: 1px;
 }
 .mi-tile-num.muted {
   font-size: 12px;

@@ -11,8 +11,8 @@
 // Every label is a notes-registry id — the metric's own (`{ metric: true }`) or an explicit
 // `{ note }` where the bespoke body used a different name (the funnel pills) — never a literal.
 // Caveats a value carries (arrivals floor, install fix, counted-from, still-arriving) and the
-// items' own captions use captionMode 'compact': a notes toggle next to the label, collapsed by
-// default, so the cards keep their compact look.
+// items' own captions use captionMode 'compact': no caption line on the item; the card lists
+// them behind its one collapsed "Notes" toggle (MetricCardInstance), the owner's clean look.
 
 import type { CardSpec, Display, MetricItem } from './types'
 
@@ -67,7 +67,7 @@ const TODAY: Display = { as: 'number', deltas: ['yesterday', 'avg7'] }
  * arrivals tile repeats per campaign flighting today, with a placeholder tile when none is. */
 export const BSK_KPIS: CardSpec = {
   v: 1,
-  showUpdated: true,
+  showUpdated: 'header',
   sections: [
     {
       layout: 'tiles',

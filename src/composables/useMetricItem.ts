@@ -12,7 +12,8 @@ import { itemViewModel, type ItemViewModel } from '../lib/metrics/render'
 import type { MetricItem, MetricsContext } from '../lib/metrics/types'
 
 export function useMetricItemViewModel(item: MetricItem, scope: ScopeInstance, context: MaybeRefOrGetter<MetricsContext | undefined>, todayEt: string): ComputedRef<ItemViewModel> {
-  const { request } = useMetrics(context)
+  // todayEt is also the cache epoch: MetricCard remounts its body when the ET day changes.
+  const { request } = useMetrics(context, todayEt)
   const spec = buildRequestSpec(item, scope)
   const valueRef = spec ? request(spec) : undefined
   return computed(() => itemViewModel(item, valueRef?.value, scope, { todayEt }))
