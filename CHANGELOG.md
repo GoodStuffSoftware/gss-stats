@@ -6,6 +6,14 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **The retest ads routine's release-health check now runs every morning read, at any hour.**
+  The 23:15 ET backstop entry is folded into the single daily morning read (moved 08:00 → 06:00
+  ET); the clock-based "01:00-12:00 ET quiet window" that used to suppress the check is retired,
+  since it would otherwise silently suppress release health forever at whatever hour the one
+  remaining run is scheduled. Parent/child maturity is unaffected: it was already enforced by an
+  independent 24h event-age cutoff, not the clock.
+
 ## [0.12.1] — 2026-09-27
 
 ### Fixed

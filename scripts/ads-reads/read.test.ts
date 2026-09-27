@@ -235,10 +235,18 @@ describe('morning-read: quiet days, the hard cap and release health', () => {
     expect(formatMorningReport(r)).toMatch(/at most 1 campaign sign-up \(tagged auth successes 1; new prod accounts sitewide in the window 1\)/)
     expect(r.notify.text).not.toMatch(/verified/i)
   })
-  it('release health is never evaluated at 08:00 ET', async () => {
+  it('release health evaluates at 08:00 ET (the quiet-window gate was retired 2026-09-27: one daily run, no time-of-day gate)', async () => {
     const r = await runMorningRead(fixtureDeps(base(), true), opts)
-    expect(r.releaseHealth.evaluated).toBe(false)
-    expect(r.releaseHealth.reason).toMatch(/quiet window/)
+    expect(r.releaseHealth.evaluated).toBe(true)
+    expect(r.releaseHealth.reason).not.toMatch(/quiet window/)
+    expect(r.releaseHealth.results).not.toBeNull()
+  })
+  it('release health also evaluates at 06:00 ET, the new single daily run time (still inside the old [1,12) quiet window)', async () => {
+    const fx = base()
+    fx.now = '2026-09-30T10:05:00Z' // 06:05 ET
+    const r = await runMorningRead(fixtureDeps(fx, true), opts)
+    expect(r.releaseHealth.evaluated).toBe(true)
+    expect(r.releaseHealth.reason).not.toMatch(/quiet window/)
   })
   it('the evening backstop evaluates on a day that served ads; 2 post-fix install accepts are only a watch', async () => {
     const fx = base()

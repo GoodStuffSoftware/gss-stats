@@ -674,18 +674,23 @@ export function playReturnStatus(stats: readonly ReturnSiteStat[], nowMs: number
 }
 
 // ── Release health: missing child of a non-zero parent (coordinator addendum) ────────────
-export const HEALTH_QUIET_WINDOW_ET: readonly [number, number] = [1, 12] // [start, end) ET hours
+// RETIRED 2026-09-27 (coordinator decision: fold the 23:15 ET backstop into a single daily
+// morning read): this module used to export HEALTH_QUIET_WINDOW_ET ([1, 12), ET hours) and
+// releaseHealthGate(), which refused to evaluate release health at all between 01:00 and
+// 12:00 ET so an 08:00 morning run would defer to a separate 23:15 ET backstop entry. With
+// only one daily run left, that clock gate does not protect data quality — parent/child
+// maturity is already enforced independently by the parentAgeHours cutoff in releaseHealth()
+// (scripts/ads-reads/read.ts), which keys off event timestamps, not the clock the run happens
+// to execute at — it would just silently suppress release health forever at whatever single
+// hour the run is scheduled for. The run time itself moved once (08:00 -> 06:00) during this
+// same change; a clock-based gate would need re-tuning every time it moves again, and a miss
+// would be a silent, permanent loss of release-health alerting during a live $100-capped
+// flight. Removed rather than re-tuned. etHourOf() stays: a general ET utility, still
+// exercised by src/lib/lazyFormatters.test.ts and available for reporting.
 let etHourOfFmt: Intl.DateTimeFormat | null = null
 export function etHourOf(ms: number): number {
   etHourOfFmt ??= new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hourCycle: 'h23' })
   return Number(etHourOfFmt.format(new Date(ms))) % 24
-}
-/** Never evaluated between 01:00 and 12:00 ET. */
-export function releaseHealthGate(nowMs: number): { evaluate: boolean; reason: string } {
-  const h = etHourOf(nowMs)
-  const [start, end] = HEALTH_QUIET_WINDOW_ET
-  if (h >= start && h < end) return { evaluate: false, reason: `not evaluated: ${String(h).padStart(2, '0')}:xx ET is inside the 01:00-12:00 ET quiet window` }
-  return { evaluate: true, reason: `evaluated at ${String(h).padStart(2, '0')}:xx ET` }
 }
 
 export interface HealthPair {
