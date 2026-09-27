@@ -63,7 +63,11 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   cards, presets `campaign-funnel`, `campaign-country` — a table with the funnel steps as rows
   and US / CA / Other as columns, each cell a campaign metric with the registry's optional
   `country` param — `campaign-cost` and `campaign-returns` — d0 and each return window's rate,
-  dN over d0 with its n/d, as bars side by side; the funnel card also carries the signed-out upsell
+  dN over d0 with its n/d, as bars side by side. "Arrivals by ET hour of day" and "Daily
+  arrivals by flight day" are standard geo charts over the same tagged arrivals (filter
+  `arrival` = tagged): a breakdown bar of `hourEt` × `campaignFlight`, and a line of
+  `flightDay` × `campaignFlight` with `cumulative` running totals dashed on a right-hand axis.
+  The funnel card also carries the signed-out upsell
   fix's pre/post-fix segment table, which appears on its own once `UPSELL_SIGNEDOUT_FIX_AT` is
   set; the other panels are dataset `campaigns`, see
   [`src/components/widgets/CampaignsWidgetBody.vue`](src/components/widgets/CampaignsWidgetBody.vue))
@@ -74,7 +78,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
 - **Movable / composable charts** — drag the header, resize from the corner; add /
   edit / duplicate / delete charts of any type: stat, bar, horizontal bar, stacked
   bar, **breakdown bar** (one dimension on the axis × another as the series, grouped or
-  stacked — `Widget.barMode`), line, area, doughnut, nested doughnut, pie, table, a geo point
+  stacked — `Widget.barMode`), line (over a non-date axis, a breakdown draws one line per
+  value, and `Widget.cumulative` adds each one's running total dashed on a right-hand axis),
+  area, doughnut, nested doughnut, pie, table, a geo point
   map, and a note/text tile. Zoom is a single click, always available on every chart; its other
   modification chrome (edit/remove/drag/resize) tucks away until you hover that chart
   — or tap that chart's own reveal icon on touch, which has no hover.
@@ -338,7 +344,11 @@ malformed rows as `(other)`); **campaign flight** (`campaignFlight`, decided by 
 `campaignAttributionClause` + `EXCLUSIONS` the campaigns endpoint uses); **arrival** (`arrival`:
 a first-ever beacon, `tagged` when a flight claims it, else `untagged`); and **key event**
 (`keyEvent`: `auth-success` base rows, `install` from the install fix on, `raw-install-signal`,
-`game-complete`). A chart grouping by
+`game-complete`); the **ET hour of day** (`hourEt`, `0`-`23`, DST-aware like `dateEt`); and the
+**campaign flight day** (`flightDay`: `1` for the first ET day of the flight the row is
+attributed to, as `campaignFlight` decides it, blank outside that flight's serving days). A
+chart on `hourEt` shows all 24 hours, and one on `flightDay` by `campaignFlight` every day up
+to the longest of its flights, so an empty bucket still has its place. A chart grouping by
 one of the pop-up or completion dimensions counts those event rows without needing "Include
 event beacons" (the standing exclusion would remove every row it describes), and never shows
 unrelated rows as a "(none)" bar. Every derived dimension except `date` can be one of several

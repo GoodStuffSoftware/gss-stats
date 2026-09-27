@@ -101,6 +101,8 @@ export const GEO_DIMENSIONS: { key: string; label: string }[] = [
   { key: 'campaignFlight', label: 'Campaign flight (attributed)' },
   { key: 'arrival', label: 'Arrival (first visit): tagged / untagged' },
   { key: 'keyEvent', label: 'Key event (sign-in / install / raw install / completion)' },
+  { key: 'hourEt', label: 'Hour of day (ET)' },
+  { key: 'flightDay', label: 'Campaign flight day (day 1 = first day)' },
   { key: 'date', label: 'Date (trend)' },
   { key: 'dateEt', label: 'Date (trend, ET)' },
 ]
@@ -152,7 +154,7 @@ export const CHART_TYPES: { value: ChartType; label: string; needsDimension: boo
   { value: 'hbar', label: 'Bar (horizontal)', needsDimension: true, allowsBreakdown: false },
   { value: 'stackedBar', label: 'Stacked bar', needsDimension: true, allowsBreakdown: true },
   { value: 'breakdownBar', label: 'Breakdown bar (axis × series, grouped or stacked)', needsDimension: true, allowsBreakdown: true },
-  { value: 'line', label: 'Line', needsDimension: true, allowsBreakdown: false },
+  { value: 'line', label: 'Line (a breakdown draws one line per value)', needsDimension: true, allowsBreakdown: true },
   { value: 'area', label: 'Area', needsDimension: true, allowsBreakdown: false },
   { value: 'doughnut', label: 'Doughnut', needsDimension: true, allowsBreakdown: false },
   { value: 'nestedDoughnut', label: 'Nested doughnut (ring × ring)', needsDimension: true, allowsBreakdown: true },

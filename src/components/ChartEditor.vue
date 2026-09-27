@@ -259,6 +259,10 @@ function moveRing(idx: number, dir: -1 | 1) {
 // ── Line/area charts on a date axis: overlay toggles, and (beacon data) a series list — each
 // series its own date query narrowed by one filter, on the left or right axis. ─────────────────
 const isDateLine = computed(() => (draft.type === 'line' || draft.type === 'area') && isDateDim(draft.dimension))
+// A line over a non-date axis may break down into one line per value (lib/charts.ts); a date
+// axis draws its lines from `series` instead, so it offers no breakdown there.
+const breakdownAllowed = computed(() => !!typeDef.value?.allowsBreakdown && !isDateLine.value)
+const isBreakdownLine = computed(() => (draft.type === 'line' || draft.type === 'area') && !isDateLine.value && !!draft.breakdown)
 const canUseSeries = computed(() => isDateLine.value && isGeo.value)
 const SERIES_FIELDS = GEO_DIMENSIONS.filter((d) => !isDateDim(d.key))
 function addSeries() {
@@ -387,7 +391,8 @@ function save() {
   // defaults at render time (see its own comment).
   if (draft.type !== 'note') draft.notes = attachedNotesValue.value
   if (typeDef.value && !typeDef.value.needsDimension) draft.dimension = ''
-  if (typeDef.value && !typeDef.value.allowsBreakdown) draft.breakdown = undefined
+  if (!breakdownAllowed.value) draft.breakdown = undefined
+  if (!isBreakdownLine.value) draft.cumulative = undefined
   if (draft.breakdown === '') draft.breakdown = undefined
   if (!popupNeedsPopup.value) draft.popup = undefined
   if (!popupNeedsKind.value) draft.popupKind = undefined
@@ -537,13 +542,18 @@ function save() {
             <option v-for="d in dimOptions" :key="d.key" :value="d.key">{{ d.label }}</option>
           </select>
         </div>
-        <div class="field" v-if="typeDef?.allowsBreakdown">
-          <label>{{ draft.type === 'breakdownBar' ? 'Series (break down by)' : 'Break down by' }}</label>
+        <div class="field" v-if="breakdownAllowed">
+          <label>{{ draft.type === 'breakdownBar' ? 'Series (break down by)' : draft.type === 'line' || draft.type === 'area' ? 'One line per' : 'Break down by' }}</label>
           <select v-model="draft.breakdown">
             <option :value="undefined">— none —</option>
             <option v-for="d in dimOptions" :key="d.key" :value="d.key">{{ d.label }}</option>
           </select>
         </div>
+      </div>
+
+      <!-- Line with a breakdown: also each line's running total, dashed on a right-hand axis -->
+      <div class="field check" v-if="isBreakdownLine">
+        <label><input type="checkbox" :checked="!!draft.cumulative" @change="draft.cumulative = ($event.target as HTMLInputElement).checked || undefined" /> Add cumulative lines (dashed, right axis)</label>
       </div>
 
       <!-- Breakdown bar: series side by side, or stacked into one bar per axis value -->

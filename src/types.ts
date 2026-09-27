@@ -99,6 +99,9 @@ export interface Widget {
   // marker and band is listed, with its date and note, under the chart.
   goLiveMarkers?: boolean
   flightBands?: boolean
+  // type 'line' with a breakdown: also draw each series' running total as a dashed line on a
+  // right-hand axis (the campaigns flight-day chart's cumulative view).
+  cumulative?: boolean
   // A beacon (geo) line/area chart on the date axis: draw these series instead of one line. Each
   // series is its own date query narrowed by `filter` (native geo field = value pairs, e.g.
   // keyEvent = 'install'; none = every page view), on the left or right y-axis.

@@ -70,6 +70,8 @@ describe('v10: the production layout (sanitised)', () => {
     'bsk-campaigns/cw-country': 'campaign-country',
     'bsk-campaigns/cw-returns': 'campaign-returns',
   }
+  // The panels that became standard charts on production, swapped in place (v11).
+  const CHARTED = ['bsk-campaigns/cw-hour', 'bsk-campaigns/cw-flightday'] as const
   it('v9 → current changes exactly the panels, by adding a card, and nothing else', () => {
     const before = widgetsById(PROD_V9 as unknown as DashboardConfig)
     const after = widgetsById(v10FromV9)
@@ -77,8 +79,14 @@ describe('v10: the production layout (sanitised)', () => {
     // Compared by content: key order and absent-vs-undefined fields don't count (normWidget
     // re-orders a widget's keys on every load).
     const canon = (w: unknown) => sorted(stable({ pages: [{ filters: {}, widgets: [w] }] } as any))
-    const changed = [...after].filter(([k, w]) => canon(w) !== canon(before.get(k)))
+    const changed = [...after].filter(([k, w]) => canon(w) !== canon(before.get(k)) && !(CHARTED as readonly string[]).includes(k))
     expect(changed.map(([k]) => k).sort()).toEqual(Object.keys(CARDED).sort())
+    for (const k of CHARTED) {
+      const was = before.get(k)!
+      const now = after.get(k)!
+      expect(now.dataset, k).toBe('geo')
+      expect([now.id, now.title, now.x, now.y, now.w, now.h, now.notes], k).toEqual([was.id, was.title, was.x, was.y, was.w, was.h, was.notes])
+    }
     for (const [k, w] of changed) {
       const { card, ...rest } = w
       expect(card, k).toEqual({ preset: CARDED[k] })

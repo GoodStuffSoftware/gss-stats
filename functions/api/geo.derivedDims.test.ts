@@ -19,8 +19,8 @@ import {
   trackingActivationStartMs,
   etDateFromMs,
 } from '../../src/lib/popupEvents'
-import { CAMPAIGNS, etMidnightUtcMs, gameDimOf, keyEventOf, arrivalOf } from '../../src/lib/campaigns'
-import { etWallTimeMs, etDateFast } from '../../src/lib/etTime'
+import { CAMPAIGNS, etMidnightUtcMs, gameDimOf, keyEventOf, arrivalOf, campaignAttributionClause, etFlightRangeMs, flightDayIndex } from '../../src/lib/campaigns'
+import { etWallTimeMs, etDateFast, etHourFast } from '../../src/lib/etTime'
 
 const noopCache: CacheLike = { match: async () => undefined, put: async () => {} }
 
@@ -162,6 +162,44 @@ describe('gameMode / gameDifficulty SQL match parseGameCompletePath', () => {
   it('buckets a right-prefix, wrong-shape row as (other), like /api/completions', () => {
     expect(gameDimOf('gameMode', '/game/complete/normal')).toBe('(other)')
     expect(gameDimOf('gameMode', '/game')).toBe('')
+  })
+})
+
+describe('hourEt and flightDay SQL (the campaigns hour-of-day and flight-day charts)', () => {
+  it('hourEt is the ET wall-clock hour, across both DST changes', () => {
+    const probes: number[] = []
+    for (const day of ['2026-03-07', '2026-03-08', '2026-03-09', '2026-10-31', '2026-11-01', '2026-11-02', '2026-09-26']) {
+      const base = Date.parse(`${day}T00:00:00Z`)
+      for (let h = 0; h < 48; h++) probes.push(base + h * 1_800_000 + 17_000)
+    }
+    const got = exprValues('hourEt', probes.map((ts) => ({ ts })))
+    expect(got).toEqual(probes.map((ts) => String(etHourFast(ts))))
+  })
+  it('flightDay is flightDayIndex of the attributed campaign, only inside its serving window', () => {
+    const android = CAMPAIGNS.find((c) => c.id === '24215315197')!
+    const retest = CAMPAIGNS.find((c) => c.id === '24279250691')!
+    const probes: Row[] = []
+    for (const c of [android, retest]) {
+      const [start, end] = etFlightRangeMs(c.flightStart!, c.flightEnd)
+      for (const ts of [start - 60_000, start, start + 3_600_000 * 5, start + 86_400_000 * 2 + 1, end - 1, end, end + 86_400_000]) probes.push({ ts, campaign: c.ucValues[0] })
+    }
+    probes.push({ ts: Date.parse('2026-09-04T15:00:00Z'), campaign: android.ucValues[0], medium: 'lifecycle' }) // excluded
+    probes.push({ ts: Date.parse('2026-09-04T15:00:00Z'), campaign: 'not_a_campaign' })
+    const expected = probes.map((r) => {
+      if (r.medium === 'lifecycle') return ''
+      const c = CAMPAIGNS.find((x) => x.ucValues.includes(r.campaign ?? '') && campaignAttributionClause(x).matches(r.campaign ?? '', r.ts))
+      if (!c || !c.flightStart) return ''
+      const d = flightDayIndex(c, etDateFast(r.ts))
+      return d == null ? '' : String(d)
+    })
+    expect(exprValues('flightDay', probes)).toEqual(expected)
+    expect(expected.filter((v) => v !== '').length).toBe(6) // start, +5 h, day 3, last ms, per flight
+  })
+  it('both are whitelisted derived dims that group like columns (usable as a chart axis with a breakdown)', () => {
+    for (const d of ['hourEt', 'flightDay']) {
+      expect(GEO_DIMS.has(d)).toBe(true)
+      expect(RING_EXCLUDED_DIMS.has(d)).toBe(false)
+    }
   })
 })
 

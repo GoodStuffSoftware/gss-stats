@@ -308,7 +308,12 @@ describe('defaultOverviewWidgets / defaultCampaignsWidgets', () => {
     const campaignsViews = defaultCampaignsWidgets()
       .filter((w) => w.dataset === 'campaigns')
       .map((w) => w.view)
-    expect(new Set(campaignsViews)).toEqual(new Set(['funnel', 'hourOfDay', 'country', 'flightDay', 'cost', 'returns']))
+    expect(new Set(campaignsViews)).toEqual(new Set(['funnel', 'country', 'cost', 'returns']))
+    // Every campaigns panel left on that dataset is a card (v11); hour of day and flight day
+    // are standard geo charts over the same tagged arrivals.
+    for (const w of defaultCampaignsWidgets().filter((x) => x.dataset === 'campaigns')) expect(w.card, w.id).toBeDefined()
+    expect(defaultCampaignsWidgets().find((w) => w.id === 'cw-hour')).toMatchObject({ type: 'breakdownBar', dataset: 'geo', dimension: 'hourEt', breakdown: 'campaignFlight' })
+    expect(defaultCampaignsWidgets().find((w) => w.id === 'cw-flightday')).toMatchObject({ type: 'line', dataset: 'geo', dimension: 'flightDay', breakdown: 'campaignFlight', cumulative: true })
     // The device mix is the standard nested doughnut now, not a bespoke 'deviceMix' view.
     const mix = defaultCampaignsWidgets().find((w) => w.id === 'cw-devicemix')!
     expect(mix).toMatchObject({ type: 'nestedDoughnut', dataset: 'geo', dimension: 'campaignFlight', breakdown: 'device', rings: ['os'], includeEventBeacons: true })

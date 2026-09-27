@@ -340,9 +340,9 @@ export function isBestSudokuPopupsPage(p: DashboardPage): boolean {
 export function defaultCampaignsWidgets(): Widget[] {
   return [
     w({ id: 'cw-funnel', title: 'Funnel per campaign', type: 'table', dataset: 'campaigns', view: 'funnel', card: { preset: 'campaign-funnel' }, dimension: '', metric: 'pageviews', limit: 1, notes: ['arrivals-caveat', 'min-cohort-caveat'], x: 0, y: 0, w: 12, h: 14 }),
-    w({ id: 'cw-hour', title: 'Arrivals by ET hour of day', type: 'table', dataset: 'campaigns', view: 'hourOfDay', dimension: '', metric: 'pageviews', limit: 1, notes: ['arrivals-caveat'], x: 0, y: 14, w: 12, h: 8 }),
+    hourOfDayWidget({ x: 0, y: 14, w: 12, h: 8 }),
     w({ id: 'cw-country', title: 'Arrivals & funnel by country', type: 'table', dataset: 'campaigns', view: 'country', card: { preset: 'campaign-country' }, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 22, w: 12, h: 10 }),
-    w({ id: 'cw-flightday', title: 'Daily arrivals by flight day', type: 'table', dataset: 'campaigns', view: 'flightDay', dimension: '', metric: 'pageviews', limit: 1, notes: ['arrivals-caveat', 'flight-day-caption'], x: 0, y: 32, w: 12, h: 10 }),
+    flightDayWidget({ x: 0, y: 32, w: 12, h: 10 }),
     w({ id: 'cw-cost', title: 'Cost per arrival / auth success', type: 'table', dataset: 'campaigns', view: 'cost', card: { preset: 'campaign-cost' }, dimension: '', metric: 'pageviews', limit: 1, notes: ['arrivals-caveat', 'spend-source'], x: 0, y: 42, w: 12, h: 9 }),
     deviceMixWidget({ x: 0, y: 51, w: 12, h: 12 }),
     w({ id: 'cw-returns', title: 'Return visits', type: 'table', dataset: 'campaigns', view: 'returns', card: { preset: 'campaign-returns' }, dimension: '', metric: 'pageviews', limit: 1, notes: ['play-tracking-status', 'return-rate-caption'], x: 0, y: 63, w: 12, h: 11 }),
@@ -405,6 +405,43 @@ export function deviceMixWidget(geom: { x: number; y: number; w: number; h: numb
     ...geom,
   }
 }
+// Campaign arrivals charts (CONFIG_VERSION 11, ADR 0003 slice 7): the bespoke hour-of-day and
+// flight-day panels as STANDARD geo charts. Both count tagged arrivals exactly as /api/campaigns
+// did: the 'arrival' = tagged filter (a device's first-ever beacon, attributed by
+// campaignAttributionClause with the same EXCLUSIONS, pre-fix install-gap rows left out), one
+// series per campaign flight ('campaignFlight'), over a rolling year (attribution itself bounds
+// each flight from below) and without "hide my visits", which the campaigns endpoint never
+// applied. The spend-only campaign has no tagged rows, so it never appears.
+function campaignArrivalsFilters(): GlobalFilters {
+  return normFilters({ ...defaultFilters(), siteSel: [], rangeRel: '12mo', excludeOwnVisits: false, drill: [{ key: 'arrival', value: 'tagged', label: 'Tagged' }] })
+}
+/** Arrivals by ET hour of day: bars per hour 0:00-23:00, one per campaign (grouped). */
+export function hourOfDayWidget(geom: { x: number; y: number; w: number; h: number }, id = 'cw-hour', title = 'Arrivals by ET hour of day'): Widget {
+  return { id, i: id, title, type: 'breakdownBar', dataset: 'geo', dimension: 'hourEt', breakdown: 'campaignFlight', metric: 'pageviews', limit: 500, includeEventBeacons: true, filters: campaignArrivalsFilters(), notes: ['arrivals-caveat'], ...geom }
+}
+/** Daily arrivals by flight day: a line per campaign over its flight days (day 1 = its first ET
+ * day), with each campaign's running total dashed on a right-hand axis. */
+export function flightDayWidget(geom: { x: number; y: number; w: number; h: number }, id = 'cw-flightday', title = 'Daily arrivals by flight day'): Widget {
+  return { id, i: id, title, type: 'line', dataset: 'geo', dimension: 'flightDay', breakdown: 'campaignFlight', cumulative: true, metric: 'pageviews', limit: 500, includeEventBeacons: true, filters: campaignArrivalsFilters(), notes: ['arrivals-caveat', 'flight-day-caption'], ...geom }
+}
+const CAMPAIGN_CHART_FOR_VIEW: Readonly<Record<string, typeof hourOfDayWidget>> = Object.freeze(
+  Object.assign(Object.create(null) as Record<string, typeof hourOfDayWidget>, { hourOfDay: hourOfDayWidget, flightDay: flightDayWidget }),
+)
+/** One bespoke campaign chart panel as its standard chart: same id, grid position, size, title,
+ * captions and default mark. A panel scoped to ONE campaign keeps that scope as a campaignFlight
+ * filter; one scoped to several (not all) shows every flight (each is its own series). */
+function campaignChartFromBespoke(wd: Widget, make: typeof hourOfDayWidget): Widget {
+  const next = make({ x: wd.x, y: wd.y, w: wd.w, h: wd.h }, wd.id, wd.title)
+  next.isDefault = wd.isDefault
+  if (wd.notes) next.notes = [...wd.notes]
+  const ids = (wd.campaignIds ?? []).filter((id) => CAMPAIGNS.some((c) => c.id === id))
+  if (ids.length === 1) {
+    const c = CAMPAIGNS.find((x) => x.id === ids[0])!
+    next.filters = { ...next.filters!, drill: [...(next.filters!.drill ?? []), { key: 'campaignFlight', value: c.id, label: c.label }] }
+  }
+  return next
+}
+
 /** A saved widget that is the retired bespoke device-mix table (any page, any id). */
 export function isBespokeDeviceMix(wd: Widget): boolean {
   return wd.dataset === 'campaigns' && wd.view === 'deviceMix'
@@ -603,9 +640,12 @@ export function migratePanelsV11(page: DashboardPage): DashboardPage {
   return migrateCardsV10(swapped)
 }
 /** The bespoke panels that became STANDARD charts (not cards), swapped in place: same id, grid
- * position, size, title, captions and default mark. The same object when it is not one. */
+ * position, size, title, captions and default mark (campaignChartFromBespoke). Matched by what
+ * the widget is (dataset 'campaigns' and its view), never by name. The same object when it is
+ * not one, so a second run changes nothing. */
 export function swapPanelChart(wd: Widget): Widget {
-  return wd
+  if (wd.dataset !== 'campaigns' || typeof wd.view !== 'string' || !Object.hasOwn(CAMPAIGN_CHART_FOR_VIEW, wd.view)) return wd
+  return campaignChartFromBespoke(wd, CAMPAIGN_CHART_FOR_VIEW[wd.view])
 }
 
 export function defaultOverviewWidgets(): Widget[] {
@@ -782,6 +822,8 @@ function normWidget(x: any): Widget {
     markers: x.markers === 'releases' ? 'releases' : undefined,
     goLiveMarkers: x.goLiveMarkers === true || undefined,
     flightBands: x.flightBands === true || undefined,
+    // A line with a breakdown: also each series' running total (dashed, right axis).
+    cumulative: x.cumulative === true || undefined,
     // Per-chart site override (Widget.siteSel): site tokens only.
     siteSel: Array.isArray(x.siteSel) ? x.siteSel.filter((t: any) => typeof t === 'string' && /^[a-z0-9.\-]{1,60}$/i.test(t)) : undefined,
     // Series line chart (Widget.series): label + optional field=value filters + axis/style.
