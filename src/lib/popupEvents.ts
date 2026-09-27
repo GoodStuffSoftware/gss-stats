@@ -64,31 +64,46 @@ export function isPopupEventPath(path: string): boolean {
   return POPUP_EVENT_PREFIXES.some((p) => (p.endsWith('/') ? path.startsWith(p) : path === p || path.startsWith(p + '/')))
 }
 
-/** Appends `path <> ? AND path NOT LIKE ?` (ANDed) for every prefix — excludes all popup-event rows.
- * A prefix that already ends in '/' (see POPUP_EVENT_PREFIXES' `/game/complete/`) is matched
- * with a single `path NOT LIKE ?` against `${prefix}%` — never `${prefix}/%`, which would
- * require a spurious extra slash and never exclude anything. */
-export function popupExcludeClause(w: string[], b: unknown[]): void {
+/** Appends `path <> '<prefix>' AND path NOT LIKE '<prefix>/%'` (ANDed) for every prefix —
+ * excludes all popup-event rows. A prefix that already ends in '/' (see
+ * POPUP_EVENT_PREFIXES' `/game/complete/`) is matched with a single `path NOT LIKE
+ * '<prefix>%'` — never `${prefix}/%`, which would require a spurious extra slash and never
+ * exclude anything.
+ *
+ * WHY LITERALS, NOT `?` BINDS (fixed 2026-09-27 — D1 bind-ceiling regression): every value
+ * here comes from POPUP_EVENT_PREFIXES, this module's own static constant, never from a
+ * request — the exact condition popupDimSqlCase's own "WHY LITERALS" comment (below) already
+ * documents for the popupFamily/popupOutcome CASE expressions, so this clause follows the
+ * same precedent instead of introducing a second policy. Before this fix each prefix cost 1-2
+ * BOUND parameters (`?`) in the standing exclusion every functions/api/geo.ts chart query
+ * carries; growing POPUP_EVENT_PREFIXES from 11 to 13 entries (auth/error + auth/redirect,
+ * this same release) pushed that from 19 to 23 binds and took the documented worst case (50
+ * sites + 16 path constraints + a referrer x device ring + "hide my own visits") from exactly
+ * 100 D1-bound-parameters to 104 — refused with a 400 ("104 values; at most 100") even though
+ * every input was within its own documented maximum (functions/api/geo.ts MAX_SITES /
+ * MAX_CONSTRAINTS, unchanged here). Emitting these as escaped SQL literals via sqlLit costs
+ * ZERO bind slots per prefix regardless of how many prefixes this list ever grows to — the
+ * bind budget is spent only on real request input (sites, drill constraints, own-visit
+ * browser/OS, referrer exclusion hosts), which is exactly what D1's 100-parameter cap is
+ * meant to bound. See functions/api/geo.derivedDims.test.ts's boundary tests for the
+ * before/after bind counts, executed against the real handler. */
+export function popupExcludeClause(w: string[], _b: unknown[]): void {
   for (const prefix of POPUP_EVENT_PREFIXES) {
     if (prefix.endsWith('/')) {
-      w.push(`path NOT LIKE ?`)
-      b.push(`${prefix}%`)
+      w.push(`path NOT LIKE ${sqlLit(`${prefix}%`)}`)
     } else {
-      w.push(`path <> ? AND path NOT LIKE ?`)
-      b.push(prefix, `${prefix}/%`)
+      w.push(`path <> ${sqlLit(prefix)} AND path NOT LIKE ${sqlLit(`${prefix}/%`)}`)
     }
   }
 }
 
-/** The inverse of popupExcludeClause: one OR'd fragment matching ANY popup-event row. */
+/** The inverse of popupExcludeClause: one OR'd fragment matching ANY popup-event row. Same
+ * literal-not-bind rationale as popupExcludeClause above — `binds` stays present (empty) so
+ * existing callers (functions/api/popups.ts, popupDimPrefilter below) that spread it into
+ * their own bind array don't need to change. */
 export function popupIncludeClause(): { sql: string; binds: string[] } {
-  const sql = `(${POPUP_EVENT_PREFIXES.map((p) => (p.endsWith('/') ? 'path LIKE ?' : 'path = ? OR path LIKE ?')).join(' OR ')})`
-  const binds: string[] = []
-  for (const p of POPUP_EVENT_PREFIXES) {
-    if (p.endsWith('/')) binds.push(`${p}%`)
-    else binds.push(p, `${p}/%`)
-  }
-  return { sql, binds }
+  const sql = `(${POPUP_EVENT_PREFIXES.map((p) => (p.endsWith('/') ? `path LIKE ${sqlLit(`${p}%`)}` : `path = ${sqlLit(p)} OR path LIKE ${sqlLit(`${p}/%`)}`)).join(' OR ')})`
+  return { sql, binds: [] }
 }
 
 // ── Path family — a derived dimension (functions/api/geo.ts's 'pathFamily') that groups
