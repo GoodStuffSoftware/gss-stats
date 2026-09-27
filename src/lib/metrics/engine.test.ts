@@ -7,8 +7,8 @@ import { buildFact, deriveBatch, factCuts, newSideMemo, planBatch, type FactResu
 import { FACTS, type FactId } from './facts'
 import { METRIC_DEFS, metricWindows } from './metrics'
 import { RATIO_DEFS, ratioParamsOf, ratioWindowsOf } from './ratios'
-import { validateMetricsRequest } from './validate'
-import { prewarm } from './prewarm'
+import { MAX_REQUESTS, validateMetricsRequest } from './validate'
+import { prewarm, prewarmChunks, prewarmRequests } from './prewarm'
 import { CAMPAIGNS } from '../campaigns'
 import { POPUPS } from '../popupEvents'
 import type { MetricRequest } from './types'
@@ -68,8 +68,21 @@ describe('every request side is served by its fact', () => {
       else expect(factCuts(id).length).toBeGreaterThan(0)
     }
   })
-  it('prewarm runs the whole path without throwing (it swallows errors, so check its parts too)', () => {
-    expect(() => prewarm()).not.toThrow()
+  it('prewarm runs the whole path and reports success (it swallows errors, so the flag is the check)', () => {
+    let ok: boolean | undefined
+    expect(() => (ok = prewarm())).not.toThrow()
+    expect(ok).toBe(true)
+  })
+  it('prewarm warms every registry request in chunks of at most MAX_REQUESTS — none truncated', () => {
+    const all = prewarmRequests()
+    const chunks = prewarmChunks()
+    expect(chunks.flat()).toEqual(all)
+    for (const c of chunks) expect(c.length).toBeLessThanOrEqual(MAX_REQUESTS)
+    // Every request is one the endpoint accepts (a refused one would make prewarm() false).
+    for (const c of chunks) {
+      const b = validateMetricsRequest(JSON.stringify({ v: 1, context: { since: '2026-09-20', until: '2026-09-26', sites: ['bestsudoku-web'] }, requests: c }))
+      expect(b.ok && b.requests.every((r) => r.ok)).toBe(true)
+    }
   })
 })
 

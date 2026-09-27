@@ -137,7 +137,9 @@ export function measuredInterval({ rules, window, campaign, seenInFlight }: Inte
       partialNote = note ?? null
     }
   }
-  if (from >= b) return unmeasured('not-live', goLiveEt)
+  // An empty window (today so far at exactly ET midnight: a == b) is measured, value 0, as long
+  // as no go-live falls after its start; only a go-live at or past the end leaves it unmeasured.
+  if (from > a && from >= b) return unmeasured('not-live', goLiveEt)
   if (from > a) return { status: 'partial', from, noteIds: [partialNote ?? 'counted-from', ...noteIds], goLiveEt }
   return { status: 'measured', from: a, noteIds, goLiveEt }
 }

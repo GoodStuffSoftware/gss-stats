@@ -182,6 +182,18 @@ function isRealWhen(v: string): boolean {
   return !t || (Number(t[1]) <= 23 && Number(t[2]) <= 59 && (t[3] === undefined || Number(t[3]) <= 59))
 }
 
+const BARE_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+/** The MAX_RANGE_DAYS cap. Two bare dates are a count of ET calendar days (both inclusive), not
+ * milliseconds: a range spanning one more fall-back than spring-forward is an hour longer than
+ * its days × 24 h and must not be refused for it. Anything with a clock time is measured. */
+function rangeTooLong(since: string, until: string, a: number, b: number): boolean {
+  if (BARE_DATE_RE.test(since) && BARE_DATE_RE.test(until)) {
+    const days = Math.round((Date.parse(`${until}T00:00:00Z`) - Date.parse(`${since}T00:00:00Z`)) / 86_400_000) + 1
+    return days > MAX_RANGE_DAYS
+  }
+  return b - a > MAX_RANGE_DAYS * 86_400_000
+}
+
 function validateContext(raw: unknown): ValidContext | string {
   if (raw === undefined) return { sites: [], excludeOwnVisits: false, ownBrowser: '', ownOS: '' }
   if (!isObj(raw)) return 'context must be an object'
@@ -195,7 +207,7 @@ function validateContext(raw: unknown): ValidContext | string {
     const [a, b] = rangeMs(raw.since as string, raw.until as string) // how the facts read it (bare dates are ET days)
     if (!Number.isFinite(a) || !Number.isFinite(b)) return 'context.since and context.until must be real instants'
     if (a >= b) return 'context.since must be before context.until'
-    if (b - a > MAX_RANGE_DAYS * 86_400_000) return `context range is longer than ${MAX_RANGE_DAYS} days`
+    if (rangeTooLong(raw.since as string, raw.until as string, a, b)) return `context range is longer than ${MAX_RANGE_DAYS} days`
   }
   let sites: string[] = []
   if (raw.sites !== undefined) {
