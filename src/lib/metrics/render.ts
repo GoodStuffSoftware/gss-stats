@@ -19,7 +19,7 @@ import { relativeTime } from '../adsFreshness'
 import { tokenizeAndInterpolate, type TextToken } from '../textLite'
 import { METRICS, rulesOf, type MetricDef } from './metrics'
 import { RATIOS, type RatioDef } from './ratios'
-import { resolveBinding, scopeField, scopeVars, unmeasuredByConfig, type ScopeInstance } from './scope'
+import { campaignOfScope, resolveBinding, scopeField, scopeVars, unmeasuredByConfig, type ScopeInstance } from './scope'
 import type { Display, Gating, Label, MetricItem, MetricValue } from './types'
 import { unitLabelId } from './units'
 
@@ -154,7 +154,7 @@ function applyEmptyGating(whenEmpty: Gating['whenEmpty']): { primary: string; vi
 }
 function applyUnmeasuredGating(gating: Gating | undefined, scope: ScopeInstance, value: MetricValue): { primary: string; visible: boolean } {
   const mode = gating?.whenUnmeasured ?? 'auto'
-  const closedCampaign = scope.kind === 'campaign' && scope.campaign.status === 'closed'
+  const closedCampaign = campaignOfScope(scope)?.status === 'closed' // the card's campaign, however deep the cell
   if (mode === 'omit' || (mode === 'auto' && closedCampaign)) return { primary: '', visible: false }
   // A specific reason (e.g. 'flight-pending') is more useful than the generic label when the
   // server supplied one and it's a real registry label, not just an internal reason code.
@@ -230,7 +230,7 @@ function isNewToday(item: MetricItem, value: MetricValue, def: MetricDef | Ratio
 /** The latest ET day that gates a metric's comparisons, as the engine derives it: its
  * instrumentation rules' go-live days and, for a campaign metric, the flight's start. */
 function goLiveEtFor(def: MetricDef, scope: ScopeInstance): string | null {
-  const campaign = scope.kind === 'campaign' ? scope.campaign : undefined
+  const campaign = campaignOfScope(scope)
   let best: string | null = null
   const take = (d: string | null | undefined) => {
     if (d && (best === null || d > best)) best = d

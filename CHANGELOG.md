@@ -27,6 +27,8 @@ All notable changes to **gss-stats** are documented here. The format follows
   moved into the card's Notes, and the bars use the cards' standard colour. The upsell-fix
   segment table (pre-fix and post-fix tagged upsell) now lives on this card and appears by
   itself once that fix ships.
+- **Arrivals & funnel by country is a metric card**, with the same table as before: the funnel
+  steps down the side, US, CA and Other across the top, the same counts in every cell.
 
 ## [0.11.0] — 2026-09-27
 

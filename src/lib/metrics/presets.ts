@@ -260,6 +260,34 @@ export const CAMPAIGN_FUNNEL: CardSpec = {
   ],
 }
 
+/** Arrivals and funnel by country (CampaignsWidgetBody 'country'): one card per beacon-tracked
+ * campaign, a table with its funnel steps as rows and US / CA / Other as columns — every cell a
+ * campaign metric split by the campaign fact's country bucket. A closed flight omits a step it
+ * could not measure (every cell gated out drops the row). */
+export const CAMPAIGN_COUNTRY: CardSpec = {
+  v: 1,
+  repeat: { over: 'campaigns', tracked: true },
+  minWidth: 230,
+  title: { bind: 'campaign.label' },
+  sections: [
+    {
+      layout: 'table',
+      columns: { over: 'countries' },
+      rowsLabel: { note: 'label.card.step' },
+      items: [
+        { id: 'arrivals', label: { note: 'label.funnel.arrivals' }, data: { metric: 'campaign.taggedArrivals' }, display: { as: 'number' }, ...COMPACT },
+        { id: 'played', label: { note: 'label.campaign.gameViews' }, data: { metric: 'campaign.gameViews' }, display: { as: 'number' }, ...COMPACT },
+        { id: 'completed', label: { note: 'label.funnel.completed' }, data: { metric: 'campaign.completions' }, display: { as: 'number' }, ...COMPACT },
+        { id: 'ask', label: { note: 'label.funnel.ask' }, data: { metric: 'campaign.asks' }, display: { as: 'number' }, ...COMPACT },
+        { id: 'accept', label: { note: 'label.funnel.accept' }, data: { metric: 'campaign.accepts' }, display: { as: 'number' }, ...COMPACT },
+        { id: 'authSuccess', label: { note: 'label.funnel.authSuccess' }, data: { metric: 'campaign.authSuccess' }, display: { as: 'number' }, ...COMPACT },
+        { id: 'installPrompt', label: { note: 'label.funnel.installPrompt' }, data: { metric: 'campaign.installPrompts' }, display: { as: 'number' }, ...COMPACT },
+        { id: 'install', label: { note: 'label.funnel.install' }, data: { metric: 'campaign.installs' }, display: { as: 'number' }, ...COMPACT },
+      ],
+    },
+  ],
+}
+
 /** Every preset by id. A null prototype, so an id such as 'constructor' or 'toString' is
  * simply not a preset — read through presetById, never a bare bracket lookup. */
 export const PRESETS: Readonly<Record<string, CardSpec>> = Object.freeze(
@@ -271,6 +299,7 @@ export const PRESETS: Readonly<Record<string, CardSpec>> = Object.freeze(
     'signin-eligibility': SIGNIN_ELIGIBILITY,
     'campaign-cost': CAMPAIGN_COST,
     'campaign-funnel': CAMPAIGN_FUNNEL,
+    'campaign-country': CAMPAIGN_COUNTRY,
   }),
 )
 

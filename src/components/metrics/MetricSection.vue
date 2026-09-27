@@ -96,6 +96,7 @@ const tableHeaderTokens = computed(() => props.section.items.map((it) => itemLab
 // ── table, column repeat ─────────────────────────────────────────────────────────────────────
 const tableColumns = computed<ScopeInstance[]>(() => (isColumnTable.value ? resolveRepeat(props.section.columns, props.ctx).map((c) => nestScope(c, props.outerScope)) : []))
 const columnHeaderTokens = computed(() => tableColumns.value.map((c) => resolveLabelTokens(props.section.columnLabel ?? columnDefaultLabel(c), c, undefined, props.ctx.todayEt)))
+const rowsHeaderTokens = computed(() => (props.section.rowsLabel !== undefined ? resolveLabelTokens(props.section.rowsLabel, props.outerScope, undefined, props.ctx.todayEt) : []))
 /** Each item row with its cells; a row whose every cell is gated out is left out. */
 const columnRows = computed(() => {
   const n = tableColumns.value.length
@@ -121,7 +122,7 @@ const anyVisible = computed(() => {
       <table class="metric-table columns">
         <thead>
           <tr>
-            <th></th>
+            <th><MetricLabel :tokens="rowsHeaderTokens" /></th>
             <th v-for="(tokens, i) in columnHeaderTokens" :key="i" class="num"><MetricLabel :tokens="tokens" /></th>
           </tr>
         </thead>

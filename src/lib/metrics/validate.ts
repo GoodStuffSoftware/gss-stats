@@ -176,6 +176,10 @@ export function validateCard(spec: CardSpec): string[] {
       checkRepeat(`${where}.columns`, s.columns)
       checkLabel(`${where}.columnLabel`, s.columnLabel, false)
     }
+    if (s.rowsLabel !== undefined) {
+      if (!s.columns) errors.push(`${where}: rowsLabel heads a column table's row labels; it needs columns`)
+      checkLabel(`${where}.rowsLabel`, s.rowsLabel, false)
+    }
     const ids = new Set<string>()
     for (const it of s.items ?? []) {
       const w = `${where}.${it.id}`

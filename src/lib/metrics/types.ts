@@ -128,6 +128,8 @@ export interface Section {
    * card can split its funnel steps by country. */
   columns?: RepeatSpec
   columnLabel?: Label
+  /** With `columns`: the heading over the item-label column (e.g. "Step"). */
+  rowsLabel?: Label
   items: MetricItem[]
 }
 
