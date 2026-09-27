@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
 //
 // PARITY (ADR 0003 slice 5): the presets `campaign-scorecard` and `bsk-kpis`, rendered through
-// MetricCard over POST /api/metrics, show the same numbers as the bespoke Overview body they
-// replace (OverviewWidgetBody.vue, views 'scorecard' and 'kpis') over /api/overview. Both are
-// mounted for real, and both handlers run their own SQL against ONE node:sqlite fixture (the
-// setup of functions/api/metrics.equivalence.test.ts).
+// MetricCard over POST /api/metrics against the node:sqlite fixture, show the same numbers as the
+// bespoke Overview body they replaced (OverviewWidgetBody.vue, views 'scorecard' and 'kpis').
+// Phase B retired that body and its /api/overview sections, so its output is a golden fixture
+// (__fixtures__/bespokeOverview.golden.json), captured by mounting the real body over the real
+// /api/overview handler on this same fixture at FIXTURE_NOW, the commit before they were removed.
 //
 // Every visible difference is listed here and asserted as itself, so none can appear silently:
 //
@@ -35,14 +36,12 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import MetricCard from './MetricCard.vue'
-import OverviewWidgetBody from '../widgets/OverviewWidgetBody.vue'
 import { __resetMetricsStateForTests } from '../../composables/useMetrics'
-import { onRequestPost as overviewPost } from '../../../functions/api/overview'
 import { onRequestPost as metricsPost } from '../../../functions/api/metrics'
 import { insertHits, installCaches, memoryCache, openHitsDb, pagesContext, postJson, sqliteD1 } from '../../../functions/_lib/testing/hitsDb'
 import { bskFixture, FIXTURE_NOW } from '../../../functions/_lib/testing/bskFixture'
 import { CAMPAIGNS } from '../../lib/campaigns'
-import type { GlobalFilters, Widget } from '../../types'
+import GOLDEN from './__fixtures__/bespokeOverview.golden.json'
 
 const ANDROID = CAMPAIGNS.find((c) => c.id === '24215315197')!.label
 const PLAY = CAMPAIGNS.find((c) => c.id === '24234347705')!.label
@@ -54,7 +53,7 @@ const mounted: VueWrapper[] = []
 
 async function route(url: string, init: RequestInit): Promise<Response> {
   const path = new URL(url, 'https://stats.goodstuff.software').pathname
-  const handler = path === '/api/overview' ? overviewPost : path === '/api/metrics' ? metricsPost : null
+  const handler = path === '/api/metrics' ? metricsPost : null
   if (!handler) throw new Error(`unexpected fetch ${path}`)
   const waited: Promise<unknown>[] = []
   const res = await handler(pagesContext(postJson(path, JSON.parse(String(init.body))), { gss_geo: sqliteD1(db) } as never, waited) as never)
@@ -79,20 +78,11 @@ afterAll(() => {
   vi.useRealTimers()
 })
 
-const FILTERS = { siteSel: [], since: '2026-09-19', until: '2026-09-26', excludeSelfReferrals: false, excludeOwnVisits: false, ownBrowser: '', ownOS: '' } as unknown as GlobalFilters
-const widget = (view: string) => ({ id: `ow-${view}`, i: `ow-${view}`, title: view, type: 'table', dataset: 'overview', view, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 0, w: 12, h: 10 }) as unknown as Widget
-
 async function settle() {
   for (let i = 0; i < 6; i++) {
     await flushPromises()
     await new Promise((r) => setTimeout(r, 15))
   }
-}
-async function mountOld(view: 'kpis' | 'scorecard') {
-  const w = mount(OverviewWidgetBody, { props: { widget: widget(view), filters: FILTERS }, global: { stubs: { NoteBlock: true, BaseChart: true } } })
-  mounted.push(w)
-  await settle()
-  return w
 }
 async function mountNew(preset: string) {
   const w = mount(MetricCard, { props: { cardRef: { preset }, nowMs: FIXTURE_NOW } })
@@ -117,17 +107,9 @@ interface Card {
   rows: Map<string, string>
   pills: Map<string, string>
 }
-function oldScorecard(w: VueWrapper): Map<string, Card> {
-  return new Map(
-    w.findAll('.scorecard-card').map((c) => [
-      text(c.find('.sc-label').element),
-      {
-        badge: text(c.find('.sc-status').element),
-        rows: new Map(c.findAll('.sc-row').map((r) => r.findAll(':scope > span').map((s) => text(s.element)) as [string, string])),
-        pills: new Map(c.findAll('.sc-rate-chip').map((p) => [pillKey(text(p.element)), pillValue(text(p.element))])),
-      },
-    ]),
-  )
+/** The retired bespoke scorecard, as captured (see the header). */
+function oldScorecard(): Map<string, Card> {
+  return new Map(GOLDEN.scorecard.map((c) => [c.title, { badge: c.badge, rows: new Map(c.rows as [string, string][]), pills: new Map(c.pills as [string, string][]) }]))
 }
 function newScorecard(w: VueWrapper): Map<string, Card> {
   return new Map(
@@ -159,7 +141,7 @@ const SCORECARD_DIFFS: [campaign: string, kind: 'row' | 'pill', label: string, o
 
 describe('campaign-scorecard ≡ the bespoke Overview scorecard', () => {
   it('same cards, titles, badges, rows and pills, except the documented differences', async () => {
-    const before = oldScorecard(await mountOld('scorecard'))
+    const before = oldScorecard()
     const after = newScorecard(await mountNew('campaign-scorecard'))
     expect([...after.keys()]).toEqual([...before.keys()])
     expect([...before.keys()]).toEqual([ANDROID, PLAY, RETEST])
@@ -210,13 +192,8 @@ describe('bsk-kpis ≡ the bespoke "Today at a glance" tiles', () => {
     value: string
     deltas: string[]
   }
-  const oldTiles = (w: VueWrapper): Tile[] =>
-    w.findAll('.kpi-tile').map((t) => ({
-      label: text(t.find('.kpi-label').element),
-      // A rate and its (n/d) on two lines, on both sides.
-      value: norm(`${text(t.find('.kpi-num').element)} ${t.find('.kpi-sub').exists() ? text(t.find('.kpi-sub').element) : ''}`),
-      deltas: t.findAll('.kpi-delta').map((d) => text(d.element)),
-    }))
+  /** The retired bespoke tiles, as captured (a rate and its (n/d) joined, as below). */
+  const oldTiles = (): Tile[] => GOLDEN.kpis.map((k) => ({ label: k.label, value: k.value, deltas: k.deltas }))
   const newTiles = (w: VueWrapper): Tile[] =>
     w.findAll('.mi-tile, .mp-tile').map((t) => ({
       label: text((t.find('.mi-tile-label').exists() ? t.find('.mi-tile-label') : t.find('.mp-tile-label')).element),
@@ -225,7 +202,7 @@ describe('bsk-kpis ≡ the bespoke "Today at a glance" tiles', () => {
     }))
 
   it('same tiles in the same order, same values and the same delta lines ("new today" included)', async () => {
-    const before = oldTiles(await mountOld('kpis'))
+    const before = oldTiles()
     const after = newTiles(await mountNew('bsk-kpis'))
     expect(after.map((t) => t.label)).toEqual(before.map((t) => t.label))
     expect(after.map((t) => t.value)).toEqual(before.map((t) => t.value))
@@ -237,9 +214,8 @@ describe('bsk-kpis ≡ the bespoke "Today at a glance" tiles', () => {
   })
 
   it('the freshness line and reload control stay: "Updated just now" and ↻, as before', async () => {
-    const old = await mountOld('kpis')
     const neu = await mountNew('bsk-kpis')
-    expect(text(neu.find('.mc-updated').element)).toBe(text(old.find('.last-updated').element))
+    expect(text(neu.find('.mc-updated').element)).toBe(GOLDEN.updated)
     expect(neu.find('button.mc-reload').exists()).toBe(true)
   })
 
@@ -271,8 +247,7 @@ describe('N1: caveats never add a visible line', () => {
   })
 
   it('N2: every old tile note has a line in the card Notes, under the same label', async () => {
-    const old = await mountOld('kpis')
-    const oldNotes = old.findAll('.kpi-tile').flatMap((t) => (t.find('.kpi-note').exists() ? [[text(t.find('.kpi-label').element), text(t.find('.kpi-note').element)] as const] : []))
+    const oldNotes = GOLDEN.kpis.flatMap((k) => ('note' in k && k.note ? [[k.label, k.note] as const] : []))
     expect(oldNotes.map(([l]) => l)).toEqual(['Installs', 'Raw install signals'])
     const w = await mountNew('bsk-kpis')
     await w.find('button.mc-notes-toggle').trigger('click')
