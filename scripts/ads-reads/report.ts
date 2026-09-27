@@ -14,7 +14,12 @@ import {
 } from '../../src/lib/adsRules'
 import { POPUP_OUTCOME_TYPES, gateRate, installOutcomeGapNote } from '../../src/lib/popupEvents'
 import { RAW_INSTALL_SIGNALS_LABEL } from '../../src/lib/campaigns'
+import { noteRawText } from '../../src/lib/notes'
 import type { FullRead, MorningResult, PostflightResult, SpendSection } from './read'
+
+// `/game` rows are page views, not games played (ADR 0003): the registry label, lower-cased
+// for the middle of a sentence.
+const GAME_VIEWS = noteRawText('label.campaign.gameViews').toLowerCase()
 
 const money = (x: number | null | undefined) => (x == null ? '—' : `$${x.toFixed(2)}`)
 const n = (x: number | null | undefined) => (x == null ? '—' : x.toLocaleString('en-US'))
@@ -65,7 +70,7 @@ export function fullReadLines(r: FullRead, title: string): string[] {
   if (t) {
     const s = t.summary
     out.push(
-      `Tagged funnel (campaign tag only, exclusions applied): ${n(s.taggedArrivals)} arrivals (floor), ${n(s.taggedHits)} hits; played ${n(s.funnel.played)}; asks ${n(s.asks.total)} (placement ${n(s.asks.byPath['/signin-prompt/placement'])}, streak ${n(s.asks.byPath['/signin-prompt/streak'])}, promo ${n(s.asks.byPath['/promo-first50/shown'])}${s.asks.otherShownReasons ? `, other sign-in reasons ${n(s.asks.otherShownReasons)}` : ''}); accepts ${n(s.accepts.total)}; auth redirect ${n(s.authRedirect)}, auth success ${n(s.authSuccess)}`,
+      `Tagged funnel (campaign tag only, exclusions applied): ${n(s.taggedArrivals)} arrivals (floor), ${n(s.taggedHits)} hits; ${GAME_VIEWS} ${n(s.funnel.played)}; asks ${n(s.asks.total)} (placement ${n(s.asks.byPath['/signin-prompt/placement'])}, streak ${n(s.asks.byPath['/signin-prompt/streak'])}, promo ${n(s.asks.byPath['/promo-first50/shown'])}${s.asks.otherShownReasons ? `, other sign-in reasons ${n(s.asks.otherShownReasons)}` : ''}); accepts ${n(s.accepts.total)}; auth redirect ${n(s.authRedirect)}, auth success ${n(s.authSuccess)}`,
     )
     // Not a rate (review finding, 2026-09-26): "asks" counts event rows within a tagged
     // session, "arrivals" counts first-ever tagged beacons — dividing one by the other mixes

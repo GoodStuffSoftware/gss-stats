@@ -63,6 +63,7 @@ const TABLE: Row[] = [
   ['install fix never shipped: unmeasured', [before(null)], ANDROID_ATTR, ANDROID, undefined, { status: 'unmeasured', reason: 'not-live' }],
   ['closed flight whose window never saw the path', [SEEN], ANDROID_ATTR, ANDROID, false, { status: 'unmeasured', reason: 'not-seen-in-flight' }],
   ['closed flight that saw it', [SEEN], ANDROID_ATTR, ANDROID, true, { status: 'measured' }],
+  ['closed flight with NO evidence at all: not seen (review #11)', [SEEN], ANDROID_ATTR, ANDROID, undefined, { status: 'unmeasured', reason: 'not-seen-in-flight' }],
   ['ACTIVE flight not seen yet: still live (its window is open)', [SEEN], RETEST_ATTR, RETEST, false, { status: 'measured' }],
   ['closed flight with no confirmed start', [SEEN], ANDROID_ATTR, { ...ANDROID, flightStart: null }, undefined, { status: 'unmeasured', reason: 'flight-pending' }],
   ['annotation inside the window: a note, never a gate', [{ kind: 'annotateAt', atMs: RAW_INSTALL_DEDUPE_LIVE_AT_UTC_MS, noteId: 'raw-install-dedupe' }], ANDROID_ATTR, ANDROID, undefined, { status: 'measured', noteIds: ['raw-install-dedupe'] }],

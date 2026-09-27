@@ -899,8 +899,8 @@ that code rather than copying it.
 
 **Slice 2 (the registry, `src/lib/metrics/`).**
 - `metrics.ts` declares the fact **per window** (`windows: { attribution: 'campaignPathVisitor',
-  todaySoFar: 'bskKpiMinutes' }`) instead of one `fact`: `campaign.taggedArrivals` is served from
-  either, and the site-wide metrics from `bskKpiMinutes` (today so far) or `bskHourPath` (a page
+  todaySoFar: 'bskKpiDays' }`) instead of one `fact`: `campaign.taggedArrivals` is served from
+  either, and the site-wide metrics from `bskKpiDays` (today so far) or `bskRangePath` (a page
   range). A metric is a row test (`path`, `visitor`) over its fact rather than a free-form
   `reduce`; spend is the one `spend()` reducer.
 - Pop-up ratios take the pop-up as a param (`popup.tapRate` with `{ popup }`, …) instead of one id
@@ -951,6 +951,43 @@ that code rather than copying it.
 - Worth an owner decision: bounding `campaignReturns` by the attribution start would cut its
   `rows_read` from a full `bestsudoku-web` scan to the flight's own rows, and would drop pre-launch
   QA return beacons, which the current queries count.
+
+**Review fixes (2026-09-27).** An adversarial review passed slices 1-3 with fixes:
+- **CPU (#8).** The timed facts are renamed for what they now return: `bskKpiMinutes` →
+  `bskKpiDays`, `bskHourPath` → `bskRangePath`, `popupHourPath` → `popupRangePath`. They are
+  aggregated by SQL into ET day windows (the KPI fact) and time segments — the bucket's position
+  against the fact's cuts (`engine.ts` `factCuts`: every go-live, attribution start and alignment
+  instant a metric on it can filter on, derived from the registry) — instead of one row per minute
+  or hour, comparing the bucket start exactly as the engine did per row, so counts are unchanged
+  and a fact's size no longer grows with traffic or range. The engine indexes each fact once per
+  batch, classifies each path once, resolves each side once (planning and derivation share a
+  `SideMemo`), and shares results between identical requests. ET date maths uses
+  `lib/etTime.ts` (plain DST arithmetic) instead of `Intl` per call, and the request path is
+  compiled at isolate start-up (`lib/metrics/prewarm.ts`). Numbers: `docs/capacity.md` §7.
+- **Correctness and hardening.** #1: the notes registry has a null prototype and every lookup is
+  an own-key check (`hasNote`), so `constructor`, `toString`, `__proto__` and the like are unknown
+  ids, never inherited members; presets, repeat kinds and the KPI go-live map use the same rule.
+  #9: a fact's cache key hashes its SQL and bound values, built at a fixed "now" so the KPI fact's
+  live bounds never split it, plus an entry-format version, so a config change (tags,
+  `flightStart`, `flightStartTimeEt`, `flightEnd`, cuts) never reads a stale entry. #10: context
+  dates must be real calendar days and clock times, `since` before `until`, and at most 400 days
+  apart. #11: a closed flight with no `flightPathsSeen` evidence is unmeasured. #12: a bad site tag
+  has its own error. #13: a bare `YYYY-MM-DD` page range is an ET day (the rest of the dashboard's
+  days are ET); `/api/popups` and `/api/geo` still read it as a UTC day (equivalence difference D6;
+  the dashboard's range control always sends datetimes). #5: a ratio of unknown kind is refused at
+  registration. #6: the ads routine's report says "game-screen views", through the notes label.
+  Deltas are emitted only when finite and their percentage only when finite (absent against a zero
+  day, never `null`); a non-finite value is an `error`.
+- **#2, checked:** the KPI fact filters on the Best Sudoku sites and the campaign fact does not, so
+  the two could disagree only if a campaign's tagged rows landed on another site. A read-only
+  production query (2026-09-27) found no row on any other site carrying any configured campaign
+  tag (0 arrivals, 0 rows); the registry comment says so instead of claiming they can never
+  disagree.
+- **Follow-up (#7), not changed here:** `lib/campaigns.ts` `etTimeUtcMs` returns a fallback
+  instant for a wall-clock time the spring-forward transition skips (02:00-02:59 ET on the second
+  Sunday of March). It predates this branch and no configured `flightStartTimeEt` falls in that
+  hour; `etTime.ts` `etWallTimeMs` maps such a time forward instead. Worth aligning the two before
+  a campaign ever starts in that hour.
 
 ## Implementation notes (slices 4-5)
 

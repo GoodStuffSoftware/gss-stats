@@ -1,7 +1,8 @@
 // validateCard over every preset, and the POST /api/metrics whitelist (ADR 0003 section 3).
 import { describe, expect, it } from 'vitest'
 import { KEY_RE, MAX_REQUESTS, validateCard, validateMetricsRequest, type ValidatedBatch } from './validate'
-import { PRESETS } from './presets'
+import { PRESETS, presetById } from './presets'
+import { getNote, hasNote, isNoteActive, noteRawText, noteTemplate, noteTokens } from '../notes'
 import type { CardSpec, MetricItem } from './types'
 import { MIN_COHORT } from '../popupEvents'
 
@@ -62,7 +63,9 @@ describe('validateMetricsRequest: batch-level rejections', () => {
     ['an unknown context field', JSON.stringify({ v: 1, context: { where: '1=1' }, requests: [{ key: 'a', metric: 'bsk.pageviews' }] }), 400, 'context.where is not accepted'],
     ['a malformed date', JSON.stringify({ v: 1, context: { since: '2026-09-01; DROP', until: '2026-09-02' }, requests: [{ key: 'a', metric: 'bsk.pageviews' }] }), 400, 'context.since must be YYYY-MM-DD or an ISO datetime'],
     ['since without until', JSON.stringify({ v: 1, context: { since: '2026-09-01' }, requests: [{ key: 'a', metric: 'bsk.pageviews' }] }), 400, 'context.since and context.until go together'],
-    ['a malformed site', JSON.stringify({ v: 1, context: { sites: ["x' OR '1"] }, requests: [{ key: 'a', metric: 'bsk.pageviews' }] }), 400, 'context.sites must be at most 50 site tags'],
+    ['a malformed site (its own message, review #12)', JSON.stringify({ v: 1, context: { sites: ["x' OR '1"] }, requests: [{ key: 'a', metric: 'bsk.pageviews' }] }), 400, 'context.sites contains an invalid site tag'],
+    ['too many sites', JSON.stringify({ v: 1, context: { sites: Array.from({ length: 51 }, (_, i) => `s${i}`) }, requests: [{ key: 'a', metric: 'bsk.pageviews' }] }), 400, 'context.sites must be a list of at most 50 site tags'],
+    ['sites that are not a list', JSON.stringify({ v: 1, context: { sites: 'bestsudoku' }, requests: [{ key: 'a', metric: 'bsk.pageviews' }] }), 400, 'context.sites must be a list of at most 50 site tags'],
     ['a non-true boolean', JSON.stringify({ v: 1, context: { excludeOwnVisits: 1 }, requests: [{ key: 'a', metric: 'bsk.pageviews' }] }), 400, 'context.excludeOwnVisits must be exactly true when set'],
     ['a bad user agent', JSON.stringify({ v: 1, context: { ownBrowser: 'Chrome<script>' }, requests: [{ key: 'a', metric: 'bsk.pageviews' }] }), 400, 'context.ownBrowser is not a valid user-agent value'],
   ])('%s', (_n, text, status, error) => {
@@ -117,5 +120,57 @@ describe('validateMetricsRequest: per-request rejections (the rest of the batch 
   it('context sites are deduplicated and sorted (a stable fact key)', () => {
     const b = batch({ v: 1, context: { since: '2026-09-20', until: '2026-09-26', sites: ['b', 'a', 'b'] }, requests: [{ key: 'a', metric: 'bsk.pageviews' }] })
     expect(b.ok && b.context.sites).toEqual(['a', 'b'])
+  })
+})
+
+describe('context dates are real and ordered (review #10)', () => {
+  const ctx = (since: string, until: string) => validateMetricsRequest(JSON.stringify({ v: 1, context: { since, until }, requests: [{ key: 'a', metric: 'bsk.pageviews' }] }))
+  it.each([
+    ['an impossible month and day', '2026-99-99', '2026-10-01', 'context.since must be YYYY-MM-DD or an ISO datetime'],
+    ['a day the month does not have (Date.parse rolls it over)', '2026-02-30', '2026-03-05', 'context.since must be YYYY-MM-DD or an ISO datetime'],
+    ['an impossible clock time', '2026-09-26T25:61', '2026-09-27', 'context.since must be YYYY-MM-DD or an ISO datetime'],
+    ['a 24:00 clock time', '2026-09-26T24:00', '2026-09-27', 'context.since must be YYYY-MM-DD or an ISO datetime'],
+    ['an impossible until', '2026-09-20', '2026-09-26T23:60:00Z', 'context.until must be YYYY-MM-DD or an ISO datetime'],
+    ['a reversed range', '2026-09-26', '2026-09-20', 'context.since must be before context.until'],
+    ['an empty range', '2026-09-26T12:00:00Z', '2026-09-26T12:00:00Z', 'context.since must be before context.until'],
+    ['1970 to 9999', '1970-01-01', '9999-12-31', 'context range is longer than 400 days'],
+    ['401 days', '2025-09-01', '2026-10-06', 'context range is longer than 400 days'],
+  ])('%s is a 400', (_n, since, until, error) => {
+    expect(ctx(since, until)).toMatchObject({ ok: false, status: 400, error })
+  })
+  it.each([
+    ['one ET day', '2026-09-26', '2026-09-26'],
+    ['400 days exactly', '2025-08-22', '2026-09-25'],
+    ['datetimes, with and without a zone', '2026-09-20T00:00:00Z', '2026-09-26T12:30'],
+    ['the leap day', '2028-02-29', '2028-03-01'],
+  ])('%s is accepted', (_n, since, until) => {
+    expect(ctx(since, until).ok).toBe(true)
+  })
+})
+
+describe('note ids are own keys only (review #1)', () => {
+  it.each(['constructor', 'toString', '__proto__', 'hasOwnProperty', 'valueOf'])('%s is not a note: validateCard refuses it, and the note helpers never throw', (id) => {
+    const spec: CardSpec = { v: 1, captions: [id], sections: [{ layout: 'rows', items: [{ id: 'x', label: { note: id }, data: { metric: 'bsk.pageviews' }, display: { as: 'number' }, gating: { whenEmpty: { note: id } } }] }] }
+    const errors = validateCard(spec).join('\n')
+    expect(errors).toContain(`card.captions: unknown note id '${id}'`)
+    expect(errors).toContain(`sections[0].x.label: unknown note id '${id}'`)
+    expect(errors).toContain(`sections[0].x.gating.whenEmpty: unknown note id '${id}'`)
+    expect(hasNote(id)).toBe(false)
+    expect(getNote(id)).toBeUndefined()
+    expect(noteRawText(id)).toBe('')
+    expect(noteTokens(id)).toEqual([])
+    expect(noteTemplate(id)).toBe('')
+    expect(isNoteActive(id)).toBe(false)
+  })
+  it('a real note still resolves', () => {
+    expect(hasNote('arrivals-caveat')).toBe(true)
+    expect(noteRawText('label.bsk.gameViews')).toBe('Game-screen views')
+  })
+  it('a repeat over an unknown kind is refused, and a preset id is an own key only', () => {
+    const spec = { v: 1, repeat: { over: 'constructor' }, sections: [{ layout: 'rows', items: [{ id: 'x', label: 'X', data: { metric: 'bsk.pageviews' }, display: { as: 'number' } }] }] } as unknown as CardSpec
+    expect(validateCard(spec)).toContain("card.repeat: unknown repeat 'constructor'")
+    expect(presetById('constructor')).toBeUndefined()
+    expect(presetById('__proto__')).toBeUndefined()
+    expect(presetById('bsk-kpis')).toBe(PRESETS['bsk-kpis'])
   })
 })

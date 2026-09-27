@@ -37,6 +37,7 @@ export function ratioVerdict(r: Pick<RatioDef, 'kind' | 'num' | 'den'>, metrics:
   if (!n || !d) return { ok: false, reason: 'unknown metric' }
   if (r.kind === 'pair') return { ok: true, reason: 'counts only' }
   if (r.kind === 'cost') return n.unit === 'usd' && d.unit !== 'usd' ? { ok: true, reason: 'money per ' + d.unit } : { ok: false, reason: 'cost needs usd over a count' }
+  if (r.kind !== 'proportion') return { ok: false, reason: `unknown kind ${String(r.kind)}` } // a registration from untyped data
   if (n.unit !== d.unit) return { ok: false, reason: `unit ${n.unit} over ${d.unit}` }
   const visited = new Set<string>()
   for (let cur: MetricDef | undefined = n; cur && !visited.has(cur.id); cur = cur.subsetOf ? metrics.get(cur.subsetOf) : undefined) {
@@ -65,15 +66,30 @@ export function defineRatios(defs: readonly RatioDef[], metrics: ReadonlyMap<str
 
 /** The windows both sides accept, in the numerator's order (the first is the default). */
 export function ratioWindowsOf(r: Pick<RatioDef, 'num' | 'den'>, metrics: ReadonlyMap<string, MetricDef> = METRICS): WindowName[] {
-  const n = metrics.get(r.num)
-  const d = metrics.get(r.den)
-  if (!n || !d) return []
-  const dw = new Set(metricWindows(d))
-  return metricWindows(n).filter((w) => dw.has(w))
+  return sidesMemo(r, metrics).windows
 }
 /** The params a ratio accepts: the union of both sides'. */
 export function ratioParamsOf(r: Pick<RatioDef, 'num' | 'den'>, metrics: ReadonlyMap<string, MetricDef> = METRICS): MetricParam[] {
-  return [...new Set([...(metrics.get(r.num)?.params ?? []), ...(metrics.get(r.den)?.params ?? [])])]
+  return sidesMemo(r, metrics).params
+}
+// Both are read for every request that names a ratio, so they are computed once per pair.
+const pairMemo = new WeakMap<ReadonlyMap<string, MetricDef>, Map<string, { windows: WindowName[]; params: MetricParam[] }>>()
+function sidesMemo(r: Pick<RatioDef, 'num' | 'den'>, metrics: ReadonlyMap<string, MetricDef>): { windows: WindowName[]; params: MetricParam[] } {
+  let byPair = pairMemo.get(metrics)
+  if (!byPair) pairMemo.set(metrics, (byPair = new Map()))
+  const key = `${r.num}\u0000${r.den}`
+  let v = byPair.get(key)
+  if (!v) {
+    const n = metrics.get(r.num)
+    const d = metrics.get(r.den)
+    const dw = d ? new Set(metricWindows(d)) : new Set<WindowName>()
+    v = {
+      windows: n && d ? metricWindows(n).filter((w) => dw.has(w)) : [],
+      params: [...new Set([...(n?.params ?? []), ...(d?.params ?? [])])],
+    }
+    byPair.set(key, v)
+  }
+  return v
 }
 
 const ratio = (id: string, kind: RatioKind, num: string, den: string, extra: Partial<RatioDef> = {}): RatioDef => ({ id, label: `label.${id}`, kind, num, den, ...extra })

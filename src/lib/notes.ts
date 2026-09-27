@@ -66,7 +66,10 @@ function resolveText(n: NoteDef): string {
   return typeof n.text === 'function' ? n.text() : n.text
 }
 
-export const NOTES_REGISTRY: Record<string, NoteDef> = {
+// A null-prototype object (review finding #1): an id such as 'constructor', 'toString' or
+// '__proto__' is simply not a note, never an inherited Object member. Look ids up with getNote /
+// hasNote (Object.hasOwn), never with `in`.
+export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.create(null) as Record<string, NoteDef>, {
   'small-sample': {
     id: 'small-sample',
     text: SMALL_SAMPLE_NOTE,
@@ -351,7 +354,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = {
     'label.card.retry': 'Retry',
     'label.card.openCampaigns': 'Open the Campaigns page',
   }),
-}
+})
 
 function labels(entries: Record<string, string>): Record<string, NoteDef> {
   return Object.fromEntries(Object.entries(entries).map(([id, text]) => [id, { id, text, kind: 'label' as const, severity: 'info' as const, scopes: [] }]))
@@ -373,8 +376,13 @@ export function funnelStepLabel(step: FunnelStepKey): string {
   return noteRawText(FUNNEL_STEP_LABEL_IDS[step])
 }
 
+/** Whether `id` is a registry entry (an own key — never an inherited Object member). */
+export function hasNote(id: string): boolean {
+  return typeof id === 'string' && Object.hasOwn(NOTES_REGISTRY, id)
+}
+
 export function getNote(id: string): NoteDef | undefined {
-  return NOTES_REGISTRY[id]
+  return hasNote(id) ? NOTES_REGISTRY[id] : undefined
 }
 
 /** The note's RAW template text — no tokenizing, no interpolation. Only needed for
@@ -382,7 +390,7 @@ export function getNote(id: string): NoteDef | undefined {
  * TextBlock.vue, which needs paragraph boundaries from the untouched template); every other
  * caller should use noteTokens (safe markup) or noteRawText (safe plain text) instead. */
 export function noteTemplate(id: string): string {
-  const n = NOTES_REGISTRY[id]
+  const n = getNote(id)
   return n ? resolveText(n) : ''
 }
 
@@ -391,7 +399,7 @@ export function noteTemplate(id: string): string {
  * these through NoteBlock.vue/TextBlock.vue (or any <template v-for> over bold/link/text),
  * never by joining them back into a string and re-parsing. */
 export function noteTokens(id: string, vars?: Record<string, string | number>): import('./textLite').TextToken[] {
-  const n = NOTES_REGISTRY[id]
+  const n = getNote(id)
   if (!n) return []
   return tokenizeAndInterpolate(resolveText(n), { ...n.vars, ...vars })
 }
@@ -403,13 +411,13 @@ export function noteTokens(id: string, vars?: Record<string, string | number>): 
  * `{{ noteRawText(...) }}` inside markup-capable markup (a <p>, a caption area), use
  * <NoteBlock>/<TextBlock> instead so bold/link markup actually renders as such. */
 export function noteRawText(id: string, vars?: Record<string, string | number>): string {
-  const n = NOTES_REGISTRY[id]
+  const n = getNote(id)
   if (!n) return ''
   return toPlainText(resolveText(n), { ...n.vars, ...vars })
 }
 
 export function isNoteActive(id: string): boolean {
-  const n = NOTES_REGISTRY[id]
+  const n = getNote(id)
   if (!n) return false
   return !n.activeWhen || n.activeWhen()
 }
