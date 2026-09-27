@@ -747,8 +747,14 @@ export function installOutcomeGapReportNote(fixedAtMs: number | null = INSTALL_A
   return `Install outcomes: ${status}. The install tap (/install/pwa-accept) is accurate; a Play install has no web-side outcome until a later play-detected visit.`
 }
 export const INSTALL_OUTCOME_GAP_NOTE = installOutcomeGapReportNote()
-export const UPSELL_KNOWN_BUG_NOTE =
-  'Upsell near-zero for signed-out traffic is a KNOWN BUG (useUpsellPrompt returns early when uid is null), not broken instrumentation. A later non-zero is not a campaign win until someone checks whether that bug was fixed in between.'
+/** CORRECTED 2026-09-26 (verified against best-sudoku source and confirmed by the release
+ * coordinator): the earlier "useUpsellPrompt returns early when uid is null is a KNOWN BUG"
+ * note was WRONG. A signed-out visitor is never walled by design — the trial clock only
+ * starts once someone plays a game while signed in (best-sudoku functions/src/trial-tracking.ts
+ * onCreateGame; locally stored games upload after sign-in via recordsPushUp.ts). The planned
+ * "fix" was CANCELLED, not deferred. Do not resurrect the bug framing. */
+export const UPSELL_SIGNEDOUT_EXPECTED_NOTE =
+  'Upsell near-zero for signed-out campaign traffic is EXPECTED BY DESIGN, not broken instrumentation: signed-out visitors are never shown the paywall, and the trial starts only once a player signs in and plays a game. Upsell counts only become meaningful for signed-in players.'
 export const SIGNIN_ELIGIBLE_COUNT_NOTE =
   'signin-eligible is a COUNT of asks, never a denominator: redirect-leg sign-in failures are not captured, so eligible → signed-in is not a computable ratio.'
 export const PLAY_INSTALLS_HOUSEHOLD_NOTE = "Play install counts include Mike's household installs."
@@ -760,8 +766,11 @@ export const MEASUREMENT_QUIET_NOTE = POPUP_PAGE_NOTE
  * calls it from BOTH signInWithEmail and createAccountWithEmail, so a tagged auth success can
  * be a returning sign-in; and new accounts in the window are SITEWIDE. Each input over-counts
  * campaign sign-ups, so their minimum is an UPPER bound — "at most N". */
+const AUTH_NEW_EXISTING_LIVE_AT_LABEL = AUTH_NEW_EXISTING_LIVE_AT == null ? null : etMinuteLabel(AUTH_NEW_EXISTING_LIVE_AT)
 export const SIGNUP_PROXY_NOTE =
-  'Sign-ups are an UPPER bound, "at most N campaign sign-ups" = min(tagged auth successes, new prod accounts sitewide in the flight window): /auth/success also fires for returning sign-ins and the account count is not campaign-attributed. Counts only, never matched to anyone.'
+  AUTH_NEW_EXISTING_LIVE_AT_LABEL == null
+    ? 'Sign-ups are an UPPER bound, "at most N campaign sign-ups" = min(tagged auth successes, new prod accounts sitewide in the flight window): /auth/success also fires for returning sign-ins and the account count is not campaign-attributed. Counts only, never matched to anyone.'
+    : `Sign-ups before ${AUTH_NEW_EXISTING_LIVE_AT_LABEL} are an UPPER bound, "at most N campaign sign-ups" = min(tagged auth successes, new prod accounts sitewide in the flight window): /auth/success also fires for returning sign-ins and the account count is not campaign-attributed. From ${AUTH_NEW_EXISTING_LIVE_AT_LABEL} on, tagged /auth/success/<provider>/new rows count sign-ups EXACTLY, capped at the window's new accounts; a report spanning both sides shows an "at most X + exactly Y" split. Counts only, never matched to anyone.`
 /** Post-flight recommendation (a beacon change, so only after the 2026-10-02 freeze). v1.95.5
  * shipped the beacon early (AUTH_NEW_EXISTING_LIVE_AT), so the post-flight read adds this only
  * while AUTH_NEW_EXISTING_LIVE_AT is null, and sign-ups are counted exactly from the live

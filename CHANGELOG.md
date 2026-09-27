@@ -6,6 +6,16 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Two standing retest report notes corrected.** The upsell-near-zero-for-signed-out note
+  wrongly called it a known bug (`useUpsellPrompt` returning early on `uid === null`); it is
+  expected by design (a signed-out visitor is never walled — the trial starts only once a
+  signed-in player plays a game), and the planned "fix" was cancelled. The sign-up note now
+  names both segments — bounded before the new/existing sign-in split went live (v1.95.5,
+  2026-09-26 19:43:02Z) and exact from `/auth/success/<provider>/new` after it — and the printed
+  sign-up line (`at most N campaign sign-ups (at most B + exactly E)`) shows both parts instead
+  of collapsing a mixed window to one bound.
+
 ### Added
 - **The retest ads routine's morning read now includes Play Console bulk reports (R4), read-only
   and informational only.** Installs by day, acquisition by source, and store listing
