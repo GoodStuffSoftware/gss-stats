@@ -555,7 +555,7 @@ export const RAW_INSTALL_DEDUPE_LIVE_AT_UTC_MS = Date.parse('2026-09-26T20:23:02
 export const RAW_INSTALL_DEDUPE_LIVE_AT_ET = '2026-09-26'
 export const RAW_INSTALL_DEDUPE_MARKER_LABEL = 'raw install dedupe'
 export const RAW_INSTALL_DEDUPE_NOTE =
-  'raw /install/* dedupe live — duplicate cross-tab rows no longer sent; small drop expected mainly on desktop Chrome/Edge; primary install count unaffected'
+  `Raw install signals are de-duplicated from ${RAW_INSTALL_DEDUPE_LIVE_AT_ET} on: duplicate cross-tab signals are no longer sent, so a small drop is expected, mainly on desktop Chrome/Edge. The primary install count is unaffected.`
 
 // ── Aggregation ──────────────────────────────────────────────────────────────────────
 // The Function fetches one row per (UTC hour bucket, path) with its count — still an

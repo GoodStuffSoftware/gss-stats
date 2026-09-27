@@ -6,10 +6,11 @@
 import { computed } from 'vue'
 import { useMetrics } from '../../composables/useMetrics'
 import { buildRequestSpec, flattenSectionItems, resolveRepeat, type FlatItem, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
-import { itemLabelTokens, resolveLabelTokens } from '../../lib/metrics/render'
+import { itemLabelTokens, itemViewModel, resolveLabelTokens } from '../../lib/metrics/render'
 import type { MetricsContext, Section } from '../../lib/metrics/types'
 import MetricItem from './MetricItem.vue'
 import MetricLabel from './MetricLabel.vue'
+import MetricPlaceholder from './MetricPlaceholder.vue'
 import MetricTableCell from './MetricTableCell.vue'
 
 const props = defineProps<{
@@ -30,19 +31,25 @@ const flatItems = computed<FlatItem[]>(() => (props.section.layout === 'table' ?
 // via the SAME shared useMetrics() cache each MetricItem uses (content-equal requests dedupe
 // and share one fetch) — never inside a computed getter, since request() has side effects
 // (refcounting + onScopeDispose registration) that must run exactly once.
-const { request: requestForMax } = useMetrics(() => props.context)
-const barRefs =
-  props.section.layout === 'bars'
-    ? flattenSectionItems(props.section, props.outerScope, props.ctx)
-        .filter((fi) => !fi.emptyOf && fi.item.display.as === 'bar')
-        .map((fi) => {
-          const spec = buildRequestSpec(fi.item, fi.scope)
-          return spec ? requestForMax(spec) : null
-        })
-    : []
+const { request: requestShared } = useMetrics(() => props.context)
+const setupItems = props.section.layout === 'table' ? [] : flattenSectionItems(props.section, props.outerScope, props.ctx)
+const setupRefs = setupItems.map((fi) => {
+  const spec = fi.emptyOf ? null : buildRequestSpec(fi.item, fi.scope)
+  return spec ? requestShared(spec) : null
+})
 const barMax = computed(() => {
-  const nums = barRefs.map((r) => (r?.value ? (r.value.value ?? r.value.numerator ?? 0) : 0))
+  if (props.section.layout !== 'bars') return 0
+  const nums = setupItems.flatMap((fi, i) => (fi.emptyOf || fi.item.display.as !== 'bar' ? [] : [setupRefs[i]?.value ? (setupRefs[i]!.value!.value ?? setupRefs[i]!.value!.numerator ?? 0) : 0]))
   return nums.length ? Math.max(0, ...nums) : 0
+})
+
+// A section left with no visible item after gating (every item omitted: a closed campaign's
+// unmeasured steps, whenEmpty 'omit', …) is omitted whole, title included (ADR 0003, "Closed
+// campaigns: omit, don't label"). The same view model MetricItem renders decides visibility,
+// over the same shared values; a placeholder or a still-loading item counts as visible.
+const anyVisible = computed(() => {
+  if (props.section.layout === 'table') return true
+  return setupItems.some((fi, i) => !!fi.emptyOf || itemViewModel(fi.item, setupRefs[i]?.value, fi.scope, { todayEt: props.ctx.todayEt }).visible)
 })
 
 // ── table ───────────────────────────────────────────────────────────────────────────────────
@@ -51,7 +58,7 @@ const tableHeaderTokens = computed(() => props.section.items.map((it) => itemLab
 </script>
 
 <template>
-  <div class="metric-section" :class="`layout-${section.layout}`">
+  <div v-if="anyVisible" class="metric-section" :class="`layout-${section.layout}`">
     <p v-if="titleTokens.length" class="section-title"><MetricLabel :tokens="titleTokens" /></p>
 
     <table v-if="section.layout === 'table'" class="metric-table">
@@ -71,10 +78,12 @@ const tableHeaderTokens = computed(() => props.section.items.map((it) => itemLab
 
     <div v-else class="items-wrap">
       <template v-for="(fi, i) in flatItems" :key="`${fi.item.id}-${i}`">
-        <div v-if="fi.emptyOf" class="empty-placeholder">
-          <MetricLabel :tokens="resolveLabelTokens(fi.emptyOf.label, fi.scope, undefined, ctx.todayEt)" />
-          <span class="empty-text"><MetricLabel :tokens="resolveLabelTokens(fi.emptyOf.text, fi.scope, undefined, ctx.todayEt)" /></span>
-        </div>
+        <MetricPlaceholder
+          v-if="fi.emptyOf"
+          :label-tokens="resolveLabelTokens(fi.emptyOf.label, fi.scope, undefined, ctx.todayEt)"
+          :text-tokens="resolveLabelTokens(fi.emptyOf.text, fi.scope, undefined, ctx.todayEt)"
+          :frame="fi.item.frame ?? defaultFrame"
+        />
         <MetricItem v-else :item="fi.item" :scope="fi.scope" :frame="fi.item.frame ?? defaultFrame" :today-et="ctx.todayEt" :context="context" :bar-max="section.layout === 'bars' ? barMax : undefined" />
       </template>
     </div>
@@ -102,13 +111,6 @@ const tableHeaderTokens = computed(() => props.section.items.map((it) => itemLab
 .layout-bars .items-wrap {
   display: flex;
   flex-direction: column;
-}
-.empty-placeholder {
-  font-size: 11.5px;
-  color: rgb(var(--ink-3));
-}
-.empty-text {
-  margin-left: 4px;
 }
 .metric-table {
   width: 100%;

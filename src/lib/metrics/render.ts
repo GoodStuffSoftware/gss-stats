@@ -37,7 +37,7 @@ function hasNote(id: string): boolean {
 
 export interface DeltaLine {
   text: string
-  cls: '' | 'up' | 'down'
+  cls: '' | 'up' | 'down' | 'new'
 }
 
 export interface ItemViewModel {
@@ -47,6 +47,8 @@ export interface ItemViewModel {
   deltaLines: DeltaLine[]
   captionTokens: TextToken[]
   badgeTone?: 'neutral' | 'live' | 'warn'
+  /** The primary is a status word ("not yet tracking"), not a value: render it small. */
+  muted?: boolean
 }
 
 export interface ItemViewOptions {
@@ -72,14 +74,24 @@ export function resolveLabelTokens(label: Label, scope: ScopeInstance, metricLab
 
 // ── Plain-value formatting (parallels lib/kpiFormat.ts's fmtCount/money/pct, kept separate:
 // this module has no dependency on the Overview-specific Delta/gating types). ──────────────
+// Every formatter takes wire data: anything but a finite number (null, NaN, ±Infinity, a
+// string that slipped through) renders as a dash — never "NaN", "$Infinity" or "NaN%".
+const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n)
 function fmtCount(n: number | null | undefined): string {
-  return n == null ? '—' : n.toLocaleString('en-US')
+  return finite(n) ? n.toLocaleString('en-US') : '—'
 }
 function fmtMoney(n: number | null | undefined): string {
-  return n == null ? '—' : `$${n.toFixed(2)}`
+  return finite(n) ? `$${n.toFixed(2)}` : '—'
 }
 function fmtPercent(fraction: number | null | undefined, decimals: number): string {
-  return fraction == null ? '—' : `${(fraction * 100).toFixed(decimals)}%`
+  return finite(fraction) ? `${(fraction * 100).toFixed(decimals)}%` : '—'
+}
+/** A percent's " (n/d)": always shown when either side came back, a missing or non-finite
+ * side as "?"; empty only when the server sent neither. */
+function ndSuffix(value: MetricValue): string {
+  if (value.numerator == null && value.denominator == null) return ''
+  const side = (n: unknown) => (finite(n) ? String(n) : '?')
+  return ` (${side(value.numerator)}/${side(value.denominator)})`
 }
 function unitWord(def: MetricDef): string {
   return noteRawText(def.unitLabel ?? unitLabelId(def.unit))
@@ -87,7 +99,7 @@ function unitWord(def: MetricDef): string {
 function deltaText(d: { delta: number; deltaPct: number | null }): string {
   const rounded = Math.round(d.delta)
   const sign = rounded > 0 ? '+' : ''
-  const pctPart = d.deltaPct == null ? '' : ` (${d.delta > 0 ? '+' : ''}${(d.deltaPct * 100).toFixed(0)}%)`
+  const pctPart = typeof d.deltaPct !== 'number' || !Number.isFinite(d.deltaPct) ? '' : ` (${d.delta > 0 ? '+' : ''}${(d.deltaPct * 100).toFixed(0)}%)`
   return `${sign}${rounded.toLocaleString('en-US')}${pctPart}`
 }
 function deltaLinesFor(value: MetricValue, deltas: readonly ('yesterday' | 'avg7')[] | undefined): DeltaLine[] {
@@ -95,7 +107,9 @@ function deltaLinesFor(value: MetricValue, deltas: readonly ('yesterday' | 'avg7
   const out: DeltaLine[] = []
   for (const name of deltas) {
     const d = value.deltas[name]
-    if (!d) continue
+    // A non-finite delta (today N over a zero day) arrives as null after JSON; so can a
+    // malformed one. Either way it is absent: no line, no up/down styling.
+    if (!d || typeof d.delta !== 'number' || !Number.isFinite(d.delta)) continue
     out.push({ text: `${name === 'yesterday' ? 'vs yesterday' : 'vs 7d avg'} ${deltaText(d)}`, cls: d.delta === 0 ? '' : d.delta > 0 ? 'up' : 'down' })
   }
   return out
@@ -135,7 +149,7 @@ function formatMetricOrRatioValue(display: Display, value: MetricValue, def: Met
       if (value.status === 'too-few') return { primary: noteRawText('too-few-to-report'), deltaLines: [] }
       return { primary: fmtMoney(value.value), deltaLines: [] }
     case 'percent': {
-      const nd = value.numerator != null && value.denominator != null ? ` (${value.numerator}/${value.denominator})` : ''
+      const nd = ndSuffix(value)
       if (value.status === 'too-few') return { primary: `${noteRawText('too-few-to-report')}${nd}`, deltaLines: [] }
       return { primary: `${fmtPercent(value.value, display.decimals ?? 1)}${nd}`, deltaLines: [] }
     }
@@ -161,18 +175,32 @@ function formatMetricOrRatioValue(display: Display, value: MetricValue, def: Met
   }
 }
 
+/** "new today" (the KPI tiles' go-live state): a today-so-far count asked for deltas, and the
+ * server returned none, because every comparison window predates the metric's go-live (or
+ * the campaign's attribution start). The server omits a gated delta rather than zeroing it,
+ * so an absent `deltas` on a measured today-so-far value can only mean that. */
+function isNewToday(item: MetricItem, value: MetricValue, def: MetricDef | RatioDef): boolean {
+  if (item.display.as !== 'number' || !item.display.deltas?.length || value.deltas) return false
+  if (value.status !== 'ok' && value.status !== 'partial') return false
+  if (!('unit' in def)) return false // a ratio never carries deltas
+  const window = 'metric' in item.data ? (item.data.window ?? Object.keys(def.windows)[0]) : undefined
+  return window === 'todaySoFar'
+}
+
 function itemCaptionOnly(item: MetricItem, scope: ScopeInstance, todayEt: string): TextToken[] {
   return item.caption ? resolveLabelTokens(item.caption, scope, undefined, todayEt) : []
 }
+const CAPTION_SEPARATOR: TextToken = { type: 'text', value: ' · ' }
 function valueCaptionTokens(item: MetricItem, value: MetricValue, scope: ScopeInstance, todayEt: string): TextToken[] {
-  const tokens: TextToken[] = []
+  const groups: TextToken[][] = []
   for (const id of value.noteIds ?? []) {
     if (!hasNote(id)) continue
     const vars = id === 'counted-from' && value.measuredFrom != null ? { from: etDateFromMs(value.measuredFrom) } : undefined
-    tokens.push(...noteTokens(id, vars))
+    groups.push(noteTokens(id, vars))
   }
-  tokens.push(...itemCaptionOnly(item, scope, todayEt))
-  return tokens
+  groups.push(itemCaptionOnly(item, scope, todayEt))
+  // One caption line, its notes separated — never run together ("…not recordedstill arriving").
+  return groups.filter((g) => g.length).flatMap((g, i) => (i ? [CAPTION_SEPARATOR, ...g] : g))
 }
 
 function fieldViewModel(item: MetricItem, raw: string | null, labelTokens: TextToken[], scope: ScopeInstance, todayEt: string): ItemViewModel {
@@ -214,15 +242,19 @@ function metricViewModel(item: MetricItem, value: MetricValue, def: MetricDef | 
   }
   if (value.status === 'no-data') {
     const { primary, visible } = applyEmptyGating(item.gating?.whenEmpty)
-    return { visible, labelTokens, primary, deltaLines: [], captionTokens: itemCaptionOnly(item, scope, todayEt) }
+    // A percent always shows its (n/d), a 0 denominator included ("— (0/0)"): the reader
+    // sees WHY there is no rate (ADR 0003, "n/d is always returned").
+    const nd = item.display.as === 'percent' && (item.gating?.whenEmpty ?? 'dash') === 'dash' ? ndSuffix(value) : ''
+    return { visible, labelTokens, primary: primary + nd, deltaLines: [], captionTokens: itemCaptionOnly(item, scope, todayEt) }
   }
   if (value.status === 'unmeasured') {
     const { primary, visible } = applyUnmeasuredGating(item.gating, scope, value)
-    return { visible, labelTokens, primary, deltaLines: [], captionTokens: itemCaptionOnly(item, scope, todayEt) }
+    return { visible, labelTokens, primary, deltaLines: [], captionTokens: itemCaptionOnly(item, scope, todayEt), muted: true }
   }
   // 'ok' | 'partial' | 'too-few'
   const { primary, deltaLines } = formatMetricOrRatioValue(item.display, value, def)
-  return { visible: true, labelTokens, primary, deltaLines, captionTokens: valueCaptionTokens(item, value, scope, todayEt) }
+  if (isNewToday(item, value, def)) deltaLines.push({ text: noteRawText('new-today'), cls: 'new' })
+  return { visible: true, labelTokens, primary, deltaLines, captionTokens: valueCaptionTokens(item, value, scope, todayEt), ...(value.status === 'too-few' && item.display.as !== 'percent' ? { muted: true } : {}) }
 }
 
 /** An item's label alone, resolved against its scope — used by a 'table' section's header row,

@@ -951,3 +951,68 @@ that code rather than copying it.
 - Worth an owner decision: bounding `campaignReturns` by the attribution start would cut its
   `rows_read` from a full `bestsudoku-web` scan to the flight's own rows, and would drop pre-launch
   QA return beacons, which the current queries count.
+
+## Implementation notes (slices 4-5)
+
+**Slice 4 (`src/components/metrics/`, `src/composables/useMetrics.ts`).**
+- `MetricCard` resolves the `CardRef` and the card-level repeat; `MetricSection` lays out one
+  section; `MetricItem` renders a row, pill or tile; `MetricTableCell` is a `table` column cell;
+  `MetricPlaceholder` draws a repeat's `empty` fallback in the same frame as its neighbours (the
+  KPI "no campaign flighting today" tile). All formatting is the pure `itemViewModel`
+  (`lib/metrics/render.ts`); scope expansion and request building are pure functions in
+  `lib/metrics/scope.ts`.
+- There is no `MetricCardBody`: `ChartCard` will render `MetricCard` directly (slice 5 phase B).
+- Hardening from the slice-4 review: `itemViewModel` never renders a non-finite number (a dash
+  instead of `NaN`, `$Infinity` or `NaN%`), treats a null or non-finite delta as absent (a
+  delta of `Infinity` arrives as `null` after JSON), and always shows a percent's `(n/d)`, with
+  `?` for a side that did not come back. Preset ids are read through `presetById`
+  (`Object.hasOwn` over a null-prototype `PRESETS`), so `constructor` is an unknown card.
+
+**Page context and stale responses (`useMetrics`).** A card follows the page's filter bar:
+`useMetrics(context)` takes a ref or getter, and one watcher per `useMetrics()` call, keyed on
+the normalized context's stable key, re-points each of its requests at the cache entry for the
+new context. It acquires every new entry first (so they go out as one coalesced batch) and then
+releases the old ones (unqueued, or aborted once no other card wants them). Each request's value
+is a `computed` over a swappable entry ref, so the watcher, the computeds and the one
+`onScopeDispose` are all created synchronously in `setup()`; nothing reactive is created in a
+callback, which is the v0.8.0 `campaignsData` leak this module exists to avoid.
+- The review suggested keying the card subtree on the context key instead (a remount per
+  change). Not chosen: a remount throws away the DOM state a reader has (an open notes toggle,
+  focus), re-runs every repeat expansion and request build, and drops every shared entry's
+  refcount to zero before the new subtree acquires it, so two cards sharing a request would
+  race to abort and re-create it. The watcher keeps the component instances and swaps only the
+  data. It is safe under the same two conditions a remount would give for free: it is disposed
+  with the scope (a test changes the context after `scope.stop()` and asserts no fetch), and it
+  is race-guarded.
+- The race guard is per entry: `entry.inflight` is the POST most recently dispatched for it, and
+  a response or a failure writes the entry only while it still owns it. A reload, or a context
+  flip back to a key that is still in flight for another card, replaces the owner, so a slow
+  ordinary fetch resolving after a reload can no longer overwrite the fresher value (the slice-4
+  review's race; `useMetrics.context.test.ts` resolves the slow one last and asserts the fresh
+  value stays).
+- The client's cache key still includes the whole page context, even for requests whose fact
+  honours none of it (campaign attribution windows, today so far). A filter change therefore
+  re-requests those too; the server answers them from its per-fact cache, not D1. Keying each
+  request only on the filters its fact honours (section 3, "Dedupe") is a later refinement.
+
+**Slice 5, phase A (presets; no layout change yet).**
+- `campaign-scorecard` and `bsk-kpis` reproduce the bespoke Overview `scorecard` and `kpis`
+  views. `presets.parity.test.ts` mounts the old body over `/api/overview` and the preset over
+  `/api/metrics` against one `node:sqlite` fixture, compares every title, badge, row, pill,
+  tile, value and delta line, and lists each difference: D1, D3, D4 and D5 from slice 3, the
+  game-screen-views pair (slice 1), two relabelled KPI tiles, the tap-rate tile's `(n/d)` on
+  one line, and caveats that now sit behind a notes toggle.
+- Parity rather than the ADR example for the pills: they keep the bespoke body's step names and
+  its "Auth success" count, and do not add a "Signed in after ask" rate (lead's ruling).
+- Render additions the presets needed, all generic: a "new today" delta line when a today-so-far
+  count asked for deltas and every comparison predates its go-live; muted status words ("not
+  yet tracking"); `MetricItem.captionMode: 'compact'`, which puts the caption and the value's
+  notes behind a small toggle next to the label, collapsed by default (the owner wants no new
+  visible lines); `CardSpec.showUpdated`, a footer with "Updated Xs ago" from the card's latest
+  successful load and a reload control (also exposed as `reload()` for `ChartCard`); and a
+  section with no visible item after gating is omitted, title included.
+- Text: the "/return/ d1+ returns" tile is "Return visits (day 1+)", with what it counts in the
+  `returns-d1plus-caveat` note; the raw-install de-dupe note no longer names a beacon path.
+- Phase B (not started): the `CONFIG_VERSION` 10 step (`normWidget` → `normCardRef`, the KV
+  backup on the bump) swaps the Overview `kpis` and `scorecard` widgets to `card: { preset }`,
+  then the bespoke branches retire. It waits for `CONFIG_VERSION` 9 on `main`.

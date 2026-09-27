@@ -6,10 +6,12 @@
 // title, badge and sections. A repeated card gets the scorecard's bordered, clickable box
 // (matching OverviewWidgetBody.vue's `.scorecard-card` look); an unrepeated card (KPI tiles)
 // renders its sections directly, since the tiles themselves are the boxed elements.
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useMetrics, type MetricRequestSpec } from '../../composables/useMetrics'
+import { noteRawText } from '../../lib/notes'
 import { badgeViewModel, resolveLabelTokens } from '../../lib/metrics/render'
-import { PRESETS } from '../../lib/metrics/presets'
-import { ROOT_SCOPE, resolveRepeat, scopeField, todayEtFrom, type ReadingScope, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
+import { presetById } from '../../lib/metrics/presets'
+import { buildRequestSpec, flattenSectionItems, ROOT_SCOPE, resolveRepeat, scopeField, todayEtFrom, type ReadingScope, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
 import type { CardRef, CardSpec, MetricsContext } from '../../lib/metrics/types'
 import MetricLabel from './MetricLabel.vue'
 import MetricSection from './MetricSection.vue'
@@ -23,7 +25,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ 'open-campaigns': [] }>()
 
-const spec = computed<CardSpec | null>(() => ('preset' in props.cardRef ? (PRESETS[props.cardRef.preset] ?? null) : props.cardRef.spec))
+const spec = computed<CardSpec | null>(() => ('preset' in props.cardRef ? (presetById(props.cardRef.preset) ?? null) : props.cardRef.spec))
 const todayEt = computed(() => todayEtFrom(props.nowMs ?? Date.now()))
 const ctx = computed<RepeatContext>(() => ({ todayEt: todayEt.value, readings: props.readings }))
 const instances = computed<ScopeInstance[]>(() => (spec.value ? resolveRepeat(spec.value.repeat, ctx.value) : []))
@@ -39,6 +41,56 @@ function badgeInfo(scope: ScopeInstance) {
 function onCardClick() {
   if (spec.value?.link === 'campaigns-page') emit('open-campaigns')
 }
+
+// ── Freshness footer (CardSpec.showUpdated) and reload ──────────────────────────────────────
+// The card holds its own reference on every request its items make (content-equal requests
+// share one entry, so this costs no extra fetch): that gives it the latest successful load for
+// "Updated Xs ago", and one reload() that refetches the whole card fresh. Collected once, at
+// setup, like every other useMetrics request (see useMetrics.ts, effect-scope discipline).
+const cardMetrics = useMetrics(() => props.context)
+function cardRequestSpecs(): MetricRequestSpec[] {
+  const s = spec.value
+  if (!s) return []
+  const out: MetricRequestSpec[] = []
+  for (const scope of instances.value) {
+    for (const section of s.sections) {
+      const pairs =
+        section.layout === 'table'
+          ? resolveRepeat(section.repeat, ctx.value).flatMap((row) => section.items.map((item) => ({ item, scope: row })))
+          : flattenSectionItems(section, scope, ctx.value).filter((fi) => !fi.emptyOf)
+      for (const { item, scope: sc } of pairs) {
+        const r = buildRequestSpec(item, sc)
+        if (r) out.push(r)
+      }
+    }
+  }
+  return out
+}
+for (const r of cardRequestSpecs()) cardMetrics.request(r)
+/** Refetches every value on this card, bypassing the server cache (ChartCard's reload
+ * control calls this through the component ref too). */
+function reload() {
+  cardMetrics.reloadAll()
+}
+defineExpose({ reload })
+
+const nowTick = ref(Date.now())
+let ticker: ReturnType<typeof setInterval> | null = null
+onMounted(() => {
+  if (spec.value?.showUpdated) ticker = setInterval(() => (nowTick.value = Date.now()), 5_000)
+})
+onBeforeUnmount(() => {
+  if (ticker) clearInterval(ticker)
+})
+const updatedText = computed(() => {
+  const at = cardMetrics.lastUpdated.value
+  if (at == null) return ''
+  const s = Math.max(0, Math.round((Math.max(nowTick.value, at) - at) / 1000))
+  if (s < 5) return noteRawText('label.card.updatedJustNow')
+  if (s < 60) return noteRawText('label.card.updatedSecondsAgo', { n: s })
+  return noteRawText('label.card.updatedMinutesAgo', { n: Math.round(s / 60) })
+})
+const refreshLabel = noteRawText('label.card.refresh')
 </script>
 
 <template>
@@ -75,6 +127,10 @@ function onCardClick() {
       <span v-if="badgeInfo(ROOT_SCOPE)" class="mc-badge" :class="`tone-${badgeInfo(ROOT_SCOPE)!.tone}`">{{ badgeInfo(ROOT_SCOPE)!.primary }}</span>
     </div>
     <MetricSection v-for="(section, si) in spec.sections" :key="si" :section="section" :outer-scope="ROOT_SCOPE" :ctx="ctx" :context="context" />
+  </div>
+  <div v-if="spec?.showUpdated" class="mc-footer">
+    <span v-if="updatedText" class="mc-updated mono">{{ updatedText }}</span>
+    <button type="button" class="mc-reload" :title="refreshLabel" :aria-label="refreshLabel" @click="reload">↻</button>
   </div>
 </template>
 
@@ -125,5 +181,31 @@ function onCardClick() {
 }
 .mc-badge.tone-warn {
   color: #bc4749;
+}
+/* The freshness footer: "Updated Xs ago" and the reload control, right-aligned, quiet. */
+.mc-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+.mc-updated {
+  font-size: 11px;
+  color: rgb(var(--ink-3));
+  font-family: 'JetBrains Mono', monospace;
+}
+.mc-reload {
+  border: none;
+  background: transparent;
+  color: rgb(var(--ink-3));
+  font-size: 15px;
+  padding: 3px 7px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.mc-reload:hover {
+  background: rgb(var(--sunken));
+  color: rgb(var(--ink));
 }
 </style>

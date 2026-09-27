@@ -227,6 +227,14 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = {
     severity: 'info',
     scopes: ['overview'],
   },
+  // The "Return visits (day 1+)" KPI tile (lib/metrics/presets.ts bsk-kpis): what it counts.
+  'returns-d1plus-caveat': {
+    id: 'returns-d1plus-caveat',
+    text: 'Devices that first arrived through a tagged campaign link and came back on day 1 or later. Each device counts at most once per return window (day 1, days 2-7, 8-14, 15-30, 31-60), so one device can count once in each window.',
+    kind: 'note',
+    severity: 'info',
+    scopes: ['overview'],
+  },
   'no-return-visits-yet': {
     id: 'no-return-visits-yet',
     text: 'No return visits recorded yet.',
@@ -276,7 +284,8 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = {
     'label.bsk.authSuccess': 'Auth successes',
     'label.bsk.installs': 'Installs',
     'label.bsk.rawInstallSignals': RAW_INSTALL_SIGNALS_LABEL,
-    'label.bsk.returnsD1plus': '/return/ d1+ returns',
+    // What the /return/ d1+ beacons count; the caveat lives in 'returns-d1plus-caveat'.
+    'label.bsk.returnsD1plus': 'Return visits (day 1+)',
     'label.popup.shown': 'Shown',
     'label.popup.accepts': 'Accepted',
     'label.popup.outcomeSignedIn': 'Signed in',
@@ -327,6 +336,16 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = {
     'still-arriving': 'still arriving',
     'counted-from': 'counted from {from}',
     'install-fix-note': INSTALL_FIX_NOTE,
+    'new-today': 'new today',
+
+    // Card labels that are not a metric's own name (lib/metrics/presets.ts).
+    'label.card.flight': 'Flight',
+    'label.card.taggedArrivalsFor': 'Tagged arrivals — {campaign}',
+    'label.card.updatedJustNow': 'Updated just now',
+    'label.card.updatedSecondsAgo': 'Updated {n}s ago',
+    'label.card.updatedMinutesAgo': 'Updated {n}m ago',
+    'label.card.refresh': 'Refresh',
+    'label.card.notes': 'Notes',
   }),
 }
 
