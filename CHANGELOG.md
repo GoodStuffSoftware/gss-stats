@@ -16,6 +16,22 @@ All notable changes to **gss-stats** are documented here. The format follows
   date and site filters and the change of day, keep their notes behind one "Notes" link, show
   when they last updated, and say so when a number fails to load. The dashboard does not use
   them yet.
+
+### Changed
+- **"Games played" and "Played a game" are now "Game-screen views".** Both count visits to the
+  game screen (page views, several per device), not games played; the Overview tile, the
+  campaign funnel step and the ads-read report now say so.
+
+### Fixed
+- **The Overview "Tagged arrivals" tile now counts a campaign exactly like its scorecard card.**
+  It uses the campaign's own attribution window, including a mid-day start, so the US+CA
+  retest's pre-launch test rows (before 12:00 ET on its first day, and on 2026-09-23) no longer
+  count on the tile or in its 7-day average. Its "vs yesterday" and "vs 7d avg" comparisons stay
+  hidden until the flight has full days to compare against.
+
+## [0.9.0] — 2026-09-27
+
+### Added
 - **A chart's own site pick.** "Site override" in the chart editor now really narrows that one
   chart to a site (e.g. Best Sudoku), leaving the page's site pick and dates alone; the Overall
   timeline uses it, wherever it sits.
@@ -33,9 +49,6 @@ All notable changes to **gss-stats** are documented here. The format follows
   start the day tracking went live and skip installs from before the install fix.
 
 ### Changed
-- **"Games played" and "Played a game" are now "Game-screen views".** Both count visits to the
-  game screen (page views, several per device), not games played; the Overview tile, the
-  campaign funnel step and the ads-read report now say so.
 - **The Best Sudoku Pop-ups page is now one bar chart.** Every pop-up sits on the axis with
   shown, taps, dismissals and each outcome as the series. A small table below lists only the
   rates that are valid (taps over showings, and installs over install prompts since the
@@ -61,11 +74,6 @@ All notable changes to **gss-stats** are documented here. The format follows
   keeps a copy of the previous layout, so an upgrade can be undone.
 
 ### Fixed
-- **The Overview "Tagged arrivals" tile now counts a campaign exactly like its scorecard card.**
-  It uses the campaign's own attribution window, including a mid-day start, so the US+CA
-  retest's pre-launch test rows (before 12:00 ET on its first day, and on 2026-09-23) no longer
-  count on the tile or in its 7-day average. Its "vs yesterday" and "vs 7d avg" comparisons stay
-  hidden until the flight has full days to compare against.
 - **Chart captions stay inside their card on phones.** They used to sit flush against the
   card's edge and get clipped at narrow widths.
 - **A chart with its own filter no longer fails to draw** when that filter was set up from the
