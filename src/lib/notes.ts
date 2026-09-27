@@ -321,6 +321,8 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.bsk.popupShown': 'Pop-ups shown',
     'label.bsk.popupAccepts': 'Pop-ups accepted',
     'label.bsk.authSuccess': 'Auth successes',
+    'label.bsk.authErrors': 'Sign-in failures',
+    'label.bsk.authRedirects': 'Sign-in redirect fallbacks',
     'label.bsk.installs': 'Installs',
     // Short and plain, as the Overview tile reads; the caveat is 'raw-install-double-count'.
     'label.bsk.rawInstallSignals': 'Raw install signals',
