@@ -70,12 +70,29 @@ export function returnSitesQuery(sinceMs: number): Query {
   return { sql: `SELECT site, COUNT(*) AS c, MIN(ts) AS t0, MAX(ts) AS t1 FROM hits WHERE ${w.join(' AND ')} GROUP BY site`, binds: b }
 }
 
+/** Campaign-attributed arrivals by country, aggregate counts only (R5). The SAME attribution
+ * and exclusion clauses as taggedRowsQuery (household etc.), so it can never disagree with the
+ * funnel reads it sits alongside — no separate rule, no individual-level join. */
+export function taggedCountryQuery(campaign: CampaignFlight): Query {
+  const attr = campaignAttributionClause(campaign)
+  const w = [attr.sql]
+  const b: unknown[] = [...attr.binds]
+  applyExclusions(w, b)
+  return { sql: `SELECT country, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY country ORDER BY c DESC`, binds: b }
+}
+
+export interface CountryCount {
+  country: string
+  count: number
+}
 export interface BeaconSource {
   /** `upsellFixAtMs`: undefined = the configured instant; null = no segment flag. */
   tagged(campaign: CampaignFlight, upsellFixAtMs?: number | null): Promise<TaggedRow[]>
   siteEvents(sinceMs: number): Promise<HourPathCount[]>
   returns(campaign: CampaignFlight): Promise<ReturnRow[]>
   returnSites(sinceMs: number): Promise<ReturnSiteStat[]>
+  /** Optional (R5): aggregate counts per country for campaign-attributed arrivals. */
+  countryCounts?(campaign: CampaignFlight): Promise<CountryCount[]>
 }
 
 const n = (x: unknown) => Number(x) || 0
@@ -107,6 +124,11 @@ export function createBeaconSource(select: D1Select): BeaconSource {
       const q = returnSitesQuery(sinceMs)
       const rows = await select<any>(q.sql, q.binds)
       return rows.map((x) => ({ site: String(x.site ?? ''), count: n(x.c), firstMs: x.t0 == null ? null : n(x.t0), lastMs: x.t1 == null ? null : n(x.t1) }))
+    },
+    async countryCounts(campaign) {
+      const q = taggedCountryQuery(campaign)
+      const rows = await select<any>(q.sql, q.binds)
+      return rows.map((x) => ({ country: String(x.country ?? ''), count: n(x.c) }))
     },
   }
 }

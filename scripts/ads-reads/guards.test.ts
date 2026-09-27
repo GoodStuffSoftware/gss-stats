@@ -8,7 +8,21 @@ import { campaignSyncStatements, dailyRowUpserts, mergePlacementDayRows, placeme
 import { CAMPAIGNS, campaignById } from '../../src/lib/campaigns'
 import { clearRegisteredSecrets, redact, redactedFirstLine, registerSecret, summarizeError } from '../../src/lib/adsRedact'
 import { createWranglerRunner, repoRoot } from './wrangler'
-import { buildHeaders, createAdsClient, fetchDailySpend, fetchPlacementDaily, fetchRangeTotal, searchUrl, splitPlacements, type FetchLike } from '../../src/lib/adsApi'
+import {
+  buildHeaders,
+  createAdsClient,
+  fetchDailySpend,
+  fetchDevices,
+  fetchGeo,
+  fetchHourly,
+  fetchPlacementDaily,
+  fetchRangeTotal,
+  fetchRecommendations,
+  fetchTargeting,
+  searchUrl,
+  splitPlacements,
+  type FetchLike,
+} from '../../src/lib/adsApi'
 import { BWS_KEYS, pickAdsCredentials } from './secrets'
 import type { ReadingRecord } from '../../src/lib/adsRules'
 
@@ -354,6 +368,90 @@ describe('Google Ads client: read-only, no manager header', () => {
     const client = await createAdsClient(creds, { fetchImpl: f })
     await expect(fetchDailySpend(client, '111111111', '2026-09-26', '2026-09-27')).rejects.toThrow()
     expect(calls.filter((c) => c.url.includes('googleAds:search'))).toHaveLength(0)
+  })
+
+  describe('diagnostic depth (R2/R3): hourly, geo, devices, targeting, recommendations — informational only', () => {
+    it('hourly: per (day, hour) in account time zone, zero rows dropped', async () => {
+      const { f, calls } = fakeFetch([
+        {
+          results: [
+            { segments: { date: '2026-09-27', hour: '13' }, metrics: { impressions: '120', clicks: '3', ctr: '0.025', costMicros: '900000' } },
+            { segments: { date: '2026-09-27', hour: '2' }, metrics: { impressions: '0', clicks: '0', ctr: '0', costMicros: '0' } },
+          ],
+        },
+      ])
+      const client = await createAdsClient(creds, { fetchImpl: f })
+      const rows = await fetchHourly(client, '24279250691', '2026-09-27', '2026-09-27')
+      expect(rows).toEqual([{ date: '2026-09-27', hour: 13, impressions: 120, clicks: 3, ctr: 0.025, cost: 0.9 }])
+      const q = JSON.parse(calls.find((c) => c.url.includes('googleAds:search'))!.body!).query as string
+      expect(q).toMatch(/^SELECT segments\.date, segments\.hour, metrics\.impressions/)
+    })
+    it('geo: per-country delivery joined to the LIVE bid modifier, sorted by cost descending', async () => {
+      const { f } = fakeFetch([
+        { results: [{ geographicView: { countryCriterionId: '2840' }, metrics: { impressions: '500', clicks: '10', costMicros: '3000000' } }, { geographicView: { countryCriterionId: '2826' }, metrics: { impressions: '200', clicks: '2', costMicros: '500000' } }] },
+        { results: [{ campaignCriterion: { location: { geoTargetConstant: 'geoTargetConstants/2826' }, bidModifier: 0.25 } }] },
+        { results: [{ geoTargetConstant: { id: '2840', name: 'United States', countryCode: 'US' } }, { geoTargetConstant: { id: '2826', name: 'United Kingdom', countryCode: 'GB' } }] },
+      ])
+      const client = await createAdsClient(creds, { fetchImpl: f })
+      const rows = await fetchGeo(client, '24279250691', '2026-09-27', '2026-09-27')
+      expect(rows).toEqual([
+        { criterionId: '2840', country: 'United States', countryCode: 'US', impressions: 500, clicks: 10, ctr: 0.02, cost: 3, bidModifier: null, bidAdjustmentPct: null },
+        { criterionId: '2826', country: 'United Kingdom', countryCode: 'GB', impressions: 200, clicks: 2, ctr: 0.01, cost: 0.5, bidModifier: 0.25, bidAdjustmentPct: -75 },
+      ])
+    })
+    it('devices: aggregated by the REST enum name directly (no int mapping needed)', async () => {
+      const { f } = fakeFetch([
+        { results: [{ segments: { device: 'MOBILE' }, metrics: { impressions: '1000', clicks: '20', costMicros: '5000000' } }, { segments: { device: 'DESKTOP' }, metrics: { impressions: '0', clicks: '0', costMicros: '0' } }] },
+      ])
+      const client = await createAdsClient(creds, { fetchImpl: f })
+      const rows = await fetchDevices(client, '24279250691', '2026-09-27', '2026-09-27')
+      expect(rows).toEqual([
+        { device: 'MOBILE', impressions: 1000, clicks: 20, ctr: 0.02, cost: 5 },
+        { device: 'DESKTOP', impressions: 0, clicks: 0, ctr: 0, cost: 0 },
+      ])
+    })
+    it('targeting: placement counts from PLACEMENT + MOBILE_APPLICATION criteria, audience bid-only flag', async () => {
+      const { f } = fakeFetch([
+        {
+          results: [
+            { adGroup: { id: '199141743526', name: 'Sudoku.com placement', status: 'ENABLED', targetingSetting: { targetRestrictions: [{ targetingDimension: 'AUDIENCE', bidOnly: true }] } } },
+            { adGroup: { id: '201162129980', name: 'Other Sudoku placements', status: 'ENABLED', targetingSetting: {} } },
+          ],
+        },
+        { results: [{ adGroup: { name: 'Sudoku.com placement' }, adGroupCriterion: { criterionId: '1', type: 'MOBILE_APPLICATION' } }] },
+      ])
+      const client = await createAdsClient(creds, { fetchImpl: f })
+      const rows = await fetchTargeting(client, '24279250691')
+      expect(rows).toEqual([
+        { adGroup: 'Sudoku.com placement', status: 'ENABLED', placements: 1, audienceBidOnly: true },
+        { adGroup: 'Other Sudoku placements', status: 'ENABLED', placements: 0, audienceBidOnly: null },
+      ])
+    })
+    it('recommendations: read-only list, filtered client-side to this campaign; never mutates or dismisses', async () => {
+      const { f, calls } = fakeFetch([
+        {
+          results: [
+            { recommendation: { resourceName: 'customers/8726535246/recommendations/111', type: 'MAXIMIZE_CONVERSIONS_OPT_IN', campaign: 'customers/8726535246/campaigns/24279250691' } },
+            { recommendation: { resourceName: 'customers/8726535246/recommendations/222', type: 'OPTIMIZE_AD_ROTATION', campaign: 'customers/8726535246/campaigns/24234347705' } },
+          ],
+        },
+      ])
+      const client = await createAdsClient(creds, { fetchImpl: f })
+      const rows = await fetchRecommendations(client, '8726535246', '24279250691')
+      expect(rows).toEqual([{ type: 'MAXIMIZE_CONVERSIONS_OPT_IN', resourceName: 'customers/8726535246/recommendations/111' }])
+      const q = JSON.parse(calls.find((c) => c.url.includes('googleAds:search'))!.body!).query as string
+      expect(q).toMatch(/^SELECT recommendation\.resource_name/)
+    })
+    it('every diagnostic read refuses an unknown campaign before any request', async () => {
+      const { f, calls } = fakeFetch([])
+      const client = await createAdsClient(creds, { fetchImpl: f })
+      await expect(fetchHourly(client, '111111111', '2026-09-27', '2026-09-27')).rejects.toThrow()
+      await expect(fetchGeo(client, '111111111', '2026-09-27', '2026-09-27')).rejects.toThrow()
+      await expect(fetchDevices(client, '111111111', '2026-09-27', '2026-09-27')).rejects.toThrow()
+      await expect(fetchTargeting(client, '111111111')).rejects.toThrow()
+      await expect(fetchRecommendations(client, '8726535246', '111111111')).rejects.toThrow()
+      expect(calls.filter((c) => c.url.includes('googleAds:search'))).toHaveLength(0)
+    })
   })
 })
 
