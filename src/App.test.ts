@@ -1,16 +1,14 @@
 // @vitest-environment happy-dom
 //
-// Reviewer-flagged lockout (2026-09-26): on a real touch device, the top-right function-bar
-// toggle is now the ONLY way to reach edit-mode controls (fix/clean-look made every card's
-// modification chrome hidden until edit mode on touch). A real touch tap fires `focus` BEFORE
-// `click` — touchstart -> touchend -> mouseover/mousemove/mousedown -> focus -> mouseup -> click
-// — and the toggle used to open the bar unconditionally on focus, then onBarToggleActivate's
-// touch branch (`barOpen.value = !barOpen.value`) immediately toggled it right back closed on
-// that SAME tap's trailing click. That made the bar impossible to open on touch at all — a full
-// lockout, not a cosmetic flicker, once it became the only path to the controls. This simulates
-// the exact event sequence a touchscreen produces and asserts one tap opens it, a second closes
-// it (App.vue's onBarToggleFocus now gates the focus-side open the same way onBarAreaEnter/Leave
-// already gate hover, matching the pattern the reviewer asked for).
+// Reviewer-flagged lockout (2026-09-26, still relevant post filter-bar-restore): a real touch
+// tap fires `focus` BEFORE `click` — touchstart -> touchend -> mouseover/mousemove/mousedown ->
+// focus -> mouseup -> click. The `.fb-toggle` button (now the "show filters" pin toggle — see
+// App.filterbar.test.ts for the full visibility state machine it drives) used to open
+// unconditionally on focus, then the touch click handler toggled it right back closed on that
+// SAME tap's trailing click — a full lockout, not a cosmetic flicker, on any device that relies
+// on it. This simulates the exact event sequence a touchscreen produces and asserts one tap
+// pins it, a second unpins it (App.vue's onToggleFocus gates the focus-side open to non-touch
+// input; touch relies solely on the click handler's toggle).
 import { describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import App from './App.vue'
@@ -59,8 +57,8 @@ async function touchTap(el: HTMLElement) {
   await flushPromises()
 }
 
-describe('App — function bar toggle on touch (lockout regression)', () => {
-  it('opens on the first tap and closes on the second, never stuck closed', async () => {
+describe('App — show-filters pin toggle on touch (lockout regression)', () => {
+  it('pins on the first tap and unpins on the second, never stuck closed', async () => {
     const w = mount(App, { attachTo: document.body })
     await flushPromises()
     const toggle = w.get('.fb-toggle')

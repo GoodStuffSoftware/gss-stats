@@ -6,6 +6,13 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **The main filter bar is back**, always visible in normal flow under the page tabs, instead
+  of hidden behind a top-right toggle. If it scrolls out of view, a small "show filters" button
+  appears and pins the same bar at the top of the viewport until dismissed or scrolled back
+  into view. The "reveal every chart's controls" capability moved to its own always-visible
+  header toggle so it isn't lost.
+
 ## [0.8.0] — 2026-09-26
 
 ### Added
