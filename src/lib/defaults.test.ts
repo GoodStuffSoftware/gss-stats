@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  withCardForView,
   defaultConfig,
   normalizeConfig,
   reorderBskGroup,
@@ -139,11 +140,12 @@ describe('normalizeConfig — v7 bespoke → widget migration', () => {
     }
     const once = normalizeConfig(raw)
     const ov1 = once.pages.find((p) => isOverviewPage(p))!
-    expect(ov1.widgets).toEqual([customWidget]) // untouched, not replaced with the factory set
+    // Untouched, not replaced with the factory set — beyond v10 giving the KPI panel its card.
+    expect(ov1.widgets).toEqual([{ ...customWidget, card: { preset: 'bsk-kpis' } }])
 
     const twice = normalizeConfig(once)
     const ov2 = twice.pages.find((p) => isOverviewPage(p))!
-    expect(ov2.widgets).toEqual([customWidget]) // still untouched — idempotent
+    expect(ov2.widgets).toEqual([{ ...customWidget, card: { preset: 'bsk-kpis' } }]) // still untouched — idempotent
   })
 
   it('MEDIUM regression: a page id\'d bsk-campaigns but named like the overview page (stale/manual-edit mismatch) gets CAMPAIGNS widgets, matched by id first', () => {
@@ -219,7 +221,7 @@ describe('normalizeConfig — v8 completions-widget migration', () => {
     }
     const norm = normalizeConfig(raw)
     const ov = norm.pages.find((p) => isOverviewPage(p))!
-    expect(ov.widgets).toEqual([customWidget]) // untouched — no completions widget forced onto it
+    expect(ov.widgets).toEqual([{ ...customWidget, card: { preset: 'bsk-kpis' } }]) // no completions widget forced onto it (v10 adds only the card)
   })
   it('running the migration twice on the same v7 config does not duplicate the widget', () => {
     const ids = ['ow-note-smallsample', 'ow-kpis', 'ow-timeline', 'ow-scorecard', 'ow-release']
@@ -452,7 +454,7 @@ describe('normalizeConfig — v9 migration (Pop-ups page + device mix)', () => {
   it('rebuilds the Pop-ups page: new chart + table on top, eligibility and the owner\'s own chart kept below', () => {
     const norm = normalizeConfig(v8Config())
     expect(norm.version).toBe(CONFIG_VERSION)
-    expect(CONFIG_VERSION).toBe(9)
+    expect(CONFIG_VERSION).toBeGreaterThanOrEqual(9)
     const pu = norm.pages.find((p) => p.id === 'bsk-popups')!
     expect(pu.widgets.map((w) => w.id)).toEqual(['pu-bars', 'pu-rates', 'pu-eligible-bd', 'my-popup-chart'])
     const mine = pu.widgets.find((w) => w.id === 'my-popup-chart')!
@@ -591,8 +593,9 @@ describe('normalizeConfig — v9 migration (Overview timeline → standard line 
     const raw = v8Overview()
     const norm = normalizeConfig(raw)
     const ov = norm.pages.find((p) => p.id === 'bsk-overview')!
-    expect(ov.widgets[0]).toEqual(raw.pages[1].widgets[0])
-    expect(ov.widgets[2]).toEqual(raw.pages[1].widgets[2])
+    // As saved, apart from v10 giving a KPI/scorecard panel its card.
+    expect(ov.widgets[0]).toEqual(withCardForView(raw.pages[1].widgets[0]))
+    expect(ov.widgets[2]).toEqual(withCardForView(raw.pages[1].widgets[2]))
     expect(norm.pages.find((p) => p.id === 'default')!.widgets).toEqual(raw.pages[0].widgets)
   })
 

@@ -93,3 +93,25 @@ describe('config PUT backs up the stored config on a version bump', () => {
     expect(puts).toEqual([])
   })
 })
+
+describe('the v9 → v10 upgrade (metric cards)', () => {
+  it('this code writes layout version 10', () => {
+    expect(CONFIG_VERSION).toBe(10)
+  })
+  it('the first v10 save over a stored v9 layout backs it up to backup:v9, once', async () => {
+    const v9 = JSON.stringify(cfg(9, 'v9 layout'))
+    const { kv, store } = fakeKv({ 'dashboard:default': v9 })
+    expect((await put(kv, cfg(10, 'first v10'))).status).toBe(200)
+    expect(backupKeyFor(9)).toBe('dashboard:default:backup:v9')
+    expect(store.get('dashboard:default:backup:v9')).toBe(v9)
+    await put(kv, cfg(10, 'second v10'))
+    expect(store.get('dashboard:default:backup:v9')).toBe(v9) // never overwritten
+    expect(JSON.parse(store.get('dashboard:default')!).pages[0].tag).toBe('second v10')
+  })
+  it('a v9 tab saving over a stored v10 layout gets 409; a v11 body gets 400', async () => {
+    const { kv, puts } = fakeKv({ 'dashboard:default': JSON.stringify(cfg(10)) })
+    expect((await put(kv, cfg(9, 'old tab'))).status).toBe(409)
+    expect((await put(kv, cfg(11, 'crafted'))).status).toBe(400)
+    expect(puts).toEqual([])
+  })
+})

@@ -1093,6 +1093,38 @@ callback, which is the v0.8.0 `campaignsData` leak this module exists to avoid.
   Retry), shows on an untitled card too, and the error is announced through one live region
   that is in the DOM, empty, from mount. Each Notes toggle is labelled "Notes: <card title>"
   and controls its list; a status word in a pill is muted like one in a row or tile.
-- Phase B (not started): the `CONFIG_VERSION` 10 step (`normWidget` → `normCardRef`, the KV
-  backup on the bump) swaps the Overview `kpis` and `scorecard` widgets to `card: { preset }`,
-  then the bespoke branches retire. It waits for `CONFIG_VERSION` 9 on `main`.
+
+**Slice 5, phase B (the cards replace the panels; `CONFIG_VERSION` 10).**
+- Version 10 in place of section 5's version 8 (v8 and v9 shipped other migrations first). The
+  step is additive as designed: `migrateCardsV10` adds `card: { preset }` to every widget with
+  dataset `overview` and view `kpis` or `scorecard` (`bsk-kpis`, `campaign-scorecard`), on any
+  page, matched by what the widget is, never by its title or its page's name. It keeps id,
+  position, size, title, notes and the default mark, keeps dataset/view (an older build still
+  recognises the panel), never touches a card already set, and never adds or removes a widget.
+  It runs on every load rather than only below version 10, because the bespoke bodies are
+  retired: a panel created later from the chart editor must get its card too. The editor keeps
+  the card in step with the view (`syncCardWithView`). There is no "use legacy view" opt-out.
+- `normWidget` passes `card` through `normCardRef`: a `{ preset }` is kept by id (an unknown id
+  renders as an unknown card); a `{ spec }` is kept as a plain-JSON copy when it passes
+  `validateCard` and the caps (8 sections, 40 items, 200-character strings, 16 KiB), otherwise
+  it becomes the `invalid-card` placeholder, which renders a one-line message.
+- `ChartCard` renders `MetricCard` for any widget with `card`, before its dataset dispatch,
+  passing the page context (`lib/metrics/pageContext.ts`: the effective range, capped at the
+  server's 400 days, and the resolved beacon site tags; no own-visit fields, which no fact
+  honours and the server would refuse if malformed). Its header ↻ calls the card's `reload()`;
+  zoom and reveal are unchanged; the per-chart filter button stays hidden, as for the panels.
+- The KV backup needed no change: `functions/api/config.ts` already copies the stored layout to
+  `dashboard:default:backup:v<stored>` on the first save of a newer version, so the first v10
+  save writes `backup:v9`; its 400/409 guards read `CONFIG_VERSION`.
+- Retired with the panels: the `kpis` and `scorecard` branches of `OverviewWidgetBody`, the KPI
+  and scorecard sections of `/api/overview` (its minute-bucket KPI query and the per-campaign
+  scorecard queries; the endpoint now serves only the release panel), `OverviewKpiTile`,
+  `OverviewScorecardRow`, `lib/overview.ts`'s KPI tile helpers, `lib/kpiFormat.ts`'s tile
+  formatters and `lib/campaigns.ts` `scorecardNotInstrumentedSteps`. The equivalence test's
+  `/api/overview` comparisons retired with them; the parity test now compares the cards with a
+  golden captured from the retired body over the same fixture, the commit before it was removed.
+- Migration tests run on the real default layout, on the production layout (read read-only from
+  KV, the owner's browser/OS fingerprint replaced, committed as `src/lib/__fixtures__/`
+  `prodLayout.v8.json` plus its v9 normalisation), on custom, deleted and renamed variants, and on
+  an already-v10 layout. On production, v9 → v10 changes exactly two widgets, `ow-kpis` and
+  `ow-scorecard` on "Best Sudoku · Overview", by adding their card.

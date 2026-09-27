@@ -1,9 +1,9 @@
 // "Best Sudoku overview" page (Part C) — pure logic shared by functions/api/overview.ts and
-// components/OverviewPage.vue. Aggregate-only, no joins — same rules as lib/campaigns.ts and
+// the metrics registry. Aggregate-only, no joins — same rules as lib/campaigns.ts and
 // lib/popupEvents.ts, which this module builds on rather than duplicates.
 
-import { classifyPopupPath, etDateFromMs, excludeInstallGapUnmeasured, isPopupEventPath, POPUPS, TRACKING_ACTIVATION_DATE_ET } from './popupEvents'
-import { etMidnightUtcMs, CAMPAIGNS, flightDayIndex, applyExclusions, parseReturnPath, type CampaignFlight } from './campaigns'
+import { classifyPopupPath, etDateFromMs, excludeInstallGapUnmeasured, isPopupEventPath, POPUPS } from './popupEvents'
+import { etMidnightUtcMs, applyExclusions, parseReturnPath } from './campaigns'
 
 // ── Row classifiers shared by /api/overview and the metrics registry (lib/metrics/) ───────
 // Moved here from functions/api/overview.ts (ADR 0003 slice 2) so the registry reuses them
@@ -125,41 +125,6 @@ export interface Delta {
 }
 export function computeDelta(today: number, compare: number): Delta {
   return { delta: today - compare, deltaPct: compare === 0 ? null : (today - compare) / compare }
-}
-
-// ── KPI tile shape ───────────────────────────────────────────────────────────────────────
-export interface KpiTile {
-  key: string
-  label: string
-  today: number | null // null = notYetTracking
-  vsYesterday: Delta | null
-  vsAvg7: Delta | null
-  notYetTracking: boolean
-}
-export function buildKpiTile(key: string, label: string, today: number, yesterday: number, avg7: number): KpiTile {
-  return {
-    key,
-    label,
-    today,
-    vsYesterday: computeDelta(today, yesterday),
-    vsAvg7: computeDelta(today, avg7),
-    notYetTracking: false,
-  }
-}
-export function notYetTrackingTile(key: string, label: string): KpiTile {
-  return { key, label, today: null, vsYesterday: null, vsAvg7: null, notYetTracking: true }
-}
-
-// ── Which campaigns are actually flighting on a given ET date (dynamic — never a stale
-// hand-set `status` field going out of date) ────────────────────────────────────────────
-export function campaignsFlightingOn(etDate: string): CampaignFlight[] {
-  return CAMPAIGNS.filter((c) => flightDayIndex(c, etDate) !== null)
-}
-
-// ── Return beacon instrumentation (site-wide, not per-campaign — see
-// lib/campaigns.ts returnBeaconNotInstrumented for the per-campaign version) ─────────────
-export function returnBeaconLiveToday(): boolean {
-  return TRACKING_ACTIVATION_DATE_ET !== null
 }
 
 // ── Release panel: N-day window after vs before a release date, N capped by how much

@@ -2,6 +2,8 @@ import type { DashboardConfig, DashboardPage, GlobalFilters, LineSeries, Widget 
 import { parseDurationMs } from './range'
 import { POPUPS, POPUP_RATE_SPECS, NO_OUTCOME_TRACKING_NOTE, SIGNIN_ELIGIBLE_CAVEAT } from './popupEvents'
 import { CAMPAIGNS } from './campaigns'
+import { BEST_SUDOKU_SITES } from './bestSudokuSites'
+import { normCardRef } from './metrics/validate'
 
 export function defaultDateRange(): { since: string; until: string } {
   const until = new Date()
@@ -37,7 +39,11 @@ function w(p: Omit<Widget, 'i'>): Widget {
   return { ...p, i: p.id }
 }
 
-// Bumped to 9 for the Pop-ups page rebuild, the campaign device-mix swap and the Overview
+// Bumped to 10 for metric cards (ADR 0003 slice 5, see migrateCardsV10): the Overview's bespoke
+// 'kpis' and 'scorecard' panels gain `card: { preset }` and render as MetricCard; nothing else
+// about them changes. functions/api/config.ts backs the stored v9 layout up to
+// `dashboard:default:backup:v9` on the first v10 save.
+// (Bumped to 9 for the Pop-ups page rebuild, the campaign device-mix swap and the Overview
 // timeline swap (see normalizeConfig's v9 block): the Pop-ups page's ~25 generated tiles become
 // one breakdown bar + a valid-rates table, the bespoke campaigns 'deviceMix' table becomes the
 // standard nested doughnut, and the bespoke 'timeline' panel becomes a standard line chart. functions/
@@ -47,7 +53,7 @@ function w(p: Omit<Widget, 'i'>): Widget {
 // uncustomized layout only. (Bumped to 7 for the bespoke-page → widget conversion migration —
 // see the v7 block: Overview/Campaigns went from `widgets: []` (rendered by the now-retired
 // OverviewPage.vue/CampaignComparePage.vue) to real generic widgets.)
-export const CONFIG_VERSION = 9
+export const CONFIG_VERSION = 10
 
 // The default "basic charts available out of the box" — a sensible analytics
 // starting layout. Users can move/resize/add/remove from here.
@@ -135,10 +141,8 @@ export function defaultBestSudokuLaunchWidgets(): Widget[] {
     gw({ id: 'bsk-map', title: 'Visitor map', type: 'map', dimension: '', limit: 2000, x: 6, y: 32, w: 6, h: 8 }),
   ]
 }
-// The beacon site tags for Best Sudoku traffic. The web build tags itself
-// "bestsudoku-web" (plus a small "bestsudoku" bucket from any page that falls back to the
-// hostname auto-tag), and the app pings the beacon as "bestsudoku-app".
-export const BEST_SUDOKU_SITES = ['bestsudoku-web', 'bestsudoku', 'bestsudoku-app']
+// The Best Sudoku beacon site tags (lib/bestSudokuSites.ts, a leaf module), re-exported here.
+export { BEST_SUDOKU_SITES }
 
 export function defaultBestSudokuLaunchPage(): DashboardPage {
   return {
@@ -533,12 +537,49 @@ export function migrateTimelineV9(page: DashboardPage): DashboardPage {
   }
 }
 
+// Metric cards (CONFIG_VERSION 10, ADR 0003 slice 5): the Overview panels a card preset now
+// renders. The widget keeps its dataset/view (an older build still recognises it) and gains
+// `card: { preset }`; ChartCard renders MetricCard whenever `card` is set.
+export const CARD_PRESET_FOR_OVERVIEW_VIEW: Readonly<Record<string, string>> = Object.freeze(
+  Object.assign(Object.create(null) as Record<string, string>, { kpis: 'bsk-kpis', scorecard: 'campaign-scorecard' }),
+)
+const CARD_PRESETS_FROM_VIEWS = new Set(Object.values(CARD_PRESET_FOR_OVERVIEW_VIEW))
+/** A widget that is (or was) one of those panels — matched by what it IS (dataset + view), on
+ * any page, never by its title or its page's name. */
+export function isCardPanel(wd: Widget): boolean {
+  return wd.dataset === 'overview' && typeof wd.view === 'string' && Object.hasOwn(CARD_PRESET_FOR_OVERVIEW_VIEW, wd.view)
+}
+/** The panel with its card: adds `card: { preset }` when absent and keeps everything else (id,
+ * position, size, title, notes, default mark). A card already set — a preset or a customised
+ * spec — is left as it is. Returns the same object when nothing changes. */
+export function withCardForView(wd: Widget): Widget {
+  if (!isCardPanel(wd) || wd.card) return wd
+  return { ...wd, card: { preset: CARD_PRESET_FOR_OVERVIEW_VIEW[wd.view!] } }
+}
+/** For the chart editor's save: a widget edited INTO one of the panels gets its card; one
+ * edited away from them (another overview view) loses the preset card that came with the old
+ * view, so it renders as what it now is. */
+export function syncCardWithView(wd: Widget): Widget {
+  if (isCardPanel(wd)) return withCardForView(wd)
+  if (wd.dataset === 'overview' && wd.card && 'preset' in wd.card && CARD_PRESETS_FROM_VIEWS.has(wd.card.preset)) {
+    const { card: _drop, ...rest } = wd
+    return rest as Widget
+  }
+  return wd
+}
+/** v10: every panel on the page gets its card (withCardForView). Idempotent, and never adds,
+ * removes or moves a widget, so a panel the owner deleted stays deleted. */
+export function migrateCardsV10(page: DashboardPage): DashboardPage {
+  if (!page.widgets.some((wd) => withCardForView(wd) !== wd)) return page
+  return { ...page, widgets: page.widgets.map(withCardForView) }
+}
+
 export function defaultOverviewWidgets(): Widget[] {
   return [
     w({ id: 'ow-note-smallsample', title: 'Small sample', type: 'note', dimension: '', metric: 'pageviews', limit: 1, noteId: 'small-sample', x: 0, y: 0, w: 12, h: 3 }),
-    w({ id: 'ow-kpis', title: 'Today at a glance', type: 'table', dataset: 'overview', view: 'kpis', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 3, w: 12, h: 8 }),
+    w({ id: 'ow-kpis', title: 'Today at a glance', type: 'table', dataset: 'overview', view: 'kpis', card: { preset: 'bsk-kpis' }, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 3, w: 12, h: 8 }),
     timelineWidget({ x: 0, y: 11, w: 12, h: 12 }),
-    w({ id: 'ow-scorecard', title: 'Campaign scorecard', type: 'table', dataset: 'overview', view: 'scorecard', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 23, w: 12, h: 14 }),
+    w({ id: 'ow-scorecard', title: 'Campaign scorecard', type: 'table', dataset: 'overview', view: 'scorecard', card: { preset: 'campaign-scorecard' }, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 23, w: 12, h: 14 }),
     w({ id: 'ow-release', title: 'Release panel', type: 'table', dataset: 'overview', view: 'releasePanel', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 37, w: 12, h: 9 }),
     completionsWidget(),
   ]
@@ -689,6 +730,9 @@ function normWidget(x: any): Widget {
     filters: x.filters ? normFilters(x.filters) : undefined,
     // dataset 'overview'/'campaigns'/'ads-readings': which panel + which campaign(s).
     view: typeof x.view === 'string' ? x.view : undefined,
+    // A metric card (ADR 0003): validated and size-capped here, on every load (normCardRef), so
+    // the field whitelist never silently drops it and a bad stored card becomes a placeholder.
+    card: normCardRef(x.card),
     campaignIds: Array.isArray(x.campaignIds) ? x.campaignIds.filter((c: any) => typeof c === 'string' && c) : undefined,
     // type 'note': the note body (custom text) and/or a notes-registry id — see
     // lib/notes.ts. Both pass through untouched/absent when unset: an existing note widget
@@ -849,6 +893,11 @@ export function normalizeConfig(raw: any): DashboardConfig {
         pages[i] = p
       }
     }
+    // v10 (see CONFIG_VERSION), run on every load: the Overview's 'kpis' and 'scorecard' panels
+    // render as metric cards (migrateCardsV10). Not version-gated, because their bespoke bodies
+    // are retired: a panel added later (the chart editor still offers both views) must get its
+    // card too. Idempotent; it only ever adds `card` to those panels.
+    for (let i = 0; i < pages.length; i++) pages[i] = migrateCardsV10(pages[i])
     // Self-heal (every load, not version-gated): the canonical pages — Overview, Beacon, and
     // the Best Sudoku launch page — must NEVER carry a persistent page-level drill. Drilling
     // always spawns a NEW page, so a drill sitting on one of these is always erroneous (e.g.

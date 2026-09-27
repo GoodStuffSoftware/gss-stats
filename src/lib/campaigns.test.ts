@@ -30,7 +30,6 @@ import {
   isInstallPromptInstalled,
   isAuthSuccessPath,
   gameCompleteNotInstrumented,
-  scorecardNotInstrumentedSteps,
   RAW_INSTALL_SIGNALS_LABEL,
   VALID_FUNNEL_RATE_STEPS,
   parseGameCompletePath,
@@ -258,29 +257,6 @@ describe('classifyFunnelPath / computeFunnelCounts / funnelStepRates', () => {
     const spanning: CampaignFlight = { ...base, flightEnd: '2026-09-26' } // reaches the go-live ET day
     expect(gameCompleteNotInstrumented(before)).toBe(true)
     expect(gameCompleteNotInstrumented(spanning)).toBe(false)
-  })
-  // Bug fix (owner report, 2026-09-26): the overview scorecard's "Completed a game" chip used
-  // to check the PERMANENT FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED constant directly, so an
-  // active campaign's real completed-game count never showed even once its flight reached
-  // GAME_COMPLETE_LIVE_AT. scorecardNotInstrumentedSteps is the fixed, unit-tested contract
-  // functions/api/overview.ts now feeds the scorecard row's `notInstrumented` field from.
-  it('scorecardNotInstrumentedSteps: an ACTIVE campaign whose flight reaches GAME_COMPLETE_LIVE_AT does NOT have "completed" not-instrumented', () => {
-    const retest = campaignById('24279250691')! // active, flightEnd 2026-10-02 — well past go-live
-    expect(retest.status).toBe('active')
-    const set = scorecardNotInstrumentedSteps(retest, [])
-    expect(set.has('completed')).toBe(false)
-  })
-  it('scorecardNotInstrumentedSteps: an ACTIVE campaign whose flight predates GAME_COMPLETE_LIVE_AT still has "completed" not-instrumented', () => {
-    const base = campaignById('24279250691')!
-    const early: CampaignFlight = { ...base, status: 'active', flightEnd: '2026-09-25' }
-    const set = scorecardNotInstrumentedSteps(early, [])
-    expect(set.has('completed')).toBe(true)
-  })
-  it('scorecardNotInstrumentedSteps: a CLOSED campaign uses the passed-in per-flight list exactly, ignoring gameCompleteNotInstrumented', () => {
-    const androidLaunch = campaignById('24215315197')! // closed, flightEnd 2026-09-09 — before go-live
-    const set = scorecardNotInstrumentedSteps(androidLaunch, ['ask', 'accept'])
-    expect([...set].sort()).toEqual(['accept', 'ask'])
-    expect(set.has('completed')).toBe(false) // not in the passed-in list, so NOT flagged — even though it predates go-live
   })
   it('excludes /install/platforms/* (explicit task-brief exclusion) — classifyPopupPath gives it kind "platformList"', () => {
     expect(classifyFunnelPath('/install/platforms/web')).toBeNull()

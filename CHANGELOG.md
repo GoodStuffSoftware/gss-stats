@@ -7,17 +7,18 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Added
-- **Groundwork for configurable metric cards: one batched metrics request.** A single request
-  returns many dashboard numbers with their counts and measurement status, reads each underlying
-  query once and caches it, and refuses any percentage whose two counts are not comparable. The
-  dashboard does not use it yet.
-- **Groundwork for configurable metric cards: the Overview scorecard and "Today at a glance"
-  as ready-made cards.** They show today's numbers, apart from the rate fixes, follow the page's
-  date and site filters and the change of day, keep their notes behind one "Notes" link, show
-  when they last updated, and say so when a number fails to load. The dashboard does not use
-  them yet.
+- **One batched metrics request.** A single request returns many dashboard numbers with their
+  counts and measurement status, reads each underlying query once and caches it, and refuses any
+  percentage whose two counts are not comparable. The Overview's cards use it.
 
 ### Changed
+- **"Today at a glance" and the campaign scorecard are metric cards.** They show the same
+  numbers, except where the rate audit changed them: game-screen views read against arrivals
+  instead of alone, the install rate counts prompts from the install fix to the minute, and a
+  closed or spend-only campaign drops what its flight could not measure. Each card keeps its
+  caveats behind one "Notes" link, follows the page's dates and sites, and says so with Retry
+  when a number fails to load. Saved layouts are updated automatically, and the previous layout
+  is backed up first.
 - **"Games played" and "Played a game" are now "Game-screen views".** Both count visits to the
   game screen (page views, several per device), not games played; the Overview tile, the
   campaign funnel step and the ads-read report now say so.

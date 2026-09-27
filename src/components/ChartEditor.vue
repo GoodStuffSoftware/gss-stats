@@ -18,7 +18,7 @@ import {
   BAR_MODES,
 } from '../lib/catalog'
 import { ringDims, RING_SOFT_CAP, isDateDim } from '../lib/rings'
-import { BEST_SUDOKU_SITES } from '../lib/defaults'
+import { BEST_SUDOKU_SITES, syncCardWithView } from '../lib/defaults'
 import { noteOptions, defaultNoteIdsForScope, type NoteScope } from '../lib/notes'
 
 const props = defineProps<{ widget: Widget; isNew: boolean }>()
@@ -310,7 +310,8 @@ function save() {
   } else {
     draft.rings = undefined
   }
-  emit('save', { ...draft, i: draft.id })
+  // A panel a metric card renders gets (or loses) its card with its view (lib/defaults.ts).
+  emit('save', syncCardWithView({ ...draft, i: draft.id }))
 }
 </script>
 
