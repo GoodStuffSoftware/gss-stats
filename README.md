@@ -67,10 +67,11 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   arrivals by flight day" are standard geo charts over the same tagged arrivals (filter
   `arrival` = tagged): a breakdown bar of `hourEt` × `campaignFlight`, and a line of
   `flightDay` × `campaignFlight` with `cumulative` running totals dashed on a right-hand axis.
-  The funnel card also carries the signed-out upsell
-  fix's pre/post-fix segment table, which appears on its own once `UPSELL_SIGNEDOUT_FIX_AT` is
-  set; the other panels are dataset `campaigns`, see
-  [`src/components/widgets/CampaignsWidgetBody.vue`](src/components/widgets/CampaignsWidgetBody.vue))
+  The funnel card also carries the signed-out upsell fix's pre/post-fix segment table, which
+  appears on its own once `UPSELL_SIGNEDOUT_FIX_AT` is set. Since layout version 11 no page has a
+  bespoke panel left: the former panel bodies and their endpoints (`/api/campaigns`,
+  `/api/overview`) are retired, and a saved layout's panels are swapped in place on load — see
+  [`src/lib/defaults.ts`](src/lib/defaults.ts) `migratePanelsV11`)
   and "Best Sudoku · Traffic" (per-site/geo/referrer/device detail beyond what Overview and
   Campaigns cover) round out the Best Sudoku tab group, which is kept together and in that
   order — after your own tabs — by a non-destructive reorder on load (see
@@ -264,10 +265,8 @@ Cloudflare Pages Functions  (functions/_middleware.ts → functions/api/*.ts)
    │  - /api/geo    → reads the beacon's D1 (bot-free sub-country geo)
    │  - /api/popups → pop-up funnel counts/rates from the same D1 (sign-in, upsell, install, …)
    │  - /api/completions → completed-game counts from the same D1, by mode × difficulty
-   │  - /api/campaigns → Google Ads campaign comparison from the same D1 (funnel, hour-of-day,
-   │                      country, daily/cumulative, return visits)
-   │  - /api/overview → the release before/after panel
-   │  - /api/metrics  → one batch of registry metrics/ratios by id (ADR 0003; for the card components)
+   │  - /api/metrics  → one batch of registry metrics/ratios by id (ADR 0003): every metric card
+   │                      (Overview, Campaigns, Pop-ups), from the same D1 and the ads store
    │  - /api/ads/readings → the ads routine's readings log + stored spend (D1 gss-stats-ads)
    │  - /api/sites  → auto-builds the merged site list (RUM + beacon, aliases folded)
    │  - /api/config → dashboard layout in KV (backed up once per layout-version bump)
@@ -435,7 +434,7 @@ npm run typecheck:scripts
   instant, and the fix day's spend is shown apart). **A sign-in is its base row only:** the
   status row `/auth/success/<provider>/<new|existing|unknown>` is sent ALONGSIDE the base row
   `/auth/success/<provider>` (providers `google` and `email`), so every auth-success count — the
-  tagged funnel, `/api/campaigns`, `/api/overview`, the sign-up bound — matches the exact base
+  tagged funnel, the campaign and Overview cards (`/api/metrics`), the sign-up bound — matches the exact base
   shape, and the status split reads only the three-segment rows. A prefix match would count each
   new-client sign-in twice. Kill rule 3's asks are unchanged.
 - **One reading per entry per day.** A reading is stored once per (campaign, ET day, entry
@@ -564,7 +563,7 @@ query. Mitigations (`functions/_lib/edgeCache.ts`, `functions/api/geo.ts`, `func
 - `/api/metrics` caches per fact (90 s while live, 15 min for a closed campaign, 24 h for a closed
   flight window), so one fact read serves every card and page that shows it; a representative
   Overview batch reads about 10,000 rows uncached against about 14,100 for the same sections of
-  `/api/overview` (docs/capacity.md §7).
+  the retired `/api/overview`, and a full Campaigns page batch is measured in docs/capacity.md §8.
 
 No index changes and no schema/data writes were needed — see docs/capacity.md §4 for why (the
 `hits` table is too small for an index to matter, and `GROUP BY` requires a temp b-tree
@@ -598,7 +597,8 @@ of the migrated layout first copies the layout that was stored until then to
 `dashboard:default:backup:v<stored version>`, once, and never overwrites that copy
 (`functions/api/config.ts`; if the backup can't be written, the save fails and the old layout
 stays). The backup is named after the version that was **stored**, not the one before the new
-code: a layout still stored at v8 when v10 ships is backed up as `backup:v8`. A tab still
+code: a layout still stored at v8 when v11 ships is backed up as `backup:v8`, one stored at v10
+as `backup:v10`. A tab still
 running older code gets `409` ("This tab is out of date, reload") instead of overwriting a
 newer layout.
 
@@ -614,8 +614,9 @@ To put a backup back, in this order:
    next load migrates the restored layout again. Either redeploy the previous release or ship
    the fixed migration.
 3. **Find the backup to restore**: list the backup keys, and pick the version that was stored
-   before the upgrade (the highest one below the current `CONFIG_VERSION`; on production today
-   that is `backup:v8`). Namespace id from `wrangler.toml`; a token with Workers KV Storage: Edit.
+   before the upgrade (the highest one below the current `CONFIG_VERSION`: `backup:v8` if
+   production was still stored at v8, `backup:v10` if a v10 save happened first). Namespace id
+   from `wrangler.toml`; a token with Workers KV Storage: Edit.
 
    ```bash
    npx wrangler kv key list --remote --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --prefix "dashboard:default:backup:"

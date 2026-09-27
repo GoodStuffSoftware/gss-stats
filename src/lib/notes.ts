@@ -414,6 +414,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.card.invalid': "This card's saved settings could not be read, so it can't be shown. Edit it or restore the default charts.",
     'label.card.openCampaigns': 'Open the Campaigns page',
     'label.card.release': 'Release',
+    'label.card.retiredPanel': 'This panel has been replaced by a card or a chart. Edit it, or restore the default charts.',
     'label.card.step': 'Step',
     'label.card.returnTag': 'Return beacons',
     'label.card.return.d1': 'd1',

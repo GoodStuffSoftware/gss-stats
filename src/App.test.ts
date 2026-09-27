@@ -51,7 +51,6 @@ vi.mock('./api', async (importOriginal) => {
     // The default active page is 'bsk-overview' (lib/defaults.ts) — its kpis/timeline/
     // scorecard/releasePanel widgets call this directly (OverviewWidgetBody's own
     // useOverviewData composable), bypassing ChartCard's usual fetchStats gate entirely.
-    fetchOverview: vi.fn(async () => null as any),
   }
 })
 vi.mock('./sitesStore', async (importOriginal) => {

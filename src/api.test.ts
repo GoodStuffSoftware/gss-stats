@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchAdsReadings, fetchCampaignCompare, fetchOverview, fetchStats } from './api'
+import { fetchAdsReadings, fetchStats } from './api'
 import { isAuthError, sessionExpired } from './session'
 import type { GlobalFilters, Widget } from './types'
 
@@ -40,10 +40,9 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('bespoke-page and readings-log fetchers raise the re-sign-in banner on an expired session', () => {
+// (The overview and campaigns fetchers retired with their bespoke panels in layout version 11.)
+describe('the readings-log fetcher raises the re-sign-in banner on an expired session', () => {
   it.each([
-    ['overview', () => fetchOverview(filters.since, filters.until), '/api/overview'],
-    ['campaigns', () => fetchCampaignCompare('bsk-search'), '/api/campaigns'],
     ['readings', () => fetchAdsReadings('limit=30'), '/api/ads/readings?limit=30'],
   ] as const)('%s: a 401 from the gate probes and sets sessionExpired, then rethrows', async (name, call, url) => {
     stubFetch(unauthorized(), unauthorized())
@@ -54,8 +53,6 @@ describe('bespoke-page and readings-log fetchers raise the re-sign-in banner on 
   })
 
   it.each([
-    ['overview', () => fetchOverview()],
-    ['campaigns', () => fetchCampaignCompare('bsk-search')],
     ['readings', () => fetchAdsReadings('limit=30')],
   ] as const)('%s: an expired Access session (network error + opaque redirect) also sets it', async (_name, call) => {
     stubFetch(new TypeError('Failed to fetch'), { type: 'opaqueredirect', status: 0 })
@@ -65,8 +62,6 @@ describe('bespoke-page and readings-log fetchers raise the re-sign-in banner on 
   })
 
   it.each([
-    ['overview', () => fetchOverview()],
-    ['campaigns', () => fetchCampaignCompare('bsk-search')],
     ['readings', () => fetchAdsReadings('limit=30')],
   ] as const)('%s: a server error neither probes nor signs out', async (name, call) => {
     stubFetch(new Response('boom', { status: 500 }), unauthorized())
@@ -77,7 +72,7 @@ describe('bespoke-page and readings-log fetchers raise the re-sign-in banner on 
 
   it('a 401 that the probe does not confirm leaves the banner off', async () => {
     stubFetch(unauthorized(), new Response('{}', { status: 200 }))
-    await expect(fetchOverview()).rejects.toThrow(/^overview 401:/)
+    await expect(fetchAdsReadings('limit=30')).rejects.toThrow(/^readings 401:/)
     expect(probeCalls()).toHaveLength(1)
     expect(sessionExpired.value).toBe(false)
   })
