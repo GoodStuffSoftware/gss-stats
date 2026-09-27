@@ -36,12 +36,16 @@ function w(p: Omit<Widget, 'i'>): Widget {
   return { ...p, i: p.id }
 }
 
-// Bumped to 8 for the completions-breakdown-widget migration (see normalizeConfig's v8 block
+// Bumped to 9 for the Pop-ups page rebuild + campaign device-mix swap (see normalizeConfig's v9
+// block): the Pop-ups page's ~25 generated tiles become one breakdown bar + a valid-rates table,
+// and the bespoke campaigns 'deviceMix' table becomes the standard nested doughnut. functions/
+// api/config.ts backs the previous stored config up to KV the first time a newer version is
+// saved over it. (Bumped to 8 for the completions-breakdown-widget migration (see normalizeConfig's v8 block
 // below): adds the mode × difficulty completions widget to "Best Sudoku overview" once, on an
 // uncustomized layout only. (Bumped to 7 for the bespoke-page → widget conversion migration —
 // see the v7 block: Overview/Campaigns went from `widgets: []` (rendered by the now-retired
 // OverviewPage.vue/CampaignComparePage.vue) to real generic widgets.)
-export const CONFIG_VERSION = 8
+export const CONFIG_VERSION = 9
 
 // The default "basic charts available out of the box" — a sensible analytics
 // starting layout. Users can move/resize/add/remove from here.
@@ -144,34 +148,78 @@ export function defaultBestSudokuLaunchPage(): DashboardPage {
   }
 }
 
-// "Best Sudoku pop-ups" — shown/accepted/dismissed counts, tap + outcome + eligibility
-// rates, and install's real-outcome counts, for every pop-up in lib/popupEvents.ts.
-// Bucketed by US-Eastern day (see /api/popups + lib/popupEvents.ts etDateFromMs); a rate
-// widget shows "—" instead of 0%/NaN until its denominator has data.
-function pw(p: Omit<Widget, 'i' | 'x' | 'y' | 'metric' | 'dataset'> & { w: number; h: number }): Omit<Widget, 'i' | 'x' | 'y'> {
-  return { metric: 'pageviews', dataset: 'popup', ...p }
+// "Best Sudoku · Pop-ups" (rebuilt in CONFIG_VERSION 9, owner 2026-09-27: "Couldn't we show
+// all the popups in a bar chart"). Three widgets, all generic and editable:
+//  1. ONE breakdown bar over the ordinary filtered geo query: every pop-up on the axis
+//     (popupFamily), and shown, taps, dismissals and each outcome as the series (popupOutcome;
+//     the shown row counts as outcome 'shown'). Measured rows only (see lib/popupEvents.ts
+//     popupDimSqlCase).
+//  2. A rate table with the VALID ratios only (lib/popupEvents.ts POPUP_RATE_TABLE_KEYS): each
+//     pop-up's taps over its showings, and install over post-fix install prompts, each with its
+//     n/d and "too few to report" under MIN_COHORT.
+//  3. Sign-in eligibility (earned / capped / unearned), KEPT because the bar chart can't show it:
+//     /signin-eligible isn't a pop-up but the sign-in prompt's denominator, with its own caveat
+//     (rows are deferred at least 30 minutes after the finish).
+// Dropped: the per-pop-up shown/accepted/dismissed bars, tap-rate tiles and outcome-rate tiles
+// (all in 1 and 2 now; outcome-over-shown rates are lagged cohorts, so counts only), the reason
+// and platform breakdowns and the two per-day trends (addable from the chart editor: dataset
+// 'Pop-up tracking'), and the install real-outcomes table (its three raw signals are series of
+// the bar chart). The page-level notes (App.vue) still carry the deferral and small-sample caveats.
+export function defaultBestSudokuPopupsWidgets(): Widget[] {
+  return [
+    w({
+      id: 'pu-bars',
+      title: 'Pop-ups: shown, taps and outcomes',
+      type: 'breakdownBar',
+      dataset: 'geo',
+      dimension: 'popupFamily',
+      breakdown: 'popupOutcome',
+      barMode: 'grouped',
+      metric: 'pageviews',
+      limit: 100,
+      notes: ['popup-bars-measured'],
+      x: 0,
+      y: 0,
+      w: 12,
+      h: 11,
+    }),
+    w({ id: 'pu-rates', title: 'Rates (valid ratios only)', type: 'rateTable', dataset: 'popup', dimension: '', metric: 'pageviews', limit: 1, notes: ['min-cohort-caveat'], x: 0, y: 11, w: 8, h: 8 }),
+    w({ id: 'pu-eligible-bd', title: 'Sign-in eligibility — earned / capped / unearned', type: 'bar', dataset: 'popup', dimension: 'eligible', metric: 'pageviews', limit: 3, notes: ['signin-eligible-caveat'], x: 8, y: 11, w: 4, h: 8 }),
+  ]
 }
-// Packs widgets left→right into a 12-col grid (see Dashboard.vue col-num), wrapping to a
-// new row when a widget wouldn't fit — avoids hand-computing x/y for ~30 tiles.
-function flowLayout(items: (Omit<Widget, 'i' | 'x' | 'y'> & { w: number; h: number })[]): Widget[] {
-  let x = 0
-  let y = 0
-  let rowH = 0
-  const out: Widget[] = []
-  for (const it of items) {
-    if (x + it.w > 12) {
-      x = 0
-      y += rowH
-      rowH = 0
-    }
-    out.push({ ...it, x, y, i: it.id })
-    x += it.w
-    rowH = Math.max(rowH, it.h)
+
+// The id set the pre-v9 generator produced (one kind bar + tap tile per pop-up, reason bars,
+// two trends, the eligibility bar + rate, the install-outcomes table, one rate tile per
+// outcome spec). The v9 migration removes these from a saved Pop-ups page, except
+// 'pu-eligible-bd' (kept, see above). Frozen here rather than derived from today's generator.
+export function popupsPageV8FactoryIds(): string[] {
+  const ids: string[] = []
+  for (const p of POPUPS) {
+    ids.push(`pu-${p.id}-kind`, `pu-${p.id}-tap`)
+    if (p.hasReasonBreakdown) ids.push(`pu-${p.id}-reason`)
+    if (p.id === 'signin-prompt' || p.id === 'upsell') ids.push(`pu-${p.id}-trend`)
   }
-  return out
+  ids.push('pu-eligible-bd', 'pu-eligible-rate', 'pu-install-outcomes')
+  for (const spec of POPUP_RATE_SPECS.filter((s) => s.kind === 'outcome')) ids.push(`pu-rate-${spec.key}`)
+  return ids
 }
-// Popups whose per-reason/per-platform shown breakdown is worth a chart out of the box.
-const POPUPS_WITH_TREND = new Set(['signin-prompt', 'upsell'])
+const POPUPS_V9_KEPT_IDS = new Set(['pu-eligible-bd'])
+
+/** v9: rebuild a saved Pop-ups page. Removes the pre-v9 generated tiles (by id, the owner's
+ * request: the page "makes no sense"), adds the new bar chart + rate table on top, and keeps
+ * every other widget — the eligibility bar and anything the owner added — with its size and
+ * relative order, moved down below the new block. Idempotent: a second run finds no v8 tile to
+ * remove and both new widgets already present, and returns the page unchanged. */
+export function migratePopupsPageV9(page: DashboardPage): DashboardPage {
+  const removable = new Set(popupsPageV8FactoryIds().filter((id) => !POPUPS_V9_KEPT_IDS.has(id)))
+  const kept = page.widgets.filter((wd) => !removable.has(wd.id))
+  const fresh = defaultBestSudokuPopupsWidgets().filter((wd) => !POPUPS_V9_KEPT_IDS.has(wd.id) && !kept.some((k) => k.id === wd.id))
+  if (kept.length === page.widgets.length && fresh.length === 0) return page
+  const blockH = fresh.reduce((m, wd) => Math.max(m, wd.y + wd.h), 0)
+  const minKeptY = kept.reduce((m, wd) => Math.min(m, wd.y), Infinity)
+  const shifted = kept.map((wd) => ({ ...wd, y: blockH + (wd.y - (Number.isFinite(minKeptY) ? minKeptY : 0)) }))
+  return { ...page, widgets: [...fresh, ...shifted] }
+}
 
 // The OLD generated titles baked SIGNIN_ELIGIBLE_CAVEAT/NO_OUTCOME_TRACKING_NOTE directly
 // into the string (pre notes-registry). Titles are plain names now; the caveats are default
@@ -179,42 +227,6 @@ const POPUPS_WITH_TREND = new Set(['signin-prompt', 'upsell'])
 // exact-string-matched migration of anyone's already-saved config.
 const POPUP_KIND_TITLE_OLD_SUFFIX = ` (${NO_OUTCOME_TRACKING_NOTE})`
 const SIGNIN_ELIGIBLE_TITLE_OLD_SUFFIX = ` (${SIGNIN_ELIGIBLE_CAVEAT})`
-
-export function defaultBestSudokuPopupsWidgets(): Widget[] {
-  const items: (Omit<Widget, 'i' | 'x' | 'y'> & { w: number; h: number })[] = []
-  for (const p of POPUPS) {
-    // FINAL LIST: first50-congrats has no /popup-outcome beacon — no outcome-rate tile is
-    // generated for it below (POPUP_RATE_SPECS already excludes it); its "no outcome
-    // tracking" note is now a default caption (not baked into the title — see above).
-    items.push(
-      pw({ id: `pu-${p.id}-kind`, title: `${p.label} — shown / accepted / dismissed`, type: 'bar', dimension: 'kind', popup: p.id, limit: 3, notes: p.noOutcomeTracking ? ['no-outcome-tracking'] : undefined, w: 6, h: 8 }),
-      pw({ id: `pu-${p.id}-tap`, title: `${p.label} — tap rate`, type: 'rate', dimension: `${p.id}:tap`, limit: 1, w: 3, h: 4 }),
-    )
-    if (p.hasReasonBreakdown) {
-      items.push(
-        pw({ id: `pu-${p.id}-reason`, title: `${p.label} — reason / platform breakdown`, type: 'hbar', dimension: 'reason', popup: p.id, popupKind: 'shown', limit: 12, w: 6, h: 8 }),
-      )
-    }
-    if (POPUPS_WITH_TREND.has(p.id)) {
-      items.push(
-        pw({ id: `pu-${p.id}-trend`, title: `${p.label} — shown per day (ET)`, type: 'line', dimension: 'date', popup: p.id, popupKind: 'shown', limit: 90, w: 6, h: 8 }),
-      )
-    }
-  }
-  items.push(
-    // FINAL LIST caveat: signin-eligible rows are deferred ≥30 min after the finish — now a
-    // default caption (lib/notes.ts 'signin-eligible-caveat') instead of baked into the title.
-    pw({ id: 'pu-eligible-bd', title: 'Sign-in eligibility — earned / capped / unearned', type: 'bar', dimension: 'eligible', limit: 3, notes: ['signin-eligible-caveat'], w: 6, h: 8 }),
-    pw({ id: 'pu-eligible-rate', title: 'Sign-in eligibility rate', type: 'rate', dimension: 'signin-eligible:rate', limit: 1, notes: ['signin-eligible-caveat'], w: 3, h: 4 }),
-    pw({ id: 'pu-install-outcomes', title: 'Install — real outcomes', type: 'table', dimension: 'installOutcome', limit: 3, w: 6, h: 8 }),
-  )
-  // One rate tile per (popup, outcome type) — see POPUP_RATE_SPECS. Zero data today
-  // (no /popup-outcome rows live yet) renders as "—", never 0%.
-  for (const spec of POPUP_RATE_SPECS.filter((s) => s.kind === 'outcome')) {
-    items.push(pw({ id: `pu-rate-${spec.key}`, title: spec.label, type: 'rate', dimension: spec.key, limit: 1, w: 3, h: 4 }))
-  }
-  return flowLayout(items)
-}
 
 interface PopupTitleMigration {
   id: string
@@ -300,7 +312,7 @@ export function defaultCampaignsWidgets(): Widget[] {
     w({ id: 'cw-country', title: 'Arrivals & funnel by country', type: 'table', dataset: 'campaigns', view: 'country', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 22, w: 12, h: 10 }),
     w({ id: 'cw-flightday', title: 'Daily arrivals by flight day', type: 'table', dataset: 'campaigns', view: 'flightDay', dimension: '', metric: 'pageviews', limit: 1, notes: ['arrivals-caveat', 'flight-day-caption'], x: 0, y: 32, w: 12, h: 10 }),
     w({ id: 'cw-cost', title: 'Cost per arrival / auth success', type: 'table', dataset: 'campaigns', view: 'cost', dimension: '', metric: 'pageviews', limit: 1, notes: ['arrivals-caveat', 'spend-source'], x: 0, y: 42, w: 12, h: 9 }),
-    w({ id: 'cw-devicemix', title: 'Device mix', type: 'table', dataset: 'campaigns', view: 'deviceMix', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 51, w: 12, h: 12 }),
+    deviceMixWidget({ x: 0, y: 51, w: 12, h: 12 }),
     w({ id: 'cw-returns', title: 'Return visits', type: 'table', dataset: 'campaigns', view: 'returns', dimension: '', metric: 'pageviews', limit: 1, notes: ['play-tracking-status', 'return-rate-caption'], x: 0, y: 63, w: 12, h: 11 }),
     w({
       id: 'cw-note-attrib',
@@ -331,6 +343,55 @@ export function defaultCampaignsWidgets(): Widget[] {
     }),
   ]
 }
+// Campaign device mix (CONFIG_VERSION 9, owner 2026-09-27: "you recreated the device mix chart
+// when we already have been using nested pie charts for that"): the SAME nested doughnut the
+// GSS pages use for site × device, here campaign flight → device → OS over the ordinary geo
+// query. 'campaignFlight' attributes rows exactly as the campaigns endpoint does
+// (campaignAttributionClause + EXCLUSIONS), and includeEventBeacons keeps its population the
+// old table's: every tagged hit, event beacons included. The per-chart filter spans a rolling
+// year (the Campaigns page hides the global filter bar; attribution itself bounds each flight
+// from below), with the usual "hide my visits" toggle on.
+export const DEVICE_MIX_TITLE = 'Device mix by campaign (share of tagged hits)'
+function deviceMixFilters(): GlobalFilters {
+  return normFilters({ ...defaultFilters(), siteSel: [], rangeRel: '12mo' })
+}
+export function deviceMixWidget(geom: { x: number; y: number; w: number; h: number }, id = 'cw-devicemix', title = DEVICE_MIX_TITLE): Widget {
+  return {
+    id,
+    i: id,
+    title,
+    type: 'nestedDoughnut',
+    dataset: 'geo',
+    dimension: 'campaignFlight',
+    breakdown: 'device',
+    rings: ['os'],
+    metric: 'pageviews',
+    limit: 30,
+    includeEventBeacons: true,
+    filters: deviceMixFilters(),
+    notes: ['device-mix-population'],
+    ...geom,
+  }
+}
+/** A saved widget that is the retired bespoke device-mix table (any page, any id). */
+export function isBespokeDeviceMix(wd: Widget): boolean {
+  return wd.dataset === 'campaigns' && wd.view === 'deviceMix'
+}
+/** v9: swap every bespoke device-mix table for the nested doughnut, in place: same id, grid
+ * position and size, and the owner's own title if they renamed it. Idempotent (nothing left to
+ * swap on a second run). */
+export function migrateDeviceMixV9(page: DashboardPage): DashboardPage {
+  if (!page.widgets.some(isBespokeDeviceMix)) return page
+  return {
+    ...page,
+    widgets: page.widgets.map((wd) =>
+      isBespokeDeviceMix(wd)
+        ? { ...deviceMixWidget({ x: wd.x, y: wd.y, w: wd.w, h: wd.h }, wd.id, wd.title === 'Device mix' ? DEVICE_MIX_TITLE : wd.title), isDefault: wd.isDefault }
+        : wd,
+    ),
+  }
+}
+
 // Another bespoke-turned-widget page (see components/CampaignComparePage.vue — kept for
 // reference / git history only, no longer mounted by App.vue). Second in the Best Sudoku
 // group's tab order.
@@ -512,6 +573,8 @@ function normWidget(x: any): Widget {
     dataset: KNOWN_DATASETS.has(x.dataset) ? x.dataset : undefined,
     dimension: x.dimension ?? '',
     breakdown: x.breakdown || undefined,
+    // type 'breakdownBar': grouped (default, stored as absent) or stacked.
+    barMode: x.barMode === 'stacked' || x.barMode === 'grouped' ? x.barMode : undefined,
     popup: typeof x.popup === 'string' ? x.popup : undefined,
     popupKind: typeof x.popupKind === 'string' ? x.popupKind : undefined,
     // Nested-doughnut extra rings (beyond dimension+breakdown) — see lib/rings.ts. Absent/
@@ -641,6 +704,18 @@ export function normalizeConfig(raw: any): DashboardConfig {
         if (isOverviewPage(p) && overviewPageIsUncustomized(p) && !p.widgets.some((w: Widget) => w.dataset === 'completions')) {
           p.widgets = [...p.widgets, completionsWidget()]
         }
+      }
+    }
+    // v9 migration (see CONFIG_VERSION): rebuild the Pop-ups page (migratePopupsPageV9) and swap
+    // every bespoke campaign device-mix table for the standard nested doughnut
+    // (migrateDeviceMixV9). Version-gated, so a later edit is never undone; every other page
+    // and widget is left exactly as saved.
+    if ((Number(raw.version) || 0) < 9) {
+      for (let i = 0; i < pages.length; i++) {
+        let p: DashboardPage = pages[i]
+        if (isBestSudokuPopupsPage(p)) p = migratePopupsPageV9(p)
+        p = migrateDeviceMixV9(p)
+        pages[i] = p
       }
     }
     // Self-heal (every load, not version-gated): the canonical pages — Overview, Beacon, and

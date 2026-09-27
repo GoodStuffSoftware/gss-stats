@@ -30,7 +30,8 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters): Promis
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        dimension: widget.type === 'rate' ? 'rate' : widget.dimension || 'kind',
+        // A rate tile asks for one rate; a rate table asks for every valid rate ('rates').
+        dimension: widget.type === 'rate' ? 'rate' : widget.type === 'rateTable' ? 'rates' : widget.dimension || 'kind',
         rateKey: widget.type === 'rate' ? widget.dimension : undefined,
         popup: widget.popup,
         kind: widget.popupKind,

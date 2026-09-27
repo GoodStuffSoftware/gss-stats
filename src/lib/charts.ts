@@ -2,7 +2,8 @@ import type { ChartConfiguration } from 'chart.js'
 import type { Widget, StatsResponse, StatsRow, Metric } from '../types'
 import { COUNTRY_NAMES } from './catalog'
 import { ringDims } from './rings'
-import { TRACKING_ACTIVATION_DATE_ET, PLAY_TRACKING_MARKER_LABEL } from './popupEvents'
+import { TRACKING_ACTIVATION_DATE_ET, PLAY_TRACKING_MARKER_LABEL, POPUPS, POPUP_FAMILY_ORDER, POPUP_OUTCOME_ORDER, POPUP_OUTCOME_LABELS } from './popupEvents'
+import { GAME_COMPLETE_MODES, GAME_COMPLETE_DIFFICULTIES, CAMPAIGNS } from './campaigns'
 import { datedReleases } from './releases'
 
 // Categorical palette: brand amber leads, with distinguishable warm/cool accents.
@@ -32,6 +33,20 @@ const LINE = '#E7E2D7'
 const STABLE_COLORS: Record<string, Record<string, string>> = {
   device: { desktop: PALETTE[0], mobile: PALETTE[1], tablet: PALETTE[2], tv: PALETTE[5], bot: PALETTE[7] },
   visitor: { returning: PALETTE[0], new: PALETTE[1] },
+  // Pop-up outcomes: shown is the brand hue, then one fixed color per tap/outcome, so the same
+  // series reads the same on every breakdown chart. Install's raw signals share muted tones.
+  popupOutcome: {
+    shown: PALETTE[0],
+    accept: PALETTE[1],
+    dismiss: PALETTE[7],
+    'signed-in': PALETTE[3],
+    installed: PALETTE[9],
+    returned: PALETTE[5],
+    'still-playing': PALETTE[10],
+    'pwa-installed': PALETTE[2],
+    'standalone-detected': PALETTE[8],
+    'play-detected': PALETTE[6],
+  },
 }
 // Dimensions that read as an ordered magnitude rather than distinct categories → a single
 // brand-hue ramp (most opaque = highest, fading down the sorted list) instead of a rainbow.
@@ -413,7 +428,11 @@ export function formatKey(dimension: string, value: string): string {
     return '(none)'
   }
   if (dimension === 'countryName' || dimension === 'country') return COUNTRY_NAMES[value] ?? value
-  if (dimension === 'visitor' || dimension === 'mode' || dimension === 'difficulty') return value.charAt(0).toUpperCase() + value.slice(1)
+  if (dimension === 'visitor' || dimension === 'mode' || dimension === 'difficulty' || dimension === 'gameMode' || dimension === 'gameDifficulty')
+    return value.charAt(0).toUpperCase() + value.slice(1)
+  if (dimension === 'popupFamily') return POPUPS.find((p) => p.id === value)?.label ?? value
+  if (dimension === 'popupOutcome') return POPUP_OUTCOME_LABELS[value] ?? value
+  if (dimension === 'campaignFlight') return CAMPAIGNS.find((c) => c.id === value)?.label ?? value
   if (dimension === 'date') {
     // YYYY-MM-DD → "Jun 24"
     const d = new Date(value + 'T00:00:00Z')
@@ -478,6 +497,58 @@ export function seriesRows(dim: string, resp: StatsResponse): StatsRow[] {
   return buckets.map((day) => byDay.get(day) ?? { key: { date: day }, pageviews: 0, visits: 0 })
 }
 
+// Known value order for a dimension's values, wherever one reads better than count order: the
+// pop-ups in registry order, shown → taps → outcomes, modes and difficulties in game order.
+const DIM_VALUE_ORDER: Record<string, readonly string[]> = {
+  popupFamily: POPUP_FAMILY_ORDER,
+  popupOutcome: POPUP_OUTCOME_ORDER,
+  gameMode: GAME_COMPLETE_MODES,
+  gameDifficulty: GAME_COMPLETE_DIFFICULTIES,
+  mode: GAME_COMPLETE_MODES,
+  difficulty: GAME_COMPLETE_DIFFICULTIES,
+}
+/** `values` in the dimension's known order (DIM_VALUE_ORDER), unknown values after the known
+ * ones in their given (first-seen, i.e. count) order. */
+export function orderDimValues(dim: string, values: string[]): string[] {
+  const order = DIM_VALUE_ORDER[dim]
+  if (!order) return values
+  const rank = (v: string) => {
+    const i = order.indexOf(v)
+    return i === -1 ? order.length + values.indexOf(v) : i
+  }
+  return [...values].sort((a, b) => rank(a) - rank(b))
+}
+
+export interface BreakdownBarModel {
+  axis: string[] // raw axis values (widget.dimension), in draw order
+  series: string[] // raw series values (widget.breakdown), in legend order
+  values: (number | null)[][] // [seriesIndex][axisIndex]
+  stacked: boolean
+}
+/** The data behind a breakdown bar (type 'breakdownBar', and the older 'stackedBar' which is
+ * always stacked): one bar group per axis value, one series per breakdown value, summed from the
+ * response's (axis, series) rows. A missing combination is null when grouped (so Chart.js leaves
+ * no empty slot) and 0 when stacked (so the stack still totals). */
+export function breakdownBarModel(widget: Pick<Widget, 'type' | 'dimension' | 'breakdown' | 'barMode' | 'metric'>, resp: StatsResponse): BreakdownBarModel {
+  const dim = widget.dimension
+  const bd = widget.breakdown ?? ''
+  const stacked = widget.type === 'stackedBar' || widget.barMode === 'stacked'
+  const axisSeen: string[] = []
+  const seriesSeen: string[] = []
+  const cell = new Map<string, number>() // `${axis}||${series}` -> value
+  for (const r of resp.rows) {
+    const a = r.key[dim] ?? ''
+    const b = r.key[bd] ?? ''
+    if (!axisSeen.includes(a)) axisSeen.push(a)
+    if (!seriesSeen.includes(b)) seriesSeen.push(b)
+    cell.set(`${a}||${b}`, (cell.get(`${a}||${b}`) ?? 0) + metricValue(r, widget.metric))
+  }
+  const axis = orderDimValues(dim, axisSeen)
+  const series = orderDimValues(bd, seriesSeen)
+  const values = series.map((b) => axis.map((a) => cell.get(`${a}||${b}`) ?? (stacked ? 0 : null)))
+  return { axis, series, values, stacked }
+}
+
 /**
  * Build a Chart.js configuration from a widget + its data. Returns null for
  * non-Chart.js widget types (stat / table) which the card renders itself.
@@ -486,39 +557,35 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
   const m = widget.metric
   const dim = widget.dimension
 
-  if (widget.type === 'stat' || widget.type === 'table' || widget.type === 'map' || widget.type === 'rate') return null
+  if (widget.type === 'stat' || widget.type === 'table' || widget.type === 'map' || widget.type === 'rate' || widget.type === 'rateTable') return null
 
-  // ── Stacked bar: primary dimension × breakdown ──────────────────────────────
-  if (widget.type === 'stackedBar' && widget.breakdown) {
-    const primaries: string[] = []
-    const breakdowns: string[] = []
-    const cell = new Map<string, number>() // `${p}||${b}` -> value
-    for (const r of resp.rows) {
-      const p = r.key[dim] ?? ''
-      const b = r.key[widget.breakdown] ?? ''
-      if (!primaries.includes(p)) primaries.push(p)
-      if (!breakdowns.includes(b)) breakdowns.push(b)
-      cell.set(`${p}||${b}`, (cell.get(`${p}||${b}`) ?? 0) + metricValue(r, m))
-    }
-    const datasets = breakdowns.map((b, i) => ({
+  // ── Breakdown bar (and the older stacked bar): axis dimension × series (breakdown) ──
+  if ((widget.type === 'breakdownBar' || widget.type === 'stackedBar') && widget.breakdown) {
+    const model = breakdownBarModel(widget, resp)
+    const datasets = model.series.map((b, i) => ({
       label: formatKey(widget.breakdown!, b),
-      data: primaries.map((p) => cell.get(`${p}||${b}`) ?? 0),
-      backgroundColor: PALETTE[i % PALETTE.length],
+      data: model.values[i],
+      backgroundColor: stableColor(widget.breakdown!, b) ?? PALETTE[i % PALETTE.length],
       borderRadius: 4,
+      // Grouped: an axis value with no row for this series leaves no gap (Chart.js skipNull).
+      skipNull: true,
     }))
+    const axis = (stacked: boolean) => ({ stacked, grid: { color: gridColor() }, ticks: { color: tickColor(), font: { family: 'Inter', size: 11 } } })
     return {
       type: 'bar',
-      data: { labels: primaries.map((p) => formatKey(dim, p)), datasets },
+      data: { labels: model.axis.map((p) => formatKey(dim, p)), datasets },
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        plugins: { legend: { display: true, labels: { color: tickColor(), font: { family: 'Inter', size: 11 } } } },
-        scales: {
-          x: { stacked: true, grid: { color: gridColor() }, ticks: { color: tickColor(), font: { family: 'Inter', size: 11 } } },
-          y: { stacked: true, beginAtZero: true, grid: { color: gridColor() }, ticks: { color: tickColor(), font: { family: 'Inter', size: 11 } } },
+        // A tap anywhere over an axis value shows every series' count for it (touch-friendly).
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: true, labels: { color: tickColor(), font: { family: 'Inter', size: 11 }, boxWidth: 12 } },
+          tooltip: { filter: (item: any) => item.raw != null },
         },
+        scales: { x: axis(model.stacked), y: { ...axis(model.stacked), beginAtZero: true } },
       },
-    }
+    } as ChartConfiguration
   }
 
   // ── Nested doughnut: ring 0 (innermost) = dimension, each ring outward subdivides its

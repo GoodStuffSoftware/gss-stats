@@ -7,10 +7,16 @@ export type ChartType =
   | 'pie'
   | 'nestedDoughnut'
   | 'stackedBar'
+  // One dimension on the axis × one as the series (`breakdown`), grouped side by side or
+  // stacked (Widget.barMode) — the generic "compare categories by a second category" chart.
+  | 'breakdownBar'
   | 'map'
   | 'stat'
   | 'table'
   | 'rate' // a single computed percentage (pop-up tap/outcome/eligibility rate) — see lib/popupEvents.ts
+  // A compact table of the VALID pop-up rates only (lib/popupEvents.ts POPUP_RATE_TABLE_KEYS),
+  // each with its n/d and "too few to report" gating — pop-up dataset only.
+  | 'rateTable'
   | 'note' // a static text tile (caveats/notes carried over from a bespoke page) — no data fetch
 
 export type Metric = 'pageviews' | 'visits'
@@ -53,6 +59,9 @@ export interface Widget {
   dimension: string // primary group-by ('' for a plain total/stat); for dataset 'popup' + type
   // 'rate', this is instead a lib/popupEvents.ts POPUP_RATE_SPECS `key` (e.g. 'signin-prompt:tap')
   breakdown?: string // optional secondary dimension (stacked / grouped)
+  // type 'breakdownBar' only: bars of one axis value side by side ('grouped', the default) or
+  // stacked into one bar ('stacked'). Undefined = grouped.
+  barMode?: 'grouped' | 'stacked'
   // dataset 'popup' only: which pop-up funnel (lib/popupEvents.ts POPUPS id, e.g.
   // 'signin-prompt') a 'kind'/'reason'/'date'/'outcome' dimension chart is scoped to.
   popup?: string
@@ -88,7 +97,8 @@ export interface Widget {
   // dataset 'overview': which panel this widget renders — 'kpis' | 'timeline' | 'scorecard'
   // | 'releasePanel' (see components/widgets/OverviewWidgetBody.vue).
   // dataset 'campaigns': which panel — 'funnel' | 'hourOfDay' | 'country' | 'flightDay' |
-  // 'cost' | 'deviceMix' | 'returns' (see components/widgets/CampaignsWidgetBody.vue).
+  // 'cost' | 'returns' (see components/widgets/CampaignsWidgetBody.vue). The former 'deviceMix'
+  // view is the standard nested doughnut now (CONFIG_VERSION 9, lib/defaults.ts deviceMixWidget).
   // dataset 'ads-readings': the ads-routines worker's own view value(s) (e.g. 'log') — see
   // components/widgets/AdsReadingsWidgetCard.vue.
   view?: string
@@ -210,6 +220,19 @@ export interface StatsResponse {
   // install-outcome gap, lib/popupEvents.ts INSTALL_ACCEPT_OUTCOME_FIXED_ET), rendered under
   // the chart so saved widgets with older titles still show it.
   note?: string
+  // Pop-up dataset, dimension 'rates' (type 'rateTable'): one row per valid rate.
+  rateRows?: RateTableRow[]
+}
+
+/** One row of a 'rateTable' widget — a lib/popupEvents.ts GatedRate plus its label/caveat. */
+export interface RateTableRow {
+  key: string
+  label: string
+  value: number | null
+  insufficientCohort: boolean
+  numerator: number
+  denominator: number
+  note?: string
 }
 
 // ── "Best Sudoku campaigns" (Part B) — a dedicated response shape (not the generic
@@ -262,11 +285,6 @@ export interface CampaignCompareResponse {
   funnelByCountry: Record<'US' | 'CA' | 'other', CampaignFunnelCounts>
   hourOfDayEt: number[] // length 24, index = ET hour, value = arrivals
   daily: { date: string; day: number; arrivals: number }[] // sorted by date; `day` = flightDayIndex
-  deviceMix: {
-    os: Record<string, number>
-    browser: Record<string, number>
-    screen: Record<string, number> // bucketed — see lib/campaigns.ts screenWidthBucket
-  }
   returnVisits: {
     counts: Record<string, number>
     rates: Record<string, number | null>
