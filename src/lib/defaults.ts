@@ -334,9 +334,10 @@ export function isBestSudokuPopupsPage(p: DashboardPage): boolean {
 }
 
 // "Best Sudoku campaigns" widgets — every panel of the former bespoke
-// CampaignComparePage.vue as its own movable/resizable/editable widget (dataset
-// 'campaigns'; see components/widgets/CampaignsWidgetBody.vue). campaignIds left
-// undefined = all CAMPAIGNS, same as the page's original always-every-campaign behavior.
+// CampaignComparePage.vue as its own movable/resizable/editable widget: metric cards (dataset
+// 'campaigns', `view` naming the panel, `card` its preset) and standard geo charts. campaignIds
+// left undefined = every campaign the card repeats over (MetricCard campaignIds), same as the
+// page's original always-every-campaign behavior.
 export function defaultCampaignsWidgets(): Widget[] {
   return [
     w({ id: 'cw-funnel', title: 'Funnel per campaign', type: 'table', dataset: 'campaigns', view: 'funnel', card: { preset: 'campaign-funnel' }, dimension: '', metric: 'pageviews', limit: 1, notes: ['arrivals-caveat', 'min-cohort-caveat'], x: 0, y: 0, w: 12, h: 14 }),
@@ -488,9 +489,9 @@ export function isCampaignComparePage(p: DashboardPage): boolean {
 }
 
 // "Best Sudoku overview" (Part C) widgets — every panel of the former bespoke
-// OverviewPage.vue as its own movable/resizable/editable widget (dataset 'overview'; see
-// components/widgets/OverviewWidgetBody.vue). One widget per panel, reproducing the page's
-// original top-to-bottom arrangement.
+// OverviewPage.vue as its own movable/resizable/editable widget: metric cards (dataset
+// 'overview', `view` naming the panel) and the standard timeline chart. One widget per panel,
+// reproducing the page's original top-to-bottom arrangement.
 // Completions breakdown (mode × difficulty) — a plain GENERIC dataset widget (dataset
 // 'completions', dimension/breakdown), not a bespoke 'overview' panel — see
 // functions/api/completions.ts + lib/catalog.ts COMPLETIONS_DIMENSIONS. Factored into its own
@@ -913,9 +914,9 @@ export function normalizeConfig(raw: any): DashboardConfig {
     if ((Number(raw.version) || 0) < 6 && !pages.some((p: DashboardPage) => isOverviewPage(p))) {
       pages.unshift(defaultOverviewPage())
     }
-    // v7 migration: convert the bespoke Overview/Campaigns pages to real widgets (see
-    // components/widgets/OverviewWidgetBody.vue / CampaignsWidgetBody.vue — the old
-    // OverviewPage.vue/CampaignComparePage.vue bespoke renderers are retired). Gated on
+    // v7 migration: convert the bespoke Overview/Campaigns pages to real widgets (the old
+    // OverviewPage.vue/CampaignComparePage.vue renderers are retired; the panel widgets it adds
+    // become metric cards and standard charts in the later steps, up to v11). Gated on
     // `widgets.length === 0` rather than only the version number, so it's non-destructive AND
     // idempotent even outside a clean version progression: a page that already has widgets
     // (this migration having already run, or a user who somehow added widgets before this

@@ -154,7 +154,7 @@ describe('each fact runs on SQLite and reuses the endpoint clause helpers', () =
     expect(stmt.sql).toContain(attr.sql)
     expect(stmt.binds.slice(1, 1 + attr.binds.length)).toEqual(attr.binds) // after the pf instant
   })
-  it('flightPathsSeen is exactly the statement functions/_lib/campaignInstrumentation.ts runs', () => {
+  it('the flightPathsSeen fact builds flightPathsSeenStatement', () => {
     const c = campaignById('24215315197')!
     expect(FACTS.flightPathsSeen.build({ campaignId: c.id }, NOW)).toEqual(flightPathsSeenStatement(c))
   })

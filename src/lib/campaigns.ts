@@ -15,20 +15,21 @@
 // single-row field, not a cross-row join). Never by matching location/device/time across
 // DIFFERENT rows. See campaignAttributionClause — the ONE function that decides row
 // membership — so a different method (e.g. a future owner-approved signature match) is a
-// single-function swap, not a rewrite of every query in functions/api/campaigns.ts.
+// single-function swap, not a rewrite of every query that uses it (lib/metrics/facts.ts, the
+// geo campaignFlight / flightDay / arrival dimensions, scripts/ads-reads).
 //
 // D1 COMPOUND-SELECT NOTE: D1 caps a compound SELECT (a chain of UNION/INTERSECT/EXCEPT
 // SELECTs) at 5 terms. Nothing here ever builds one — every query below is a single SELECT
-// with an ordinary (arbitrarily long) AND/OR WHERE clause, and functions/api/campaigns.ts
-// issues one small query per campaign rather than one UNIONed mega-query across all three.
+// with an ordinary (arbitrarily long) AND/OR WHERE clause, and the metrics facts issue one
+// small query per campaign rather than one UNIONed mega-query across all of them.
 
 import { etDateSql } from './etTime'
 import { classifyPopupPath, computeRate, TRACKING_ACTIVATION_DATE_ET, NEW_BEACONS_LIVE_AT_ET, etDateFromMs, sqlLit, sqlInt, INSTALL_OUTCOMES, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, INSTALL_GAP_PATHS, isInstallGapUnmeasured, pathSegmentsSql } from './popupEvents'
 
 // ET hour-of-day (0-23) for "Arrivals by ET hour of day" — same DST-safe Intl approach as
 // popupEvents.ts's etDateFromMs, just formatting the hour instead of the calendar date.
-// FINAL LIST rule (Best Sudoku team, 2026-09-25): hourOfDayEt (functions/api/campaigns.ts)
-// is built ONLY from tagged-arrival rows, never from /signin-eligible — that beacon is
+// FINAL LIST rule (Best Sudoku team, 2026-09-25): the ET hour-of-day chart (geo 'hourEt' over
+// arrival = tagged) is built ONLY from tagged-arrival rows, never from /signin-eligible — that beacon is
 // deferred ≥30 min after the finish, so its own row time is not the finish time and would
 // skew any hour-of-day bucketing. See lib/popupEvents.ts SIGNIN_ELIGIBLE_CAVEAT.
 // Formatters are built on first use, not at module load (lib/popupEvents.ts etDateFromMs says
@@ -339,7 +340,7 @@ export function applyExclusions(w: string[], b: unknown[]): void {
 
 // ── Derived dimension campaignFlight (functions/api/geo.ts) ────────────────────────────
 // Which campaign FLIGHT a row belongs to, decided by the SAME campaignAttributionClause and
-// EXCLUSIONS functions/api/campaigns.ts applies (not the raw `campaign` utm column, which also
+// EXCLUSIONS the metrics registry's campaign facts apply (not the raw `campaign` utm column, which also
 // carries unrelated betas, QA variants and pre-launch validation rows). Value = the Google Ads
 // campaign id (lib/charts.ts formatKey shows its label); '' → `emptyLabel` for every row no
 // flight claims. Built by inlining those functions' own bound parameters as checked literals
@@ -371,7 +372,7 @@ export function campaignFlightSqlCase(emptyLabel: string): string {
  * first ET day), attributed exactly as campaignFlightSqlCase (the same EXCLUSIONS, the same
  * campaign order, so a row's day belongs to the campaign its 'campaignFlight' value names), and
  * only inside that flight's serving window (flightDayIndex: '' before its start or after its end,
- * and for a flight with no start date yet). The /api/campaigns flight-day chart's own x axis. */
+ * and for a flight with no start date yet). The flight-day chart's x axis. */
 export function flightDaySqlCase(emptyLabel: string): string {
   const ew: string[] = []
   const eb: unknown[] = []
@@ -406,7 +407,7 @@ function installGapUnmeasuredSql(fixedAtMs: number | null): string {
   return fixedAtMs === null ? `path IN (${paths})` : `(path IN (${paths}) AND ts < ${sqlInt(fixedAtMs)})`
 }
 export function arrivalSqlCase(emptyLabel: string, fixedAtMs: number | null = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS): string {
-  // Same rows /api/campaigns counts as tagged arrivals: first-ever beacons (any path, event
+  // Same rows the registry counts as tagged arrivals: first-ever beacons (any path, event
   // beacons included), minus pre-fix install-gap rows, attributed by campaignFlightSqlCase.
   const E = sqlLit(emptyLabel)
   return `CASE WHEN visitor <> 'new' THEN ${E} WHEN ${installGapUnmeasuredSql(fixedAtMs)} THEN ${E} WHEN (${campaignFlightSqlCase('')}) <> '' THEN 'tagged' ELSE 'untagged' END`
@@ -465,16 +466,16 @@ export const FUNNEL_STEP_ORDER: FunnelStepKey[] = ['arrivals', 'played', 'comple
 // STALE as a blanket claim since v1.95.5 (2026-09-26T19:43:02Z) added `/game/complete/...`
 // — classifyFunnelPath below DOES now return 'completed' for those rows — but this set is
 // kept as the FALLBACK "not instrumented" default for callers that don't do a per-window
-// "did this path exist yet" check (functions/api/overview.ts's scorecard; see
-// gameCompleteNotInstrumented below for the per-flight version functions/api/campaigns.ts's
-// own seenSteps query already computes empirically and correctly with no further change).
+// "did this path exist yet" check (funnelStepRates' default, for the ads routine); the metrics
+// registry decides per flight (lib/metrics/instrumentation.ts, and gameCompleteNotInstrumented
+// below).
 export const FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED = new Set<FunnelStepKey>(['completed'])
 
 /** A campaign flight predates the game-complete beacon entirely when it's already over
  * before NEW_BEACONS_LIVE_AT_ET (v1.95.5) — same shape as returnBeaconNotInstrumented
  * below, reusing lib/popupEvents.ts's NEW_BEACONS_LIVE_AT_ET rather than a second constant.
- * Callers that can't do functions/api/campaigns.ts's per-flight "did this path exist
- * site-wide during the window" query (e.g. the overview scorecard) use this instead of the
+ * Callers that can't run the per-flight "did this path exist site-wide during the window"
+ * query (the registry's seenInFlightWindow rule runs it) use this instead of the
  * permanent FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED default once a flight's window reaches
  * the live instant. */
 export function gameCompleteNotInstrumented(campaign: CampaignFlight): boolean {
@@ -569,7 +570,7 @@ export type AuthSuccessStatus = (typeof AUTH_SUCCESS_STATUSES)[number]
 export const AUTH_SUCCESS_PATHS = ['/auth/success/google', '/auth/success/email'] as const
 const AUTH_STATUS_RE = /^\/auth\/success\/(google|email)\/(new|existing|unknown)$/
 /** A sign-in (the base row), never its status row: every auth-success count uses this
- * (functions/api/overview.ts, lib/adsRules.ts summarizeTaggedRows, classifyFunnelPath). */
+ * (lib/metrics/metrics.ts, lib/adsRules.ts summarizeTaggedRows, classifyFunnelPath). */
 export function isAuthSuccessBase(path: string): boolean {
   return (AUTH_SUCCESS_PATHS as readonly string[]).includes(path)
 }
@@ -668,11 +669,12 @@ export function computeFunnelCounts(rows: FunnelPathCount[], taggedArrivals: num
 //    recorded at all (see that constant's own doc comment), so counting it in the denominator
 //    would understate the rate for a reason that has nothing to do with real tap-through.
 //    funnelStepRates takes this pre-computed post-fix count as a separate argument rather than
-//    deriving it from `counts` (which has no time dimension) — see functions/api/campaigns.ts
-//    and functions/api/overview.ts for how callers compute it from their own hour-bucketed rows.
+//    deriving it from `counts` (which has no time dimension); the metrics registry's
+//    campaign.installPerPrompt ratio (lib/metrics/ratios.ts) splits its prompts at the fix
+//    row-exactly.
 // Every other step (played, completed, ask, authSuccess, installPrompt) is a plain COUNT ONLY
-// now — funnelStepRates doesn't populate a rate for it at all (not even null), and the widget
-// bodies (CampaignsWidgetBody.vue / OverviewWidgetBody.vue) render no percent line for it.
+// now — funnelStepRates doesn't populate a rate for it at all (not even null), and the cards
+// (the registry's ratio rule) show no percent for it.
 export const VALID_FUNNEL_RATE_STEPS = new Set<FunnelStepKey>(['accept', 'install'])
 
 /** Real conversion rates ONLY (see VALID_FUNNEL_RATE_STEPS above) — `accept` (accept/ask) and

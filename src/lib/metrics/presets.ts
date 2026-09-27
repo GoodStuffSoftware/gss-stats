@@ -1,10 +1,9 @@
 // Code-reviewed card presets (ADR 0003 section 1). A widget stores `card: { preset }`, so an
 // improvement here reaches every widget that has not been customized. validate.test.ts runs
-// validateCard over every one, and presets.parity.test.ts renders each against the bespoke
-// Overview body it replaces, over the same SQLite fixture.
+// validateCard over every one, and presets.parity.test.ts / slice7.parity.test.ts compare each
+// with the retired bespoke panel it replaced (a golden of its rendering on the same fixture).
 //
-// Each preset reproduces what the bespoke body shows today (OverviewWidgetBody.vue, views
-// 'scorecard' and 'kpis'), with only the documented changes: the ratio rule (a count or a pair
+// Each preset reproduces what the retired panel showed, with only the documented changes: the ratio rule (a count or a pair
 // where a percentage would be invalid), closed campaigns omitting what their flight could not
 // measure, and the registry differences D1-D5 (functions/api/metrics.equivalence.test.ts).
 //

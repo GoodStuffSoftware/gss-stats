@@ -871,9 +871,11 @@ users, and a review gate.
   so.
 - Closed campaigns get shorter, quieter cards: steps that were never measured disappear instead of
   reading "not instrumented" or "— (0/0)".
-- `OverviewResponse.kpis/scorecard` and much of `CampaignCompareResponse` become dead weight and are
-  removed in slice 7. The timeline, hour-of-day, flight-day, country and device-mix charts keep their
-  endpoints until series metrics exist.
+- `OverviewResponse.kpis/scorecard` and much of `CampaignCompareResponse` become dead weight. (As
+  built: both endpoints were removed in slice 7. The timeline and device mix had become standard
+  charts in layout version 9; hour-of-day and flight-day became standard `/api/geo` charts over
+  new `hourEt` and `flightDay` dimensions rather than waiting for series metrics, and country a
+  card.)
 - `lib/metrics/` becomes a second shared domain module next to `popupEvents.ts` and `campaigns.ts`.
   Their classifiers stay the single source, and the registry only composes them.
 - The ads routine (`scripts/ads-reads`) can later read the same registry for its reports, which

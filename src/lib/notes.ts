@@ -294,8 +294,8 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.funnel.accept': 'Accept',
     'label.funnel.authSuccess': 'Auth success',
     'label.funnel.installPrompt': 'Install prompt',
-    // Range-specific install-fix caveats travel with the data instead (functions/api/campaigns.ts
-    // funnel.installNote, from lib/popupEvents.ts installOutcomeGapNote).
+    // Range-specific install-fix caveats travel with the value instead (the install metric's
+    // install-fix note, in a card's Notes).
     'label.funnel.install': 'Install',
 
     // Metrics (lib/metrics/metrics.ts) — one `label.<metricId>` each.

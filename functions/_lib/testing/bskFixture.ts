@@ -59,8 +59,8 @@ function retest(): Seed[] {
     { ...tag, ts: at('2026-09-26T17:05:00Z'), path: '/game', visitor: 'returning', country: 'US', n: 14 },
     { ...tag, ts: at('2026-09-26T20:00:00Z'), path: '/game/complete/normal/easy', visitor: 'returning', n: 3 },
     { ...tag, ts: at('2026-09-26T18:00:00Z'), path: '/signin-prompt/streak', visitor: 'returning', n: 6 },
-    // No sign-in accept for the retest, and none site-wide today: /api/campaigns calls 'accept'
-    // not instrumented for this ACTIVE flight; the registry keeps it live (0 so far).
+    // No sign-in accept for the retest, and none site-wide today: the retired /api/campaigns
+    // called 'accept' not instrumented for this ACTIVE flight; the registry keeps it live (0).
     { ...tag, ts: at('2026-09-26T20:30:00Z'), path: '/popup-outcome/signin-prompt/signed-in', visitor: 'returning', n: 1 },
     { ...tag, ts: at('2026-09-26T16:30:00Z'), path: '/install/prompt/ios', visitor: 'returning', n: 5 },
     { ...tag, ts: at('2026-09-26T18:00:00Z'), path: '/install/prompt/ios', visitor: 'returning', n: 4 },
