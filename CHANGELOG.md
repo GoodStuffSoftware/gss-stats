@@ -6,6 +6,12 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Sign-in failures and redirect fallbacks now show on the Best Sudoku dashboard**, next to
+  the existing auth-success numbers on "Today at a glance". Both read a real zero (not a blank
+  or a hidden tile) once tracking is live, so "no failures yet" reads differently from "not
+  wired up".
+
 ## [0.12.1] — 2026-09-27
 
 ### Fixed

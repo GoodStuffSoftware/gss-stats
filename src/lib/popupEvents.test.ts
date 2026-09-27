@@ -49,6 +49,11 @@ import {
   rowIsPostInstallFix,
   withInstallGapNote,
   type HourPathCount,
+  AUTH_ERROR_REDIRECT_LIVE_AT_ET,
+  isAuthErrorPath,
+  isAuthRedirectPath,
+  PATH_FAMILY_OPTIONS,
+  pathFamilyOf,
 } from './popupEvents'
 
 describe('install-outcome gap, fixed in v1.95.4 (first confirmed post-fix instant 2026-09-26T16:26:36Z)', () => {
@@ -244,11 +249,50 @@ describe('classifyPopupPath', () => {
     }
   })
 
+  it('auth-error: /auth/error/<slug> classifies to the auth-error family, any slug (open-ended vocabulary)', () => {
+    expect(classifyPopupPath('/auth/error/popup-blocked')).toEqual({ family: 'auth-error', kind: 'occurred', extra: 'popup-blocked' })
+    expect(classifyPopupPath('/auth/error/other')).toEqual({ family: 'auth-error', kind: 'occurred', extra: 'other' })
+    // A brand-new slug best-sudoku hasn't shipped yet still counts — never validated against a
+    // fixed list here (AUTH_ERROR_SLUGS is a client-side table this repo does not mirror).
+    expect(classifyPopupPath('/auth/error/some-future-slug')).toEqual({ family: 'auth-error', kind: 'occurred', extra: 'some-future-slug' })
+    expect(classifyPopupPath('/auth/error')).toBeNull() // no slug
+    expect(classifyPopupPath('/auth/error/')).toBeNull()
+  })
+
+  it('auth-redirect: /auth/redirect/<provider> classifies to the auth-redirect family', () => {
+    expect(classifyPopupPath('/auth/redirect/google')).toEqual({ family: 'auth-redirect', kind: 'occurred', extra: 'google' })
+    expect(classifyPopupPath('/auth/redirect/email')).toEqual({ family: 'auth-redirect', kind: 'occurred', extra: 'email' })
+    expect(classifyPopupPath('/auth/redirect')).toBeNull() // no provider
+  })
+
   it('rejects paths outside every popup family, and ordinary page paths', () => {
     expect(classifyPopupPath('/')).toBeNull()
     expect(classifyPopupPath('/play')).toBeNull()
     expect(classifyPopupPath('')).toBeNull()
     expect(classifyPopupPath('/signin-promptx/shown')).toBeNull() // must not prefix-match a look-alike path
+  })
+})
+
+describe('auth-error / auth-redirect (v1.89.0, live 2026-09-22 — best-sudoku CHANGELOG.md)', () => {
+  it('AUTH_ERROR_REDIRECT_LIVE_AT_ET is the confirmed release date', () => {
+    expect(AUTH_ERROR_REDIRECT_LIVE_AT_ET).toBe('2026-09-22')
+  })
+  it('isAuthErrorPath / isAuthRedirectPath match exactly their own family, never each other or auth-success', () => {
+    expect(isAuthErrorPath('/auth/error/popup-blocked')).toBe(true)
+    expect(isAuthErrorPath('/auth/redirect/google')).toBe(false)
+    expect(isAuthErrorPath('/auth/success/google')).toBe(false)
+    expect(isAuthRedirectPath('/auth/redirect/google')).toBe(true)
+    expect(isAuthRedirectPath('/auth/error/popup-blocked')).toBe(false)
+    expect(isAuthRedirectPath('/auth/success/google')).toBe(false)
+  })
+  it('both families are excluded from page views (isPopupEventPath) and never counted as an ordinary path', () => {
+    expect(isPopupEventPath('/auth/error/timeout')).toBe(true)
+    expect(isPopupEventPath('/auth/redirect/google')).toBe(true)
+  })
+  it('pathFamilyOf resolves both to their own label, listed in PATH_FAMILY_OPTIONS', () => {
+    expect(pathFamilyOf('/auth/error/timeout')).toBe('auth-error')
+    expect(pathFamilyOf('/auth/redirect/google')).toBe('auth-redirect')
+    expect(PATH_FAMILY_OPTIONS.map((o) => o.value)).toEqual(expect.arrayContaining(['auth-error', 'auth-redirect']))
   })
 })
 
@@ -319,7 +363,7 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
   // exactly how '/return' was accidentally left off this list on this branch — see the
   // 2026-09-25 review). If this ever fails, either a prefix was removed (update this
   // literal list deliberately) or one was never added (fix the array instead).
-  it('POPUP_EVENT_PREFIXES is exactly these 11 prefixes', () => {
+  it('POPUP_EVENT_PREFIXES is exactly these 13 prefixes', () => {
     expect([...POPUP_EVENT_PREFIXES]).toEqual([
       '/signin-prompt',
       '/signin-eligible',
@@ -332,6 +376,8 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
       '/game/complete/',
       '/auth/success/google/',
       '/auth/success/email/',
+      '/auth/error',
+      '/auth/redirect',
     ])
   })
   it("the new/existing auth rows are events (they ride alongside the base row); the base rows stay page views", () => {
