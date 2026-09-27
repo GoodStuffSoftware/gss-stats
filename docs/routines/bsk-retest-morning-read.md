@@ -222,11 +222,14 @@ skip it, and never retry more than once.
 1. **Raw JSON.** Write the run's full `----- JSON -----` block to
    `C:\Users\msant\dev\best-sudoku-ads-next\docs\marketing\google-ads\retest\data\<ET
    date>.json` in the worktree below (create the `data/` directory if it does not exist yet).
-2. **Review doc entry.** Append one dated entry to
-   `docs/marketing/google-ads/retest/review-2026-09.md` in the same worktree, in the same
-   format as the week-1/week-2 review docs (a dated heading, the Step 5 narrative, then the
-   report's headline numbers) — read the existing file first and match its structure exactly;
-   do not invent a new format.
+2. **Review doc entry.** Append one entry to the end of
+   `docs/marketing/google-ads/retest/review-2026-09.md` in the same worktree, under its
+   `## Daily log` heading, in the exact shape that file's own header documents: `### Day N —
+   <ET date>`, then the Step 5 narrative, then a one-line "Headline numbers" summary and the
+   `data/<ET date>.json` path. That file is a plain append-only log (unlike the week-1/week-2
+   review docs, which are large hand-curated documents and NOT the format to copy) — read its
+   header once if unsure, but never invent a different shape and never edit an earlier entry;
+   a correction gets its own new dated entry.
 
 Both files live in the worktree `C:\Users\msant\dev\best-sudoku-ads-next`, branch
 `docs/ads-next-campaign`. Before writing:
