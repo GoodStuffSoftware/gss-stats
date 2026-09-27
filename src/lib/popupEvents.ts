@@ -49,6 +49,15 @@ export const POPUP_EVENT_PREFIXES = [
   // AUTH_SUCCESS_PROVIDERS.
   '/auth/success/google/',
   '/auth/success/email/',
+  // v1.89.0 (live 2026-09-22, see AUTH_ERROR_REDIRECT_LIVE_AT_ET below): a sign-in FAILURE
+  // beacon, `/auth/error/<slug>` — one row per failed attempt. `<slug>` is open-ended
+  // (best-sudoku's AUTH_ERROR_SLUGS table grows over time; an unmapped code sends `other`),
+  // so this is a plain prefix match, never a fixed enum. Never a screen view.
+  '/auth/error',
+  // v1.89.0 (same date): the popup-to-redirect sign-in fallback, `/auth/redirect/<provider>`
+  // — fires when the popup flow can't run (e.g. an in-app browser) and the app falls back to
+  // a full-page redirect. One row per fallback. Never a screen view.
+  '/auth/redirect',
 ] as const
 
 export function isPopupEventPath(path: string): boolean {
@@ -100,6 +109,8 @@ const PATH_FAMILY_LABELS: Record<(typeof POPUP_EVENT_PREFIXES)[number], string> 
   '/game/complete/': 'game-complete',
   '/auth/success/google/': 'auth-status',
   '/auth/success/email/': 'auth-status',
+  '/auth/error': 'auth-error',
+  '/auth/redirect': 'auth-redirect',
 }
 
 /** Path → family label. 'page' for anything that isn't an event beacon (an ordinary page
@@ -139,6 +150,8 @@ export const PATH_FAMILY_OPTIONS: { value: string; label: string }[] = [
   { value: 'return', label: 'Return-visit beacon' },
   { value: 'game-complete', label: 'Game completed' },
   { value: 'auth-status', label: 'Auth new/existing status' },
+  { value: 'auth-error', label: 'Sign-in failure' },
+  { value: 'auth-redirect', label: 'Sign-in redirect fallback' },
 ]
 
 // ── Classification ──────────────────────────────────────────────────────────────────
@@ -355,6 +368,20 @@ export function classifyPopupPath(path: string): PopupEvent | null {
     return null
   }
 
+  if (path === '/auth/error' || path.startsWith('/auth/error/')) {
+    const [slug] = segments(path, '/auth/error')
+    if (!slug) return null
+    // <slug> is open-ended (best-sudoku AUTH_ERROR_SLUGS grows over time; unmapped codes send
+    // 'other') — counted whatever it is, never validated against a fixed list here.
+    return { family: 'auth-error', kind: 'occurred', extra: slug }
+  }
+
+  if (path === '/auth/redirect' || path.startsWith('/auth/redirect/')) {
+    const [provider] = segments(path, '/auth/redirect')
+    if (!provider) return null
+    return { family: 'auth-redirect', kind: 'occurred', extra: provider }
+  }
+
   if (path === '/popup-outcome' || path.startsWith('/popup-outcome/')) {
     const [name, outcome] = segments(path, '/popup-outcome')
     // FINAL LIST: <popup> is exactly {signin-prompt, promo-first50, first50-offer, upsell,
@@ -556,6 +583,25 @@ export const RAW_INSTALL_DEDUPE_LIVE_AT_ET = '2026-09-26'
 export const RAW_INSTALL_DEDUPE_MARKER_LABEL = 'raw install dedupe'
 export const RAW_INSTALL_DEDUPE_NOTE =
   'raw /install/* dedupe live — duplicate cross-tab rows no longer sent; small drop expected mainly on desktop Chrome/Edge; primary install count unaffected'
+
+// ── v1.89.0 go-live (2026-09-22, ET calendar date — best-sudoku CHANGELOG.md) ───────────────
+// Two sign-in signal beacons shipped in this release: `/auth/error/<slug>` (a failed sign-in
+// attempt) and `/auth/redirect/<provider>` (the popup-to-redirect fallback), both in
+// POPUP_EVENT_PREFIXES above. Same release also added the base `/auth/success/<provider>` row
+// (lib/campaigns.ts AUTH_SUCCESS_PATHS), which predates this file's event-beacon convention and
+// is intentionally NOT gated here (see campaigns.ts's own doc comment on isAuthSuccessBase).
+// A whole ET date, like TRACKING_ACTIVATION_DATE_ET — best-sudoku's changelog dates the release
+// by day, not by a deploy-log instant the way GAME_COMPLETE_LIVE_AT is known to the second.
+export const AUTH_ERROR_REDIRECT_LIVE_AT_ET: string | null = '2026-09-22'
+
+/** A `/auth/error/<slug>` row (any slug). */
+export function isAuthErrorPath(path: string): boolean {
+  return classifyPopupPath(path)?.family === 'auth-error'
+}
+/** A `/auth/redirect/<provider>` row (any provider). */
+export function isAuthRedirectPath(path: string): boolean {
+  return classifyPopupPath(path)?.family === 'auth-redirect'
+}
 
 // ── Aggregation ──────────────────────────────────────────────────────────────────────
 // The Function fetches one row per (UTC hour bucket, path) with its count — still an

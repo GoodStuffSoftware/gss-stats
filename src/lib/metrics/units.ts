@@ -34,4 +34,6 @@ export const PATH_FAMILY_UNIT: Readonly<Record<string, Unit>> = {
   return: 'device', // deduplicated on the device, once per bucket
   'game-complete': 'completion',
   'auth-status': 'signin',
+  'auth-error': 'row', // one row per failed sign-in attempt
+  'auth-redirect': 'row', // one row per popup-to-redirect fallback
 }

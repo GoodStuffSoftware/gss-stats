@@ -62,6 +62,8 @@ describe('units key off the beacon path families (lib/popupEvents.ts)', () => {
     'bsk.popupShown': { path: '/upsell/shown/limit' },
     'bsk.popupAccepts': { path: '/promo-first50/accept' },
     'bsk.installs': { path: '/popup-outcome/install-prompt/installed' },
+    'bsk.authErrors': { path: '/auth/error/popup-blocked' },
+    'bsk.authRedirects': { path: '/auth/redirect/google' },
     'popup.shown': { path: '/signin-prompt/streak', params: { popup: 'signin-prompt' } },
     'popup.outcomeReturned': { path: '/popup-outcome/upsell/returned', params: { popup: 'upsell' } },
     'popup.eligibleEarned': { path: '/signin-eligible/earned' },
