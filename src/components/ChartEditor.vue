@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, computed, watch } from 'vue'
+import { reactive, computed, watch, onMounted, ref } from 'vue'
 import type { Widget, LineSeries, GlobalFilters } from '../types'
 import {
   DIMENSIONS,
@@ -44,6 +44,15 @@ watch(
   () => props.widget,
   (w) => Object.assign(draft, copyWidget(w)),
 )
+
+// Belt and suspenders for "the sheet must scroll to the top when it opens" (review fix,
+// 2026-09-27): a freshly mounted .panel already starts at scrollTop 0 once .overlay's flex
+// centering no longer fights it (see the mobile @media rule below) — this just makes that
+// explicit instead of relying on it being an accident of the CSS.
+const panelEl = ref<HTMLElement | null>(null)
+onMounted(() => {
+  if (panelEl.value) panelEl.value.scrollTop = 0
+})
 
 const isGeo = computed(() => draft.dataset === 'geo')
 const isPopup = computed(() => draft.dataset === 'popup')
@@ -362,7 +371,7 @@ function save() {
 
 <template>
   <div class="overlay" @click.self="emit('cancel')">
-    <div class="panel">
+    <div class="panel" :class="{ 'is-card': isCardWidget }" ref="panelEl">
       <h2>{{ isNew ? 'Add chart' : 'Edit chart' }}</h2>
 
       <div class="field">
@@ -684,6 +693,11 @@ function save() {
   justify-content: center;
   z-index: 100;
   padding: 20px;
+  /* A tall panel (a metric card with several sections) can exceed the viewport even on
+     desktop; without this, flex's vertical centering pushes its TOP out of reach with no way
+     to scroll back up to it (review fix, 2026-09-27 — the mobile version of this is the
+     dedicated sheet rule below, which removes centering outright). */
+  overflow-y: auto;
 }
 .panel {
   background: rgb(var(--surface));
@@ -693,6 +707,15 @@ function save() {
   width: 100%;
   max-width: 460px;
   box-shadow: 0 20px 60px rgb(0 0 0 / 0.25);
+  /* Never itself the scroll container at desktop (.overlay is, above) — margin:auto on a flex
+     item keeps it centered when it's short AND fully reachable by scroll when it's tall. */
+  margin: auto;
+}
+/* A metric card (ADR 0003, phase B): CardEditor wants real width for its two-column live
+   preview (its own .ce-root goes up to 900px) — the plain chart panel's 460px would otherwise
+   squeeze it into one cramped column. */
+.panel.is-card {
+  max-width: 960px;
 }
 h2 {
   font-size: 18px;
@@ -796,5 +819,36 @@ h2 {
 .btn.danger:hover {
   border-color: #bc4749;
   background: rgb(188 71 73 / 0.06);
+}
+
+/* Full-screen sheet at phone width (review fix, 2026-09-27 — matches the app's own mobile
+   breakpoint, lib/responsive.ts MOBILE_MAX_WIDTH, and CardEditor.vue's own). Before this rule,
+   .overlay's flex centering (align-items: center) plus an unbounded .panel meant a tall panel —
+   any metric card with a couple of sections easily exceeds a phone's viewport height — had its
+   TOP pushed above y=0 with nothing to scroll: the "editor fields must be at the top" state was
+   unreachable, and whatever landed mid-panel at natural center (often the live preview, well
+   below the actual top of the content) was the first thing visible. Removing the centering and
+   making .panel itself the one full-height, top-anchored scroll container fixes both: the DOM's
+   own order (Title → fields → CardEditor's own controls-then-preview columns, now stacked) is
+   what's on screen, and a freshly mounted element starts at scrollTop 0 — no extra JS needed to
+   "scroll to the top on open". */
+@media (max-width: 700px) {
+  .overlay {
+    align-items: stretch;
+    justify-content: stretch;
+    padding: 0;
+  }
+  .panel,
+  .panel.is-card {
+    max-width: none;
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    border-radius: 0;
+    border: none;
+    box-shadow: none;
+    margin: 0;
+    overflow-y: auto;
+  }
 }
 </style>

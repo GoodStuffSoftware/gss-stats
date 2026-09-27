@@ -3,11 +3,11 @@
 // (ADR 0003 section 1). 'table' is structurally different from the other four — items are
 // COLUMNS and repeat instances are ROWS — so it gets its own branch with MetricTableCell
 // instead of MetricItem.
-import { computed } from 'vue'
+import { computed, effectScope, onScopeDispose, shallowRef, watch, type EffectScope, type Ref } from 'vue'
 import { useMetrics } from '../../composables/useMetrics'
 import { buildRequestSpec, flattenSectionItems, resolveRepeat, type FlatItem, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
 import { itemLabelTokens, itemViewModel, resolveLabelTokens } from '../../lib/metrics/render'
-import type { MetricsContext, Section } from '../../lib/metrics/types'
+import type { MetricsContext, MetricValue, Section } from '../../lib/metrics/types'
 import MetricItem from './MetricItem.vue'
 import MetricLabel from './MetricLabel.vue'
 import MetricPlaceholder from './MetricPlaceholder.vue'
@@ -27,29 +27,59 @@ const titleTokens = computed(() => (props.section.title !== undefined ? resolveL
 // ── rows / pills / tiles / bars ────────────────────────────────────────────────────────────
 const flatItems = computed<FlatItem[]>(() => (props.section.layout === 'table' ? [] : flattenSectionItems(props.section, props.outerScope, props.ctx)))
 
-// A 'bars' section scales every bar to the section's largest value. Acquired once, at setup,
-// via the SAME shared useMetrics() cache each MetricItem uses (content-equal requests dedupe
-// and share one fetch) — never inside a computed getter, since request() has side effects
-// (refcounting + onScopeDispose registration) that must run exactly once.
-const { request: requestShared } = useMetrics(() => props.context, () => props.ctx.todayEt)
-const setupItems = props.section.layout === 'table' ? [] : flattenSectionItems(props.section, props.outerScope, props.ctx)
-const setupRefs = setupItems.map((fi) => {
-  const spec = fi.emptyOf ? null : buildRequestSpec(fi.item, fi.scope)
-  return spec ? requestShared(spec) : null
-})
+// barMax (a 'bars' section scales every bar to the section's largest value) and anyVisible (a
+// section left with no visible item after gating is omitted whole — ADR 0003, "Closed campaigns:
+// omit, don't label") both need one value per flattened item, from the SAME shared useMetrics()
+// cache every MetricItem uses (content-equal requests dedupe and share one fetch).
+//
+// Review fix, 2026-09-27 (the same staleness useMetricItem.ts had): these used to be acquired
+// ONCE at setup from a snapshot of flattenSectionItems() taken then and never again — editing a
+// 'bars' card's items, or a section's item list, left the bar scale or the show/hide decision
+// reading stale data forever, because the snapshot (and the refs pointing at it) never updated
+// when `flatItems` did. Fixed the same way: `activeRefs` is rebuilt — in a fresh nested
+// effectScope, so the OLD useMetrics() consumers are released before the NEW ones are acquired
+// (see useMetrics.ts releaseKey) — only when the flattened items' RESOLVED REQUEST PLAN actually
+// changes (planKey), so a purely cosmetic edit (a label, a caption) never touches the fetch
+// layer. `barMax`/`anyVisible` then read `flatItems.value` and `activeRefs.value` directly, both
+// reactive, so they follow a live edit instead of freezing at first mount.
+function planKey(items: readonly FlatItem[]): string {
+  return JSON.stringify(items.map((fi) => (fi.emptyOf ? null : (buildRequestSpec(fi.item, fi.scope) ?? null))))
+}
+const activeRefs = shallowRef<(Readonly<Ref<MetricValue | undefined>> | null)[]>([])
+let requestScope: EffectScope | null = null
+let currentPlanKey: string | null = null
+function rebuildRefs(items: FlatItem[]) {
+  const key = planKey(items)
+  if (key === currentPlanKey && requestScope) return
+  currentPlanKey = key
+  requestScope?.stop()
+  requestScope = effectScope(true)
+  activeRefs.value =
+    requestScope.run(() => {
+      const { request } = useMetrics(() => props.context, () => props.ctx.todayEt)
+      return items.map((fi) => {
+        if (fi.emptyOf) return null
+        const spec = buildRequestSpec(fi.item, fi.scope)
+        return spec ? request(spec) : null
+      })
+    }) ?? []
+}
+watch(flatItems, rebuildRefs, { immediate: true })
+onScopeDispose(() => requestScope?.stop())
+
 const barMax = computed(() => {
   if (props.section.layout !== 'bars') return 0
-  const nums = setupItems.flatMap((fi, i) => (fi.emptyOf || fi.item.display.as !== 'bar' ? [] : [setupRefs[i]?.value ? (setupRefs[i]!.value!.value ?? setupRefs[i]!.value!.numerator ?? 0) : 0]))
+  const items = flatItems.value
+  const refs = activeRefs.value
+  const nums = items.flatMap((fi, i) => (fi.emptyOf || fi.item.display.as !== 'bar' ? [] : [refs[i]?.value ? (refs[i]!.value!.value ?? refs[i]!.value!.numerator ?? 0) : 0]))
   return nums.length ? Math.max(0, ...nums) : 0
 })
 
-// A section left with no visible item after gating (every item omitted: a closed campaign's
-// unmeasured steps, whenEmpty 'omit', …) is omitted whole, title included (ADR 0003, "Closed
-// campaigns: omit, don't label"). The same view model MetricItem renders decides visibility,
-// over the same shared values; a placeholder or a still-loading item counts as visible.
 const anyVisible = computed(() => {
   if (props.section.layout === 'table') return true
-  return setupItems.some((fi, i) => !!fi.emptyOf || itemViewModel(fi.item, setupRefs[i]?.value, fi.scope, { todayEt: props.ctx.todayEt }).visible)
+  const items = flatItems.value
+  const refs = activeRefs.value
+  return items.some((fi, i) => !!fi.emptyOf || itemViewModel(fi.item, refs[i]?.value, fi.scope, { todayEt: props.ctx.todayEt }).visible)
 })
 
 // ── table ───────────────────────────────────────────────────────────────────────────────────
