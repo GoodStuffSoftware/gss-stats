@@ -18,7 +18,7 @@ import {
   sqlInt,
   trackingActivationStartMs,
 } from '../../src/lib/popupEvents'
-import { CAMPAIGNS, etMidnightUtcMs, gameDimOf } from '../../src/lib/campaigns'
+import { CAMPAIGNS, etMidnightUtcMs, gameDimOf, keyEventOf, arrivalOf } from '../../src/lib/campaigns'
 import { etWallTimeMs } from '../../src/lib/etTime'
 
 const noopCache: CacheLike = { match: async () => undefined, put: async () => {} }
@@ -161,6 +161,35 @@ describe('campaignFlight SQL follows campaignAttributionClause + EXCLUSIONS', ()
       { ts: LIVE, campaign: '' },
     ]
     expect(exprValues('campaignFlight', rows)).toEqual([android.id, '', '', '', '', '', retest.id, ''])
+  })
+})
+
+describe('arrival / keyEvent SQL (the Overall timeline series filters)', () => {
+  const android = CAMPAIGNS[0]
+  const inFlight = etMidnightUtcMs(android.flightStart!) + 1000
+  it('keyEvent matches its JS reading, and install counts only from the install fix on', () => {
+    const rows: Row[] = [
+      '/auth/success/google', '/auth/success/email', '/auth/success/google/new', '/popup-outcome/install-prompt/installed',
+      '/install/pwa-installed', '/install/standalone-detected', '/install/play-detected', '/install/play', '/game/complete/normal/easy', '/game', '/',
+    ].map((path) => ({ ts: LIVE, path }))
+    rows.push({ ts: FIX - 1, path: '/popup-outcome/install-prompt/installed' })
+    const got = exprValues('keyEvent', rows)
+    expect(got).toEqual(rows.map((r) => keyEventOf(r.path!, r.ts)))
+    expect(got).toEqual(['auth-success', 'auth-success', '', 'install', 'raw-install-signal', 'raw-install-signal', 'raw-install-signal', '', 'game-complete', '', '', ''])
+  })
+  it("arrival: a first-ever beacon is 'tagged' only when a campaign flight claims it", () => {
+    for (const [visitor, campaign, ts] of [
+      ['new', 'sudoku_tired_of_ads', inFlight],
+      ['new', 'beta_v2_tier1en', inFlight],
+      ['new', '', inFlight],
+      ['returning', 'sudoku_tired_of_ads', inFlight],
+    ] as const) {
+      db.prepare('INSERT INTO hits (ts, path, campaign, visitor) VALUES (?, ?, ?, ?)').run(ts, '/', campaign, visitor)
+    }
+    const got = (db.prepare(`SELECT ${breakdownColumnExpr('arrival', '')} AS v FROM hits ORDER BY rowid`).all() as any[]).map((x) => x.v)
+    expect(got).toEqual(['tagged', 'untagged', 'untagged', ''])
+    expect(arrivalOf('new', android.id)).toBe('tagged')
+    expect(arrivalOf('returning', android.id)).toBe('')
   })
 })
 

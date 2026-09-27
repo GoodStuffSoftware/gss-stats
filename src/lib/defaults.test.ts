@@ -15,6 +15,7 @@ import {
   popupsPageV8FactoryIds,
   migratePopupsPageV9,
   migrateDeviceMixV9,
+  migrateTimelineV9,
   DEVICE_MIX_TITLE,
   CONFIG_VERSION,
 } from './defaults'
@@ -121,7 +122,9 @@ describe('normalizeConfig — v7 bespoke → widget migration', () => {
     const ov = norm.pages.find((p) => isOverviewPage(p))!
     const cp = norm.pages.find((p) => isCampaignComparePage(p))!
     expect(ov.widgets.length).toBeGreaterThan(0)
-    expect(ov.widgets.some((w) => w.dataset === 'overview' && w.view === 'timeline')).toBe(true)
+    expect(ov.widgets.some((w) => w.dataset === 'overview' && w.view === 'kpis')).toBe(true)
+    // the timeline is the standard line chart now (v9)
+    expect(ov.widgets.some((w) => w.id === 'ow-timeline' && w.type === 'line' && w.dataset === 'geo')).toBe(true)
     expect(cp.widgets.length).toBeGreaterThan(0)
     expect(cp.widgets.some((w) => w.dataset === 'campaigns' && w.view === 'funnel')).toBe(true)
     expect(norm.version).toBe(CONFIG_VERSION)
@@ -296,7 +299,7 @@ describe('defaultOverviewWidgets / defaultCampaignsWidgets', () => {
     const overviewViews = defaultOverviewWidgets()
       .filter((w) => w.dataset === 'overview')
       .map((w) => w.view)
-    expect(new Set(overviewViews)).toEqual(new Set(['kpis', 'timeline', 'scorecard', 'releasePanel']))
+    expect(new Set(overviewViews)).toEqual(new Set(['kpis', 'scorecard', 'releasePanel']))
 
     const campaignsViews = defaultCampaignsWidgets()
       .filter((w) => w.dataset === 'campaigns')
@@ -529,7 +532,104 @@ describe('normalizeConfig — v9 migration (Pop-ups page + device mix)', () => {
   })
 })
 
+describe('normalizeConfig — v9 migration (Overview timeline → standard line chart)', () => {
+  function v8Overview(): any {
+    return {
+      version: 8,
+      activePageId: 'bsk-overview',
+      pages: [
+        page({ id: 'default', name: 'Overview', isDefault: true, widgets: [widget({ id: 'g1', dataset: 'geo', dimension: 'city', type: 'hbar' })] }),
+        page({
+          id: 'bsk-overview',
+          name: 'Best Sudoku · Overview',
+          widgets: [
+            widget({ id: 'ow-kpis', type: 'table', dataset: 'overview', view: 'kpis', x: 0, y: 3, w: 12, h: 8 }),
+            widget({ id: 'ow-timeline', title: 'My timeline', type: 'table', dataset: 'overview', view: 'timeline', notes: ['overview-timeline-caption'], x: 1, y: 11, w: 10, h: 13, isDefault: true }),
+            widget({ id: 'mine', title: 'Mine', dataset: 'geo', dimension: 'device', type: 'doughnut', x: 0, y: 30, w: 4, h: 6 }),
+          ],
+        }),
+      ],
+    }
+  }
+
+  it('swaps the bespoke panel in place, keeping id, position, size, title, captions and default mark', () => {
+    const norm = normalizeConfig(v8Overview())
+    const ov = norm.pages.find((p) => p.id === 'bsk-overview')!
+    expect(ov.widgets.map((w) => w.id)).toEqual(['ow-kpis', 'ow-timeline', 'mine'])
+    const tl = ov.widgets[1]
+    expect(tl).toMatchObject({ type: 'line', dataset: 'geo', dimension: 'date', title: 'My timeline', x: 1, y: 11, w: 10, h: 13, isDefault: true, markers: 'releases', goLiveMarkers: true, flightBands: true })
+    expect(tl.view).toBeUndefined()
+    expect(tl.series?.length).toBe(5)
+    expect(tl.notes).toEqual(['overview-timeline-caption'])
+  })
+
+  it("keeps the owner's other widgets on that page and elsewhere exactly as saved", () => {
+    const raw = v8Overview()
+    const norm = normalizeConfig(raw)
+    const ov = norm.pages.find((p) => p.id === 'bsk-overview')!
+    expect(ov.widgets[0]).toEqual(raw.pages[1].widgets[0])
+    expect(ov.widgets[2]).toEqual(raw.pages[1].widgets[2])
+    expect(norm.pages.find((p) => p.id === 'default')!.widgets).toEqual(raw.pages[0].widgets)
+  })
+
+  it('narrows an Overview page still on "all sites" to Best Sudoku, but leaves a chosen selection alone', () => {
+    const ov = normalizeConfig(v8Overview()).pages.find((p) => p.id === 'bsk-overview')!
+    expect(ov.filters.siteSel).toEqual(['bestsudoku-web', 'bestsudoku', 'bestsudoku-app'])
+    const raw = v8Overview()
+    raw.pages[1].filters.siteSel = ['bestsudoku-web']
+    expect(normalizeConfig(raw).pages.find((p) => p.id === 'bsk-overview')!.filters.siteSel).toEqual(['bestsudoku-web'])
+  })
+
+  it('is idempotent and the swap function is a no-op on its own output', () => {
+    const once = normalizeConfig(v8Overview())
+    const twice = normalizeConfig(JSON.parse(JSON.stringify(once)))
+    expect(twice.pages.find((p) => p.id === 'bsk-overview')!.widgets).toEqual(once.pages.find((p) => p.id === 'bsk-overview')!.widgets)
+    const ov = once.pages.find((p) => p.id === 'bsk-overview')!
+    expect(migrateTimelineV9(ov)).toBe(ov)
+  })
+})
+
 describe('normWidget — v9 fields survive the whitelist (via normalizeConfig)', () => {
+  it('keeps the marker/band toggles, series, axis titles and known-traffic flag; sanitizes bad values', () => {
+    const cfg: any = {
+      version: CONFIG_VERSION,
+      activePageId: 'u',
+      pages: [
+        page({
+          id: 'u',
+          name: 'Mine',
+          widgets: [
+            widget({
+              id: 'l',
+              type: 'line',
+              dataset: 'geo',
+              dimension: 'date',
+              markers: 'releases',
+              goLiveMarkers: true,
+              flightBands: true,
+              excludeKnownTraffic: true,
+              series: [
+                { label: 'A', filter: [{ field: 'keyEvent', value: 'install' }], axis: 'right', style: 'dashed', color: 4 },
+                { label: '', filter: [{ field: 5, value: 'x' }], axis: 'up', style: 'wavy' },
+              ] as any,
+              axisTitles: { left: 'L', right: '' },
+            }),
+            widget({ id: 'm', type: 'line', dataset: 'geo', dimension: 'date', goLiveMarkers: 'yes' as any, flightBands: 1 as any }),
+          ],
+        }),
+      ],
+    }
+    const [l, m] = normalizeConfig(JSON.parse(JSON.stringify(cfg))).pages[0].widgets
+    expect(l).toMatchObject({ markers: 'releases', goLiveMarkers: true, flightBands: true, excludeKnownTraffic: true, axisTitles: { left: 'L' } })
+    expect(l.series).toEqual([
+      { label: 'A', filter: [{ field: 'keyEvent', value: 'install' }], axis: 'right', style: 'dashed', color: 4 },
+      { label: 'Series 2', axis: 'left', style: 'solid' },
+    ])
+    expect(m.goLiveMarkers).toBeUndefined()
+    expect(m.flightBands).toBeUndefined()
+    expect(m.series).toBeUndefined()
+  })
+
   it('keeps barMode, and drops an unknown barMode value', () => {
     const cfg: DashboardConfig = {
       version: CONFIG_VERSION,

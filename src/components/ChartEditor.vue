@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { reactive, computed, watch } from 'vue'
-import type { Widget } from '../types'
+import type { Widget, LineSeries } from '../types'
 import {
   DIMENSIONS,
   GEO_DIMENSIONS,
@@ -24,10 +24,16 @@ import { noteOptions, defaultNoteIdsForScope, type NoteScope } from '../lib/note
 const props = defineProps<{ widget: Widget; isNew: boolean }>()
 const emit = defineEmits<{ save: [Widget]; cancel: []; remove: [] }>()
 
-const draft = reactive<Widget>({ ...props.widget })
+// Series/axis titles are nested objects: copy them, so Cancel leaves the saved widget untouched.
+const copyWidget = (w: Widget): Widget => ({
+  ...w,
+  series: w.series?.map((x) => ({ ...x, filter: x.filter?.map((f) => ({ ...f })) })),
+  axisTitles: w.axisTitles ? { ...w.axisTitles } : undefined,
+})
+const draft = reactive<Widget>(copyWidget(props.widget))
 watch(
   () => props.widget,
-  (w) => Object.assign(draft, w),
+  (w) => Object.assign(draft, copyWidget(w)),
 )
 
 const isGeo = computed(() => draft.dataset === 'geo')
@@ -190,6 +196,31 @@ function moveRing(idx: number, dir: -1 | 1) {
   ;[list[idx], list[j]] = [list[j], list[idx]]
 }
 
+// ── Line/area charts on a date axis: overlay toggles, and (beacon data) a series list — each
+// series its own date query narrowed by one filter, on the left or right axis. ─────────────────
+const isDateLine = computed(() => (draft.type === 'line' || draft.type === 'area') && draft.dimension === 'date')
+const canUseSeries = computed(() => isDateLine.value && isGeo.value)
+const SERIES_FIELDS = GEO_DIMENSIONS.filter((d) => d.key !== 'date')
+function addSeries() {
+  const list: LineSeries[] = (draft.series ??= [])
+  list.push({ label: `Series ${list.length + 1}`, axis: 'left', style: 'solid' })
+}
+function removeSeries(idx: number) {
+  draft.series?.splice(idx, 1)
+  if (!draft.series?.length) draft.series = undefined
+}
+function setSeriesFilter(idx: number, part: 'field' | 'value', v: string) {
+  const s = draft.series?.[idx]
+  if (!s) return
+  const cur = s.filter?.[0] ?? { field: '', value: '' }
+  const next = { ...cur, [part]: v }
+  s.filter = next.field ? [next] : undefined
+}
+const axisTitlesValue = (side: 'left' | 'right') => draft.axisTitles?.[side] ?? ''
+function setAxisTitle(side: 'left' | 'right', v: string) {
+  draft.axisTitles = { ...(draft.axisTitles ?? {}), [side]: v || undefined }
+}
+
 // The world map is geo-only.
 watch(
   () => draft.type,
@@ -243,6 +274,18 @@ function save() {
   if (!popupNeedsPopup.value) draft.popup = undefined
   if (!popupNeedsKind.value) draft.popupKind = undefined
   if (draft.type !== 'breakdownBar') draft.barMode = undefined
+  // Overlays need a date axis; series need a beacon date axis. A series with no label gets one.
+  if (!isDateLine.value) {
+    draft.markers = undefined
+    draft.goLiveMarkers = undefined
+    draft.flightBands = undefined
+  }
+  if (!canUseSeries.value || !draft.series?.length) {
+    draft.series = undefined
+    draft.axisTitles = undefined
+  } else {
+    draft.series = draft.series.map((s, i) => ({ ...s, label: s.label.trim() || `Series ${i + 1}` }))
+  }
   // Extra rings only make sense for a nested doughnut with a breakdown set; sanitize (drop
   // blanks/duplicates/'date') and clear them entirely otherwise.
   if (draft.type === 'nestedDoughnut' && draft.breakdown) {
@@ -451,13 +494,68 @@ function save() {
           <input type="checkbox" v-model="draft.includeEventBeacons" />
           Include event beacons (pop-up / install / return / game-complete / auth-status)
         </label>
+        <label>
+          <input type="checkbox" :checked="!!draft.excludeKnownTraffic" @change="draft.excludeKnownTraffic = ($event.target as HTMLInputElement).checked || undefined" />
+          Hide known test and household traffic
+        </label>
       </div>
 
-      <div class="field check" v-if="draft.dimension === 'date' && (draft.type === 'line' || draft.type === 'area')">
+      <div class="field check" v-if="isDateLine">
         <label>
           <input type="checkbox" :checked="draft.markers === 'releases'" @change="draft.markers = ($event.target as HTMLInputElement).checked ? 'releases' : undefined" />
           Show Best Sudoku release markers
         </label>
+        <label>
+          <input type="checkbox" :checked="!!draft.goLiveMarkers" @change="draft.goLiveMarkers = ($event.target as HTMLInputElement).checked || undefined" />
+          Show go-live markers (tracking starts, new beacons, install fix)
+        </label>
+        <label>
+          <input type="checkbox" :checked="!!draft.flightBands" @change="draft.flightBands = ($event.target as HTMLInputElement).checked || undefined" />
+          Show campaign flights as shaded bands
+        </label>
+      </div>
+
+      <!-- Beacon line chart on dates: draw several series, each narrowed by one filter. -->
+      <div class="field" v-if="canUseSeries">
+        <label>Series <span class="hint">— none = one line of everything the chart counts</span></label>
+        <div class="series-list">
+          <div v-for="(s, idx) in draft.series ?? []" :key="idx" class="series-row">
+            <input type="text" v-model="s.label" placeholder="Label" aria-label="Series label" />
+            <select :value="s.filter?.[0]?.field ?? ''" aria-label="Series filter field" @change="setSeriesFilter(idx, 'field', ($event.target as HTMLSelectElement).value)">
+              <option value="">(all page views)</option>
+              <option v-for="d in SERIES_FIELDS" :key="d.key" :value="d.key">{{ d.label }}</option>
+            </select>
+            <input
+              v-if="s.filter?.[0]?.field"
+              type="text"
+              :value="s.filter?.[0]?.value ?? ''"
+              placeholder="value"
+              aria-label="Series filter value"
+              @input="setSeriesFilter(idx, 'value', ($event.target as HTMLInputElement).value)"
+            />
+            <select v-model="s.axis" aria-label="Axis">
+              <option value="left">Left axis</option>
+              <option value="right">Right axis</option>
+            </select>
+            <select v-model="s.style" aria-label="Line style">
+              <option value="solid">Solid</option>
+              <option value="dashed">Dashed</option>
+              <option value="dotted">Dotted</option>
+            </select>
+            <button type="button" class="btn ring-btn danger" title="Remove series" @click="removeSeries(idx)">✕</button>
+          </div>
+          <button type="button" class="btn" @click="addSeries">+ Add series</button>
+        </div>
+      </div>
+      <div class="row" v-if="canUseSeries && draft.series?.length">
+        <div class="field">
+          <label>Left axis title</label>
+          <input type="text" :value="axisTitlesValue('left')" @input="setAxisTitle('left', ($event.target as HTMLInputElement).value)" />
+        </div>
+        <div class="field">
+          <label>Right axis title</label>
+          <input type="text" :value="axisTitlesValue('right')" @input="setAxisTitle('right', ($event.target as HTMLInputElement).value)" />
+        </div>
       </div>
 
       <div class="actions">
@@ -471,6 +569,33 @@ function save() {
 </template>
 
 <style scoped>
+.series-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.series-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 6px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid rgb(var(--line));
+  border-radius: 10px;
+}
+/* label on its own row (with the remove button), then field + value, then axis + style */
+.series-row > input:first-child {
+  grid-column: 1 / 3;
+}
+.series-row > button {
+  grid-column: 3;
+  grid-row: 1;
+}
+.series-row input,
+.series-row select {
+  min-width: 0;
+  width: 100%;
+}
 .overlay {
   position: fixed;
   inset: 0;
