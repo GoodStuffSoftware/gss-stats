@@ -66,6 +66,19 @@
 //   Same: the same campaigns (a flight that ended before the return beacon existed, and a
 //   campaign with no return beacons yet, are left out); none left → "No return visits recorded
 //   yet."; the rates' lag note is in the card's Notes.
+//
+// Arrivals by ET hour of day (campaigns 'hourOfDay' → a standard breakdown bar over /api/geo:
+// dimension hourEt × campaignFlight, filter arrival = tagged):
+//   H1  An hour with no arrivals for a campaign has no bar (and no tooltip line), where the old
+//       chart drew a 0-height bar; every count is the same. The legend sits at the top on a
+//       desktop, as on every breakdown bar.
+// Daily arrivals by flight day (campaigns 'flightDay' → a standard line over /api/geo: dimension
+// flightDay × campaignFlight, filter arrival = tagged, `cumulative`):
+//   FD1 The two charts (daily left, cumulative right) are one chart: the daily lines solid on the
+//       left axis, each campaign's running total dashed on a right-hand "cumulative" axis.
+//       Same days (Day 1 to the longest flight), same counts, same running totals.
+//   M1  (above) the upsell-fix segment table is on the funnel card; the "▼ upsell fix" day label
+//       stays on this chart's axis (lib/charts.ts formatKey, once the fix is set).
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import MetricCard from './MetricCard.vue'
@@ -75,6 +88,9 @@ import { onRequestPost as metricsPost } from '../../../functions/api/metrics'
 import { onRequestPost as overviewPost } from '../../../functions/api/overview'
 import { onRequestPost as popupsPost } from '../../../functions/api/popups'
 import { onRequestPost as campaignsPost } from '../../../functions/api/campaigns'
+import { onRequestPost as geoPost } from '../../../functions/api/geo'
+import { flightDayWidget, hourOfDayWidget } from '../../lib/defaults'
+import type { ChartConfiguration } from 'chart.js'
 import CampaignsWidgetBody from '../widgets/CampaignsWidgetBody.vue'
 import { DatabaseSync } from 'node:sqlite'
 import ChartCard from '../ChartCard.vue'
@@ -103,6 +119,7 @@ const HANDLERS: Record<string, (ctx: any) => Response | Promise<Response>> = {
   '/api/overview': overviewPost,
   '/api/popups': popupsPost,
   '/api/campaigns': campaignsPost,
+  '/api/geo': geoPost,
 }
 /** gss-stats' own ads store, for the cost panel: stored spend for two campaigns (Android's whole
  * flight, closed days; the retest's first, still-open day), none for Play-direct (it falls back to
@@ -564,5 +581,49 @@ describe('campaign-returns ≡ the bespoke return-visits panel', () => {
       expect(visible(card)).toHaveLength(0)
       expect(text(card.find('.metric-card-empty').element)).toBe('No return visits recorded yet.')
     })
+  })
+})
+
+describe('the campaign arrivals charts ≡ their bespoke panels', () => {
+  const stub = { global: { stubs: { BaseChart: { name: 'BaseChart', props: ['config', 'drillOpen'], template: '<div class="chart-stub" />' } } } }
+  const configs = (w: VueWrapper) => w.findAllComponents({ name: 'BaseChart' }).map((c) => c.props('config') as ChartConfiguration)
+  async function mountOldChart(view: string) {
+    const w = mount(CampaignsWidgetBody, { props: { widget: campaignsWidget(view) }, ...stub })
+    mounted.push(w)
+    await settle()
+    await w.find('.cw-head button').trigger('click') // re-read: the old body caches per module
+    await settle()
+    return configs(w)
+  }
+  async function mountNewChart(widget: Widget) {
+    const w = mount(ChartCard, { props: { widget, filters: defaultFilters(), dark: false, drillOpen: false }, ...stub })
+    mounted.push(w)
+    await settle()
+    return configs(w)
+  }
+  const series = (cfg: ChartConfiguration) => cfg.data.datasets.map((d) => [d.label, (d.data as (number | null)[]).map((v) => v ?? 0)] as const)
+
+  it('hour of day: the same 24 hours and the same arrivals per campaign (H1)', async () => {
+    const [old] = await mountOldChart('hourOfDay')
+    const [neu] = await mountNewChart(hourOfDayWidget({ x: 0, y: 0, w: 12, h: 8 }))
+    expect(neu.type).toBe('bar')
+    expect(neu.data.labels).toEqual(old.data.labels)
+    expect(new Map(series(neu))).toEqual(new Map(series(old)))
+    expect(series(old).length).toBe(2)
+    expect(series(old).every(([, d]) => d.some((v) => v > 0))).toBe(true)
+  })
+
+  it('flight day: the same days, daily arrivals and running totals, on one chart (FD1)', async () => {
+    const [oldDaily, oldCum] = await mountOldChart('flightDay')
+    const [neu] = await mountNewChart(flightDayWidget({ x: 0, y: 0, w: 12, h: 10 }))
+    expect(neu.type).toBe('line')
+    expect(neu.data.labels).toEqual(oldDaily.data.labels)
+    expect(neu.data.labels).toEqual(oldCum.data.labels)
+    const daily = neu.data.datasets.filter((d) => (d as { yAxisID?: string }).yAxisID === 'y')
+    const cum = neu.data.datasets.filter((d) => (d as { yAxisID?: string }).yAxisID === 'y1')
+    expect(new Map(daily.map((d) => [d.label, d.data]))).toEqual(new Map(series(oldDaily)))
+    expect(new Map(cum.map((d) => [String(d.label).replace(/ \(cumulative\)$/, ''), d.data]))).toEqual(new Map(series(oldCum)))
+    expect(cum.every((d) => Array.isArray((d as { borderDash?: number[] }).borderDash))).toBe(true)
+    expect(neu.data.labels).toHaveLength(8) // Day 1 to the longest flight (Android, 8 days)
   })
 })

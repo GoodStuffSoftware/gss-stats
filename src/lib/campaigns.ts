@@ -22,6 +22,7 @@
 // with an ordinary (arbitrarily long) AND/OR WHERE clause, and functions/api/campaigns.ts
 // issues one small query per campaign rather than one UNIONed mega-query across all three.
 
+import { etDateSql } from './etTime'
 import { classifyPopupPath, computeRate, TRACKING_ACTIVATION_DATE_ET, NEW_BEACONS_LIVE_AT_ET, etDateFromMs, sqlLit, sqlInt, INSTALL_OUTCOMES, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, INSTALL_GAP_PATHS, isInstallGapUnmeasured, pathSegmentsSql } from './popupEvents'
 
 // ET hour-of-day (0-23) for "Arrivals by ET hour of day" — same DST-safe Intl approach as
@@ -366,6 +367,28 @@ export function campaignFlightSqlCase(emptyLabel: string): string {
   })
   return `CASE WHEN ${excluded} THEN ${sqlLit(emptyLabel)} ${whens.join(' ')} ELSE ${sqlLit(emptyLabel)} END`
 }
+/** SQL CASE for the geo 'flightDay' dimension: the day of the row's campaign flight ('1' for its
+ * first ET day), attributed exactly as campaignFlightSqlCase (the same EXCLUSIONS, the same
+ * campaign order, so a row's day belongs to the campaign its 'campaignFlight' value names), and
+ * only inside that flight's serving window (flightDayIndex: '' before its start or after its end,
+ * and for a flight with no start date yet). The /api/campaigns flight-day chart's own x axis. */
+export function flightDaySqlCase(emptyLabel: string): string {
+  const ew: string[] = []
+  const eb: unknown[] = []
+  applyExclusions(ew, eb)
+  const excluded = `NOT (${inlineBinds(ew.join(' AND '), eb)})`
+  const E = sqlLit(emptyLabel)
+  const etDate = etDateSql()
+  const whens = CAMPAIGNS.map((c) => {
+    const attr = campaignAttributionClause(c)
+    if (!c.flightStart) return `WHEN ${inlineBinds(attr.sql, attr.binds)} THEN ${E}`
+    const [startMs, endMs] = etFlightRangeMs(c.flightStart, c.flightEnd)
+    const day = `CAST(CAST(julianday(${etDate}) - julianday(${sqlLit(c.flightStart)}) AS INTEGER) + 1 AS TEXT)`
+    return `WHEN ${inlineBinds(attr.sql, attr.binds)} THEN CASE WHEN ts >= ${sqlInt(startMs)} AND ts < ${sqlInt(endMs)} THEN ${day} ELSE ${E} END`
+  })
+  return `CASE WHEN ${excluded} THEN ${E} ${whens.join(' ')} ELSE ${E} END`
+}
+
 // ── Derived dimensions arrival / keyEvent (functions/api/geo.ts) — what the Overview timeline's
 // series count, as generic dims any chart can use (a line series is a date query filtered on
 // one of these; see Widget.series). Same literal rules as campaignFlightSqlCase above.

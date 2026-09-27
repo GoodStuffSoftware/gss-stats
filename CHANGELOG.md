@@ -33,6 +33,16 @@ All notable changes to **gss-stats** are documented here. The format follows
   loads (d0) and the return rate of every later window as bars side by side, d1 to d31-60, each
   with its counts, where the line chart and its counts line were. Under 5 first loads, each bar
   says "too few to report" with its counts.
+- **Arrivals by ET hour of day and daily arrivals by flight day are standard charts.** The hour
+  chart is a breakdown bar (one bar per campaign in every hour, 0:00 to 23:00), and the flight-day
+  chart is one line chart: each campaign's daily arrivals, and its running total dashed on a
+  right-hand axis, where there used to be two charts side by side. Both count the same tagged
+  arrivals, and both can be edited like any other chart.
+
+### Added
+- **Two new beacon dimensions, "Hour of day (ET)" and "Campaign flight day"**, and line charts
+  can now draw one line per value of a second dimension, with an optional running-total line for
+  each.
 
 ## [0.11.0] — 2026-09-27
 
