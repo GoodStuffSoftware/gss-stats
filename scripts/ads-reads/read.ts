@@ -37,7 +37,6 @@ import {
   readingEntryKind,
   readingId,
   readPlanFor,
-  releaseHealthGate,
   round2,
   AUTH_NEW_EXISTING_LIVE_AT,
   campaignSignUps,
@@ -553,8 +552,8 @@ async function releaseHealth(
   cached: { siteRows?: Attempt<HourPathCount[]>; returns?: Attempt<ReturnSummary> },
   opts: { minParent: number; parentAgeHours: number; servedToday: boolean | null; requireServedToday: boolean },
 ): Promise<HealthSection> {
-  const gate = releaseHealthGate(deps.nowMs)
-  if (!gate.evaluate) return { evaluated: false, reason: gate.reason, results: null, alerts: 0 }
+  // No time-of-day gate (retired 2026-09-27, src/lib/adsRules.ts): parent/child maturity is
+  // enforced below by parentAgeHours against event timestamps, not the clock.
   if (opts.requireServedToday && opts.servedToday !== true) {
     return { evaluated: false, reason: opts.servedToday === false ? 'not evaluated: no ads served today' : 'not evaluated: could not tell whether ads served today', results: null, alerts: 0 }
   }
@@ -571,7 +570,7 @@ async function releaseHealth(
   const site = summarizeSiteEvents(siteRows.value, maturedBefore)
   const arrivalsMatured = tagged.value.filter((r) => r.visitor === 'new' && r.hourStartMs + 2 * 3_600_000 <= deps.nowMs).reduce((a, r) => a + r.count, 0)
   const results = evaluateHealthPairs(buildHealthPairs({ site, taggedArrivalsMatured: arrivalsMatured, returnD0Web: returns.value.web.d0 }), opts.minParent)
-  return { evaluated: true, reason: gate.reason, results, alerts: results.filter((r) => r.status === 'alert').length }
+  return { evaluated: true, reason: 'evaluated', results, alerts: results.filter((r) => r.status === 'alert').length }
 }
 
 export interface DedupSection {
@@ -622,9 +621,10 @@ async function appendReadings(
 // ── morning-read ─────────────────────────────────────────────────────────────────────────
 export interface MorningOptions {
   campaignId: string
-  /** 'auto' evaluates release health when the ET clock allows; 'skip' never does. */
+  /** 'auto' evaluates release health unconditionally (no time-of-day gate since 2026-09-27); 'skip' never does. */
   releaseHealth: 'auto' | 'skip'
-  /** Backstop mode: status + today's spend + release health only (run after 23:00 ET). */
+  /** Manual/diagnostic mode retained from the retired 23:15 ET backstop entry: status + today's
+   * spend + release health only. No longer scheduled (folded into the single daily read). */
   healthOnly: boolean
   healthMinParent: number
   healthParentAgeHours: number
