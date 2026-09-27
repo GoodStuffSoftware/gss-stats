@@ -47,6 +47,10 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters, extraCo
         until: filters.until,
         limit: widget.limit ?? 50,
         sites: tags,
+        // "Hide my visits" — applied by /api/popups too, so pop-up numbers match the beacon's.
+        excludeOwnVisits: filters.excludeOwnVisits,
+        ownBrowser: filters.ownBrowser,
+        ownOS: filters.ownOS,
       }),
     })
     if (!res.ok) {
@@ -254,13 +258,16 @@ export async function loadConfig(): Promise<DashboardConfig | null> {
 }
 
 /** Persist the dashboard config to KV. */
-export async function saveConfig(cfg: DashboardConfig): Promise<boolean> {
+/** true = saved, false = failed, 'stale' = the server holds a NEWER layout version than this
+ * tab's code writes (another tab or a deploy upgraded it) — the tab must reload, not overwrite. */
+export async function saveConfig(cfg: DashboardConfig): Promise<boolean | 'stale'> {
   try {
     const res = await fetch('/api/config', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(cfg),
     })
+    if (res.status === 409) return 'stale'
     return res.ok
   } catch {
     return false

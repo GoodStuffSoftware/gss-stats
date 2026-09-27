@@ -535,6 +535,33 @@ npm run deploy      # = vite build && wrangler pages deploy
 
 Single Cloudflare account — no account-ID env needed. Pages project: **gss-stats**.
 
+### Restoring a layout backup
+
+The saved dashboard layout lives in KV (`STATS_CONFIG`, key `dashboard:default`). Each time a
+release bumps the layout version (`CONFIG_VERSION` in `src/lib/defaults.ts`), the first save
+of the migrated layout first copies the previous one to `dashboard:default:backup:v<old>`,
+once, and never overwrites that copy (`functions/api/config.ts`; if the backup can't be
+written, the save fails and the old layout stays). A tab still running older code gets `409`
+("This tab is out of date, reload") instead of overwriting a newer layout.
+
+To put a backup back (e.g. the v8 layout after a bad v9 migration):
+
+1. **Close every dashboard tab**, on every device. An open tab saves its in-memory layout on the
+   next change and would overwrite what you restore.
+2. **Roll back or fix the code first.** If the deployed code still has the bad migration, the
+   next load migrates the restored layout again. Either redeploy the previous release (its
+   `CONFIG_VERSION` matches the backup) or ship the fixed migration.
+3. Keep a copy of what's there now, then restore (namespace id from `wrangler.toml`; a token
+   with Workers KV Storage: Edit):
+
+   ```bash
+   npx wrangler kv key get "dashboard:default" --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-current.json
+   npx wrangler kv key get "dashboard:default:backup:v8" --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-v8.json
+   npx wrangler kv key put "dashboard:default" --path layout-v8.json --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote
+   ```
+
+4. Open one tab and check the layout before opening any others.
+
 ## Auth
 
 The app does its own sign-in, the same way deckhand does: Google OAuth plus an email
