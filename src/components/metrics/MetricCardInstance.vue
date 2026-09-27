@@ -12,7 +12,7 @@
 // The click-through (`link`) is the title, a real button — never a role="button" wrapper
 // around other controls. The rest of the box stays clickable for a pointer only (no role, not
 // focusable), matching the old scorecard card.
-import { computed, ref, useSlots } from 'vue'
+import { computed, ref, useId } from 'vue'
 import { useMetrics } from '../../composables/useMetrics'
 import { noteRawText } from '../../lib/notes'
 import { badgeViewModel, itemViewModel, resolveLabelTokens } from '../../lib/metrics/render'
@@ -30,7 +30,6 @@ const props = defineProps<{
   boxed: boolean
 }>()
 const emit = defineEmits<{ open: [] }>()
-const slots = useSlots()
 
 const todayEt = props.ctx.todayEt
 const titleTokens = computed(() => (props.spec.title !== undefined ? resolveLabelTokens(props.spec.title, props.scope, undefined, todayEt) : []))
@@ -63,7 +62,14 @@ const notes = computed(() =>
 const notesOpen = ref(false)
 const notesLabel = noteRawText('label.card.notes')
 const openLabel = noteRawText('label.card.openCampaigns')
-const showHead = computed(() => titleTokens.value.length > 0 || !!badge.value || notes.value.length > 0 || !!slots.status)
+// The header's own content; a slotted status (MetricCard's freshness or error line) also shows
+// it, checked in the template through $slots, which is reactive — useSlots() read inside a
+// computed is not, and an untitled card would never show its error line.
+const hasOwnHead = computed(() => titleTokens.value.length > 0 || !!badge.value || notes.value.length > 0)
+const notesId = `mc-notes-${useId()}`
+const plainTitle = computed(() => titleTokens.value.map((t) => t.value).join(''))
+/** "Notes: US+CA web retest" — which card's notes, for a screen reader moving between cards. */
+const notesAria = computed(() => (plainTitle.value ? `${notesLabel}: ${plainTitle.value}` : notesLabel))
 
 function onBoxClick() {
   if (linked.value) emit('open')
@@ -72,18 +78,18 @@ function onBoxClick() {
 
 <template>
   <div class="metric-card-instance" :class="{ 'metric-card': boxed, clickable: boxed && linked }" @click="boxed ? onBoxClick() : undefined">
-    <div v-if="showHead" class="mc-head">
+    <div v-if="hasOwnHead || $slots.status" class="mc-head">
       <span class="mc-head-left">
         <button v-if="linked && titleTokens.length" type="button" class="mc-title mc-title-link" :title="openLabel" @click.stop="emit('open')"><MetricLabel :tokens="titleTokens" /></button>
         <span v-else-if="titleTokens.length" class="mc-title"><MetricLabel :tokens="titleTokens" /></span>
       </span>
       <span class="mc-head-right">
         <span v-if="badge" class="mc-badge" :class="`tone-${badge.tone}`">{{ badge.primary }}</span>
-        <button v-if="notes.length" type="button" class="mc-notes-toggle" :aria-expanded="notesOpen" @click.stop="notesOpen = !notesOpen">{{ notesLabel }}</button>
+        <button v-if="notes.length" type="button" class="mc-notes-toggle" :aria-label="notesAria" :aria-expanded="notesOpen" :aria-controls="notesId" @click.stop="notesOpen = !notesOpen">{{ notesLabel }}</button>
         <slot name="status" />
       </span>
     </div>
-    <ul v-if="notesOpen && notes.length" class="mc-notes" @click.stop>
+    <ul v-if="notes.length" v-show="notesOpen" :id="notesId" class="mc-notes" @click.stop>
       <li v-for="n in notes" :key="n.key"><MetricLabel :tokens="n.labelTokens" />: <MetricLabel :tokens="n.captionTokens" /></li>
     </ul>
     <MetricSection v-for="(section, si) in spec.sections" :key="si" :section="section" :outer-scope="scope" :ctx="ctx" :context="context" />

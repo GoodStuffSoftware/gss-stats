@@ -193,9 +193,16 @@ export function flattenSectionItems(section: Section, outerScope: ScopeInstance,
         out.push({ item, scope: sScope })
         continue
       }
-      const itemScopes = resolveRepeat(item.repeat, ctx)
+      const allScopes = resolveRepeat(item.repeat, ctx)
+      // Instances the campaign's own config rules out (a spend-only campaign) are dropped here, so
+      // a repeat left with only those shows its empty placeholder — saying why — instead of
+      // silently losing the tile.
+      const itemScopes = allScopes.filter((s) => !unmeasuredByConfig(item.data, s))
       if (!itemScopes.length) {
-        if (item.repeat.empty) out.push({ item, scope: sScope, emptyOf: item.repeat.empty })
+        if (item.repeat.empty) {
+          const untracked = allScopes.length > 0 && item.repeat.over === 'campaigns' && !!item.repeat.flightingToday
+          out.push({ item, scope: sScope, emptyOf: untracked ? { label: item.repeat.empty.label, text: { note: 'no-tracked-campaign-flighting' } } : item.repeat.empty })
+        }
         continue
       }
       for (const iScope of itemScopes) out.push({ item, scope: iScope })

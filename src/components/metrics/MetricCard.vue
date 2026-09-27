@@ -23,6 +23,7 @@ import { presetById } from '../../lib/metrics/presets'
 import { buildRequestSpec, flattenSectionItems, ROOT_SCOPE, resolveRepeat, todayEtFrom, type ReadingScope, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
 import type { CardRef, CardSpec, MetricsContext } from '../../lib/metrics/types'
 import MetricCardInstance from './MetricCardInstance.vue'
+import MetricCardStatus from './MetricCardStatus.vue'
 import MetricLabel from './MetricLabel.vue'
 
 const props = defineProps<{
@@ -109,30 +110,23 @@ const updatedText = computed(() => {
   if (s < 60) return noteRawText('label.card.updatedSecondsAgo', { n: s })
   return noteRawText('label.card.updatedMinutesAgo', { n: Math.round(s / 60) })
 })
-const L = {
-  refresh: noteRawText('label.card.refresh'),
-  failed: noteRawText('label.card.loadFailed'),
-  retry: noteRawText('label.card.retry'),
-}
-/** Where the status line goes: an unrepeated card puts it in its own header row (top-right,
- * above the tiles, where the old KPI panel had it); a repeated card above its grid. */
-const statusInInstanceHeader = computed(() => !spec.value?.repeat && (hasError.value || updatedPlacement.value === 'header'))
-const statusAboveGrid = computed(() => !!spec.value?.repeat && (hasError.value || updatedPlacement.value === 'header'))
+const failedText = noteRawText('label.card.loadFailed')
+/** Where the status line goes: where showUpdated puts freshness, and in the header when the
+ * card shows no freshness but has an error. Header: an unrepeated card's own header row
+ * (top-right, above the tiles, where the old KPI panel had it), a repeated card above its grid.
+ * Footer: under the card — an error in a footer card shows there too, so Retry is never lost. */
+const statusPlacement = computed<'header' | 'footer' | null>(() => updatedPlacement.value ?? (hasError.value ? 'header' : null))
+const statusInInstanceHeader = computed(() => !spec.value?.repeat && statusPlacement.value === 'header')
+const statusAboveGrid = computed(() => !!spec.value?.repeat && statusPlacement.value === 'header')
 </script>
 
 <template>
   <p v-if="!spec" class="metric-card-error">Unknown card{{ 'preset' in cardRef ? ` preset "${cardRef.preset}"` : '' }}.</p>
   <div v-else class="metric-card-root">
+    <!-- Present from mount and empty until an error, so screen readers announce the change. -->
+    <span class="mc-live" role="status" aria-live="polite">{{ hasError ? failedText : '' }}</span>
     <div v-if="statusAboveGrid" class="mc-status-row">
-      <span class="mc-status">
-        <template v-if="hasError"
-          ><span class="mc-error" role="status">{{ L.failed }}</span> <button type="button" class="mc-retry" @click="reload">{{ L.retry }}</button></template
-        >
-        <template v-else>
-          <span v-if="updatedText" class="mc-updated">{{ updatedText }}</span>
-          <button type="button" class="mc-reload" :title="L.refresh" :aria-label="L.refresh" @click="reload">↻</button>
-        </template>
-      </span>
+      <MetricCardStatus :has-error="hasError" :updated-text="updatedText" @reload="reload" />
     </div>
 
     <!-- Keyed on the ET day: a new day remounts the body, so every repeat and request rebuilds. -->
@@ -145,23 +139,12 @@ const statusAboveGrid = computed(() => !!spec.value?.repeat && (hasError.value |
     </div>
     <MetricCardInstance v-else :key="todayEt" class="metric-card-plain" :spec="spec" :scope="ROOT_SCOPE" :ctx="ctx" :context="context" :boxed="false" @open="emit('open-campaigns')">
       <template v-if="statusInInstanceHeader" #status>
-        <span class="mc-status">
-          <template v-if="hasError"
-            ><span class="mc-error" role="status">{{ L.failed }}</span> <button type="button" class="mc-retry" @click="reload">{{ L.retry }}</button></template
-          >
-          <template v-else>
-            <span v-if="updatedText" class="mc-updated">{{ updatedText }}</span>
-            <button type="button" class="mc-reload" :title="L.refresh" :aria-label="L.refresh" @click="reload">↻</button>
-          </template>
-        </span>
+        <MetricCardStatus :has-error="hasError" :updated-text="updatedText" @reload="reload" />
       </template>
     </MetricCardInstance>
 
-    <div v-if="updatedPlacement === 'footer' && !hasError" class="mc-status-row mc-footer">
-      <span class="mc-status">
-        <span v-if="updatedText" class="mc-updated">{{ updatedText }}</span>
-        <button type="button" class="mc-reload" :title="L.refresh" :aria-label="L.refresh" @click="reload">↻</button>
-      </span>
+    <div v-if="statusPlacement === 'footer'" class="mc-status-row mc-footer">
+      <MetricCardStatus :has-error="hasError" :updated-text="updatedText" @reload="reload" />
     </div>
   </div>
 </template>
@@ -188,41 +171,13 @@ const statusAboveGrid = computed(() => !!spec.value?.repeat && (hasError.value |
 .mc-footer {
   margin: 8px 0 0;
 }
-.mc-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-.mc-updated {
-  font-size: 11px;
-  color: rgb(var(--ink-3));
-  font-family: 'JetBrains Mono', monospace;
-}
-.mc-error {
-  font-size: 11px;
-  color: #bc4749;
-}
-.mc-retry {
-  border: 1px solid rgb(var(--line));
-  background: transparent;
-  color: rgb(var(--ink-2));
-  font-size: 11px;
-  padding: 1px 8px;
-  border-radius: 7px;
-  cursor: pointer;
-}
-.mc-reload {
-  border: none;
-  background: transparent;
-  color: rgb(var(--ink-3));
-  font-size: 15px;
-  padding: 3px 7px;
-  border-radius: 7px;
-  cursor: pointer;
-}
-.mc-reload:hover,
-.mc-retry:hover {
-  background: rgb(var(--sunken));
-  color: rgb(var(--ink));
+/* The live region: in the accessibility tree, not on screen. */
+.mc-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 </style>

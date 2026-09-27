@@ -66,3 +66,29 @@ describe('today so far at exactly ET midnight', () => {
     expect(measuredInterval({ rules: [{ kind: 'liveAt', atMs: MIDNIGHT_ET + 1, source: 't' }], window: [MIDNIGHT_ET, MIDNIGHT_ET] })).toMatchObject({ status: 'unmeasured', reason: 'not-live' })
   })
 })
+
+describe('a window that has not started yet (start after end)', () => {
+  const RETEST = '24279250691'
+  const BEFORE_NOON = Date.parse('2026-09-26T15:59:00Z') // 11:59 EDT, the retest starts at 12:00 ET
+
+  it('the retest at 11:59 ET on its first day: "not-started", never a measured 0 and never "not yet tracking"', async () => {
+    const p = { campaignId: RETEST }
+    const r = await metricsAt(BEFORE_NOON, [
+      { key: 'arrivals', metric: 'campaign.taggedArrivals', params: p },
+      { key: 'asks', metric: 'campaign.asks', params: p },
+      { key: 'accept', ratio: 'campaign.acceptPerAsk', params: p },
+      { key: 'pair', ratio: 'campaign.gameViewsVsArrivals', params: p },
+    ])
+    for (const k of ['arrivals', 'asks', 'accept', 'pair']) expect(r[k], k).toEqual({ status: 'unmeasured', reason: 'not-started', noteIds: ['not-started'] })
+  })
+
+  it('at 12:00 ET it starts: measured', async () => {
+    const r = await metricsAt(Date.parse('2026-09-26T16:00:00Z'), [{ key: 'arrivals', metric: 'campaign.taggedArrivals', params: { campaignId: RETEST } }])
+    expect(r.arrivals.status).toBe('ok')
+  })
+
+  it('measuredInterval: start after end is not-started; start == end is a measured 0', () => {
+    expect(measuredInterval({ rules: [], window: [BEFORE_NOON + 60_000, BEFORE_NOON] })).toMatchObject({ status: 'unmeasured', reason: 'not-started', noteIds: ['not-started'] })
+    expect(measuredInterval({ rules: [], window: [BEFORE_NOON, BEFORE_NOON] })).toMatchObject({ status: 'measured' })
+  })
+})

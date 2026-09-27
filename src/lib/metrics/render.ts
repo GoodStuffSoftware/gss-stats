@@ -137,7 +137,7 @@ function applyUnmeasuredGating(gating: Gating | undefined, scope: ScopeInstance,
   if (mode === 'omit' || (mode === 'auto' && closedCampaign)) return { primary: '', visible: false }
   // A specific reason (e.g. 'flight-pending') is more useful than the generic label when the
   // server supplied one and it's a real registry label, not just an internal reason code.
-  const specific = value.noteIds?.find((id) => id !== 'not-yet-tracking' && hasNote(id) && getNote(id)?.kind === 'label')
+  const specific = value.noteIds?.find((id) => id !== 'not-yet-tracking' && hasNote(id) && getNote(id)?.kind === 'label') ?? (value.reason === 'not-started' ? 'not-started' : undefined)
   return { primary: noteRawText(specific ?? 'not-yet-tracking'), visible: true }
 }
 function formatBadge(raw: string | null, display: Extract<Display, { as: 'badge' }>): { primary: string; tone: 'neutral' | 'live' | 'warn' } {

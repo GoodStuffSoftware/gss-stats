@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest'
 import { campaignById } from '../campaigns'
 import { itemViewModel } from './render'
-import { buildRequestSpec, unmeasuredByConfig } from './scope'
+import { buildRequestSpec, flattenSectionItems, unmeasuredByConfig } from './scope'
 import type { ScopeInstance } from './scope'
 import type { MetricItem, MetricValue } from './types'
 
@@ -114,5 +114,35 @@ describe('decided from the campaign config, on the client (spend-only, flight pe
   it('an ordinary active campaign and site-wide items are unaffected', () => {
     expect(unmeasuredByConfig(numberItem().data, activeScope)).toBe(false)
     expect(unmeasuredByConfig(kpi().data, spendOnly)).toBe(false) // no campaign param: site-wide
+  })
+})
+
+describe('"not started" (a window that has not begun)', () => {
+  it('reads "not started", muted — never "not yet tracking" — from the note or from the reason alone', () => {
+    expect(itemViewModel(numberItem(), { status: 'unmeasured', reason: 'not-started', noteIds: ['not-started'] }, activeScope, opts)).toMatchObject({ primary: 'not started', muted: true, visible: true })
+    expect(itemViewModel(numberItem(), { status: 'unmeasured', reason: 'not-started' }, activeScope, opts).primary).toBe('not started')
+    expect(itemViewModel(percentItem(), { status: 'unmeasured', reason: 'not-started', noteIds: ['not-started'] }, activeScope, opts).primary).toBe('not started')
+  })
+})
+
+describe('a flighting-today repeat whose only campaigns are spend-only', () => {
+  const tile: MetricItem = {
+    id: 'arrivals',
+    label: { note: 'label.card.taggedArrivalsFor', vars: { campaign: 'campaign.label' } },
+    data: { metric: 'campaign.taggedArrivals', window: 'todaySoFar' },
+    display: { as: 'number' },
+    repeat: { over: 'campaigns', flightingToday: true, empty: { label: { note: 'label.campaign.taggedArrivals' }, text: { note: 'no-campaign-flighting' } } },
+  }
+  const section = { layout: 'tiles' as const, items: [tile] }
+  it('says so in the placeholder instead of dropping the tile silently', () => {
+    const only = flattenSectionItems(section, rootScope, { todayEt: '2026-09-11' }) // Play-direct (spend-only) alone
+    expect(only).toHaveLength(1)
+    expect(only[0].emptyOf?.text).toEqual({ note: 'no-tracked-campaign-flighting' })
+  })
+  it('a tracked campaign flighting alongside it gets its tile; nothing flighting keeps the usual text', () => {
+    const both = flattenSectionItems(section, rootScope, { todayEt: '2026-09-09' }) // Android + Play-direct
+    expect(both.map((f) => (f.scope.kind === 'campaign' ? f.scope.campaign.id : f.emptyOf))).toEqual(['24215315197'])
+    const none = flattenSectionItems(section, rootScope, { todayEt: '2026-09-20' })
+    expect(none[0].emptyOf?.text).toEqual({ note: 'no-campaign-flighting' })
   })
 })

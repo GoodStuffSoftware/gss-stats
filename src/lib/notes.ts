@@ -341,6 +341,8 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'install-fix-note': INSTALL_FIX_NOTE,
     'new-today': 'new today',
     'metric-unavailable': 'unavailable',
+    'not-started': 'not started',
+    'no-tracked-campaign-flighting': 'no beacon-tracked campaign flighting today',
 
     // Card labels that are not a metric's own name (lib/metrics/presets.ts).
     'label.card.flight': 'Flight',

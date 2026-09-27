@@ -137,6 +137,10 @@ export function measuredInterval({ rules, window, campaign, seenInFlight }: Inte
       partialNote = note ?? null
     }
   }
+  // A window that has not started yet (a > b: an attribution window before the flight's start
+  // time, e.g. the retest before 12:00 ET on its first day) is 'not-started' — never a measured
+  // 0, and never "not yet tracking" either: the campaign simply has not begun.
+  if (a > b) return { ...unmeasured('not-started', goLiveEt), noteIds: ['not-started'] }
   // An empty window (today so far at exactly ET midnight: a == b) is measured, value 0, as long
   // as no go-live falls after its start; only a go-live at or past the end leaves it unmeasured.
   if (from > a && from >= b) return unmeasured('not-live', goLiveEt)

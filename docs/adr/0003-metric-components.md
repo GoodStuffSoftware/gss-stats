@@ -1084,6 +1084,15 @@ callback, which is the v0.8.0 `campaignsData` leak this module exists to avoid.
   ends are bare dates, so an extra fall-back hour no longer refuses a 400-day range; and
   `prewarm()` returns whether it succeeded and warms every registry request in
   `MAX_REQUESTS`-sized chunks instead of truncating to the first 200.
+- From the phase-A fix verification: a window that has not begun (start after end, e.g. an
+  attribution window before a flight's 12:00 ET start) is `unmeasured` with reason and note
+  `not-started`, rendered as a muted "not started"; only an empty window (start == end, ET
+  midnight) is a measured 0. A flighting-today repeat whose only campaigns are spend-only shows
+  its placeholder as "no beacon-tracked campaign flighting today" rather than losing the tile.
+  The status line follows `showUpdated` (an error in a footer card stays in the footer, with
+  Retry), shows on an untitled card too, and the error is announced through one live region
+  that is in the DOM, empty, from mount. Each Notes toggle is labelled "Notes: <card title>"
+  and controls its list; a status word in a pill is muted like one in a row or tile.
 - Phase B (not started): the `CONFIG_VERSION` 10 step (`normWidget` → `normCardRef`, the KV
   backup on the bump) swaps the Overview `kpis` and `scorecard` widgets to `card: { preset }`,
   then the bespoke branches retire. It waits for `CONFIG_VERSION` 9 on `main`.
