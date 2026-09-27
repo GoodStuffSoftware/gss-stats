@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { reactive, computed, watch } from 'vue'
-import type { Widget, LineSeries } from '../types'
+import { reactive, computed, watch, onMounted, onBeforeUnmount, ref, useId } from 'vue'
+import type { Widget, LineSeries, GlobalFilters } from '../types'
 import {
   DIMENSIONS,
   GEO_DIMENSIONS,
@@ -20,8 +20,17 @@ import {
 import { ringDims, RING_SOFT_CAP, isDateDim } from '../lib/rings'
 import { BEST_SUDOKU_SITES, syncCardWithView } from '../lib/defaults'
 import { noteOptions, defaultNoteIdsForScope, type NoteScope } from '../lib/notes'
+import CardEditor from './metrics/CardEditor.vue'
+import { metricsContextFor } from '../lib/metrics/pageContext'
+import { resolveSelection } from '../sitesStore'
+import type { MetricsContext } from '../lib/metrics/types'
 
-const props = defineProps<{ widget: Widget; isNew: boolean }>()
+// `filters` is the page's main filter bar (App.vue's `activePage.filters`) — used ONLY to build
+// the metric-card preview's context (the same range/sites a saved card would read); every other
+// field here is unaffected by it, same as before this prop existed.
+// `filters` is optional defensively (a caller that hasn't wired it yet still gets a working
+// editor — the card preview just has no page range for a `window: 'page'` item until it does).
+const props = defineProps<{ widget: Widget; isNew: boolean; filters?: GlobalFilters }>()
 const emit = defineEmits<{ save: [Widget]; cancel: []; remove: [] }>()
 
 // Series/axis titles are nested objects: copy them, so Cancel leaves the saved widget untouched.
@@ -35,6 +44,57 @@ watch(
   () => props.widget,
   (w) => Object.assign(draft, copyWidget(w)),
 )
+
+// Belt and suspenders for "the sheet must scroll to the top when it opens" (review fix,
+// 2026-09-27): a freshly mounted .panel already starts at scrollTop 0 once .overlay's flex
+// centering no longer fights it (see the mobile @media rule below) — this just makes that
+// explicit instead of relying on it being an accident of the CSS.
+const panelEl = ref<HTMLElement | null>(null)
+
+// ── Dialog a11y (review fix, 2026-09-27): role="dialog"/aria-modal on .panel, named by the
+// heading below; focus moves to Title on open, is trapped inside the dialog while it's open
+// (Tab/Shift+Tab wrap instead of escaping to the page behind it), Esc cancels the same as the
+// Cancel button, and focus returns to whatever had it before the dialog opened (App.vue's own
+// "Edit"/"Add chart" control) once it closes — captured here rather than passed in, so this
+// works regardless of what opened the editor, with no change needed at any call site. ──────────
+const dialogTitleId = useId()
+const titleInputEl = ref<HTMLInputElement | null>(null)
+let previouslyFocused: HTMLElement | null = null
+
+function focusableEls(): HTMLElement[] {
+  if (!panelEl.value) return []
+  const selector = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+  return [...panelEl.value.querySelectorAll<HTMLElement>(selector)].filter((el) => el.offsetParent !== null || el === document.activeElement)
+}
+function onDialogKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') {
+    e.stopPropagation()
+    emit('cancel')
+    return
+  }
+  if (e.key !== 'Tab') return
+  const els = focusableEls()
+  if (!els.length) return
+  const first = els[0]
+  const last = els[els.length - 1]
+  // Wrap instead of letting Tab escape the dialog onto the page behind it.
+  if (e.shiftKey && document.activeElement === first) {
+    e.preventDefault()
+    last.focus()
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault()
+    first.focus()
+  }
+}
+
+onMounted(() => {
+  if (panelEl.value) panelEl.value.scrollTop = 0
+  previouslyFocused = document.activeElement as HTMLElement | null
+  titleInputEl.value?.focus()
+})
+onBeforeUnmount(() => {
+  previouslyFocused?.focus?.()
+})
 
 const isGeo = computed(() => draft.dataset === 'geo')
 const isPopup = computed(() => draft.dataset === 'popup')
@@ -254,6 +314,49 @@ watch(
   },
 )
 
+// ── Metric card (ADR 0003, phase B): a widget with `card` set replaces every chart-only field
+// below with CardEditor. Gated on `!!draft.card`, the SAME condition ChartCard.vue's own
+// dispatch uses (`v-if="widget.card"`) — never on `draft.type`, which a card widget's renderer
+// ignores entirely — so a widget migrated from the old bespoke Overview panels (still
+// `type: 'table'`, `dataset: 'overview'`, `card` set by the v10 migration) opens as a card here
+// too, whatever its own stored type says. `draft.type` is deliberately left untouched by any of
+// this: ChartCard never reads it for a card widget, so there is no need for a dedicated 'card'
+// ChartType value (that would touch the shared ChartType union / CHART_TYPES catalog, outside
+// this integration's file list).
+const isCardWidget = computed(() => !!draft.card)
+const CARD_DEFAULT_PRESET = 'campaign-scorecard'
+/** "Add chart" → "Metric card": the button below sets a default preset the owner can then
+ * customize (CardEditor's own preset → Customize… flow). */
+function makeCardWidget() {
+  draft.card = { preset: CARD_DEFAULT_PRESET }
+}
+function leaveCardMode() {
+  draft.card = undefined
+}
+/** CardEditor needs a non-optional CardRef; the template only mounts it while isCardWidget is
+ * true, which is exactly when draft.card is set — the `!` reflects that guarantee. */
+const cardModel = computed<import('../lib/metrics/types').CardRef>({
+  get: () => draft.card!,
+  set: (v) => {
+    draft.card = v
+  },
+})
+/** The same page-context shape ChartCard.vue builds for a saved card (lib/metrics/pageContext.ts
+ * metricsContextFor) — the widget's own site override if set, else the page's filter bar — so
+ * the live preview reads the same window a saved card would. */
+const cardContext = computed<MetricsContext>(() => {
+  const f = draft.filters ?? props.filters
+  if (!f) return {}
+  return metricsContextFor({ since: f.since, until: f.until }, resolveSelection(draft.siteSel ?? f.siteSel).tags)
+})
+// CardEditor's own `errors` event (review fix, 2026-09-27): the only way this form learns a
+// metric card is currently invalid, since CardEditor's `update:modelValue` simply never fires
+// for one — there is no "invalid value" to read back otherwise. Irrelevant, and never set, for
+// any non-card widget: `save()` and the Save button below are unaffected for those, exactly as
+// before this existed.
+const cardErrors = ref<string[]>([])
+const cardSaveDisabled = computed(() => isCardWidget.value && cardErrors.value.length > 0)
+
 const typeDef = computed(() => CHART_TYPES.find((t) => t.value === draft.type))
 // "Site override" = Widget.siteSel: this chart's own site pick, replacing the page's (dates and
 // every other page filter still apply). Best Sudoku is its beacon tags (web + app).
@@ -277,6 +380,7 @@ const siteValue = computed({
 })
 
 function save() {
+  if (cardSaveDisabled.value) return // belt and suspenders: the Save button is disabled for this too
   // Freeze whatever the "Captions" checkboxes currently show (scope defaults, or the
   // user's own edit) into draft.notes, so what the editor DISPLAYED is exactly what gets
   // saved — ChartCard.vue only ever reads widget.notes directly, never recomputes scope
@@ -317,35 +421,51 @@ function save() {
 
 <template>
   <div class="overlay" @click.self="emit('cancel')">
-    <div class="panel">
-      <h2>{{ isNew ? 'Add chart' : 'Edit chart' }}</h2>
+    <div class="panel" :class="{ 'is-card': isCardWidget }" ref="panelEl" role="dialog" aria-modal="true" :aria-labelledby="dialogTitleId" @keydown="onDialogKeydown">
+      <h2 :id="dialogTitleId">{{ isNew ? 'Add chart' : 'Edit chart' }}</h2>
 
       <div class="field">
         <label>Title</label>
-        <input type="text" v-model="draft.title" placeholder="Chart title" />
+        <input ref="titleInputEl" type="text" v-model="draft.title" placeholder="Chart title" />
       </div>
 
-      <div class="field" v-if="!isNote">
-        <label>Data source</label>
-        <select v-model="draft.dataset" @change="onDatasetChange">
-          <option v-for="d in DATASETS" :key="d.value" :value="d.value === 'rum' ? undefined : d.value">{{ d.label }}</option>
-        </select>
-      </div>
+      <template v-if="!isCardWidget">
+        <div class="field" v-if="!isNote">
+          <label>Data source</label>
+          <select v-model="draft.dataset" @change="onDatasetChange">
+            <option v-for="d in DATASETS" :key="d.value" :value="d.value === 'rum' ? undefined : d.value">{{ d.label }}</option>
+          </select>
+        </div>
 
-      <div class="row">
-        <div class="field">
-          <label>Chart type</label>
-          <select v-model="draft.type">
-            <option v-for="t in CHART_TYPES" :key="t.value" :value="t.value">{{ t.label }}</option>
-          </select>
+        <div class="row">
+          <div class="field">
+            <label>Chart type</label>
+            <select v-model="draft.type">
+              <option v-for="t in CHART_TYPES" :key="t.value" :value="t.value">{{ t.label }}</option>
+            </select>
+          </div>
+          <div class="field" v-if="!isGeo && !isPopup && !isBespokeDataset && !isNote">
+            <label>Metric</label>
+            <select v-model="draft.metric">
+              <option v-for="m in METRICS" :key="m.value" :value="m.value">{{ m.label }}</option>
+            </select>
+          </div>
         </div>
-        <div class="field" v-if="!isGeo && !isPopup && !isBespokeDataset && !isNote">
-          <label>Metric</label>
-          <select v-model="draft.metric">
-            <option v-for="m in METRICS" :key="m.value" :value="m.value">{{ m.label }}</option>
-          </select>
+
+        <!-- "Add chart" → "Metric card" (ADR 0003, phase B): reusable, configurable stat/table
+             cards, distinct from the fixed chart types above — see CardEditor.vue. -->
+        <div class="field" v-if="!isNote">
+          <button type="button" class="btn" @click="makeCardWidget">Make this a metric card instead</button>
         </div>
-      </div>
+      </template>
+
+      <!-- A metric card (ADR 0003, phase B) replaces every chart-only field below it: label/
+           data/display per item, sections, live preview — see CardEditor.vue. -->
+      <template v-if="isCardWidget">
+        <p class="hint">This chart is a metric card.</p>
+        <button type="button" class="btn" @click="leaveCardMode">Switch to a regular chart</button>
+        <CardEditor v-model="cardModel" :context="cardContext" @errors="cardErrors = $event" />
+      </template>
 
       <!-- Note: pick a registry entry, or write custom text (owner requirement, 2026-09-26:
            every note/caveat/explanatory block goes through the shared registry — see
@@ -388,6 +508,7 @@ function save() {
         </div>
       </div>
 
+      <template v-if="!isCardWidget">
       <!-- Overview / campaigns / ads-readings datasets: a View picker replaces the
            dimension/breakdown/metric/site-override fields below (not applicable to them). -->
       <div class="row" v-if="isBespokeDataset">
@@ -573,12 +694,14 @@ function save() {
           <input type="text" :value="axisTitlesValue('right')" @input="setAxisTitle('right', ($event.target as HTMLInputElement).value)" />
         </div>
       </div>
+      </template>
 
+      <p v-if="cardSaveDisabled" class="hint save-reason" role="alert">Fix the highlighted fields to save.</p>
       <div class="actions">
         <button v-if="!isNew" class="btn danger" @click="emit('remove')">Delete</button>
         <span class="spacer"></span>
         <button class="btn" @click="emit('cancel')">Cancel</button>
-        <button class="btn btn-primary" @click="save">{{ isNew ? 'Add chart' : 'Save' }}</button>
+        <button class="btn btn-primary" :disabled="cardSaveDisabled" :title="cardSaveDisabled ? 'Fix the highlighted fields to save.' : ''" @click="save">{{ isNew ? 'Add chart' : 'Save' }}</button>
       </div>
     </div>
   </div>
@@ -621,6 +744,11 @@ function save() {
   justify-content: center;
   z-index: 100;
   padding: 20px;
+  /* A tall panel (a metric card with several sections) can exceed the viewport even on
+     desktop; without this, flex's vertical centering pushes its TOP out of reach with no way
+     to scroll back up to it (review fix, 2026-09-27 — the mobile version of this is the
+     dedicated sheet rule below, which removes centering outright). */
+  overflow-y: auto;
 }
 .panel {
   background: rgb(var(--surface));
@@ -630,6 +758,15 @@ function save() {
   width: 100%;
   max-width: 460px;
   box-shadow: 0 20px 60px rgb(0 0 0 / 0.25);
+  /* Never itself the scroll container at desktop (.overlay is, above) — margin:auto on a flex
+     item keeps it centered when it's short AND fully reachable by scroll when it's tall. */
+  margin: auto;
+}
+/* A metric card (ADR 0003, phase B): CardEditor wants real width for its two-column live
+   preview (its own .ce-root goes up to 900px) — the plain chart panel's 460px would otherwise
+   squeeze it into one cramped column. */
+.panel.is-card {
+  max-width: 960px;
 }
 h2 {
   font-size: 18px;
@@ -717,6 +854,17 @@ h2 {
   font-size: 12px;
   color: rgb(var(--ink-3));
 }
+.save-reason {
+  color: #bc4749;
+  margin-top: 8px;
+  margin-bottom: 0;
+}
+.btn-primary:disabled {
+  background: rgb(var(--line-2));
+  border-color: rgb(var(--line-2));
+  color: rgb(var(--ink-3));
+  cursor: not-allowed;
+}
 .actions {
   display: flex;
   align-items: center;
@@ -733,5 +881,36 @@ h2 {
 .btn.danger:hover {
   border-color: #bc4749;
   background: rgb(188 71 73 / 0.06);
+}
+
+/* Full-screen sheet at phone width (review fix, 2026-09-27 — matches the app's own mobile
+   breakpoint, lib/responsive.ts MOBILE_MAX_WIDTH, and CardEditor.vue's own). Before this rule,
+   .overlay's flex centering (align-items: center) plus an unbounded .panel meant a tall panel —
+   any metric card with a couple of sections easily exceeds a phone's viewport height — had its
+   TOP pushed above y=0 with nothing to scroll: the "editor fields must be at the top" state was
+   unreachable, and whatever landed mid-panel at natural center (often the live preview, well
+   below the actual top of the content) was the first thing visible. Removing the centering and
+   making .panel itself the one full-height, top-anchored scroll container fixes both: the DOM's
+   own order (Title → fields → CardEditor's own controls-then-preview columns, now stacked) is
+   what's on screen, and a freshly mounted element starts at scrollTop 0 — no extra JS needed to
+   "scroll to the top on open". */
+@media (max-width: 700px) {
+  .overlay {
+    align-items: stretch;
+    justify-content: stretch;
+    padding: 0;
+  }
+  .panel,
+  .panel.is-card {
+    max-width: none;
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    border-radius: 0;
+    border: none;
+    box-shadow: none;
+    margin: 0;
+    overflow-y: auto;
+  }
 }
 </style>

@@ -385,6 +385,14 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.card.retry': 'Retry',
     'label.card.invalid': "This card's saved settings could not be read, so it can't be shown. Edit it or restore the default charts.",
     'label.card.openCampaigns': 'Open the Campaigns page',
+
+    // Preset names + one-line descriptions for CardEditor's "Start from" picker
+    // (lib/metrics/editorModel.ts presetOptions) — never the raw preset id (review fix,
+    // 2026-09-27: it was showing an auto-title-cased id, e.g. "Bsk Kpis").
+    'label.preset.campaign-scorecard': 'Campaign scorecard',
+    'label.preset.campaign-scorecard.description': 'One card per campaign: flight dates, arrivals, auth successes, installs, return rate, cost, and the funnel pills.',
+    'label.preset.bsk-kpis': 'Today at a glance (KPI tiles)',
+    'label.preset.bsk-kpis.description': 'Site-wide KPI tiles for today so far, each compared with yesterday and the 7-day average.',
   }),
 })
 

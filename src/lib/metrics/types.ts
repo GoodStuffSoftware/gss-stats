@@ -115,8 +115,13 @@ export interface CardSpec {
   showUpdated?: boolean | 'header' | 'footer'
 }
 
-/** What a Widget stores. A preset is a code-reviewed CardSpec in lib/metrics/presets.ts. */
-export type CardRef = { preset: string } | { spec: CardSpec }
+/** What a Widget stores. A preset is a code-reviewed CardSpec in lib/metrics/presets.ts.
+ * `from`, on a customized spec: the preset id CardEditor copied it from, so "Reset to preset"
+ * (and "Customized from …") name the RIGHT preset instead of an arbitrary default — see
+ * lib/metrics/validate.ts normCardRef, which keeps it only when it still resolves to a real
+ * preset (ADR 0003 slice 6 review fix, 2026-09-27). Never trust it un-normalized: a `{ spec }`
+ * read straight from storage may carry a stale or fabricated `from`. */
+export type CardRef = { preset: string } | { spec: CardSpec; from?: string }
 
 // ── Section 3: POST /api/metrics ──────────────────────────────────────────────────────────
 

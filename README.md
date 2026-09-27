@@ -274,7 +274,14 @@ Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats
   shows `MetricCard` ([`src/components/metrics/`](src/components/metrics)) — one batched request
   per page, following the page's date range and sites, with each card's caveats behind one
   collapsed "Notes" link and "Updated Xs ago" with ↻ where the card asks for it. The Overview's
-  "Today at a glance" and campaign scorecard are cards since layout version 10.
+  "Today at a glance" and campaign scorecard are cards since layout version 10. **Cards are
+  editable**: "Add chart" offers a metric card as a chart type, and editing one — a new card or
+  an existing "Today at a glance"/scorecard — opens a card builder in place of the usual chart
+  fields ([`src/components/metrics/CardEditor.vue`](src/components/metrics/CardEditor.vue)): pick
+  each row's label (plain text, a note, a bound field, or the metric's own name), its data (a
+  metric, a registered ratio, or a field — only unit-compatible display types are offered, so an
+  invalid percentage can't be built), arrange sections, and watch it update live before saving; an
+  edit that would leave the card invalid is refused inline instead of being saved.
 - **Two datasets, one dashboard.** RUM (sampled, human-only) and the beacon (every
   real load, sub-country geo) are charted side by side; they're independent and never
   summed.
