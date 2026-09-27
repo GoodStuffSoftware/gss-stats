@@ -202,3 +202,61 @@ same "TEMP B-TREE for GROUP BY" cost every existing breakdown query already pays
 one. Query 2 (events included) reads slightly MORE rows than query 1 (770 vs. 719) simply
 because it scans a few dozen more matching rows once the 8-prefix exclusion is lifted — not a
 different plan. No `CREATE INDEX` or write statement was run for this section either.
+
+## 7. `POST /api/metrics` (ADR 0003 slice 3, 2026-09-26) — rows read and CPU
+
+The batched metrics endpoint (`functions/api/metrics.ts`) runs a small set of fixed aggregate
+"facts" (`src/lib/metrics/facts.ts`), each once per batch and each cached on its own in the Cache
+API. Measured read-only against production with `npm run metrics:capture -- --cf-token-file <path>
+--legacy-scorecard` (`scripts/metrics/capture-facts.ts`: it plans the batch exactly as the endpoint
+does and runs each planned fact's `SELECT` through `wrangler d1 execute --remote --json --command`;
+never `--file`, never a write), at 2026-09-27T03:46Z (23:46 ET on 2026-09-26).
+
+**The batch:** a representative Overview page — the `campaign-scorecard` preset over all three
+campaigns plus the `bsk-kpis` tiles (`scripts/metrics/overviewBatch.ts`): 47 requests, planned into
+6 distinct facts. The planner reads nothing a campaign's config already rules out: the spend-only
+Play-direct campaign plans no beacon fact, and the Android launch's return rate needs no
+`campaignReturns` read (its flight ended before the return beacon existed).
+
+| Fact | Params | Rows returned | `rows_read` | Cached for |
+|---|---|---|---|---|
+| `campaignPathVisitor` | Android launch (closed) | 8 | 3,354 | 15 min |
+| `flightPathsSeen` | Android launch (closed) | 10 | 2,621 | 24 h (window closed) |
+| `adsSpend` (gss-stats-ads) | — | 3 | 20 | 5 min |
+| `campaignPathVisitor` | US+CA retest (active) | 10 | 327 | 90 s |
+| `campaignReturns` | US+CA retest (active) | 1 | 2,952 | 90 s |
+| `bskKpiMinutes` | today (ET) | 247 | 720 | 90 s |
+| **Total, every fact a cache miss** | | 279 | **9,994** | |
+
+For comparison, `/api/overview`'s scorecard runs its two per-campaign statements for **every**
+campaign on **every** load, uncached. They have exactly these facts' `WHERE` clauses, so the same
+`rows_read`: 3,354 + 2,919 (Android launch), 919 + 2,919 (Play-direct), 327 + 2,952 (retest) =
+**13,390**, plus the KPI query (720) and the spend read (20) — about **14,130 rows per load** for the
+sections the metrics batch covers, against **9,994 for a fully uncached batch and 0 for a cached
+one** (a cache entry is per colo). The timeline, first-hit and release-panel queries are not part of
+the batch; they stay on `/api/overview` until later slices.
+
+Two reads dominate and are candidates for later work, not changed here: `campaignReturns` scans
+every `bestsudoku-web` row (the path-embedded uc has no index to use), and a closed campaign's
+`campaignPathVisitor` scans every row since its flight start (there is no index on `campaign`).
+Bounding `campaignReturns` by the campaign's attribution start would read only rows since the flight
+began and would also drop pre-launch QA return beacons; it changes counts, so it needs an owner
+decision first.
+
+**CPU** (`npm run metrics:profile -- --seed <captured.json>`, `scripts/metrics/profile-metrics.ts`,
+the `scripts/ads-reads/profile-worker.ts` approach): the real handler runs end to end in Node (the
+same V8 as workerd) against a fake D1 that answers each planned statement from the captured fact rows,
+re-parsed from JSON on every call. 200 calls each, three runs:
+
+| Case | Mean | p50 | Max |
+|---|---|---|---|
+| Every fact a cache miss | 1.44–1.48 ms | 1.32–1.36 ms | 3.05–3.37 ms |
+| Every fact cached | 1.07–1.08 ms | 1.04 ms | 1.46–1.55 ms |
+| First call in a fresh process (lazy compilation) | 8.6–9.6 ms | | |
+
+All under the 10 ms Workers Free limit. The first-call figure excludes module load (where the
+Intl/ICU time-zone data is loaded, about 13 ms in Node, as it is for every endpoint that formats ET
+dates) and Node's own lazily loaded `Request`/`Response` implementation, which workerd provides
+natively. ET date conversions inside a batch are memoized (`src/lib/metrics/instrumentation.ts`
+`etMidnightMs`/`etDateOfMs`, the per-campaign attribution in `engine.ts`): without that, the
+synthetic-fixture batch took about 4 ms warm, most of it formatting the same few dates through `Intl`.

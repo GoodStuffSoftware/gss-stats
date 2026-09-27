@@ -15,6 +15,8 @@ export const HITS_COLUMNS = [
 ] as const
 export type HitsColumn = (typeof HITS_COLUMNS)[number]
 export type HitRow = Partial<Record<HitsColumn, string | number>> & { ts: number }
+/** A value SQLite binds: what every fact builder produces (validated strings and numbers). */
+type SqlValue = string | number | null
 
 export function openHitsDb(): DatabaseSync {
   const db = new DatabaseSync(':memory:')
@@ -30,7 +32,7 @@ export function insertHits(db: DatabaseSync, rows: (HitRow & { n?: number })[]):
   for (const r of rows) {
     const cols = HITS_COLUMNS.filter((c) => r[c] !== undefined)
     const stmt = db.prepare(`INSERT INTO hits (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`)
-    for (let i = 0; i < (r.n ?? 1); i++) stmt.run(...cols.map((c) => r[c]))
+    for (let i = 0; i < (r.n ?? 1); i++) stmt.run(...(cols.map((c) => r[c]) as SqlValue[]))
   }
 }
 
@@ -43,11 +45,11 @@ export function sqliteD1(db: DatabaseSync): D1Database & { statements: string[] 
       const bound = (values: unknown[]) => ({
         async all() {
           statements.push(sql)
-          return { results: db.prepare(sql).all(...values), success: true, meta: {} }
+          return { results: db.prepare(sql).all(...(values as SqlValue[])), success: true, meta: {} }
         },
         async first() {
           statements.push(sql)
-          return db.prepare(sql).get(...values) ?? null
+          return db.prepare(sql).get(...(values as SqlValue[])) ?? null
         },
       })
       return { ...bound([]), bind: (...values: unknown[]) => bound(values) }

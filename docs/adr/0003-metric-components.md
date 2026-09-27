@@ -1,6 +1,6 @@
 # ADR 0003: Metric components: one configurable card, a metrics registry, one batched endpoint
 
-- **Status:** Accepted (owner-approved 2026-09-26). Slices 1-2 are implemented on
+- **Status:** Accepted (owner-approved 2026-09-26). Slices 1-3 are implemented on
   `feat/metrics-core`; see [Implementation notes](#implementation-notes-slices-1-3) for where the
   code differs from this design and why.
 - **Date:** 2026-09-26
@@ -920,3 +920,34 @@ that code rather than copying it.
   day hides that comparison (the go-live day itself is partial).
 - Gating messages and unit words are notes of kind `label` (never a caption, never a scope
   default); a partial value carries `counted-from` (or the rule's own note, e.g. the install fix).
+
+**Slice 3 (`POST /api/metrics`).**
+- Engine split: `src/lib/metrics/engine.ts` (pure: `planBatch`, `deriveBatch`),
+  `functions/_lib/metricFacts.ts` (runs and caches facts), `functions/api/metrics.ts` (wires them).
+- The planner skips any side a request's config already rules out (a spend-only campaign, a
+  beacon not live for the flight, a pending flight), so the representative Overview batch needs 6
+  statements, not the 12 estimated above. Measured `rows_read` and CPU: `docs/capacity.md` §7.
+- Batch-level problems (body over 64 KiB, more than 200 requests, a malformed body, key or
+  context, duplicate keys) are a `400`/`413`; a bad id, param, window or delta list is that
+  request's `error` result (`unknown-id`, `bad-param`, `missing-param`, `bad-window`,
+  `missing-range`, `bad-deltas`), so the rest of the batch still answers.
+- Requests gained an optional `minCohort` (the `Gating.minCohort` this design says the server
+  clamps): it may only raise `MIN_COHORT`, and only for a proportion or a cost.
+- A `page` window needs `context.since` and `context.until`; there is no server default range.
+  `excludeOwnVisits`, `ownBrowser` and `ownOS` are validated, but no fact honours them yet (none
+  of the replaced sections does today).
+- Each fact's cache key includes a hash of its SQL text, so a changed statement never reads an
+  entry an older build stored, and the entry keeps the instant it was read (`asOfMs`), so
+  today-so-far windows use the rows' own clock.
+- The ads store is read fail-soft, as `readSpendSummaries` is: absent or unreadable means spend
+  falls back to `CAMPAIGN_SPEND`.
+- Deliberate differences from the endpoints the registry replaces, each asserted in
+  `functions/api/metrics.equivalence.test.ts`: the install-rate denominator is row-exact at the
+  fix (the `pf` split, as `/api/popups`), where `/api/overview` and `/api/campaigns` bucket by
+  hour; an active flight's not-yet-seen step stays live (as above); and a step or return rate the
+  endpoints still count for a flight that could not measure it is `unmeasured`.
+- ET date conversions and each campaign's attribution are memoized within the engine: without that
+  a batch spent most of its CPU formatting the same few dates through `Intl`.
+- Worth an owner decision: bounding `campaignReturns` by the attribution start would cut its
+  `rows_read` from a full `bestsudoku-web` scan to the flight's own rows, and would drop pre-launch
+  QA return beacons, which the current queries count.

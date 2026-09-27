@@ -64,9 +64,33 @@ export function seenInFlightRequired(campaign: CampaignFlight | undefined): bool
   return !!campaign && campaign.status === 'closed'
 }
 
+// ET date <-> instant conversions format through Intl on every call (tens of µs each), and one
+// batch asks for the same handful of go-live dates and flight bounds hundreds of times. They are
+// pure functions of their input, so they are memoized here (bounded; cleared if it ever grows).
+const midnightMemo = new Map<string, number>()
+const etDateMemo = new Map<number, string>()
+/** lib/campaigns.ts etMidnightUtcMs, memoized. */
+export function etMidnightMs(dateEt: string): number {
+  let v = midnightMemo.get(dateEt)
+  if (v === undefined) {
+    if (midnightMemo.size > 2_000) midnightMemo.clear()
+    midnightMemo.set(dateEt, (v = etMidnightUtcMs(dateEt)))
+  }
+  return v
+}
+/** lib/popupEvents.ts etDateFromMs, memoized (only ever called with fixed go-live instants). */
+export function etDateOfMs(ms: number): string {
+  let v = etDateMemo.get(ms)
+  if (v === undefined) {
+    if (etDateMemo.size > 2_000) etDateMemo.clear()
+    etDateMemo.set(ms, (v = etDateFromMs(ms)))
+  }
+  return v
+}
+
 /** The end (exclusive, epoch ms) of a campaign's serving window: the ET midnight after flightEnd. */
 export function servingEndMs(campaign: CampaignFlight): number {
-  return etMidnightUtcMs(addEtDays(campaign.flightEnd, 1))
+  return etMidnightMs(addEtDays(campaign.flightEnd, 1))
 }
 
 const unmeasured = (reason: string, goLiveEt: string | null = null): MeasuredInterval => ({ status: 'unmeasured', from: Number.POSITIVE_INFINITY, reason, noteIds: [], goLiveEt })
@@ -94,7 +118,7 @@ export function measuredInterval({ rules, window, campaign, seenInFlight }: Inte
       case 'liveAt': {
         if (rule.atMs === null) return unmeasured(rule.reason ?? 'not-live')
         if (rule.against === 'flight' && campaign && servingEndMs(campaign) <= rule.atMs) return unmeasured(rule.reason ?? 'not-live')
-        bumpGoLive(etDateFromMs(rule.atMs))
+        bumpGoLive(etDateOfMs(rule.atMs))
         startAt(rule.atMs, rule.noteId)
         break
       }
@@ -102,12 +126,12 @@ export function measuredInterval({ rules, window, campaign, seenInFlight }: Inte
         if (rule.dateEt === null) return unmeasured('not-live')
         if (rule.against === 'flight' && campaign && campaign.flightEnd < rule.dateEt) return unmeasured('not-live')
         bumpGoLive(rule.dateEt)
-        startAt(etMidnightUtcMs(rule.dateEt), rule.noteId)
+        startAt(etMidnightMs(rule.dateEt), rule.noteId)
         break
       }
       case 'unmeasuredBefore': {
         if (rule.atMs === null) return unmeasured('not-live')
-        bumpGoLive(etDateFromMs(rule.atMs))
+        bumpGoLive(etDateOfMs(rule.atMs))
         startAt(rule.atMs, rule.noteId)
         break
       }
