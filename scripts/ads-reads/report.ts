@@ -15,7 +15,7 @@ import {
 import { POPUP_OUTCOME_TYPES, gateRate, installOutcomeGapNote } from '../../src/lib/popupEvents'
 import { RAW_INSTALL_SIGNALS_LABEL } from '../../src/lib/campaigns'
 import { noteRawText } from '../../src/lib/notes'
-import type { FullRead, MorningResult, PostflightResult, SpendSection } from './read'
+import type { DiagnosticsSection, FullRead, MorningResult, PostflightResult, SpendSection } from './read'
 
 // `/game` rows are page views, not games played (ADR 0003): the registry label, lower-cased
 // for the middle of a sentence.
@@ -175,12 +175,65 @@ export function formatMorningReport(r: MorningResult): string {
     for (const x of h.results ?? []) out.push(`  [${x.status}] ${x.parentLabel} ${n(x.parent)} → ${x.childLabel} ${n(x.children)}${x.status === 'known-gap' ? ' (known gap, never alerts)' : ''}`)
   }
   if (r.play) out.push(r.play.line)
+  const diag = diagnosticsLines(r.diagnostics)
+  if (diag.length) out.push('', ...diag)
   if (r.thresholdRead) out.push('', ...fullReadLines(r.thresholdRead, `THRESHOLD READ at $${Math.max(...r.thresholdRead.thresholds)}`))
   out.push('', storeLine(r))
   out.push(`Errors: ${r.errors.length ? r.errors.join(' | ') : 'none'}`)
   out.push(`Push: ${r.notify.push ? `YES (${r.notify.reason}): ${r.notify.text}` : `no (${r.notify.reason})`}${r.notify.busCopy ? ' + bus copy' : ''}`)
   out.push(`Notes: ${r.notes.join(' / ')}`)
   return out.join('\n')
+}
+
+/** Standing Recommendations verdicts (R3), carried from the retired routines, never
+ * re-derived and never acted on here (this file only formats text). */
+const RECOMMENDATION_STANDING_VERDICTS = 'Maximize Conversions REJECT; conversion tracking REJECT PERMANENTLY; Customer Match REJECT; Optimized targeting REJECT'
+
+/** R2/R3/R5/R8 diagnostic depth: every line here is informational only. An "ANOMALY" tag
+ * means "propose to Mike" in the sense of flagging it in the report text — it is never wired
+ * to `notify.push`, never a kill rule, never an automatic action (contract sections 12-13 are
+ * unchanged by this file). */
+function diagnosticsLines(d: DiagnosticsSection): string[] {
+  const empty = !d.hourly && !d.geo && !d.devices && !d.targeting && !d.recommendations && !d.countryCounts && !d.accountCrossCheck && !d.errors.length
+  if (empty) return []
+  const out = [`Diagnostics for ${d.spendThroughEt ?? 'the closed day'} (informational only; never a kill rule or an automatic action):`]
+  if (d.hourly) {
+    const top = [...d.hourly].sort((a, b) => b.cost - a.cost).slice(0, 3)
+    out.push(`  hourly (account tz): ${d.hourly.length} hour(s) with delivery${top.length ? `; top by spend: ${top.map((h) => `${h.hour}:00 ${money(h.cost)} (${n(h.impressions)} impr, ${n(h.clicks)} clicks)`).join(', ')}` : ''}`)
+  } else out.push('  hourly: not read')
+  if (d.geo) {
+    if (!d.geo.length) out.push('  geo: no rows')
+    for (const g of d.geo) out.push(`  geo: ${g.country} (${g.countryCode}) ${money(g.cost)}, ${n(g.impressions)} impr, ${n(g.clicks)} clicks, bid modifier ${g.bidModifier == null ? 'none on record' : `${g.bidModifier} (${g.bidAdjustmentPct}%)`}`)
+  } else out.push('  geo: not read')
+  if (d.devices) {
+    for (const dv of d.devices) {
+      const shouldBeZero = dv.device === 'DESKTOP' || dv.device === 'CONNECTED_TV'
+      const nonZero = dv.impressions > 0 || dv.clicks > 0
+      out.push(`  device: ${dv.device} ${n(dv.impressions)} impr, ${n(dv.clicks)} clicks, ${money(dv.cost)}${shouldBeZero && nonZero ? ' — ANOMALY: computers/TV should read zero on a mobile-app placement campaign, propose to Mike' : ''}`)
+    }
+  } else out.push('  devices: not read')
+  if (d.targeting) {
+    for (const t of d.targeting) {
+      const placementMismatch = t.expectedPlacements != null && t.placements !== t.expectedPlacements
+      const optimizedOn = t.audienceBidOnly === false
+      out.push(
+        `  targeting: ${t.adGroup} [${t.status ?? '—'}] ${n(t.placements)} placement(s)${t.expectedPlacements != null ? ` (build spec: ${t.expectedPlacements})` : ' (build spec: unknown ad group)'}, optimized targeting ${optimizedOn ? 'ON' : 'off'}${placementMismatch ? ' — ANOMALY: placement count does not match the build spec, propose to Mike' : ''}${optimizedOn ? ' — ANOMALY: optimized targeting is on (do-not-change list, spec section 14), propose to Mike' : ''}`,
+      )
+    }
+  } else out.push('  targeting: not read')
+  if (d.recommendations) {
+    out.push(d.recommendations.length ? `  recommendations queued: ${d.recommendations.map((r) => r.type ?? 'unknown').join(', ')} (read-only; nothing applied or dismissed)` : '  recommendations: none queued')
+    out.push(`  standing verdicts (never re-derived, never applied): ${RECOMMENDATION_STANDING_VERDICTS}`)
+  } else out.push('  recommendations: not read')
+  if (d.countryCounts) out.push(`  beacon countries (tagged arrivals, aggregate counts): ${d.countryCounts.length ? d.countryCounts.map((c) => `${c.country} ${n(c.count)}`).join(', ') : 'none'}`)
+  else out.push('  beacon countries: not read')
+  if (d.accountCrossCheck) {
+    const cc = d.accountCrossCheck
+    const below = cc.firestoreNewAccounts != null && cc.beaconAuthSuccessNew != null && cc.firestoreNewAccounts < cc.beaconAuthSuccessNew
+    out.push(`  account cross-check (${cc.etDate}): Firestore new accounts ${n(cc.firestoreNewAccounts)} vs beacon /auth/success new ${n(cc.beaconAuthSuccessNew)}${below ? ' — ANOMALY: Firestore count below the beacon count, propose to Mike' : ''}`)
+  } else out.push('  account cross-check: not read')
+  if (d.errors.length) out.push(`  diagnostic read errors (best-effort; did not block the read above): ${d.errors.join(' | ')}`)
+  return out
 }
 
 function storeLine(r: MorningResult | PostflightResult): string {
