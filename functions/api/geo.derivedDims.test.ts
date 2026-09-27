@@ -280,6 +280,49 @@ describe('review fixes: arrivals, raw signals, date limit, request caps', () => 
     expect(ok.body.error).toBeUndefined()
   })
 
+  it('refuses a statement over D1\'s 100 bound parameters with a clear 400 (50 sites + 16 path filters + a referrer ring)', async () => {
+    const { body, calls } = await post({
+      dimension: 'referrer',
+      breakdown: 'device',
+      dims: ['referrer', 'device'],
+      sites: Array.from({ length: 50 }, (_, i) => `s${i}`),
+      constraints: Array.from({ length: 16 }, (_, i) => ({ field: 'path', value: `/p${i}` })),
+      excludeOwnVisits: true,
+      ownBrowser: 'Opera',
+      ownOS: 'Windows',
+      excludeKnownTraffic: true,
+      ...range,
+    })
+    expect(body.error).toMatch(/too many to query at once \(110 values; at most 100\)/)
+    expect(calls).toHaveLength(0) // never reached D1
+  })
+
+  it('exactly 100 bound parameters is still allowed', async () => {
+    const { body, calls } = await post({
+      dimension: 'referrer',
+      breakdown: 'device',
+      dims: ['referrer', 'device'],
+      sites: Array.from({ length: 50 }, (_, i) => `s${i}`),
+      constraints: Array.from({ length: 16 }, (_, i) => ({ field: 'path', value: `/p${i}` })),
+      excludeOwnVisits: true,
+      ownBrowser: 'Opera',
+      ownOS: 'Windows',
+      ...range,
+    })
+    expect(body.error).toBeUndefined()
+    expect(calls[0].binds.length).toBe(100)
+  })
+
+  it('refuses a statement over 90,000 bytes of SQL with a clear 400 (16 pop-up outcome filters)', async () => {
+    const { body, calls } = await post({
+      dimension: 'device',
+      constraints: Array.from({ length: 16 }, () => ({ field: 'popupOutcome', value: 'shown' })),
+      ...range,
+    })
+    expect(body.error).toMatch(/too large \(\d+ bytes; at most 90000\)/)
+    expect(calls).toHaveLength(0)
+  })
+
   it('a failing D1 query returns a generic error, never the D1 message', async () => {
     const gss_geo = { prepare: () => ({ bind: () => ({ all: async () => { throw new Error('SQLITE_ERROR: secret detail') } }) }) }
     const res = await onRequestPost({ request: { json: async () => ({ dimension: 'device', ...range }) }, env: { gss_geo }, waitUntil: () => {} } as any)
