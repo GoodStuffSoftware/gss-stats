@@ -65,6 +65,7 @@ describe('v10: the production layout (sanitised)', () => {
     'bsk-overview/ow-release': 'release-before-after',
     'bsk-popups/pu-rates': 'popup-rates',
     'bsk-popups/pu-eligible-bd': 'signin-eligibility',
+    'bsk-campaigns/cw-cost': 'campaign-cost',
   }
   it('v9 → current changes exactly the panels, by adding a card, and nothing else', () => {
     const before = widgetsById(PROD_V9 as unknown as DashboardConfig)
@@ -74,7 +75,7 @@ describe('v10: the production layout (sanitised)', () => {
     // re-orders a widget's keys on every load).
     const canon = (w: unknown) => sorted(stable({ pages: [{ filters: {}, widgets: [w] }] } as any))
     const changed = [...after].filter(([k, w]) => canon(w) !== canon(before.get(k)))
-    expect(changed.map(([k]) => k)).toEqual(Object.keys(CARDED))
+    expect(changed.map(([k]) => k).sort()).toEqual(Object.keys(CARDED).sort())
     for (const [k, w] of changed) {
       const { card, ...rest } = w
       expect(card, k).toEqual({ preset: CARDED[k] })

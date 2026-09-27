@@ -25,6 +25,16 @@
 // Sign-in eligibility (popup 'eligible' bar chart → preset signin-eligibility):
 //   L3  The three counts are the card's bars (labels and values as the chart's bars).
 //   A1  Added: the eligibility rate (earned over all three, a valid partition ratio) under them.
+//
+// Campaign cost (campaigns 'cost' → preset campaign-cost), with an ads store in the fixture:
+//   L4  The one freshness line "Spend through Sep 9 · synced 1h ago" is two rows, "Spend
+//       through" and "Synced"; a stale campaign's "stale — sync pending" is a line under the
+//       date. The spend-only reason is the card's section heading instead of a line of its own.
+//   C1  The spend-only Play-direct card omits "Per arrival" and "Per auth success": it can have
+//       no beacon arrivals or sign-ins (old: "—" for both).
+//   C2  A cost over fewer than MIN_COHORT arrivals or sign-ins reads "too few to report" (the
+//       registry gates every cost like every rate); the old endpoint returned no value, "—".
+//   A2  The "Refresh data" button is the card's action, above the cards, as before.
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import MetricCard from './MetricCard.vue'
@@ -33,6 +43,9 @@ import { __resetMetricsStateForTests } from '../../composables/useMetrics'
 import { onRequestPost as metricsPost } from '../../../functions/api/metrics'
 import { onRequestPost as overviewPost } from '../../../functions/api/overview'
 import { onRequestPost as popupsPost } from '../../../functions/api/popups'
+import { onRequestPost as campaignsPost } from '../../../functions/api/campaigns'
+import CampaignsWidgetBody from '../widgets/CampaignsWidgetBody.vue'
+import { DatabaseSync } from 'node:sqlite'
 import ChartCard from '../ChartCard.vue'
 import { fetchStats } from '../../api'
 import { buildChartConfig } from '../../lib/charts'
@@ -58,13 +71,28 @@ const HANDLERS: Record<string, (ctx: any) => Response | Promise<Response>> = {
   '/api/metrics': metricsPost,
   '/api/overview': overviewPost,
   '/api/popups': popupsPost,
+  '/api/campaigns': campaignsPost,
 }
+/** gss-stats' own ads store, for the cost panel: stored spend for two campaigns (Android's whole
+ * flight, closed days; the retest's first, still-open day), none for Play-direct (it falls back to
+ * the hand-entered figure), and one finished sync run. */
+function adsDb(): DatabaseSync {
+  const a = new DatabaseSync(':memory:')
+  a.exec('CREATE TABLE ads_daily_metrics (campaign_id TEXT, date TEXT, cost_micros INTEGER, impressions INTEGER, clicks INTEGER, source TEXT, fetched_at TEXT, placements_fetched_at TEXT)')
+  a.exec('CREATE TABLE ads_sync_runs (campaigns_ok TEXT, campaigns_pulled TEXT, finished_at TEXT, status TEXT)')
+  const ins = a.prepare("INSERT INTO ads_daily_metrics VALUES (?, ?, ?, 100, 10, 'google-ads-api', ?, NULL)")
+  for (let d = 2; d <= 9; d++) ins.run('24215315197', `2026-09-0${d}`, 15_000_000, '2026-09-10T12:00:00Z')
+  ins.run('24279250691', '2026-09-26', 5_000_000, '2026-09-26T20:00:00Z')
+  a.prepare('INSERT INTO ads_sync_runs VALUES (?, ?, ?, ?)').run('["24215315197","24279250691"]', '["24215315197","24279250691"]', '2026-09-26T19:30:00Z', 'ok')
+  return a
+}
+let ads: DatabaseSync
 async function route(url: string, init: RequestInit): Promise<Response> {
   const path = new URL(url, 'https://stats.goodstuff.software').pathname
   const handler = HANDLERS[path]
   if (!handler) throw new Error(`unexpected fetch ${path}`)
   const waited: Promise<unknown>[] = []
-  const res = await handler(pagesContext(postJson(path, JSON.parse(String(init.body ?? '{}'))), { gss_geo: sqliteD1(db) } as never, waited))
+  const res = await handler(pagesContext(postJson(path, JSON.parse(String(init.body ?? '{}'))), { gss_geo: sqliteD1(db), gss_stats_ads: sqliteD1(ads as never) } as never, waited))
   await Promise.all(waited)
   return res
 }
@@ -72,6 +100,7 @@ async function route(url: string, init: RequestInit): Promise<Response> {
 beforeAll(() => {
   db = openHitsDb()
   insertHits(db, [...bskFixture(), ...PARITY_EXTRA])
+  ads = adsDb()
   vi.useFakeTimers({ now: FIXTURE_NOW, toFake: ['Date'] })
   cache = memoryCache()
   undoCaches = installCaches(cache)
@@ -245,5 +274,65 @@ describe('the Pop-ups page panels ≡ their /api/popups renderings', () => {
     expect(r.slice(0, 3)).toEqual(oldBars)
     expect(card.findAll('.mi-bar-fill').map((b) => (b.element as HTMLElement).style.width)).toEqual(['100%', '50%', '25%'])
     expect(r[3]).toEqual(['Sign-in eligibility rate', '57.1% (4/7)']) // A1
+  })
+})
+
+// ── Campaigns page ────────────────────────────────────────────────────────────────────────
+const campaignsWidget = (view: string): Widget => ({ id: `cw-${view}`, i: `cw-${view}`, title: view, type: 'table', dataset: 'campaigns', view, dimension: '', metric: 'pageviews', limit: 1, notes: ['arrivals-caveat', 'spend-source'], x: 0, y: 0, w: 12, h: 10 })
+async function mountOldCampaigns(view: string) {
+  const w = mount(CampaignsWidgetBody, { props: { widget: campaignsWidget(view) } })
+  mounted.push(w)
+  await settle()
+  return w
+}
+
+describe('campaign-cost ≡ the bespoke cost panel', () => {
+  it('same campaigns, spend, source, freshness and costs, except L4, C1, C2 (A2: the refresh action)', async () => {
+    const old = await mountOldCampaigns('cost')
+    const oldCards = old.findAll('.cost-card').map((c) => ({
+      title: text(c.find('.fc-label').element),
+      why: c.find('p.state').exists() ? text(c.find('p.state').element) : '',
+      rows: new Map(c.findAll('.cost-row:not(.fresh-row)').map((r) => [text(r.findAll('span')[0].element), text(r.findAll('span')[1].element)])),
+      fresh: text(c.find('.fresh-row').element),
+    }))
+    expect(oldCards.map((c) => c.title)).toHaveLength(3)
+    const card = await mountCard('campaign-cost', FIXTURE_NOW)
+    expect(card.find('.mc-actions .ads-refresh button').exists()).toBe(true) // A2
+    expect(old.find('.ads-refresh button').exists()).toBe(true)
+    const newCards = card.findAll('.metric-card').map((c) => ({
+      title: text(c.find('.mc-title').element),
+      why: c.find('.section-title').exists() ? text(c.find('.section-title').element) : '',
+      rows: new Map(c.findAll('.mi-row').map((r) => [text(r.find('.mi-label').element), text(r.find('.mi-value').element)])),
+      stale: c.findAll('.mi-caption').map((x) => text(x.element)).join(' '),
+    }))
+    expect(newCards.map((c) => c.title)).toEqual(oldCards.map((c) => c.title))
+    const seen = new Set<string>()
+    for (const o of oldCards) {
+      const n = newCards.find((c) => c.title === o.title)!
+      expect(n.why, `${o.title}: L4 spend-only reason`).toBe(o.why)
+      expect(n.rows.get('Spend'), o.title).toBe(o.rows.get('Spend'))
+      expect(n.rows.get('Source'), o.title).toBe(o.rows.get('Source'))
+      // L4: the freshness line, from the two rows (and the stale line under the date).
+      const through = n.rows.get('Spend through')!
+      const synced = n.rows.get('Synced')!
+      const line = `${through === 'no closed spend day stored yet' ? 'No closed spend day stored yet' : `Spend through ${through}`} · ${synced === 'not synced yet' ? 'not synced yet' : `synced ${synced}`}${n.stale ? ` · ${n.stale}` : ''}`
+      expect(line, `${o.title}: L4`).toBe(o.fresh)
+      for (const label of ['Per arrival', 'Per auth success']) {
+        const was = o.rows.get(label)
+        const now = n.rows.get(label)
+        if (o.why) {
+          expect([was, now], `${o.title} ${label}: C1`).toEqual(['—', undefined])
+          seen.add('C1')
+        } else if (was === '—' && now === 'too few to report') {
+          seen.add('C2')
+        } else {
+          expect(now, `${o.title} ${label}`).toBe(was)
+        }
+      }
+    }
+    expect([...seen].sort()).toEqual(['C1', 'C2']) // every listed difference still occurs
+    // The fixture exercises both sources and a real cost.
+    expect(newCards.map((c) => c.rows.get('Source'))).toEqual(expect.arrayContaining(['Ads API', 'hand-entered']))
+    expect(newCards.some((c) => /^\$\d+\.\d{2}$/.test(c.rows.get('Per arrival') ?? ''))).toBe(true)
   })
 })

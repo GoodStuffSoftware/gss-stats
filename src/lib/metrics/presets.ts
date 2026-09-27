@@ -176,6 +176,34 @@ export const SIGNIN_ELIGIBILITY: CardSpec = {
   ],
 }
 
+/** Cost per arrival / auth success (CampaignsWidgetBody 'cost'): one card per campaign, spend-only
+ * ones included (their spend is real; the section title says why nothing else is measured), with
+ * the ads store's figures — spend, where it came from, how far it is stored and when it last
+ * synced (a "stale" line while a closed day is missing) — and the two costs. The card's action
+ * asks the ads sync for fresh spend and reloads the card once one ran. */
+export const CAMPAIGN_COST: CardSpec = {
+  v: 1,
+  repeat: { over: 'campaigns' },
+  minWidth: 230,
+  title: { bind: 'campaign.label' },
+  actions: ['ads-refresh'],
+  sections: [
+    {
+      layout: 'rows',
+      title: { bind: 'campaign.measurabilityNote' },
+      items: [
+        { id: 'spend', label: { metric: true }, data: { metric: 'campaign.spend' }, display: { as: 'currency' }, ...COMPACT },
+        { id: 'source', label: { metric: true }, data: { metric: 'campaign.spendSource' }, display: { as: 'status' }, ...COMPACT },
+        // Inline on purpose: "stale — sync pending" stays visible under the date, as it was.
+        { id: 'through', label: { metric: true }, data: { metric: 'campaign.spendThrough' }, display: { as: 'date' }, gating: { whenEmpty: { note: 'no-spend-day-yet' } }, captionMode: 'inline' },
+        { id: 'synced', label: { metric: true }, data: { metric: 'campaign.lastSync' }, display: { as: 'ago' }, gating: { whenEmpty: { note: 'not-synced-yet' } }, ...COMPACT },
+        { id: 'cpa', label: { note: 'label.card.perArrival' }, data: { ratio: 'campaign.costPerArrival' }, display: { as: 'currency' }, ...COMPACT },
+        { id: 'cps', label: { note: 'label.card.perAuthSuccess' }, data: { ratio: 'campaign.costPerSignin' }, display: { as: 'currency' }, ...COMPACT },
+      ],
+    },
+  ],
+}
+
 /** Every preset by id. A null prototype, so an id such as 'constructor' or 'toString' is
  * simply not a preset — read through presetById, never a bare bracket lookup. */
 export const PRESETS: Readonly<Record<string, CardSpec>> = Object.freeze(
@@ -185,6 +213,7 @@ export const PRESETS: Readonly<Record<string, CardSpec>> = Object.freeze(
     'release-before-after': RELEASE_BEFORE_AFTER,
     'popup-rates': POPUP_RATES,
     'signin-eligibility': SIGNIN_ELIGIBILITY,
+    'campaign-cost': CAMPAIGN_COST,
   }),
 )
 
