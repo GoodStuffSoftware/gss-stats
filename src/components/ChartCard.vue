@@ -6,6 +6,7 @@ import { sitesLoaded } from '../sitesStore'
 import { checkSessionExpired, isAuthError, isNetworkError } from '../session'
 import { buildChartConfig, formatKey, metricValue, nestedDoughnutClickValue, seriesRows, hasLineSeries, widgetHasOverlay, widgetOverlayOptions } from '../lib/charts'
 import { overlayItems, itemsInRange } from '../lib/timelineOverlay'
+import { isDateDim } from '../lib/rings'
 import { rangeLabel } from '../lib/range'
 import { isSiteDim, semanticKey } from '../lib/drill'
 import { isMobileViewport } from '../lib/responsive'
@@ -70,7 +71,7 @@ const needsChartHeight = computed(() => {
 // A breakdown bar (legend + rotated axis labels) and a line chart with series or overlays
 // (legend, marker labels, the markers list, captions) don't fit Dashboard.vue's fixed phone chart
 // height: on a phone these cards size to their content, with a fixed-height plot area instead.
-const tallOnPhone = computed(() => props.widget.type === 'breakdownBar' || hasLineSeries(props.widget) || (props.widget.dimension === 'date' && widgetHasOverlay(props.widget)))
+const tallOnPhone = computed(() => props.widget.type === 'breakdownBar' || hasLineSeries(props.widget) || (isDateDim(props.widget.dimension) && widgetHasOverlay(props.widget)))
 
 // Double-tap-to-zoom (owner: "allow a double-tap on the chart to zoom if that's easy") — an
 // extra shortcut alongside the always-visible zoom button (see below), not a substitute for
@@ -326,7 +327,7 @@ onMounted(load)
 // range — listed under the chart in a collapsed disclosure, so each marker's and band's date,
 // name and note are reachable by keyboard and touch, not only by hovering the canvas.
 const overlayList = computed(() => {
-  if (props.widget.dimension !== 'date' || !widgetHasOverlay(props.widget) || !data.value) return []
+  if (!isDateDim(props.widget.dimension) || !widgetHasOverlay(props.widget) || !data.value) return []
   const first = String(data.value.meta.since).slice(0, 10)
   const last = String(data.value.meta.until).slice(0, 10)
   return itemsInRange(overlayItems(widgetOverlayOptions(props.widget)), first, last).map((it) => ({

@@ -475,7 +475,8 @@ export function timelineWidget(geom: { x: number; y: number; w: number; h: numbe
     title,
     type: 'line',
     dataset: 'geo',
-    dimension: 'date',
+    // US-Eastern days, the same days its flight bands and go-live markers are dated in.
+    dimension: 'dateEt',
     metric: 'pageviews',
     limit: 400,
     markers: 'releases',

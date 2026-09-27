@@ -1,7 +1,8 @@
 import type { ChartConfiguration } from 'chart.js'
 import type { Widget, StatsResponse, StatsRow, Metric } from '../types'
 import { COUNTRY_NAMES } from './catalog'
-import { ringDims } from './rings'
+import { ringDims, isDateDim } from './rings'
+import { etDateFast } from './etTime'
 import { TRACKING_ACTIVATION_DATE_ET, PLAY_TRACKING_MARKER_LABEL, POPUPS, POPUP_FAMILY_ORDER, POPUP_OUTCOME_ORDER, POPUP_OUTCOME_LABELS } from './popupEvents'
 import { GAME_COMPLETE_MODES, GAME_COMPLETE_DIFFICULTIES, CAMPAIGNS } from './campaigns'
 import { isMobileViewport } from './responsive'
@@ -435,7 +436,7 @@ function wrapText(ctx: any, text: string, maxW: number): string[] {
 
 /** True for a line/area chart on the beacon's date axis that draws its own series list. */
 export function hasLineSeries(widget: Pick<Widget, 'type' | 'dataset' | 'dimension' | 'series'>): boolean {
-  return (widget.type === 'line' || widget.type === 'area') && widget.dataset === 'geo' && widget.dimension === 'date' && !!widget.series?.length
+  return (widget.type === 'line' || widget.type === 'area') && widget.dataset === 'geo' && isDateDim(widget.dimension) && !!widget.series?.length
 }
 
 /** A line chart's series (Widget.series): each one is its own date query, filtered on a geo
@@ -445,8 +446,9 @@ export function buildSeriesLineConfig(widget: Widget, responses: StatsResponse[]
   const series = widget.series ?? []
   if (!series.length || responses.length !== series.length) return null
   const first = responses[0]
-  const allDays = dayBucketsInRange(first.meta.since, first.meta.until) ?? [...new Set(responses.flatMap((r) => r.rows.map((x) => x.key.date ?? '')))].sort()
-  const byDay = responses.map((r) => new Map(r.rows.map((x) => [x.key.date ?? '', metricValue(x, widget.metric)])))
+  const dim = widget.dimension
+  const allDays = dayBucketsInRange(first.meta.since, first.meta.until, dim === 'dateEt') ?? [...new Set(responses.flatMap((r) => r.rows.map((x) => x.key[dim] ?? '')))].sort()
+  const byDay = responses.map((r) => new Map(r.rows.map((x) => [x.key[dim] ?? '', metricValue(x, widget.metric)])))
   // The axis starts at the first day any series has data (a long range, e.g. "since January",
   // would otherwise open with months of flat zeros); every later empty day still plots as 0.
   const firstData = allDays.findIndex((d) => byDay.some((m) => (m.get(d) ?? 0) > 0))
@@ -622,7 +624,7 @@ export function formatKey(dimension: string, value: string): string {
   if (dimension === 'popupFamily') return POPUPS.find((p) => p.id === value)?.label ?? value
   if (dimension === 'popupOutcome') return POPUP_OUTCOME_LABELS[value] ?? value
   if (dimension === 'campaignFlight') return CAMPAIGNS.find((c) => c.id === value)?.label ?? value
-  if (dimension === 'date') {
+  if (dimension === 'date' || dimension === 'dateEt') {
     // YYYY-MM-DD → "Jun 24"
     const d = new Date(value + 'T00:00:00Z')
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
@@ -658,12 +660,14 @@ const noLegend = { legend: { display: false } }
 // the span is implausibly huge — a malformed or enormous range shouldn't allocate thousands of
 // empty buckets, and callers fall back to the pre-fill behavior in that case.
 const MAX_FILL_DAYS = 400
-function dayBucketsInRange(since: string, until: string): string[] | null {
-  const s = new Date(since).getTime()
-  const u = new Date(until).getTime()
-  if (!isFinite(s) || !isFinite(u)) return null
-  const startDay = Date.UTC(new Date(s).getUTCFullYear(), new Date(s).getUTCMonth(), new Date(s).getUTCDate())
-  const endDay = Date.UTC(new Date(u).getUTCFullYear(), new Date(u).getUTCMonth(), new Date(u).getUTCDate())
+function dayBucketsInRange(since: string, until: string, et = false): string[] | null {
+  const s0 = new Date(since).getTime()
+  const u0 = new Date(until).getTime()
+  if (!isFinite(s0) || !isFinite(u0)) return null
+  // An ET-day axis ('dateEt') spans the ET days of since/until; a UTC one their UTC days.
+  const dayOf = (ms: number) => (et ? etDateFast(ms) : new Date(ms).toISOString().slice(0, 10))
+  const startDay = Date.parse(dayOf(s0) + 'T00:00:00Z')
+  const endDay = Date.parse(dayOf(u0) + 'T00:00:00Z')
   if (endDay < startDay) return null
   const dayCount = Math.round((endDay - startDay) / 86_400_000) + 1
   if (dayCount > MAX_FILL_DAYS) return null
@@ -679,11 +683,11 @@ function dayBucketsInRange(since: string, until: string): string[] | null {
 // have more points than the response has rows, and indexing the raw rows would drill into the
 // wrong day (or miss entirely).
 export function seriesRows(dim: string, resp: StatsResponse): StatsRow[] {
-  if (dim !== 'date') return resp.rows
-  const buckets = dayBucketsInRange(resp.meta.since, resp.meta.until)
+  if (!isDateDim(dim)) return resp.rows
+  const buckets = dayBucketsInRange(resp.meta.since, resp.meta.until, dim === 'dateEt')
   if (!buckets) return resp.rows
-  const byDay = new Map(resp.rows.map((r) => [r.key.date ?? '', r]))
-  return buckets.map((day) => byDay.get(day) ?? { key: { date: day }, pageviews: 0, visits: 0 })
+  const byDay = new Map(resp.rows.map((r) => [r.key[dim] ?? '', r]))
+  return buckets.map((day) => byDay.get(day) ?? { key: { [dim]: day }, pageviews: 0, visits: 0 })
 }
 
 // Known value order for a dimension's values, wherever one reads better than count order: the
@@ -899,7 +903,7 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse, seriesResp
     // with a corner watermark instead — see activationMarkerIndex above).
     const isPopupTrend = widget.dataset === 'popup' && dim === 'date'
     const boundary = isPopupTrend ? (TRACKING_ACTIVATION_DATE_ET ? activationMarkerIndex(rows, TRACKING_ACTIVATION_DATE_ET) : rows.length) : -1
-    const overlay = dim === 'date' ? overlayItems(widgetOverlayOptions(widget)) : []
+    const overlay = isDateDim(dim) ? overlayItems(widgetOverlayOptions(widget)) : []
     const muted = isDark() ? 'rgba(231,226,215,0.35)' : 'rgba(26,23,21,0.28)'
     const mutedFill = isDark() ? 'rgba(231,226,215,0.08)' : 'rgba(26,23,21,0.06)'
 
@@ -943,7 +947,7 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse, seriesResp
       ...((isPopupTrend || overlay.length) && {
         plugins: [
           ...(isPopupTrend ? [TRACKING_ACTIVATION_DATE_ET ? activationMarkerPlugin(boundary) : notYetTrackedWatermarkPlugin()] : []),
-          ...(overlay.length ? [timelineOverlayPlugin(rows.map((r) => r.key.date ?? ''), overlay, isMobileViewport())] : []),
+          ...(overlay.length ? [timelineOverlayPlugin(rows.map((r) => r.key[dim] ?? ''), overlay, isMobileViewport())] : []),
         ],
       }),
     } as ChartConfiguration

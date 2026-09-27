@@ -105,14 +105,15 @@ describe('overlay items', () => {
 
 describe('series line chart (the Overall timeline as a standard line chart)', () => {
   const resp = (rows: [string, number][]): StatsResponse => ({
-    rows: rows.map(([date, c]) => ({ key: { date }, pageviews: c, visits: c })),
+    rows: rows.map(([date, c]) => ({ key: { dateEt: date }, pageviews: c, visits: c })),
     totals: { pageviews: 0, visits: 0 },
-    meta: { site: 'all', host: null, since: '2026-09-24', until: '2026-09-26', dimensions: ['date'], metric: 'pageviews' },
+    // ET days: noon UTC on both ends sits inside the same ET day
+    meta: { site: 'all', host: null, since: '2026-09-24T12:00:00Z', until: '2026-09-26T12:00:00Z', dimensions: ['dateEt'], metric: 'pageviews' },
   })
   const w = timelineWidget({ x: 0, y: 0, w: 12, h: 12 })
 
   it('is a standard line widget with series, overlays and the known-traffic filter on', () => {
-    expect(w).toMatchObject({ type: 'line', dataset: 'geo', dimension: 'date', markers: 'releases', goLiveMarkers: true, flightBands: true, excludeKnownTraffic: true })
+    expect(w).toMatchObject({ type: 'line', dataset: 'geo', dimension: 'dateEt', markers: 'releases', goLiveMarkers: true, flightBands: true, excludeKnownTraffic: true })
     expect(hasLineSeries(w)).toBe(true)
     expect(w.series!.map((s) => s.label)).toEqual(['Page views', 'Tagged arrivals', 'Auth successes', 'Installs', 'Raw install signals'])
   })

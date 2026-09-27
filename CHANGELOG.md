@@ -7,6 +7,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **A US-Eastern date axis for beacon trend charts.** "Date (trend, ET)" buckets by Eastern day,
+  daylight saving included; the Overall timeline uses it, so its days line up with its flight
+  bands and go-live markers.
 - **Arrival and key-event dimensions for beacon charts,** and a per-chart option to hide known
   test and household traffic.
 - **A breakdown bar chart for any two dimensions.** Put one dimension on the axis and another
@@ -51,6 +54,7 @@ All notable changes to **gss-stats** are documented here. The format follows
   only the top of the axis showed.
 - **The sign-in eligibility chart has a short title** that fits its card.
 - **Timeline marker labels no longer collide,** on desktop or phone.
+- **Chart editor checkboxes sit right next to their labels,** and clicking the label toggles them.
 
 ## [0.8.0] — 2026-09-26
 

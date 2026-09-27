@@ -17,9 +17,10 @@ import {
   sqlLit,
   sqlInt,
   trackingActivationStartMs,
+  etDateFromMs,
 } from '../../src/lib/popupEvents'
 import { CAMPAIGNS, etMidnightUtcMs, gameDimOf, keyEventOf, arrivalOf } from '../../src/lib/campaigns'
-import { etWallTimeMs } from '../../src/lib/etTime'
+import { etWallTimeMs, etDateFast } from '../../src/lib/etTime'
 
 const noopCache: CacheLike = { match: async () => undefined, put: async () => {} }
 
@@ -190,6 +191,36 @@ describe('arrival / keyEvent SQL (the Overall timeline series filters)', () => {
     expect(got).toEqual(['tagged', 'untagged', 'untagged', ''])
     expect(arrivalOf('new', android.id)).toBe('tagged')
     expect(arrivalOf('returning', android.id)).toBe('')
+  })
+})
+
+describe("dateEt — US-Eastern day buckets in SQL, matching the BSK code's own ET days", () => {
+  const Z = (iso: string) => Date.parse(iso)
+  it('splits at ET midnight, not UTC midnight (EDT: 04:00Z)', () => {
+    const rows: Row[] = ['2026-09-27T03:59:59.999Z', '2026-09-27T04:00:00.000Z', '2026-09-26T23:30:00Z', '2026-09-27T00:30:00Z'].map((iso) => ({ ts: Z(iso) }))
+    expect(exprValues('dateEt', rows)).toEqual(['2026-09-26', '2026-09-27', '2026-09-26', '2026-09-26'])
+  })
+  it('splits at 05:00Z in winter (EST)', () => {
+    const rows: Row[] = ['2026-12-15T04:59:59Z', '2026-12-15T05:00:00Z'].map((iso) => ({ ts: Z(iso) }))
+    expect(exprValues('dateEt', rows)).toEqual(['2026-12-14', '2026-12-15'])
+  })
+  it('agrees with etDateFast and etDateFromMs hour by hour across both 2026 DST transition days', () => {
+    const rows: Row[] = []
+    for (const day of ['2026-03-07T00:00:00Z', '2026-10-31T00:00:00Z']) {
+      for (let h = 0; h < 72; h++) rows.push({ ts: Z(day) + h * 3_600_000 + 1234 })
+    }
+    const got = exprValues('dateEt', rows)
+    expect(got).toEqual(rows.map((r) => etDateFast(r.ts)))
+    expect(got).toEqual(rows.map((r) => etDateFromMs(r.ts)))
+    // 2026-11-01 lasts 25 hours in ET (04:00Z to 05:00Z the next day), 2026-03-08 only 23.
+    expect(got.filter((d) => d === '2026-11-01')).toHaveLength(25)
+    expect(got.filter((d) => d === '2026-03-08')).toHaveLength(23)
+  })
+  it('dateEt is a trend bucket: never a ring and never a filter', async () => {
+    expect(RING_EXCLUDED_DIMS.has('dateEt')).toBe(true)
+    insert({ ts: LIVE, path: '/' })
+    const { calls } = await post({ dimension: 'device', constraints: [{ field: 'dateEt', value: '2026-09-26' }], ...range })
+    expect(calls[0].binds).not.toContain('2026-09-26')
   })
 })
 

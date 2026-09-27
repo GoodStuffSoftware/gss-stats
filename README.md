@@ -52,7 +52,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   chart** (see *Line charts* below) with five series — page views and tagged arrivals on the left
   axis, auth successes, installs and raw install signals on the right — over the page's date
   range and Best Sudoku sites, with campaign-flight bands, release markers and go-live markers
-  on. Its day buckets are UTC days, like every other beacon trend chart.
+  on. It buckets by **US-Eastern day** (the `dateEt` beacon dimension, "Date (trend, ET)":
+  DST-aware, the same days as `etDateFast` and the flight bands and markers), where the plain
+  `date` dimension is a UTC day.
   [`src/lib/releases.ts`](src/lib/releases.ts) holds the hand-entered release dates (`hits` has
   no app-version column; major releases get a labelled line, minor ones a short tick).
   "Best Sudoku · Campaigns" (dataset `campaigns`; see

@@ -18,7 +18,7 @@ import {
   CAMPAIGN_OPTIONS,
   BAR_MODES,
 } from '../lib/catalog'
-import { ringDims, RING_SOFT_CAP } from '../lib/rings'
+import { ringDims, RING_SOFT_CAP, isDateDim } from '../lib/rings'
 import { noteOptions, defaultNoteIdsForScope, type NoteScope } from '../lib/notes'
 
 const props = defineProps<{ widget: Widget; isNew: boolean }>()
@@ -172,7 +172,7 @@ function ringOptionsFor(idx: number) {
   const used = new Set(ringDims(draft))
   const current = draft.rings?.[idx]
   if (current) used.delete(current) // keep this ring's own current value selectable
-  return dimOptions.value.filter((d) => d.key !== 'date' && !used.has(d.key))
+  return dimOptions.value.filter((d) => !isDateDim(d.key) && !used.has(d.key))
 }
 const canAddRing = computed(() => ringOptionsFor((draft.rings ?? []).length).length > 0)
 const totalRingCount = computed(() => ringDims(draft).length)
@@ -198,9 +198,9 @@ function moveRing(idx: number, dir: -1 | 1) {
 
 // ── Line/area charts on a date axis: overlay toggles, and (beacon data) a series list — each
 // series its own date query narrowed by one filter, on the left or right axis. ─────────────────
-const isDateLine = computed(() => (draft.type === 'line' || draft.type === 'area') && draft.dimension === 'date')
+const isDateLine = computed(() => (draft.type === 'line' || draft.type === 'area') && isDateDim(draft.dimension))
 const canUseSeries = computed(() => isDateLine.value && isGeo.value)
-const SERIES_FIELDS = GEO_DIMENSIONS.filter((d) => d.key !== 'date')
+const SERIES_FIELDS = GEO_DIMENSIONS.filter((d) => !isDateDim(d.key))
 function addSeries() {
   const list: LineSeries[] = (draft.series ??= [])
   list.push({ label: `Series ${list.length + 1}`, axis: 'left', style: 'solid' })
@@ -290,7 +290,7 @@ function save() {
   // blanks/duplicates/'date') and clear them entirely otherwise.
   if (draft.type === 'nestedDoughnut' && draft.breakdown) {
     const rings = (draft.rings ?? []).filter(
-      (r, i, arr) => r && r !== 'date' && r !== draft.dimension && r !== draft.breakdown && arr.indexOf(r) === i,
+      (r, i, arr) => r && !isDateDim(r) && r !== draft.dimension && r !== draft.breakdown && arr.indexOf(r) === i,
     )
     draft.rings = rings.length ? rings : undefined
   } else {
@@ -634,6 +634,18 @@ h2 {
 .field textarea {
   font-family: inherit;
   resize: vertical;
+}
+/* A checkbox keeps its own size, directly left of its label text (the full-width rule above
+   stretched it and pushed the text far to the right); the whole label stays the click target. */
+.field input[type='checkbox'] {
+  width: auto;
+  flex: none;
+  margin: 0;
+}
+.field.check label,
+.campaign-row {
+  justify-content: flex-start;
+  text-align: left;
 }
 .campaign-list {
   display: flex;
