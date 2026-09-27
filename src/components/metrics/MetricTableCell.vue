@@ -9,7 +9,7 @@ import type { MetricItem, MetricsContext } from '../../lib/metrics/types'
 import MetricLabel from './MetricLabel.vue'
 
 const props = defineProps<{ item: MetricItem; scope: ScopeInstance; todayEt: string; context?: MetricsContext }>()
-const vm = useMetricItemViewModel(props.item, props.scope, props.context, props.todayEt)
+const vm = useMetricItemViewModel(props.item, props.scope, () => props.context, props.todayEt)
 </script>
 
 <template>

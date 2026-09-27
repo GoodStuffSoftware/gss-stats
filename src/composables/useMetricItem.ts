@@ -5,13 +5,13 @@
 // synchronously in THEIR OWN component's setup() — each v-for'd cell/row is a real component
 // instance with its own effect scope, so onScopeDispose cleanup (see useMetrics.ts) applies to
 // each one independently.
-import { computed, type ComputedRef } from 'vue'
+import { computed, type ComputedRef, type MaybeRefOrGetter } from 'vue'
 import { useMetrics } from './useMetrics'
 import { buildRequestSpec, type ScopeInstance } from '../lib/metrics/scope'
 import { itemViewModel, type ItemViewModel } from '../lib/metrics/render'
 import type { MetricItem, MetricsContext } from '../lib/metrics/types'
 
-export function useMetricItemViewModel(item: MetricItem, scope: ScopeInstance, context: MetricsContext | undefined, todayEt: string): ComputedRef<ItemViewModel> {
+export function useMetricItemViewModel(item: MetricItem, scope: ScopeInstance, context: MaybeRefOrGetter<MetricsContext | undefined>, todayEt: string): ComputedRef<ItemViewModel> {
   const { request } = useMetrics(context)
   const spec = buildRequestSpec(item, scope)
   const valueRef = spec ? request(spec) : undefined
