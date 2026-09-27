@@ -21,6 +21,12 @@ All notable changes to **gss-stats** are documented here. The format follows
   missing), and its cost per arrival and per auth success; "Refresh data" is still above the
   cards. A cost over fewer than 5 arrivals or sign-ins now says "too few to report", and the
   spend-only Play-direct card no longer shows two costs it can never have.
+- **The funnel per campaign is a metric card.** Each beacon-tracked campaign keeps its tagged
+  hits against its arrivals, its raw install signals, every funnel step as a bar, and the two
+  valid rates (accept of asks, install of prompts shown after the fix). The install-fix caveat
+  moved into the card's Notes, and the bars use the cards' standard colour. The upsell-fix
+  segment table (pre-fix and post-fix tagged upsell) now lives on this card and appears by
+  itself once that fix ships.
 
 ## [0.11.0] — 2026-09-27
 

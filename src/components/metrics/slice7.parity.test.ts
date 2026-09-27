@@ -35,6 +35,22 @@
 //   C2  A cost over fewer than MIN_COHORT arrivals or sign-ins reads "too few to report" (the
 //       registry gates every cost like every rate); the old endpoint returned no value, "—".
 //   A2  The "Refresh data" button is the card's action, above the cards, as before.
+//
+// Funnel per campaign (campaigns 'funnel' → preset campaign-funnel):
+//   F1  "tagged hits: 180 (vs 50 arrivals)" reads "Tagged hits vs arrivals: 180 hits · 50 arrivals".
+//   F2  The install step's label no longer carries the install-fix caveat in brackets; the
+//       caveat is in the card's Notes. The two rate lines are pills: "Accept of asks: 26.7%
+//       (4/15)" for "26.7% of previous step (4/15)", and "Install of prompts shown post-fix".
+//   F3  Each campaign's own colour (its dot and its bars) is the cards' standard bar colour, and
+//       a bar's length is relative to the card's largest SHOWN step (the old one counted
+//       omitted steps too).
+//   D1  The retest's install rate: the registry counts prompts from the install fix row-exactly
+//       (denominator 9), /api/campaigns by hour (4) — as in the scorecard.
+//   D2  The active retest's not-yet-seen accept step: old "not instrumented" (count and rate),
+//       new its live count 0 and "0.0% (0/6)".
+//   M1  The upsell-fix segment table moved here from the flight-day panel (that panel is a
+//       standard chart now); it stays hidden until lib/adsRules.ts UPSELL_SIGNEDOUT_FIX_AT is
+//       set — slice7.upsell.test.ts sets it and compares both.
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import MetricCard from './MetricCard.vue'
@@ -334,5 +350,88 @@ describe('campaign-cost ≡ the bespoke cost panel', () => {
     // The fixture exercises both sources and a real cost.
     expect(newCards.map((c) => c.rows.get('Source'))).toEqual(expect.arrayContaining(['Ads API', 'hand-entered']))
     expect(newCards.some((c) => /^\$\d+\.\d{2}$/.test(c.rows.get('Per arrival') ?? ''))).toBe(true)
+  })
+})
+
+describe('campaign-funnel ≡ the bespoke funnel panel', () => {
+  interface Col {
+    status: string
+    lines: string[]
+    steps: Map<string, { count: string; rate: string }>
+  }
+  function oldFunnel(w: VueWrapper): Map<string, Col> {
+    return new Map(
+      w.findAll('.funnel-col').map((c) => [
+        text(c.find('.fc-label').element),
+        {
+          status: text(c.find('.fc-status').element),
+          lines: c.findAll('.tagged-hits').map((l) => text(l.element)),
+          steps: new Map(
+            c.findAll('.funnel-step').map((st) => [
+              text(st.find('.fs-label').element).replace(/ \(.*\)$/, ''),
+              { count: text(st.find('.fs-count').element), rate: st.find('.fs-rate').exists() ? text(st.find('.fs-rate').element) : '' },
+            ]),
+          ),
+        },
+      ]),
+    )
+  }
+
+  it('same beacon campaigns, status, counts and valid rates, except F1-F3, D1, D2', async () => {
+    const old = oldFunnel(await mountOldCampaigns('funnel'))
+    const card = await mountCard('campaign-funnel', FIXTURE_NOW)
+    const cards = new Map(card.findAll('.metric-card').map((c) => [text(c.find('.mc-title').element), c]))
+    expect([...cards.keys()]).toEqual([...old.keys()]) // the spend-only campaign is in neither
+    expect(old.size).toBe(2)
+    const seen = new Set<string>()
+    for (const [title, o] of old) {
+      const c = cards.get(title)!
+      expect(text(c.find('.mc-badge').element), title).toBe(o.status)
+      const sections = c.findAll('.metric-section')
+      const rowsOf = (i: number) => new Map(sections[i].findAll('.mi-row').map((r) => [text(r.find('.mi-label').element), text(r.find('.mi-value').element)]))
+      const top = rowsOf(0)
+      // F1: the tagged-hits line, as counts.
+      const hits = /^tagged hits: ([\d,]+) \(vs ([\d,]+) arrivals\)$/.exec(o.lines[0])!
+      expect(top.get('Tagged hits vs arrivals'), title).toBe(`${hits[1]} hits · ${hits[2]} arrivals`)
+      seen.add('F1')
+      expect(`${[...top.keys()][1]}: ${top.get([...top.keys()][1])}`, title).toBe(o.lines[1])
+      const bars = rowsOf(1)
+      for (const [label, st] of o.steps) {
+        if (st.count === 'not instrumented') {
+          expect(c.find('.mc-badge').text(), `${title} ${label}: D2 only on an active flight`).toBe('active')
+          expect(bars.get(label), `${title} ${label}: D2`).toBe('0')
+          seen.add('D2')
+        } else {
+          expect(bars.get(label), `${title} ${label}`).toBe(st.count)
+        }
+      }
+      expect([...bars.keys()], `${title}: no step appears that the old view omitted`).toEqual([...o.steps.keys()])
+      const pills = new Map(c.findAll('.mi-pill').map((p) => [text(p.element).slice(0, text(p.element).indexOf(':')), text(p.element).slice(text(p.element).indexOf(':') + 1).trim()]))
+      for (const [label, st] of o.steps) {
+        if (!st.rate) continue
+        const pill = label === 'Accept' ? 'Accept of asks' : 'Install of prompts shown post-fix'
+        const got = pills.get(pill)
+        seen.add('F2')
+        if (st.rate === 'not instrumented') {
+          expect(got, `${title}: D2`).toBe('0.0% (0/6)')
+          continue
+        }
+        const m = /^(.*?) of (previous step|prompts shown post-fix) \((\d+)\/(\d+)\)$/.exec(st.rate)!
+        if (label === 'Install' && got !== `${m[1]} (${m[3]}/${m[4]})`) {
+          expect([st.rate, got], `${title}: D1`).toEqual(['too few to report of prompts shown post-fix (2/4)', '22.2% (2/9)'])
+          seen.add('D1')
+          continue
+        }
+        expect(got, `${title} ${label}`).toBe(`${m[1]} (${m[3]}/${m[4]})`)
+      }
+      expect(c.findAll('.mi-bar-fill').length).toBe(bars.size) // F3: a bar per shown step
+    }
+    expect([...seen].sort()).toEqual(['D1', 'D2', 'F1', 'F2'])
+  })
+
+  it('M1: with the upsell fix unset, no card shows a segment table', async () => {
+    const card = await mountCard('campaign-funnel', FIXTURE_NOW)
+    expect(card.findAll('.metric-section.layout-table')).toHaveLength(0)
+    expect(card.text()).not.toMatch(/upsell fix/)
   })
 })
