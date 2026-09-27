@@ -294,15 +294,29 @@ describe('release-before-after ≡ the bespoke release panel', () => {
 describe('the Pop-ups page panels ≡ their /api/popups renderings', () => {
   const filters = { ...defaultFilters(), siteSel: [...BEST_SUDOKU_SITES], since: '2026-09-20T04:00:00.000Z', until: '2026-09-27T04:00:00.000Z', rangeRel: '', excludeOwnVisits: true, ownBrowser: 'Opera', ownOS: 'Windows' }
 
-  it('popup-rates: every old rate row, same label, same rate and n/d (L2), the install caveat in Notes (N3)', async () => {
+  it('popup-rates: every old rate row, same label, same rate and n/d (L2), the install caveat in Notes (N3), PLUS the new signed-in/returned/still-playing count tiles (A2, review round 2026-09-27)', async () => {
     const oldRows = fromGolden<{ label: string; value: string; note: string }[]>('popups.rateTable')
     expect(oldRows.length).toBe(6)
     const card = await mountCard('popup-rates', FIXTURE_NOW, { since: filters.since, until: filters.until, sites: [...BEST_SUDOKU_SITES], excludeOwnVisits: true, ownBrowser: 'Opera', ownOS: 'Windows' })
     const newRows = [...rows(card)].map(([label, value]) => ({ label, value }))
-    expect(newRows).toEqual(oldRows.map(({ label, value }) => ({ label, value })))
+    // The original 6 rate rows are byte-for-byte unchanged (parity with the retired panel).
+    expect(newRows.slice(0, 6)).toEqual(oldRows.map(({ label, value }) => ({ label, value })))
     // Real rates, a zero one, and the owner's own taps left out on both sides (4/11, not 7/14).
     expect(newRows.find((r) => r.label.startsWith('Upsell'))!.value).toBe('36.4% (4/11)')
     expect(newRows.some((r) => r.value.startsWith('0.0% ('))).toBe(true)
+    // New: signed-in/returned/still-playing, one row per pop-up, appended after the 6 rate rows.
+    // A count, never a rate (these are lagged cohorts — see presets.ts's comment); an explicit
+    // "0" where a pop-up had no rows this range (never blank), and "not yet tracking" for
+    // first50-congrats (POPUPS.noOutcomeTracking — a product decision, not a gap).
+    expect(newRows.length).toBe(6 + 5 * 3) // 5 pop-ups x {signed-in, returned, still-playing}
+    const byLabel = new Map(newRows.map((r) => [r.label, r.value]))
+    expect(byLabel.get('First 50 congrats — signed in')).toBe('not yet tracking')
+    expect(byLabel.get('First 50 congrats — returned')).toBe('not yet tracking')
+    expect(byLabel.get('First 50 congrats — still playing')).toBe('not yet tracking')
+    expect(byLabel.get('Sign-in prompt — signed in')).toBe('1') // a real, nonzero count
+    expect(byLabel.get('Upsell — returned')).toBe('1') // a real, nonzero count
+    expect(byLabel.get('First 50 promo — signed in')).toBe('0') // explicit zero, never blank
+    expect(byLabel.get('Install prompt — still playing')).toBe('0') // explicit zero, never blank
     // N3: the old inline caveat, now a Notes line for the installed rate.
     const oldNote = oldRows.find((r) => r.label.startsWith('Install prompt — installed'))!.note
     expect(oldNote).toMatch(/install fix/i)

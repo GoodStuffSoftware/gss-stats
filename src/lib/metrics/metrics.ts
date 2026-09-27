@@ -13,6 +13,7 @@
 
 import {
   CAMPAIGN_SPEND,
+  authSuccessRow,
   classifyFunnelPath,
   isAuthSuccessBase,
   isInstallPromptInstalled,
@@ -36,7 +37,7 @@ import {
   type PopupEvent,
 } from '../popupEvents'
 import { isEventPath, isPopupAccept, isPopupShown, isReturnD1Plus } from '../overview'
-import { resolveCampaignSpend, UPSELL_SIGNEDOUT_FIX_AT, type SpendSummary } from '../adsRules'
+import { resolveCampaignSpend, UPSELL_SIGNEDOUT_FIX_AT, AUTH_NEW_EXISTING_LIVE_AT, type SpendSummary } from '../adsRules'
 import { freshnessOf, spendThroughFromRows } from '../adsFreshness'
 import type { BeaconRow, FactId, FactRows } from './facts'
 import { etMidnightMs, type InstrumentationRule } from './instrumentation'
@@ -120,6 +121,13 @@ const GAME_COMPLETE: InstrumentationRule = { kind: 'liveAt', atMs: GAME_COMPLETE
 const INSTALL_FIX: InstrumentationRule = { kind: 'unmeasuredBefore', atMs: INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, source: 'INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS', noteId: 'install-fix-note' }
 const RAW_DEDUPE: InstrumentationRule = { kind: 'annotateAt', atMs: RAW_INSTALL_DEDUPE_LIVE_AT_UTC_MS, noteId: 'raw-install-dedupe' }
 const AUTH_ERROR_REDIRECT: InstrumentationRule = { kind: 'liveOnEtDate', dateEt: AUTH_ERROR_REDIRECT_LIVE_AT_ET, source: 'AUTH_ERROR_REDIRECT_LIVE_AT_ET' }
+// v1.95.5 (live 2026-09-26T19:43:02Z, the same instant as GAME_COMPLETE above): the new/
+// existing/unknown split that rides alongside every base /auth/success/<provider> row (lib/
+// adsRules.ts AUTH_NEW_EXISTING_LIVE_AT — the canonical source; see that constant's own doc
+// comment for why it lives there and not in lib/popupEvents.ts). A custom noteId because the
+// go-live is known to the SECOND (not just the ET calendar day AUTH_ERROR_REDIRECT above uses),
+// so the note carries the precise ET clock time (lib/notes.ts 'auth-new-existing-note').
+const AUTH_NEW_EXISTING: InstrumentationRule = { kind: 'liveAt', atMs: AUTH_NEW_EXISTING_LIVE_AT, source: 'AUTH_NEW_EXISTING_LIVE_AT', noteId: 'auth-new-existing-note' }
 /** The signed-out upsell fix as a funnel segment boundary: a pre/post-fix window exists only
  * once it is set and falls inside the campaign's flight (lib/adsRules.ts campaignSegmentMarker). */
 const UPSELL_BOUNDARY: InstrumentationRule = { kind: 'boundaryInFlight', atMs: UPSELL_SIGNEDOUT_FIX_AT, source: 'UPSELL_SIGNEDOUT_FIX_AT' }
@@ -309,6 +317,15 @@ export const METRIC_DEFS: MetricDef[] = [
   bskMetric({ id: 'bsk.popupShown', unit: 'showing', path: isPopupShown, instrumented: [TRACKING] }),
   bskMetric({ id: 'bsk.popupAccepts', unit: 'showing', subsetOf: 'bsk.popupShown', path: isPopupAccept, instrumented: [TRACKING] }),
   bskMetric({ id: 'bsk.authSuccess', unit: 'signin', path: isAuthSuccessBase, windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [] }),
+  // The new/existing/unknown split (A2, review round 2026-09-27): the exact sign-up count the
+  // current ad flight is judged on ('new'), plus existing sign-ins and the small unknown/old-
+  // client remainder. Gated on AUTH_NEW_EXISTING (the 19:43:02Z go-live) so a range reaching
+  // back before it reads "counted from 2026-09-26 15:43 ET" instead of a false zero — the base
+  // bsk.authSuccess metric above predates this split and stays ungated (it counts every sign-in
+  // regardless of whether the status row rode alongside it).
+  bskMetric({ id: 'bsk.authSuccessNew', unit: 'signin', path: (p) => authSuccessRow(p) === 'new', windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [AUTH_NEW_EXISTING] }),
+  bskMetric({ id: 'bsk.authSuccessExisting', unit: 'signin', path: (p) => authSuccessRow(p) === 'existing', windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [AUTH_NEW_EXISTING] }),
+  bskMetric({ id: 'bsk.authSuccessUnknown', unit: 'signin', path: (p) => authSuccessRow(p) === 'unknown', windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [AUTH_NEW_EXISTING] }),
   // v1.89.0 (live 2026-09-22): sign-in FAILURES (/auth/error/<slug>, any slug) and the
   // popup-to-redirect fallback (/auth/redirect/<provider>) — see lib/popupEvents.ts
   // AUTH_ERROR_REDIRECT_LIVE_AT_ET. Gated (unlike bsk.authSuccess above, which predates this

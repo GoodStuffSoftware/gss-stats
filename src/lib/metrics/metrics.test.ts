@@ -7,6 +7,7 @@ import { PATH_FAMILY_UNIT, UNITS, unitLabelId } from './units'
 import { NOTES_REGISTRY } from '../notes'
 import { PATH_FAMILY_OPTIONS, pathFamilyOf, POPUPS } from '../popupEvents'
 import { campaignById, type CampaignFlight } from '../campaigns'
+import { AUTH_NEW_EXISTING_LIVE_AT } from '../adsRules'
 import type { BeaconRow } from './facts'
 
 const ANDROID = campaignById('24215315197')!
@@ -64,6 +65,9 @@ describe('units key off the beacon path families (lib/popupEvents.ts)', () => {
     'bsk.installs': { path: '/popup-outcome/install-prompt/installed' },
     'bsk.authErrors': { path: '/auth/error/popup-blocked' },
     'bsk.authRedirects': { path: '/auth/redirect/google' },
+    'bsk.authSuccessNew': { path: '/auth/success/google/new' },
+    'bsk.authSuccessExisting': { path: '/auth/success/email/existing' },
+    'bsk.authSuccessUnknown': { path: '/auth/success/google/unknown' },
     'popup.shown': { path: '/signin-prompt/streak', params: { popup: 'signin-prompt' } },
     'popup.outcomeReturned': { path: '/popup-outcome/upsell/returned', params: { popup: 'upsell' } },
     'popup.eligibleEarned': { path: '/signin-eligible/earned' },
@@ -77,6 +81,9 @@ describe('units key off the beacon path families (lib/popupEvents.ts)', () => {
   const EXCEPTIONS: Record<string, string> = {
     'campaign.authSuccess': 'signin',
     'bsk.authSuccess': 'signin',
+    'bsk.authSuccessNew': 'signin',
+    'bsk.authSuccessExisting': 'signin',
+    'bsk.authSuccessUnknown': 'signin',
     'campaign.rawInstallSignals': 'row',
     'bsk.rawInstallSignals': 'row',
     'bsk.returnsD1plus': 'row',
@@ -116,6 +123,32 @@ describe('the catalog', () => {
     const auth = METRICS.get('bsk.authSuccess')!
     expect(rowMatcher(auth, ctxFor())(row('/auth/success/google'))).toBe(true)
     expect(rowMatcher(auth, ctxFor())(row('/auth/success/google/new'))).toBe(false)
+  })
+  // A2 (review round 2026-09-27): the new/existing/unknown split rides alongside the base
+  // auth-success row (never in place of it) — mutually exclusive from each other AND from the
+  // base bsk.authSuccess metric, gated on its own go-live (AUTH_NEW_EXISTING_LIVE_AT,
+  // lib/adsRules.ts), never the base metric's ungated rule.
+  it('new/existing/unknown are mutually exclusive, and exclusive of the base auth-success row', () => {
+    const newM = METRICS.get('bsk.authSuccessNew')!
+    const existingM = METRICS.get('bsk.authSuccessExisting')!
+    const unknownM = METRICS.get('bsk.authSuccessUnknown')!
+    const base = METRICS.get('bsk.authSuccess')!
+    const ctx = ctxFor()
+    expect(rowMatcher(newM, ctx)(row('/auth/success/google/new'))).toBe(true)
+    expect(rowMatcher(newM, ctx)(row('/auth/success/google/existing'))).toBe(false)
+    expect(rowMatcher(newM, ctx)(row('/auth/success/google'))).toBe(false) // the base row itself
+    expect(rowMatcher(existingM, ctx)(row('/auth/success/email/existing'))).toBe(true)
+    expect(rowMatcher(existingM, ctx)(row('/auth/success/email/new'))).toBe(false)
+    expect(rowMatcher(unknownM, ctx)(row('/auth/success/google/unknown'))).toBe(true)
+    expect(rowMatcher(unknownM, ctx)(row('/auth/success/google/new'))).toBe(false)
+    expect(rowMatcher(base, ctx)(row('/auth/success/google/new'))).toBe(false) // never double-counted
+  })
+  it('new/existing/unknown are gated on AUTH_NEW_EXISTING_LIVE_AT, never the base metric\'s ungated rule', () => {
+    for (const id of ['bsk.authSuccessNew', 'bsk.authSuccessExisting', 'bsk.authSuccessUnknown']) {
+      const rules = rulesOf(METRICS.get(id)!, ctxFor())
+      expect(rules, id).toEqual([{ kind: 'liveAt', atMs: AUTH_NEW_EXISTING_LIVE_AT, source: 'AUTH_NEW_EXISTING_LIVE_AT', noteId: 'auth-new-existing-note' }])
+    }
+    expect(rulesOf(METRICS.get('bsk.authSuccess')!, ctxFor())).toEqual([]) // predates the split, stays ungated
   })
   it('first50-congrats has no outcome tracking: its outcome metrics are never live', () => {
     for (const id of ['popup.outcomeSignedIn', 'popup.outcomeInstalled', 'popup.outcomeReturned', 'popup.outcomeStillPlaying']) {
