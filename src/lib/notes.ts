@@ -413,6 +413,8 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.card.invalid': "This card's saved settings could not be read, so it can't be shown. Edit it or restore the default charts.",
     'label.card.openCampaigns': 'Open the Campaigns page',
     'label.card.release': 'Release',
+    'label.card.perArrival': 'Per arrival',
+    'label.card.perAuthSuccess': 'Per auth success',
     'label.card.popupTapRate': '{popup} — tap rate (accept / shown)',
     'label.card.installedRateFromFix': 'Install prompt — installed rate (from the install fix on)',
     'label.card.eligible.earned': 'earned',
@@ -432,6 +434,8 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.preset.popup-rates.description': 'Each pop-up\'s tap rate, and the install prompt\'s installed rate from the install fix on, each with its counts.',
     'label.preset.signin-eligibility': 'Sign-in eligibility',
     'label.preset.signin-eligibility.description': 'Signed-out finishes that earned a sign-in ask, hit the cap, or did not earn one, and the eligibility rate.',
+    'label.preset.campaign-cost': 'Campaign cost',
+    'label.preset.campaign-cost.description': 'One card per campaign: spend, where it came from and how fresh it is, and the cost per arrival and per auth success.',
     'label.preset.release-before-after.description': 'The latest dated release: page views, tagged arrivals, auth successes and installs over the same number of days before and after it.',
   }),
 })

@@ -10,7 +10,7 @@ import { validateCard } from './validate'
 import type { CardSpec, Label, MetricItem } from './types'
 
 /** Every preset id: slice 5's two, and slice 7's (the panels they replaced). */
-const PRESET_IDS = ['bsk-kpis', 'campaign-scorecard', 'release-before-after', 'popup-rates', 'signin-eligibility'] as const
+const PRESET_IDS = ['bsk-kpis', 'campaign-scorecard', 'release-before-after', 'popup-rates', 'signin-eligibility', 'campaign-cost'] as const
 const items = (spec: CardSpec): MetricItem[] => spec.sections.flatMap((s) => s.items)
 const labelNoteIds = (l: Label | undefined): string[] => (l && typeof l === 'object' && 'note' in l ? [l.note] : [])
 
@@ -65,7 +65,9 @@ describe('presets', () => {
   it('the KPI tiles show freshness in the header, and every caveat-carrying item hands it to the card notes', () => {
     expect(BSK_KPIS.showUpdated).toBe('header')
     for (const spec of Object.values(PRESETS)) {
-      for (const it of items(spec)) if (!('field' in it.data)) expect(it.captionMode, it.id).toBe('compact')
+      // The one deliberate exception: the cost card's "stale — sync pending" line stays visible
+      // under the spend-through date, as the old freshness line showed it.
+      for (const it of items(spec)) if (!('field' in it.data) && !(spec === PRESETS['campaign-cost'] && it.id === 'through')) expect(it.captionMode, it.id).toBe('compact')
     }
   })
 

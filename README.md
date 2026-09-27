@@ -465,9 +465,10 @@ Today's still-open day is never stored. The Ads client (plain `fetch`) and the s
 are runtime-agnostic, so the local routines and the Worker run the same code; whichever runs
 second finds nothing to write.
 
-The campaigns page and the readings widget show **"Spend through &lt;date&gt; · synced
-&lt;relative time&gt;"** per campaign (`spendThrough`, `lastSync` from `/api/campaigns` and
-`/api/ads/readings`), and **"stale — sync pending"** when a flight day that should be stored
+The campaigns page's cost card (preset `campaign-cost`: registry metrics `campaign.spendThrough`
+and `campaign.lastSync` over the facts `adsCoverage` and `adsLastSync`, the same two reads) and
+the readings widget (`/api/ads/readings`) show **"Spend through &lt;date&gt;"** and **"synced
+&lt;relative time&gt;"** per campaign, and **"stale — sync pending"** when a flight day that should be stored
 by now is missing: yesterday from 09:30 ET (the 08:00 ET morning read has synced by then),
 otherwise the day before. A sync run that claimed and never finished (killed mid-run, e.g. by
 a CPU limit) shows as a **"Sync alert"** line in the readings widget once it is 15 minutes old

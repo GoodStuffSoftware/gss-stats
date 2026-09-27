@@ -327,7 +327,8 @@ export function unmeasuredByConfig(binding: DataBinding, scope: ScopeInstance): 
   for (const def of sides) {
     if (!def || !def.params.includes('campaignId') || resolved.params.campaignId !== campaign.id) continue
     const fact = def.windows[window]
-    if (campaign.flightStart === null && fact !== 'adsSpend') return true
+    // The ads store's reads (spend and its freshness) need no flight date, only a campaign.
+    if (campaign.flightStart === null && fact !== 'adsSpend' && fact !== 'adsCoverage' && fact !== 'adsLastSync') return true
     const rules = rulesOf(def, { params: resolved.params, campaign, window: window as never })
     if (campaign.measurement === 'spend-only' && rules.some((r) => r.kind === 'beaconMeasurable')) return true
   }

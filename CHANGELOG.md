@@ -16,6 +16,11 @@ All notable changes to **gss-stats** are documented here. The format follows
   same valid rates with their counts ("36.4% (4/11)"), with the install-fix caveat in its Notes;
   the eligibility panel shows earned, capped and unearned as bars and adds the eligibility rate
   under them. Both still follow the page's range, sites and "hide my own visits".
+- **The campaign cost panel is a metric card.** Each campaign keeps its spend, where the spend
+  came from, how far it is stored and when it last synced ("stale — sync pending" when a day is
+  missing), and its cost per arrival and per auth success; "Refresh data" is still above the
+  cards. A cost over fewer than 5 arrivals or sign-ins now says "too few to report", and the
+  spend-only Play-direct card no longer shows two costs it can never have.
 
 ## [0.11.0] — 2026-09-27
 
