@@ -92,12 +92,18 @@
 //   Numbers: the /api/geo rows against /api/campaigns' own hourOfDayEt and daily series, per
 //   campaign, per hour and per flight day, plus the running totals, with rows on both DST
 //   changes and at the retest's 12:00 ET attribution start — no difference.
-//   Range: both charts read "since first campaign" (ET midnight of the earliest flight start to
-//       now, a window that grows), so, like /api/campaigns, nothing past a flight's attribution
-//       start ever drops off; checked below two years on, against the same golden.
-//   Series: every beacon-tracked campaign with a start date, a campaign with no arrivals at 0
-//       (in the legend, and in the tooltip), as on the old charts; the flight-day axis runs to
-//       the longest of those flights whether or not it has rows (lib/breakdownBar.test.ts).
+//   Range: both charts read "since first campaign" (ET midnight of the earliest flight start), so,
+//       like /api/campaigns, nothing past a flight's attribution start ever drops off; checked
+//       below two years on, against the same golden. They differ at the OTHER end (v0.12.1,
+//       lib/range.ts): hour-of-day always ends "now"; flight-day ends "until last campaign ends"
+//       instead — a fixed instant once every flight is over, so its range (and cache key) stops
+//       growing on every load, and "now" only while any flight is open-ended or still running
+//       (range.test.ts covers the 2026-10-02 retest-end transition).
+//   Series: every beacon-tracked campaign, a campaign with no arrivals — including one with no
+//       start date yet, which can never be attributed any rows — at 0 (in the legend, and in the
+//       tooltip), as on the old charts and as the funnel/country cards already draw it; the
+//       flight-day axis runs to the longest of those flights whether or not it has rows
+//       (lib/breakdownBar.test.ts).
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import MetricCard from './MetricCard.vue'
@@ -648,12 +654,41 @@ describe('the campaign arrivals charts ≡ their bespoke panels', () => {
     expect(neu.data.labels).toHaveLength(8) // Day 1 to the longest flight (Android, 8 days)
   })
 
+  it('a beacon-tracked campaign with no start date yet still gets a series, drawn at 0, on both charts', async () => {
+    const retest = CAMPAIGNS.find((c) => c.id === '24279250691')!
+    const pending = { ...retest, id: '99999999999', label: 'Upcoming test flight', status: 'upcoming' as const, flightStart: null, flightStartTimeEt: undefined }
+    CAMPAIGNS.push(pending)
+    try {
+      const [hour] = await mountNewChart(hourOfDayWidget({ x: 0, y: 0, w: 12, h: 8 }))
+      const hourSeries = new Map(series(hour))
+      expect([...hourSeries.keys()], 'hour-of-day legend').toContain(pending.label)
+      expect(hourSeries.get(pending.label)).toEqual(Array(24).fill(0))
+
+      const [day] = await mountNewChart(flightDayWidget({ x: 0, y: 0, w: 12, h: 10 }))
+      const dayDaily = day.data.datasets.filter((d) => (d as { yAxisID?: string }).yAxisID === 'y')
+      const pendingLine = dayDaily.find((d) => d.label === pending.label)
+      expect(pendingLine, 'flight-day legend').toBeTruthy()
+      // flightLength (lib/charts.ts) is 0 for a flight with no start, so it never stretches the
+      // axis: still Day 1 to the longest DATED flight (Android, 8 days), all zeros for pending.
+      expect(day.data.labels).toHaveLength(8)
+      expect(pendingLine!.data).toEqual(Array(8).fill(0))
+    } finally {
+      CAMPAIGNS.splice(CAMPAIGNS.indexOf(pending), 1)
+    }
+  })
+
   it('two years on, both charts still count every arrival since the first flight began', async () => {
     const later = Date.parse('2028-09-26T21:00:00Z')
     vi.setSystemTime(later)
     const hourW = hourOfDayWidget({ x: 0, y: 0, w: 12, h: 8 })
     const dayW = flightDayWidget({ x: 0, y: 0, w: 12, h: 10 })
     expect(hourW.filters!.since).toBe('2026-09-02T04:00:00.000Z')
+    expect(dayW.filters!.since).toBe('2026-09-02T04:00:00.000Z')
+    // The hour-of-day chart still ends "now" two years on; the flight-day chart's range has
+    // closed instead — every flight ended long ago (ET midnight of the day after the retest's
+    // 2026-10-02 end, the latest of the three) — and stays fixed there, not at `later`.
+    expect(hourW.filters!.until).toBe(new Date(later).toISOString())
+    expect(dayW.filters!.until).toBe('2026-10-03T04:00:00.000Z')
     const [hour] = await mountNewChart(hourW)
     expect(new Map(series(hour))).toEqual(new Map(mountOldChart('hourOfDay')[0].series))
     const [day] = await mountNewChart(dayW)

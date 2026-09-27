@@ -6,6 +6,22 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.12.1] — 2026-09-27
+
+### Fixed
+- **A campaign with no confirmed start date now shows on the hour-of-day and flight-day charts.**
+  It draws at zero, keeping its place in the legend, the same as it already did on the funnel and
+  country cards — a campaign no longer disappears from two of the four campaign views just because
+  its flight hasn't been scheduled yet.
+
+### Changed
+- **A newly added flight-day chart's date range stops growing once every campaign flight is
+  over.** It still starts from the first campaign, same as the hour-of-day chart, but once every
+  flight has run its course the range settles on a fixed end date instead of always reaching to
+  "now" — so its cached data stays valid for longer once nothing is still active. An existing
+  flight-day chart keeps its current range until you type "since first campaign until last
+  campaign ends" into its own date range field.
+
 ## [0.12.0] — 2026-09-27
 
 ### Changed
