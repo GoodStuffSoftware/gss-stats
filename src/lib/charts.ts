@@ -1,9 +1,13 @@
 import type { ChartConfiguration } from 'chart.js'
 import type { Widget, StatsResponse, StatsRow, Metric } from '../types'
 import { COUNTRY_NAMES } from './catalog'
-import { ringDims } from './rings'
-import { TRACKING_ACTIVATION_DATE_ET, PLAY_TRACKING_MARKER_LABEL } from './popupEvents'
-import { datedReleases } from './releases'
+import { ringDims, isDateDim } from './rings'
+import { etDateFast } from './etTime'
+import { TRACKING_ACTIVATION_DATE_ET, PLAY_TRACKING_MARKER_LABEL, POPUPS, POPUP_FAMILY_ORDER, POPUP_OUTCOME_ORDER, POPUP_OUTCOME_LABELS } from './popupEvents'
+import { GAME_COMPLETE_MODES, GAME_COMPLETE_DIFFICULTIES, CAMPAIGNS } from './campaigns'
+import { isMobileViewport } from './responsive'
+import { layoutMarkerLabels } from './markerLayout'
+import { overlayItems, layoutFlightBands, markerIndex, type OverlayItem } from './timelineOverlay'
 
 // Categorical palette: brand amber leads, with distinguishable warm/cool accents.
 export const PALETTE = [
@@ -32,6 +36,20 @@ const LINE = '#E7E2D7'
 const STABLE_COLORS: Record<string, Record<string, string>> = {
   device: { desktop: PALETTE[0], mobile: PALETTE[1], tablet: PALETTE[2], tv: PALETTE[5], bot: PALETTE[7] },
   visitor: { returning: PALETTE[0], new: PALETTE[1] },
+  // Pop-up outcomes: shown is the brand hue, then one fixed color per tap/outcome, so the same
+  // series reads the same on every breakdown chart. Install's raw signals share muted tones.
+  popupOutcome: {
+    shown: PALETTE[0],
+    accept: PALETTE[1],
+    dismiss: PALETTE[7],
+    'signed-in': PALETTE[3],
+    installed: PALETTE[9],
+    returned: PALETTE[5],
+    'still-playing': PALETTE[10],
+    'pwa-installed': PALETTE[2],
+    'standalone-detected': PALETTE[8],
+    'play-detected': PALETTE[6],
+  },
 }
 // Dimensions that read as an ordered magnitude rather than distinct categories → a single
 // brand-hue ramp (most opaque = highest, fading down the sorted list) instead of a rainbow.
@@ -250,49 +268,240 @@ export function playActivationMarkerPlugin(index: number) {
 // the chart's own plotted rows (zero-filled — see seriesRows), so the marker lands on the
 // correct category-axis INDEX, not a raw date value (the x axis here is a category axis of
 // formatted labels, not real date values — see formatKey).
-function releaseMarkersPlugin(rows: { key: { date?: string } }[]) {
-  const releases = datedReleases()
+/** The overlay switches on a date-axis line chart (release markers, go-live markers, campaign
+ * flight bands — see lib/timelineOverlay.ts). */
+export function widgetOverlayOptions(widget: Pick<Widget, 'markers' | 'goLiveMarkers' | 'flightBands'>) {
+  return { releases: widget.markers === 'releases', goLive: !!widget.goLiveMarkers, flights: !!widget.flightBands }
+}
+export function widgetHasOverlay(widget: Pick<Widget, 'markers' | 'goLiveMarkers' | 'flightBands'>): boolean {
+  const o = widgetOverlayOptions(widget)
+  return o.releases || o.goLive || o.flights
+}
+
+/** Draws a date-axis chart's overlay: shaded flight bands (labelled, one label row per overlap),
+ * dashed labelled lines for major releases and go-live moments (labels placed by
+ * layoutMarkerLabels, so close markers stagger instead of colliding, and a label that fits
+ * nowhere is dropped, not overprinted), short ticks for minor releases. Hover or tap near a
+ * marker line, or on a band's label strip, shows that item's date, name and note. `dates` are
+ * the plotted category values (YYYY-MM-DD), in order. */
+export function timelineOverlayPlugin(dates: string[], items: OverlayItem[], narrow = false) {
+  const dark = isDark()
+  const lineColor = dark ? 'rgba(240,238,233,0.45)' : 'rgba(26,23,21,0.4)'
+  const labelColor = dark ? 'rgba(240,238,233,0.8)' : 'rgba(26,23,21,0.72)'
+  const tickColor = dark ? 'rgba(240,238,233,0.3)' : 'rgba(26,23,21,0.3)'
+  const bands = layoutFlightBands(dates, items.filter((i) => i.kind === 'flight'))
+  const points = items
+    .filter((i) => i.kind !== 'flight')
+    .map((i) => ({ item: i, index: markerIndex(dates, i.date) }))
+    .filter((p) => p.index !== -1)
+  // Hit areas from the last draw, for hover/tap.
+  let hits: { x0: number; x1: number; y0: number; y1: number; item: OverlayItem }[] = []
+  let active: { item: OverlayItem; x: number; y: number } | null = null
+  const bandFlightIndex = new Map(items.filter((i) => i.kind === 'flight').map((it, n) => [it, n]))
   return {
-    id: 'releaseMarkers',
-    afterDraw(chart: any) {
+    id: 'timelineOverlay',
+    beforeDatasetsDraw(chart: any) {
       const { ctx, chartArea, scales } = chart
-      if (!chartArea || !scales?.x || !rows.length) return
-      const first = rows[0].key.date ?? ''
-      const last = rows[rows.length - 1].key.date ?? ''
+      if (!chartArea || !scales?.x) return
+      hits = []
+      const half = dates.length > 1 ? Math.abs(scales.x.getPixelForValue(1) - scales.x.getPixelForValue(0)) / 2 : 12
       ctx.save()
-      for (const r of releases) {
-        if (r.dateEt < first || r.dateEt > last) continue
-        const idx = rows.findIndex((row) => (row.key.date ?? '') >= r.dateEt)
-        if (idx === -1) continue
-        const x = scales.x.getPixelForValue(idx)
+      ctx.font = '600 9px Inter, system-ui, sans-serif'
+      for (const b of bands) {
+        const left = Math.max(chartArea.left, scales.x.getPixelForValue(b.startIndex) - half)
+        const right = Math.min(chartArea.right, scales.x.getPixelForValue(b.endIndex) + half)
+        if (right <= left) continue
+        const color = PALETTE[(bandFlightIndex.get(b.item) ?? 0) % PALETTE.length]
+        ctx.fillStyle = color + '22'
+        ctx.fillRect(left, chartArea.top, right - left, chartArea.bottom - chartArea.top)
+        // A band's name sits in a strip at its bottom edge; an open-ended band gets an arrow.
+        const y = chartArea.bottom - 4 - b.row * 11
+        const text = `${b.item.label}${b.clippedEnd && b.item.openEnded ? ' →' : ''}`
+        let shown = text
+        const room = right - left - 6
+        while (shown.length > 1 && ctx.measureText(shown).width > room) shown = shown.slice(0, -2) + '…'
+        if (room > 14) {
+          ctx.fillStyle = color
+          ctx.textAlign = 'left'
+          ctx.fillText(shown, left + 3, y)
+        }
+        hits.push({ x0: left, x1: right, y0: y - 10, y1: y + 2, item: b.item })
+      }
+      ctx.restore()
+    },
+    afterDatasetsDraw(chart: any) {
+      const { ctx, chartArea, scales } = chart
+      if (!chartArea || !scales?.x) return
+      const labelled: { x: number; label: string }[] = []
+      ctx.save()
+      for (const p of points) {
+        const x = scales.x.getPixelForValue(p.index)
         if (x == null || Number.isNaN(x) || x < chartArea.left || x > chartArea.right) continue
-        if (!r.major) {
-          // minor release — a short unlabeled tick, so a long release history doesn't
-          // crowd out the labeled major ones (see lib/releases.ts).
-          ctx.strokeStyle = isDark() ? 'rgba(231,226,215,0.3)' : 'rgba(26,23,21,0.25)'
+        if (p.item.kind === 'minor-release') {
+          ctx.strokeStyle = tickColor
           ctx.lineWidth = 2
           ctx.beginPath()
           ctx.moveTo(x, chartArea.top)
           ctx.lineTo(x, chartArea.top + 6)
           ctx.stroke()
-          continue
+        } else {
+          ctx.strokeStyle = lineColor
+          ctx.lineWidth = 1.2
+          ctx.setLineDash(p.item.kind === 'go-live' ? [2, 3] : [4, 3])
+          ctx.beginPath()
+          ctx.moveTo(x, chartArea.top)
+          ctx.lineTo(x, chartArea.bottom)
+          ctx.stroke()
+          ctx.setLineDash([])
+          labelled.push({ x, label: p.item.label })
         }
-        ctx.strokeStyle = isDark() ? 'rgba(231,226,215,0.4)' : 'rgba(26,23,21,0.32)'
-        ctx.setLineDash([3, 3])
-        ctx.lineWidth = 1.2
-        ctx.beginPath()
-        ctx.moveTo(x, chartArea.top)
-        ctx.lineTo(x, chartArea.bottom)
-        ctx.stroke()
-        ctx.setLineDash([])
-        ctx.font = '600 9px Inter, system-ui, sans-serif'
-        ctx.fillStyle = isDark() ? 'rgba(231,226,215,0.75)' : 'rgba(26,23,21,0.65)'
-        ctx.textAlign = 'left'
-        ctx.fillText(r.version, Math.min(x + 3, chartArea.right - 50), chartArea.top + 2)
+        hits.push({ x0: x - 6, x1: x + 6, y0: chartArea.top - 34, y1: chartArea.bottom, item: p.item })
       }
+      // Labels above the plot, in the layout padding: staggered into rows; at phone width only
+      // two rows, so crowded labels drop out (every item stays in the list under the chart).
+      ctx.font = '600 9.5px Inter, system-ui, sans-serif'
+      const placed = layoutMarkerLabels(labelled, {
+        measureWidth: (t) => ctx.measureText(t).width,
+        areaLeft: chartArea.left,
+        areaRight: chartArea.right,
+        maxRows: narrow ? 2 : 3,
+        rowHeight: 10,
+      })
+      ctx.fillStyle = labelColor
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'top'
+      const top = chartArea.top - (narrow ? 22 : 32)
+      for (const l of placed) ctx.fillText(l.label, l.x, top + l.y)
+      ctx.restore()
+    },
+    afterEvent(chart: any, args: any) {
+      const e = args.event
+      if (!e) return
+      if (e.type === 'mouseout') {
+        if (active) {
+          active = null
+          args.changed = true
+        }
+        return
+      }
+      if (e.type !== 'mousemove' && e.type !== 'click') return
+      const hit = hits.find((h) => e.x >= h.x0 && e.x <= h.x1 && e.y >= h.y0 && e.y <= h.y1)
+      const next = hit ? { item: hit.item, x: e.x, y: e.y } : null
+      if ((next?.item ?? null) !== (active?.item ?? null)) {
+        active = next
+        args.changed = true
+      }
+    },
+    afterDraw(chart: any) {
+      if (!active) return
+      const { ctx, chartArea } = chart
+      const it = active.item
+      const when = it.kind === 'flight' ? `${it.date} to ${it.openEnded ? 'now' : it.endDate}` : it.date
+      const lines = [`${when} · ${it.label}`, ...wrapText(ctx, it.note, 220)]
+      ctx.save()
+      ctx.font = '11px Inter, system-ui, sans-serif'
+      const w = Math.min(240, Math.max(...lines.map((l) => ctx.measureText(l).width)) + 14)
+      const h = lines.length * 14 + 10
+      const x = Math.min(Math.max(chartArea.left, active.x + 8), chartArea.right - w)
+      const y = chartArea.top + 4
+      ctx.fillStyle = dark ? 'rgba(33,28,24,0.96)' : 'rgba(255,255,255,0.97)'
+      ctx.strokeStyle = dark ? 'rgba(240,238,233,0.25)' : 'rgba(26,23,21,0.18)'
+      ctx.fillRect(x, y, w, h)
+      ctx.strokeRect(x, y, w, h)
+      ctx.fillStyle = dark ? '#F4F1EA' : INK
+      ctx.textBaseline = 'top'
+      ctx.textAlign = 'left'
+      lines.forEach((l, i) => {
+        ctx.font = i === 0 ? '600 11px Inter, system-ui, sans-serif' : '11px Inter, system-ui, sans-serif'
+        ctx.fillText(l, x + 7, y + 5 + i * 14)
+      })
       ctx.restore()
     },
   }
+}
+function wrapText(ctx: any, text: string, maxW: number): string[] {
+  ctx.font = '11px Inter, system-ui, sans-serif'
+  const out: string[] = []
+  let line = ''
+  for (const word of text.split(/\s+/)) {
+    const next = line ? `${line} ${word}` : word
+    if (line && ctx.measureText(next).width > maxW) {
+      out.push(line)
+      line = word
+    } else line = next
+  }
+  if (line) out.push(line)
+  return out
+}
+
+/** True for a line/area chart on the beacon's date axis that draws its own series list. */
+export function hasLineSeries(widget: Pick<Widget, 'type' | 'dataset' | 'dimension' | 'series'>): boolean {
+  return (widget.type === 'line' || widget.type === 'area') && widget.dataset === 'geo' && isDateDim(widget.dimension) && !!widget.series?.length
+}
+
+/** A line chart's series (Widget.series): each one is its own date query, filtered on a geo
+ * field (e.g. keyEvent = 'install'), drawn on the left or right axis. `responses` is one
+ * StatsResponse per series, in order. */
+export function buildSeriesLineConfig(widget: Widget, responses: StatsResponse[]): ChartConfiguration | null {
+  const series = widget.series ?? []
+  if (!series.length || responses.length !== series.length) return null
+  const first = responses[0]
+  const dim = widget.dimension
+  const allDays = dayBucketsInRange(first.meta.since, first.meta.until, dim === 'dateEt') ?? [...new Set(responses.flatMap((r) => r.rows.map((x) => x.key[dim] ?? '')))].sort()
+  const byDay = responses.map((r) => new Map(r.rows.map((x) => [x.key[dim] ?? '', metricValue(x, widget.metric)])))
+  // The axis starts at the first day any series has data (a long range, e.g. "since January",
+  // would otherwise open with months of flat zeros); every later empty day still plots as 0.
+  const firstData = allDays.findIndex((d) => byDay.some((m) => (m.get(d) ?? 0) > 0))
+  // A series the server cut to its limit only covers its newest days: start there too.
+  const cuts = responses.map((r) => truncatedFrom(dim, r)).filter((c): c is string => !!c)
+  const cutFrom = cuts.length ? cuts.reduce((a, b) => (a > b ? a : b)) : ''
+  const buckets = (firstData > 0 ? allDays.slice(firstData) : allDays).filter((d) => d >= cutFrom)
+  const hasRight = series.some((s) => s.axis === 'right')
+  const narrow = isMobileViewport()
+  const items = overlayItems(widgetOverlayOptions(widget))
+  const hasLabels = items.some((i) => i.kind === 'release' || i.kind === 'go-live')
+  const dash = (style?: string) => (style === 'dashed' ? [4, 3] : style === 'dotted' ? [1, 3] : [])
+  const axisTitle = (text?: string) => (text ? { display: !narrow, text, color: tickColor(), font: { family: 'Inter', size: 10 } } : { display: false })
+  const scales: any = {
+    x: { grid: { color: gridColor() }, ticks: { color: tickColor(), font: { family: 'Inter', size: 11 }, maxRotation: 0, autoSkip: true } },
+    y: { position: 'left', beginAtZero: true, grid: { color: gridColor() }, ticks: { color: tickColor(), font: { family: 'Inter', size: 11 } }, title: axisTitle(widget.axisTitles?.left) },
+  }
+  if (hasRight) {
+    scales.y2 = { position: 'right', beginAtZero: true, grid: { drawOnChartArea: false }, ticks: { color: tickColor(), font: { family: 'Inter', size: 11 } }, title: axisTitle(widget.axisTitles?.right) }
+  }
+  return {
+    type: 'line',
+    data: {
+      labels: buckets.map((d) => formatKey('date', d)),
+      datasets: series.map((s, i) => {
+        const color = PALETTE[s.color ?? i] ?? PALETTE[i % PALETTE.length]
+        return {
+          label: s.label,
+          data: buckets.map((d) => byDay[i].get(d) ?? 0),
+          borderColor: color,
+          backgroundColor: color,
+          yAxisID: s.axis === 'right' ? 'y2' : 'y',
+          borderDash: dash(s.style),
+          borderWidth: s.style === 'dotted' ? 1.5 : 2,
+          tension: 0.2,
+          pointRadius: 0,
+          pointHitRadius: 16,
+          fill: false,
+        }
+      }),
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      layout: { padding: { top: hasLabels ? (narrow ? 24 : 34) : 4 } },
+      plugins: {
+        legend: { display: true, position: 'bottom', labels: { color: tickColor(), font: { family: 'Inter', size: narrow ? 10 : 11 }, boxWidth: narrow ? 8 : 10, boxHeight: narrow ? 8 : 10, padding: narrow ? 6 : 10 } },
+      },
+      scales,
+    },
+    plugins: items.length ? [timelineOverlayPlugin(buckets, items, narrow)] : [],
+  } as ChartConfiguration
 }
 
 function notYetTrackedWatermarkPlugin() {
@@ -413,8 +622,12 @@ export function formatKey(dimension: string, value: string): string {
     return '(none)'
   }
   if (dimension === 'countryName' || dimension === 'country') return COUNTRY_NAMES[value] ?? value
-  if (dimension === 'visitor' || dimension === 'mode' || dimension === 'difficulty') return value.charAt(0).toUpperCase() + value.slice(1)
-  if (dimension === 'date') {
+  if (dimension === 'visitor' || dimension === 'mode' || dimension === 'difficulty' || dimension === 'gameMode' || dimension === 'gameDifficulty')
+    return value.charAt(0).toUpperCase() + value.slice(1)
+  if (dimension === 'popupFamily') return POPUPS.find((p) => p.id === value)?.label ?? value
+  if (dimension === 'popupOutcome') return POPUP_OUTCOME_LABELS[value] ?? value
+  if (dimension === 'campaignFlight') return CAMPAIGNS.find((c) => c.id === value)?.label ?? value
+  if (dimension === 'date' || dimension === 'dateEt') {
     // YYYY-MM-DD → "Jun 24"
     const d = new Date(value + 'T00:00:00Z')
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
@@ -450,12 +663,14 @@ const noLegend = { legend: { display: false } }
 // the span is implausibly huge — a malformed or enormous range shouldn't allocate thousands of
 // empty buckets, and callers fall back to the pre-fill behavior in that case.
 const MAX_FILL_DAYS = 400
-function dayBucketsInRange(since: string, until: string): string[] | null {
-  const s = new Date(since).getTime()
-  const u = new Date(until).getTime()
-  if (!isFinite(s) || !isFinite(u)) return null
-  const startDay = Date.UTC(new Date(s).getUTCFullYear(), new Date(s).getUTCMonth(), new Date(s).getUTCDate())
-  const endDay = Date.UTC(new Date(u).getUTCFullYear(), new Date(u).getUTCMonth(), new Date(u).getUTCDate())
+function dayBucketsInRange(since: string, until: string, et = false): string[] | null {
+  const s0 = new Date(since).getTime()
+  const u0 = new Date(until).getTime()
+  if (!isFinite(s0) || !isFinite(u0)) return null
+  // An ET-day axis ('dateEt') spans the ET days of since/until; a UTC one their UTC days.
+  const dayOf = (ms: number) => (et ? etDateFast(ms) : new Date(ms).toISOString().slice(0, 10))
+  const startDay = Date.parse(dayOf(s0) + 'T00:00:00Z')
+  const endDay = Date.parse(dayOf(u0) + 'T00:00:00Z')
   if (endDay < startDay) return null
   const dayCount = Math.round((endDay - startDay) / 86_400_000) + 1
   if (dayCount > MAX_FILL_DAYS) return null
@@ -470,55 +685,119 @@ function dayBucketsInRange(since: string, until: string): string[] | null {
 // clicked point index always resolves to the value drawn there: with zero-fill the chart can
 // have more points than the response has rows, and indexing the raw rows would drill into the
 // wrong day (or miss entirely).
+/** The first day a date response actually covers when the server cut it to its `limit` (it keeps
+ * the NEWEST days — functions/api/geo.ts): the rows then sum to less than the grand total. Days
+ * before it are unknown, not zero, so a chart must not zero-fill them. null = not truncated. */
+export function truncatedFrom(dim: string, resp: StatsResponse): string | null {
+  const shown = resp.rows.reduce((a, r) => a + (r.pageviews || 0), 0)
+  if (!resp.rows.length || shown >= (resp.totals?.pageviews ?? 0)) return null
+  return resp.rows.reduce((min, r) => (r.key[dim] && (min === null || r.key[dim] < min) ? r.key[dim] : min), null as string | null)
+}
+
 export function seriesRows(dim: string, resp: StatsResponse): StatsRow[] {
-  if (dim !== 'date') return resp.rows
-  const buckets = dayBucketsInRange(resp.meta.since, resp.meta.until)
-  if (!buckets) return resp.rows
-  const byDay = new Map(resp.rows.map((r) => [r.key.date ?? '', r]))
-  return buckets.map((day) => byDay.get(day) ?? { key: { date: day }, pageviews: 0, visits: 0 })
+  if (!isDateDim(dim)) return resp.rows
+  const all = dayBucketsInRange(resp.meta.since, resp.meta.until, dim === 'dateEt')
+  if (!all) return resp.rows
+  const cut = truncatedFrom(dim, resp)
+  const buckets = cut ? all.filter((d) => d >= cut) : all
+  const byDay = new Map(resp.rows.map((r) => [r.key[dim] ?? '', r]))
+  return buckets.map((day) => byDay.get(day) ?? { key: { [dim]: day }, pageviews: 0, visits: 0 })
+}
+
+// Known value order for a dimension's values, wherever one reads better than count order: the
+// pop-ups in registry order, shown → taps → outcomes, modes and difficulties in game order.
+const DIM_VALUE_ORDER: Record<string, readonly string[]> = {
+  popupFamily: POPUP_FAMILY_ORDER,
+  popupOutcome: POPUP_OUTCOME_ORDER,
+  gameMode: GAME_COMPLETE_MODES,
+  gameDifficulty: GAME_COMPLETE_DIFFICULTIES,
+  mode: GAME_COMPLETE_MODES,
+  difficulty: GAME_COMPLETE_DIFFICULTIES,
+}
+/** `values` in the dimension's known order (DIM_VALUE_ORDER), unknown values after the known
+ * ones in their given (first-seen, i.e. count) order. */
+export function orderDimValues(dim: string, values: string[]): string[] {
+  const order = DIM_VALUE_ORDER[dim]
+  if (!order) return values
+  const rank = (v: string) => {
+    const i = order.indexOf(v)
+    return i === -1 ? order.length + values.indexOf(v) : i
+  }
+  return [...values].sort((a, b) => rank(a) - rank(b))
+}
+
+export interface BreakdownBarModel {
+  axis: string[] // raw axis values (widget.dimension), in draw order
+  series: string[] // raw series values (widget.breakdown), in legend order
+  values: (number | null)[][] // [seriesIndex][axisIndex]
+  stacked: boolean
+}
+/** The data behind a breakdown bar (type 'breakdownBar', and the older 'stackedBar' which is
+ * always stacked): one bar group per axis value, one series per breakdown value, summed from the
+ * response's (axis, series) rows. A missing combination is null when grouped (so Chart.js leaves
+ * no empty slot) and 0 when stacked (so the stack still totals). */
+export function breakdownBarModel(widget: Pick<Widget, 'type' | 'dimension' | 'breakdown' | 'barMode' | 'metric'>, resp: StatsResponse): BreakdownBarModel {
+  const dim = widget.dimension
+  const bd = widget.breakdown ?? ''
+  const stacked = widget.type === 'stackedBar' || widget.barMode === 'stacked'
+  const axisSeen: string[] = []
+  const seriesSeen: string[] = []
+  const cell = new Map<string, number>() // `${axis}||${series}` -> value
+  for (const r of resp.rows) {
+    const a = r.key[dim] ?? ''
+    const b = r.key[bd] ?? ''
+    if (!axisSeen.includes(a)) axisSeen.push(a)
+    if (!seriesSeen.includes(b)) seriesSeen.push(b)
+    cell.set(`${a}||${b}`, (cell.get(`${a}||${b}`) ?? 0) + metricValue(r, widget.metric))
+  }
+  const axis = orderDimValues(dim, axisSeen)
+  const series = orderDimValues(bd, seriesSeen)
+  const values = series.map((b) => axis.map((a) => cell.get(`${a}||${b}`) ?? (stacked ? 0 : null)))
+  return { axis, series, values, stacked }
 }
 
 /**
  * Build a Chart.js configuration from a widget + its data. Returns null for
  * non-Chart.js widget types (stat / table) which the card renders itself.
  */
-export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConfiguration | null {
+export function buildChartConfig(widget: Widget, resp: StatsResponse, seriesResponses?: StatsResponse[]): ChartConfiguration | null {
   const m = widget.metric
   const dim = widget.dimension
+  if (hasLineSeries(widget)) return seriesResponses ? buildSeriesLineConfig(widget, seriesResponses) : null
 
-  if (widget.type === 'stat' || widget.type === 'table' || widget.type === 'map' || widget.type === 'rate') return null
+  if (widget.type === 'stat' || widget.type === 'table' || widget.type === 'map' || widget.type === 'rate' || widget.type === 'rateTable') return null
 
-  // ── Stacked bar: primary dimension × breakdown ──────────────────────────────
-  if (widget.type === 'stackedBar' && widget.breakdown) {
-    const primaries: string[] = []
-    const breakdowns: string[] = []
-    const cell = new Map<string, number>() // `${p}||${b}` -> value
-    for (const r of resp.rows) {
-      const p = r.key[dim] ?? ''
-      const b = r.key[widget.breakdown] ?? ''
-      if (!primaries.includes(p)) primaries.push(p)
-      if (!breakdowns.includes(b)) breakdowns.push(b)
-      cell.set(`${p}||${b}`, (cell.get(`${p}||${b}`) ?? 0) + metricValue(r, m))
-    }
-    const datasets = breakdowns.map((b, i) => ({
+  // ── Breakdown bar (and the older stacked bar): axis dimension × series (breakdown) ──
+  if ((widget.type === 'breakdownBar' || widget.type === 'stackedBar') && widget.breakdown) {
+    const model = breakdownBarModel(widget, resp)
+    const datasets = model.series.map((b, i) => ({
       label: formatKey(widget.breakdown!, b),
-      data: primaries.map((p) => cell.get(`${p}||${b}`) ?? 0),
-      backgroundColor: PALETTE[i % PALETTE.length],
+      data: model.values[i],
+      backgroundColor: stableColor(widget.breakdown!, b) ?? PALETTE[i % PALETTE.length],
       borderRadius: 4,
+      // Grouped: an axis value with no row for this series leaves no gap (Chart.js skipNull).
+      skipNull: true,
     }))
+    const narrow = isMobileViewport()
+    const axis = (stacked: boolean) => ({ stacked, grid: { color: gridColor() }, ticks: { color: tickColor(), font: { family: 'Inter', size: 11 } } })
     return {
       type: 'bar',
-      data: { labels: primaries.map((p) => formatKey(dim, p)), datasets },
+      data: { labels: model.axis.map((p) => formatKey(dim, p)), datasets },
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        plugins: { legend: { display: true, labels: { color: tickColor(), font: { family: 'Inter', size: 11 } } } },
-        scales: {
-          x: { stacked: true, grid: { color: gridColor() }, ticks: { color: tickColor(), font: { family: 'Inter', size: 11 } } },
-          y: { stacked: true, beginAtZero: true, grid: { color: gridColor() }, ticks: { color: tickColor(), font: { family: 'Inter', size: 11 } } },
+        // A tap anywhere over an axis value shows every series' count for it (touch-friendly).
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          // Phone width: a compact legend under the bars, so the series names don't eat the plot.
+          legend: narrow
+            ? { display: true, position: 'bottom', labels: { color: tickColor(), font: { family: 'Inter', size: 10 }, boxWidth: 8, boxHeight: 8, padding: 6 } }
+            : { display: true, labels: { color: tickColor(), font: { family: 'Inter', size: 11 }, boxWidth: 12 } },
+          tooltip: { filter: (item: any) => item.raw != null },
         },
+        scales: { x: axis(model.stacked), y: { ...axis(model.stacked), beginAtZero: true } },
       },
-    }
+    } as ChartConfiguration
   }
 
   // ── Nested doughnut: ring 0 (innermost) = dimension, each ring outward subdivides its
@@ -638,6 +917,7 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
     // with a corner watermark instead — see activationMarkerIndex above).
     const isPopupTrend = widget.dataset === 'popup' && dim === 'date'
     const boundary = isPopupTrend ? (TRACKING_ACTIVATION_DATE_ET ? activationMarkerIndex(rows, TRACKING_ACTIVATION_DATE_ET) : rows.length) : -1
+    const overlay = isDateDim(dim) ? overlayItems(widgetOverlayOptions(widget)) : []
     const muted = isDark() ? 'rgba(231,226,215,0.35)' : 'rgba(26,23,21,0.28)'
     const mutedFill = isDark() ? 'rgba(231,226,215,0.08)' : 'rgba(26,23,21,0.06)'
 
@@ -674,13 +954,14 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse): ChartConf
         responsive: true,
         maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
+        ...(overlay.length && overlay.some((i) => i.kind === 'release' || i.kind === 'go-live') ? { layout: { padding: { top: isMobileViewport() ? 24 : 34 } } } : {}),
         plugins: noLegend,
         scales: baseScales(),
       },
-      ...((isPopupTrend || (widget.markers === 'releases' && dim === 'date')) && {
+      ...((isPopupTrend || overlay.length) && {
         plugins: [
           ...(isPopupTrend ? [TRACKING_ACTIVATION_DATE_ET ? activationMarkerPlugin(boundary) : notYetTrackedWatermarkPlugin()] : []),
-          ...(widget.markers === 'releases' && dim === 'date' ? [releaseMarkersPlugin(rows)] : []),
+          ...(overlay.length ? [timelineOverlayPlugin(rows.map((r) => r.key[dim] ?? ''), overlay, isMobileViewport())] : []),
         ],
       }),
     } as ChartConfiguration

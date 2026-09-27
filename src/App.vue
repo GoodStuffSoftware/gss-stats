@@ -20,7 +20,7 @@ const config = reactive<DashboardConfig>(defaultConfig())
 const loaded = ref(false)
 const editing = ref<{ widget: Widget; isNew: boolean } | null>(null)
 const dark = ref(false)
-const saveState = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
+const saveState = ref<'idle' | 'saving' | 'saved' | 'error' | 'stale'>('idle')
 
 // The page currently being viewed/edited.
 const activePage = computed<DashboardPage>(() => config.pages.find((p) => p.id === config.activePageId) ?? config.pages[0])
@@ -80,13 +80,13 @@ function scheduleSave() {
   clearTimeout(saveTimer)
   saveTimer = window.setTimeout(async () => {
     const ok = await saveConfig(JSON.parse(JSON.stringify(config)) as DashboardConfig)
-    saveState.value = ok ? 'saved' : 'error'
+    saveState.value = ok === 'stale' ? 'stale' : ok ? 'saved' : 'error'
   }, 700)
 }
 watch(config, scheduleSave, { deep: true })
 
 const saveLabel = computed(
-  () => ({ idle: '', saving: 'Saving…', saved: 'Saved', error: 'Save failed' })[saveState.value],
+  () => ({ idle: '', saving: 'Saving…', saved: 'Saved', error: 'Save failed', stale: 'This tab is out of date, reload' })[saveState.value],
 )
 
 // ── Page operations ───────────────────────────────────────────────────────────

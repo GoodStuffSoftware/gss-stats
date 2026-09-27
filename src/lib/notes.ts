@@ -35,7 +35,6 @@ import {
   PLAY_TRACKING_ACTIVATION_DATE_ET,
   TRACKING_ACTIVATION_DATE_ET,
   MIN_COHORT,
-  RAW_INSTALL_DEDUPE_NOTE,
 } from './popupEvents'
 import { ARRIVALS_CAVEAT } from './campaigns'
 import { tokenizeAndInterpolate, toPlainText } from './textLite'
@@ -165,7 +164,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = {
   // copy). ──────────────────────────────────────────────────────────────────────────────
   'campaigns-attribution-scope': {
     id: 'campaigns-attribution-scope',
-    text: 'Attribution is by **campaign tag** only ([see lib/campaigns.ts](https://github.com/GoodStuffSoftware/gss-stats/blob/main/src/lib/campaigns.ts)) — no device/location/timestamp correlation across rows. Funnel steps are counted within tagged sessions. Verification and household traffic are excluded server-side.',
+    text: 'Attribution is by **campaign tag** only — no device/location/timestamp correlation across rows. Funnel steps are counted within tagged sessions. Verification and household traffic are excluded server-side.',
     kind: 'text',
     severity: 'info',
     scopes: ['campaigns'],
@@ -182,7 +181,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = {
     // v0.4.0: spend comes from the ads-read routine's own store (Google Ads API) first,
     // falling back to the hand-entered CAMPAIGN_SPEND (lib/campaigns.ts) only for a
     // campaign with nothing stored yet — each campaign's own "Source" row above says which.
-    text: 'Spend comes from the Google Ads API as stored by the ads-read routine; a campaign with nothing stored falls back to the hand-entered CAMPAIGN_SPEND (lib/campaigns.ts).',
+    text: 'Spend comes from the Google Ads API as stored by the ads-read routine; a campaign with nothing stored yet falls back to the hand-entered spend figures.',
     kind: 'note',
     severity: 'info',
     scopes: ['campaigns'],
@@ -210,17 +209,37 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = {
   },
   'overview-timeline-caption': {
     id: 'overview-timeline-caption',
-    text: 'Shaded bands = campaign flights. Dashed labeled lines = major releases / tracking-activation. Short ticks = other releases (see `lib/releases.ts` for versions).',
+    text: 'Shaded bands = campaign flights. Dashed labelled lines = major releases and go-live moments. Short ticks = other releases. Every marker and band is listed under the chart.',
     kind: 'note',
     severity: 'info',
     scopes: ['overview'],
   },
   'raw-install-dedupe': {
     id: 'raw-install-dedupe',
-    text: RAW_INSTALL_DEDUPE_NOTE,
+    // Plain wording for the screen (RAW_INSTALL_DEDUPE_NOTE, with its raw path, stays the ads
+    // routine's report text).
+    text: 'Raw install signals: duplicate rows from several open tabs stopped being sent (v1.95.6), so expect a small drop, mainly on desktop Chrome and Edge. The main install count is unaffected.',
     kind: 'note',
     severity: 'info',
     scopes: ['overview'],
+  },
+  // Caption for the Pop-ups page's breakdown bar (and any chart on the pop-up dimensions):
+  // what the counts include. Plain wording, no code paths.
+  'popup-bars-measured': {
+    id: 'popup-bars-measured',
+    text: 'Counts start the day pop-up tracking went live. Installs before the install fix are not counted. First-50 congrats has no outcome tracking.',
+    kind: 'note',
+    severity: 'info',
+    scopes: ['popup'],
+  },
+  // Caption for the campaign device-mix doughnut: the population is tagged hits, not people
+  // (a heavy user weighs more — shares of rows, not of devices).
+  'device-mix-population': {
+    id: 'device-mix-population',
+    text: 'Shares of **tagged hits** (every beacon a tagged visit sent), not of people: a heavy user weighs more.',
+    kind: 'note',
+    severity: 'info',
+    scopes: ['campaigns'],
   },
   'no-return-visits-yet': {
     id: 'no-return-visits-yet',
@@ -285,7 +304,8 @@ export function defaultNoteIdsForScope(scope: NoteScope): string[] {
 /** Options for a "pick a note" dropdown (ChartEditor) — id + a short preview of its text. */
 export function noteOptions(): { value: string; label: string }[] {
   return Object.values(NOTES_REGISTRY).map((n) => {
-    const t = resolveText(n)
+    // Plain text, as rendered: markup stripped and {vars} filled in (not the raw template).
+    const t = noteRawText(n.id)
     return { value: n.id, label: t.length > 64 ? t.slice(0, 61) + '…' : t }
   })
 }

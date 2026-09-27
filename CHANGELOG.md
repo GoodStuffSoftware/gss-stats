@@ -6,6 +6,80 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-09-27
+
+### Added
+- **A chart's own site pick.** "Site override" in the chart editor now really narrows that one
+  chart to a site (e.g. Best Sudoku), leaving the page's site pick and dates alone; the Overall
+  timeline uses it, wherever it sits.
+- **A US-Eastern date axis for beacon trend charts.** "Date (trend, ET)" buckets by Eastern day,
+  daylight saving included; the Overall timeline uses it, so its days line up with its flight
+  bands and go-live markers.
+- **Arrival and key-event dimensions for beacon charts,** and a per-chart option to hide known
+  test and household traffic.
+- **A breakdown bar chart for any two dimensions.** Put one dimension on the axis and another
+  as the series, grouped side by side or stacked, from the normal chart editor; movable,
+  zoomable and editable like every other chart.
+- **Pop-up, completed-game and campaign-flight dimensions for beacon charts.** Chart or filter
+  by which pop-up, what happened to it (shown, tapped, dismissed, or an outcome), a completed
+  game's mode and difficulty, and which campaign flight a visit belongs to. Pop-up counts
+  start the day tracking went live and skip installs from before the install fix.
+
+### Changed
+- **The Best Sudoku Pop-ups page is now one bar chart.** Every pop-up sits on the axis with
+  shown, taps, dismissals and each outcome as the series. A small table below lists only the
+  rates that are valid (taps over showings, and installs over install prompts since the
+  install fix), each with its counts and "too few to report" under five. Sign-in eligibility
+  stays; the other tiles are gone. Saved layouts are updated automatically; charts you added
+  to the page are kept.
+- **The campaign device mix uses the standard nested pie.** Campaign flight, then device, then
+  operating system, on the same chart the other pages use for site and device, labelled as a
+  share of tagged hits. Saved layouts keep its place, size, title and captions, and a chart
+  scoped to one campaign keeps that scope. What changed: the browser and screen-width shares
+  are gone (add them as extra rings from the chart editor), and an operating system's
+  percentage is now its share within its device, not within the whole campaign.
+- **The Overall timeline is a standard line chart.** Same look (page views and tagged arrivals
+  on the left, sign-ins, installs and raw install signals on the right, campaign-flight bands,
+  release and go-live markers), now edited in the normal chart editor. Hovering or tapping a
+  marker or band shows its date and note, and a collapsed list under the chart has them all.
+  Saved layouts keep its place, size and title.
+- **Every line chart can show release markers, go-live markers and campaign-flight bands,** and
+  a beacon line chart can draw several series on a left and right axis.
+- **Overview tile labels are short and plain.** "Return visits (day 1+)" and "Installs", with the
+  install-fix caveat under the label instead of in it.
+- **A saved dashboard is backed up before a layout upgrade.** The first save after an upgrade
+  keeps a copy of the previous layout, so an upgrade can be undone.
+
+### Fixed
+- **Chart captions stay inside their card on phones.** They used to sit flush against the
+  card's edge and get clipped at narrow widths.
+- **A chart with its own filter no longer fails to draw** when that filter was set up from the
+  current site picker rather than the old single-site one.
+- **Captions and notes read as plain language.** None of them names a source file any more.
+- **Each note shows once per card.** The Campaigns cards no longer repeat a caveat at the top
+  and again under the chart.
+- **The Return visits chart fits its card.** Its plot used to stretch far below the card, so
+  only the top of the axis showed.
+- **The sign-in eligibility chart has a short title** that fits its card.
+- **Timeline marker labels no longer collide,** on desktop or phone.
+- **Chart editor checkboxes sit right next to their labels,** and clicking the label toggles them.
+- **The timeline's tagged-arrivals line matches the campaign funnel.** It now counts a first
+  visit even when that first beacon was a pop-up or install event.
+- **A long trend chart keeps its most recent days** when the range has more days than the
+  chart's limit, instead of the oldest ones.
+- **Raw install signals skip installs from before the install fix,** like every other install
+  count.
+- **Pop-up charts read unusual beacon paths the same way the rest of the dashboard does**
+  (a trailing or doubled slash, an extra segment).
+- **An oversized chart request gets a clear error** instead of a database message: too many
+  sites or filters, or a combination too large for one query, says what to cut back.
+- **"Hide my visits" applies to the pop-up rate table and eligibility counts too,** so they
+  agree with the pop-up bar chart.
+- **A tab left open on older code can't overwrite a newer layout.** Its save is refused, so the
+  layout is protected either way. A tab that loaded this version says "This tab is out of date,
+  reload"; a tab still open on v0.8.x just shows "Save failed" (reload it).
+- **The notes picker in the chart editor shows plain text,** without markup or placeholders.
+
 ## [0.8.1] — 2026-09-27
 
 ### Changed
