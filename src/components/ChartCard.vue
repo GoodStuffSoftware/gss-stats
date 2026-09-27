@@ -345,7 +345,7 @@ const overrideSummary = computed(() => {
           : f.siteSel.join(', ')
   const flags: string[] = []
   if (f.excludeOwnVisits) flags.push('−me')
-  return [site, rangeLabel(f.since, f.until), ...flags].join(' · ')
+  return [site, rangeLabel(f.since, f.until, f.rangeRel), ...flags].join(' · ')
 })
 watch(dataKey, load)
 watch(sitesLoaded, (ready) => ready && load()) // fetch RUM charts once the allow-list is ready
@@ -370,7 +370,7 @@ const overlayList = computed(() => {
 const chartConfig = computed(() => {
   if (!data.value) return null
   void props.dark // recompute colors on theme toggle
-  return buildChartConfig(props.widget, data.value, seriesData.value ?? undefined)
+  return buildChartConfig(props.widget, data.value, seriesData.value ?? undefined, effectiveFilters.value)
 })
 
 const statValue = computed(() =>

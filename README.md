@@ -67,6 +67,8 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   arrivals by flight day" are standard geo charts over the same tagged arrivals (filter
   `arrival` = tagged): a breakdown bar of `hourEt` × `campaignFlight`, and a line of
   `flightDay` × `campaignFlight` with `cumulative` running totals dashed on a right-hand axis.
+  A `campaignFlight` breakdown draws every beacon-tracked campaign with a start date, one with
+  no arrivals yet at 0, and the flight-day axis runs to the longest of those flights.
   The funnel card also carries the signed-out upsell fix's pre/post-fix segment table, which
   appears on its own once `UPSELL_SIGNEDOUT_FIX_AT` is set. Since layout version 11 no page has a
   bespoke panel left: the former panel bodies and their endpoints (`/api/campaigns`,
@@ -112,7 +114,8 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   any chart as a caption (`widget.notes`) or as its own movable 'note' widget
   (`widget.noteId`), editable from the chart menu either way. Short UI names (metric and
   funnel-step labels such as "Game-screen views") are registry entries too, of kind `label`:
-  never a caption and never offered in the caption pickers.
+  never a caption and never offered in the caption pickers (the card builder's label pickers
+  list them).
 - **Durable, multi-page dashboards** — layout + chart definitions persist in KV (not
   `localStorage`), so they follow you across devices. Duplicate / rename / delete
   pages; a protected default page with "restore default charts"; per-page filters and
@@ -146,7 +149,10 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   axis, solid/dashed/dotted, with optional axis titles. "Hide known test and household traffic"
   (`excludeKnownTraffic`) applies the campaigns endpoint's `EXCLUSIONS` to a beacon chart.
 - **Smart date range** — type spans like `7d` / `24h` / `2w` / `last 3d`, or pick
-  exact dates.
+  exact dates. `since first campaign` (also a chip in a chart's own filter) runs from ET
+  midnight of the earliest configured campaign flight's start to now, a window that grows
+  instead of rolling ([`src/lib/range.ts`](src/lib/range.ts)); the two campaign arrivals charts
+  use it, so a flight's first days never drop off.
 - **Geo beacon dataset** — region / city / ISP / new-vs-returning and a visitor map,
   from the beacon (RUM geography is country-only).
 - **Pop-up tracking** — a Best Sudoku page for the sign-in prompt, first-50 promo, upsell

@@ -24,7 +24,7 @@ const saveState = ref<'idle' | 'saving' | 'saved' | 'error' | 'stale'>('idle')
 
 // The page currently being viewed/edited.
 const activePage = computed<DashboardPage>(() => config.pages.find((p) => p.id === config.activePageId) ?? config.pages[0])
-const rangeText = computed(() => rangeLabel(activePage.value.filters.since, activePage.value.filters.until))
+const rangeText = computed(() => rangeLabel(activePage.value.filters.since, activePage.value.filters.until, activePage.value.filters.rangeRel))
 
 // Part A hard requirement #4: while pop-up tracking hasn't shipped yet (activation date
 // still null — see lib/popupEvents.ts), the pop-ups page carries this note so nothing on

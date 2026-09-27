@@ -314,7 +314,7 @@ read, its flight predating the return beacon).
 | `adsCoverage` (gss-stats-ads) | — | 20 | 20 | 5 min |
 | `adsLastSync` (gss-stats-ads) | — | 3 | 61 | 60 s |
 | **Metrics batch, every fact a miss** | | 74 | **9,369** | |
-| `/api/geo` hour of day (`hourEt` × `campaignFlight`, arrival = tagged, rolling 12 months) | | 25 | 5,415 | `/api/geo` cache |
+| `/api/geo` hour of day (`hourEt` × `campaignFlight`, arrival = tagged, since the first campaign) | | 25 | 5,415 | `/api/geo` cache |
 | `/api/geo` flight day (`flightDay` × `campaignFlight`, same filter) | | 9 | 5,361 | `/api/geo` cache |
 | **Page total, nothing cached** | | | **20,145** | |
 
@@ -324,8 +324,9 @@ clauses as `campaignPathVisitor`, `flightPathsSeen` and `campaignReturns`): 3,36
 (Android launch), 925 + 465 + 2,921 (Play-direct), 333 + 409 + 2,954 (retest) = **16,909**, plus
 three ads-store reads per campaign (about 300): about **17,200 rows per load**. The card batch
 reads 9,369 once and then serves every card, page and colo visit from its fact cache (15 minutes
-to 24 hours for the closed flight); the two arrivals charts scan the rolling year of `hits` by
-`ts` (they cannot use an index on `campaign`, as the old attribution scan could not either), so a
+to 24 hours for the closed flight); the two arrivals charts scan `hits` by `ts` from the first
+campaign's start (they cannot use an index on `campaign`, as the old attribution scan could not
+either; that window grows with every day, as the old scan's did), so a
 page with nothing cached reads about 2,900 more rows than the old one, and a cached page reads
 none for the cards. `campaignReturns` still scans every `bestsudoku-web` row (§7); bounding it is
 the same owner decision.

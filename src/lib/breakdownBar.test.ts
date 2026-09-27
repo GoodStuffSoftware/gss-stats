@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest'
 import { breakdownBarModel, buildChartConfig, orderDimValues, formatKey } from './charts'
 import type { StatsResponse, Widget } from '../types'
+import { CAMPAIGNS } from './campaigns'
 
 function resp(rows: [string, string, number][], dims = ['popupFamily', 'popupOutcome']): StatsResponse {
   return {
@@ -120,5 +121,62 @@ describe('labels for the derived dims', () => {
   })
   it('orderDimValues puts unknown values after known ones', () => {
     expect(orderDimValues('popupOutcome', ['weird', 'returned', 'shown'])).toEqual(['shown', 'returned', 'weird'])
+  })
+})
+
+// A campaignFlight breakdown (the campaign arrivals charts) draws every beacon-tracked campaign
+// with a start date, rows or not, as the old campaign charts did: a campaign with no arrivals keeps
+// its legend entry at 0, and the flight-day axis runs to the longest of those flights.
+describe('campaignFlight breakdown: every tracked campaign, zero-filled', () => {
+  const TRACKED = CAMPAIGNS.filter((c) => c.measurement !== 'spend-only' && c.flightStart != null)
+  const android = TRACKED.find((c) => c.flightStart === '2026-09-02')!
+  const retest = TRACKED.find((c) => c.flightStart === '2026-09-26')!
+  const flight = (c: (typeof CAMPAIGNS)[number]) => Math.round((Date.parse(c.flightEnd) - Date.parse(c.flightStart!)) / 86_400_000) + 1
+  const maxFlight = Math.max(...TRACKED.map(flight))
+
+  it('the configuration has two tracked campaigns, the longest Android at 8 days', () => {
+    expect(TRACKED.map((c) => c.id)).toEqual([android.id, retest.id])
+    expect(maxFlight).toBe(8)
+    expect(flight(retest)).toBeLessThan(maxFlight)
+  })
+
+  it('flight day: only the retest has rows; Android is still a series (all 0), and the axis is Day 1 to 8', () => {
+    const w = widget({ type: 'line', dimension: 'flightDay', breakdown: 'campaignFlight', cumulative: true })
+    const r = resp([['1', retest.id, 5], ['3', retest.id, 2]], ['flightDay', 'campaignFlight'])
+    const m = breakdownBarModel({ ...w, type: 'breakdownBar', barMode: 'stacked' }, r)
+    expect(m.series).toEqual([android.id, retest.id])
+    expect(m.axis).toEqual(Array.from({ length: maxFlight }, (_, i) => String(i + 1)))
+    expect(m.values[0]).toEqual(Array(maxFlight).fill(0))
+    expect(m.values[1]).toEqual([5, 0, 2, 0, 0, 0, 0, 0])
+    const cfg: any = buildChartConfig(w, r)
+    expect(cfg.data.datasets.map((d: any) => d.label)).toEqual([android.label, retest.label, `${android.label} (cumulative)`, `${retest.label} (cumulative)`])
+    expect(cfg.data.datasets[2].data).toEqual(Array(maxFlight).fill(0))
+  })
+
+  it('hour of day (grouped bars): a campaign with no arrivals is 0 in every hour, not missing', () => {
+    const w = widget({ dimension: 'hourEt', breakdown: 'campaignFlight' })
+    const cfg: any = buildChartConfig(w, resp([['9', android.id, 4]], ['hourEt', 'campaignFlight']))
+    expect(cfg.data.labels).toHaveLength(24)
+    expect(cfg.data.datasets.map((d: any) => d.label)).toEqual([android.label, retest.label])
+    expect(cfg.data.datasets[1].data).toEqual(Array(24).fill(0))
+    // A campaign WITH rows still leaves an empty hour out (no zero-height bar), as before (H1).
+    expect(cfg.data.datasets[0].data[8]).toBeNull()
+    expect(cfg.data.datasets[0].data[9]).toBe(4)
+  })
+
+  it('a campaignFlight drill narrows the series (and the axis) to the drilled campaign', () => {
+    const w = widget({ type: 'line', dimension: 'flightDay', breakdown: 'campaignFlight' })
+    const drill = [{ key: 'campaignFlight', value: retest.id, label: retest.label }]
+    const empty = resp([], ['flightDay', 'campaignFlight'])
+    const m = breakdownBarModel({ ...w, type: 'breakdownBar', barMode: 'stacked' }, empty, drill)
+    expect(m.series).toEqual([retest.id])
+    expect(m.axis).toHaveLength(flight(retest))
+    const cfg: any = buildChartConfig(w, empty, undefined, { drill } as never)
+    expect(cfg.data.datasets.map((d: any) => d.label)).toEqual([retest.label])
+  })
+
+  it('other breakdowns keep only the values the response has', () => {
+    const m = breakdownBarModel(widget(), resp(ROWS))
+    expect(m.series).not.toContain(android.id)
   })
 })

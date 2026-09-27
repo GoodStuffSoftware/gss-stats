@@ -37,7 +37,9 @@ All notable changes to **gss-stats** are documented here. The format follows
   chart is a breakdown bar (one bar per campaign in every hour, 0:00 to 23:00), and the flight-day
   chart is one line chart: each campaign's daily arrivals, and its running total dashed on a
   right-hand axis, where there used to be two charts side by side. Both count the same tagged
-  arrivals, and both can be edited like any other chart.
+  arrivals, and both can be edited like any other chart. They read every arrival since the first
+  campaign began (not a rolling year), and every tracked campaign keeps its series, at 0 when it
+  has no arrivals yet.
 
 ### Removed
 - **The old bespoke panels and their data endpoints.** Every Overview, Campaigns and Pop-ups
@@ -51,6 +53,8 @@ All notable changes to **gss-stats** are documented here. The format follows
   quietly showing "No data".
 
 ### Added
+- **A "Since first campaign" date range.** Type it in any range field, or pick the chip in a
+  chart's own filter: from the first ad campaign's start to now, growing each day.
 - **Two new beacon dimensions, "Hour of day (ET)" and "Campaign flight day"**, and line charts
   can now draw one line per value of a second dimension, with an optional running-total line for
   each.
@@ -61,6 +65,9 @@ All notable changes to **gss-stats** are documented here. The format follows
   pickers show the current name instead of coming up blank.
 - **A card's Notes name each row once.** A table row repeated in several columns (a count under
   US, CA and Other, or under Before and After) is listed once in front of its note.
+- **A chart's own date range survives a reload.** A span picked in a chart's filter (a chip or a
+  typed "2w") stays that rolling span after the page reloads, and a calendar range stays fixed,
+  instead of reverting to the span the chart was saved with.
 
 ## [0.11.0] — 2026-09-27
 

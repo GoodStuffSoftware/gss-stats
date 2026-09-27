@@ -1,5 +1,6 @@
 // Smart date-range helpers. The filter `since`/`until` are ISO datetime strings
 // (with back-compat for legacy "YYYY-MM-DD" day values).
+import { CAMPAIGNS, etMidnightUtcMs } from './campaigns'
 
 /** A since/until value every API accepts: a YYYY-MM-DD day or an ISO datetime. One copy for
  * every endpoint (functions/api/*) and the metrics request validator (lib/metrics/validate.ts). */
@@ -38,8 +39,27 @@ export function parseDurationMs(input: string): number | null {
   return unit ? parseFloat(m[1]) * unit : null
 }
 
-/** Relative token → {since, until} ISO datetimes (until = now). */
+/** The relative range from the earliest configured campaign flight's start (ET midnight of its
+ * first day) to now: a window that grows with time instead of rolling, so a chart over every
+ * campaign never drops a flight's first days. Typed as "since first campaign" in any range field;
+ * stored as this token in `rangeRel`, recomputed on every load like "7d". */
+export const SINCE_FIRST_CAMPAIGN = 'since first campaign'
+export function isSinceFirstCampaign(input: string | undefined | null): boolean {
+  return /^(since\s+)?(the\s+)?first\s+campaign$/.test((input || '').trim().toLowerCase())
+}
+/** ET midnight of the earliest configured flight start, or null while no flight has a start. */
+export function firstCampaignStartMs(): number | null {
+  const starts = CAMPAIGNS.map((c) => c.flightStart).filter((d): d is string => !!d).sort()
+  return starts.length ? etMidnightUtcMs(starts[0]) : null
+}
+
+/** Relative token → {since, until} ISO datetimes (until = now): a duration ("7d", "12mo") or
+ * SINCE_FIRST_CAMPAIGN. */
 export function relativeRange(input: string): { since: string; until: string } | null {
+  if (isSinceFirstCampaign(input)) {
+    const start = firstCampaignStartMs()
+    return start == null ? null : { since: new Date(start).toISOString(), until: new Date().toISOString() }
+  }
   const ms = parseDurationMs(input)
   if (ms == null || ms <= 0) return null
   const until = new Date()
@@ -64,8 +84,10 @@ export function ymdRangeToISO(fromYmd: string, toYmd: string): { since: string; 
   return { since: `${fromYmd}T00:00:00.000Z`, until: `${toYmd}T23:59:59.999Z` }
 }
 
-/** Human label for a range: "Last 24h" / "Last 7d" when it ends ~now, else "Jun 1 – Jun 26". */
-export function rangeLabel(since: string, until: string): string {
+/** Human label for a range: "Last 24h" / "Last 7d" when it ends ~now, else "Jun 1 – Jun 26";
+ * "Since first campaign" when the stored relative token (`rel`) is that range. */
+export function rangeLabel(since: string, until: string, rel?: string): string {
+  if (isSinceFirstCampaign(rel)) return 'Since first campaign'
   const s = new Date(since).getTime()
   const u = new Date(until).getTime()
   if (!isFinite(s) || !isFinite(u)) return ''
