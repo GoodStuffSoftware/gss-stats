@@ -1,5 +1,5 @@
 import type { DashboardConfig, DashboardPage, GlobalFilters, LineSeries, Widget } from '../types'
-import { relativeRange, SINCE_FIRST_CAMPAIGN } from './range'
+import { relativeRange, SINCE_FIRST_CAMPAIGN, SINCE_FIRST_UNTIL_LAST_CAMPAIGN } from './range'
 import { POPUPS, POPUP_RATE_SPECS, NO_OUTCOME_TRACKING_NOTE, SIGNIN_ELIGIBLE_CAVEAT } from './popupEvents'
 import { CAMPAIGNS } from './campaigns'
 import { BEST_SUDOKU_SITES } from './bestSudokuSites'
@@ -411,12 +411,18 @@ export function deviceMixWidget(geom: { x: number; y: number; w: number; h: numb
 // did: the 'arrival' = tagged filter (a device's first-ever beacon, attributed by
 // campaignAttributionClause with the same EXCLUSIONS, pre-fix install-gap rows left out), one
 // series per beacon-tracked campaign flight ('campaignFlight', lib/charts.ts
-// campaignFlightDomain: a campaign with no arrivals yet at 0), since the first campaign's start
-// (a range that grows, so no flight's early days ever drop off, and every arrival the funnel card
-// counts is on the charts), and without "hide my visits", which the campaigns endpoint never
-// applied.
-function campaignArrivalsFilters(): GlobalFilters {
-  return normFilters({ ...defaultFilters(), siteSel: [], rangeRel: SINCE_FIRST_CAMPAIGN, excludeOwnVisits: false, drill: [{ key: 'arrival', value: 'tagged', label: 'Tagged' }] })
+// campaignFlightDomain: a campaign with no arrivals yet — including one with no start date yet —
+// at 0), since the first campaign's start (a range that grows, so no flight's early days ever
+// drop off, and every arrival the funnel card counts is on the charts), and without "hide my
+// visits", which the campaigns endpoint never applied.
+// The two charts differ only in where the range ENDS (v0.12.1): the hour-of-day chart stays
+// open-ended (until = now, so it always includes today's arrivals). The flight-day chart instead
+// ends at "until last campaign ends" (lib/range.ts) — a fixed instant, ET midnight of the day
+// after the latest flight's end, once every flight is over — so its range (and cache key) stops
+// changing on every load once there's nothing left to grow; it still ends at now while any
+// flight is open-ended or still running.
+function campaignArrivalsFilters(rangeRel: string = SINCE_FIRST_CAMPAIGN): GlobalFilters {
+  return normFilters({ ...defaultFilters(), siteSel: [], rangeRel, excludeOwnVisits: false, drill: [{ key: 'arrival', value: 'tagged', label: 'Tagged' }] })
 }
 /** Arrivals by ET hour of day: bars per hour 0:00-23:00, one per campaign (grouped). */
 export function hourOfDayWidget(geom: { x: number; y: number; w: number; h: number }, id = 'cw-hour', title = 'Arrivals by ET hour of day'): Widget {
@@ -425,7 +431,7 @@ export function hourOfDayWidget(geom: { x: number; y: number; w: number; h: numb
 /** Daily arrivals by flight day: a line per campaign over its flight days (day 1 = its first ET
  * day), with each campaign's running total dashed on a right-hand axis. */
 export function flightDayWidget(geom: { x: number; y: number; w: number; h: number }, id = 'cw-flightday', title = 'Daily arrivals by flight day'): Widget {
-  return { id, i: id, title, type: 'line', dataset: 'geo', dimension: 'flightDay', breakdown: 'campaignFlight', cumulative: true, metric: 'pageviews', limit: 500, includeEventBeacons: true, filters: campaignArrivalsFilters(), notes: ['arrivals-caveat', 'flight-day-caption'], ...geom }
+  return { id, i: id, title, type: 'line', dataset: 'geo', dimension: 'flightDay', breakdown: 'campaignFlight', cumulative: true, metric: 'pageviews', limit: 500, includeEventBeacons: true, filters: campaignArrivalsFilters(SINCE_FIRST_UNTIL_LAST_CAMPAIGN), notes: ['arrivals-caveat', 'flight-day-caption'], ...geom }
 }
 const CAMPAIGN_CHART_FOR_VIEW: Readonly<Record<string, typeof hourOfDayWidget>> = Object.freeze(
   Object.assign(Object.create(null) as Record<string, typeof hourOfDayWidget>, { hourOfDay: hourOfDayWidget, flightDay: flightDayWidget }),

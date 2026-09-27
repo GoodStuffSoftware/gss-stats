@@ -748,12 +748,14 @@ function flightLength(c: CampaignFlight): number {
   return c.flightStart ? Math.round((Date.parse(c.flightEnd + 'T00:00:00Z') - Date.parse(c.flightStart + 'T00:00:00Z')) / 86_400_000) + 1 : 0
 }
 /** The campaigns a campaignFlight breakdown always draws, rows or not: every beacon-tracked
- * campaign (not spend-only: its ads bypass the beacon) with a start date, in configured order,
- * narrowed by any campaignFlight drill in effect. A campaign with no arrivals yet keeps its
- * series (at 0) and its place in the legend, as on the old campaign charts. */
+ * campaign (not spend-only: its ads bypass the beacon), in configured order, narrowed by any
+ * campaignFlight drill in effect. A campaign with no arrivals yet — including one with no start
+ * date yet, which can never be attributed any rows (campaignAttributionClause) — keeps its
+ * series (at 0, per flightLength below) and its place in the legend, as on the old campaign
+ * charts; the funnel and country cards already draw it this way (defaults.ts). */
 function campaignFlightDomain(drill: DrillConstraint[] | undefined): CampaignFlight[] {
   const picked = (drill ?? []).filter((d) => d.key === 'campaignFlight').map((d) => d.value)
-  return CAMPAIGNS.filter((c) => c.measurement !== 'spend-only' && c.flightStart != null && picked.every((v) => v === c.id))
+  return CAMPAIGNS.filter((c) => c.measurement !== 'spend-only' && picked.every((v) => v === c.id))
 }
 /** The whole axis for a dimension with a known domain, so an empty bucket still shows: every
  * hour of the day, and every flight day up to the longest flight among the chart's campaigns
