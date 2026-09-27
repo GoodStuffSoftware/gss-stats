@@ -351,87 +351,154 @@ function openFilteredPage() {
   closeDrill()
 }
 
-// ── Function bar (filters: range/sites/exclusions; modification: add chart, theme) — hidden
-// by default, revealed via a small fixed top-right button (owner request, 2026-09-26; scope
-// clarified 2026-09-26: page TABS are wayfinding, not "modification" chrome, so PageBar stays
-// always visible and lives outside this bar — see the template). An overlay/dropdown
-// (position: fixed), never a layout shift — the grid below never moves when it opens.
-// `barOpen` also drives per-chart modification chrome (ChartCard's edit/zoom/menu icons,
-// drag handles, resize grips): those stay hidden until this bar is open OR that specific
-// card is hovered — see Dashboard.vue's `controlsVisible` prop / ChartCard.vue. ───────────
-const barOpen = ref(false)
-const fbAnchor = ref<HTMLElement | null>(null)
+// ── Main filter bar (owner request, 2026-09-26: put it back) ──────────────────────────────
+// v0.6 (PR #9, commit 672aa24) hid this bar behind a small top-right toggle. The owner wants
+// it back in normal flow, in EXACTLY its pre-v0.6 position/order/spacing/styling/wrapping —
+// see commit 8692b0f's src/App.vue (the last commit before that merge): directly under
+// PageBar, always visible, no overlay/collapse. It's restored in the template below as a plain
+// in-flow section (`barSectionEl`), unconditionally rendered whenever `!isCampaignPage` (the
+// campaign page still doesn't use it — unchanged from before).
+//
+// What's new here: since the page can be taller than the viewport, an IntersectionObserver on
+// that in-flow section drives a small fixed top-right "Show filters" button that appears ONLY
+// once the bar scrolls out of view (never while it's visible — no redundant control on screen).
+// Clicking it pins a SECOND copy of the SAME FilterBar (same props/handlers, so it's always in
+// sync with the in-flow one) as a fixed overlay at the top of the viewport. The pin clears
+// itself the moment the in-flow bar scrolls back into view, or via the button again, Esc, or a
+// click outside it. The in-flow bar is never removed from the DOM while pinned — it keeps its
+// layout space, so nothing shifts when the pin appears (position: fixed is out of flow — see
+// CSS `.fb-pinned`).
+const barSectionEl = ref<HTMLElement | null>(null)
+const barVisible = ref(true) // assume visible until the observer reports otherwise (keeps the button hidden at first paint)
+const pinned = ref(false)
 const fbToggleBtn = ref<HTMLButtonElement | null>(null)
-const fbPanelId = 'fb-panel'
+const pinnedAnchor = ref<HTMLElement | null>(null)
+const fbPanelId = 'fb-pinned-panel'
 const touchCapable = isTouchDevice()
-let barHideTimer: number | undefined
+let barObserver: IntersectionObserver | undefined
 
-function openBar() {
-  clearTimeout(barHideTimer)
-  barOpen.value = true
+function observeBarSection(el: HTMLElement | null) {
+  barObserver?.disconnect()
+  barObserver = undefined
+  if (!el) {
+    // No in-flow bar on this page (e.g. the campaign page never renders one) — nothing to
+    // watch, and nothing to pin.
+    barVisible.value = true
+    pinned.value = false
+    return
+  }
+  barObserver = new IntersectionObserver(
+    ([entry]) => {
+      barVisible.value = entry.isIntersecting
+      if (entry.isIntersecting) pinned.value = false // back in view — the pin has done its job
+    },
+    { threshold: 0 },
+  )
+  barObserver.observe(el)
 }
-function scheduleCloseBar() {
-  clearTimeout(barHideTimer)
-  barHideTimer = window.setTimeout(() => {
-    barOpen.value = false
-  }, 350) // small delay so moving from the button to the panel doesn't flicker it shut
+// `flush: 'post'` — the template ref is only set after Vue patches the DOM (e.g. switching to
+// a page that hides/shows the in-flow bar via its own v-if).
+watch(barSectionEl, (el) => observeBarSection(el), { flush: 'post' })
+onMounted(() => observeBarSection(barSectionEl.value))
+onBeforeUnmount(() => barObserver?.disconnect())
+
+function togglePinned() {
+  pinned.value = !pinned.value
 }
-function closeBarNow() {
-  clearTimeout(barHideTimer)
-  barOpen.value = false
+// Reviewer fix (2026-09-27): the toggle stays in the tab order ALWAYS now (see the template —
+// no more `tabindex="-1"` while the in-flow bar is visible), so a keyboard user can reach it
+// even after tabbing past it earlier in the page. But there's nothing to pin while the in-flow
+// bar is already on screen — activating it there instead jumps focus straight to the bar's
+// first control, which is more useful than toggling a pin nobody can see the point of.
+function activateToggle() {
+  if (barVisible.value) {
+    focusFirstBarControl()
+    return
+  }
+  togglePinned()
 }
-// Escape returns focus to the toggle button — without this, focus is left on whatever was
-// inside the now-hidden panel (or lost entirely), stranding a keyboard user (LOW a11y fix).
-function closeBarAndReturnFocus() {
-  closeBarNow()
+function focusFirstBarControl() {
+  const el = barSectionEl.value?.querySelector<HTMLElement>(
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+  )
+  el?.focus()
+}
+function closePinned() {
+  pinned.value = false
+}
+// Returning focus to the toggle button on close (see closePinnedAndReturnFocus below) itself
+// fires the button's own `focus` event — which, on non-touch input, is exactly what
+// onToggleFocus below treats as "open the pin". Left unguarded, closing on Escape/outside-click
+// would immediately reopen itself via that refocus. `suppressNextFocusOpen` marks a focus that
+// WE caused (closing), synchronously, since `.focus()` dispatches its `focus` event before
+// returning — set the flag right before calling it and clear it right after, so only that one
+// synchronous focus is ignored and a genuine later Tab-focus still opens normally.
+let suppressNextFocusOpen = false
+// Escape / outside-click return focus to the toggle button — without this, focus is left on
+// whatever was inside the now-hidden pinned bar (or lost entirely), stranding a keyboard user.
+function closePinnedAndReturnFocus() {
+  closePinned()
+  suppressNextFocusOpen = true
   fbToggleBtn.value?.focus()
+  suppressNextFocusOpen = false
 }
-function onBarToggleActivate() {
-  // Touch has no hover — the button just toggles. Desktop/mouse reveals on hover instead
-  // (the click still works there too, e.g. for keyboard/assistive activation).
-  if (touchCapable) barOpen.value = !barOpen.value
-  else openBar()
+// Reviewer-flagged lockout this reuses on purpose (originally fixed on the old always-hidden
+// function-bar toggle — see App.test.ts): a real touch tap fires `focus` BEFORE `click`
+// (touchstart -> touchend -> mouseover/mousemove/mousedown -> focus -> mouseup -> click). If
+// focus opened the pin unconditionally, that SAME tap's trailing click would immediately toggle
+// it back closed — a lockout, not a flicker. Gated to skip touch entirely, same as before: touch
+// relies solely on the click handler's toggle below.
+//
+// Verified against a real click too (Playwright, Chromium): a plain MOUSE click on a <button>
+// ALSO fires `focus` before `click` (mousedown -> focus -> mouseup -> click) — the original
+// v0.6-0.8 toggle never hit this because its non-touch click handler just called an idempotent
+// `openBar()`, never a toggle. This button's click handler DOES toggle (for every input type,
+// per the "click it again to unpin" requirement), so gating on touch alone isn't enough here —
+// a mouse click would open-then-immediately-close on that same click's focus+click pair. Added
+// `:focus-visible` as the non-touch condition: true for real keyboard (Tab) navigation, false
+// for a click-caused focus, so it only auto-opens on genuine keyboard nav and never fights a
+// pointer click's own toggle.
+function onToggleFocus(e: FocusEvent) {
+  if (suppressNextFocusOpen) return
+  if (touchCapable) return
+  if (barVisible.value) return // nothing to pin — the in-flow bar is already on screen
+  const el = e.target as HTMLElement
+  if (el.matches(':focus-visible')) pinned.value = true
 }
-function onBarAreaEnter() {
-  if (!touchCapable) openBar()
+function onDocumentClickForPinned(e: MouseEvent) {
+  if (!pinned.value) return
+  const target = e.target as Node
+  if (fbToggleBtn.value?.contains(target)) return // its own click handler already toggles this
+  if (pinnedAnchor.value && !pinnedAnchor.value.contains(target)) closePinned()
 }
-// Reviewer-flagged lockout (2026-09-26): a real touch tap fires `focus` BEFORE `click`
-// (touchstart -> touchend -> mouseover/mousemove/mousedown -> focus -> mouseup -> click). The
-// toggle button used to open unconditionally on focus, then onBarToggleActivate's touch branch
-// immediately toggled it back closed on the very same tap's click — since this toggle is now
-// the ONLY way to reach the controls on touch (fix/clean-look), that was a full lockout, not
-// just a cosmetic flicker. Gated the same way as onBarAreaEnter/Leave: focus only opens on a
-// device that isn't touch-capable (keyboard/assistive nav there); on touch, the click handler's
-// own toggle is what opens it.
-function onBarToggleFocus() {
-  if (!touchCapable) openBar()
+function onGlobalKeyForPinned(e: KeyboardEvent) {
+  if (e.key === 'Escape' && pinned.value) closePinnedAndReturnFocus()
 }
-function onBarAreaLeave() {
-  if (!touchCapable) scheduleCloseBar()
-}
-// Close as soon as focus leaves the anchor/panel entirely (e.g. Tabbing past the last
-// control) — relatedTarget is the element gaining focus; null when focus leaves the
-// document (e.g. to the browser chrome), which we also treat as "left" (LOW a11y fix).
-function onBarFocusOut(e: FocusEvent) {
+// Close as soon as focus leaves the pinned panel entirely (e.g. Tabbing past its last control)
+// — relatedTarget is the element gaining focus; null when focus leaves the document (e.g. to
+// the browser chrome), also treated as "left".
+function onPinnedFocusOut(e: FocusEvent) {
   const next = e.relatedTarget as Node | null
-  if (!fbAnchor.value) return
-  if (!next || !fbAnchor.value.contains(next)) closeBarNow()
-}
-function onDocumentClickForBar(e: MouseEvent) {
-  if (!touchCapable || !barOpen.value) return
-  if (fbAnchor.value && !fbAnchor.value.contains(e.target as Node)) closeBarNow()
-}
-function onGlobalKeyForBar(e: KeyboardEvent) {
-  if (e.key === 'Escape' && barOpen.value) closeBarAndReturnFocus()
+  if (next === fbToggleBtn.value) return // shift-tabbing back to the toggle isn't "leaving"
+  if (!pinnedAnchor.value) return
+  if (!next || !pinnedAnchor.value.contains(next)) closePinned()
 }
 onMounted(() => {
-  document.addEventListener('click', onDocumentClickForBar)
-  document.addEventListener('keydown', onGlobalKeyForBar)
+  document.addEventListener('click', onDocumentClickForPinned)
+  document.addEventListener('keydown', onGlobalKeyForPinned)
 })
 onBeforeUnmount(() => {
-  document.removeEventListener('click', onDocumentClickForBar)
-  document.removeEventListener('keydown', onGlobalKeyForBar)
+  document.removeEventListener('click', onDocumentClickForPinned)
+  document.removeEventListener('keydown', onGlobalKeyForPinned)
 })
+
+// "Reveal all chart controls" — used to ride along with opening the old hidden function bar
+// (see Dashboard.vue's `controlsVisible` prop). Reviewer call (2026-09-27): the header must
+// match the pre-v0.6 layout EXACTLY, so there's no header control for this any more — ChartCard's
+// own per-chart reveal icon + zoom (v0.8) is the supported way to reach a chart's controls,
+// including on touch. Kept wired to Dashboard's `controls-visible` prop (stays false; cheap to
+// leave in place rather than unwind the prop) in case a future non-header trigger needs it.
+const revealAllControls = ref(false)
 
 // ── Theme ─────────────────────────────────────────────────────────────────────
 function applyDark() {
@@ -458,10 +525,17 @@ function toggleDark() {
           <span class="overline">Good Stuff Software · bot-free RUM</span>
         </div>
       </div>
-      <!-- AccountMenu (signed-in email + Sign out) stays visible in the header at all times —
-           unlike save-state/theme/add-chart, which live in the hidden function bar below,
-           this is identity/auth chrome, not page-modification chrome (owner requirement). -->
+      <!-- Restored to the pre-v0.6 layout EXACTLY (commit 8692b0f, reviewer-confirmed
+           2026-09-27): save-state, theme, add-chart, AccountMenu — in that order, nothing
+           else. No "reveal chart controls" button here — per-chart reveal + zoom (ChartCard.vue,
+           v0.8) is the way to show a chart's controls; `revealAllControls` below stays wired to
+           Dashboard's `controls-visible` prop (cheap to keep) but has no header UI to set it. -->
       <div class="top-actions">
+        <span v-if="saveLabel" class="save-state mono" :class="saveState">{{ saveLabel }}</span>
+        <button class="btn" @click="toggleDark" :title="dark ? 'Light mode' : 'Dark mode'">
+          {{ dark ? '☀' : '☾' }}
+        </button>
+        <button class="btn btn-primary" @click="addChart">＋ Add chart</button>
         <AccountMenu />
       </div>
     </header>
@@ -480,43 +554,55 @@ function toggleDark() {
       @restore="restoreDefaultCharts"
     />
 
-    <!-- Function bar: range/filters/add-chart/theme — hidden by default, revealed on hover
-         (desktop) or tap (touch); Escape or tapping outside hides it. Fixed top-right,
-         overlays the page rather than shifting the grid below. -->
-    <div ref="fbAnchor" class="fb-anchor" @mouseenter="onBarAreaEnter" @mouseleave="onBarAreaLeave" @focusout="onBarFocusOut">
+    <!-- Main filter bar — restored to normal flow (pre-v0.6 layout, commit 8692b0f): always
+         visible, directly under PageBar. Hidden only on the campaign page, whose widgets each
+         cover their own fixed campaign window and aren't filter-driven. -->
+    <div v-if="!isCampaignPage" ref="barSectionEl" class="filterbar-inflow">
+      <FilterBar
+        :filters="activePage.filters"
+        :sync-range="config.syncRange"
+        @change="onFiltersChange"
+        @toggle-sync="onToggleSync"
+      />
+    </div>
+
+    <!-- "Show filters" pin — visually hidden while the in-flow bar above is visible (see
+         barVisible / the IntersectionObserver on barSectionEl), but ALWAYS in the tab order
+         (reviewer fix, 2026-09-27: a keyboard user who tabbed past it earlier must still be able
+         to reach it — no `tabindex="-1"`) and never `aria-hidden` (it's always focusable, so it's
+         never truly hidden from assistive tech). Keyboard focus while merely visually hidden
+         reveals it via `:focus-visible` in CSS. Once out of view, clicking/activating it pins
+         the same FilterBar, fixed at the top of the viewport, until dismissed (this button
+         again, Esc, or a click outside it) or until scrolling back to where the in-flow bar is
+         visible again; while the in-flow bar IS visible, activating it just moves focus to the
+         bar's first control instead (nothing to pin — see activateToggle). -->
+    <div v-if="!isCampaignPage" class="fb-anchor">
       <button
         ref="fbToggleBtn"
         type="button"
         class="fb-toggle"
-        :aria-expanded="barOpen"
+        :class="{ 'fb-toggle-hidden': barVisible }"
+        :aria-expanded="pinned"
         :aria-controls="fbPanelId"
-        aria-label="Show page controls"
-        @mouseenter="onBarAreaEnter"
-        @focus="onBarToggleFocus"
-        @click="onBarToggleActivate"
-        @keydown.escape="closeBarAndReturnFocus"
+        aria-label="Show filters"
+        @focus="onToggleFocus"
+        @click="activateToggle"
+        @keydown.escape="closePinnedAndReturnFocus"
       >
         <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
-          <path d="M3 6h14M3 10h14M3 14h14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+          <path d="M3 5h14M6 10h8M9 15h2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
         </svg>
       </button>
       <Transition name="fb-fade">
-        <div v-if="barOpen" :id="fbPanelId" class="fb-panel">
-          <div class="fb-row top-actions">
-            <span v-if="saveLabel" class="save-state mono" :class="saveState">{{ saveLabel }}</span>
-            <button class="btn" @click="toggleDark" :title="dark ? 'Light mode' : 'Dark mode'">
-              {{ dark ? '☀' : '☾' }}
-            </button>
-            <button class="btn btn-primary" @click="addChart">＋ Add chart</button>
+        <div v-if="pinned" :id="fbPanelId" ref="pinnedAnchor" class="fb-pinned" @focusout="onPinnedFocusOut">
+          <div class="fb-pinned-inner">
+            <FilterBar
+              :filters="activePage.filters"
+              :sync-range="config.syncRange"
+              @change="onFiltersChange"
+              @toggle-sync="onToggleSync"
+            />
           </div>
-
-          <FilterBar
-            v-if="!isCampaignPage"
-            :filters="activePage.filters"
-            :sync-range="config.syncRange"
-            @change="onFiltersChange"
-            @toggle-sync="onToggleSync"
-          />
         </div>
       </Transition>
     </div>
@@ -531,7 +617,7 @@ function toggleDark() {
         :filters="activePage.filters"
         :dark="dark"
         :drill-open-id="drillMenu?.widgetId ?? null"
-        :controls-visible="barOpen"
+        :controls-visible="revealAllControls"
         @edit="editChart"
         @remove="removeWidget"
         @duplicate="duplicateWidget"
@@ -718,13 +804,23 @@ function toggleDark() {
   gap: 16px;
   flex-wrap: wrap;
 }
+.filterbar-inflow {
+  /* A plain block wrapper for the IntersectionObserver ref. NOT `display: contents` — a
+     `display: contents` element generates no box of its own, so `getBoundingClientRect()`
+     (which IntersectionObserver relies on) reports it as empty/zero-sized regardless of its
+     content, permanently misreporting it as out of view. A default block div has no
+     margin/padding/border, so it still sits exactly where FilterBar would as a direct .app
+     flex child (pre-v0.6 layout, commit 8692b0f: PageBar, then this, with .app's own
+     `gap: 14px` between them) while giving the observer real geometry to measure. */
+  min-width: 0;
+}
 .fb-anchor {
   position: fixed;
   top: 16px;
   right: 18px;
   /* Above EVERYTHING else that can overlay the page, including a zoomed ChartCard
      (z-index 1000/1001 — see ChartCard.vue) and the drill-down menu (1100 below) — the
-     toggle must stay reachable no matter what's on screen (MEDIUM review fix). */
+     toggle must stay reachable no matter what's on screen (MEDIUM review fix, carried over). */
   z-index: 1200;
 }
 .fb-toggle {
@@ -739,33 +835,43 @@ function toggleDark() {
   color: rgb(var(--ink-2));
   box-shadow: 0 2px 10px rgb(0 0 0 / 0.12);
   cursor: pointer;
+  opacity: 1;
+  transition: opacity 0.15s ease;
 }
 .fb-toggle:hover,
 .fb-toggle:focus-visible {
   color: rgb(var(--ink));
   border-color: rgb(var(--amber));
 }
-.fb-panel {
-  position: absolute;
-  top: 42px;
-  right: 0;
-  width: min(94vw, 640px);
-  max-height: 82vh;
-  overflow: auto;
-  background: rgb(var(--surface));
-  border: 1px solid rgb(var(--line-2));
-  border-radius: 14px;
-  box-shadow: 0 16px 44px rgb(0 0 0 / 0.28);
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+/* Visually hidden while the in-flow bar is visible (req #3) — kept in the DOM (not v-if'd away)
+   so it never causes a layout shift when it appears. It STAYS in the tab order even while
+   hidden this way (reviewer fix, 2026-09-27 — see the template, no `tabindex="-1"`), so a
+   keyboard user tabbing through the page still reaches it; the override below reveals it the
+   moment it gets real keyboard focus, even though the bar is on screen. */
+.fb-toggle-hidden {
+  opacity: 0;
+  pointer-events: none;
 }
-.fb-row.top-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
+.fb-toggle-hidden:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.fb-pinned {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  /* Above the drill-down menu (1100) and a zoomed ChartCard (1000/1001), below the toggle
+     itself (1200) so the toggle button always stays clickable to unpin. */
+  z-index: 1150;
+  background: rgb(var(--surface));
+  border-bottom: 1px solid rgb(var(--line-2));
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.2);
+}
+.fb-pinned-inner {
+  max-width: 1480px;
+  margin: 0 auto;
+  padding: 14px 22px;
 }
 .fb-fade-enter-active,
 .fb-fade-leave-active {
@@ -776,13 +882,22 @@ function toggleDark() {
   opacity: 0;
   transform: translateY(-4px);
 }
+@media (prefers-reduced-motion: reduce) {
+  .fb-toggle {
+    transition: none;
+  }
+  .fb-fade-enter-active,
+  .fb-fade-leave-active {
+    transition: none;
+  }
+}
 @media (max-width: 700px) {
   .fb-anchor {
     top: 10px;
     right: 12px;
   }
-  .fb-panel {
-    width: min(94vw, 420px);
+  .fb-pinned-inner {
+    padding: 10px 12px;
   }
 }
 .brand {
