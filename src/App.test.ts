@@ -13,6 +13,29 @@ import { describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import App from './App.vue'
 
+// The pin only does anything once the in-flow bar has scrolled out of view (App.filterbar.test.ts
+// covers that whole state machine) — while it's in view, activating the toggle moves focus to
+// the bar instead (reviewer fix, 2026-09-27), so this touch-lockout regression needs the bar
+// reported "out of view" first, same as a real scrolled-away touch tap would find it.
+class FakeIntersectionObserver {
+  callback: IntersectionObserverCallback
+  static instances: FakeIntersectionObserver[] = []
+  constructor(callback: IntersectionObserverCallback) {
+    this.callback = callback
+    FakeIntersectionObserver.instances.push(this)
+  }
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+  takeRecords(): IntersectionObserverEntry[] {
+    return []
+  }
+  fire(isIntersecting: boolean) {
+    this.callback([{ isIntersecting } as IntersectionObserverEntry], this as unknown as IntersectionObserver)
+  }
+}
+vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver)
+
 vi.mock('./lib/responsive', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./lib/responsive')>()
   return { ...actual, isTouchDevice: () => true }
@@ -59,7 +82,10 @@ async function touchTap(el: HTMLElement) {
 
 describe('App — show-filters pin toggle on touch (lockout regression)', () => {
   it('pins on the first tap and unpins on the second, never stuck closed', async () => {
+    FakeIntersectionObserver.instances = []
     const w = mount(App, { attachTo: document.body })
+    await flushPromises()
+    FakeIntersectionObserver.instances[0].fire(false) // the in-flow bar has scrolled away
     await flushPromises()
     const toggle = w.get('.fb-toggle')
     expect(toggle.attributes('aria-expanded')).toBe('false')

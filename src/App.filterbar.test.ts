@@ -1,15 +1,20 @@
 // @vitest-environment happy-dom
 //
 // Owner request (2026-09-26): the main filter bar is back in normal flow (see App.vue's
-// `filterbar-inflow` section, restored to its pre-v0.6 layout — commit 8692b0f). These tests
-// cover the NEW bit: the IntersectionObserver-driven "show filters" pin that takes over once
-// that in-flow bar scrolls out of the viewport. State machine under test (App.vue: barVisible /
-// pinned):
-//   in view      -> toggle button hidden
+// `filterbar-inflow` section, restored to its pre-v0.6 layout — commit 8692b0f — EXACTLY,
+// reviewer-confirmed 2026-09-27: header order is save-state/dark-toggle/add-chart/AccountMenu,
+// nothing else). These tests cover the NEW bit: the IntersectionObserver-driven "show filters"
+// pin that takes over once that in-flow bar scrolls out of the viewport. State machine under
+// test (App.vue: barVisible / pinned):
+//   in view      -> toggle button visually hidden, but ALWAYS in the tab order
 //   out of view  -> toggle button shown
 //   click        -> pinned (a second copy of FilterBar fixed at the top of the viewport)
 //   back in view -> unpinned, button hidden again
 //   Esc          -> unpinned, focus returns to the toggle
+// Reviewer fix (2026-09-27): a keyboard user who has tabbed past the toggle must still be able
+// to reach it once the bar scrolls away, so it's never `tabindex="-1"`/`aria-hidden`. Focusing
+// or activating it while the in-flow bar IS visible does nothing pin-related (nothing to pin) —
+// activating it instead moves focus to the bar's first control.
 // happy-dom ships a real `IntersectionObserver` constructor but never fires it on its own (no
 // actual layout/scrolling) — these tests stub it with a controllable fake so `observe()` is
 // captured and its callback can be driven by hand.
@@ -96,11 +101,14 @@ describe('App — main filter bar: in-flow layout + show-filters pin state machi
     w.unmount()
   })
 
-  it('hides the show-filters button while the in-flow bar is in view', async () => {
+  it('visually hides the show-filters button while the in-flow bar is in view, but keeps it in the tab order', async () => {
     const w = await mountApp()
     const toggle = w.get('.fb-toggle')
     expect(toggle.classes()).toContain('fb-toggle-hidden')
-    expect(toggle.attributes('aria-hidden')).toBe('true')
+    // Reviewer fix (2026-09-27): never tabindex="-1", never aria-hidden — a keyboard user who
+    // tabbed past this earlier must still be able to reach it once the bar scrolls away.
+    expect(toggle.attributes('tabindex')).toBeUndefined()
+    expect(toggle.attributes('aria-hidden')).toBeUndefined()
     w.unmount()
   })
 
@@ -114,7 +122,31 @@ describe('App — main filter bar: in-flow layout + show-filters pin state machi
 
     const toggle = w.get('.fb-toggle')
     expect(toggle.classes()).not.toContain('fb-toggle-hidden')
-    expect(toggle.attributes('aria-hidden')).toBe('false')
+    expect(toggle.attributes('aria-hidden')).toBeUndefined()
+    w.unmount()
+  })
+
+  it('focusing the toggle while the in-flow bar is visible does not pin anything', async () => {
+    const w = await mountApp()
+    // Bar is in view (default state) — nothing has scrolled it away.
+    const toggle = w.get('.fb-toggle')
+    await toggle.trigger('focus')
+    expect(w.find('#fb-pinned-panel').exists()).toBe(false)
+    expect(toggle.attributes('aria-expanded')).toBe('false')
+    w.unmount()
+  })
+
+  it('activating the toggle while the in-flow bar is visible moves focus to the bar instead of pinning', async () => {
+    const w = await mountApp()
+    const toggle = w.get('.fb-toggle')
+    await toggle.trigger('click')
+
+    // Nothing pinned — there's nothing to pin while the in-flow bar is already on screen.
+    expect(w.find('#fb-pinned-panel').exists()).toBe(false)
+    // Focus landed on a real control inside the in-flow bar, not the toggle itself.
+    const inflow = w.get('.filterbar-inflow').element
+    expect(inflow.contains(document.activeElement)).toBe(true)
+    expect(document.activeElement).not.toBe(toggle.element)
     w.unmount()
   })
 
@@ -186,17 +218,18 @@ describe('App — main filter bar: in-flow layout + show-filters pin state machi
   })
 })
 
-describe('App — "reveal all chart controls" stays reachable without the old hidden panel', () => {
-  it('is an always-present header toggle, independent of the filter-bar pin state', async () => {
+describe('App — header matches the pre-v0.6 layout EXACTLY (reviewer fix, 2026-09-27)', () => {
+  it('has no "reveal chart controls" button — only save-state, dark-toggle, add-chart, AccountMenu', async () => {
     const w = await mountApp()
-    // Not gated behind barOpen/pinned — it's a plain always-visible button in the header now.
     const buttons = w.findAll('.top-actions button')
+    // Every button in top-actions must be one of the two plain header buttons (theme toggle,
+    // add chart) — no button carries aria-pressed (that was the removed reveal-controls toggle).
     expect(buttons.length).toBeGreaterThan(0)
-    const revealBtn = buttons.find((b) => b.attributes('aria-pressed') !== undefined)
-    expect(revealBtn).toBeTruthy()
-    expect(revealBtn!.attributes('aria-pressed')).toBe('false')
-    await revealBtn!.trigger('click')
-    expect(revealBtn!.attributes('aria-pressed')).toBe('true')
+    for (const b of buttons) {
+      expect(b.attributes('aria-pressed')).toBeUndefined()
+    }
+    const texts = buttons.map((b) => b.text())
+    expect(texts.some((t) => t.includes('Add chart'))).toBe(true)
     w.unmount()
   })
 })
