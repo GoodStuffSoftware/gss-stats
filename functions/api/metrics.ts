@@ -1,0 +1,92 @@
+/// <reference types="@cloudflare/workers-types" />
+//
+// POST /api/metrics — one batched endpoint for every registered metric and ratio (ADR 0003
+// section 3). The client sends registry ids and params, never SQL:
+//
+//   1. Validate  (src/lib/metrics/validate.ts): a 64 KiB body cap, at most 200 requests, keys
+//      by regex, ids by registry Map lookup, only each metric's declared params, campaignId and
+//      popup from their sets, sites/dates by the shared regexes, exact-true booleans.
+//   2. Plan      (src/lib/metrics/engine.ts planBatch): distinct facts, deduplicated.
+//   3. Budget    more than 40 statements → 413 { maxStatements } (D1 allows 50 per invocation).
+//   4. Fetch     (functions/_lib/metricFacts.ts): each fact once, per-fact Cache API entries.
+//   5. Derive    (engine.ts deriveBatch): counts, gateRate/MIN_COHORT rates with n/d,
+//      instrumentation statuses, deltas, lag — numbers, enums and note ids only, never text.
+//
+// Behind functions/_middleware.ts like every /api/* route: the Google sign-in gate plus its
+// Origin check on non-GET requests (ADR 0002). ANONYMOUS AGGREGATES ONLY: every fact is a
+// COUNT(*) GROUP BY (or the stored-spend summary); nothing is a row fetch or a join.
+//
+// POST { v: 1, context?: { since?, until?, sites?, excludeOwnVisits?, ownBrowser?, ownOS? },
+//        fresh?: true, requests: [{ key, metric | ratio, params?, window?, deltas?, minCohort? }] }
+
+import { etDateFromMs } from '../../src/lib/popupEvents'
+import { deriveBatch, planBatch } from '../../src/lib/metrics/engine'
+import { MAX_BODY_BYTES, MAX_STATEMENTS, validateMetricsRequest } from '../../src/lib/metrics/validate'
+import type { MetricsResponseBody } from '../../src/lib/metrics/types'
+import { fetchFacts, type MetricFactsEnv } from '../_lib/metricFacts'
+import type { CacheLike } from '../_lib/edgeCache'
+
+const json = (data: unknown, status = 200): Response =>
+  new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+  })
+
+/** The body as text, or null once it passes `max` bytes (read incrementally, never buffered past
+ * the cap — a declared Content-Length is not trusted on its own). */
+async function readCapped(request: Request, max: number): Promise<string | null> {
+  const declared = Number(request.headers.get('Content-Length'))
+  if (Number.isFinite(declared) && declared > max) return null
+  if (!request.body) return ''
+  const reader = request.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > max) {
+      await reader.cancel()
+      return null
+    }
+    chunks.push(value)
+  }
+  const buf = new Uint8Array(total)
+  let at = 0
+  for (const c of chunks) {
+    buf.set(c, at)
+    at += c.byteLength
+  }
+  return new TextDecoder().decode(buf)
+}
+
+export const onRequestPost: PagesFunction<MetricFactsEnv> = async (ctx) => {
+  const text = await readCapped(ctx.request, MAX_BODY_BYTES)
+  if (text === null) return json({ error: 'body too large', maxBytes: MAX_BODY_BYTES }, 413)
+  const batch = validateMetricsRequest(text)
+  if (!batch.ok) return json({ error: batch.error, ...batch.detail }, batch.status)
+  if (!ctx.env.gss_geo) return json({ error: 'geo DB not bound' }, 500)
+
+  const nowMs = Date.now()
+  const env = { context: batch.context, nowMs, todayEt: etDateFromMs(nowMs), hasAdsDb: !!ctx.env.gss_stats_ads }
+  const plan = planBatch(
+    batch.requests.flatMap((r) => (r.ok ? [r.req] : [])),
+    env,
+  )
+  if (plan.statements > MAX_STATEMENTS) {
+    return json({ error: 'batch needs more statements than one request may run; split it', maxStatements: MAX_STATEMENTS, statements: plan.statements }, 413)
+  }
+
+  const cache = (caches as unknown as { default: CacheLike }).default
+  const fetched = await fetchFacts(plan, ctx.env, { nowMs, fresh: batch.fresh, cache, waitUntil: (p) => ctx.waitUntil(p) })
+  const body: MetricsResponseBody = {
+    v: 1,
+    generatedAt: new Date(nowMs).toISOString(),
+    results: deriveBatch(batch.requests, { ...env, facts: fetched.facts }),
+    meta: { facts: plan.facts.length, cacheHits: fetched.cacheHits, statements: fetched.statements },
+  }
+  return json(body)
+}
+
+export const onRequestGet: PagesFunction = async () =>
+  json({ ok: true, hint: 'POST a metrics batch: { v: 1, context?, requests: [{ key, metric | ratio, params?, window?, deltas? }] }' })

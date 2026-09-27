@@ -6,6 +6,12 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Groundwork for configurable metric cards: one batched metrics request.** A single request
+  returns many dashboard numbers with their counts and measurement status, reads each underlying
+  query once and caches it, and refuses any percentage whose two counts are not comparable. The
+  dashboard does not use it yet.
+
 ### Changed
 - **"Games played" and "Played a game" are now "Game-screen views".** Both count visits to the
   game screen (page views, several per device), not games played; the Overview tile and the

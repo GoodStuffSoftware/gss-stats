@@ -212,6 +212,7 @@ Cloudflare Pages Functions  (functions/_middleware.ts → functions/api/*.ts)
    │  - /api/campaigns → Google Ads campaign comparison from the same D1 (funnel, hour-of-day,
    │                      country, daily/cumulative, device mix, return visits)
    │  - /api/overview → today-at-a-glance KPIs, daily timeline, campaign scorecard, release panel
+   │  - /api/metrics  → one batch of registry metrics/ratios by id (ADR 0003; for the card components)
    │  - /api/ads/readings → the ads routine's readings log + stored spend (D1 gss-stats-ads)
    │  - /api/sites  → auto-builds the merged site list (RUM + beacon, aliases folded)
    │  - /api/config → dashboard layout in KV
@@ -224,7 +225,11 @@ Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats
   GROUP BY` statement) it is counted from, its params, windows and go-live rules. A percentage is
   registered only when numerator and denominator share a unit and the numerator is a declared
   subset of the denominator; an invalid ratio fails at import. Labels are notes-registry entries.
-  Card components that read it through one batched endpoint come in later slices.
+  `POST /api/metrics` answers a batch of registry ids and params (never SQL): it validates every
+  id and param against the registry, plans the distinct facts (at most 40 statements, else `413`
+  with `maxStatements`), caches each fact on its own in the Cache API, and derives every value in
+  JS with its status (`ok`, `too-few`, `no-data`, `unmeasured`, `partial`), n/d, deltas and a
+  provisional flag for lagged outcomes. The card components that call it come in later slices.
 - **Two datasets, one dashboard.** RUM (sampled, human-only) and the beacon (every
   real load, sub-country geo) are charted side by side; they're independent and never
   summed.
@@ -442,7 +447,7 @@ per 10 minutes. The dashboard holds no Google Ads credential and never calls the
 | Contributing / conventions | [CLAUDE.md](CLAUDE.md) |
 | Auth design (ADR) | [docs/adr/0002-google-auth.md](docs/adr/0002-google-auth.md) |
 | Ads store decision | [docs/adr/0001-ads-read-store.md](docs/adr/0001-ads-read-store.md) |
-| Metric components design (ADR; registry built, cards pending) | [docs/adr/0003-metric-components.md](docs/adr/0003-metric-components.md) |
+| Metric components design (ADR; registry and endpoint built, cards pending) | [docs/adr/0003-metric-components.md](docs/adr/0003-metric-components.md) |
 | Ads routine prompts | [docs/routines/](docs/routines/) |
 | Geo beacon (companion) | [GoodStuffSoftware/gss-beacon](https://github.com/GoodStuffSoftware/gss-beacon) |
 | Capacity / free-plan limits | [docs/capacity.md](docs/capacity.md) |
@@ -465,6 +470,11 @@ query. Mitigations (`functions/_lib/edgeCache.ts`, `functions/api/geo.ts`, `func
 - `/api/geo` and `/api/stats` responses are cached (Cache API, keyed by the full normalized
   query) with a long TTL for date ranges that end before today (immutable — they can't change)
   and a short TTL for ranges that include today.
+
+- `/api/metrics` caches per fact (90 s while live, 15 min for a closed campaign, 24 h for a closed
+  flight window), so one fact read serves every card and page that shows it; a representative
+  Overview batch reads about 10,000 rows uncached against about 14,100 for the same sections of
+  `/api/overview` (docs/capacity.md §7).
 
 No index changes and no schema/data writes were needed — see docs/capacity.md §4 for why (the
 `hits` table is too small for an index to matter, and `GROUP BY` requires a temp b-tree
