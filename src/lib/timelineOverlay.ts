@@ -57,21 +57,27 @@ export function releaseItems(): OverlayItem[] {
   return datedReleases().map((r) => ({ kind: r.major ? 'release' : 'minor-release', date: r.dateEt, label: r.version, note: r.note }))
 }
 
-export function flightItems(flights: CampaignFlight[] = CAMPAIGNS): OverlayItem[] {
+/** A flight's band: closed flights end at flightEnd. An ACTIVE flight is open-ended (runs to the
+ * axis end) only while it's still inside its serving window (ET today <= flightEnd); once past
+ * it, it ends at flightEnd like any other, even if nobody has flipped its status yet. */
+export function flightItems(flights: CampaignFlight[] = CAMPAIGNS, todayEt: string = etDateFast(Date.now())): OverlayItem[] {
   return flights
     .filter((f) => f.flightStart !== null && f.status !== 'upcoming')
-    .map((f) => ({
-      kind: 'flight' as const,
-      date: f.flightStart!,
-      ...(f.status === 'active' ? { openEnded: true } : { endDate: f.flightEnd }),
-      label: f.label,
-      note: f.status === 'active' ? `Campaign flight from ${f.flightStart}, still serving.` : `Campaign flight ${f.flightStart} to ${f.flightEnd}.`,
-    }))
+    .map((f) => {
+      const open = f.status === 'active' && todayEt <= f.flightEnd
+      return {
+        kind: 'flight' as const,
+        date: f.flightStart!,
+        ...(open ? { openEnded: true } : { endDate: f.flightEnd }),
+        label: f.label,
+        note: open ? `Campaign flight from ${f.flightStart}, still serving.` : `Campaign flight ${f.flightStart} to ${f.flightEnd}.`,
+      }
+    })
 }
 
 /** Every overlay item the options switch on, sorted by date (flights first on a tie). */
-export function overlayItems(opts: OverlayOptions, flights: CampaignFlight[] = CAMPAIGNS): OverlayItem[] {
-  const items = [...(opts.flights ? flightItems(flights) : []), ...(opts.releases ? releaseItems() : []), ...(opts.goLive ? goLiveItems() : [])]
+export function overlayItems(opts: OverlayOptions, flights: CampaignFlight[] = CAMPAIGNS, todayEt?: string): OverlayItem[] {
+  const items = [...(opts.flights ? flightItems(flights, todayEt) : []), ...(opts.releases ? releaseItems() : []), ...(opts.goLive ? goLiveItems() : [])]
   const order: Record<OverlayKind, number> = { flight: 0, release: 1, 'go-live': 2, 'minor-release': 3 }
   return items.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : order[a.kind] - order[b.kind]))
 }

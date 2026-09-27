@@ -7,6 +7,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **A chart's own site pick.** "Site override" in the chart editor now really narrows that one
+  chart to a site (e.g. Best Sudoku), leaving the page's site pick and dates alone; the Overall
+  timeline uses it, wherever it sits.
 - **A US-Eastern date axis for beacon trend charts.** "Date (trend, ET)" buckets by Eastern day,
   daylight saving included; the Overall timeline uses it, so its days line up with its flight
   bands and go-live markers.
@@ -29,7 +32,10 @@ All notable changes to **gss-stats** are documented here. The format follows
   to the page are kept.
 - **The campaign device mix uses the standard nested pie.** Campaign flight, then device, then
   operating system, on the same chart the other pages use for site and device, labelled as a
-  share of tagged hits. Saved layouts keep its place, size and title.
+  share of tagged hits. Saved layouts keep its place, size, title and captions, and a chart
+  scoped to one campaign keeps that scope. What changed: the browser and screen-width shares
+  are gone (add them as extra rings from the chart editor), and an operating system's
+  percentage is now its share within its device, not within the whole campaign.
 - **The Overall timeline is a standard line chart.** Same look (page views and tagged arrivals
   on the left, sign-ins, installs and raw install signals on the right, campaign-flight bands,
   release and go-live markers), now edited in the normal chart editor. Hovering or tapping a

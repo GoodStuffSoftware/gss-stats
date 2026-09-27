@@ -28,7 +28,8 @@ export async function fetchSeriesStats(widget: Widget, filters: GlobalFilters): 
 export async function fetchStats(widget: Widget, filters: GlobalFilters, extraConstraints: { field: string; value: string }[] = []): Promise<StatsResponse> {
   // Resolve the site selection into concrete RUM hosts + beacon tags. Empty = all
   // real sites; dev/preview hosts are never in the list, so they never count.
-  const { hosts, tags } = resolveSelection(filters.siteSel)
+  // A chart's own site override (Widget.siteSel) replaces the page's site pick; nothing else.
+  const { hosts, tags } = resolveSelection(widget.siteSel ?? filters.siteSel)
 
   // Pop-up funnel dataset → /api/popups (same D1 `hits` table as the beacon, but
   // classified as sign-in/upsell/install events rather than page views).

@@ -1,6 +1,7 @@
 import type { DashboardConfig, DashboardPage, GlobalFilters, LineSeries, Widget } from '../types'
 import { parseDurationMs } from './range'
 import { POPUPS, POPUP_RATE_SPECS, NO_OUTCOME_TRACKING_NOTE, SIGNIN_ELIGIBLE_CAVEAT } from './popupEvents'
+import { CAMPAIGNS } from './campaigns'
 
 export function defaultDateRange(): { since: string; until: string } {
   const until = new Date()
@@ -189,10 +190,17 @@ export function defaultBestSudokuPopupsWidgets(): Widget[] {
   ]
 }
 
-// The id set the pre-v9 generator produced (one kind bar + tap tile per pop-up, reason bars,
-// two trends, the eligibility bar + rate, the install-outcomes table, one rate tile per
-// outcome spec). The v9 migration removes these from a saved Pop-ups page, except
-// 'pu-eligible-bd' (kept, see above). Frozen here rather than derived from today's generator.
+// Every widget id a pre-v9 Pop-ups generator ever produced, by PATTERN (from the full git
+// history of this file, v0.3.0 on): `pu-<popup>-kind|tap|reason|trend`, `pu-rate-<spec key>`
+// (every rate tile, including specs later removed, e.g. v0.3.0's
+// `pu-rate-first50-congrats:outcome:returned`), plus the fixed `pu-eligible-rate` and
+// `pu-install-outcomes`. The v9 migration removes all of these from a saved Pop-ups page, except
+// 'pu-eligible-bd' (kept, see above). Owner-made widgets never match (their ids are random).
+const POPUPS_PRE_V9_ID_PATTERNS = [/^pu-rate-/, /^pu-.+-(kind|tap|reason|trend)$/, /^pu-eligible-rate$/, /^pu-install-outcomes$/]
+export function isPrePopupsV9GeneratedId(id: string): boolean {
+  return POPUPS_PRE_V9_ID_PATTERNS.some((re) => re.test(id))
+}
+// Today's generator ids (for tests / fixtures) — every one matches the patterns above.
 export function popupsPageV8FactoryIds(): string[] {
   const ids: string[] = []
   for (const p of POPUPS) {
@@ -214,8 +222,7 @@ const POPUPS_V8_ELIGIBILITY_TITLE = 'Sign-in eligibility — earned / capped / u
  * relative order, moved down below the new block. Idempotent: a second run finds no v8 tile to
  * remove and both new widgets already present, and returns the page unchanged. */
 export function migratePopupsPageV9(page: DashboardPage): DashboardPage {
-  const removable = new Set(popupsPageV8FactoryIds().filter((id) => !POPUPS_V9_KEPT_IDS.has(id)))
-  const survivors = page.widgets.filter((wd) => !removable.has(wd.id))
+  const survivors = page.widgets.filter((wd) => POPUPS_V9_KEPT_IDS.has(wd.id) || !isPrePopupsV9GeneratedId(wd.id))
   const defaults = defaultBestSudokuPopupsWidgets()
   const fresh = defaults.filter((wd) => !POPUPS_V9_KEPT_IDS.has(wd.id) && !survivors.some((k) => k.id === wd.id))
   if (survivors.length === page.widgets.length && fresh.length === 0) return page
@@ -394,17 +401,31 @@ export function deviceMixWidget(geom: { x: number; y: number; w: number; h: numb
 export function isBespokeDeviceMix(wd: Widget): boolean {
   return wd.dataset === 'campaigns' && wd.view === 'deviceMix'
 }
-/** v9: swap every bespoke device-mix table for the nested doughnut, in place: same id, grid
- * position and size, and the owner's own title if they renamed it. Idempotent (nothing left to
- * swap on a second run). */
+/** The nested doughnut that replaces one bespoke device-mix table: same id, grid position, size,
+ * default mark and captions (the owner's own notes, plus the tagged-hits population note), the
+ * owner's title if they renamed it, and — when the table was scoped to ONE campaign — that
+ * campaign as a campaignFlight filter on the chart. A table scoped to several (but not all)
+ * campaigns can't be expressed as one equality filter, so it shows every flight (each is its own
+ * inner ring anyway). */
+function deviceMixFromBespoke(wd: Widget): Widget {
+  const next = deviceMixWidget({ x: wd.x, y: wd.y, w: wd.w, h: wd.h }, wd.id, wd.title === 'Device mix' ? DEVICE_MIX_TITLE : wd.title)
+  next.isDefault = wd.isDefault
+  if (wd.notes) next.notes = wd.notes.includes('device-mix-population') ? [...wd.notes] : [...wd.notes, 'device-mix-population']
+  const ids = (wd.campaignIds ?? []).filter((id) => CAMPAIGNS.some((c) => c.id === id))
+  if (ids.length === 1) {
+    const c = CAMPAIGNS.find((x) => x.id === ids[0])!
+    next.filters = { ...next.filters!, drill: [{ key: 'campaignFlight', value: c.id, label: c.label }] }
+  }
+  return next
+}
+/** v9: swap every bespoke device-mix table for the nested doughnut in place (deviceMixFromBespoke).
+ * Idempotent (nothing left to swap on a second run). */
 export function migrateDeviceMixV9(page: DashboardPage): DashboardPage {
   if (!page.widgets.some(isBespokeDeviceMix)) return page
   return {
     ...page,
     widgets: page.widgets.map((wd) =>
-      isBespokeDeviceMix(wd)
-        ? { ...deviceMixWidget({ x: wd.x, y: wd.y, w: wd.w, h: wd.h }, wd.id, wd.title === 'Device mix' ? DEVICE_MIX_TITLE : wd.title), isDefault: wd.isDefault }
-        : wd,
+      isBespokeDeviceMix(wd) ? deviceMixFromBespoke(wd) : wd,
     ),
   }
 }
@@ -466,7 +487,7 @@ export const TIMELINE_SERIES: LineSeries[] = [
   { label: 'Tagged arrivals', filter: [{ field: 'arrival', value: 'tagged' }], axis: 'left', style: 'solid', color: 1 },
   { label: 'Auth successes', filter: [{ field: 'keyEvent', value: 'auth-success' }], axis: 'right', style: 'dashed', color: 3 },
   { label: 'Installs', filter: [{ field: 'keyEvent', value: 'install' }], axis: 'right', style: 'dashed', color: 4 },
-  { label: 'Raw install signals', filter: [{ field: 'keyEvent', value: 'raw-install-signal' }], axis: 'right', style: 'dotted', color: 7 },
+  { label: 'Raw install signals (can double-count)', filter: [{ field: 'keyEvent', value: 'raw-install-signal' }], axis: 'right', style: 'dotted', color: 7 },
 ]
 export function timelineWidget(geom: { x: number; y: number; w: number; h: number }, id = 'ow-timeline', title = 'Overall timeline'): Widget {
   return {
@@ -483,6 +504,9 @@ export function timelineWidget(geom: { x: number; y: number; w: number; h: numbe
     goLiveMarkers: true,
     flightBands: true,
     excludeKnownTraffic: true,
+    // Best Sudoku sites for this chart only (the "Site override"), so the page's own site pick —
+    // and every other chart on the page — stays exactly as the owner set it.
+    siteSel: [...BEST_SUDOKU_SITES],
     series: TIMELINE_SERIES.map((x) => ({ ...x, filter: x.filter?.map((f) => ({ ...f })) })),
     axisTitles: { left: 'page views / arrivals', right: 'auth / installs' },
     notes: ['overview-timeline-caption'],
@@ -528,9 +552,7 @@ export function defaultOverviewPage(): DashboardPage {
     id: 'bsk-overview',
     name: 'Best Sudoku · Overview',
     isDefault: false,
-    // Best Sudoku traffic only: the timeline (and the completions chart) are ordinary beacon
-    // charts that follow the page's site selection.
-    filters: { ...defaultFilters(), siteSel: [...BEST_SUDOKU_SITES], since: '2026-01-01T00:00:00.000Z', rangeRel: '' },
+    filters: { ...defaultFilters(), since: '2026-01-01T00:00:00.000Z', rangeRel: '' },
     widgets: defaultOverviewWidgets(),
   }
 }
@@ -680,6 +702,8 @@ function normWidget(x: any): Widget {
     markers: x.markers === 'releases' ? 'releases' : undefined,
     goLiveMarkers: x.goLiveMarkers === true || undefined,
     flightBands: x.flightBands === true || undefined,
+    // Per-chart site override (Widget.siteSel): site tokens only.
+    siteSel: Array.isArray(x.siteSel) ? x.siteSel.filter((t: any) => typeof t === 'string' && /^[a-z0-9.\-]{1,60}$/i.test(t)) : undefined,
     // Series line chart (Widget.series): label + optional field=value filters + axis/style.
     series: normSeries(x.series),
     axisTitles: normAxisTitles(x.axisTitles),
@@ -817,10 +841,9 @@ export function normalizeConfig(raw: any): DashboardConfig {
         let p: DashboardPage = pages[i]
         if (isBestSudokuPopupsPage(p)) p = migratePopupsPageV9(p)
         p = migrateDeviceMixV9(p)
+        // Page filters are never touched: the swapped timeline carries its own Best Sudoku site
+        // override (Widget.siteSel), whatever page it sits on.
         p = migrateTimelineV9(p)
-        // The timeline is a beacon chart now, following the page's site selection: an Overview
-        // page still on "all sites" (its old, inert default) is narrowed to Best Sudoku.
-        if (isOverviewPage(p) && !p.filters.siteSel.length) p = { ...p, filters: { ...p.filters, siteSel: [...BEST_SUDOKU_SITES] } }
         pages[i] = p
       }
     }

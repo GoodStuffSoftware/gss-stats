@@ -75,7 +75,11 @@ export interface Widget {
   rings?: string[]
   metric: Metric
   limit: number
-  site?: SiteKey // optional per-widget site override ('inherit' = use global)
+  site?: SiteKey // legacy per-widget site value (never applied by a query; see siteSel)
+  // Per-chart site selection (the chart editor's "Site override"): same tokens as the page's
+  // siteSel (a domain, a host, or a beacon tag). Set = this chart ignores the page's site pick,
+  // but still follows every other page filter (dates, drills, toggles). [] = all sites.
+  siteSel?: string[]
   host?: string // optional per-widget host override
   excludeSelfReferrals?: boolean
   // dataset 'geo' only: lift the standing exclusion of pop-up/install/return/game-complete/

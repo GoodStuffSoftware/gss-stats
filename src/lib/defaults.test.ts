@@ -493,6 +493,17 @@ describe('normalizeConfig — v9 migration (Pop-ups page + device mix)', () => {
     expect(other).toMatchObject({ id: 'dm2', type: 'nestedDoughnut', title: DEVICE_MIX_TITLE, x: 0, y: 5, w: 6, h: 8 })
   })
 
+  it("carries the owner's captions, and a single-campaign scope as a campaignFlight filter", () => {
+    const one = widget({ id: 'dm-one', dataset: 'campaigns', view: 'deviceMix', type: 'table', notes: ['small-sample'], campaignIds: ['24279250691'] })
+    const two = widget({ id: 'dm-two', dataset: 'campaigns', view: 'deviceMix', type: 'table', campaignIds: ['24279250691', '24215315197'] })
+    const [a, b] = migrateDeviceMixV9(page({ id: 'p', name: 'P', widgets: [one, two] })).widgets
+    expect(a.notes).toEqual(['small-sample', 'device-mix-population'])
+    expect(a.filters?.drill).toEqual([{ key: 'campaignFlight', value: '24279250691', label: 'US+CA web retest' }])
+    expect(a.campaignIds).toBeUndefined()
+    expect(b.notes).toEqual(['device-mix-population'])
+    expect(b.filters?.drill ?? []).toEqual([]) // several campaigns: every flight shows (its own ring)
+  })
+
   it('leaves every other page and widget exactly as saved', () => {
     const raw = v8Config()
     const norm = normalizeConfig(raw)
@@ -518,6 +529,19 @@ describe('normalizeConfig — v9 migration (Pop-ups page + device mix)', () => {
     const cfg: any = { version: 9, activePageId: 'bsk-popups', pages: [page({ id: 'bsk-popups', name: 'Best Sudoku · Pop-ups', widgets: [widget({ id: 'pu-upsell-kind', dataset: 'popup' })] })] }
     const norm = normalizeConfig(cfg)
     expect(norm.pages.find((p) => p.id === 'bsk-popups')!.widgets.map((w) => w.id)).toEqual(['pu-upsell-kind'])
+  })
+
+  it('removes every generator id from older releases too (a v0.3.0-shaped page), by pattern', () => {
+    const v030 = [
+      'pu-signin-prompt-kind', 'pu-signin-prompt-tap', 'pu-signin-prompt-trend',
+      'pu-first50-congrats-kind', 'pu-first50-congrats-tap',
+      'pu-rate-first50-congrats:outcome:signed-in', 'pu-rate-first50-congrats:outcome:installed', 'pu-rate-first50-congrats:outcome:returned',
+      'pu-rate-signin-prompt:outcome:signed-in', 'pu-rate-upsell:outcome:installed',
+      'pu-upsell-reason', 'pu-install-reason', 'pu-install-outcomes', 'pu-eligible-rate', 'pu-eligible-bd',
+    ].map((id, i) => widget({ id, dataset: 'popup', y: i * 4 }))
+    const mine = widget({ id: 'a1b2c3d4', title: 'Mine', dataset: 'popup', dimension: 'reason', y: 90 })
+    const out = migratePopupsPageV9(page({ id: 'bsk-popups', name: 'Best Sudoku · Pop-ups', widgets: [...v030, mine] }))
+    expect(out.widgets.map((w) => w.id)).toEqual(['pu-bars', 'pu-rates', 'pu-eligible-bd', 'a1b2c3d4'])
   })
 
   it('a Pop-ups page the owner emptied gets the two new widgets but not the eligibility bar back', () => {
@@ -572,12 +596,31 @@ describe('normalizeConfig — v9 migration (Overview timeline → standard line 
     expect(norm.pages.find((p) => p.id === 'default')!.widgets).toEqual(raw.pages[0].widgets)
   })
 
-  it('narrows an Overview page still on "all sites" to Best Sudoku, but leaves a chosen selection alone', () => {
-    const ov = normalizeConfig(v8Overview()).pages.find((p) => p.id === 'bsk-overview')!
-    expect(ov.filters.siteSel).toEqual(['bestsudoku-web', 'bestsudoku', 'bestsudoku-app'])
-    const raw = v8Overview()
-    raw.pages[1].filters.siteSel = ['bestsudoku-web']
-    expect(normalizeConfig(raw).pages.find((p) => p.id === 'bsk-overview')!.filters.siteSel).toEqual(['bestsudoku-web'])
+  it("never narrows a page's site pick: every migrated timeline carries its own Best Sudoku site override instead", () => {
+    const oldTimeline = (id: string) => widget({ id, title: 'Overall timeline', type: 'table', dataset: 'overview', view: 'timeline', x: 0, y: 0, w: 12, h: 12 })
+    const raw: any = {
+      version: 8,
+      activePageId: 'default',
+      pages: [
+        // the GSS Overview (id default) with a copy of the old timeline on it
+        page({ id: 'default', name: 'Overview', isDefault: true, widgets: [oldTimeline('t-gss'), widget({ id: 'g1', dataset: 'geo', dimension: 'city', type: 'hbar' })] }),
+        // a user page that happens to be NAMED like the BSK overview (matched by name)
+        page({ id: 'u-named', name: 'Best Sudoku Overview', widgets: [oldTimeline('t-named')] }),
+        // a scratch page with an old timeline copy and a site pick of its own
+        page({ id: 'scratch', name: 'Scratch', widgets: [oldTimeline('t-scratch')], filters: { siteSel: ['goodstuff.software'], since: '2026-01-01', until: '2026-01-02', excludeSelfReferrals: false, excludeOwnVisits: false, ownBrowser: '', ownOS: '' } }),
+        page({ id: 'bsk-overview', name: 'Best Sudoku · Overview', widgets: [oldTimeline('ow-timeline')] }),
+      ],
+    }
+    const norm = normalizeConfig(JSON.parse(JSON.stringify(raw)))
+    for (const [pageId, widgetId] of [['default', 't-gss'], ['u-named', 't-named'], ['scratch', 't-scratch'], ['bsk-overview', 'ow-timeline']]) {
+      const p = norm.pages.find((x) => x.id === pageId)!
+      const t = p.widgets.find((w) => w.id === widgetId)!
+      expect(t, widgetId).toMatchObject({ type: 'line', dataset: 'geo', dimension: 'dateEt', siteSel: ['bestsudoku-web', 'bestsudoku', 'bestsudoku-app'] })
+      // the page's own site pick is exactly what it was
+      expect(p.filters.siteSel, pageId).toEqual(raw.pages.find((x: any) => x.id === pageId).filters.siteSel)
+    }
+    // the GSS Overview's other chart is untouched
+    expect(norm.pages.find((x) => x.id === 'default')!.widgets.find((w) => w.id === 'g1')).toEqual(raw.pages[0].widgets[1])
   })
 
   it('is idempotent and the swap function is a no-op on its own output', () => {

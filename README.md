@@ -114,6 +114,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
 - **Exclusions** (global across pages) — hide self-referrals, hide your own visits by
   browser+OS, and an **"exclude this device"** opt-out that works on every site (see
   [gss-beacon](https://github.com/GoodStuffSoftware/gss-beacon)).
+- **Per-chart site pick** — "Site override" in the chart editor (`Widget.siteSel`) narrows one
+  chart to a site (e.g. Best Sudoku's web + app beacon tags) instead of the page's site pick;
+  dates, drills and the other page filters still apply.
 - **Line charts** — on a date axis, any line/area chart can draw release markers, go-live
   markers (tracking activation, the game-complete/auth beacons, the install fix, the raw-install
   de-dupe) and shaded campaign-flight bands (an active flight's band runs to the axis end), each
