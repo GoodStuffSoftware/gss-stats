@@ -33,6 +33,11 @@ All notable changes to **gss-stats** are documented here. The format follows
   or a hidden tile) once tracking is live, so "no failures yet" reads differently from "not
   wired up".
 
+### Fixed
+- **Chart queries with many sites and pop-up filters no longer refuse to run.** The dashboard's
+  documented maximums (50 sites, 16 path filters) work together again without hitting the
+  underlying database's per-query parameter ceiling.
+
 ## [0.12.1] — 2026-09-27
 
 ### Fixed

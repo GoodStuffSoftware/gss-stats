@@ -8,7 +8,7 @@
 //     event-beacon exclusion lift, the prefilters and the bind count are what a request gets.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
-import { breakdownColumnExpr, onRequestPost, RING_EXCLUDED_DIMS, EVENT_DIMS, GEO_DIMS } from './geo'
+import { breakdownColumnExpr, onRequestPost, RING_EXCLUDED_DIMS, EVENT_DIMS, GEO_DIMS, statementTooLarge } from './geo'
 import type { CacheLike } from '../_lib/edgeCache'
 import {
   INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS,
@@ -321,34 +321,26 @@ describe('review fixes: arrivals, raw signals, date limit, request caps', () => 
     expect(ok.body.error).toBeUndefined()
   })
 
-  // 46 sites, not 50: two more event-beacon prefixes (lib/popupEvents.ts POPUP_EVENT_PREFIXES,
-  // auth-error/auth-redirect) each add a `path <> ? AND path NOT LIKE ?` pair to the standing
-  // exclusion every query here carries, so the site count is trimmed by 4 to keep this fixture
-  // landing on the same round total (110) it always has — the boundary being tested is D1's own
-  // 100-param cap, not this repo's current exclusion-clause size.
-  it('refuses a statement over D1\'s 100 bound parameters with a clear 400 (46 sites + 16 path filters + a referrer ring)', async () => {
+  // REGRESSION FIXED 2026-09-27 (D1 bind-ceiling review round): this test used to run the
+  // documented worst case at 46 sites, not the real 50-site MAX_SITES — a comment here used to
+  // explain that two more event-beacon prefixes (lib/popupEvents.ts POPUP_EVENT_PREFIXES,
+  // auth-error/auth-redirect) each added a `path <> ? AND path NOT LIKE ?` BOUND pair to the
+  // standing exclusion every query here carries, pushing the documented maximum (50 sites + 16
+  // path filters + a referrer x device ring + "hide my own visits") from exactly 100 D1 bound
+  // parameters to 104 — refused with a 400 even though every individual input was within its
+  // own documented cap. Rather than fix that, the PR quietly shrank the fixture to 46 sites so
+  // the boundary test kept landing on a round number. The real fix (lib/popupEvents.ts
+  // popupExcludeClause / popupIncludeClause now emit escaped SQL literals instead of binds —
+  // see that file's doc comment) means the standing exclusion costs ZERO bind slots regardless
+  // of how many prefixes POPUP_EVENT_PREFIXES holds, so the REAL 50-site maximum is used below
+  // again, and the worst case that used to 400 is asserted allowed, at the real caps, through
+  // the real handler.
+  it('the documented worst case (50 sites + 16 path filters + a referrer x device ring + hide-my-own-visits) is allowed again', async () => {
     const { body, calls } = await post({
       dimension: 'referrer',
       breakdown: 'device',
       dims: ['referrer', 'device'],
-      sites: Array.from({ length: 46 }, (_, i) => `s${i}`),
-      constraints: Array.from({ length: 16 }, (_, i) => ({ field: 'path', value: `/p${i}` })),
-      excludeOwnVisits: true,
-      ownBrowser: 'Opera',
-      ownOS: 'Windows',
-      excludeKnownTraffic: true,
-      ...range,
-    })
-    expect(body.error).toMatch(/too many to query at once \(110 values; at most 100\)/)
-    expect(calls).toHaveLength(0) // never reached D1
-  })
-
-  it('exactly 100 bound parameters is still allowed', async () => {
-    const { body, calls } = await post({
-      dimension: 'referrer',
-      breakdown: 'device',
-      dims: ['referrer', 'device'],
-      sites: Array.from({ length: 46 }, (_, i) => `s${i}`),
+      sites: Array.from({ length: 50 }, (_, i) => `s${i}`),
       constraints: Array.from({ length: 16 }, (_, i) => ({ field: 'path', value: `/p${i}` })),
       excludeOwnVisits: true,
       ownBrowser: 'Opera',
@@ -356,7 +348,45 @@ describe('review fixes: arrivals, raw signals, date limit, request caps', () => 
       ...range,
     })
     expect(body.error).toBeUndefined()
-    expect(calls[0].binds.length).toBe(100)
+    expect(calls).toHaveLength(1) // reached D1 — never refused before getting there
+    // Comfortably under D1's 100-parameter cap now that the exclusion clause is bind-free —
+    // pre-fix, this exact combination would have bound 104 and been refused with a 400.
+    expect(calls[0].binds.length).toBeLessThan(100)
+    expect(calls[0].binds.length).toBe(81)
+  })
+
+  it('the same worst case PLUS "hide known test/household traffic" (the old 110-bind fixture) is also allowed now', async () => {
+    const { body, calls } = await post({
+      dimension: 'referrer',
+      breakdown: 'device',
+      dims: ['referrer', 'device'],
+      sites: Array.from({ length: 50 }, (_, i) => `s${i}`),
+      constraints: Array.from({ length: 16 }, (_, i) => ({ field: 'path', value: `/p${i}` })),
+      excludeOwnVisits: true,
+      ownBrowser: 'Opera',
+      ownOS: 'Windows',
+      excludeKnownTraffic: true,
+      ...range,
+    })
+    expect(body.error).toBeUndefined()
+    expect(calls).toHaveLength(1)
+    expect(calls[0].binds.length).toBeLessThan(100)
+    expect(calls[0].binds.length).toBe(91)
+  })
+
+  // statementTooLarge itself (src/lib/queryLimits.ts, re-exported from './geo') still refuses
+  // over-cap statements — exercised directly since, with the exclusion clause now bind-free,
+  // no combination of MAX_SITES (50) + MAX_CONSTRAINTS (16) + every other toggle reaches 100
+  // bound parameters through the real handler any more (the two tests above are the actual
+  // ceiling today, at 81 and 91). The guard stays in place as defense in depth for when
+  // POPUP_EVENT_PREFIXES, CAMPAIGNS, or EXCLUSIONS grow enough to matter again.
+  it('statementTooLarge still refuses a statement over 100 bound parameters', () => {
+    const res = statementTooLarge('SELECT 1', 101)
+    expect(res).not.toBeNull()
+    expect(res!.status).toBe(400)
+  })
+  it('statementTooLarge still allows exactly 100 bound parameters', () => {
+    expect(statementTooLarge('SELECT 1', 100)).toBeNull()
   })
 
   it('refuses a statement over 90,000 bytes of SQL with a clear 400 (16 pop-up outcome filters)', async () => {
