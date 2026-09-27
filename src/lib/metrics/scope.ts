@@ -7,7 +7,7 @@
 // without mounting a component.
 import { CAMPAIGNS, campaignById, flightDayIndex, type CampaignFlight } from '../campaigns'
 import { etDateFromMs, POPUPS, type PopupDef } from '../popupEvents'
-import { metricWindows, METRICS, type MetricDef, type MetricParam } from './metrics'
+import { metricWindows, METRICS, rulesOf, type MetricDef, type MetricParam } from './metrics'
 import { ratioParamsOf, ratioWindowsOf, RATIOS, type RatioDef } from './ratios'
 import type { DataBinding, DeltaName, Label, MetricItem, ParamValue, RepeatSpec, ScopePath, Section } from './types'
 
@@ -220,12 +220,36 @@ export interface MetricRequestSpec {
   minCohort?: number
 }
 
+/** True when the campaign's own config already rules the binding out — the same two checks
+ * the server makes before any query (lib/metrics/engine.ts sideStatic): a campaign whose
+ * flight has no start date yet reads nothing but spend, and a spend-only campaign
+ * (`measurement: 'spend-only'`) never has beacon data. Such an item is omitted whatever the
+ * campaign's status, and never requested, so a card shows no "…" for it and never labels it
+ * "not yet tracking" (it never will be tracked). */
+export function unmeasuredByConfig(binding: DataBinding, scope: ScopeInstance): boolean {
+  if (scope.kind !== 'campaign' || 'field' in binding) return false
+  const resolved = resolveBinding(binding, scope)
+  if (!resolved || resolved.kind === 'field' || !resolved.window) return false
+  const campaign = scope.campaign
+  const window = resolved.window as keyof MetricDef['windows']
+  const sides = resolved.kind === 'metric' ? [resolved.def as MetricDef] : [METRICS.get((resolved.def as RatioDef).num), METRICS.get((resolved.def as RatioDef).den)]
+  for (const def of sides) {
+    if (!def || !def.params.includes('campaignId') || resolved.params.campaignId !== campaign.id) continue
+    const fact = def.windows[window]
+    if (campaign.flightStart === null && fact !== 'adsSpend') return true
+    const rules = rulesOf(def, { params: resolved.params, campaign, window: window as never })
+    if (campaign.measurement === 'spend-only' && rules.some((r) => r.kind === 'beaconMeasurable')) return true
+  }
+  return false
+}
+
 /** The request a MetricItem's data binding resolves to against a scope, or `null` for a
  * `field` binding (no network round trip) or an unknown metric/ratio id (the caller treats
  * that the same as the server's `unknown-id`, i.e. an `error` status). */
 export function buildRequestSpec(item: MetricItem, scope: ScopeInstance): MetricRequestSpec | null {
   const resolved = resolveBinding(item.data, scope)
   if (!resolved || resolved.kind === 'field') return null
+  if (unmeasuredByConfig(item.data, scope)) return null // never asked: the answer is known
   const spec: MetricRequestSpec = {}
   if (resolved.kind === 'metric') spec.metric = (item.data as { metric: string }).metric
   else spec.ratio = (item.data as { ratio: string }).ratio

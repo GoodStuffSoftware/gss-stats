@@ -18,7 +18,7 @@ import { etDateFromMs } from '../popupEvents'
 import { tokenizeAndInterpolate, type TextToken } from '../textLite'
 import { METRICS, type MetricDef } from './metrics'
 import { RATIOS, type RatioDef } from './ratios'
-import { resolveBinding, scopeField, scopeVars, type ScopeInstance } from './scope'
+import { resolveBinding, scopeField, scopeVars, unmeasuredByConfig, type ScopeInstance } from './scope'
 import type { Display, Gating, Label, MetricItem, MetricValue } from './types'
 import { unitLabelId } from './units'
 
@@ -47,8 +47,14 @@ export interface ItemViewModel {
   deltaLines: DeltaLine[]
   captionTokens: TextToken[]
   badgeTone?: 'neutral' | 'live' | 'warn'
-  /** The primary is a status word ("not yet tracking"), not a value: render it small. */
+  /** The primary is a status word ("not yet tracking", "unavailable"), not a value: render it
+   * small. */
   muted?: boolean
+  /** A percent's two parts, for a tile: the rate big, its "(n/d)" as a small line under it.
+   * Rows and pills show `primary`, which is the two joined. */
+  split?: { main: string; sub: string }
+  /** The value failed to load (the server's per-request error, or the batch failed). */
+  error?: boolean
 }
 
 export interface ItemViewOptions {
@@ -140,7 +146,7 @@ function formatBadge(raw: string | null, display: Extract<Display, { as: 'badge'
 }
 
 // ── Metric/ratio value formatting by display kind ─────────────────────────────────────────
-function formatMetricOrRatioValue(display: Display, value: MetricValue, def: MetricDef | RatioDef): { primary: string; deltaLines: DeltaLine[] } {
+function formatMetricOrRatioValue(display: Display, value: MetricValue, def: MetricDef | RatioDef): { primary: string; deltaLines: DeltaLine[]; split?: { main: string; sub: string } } {
   switch (display.as) {
     case 'number':
       if (value.status === 'too-few') return { primary: noteRawText('too-few-to-report'), deltaLines: [] }
@@ -150,8 +156,8 @@ function formatMetricOrRatioValue(display: Display, value: MetricValue, def: Met
       return { primary: fmtMoney(value.value), deltaLines: [] }
     case 'percent': {
       const nd = ndSuffix(value)
-      if (value.status === 'too-few') return { primary: `${noteRawText('too-few-to-report')}${nd}`, deltaLines: [] }
-      return { primary: `${fmtPercent(value.value, display.decimals ?? 1)}${nd}`, deltaLines: [] }
+      const main = value.status === 'too-few' ? noteRawText('too-few-to-report') : fmtPercent(value.value, display.decimals ?? 1)
+      return { primary: `${main}${nd}`, deltaLines: [], ...(nd ? { split: { main, sub: nd.trim() } } : {}) }
     }
     case 'counts': {
       // Always n/d, whatever the status — a pair is never gated, and a proportion shown as
@@ -238,23 +244,24 @@ function fieldViewModel(item: MetricItem, raw: string | null, labelTokens: TextT
 
 function metricViewModel(item: MetricItem, value: MetricValue, def: MetricDef | RatioDef, labelTokens: TextToken[], scope: ScopeInstance, todayEt: string): ItemViewModel {
   if (value.status === 'error') {
-    return { visible: true, labelTokens, primary: '—', deltaLines: [], captionTokens: itemCaptionOnly(item, scope, todayEt) }
+    // A status word, never a dash: a dash reads as "no value", an error means "not loaded".
+    return { visible: true, labelTokens, primary: noteRawText('metric-unavailable'), deltaLines: [], captionTokens: itemCaptionOnly(item, scope, todayEt), muted: true, error: true }
   }
   if (value.status === 'no-data') {
     const { primary, visible } = applyEmptyGating(item.gating?.whenEmpty)
     // A percent always shows its (n/d), a 0 denominator included ("— (0/0)"): the reader
     // sees WHY there is no rate (ADR 0003, "n/d is always returned").
     const nd = item.display.as === 'percent' && (item.gating?.whenEmpty ?? 'dash') === 'dash' ? ndSuffix(value) : ''
-    return { visible, labelTokens, primary: primary + nd, deltaLines: [], captionTokens: itemCaptionOnly(item, scope, todayEt) }
+    return { visible, labelTokens, primary: primary + nd, deltaLines: [], captionTokens: itemCaptionOnly(item, scope, todayEt), ...(nd ? { split: { main: primary, sub: nd.trim() } } : {}) }
   }
   if (value.status === 'unmeasured') {
     const { primary, visible } = applyUnmeasuredGating(item.gating, scope, value)
     return { visible, labelTokens, primary, deltaLines: [], captionTokens: itemCaptionOnly(item, scope, todayEt), muted: true }
   }
   // 'ok' | 'partial' | 'too-few'
-  const { primary, deltaLines } = formatMetricOrRatioValue(item.display, value, def)
+  const { primary, deltaLines, split } = formatMetricOrRatioValue(item.display, value, def)
   if (isNewToday(item, value, def)) deltaLines.push({ text: noteRawText('new-today'), cls: 'new' })
-  return { visible: true, labelTokens, primary, deltaLines, captionTokens: valueCaptionTokens(item, value, scope, todayEt), ...(value.status === 'too-few' && item.display.as !== 'percent' ? { muted: true } : {}) }
+  return { visible: true, labelTokens, primary, deltaLines, captionTokens: valueCaptionTokens(item, value, scope, todayEt), ...(split ? { split } : {}), ...(value.status === 'too-few' && item.display.as !== 'percent' ? { muted: true } : {}) }
 }
 
 /** An item's label alone, resolved against its scope — used by a 'table' section's header row,
@@ -280,6 +287,9 @@ export function itemViewModel(item: MetricItem, value: MetricValue | undefined, 
   if (resolved.kind === 'field') {
     return fieldViewModel(item, resolved.fieldValue ?? null, labelTokens, scope, opts.todayEt)
   }
+  // Ruled out by the campaign's own config (spend-only, or no flight start yet): omitted
+  // whatever the status, and never requested (scope.ts unmeasuredByConfig).
+  if (unmeasuredByConfig(item.data, scope)) return { visible: false, labelTokens, primary: '', deltaLines: [], captionTokens: [] }
   if (!value) {
     return { visible: true, labelTokens, primary: '…', deltaLines: [], captionTokens: [] }
   }

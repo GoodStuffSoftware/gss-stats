@@ -31,7 +31,7 @@ const flatItems = computed<FlatItem[]>(() => (props.section.layout === 'table' ?
 // via the SAME shared useMetrics() cache each MetricItem uses (content-equal requests dedupe
 // and share one fetch) — never inside a computed getter, since request() has side effects
 // (refcounting + onScopeDispose registration) that must run exactly once.
-const { request: requestShared } = useMetrics(() => props.context)
+const { request: requestShared } = useMetrics(() => props.context, () => props.ctx.todayEt)
 const setupItems = props.section.layout === 'table' ? [] : flattenSectionItems(props.section, props.outerScope, props.ctx)
 const setupRefs = setupItems.map((fi) => {
   const spec = fi.emptyOf ? null : buildRequestSpec(fi.item, fi.scope)
@@ -101,6 +101,10 @@ const tableHeaderTokens = computed(() => props.section.items.map((it) => itemLab
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
+}
+/* Pills after rows sit 8px below them, as the old scorecard's chip row did (rows end with 3px). */
+.metric-section + .metric-section.layout-pills {
+  margin-top: 5px;
 }
 .layout-pills .items-wrap {
   display: flex;

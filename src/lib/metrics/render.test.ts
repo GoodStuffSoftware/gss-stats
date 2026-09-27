@@ -167,10 +167,10 @@ describe('itemViewModel — status × gating', () => {
     expect(vm.primary).toBe('pending — start date not yet confirmed')
   })
 
-  it('error: an em dash, and the item caption still renders', () => {
+  it('error: the muted status word "unavailable" (never a dash, which reads as no value), and the item caption still renders', () => {
     const vm = itemViewModel(numberItem({ caption: 'still shown' }), { status: 'error', reason: 'fetch-failed' }, activeScope, opts)
     expect(vm.visible).toBe(true)
-    expect(vm.primary).toBe('—')
+    expect(vm).toMatchObject({ primary: 'unavailable', muted: true, error: true })
     expect(vm.captionTokens.map((t) => t.value).join('')).toBe('still shown')
   })
 
