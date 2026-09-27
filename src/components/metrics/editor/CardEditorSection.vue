@@ -2,7 +2,7 @@
 // One Section editor (ADR 0003 section 4 item 4): a layout select, an optional title, an
 // optional repeat, and its items — add/remove/reorder, each opening to the label/data/display/
 // gating pickers (CardEditorItem.vue).
-import { computed } from 'vue'
+import { computed, useId } from 'vue'
 import { duplicateItem, emptyItem, moveBy } from '../../../lib/metrics/editorModel'
 import type { RepeatSpec, Section } from '../../../lib/metrics/types'
 import CardEditorItem from './CardEditorItem.vue'
@@ -18,6 +18,8 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ move: [dir: -1 | 1]; remove: [] }>()
 const section = defineModel<Section>({ required: true })
+
+const layoutId = useId()
 
 const LAYOUTS: { value: Section['layout']; label: string }[] = [
   { value: 'rows', label: 'Rows' },
@@ -67,8 +69,8 @@ function removeAt(i: number) {
     <div class="ce-section-head">
       <div class="row" style="flex: 1">
         <div class="field">
-          <label>Layout</label>
-          <select v-model="section.layout">
+          <label :for="layoutId">Layout</label>
+          <select :id="layoutId" v-model="section.layout">
             <option v-for="l in LAYOUTS" :key="l.value" :value="l.value">{{ l.label }}</option>
           </select>
         </div>
@@ -87,7 +89,7 @@ function removeAt(i: number) {
     <div class="field check">
       <label><input type="checkbox" :checked="hasTitle" @change="toggleTitle(($event.target as HTMLInputElement).checked)" /> Section title</label>
     </div>
-    <CardEditorLabel v-if="hasTitle" v-model="titleModel" :has-data="false" :repeat-over="cardRepeatOver" placeholder="Section title" />
+    <CardEditorLabel v-if="hasTitle" v-model="titleModel" :has-data="false" :repeat-over="cardRepeatOver" placeholder="Section title" heading="Section title" />
 
     <CardEditorRepeat v-model="repeatModel" :allow="['campaigns', 'popups', 'windows', 'readings']" label="Repeat this section" />
 

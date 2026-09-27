@@ -4,6 +4,19 @@
    directly beside their labels throughout (.field.check label / .campaign-row), matching the
    fix already made in ChartEditor.vue. */
 
+/* Screen-reader-only label text (a11y review fix, 2026-09-27): pairs a control with an
+   accessible name — via for/id — where a visible label would duplicate a heading already right
+   above it (e.g. the "Label" heading over a kind-tabbed control whose one active input needs its
+   own name: "Label text", "Search notes", …). Same technique as MetricCard.vue's .mc-live. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
 .field {
   display: flex;
   flex-direction: column;

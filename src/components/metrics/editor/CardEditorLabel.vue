@@ -4,7 +4,7 @@
 // plain-text preview), a bound scope field, or "use the metric's own label". Reused for both an
 // item's `label` and its `caption` (both are `Label`) — `allowMetricOwn` hides the "metric's own
 // name" option for a caption, which has no natural registry counterpart.
-import { computed, ref } from 'vue'
+import { computed, ref, useId } from 'vue'
 import { isKnownNote, labelKind, makeLabel, noteLabelOptions, scopePathOptions, type LabelKind } from '../../../lib/metrics/editorModel'
 import type { Label, RepeatSpec, ScopePath } from '../../../lib/metrics/types'
 
@@ -14,10 +14,21 @@ const props = withDefaults(
     repeatOver?: RepeatSpec['over']
     allowMetricOwn?: boolean
     placeholder?: string
+    /** "Label" for an item's own label, "Caption" when reused for `item.caption` — both render
+     * through this same component (both are a `Label`), but the heading and every control's
+     * accessible name should say which one this is. */
+    heading?: string
   }>(),
-  { allowMetricOwn: true, placeholder: 'Label text' },
+  { allowMetricOwn: true, placeholder: 'Label text', heading: 'Label' },
 )
 const label = defineModel<Label | undefined>({ required: true })
+
+const groupId = useId()
+const textId = useId()
+const insertVarId = useId()
+const noteSearchId = useId()
+const noteSelectId = useId()
+const bindSelectId = useId()
 
 const scopeOptions = computed(() => scopePathOptions(props.repeatOver))
 const fallbackPath = computed<ScopePath>(() => scopeOptions.value[0]?.value ?? 'campaign.label')
@@ -60,9 +71,9 @@ const bindPath = computed<ScopePath>({
 </script>
 
 <template>
-  <div class="field">
-    <label>Label</label>
-    <div class="tabs" role="tablist">
+  <div class="field" role="group" :aria-labelledby="groupId">
+    <label :id="groupId">{{ heading }}</label>
+    <div class="tabs" role="tablist" :aria-label="`${heading} kind`">
       <button type="button" class="tab" :class="{ active: kind === 'text' }" @click="setKind('text')">Text</button>
       <button v-if="allowMetricOwn" type="button" class="tab" :class="{ active: kind === 'metric' }" :disabled="!hasData" @click="setKind('metric')" :title="hasData ? '' : 'Pick a metric or ratio first'">
         Metric's own
@@ -74,9 +85,11 @@ const bindPath = computed<ScopePath>({
     </div>
 
     <template v-if="kind === 'text'">
-      <input type="text" v-model="textValue" :placeholder="placeholder" />
+      <label class="visually-hidden" :for="textId">{{ heading }} text</label>
+      <input :id="textId" type="text" v-model="textValue" :placeholder="placeholder" />
       <div class="field" v-if="scopeOptions.length">
-        <select @change="insertVar(($event.target as HTMLSelectElement).value as ScopePath); ($event.target as HTMLSelectElement).value = ''">
+        <label class="visually-hidden" :for="insertVarId">Insert a variable into the {{ heading.toLowerCase() }}</label>
+        <select :id="insertVarId" @change="insertVar(($event.target as HTMLSelectElement).value as ScopePath); ($event.target as HTMLSelectElement).value = ''">
           <option value="" disabled selected>+ Insert variable…</option>
           <option v-for="o in scopeOptions" :key="o.value" :value="o.value">{{ '{' + o.value + '}' }} — {{ o.label }}</option>
         </select>
@@ -88,8 +101,10 @@ const bindPath = computed<ScopePath>({
     </template>
 
     <template v-else-if="kind === 'note'">
-      <input class="search-input" type="text" v-model="noteSearch" placeholder="Search notes…" />
-      <select v-model="noteId" :class="{ invalid: noteInvalid }">
+      <label class="visually-hidden" :for="noteSearchId">Search notes</label>
+      <input :id="noteSearchId" class="search-input" type="text" v-model="noteSearch" placeholder="Search notes…" />
+      <label class="visually-hidden" :for="noteSelectId">Choose a note</label>
+      <select :id="noteSelectId" v-model="noteId" :class="{ invalid: noteInvalid }">
         <option value="" disabled>Choose a note…</option>
         <option v-for="o in noteChoices" :key="o.value" :value="o.value">{{ o.preview }}</option>
       </select>
@@ -97,7 +112,8 @@ const bindPath = computed<ScopePath>({
     </template>
 
     <template v-else-if="kind === 'bind'">
-      <select v-model="bindPath">
+      <label class="visually-hidden" :for="bindSelectId">Bound field</label>
+      <select :id="bindSelectId" v-model="bindPath">
         <option v-for="o in scopeOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
       </select>
     </template>

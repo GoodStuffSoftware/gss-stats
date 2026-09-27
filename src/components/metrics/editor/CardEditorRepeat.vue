@@ -2,7 +2,7 @@
 // One RepeatSpec editor, reused at card/section/item level (ADR 0003 section 4, "Repeat").
 // Card-level repeat only ever offers campaigns/popups (the owner's "one per campaign, or one
 // per pop-up"); a section/item repeat may also use windows/readings, per the type.
-import { computed } from 'vue'
+import { computed, useId } from 'vue'
 import { CAMPAIGN_ID_OPTIONS, POPUP_ID_OPTIONS, withRepeatOver } from '../../../lib/metrics/editorModel'
 import type { RepeatSpec } from '../../../lib/metrics/types'
 
@@ -11,6 +11,11 @@ const props = defineProps<{
   label?: string
 }>()
 const repeat = defineModel<RepeatSpec | undefined>({ required: true })
+
+const overId = useId()
+const campaignsGroupId = useId()
+const statusGroupId = useId()
+const popupsGroupId = useId()
 
 const OVER_LABELS: Record<RepeatSpec['over'], string> = {
   campaigns: 'One per campaign',
@@ -66,16 +71,16 @@ const flightingToday = computed<boolean>({
 
 <template>
   <div class="field">
-    <label>{{ label ?? 'Repeat' }}</label>
-    <select v-model="overValue">
+    <label :for="overId">{{ label ?? 'Repeat' }}</label>
+    <select :id="overId" v-model="overValue">
       <option value="">None — a single card/item</option>
       <option v-for="o in allow" :key="o" :value="o">{{ OVER_LABELS[o] }}</option>
     </select>
   </div>
 
   <div class="field" v-if="overValue === 'campaigns'">
-    <label>Campaigns <span class="hint">— none checked = all</span></label>
-    <div class="campaign-list">
+    <label :id="campaignsGroupId">Campaigns <span class="hint">— none checked = all</span></label>
+    <div class="campaign-list" role="group" :aria-labelledby="campaignsGroupId">
       <label v-for="c in CAMPAIGN_ID_OPTIONS" :key="c.value" class="campaign-row">
         <input type="checkbox" :checked="idsValue.includes(c.value)" @change="toggleId(c.value, ($event.target as HTMLInputElement).checked, CAMPAIGN_ID_OPTIONS)" />
         {{ c.label }}
@@ -84,8 +89,8 @@ const flightingToday = computed<boolean>({
   </div>
   <div class="row" v-if="overValue === 'campaigns'">
     <div class="field">
-      <label>Status <span class="hint">— none checked = all</span></label>
-      <div class="campaign-list">
+      <label :id="statusGroupId">Status <span class="hint">— none checked = all</span></label>
+      <div class="campaign-list" role="group" :aria-labelledby="statusGroupId">
         <label v-for="s in STATUS_OPTIONS" :key="s" class="campaign-row">
           <input type="checkbox" :checked="statusValue.includes(s)" @change="toggleStatus(s, ($event.target as HTMLInputElement).checked)" />
           {{ s }}
@@ -98,8 +103,8 @@ const flightingToday = computed<boolean>({
   </div>
 
   <div class="field" v-if="overValue === 'popups'">
-    <label>Pop-ups <span class="hint">— none checked = all</span></label>
-    <div class="campaign-list">
+    <label :id="popupsGroupId">Pop-ups <span class="hint">— none checked = all</span></label>
+    <div class="campaign-list" role="group" :aria-labelledby="popupsGroupId">
       <label v-for="p in POPUP_ID_OPTIONS" :key="p.value" class="campaign-row">
         <input type="checkbox" :checked="idsValue.includes(p.value)" @change="toggleId(p.value, ($event.target as HTMLInputElement).checked, POPUP_ID_OPTIONS)" />
         {{ p.label }}

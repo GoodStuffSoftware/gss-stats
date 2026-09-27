@@ -4,9 +4,9 @@
 // ("Tagged arrivals · campaign.taggedArrivals · number") with ↑ ↓ ⧉ ✕ buttons, matching the
 // nested-doughnut ring editor's button pattern (ChartEditor.vue) so it works with a keyboard and
 // on touch.
-import { computed, ref, watch } from 'vue'
+import { computed, ref, useId, watch } from 'vue'
 import { MIN_COHORT } from '../../../lib/popupEvents'
-import { dataKindOf, firstDisplayFor, isDisplaySelectable } from '../../../lib/metrics/editorModel'
+import { dataKindOf, firstDisplayFor, isDisplaySelectable, isKnownNote, makeDisplay, noteLabelOptions } from '../../../lib/metrics/editorModel'
 import type { MetricItem, RepeatSpec } from '../../../lib/metrics/types'
 import CardEditorData from './CardEditorData.vue'
 import CardEditorDisplay from './CardEditorDisplay.vue'
@@ -26,6 +26,14 @@ const item = defineModel<MetricItem>({ required: true })
 const open = ref(false)
 const innermostOver = computed<RepeatSpec['over'] | undefined>(() => item.value.repeat?.over ?? props.sectionRepeatOver ?? props.cardRepeatOver)
 
+const whenUnmeasuredId = useId()
+const minCohortId = useId()
+const whenEmptyId = useId()
+const whenEmptyNoteSearchId = useId()
+const whenEmptyNoteSelectId = useId()
+const captionModeId = useId()
+const frameId = useId()
+
 // Auto-correct the display when the data binding changes under it and the current display is no
 // longer offered — never leaves an item saveable with an incompatible display (validateCard
 // would reject it anyway; this just avoids the interim invalid state showing as a saved error).
@@ -34,7 +42,7 @@ watch(
   () => {
     if (!isDisplaySelectable(item.value.data, item.value.display.as)) {
       const next = firstDisplayFor(item.value.data)
-      if (next) item.value = { ...item.value, display: { as: next } }
+      if (next) item.value = { ...item.value, display: makeDisplay(next, item.value.display) }
     }
   },
   { deep: true },
@@ -90,6 +98,17 @@ const whenEmptyNote = computed<string>({
     item.value = { ...item.value, gating: { ...item.value.gating, whenEmpty: { note: v } } }
   },
 })
+// "Show a note" picks from the SAME curated, plain-text-previewed registry list CardEditorLabel
+// uses (review fix, 2026-09-27) — never free text, which could hold a note id that doesn't exist
+// (validateCard would reject it, but the UI shouldn't offer building an invalid card in the
+// first place: the owner's whole point for the ratio picker applies here too).
+const whenEmptyNoteSearch = ref('')
+const whenEmptyNoteChoices = computed(() => {
+  const q = whenEmptyNoteSearch.value.trim().toLowerCase()
+  const all = noteLabelOptions()
+  return q ? all.filter((o) => o.preview.toLowerCase().includes(q) || o.value.toLowerCase().includes(q)) : all
+})
+const whenEmptyNoteInvalid = computed(() => !!whenEmptyNote.value && !isKnownNote(whenEmptyNote.value))
 const captionMode = computed<NonNullable<MetricItem['captionMode']>>({
   get: () => item.value.captionMode ?? 'inline',
   set: (v) => {
@@ -139,43 +158,52 @@ const itemRepeatModel = computed({
 
         <div class="row">
           <div class="field">
-            <label>When not measured</label>
-            <select v-model="whenUnmeasured">
+            <label :for="whenUnmeasuredId">When not measured</label>
+            <select :id="whenUnmeasuredId" v-model="whenUnmeasured">
               <option value="auto">Auto — omit for a closed campaign, else show a label</option>
               <option value="omit">Always omit</option>
               <option value="label">Always show a label</option>
             </select>
           </div>
           <div class="field">
-            <label>Minimum cohort</label>
-            <input type="number" :min="MIN_COHORT" :value="minCohort ?? ''" placeholder="(default)" @change="minCohort = ($event.target as HTMLInputElement).valueAsNumber || undefined" />
+            <label :for="minCohortId">Minimum cohort</label>
+            <input :id="minCohortId" type="number" :min="MIN_COHORT" :value="minCohort ?? ''" placeholder="(default)" @change="minCohort = ($event.target as HTMLInputElement).valueAsNumber || undefined" />
           </div>
         </div>
 
         <div class="field">
-          <label>When empty</label>
-          <select v-model="whenEmptyKind">
+          <label :for="whenEmptyId">When empty</label>
+          <select :id="whenEmptyId" v-model="whenEmptyKind">
             <option value="dash">Show a dash</option>
             <option value="omit">Omit</option>
             <option value="note">Show a note</option>
           </select>
-          <input v-if="whenEmptyKind === 'note'" type="text" v-model="whenEmptyNote" placeholder="Note id, e.g. flight-pending" />
         </div>
+        <template v-if="whenEmptyKind === 'note'">
+          <label class="visually-hidden" :for="whenEmptyNoteSearchId">Search notes</label>
+          <input :id="whenEmptyNoteSearchId" class="search-input" type="text" v-model="whenEmptyNoteSearch" placeholder="Search notes…" />
+          <label class="visually-hidden" :for="whenEmptyNoteSelectId">Choose a note</label>
+          <select :id="whenEmptyNoteSelectId" v-model="whenEmptyNote" :class="{ invalid: whenEmptyNoteInvalid }">
+            <option value="" disabled>Choose a note…</option>
+            <option v-for="o in whenEmptyNoteChoices" :key="o.value" :value="o.value">{{ o.preview }}</option>
+          </select>
+          <p v-if="whenEmptyNoteInvalid" class="hint">Unknown note id "{{ whenEmptyNote }}".</p>
+        </template>
 
         <CardEditorRepeat v-model="itemRepeatModel" :allow="['campaigns', 'popups', 'windows', 'readings']" label="Repeat this item" />
 
-        <CardEditorLabel v-model="item.caption" :has-data="hasData" :repeat-over="innermostOver" :allow-metric-own="false" placeholder="Caption text" />
+        <CardEditorLabel v-model="item.caption" :has-data="hasData" :repeat-over="innermostOver" :allow-metric-own="false" placeholder="Caption text" heading="Caption" />
         <div class="row">
           <div class="field">
-            <label>Caption placement</label>
-            <select v-model="captionMode">
+            <label :for="captionModeId">Caption placement</label>
+            <select :id="captionModeId" v-model="captionMode">
               <option value="inline">Inline — a line under the value</option>
               <option value="compact">Compact — behind the card's Notes toggle</option>
             </select>
           </div>
           <div class="field">
-            <label>Frame override</label>
-            <select v-model="frame">
+            <label :for="frameId">Frame override</label>
+            <select :id="frameId" v-model="frame">
               <option value="">(section default)</option>
               <option value="row">Row</option>
               <option value="pill">Pill</option>

@@ -1,10 +1,13 @@
 <script setup lang="ts">
 // The metric-card editor (ADR 0003 slice 6, "Editor UX"): start from a preset or customize one
 // into an editable spec, edit card-level fields, sections and items, and preview the result
-// live through the real MetricCard. STANDALONE: not wired into ChartEditor/ChartCard yet (phase
-// B, tracked separately) — the integrator mounts it with `v-model="widget.card"` and decides how
-// to host it (a modal overlay, an inline panel, …); see the component doc block below for the
-// exact contract.
+// live through the real MetricCard. Wired into ChartEditor.vue for a widget with `card` set (a
+// "Metric card" chart type) — ChartEditor v-models `draft.card` here and forwards the page's
+// filter context; normWidget/normCardRef (lib/defaults.ts) validate whatever gets saved.
+//
+// Props: `modelValue: CardRef` (required), `context?: MetricsContext` (the page's current
+// filters, forwarded to the live preview only — never mutated here). Emits `update:modelValue:
+// [CardRef]`.
 //
 // Validity gate: `update:modelValue` only ever fires a CardRef that `validateCard` accepts (a
 // `{ preset }` is valid iff the id resolves; a `{ spec }` iff `validateCard(spec)` returns no
@@ -12,7 +15,17 @@
 // lib/metrics/editorModel.ts groupErrors) and simply doesn't emit, so a caller's `v-model` can
 // never receive an invalid card. Live preview always renders the current draft, valid or not, so
 // the owner sees a mid-edit state before it's saveable.
-import { computed, onBeforeUnmount, ref, watch, reactive, toRaw } from 'vue'
+//
+// MOUNT-TIME EMIT: the validity watcher below runs with `{ immediate: true }`, so if the CardRef
+// passed in as `modelValue` is ALREADY valid, `update:modelValue` fires once, synchronously,
+// during the component's own setup — before any user interaction. This is intentional (it is
+// also what normalizes a `{ preset }` that happens to already resolve, or a `{ spec }` straight
+// off a v-model with no edits yet, into the exact same shape a real edit would produce), but a
+// caller must treat it as a no-op rather than "the user changed something": ChartEditor.vue's own
+// `v-model="draft.card"` simply re-assigns the same (deeply-equal) value, which is harmless, but
+// a caller that treats every emit as dirtying an otherwise-clean form should compare against the
+// CardRef it started with, not just count emits.
+import { computed, onBeforeUnmount, ref, watch, reactive, toRaw, useId } from 'vue'
 import MetricCard from './MetricCard.vue'
 import CardEditorLabel from './editor/CardEditorLabel.vue'
 import CardEditorData from './editor/CardEditorData.vue'
@@ -22,12 +35,25 @@ import { presetById } from '../../lib/metrics/presets'
 import { validateCard } from '../../lib/metrics/validate'
 import { noteLabelOptions } from '../../lib/metrics/editorModel'
 import { cloneSpec, emptySection, groupErrors, moveBy, presetOptions, specFromPresetId } from '../../lib/metrics/editorModel'
-import type { CardRef, CardSpec } from '../../lib/metrics/types'
+import type { CardRef, CardSpec, MetricsContext } from '../../lib/metrics/types'
 
-const props = defineProps<{ modelValue: CardRef }>()
+const props = defineProps<{
+  modelValue: CardRef
+  /** The page's current filter context (range, sites, …) — forwarded to the live preview so it
+   * reads the same window a saved card would (a `window: 'page'` item's preview otherwise has no
+   * range to ask for). Never mutated here. */
+  context?: MetricsContext
+}>()
 const emit = defineEmits<{ 'update:modelValue': [CardRef] }>()
 
 const PRESET_OPTIONS = presetOptions()
+
+// Every label below is paired with its control via for/id (useId()) — a label that only sits
+// beside a <select>/<input> as a visual sibling gives a screen reader no name for that control.
+const startFromId = useId()
+const captionsId = useId()
+const minWidthId = useId()
+const showUpdatedId = useId()
 
 type Mode = 'preset' | 'custom'
 const mode = ref<Mode>('spec' in props.modelValue ? 'custom' : 'preset')
@@ -184,8 +210,8 @@ function removeSection(i: number) {
         <h2>Card</h2>
 
         <div class="field" v-if="mode === 'preset'">
-          <label>Start from</label>
-          <select v-model="presetId">
+          <label :for="startFromId">Start from</label>
+          <select :id="startFromId" v-model="presetId">
             <option value="">Blank card</option>
             <option v-for="p in PRESET_OPTIONS" :key="p.value" :value="p.value">{{ p.label }}</option>
           </select>
@@ -207,7 +233,7 @@ function removeSection(i: number) {
           <div class="field check">
             <label><input type="checkbox" :checked="hasTitle" @change="toggleTitle(($event.target as HTMLInputElement).checked)" /> Card title</label>
           </div>
-          <CardEditorLabel v-if="hasTitle" v-model="titleModel" :has-data="false" :repeat-over="spec.repeat?.over" placeholder="Card title" />
+          <CardEditorLabel v-if="hasTitle" v-model="titleModel" :has-data="false" :repeat-over="spec.repeat?.over" placeholder="Card title" heading="Card title" />
 
           <CardEditorRepeat v-model="repeatModel" :allow="['campaigns', 'popups']" />
 
@@ -217,8 +243,8 @@ function removeSection(i: number) {
           <CardEditorData v-if="hasBadge" v-model="badgeDataModel" :repeat-over="spec.repeat?.over" field-only />
 
           <div class="field">
-            <label>Captions <span class="hint">— note ids shown under the whole card</span></label>
-            <div class="campaign-list">
+            <label :id="captionsId">Captions <span class="hint">— note ids shown under the whole card</span></label>
+            <div class="campaign-list" role="group" :aria-labelledby="captionsId">
               <label v-for="o in NOTE_OPTIONS" :key="o.value" class="campaign-row">
                 <input type="checkbox" :checked="captionsValue.includes(o.value)" @change="toggleCaption(o.value, ($event.target as HTMLInputElement).checked)" />
                 {{ o.preview }}
@@ -231,13 +257,13 @@ function removeSection(i: number) {
               <label><input type="checkbox" v-model="linkValue" /> Click through to the Campaigns page</label>
             </div>
             <div class="field">
-              <label>Minimum width (px)</label>
-              <input type="number" min="120" :value="minWidthValue ?? ''" placeholder="230" @change="minWidthValue = ($event.target as HTMLInputElement).valueAsNumber" />
+              <label :for="minWidthId">Minimum width (px)</label>
+              <input :id="minWidthId" type="number" min="120" :value="minWidthValue ?? ''" placeholder="230" @change="minWidthValue = ($event.target as HTMLInputElement).valueAsNumber" />
             </div>
           </div>
           <div class="field">
-            <label>"Updated Xs ago"</label>
-            <select v-model="showUpdatedValue">
+            <label :for="showUpdatedId">"Updated Xs ago"</label>
+            <select :id="showUpdatedId" v-model="showUpdatedValue">
               <option value="">Off</option>
               <option value="header">Header</option>
               <option value="footer">Footer</option>
@@ -264,7 +290,7 @@ function removeSection(i: number) {
 
       <div class="ce-preview">
         <h3>Preview</h3>
-        <MetricCard :card-ref="previewCardRef" />
+        <MetricCard :card-ref="previewCardRef" :context="context" />
       </div>
     </div>
   </div>
