@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-09-27
+
 ### Added
 - **A chart's own site pick.** "Site override" in the chart editor now really narrows that one
   chart to a site (e.g. Best Sudoku), leaving the page's site pick and dates alone; the Overall
