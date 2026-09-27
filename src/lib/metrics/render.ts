@@ -13,7 +13,7 @@
 //   unmeasured       Gating.whenUnmeasured ('auto' default: omit for a closed campaign, else
 //                    the registry's "not yet tracking" label | 'omit' | 'label').
 //   error            an em dash; the item's own caption still renders if set.
-import { getNote, noteRawText, noteTokens } from '../notes'
+import { getNote, NOTES_REGISTRY, noteRawText, noteTokens } from '../notes'
 import { etDateFromMs } from '../popupEvents'
 import { tokenizeAndInterpolate, type TextToken } from '../textLite'
 import { METRICS, type MetricDef } from './metrics'
@@ -21,6 +21,19 @@ import { RATIOS, type RatioDef } from './ratios'
 import { resolveBinding, scopeField, scopeVars, type ScopeInstance } from './scope'
 import type { Display, Gating, Label, MetricItem, MetricValue } from './types'
 import { unitLabelId } from './units'
+
+// A note id ever reaches here from data an author saved into a CardSpec (Label's `note`,
+// Gating.whenEmpty's `note`) or that the server echoed back (MetricValue.noteIds) — never a
+// literal this module wrote itself. NOTES_REGISTRY is an ordinary object literal, so a bracket
+// lookup for an id like 'constructor' or '__proto__' resolves through Object.prototype instead
+// of coming back undefined (review finding, 2026-09-27) — `getNote`'s own `!n` truthiness check
+// doesn't catch that (a Function is truthy). validateCard is meant to reject such an id before
+// it's ever saved, but this checks the registry's OWN property regardless, so a save made
+// before that guard existed still renders as plain text instead of crashing (`resolveText`
+// calling `.text` on a Function, or a token walk over its `undefined` result).
+function hasNote(id: string): boolean {
+  return Object.hasOwn(NOTES_REGISTRY, id)
+}
 
 export interface DeltaLine {
   text: string
@@ -44,6 +57,7 @@ export interface ItemViewOptions {
 export function resolveLabelTokens(label: Label, scope: ScopeInstance, metricLabelId: string | undefined, todayEt: string): TextToken[] {
   if (typeof label === 'string') return tokenizeAndInterpolate(label, scopeVars(scope, todayEt))
   if ('note' in label) {
+    if (!hasNote(label.note)) return [{ type: 'text', value: label.note }]
     const vars: Record<string, string> = {}
     if (label.vars) for (const [k, path] of Object.entries(label.vars)) vars[k] = scopeField(scope, path, todayEt) ?? ''
     return noteTokens(label.note, vars)
@@ -94,7 +108,7 @@ function rangeDays(start: string, end: string): number {
 function applyEmptyGating(whenEmpty: Gating['whenEmpty']): { primary: string; visible: boolean } {
   const mode = whenEmpty ?? 'dash'
   if (mode === 'omit') return { primary: '', visible: false }
-  if (typeof mode === 'object') return { primary: noteRawText(mode.note), visible: true }
+  if (typeof mode === 'object') return { primary: hasNote(mode.note) ? noteRawText(mode.note) : mode.note, visible: true }
   return { primary: '—', visible: true }
 }
 function applyUnmeasuredGating(gating: Gating | undefined, scope: ScopeInstance, value: MetricValue): { primary: string; visible: boolean } {
@@ -103,7 +117,7 @@ function applyUnmeasuredGating(gating: Gating | undefined, scope: ScopeInstance,
   if (mode === 'omit' || (mode === 'auto' && closedCampaign)) return { primary: '', visible: false }
   // A specific reason (e.g. 'flight-pending') is more useful than the generic label when the
   // server supplied one and it's a real registry label, not just an internal reason code.
-  const specific = value.noteIds?.find((id) => id !== 'not-yet-tracking' && getNote(id)?.kind === 'label')
+  const specific = value.noteIds?.find((id) => id !== 'not-yet-tracking' && hasNote(id) && getNote(id)?.kind === 'label')
   return { primary: noteRawText(specific ?? 'not-yet-tracking'), visible: true }
 }
 function formatBadge(raw: string | null, display: Extract<Display, { as: 'badge' }>): { primary: string; tone: 'neutral' | 'live' | 'warn' } {
@@ -153,7 +167,7 @@ function itemCaptionOnly(item: MetricItem, scope: ScopeInstance, todayEt: string
 function valueCaptionTokens(item: MetricItem, value: MetricValue, scope: ScopeInstance, todayEt: string): TextToken[] {
   const tokens: TextToken[] = []
   for (const id of value.noteIds ?? []) {
-    if (!getNote(id)) continue
+    if (!hasNote(id)) continue
     const vars = id === 'counted-from' && value.measuredFrom != null ? { from: etDateFromMs(value.measuredFrom) } : undefined
     tokens.push(...noteTokens(id, vars))
   }
