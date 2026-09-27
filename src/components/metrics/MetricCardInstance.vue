@@ -56,14 +56,20 @@ const compactItems = noteItems
 // arrivals" and on the game-screen views pair, the install fix on "Installs" and "Install") are
 // listed together in front of it, "Tagged arrivals, Game-screen views: Floor — …".
 const notes = computed(() => {
-  const byCaption = new Map<string, { key: string; labels: TextToken[][]; captionTokens: TextToken[] }>()
+  const byCaption = new Map<string, { key: string; labels: TextToken[][]; names: Set<string>; captionTokens: TextToken[] }>()
   compactItems.forEach((fi, i) => {
     const vm = itemViewModel(fi.item, fi.value?.value, fi.scope, { todayEt })
     if (!vm.visible || !vm.captionTokens.length) return
     const text = vm.captionTokens.map((t) => t.value).join('')
     const entry = byCaption.get(text)
-    if (entry) entry.labels.push(vm.labelTokens)
-    else byCaption.set(text, { key: `${fi.item.id}-${i}`, labels: [vm.labelTokens], captionTokens: vm.captionTokens })
+    // Each label once: a table row repeats its item in every column (Arrivals in US, CA, Other).
+    const name = vm.labelTokens.map((t) => t.value).join('')
+    if (entry) {
+      if (!entry.names.has(name)) {
+        entry.names.add(name)
+        entry.labels.push(vm.labelTokens)
+      }
+    } else byCaption.set(text, { key: `${fi.item.id}-${i}`, labels: [vm.labelTokens], names: new Set([name]), captionTokens: vm.captionTokens })
   })
   const SEP: TextToken = { type: 'text', value: ', ' }
   return [...byCaption.values()].map((e) => ({ key: e.key, labelTokens: e.labels.flatMap((l, i) => (i ? [SEP, ...l] : l)), captionTokens: e.captionTokens }))

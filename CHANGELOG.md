@@ -51,6 +51,13 @@ All notable changes to **gss-stats** are documented here. The format follows
   can now draw one line per value of a second dimension, with an optional running-total line for
   each.
 
+### Fixed
+- **The card builder names every preset row.** Customizing a preset no longer shows "Unknown
+  note" for rows labelled with a step or title name (most of the funnel's), and their label
+  pickers show the current name instead of coming up blank.
+- **A card's Notes name each row once.** A table row repeated in several columns (a count under
+  US, CA and Other, or under Before and After) is listed once in front of its note.
+
 ## [0.11.0] — 2026-09-27
 
 ### Added

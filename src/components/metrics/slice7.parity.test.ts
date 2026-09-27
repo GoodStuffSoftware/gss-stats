@@ -461,6 +461,28 @@ describe('campaign-country ≡ the bespoke country panel', () => {
   })
 })
 
+describe('Notes name each label once, however many columns repeat it', () => {
+  // A column table repeats every row's item once per column (Arrivals under US, CA and Other;
+  // each count under Before and After): its Notes line names the row once, not once per column.
+  it.each([
+    ['campaign-country', FIXTURE_NOW],
+    ['release-before-after', Date.parse('2026-09-28T16:00:00Z')],
+  ] as const)('%s', async (preset, now) => {
+    vi.setSystemTime(now)
+    const card = await mountCard(preset, now)
+    let lines = 0
+    for (const toggle of card.findAll('button.mc-notes-toggle')) await toggle.trigger('click')
+    for (const li of card.findAll('.mc-notes li')) {
+      const t = text(li.element)
+      const head = t.slice(0, t.indexOf(': '))
+      const names = head.split(', ')
+      expect(new Set(names).size, t).toBe(names.length)
+      lines++
+    }
+    expect(lines, `${preset} has Notes`).toBeGreaterThan(0)
+  })
+})
+
 describe('campaign-returns ≡ the bespoke return-visits panel', () => {
   const visible = (w: VueWrapper) => w.findAll('.metric-card').filter((c) => (c.element as HTMLElement).style.display !== 'none')
   function newReturns(w: VueWrapper) {
