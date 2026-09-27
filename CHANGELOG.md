@@ -7,6 +7,22 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **The retest ads routine's morning read now includes Play Console bulk reports (R4), read-only
+  and informational only.** Installs by day, acquisition by source, and store listing
+  visitors/acquisitions by country (all covering the campaign's own flight window), plus the
+  $50/$75 cumulative-spend Play-install checkpoints as informational lines (never a kill rule).
+  Reads Google Play's "bulk reports" CSVs directly from the developer account's private Cloud
+  Storage bucket via the GCS JSON API (the only programmatic path, since Play has no REST API for
+  install/acquisition statistics): no scraping, no browser, GET only. The bucket name
+  (`pubsite_prod_6577064245925542510`) was settled by a live authenticated probe, not by memory
+  or an old script's guess, which turned out to be wrong (404). The existing
+  `play-publisher@best-sudoku-prod.iam.gserviceaccount.com` credential already has the needed
+  permission: no new secret plumbing. Day-1/day-7 retention is explicitly reported as NOT
+  available from bulk reports (confirmed by listing the bucket: only two report families exist,
+  installs and store_performance). Every figure names the date it covers (bulk reports lag a day
+  or more) and states that Play device/install counts include the developer's own household
+  devices. Wired via a new optional `ReadDeps.playReports` source (`--play-sa <path>`, mirroring
+  `--firebase-sa`), so every existing fixture and test keeps compiling untouched.
 - **The retest ads routine's morning read regains full diagnostic depth for the closed day,
   informational only.** Hourly delivery (account time zone), geo (country/region plus a live
   location bid-modifier check), device split (computers/Connected TV flagged if nonzero for a

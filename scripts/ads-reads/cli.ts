@@ -29,6 +29,7 @@ import { createBeaconSource, type BeaconSource } from './beacon'
 import { createD1Select } from './d1'
 import { createD1Store, createMemoryStore } from './d1Store'
 import { readFirebaseCounts, type FirebaseCounts } from './firebase'
+import { readPlayReports } from './play'
 import type { AdsSource, ReadDeps } from './read'
 import { redact, registerSecret } from '../../src/lib/adsRedact'
 import { loadAdsCredentials } from './secrets'
@@ -39,6 +40,7 @@ export const COMMON_OPTIONS = {
   campaign: { type: 'string', default: RETEST_CAMPAIGN_ID },
   'cf-token-file': { type: 'string' },
   'firebase-sa': { type: 'string' },
+  'play-sa': { type: 'string' },
   fixture: { type: 'string' },
   now: { type: 'string' },
   'json-only': { type: 'boolean', default: false },
@@ -97,6 +99,7 @@ export async function liveDeps(opts: Record<string, string | boolean | undefined
   const run = createWranglerRunner({ cfToken: loadCfToken(opts['cf-token-file'] as string | undefined) })
   const { ads, adsInitError } = await liveAdsClient()
   const saPath = opts['firebase-sa'] as string | undefined
+  const playSaPath = opts['play-sa'] as string | undefined
   return {
     nowMs: Date.now(),
     ads: ads ? adsSource(ads) : null,
@@ -105,6 +108,10 @@ export async function liveDeps(opts: Record<string, string | boolean | undefined
     store: createD1Store({ run, dryRun }),
     // --firebase-sa is a plain path so the key can be swapped for a read-only one later.
     firebase: saPath ? { counts: (s, e, at) => readFirebaseCounts(saPath, s, e, { cohortTiersAtMs: at ?? null }) } : null,
+    // --play-sa: Play Console bulk-reports (R4), read-only, informational (see play.ts header
+    // for the bucket/credential facts settled by execution). Same existing SA credential works
+    // (~/.google-play/service-accounts/best-sudoku-prod.json) — no new secret plumbing.
+    playReports: playSaPath ? { read: (o) => readPlayReports(playSaPath, o) } : null,
     dryRun,
   }
 }

@@ -1,6 +1,6 @@
 ---
 name: bsk-retest-morning-read
-description: Single daily 06:00 ET read for the Best Sudoku US+CA web retest (Google Ads campaign 24279250691, uc sudoku_funnel_retest), 2026-09-27..2026-10-03. Folds the old 23:15 ET release-health backstop in (evaluated on every run, at any hour). Full diagnostic depth (Ads hourly/geo/device/targeting, Recommendations, beacon country breakdown, an account-count cross-check), a daily narrative, and an audit-trail commit. Runs the gss-stats CLI; pushes Mike only on a threshold read, a kill-rule trip, a failed read, or a real release-health alert; copies threshold reads and the daily narrative to the deckhand bus. Proposes only; never changes a campaign.
+description: Single daily 06:00 ET read for the Best Sudoku US+CA web retest (Google Ads campaign 24279250691, uc sudoku_funnel_retest), 2026-09-27..2026-10-03. Folds the old 23:15 ET release-health backstop in (evaluated on every run, at any hour). Full diagnostic depth (Ads hourly/geo/device/targeting, Recommendations, beacon country breakdown, an account-count cross-check), read-only Play Console bulk reports (installs by day, acquisition, store listing visitors, informational $50/$75 Play-install checkpoints; day-1/day-7 retention explicitly not available), a daily narrative, and an audit-trail commit. Runs the gss-stats CLI; pushes Mike only on a threshold read, a kill-rule trip, a failed read, or a real release-health alert; copies threshold reads and the daily narrative to the deckhand bus. Proposes only; never changes a campaign.
 ---
 
 <!--
@@ -54,6 +54,9 @@ and add nothing of your own to the rules.** Windows machine; the Bash tool is Gi
   never run `scripts/grant-first50.mjs` (a write tool), never write Firestore, never touch
   email (Resend) data, never propose closing the first-50 promo (it stays open through
   2026-10-02), and propose no beacon changes (paths are frozen through 2026-10-02).
+- **No em-dashes in any text you generate** (the Step 5 narrative, the Step 7 audit-trail log
+  entry, and any other prose you compose for this routine): use a comma, a colon or
+  parentheses instead. Report text you relay verbatim from the CLI is unaffected by this rule.
 
 ## Window
 
@@ -80,12 +83,18 @@ git -C C:/Users/msant/dev/gss-stats-ads-routine checkout --detach origin/main
 npm --prefix C:/Users/msant/dev/gss-stats-ads-routine ci --no-audit --no-fund
 ```
 
+If `git fetch origin` fails (network, auth, anything), **stop here** and push Mike ONE push:
+`BSK retest morning read did not run: git fetch origin failed, <one short reason, no paths or
+secrets>` (the same loud-failure pattern as Steps 3 and 7). Never fall back to running the read
+against whatever `main` the checkout already has; a stale checkout could be running against
+code that no longer matches the live thresholds, kill rules or Play bucket, silently.
+
 ## Step 1: run the read
 
 From `C:\Users\msant\dev\gss-stats-ads-routine`:
 
 ```bash
-npm run -s ads:morning-read -- --cf-token-file C:/Users/msant/dev/cf-token.txt --firebase-sa C:/Users/msant/.firebase/service-accounts/best-sudoku-prod.json
+npm run -s ads:morning-read -- --cf-token-file C:/Users/msant/dev/cf-token.txt --firebase-sa C:/Users/msant/.firebase/service-accounts/best-sudoku-prod.json --play-sa C:/Users/msant/.google-play/service-accounts/best-sudoku-prod.json
 ```
 
 This single run replaces both of the old two-entry system's runs. It evaluates release health
@@ -104,7 +113,9 @@ above already covers release health.
 Not `--dry-run`: this run is the one that syncs spend, appends the daily line and marks a
 fired threshold. Never run `npm run ads:sync` before it "to be safe": the read syncs itself. `BWS_ACCESS_TOKEN` is already in the environment. If the service-account
 file is missing, drop `--firebase-sa` (the account counts then read "not read"); never go
-looking for other credentials.
+looking for other credentials. Same for `--play-sa`: if that file is missing, drop the flag
+(the Play bulk-reports section then reads "not read (--play-sa not given)"); never substitute
+another credential or click through Play Console yourself (Step 4a covers why).
 
 What the CLI does, so you can explain it (do not re-implement any of it):
 
@@ -131,12 +142,19 @@ What the CLI does, so you can explain it (do not re-implement any of it):
    same-day Firestore-vs-beacon account-count cross-check. Every one of these sub-reads is
    independently best-effort: a failure is recorded and printed, never thrown, and never
    blocks the others, the spend read, or a kill rule.
+6. Reads Play Console bulk reports (R4): installs by day, acquisition by source and by
+   country (store listing visitors/acquisitions/conversion), and the $50/$75 cumulative-spend
+   Play-install checkpoints, all covering the campaign's own flight window
+   (`campaign.flightStart` through today). Read-only (GET only, never touches Play Console
+   itself); best-effort like the diagnostics above, never blocks the rest of the read; see
+   Step 4a.
 
 ## Step 2: read the result
 
 The output is a short human report, then a line `----- JSON -----`, then JSON. Use the
 JSON's `notify`, `errors`, `thresholds` and `thresholdRead` fields; never recompute a rule.
-The report's "Diagnostics for ..." block (R2/R3/R5/R8) is informational only — see Step 4.
+The report's "Diagnostics for ..." block (R2/R3/R5/R8) is informational only, see Step 4; its
+"Play Console bulk reports" block (R4) is informational only too, see Step 4a.
 
 ## Step 3: push (the CLI decides; you relay)
 
@@ -180,6 +198,37 @@ country breakdown, and the account-count cross-check. Relay it in your output as
 - A `not read` diagnostic line (missing `--firebase-sa`, a GAQL error, a beacon timeout) is
   informational: it never blocks the spend/kill-rule read above it, and never itself pushes.
   Relay it in your output as `diagnostic read errors` if the report's `errors` field lists any.
+
+## Step 4a: Play Console bulk reports (R4) — report lines only
+
+The report's `Play Console bulk reports (informational only; never a kill rule or an automatic
+action):` block covers installs by day, acquisition by source, acquisition/visitors by
+country, and the day-1/day-7 retention line. Relay it in your output as printed.
+
+- **Read-only by construction.** This reads Google Play's "bulk reports" CSVs from a private
+  Cloud Storage bucket (`pubsite_prod_6577064245925542510`, the developer account id) using
+  the existing `play-publisher@best-sudoku-prod.iam.gserviceaccount.com` credential
+  (`--play-sa`); every request is a GET. Never open the Play Console UI to get these numbers
+  yourself, and never treat anything in this block as license to touch Play Console.
+- **Bulk reports lag.** Every installs/acquisition line names the ET date it covers
+  (`installsThrough` / `storePerformanceThrough`) and its lag in days; this is normal (Google's
+  own docs say 3-7 days), not a failed read. A figure that has not yet reached the campaign's
+  flight start is expected early in the flight.
+- **Day-1/day-7 retention is NOT available** from Play bulk reports (the bucket has exactly two
+  report families, installs and store_performance; no retention-shaped file exists). The report
+  always prints this as an explicit line; never fabricate a retention number from anywhere
+  else.
+- **Household caveat.** Every installs/acquisition line already states that Play device/install
+  counts include the developer's own household devices and are not attributable to any one
+  campaign (no install-referrer capture on this app): relay each line as printed, do not strip
+  the caveat when summarizing.
+- **The $50/$75 Play-install checkpoints are informational only**, exactly like a diagnostics
+  ANOMALY line: never a push, a bus copy, a kill rule, or a change you make yourself. A status
+  of `undecidable` (spend crossed the threshold but Play's installs horizon has not yet reached
+  the flight start) is the expected precedent for this exact lag, not an error.
+- A `not read` Play line (missing `--play-sa`, a GCS error) is informational: it never blocks
+  the spend/kill-rule read above it, and never itself pushes. Relay it in your output if the
+  report's Play block says so.
 
 ## Step 5: daily narrative (R6)
 
@@ -271,12 +320,14 @@ lines of your own: whether a push and a bus copy went out, whether the Step 7 au
 commit succeeded (with its commit sha), any `errors` in plain words, and (on a threshold read)
 the proposal and the kill-rule results exactly as the report states them. If a diagnostics
 ANOMALY line appeared (Step 4), name it explicitly as a proposal for Mike, separate from any
-push. Standing reading notes, all already in the report: every rate is MIN_COHORT-gated and
-shown with its counts; production has about 14 registered users, so everything is anecdotal;
-upsell near-zero for signed-out traffic is a known bug, not broken instrumentation;
-signin-eligible is a count, never a denominator; install outcomes are measured only from the
-26 Sep 12:26 ET install fix on; Play reads "not yet seen" until the first app `/return/` row;
-Play installs include Mike's household.
+push. If a $50/$75 Play-install checkpoint (Step 4a) reads anything other than "not yet
+crossed", name it too, explicitly as informational, never a proposal or a push. Standing
+reading notes, all already in the report: every rate is MIN_COHORT-gated and shown with its
+counts; production has about 14 registered users, so everything is anecdotal; upsell near-zero
+for signed-out traffic is a known bug, not broken instrumentation; signin-eligible is a count,
+never a denominator; install outcomes are measured only from the 26 Sep 12:26 ET install fix
+on; Play reads "not yet seen" until the first app `/return/` row; Play installs (both the
+`/return/`-derived line and the Step 4a bulk-reports figures) include Mike's household.
 
 If the report starts with `READ FAILED`, say so first: which reads failed, that thresholds
 and the cap were not fully checked, and that the next run retries automatically. If a

@@ -89,6 +89,7 @@ import { syncAdsData, type AdsMetricsSource, type CampaignSyncResult, type SyncR
 import type { SyncSource } from '../../src/lib/adsStore'
 import type { BeaconSource } from './beacon'
 import type { FirebaseCounts } from './firebase'
+import { HOUSEHOLD_NOTE, RETENTION_NOTE, type PlayReportsSection } from './play'
 import { redact, summarizeError } from '../../src/lib/adsRedact'
 
 // ── Dependencies ─────────────────────────────────────────────────────────────────────────
@@ -108,6 +109,15 @@ export interface FirebaseSource {
   /** cohortTiersAtMs: also read the day-15/30/60 cohort-by-tier COUNTs as of that instant. */
   counts(windowStartMs: number, windowEndMs: number, cohortTiersAtMs?: number | null): Promise<FirebaseCounts>
 }
+/** R4: Play Console bulk-reports (installs by day, acquisition, store-listing visitors). See
+ * play.ts's header for the bucket/credential/retention facts settled by execution. Optional so
+ * every existing ReadDeps literal (fixtures, other tests) keeps compiling untouched; absent =
+ * "not read (--play-sa not given)" in the report, never a failure. */
+export interface PlayReportsSource {
+  /** Never throws (matches readPlayReports's own fail-closed contract): a failure is carried in
+   * the returned section's ok/error/errors, not as a rejected promise. */
+  read(opts: { since: string; until: string; flightStart: string; cumulativeSpend: number }): Promise<PlayReportsSection>
+}
 export interface ReadDeps {
   nowMs: number
   /** null when the Ads client could not be built (credentials); `adsInitError` says why. */
@@ -117,6 +127,7 @@ export interface ReadDeps {
   beaconInitError?: string | null
   store: AdsStore
   firebase: FirebaseSource | null
+  playReports?: PlayReportsSource | null
   dryRun: boolean
   /** Overrides for the mid-flight instrumentation instants (tests and --fixture); unset = the
    * lib/adsRules.ts constants AUTH_NEW_EXISTING_LIVE_AT / UPSELL_SIGNEDOUT_FIX_AT. */
@@ -668,6 +679,39 @@ async function diagnosticsRead(
   }
 }
 
+/** The shape used when Play reports were never read at all (no --play-sa): distinct from a
+ * read that ran and failed (that keeps its own `error`/`errors` from play.ts). */
+function playReportsNotRead(reason: string): PlayReportsSection {
+  return {
+    ok: false,
+    error: reason,
+    bucket: '',
+    installsThrough: null,
+    storePerformanceThrough: null,
+    installsLagDays: null,
+    storePerformanceLagDays: null,
+    installsByDay: null,
+    acquisitionByCountry: null,
+    acquisitionBySource: null,
+    retentionNote: RETENTION_NOTE,
+    householdNote: HOUSEHOLD_NOTE,
+    checkpoints: [],
+    errors: [],
+  }
+}
+
+/** R4: Play Console bulk-reports, informational only (never a kill rule, never `notify`).
+ * Best-effort like diagnosticsRead() above: a failure never blocks the spend/kill-rule read it
+ * sits alongside. `since` is the campaign's own flight start, not a rolling window, so
+ * installsByDay/acquisitionBySource always cover the whole flight so far. */
+async function playReportsRead(deps: ReadDeps, campaign: CampaignFlight, todayEt: string, cumulativeSpend: number): Promise<PlayReportsSection> {
+  if (!deps.playReports) return playReportsNotRead('not read (--play-sa not given)')
+  const r = await attempt('play reports', () =>
+    deps.playReports!.read({ since: campaign.flightStart!, until: todayEt, flightStart: campaign.flightStart!, cumulativeSpend }),
+  )
+  return r.ok ? r.value : { ...playReportsNotRead(r.error), error: r.error }
+}
+
 export interface DedupSection {
   /** Records not appended: a same-day rerun of the same entry that carries nothing new. */
   skipped: { kind: ReadingRecord['kind']; entryKind: string; reason: string }[]
@@ -742,6 +786,10 @@ export interface MorningResult {
   releaseHealth: HealthSection
   diagnostics: DiagnosticsSection
   play: PlayReturnStatus | null
+  /** R4: Play Console bulk-reports (unrelated to `play` above, which is beacon-derived
+   * /return/ status — see play.ts). null only in health-only mode; otherwise always populated,
+   * `ok: false` when not read or when the read failed. */
+  playReports: PlayReportsSection | null
   store: StoreSection
   /** Short names of the reads that failed this run — any entry pushes. */
   failures: string[]
@@ -937,6 +985,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
   const diagnostics: DiagnosticsSection = opts.healthOnly
     ? { spendThroughEt: null, hourly: null, geo: null, devices: null, targeting: null, recommendations: null, countryCounts: null, accountCrossCheck: null, errors: [] }
     : await diagnosticsRead(deps, campaign, plan.campaignId, spend.throughEt, taggedRows)
+  const playReports: PlayReportsSection | null = opts.healthOnly ? null : await playReportsRead(deps, campaign, todayEt, cumulative)
 
   const servedToday = spend.ok ? (spend.todayPartial?.cost ?? 0) > 0 : null
   const health: HealthSection =
@@ -1073,6 +1122,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
     releaseHealth: health,
     diagnostics,
     play,
+    playReports,
     store: {
       kind: deps.store.kind,
       dryRun: deps.dryRun,
