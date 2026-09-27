@@ -17,9 +17,7 @@ import {
   FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED,
   ARRIVALS_CAVEAT,
   countryBucket,
-  screenWidthBucket,
   costPer,
-  topShares,
   parseReturnPath,
   returnVisitRates,
   returnBeaconNotInstrumented,
@@ -32,7 +30,6 @@ import {
   isInstallPromptInstalled,
   isAuthSuccessPath,
   gameCompleteNotInstrumented,
-  scorecardNotInstrumentedSteps,
   RAW_INSTALL_SIGNALS_LABEL,
   VALID_FUNNEL_RATE_STEPS,
   parseGameCompletePath,
@@ -261,29 +258,6 @@ describe('classifyFunnelPath / computeFunnelCounts / funnelStepRates', () => {
     expect(gameCompleteNotInstrumented(before)).toBe(true)
     expect(gameCompleteNotInstrumented(spanning)).toBe(false)
   })
-  // Bug fix (owner report, 2026-09-26): the overview scorecard's "Completed a game" chip used
-  // to check the PERMANENT FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED constant directly, so an
-  // active campaign's real completed-game count never showed even once its flight reached
-  // GAME_COMPLETE_LIVE_AT. scorecardNotInstrumentedSteps is the fixed, unit-tested contract
-  // functions/api/overview.ts now feeds the scorecard row's `notInstrumented` field from.
-  it('scorecardNotInstrumentedSteps: an ACTIVE campaign whose flight reaches GAME_COMPLETE_LIVE_AT does NOT have "completed" not-instrumented', () => {
-    const retest = campaignById('24279250691')! // active, flightEnd 2026-10-02 — well past go-live
-    expect(retest.status).toBe('active')
-    const set = scorecardNotInstrumentedSteps(retest, [])
-    expect(set.has('completed')).toBe(false)
-  })
-  it('scorecardNotInstrumentedSteps: an ACTIVE campaign whose flight predates GAME_COMPLETE_LIVE_AT still has "completed" not-instrumented', () => {
-    const base = campaignById('24279250691')!
-    const early: CampaignFlight = { ...base, status: 'active', flightEnd: '2026-09-25' }
-    const set = scorecardNotInstrumentedSteps(early, [])
-    expect(set.has('completed')).toBe(true)
-  })
-  it('scorecardNotInstrumentedSteps: a CLOSED campaign uses the passed-in per-flight list exactly, ignoring gameCompleteNotInstrumented', () => {
-    const androidLaunch = campaignById('24215315197')! // closed, flightEnd 2026-09-09 — before go-live
-    const set = scorecardNotInstrumentedSteps(androidLaunch, ['ask', 'accept'])
-    expect([...set].sort()).toEqual(['accept', 'ask'])
-    expect(set.has('completed')).toBe(false) // not in the passed-in list, so NOT flagged — even though it predates go-live
-  })
   it('excludes /install/platforms/* (explicit task-brief exclusion) — classifyPopupPath gives it kind "platformList"', () => {
     expect(classifyFunnelPath('/install/platforms/web')).toBeNull()
     expect(classifyFunnelPath('/install/platforms/play')).toBeNull()
@@ -397,20 +371,12 @@ describe('classifyFunnelPath / computeFunnelCounts / funnelStepRates', () => {
   })
 })
 
-describe('countryBucket / screenWidthBucket', () => {
+describe('countryBucket', () => {
   it('buckets US and CA on their own, everything else as "other"', () => {
     expect(countryBucket('US')).toBe('US')
     expect(countryBucket('CA')).toBe('CA')
     expect(countryBucket('GB')).toBe('other')
     expect(countryBucket('')).toBe('other')
-  })
-  it('buckets screen width into small/medium/large', () => {
-    expect(screenWidthBucket(360)).toBe('small (<480)')
-    expect(screenWidthBucket(0)).toBe('small (<480)')
-    expect(screenWidthBucket(800)).toBe('medium (480-1024)')
-    expect(screenWidthBucket(1920)).toBe('large (>1024)')
-    expect(screenWidthBucket(1024)).toBe('medium (480-1024)') // boundary is inclusive on the medium side
-    expect(screenWidthBucket(1025)).toBe('large (>1024)')
   })
 })
 
@@ -424,34 +390,6 @@ describe('costPer (spend table — "—"/null until filled in)', () => {
   })
   it('a real cost per unit once both are set', () => {
     expect(costPer(100, 50)).toBe(2)
-  })
-})
-
-describe('topShares (device-mix breakdown — MIN_COHORT-gated, review fix 2026-09-26)', () => {
-  it('a real rate once the total clears MIN_COHORT', () => {
-    const shares = topShares({ Chrome: 6, Safari: 4 })
-    expect(shares).toEqual([
-      { label: 'Chrome', value: 6, total: 10, rate: 0.6 },
-      { label: 'Safari', value: 4, total: 10, rate: 0.4 },
-    ])
-  })
-  it('a total under MIN_COHORT (but nonzero) reports null, NOT a bare value/total division', () => {
-    // The bug this fixes: value/total directly would have given 1/1 = 100%, reading as a
-    // confident rate off a single device — this must gate through computeRate instead.
-    const shares = topShares({ Chrome: 1 })
-    expect(shares).toEqual([{ label: 'Chrome', value: 1, total: 1, rate: null }])
-  })
-  it('a total of exactly MIN_COHORT (5) is measured, one below is not', () => {
-    expect(topShares({ Chrome: 5 })[0].rate).toBe(1)
-    expect(topShares({ Chrome: 4 })[0].rate).toBeNull()
-  })
-  it('an empty breakdown (total 0) reports null for every row, never NaN/Infinity', () => {
-    const shares = topShares({ Chrome: 0, Safari: 0 })
-    expect(shares.every((s) => s.rate === null)).toBe(true)
-  })
-  it('sorts by count descending and caps at n (default 4)', () => {
-    const shares = topShares({ a: 1, b: 5, c: 3, d: 2, e: 4 })
-    expect(shares.map((s) => s.label)).toEqual(['b', 'e', 'c', 'd'])
   })
 })
 

@@ -13,10 +13,11 @@ const widgets = defineModel<Widget[]>('widgets', { required: true })
 // not a blanket "some menu is open somewhere" flag. Only that widget's ChartCard gets
 // `drill-open="true"`, so a suppressed/stuck tooltip is scoped to the chart the menu actually
 // belongs to, never every chart on the page.
-// `controlsVisible` (App.vue's function-bar `barOpen`): when true, every card's own
-// modification chrome (edit/zoom/menu icons, drag handle, resize grip) is shown regardless
-// of hover — otherwise each card only reveals its own chrome on :hover (see ChartCard.vue
-// and the resize-grip CSS below). Titles/values/notes are never affected by this.
+// `controlsVisible` (App.vue's header "reveal chart controls" toggle, `revealAllControls`):
+// when true, every card's own modification chrome (edit/zoom/menu icons, drag handle, resize
+// grip) is shown regardless of hover — otherwise each card only reveals its own chrome on
+// :hover (see ChartCard.vue and the resize-grip CSS below). Titles/values/notes are never
+// affected by this.
 defineProps<{ filters: GlobalFilters; dark: boolean; drillOpenId: string | null; controlsVisible: boolean }>()
 const emit = defineEmits<{
   edit: [Widget]

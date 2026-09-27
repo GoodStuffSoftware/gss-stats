@@ -1,0 +1,232 @@
+{
+ "capturedFrom": "OverviewWidgetBody.vue (views scorecard, kpis) over /api/overview, bskFixture at FIXTURE_NOW, before the bespoke views were retired (ADR 0003 slice 5 phase B)",
+ "scorecard": [
+  {
+   "title": "Android launch — \"tired of ads\"",
+   "badge": "closed",
+   "rows": [
+    [
+     "Flight",
+     "2026-09-02 → 2026-09-09 (8d)"
+    ],
+    [
+     "Tagged arrivals",
+     "50"
+    ],
+    [
+     "Auth successes",
+     "5"
+    ],
+    [
+     "Installs",
+     "1"
+    ],
+    [
+     "Return rate (d2-7)",
+     "10.0% (2/20)"
+    ],
+    [
+     "Cost / arrival",
+     "$2.49"
+    ]
+   ],
+   "pills": [
+    [
+     "Game-screen views",
+     "100"
+    ],
+    [
+     "Sign-in ask",
+     "15"
+    ],
+    [
+     "Accept",
+     "26.7% (4/15)"
+    ],
+    [
+     "Auth success",
+     "5"
+    ],
+    [
+     "Install prompt",
+     "13"
+    ]
+   ]
+  },
+  {
+   "title": "Play-direct — \"tired of ads\"",
+   "badge": "closed",
+   "rows": [
+    [
+     "Flight",
+     "2026-09-09 → 2026-09-13 (5d)"
+    ],
+    [
+     "Tagged arrivals",
+     "0"
+    ],
+    [
+     "Auth successes",
+     "0"
+    ],
+    [
+     "Installs",
+     "0"
+    ],
+    [
+     "Return rate (d2-7)",
+     "— (0/0)"
+    ],
+    [
+     "Cost / arrival",
+     "—"
+    ]
+   ],
+   "pills": []
+  },
+  {
+   "title": "US+CA web retest",
+   "badge": "flighting today",
+   "rows": [
+    [
+     "Flight",
+     "2026-09-26 → 2026-10-02 (7d)"
+    ],
+    [
+     "Tagged arrivals",
+     "7"
+    ],
+    [
+     "Auth successes",
+     "2"
+    ],
+    [
+     "Installs",
+     "2"
+    ],
+    [
+     "Return rate (d2-7)",
+     "0.0% (0/6)"
+    ],
+    [
+     "Cost / arrival",
+     "—"
+    ]
+   ],
+   "pills": [
+    [
+     "Game-screen views",
+     "21"
+    ],
+    [
+     "Completed a game",
+     "3"
+    ],
+    [
+     "Sign-in ask",
+     "6"
+    ],
+    [
+     "Accept",
+     "0.0% (0/6)"
+    ],
+    [
+     "Auth success",
+     "2"
+    ],
+    [
+     "Install prompt",
+     "9"
+    ],
+    [
+     "Install",
+     "too few to report (2/4)"
+    ]
+   ]
+  }
+ ],
+ "kpis": [
+  {
+   "label": "Page views",
+   "value": "86",
+   "deltas": [
+    "vs yesterday +31 (+56%)",
+    "vs 7d avg +36 (+71%)"
+   ]
+  },
+  {
+   "label": "Tagged arrivals — US+CA web retest",
+   "value": "7",
+   "deltas": [
+    "new today"
+   ]
+  },
+  {
+   "label": "Game-screen views",
+   "value": "40",
+   "deltas": [
+    "vs yesterday +25 (+167%)",
+    "vs 7d avg +27 (+201%)"
+   ]
+  },
+  {
+   "label": "Games completed",
+   "value": "8",
+   "deltas": [
+    "new today"
+   ]
+  },
+  {
+   "label": "Pop-ups shown",
+   "value": "41",
+   "deltas": [
+    "new today"
+   ]
+  },
+  {
+   "label": "Pop-ups accepted",
+   "value": "5",
+   "deltas": [
+    "new today"
+   ]
+  },
+  {
+   "label": "Pop-up tap rate",
+   "value": "12.2% (5/41)",
+   "deltas": []
+  },
+  {
+   "label": "Auth successes",
+   "value": "6",
+   "deltas": [
+    "vs yesterday +5 (+500%)",
+    "vs 7d avg +5 (+500%)"
+   ]
+  },
+  {
+   "label": "Installs",
+   "value": "6",
+   "deltas": [
+    "new today"
+   ],
+   "note": "install fix went live 26 Sep 12:26 ET; earlier prompt-driven installs not recorded"
+  },
+  {
+   "label": "Raw install signals",
+   "value": "2",
+   "deltas": [
+    "vs yesterday +2",
+    "vs 7d avg +2"
+   ],
+   "note": "can double-count"
+  },
+  {
+   "label": "Return visits (day 1+)",
+   "value": "9",
+   "deltas": [
+    "new today"
+   ]
+  }
+ ],
+ "updated": "Updated just now"
+}

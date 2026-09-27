@@ -23,11 +23,19 @@ export function ringDims(widget: Pick<Widget, 'dimension' | 'breakdown' | 'rings
   return out
 }
 
+// The date-axis dimensions: 'date' (UTC day) and 'dateEt' (US-Eastern day, geo only — see
+// functions/api/geo.ts). Both are trend buckets: a chart's sole dimension, zero-filled, never a
+// ring or a filter.
+export const DATE_DIMS: ReadonlySet<string> = new Set(['date', 'dateEt'])
+export function isDateDim(dim: string | undefined | null): boolean {
+  return !!dim && DATE_DIMS.has(dim)
+}
+
 // The dims to actually send to a stats query: same as ringDims(), except 'date' is dropped
 // whenever it isn't the widget's ONLY dimension. 'date' is a derived time bucket (see
 // functions/api/geo.ts and stats.ts), not a real equality-groupable column, so it can only
 // ever be a chart's sole dimension (a trend series) — never one ring among several.
 export function queryDims(widget: Pick<Widget, 'dimension' | 'breakdown' | 'rings'>): string[] {
   const dims = ringDims(widget)
-  return dims.length > 1 ? dims.filter((d) => d !== 'date') : dims
+  return dims.length > 1 ? dims.filter((d) => !isDateDim(d)) : dims
 }

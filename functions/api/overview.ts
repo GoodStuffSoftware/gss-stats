@@ -1,82 +1,30 @@
 /// <reference types="@cloudflare/workers-types" />
 //
-// "Best Sudoku overview" dataset (Part C) — today-at-a-glance KPIs, a daily timeline since
-// the first Best Sudoku hit, a campaign scorecard, and a release before/after panel. Reads
-// the same D1 `hits` table as /api/geo, /api/popups and /api/campaigns; reuses their
-// classification/attribution helpers rather than re-deriving them.
+// "Best Sudoku overview" dataset — the release before/after panel, the one bespoke Overview
+// panel left (ADR 0003 slice 7 turns it into a card preset too). Reads the same D1 `hits` table
+// as /api/geo, /api/popups and /api/campaigns and reuses their classifiers.
 //
-// ANONYMOUS AGGREGATES ONLY, no joins — every D1 query below is a GROUP BY producing
-// counts, never a raw per-row fetch. Time-window boundaries need sub-hour precision (for
-// "the same time of day yesterday"), so the KPI query groups by MINUTE (not hour) — still
-// an aggregate bucket, just a finer one than /api/popups' hour buckets.
+// Retired sections: "Today at a glance" (kpis) and the campaign scorecard are metric cards
+// since CONFIG_VERSION 10, served by POST /api/metrics (presets 'bsk-kpis' and
+// 'campaign-scorecard'); the daily timeline is the standard line chart over /api/geo
+// (CONFIG_VERSION 9). Their numbers are pinned by src/components/metrics/presets.parity.test.ts
+// against a golden captured from the last build that still served them.
 //
-// POST { since?, until? }  — since/until scope ONLY the daily timeline (the "existing range
-// control" the brief asks it to zoom/range-select with); the KPI and scorecard sections are
-// always computed server-side ("today", "yesterday", "last 7 days" in ET).
+// ANONYMOUS AGGREGATES ONLY, no joins — every D1 query below is a GROUP BY producing counts
+// (or a bare MIN), never a raw per-row fetch.
+//
+// POST {} — the panel is computed server-side from the latest dated release.
 
-import {
-  CAMPAIGNS,
-  applyExclusions,
-  campaignAttributionClause,
-  classifyFunnelPath,
-  computeFunnelCounts,
-  costPer,
-  etMidnightUtcMs,
-  flightDayIndex,
-  funnelStepRates,
-  parseReturnPath,
-  returnVisitRates,
-  CAMPAIGN_SPEND,
-  isAuthSuccessBase,
-  isInstallPromptInstalled,
-  isRawInstallSignal,
-  scorecardNotInstrumentedSteps,
-  RAW_INSTALL_SIGNALS_LABEL,
-  type FunnelStepKey,
-} from '../../src/lib/campaigns'
-import {
-  computeRate,
-  etDateFromMs,
-  excludeInstallGapUnmeasured,
-  withInstallGapNote,
-  TRACKING_ACTIVATION_DATE_ET,
-  GAME_COMPLETE_LIVE_AT,
-  NEW_BEACONS_LIVE_AT_ET,
-  NEW_BEACONS_LIVE_MARKER_LABEL,
-  RAW_INSTALL_DEDUPE_LIVE_AT_ET,
-  INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS,
-  rowIsPostInstallFix,
-} from '../../src/lib/popupEvents'
-import {
-  addEtDays,
-  buildKpiTile,
-  isEventPath,
-  isPopupAccept,
-  isPopupShown,
-  isReturnD1Plus,
-  campaignsFlightingOn,
-  computeDelta,
-  last7DatesBefore,
-  notYetTrackingTile,
-  releaseComparisonWindows,
-  returnBeaconLiveToday,
-  sameTimeWindowMs,
-  siteWindowClause,
-} from '../../src/lib/overview'
-import { latestDatedRelease, datedReleases } from '../../src/lib/releases'
-import { resolveCampaignSpend } from '../../src/lib/adsRules'
-import { readSpendSummaries } from '../../src/lib/adsStore'
-import { notInstrumentedFunnelSteps } from '../_lib/campaignInstrumentation'
-import { noteRawText } from '../../src/lib/notes'
+import { isAuthSuccessBase, isInstallPromptInstalled } from '../../src/lib/campaigns'
+import { etDateFromMs } from '../../src/lib/popupEvents'
+import { isEventPath, releaseComparisonWindows, siteWindowClause } from '../../src/lib/overview'
+import { latestDatedRelease } from '../../src/lib/releases'
 // lib/defaults.ts is plain TypeScript (no Vue imports), so the Function shares its site list
-// instead of keeping a copy; the metrics registry's facts read the same constant.
-import { BEST_SUDOKU_SITES } from '../../src/lib/defaults'
-import { WHEN_RE } from '../../src/lib/range'
+// instead of keeping a copy.
+import { BEST_SUDOKU_SITES } from '../../src/lib/bestSudokuSites'
 
 interface Env {
   gss_geo: D1Database
-  /** gss-stats' own ads store — optional; spend falls back to CAMPAIGN_SPEND. */
-  gss_stats_ads?: D1Database
 }
 
 const json = (data: unknown, status = 200): Response =>
@@ -85,303 +33,29 @@ const json = (data: unknown, status = 200): Response =>
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
   })
 
-
-function safeDate(v: unknown, fallback: string): string {
-  return typeof v === 'string' && WHEN_RE.test(v) ? v : fallback
-}
-const isDateOnly = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v)
-
-type Row = { min: number; path: string; visitor: string; campaign: string; c: number }
-
-function sumInWindow(rows: Row[], startMs: number, endMs: number, pred: (r: Row) => boolean): number {
-  let total = 0
-  for (const r of rows) {
-    const ms = r.min * 60_000
-    if (ms < startMs || ms >= endMs || !pred(r)) continue
-    total += r.c
-  }
-  return total
-}
-// One per sign-in: the base row only (lib/campaigns.ts isAuthSuccessBase, alias
-// isAuthSuccessPath: the one matcher), never the /auth/success/<provider>/<new|existing|unknown>
-// row v1.95.5 sends alongside it for the same sign-in (a prefix match would double-count).
+// One per sign-in: the base row only (lib/campaigns.ts isAuthSuccessBase), never the
+// /auth/success/<provider>/<new|existing|unknown> row sent alongside it for the same sign-in.
 const isAuthSuccess = isAuthSuccessBase
-// Installs = /popup-outcome/install-prompt/installed (once per showing), like the campaign
-// funnel; raw /install/<outcome> beacons can double-count one install and are a secondary
-// figure only (lib/campaigns.ts isInstallPromptInstalled / isRawInstallSignal).
+// Installs = the install prompt's "installed" outcome (once per showing), like the campaign
+// funnel; raw install beacons can double-count one install.
 const isInstallOutcome = isInstallPromptInstalled
-/** "Installs", plus the install-fix caveat for the range shown (none once it is all post-fix). */
-const installsLabel = (startMs: number, endMs: number) => withInstallGapNote('Installs', { startMs, endMs })
 
 export const onRequestPost: PagesFunction<Env> = async (ctx) => {
-  let body: any
-  try {
-    body = await ctx.request.json()
-  } catch {
-    body = {}
-  }
   if (!ctx.env.gss_geo) return json({ error: 'geo DB not bound' }, 500)
   const db = ctx.env.gss_geo
-
   const nowMs = Date.now()
   const todayEt = etDateFromMs(nowMs)
-  const yesterdayEt = addEtDays(todayEt, -1)
-  const last7 = last7DatesBefore(todayEt)
-  const earliestKpiDay = last7[last7.length - 1] // 7 days before today
-  const kpiRangeStart = etMidnightUtcMs(earliestKpiDay)
 
-  // ── Query 1: today-at-a-glance source rows (minute bucket, path, visitor, campaign) ────
-  // siteWindowClause applies exclusions (HIGH review finding, 2026-09-25): Mike's household +
-  // lifecycle/email traffic must be filtered here too, the same as the campaign scorecard
-  // below — this query feeds every KPI tile. ─────────────────────────────────────────────
-  const kpiClause = siteWindowClause(BEST_SUDOKU_SITES, kpiRangeStart, nowMs)
-  const sqlKpi = `SELECT CAST(ts / 60000 AS INTEGER) AS min, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE ${kpiClause.sql} GROUP BY min, path, visitor, campaign`
-
-  // ── Query 2: daily timeline since first Best Sudoku hit (or the requested since/until —
-  // the "existing range control") — hour bucket is plenty for a DAILY series. Same
-  // exclusions requirement as query 1 — this feeds the daily timeline chart. ───────────────
-  const since = safeDate(body.since, '2026-01-01') // well before any known Best Sudoku data
-  const until = safeDate(body.until, new Date().toISOString())
-  const sinceMs = Date.parse(since)
-  const untilMs = isDateOnly(until) ? Date.parse(until) + 86_400_000 : Date.parse(until)
-  const timelineClause = siteWindowClause(BEST_SUDOKU_SITES, sinceMs, untilMs)
-  const sqlTimeline = `SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE ${timelineClause.sql} GROUP BY hr, path, visitor, campaign`
-
-  // ── Query 3: first-ever Best Sudoku hit (for the release panel's "before" window cap). ──
+  // The first-ever Best Sudoku hit caps the release panel's "before" window.
   const sqlFirstHit = `SELECT MIN(ts) AS t FROM hits WHERE site IN (${BEST_SUDOKU_SITES.map(() => '?').join(', ')})`
-  const bFirstHit = [...BEST_SUDOKU_SITES]
-
-  let rKpi: any, rTimeline: any, rFirstHit: any
+  let rFirstHit: any
   try {
-    ;[rKpi, rTimeline, rFirstHit] = await Promise.all([
-      db.prepare(sqlKpi).bind(...kpiClause.binds).all(),
-      db.prepare(sqlTimeline).bind(...timelineClause.binds).all(),
-      db.prepare(sqlFirstHit).bind(...bFirstHit).all(),
-    ])
+    rFirstHit = await db.prepare(sqlFirstHit).bind(...BEST_SUDOKU_SITES).all()
   } catch (e) {
     return json({ error: 'd1 query failed', detail: String(e) }, 500)
   }
 
-  const kpiRows: Row[] = (rKpi.results ?? []).map((x: any) => ({
-    min: Number(x.min) || 0,
-    path: String(x.path ?? ''),
-    visitor: String(x.visitor ?? ''),
-    campaign: String(x.campaign ?? ''),
-    c: Number(x.c) || 0,
-  }))
-
-  // ── 1. TODAY AT A GLANCE ────────────────────────────────────────────────────────────────
-  const todayWindow: [number, number] = [etMidnightUtcMs(todayEt), nowMs]
-  // DST-safe (HIGH review finding, 2026-09-25): derives each comparison day's end from ITS
-  // OWN midnight plus today's wall-clock time, not a millisecond span reused across days —
-  // see lib/overview.ts sameTimeWindowMs's doc comment.
-  const yesterdayWindow: [number, number] = sameTimeWindowMs(yesterdayEt, nowMs)
-  const avg7Windows = last7.map((d): [number, number] => sameTimeWindowMs(d, nowMs))
-
-  function windowed(pred: (r: Row) => boolean): { today: number; yesterday: number; avg7: number } {
-    const today = sumInWindow(kpiRows, todayWindow[0], todayWindow[1], pred)
-    const yesterday = sumInWindow(kpiRows, yesterdayWindow[0], yesterdayWindow[1], pred)
-    const avg7 = avg7Windows.reduce((a, [s, e]) => a + sumInWindow(kpiRows, s, e, pred), 0) / 7
-    return { today, yesterday, avg7 }
-  }
-
-  const kpis: any[] = []
-  {
-    const w = windowed((r) => !isEventPath(r.path))
-    kpis.push(buildKpiTile('pageviews', 'Page views', w.today, w.yesterday, w.avg7))
-  }
-  {
-    const flighting = campaignsFlightingOn(todayEt)
-    if (!flighting.length) {
-      kpis.push({ key: 'taggedArrivals', label: 'Tagged arrivals', noCampaignFlighting: true })
-    } else {
-      for (const c of flighting) {
-        // The SAME membership rule as the campaign scorecard and /api/campaigns
-        // (campaignAttributionClause, applied in JS to the minute rows), including
-        // flightStartTimeEt — so pre-launch QA rows (the retest's before 12:00 ET on its first
-        // day, and its 2026-09-23 rows inside the 7-day average) never count here either. It
-        // used to filter on ucValues alone (ADR 0003 rate audit, "Label findings").
-        const attr = campaignAttributionClause(c)
-        const w = windowed((r) => r.visitor === 'new' && attr.matches(r.campaign, r.min * 60_000))
-        kpis.push({ ...buildKpiTile(`arrivals-${c.id}`, `Tagged arrivals — ${c.label}`, w.today, w.yesterday, w.avg7), campaignId: c.id })
-      }
-    }
-  }
-  {
-    const w = windowed((r) => r.path === '/game')
-    // `/game` rows are page views, not games (ADR 0003 rate audit): the registry's label.
-    kpis.push(buildKpiTile('played', noteRawText('label.bsk.gameViews'), w.today, w.yesterday, w.avg7))
-  }
-  // v1.95.5 (live GAME_COMPLETE_LIVE_AT, 2026-09-26T19:43:02Z): '/game/complete/...' didn't
-  // exist before this instant, so "today"/"yesterday"/avg7 windows entirely before it are a
-  // real not-instrumented gap, not a real 0 — same convention as notYetTrackingTile's other
-  // callers (e.g. the /return/ tile below, gated on returnBeaconLiveToday()).
-  if (nowMs < GAME_COMPLETE_LIVE_AT) {
-    kpis.push(notYetTrackingTile('completed', 'Games completed'))
-  } else {
-    const w = windowed((r) => r.path.startsWith('/game/complete/'))
-    kpis.push(buildKpiTile('completed', 'Games completed', w.today, w.yesterday, w.avg7))
-  }
-  {
-    const shown = windowed((r) => isPopupShown(r.path))
-    const accept = windowed((r) => isPopupAccept(r.path))
-    kpis.push(buildKpiTile('popupShown', 'Pop-ups shown', shown.today, shown.yesterday, shown.avg7))
-    kpis.push(buildKpiTile('popupAccept', 'Pop-ups accepted', accept.today, accept.yesterday, accept.avg7))
-    kpis.push({
-      key: 'popupTapRate',
-      label: 'Pop-up tap rate',
-      today: computeRate(accept.today, shown.today), // null ("—"/"too few", never 0%/NaN — see MIN_COHORT
-      denominator: shown.today, // lets the UI tell "too few to report" apart from "—"
-      numerator: accept.today, // shown next to the rate — see SMALL_SAMPLE_NOTE
-      notYetTracking: false,
-      isRate: true,
-    })
-  }
-  {
-    const w = windowed((r) => isAuthSuccess(r.path))
-    kpis.push(buildKpiTile('authSuccess', 'Auth successes', w.today, w.yesterday, w.avg7))
-  }
-  {
-    const w = windowed((r) => isInstallOutcome(r.path))
-    kpis.push(buildKpiTile('install', installsLabel(kpiRangeStart, nowMs), w.today, w.yesterday, w.avg7))
-    const raw = windowed((r) => isRawInstallSignal(r.path))
-    kpis.push(buildKpiTile('installRaw', RAW_INSTALL_SIGNALS_LABEL, raw.today, raw.yesterday, raw.avg7))
-  }
-  if (!returnBeaconLiveToday()) {
-    kpis.push(notYetTrackingTile('returns', '/return/ d1+ returns'))
-  } else {
-    const w = windowed((r) => isReturnD1Plus(r.path))
-    kpis.push(buildKpiTile('returns', '/return/ d1+ returns', w.today, w.yesterday, w.avg7))
-  }
-
-  // ── 2. OVERALL TIMELINE (daily ET series) ───────────────────────────────────────────────
-  const timelineRows: Row[] = (rTimeline.results ?? []).map((x: any) => ({
-    min: (Number(x.hr) || 0) * 60, // reuse the same `min` field/sumInWindow helper (hr*3600000 === (hr*60)*60000)
-    path: String(x.path ?? ''),
-    visitor: String(x.visitor ?? ''),
-    campaign: String(x.campaign ?? ''),
-    c: Number(x.c) || 0,
-  }))
-  const dailyMap = new Map<string, { pageviews: number; taggedArrivals: number; authSuccess: number; install: number; rawInstallSignals: number }>()
-  for (const r of timelineRows) {
-    const ms = r.min * 60_000
-    const d = etDateFromMs(ms)
-    const bucket = dailyMap.get(d) ?? { pageviews: 0, taggedArrivals: 0, authSuccess: 0, install: 0, rawInstallSignals: 0 }
-    if (!isEventPath(r.path)) bucket.pageviews += r.c
-    if (r.visitor === 'new' && r.campaign) bucket.taggedArrivals += r.c
-    if (isAuthSuccess(r.path)) bucket.authSuccess += r.c
-    if (isInstallOutcome(r.path)) bucket.install += r.c
-    if (isRawInstallSignal(r.path)) bucket.rawInstallSignals += r.c
-    dailyMap.set(d, bucket)
-  }
-  const daily = [...dailyMap.entries()]
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([date, v]) => ({ date, ...v }))
-
-  // Overlay data for the timeline chart: campaign flights (shaded bands), release markers,
-  // and the tracking-activation marker — all config-driven, no extra queries needed.
-  const campaignFlights = CAMPAIGNS.map((c) => ({ id: c.id, label: c.label, flightStart: c.flightStart, flightEnd: c.flightEnd, status: c.status }))
-  // Every dated release, not just the latest — the timeline overlay labels 'major' ones and
-  // draws the rest as unlabeled ticks (see components/widgets/OverviewWidgetBody.vue), so a
-  // growing release history doesn't clutter the chart. releasePanel (below) still keys off
-  // just the LATEST dated release for its own "no dated release yet" fallback.
-  const releaseMarkers = datedReleases().map((r) => ({ version: r.version, dateEt: r.dateEt, note: r.note, major: r.major }))
-
-  // Stored Google Ads spend (gss-stats-ads) beats the hand-entered config — the same rule as
-  // /api/campaigns (lib/adsRules.ts resolveCampaignSpend), read once for every campaign.
-  const storedSpend = await readSpendSummaries(ctx.env.gss_stats_ads)
-
-  // ── 3. CAMPAIGN SCORECARD ───────────────────────────────────────────────────────────────
-  const scorecard = await Promise.all(
-    CAMPAIGNS.map(async (c) => {
-      const attr = campaignAttributionClause(c)
-      const w1: string[] = [attr.sql]
-      const b1: unknown[] = [...attr.binds]
-      applyExclusions(w1, b1)
-      excludeInstallGapUnmeasured(w1, b1) // pre-fix install-gap rows are unmeasured
-      // Hour bucket (not just path/visitor): needed to split installPrompt rows at the
-      // install-outcome-gap fix instant for the install/installPrompt rate's real denominator
-      // — see installPromptPostFixCount below.
-      const sql1 = `SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, visitor, COUNT(*) AS cnt FROM hits WHERE ${w1.join(' AND ')} GROUP BY hr, path, visitor`
-
-      const w2: string[] = ['site = ?', `(${c.ucValues.map(() => 'path LIKE ?').join(' OR ')})`]
-      const b2: unknown[] = ['bestsudoku-web', ...c.ucValues.map((u) => `/return/${u}/%`)]
-      applyExclusions(w2, b2)
-      const sql2 = `SELECT path, COUNT(*) AS cnt FROM hits WHERE ${w2.join(' AND ')} GROUP BY path`
-
-      // CLOSED-campaign notInstrumented: the same per-flight "did this path exist site-wide
-      // during the window" derivation /api/campaigns.ts uses (functions/_lib/
-      // campaignInstrumentation.ts), so the scorecard's chip list can OMIT a closed flight's
-      // never-instrumented steps instead of showing a false-zero rate for them (owner
-      // clarification, 2026-09-26 — "closed campaigns" scope). Kept OFF for the active/
-      // upcoming campaign(s) on purpose: the simplified gameCompleteNotInstrumented-only gate
-      // below is what the scorecard has always shown for them, and the owner asked to leave
-      // that campaign's rendering exactly as it is.
-      const [r1, r2, closedNotInstrumented] = await Promise.all([
-        db.prepare(sql1).bind(...b1).all(),
-        db.prepare(sql2).bind(...b2).all(),
-        c.status === 'closed' ? notInstrumentedFunnelSteps(db, c) : Promise.resolve<FunnelStepKey[]>([]),
-      ])
-      const rows1 = (r1.results ?? []).map((x: any) => ({ hr: Number(x.hr) || 0, path: String(x.path ?? ''), visitor: String(x.visitor ?? ''), c: Number(x.cnt) || 0 }))
-      const taggedArrivals = rows1.filter((r) => r.visitor === 'new').reduce((a, r) => a + r.c, 0)
-      const counts = computeFunnelCounts(
-        rows1.map((r) => ({ path: r.path, count: r.c })),
-        taggedArrivals,
-      )
-      // Simplified vs /api/campaigns.ts for a non-closed flight: skips the extra per-flight
-      // query above and gates 'completed' only on gameCompleteNotInstrumented (v1.95.5)
-      // rather than the permanent global default, so a flight whose window reaches
-      // GAME_COMPLETE_LIVE_AT shows real completed-game rates instead of a stale "—". See
-      // lib/campaigns.ts scorecardNotInstrumentedSteps for the exact, unit-tested contract.
-      const notInstrumentedSet = scorecardNotInstrumentedSteps(c, closedNotInstrumented)
-      // install/installPrompt's real denominator — same rule as /api/campaigns.ts (audit
-      // finding, 2026-09-26): only prompts shown AT OR AFTER the install-outcome-gap fix.
-      const installFixAtMs = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS
-      const installPromptPostFixCount = rows1.reduce(
-        (a, r) => (classifyFunnelPath(r.path) === 'installPrompt' && rowIsPostInstallFix({ hourStartMs: r.hr * 3_600_000, path: r.path, count: r.c }, installFixAtMs) ? a + r.c : a),
-        0,
-      )
-      const rates = funnelStepRates(counts, notInstrumentedSet, installPromptPostFixCount)
-
-      const returnCounts = Object.fromEntries(['d0', 'd1', 'd2-7', 'd8-14', 'd15-30', 'd31-60'].map((b) => [b, 0])) as Record<string, number>
-      for (const x of r2.results ?? []) {
-        const ev = parseReturnPath(String(x.path ?? ''))
-        if (ev && c.ucValues.includes(ev.uc)) returnCounts[ev.bucket] += Number(x.cnt) || 0
-      }
-      const returnRates = returnVisitRates(returnCounts as any)
-      const spend = resolveCampaignSpend(storedSpend?.get(c.id) ?? null, CAMPAIGN_SPEND[c.id] ?? null).spend
-      // flightStart is nullable (a not-yet-confirmed flight, e.g. the retest — see
-      // lib/campaigns.ts CAMPAIGNS) — there's no day count to report until it's set.
-      const flightDays = c.flightStart == null ? null : Math.round((etMidnightUtcMs(c.flightEnd) - etMidnightUtcMs(c.flightStart)) / 86_400_000) + 1
-      const dayIndexToday = flightDayIndex(c, todayEt)
-
-      return {
-        id: c.id,
-        label: c.label,
-        status: c.status,
-        flightStart: c.flightStart,
-        flightEnd: c.flightEnd,
-        flightDays,
-        flightingToday: dayIndexToday !== null,
-        taggedArrivals,
-        funnelRates: rates,
-        funnelCounts: counts, // lets the UI tell "too few to report" (MIN_COHORT) apart from "—"
-        // Closed campaigns only (see notInstrumentedSet above) — the UI omits these chips
-        // entirely instead of labeling them "not instrumented" (owner clarification,
-        // 2026-09-26). Always [] for an active/upcoming campaign.
-        notInstrumented: [...notInstrumentedSet],
-        installPromptPostFixCount,
-        authSuccess: counts.authSuccess,
-        install: counts.install,
-        returnRateD2to7: returnRates['d2-7'],
-        returnD0: returnCounts.d0, // same reason as funnelCounts, for returnRateD2to7
-        returnD2to7: returnCounts['d2-7'], // numerator for returnRateD2to7 — see SMALL_SAMPLE_NOTE
-        costPerArrival: costPer(spend, taggedArrivals),
-      }
-    }),
-  )
-
-  // ── 4. RELEASE PANEL ─────────────────────────────────────────────────────────────────────
+  // ── RELEASE PANEL ─────────────────────────────────────────────────────────────────────────
   const firstHitMs = Number(rFirstHit.results?.[0]?.t) || nowMs
   const firstHitEt = etDateFromMs(firstHitMs)
   const latest = latestDatedRelease()
@@ -389,19 +63,19 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   if (latest) {
     const windows = releaseComparisonWindows(latest.dateEt, firstHitEt, nowMs)
     if (windows) {
-      // siteWindowClause applies exclusions (HIGH review finding, 2026-09-25): a before/after
-      // comparison is exactly where uneven household/lifecycle traffic on either side of the
-      // release date would bias the delta — same requirement as queries 1/2 above and the
-      // scorecard. ────────────────────────────────────────────────────────────────────────
+      // siteWindowClause applies exclusions: a before/after comparison is exactly where uneven
+      // household/lifecycle traffic on either side of the release date would bias the delta.
       const releaseWindowQuery = (startMs: number, endMs: number) => {
         const clause = siteWindowClause(BEST_SUDOKU_SITES, startMs, endMs)
         const sql = `SELECT path, visitor, campaign, COUNT(*) AS c FROM hits WHERE ${clause.sql} GROUP BY path, visitor, campaign`
         return db.prepare(sql).bind(...clause.binds).all()
       }
-      const [beforeRes, afterRes] = await Promise.all([
-        releaseWindowQuery(windows.before[0], windows.before[1]),
-        releaseWindowQuery(windows.after[0], windows.after[1]),
-      ])
+      let beforeRes: any, afterRes: any
+      try {
+        ;[beforeRes, afterRes] = await Promise.all([releaseWindowQuery(windows.before[0], windows.before[1]), releaseWindowQuery(windows.after[0], windows.after[1])])
+      } catch (e) {
+        return json({ error: 'd1 query failed', detail: String(e) }, 500)
+      }
       const summarize = (res: any) => {
         const rows = (res.results ?? []).map((x: any) => ({ path: String(x.path ?? ''), visitor: String(x.visitor ?? ''), campaign: String(x.campaign ?? ''), c: Number(x.c) || 0 }))
         let pageviews = 0, taggedArrivals = 0, authSuccess = 0, install = 0
@@ -423,32 +97,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     }
   }
 
-  return json({
-    generatedAt: new Date().toISOString(),
-    todayEt,
-    kpis,
-    timeline: {
-      daily,
-      campaignFlights,
-      releaseMarkers,
-      trackingActivationDate: TRACKING_ACTIVATION_DATE_ET,
-      // v1.95.5 go-live (game-complete + auth new/existing beacons) — same marker
-      // convention as trackingActivationDate above, see lib/popupEvents.ts
-      // NEW_BEACONS_LIVE_AT_ET / NEW_BEACONS_LIVE_MARKER_LABEL.
-      newBeaconsLiveAt: NEW_BEACONS_LIVE_AT_ET,
-      newBeaconsLiveAtLabel: NEW_BEACONS_LIVE_MARKER_LABEL,
-      // v1.95.6 raw /install/* de-dupe (ADD-only — never gates any count; see
-      // lib/popupEvents.ts RAW_INSTALL_DEDUPE_LIVE_AT_ET's own comment): annotates the raw
-      // install-signal line ONLY, never the primary (already deduplicated) install count.
-      rawInstallDedupeAt: RAW_INSTALL_DEDUPE_LIVE_AT_ET,
-      since,
-      until,
-      // Series labels that carry data caveats, so the chart shows them whatever the layout.
-      seriesLabels: { install: installsLabel(sinceMs, untilMs), rawInstallSignals: RAW_INSTALL_SIGNALS_LABEL },
-    },
-    scorecard,
-    releasePanel,
-  })
+  return json({ generatedAt: new Date().toISOString(), todayEt, releasePanel })
 }
 
-export const onRequestGet: PagesFunction = async () => json({ ok: true, hint: 'POST an overview query: { since?, until? }' })
+export const onRequestGet: PagesFunction = async () => json({ ok: true, hint: 'POST an overview query: {}' })
