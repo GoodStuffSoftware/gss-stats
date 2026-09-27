@@ -60,7 +60,7 @@ import {
   PLAY_INSTALLS_HOUSEHOLD_NOTE,
   SIGNIN_ELIGIBLE_COUNT_NOTE,
   SIGNUP_PROXY_NOTE,
-  UPSELL_KNOWN_BUG_NOTE,
+  UPSELL_SIGNEDOUT_EXPECTED_NOTE,
   type AdsReadPlan,
   type DecisionResult,
   type HealthResult,
@@ -284,7 +284,7 @@ export const STANDING_NOTES = [
   `${SMALL_SAMPLE_NOTE} Production has about 14 registered users: every figure here is anecdotal.`,
   `Tagged arrivals: ${ARRIVALS_CAVEAT}`,
   SIGNIN_ELIGIBLE_COUNT_NOTE,
-  UPSELL_KNOWN_BUG_NOTE,
+  UPSELL_SIGNEDOUT_EXPECTED_NOTE,
   MEASUREMENT_QUIET_NOTE,
   PLAY_INSTALLS_HOUSEHOLD_NOTE,
   SIGNUP_PROXY_NOTE,
@@ -544,9 +544,14 @@ function segmentCounts(s: FunnelSegments | null): Record<string, number | null> 
   })
   return { segmentBoundaryMs: s.boundaryMs, fixDaySpend: s.boundaryDaySpend, ...side('preFix', s.pre), ...side('postFix', s.post) }
 }
-/** "at most N campaign sign-ups (upper bound)" or "N campaign sign-ups (exact)". */
-export function signUpsPhrase(d: { signUpsAtMost: number; signUpsExact?: boolean }): string {
-  return d.signUpsExact ? `${d.signUpsAtMost} campaign sign-up${d.signUpsAtMost === 1 ? '' : 's'} (exact)` : `at most ${d.signUpsAtMost} campaign sign-ups (upper bound)`
+/** "at most N campaign sign-ups (upper bound)", "N campaign sign-ups (exact)", or, once the
+ * new/existing split is live but the window still mixes an unresolved sign-in with an exact
+ * /new count, "at most N campaign sign-ups (at most B + exactly E)" — both segments shown, never
+ * collapsed to a single bound that hides the exact part. */
+export function signUpsPhrase(d: { signUpsAtMost: number; signUpsExact?: boolean; signUpsBounded?: number | null; signUpsExactNew?: number | null }): string {
+  if (d.signUpsExact) return `${d.signUpsAtMost} campaign sign-up${d.signUpsAtMost === 1 ? '' : 's'} (exact)`
+  if (d.signUpsExactNew) return `at most ${d.signUpsAtMost} campaign sign-ups (at most ${d.signUpsBounded ?? 0} + exactly ${d.signUpsExactNew})`
+  return `at most ${d.signUpsAtMost} campaign sign-ups (upper bound)`
 }
 
 function fullReadCounts(r: FullRead): Record<string, number | null> {

@@ -35,6 +35,7 @@ import {
   stripLocalPaths,
   placementId,
   SIGNUP_PROXY_NOTE,
+  UPSELL_SIGNEDOUT_EXPECTED_NOTE,
   AUTH_SUCCESS_SPLIT_RECOMMENDATION,
   AUTH_NEW_EXISTING_LIVE_AT,
   servingStateOf,
@@ -298,6 +299,16 @@ describe('decision table at $100 (spec section 13)', () => {
     expect(signUpsAtMostLabel(2, 2, null)).toBe('at most 2 campaign sign-ups (tagged auth successes 2; new prod accounts sitewide in the window not read)')
     expect(SIGNUP_PROXY_NOTE).toMatch(/UPPER bound/)
     expect(SIGNUP_PROXY_NOTE).not.toMatch(/verified/i)
+  })
+  it('SIGNUP_PROXY_NOTE names both segments: bounded before the new/existing go-live, exact from it on (v1.95.5, 2026-09-26 19:43:02Z)', () => {
+    expect(SIGNUP_PROXY_NOTE).toMatch(/2026-09-26 15:43 ET/)
+    expect(SIGNUP_PROXY_NOTE).toMatch(/EXACTLY/)
+    expect(SIGNUP_PROXY_NOTE).toMatch(/at most X \+ exactly Y/)
+  })
+  it('UPSELL_SIGNEDOUT_EXPECTED_NOTE says the near-zero is expected by design, never a bug (corrected 2026-09-26)', () => {
+    expect(UPSELL_SIGNEDOUT_EXPECTED_NOTE).toMatch(/EXPECTED BY DESIGN/)
+    expect(UPSELL_SIGNEDOUT_EXPECTED_NOTE).not.toMatch(/KNOWN BUG|bug/i)
+    expect(UPSELL_SIGNEDOUT_EXPECTED_NOTE).toMatch(/never shown the paywall/)
   })
   it('the post-flight recommendation names the beacon split and the freeze', () => {
     expect(AUTH_SUCCESS_SPLIT_RECOMMENDATION).toContain('add /auth/success/<provider>/new|existing via additionalUserInfo.isNewUser (frozen until 10-02)')
