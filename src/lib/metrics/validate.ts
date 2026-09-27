@@ -15,6 +15,7 @@ import { SITE_TAG_RE, WHEN_RE } from '../range'
 import { addDays } from '../etTime'
 import { rangeMs } from './facts'
 import { METRICS, metricWindows, type MetricDef, type MetricParam } from './metrics'
+import { presetById } from './presets'
 import { RATIOS, ratioParamsOf, ratioWindowsOf, type RatioDef } from './ratios'
 import type { CardRef, CardSpec, DataBinding, DeltaName, Display, DisplayAs, Label, RepeatSpec, WindowName } from './types'
 
@@ -171,6 +172,13 @@ export function normCardRef(raw: unknown): CardRef | undefined {
   const r = raw as Record<string, unknown>
   if ('preset' in r) return typeof r.preset === 'string' && PRESET_ID_RE.test(r.preset) ? { preset: r.preset } : { preset: INVALID_CARD_PRESET }
   if (!('spec' in r)) return undefined
+  // `from` (review fix, 2026-09-27 — the "Reset to preset" data-loss bug): kept ONLY when it is
+  // a real, still-resolvable preset id — presetById is already own-key-safe (Object.hasOwn over
+  // a null-prototype PRESETS), so a prototype-named id ('constructor', '__proto__') or an id
+  // that no longer names a preset both resolve to `undefined` here, same as any other unknown
+  // id. Anything else just silently loses its "Reset to preset" shortcut; it never becomes a
+  // wrong one — that mistrust is the whole point of normalizing it at all.
+  const from = typeof r.from === 'string' && PRESET_ID_RE.test(r.from) && presetById(r.from) ? r.from : undefined
   try {
     const text = JSON.stringify(r.spec)
     if (typeof text !== 'string' || text.length > CARD_LIMITS.jsonBytes) return { preset: INVALID_CARD_PRESET }
@@ -178,7 +186,8 @@ export function normCardRef(raw: unknown): CardRef | undefined {
     if (!withinLimits(spec) || !Array.isArray(spec.sections) || spec.sections.length > CARD_LIMITS.sections) return { preset: INVALID_CARD_PRESET }
     const items = spec.sections.reduce((n, sec) => n + (Array.isArray(sec?.items) ? sec.items.length : Infinity), 0)
     if (items > CARD_LIMITS.items) return { preset: INVALID_CARD_PRESET }
-    return validateCard(spec).length ? { preset: INVALID_CARD_PRESET } : { spec }
+    if (validateCard(spec).length) return { preset: INVALID_CARD_PRESET }
+    return from ? { spec, from } : { spec }
   } catch {
     return { preset: INVALID_CARD_PRESET }
   }

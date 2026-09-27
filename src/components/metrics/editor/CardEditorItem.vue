@@ -1,12 +1,12 @@
 <script setup lang="ts">
 // One MetricItem editor (ADR 0003 section 4 items 4-5): label / data / display, in the owner's
-// order, plus gating and a caption under "More". Collapsed to a one-line summary
-// ("Tagged arrivals · campaign.taggedArrivals · number") with ↑ ↓ ⧉ ✕ buttons, matching the
-// nested-doughnut ring editor's button pattern (ChartEditor.vue) so it works with a keyboard and
-// on touch.
+// order, plus gating and a caption under "More". Collapsed to a one-line plain-language summary
+// ("Tagged arrivals · Tagged arrivals (campaign) · Number" — never a raw metric/ratio/field id,
+// review fix 2026-09-27) with ↑ ↓ ⧉ ✕ buttons, matching the nested-doughnut ring editor's button
+// pattern (ChartEditor.vue) so it works with a keyboard and on touch.
 import { computed, ref, useId, watch } from 'vue'
 import { MIN_COHORT } from '../../../lib/popupEvents'
-import { dataKindOf, firstDisplayFor, isDisplaySelectable, isKnownNote, makeDisplay, noteLabelOptions } from '../../../lib/metrics/editorModel'
+import { dataKindOf, dataSummaryLabel, displayAsLabel, firstDisplayFor, isDisplaySelectable, isKnownNote, makeDisplay, noteLabelOptions, scopePathLabel } from '../../../lib/metrics/editorModel'
 import type { MetricItem, RepeatSpec } from '../../../lib/metrics/types'
 import CardEditorData from './CardEditorData.vue'
 import CardEditorDisplay from './CardEditorDisplay.vue'
@@ -48,19 +48,15 @@ watch(
   { deep: true },
 )
 
+// Plain language only — never a raw note/scope-path id (review fix, 2026-09-27).
 const summaryLabel = computed(() => {
   const l = item.value.label
   if (typeof l === 'string') return l || '(no label)'
-  if ('note' in l) return `note: ${l.note || '…'}`
-  if ('bind' in l) return `{${l.bind}}`
+  if ('note' in l) return l.note ? (noteLabelOptions().find((o) => o.value === l.note)?.preview ?? 'Unknown note') : '(no note chosen)'
+  if ('bind' in l) return scopePathLabel(l.bind)
   return "metric's own"
 })
-const summaryData = computed(() => {
-  const d = item.value.data
-  if ('field' in d) return d.field
-  if ('metric' in d) return d.metric
-  return d.ratio
-})
+const summaryData = computed(() => dataSummaryLabel(item.value.data))
 const dataKindLabel = computed(() => dataKindOf(item.value.data) ?? 'unknown')
 const hasData = computed(() => !('field' in item.value.data))
 
@@ -133,7 +129,7 @@ const itemRepeatModel = computed({
   <li class="ce-item" :class="{ open }">
     <div class="ce-item-head">
       <button type="button" class="ce-item-summary" @click="open = !open" :aria-expanded="open">
-        <span class="ce-item-summary-text">{{ summaryLabel }} · {{ summaryData }} · {{ item.display.as }}</span>
+        <span class="ce-item-summary-text">{{ summaryLabel }} · {{ summaryData }} · {{ displayAsLabel(item.display.as) }}</span>
         <span v-if="errors.length" class="chip" style="color: #bc4749">{{ errors.length }} error{{ errors.length > 1 ? 's' : '' }}</span>
       </button>
       <span class="ce-item-controls">

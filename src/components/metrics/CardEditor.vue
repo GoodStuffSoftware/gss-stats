@@ -7,7 +7,7 @@
 //
 // Props: `modelValue: CardRef` (required), `context?: MetricsContext` (the page's current
 // filters, forwarded to the live preview only — never mutated here). Emits `update:modelValue:
-// [CardRef]`.
+// [CardRef]` and `errors: [string[]]`.
 //
 // Validity gate: `update:modelValue` only ever fires a CardRef that `validateCard` accepts (a
 // `{ preset }` is valid iff the id resolves; a `{ spec }` iff `validateCard(spec)` returns no
@@ -15,6 +15,12 @@
 // lib/metrics/editorModel.ts groupErrors) and simply doesn't emit, so a caller's `v-model` can
 // never receive an invalid card. Live preview always renders the current draft, valid or not, so
 // the owner sees a mid-edit state before it's saveable.
+//
+// `errors` (review fix, 2026-09-27) fires immediately and on every validity change, with the
+// SAME array `update:modelValue`'s own gate checks — `[]` means the current draft is saveable.
+// A host that wraps this in its own form (ChartEditor.vue) listens to disable its own Save
+// button and say why while errors are non-empty, since a caller has no other way to learn
+// "invalid" from a component whose whole contract is "never emit an invalid value".
 //
 // MOUNT-TIME EMIT: the validity watcher below runs with `{ immediate: true }`, so if the CardRef
 // passed in as `modelValue` is ALREADY valid, `update:modelValue` fires once, synchronously,
@@ -44,7 +50,12 @@ const props = defineProps<{
    * range to ask for). Never mutated here. */
   context?: MetricsContext
 }>()
-const emit = defineEmits<{ 'update:modelValue': [CardRef] }>()
+// `errors` fires whenever the current draft's validity changes (immediate, so a caller has the
+// answer synchronously from mount) — how a host like ChartEditor.vue knows to disable its own
+// Save button and say why, since `update:modelValue` alone never reports an invalid state (it
+// simply doesn't fire — see the doc block above). Always the SAME array validateCard would
+// produce; `[]` means the current draft is saveable.
+const emit = defineEmits<{ 'update:modelValue': [CardRef]; errors: [string[]] }>()
 
 const PRESET_OPTIONS = presetOptions()
 /** The preset's plain name — never its raw id (review fix, 2026-09-27) — for "Customized from
@@ -64,9 +75,22 @@ const showUpdatedId = useId()
 
 type Mode = 'preset' | 'custom'
 const mode = ref<Mode>('spec' in props.modelValue ? 'custom' : 'preset')
-const presetId = ref<string>('preset' in props.modelValue ? props.modelValue.preset : (PRESET_OPTIONS[0]?.value ?? ''))
-/** The preset id `spec` was last copied from, when in custom mode — powers "Reset to preset". */
-const customizedFrom = ref<string>(mode.value === 'custom' ? presetId.value : '')
+
+// Review fix, 2026-09-27 (MUST-FIX — a data-loss bug): a `{ spec }` CardRef carries an optional
+// `from` (the preset it was customized from — see types.ts's own doc comment). This used to be
+// missing entirely, so a saved custom card's "Reset to preset" defaulted to PRESET_OPTIONS[0] —
+// an ARBITRARY preset, not necessarily the one the card was ever related to — silently replacing
+// the card's rows with a different preset's. `from` is re-validated here regardless of whether
+// the caller already normalized it (lib/metrics/validate.ts normCardRef does, on load, but
+// CardEditor's own contract shouldn't depend on a specific caller having done that): only a
+// `from` that still resolves to a real preset is trusted, exactly like normCardRef's own rule.
+const initialFrom = 'spec' in props.modelValue && props.modelValue.from && presetById(props.modelValue.from) ? props.modelValue.from : ''
+const presetId = ref<string>('preset' in props.modelValue ? props.modelValue.preset : initialFrom)
+/** The preset id `spec` was copied from, when known — powers "Customized from …" and "Reset to
+ * preset" (both shown only when this is non-empty; see the template). Empty for a legacy/
+ * hand-edited custom card whose `from` never survived normalization — that state is never
+ * guessed at, only left honest. */
+const customizedFrom = ref<string>(mode.value === 'custom' ? initialFrom : '')
 
 const spec = reactive<CardSpec>(cloneSpec('spec' in props.modelValue ? props.modelValue.spec : specFromPresetId(presetId.value)))
 function resetSpecTo(next: CardSpec) {
@@ -80,8 +104,13 @@ function customize() {
   customizedFrom.value = presetId.value
   mode.value = 'custom'
 }
+/** Replaces every edit with the preset's own rows — a real (and, before this fix, sometimes
+ * WRONG) data-loss risk, so it asks first. `window.confirm` rather than a second custom dialog:
+ * simplest thing that's actually modal and keyboard-dismissable (Esc = cancel) for free. */
 function resetToPreset() {
   if (!customizedFrom.value) return
+  const label = presetLabel(customizedFrom.value)
+  if (!window.confirm(`Replace your changes with the ${label} preset?`)) return
   resetSpecTo(specFromPresetId(customizedFrom.value))
 }
 function useDifferentPreset() {
@@ -99,18 +128,22 @@ const presetErrors = computed<string[]>(() => {
 })
 const errors = computed<string[]>(() => (mode.value === 'preset' ? presetErrors.value : validateCard(spec)))
 const grouped = computed(() => groupErrors(errors.value, spec))
+watch(errors, (e) => emit('errors', e), { immediate: true })
 
 // A deep fingerprint of everything that decides the emitted/previewed CardRef — JSON.stringify
 // over a reactive tree reads every nested property, so this recomputes on any change anywhere in
 // `spec`, without a bespoke deep-watch per field.
-const fingerprint = computed(() => JSON.stringify({ mode: mode.value, presetId: presetId.value, spec: mode.value === 'custom' ? spec : null }))
+const fingerprint = computed(() => JSON.stringify({ mode: mode.value, presetId: presetId.value, customizedFrom: customizedFrom.value, spec: mode.value === 'custom' ? spec : null }))
 
 // `spec` is a Vue reactive() proxy — structuredClone (cloneSpec) can't clone a Proxy directly in
 // every environment (happy-dom's polyfill throws DataCloneError on one), so every clone of it
 // goes through toRaw() first, which unwraps to the plain underlying tree Vue never actually
 // mutates in place (nested reactive proxies are a lazy, cached VIEW over it, never written back).
 function currentCardRef(): CardRef {
-  return mode.value === 'preset' ? { preset: presetId.value } : { spec: cloneSpec(toRaw(spec)) }
+  if (mode.value === 'preset') return { preset: presetId.value }
+  const specCopy = cloneSpec(toRaw(spec))
+  // `from` rides along only when known — never a guess (the bug this whole change fixes).
+  return customizedFrom.value ? { spec: specCopy, from: customizedFrom.value } : { spec: specCopy }
 }
 
 watch(
@@ -252,7 +285,7 @@ function removeSection(i: number) {
           <CardEditorData v-if="hasBadge" v-model="badgeDataModel" :repeat-over="spec.repeat?.over" field-only />
 
           <div class="field">
-            <label :id="captionsId">Captions <span class="hint">— note ids shown under the whole card</span></label>
+            <label :id="captionsId">Captions <span class="hint">— notes shown under the whole card</span></label>
             <div class="campaign-list" role="group" :aria-labelledby="captionsId">
               <label v-for="o in NOTE_OPTIONS" :key="o.value" class="campaign-row">
                 <input type="checkbox" :checked="captionsValue.includes(o.value)" @change="toggleCaption(o.value, ($event.target as HTMLInputElement).checked)" />

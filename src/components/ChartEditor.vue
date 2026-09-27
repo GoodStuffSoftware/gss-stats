@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, computed, watch, onMounted, ref } from 'vue'
+import { reactive, computed, watch, onMounted, onBeforeUnmount, ref, useId } from 'vue'
 import type { Widget, LineSeries, GlobalFilters } from '../types'
 import {
   DIMENSIONS,
@@ -50,8 +50,50 @@ watch(
 // centering no longer fights it (see the mobile @media rule below) — this just makes that
 // explicit instead of relying on it being an accident of the CSS.
 const panelEl = ref<HTMLElement | null>(null)
+
+// ── Dialog a11y (review fix, 2026-09-27): role="dialog"/aria-modal on .panel, named by the
+// heading below; focus moves to Title on open, is trapped inside the dialog while it's open
+// (Tab/Shift+Tab wrap instead of escaping to the page behind it), Esc cancels the same as the
+// Cancel button, and focus returns to whatever had it before the dialog opened (App.vue's own
+// "Edit"/"Add chart" control) once it closes — captured here rather than passed in, so this
+// works regardless of what opened the editor, with no change needed at any call site. ──────────
+const dialogTitleId = useId()
+const titleInputEl = ref<HTMLInputElement | null>(null)
+let previouslyFocused: HTMLElement | null = null
+
+function focusableEls(): HTMLElement[] {
+  if (!panelEl.value) return []
+  const selector = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+  return [...panelEl.value.querySelectorAll<HTMLElement>(selector)].filter((el) => el.offsetParent !== null || el === document.activeElement)
+}
+function onDialogKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') {
+    e.stopPropagation()
+    emit('cancel')
+    return
+  }
+  if (e.key !== 'Tab') return
+  const els = focusableEls()
+  if (!els.length) return
+  const first = els[0]
+  const last = els[els.length - 1]
+  // Wrap instead of letting Tab escape the dialog onto the page behind it.
+  if (e.shiftKey && document.activeElement === first) {
+    e.preventDefault()
+    last.focus()
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault()
+    first.focus()
+  }
+}
+
 onMounted(() => {
   if (panelEl.value) panelEl.value.scrollTop = 0
+  previouslyFocused = document.activeElement as HTMLElement | null
+  titleInputEl.value?.focus()
+})
+onBeforeUnmount(() => {
+  previouslyFocused?.focus?.()
 })
 
 const isGeo = computed(() => draft.dataset === 'geo')
@@ -307,6 +349,13 @@ const cardContext = computed<MetricsContext>(() => {
   if (!f) return {}
   return metricsContextFor({ since: f.since, until: f.until }, resolveSelection(draft.siteSel ?? f.siteSel).tags)
 })
+// CardEditor's own `errors` event (review fix, 2026-09-27): the only way this form learns a
+// metric card is currently invalid, since CardEditor's `update:modelValue` simply never fires
+// for one — there is no "invalid value" to read back otherwise. Irrelevant, and never set, for
+// any non-card widget: `save()` and the Save button below are unaffected for those, exactly as
+// before this existed.
+const cardErrors = ref<string[]>([])
+const cardSaveDisabled = computed(() => isCardWidget.value && cardErrors.value.length > 0)
 
 const typeDef = computed(() => CHART_TYPES.find((t) => t.value === draft.type))
 // "Site override" = Widget.siteSel: this chart's own site pick, replacing the page's (dates and
@@ -331,6 +380,7 @@ const siteValue = computed({
 })
 
 function save() {
+  if (cardSaveDisabled.value) return // belt and suspenders: the Save button is disabled for this too
   // Freeze whatever the "Captions" checkboxes currently show (scope defaults, or the
   // user's own edit) into draft.notes, so what the editor DISPLAYED is exactly what gets
   // saved — ChartCard.vue only ever reads widget.notes directly, never recomputes scope
@@ -371,12 +421,12 @@ function save() {
 
 <template>
   <div class="overlay" @click.self="emit('cancel')">
-    <div class="panel" :class="{ 'is-card': isCardWidget }" ref="panelEl">
-      <h2>{{ isNew ? 'Add chart' : 'Edit chart' }}</h2>
+    <div class="panel" :class="{ 'is-card': isCardWidget }" ref="panelEl" role="dialog" aria-modal="true" :aria-labelledby="dialogTitleId" @keydown="onDialogKeydown">
+      <h2 :id="dialogTitleId">{{ isNew ? 'Add chart' : 'Edit chart' }}</h2>
 
       <div class="field">
         <label>Title</label>
-        <input type="text" v-model="draft.title" placeholder="Chart title" />
+        <input ref="titleInputEl" type="text" v-model="draft.title" placeholder="Chart title" />
       </div>
 
       <template v-if="!isCardWidget">
@@ -414,7 +464,7 @@ function save() {
       <template v-if="isCardWidget">
         <p class="hint">This chart is a metric card.</p>
         <button type="button" class="btn" @click="leaveCardMode">Switch to a regular chart</button>
-        <CardEditor v-model="cardModel" :context="cardContext" />
+        <CardEditor v-model="cardModel" :context="cardContext" @errors="cardErrors = $event" />
       </template>
 
       <!-- Note: pick a registry entry, or write custom text (owner requirement, 2026-09-26:
@@ -646,11 +696,12 @@ function save() {
       </div>
       </template>
 
+      <p v-if="cardSaveDisabled" class="hint save-reason" role="alert">Fix the highlighted fields to save.</p>
       <div class="actions">
         <button v-if="!isNew" class="btn danger" @click="emit('remove')">Delete</button>
         <span class="spacer"></span>
         <button class="btn" @click="emit('cancel')">Cancel</button>
-        <button class="btn btn-primary" @click="save">{{ isNew ? 'Add chart' : 'Save' }}</button>
+        <button class="btn btn-primary" :disabled="cardSaveDisabled" :title="cardSaveDisabled ? 'Fix the highlighted fields to save.' : ''" @click="save">{{ isNew ? 'Add chart' : 'Save' }}</button>
       </div>
     </div>
   </div>
@@ -802,6 +853,17 @@ h2 {
 .hint {
   font-size: 12px;
   color: rgb(var(--ink-3));
+}
+.save-reason {
+  color: #bc4749;
+  margin-top: 8px;
+  margin-bottom: 0;
+}
+.btn-primary:disabled {
+  background: rgb(var(--line-2));
+  border-color: rgb(var(--line-2));
+  color: rgb(var(--ink-3));
+  cursor: not-allowed;
 }
 .actions {
   display: flex;

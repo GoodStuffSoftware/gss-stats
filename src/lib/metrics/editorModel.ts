@@ -149,6 +149,14 @@ export const SCOPE_PATH_OPTIONS: Record<RepeatSpec['over'], { value: ScopePath; 
 export function scopePathOptions(over: RepeatSpec['over'] | undefined): { value: ScopePath; label: string }[] {
   return over ? SCOPE_PATH_OPTIONS[over] : []
 }
+/** A ScopePath's plain label, from the SAME table the pickers use — flattened once, since a path
+ * string is unique across every repeat kind (e.g. 'campaign.label' only ever appears under
+ * 'campaigns'). Used wherever a bound field needs to be named back to the owner outside its own
+ * picker (the item summary line, a label-kind switch) — never the bare path string itself. */
+const ALL_SCOPE_PATH_LABELS: ReadonlyMap<string, string> = new Map(Object.values(SCOPE_PATH_OPTIONS).flat().map((o) => [o.value, o.label]))
+export function scopePathLabel(path: ScopePath): string {
+  return ALL_SCOPE_PATH_LABELS.get(path) ?? 'Unknown field'
+}
 
 // ── Notes (for a `note` label, or a caption) — plain-text previews only: noteRawText strips
 // markup and resolves the note's own default vars, so no raw `**`/`{var}` ever shows in a
@@ -228,6 +236,36 @@ export function metricDef(id: string): MetricDef | undefined {
 export function ratioDef(id: string): RatioDef | undefined {
   return RATIOS.get(id)
 }
+/** "campaign" / "site-wide" / "pop-up" — the id's own namespace prefix, spelled out, purely to
+ * disambiguate two metrics that would otherwise share a short plain name (e.g. "Tagged arrivals"
+ * meaning something different per family is unlikely today, but the summary line shows it on
+ * every metric/ratio regardless, so it never has to guess when it WOULD matter). '' for a prefix
+ * outside the three known families (defensive; every real metric/ratio id has one of these). */
+function idNamespaceWord(id: string): string {
+  const prefix = id.slice(0, id.indexOf('.'))
+  return prefix === 'campaign' ? 'campaign' : prefix === 'bsk' ? 'site-wide' : prefix === 'popup' ? 'pop-up' : ''
+}
+/** A DataBinding's plain-language name — for the item summary line and anywhere else a data
+ * pick needs to be named back to the owner OUTSIDE its own picker (review fix, 2026-09-27: "no
+ * ids anywhere a user reads" — this used to be the bare metric/ratio id or ScopePath). An id
+ * that no longer resolves (hand-edited storage, a since-removed metric) reads as "Unknown …"
+ * rather than showing the id itself; validateCard flags the same item with a real error
+ * alongside it, so the problem is never silently disguised as a normal-looking name. */
+export function dataSummaryLabel(binding: DataBinding): string {
+  if ('field' in binding) return scopePathLabel(binding.field)
+  if ('metric' in binding) {
+    const def = metricDef(binding.metric)
+    if (!def) return 'Unknown metric'
+    const label = noteRawText(def.label) || 'Unnamed metric'
+    const ns = idNamespaceWord(binding.metric)
+    return ns ? `${label} (${ns})` : label
+  }
+  const def = ratioDef(binding.ratio)
+  if (!def) return 'Unknown ratio'
+  const label = noteRawText(def.label) || 'Unnamed ratio'
+  const ns = idNamespaceWord(binding.ratio)
+  return ns ? `${label} (${ns})` : label
+}
 
 // Campaign/pop-up option lists — from the real arrays, id + label only (never a free-text id).
 export const CAMPAIGN_ID_OPTIONS: { value: string; label: string }[] = CAMPAIGNS.map((c) => ({ value: c.id, label: c.label }))
@@ -240,6 +278,23 @@ export function paramIsPinned(v: ParamValue | undefined): v is string {
 }
 
 // ── Display kind / compatibility ──────────────────────────────────────────────────────────
+/** Plain names for a Display's `as` — never the raw camelCase type-level string (review fix,
+ * 2026-09-27), used both by the display-kind picker's own tabs and the item summary line. */
+const DISPLAY_AS_LABELS: Record<DisplayAs, string> = {
+  number: 'Number',
+  currency: 'Currency',
+  percent: 'Percent',
+  counts: 'Counts',
+  dateRange: 'Date range',
+  datetime: 'Date & time',
+  badge: 'Badge',
+  bar: 'Bar',
+  sparkline: 'Sparkline',
+  text: 'Text',
+}
+export function displayAsLabel(as: DisplayAs): string {
+  return DISPLAY_AS_LABELS[as] ?? as
+}
 export interface DisplayOption {
   as: DisplayAs
   disabled: boolean

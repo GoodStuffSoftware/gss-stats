@@ -155,6 +155,47 @@ describe('normCardRef', () => {
     const big = { v: 1, sections: [{ layout: 'rows', items: Array.from({ length: 41 }, (_, i) => ({ id: `i${i}`, label: 'x', data: { field: 'campaign.label' }, display: { as: 'text' } })) }] }
     expect(normCardRef({ spec: big })).toEqual({ preset: INVALID_CARD_PRESET })
   })
+
+  // `from` (review fix, 2026-09-27 — the "Reset to preset" data-loss bug): the preset a
+  // customized spec was copied from. Kept ONLY when it still resolves to a real preset, so a
+  // saved custom card's "Reset to preset" (CardEditor.vue) can never swap in an unrelated one.
+  describe('from (the origin preset of a customized spec)', () => {
+    const spec = { v: 1, sections: [{ layout: 'tiles', items: [{ id: 'pv', label: { metric: true }, data: { metric: 'bsk.pageviews', window: 'todaySoFar' }, display: { as: 'number' } }] }] }
+    it('a real preset id is kept alongside the spec', () => {
+      expect(normCardRef({ spec, from: 'campaign-scorecard' })).toEqual({ spec, from: 'campaign-scorecard' })
+    })
+    it('an unknown preset id is dropped silently (the spec is still kept)', () => {
+      expect(normCardRef({ spec, from: 'not-a-real-preset' })).toEqual({ spec })
+    })
+    it('a prototype-named "from" is dropped, never resolved through Object.prototype', () => {
+      for (const from of ['constructor', '__proto__', 'toString']) {
+        const out = normCardRef({ spec, from })
+        expect(out).toEqual({ spec })
+        expect(out && 'from' in out).toBe(false)
+      }
+    })
+    it('a non-string "from" is dropped', () => {
+      for (const from of [7, {}, [], null, true]) expect(normCardRef({ spec, from })).toEqual({ spec })
+    })
+    it('absent "from" stays absent', () => {
+      const out = normCardRef({ spec })
+      expect(out).toEqual({ spec })
+      expect(out && 'from' in out).toBe(false)
+    })
+  })
+})
+
+describe('a saved custom card keeps `from` through a full normalizeConfig round trip', () => {
+  it('survives load, and a second normalization changes nothing further', () => {
+    const spec = { v: 1, sections: [{ layout: 'rows', items: [{ id: 'a', label: 'A', data: { field: 'campaign.label' }, display: { as: 'text' } }] }] }
+    const widget = { ...(panel('custom-kpi', 'kpis') as Widget), card: { spec, from: 'bsk-kpis' } }
+    const raw: any = { version: CONFIG_VERSION, activePageId: 'p1', pages: [page('p1', [widget])] }
+    const once = normalizeConfig(raw)
+    const got = once.pages[0].widgets[0].card
+    expect(got).toEqual({ spec, from: 'bsk-kpis' })
+    const twice = normalizeConfig(clone(once))
+    expect(twice.pages[0].widgets[0].card).toEqual({ spec, from: 'bsk-kpis' })
+  })
 })
 
 describe('the chart editor keeps the card in step with the view', () => {

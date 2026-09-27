@@ -5,7 +5,7 @@
 // shows "(n/d)"; there is no toggle to hide it (ADR: "no toggle to hide it"). Sparkline is
 // listed but disabled ("coming soon"): MetricValue carries no per-day series yet.
 import { computed, useId } from 'vue'
-import { dataKindOf, displayOptionsFor, makeDisplay, metricDef } from '../../../lib/metrics/editorModel'
+import { dataKindOf, displayAsLabel, displayOptionsFor, makeDisplay, metricDef } from '../../../lib/metrics/editorModel'
 import type { DataBinding, Display, DisplayAs } from '../../../lib/metrics/types'
 
 const props = defineProps<{ binding: DataBinding }>()
@@ -77,7 +77,7 @@ const dateRangeDays = computed<boolean>({
         :title="o.hint ?? ''"
         @click="pick(o.as)"
       >
-        {{ o.as }}{{ o.disabled ? ' (coming soon)' : '' }}
+        {{ displayAsLabel(o.as) }}{{ o.disabled ? ' (coming soon)' : '' }}
       </button>
     </div>
 
