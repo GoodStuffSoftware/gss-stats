@@ -39,10 +39,14 @@ function w(p: Omit<Widget, 'i'>): Widget {
   return { ...p, i: p.id }
 }
 
-// Bumped to 10 for metric cards (ADR 0003 slice 5, see migrateCardsV10): the Overview's bespoke
+// Bumped to 11 for the rest of the panels (ADR 0003 slice 7, see migratePanelsV11): every
+// remaining bespoke panel becomes a card preset (the release panel; the campaign funnel, country,
+// cost and returns panels; the Pop-ups rate table and sign-in eligibility) or a standard chart
+// (arrivals by ET hour, daily arrivals by flight day), swapped in place. functions/api/config.ts
+// backs the stored layout up to `dashboard:default:backup:v<stored>` on the first v11 save.
+// (Bumped to 10 for metric cards (ADR 0003 slice 5, see migrateCardsV10): the Overview's bespoke
 // 'kpis' and 'scorecard' panels gain `card: { preset }` and render as MetricCard; nothing else
-// about them changes. functions/api/config.ts backs the stored v9 layout up to
-// `dashboard:default:backup:v9` on the first v10 save.
+// about them changes.)
 // (Bumped to 9 for the Pop-ups page rebuild, the campaign device-mix swap and the Overview
 // timeline swap (see normalizeConfig's v9 block): the Pop-ups page's ~25 generated tiles become
 // one breakdown bar + a valid-rates table, the bespoke campaigns 'deviceMix' table becomes the
@@ -53,7 +57,7 @@ function w(p: Omit<Widget, 'i'>): Widget {
 // uncustomized layout only. (Bumped to 7 for the bespoke-page → widget conversion migration —
 // see the v7 block: Overview/Campaigns went from `widgets: []` (rendered by the now-retired
 // OverviewPage.vue/CampaignComparePage.vue) to real generic widgets.)
-export const CONFIG_VERSION = 10
+export const CONFIG_VERSION = 11
 
 // The default "basic charts available out of the box" — a sensible analytics
 // starting layout. Users can move/resize/add/remove from here.
@@ -537,41 +541,65 @@ export function migrateTimelineV9(page: DashboardPage): DashboardPage {
   }
 }
 
-// Metric cards (CONFIG_VERSION 10, ADR 0003 slice 5): the Overview panels a card preset now
-// renders. The widget keeps its dataset/view (an older build still recognises it) and gains
-// `card: { preset }`; ChartCard renders MetricCard whenever `card` is set.
-export const CARD_PRESET_FOR_OVERVIEW_VIEW: Readonly<Record<string, string>> = Object.freeze(
-  Object.assign(Object.create(null) as Record<string, string>, { kpis: 'bsk-kpis', scorecard: 'campaign-scorecard' }),
+// Metric cards (CONFIG_VERSION 10 and 11, ADR 0003 slices 5 and 7): the panels a card preset now
+// renders, keyed by what the widget IS (panelKey) — dataset and view for the overview and
+// campaigns panels, and for the pop-up dataset its rate table (type 'rateTable') and its
+// sign-in eligibility chart (dimension 'eligible', any chart type). The widget keeps its
+// dataset/view/type (an older build still recognises it) and gains `card: { preset }`;
+// ChartCard renders MetricCard whenever `card` is set.
+export const CARD_PRESET_FOR_PANEL: Readonly<Record<string, string>> = Object.freeze(
+  Object.assign(Object.create(null) as Record<string, string>, {
+    'overview:kpis': 'bsk-kpis',
+    'overview:scorecard': 'campaign-scorecard',
+    'overview:releasePanel': 'release-before-after',
+  }),
 )
-const CARD_PRESETS_FROM_VIEWS = new Set(Object.values(CARD_PRESET_FOR_OVERVIEW_VIEW))
-/** A widget that is (or was) one of those panels — matched by what it IS (dataset + view), on
- * any page, never by its title or its page's name. */
+const CARD_PRESETS_FROM_PANELS = new Set(Object.values(CARD_PRESET_FOR_PANEL))
+/** What a widget IS, as a CARD_PRESET_FOR_PANEL key: never its title or its page's name. */
+export function panelKey(wd: Pick<Widget, 'dataset' | 'view' | 'type' | 'dimension'>): string | null {
+  if ((wd.dataset === 'overview' || wd.dataset === 'campaigns') && typeof wd.view === 'string') return `${wd.dataset}:${wd.view}`
+  if (wd.dataset === 'popup' && wd.type === 'rateTable') return 'popup:rates'
+  if (wd.dataset === 'popup' && wd.dimension === 'eligible' && wd.type !== 'rate') return 'popup:eligible'
+  return null
+}
+/** A widget that is (or was) one of those panels, on any page. */
 export function isCardPanel(wd: Widget): boolean {
-  return wd.dataset === 'overview' && typeof wd.view === 'string' && Object.hasOwn(CARD_PRESET_FOR_OVERVIEW_VIEW, wd.view)
+  const k = panelKey(wd)
+  return k !== null && Object.hasOwn(CARD_PRESET_FOR_PANEL, k)
 }
 /** The panel with its card: adds `card: { preset }` when absent and keeps everything else (id,
- * position, size, title, notes, default mark). A card already set — a preset or a customised
- * spec — is left as it is. Returns the same object when nothing changes. */
+ * position, size, title, notes, default mark, campaign selection). A card already set — a
+ * preset or a customised spec — is left as it is. Returns the same object when nothing changes. */
 export function withCardForView(wd: Widget): Widget {
   if (!isCardPanel(wd) || wd.card) return wd
-  return { ...wd, card: { preset: CARD_PRESET_FOR_OVERVIEW_VIEW[wd.view!] } }
+  return { ...wd, card: { preset: CARD_PRESET_FOR_PANEL[panelKey(wd)!] } }
 }
 /** For the chart editor's save: a widget edited INTO one of the panels gets its card; one
- * edited away from them (another overview view) loses the preset card that came with the old
- * view, so it renders as what it now is. */
+ * edited away from them (another view, dimension or type) loses the preset card that came with
+ * the old panel, so it renders as what it now is. */
 export function syncCardWithView(wd: Widget): Widget {
   if (isCardPanel(wd)) return withCardForView(wd)
-  if (wd.dataset === 'overview' && wd.card && 'preset' in wd.card && CARD_PRESETS_FROM_VIEWS.has(wd.card.preset)) {
+  if ((wd.dataset === 'overview' || wd.dataset === 'campaigns' || wd.dataset === 'popup') && wd.card && 'preset' in wd.card && CARD_PRESETS_FROM_PANELS.has(wd.card.preset)) {
     const { card: _drop, ...rest } = wd
     return rest as Widget
   }
   return wd
 }
-/** v10: every panel on the page gets its card (withCardForView). Idempotent, and never adds,
+/** Every card panel on the page gets its card (withCardForView). Idempotent, and never adds,
  * removes or moves a widget, so a panel the owner deleted stays deleted. */
 export function migrateCardsV10(page: DashboardPage): DashboardPage {
   if (!page.widgets.some((wd) => withCardForView(wd) !== wd)) return page
   return { ...page, widgets: page.widgets.map(withCardForView) }
+}
+/** v11 (every load): the chart swaps (swapPanelChart), then every card panel's card. */
+export function migratePanelsV11(page: DashboardPage): DashboardPage {
+  const swapped = page.widgets.some((wd) => swapPanelChart(wd) !== wd) ? { ...page, widgets: page.widgets.map(swapPanelChart) } : page
+  return migrateCardsV10(swapped)
+}
+/** The bespoke panels that became STANDARD charts (not cards), swapped in place: same id, grid
+ * position, size, title, captions and default mark. The same object when it is not one. */
+export function swapPanelChart(wd: Widget): Widget {
+  return wd
 }
 
 export function defaultOverviewWidgets(): Widget[] {
@@ -580,7 +608,7 @@ export function defaultOverviewWidgets(): Widget[] {
     w({ id: 'ow-kpis', title: 'Today at a glance', type: 'table', dataset: 'overview', view: 'kpis', card: { preset: 'bsk-kpis' }, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 3, w: 12, h: 8 }),
     timelineWidget({ x: 0, y: 11, w: 12, h: 12 }),
     w({ id: 'ow-scorecard', title: 'Campaign scorecard', type: 'table', dataset: 'overview', view: 'scorecard', card: { preset: 'campaign-scorecard' }, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 23, w: 12, h: 14 }),
-    w({ id: 'ow-release', title: 'Release panel', type: 'table', dataset: 'overview', view: 'releasePanel', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 37, w: 12, h: 9 }),
+    w({ id: 'ow-release', title: 'Release panel', type: 'table', dataset: 'overview', view: 'releasePanel', card: { preset: 'release-before-after' }, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 37, w: 12, h: 9 }),
     completionsWidget(),
   ]
 }
@@ -893,11 +921,11 @@ export function normalizeConfig(raw: any): DashboardConfig {
         pages[i] = p
       }
     }
-    // v10 (see CONFIG_VERSION), run on every load: the Overview's 'kpis' and 'scorecard' panels
-    // render as metric cards (migrateCardsV10). Not version-gated, because their bespoke bodies
-    // are retired: a panel added later (the chart editor still offers both views) must get its
-    // card too. Idempotent; it only ever adds `card` to those panels.
-    for (let i = 0; i < pages.length; i++) pages[i] = migrateCardsV10(pages[i])
+    // v10 and v11 (see CONFIG_VERSION), run on every load: every former bespoke panel renders as
+    // a metric card or a standard chart (migratePanelsV11). Not version-gated, because the bespoke
+    // bodies are retired: a panel a stale tab or an older build saves later must be swapped too.
+    // Idempotent; it swaps panels in place and never adds, removes or moves a widget.
+    for (let i = 0; i < pages.length; i++) pages[i] = migratePanelsV11(pages[i])
     // Self-heal (every load, not version-gated): the canonical pages — Overview, Beacon, and
     // the Best Sudoku launch page — must NEVER carry a persistent page-level drill. Drilling
     // always spawns a NEW page, so a drill sitting on one of these is always erroneous (e.g.

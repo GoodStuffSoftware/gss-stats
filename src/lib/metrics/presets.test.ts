@@ -9,14 +9,17 @@ import { defineRatios, RATIO_DEFS, RATIOS, ratioVerdict } from './ratios'
 import { validateCard } from './validate'
 import type { CardSpec, Label, MetricItem } from './types'
 
+/** Every preset id: slice 5's two, and slice 7's (the panels they replaced). */
+const PRESET_IDS = ['bsk-kpis', 'campaign-scorecard', 'release-before-after'] as const
 const items = (spec: CardSpec): MetricItem[] => spec.sections.flatMap((s) => s.items)
 const labelNoteIds = (l: Label | undefined): string[] => (l && typeof l === 'object' && 'note' in l ? [l.note] : [])
 
 describe('presets', () => {
-  it('both slice-5 presets are registered and pass validateCard', () => {
-    expect(Object.keys(PRESETS).sort()).toEqual(['bsk-kpis', 'campaign-scorecard'])
+  it('every preset (slices 5 and 7) is registered and passes validateCard', () => {
+    expect(Object.keys(PRESETS).sort()).toEqual([...PRESET_IDS].sort())
     expect(validateCard(CAMPAIGN_SCORECARD)).toEqual([])
     expect(validateCard(BSK_KPIS)).toEqual([])
+    for (const [id, spec] of Object.entries(PRESETS)) expect(validateCard(spec), id).toEqual([])
   })
 
   it('the ratio check at import passes, and every ratio a preset names is registered and valid', () => {

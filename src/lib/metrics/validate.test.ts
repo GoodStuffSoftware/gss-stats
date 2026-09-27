@@ -27,7 +27,7 @@ describe('validateCard', () => {
     ['an unknown campaign id', card({ data: { metric: 'campaign.asks', params: { campaignId: '999' } } }), /unknown campaignId '999'/],
     ['a campaign metric with no campaign in scope', card({ data: { metric: 'campaign.asks' } }), /param 'campaignId' is neither set nor provided by a repeat/],
     ['a window the metric does not allow', card({ data: { metric: 'campaign.asks', window: 'todaySoFar' } }, CAMPAIGNS_REPEAT), /window 'todaySoFar' not allowed/],
-    ['a window the registry does not serve yet', card({ data: { metric: 'bsk.pageviews', window: 'before' } }), /window "before" is not served/],
+    ['a window the registry does not serve yet', card({ data: { metric: 'bsk.pageviews', window: 'flight' } }), /window "flight" is not served/],
     ['deltas on a campaign-window count', card({ data: { metric: 'campaign.asks' }, display: { as: 'number', deltas: ['yesterday'] } }, CAMPAIGNS_REPEAT), /deltas need a count metric over 'todaySoFar'/],
     ['a minCohort under the floor', card({ data: { ratio: 'campaign.acceptPerAsk' }, display: { as: 'percent' }, gating: { minCohort: MIN_COHORT - 1 } }, CAMPAIGNS_REPEAT), /minCohort below MIN_COHORT/],
     ['an unknown note label', card({ label: { note: 'label.nope' } }), /unknown note id 'label.nope'/],

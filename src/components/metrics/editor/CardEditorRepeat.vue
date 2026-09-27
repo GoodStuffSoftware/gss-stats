@@ -22,6 +22,7 @@ const OVER_LABELS: Record<RepeatSpec['over'], string> = {
   popups: 'One per pop-up',
   windows: 'One per before/after window',
   readings: 'One per stored reading',
+  countries: 'One per country (US / CA / Other)',
 }
 
 const overValue = computed<RepeatSpec['over'] | ''>({
@@ -59,6 +60,14 @@ function toggleStatus(s: (typeof STATUS_OPTIONS)[number], checked: boolean) {
   else set.delete(s)
   statusValue.value = STATUS_OPTIONS.filter((o) => set.has(o))
 }
+
+const tracked = computed<boolean>({
+  get: () => !!repeat.value?.tracked,
+  set: (v) => {
+    if (!repeat.value) return
+    repeat.value = { ...repeat.value, tracked: v || undefined }
+  },
+})
 
 const flightingToday = computed<boolean>({
   get: () => !!repeat.value?.flightingToday,
@@ -99,6 +108,9 @@ const flightingToday = computed<boolean>({
     </div>
     <div class="field check">
       <label><input type="checkbox" v-model="flightingToday" /> Flighting today only</label>
+    </div>
+    <div class="field check">
+      <label><input type="checkbox" v-model="tracked" /> Beacon-tracked only (skip spend-only campaigns)</label>
     </div>
   </div>
 

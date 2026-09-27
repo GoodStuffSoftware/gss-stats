@@ -6,6 +6,13 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **The release panel is a metric card.** It shows the same four counts, with Before and After
+  as the columns of one table, names the release and how many days each side covers, and keeps
+  its "partially instrumented" note. Installs in the Before window read "not yet tracking"
+  instead of a 0 nobody could have measured, and on the release day itself the card says there
+  is no window yet instead of "No dated release yet".
+
 ## [0.11.0] — 2026-09-27
 
 ### Added

@@ -132,12 +132,18 @@ export const SCOPE_PATH_OPTIONS: Record<RepeatSpec['over'], { value: ScopePath; 
     { value: 'campaign.statusToday', label: 'Status (today)' },
     { value: 'campaign.flight', label: 'Flight dates' },
     { value: 'campaign.measurabilityNote', label: 'Measurability note' },
+    { value: 'campaign.upsellFixAt', label: 'Upsell fix time' },
+    { value: 'campaign.upsellFixFlightDay', label: 'Upsell fix flight day' },
   ],
   popups: [
     { value: 'popup.id', label: 'Pop-up id' },
     { value: 'popup.label', label: 'Pop-up name' },
   ],
-  windows: [{ value: 'window.label', label: 'Window label (Before / After)' }],
+  windows: [
+    { value: 'window.label', label: 'Window label (Before / After)' },
+    { value: 'release.label', label: 'Release (version and date)' },
+  ],
+  countries: [{ value: 'country.label', label: 'Country (US / CA / Other)' }],
   readings: [
     { value: 'reading.readAt', label: 'Read at' },
     { value: 'reading.kind', label: 'Reading kind' },
@@ -291,6 +297,9 @@ const DISPLAY_AS_LABELS: Record<DisplayAs, string> = {
   bar: 'Bar',
   sparkline: 'Sparkline',
   text: 'Text',
+  date: 'Date',
+  ago: 'Time ago',
+  status: 'Label',
 }
 export function displayAsLabel(as: DisplayAs): string {
   return DISPLAY_AS_LABELS[as] ?? as

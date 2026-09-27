@@ -265,6 +265,15 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     severity: 'info',
     scopes: ['campaigns'],
   },
+  // The release panel (lib/metrics/presets.ts release-before-after): why the before window reads
+  // low. Plain wording, as the panel's own line had it.
+  'release-before-partial': {
+    id: 'release-before-partial',
+    text: 'before = partially instrumented — auth success, install, and campaign tagging are new paths this release adds; the "before" window predates them.',
+    kind: 'note',
+    severity: 'caveat',
+    scopes: ['overview'],
+  },
   'no-return-visits-yet': {
     id: 'no-return-visits-yet',
     text: 'No return visits recorded yet.',
@@ -325,6 +334,16 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.popup.outcomeStillPlaying': 'Still playing',
     'label.popup.eligibleEarned': 'Eligible finishes (earned)',
     'label.popup.eligibleFinishes': 'Signed-out finishes',
+    'label.popup.eligibleCapped': 'Capped',
+    'label.popup.eligibleUnearned': 'Unearned',
+    'label.bsk.taggedArrivals': 'Tagged arrivals',
+    'label.release.windowDays': 'Days on each side',
+    'label.campaign.upsellShown': 'Shown',
+    'label.campaign.upsellAccepts': 'Accepted',
+    'label.campaign.upsellDismisses': 'Dismissed',
+    'label.campaign.spendSource': 'Source',
+    'label.campaign.spendThrough': 'Spend through',
+    'label.campaign.lastSync': 'Synced',
 
     // Ratios (lib/metrics/ratios.ts).
     'label.campaign.acceptPerAsk': 'Accept rate',
@@ -359,6 +378,8 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'unit.usd': 'USD',
     'unit.day': 'days',
     'unit.arrivals': 'arrivals',
+    'unit.instant': 'time',
+    'unit.code': 'kind',
 
     // Status words and gating messages (MetricValue.status / noteIds).
     'flight-pending': 'pending — start date not yet confirmed',
@@ -372,6 +393,12 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'metric-unavailable': 'unavailable',
     'not-started': 'not started',
     'no-tracked-campaign-flighting': 'no beacon-tracked campaign flighting today',
+    'release-pending': 'no release window yet',
+    'spend-source.ads-api': 'Ads API',
+    'spend-source.config': 'hand-entered',
+    'ads-stale': 'stale — sync pending',
+    'no-spend-day-yet': 'no closed spend day stored yet',
+    'not-synced-yet': 'not synced yet',
 
     // Card labels that are not a metric's own name (lib/metrics/presets.ts).
     'label.card.flight': 'Flight',
@@ -385,6 +412,8 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.card.retry': 'Retry',
     'label.card.invalid': "This card's saved settings could not be read, so it can't be shown. Edit it or restore the default charts.",
     'label.card.openCampaigns': 'Open the Campaigns page',
+    'label.card.release': 'Release',
+    'release-none': 'No dated release yet. This panel fills in once a release has a date.',
 
     // Preset names + one-line descriptions for CardEditor's "Start from" picker
     // (lib/metrics/editorModel.ts presetOptions) — never the raw preset id (review fix,
@@ -393,6 +422,8 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.preset.campaign-scorecard.description': 'One card per campaign: flight dates, arrivals, auth successes, installs, return rate, cost, and the funnel pills.',
     'label.preset.bsk-kpis': 'Today at a glance (KPI tiles)',
     'label.preset.bsk-kpis.description': 'Site-wide KPI tiles for today so far, each compared with yesterday and the 7-day average.',
+    'label.preset.release-before-after': 'Release before/after',
+    'label.preset.release-before-after.description': 'The latest dated release: page views, tagged arrivals, auth successes and installs over the same number of days before and after it.',
   }),
 })
 

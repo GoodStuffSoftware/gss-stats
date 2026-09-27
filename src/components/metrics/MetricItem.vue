@@ -29,8 +29,7 @@ const vm = useMetricItemViewModel(
 
 const barPct = computed(() => {
   if (props.item.display.as !== 'bar' || !props.barMax) return 0
-  const raw = vm.value.primary.replace(/[^0-9.-]/g, '')
-  const n = Number(raw)
+  const n = vm.value.barValue ?? 0
   return Number.isFinite(n) && props.barMax > 0 ? Math.max(0, Math.min(100, Math.round((n / props.barMax) * 100))) : 0
 })
 const plainLabel = computed(() => vm.value.labelTokens.map((t) => t.value).join(''))

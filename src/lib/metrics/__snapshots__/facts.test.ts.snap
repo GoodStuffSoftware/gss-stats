@@ -1,10 +1,38 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`fact SQL snapshots > adsCoverage {} 1`] = `
+{
+  "binds": [],
+  "db": "gss_stats_ads",
+  "sql": "SELECT campaign_id, date, fetched_at FROM ads_daily_metrics ORDER BY campaign_id, date",
+}
+`;
+
+exports[`fact SQL snapshots > adsLastSync {} 1`] = `
+{
+  "binds": [],
+  "db": "gss_stats_ads",
+  "sql": "SELECT j.value AS campaign_id, MAX(r.finished_at) AS last_sync FROM (SELECT campaigns_ok, finished_at FROM ads_sync_runs WHERE status <> 'running' ORDER BY finished_at DESC LIMIT 50) AS r, json_each(r.campaigns_ok) AS j GROUP BY j.value",
+}
+`;
+
 exports[`fact SQL snapshots > adsSpend {} 1`] = `
 {
   "binds": [],
   "db": "gss_stats_ads",
   "sql": "SELECT campaign_id, SUM(cost_micros) AS cost_micros, SUM(impressions) AS impressions, SUM(clicks) AS clicks, COUNT(*) AS days, MIN(date) AS first_date, MAX(date) AS last_date, MAX(fetched_at) AS fetched_at FROM ads_daily_metrics GROUP BY campaign_id",
+}
+`;
+
+exports[`fact SQL snapshots > bskFirstHit {} 1`] = `
+{
+  "binds": [
+    "bestsudoku-web",
+    "bestsudoku",
+    "bestsudoku-app",
+  ],
+  "db": "gss_geo",
+  "sql": "SELECT MIN(ts) AS t FROM hits WHERE site IN (?, ?, ?)",
 }
 `;
 
@@ -87,6 +115,35 @@ exports[`fact SQL snapshots > bskRangePath {"since":"2026-09-20","until":"2026-0
 }
 `;
 
+exports[`fact SQL snapshots > bskReleaseSides {"releaseDateEt":"2026-09-26","days":2} 1`] = `
+{
+  "binds": [
+    1790395200000,
+    1790439960000,
+    "bestsudoku-web",
+    "bestsudoku",
+    "bestsudoku-app",
+    1790222400000,
+    1790568000000,
+    "lifecycle",
+    "email_%",
+    "Virginia",
+    "Reston",
+    "Verizon Business",
+    "desktop",
+    "Windows",
+    "Chrome",
+    1280,
+    "North Carolina",
+    "/popup-outcome/install-prompt/installed",
+    "/install/pwa-installed",
+    1790439996000,
+  ],
+  "db": "gss_geo",
+  "sql": "SELECT (ts >= ?) AS d, CASE WHEN ts >= ? THEN 1 ELSE 0 END AS s, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE site IN (?, ?, ?) AND ts >= ? AND ts < ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY d, s, path, visitor, campaign",
+}
+`;
+
 exports[`fact SQL snapshots > campaignPathVisitor {"campaignId":"24215315197"} 1`] = `
 {
   "binds": [
@@ -110,7 +167,7 @@ exports[`fact SQL snapshots > campaignPathVisitor {"campaignId":"24215315197"} 1
     1790439996000,
   ],
   "db": "gss_geo",
-  "sql": "SELECT path, visitor, (ts >= ?) AS pf, COUNT(*) AS c FROM hits WHERE campaign IN (?, ?, ?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY path, visitor, pf",
+  "sql": "SELECT path, visitor, (ts >= ?) AS pf, CASE country WHEN 'US' THEN 'US' WHEN 'CA' THEN 'CA' ELSE 'other' END AS cb, COUNT(*) AS c FROM hits WHERE campaign IN (?, ?, ?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY path, visitor, pf, cb",
 }
 `;
 
@@ -135,7 +192,7 @@ exports[`fact SQL snapshots > campaignPathVisitor {"campaignId":"24234347705"} 1
     1790439996000,
   ],
   "db": "gss_geo",
-  "sql": "SELECT path, visitor, (ts >= ?) AS pf, COUNT(*) AS c FROM hits WHERE campaign IN (?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY path, visitor, pf",
+  "sql": "SELECT path, visitor, (ts >= ?) AS pf, CASE country WHEN 'US' THEN 'US' WHEN 'CA' THEN 'CA' ELSE 'other' END AS cb, COUNT(*) AS c FROM hits WHERE campaign IN (?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY path, visitor, pf, cb",
 }
 `;
 
@@ -160,7 +217,7 @@ exports[`fact SQL snapshots > campaignPathVisitor {"campaignId":"24279250691"} 1
     1790439996000,
   ],
   "db": "gss_geo",
-  "sql": "SELECT path, visitor, (ts >= ?) AS pf, COUNT(*) AS c FROM hits WHERE campaign IN (?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY path, visitor, pf",
+  "sql": "SELECT path, visitor, (ts >= ?) AS pf, CASE country WHEN 'US' THEN 'US' WHEN 'CA' THEN 'CA' ELSE 'other' END AS cb, COUNT(*) AS c FROM hits WHERE campaign IN (?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY path, visitor, pf, cb",
 }
 `;
 
