@@ -16,6 +16,9 @@
 //       returns `unmeasured` (reason spend-only) for every beacon metric. Spend itself matches.
 //   D5  Closed-campaign steps the endpoints list in notInstrumented still carry a count there;
 //       the registry returns `unmeasured` instead of a number.
+//   D6  A bare YYYY-MM-DD page range is an ET day for the registry (review #13), like every other
+//       day on the dashboard; /api/popups (and /api/geo) still read it as a UTC day. The
+//       dashboard's range control always sends datetimes, which both read identically.
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { onRequestPost as overviewPost } from './overview'
 import { onRequestPost as campaignsPost } from './campaigns'
@@ -257,5 +260,27 @@ describe('/api/metrics ≡ /api/popups rates', () => {
     expect(x.denominator).toBe(pop.denominator)
     expect(x.value ?? null).toBe(pop.rate)
     expect(pop.denominator).toBeGreaterThan(0)
+  })
+})
+
+describe('D6: a bare-date page range is an ET day for the registry, a UTC day for /api/popups', () => {
+  it('an evening-ET event (after midnight UTC) counts in its ET day; with datetimes both agree', async () => {
+    const own = openHitsDb()
+    const at = (iso: string, path: string, n: number) => ({ ts: Date.parse(iso), site: 'bestsudoku-web', path, n })
+    insertHits(own, [
+      at('2026-09-26T15:00:00Z', '/upsell/shown/limit', 6),
+      at('2026-09-27T02:00:00Z', '/upsell/shown/limit', 4), // 22:00 ET on 2026-09-26
+      at('2026-09-27T02:05:00Z', '/upsell/accept/limit', 2),
+    ])
+    const post = async (handler: (ctx: any) => Response | Promise<Response>, path: string, body: unknown) => (await handler(pagesContext(postJson(path, body), { gss_geo: sqliteD1(own) }))).json() as Promise<any>
+    const bare = { since: '2026-09-26', until: '2026-09-26' }
+    const m = (await post(metricsPost, '/api/metrics', { v: 1, context: bare, requests: [{ key: 'x', ratio: 'popup.tapRate', params: { popup: 'upsell' } }] })).results.x
+    const p = await post(popupsPost, '/api/popups', { dimension: 'rate', rateKey: 'upsell:tap', ...bare })
+    expect(m).toMatchObject({ numerator: 2, denominator: 10 }) // the ET day holds all of it
+    expect(p).toMatchObject({ numerator: 0, denominator: 6 }) // the UTC day ends at 20:00 ET
+    const iso = { since: '2026-09-26T04:00:00Z', until: '2026-09-27T04:00:00Z' }
+    const m2 = (await post(metricsPost, '/api/metrics', { v: 1, context: iso, requests: [{ key: 'x', ratio: 'popup.tapRate', params: { popup: 'upsell' } }] })).results.x
+    const p2 = await post(popupsPost, '/api/popups', { dimension: 'rate', rateKey: 'upsell:tap', ...iso })
+    expect([m2.numerator, m2.denominator]).toEqual([p2.numerator, p2.denominator])
   })
 })

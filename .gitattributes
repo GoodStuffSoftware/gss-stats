@@ -1,0 +1,2 @@
+# Vitest snapshots are compared byte for byte; keep LF on every platform.
+*.snap text eol=lf

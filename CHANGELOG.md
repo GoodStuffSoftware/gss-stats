@@ -14,8 +14,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ### Changed
 - **"Games played" and "Played a game" are now "Game-screen views".** Both count visits to the
-  game screen (page views, several per device), not games played; the Overview tile and the
-  campaign funnel step now say so.
+  game screen (page views, several per device), not games played; the Overview tile, the
+  campaign funnel step and the ads-read report now say so.
 
 ### Fixed
 - **The Overview "Tagged arrivals" tile now counts a campaign exactly like its scorecard card.**

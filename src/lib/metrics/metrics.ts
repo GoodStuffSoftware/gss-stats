@@ -46,7 +46,7 @@ export interface MetricCtx {
   params: { campaignId?: string; popup?: string }
   campaign?: CampaignFlight
   /** campaignAttributionClause(campaign) — applied in JS when a campaign metric reads a
-   * site-wide fact (campaign.taggedArrivals over the KPI minute rows). */
+   * site-wide fact (campaign.taggedArrivals over the KPI fact). */
   attribution?: CampaignAttribution
   window: WindowName
 }
@@ -143,8 +143,10 @@ export const METRIC_DEFS: MetricDef[] = [
     unit: 'device',
     unitLabel: 'unit.arrivals',
     visitor: 'new',
-    // 'todaySoFar' reads the KPI minute rows through campaignAttributionClause's JS twin, so the
-    // KPI tile and the campaign card can never disagree (ADR 0003 rate audit).
+    // 'todaySoFar' reads the KPI fact through campaignAttributionClause's rule, so the KPI tile and
+    // the campaign card count the same rows — as long as a campaign's tagged rows are all on the
+    // Best Sudoku sites, which the KPI fact filters on and the campaign fact does not (review #2:
+    // production had none elsewhere on 2026-09-27; see the ADR's implementation notes).
     windows: { attribution: 'campaignPathVisitor', todaySoFar: 'bskKpiDays' },
     instrumented: [BEACON],
     caveats: ['arrivals-caveat'],

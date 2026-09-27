@@ -77,6 +77,9 @@ describe('an invalid registration throws', () => {
     expect(() => defineRatios([bad({ kind: 'pair', label: 'Played a game' })])).toThrow(/label must be label\.campaign\.bad/)
     expect(() => defineRatios([bad({ kind: 'pair', alignDenominator: true })])).toThrow(/alignDenominator/)
     expect(() => defineRatios([RATIO_DEFS[0], RATIO_DEFS[0]])).toThrow(/duplicate/)
+    // Review #5: a kind outside the union (registrations from untyped data) is refused at runtime.
+    expect(() => defineRatios([bad({ kind: 'percent' as never, num: 'campaign.accepts', den: 'campaign.asks' })])).toThrow(/unknown kind percent/)
+    expect(ratioVerdict({ kind: 'rate' as never, num: 'campaign.accepts', den: 'campaign.asks' })).toEqual({ ok: false, reason: 'unknown kind rate' })
   })
 
   afterEach(() => {

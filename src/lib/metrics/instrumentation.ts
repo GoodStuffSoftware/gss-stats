@@ -53,7 +53,7 @@ export interface IntervalInput {
   window: readonly [number, number]
   campaign?: CampaignFlight
   /** seenInFlightWindow's evidence: did any flightPathsSeen row match the metric? Only read for
-   * a closed campaign (seenInFlightRequired). */
+   * a closed campaign (seenInFlightRequired); absent evidence counts as not seen. */
   seenInFlight?: boolean
 }
 
@@ -124,7 +124,7 @@ export function measuredInterval({ rules, window, campaign, seenInFlight }: Inte
       case 'seenInFlightWindow':
         if (seenInFlightRequired(campaign)) {
           if (!campaign!.flightStart) return unmeasured('flight-pending')
-          if (seenInFlight === false) return unmeasured('not-seen-in-flight')
+          if (seenInFlight !== true) return unmeasured('not-seen-in-flight') // no evidence is not evidence of a path
         }
         continue
       case 'annotateAt':

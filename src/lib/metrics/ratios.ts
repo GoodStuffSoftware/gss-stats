@@ -37,6 +37,7 @@ export function ratioVerdict(r: Pick<RatioDef, 'kind' | 'num' | 'den'>, metrics:
   if (!n || !d) return { ok: false, reason: 'unknown metric' }
   if (r.kind === 'pair') return { ok: true, reason: 'counts only' }
   if (r.kind === 'cost') return n.unit === 'usd' && d.unit !== 'usd' ? { ok: true, reason: 'money per ' + d.unit } : { ok: false, reason: 'cost needs usd over a count' }
+  if (r.kind !== 'proportion') return { ok: false, reason: `unknown kind ${String(r.kind)}` } // a registration from untyped data
   if (n.unit !== d.unit) return { ok: false, reason: `unit ${n.unit} over ${d.unit}` }
   const visited = new Set<string>()
   for (let cur: MetricDef | undefined = n; cur && !visited.has(cur.id); cur = cur.subsetOf ? metrics.get(cur.subsetOf) : undefined) {
