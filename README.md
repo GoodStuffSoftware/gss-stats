@@ -44,13 +44,17 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
 ## Features
 
 - **"Best Sudoku · Overview"** — the landing page: today-at-a-glance KPI tiles (vs the same
-  time yesterday and the 7-day average), a daily timeline since the first hit overlaid with
-  campaign flights / release / tracking-activation markers, a campaign scorecard, and a
-  release before/after panel — each its own movable/editable widget (dataset `overview`; see
-  [`src/components/widgets/OverviewWidgetBody.vue`](src/components/widgets/OverviewWidgetBody.vue)).
-  See [`src/lib/overview.ts`](src/lib/overview.ts) and
-  [`src/lib/releases.ts`](src/lib/releases.ts) (hand-entered release dates — `hits` has no
-  app-version column; major releases label the timeline, minor ones show as short ticks).
+  time yesterday and the 7-day average), the **Overall timeline**, a campaign scorecard, and a
+  release before/after panel — each its own movable/editable widget. The KPI tiles, scorecard
+  and release panel are dataset `overview` (see
+  [`src/components/widgets/OverviewWidgetBody.vue`](src/components/widgets/OverviewWidgetBody.vue)
+  and [`src/lib/overview.ts`](src/lib/overview.ts)). The Overall timeline is a **standard line
+  chart** (see *Line charts* below) with five series — page views and tagged arrivals on the left
+  axis, auth successes, installs and raw install signals on the right — over the page's date
+  range and Best Sudoku sites, with campaign-flight bands, release markers and go-live markers
+  on. Its day buckets are UTC days, like every other beacon trend chart.
+  [`src/lib/releases.ts`](src/lib/releases.ts) holds the hand-entered release dates (`hits` has
+  no app-version column; major releases get a labelled line, minor ones a short tick).
   "Best Sudoku · Campaigns" (dataset `campaigns`; see
   [`src/components/widgets/CampaignsWidgetBody.vue`](src/components/widgets/CampaignsWidgetBody.vue))
   and "Best Sudoku · Traffic" (per-site/geo/referrer/device detail beyond what Overview and
@@ -102,6 +106,17 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
 - **Exclusions** (global across pages) — hide self-referrals, hide your own visits by
   browser+OS, and an **"exclude this device"** opt-out that works on every site (see
   [gss-beacon](https://github.com/GoodStuffSoftware/gss-beacon)).
+- **Line charts** — on a date axis, any line/area chart can draw release markers, go-live
+  markers (tracking activation, the game-complete/auth beacons, the install fix, the raw-install
+  de-dupe) and shaded campaign-flight bands (an active flight's band runs to the axis end), each
+  a checkbox in the chart editor ([`src/lib/timelineOverlay.ts`](src/lib/timelineOverlay.ts)).
+  Close labels stagger into rows and drop out rather than overprint (fewer rows at phone width);
+  hovering or tapping a marker line or a band's name shows its date and note, and a collapsed
+  "Markers and bands" list under the chart holds every item in range for keyboard and touch. A
+  beacon line chart can also draw several **series** (`Widget.series`): each is its own date
+  query narrowed by one field = value filter (e.g. `keyEvent = install`), on the left or right
+  axis, solid/dashed/dotted, with optional axis titles. "Hide known test and household traffic"
+  (`excludeKnownTraffic`) applies the campaigns endpoint's `EXCLUSIONS` to a beacon chart.
 - **Smart date range** — type spans like `7d` / `24h` / `2w` / `last 3d`, or pick
   exact dates.
 - **Geo beacon dataset** — region / city / ISP / new-vs-returning and a visitor map,
@@ -222,7 +237,7 @@ Cloudflare Pages Functions  (functions/_middleware.ts → functions/api/*.ts)
    │  - /api/completions → completed-game counts from the same D1, by mode × difficulty
    │  - /api/campaigns → Google Ads campaign comparison from the same D1 (funnel, hour-of-day,
    │                      country, daily/cumulative, return visits)
-   │  - /api/overview → today-at-a-glance KPIs, daily timeline, campaign scorecard, release panel
+   │  - /api/overview → today-at-a-glance KPIs, campaign scorecard, release panel
    │  - /api/ads/readings → the ads routine's readings log + stored spend (D1 gss-stats-ads)
    │  - /api/sites  → auto-builds the merged site list (RUM + beacon, aliases folded)
    │  - /api/config → dashboard layout in KV (backed up once per layout-version bump)
@@ -270,8 +285,11 @@ only (from the tracking activation day; pre-fix install-gap rows get no value �
 [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) `popupDimSqlCase`, where
 `/popup-outcome/first50-offer/…` resolves to the first-50 promo); a completed game's **mode**
 and **difficulty** (`gameMode` / `gameDifficulty`, from `/game/complete/<mode>/<difficulty>`,
-malformed rows as `(other)`); and **campaign flight** (`campaignFlight`, decided by the same
-`campaignAttributionClause` + `EXCLUSIONS` the campaigns endpoint uses). A chart grouping by
+malformed rows as `(other)`); **campaign flight** (`campaignFlight`, decided by the same
+`campaignAttributionClause` + `EXCLUSIONS` the campaigns endpoint uses); **arrival** (`arrival`:
+a first-ever beacon, `tagged` when a flight claims it, else `untagged`); and **key event**
+(`keyEvent`: `auth-success` base rows, `install` from the install fix on, `raw-install-signal`,
+`game-complete`). A chart grouping by
 one of the pop-up or completion dimensions counts those event rows without needing "Include
 event beacons" (the standing exclusion would remove every row it describes), and never shows
 unrelated rows as a "(none)" bar. Every derived dimension except `date` can be one of several

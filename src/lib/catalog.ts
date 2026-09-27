@@ -6,7 +6,7 @@ export const DATASETS: { value: Dataset; label: string }[] = [
   { value: 'rum', label: 'RUM — pageviews / visits' },
   { value: 'geo', label: 'Geo beacon — region / city (bot-free)' },
   { value: 'popup', label: 'Pop-up tracking — sign-in / promo / upsell / install' },
-  { value: 'overview', label: 'Best Sudoku overview — KPIs / timeline / scorecard / release panel' },
+  { value: 'overview', label: 'Best Sudoku overview — KPIs / scorecard / release panel' },
   { value: 'campaigns', label: 'Best Sudoku campaigns — funnel / hour-of-day / country / …' },
   { value: 'ads-readings', label: 'Best Sudoku ads readings log' },
   { value: 'completions', label: 'Best Sudoku completions — mode × difficulty' },
@@ -21,7 +21,6 @@ export const COMPLETIONS_DIMENSIONS: { key: string; label: string }[] = [
 // dataset 'overview' — which panel a widget renders (widget.view).
 export const OVERVIEW_VIEWS: { value: string; label: string }[] = [
   { value: 'kpis', label: 'Today at a glance (KPI tiles)' },
-  { value: 'timeline', label: 'Overall timeline' },
   { value: 'scorecard', label: 'Campaign scorecard' },
   { value: 'releasePanel', label: 'Release before/after panel' },
 ]
@@ -100,6 +99,8 @@ export const GEO_DIMENSIONS: { key: string; label: string }[] = [
   { key: 'gameMode', label: 'Completed game: mode' },
   { key: 'gameDifficulty', label: 'Completed game: difficulty' },
   { key: 'campaignFlight', label: 'Campaign flight (attributed)' },
+  { key: 'arrival', label: 'Arrival (first visit): tagged / untagged' },
+  { key: 'keyEvent', label: 'Key event (sign-in / install / raw install / completion)' },
   { key: 'date', label: 'Date (trend)' },
 ]
 

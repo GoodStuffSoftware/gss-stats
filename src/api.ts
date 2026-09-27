@@ -17,8 +17,15 @@ function drillConstraints(filters: GlobalFilters, dataset: Dataset): { field: st
     .filter((c): c is { field: string; value: string } => c !== null)
 }
 
+/** A series line chart (Widget.series): one date query per series, each narrowed by its own
+ * filter, fetched in parallel (the Function's edge cache keys each one separately). */
+export async function fetchSeriesStats(widget: Widget, filters: GlobalFilters): Promise<StatsResponse[]> {
+  const base: Widget = { ...widget, series: undefined, breakdown: undefined, rings: undefined }
+  return Promise.all((widget.series ?? []).map((s) => fetchStats(base, filters, (s.filter ?? []).filter((f) => f.field && f.value))))
+}
+
 /** Fetch one widget's data from the server-side stats Function. */
-export async function fetchStats(widget: Widget, filters: GlobalFilters): Promise<StatsResponse> {
+export async function fetchStats(widget: Widget, filters: GlobalFilters, extraConstraints: { field: string; value: string }[] = []): Promise<StatsResponse> {
   // Resolve the site selection into concrete RUM hosts + beacon tags. Empty = all
   // real sites; dev/preview hosts are never in the list, so they never count.
   const { hosts, tags } = resolveSelection(filters.siteSel)
@@ -88,7 +95,9 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters): Promis
         until: filters.until,
         limit: widget.type === 'map' ? 2000 : widget.limit ?? 50,
         sites: tags,
-        constraints: drillConstraints(filters, 'geo'),
+        // The page's drill-downs, plus (for one series of a series line chart) that series'
+        // own filter — native geo fields, validated server-side against GEO_DIMS like any drill.
+        constraints: [...drillConstraints(filters, 'geo'), ...extraConstraints],
         // "Hide my visits" / "hide self-referrals" apply to the beacon dataset too — same
         // resolution as the RUM branch below (widget-level override falls back to the global
         // filter) — so the two datasets agree instead of only RUM honoring these toggles.
@@ -103,6 +112,7 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters): Promis
         // pathFamily value, so every widget on that page — not just the one that was
         // drilled — can actually show the event rows it just filtered down to.
         includeEventBeacons: widget.includeEventBeacons === true || filters.includeEventBeacons === true,
+        excludeKnownTraffic: widget.excludeKnownTraffic === true,
       }),
     })
     if (!res.ok) {

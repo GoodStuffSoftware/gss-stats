@@ -1,4 +1,4 @@
-import type { DashboardConfig, DashboardPage, GlobalFilters, Widget } from '../types'
+import type { DashboardConfig, DashboardPage, GlobalFilters, LineSeries, Widget } from '../types'
 import { parseDurationMs } from './range'
 import { POPUPS, POPUP_RATE_SPECS, NO_OUTCOME_TRACKING_NOTE, SIGNIN_ELIGIBLE_CAVEAT } from './popupEvents'
 
@@ -36,9 +36,10 @@ function w(p: Omit<Widget, 'i'>): Widget {
   return { ...p, i: p.id }
 }
 
-// Bumped to 9 for the Pop-ups page rebuild + campaign device-mix swap (see normalizeConfig's v9
-// block): the Pop-ups page's ~25 generated tiles become one breakdown bar + a valid-rates table,
-// and the bespoke campaigns 'deviceMix' table becomes the standard nested doughnut. functions/
+// Bumped to 9 for the Pop-ups page rebuild, the campaign device-mix swap and the Overview
+// timeline swap (see normalizeConfig's v9 block): the Pop-ups page's ~25 generated tiles become
+// one breakdown bar + a valid-rates table, the bespoke campaigns 'deviceMix' table becomes the
+// standard nested doughnut, and the bespoke 'timeline' panel becomes a standard line chart. functions/
 // api/config.ts backs the previous stored config up to KV the first time a newer version is
 // saved over it. (Bumped to 8 for the completions-breakdown-widget migration (see normalizeConfig's v8 block
 // below): adds the mode × difficulty completions widget to "Best Sudoku overview" once, on an
@@ -454,11 +455,62 @@ export function overviewPageIsUncustomized(p: DashboardPage): boolean {
   const ids = new Set(p.widgets.map((w) => w.id))
   return ids.size === OVERVIEW_DEFAULT_WIDGET_IDS_V7.length && OVERVIEW_DEFAULT_WIDGET_IDS_V7.every((id) => ids.has(id))
 }
+// "Overall timeline" (CONFIG_VERSION 9, owner 2026-09-27: "it's still a line chart"): the
+// STANDARD line chart, not a bespoke panel. Five series over the beacon's date axis, each a date
+// query narrowed by one filter (Widget.series): page views and tagged arrivals on the left axis;
+// sign-ins, installs and raw install signals on the right. Release and go-live markers and the
+// campaign-flight bands are its overlay options (lib/timelineOverlay.ts), all editable in the
+// normal chart editor. Colors match the former panel's.
+export const TIMELINE_SERIES: LineSeries[] = [
+  { label: 'Page views', axis: 'left', style: 'solid', color: 0 },
+  { label: 'Tagged arrivals', filter: [{ field: 'arrival', value: 'tagged' }], axis: 'left', style: 'solid', color: 1 },
+  { label: 'Auth successes', filter: [{ field: 'keyEvent', value: 'auth-success' }], axis: 'right', style: 'dashed', color: 3 },
+  { label: 'Installs', filter: [{ field: 'keyEvent', value: 'install' }], axis: 'right', style: 'dashed', color: 4 },
+  { label: 'Raw install signals', filter: [{ field: 'keyEvent', value: 'raw-install-signal' }], axis: 'right', style: 'dotted', color: 7 },
+]
+export function timelineWidget(geom: { x: number; y: number; w: number; h: number }, id = 'ow-timeline', title = 'Overall timeline'): Widget {
+  return {
+    id,
+    i: id,
+    title,
+    type: 'line',
+    dataset: 'geo',
+    dimension: 'date',
+    metric: 'pageviews',
+    limit: 400,
+    markers: 'releases',
+    goLiveMarkers: true,
+    flightBands: true,
+    excludeKnownTraffic: true,
+    series: TIMELINE_SERIES.map((x) => ({ ...x, filter: x.filter?.map((f) => ({ ...f })) })),
+    axisTitles: { left: 'page views / arrivals', right: 'auth / installs' },
+    notes: ['overview-timeline-caption'],
+    ...geom,
+  }
+}
+/** A saved widget that is the retired bespoke Overview timeline panel. */
+export function isBespokeTimeline(wd: Widget): boolean {
+  return wd.dataset === 'overview' && wd.view === 'timeline'
+}
+/** v9: swap every bespoke timeline panel for the standard line chart, in place: same id, grid
+ * position, size, title, captions and default mark. Idempotent. */
+export function migrateTimelineV9(page: DashboardPage): DashboardPage {
+  if (!page.widgets.some(isBespokeTimeline)) return page
+  return {
+    ...page,
+    widgets: page.widgets.map((wd) =>
+      isBespokeTimeline(wd)
+        ? { ...timelineWidget({ x: wd.x, y: wd.y, w: wd.w, h: wd.h }, wd.id, wd.title), ...(wd.notes ? { notes: wd.notes } : {}), isDefault: wd.isDefault }
+        : wd,
+    ),
+  }
+}
+
 export function defaultOverviewWidgets(): Widget[] {
   return [
     w({ id: 'ow-note-smallsample', title: 'Small sample', type: 'note', dimension: '', metric: 'pageviews', limit: 1, noteId: 'small-sample', x: 0, y: 0, w: 12, h: 3 }),
     w({ id: 'ow-kpis', title: 'Today at a glance', type: 'table', dataset: 'overview', view: 'kpis', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 3, w: 12, h: 8 }),
-    w({ id: 'ow-timeline', title: 'Overall timeline', type: 'table', dataset: 'overview', view: 'timeline', dimension: '', metric: 'pageviews', limit: 1, notes: ['overview-timeline-caption'], x: 0, y: 11, w: 12, h: 12 }),
+    timelineWidget({ x: 0, y: 11, w: 12, h: 12 }),
     w({ id: 'ow-scorecard', title: 'Campaign scorecard', type: 'table', dataset: 'overview', view: 'scorecard', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 23, w: 12, h: 14 }),
     w({ id: 'ow-release', title: 'Release panel', type: 'table', dataset: 'overview', view: 'releasePanel', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 37, w: 12, h: 9 }),
     completionsWidget(),
@@ -475,7 +527,9 @@ export function defaultOverviewPage(): DashboardPage {
     id: 'bsk-overview',
     name: 'Best Sudoku · Overview',
     isDefault: false,
-    filters: { ...defaultFilters(), since: '2026-01-01T00:00:00.000Z', rangeRel: '' },
+    // Best Sudoku traffic only: the timeline (and the completions chart) are ordinary beacon
+    // charts that follow the page's site selection.
+    filters: { ...defaultFilters(), siteSel: [...BEST_SUDOKU_SITES], since: '2026-01-01T00:00:00.000Z', rangeRel: '' },
     widgets: defaultOverviewWidgets(),
   }
 }
@@ -604,6 +658,7 @@ function normWidget(x: any): Widget {
     // Per-chart geo-only opt-in (feat/all-beacon-fields) — default/absent stays false (every
     // pre-existing saved chart keeps excluding event-beacon paths exactly as before).
     includeEventBeacons: x.includeEventBeacons === true || undefined,
+    excludeKnownTraffic: x.excludeKnownTraffic === true || undefined,
     isDefault: x.isDefault === true || undefined,
     // Per-chart override: back-fill any filter fields added since it was saved.
     filters: x.filters ? normFilters(x.filters) : undefined,
@@ -620,13 +675,43 @@ function normWidget(x: any): Widget {
     // Attached captions (lib/notes.ts) — absent stays absent (no scope-default notes get
     // injected for a widget that predates this feature; see ChartCard.vue's own comment).
     notes: Array.isArray(x.notes) ? x.notes.filter((n: any) => typeof n === 'string' && n) : undefined,
-    // date-dimension trend charts: release-marker overlay.
+    // date-dimension trend charts: release-marker overlay, go-live markers, flight bands.
     markers: x.markers === 'releases' ? 'releases' : undefined,
+    goLiveMarkers: x.goLiveMarkers === true || undefined,
+    flightBands: x.flightBands === true || undefined,
+    // Series line chart (Widget.series): label + optional field=value filters + axis/style.
+    series: normSeries(x.series),
+    axisTitles: normAxisTitles(x.axisTitles),
     x: Number(x.x) || 0,
     y: Number(x.y) || 0,
     w: Number(x.w) || 4,
     h: Number(x.h) || 8,
   }
+}
+
+function normSeries(raw: any): LineSeries[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const out: LineSeries[] = raw
+    .filter((s: any) => s && typeof s === 'object')
+    .map((s: any, i: number) => {
+      const filter = Array.isArray(s.filter)
+        ? s.filter.filter((f: any) => f && typeof f.field === 'string' && f.field && typeof f.value === 'string').map((f: any) => ({ field: f.field, value: f.value }))
+        : []
+      return {
+        label: typeof s.label === 'string' && s.label.trim() ? s.label : `Series ${i + 1}`,
+        ...(filter.length ? { filter } : {}),
+        axis: s.axis === 'right' ? ('right' as const) : ('left' as const),
+        style: s.style === 'dashed' || s.style === 'dotted' ? s.style : ('solid' as const),
+        ...(Number.isInteger(s.color) && s.color >= 0 ? { color: s.color } : {}),
+      }
+    })
+  return out.length ? out : undefined
+}
+function normAxisTitles(raw: any): { left?: string; right?: string } | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const left = typeof raw.left === 'string' && raw.left ? raw.left : undefined
+  const right = typeof raw.right === 'string' && raw.right ? raw.right : undefined
+  return left || right ? { left, right } : undefined
 }
 
 function normPage(p: any, i: number): DashboardPage {
@@ -731,6 +816,10 @@ export function normalizeConfig(raw: any): DashboardConfig {
         let p: DashboardPage = pages[i]
         if (isBestSudokuPopupsPage(p)) p = migratePopupsPageV9(p)
         p = migrateDeviceMixV9(p)
+        p = migrateTimelineV9(p)
+        // The timeline is a beacon chart now, following the page's site selection: an Overview
+        // page still on "all sites" (its old, inert default) is narrowed to Best Sudoku.
+        if (isOverviewPage(p) && !p.filters.siteSel.length) p = { ...p, filters: { ...p.filters, siteSel: [...BEST_SUDOKU_SITES] } }
         pages[i] = p
       }
     }

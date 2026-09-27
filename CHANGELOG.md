@@ -7,6 +7,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Arrival and key-event dimensions for beacon charts,** and a per-chart option to hide known
+  test and household traffic.
 - **A breakdown bar chart for any two dimensions.** Put one dimension on the axis and another
   as the series, grouped side by side or stacked, from the normal chart editor; movable,
   zoomable and editable like every other chart.
@@ -25,6 +27,15 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **The campaign device mix uses the standard nested pie.** Campaign flight, then device, then
   operating system, on the same chart the other pages use for site and device, labelled as a
   share of tagged hits. Saved layouts keep its place, size and title.
+- **The Overall timeline is a standard line chart.** Same look (page views and tagged arrivals
+  on the left, sign-ins, installs and raw install signals on the right, campaign-flight bands,
+  release and go-live markers), now edited in the normal chart editor. Hovering or tapping a
+  marker or band shows its date and note, and a collapsed list under the chart has them all.
+  Saved layouts keep its place, size and title.
+- **Every line chart can show release markers, go-live markers and campaign-flight bands,** and
+  a beacon line chart can draw several series on a left and right axis.
+- **Overview tile labels are short and plain.** "Return visits (day 1+)" and "Installs", with the
+  install-fix caveat under the label instead of in it.
 - **A saved dashboard is backed up before a layout upgrade.** The first save after an upgrade
   keeps a copy of the previous layout, so an upgrade can be undone.
 
@@ -39,6 +50,7 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **The Return visits chart fits its card.** Its plot used to stretch far below the card, so
   only the top of the axis showed.
 - **The sign-in eligibility chart has a short title** that fits its card.
+- **Timeline marker labels no longer collide,** on desktop or phone.
 
 ## [0.8.0] — 2026-09-26
 

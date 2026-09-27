@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { ref, watch, computed, onMounted, onBeforeUnmount, nextTick, useId } from 'vue'
 import type { Widget, GlobalFilters, StatsResponse } from '../types'
-import { fetchStats } from '../api'
+import { fetchStats, fetchSeriesStats } from '../api'
 import { sitesLoaded } from '../sitesStore'
 import { checkSessionExpired, isAuthError, isNetworkError } from '../session'
-import { buildChartConfig, formatKey, metricValue, nestedDoughnutClickValue, seriesRows } from '../lib/charts'
+import { buildChartConfig, formatKey, metricValue, nestedDoughnutClickValue, seriesRows, hasLineSeries, widgetHasOverlay, widgetOverlayOptions } from '../lib/charts'
+import { overlayItems, itemsInRange } from '../lib/timelineOverlay'
 import { rangeLabel } from '../lib/range'
 import { isSiteDim, semanticKey } from '../lib/drill'
 import { isMobileViewport } from '../lib/responsive'
@@ -61,14 +62,15 @@ const isNoteWidget = computed(() => props.widget.type === 'note')
 // .needs-chart-height).
 const CHART_CANVAS_TYPES = new Set(['bar', 'hbar', 'stackedBar', 'breakdownBar', 'line', 'area', 'doughnut', 'nestedDoughnut', 'pie', 'map'])
 const needsChartHeight = computed(() => {
-  if (props.widget.dataset === 'overview') return props.widget.view === 'timeline' // the only overview panel with a real chart
+  if (props.widget.dataset === 'overview') return false // content-driven panels (the timeline is a standard line chart now)
   if (props.widget.dataset === 'campaigns' || props.widget.dataset === 'ads-readings' || isNoteWidget.value) return false
   return CHART_CANVAS_TYPES.has(props.widget.type)
 })
 
-// A breakdown bar carries a legend plus rotated axis labels, so the fixed phone chart height
-// (Dashboard.vue's .needs-chart-height) leaves almost no plot; give it more room there.
-const tallOnPhone = computed(() => props.widget.type === 'breakdownBar')
+// A breakdown bar (legend + rotated axis labels) and a line chart with series or overlays
+// (legend, marker labels, the markers list, captions) don't fit Dashboard.vue's fixed phone chart
+// height: on a phone these cards size to their content, with a fixed-height plot area instead.
+const tallOnPhone = computed(() => props.widget.type === 'breakdownBar' || hasLineSeries(props.widget) || (props.widget.dimension === 'date' && widgetHasOverlay(props.widget)))
 
 // Double-tap-to-zoom (owner: "allow a double-tap on the chart to zoom if that's easy") — an
 // extra shortcut alongside the always-visible zoom button (see below), not a substitute for
@@ -208,6 +210,7 @@ onMounted(() => document.addEventListener('keydown', onKey))
 onBeforeUnmount(() => document.removeEventListener('keydown', onKey))
 
 const data = ref<StatsResponse | null>(null)
+const seriesData = ref<StatsResponse[] | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
 const menuOpen = ref(false)
@@ -230,8 +233,21 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const r = await fetchStats(props.widget, effectiveFilters.value)
-    if (my === reqId) data.value = r
+    // A series line chart fetches one date query per series; the first also stands in as `data`
+    // for the generic empty/loaded states.
+    if (hasLineSeries(props.widget)) {
+      const all = await fetchSeriesStats(props.widget, effectiveFilters.value)
+      if (my === reqId) {
+        seriesData.value = all
+        data.value = { ...all[0], rows: all.flatMap((r) => r.rows) }
+      }
+    } else {
+      const r = await fetchStats(props.widget, effectiveFilters.value)
+      if (my === reqId) {
+        seriesData.value = null
+        data.value = r
+      }
+    }
   } catch (e: any) {
     if (my === reqId) error.value = e?.message ?? 'Failed to load'
     if (isNetworkError(e) || isAuthError(e)) checkSessionExpired() // probe for an expired session
@@ -255,6 +271,10 @@ const dataKey = computed(() =>
     // feat/all-beacon-fields: per-chart geo opt-in — data-affecting (changes which rows the
     // query counts), so it belongs in the refetch key same as excludeSelfReferrals above.
     ieb: props.widget.includeEventBeacons,
+    ekt: props.widget.excludeKnownTraffic,
+    // A series line chart's series list (labels/axes/styles change only the drawing, but it's
+    // simplest and cheap to refetch — each series query is edge-cached).
+    ser: props.widget.series,
     f: effectiveFilters.value,
   }),
 )
@@ -302,10 +322,26 @@ watch(dataKey, load)
 watch(sitesLoaded, (ready) => ready && load()) // fetch RUM charts once the allow-list is ready
 onMounted(load)
 
+// Every overlay item (release, go-live, campaign flight) the chart can draw inside the plotted
+// range — listed under the chart in a collapsed disclosure, so each marker's and band's date,
+// name and note are reachable by keyboard and touch, not only by hovering the canvas.
+const overlayList = computed(() => {
+  if (props.widget.dimension !== 'date' || !widgetHasOverlay(props.widget) || !data.value) return []
+  const first = String(data.value.meta.since).slice(0, 10)
+  const last = String(data.value.meta.until).slice(0, 10)
+  return itemsInRange(overlayItems(widgetOverlayOptions(props.widget)), first, last).map((it) => ({
+    key: `${it.kind}|${it.date}|${it.label}`,
+    when: it.kind === 'flight' ? `${it.date} to ${it.openEnded ? 'now' : it.endDate}` : it.date,
+    kind: it.kind === 'flight' ? 'Campaign flight' : it.kind === 'go-live' ? 'Go-live' : 'Release',
+    label: it.label,
+    note: it.note,
+  }))
+})
+
 const chartConfig = computed(() => {
   if (!data.value) return null
   void props.dark // recompute colors on theme toggle
-  return buildChartConfig(props.widget, data.value)
+  return buildChartConfig(props.widget, data.value, seriesData.value ?? undefined)
 })
 
 const statValue = computed(() =>
@@ -559,6 +595,17 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
          known install-outcome gap), computed per-request rather than being static config
          like the registry captions above, so it has to be rendered from `data` here rather
          than looked up by id — previously fetched but never rendered anywhere. -->
+    <details v-if="overlayList.length" class="overlay-list">
+      <summary>Markers and bands ({{ overlayList.length }})</summary>
+      <ul>
+        <li v-for="o in overlayList" :key="o.key">
+          <span class="ol-when mono">{{ o.when }}</span>
+          <span class="ol-kind">{{ o.kind }}</span>
+          <strong>{{ o.label }}</strong>
+          <span class="ol-note">{{ o.note }}</span>
+        </li>
+      </ul>
+    </details>
     <div v-if="captionNoteIds.length || data?.note" class="card-captions">
       <NoteBlock v-for="id in captionNoteIds" :key="id" :note-id="id" />
       <NoteBlock v-if="data?.note" :text="data.note" />
@@ -901,8 +948,51 @@ td {
 }
 @media (max-width: 700px) {
   .chart-card.chart-card.needs-chart-height.tall-on-phone {
-    height: 420px;
+    height: auto;
   }
+  .chart-card.tall-on-phone .card-body {
+    flex: none;
+    height: 360px;
+  }
+}
+.overlay-list {
+  padding: 0 14px 6px;
+  font-size: 12px;
+  color: rgb(var(--ink-2));
+  min-width: 0;
+}
+.overlay-list summary {
+  cursor: pointer;
+  color: rgb(var(--ink-3));
+  font-size: 11.5px;
+  padding: 4px 0;
+}
+.overlay-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 150px;
+  overflow-y: auto;
+}
+.overlay-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  padding: 4px 0;
+  border-top: 1px solid rgb(var(--line));
+  overflow-wrap: anywhere;
+}
+.ol-when {
+  color: rgb(var(--ink-3));
+  font-size: 11px;
+}
+.ol-kind {
+  color: rgb(var(--ink-3));
+  font-size: 11px;
+}
+.ol-note {
+  flex-basis: 100%;
+  color: rgb(var(--ink-2));
 }
 /* Attached captions: inside the card's own padding, and a long word or path wraps instead of
    running past the rounded border (it used to sit flush left and be clipped at phone width). */

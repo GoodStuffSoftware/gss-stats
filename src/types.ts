@@ -83,10 +83,24 @@ export interface Widget {
   // chart can group/filter on event rows too (e.g. by the new 'pathFamily' dimension).
   // Undefined/false = excluded, same as every chart before this option existed.
   includeEventBeacons?: boolean
+  // dataset 'geo' only: also drop known test and household traffic (lib/campaigns.ts
+  // EXCLUSIONS), as the campaigns and overview numbers do. Undefined/false = not applied.
+  excludeKnownTraffic?: boolean
   // A date-dimension trend chart ('line'/'area'/'bar' with dimension 'date') only: overlay
   // Best Sudoku release markers (see lib/releases.ts) as dashed vertical lines, same visual
   // treatment as the Overview page's timeline. Undefined/false = no overlay.
   markers?: 'releases'
+  // A date-dimension line/area chart: also draw go-live markers (the instants a measurement
+  // started or changed) and/or shaded campaign-flight bands (lib/timelineOverlay.ts). Every
+  // marker and band is listed, with its date and note, under the chart.
+  goLiveMarkers?: boolean
+  flightBands?: boolean
+  // A beacon (geo) line/area chart on the date axis: draw these series instead of one line. Each
+  // series is its own date query narrowed by `filter` (native geo field = value pairs, e.g.
+  // keyEvent = 'install'; none = every page view), on the left or right y-axis.
+  series?: LineSeries[]
+  // Titles for the left / right y-axes of a series line chart (hidden at phone width).
+  axisTitles?: { left?: string; right?: string }
   // Marked by the user as one of this page's default charts. "Restore default charts"
   // keeps the marked charts and drops the rest (falling back to the factory set when
   // nothing is marked). Undefined/false = not a default.
@@ -94,8 +108,9 @@ export interface Widget {
   // Full per-chart filter override. When set, this chart ignores the global
   // filter bar and uses these instead. Undefined = follow the global filter.
   filters?: GlobalFilters | null
-  // dataset 'overview': which panel this widget renders — 'kpis' | 'timeline' | 'scorecard'
-  // | 'releasePanel' (see components/widgets/OverviewWidgetBody.vue).
+  // dataset 'overview': which panel this widget renders — 'kpis' | 'scorecard' | 'releasePanel'
+  // (see components/widgets/OverviewWidgetBody.vue). The former 'timeline' panel is the
+  // standard line chart now (CONFIG_VERSION 9, lib/defaults.ts timelineWidget).
   // dataset 'campaigns': which panel — 'funnel' | 'hourOfDay' | 'country' | 'flightDay' |
   // 'cost' | 'returns' (see components/widgets/CampaignsWidgetBody.vue). The former 'deviceMix'
   // view is the standard nested doughnut now (CONFIG_VERSION 9, lib/defaults.ts deviceMixWidget).
@@ -126,6 +141,15 @@ export interface Widget {
   y: number
   w: number
   h: number
+}
+
+/** One line of a multi-series line chart (Widget.series). */
+export interface LineSeries {
+  label: string
+  filter?: { field: string; value: string }[]
+  axis?: 'left' | 'right'
+  style?: 'solid' | 'dashed' | 'dotted'
+  color?: number // index into lib/charts.ts PALETTE; default = the series' position
 }
 
 // A drill-down constraint: filter every chart on a page to one value of a dimension.
@@ -330,26 +354,14 @@ export interface OverviewKpiTile {
   noCampaignFlighting?: boolean
   campaignId?: string
   isRate?: boolean
+  // A short caveat shown under the tile's label (e.g. the install-fix note), so the label
+  // itself stays short.
+  note?: string
   // Rate tiles only — the rate's own denominator, so the UI can tell "too few to report"
   // (MIN_COHORT) apart from plain "—" (no data at all) for a null `today`.
   denominator?: number
   // Rate tiles only — pairs with `denominator` so the UI can show n/d next to the rate.
   numerator?: number
-}
-export interface OverviewDailyPoint {
-  date: string
-  pageviews: number
-  taggedArrivals: number
-  authSuccess: number
-  install: number // /popup-outcome/install-prompt/installed (once per showing)
-  rawInstallSignals?: number // raw /install/<outcome> beacons — can double-count
-}
-export interface OverviewCampaignFlightMeta {
-  id: string
-  label: string
-  flightStart: string | null
-  flightEnd: string
-  status: string
 }
 export interface OverviewScorecardRow {
   id: string
@@ -393,22 +405,6 @@ export interface OverviewResponse {
   generatedAt: string
   todayEt: string
   kpis: OverviewKpiTile[]
-  timeline: {
-    daily: OverviewDailyPoint[]
-    campaignFlights: OverviewCampaignFlightMeta[]
-    releaseMarkers: { version: string; dateEt: string; note: string; major?: boolean }[]
-    trackingActivationDate: string | null
-    /** v1.95.5 go-live (game-complete + auth new/existing beacons) — see
-     * lib/popupEvents.ts NEW_BEACONS_LIVE_AT_ET. */
-    newBeaconsLiveAt?: string
-    newBeaconsLiveAtLabel?: string
-    /** v1.95.6 raw /install/* de-dupe go-live (ET date) — see lib/popupEvents.ts
-     * RAW_INSTALL_DEDUPE_LIVE_AT_ET. Annotates the raw install-signal line ONLY. */
-    rawInstallDedupeAt?: string
-    since: string
-    until: string
-    seriesLabels?: { install: string; rawInstallSignals: string }
-  }
   scorecard: OverviewScorecardRow[]
   releasePanel: OverviewReleasePanel | null
 }
