@@ -108,6 +108,7 @@ export function validateCard(spec: CardSpec): string[] {
   }
   const scopeOf = (...repeats: (RepeatSpec | undefined)[]) => new Set(repeats.map((r) => (r ? SCOPE_PARAM[r.over] : null)).filter((p): p is MetricParam => !!p))
 
+  if (spec.showUpdated !== undefined && typeof spec.showUpdated !== 'boolean') errors.push('card: showUpdated must be a boolean')
   checkRepeat('card', spec.repeat)
   checkLabel('card.title', spec.title, false)
   for (const id of spec.captions ?? []) checkNote('card.captions', id)
@@ -129,6 +130,7 @@ export function validateCard(spec: CardSpec): string[] {
       checkLabel(`${w}.caption`, it.caption, !('field' in it.data))
       check(w, it.data, it.display, scopeOf(spec.repeat, s.repeat, it.repeat))
       if (it.gating?.minCohort != null && it.gating.minCohort < MIN_COHORT) errors.push(`${w}: minCohort below MIN_COHORT`)
+      if (it.captionMode !== undefined && it.captionMode !== 'inline' && it.captionMode !== 'compact') errors.push(`${w}: captionMode must be 'inline' or 'compact'`)
       const empty = it.gating?.whenEmpty
       if (empty && typeof empty === 'object') checkNote(`${w}.gating.whenEmpty`, empty.note)
     }

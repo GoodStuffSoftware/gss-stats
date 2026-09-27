@@ -11,8 +11,14 @@ All notable changes to **gss-stats** are documented here. The format follows
   returns many dashboard numbers with their counts and measurement status, reads each underlying
   query once and caches it, and refuses any percentage whose two counts are not comparable. The
   dashboard does not use it yet.
+- **Groundwork for configurable metric cards: the Overview scorecard and "Today at a glance"
+  as ready-made cards.** They show today's numbers, apart from the rate fixes, follow the page's
+  date and site filters, keep their notes behind a small toggle, and show when they last updated.
+  The dashboard does not use them yet.
 
 ### Changed
+- **The raw-install de-duplication note is plain language.** It says what changed and from
+  which day, without naming a beacon path.
 - **"Games played" and "Played a game" are now "Game-screen views".** Both count visits to the
   game screen (page views, several per device), not games played; the Overview tile and the
   campaign funnel step now say so.

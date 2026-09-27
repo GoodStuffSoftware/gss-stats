@@ -85,6 +85,10 @@ export interface MetricItem {
   display: Display
   gating?: Gating
   caption?: Label // rendered through NoteBlock under the value
+  /** How the caption and the value's own notes (install-fix, counted-from, caveats) show:
+   * 'inline' (default) as a line under the value; 'compact' behind a small notes toggle next
+   * to the label, collapsed by default, so the card keeps its compact look. */
+  captionMode?: 'inline' | 'compact'
   frame?: 'row' | 'pill' | 'tile' // overrides the section layout for this item
   repeat?: RepeatSpec // expands in place, e.g. one tile per flighting campaign
 }
@@ -106,6 +110,8 @@ export interface CardSpec {
   captions?: string[] // note ids under the whole card
   link?: 'campaigns-page' // click-through; replaces the scorecard's emit('open-campaigns')
   minWidth?: number // grid minimum per instance (230 px today)
+  /** A footer with "Updated Xs ago" (the card's latest successful load) and a reload control. */
+  showUpdated?: boolean
 }
 
 /** What a Widget stores. A preset is a code-reviewed CardSpec in lib/metrics/presets.ts. */
