@@ -22,7 +22,7 @@
 // with an ordinary (arbitrarily long) AND/OR WHERE clause, and functions/api/campaigns.ts
 // issues one small query per campaign rather than one UNIONed mega-query across all three.
 
-import { classifyPopupPath, computeRate, TRACKING_ACTIVATION_DATE_ET, NEW_BEACONS_LIVE_AT_ET, etDateFromMs, sqlLit, sqlInt, INSTALL_OUTCOMES, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, isInstallGapUnmeasured } from './popupEvents'
+import { classifyPopupPath, computeRate, TRACKING_ACTIVATION_DATE_ET, NEW_BEACONS_LIVE_AT_ET, etDateFromMs, sqlLit, sqlInt, INSTALL_OUTCOMES, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, INSTALL_GAP_PATHS, isInstallGapUnmeasured, pathSegmentsSql } from './popupEvents'
 
 // ET hour-of-day (0-23) for "Arrivals by ET hour of day" — same DST-safe Intl approach as
 // popupEvents.ts's etDateFromMs, just formatting the hour instead of the calendar date.
@@ -354,19 +354,32 @@ export function campaignFlightSqlCase(emptyLabel: string): string {
 //              deduplicated install count; earlier rows are unmeasured), 'raw-install-signal'
 //              (/install/<pwa-installed|standalone-detected|play-detected>, can double-count),
 //              'game-complete' (/game/complete/…); '' for everything else.
-export function arrivalSqlCase(emptyLabel: string): string {
-  return `CASE WHEN visitor <> 'new' THEN ${sqlLit(emptyLabel)} WHEN (${campaignFlightSqlCase('')}) <> '' THEN 'tagged' ELSE 'untagged' END`
+/** A pre-fix row of one of the two install-gap paths (unmeasured everywhere; see
+ * lib/popupEvents.ts isInstallGapUnmeasured), as SQL. */
+function installGapUnmeasuredSql(fixedAtMs: number | null): string {
+  const paths = INSTALL_GAP_PATHS.map(sqlLit).join(', ')
+  return fixedAtMs === null ? `path IN (${paths})` : `(path IN (${paths}) AND ts < ${sqlInt(fixedAtMs)})`
+}
+export function arrivalSqlCase(emptyLabel: string, fixedAtMs: number | null = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS): string {
+  // Same rows /api/campaigns counts as tagged arrivals: first-ever beacons (any path, event
+  // beacons included), minus pre-fix install-gap rows, attributed by campaignFlightSqlCase.
+  const E = sqlLit(emptyLabel)
+  return `CASE WHEN visitor <> 'new' THEN ${E} WHEN ${installGapUnmeasuredSql(fixedAtMs)} THEN ${E} WHEN (${campaignFlightSqlCase('')}) <> '' THEN 'tagged' ELSE 'untagged' END`
 }
 export function keyEventSqlCase(emptyLabel: string, fixedAtMs: number | null = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS): string {
-  const installed = '/popup-outcome/install-prompt/installed'
-  const installWhen = fixedAtMs === null ? '1 = 0' : `path = ${sqlLit(installed)} AND ts >= ${sqlInt(fixedAtMs)}`
+  const E = sqlLit(emptyLabel)
   const list = (xs: readonly string[]) => xs.map(sqlLit).join(', ')
+  // Segment parsing exactly as classifyPopupPath does it (isInstallPromptInstalled and
+  // isRawInstallSignal are built on it), so off-vocabulary shapes agree with the JS.
+  const po = pathSegmentsSql('/popup-outcome')
+  const ins = pathSegmentsSql('/install')
+  const installed = fixedAtMs === null ? E : `CASE WHEN ts >= ${sqlInt(fixedAtMs)} THEN 'install' ELSE ${E} END`
   return (
     `CASE WHEN path IN (${list(AUTH_SUCCESS_PATHS)}) THEN 'auth-success' ` +
-    `WHEN ${installWhen} THEN 'install' ` +
-    `WHEN path IN (${list(INSTALL_OUTCOMES.map((o) => `/install/${o}`))}) THEN 'raw-install-signal' ` +
+    `WHEN ${po.match} AND ${po.s1} = 'install-prompt' AND ${po.s2} = 'installed' THEN ${installed} ` +
+    `WHEN ${ins.match} AND ${ins.s1} IN (${list(INSTALL_OUTCOMES)}) THEN CASE WHEN ${installGapUnmeasuredSql(fixedAtMs)} THEN ${E} ELSE 'raw-install-signal' END ` +
     `WHEN substr(path, 1, ${sqlInt(GAME_COMPLETE_PREFIX.length)}) = ${sqlLit(GAME_COMPLETE_PREFIX)} THEN 'game-complete' ` +
-    `ELSE ${sqlLit(emptyLabel)} END`
+    `ELSE ${E} END`
   )
 }
 /** JS readings of the two dims, from the canonical matchers (tests compare them to the SQL). */
@@ -374,10 +387,12 @@ export function arrivalOf(visitor: string, attributedFlightId: string): string {
   if (visitor !== 'new') return ''
   return attributedFlightId ? 'tagged' : 'untagged'
 }
-export function keyEventOf(path: string, tsMs: number): string {
+export function keyEventOf(path: string, tsMs: number, fixedAtMs: number | null = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS): string {
   if (isAuthSuccessBase(path)) return 'auth-success'
-  if (isInstallPromptInstalled(path)) return isInstallGapUnmeasured(path, tsMs) ? '' : 'install'
-  if (isRawInstallSignal(path)) return 'raw-install-signal'
+  // Installs count from the install fix on (a pre-fix showing could never record one).
+  if (isInstallPromptInstalled(path)) return fixedAtMs !== null && tsMs >= fixedAtMs ? 'install' : ''
+  // Raw signals: the pre-fix /install/pwa-installed rows are unmeasured, like everywhere else.
+  if (isRawInstallSignal(path)) return isInstallGapUnmeasured(path, tsMs, fixedAtMs) ? '' : 'raw-install-signal'
   if (path.startsWith(GAME_COMPLETE_PREFIX)) return 'game-complete'
   return ''
 }

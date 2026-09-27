@@ -80,6 +80,24 @@ const POPUP_PATHS = [
   '/popup-outcome/first50-congrats/returned', '/popup-outcome/upsell/bogus', '/popup-outcome/upsell', '/popup-outcome/',
   '/signin-eligible/earned', '/', '/game', '/game/complete/normal/easy', '/return/sudoku_tired_of_ads/d0', '/auth/success/google',
   '/SIGNIN-PROMPT/accept', // case matters: classifyPopupPath is case-sensitive, so is the SQL
+  // Off-vocabulary shapes: trailing and doubled slashes, extra segments. classifyPopupPath
+  // ignores empty segments and anything past the ones it reads, and so must the SQL.
+  '/signin-prompt/accept/',
+  '/signin-prompt//dismiss',
+  '/signin-prompt/placement/extra',
+  '/promo-first50/shown/',
+  '/promo-first50//accept',
+  '/first50-congrats/ack/x',
+  '/upsell/shown/cadence/extra',
+  '/upsell//accept//limit',
+  '/upsell/dismiss/',
+  '/install/prompt/android/',
+  '/install//prompt//ios',
+  '/install/play/extra',
+  '/install/pwa-installed/',
+  '/popup-outcome/upsell/signed-in/extra',
+  '/popup-outcome//first50-offer//returned/',
+  '/popup-outcome/install-prompt/installed/',
 ]
 
 describe('popupFamily / popupOutcome SQL match classifyPopupPath row for row', () => {
@@ -191,6 +209,83 @@ describe('arrival / keyEvent SQL (the Overall timeline series filters)', () => {
     expect(got).toEqual(['tagged', 'untagged', 'untagged', ''])
     expect(arrivalOf('new', android.id)).toBe('tagged')
     expect(arrivalOf('returning', android.id)).toBe('')
+  })
+})
+
+describe('review fixes: arrivals, raw signals, date limit, request caps', () => {
+  it('keyEvent: a pre-fix /install/pwa-installed is not a raw install signal; post-fix it is; off-vocabulary shapes agree', () => {
+    const rows: Row[] = [
+      { ts: FIX - 1, path: '/install/pwa-installed' },
+      { ts: FIX, path: '/install/pwa-installed' },
+      { ts: FIX - 1, path: '/install/standalone-detected' },
+      { ts: LIVE, path: '/install/play-detected/' },
+      { ts: LIVE, path: '/popup-outcome/install-prompt/installed/' },
+      { ts: FIX - 1, path: '/popup-outcome//install-prompt/installed' },
+    ]
+    const got = exprValues('keyEvent', rows)
+    expect(got).toEqual(rows.map((r) => keyEventOf(r.path!, r.ts)))
+    expect(got).toEqual(['', 'raw-install-signal', 'raw-install-signal', 'raw-install-signal', 'install', ''])
+  })
+
+  it("the timeline's tagged-arrivals total per flight equals /api/campaigns' taggedArrivals", async () => {
+    const retest = CAMPAIGNS.find((c) => c.flightStartTimeEt)!
+    const start = etWallTimeMs(retest.flightStart!, retest.flightStartTimeEt)
+    // First-ever beacons for the retest: page views AND event beacons (e.g. an install prompt as
+    // the very first row), plus a pre-fix gap row, a returning row and pre-schedule QA.
+    const seed: [string, string, number][] = [
+      ['/', 'new', 5],
+      ['/game', 'new', 2],
+      ['/install/prompt/android', 'new', 3],
+      ['/signin-prompt/placement', 'new', 1],
+      ['/', 'returning', 4],
+    ]
+    for (const [path, visitor, n] of seed) {
+      for (let i = 0; i < n; i++) db.prepare('INSERT INTO hits (ts, path, campaign, visitor, site) VALUES (?, ?, ?, ?, ?)').run(FIX + 3_600_000 + i, path, 'sudoku_funnel_retest', visitor, 'bestsudoku-web')
+    }
+    db.prepare('INSERT INTO hits (ts, path, campaign, visitor, site) VALUES (?, ?, ?, ?, ?)').run(start - 1000, '/', 'sudoku_funnel_retest', 'new', 'bestsudoku-web')
+    db.prepare('INSERT INTO hits (ts, path, campaign, visitor, site) VALUES (?, ?, ?, ?, ?)').run(FIX - 1000, '/install/pwa-installed', 'sudoku_funnel_retest', 'new', 'bestsudoku-web')
+
+    // The timeline series: a date query filtered to arrival = tagged (no event-beacon opt-in).
+    const { body: series } = await post({ dimension: 'dateEt', constraints: [{ field: 'arrival', value: 'tagged' }], limit: 400, ...range, since: '2026-09-01', until: '2026-10-05' })
+    const timelineTotal = series.rows.reduce((a: number, r: any) => a + r.pageviews, 0)
+
+    const { onRequestPost: campaignsPost } = await import('./campaigns')
+    const { gss_geo } = fakeD1()
+    const res = await campaignsPost({ request: { json: async () => ({ campaignId: retest.id }) }, env: { gss_geo }, waitUntil: () => {} } as any)
+    const camp: any = await res.json()
+    expect(camp.funnel.counts.arrivals).toBe(11)
+    expect(timelineTotal).toBe(camp.funnel.counts.arrivals)
+  })
+
+  it('a date axis keeps the most recent `limit` days, returned oldest first', async () => {
+    const day0 = Date.parse('2025-01-01T12:00:00Z')
+    for (let d = 0; d < 450; d++) insert({ ts: day0 + d * 86_400_000 })
+    const { body } = await post({ dimension: 'date', limit: 400, since: '2024-12-01', until: '2026-12-31' })
+    const days = body.rows.map((r: any) => r.key.date)
+    expect(days).toHaveLength(400)
+    expect(days[0]).toBe(new Date(day0 + 50 * 86_400_000).toISOString().slice(0, 10))
+    expect(days[399]).toBe(new Date(day0 + 449 * 86_400_000).toISOString().slice(0, 10))
+    expect([...days].sort()).toEqual(days)
+    expect(body.totals.pageviews).toBe(450)
+  })
+
+  it('caps sites at 50 and filters at 16 with a clear 400, before touching D1', async () => {
+    const tooManySites = await post({ dimension: 'device', sites: Array.from({ length: 51 }, (_, i) => `s${i}`), ...range })
+    expect(tooManySites.body.error).toMatch(/too many sites/)
+    expect(tooManySites.calls).toHaveLength(0)
+    const tooManyFilters = await post({ dimension: 'device', constraints: Array.from({ length: 17 }, () => ({ field: 'device', value: 'mobile' })), ...range })
+    expect(tooManyFilters.body.error).toMatch(/too many filters/)
+    expect(tooManyFilters.calls).toHaveLength(0)
+    const ok = await post({ dimension: 'device', sites: Array.from({ length: 50 }, (_, i) => `s${i}`), constraints: Array.from({ length: 16 }, () => ({ field: 'device', value: 'mobile' })), ...range })
+    expect(ok.body.error).toBeUndefined()
+  })
+
+  it('a failing D1 query returns a generic error, never the D1 message', async () => {
+    const gss_geo = { prepare: () => ({ bind: () => ({ all: async () => { throw new Error('SQLITE_ERROR: secret detail') } }) }) }
+    const res = await onRequestPost({ request: { json: async () => ({ dimension: 'device', ...range }) }, env: { gss_geo }, waitUntil: () => {} } as any)
+    const text = await res.text()
+    expect(res.status).toBe(500)
+    expect(text).not.toContain('secret detail')
   })
 })
 

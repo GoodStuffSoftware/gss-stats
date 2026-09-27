@@ -154,6 +154,11 @@ export const RING_EXCLUDED_DIMS = new Set(['date', 'dateEt'])
 // prefilter applies instead (only rows of that event family). Their blank rows are dropped even
 // in single-dim mode, so a page view never shows up as a "(none)" bar.
 export const EVENT_DIMS = new Set(['popupFamily', 'popupOutcome', 'gameMode', 'gameDifficulty', 'keyEvent'])
+// Dims whose charts/filters lift the standing event-beacon exclusion: the event dims, plus
+// 'arrival' — a device's first-ever beacon can itself be an event row (e.g. an install prompt),
+// and /api/campaigns counts it as a tagged arrival, so the timeline's arrivals line must too.
+export const EXCLUSION_LIFTING_DIMS = new Set([...EVENT_DIMS, 'arrival'])
+
 // Bound WHERE prefilters for dims that only describe a subset of rows (cheap, and keeps the CASE
 // evaluation to rows that can carry a value). campaignFlight is not an event dim: a tagged row
 // is often a page view, so it keeps the chart's own event-beacon setting.
@@ -186,6 +191,9 @@ const DERIVED_FILTER_EXPR: Record<string, string> = {
   arrival: breakdownColumnExpr('arrival', ''),
   keyEvent: breakdownColumnExpr('keyEvent', ''),
 }
+
+export const MAX_SITES = 50
+export const MAX_CONSTRAINTS = 16
 
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), {
@@ -220,6 +228,12 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // "goodstuff"]) mapped from the Site/Subdomain selectors, or a single legacy
   // `site`. Empty / "all" = no filter.
   const rawSites: unknown[] = Array.isArray(body.sites) ? body.sites : body.site != null ? [body.site] : []
+  // Hard caps on request size (defense in depth: every site and constraint becomes a bound
+  // parameter, and D1 allows 100 per query). A clear 400, never a D1 error.
+  if (rawSites.length > MAX_SITES) return json({ error: `too many sites (at most ${MAX_SITES})` }, 400)
+  if (Array.isArray(body.constraints) && body.constraints.length > MAX_CONSTRAINTS) {
+    return json({ error: `too many filters (at most ${MAX_CONSTRAINTS})` }, 400)
+  }
   const sites = rawSites.filter(
     (s): s is string => typeof s === 'string' && s !== 'all' && /^[a-z0-9.\-]{1,40}$/i.test(s),
   )
@@ -318,7 +332,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // lift and which prefilters apply (see EVENT_DIMS / DIM_PREFILTERS above). A drill on an event
   // dim lifts the exclusion too, for the same reason.
   const activeDims: string[] = isPoints ? [] : isRing ? ringDims : [dim]
-  const eventDimActive = [...activeDims, ...constraints.map((c) => c.field)].some((d) => EVENT_DIMS.has(d))
+  const eventDimActive = [...activeDims, ...constraints.map((c) => c.field)].some((d) => EXCLUSION_LIFTING_DIMS.has(d))
   const eventRowsClause = (w: string[], b: any[]) => {
     if (!includeEventBeacons && !eventDimActive) popupExcludeClause(w, b) // events, not screen views: excluded unless opted in
     const seen = new Set<(w: string[], b: unknown[]) => void>()
@@ -374,7 +388,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     try {
       r = await ctx.env.gss_geo.prepare(sql).bind(...b).all()
     } catch (e) {
-      return json({ error: 'd1 query failed', detail: String(e) }, 500)
+      console.error('geo: d1 query failed', e)
+      return json({ error: 'd1 query failed' }, 500)
     }
     const rows = (r.results ?? []).map((x: any) => ({
       key: {
@@ -427,7 +442,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     try {
       r = await ctx.env.gss_geo.prepare(sql).bind(...b, fetchLimit).all()
     } catch (e) {
-      return json({ error: 'd1 query failed', detail: String(e) }, 500)
+      console.error('geo: d1 query failed', e)
+      return json({ error: 'd1 query failed' }, 500)
     }
     const rows = (r.results ?? []).map((x: any) => {
       const key: Record<string, string> = {}
@@ -459,7 +475,9 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
 
   const whereSql = where.join(' AND ')
   // Tiebreak on k (see buildMergedBreakdownSql) so which rows LIMIT keeps is deterministic.
-  const orderBy = isDateDim(dim) ? 'k ASC' : 'c DESC, k ASC'
+  // A date axis keeps the most RECENT `limit` days (newest first under LIMIT, then put back in
+  // date order below) — ascending would silently keep the oldest ones on a long range.
+  const orderBy = isDateDim(dim) ? 'k DESC' : 'c DESC, k ASC'
   // One statement in place of the old total-COUNT(*) + grouped-COUNT(*) pair — see the
   // buildMergedBreakdownSql doc comment for why SUM(c) OVER () gives the same grand total.
   const sql = buildMergedBreakdownSql(col, whereSql, orderBy)
@@ -468,7 +486,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   try {
     res = await ctx.env.gss_geo.prepare(sql).bind(...binds, limit).all()
   } catch (e) {
-    return json({ error: 'd1 query failed', detail: String(e) }, 500)
+    console.error('geo: d1 query failed', e)
+    return json({ error: 'd1 query failed' }, 500)
   }
 
   const rows = (res.results ?? []).map((r: any) => ({
@@ -476,6 +495,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     pageviews: Number(r.c) || 0,
     visits: Number(r.c) || 0,
   }))
+  if (isDateDim(dim)) rows.reverse()
   const total = Number(res.results?.[0]?.total) || 0
   const totals = { pageviews: total, visits: total }
 

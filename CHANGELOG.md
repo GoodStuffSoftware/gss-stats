@@ -55,6 +55,15 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **The sign-in eligibility chart has a short title** that fits its card.
 - **Timeline marker labels no longer collide,** on desktop or phone.
 - **Chart editor checkboxes sit right next to their labels,** and clicking the label toggles them.
+- **The timeline's tagged-arrivals line matches the campaign funnel.** It now counts a first
+  visit even when that first beacon was a pop-up or install event.
+- **A long trend chart keeps its most recent days** when the range has more days than the
+  chart's limit, instead of the oldest ones.
+- **Raw install signals skip installs from before the install fix,** like every other install
+  count.
+- **Pop-up charts read unusual beacon paths the same way the rest of the dashboard does**
+  (a trailing or doubled slash, an extra segment).
+- **An oversized chart request gets a clear error** instead of a database message.
 
 ## [0.8.1] — 2026-09-27
 

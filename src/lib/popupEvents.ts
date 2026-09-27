@@ -766,9 +766,23 @@ export function sqlInt(value: number): number {
   return value
 }
 const sqlList = (values: readonly string[]) => values.map(sqlLit).join(', ')
-/** `substr(path, 1, len(prefix)) = prefix` — a case-sensitive prefix test (LIKE is ASCII-case-
- * insensitive in SQLite, unlike classifyPopupPath's startsWith), plus "something follows it". */
-const pathHasPrefix = (prefix: string) => `(substr(path, 1, ${sqlInt(prefix.length)}) = ${sqlLit(prefix)} AND length(path) > ${sqlInt(prefix.length)})`
+/** SQL twins of classifyPopupPath's own parsing: a family prefix P matches `path = P` or a
+ * path starting `P/` (case-sensitive — LIKE would not be); the rest is split into segments the
+ * way `segments()` does, IGNORING empty segments (runs of slashes, a trailing slash) and
+ * anything past the segments a rule reads. So `/signin-prompt/accept/`, `/install/prompt/
+ * android/` and `/popup-outcome/upsell/signed-in/extra` classify exactly as the JS does. */
+export function pathSegmentsSql(prefix: string): { match: string; s1: string; s2: string } {
+  const n = sqlInt(prefix.length)
+  const match = `(path = ${sqlLit(prefix)} OR substr(path, 1, ${n + 1}) = ${sqlLit(prefix + '/')})`
+  // Collapse slash runs (5 passes: runs up to 32) and trim the ends, leaving 'a/b/c'.
+  let rest = `substr(path, ${n + 2})`
+  for (let i = 0; i < 5; i++) rest = `replace(${rest}, '//', '/')`
+  const r = `trim(${rest}, '/')`
+  const s1 = `(CASE WHEN instr(${r}, '/') > 0 THEN substr(${r}, 1, instr(${r}, '/') - 1) ELSE ${r} END)`
+  const tail = `substr(${r}, instr(${r}, '/') + 1)`
+  const s2 = `(CASE WHEN instr(${r}, '/') = 0 THEN '' WHEN instr(${tail}, '/') > 0 THEN substr(${tail}, 1, instr(${tail}, '/') - 1) ELSE ${tail} END)`
+  return { match, s1, s2 }
+}
 
 /** UTC ms of ET midnight starting TRACKING_ACTIVATION_DATE_ET — the instant from which
  * aggregatePopupRows counts a row as measured (its ET day is on/after the activation date).
@@ -787,70 +801,64 @@ function popupUnmeasuredSql(): string {
   return `(${preAct} OR ${gap})`
 }
 
-interface PopupDimRule {
-  when: string // SQL condition over `path`
-  family: string // SQL expression (usually a literal)
-  outcome: string // SQL expression (usually a literal)
+/** `CASE <expr> WHEN k THEN v ... ELSE E END` over literal pairs (expr is evaluated once). */
+function caseMap(expr: string, pairs: [string, string][], empty: string): string {
+  return `CASE ${expr} ${pairs.map(([k, v]) => `WHEN ${sqlLit(k)} THEN ${sqlLit(v)}`).join(' ')} ELSE ${empty} END`
 }
-// Order matters (first match wins, like a CASE): exact accept/dismiss paths before the
-// signin-prompt catch-all that makes every other /signin-prompt/<reason> a showing.
-function popupDimRules(): PopupDimRule[] {
-  const rules: PopupDimRule[] = []
-  const lit = sqlLit
-  // signin-prompt: accept / dismiss are reserved; any other /signin-prompt/<reason> is shown.
-  rules.push({ when: `path = ${lit('/signin-prompt/accept')}`, family: lit('signin-prompt'), outcome: lit('accept') })
-  rules.push({ when: `path = ${lit('/signin-prompt/dismiss')}`, family: lit('signin-prompt'), outcome: lit('dismiss') })
-  rules.push({ when: pathHasPrefix('/signin-prompt/'), family: lit('signin-prompt'), outcome: lit('shown') })
-  // promo-first50: /promo-first50/<shown|accept|dismiss> — the segment IS the outcome.
-  rules.push({
-    when: `path IN (${sqlList(['shown', 'accept', 'dismiss'].map((k) => `/promo-first50/${k}`))})`,
-    family: lit('promo-first50'),
-    outcome: `substr(path, ${sqlInt('/promo-first50/'.length + 1)})`,
-  })
-  // first50-congrats: shown / ack (= accept) / close (= dismiss).
-  for (const [seg, kind] of [['shown', 'shown'], ['ack', 'accept'], ['close', 'dismiss']] as const) {
-    rules.push({ when: `path = ${lit(`/first50-congrats/${seg}`)}`, family: lit('first50-congrats'), outcome: lit(kind) })
-  }
-  // upsell: /upsell/<shown|accept|dismiss>/<reason> — a reason segment is required.
-  for (const kind of ['shown', 'accept', 'dismiss'] as const) {
-    rules.push({ when: pathHasPrefix(`/upsell/${kind}/`), family: lit('upsell'), outcome: lit(kind) })
-  }
-  // install: prompt platforms are showings; the prompt dismissals and pwa-decline are dismissals;
-  // play / pwa-accept / app-store are accepts; INSTALL_OUTCOMES are raw outcome signals, kept
-  // under their own names. /install/platforms/* (the platform LIST) is not an outcome: no value.
-  rules.push({ when: `path IN (${sqlList(INSTALL_SHOWN_PLATFORMS.map((p) => `/install/prompt/${p}`))})`, family: lit('install'), outcome: lit('shown') })
-  rules.push({
-    when: `path IN (${sqlList([...INSTALL_PROMPT_DISMISS.map((d) => `/install/prompt/${d}`), '/install/pwa-decline'])})`,
-    family: lit('install'),
-    outcome: lit('dismiss'),
-  })
-  rules.push({ when: `path IN (${sqlList(['/install/play', '/install/pwa-accept', '/install/app-store'])})`, family: lit('install'), outcome: lit('accept') })
-  rules.push({
-    when: `path IN (${sqlList(INSTALL_OUTCOMES.map((o) => `/install/${o}`))})`,
-    family: lit('install'),
-    outcome: `substr(path, ${sqlInt('/install/'.length + 1)})`,
-  })
-  // /popup-outcome/<name>/<outcome>: <name> resolves through POPUP_OUTCOME_NAME_TO_FAMILY (so
-  // first50-offer → promo-first50, install-prompt → install); <outcome> must be a known type.
-  const P = '/popup-outcome/'
-  const rest = `substr(path, ${sqlInt(P.length + 1)})`
-  const name = `substr(${rest}, 1, instr(${rest}, '/') - 1)`
-  const outcome = `substr(${rest}, instr(${rest}, '/') + 1)`
-  const names = Object.keys(POPUP_OUTCOME_NAME_TO_FAMILY)
-  rules.push({
-    when: `(substr(path, 1, ${sqlInt(P.length)}) = ${sqlLit(P)} AND ${name} IN (${sqlList(names)}) AND ${outcome} IN (${sqlList(POPUP_OUTCOME_TYPES)}))`,
-    family: `CASE ${name} ${names.map((n) => `WHEN ${sqlLit(n)} THEN ${sqlLit(POPUP_OUTCOME_NAME_TO_FAMILY[n])}`).join(' ')} END`,
-    outcome,
-  })
-  return rules
-}
+const same = (xs: readonly string[]): [string, string][] => xs.map((x) => [x, x])
 
 /** SQL CASE expression for the popupFamily / popupOutcome derived dimension; `emptyLabel` is
- * what a non-pop-up or unmeasured row gets (geo.ts passes '' so its blank test drops them). */
+ * what a non-pop-up or unmeasured row gets (geo.ts passes '' so its blank test drops them).
+ * One branch per classifyPopupPath family, in its order, each reading the path's segments with
+ * pathSegmentsSql exactly as the classifier reads them. */
 export function popupDimSqlCase(dim: 'popupFamily' | 'popupOutcome', emptyLabel: string): string {
-  const empty = sqlLit(emptyLabel)
-  const whens = popupDimRules().map((r) => `WHEN ${r.when} THEN ${dim === 'popupFamily' ? r.family : r.outcome}`)
-  return `CASE WHEN ${popupUnmeasuredSql()} THEN ${empty} ${whens.join(' ')} ELSE ${empty} END`
+  const E = sqlLit(emptyLabel)
+  const fam = dim === 'popupFamily'
+  const branch: string[] = []
+  // /signin-prompt/<x>: accept | dismiss | anything else non-empty = shown (x = reason).
+  {
+    const g = pathSegmentsSql('/signin-prompt')
+    branch.push(`WHEN ${g.match} THEN ${fam ? `CASE WHEN ${g.s1} = '' THEN ${E} ELSE 'signin-prompt' END` : `CASE ${g.s1} WHEN '' THEN ${E} WHEN 'accept' THEN 'accept' WHEN 'dismiss' THEN 'dismiss' ELSE 'shown' END`}`)
+  }
+  // /promo-first50/<shown|accept|dismiss>
+  {
+    const g = pathSegmentsSql('/promo-first50')
+    const kinds = ['shown', 'accept', 'dismiss']
+    branch.push(`WHEN ${g.match} THEN ${caseMap(g.s1, fam ? kinds.map((k) => [k, 'promo-first50']) : same(kinds), E)}`)
+  }
+  // /first50-congrats/<shown|ack|close> = shown | accept | dismiss
+  {
+    const g = pathSegmentsSql('/first50-congrats')
+    const map: [string, string][] = [['shown', 'shown'], ['ack', 'accept'], ['close', 'dismiss']]
+    branch.push(`WHEN ${g.match} THEN ${caseMap(g.s1, fam ? map.map(([k]) => [k, 'first50-congrats']) : map, E)}`)
+  }
+  // /upsell/<shown|accept|dismiss>/<reason> — the reason segment is required.
+  {
+    const g = pathSegmentsSql('/upsell')
+    const kinds = ['shown', 'accept', 'dismiss']
+    branch.push(`WHEN ${g.match} THEN CASE WHEN ${g.s2} = '' THEN ${E} ELSE ${caseMap(g.s1, fam ? kinds.map((k) => [k, 'upsell']) : same(kinds), E)} END`)
+  }
+  // /install/...: prompt/<platform> shown, prompt/<dismiss kind> dismiss, platforms/* no value,
+  // play | pwa-accept | app-store accept, pwa-decline dismiss, INSTALL_OUTCOMES raw outcomes.
+  {
+    const g = pathSegmentsSql('/install')
+    const prompt: [string, string][] = [...INSTALL_SHOWN_PLATFORMS.map((p): [string, string] => [p, 'shown']), ...INSTALL_PROMPT_DISMISS.map((d): [string, string] => [d, 'dismiss'])]
+    const direct: [string, string][] = [['play', 'accept'], ['pwa-accept', 'accept'], ['app-store', 'accept'], ['pwa-decline', 'dismiss'], ...same(INSTALL_OUTCOMES)]
+    const promptCase = caseMap(g.s2, fam ? prompt.map(([k]) => [k, 'install']) : prompt, E)
+    const directPairs = fam ? direct.map(([k]): [string, string] => [k, 'install']) : direct
+    branch.push(`WHEN ${g.match} THEN CASE ${g.s1} WHEN 'prompt' THEN ${promptCase} ${directPairs.map(([k, v]) => `WHEN ${sqlLit(k)} THEN ${sqlLit(v)}`).join(' ')} ELSE ${E} END`)
+  }
+  // /popup-outcome/<name>/<outcome>: <name> through POPUP_OUTCOME_NAME_TO_FAMILY (first50-offer →
+  // promo-first50, install-prompt → install), <outcome> one of POPUP_OUTCOME_TYPES.
+  {
+    const g = pathSegmentsSql('/popup-outcome')
+    const names = Object.keys(POPUP_OUTCOME_NAME_TO_FAMILY)
+    const value = fam
+      ? caseMap(g.s1, names.map((n): [string, string] => [n, POPUP_OUTCOME_NAME_TO_FAMILY[n]]), E)
+      : `CASE WHEN ${g.s1} IN (${sqlList(names)}) THEN ${caseMap(g.s2, same(POPUP_OUTCOME_TYPES), E)} ELSE ${E} END`
+    branch.push(fam ? `WHEN ${g.match} THEN CASE WHEN ${g.s2} IN (${sqlList(POPUP_OUTCOME_TYPES)}) THEN ${value} ELSE ${E} END` : `WHEN ${g.match} THEN ${value}`)
+  }
+  return `CASE WHEN ${popupUnmeasuredSql()} THEN ${E} ${branch.join(' ')} ELSE ${E} END`
 }
 
 /** The SQL prefilter a popupFamily/popupOutcome query adds (bound, cheap): only pop-up event
