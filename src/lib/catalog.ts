@@ -6,7 +6,7 @@ export const DATASETS: { value: Dataset; label: string }[] = [
   { value: 'rum', label: 'RUM — pageviews / visits' },
   { value: 'geo', label: 'Geo beacon — region / city (bot-free)' },
   { value: 'popup', label: 'Pop-up tracking — sign-in / promo / upsell / install' },
-  { value: 'overview', label: 'Best Sudoku overview — KPIs / timeline / scorecard / release panel' },
+  { value: 'overview', label: 'Best Sudoku overview — KPIs / scorecard / release panel' },
   { value: 'campaigns', label: 'Best Sudoku campaigns — funnel / hour-of-day / country / …' },
   { value: 'ads-readings', label: 'Best Sudoku ads readings log' },
   { value: 'completions', label: 'Best Sudoku completions — mode × difficulty' },
@@ -21,7 +21,6 @@ export const COMPLETIONS_DIMENSIONS: { key: string; label: string }[] = [
 // dataset 'overview' — which panel a widget renders (widget.view).
 export const OVERVIEW_VIEWS: { value: string; label: string }[] = [
   { value: 'kpis', label: 'Today at a glance (KPI tiles)' },
-  { value: 'timeline', label: 'Overall timeline' },
   { value: 'scorecard', label: 'Campaign scorecard' },
   { value: 'releasePanel', label: 'Release before/after panel' },
 ]
@@ -33,7 +32,6 @@ export const CAMPAIGNS_VIEWS: { value: string; label: string }[] = [
   { value: 'country', label: 'Arrivals & funnel by country' },
   { value: 'flightDay', label: 'Daily arrivals by flight day (+ cumulative)' },
   { value: 'cost', label: 'Cost per arrival / auth success' },
-  { value: 'deviceMix', label: 'Device mix' },
   { value: 'returns', label: 'Return visits' },
 ]
 
@@ -95,7 +93,16 @@ export const GEO_DIMENSIONS: { key: string; label: string }[] = [
   { key: 'screenw', label: 'Screen width (px, exact)' },
   { key: 'screenwBucket', label: 'Screen width (bucketed)' },
   { key: 'pathFamily', label: 'Path family (page vs. event beacons)' },
+  // Event dims: a chart grouping by one counts only those event rows (no opt-in needed).
+  { key: 'popupFamily', label: 'Pop-up (measured)' },
+  { key: 'popupOutcome', label: 'Pop-up outcome (shown / tapped / dismissed / outcomes)' },
+  { key: 'gameMode', label: 'Completed game: mode' },
+  { key: 'gameDifficulty', label: 'Completed game: difficulty' },
+  { key: 'campaignFlight', label: 'Campaign flight (attributed)' },
+  { key: 'arrival', label: 'Arrival (first visit): tagged / untagged' },
+  { key: 'keyEvent', label: 'Key event (sign-in / install / raw install / completion)' },
   { key: 'date', label: 'Date (trend)' },
+  { key: 'dateEt', label: 'Date (trend, ET)' },
 ]
 
 // Client-side mirror of the server's site registry (the Function has its own copy
@@ -144,6 +151,7 @@ export const CHART_TYPES: { value: ChartType; label: string; needsDimension: boo
   { value: 'bar', label: 'Bar (vertical)', needsDimension: true, allowsBreakdown: false },
   { value: 'hbar', label: 'Bar (horizontal)', needsDimension: true, allowsBreakdown: false },
   { value: 'stackedBar', label: 'Stacked bar', needsDimension: true, allowsBreakdown: true },
+  { value: 'breakdownBar', label: 'Breakdown bar (axis × series, grouped or stacked)', needsDimension: true, allowsBreakdown: true },
   { value: 'line', label: 'Line', needsDimension: true, allowsBreakdown: false },
   { value: 'area', label: 'Area', needsDimension: true, allowsBreakdown: false },
   { value: 'doughnut', label: 'Doughnut', needsDimension: true, allowsBreakdown: false },
@@ -152,7 +160,14 @@ export const CHART_TYPES: { value: ChartType; label: string; needsDimension: boo
   { value: 'map', label: 'World map (geo points · beacon only)', needsDimension: false, allowsBreakdown: false },
   { value: 'table', label: 'Table', needsDimension: true, allowsBreakdown: true },
   { value: 'rate', label: 'Rate (% tile · pop-up dataset only)', needsDimension: true, allowsBreakdown: false },
+  { value: 'rateTable', label: 'Rate table (valid pop-up rates · pop-up dataset only)', needsDimension: false, allowsBreakdown: false },
   { value: 'note', label: 'Note (static text tile)', needsDimension: false, allowsBreakdown: false },
+]
+
+// type 'breakdownBar': how one axis value's series sit (Widget.barMode).
+export const BAR_MODES: { value: 'grouped' | 'stacked'; label: string }[] = [
+  { value: 'grouped', label: 'Grouped (side by side)' },
+  { value: 'stacked', label: 'Stacked' },
 ]
 
 export const METRICS: { value: Metric; label: string }[] = [

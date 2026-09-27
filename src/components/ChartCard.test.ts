@@ -21,21 +21,16 @@ import type { Widget, GlobalFilters, OverviewResponse } from '../types'
 const MINIMAL_OVERVIEW_RESPONSE: OverviewResponse = {
   generatedAt: '2026-09-26T12:00:00Z',
   todayEt: '2026-09-26',
-  kpis: [],
-  timeline: {
-    daily: [{ date: '2026-09-26', pageviews: 5, taggedArrivals: 0, authSuccess: 0, install: 0 }],
-    campaignFlights: [],
-    releaseMarkers: [],
-    trackingActivationDate: null,
-    since: '2026-09-01',
-    until: '2026-09-26',
-  },
-  scorecard: [],
   releasePanel: null,
 }
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>()
-  return { ...actual, fetchOverview: vi.fn(async () => MINIMAL_OVERVIEW_RESPONSE) }
+  const statsFor = () => ({ rows: [{ key: { date: '2026-09-26' }, pageviews: 5, visits: 5 }], totals: { pageviews: 5, visits: 5 }, meta: { site: 'all', host: null, since: '2026-09-26', until: '2026-09-27', dimensions: ['date'], metric: 'pageviews' } })
+  return {
+    ...actual,
+    fetchOverview: vi.fn(async () => MINIMAL_OVERVIEW_RESPONSE),
+    fetchSeriesStats: vi.fn(async (w: Widget) => (w.series ?? []).map(statsFor)),
+  }
 })
 
 const filters: GlobalFilters = {
@@ -215,19 +210,20 @@ describe('ChartCard — the overview timeline caption renders exactly once (coor
   // inline in OverviewWidgetBody.vue's timeline template, and once more through ChartCard's
   // generic attached-caption system (widget.notes -> widgetCaptionNoteIds -> the SAME
   // registry note, 'overview-timeline-caption', via the SAME NoteBlock component). Only the
-  // generic path should remain — one NoteBlock, not two.
+  // generic path should remain — one NoteBlock, not two. (The timeline is the standard line
+  // chart since CONFIG_VERSION 9; its caption still comes only from widget.notes.)
   it('renders the registry caption once, not twice', async () => {
     const w = mountCard(
       baseWidget({
         id: 'ow-timeline',
         i: 'ow-timeline',
         title: 'Overall timeline',
-        type: 'table',
-        dataset: 'overview',
-        view: 'timeline',
-        dimension: '',
+        type: 'line',
+        dataset: 'geo',
+        dimension: 'date',
         metric: 'pageviews',
-        limit: 1,
+        limit: 400,
+        series: [{ label: 'Page views' }, { label: 'Installs', filter: [{ field: 'keyEvent', value: 'install' }], axis: 'right' }],
         notes: ['overview-timeline-caption'],
       } as Partial<Widget>),
     )

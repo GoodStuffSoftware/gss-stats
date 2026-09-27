@@ -16,7 +16,7 @@ import { addDays } from '../etTime'
 import { rangeMs } from './facts'
 import { METRICS, metricWindows, type MetricDef, type MetricParam } from './metrics'
 import { RATIOS, ratioParamsOf, ratioWindowsOf, type RatioDef } from './ratios'
-import type { CardSpec, DataBinding, DeltaName, Display, DisplayAs, Label, RepeatSpec, WindowName } from './types'
+import type { CardRef, CardSpec, DataBinding, DeltaName, Display, DisplayAs, Label, RepeatSpec, WindowName } from './types'
 
 // ── Limits (ADR 0003 section 3, "The security whitelist") ─────────────────────────────────
 export const MAX_BODY_BYTES = 64 * 1024
@@ -141,6 +141,46 @@ export function validateCard(spec: CardSpec): string[] {
     }
   })
   return errors
+}
+
+// ── normCardRef (load-time: a widget's saved `card`) ───────────────────────────────────────
+/** The preset id a card that failed validation is replaced with: MetricCard renders a short
+ * "can't be shown" message for it, so a bad saved card is a placeholder, never a crash. */
+export const INVALID_CARD_PRESET = 'invalid-card'
+export const CARD_LIMITS = { sections: 8, items: 40, stringLength: 200, jsonBytes: 16 * 1024 } as const
+const PRESET_ID_RE = /^[a-z0-9-]{1,64}$/
+
+function withinLimits(v: unknown, depth = 0): boolean {
+  if (depth > 12) return false
+  if (typeof v === 'string') return v.length <= CARD_LIMITS.stringLength
+  if (typeof v === 'number') return Number.isFinite(v)
+  if (typeof v === 'boolean' || v === null) return true
+  if (Array.isArray(v)) return v.length <= 64 && v.every((x) => withinLimits(x, depth + 1))
+  if (typeof v === 'object') return Object.keys(v as object).length <= 32 && Object.values(v as object).every((x) => withinLimits(x, depth + 1))
+  return false
+}
+
+/** A widget's saved `card`, normalised on every load (lib/defaults.ts normWidget): absent or
+ * not an object → undefined (no card); `{ preset }` → kept by id (an unknown id renders as an
+ * unknown card, it is never guessed); `{ spec }` → a plain-JSON copy when it is within
+ * CARD_LIMITS and passes validateCard, otherwise the INVALID_CARD_PRESET placeholder. Never
+ * throws: stored data can be anything. */
+export function normCardRef(raw: unknown): CardRef | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const r = raw as Record<string, unknown>
+  if ('preset' in r) return typeof r.preset === 'string' && PRESET_ID_RE.test(r.preset) ? { preset: r.preset } : { preset: INVALID_CARD_PRESET }
+  if (!('spec' in r)) return undefined
+  try {
+    const text = JSON.stringify(r.spec)
+    if (typeof text !== 'string' || text.length > CARD_LIMITS.jsonBytes) return { preset: INVALID_CARD_PRESET }
+    const spec = JSON.parse(text) as CardSpec
+    if (!withinLimits(spec) || !Array.isArray(spec.sections) || spec.sections.length > CARD_LIMITS.sections) return { preset: INVALID_CARD_PRESET }
+    const items = spec.sections.reduce((n, sec) => n + (Array.isArray(sec?.items) ? sec.items.length : Infinity), 0)
+    if (items > CARD_LIMITS.items) return { preset: INVALID_CARD_PRESET }
+    return validateCard(spec).length ? { preset: INVALID_CARD_PRESET } : { spec }
+  } catch {
+    return { preset: INVALID_CARD_PRESET }
+  }
 }
 
 // ── validateMetricsRequest (the server whitelist) ─────────────────────────────────────────

@@ -17,11 +17,19 @@ function drillConstraints(filters: GlobalFilters, dataset: Dataset): { field: st
     .filter((c): c is { field: string; value: string } => c !== null)
 }
 
+/** A series line chart (Widget.series): one date query per series, each narrowed by its own
+ * filter, fetched in parallel (the Function's edge cache keys each one separately). */
+export async function fetchSeriesStats(widget: Widget, filters: GlobalFilters): Promise<StatsResponse[]> {
+  const base: Widget = { ...widget, series: undefined, breakdown: undefined, rings: undefined }
+  return Promise.all((widget.series ?? []).map((s) => fetchStats(base, filters, (s.filter ?? []).filter((f) => f.field && f.value))))
+}
+
 /** Fetch one widget's data from the server-side stats Function. */
-export async function fetchStats(widget: Widget, filters: GlobalFilters): Promise<StatsResponse> {
+export async function fetchStats(widget: Widget, filters: GlobalFilters, extraConstraints: { field: string; value: string }[] = []): Promise<StatsResponse> {
   // Resolve the site selection into concrete RUM hosts + beacon tags. Empty = all
   // real sites; dev/preview hosts are never in the list, so they never count.
-  const { hosts, tags } = resolveSelection(filters.siteSel)
+  // A chart's own site override (Widget.siteSel) replaces the page's site pick; nothing else.
+  const { hosts, tags } = resolveSelection(widget.siteSel ?? filters.siteSel)
 
   // Pop-up funnel dataset → /api/popups (same D1 `hits` table as the beacon, but
   // classified as sign-in/upsell/install events rather than page views).
@@ -30,7 +38,8 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters): Promis
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        dimension: widget.type === 'rate' ? 'rate' : widget.dimension || 'kind',
+        // A rate tile asks for one rate; a rate table asks for every valid rate ('rates').
+        dimension: widget.type === 'rate' ? 'rate' : widget.type === 'rateTable' ? 'rates' : widget.dimension || 'kind',
         rateKey: widget.type === 'rate' ? widget.dimension : undefined,
         popup: widget.popup,
         kind: widget.popupKind,
@@ -38,6 +47,10 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters): Promis
         until: filters.until,
         limit: widget.limit ?? 50,
         sites: tags,
+        // "Hide my visits" — applied by /api/popups too, so pop-up numbers match the beacon's.
+        excludeOwnVisits: filters.excludeOwnVisits,
+        ownBrowser: filters.ownBrowser,
+        ownOS: filters.ownOS,
       }),
     })
     if (!res.ok) {
@@ -87,7 +100,9 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters): Promis
         until: filters.until,
         limit: widget.type === 'map' ? 2000 : widget.limit ?? 50,
         sites: tags,
-        constraints: drillConstraints(filters, 'geo'),
+        // The page's drill-downs, plus (for one series of a series line chart) that series'
+        // own filter — native geo fields, validated server-side against GEO_DIMS like any drill.
+        constraints: [...drillConstraints(filters, 'geo'), ...extraConstraints],
         // "Hide my visits" / "hide self-referrals" apply to the beacon dataset too — same
         // resolution as the RUM branch below (widget-level override falls back to the global
         // filter) — so the two datasets agree instead of only RUM honoring these toggles.
@@ -102,6 +117,7 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters): Promis
         // pathFamily value, so every widget on that page — not just the one that was
         // drilled — can actually show the event rows it just filtered down to.
         includeEventBeacons: widget.includeEventBeacons === true || filters.includeEventBeacons === true,
+        excludeKnownTraffic: widget.excludeKnownTraffic === true,
       }),
     })
     if (!res.ok) {
@@ -242,13 +258,16 @@ export async function loadConfig(): Promise<DashboardConfig | null> {
 }
 
 /** Persist the dashboard config to KV. */
-export async function saveConfig(cfg: DashboardConfig): Promise<boolean> {
+/** true = saved, false = failed, 'stale' = the server holds a NEWER layout version than this
+ * tab's code writes (another tab or a deploy upgraded it) — the tab must reload, not overwrite. */
+export async function saveConfig(cfg: DashboardConfig): Promise<boolean | 'stale'> {
   try {
     const res = await fetch('/api/config', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(cfg),
     })
+    if (res.status === 409) return 'stale'
     return res.ok
   } catch {
     return false

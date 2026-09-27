@@ -33,6 +33,16 @@ export const DRILL_FIELDS: Record<string, { rum: string | null; geo: string | nu
   // day RANGE client-side (App.openFilteredPage), never an equality constraint.
   screenwBucket: { rum: null, geo: 'screenwBucket' },
   pathFamily: { rum: null, geo: 'pathFamily' },
+  // Pop-up / completion / campaign-flight dims (derived, same bound-equality filtering). A drill
+  // on a pop-up or completion dim needs no page-level event-beacon opt-in: functions/api/geo.ts
+  // lifts the standing exclusion itself for any query constrained on one (EVENT_DIMS).
+  popupFamily: { rum: null, geo: 'popupFamily' },
+  popupOutcome: { rum: null, geo: 'popupOutcome' },
+  gameMode: { rum: null, geo: 'gameMode' },
+  gameDifficulty: { rum: null, geo: 'gameDifficulty' },
+  campaignFlight: { rum: null, geo: 'campaignFlight' },
+  arrival: { rum: null, geo: 'arrival' },
+  keyEvent: { rum: null, geo: 'keyEvent' },
 }
 
 // Site dimensions are handled by the site multi-select (siteSel), not generic drill.

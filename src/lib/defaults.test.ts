@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  withCardForView,
   defaultConfig,
   normalizeConfig,
   reorderBskGroup,
@@ -12,6 +13,11 @@ import {
   isBestSudokuPopupsPage,
   isBestSudokuLaunchPage,
   overviewPageIsUncustomized,
+  popupsPageV8FactoryIds,
+  migratePopupsPageV9,
+  migrateDeviceMixV9,
+  migrateTimelineV9,
+  DEVICE_MIX_TITLE,
   CONFIG_VERSION,
 } from './defaults'
 import { NO_OUTCOME_TRACKING_NOTE, SIGNIN_ELIGIBLE_CAVEAT } from './popupEvents'
@@ -117,7 +123,9 @@ describe('normalizeConfig — v7 bespoke → widget migration', () => {
     const ov = norm.pages.find((p) => isOverviewPage(p))!
     const cp = norm.pages.find((p) => isCampaignComparePage(p))!
     expect(ov.widgets.length).toBeGreaterThan(0)
-    expect(ov.widgets.some((w) => w.dataset === 'overview' && w.view === 'timeline')).toBe(true)
+    expect(ov.widgets.some((w) => w.dataset === 'overview' && w.view === 'kpis')).toBe(true)
+    // the timeline is the standard line chart now (v9)
+    expect(ov.widgets.some((w) => w.id === 'ow-timeline' && w.type === 'line' && w.dataset === 'geo')).toBe(true)
     expect(cp.widgets.length).toBeGreaterThan(0)
     expect(cp.widgets.some((w) => w.dataset === 'campaigns' && w.view === 'funnel')).toBe(true)
     expect(norm.version).toBe(CONFIG_VERSION)
@@ -132,11 +140,12 @@ describe('normalizeConfig — v7 bespoke → widget migration', () => {
     }
     const once = normalizeConfig(raw)
     const ov1 = once.pages.find((p) => isOverviewPage(p))!
-    expect(ov1.widgets).toEqual([customWidget]) // untouched, not replaced with the factory set
+    // Untouched, not replaced with the factory set — beyond v10 giving the KPI panel its card.
+    expect(ov1.widgets).toEqual([{ ...customWidget, card: { preset: 'bsk-kpis' } }])
 
     const twice = normalizeConfig(once)
     const ov2 = twice.pages.find((p) => isOverviewPage(p))!
-    expect(ov2.widgets).toEqual([customWidget]) // still untouched — idempotent
+    expect(ov2.widgets).toEqual([{ ...customWidget, card: { preset: 'bsk-kpis' } }]) // still untouched — idempotent
   })
 
   it('MEDIUM regression: a page id\'d bsk-campaigns but named like the overview page (stale/manual-edit mismatch) gets CAMPAIGNS widgets, matched by id first', () => {
@@ -212,7 +221,7 @@ describe('normalizeConfig — v8 completions-widget migration', () => {
     }
     const norm = normalizeConfig(raw)
     const ov = norm.pages.find((p) => isOverviewPage(p))!
-    expect(ov.widgets).toEqual([customWidget]) // untouched — no completions widget forced onto it
+    expect(ov.widgets).toEqual([{ ...customWidget, card: { preset: 'bsk-kpis' } }]) // no completions widget forced onto it (v10 adds only the card)
   })
   it('running the migration twice on the same v7 config does not duplicate the widget', () => {
     const ids = ['ow-note-smallsample', 'ow-kpis', 'ow-timeline', 'ow-scorecard', 'ow-release']
@@ -292,12 +301,15 @@ describe('defaultOverviewWidgets / defaultCampaignsWidgets', () => {
     const overviewViews = defaultOverviewWidgets()
       .filter((w) => w.dataset === 'overview')
       .map((w) => w.view)
-    expect(new Set(overviewViews)).toEqual(new Set(['kpis', 'timeline', 'scorecard', 'releasePanel']))
+    expect(new Set(overviewViews)).toEqual(new Set(['kpis', 'scorecard', 'releasePanel']))
 
     const campaignsViews = defaultCampaignsWidgets()
       .filter((w) => w.dataset === 'campaigns')
       .map((w) => w.view)
-    expect(new Set(campaignsViews)).toEqual(new Set(['funnel', 'hourOfDay', 'country', 'flightDay', 'cost', 'deviceMix', 'returns']))
+    expect(new Set(campaignsViews)).toEqual(new Set(['funnel', 'hourOfDay', 'country', 'flightDay', 'cost', 'returns']))
+    // The device mix is the standard nested doughnut now, not a bespoke 'deviceMix' view.
+    const mix = defaultCampaignsWidgets().find((w) => w.id === 'cw-devicemix')!
+    expect(mix).toMatchObject({ type: 'nestedDoughnut', dataset: 'geo', dimension: 'campaignFlight', breakdown: 'device', rings: ['os'], includeEventBeacons: true })
   })
 
   it('the note-type widgets point at registry ids (noteId), not baked-in literal text', () => {
@@ -389,29 +401,305 @@ describe('normWidget — includeEventBeacons round-trip (via normalizeConfig)', 
   })
 })
 
-describe('defaultBestSudokuPopupsWidgets — titles are plain, caveats are captions', () => {
+describe('defaultBestSudokuPopupsWidgets — one bar chart, a valid-rates table, eligibility', () => {
   const widgets = defaultBestSudokuPopupsWidgets()
 
-  it('the first50-congrats "kind" widget has a plain title and the no-outcome-tracking caption', () => {
-    const w = widgets.find((w) => w.id === 'pu-first50-congrats-kind')!
-    expect(w.title).toBe('First 50 congrats — shown / accepted / dismissed')
-    expect(w.title).not.toContain(NO_OUTCOME_TRACKING_NOTE)
-    expect(w.notes).toEqual(['no-outcome-tracking'])
+  it('is exactly the breakdown bar, the rate table and the eligibility bar', () => {
+    expect(widgets.map((w) => w.id)).toEqual(['pu-bars', 'pu-rates', 'pu-eligible-bd'])
   })
 
-  it('a popup WITHOUT noOutcomeTracking never gets that caption', () => {
-    const w = widgets.find((w) => w.id === 'pu-signin-prompt-kind')!
-    expect(w.notes ?? []).not.toContain('no-outcome-tracking')
+  it('the bar chart puts every pop-up on the axis and shown + outcomes as the series, over geo', () => {
+    const bars = widgets.find((w) => w.id === 'pu-bars')!
+    expect(bars).toMatchObject({ type: 'breakdownBar', dataset: 'geo', dimension: 'popupFamily', breakdown: 'popupOutcome', barMode: 'grouped' })
   })
 
-  it('the sign-in eligibility widgets have plain titles and the signin-eligible-caveat caption', () => {
+  it('the eligibility bar keeps its plain title and the signin-eligible-caveat caption', () => {
     const bd = widgets.find((w) => w.id === 'pu-eligible-bd')!
-    const rate = widgets.find((w) => w.id === 'pu-eligible-rate')!
-    expect(bd.title).toBe('Sign-in eligibility — earned / capped / unearned')
+    expect(bd.title).toBe('Sign-in eligibility')
     expect(bd.title).not.toContain(SIGNIN_ELIGIBLE_CAVEAT)
     expect(bd.notes).toEqual(['signin-eligible-caveat'])
-    expect(rate.title).toBe('Sign-in eligibility rate')
-    expect(rate.notes).toEqual(['signin-eligible-caveat'])
+  })
+
+  it('no generated caveat text in any title', () => {
+    for (const w of widgets) expect(w.title).not.toContain(NO_OUTCOME_TRACKING_NOTE)
+  })
+})
+
+// ── v9: Pop-ups page rebuild + device-mix swap ─────────────────────────────────────────────
+describe('normalizeConfig — v9 migration (Pop-ups page + device mix)', () => {
+  // A v8-era saved layout: the old generated Pop-ups tiles (moved/resized by the owner), one
+  // chart the owner added there, the bespoke device-mix table between other campaign widgets
+  // (renamed), and a customised page elsewhere.
+  function v8Config(): any {
+    const oldPopupTiles = popupsPageV8FactoryIds().map((id, i) => widget({ id, dataset: 'popup', x: (i % 2) * 6, y: i * 4, w: 6, h: 4 }))
+    const mine = widget({ id: 'my-popup-chart', title: 'My upsell reasons', dataset: 'popup', dimension: 'reason', popup: 'upsell', x: 3, y: 200, w: 5, h: 7 })
+    const campaigns = [
+      widget({ id: 'cw-funnel', dataset: 'campaigns', view: 'funnel', type: 'table', x: 0, y: 0, w: 12, h: 14 }),
+      widget({ id: 'cw-devicemix', title: 'Devices per flight', dataset: 'campaigns', view: 'deviceMix', type: 'table', x: 2, y: 51, w: 10, h: 9, isDefault: true }),
+      widget({ id: 'cw-returns', dataset: 'campaigns', view: 'returns', type: 'table', x: 0, y: 63, w: 12, h: 11 }),
+    ]
+    const custom = [widget({ id: 'u1', title: 'Custom', dataset: 'geo', dimension: 'city', type: 'hbar', x: 1, y: 2, w: 3, h: 4, notes: ['small-sample'] })]
+    return {
+      version: 8,
+      activePageId: 'bsk-popups',
+      pages: [
+        page({ id: 'default', name: 'Overview', isDefault: true, widgets: custom }),
+        page({ id: 'bsk-campaigns', name: 'Best Sudoku · Campaigns', widgets: campaigns }),
+        page({ id: 'bsk-popups', name: 'Best Sudoku · Pop-ups', widgets: [...oldPopupTiles, mine] }),
+        page({ id: 'user-x', name: 'Mine', widgets: [widget({ id: 'dm2', title: 'Device mix', dataset: 'campaigns', view: 'deviceMix', type: 'table', x: 0, y: 5, w: 6, h: 8 })] }),
+      ],
+    }
+  }
+
+  it('rebuilds the Pop-ups page: new chart + table on top, eligibility and the owner\'s own chart kept below', () => {
+    const norm = normalizeConfig(v8Config())
+    expect(norm.version).toBe(CONFIG_VERSION)
+    expect(CONFIG_VERSION).toBeGreaterThanOrEqual(9)
+    const pu = norm.pages.find((p) => p.id === 'bsk-popups')!
+    expect(pu.widgets.map((w) => w.id)).toEqual(['pu-bars', 'pu-rates', 'pu-eligible-bd', 'my-popup-chart'])
+    const mine = pu.widgets.find((w) => w.id === 'my-popup-chart')!
+    expect(mine).toMatchObject({ title: 'My upsell reasons', x: 3, w: 5, h: 7, dimension: 'reason', popup: 'upsell' })
+    // the kept eligibility bar takes its new slot beside the table; the owner's chart sits below
+    const elig = pu.widgets.find((w) => w.id === 'pu-eligible-bd')!
+    expect({ x: elig.x, y: elig.y, w: elig.w, h: elig.h }).toEqual({ x: 8, y: 11, w: 4, h: 7 })
+    expect(elig.title).toBe('x') // the fixture's own (owner-edited) title is kept
+    const oldTitled = migratePopupsPageV9(page({ id: 'bsk-popups', name: 'P', widgets: [widget({ id: 'pu-eligible-bd', title: 'Sign-in eligibility — earned / capped / unearned' })] }))
+    expect(oldTitled.widgets.find((w) => w.id === 'pu-eligible-bd')!.title).toBe('Sign-in eligibility')
+    const blockBottom = Math.max(...pu.widgets.slice(0, 3).map((w) => w.y + w.h))
+    expect(mine.y).toBeGreaterThanOrEqual(blockBottom)
+  })
+
+  it('swaps the bespoke device mix for the nested doughnut in place, keeping id, position, size, title and default mark', () => {
+    const norm = normalizeConfig(v8Config())
+    const cw = norm.pages.find((p) => p.id === 'bsk-campaigns')!
+    expect(cw.widgets.map((w) => w.id)).toEqual(['cw-funnel', 'cw-devicemix', 'cw-returns'])
+    const mix = cw.widgets[1]
+    expect(mix).toMatchObject({
+      type: 'nestedDoughnut',
+      dataset: 'geo',
+      dimension: 'campaignFlight',
+      breakdown: 'device',
+      rings: ['os'],
+      includeEventBeacons: true,
+      title: 'Devices per flight', // the owner's own title survives
+      isDefault: true,
+      x: 2,
+      y: 51,
+      w: 10,
+      h: 9,
+    })
+    expect(mix.view).toBeUndefined()
+    expect(mix.filters?.rangeRel).toBe('12mo')
+    // a copy on another page is swapped too; the default title moves to the new one
+    const other = norm.pages.find((p) => p.id === 'user-x')!.widgets[0]
+    expect(other).toMatchObject({ id: 'dm2', type: 'nestedDoughnut', title: DEVICE_MIX_TITLE, x: 0, y: 5, w: 6, h: 8 })
+  })
+
+  it("carries the owner's captions, and a single-campaign scope as a campaignFlight filter", () => {
+    const one = widget({ id: 'dm-one', dataset: 'campaigns', view: 'deviceMix', type: 'table', notes: ['small-sample'], campaignIds: ['24279250691'] })
+    const two = widget({ id: 'dm-two', dataset: 'campaigns', view: 'deviceMix', type: 'table', campaignIds: ['24279250691', '24215315197'] })
+    const [a, b] = migrateDeviceMixV9(page({ id: 'p', name: 'P', widgets: [one, two] })).widgets
+    expect(a.notes).toEqual(['small-sample', 'device-mix-population'])
+    expect(a.filters?.drill).toEqual([{ key: 'campaignFlight', value: '24279250691', label: 'US+CA web retest' }])
+    expect(a.campaignIds).toBeUndefined()
+    expect(b.notes).toEqual(['device-mix-population'])
+    expect(b.filters?.drill ?? []).toEqual([]) // several campaigns: every flight shows (its own ring)
+  })
+
+  it('leaves every other page and widget exactly as saved', () => {
+    const raw = v8Config()
+    const norm = normalizeConfig(raw)
+    expect(norm.pages.find((p) => p.id === 'default')!.widgets).toEqual(raw.pages[0].widgets)
+    const cw = norm.pages.find((p) => p.id === 'bsk-campaigns')!.widgets
+    expect(cw[0]).toEqual(raw.pages[1].widgets[0])
+    expect(cw[2]).toEqual(raw.pages[1].widgets[2])
+  })
+
+  it('is idempotent: normalizing the migrated config again changes no widget', () => {
+    const once = normalizeConfig(v8Config())
+    const twice = normalizeConfig(JSON.parse(JSON.stringify(once)))
+    const strip = (c: DashboardConfig) => c.pages.map((p) => ({ id: p.id, widgets: p.widgets.map((w) => ({ ...w, filters: w.filters ? { ...w.filters, since: '', until: '' } : w.filters })) }))
+    expect(strip(twice)).toEqual(strip(once))
+    // and the migration functions themselves are no-ops on their own output
+    const pu = once.pages.find((p) => p.id === 'bsk-popups')!
+    expect(migratePopupsPageV9(pu)).toBe(pu)
+    const cw = once.pages.find((p) => p.id === 'bsk-campaigns')!
+    expect(migrateDeviceMixV9(cw)).toBe(cw)
+  })
+
+  it('is version-gated: a v9 config with a hand-added old tile keeps it', () => {
+    const cfg: any = { version: 9, activePageId: 'bsk-popups', pages: [page({ id: 'bsk-popups', name: 'Best Sudoku · Pop-ups', widgets: [widget({ id: 'pu-upsell-kind', dataset: 'popup' })] })] }
+    const norm = normalizeConfig(cfg)
+    expect(norm.pages.find((p) => p.id === 'bsk-popups')!.widgets.map((w) => w.id)).toEqual(['pu-upsell-kind'])
+  })
+
+  it('removes every generator id from older releases too (a v0.3.0-shaped page), by pattern', () => {
+    const v030 = [
+      'pu-signin-prompt-kind', 'pu-signin-prompt-tap', 'pu-signin-prompt-trend',
+      'pu-first50-congrats-kind', 'pu-first50-congrats-tap',
+      'pu-rate-first50-congrats:outcome:signed-in', 'pu-rate-first50-congrats:outcome:installed', 'pu-rate-first50-congrats:outcome:returned',
+      'pu-rate-signin-prompt:outcome:signed-in', 'pu-rate-upsell:outcome:installed',
+      'pu-upsell-reason', 'pu-install-reason', 'pu-install-outcomes', 'pu-eligible-rate', 'pu-eligible-bd',
+    ].map((id, i) => widget({ id, dataset: 'popup', y: i * 4 }))
+    const mine = widget({ id: 'a1b2c3d4', title: 'Mine', dataset: 'popup', dimension: 'reason', y: 90 })
+    const out = migratePopupsPageV9(page({ id: 'bsk-popups', name: 'Best Sudoku · Pop-ups', widgets: [...v030, mine] }))
+    expect(out.widgets.map((w) => w.id)).toEqual(['pu-bars', 'pu-rates', 'pu-eligible-bd', 'a1b2c3d4'])
+  })
+
+  it('a Pop-ups page the owner emptied gets the two new widgets but not the eligibility bar back', () => {
+    const out = migratePopupsPageV9(page({ id: 'bsk-popups', name: 'Best Sudoku · Pop-ups', widgets: [] }))
+    expect(out.widgets.map((w) => w.id)).toEqual(['pu-bars', 'pu-rates'])
+  })
+
+  it('a fresh default config needs no migration and already has the new page', () => {
+    const norm = normalizeConfig(defaultConfig())
+    expect(norm.pages.find((p) => p.id === 'bsk-popups')!.widgets.map((w) => w.id)).toEqual(['pu-bars', 'pu-rates', 'pu-eligible-bd'])
+    expect(norm.pages.find((p) => p.id === 'bsk-campaigns')!.widgets.some((w) => w.view === 'deviceMix')).toBe(false)
+  })
+})
+
+describe('normalizeConfig — v9 migration (Overview timeline → standard line chart)', () => {
+  function v8Overview(): any {
+    return {
+      version: 8,
+      activePageId: 'bsk-overview',
+      pages: [
+        page({ id: 'default', name: 'Overview', isDefault: true, widgets: [widget({ id: 'g1', dataset: 'geo', dimension: 'city', type: 'hbar' })] }),
+        page({
+          id: 'bsk-overview',
+          name: 'Best Sudoku · Overview',
+          widgets: [
+            widget({ id: 'ow-kpis', type: 'table', dataset: 'overview', view: 'kpis', x: 0, y: 3, w: 12, h: 8 }),
+            widget({ id: 'ow-timeline', title: 'My timeline', type: 'table', dataset: 'overview', view: 'timeline', notes: ['overview-timeline-caption'], x: 1, y: 11, w: 10, h: 13, isDefault: true }),
+            widget({ id: 'mine', title: 'Mine', dataset: 'geo', dimension: 'device', type: 'doughnut', x: 0, y: 30, w: 4, h: 6 }),
+          ],
+        }),
+      ],
+    }
+  }
+
+  it('swaps the bespoke panel in place, keeping id, position, size, title, captions and default mark', () => {
+    const norm = normalizeConfig(v8Overview())
+    const ov = norm.pages.find((p) => p.id === 'bsk-overview')!
+    expect(ov.widgets.map((w) => w.id)).toEqual(['ow-kpis', 'ow-timeline', 'mine'])
+    const tl = ov.widgets[1]
+    expect(tl).toMatchObject({ type: 'line', dataset: 'geo', dimension: 'dateEt', title: 'My timeline', x: 1, y: 11, w: 10, h: 13, isDefault: true, markers: 'releases', goLiveMarkers: true, flightBands: true })
+    expect(tl.view).toBeUndefined()
+    expect(tl.series?.length).toBe(5)
+    expect(tl.notes).toEqual(['overview-timeline-caption'])
+  })
+
+  it("keeps the owner's other widgets on that page and elsewhere exactly as saved", () => {
+    const raw = v8Overview()
+    const norm = normalizeConfig(raw)
+    const ov = norm.pages.find((p) => p.id === 'bsk-overview')!
+    // As saved, apart from v10 giving a KPI/scorecard panel its card.
+    expect(ov.widgets[0]).toEqual(withCardForView(raw.pages[1].widgets[0]))
+    expect(ov.widgets[2]).toEqual(withCardForView(raw.pages[1].widgets[2]))
+    expect(norm.pages.find((p) => p.id === 'default')!.widgets).toEqual(raw.pages[0].widgets)
+  })
+
+  it("never narrows a page's site pick: every migrated timeline carries its own Best Sudoku site override instead", () => {
+    const oldTimeline = (id: string) => widget({ id, title: 'Overall timeline', type: 'table', dataset: 'overview', view: 'timeline', x: 0, y: 0, w: 12, h: 12 })
+    const raw: any = {
+      version: 8,
+      activePageId: 'default',
+      pages: [
+        // the GSS Overview (id default) with a copy of the old timeline on it
+        page({ id: 'default', name: 'Overview', isDefault: true, widgets: [oldTimeline('t-gss'), widget({ id: 'g1', dataset: 'geo', dimension: 'city', type: 'hbar' })] }),
+        // a user page that happens to be NAMED like the BSK overview (matched by name)
+        page({ id: 'u-named', name: 'Best Sudoku Overview', widgets: [oldTimeline('t-named')] }),
+        // a scratch page with an old timeline copy and a site pick of its own
+        page({ id: 'scratch', name: 'Scratch', widgets: [oldTimeline('t-scratch')], filters: { siteSel: ['goodstuff.software'], since: '2026-01-01', until: '2026-01-02', excludeSelfReferrals: false, excludeOwnVisits: false, ownBrowser: '', ownOS: '' } }),
+        page({ id: 'bsk-overview', name: 'Best Sudoku · Overview', widgets: [oldTimeline('ow-timeline')] }),
+      ],
+    }
+    const norm = normalizeConfig(JSON.parse(JSON.stringify(raw)))
+    for (const [pageId, widgetId] of [['default', 't-gss'], ['u-named', 't-named'], ['scratch', 't-scratch'], ['bsk-overview', 'ow-timeline']]) {
+      const p = norm.pages.find((x) => x.id === pageId)!
+      const t = p.widgets.find((w) => w.id === widgetId)!
+      expect(t, widgetId).toMatchObject({ type: 'line', dataset: 'geo', dimension: 'dateEt', siteSel: ['bestsudoku-web', 'bestsudoku', 'bestsudoku-app'] })
+      // the page's own site pick is exactly what it was
+      expect(p.filters.siteSel, pageId).toEqual(raw.pages.find((x: any) => x.id === pageId).filters.siteSel)
+    }
+    // the GSS Overview's other chart is untouched
+    expect(norm.pages.find((x) => x.id === 'default')!.widgets.find((w) => w.id === 'g1')).toEqual(raw.pages[0].widgets[1])
+  })
+
+  it('is idempotent and the swap function is a no-op on its own output', () => {
+    const once = normalizeConfig(v8Overview())
+    const twice = normalizeConfig(JSON.parse(JSON.stringify(once)))
+    expect(twice.pages.find((p) => p.id === 'bsk-overview')!.widgets).toEqual(once.pages.find((p) => p.id === 'bsk-overview')!.widgets)
+    const ov = once.pages.find((p) => p.id === 'bsk-overview')!
+    expect(migrateTimelineV9(ov)).toBe(ov)
+  })
+})
+
+describe('normWidget — v9 fields survive the whitelist (via normalizeConfig)', () => {
+  it('keeps the marker/band toggles, series, axis titles and known-traffic flag; sanitizes bad values', () => {
+    const cfg: any = {
+      version: CONFIG_VERSION,
+      activePageId: 'u',
+      pages: [
+        page({
+          id: 'u',
+          name: 'Mine',
+          widgets: [
+            widget({
+              id: 'l',
+              type: 'line',
+              dataset: 'geo',
+              dimension: 'date',
+              markers: 'releases',
+              goLiveMarkers: true,
+              flightBands: true,
+              excludeKnownTraffic: true,
+              series: [
+                { label: 'A', filter: [{ field: 'keyEvent', value: 'install' }], axis: 'right', style: 'dashed', color: 4 },
+                { label: '', filter: [{ field: 5, value: 'x' }], axis: 'up', style: 'wavy' },
+              ] as any,
+              axisTitles: { left: 'L', right: '' },
+            }),
+            widget({ id: 'm', type: 'line', dataset: 'geo', dimension: 'date', goLiveMarkers: 'yes' as any, flightBands: 1 as any }),
+          ],
+        }),
+      ],
+    }
+    const [l, m] = normalizeConfig(JSON.parse(JSON.stringify(cfg))).pages[0].widgets
+    expect(l).toMatchObject({ markers: 'releases', goLiveMarkers: true, flightBands: true, excludeKnownTraffic: true, axisTitles: { left: 'L' } })
+    expect(l.series).toEqual([
+      { label: 'A', filter: [{ field: 'keyEvent', value: 'install' }], axis: 'right', style: 'dashed', color: 4 },
+      { label: 'Series 2', axis: 'left', style: 'solid' },
+    ])
+    expect(m.goLiveMarkers).toBeUndefined()
+    expect(m.flightBands).toBeUndefined()
+    expect(m.series).toBeUndefined()
+  })
+
+  it('keeps barMode, and drops an unknown barMode value', () => {
+    const cfg: DashboardConfig = {
+      version: CONFIG_VERSION,
+      activePageId: 'u',
+      pages: [
+        page({
+          id: 'u',
+          name: 'Mine',
+          widgets: [
+            widget({ id: 'a', type: 'breakdownBar', dataset: 'geo', dimension: 'popupFamily', breakdown: 'popupOutcome', barMode: 'stacked' }),
+            widget({ id: 'b', type: 'breakdownBar', dataset: 'geo', dimension: 'popupFamily', breakdown: 'popupOutcome', barMode: 'sideways' as any }),
+          ],
+        }),
+      ],
+    }
+    const [a, b] = normalizeConfig(JSON.parse(JSON.stringify(cfg))).pages[0].widgets
+    expect(a.barMode).toBe('stacked')
+    expect(b.barMode).toBeUndefined()
+  })
+  it('the device-mix doughnut round-trips with its rings, event-beacon opt-in and filter override', () => {
+    const cfg: DashboardConfig = { version: CONFIG_VERSION, activePageId: 'bsk-campaigns', pages: [page({ id: 'bsk-campaigns', name: 'Best Sudoku · Campaigns', widgets: defaultCampaignsWidgets() })] }
+    const mix = normalizeConfig(JSON.parse(JSON.stringify(cfg))).pages[0].widgets.find((w) => w.id === 'cw-devicemix')!
+    expect(mix).toMatchObject({ rings: ['os'], includeEventBeacons: true, notes: ['device-mix-population'] })
+    expect(mix.filters?.rangeRel).toBe('12mo')
   })
 })
 
@@ -437,7 +725,7 @@ describe('migratePopupCaveatTitles', () => {
     const bd = widget({ id: 'pu-eligible-bd', title: `Sign-in eligibility — earned / capped / unearned (${SIGNIN_ELIGIBLE_CAVEAT})`, type: 'bar', dataset: 'popup' })
     const rate = widget({ id: 'pu-eligible-rate', title: `Sign-in eligibility rate (${SIGNIN_ELIGIBLE_CAVEAT})`, type: 'rate', dataset: 'popup' })
     const [out] = migratePopupCaveatTitles([popupPage([bd, rate])])
-    expect(out.widgets[0].title).toBe('Sign-in eligibility — earned / capped / unearned')
+    expect(out.widgets[0].title).toBe('Sign-in eligibility')
     expect(out.widgets[0].notes).toEqual(['signin-eligible-caveat'])
     expect(out.widgets[1].title).toBe('Sign-in eligibility rate')
     expect(out.widgets[1].notes).toEqual(['signin-eligible-caveat'])
@@ -500,7 +788,7 @@ describe('migratePopupCaveatTitles', () => {
     const norm = normalizeConfig(raw)
     const popupsPage = norm.pages.find((p) => isBestSudokuPopupsPage(p))!
     const w = popupsPage.widgets.find((w) => w.id === 'pu-eligible-bd')!
-    expect(w.title).toBe('Sign-in eligibility — earned / capped / unearned')
+    expect(w.title).toBe('Sign-in eligibility')
     expect(w.notes).toEqual(['signin-eligible-caveat'])
   })
 })
