@@ -6,6 +6,37 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-09-27
+
+### Added
+- **Metric cards are now editable.** "Add chart" offers a metric card alongside the usual chart
+  types, and editing an existing one — including "Today at a glance" and the campaign scorecard —
+  opens a builder instead of the chart fields: start from a preset or a blank card, pick each
+  row's label, its number, and how it displays, arrange sections, and see it update live before
+  saving. A save that would produce an invalid card (an impossible percentage, a broken pick) is
+  refused inline instead of being allowed onto the page.
+
+### Fixed
+- **The card builder opens at the top on a phone, not mid-scroll.** Its fields — title, then the
+  card itself, then the live preview — are reachable from the top of the sheet, the way they're
+  meant to be, instead of the sheet opening centered on whatever content happened to land in the
+  middle.
+- **A live 'bars' card's scale, and a section's show/hide, now follow an edit.** Editing a bars
+  card's rows, or adding/removing a section's rows, used to leave the bar widths reading an old
+  scale and could leave a section shown or hidden based on data from before the edit.
+- **The card builder no longer leaves a gap between the fields and the preview on a phone**, and
+  the "Start from" list shows each preset's plain name and a one-line description, never its raw
+  id.
+- **"Reset to preset" on a saved, customized card no longer risks swapping in the wrong preset.**
+  It now always names — and asks to confirm before replacing your edits with — the actual preset
+  the card was customized from, and the button no longer appears at all for a card where that
+  isn't known.
+- **The chart editor behaves like a proper dialog.** Opening it moves keyboard focus to the Title
+  field, Tab stays inside it instead of leaking onto the page behind it, Escape closes it, and
+  focus returns to whatever you clicked to open it. Saving a metric card is disabled, with a
+  reason shown, until its errors are fixed. Every field in a card's item list now shows plain
+  names — never a raw metric or ratio id.
+
 ## [0.10.0] — 2026-09-27
 
 ### Added
