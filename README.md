@@ -825,6 +825,22 @@ settings it answers 503, by design. Pick one of two setups in `.dev.vars` (see
   production client's secret locally. Plain-http loopback uses unprefixed,
   non-`Secure` cookie names; everything else behaves as in production.
 
+**Worktree agents and the Claude Desktop Browser pane.** `.claude/launch.json` intentionally
+defines **no** `preview_start` configuration. A Browser-pane preview command's working directory
+resolves against the project root that started the Claude Code *session*, not the cwd of a
+subagent running in its own `git worktree` — so a worktree agent's `preview_start` call (or any
+preview tool call with no explicit `tabId`) would silently run `wrangler pages dev` rooted at the
+**main checkout**, on its real `.dev.vars` (a real `CF_ANALYTICS_TOKEN`), on the same port `8788`
+every other worktree session shares. A worktree agent should instead:
+
+1. Create its own `.dev.vars` in its worktree (`Copy-Item .dev.vars.example .dev.vars`, or your
+   own test values — never the main checkout's).
+2. Run `npx wrangler pages dev --port <own port> --ip 127.0.0.1` from its own worktree directory,
+   picking a port other than `8788` (which the main checkout's own manual `npm run preview` may be
+   using).
+3. Pass that worktree's own explicit `url` and `tabId` to every `preview_*` tool call — never the
+   default/no-`tabId` tab, which may belong to another session.
+
 `npm run dev` (Vite only) serves no Functions, so it has no auth and no `/api/*`.
 
 **Tests.** `npm test` runs the vitest suite. For auth, `functions/_lib/auth.test.ts`
