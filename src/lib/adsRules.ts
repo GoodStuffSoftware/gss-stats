@@ -43,6 +43,7 @@ import {
   type FunnelStepKey,
   type ReturnBucket,
 } from './campaigns'
+import { etOffsetHours } from './etTime'
 
 // ── Accounts and campaigns ───────────────────────────────────────────────────────────────
 /** Google Ads REST API version the routine speaks. */
@@ -1104,13 +1105,15 @@ export function signUpsAtMostLabel(atMost: number, taggedAuthSuccess: number, wi
 }
 
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`
-function etMinuteLabel(ms: number): string {
-  const p = Object.fromEntries(
-    new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
-      .formatToParts(new Date(ms))
-      .map((x) => [x.type, x.value]),
-  )
-  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute} ET`
+/** "YYYY-MM-DD HH:MM ET". Plain ET arithmetic (lib/etTime.ts), not Intl: it runs at module
+ * load (SIGNUP_PROXY_NOTE), and this module is in the gss-stats-sync Worker's bundle, whose cold
+ * start must build no Intl formatter (docs/adr/0001-ads-read-store.md; workerNoIntlAtLoad.test.ts).
+ * Byte-identical to the former en-CA { year, month, day: '2-digit', hour, minute: '2-digit',
+ * hourCycle: 'h23' } parts (lazyFormatters.test.ts compares them). */
+export function etMinuteLabel(ms: number): string {
+  const et = new Date(ms + etOffsetHours(ms) * 3_600_000)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${et.getUTCFullYear()}-${pad(et.getUTCMonth() + 1)}-${pad(et.getUTCDate())} ${pad(et.getUTCHours())}:${pad(et.getUTCMinutes())} ET`
 }
 
 export interface SignUpCount {
