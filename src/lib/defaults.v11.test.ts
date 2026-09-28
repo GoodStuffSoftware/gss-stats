@@ -6,7 +6,7 @@
 // the owner deleted stays deleted. Run on the real default layout, on the sanitised production
 // layout (prodLayout.v8.json as KV stores it, and its v9 normalisation), and on variants.
 import { describe, expect, it } from 'vitest'
-import { CONFIG_VERSION, defaultConfig, flightDayWidget, hourOfDayWidget, migratePanelsV11, normalizeConfig, panelKey, swapPanelChart } from './defaults'
+import { CONFIG_VERSION, compactSmallSampleNoteV12, defaultConfig, flightDayWidget, hourOfDayWidget, migratePanelsV11, normalizeConfig, panelKey, swapPanelChart } from './defaults'
 import { presetById } from './metrics/presets'
 import type { DashboardConfig, Widget } from '../types'
 import PROD_V8 from './__fixtures__/prodLayout.v8.json'
@@ -31,6 +31,13 @@ const canon = (w: unknown) => sorted(stable({ pages: [{ filters: {}, widgets: [w
 const byKey = (cfg: DashboardConfig) => new Map<string, Widget>(cfg.pages.flatMap((p) => p.widgets.map((w) => [`${p.id}/${w.id}`, w] as const)))
 const page = (id: string, widgets: unknown[], name = id): any => ({ id, name, filters: {}, widgets })
 const panel = (id: string, dataset: string, view: string, extra: Partial<Widget> = {}): Partial<Widget> => ({ id, i: id, title: 'T', type: 'table', dataset: dataset as Widget['dataset'], view, dimension: '', metric: 'pageviews', limit: 1, x: 1, y: 2, w: 6, h: 7, ...extra })
+// The v12 small-sample note compaction (compactSmallSampleNoteV12) also runs on this fixture: it
+// shrinks bsk-overview's note to one row and moves the widgets below it up two rows. Applied to
+// the "before" side up front, so these checks still isolate exactly what the panel swaps change.
+const withV12 = (cfg: unknown): DashboardConfig => {
+  const c = clone(cfg) as DashboardConfig
+  return { ...c, pages: c.pages.map(compactSmallSampleNoteV12) }
+}
 const load = (pages: any[], version = 10) => normalizeConfig({ version, activePageId: pages[0].id, pages })
 
 /** Nothing bespoke is left: every overview/campaigns/popup panel renders as a card or a chart. */
@@ -41,8 +48,8 @@ function bespokeLeft(cfg: DashboardConfig): string[] {
 describe('v11: the real default layout', () => {
   it('ships every former panel as a card or a standard chart, and round-trips unchanged', () => {
     const d = defaultConfig()
-    expect(CONFIG_VERSION).toBe(11)
-    expect(d.version).toBe(11)
+    expect(CONFIG_VERSION).toBeGreaterThanOrEqual(11)
+    expect(d.version).toBe(CONFIG_VERSION)
     expect(bespokeLeft(d)).toEqual([])
     const w = byKey(d)
     expect(w.get('bsk-campaigns/cw-hour')).toMatchObject({ type: 'breakdownBar', dataset: 'geo', dimension: 'hourEt' })
@@ -74,7 +81,7 @@ describe('v11: the production layout (sanitised)', () => {
   }
 
   it('v9 → v11: exactly the eleven panels change (two v10 cards, seven v11 cards, two charts), nothing else', () => {
-    const before = byKey(PROD_V9 as unknown as DashboardConfig)
+    const before = byKey(withV12(PROD_V9))
     const after = byKey(fromV9)
     expect([...after.keys()]).toEqual([...before.keys()]) // none added, removed or reordered
     const changed = [...after].filter(([k, w]) => canon(w) !== canon(before.get(k))).map(([k]) => k)
@@ -83,7 +90,7 @@ describe('v11: the production layout (sanitised)', () => {
   })
 
   it('each v11 card keeps everything and only gains its card', () => {
-    const before = byKey(PROD_V9 as unknown as DashboardConfig)
+    const before = byKey(withV12(PROD_V9))
     const after = byKey(fromV9)
     for (const [k, preset] of Object.entries(V11_CARDS)) {
       const { card, ...rest } = after.get(k)!
@@ -93,7 +100,7 @@ describe('v11: the production layout (sanitised)', () => {
   })
 
   it('each chart keeps its id, title, place, size and captions; its data is the standard chart', () => {
-    const before = byKey(PROD_V9 as unknown as DashboardConfig)
+    const before = byKey(withV12(PROD_V9))
     const after = byKey(fromV9)
     for (const [k, make] of Object.entries(V11_CHARTS)) {
       const was = before.get(k)!
