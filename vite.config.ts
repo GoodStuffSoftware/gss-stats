@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
 
 // Build output goes to dist/ which Pages serves; functions/ is picked up by wrangler.
@@ -17,5 +17,11 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+  },
+  test: {
+    // Agent worktrees under .claude/worktrees/ are full checkouts with their own
+    // test files; without this, `npm test` from the main checkout collects every
+    // worktree's suite too, producing large numbers of spurious failing files.
+    exclude: [...configDefaults.exclude, '.claude/**'],
   },
 })
