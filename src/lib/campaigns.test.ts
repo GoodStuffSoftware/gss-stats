@@ -11,6 +11,7 @@ import {
   isDirectionalDay,
   applyExclusions,
   classifyFunnelPath,
+  isGameCompleteDeferredPath,
   computeFunnelCounts,
   funnelStepRates,
   FUNNEL_STEP_ORDER,
@@ -250,6 +251,16 @@ describe('classifyFunnelPath / computeFunnelCounts / funnelStepRates', () => {
     // FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED is still the pre-go-live/fallback default —
     // see gameCompleteNotInstrumented for the per-flight version that goes live at the instant.
     expect(FUNNEL_STEPS_GLOBALLY_NOT_INSTRUMENTED.has('completed')).toBe(true)
+  })
+  // best-sudoku card 125: /game/complete-deferred/... is a SIBLING of /game/complete/..., not a
+  // sub-path of it — GAME_COMPLETE_PREFIX's startsWith check anchors on the exact '/complete/'
+  // segment, so the hyphenated variant can never match and can never be counted as a live
+  // "completed" funnel step.
+  it('/game/complete-deferred/... is never classified as "completed" (or any other funnel step)', () => {
+    expect(classifyFunnelPath('/game/complete-deferred/normal/easy')).toBeNull()
+    expect(classifyFunnelPath('/game/complete-deferred/daily/unknown')).toBeNull()
+    expect(isGameCompleteDeferredPath('/game/complete-deferred/normal/easy')).toBe(true)
+    expect(isGameCompleteDeferredPath('/game/complete/normal/easy')).toBe(false)
   })
   it('gameCompleteNotInstrumented: true for a flight entirely before go-live, false once its window reaches it', () => {
     const base = campaignById('24215315197')! // real flight, closed 2026-09-09 — well before go-live
