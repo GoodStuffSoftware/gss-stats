@@ -1,0 +1,582 @@
+<title>BSK Retest Morning Read</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#F4F6F9; --surface:#FFFFFF; --ink:#18202E; --muted:#566174; --faint:#8C95A5;
+  --rule:#D9DEE6; --rule-soft:#E9ECF1;
+  --accent:#2D59CF; --accent-soft:#E5ECFB;
+  --good:#1C7A52; --good-soft:#E1F2E9;
+  --warn:#94600F; --warn-soft:#FBEFD9;
+  --crit:#B4372A; --crit-soft:#FBE5E1;
+  --neutral:#566174; --neutral-soft:#ECEFF3;
+  --font-display:"Bricolage Grotesque","IBM Plex Sans",system-ui,sans-serif;
+  --font-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,"Cascadia Mono",Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#0D1118; --surface:#151A23; --ink:#E3E7EE; --muted:#A1AABA; --faint:#6E7788;
+    --rule:#2A313D; --rule-soft:#1F2530;
+    --accent:#88A5F8; --accent-soft:#1C2744;
+    --good:#5DC896; --good-soft:#12291F;
+    --warn:#E2AB52; --warn-soft:#2E2210;
+    --crit:#F2897A; --crit-soft:#361B17;
+    --neutral:#A1AABA; --neutral-soft:#212733;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0D1118; --surface:#151A23; --ink:#E3E7EE; --muted:#A1AABA; --faint:#6E7788;
+  --rule:#2A313D; --rule-soft:#1F2530;
+  --accent:#88A5F8; --accent-soft:#1C2744;
+  --good:#5DC896; --good-soft:#12291F;
+  --warn:#E2AB52; --warn-soft:#2E2210;
+  --crit:#F2897A; --crit-soft:#361B17;
+  --neutral:#A1AABA; --neutral-soft:#212733;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:15px/1.55 var(--font-body);-webkit-font-smoothing:antialiased}
+.wrap{max-width:980px;margin:0 auto;padding-inline:20px;padding-block:32px 64px;display:flex;flex-direction:column;gap:36px}
+.mono{font-family:var(--font-mono);font-size:.92em}
+.num{font-variant-numeric:tabular-nums}
+
+/* masthead */
+.masthead{display:flex;flex-direction:column;gap:10px}
+.eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:500}
+.dayline{font-family:var(--font-mono);font-size:13px;color:var(--accent);font-weight:500}
+h1{font-family:var(--font-display);font-weight:700;font-size:clamp(26px,4.2vw,38px);line-height:1.12;letter-spacing:-.01em;margin:0;text-wrap:balance;max-width:24ch}
+.dateline{color:var(--muted);font-size:14px;margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+.chip{display:inline-flex;align-items:center;gap:7px;padding:4px 11px 4px 9px;border-radius:999px;font-size:12.5px;font-weight:500;line-height:1.3;max-width:100%}
+.chip::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
+.chip.good{background:var(--good-soft);color:var(--good)}
+.chip.warn{background:var(--warn-soft);color:var(--warn)}
+.chip.crit{background:var(--crit-soft);color:var(--crit)}
+.chip.accent{background:var(--accent-soft);color:var(--accent)}
+.chip.neutral{background:var(--neutral-soft);color:var(--neutral)}
+
+/* callouts */
+.callouts{display:flex;flex-direction:column;gap:10px}
+.callout{padding:12px 16px;border-radius:8px;font-size:14px}
+.callout.crit{background:var(--crit-soft);color:var(--ink);border:1px solid var(--crit)}
+.callout.warn{background:var(--warn-soft);color:var(--ink);border:1px solid var(--warn)}
+.callout strong{display:block;margin-bottom:2px}
+
+/* narrative */
+.narrative{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;border-top:1px solid var(--rule);border-bottom:1px solid var(--rule)}
+.nar{padding:18px 20px 20px;display:flex;flex-direction:column;gap:8px}
+.nar + .nar{border-left:1px solid var(--rule)}
+.nar h3{margin:0;font-size:12px;letter-spacing:.08em;text-transform:uppercase;font-weight:600;display:flex;align-items:center;gap:8px}
+.nar h3::before{content:"";width:8px;height:8px;border-radius:2px;background:currentColor}
+.nar.good h3{color:var(--good)} .nar.warn h3{color:var(--warn)} .nar.accent h3{color:var(--accent)}
+.nar ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:8px;font-size:14.5px}
+@media (max-width:760px){
+  .narrative{grid-template-columns:1fr}
+  .nar + .nar{border-left:0;border-top:1px solid var(--rule)}
+  .nar{padding-inline:4px}
+}
+
+/* stats */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.stat{background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:4px}
+.stat .k{font-size:12px;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;font-weight:500}
+.stat .v{font-family:var(--font-display);font-size:26px;font-weight:600;line-height:1.15;font-variant-numeric:tabular-nums}
+.stat .s{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+
+/* sections */
+section{display:flex;flex-direction:column;gap:14px}
+h2{font-family:var(--font-display);font-weight:600;font-size:21px;margin:0;letter-spacing:-.005em}
+.sub{margin:-8px 0 0;color:var(--muted);font-size:13.5px}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:28px}
+@media (max-width:760px){.grid2{grid-template-columns:1fr}}
+.panel{display:flex;flex-direction:column;gap:10px;min-width:0}
+h3.ph{margin:0;font-size:13px;font-weight:600;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
+
+/* charts */
+.chart{background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:12px 14px 6px}
+.chart svg{display:block;width:100%;height:auto}
+.track{fill:var(--rule-soft)} .fillbar{fill:var(--accent)}
+.tick-hit{stroke:var(--accent);stroke-width:1.5} .tick-off{stroke:var(--faint);stroke-width:1.5}
+.tlabel{fill:var(--muted);font:12px var(--font-mono)}
+.mlabel{fill:var(--ink);font:600 13px var(--font-mono)}
+.gridline{stroke:var(--rule-soft);stroke-width:1}
+.axis{stroke:var(--rule);stroke-width:1}
+.bar{fill:var(--accent)}
+.caption{font-size:13px;color:var(--muted);margin:0}
+
+/* tables */
+.table-wrap{overflow-x:auto;border:1px solid var(--rule);border-radius:8px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{padding:9px 12px;text-align:left;vertical-align:top;border-bottom:1px solid var(--rule-soft)}
+tr:last-child td{border-bottom:0}
+th{font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;background:var(--bg);white-space:nowrap}
+td.r,th.r{text-align:right}
+td{font-variant-numeric:tabular-nums}
+td .chip{font-size:12px}
+
+/* printed lines */
+.printed{margin:0;padding:12px 16px;list-style:none;background:var(--surface);border:1px solid var(--rule);border-radius:8px;display:flex;flex-direction:column;gap:6px;font-size:13.5px}
+.printed li{overflow-wrap:anywhere}
+.printed li.head{font-weight:600}
+.kv{display:flex;flex-wrap:wrap;gap:8px 18px;font-size:14px}
+.kv span b{font-weight:600}
+
+/* raw + notes */
+details{background:var(--surface);border:1px solid var(--rule);border-radius:8px}
+summary{cursor:pointer;padding:12px 16px;font-weight:600;font-size:14px;list-style-position:inside}
+summary:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+.dbody{padding:0 16px 16px;display:flex;flex-direction:column;gap:10px}
+.dbody p{margin:0;color:var(--muted);font-size:13.5px}
+pre.raw{margin:0;max-height:520px;overflow:auto;font:12.5px/1.5 var(--font-mono);background:var(--bg);border:1px solid var(--rule-soft);border-radius:6px;padding:12px 14px;white-space:pre;tab-size:2}
+.notes{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:13.5px;color:var(--muted)}
+button.copy{align-self:flex-start;font:500 13px var(--font-body);color:var(--accent);background:var(--accent-soft);border:1px solid transparent;border-radius:6px;padding:6px 12px;cursor:pointer}
+button.copy:hover{border-color:var(--accent)}
+
+footer{border-top:1px solid var(--rule);padding-top:16px;color:var(--muted);font-size:13px;display:flex;flex-direction:column;gap:4px}
+[hidden]{display:none!important}
+.nr{margin:0;padding:10px 14px;border:1px dashed var(--rule);border-radius:8px;color:var(--muted);font-size:13.5px;overflow-wrap:anywhere}
+ul .nr{border:0;padding:0}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <div class="eyebrow">Best Sudoku · US+CA web retest · Google Ads campaign <span class="mono">24279250691</span></div>
+    <div class="dayline" id="dayline"></div>
+    <h1 id="headline">Loading the morning read</h1>
+    <p class="dateline" id="dateline"></p>
+    <div class="chips" id="chips"></div>
+  </header>
+
+  <div class="callouts" id="callouts" hidden></div>
+
+  <div class="narrative" id="narrative" aria-label="Daily narrative"></div>
+
+  <div class="stats" id="stats"></div>
+
+  <section id="sec-threshold">
+    <h2>Spend against the thresholds</h2>
+    <p class="sub">Reads fire once each at $25, $50, $75 and $100. Kill rules only propose; Mike pauses the campaign himself.</p>
+    <div class="chart" id="ladder"></div>
+    <p class="caption" id="ladder-caption"></p>
+    <div class="table-wrap"><table id="kill"></table></div>
+  </section>
+
+  <section id="sec-health">
+    <h2>Release health</h2>
+    <p class="sub">A parent of at least 5, shown at least 24 hours ago, with a zero child is an alert. A smaller parent is a watch; a zero parent never alerts.</p>
+    <div class="table-wrap"><table id="health"></table></div>
+  </section>
+
+  <section id="sec-funnel">
+    <h2>Campaign funnel and returns</h2>
+    <p class="sub">Campaign tag only, exclusions applied. Rates are anecdotal at these counts; read the counts.</p>
+    <div class="grid2">
+      <div class="panel"><h3 class="ph">Tagged funnel</h3><div class="table-wrap"><table id="funnel"></table></div></div>
+      <div class="panel"><h3 class="ph">Returns by path</h3><div class="table-wrap"><table id="returns"></table></div><p class="caption" id="play-line"></p></div>
+    </div>
+    <div class="panel"><h3 class="ph">Accounts</h3><div class="kv" id="accounts"></div></div>
+    <div class="panel"><h3 class="ph">Site-wide, not campaign-attributed</h3><ul class="printed" id="sitewide"></ul></div>
+  </section>
+
+  <section id="sec-diag">
+    <h2 id="diag-title">Diagnostics</h2>
+    <p class="sub">Informational only; never a kill rule or an automatic action.</p>
+    <div class="chart" id="hourly"></div>
+    <p class="caption" id="hourly-caption"></p>
+    <div class="grid2">
+      <div class="panel"><h3 class="ph">Geo</h3><div class="table-wrap"><table id="geo"></table></div></div>
+      <div class="panel"><h3 class="ph">Device</h3><div class="table-wrap"><table id="device"></table></div></div>
+    </div>
+    <div class="grid2">
+      <div class="panel"><h3 class="ph">Targeting</h3><div class="table-wrap"><table id="targeting"></table></div></div>
+      <div class="panel"><h3 class="ph">Beacon countries and cross-check</h3><div class="kv" id="countries"></div><p class="caption" id="crosscheck"></p></div>
+    </div>
+    <div class="panel"><h3 class="ph">Recommendations</h3><ul class="printed" id="recs"></ul></div>
+  </section>
+
+  <section id="sec-play">
+    <h2>Play Console bulk reports</h2>
+    <p class="sub">Read-only. Bulk reports lag 3 to 7 days or more; Play counts include Mike's household devices and are not attributable to the campaign.</p>
+    <div class="chips" id="play-chips"></div>
+    <ul class="printed" id="play"></ul>
+  </section>
+
+  <section id="sec-raw">
+    <h2>Raw output</h2>
+    <details id="notes-d"><summary>Standing reading notes</summary><div class="dbody"><ul class="notes" id="notes"></ul></div></details>
+    <details><summary>Report as printed by the CLI</summary><div class="dbody"><p>Byte-for-byte text of the human report, for anything that needs it verbatim.</p><button class="copy" id="copy-human" data-label="Copy report text" type="button">Copy report text</button><pre class="raw" id="raw-human"></pre></div></details>
+    <details><summary>Raw JSON</summary><div class="dbody"><p>The run's full JSON block, identical to the committed audit-trail file.</p><button class="copy" id="copy-json" data-label="Copy JSON" type="button">Copy JSON</button><pre class="raw" id="raw-json"></pre></div></details>
+  </section>
+
+  <footer id="footer"></footer>
+</div>
+
+<script type="application/json" id="report-src">"@@SRC@@"</script>
+<script>
+// The build script (scripts/ads-reads/read-page.ts) injects one JSON payload above:
+//   { raw: <full CLI stdout>, narrative: { headline, working[], notWorking[], soWhat[] },
+//     audit: { commit, branch, file } | null }
+// Every section renders on its own: a missing or failed sub-read shows a short
+// "not read on this run" line instead of breaking the page, and a section that throws while
+// rendering is contained to that section. The outer try/catch is the last resort.
+const $ = (id) => document.getElementById(id);
+function el(tag, attrs, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") n.className = v; else if (k === "text") n.textContent = v; else n.setAttribute(k, v);
+  }
+  for (const k of kids.flat()) { if (k == null) continue; n.append(k.nodeType ? k : document.createTextNode(String(k))); }
+  return n;
+}
+const money = (v) => v == null || !isFinite(v) ? "n/a" : "$" + Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const int = (v) => v == null || !isFinite(v) ? "n/a" : Number(v).toLocaleString("en-US");
+const pct = (n, d, dp = 2) => d ? (n / d * 100).toFixed(dp) + "%" : "n/a";
+const chip = (text, tone) => el("span", { class: "chip " + (tone || "neutral") }, text);
+const toneFor = (status) => {
+  const s = String(status || "").toLowerCase();
+  if (/alert|trip|fail|mismatch/.test(s)) return "crit";
+  if (/watch|border/.test(s)) return "warn";
+  if (/^ok$|pass|clear|match/.test(s)) return "good";
+  return "neutral";
+};
+function table(id, head, rows, rightCols) {
+  const t = $(id); const rc = new Set(rightCols || []);
+  t.append(el("thead", {}, el("tr", {}, head.map((h, i) => el("th", { class: rc.has(i) ? "r" : "" }, h)))));
+  t.append(el("tbody", {}, rows.map(r => el("tr", {}, r.map((c, i) => el("td", { class: rc.has(i) ? "r" : "" }, c))))));
+}
+// Replace a table, chart, list or key-value block with one short line. A list keeps its box
+// and gains the line as an item; anything else is hidden and the line goes right after it.
+function notRead(id, why, lead) {
+  const n = $(id); if (!n) return;
+  const msg = (lead || "Not read on this run") + (why ? ": " + why : ".");
+  if (n.tagName === "UL") { n.append(el("li", { class: "nr", text: msg })); return; }
+  const host = n.closest(".table-wrap, .chart") || n;
+  host.hidden = true;
+  host.after(el("p", { class: "nr", text: msg }));
+}
+// Run one section; if it throws, say so in that section and carry on with the rest.
+function guard(fallbackId, fn) {
+  try { fn(); }
+  catch (err) { notRead(fallbackId, String(err && err.message || err) + ". The verbatim report under Raw output has this section", "Could not be shown"); }
+}
+const dayNum = (start, d) => Math.round((Date.parse(d + "T00:00:00Z") - Date.parse(start + "T00:00:00Z")) / 86400000) + 1;
+const wireCopy = (btnId, preId) => {
+  const b = $(btnId), p = $(preId);
+  b.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(p.textContent); b.textContent = "Copied"; }
+    catch (e) {
+      const r = document.createRange(); r.selectNodeContents(p);
+      const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+      b.textContent = "Selected; press Ctrl+C";
+    }
+    setTimeout(() => { b.textContent = b.dataset.label; }, 2500);
+  });
+};
+
+try {
+  const SRC = JSON.parse($("report-src").textContent);
+  const RAW = String(SRC.raw || "");
+  const NARRATIVE = SRC.narrative || null;
+  const AUDIT = SRC.audit || null;
+  const SPLIT = "----- JSON -----";
+  const at = RAW.indexOf(SPLIT);
+  const HUMAN = (at >= 0 ? RAW.slice(0, at) : RAW).replace(/\s+$/, "");
+  const JSON_TEXT = at >= 0 ? RAW.slice(at + SPLIT.length).replace(/^\s*\n/, "").replace(/\s+$/, "") : "";
+
+  // raw output first, so the verbatim text is on the page whatever happens below
+  $("raw-human").textContent = HUMAN;
+  $("raw-json").textContent = JSON_TEXT || "No JSON block in this run's output.";
+  wireCopy("copy-human", "raw-human");
+  wireCopy("copy-json", "raw-json");
+
+  const D = JSON.parse(JSON_TEXT);
+  const LINES = HUMAN.split("\n");
+  const blockAfter = (prefix) => {
+    const i = LINES.findIndex(l => l.startsWith(prefix));
+    if (i < 0) return null;
+    const out = [LINES[i]];
+    for (let j = i + 1; j < LINES.length && /^\s{2}/.test(LINES[j]); j++) out.push(LINES[j].trim());
+    return out;
+  };
+
+  const s = D.spend || {}, tr = D.thresholdRead || null, fb = (tr && tr.firebase) || null;
+  const th = D.thresholds || {};
+  const crossed = th.crossedNow || [];
+  const camp = D.campaign || {};
+  const closed = s.throughEt || null;
+  const readLine = (LINES[0].match(/morning read, (.+ ET)/) || [])[1] || D.etDate || "time unknown";
+  const rh = D.releaseHealth || null;
+  const errCount = (D.errors || []).length + (D.failures || []).length;
+
+  // masthead
+  guard("dateline", () => {
+    const flightDays = camp.flightStart && camp.flightEnd ? dayNum(camp.flightStart, camp.flightEnd) : null;
+    $("dayline").textContent = closed && camp.flightStart
+      ? `Day ${dayNum(camp.flightStart, closed)} of ${flightDays} · closed ET day ${closed}`
+      : "No closed ET day read on this run";
+    $("headline").textContent = NARRATIVE && NARRATIVE.headline ? NARRATIVE.headline : "Morning read (no narrative supplied)";
+    const st = D.status;
+    const statusText = st
+      ? `Campaign ${st.status}/${st.servingStatus}${st.dailyBudget != null ? `, budget ${money(st.dailyBudget)}/day` : ""}.`
+      : `Campaign status not read on this run${D.statusError ? ` (${D.statusError})` : ""}.`;
+    $("dateline").textContent = `Read ${readLine}. ${statusText} Flight ${camp.flightStart || "?"} to ${camp.flightEnd || "?"}.`;
+    const chips = $("chips");
+    if (tr) chips.append(chip("Proposal: " + tr.kill.proposal, tr.kill.proposal === "CONTINUE" ? "good" : "crit"));
+    chips.append(chip(crossed.length ? "Threshold read: " + crossed.map(t => "$" + t).join(", ") : "No new threshold", crossed.length ? "accent" : "neutral"));
+    if (!rh) chips.append(chip("Release health: not read", "warn"));
+    else if (rh.readError) chips.append(chip("Release health: read error", "crit"));
+    else if (!rh.evaluated) chips.append(chip("Release health: not evaluated", "neutral"));
+    else chips.append(chip(rh.alerts ? `Release health: ${rh.alerts} alert(s)` : "Release health: no alerts", rh.alerts ? "crit" : "good"));
+    chips.append(chip(errCount ? `${errCount} read error(s)` : "No read errors", errCount ? "crit" : "good"));
+    if (D.notify) chips.append(chip(D.notify.push ? "Push: yes" : "Push: no", "neutral"));
+  });
+
+  // callouts: read failures, sync and release-health alerts, anomalies, missed reads
+  guard("callouts", () => {
+    const callouts = [];
+    LINES.filter(l => l.startsWith("READ FAILED")).forEach(l => callouts.push(["crit", "Read failed", l.trim()]));
+    LINES.filter(l => /\bALERT\b/.test(l) && !/no alerts/.test(l)).forEach(l => callouts.push(["crit", /SYNC ALERT/.test(l) ? "Sync alert" : "Release-health alert", l.trim()]));
+    LINES.filter(l => /ANOMALY/.test(l)).forEach(l => callouts.push(["warn", "Diagnostics anomaly (propose to Mike)", l.trim()]));
+    if ((D.missedReads || []).length) callouts.push(["warn", "Previous scheduled read missing", D.missedReads.join(", ")]);
+    if (callouts.length) {
+      const c = $("callouts"); c.hidden = false;
+      callouts.forEach(([tone, title, text]) => c.append(el("div", { class: "callout " + tone }, el("strong", { text: title }), text)));
+    }
+  });
+
+  // narrative
+  guard("narrative", () => {
+    if (!NARRATIVE) { notRead("narrative", "no narrative was supplied"); return; }
+    [["Working", "good", NARRATIVE.working], ["Not working", "warn", NARRATIVE.notWorking], ["So what", "accent", NARRATIVE.soWhat]]
+      .forEach(([label, tone, items]) => $("narrative").append(el("div", { class: "nar " + tone }, el("h3", { text: label }), el("ul", {}, (items || []).map(t => el("li", { text: t }))))));
+  });
+
+  // stats
+  guard("stats", () => {
+    const tg = D.tagged && D.tagged.ok ? D.tagged.cumulative : null;
+    const ty = D.tagged && D.tagged.ok ? D.tagged.yesterday : null;
+    const spendOk = s.ok !== false && s.cumulative;
+    const y = spendOk ? s.yesterday : null;
+    const nr = "not read on this run";
+    [
+      ["Spend yesterday", y ? money(y.cost) : "n/a", y ? `budget ${money(s.dailyBudget)} · ${int(y.impressions)} impr · ${int(y.clicks)} clicks` : spendOk ? "no closed day yet" : nr],
+      ["Spend to date", spendOk ? money(s.cumulative.cost) : "n/a", spendOk ? `of ${money(s.hardCap)} cap · ${s.cumulative.days} day(s)` : nr],
+      ["CTR to date", spendOk ? pct(s.cumulative.clicks, s.cumulative.impressions) : "n/a", spendOk ? `${int(s.cumulative.clicks)} / ${int(s.cumulative.impressions)}` : nr],
+      ["Tagged arrivals", tg ? int(tg.taggedArrivals) : "n/a", tg ? `floor · ${int(tg.taggedHits)} hits · ${ty ? int(ty.taggedArrivals) : "n/a"} yesterday` : nr],
+      ["Sign-in asks", tg ? int(tg.asks) : "n/a", tg ? `${int(tg.accepts)} accepts` : nr],
+      ["Auth successes", tg ? int(tg.authSuccess) : "n/a", tg ? (fb ? `${int(fb.newAccountsInWindow)} new accounts (of ${int(fb.accountsWithCreatedAt)})` : "") : nr]
+    ].forEach(([k, v, sub]) => $("stats").append(el("div", { class: "stat" }, el("span", { class: "k", text: k }), el("span", { class: "v", text: v }), el("span", { class: "s", text: sub }))));
+  });
+
+  // threshold ladder
+  guard("ladder", () => {
+    if (s.ok === false || !s.cumulative) { notRead("ladder", "spend" + (s.error ? ` (${s.error})` : "")); return; }
+    const cap = s.hardCap, cum = s.cumulative.cost;
+    const fired = new Set([...(th.consumedBefore || []), ...crossed]);
+    const W = 640, L = 22, R = 22, top = 36, bh = 14, H = 88;
+    const x = v => L + (Math.min(v, cap) / cap) * (W - L - R);
+    let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Cumulative spend ${money(cum)} of the ${money(cap)} cap">`;
+    svg += `<rect class="track" x="${L}" y="${top}" width="${W - L - R}" height="${bh}" rx="3"/>`;
+    svg += `<rect class="fillbar" x="${L}" y="${top}" width="${Math.max(0, x(cum) - L)}" height="${bh}" rx="3"/>`;
+    svg += `<text class="tlabel" x="${L}" y="${top + bh + 22}">$0</text>`;
+    [25, 50, 75, 100].forEach(t => {
+      const xx = x(t), hit = fired.has(t) || cum >= t;
+      svg += `<line class="${hit ? "tick-hit" : "tick-off"}" x1="${xx}" x2="${xx}" y1="${top - 6}" y2="${top + bh + 6}"/>`;
+      svg += `<text class="tlabel" x="${xx}" y="${top + bh + 22}" text-anchor="${t === 100 ? "end" : "middle"}">$${t}</text>`;
+    });
+    svg += `<text class="mlabel" x="${Math.min(x(cum), W - R - 30)}" y="${top - 12}" text-anchor="middle">${money(cum)}</text>`;
+    $("ladder").innerHTML = svg + "</svg>";
+    const before = th.consumedBefore || [];
+    const stateNote = th.stateError ? ` Threshold state not read (${th.stateError}).` : "";
+    $("ladder-caption").textContent = `${money(cum)} spent through ${closed || "no closed day"}. Fired today: ${crossed.length ? crossed.map(t => "$" + t).join(", ") : "none"}; fired earlier: ${before.length ? before.map(t => "$" + t).join(", ") : "none"}; ${th.next != null ? `next read at $${th.next}` : "no further threshold"}.${stateNote}`;
+  });
+  guard("kill", () => {
+    const rules = tr ? (tr.kill && tr.kill.rules) : (D.hardCapDaily ? [D.hardCapDaily] : null);
+    if (!rules || !rules.length) { notRead("kill", "no threshold read and no cap check on this run"); return; }
+    table("kill", ["Kill rule", "Status", "Detail"], rules.map(r => [r.label, chip(r.status, toneFor(r.status)), r.detail || ""]));
+  });
+
+  // release health
+  guard("health", () => {
+    if (!rh) { notRead("health", "release health is missing from this run's JSON"); return; }
+    if (!rh.results || !rh.results.length) { notRead("health", rh.reason || (rh.evaluated ? "no pairs evaluated" : "not evaluated")); return; }
+    table("health", ["Parent", "Count", "Child", "Count", "Status"],
+      rh.results.map(r => [r.parentLabel, int(r.parent), el("span", { class: "mono" }, r.childLabel), int(r.children), chip(r.status, toneFor(r.status))]), [1, 3]);
+  });
+
+  // funnel
+  guard("funnel", () => {
+    const tg = D.tagged && D.tagged.ok ? D.tagged.cumulative : null;
+    if (tr && tr.tagged) {
+      const sm = tr.tagged.summary, f = sm.funnel, ab = sm.asks.byPath, sp = sm.authSuccessSplit, ins = sm.install;
+      table("funnel", ["Step", "Count"], [
+        ["Tagged arrivals (floor)", int(f.arrivals)],
+        ["Tagged hits", int(sm.taggedHits)],
+        ["Game-screen views", int(f.played)],
+        ["Sign-in asks", `${int(sm.asks.total)} (placement ${ab["/signin-prompt/placement"]}, streak ${ab["/signin-prompt/streak"]}, promo ${ab["/promo-first50/shown"]})`],
+        ["Accepts", int(sm.accepts.total)],
+        ["Dismisses", `sign-in ${sm.dismisses.signinPrompt}, promo ${sm.dismisses.promoFirst50}`],
+        ["Auth redirects", int(sm.authRedirect)],
+        ["Auth successes", `${int(sm.authSuccess)} (new ${sp.new}, existing ${sp.existing})`],
+        ["Install prompt: shown / taps / installed", `${ins.promptShown} / ${ins.taps} / ${ins.installed}`],
+        ["Cost per tagged arrival", money(tr.tagged.costPerArrival)]
+      ], [1]);
+    } else if (tg) {
+      table("funnel", ["Step", "Count"], [["Tagged arrivals (floor)", int(tg.taggedArrivals)], ["Tagged hits", int(tg.taggedHits)], ["Sign-in asks", int(tg.asks)], ["Accepts", int(tg.accepts)], ["Auth successes", int(tg.authSuccess)]], [1]);
+    } else {
+      notRead("funnel", "tagged beacon counts" + (D.tagged && D.tagged.error ? ` (${D.tagged.error})` : ""));
+    }
+  });
+  guard("returns", () => {
+    if (!tr) { notRead("returns", "returns are read on threshold reads only"); return; }
+    if (!tr.returns) { notRead("returns", "the returns read failed"); return; }
+    const rt = tr.returns, buckets = ["d0", "d1", "d2-7", "d8-14", "d15-30", "d31-60"];
+    const cell = (kind, b) => {
+      const n = rt[kind][b], d0 = rt[kind].d0, rate = rt[kind + "Rates"][b];
+      if (b === "d0") return int(n);
+      return rate == null ? `n/a (${n}/${d0})` : `${(rate * 100).toFixed(1)}% (${n}/${d0})`;
+    };
+    table("returns", ["Bucket", "Web", "App"], buckets.map(b => [b, cell("web", b), cell("app", b)]), [1, 2]);
+  });
+  guard("play-line", () => {
+    $("play-line").textContent = D.play && D.play.line ? D.play.line : "Play return status: not read on this run.";
+  });
+  guard("accounts", () => {
+    if (fb) {
+      const f50 = fb.first50;
+      [["New accounts in window", `${int(fb.newAccountsInWindow)} of ${int(fb.accountsWithCreatedAt)} with createdAt`],
+       ["Promo claims in window", `${int(fb.promoClaimsInWindow)} of ${int(fb.promoClaimsTotal)}`],
+       ["First-50 promo", f50 ? `${int(f50.claimed)}/${int(f50.cap)} claimed, ${f50.closed == null ? "state unknown" : f50.closed ? "closed" : "open"}` : "not read"]]
+        .forEach(([k, v]) => $("accounts").append(el("span", {}, el("b", { text: k + ": " }), v)));
+      if ((fb.errors || []).length) $("accounts").append(el("span", { class: "nr", text: "Firestore errors: " + fb.errors.join("; ") }));
+    } else if (tr) {
+      notRead("accounts", "Firestore account counts");
+    } else {
+      $("accounts").append(el("span", { text: "Accounts are read on threshold reads only." }));
+    }
+  });
+  guard("sitewide", () => {
+    const site = blockAfter("Site-wide on");
+    if (site) site.forEach((l, i) => $("sitewide").append(el("li", { class: i === 0 ? "head" : "", text: l })));
+    else $("sitewide").append(el("li", { text: "Not printed on this run." }));
+  });
+
+  // diagnostics
+  const dg = D.diagnostics || null;
+  const DIAG_IDS = ["hourly", "geo", "device", "targeting", "countries", "recs"];
+  if (!dg) {
+    DIAG_IDS.forEach(id => guard(id, () => notRead(id, "diagnostics missing from this run's JSON")));
+  } else {
+    guard("hourly", () => {
+      if (dg.spendThroughEt) $("diag-title").textContent = `Diagnostics for ${dg.spendThroughEt}`;
+      if ((dg.errors || []).length) {
+        const box = el("div", { class: "callout warn" }, el("strong", { text: "Diagnostic read errors" }), el("ul", { class: "notes" }, dg.errors.map(e => el("li", { text: e }))));
+        $("hourly").before(box);
+      }
+      if (!dg.hourly) { notRead("hourly", "hourly spend"); return; }
+      const hrs = dg.hourly;
+      if (!hrs.length) { $("hourly").hidden = true; $("hourly-caption").textContent = "No hourly delivery read on this run."; return; }
+      const byHour = new Map(hrs.map(h => [h.hour, h]));
+      const h0 = Math.min(...hrs.map(h => h.hour)), h1 = Math.max(...hrs.map(h => h.hour));
+      const hours = []; for (let h = h0; h <= h1; h++) hours.push(byHour.get(h) || { hour: h, cost: 0, impressions: 0, clicks: 0 });
+      const maxC = Math.max(...hours.map(h => h.cost));
+      const step = maxC <= 5 ? 1 : maxC <= 10 ? 2 : 5;
+      const yMax = Math.max(step, Math.ceil(maxC / step) * step);
+      const CW = 640, CH = 230, cl = 46, cr = 12, ct = 26, cb = 34;
+      const pw = CW - cl - cr, ph = CH - ct - cb;
+      const y = v => ct + ph - (v / yMax) * ph;
+      const band = pw / hours.length, bw = Math.min(56, band * 0.58);
+      let g = `<svg viewBox="0 0 ${CW} ${CH}" role="img" aria-label="Spend by hour on ${dg.spendThroughEt}">`;
+      for (let v = 0; v <= yMax; v += step) {
+        g += `<line class="${v === 0 ? "axis" : "gridline"}" x1="${cl}" x2="${CW - cr}" y1="${y(v)}" y2="${y(v)}"/>`;
+        g += `<text class="tlabel" x="${cl - 8}" y="${y(v) + 4}" text-anchor="end">$${v}</text>`;
+      }
+      hours.forEach((h, i) => {
+        const cx = cl + band * i + band / 2;
+        if (h.cost > 0) {
+          g += `<rect class="bar" x="${cx - bw / 2}" y="${y(h.cost)}" width="${bw}" height="${y(0) - y(h.cost)}" rx="2"><title>${String(h.hour).padStart(2, "0")}:00 ${money(h.cost)}, ${int(h.impressions)} impr, ${h.clicks} clicks</title></rect>`;
+          g += `<text class="mlabel" x="${cx}" y="${y(h.cost) - 7}" text-anchor="middle">${money(h.cost)}</text>`;
+        }
+        g += `<text class="tlabel" x="${cx}" y="${CH - cb + 20}" text-anchor="middle">${String(h.hour).padStart(2, "0")}:00</text>`;
+      });
+      $("hourly").innerHTML = g + "</svg>";
+      const clicks = hrs.reduce((a, h) => a + h.clicks, 0);
+      $("hourly-caption").textContent = `Spend by hour, account time zone. ${hrs.length} hour(s) with delivery, ${int(clicks)} clicks. Hover a bar for impressions and clicks.`;
+    });
+    guard("geo", () => {
+      if (!dg.geo) { notRead("geo", "geo breakdown"); return; }
+      table("geo", ["Country", "Spend", "Impr", "Clicks", "CTR", "Bid mod."],
+        dg.geo.map(r => [`${r.country} (${r.countryCode})`, money(r.cost), int(r.impressions), int(r.clicks), pct(r.clicks, r.impressions), r.bidModifier == null ? "none" : String(r.bidModifier)]), [1, 2, 3, 4]);
+    });
+    guard("device", () => {
+      if (!dg.devices) { notRead("device", "device breakdown"); return; }
+      table("device", ["Device", "Spend", "Impr", "Clicks", "CTR"],
+        dg.devices.map(r => [r.device, money(r.cost), int(r.impressions), int(r.clicks), pct(r.clicks, r.impressions)]), [1, 2, 3, 4]);
+    });
+    guard("targeting", () => {
+      if (!dg.targeting) { notRead("targeting", "targeting"); return; }
+      table("targeting", ["Ad group", "Status", "Placements", "Spec"],
+        dg.targeting.map(r => [r.adGroup, r.status, int(r.placements),
+          r.expectedPlacements == null ? chip("no spec", "neutral")
+            : chip(r.placements === r.expectedPlacements ? `match (${r.expectedPlacements})` : `mismatch (spec ${r.expectedPlacements})`, r.placements === r.expectedPlacements ? "good" : "crit")]), [2]);
+    });
+    guard("countries", () => {
+      if (!dg.countryCounts) notRead("countries", "beacon country breakdown");
+      else if (!dg.countryCounts.length) $("countries").append(el("span", { text: "No tagged arrivals by country yet." }));
+      else dg.countryCounts.forEach(c => $("countries").append(el("span", {}, el("b", { text: c.country + " " }), int(c.count))));
+      const cc = dg.accountCrossCheck;
+      $("crosscheck").textContent = cc
+        ? `Account cross-check (${cc.etDate}): Firestore new accounts ${int(cc.firestoreNewAccounts)} vs beacon /auth/success new ${int(cc.beaconAuthSuccessNew)}. Beacon countries are aggregate counts from the report.`
+        : "Account cross-check: not read on this run.";
+    });
+    guard("recs", () => {
+      const recs = dg.recommendations;
+      if (!recs) notRead("recs", "recommendations");
+      else $("recs").append(el("li", { text: recs.length ? `${recs.length} recommendation(s) queued (see raw report)` : "None queued." }));
+      const sv = LINES.find(l => l.includes("standing verdicts"));
+      if (sv) $("recs").append(el("li", { text: sv.trim().replace(/^standing verdicts/, "Standing verdicts") }));
+    });
+  }
+
+  // play bulk reports
+  guard("play", () => {
+    const pr = D.playReports || null;
+    if (!pr) {
+      notRead("play", "Play bulk reports are not read in this mode");
+    } else if (!pr.ok) {
+      notRead("play", pr.error || "Play bulk reports read failed");
+    } else {
+      $("play-chips").append(chip(`Installs through ${pr.installsThrough || "n/a"} (${pr.installsLagDays == null ? "n/a" : pr.installsLagDays}-day lag)`, "neutral"));
+      $("play-chips").append(chip(`Store performance through ${pr.storePerformanceThrough || "n/a"} (${pr.storePerformanceLagDays == null ? "n/a" : pr.storePerformanceLagDays}-day lag)`, "neutral"));
+      (pr.checkpoints || []).forEach(c => $("play-chips").append(chip(`$${c.threshold} checkpoint: ${c.status}`, c.status === "not yet crossed" ? "neutral" : "accent")));
+    }
+    if (pr && (pr.errors || []).length) pr.errors.forEach(e => $("play").append(el("li", { class: "nr", text: "Play read error: " + e })));
+    const pb = blockAfter("Play Console bulk reports");
+    if (pb) pb.slice(1).forEach(l => $("play").append(el("li", { text: l })));
+    else if (pr && pr.ok) $("play").append(el("li", { text: "Not printed on this run." }));
+  });
+
+  // notes
+  guard("notes", () => {
+    const notes = D.notes || [];
+    if (notes.length) notes.forEach(n => $("notes").append(el("li", { text: n })));
+    else $("notes").append(el("li", { text: "No standing notes on this run." }));
+  });
+
+  // footer
+  guard("footer", () => {
+    const f = $("footer");
+    f.append(el("span", { text: `Source: npm run ads:morning-read in gss-stats, read ${readLine}. Errors: ${errCount ? errCount : "none"}.` }));
+    if (AUDIT) f.append(el("span", {}, "Audit trail: commit ", el("span", { class: "mono", text: AUDIT.commit }), " on ", el("span", { class: "mono", text: AUDIT.branch }), ", raw JSON at ", el("span", { class: "mono", text: AUDIT.file }), "."));
+    else f.append(el("span", { text: "Audit trail: not written on this run (no audit-trail commit was made)." }));
+    f.append(el("span", { text: "This page only reports. Nothing here changes the campaign; every kill rule is a proposal for Mike." }));
+  });
+} catch (err) {
+  $("headline").textContent = "The report data on this page could not be read";
+  $("dateline").textContent = String(err && err.message || err);
+}
+</script>

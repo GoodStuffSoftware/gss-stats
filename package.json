@@ -14,6 +14,7 @@
     "typecheck:scripts": "tsc -p scripts/ads-reads/tsconfig.json --noEmit && tsc -p scripts/metrics/tsconfig.json --noEmit",
     "ads:morning-read": "tsx scripts/ads-reads/morning-read.ts",
     "ads:postflight-read": "tsx scripts/ads-reads/postflight-read.ts",
+    "ads:read-page": "tsx scripts/ads-reads/read-page.ts",
     "ads:backfill": "tsx scripts/ads-reads/backfill.ts",
     "ads:sync": "tsx scripts/ads-reads/sync.ts",
     "ads:worker-secrets": "tsx scripts/ads-reads/worker-secrets.ts",

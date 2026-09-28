@@ -17,6 +17,12 @@ All notable changes to **gss-stats** are documented here. The format follows
   of collapsing a mixed window to one bound.
 
 ### Added
+- **The retest morning read now publishes a rendered report page every run.** A build step turns
+  the read's saved output and the daily narrative into one self-contained page (narrative, spend
+  against the thresholds, release health, funnel, diagnostics, Play bulk reports, and the
+  verbatim report and JSON), published to one fixed link; any sub-read that is missing or failed
+  shows as a short "not read on this run" line instead of breaking the page. The routine's chat
+  output shrinks to the narrative, the page link and a few status lines.
 - **The retest ads routine's morning read now includes Play Console bulk reports (R4), read-only
   and informational only.** Installs by day, acquisition by source, and store listing
   visitors/acquisitions by country (all covering the campaign's own flight window), plus the

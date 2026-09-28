@@ -395,9 +395,16 @@ npm run ads:morning-read -- --dry-run --cf-token-file <path>               # dai
 npm run ads:postflight-read -- --stage wrapup --dry-run --cf-token-file <path>
 npm run ads:backfill -- --dry-run --cf-token-file <path>                   # full re-pull + config check
 npm run ads:morning-read -- --fixture <file.json> --now <iso>              # offline, recorded data
+npm run -s ads:read-page -- --input <read.out> --narrative <n.json> --out <page.html> [--audit-commit <sha>]
 npm run typecheck:scripts
 ```
 
+- **Report page:** `ads:read-page` turns a saved morning-read stdout (report, `----- JSON -----`,
+  JSON) plus the routine's narrative JSON (`headline`, `working[]`, `notWorking[]`, `soWhat[]`)
+  into the self-contained HTML page the routine publishes (template:
+  [`scripts/ads-reads/read-page.template.html`](scripts/ads-reads/read-page.template.html)).
+  Any missing or failed sub-read shows as a "not read on this run" line; a missing JSON block
+  or an incomplete narrative fails the build and writes nothing.
 - **Spend** comes from the Google Ads REST API only (customer 8726535246, no manager
   header), and only through the shared sync (see [Ads data freshness](#ads-data-freshness)).
   Credentials are read from Bitwarden Secrets Manager with `bws` (needs `BWS_ACCESS_TOKEN`)
