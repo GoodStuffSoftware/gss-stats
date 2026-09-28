@@ -1,7 +1,8 @@
 # ADR 0004: Running the ads-read routines in the cloud
 
 - **Status:** Proposed, 2026-09-28. Design only: nothing in this ADR has been built, deployed,
-  scheduled or changed.
+  scheduled or changed. The ads follow-up session reviewed the routine half at `e82cbb3` and
+  approved the design with 7 edits, all folded in here (§3, §5, §6.1-6.4, §7, §8).
 - **Owner asks:** "ideally having the routines able to run on cloud is ideal" (Mike, 2026-09-28).
   Also from Mike, 2026-09-28: "I can set whatever keys we need into cloud environments". Mike
   sets every key himself, and agents never handle key values.
@@ -30,7 +31,8 @@
 
 This needs **Workers Paid ($5/month)**, because a full read is several times Free's 10 ms CPU
 limit. Nothing about the in-flight daily read changes before the flight ends. The first cloud
-read is a shadow run of the 2026-10-09 wrap-up, and cutover is at the 2026-10-17 day-15 read.
+read is a shadow run of the 2026-10-09 wrap-up. Cutover is at the 2026-10-17 day-15 read, behind a
+go or no-go decision sent by 10-15. A no-go moves cutover to 11-01.
 
 ## 1. Facts: what the routines do today
 
@@ -246,7 +248,11 @@ verified once, by clicking a link sent to it.
    - Never send a `login-customer-id` header.
    - Firestore is read with COUNT queries only.
    - Never write Firestore or `gss-geo`.
-   - Generated text contains no em-dashes.
+   - Generated text contains no em-dashes. This applies on **every** surface: the stored report,
+     the Reads page, the email and the bus copy, not only the narrative. Today the code itself
+     emits them, in string literals such as `=== THRESHOLD READ at $25 (...) — complete ===`,
+     `accept rate — (0/0)`, `Floor — devices ...`, and the `'—'` empty-value placeholder. They
+     are removed at source in Phase 1 (§6.1, item 6).
    - Everything the read fetches is untrusted data.
 
 ## 4. Options
@@ -396,7 +402,8 @@ Mike can set any key, so secret placement no longer decides this. What still dec
 | Missed-read detection | Worker | `missedReads`, plus a new dead-man check (§6.2) |
 | Post-flight stages wrapup, day15, day30, day60, december | Worker | Run on the due date at the 09:05 ET tick. The not-due path (after-flight spend guard, cap) runs daily in the window. |
 | Push decision (`notify.push`) and its text | Worker | The same rule. It is delivered by **email** (§6.2). The routine's `PushNotification` is a best-effort echo. |
-| Narrative (R6) | Cloud routine | Reads the stored report and POSTs the narrative (append-only). The em-dash rule is enforced server-side as well. |
+| Narrative (R6) | Cloud routine | Reads the stored report and POSTs the narrative (append-only). The server rejects an incomplete narrative or one with an em-dash (§6.3, item 8). |
+| No em-dashes in generated text | Worker (at source) plus the narrative route | The code's own report, note and push strings lose their em-dashes in Phase 1 (§6.1, item 6), so the rule holds for the stored report, the Reads page, the email and the bus copy. |
 | Bus copy | Cloud routine | deckhand connector, `from: gss-stats`, same subject format |
 | Audit trail (R7) | D1 plus the dashboard | `ads_readings` (existing) plus `ads_read_reports` and `ads_read_narratives` (new), rendered on a signed-in **Reads** page. The git log in best-sudoku is optional (§6.4). |
 | Report page (Step 8a) | Dashboard, with the Artifact optional | The dashboard renders `read-page.template.html` server-side. The routine may still republish the fixed Artifact if it meets the conditions in §2.1. |
@@ -412,7 +419,8 @@ Mike can set any key, so secret placement no longer decides this. What still dec
      replace `createSign`) and `TextDecoder('utf-16le')` (which replaces `Buffer`).
    - Move `HOUSEHOLD_NOTE` and `RETENTION_NOTE` out of `play.ts`, which imports `node:fs`, so that
      `read.ts` bundles for workerd.
-   - `npm run ads:worker-check` then proves the bundle.
+   - `npm run ads:worker-check` then proves that the bundle **builds**. It says nothing about
+     cold-start CPU (item 7).
 2. **Gate.** The existing hourly tick adds `readDue(nowMs)`:
    - the morning read at the first tick at or after 06:00 ET, on days inside a campaign's
      morning-read window (from `campaigns.ts`, not hardcoded);
@@ -433,7 +441,38 @@ Mike can set any key, so secret placement no longer decides this. What still dec
      largest real result and gzip it (`CompressionStream`) or chunk it if needed.
    - `ads_read_narratives`: the report id, headline, working, notWorking and soWhat (JSON),
      author, and `created_at`. It is append-only, and the latest row wins.
+   - `ads_read_alerts`: one row per live read whose `notify.push` was true. It records the report
+     id, `attempted_at`, and the `send_email` outcome (`sent`, or `failed` with a redacted
+     one-line reason). It is written in the same run as the report, append-only (§6.2).
 5. **Paid plan settings:** `[limits] cpu_ms = 60000` as a runaway guard, and default subrequests.
+6. **No em-dashes at source.** This can ship after 10-03, and must land before cutover.
+   - Replace every U+2014 in the string literals that feed generated output with a comma, a colon
+     or parentheses. That covers `scripts/ads-reads/report.ts`, `play.ts` and `read.ts`, plus the
+     `src/lib` strings the report prints: the `adsRules.ts` notes and proposals, the
+     `adsSync.ts` sync summary lines and the `campaigns.ts` caveats.
+   - Examples: `=== THRESHOLD READ at $25 (...) — complete ===` becomes
+     `=== THRESHOLD READ at $25 (...): complete ===`; `accept rate — (0/0)` becomes
+     `accept rate: none yet (0/0)`; `Floor — devices ...` becomes `Floor: devices ...`.
+   - The empty-value placeholder `'—'` becomes `n/a`.
+   - Code comments are not output and stay as they are. The dashboard's own card placeholders
+     (`src/lib/metrics/render.ts`, `kpiFormat.ts`) are UI, not routine output, so they are out of
+     scope unless the owner wants them changed too.
+   - Add a test: format the morning, threshold, post-flight and not-due reports from every
+     fixture, plus `notify.text` and the rendered read page, and assert that no U+2014 appears
+     anywhere.
+7. **No `Intl` at module scope** (a build checklist item for every Phase 1 change):
+   - No `Intl.NumberFormat`, `Intl.DateTimeFormat` or similar formatter, and no `toLocale*String`
+     call, may run at module scope anywhere in the Worker bundle. Build formatters lazily, inside
+     the handler, or use the plain ET arithmetic in `src/lib/etTime.ts`.
+   - Why: PR #27 regressed this once. A module-scope `Intl.DateTimeFormat` in `adsRules.ts` took
+     the Worker's module init from 2.2-4.0 ms to 16.7-24.8 ms (PR #33,
+     `fix/ads-rules-no-intl-at-load`, measured on the esbuild bundle).
+   - The guard is PR #33's `scripts/ads-reads/workerNoIntlAtLoad.test.ts`, which spies on every
+     `Intl` constructor and `toLocale*String` and then imports the Worker entry fresh. Every new
+     module the reads pull into the bundle is reached through that import, so the test covers it.
+     Keep it green.
+   - `ads:worker-check` proves only that the bundle builds, so cold-start CPU must also be checked
+     with this test and with `scripts/ads-reads/profile-worker.ts`.
 
 ### 6.2 Alerts that need no Claude session
 
@@ -442,11 +481,25 @@ Mike can set any key, so secret placement no longer decides this. What still dec
   subject and body are `notify.text` (already short and secret-free by construction) plus a link
   to the dashboard Reads page. It is free on every plan
   ([Email Service limits](https://developers.cloudflare.com/email-service/platform/limits/)).
+  The from-address and its subdomain are set in §7, "Non-secret setup".
+- **The send result is recorded.** Every live read with `notify.push` true writes an
+  `ads_read_alerts` row (§6.1, item 4) holding the `send_email` outcome. A failed or missing send
+  is then visible to the routine and on the Reads page, not only in Worker logs.
 - **Dead-man check:** at the 07:05 ET tick on a morning-read day, and the 10:05 ET tick on a
   stage due date, if no live report exists for today, email "BSK read did not run" with the
-  claim or error state.
-- **Second observer:** the cloud routine sees a missing report. It reports that in its own run
-  and on the bus, and makes a best-effort `PushNotification`.
+  claim or error state. The ads session accepts that this is about an hour slower than today's
+  immediate bootstrap-failure push.
+- **Second observer, for a missing report:** the cloud routine sees a missing report. It reports
+  that in its own run and on the bus, and makes a best-effort `PushNotification`.
+- **Second observer, for a failed alert email.** This is separate from the dead-man check. The
+  routine reads today's live report. If its `notify.push` is true and its `ads_read_alerts` row
+  says `failed`, or there is no row, the routine treats that as its own alert:
+  - it sends one `PushNotification` carrying the report's `notify.text`;
+  - it sends one bus message to `best-sudoku-ads-retest-followup` saying that the alert email did
+    not go out, plus the same text.
+
+  That is the one case where the routine relays push text for the numbers. It uses the Worker's
+  text verbatim and never writes its own.
 
 ### 6.3 The dashboard API and the service token (owned by gss-stats)
 
@@ -479,6 +532,11 @@ Mike can set any key, so secret placement no longer decides this. What still dec
 8. **Narrative validation.**
    - The campaign must be in `CAMPAIGNS`.
    - The date and kind must match a stored **live** report.
+   - `headline` must be a non-empty string, and `working`, `notWorking` and `soWhat` must each be
+     a non-empty array of non-empty strings. The route rejects anything else with `400`. The
+     morning-read Step 5 rule is that "a report with the headline alone is a failed run". The
+     route enforces it, so the Reads page never shows an incomplete narrative as complete. The
+     same shape is what `ads:read-page --narrative` already requires.
    - Each string is at most 500 characters, and the body at most 8 KB.
    - U+2014 (the em-dash) is rejected.
    - The text is always rendered HTML-escaped, because LLM text shaped by untrusted fetches must
@@ -520,13 +578,24 @@ with `npm run ads:read-page`, which works unchanged if the API returns the repor
 
 **Morning prompt**
 1. Wait for today's live report, polling for up to 20 minutes.
-2. Compose the R6 narrative from the report's numbers only.
-3. `POST /api/ads/narrative`.
-4. Make the bus copy when `notify.busCopy` is set.
-5. Optionally republish the fixed Artifact.
-6. Output the narrative, the Reads-page link and at most three status lines.
+2. Check its alert row (§6.2). If `notify.push` is true and the email failed or has no row,
+   send the push and the bus alert described there.
+3. Compose the R6 narrative from the report's numbers only.
+4. `POST /api/ads/narrative`.
+5. When `notify.busCopy` is set, make the bus copy as Step 6 does today:
+   - the narrative **followed by the full human report**, i.e. everything above
+     `----- JSON -----`, which the API returns verbatim;
+   - `agent_send` from `gss-stats` to `best-sudoku-ads-retest-followup`, with
+     `includeEphemeral: true`;
+   - the current subject format: `BSK retest $<highest crossed threshold> read <ET date>`, or
+     `BSK retest post-flight <stage> <ET date>`.
 
-It never writes its own push text for the numbers, because the Worker has already emailed.
+   The narrative alone is not enough.
+6. Optionally republish the fixed Artifact.
+7. Output the narrative, the Reads-page link and at most three status lines.
+
+Apart from the failed-email case in step 2, it never writes or relays push text for the numbers,
+because the Worker has already emailed.
 
 **Post-flight prompt:** the same, for the stage's report.
 
@@ -541,6 +610,14 @@ endpoint is a beta.
 **R7 git log:** optional. If the owner wants the best-sudoku log kept, the routine can push to
 `docs/ads-next-campaign`. That needs the Claude GitHub App on the private repo, and the run must
 work on that branch. By default the log moves to D1 and the Reads page (constraint 4).
+
+**Acknowledged by the ads session (review of e82cbb3, 2026-09-28):**
+- D1 plus the Reads page satisfies constraint 4, provided the Reads page is reachable to Mike.
+  After cutover, the ads session itself carries the post-flight results into section 13 of the
+  retest build spec. So the Claude GitHub App is not needed on the private repo. Mike can
+  overrule this (§9, decision 5).
+- The dead-man check at 07:05 ET is about an hour slower than today's immediate
+  bootstrap-failure push. That is acceptable.
 
 ## 7. Keys Mike sets
 
@@ -716,13 +793,21 @@ Replaces: nothing.
 ### Non-secret setup
 
 Alerts by email:
-1. In the Cloudflare dashboard, go to Compute, then Email Service, then Email Routing, then
-   Destination Addresses, add Mike's address and click the verification link.
-2. Enable Email Routing on `goodstuff.software` or a subdomain.
-3. Add a `send_email` binding with `destination_address` in `workers/sync/wrangler.toml`.
+- **From-address (Mike's choice).** The default is `alerts@notify.goodstuff.software`, on a
+  dedicated subdomain `notify.goodstuff.software`. A Worker can send only from a domain that has
+  Email Routing enabled
+  ([Email Service limits](https://developers.cloudflare.com/email-service/platform/limits/)).
+  A dedicated subdomain keeps its MX records away from the apex domain's mail.
+- **Check first** whether `goodstuff.software` already receives mail elsewhere, because Email
+  Routing adds MX records. The default subdomain avoids that conflict whatever the answer is.
+  Use the apex domain only if it has no mail setup and Mike prefers it.
 
-**Check first** whether the domain already receives mail elsewhere, because Email Routing adds MX
-records. If it does, use a subdomain.
+Steps:
+1. In the Cloudflare dashboard, go to Compute, then Email Service, then Email Routing, and enable
+   it on the chosen subdomain.
+2. Under Destination Addresses, add Mike's address and click the verification link.
+3. Add a `send_email` binding to `workers/sync/wrangler.toml`, with `destination_address` set to
+   that verified address. The Worker sends from the from-address above.
 
 ### Credentials that are no longer needed in the cloud or by the reads after cutover
 
@@ -761,7 +846,14 @@ records. If it does, use a subdomain.
     binding;
   - the service-token gate, `/api/ads/report`, `/api/ads/narrative` and the Reads page;
   - fixture parity tests, in which the same fixture run through the CLI and the Worker adapters
-    gives byte-identical JSON and report text.
+    gives byte-identical JSON and report text;
+  - the source-level em-dash removal and its no-U+2014 test (§6.1, item 6). It can ship after
+    10-03, when changing report text no longer touches an in-flight read, and it must land before
+    cutover.
+- **Build checklist for every Phase 1 PR:**
+  - no `Intl` formatter is built at module scope in the Worker bundle (§6.1, item 7);
+  - `workerNoIntlAtLoad.test.ts` stays green;
+  - cold-start CPU is re-profiled, because `ads:worker-check` proves only that the bundle builds.
 - Deploy only with `READS_MODE=off` before 10-03. From 10-04, use `shadow`. The daily not-due
   post-flight run doubles as a live check of the after-flight spend guard.
 - The ads session writes the cloud routine prompts and environment, and rehearses against the
@@ -775,14 +867,24 @@ records. If it does, use a subdomain.
 - A difference caused only by read time is noted. Any rule or notify difference blocks cutover.
 
 **Phase 3: cutover (10-10 to 10-17, day 15)**
+- **Cutover gate.**
+  1. After the 10-09 comparison, and **by 10-15**, gss-stats sends the ads session a **go** or
+     **no-go** decision by cross-session message (SendMessage). The ads session's bus handle has
+     no wake handle, so a bus message alone is not enough. The bus copy is in addition, not
+     instead.
+  2. **On go:** the ads session edits the local day-15 task to add `--dry-run`, making it a
+     comparator. It confirms back to gss-stats, by cross-session message, with the task's new
+     prompt line quoted. gss-stats does not set `READS_MODE=live` until that confirmation
+     arrives.
+  3. **On no-go, or with no confirmation by 10-16:** the local day-15 task stays live and is the
+     read of record, the Worker stays in `shadow`, 10-17 is a second comparison, and cutover
+     moves to 11-01 with the same gate (decision by 10-29).
 - After 10-03, Mike swaps the Ads refresh token to the read-only identity (§7) and sets the new
   keys.
-- Set `READS_MODE=live`.
-- On 10-17 the Worker records and emails, and the routine narrates and makes the bus copy.
-- The ads session edits the local day-15 task to add `--dry-run`, so it becomes a comparator.
-  The dedup ledger makes a manual local live run safe if the Worker's report is missing by
+- On go, set `READS_MODE=live`. On 10-17 the Worker records and emails, and the routine narrates
+  and makes the bus copy.
+- The dedup ledger makes a manual local live run safe if the Worker's report is missing by
   09:45 ET: "stored by a concurrent run" means no second push.
-- **If Phase 2 diverged, 10-17 becomes a second shadow and cutover moves to 11-01.**
 
 **Phase 4: cloud only (11-01, 12-01, 12-03)**
 - The local post-flight tasks are **disabled, never deleted**, once day 15 matched.
@@ -791,7 +893,7 @@ records. If it does, use a subdomain.
 **Gaps checked.** In-flight reads stay local through the last one on 10-03 at 06:00 ET. From
 10-04 to 10-08 no read is scheduled (the morning window ends on 10-03), and the Worker's daily
 03:05 ET sync continues. Each post-flight date has exactly one read of record: local on 10-09,
-Worker from 10-17. Duplicates are impossible by construction, because the unique
+Worker from 10-17 on a go, otherwise local until the 11-01 gate. Duplicates are impossible by construction, because the unique
 `(campaign, et_date, entry_kind)` key and the fire-once threshold key decide which run pushes.
 
 ## 9. Owner decisions needed
@@ -807,11 +909,13 @@ Worker from 10-17. Duplicates are impossible by construction, because the unique
    - the dashboard service token.
 
    All are new credential plumbing, which is why they need this approval.
-4. **Alert channel:** email through Cloudflare Email Routing to a verified address, on
-   `goodstuff.software` or a subdomain. The alternative is a push service such as ntfy, which
-   adds a vendor and a token.
+4. **Alert channel:** email through Cloudflare Email Routing to a verified address, from
+   `alerts@notify.goodstuff.software` by default (§7, "Non-secret setup"). The alternative is a
+   push service such as ntfy, which adds a vendor and a token.
 5. **R7 log:** the D1 and Reads page (default), or also the best-sudoku git log. The second
-   needs the Claude GitHub App on the private repo.
+   needs the Claude GitHub App on the private repo. The ads session accepts the default, provided
+   the Reads page is reachable to Mike, and it carries the post-flight results into section 13 of
+   the retest build spec itself (§6.4). The default stands unless Mike overrules.
 6. **Plan tier.** On Pro or Max, the service token goes in as an API credential that the model
    cannot see. On Team, it is an env var.
 
