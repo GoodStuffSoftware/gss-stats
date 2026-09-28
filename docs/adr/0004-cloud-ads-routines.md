@@ -394,7 +394,8 @@ Mike can set any key, so secret placement no longer decides this. What still dec
 | Ads diagnostics: hourly, geo with bid modifiers, devices, targeting and placement count | Worker | `adsApi` fetchers, which are already runtime-neutral |
 | Recommendations and auto-apply, read-only, plus the standing verdicts | Worker | GAQL SELECT, and the report prints the verdicts |
 | Beacon country counts | Worker | the `gss_geo` binding |
-| Firestore new-account cross-check, window counts, first-50, post-flight tier split | Worker | New read-only service account. The fence (token, first50 GET, `runAggregationQuery`) is kept. The signing moves to WebCrypto. |
+| Firestore new-account cross-check, window counts, first-50, post-flight tier split | Worker | New read-only service account. The fence (token, first50 GET, the masked `promos_public/first50` GET, `runAggregationQuery`) is kept. The signing moves to WebCrypto. |
+| First-50 client-visible state | Worker | Read `promos_public/first50` `open` alongside the `promos/first50` counter, report both, and flag disagreement. One masked GET (`?mask.fieldPaths=open`), fail-soft (`client offer UNKNOWN`), report text only: never a kill rule, a decision input or a push. Why: the ads session found (2026-09-28) that the signed-out client gates its offer on `promos_public/first50` (best-sudoku `first50PromoStatus.ts`, `open === true`, a missing doc means closed), not on the counter; that doc did not exist in prod until 2026-09-28T20:11:29Z, so the offer was hidden while the read said "open". Local CLI: PR #37. |
 | Play bulk reports, with the informational $50/$75 checkpoints | Worker | New reports-only service account. The UTF-16 decode moves to `TextDecoder`. |
 | Two-segment sign-up line ("at most" before 15:43:02 ET 09-26, exact after) | Worker | `signUpsPhrase`. The routine relays it verbatim and never upgrades a bound. |
 | Corrected upsell note, household caveat, retention "not available" line | Worker | `report.ts` / `play.ts` text |
@@ -693,8 +694,8 @@ Replaces: the reads' use of `BWS_ACCESS_TOKEN` at run time.
 Target: Secrets Store `gss-firestore-ro-sa`, binding `FIRESTORE_RO_SA`.
 
 Scope: a new service account `gss-ads-reads-ro@best-sudoku-prod.iam.gserviceaccount.com` with
-**only `roles/datastore.viewer`**. The code fence stays on top: token, first50 GET and
-`runAggregationQuery` only, COUNT only.
+**only `roles/datastore.viewer`**. The code fence stays on top: token, first50 GET, the
+masked `promos_public/first50` GET and `runAggregationQuery` only, COUNT only.
 
 How Mike sets it:
 1. `gcloud iam service-accounts create gss-ads-reads-ro --project best-sudoku-prod`
