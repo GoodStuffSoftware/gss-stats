@@ -24,6 +24,10 @@ All notable changes to **gss-stats** are documented here. The format follows
   of collapsing a mixed window to one bound.
 
 ### Added
+- **The retest read shows whether the first-50 offer is actually visible.** The Accounts line
+  now reports the first-50 counter and the offer signed-out visitors really see side by side,
+  flags when they disagree, and $50-and-later and post-flight reads note that the promo arm was
+  absent until 16:11:29 ET on 09-28. Report text only: no kill rule, threshold or push changes.
 - **New event-beacon family: deferred completions from EU visitors (best-sudoku card 125).**
   `/game/complete-deferred/<mode>/<difficulty>` — a game that finished while the EU consent
   modal was still unanswered, sent later at consent time — is excluded from page views and
