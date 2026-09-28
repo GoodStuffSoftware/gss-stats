@@ -9,6 +9,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 ### Fixed
 - **Sync all pages shows its real state.** The "Sync all pages" checkbox in the filter bar no
   longer always shows as on — it now genuinely reflects whether page date ranges are synced.
+- **Best Sudoku · Overview content sits right under the filter bar again.** The small-sample
+  note took a three-row grid cell for one line of text, leaving an empty band between the bar and
+  the first card; it now takes one row and the cards below move up (layout version 12, saved
+  layouts migrate once and a note you resized keeps its size). The "show filters" button also
+  closes the pinned bar again: the open bar no longer covers it.
 - **Two standing retest report notes corrected.** The upsell-near-zero-for-signed-out note
   wrongly called it a known bug (`useUpsellPrompt` returning early on `uid === null`); it is
   expected by design (a signed-out visitor is never walled — the trial starts only once a
