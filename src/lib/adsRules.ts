@@ -75,6 +75,21 @@ export const AUTH_NEW_EXISTING_LIVE_AT: number | null = Date.parse('2026-09-26T1
  * BOUNDARY: the $100 read and the post-flight reads report pre-fix and post-fix figures
  * separately (spec section 14a: "two separate short tests"). See splitAtBoundary. */
 export const UPSELL_SIGNEDOUT_FIX_AT: number | null = null
+/** When promos_public/first50 (the doc the signed-out client gates its first-50 offer on) first
+ * existed in prod. Before it, the client showed NO first-50 offer, whatever the promos/first50
+ * counter said (ads-session finding, 2026-09-28). REPORT TEXT ONLY: never a kill rule, a
+ * threshold, a decision row or a push input. A plain Date.parse literal (Worker bundle, no Intl). */
+export const PROMOS_PUBLIC_FIRST50_LIVE_AT: number = Date.parse('2026-09-28T20:11:29Z')
+/** "HH:MM:SS ET MM-DD" by etTime arithmetic (never Intl; built on call, not at load). */
+export function etSecondLabelShort(ms: number): string {
+  const et = new Date(ms + etOffsetHours(ms) * 3_600_000)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${pad(et.getUTCHours())}:${pad(et.getUTCMinutes())}:${pad(et.getUTCSeconds())} ET ${pad(et.getUTCMonth() + 1)}-${pad(et.getUTCDate())}`
+}
+/** The note appended wherever a full read prints the promo-ask count ($50+ reads, post-flight). */
+export function promoArmAbsentNote(liveAtMs: number = PROMOS_PUBLIC_FIRST50_LIVE_AT): string {
+  return `promo arm absent until ${etSecondLabelShort(liveAtMs)} (promos_public/first50 did not exist)`
+}
 
 // The 17 approved placements (spec section 5): 1 in "Sudoku.com placement", 16 in "Other
 // Sudoku placements". Android package ids, matched against the Ads API's placement strings
