@@ -7,6 +7,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **Sync all pages shows its real state.** The "Sync all pages" checkbox in the filter bar no
+  longer always shows as on — it now genuinely reflects whether page date ranges are synced.
 - **Two standing retest report notes corrected.** The upsell-near-zero-for-signed-out note
   wrongly called it a known bug (`useUpsellPrompt` returning early on `uid === null`); it is
   expected by design (a signed-out visitor is never walled — the trial starts only once a
