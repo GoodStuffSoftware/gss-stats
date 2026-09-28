@@ -15,7 +15,10 @@ if (!Array.isArray(local.siteSel)) local.siteSel = []
 const rangeInput = ref('')
 const fromYmd = ref('')
 const toYmd = ref('')
-function syncRange() {
+// Refreshes the range display fields (input text, calendar date pickers, slider position)
+// from local.since/until — unrelated to the syncRange PROP below (that one shares the date
+// range across pages; this one just keeps this page's own controls in sync with its state).
+function syncRangeDisplay() {
   rangeInput.value = rangeLabel(local.since, local.until, local.rangeRel)
   fromYmd.value = isoToYmd(local.since)
   toYmd.value = isoToYmd(local.until)
@@ -26,11 +29,11 @@ watch(
   () => props.filters,
   (f) => {
     Object.assign(local, f)
-    syncRange()
+    syncRangeDisplay()
   },
   { deep: true },
 )
-onMounted(syncRange)
+onMounted(syncRangeDisplay)
 
 function commit() {
   emit('change', { ...local })
@@ -121,9 +124,9 @@ function applyRange() {
     local.rangeRel = rangeInput.value.trim() // remember the relative span
     rangeOk.value = true
     commit()
-    syncRange()
+    syncRangeDisplay()
   } else if (rangeInput.value.trim() === '') {
-    syncRange() // empty → revert to label
+    syncRangeDisplay() // empty → revert to label
     rangeOk.value = true
   } else {
     rangeOk.value = false // invalid token — flag, keep what they typed
@@ -174,7 +177,7 @@ function onSlider() {
   local.until = until.toISOString()
   local.rangeRel = st.label // stays this relative span across reloads
   commit()
-  syncRange()
+  syncRangeDisplay()
 }
 // Fine-tune by exactly one step — drag gets you close, these land it (essential on touch,
 // where each of the 53 steps is only a few pixels of the slider).
@@ -368,12 +371,12 @@ onBeforeUnmount(() => window.removeEventListener('focus', readMuteCookie))
       <label>Pages</label>
       <label
         class="sync-toggle"
-        :class="{ on: !!syncRange }"
+        :class="{ on: syncRange }"
         title="When on, every page shares the same date range — change it on one, they all match. Each page keeps its own site filter. Turn off for independent per-page ranges."
       >
         <input
           type="checkbox"
-          :checked="!!syncRange"
+          :checked="syncRange"
           @change="emit('toggleSync', ($event.target as HTMLInputElement).checked)"
         />
         🔗 Sync all pages
