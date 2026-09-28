@@ -30,7 +30,7 @@
     "vue": "^3.5.13"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20241218.0",
+    "@cloudflare/workers-types": "^5.20260928.1",
     "@types/node": "^24.19.0",
     "@vitejs/plugin-vue": "^5.2.1",
     "@vue/test-utils": "^2.5.1",
@@ -40,7 +40,7 @@
     "vite": "^6.0.7",
     "vitest": "^5.0.2",
     "vue-tsc": "^3.3.11",
-    "workerd": "^1.20260925.2",
-    "wrangler": "^4.20.0"
+    "workerd": "^1.20260926.1",
+    "wrangler": "^4.143.0"
   }
 }
