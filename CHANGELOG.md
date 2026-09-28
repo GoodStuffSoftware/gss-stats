@@ -17,6 +17,14 @@ All notable changes to **gss-stats** are documented here. The format follows
   of collapsing a mixed window to one bound.
 
 ### Added
+- **New event-beacon family: deferred completions from EU visitors (best-sudoku card 125).**
+  `/game/complete-deferred/<mode>/<difficulty>` — a game that finished while the EU consent
+  modal was still unanswered, sent later at consent time — is excluded from page views and
+  route counts everywhere the live completion family is, and is never counted as a live
+  completion or a campaign funnel step (it is a sibling of `/game/complete/`, not a sub-path of
+  it). A new "Deferred completions (EU consent)" tile on the Best Sudoku dashboard, next to
+  Games completed, reads an explicit 0 while no rows exist; its caption explains it counts at
+  consent time, not completion time, and is EU-only.
 - **The retest morning read now publishes a rendered report page every run.** A build step turns
   the read's saved output and the daily narrative into one self-contained page (narrative, spend
   against the thresholds, release health, funnel, diagnostics, Play bulk reports, and the

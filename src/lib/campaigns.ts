@@ -554,6 +554,24 @@ export function gameDimOf(dim: 'gameMode' | 'gameDifficulty', path: string): str
   if (!parsed) return GAME_OTHER_BUCKET
   return dim === 'gameMode' ? parsed.mode : parsed.difficulty
 }
+
+// ── Deferred completions (best-sudoku card 125, EU consent) ────────────────────────────
+// `/game/complete-deferred/<mode>/<difficulty>` — a completion by an EU visitor whose consent
+// modal was still unanswered when the game finished; the SAME shape as GAME_COMPLETE_PREFIX
+// but sent later, at consent time (the worker stamps `ts` at ingest, so the row's time is
+// consent time, not completion time). A SIBLING prefix, never folded into GAME_COMPLETE_PREFIX
+// — the hyphen right after "complete" means `path.startsWith(GAME_COMPLETE_PREFIX)` can never
+// match it (GAME_COMPLETE_PREFIX ends '/complete/', this path has '/complete-deferred/' at the
+// same position), so it can never register as a live completion or a funnel "completed" step
+// (classifyFunnelPath below) — see campaigns.test.ts for the proof. Registered as its own
+// event-beacon prefix in lib/popupEvents.ts POPUP_EVENT_PREFIXES ('game-complete-deferred'
+// family), so it is excluded from page views the same way GAME_COMPLETE_PREFIX is. */
+export const GAME_COMPLETE_DEFERRED_PREFIX = '/game/complete-deferred/'
+/** A deferred-completion row (any mode/difficulty) — counts-only metric (lib/metrics/metrics.ts
+ * bsk.deferredCompletions); never a live completion and never a funnel step. */
+export function isGameCompleteDeferredPath(path: string): boolean {
+  return path.startsWith(GAME_COMPLETE_DEFERRED_PREFIX)
+}
 /** "auth success" — NOT part of lib/popupEvents.ts's POPUP_EVENT_PREFIXES (an ordinary page
  * path there), so classified here directly. ONE matcher for the whole codebase.
  *
