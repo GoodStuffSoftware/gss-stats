@@ -8,8 +8,8 @@ Local development is in the README ([Local development](../README.md#local-devel
 - The environment provides `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
 - The environment's **network access** must allow `api.cloudflare.com`, or every
   `wrangler … --remote` call fails with a bare `fetch failed` (the proxy answers 403 to
-  CONNECT). `sparrow.cloudflare.com` is wrangler telemetry and does not need allowing:
-  [`.claude/settings.json`](../.claude/settings.json) sets `WRANGLER_SEND_METRICS=false`.
+  CONNECT). Also allow `sparrow.cloudflare.com` (wrangler's usage metrics). Queries work
+  without it, but the proxy logs a denial on every call.
 - Run `npm ci` first. Wrangler isn't on the image, only in `node_modules`.
 - Read the beacon with
   `npx wrangler d1 execute gss-geo --remote --json --command "<SQL>" 2>/dev/null`.
@@ -28,6 +28,7 @@ Two fallbacks, either is enough:
 
 1. **This repo.** [`.claude/settings.json`](../.claude/settings.json) declares both
    marketplaces and enables both plugins, so any session of gss-stats should load them.
+   It changes nothing else.
 2. **Every repo in the environment.** Add to the environment's setup script:
 
    ```bash
