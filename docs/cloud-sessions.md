@@ -24,19 +24,30 @@ worker ladder and guardrail hooks) and `deckhand` (plugin `deckhand`, the agent 
 added on the claude.ai account. As of 2026-09-29 the account sync did **not** install them
 into cloud containers: `claude plugin list` showed nothing.
 
-Two fallbacks, either is enough:
+Per the docs, a cloud session loads only plugins enabled on the claude.ai account (or
+force-installed by the org). It ignores plugins a repo's `.claude/settings.json` turns on and
+never adds `extraKnownMarketplaces`, because those need the workspace-trust dialog
+([install](https://code.claude.com/docs/en/plugins/install.md),
+[loading](https://code.claude.com/docs/en/plugins/loading.md)).
+[`.claude/settings.json`](../.claude/settings.json) therefore only helps **local** sessions.
 
-1. **This repo.** [`.claude/settings.json`](../.claude/settings.json) declares both
-   marketplaces and enables both plugins, so any session of gss-stats should load them.
-   It changes nothing else.
-2. **Every repo in the environment.** Add to the environment's setup script:
+The one working fallback for cloud is the environment's **setup script**:
 
-   ```bash
-   claude plugin marketplace add GoodStuffSoftware/agent-templates
-   claude plugin marketplace add msantoro12/deckhand
-   claude plugin install agent-companion@agent-templates
-   claude plugin install deckhand@deckhand
-   ```
+```bash
+claude plugin marketplace add GoodStuffSoftware/agent-templates
+claude plugin install agent-companion@agent-templates
+# deckhand is a private repo: needs a real GitHub token at setup time
+if [ -n "$BSK_GH_TOKEN" ]; then
+  git config --global url."https://x-access-token:${BSK_GH_TOKEN}@github.com/msantoro12/".insteadOf "https://github.com/msantoro12/"
+  claude plugin marketplace add msantoro12/deckhand && claude plugin install deckhand@deckhand || echo "deckhand plugin install failed"
+fi
+```
+
+In a cloud session `GH_TOKEN`/`GITHUB_TOKEN` are proxy placeholders, not real tokens, and the
+docs only describe private-marketplace auth through a git credential helper or SSH. Without a
+real token, `marketplace add msantoro12/deckhand` fails with `could not read Username`, and an
+unguarded failure makes the whole setup script fail, so the session never starts. The deckhand
+bus tools still work without the plugin through the account's MCP connector.
 
 Plugins load only at session start. Installing mid-session doesn't help that session, and
 `/reload-plugins` isn't available in cloud sessions. Check a new session by confirming the
