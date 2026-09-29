@@ -557,6 +557,7 @@ per 10 minutes. The dashboard holds no Google Ads credential and never calls the
 | Ads routine prompts | [docs/routines/](docs/routines/) |
 | Geo beacon (companion) | [GoodStuffSoftware/gss-beacon](https://github.com/GoodStuffSoftware/gss-beacon) |
 | Capacity / free-plan limits | [docs/capacity.md](docs/capacity.md) |
+| Cloud (Claude Code on the web) sessions | [docs/cloud-sessions.md](docs/cloud-sessions.md) |
 
 ## Capacity
 
