@@ -10,8 +10,5 @@
   "enabledPlugins": {
     "agent-companion@agent-templates": true,
     "deckhand@deckhand": true
-  },
-  "env": {
-    "WRANGLER_SEND_METRICS": "false"
   }
 }
