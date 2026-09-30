@@ -47,6 +47,7 @@ import {
   spendTotals,
   summarizeReturns,
   summarizeSiteEvents,
+  siteSigninShown,
   summarizeTaggedRows,
   type KillRuleInput,
   type ReadingRecord,
@@ -256,6 +257,38 @@ describe('evaluateKillRules (spec section 12)', () => {
     const res = evaluateKillRules(killInput({ beacon: { asks: 0, taggedArrivals: 0 } }))
     expect(rule(res, 'funnel-reach').status).toBe('trip')
     expect(rule(res, 'funnel-reach').detail).toMatch(/landing URL/)
+  })
+  it('rule 3: tagged asks > 0 clears and reports the site-wide shown count', () => {
+    const r = rule(evaluateKillRules(killInput({ beacon: { asks: 3, taggedArrivals: 40, siteSigninShown: 12 } })), 'funnel-reach')
+    expect(r.status).toBe('clear')
+    expect(r.detail).toMatch(/Site-wide sign-in prompts shown: 12\./)
+  })
+  it('rule 3: zero tagged asks but sign-in prompts shown site-wide is watch, not trip', () => {
+    const res = evaluateKillRules(killInput({ beacon: { asks: 0, taggedArrivals: 40, siteSigninShown: 7 } }))
+    const r = rule(res, 'funnel-reach')
+    expect(r.status).toBe('watch')
+    expect(r.detail).toMatch(/Site-wide sign-in prompts shown: 7\./)
+    expect(r.detail).toMatch(/expires 30 min/)
+    expect(res.tripped).not.toContain('funnel-reach')
+  })
+  it('rule 3: zero tagged asks and zero site-wide prompts still trips', () => {
+    const r = rule(evaluateKillRules(killInput({ beacon: { asks: 0, taggedArrivals: 40, siteSigninShown: 0 } })), 'funnel-reach')
+    expect(r.status).toBe('trip')
+    expect(r.detail).toMatch(/Site-wide sign-in prompts shown: 0\./)
+    expect(r.detail).not.toMatch(/expires 30 min/)
+  })
+  it('siteSigninShown counts only shown sign-in prompts inside the window', () => {
+    const t0 = H('2026-09-20T10:30:00Z')
+    const rows = [
+      { hourStartMs: H('2026-09-20T10:00:00Z'), path: '/signin-prompt/streak', count: 2 },
+      { hourStartMs: H('2026-09-20T12:00:00Z'), path: '/signin-prompt/placement', count: 3 },
+      { hourStartMs: H('2026-09-20T12:00:00Z'), path: '/signin-prompt/dismiss', count: 5 },
+      { hourStartMs: H('2026-09-20T12:00:00Z'), path: '/signin-prompt/accept', count: 1 },
+      { hourStartMs: H('2026-09-20T12:00:00Z'), path: '/promo-first50/shown', count: 4 },
+      { hourStartMs: H('2026-09-20T09:00:00Z'), path: '/signin-prompt/streak', count: 9 },
+      { hourStartMs: H('2026-09-20T14:00:00Z'), path: '/signin-prompt/streak', count: 9 },
+    ]
+    expect(siteSigninShown(rows, t0, H('2026-09-20T14:00:00Z'))).toBe(5)
   })
   it('rule 4: $100 proposes a pause regardless of results', () => {
     const res = evaluateKillRules(killInput({ cumulativeSpend: 100 }))
