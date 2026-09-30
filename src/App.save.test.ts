@@ -49,12 +49,16 @@ async function mountApp() {
   return w
 }
 // Rename the page on screen through its ⋯ menu.
+/** ⋯ → Rename: the page's breadcrumb segment turns into a field; type the name, Enter. */
 async function rename(w: VueWrapper, name: string) {
   await w.find('.page-menu-btn').trigger('click')
   await flushPromises()
-  vi.stubGlobal('prompt', vi.fn(() => name))
   Array.from(document.querySelectorAll<HTMLElement>('#page-menu [role="menuitem"]')).find((b) => b.textContent!.trim() === 'Rename')!.click()
-  vi.unstubAllGlobals()
+  await flushPromises()
+  const input = document.querySelector<HTMLInputElement>('nav.crumbs .seg.editing input')!
+  input.value = name
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
   await flushPromises()
 }
 const shownName = (w: VueWrapper) => (w.find('.foot').text() as string).split(' · ')[0]

@@ -1,17 +1,18 @@
 <script setup lang="ts">
 // The / search: one box over every page in every group — page names first, then pages matched by a
-// chart title (lib/nav.ts searchPages) — each result with its page icon and its group's badge, so
+// chart title (lib/nav.ts searchPages) — each result with its page icon, its path for a drill page
+// ("Traffic › mobile › California") and its group's badge, so
 // same-named pages in two groups stay apart. ↑/↓ move, ↵ opens, Esc closes and puts focus back
 // where it was. A modal dialog: the input keeps focus (the results are its listbox, announced via
 // aria-activedescendant), and Tab stays inside.
 import { computed, nextTick, ref, watch } from 'vue'
 import type { DashboardPage, GroupMeta } from '../../types'
-import { highlightParts, rootOf, searchPages, type SearchHit } from '../../lib/nav'
+import { DRILL_TRAIL_SEP, ancestorsOf, highlightParts, rootOf, searchPages, type SearchHit } from '../../lib/nav'
 import { SearchIcon, StarIcon } from '../../lib/icons'
 import PageIcon from './PageIcon.vue'
 import GroupBadge from './GroupBadge.vue'
 
-const props = defineProps<{ open: boolean; pages: DashboardPage[]; groupMeta?: Record<string, GroupMeta> }>()
+const props = defineProps<{ open: boolean; pages: DashboardPage[]; groupMeta?: Record<string, GroupMeta>; groupOrder?: string[] }>()
 const emit = defineEmits<{ close: []; pick: [id: string] }>()
 
 const query = ref('')
@@ -20,7 +21,12 @@ const input = ref<HTMLInputElement | null>(null)
 const list = ref<HTMLElement | null>(null)
 let returnFocus: HTMLElement | null = null
 
-const hits = computed(() => searchPages(query.value, props.pages))
+const hits = computed(() => searchPages(query.value, props.pages, props.groupOrder))
+/** A drill page's ancestors, top-level page first ("Traffic › mobile › "), shown before its name. */
+const pathPrefix = (p: DashboardPage) => {
+  const up = ancestorsOf(p, props.pages).reverse()
+  return up.length ? up.map((a) => a.name).join(DRILL_TRAIL_SEP) + DRILL_TRAIL_SEP : ''
+}
 const optId = (i: number) => `nav-search-opt-${i}`
 watch(query, () => (activeIdx.value = 0))
 watch(
@@ -113,6 +119,7 @@ const chartParts = (h: SearchHit) => (h.chart ? highlightParts(h.chart, h.at, h.
           >
             <PageIcon :page="h.page" :pages="pages" />
             <span class="nm">
+              <span v-if="pathPrefix(h.page)" class="path">{{ pathPrefix(h.page) }}</span>
               <template v-for="(part, j) in nameParts(h)" :key="j"><mark v-if="part.mark">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template>
               <span v-if="h.match === 'chart'" class="meta">
                 · chart “<template v-for="(part, j) in chartParts(h)" :key="j"><mark v-if="part.mark">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template>”
@@ -200,6 +207,10 @@ const chartParts = (h: SearchHit) => (h.chart ? highlightParts(h.chart, h.at, h.
 }
 .sp-opt .meta {
   margin-left: 4px;
+}
+.path {
+  color: rgb(var(--ink-3));
+  font-weight: 400;
 }
 .gname {
   color: rgb(var(--ink-3));

@@ -128,8 +128,10 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
 - **Page navigation** — every page belongs to a **group** (`DashboardPage.group`, a plain
   string: "All sites", "Best Sudoku", "Mine", …, so a new product is just a new group). The
   default page, **★ Overview** (all-sites traffic), is shown pinned first, outside the groups,
-  and can't be deleted. Order is data: groups appear in the order they first occur in the saved
-  page list and pages keep their saved order within a group — nothing is re-sorted on load.
+  and can't be deleted. Order is data: groups appear in the config's optional `groupOrder` (which
+  also keeps a group that has no page yet), then in the order they first occur in the saved page
+  list, and pages keep their saved order within a group — nothing is re-sorted on load
+  (`normGroupOrder` sanitises the list and stores it only when it says more than the pages do).
   Built-in pages are recognised **by id only** ([`src/lib/defaults.ts`](src/lib/defaults.ts)
   `isOverviewPage`, `isCampaignComparePage`, …), so renaming a page never changes how it
   behaves. The page each viewer is on (and the page they last viewed in each group) is
@@ -142,34 +144,67 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   can't be linked to the page they came from (nothing stored it), so they stay ordinary pages
   under Mine.
   - **Breadcrumb** ([`src/components/nav/NavBreadcrumb.vue`](src/components/nav/NavBreadcrumb.vue))
-    — `Group / Page / Drill` in the header, the everyday way to move around. Each segment opens
-    a menu of its siblings: the group segment lists ★ Overview and every group (picking a group
-    opens the page you last viewed in it, else its first page), the page segment lists the
-    group's pages plus "New page in <group>" (a copy of the page on screen, in that group), and
-    the drill segment lists the other drill pages of the same page plus the way back to it. On
-    ★ Overview the group segment is ★ Overview itself. At phone width it collapses to
-    `Group / Page` (the page on screen; drill pages listed under their page) and the menus open
-    as a bottom sheet. Menus are keyboard-operable (arrows, Home/End, Esc/Tab return focus to
-    the segment).
+    — `Group / Page / Drill / Drill…` in the header (the whole path to the page on screen), the
+    everyday way to move around. Each segment opens a menu: the group segment lists ★ Overview
+    and every group (picking a group opens the page you last viewed in it, else its first page)
+    and "Rename <group>"; the page segment lists the group's pages with their drill pages nested
+    under them, all pickable (a page with more than six folds them behind "Show N drill pages"
+    unless you're in there), plus "New page in <group>" (a copy of the page on screen, in that
+    group); a drill segment lists its sibling drill pages, its own drill pages under it, and the
+    way back to its parent. On ★ Overview the group segment is ★ Overview itself. When the path
+    doesn't fit, the middle folds into a "…" segment whose menu lists it; at phone width it
+    always does (`Group / … / Page`) and the menus open as a bottom sheet. Menus are
+    keyboard-operable (arrows, Home/End, Esc/Tab return focus to the segment).
   - **Search** ([`src/components/nav/SearchPalette.vue`](src/components/nav/SearchPalette.vue))
     — press <kbd>/</kbd> anywhere you're not typing (or the header's search button) to search
     every page in every group: page names first, then pages matched only by a chart title, each
-    with its icon and group badge. <kbd>↑</kbd> <kbd>↓</kbd> move, <kbd>↵</kbd> opens,
+    with its icon, its path for a drill page ("Traffic › mobile › California") and its group
+    badge. <kbd>↑</kbd> <kbd>↓</kbd> move, <kbd>↵</kbd> opens,
     <kbd>esc</kbd> closes ([`src/lib/nav.ts`](src/lib/nav.ts) `searchPages`).
   - **Drawer** ([`src/components/nav/NavDrawer.vue`](src/components/nav/NavDrawer.vue)) — the
     ☰ button (it carries the current group's badge, ★ on ★ Overview) opens the whole page tree
-    as an overlay over the charts, on every screen size: ★ Overview, then each group
-    (collapsible — remembered per viewer — with its badge and page count), pages with their
-    icons, drill pages indented under their page with × to delete them, a ⋯ page menu on every
-    page, and "New page" (a copy of the page on screen, in its group). Esc, the scrim or
-    picking a page closes it; focus stays inside while it's open and returns to ☰.
+    as an overlay over the charts, on every screen size: ★ Overview pinned first (unindented),
+    then each group — its header collapsible (remembered per viewer), with its badge, a ⋯ group
+    menu and its page count — its pages indented under it and each level of drill pages one more
+    step in (a page with drill pages folds them away; remembered per viewer, and the path to the
+    page on screen always shows). Every page, drill pages included, has the ⋯ page menu; drill
+    pages also have × to delete them. Esc, the scrim or picking a page closes it; focus stays
+    inside while it's open and returns to ☰.
+  - **Group menu** ([`src/components/nav/GroupMenu.vue`](src/components/nav/GroupMenu.vue)) — ⋯
+    on a drawer group header: Rename (in place), New page in this group (the page wizard with
+    the group picked), Delete group… ([`DeleteGroupDialog.vue`](src/components/nav/DeleteGroupDialog.vue):
+    says how many pages it holds and moves them to the group you pick — "Mine" by default, the
+    first other group when Mine is the one going; ★ Overview never moves). A group can exist
+    with no pages. Renaming a group renames it on every page, in `groupOrder` and in `groupMeta`
+    at once; another group's name (in any case) is refused with a message, never merged
+    ([`src/lib/nav.ts`](src/lib/nav.ts) `renameGroup`, `deleteGroup`).
+  - **"+ New"** ([`src/components/nav/WizardCarousel.vue`](src/components/nav/WizardCarousel.vue),
+    [`NewWizards.vue`](src/components/nav/NewWizards.vue), [`src/lib/wizards.ts`](src/lib/wizards.ts))
+    — at the bottom of the drawer. Its label slides aside to a menu of what can be created (a
+    small registry of wizard definitions), and the chosen wizard runs as a carousel of steps with
+    Back / Next (Create on the last step), each step's Next waiting until the step is complete
+    and saying why inline. A **page**: its name; its group (an existing one or a new one named
+    there); what it starts from (blank, a copy of the page on screen, or a built-in page's
+    default charts) and its icon (Auto, shown, or one from the icon picker) — it's added to its
+    group and opened. A **group**: its name (unique); pages to move into it (optional, ★ Overview
+    excluded); a review — it's listed even when empty, and the drawer scrolls to it. Esc or ×
+    closes and starts over; with reduced motion nothing slides.
   - **Page menu** ([`src/components/nav/PageMenu.vue`](src/components/nav/PageMenu.vue)) — ⋯
     next to the breadcrumb (the page on screen) or on a drawer row: Rename, Duplicate (same
     group and icon; a copy of a drill page stays under the same page), Change icon…, Move to
-    group (the groups in use, or "New group…"; the page's drill pages move with it), Restore
-    default charts, Delete. ★ Overview can't be moved or deleted, a drill page follows its
-    page's group, and **deleting a page deletes its drill pages too**, asked once ("Delete
-    "Traffic" and its 3 drill pages?").
+    group (every group, or "New group…" named right in the menu; the page's drill pages move
+    with it — a drill page moved this way becomes a page of its own in that group), Restore
+    default charts, Delete. ★ Overview can't be moved or deleted, and **deleting a page deletes
+    every drill page under it too**, asked once ("Delete "Traffic" and its 3 drill pages?").
+    When the page on screen is deleted you land on its nearest remaining parent, else the page
+    before it in its group, else the group's first page, else ★ Overview
+    (`landingAfterDelete`).
+  - **Renaming in place** ([`src/components/nav/InlineName.vue`](src/components/nav/InlineName.vue))
+    — Rename (a ⋯ menu, or double-clicking the breadcrumb's group or page segment) turns the name
+    into a text field right where it is: Enter or leaving the field saves, Esc cancels, an empty
+    name changes nothing. No prompt dialogs. Every name on screen — breadcrumb, drawer, search,
+    menus and the browser tab's title — is rendered from the one config, so a rename shows
+    everywhere at once.
   - **Icon picker** ([`src/components/nav/IconPicker.vue`](src/components/nav/IconPicker.vue))
     — search the ~40 curated icons (Traffic, Engagement, Money, Product, Geography), or pick
     **Auto**, which shows what the page would resolve to on its own.
@@ -178,7 +213,8 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   (`DashboardPage.icon`, e.g. `megaphone`), never markup; the registry maps ~40 curated keys to
   [Lucide](https://lucide.dev) icons (`@lucide/vue`, named imports, so only those ship), and
   an unknown key shows the generic page icon. `resolveIcon`, first match wins: the icon someone
-  picked; for a drill page, its root page's icon with a small drill mark; the icon of the dataset
+  picked; for a drill page, the icon of its nearest ancestor someone picked one for, else its
+  top-level page's own icon, with a small drill mark; the icon of the dataset
   most of the page's charts read (notes don't count, a chart with no dataset is `rum`, a tie goes
   to the first chart in layout order: rum → trending-up, geo → map-pin, popup → app-window,
   campaigns → megaphone, completions → trophy, ads-readings → tag, overview → layout-grid); else
@@ -195,9 +231,13 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   dev/preview hosts from both the picker and the numbers.
 - **Click-to-drill-down** — click any chart value to open a new page filtered to it
   (device, referrer, location, browser, …). The drill page is created at once, nested under the
-  page it came from (`DashboardPage.parentId`, in that page's group), and named by its trail,
-  e.g. "mobile › California" ([`src/lib/nav.ts`](src/lib/nav.ts) `drillTrail`); drilling again
-  from a drill page stacks the filters and nests under the same page.
+  page it came from (`DashboardPage.parentId`, its immediate parent, in its group), and named by
+  what it adds to that page, e.g. "California" under "mobile" ([`src/lib/nav.ts`](src/lib/nav.ts)
+  `drillTrail`) — the drawer, breadcrumb and search show the rest of the path. Drilling again
+  from a drill page stacks the filters and nests one level deeper, up to 8 levels
+  (`MAX_DRILL_DEPTH`; beyond that a drill attaches to the deepest page allowed). Every load
+  repairs the tree: a link to a missing page, to itself or closing a loop is dropped, and a tree
+  deeper than 8 is re-attached (`normDrillLinks`).
 - **Exclusions** (global across pages) — hide self-referrals, hide your own visits by
   browser+OS, and an **"exclude this device"** opt-out that works on every site (see
   [gss-beacon](https://github.com/GoodStuffSoftware/gss-beacon)).

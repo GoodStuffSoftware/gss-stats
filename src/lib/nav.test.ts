@@ -1,5 +1,36 @@
 import { describe, expect, it } from 'vitest'
-import { drillChildren, drillTrail, groupLandingPage, groupNames, highlightParts, movePageToGroup, navOrder, navTree, pagesToDelete, parentOf, rootOf, rootsInGroup, searchPages } from './nav'
+import {
+  addGroup,
+  ancestorsOf,
+  childrenOf,
+  deleteGroup,
+  deleteGroupTargets,
+  depthOf,
+  descendantsOf,
+  drillParentFor,
+  drillTrail,
+  groupLandingPage,
+  groupNameError,
+  groupNames,
+  highlightParts,
+  insertPageInGroup,
+  landingAfterDelete,
+  movePageToGroup,
+  navOrder,
+  navTree,
+  orderedGroups,
+  pageNameError,
+  pagesToDelete,
+  parentOf,
+  pathLabel,
+  pathOf,
+  renameGroup,
+  rootOf,
+  rootsInGroup,
+  searchPages,
+  type NavNode,
+} from './nav'
+import { MAX_DRILL_DEPTH } from './defaults'
 import type { DashboardPage, GlobalFilters } from '../types'
 
 const f = (over: Partial<GlobalFilters> = {}): GlobalFilters => ({
@@ -25,9 +56,86 @@ describe('drill tree helpers', () => {
     expect(parentOf(pages[4], pages)).toBeUndefined()
     expect(rootOf(pages[4], pages).id).toBe('stale')
   })
-  it('drillChildren lists a root\'s drill pages in array order', () => {
-    expect(drillChildren('t', pages).map((p) => p.id)).toEqual(['k1', 'k2'])
-    expect(drillChildren('default', pages)).toEqual([])
+  it('childrenOf lists a page\'s own drill pages in array order', () => {
+    expect(childrenOf('t', pages).map((p) => p.id)).toEqual(['k1', 'k2'])
+    expect(childrenOf('default', pages)).toEqual([])
+  })
+})
+
+describe('the drill tree, nested to any depth', () => {
+  // Traffic › mobile › California › Los Angeles, and Traffic › reddit.com
+  const pages = [
+    page('default', { isDefault: true }),
+    page('t', { name: 'Traffic', group: 'Best Sudoku' }),
+    page('m', { name: 'mobile', parentId: 't', group: 'Best Sudoku' }),
+    page('r', { name: 'reddit.com', parentId: 't', group: 'Best Sudoku' }),
+    page('ca', { name: 'California', parentId: 'm', group: 'Best Sudoku' }),
+    page('la', { name: 'Los Angeles', parentId: 'ca', group: 'Best Sudoku' }),
+    page('x', { name: 'Other' }),
+  ]
+  const byId = (id: string) => pages.find((p) => p.id === id)!
+  it('a drill page\'s parent is the page it was drilled from; its root the top-level page', () => {
+    expect(parentOf(byId('la'), pages)?.id).toBe('ca')
+    expect(ancestorsOf(byId('la'), pages).map((p) => p.id)).toEqual(['ca', 'm', 't'])
+    expect(rootOf(byId('la'), pages).id).toBe('t')
+    expect(pathOf(byId('la'), pages).map((p) => p.id)).toEqual(['t', 'm', 'ca', 'la'])
+    expect([depthOf(byId('t'), pages), depthOf(byId('m'), pages), depthOf(byId('la'), pages)]).toEqual([0, 1, 3])
+    expect(pathLabel(byId('ca'), pages)).toBe('Traffic › mobile › California')
+  })
+  it('descendantsOf walks the whole subtree in tree order', () => {
+    expect(descendantsOf('t', pages).map((p) => p.id)).toEqual(['m', 'ca', 'la', 'r'])
+    expect(descendantsOf('ca', pages).map((p) => p.id)).toEqual(['la'])
+    expect(pagesToDelete('m', pages)).toEqual(['m', 'ca', 'la'])
+  })
+  it('navTree nests each drill page under its own parent; navOrder flattens it depth first', () => {
+    const t = navTree(pages)
+    const shape = (n: NavNode): unknown => [n.page.id, n.children.map(shape)]
+    expect(t.groups.map((g) => [g.name, g.nodes.map(shape)])).toEqual([
+      ['Best Sudoku', [['t', [['m', [['ca', [['la', []]]]]], ['r', []]]]]],
+      ['Mine', [['x', []]]],
+    ])
+    expect(navOrder(pages).map((p) => p.id)).toEqual(['default', 't', 'm', 'ca', 'la', 'r', 'x'])
+  })
+  it('a loop in the links never hangs anything (normDrillLinks repairs it on load)', () => {
+    const loop = [page('a', { parentId: 'b' }), page('b', { parentId: 'a' })]
+    expect(ancestorsOf(loop[0], loop).map((p) => p.id)).toEqual(['b'])
+    expect(descendantsOf('a', loop).map((p) => p.id)).toEqual(['b'])
+    expect(rootOf(loop[0], loop).id).toBe('b')
+  })
+  it(`drillParentFor: the page drilled from, until it is ${MAX_DRILL_DEPTH} deep — then its parent`, () => {
+    expect(drillParentFor(byId('la'), pages).id).toBe('la')
+    const chain = [page('d0')]
+    for (let i = 1; i <= MAX_DRILL_DEPTH; i++) chain.push(page(`d${i}`, { parentId: `d${i - 1}` }))
+    expect(depthOf(chain.at(-1)!, chain)).toBe(MAX_DRILL_DEPTH)
+    expect(drillParentFor(chain.at(-1)!, chain).id).toBe(`d${MAX_DRILL_DEPTH - 1}`)
+    expect(drillParentFor(chain.at(-2)!, chain).id).toBe(`d${MAX_DRILL_DEPTH - 1}`)
+  })
+  it('landingAfterDelete: the nearest ancestor left, else the page before in the group, else its first page, else ★ Overview', () => {
+    const after = (gone: string[]) => pages.filter((p) => !gone.includes(p.id))
+    expect(landingAfterDelete(byId('la'), pages, after(['la']))?.id).toBe('ca')
+    expect(landingAfterDelete(byId('m'), pages, after(pagesToDelete('m', pages)))?.id).toBe('t')
+    const g = [page('default', { isDefault: true }), page('a'), page('b'), page('c'), page('solo', { group: 'Solo' })]
+    const drop = (id: string) => g.filter((p) => p.id !== id)
+    expect(landingAfterDelete(g[3], g, drop('c'))?.id).toBe('b')
+    expect(landingAfterDelete(g[1], g, drop('a'))?.id).toBe('b')
+    expect(landingAfterDelete(g[4], g, drop('solo'))?.id).toBe('default')
+  })
+  it('Move to group: a drill page becomes a page of its own there, with its own drill pages', () => {
+    const out = movePageToGroup(pages, 'm', 'Mine')
+    expect(out.map((p) => [p.id, p.group, p.parentId ?? null])).toEqual([
+      ['default', 'Mine', null],
+      ['t', 'Best Sudoku', null],
+      ['r', 'Best Sudoku', 't'],
+      ['x', 'Mine', null],
+      ['m', 'Mine', null],
+      ['ca', 'Mine', 'm'],
+      ['la', 'Mine', 'ca'],
+    ])
+    // …even into the group it's already in
+    const same = movePageToGroup(pages, 'ca', 'Best Sudoku')
+    expect(same.find((p) => p.id === 'ca')!.parentId).toBeUndefined()
+    expect(same.find((p) => p.id === 'la')!.parentId).toBe('ca')
+    expect(pages.find((p) => p.id === 'm')!.parentId).toBe('t') // the input is not mutated
   })
 })
 
@@ -38,7 +146,10 @@ describe('drillTrail (a drill page\'s name)', () => {
     const root = f({ siteSel: ['bestsudoku', 'bestsudoku-app'] })
     expect(drillTrail(f({ siteSel: ['bestsudoku', 'bestsudoku-app'], drill: [mobile] }), root, label)).toBe('mobile')
   })
-  it('a drill from a drill page carries the trail forward, joined with " › "', () => {
+  it('a drill from a drill page is named by its own step alone (its parent is the drill page)', () => {
+    expect(drillTrail(f({ drill: [mobile, de] }), f({ drill: [mobile] }), label)).toBe('Germany')
+  })
+  it('what differs from the parent is joined with " › "', () => {
     expect(drillTrail(f({ drill: [mobile, de] }), f(), label)).toBe('mobile › Germany')
   })
   it('a drill that replaces a constraint on the same dimension shows only the new value', () => {
@@ -79,8 +190,8 @@ describe('the page tree', () => {
 
   it('pins ★ Overview (with its drill pages) and lists groups in first-appearance order, pages in array order', () => {
     const t = navTree(pages)
-    expect(t.pinned).toMatchObject({ page: { id: 'default' }, children: [{ id: 'k0' }] })
-    expect(t.groups.map((g) => [g.name, g.nodes.map((n) => [n.page.id, n.children.map((c) => c.id)])])).toEqual([
+    expect(t.pinned).toMatchObject({ page: { id: 'default' }, children: [{ page: { id: 'k0' } }] })
+    expect(t.groups.map((g) => [g.name, g.nodes.map((n) => [n.page.id, n.children.map((c) => c.page.id)])])).toEqual([
       ['All sites', [['beacon', []]]],
       ['Mine', [['mine-1', []], ['stale', []]]],
       ['Best Sudoku', [['bsk-overview', []], ['bsk-popups', []], ['bsk-launch', ['k1', 'k2']]]],
@@ -88,10 +199,27 @@ describe('the page tree', () => {
     expect(navOrder(pages).map((p) => p.id)).toEqual(['default', 'k0', 'beacon', 'mine-1', 'stale', 'bsk-overview', 'bsk-popups', 'bsk-launch', 'k1', 'k2'])
   })
 
-  it('leaves out a group whose only page is ★ Overview, but still offers it to move pages into', () => {
+  it('leaves out a group whose only page is ★ Overview — unless the group order lists it', () => {
     const only = [page('default', { isDefault: true, group: 'All sites' }), page('x', { group: 'Mine' })]
     expect(navTree(only).groups.map((g) => g.name)).toEqual(['Mine'])
     expect(groupNames(only)).toEqual(['All sites', 'Mine'])
+    expect(navTree(only, ['All sites', 'Mine']).groups.map((g) => [g.name, g.nodes.length])).toEqual([
+      ['All sites', 0],
+      ['Mine', 1],
+    ])
+  })
+
+  it('groupOrder orders the groups and keeps empty ones; groups it misses follow in page order', () => {
+    expect(orderedGroups(pages, ['Best Sudoku', 'Empty'])).toEqual(['Best Sudoku', 'Empty', 'All sites', 'Mine'])
+    const t = navTree(pages, ['Best Sudoku', 'Empty'])
+    expect(t.groups.map((g) => [g.name, g.nodes.length])).toEqual([
+      ['Best Sudoku', 3],
+      ['Empty', 0],
+      ['All sites', 1],
+      ['Mine', 2],
+    ])
+    expect(navOrder(pages, ['Best Sudoku']).map((p) => p.id).slice(0, 6)).toEqual(['default', 'k0', 'bsk-overview', 'bsk-popups', 'bsk-launch', 'k1'])
+    expect(searchPages('', pages, ['Mine'])[2].page.id).toBe('mine-1')
   })
 
   it('rootsInGroup and groupLandingPage: the page last viewed in a group, else its first page', () => {
@@ -177,9 +305,96 @@ describe('page operations', () => {
     expect(out.find((p) => p.id === 't')!.widgets).toBe(pages[2].widgets)
     expect(pages[2].group).toBe('Best Sudoku') // the input is not mutated
   })
-  it('a new group goes last; ★ Overview, a drill page, or the same group moves nothing', () => {
+  it('a new group goes last; ★ Overview, the same group or no group moves nothing', () => {
     expect(movePageToGroup(pages, 'beacon', 'Star Rupture').map((p) => p.id).at(-1)).toBe('beacon')
     expect(movePageToGroup(pages, 'm1', 'All sites').map((p) => p.id)).toEqual(['default', 'beacon', 'm1', 't', 'k1', 'k2', 'm2'])
-    for (const [id, g] of [['default', 'Mine'], ['k1', 'Mine'], ['m1', 'Mine'], ['m1', '']]) expect(movePageToGroup(pages, id, g)).toBe(pages)
+    for (const [id, g] of [['default', 'Mine'], ['m1', 'Mine'], ['m1', ''], ['nope', 'Mine']]) expect(movePageToGroup(pages, id, g)).toBe(pages)
+  })
+  it('insertPageInGroup puts a new page after the pages already in its group', () => {
+    expect(insertPageInGroup(pages, page('n'), 'All sites').map((p) => p.id)).toEqual(['default', 'beacon', 'n', 't', 'k1', 'm1', 'k2', 'm2'])
+    expect(insertPageInGroup(pages, page('n'), 'New').map((p) => [p.id, p.group]).at(-1)).toEqual(['n', 'New'])
+  })
+})
+
+describe('names', () => {
+  it('pageNameError: only an empty name is refused', () => {
+    expect(pageNameError('   ')).toBe('Give the page a name.')
+    expect(pageNameError(' x ')).toBeNull()
+  })
+  it('groupNameError: empty, or another group\'s name in any case, is refused; its own name in a new case is fine', () => {
+    const groups = ['All sites', 'Mine']
+    expect(groupNameError('  ', groups)).toBe('Give the group a name.')
+    expect(groupNameError(' mine ', groups)).toBe('There\'s already a group called "Mine".')
+    expect(groupNameError('MINE', groups, 'Mine')).toBeNull()
+    expect(groupNameError('Star   Rupture', groups)).toBeNull()
+  })
+})
+
+describe('group operations', () => {
+  const state = () => ({
+    pages: [
+      page('default', { isDefault: true, group: 'All sites' }),
+      page('beacon', { group: 'All sites' }),
+      page('t', { group: 'Best Sudoku' }),
+      page('k1', { group: 'Best Sudoku', parentId: 't' }),
+      page('m1', { group: 'Mine' }),
+      page('m2', { group: 'Mine' }),
+    ],
+    groupOrder: ['All sites', 'Best Sudoku', 'Mine', 'Empty'],
+    groupMeta: { 'Best Sudoku': { color: 'g3' }, Mine: { color: 'g1' } },
+  })
+  it('renameGroup renames it on every page (★ Overview and drill pages too), in the order and in groupMeta, at once', () => {
+    const s = state()
+    const r = renameGroup(s, 'Best Sudoku', '  BS   Games ')
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.result.pages.map((p) => p.group)).toEqual(['All sites', 'All sites', 'BS Games', 'BS Games', 'Mine', 'Mine'])
+    expect(r.result.groupOrder).toEqual(['All sites', 'BS Games', 'Mine', 'Empty'])
+    expect(r.result.groupMeta).toEqual({ 'BS Games': { color: 'g3' }, Mine: { color: 'g1' } })
+    const pinned = renameGroup(s, 'All sites', 'Sites')
+    expect(pinned.ok && pinned.result.pages.filter((p) => p.group === 'Sites').map((p) => p.id)).toEqual(['default', 'beacon'])
+    expect(s.pages[2].group).toBe('Best Sudoku') // the input is not mutated
+  })
+  it('renameGroup refuses another group\'s name (no silent merge), an empty name, or a group that isn\'t there', () => {
+    expect(renameGroup(state(), 'Mine', 'best sudoku')).toEqual({ ok: false, error: 'There\'s already a group called "Best Sudoku".' })
+    expect(renameGroup(state(), 'Mine', ' ')).toEqual({ ok: false, error: 'Give the group a name.' })
+    expect(renameGroup(state(), 'Nope', 'X').ok).toBe(false)
+    const empty = renameGroup(state(), 'Empty', 'Later')
+    expect(empty.ok && empty.result.groupOrder).toEqual(['All sites', 'Best Sudoku', 'Mine', 'Later'])
+  })
+  it('deleteGroupTargets: Mine by default, the first other group when Mine goes', () => {
+    expect(deleteGroupTargets('Best Sudoku', ['All sites', 'Best Sudoku', 'Mine'])).toEqual({ options: ['All sites', 'Mine'], fallback: 'Mine' })
+    expect(deleteGroupTargets('Best Sudoku', ['Best Sudoku'])).toEqual({ options: ['Mine'], fallback: 'Mine' })
+    expect(deleteGroupTargets('Mine', ['All sites', 'Mine'])).toEqual({ options: ['All sites'], fallback: 'All sites' })
+    expect(deleteGroupTargets('Mine', ['Mine'])).toEqual({ options: [], fallback: null })
+  })
+  it('deleteGroup moves its pages (with their drill pages) to the destination and drops it from the order and groupMeta', () => {
+    const r = deleteGroup(state(), 'Best Sudoku', 'Mine')!
+    expect(r.pages.map((p) => [p.id, p.group])).toEqual([
+      ['default', 'All sites'],
+      ['beacon', 'All sites'],
+      ['m1', 'Mine'],
+      ['m2', 'Mine'],
+      ['t', 'Mine'],
+      ['k1', 'Mine'],
+    ])
+    expect(r.groupOrder).toEqual(['All sites', 'Mine', 'Empty'])
+    expect(r.groupMeta).toEqual({ Mine: { color: 'g1' } })
+  })
+  it('deleteGroup never moves ★ Overview, deletes an empty group outright, and refuses nowhere to go', () => {
+    const r = deleteGroup(state(), 'All sites', 'Mine')!
+    expect(r.pages.find((p) => p.id === 'default')!.group).toBe('All sites')
+    expect(r.pages.find((p) => p.id === 'beacon')!.group).toBe('Mine')
+    expect(r.groupOrder).toEqual(['Best Sudoku', 'Mine', 'Empty'])
+    expect(deleteGroup(state(), 'Empty', null)!.groupOrder).toEqual(['All sites', 'Best Sudoku', 'Mine'])
+    expect(deleteGroup(state(), 'Mine', null)).toBeNull()
+    expect(deleteGroup(state(), 'Mine', 'Mine')).toBeNull()
+    // a destination that isn't listed yet joins the order
+    expect(deleteGroup(state(), 'Mine', 'Archive')!.groupOrder).toEqual(['All sites', 'Best Sudoku', 'Empty', 'Archive'])
+  })
+  it('addGroup lists a new, empty group last; a taken name is refused', () => {
+    expect(addGroup(state(), ' Star  Rupture ')!.groupOrder).toEqual(['All sites', 'Best Sudoku', 'Mine', 'Empty', 'Star Rupture'])
+    expect(addGroup(state(), 'mine')).toBeNull()
+    expect(addGroup({ pages: state().pages }, 'X')!.groupOrder).toEqual(['All sites', 'Best Sudoku', 'Mine', 'X'])
   })
 })

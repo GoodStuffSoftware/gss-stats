@@ -1,14 +1,15 @@
 <script setup lang="ts">
-import { reactive, ref, watch, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
+import { reactive, ref, watch, watchEffect, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import type { DashboardConfig, DashboardPage, Widget, GlobalFilters } from './types'
-import { defaultConfig, normalizeConfig, defaultWidgetsForPage, clonePage, cryptoId, isBestSudokuLaunchPage, isBestSudokuPopupsPage, isCampaignComparePage, BEST_SUDOKU_SITES, beaconizeWidget, cleanGroupName } from './lib/defaults'
+import { defaultConfig, normalizeConfig, defaultWidgetsForPage, clonePage, cryptoId, isBestSudokuLaunchPage, isBestSudokuPopupsPage, isCampaignComparePage, BEST_SUDOKU_SITES, beaconizeWidget, cleanGroupName, cleanPageName } from './lib/defaults'
 import { rangeLabel, ymdRangeToISO } from './lib/range'
 import { loadConfig, saveConfig } from './api'
 import { loadSites, sitesTree, tokenLabel } from './sitesStore'
 import { isSiteDim, semanticKey, drillNeedsEventBeacons } from './lib/drill'
 import { sessionExpired, reauth } from './session'
 import { readViewerPrefs, writeViewerPrefs, initialPageId, readDarkPref, writeDarkPref } from './lib/viewerPrefs'
-import { rootOf, drillTrail, groupLandingPage, pagesToDelete, movePageToGroup } from './lib/nav'
+import { rootOf, drillTrail, drillParentFor, groupLandingPage, pagesToDelete, movePageToGroup, landingAfterDelete, orderedGroups, pathLabel, renameGroup, deleteGroup, type GroupResult, type RenameTarget } from './lib/nav'
+import { applyGroupDraft, applyPageDraft, type GroupDraft, type PageDraft } from './lib/wizards'
 import { SearchIcon, MenuIcon, EllipsisIcon, StarIcon, type IconKey } from './lib/icons'
 import NavBreadcrumb from './components/nav/NavBreadcrumb.vue'
 import SearchPalette from './components/nav/SearchPalette.vue'
@@ -16,6 +17,7 @@ import NavDrawer from './components/nav/NavDrawer.vue'
 import PageMenu from './components/nav/PageMenu.vue'
 import IconPicker from './components/nav/IconPicker.vue'
 import GroupBadge from './components/nav/GroupBadge.vue'
+import DeleteGroupDialog from './components/nav/DeleteGroupDialog.vue'
 import { isTouchDevice } from './lib/responsive'
 import { TRACKING_ACTIVATION_DATE_ET } from './lib/popupEvents'
 import NoteBlock from './components/NoteBlock.vue'
@@ -79,6 +81,7 @@ onMounted(async () => {
   config.pages = norm.pages
   config.syncRange = norm.syncRange
   config.groupMeta = norm.groupMeta
+  config.groupOrder = norm.groupOrder
   activePageId.value = initialPageId(norm.pages, readViewerPrefs(), norm.activePageId)
 
   await nextTick()
@@ -186,14 +189,75 @@ function duplicatePage(id: string) {
   config.pages.push(clone)
   switchPage(clone.id)
 }
-function renamePage(id: string) {
-  const p = config.pages.find((x) => x.id === id)
-  if (!p) return
-  const name = window.prompt('Rename page', p.name)
-  if (name && name.trim()) p.name = name.trim()
+// ── In-place rename ─────────────────────────────────────────────────────────────
+// Every name on screen (breadcrumb, drawer, search, the ⋯ menus, the document title) is rendered
+// straight from `config`, so a rename shows everywhere at once. `renaming` says which name is being
+// edited and where its field is (the drawer row or the breadcrumb segment).
+const renaming = ref<RenameTarget | null>(null)
+function startRename(t: RenameTarget) {
+  renaming.value = t
 }
-// Delete: the page and its drill pages together, asked once. ★ Overview (the default page) can't
-// be deleted, nor the last page.
+function renamePageTo(id: string, raw: string) {
+  renaming.value = null
+  const p = config.pages.find((x) => x.id === id)
+  const name = cleanPageName(raw)
+  if (p && name) p.name = name
+}
+// The shared config changes in one step: every page in the group, the group order and groupMeta.
+function applyGroups(r: GroupResult) {
+  config.pages = r.pages
+  config.groupOrder = r.groupOrder
+  config.groupMeta = r.groupMeta
+}
+function renameGroupTo(from: string, raw: string) {
+  renaming.value = null
+  const r = renameGroup(config, from, raw)
+  if (!r.ok) return
+  const to = cleanGroupName(raw)
+  applyGroups(r.result)
+  // …and this viewer's own memory of it (collapsed, last page viewed there)
+  const prefs = readViewerPrefs()
+  if (collapsedGroups.value.includes(from)) {
+    collapsedGroups.value = collapsedGroups.value.map((g) => (g === from ? to : g))
+    prefs.collapsed = collapsedGroups.value
+  }
+  if (prefs.lastByGroup && Object.hasOwn(prefs.lastByGroup, from)) {
+    const { [from]: last, ...rest } = prefs.lastByGroup
+    prefs.lastByGroup = { ...rest, [to]: last }
+  }
+  writeViewerPrefs(prefs)
+}
+// Delete group…: its pages go where the dialog says; ★ Overview never moves.
+const groupToDelete = ref<{ name: string; returnTo: HTMLElement | null } | null>(null)
+function askDeleteGroup(name: string, anchor: HTMLElement | null) {
+  groupToDelete.value = { name, returnTo: anchor }
+}
+function confirmDeleteGroup(name: string, dest: string | null) {
+  groupToDelete.value = null
+  const r = deleteGroup(config, name, dest)
+  if (!r) return
+  applyGroups(r)
+  if (collapsedGroups.value.includes(name)) {
+    collapsedGroups.value = collapsedGroups.value.filter((g) => g !== name)
+    writeViewerPrefs({ ...readViewerPrefs(), collapsed: collapsedGroups.value })
+  }
+}
+// + New (the drawer's wizards): a page, put in its group and opened; a group, listed (even empty)
+// with the pages picked for it moved in.
+function createPage(d: PageDraft) {
+  const { result, page } = applyPageDraft(config, d, activePage.value)
+  applyGroups(result)
+  drawerOpen.value = false
+  switchPage(page.id)
+}
+function createGroup(d: GroupDraft) {
+  const r = applyGroupDraft(config, d)
+  if (r) applyGroups(r)
+}
+// Delete: the page and every drill page under it, asked once. ★ Overview (the default page) can't
+// be deleted, nor the last page. When the page on screen goes, the viewer lands on its nearest
+// ancestor left, else the page before it in its group, else the group's first page, else ★ Overview
+// (lib/nav.ts landingAfterDelete).
 function deletePage(id: string) {
   const p = config.pages.find((x) => x.id === id)
   if (!p || p.isDefault || config.pages.length <= 1) return
@@ -204,20 +268,20 @@ function deletePage(id: string) {
     ? `Delete "${p.name}" and its ${drills} drill page${drills === 1 ? '' : 's'}? This can't be undone.`
     : `Delete page "${p.name}"? This can't be undone.`
   if (!confirm(msg)) return
-  const parentId = p.parentId
+  const before = [...config.pages]
   config.pages = config.pages.filter((x) => !gone.has(x.id))
   const fallback = config.pages.find((x) => x.isDefault) ?? config.pages[0]
   if (gone.has(config.activePageId)) config.activePageId = fallback.id
-  if (gone.has(activePageId.value)) switchPage(parentId && config.pages.some((x) => x.id === parentId) ? parentId : fallback.id)
+  if (gone.has(activePageId.value)) switchPage((landingAfterDelete(p, before, config.pages) ?? fallback).id)
 }
-// Move to group: the page and its drill pages join the group, after the pages already there.
+// Move to group: the page and its drill pages join the group, after the pages already there (a drill
+// page becomes a page of its own there); a group named just now is listed last.
 function movePage(id: string, group: string) {
   const g = cleanGroupName(group)
-  if (g) config.pages = [...movePageToGroup(config.pages, id, g)]
-}
-function moveToNewGroup(id: string) {
-  const name = cleanGroupName(window.prompt('New group name', '') ?? '')
-  if (name) movePage(id, name)
+  if (!g) return
+  const groups = orderedGroups(config.pages, config.groupOrder)
+  config.pages = [...movePageToGroup(config.pages, id, g)]
+  config.groupOrder = groups.includes(g) ? groups : [...groups, g]
 }
 // Change icon…: a registry key, or null for Auto (resolved from the page's charts / its page).
 function setIcon(id: string, key: IconKey | null) {
@@ -268,7 +332,7 @@ function closePageMenu(reason: 'action' | 'dismiss' = 'dismiss') {
   // the action, takes it itself). If that row is gone (deleted), to the drawer's current row.
   if (reason !== 'action') return
   nextTick(() => {
-    if (iconFor.value) return
+    if (iconFor.value || renaming.value) return
     if (anchor?.isConnected) anchor.focus()
     else document.querySelector<HTMLElement>('#nav-drawer .dr-page[aria-current="page"], #nav-drawer .dr-close')?.focus()
   })
@@ -286,6 +350,16 @@ function pickIcon(key: IconKey | null) {
 const drawerOpen = ref(false)
 const drawerBtn = ref<HTMLElement | null>(null)
 const collapsedGroups = ref<string[]>(readViewerPrefs().collapsed ?? [])
+// Pages whose drill pages this viewer folded away in the drawer (remembered in this browser).
+const collapsedPages = ref<string[]>(readViewerPrefs().collapsedPages ?? [])
+function togglePageFold(id: string) {
+  const next = collapsedPages.value.includes(id) ? collapsedPages.value.filter((x) => x !== id) : [...collapsedPages.value, id]
+  collapsedPages.value = next
+  writeViewerPrefs({ ...readViewerPrefs(), collapsedPages: next })
+}
+function renameFromMenu(id: string) {
+  startRename({ kind: 'page', key: id, where: pageMenu.value?.anchor.closest('#nav-drawer') ? 'drawer' : 'crumb' })
+}
 function toggleGroup(name: string) {
   const next = collapsedGroups.value.includes(name) ? collapsedGroups.value.filter((g) => g !== name) : [...collapsedGroups.value, name]
   collapsedGroups.value = next
@@ -295,13 +369,14 @@ function pickFromDrawer(id: string) {
   drawerOpen.value = false
   switchPage(id)
 }
-function newPageFromDrawer() {
-  drawerOpen.value = false
-  addPage()
-}
 // The ☰ button carries the current group's badge (★ on ★ Overview), so the group shows even when
 // the breadcrumb is short.
 const activeRoot = computed(() => rootOf(activePage.value, config.pages))
+// The browser tab says where you are, from the same config as everything else.
+watchEffect(() => {
+  const r = activeRoot.value
+  document.title = `${pathLabel(activePage.value, config.pages)}${r.isDefault ? '' : ` · ${r.group}`} · GSS Stats`
+})
 
 function restoreDefaultCharts(id: string) {
   const p = config.pages.find((x) => x.id === id) ?? activePage.value
@@ -474,16 +549,18 @@ function tagToHost(tag: string): string {
   for (const g of sitesTree.value) for (const s of g.subs) if (s.tag === tag) return s.host
   return tag
 }
-// A drill creates its page at once, nested under the ROOT page it came from (a drill from a drill
-// page nests under the same root), in that page's group, with no icon of its own (it shows its
-// root's, with a drill mark — lib/icons.ts). Its name is the trail of what it narrows the root
-// page to, joined with " › " (lib/nav.ts drillTrail).
+// A drill creates its page at once, nested under the page it was made from (a drill from a drill
+// page nests under that drill page, up to MAX_DRILL_DEPTH levels — lib/nav.ts drillParentFor), in
+// its group, with no icon of its own (it shows its top-level page's, with a drill mark —
+// lib/icons.ts). Its name is just what it narrows its parent to (lib/nav.ts drillTrail): the tree
+// and the breadcrumb show the rest of the path.
 function openFilteredPage() {
   const p = drillMenu.value
   if (!p) return
-  const root = rootOf(activePage.value, config.pages)
+  const parent = drillParentFor(activePage.value, config.pages)
+  const root = rootOf(parent, config.pages)
   const clone = clonePage(activePage.value, 'Filtered')
-  clone.parentId = root.id
+  clone.parentId = parent.id
   clone.group = root.group
   delete clone.icon
   if (p.dimension === 'date') {
@@ -493,7 +570,7 @@ function openFilteredPage() {
     clone.filters.since = since
     clone.filters.until = until
     clone.filters.rangeRel = '' // absolute range — don't recompute a rolling window on load
-    clone.name = drillTrail(clone.filters, root.filters, tokenLabel, p.label)
+    clone.name = drillTrail(clone.filters, parent.filters, tokenLabel, p.label)
   } else {
     if (isSiteDim(p.dimension)) {
       // site drill → the site multi-select (filters both datasets consistently)
@@ -531,7 +608,7 @@ function openFilteredPage() {
         ]
       }
     }
-    clone.name = drillTrail(clone.filters, root.filters, tokenLabel)
+    clone.name = drillTrail(clone.filters, parent.filters, tokenLabel)
   }
   config.pages.push(clone)
   switchPage(clone.id)
@@ -728,10 +805,16 @@ function toggleDark() {
         :pages="config.pages"
         :active="activePage"
         :group-meta="config.groupMeta"
+        :group-order="config.groupOrder"
         :compact="isMobile"
+        :renaming="renaming"
         @switch="switchPage"
         @switch-group="switchGroup"
         @new-page="addPage"
+        @rename-start="startRename"
+        @rename-page="renamePageTo"
+        @rename-group="renameGroupTo"
+        @rename-cancel="renaming = null"
       />
       <button
         ref="pageMenuBtn"
@@ -876,21 +959,32 @@ function toggleDark() {
       </Transition>
     </Teleport>
 
-    <SearchPalette :open="searchOpen" :pages="config.pages" :group-meta="config.groupMeta" @close="searchOpen = false" @pick="pickSearchResult" />
+    <SearchPalette :open="searchOpen" :pages="config.pages" :group-meta="config.groupMeta" :group-order="config.groupOrder" @close="searchOpen = false" @pick="pickSearchResult" />
     <NavDrawer
       :open="drawerOpen"
       :pages="config.pages"
       :active="activePage"
       :group-meta="config.groupMeta"
+      :group-order="config.groupOrder"
       :collapsed="collapsedGroups"
+      :collapsed-pages="collapsedPages"
       :menu-for="pageMenu?.id ?? null"
+      :renaming="renaming"
       :return-to="drawerBtn"
+      :compact="isMobile"
       @close="drawerOpen = false"
       @switch="pickFromDrawer"
       @menu="openPageMenu"
       @delete="deletePage"
-      @new-page="newPageFromDrawer"
       @toggle-group="toggleGroup"
+      @toggle-page="togglePageFold"
+      @rename-start="startRename"
+      @rename-page="renamePageTo"
+      @rename-group="renameGroupTo"
+      @rename-cancel="renaming = null"
+      @delete-group="askDeleteGroup"
+      @create-page="createPage"
+      @create-group="createGroup"
     />
     <PageMenu
       :open="!!pageMenu"
@@ -898,15 +992,24 @@ function toggleDark() {
       :page="pageMenuPage"
       :pages="config.pages"
       :group-meta="config.groupMeta"
+      :group-order="config.groupOrder"
       :sheet="isMobile"
       @close="closePageMenu"
-      @rename="renamePage"
+      @rename="renameFromMenu"
       @duplicate="duplicatePage"
       @change-icon="openIconPicker"
       @move="movePage"
-      @new-group="moveToNewGroup"
       @restore="restoreDefaultCharts"
       @delete="deletePage"
+    />
+    <DeleteGroupDialog
+      :group="groupToDelete?.name ?? null"
+      :pages="config.pages"
+      :group-order="config.groupOrder"
+      :group-meta="config.groupMeta"
+      :return-to="groupToDelete?.returnTo ?? null"
+      @cancel="groupToDelete = null"
+      @confirm="confirmDeleteGroup"
     />
     <IconPicker :open="!!iconFor" :page="iconPage" :pages="config.pages" :return-to="iconFor?.returnTo ?? null" @close="iconFor = null" @pick="pickIcon" />
 
