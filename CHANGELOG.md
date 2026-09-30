@@ -37,25 +37,38 @@ All notable changes to **gss-stats** are documented here. The format follows
   Mine.
 - **Every page has an icon.** It comes from what the page's charts show (traffic, map, pop-ups,
   campaigns, completions, ads, overview) unless someone picks one; a drill page shows the icon of
-  the page it came from with a small drill mark, and Traffic gets its own traffic-line icon.
-- **A breadcrumb in the header switches pages.** Group / page / drill page, each opening a list of
-  its neighbours: every group (and ★ Overview), the pages in the group (and a new page there), or
-  the other drill pages and the way back. Picking a group opens the page you last viewed in it.
-  Each group has a lettered, coloured badge. On a phone it shortens to group / page and the lists
-  open from the bottom of the screen.
+  its top-level page with a small drill mark, and Traffic gets its own traffic-line icon.
+- **A breadcrumb in the header switches pages.** Group / page / drill page / …, the whole path,
+  each opening a list: every group (and ★ Overview), the pages in the group with their drill pages
+  nested under them (and a new page there), or a drill page's siblings, its own drill pages and the
+  way back. Picking a group opens the page you last viewed in it. Each group has a lettered,
+  coloured badge. When the path is too long its middle folds into "…"; on a phone it always does,
+  and the lists open from the bottom of the screen.
 - **Every page is in a drawer behind ☰.** It opens over the charts on any screen: ★ Overview,
-  then each group (collapsible) with its pages and their icons, drill pages indented under their
-  page with × to delete them, a ⋯ menu on every page, and a new-page button. The ☰ button shows the
-  current group's badge.
-- **Every page has a menu.** Rename, duplicate, change icon, move to another group (or a new one),
-  restore default charts, delete. ★ Overview can't be moved or deleted.
+  then each group (collapsible) with its pages indented under it and each level of drill pages one
+  step further in (foldable), a ⋯ menu on every page and every group, × on drill pages, and
+  "+ New". The ☰ button shows the current group's badge.
+- **Every page has a menu.** Rename, duplicate, change icon, move to another group (or a new one
+  named right there), restore default charts, delete. Drill pages have the same menu; moving one
+  makes it a page of its own. ★ Overview can't be moved or deleted.
+- **Create pages and groups from the drawer.** "+ New" asks what to make and walks through a few
+  steps: a page's name, group and starting charts (blank, a copy, or a built-in page's defaults)
+  and icon; a group's name and which pages to move into it. A group can stay empty.
+- **Rename anything where it is.** Page and group names turn into a text field in the drawer or
+  the breadcrumb (from a menu, or by double-clicking a breadcrumb segment) — no pop-up prompts —
+  and the new name shows everywhere at once, the browser tab's title included.
+- **Groups can be renamed and deleted.** Renaming onto another group's name is refused rather than
+  merged; deleting a group says how many pages it holds and moves them to the group you pick
+  (Mine by default). ★ Overview never moves.
 - **Pick a page's icon.** Search about forty icons in five groups, or choose Auto, which shows
   what the page would get on its own.
 - **Press / to search every page.** Page names match first, then charts' titles, each result with
   its icon and group; arrow keys move, Enter opens, Esc closes.
 - **Drill pages nest under the page they came from.** A drill opens its page straight away, in the
-  same group, named by its trail (for example "mobile › California"); a drill from a drill page
-  nests under the same page.
+  same group, named by what it adds (for example "California" under "mobile"); a drill from a
+  drill page nests under that drill page, up to eight levels deep. Deleting a page deletes every
+  drill page under it, asked once; when the page you're on goes, you land on its parent, else the
+  page before it in its group, else the group's first page, else ★ Overview.
 - **The retest read shows whether the first-50 offer is actually visible.** The Accounts line
   now reports the first-50 counter and the offer signed-out visitors really see side by side,
   flags when they disagree, and $50-and-later and post-flight reads note that the promo arm was

@@ -41,7 +41,7 @@ function w(p: Omit<Widget, 'i'>): Widget {
 
 // Bumped to 13 for page navigation (see migrateNavV13): every page gets a `group` (built-ins by id,
 // others from a name prefix, else "Mine"), drill pages can carry a `parentId`, pages an `icon`, the
-// config an optional `groupMeta`; the Best Sudoku pages lose their "Best Sudoku · " name prefix (the
+// config an optional `groupMeta` and `groupOrder` (normGroupOrder); the Best Sudoku pages lose their "Best Sudoku · " name prefix (the
 // group shows it); the pre-v13 tab order becomes the stored order (no more reorder on load); and
 // `activePageId` becomes the landing page for a first-time viewer (★ Overview) — each viewer's own
 // current page lives in their browser (lib/viewerPrefs.ts). functions/api/config.ts backs the stored
@@ -945,44 +945,74 @@ function normPage(p: any, i: number): DashboardPage {
 // Page groups, drill-page parents, page icons and group badges. The shared config only ever holds
 // short, validated strings for these (never markup or SVG): lib/icons.ts maps an icon key to a
 // component and a group name to its badge.
-const GROUP_NAME_MAX = 60
+export const GROUP_NAME_MAX = 60
 /** A group name as stored: whitespace collapsed, trimmed, capped; '' when there is none. */
 export function cleanGroupName(raw: unknown): string {
   return typeof raw === 'string' ? raw.replace(/\s+/g, ' ').trim().slice(0, GROUP_NAME_MAX).trim() : ''
+}
+/** The longest page name the rename field and the wizard accept. */
+export const PAGE_NAME_MAX = 80
+/** A page name as typed in: whitespace collapsed, trimmed, capped; '' when there is none. */
+export function cleanPageName(raw: unknown): string {
+  return typeof raw === 'string' ? raw.replace(/\s+/g, ' ').trim().slice(0, PAGE_NAME_MAX).trim() : ''
 }
 // An icon registry key: lowercase letters, digits and dashes. A well-formed key the registry does
 // not know is kept (it resolves to the generic page icon, lib/icons.ts), so a key added to the
 // registry later still works for a config saved before it.
 const ICON_KEY_RE = /^[a-z0-9][a-z0-9-]{0,39}$/
 
-/** Every load: a drill page's `parentId` must name an existing ROOT page (one with no parent of its
- * own) other than itself, and the default page is never a drill page. A parent that is itself a
- * drill page is followed up to its root (a drill from a drill page nests under the same root); a
- * missing parent or a cycle drops the link, leaving an ordinary page. A drill page always sits in
- * its root's group. Mutates the (freshly normalised) pages in place. */
+/** How deep drill pages nest: a top-level page is depth 0, its drill pages 1, theirs 2, … A drill
+ * made from a page already this deep attaches to its ancestor one level up (lib/nav.ts
+ * drillParentFor), and a stored tree deeper than this is re-attached the same way on load. */
+export const MAX_DRILL_DEPTH = 8
+
+/** Every load: a drill page's `parentId` must name an existing page other than itself (its
+ * IMMEDIATE parent — a drill from a drill page nests under that drill page), the chain of parents
+ * must end at a top-level page without looping, and the default page is never a drill page. A
+ * missing parent, a self-link or a link that closes a loop is dropped (leaving an ordinary page); a
+ * page nested deeper than MAX_DRILL_DEPTH is re-attached to its ancestor at depth
+ * MAX_DRILL_DEPTH - 1. Every drill page sits in its top-level page's group. Mutates the (freshly
+ * normalised) pages in place. */
 export function normDrillLinks(pages: DashboardPage[]): void {
   const byId = new Map(pages.map((p) => [p.id, p] as const))
+  // 1) links to nothing, to itself, from the default page, or closing a loop: dropped
   for (const p of pages) {
     if (!p.parentId) continue
+    const parent = byId.get(p.parentId)
+    if (!parent || parent === p || p.isDefault) {
+      delete p.parentId
+      continue
+    }
     const seen = new Set([p.id])
-    let cur = byId.get(p.parentId)
-    let ok = true
-    while (cur && cur.parentId) {
+    let cur: DashboardPage | undefined = parent
+    while (cur) {
       if (seen.has(cur.id)) {
-        ok = false
+        delete p.parentId
         break
       }
       seen.add(cur.id)
-      const next = byId.get(cur.parentId)
-      if (!next) break // cur's own parent is gone: cur is the root (its link is dropped when reached)
-      cur = next
+      cur = cur.parentId ? byId.get(cur.parentId) : undefined
     }
-    if (!ok || !cur || cur.id === p.id || p.isDefault) delete p.parentId
-    else p.parentId = cur.id
   }
+  // 2) the ancestors, nearest first (no loops are left)
+  const chain = (p: DashboardPage): DashboardPage[] => {
+    const out: DashboardPage[] = []
+    let cur = p.parentId ? byId.get(p.parentId) : undefined
+    while (cur) {
+      out.push(cur)
+      cur = cur.parentId ? byId.get(cur.parentId) : undefined
+    }
+    return out
+  }
+  // 3) too deep: re-attached to the ancestor at depth MAX_DRILL_DEPTH - 1 (only ever lowers depths)
   for (const p of pages) {
-    const root = p.parentId ? byId.get(p.parentId) : undefined
-    if (root) p.group = root.group
+    const up = chain(p)
+    if (up.length > MAX_DRILL_DEPTH) p.parentId = up[up.length - MAX_DRILL_DEPTH].id
+  }
+  // 4) a drill page is in its top-level page's group
+  for (const p of pages) {
+    const up = chain(p)
+    if (up.length) p.group = up[up.length - 1].group
   }
 }
 
@@ -1082,6 +1112,44 @@ export function normGroupMeta(raw: unknown): Record<string, GroupMeta> | undefin
     if (m.color || m.logo) out.push([group, m])
   }
   return out.length ? Object.fromEntries(out) : undefined
+}
+
+// groupOrder (layout version 13, additive): the drawer's group order, including groups that have
+// no page yet. Stored only when it says more than the pages do (see normGroupOrder).
+const GROUP_ORDER_MAX = 50
+/** The groups the pages file under, in the order they first appear: every top-level page's group
+ * except ★ Overview's (the default page is shown pinned, outside the groups). */
+export function pageGroupsOf(pages: readonly DashboardPage[]): string[] {
+  const ids = new Set(pages.map((p) => p.id))
+  const out: string[] = []
+  for (const p of pages) {
+    if (p.isDefault || (p.parentId && p.parentId !== p.id && ids.has(p.parentId))) continue
+    if (!out.includes(p.group)) out.push(p.group)
+  }
+  return out
+}
+/** Every group, in display order: `order` first, then the pages' groups it misses (pageGroupsOf). */
+export function unionGroupOrder(order: readonly string[], pages: readonly DashboardPage[]): string[] {
+  const out = [...order]
+  for (const g of pageGroupsOf(pages)) if (!out.includes(g)) out.push(g)
+  return out
+}
+/** Every load: the stored list sanitised (strings only, cleaned like a group name, no repeats, at
+ * most GROUP_ORDER_MAX kept), then every group the pages use that it misses appended in the order
+ * they first appear; groups with no page stay listed. undefined when the result is exactly the
+ * order the pages give on their own (nothing worth storing). */
+export function normGroupOrder(raw: unknown, pages: readonly DashboardPage[]): string[] | undefined {
+  const listed: string[] = []
+  if (Array.isArray(raw)) {
+    for (const x of raw.slice(0, GROUP_ORDER_MAX * 4)) {
+      if (listed.length >= GROUP_ORDER_MAX) break
+      const g = cleanGroupName(x)
+      if (g && !listed.includes(g)) listed.push(g)
+    }
+  }
+  const all = unionGroupOrder(listed, pages)
+  const derived = pageGroupsOf(pages)
+  return all.length === derived.length && all.every((g, i) => g === derived[i]) ? undefined : all
 }
 
 // Normalize a loaded config. Handles v2 (pages), migrates v1 (single page), and
@@ -1205,7 +1273,8 @@ export function normalizeConfig(raw: any): DashboardConfig {
     const wanted = version < 13 ? pinnedId : raw.activePageId
     const activePageId = ordered.some((p: DashboardPage) => p.id === wanted) ? wanted : pinnedId
     const groupMeta = normGroupMeta(raw.groupMeta)
-    return { version: CONFIG_VERSION, activePageId, pages: ordered, syncRange: !!raw.syncRange, ...(groupMeta ? { groupMeta } : {}) }
+    const groupOrder = normGroupOrder(raw.groupOrder, ordered)
+    return { version: CONFIG_VERSION, activePageId, pages: ordered, syncRange: !!raw.syncRange, ...(groupMeta ? { groupMeta } : {}), ...(groupOrder ? { groupOrder } : {}) }
   }
   // v1 — single page; wrap as the default page
   if (raw && typeof raw === 'object' && Array.isArray(raw.widgets)) {
@@ -1228,7 +1297,7 @@ export function cryptoId(): string {
 }
 
 // Deep-clone a page with fresh ids (for duplication). The copy keeps the source's group and icon,
-// and a copy of a drill page stays a drill page of the same root (its parentId); callers that make
+// and a copy of a drill page stays a drill page of the same parent (its parentId); callers that make
 // a new ROOT page (+ Page) or a new drill (App.vue openFilteredPage) set parentId/icon themselves.
 export function clonePage(src: DashboardPage, name: string): DashboardPage {
   const id = cryptoId()

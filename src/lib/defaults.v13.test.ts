@@ -20,9 +20,11 @@ import {
   isBestSudokuPopupsPage,
   isCampaignComparePage,
   isOverviewPage,
+  MAX_DRILL_DEPTH,
   migrateNavV13,
   normalizeConfig,
   normGroupMeta,
+  normGroupOrder,
 } from './defaults'
 import type { DashboardConfig, DashboardPage } from '../types'
 import PROD_V8 from './__fixtures__/prodLayout.v8.json'
@@ -330,12 +332,12 @@ describe('v13: the owner\'s pages', () => {
 describe('v13: drill links and fields, checked on every load', () => {
   const base = () => [rawPage('default', 'Overview', { isDefault: true, group: 'All sites' }), rawPage('t', 'Traffic', { group: 'Best Sudoku' })]
 
-  it('keep a drill page under its root, in the root\'s group', () => {
+  it('keep a drill page under its parent, in its top-level page\'s group', () => {
     const cfg = V13([...base(), rawPage('k', 'mobile', { group: 'Mine', parentId: 't' })])
     expect(cfg.pages[2]).toMatchObject({ parentId: 't', group: 'Best Sudoku' })
   })
 
-  it('re-point a drill of a drill page to the root, and drop a link to a missing page, to itself, or from the default page', () => {
+  it('keep a drill of a drill page under that drill page, and drop a link to a missing page, to itself, or from the default page', () => {
     const cfg = V13([
       rawPage('default', 'Overview', { isDefault: true, group: 'All sites', parentId: 't' }),
       rawPage('t', 'Traffic', { group: 'Best Sudoku' }),
@@ -348,7 +350,7 @@ describe('v13: drill links and fields, checked on every load', () => {
       ['default', null, 'All sites'],
       ['t', null, 'Best Sudoku'],
       ['k1', 't', 'Best Sudoku'],
-      ['k2', 't', 'Best Sudoku'],
+      ['k2', 'k1', 'Best Sudoku'],
       ['gone', null, 'Mine'],
       ['self', null, 'Mine'],
     ])
@@ -360,6 +362,47 @@ describe('v13: drill links and fields, checked on every load', () => {
     const linked = cfg.pages.filter((p) => p.parentId)
     expect(linked).toHaveLength(1)
     expect(cfg.pages.find((p) => p.id === linked[0].parentId)!.parentId).toBeUndefined()
+  })
+
+  it('keep a deep tree as it is, three levels down, and repair a loop anywhere in it', () => {
+    const cfg = V13([
+      ...base(),
+      rawPage('m', 'mobile', { parentId: 't' }),
+      rawPage('ca', 'California', { parentId: 'm' }),
+      rawPage('la', 'Los Angeles', { parentId: 'ca', group: 'Elsewhere' }),
+      rawPage('x', 'X', { parentId: 'y' }),
+      rawPage('y', 'Y', { parentId: 'z' }),
+      rawPage('z', 'Z', { parentId: 'x' }),
+    ])
+    expect(cfg.pages.slice(2, 5).map((p) => [p.id, p.parentId, p.group])).toEqual([
+      ['m', 't', 'Best Sudoku'],
+      ['ca', 'm', 'Best Sudoku'],
+      ['la', 'ca', 'Best Sudoku'],
+    ])
+    // x → y → z → x: the first link met that closes the loop goes; the others stay a chain
+    expect(cfg.pages.slice(5).map((p) => [p.id, p.parentId ?? null])).toEqual([
+      ['x', null],
+      ['y', 'z'],
+      ['z', 'x'],
+    ])
+    expect(stable(normalizeConfig(clone(cfg)))).toEqual(stable(cfg))
+  })
+
+  it(`re-attach a page nested deeper than ${MAX_DRILL_DEPTH} levels to its ancestor at depth ${MAX_DRILL_DEPTH - 1}`, () => {
+    const chain = [rawPage('d0', 'd0', { group: 'Deep' })]
+    for (let i = 1; i <= MAX_DRILL_DEPTH + 2; i++) chain.push(rawPage(`d${i}`, `d${i}`, { parentId: `d${i - 1}` }))
+    const cfg = V13([rawPage('default', 'Overview', { isDefault: true }), ...chain])
+    const parent = (id: string) => cfg.pages.find((p) => p.id === id)!.parentId
+    expect(parent(`d${MAX_DRILL_DEPTH}`)).toBe(`d${MAX_DRILL_DEPTH - 1}`)
+    expect(parent(`d${MAX_DRILL_DEPTH + 1}`)).toBe(`d${MAX_DRILL_DEPTH - 1}`)
+    expect(parent(`d${MAX_DRILL_DEPTH + 2}`)).toBe(`d${MAX_DRILL_DEPTH - 1}`) // its parent moved up, so it is one level too deep too
+    const depth = (id: string) => {
+      let n = 0
+      for (let p = parent(id); p; p = parent(p)) n++
+      return n
+    }
+    expect(Math.max(...cfg.pages.map((p) => depth(p.id)))).toBe(MAX_DRILL_DEPTH)
+    expect(cfg.pages.every((p) => p.isDefault || p.group === 'Deep')).toBe(true)
   })
 
   it('a drill from ★ Overview nests under it', () => {
@@ -428,6 +471,47 @@ describe('v13: groupMeta', () => {
     const pages = [rawPage('default', 'Overview', { isDefault: true })]
     expect(normalizeConfig({ version: 13, activePageId: 'default', pages, groupMeta: { Mine: { color: 'g5' } } }).groupMeta).toEqual({ Mine: { color: 'g5' } })
     expect('groupMeta' in normalizeConfig({ version: 13, activePageId: 'default', pages })).toBe(false)
+  })
+})
+
+describe('v13: groupOrder (additive, stored only when it says more than the pages)', () => {
+  const pages = () => [
+    rawPage('default', 'Overview', { isDefault: true, group: 'All sites' }),
+    rawPage('beacon', 'Beacon', { group: 'All sites' }),
+    rawPage('t', 'Traffic', { group: 'Best Sudoku' }),
+    rawPage('m', 'mine', { group: 'Mine' }),
+  ]
+  it('is left out when it is just the order the pages give (and when absent or garbage)', () => {
+    expect('groupOrder' in V13(pages())).toBe(false)
+    expect('groupOrder' in V13(pages(), { groupOrder: ['All sites', 'Best Sudoku', 'Mine'] })).toBe(false)
+    expect('groupOrder' in V13(pages(), { groupOrder: 'Mine' })).toBe(false)
+    expect('groupOrder' in V13(pages(), { groupOrder: [7, null, {}, '  '] })).toBe(false)
+  })
+  it('keeps an order of its own and empty groups; groups the pages use but it misses follow, in page order', () => {
+    const cfg = V13(pages(), { groupOrder: ['Mine', 'Empty', 'All sites'] })
+    expect(cfg.groupOrder).toEqual(['Mine', 'Empty', 'All sites', 'Best Sudoku'])
+    // ★ Overview's group alone doesn't make a group: listed or not, it shows only when listed
+    const onlyPinned = V13([rawPage('default', 'Overview', { isDefault: true, group: 'All sites' }), rawPage('m', 'M', { group: 'Mine' })], { groupOrder: ['All sites'] })
+    expect(onlyPinned.groupOrder).toEqual(['All sites', 'Mine'])
+  })
+  it('sanitises: strings only, cleaned like a group name, no repeats, at most 50', () => {
+    expect(normGroupOrder(['  Star   Rupture ', 'Star Rupture', 42, '', 'x'.repeat(99), 'Mine'], [])).toEqual(['Star Rupture', 'x'.repeat(60), 'Mine'])
+    const many = Array.from({ length: 80 }, (_, i) => `G${i}`)
+    expect(normGroupOrder(many, [])).toHaveLength(50)
+    // …but every group a page uses is always listed, cap or not
+    const withPage = normGroupOrder(many, [{ id: 'p', name: 'P', isDefault: false, group: 'Real', filters: {} as any, widgets: [] }])!
+    expect(withPage).toHaveLength(51)
+    expect(withPage.at(-1)).toBe('Real')
+  })
+  it('is idempotent', () => {
+    const once = V13(pages(), { groupOrder: ['Empty', 'Mine', 'Mine', ' Best  Sudoku '] })
+    expect(once.groupOrder).toEqual(['Empty', 'Mine', 'Best Sudoku', 'All sites'])
+    expect(stable(normalizeConfig(clone(once)))).toEqual(stable(once))
+  })
+  it('the production layouts migrate exactly as before: no groupOrder is added', () => {
+    expect('groupOrder' in normalizeConfig(clone(PROD_V12))).toBe(false)
+    expect('groupOrder' in normalizeConfig(clone(PROD_V9))).toBe(false)
+    expect('groupOrder' in defaultConfig()).toBe(false)
   })
 })
 

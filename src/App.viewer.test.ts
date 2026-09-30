@@ -92,9 +92,13 @@ describe('App — the active page is per viewer (layout version 13)', () => {
     const w = await mountApp()
     await goTo(w, 'Traffic')
     await w.find('.page-menu-btn').trigger('click')
-    vi.stubGlobal('prompt', vi.fn(() => 'Traffic (all)'))
+    await flushPromises()
     Array.from(document.querySelectorAll<HTMLElement>('#page-menu [role="menuitem"]')).find((b) => b.textContent!.trim() === 'Rename')!.click()
-    vi.unstubAllGlobals()
+    await flushPromises()
+    const input = document.querySelector<HTMLInputElement>('nav.crumbs .seg.editing input')!
+    input.value = 'Traffic (all)'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
     await pastDebounce()
     await flushPromises()
     expect(saveConfig).toHaveBeenCalledTimes(1)
@@ -105,7 +109,7 @@ describe('App — the active page is per viewer (layout version 13)', () => {
     w.unmount()
   })
 
-  it('a drill opens a new page at once, nested under the root page, in its group, named by its trail', async () => {
+  it('a drill opens a new page at once, nested under the page it came from, in its group, named by its own step', async () => {
     localStorage.setItem(VIEWER_PREFS_KEY, JSON.stringify({ active: 'bsk-launch' }))
     const w = await mountApp()
     w.findComponent(Dashboard).vm.$emit('drill', { widgetId: 'bsk-device', dimension: 'device', dataset: 'geo', value: 'mobile', label: 'mobile', x: 10, y: 10 })
@@ -115,7 +119,7 @@ describe('App — the active page is per viewer (layout version 13)', () => {
     const first = remembered().active as string
     expect(first).not.toBe('bsk-launch')
 
-    // …and a drill from that drill page nests under the same root, its name the whole trail
+    // …and a drill from that drill page nests under THAT drill page, named by what it adds
     w.findComponent(Dashboard).vm.$emit('drill', { widgetId: 'x', dimension: 'region', dataset: 'geo', value: 'CA', label: 'California', x: 10, y: 10 })
     await flushPromises()
     ;(document.querySelector('.drill-act') as HTMLButtonElement).click()
@@ -126,8 +130,10 @@ describe('App — the active page is per viewer (layout version 13)', () => {
     const drills = saved.pages.filter((p) => p.parentId)
     expect(drills.map((p) => [p.name, p.parentId, p.group, p.icon ?? null])).toEqual([
       ['mobile', 'bsk-launch', 'Best Sudoku', null],
-      ['mobile › California', 'bsk-launch', 'Best Sudoku', null],
+      ['California', first, 'Best Sudoku', null],
     ])
+    // the breadcrumb shows the whole path
+    expect(w.findAll('nav.crumbs .seg').map((x) => x.text())).toEqual(['BSBest Sudoku', 'Traffic', 'mobile', 'California'])
     w.unmount()
   })
 })

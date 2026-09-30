@@ -1,5 +1,5 @@
 // Per-viewer navigation state (layout version 13): which page this viewer is on, the page they
-// last viewed in each group, and which drawer groups they collapsed. It lives in this browser's
+// last viewed in each group, and which drawer groups and drill trees they collapsed. It lives in this browser's
 // localStorage, NOT in the shared dashboard config: everyone shares one config in KV and the last
 // write wins, so one person switching pages must never move everyone else (or cost a KV write).
 //
@@ -17,6 +17,8 @@ export interface ViewerPrefs {
   lastByGroup?: Record<string, string>
   /** Drawer groups this viewer collapsed. */
   collapsed?: string[]
+  /** Pages whose drill pages this viewer collapsed in the drawer (page ids). */
+  collapsedPages?: string[]
 }
 
 const ID_MAX = 200
@@ -42,6 +44,10 @@ export function readViewerPrefs(): ViewerPrefs {
   if (Array.isArray(r.collapsed)) {
     const c = r.collapsed.filter(isId).slice(0, 100)
     if (c.length) out.collapsed = c
+  }
+  if (Array.isArray(r.collapsedPages)) {
+    const c = r.collapsedPages.filter(isId).slice(0, 200)
+    if (c.length) out.collapsedPages = c
   }
   return out
 }

@@ -61,6 +61,11 @@ async function key(el: Element, k: string) {
   el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }))
   await flushPromises()
 }
+async function typeInto(input: HTMLInputElement, text: string) {
+  input.value = text
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  await flushPromises()
+}
 
 describe('App — breadcrumb (Group / Page / Drill)', () => {
   beforeEach(() => {
@@ -87,9 +92,11 @@ describe('App — breadcrumb (Group / Page / Drill)', () => {
     const pageSeg = segs(w)[1]
     await pageSeg.trigger('click')
     expect(pageSeg.attributes('aria-expanded')).toBe('true')
-    expect(rowTexts('crumb-pages')).toEqual(['Overview', 'Campaigns', 'Pop-ups', 'Traffic3 drills', 'New page in Best Sudoku'])
-    // focus starts on the current page, and ↓ moves to the next item
-    expect(document.activeElement?.textContent).toContain('Traffic')
+    // every page of the group, each with its drill pages nested under it, all of them pickable
+    expect(rowTexts('crumb-pages')).toEqual(['Overview', 'Campaigns', 'Pop-ups', 'Traffic', 'mobile', 'reddit.com', 'mobile › California', 'New page in Best Sudoku'])
+    expect(rows('crumb-pages').map((r) => r.classList.contains('kid'))).toEqual([false, false, false, false, true, true, true, false])
+    // focus starts on the page on screen, and ↓ moves to the next item
+    expect(document.activeElement?.textContent).toContain('mobile › California')
     await key(document.activeElement!, 'ArrowDown')
     expect(document.activeElement?.textContent).toContain('New page in Best Sudoku')
     await key(document.activeElement!, 'ArrowDown') // wraps
@@ -112,7 +119,7 @@ describe('App — breadcrumb (Group / Page / Drill)', () => {
     const w = await mountApp('d-mobile-ca')
     // this viewer's last page in Best Sudoku is the drill page they're on
     await segs(w)[0].trigger('click')
-    expect(rowTexts('crumb-groups')).toEqual(['Overviewpinned', 'ASAll sites1', 'BSBest Sudoku4', 'MIMine4'])
+    expect(rowTexts('crumb-groups')).toEqual(['Overviewpinned', 'ASAll sites1', 'BSBest Sudoku4', 'MIMine4', 'Rename Best Sudoku'])
     rows('crumb-groups')[3].click() // Mine
     await flushPromises()
     expect(shownPage(w)).toBe('goodstuffsoftware.com') // Mine's first page
@@ -239,7 +246,7 @@ describe('App — page drawer, page menu, icon picker', () => {
     await openDrawer(w)
     expect(drawer()!.getAttribute('role')).toBe('dialog')
     expect(w.find('.drawer-btn').attributes('aria-expanded')).toBe('true')
-    const groups = Array.from(drawer()!.querySelectorAll('.dr-gbtn')).map((g) => ['.group-badge', '.nm', '.cnt'].map((c) => g.querySelector(c)!.textContent!.trim()))
+    const groups = Array.from(drawer()!.querySelectorAll('.dr-gh')).map((g) => ['.group-badge', '.nm', '.cnt'].map((c) => g.querySelector(c)!.textContent!.trim()))
     expect(groups).toEqual([
       ['AS', 'All sites', '1'],
       ['BS', 'Best Sudoku', '4'],
@@ -340,7 +347,7 @@ describe('App — page drawer, page menu, icon picker', () => {
     ])
   })
 
-  it('delete asks once and removes the page with its drill pages; the viewer lands back on ★ Overview', async () => {
+  it('delete asks once and removes the page with its drill pages; the viewer lands on the page before it', async () => {
     const w = await mountApp('d-mobile')
     const confirm = vi.fn(() => true)
     vi.stubGlobal('confirm', confirm)
@@ -354,7 +361,7 @@ describe('App — page drawer, page menu, icon picker', () => {
     const saved = (await lastSave())!
     expect(saved.pages.filter((p) => ['bsk-launch', 'd-mobile', 'd-reddit', 'd-mobile-ca'].includes(p.id))).toEqual([])
     expect(saved.pages).toHaveLength(9)
-    expect(segTexts(w)).toEqual(['Overview'])
+    expect(segTexts(w)).toEqual(['BSBest Sudoku', 'Pop-ups'])
   })
 
   it('declining the confirm deletes nothing; × on a drill row deletes just that drill page', async () => {
@@ -392,12 +399,19 @@ describe('App — page drawer, page menu, icon picker', () => {
     await openRowMenu('Beacon')
     menuItem('Move to group')!.click()
     await flushPromises()
-    vi.stubGlobal('prompt', vi.fn(() => '  Star   Rupture '))
     menuItem('New group…')!.click()
     await flushPromises()
-    vi.unstubAllGlobals()
+    // named right there in the menu, no prompt: a taken name is refused inline
+    const field = document.querySelector<HTMLInputElement>('#page-menu input')!
+    expect(document.activeElement).toBe(field)
+    await typeInto(field, ' mine ')
+    await key(field, 'Enter')
+    expect(document.querySelector('#page-menu [role="alert"]')!.textContent).toBe('There\'s already a group called "Mine".')
+    await typeInto(field, '  Star   Rupture ')
+    await key(field, 'Enter')
     saved = (await lastSave())!
     expect(saved.pages.at(-1)).toMatchObject({ id: 'beacon', group: 'Star Rupture' })
+    expect(saved.groupOrder).toEqual(['All sites', 'Best Sudoku', 'Mine', 'Star Rupture'])
     expect(Array.from(drawer()!.querySelectorAll('.dr-gbtn .nm')).map((g) => g.textContent!.trim()).at(-1)).toBe('Star Rupture')
   })
 

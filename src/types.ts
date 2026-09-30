@@ -209,15 +209,16 @@ export interface DashboardPage {
   name: string
   isDefault: boolean // the default page (★ Overview) — not deletable; always restorable; shown pinned first
   // Navigation group (layout version 13): "All sites", "Best Sudoku", "Mine", … — a plain string,
-  // so a new product is a new group with no code change. Group order is the order groups first
-  // appear in `pages`; pages within a group keep their array order. The default page keeps its
-  // group in data but is shown pinned first, outside the groups.
+  // so a new product is a new group with no code change. Group order is DashboardConfig.groupOrder,
+  // then the order groups first appear in `pages`; pages within a group keep their array order.
+  // The default page keeps its group in data but is shown pinned first, outside the groups.
   group: string
-  // Drill pages only: the ROOT page this one was drilled from (a drill from a drill page nests
-  // under the same root). Shown nested under that page; deleted together with it.
+  // Drill pages only: the page this one was drilled from, its IMMEDIATE parent (a drill from a
+  // drill page nests under that drill page, up to lib/defaults.ts MAX_DRILL_DEPTH levels). Shown
+  // nested under it; deleted and moved together with it.
   parentId?: string
   // A lib/icons.ts registry key (e.g. "megaphone") someone picked. Unset = resolved
-  // automatically (inherited from the parent for a drill page, else from the page's charts).
+  // automatically (inherited from its top-level page for a drill page, else from its charts).
   icon?: string
   filters: GlobalFilters
   widgets: Widget[]
@@ -241,6 +242,11 @@ export interface DashboardConfig {
   // everywhere). Site selection and drill-downs stay per-page. Default off.
   syncRange?: boolean
   groupMeta?: Record<string, GroupMeta>
+  // The drawer's group order, and the groups that exist with no page in them yet (layout version
+  // 13, additive): every group name once, in display order. Groups the pages file under but this
+  // list misses are shown after it, in the order they first appear in `pages`. Absent = exactly
+  // that derived order (lib/defaults.ts normGroupOrder only stores it when it says more).
+  groupOrder?: string[]
 }
 
 export interface StatsRow {

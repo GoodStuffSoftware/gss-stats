@@ -8,7 +8,7 @@
 // doesn't know (removed later, or typed into the config by hand) resolves to the generic page icon.
 //
 // Every page shows an icon without anyone setting one (resolveIcon): the one someone picked, else
-// (a drill page) its root page's icon with a small drill mark, else the icon of the dataset most of
+// (a drill page) its top-level page's icon with a small drill mark, else the icon of the dataset most of
 // its charts read, else the generic page icon. Groups get a lettered badge and a colour computed
 // from their name (groupBadge), overridable per group with the config's groupMeta.
 import type { Component } from 'vue'
@@ -56,7 +56,7 @@ import {
   Wallet,
 } from '@lucide/vue'
 import type { DashboardPage, Dataset, GroupMeta, Widget } from '../types'
-import { parentOf } from './nav'
+import { ancestorsOf } from './nav'
 
 // The navigation UI's own glyphs (menus, the drill mark, …), re-exported so this file stays the
 // only one importing the icon library.
@@ -68,6 +68,11 @@ export {
   Ellipsis as EllipsisIcon,
   Menu as MenuIcon,
   Plus as PlusIcon,
+  ArrowLeft as BackIcon,
+  ArrowRight as ForwardIcon,
+  FilePlus2 as NewPageIcon,
+  FolderPlus as NewGroupIcon,
+  Pencil as RenameIcon,
   Search as SearchIcon,
   Sparkles as SparklesIcon,
   Star as StarIcon,
@@ -218,14 +223,17 @@ function ownIcon(page: DashboardPage): Omit<ResolvedIcon, 'drill'> {
 }
 
 /** The icon a page shows. First match wins: 1) the icon someone picked (page.icon; a key the
- * registry doesn't know falls back to the generic page icon), 2) a drill page shows its root
- * page's icon, 3) the icon of the dataset most of its charts read (chartsDataset), 4) the generic
- * page icon. A drill page always carries the drill mark. */
+ * registry doesn't know falls back to the generic page icon), 2) a drill page shows the icon of its
+ * nearest ancestor someone picked one for, else its top-level page's own icon (drill pages nest to
+ * any depth: "Traffic › mobile › California" shows Traffic's), 3) the icon of the dataset most of
+ * its charts read (chartsDataset), 4) the generic page icon. A drill page always carries the drill
+ * mark; a drill page moved out to a group of its own is a top-level page and resolves by 1, 3, 4. */
 export function resolveIcon(page: DashboardPage, pages: readonly DashboardPage[]): ResolvedIcon {
-  const parent = parentOf(page, pages)
-  const drill = !!parent
-  if (page.icon || !parent) return { ...ownIcon(page), drill }
-  return { key: ownIcon(parent).key, drill: true, source: 'inherited', from: parent }
+  const up = ancestorsOf(page, pages)
+  const drill = up.length > 0
+  if (page.icon || !drill) return { ...ownIcon(page), drill }
+  const from = up.find((a) => a.icon) ?? up[up.length - 1]
+  return { key: ownIcon(from).key, drill: true, source: 'inherited', from }
 }
 
 /** What "Auto" would show for a page: resolveIcon as if no icon had been picked. */
