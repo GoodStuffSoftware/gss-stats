@@ -81,6 +81,21 @@ describe('resolveIcon', () => {
     expect(resolveIcon(page('s', [wd('a', { dataset: 'popup' })], { parentId: 'gone' }), [])).toMatchObject({ key: 'app-window', drill: false })
   })
 
+  it('2 · inherited at any depth: the top-level page\'s icon (or the nearest ancestor someone picked one for)', () => {
+    const root = page('t', [wd('a', { dataset: 'geo' })], { icon: 'trending-up' })
+    const m = page('m', [wd('a', { dataset: 'popup' })], { parentId: 't' })
+    const ca = page('ca', [wd('a', { dataset: 'popup' })], { parentId: 'm' })
+    const la = page('la', [wd('a', { dataset: 'popup' })], { parentId: 'ca' })
+    const all = [root, m, ca, la]
+    expect(resolveIcon(la, all)).toMatchObject({ key: 'trending-up', source: 'inherited', drill: true, from: root })
+    const picked = [root, m, { ...ca, icon: 'flag' }, la]
+    expect(resolveIcon(la, picked)).toMatchObject({ key: 'flag', source: 'inherited', drill: true })
+    // moved out to a group of its own (no parent any more): its own icon from its charts, no mark
+    const { parentId: _p, ...promoted } = ca
+    expect(resolveIcon(promoted as typeof ca, [root, m, promoted as typeof ca, la])).toMatchObject({ key: 'app-window', source: 'charts', drill: false })
+    expect(resolveIcon(la, [root, m, promoted as typeof ca, la])).toMatchObject({ key: 'app-window', source: 'inherited', drill: true })
+  })
+
   it('3 · from charts, 4 · fallback', () => {
     expect(resolveIcon(page('p', [wd('a', { dataset: 'completions' })]), [])).toMatchObject({ key: 'trophy', source: 'charts', dataset: 'completions' })
     expect(resolveIcon(page('p', []), [])).toMatchObject({ key: FALLBACK_ICON, source: 'fallback', drill: false })
