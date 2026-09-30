@@ -1,6 +1,7 @@
 # ADR 0002: Google sign-in in the app, replacing Cloudflare Access
 
 - **Status:** Accepted (shipped in v0.5.0). The rollout is manual; see README "Auth".
+  Amended 2026-09-30: one hosted preview host (see the end).
 - **Date:** 2026-09-25
 - **Code:** `functions/_middleware.ts` (host guard, then the auth gate),
   `functions/_lib/auth.ts` (gate and OAuth flow), `functions/_lib/auth.test.ts`,
@@ -183,3 +184,30 @@ etc.), the signature must be verified first. To keep this ruling valid:
   junk code). The owner adds a Cloudflare rate-limiting rule on
   `/auth/google/callback` (README rollout step 5, before Access is removed) so a flood
   can't get the OAuth client throttled.
+
+## Amendment 2026-09-30: one hosted preview host
+
+A hosted preview at `https://dev.gss-stats.pages.dev` (a Pages preview deployment of
+branch `dev`) is now served, so changes can be checked on real infrastructure before they
+reach production. Everything above still holds for production.
+
+- **One extra host, preview-only.** The host guard also serves the hostname in the
+  `PREVIEW_HOST` variable when, and only when, it is set and the request host equals it
+  exactly (no case folding, suffix or wildcard match). `PREVIEW_HOST` is defined only in
+  `wrangler.toml`'s `[env.preview.vars]`, which Pages applies to preview deployments.
+  Production has no `[env.production]` section, so it keeps the unchanged top-level config
+  and never has `PREVIEW_HOST`; its host set is still the canonical domain plus loopback.
+  Every other `*.pages.dev` host (the production `gss-stats.pages.dev`, other branch aliases,
+  per-deployment hash URLs) still gets the 404, preview deployments included.
+- **Its own origin, its own OAuth redirect.** The redirect URI is still derived from the
+  request origin, so on the preview it is `https://dev.gss-stats.pages.dev/auth/google/callback`,
+  which the owner registers on the OAuth client. The session cookie is `__Host-` scoped to
+  that origin, so a preview session never works on production or the other way round.
+- **Separate config store.** The preview binds `STATS_CONFIG` to its own KV namespace
+  (`gss-stats-config-preview`), seeded once with a copy of production's `dashboard:default`,
+  so saving a layout on the preview never writes production's layout or its backups.
+- **Shared data.** The preview binds the same D1 databases and the same `ADS_SYNC` Worker
+  as production: it reads real data, and an ads refresh there runs a real sync.
+- **Its own secrets.** Pages keeps secrets per environment, so the preview is fail-closed
+  (503) until the owner sets its sign-in secrets under Preview. README "Deploy" →
+  "Preview (dev)" lists them.

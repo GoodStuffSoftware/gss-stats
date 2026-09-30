@@ -17,6 +17,10 @@ All notable changes to **gss-stats** are documented here. The format follows
   of collapsing a mixed window to one bound.
 
 ### Added
+- **A hosted preview at dev.gss-stats.pages.dev.** Preview deployments of branch `dev` are now
+  served (still behind Google sign-in) with their own saved-layout store, seeded from
+  production's, while reading the same live data; production's hosts, settings and saved layout
+  are unchanged.
 - **The retest morning read now publishes a rendered report page every run.** A build step turns
   the read's saved output and the daily narrative into one self-contained page (narrative, spend
   against the thresholds, release health, funnel, diagnostics, Play bulk reports, and the
