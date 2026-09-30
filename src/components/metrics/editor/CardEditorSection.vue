@@ -3,8 +3,8 @@
 // optional repeat, and its items — add/remove/reorder, each opening to the label/data/display/
 // gating pickers (CardEditorItem.vue).
 import { computed, useId } from 'vue'
-import { duplicateItem, emptyItem, moveBy } from '../../../lib/metrics/editorModel'
-import type { RepeatSpec, Section } from '../../../lib/metrics/types'
+import { duplicateItem, emptyItem, moveBy, withField } from '../../../lib/metrics/editorModel'
+import type { Label, RepeatSpec, Section } from '../../../lib/metrics/types'
 import CardEditorItem from './CardEditorItem.vue'
 import CardEditorLabel from './CardEditorLabel.vue'
 import CardEditorRepeat from './CardEditorRepeat.vue'
@@ -30,27 +30,58 @@ const LAYOUTS: { value: Section['layout']; label: string }[] = [
   { value: 'table', label: 'Table' },
 ]
 
-const titleModel = computed({
-  get: () => section.value.title,
-  set: (v) => {
-    section.value = { ...section.value, title: v }
-  },
-})
+// Optional labels (title, column heading, row-label heading): switching one off remembers it,
+// so switching it back on restores what the template had instead of starting from blank.
+type OptionalLabel = 'title' | 'columnLabel' | 'rowsLabel'
+const remembered: Partial<Record<OptionalLabel, Label>> = {}
+/** The column headings that were set when the columns were cleared (restored with them). */
+const setAside: Partial<Record<'columnLabel' | 'rowsLabel', Label>> = {}
+function labelModel(key: OptionalLabel) {
+  return computed<Label | undefined>({
+    get: () => section.value[key],
+    set: (v) => {
+      if (v === section.value[key]) return
+      section.value = withField(section.value, key, v)
+    },
+  })
+}
+function toggleLabel(key: OptionalLabel, on: boolean) {
+  if (on === (section.value[key] !== undefined)) return
+  if (!on) remembered[key] = section.value[key]
+  section.value = withField(section.value, key, on ? (remembered[key] ?? '') : undefined)
+}
+const titleModel = labelModel('title')
 const hasTitle = computed(() => section.value.title !== undefined)
 function toggleTitle(on: boolean) {
-  section.value = { ...section.value, title: on ? '' : undefined }
+  toggleLabel('title', on)
 }
 const repeatModel = computed({
   get: () => section.value.repeat,
   set: (v) => {
-    section.value = { ...section.value, repeat: v }
+    if (v === section.value.repeat) return
+    section.value = withField(section.value, 'repeat', v)
   },
 })
-/** A table's column repeat (Section.columns): items become rows, these instances columns. */
+/** A table's column repeat (Section.columns): items become rows, these instances columns. The
+ * column and row-label headings only apply with columns (validateCard), so clearing the columns
+ * sets them aside and choosing columns again brings them back. */
 const columnsModel = computed({
   get: () => section.value.columns,
   set: (v) => {
-    section.value = { ...section.value, columns: v }
+    if (v === section.value.columns) return
+    let next = withField(section.value, 'columns', v)
+    if (!v) {
+      for (const k of ['columnLabel', 'rowsLabel'] as const) {
+        if (next[k] !== undefined) setAside[k] = next[k]
+        next = withField(next, k, undefined)
+      }
+    } else if (!section.value.columns) {
+      for (const k of ['columnLabel', 'rowsLabel'] as const) {
+        if (next[k] === undefined && setAside[k] !== undefined) next = { ...next, [k]: setAside[k] }
+        delete setAside[k]
+      }
+    }
+    section.value = next
   },
 })
 
@@ -95,7 +126,7 @@ function removeAt(i: number) {
     </ul>
 
     <div class="field check">
-      <label><input type="checkbox" :checked="hasTitle" @change="toggleTitle(($event.target as HTMLInputElement).checked)" /> Section title</label>
+      <label><input type="checkbox" :checked="hasTitle"@change="toggleTitle(($event.target as HTMLInputElement).checked)" /> Section title</label>
     </div>
     <CardEditorLabel v-if="hasTitle" v-model="titleModel" :has-data="false" :repeat-over="cardRepeatOver" placeholder="Section title" heading="Section title" />
 

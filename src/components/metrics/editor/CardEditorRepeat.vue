@@ -1,9 +1,14 @@
 <script setup lang="ts">
 // One RepeatSpec editor, reused at card/section/item level (ADR 0003 section 4, "Repeat").
 // Card-level repeat only ever offers campaigns/popups (the owner's "one per campaign, or one
-// per pop-up"); a section/item repeat may also use windows/readings, per the type.
+// per pop-up"); a section/item repeat may also use windows/readings/countries, per the type.
+//
+// Nothing a template set is lost to a click: re-picking the current kind is a no-op, switching
+// kind keeps `empty` (editorModel withRepeatOver), and each kind's own filters (ids, status,
+// tracked, flighting today) are remembered for the life of the editor, so switching away and
+// back — or off and on again — restores them.
 import { computed, useId } from 'vue'
-import { CAMPAIGN_ID_OPTIONS, POPUP_ID_OPTIONS, withRepeatOver } from '../../../lib/metrics/editorModel'
+import { CAMPAIGN_ID_OPTIONS, POPUP_ID_OPTIONS, withField, withRepeatOver } from '../../../lib/metrics/editorModel'
 import type { RepeatSpec } from '../../../lib/metrics/types'
 
 const props = defineProps<{
@@ -13,9 +18,8 @@ const props = defineProps<{
 const repeat = defineModel<RepeatSpec | undefined>({ required: true })
 
 const overId = useId()
-const campaignsGroupId = useId()
+const idsGroupId = useId()
 const statusGroupId = useId()
-const popupsGroupId = useId()
 
 const OVER_LABELS: Record<RepeatSpec['over'], string> = {
   campaigns: 'One per campaign',
@@ -24,26 +28,42 @@ const OVER_LABELS: Record<RepeatSpec['over'], string> = {
   readings: 'One per stored reading',
   countries: 'One per country (US / CA / Other)',
 }
+/** What "none checked" means for each kind's id list. */
+const IDS_HEADINGS: Partial<Record<RepeatSpec['over'], { title: string; none: string }>> = {
+  campaigns: { title: 'Campaigns', none: 'none checked = all' },
+  popups: { title: 'Pop-ups', none: 'none checked = all' },
+}
 
+/** The last spec seen for each kind, so switching away and back restores its filters. */
+const remembered = new Map<RepeatSpec['over'], RepeatSpec>()
 const overValue = computed<RepeatSpec['over'] | ''>({
   get: () => repeat.value?.over ?? '',
   set: (v) => {
-    repeat.value = withRepeatOver(repeat.value, v)
+    const cur = repeat.value
+    if ((cur?.over ?? '') === v) return
+    if (cur) remembered.set(cur.over, cur)
+    const prev = v ? remembered.get(v) : undefined
+    repeat.value = prev ? (cur?.empty ? { ...prev, empty: cur.empty } : prev) : withRepeatOver(cur, v)
   },
 })
 
+const idOptions = computed(() => (overValue.value === 'campaigns' ? CAMPAIGN_ID_OPTIONS : overValue.value === 'popups' ? POPUP_ID_OPTIONS : []))
+const idsHeading = computed(() => (overValue.value ? IDS_HEADINGS[overValue.value] : undefined))
 const idsValue = computed<string[]>({
   get: () => repeat.value?.ids ?? [],
   set: (v) => {
     if (!repeat.value) return
-    repeat.value = { ...repeat.value, ids: v.length ? v : undefined }
+    repeat.value = withField(repeat.value, 'ids', v.length ? v : undefined)
   },
 })
-function toggleId(id: string, checked: boolean, all: { value: string }[]) {
+function toggleId(id: string, checked: boolean) {
   const set = new Set(idsValue.value)
+  if (checked === set.has(id)) return
   if (checked) set.add(id)
   else set.delete(id)
-  idsValue.value = all.map((o) => o.value).filter((v) => set.has(v))
+  // Option order, plus any stored id the options do not list (kept, never silently dropped).
+  const known = idOptions.value.map((o) => o.value)
+  idsValue.value = [...known.filter((v) => set.has(v)), ...idsValue.value.filter((v) => !known.includes(v) && set.has(v))]
 }
 
 const STATUS_OPTIONS: NonNullable<RepeatSpec['status']>[number][] = ['closed', 'active', 'upcoming']
@@ -51,11 +71,12 @@ const statusValue = computed<NonNullable<RepeatSpec['status']>>({
   get: () => repeat.value?.status ?? [],
   set: (v) => {
     if (!repeat.value) return
-    repeat.value = { ...repeat.value, status: v.length ? v : undefined }
+    repeat.value = withField(repeat.value, 'status', v.length ? v : undefined)
   },
 })
 function toggleStatus(s: (typeof STATUS_OPTIONS)[number], checked: boolean) {
   const set = new Set(statusValue.value)
+  if (checked === set.has(s)) return
   if (checked) set.add(s)
   else set.delete(s)
   statusValue.value = STATUS_OPTIONS.filter((o) => set.has(o))
@@ -64,34 +85,35 @@ function toggleStatus(s: (typeof STATUS_OPTIONS)[number], checked: boolean) {
 const tracked = computed<boolean>({
   get: () => !!repeat.value?.tracked,
   set: (v) => {
-    if (!repeat.value) return
-    repeat.value = { ...repeat.value, tracked: v || undefined }
+    if (!repeat.value || v === tracked.value) return
+    repeat.value = withField(repeat.value, 'tracked', v || undefined)
   },
 })
 
 const flightingToday = computed<boolean>({
   get: () => !!repeat.value?.flightingToday,
   set: (v) => {
-    if (!repeat.value) return
-    repeat.value = { ...repeat.value, flightingToday: v || undefined }
+    if (!repeat.value || v === flightingToday.value) return
+    repeat.value = withField(repeat.value, 'flightingToday', v || undefined)
   },
 })
+
 </script>
 
 <template>
   <div class="field">
-    <label :for="overId">{{ label ?? 'Repeat' }}</label>
+    <label :for="overId">{{ props.label ?? 'Repeat' }}</label>
     <select :id="overId" v-model="overValue">
       <option value="">None — a single card/item</option>
       <option v-for="o in allow" :key="o" :value="o">{{ OVER_LABELS[o] }}</option>
     </select>
   </div>
 
-  <div class="field" v-if="overValue === 'campaigns'">
-    <label :id="campaignsGroupId">Campaigns <span class="hint">— none checked = all</span></label>
-    <div class="campaign-list" role="group" :aria-labelledby="campaignsGroupId">
-      <label v-for="c in CAMPAIGN_ID_OPTIONS" :key="c.value" class="campaign-row">
-        <input type="checkbox" :checked="idsValue.includes(c.value)" @change="toggleId(c.value, ($event.target as HTMLInputElement).checked, CAMPAIGN_ID_OPTIONS)" />
+  <div class="field" v-if="idOptions.length && idsHeading">
+    <label :id="idsGroupId">{{ idsHeading.title }} <span class="hint">— {{ idsHeading.none }}</span></label>
+    <div class="campaign-list" role="group" :aria-labelledby="idsGroupId">
+      <label v-for="c in idOptions" :key="c.value" class="campaign-row">
+        <input type="checkbox" :checked="idsValue.includes(c.value)" @change="toggleId(c.value, ($event.target as HTMLInputElement).checked)" />
         {{ c.label }}
       </label>
     </div>
@@ -114,15 +136,6 @@ const flightingToday = computed<boolean>({
     </div>
   </div>
 
-  <div class="field" v-if="overValue === 'popups'">
-    <label :id="popupsGroupId">Pop-ups <span class="hint">— none checked = all</span></label>
-    <div class="campaign-list" role="group" :aria-labelledby="popupsGroupId">
-      <label v-for="p in POPUP_ID_OPTIONS" :key="p.value" class="campaign-row">
-        <input type="checkbox" :checked="idsValue.includes(p.value)" @change="toggleId(p.value, ($event.target as HTMLInputElement).checked, POPUP_ID_OPTIONS)" />
-        {{ p.label }}
-      </label>
-    </div>
-  </div>
 </template>
 
 <style scoped src="./editor.css"></style>

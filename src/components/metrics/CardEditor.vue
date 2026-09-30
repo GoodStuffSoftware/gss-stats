@@ -41,7 +41,7 @@ import { presetById } from '../../lib/metrics/presets'
 import { validateCard } from '../../lib/metrics/validate'
 import { noteLabelOptions } from '../../lib/metrics/editorModel'
 import { cloneSpec, emptySection, groupErrors, moveBy, presetOptions, specFromPresetId } from '../../lib/metrics/editorModel'
-import type { CardRef, CardSpec, MetricsContext } from '../../lib/metrics/types'
+import type { CardRef, CardSpec, Label, MetricsContext } from '../../lib/metrics/types'
 
 const props = defineProps<{
   modelValue: CardRef
@@ -94,10 +94,22 @@ const presetId = ref<string>('preset' in props.modelValue ? props.modelValue.pre
  * guessed at, only left honest. */
 const customizedFrom = ref<string>(mode.value === 'custom' ? initialFrom : '')
 
+// Read once, at setup: a host that swaps which card is being edited remounts this component
+// (App.vue keys ChartEditor on the widget id), so there is no stale-prop watcher to keep in sync.
 const spec = reactive<CardSpec>(cloneSpec('spec' in props.modelValue ? props.modelValue.spec : specFromPresetId(presetId.value)))
+/** Bumped whenever `spec` is replaced wholesale, so the section/item editors remount instead of
+ * carrying their remembered per-field state (a badge or title switched off, a repeat kind's
+ * filters) over to a different template. */
+const specKey = ref(0)
+// The title and badge as they were when last switched off (see toggleTitle / toggleBadge below).
+let lastTitle: Label | undefined
+let lastBadge: NonNullable<CardSpec['badge']> | null = null
 function resetSpecTo(next: CardSpec) {
   for (const k of Object.keys(spec)) delete (spec as Record<string, unknown>)[k]
   Object.assign(spec, next)
+  lastBadge = null
+  lastTitle = undefined
+  specKey.value += 1
 }
 
 function customize() {
@@ -182,19 +194,31 @@ const titleModel = computed({
     spec.title = v
   },
 })
+// Switching the title or badge off remembers it, so switching it back on restores the
+// template's own (a bound campaign name; the badge's field AND its colours) instead of a blank.
 const hasTitle = computed(() => spec.title !== undefined)
 function toggleTitle(on: boolean) {
-  spec.title = on ? '' : undefined
+  if (on === hasTitle.value) return
+  if (!on) lastTitle = spec.title
+  if (on) spec.title = lastTitle ?? ''
+  else delete spec.title
 }
 const repeatModel = computed({
   get: () => spec.repeat,
   set: (v) => {
-    spec.repeat = v
+    if (v === spec.repeat) return
+    if (v) spec.repeat = v
+    else delete spec.repeat
   },
 })
 const hasBadge = computed(() => !!spec.badge)
 function toggleBadge(on: boolean) {
-  spec.badge = on ? { data: { field: 'campaign.statusToday' }, display: { as: 'badge' } } : undefined
+  if (on === hasBadge.value) return
+  if (on) spec.badge = lastBadge ?? { data: { field: 'campaign.statusToday' }, display: { as: 'badge' } }
+  else {
+    lastBadge = JSON.parse(JSON.stringify(spec.badge)) as NonNullable<CardSpec['badge']>
+    delete spec.badge
+  }
 }
 const badgeDataModel = computed({
   get: () => spec.badge?.data ?? { field: 'campaign.statusToday' },
@@ -218,19 +242,25 @@ function toggleCaption(id: string, checked: boolean) {
 const linkValue = computed<boolean>({
   get: () => spec.link === 'campaigns-page',
   set: (v) => {
-    spec.link = v ? 'campaigns-page' : undefined
+    if (v === linkValue.value) return
+    if (v) spec.link = 'campaigns-page'
+    else delete spec.link
   },
 })
 const minWidthValue = computed<number | undefined>({
   get: () => spec.minWidth,
   set: (v) => {
-    spec.minWidth = v || undefined
+    if ((v || undefined) === spec.minWidth) return
+    if (v) spec.minWidth = v
+    else delete spec.minWidth
   },
 })
 const showUpdatedValue = computed<'' | 'header' | 'footer'>({
   get: () => (spec.showUpdated === true ? 'header' : spec.showUpdated || ''),
   set: (v) => {
-    spec.showUpdated = v || undefined
+    if (v === showUpdatedValue.value) return
+    if (v) spec.showUpdated = v
+    else delete spec.showUpdated
   },
 })
 
@@ -314,6 +344,7 @@ function removeSection(i: number) {
             </select>
           </div>
 
+          <div :key="specKey">
           <h3>Sections</h3>
           <CardEditorSection
             v-for="(section, si) in spec.sections"
@@ -329,6 +360,7 @@ function removeSection(i: number) {
             @remove="removeSection(si)"
           />
           <button type="button" class="btn" @click="addSection">+ Add section</button>
+          </div>
         </template>
       </div>
 

@@ -13,10 +13,11 @@
 import { CAMPAIGNS } from '../campaigns'
 import { getNote, hasNote, NOTES_REGISTRY, noteOptions, noteRawText } from '../notes'
 import { POPUPS } from '../popupEvents'
-import { METRICS, type MetricDef } from './metrics'
-import { RATIOS, type RatioDef } from './ratios'
+import { METRICS, metricWindows, type MetricDef, type MetricParam } from './metrics'
+import { RATIOS, ratioParamsOf, ratioWindowsOf, type RatioDef } from './ratios'
 import { DISPLAYS_FOR, kindOf, type DataKind } from './validate'
-import type { CardSpec, DataBinding, Display, DisplayAs, Label, MetricItem, ParamValue, RepeatSpec, ScopePath, Section } from './types'
+import { WINDOW_SIDES } from './types'
+import type { CardSpec, DataBinding, Display, DisplayAs, Gating, Label, MetricItem, ParamValue, Params, RepeatSpec, ScopePath, Section, WindowName, WindowSpec } from './types'
 import { PRESETS, presetById } from './presets'
 
 // ── Ids: generated, never typed ───────────────────────────────────────────────────────────
@@ -112,14 +113,23 @@ export function makeLabel(kind: LabelKind, current: Label | undefined, fallbackS
     case 'metric':
       return { metric: true }
     case 'note': {
-      const id = current !== undefined && typeof current === 'object' && 'note' in current ? current.note : ''
-      return { note: id }
+      // Re-picking 'note' on a note label keeps it whole — its id AND its `vars` (a preset's
+      // "{campaign}" binding), never a bare `{ note }` that would render the placeholder raw.
+      if (current !== undefined && typeof current === 'object' && 'note' in current) return current.vars ? { note: current.note, vars: { ...current.vars } } : { note: current.note }
+      return { note: '' }
     }
     case 'bind': {
       const path = current !== undefined && typeof current === 'object' && 'bind' in current ? current.bind : fallbackScopePath
       return { bind: path }
     }
   }
+}
+
+/** A note label with a different note id, keeping the `vars` it already binds (the owner
+ * removes a var explicitly in the Variables list, never as a side effect of re-picking). */
+export function withNoteId(current: Label | undefined, id: string): Label {
+  const vars = current !== undefined && typeof current === 'object' && 'note' in current ? current.vars : undefined
+  return vars ? { note: id, vars: { ...vars } } : { note: id }
 }
 
 // ── Scope paths (for a `bind` label or a `field` data binding) — a fixed, curated list per
@@ -215,6 +225,35 @@ export function makeData(kind: DataBindingKind, current: DataBinding, fallbackSc
     case 'field':
       return 'field' in current ? current : { field: fallbackScopePath }
   }
+}
+
+/** The windows and params a metric or ratio id accepts ([] for an unknown id). */
+function acceptsOf(b: { metric: string } | { ratio: string }): { windows: WindowName[]; params: MetricParam[] } | null {
+  if ('metric' in b) {
+    const def = METRICS.get(b.metric)
+    return def ? { windows: metricWindows(def), params: def.params } : null
+  }
+  const r = RATIOS.get(b.ratio)
+  return r ? { windows: ratioWindowsOf(r), params: ratioParamsOf(r) } : null
+}
+/** Picks a metric or ratio id, keeping what the current binding already set whenever the new id
+ * still accepts it: re-picking the SAME id is a no-op (the current binding, window and params
+ * intact), and switching to another id keeps each param it accepts and the window when it serves
+ * it (a `{ scope: 'window' }` binding when it serves a before/after side). Anything the new id
+ * does not accept is dropped, so the result never trips validateCard for a leftover. */
+export function rebindData(current: DataBinding, next: { metric: string } | { ratio: string }): DataBinding {
+  if ('metric' in next && 'metric' in current && current.metric === next.metric) return current
+  if ('ratio' in next && 'ratio' in current && current.ratio === next.ratio) return current
+  if ('field' in current) return next
+  const acc = acceptsOf(next)
+  if (!acc) return next
+  const out: { metric?: string; ratio?: string; params?: Params; window?: WindowSpec } = { ...next }
+  const params: Params = {}
+  for (const [k, v] of Object.entries(current.params ?? {})) if (acc.params.includes(k as MetricParam)) params[k as MetricParam] = v
+  if (Object.keys(params).length) out.params = params
+  const w = current.window
+  if (typeof w === 'string' ? acc.windows.includes(w as WindowName) : w !== undefined && acc.windows.some((x) => (WINDOW_SIDES as readonly string[]).includes(x))) out.window = w
+  return out as DataBinding
 }
 
 // ── Metric / ratio pickers — grouped, plain-language options built ONLY from the real
@@ -375,11 +414,36 @@ export function makeDisplay(as: DisplayAs, current: Display): Display {
 }
 
 // ── Repeat ─────────────────────────────────────────────────────────────────────────────────
+/** Switches a repeat to another kind. The ids/status/tracked/flightingToday filters belong to
+ * the old kind and are dropped; `empty` (what shows when the repeat yields nothing) does not
+ * depend on the kind and is kept. CardEditorRepeat.vue also remembers each kind's own filters
+ * for the life of the editor, so switching away and back restores them. */
 export function withRepeatOver(current: RepeatSpec | undefined, over: RepeatSpec['over'] | ''): RepeatSpec | undefined {
   if (!over) return undefined
   if (current?.over === over) return current
-  return { over }
+  return current?.empty ? { over, empty: current.empty } : { over }
 }
+// ── Gating ─────────────────────────────────────────────────────────────────────────────────
+/** An item with some gating fields changed; `undefined` removes a field, and an emptied gating
+ * is dropped altogether rather than left as `gating: {}` (a no-op edit leaves the item equal). */
+export function withGating(item: MetricItem, patch: Partial<Record<keyof Gating, unknown>>): MetricItem {
+  const gating: Record<string, unknown> = { ...item.gating }
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === undefined) delete gating[k]
+    else gating[k] = v
+  }
+  const { gating: _old, ...rest } = item
+  return Object.keys(gating).length ? { ...rest, gating: gating as Gating } : rest
+}
+/** An object with `key` set to `value`, or without `key` when `value` is undefined — never a
+ * key holding `undefined` (so a no-op edit leaves the object deep-equal to what it was). */
+export function withField<T extends object, K extends keyof T>(obj: T, key: K, value: T[K] | undefined): T {
+  const out = { ...obj }
+  if (value === undefined) delete out[key]
+  else out[key] = value
+  return out
+}
+
 
 // ── Error grouping (validateCard's flat string[] -> per-section / per-item, for inline
 // display) — validate.ts's `where` strings are always `sections[N]` or `sections[N].<itemId>`,

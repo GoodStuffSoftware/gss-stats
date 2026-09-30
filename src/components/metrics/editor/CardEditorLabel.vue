@@ -5,7 +5,7 @@
 // item's `label` and its `caption` (both are `Label`) — `allowMetricOwn` hides the "metric's own
 // name" option for a caption, which has no natural registry counterpart.
 import { computed, ref, useId } from 'vue'
-import { isKnownNote, labelKind, labelNoteOptions, makeLabel, scopePathOptions, type LabelKind } from '../../../lib/metrics/editorModel'
+import { isKnownNote, labelKind, labelNoteOptions, makeLabel, scopePathOptions, withNoteId, type LabelKind } from '../../../lib/metrics/editorModel'
 import type { Label, RepeatSpec, ScopePath } from '../../../lib/metrics/types'
 
 const props = withDefaults(
@@ -35,12 +35,16 @@ const fallbackPath = computed<ScopePath>(() => scopeOptions.value[0]?.value ?? '
 
 const kind = computed<LabelKind>(() => labelKind(label.value))
 function setKind(k: LabelKind) {
+  if (k === kind.value) return // the active tab: a no-op (an unset caption stays unset)
   label.value = makeLabel(k, label.value, fallbackPath.value)
 }
 
 const textValue = computed<string>({
   get: () => (typeof label.value === 'string' ? label.value : ''),
   set: (v) => {
+    // Unchanged text — or no text typed into a label that is not set at all (an item with no
+    // caption) — writes nothing.
+    if (v === textValue.value && (typeof label.value === 'string' || v === '')) return
     label.value = v
   },
 })
@@ -51,7 +55,8 @@ function insertVar(path: ScopePath) {
 const noteId = computed<string>({
   get: () => (label.value && typeof label.value === 'object' && 'note' in label.value ? label.value.note : ''),
   set: (v) => {
-    label.value = { note: v }
+    if (v === noteId.value) return
+    label.value = withNoteId(label.value, v)
   },
 })
 const noteSearch = ref('')
@@ -66,6 +71,7 @@ const noteInvalid = computed(() => !!noteId.value && !isKnownNote(noteId.value))
 const bindPath = computed<ScopePath>({
   get: () => (label.value && typeof label.value === 'object' && 'bind' in label.value ? label.value.bind : fallbackPath.value),
   set: (v) => {
+    if (v === bindPath.value && label.value && typeof label.value === 'object' && 'bind' in label.value) return
     label.value = { bind: v }
   },
 })
