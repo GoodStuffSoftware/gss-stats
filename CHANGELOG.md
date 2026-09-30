@@ -101,8 +101,9 @@ All notable changes to **gss-stats** are documented here. The format follows
   visitor lands on ★ Overview.
 - **Built-in pages are recognised by what they are, not their name.** Renaming a page no longer
   changes how it behaves (its notes, its filter bar, what "restore default charts" brings back).
-- **Saved layouts move to version 12.** The first save keeps a backup of the previous layout, and a
-  tab still running the previous version is told to reload instead of overwriting the new one.
+- **Saved layouts move to version 13.** The first save keeps a backup of the previous layout
+  (version 12), and a tab still running the previous version is told to reload instead of
+  overwriting the new one.
 - **The retest ads routine's release-health check now runs every morning read, at any hour.**
   The 23:15 ET backstop entry is folded into the single daily morning read (moved 08:00 → 06:00
   ET); the clock-based "01:00-12:00 ET quiet window" that used to suppress the check is retired,

@@ -1,9 +1,11 @@
-// The v12 layout migration (page navigation): every page gets a group (built-ins by id, other pages
+// The v13 layout migration (page navigation): every page gets a group (built-ins by id, other pages
 // from a name prefix, else "Mine"), the Best Sudoku built-ins lose their "Best Sudoku · " prefix,
-// the v11 tab order becomes the stored order (and is never re-sorted after that), Traffic gets the
-// one explicit built-in icon, and the landing page becomes ★ Overview. Existing drill pages are NOT
-// linked to a parent (nothing stored says where they came from). Run on the real default layout, on
-// the sanitised production layout (prodLayout.v8/v9.json, normalised through v11), and on variants.
+// the pre-v13 tab order becomes the stored order (and is never re-sorted after that), Traffic gets
+// the one explicit built-in icon, and the landing page becomes ★ Overview. Existing drill pages are
+// NOT linked to a parent (nothing stored says where they came from). Run on the real default layout,
+// on the sanitised production layout (prodLayout.v8/v9.json, normalised through v12), and on
+// variants. (Layout version 12 is the Overview's one-row small-sample note; production is stored
+// at v12, before page navigation, when v13 ships.)
 import { describe, expect, it } from 'vitest'
 import {
   CONFIG_VERSION,
@@ -18,7 +20,7 @@ import {
   isBestSudokuPopupsPage,
   isCampaignComparePage,
   isOverviewPage,
-  migrateNavV12,
+  migrateNavV13,
   normalizeConfig,
   normGroupMeta,
 } from './defaults'
@@ -40,15 +42,17 @@ function stable(cfg: DashboardConfig): DashboardConfig {
   return c
 }
 const rawPage = (id: string, name: string, extra: Record<string, unknown> = {}): any => ({ id, name, filters: { siteSel: [], since: '2026-01-01T00:00:00.000Z', until: '2026-01-02T00:00:00.000Z', rangeRel: '' }, widgets: [], ...extra })
-const v11 = (pages: any[], extra: Record<string, unknown> = {}) => normalizeConfig({ version: 11, activePageId: pages[0].id, pages, ...extra })
-const v12 = (pages: any[], extra: Record<string, unknown> = {}) => normalizeConfig({ version: 12, activePageId: pages[0].id, pages, ...extra })
+/** Load a layout stored before page navigation (v12, as production stores it): the v13 step runs. */
+const V12 = (pages: any[], extra: Record<string, unknown> = {}) => normalizeConfig({ version: 12, activePageId: pages[0].id, pages, ...extra })
+/** Load a layout already at v13: only the every-load checks run. */
+const V13 = (pages: any[], extra: Record<string, unknown> = {}) => normalizeConfig({ version: 13, activePageId: pages[0].id, pages, ...extra })
 const summary = (cfg: DashboardConfig) => cfg.pages.map((p) => [p.id, p.group, p.name, p.icon ?? null, p.parentId ?? null])
 
-describe('v12: the real default layout', () => {
-  it('is version 12, lands on ★ Overview, and files the built-ins in order', () => {
+describe('v13: the real default layout', () => {
+  it('is version 13, lands on ★ Overview, and files the built-ins in order', () => {
     const d = defaultConfig()
-    expect(CONFIG_VERSION).toBe(12)
-    expect(d.version).toBe(12)
+    expect(CONFIG_VERSION).toBe(13)
+    expect(d.version).toBe(13)
     expect(d.activePageId).toBe('default')
     expect(summary(d)).toEqual([
       ['default', GROUP_ALL_SITES, 'Overview', null, null],
@@ -69,12 +73,12 @@ describe('v12: the real default layout', () => {
   })
 })
 
-describe('v12: the production layout (sanitised)', () => {
+describe('v13: the production layout (sanitised)', () => {
   const fromV8 = normalizeConfig(clone(PROD_V8))
   const fromV9 = normalizeConfig(clone(PROD_V9))
 
   it('files every page: built-ins by id with the short names, every other page under Mine, nothing linked', () => {
-    expect(fromV9.version).toBe(12)
+    expect(fromV9.version).toBe(13)
     expect(summary(fromV9)).toEqual([
       ['default', GROUP_ALL_SITES, 'Overview', null, null],
       ['beacon', GROUP_ALL_SITES, 'Beacon', null, null],
@@ -93,26 +97,26 @@ describe('v12: the production layout (sanitised)', () => {
     expect(fromV9.groupMeta).toBeUndefined()
   })
 
-  it('v8 → v12 in one load equals v9 → v12', () => {
+  it('v8 → v13 in one load equals v9 → v13', () => {
     expect(stable(fromV8)).toEqual(stable(fromV9))
   })
 
-  it('the v12 step changes no widget and no filter on any page', () => {
-    // The same layout as a v11 build stored it (the v11 names, no v12 fields), migrated to v12.
+  it('the v13 step changes no widget and no filter on any page', () => {
+    // The same layout as the v12 build stores it (the old names, no v13 fields), migrated to v13.
     const oldNames = new Map((PROD_V9 as any).pages.map((p: any) => [p.id, p.name]))
-    const asV11: any = clone(fromV9)
-    asV11.version = 11
-    asV11.activePageId = 'bsk-overview'
-    for (const p of asV11.pages) {
+    const asV12: any = clone(fromV9)
+    asV12.version = 12
+    asV12.activePageId = 'bsk-overview'
+    for (const p of asV12.pages) {
       delete p.group
       delete p.icon
       delete p.parentId
       p.name = oldNames.get(p.id)
     }
-    const migrated = normalizeConfig(clone(asV11))
-    expect(migrated.pages.map((p) => p.id)).toEqual(asV11.pages.map((p: any) => p.id))
+    const migrated = normalizeConfig(clone(asV12))
+    expect(migrated.pages.map((p) => p.id)).toEqual(asV12.pages.map((p: any) => p.id))
     const s = stable(migrated)
-    const before = stable(asV11)
+    const before = stable(asV12)
     s.pages.forEach((p, i) => {
       expect(p.widgets, p.id).toEqual(before.pages[i].widgets)
       expect(p.filters, p.id).toEqual(before.pages[i].filters)
@@ -121,12 +125,12 @@ describe('v12: the production layout (sanitised)', () => {
     expect(stable(migrated)).toEqual(stable(fromV9))
   })
 
-  it('is idempotent: v12 → v12 changes nothing (names, groups, order, landing page)', () => {
+  it('is idempotent: v13 → v13 changes nothing (names, groups, order, landing page)', () => {
     expect(stable(normalizeConfig(clone(fromV9)))).toEqual(stable(fromV9))
   })
 })
 
-describe('v12: built-in pages', () => {
+describe('v13: built-in pages', () => {
   it('are detected by id only — a renamed built-in keeps its behaviour, a look-alike name gets none', () => {
     for (const [fn, id] of [
       [isOverviewPage, 'bsk-overview'],
@@ -137,13 +141,13 @@ describe('v12: built-in pages', () => {
       expect(fn({ id }), id).toBe(true)
       expect(fn({ id: 'user-1' }), id).toBe(false)
     }
-    const cfg = v12([rawPage('default', 'Overview', { isDefault: true }), rawPage('u1', 'Best Sudoku · Campaigns'), rawPage('bsk-campaigns', 'Whatever I like')])
+    const cfg = V13([rawPage('default', 'Overview', { isDefault: true }), rawPage('u1', 'Best Sudoku · Campaigns'), rawPage('bsk-campaigns', 'Whatever I like')])
     expect(isCampaignComparePage(cfg.pages[1])).toBe(false)
     expect(isCampaignComparePage(cfg.pages[2])).toBe(true)
   })
 
   it('renames the Best Sudoku built-ins from every old default name, keeps an owner-chosen name', () => {
-    const cfg = v11([
+    const cfg = V12([
       rawPage('default', 'Overview', { isDefault: true }),
       rawPage('bsk-overview', "Mike's dashboard"),
       rawPage('bsk-campaigns', 'Best Sudoku · My campaigns'),
@@ -160,11 +164,11 @@ describe('v12: built-in pages', () => {
   })
 
   it('does not bring back a built-in the owner deleted', () => {
-    const cfg = v11([rawPage('default', 'Overview', { isDefault: true }), rawPage('bsk-overview', 'Best Sudoku · Overview'), rawPage('u1', 'Scratch')])
+    const cfg = V12([rawPage('default', 'Overview', { isDefault: true }), rawPage('bsk-overview', 'Best Sudoku · Overview'), rawPage('u1', 'Scratch')])
     expect(cfg.pages.map((p) => p.id)).toEqual(['default', 'bsk-overview', 'u1'])
   })
 
-  it('puts the pages in the v11 tab order once, and never re-sorts them after that', () => {
+  it('puts the pages in the pre-v13 tab order once, and never re-sorts them after that', () => {
     const scattered = [
       rawPage('u2', 'My custom page'),
       rawPage('bsk-launch', 'Best Sudoku · Traffic'),
@@ -175,23 +179,23 @@ describe('v12: built-in pages', () => {
       rawPage('bsk-overview', 'Best Sudoku · Overview'),
       rawPage('bsk-campaigns', 'Best Sudoku · Campaigns'),
     ]
-    expect(v11(scattered).pages.map((p) => p.id)).toEqual(['default', 'beacon', 'bsk-overview', 'bsk-campaigns', 'bsk-popups', 'bsk-launch', 'u2', 'u1'])
-    // at v12 the order is data: kept exactly as stored
-    expect(v12(scattered).pages.map((p) => p.id)).toEqual(scattered.map((p) => p.id))
+    expect(V12(scattered).pages.map((p) => p.id)).toEqual(['default', 'beacon', 'bsk-overview', 'bsk-campaigns', 'bsk-popups', 'bsk-launch', 'u2', 'u1'])
+    // at v13 the order is data: kept exactly as stored
+    expect(V13(scattered).pages.map((p) => p.id)).toEqual(scattered.map((p) => p.id))
   })
 
   it('writes only Traffic\'s icon, and keeps one someone already picked', () => {
-    const cfg = v11([rawPage('default', 'Overview', { isDefault: true }), rawPage('beacon', 'Beacon'), rawPage('bsk-launch', 'Best Sudoku · Traffic'), rawPage('bsk-popups', 'Best Sudoku · Pop-ups')])
-    // (in the v11 tab order: Pop-ups before Traffic)
+    const cfg = V12([rawPage('default', 'Overview', { isDefault: true }), rawPage('beacon', 'Beacon'), rawPage('bsk-launch', 'Best Sudoku · Traffic'), rawPage('bsk-popups', 'Best Sudoku · Pop-ups')])
+    // (in the pre-v13 tab order: Pop-ups before Traffic)
     expect(cfg.pages.map((p) => [p.id, p.icon ?? null])).toEqual([['default', null], ['beacon', null], ['bsk-popups', null], ['bsk-launch', 'trending-up']])
-    const picked = v11([rawPage('default', 'Overview', { isDefault: true }), rawPage('bsk-launch', 'Best Sudoku · Traffic', { icon: 'rocket' })])
+    const picked = V12([rawPage('default', 'Overview', { isDefault: true }), rawPage('bsk-launch', 'Best Sudoku · Traffic', { icon: 'rocket' })])
     expect(picked.pages[1].icon).toBe('rocket')
   })
 
-  it('keeps an owner-changed v12 name, group and icon on later loads', () => {
+  it('keeps an owner-changed v13 name, group and icon on later loads', () => {
     const once = normalizeConfig(clone(defaultConfig()))
     const edited = clone(once)
-    edited.pages[5].name = 'Best Sudoku · Traffic' // renamed back by hand: v12 leaves it alone
+    edited.pages[5].name = 'Best Sudoku · Traffic' // renamed back by hand: v13 leaves it alone
     edited.pages[4].group = 'Mine'
     delete edited.pages[5].icon
     const again = normalizeConfig(edited)
@@ -199,9 +203,9 @@ describe('v12: built-in pages', () => {
   })
 })
 
-describe('v12: the owner\'s pages', () => {
+describe('v13: the owner\'s pages', () => {
   it('file under the group their name starts with (dropping a " · " prefix), else Mine', () => {
-    const cfg = v11([
+    const cfg = V12([
       rawPage('default', 'Overview', { isDefault: true }),
       rawPage('a', 'Best Sudoku · Retention'),
       rawPage('b', 'best sudoku launch copy'),
@@ -227,7 +231,7 @@ describe('v12: the owner\'s pages', () => {
   it('keep every widget and filter exactly, and every page is kept', () => {
     const widget = { id: 'w1', i: 'w1', title: 'Mine', type: 'hbar', dataset: 'geo', dimension: 'region', metric: 'pageviews', limit: 10, x: 1, y: 2, w: 3, h: 4, isDefault: true }
     const drillPage = rawPage('d1', '3 sites · mobile', { widgets: [widget], filters: { siteSel: ['bestsudoku'], drill: [{ key: 'device', value: 'mobile', label: 'mobile' }], since: '2026-01-01T00:00:00.000Z', until: '2026-01-02T00:00:00.000Z', rangeRel: '' } })
-    const cfg = v11([rawPage('default', 'Overview', { isDefault: true }), drillPage])
+    const cfg = V12([rawPage('default', 'Overview', { isDefault: true }), drillPage])
     const d1 = cfg.pages[1]
     expect(d1).toMatchObject({ id: 'd1', name: '3 sites · mobile', group: GROUP_MINE })
     expect(d1.parentId).toBeUndefined() // an old drill page is not linked: its parent can't be known
@@ -235,22 +239,22 @@ describe('v12: the owner\'s pages', () => {
     expect(d1.filters).toMatchObject(drillPage.filters)
   })
 
-  it('migrateNavV12 never adds or drops a page', () => {
-    const pages = v12([rawPage('default', 'Overview', { isDefault: true }), rawPage('x', 'X'), rawPage('y', 'Y')]).pages
-    expect(migrateNavV12(pages).map((p) => p.id).sort()).toEqual(pages.map((p) => p.id).sort())
+  it('migrateNavV13 never adds or drops a page', () => {
+    const pages = V13([rawPage('default', 'Overview', { isDefault: true }), rawPage('x', 'X'), rawPage('y', 'Y')]).pages
+    expect(migrateNavV13(pages).map((p) => p.id).sort()).toEqual(pages.map((p) => p.id).sort())
   })
 })
 
-describe('v12: drill links and fields, checked on every load', () => {
+describe('v13: drill links and fields, checked on every load', () => {
   const base = () => [rawPage('default', 'Overview', { isDefault: true, group: 'All sites' }), rawPage('t', 'Traffic', { group: 'Best Sudoku' })]
 
   it('keep a drill page under its root, in the root\'s group', () => {
-    const cfg = v12([...base(), rawPage('k', 'mobile', { group: 'Mine', parentId: 't' })])
+    const cfg = V13([...base(), rawPage('k', 'mobile', { group: 'Mine', parentId: 't' })])
     expect(cfg.pages[2]).toMatchObject({ parentId: 't', group: 'Best Sudoku' })
   })
 
   it('re-point a drill of a drill page to the root, and drop a link to a missing page, to itself, or from the default page', () => {
-    const cfg = v12([
+    const cfg = V13([
       rawPage('default', 'Overview', { isDefault: true, group: 'All sites', parentId: 't' }),
       rawPage('t', 'Traffic', { group: 'Best Sudoku' }),
       rawPage('k1', 'mobile', { group: 'Best Sudoku', parentId: 't' }),
@@ -269,7 +273,7 @@ describe('v12: drill links and fields, checked on every load', () => {
   })
 
   it('break a parent cycle without losing a page', () => {
-    const cfg = v12([rawPage('default', 'Overview', { isDefault: true }), rawPage('a', 'A', { parentId: 'b' }), rawPage('b', 'B', { parentId: 'a' })])
+    const cfg = V13([rawPage('default', 'Overview', { isDefault: true }), rawPage('a', 'A', { parentId: 'b' }), rawPage('b', 'B', { parentId: 'a' })])
     expect(cfg.pages).toHaveLength(3)
     const linked = cfg.pages.filter((p) => p.parentId)
     expect(linked).toHaveLength(1)
@@ -277,18 +281,18 @@ describe('v12: drill links and fields, checked on every load', () => {
   })
 
   it('a drill from ★ Overview nests under it', () => {
-    const cfg = v12([...base(), rawPage('k', 'mobile', { parentId: 'default' })])
+    const cfg = V13([...base(), rawPage('k', 'mobile', { parentId: 'default' })])
     expect(cfg.pages[2]).toMatchObject({ parentId: 'default', group: 'All sites' })
   })
 
   it('fill a missing group (built-ins by id, else Mine) and clean a messy one', () => {
-    const cfg = v12([rawPage('default', 'Overview', { isDefault: true }), rawPage('bsk-popups', 'Pop-ups'), rawPage('u', 'U', { group: '  Star   Rupture  ' }), rawPage('v', 'V', { group: 42 }), rawPage('w', 'W', { group: 'x'.repeat(200) })])
+    const cfg = V13([rawPage('default', 'Overview', { isDefault: true }), rawPage('bsk-popups', 'Pop-ups'), rawPage('u', 'U', { group: '  Star   Rupture  ' }), rawPage('v', 'V', { group: 42 }), rawPage('w', 'W', { group: 'x'.repeat(200) })])
     expect(cfg.pages.map((p) => p.group)).toEqual(['All sites', 'Best Sudoku', 'Star Rupture', 'Mine', 'x'.repeat(60)])
     expect(cleanGroupName('\n')).toBe('')
   })
 
   it('keep a well-formed icon key (known or not) and drop anything else', () => {
-    const cfg = v12([
+    const cfg = V13([
       rawPage('default', 'Overview', { isDefault: true, icon: 'rocket' }),
       rawPage('a', 'A', { icon: 'not-in-registry-yet' }),
       rawPage('b', 'B', { icon: '<svg onload=alert(1)>' }),
@@ -298,15 +302,16 @@ describe('v12: drill links and fields, checked on every load', () => {
     expect(cfg.pages.map((p) => p.icon ?? null)).toEqual(['rocket', 'not-in-registry-yet', null, null, null])
   })
 
-  it('keep the stored landing page at v12 if it exists, else ★ Overview', () => {
+  it('keep the stored landing page at v13 if it exists, else ★ Overview', () => {
     const pages = [rawPage('default', 'Overview', { isDefault: true }), rawPage('bsk-popups', 'Pop-ups')]
-    expect(normalizeConfig({ version: 12, activePageId: 'bsk-popups', pages: clone(pages) }).activePageId).toBe('bsk-popups')
-    expect(normalizeConfig({ version: 12, activePageId: 'gone', pages: clone(pages) }).activePageId).toBe('default')
+    expect(normalizeConfig({ version: 13, activePageId: 'bsk-popups', pages: clone(pages) }).activePageId).toBe('bsk-popups')
+    expect(normalizeConfig({ version: 13, activePageId: 'gone', pages: clone(pages) }).activePageId).toBe('default')
+    expect(normalizeConfig({ version: 12, activePageId: 'bsk-popups', pages: clone(pages) }).activePageId).toBe('default')
     expect(normalizeConfig({ version: 11, activePageId: 'bsk-popups', pages: clone(pages) }).activePageId).toBe('default')
   })
 })
 
-describe('v12: groupMeta', () => {
+describe('v13: groupMeta', () => {
   it('keeps a palette slot or hex colour and an https, same-origin or image data logo', () => {
     expect(
       normGroupMeta({
@@ -339,8 +344,8 @@ describe('v12: groupMeta', () => {
 
   it('survives a load and is left out of a config that has none', () => {
     const pages = [rawPage('default', 'Overview', { isDefault: true })]
-    expect(normalizeConfig({ version: 12, activePageId: 'default', pages, groupMeta: { Mine: { color: 'g5' } } }).groupMeta).toEqual({ Mine: { color: 'g5' } })
-    expect('groupMeta' in normalizeConfig({ version: 12, activePageId: 'default', pages })).toBe(false)
+    expect(normalizeConfig({ version: 13, activePageId: 'default', pages, groupMeta: { Mine: { color: 'g5' } } }).groupMeta).toEqual({ Mine: { color: 'g5' } })
+    expect('groupMeta' in normalizeConfig({ version: 13, activePageId: 'default', pages })).toBe(false)
   })
 })
 

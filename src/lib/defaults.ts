@@ -39,14 +39,15 @@ function w(p: Omit<Widget, 'i'>): Widget {
   return { ...p, i: p.id }
 }
 
-// Bumped to 12 for page navigation (see migrateNavV12): every page gets a `group` (built-ins by id,
+// Bumped to 13 for page navigation (see migrateNavV13): every page gets a `group` (built-ins by id,
 // others from a name prefix, else "Mine"), drill pages can carry a `parentId`, pages an `icon`, the
 // config an optional `groupMeta`; the Best Sudoku pages lose their "Best Sudoku · " name prefix (the
-// group shows it); the v11 tab order becomes the stored order (no more reorder on load); and
+// group shows it); the pre-v13 tab order becomes the stored order (no more reorder on load); and
 // `activePageId` becomes the landing page for a first-time viewer (★ Overview) — each viewer's own
 // current page lives in their browser (lib/viewerPrefs.ts). functions/api/config.ts backs the stored
-// layout up to `dashboard:default:backup:v<stored>` on the first v12 save; a tab still running v11
-// code then gets 409 ("This tab is out of date, reload") instead of overwriting it.
+// layout up to `dashboard:default:backup:v<stored>` on the first v13 save (production is stored at
+// v12 when this ships: `backup:v12`); a tab still running v12 code then gets 409 ("This tab is out
+// of date, reload") instead of overwriting it.
 // (Bumped to 11 for the rest of the panels (ADR 0003 slice 7, see migratePanelsV11): every
 // remaining bespoke panel becomes a card preset (the release panel; the campaign funnel, country,
 // cost and returns panels; the Pop-ups rate table and sign-in eligibility) or a standard chart
@@ -65,7 +66,7 @@ function w(p: Omit<Widget, 'i'>): Widget {
 // uncustomized layout only. (Bumped to 7 for the bespoke-page → widget conversion migration —
 // see the v7 block: Overview/Campaigns went from `widgets: []` (rendered by the now-retired
 // OverviewPage.vue/CampaignComparePage.vue) to real generic widgets.)
-export const CONFIG_VERSION = 12
+export const CONFIG_VERSION = 13
 
 // The default "basic charts available out of the box" — a sensible analytics
 // starting layout. Users can move/resize/add/remove from here.
@@ -87,7 +88,7 @@ export function defaultWidgets(): Widget[] {
   ]
 }
 
-// Navigation groups (layout version 12). Groups are plain strings (DashboardPage.group), so these
+// Navigation groups (layout version 13). Groups are plain strings (DashboardPage.group), so these
 // are only the built-ins' groups and the catch-all for everything else; a new product is just a new
 // group name. BUILTIN_GROUP files each built-in page BY ID (never by name).
 export const GROUP_ALL_SITES = 'All sites'
@@ -364,7 +365,7 @@ export function defaultBestSudokuPopupsPage(): DashboardPage {
     widgets: defaultBestSudokuPopupsWidgets(),
   }
 }
-// Built-in page detection is BY ID ONLY (layout version 12): no name fallback, so renaming a page can
+// Built-in page detection is BY ID ONLY (layout version 13): no name fallback, so renaming a page can
 // never change how it behaves (its notes, its filter bar, what "restore default charts" restores).
 export function isBestSudokuPopupsPage(p: Pick<DashboardPage, 'id'>): boolean {
   return p.id === 'bsk-popups'
@@ -727,7 +728,7 @@ export function isOverviewPage(p: Pick<DashboardPage, 'id'>): boolean {
   return p.id === 'bsk-overview'
 }
 
-// The built-in pages in their order, which is data (layout version 12): ★ Overview (pinned),
+// The built-in pages in their order, which is data (layout version 13): ★ Overview (pinned),
 // then the "All sites" group (Beacon), then the "Best Sudoku" group (Overview, Campaigns, Pop-ups,
 // Traffic). A first-time viewer lands on ★ Overview.
 export function defaultConfig(): DashboardConfig {
@@ -920,7 +921,7 @@ function normPage(p: any, i: number): DashboardPage {
   return page
 }
 
-// ── Navigation (layout version 12) ─────────────────────────────────────────────────────────
+// ── Navigation (layout version 13) ─────────────────────────────────────────────────────────
 // Page groups, drill-page parents, page icons and group badges. The shared config only ever holds
 // short, validated strings for these (never markup or SVG): lib/icons.ts maps an icon key to a
 // component and a group name to its badge.
@@ -965,7 +966,7 @@ export function normDrillLinks(pages: DashboardPage[]): void {
   }
 }
 
-/** A page name that starts with a known group's name files under that group (layout version 12):
+/** A page name that starts with a known group's name files under that group (layout version 13):
  * "Best Sudoku · Retention" → group "Best Sudoku", name "Retention" (the " · " prefix is dropped,
  * the group segment shows it); "Best Sudoku launch copy" → group "Best Sudoku", name unchanged. The
  * group name must be followed by " · ", another separator, a space or the end (so "Minesweeper" is
@@ -984,31 +985,32 @@ export function groupFromName(name: string, groups: readonly string[]): { group:
   return null
 }
 
-// The v11 tab order (the retired reorderBskGroup, run on every v11 load): the GSS pages first,
-// then the Best Sudoku group in a fixed order, then every other page in its existing relative
-// order. The v12 migration applies it ONCE, so the order each viewer saw under v11 becomes the
-// stored order; after that the order is data (group order, then array order), never re-sorted.
-const V11_GSS_IDS = new Set(['default', 'beacon'])
-const V11_BSK_ORDER = ['bsk-overview', 'bsk-campaigns', 'bsk-popups', 'bsk-launch']
-function v11TabOrder(pages: DashboardPage[]): DashboardPage[] {
-  const bskFound = new Map(pages.filter((p) => V11_BSK_ORDER.includes(p.id)).map((p) => [p.id, p] as const))
-  const bsk = V11_BSK_ORDER.map((id) => bskFound.get(id)).filter((p): p is DashboardPage => !!p)
-  const gss = pages.filter((p) => V11_GSS_IDS.has(p.id))
-  const rest = pages.filter((p) => !V11_GSS_IDS.has(p.id) && !V11_BSK_ORDER.includes(p.id))
+// The pre-v13 tab order (the retired reorderBskGroup, run on every load up to layout version 12):
+// the GSS pages first, then the Best Sudoku group in a fixed order, then every other page in its
+// existing relative order. The v13 migration applies it ONCE, so the order each viewer saw before
+// becomes the stored order; after that the order is data (group order, then array order), never
+// re-sorted.
+const PRE_V13_GSS_IDS = new Set(['default', 'beacon'])
+const PRE_V13_BSK_ORDER = ['bsk-overview', 'bsk-campaigns', 'bsk-popups', 'bsk-launch']
+function preV13TabOrder(pages: DashboardPage[]): DashboardPage[] {
+  const bskFound = new Map(pages.filter((p) => PRE_V13_BSK_ORDER.includes(p.id)).map((p) => [p.id, p] as const))
+  const bsk = PRE_V13_BSK_ORDER.map((id) => bskFound.get(id)).filter((p): p is DashboardPage => !!p)
+  const gss = pages.filter((p) => PRE_V13_GSS_IDS.has(p.id))
+  const rest = pages.filter((p) => !PRE_V13_GSS_IDS.has(p.id) && !PRE_V13_BSK_ORDER.includes(p.id))
   return [...gss, ...bsk, ...rest]
 }
-// The Best Sudoku built-ins' known default names (every name a build has given them) → their v12
+// The Best Sudoku built-ins' known default names (every name a build has given them) → their v13
 // name. A built-in the owner renamed to anything else keeps that name (a "Best Sudoku · " prefix is
 // still dropped).
-const V12_BSK_NAME: Readonly<Record<string, { from: readonly string[]; to: string }>> = Object.freeze({
+const V13_BSK_NAME: Readonly<Record<string, { from: readonly string[]; to: string }>> = Object.freeze({
   'bsk-overview': { from: ['best sudoku overview', 'best sudoku · overview'], to: 'Overview' },
   'bsk-campaigns': { from: ['best sudoku campaigns', 'best sudoku · campaigns'], to: 'Campaigns' },
   'bsk-popups': { from: ['best sudoku pop-ups', 'best sudoku · pop-ups'], to: 'Pop-ups' },
   'bsk-launch': { from: ['best sudoku launch', 'best sudoku · traffic', 'best sudoku traffic'], to: 'Traffic' },
 })
 
-/** v12 (once, version-gated): page navigation.
- *  - The v11 tab order becomes the stored order (v11TabOrder), so nothing moves.
+/** v13 (once, version-gated): page navigation.
+ *  - The pre-v13 tab order becomes the stored order (preV13TabOrder), so nothing moves.
  *  - Built-ins get their group by id (BUILTIN_GROUP): ★ Overview and Beacon "All sites" (★ Overview
  *    is shown pinned first, outside the groups), the four Best Sudoku pages "Best Sudoku", named
  *    Overview, Campaigns, Pop-ups and Traffic.
@@ -1019,12 +1021,12 @@ const V12_BSK_NAME: Readonly<Record<string, { from: readonly string[]; to: strin
  *  - Traffic (bsk-launch) gets `icon: "trending-up"`, the one explicit built-in icon (its beacon
  *    charts would otherwise resolve to Beacon's map pin); every other icon stays automatic.
  * Never adds, drops or edits a page's widgets or filters. Returns new page objects. */
-export function migrateNavV12(pages: DashboardPage[]): DashboardPage[] {
+export function migrateNavV13(pages: DashboardPage[]): DashboardPage[] {
   const nameGroups = [GROUP_ALL_SITES, GROUP_BEST_SUDOKU, GROUP_MINE]
-  return v11TabOrder(pages).map((p) => {
+  return preV13TabOrder(pages).map((p) => {
     const bg = builtinGroup(p.id)
     if (bg) {
-      const known = Object.hasOwn(V12_BSK_NAME, p.id) ? V12_BSK_NAME[p.id] : undefined
+      const known = Object.hasOwn(V13_BSK_NAME, p.id) ? V13_BSK_NAME[p.id] : undefined
       let name = p.name
       if (known && known.from.includes(name.trim().toLowerCase())) name = known.to
       else {
@@ -1040,7 +1042,7 @@ export function migrateNavV12(pages: DashboardPage[]): DashboardPage[] {
   })
 }
 
-// groupMeta (layout version 12): per-group badge overrides, validated on every load because they
+// groupMeta (layout version 13): per-group badge overrides, validated on every load because they
 // are rendered as a colour and an image source. A colour is a palette slot ("g0"…"g6") or a hex
 // colour; a logo is an https: URL, a same-origin path, or a base64 image data URL.
 const GROUP_COLOR_RE = /^(?:g[0-6]|#[0-9a-f]{3}|#[0-9a-f]{6})$/i
@@ -1108,7 +1110,7 @@ export function normalizeConfig(raw: any): DashboardConfig {
     // (this migration having already run, or a user who somehow added widgets before this
     // shipped) is left completely alone — never dropped, never re-populated, never duplicated.
     //
-    // The page's kind is decided by id alone (since layout version 12 there is no name fallback),
+    // The page's kind is decided by id alone (since layout version 13 there is no name fallback),
     // so a page is converted as exactly one of 'overview' | 'campaigns' | neither, whatever its name.
     for (const p of pages) {
       if (p.widgets.length !== 0) continue
@@ -1164,18 +1166,18 @@ export function normalizeConfig(raw: any): DashboardConfig {
     // default caption instead. A title the user has since edited never matches, so it's
     // left untouched.
     const withCaptionsMigrated = migratePopupCaveatTitles(pages)
-    // v12 migration (see CONFIG_VERSION and migrateNavV12): groups, the Best Sudoku short names,
-    // the v11 tab order as the stored order, Traffic's icon. Version-gated, so a later rename, move
-    // or reorder is never undone. The order is data from here on: no reorder runs on load.
+    // v13 migration (see CONFIG_VERSION and migrateNavV13): groups, the Best Sudoku short names,
+    // the pre-v13 tab order as the stored order, Traffic's icon. Version-gated, so a later rename,
+    // move or reorder is never undone. The order is data from here on: no reorder runs on load.
     const version = Number(raw.version) || 0
-    const ordered = version < 12 ? migrateNavV12(withCaptionsMigrated) : withCaptionsMigrated
+    const ordered = version < 13 ? migrateNavV13(withCaptionsMigrated) : withCaptionsMigrated
     // Every load: drill links must name an existing root page (normDrillLinks).
     normDrillLinks(ordered)
     // `activePageId` is the landing page for a first-time viewer (each viewer's current page lives
-    // in their browser since v12 — lib/viewerPrefs.ts): ★ Overview after the v12 migration, and
+    // in their browser since v13 — lib/viewerPrefs.ts): ★ Overview after the v13 migration, and
     // whenever the stored one no longer exists.
     const pinnedId = (ordered.find((p: DashboardPage) => p.isDefault) ?? ordered[0]).id
-    const wanted = version < 12 ? pinnedId : raw.activePageId
+    const wanted = version < 13 ? pinnedId : raw.activePageId
     const activePageId = ordered.some((p: DashboardPage) => p.id === wanted) ? wanted : pinnedId
     const groupMeta = normGroupMeta(raw.groupMeta)
     return { version: CONFIG_VERSION, activePageId, pages: ordered, syncRange: !!raw.syncRange, ...(groupMeta ? { groupMeta } : {}) }

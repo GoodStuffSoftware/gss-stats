@@ -135,10 +135,10 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   behaves. The page each viewer is on (and the page they last viewed in each group) is
   remembered **in their own browser** ([`src/lib/viewerPrefs.ts`](src/lib/viewerPrefs.ts)), not
   in the shared KV config: switching pages never saves anything or moves anyone else, and a
-  first-time viewer lands on ★ Overview (the config's `activePageId`). Layout version 12
-  (`migrateNavV12`) filed the existing pages: the built-ins by id, the Best Sudoku pages renamed
+  first-time viewer lands on ★ Overview (the config's `activePageId`). Layout version 13
+  (`migrateNavV13`) filed the existing pages: the built-ins by id, the Best Sudoku pages renamed
   Overview, Campaigns, Pop-ups and Traffic (their group shows "Best Sudoku"), and every other
-  page under the group its name starts with, else **Mine**. Drill pages made before version 12
+  page under the group its name starts with, else **Mine**. Drill pages made before version 13
   can't be linked to the page they came from (nothing stored it), so they stay ordinary pages
   under Mine.
   - **Breadcrumb** ([`src/components/nav/NavBreadcrumb.vue`](src/components/nav/NavBreadcrumb.vue))
@@ -683,13 +683,14 @@ of the migrated layout first copies the layout that was stored until then to
 (`functions/api/config.ts`; if the backup can't be written, the save fails and the old layout
 stays). The backup is named after the version that was **stored**, not the one before the new
 code: a layout still stored at v8 when v11 ships is backed up as `backup:v8`, one stored at v10
-as `backup:v10`. A tab still
+as `backup:v10`. Production is stored at v12 when layout version 13 (page navigation) ships, so
+its first v13 save writes `backup:v12`. A tab still
 running older code gets `409` ("This tab is out of date, reload") instead of overwriting a
 newer layout.
 
 **Rolling the code back needs the layout rolled back too.** An older release refuses to save
-over a newer stored layout (409), so after rolling back to v0.9.0 (layout v9), for example,
-every save fails until the stored layout is back at the version that release writes.
+over a newer stored layout (409), so after rolling back to the release before page navigation
+(layout v12), for example, every save fails until `backup:v12` is restored.
 
 To put a backup back, in this order:
 
@@ -699,8 +700,8 @@ To put a backup back, in this order:
    next load migrates the restored layout again. Either redeploy the previous release or ship
    the fixed migration.
 3. **Find the backup to restore**: list the backup keys, and pick the version that was stored
-   before the upgrade (the highest one below the current `CONFIG_VERSION`: `backup:v8` if
-   production was still stored at v8, `backup:v10` if a v10 save happened first). Namespace id
+   before the upgrade (the highest one below the current `CONFIG_VERSION`: `backup:v12` to undo
+   the v13 page-navigation upgrade). Namespace id
    from `wrangler.toml`; a token with Workers KV Storage: Edit.
 
    ```bash
@@ -712,7 +713,7 @@ To put a backup back, in this order:
 
    ```bash
    npx wrangler kv key get "dashboard:default" --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-current.json
-   npx wrangler kv key get "dashboard:default:backup:v8" --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-backup.json
+   npx wrangler kv key get "dashboard:default:backup:v12" --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-backup.json
    node -e "const c=JSON.parse(require('fs').readFileSync('layout-backup.json','utf8')); if(!Array.isArray(c.pages)||!c.pages.length) throw new Error('not a layout'); console.log('ok: version', c.version, '-', c.pages.length, 'pages')"
    npx wrangler kv key put "dashboard:default" --path layout-backup.json --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote
    ```
