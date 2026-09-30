@@ -109,7 +109,7 @@ describe('v11: the production layout (sanitised)', () => {
   it('v8 → v11 in one load equals v8 → v9 → v11; v11 → v11 is a no-op', () => {
     expect(stable(fromV8)).toEqual(stable(fromV9))
     expect(stable(normalizeConfig(clone(fromV9)))).toEqual(stable(fromV9))
-    // Every page is kept, in order (its v12 name and group: defaults.v12.test.ts).
+    // Every page is kept, in order (its v13 name and group: defaults.v13.test.ts).
     expect(fromV9.pages.map((p) => p.id)).toEqual((PROD_V9 as any).pages.map((p: any) => p.id))
   })
 })

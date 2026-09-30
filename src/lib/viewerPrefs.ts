@@ -1,4 +1,4 @@
-// Per-viewer navigation state (layout version 12): which page this viewer is on, the page they
+// Per-viewer navigation state (layout version 13): which page this viewer is on, the page they
 // last viewed in each group, and which drawer groups they collapsed. It lives in this browser's
 // localStorage, NOT in the shared dashboard config: everyone shares one config in KV and the last
 // write wins, so one person switching pages must never move everyone else (or cost a KV write).

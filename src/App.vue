@@ -30,7 +30,7 @@ const editing = ref<{ widget: Widget; isNew: boolean } | null>(null)
 const dark = ref(false)
 const saveState = ref<'idle' | 'saving' | 'saved' | 'error' | 'stale'>('idle')
 
-// The page currently being viewed/edited — per VIEWER (layout version 12): remembered in this
+// The page currently being viewed/edited — per VIEWER (layout version 13): remembered in this
 // browser (lib/viewerPrefs.ts), never written to the shared config, so switching pages costs no KV
 // write and never moves anyone else. `config.activePageId` is only the landing page for a viewer
 // with nothing remembered (★ Overview).
@@ -542,7 +542,7 @@ function openFilteredPage() {
 // v0.6 (PR #9, commit 672aa24) hid this bar behind a small top-right toggle. The owner wants
 // it back in normal flow, in EXACTLY its pre-v0.6 position/order/spacing/styling/wrapping —
 // see commit 8692b0f's src/App.vue (the last commit before that merge): directly under the page
-// navigation (the header since layout version 12), always visible, no overlay/collapse. It's
+// navigation (the header since layout version 13), always visible, no overlay/collapse. It's
 // restored in the template below as a plain
 // in-flow section (`barSectionEl`), unconditionally rendered whenever `!isCampaignPage` (the
 // campaign page still doesn't use it — unchanged from before).
@@ -914,7 +914,7 @@ function toggleDark() {
 </template>
 
 <style scoped>
-/* Full width (layout version 12): no centred max-width column — the header, the filter bar and the
+/* Full width (layout version 13): no centred max-width column — the header, the filter bar and the
    chart grid span the window, with a 16px gutter, so wide screens fit more charts per row. */
 .app {
   padding: 0 16px 60px;

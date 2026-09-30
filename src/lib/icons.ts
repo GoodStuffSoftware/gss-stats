@@ -1,4 +1,4 @@
-// Page icons and group badges (layout version 12).
+// Page icons and group badges (layout version 13).
 //
 // Keys in data, components in code: a page stores at most a short registry key (DashboardPage.icon,
 // e.g. "megaphone"), never markup or SVG, and this file maps each key to a Lucide icon component

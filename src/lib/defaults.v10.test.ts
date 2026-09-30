@@ -92,7 +92,7 @@ describe('v10: the production layout (sanitised)', () => {
       expect(card, k).toEqual({ preset: CARDED[k] })
       expect(rest, k).toEqual(before.get(k)) // id, title, dataset/view, x/y/w/h, notes: all kept
     }
-    // Every page is kept, in order (its v12 name, group and the landing page: defaults.v12.test.ts).
+    // Every page is kept, in order (its v13 name, group and the landing page: defaults.v13.test.ts).
     expect(v10FromV9.pages.map((p) => p.id)).toEqual((PROD_V9 as any).pages.map((p: DashboardPage) => p.id))
   })
 
