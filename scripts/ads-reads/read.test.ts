@@ -80,6 +80,9 @@ describe('morning-read: the $50 threshold read', () => {
     const fx = base()
     const b = fx.beacon as Extract<Fixture['beacon'], { tagged: unknown }>
     b.tagged = b.tagged.filter((t) => !['/signin-prompt/placement', '/promo-first50/shown'].includes(t.path))
+    const watch = await runMorningRead(fixtureDeps(fx, false), opts)
+    expect(watch.thresholdRead!.kill.rules.find((x) => x.id === 'funnel-reach')!.status).toBe('watch') // prompts still fire site-wide
+    b.siteEvents = b.siteEvents.filter((x) => !x.path.startsWith('/signin-prompt/') || ['/signin-prompt/accept', '/signin-prompt/dismiss'].includes(x.path))
     const r = await runMorningRead(fixtureDeps(fx, false), opts)
     expect(r.thresholdRead!.kill.tripped).toContain('funnel-reach')
   })
