@@ -891,10 +891,10 @@ function toggleDark() {
 </template>
 
 <style scoped>
+/* Full width (layout version 12): no centred max-width column — the header, the filter bar and the
+   chart grid span the window, with a 16px gutter, so wide screens fit more charts per row. */
 .app {
-  max-width: 1480px;
-  margin: 0 auto;
-  padding: 22px 22px 60px;
+  padding: 0 16px 60px;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -1025,6 +1025,11 @@ function toggleDark() {
   align-items: center;
   gap: 10px 14px;
   flex-wrap: wrap;
+  /* a full-bleed strip across the window, edge to edge past the .app gutter */
+  margin: 0 -16px;
+  padding: 10px 16px;
+  background: rgb(var(--surface));
+  border-bottom: 1px solid rgb(var(--line));
 }
 .topbar-crumbs {
   min-width: 0;
@@ -1126,9 +1131,8 @@ function toggleDark() {
   box-shadow: 0 10px 30px rgb(0 0 0 / 0.2);
 }
 .fb-pinned-inner {
-  max-width: 1480px;
-  margin: 0 auto;
-  padding: 14px 22px;
+  /* full width, like the in-flow bar it copies */
+  padding: 12px 16px;
 }
 .fb-fade-enter-active,
 .fb-fade-leave-active {
@@ -1228,8 +1232,27 @@ function toggleDark() {
 
 @media (max-width: 700px) {
   .app {
-    padding: 14px 12px 48px;
+    padding: 0 12px 48px;
     gap: 12px;
+  }
+  .topbar {
+    margin: 0 -12px;
+    padding: 9px 12px;
+    gap: 8px;
+  }
+  /* Phone: ☰, the (shortened) breadcrumb, ⋯ and search on the first row; the other actions below. */
+  .topbar-crumbs {
+    flex: 1 1 0;
+  }
+  .topbar-sp {
+    display: none;
+  }
+  .page-menu-btn {
+    margin-left: -6px;
+  }
+  .top-actions {
+    order: 1;
+    flex-basis: 100%;
   }
   .top-actions {
     flex-wrap: wrap;

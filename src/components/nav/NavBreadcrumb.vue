@@ -300,12 +300,23 @@ const drillCount = (n: number) => (n === 1 ? '1 drill' : `${n} drills`)
   color: rgb(var(--ink-3));
 }
 .compact .seg {
-  max-width: 150px;
+  max-width: none;
   padding: 3px 4px;
   font-size: 13.5px;
   gap: 5px;
 }
+/* Phone: when space runs out, the group name gives way before the page name. */
+.compact li:first-child {
+  flex-shrink: 4;
+}
+.compact li + li {
+  flex-shrink: 1;
+}
 .compact li:first-child .cv {
+  display: none;
+}
+/* Phone: the ☰ button next to it already carries the group's badge. */
+.compact li:first-child .group-badge {
   display: none;
 }
 .sheet-title {
