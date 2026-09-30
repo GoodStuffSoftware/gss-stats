@@ -214,6 +214,7 @@ function openSearch() {
 }
 function pickSearchResult(id: string) {
   searchOpen.value = false
+  drawerOpen.value = false // it can be opened over the drawer
   switchPage(id)
 }
 // "/" anywhere opens the search, unless you're typing into a field (or a dialog is open).

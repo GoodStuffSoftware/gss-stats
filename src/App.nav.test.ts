@@ -282,6 +282,20 @@ describe('App — page drawer, page menu, icon picker', () => {
     expect(w.find('.filterbar-inflow').exists()).toBe(false)
   })
 
+  it('/ works over the drawer, and picking a result closes both', async () => {
+    const w = await mountApp()
+    await openDrawer(w)
+    await key(document.activeElement!, '/')
+    await flushPromises()
+    const input = document.querySelector<HTMLInputElement>('[role="dialog"][aria-label="Search pages"] input')!
+    input.value = 'pop-ups'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+    await key(input, 'Enter')
+    expect(drawer()).toBeNull()
+    expect(shownPage(w)).toBe('Pop-ups')
+  })
+
   it('Tab stays inside the drawer', async () => {
     const w = await mountApp()
     await openDrawer(w)
@@ -310,6 +324,8 @@ describe('App — page drawer, page menu, icon picker', () => {
     const w = await mountApp()
     await openDrawer(w)
     await openRowMenu('Overview')
+    // opened from the (modal) drawer, the menu lives inside it, not outside the modal
+    expect(drawer()!.contains(document.getElementById('page-menu'))).toBe(true)
     expect(Array.from(document.querySelectorAll('#page-menu [role="menuitem"]')).map((b) => b.textContent!.trim())).toEqual(['Rename', 'Duplicate', 'Change icon…', 'Restore default charts'])
     await key(document.activeElement!, 'Escape')
     await openRowMenu('Traffic')
