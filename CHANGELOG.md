@@ -7,6 +7,12 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **The metric-card editor no longer loses a template's settings.** Re-picking a row's current
+  metric or note, switching the badge, a title or a repeat off and back on, or changing a repeat
+  and back now leaves a customized card exactly as the preset had it; picking a different metric
+  keeps the window and filters it still supports, the window picker says "Default" rather than
+  showing a window the row doesn't store, and editing another chart while the editor is open
+  shows that chart instead of the previous one.
 - **Two standing retest report notes corrected.** The upsell-near-zero-for-signed-out note
   wrongly called it a known bug (`useUpsellPrompt` returning early on `uid === null`); it is
   expected by design (a signed-out visitor is never walled — the trial starts only once a
