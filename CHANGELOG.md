@@ -13,6 +13,8 @@ All notable changes to **gss-stats** are documented here. The format follows
   keeps the window and filters it still supports, the window picker says "Default" rather than
   showing a window the row doesn't store, and editing another chart while the editor is open
   shows that chart instead of the previous one.
+- **The top-right corner of the header takes clicks again.** The hidden "show filters" button's
+  box no longer sits invisibly over the account menu (and, on a phone, the page menu button).
 - **Two standing retest report notes corrected.** The upsell-near-zero-for-signed-out note
   wrongly called it a known bug (`useUpsellPrompt` returning early on `uid === null`); it is
   expected by design (a signed-out visitor is never walled — the trial starts only once a
@@ -32,6 +34,32 @@ All notable changes to **gss-stats** are documented here. The format follows
   to show, before/after window and country picks, table column and row-label headings, "leave out
   a measured 0" and the column frame now have controls, and a preset card opens with its settings
   visible (read-only) until you choose Customize.
+- **Pages belong to groups.** Every page is filed under a group — "All sites", "Best Sudoku", or
+  "Mine" for your own pages unless their name starts with a group's name — and the Best Sudoku
+  pages drop their "Best Sudoku · " prefix (Overview, Campaigns, Pop-ups, Traffic). Drill pages
+  made before this can't be traced to the page they came from, so they stay ordinary pages under
+  Mine.
+- **Every page has an icon.** It comes from what the page's charts show (traffic, map, pop-ups,
+  campaigns, completions, ads, overview) unless someone picks one; a drill page shows the icon of
+  the page it came from with a small drill mark, and Traffic gets its own traffic-line icon.
+- **A breadcrumb in the header switches pages.** Group / page / drill page, each opening a list of
+  its neighbours: every group (and ★ Overview), the pages in the group (and a new page there), or
+  the other drill pages and the way back. Picking a group opens the page you last viewed in it.
+  Each group has a lettered, coloured badge. On a phone it shortens to group / page and the lists
+  open from the bottom of the screen.
+- **Every page is in a drawer behind ☰.** It opens over the charts on any screen: ★ Overview,
+  then each group (collapsible) with its pages and their icons, drill pages indented under their
+  page with × to delete them, a ⋯ menu on every page, and a new-page button. The ☰ button shows the
+  current group's badge.
+- **Every page has a menu.** Rename, duplicate, change icon, move to another group (or a new one),
+  restore default charts, delete. ★ Overview can't be moved or deleted.
+- **Pick a page's icon.** Search about forty icons in five groups, or choose Auto, which shows
+  what the page would get on its own.
+- **Press / to search every page.** Page names match first, then charts' titles, each result with
+  its icon and group; arrow keys move, Enter opens, Esc closes.
+- **Drill pages nest under the page they came from.** A drill opens its page straight away, in the
+  same group, named by its trail (for example "mobile › California"); a drill from a drill page
+  nests under the same page.
 - **The retest morning read now publishes a rendered report page every run.** A build step turns
   the read's saved output and the daily narrative into one self-contained page (narrative, spend
   against the thresholds, release health, funnel, diagnostics, Play bulk reports, and the
@@ -74,6 +102,18 @@ All notable changes to **gss-stats** are documented here. The format follows
   install rate** on the Pop-ups page, as counts.
 
 ### Changed
+- **The dashboard uses the full width of the window.** The header, the filter bar and the charts
+  span the screen instead of a centred column, so wide screens show more; the pinned filter bar
+  spans it too.
+- **Deleting a page also deletes its drill pages.** You're asked once, with the count ("Delete
+  Traffic and its 3 drill pages?").
+- **The page you're on is yours alone.** It's remembered in your own browser instead of the shared
+  dashboard, so switching pages no longer saves anything or moves anyone else, and a first-time
+  visitor lands on ★ Overview.
+- **Built-in pages are recognised by what they are, not their name.** Renaming a page no longer
+  changes how it behaves (its notes, its filter bar, what "restore default charts" brings back).
+- **Saved layouts move to version 12.** The first save keeps a backup of the previous layout, and a
+  tab still running the previous version is told to reload instead of overwriting the new one.
 - **The retest ads routine's release-health check now runs every morning read, at any hour.**
   The 23:15 ET backstop entry is folded into the single daily morning read (moved 08:00 → 06:00
   ET); the clock-based "01:00-12:00 ET quiet window" that used to suppress the check is retired,
@@ -84,6 +124,10 @@ All notable changes to **gss-stats** are documented here. The format follows
   the existing auth-success numbers on "Today at a glance". Both read a real zero (not a blank
   or a hidden tile) once tracking is live, so "no failures yet" reads differently from "not
   wired up".
+
+### Removed
+- **The page tab strip.** The breadcrumb, the page drawer and / search replace it; "+ Page" is
+  "New page" in the drawer and in the breadcrumb's page list.
 
 ### Fixed
 - **Chart queries with many sites and pop-up filters no longer refuse to run.** The dashboard's

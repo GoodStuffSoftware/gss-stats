@@ -92,8 +92,8 @@ describe('v10: the production layout (sanitised)', () => {
       expect(card, k).toEqual({ preset: CARDED[k] })
       expect(rest, k).toEqual(before.get(k)) // id, title, dataset/view, x/y/w/h, notes: all kept
     }
-    expect(v10FromV9.pages.map((p) => [p.id, p.name])).toEqual((PROD_V9 as any).pages.map((p: DashboardPage) => [p.id, p.name]))
-    expect(v10FromV9.activePageId).toBe((PROD_V9 as any).activePageId)
+    // Every page is kept, in order (its v12 name, group and the landing page: defaults.v12.test.ts).
+    expect(v10FromV9.pages.map((p) => p.id)).toEqual((PROD_V9 as any).pages.map((p: DashboardPage) => p.id))
   })
 
   it('v8 → v10 in one load equals v8 → v9 → v10', () => {
@@ -227,7 +227,7 @@ describe('the chart editor keeps the card in step with the view', () => {
     expect(syncCardWithView(custom).card).toEqual({ spec: {} }) // a customised card is not the view's
   })
   it('migrateCardsV10 returns the same page object when there is nothing to do', () => {
-    const p = { id: 'p', name: 'p', isDefault: false, filters: {} as any, widgets: [withCardForView(panel('a', 'kpis') as Widget)] }
+    const p = { id: 'p', name: 'p', isDefault: false, group: 'Mine', filters: {} as any, widgets: [withCardForView(panel('a', 'kpis') as Widget)] }
     expect(migrateCardsV10(p)).toBe(p)
   })
 })

@@ -41,8 +41,8 @@ function bespokeLeft(cfg: DashboardConfig): string[] {
 describe('v11: the real default layout', () => {
   it('ships every former panel as a card or a standard chart, and round-trips unchanged', () => {
     const d = defaultConfig()
-    expect(CONFIG_VERSION).toBe(11)
-    expect(d.version).toBe(11)
+    expect(CONFIG_VERSION).toBeGreaterThanOrEqual(11)
+    expect(d.version).toBe(CONFIG_VERSION)
     expect(bespokeLeft(d)).toEqual([])
     const w = byKey(d)
     expect(w.get('bsk-campaigns/cw-hour')).toMatchObject({ type: 'breakdownBar', dataset: 'geo', dimension: 'hourEt' })
@@ -109,7 +109,8 @@ describe('v11: the production layout (sanitised)', () => {
   it('v8 → v11 in one load equals v8 → v9 → v11; v11 → v11 is a no-op', () => {
     expect(stable(fromV8)).toEqual(stable(fromV9))
     expect(stable(normalizeConfig(clone(fromV9)))).toEqual(stable(fromV9))
-    expect(fromV9.pages.map((p) => [p.id, p.name])).toEqual((PROD_V9 as any).pages.map((p: any) => [p.id, p.name]))
+    // Every page is kept, in order (its v12 name and group: defaults.v12.test.ts).
+    expect(fromV9.pages.map((p) => p.id)).toEqual((PROD_V9 as any).pages.map((p: any) => p.id))
   })
 })
 
@@ -173,7 +174,7 @@ describe('v11: custom, deleted and renamed variants', () => {
   })
 
   it('idempotent at every level: a swapped chart and a carded panel are left as they are', () => {
-    const p = { id: 'p', name: 'p', isDefault: false, filters: {} as any, widgets: [hourOfDayWidget({ x: 0, y: 0, w: 1, h: 1 }), { ...(panel('r', 'campaigns', 'returns') as Widget), card: { preset: 'campaign-returns' } }] }
+    const p = { id: 'p', name: 'p', isDefault: false, group: 'Mine', filters: {} as any, widgets: [hourOfDayWidget({ x: 0, y: 0, w: 1, h: 1 }), { ...(panel('r', 'campaigns', 'returns') as Widget), card: { preset: 'campaign-returns' } }] }
     expect(migratePanelsV11(p)).toBe(p)
     const once = migratePanelsV11({ ...p, widgets: [panel('x', 'campaigns', 'flightDay') as Widget] })
     expect(migratePanelsV11(once)).toBe(once)
