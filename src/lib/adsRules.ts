@@ -410,7 +410,7 @@ export function nextThreshold(cumulative: number, thresholds: readonly number[])
 // ── Tagged (campaign-attributed) beacon rows → the funnel and the new indicators ─────────
 /** The spec's corrected sign-in ask (section 11): both prefixes, since the first-50 offer
  * REPLACES the sign-in dialog when it fires — never both. */
-export const ASK_PATHS = ['/signin-prompt/placement', '/signin-prompt/streak', '/promo-first50/shown'] as const
+export const ASK_PATHS = ['/signin-prompt/placement', '/signin-prompt/streak', '/signin-prompt/tutorial', '/promo-first50/shown'] as const
 export const ACCEPT_PATHS = ['/signin-prompt/accept', '/promo-first50/accept'] as const
 /** /popup-outcome/<popup> families, by lib/popupEvents.ts's internal id ('install' is the
  * wire name 'install-prompt'). */
@@ -624,6 +624,167 @@ export function siteSigninShown(rows: readonly HourPathCount[], fromMs: number, 
     if (ev?.family === 'signin-prompt' && ev.kind === 'shown') n += r.count
   }
   return n
+}
+
+// ── First-session funnel (informational only; never a kill rule) ─────────────────────────
+// Where ad arrivals drop between opening /game and finishing a puzzle. Tagged counts (the
+// campaign tag, as summarizeTaggedRows reads it) with site-wide web counts over the same
+// window alongside. A step whose path has no rows at all, site-wide or tagged, is "not yet
+// tracked" (the app release that sends it is not live), never a 0% step. Every figure is a row count: there is
+// no visitor id to join steps on, so a "vs parent" ratio is rows over rows, not a per-visitor
+// conversion rate, and it is MIN_COHORT-gated like every other rate.
+export const FIRST_SESSION_STEPS = ['arrivals', 'gameView', 'tourStart', 'tourComplete', 'tourSkip', 'firstMove', 'gameComplete'] as const
+export type FirstSessionStep = (typeof FIRST_SESSION_STEPS)[number]
+export const FIRST_SESSION_STEP_LABELS: Record<FirstSessionStep, string> = {
+  arrivals: 'arrivals (d0, floor)',
+  gameView: 'game views',
+  tourStart: 'tour start',
+  tourComplete: 'tour complete',
+  tourSkip: 'tour skip',
+  firstMove: 'first move',
+  gameComplete: 'game complete',
+}
+/** Each step's parent for the row ratio; an untracked parent falls back to its own parent.
+ * Game views get none: /game rows are page views (several per visit) against first-ever
+ * beacons, the mixed-unit ratio lib/campaigns.ts VALID_FUNNEL_RATE_STEPS rules out. */
+export const FIRST_SESSION_PARENT: Record<FirstSessionStep, FirstSessionStep | null> = {
+  arrivals: null,
+  gameView: null,
+  tourStart: 'gameView',
+  tourComplete: 'tourStart',
+  tourSkip: 'tourStart',
+  firstMove: 'gameView',
+  gameComplete: 'firstMove',
+}
+export const ABANDON_BUCKETS = ['0', '1-25', '26-50', '51-75', '76-99'] as const
+export type AbandonBucket = (typeof ABANDON_BUCKETS)[number]
+export const WELCOME_EVENTS = ['shown', 'daily', 'leaderboard', 'dismiss'] as const
+export type WelcomeEvent = (typeof WELCOME_EVENTS)[number]
+
+const TOUR_PATHS: Partial<Record<FirstSessionStep, string>> = { tourStart: '/tour/start', tourComplete: '/tour/complete', tourSkip: '/tour/skip', firstMove: '/game/first-move' }
+const ABANDON_PREFIX = '/game/abandon/'
+const WELCOME_PREFIX = '/welcome-signed-in/'
+
+/** The first-session bucket a path counts in, or null. Exact paths only (a trailing slash or
+ * an unknown abandon bucket / welcome action is not guessed at). */
+export type FirstSessionBucket =
+  | { kind: 'step'; step: Exclude<FirstSessionStep, 'arrivals'> }
+  | { kind: 'abandon'; bucket: AbandonBucket }
+  | { kind: 'welcome'; event: WelcomeEvent }
+  | { kind: 'ask'; tutorial: boolean }
+export function firstSessionBucket(path: string): FirstSessionBucket | null {
+  if (path === '/game') return { kind: 'step', step: 'gameView' }
+  if (path.startsWith('/game/complete/')) return { kind: 'step', step: 'gameComplete' } // lib/campaigns.ts classifyFunnelPath's 'completed'
+  for (const [step, p] of Object.entries(TOUR_PATHS)) if (path === p) return { kind: 'step', step: step as Exclude<FirstSessionStep, 'arrivals'> }
+  if (path.startsWith(ABANDON_PREFIX)) {
+    const b = path.slice(ABANDON_PREFIX.length)
+    return (ABANDON_BUCKETS as readonly string[]).includes(b) ? { kind: 'abandon', bucket: b as AbandonBucket } : null
+  }
+  if (path.startsWith(WELCOME_PREFIX)) {
+    const e = path.slice(WELCOME_PREFIX.length)
+    return (WELCOME_EVENTS as readonly string[]).includes(e) ? { kind: 'welcome', event: e as WelcomeEvent } : null
+  }
+  if ((ASK_PATHS as readonly string[]).includes(path)) return { kind: 'ask', tutorial: path === '/signin-prompt/tutorial' }
+  return null
+}
+
+/** Raw first-session tallies, one side (tagged or site-wide). */
+export interface FirstSessionTally {
+  steps: Record<FirstSessionStep, number>
+  abandon: Record<AbandonBucket, number>
+  welcome: Record<WelcomeEvent, number>
+  asks: number
+  asksTutorial: number
+}
+/** One site-wide web row of the first-session read (scripts/ads-reads/beacon.ts
+ * siteFirstSessionQuery): a first-session path (or '' for every other path) with its counts. */
+export interface FirstSessionRowSite {
+  path: string
+  /** visitor = 'new' rows among `count`. */
+  newVisitors: number
+  count: number
+}
+export function emptyFirstSessionTally(): FirstSessionTally {
+  const zero = <K extends string>(ks: readonly K[]) => Object.fromEntries(ks.map((k) => [k, 0])) as Record<K, number>
+  return { steps: zero(FIRST_SESSION_STEPS), abandon: zero(ABANDON_BUCKETS), welcome: zero(WELCOME_EVENTS), asks: 0, asksTutorial: 0 }
+}
+function tally(t: FirstSessionTally, path: string, count: number): void {
+  const b = firstSessionBucket(path)
+  if (!b) return
+  if (b.kind === 'step') t.steps[b.step] += count
+  else if (b.kind === 'abandon') t.abandon[b.bucket] += count
+  else if (b.kind === 'welcome') t.welcome[b.event] += count
+  else {
+    t.asks += count
+    if (b.tutorial) t.asksTutorial += count
+  }
+}
+/** Tagged side: arrivals = visitor 'new' rows (TaggedSummary.taggedArrivals's definition). */
+export function tallyTaggedFirstSession(rows: readonly TaggedRow[]): FirstSessionTally {
+  const t = emptyFirstSessionTally()
+  for (const r of rows) {
+    if (r.visitor === 'new') t.steps.arrivals += r.count
+    tally(t, r.path, r.count)
+  }
+  return t
+}
+/** Site-wide side: arrivals = every visitor 'new' row on the web site in the window. */
+export function tallySiteFirstSession(rows: readonly FirstSessionRowSite[]): FirstSessionTally {
+  const t = emptyFirstSessionTally()
+  for (const r of rows) {
+    t.steps.arrivals += r.newVisitors
+    tally(t, r.path, r.count)
+  }
+  return t
+}
+
+/** One figure: the tagged count, the site-wide count beside it (null = site-wide not read),
+ * and whether the path is tracked at all (null = unknown, the site-wide read is missing). */
+export interface FirstSessionFigure {
+  tagged: number
+  site: number | null
+  tracked: boolean | null
+}
+export interface FirstSessionStepFigure extends FirstSessionFigure {
+  /** The step's tagged rows over its nearest tracked ancestor's (rows over rows, gated);
+   * null for the first step or an untracked step. */
+  vsParent: (GatedRate & { parent: FirstSessionStep }) | null
+}
+export interface FirstSessionFunnel {
+  steps: Record<FirstSessionStep, FirstSessionStepFigure>
+  abandon: Record<AbandonBucket, FirstSessionFigure>
+  welcome: Record<WelcomeEvent, FirstSessionFigure>
+  asks: FirstSessionFigure
+  asksTutorial: FirstSessionFigure
+  /** Whether the site-wide side was read (false: every `site` is null, `tracked` unknown). */
+  siteRead: boolean
+}
+// Tracked once either side has a row: a tagged row proves the release is live even if the
+// site-wide read (web only) has none.
+const figure = (tagged: number, site: number | null): FirstSessionFigure => ({ tagged, site, tracked: tagged > 0 || (site ?? 0) > 0 ? true : site == null ? null : false })
+
+/** Pairs the tagged tally with the site-wide one. `site` null = the site-wide read failed. */
+export function buildFirstSessionFunnel(tagged: FirstSessionTally, site: FirstSessionTally | null): FirstSessionFunnel {
+  const steps = {} as Record<FirstSessionStep, FirstSessionStepFigure>
+  for (const k of FIRST_SESSION_STEPS) steps[k] = { ...figure(tagged.steps[k], site ? site.steps[k] : null), vsParent: null }
+  // An unknown `tracked` (no site-wide read) still gets a ratio: only a known-untracked step is skipped.
+  const usable = (k: FirstSessionStep) => steps[k].tracked !== false
+  for (const k of FIRST_SESSION_STEPS) {
+    if (!usable(k)) continue
+    let p = FIRST_SESSION_PARENT[k]
+    while (p && !usable(p)) p = FIRST_SESSION_PARENT[p]
+    if (p) steps[k].vsParent = { ...gateRate(steps[k].tagged, steps[p].tagged), parent: p }
+  }
+  const map = <K extends string>(ks: readonly K[], t: Record<K, number>, s: Record<K, number> | null) =>
+    Object.fromEntries(ks.map((k) => [k, figure(t[k], s ? s[k] : null)])) as Record<K, FirstSessionFigure>
+  return {
+    steps,
+    abandon: map(ABANDON_BUCKETS, tagged.abandon, site?.abandon ?? null),
+    welcome: map(WELCOME_EVENTS, tagged.welcome, site?.welcome ?? null),
+    asks: figure(tagged.asks, site ? site.asks : null),
+    asksTutorial: figure(tagged.asksTutorial, site ? site.asksTutorial : null),
+    siteRead: site != null,
+  }
 }
 
 /** Sum of every outcome type for one popup. */

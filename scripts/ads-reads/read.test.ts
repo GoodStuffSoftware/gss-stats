@@ -149,6 +149,54 @@ describe('morning-read: review lows', () => {
   })
 })
 
+describe('morning-read: first-session funnel (informational only)', () => {
+  const beaconOf = (fx: Fixture) => fx.beacon as Extract<Fixture['beacon'], { tagged: unknown }>
+  it('reads tagged steps with site-wide counts alongside; untracked steps say so, never 0%', async () => {
+    const fx = base()
+    beaconOf(fx).tagged.push(
+      { hour: '2026-09-29T20:00:00Z', path: '/tour/start', visitor: 'returning', count: 8 },
+      { hour: '2026-09-29T20:00:00Z', path: '/tour/skip', visitor: 'returning', count: 5 },
+      { hour: '2026-09-29T20:00:00Z', path: '/signin-prompt/tutorial', visitor: 'returning', count: 2 },
+    )
+    beaconOf(fx).siteFirstSession!.push({ path: '/tour/start', newVisitors: 0, count: 90 }, { path: '/welcome-signed-in/shown', newVisitors: 0, count: 4 })
+    const r = await runMorningRead(fixtureDeps(fx, true), opts)
+    const f = r.firstSession!.funnel
+    expect(r.firstSession!.siteError).toBeNull()
+    expect(f.steps.arrivals).toMatchObject({ tagged: 30, site: 422, tracked: true })
+    expect(f.steps.tourStart).toMatchObject({ tagged: 8, site: 90, tracked: true })
+    expect(f.steps.tourSkip.vsParent).toMatchObject({ parent: 'tourStart', numerator: 5, denominator: 8 })
+    expect(f.steps.firstMove.tracked).toBe(false)
+    expect(f.asksTutorial).toEqual({ tagged: 2, site: 0, tracked: true })
+    expect(r.hardCapDaily?.id).toBe('hard-cap') // no new rule
+    expect(r.thresholdRead!.kill.rules.map((x) => x.id)).not.toContain('first-session')
+    const text = formatMorningReport(r)
+    expect(text).toContain('First-session funnel since attribution start (informational only; never a kill rule)')
+    expect(text).toMatch(/^ {2}tour start: 8 · site-wide 90; vs game views 12.5% \(8\/64\)$/m)
+    expect(text).toMatch(/^ {2}tour skip: 5 · site-wide 0; vs tour start 62.5% \(5\/8\)$/m)
+    expect(text).toMatch(/^ {2}first move: not yet tracked \(no rows yet\)$/m)
+    expect(text).toMatch(/^ {2}abandon by % filled: not yet tracked \(no rows yet\)$/m)
+    expect(text).toMatch(/^ {2}welcome card \(signed in\): shown 0 · site-wide 4; daily not yet tracked/m)
+    expect(text).not.toMatch(/first move: 0\b/)
+  })
+  it('a beacon source without the site-wide read leaves tracking unknown and does not fail the read', async () => {
+    const fx = base()
+    delete beaconOf(fx).siteFirstSession
+    const r = await runMorningRead(fixtureDeps(fx, true), opts)
+    expect(r.firstSession!.funnel.siteRead).toBe(false)
+    expect(r.firstSession!.siteError).toMatch(/beacon site first-session: not supported/)
+    expect(r.failures).toEqual([])
+    expect(formatMorningReport(r)).toMatch(/^ {2}first move: 0 · site-wide not read/m)
+  })
+  it('is absent in health-only mode and when the tagged read fails', async () => {
+    expect((await runMorningRead(fixtureDeps(base(), true), { ...opts, healthOnly: true })).firstSession).toBeNull()
+    const fx = base()
+    fx.beacon = { error: 'wrangler unavailable' }
+    const r = await runMorningRead(fixtureDeps(fx, true), opts)
+    expect(r.firstSession).toBeNull()
+    expect(formatMorningReport(r)).toContain('First-session funnel: not read')
+  })
+})
+
 describe('morning-read: a scheduled read that never ran', () => {
   it('the next read notes the missing ET dates (report, record, and any push), without pushing on its own', async () => {
     const fx = base()
