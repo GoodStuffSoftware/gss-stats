@@ -6,10 +6,12 @@
 // Nothing a template set is lost to a click: re-picking the current kind is a no-op, switching
 // kind keeps `empty` (editorModel withRepeatOver), and each kind's own filters (ids, status,
 // tracked, flighting today) are remembered for the life of the editor, so switching away and
-// back — or off and on again — restores them.
-import { computed, useId } from 'vue'
-import { CAMPAIGN_ID_OPTIONS, POPUP_ID_OPTIONS, withField, withRepeatOver } from '../../../lib/metrics/editorModel'
-import type { RepeatSpec } from '../../../lib/metrics/types'
+// back — or off and on again — restores them. The "when there is nothing to repeat" message
+// (RepeatSpec.empty) is remembered the same way when it is switched off and on.
+import { computed, ref, useId } from 'vue'
+import { repeatIdOptions, withField, withRepeatOver } from '../../../lib/metrics/editorModel'
+import type { Label, RepeatSpec } from '../../../lib/metrics/types'
+import CardEditorLabel from './CardEditorLabel.vue'
 
 const props = defineProps<{
   allow: RepeatSpec['over'][]
@@ -32,6 +34,8 @@ const OVER_LABELS: Record<RepeatSpec['over'], string> = {
 const IDS_HEADINGS: Partial<Record<RepeatSpec['over'], { title: string; none: string }>> = {
   campaigns: { title: 'Campaigns', none: 'none checked = all' },
   popups: { title: 'Pop-ups', none: 'none checked = all' },
+  windows: { title: 'Windows', none: 'none checked = release before and after' },
+  countries: { title: 'Countries', none: 'none checked = all three' },
 }
 
 /** The last spec seen for each kind, so switching away and back restores its filters. */
@@ -47,7 +51,7 @@ const overValue = computed<RepeatSpec['over'] | ''>({
   },
 })
 
-const idOptions = computed(() => (overValue.value === 'campaigns' ? CAMPAIGN_ID_OPTIONS : overValue.value === 'popups' ? POPUP_ID_OPTIONS : []))
+const idOptions = computed(() => repeatIdOptions(overValue.value))
 const idsHeading = computed(() => (overValue.value ? IDS_HEADINGS[overValue.value] : undefined))
 const idsValue = computed<string[]>({
   get: () => repeat.value?.ids ?? [],
@@ -98,6 +102,30 @@ const flightingToday = computed<boolean>({
   },
 })
 
+// ── When the repeat yields nothing (RepeatSpec.empty): a heading and a message, once. ─────────
+const lastEmpty = ref<NonNullable<RepeatSpec['empty']> | null>(null)
+const hasEmpty = computed(() => !!repeat.value?.empty)
+function toggleEmpty(on: boolean) {
+  if (!repeat.value || on === hasEmpty.value) return
+  if (!on) {
+    lastEmpty.value = repeat.value.empty ?? null
+    repeat.value = withField(repeat.value, 'empty', undefined)
+  } else {
+    repeat.value = { ...repeat.value, empty: lastEmpty.value ?? { label: '', text: '' } }
+  }
+}
+function setEmptyPart(part: 'label' | 'text', v: Label | undefined) {
+  if (!repeat.value?.empty) return
+  repeat.value = { ...repeat.value, empty: { ...repeat.value.empty, [part]: v ?? '' } }
+}
+const emptyLabel = computed<Label | undefined>({
+  get: () => repeat.value?.empty?.label,
+  set: (v) => setEmptyPart('label', v),
+})
+const emptyText = computed<Label | undefined>({
+  get: () => repeat.value?.empty?.text,
+  set: (v) => setEmptyPart('text', v),
+})
 </script>
 
 <template>
@@ -136,6 +164,15 @@ const flightingToday = computed<boolean>({
     </div>
   </div>
 
+  <template v-if="overValue">
+    <div class="field check">
+      <label><input type="checkbox" :checked="hasEmpty" @change="toggleEmpty(($event.target as HTMLInputElement).checked)" /> When there is nothing to repeat, show a message</label>
+    </div>
+    <template v-if="hasEmpty">
+      <CardEditorLabel v-model="emptyLabel" :has-data="false" :allow-metric-own="false" placeholder="Heading (optional)" heading="Empty heading" />
+      <CardEditorLabel v-model="emptyText" :has-data="false" :allow-metric-own="false" placeholder="Message" heading="Empty message" />
+    </template>
+  </template>
 </template>
 
 <style scoped src="./editor.css"></style>

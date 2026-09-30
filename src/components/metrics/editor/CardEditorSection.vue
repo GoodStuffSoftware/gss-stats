@@ -15,6 +15,8 @@ const props = defineProps<{
   count: number
   sectionErrors: string[]
   itemErrors: Record<string, string[]>
+  /** A preset's template shown for reading (CardEditor's preset mode): controls disabled. */
+  readonly?: boolean
 }>()
 const emit = defineEmits<{ move: [dir: -1 | 1]; remove: [] }>()
 const section = defineModel<Section>({ required: true })
@@ -51,6 +53,8 @@ function toggleLabel(key: OptionalLabel, on: boolean) {
   section.value = withField(section.value, key, on ? (remembered[key] ?? '') : undefined)
 }
 const titleModel = labelModel('title')
+const columnLabelModel = labelModel('columnLabel')
+const rowsLabelModel = labelModel('rowsLabel')
 const hasTitle = computed(() => section.value.title !== undefined)
 function toggleTitle(on: boolean) {
   toggleLabel('title', on)
@@ -106,15 +110,15 @@ function removeAt(i: number) {
 <template>
   <div class="ce-section">
     <div class="ce-section-head">
-      <div class="row" style="flex: 1">
+      <fieldset class="row ce-fieldset" style="flex: 1" :disabled="readonly">
         <div class="field">
           <label :for="layoutId">Layout</label>
           <select :id="layoutId" v-model="section.layout">
             <option v-for="l in LAYOUTS" :key="l.value" :value="l.value">{{ l.label }}</option>
           </select>
         </div>
-      </div>
-      <span class="ce-item-controls">
+      </fieldset>
+      <span v-if="!readonly" class="ce-item-controls">
         <button type="button" class="icon-btn" title="Move section up" :disabled="index === 0" @click="emit('move', -1)">↑</button>
         <button type="button" class="icon-btn" title="Move section down" :disabled="index === count - 1" @click="emit('move', 1)">↓</button>
         <button type="button" class="icon-btn danger" title="Remove section" @click="emit('remove')">✕ Section</button>
@@ -125,6 +129,7 @@ function removeAt(i: number) {
       <li v-for="(e, i) in sectionErrors" :key="i">{{ e }}</li>
     </ul>
 
+    <fieldset class="ce-fieldset" :disabled="readonly">
     <div class="field check">
       <label><input type="checkbox" :checked="hasTitle"@change="toggleTitle(($event.target as HTMLInputElement).checked)" /> Section title</label>
     </div>
@@ -132,6 +137,17 @@ function removeAt(i: number) {
 
     <CardEditorRepeat v-if="!section.columns" v-model="repeatModel" :allow="['campaigns', 'popups', 'windows', 'readings', 'countries']" label="Repeat this section" />
     <CardEditorRepeat v-if="section.layout === 'table' && !section.repeat" v-model="columnsModel" :allow="['windows', 'countries', 'campaigns', 'popups']" label="Columns (each item becomes a row)" />
+    <template v-if="section.columns">
+      <div class="field check">
+        <label><input type="checkbox" :checked="section.columnLabel !== undefined" @change="toggleLabel('columnLabel', ($event.target as HTMLInputElement).checked)" /> Column heading <span class="hint">— default: each column's own name</span></label>
+      </div>
+      <CardEditorLabel v-if="section.columnLabel !== undefined" v-model="columnLabelModel" :has-data="false" :allow-metric-own="false" :repeat-over="section.columns.over" placeholder="Column heading" heading="Column heading" />
+      <div class="field check">
+        <label><input type="checkbox" :checked="section.rowsLabel !== undefined" @change="toggleLabel('rowsLabel', ($event.target as HTMLInputElement).checked)" /> Heading over the row labels <span class="hint">— e.g. "Step"</span></label>
+      </div>
+      <CardEditorLabel v-if="section.rowsLabel !== undefined" v-model="rowsLabelModel" :has-data="false" :allow-metric-own="false" :repeat-over="cardRepeatOver" placeholder="Row-label heading" heading="Row-label heading" />
+    </template>
+    </fieldset>
 
     <ul class="ce-items">
       <CardEditorItem
@@ -144,12 +160,13 @@ function removeAt(i: number) {
         :index="i"
         :count="section.items.length"
         :errors="itemErrors[item.id] ?? []"
+        :readonly="readonly"
         @move="(dir) => moveItem(i, dir)"
         @duplicate="duplicateAt(i)"
         @remove="removeAt(i)"
       />
     </ul>
-    <button type="button" class="btn" @click="addItem">+ Add item</button>
+    <button v-if="!readonly" type="button" class="btn" @click="addItem">+ Add item</button>
   </div>
 </template>
 

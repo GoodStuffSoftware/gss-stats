@@ -23,6 +23,11 @@ All notable changes to **gss-stats** are documented here. The format follows
   of collapsing a mixed window to one bound.
 
 ### Added
+- **The metric-card editor shows and edits every template setting.** Badge colours, the card's
+  Google Ads refresh button, a note label's variables, the message shown when a repeat has nothing
+  to show, before/after window and country picks, table column and row-label headings, "leave out
+  a measured 0" and the column frame now have controls, and a preset card opens with its settings
+  visible (read-only) until you choose Customize.
 - **The retest morning read now publishes a rendered report page every run.** A build step turns
   the read's saved output and the daily narrative into one self-contained page (narrative, spend
   against the thresholds, release health, funnel, diagnostics, Play bulk reports, and the

@@ -40,8 +40,8 @@ import CardEditorSection from './editor/CardEditorSection.vue'
 import { presetById } from '../../lib/metrics/presets'
 import { validateCard } from '../../lib/metrics/validate'
 import { noteLabelOptions } from '../../lib/metrics/editorModel'
-import { cloneSpec, emptySection, groupErrors, moveBy, presetOptions, specFromPresetId } from '../../lib/metrics/editorModel'
-import type { CardRef, CardSpec, Label, MetricsContext } from '../../lib/metrics/types'
+import { BADGE_TONE_OPTIONS, CARD_ACTION_OPTIONS, cloneSpec, emptySection, groupErrors, moveBy, presetOptions, rowsToTones, specFromPresetId, tonesToRows, withField, type BadgeTone, type ToneRow } from '../../lib/metrics/editorModel'
+import type { CardAction, CardRef, CardSpec, Label, MetricsContext } from '../../lib/metrics/types'
 
 const props = defineProps<{
   modelValue: CardRef
@@ -129,7 +129,14 @@ function resetToPreset() {
 }
 function useDifferentPreset() {
   mode.value = 'preset'
+  if (customizedFrom.value) presetId.value = customizedFrom.value
+  resetSpecTo(specFromPresetId(presetId.value))
 }
+// In preset mode the form shows the chosen preset's own settings, read-only (a `{ preset }` card
+// is never edited in place — Customize… copies it into a `{ spec, from }` first).
+watch(presetId, (id) => {
+  if (mode.value === 'preset') resetSpecTo(specFromPresetId(id))
+})
 const selectedPresetDescription = computed(() => PRESET_OPTIONS.find((p) => p.value === presetId.value)?.description ?? '')
 
 // ── Validity ─────────────────────────────────────────────────────────────────────────────────
@@ -226,6 +233,38 @@ const badgeDataModel = computed({
     if (spec.badge && 'field' in v) spec.badge.data = v
   },
 })
+// Badge colours (display.tones): which badge text reads as live (green) or a warning.
+const toneRows = computed<ToneRow[]>(() => tonesToRows(spec.badge?.display.tones))
+function setToneRows(rows: ToneRow[]) {
+  if (!spec.badge) return
+  spec.badge.display = withField(spec.badge.display, 'tones', rowsToTones(rows))
+}
+function setToneRow(i: number, patch: Partial<ToneRow>) {
+  const rows = toneRows.value.map((r, j) => (j === i ? { ...r, ...patch } : r))
+  if (JSON.stringify(rows) !== JSON.stringify(toneRows.value)) setToneRows(rows)
+}
+function addToneRow() {
+  // A fresh row needs a value no other row has (the map is keyed by it).
+  let value = 'new value'
+  for (let n = 2; toneRows.value.some((r) => r.value === value); n++) value = `new value ${n}`
+  setToneRows([...toneRows.value, { value, tone: 'live' }])
+}
+function removeToneRow(i: number) {
+  setToneRows(toneRows.value.filter((_, j) => j !== i))
+}
+// Card actions (CardSpec.actions): controls in the card's status row.
+function hasAction(a: CardAction): boolean {
+  return !!spec.actions?.includes(a)
+}
+function toggleAction(a: CardAction, on: boolean) {
+  if (on === hasAction(a)) return
+  const set = new Set(spec.actions ?? [])
+  if (on) set.add(a)
+  else set.delete(a)
+  const next = CARD_ACTION_OPTIONS.map((o) => o.value).filter((v) => set.has(v))
+  if (next.length) spec.actions = next
+  else delete spec.actions
+}
 const NOTE_OPTIONS = noteLabelOptions()
 const captionsValue = computed<string[]>({
   get: () => spec.captions ?? [],
@@ -263,6 +302,12 @@ const showUpdatedValue = computed<'' | 'header' | 'footer'>({
     else delete spec.showUpdated
   },
 })
+const TONE_OPTIONS = BADGE_TONE_OPTIONS
+const tonesGroupId = useId()
+const actionsGroupId = useId()
+function toneOf(e: Event): BadgeTone {
+  return (e.target as HTMLSelectElement).value as BadgeTone
+}
 
 // ── Sections ─────────────────────────────────────────────────────────────────────────────────
 function addSection() {
@@ -303,7 +348,8 @@ function removeSection(i: number) {
           <li v-for="(e, i) in grouped.cardErrors" :key="i">{{ e }}</li>
         </ul>
 
-        <template v-if="mode === 'custom'">
+        <p v-if="mode === 'preset' && presetId" class="hint ce-readonly-hint">The preset's settings, for reading. Customize… to edit a copy of them.</p>
+        <fieldset v-if="mode === 'custom' || presetId" :key="specKey" class="ce-fieldset" :disabled="mode === 'preset'">
           <div class="field check">
             <label><input type="checkbox" :checked="hasTitle" @change="toggleTitle(($event.target as HTMLInputElement).checked)" /> Card title</label>
           </div>
@@ -314,7 +360,26 @@ function removeSection(i: number) {
           <div class="field check">
             <label><input type="checkbox" :checked="hasBadge" @change="toggleBadge(($event.target as HTMLInputElement).checked)" /> Badge</label>
           </div>
-          <CardEditorData v-if="hasBadge" v-model="badgeDataModel" :repeat-over="spec.repeat?.over" field-only />
+          <template v-if="hasBadge && spec.badge">
+            <CardEditorData v-model="badgeDataModel" :repeat-over="spec.repeat?.over" field-only />
+            <div class="field" role="group" :aria-labelledby="tonesGroupId">
+              <label :id="tonesGroupId">Badge colours <span class="hint">— by the badge's text; anything else is neutral</span></label>
+              <div v-for="(r, i) in toneRows" :key="i" class="row">
+                <div class="field">
+                  <label :for="`${tonesGroupId}-v${i}`">Badge text</label>
+                  <input :id="`${tonesGroupId}-v${i}`" type="text" :value="r.value" maxlength="60" @change="setToneRow(i, { value: ($event.target as HTMLInputElement).value })" />
+                </div>
+                <div class="field">
+                  <label :for="`${tonesGroupId}-t${i}`">Colour</label>
+                  <select :id="`${tonesGroupId}-t${i}`" :value="r.tone" @change="setToneRow(i, { tone: toneOf($event) })">
+                    <option v-for="o in TONE_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+                  </select>
+                </div>
+                <button type="button" class="icon-btn danger" :title="'Remove the colour for ' + r.value" @click="removeToneRow(i)">✕</button>
+              </div>
+              <button type="button" class="btn" @click="addToneRow">+ Add a colour</button>
+            </div>
+          </template>
 
           <div class="field">
             <label :id="captionsId">Captions <span class="hint">— notes shown under the whole card</span></label>
@@ -335,6 +400,13 @@ function removeSection(i: number) {
               <input :id="minWidthId" type="number" min="120" :value="minWidthValue ?? ''" placeholder="230" @change="minWidthValue = ($event.target as HTMLInputElement).valueAsNumber" />
             </div>
           </div>
+          <div class="field" role="group" :aria-labelledby="actionsGroupId">
+            <label :id="actionsGroupId">Card controls</label>
+            <label v-for="o in CARD_ACTION_OPTIONS" :key="o.value" class="campaign-row">
+              <input type="checkbox" :checked="hasAction(o.value)" @change="toggleAction(o.value, ($event.target as HTMLInputElement).checked)" />
+              {{ o.label }}
+            </label>
+          </div>
           <div class="field">
             <label :for="showUpdatedId">"Updated Xs ago"</label>
             <select :id="showUpdatedId" v-model="showUpdatedValue">
@@ -343,8 +415,11 @@ function removeSection(i: number) {
               <option value="footer">Footer</option>
             </select>
           </div>
+        </fieldset>
 
-          <div :key="specKey">
+        <!-- Outside the card-level fieldset: in preset mode each section disables its own
+             controls but its items still open (a disabled fieldset would disable their toggles). -->
+        <div v-if="mode === 'custom' || presetId" :key="specKey">
           <h3>Sections</h3>
           <CardEditorSection
             v-for="(section, si) in spec.sections"
@@ -356,12 +431,12 @@ function removeSection(i: number) {
             :count="spec.sections.length"
             :section-errors="grouped.sectionErrors[si] ?? []"
             :item-errors="grouped.itemErrors[si] ?? {}"
+            :readonly="mode === 'preset'"
             @move="(dir) => moveSection(si, dir)"
             @remove="removeSection(si)"
           />
-          <button type="button" class="btn" @click="addSection">+ Add section</button>
-          </div>
-        </template>
+          <button v-if="mode === 'custom'" type="button" class="btn" @click="addSection">+ Add section</button>
+        </div>
       </div>
 
       <div class="ce-preview">

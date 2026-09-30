@@ -16,8 +16,8 @@ import { POPUPS } from '../popupEvents'
 import { METRICS, metricWindows, type MetricDef, type MetricParam } from './metrics'
 import { RATIOS, ratioParamsOf, ratioWindowsOf, type RatioDef } from './ratios'
 import { DISPLAYS_FOR, kindOf, type DataKind } from './validate'
-import { WINDOW_SIDES } from './types'
-import type { CardSpec, DataBinding, Display, DisplayAs, Gating, Label, MetricItem, ParamValue, Params, RepeatSpec, ScopePath, Section, WindowName, WindowSpec } from './types'
+import { COUNTRY_BUCKETS, WINDOW_SIDES } from './types'
+import type { CardAction, CardSpec, DataBinding, Display, DisplayAs, Gating, Label, MetricItem, ParamValue, Params, RepeatSpec, ScopePath, Section, WindowName, WindowSide, WindowSpec } from './types'
 import { PRESETS, presetById } from './presets'
 
 // ── Ids: generated, never typed ───────────────────────────────────────────────────────────
@@ -130,6 +130,24 @@ export function makeLabel(kind: LabelKind, current: Label | undefined, fallbackS
 export function withNoteId(current: Label | undefined, id: string): Label {
   const vars = current !== undefined && typeof current === 'object' && 'note' in current ? current.vars : undefined
   return vars ? { note: id, vars: { ...vars } } : { note: id }
+}
+/** The `{name}` placeholders a registry note's template uses, in order, deduplicated — the
+ * variables a note label can bind to a scope field (Label.vars). [] for an unknown note. */
+export function noteVarNames(id: string): string[] {
+  const n = getNote(id)
+  if (!n) return []
+  const text = typeof n.text === 'function' ? n.text() : n.text
+  const out: string[] = []
+  for (const m of text.matchAll(/\{([A-Za-z0-9_.]+)\}/g)) if (!out.includes(m[1])) out.push(m[1])
+  return out
+}
+/** A note label with one var bound (`path`) or removed (`''`); `vars` is dropped once empty. */
+export function withNoteVar(current: Label | undefined, name: string, path: ScopePath | ''): Label | undefined {
+  if (current === undefined || typeof current !== 'object' || !('note' in current)) return current
+  const vars: Record<string, ScopePath> = { ...current.vars }
+  if (path) vars[name] = path
+  else delete vars[name]
+  return Object.keys(vars).length ? { note: current.note, vars } : { note: current.note }
 }
 
 // ── Scope paths (for a `bind` label or a `field` data binding) — a fixed, curated list per
@@ -423,6 +441,26 @@ export function withRepeatOver(current: RepeatSpec | undefined, over: RepeatSpec
   if (current?.over === over) return current
   return current?.empty ? { over, empty: current.empty } : { over }
 }
+/** The ids a repeat over `over` can be narrowed to (RepeatSpec.ids), plain names only; [] for a
+ * kind with no id list (readings). Windows: the before/after and upsell sides validateCard
+ * accepts (WINDOW_SIDES); countries: the COUNTRY_BUCKETS. */
+const WINDOW_SIDE_LABELS: Record<WindowSide, string> = { before: 'Release: before', after: 'Release: after', upsellPre: 'Before the upsell fix', upsellPost: 'After the upsell fix' }
+const COUNTRY_LABELS: Record<string, string> = { US: 'US', CA: 'CA', other: 'Other' }
+export function repeatIdOptions(over: RepeatSpec['over'] | '' | undefined): { value: string; label: string }[] {
+  switch (over) {
+    case 'campaigns':
+      return CAMPAIGN_ID_OPTIONS
+    case 'popups':
+      return POPUP_ID_OPTIONS
+    case 'windows':
+      return WINDOW_SIDES.map((w) => ({ value: w, label: WINDOW_SIDE_LABELS[w] }))
+    case 'countries':
+      return COUNTRY_BUCKETS.map((c) => ({ value: c, label: COUNTRY_LABELS[c] ?? c }))
+    default:
+      return []
+  }
+}
+
 // ── Gating ─────────────────────────────────────────────────────────────────────────────────
 /** An item with some gating fields changed; `undefined` removes a field, and an emptied gating
  * is dropped altogether rather than left as `gating: {}` (a no-op edit leaves the item equal). */
@@ -444,6 +482,27 @@ export function withField<T extends object, K extends keyof T>(obj: T, key: K, v
   return out
 }
 
+// ── Badge tones / card actions ──────────────────────────────────────────────────────────────
+export type BadgeTone = 'neutral' | 'live' | 'warn'
+export const BADGE_TONE_OPTIONS: { value: BadgeTone; label: string }[] = [
+  { value: 'neutral', label: 'Neutral' },
+  { value: 'live', label: 'Live (green)' },
+  { value: 'warn', label: 'Warning' },
+]
+export interface ToneRow {
+  value: string
+  tone: BadgeTone
+}
+export function tonesToRows(tones: Record<string, BadgeTone> | undefined): ToneRow[] {
+  return Object.entries(tones ?? {}).map(([value, tone]) => ({ value, tone }))
+}
+/** Rows back to a tones map, in order (a later row wins a duplicated value); undefined when
+ * there are none. Object.fromEntries defines own properties, so a value such as '__proto__' is
+ * stored as plain data, never as the map's prototype. */
+export function rowsToTones(rows: readonly ToneRow[]): Record<string, BadgeTone> | undefined {
+  return rows.length ? Object.fromEntries(rows.map((r) => [r.value, r.tone])) : undefined
+}
+export const CARD_ACTION_OPTIONS: { value: CardAction; label: string }[] = [{ value: 'ads-refresh', label: 'Refresh Google Ads spend button' }]
 
 // ── Error grouping (validateCard's flat string[] -> per-section / per-item, for inline
 // display) — validate.ts's `where` strings are always `sections[N]` or `sections[N].<itemId>`,

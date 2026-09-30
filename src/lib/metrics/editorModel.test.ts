@@ -39,9 +39,14 @@ import {
   reorder,
   scopePathOptions,
   specFromPresetId,
+  noteVarNames,
   rebindData,
+  repeatIdOptions,
+  rowsToTones,
+  tonesToRows,
   withGating,
   withNoteId,
+  withNoteVar,
   withRepeatOver,
   type LabelKind,
 } from './editorModel'
@@ -342,6 +347,15 @@ describe('template settings survive a re-pick', () => {
     expect(withNoteId('text', 'label.card.flight')).toEqual({ note: 'label.card.flight' })
   })
 
+  it('noteVarNames reads the template placeholders; withNoteVar binds and unbinds one', () => {
+    expect(noteVarNames('label.card.upsellSegment')).toEqual(['at', 'day'])
+    expect(noteVarNames('no-such-note')).toEqual([])
+    const l: Label = { note: 'label.card.taggedArrivalsFor', vars: { campaign: 'campaign.label' } }
+    expect(withNoteVar(l, 'campaign', '')).toEqual({ note: 'label.card.taggedArrivalsFor' })
+    expect(withNoteVar({ note: 'label.card.taggedArrivalsFor' }, 'campaign', 'campaign.id')).toEqual({ note: 'label.card.taggedArrivalsFor', vars: { campaign: 'campaign.id' } })
+    expect(withNoteVar('plain', 'x', 'campaign.id')).toBe('plain')
+  })
+
   it('rebindData: the same id is a no-op; another id keeps the window and params it accepts', () => {
     const cur = { metric: 'bsk.pageviews', window: 'todaySoFar' as const }
     expect(rebindData(cur, { metric: 'bsk.pageviews' })).toBe(cur)
@@ -362,6 +376,12 @@ describe('template settings survive a re-pick', () => {
     expect(withRepeatOver({ over: 'campaigns', tracked: true, empty }, 'popups')).toEqual({ over: 'popups', empty })
   })
 
+  it('repeatIdOptions lists window sides and country buckets too', () => {
+    expect(repeatIdOptions('windows').map((o) => o.value)).toEqual(['before', 'after', 'upsellPre', 'upsellPost'])
+    expect(repeatIdOptions('countries').map((o) => o.value)).toEqual(['US', 'CA', 'other'])
+    expect(repeatIdOptions('readings')).toEqual([])
+  })
+
   it('withGating drops an emptied gating instead of leaving gating: {}', () => {
     const item = { id: 'a', label: '', data: { metric: 'bsk.pageviews' }, display: { as: 'number' as const } }
     expect('gating' in withGating(item, { whenUnmeasured: undefined })).toBe(false)
@@ -369,4 +389,12 @@ describe('template settings survive a re-pick', () => {
     expect(withGating(item, { whenZero: 'omit' })).toEqual({ ...item, gating: { whenZero: 'omit' } })
   })
 
+  it('badge tones round-trip through rows, and a prototype-named value stays plain data', () => {
+    const tones = { 'flighting today': 'live' as const, closed: 'warn' as const }
+    expect(rowsToTones(tonesToRows(tones))).toEqual(tones)
+    expect(rowsToTones([])).toBeUndefined()
+    const odd = rowsToTones([{ value: '__proto__', tone: 'warn' }])!
+    expect(Object.getPrototypeOf(odd)).toBe(Object.prototype)
+    expect(Object.hasOwn(odd, '__proto__')).toBe(true)
+  })
 })
