@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **A hosted preview at dev.gss-stats.pages.dev.** Preview deployments of branch `dev` are now served (still behind Google sign-in) with their own saved-layout store, seeded from production's, while reading the same live data; production's hosts, settings and saved layout are unchanged.
+
 ### Changed
 - **v1.99.4 Play release note.** The release timeline and panel now say v1.99.4 went public on Play at 15:43Z on 10-18.
 
