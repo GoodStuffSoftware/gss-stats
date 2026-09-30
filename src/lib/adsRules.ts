@@ -596,6 +596,20 @@ export function summarizeSiteEvents(
   return s
 }
 
+/** Site-wide sign-in prompts SHOWN (lib/popupEvents.ts classifyPopupPath: `/signin-prompt/<x>`
+ * other than accept/dismiss) in hour buckets overlapping [fromMs, toMs) — the untagged
+ * cross-check for kill rule 3, since the campaign tag only rides beacons for 30 minutes. */
+export function siteSigninShown(rows: readonly HourPathCount[], fromMs: number, toMs: number): number {
+  const fromHour = Math.floor(fromMs / 3_600_000) * 3_600_000
+  let n = 0
+  for (const r of rows) {
+    if (r.hourStartMs < fromHour || r.hourStartMs >= toMs) continue
+    const ev = classifyPopupPath(r.path)
+    if (ev?.family === 'signin-prompt' && ev.kind === 'shown') n += r.count
+  }
+  return n
+}
+
 /** Sum of every outcome type for one popup. */
 export function outcomeTotal(o: OutcomeCounts, popup: OutcomePopup): number {
   return POPUP_OUTCOME_TYPES.reduce((a, t) => a + o[popup][t], 0)
@@ -840,7 +854,7 @@ export function buildHealthPairs(i: HealthInputs): HealthPair[] {
 
 // ── Kill rules (spec section 12) — evaluated only on data that came back ────────────────
 export type RuleId = 'placement-leak' | 'ctr' | 'funnel-reach' | 'hard-cap'
-export type RuleStatus = 'trip' | 'clear' | 'not-armed' | 'no-data'
+export type RuleStatus = 'trip' | 'watch' | 'clear' | 'not-armed' | 'no-data'
 export interface RuleResult {
   id: RuleId
   label: string
@@ -889,8 +903,10 @@ export interface KillRuleInput {
   delivery: { impressions: number; clicks: number } | null
   /** Placement cost split — null when the placement read failed. */
   placements: { campaignCost: number; approvedCost: number; itemizedCost: number } | null
-  /** Tagged beacon counts — null when the beacon read failed. */
-  beacon: { asks: number; taggedArrivals: number } | null
+  /** Tagged beacon counts — null when the beacon read failed. `siteSigninShown` = site-wide
+   * (untagged) sign-in prompts shown in the same window (siteSigninShown); null/absent = the
+   * site read failed. */
+  beacon: { asks: number; taggedArrivals: number; siteSigninShown?: number | null } | null
 }
 export interface KillRuleEvaluation {
   rules: RuleResult[]
@@ -993,18 +1009,23 @@ export function evaluateKillRules(i: KillRuleInput): KillRuleEvaluation {
     }
   }
 
-  // 3. Funnel reach — zero sign-in asks from tagged arrivals.
+  // 3. Funnel reach — zero sign-in asks from tagged arrivals. The tag rides beacons for only
+  // 30 minutes and the streak prompt fires in later sessions, so zero tagged asks with
+  // sign-in prompts still showing site-wide is WATCH, not TRIP.
   {
     const base = { id: 'funnel-reach' as const, label: 'zero sign-in asks from tagged arrivals', limit: 0 }
     if (!armed) rules.push({ ...base, status: 'not-armed', value: null, detail: `armed at ${usd(plan.killRulesFrom)}` })
     else if (!i.beacon) rules.push({ ...base, status: 'no-data', value: null, detail: 'beacon read returned no data' })
     else {
       const zeroArrivals = i.beacon.taggedArrivals === 0 ? ' Zero tagged arrivals too: check the landing URL and tagging.' : ''
+      const site = i.beacon.siteSigninShown ?? null
+      const watch = i.beacon.asks === 0 && site != null && site > 0
+      const siteLine = ` Site-wide sign-in prompts shown: ${site ?? 'unavailable'}.${watch ? ' Tagged attribution expires 30 min after the ad click, so later-session prompts are not counted as tagged asks.' : ''}`
       rules.push({
         ...base,
-        status: i.beacon.asks === 0 ? 'trip' : 'clear',
+        status: i.beacon.asks > 0 ? 'clear' : watch ? 'watch' : 'trip',
         value: i.beacon.asks,
-        detail: `${i.beacon.asks} asks from ${i.beacon.taggedArrivals} tagged arrivals.${zeroArrivals}`,
+        detail: `${i.beacon.asks} asks from ${i.beacon.taggedArrivals} tagged arrivals.${siteLine}${zeroArrivals}`,
       })
     }
   }
