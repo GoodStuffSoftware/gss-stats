@@ -178,7 +178,7 @@ ul .nr{border:0;padding:0}
       <div class="panel"><h3 class="ph">Tagged funnel</h3><div class="table-wrap"><table id="funnel"></table></div></div>
       <div class="panel"><h3 class="ph">Returns by path</h3><div class="table-wrap"><table id="returns"></table></div><p class="caption" id="play-line"></p></div>
     </div>
-    <div class="panel"><h3 class="ph">First-session funnel</h3><p class="caption">Informational only, never a kill rule. Row counts with no visitor join: "vs" is rows over rows, not per-visitor conversion. A path with no rows yet (site-wide or tagged) is not yet tracked, not zero.</p><div class="table-wrap"><table id="first-session"></table></div></div>
+    <div class="panel"><h3 class="ph">First-session funnel</h3><p class="caption">Informational only, never a kill rule. Row counts with no visitor join: "vs" is rows over rows, not per-visitor conversion. A beacon family (paths shipped in one app release) with no rows yet, site-wide or tagged, is not yet tracked; once any path in it has a row, a missing sibling is a real 0.</p><div class="table-wrap"><table id="first-session"></table></div></div>
     <div class="panel"><h3 class="ph">Accounts</h3><div class="kv" id="accounts"></div></div>
     <div class="panel"><h3 class="ph">Site-wide, not campaign-attributed</h3><ul class="printed" id="sitewide"></ul></div>
   </section>
@@ -436,7 +436,7 @@ try {
     const fs = D.firstSession;
     if (!fs || !fs.funnel) { notRead("first-session", "tagged beacon rows unavailable"); return; }
     const f = fs.funnel;
-    const LABELS = { arrivals: "Tagged arrivals (d0, floor)", gameView: "Game views", tourStart: "Tour start", tourComplete: "Tour complete", tourSkip: "Tour skip", firstMove: "First move", gameComplete: "Game complete" };
+    const LABELS = { arrivals: "Arrivals (d0 devices)", gameView: "Game views", tourStart: "Tour start", tourComplete: "Tour complete", tourSkip: "Tour skip", firstMove: "First move", gameComplete: "Game complete" };
     const untracked = () => chip("not yet tracked", "neutral");
     const site = (x) => x.site == null ? "not read" : int(x.site);
     const vs = (x) => {

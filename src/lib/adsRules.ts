@@ -612,31 +612,38 @@ export function summarizeSiteEvents(
   return s
 }
 
-/** Site-wide sign-in prompts SHOWN (lib/popupEvents.ts classifyPopupPath: `/signin-prompt/<x>`
- * other than accept/dismiss) in hour buckets overlapping [fromMs, toMs) — the untagged
- * cross-check for kill rule 3, since the campaign tag only rides beacons for 30 minutes. */
-export function siteSigninShown(rows: readonly HourPathCount[], fromMs: number, toMs: number): number {
+/** Site-wide asks SHOWN — the same shown-ask set as ASK_PATHS (sign-in placement / streak /
+ * tutorial and the first-50 promo that replaces the dialog), exact paths — in hour buckets
+ * overlapping [fromMs, toMs): the untagged cross-check for kill rule 3, since the campaign tag
+ * only rides beacons for 30 minutes. `paths` narrows the set (siteTutorialAsksShown). */
+export function siteSigninShown(rows: readonly HourPathCount[], fromMs: number, toMs: number, paths: readonly string[] = ASK_PATHS): number {
   const fromHour = Math.floor(fromMs / 3_600_000) * 3_600_000
   let n = 0
   for (const r of rows) {
     if (r.hourStartMs < fromHour || r.hourStartMs >= toMs) continue
-    const ev = classifyPopupPath(r.path)
-    if (ev?.family === 'signin-prompt' && ev.kind === 'shown') n += r.count
+    if (paths.includes(r.path)) n += r.count
   }
   return n
+}
+/** The app's first-session ask beacon. Until it has a row site-wide, first-session asks are
+ * unobservable and rule 3 may downgrade to WATCH; once it has one, rule 3 reads tagged asks only. */
+export const FIRST_SESSION_ASK_PATH = '/signin-prompt/tutorial'
+export function siteTutorialAsksShown(rows: readonly HourPathCount[], fromMs: number, toMs: number): number {
+  return siteSigninShown(rows, fromMs, toMs, [FIRST_SESSION_ASK_PATH])
 }
 
 // ── First-session funnel (informational only; never a kill rule) ─────────────────────────
 // Where ad arrivals drop between opening /game and finishing a puzzle. Tagged counts (the
 // campaign tag, as summarizeTaggedRows reads it) with site-wide web counts over the same
-// window alongside. A step whose path has no rows at all, site-wide or tagged, is "not yet
-// tracked" (the app release that sends it is not live), never a 0% step. Every figure is a row count: there is
+// window alongside. A beacon FAMILY (paths that ship in one app release) with no rows at all,
+// site-wide or tagged, is "not yet tracked" (the release is not live), never a 0% step; once
+// any path in the family has a row, a sibling with none is a real 0. Every figure is a row count: there is
 // no visitor id to join steps on, so a "vs parent" ratio is rows over rows, not a per-visitor
 // conversion rate, and it is MIN_COHORT-gated like every other rate.
 export const FIRST_SESSION_STEPS = ['arrivals', 'gameView', 'tourStart', 'tourComplete', 'tourSkip', 'firstMove', 'gameComplete'] as const
 export type FirstSessionStep = (typeof FIRST_SESSION_STEPS)[number]
 export const FIRST_SESSION_STEP_LABELS: Record<FirstSessionStep, string> = {
-  arrivals: 'arrivals (d0, floor)',
+  arrivals: 'arrivals (d0 devices)',
   gameView: 'game views',
   tourStart: 'tour start',
   tourComplete: 'tour complete',
@@ -645,17 +652,20 @@ export const FIRST_SESSION_STEP_LABELS: Record<FirstSessionStep, string> = {
   gameComplete: 'game complete',
 }
 /** Each step's parent for the row ratio; an untracked parent falls back to its own parent.
- * Game views get none: /game rows are page views (several per visit) against first-ever
- * beacons, the mixed-unit ratio lib/campaigns.ts VALID_FUNNEL_RATE_STEPS rules out. */
+ * Nothing divides by game views (or divides game views by arrivals): /game rows are page views
+ * (several per visit) against once-per-event beacons, the mixed-unit ratio lib/campaigns.ts
+ * VALID_FUNNEL_RATE_STEPS rules out. So tour start and first move carry no ratio. */
 export const FIRST_SESSION_PARENT: Record<FirstSessionStep, FirstSessionStep | null> = {
   arrivals: null,
   gameView: null,
-  tourStart: 'gameView',
+  tourStart: null,
   tourComplete: 'tourStart',
   tourSkip: 'tourStart',
-  firstMove: 'gameView',
+  firstMove: null,
   gameComplete: 'firstMove',
 }
+/** Steps whose beacons ship in one app release with the abandon buckets: tracked together. */
+export const FIRST_SESSION_RELEASE_STEPS = ['tourStart', 'tourComplete', 'tourSkip', 'firstMove'] as const satisfies readonly FirstSessionStep[]
 export const ABANDON_BUCKETS = ['0', '1-25', '26-50', '51-75', '76-99'] as const
 export type AbandonBucket = (typeof ABANDON_BUCKETS)[number]
 export const WELCOME_EVENTS = ['shown', 'daily', 'leaderboard', 'dismiss'] as const
@@ -672,8 +682,13 @@ export type FirstSessionBucket =
   | { kind: 'abandon'; bucket: AbandonBucket }
   | { kind: 'welcome'; event: WelcomeEvent }
   | { kind: 'ask'; tutorial: boolean }
+  | { kind: 'arrival'; uc: string }
 export function firstSessionBucket(path: string): FirstSessionBucket | null {
   if (path === '/game') return { kind: 'step', step: 'gameView' }
+  // Arrivals: /return/<uc>/d0, sent once per device on its first tagged visit (best-sudoku
+  // src/services/campaignReturns.ts) — devices, not page rows. Attributed by the path's own uc.
+  const ret = parseReturnPath(path)
+  if (ret) return ret.bucket === 'd0' ? { kind: 'arrival', uc: ret.uc } : null
   if (path.startsWith('/game/complete/')) return { kind: 'step', step: 'gameComplete' } // lib/campaigns.ts classifyFunnelPath's 'completed'
   for (const [step, p] of Object.entries(TOUR_PATHS)) if (path === p) return { kind: 'step', step: step as Exclude<FirstSessionStep, 'arrivals'> }
   if (path.startsWith(ABANDON_PREFIX)) {
@@ -695,14 +710,20 @@ export interface FirstSessionTally {
   welcome: Record<WelcomeEvent, number>
   asks: number
   asksTutorial: number
+  /** true when the tagged arrivals (d0) read failed: arrivals is unknown, not 0. */
+  arrivalsUnread?: boolean
 }
 /** One site-wide web row of the first-session read (scripts/ads-reads/beacon.ts
- * siteFirstSessionQuery): a first-session path (or '' for every other path) with its counts. */
+ * siteFirstSessionQuery): a first-session path with its row count. */
 export interface FirstSessionRowSite {
   path: string
-  /** visitor = 'new' rows among `count`. */
-  newVisitors: number
   count: number
+}
+/** Tagged arrivals: /return/<uc>/d0 rows for the campaign's own tags (scripts/ads-reads/beacon.ts
+ * returnArrivalsQuery), with the campaign's uc values to re-check each path against. */
+export interface FirstSessionArrivals {
+  rows: readonly { path: string; count: number }[]
+  ucValues: readonly string[]
 }
 export function emptyFirstSessionTally(): FirstSessionTally {
   const zero = <K extends string>(ks: readonly K[]) => Object.fromEntries(ks.map((k) => [k, 0])) as Record<K, number>
@@ -714,34 +735,38 @@ function tally(t: FirstSessionTally, path: string, count: number): void {
   if (b.kind === 'step') t.steps[b.step] += count
   else if (b.kind === 'abandon') t.abandon[b.bucket] += count
   else if (b.kind === 'welcome') t.welcome[b.event] += count
+  else if (b.kind === 'arrival') t.steps.arrivals += count
   else {
     t.asks += count
     if (b.tutorial) t.asksTutorial += count
   }
 }
-/** Tagged side: arrivals = visitor 'new' rows (TaggedSummary.taggedArrivals's definition). */
-export function tallyTaggedFirstSession(rows: readonly TaggedRow[]): FirstSessionTally {
+/** Tagged side: every step from the campaign-tagged rows; arrivals = /return/<uc>/d0 rows for
+ * the campaign's uc values (one per device; a d0 row can land in a later, untagged page load,
+ * so it is attributed by the path's uc, never by the row's tag). `arrivals` null = not read. */
+export function tallyTaggedFirstSession(rows: readonly TaggedRow[], arrivals: FirstSessionArrivals | null): FirstSessionTally {
   const t = emptyFirstSessionTally()
-  for (const r of rows) {
-    if (r.visitor === 'new') t.steps.arrivals += r.count
-    tally(t, r.path, r.count)
-  }
+  for (const r of rows) if (firstSessionBucket(r.path)?.kind !== 'arrival') tally(t, r.path, r.count)
+  if (!arrivals) t.arrivalsUnread = true
+  else
+    for (const r of arrivals.rows) {
+      const b = firstSessionBucket(r.path)
+      if (b?.kind === 'arrival' && arrivals.ucValues.includes(b.uc)) t.steps.arrivals += r.count
+    }
   return t
 }
-/** Site-wide side: arrivals = every visitor 'new' row on the web site in the window. */
+/** Site-wide side: arrivals = every /return/<any uc>/d0 row on the web site in the window. */
 export function tallySiteFirstSession(rows: readonly FirstSessionRowSite[]): FirstSessionTally {
   const t = emptyFirstSessionTally()
-  for (const r of rows) {
-    t.steps.arrivals += r.newVisitors
-    tally(t, r.path, r.count)
-  }
+  for (const r of rows) tally(t, r.path, r.count)
   return t
 }
 
-/** One figure: the tagged count, the site-wide count beside it (null = site-wide not read),
- * and whether the path is tracked at all (null = unknown, the site-wide read is missing). */
+/** One figure: the tagged count (null = not read; only arrivals can be), the site-wide count
+ * beside it (null = site-wide not read), and whether the path is tracked at all (null =
+ * unknown, the site-wide read is missing). */
 export interface FirstSessionFigure {
-  tagged: number
+  tagged: number | null
   site: number | null
   tracked: boolean | null
 }
@@ -760,27 +785,38 @@ export interface FirstSessionFunnel {
   siteRead: boolean
 }
 // Tracked once either side has a row: a tagged row proves the release is live even if the
-// site-wide read (web only) has none.
-const figure = (tagged: number, site: number | null): FirstSessionFigure => ({ tagged, site, tracked: tagged > 0 || (site ?? 0) > 0 ? true : site == null ? null : false })
+// site-wide read (web only) has none. Families then widen it (trackFamily).
+const figure = (tagged: number | null, site: number | null): FirstSessionFigure => ({ tagged, site, tracked: (tagged ?? 0) > 0 || (site ?? 0) > 0 ? true : site == null ? null : false })
+/** A family ships in one release: once any member is tracked, every member is (a missing
+ * sibling is a real 0, not an instrumentation gap). */
+function trackFamily(members: FirstSessionFigure[]): void {
+  if (members.some((m) => m.tracked === true)) for (const m of members) m.tracked = true
+}
 
-/** Pairs the tagged tally with the site-wide one. `site` null = the site-wide read failed. */
+/** Pairs the tagged tally with the site-wide one. `site` null = the site-wide read failed.
+ * Families: the tour / first-move / abandon release; the welcome-signed-in card; and the
+ * tutorial ask (its own beacon). */
 export function buildFirstSessionFunnel(tagged: FirstSessionTally, site: FirstSessionTally | null): FirstSessionFunnel {
   const steps = {} as Record<FirstSessionStep, FirstSessionStepFigure>
-  for (const k of FIRST_SESSION_STEPS) steps[k] = { ...figure(tagged.steps[k], site ? site.steps[k] : null), vsParent: null }
+  for (const k of FIRST_SESSION_STEPS) steps[k] = { ...figure(k === 'arrivals' && tagged.arrivalsUnread ? null : tagged.steps[k], site ? site.steps[k] : null), vsParent: null }
+  const map = <K extends string>(ks: readonly K[], t: Record<K, number>, s: Record<K, number> | null) =>
+    Object.fromEntries(ks.map((k) => [k, figure(t[k], s ? s[k] : null)])) as Record<K, FirstSessionFigure>
+  const abandon = map(ABANDON_BUCKETS, tagged.abandon, site?.abandon ?? null)
+  const welcome = map(WELCOME_EVENTS, tagged.welcome, site?.welcome ?? null)
+  trackFamily([...FIRST_SESSION_RELEASE_STEPS.map((k) => steps[k]), ...ABANDON_BUCKETS.map((b) => abandon[b])])
+  trackFamily(WELCOME_EVENTS.map((e) => welcome[e]))
   // An unknown `tracked` (no site-wide read) still gets a ratio: only a known-untracked step is skipped.
   const usable = (k: FirstSessionStep) => steps[k].tracked !== false
   for (const k of FIRST_SESSION_STEPS) {
     if (!usable(k)) continue
     let p = FIRST_SESSION_PARENT[k]
     while (p && !usable(p)) p = FIRST_SESSION_PARENT[p]
-    if (p) steps[k].vsParent = { ...gateRate(steps[k].tagged, steps[p].tagged), parent: p }
+    if (p) steps[k].vsParent = { ...gateRate(tagged.steps[k], tagged.steps[p]), parent: p } // arrivals (the only nullable) is never in a ratio
   }
-  const map = <K extends string>(ks: readonly K[], t: Record<K, number>, s: Record<K, number> | null) =>
-    Object.fromEntries(ks.map((k) => [k, figure(t[k], s ? s[k] : null)])) as Record<K, FirstSessionFigure>
   return {
     steps,
-    abandon: map(ABANDON_BUCKETS, tagged.abandon, site?.abandon ?? null),
-    welcome: map(WELCOME_EVENTS, tagged.welcome, site?.welcome ?? null),
+    abandon,
+    welcome,
     asks: figure(tagged.asks, site ? site.asks : null),
     asksTutorial: figure(tagged.asksTutorial, site ? site.asksTutorial : null),
     siteRead: site != null,
@@ -1081,9 +1117,10 @@ export interface KillRuleInput {
   /** Placement cost split — null when the placement read failed. */
   placements: { campaignCost: number; approvedCost: number; itemizedCost: number } | null
   /** Tagged beacon counts — null when the beacon read failed. `siteSigninShown` = site-wide
-   * (untagged) sign-in prompts shown in the same window (siteSigninShown); null/absent = the
-   * site read failed. */
-  beacon: { asks: number; taggedArrivals: number; siteSigninShown?: number | null } | null
+   * (untagged) asks shown in the same window (siteSigninShown); null/absent = the site read
+   * failed. `siteTutorialAsks` = site-wide FIRST_SESSION_ASK_PATH rows (siteTutorialAsksShown);
+   * > 0 means first-session asks are observable, so rule 3 reads tagged asks only. */
+  beacon: { asks: number; taggedArrivals: number; siteSigninShown?: number | null; siteTutorialAsks?: number | null } | null
 }
 export interface KillRuleEvaluation {
   rules: RuleResult[]
@@ -1187,8 +1224,11 @@ export function evaluateKillRules(i: KillRuleInput): KillRuleEvaluation {
   }
 
   // 3. Funnel reach — zero sign-in asks from tagged arrivals. The tag rides beacons for only
-  // 30 minutes and the streak prompt fires in later sessions, so zero tagged asks with
-  // sign-in prompts still showing site-wide is WATCH, not TRIP.
+  // 30 minutes and the streak prompt fires in later sessions, so while first-session asks are
+  // unobservable (FIRST_SESSION_ASK_PATH has no row site-wide), zero tagged asks from tagged
+  // arrivals with asks still showing site-wide is WATCH, not TRIP. The downgrade expires by
+  // itself: once the tutorial ask has a row site-wide, a working first session produces tagged
+  // asks directly, so rule 3 reads tagged asks only. Zero tagged arrivals is always TRIP.
   {
     const base = { id: 'funnel-reach' as const, label: 'zero sign-in asks from tagged arrivals', limit: 0 }
     if (!armed) rules.push({ ...base, status: 'not-armed', value: null, detail: `armed at ${usd(plan.killRulesFrom)}` })
@@ -1196,13 +1236,18 @@ export function evaluateKillRules(i: KillRuleInput): KillRuleEvaluation {
     else {
       const zeroArrivals = i.beacon.taggedArrivals === 0 ? ' Zero tagged arrivals too: check the landing URL and tagging.' : ''
       const site = i.beacon.siteSigninShown ?? null
-      const watch = i.beacon.asks === 0 && site != null && site > 0
-      const siteLine = ` Site-wide sign-in prompts shown: ${site ?? 'unavailable'}.${watch ? ' Tagged attribution expires 30 min after the ad click, so later-session prompts are not counted as tagged asks.' : ''}`
+      const tutorial = i.beacon.siteTutorialAsks ?? null
+      const taggedOnly = tutorial != null && tutorial > 0
+      const mode = taggedOnly
+        ? ` Mode: tagged asks only (${FIRST_SESSION_ASK_PATH} shown ${tutorial} times site-wide, so first-session asks are observable).`
+        : ` Mode: site-wide fallback (${FIRST_SESSION_ASK_PATH} ${tutorial == null ? 'not read' : 'has no rows'} site-wide, so first-session asks are not yet observable).`
+      const watch = !taggedOnly && i.beacon.asks === 0 && i.beacon.taggedArrivals > 0 && site != null && site > 0
+      const siteLine = ` Site-wide asks shown: ${site ?? 'unavailable'}.${watch ? ' Tagged attribution expires 30 min after the ad click, so later-session prompts are not counted as tagged asks.' : ''}`
       rules.push({
         ...base,
         status: i.beacon.asks > 0 ? 'clear' : watch ? 'watch' : 'trip',
         value: i.beacon.asks,
-        detail: `${i.beacon.asks} asks from ${i.beacon.taggedArrivals} tagged arrivals.${siteLine}${zeroArrivals}`,
+        detail: `${i.beacon.asks} asks from ${i.beacon.taggedArrivals} tagged arrivals.${siteLine}${mode}${zeroArrivals}`,
       })
     }
   }

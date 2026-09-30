@@ -51,11 +51,11 @@ export function siteEventsQuery(sinceMs: number, fixedAtMs: number | null = INST
   }
 }
 
-/** Site-wide first-session rows on the web site since `sinceMs` (lib/adsRules.ts
- * firstSessionBucket): each first-session path by name, every other path folded into '' — so
- * the site-wide arrivals (visitor 'new' rows, any path) come back in the same aggregate. NOT
- * campaign-attributed; the counterpart the tagged first-session figures are read beside. */
-export function siteFirstSessionQuery(sinceMs: number): Query {
+/** Site-wide first-session rows on the web site in [sinceMs, untilMs) (lib/adsRules.ts
+ * firstSessionBucket): each first-session path by name, arrivals as /return/<any uc>/d0 rows
+ * (one per device's first tagged visit). NOT campaign-attributed; the counterpart the tagged
+ * first-session figures are read beside, over the same [sinceMs, untilMs) window. */
+export function siteFirstSessionQuery(sinceMs: number, untilMs: number): Query {
   const match = [
     `path = '/game'`,
     `path LIKE '/game/complete/%'`,
@@ -63,14 +63,26 @@ export function siteFirstSessionQuery(sinceMs: number): Query {
     `path LIKE '/game/abandon/%'`,
     `path LIKE '/welcome-signed-in/%'`,
     `path IN (${ASK_PATHS.map((p) => `'${p}'`).join(', ')})`,
+    `path LIKE '/return/%/d0'`,
   ].join(' OR ')
-  const w = ['site = ?', 'ts >= ?']
-  const b: unknown[] = [WEB_SITE, sinceMs]
+  const w = ['site = ?', 'ts >= ?', 'ts < ?']
+  const b: unknown[] = [WEB_SITE, sinceMs, untilMs]
   applyExclusions(w, b)
   return {
-    sql: `SELECT CASE WHEN ${match} THEN path ELSE '' END AS p, SUM(CASE WHEN visitor = 'new' THEN 1 ELSE 0 END) AS nv, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY p`,
+    sql: `SELECT path AS p, COUNT(*) AS c FROM hits WHERE ${[...w, `(${match})`].join(' AND ')} GROUP BY p`,
     binds: b,
   }
+}
+
+/** Tagged first-session arrivals: /return/<uc>/d0 rows (one per device's first tagged visit,
+ * best-sudoku src/services/campaignReturns.ts) for this campaign's own tags, web and app, in
+ * [sinceMs, untilMs). Attributed by the path's uc like returnRowsQuery (the d0 row can land in a
+ * later, untagged page load). */
+export function returnArrivalsQuery(campaign: CampaignFlight, sinceMs: number, untilMs: number): Query {
+  const w = ['site IN (?, ?)', `path IN (${campaign.ucValues.map(() => '?').join(', ')})`, 'ts >= ?', 'ts < ?']
+  const b: unknown[] = [WEB_SITE, APP_SITE, ...campaign.ucValues.map((u) => `/return/${u}/d0`), sinceMs, untilMs]
+  applyExclusions(w, b)
+  return { sql: `SELECT path, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY path`, binds: b }
 }
 
 /** /return/<uc>/<bucket> rows for this campaign's tags on web and app — attributed by the
@@ -114,7 +126,9 @@ export interface BeaconSource {
   returns(campaign: CampaignFlight): Promise<ReturnRow[]>
   returnSites(sinceMs: number): Promise<ReturnSiteStat[]>
   /** Optional: site-wide first-session rows (siteFirstSessionQuery). Absent = not read. */
-  siteFirstSession?(sinceMs: number): Promise<FirstSessionRowSite[]>
+  siteFirstSession?(sinceMs: number, untilMs: number): Promise<FirstSessionRowSite[]>
+  /** Optional: tagged first-session arrivals (returnArrivalsQuery). Absent = not read. */
+  returnArrivals?(campaign: CampaignFlight, sinceMs: number, untilMs: number): Promise<{ path: string; count: number }[]>
   /** Optional (R5): aggregate counts per country for campaign-attributed arrivals. */
   countryCounts?(campaign: CampaignFlight): Promise<CountryCount[]>
 }
@@ -139,10 +153,15 @@ export function createBeaconSource(select: D1Select): BeaconSource {
       const rows = await select<any>(q.sql, q.binds)
       return rows.map((x) => ({ hourStartMs: n(x.hr) * 3_600_000, path: String(x.path ?? ''), count: n(x.c), postInstallFix: n(x.pf) === 1 }))
     },
-    async siteFirstSession(sinceMs) {
-      const q = siteFirstSessionQuery(sinceMs)
+    async siteFirstSession(sinceMs, untilMs) {
+      const q = siteFirstSessionQuery(sinceMs, untilMs)
       const rows = await select<any>(q.sql, q.binds)
-      return rows.map((x) => ({ path: String(x.p ?? ''), newVisitors: n(x.nv), count: n(x.c) }))
+      return rows.map((x) => ({ path: String(x.p ?? ''), count: n(x.c) }))
+    },
+    async returnArrivals(campaign, sinceMs, untilMs) {
+      const q = returnArrivalsQuery(campaign, sinceMs, untilMs)
+      const rows = await select<any>(q.sql, q.binds)
+      return rows.map((x) => ({ path: String(x.path ?? ''), count: n(x.c) }))
     },
     async returns(campaign) {
       const q = returnRowsQuery(campaign)
