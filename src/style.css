@@ -178,3 +178,115 @@ label {
   background: rgb(var(--line-2));
   border-radius: 6px;
 }
+
+/* ── Navigation lists (breadcrumb menus, page menu, drawer, search) ─────────────────────────── */
+.nav-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-width: 0;
+  padding: 6px 9px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: rgb(var(--ink));
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.nav-row:hover {
+  background: rgb(var(--sunken));
+}
+.nav-row:focus-visible {
+  outline: none;
+  background: rgb(var(--sunken));
+  box-shadow: inset 0 0 0 2px rgb(var(--amber) / 0.55);
+}
+.nav-row[aria-current='page'] {
+  background: rgb(var(--amber-tint));
+  font-weight: 600;
+}
+.nav-row .nm {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nav-row .meta {
+  color: rgb(var(--ink-3));
+  font-size: 11.5px;
+  font-weight: 400;
+}
+.nav-row .ck {
+  color: rgb(var(--amber-hover));
+  flex: none;
+}
+.nav-row.new {
+  color: rgb(var(--ink-2));
+}
+.nav-row.danger {
+  color: #bc4749;
+}
+.nav-row.kid {
+  position: relative;
+  padding-left: 34px;
+  font-size: 12.5px;
+}
+.nav-row.kid::before {
+  content: '';
+  position: absolute;
+  left: 17px;
+  top: 0;
+  bottom: 50%;
+  width: 9px;
+  border-left: 1px solid rgb(var(--line-2));
+  border-bottom: 1px solid rgb(var(--line-2));
+  border-bottom-left-radius: 4px;
+}
+.nav-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: rgb(var(--ink-3));
+}
+.nav-sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: rgb(var(--line));
+}
+.np-panel.sheet .nav-row {
+  padding: 10px;
+  font-size: 14px;
+}
+.star {
+  color: rgb(var(--amber));
+}
+kbd {
+  font: 500 11px 'JetBrains Mono', ui-monospace, monospace;
+  border: 1px solid rgb(var(--line-2));
+  border-bottom-width: 2px;
+  background: rgb(var(--surface));
+  color: rgb(var(--ink-2));
+  border-radius: 5px;
+  padding: 0 5px;
+  white-space: nowrap;
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}

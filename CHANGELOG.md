@@ -25,6 +25,13 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **Every page has an icon.** It comes from what the page's charts show (traffic, map, pop-ups,
   campaigns, completions, ads, overview) unless someone picks one; a drill page shows the icon of
   the page it came from with a small drill mark, and Traffic gets its own traffic-line icon.
+- **A breadcrumb in the header switches pages.** Group / page / drill page, each opening a list of
+  its neighbours: every group (and ★ Overview), the pages in the group (and a new page there), or
+  the other drill pages and the way back. Picking a group opens the page you last viewed in it.
+  Each group has a lettered, coloured badge. On a phone it shortens to group / page and the lists
+  open from the bottom of the screen.
+- **Press / to search every page.** Page names match first, then charts' titles, each result with
+  its icon and group; arrow keys move, Enter opens, Esc closes.
 - **Drill pages nest under the page they came from.** A drill opens its page straight away, in the
   same group, named by its trail (for example "mobile › California"); a drill from a drill page
   nests under the same page.
