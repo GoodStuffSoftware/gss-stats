@@ -176,7 +176,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
 - **Page icons and group badges** ([`src/lib/icons.ts`](src/lib/icons.ts)) — every page shows an
   icon without anyone setting one. The config stores at most a short registry key
   (`DashboardPage.icon`, e.g. `megaphone`), never markup; the registry maps ~40 curated keys to
-  [Lucide](https://lucide.dev) icons (`lucide-vue-next`, named imports, so only those ship), and
+  [Lucide](https://lucide.dev) icons (`@lucide/vue`, named imports, so only those ship), and
   an unknown key shows the generic page icon. `resolveIcon`, first match wins: the icon someone
   picked; for a drill page, its root page's icon with a small drill mark; the icon of the dataset
   most of the page's charts read (notes don't count, a chart with no dataset is `rum`, a tie goes
