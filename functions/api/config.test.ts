@@ -95,8 +95,8 @@ describe('config PUT backs up the stored config on a version bump', () => {
 })
 
 describe('the v10 → v11 upgrade (the rest of the panels as cards and charts)', () => {
-  it('this code writes layout version 11', () => {
-    expect(CONFIG_VERSION).toBe(11)
+  it('this code writes layout version 11 or later', () => {
+    expect(CONFIG_VERSION).toBeGreaterThanOrEqual(11)
   })
   it('the first v11 save over a stored v10 layout backs it up to backup:v10, once', async () => {
     const v10 = JSON.stringify(cfg(10, 'v10 layout'))
@@ -115,10 +115,24 @@ describe('the v10 → v11 upgrade (the rest of the panels as cards and charts)',
     expect(store.get('dashboard:default:backup:v8')).toBe(v8)
     expect([...store.keys()].filter((k) => k.includes('backup'))).toEqual(['dashboard:default:backup:v8'])
   })
-  it('a v10 tab saving over a stored v11 layout gets 409; a v12 body gets 400', async () => {
+  it('a v10 tab saving over a stored v11 layout gets 409; a body above CONFIG_VERSION gets 400', async () => {
     const { kv, puts } = fakeKv({ 'dashboard:default': JSON.stringify(cfg(11)) })
     expect((await put(kv, cfg(10, 'old tab'))).status).toBe(409)
-    expect((await put(kv, cfg(12, 'crafted'))).status).toBe(400)
+    expect((await put(kv, cfg(CONFIG_VERSION + 1, 'crafted'))).status).toBe(400)
     expect(puts).toEqual([])
+  })
+})
+
+describe('the v11 → v12 upgrade (the Overview small-sample note takes one grid row)', () => {
+  it('this code writes layout version 12', () => {
+    expect(CONFIG_VERSION).toBe(12)
+  })
+  it('the first v12 save over a stored v11 layout backs it up to backup:v11; a v11 tab then gets 409', async () => {
+    const v11 = JSON.stringify(cfg(11, 'v11 layout'))
+    const { kv, store } = fakeKv({ 'dashboard:default': v11 })
+    expect((await put(kv, cfg(12, 'first v12'))).status).toBe(200)
+    expect(store.get('dashboard:default:backup:v11')).toBe(v11)
+    expect((await put(kv, cfg(11, 'old tab'))).status).toBe(409)
+    expect((await put(kv, cfg(13, 'crafted'))).status).toBe(400)
   })
 })

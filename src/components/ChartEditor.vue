@@ -602,7 +602,7 @@ function save() {
         <label>Extra rings (outward from break-down)</label>
         <div class="rings-list">
           <div v-for="(r, idx) in draft.rings ?? []" :key="idx" class="ring-row">
-            <select :value="r" @change="setRing(idx, $event.target.value)">
+            <select :value="r" @change="setRing(idx, ($event.target as HTMLSelectElement).value)">
               <option v-for="d in ringOptionsFor(idx)" :key="d.key" :value="d.key">{{ d.label }}</option>
             </select>
             <button type="button" class="btn ring-btn" title="Move toward center" :disabled="idx === 0" @click="moveRing(idx, -1)">↑</button>

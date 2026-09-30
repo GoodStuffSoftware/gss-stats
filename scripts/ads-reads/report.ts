@@ -7,6 +7,7 @@ import {
   formatGated,
   isPlacementBorderline,
   PLACEMENT_BORDERLINE_NOTE,
+  promoArmAbsentNote,
   SIGNIN_ELIGIBLE_COUNT_NOTE,
   UPSELL_SIGNEDOUT_EXPECTED_NOTE,
   type OutcomePopup,
@@ -16,6 +17,7 @@ import { POPUP_OUTCOME_TYPES, gateRate, installOutcomeGapNote } from '../../src/
 import { RAW_INSTALL_SIGNALS_LABEL } from '../../src/lib/campaigns'
 import { noteRawText } from '../../src/lib/notes'
 import type { DiagnosticsSection, FullRead, MorningResult, PostflightResult, SpendSection } from './read'
+import type { FirebaseCounts } from './firebase'
 
 // `/game` rows are page views, not games played (ADR 0003): the registry label, lower-cased
 // for the middle of a sentence.
@@ -55,7 +57,40 @@ function ruleLine(r: RuleResult): string {
   return `  [${r.status}] ${r.label}: ${r.detail}`
 }
 
-export function fullReadLines(r: FullRead, title: string): string[] {
+/** The promo-arm note goes on the $50-and-later threshold reads and every post-flight stage:
+ * their promo-ask counts span the hours when the client showed no first-50 offer at all. */
+export function promoArmNoteApplies(r: FullRead, postflight: boolean): boolean {
+  return postflight || (r.thresholds.length > 0 && Math.max(...r.thresholds) >= 50)
+}
+
+/** The first-50 part of the Accounts line: the promos/first50 COUNTER and, separately, what the
+ * signed-out client sees (promos_public/first50). Report text only. */
+export function first50Text(f: FirebaseCounts): string {
+  const counter = f.first50 ? `counter ${n(f.first50.claimed)}/${n(f.first50.cap)} claimed, ${f.first50.closed ? 'closed' : 'open'}` : 'counter not read'
+  const c = f.first50Client
+  let client: string
+  if (!c || c.state === 'unknown') client = `client offer UNKNOWN (read failed: ${c?.error ?? 'not read'})`
+  else if (c.exists === false) client = 'client offer HIDDEN (promos_public missing)'
+  else {
+    const upd = c.updateTime && !Number.isNaN(Date.parse(c.updateTime)) ? `, updated ${etMinuteLabel(Date.parse(c.updateTime))}` : ''
+    client = `client offer ${c.state === 'visible' ? 'VISIBLE' : 'HIDDEN'} (promos_public open=${c.open == null ? 'unset' : String(c.open)}${upd})`
+  }
+  return `first-50: ${counter}; ${client}`
+}
+
+/** A loud line when the counter and the client disagree (null when they agree or either side is
+ * unknown). Report text only: never a kill rule, never a push. */
+export function first50FlagLine(f: FirebaseCounts): string | null {
+  const c = f.first50Client
+  if (!f.first50 || f.first50.closed == null || !c || c.state === 'unknown') return null
+  const counterOpen = f.first50.closed === false
+  if (counterOpen && c.state === 'hidden') return 'FLAG: first-50 counter says open but the client offer is hidden'
+  if (!counterOpen && c.state === 'visible') return 'FLAG: first-50 counter says closed but the client offer is visible'
+  return null
+}
+
+export function fullReadLines(r: FullRead, title: string, opts: { postflight?: boolean } = {}): string[] {
+  const promoNote = promoArmNoteApplies(r, !!opts.postflight)
   const out: string[] = [`=== ${title} (cumulative ${money(r.cumulativeSpend)}, closed days through ${r.spendThroughEt ?? '—'}) — ${r.complete ? 'complete' : 'INCOMPLETE, retried next run'} ===`]
   out.push('Kill rules (propose only; nothing is changed):')
   for (const rule of r.kill.rules) out.push(ruleLine(rule))
@@ -76,6 +111,7 @@ export function fullReadLines(r: FullRead, title: string): string[] {
     // session, "arrivals" counts first-ever tagged beacons — dividing one by the other mixes
     // units with no shared visitor id to join them on, so this is a count pair, not a percent.
     // acceptRate IS a real rate (accepts/asks — the same popup, the same session).
+    if (promoNote) out.push(`  promo asks: ${promoArmAbsentNote()}`)
     out.push(`  ${n(s.asks.total)} asks · ${n(s.taggedArrivals)} arrivals; accept rate ${formatGated(t.acceptRate)}; cost per tagged arrival ${money(t.costPerArrival)}`)
     out.push(`  dismisses (read separately): sign-in ${n(s.dismisses.signinPrompt)}, promo ${n(s.dismisses.promoFirst50)}`)
     out.push(`  install: prompt shown ${n(s.install.promptShown)}, taps ${n(s.install.taps)}, installed ${n(s.install.installed)} [${installOutcomeGapNote()}]; ${RAW_INSTALL_SIGNALS_LABEL} ${n(s.install.rawSignals)}; signin-eligible (count of asks) earned ${n(s.signinEligible.earned)}, capped ${n(s.signinEligible.capped)}, unearned ${n(s.signinEligible.unearned)}`)
@@ -91,7 +127,7 @@ export function fullReadLines(r: FullRead, title: string): string[] {
     ]
     for (const [p, label] of popups) {
       const rates = POPUP_OUTCOME_TYPES.map((o) => `${o} ${formatGated(r.site!.outcomeRates[p][o])}`).join(', ')
-      out.push(`  ${label}: shown ${n(s.shown[p])}; outcomes ${rates}`)
+      out.push(`  ${label}: shown ${n(s.shown[p])}; outcomes ${rates}${p === 'promo-first50' && promoNote ? `; ${promoArmAbsentNote()}` : ''}`)
     }
     out.push(`  promo accept/dismiss ${n(s.promoFirst50.accept)}/${n(s.promoFirst50.dismiss)}; upsell accept/dismiss ${n(s.upsell.accept)}/${n(s.upsell.dismiss)}; install-prompt installed ${n(s.outcomes.install.installed)} [${installOutcomeGapNote()}]; ${RAW_INSTALL_SIGNALS_LABEL} ${n(s.rawInstallSignals)}`)
     out.push(`  signin-eligible: earned ${n(s.signinEligible.earned)}, capped ${n(s.signinEligible.capped)}, unearned ${n(s.signinEligible.unearned)} (${SIGNIN_ELIGIBLE_COUNT_NOTE})`)
@@ -107,8 +143,10 @@ export function fullReadLines(r: FullRead, title: string): string[] {
   if (r.firebase) {
     const f = r.firebase
     out.push(
-      `Accounts (Firestore COUNT queries, window only, nobody matched): new ${n(f.newAccountsInWindow)} (of ${n(f.accountsWithCreatedAt)} with createdAt); promo claims ${n(f.promoClaimsInWindow)} (of ${n(f.promoClaimsTotal)}); first-50 ${f.first50 ? `${n(f.first50.claimed)}/${n(f.first50.cap)} claimed, ${f.first50.closed ? 'closed' : 'open'}` : '—'}`,
+      `Accounts (Firestore COUNT queries, window only, nobody matched): new ${n(f.newAccountsInWindow)} (of ${n(f.accountsWithCreatedAt)} with createdAt); promo claims ${n(f.promoClaimsInWindow)} (of ${n(f.promoClaimsTotal)}); ${first50Text(f)}`,
     )
+    const flag = first50FlagLine(f)
+    if (flag) out.push(`  ${flag}`)
   } else out.push('Accounts: not read (no --firebase-sa)')
   if (r.decision) {
     out.push(`Decision table (spec section 13): row ${r.decision.row}; ${r.decision.label}`)
@@ -148,6 +186,8 @@ function header(r: MorningResult | PostflightResult, kind: string): string[] {
 export function formatMorningReport(r: MorningResult): string {
   const out = header(r, r.mode === 'health-only' ? 'release-health backstop' : 'morning read')
   if (r.failures.length) out.push(`READ FAILED: ${r.failureDetails.join("; ")}`)
+  const flag1 = r.thresholdRead?.firebase ? first50FlagLine(r.thresholdRead.firebase) : null
+  if (flag1) out.push(flag1)
   if (r.missedReads.length) out.push(`Previous scheduled read missing: ${r.missedReads.join(', ')}`)
   if (r.mode === 'morning') {
     out.push(...spendLines(r.spend))
@@ -279,11 +319,13 @@ function storeLine(r: MorningResult | PostflightResult): string {
 export function formatPostflightReport(r: PostflightResult): string {
   const out = header(r, `post-flight ${r.stage} read`)
   if (r.failures.length) out.push(`READ FAILED: ${r.failureDetails.join("; ")}`)
+  const flag2 = r.read?.firebase ? first50FlagLine(r.read.firebase) : null
+  if (flag2) out.push(flag2)
   out.push(...spendLines(r.spend))
   out.push(`Spend ended ${r.spendEndEt ?? '—'}; this stage is due ${r.dueEt ?? '—'} (${r.due ? 'due' : 'NOT due yet'})`)
   if (r.postFlightSpend) out.push(`After-flight spend: [${r.postFlightSpend.status}] ${r.postFlightSpend.detail}`)
   if (r.hardCap) out.push(`Hard cap: [${r.hardCap.status}] ${r.hardCap.detail}`)
-  if (r.read) out.push('', ...fullReadLines(r.read, `POST-FLIGHT ${r.stage.toUpperCase()}`))
+  if (r.read) out.push('', ...fullReadLines(r.read, `POST-FLIGHT ${r.stage.toUpperCase()}`, { postflight: true }))
   const b = r.promoSplit.beacon
   if (b) {
     const row = (o: Record<string, number>, shown: number) => POPUP_OUTCOME_TYPES.map((t) => `${t} ${formatGated(gateRate(o[t], shown))}`).join(', ')

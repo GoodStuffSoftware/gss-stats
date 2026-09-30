@@ -259,6 +259,15 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     severity: 'info',
     scopes: ['overview'],
   },
+  // The "Deferred completions (EU consent)" KPI tile (best-sudoku card 125): what it counts
+  // and why it can't be compared to the live completions tile by completion time.
+  'game-complete-deferred-caveat': {
+    id: 'game-complete-deferred-caveat',
+    text: 'EU visitors whose game finished before they answered the consent prompt. Sent later, at consent time — counted then, not when the game finished.',
+    kind: 'note',
+    severity: 'info',
+    scopes: ['overview'],
+  },
   // The "Raw install signals" KPI tile: why it is secondary to the install count.
   'raw-install-double-count': {
     id: 'raw-install-double-count',
@@ -338,6 +347,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.campaign.spend': 'Spend',
     'label.bsk.pageviews': 'Page views',
     'label.bsk.completions': 'Games completed',
+    'label.bsk.deferredCompletions': 'Deferred completions (EU consent)',
     'label.bsk.popupShown': 'Pop-ups shown',
     'label.bsk.popupAccepts': 'Pop-ups accepted',
     'label.bsk.authSuccess': 'Auth successes',

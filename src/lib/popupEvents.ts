@@ -42,6 +42,17 @@ export const POPUP_EVENT_PREFIXES = [
   // '/' are matched as a raw prefix below (isPopupEventPath/popupExcludeClause/
   // popupIncludeClause), not the exact-or-prefix-plus-slash shape the other entries use.
   '/game/complete/',
+  // best-sudoku card 125 (not yet live as of this file — see GAME_COMPLETE_DEFERRED_PREFIX in
+  // lib/campaigns.ts): EU visitors whose game finished while the consent modal was still
+  // unanswered send the SAME completion later, at consent time, on
+  // `/game/complete-deferred/<mode>/<difficulty>` instead of the live `/game/complete/<mode>/
+  // <difficulty>` path. The worker stamps `ts` at ingest, so the row's time is consent time,
+  // not completion time — never a live completion, never a funnel "completed" step (see
+  // lib/campaigns.ts classifyFunnelPath, whose GAME_COMPLETE_PREFIX anchors on the exact
+  // `/game/complete/` segment and therefore never matches this hyphenated sibling path). Same
+  // trailing-slash prefix-match convention as `/game/complete/` above, and a DISTINCT family
+  // (never folded into 'game-complete') so the deferred count stays separately visible.
+  '/game/complete-deferred/',
   // v1.95.5 (same instant): the new/existing/unknown row `/auth/success/<provider>/<status>`
   // fires ALONGSIDE the base `/auth/success/<provider>` row for the same sign-in, so it is an
   // event, not a second screen view. Anchored per provider WITH the trailing slash, so the base
@@ -122,6 +133,7 @@ const PATH_FAMILY_LABELS: Record<(typeof POPUP_EVENT_PREFIXES)[number], string> 
   '/popup-outcome': 'popup-outcome',
   '/return': 'return',
   '/game/complete/': 'game-complete',
+  '/game/complete-deferred/': 'game-complete-deferred',
   '/auth/success/google/': 'auth-status',
   '/auth/success/email/': 'auth-status',
   '/auth/error': 'auth-error',
@@ -164,6 +176,7 @@ export const PATH_FAMILY_OPTIONS: { value: string; label: string }[] = [
   { value: 'popup-outcome', label: 'Pop-up outcome' },
   { value: 'return', label: 'Return-visit beacon' },
   { value: 'game-complete', label: 'Game completed' },
+  { value: 'game-complete-deferred', label: 'Game completed (deferred, EU consent)' },
   { value: 'auth-status', label: 'Auth new/existing status' },
   { value: 'auth-error', label: 'Sign-in failure' },
   { value: 'auth-redirect', label: 'Sign-in redirect fallback' },
