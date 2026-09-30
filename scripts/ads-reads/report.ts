@@ -4,7 +4,12 @@
 // sign-ups and promo claims appear only as window COUNTS.
 
 import {
+  ABANDON_BUCKETS,
+  FIRST_SESSION_STEP_LABELS,
+  FIRST_SESSION_STEPS,
+  WELCOME_EVENTS,
   formatGated,
+  type FirstSessionFigure,
   isPlacementBorderline,
   PLACEMENT_BORDERLINE_NOTE,
   promoArmAbsentNote,
@@ -105,7 +110,7 @@ export function fullReadLines(r: FullRead, title: string, opts: { postflight?: b
   if (t) {
     const s = t.summary
     out.push(
-      `Tagged funnel (campaign tag only, exclusions applied): ${n(s.taggedArrivals)} arrivals (floor), ${n(s.taggedHits)} hits; ${GAME_VIEWS} ${n(s.funnel.played)}; asks ${n(s.asks.total)} (placement ${n(s.asks.byPath['/signin-prompt/placement'])}, streak ${n(s.asks.byPath['/signin-prompt/streak'])}, promo ${n(s.asks.byPath['/promo-first50/shown'])}${s.asks.otherShownReasons ? `, other sign-in reasons ${n(s.asks.otherShownReasons)}` : ''}); accepts ${n(s.accepts.total)}; auth redirect ${n(s.authRedirect)}, auth success ${n(s.authSuccess)}`,
+      `Tagged funnel (campaign tag only, exclusions applied): ${n(s.taggedArrivals)} arrivals (floor), ${n(s.taggedHits)} hits; ${GAME_VIEWS} ${n(s.funnel.played)}; asks ${n(s.asks.total)} (placement ${n(s.asks.byPath['/signin-prompt/placement'])}, streak ${n(s.asks.byPath['/signin-prompt/streak'])}, tutorial ${n(s.asks.byPath['/signin-prompt/tutorial'])}, promo ${n(s.asks.byPath['/promo-first50/shown'])}${s.asks.otherShownReasons ? `, other sign-in reasons ${n(s.asks.otherShownReasons)}` : ''}); accepts ${n(s.accepts.total)}; auth redirect ${n(s.authRedirect)}, auth success ${n(s.authSuccess)}`,
     )
     // Not a rate (review finding, 2026-09-26): "asks" counts event rows within a tagged
     // session, "arrivals" counts first-ever tagged beacons — dividing one by the other mixes
@@ -197,6 +202,7 @@ export function formatMorningReport(r: MorningResult): string {
         ? `Tagged so far: ${n(t.cumulative!.taggedArrivals)} arrivals (floor), ${n(t.cumulative!.taggedHits)} hits, ${n(t.cumulative!.asks)} asks, ${n(t.cumulative!.accepts)} accepts, ${n(t.cumulative!.authSuccess)} auth successes; yesterday ${n(t.yesterday!.taggedArrivals)} arrivals, ${n(t.yesterday!.asks)} asks`
         : `Tagged: NOT READ (${t.error})`,
     )
+    out.push(...firstSessionLines(r.firstSession))
     const th = r.thresholds
     out.push(
       th.crossedNow.length
@@ -225,6 +231,44 @@ export function formatMorningReport(r: MorningResult): string {
   out.push(`Push: ${r.notify.push ? `YES (${r.notify.reason}): ${r.notify.text}` : `no (${r.notify.reason})`}${r.notify.busCopy ? ' + bus copy' : ''}`)
   out.push(`Notes: ${r.notes.join(' / ')}`)
   return out.join('\n')
+}
+
+export const NOT_YET_TRACKED = 'not yet tracked'
+
+/** "<tagged> · site-wide <site>", or "not yet tracked" when the path has no rows at all (the
+ * release sending it is not live yet — never read as a zero step). */
+export function firstSessionFigureText(f: FirstSessionFigure): string {
+  if (f.tracked === false) return `${NOT_YET_TRACKED} (no rows yet)`
+  return `${n(f.tagged)} · site-wide ${f.site == null ? 'not read' : n(f.site)}`
+}
+
+/** The first-session funnel block (informational only: never a kill rule, never a push). */
+export function firstSessionLines(fs: MorningResult['firstSession']): string[] {
+  if (!fs) return ['First-session funnel: not read (tagged beacon rows unavailable)']
+  const f = fs.funnel
+  const out = [
+    `First-session funnel since attribution start (informational only; never a kill rule). Tagged rows, site-wide web rows alongside; row counts with no visitor join, so "vs" figures are row ratios, not per-visitor conversion:${fs.siteError ? ` [site-wide not read: ${fs.siteError}]` : ''}`,
+  ]
+  for (const k of FIRST_SESSION_STEPS) {
+    const st = f.steps[k]
+    const vs = st.vsParent ? `; vs ${FIRST_SESSION_STEP_LABELS[st.vsParent.parent]} ${formatGated(st.vsParent)}` : ''
+    out.push(`  ${FIRST_SESSION_STEP_LABELS[k]}: ${firstSessionFigureText(st)}${st.tracked === false ? '' : vs}`)
+  }
+  const allUntracked = (xs: FirstSessionFigure[]) => xs.every((x) => x.tracked === false)
+  const ab = ABANDON_BUCKETS.map((b) => f.abandon[b])
+  out.push(
+    allUntracked(ab)
+      ? `  abandon by % filled: ${NOT_YET_TRACKED} (no rows yet)`
+      : `  abandon by % filled: ${ABANDON_BUCKETS.map((b) => `${b}% ${firstSessionFigureText(f.abandon[b])}`).join('; ')}`,
+  )
+  out.push(`  sign-in asks shown: ${firstSessionFigureText(f.asks)}; of which tutorial ${firstSessionFigureText(f.asksTutorial)}`)
+  const wl = WELCOME_EVENTS.map((e) => f.welcome[e])
+  out.push(
+    allUntracked(wl)
+      ? `  welcome card (signed in): ${NOT_YET_TRACKED} (no rows yet)`
+      : `  welcome card (signed in): ${WELCOME_EVENTS.map((e) => `${e} ${firstSessionFigureText(f.welcome[e])}`).join('; ')}`,
+  )
+  return out
 }
 
 /** Standing Recommendations verdicts (R3), carried from the retired routines, never

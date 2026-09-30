@@ -3,7 +3,8 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { assertReadOnlySql, createD1Select, inlineBinds, parseD1Json, parseD1Response, sqlLiteral, stripSqlLiterals } from './d1'
 import { assertAdsWriteSql, createD1Store } from './d1Store'
-import { returnRowsQuery, returnSitesQuery, siteEventsQuery, taggedRowsQuery } from './beacon'
+import { returnRowsQuery, returnSitesQuery, siteEventsQuery, siteFirstSessionQuery, taggedRowsQuery } from './beacon'
+import { DatabaseSync } from 'node:sqlite'
 import { campaignSyncStatements, dailyRowUpserts, mergePlacementDayRows, placementDailyUpserts, readingInsert, syncRunInsert, thresholdStateInsert } from '../../src/lib/adsStore'
 import { CAMPAIGNS, campaignById } from '../../src/lib/campaigns'
 import { clearRegisteredSecrets, redact, redactedFirstLine, registerSecret, summarizeError } from '../../src/lib/adsRedact'
@@ -115,7 +116,7 @@ describe('inlineBinds / sqlLiteral', () => {
 })
 
 describe('beacon reads are read-only and apply the shared exclusions', () => {
-  const queries = [taggedRowsQuery(retest), taggedRowsQuery(retest, Date.parse('2026-09-29T18:26:00Z')), siteEventsQuery(0), returnRowsQuery(retest), returnSitesQuery(0)]
+  const queries = [taggedRowsQuery(retest), taggedRowsQuery(retest, Date.parse('2026-09-29T18:26:00Z')), siteEventsQuery(0), siteFirstSessionQuery(0), returnRowsQuery(retest), returnSitesQuery(0)]
   it('with an upsell-fix instant, the tagged query flags each row exactly at it (uf), binding the instant first', () => {
     const fix = Date.parse('2026-09-29T18:26:00Z')
     const q = taggedRowsQuery(retest, fix)
@@ -138,6 +139,35 @@ describe('beacon reads are read-only and apply the shared exclusions', () => {
     expect(q.binds).toContain('sudoku_funnel_retest')
     expect(q.binds).toContain(Date.parse('2026-09-26T16:00:00Z'))
     expect(q.sql).not.toMatch(/\bJOIN\b/i)
+  })
+  it('the site-wide first-session query names each first-session path and folds every other path into one row, arrivals included', () => {
+    const db = new DatabaseSync(':memory:')
+    db.exec('CREATE TABLE hits (site TEXT, ts INTEGER, path TEXT, visitor TEXT, medium TEXT, campaign TEXT, region TEXT, city TEXT, org TEXT, device TEXT, os TEXT, browser TEXT, screenw INTEGER)')
+    const ins = db.prepare("INSERT INTO hits (site, ts, path, visitor, medium, campaign, region, city) VALUES (?, ?, ?, ?, '', '', 'Ohio', 'Columbus')")
+    const since = Date.parse('2026-09-30T00:00:00Z')
+    for (const [site, ts, p, v] of [
+      ['bestsudoku-web', since, '/', 'new'],
+      ['bestsudoku-web', since, '/game', 'new'],
+      ['bestsudoku-web', since, '/game', 'returning'],
+      ['bestsudoku-web', since, '/tour/start', 'returning'],
+      ['bestsudoku-web', since, '/game/abandon/1-25', 'returning'],
+      ['bestsudoku-web', since, '/signin-prompt/tutorial', 'returning'],
+      ['bestsudoku-web', since, '/welcome-signed-in/shown', 'returning'],
+      ['bestsudoku-web', since, '/settings', 'returning'],
+      ['bestsudoku-web', since - 1, '/tour/start', 'new'], // before the window
+      ['bestsudoku-app', since, '/tour/start', 'new'], // another site
+    ] as const) ins.run(site, ts, p, v)
+    const q = siteFirstSessionQuery(since)
+    const rows = db.prepare(q.sql).all(...(q.binds as (string | number)[])) as { p: string; nv: number; c: number }[]
+    const by = Object.fromEntries(rows.map((r) => [r.p, { nv: r.nv, c: r.c }]))
+    expect(by).toEqual({
+      '': { nv: 1, c: 2 },
+      '/game': { nv: 1, c: 2 },
+      '/tour/start': { nv: 0, c: 1 },
+      '/game/abandon/1-25': { nv: 0, c: 1 },
+      '/signin-prompt/tutorial': { nv: 0, c: 1 },
+      '/welcome-signed-in/shown': { nv: 0, c: 1 },
+    })
   })
   it('the guard rejects writes, multiple statements, comments and non-SELECTs', () => {
     for (const bad of ['DELETE FROM hits', 'SELECT 1; DROP TABLE hits', 'SELECT 1 -- x', 'PRAGMA table_info(hits)', 'INSERT INTO hits VALUES (1)', 'WITH x AS (SELECT 1) DELETE FROM hits']) {

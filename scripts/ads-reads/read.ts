@@ -55,6 +55,10 @@ import {
   siteSigninShown,
   summarizeSiteEvents,
   summarizeTaggedRows,
+  buildFirstSessionFunnel,
+  tallySiteFirstSession,
+  tallyTaggedFirstSession,
+  type FirstSessionFunnel,
   WEB_GO_LIVE_UTC_MS,
   INSTALL_OUTCOME_GAP_NOTE,
   MEASUREMENT_QUIET_NOTE,
@@ -79,6 +83,7 @@ import {
   type SpendDay,
   type StoredSpend,
   type TaggedRow,
+  type FirstSessionRowSite,
   type TaggedSummary,
 } from '../../src/lib/adsRules'
 import type { AdsStore, AppendOutcome, PlacementDayRow } from '../../src/lib/adsStore'
@@ -793,6 +798,10 @@ export interface MorningResult {
   spend: SpendSection
   thresholds: { crossedNow: number[]; consumedBefore: number[]; next: number | null; stateError: string | null }
   tagged: { ok: boolean; error: string | null; cumulative: TaggedCounts | null; yesterday: TaggedCounts | null }
+  /** First-session funnel since attribution start (informational only; never a kill rule):
+   * tagged counts with site-wide web counts alongside. null in health-only mode or when the
+   * tagged read failed; `siteError` says why the site-wide side is missing. */
+  firstSession: { funnel: FirstSessionFunnel; siteError: string | null } | null
   thresholdRead: FullRead | null
   hardCapDaily: RuleResult | null
   releaseHealth: HealthSection
@@ -940,6 +949,20 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
     error: taggedRows.ok ? null : taggedRows.error,
     cumulative: taggedRows.ok ? taggedCounts(summarizeTaggedRows(taggedRows.value)) : null,
     yesterday: taggedRows.ok ? taggedCounts(summarizeTaggedRows(taggedRows.value, { fromMs: yStart, toMs: yEnd })) : null,
+  }
+
+  // First-session funnel, every morning read. The site-wide side is best-effort: a failure
+  // leaves it unread (every step's "tracked" unknown) and never fails or pushes the read.
+  let firstSession: MorningResult['firstSession'] = null
+  if (!opts.healthOnly && taggedRows.ok) {
+    const sinceMs = attributionStartMs(campaign)
+    const siteFs = beacon?.siteFirstSession
+      ? await attempt('beacon site first-session', () => beacon.siteFirstSession!(sinceMs))
+      : unavailable<FirstSessionRowSite[]>('beacon site first-session', beacon ? 'not supported by this beacon source' : deps.beaconInitError)
+    firstSession = {
+      funnel: buildFirstSessionFunnel(tallyTaggedFirstSession(taggedRows.value), siteFs.ok ? tallySiteFirstSession(siteFs.value) : null),
+      siteError: siteFs.ok ? null : siteFs.error,
+    }
   }
 
   let thresholdRead: FullRead | null = null
@@ -1129,6 +1152,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
     spend,
     thresholds: { crossedNow, consumedBefore: consumed, next: nextThreshold(cumulative, plan.thresholds), stateError: consumedA.ok ? null : consumedA.error },
     tagged,
+    firstSession,
     thresholdRead,
     hardCapDaily,
     releaseHealth: health,

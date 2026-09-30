@@ -41,6 +41,14 @@ All notable changes to **gss-stats** are documented here. The format follows
   it). A new "Deferred completions (EU consent)" tile on the Best Sudoku dashboard, next to
   Games completed, reads an explicit 0 while no rows exist; its caption explains it counts at
   consent time, not completion time, and is EU-only.
+- **First-session funnel in the retest morning read and its report page.** Tagged arrivals,
+  game views, tutorial tour start/complete/skip, first move and game completions, abandoned
+  games by % filled, sign-in asks shown and the signed-in welcome card, each with its site-wide
+  count alongside; steps the app does not send yet read "not yet tracked" rather than 0%.
+  Informational only, never a kill rule.
+- **The tutorial sign-in ask counts as a sign-in ask.** `/signin-prompt/tutorial` joins the
+  campaign ask count and the site-wide shown count, and the new tour, first-move, abandon and
+  welcome-card beacons are treated as events, never page views.
 - **The retest morning read now publishes a rendered report page every run.** A build step turns
   the read's saved output and the daily narrative into one self-contained page (narrative, spend
   against the thresholds, release health, funnel, diagnostics, Play bulk reports, and the
