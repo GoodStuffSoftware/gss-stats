@@ -6,7 +6,7 @@
 // pattern (ChartEditor.vue) so it works with a keyboard and on touch.
 import { computed, ref, useId, watch } from 'vue'
 import { MIN_COHORT } from '../../../lib/popupEvents'
-import { dataKindOf, dataSummaryLabel, displayAsLabel, firstDisplayFor, isDisplaySelectable, isKnownNote, labelNoteOptions, makeDisplay, notePreview, scopePathLabel } from '../../../lib/metrics/editorModel'
+import { dataKindOf, dataSummaryLabel, displayAsLabel, firstDisplayFor, isDisplaySelectable, isKnownNote, labelNoteOptions, makeDisplay, notePreview, scopePathLabel, withField, withGating } from '../../../lib/metrics/editorModel'
 import type { MetricItem, RepeatSpec } from '../../../lib/metrics/types'
 import CardEditorData from './CardEditorData.vue'
 import CardEditorDisplay from './CardEditorDisplay.vue'
@@ -19,6 +19,9 @@ const props = defineProps<{
   index: number
   count: number
   errors: string[]
+  /** A preset's template shown for reading (CardEditor's preset mode): every control disabled,
+   * no reorder/duplicate/remove, but the item still opens so its settings can be read. */
+  readonly?: boolean
 }>()
 const emit = defineEmits<{ 'move': [dir: -1 | 1]; duplicate: []; remove: [] }>()
 const item = defineModel<MetricItem>({ required: true })
@@ -62,35 +65,50 @@ const summaryData = computed(() => dataSummaryLabel(item.value.data))
 const dataKindLabel = computed(() => dataKindOf(item.value.data) ?? 'unknown')
 const hasData = computed(() => !('field' in item.value.data))
 
+// Every setter below ignores a pick of the value already shown, and edits go through
+// withGating/withField: a no-op interaction leaves the item exactly as it was (no `gating: {}`,
+// no explicit default replacing an absent field or the other way round).
 const minCohort = computed<number | undefined>({
   get: () => item.value.gating?.minCohort,
   set: (v) => {
-    item.value = { ...item.value, gating: { ...item.value.gating, minCohort: v || undefined } }
+    if ((v || undefined) === item.value.gating?.minCohort) return
+    item.value = withGating(item.value, { minCohort: v || undefined })
   },
 })
 const whenUnmeasured = computed<NonNullable<MetricItem['gating']>['whenUnmeasured']>({
   get: () => item.value.gating?.whenUnmeasured ?? 'auto',
   set: (v) => {
-    item.value = { ...item.value, gating: { ...item.value.gating, whenUnmeasured: v === 'auto' ? undefined : v } }
+    if (v === whenUnmeasured.value) return
+    item.value = withGating(item.value, { whenUnmeasured: v === 'auto' ? undefined : v })
   },
 })
 const whenNotStarted = computed<'default' | 'label' | 'zero'>({
   get: () => item.value.gating?.whenNotStarted ?? 'default',
   set: (v) => {
-    item.value = { ...item.value, gating: { ...item.value.gating, whenNotStarted: v === 'default' ? undefined : v } }
+    if (v === whenNotStarted.value) return
+    item.value = withGating(item.value, { whenNotStarted: v === 'default' ? undefined : v })
   },
 })
+/** gating.whenZero: a measured count of exactly 0 is left out. */
+const whenZeroOmit = computed<boolean>({
+  get: () => item.value.gating?.whenZero === 'omit',
+  set: (v) => {
+    if (v === whenZeroOmit.value) return
+    item.value = withGating(item.value, { whenZero: v ? 'omit' : undefined })
+  },
+})
+/** The note a "Show a note" pick had, so switching to dash/omit and back restores it. */
+let lastWhenEmptyNote = ''
 const whenEmptyKind = computed<'dash' | 'omit' | 'note'>({
   get: () => {
     const e = item.value.gating?.whenEmpty
     return e === 'omit' ? 'omit' : typeof e === 'object' ? 'note' : 'dash'
   },
   set: (v) => {
-    const gating = { ...item.value.gating }
-    if (v === 'dash') delete gating.whenEmpty
-    else if (v === 'omit') gating.whenEmpty = 'omit'
-    else gating.whenEmpty = { note: '' }
-    item.value = { ...item.value, gating }
+    if (v === whenEmptyKind.value) return
+    const e = item.value.gating?.whenEmpty
+    if (typeof e === 'object') lastWhenEmptyNote = e.note
+    item.value = withGating(item.value, { whenEmpty: v === 'dash' ? undefined : v === 'omit' ? 'omit' : { note: lastWhenEmptyNote } })
   },
 })
 const whenEmptyNote = computed<string>({
@@ -99,7 +117,8 @@ const whenEmptyNote = computed<string>({
     return typeof e === 'object' ? e.note : ''
   },
   set: (v) => {
-    item.value = { ...item.value, gating: { ...item.value.gating, whenEmpty: { note: v } } }
+    if (v === whenEmptyNote.value) return
+    item.value = withGating(item.value, { whenEmpty: { note: v } })
   },
 })
 // "Show a note" picks from the SAME curated, plain-text-previewed registry list CardEditorLabel
@@ -116,19 +135,22 @@ const whenEmptyNoteInvalid = computed(() => !!whenEmptyNote.value && !isKnownNot
 const captionMode = computed<NonNullable<MetricItem['captionMode']>>({
   get: () => item.value.captionMode ?? 'inline',
   set: (v) => {
-    item.value = { ...item.value, captionMode: v === 'inline' ? undefined : v }
+    if (v === captionMode.value) return
+    item.value = withField(item.value, 'captionMode', v === 'inline' ? undefined : v)
   },
 })
 const frame = computed<'' | NonNullable<MetricItem['frame']>>({
   get: () => item.value.frame ?? '',
   set: (v) => {
-    item.value = { ...item.value, frame: v || undefined }
+    if (v === frame.value) return
+    item.value = withField(item.value, 'frame', v || undefined)
   },
 })
 const itemRepeatModel = computed({
   get: () => item.value.repeat,
   set: (v) => {
-    item.value = { ...item.value, repeat: v }
+    if (v === item.value.repeat) return
+    item.value = withField(item.value, 'repeat', v)
   },
 })
 </script>
@@ -140,7 +162,7 @@ const itemRepeatModel = computed({
         <span class="ce-item-summary-text">{{ summaryLabel }} · {{ summaryData }} · {{ displayAsLabel(item.display.as) }}</span>
         <span v-if="errors.length" class="chip" style="color: #bc4749">{{ errors.length }} error{{ errors.length > 1 ? 's' : '' }}</span>
       </button>
-      <span class="ce-item-controls">
+      <span v-if="!readonly" class="ce-item-controls">
         <button type="button" class="icon-btn" title="Move up" :disabled="index === 0" @click="emit('move', -1)">↑</button>
         <button type="button" class="icon-btn" title="Move down" :disabled="index === count - 1" @click="emit('move', 1)">↓</button>
         <button type="button" class="icon-btn" title="Duplicate" @click="emit('duplicate')">⧉</button>
@@ -152,7 +174,7 @@ const itemRepeatModel = computed({
       <li v-for="(e, i) in errors" :key="i">{{ e }}</li>
     </ul>
 
-    <div v-if="open" class="ce-item-body">
+    <fieldset v-if="open" class="ce-item-body ce-fieldset" :disabled="readonly">
       <CardEditorLabel v-model="item.label" :has-data="hasData" :repeat-over="innermostOver" />
       <CardEditorData v-model="item.data" :repeat-over="innermostOver" />
       <CardEditorDisplay v-model="item.display" :binding="item.data" />
@@ -176,6 +198,9 @@ const itemRepeatModel = computed({
               <option value="label">Always "not started"</option>
               <option value="zero">Show 0</option>
             </select>
+          </div>
+          <div class="field check">
+            <label><input type="checkbox" v-model="whenZeroOmit" /> Leave out a measured 0</label>
           </div>
           <div class="field">
             <label :for="minCohortId">Minimum cohort</label>
@@ -220,11 +245,12 @@ const itemRepeatModel = computed({
               <option value="row">Row</option>
               <option value="pill">Pill</option>
               <option value="tile">Tile</option>
+              <option value="column">Column</option>
             </select>
           </div>
         </div>
       </details>
-    </div>
+    </fieldset>
   </li>
 </template>
 

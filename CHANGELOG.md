@@ -7,6 +7,12 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **The metric-card editor no longer loses a template's settings.** Re-picking a row's current
+  metric or note, switching the badge, a title or a repeat off and back on, or changing a repeat
+  and back now leaves a customized card exactly as the preset had it; picking a different metric
+  keeps the window and filters it still supports, the window picker says "Default" rather than
+  showing a window the row doesn't store, and editing another chart while the editor is open
+  shows that chart instead of the previous one.
 - **Two standing retest report notes corrected.** The upsell-near-zero-for-signed-out note
   wrongly called it a known bug (`useUpsellPrompt` returning early on `uid === null`); it is
   expected by design (a signed-out visitor is never walled — the trial starts only once a
@@ -21,6 +27,11 @@ All notable changes to **gss-stats** are documented here. The format follows
   served (still behind Google sign-in) with their own saved-layout store, seeded from
   production's, while reading the same live data; production's hosts, settings and saved layout
   are unchanged.
+- **The metric-card editor shows and edits every template setting.** Badge colours, the card's
+  Google Ads refresh button, a note label's variables, the message shown when a repeat has nothing
+  to show, before/after window and country picks, table column and row-label headings, "leave out
+  a measured 0" and the column frame now have controls, and a preset card opens with its settings
+  visible (read-only) until you choose Customize.
 - **The retest morning read now publishes a rendered report page every run.** A build step turns
   the read's saved output and the daily narrative into one self-contained page (narrative, spend
   against the thresholds, release health, funnel, diagnostics, Play bulk reports, and the
