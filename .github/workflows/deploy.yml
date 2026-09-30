@@ -32,6 +32,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test # a red test (e.g. the auth gate) stops the deploy
+      - run: npm run typecheck # a type error stops the deploy too
       - run: npm run build
       - name: Publish to Cloudflare Pages
         run: npx wrangler pages deploy dist --project-name=gss-stats --branch=main

@@ -33,6 +33,7 @@ export const PATH_FAMILY_UNIT: Readonly<Record<string, Unit>> = {
   'popup-outcome': 'showing', // an outcome is recorded at most once per showing
   return: 'device', // deduplicated on the device, once per bucket
   'game-complete': 'completion',
+  'game-complete-deferred': 'completion',
   'auth-status': 'signin',
   'auth-error': 'row', // one row per failed sign-in attempt
   'auth-redirect': 'row', // one row per popup-to-redirect fallback
