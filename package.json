@@ -25,9 +25,9 @@
     "metrics:profile": "tsx scripts/metrics/profile-metrics.ts"
   },
   "dependencies": {
+    "@lucide/vue": "^1.49.0",
     "chart.js": "^4.4.7",
     "grid-layout-plus": "^1.0.5",
-    "lucide-vue-next": "^1.0.0",
     "vue": "^3.5.13"
   },
   "devDependencies": {
