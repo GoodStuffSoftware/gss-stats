@@ -17,6 +17,14 @@ All notable changes to **gss-stats** are documented here. The format follows
   of collapsing a mixed window to one bound.
 
 ### Added
+- **Pages belong to groups.** Every page is filed under a group — "All sites", "Best Sudoku", or
+  "Mine" for your own pages unless their name starts with a group's name — and the Best Sudoku
+  pages drop their "Best Sudoku · " prefix (Overview, Campaigns, Pop-ups, Traffic). Drill pages
+  made before this can't be traced to the page they came from, so they stay ordinary pages under
+  Mine.
+- **Drill pages nest under the page they came from.** A drill opens its page straight away, in the
+  same group, named by its trail (for example "mobile › California"); a drill from a drill page
+  nests under the same page.
 - **The retest morning read now publishes a rendered report page every run.** A build step turns
   the read's saved output and the daily narrative into one self-contained page (narrative, spend
   against the thresholds, release health, funnel, diagnostics, Play bulk reports, and the
@@ -59,6 +67,13 @@ All notable changes to **gss-stats** are documented here. The format follows
   install rate** on the Pop-ups page, as counts.
 
 ### Changed
+- **The page you're on is yours alone.** It's remembered in your own browser instead of the shared
+  dashboard, so switching pages no longer saves anything or moves anyone else, and a first-time
+  visitor lands on ★ Overview.
+- **Built-in pages are recognised by what they are, not their name.** Renaming a page no longer
+  changes how it behaves (its notes, its filter bar, what "restore default charts" brings back).
+- **Saved layouts move to version 12.** The first save keeps a backup of the previous layout, and a
+  tab still running the previous version is told to reload instead of overwriting the new one.
 - **The retest ads routine's release-health check now runs every morning read, at any hour.**
   The 23:15 ET backstop entry is folded into the single daily morning read (moved 08:00 → 06:00
   ET); the clock-based "01:00-12:00 ET quiet window" that used to suppress the check is retired,

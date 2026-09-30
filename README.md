@@ -43,7 +43,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
 
 ## Features
 
-- **"Best Sudoku · Overview"** — the landing page: today-at-a-glance KPI tiles (vs the same
+- **Best Sudoku / Overview** — the Best Sudoku group's first page: today-at-a-glance KPI tiles (vs the same
   time yesterday and the 7-day average), the **Overall timeline**, a campaign scorecard, and a
   release before/after panel — each its own movable/editable widget. The KPI tiles and the
   scorecard are **metric cards** (presets `bsk-kpis` and `campaign-scorecard`, see *One metrics
@@ -59,7 +59,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   `date` dimension is a UTC day.
   [`src/lib/releases.ts`](src/lib/releases.ts) holds the hand-entered release dates (`hits` has
   no app-version column; major releases get a labelled line, minor ones a short tick).
-  "Best Sudoku · Campaigns" (its funnel, country, cost and return-visits panels are metric
+  Best Sudoku / Campaigns (its funnel, country, cost and return-visits panels are metric
   cards, presets `campaign-funnel`, `campaign-country` — a table with the funnel steps as rows
   and US / CA / Other as columns, each cell a campaign metric with the registry's optional
   `country` param — `campaign-cost` and `campaign-returns` — d0 and each return window's rate,
@@ -74,10 +74,8 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   bespoke panel left: the former panel bodies and their endpoints (`/api/campaigns`,
   `/api/overview`) are retired, and a saved layout's panels are swapped in place on load — see
   [`src/lib/defaults.ts`](src/lib/defaults.ts) `migratePanelsV11`)
-  and "Best Sudoku · Traffic" (per-site/geo/referrer/device detail beyond what Overview and
-  Campaigns cover) round out the Best Sudoku tab group, which is kept together and in that
-  order — after your own tabs — by a non-destructive reorder on load (see
-  [`src/lib/defaults.ts`](src/lib/defaults.ts)'s `reorderBskGroup`).
+  and Best Sudoku / Traffic (per-site/geo/referrer/device detail beyond what Overview and
+  Campaigns cover) round out the Best Sudoku group, in that order (see *Page navigation* below).
 - **Movable / composable charts** — drag the header, resize from the corner; add /
   edit / duplicate / delete charts of any type: stat, bar, horizontal bar, stacked
   bar, **breakdown bar** (one dimension on the axis × another as the series, grouped or
@@ -124,13 +122,32 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   first save of a newer version first copies the previous stored layout to
   `dashboard:default:backup:v<old version>` in KV ([`functions/api/config.ts`](functions/api/config.ts)),
   once, so a migration can be rolled back by copying that key over `dashboard:default`.
+- **Page navigation** — every page belongs to a **group** (`DashboardPage.group`, a plain
+  string: "All sites", "Best Sudoku", "Mine", …, so a new product is just a new group). The
+  default page, **★ Overview** (all-sites traffic), is shown pinned first, outside the groups,
+  and can't be deleted. Order is data: groups appear in the order they first occur in the saved
+  page list and pages keep their saved order within a group — nothing is re-sorted on load.
+  Built-in pages are recognised **by id only** ([`src/lib/defaults.ts`](src/lib/defaults.ts)
+  `isOverviewPage`, `isCampaignComparePage`, …), so renaming a page never changes how it
+  behaves. The page each viewer is on (and the page they last viewed in each group) is
+  remembered **in their own browser** ([`src/lib/viewerPrefs.ts`](src/lib/viewerPrefs.ts)), not
+  in the shared KV config: switching pages never saves anything or moves anyone else, and a
+  first-time viewer lands on ★ Overview (the config's `activePageId`). Layout version 12
+  (`migrateNavV12`) filed the existing pages: the built-ins by id, the Best Sudoku pages renamed
+  Overview, Campaigns, Pop-ups and Traffic (their group shows "Best Sudoku"), and every other
+  page under the group its name starts with, else **Mine**. Drill pages made before version 12
+  can't be linked to the page they came from (nothing stored it), so they stay ordinary pages
+  under Mine.
 - **Auto-built site filter** — a single multi-select of your sites and subdomains,
   built live from the data. It merges each site's RUM host and beacon tag into one
   entry, groups subdomains under their site, folds **alias hosts** (an HTTP redirect
   or a `rel="canonical"` pointing elsewhere) into their canonical site, and excludes
   dev/preview hosts from both the picker and the numbers.
 - **Click-to-drill-down** — click any chart value to open a new page filtered to it
-  (device, referrer, location, browser, …), titled by the value; drill-downs stack.
+  (device, referrer, location, browser, …). The drill page is created at once, nested under the
+  page it came from (`DashboardPage.parentId`, in that page's group), and named by its trail,
+  e.g. "mobile › California" ([`src/lib/nav.ts`](src/lib/nav.ts) `drillTrail`); drilling again
+  from a drill page stacks the filters and nests under the same page.
 - **Exclusions** (global across pages) — hide self-referrals, hide your own visits by
   browser+OS, and an **"exclude this device"** opt-out that works on every site (see
   [gss-beacon](https://github.com/GoodStuffSoftware/gss-beacon)).
