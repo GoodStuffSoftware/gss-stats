@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import type { DashboardPage } from '../types'
+import PageIcon from './nav/PageIcon.vue'
 
 defineProps<{ pages: DashboardPage[]; activePageId: string }>()
 const emit = defineEmits<{
@@ -39,6 +40,7 @@ function rename(p: DashboardPage) {
         @click="emit('switch', p.id)"
       >
         <span v-if="p.isDefault" class="badge" title="Default page">★</span>
+        <PageIcon :page="p" :pages="pages" :size="14" />
         <span class="tab-name">{{ p.name }}</span>
         <button v-if="p.id === activePageId" class="caret" title="Page options" @click.stop="toggleMenu(p.id)">▾</button>
         <div v-if="menuFor === p.id" class="pmenu" @click.stop>

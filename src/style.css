@@ -12,6 +12,17 @@
   --amber: 224 114 44; /* #E0722C accent */
   --amber-hover: 194 94 30; /* #C25E1E */
   --amber-tint: 248 236 224; /* #F8ECE0 */
+  /* Group badge palette (lib/icons.ts groupBadge): seven slots, each with a light and a dark
+     value so a badge reads in both themes; --on-g is the monogram's colour on them. */
+  --g0: 79 107 216; /* #4F6BD8 blue */
+  --g1: 14 138 126; /* #0E8A7E teal */
+  --g2: 138 85 201; /* #8A55C9 violet */
+  --g3: 208 101 42; /* #D0652A orange */
+  --g4: 196 77 110; /* #C44D6E rose */
+  --g5: 60 138 63; /* #3C8A3F green */
+  --g6: 47 127 184; /* #2F7FB8 sky */
+  --on-g: 255 255 255;
+  --scrim: 26 23 21;
 }
 
 .dark {
@@ -27,6 +38,15 @@
   --amber: 238 138 71;
   --amber-hover: 240 154 94;
   --amber-tint: 42 30 18;
+  --g0: 143 163 242; /* #8FA3F2 */
+  --g1: 76 195 181; /* #4CC3B5 */
+  --g2: 185 147 236; /* #B993EC */
+  --g3: 240 154 94; /* #F09A5E */
+  --g4: 238 138 166; /* #EE8AA6 */
+  --g5: 124 197 127; /* #7CC57F */
+  --g6: 116 182 230; /* #74B6E6 */
+  --on-g: 21 18 15;
+  --scrim: 0 0 0;
 }
 
 * {
