@@ -12,6 +12,17 @@ All notable changes to **gss-stats** are documented here. The format follows
   window (the campaign tag only rides beacons for 30 minutes, so later-session streak prompts
   go untagged); it still trips when both are zero, and the rule always states the site-wide
   shown count.
+- **The funnel-reach WATCH can no longer hide a broken campaign.** Zero tagged arrivals always
+  trips; the WATCH downgrade applies only until the tutorial sign-in ask is seen site-wide, after
+  which the rule reads tagged asks only; the detail line states which mode applied, the
+  site-wide cross-check counts the same asks the rule does (first-50 promo included), and the
+  threshold push names a rule on WATCH instead of saying no rule tripped.
+- **First-session funnel figures are more faithful.** Arrivals count one per device (first
+  tagged visit) instead of new-visitor page rows; a step whose sibling beacons are live reads
+  a real 0 instead of "not yet tracked"; the site-wide column now stops at the same end as the
+  tagged one; and no ratio divides by game views, which are page views.
+- **Agent worktrees no longer leak into the test run.** The test suite skips copies of the
+  repository under the agent worktree folder.
 - **Two standing retest report notes corrected.** The upsell-near-zero-for-signed-out note
   wrongly called it a known bug (`useUpsellPrompt` returning early on `uid === null`); it is
   expected by design (a signed-out visitor is never walled — the trial starts only once a

@@ -146,6 +146,8 @@ export function fixtureDeps(fx: Fixture, dryRun: boolean): ReadDeps & { store: R
         returns: async () => beacon.returns,
         returnSites: async () => beacon.returnSites.map((s) => ({ site: s.site, count: s.count, firstMs: optMs(s.first, s.firstMs), lastMs: optMs(s.last, s.lastMs) })),
         ...(beacon.siteFirstSession ? { siteFirstSession: async () => beacon.siteFirstSession! } : {}),
+        // Tagged d0 arrivals: the fixture's own /return/<uc>/d0 rows (path-attributed, like the real query).
+        returnArrivals: async (c) => beacon.returns.filter((r) => c.ucValues.some((u) => r.path === `/return/${u}/d0`)).map((r) => ({ path: r.path, count: r.count })),
       }
     : null
   return {
