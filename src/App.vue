@@ -8,7 +8,10 @@ import { loadSites, sitesTree, tokenLabel } from './sitesStore'
 import { isSiteDim, semanticKey, drillNeedsEventBeacons } from './lib/drill'
 import { sessionExpired, reauth } from './session'
 import { readViewerPrefs, writeViewerPrefs, initialPageId } from './lib/viewerPrefs'
-import { rootOf, drillTrail } from './lib/nav'
+import { rootOf, drillTrail, groupLandingPage } from './lib/nav'
+import { SearchIcon } from './lib/icons'
+import NavBreadcrumb from './components/nav/NavBreadcrumb.vue'
+import SearchPalette from './components/nav/SearchPalette.vue'
 import { isTouchDevice } from './lib/responsive'
 import { TRACKING_ACTIVATION_DATE_ET } from './lib/popupEvents'
 import NoteBlock from './components/NoteBlock.vue'
@@ -79,17 +82,21 @@ onMounted(async () => {
   // What the store holds as far as this tab knows: a save only goes out when the config differs.
   lastSavedJson = configJson(config)
   loaded.value = true
+  rememberActivePage()
 })
 
 // Remember this viewer's page (and the page they last viewed in its group, which picking that
 // group opens) in this browser only.
-watch(activePageId, () => {
-  if (!loaded.value) return
+function rememberActivePage() {
   const p = activePage.value
+  const root = rootOf(p, config.pages)
   const prefs = readViewerPrefs()
   prefs.active = p.id
-  if (!p.isDefault) prefs.lastByGroup = { ...prefs.lastByGroup, [rootOf(p, config.pages).group]: p.id }
+  if (!root.isDefault) prefs.lastByGroup = { ...prefs.lastByGroup, [root.group]: p.id }
   writeViewerPrefs(prefs)
+}
+watch(activePageId, () => {
+  if (loaded.value) rememberActivePage()
 })
 
 // ── Persistence (debounced) ───────────────────────────────────────────────────
@@ -134,6 +141,34 @@ const saveLabel = computed(
 function switchPage(id: string) {
   if (config.pages.some((p) => p.id === id)) activePageId.value = id
 }
+// Picking a group opens the page this viewer last viewed in it, else its first page.
+function switchGroup(group: string) {
+  const target = groupLandingPage(group, config.pages, readViewerPrefs().lastByGroup)
+  if (target) switchPage(target.id)
+}
+
+// ── / search ──────────────────────────────────────────────────────────────────────
+const searchOpen = ref(false)
+function openSearch() {
+  searchOpen.value = true
+}
+function pickSearchResult(id: string) {
+  searchOpen.value = false
+  switchPage(id)
+}
+// "/" anywhere opens the search, unless you're typing into a field (or a dialog is open).
+function isTypingTarget(t: EventTarget | null): boolean {
+  if (!(t instanceof HTMLElement)) return false
+  return t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)
+}
+function onSlashKey(e: KeyboardEvent) {
+  if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return
+  if (isTypingTarget(e.target) || searchOpen.value || editing.value) return
+  e.preventDefault()
+  openSearch()
+}
+onMounted(() => document.addEventListener('keydown', onSlashKey))
+onBeforeUnmount(() => document.removeEventListener('keydown', onSlashKey))
 // + Page: a new ROOT page, a copy of the active one, in its group with its icon (clonePage).
 function addPage(group?: string) {
   const src = activePage.value
@@ -575,11 +610,27 @@ function toggleDark() {
           <span class="overline">Good Stuff Software · bot-free RUM</span>
         </div>
       </div>
-      <!-- Restored to the pre-v0.6 layout EXACTLY (commit 8692b0f, reviewer-confirmed
-           2026-09-27): save-state, theme, add-chart, AccountMenu — in that order, nothing
-           else. No "reveal chart controls" button here — per-chart reveal + zoom (ChartCard.vue,
-           v0.8) is the way to show a chart's controls; `revealAllControls` below stays wired to
-           Dashboard's `controls-visible` prop (cheap to keep) but has no header UI to set it. -->
+      <!-- Group / Page / Drill: each segment opens its siblings (components/nav/NavBreadcrumb.vue). -->
+      <NavBreadcrumb
+        class="topbar-crumbs"
+        :pages="config.pages"
+        :active="activePage"
+        :group-meta="config.groupMeta"
+        :compact="isMobile"
+        @switch="switchPage"
+        @switch-group="switchGroup"
+        @new-page="addPage"
+      />
+      <span class="topbar-sp"></span>
+      <button type="button" class="nav-search-btn" aria-label="Search pages" aria-keyshortcuts="/" @click="openSearch">
+        <SearchIcon :size="15" aria-hidden="true" />
+        <span class="nav-search-label">Search pages</span>
+        <kbd>/</kbd>
+      </button>
+      <!-- save-state, theme, add-chart, AccountMenu — in that order. No "reveal chart controls"
+           button here — per-chart reveal + zoom (ChartCard.vue, v0.8) is the way to show a chart's
+           controls; `revealAllControls` below stays wired to Dashboard's `controls-visible` prop
+           (cheap to keep) but has no header UI to set it. -->
       <div class="top-actions">
         <span v-if="saveLabel" class="save-state mono" :class="saveState">{{ saveLabel }}</span>
         <button class="btn" @click="toggleDark" :title="dark ? 'Light mode' : 'Dark mode'">
@@ -711,6 +762,8 @@ function toggleDark() {
         <div v-if="drillMenu && isMobile" class="drill-backdrop" @click="closeDrill"></div>
       </Transition>
     </Teleport>
+
+    <SearchPalette :open="searchOpen" :pages="config.pages" :group-meta="config.groupMeta" @close="searchOpen = false" @pick="pickSearchResult" />
 
     <footer class="foot overline">
       {{ activePage.name }} · humans only, bots excluded · {{ rangeText }}
@@ -851,9 +904,36 @@ function toggleDark() {
 .topbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  gap: 10px 14px;
   flex-wrap: wrap;
+}
+.topbar-crumbs {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.topbar-sp {
+  flex: 1;
+}
+.nav-search-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 200px;
+  padding: 5px 7px 5px 10px;
+  border: 1px solid rgb(var(--line-2));
+  border-radius: 9px;
+  background: rgb(var(--canvas));
+  color: rgb(var(--ink-3));
+  font-size: 12.5px;
+}
+.nav-search-btn kbd {
+  margin-left: auto;
+}
+.nav-search-btn:hover,
+.nav-search-btn:focus-visible {
+  border-color: rgb(var(--amber));
+  color: rgb(var(--ink));
+  outline: none;
 }
 .filterbar-inflow {
   /* A plain block wrapper for the IntersectionObserver ref. NOT `display: contents` — a
@@ -1022,6 +1102,14 @@ function toggleDark() {
   }
   .top-actions {
     flex-wrap: wrap;
+  }
+  .nav-search-btn {
+    min-width: 0;
+    padding: 7px;
+  }
+  .nav-search-label,
+  .nav-search-btn kbd {
+    display: none;
   }
 }
 </style>

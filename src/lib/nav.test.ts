@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { drillChildren, drillTrail, parentOf, rootOf } from './nav'
+import { drillChildren, drillTrail, groupLandingPage, groupNames, highlightParts, navOrder, navTree, parentOf, rootOf, rootsInGroup, searchPages } from './nav'
 import type { DashboardPage, GlobalFilters } from '../types'
 
 const f = (over: Partial<GlobalFilters> = {}): GlobalFilters => ({
@@ -59,5 +59,92 @@ describe('drillTrail (a drill page\'s name)', () => {
   })
   it('"Filtered" when nothing differs from the root', () => {
     expect(drillTrail(f(), f(), label)).toBe('Filtered')
+  })
+})
+
+describe('the page tree', () => {
+  const w = (title: string) => ({ id: title, i: title, title, type: 'bar' as const, dimension: '', metric: 'pageviews' as const, limit: 1, x: 0, y: 0, w: 1, h: 1 })
+  const pages = [
+    page('default', { isDefault: true, name: 'Overview', group: 'All sites' }),
+    page('beacon', { name: 'Beacon', group: 'All sites' }),
+    page('mine-1', { name: 'Filtered', group: 'Mine', widgets: [w('Pop-ups: shown, taps and outcomes')] }),
+    page('bsk-overview', { name: 'Overview', group: 'Best Sudoku' }),
+    page('bsk-popups', { name: 'Pop-ups', group: 'Best Sudoku', widgets: [w('Pop-ups: shown, taps and outcomes')] }),
+    page('bsk-launch', { name: 'Traffic', group: 'Best Sudoku', widgets: [w('Visits over time')] }),
+    page('k1', { name: 'mobile', group: 'Best Sudoku', parentId: 'bsk-launch' }),
+    page('k0', { name: 'reddit.com', group: 'All sites', parentId: 'default' }),
+    page('k2', { name: 'mobile › California', group: 'Best Sudoku', parentId: 'bsk-launch' }),
+    page('stale', { name: 'Old drill', group: 'Mine', parentId: 'deleted' }),
+  ]
+
+  it('pins ★ Overview (with its drill pages) and lists groups in first-appearance order, pages in array order', () => {
+    const t = navTree(pages)
+    expect(t.pinned).toMatchObject({ page: { id: 'default' }, children: [{ id: 'k0' }] })
+    expect(t.groups.map((g) => [g.name, g.nodes.map((n) => [n.page.id, n.children.map((c) => c.id)])])).toEqual([
+      ['All sites', [['beacon', []]]],
+      ['Mine', [['mine-1', []], ['stale', []]]],
+      ['Best Sudoku', [['bsk-overview', []], ['bsk-popups', []], ['bsk-launch', ['k1', 'k2']]]],
+    ])
+    expect(navOrder(pages).map((p) => p.id)).toEqual(['default', 'k0', 'beacon', 'mine-1', 'stale', 'bsk-overview', 'bsk-popups', 'bsk-launch', 'k1', 'k2'])
+  })
+
+  it('leaves out a group whose only page is ★ Overview, but still offers it to move pages into', () => {
+    const only = [page('default', { isDefault: true, group: 'All sites' }), page('x', { group: 'Mine' })]
+    expect(navTree(only).groups.map((g) => g.name)).toEqual(['Mine'])
+    expect(groupNames(only)).toEqual(['All sites', 'Mine'])
+  })
+
+  it('rootsInGroup and groupLandingPage: the page last viewed in a group, else its first page', () => {
+    expect(rootsInGroup('Best Sudoku', pages).map((p) => p.id)).toEqual(['bsk-overview', 'bsk-popups', 'bsk-launch'])
+    expect(groupLandingPage('Best Sudoku', pages)?.id).toBe('bsk-overview')
+    expect(groupLandingPage('Best Sudoku', pages, { 'Best Sudoku': 'k2' })?.id).toBe('k2')
+    // a remembered page that has since moved to another group (or gone) is ignored
+    expect(groupLandingPage('Best Sudoku', pages, { 'Best Sudoku': 'beacon' })?.id).toBe('bsk-overview')
+    expect(groupLandingPage('Best Sudoku', pages, { 'Best Sudoku': 'gone' })?.id).toBe('bsk-overview')
+    expect(groupLandingPage('Nope', pages)).toBeUndefined()
+  })
+})
+
+describe('searchPages', () => {
+  const w = (title: string) => ({ id: title, i: title, title, type: 'bar' as const, dimension: '', metric: 'pageviews' as const, limit: 1, x: 0, y: 0, w: 1, h: 1 })
+  const pages = [
+    page('default', { isDefault: true, name: 'Overview', group: 'All sites' }),
+    page('mine-1', { name: 'Filtered', group: 'Mine', widgets: [w('Top pages'), w('Pop-ups: shown, taps and outcomes')] }),
+    page('bsk-popups', { name: 'Pop-ups', group: 'Best Sudoku', widgets: [w('Pop-ups: shown, taps and outcomes')] }),
+    page('app-pop', { name: 'App popularity', group: 'Mine' }),
+    page('re-pop', { name: 'Repopulated', group: 'Mine' }),
+  ]
+  it('page names first — a name starting with the query, then a word starting with it, then the rest — then chart titles, each page once', () => {
+    const hits = searchPages('pop', pages)
+    expect(hits.map((h) => [h.page.id, h.match])).toEqual([
+      ['bsk-popups', 'name'],
+      ['app-pop', 'name'],
+      ['re-pop', 'name'],
+      ['mine-1', 'chart'],
+    ])
+    expect(hits[3]).toMatchObject({ chart: 'Pop-ups: shown, taps and outcomes', at: 0, len: 3 })
+  })
+  it('is case-insensitive and lists every page (in navigation order) for an empty query', () => {
+    expect(searchPages('OVER', pages).map((h) => h.page.id)).toEqual(['default'])
+    expect(searchPages('  ', pages).map((h) => [h.page.id, h.match])).toEqual([
+      ['default', 'all'],
+      ['mine-1', 'all'],
+      ['app-pop', 'all'],
+      ['re-pop', 'all'],
+      ['bsk-popups', 'all'],
+    ])
+    expect(searchPages('zzz', pages)).toEqual([])
+  })
+  it('highlightParts splits the text around the match (rendered as text, never HTML)', () => {
+    expect(highlightParts('Pop-ups', 0, 3)).toEqual([
+      { text: 'Pop', mark: true },
+      { text: '-ups', mark: false },
+    ])
+    expect(highlightParts('<b>x</b>', 3, 1)).toEqual([
+      { text: '<b>', mark: false },
+      { text: 'x', mark: true },
+      { text: '</b>', mark: false },
+    ])
+    expect(highlightParts('Traffic', -1, 0)).toEqual([{ text: 'Traffic', mark: false }])
   })
 })

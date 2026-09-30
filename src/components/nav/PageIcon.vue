@@ -27,10 +27,8 @@ const resolved = computed(() => resolveIcon(props.page, props.pages))
 }
 .drill-mark {
   position: absolute;
-  right: -5px;
-  bottom: -4px;
-  background: rgb(var(--surface));
-  border-radius: 3px;
+  right: -6px;
+  bottom: -5px;
   color: rgb(var(--amber-hover));
 }
 </style>

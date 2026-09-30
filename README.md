@@ -138,6 +138,21 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   page under the group its name starts with, else **Mine**. Drill pages made before version 12
   can't be linked to the page they came from (nothing stored it), so they stay ordinary pages
   under Mine.
+  - **Breadcrumb** ([`src/components/nav/NavBreadcrumb.vue`](src/components/nav/NavBreadcrumb.vue))
+    — `Group / Page / Drill` in the header, the everyday way to move around. Each segment opens
+    a menu of its siblings: the group segment lists ★ Overview and every group (picking a group
+    opens the page you last viewed in it, else its first page), the page segment lists the
+    group's pages plus "New page in <group>" (a copy of the page on screen, in that group), and
+    the drill segment lists the other drill pages of the same page plus the way back to it. On
+    ★ Overview the group segment is ★ Overview itself. At phone width it collapses to
+    `Group / Page` (the page on screen; drill pages listed under their page) and the menus open
+    as a bottom sheet. Menus are keyboard-operable (arrows, Home/End, Esc/Tab return focus to
+    the segment).
+  - **Search** ([`src/components/nav/SearchPalette.vue`](src/components/nav/SearchPalette.vue))
+    — press <kbd>/</kbd> anywhere you're not typing (or the header's search button) to search
+    every page in every group: page names first, then pages matched only by a chart title, each
+    with its icon and group badge. <kbd>↑</kbd> <kbd>↓</kbd> move, <kbd>↵</kbd> opens,
+    <kbd>esc</kbd> closes ([`src/lib/nav.ts`](src/lib/nav.ts) `searchPages`).
 - **Page icons and group badges** ([`src/lib/icons.ts`](src/lib/icons.ts)) — every page shows an
   icon without anyone setting one. The config stores at most a short registry key
   (`DashboardPage.icon`, e.g. `megaphone`), never markup; the registry maps ~40 curated keys to
