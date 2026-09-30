@@ -630,8 +630,11 @@ function toggleDark() {
       </div>
     </main>
 
+    <!-- Keyed on the widget: editing a different widget while the editor is open remounts it,
+         so no part of it (CardEditor reads its card once, at setup) shows the previous one. -->
     <ChartEditor
       v-if="editing"
+      :key="editing.widget.id"
       :widget="editing.widget"
       :is-new="editing.isNew"
       :filters="activePage.filters"
