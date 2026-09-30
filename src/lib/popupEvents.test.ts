@@ -363,7 +363,7 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
   // exactly how '/return' was accidentally left off this list on this branch — see the
   // 2026-09-25 review). If this ever fails, either a prefix was removed (update this
   // literal list deliberately) or one was never added (fix the array instead).
-  it('POPUP_EVENT_PREFIXES is exactly these 13 prefixes', () => {
+  it('POPUP_EVENT_PREFIXES is exactly these 14 prefixes', () => {
     expect([...POPUP_EVENT_PREFIXES]).toEqual([
       '/signin-prompt',
       '/signin-eligible',
@@ -374,6 +374,7 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
       '/popup-outcome',
       '/return',
       '/game/complete/',
+      '/game/complete-deferred/',
       '/auth/success/google/',
       '/auth/success/email/',
       '/auth/error',
@@ -418,6 +419,15 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
     expect(isPopupEventPath('/game/')).toBe(false)
     expect(isPopupEventPath('/game/complete')).toBe(false) // no trailing slash — not a real beacon shape either
   })
+  // best-sudoku card 125: the EU-consent-deferred sibling. Same exclusion, a DISTINCT family
+  // from '/game/complete/' (never folded together — see PATH_FAMILY_LABELS), and it must never
+  // be mistaken for the live '/game/complete/' family (a substring, not a prefix, of it).
+  it('excludes every /game/complete-deferred/... beacon too, as its own family', () => {
+    expect(isPopupEventPath('/game/complete-deferred/normal/easy')).toBe(true)
+    expect(isPopupEventPath('/game/complete-deferred/daily/unknown')).toBe(true)
+    expect(pathFamilyOf('/game/complete-deferred/normal/easy')).toBe('game-complete-deferred')
+    expect(pathFamilyOf('/game/complete/normal/easy')).toBe('game-complete') // unaffected, still its own family
+  })
 })
 
 describe('v1.95.5 go-live markers', () => {
@@ -446,6 +456,19 @@ describe('popupExcludeClause / popupIncludeClause anchoring for /game/complete/ 
     const { sql, binds } = popupIncludeClause()
     expect(binds).toEqual([]) // literal, not bound
     expect(sql).toContain("path LIKE '/game/complete/%'")
+  })
+  // best-sudoku card 125: the two families' exclude/include clauses must be separate
+  // fragments (never one accidentally subsuming the other's rows).
+  it('excludes /game/complete-deferred/... as its own fragment, distinct from /game/complete/', () => {
+    const w: string[] = []
+    const b: unknown[] = []
+    popupExcludeClause(w, b)
+    expect(b).toEqual([])
+    const whereSql = w.join(' AND ')
+    expect(whereSql).toContain("path NOT LIKE '/game/complete-deferred/%'")
+    expect(whereSql).toContain("path NOT LIKE '/game/complete/%'") // both present, independently
+    const { sql } = popupIncludeClause()
+    expect(sql).toContain("path LIKE '/game/complete-deferred/%'")
   })
 })
 

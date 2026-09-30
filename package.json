@@ -10,7 +10,7 @@
     "preview": "npm run build && wrangler pages dev",
     "deploy": "npm run build && wrangler pages deploy",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "vue-tsc --noEmit",
     "typecheck:scripts": "tsc -p scripts/ads-reads/tsconfig.json --noEmit && tsc -p scripts/metrics/tsconfig.json --noEmit",
     "ads:morning-read": "tsx scripts/ads-reads/morning-read.ts",
     "ads:postflight-read": "tsx scripts/ads-reads/postflight-read.ts",
@@ -30,7 +30,7 @@
     "vue": "^3.5.13"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20241218.0",
+    "@cloudflare/workers-types": "^5.20260928.1",
     "@types/node": "^24.19.0",
     "@vitejs/plugin-vue": "^5.2.1",
     "@vue/test-utils": "^2.5.1",
@@ -39,7 +39,8 @@
     "typescript": "^5.7.2",
     "vite": "^6.0.7",
     "vitest": "^5.0.2",
-    "workerd": "^1.20260925.2",
-    "wrangler": "^4.20.0"
+    "vue-tsc": "^3.3.11",
+    "workerd": "^1.20260926.1",
+    "wrangler": "^4.143.0"
   }
 }
