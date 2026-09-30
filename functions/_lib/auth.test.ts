@@ -16,7 +16,7 @@ import {
   type AuthConfig,
   type AuthEnv,
 } from './auth'
-import { onRequest } from '../_middleware'
+import { hostGuard, onRequest, type MiddlewareEnv } from '../_middleware'
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────────
 
@@ -959,7 +959,7 @@ describe('local dev bypass', () => {
 // ── The middleware wiring (host guard → auth gate) ───────────────────────────────
 
 describe('functions/_middleware onRequest', () => {
-  function ctx(request: Request, env: AuthEnv) {
+  function ctx(request: Request, env: MiddlewareEnv) {
     const next = nextSpy()
     return { ctx: { request, env, next } as unknown as Parameters<typeof onRequest>[0], next }
   }
@@ -983,5 +983,75 @@ describe('functions/_middleware onRequest', () => {
     const res = await onRequest(c)
     expect(res.status).toBe(401)
     expect(next).not.toHaveBeenCalled()
+  })
+})
+
+// ── Hosted preview (PREVIEW_HOST, set only by wrangler.toml's [env.preview]) ─────────
+
+describe('host guard: the preview host', () => {
+  const PREVIEW = 'dev.gss-stats.pages.dev'
+  const PREVIEW_ENV: MiddlewareEnv = { ...ENV, PREVIEW_HOST: PREVIEW }
+
+  function ctx(request: Request, env: MiddlewareEnv) {
+    const next = nextSpy()
+    return { ctx: { request, env, next } as unknown as Parameters<typeof onRequest>[0], next }
+  }
+
+  it('serves the preview host only when PREVIEW_HOST names it (then the auth gate runs)', async () => {
+    const { ctx: c, next } = ctx(new Request(`https://${PREVIEW}/api/stats`, { method: 'POST' }), PREVIEW_ENV)
+    const res = await onRequest(c)
+    expect(res.status).toBe(401) // reached the auth gate, not the 404
+    expect(next).not.toHaveBeenCalled()
+    expect(hostGuard(new Request(`https://${PREVIEW}/`), PREVIEW_ENV)).toBeNull()
+  })
+
+  it('sends a preview sign-in back to the preview origin', async () => {
+    const { ctx: c } = ctx(new Request(`https://${PREVIEW}/auth/google/login`), PREVIEW_ENV)
+    const res = await onRequest(c)
+    expect(res.status).toBe(302)
+    const location = new URL(res.headers.get('Location') ?? '')
+    expect(location.searchParams.get('redirect_uri')).toBe(`https://${PREVIEW}/auth/google/callback`)
+  })
+
+  it('404s the preview host without PREVIEW_HOST (production, local dev)', async () => {
+    for (const env of [ENV, { ...ENV, PREVIEW_HOST: '' }] as MiddlewareEnv[]) {
+      const { ctx: c, next } = ctx(new Request(`https://${PREVIEW}/`), env)
+      const res = await onRequest(c)
+      expect(res.status).toBe(404)
+      expect(next).not.toHaveBeenCalled()
+    }
+  })
+
+  it('still 404s every other *.pages.dev host on a preview deployment', async () => {
+    for (const host of [
+      'gss-stats.pages.dev',
+      'feat-x.gss-stats.pages.dev',
+      '0123abcd.gss-stats.pages.dev',
+      `x.${PREVIEW}`,
+      'dev.gss-stats.pages.dev.evil.example',
+      'dev-gss-stats.pages.dev',
+    ]) {
+      const { ctx: c, next } = ctx(new Request(`https://${host}/`), PREVIEW_ENV)
+      const res = await onRequest(c)
+      expect(res.status, host).toBe(404)
+      expect(next).not.toHaveBeenCalled()
+    }
+  })
+
+  it('matches exactly: no case folding, whitespace or wildcard in PREVIEW_HOST', () => {
+    const url = `https://${PREVIEW}/`
+    for (const value of [' dev.gss-stats.pages.dev', 'DEV.gss-stats.pages.dev', '*.gss-stats.pages.dev', 'gss-stats.pages.dev']) {
+      expect(hostGuard(new Request(url), { PREVIEW_HOST: value })?.status, value).toBe(404)
+    }
+  })
+
+  it('leaves production unchanged: canonical host served, pages.dev 404, with or without PREVIEW_HOST', async () => {
+    for (const env of [ENV, PREVIEW_ENV]) {
+      expect(hostGuard(new Request(`${ORIGIN}/`), env)).toBeNull()
+      expect(hostGuard(new Request('http://localhost:8788/'), env)).toBeNull()
+      expect(hostGuard(new Request('https://gss-stats.pages.dev/'), env)?.status).toBe(404)
+    }
+    expect(hostGuard(new Request(`${ORIGIN}/`))).toBeNull()
+    expect(hostGuard(new Request(`https://${PREVIEW}/`))?.status).toBe(404)
   })
 })

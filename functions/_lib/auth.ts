@@ -310,7 +310,9 @@ export async function readSession(request: Request, config: AuthConfig, nowMs: n
 export function callbackUrl(url: URL): string {
   // Derived from the request origin. The host guard in functions/_middleware.ts only
   // lets the canonical domain (and loopback for dev) reach this code, so the only
-  // production value is https://stats.goodstuff.software/auth/google/callback.
+  // production value is https://stats.goodstuff.software/auth/google/callback. A preview
+  // deployment (PREVIEW_HOST set) also admits its one host, giving
+  // https://dev.gss-stats.pages.dev/auth/google/callback there.
   return `${url.origin}${CALLBACK_PATH}`
 }
 

@@ -607,6 +607,37 @@ npm run deploy      # = vite build && wrangler pages deploy
 
 Single Cloudflare account — no account-ID env needed. Pages project: **gss-stats**.
 
+### Preview (dev)
+
+A hosted preview runs at **https://dev.gss-stats.pages.dev**: a Pages *preview* deployment
+of branch `dev`, built from whatever is checked out. It is not deployed automatically.
+
+```bash
+npm run build && npx wrangler pages deploy dist --project-name gss-stats --branch dev
+```
+
+Any branch other than `main` deploys as a preview and uses `wrangler.toml`'s `[env.preview]`
+(production keeps the top-level config). That section repeats every binding, points
+`STATS_CONFIG` at the preview's own KV namespace (`gss-stats-config-preview`, seeded with a
+copy of production's saved layout), and sets `PREVIEW_HOST`, the one extra hostname the host
+guard serves ([ADR 0002, 2026-09-30 amendment](docs/adr/0002-google-auth.md#amendment-2026-09-30-one-hosted-preview-host)).
+Only the `dev` alias is served; other preview URLs still 404.
+
+- **Real data.** The preview binds the same D1 databases as production (geo and ads) and the
+  real `gss-stats-sync` Worker, so it shows live numbers and **an ads refresh on the preview
+  runs a real Google Ads sync**. Only the saved layout is separate.
+- **One-time owner setup**, before the first preview deploy (it is fail-closed, 503, until then):
+  1. Add `https://dev.gss-stats.pages.dev/auth/google/callback` as an **Authorized redirect
+     URI** on the Google OAuth client.
+  2. Set the preview's **secrets** (Pages keeps them per environment, so production's don't
+     carry over): `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET` (use a
+     different value from production), `ALLOWED_EMAILS`, and `CF_ANALYTICS_TOKEN` (for the
+     Cloudflare analytics charts); optional `SESSION_TTL_HOURS`. Values and rules are in
+     [Auth → Settings](#settings-pages-project-secrets-production). Each one:
+     `npx wrangler pages secret put <NAME> --project-name gss-stats --env preview`.
+     Check with `npx wrangler pages secret list --project-name gss-stats --env preview`.
+     Never set `AUTH_DEV_BYPASS`.
+
 ### Restoring a layout backup
 
 The saved dashboard layout lives in KV (`STATS_CONFIG`, key `dashboard:default`). Each time a
@@ -663,7 +694,8 @@ allowlist. Design, alternatives and the deckhand comparison are in
 static assets, `/api/*` and `/auth/*`.
 
 1. A host guard 404s every host except `stats.goodstuff.software` and loopback. That
-   includes `*.pages.dev` and preview-branch URLs.
+   includes `*.pages.dev` and preview-branch URLs; the one exception is the hosted
+   preview's own host, on preview deployments only ([Deploy → Preview (dev)](#preview-dev)).
 2. The auth gate then needs a valid session cookie belonging to an email on
    `ALLOWED_EMAILS`:
    - With no valid session, `/api/*` returns **401 JSON**
