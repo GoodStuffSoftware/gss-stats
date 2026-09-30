@@ -90,13 +90,13 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   regression from this app's own code. Resizing a chart currently needs a mouse or touch;
   every other chart action (edit, remove, zoom, duplicate, set-as-default) has a real
   button and works from the keyboard.
-- **The main filter bar is always visible**, in normal flow directly under the page
-  tabs (range, sites, exclusions, sync-across-pages). If it scrolls out of view, a
+- **The main filter bar is always visible**, in normal flow directly under the header
+  (range, sites, exclusions, sync-across-pages). If it scrolls out of view, a
   small "show filters" button appears top-right — see the IntersectionObserver on
   `barSectionEl` in [`src/App.vue`](src/App.vue) — and pins the same bar at the top of
   the viewport until you dismiss it (the button again, Escape, or clicking outside) or
-  scroll back to where the in-flow bar is visible. Page tabs stay always visible above
-  it either way. Hidden only on the campaign page, whose widgets aren't filter-driven.
+  scroll back to where the in-flow bar is visible. Hidden only on the campaign page
+  (`isCampaignComparePage`, by id), whose widgets aren't filter-driven.
   The button stays keyboard-reachable at all times (never `tabindex="-1"`, revealed on
   real keyboard focus even while visually hidden); activating it while the in-flow bar
   is already on screen just moves focus to the bar's first control.
@@ -116,7 +116,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   list them).
 - **Durable, multi-page dashboards** — layout + chart definitions persist in KV (not
   `localStorage`), so they follow you across devices. Duplicate / rename / delete
-  pages; a protected default page with "restore default charts"; per-page filters and
+  pages (see *Page navigation*); a protected default page with "restore default charts"; per-page filters and
   per-chart filter overrides. A saved layout is migrated forward on load
   ([`src/lib/defaults.ts`](src/lib/defaults.ts) `normalizeConfig`, `CONFIG_VERSION`), and the
   first save of a newer version first copies the previous stored layout to
@@ -153,6 +153,23 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
     every page in every group: page names first, then pages matched only by a chart title, each
     with its icon and group badge. <kbd>↑</kbd> <kbd>↓</kbd> move, <kbd>↵</kbd> opens,
     <kbd>esc</kbd> closes ([`src/lib/nav.ts`](src/lib/nav.ts) `searchPages`).
+  - **Drawer** ([`src/components/nav/NavDrawer.vue`](src/components/nav/NavDrawer.vue)) — the
+    ☰ button (it carries the current group's badge, ★ on ★ Overview) opens the whole page tree
+    as an overlay over the charts, on every screen size: ★ Overview, then each group
+    (collapsible — remembered per viewer — with its badge and page count), pages with their
+    icons, drill pages indented under their page with × to delete them, a ⋯ page menu on every
+    page, and "New page" (a copy of the page on screen, in its group). Esc, the scrim or
+    picking a page closes it; focus stays inside while it's open and returns to ☰.
+  - **Page menu** ([`src/components/nav/PageMenu.vue`](src/components/nav/PageMenu.vue)) — ⋯
+    next to the breadcrumb (the page on screen) or on a drawer row: Rename, Duplicate (same
+    group and icon; a copy of a drill page stays under the same page), Change icon…, Move to
+    group (the groups in use, or "New group…"; the page's drill pages move with it), Restore
+    default charts, Delete. ★ Overview can't be moved or deleted, a drill page follows its
+    page's group, and **deleting a page deletes its drill pages too**, asked once ("Delete
+    "Traffic" and its 3 drill pages?").
+  - **Icon picker** ([`src/components/nav/IconPicker.vue`](src/components/nav/IconPicker.vue))
+    — search the ~40 curated icons (Traffic, Engagement, Money, Product, Geography), or pick
+    **Auto**, which shows what the page would resolve to on its own.
 - **Page icons and group badges** ([`src/lib/icons.ts`](src/lib/icons.ts)) — every page shows an
   icon without anyone setting one. The config stores at most a short registry key
   (`DashboardPage.icon`, e.g. `megaphone`), never markup; the registry maps ~40 curated keys to

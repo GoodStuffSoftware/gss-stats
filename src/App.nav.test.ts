@@ -203,3 +203,216 @@ describe('App — / search', () => {
     field.remove()
   })
 })
+
+describe('App — page drawer, page menu, icon picker', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    vi.mocked(saveConfig).mockClear()
+    vi.mocked(loadConfig).mockImplementation(async () => storedV12())
+  })
+  const drawer = () => document.getElementById('nav-drawer')
+  const drawerRows = () => Array.from(drawer()?.querySelectorAll<HTMLElement>('.dr-page') ?? [])
+  const rowName = (r: HTMLElement) => r.querySelector('.nm')!.textContent!.trim()
+  const drawerRow = (name: string) => drawerRows().find((b) => rowName(b) === name)!
+  const menuItem = (label: string) =>
+    Array.from(document.querySelectorAll<HTMLElement>('#page-menu [role="menuitem"], #page-menu [role="menuitemradio"]')).find((b) => (b.querySelector('.nm') ?? b).textContent!.trim() === label)
+  const lastSave = async () => {
+    await new Promise((r) => setTimeout(r, 800))
+    await flushPromises()
+    return vi.mocked(saveConfig).mock.calls.at(-1)?.[0]
+  }
+  async function openDrawer(w: VueWrapper) {
+    await w.find('.drawer-btn').trigger('click')
+    await flushPromises()
+  }
+  async function openRowMenu(name: string) {
+    const more = drawerRow(name).parentElement!.querySelector<HTMLElement>('.dr-more')!
+    more.click()
+    await flushPromises()
+    return more
+  }
+
+  it('☰ opens the whole tree: ★ Overview, groups with badges and counts, drill pages under their page', async () => {
+    const w = await mountApp('d-reddit')
+    expect(w.find('.drawer-btn').attributes('aria-label')).toBe('Open pages (Best Sudoku)')
+    await openDrawer(w)
+    expect(drawer()!.getAttribute('role')).toBe('dialog')
+    expect(w.find('.drawer-btn').attributes('aria-expanded')).toBe('true')
+    const groups = Array.from(drawer()!.querySelectorAll('.dr-gbtn')).map((g) => ['.group-badge', '.nm', '.cnt'].map((c) => g.querySelector(c)!.textContent!.trim()))
+    expect(groups).toEqual([
+      ['AS', 'All sites', '1'],
+      ['BS', 'Best Sudoku', '4'],
+      ['MI', 'Mine', '4'],
+    ])
+    expect(drawerRows().map((r) => [rowName(r), r.classList.contains('kid')])).toEqual([
+      ['Overview', false],
+      ['Beacon', false],
+      ['Overview', false],
+      ['Campaigns', false],
+      ['Pop-ups', false],
+      ['Traffic', false],
+      ['mobile', true],
+      ['reddit.com', true],
+      ['mobile › California', true],
+      ['goodstuffsoftware.com', false],
+      ['/products/best-sudoku-beta/', false],
+      ['Copy of Best Sudoku launch', false],
+      ['4 sites · New', false],
+    ])
+    // focus lands on the page on screen
+    expect(document.activeElement).toBe(drawerRow('reddit.com'))
+  })
+
+  it('Esc or the scrim closes it and focus returns to ☰; picking a page closes it and goes there', async () => {
+    const w = await mountApp()
+    await openDrawer(w)
+    await key(document.activeElement!, 'Escape')
+    expect(drawer()).toBeNull()
+    expect(document.activeElement).toBe(w.find('.drawer-btn').element)
+    await openDrawer(w)
+    ;(document.querySelector('.dr-scrim') as HTMLElement).click()
+    await flushPromises()
+    expect(drawer()).toBeNull()
+    await openDrawer(w)
+    drawerRow('Campaigns').click()
+    await flushPromises()
+    expect(drawer()).toBeNull()
+    expect(shownPage(w)).toBe('Campaigns')
+    // the filter bar stays hidden on Campaigns (found by id)
+    expect(w.find('.filterbar-inflow').exists()).toBe(false)
+  })
+
+  it('Tab stays inside the drawer', async () => {
+    const w = await mountApp()
+    await openDrawer(w)
+    const focusables = Array.from(drawer()!.querySelectorAll<HTMLElement>('button'))
+    focusables.at(-1)!.focus()
+    await key(document.activeElement!, 'Tab')
+    expect(document.activeElement).toBe(focusables[0])
+  })
+
+  it('a group collapses (remembered in this browser); the group of the page on screen stays open', async () => {
+    const w = await mountApp('bsk-launch')
+    await openDrawer(w)
+    const mine = Array.from(drawer()!.querySelectorAll<HTMLElement>('.dr-gbtn')).find((g) => g.textContent!.includes('Mine'))!
+    mine.click()
+    await flushPromises()
+    expect(mine.getAttribute('aria-expanded')).toBe('false')
+    expect(drawerRows().some((r) => rowName(r) === 'goodstuffsoftware.com')).toBe(false)
+    expect(JSON.parse(localStorage.getItem(VIEWER_PREFS_KEY)!).collapsed).toEqual(['Mine'])
+    const bs = Array.from(drawer()!.querySelectorAll<HTMLElement>('.dr-gbtn')).find((g) => g.textContent!.includes('Best Sudoku'))!
+    bs.click()
+    await flushPromises()
+    expect(bs.getAttribute('aria-expanded')).toBe('true') // Traffic is on screen
+  })
+
+  it("page ⋯ menu: ★ Overview can't be moved or deleted; a page with drill pages says how many go with it", async () => {
+    const w = await mountApp()
+    await openDrawer(w)
+    await openRowMenu('Overview')
+    expect(Array.from(document.querySelectorAll('#page-menu [role="menuitem"]')).map((b) => b.textContent!.trim())).toEqual(['Rename', 'Duplicate', 'Change icon…', 'Restore default charts'])
+    await key(document.activeElement!, 'Escape')
+    await openRowMenu('Traffic')
+    expect(Array.from(document.querySelectorAll('#page-menu [role="menuitem"]')).map((b) => b.textContent!.trim())).toEqual([
+      'Rename',
+      'Duplicate',
+      'Change icon…',
+      'Move to group',
+      'Restore default charts',
+      'Delete (+3 drill pages)',
+    ])
+  })
+
+  it('delete asks once and removes the page with its drill pages; the viewer lands back on ★ Overview', async () => {
+    const w = await mountApp('d-mobile')
+    const confirm = vi.fn(() => true)
+    vi.stubGlobal('confirm', confirm)
+    await openDrawer(w)
+    await openRowMenu('Traffic')
+    menuItem('Delete (+3 drill pages)')!.click()
+    await flushPromises()
+    vi.unstubAllGlobals()
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(confirm.mock.calls[0]).toEqual(['Delete "Traffic" and its 3 drill pages? This can\'t be undone.'])
+    const saved = (await lastSave())!
+    expect(saved.pages.filter((p) => ['bsk-launch', 'd-mobile', 'd-reddit', 'd-mobile-ca'].includes(p.id))).toEqual([])
+    expect(saved.pages).toHaveLength(9)
+    expect(segTexts(w)).toEqual(['Overview'])
+  })
+
+  it('declining the confirm deletes nothing; × on a drill row deletes just that drill page', async () => {
+    const w = await mountApp('bsk-launch')
+    vi.stubGlobal('confirm', vi.fn(() => false))
+    await openDrawer(w)
+    await openRowMenu('Traffic')
+    menuItem('Delete (+3 drill pages)')!.click()
+    await flushPromises()
+    vi.stubGlobal('confirm', vi.fn(() => true))
+    drawerRow('reddit.com').parentElement!.querySelector<HTMLElement>('.dr-x')!.click()
+    await flushPromises()
+    vi.unstubAllGlobals()
+    const saved = (await lastSave())!
+    expect(saved.pages.filter((p) => p.parentId === 'bsk-launch').map((p) => p.id)).toEqual(['d-mobile', 'd-mobile-ca'])
+    expect(saved.pages.some((p) => p.id === 'bsk-launch')).toBe(true)
+  })
+
+  it('Move to group moves the page with its drill pages; New group… makes a group', async () => {
+    const w = await mountApp()
+    await openDrawer(w)
+    await openRowMenu('Traffic')
+    menuItem('Move to group')!.click()
+    await flushPromises()
+    expect(document.activeElement?.textContent?.trim()).toContain('Best Sudoku') // the current group, checked
+    menuItem('Mine')!.click()
+    await flushPromises()
+    let saved = (await lastSave())!
+    expect(saved.pages.slice(-4).map((p) => [p.id, p.group])).toEqual([
+      ['bsk-launch', 'Mine'],
+      ['d-mobile', 'Mine'],
+      ['d-reddit', 'Mine'],
+      ['d-mobile-ca', 'Mine'],
+    ])
+    await openRowMenu('Beacon')
+    menuItem('Move to group')!.click()
+    await flushPromises()
+    vi.stubGlobal('prompt', vi.fn(() => '  Star   Rupture '))
+    menuItem('New group…')!.click()
+    await flushPromises()
+    vi.unstubAllGlobals()
+    saved = (await lastSave())!
+    expect(saved.pages.at(-1)).toMatchObject({ id: 'beacon', group: 'Star Rupture' })
+    expect(Array.from(drawer()!.querySelectorAll('.dr-gbtn .nm')).map((g) => g.textContent!.trim()).at(-1)).toBe('Star Rupture')
+  })
+
+  it('Change icon… picks an icon or goes back to Auto; Esc cancels and returns focus', async () => {
+    const w = await mountApp('bsk-launch')
+    const picker = () => document.querySelector<HTMLElement>('[role="dialog"][aria-label="Icon for Traffic"]')
+    await w.find('.page-menu-btn').trigger('click')
+    menuItem('Change icon…')!.click()
+    await flushPromises()
+    expect(picker()).not.toBeNull()
+    expect(picker()!.textContent).toContain('Would resolve to map pin, from geo charts')
+    expect(picker()!.querySelector('.ip-icon[aria-pressed="true"]')!.getAttribute('aria-label')).toBe('Traffic line')
+    ;(picker()!.querySelector('[aria-label="Launch"]') as HTMLElement).click()
+    await flushPromises()
+    expect(picker()).toBeNull()
+    let saved = (await lastSave())!
+    expect(saved.pages.find((p) => p.id === 'bsk-launch')!.icon).toBe('rocket')
+
+    await w.find('.page-menu-btn').trigger('click')
+    menuItem('Change icon…')!.click()
+    await flushPromises()
+    ;(picker()!.querySelector('.ip-auto') as HTMLElement).click()
+    await flushPromises()
+    saved = (await lastSave())!
+    expect('icon' in saved.pages.find((p) => p.id === 'bsk-launch')!).toBe(false)
+
+    await w.find('.page-menu-btn').trigger('click')
+    menuItem('Change icon…')!.click()
+    await flushPromises()
+    await key(document.activeElement!, 'Escape')
+    await flushPromises()
+    expect(picker()).toBeNull()
+    expect(document.activeElement).toBe(w.find('.page-menu-btn').element)
+  })
+})
