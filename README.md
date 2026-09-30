@@ -43,7 +43,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
 
 ## Features
 
-- **"Best Sudoku · Overview"** — the landing page: today-at-a-glance KPI tiles (vs the same
+- **Best Sudoku / Overview** — the Best Sudoku group's first page: today-at-a-glance KPI tiles (vs the same
   time yesterday and the 7-day average), the **Overall timeline**, a campaign scorecard, and a
   release before/after panel — each its own movable/editable widget. The KPI tiles and the
   scorecard are **metric cards** (presets `bsk-kpis` and `campaign-scorecard`, see *One metrics
@@ -59,7 +59,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   `date` dimension is a UTC day.
   [`src/lib/releases.ts`](src/lib/releases.ts) holds the hand-entered release dates (`hits` has
   no app-version column; major releases get a labelled line, minor ones a short tick).
-  "Best Sudoku · Campaigns" (its funnel, country, cost and return-visits panels are metric
+  Best Sudoku / Campaigns (its funnel, country, cost and return-visits panels are metric
   cards, presets `campaign-funnel`, `campaign-country` — a table with the funnel steps as rows
   and US / CA / Other as columns, each cell a campaign metric with the registry's optional
   `country` param — `campaign-cost` and `campaign-returns` — d0 and each return window's rate,
@@ -74,10 +74,8 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   bespoke panel left: the former panel bodies and their endpoints (`/api/campaigns`,
   `/api/overview`) are retired, and a saved layout's panels are swapped in place on load — see
   [`src/lib/defaults.ts`](src/lib/defaults.ts) `migratePanelsV11`)
-  and "Best Sudoku · Traffic" (per-site/geo/referrer/device detail beyond what Overview and
-  Campaigns cover) round out the Best Sudoku tab group, which is kept together and in that
-  order — after your own tabs — by a non-destructive reorder on load (see
-  [`src/lib/defaults.ts`](src/lib/defaults.ts)'s `reorderBskGroup`).
+  and Best Sudoku / Traffic (per-site/geo/referrer/device detail beyond what Overview and
+  Campaigns cover) round out the Best Sudoku group, in that order (see *Page navigation* below).
 - **Movable / composable charts** — drag the header, resize from the corner; add /
   edit / duplicate / delete charts of any type: stat, bar, horizontal bar, stacked
   bar, **breakdown bar** (one dimension on the axis × another as the series, grouped or
@@ -92,13 +90,16 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   regression from this app's own code. Resizing a chart currently needs a mouse or touch;
   every other chart action (edit, remove, zoom, duplicate, set-as-default) has a real
   button and works from the keyboard.
-- **The main filter bar is always visible**, in normal flow directly under the page
-  tabs (range, sites, exclusions, sync-across-pages). If it scrolls out of view, a
+- **Full width** — there's no centred max-width column: the header (a strip across the window),
+  the filter bar and the chart grid span the window with a 16px gutter (12px on a phone), so a
+  wide screen shows wider charts, and the pinned filter bar (below) spans it too.
+- **The main filter bar is always visible**, in normal flow directly under the header
+  (range, sites, exclusions, sync-across-pages). If it scrolls out of view, a
   small "show filters" button appears top-right — see the IntersectionObserver on
   `barSectionEl` in [`src/App.vue`](src/App.vue) — and pins the same bar at the top of
   the viewport until you dismiss it (the button again, Escape, or clicking outside) or
-  scroll back to where the in-flow bar is visible. Page tabs stay always visible above
-  it either way. Hidden only on the campaign page, whose widgets aren't filter-driven.
+  scroll back to where the in-flow bar is visible. Hidden only on the campaign page
+  (`isCampaignComparePage`, by id), whose widgets aren't filter-driven.
   The button stays keyboard-reachable at all times (never `tabindex="-1"`, revealed on
   real keyboard focus even while visually hidden); activating it while the in-flow bar
   is already on screen just moves focus to the bar's first control.
@@ -118,19 +119,85 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   list them).
 - **Durable, multi-page dashboards** — layout + chart definitions persist in KV (not
   `localStorage`), so they follow you across devices. Duplicate / rename / delete
-  pages; a protected default page with "restore default charts"; per-page filters and
+  pages (see *Page navigation*); a protected default page with "restore default charts"; per-page filters and
   per-chart filter overrides. A saved layout is migrated forward on load
   ([`src/lib/defaults.ts`](src/lib/defaults.ts) `normalizeConfig`, `CONFIG_VERSION`), and the
   first save of a newer version first copies the previous stored layout to
   `dashboard:default:backup:v<old version>` in KV ([`functions/api/config.ts`](functions/api/config.ts)),
   once, so a migration can be rolled back by copying that key over `dashboard:default`.
+- **Page navigation** — every page belongs to a **group** (`DashboardPage.group`, a plain
+  string: "All sites", "Best Sudoku", "Mine", …, so a new product is just a new group). The
+  default page, **★ Overview** (all-sites traffic), is shown pinned first, outside the groups,
+  and can't be deleted. Order is data: groups appear in the order they first occur in the saved
+  page list and pages keep their saved order within a group — nothing is re-sorted on load.
+  Built-in pages are recognised **by id only** ([`src/lib/defaults.ts`](src/lib/defaults.ts)
+  `isOverviewPage`, `isCampaignComparePage`, …), so renaming a page never changes how it
+  behaves. The page each viewer is on (and the page they last viewed in each group) is
+  remembered **in their own browser** ([`src/lib/viewerPrefs.ts`](src/lib/viewerPrefs.ts)), not
+  in the shared KV config: switching pages never saves anything or moves anyone else, and a
+  first-time viewer lands on ★ Overview (the config's `activePageId`). Layout version 12
+  (`migrateNavV12`) filed the existing pages: the built-ins by id, the Best Sudoku pages renamed
+  Overview, Campaigns, Pop-ups and Traffic (their group shows "Best Sudoku"), and every other
+  page under the group its name starts with, else **Mine**. Drill pages made before version 12
+  can't be linked to the page they came from (nothing stored it), so they stay ordinary pages
+  under Mine.
+  - **Breadcrumb** ([`src/components/nav/NavBreadcrumb.vue`](src/components/nav/NavBreadcrumb.vue))
+    — `Group / Page / Drill` in the header, the everyday way to move around. Each segment opens
+    a menu of its siblings: the group segment lists ★ Overview and every group (picking a group
+    opens the page you last viewed in it, else its first page), the page segment lists the
+    group's pages plus "New page in <group>" (a copy of the page on screen, in that group), and
+    the drill segment lists the other drill pages of the same page plus the way back to it. On
+    ★ Overview the group segment is ★ Overview itself. At phone width it collapses to
+    `Group / Page` (the page on screen; drill pages listed under their page) and the menus open
+    as a bottom sheet. Menus are keyboard-operable (arrows, Home/End, Esc/Tab return focus to
+    the segment).
+  - **Search** ([`src/components/nav/SearchPalette.vue`](src/components/nav/SearchPalette.vue))
+    — press <kbd>/</kbd> anywhere you're not typing (or the header's search button) to search
+    every page in every group: page names first, then pages matched only by a chart title, each
+    with its icon and group badge. <kbd>↑</kbd> <kbd>↓</kbd> move, <kbd>↵</kbd> opens,
+    <kbd>esc</kbd> closes ([`src/lib/nav.ts`](src/lib/nav.ts) `searchPages`).
+  - **Drawer** ([`src/components/nav/NavDrawer.vue`](src/components/nav/NavDrawer.vue)) — the
+    ☰ button (it carries the current group's badge, ★ on ★ Overview) opens the whole page tree
+    as an overlay over the charts, on every screen size: ★ Overview, then each group
+    (collapsible — remembered per viewer — with its badge and page count), pages with their
+    icons, drill pages indented under their page with × to delete them, a ⋯ page menu on every
+    page, and "New page" (a copy of the page on screen, in its group). Esc, the scrim or
+    picking a page closes it; focus stays inside while it's open and returns to ☰.
+  - **Page menu** ([`src/components/nav/PageMenu.vue`](src/components/nav/PageMenu.vue)) — ⋯
+    next to the breadcrumb (the page on screen) or on a drawer row: Rename, Duplicate (same
+    group and icon; a copy of a drill page stays under the same page), Change icon…, Move to
+    group (the groups in use, or "New group…"; the page's drill pages move with it), Restore
+    default charts, Delete. ★ Overview can't be moved or deleted, a drill page follows its
+    page's group, and **deleting a page deletes its drill pages too**, asked once ("Delete
+    "Traffic" and its 3 drill pages?").
+  - **Icon picker** ([`src/components/nav/IconPicker.vue`](src/components/nav/IconPicker.vue))
+    — search the ~40 curated icons (Traffic, Engagement, Money, Product, Geography), or pick
+    **Auto**, which shows what the page would resolve to on its own.
+- **Page icons and group badges** ([`src/lib/icons.ts`](src/lib/icons.ts)) — every page shows an
+  icon without anyone setting one. The config stores at most a short registry key
+  (`DashboardPage.icon`, e.g. `megaphone`), never markup; the registry maps ~40 curated keys to
+  [Lucide](https://lucide.dev) icons (`lucide-vue-next`, named imports, so only those ship), and
+  an unknown key shows the generic page icon. `resolveIcon`, first match wins: the icon someone
+  picked; for a drill page, its root page's icon with a small drill mark; the icon of the dataset
+  most of the page's charts read (notes don't count, a chart with no dataset is `rum`, a tie goes
+  to the first chart in layout order: rum → trending-up, geo → map-pin, popup → app-window,
+  campaigns → megaphone, completions → trophy, ads-readings → tag, overview → layout-grid); else
+  the generic page icon. Traffic carries the one explicit built-in icon (`trending-up`), since
+  its beacon charts would otherwise show Beacon's map pin. Each group gets a lettered badge (the
+  first letters of its first two words, or a one-word name's first two letters) in one of seven
+  colours hashed from its name (FNV-1a), each with a light and a dark value; the config's
+  optional `groupMeta[group]` pins a colour (a slot `g0`…`g6` or a hex colour) or a logo image
+  (an https URL, a same-origin path or a base64 image), validated on load.
 - **Auto-built site filter** — a single multi-select of your sites and subdomains,
   built live from the data. It merges each site's RUM host and beacon tag into one
   entry, groups subdomains under their site, folds **alias hosts** (an HTTP redirect
   or a `rel="canonical"` pointing elsewhere) into their canonical site, and excludes
   dev/preview hosts from both the picker and the numbers.
 - **Click-to-drill-down** — click any chart value to open a new page filtered to it
-  (device, referrer, location, browser, …), titled by the value; drill-downs stack.
+  (device, referrer, location, browser, …). The drill page is created at once, nested under the
+  page it came from (`DashboardPage.parentId`, in that page's group), and named by its trail,
+  e.g. "mobile › California" ([`src/lib/nav.ts`](src/lib/nav.ts) `drillTrail`); drilling again
+  from a drill page stacks the filters and nests under the same page.
 - **Exclusions** (global across pages) — hide self-referrals, hide your own visits by
   browser+OS, and an **"exclude this device"** opt-out that works on every site (see
   [gss-beacon](https://github.com/GoodStuffSoftware/gss-beacon)).

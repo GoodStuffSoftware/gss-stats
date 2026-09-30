@@ -4,7 +4,6 @@ import {
   swapPanelChart,
   defaultConfig,
   normalizeConfig,
-  reorderBskGroup,
   defaultOverviewWidgets,
   defaultCampaignsWidgets,
   defaultBestSudokuPopupsWidgets,
@@ -30,84 +29,12 @@ function widget(over: Partial<Widget> & { id: string }): Widget {
   return { i: over.id, title: 'x', type: 'bar', dimension: '', metric: 'pageviews', limit: 10, x: 0, y: 0, w: 6, h: 6, ...over }
 }
 function page(over: Partial<DashboardPage> & { id: string; name: string }): DashboardPage {
-  return { isDefault: false, filters: { siteSel: [], since: '2026-01-01', until: '2026-01-02', excludeSelfReferrals: false, excludeOwnVisits: false, ownBrowser: '', ownOS: '' }, widgets: [], ...over }
+  return { isDefault: false, group: 'Mine', filters: { siteSel: [], since: '2026-01-01', until: '2026-01-02', excludeSelfReferrals: false, excludeOwnVisits: false, ownBrowser: '', ownOS: '' }, widgets: [], ...over }
 }
 
-describe('reorderBskGroup', () => {
-  it('puts GSS pages first, then the BSK group in fixed order, then user pages in their relative order', () => {
-    const pages = [
-      page({ id: 'user-2', name: 'My custom page' }),
-      page({ id: 'bsk-launch', name: 'Best Sudoku launch' }),
-      page({ id: 'default', name: 'Overview', isDefault: true }),
-      page({ id: 'user-1', name: 'Another custom page' }),
-      page({ id: 'bsk-popups', name: 'Best Sudoku pop-ups' }),
-      page({ id: 'beacon', name: 'Beacon' }),
-      page({ id: 'bsk-overview', name: 'Best Sudoku overview' }),
-      page({ id: 'bsk-campaigns', name: 'Best Sudoku campaigns' }),
-    ]
-    const out = reorderBskGroup(pages)
-    expect(out.map((p) => p.id)).toEqual([
-      'default',
-      'beacon',
-      'bsk-overview',
-      'bsk-campaigns',
-      'bsk-popups',
-      'bsk-launch',
-      'user-2', // user pages keep their ORIGINAL relative order (user-2 was before user-1)
-      'user-1',
-    ])
-  })
-
-  it('renames the BSK group to the consistent "Best Sudoku · X" names, from their known old default names', () => {
-    const pages = [
-      page({ id: 'bsk-overview', name: 'Best Sudoku overview' }),
-      page({ id: 'bsk-campaigns', name: 'Best Sudoku campaigns' }),
-      page({ id: 'bsk-popups', name: 'Best Sudoku pop-ups' }),
-      page({ id: 'bsk-launch', name: 'Best Sudoku launch' }),
-    ]
-    const out = reorderBskGroup(pages)
-    expect(out.map((p) => p.name)).toEqual(['Best Sudoku · Overview', 'Best Sudoku · Campaigns', 'Best Sudoku · Pop-ups', 'Best Sudoku · Traffic'])
-  })
-
-  it('never renames a BSK page the user renamed to something else entirely', () => {
-    const pages = [page({ id: 'bsk-overview', name: "Mike's dashboard" })]
-    const out = reorderBskGroup(pages)
-    expect(out[0].name).toBe("Mike's dashboard") // untouched — not one of the known old default names
-  })
-
-  it('is non-destructive: never drops a page or touches its widgets', () => {
-    const w1 = widget({ id: 'w1', isDefault: true })
-    const pages = [page({ id: 'bsk-overview', name: 'x', widgets: [w1] }), page({ id: 'user-1', name: 'Mine', widgets: [] })]
-    const out = reorderBskGroup(pages)
-    expect(out).toHaveLength(2)
-    expect(out.find((p) => p.id === 'bsk-overview')!.widgets).toEqual([w1])
-  })
-
-  it('is idempotent: running it twice produces the identical order/names as running it once', () => {
-    const pages = [
-      page({ id: 'user-1', name: 'Mine' }),
-      page({ id: 'bsk-launch', name: 'Best Sudoku launch' }),
-      page({ id: 'default', name: 'Overview', isDefault: true }),
-    ]
-    const once = reorderBskGroup(pages)
-    const twice = reorderBskGroup(once)
-    expect(twice.map((p) => [p.id, p.name])).toEqual(once.map((p) => [p.id, p.name]))
-  })
-
-  it('is a no-op (same array reference) on an already-correctly-ordered, already-named config', () => {
-    const pages = [
-      page({ id: 'default', name: 'Overview', isDefault: true }),
-      page({ id: 'beacon', name: 'Beacon' }),
-      page({ id: 'bsk-overview', name: 'Best Sudoku · Overview' }),
-      page({ id: 'bsk-campaigns', name: 'Best Sudoku · Campaigns' }),
-      page({ id: 'bsk-popups', name: 'Best Sudoku · Pop-ups' }),
-      page({ id: 'bsk-launch', name: 'Best Sudoku · Traffic' }),
-      page({ id: 'user-1', name: 'Mine' }),
-    ]
-    const out = reorderBskGroup(pages)
-    expect(out).toBe(pages) // same array reference — nothing moved or renamed
-  })
-})
+// (The v11 reorderBskGroup, which re-sorted the tabs on every load, retired with layout version
+// 12: it runs once as part of the v12 migration and the order is data after that. Its cases, and
+// the v12 renames that replaced its renames, are in defaults.v12.test.ts.)
 
 describe('normalizeConfig — v7 bespoke → widget migration', () => {
   it('populates default widgets on a v6 config whose Overview/Campaigns pages are still empty (the pre-migration bespoke shape)', () => {
@@ -251,7 +178,7 @@ describe('normalizeConfig — v8 completions-widget migration', () => {
 })
 
 describe('normalizeConfig — fixtures', () => {
-  it('a fresh default config: GSS first, BSK group in order, all BSK-named consistently', () => {
+  it('a fresh default config: GSS first, BSK group in order, the built-ins found by id', () => {
     const norm = normalizeConfig(defaultConfig())
     const bskIds = ['bsk-overview', 'bsk-campaigns', 'bsk-popups', 'bsk-launch']
     const order = norm.pages.map((p) => p.id)
@@ -264,10 +191,10 @@ describe('normalizeConfig — fixtures', () => {
     expect(isBestSudokuLaunchPage(norm.pages.find((p) => p.id === 'bsk-launch')!)).toBe(true)
   })
 
-  it('a customised config: BSK pages scattered + renamed + user pages + pre-populated widgets — reordered without loss', () => {
+  it('a customised v11 config: BSK pages scattered + renamed + user pages + pre-populated widgets — put in the v11 tab order once, without loss', () => {
     const pinnedWidget = widget({ id: 'pinned-1', title: 'Pinned', dataset: 'campaigns', view: 'funnel', isDefault: true })
     const raw: DashboardConfig = {
-      version: CONFIG_VERSION,
+      version: 11,
       activePageId: 'bsk-campaigns',
       pages: [
         page({ id: 'user-a', name: 'Team A dashboard' }),
@@ -285,8 +212,11 @@ describe('normalizeConfig — fixtures', () => {
     // the user's pinned widget on Campaigns survives (not replaced by the factory set), its only
     // change the card the v11 migration gives every former bespoke panel
     expect(norm.pages.find((p) => p.id === 'bsk-campaigns')!.widgets).toEqual([withCardForView(pinnedWidget)])
-    // activePageId is preserved through the reorder
-    expect(norm.activePageId).toBe('bsk-campaigns')
+    // the landing page becomes ★ Overview (v12: each viewer's own page lives in their browser)
+    expect(norm.activePageId).toBe('default')
+    // and from v12 on the order is data: a later load never re-sorts it
+    const moved = { ...norm, pages: [norm.pages[3], ...norm.pages.filter((_, i) => i !== 3)] }
+    expect(normalizeConfig(JSON.parse(JSON.stringify(moved))).pages.map((p) => p.id)).toEqual(moved.pages.map((p) => p.id))
   })
 
   it('an already-ordered config round-trips with the same order and widget contents', () => {
