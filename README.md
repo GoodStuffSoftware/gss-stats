@@ -138,6 +138,21 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   page under the group its name starts with, else **Mine**. Drill pages made before version 12
   can't be linked to the page they came from (nothing stored it), so they stay ordinary pages
   under Mine.
+- **Page icons and group badges** ([`src/lib/icons.ts`](src/lib/icons.ts)) — every page shows an
+  icon without anyone setting one. The config stores at most a short registry key
+  (`DashboardPage.icon`, e.g. `megaphone`), never markup; the registry maps ~40 curated keys to
+  [Lucide](https://lucide.dev) icons (`lucide-vue-next`, named imports, so only those ship), and
+  an unknown key shows the generic page icon. `resolveIcon`, first match wins: the icon someone
+  picked; for a drill page, its root page's icon with a small drill mark; the icon of the dataset
+  most of the page's charts read (notes don't count, a chart with no dataset is `rum`, a tie goes
+  to the first chart in layout order: rum → trending-up, geo → map-pin, popup → app-window,
+  campaigns → megaphone, completions → trophy, ads-readings → tag, overview → layout-grid); else
+  the generic page icon. Traffic carries the one explicit built-in icon (`trending-up`), since
+  its beacon charts would otherwise show Beacon's map pin. Each group gets a lettered badge (the
+  first letters of its first two words, or a one-word name's first two letters) in one of seven
+  colours hashed from its name (FNV-1a), each with a light and a dark value; the config's
+  optional `groupMeta[group]` pins a colour (a slot `g0`…`g6` or a hex colour) or a logo image
+  (an https URL, a same-origin path or a base64 image), validated on load.
 - **Auto-built site filter** — a single multi-select of your sites and subdomains,
   built live from the data. It merges each site's RUM host and beacon tag into one
   entry, groups subdomains under their site, folds **alias hosts** (an HTTP redirect

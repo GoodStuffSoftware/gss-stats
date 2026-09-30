@@ -22,6 +22,9 @@ All notable changes to **gss-stats** are documented here. The format follows
   pages drop their "Best Sudoku · " prefix (Overview, Campaigns, Pop-ups, Traffic). Drill pages
   made before this can't be traced to the page they came from, so they stay ordinary pages under
   Mine.
+- **Every page has an icon.** It comes from what the page's charts show (traffic, map, pop-ups,
+  campaigns, completions, ads, overview) unless someone picks one; a drill page shows the icon of
+  the page it came from with a small drill mark, and Traffic gets its own traffic-line icon.
 - **Drill pages nest under the page they came from.** A drill opens its page straight away, in the
   same group, named by its trail (for example "mobile › California"); a drill from a drill page
   nests under the same page.
