@@ -1,21 +1,24 @@
 <script setup lang="ts">
 import { reactive, ref, watch, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import type { DashboardConfig, DashboardPage, Widget, GlobalFilters } from './types'
-import { defaultConfig, normalizeConfig, defaultWidgetsForPage, clonePage, cryptoId, isBestSudokuLaunchPage, isBestSudokuPopupsPage, isCampaignComparePage, BEST_SUDOKU_SITES, beaconizeWidget } from './lib/defaults'
+import { defaultConfig, normalizeConfig, defaultWidgetsForPage, clonePage, cryptoId, isBestSudokuLaunchPage, isBestSudokuPopupsPage, isCampaignComparePage, BEST_SUDOKU_SITES, beaconizeWidget, cleanGroupName } from './lib/defaults'
 import { rangeLabel, ymdRangeToISO } from './lib/range'
 import { loadConfig, saveConfig } from './api'
 import { loadSites, sitesTree, tokenLabel } from './sitesStore'
 import { isSiteDim, semanticKey, drillNeedsEventBeacons } from './lib/drill'
 import { sessionExpired, reauth } from './session'
 import { readViewerPrefs, writeViewerPrefs, initialPageId } from './lib/viewerPrefs'
-import { rootOf, drillTrail, groupLandingPage } from './lib/nav'
-import { SearchIcon } from './lib/icons'
+import { rootOf, drillTrail, groupLandingPage, pagesToDelete, movePageToGroup } from './lib/nav'
+import { SearchIcon, MenuIcon, EllipsisIcon, StarIcon, type IconKey } from './lib/icons'
 import NavBreadcrumb from './components/nav/NavBreadcrumb.vue'
 import SearchPalette from './components/nav/SearchPalette.vue'
+import NavDrawer from './components/nav/NavDrawer.vue'
+import PageMenu from './components/nav/PageMenu.vue'
+import IconPicker from './components/nav/IconPicker.vue'
+import GroupBadge from './components/nav/GroupBadge.vue'
 import { isTouchDevice } from './lib/responsive'
 import { TRACKING_ACTIVATION_DATE_ET } from './lib/popupEvents'
 import NoteBlock from './components/NoteBlock.vue'
-import PageBar from './components/PageBar.vue'
 import FilterBar from './components/FilterBar.vue'
 import Dashboard from './components/Dashboard.vue'
 import ChartEditor from './components/ChartEditor.vue'
@@ -147,6 +150,63 @@ function switchGroup(group: string) {
   if (target) switchPage(target.id)
 }
 
+// + Page: a new ROOT page, a copy of the active one, in its group with its icon (clonePage).
+function addPage(group?: string) {
+  const src = activePage.value
+  const clone = clonePage(src, 'Copy of ' + src.name)
+  delete clone.parentId
+  clone.group = group ?? rootOf(src, config.pages).group
+  config.pages.push(clone)
+  switchPage(clone.id)
+}
+// Duplicate: a copy of that page — same group and icon, and a copy of a drill page stays a drill
+// page of the same root.
+function duplicatePage(id: string) {
+  const src = config.pages.find((p) => p.id === id) ?? activePage.value
+  const clone = clonePage(src, 'Copy of ' + src.name)
+  config.pages.push(clone)
+  switchPage(clone.id)
+}
+function renamePage(id: string) {
+  const p = config.pages.find((x) => x.id === id)
+  if (!p) return
+  const name = window.prompt('Rename page', p.name)
+  if (name && name.trim()) p.name = name.trim()
+}
+// Delete: the page and its drill pages together, asked once. ★ Overview (the default page) can't
+// be deleted, nor the last page.
+function deletePage(id: string) {
+  const p = config.pages.find((x) => x.id === id)
+  if (!p || p.isDefault || config.pages.length <= 1) return
+  const gone = new Set(pagesToDelete(id, config.pages))
+  if (config.pages.length - gone.size < 1) return
+  const drills = gone.size - 1
+  const msg = drills
+    ? `Delete "${p.name}" and its ${drills} drill page${drills === 1 ? '' : 's'}? This can't be undone.`
+    : `Delete page "${p.name}"? This can't be undone.`
+  if (!confirm(msg)) return
+  const parentId = p.parentId
+  config.pages = config.pages.filter((x) => !gone.has(x.id))
+  const fallback = config.pages.find((x) => x.isDefault) ?? config.pages[0]
+  if (gone.has(config.activePageId)) config.activePageId = fallback.id
+  if (gone.has(activePageId.value)) switchPage(parentId && config.pages.some((x) => x.id === parentId) ? parentId : fallback.id)
+}
+// Move to group: the page and its drill pages join the group, after the pages already there.
+function movePage(id: string, group: string) {
+  const g = cleanGroupName(group)
+  if (g) config.pages = [...movePageToGroup(config.pages, id, g)]
+}
+function moveToNewGroup(id: string) {
+  const name = cleanGroupName(window.prompt('New group name', '') ?? '')
+  if (name) movePage(id, name)
+}
+// Change icon…: a registry key, or null for Auto (resolved from the page's charts / its page).
+function setIcon(id: string, key: IconKey | null) {
+  const p = config.pages.find((x) => x.id === id)
+  if (!p) return
+  if (key) p.icon = key
+  else delete p.icon
+}
 // ── / search ──────────────────────────────────────────────────────────────────────
 const searchOpen = ref(false)
 function openSearch() {
@@ -169,38 +229,57 @@ function onSlashKey(e: KeyboardEvent) {
 }
 onMounted(() => document.addEventListener('keydown', onSlashKey))
 onBeforeUnmount(() => document.removeEventListener('keydown', onSlashKey))
-// + Page: a new ROOT page, a copy of the active one, in its group with its icon (clonePage).
-function addPage(group?: string) {
-  const src = activePage.value
-  const clone = clonePage(src, 'Copy of ' + src.name)
-  delete clone.parentId
-  clone.group = group ?? rootOf(src, config.pages).group
-  config.pages.push(clone)
-  switchPage(clone.id)
+// ── Page menu, icon picker and page drawer ──────────────────────────────────────
+// One ⋯ menu for whichever page it was opened on (the header's is the page on screen), anchored to
+// the button that opened it.
+const pageMenu = ref<{ id: string; anchor: HTMLElement } | null>(null)
+const pageMenuPage = computed(() => (pageMenu.value ? config.pages.find((p) => p.id === pageMenu.value!.id) ?? null : null))
+const pageMenuBtn = ref<HTMLElement | null>(null)
+function openPageMenu(id: string, anchor: HTMLElement) {
+  pageMenu.value = pageMenu.value?.id === id && pageMenu.value.anchor === anchor ? null : { id, anchor }
 }
-// Duplicate: a copy of that page — same group and icon, and a copy of a drill page stays a drill
-// page of the same root.
-function duplicatePage(id: string) {
-  const src = config.pages.find((p) => p.id === id) ?? activePage.value
-  const clone = clonePage(src, 'Copy of ' + src.name)
-  config.pages.push(clone)
-  switchPage(clone.id)
+function closePageMenu(reason: 'action' | 'dismiss' = 'dismiss') {
+  const anchor = pageMenu.value?.anchor
+  pageMenu.value = null
+  // After an action, focus goes back to the ⋯ that opened the menu (the icon picker, if that was
+  // the action, takes it itself). If that row is gone (deleted), to the drawer's current row.
+  if (reason !== 'action') return
+  nextTick(() => {
+    if (iconFor.value) return
+    if (anchor?.isConnected) anchor.focus()
+    else document.querySelector<HTMLElement>('#nav-drawer .dr-page[aria-current="page"], #nav-drawer .dr-close')?.focus()
+  })
 }
-function renamePage(id: string, name: string) {
-  const p = config.pages.find((x) => x.id === id)
-  if (p) p.name = name
+const iconFor = ref<{ id: string; returnTo: HTMLElement | null } | null>(null)
+const iconPage = computed(() => (iconFor.value ? config.pages.find((p) => p.id === iconFor.value!.id) ?? null : null))
+function openIconPicker(id: string) {
+  iconFor.value = { id, returnTo: pageMenu.value?.anchor ?? null }
 }
-function deletePage(id: string) {
-  const p = config.pages.find((x) => x.id === id)
-  if (!p || p.isDefault || config.pages.length <= 1) return
-  if (!confirm(`Delete page "${p.name}"? This can't be undone.`)) return
-  const idx = config.pages.findIndex((x) => x.id === id)
-  const parentId = p.parentId
-  config.pages.splice(idx, 1)
-  const fallback = config.pages.find((x) => x.isDefault) ?? config.pages[0]
-  if (config.activePageId === id) config.activePageId = fallback.id
-  if (activePageId.value === id) switchPage(parentId && config.pages.some((x) => x.id === parentId) ? parentId : fallback.id)
+function pickIcon(key: IconKey | null) {
+  if (iconFor.value) setIcon(iconFor.value.id, key)
+  iconFor.value = null
 }
+
+const drawerOpen = ref(false)
+const drawerBtn = ref<HTMLElement | null>(null)
+const collapsedGroups = ref<string[]>(readViewerPrefs().collapsed ?? [])
+function toggleGroup(name: string) {
+  const next = collapsedGroups.value.includes(name) ? collapsedGroups.value.filter((g) => g !== name) : [...collapsedGroups.value, name]
+  collapsedGroups.value = next
+  writeViewerPrefs({ ...readViewerPrefs(), collapsed: next })
+}
+function pickFromDrawer(id: string) {
+  drawerOpen.value = false
+  switchPage(id)
+}
+function newPageFromDrawer() {
+  drawerOpen.value = false
+  addPage()
+}
+// The ☰ button carries the current group's badge (★ on ★ Overview), so the group shows even when
+// the breadcrumb is short.
+const activeRoot = computed(() => rootOf(activePage.value, config.pages))
+
 function restoreDefaultCharts(id: string) {
   const p = config.pages.find((x) => x.id === id) ?? activePage.value
   const launch = isBestSudokuLaunchPage(p)
@@ -439,8 +518,9 @@ function openFilteredPage() {
 // ── Main filter bar (owner request, 2026-09-26: put it back) ──────────────────────────────
 // v0.6 (PR #9, commit 672aa24) hid this bar behind a small top-right toggle. The owner wants
 // it back in normal flow, in EXACTLY its pre-v0.6 position/order/spacing/styling/wrapping —
-// see commit 8692b0f's src/App.vue (the last commit before that merge): directly under
-// PageBar, always visible, no overlay/collapse. It's restored in the template below as a plain
+// see commit 8692b0f's src/App.vue (the last commit before that merge): directly under the page
+// navigation (the header since layout version 12), always visible, no overlay/collapse. It's
+// restored in the template below as a plain
 // in-flow section (`barSectionEl`), unconditionally rendered whenever `!isCampaignPage` (the
 // campaign page still doesn't use it — unchanged from before).
 //
@@ -603,13 +683,22 @@ function toggleDark() {
       <button class="btn btn-primary" @click="reauth">Sign in again</button>
     </div>
     <header class="topbar">
-      <div class="brand">
-        <span class="logo">S</span>
-        <div>
-          <h1>Stats</h1>
-          <span class="overline">Good Stuff Software · bot-free RUM</span>
-        </div>
-      </div>
+      <h1 class="visually-hidden">Stats</h1>
+      <!-- ☰: the page drawer (components/nav/NavDrawer.vue), with the current group's badge. -->
+      <button
+        ref="drawerBtn"
+        type="button"
+        class="drawer-btn"
+        :aria-label="`Open pages (${activeRoot.isDefault ? activeRoot.name : activeRoot.group})`"
+        aria-haspopup="dialog"
+        :aria-expanded="drawerOpen"
+        aria-controls="nav-drawer"
+        @click="drawerOpen = true"
+      >
+        <MenuIcon :size="17" aria-hidden="true" />
+        <StarIcon v-if="activeRoot.isDefault" class="star" :size="16" aria-hidden="true" />
+        <GroupBadge v-else :name="activeRoot.group" :meta="config.groupMeta?.[activeRoot.group]" />
+      </button>
       <!-- Group / Page / Drill: each segment opens its siblings (components/nav/NavBreadcrumb.vue). -->
       <NavBreadcrumb
         class="topbar-crumbs"
@@ -621,6 +710,17 @@ function toggleDark() {
         @switch-group="switchGroup"
         @new-page="addPage"
       />
+      <button
+        ref="pageMenuBtn"
+        type="button"
+        class="page-menu-btn"
+        :aria-label="`Page options: ${activePage.name}`"
+        aria-haspopup="menu"
+        :aria-expanded="pageMenu?.anchor === pageMenuBtn"
+        @click="pageMenuBtn && openPageMenu(activePage.id, pageMenuBtn)"
+      >
+        <EllipsisIcon :size="17" aria-hidden="true" />
+      </button>
       <span class="topbar-sp"></span>
       <button type="button" class="nav-search-btn" aria-label="Search pages" aria-keyshortcuts="/" @click="openSearch">
         <SearchIcon :size="15" aria-hidden="true" />
@@ -641,23 +741,10 @@ function toggleDark() {
       </div>
     </header>
 
-    <!-- Page tabs — ALWAYS visible (owner clarification, 2026-09-26): unlike the rest of the
-         page chrome, navigating between pages is core wayfinding, not "modification" chrome,
-         so it never hides. -->
-    <PageBar
-      :pages="config.pages"
-      :active-page-id="activePage.id"
-      @switch="switchPage"
-      @add="addPage"
-      @rename="renamePage"
-      @duplicate="duplicatePage"
-      @delete="deletePage"
-      @restore="restoreDefaultCharts"
-    />
-
-    <!-- Main filter bar — restored to normal flow (pre-v0.6 layout, commit 8692b0f): always
-         visible, directly under PageBar. Hidden only on the campaign page, whose widgets each
-         cover their own fixed campaign window and aren't filter-driven. -->
+    <!-- Main filter bar — in normal flow, always visible, directly under the header (its
+         breadcrumb is the everyday page switcher; the full page tree is in the ☰ drawer). Hidden
+         only on the campaign page, whose widgets each cover their own fixed campaign window and
+         aren't filter-driven. -->
     <div v-if="!isCampaignPage" ref="barSectionEl" class="filterbar-inflow">
       <FilterBar
         :filters="activePage.filters"
@@ -764,6 +851,38 @@ function toggleDark() {
     </Teleport>
 
     <SearchPalette :open="searchOpen" :pages="config.pages" :group-meta="config.groupMeta" @close="searchOpen = false" @pick="pickSearchResult" />
+    <NavDrawer
+      :open="drawerOpen"
+      :pages="config.pages"
+      :active="activePage"
+      :group-meta="config.groupMeta"
+      :collapsed="collapsedGroups"
+      :menu-for="pageMenu?.id ?? null"
+      :return-to="drawerBtn"
+      @close="drawerOpen = false"
+      @switch="pickFromDrawer"
+      @menu="openPageMenu"
+      @delete="deletePage"
+      @new-page="newPageFromDrawer"
+      @toggle-group="toggleGroup"
+    />
+    <PageMenu
+      :open="!!pageMenu"
+      :anchor="pageMenu?.anchor ?? null"
+      :page="pageMenuPage"
+      :pages="config.pages"
+      :group-meta="config.groupMeta"
+      :sheet="isMobile"
+      @close="closePageMenu"
+      @rename="renamePage"
+      @duplicate="duplicatePage"
+      @change-icon="openIconPicker"
+      @move="movePage"
+      @new-group="moveToNewGroup"
+      @restore="restoreDefaultCharts"
+      @delete="deletePage"
+    />
+    <IconPicker :open="!!iconFor" :page="iconPage" :pages="config.pages" :return-to="iconFor?.returnTo ?? null" @close="iconFor = null" @pick="pickIcon" />
 
     <footer class="foot overline">
       {{ activePage.name }} · humans only, bots excluded · {{ rangeText }}
@@ -941,8 +1060,8 @@ function toggleDark() {
      (which IntersectionObserver relies on) reports it as empty/zero-sized regardless of its
      content, permanently misreporting it as out of view. A default block div has no
      margin/padding/border, so it still sits exactly where FilterBar would as a direct .app
-     flex child (pre-v0.6 layout, commit 8692b0f: PageBar, then this, with .app's own
-     `gap: 14px` between them) while giving the observer real geometry to measure. */
+     flex child (under the header, with .app's own `gap` between them) while giving the observer
+     real geometry to measure. */
   min-width: 0;
 }
 .fb-anchor {
@@ -953,6 +1072,13 @@ function toggleDark() {
      (z-index 1000/1001 — see ChartCard.vue) and the drill-down menu (1100 below) — the
      toggle must stay reachable no matter what's on screen (MEDIUM review fix, carried over). */
   z-index: 1200;
+  /* The anchor box itself sits over the header's top-right corner (the account menu, the page ⋯
+     button at phone width): it must not swallow their clicks while the toggle is hidden. Only
+     its children (the toggle when shown, the pinned bar) take pointer events. */
+  pointer-events: none;
+}
+.fb-anchor > * {
+  pointer-events: auto;
 }
 .fb-toggle {
   width: 34px;
@@ -1031,27 +1157,40 @@ function toggleDark() {
     padding: 10px 12px;
   }
 }
-.brand {
-  display: flex;
+.drawer-btn {
+  display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 6px;
+  flex: none;
+  padding: 4px 6px 4px 7px;
+  border: 1px solid rgb(var(--line-2));
+  border-radius: 9px;
+  background: rgb(var(--surface));
+  color: rgb(var(--ink));
 }
-.logo {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  background: rgb(var(--amber));
-  color: #fff;
-  font-family: 'JetBrains Mono', monospace;
-  font-weight: 700;
-  font-size: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.page-menu-btn {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  margin-left: -8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: rgb(var(--ink-3));
 }
-.brand h1 {
-  font-size: 22px;
-  line-height: 1.1;
+.drawer-btn:hover,
+.page-menu-btn:hover,
+.page-menu-btn[aria-expanded='true'] {
+  border-color: rgb(var(--amber));
+  background: rgb(var(--sunken));
+  color: rgb(var(--ink));
+}
+.drawer-btn:focus-visible,
+.page-menu-btn:focus-visible {
+  outline: 2px solid rgb(var(--amber));
+  outline-offset: 1px;
 }
 .top-actions {
   display: flex;
@@ -1091,14 +1230,6 @@ function toggleDark() {
   .app {
     padding: 14px 12px 48px;
     gap: 12px;
-  }
-  .brand h1 {
-    font-size: 19px;
-  }
-  .logo {
-    width: 34px;
-    height: 34px;
-    font-size: 18px;
   }
   .top-actions {
     flex-wrap: wrap;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { drillChildren, drillTrail, groupLandingPage, groupNames, highlightParts, navOrder, navTree, parentOf, rootOf, rootsInGroup, searchPages } from './nav'
+import { drillChildren, drillTrail, groupLandingPage, groupNames, highlightParts, movePageToGroup, navOrder, navTree, pagesToDelete, parentOf, rootOf, rootsInGroup, searchPages } from './nav'
 import type { DashboardPage, GlobalFilters } from '../types'
 
 const f = (over: Partial<GlobalFilters> = {}): GlobalFilters => ({
@@ -146,5 +146,40 @@ describe('searchPages', () => {
       { text: '</b>', mark: false },
     ])
     expect(highlightParts('Traffic', -1, 0)).toEqual([{ text: 'Traffic', mark: false }])
+  })
+})
+
+describe('page operations', () => {
+  const pages = [
+    page('default', { isDefault: true, group: 'All sites' }),
+    page('beacon', { group: 'All sites' }),
+    page('t', { group: 'Best Sudoku' }),
+    page('k1', { group: 'Best Sudoku', parentId: 't' }),
+    page('m1', { group: 'Mine' }),
+    page('k2', { group: 'Best Sudoku', parentId: 't' }),
+    page('m2', { group: 'Mine' }),
+  ]
+  it('pagesToDelete: the page and its drill pages', () => {
+    expect(pagesToDelete('t', pages)).toEqual(['t', 'k1', 'k2'])
+    expect(pagesToDelete('m1', pages)).toEqual(['m1'])
+  })
+  it('movePageToGroup moves the page with its drill pages to the end of the group, keeping everything else', () => {
+    const out = movePageToGroup(pages, 't', 'Mine')
+    expect(out.map((p) => [p.id, p.group])).toEqual([
+      ['default', 'All sites'],
+      ['beacon', 'All sites'],
+      ['m1', 'Mine'],
+      ['m2', 'Mine'],
+      ['t', 'Mine'],
+      ['k1', 'Mine'],
+      ['k2', 'Mine'],
+    ])
+    expect(out.find((p) => p.id === 't')!.widgets).toBe(pages[2].widgets)
+    expect(pages[2].group).toBe('Best Sudoku') // the input is not mutated
+  })
+  it('a new group goes last; ★ Overview, a drill page, or the same group moves nothing', () => {
+    expect(movePageToGroup(pages, 'beacon', 'Star Rupture').map((p) => p.id).at(-1)).toBe('beacon')
+    expect(movePageToGroup(pages, 'm1', 'All sites').map((p) => p.id)).toEqual(['default', 'beacon', 'm1', 't', 'k1', 'k2', 'm2'])
+    for (const [id, g] of [['default', 'Mine'], ['k1', 'Mine'], ['m1', 'Mine'], ['m1', '']]) expect(movePageToGroup(pages, id, g)).toBe(pages)
   })
 })

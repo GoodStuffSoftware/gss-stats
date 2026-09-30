@@ -7,6 +7,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **The top-right corner of the header takes clicks again.** The hidden "show filters" button's
+  box no longer sits invisibly over the account menu (and, on a phone, the page menu button).
 - **Two standing retest report notes corrected.** The upsell-near-zero-for-signed-out note
   wrongly called it a known bug (`useUpsellPrompt` returning early on `uid === null`); it is
   expected by design (a signed-out visitor is never walled — the trial starts only once a
@@ -30,6 +32,14 @@ All notable changes to **gss-stats** are documented here. The format follows
   the other drill pages and the way back. Picking a group opens the page you last viewed in it.
   Each group has a lettered, coloured badge. On a phone it shortens to group / page and the lists
   open from the bottom of the screen.
+- **Every page is in a drawer behind ☰.** It opens over the charts on any screen: ★ Overview,
+  then each group (collapsible) with its pages and their icons, drill pages indented under their
+  page with × to delete them, a ⋯ menu on every page, and a new-page button. The ☰ button shows the
+  current group's badge.
+- **Every page has a menu.** Rename, duplicate, change icon, move to another group (or a new one),
+  restore default charts, delete. ★ Overview can't be moved or deleted.
+- **Pick a page's icon.** Search about forty icons in five groups, or choose Auto, which shows
+  what the page would get on its own.
 - **Press / to search every page.** Page names match first, then charts' titles, each result with
   its icon and group; arrow keys move, Enter opens, Esc closes.
 - **Drill pages nest under the page they came from.** A drill opens its page straight away, in the
@@ -77,6 +87,8 @@ All notable changes to **gss-stats** are documented here. The format follows
   install rate** on the Pop-ups page, as counts.
 
 ### Changed
+- **Deleting a page also deletes its drill pages.** You're asked once, with the count ("Delete
+  Traffic and its 3 drill pages?").
 - **The page you're on is yours alone.** It's remembered in your own browser instead of the shared
   dashboard, so switching pages no longer saves anything or moves anyone else, and a first-time
   visitor lands on ★ Overview.
@@ -94,6 +106,10 @@ All notable changes to **gss-stats** are documented here. The format follows
   the existing auth-success numbers on "Today at a glance". Both read a real zero (not a blank
   or a hidden tile) once tracking is live, so "no failures yet" reads differently from "not
   wired up".
+
+### Removed
+- **The page tab strip.** The breadcrumb, the page drawer and / search replace it; "+ Page" is
+  "New page" in the drawer and in the breadcrumb's page list.
 
 ### Fixed
 - **Chart queries with many sites and pop-up filters no longer refuse to run.** The dashboard's

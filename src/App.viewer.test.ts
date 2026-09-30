@@ -46,6 +46,13 @@ async function mountApp() {
   return w
 }
 const shownWidgetIds = (w: any) => (w.findComponent(Dashboard).props('widgets') as { id: string }[]).map((x) => x.id)
+// Switch pages the way a viewer does: open the ☰ drawer and pick the page.
+async function goTo(w: any, name: string) {
+  await w.find('.drawer-btn').trigger('click')
+  await flushPromises()
+  Array.from(document.querySelectorAll<HTMLElement>('#nav-drawer .dr-page')).find((b) => b.textContent!.trim() === name)!.click()
+  await flushPromises()
+}
 // The footer names the page on screen.
 const shownPage = (w: any) => (w.find('.foot').text() as string).split(' · ')[0]
 const remembered = () => JSON.parse(localStorage.getItem(VIEWER_PREFS_KEY) ?? 'null')
@@ -67,10 +74,7 @@ describe('App — the active page is per viewer (layout version 12)', () => {
 
   it('switching pages is remembered in this browser and never saves the shared config', async () => {
     const w = await mountApp()
-    const tabs = w.findAll('.tab')
-    const traffic = tabs.find((t) => t.text().includes('Traffic'))!
-    await traffic.trigger('click')
-    await flushPromises()
+    await goTo(w, 'Traffic')
     expect(shownPage(w)).toBe('Traffic')
     expect(remembered()).toMatchObject({ active: 'bsk-launch', lastByGroup: { 'Best Sudoku': 'bsk-launch' } })
     await pastDebounce()
@@ -85,11 +89,10 @@ describe('App — the active page is per viewer (layout version 12)', () => {
 
   it('a real change saves the config as v12, with the landing page left at ★ Overview', async () => {
     const w = await mountApp()
-    await w.findAll('.tab').find((t) => t.text().includes('Traffic'))!.trigger('click')
-    await flushPromises()
-    await w.find('.tab.active .caret').trigger('click')
+    await goTo(w, 'Traffic')
+    await w.find('.page-menu-btn').trigger('click')
     vi.stubGlobal('prompt', vi.fn(() => 'Traffic (all)'))
-    await w.findAll('.pmenu button').find((b) => b.text() === 'Rename')!.trigger('click')
+    Array.from(document.querySelectorAll<HTMLElement>('#page-menu [role="menuitem"]')).find((b) => b.textContent!.trim() === 'Rename')!.click()
     vi.unstubAllGlobals()
     await pastDebounce()
     await flushPromises()

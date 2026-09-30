@@ -114,6 +114,29 @@ export function groupLandingPage(group: string, pages: readonly DashboardPage[],
   return rootsInGroup(group, pages)[0]
 }
 
+// ── Page operations ─────────────────────────────────────────────────────────────────────────
+/** The pages deleting `id` removes: the page and its drill pages (asked about once, together). */
+export function pagesToDelete(id: string, pages: readonly DashboardPage[]): string[] {
+  return [id, ...drillChildren(id, pages).map((p) => p.id)]
+}
+
+/** "Move to group": the page and its drill pages join `group`, placed after the pages already in
+ * it (a new group goes last). ★ Overview (pinned, outside the groups) and drill pages (they follow
+ * their page) don't move on their own. Returns the new page list — the same array when nothing
+ * moves — with the moved pages as new objects (their widgets and filters untouched). */
+export function movePageToGroup(pages: readonly DashboardPage[], id: string, group: string): readonly DashboardPage[] {
+  const p = pages.find((x) => x.id === id)
+  if (!p || !group || isPinnedPage(p) || parentOf(p, pages) || p.group === group) return pages
+  const movingIds = new Set(pagesToDelete(id, pages))
+  const moving = pages.filter((x) => movingIds.has(x.id)).map((x) => ({ ...x, group }))
+  const rest = pages.filter((x) => !movingIds.has(x.id))
+  let at = -1
+  rest.forEach((x, i) => {
+    if (x.group === group) at = i
+  })
+  return at < 0 ? [...rest, ...moving] : [...rest.slice(0, at + 1), ...moving, ...rest.slice(at + 1)]
+}
+
 // ── / search ────────────────────────────────────────────────────────────────────────────────
 export interface SearchHit {
   page: DashboardPage
