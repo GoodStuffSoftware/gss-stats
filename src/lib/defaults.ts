@@ -48,6 +48,8 @@ function w(p: Omit<Widget, 'i'>): Widget {
 // layout up to `dashboard:default:backup:v<stored>` on the first v13 save (production is stored at
 // v12 when this ships: `backup:v12`); a tab still running v12 code then gets 409 ("This tab is out
 // of date, reload") instead of overwriting it.
+// (Bumped to 12 for the Overview's small-sample note row (see compactSmallSampleNoteV12): the
+// one-line note drops from three grid rows to one and the cards below move up to meet it.)
 // (Bumped to 11 for the rest of the panels (ADR 0003 slice 7, see migratePanelsV11): every
 // remaining bespoke panel becomes a card preset (the release panel; the campaign funnel, country,
 // cost and returns panels; the Pop-ups rate table and sign-in eligibility) or a standard chart
@@ -540,8 +542,9 @@ export function isCampaignComparePage(p: Pick<DashboardPage, 'id'>): boolean {
 // 'completions', dimension/breakdown), not a bespoke 'overview' panel — see
 // functions/api/completions.ts + lib/catalog.ts COMPLETIONS_DIMENSIONS. Factored into its own
 // builder so both defaultOverviewWidgets() (fresh configs) and the v8 migration below (existing
-// saved configs) build the EXACT same widget.
-function completionsWidget(): Widget {
+// saved configs) build the EXACT same widget. `y` defaults to the v12 layout (row 44); the v8
+// migration passes the pre-v12 row 46, which the v12 migration then moves up with the rest.
+function completionsWidget(y = 44): Widget {
   return w({
     id: 'ow-completions',
     title: 'Completions by mode × difficulty',
@@ -552,7 +555,7 @@ function completionsWidget(): Widget {
     metric: 'pageviews',
     limit: 20,
     x: 0,
-    y: 46,
+    y,
     w: 12,
     h: 10,
   })
@@ -688,6 +691,20 @@ export function migratePanelsV11(page: DashboardPage): DashboardPage {
   const swapped = page.widgets.some((wd) => swapPanelChart(wd) !== wd) ? { ...page, widgets: page.widgets.map(swapPanelChart) } : page
   return migrateCardsV10(swapped)
 }
+/** v12: the Overview's small-sample note shipped as a 12-wide, 3-row grid cell (148px on
+ * desktop) holding a single caption line, which read as an empty band under the filter bar.
+ * Shrink it to one row and move every widget below it up by the two freed rows. Matches only the
+ * untouched factory cell (id, note type, x 0, w 12, h 3), so a note the owner has resized or
+ * moved keeps its geometry. The same object when there is nothing to do. */
+export function compactSmallSampleNoteV12(page: DashboardPage): DashboardPage {
+  const note = page.widgets.find((wd) => wd.id === 'ow-note-smallsample' && wd.type === 'note' && wd.x === 0 && wd.w === 12 && wd.h === 3)
+  if (!note) return page
+  const freedFrom = note.y + 3
+  return {
+    ...page,
+    widgets: page.widgets.map((wd) => (wd === note ? { ...wd, h: 1 } : wd.y >= freedFrom ? { ...wd, y: wd.y - 2 } : wd)),
+  }
+}
 /** The bespoke panels that became STANDARD charts (not cards), swapped in place: same id, grid
  * position, size, title, captions and default mark (campaignChartFromBespoke). Matched by what
  * the widget is (dataset 'campaigns' and its view), never by name. The same object when it is
@@ -699,11 +716,14 @@ export function swapPanelChart(wd: Widget): Widget {
 
 export function defaultOverviewWidgets(): Widget[] {
   return [
-    w({ id: 'ow-note-smallsample', title: 'Small sample', type: 'note', dimension: '', metric: 'pageviews', limit: 1, noteId: 'small-sample', x: 0, y: 0, w: 12, h: 3 }),
-    w({ id: 'ow-kpis', title: 'Today at a glance', type: 'table', dataset: 'overview', view: 'kpis', card: { preset: 'bsk-kpis' }, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 3, w: 12, h: 8 }),
-    timelineWidget({ x: 0, y: 11, w: 12, h: 12 }),
-    w({ id: 'ow-scorecard', title: 'Campaign scorecard', type: 'table', dataset: 'overview', view: 'scorecard', card: { preset: 'campaign-scorecard' }, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 23, w: 12, h: 14 }),
-    w({ id: 'ow-release', title: 'Release panel', type: 'table', dataset: 'overview', view: 'releasePanel', card: { preset: 'release-before-after' }, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 37, w: 12, h: 9 }),
+    // The small-sample note is ONE grid row (h: 1), not three (CONFIG_VERSION 12, see
+    // compactSmallSampleNoteV12): a one-line caption in a 148px cell left an empty band between
+    // the filter bar and the first card that the pre-v0.6 page never had.
+    w({ id: 'ow-note-smallsample', title: 'Small sample', type: 'note', dimension: '', metric: 'pageviews', limit: 1, noteId: 'small-sample', x: 0, y: 0, w: 12, h: 1 }),
+    w({ id: 'ow-kpis', title: 'Today at a glance', type: 'table', dataset: 'overview', view: 'kpis', card: { preset: 'bsk-kpis' }, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 1, w: 12, h: 8 }),
+    timelineWidget({ x: 0, y: 9, w: 12, h: 12 }),
+    w({ id: 'ow-scorecard', title: 'Campaign scorecard', type: 'table', dataset: 'overview', view: 'scorecard', card: { preset: 'campaign-scorecard' }, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 21, w: 12, h: 14 }),
+    w({ id: 'ow-release', title: 'Release panel', type: 'table', dataset: 'overview', view: 'releasePanel', card: { preset: 'release-before-after' }, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 35, w: 12, h: 9 }),
     completionsWidget(),
   ]
 }
@@ -1127,7 +1147,7 @@ export function normalizeConfig(raw: any): DashboardConfig {
     if ((Number(raw.version) || 0) < 8) {
       for (const p of pages) {
         if (isOverviewPage(p) && overviewPageIsUncustomized(p) && !p.widgets.some((w: Widget) => w.dataset === 'completions')) {
-          p.widgets = [...p.widgets, completionsWidget()]
+          p.widgets = [...p.widgets, completionsWidget(46)]
         }
       }
     }
@@ -1145,6 +1165,11 @@ export function normalizeConfig(raw: any): DashboardConfig {
         p = migrateTimelineV9(p)
         pages[i] = p
       }
+    }
+    // v12 migration (see CONFIG_VERSION): the Overview's small-sample note takes one grid row,
+    // not three (compactSmallSampleNoteV12). Version-gated, so a later resize is never undone.
+    if ((Number(raw.version) || 0) < 12) {
+      for (let i = 0; i < pages.length; i++) pages[i] = compactSmallSampleNoteV12(pages[i])
     }
     // v10 and v11 (see CONFIG_VERSION), run on every load: every former bespoke panel renders as
     // a metric card or a standard chart (migratePanelsV11). Not version-gated, because the bespoke

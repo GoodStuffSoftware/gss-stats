@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest'
 import { etDateFromMs, installFixMarkerLabel, INSTALL_FIX_NOTE } from './popupEvents'
 import { etDateTimeFromMs, etHourFromMs } from './campaigns'
-import { etHourLabel, etHourOf, INSTALL_OUTCOME_GAP_NOTE } from './adsRules'
+import { etHourLabel, etHourOf, etMinuteLabel, INSTALL_OUTCOME_GAP_NOTE, SIGNUP_PROXY_NOTE } from './adsRules'
 
 const TZ = 'America/New_York'
 const ref = {
@@ -27,6 +27,10 @@ const old = {
   etHourLabel: (ms: number) => {
     const p = parts(ref.hourLabel, ms)
     return `${p.year}-${p.month}-${p.day} ${p.hour}:00 ET`
+  },
+  etMinuteLabel: (ms: number) => {
+    const p = parts(ref.dateTime, ms)
+    return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute} ET`
   },
   etHourOf: (ms: number) => Number(ref.hour.format(new Date(ms))) % 24,
   installFixMarkerLabel: (ms: number) => {
@@ -59,6 +63,7 @@ describe('lazy formatters produce byte-identical output to the former eager ones
     ['etHourLabel', etHourLabel],
     ['etHourOf', etHourOf],
     ['installFixMarkerLabel', installFixMarkerLabel],
+    ['etMinuteLabel', etMinuteLabel],
   ] as const) {
     it(name, () => {
       const mismatches = all.filter((ms) => (fn as (ms: number) => unknown)(ms) !== old[name](ms))
@@ -68,5 +73,9 @@ describe('lazy formatters produce byte-identical output to the former eager ones
   it('the module-load notes are unchanged', () => {
     expect(INSTALL_FIX_NOTE).toBe('install fix went live 26 Sep 12:26 ET; earlier prompt-driven installs not recorded')
     expect(INSTALL_OUTCOME_GAP_NOTE).toContain('install fix went live 26 Sep 12:26 ET (Best Sudoku v1.95.4)')
+    // Byte-identical to the text #27 rendered with an eager Intl formatter.
+    expect(SIGNUP_PROXY_NOTE).toBe(
+      'Sign-ups before 2026-09-26 15:43 ET are an UPPER bound, "at most N campaign sign-ups" = min(tagged auth successes, new prod accounts sitewide in the flight window): /auth/success also fires for returning sign-ins and the account count is not campaign-attributed. From 2026-09-26 15:43 ET on, tagged /auth/success/<provider>/new rows count sign-ups EXACTLY, capped at the window\'s new accounts; a report spanning both sides shows an "at most X + exactly Y" split. Counts only, never matched to anyone.',
+    )
   })
 })

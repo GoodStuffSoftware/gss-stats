@@ -6,8 +6,9 @@
 //
 // COUNTS ONLY: every user figure comes from a Firestore COUNT aggregation query, so no user
 // document, email or uid ever enters this process. fencedFetch() below is the only way a
-// request leaves this module, and it allows exactly three calls: the OAuth token exchange, a
-// GET of promos/first50, and POST documents:runAggregationQuery. No write, commit or batch
+// request leaves this module, and it allows exactly four calls: the OAuth token exchange, a
+// GET of promos/first50, a GET of promos_public/first50 masked to its `open` field, and POST
+// documents:runAggregationQuery. No write, commit or batch
 // endpoint is reachable, nothing under users/ is ever written, and grant-first50.mjs (a WRITE
 // tool) is never used.
 //
@@ -21,6 +22,15 @@
 // Timestamp; promo_first50_granted_at, trial_ends_at and access_expires_at are ISO strings
 // (access_expires_at may also be the sentinel 'lifetime'); promos/first50 is
 // { cap, claimed, closed, updatedAt }.
+//
+// CLIENT-VISIBLE FIRST-50 (ads-session finding, 2026-09-28): the counter above is NOT what the
+// signed-out client gates its offer on. best-sudoku src/services/first50PromoStatus.ts
+// isFirst50PromoOpen() reads promos_public/first50 (getDocFromServer) and shows the offer only
+// when `open === true`, so a missing doc means HIDDEN. That doc did not exist in prod until
+// 2026-09-28T20:11:29Z, while the counter read "open" all along. We read that one doc, only its
+// `open` field (plus the document's own updateTime), and report it next to the counter. The
+// read is fail-soft: its failure is carried in first50Client.error, never in `errors`, so it
+// can never make a read incomplete or change a push (see read.ts `complete` / failedDetails).
 
 import fs from 'node:fs'
 import { createSign } from 'node:crypto'
@@ -40,20 +50,54 @@ export interface FirebaseCounts {
   /** users with any promo_first50_granted_at — sanity check against promos/first50.claimed. */
   promoClaimsTotal: number | null
   first50: { cap: number | null; claimed: number | null; closed: boolean | null } | null
+  /** What the signed-out client sees (promos_public/first50). Report text only: never feeds a
+   * kill rule, the decision table, completeness or a push. Absent on older fixtures. */
+  first50Client?: First50ClientState | null
   /** Day-15/30/60 only: the raw COUNT inputs for lib/adsRules.ts deriveCohortTiers. */
   cohortTiers?: CohortTierCounts | null
   errors: string[]
 }
 
+export interface First50ClientState {
+  /** visible: the doc exists with open === true. hidden: the doc is missing, or open is not
+   * true (the client's own rule). unknown: the read failed or never ran. */
+  state: 'visible' | 'hidden' | 'unknown'
+  /** false = HTTP 404 (no such doc); null when unknown. */
+  exists: boolean | null
+  /** The raw `open` field when it is a boolean, else null. */
+  open: boolean | null
+  /** The document's updateTime (ISO), when the doc exists. */
+  updateTime: string | null
+  /** Short, secret-free reason when state is unknown. */
+  error: string | null
+}
+export const PROMOS_PUBLIC_FIRST50_PATH = 'promos_public/first50'
+/** The one URL the client-visible read may GET: that doc, masked to `open`. */
+export const promosPublicUrl = (documentsBase: string) => `${documentsBase}/${PROMOS_PUBLIC_FIRST50_PATH}?mask.fieldPaths=open`
+export const first50ClientUnknown = (error: string): First50ClientState => ({ state: 'unknown', exists: null, open: null, updateTime: null, error })
+
+/** Parse the promos_public/first50 GET. 404 = missing = hidden (the client treats a missing doc
+ * as closed); any other non-2xx throws so the caller records it as unknown. */
+export function parseFirst50Client(status: number, ok: boolean, text: string): First50ClientState {
+  if (status === 404) return { state: 'hidden', exists: false, open: null, updateTime: null, error: null }
+  if (!ok) throw new Error(`${PROMOS_PUBLIC_FIRST50_PATH} HTTP ${status}`)
+  const doc = JSON.parse(text)
+  const raw = doc?.fields?.open?.booleanValue
+  const open = typeof raw === 'boolean' ? raw : null
+  const updateTime = typeof doc?.updateTime === 'string' ? doc.updateTime : null
+  return { state: open === true ? 'visible' : 'hidden', exists: true, open, updateTime, error: null }
+}
+
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const b64url = (b: Buffer | string) => Buffer.from(b).toString('base64').replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_')
 
-/** The only three requests this module may make. Anything else throws before it is sent. */
+/** The only four requests this module may make. Anything else throws before it is sent. */
 export function fencedFetch(f: FetchLike, documentsBase: string): FetchLike {
   return (url, init) => {
     const ok =
       (init.method === 'POST' && url === TOKEN_URL) ||
       (init.method === 'GET' && url === `${documentsBase}/promos/first50`) ||
+      (init.method === 'GET' && url === promosPublicUrl(documentsBase)) ||
       (init.method === 'POST' && url === `${documentsBase}:runAggregationQuery`)
     if (!ok) throw new Error(`firebase.ts refused a ${init.method} to a non-allowlisted URL`)
     return f(url, init)
@@ -132,6 +176,12 @@ export function cohortTierQueries(startIso: string, endIso: string, nowIso: stri
   ]
 }
 
+/** One line, no URL, capped: a reason fit for a report line. */
+export function shortReason(msg: string): string {
+  const line = String(msg).split('\n')[0].replace(/https?:\/\/\S+/g, '<url>').trim()
+  return (line.length > 80 ? `${line.slice(0, 77)}...` : line) || 'unknown error'
+}
+
 export async function readFirebaseCounts(
   saPath: string,
   windowStartMs: number,
@@ -146,6 +196,7 @@ export async function readFirebaseCounts(
     promoClaimsInWindow: null,
     promoClaimsTotal: null,
     first50: null,
+    first50Client: first50ClientUnknown('not read'),
     errors: [],
   }
   let sa: any
@@ -168,6 +219,7 @@ export async function readFirebaseCounts(
     token = await accessToken(sa, f)
   } catch (e) {
     out.errors.push(redact(e))
+    out.first50Client = first50ClientUnknown('Firestore sign-in failed')
     return out
   } finally {
     sa = null
@@ -229,6 +281,15 @@ export async function readFirebaseCounts(
     out.first50 = { cap: int(fields.cap), claimed: int(fields.claimed), closed: typeof fields.closed?.booleanValue === 'boolean' ? fields.closed.booleanValue : null }
   } catch (e) {
     out.errors.push(`first50: ${redact(e)}`)
+  }
+  // Fail-soft by construction: a throw or a timeout here becomes state 'unknown' with a short
+  // redacted reason, and is deliberately NOT pushed to out.errors (which feed completeness and
+  // the failure push in read.ts).
+  try {
+    const res = await f(promosPublicUrl(base), { method: 'GET', headers })
+    out.first50Client = parseFirst50Client(res.status, res.ok, await res.text())
+  } catch (e) {
+    out.first50Client = first50ClientUnknown(shortReason(redact(e)))
   }
   return out
 }

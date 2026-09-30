@@ -37,7 +37,7 @@ function setTooltipEnabled(enabled: boolean) {
   const tooltip = (c.options.plugins as { tooltip?: { enabled?: boolean } } | undefined)?.tooltip
   if (!tooltip) return
   c.setActiveElements([])
-  ;(c.tooltip as { setActiveElements?: (e: unknown[], p: { x: number; y: number }) => void } | undefined)?.setActiveElements(
+  ;(c.tooltip as { setActiveElements?: (e: unknown[], p: { x: number; y: number }) => void } | undefined)?.setActiveElements?.(
     [],
     { x: 0, y: 0 },
   )
