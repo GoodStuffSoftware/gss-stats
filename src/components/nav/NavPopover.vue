@@ -3,7 +3,9 @@
 // screen it drops down under its trigger; on a phone (`sheet`) it rises as a bottom sheet over a
 // scrim. Either way: focus moves into it (the current item, else the first), ↑/↓/Home/End move
 // between its items, Esc or Tab closes it and puts focus back on the trigger, and a click outside
-// closes it. Teleported to <body> so no scroll container clips it.
+// closes it. Teleported to <body> (or `teleportTo`: a menu opened from inside a modal dialog — the
+// page drawer — goes into that dialog, so assistive tech doesn't treat it as outside the modal)
+// so no scroll container clips it.
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 const props = withDefaults(
@@ -14,8 +16,9 @@ const props = withDefaults(
     sheet?: boolean
     width?: number
     panelId?: string
+    teleportTo?: string
   }>(),
-  { sheet: false, width: 260, panelId: undefined },
+  { sheet: false, width: 260, panelId: undefined, teleportTo: 'body' },
 )
 const emit = defineEmits<{ close: [reason: 'escape' | 'outside' | 'tab' | 'viewport'] }>()
 
@@ -73,6 +76,7 @@ function onKeydown(e: KeyboardEvent) {
     closeTo('escape')
   } else if (e.key === 'Tab') {
     e.preventDefault()
+    e.stopPropagation()
     closeTo('tab')
   }
 }
@@ -100,7 +104,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <Teleport to="body">
+  <Teleport :to="teleportTo">
     <template v-if="open">
       <div v-if="sheet" class="np-scrim" aria-hidden="true" @click="emit('close', 'outside')"></div>
       <div

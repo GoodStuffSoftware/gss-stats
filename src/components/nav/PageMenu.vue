@@ -42,6 +42,8 @@ const canMove = computed(() => !!props.page && !props.page.isDefault && !isDrill
 const canDelete = computed(() => !!props.page && !props.page.isDefault && props.pages.length > 1)
 const drillCount = computed(() => (props.page ? drillChildren(props.page.id, props.pages).length : 0))
 const groups = computed(() => groupNames(props.pages))
+// Opened from a row of the page drawer (a modal dialog): the menu goes inside the drawer.
+const teleportTo = computed(() => (props.anchor?.closest('#nav-drawer') ? '#nav-drawer' : 'body'))
 const deleteLabel = computed(() => (drillCount.value ? `Delete (+${drillCount.value} drill page${drillCount.value === 1 ? '' : 's'})` : 'Delete'))
 
 // The action runs first (so it still knows which button opened the menu), then the menu closes.
@@ -60,7 +62,7 @@ async function toggleMove() {
 </script>
 
 <template>
-  <NavPopover :open="open && !!page" :anchor="anchor" :label="page ? `Page options: ${page.name}` : 'Page options'" :sheet="sheet" :width="240" panel-id="page-menu" @close="emit('close', 'dismiss')">
+  <NavPopover :open="open && !!page" :anchor="anchor" :label="page ? `Page options: ${page.name}` : 'Page options'" :sheet="sheet" :width="240" :teleport-to="teleportTo" panel-id="page-menu" @close="emit('close', 'dismiss')">
     <template v-if="page">
       <div v-if="sheet" class="nav-head">{{ page.name }}</div>
       <button type="button" role="menuitem" class="nav-row" @click="act(() => emit('rename', page!.id))"><span class="nm">Rename</span></button>
