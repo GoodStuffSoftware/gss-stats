@@ -27,6 +27,7 @@ import {
 import type { DashboardConfig, DashboardPage } from '../types'
 import PROD_V8 from './__fixtures__/prodLayout.v8.json'
 import PROD_V9 from './__fixtures__/prodLayout.v9.json'
+import PROD_V12 from './__fixtures__/prodLayout.v12.json'
 
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x))
 /** Relative ranges are recomputed to "now" on every load; pin them so two loads compare equal. */
@@ -127,6 +128,87 @@ describe('v13: the production layout (sanitised)', () => {
 
   it('is idempotent: v13 → v13 changes nothing (names, groups, order, landing page)', () => {
     expect(stable(normalizeConfig(clone(fromV9)))).toEqual(stable(fromV9))
+  })
+})
+
+// The live production layout as KV stores it when v13 ships (dashboard:default, read-only,
+// 2026-09-30; owner browser/OS replaced as in prodLayout.v8): version 12 in the pre-navigation shape
+// (no groups, the "Best Sudoku · " names, activePageId bsk-overview), its small-sample note already
+// one row. Only the v13 step may change it, and only page names, groups, Traffic's icon and the
+// landing page.
+describe('v13: the live production layout (stored at v12)', () => {
+  const stored = PROD_V12 as unknown as DashboardConfig
+  const migrated = normalizeConfig(clone(PROD_V12))
+  /** The runtime-only `moved` flag (vue-grid-layout) is never kept by normWidget, whatever the version. */
+  const withoutMoved = (cfg: DashboardConfig): DashboardConfig => ({ ...cfg, pages: cfg.pages.map((p) => ({ ...p, widgets: p.widgets.map(({ moved: _m, ...w }: any) => w) })) })
+
+  it('is the pre-navigation v12 shape it claims to be', () => {
+    expect(stored.version).toBe(12)
+    expect(stored.activePageId).toBe('bsk-overview')
+    expect(stored.pages.some((p: any) => 'group' in p || 'icon' in p || 'parentId' in p)).toBe(false)
+  })
+
+  it('files every page: built-ins by id with the short names, Traffic\'s icon, every other page under Mine', () => {
+    expect(migrated.version).toBe(13)
+    expect(summary(migrated)).toEqual([
+      ['default', GROUP_ALL_SITES, 'Overview', null, null],
+      ['beacon', GROUP_ALL_SITES, 'Beacon', null, null],
+      ['bsk-overview', GROUP_BEST_SUDOKU, 'Overview', null, null],
+      ['bsk-campaigns', GROUP_BEST_SUDOKU, 'Campaigns', null, null],
+      ['bsk-popups', GROUP_BEST_SUDOKU, 'Pop-ups', null, null],
+      ['bsk-launch', GROUP_BEST_SUDOKU, 'Traffic', 'trending-up', null],
+      ['a666a816', GROUP_MINE, 'goodstuffsoftware.com', null, null],
+      ['782bef28', GROUP_MINE, '/products/best-sudoku-beta/', null, null],
+      ['b8c47309', GROUP_MINE, 'Copy of Best Sudoku launch', null, null],
+      ['7fc55dff', GROUP_MINE, '4 sites · New', null, null],
+    ])
+    expect(migrated.pages.filter((p) => p.isDefault).map((p) => p.id)).toEqual(['default'])
+  })
+
+  it('makes ★ Overview the landing page and adds nothing else to the config', () => {
+    expect(migrated.activePageId).toBe('default')
+    expect(migrated.syncRange).toBe(false)
+    expect('groupMeta' in migrated).toBe(false)
+  })
+
+  it('keeps every page, in the stored order, with every widget and filter exactly as stored', () => {
+    expect(migrated.pages.map((p) => p.id)).toEqual(stored.pages.map((p) => p.id))
+    const after = stable(migrated)
+    const before = stable(withoutMoved(stored))
+    after.pages.forEach((p, i) => {
+      expect(p.widgets, p.id).toEqual(before.pages[i].widgets)
+      expect(p.filters, p.id).toEqual(before.pages[i].filters)
+    })
+    // …and exactly what a load that skips the v13 step makes of them (the step itself touches none)
+    const skipped = stable(normalizeConfig({ ...clone(PROD_V12), version: 13 }))
+    after.pages.forEach((p, i) => {
+      expect(p.widgets, p.id).toEqual(skipped.pages[i].widgets)
+      expect(p.filters, p.id).toEqual(skipped.pages[i].filters)
+    })
+  })
+
+  it('does not run the v12 note step again: the Overview keeps its stored geometry', () => {
+    const geom = (c: DashboardConfig) => c.pages.find((p) => p.id === 'bsk-overview')!.widgets.map((w) => [w.id, w.x, w.y, w.w, w.h])
+    expect(geom(migrated)).toEqual(geom(stored))
+    expect(geom(migrated)[0]).toEqual(['ow-note-smallsample', 0, 0, 12, 1])
+  })
+
+  it('is idempotent: loading the v13 result again changes nothing', () => {
+    expect(stable(normalizeConfig(clone(migrated)))).toEqual(stable(migrated))
+  })
+
+  it('a v11 layout goes through the v12 note step and then the v13 step to the same result', () => {
+    // The same layout as a v11 build stored it: the note three rows tall, everything below it two
+    // rows lower.
+    const asV11: any = clone(PROD_V12)
+    asV11.version = 11
+    const ov = asV11.pages.find((p: any) => p.id === 'bsk-overview')
+    for (const w of ov.widgets) {
+      if (w.id === 'ow-note-smallsample') w.h = 3
+      else if (w.y >= 1) w.y += 2
+    }
+    const fromV11 = normalizeConfig(asV11)
+    expect(stable(fromV11)).toEqual(stable(migrated))
   })
 })
 
