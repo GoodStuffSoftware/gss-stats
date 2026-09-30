@@ -128,7 +128,7 @@ describe('read-page rendering', () => {
     const { doc } = render(buildReadPage({ template, raw, narrative }))
     const rows = [...doc.getElementById('first-session')!.querySelectorAll('tbody tr')].map((tr) => [...tr.querySelectorAll('td')].map((td) => td.textContent))
     expect(rows.find((r) => r[0] === 'Game views')).toEqual(['Game views', '64', '1,900', ''])
-    expect(rows.find((r) => r[0] === 'Game complete')).toEqual(['Game complete', '0', '41', '0.0% of game views (0/64)'])
+    expect(rows.find((r) => r[0] === 'Game complete')).toEqual(['Game complete', '0', '41', '']) // no ratio against game views (mixed units)
     expect(rows.find((r) => r[0] === 'First move')).toEqual(['First move', 'not yet tracked', 'no rows yet', ''])
     expect(rows.find((r) => r[0] === 'Welcome card shown')![1]).toBe('not yet tracked')
   })

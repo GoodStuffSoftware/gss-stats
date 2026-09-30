@@ -53,6 +53,7 @@ import {
   spendTotals,
   summarizeReturns,
   siteSigninShown,
+  siteTutorialAsksShown,
   summarizeSiteEvents,
   summarizeTaggedRows,
   buildFirstSessionFunnel,
@@ -488,6 +489,7 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
           asks: tagged.summary.asks.total,
           taggedArrivals: tagged.summary.taggedArrivals,
           siteSigninShown: siteRows.ok ? siteSigninShown(siteRows.value, attributionStartMs(campaign), windowEnd) : null,
+          siteTutorialAsks: siteRows.ok ? siteTutorialAsksShown(siteRows.value, attributionStartMs(campaign), windowEnd) : null,
         }
       : null,
   })
@@ -801,7 +803,7 @@ export interface MorningResult {
   /** First-session funnel since attribution start (informational only; never a kill rule):
    * tagged counts with site-wide web counts alongside. null in health-only mode or when the
    * tagged read failed; `siteError` says why the site-wide side is missing. */
-  firstSession: { funnel: FirstSessionFunnel; siteError: string | null } | null
+  firstSession: { funnel: FirstSessionFunnel; siteError: string | null; arrivalsError?: string | null } | null
   thresholdRead: FullRead | null
   hardCapDaily: RuleResult | null
   releaseHealth: HealthSection
@@ -843,9 +845,13 @@ export function morningPushText(r: MorningResult): string | null {
     const bits = [`BSK retest $${Math.max(...t.thresholds)} read: ${money(t.cumulativeSpend)} spent`]
     const tc = t.tagged?.summary
     if (tc) bits.push(`${tc.taggedArrivals} tagged arrivals, ${tc.asks.total} asks, ${tc.authSuccess} auth successes`)
+    const watching = t.kill.rules.filter((x) => x.status === 'watch').map((x) => x.id)
+    const onWatch = watching.length ? `WATCH (${watching.join(', ')})` : ''
     if (t.kill.tripped.length && t.kill.proposal === 'PROPOSE PAUSE') bits.push(`PROPOSE PAUSE (${t.kill.tripped.join(', ')})`)
     else if (t.kill.tripped.length) bits.push(`rules tripped (${t.kill.tripped.join(', ')}) but campaign ${t.kill.servingState}, no pause proposed`)
-    else bits.push(t.complete ? 'no kill rule tripped, continue' : 'read incomplete, will retry')
+    else if (!t.complete) bits.push('read incomplete, will retry')
+    else bits.push(onWatch ? `no kill rule tripped, ${onWatch}, continue` : 'no kill rule tripped, continue')
+    if (onWatch && (t.kill.tripped.length || !t.complete)) bits.push(onWatch)
     if (t.decision) bits.push(`${signUpsPhrase(t.decision)}, row ${t.decision.row}`)
     if (t.segments) bits.push(`split at the upsell fix: pre-fix ${t.segments.pre.asks} asks/${t.segments.pre.signUps.count} sign-ups, post-fix ${t.segments.post.asks} asks/${t.segments.post.signUps.count} sign-ups`)
     const share = t.placements?.outsideShare
@@ -956,12 +962,20 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
   let firstSession: MorningResult['firstSession'] = null
   if (!opts.healthOnly && taggedRows.ok) {
     const sinceMs = attributionStartMs(campaign)
+    const untilMs = Math.min(deps.nowMs, flightEndExclusiveMs(campaign)) // the tagged side's end too
     const siteFs = beacon?.siteFirstSession
-      ? await attempt('beacon site first-session', () => beacon.siteFirstSession!(sinceMs))
+      ? await attempt('beacon site first-session', () => beacon.siteFirstSession!(sinceMs, untilMs))
       : unavailable<FirstSessionRowSite[]>('beacon site first-session', beacon ? 'not supported by this beacon source' : deps.beaconInitError)
+    const d0 = beacon?.returnArrivals
+      ? await attempt('beacon first-session arrivals', () => beacon.returnArrivals!(campaign, sinceMs, untilMs))
+      : unavailable<{ path: string; count: number }[]>('beacon first-session arrivals', beacon ? 'not supported by this beacon source' : deps.beaconInitError)
     firstSession = {
-      funnel: buildFirstSessionFunnel(tallyTaggedFirstSession(taggedRows.value), siteFs.ok ? tallySiteFirstSession(siteFs.value) : null),
+      funnel: buildFirstSessionFunnel(
+        tallyTaggedFirstSession(taggedRows.value, d0.ok ? { rows: d0.value, ucValues: campaign.ucValues } : null),
+        siteFs.ok ? tallySiteFirstSession(siteFs.value) : null,
+      ),
       siteError: siteFs.ok ? null : siteFs.error,
+      arrivalsError: d0.ok ? null : d0.error,
     }
   }
 

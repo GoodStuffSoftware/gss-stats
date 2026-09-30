@@ -235,11 +235,11 @@ export function formatMorningReport(r: MorningResult): string {
 
 export const NOT_YET_TRACKED = 'not yet tracked'
 
-/** "<tagged> · site-wide <site>", or "not yet tracked" when the path has no rows at all (the
+/** "<tagged> · site-wide <site>", or "not yet tracked" when its beacon family has no rows at all (the
  * release sending it is not live yet — never read as a zero step). */
 export function firstSessionFigureText(f: FirstSessionFigure): string {
   if (f.tracked === false) return `${NOT_YET_TRACKED} (no rows yet)`
-  return `${n(f.tagged)} · site-wide ${f.site == null ? 'not read' : n(f.site)}`
+  return `${f.tagged == null ? 'not read' : n(f.tagged)} · site-wide ${f.site == null ? 'not read' : n(f.site)}`
 }
 
 /** The first-session funnel block (informational only: never a kill rule, never a push). */
@@ -247,7 +247,7 @@ export function firstSessionLines(fs: MorningResult['firstSession']): string[] {
   if (!fs) return ['First-session funnel: not read (tagged beacon rows unavailable)']
   const f = fs.funnel
   const out = [
-    `First-session funnel since attribution start (informational only; never a kill rule). Tagged rows, site-wide web rows alongside; row counts with no visitor join, so "vs" figures are row ratios, not per-visitor conversion:${fs.siteError ? ` [site-wide not read: ${fs.siteError}]` : ''}`,
+    `First-session funnel since attribution start (informational only; never a kill rule). Tagged rows, site-wide web rows alongside; row counts with no visitor join, so "vs" figures are row ratios, not per-visitor conversion:${fs.siteError ? ` [site-wide not read: ${fs.siteError}]` : ''}${fs.arrivalsError ? ` [tagged arrivals not read: ${fs.arrivalsError}]` : ''}`,
   ]
   for (const k of FIRST_SESSION_STEPS) {
     const st = f.steps[k]
