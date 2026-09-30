@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   classifyPopupPath,
+  popupFamilyOf,
   isPopupEventPath,
   popupExcludeClause,
   popupIncludeClause,
@@ -128,6 +129,16 @@ describe('classifyPopupPath', () => {
     expect(classifyPopupPath('/signin-prompt/streak')).toEqual({ family: 'signin-prompt', kind: 'shown', extra: 'streak' })
     expect(classifyPopupPath('/signin-prompt/accept')).toEqual({ family: 'signin-prompt', kind: 'accept' })
     expect(classifyPopupPath('/signin-prompt/dismiss')).toEqual({ family: 'signin-prompt', kind: 'dismiss' })
+    // the tutorial ask (2026-09-30) is a shown reason like any other, never a response
+    expect(classifyPopupPath('/signin-prompt/tutorial')).toEqual({ family: 'signin-prompt', kind: 'shown', extra: 'tutorial' })
+  })
+  it('welcome-signed-in: shown, daily/leaderboard taps as accept, dismiss; nothing else', () => {
+    expect(classifyPopupPath('/welcome-signed-in/shown')).toEqual({ family: 'welcome-signed-in', kind: 'shown' })
+    expect(classifyPopupPath('/welcome-signed-in/daily')).toEqual({ family: 'welcome-signed-in', kind: 'accept', extra: 'daily' })
+    expect(classifyPopupPath('/welcome-signed-in/leaderboard')).toEqual({ family: 'welcome-signed-in', kind: 'accept', extra: 'leaderboard' })
+    expect(classifyPopupPath('/welcome-signed-in/dismiss')).toEqual({ family: 'welcome-signed-in', kind: 'dismiss' })
+    expect(classifyPopupPath('/welcome-signed-in/other')).toBeNull()
+    expect(popupFamilyOf('/welcome-signed-in/shown', Date.parse('2026-09-30T12:00:00Z'))).toBe('') // not a POPUPS panel
   })
 
   it('signin-eligible: earned/capped/unearned only', () => {
@@ -363,7 +374,7 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
   // exactly how '/return' was accidentally left off this list on this branch — see the
   // 2026-09-25 review). If this ever fails, either a prefix was removed (update this
   // literal list deliberately) or one was never added (fix the array instead).
-  it('POPUP_EVENT_PREFIXES is exactly these 13 prefixes', () => {
+  it('POPUP_EVENT_PREFIXES is exactly these 17 prefixes', () => {
     expect([...POPUP_EVENT_PREFIXES]).toEqual([
       '/signin-prompt',
       '/signin-eligible',
@@ -378,7 +389,21 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
       '/auth/success/email/',
       '/auth/error',
       '/auth/redirect',
+      '/tour',
+      '/game/first-move',
+      '/game/abandon',
+      '/welcome-signed-in',
     ])
+  })
+  it('the first-session beacons are events; /game itself stays a page view', () => {
+    for (const p of ['/tour/start', '/tour/complete', '/tour/skip', '/game/first-move', '/game/abandon/0', '/game/abandon/76-99', '/welcome-signed-in/shown', '/welcome-signed-in/leaderboard']) {
+      expect(isPopupEventPath(p), p).toBe(true)
+    }
+    expect(isPopupEventPath('/game')).toBe(false)
+    expect(isPopupEventPath('/tournament')).toBe(false)
+    expect(isPopupEventPath('/game/abandoned')).toBe(false)
+    expect(pathFamilyOf('/game/abandon/1-25')).toBe('game-abandon')
+    expect(pathFamilyOf('/welcome-signed-in/daily')).toBe('welcome-signed-in')
   })
   it("the new/existing auth rows are events (they ride alongside the base row); the base rows stay page views", () => {
     for (const p of ['/auth/success/google/new', '/auth/success/google/existing', '/auth/success/email/unknown']) expect(isPopupEventPath(p)).toBe(true)

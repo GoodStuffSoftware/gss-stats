@@ -48,6 +48,13 @@
     ],
     "returnSites": [
       { "site": "bestsudoku-web", "count": 41, "first": "2026-09-26T16:10:00Z", "last": "2026-09-29T23:40:00Z" }
+    ],
+    "siteFirstSession": [
+      { "path": "", "newVisitors": 410, "count": 5200 },
+      { "path": "/game", "newVisitors": 12, "count": 1900 },
+      { "path": "/game/complete/normal/easy", "newVisitors": 0, "count": 41 },
+      { "path": "/signin-prompt/placement", "newVisitors": 0, "count": 9 },
+      { "path": "/promo-first50/shown", "newVisitors": 0, "count": 6 }
     ]
   },
   "store": {

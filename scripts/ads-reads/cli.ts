@@ -8,7 +8,7 @@
 
 import fs from 'node:fs'
 import { parseArgs } from 'node:util'
-import { ADS_CUSTOMER_ID, RETEST_CAMPAIGN_ID, type ReadingRecord, type ReturnRow, type ReturnSiteStat, type SpendDay, type StoredSpend, type TaggedRow } from '../../src/lib/adsRules'
+import { ADS_CUSTOMER_ID, RETEST_CAMPAIGN_ID, type FirstSessionRowSite, type ReadingRecord, type ReturnRow, type ReturnSiteStat, type SpendDay, type StoredSpend, type TaggedRow } from '../../src/lib/adsRules'
 import type { PlacementDayRow } from '../../src/lib/adsStore'
 import type { HourPathCount } from '../../src/lib/popupEvents'
 import {
@@ -125,6 +125,8 @@ export interface Fixture {
     siteEvents: (Omit<HourPathCount, 'hourStartMs'> & { hour?: string; hourStartMs?: number })[]
     returns: ReturnRow[]
     returnSites: (Omit<ReturnSiteStat, 'firstMs' | 'lastMs'> & { first?: string | null; last?: string | null; firstMs?: number | null; lastMs?: number | null })[]
+    /** Site-wide first-session rows (beacon.ts siteFirstSessionQuery); absent = not read. */
+    siteFirstSession?: FirstSessionRowSite[]
   } | { error: string }
   store?: { spend?: StoredSpend | null; readings?: ReadingRecord[]; consumed?: number[] }
   firebase?: FirebaseCounts | null
@@ -143,6 +145,7 @@ export function fixtureDeps(fx: Fixture, dryRun: boolean): ReadDeps & { store: R
         siteEvents: async (sinceMs) => beacon.siteEvents.map((r) => ({ hourStartMs: hourMs(r), path: r.path, count: r.count })).filter((r) => r.hourStartMs >= sinceMs),
         returns: async () => beacon.returns,
         returnSites: async () => beacon.returnSites.map((s) => ({ site: s.site, count: s.count, firstMs: optMs(s.first, s.firstMs), lastMs: optMs(s.last, s.lastMs) })),
+        ...(beacon.siteFirstSession ? { siteFirstSession: async () => beacon.siteFirstSession! } : {}),
       }
     : null
   return {
