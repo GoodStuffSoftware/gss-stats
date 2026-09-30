@@ -19,6 +19,9 @@ const props = defineProps<{
   index: number
   count: number
   errors: string[]
+  /** A preset's template shown for reading (CardEditor's preset mode): every control disabled,
+   * no reorder/duplicate/remove, but the item still opens so its settings can be read. */
+  readonly?: boolean
 }>()
 const emit = defineEmits<{ 'move': [dir: -1 | 1]; duplicate: []; remove: [] }>()
 const item = defineModel<MetricItem>({ required: true })
@@ -86,6 +89,14 @@ const whenNotStarted = computed<'default' | 'label' | 'zero'>({
     item.value = withGating(item.value, { whenNotStarted: v === 'default' ? undefined : v })
   },
 })
+/** gating.whenZero: a measured count of exactly 0 is left out. */
+const whenZeroOmit = computed<boolean>({
+  get: () => item.value.gating?.whenZero === 'omit',
+  set: (v) => {
+    if (v === whenZeroOmit.value) return
+    item.value = withGating(item.value, { whenZero: v ? 'omit' : undefined })
+  },
+})
 /** The note a "Show a note" pick had, so switching to dash/omit and back restores it. */
 let lastWhenEmptyNote = ''
 const whenEmptyKind = computed<'dash' | 'omit' | 'note'>({
@@ -151,7 +162,7 @@ const itemRepeatModel = computed({
         <span class="ce-item-summary-text">{{ summaryLabel }} · {{ summaryData }} · {{ displayAsLabel(item.display.as) }}</span>
         <span v-if="errors.length" class="chip" style="color: #bc4749">{{ errors.length }} error{{ errors.length > 1 ? 's' : '' }}</span>
       </button>
-      <span class="ce-item-controls">
+      <span v-if="!readonly" class="ce-item-controls">
         <button type="button" class="icon-btn" title="Move up" :disabled="index === 0" @click="emit('move', -1)">↑</button>
         <button type="button" class="icon-btn" title="Move down" :disabled="index === count - 1" @click="emit('move', 1)">↓</button>
         <button type="button" class="icon-btn" title="Duplicate" @click="emit('duplicate')">⧉</button>
@@ -163,7 +174,7 @@ const itemRepeatModel = computed({
       <li v-for="(e, i) in errors" :key="i">{{ e }}</li>
     </ul>
 
-    <div v-if="open" class="ce-item-body">
+    <fieldset v-if="open" class="ce-item-body ce-fieldset" :disabled="readonly">
       <CardEditorLabel v-model="item.label" :has-data="hasData" :repeat-over="innermostOver" />
       <CardEditorData v-model="item.data" :repeat-over="innermostOver" />
       <CardEditorDisplay v-model="item.display" :binding="item.data" />
@@ -187,6 +198,9 @@ const itemRepeatModel = computed({
               <option value="label">Always "not started"</option>
               <option value="zero">Show 0</option>
             </select>
+          </div>
+          <div class="field check">
+            <label><input type="checkbox" v-model="whenZeroOmit" /> Leave out a measured 0</label>
           </div>
           <div class="field">
             <label :for="minCohortId">Minimum cohort</label>
@@ -231,11 +245,12 @@ const itemRepeatModel = computed({
               <option value="row">Row</option>
               <option value="pill">Pill</option>
               <option value="tile">Tile</option>
+              <option value="column">Column</option>
             </select>
           </div>
         </div>
       </details>
-    </div>
+    </fieldset>
   </li>
 </template>
 

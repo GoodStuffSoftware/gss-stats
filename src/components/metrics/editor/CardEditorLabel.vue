@@ -5,7 +5,7 @@
 // item's `label` and its `caption` (both are `Label`) — `allowMetricOwn` hides the "metric's own
 // name" option for a caption, which has no natural registry counterpart.
 import { computed, ref, useId } from 'vue'
-import { isKnownNote, labelKind, labelNoteOptions, makeLabel, scopePathOptions, withNoteId, type LabelKind } from '../../../lib/metrics/editorModel'
+import { isKnownNote, labelKind, labelNoteOptions, makeLabel, noteVarNames, scopePathLabel, scopePathOptions, withNoteId, withNoteVar, type LabelKind } from '../../../lib/metrics/editorModel'
 import type { Label, RepeatSpec, ScopePath } from '../../../lib/metrics/types'
 
 const props = withDefaults(
@@ -59,6 +59,26 @@ const noteId = computed<string>({
     label.value = withNoteId(label.value, v)
   },
 })
+// ── Variables (Label.vars): each `{name}` in the note's template can read a scope field of the
+// instance the label sits in (e.g. {campaign} → the campaign's name). Rows: the note's own
+// placeholders, plus any var already stored under another name (never hidden, so never lost).
+const noteVars = computed<Record<string, ScopePath>>(() => (label.value && typeof label.value === 'object' && 'note' in label.value ? (label.value.vars ?? {}) : {}))
+const varRows = computed<string[]>(() => {
+  const names = noteId.value ? noteVarNames(noteId.value) : []
+  for (const k of Object.keys(noteVars.value)) if (!names.includes(k)) names.push(k)
+  return names
+})
+/** The paths a var may read: the repeat's own fields, plus its current path when that is outside
+ * them (a preset's binding stays shown and selected, never blanked by the picker). */
+function varOptions(name: string): { value: ScopePath; label: string }[] {
+  const cur = noteVars.value[name]
+  const opts = scopeOptions.value
+  return cur && !opts.some((o) => o.value === cur) ? [...opts, { value: cur, label: scopePathLabel(cur) }] : opts
+}
+function setVar(name: string, path: ScopePath | '') {
+  if ((noteVars.value[name] ?? '') === path) return
+  label.value = withNoteVar(label.value, name, path)
+}
 const noteSearch = ref('')
 const noteChoices = computed(() => {
   const q = noteSearch.value.trim().toLowerCase()
@@ -116,6 +136,18 @@ const bindPath = computed<ScopePath>({
         <option v-for="o in noteChoices" :key="o.value" :value="o.value">{{ o.preview }}</option>
       </select>
       <p v-if="noteInvalid" class="hint">Unknown note id "{{ noteId }}".</p>
+      <div v-if="varRows.length" class="field" role="group" :aria-labelledby="`${groupId}-vars`">
+        <label :id="`${groupId}-vars`">Variables <span class="hint">— fill the note's {placeholders} from the repeat</span></label>
+        <div v-for="name in varRows" :key="name" class="row">
+          <div class="field">
+            <label :for="`${groupId}-var-${name}`">{{ '{' + name + '}' }}</label>
+            <select :id="`${groupId}-var-${name}`" :value="noteVars[name] ?? ''" @change="setVar(name, ($event.target as HTMLSelectElement).value as ScopePath | '')">
+              <option value="">(the note's default)</option>
+              <option v-for="o in varOptions(name)" :key="o.value" :value="o.value">{{ o.label }}</option>
+            </select>
+          </div>
+        </div>
+      </div>
     </template>
 
     <template v-else-if="kind === 'bind'">
