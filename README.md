@@ -90,6 +90,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   regression from this app's own code. Resizing a chart currently needs a mouse or touch;
   every other chart action (edit, remove, zoom, duplicate, set-as-default) has a real
   button and works from the keyboard.
+- **Full width** — there's no centred max-width column: the header (a strip across the window),
+  the filter bar and the chart grid span the window with a 16px gutter (12px on a phone), so a
+  wide screen shows wider charts, and the pinned filter bar (below) spans it too.
 - **The main filter bar is always visible**, in normal flow directly under the header
   (range, sites, exclusions, sync-across-pages). If it scrolls out of view, a
   small "show filters" button appears top-right — see the IntersectionObserver on

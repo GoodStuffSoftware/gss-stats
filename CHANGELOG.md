@@ -87,6 +87,9 @@ All notable changes to **gss-stats** are documented here. The format follows
   install rate** on the Pop-ups page, as counts.
 
 ### Changed
+- **The dashboard uses the full width of the window.** The header, the filter bar and the charts
+  span the screen instead of a centred column, so wide screens show more; the pinned filter bar
+  spans it too.
 - **Deleting a page also deletes its drill pages.** You're asked once, with the count ("Delete
   Traffic and its 3 drill pages?").
 - **The page you're on is yours alone.** It's remembered in your own browser instead of the shared
