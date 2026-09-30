@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 //
-// Layout version 12: the page a viewer is on is theirs alone. It is remembered in this browser
+// Layout version 13: the page a viewer is on is theirs alone. It is remembered in this browser
 // (lib/viewerPrefs.ts), a first-time viewer lands on ★ Overview, and switching pages never writes
-// the shared config (no PUT). A real change still saves, as v12, with the landing page untouched.
+// the shared config (no PUT). A real change still saves, as v13, with the landing page untouched.
 // A drill creates its page at once, nested under the root page it came from.
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -34,10 +34,11 @@ vi.mock('./session', async (importOriginal) => {
 
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x))
 const pastDebounce = () => new Promise((r) => setTimeout(r, 800))
-function storedV11() {
-  // The live layout as the v11 build stores it: the Best Sudoku overview as the shared active page.
+function storedV12() {
+  // The live layout as the v12 build stores it (before page navigation): no groups, the
+  // "Best Sudoku · " names, and the Best Sudoku overview as the shared active page.
   const c: any = clone(PROD_V9)
-  c.version = 11
+  c.version = 12
   return c
 }
 async function mountApp() {
@@ -57,16 +58,16 @@ async function goTo(w: any, name: string) {
 const shownPage = (w: any) => (w.find('.foot').text() as string).split(' · ')[0]
 const remembered = () => JSON.parse(localStorage.getItem(VIEWER_PREFS_KEY) ?? 'null')
 
-describe('App — the active page is per viewer (layout version 12)', () => {
+describe('App — the active page is per viewer (layout version 13)', () => {
   beforeEach(() => {
     localStorage.clear()
     vi.mocked(saveConfig).mockClear()
-    vi.mocked(loadConfig).mockImplementation(async () => storedV11())
+    vi.mocked(loadConfig).mockImplementation(async () => storedV12())
   })
 
   it('a first-time viewer lands on ★ Overview, not the shared config\'s old active page', async () => {
     const w = await mountApp()
-    // ★ Overview (id default: RUM charts), not the Best Sudoku overview (cards) the v11 config had
+    // ★ Overview (id default: RUM charts), not the Best Sudoku overview (cards) the v12 config had
     expect(shownWidgetIds(w)).toContain('trend')
     expect(shownWidgetIds(w)).not.toContain('ow-kpis')
     w.unmount()
@@ -87,7 +88,7 @@ describe('App — the active page is per viewer (layout version 12)', () => {
     again.unmount()
   })
 
-  it('a real change saves the config as v12, with the landing page left at ★ Overview', async () => {
+  it('a real change saves the config as v13, with the landing page left at ★ Overview', async () => {
     const w = await mountApp()
     await goTo(w, 'Traffic')
     await w.find('.page-menu-btn').trigger('click')
@@ -98,7 +99,7 @@ describe('App — the active page is per viewer (layout version 12)', () => {
     await flushPromises()
     expect(saveConfig).toHaveBeenCalledTimes(1)
     const saved = vi.mocked(saveConfig).mock.calls[0][0]
-    expect(saved.version).toBe(12)
+    expect(saved.version).toBe(13)
     expect(saved.activePageId).toBe('default')
     expect(saved.pages.find((p) => p.id === 'bsk-launch')).toMatchObject({ name: 'Traffic (all)', group: 'Best Sudoku', icon: 'trending-up' })
     w.unmount()

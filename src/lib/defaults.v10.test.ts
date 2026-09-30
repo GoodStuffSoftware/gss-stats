@@ -5,7 +5,7 @@
 // deleted and renamed variants, and on an already-v10 layout; plus normCardRef, which keeps a
 // saved card through the field whitelist and turns a bad one into a placeholder.
 import { describe, expect, it } from 'vitest'
-import { CONFIG_VERSION, defaultConfig, migrateCardsV10, normalizeConfig, syncCardWithView, withCardForView } from './defaults'
+import { CONFIG_VERSION, compactSmallSampleNoteV12, defaultConfig, migrateCardsV10, normalizeConfig, syncCardWithView, withCardForView } from './defaults'
 import { INVALID_CARD_PRESET, normCardRef } from './metrics/validate'
 import { presetById } from './metrics/presets'
 import type { DashboardConfig, DashboardPage, Widget } from '../types'
@@ -73,7 +73,10 @@ describe('v10: the production layout (sanitised)', () => {
   // The panels that became standard charts on production, swapped in place (v11).
   const CHARTED = ['bsk-campaigns/cw-hour', 'bsk-campaigns/cw-flightday'] as const
   it('v9 → current changes exactly the panels, by adding a card, and nothing else', () => {
-    const before = widgetsById(PROD_V9 as unknown as DashboardConfig)
+    // v12's note-row compaction applied to the before side too (compactSmallSampleNoteV12), so
+    // this still isolates the panel changes.
+    const v9 = clone(PROD_V9) as unknown as DashboardConfig
+    const before = widgetsById({ ...v9, pages: v9.pages.map(compactSmallSampleNoteV12) })
     const after = widgetsById(v10FromV9)
     expect([...after.keys()]).toEqual([...before.keys()]) // no widget added, removed or reordered
     // Compared by content: key order and absent-vs-undefined fields don't count (normWidget
@@ -92,7 +95,7 @@ describe('v10: the production layout (sanitised)', () => {
       expect(card, k).toEqual({ preset: CARDED[k] })
       expect(rest, k).toEqual(before.get(k)) // id, title, dataset/view, x/y/w/h, notes: all kept
     }
-    // Every page is kept, in order (its v12 name, group and the landing page: defaults.v12.test.ts).
+    // Every page is kept, in order (its v13 name, group and the landing page: defaults.v13.test.ts).
     expect(v10FromV9.pages.map((p) => p.id)).toEqual((PROD_V9 as any).pages.map((p: DashboardPage) => p.id))
   })
 

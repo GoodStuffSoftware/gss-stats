@@ -7,7 +7,7 @@ import { loadConfig, saveConfig } from './api'
 import { loadSites, sitesTree, tokenLabel } from './sitesStore'
 import { isSiteDim, semanticKey, drillNeedsEventBeacons } from './lib/drill'
 import { sessionExpired, reauth } from './session'
-import { readViewerPrefs, writeViewerPrefs, initialPageId } from './lib/viewerPrefs'
+import { readViewerPrefs, writeViewerPrefs, initialPageId, readDarkPref, writeDarkPref } from './lib/viewerPrefs'
 import { rootOf, drillTrail, groupLandingPage, pagesToDelete, movePageToGroup } from './lib/nav'
 import { SearchIcon, MenuIcon, EllipsisIcon, StarIcon, type IconKey } from './lib/icons'
 import NavBreadcrumb from './components/nav/NavBreadcrumb.vue'
@@ -30,7 +30,7 @@ const editing = ref<{ widget: Widget; isNew: boolean } | null>(null)
 const dark = ref(false)
 const saveState = ref<'idle' | 'saving' | 'saved' | 'error' | 'stale'>('idle')
 
-// The page currently being viewed/edited — per VIEWER (layout version 12): remembered in this
+// The page currently being viewed/edited — per VIEWER (layout version 13): remembered in this
 // browser (lib/viewerPrefs.ts), never written to the shared config, so switching pages costs no KV
 // write and never moves anyone else. `config.activePageId` is only the landing page for a viewer
 // with nothing remembered (★ Overview).
@@ -67,7 +67,7 @@ const showSmallSampleNote = computed(() => isBestSudokuPopupsPage(activePage.val
 const isCampaignPage = computed(() => isCampaignComparePage(activePage.value))
 
 onMounted(async () => {
-  dark.value = localStorage.getItem('gss-stats-dark') === '1'
+  dark.value = readDarkPref()
   applyDark()
 
   // Load the durable config and the auto-built site tree in parallel; the tree must
@@ -115,23 +115,42 @@ function configJson(c: DashboardConfig): string {
     return key === 'moved' && this && typeof this === 'object' && 'i' in this && 'x' in this ? undefined : value
   })
 }
+// The body of the newest PUT still awaiting its answer. A change is judged against it (not just
+// the last completed save), so reverting while a save is in flight still sends the revert.
+let inFlight: string | null = null
+// Every PUT gets the next number; lastSavedJson only moves forward, so an older PUT answering
+// after a newer one never points it back at the older body.
+let saveSeq = 0
+let savedSeq = 0
 function scheduleSave() {
   // Never save while signed out: a config that fell back to defaults because the load
   // was refused must not overwrite the stored one.
   if (!loaded.value || sessionExpired.value) return
-  if (configJson(config) === lastSavedJson) return
+  if (configJson(config) === (inFlight ?? lastSavedJson)) return
   saveState.value = 'saving'
   clearTimeout(saveTimer)
-  saveTimer = window.setTimeout(async () => {
-    const body = configJson(config)
-    if (body === lastSavedJson) {
-      saveState.value = 'saved'
-      return
-    }
-    const ok = await saveConfig(JSON.parse(body) as DashboardConfig)
-    if (ok === true) lastSavedJson = body
-    saveState.value = ok === 'stale' ? 'stale' : ok ? 'saved' : 'error'
-  }, 700)
+  saveTimer = window.setTimeout(flushSave, 700)
+}
+async function flushSave() {
+  const body = configJson(config)
+  if (body === (inFlight ?? lastSavedJson)) {
+    // nothing new to send; a PUT still in flight reports its own outcome
+    if (inFlight === null) saveState.value = 'saved'
+    return
+  }
+  const seq = ++saveSeq
+  inFlight = body
+  const ok = await saveConfig(JSON.parse(body) as DashboardConfig)
+  if (ok === true && seq > savedSeq) {
+    lastSavedJson = body
+    savedSeq = seq
+  }
+  // A newer PUT went out meanwhile: it owns inFlight and the status.
+  if (seq !== saveSeq) return
+  inFlight = null
+  saveState.value = ok === 'stale' ? 'stale' : ok ? 'saved' : 'error'
+  // The config moved on (or back) while this PUT was out: send what's on screen now.
+  if (ok === true && configJson(config) !== lastSavedJson) scheduleSave()
 }
 watch(config, scheduleSave, { deep: true })
 
@@ -225,6 +244,9 @@ function isTypingTarget(t: EventTarget | null): boolean {
 function onSlashKey(e: KeyboardEvent) {
   if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return
   if (isTypingTarget(e.target) || searchOpen.value || editing.value) return
+  // …nor while a menu or another dialog has the keyboard (the drawer is the exception: / searches over it)
+  if (pageMenu.value || iconFor.value || drillMenu.value) return
+  if (document.querySelector('[role="dialog"][aria-modal="true"]:not(#nav-drawer), dialog[open]')) return
   e.preventDefault()
   openSearch()
 }
@@ -520,7 +542,7 @@ function openFilteredPage() {
 // v0.6 (PR #9, commit 672aa24) hid this bar behind a small top-right toggle. The owner wants
 // it back in normal flow, in EXACTLY its pre-v0.6 position/order/spacing/styling/wrapping —
 // see commit 8692b0f's src/App.vue (the last commit before that merge): directly under the page
-// navigation (the header since layout version 12), always visible, no overlay/collapse. It's
+// navigation (the header since layout version 13), always visible, no overlay/collapse. It's
 // restored in the template below as a plain
 // in-flow section (`barSectionEl`), unconditionally rendered whenever `!isCampaignPage` (the
 // campaign page still doesn't use it — unchanged from before).
@@ -672,7 +694,7 @@ function applyDark() {
 }
 function toggleDark() {
   dark.value = !dark.value
-  localStorage.setItem('gss-stats-dark', dark.value ? '1' : '0')
+  writeDarkPref(dark.value)
   applyDark()
 }
 </script>
@@ -895,7 +917,7 @@ function toggleDark() {
 </template>
 
 <style scoped>
-/* Full width (layout version 12): no centred max-width column — the header, the filter bar and the
+/* Full width (layout version 13): no centred max-width column — the header, the filter bar and the
    chart grid span the window, with a 16px gutter, so wide screens fit more charts per row. */
 .app {
   padding: 0 16px 60px;
@@ -1090,6 +1112,11 @@ function toggleDark() {
   pointer-events: auto;
 }
 .fb-toggle {
+  /* Positioned and stacked above .fb-pinned (1150): both live inside .fb-anchor's own stacking
+     context, where a positioned panel paints over a non-positioned sibling whatever the anchor's
+     z-index — without this the open pin covered the very button meant to close it. */
+  position: relative;
+  z-index: 1160;
   width: 34px;
   height: 34px;
   display: flex;
@@ -1128,7 +1155,8 @@ function toggleDark() {
   left: 0;
   right: 0;
   /* Above the drill-down menu (1100) and a zoomed ChartCard (1000/1001), below the toggle
-     itself (1200) so the toggle button always stays clickable to unpin. */
+     button itself (.fb-toggle, 1160 in the same .fb-anchor stacking context) so it always stays
+     clickable to unpin. */
   z-index: 1150;
   background: rgb(var(--surface));
   border-bottom: 1px solid rgb(var(--line-2));
