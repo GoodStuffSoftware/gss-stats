@@ -36,3 +36,40 @@ service = "gss-stats-sync"
 # Secret (NOT here): CF_ANALYTICS_TOKEN — set per-environment via
 #   npx wrangler pages secret put CF_ANALYTICS_TOKEN
 # and locally via .dev.vars (gitignored).
+
+# ── Preview environment (Pages preview deployments only) ─────────────────────────
+# Pages uses [env.preview] for every non-production-branch deploy, e.g.
+#   npx wrangler pages deploy dist --project-name gss-stats --branch dev
+# which serves at https://dev.gss-stats.pages.dev. There is no [env.production], so
+# production keeps using the top-level config above, unchanged. Bindings and vars are
+# NOT inherited from the top level, so every binding is repeated here. See README
+# "Deploy" → "Preview (dev)" and the 2026-09-30 amendment in docs/adr/0002-google-auth.md.
+[env.preview]
+
+# Preview's OWN config store (gss-stats-config-preview), seeded with a copy of the
+# production dashboard; preview saves never touch production's STATS_CONFIG.
+[[env.preview.kv_namespaces]]
+binding = "STATS_CONFIG"
+id = "7c960394bc934b07a0564e58525c1f73"
+
+# The same real D1 stores as production: preview reads live geo and ads data.
+[[env.preview.d1_databases]]
+binding = "gss_geo"
+database_name = "gss-geo"
+database_id = "fa0b2929-0086-479e-ae10-50509c34ebf8"
+
+[[env.preview.d1_databases]]
+binding = "gss_stats_ads"
+database_name = "gss-stats-ads"
+database_id = "785327a3-683c-4f85-819d-abe11efcacc9"
+migrations_dir = "migrations/gss-stats-ads"
+
+# The real sync Worker: an ads refresh on preview runs a real Google Ads sync.
+[[env.preview.services]]
+binding = "ADS_SYNC"
+service = "gss-stats-sync"
+
+# The one extra hostname the host guard (functions/_middleware.ts) serves, and only
+# where this var is set: preview deployments. Production never has it.
+[env.preview.vars]
+PREVIEW_HOST = "dev.gss-stats.pages.dev"
