@@ -1109,6 +1109,11 @@ function toggleDark() {
   pointer-events: auto;
 }
 .fb-toggle {
+  /* Positioned and stacked above .fb-pinned (1150): both live inside .fb-anchor's own stacking
+     context, where a positioned panel paints over a non-positioned sibling whatever the anchor's
+     z-index — without this the open pin covered the very button meant to close it. */
+  position: relative;
+  z-index: 1160;
   width: 34px;
   height: 34px;
   display: flex;
@@ -1147,7 +1152,8 @@ function toggleDark() {
   left: 0;
   right: 0;
   /* Above the drill-down menu (1100) and a zoomed ChartCard (1000/1001), below the toggle
-     itself (1200) so the toggle button always stays clickable to unpin. */
+     button itself (.fb-toggle, 1160 in the same .fb-anchor stacking context) so it always stays
+     clickable to unpin. */
   z-index: 1150;
   background: rgb(var(--surface));
   border-bottom: 1px solid rgb(var(--line-2));
