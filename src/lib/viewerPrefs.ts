@@ -1,4 +1,4 @@
-// Per-viewer navigation state (layout version 12): which page this viewer is on, the page they
+// Per-viewer navigation state (layout version 13): which page this viewer is on, the page they
 // last viewed in each group, and which drawer groups they collapsed. It lives in this browser's
 // localStorage, NOT in the shared dashboard config: everyone shares one config in KV and the last
 // write wins, so one person switching pages must never move everyone else (or cost a KV write).
@@ -63,4 +63,24 @@ export function initialPageId(pages: readonly DashboardPage[], prefs: ViewerPref
   if (has(prefs.active)) return prefs.active
   if (has(landingId)) return landingId
   return (pages.find((p) => p.isDefault) ?? pages[0]).id
+}
+
+export const DARK_PREF_KEY = 'gss-stats-dark'
+
+/** Whether this viewer chose dark mode. A blocked or throwing localStorage reads as "no". */
+export function readDarkPref(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(DARK_PREF_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+/** Remember this viewer's dark-mode choice. Never throws. */
+export function writeDarkPref(on: boolean): void {
+  try {
+    globalThis.localStorage?.setItem(DARK_PREF_KEY, on ? '1' : '0')
+  } catch {
+    // storage full, blocked or unavailable: the choice lasts this visit only
+  }
 }

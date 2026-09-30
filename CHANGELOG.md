@@ -13,8 +13,19 @@ All notable changes to **gss-stats** are documented here. The format follows
   keeps the window and filters it still supports, the window picker says "Default" rather than
   showing a window the row doesn't store, and editing another chart while the editor is open
   shows that chart instead of the previous one.
+- **Undoing a change while it saves still saves the undo.** Reverting an edit before its save
+  finished used to leave the stored dashboard on the edit while the screen showed the original.
+- **The dashboard loads with browser storage blocked.** A private window or disabled site data no
+  longer stops it loading; the dark-mode choice just isn't remembered.
 - **The top-right corner of the header takes clicks again.** The hidden "show filters" button's
   box no longer sits invisibly over the account menu (and, on a phone, the page menu button).
+- **Sync all pages shows its real state.** The "Sync all pages" checkbox in the filter bar no
+  longer always shows as on — it now genuinely reflects whether page date ranges are synced.
+- **Best Sudoku · Overview content sits right under the filter bar again.** The small-sample
+  note took a three-row grid cell for one line of text, leaving an empty band between the bar and
+  the first card; it now takes one row and the cards below move up (layout version 12, saved
+  layouts migrate once and a note you resized keeps its size). The "show filters" button also
+  closes the pinned bar again: the open bar no longer covers it.
 - **Two standing retest report notes corrected.** The upsell-near-zero-for-signed-out note
   wrongly called it a known bug (`useUpsellPrompt` returning early on `uid === null`); it is
   expected by design (a signed-out visitor is never walled — the trial starts only once a
@@ -60,6 +71,18 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **Drill pages nest under the page they came from.** A drill opens its page straight away, in the
   same group, named by its trail (for example "mobile › California"); a drill from a drill page
   nests under the same page.
+- **The retest read shows whether the first-50 offer is actually visible.** The Accounts line
+  now reports the first-50 counter and the offer signed-out visitors really see side by side,
+  flags when they disagree, and $50-and-later and post-flight reads note that the promo arm was
+  absent until 16:11:29 ET on 09-28. Report text only: no kill rule, threshold or push changes.
+- **New event-beacon family: deferred completions from EU visitors (best-sudoku card 125).**
+  `/game/complete-deferred/<mode>/<difficulty>` — a game that finished while the EU consent
+  modal was still unanswered, sent later at consent time — is excluded from page views and
+  route counts everywhere the live completion family is, and is never counted as a live
+  completion or a campaign funnel step (it is a sibling of `/game/complete/`, not a sub-path of
+  it). A new "Deferred completions (EU consent)" tile on the Best Sudoku dashboard, next to
+  Games completed, reads an explicit 0 while no rows exist; its caption explains it counts at
+  consent time, not completion time, and is EU-only.
 - **The retest morning read now publishes a rendered report page every run.** A build step turns
   the read's saved output and the daily narrative into one self-contained page (narrative, spend
   against the thresholds, release health, funnel, diagnostics, Play bulk reports, and the
@@ -112,8 +135,9 @@ All notable changes to **gss-stats** are documented here. The format follows
   visitor lands on ★ Overview.
 - **Built-in pages are recognised by what they are, not their name.** Renaming a page no longer
   changes how it behaves (its notes, its filter bar, what "restore default charts" brings back).
-- **Saved layouts move to version 12.** The first save keeps a backup of the previous layout, and a
-  tab still running the previous version is told to reload instead of overwriting the new one.
+- **Saved layouts move to version 13.** The first save keeps a backup of the previous layout
+  (version 12), and a tab still running the previous version is told to reload instead of
+  overwriting the new one.
 - **The retest ads routine's release-health check now runs every morning read, at any hour.**
   The 23:15 ET backstop entry is folded into the single daily morning read (moved 08:00 → 06:00
   ET); the clock-based "01:00-12:00 ET quiet window" that used to suppress the check is retired,

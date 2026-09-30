@@ -135,10 +135,10 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   behaves. The page each viewer is on (and the page they last viewed in each group) is
   remembered **in their own browser** ([`src/lib/viewerPrefs.ts`](src/lib/viewerPrefs.ts)), not
   in the shared KV config: switching pages never saves anything or moves anyone else, and a
-  first-time viewer lands on ★ Overview (the config's `activePageId`). Layout version 12
-  (`migrateNavV12`) filed the existing pages: the built-ins by id, the Best Sudoku pages renamed
+  first-time viewer lands on ★ Overview (the config's `activePageId`). Layout version 13
+  (`migrateNavV13`) filed the existing pages: the built-ins by id, the Best Sudoku pages renamed
   Overview, Campaigns, Pop-ups and Traffic (their group shows "Best Sudoku"), and every other
-  page under the group its name starts with, else **Mine**. Drill pages made before version 12
+  page under the group its name starts with, else **Mine**. Drill pages made before version 13
   can't be linked to the page they came from (nothing stored it), so they stay ordinary pages
   under Mine.
   - **Breadcrumb** ([`src/components/nav/NavBreadcrumb.vue`](src/components/nav/NavBreadcrumb.vue))
@@ -176,7 +176,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
 - **Page icons and group badges** ([`src/lib/icons.ts`](src/lib/icons.ts)) — every page shows an
   icon without anyone setting one. The config stores at most a short registry key
   (`DashboardPage.icon`, e.g. `megaphone`), never markup; the registry maps ~40 curated keys to
-  [Lucide](https://lucide.dev) icons (`lucide-vue-next`, named imports, so only those ship), and
+  [Lucide](https://lucide.dev) icons (`@lucide/vue`, named imports, so only those ship), and
   an unknown key shows the generic page icon. `resolveIcon`, first match wins: the icon someone
   picked; for a drill page, its root page's icon with a small drill mark; the icon of the dataset
   most of the page's charts read (notes don't count, a chart with no dataset is `rum`, a tie goes
@@ -507,8 +507,12 @@ npm run typecheck:scripts
   for returning sign-ins. A pause is never proposed for a campaign that isn't serving (after
   its end date it reads ENABLED/ENDED); it's reported as ended instead.
 - `--firebase-sa <service-account.json>` adds Firestore COUNT queries (new accounts and
-  first-50 claims in the flight window, `promos/first50` status, the cohort split). The code
-  can only make COUNT queries and one document GET, but the prod key on this machine is not
+  first-50 claims in the flight window, `promos/first50` status, the cohort split), plus the
+  `open` field of `promos_public/first50`: the doc the signed-out client actually gates its
+  first-50 offer on (missing = hidden). The Accounts line reports the counter and the client
+  offer separately, flags a disagreement, and reads `client offer UNKNOWN` if that one read
+  fails (it never fails the read or changes a decision). The code can only make COUNT queries
+  and two document GETs, but the prod key on this machine is not
   a read-only key (it holds `roles/editor`); pointing this flag at a key with only
   `roles/datastore.viewer` is an owner step.
 - **Mid-flight instrumentation (the beacon freeze was lifted by the owner on 2026-09-26).** Two
@@ -718,13 +722,14 @@ of the migrated layout first copies the layout that was stored until then to
 (`functions/api/config.ts`; if the backup can't be written, the save fails and the old layout
 stays). The backup is named after the version that was **stored**, not the one before the new
 code: a layout still stored at v8 when v11 ships is backed up as `backup:v8`, one stored at v10
-as `backup:v10`. A tab still
+as `backup:v10`. Production is stored at v12 when layout version 13 (page navigation) ships, so
+its first v13 save writes `backup:v12`. A tab still
 running older code gets `409` ("This tab is out of date, reload") instead of overwriting a
 newer layout.
 
 **Rolling the code back needs the layout rolled back too.** An older release refuses to save
-over a newer stored layout (409), so after rolling back to v0.9.0 (layout v9), for example,
-every save fails until the stored layout is back at the version that release writes.
+over a newer stored layout (409), so after rolling back to the release before page navigation
+(layout v12), for example, every save fails until `backup:v12` is restored.
 
 To put a backup back, in this order:
 
@@ -734,8 +739,8 @@ To put a backup back, in this order:
    next load migrates the restored layout again. Either redeploy the previous release or ship
    the fixed migration.
 3. **Find the backup to restore**: list the backup keys, and pick the version that was stored
-   before the upgrade (the highest one below the current `CONFIG_VERSION`: `backup:v8` if
-   production was still stored at v8, `backup:v10` if a v10 save happened first). Namespace id
+   before the upgrade (the highest one below the current `CONFIG_VERSION`: `backup:v12` to undo
+   the v13 page-navigation upgrade). Namespace id
    from `wrangler.toml`; a token with Workers KV Storage: Edit.
 
    ```bash
@@ -747,7 +752,7 @@ To put a backup back, in this order:
 
    ```bash
    npx wrangler kv key get "dashboard:default" --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-current.json
-   npx wrangler kv key get "dashboard:default:backup:v8" --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-backup.json
+   npx wrangler kv key get "dashboard:default:backup:v12" --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-backup.json
    node -e "const c=JSON.parse(require('fs').readFileSync('layout-backup.json','utf8')); if(!Array.isArray(c.pages)||!c.pages.length) throw new Error('not a layout'); console.log('ok: version', c.version, '-', c.pages.length, 'pages')"
    npx wrangler kv key put "dashboard:default" --path layout-backup.json --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote
    ```
@@ -928,6 +933,22 @@ settings it answers 503, by design. Pick one of two setups in `.dev.vars` (see
   your own `SESSION_SECRET` and `ALLOWED_EMAILS`, in `.dev.vars`. Never use the
   production client's secret locally. Plain-http loopback uses unprefixed,
   non-`Secure` cookie names; everything else behaves as in production.
+
+**Worktree agents and the Claude Desktop Browser pane.** `.claude/launch.json` intentionally
+defines **no** `preview_start` configuration. A Browser-pane preview command's working directory
+resolves against the project root that started the Claude Code *session*, not the cwd of a
+subagent running in its own `git worktree` — so a worktree agent's `preview_start` call (or any
+preview tool call with no explicit `tabId`) would silently run `wrangler pages dev` rooted at the
+**main checkout**, on its real `.dev.vars` (a real `CF_ANALYTICS_TOKEN`), on the same port `8788`
+every other worktree session shares. A worktree agent should instead:
+
+1. Create its own `.dev.vars` in its worktree (`Copy-Item .dev.vars.example .dev.vars`, or your
+   own test values — never the main checkout's).
+2. Run `npx wrangler pages dev --port <own port> --ip 127.0.0.1` from its own worktree directory,
+   picking a port other than `8788` (which the main checkout's own manual `npm run preview` may be
+   using).
+3. Pass that worktree's own explicit `url` and `tabId` to every `preview_*` tool call — never the
+   default/no-`tabId` tab, which may belong to another session.
 
 `npm run dev` (Vite only) serves no Functions, so it has no auth and no `/api/*`.
 

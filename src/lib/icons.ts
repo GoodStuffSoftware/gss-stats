@@ -1,9 +1,9 @@
-// Page icons and group badges (layout version 12).
+// Page icons and group badges (layout version 13).
 //
 // Keys in data, components in code: a page stores at most a short registry key (DashboardPage.icon,
 // e.g. "megaphone"), never markup or SVG, and this file maps each key to a Lucide icon component
-// (lucide-vue-next; npm now marks it deprecated in favour of @lucide/vue, same component names, so
-// switching is a change to this file's imports only — nothing else imports the library).
+// (@lucide/vue, the maintained successor of the deprecated lucide-vue-next — same component names;
+// nothing else imports the library).
 // Named imports only, so the bundle carries exactly the icons listed here. A key the registry
 // doesn't know (removed later, or typed into the config by hand) resolves to the generic page icon.
 //
@@ -54,7 +54,7 @@ import {
   Trophy,
   Users,
   Wallet,
-} from 'lucide-vue-next'
+} from '@lucide/vue'
 import type { DashboardPage, Dataset, GroupMeta, Widget } from '../types'
 import { parentOf } from './nav'
 
@@ -72,7 +72,7 @@ export {
   Sparkles as SparklesIcon,
   Star as StarIcon,
   X as CloseIcon,
-} from 'lucide-vue-next'
+} from '@lucide/vue'
 
 export const ICON_CATEGORIES = ['Traffic', 'Engagement', 'Money', 'Product', 'Geography'] as const
 export type IconCategory = (typeof ICON_CATEGORIES)[number]

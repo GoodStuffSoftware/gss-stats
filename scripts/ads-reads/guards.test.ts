@@ -37,7 +37,7 @@ const retest = campaignById('24279250691')!
 describe('Firestore reads: fenced, COUNT-only, degrade on a missing index', () => {
   afterEach(() => clearRegisteredSecrets())
   const base = 'https://firestore.googleapis.com/v1/projects/p/databases/(default)/documents'
-  it('the fence allows only the token exchange, GET promos/first50 and POST :runAggregationQuery', async () => {
+  it('the fence allows only the token exchange, GET promos/first50, the masked GET of promos_public/first50 and POST :runAggregationQuery', async () => {
     const f = fencedFetch(async () => ({ ok: true, status: 200, text: async () => '{}' }), base)
     await expect(f('https://oauth2.googleapis.com/token', { method: 'POST', headers: {} })).resolves.toBeTruthy()
     await expect(f(`${base}/promos/first50`, { method: 'GET', headers: {} })).resolves.toBeTruthy()
@@ -86,7 +86,7 @@ describe('Firestore reads: fenced, COUNT-only, degrade on a missing index', () =
       expect(out.errors.join(' ')).toMatch(/cohort paid: needs a Firestore composite index \(not created; owner step\)/)
       expect(out.errors.join(' ')).not.toMatch(/console\.firebase/)
       expect(out.first50).toEqual({ cap: 50, claimed: 3, closed: false })
-      expect(seen.every((s) => /^POST https:\/\/oauth2|^POST <docs>:runAggregationQuery$|^GET <docs>\/promos\/first50$/.test(s))).toBe(true)
+      expect(seen.every((s) => /^POST https:\/\/oauth2|^POST <docs>:runAggregationQuery$|^GET <docs>\/promos\/first50$|^GET <docs>\/promos_public\/first50\?mask\.fieldPaths=open$/.test(s))).toBe(true)
     } finally {
       fs.rmSync(sa, { force: true })
     }

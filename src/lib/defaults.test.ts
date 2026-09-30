@@ -32,9 +32,9 @@ function page(over: Partial<DashboardPage> & { id: string; name: string }): Dash
   return { isDefault: false, group: 'Mine', filters: { siteSel: [], since: '2026-01-01', until: '2026-01-02', excludeSelfReferrals: false, excludeOwnVisits: false, ownBrowser: '', ownOS: '' }, widgets: [], ...over }
 }
 
-// (The v11 reorderBskGroup, which re-sorted the tabs on every load, retired with layout version
-// 12: it runs once as part of the v12 migration and the order is data after that. Its cases, and
-// the v12 renames that replaced its renames, are in defaults.v12.test.ts.)
+// (The reorderBskGroup of layout versions up to 12, which re-sorted the tabs on every load, retired
+// with layout version 13: it runs once as part of the v13 migration and the order is data after
+// that. Its cases, and the v13 renames that replaced its renames, are in defaults.v13.test.ts.)
 
 describe('normalizeConfig — v7 bespoke → widget migration', () => {
   it('populates default widgets on a v6 config whose Overview/Campaigns pages are still empty (the pre-migration bespoke shape)', () => {
@@ -191,10 +191,10 @@ describe('normalizeConfig — fixtures', () => {
     expect(isBestSudokuLaunchPage(norm.pages.find((p) => p.id === 'bsk-launch')!)).toBe(true)
   })
 
-  it('a customised v11 config: BSK pages scattered + renamed + user pages + pre-populated widgets — put in the v11 tab order once, without loss', () => {
+  it('a customised v12 config: BSK pages scattered + renamed + user pages + pre-populated widgets — put in the pre-v13 tab order once, without loss', () => {
     const pinnedWidget = widget({ id: 'pinned-1', title: 'Pinned', dataset: 'campaigns', view: 'funnel', isDefault: true })
     const raw: DashboardConfig = {
-      version: 11,
+      version: 12,
       activePageId: 'bsk-campaigns',
       pages: [
         page({ id: 'user-a', name: 'Team A dashboard' }),
@@ -212,9 +212,9 @@ describe('normalizeConfig — fixtures', () => {
     // the user's pinned widget on Campaigns survives (not replaced by the factory set), its only
     // change the card the v11 migration gives every former bespoke panel
     expect(norm.pages.find((p) => p.id === 'bsk-campaigns')!.widgets).toEqual([withCardForView(pinnedWidget)])
-    // the landing page becomes ★ Overview (v12: each viewer's own page lives in their browser)
+    // the landing page becomes ★ Overview (v13: each viewer's own page lives in their browser)
     expect(norm.activePageId).toBe('default')
-    // and from v12 on the order is data: a later load never re-sorts it
+    // and from v13 on the order is data: a later load never re-sorts it
     const moved = { ...norm, pages: [norm.pages[3], ...norm.pages.filter((_, i) => i !== 3)] }
     expect(normalizeConfig(JSON.parse(JSON.stringify(moved))).pages.map((p) => p.id)).toEqual(moved.pages.map((p) => p.id))
   })

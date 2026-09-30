@@ -1,4 +1,4 @@
-// Page navigation model (layout version 12): the pure helpers behind the breadcrumb, the page
+// Page navigation model (layout version 13): the pure helpers behind the breadcrumb, the page
 // drawer, the / search and the page operations in App.vue. Pages carry a `group` (a plain string),
 // drill pages a `parentId` naming their ROOT page (lib/defaults.ts normDrillLinks keeps that true on
 // every load), and the default page (★ Overview) is shown pinned first, outside the groups.

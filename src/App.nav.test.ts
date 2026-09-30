@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
 //
-// Page navigation (layout version 12): the header breadcrumb (Group / Page / Drill, each segment a
+// Page navigation (layout version 13): the header breadcrumb (Group / Page / Drill, each segment a
 // menu of its siblings) and the / search. Driven through the real App against the sanitised
-// production layout migrated to v12, with three drill pages under Traffic.
+// production layout migrated to v13, with three drill pages under Traffic.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import App from './App.vue'
+import Dashboard from './components/Dashboard.vue'
 import { saveConfig, loadConfig } from './api'
 import { VIEWER_PREFS_KEY } from './lib/viewerPrefs'
 import { clonePage, normalizeConfig } from './lib/defaults'
@@ -31,7 +32,7 @@ vi.mock('./session', async (importOriginal) => {
   return { ...actual, loadIdentity: vi.fn(async () => {}), checkSessionExpired: vi.fn(async () => {}) }
 })
 
-function storedV12(): DashboardConfig {
+function storedV13(): DashboardConfig {
   const c = normalizeConfig({ ...JSON.parse(JSON.stringify(PROD_V9)), version: 11 })
   const launch = c.pages.find((p) => p.id === 'bsk-launch')!
   const drill = (id: string, name: string) => ({ ...clonePage(launch, name), id, parentId: 'bsk-launch', icon: undefined })
@@ -65,7 +66,7 @@ describe('App — breadcrumb (Group / Page / Drill)', () => {
   beforeEach(() => {
     localStorage.clear()
     vi.mocked(saveConfig).mockClear()
-    vi.mocked(loadConfig).mockImplementation(async () => storedV12())
+    vi.mocked(loadConfig).mockImplementation(async () => storedV13())
   })
 
   it('on a drill page shows its group, its page and the drill page, the last one current', async () => {
@@ -151,7 +152,7 @@ describe('App — breadcrumb (Group / Page / Drill)', () => {
 describe('App — / search', () => {
   beforeEach(() => {
     localStorage.clear()
-    vi.mocked(loadConfig).mockImplementation(async () => storedV12())
+    vi.mocked(loadConfig).mockImplementation(async () => storedV13())
   })
   const dialog = () => document.querySelector<HTMLElement>('[role="dialog"][aria-label="Search pages"]')
   const options = () => Array.from(document.querySelectorAll<HTMLElement>('#nav-search-list [role="option"]'))
@@ -208,7 +209,7 @@ describe('App — page drawer, page menu, icon picker', () => {
   beforeEach(() => {
     localStorage.clear()
     vi.mocked(saveConfig).mockClear()
-    vi.mocked(loadConfig).mockImplementation(async () => storedV12())
+    vi.mocked(loadConfig).mockImplementation(async () => storedV13())
   })
   const drawer = () => document.getElementById('nav-drawer')
   const drawerRows = () => Array.from(drawer()?.querySelectorAll<HTMLElement>('.dr-page') ?? [])
@@ -430,5 +431,43 @@ describe('App — page drawer, page menu, icon picker', () => {
     await flushPromises()
     expect(picker()).toBeNull()
     expect(document.activeElement).toBe(w.find('.page-menu-btn').element)
+  })
+
+  it("/ doesn't open search over the page menu, the icon picker, the drill menu or another modal", async () => {
+    const w = await mountApp('bsk-launch')
+    const search = () => document.querySelector('[role="dialog"][aria-label="Search pages"]')
+    // page menu
+    await w.find('.page-menu-btn').trigger('click')
+    await flushPromises()
+    expect(document.getElementById('page-menu')).not.toBeNull()
+    await key(document.body, '/')
+    expect(search()).toBeNull()
+    // icon picker
+    menuItem('Change icon…')!.click()
+    await flushPromises()
+    expect(document.querySelector('[role="dialog"][aria-label="Icon for Traffic"]')).not.toBeNull()
+    await key(document.body, '/')
+    expect(search()).toBeNull()
+    await key(document.activeElement!, 'Escape')
+    // drill menu
+    w.findComponent(Dashboard).vm.$emit('drill', { widgetId: 'bsk-device', dimension: 'device', dataset: 'geo', value: 'mobile', label: 'mobile', x: 10, y: 10 })
+    await flushPromises()
+    expect(document.querySelector('.drill-act')).not.toBeNull()
+    await key(document.body, '/')
+    expect(search()).toBeNull()
+    document.body.click() // an outside click closes it
+    await flushPromises()
+    expect(document.querySelector('.drill-act')).toBeNull()
+    // any other open modal dialog
+    const other = document.createElement('div')
+    other.setAttribute('role', 'dialog')
+    other.setAttribute('aria-modal', 'true')
+    document.body.appendChild(other)
+    await key(document.body, '/')
+    expect(search()).toBeNull()
+    other.remove()
+    // with all of them closed, / opens the search again
+    await key(document.body, '/')
+    expect(search()).not.toBeNull()
   })
 })
