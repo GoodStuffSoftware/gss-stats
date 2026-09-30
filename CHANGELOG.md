@@ -7,6 +7,13 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **Sync all pages shows its real state.** The "Sync all pages" checkbox in the filter bar no
+  longer always shows as on — it now genuinely reflects whether page date ranges are synced.
+- **Best Sudoku · Overview content sits right under the filter bar again.** The small-sample
+  note took a three-row grid cell for one line of text, leaving an empty band between the bar and
+  the first card; it now takes one row and the cards below move up (layout version 12, saved
+  layouts migrate once and a note you resized keeps its size). The "show filters" button also
+  closes the pinned bar again: the open bar no longer covers it.
 - **Two standing retest report notes corrected.** The upsell-near-zero-for-signed-out note
   wrongly called it a known bug (`useUpsellPrompt` returning early on `uid === null`); it is
   expected by design (a signed-out visitor is never walled — the trial starts only once a
@@ -21,6 +28,18 @@ All notable changes to **gss-stats** are documented here. The format follows
   served (still behind Google sign-in) with their own saved-layout store, seeded from
   production's, while reading the same live data; production's hosts, settings and saved layout
   are unchanged.
+- **The retest read shows whether the first-50 offer is actually visible.** The Accounts line
+  now reports the first-50 counter and the offer signed-out visitors really see side by side,
+  flags when they disagree, and $50-and-later and post-flight reads note that the promo arm was
+  absent until 16:11:29 ET on 09-28. Report text only: no kill rule, threshold or push changes.
+- **New event-beacon family: deferred completions from EU visitors (best-sudoku card 125).**
+  `/game/complete-deferred/<mode>/<difficulty>` — a game that finished while the EU consent
+  modal was still unanswered, sent later at consent time — is excluded from page views and
+  route counts everywhere the live completion family is, and is never counted as a live
+  completion or a campaign funnel step (it is a sibling of `/game/complete/`, not a sub-path of
+  it). A new "Deferred completions (EU consent)" tile on the Best Sudoku dashboard, next to
+  Games completed, reads an explicit 0 while no rows exist; its caption explains it counts at
+  consent time, not completion time, and is EU-only.
 - **The retest morning read now publishes a rendered report page every run.** A build step turns
   the read's saved output and the daily narrative into one self-contained page (narrative, spend
   against the thresholds, release health, funnel, diagnostics, Play bulk reports, and the

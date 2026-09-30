@@ -436,8 +436,12 @@ npm run typecheck:scripts
   for returning sign-ins. A pause is never proposed for a campaign that isn't serving (after
   its end date it reads ENABLED/ENDED); it's reported as ended instead.
 - `--firebase-sa <service-account.json>` adds Firestore COUNT queries (new accounts and
-  first-50 claims in the flight window, `promos/first50` status, the cohort split). The code
-  can only make COUNT queries and one document GET, but the prod key on this machine is not
+  first-50 claims in the flight window, `promos/first50` status, the cohort split), plus the
+  `open` field of `promos_public/first50`: the doc the signed-out client actually gates its
+  first-50 offer on (missing = hidden). The Accounts line reports the counter and the client
+  offer separately, flags a disagreement, and reads `client offer UNKNOWN` if that one read
+  fails (it never fails the read or changes a decision). The code can only make COUNT queries
+  and two document GETs, but the prod key on this machine is not
   a read-only key (it holds `roles/editor`); pointing this flag at a key with only
   `roles/datastore.viewer` is an owner step.
 - **Mid-flight instrumentation (the beacon freeze was lifted by the owner on 2026-09-26).** Two
@@ -857,6 +861,22 @@ settings it answers 503, by design. Pick one of two setups in `.dev.vars` (see
   your own `SESSION_SECRET` and `ALLOWED_EMAILS`, in `.dev.vars`. Never use the
   production client's secret locally. Plain-http loopback uses unprefixed,
   non-`Secure` cookie names; everything else behaves as in production.
+
+**Worktree agents and the Claude Desktop Browser pane.** `.claude/launch.json` intentionally
+defines **no** `preview_start` configuration. A Browser-pane preview command's working directory
+resolves against the project root that started the Claude Code *session*, not the cwd of a
+subagent running in its own `git worktree` — so a worktree agent's `preview_start` call (or any
+preview tool call with no explicit `tabId`) would silently run `wrangler pages dev` rooted at the
+**main checkout**, on its real `.dev.vars` (a real `CF_ANALYTICS_TOKEN`), on the same port `8788`
+every other worktree session shares. A worktree agent should instead:
+
+1. Create its own `.dev.vars` in its worktree (`Copy-Item .dev.vars.example .dev.vars`, or your
+   own test values — never the main checkout's).
+2. Run `npx wrangler pages dev --port <own port> --ip 127.0.0.1` from its own worktree directory,
+   picking a port other than `8788` (which the main checkout's own manual `npm run preview` may be
+   using).
+3. Pass that worktree's own explicit `url` and `tabId` to every `preview_*` tool call — never the
+   default/no-`tabId` tab, which may belong to another session.
 
 `npm run dev` (Vite only) serves no Functions, so it has no auth and no `/api/*`.
 
