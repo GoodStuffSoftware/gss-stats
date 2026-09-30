@@ -14,6 +14,11 @@ All notable changes to **gss-stats** are documented here. The format follows
   the first card; it now takes one row and the cards below move up (layout version 12, saved
   layouts migrate once and a note you resized keeps its size). The "show filters" button also
   closes the pinned bar again: the open bar no longer covers it.
+- **The funnel-reach kill rule no longer trips while sign-in prompts still fire site-wide.**
+  Zero tagged asks now reads as WATCH when sign-in prompts were shown site-wide in the same
+  window (the campaign tag only rides beacons for 30 minutes, so later-session streak prompts
+  go untagged); it still trips when both are zero, and the rule always states the site-wide
+  shown count.
 - **Two standing retest report notes corrected.** The upsell-near-zero-for-signed-out note
   wrongly called it a known bug (`useUpsellPrompt` returning early on `uid === null`); it is
   expected by design (a signed-out visitor is never walled — the trial starts only once a

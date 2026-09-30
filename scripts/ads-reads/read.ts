@@ -52,6 +52,7 @@ import {
   type CohortTiers,
   spendTotals,
   summarizeReturns,
+  siteSigninShown,
   summarizeSiteEvents,
   summarizeTaggedRows,
   WEB_GO_LIVE_UTC_MS,
@@ -477,7 +478,13 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
     campaignState: i.campaignState,
     delivery: i.stored && i.spendThroughEt ? { impressions: totals.impressions, clicks: totals.clicks } : null,
     placements: split ? { campaignCost: cumulativeSpend, approvedCost: split.approvedCost, itemizedCost: split.itemizedCost } : null,
-    beacon: tagged ? { asks: tagged.summary.asks.total, taggedArrivals: tagged.summary.taggedArrivals } : null,
+    beacon: tagged
+      ? {
+          asks: tagged.summary.asks.total,
+          taggedArrivals: tagged.summary.taggedArrivals,
+          siteSigninShown: siteRows.ok ? siteSigninShown(siteRows.value, attributionStartMs(campaign), windowEnd) : null,
+        }
+      : null,
   })
 
   const authLiveAt = deps.boundaries?.authNewExistingLiveAtMs === undefined ? AUTH_NEW_EXISTING_LIVE_AT : deps.boundaries.authNewExistingLiveAtMs
