@@ -6,6 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import App from './App.vue'
+import Dashboard from './components/Dashboard.vue'
 import { saveConfig, loadConfig } from './api'
 import { VIEWER_PREFS_KEY } from './lib/viewerPrefs'
 import { clonePage, normalizeConfig } from './lib/defaults'
@@ -430,5 +431,43 @@ describe('App — page drawer, page menu, icon picker', () => {
     await flushPromises()
     expect(picker()).toBeNull()
     expect(document.activeElement).toBe(w.find('.page-menu-btn').element)
+  })
+
+  it("/ doesn't open search over the page menu, the icon picker, the drill menu or another modal", async () => {
+    const w = await mountApp('bsk-launch')
+    const search = () => document.querySelector('[role="dialog"][aria-label="Search pages"]')
+    // page menu
+    await w.find('.page-menu-btn').trigger('click')
+    await flushPromises()
+    expect(document.getElementById('page-menu')).not.toBeNull()
+    await key(document.body, '/')
+    expect(search()).toBeNull()
+    // icon picker
+    menuItem('Change icon…')!.click()
+    await flushPromises()
+    expect(document.querySelector('[role="dialog"][aria-label="Icon for Traffic"]')).not.toBeNull()
+    await key(document.body, '/')
+    expect(search()).toBeNull()
+    await key(document.activeElement!, 'Escape')
+    // drill menu
+    w.findComponent(Dashboard).vm.$emit('drill', { widgetId: 'bsk-device', dimension: 'device', dataset: 'geo', value: 'mobile', label: 'mobile', x: 10, y: 10 })
+    await flushPromises()
+    expect(document.querySelector('.drill-act')).not.toBeNull()
+    await key(document.body, '/')
+    expect(search()).toBeNull()
+    document.body.click() // an outside click closes it
+    await flushPromises()
+    expect(document.querySelector('.drill-act')).toBeNull()
+    // any other open modal dialog
+    const other = document.createElement('div')
+    other.setAttribute('role', 'dialog')
+    other.setAttribute('aria-modal', 'true')
+    document.body.appendChild(other)
+    await key(document.body, '/')
+    expect(search()).toBeNull()
+    other.remove()
+    // with all of them closed, / opens the search again
+    await key(document.body, '/')
+    expect(search()).not.toBeNull()
   })
 })

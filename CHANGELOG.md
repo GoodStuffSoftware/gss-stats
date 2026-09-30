@@ -7,6 +7,10 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **Undoing a change while it saves still saves the undo.** Reverting an edit before its save
+  finished used to leave the stored dashboard on the edit while the screen showed the original.
+- **The dashboard loads with browser storage blocked.** A private window or disabled site data no
+  longer stops it loading; the dark-mode choice just isn't remembered.
 - **The top-right corner of the header takes clicks again.** The hidden "show filters" button's
   box no longer sits invisibly over the account menu (and, on a phone, the page menu button).
 - **Two standing retest report notes corrected.** The upsell-near-zero-for-signed-out note
