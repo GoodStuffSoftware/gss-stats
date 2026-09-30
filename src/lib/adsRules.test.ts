@@ -52,6 +52,10 @@ import {
   type KillRuleInput,
   type ReadingRecord,
   type StoredSpend,
+  buildFirstSessionFunnel,
+  firstSessionBucket,
+  tallySiteFirstSession,
+  tallyTaggedFirstSession,
 } from './adsRules'
 import { campaignById } from './campaigns'
 import { MIN_COHORT, POPUP_PAGE_NOTE } from './popupEvents'
@@ -287,8 +291,9 @@ describe('evaluateKillRules (spec section 12)', () => {
       { hourStartMs: H('2026-09-20T12:00:00Z'), path: '/promo-first50/shown', count: 4 },
       { hourStartMs: H('2026-09-20T09:00:00Z'), path: '/signin-prompt/streak', count: 9 },
       { hourStartMs: H('2026-09-20T14:00:00Z'), path: '/signin-prompt/streak', count: 9 },
+      { hourStartMs: H('2026-09-20T13:00:00Z'), path: '/signin-prompt/tutorial', count: 2 },
     ]
-    expect(siteSigninShown(rows, t0, H('2026-09-20T14:00:00Z'))).toBe(5)
+    expect(siteSigninShown(rows, t0, H('2026-09-20T14:00:00Z'))).toBe(7)
   })
   it('rule 4: $100 proposes a pause regardless of results', () => {
     const res = evaluateKillRules(killInput({ cumulativeSpend: 100 }))
@@ -410,6 +415,7 @@ describe('summarizeTaggedRows (campaign-attributed new indicators)', () => {
     { hourStartMs: H('2026-09-28T18:00:00Z'), path: '/signin-prompt/placement', visitor: 'returning', count: 2 },
     { hourStartMs: H('2026-09-28T18:00:00Z'), path: '/signin-prompt/streak', visitor: 'returning', count: 1 },
     { hourStartMs: H('2026-09-28T18:00:00Z'), path: '/signin-prompt/other-reason', visitor: 'returning', count: 4 },
+    { hourStartMs: H('2026-09-28T18:00:00Z'), path: '/signin-prompt/tutorial', visitor: 'returning', count: 3 },
     { hourStartMs: H('2026-09-28T18:00:00Z'), path: '/promo-first50/shown', visitor: 'returning', count: 1 },
     { hourStartMs: H('2026-09-28T18:00:00Z'), path: '/signin-prompt/dismiss', visitor: 'returning', count: 2 },
     { hourStartMs: H('2026-09-28T18:00:00Z'), path: '/promo-first50/dismiss', visitor: 'returning', count: 1 },
@@ -418,10 +424,10 @@ describe('summarizeTaggedRows (campaign-attributed new indicators)', () => {
     { hourStartMs: H('2026-09-28T19:00:00Z'), path: '/install/standalone-detected', visitor: 'returning', count: 1 },
     { hourStartMs: H('2026-09-28T19:00:00Z'), path: '/popup-outcome/install-prompt/installed', visitor: 'returning', count: 1 },
   ]
-  it('asks are EXACTLY placement + streak + promo-first50/shown; any other reason is reported separately', () => {
+  it('asks are EXACTLY placement + streak + tutorial + promo-first50/shown; any other reason is reported separately', () => {
     const s = summarizeTaggedRows(rows)
-    expect(s.asks.total).toBe(4)
-    expect(s.asks.byPath).toEqual({ '/signin-prompt/placement': 2, '/signin-prompt/streak': 1, '/promo-first50/shown': 1 })
+    expect(s.asks.total).toBe(7)
+    expect(s.asks.byPath).toEqual({ '/signin-prompt/placement': 2, '/signin-prompt/streak': 1, '/signin-prompt/tutorial': 3, '/promo-first50/shown': 1 })
     expect(s.asks.otherShownReasons).toBe(4)
     expect(s.accepts.total).toBe(1)
   })
@@ -431,7 +437,7 @@ describe('summarizeTaggedRows (campaign-attributed new indicators)', () => {
   it('arrivals are visitor=new rows; hits are every row', () => {
     const s = summarizeTaggedRows(rows)
     expect(s.taggedArrivals).toBe(15)
-    expect(s.taggedHits).toBe(50)
+    expect(s.taggedHits).toBe(53)
     expect(s.funnel.arrivals).toBe(15)
   })
   it('one install racing two raw beacons counts ONCE (the popup outcome); raw signals are secondary', () => {
@@ -723,5 +729,84 @@ describe('backfill check against the hand-entered config', () => {
 describe('caveat wording shared with the dashboard', () => {
   it('the routine says exactly what the pop-ups page says about late outcomes', () => {
     expect(MEASUREMENT_QUIET_NOTE).toBe(POPUP_PAGE_NOTE)
+  })
+})
+
+describe('first-session funnel (informational only)', () => {
+  const tagged = [
+    { hourStartMs: H('2026-09-30T12:00:00Z'), path: '/', visitor: 'new', count: 20 },
+    { hourStartMs: H('2026-09-30T12:00:00Z'), path: '/game', visitor: 'returning', count: 40 },
+    { hourStartMs: H('2026-09-30T12:00:00Z'), path: '/tour/start', visitor: 'returning', count: 10 },
+    { hourStartMs: H('2026-09-30T12:00:00Z'), path: '/tour/complete', visitor: 'returning', count: 4 },
+    { hourStartMs: H('2026-09-30T12:00:00Z'), path: '/tour/skip', visitor: 'returning', count: 5 },
+    { hourStartMs: H('2026-09-30T12:00:00Z'), path: '/game/complete/normal/easy', visitor: 'returning', count: 2 },
+    { hourStartMs: H('2026-09-30T12:00:00Z'), path: '/game/abandon/0', visitor: 'returning', count: 6 },
+    { hourStartMs: H('2026-09-30T12:00:00Z'), path: '/game/abandon/26-50', visitor: 'returning', count: 1 },
+    { hourStartMs: H('2026-09-30T12:00:00Z'), path: '/game/abandon/bogus', visitor: 'returning', count: 9 },
+    { hourStartMs: H('2026-09-30T12:00:00Z'), path: '/signin-prompt/tutorial', visitor: 'returning', count: 2 },
+    { hourStartMs: H('2026-09-30T12:00:00Z'), path: '/signin-prompt/placement', visitor: 'returning', count: 1 },
+    { hourStartMs: H('2026-09-30T12:00:00Z'), path: '/signin-prompt/dismiss', visitor: 'returning', count: 3 },
+    { hourStartMs: H('2026-09-30T12:00:00Z'), path: '/welcome-signed-in/shown', visitor: 'returning', count: 1 },
+    { hourStartMs: H('2026-09-30T12:00:00Z'), path: '/welcome-signed-in/daily', visitor: 'returning', count: 1 },
+  ]
+  const site = [
+    { path: '', newVisitors: 300, count: 4000 },
+    { path: '/game', newVisitors: 5, count: 900 },
+    { path: '/tour/start', newVisitors: 0, count: 120 },
+    { path: '/tour/complete', newVisitors: 0, count: 50 },
+    { path: '/tour/skip', newVisitors: 0, count: 60 },
+    { path: '/game/complete/daily/hard', newVisitors: 0, count: 30 },
+    { path: '/game/abandon/0', newVisitors: 0, count: 70 },
+    { path: '/signin-prompt/tutorial', newVisitors: 0, count: 8 },
+    { path: '/welcome-signed-in/shown', newVisitors: 0, count: 3 },
+  ]
+
+  it('buckets exactly the new beacon paths, never an unknown abandon bucket or welcome action', () => {
+    expect(firstSessionBucket('/game')).toEqual({ kind: 'step', step: 'gameView' })
+    expect(firstSessionBucket('/game/first-move')).toEqual({ kind: 'step', step: 'firstMove' })
+    expect(firstSessionBucket('/game/complete/normal/easy')).toEqual({ kind: 'step', step: 'gameComplete' })
+    expect(firstSessionBucket('/game/abandon/76-99')).toEqual({ kind: 'abandon', bucket: '76-99' })
+    expect(firstSessionBucket('/game/abandon/100')).toBeNull()
+    expect(firstSessionBucket('/welcome-signed-in/leaderboard')).toEqual({ kind: 'welcome', event: 'leaderboard' })
+    expect(firstSessionBucket('/welcome-signed-in/other')).toBeNull()
+    expect(firstSessionBucket('/signin-prompt/tutorial')).toEqual({ kind: 'ask', tutorial: true })
+    expect(firstSessionBucket('/signin-prompt/dismiss')).toBeNull()
+    expect(firstSessionBucket('/tour/start/')).toBeNull()
+  })
+
+  it('tallies tagged arrivals (visitor new) and site-wide arrivals (every new row, any path)', () => {
+    const t = tallyTaggedFirstSession(tagged)
+    expect(t.steps).toEqual({ arrivals: 20, gameView: 40, tourStart: 10, tourComplete: 4, tourSkip: 5, firstMove: 0, gameComplete: 2 })
+    expect(t.abandon).toEqual({ '0': 6, '1-25': 0, '26-50': 1, '51-75': 0, '76-99': 0 })
+    expect(t.asks).toBe(3)
+    expect(t.asksTutorial).toBe(2)
+    expect(t.welcome).toEqual({ shown: 1, daily: 1, leaderboard: 0, dismiss: 0 })
+    expect(tallySiteFirstSession(site).steps.arrivals).toBe(305)
+  })
+
+  it('a step with no rows anywhere is not yet tracked, never a 0% step; its ratio is skipped and children fall back', () => {
+    const f = buildFirstSessionFunnel(tallyTaggedFirstSession(tagged), tallySiteFirstSession(site))
+    expect(f.siteRead).toBe(true)
+    expect(f.steps.firstMove).toEqual({ tagged: 0, site: 0, tracked: false, vsParent: null })
+    // game complete's parent (first move) is untracked, so it reads against game views.
+    expect(f.steps.gameComplete.vsParent).toMatchObject({ parent: 'gameView', numerator: 2, denominator: 40 })
+    expect(f.steps.tourComplete.vsParent).toMatchObject({ parent: 'tourStart', numerator: 4, denominator: 10, value: 0.4 })
+    // no ratio for game views: page-view rows over first-ever beacons mixes units.
+    expect(f.steps.gameView.vsParent).toBeNull()
+    expect(f.steps.arrivals.vsParent).toBeNull()
+    expect(f.abandon['1-25'].tracked).toBe(false)
+    expect(f.abandon['0']).toEqual({ tagged: 6, site: 70, tracked: true })
+    // a tagged row proves the path is live even when the site-wide (web) read has none
+    expect(f.abandon['26-50']).toEqual({ tagged: 1, site: 0, tracked: true })
+    expect(f.welcome.dismiss.tracked).toBe(false)
+    expect(f.asksTutorial).toEqual({ tagged: 2, site: 8, tracked: true })
+  })
+
+  it('without the site-wide read every figure is tracked-unknown and ratios still use the tagged counts', () => {
+    const f = buildFirstSessionFunnel(tallyTaggedFirstSession(tagged), null)
+    expect(f.siteRead).toBe(false)
+    expect(f.steps.firstMove).toMatchObject({ tagged: 0, site: null, tracked: null })
+    expect(f.steps.tourStart).toMatchObject({ tagged: 10, site: null, tracked: true })
+    expect(f.steps.gameComplete.vsParent).toMatchObject({ parent: 'firstMove', numerator: 2, denominator: 0, value: null })
   })
 })

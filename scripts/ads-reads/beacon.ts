@@ -7,7 +7,7 @@
 
 import { applyExclusions, campaignAttributionClause, type CampaignFlight } from '../../src/lib/campaigns'
 import { excludeInstallGapUnmeasured, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, popupIncludeClause, type HourPathCount } from '../../src/lib/popupEvents'
-import { UPSELL_SIGNEDOUT_FIX_AT, type ReturnRow, type ReturnSiteStat, type TaggedRow } from '../../src/lib/adsRules'
+import { ASK_PATHS, UPSELL_SIGNEDOUT_FIX_AT, type FirstSessionRowSite, type ReturnRow, type ReturnSiteStat, type TaggedRow } from '../../src/lib/adsRules'
 import type { D1Select } from './d1'
 
 export const WEB_SITE = 'bestsudoku-web'
@@ -51,6 +51,28 @@ export function siteEventsQuery(sinceMs: number, fixedAtMs: number | null = INST
   }
 }
 
+/** Site-wide first-session rows on the web site since `sinceMs` (lib/adsRules.ts
+ * firstSessionBucket): each first-session path by name, every other path folded into '' — so
+ * the site-wide arrivals (visitor 'new' rows, any path) come back in the same aggregate. NOT
+ * campaign-attributed; the counterpart the tagged first-session figures are read beside. */
+export function siteFirstSessionQuery(sinceMs: number): Query {
+  const match = [
+    `path = '/game'`,
+    `path LIKE '/game/complete/%'`,
+    `path IN ('/tour/start', '/tour/complete', '/tour/skip', '/game/first-move')`,
+    `path LIKE '/game/abandon/%'`,
+    `path LIKE '/welcome-signed-in/%'`,
+    `path IN (${ASK_PATHS.map((p) => `'${p}'`).join(', ')})`,
+  ].join(' OR ')
+  const w = ['site = ?', 'ts >= ?']
+  const b: unknown[] = [WEB_SITE, sinceMs]
+  applyExclusions(w, b)
+  return {
+    sql: `SELECT CASE WHEN ${match} THEN path ELSE '' END AS p, SUM(CASE WHEN visitor = 'new' THEN 1 ELSE 0 END) AS nv, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY p`,
+    binds: b,
+  }
+}
+
 /** /return/<uc>/<bucket> rows for this campaign's tags on web and app — attributed by the
  * path's own uc (lib/campaigns.ts parseReturnPath re-checks it exactly). Not date-windowed:
  * a d31-60 return fires long after the flight. */
@@ -91,6 +113,8 @@ export interface BeaconSource {
   siteEvents(sinceMs: number): Promise<HourPathCount[]>
   returns(campaign: CampaignFlight): Promise<ReturnRow[]>
   returnSites(sinceMs: number): Promise<ReturnSiteStat[]>
+  /** Optional: site-wide first-session rows (siteFirstSessionQuery). Absent = not read. */
+  siteFirstSession?(sinceMs: number): Promise<FirstSessionRowSite[]>
   /** Optional (R5): aggregate counts per country for campaign-attributed arrivals. */
   countryCounts?(campaign: CampaignFlight): Promise<CountryCount[]>
 }
@@ -114,6 +138,11 @@ export function createBeaconSource(select: D1Select): BeaconSource {
       const q = siteEventsQuery(sinceMs)
       const rows = await select<any>(q.sql, q.binds)
       return rows.map((x) => ({ hourStartMs: n(x.hr) * 3_600_000, path: String(x.path ?? ''), count: n(x.c), postInstallFix: n(x.pf) === 1 }))
+    },
+    async siteFirstSession(sinceMs) {
+      const q = siteFirstSessionQuery(sinceMs)
+      const rows = await select<any>(q.sql, q.binds)
+      return rows.map((x) => ({ path: String(x.p ?? ''), newVisitors: n(x.nv), count: n(x.c) }))
     },
     async returns(campaign) {
       const q = returnRowsQuery(campaign)

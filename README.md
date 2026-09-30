@@ -320,8 +320,9 @@ geography is country-only** — sub-country region/city comes from the beacon.
 
 **Pop-up event beacons never count as page views — unless a chart opts in.** Paths under
 `/signin-prompt`, `/signin-eligible`, `/promo-first50`, `/first50-congrats`, `/upsell`,
-`/install`, `/popup-outcome`, `/return`, `/game/complete/` and the `/auth/success/<provider>/`
-status suffix are pop-up/event beacons, not screens — `/api/geo` and `/api/sites` exclude all
+`/install`, `/popup-outcome`, `/return`, `/game/complete/`, the `/auth/success/<provider>/`
+status suffix, `/auth/error`, `/auth/redirect` and the first-session beacons (`/tour`,
+`/game/first-move`, `/game/abandon`, `/welcome-signed-in`) are pop-up/event beacons, not screens — `/api/geo` and `/api/sites` exclude all
 of them from every pageview/visit total and the top-pages breakdown by default (see
 [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) `POPUP_EVENT_PREFIXES`); `/api/popups` is
 where they're counted. Each geo chart has its own **"Include event beacons"** option (off by
@@ -339,7 +340,8 @@ medium/date, plus **screen width** (`screenw`, exact pixels) and its bucketed fo
 (`screenwBucket`: `<480` / `480-767` / `768-1023` / `1024-1439` / `1440+`), plus a derived
 **path family** dimension (`pathFamily`) that groups every event-beacon prefix above into
 `page` / `signin-prompt` / `signin-eligible` / `promo-first50` / `first50-congrats` / `upsell`
-/ `install` / `popup-outcome` / `return` / `game-complete` / `auth-status`. More derived
+/ `install` / `popup-outcome` / `return` / `game-complete` / `auth-status` / `auth-error` /
+`auth-redirect` / `tour` / `game-first-move` / `game-abandon` / `welcome-signed-in`. More derived
 dimensions: **pop-up** (`popupFamily`) and **pop-up outcome** (`popupOutcome`), measured rows
 only (from the tracking activation day; pre-fix install-gap rows get no value — see
 [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) `popupDimSqlCase`, where
@@ -426,6 +428,11 @@ npm run typecheck:scripts
   timestamps, not the clock), so removing the gate does not weaken it. Pushes go out only on a
   threshold read, a kill-rule trip, a failed read, or a real release-health alert (parent at
   least MIN_COHORT, outcome window elapsed, child zero).
+  Every morning read also prints a **first-session funnel** (tagged arrivals → game views →
+  tour start → tour complete/skip → first move → game complete, abandon-by-%-filled buckets,
+  sign-in asks shown incl. the tutorial ask, and the signed-in welcome card), tagged counts with
+  site-wide web counts alongside; a path with no rows yet reads "not yet tracked", never 0%.
+  Informational only — never a kill rule or a push.
 - **postflight-read** covers the wrap-up (flight end + 7 days; spend after the flight and the cap are checked first on every run) and the day-15/30/60 and
   December follow-ups, split promo vs non-promo, with the d31-60 return buckets. Day 15/30/60
   add the flight-window account cohort by access tier and promo marker (sitewide, not
