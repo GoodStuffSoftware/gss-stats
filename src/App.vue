@@ -7,6 +7,8 @@ import { loadConfig, saveConfig } from './api'
 import { loadSites, sitesTree, tokenLabel } from './sitesStore'
 import { isSiteDim, semanticKey, drillNeedsEventBeacons } from './lib/drill'
 import { sessionExpired, reauth } from './session'
+import { readViewerPrefs, writeViewerPrefs, initialPageId } from './lib/viewerPrefs'
+import { rootOf, drillTrail } from './lib/nav'
 import { isTouchDevice } from './lib/responsive'
 import { TRACKING_ACTIVATION_DATE_ET } from './lib/popupEvents'
 import NoteBlock from './components/NoteBlock.vue'
@@ -22,8 +24,14 @@ const editing = ref<{ widget: Widget; isNew: boolean } | null>(null)
 const dark = ref(false)
 const saveState = ref<'idle' | 'saving' | 'saved' | 'error' | 'stale'>('idle')
 
-// The page currently being viewed/edited.
-const activePage = computed<DashboardPage>(() => config.pages.find((p) => p.id === config.activePageId) ?? config.pages[0])
+// The page currently being viewed/edited — per VIEWER (layout version 12): remembered in this
+// browser (lib/viewerPrefs.ts), never written to the shared config, so switching pages costs no KV
+// write and never moves anyone else. `config.activePageId` is only the landing page for a viewer
+// with nothing remembered (★ Overview).
+const activePageId = ref(config.activePageId)
+const activePage = computed<DashboardPage>(
+  () => config.pages.find((p) => p.id === activePageId.value) ?? config.pages.find((p) => p.isDefault) ?? config.pages[0],
+)
 const rangeText = computed(() => rangeLabel(activePage.value.filters.since, activePage.value.filters.until, activePage.value.filters.rangeRel))
 
 // Part A hard requirement #4: while pop-up tracking hasn't shipped yet (activation date
@@ -64,21 +72,54 @@ onMounted(async () => {
   config.activePageId = norm.activePageId
   config.pages = norm.pages
   config.syncRange = norm.syncRange
+  config.groupMeta = norm.groupMeta
+  activePageId.value = initialPageId(norm.pages, readViewerPrefs(), norm.activePageId)
 
   await nextTick()
+  // What the store holds as far as this tab knows: a save only goes out when the config differs.
+  lastSavedJson = configJson(config)
   loaded.value = true
+})
+
+// Remember this viewer's page (and the page they last viewed in its group, which picking that
+// group opens) in this browser only.
+watch(activePageId, () => {
+  if (!loaded.value) return
+  const p = activePage.value
+  const prefs = readViewerPrefs()
+  prefs.active = p.id
+  if (!p.isDefault) prefs.lastByGroup = { ...prefs.lastByGroup, [rootOf(p, config.pages).group]: p.id }
+  writeViewerPrefs(prefs)
 })
 
 // ── Persistence (debounced) ───────────────────────────────────────────────────
 let saveTimer: number | undefined
+// The config as last loaded or saved. A change that leaves the config the same (e.g. the grid
+// re-reporting an unchanged layout when you switch pages) never goes out as a save.
+let lastSavedJson = ''
+// The config as saved. grid-layout-plus writes its own bookkeeping (`moved`) onto every widget it
+// lays out — the first time each page is shown, so on every page switch — which is not part of the
+// layout (normWidget drops it on load): it never counts as a change and is never saved.
+function configJson(c: DashboardConfig): string {
+  return JSON.stringify(c, function (this: unknown, key: string, value: unknown) {
+    return key === 'moved' && this && typeof this === 'object' && 'i' in this && 'x' in this ? undefined : value
+  })
+}
 function scheduleSave() {
   // Never save while signed out: a config that fell back to defaults because the load
   // was refused must not overwrite the stored one.
   if (!loaded.value || sessionExpired.value) return
+  if (configJson(config) === lastSavedJson) return
   saveState.value = 'saving'
   clearTimeout(saveTimer)
   saveTimer = window.setTimeout(async () => {
-    const ok = await saveConfig(JSON.parse(JSON.stringify(config)) as DashboardConfig)
+    const body = configJson(config)
+    if (body === lastSavedJson) {
+      saveState.value = 'saved'
+      return
+    }
+    const ok = await saveConfig(JSON.parse(body) as DashboardConfig)
+    if (ok === true) lastSavedJson = body
     saveState.value = ok === 'stale' ? 'stale' : ok ? 'saved' : 'error'
   }, 700)
 }
@@ -89,19 +130,26 @@ const saveLabel = computed(
 )
 
 // ── Page operations ───────────────────────────────────────────────────────────
+// Switching pages is per viewer: it never touches the shared config (see activePageId).
 function switchPage(id: string) {
-  config.activePageId = id
+  if (config.pages.some((p) => p.id === id)) activePageId.value = id
 }
-function addPage() {
-  const clone = clonePage(activePage.value, 'Copy of ' + activePage.value.name)
+// + Page: a new ROOT page, a copy of the active one, in its group with its icon (clonePage).
+function addPage(group?: string) {
+  const src = activePage.value
+  const clone = clonePage(src, 'Copy of ' + src.name)
+  delete clone.parentId
+  clone.group = group ?? rootOf(src, config.pages).group
   config.pages.push(clone)
-  config.activePageId = clone.id
+  switchPage(clone.id)
 }
+// Duplicate: a copy of that page — same group and icon, and a copy of a drill page stays a drill
+// page of the same root.
 function duplicatePage(id: string) {
   const src = config.pages.find((p) => p.id === id) ?? activePage.value
   const clone = clonePage(src, 'Copy of ' + src.name)
   config.pages.push(clone)
-  config.activePageId = clone.id
+  switchPage(clone.id)
 }
 function renamePage(id: string, name: string) {
   const p = config.pages.find((x) => x.id === id)
@@ -112,8 +160,11 @@ function deletePage(id: string) {
   if (!p || p.isDefault || config.pages.length <= 1) return
   if (!confirm(`Delete page "${p.name}"? This can't be undone.`)) return
   const idx = config.pages.findIndex((x) => x.id === id)
+  const parentId = p.parentId
   config.pages.splice(idx, 1)
-  if (config.activePageId === id) config.activePageId = config.pages[0].id
+  const fallback = config.pages.find((x) => x.isDefault) ?? config.pages[0]
+  if (config.activePageId === id) config.activePageId = fallback.id
+  if (activePageId.value === id) switchPage(parentId && config.pages.some((x) => x.id === parentId) ? parentId : fallback.id)
 }
 function restoreDefaultCharts(id: string) {
   const p = config.pages.find((x) => x.id === id) ?? activePage.value
@@ -286,18 +337,18 @@ function tagToHost(tag: string): string {
   for (const g of sitesTree.value) for (const s of g.subs) if (s.tag === tag) return s.host
   return tag
 }
-function drillTitle(f: GlobalFilters): string {
-  const parts: string[] = []
-  const sel = f.siteSel ?? []
-  if (sel.length === 1) parts.push(tokenLabel(sel[0]))
-  else if (sel.length > 1) parts.push(`${sel.length} sites`)
-  for (const d of f.drill ?? []) parts.push(d.label)
-  return parts.join(' · ') || 'Filtered'
-}
+// A drill creates its page at once, nested under the ROOT page it came from (a drill from a drill
+// page nests under the same root), in that page's group, with no icon of its own (it shows its
+// root's, with a drill mark — lib/icons.ts). Its name is the trail of what it narrows the root
+// page to, joined with " › " (lib/nav.ts drillTrail).
 function openFilteredPage() {
   const p = drillMenu.value
   if (!p) return
+  const root = rootOf(activePage.value, config.pages)
   const clone = clonePage(activePage.value, 'Filtered')
+  clone.parentId = root.id
+  clone.group = root.group
+  delete clone.icon
   if (p.dimension === 'date') {
     // A day isn't a filterable field (see geo.ts) — turn it into an absolute one-day RANGE
     // instead of a drill constraint. p.value is 'YYYY-MM-DD' (from date(ts/1000,'unixepoch')).
@@ -305,7 +356,7 @@ function openFilteredPage() {
     clone.filters.since = since
     clone.filters.until = until
     clone.filters.rangeRel = '' // absolute range — don't recompute a rolling window on load
-    clone.name = p.label
+    clone.name = drillTrail(clone.filters, root.filters, tokenLabel, p.label)
   } else {
     if (isSiteDim(p.dimension)) {
       // site drill → the site multi-select (filters both datasets consistently)
@@ -343,10 +394,10 @@ function openFilteredPage() {
         ]
       }
     }
-    clone.name = drillTitle(clone.filters)
+    clone.name = drillTrail(clone.filters, root.filters, tokenLabel)
   }
   config.pages.push(clone)
-  config.activePageId = clone.id
+  switchPage(clone.id)
   closeDrill()
 }
 
@@ -544,7 +595,7 @@ function toggleDark() {
          so it never hides. -->
     <PageBar
       :pages="config.pages"
-      :active-page-id="config.activePageId"
+      :active-page-id="activePage.id"
       @switch="switchPage"
       @add="addPage"
       @rename="renamePage"
