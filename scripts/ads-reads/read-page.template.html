@@ -159,7 +159,7 @@ ul .nr{border:0;padding:0}
 
   <section id="sec-threshold">
     <h2>Spend against the thresholds</h2>
-    <p class="sub">Reads fire once each at $25, $50, $75 and $100. Kill rules only propose; Mike pauses the campaign himself.</p>
+    <p class="sub" id="ladder-sub">Kill rules only propose; Mike pauses the campaign himself.</p>
     <div class="chart" id="ladder"></div>
     <p class="caption" id="ladder-caption"></p>
     <div class="table-wrap"><table id="kill"></table></div>
@@ -283,6 +283,8 @@ try {
   const RAW = String(SRC.raw || "");
   const NARRATIVE = SRC.narrative || null;
   const AUDIT = SRC.audit || null;
+  // The campaign's own read points (its read plan, looked up by campaign id when the page was built).
+  const THRESHOLDS = Array.isArray(SRC.thresholds) && SRC.thresholds.length ? SRC.thresholds : null;
   const SPLIT = "----- JSON -----";
   const at = RAW.indexOf(SPLIT);
   const HUMAN = (at >= 0 ? RAW.slice(0, at) : RAW).replace(/\s+$/, "");
@@ -381,7 +383,10 @@ try {
   // threshold ladder
   guard("ladder", () => {
     if (s.ok === false || !s.cumulative) { notRead("ladder", "spend" + (s.error ? ` (${s.error})` : "")); return; }
+    if (!THRESHOLDS) { notRead("ladder", "the campaign's read points (its read plan was not found for this page)"); return; }
     const cap = s.hardCap, cum = s.cumulative.cost;
+    const labels = THRESHOLDS.map(t => "$" + t);
+    $("ladder-sub").textContent = `Reads fire once each at ${labels.length > 1 ? labels.slice(0, -1).join(", ") + " and " + labels[labels.length - 1] : labels[0]}. ${$("ladder-sub").textContent}`;
     const fired = new Set([...(th.consumedBefore || []), ...crossed]);
     const W = 640, L = 22, R = 22, top = 36, bh = 14, H = 88;
     const x = v => L + (Math.min(v, cap) / cap) * (W - L - R);
@@ -389,10 +394,10 @@ try {
     svg += `<rect class="track" x="${L}" y="${top}" width="${W - L - R}" height="${bh}" rx="3"/>`;
     svg += `<rect class="fillbar" x="${L}" y="${top}" width="${Math.max(0, x(cum) - L)}" height="${bh}" rx="3"/>`;
     svg += `<text class="tlabel" x="${L}" y="${top + bh + 22}">$0</text>`;
-    [25, 50, 75, 100].forEach(t => {
+    THRESHOLDS.forEach(t => {
       const xx = x(t), hit = fired.has(t) || cum >= t;
       svg += `<line class="${hit ? "tick-hit" : "tick-off"}" x1="${xx}" x2="${xx}" y1="${top - 6}" y2="${top + bh + 6}"/>`;
-      svg += `<text class="tlabel" x="${xx}" y="${top + bh + 22}" text-anchor="${t === 100 ? "end" : "middle"}">$${t}</text>`;
+      svg += `<text class="tlabel" x="${xx}" y="${top + bh + 22}" text-anchor="${t >= cap ? "end" : "middle"}">$${t}</text>`;
     });
     svg += `<text class="mlabel" x="${Math.min(x(cum), W - R - 30)}" y="${top - 12}" text-anchor="middle">${money(cum)}</text>`;
     $("ladder").innerHTML = svg + "</svg>";
