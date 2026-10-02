@@ -304,6 +304,51 @@ describe('evaluateKillRules (spec section 12)', () => {
     expect(r.detail).toMatch(/Site-wide asks shown: 0\./)
     expect(r.detail).not.toMatch(/expires 30 min/)
   })
+  // The 2026-09-30 Day-4 read Mike retracted as a measurement gap: 0 tagged asks from 161 tagged
+  // arrivals; site-wide since the 2026-09-26 flight start /signin-prompt/streak 5,
+  // /signin-prompt/dismiss 3, /signin-prompt/placement 0, /promo-first50/shown 0, no tutorial ask.
+  const day4 = (streak: number) => {
+    const from = H('2026-09-26T00:00:00Z')
+    const to = H('2026-09-30T10:00:00Z')
+    const rows = [
+      { hourStartMs: H('2026-09-27T15:00:00Z'), path: '/signin-prompt/streak', count: streak },
+      { hourStartMs: H('2026-09-28T18:00:00Z'), path: '/signin-prompt/dismiss', count: 3 },
+      { hourStartMs: H('2026-09-28T18:00:00Z'), path: '/signin-prompt/placement', count: 0 },
+      { hourStartMs: H('2026-09-29T12:00:00Z'), path: '/promo-first50/shown', count: 0 },
+    ]
+    const site = siteSigninShown(rows, from, to)
+    const tutorial = siteTutorialAsksShown(rows, from, to)
+    return { site, tutorial, res: evaluateKillRules(killInput({ beacon: { asks: 0, taggedArrivals: 161, siteSigninShown: site, siteTutorialAsks: tutorial } })) }
+  }
+  it('rule 3, 2026-09-30 numbers: 0 asks / 161 arrivals with streak 5 + dismiss 3 site-wide reads WATCH, no pause proposal', () => {
+    const { site, tutorial, res } = day4(5)
+    expect(site).toBe(5) // shown asks only: a dismiss is not a shown prompt
+    expect(tutorial).toBe(0)
+    const r = rule(res, 'funnel-reach')
+    expect(r.status).toBe('watch')
+    expect(r.detail).toMatch(/^0 asks from 161 tagged arrivals\. Site-wide asks shown: 5\./)
+    expect(r.detail).toMatch(/Mode: site-wide fallback \(\/signin-prompt\/tutorial has no rows site-wide/)
+    expect(res.tripped).toEqual([])
+    expect(res.proposal).toBe('CONTINUE')
+  })
+  it('rule 3, 2026-09-30 zero-site-wide twin: 0 asks / 161 arrivals with no prompt shown site-wide trips and proposes a pause', () => {
+    const { site, res } = day4(0)
+    expect(site).toBe(0)
+    const r = rule(res, 'funnel-reach')
+    expect(r.status).toBe('trip')
+    expect(r.detail).toMatch(/Site-wide asks shown: 0\./)
+    expect(res.tripped).toEqual(['funnel-reach'])
+    expect(res.proposal).toBe('PROPOSE PAUSE')
+  })
+  it('rule 3: an unavailable site-wide count never reads WATCH (it trips and says the count is unavailable)', () => {
+    for (const siteSigninShown of [null, undefined]) {
+      const res = evaluateKillRules(killInput({ beacon: { asks: 0, taggedArrivals: 161, siteSigninShown, siteTutorialAsks: null } }))
+      const r = rule(res, 'funnel-reach')
+      expect(r.status).toBe('trip')
+      expect(r.detail).toMatch(/Site-wide asks shown: unavailable\./)
+      expect(res.tripped).toContain('funnel-reach')
+    }
+  })
   it('siteSigninShown counts the ASK_PATHS shown set (promo included) inside the window; siteTutorialAsksShown only the tutorial ask', () => {
     const t0 = H('2026-09-20T10:30:00Z')
     const rows = [
