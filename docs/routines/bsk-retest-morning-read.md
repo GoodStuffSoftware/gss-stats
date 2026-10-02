@@ -96,7 +96,7 @@ session's scratchpad directory (`<scratchpad>` below; `<ET date>` is today's ET 
 stderr to a sibling `.err`:
 
 ```bash
-npm run -s ads:morning-read -- --cf-token-file C:/Users/msant/dev/cf-token.txt --firebase-sa C:/Users/msant/.firebase/service-accounts/best-sudoku-prod.json --play-sa C:/Users/msant/.google-play/service-accounts/best-sudoku-prod.json > <scratchpad>/morning-read-<ET date>.out 2> <scratchpad>/morning-read-<ET date>.err
+npm run -s ads:morning-read -- --campaign 24279250691 --cf-token-file C:/Users/msant/dev/cf-token.txt --firebase-sa C:/Users/msant/.firebase/service-accounts/best-sudoku-prod.json --play-sa C:/Users/msant/.google-play/service-accounts/best-sudoku-prod.json > <scratchpad>/morning-read-<ET date>.out 2> <scratchpad>/morning-read-<ET date>.err
 ```
 
 Read the `.out` file for Steps 2-8: it is the full output, and Step 8 builds the report page
