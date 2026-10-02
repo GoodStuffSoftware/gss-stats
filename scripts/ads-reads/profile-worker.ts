@@ -64,8 +64,11 @@ async function main() {
       ADS_REFRESH_TOKEN: secret('profile-refresh-token'),
       ADS_DEVELOPER_TOKEN: secret('profile-developer-token'),
     }) as unknown as import('../../workers/sync/src/index').Env
+  // day1 profiles one campaign's first day: the registry's first closed play-direct flight (no literal id here).
+  const { CAMPAIGNS } = await import('../../src/lib/campaigns')
+  const day1Id = CAMPAIGNS.find((c) => c.status === 'closed' && c.kind === 'play-direct')?.id
   const body: Record<string, unknown> =
-    mode === 'full' ? { full: true } : mode === 'day1' ? { full: true, campaignIds: ['24234347705'], maxDays: 1 } : {}
+    mode === 'full' ? { full: true } : mode === 'day1' ? { full: true, campaignIds: day1Id ? [day1Id] : [], maxDays: 1 } : {}
   const once = async () => {
     const env = envFor()
     const t = performance.now()
