@@ -8,7 +8,7 @@
 
 import fs from 'node:fs'
 import { parseArgs } from 'node:util'
-import { ADS_CUSTOMER_ID, RETEST_CAMPAIGN_ID, type FirstSessionRowSite, type ReadingRecord, type ReturnRow, type ReturnSiteStat, type SpendDay, type StoredSpend, type TaggedRow } from '../../src/lib/adsRules'
+import { ADS_CUSTOMER_ID, defaultReadCampaignId, etDateOf, type PostflightStage, type FirstSessionRowSite, type ReadingRecord, type ReturnRow, type ReturnSiteStat, type SpendDay, type StoredSpend, type TaggedRow } from '../../src/lib/adsRules'
 import type { PlacementDayRow } from '../../src/lib/adsStore'
 import type { HourPathCount } from '../../src/lib/popupEvents'
 import {
@@ -37,7 +37,7 @@ import { createWranglerRunner, EXTERNAL_TIMEOUT_MS, type WranglerRunner } from '
 
 export const COMMON_OPTIONS = {
   'dry-run': { type: 'boolean', default: false },
-  campaign: { type: 'string', default: RETEST_CAMPAIGN_ID },
+  campaign: { type: 'string' },
   'cf-token-file': { type: 'string' },
   'firebase-sa': { type: 'string' },
   'play-sa': { type: 'string' },
@@ -49,6 +49,16 @@ export const COMMON_OPTIONS = {
 
 export function parseCli<T extends Record<string, { type: 'string' | 'boolean'; default?: string | boolean }>>(extra: T, argv = process.argv.slice(2)) {
   return parseArgs({ args: argv, options: { ...COMMON_OPTIONS, ...extra }, allowPositionals: false, strict: true }).values as Record<string, string | boolean | undefined>
+}
+
+/** The campaign a read runs on: an explicit `--campaign <id>`, else the registry's default for
+ * this kind of read on the read's own clock (src/lib/adsRules.ts defaultReadCampaignId; throws
+ * a one-line error listing the registered ids when it cannot pick exactly one). `nowMs` is the
+ * fixture's clock under --fixture, else the real one. */
+export function resolveCampaignId(opts: Record<string, string | boolean | undefined>, kind: 'morning' | 'postflight', nowMs: number, stage?: PostflightStage): string {
+  const given = opts.campaign
+  if (typeof given === 'string' && given) return given
+  return defaultReadCampaignId(kind, etDateOf(nowMs), stage)
 }
 
 export function loadCfToken(file: string | undefined): string | null {
