@@ -492,18 +492,21 @@ written anywhere outside the registry entries below (and fixtures, tests and the
 Several campaigns can be live at once. Do these in order. The numbering matters: step 1 comes
 **before** anything is registered.
 
-**1. Pin `--campaign <current id>` on every existing scheduled invocation, first.** Today that is
-the retest, `--campaign 24279250691`, on each of the five one-time post-flight tasks (wrapup,
-day15, day30, day60, december: `npm run -s ads:postflight-read -- --stage <stage> --campaign
-24279250691 …`) and on any morning-read task still running (including its `--release-health-only`
-runs). Why first: without `--campaign`, a post-flight read defaults only when **exactly one**
-campaign is registered, and a morning read only when exactly one window covers today. The
-moment a second campaign is registered, an unpinned post-flight task exits 1 ("2 campaigns have
-read plans … pass --campaign <id>") instead of reading. That is a loud failure, never a silent
-read of the wrong campaign, but it would skip a scheduled stage. Those tasks run from `main`, so
-they pick the new rule up the day it merges: pin them before you merge the registration. (The
-task prompts live outside this repo, in the scheduled-tasks store; this README does not edit
-them.)
+**1. Every campaign's routine doc must pin its own `--campaign`.** The command lines that run
+the reads live in the routine docs under [`docs/routines/`](docs/routines/), not in the
+scheduled-task prompts: the task prompts only say "read the doc and follow it", and each task
+checks out `main` and reads the doc at run time. The retest is already pinned there
+(`--campaign 24279250691` on the `ads:morning-read` line of
+[`bsk-retest-morning-read.md`](docs/routines/bsk-retest-morning-read.md) and the
+`ads:postflight-read` line of [`bsk-retest-postflight.md`](docs/routines/bsk-retest-postflight.md),
+which serves all five stages), so registering a second campaign needs no edit to the retest's
+routine. Why every doc must pin: without `--campaign`, a read defaults only when **exactly one**
+campaign is registered (the same rule for the morning read and every post-flight stage). The
+moment a second campaign is registered, an unpinned read exits 1 ("2 campaigns have read plans
+… pass --campaign <id>") instead of reading. That is a loud failure, never a silent read of the
+wrong campaign, but it would skip a scheduled run. A new campaign's routine docs (step 3) carry
+`--campaign <its id>` from the first commit; if any doc or prompt for an existing campaign still
+lacks the pin, pin it in the same PR as the registration.
 
 **2. Register the campaign**, two edits, both in `src/lib`:
 
@@ -528,17 +531,18 @@ them.)
   unset reads as no config spend). The Worker bundles `campaigns.ts`, so redeploy it too (see
   [The sync Worker](#the-sync-worker-workerssync-gss-stats-sync)).
 
-**3. Create the new campaign's own scheduled tasks**, each with `--campaign <new id>` spelled
-out (never rely on a default again). A morning read, daily across its `morningReadFirstEt` ..
-`morningReadLastEt` window. Five post-flight tasks, one per stage, each on that stage's due date
-for the new flight end (the dates come from `postflightDueDate(stage, flightEnd)` in
-`adsRules.ts`: flight end + 7, 15, 30 and 60 days, and `december` at flight end + 62 days but no
-earlier than 2026-12-01). The routine docs
+**3. Create the new campaign's own routine docs and scheduled tasks**, with `--campaign <new
+id>` spelled out on the CLI command lines in the docs (never rely on a default again). A morning
+read, daily across its `morningReadFirstEt` .. `morningReadLastEt` window. Five post-flight
+tasks, one per stage, each on that stage's due date for the new flight end (the dates come from
+`postflightDueDate(stage, flightEnd)` in `adsRules.ts`: flight end + 7, 15, 30 and 60 days, and
+`december` at flight end + 62 days but no earlier than 2026-12-01). The existing routine docs
 ([morning read](docs/routines/bsk-retest-morning-read.md),
 [post-flight](docs/routines/bsk-retest-postflight.md)) describe the retest's own copy of these
-tasks (its dates, its audit path, its fixed Artifact link); a new campaign's tasks need their own
-dates, the audit path above (the page builder derives it from the plan, so leave `--audit-file`
-off) and their own Artifact link.
+tasks (its dates, its audit path, its fixed Artifact link): copy them for the new campaign, with
+its own dates, its own `--campaign` pin, the audit path above (the page builder derives it from
+the plan, so leave `--audit-file` off) and its own Artifact link. The task prompts (outside this
+repo) just point at the doc.
 
 **4. Verify with fixtures before the first live read** (no network, no credentials), for each
 campaign: `npm run -s ads:morning-read -- --fixture <file> --now <iso> --dry-run --campaign
@@ -548,30 +552,29 @@ read points.
 
 **5. When the old campaign is done being read, add it to `CLOSED_CAMPAIGN_IDS`** (`adsRules.ts`).
 What it changes: `readPlanFor` refuses the campaign for **every** read, morning and post-flight
-alike ("campaign … is closed"), so no query, proposal or change can be built for it, and the
-morning-read default stops counting it as a candidate. What it does **not** change: the
-campaign's `ADS_READ_PLANS` entry stays, and a closed plan still counts as registered for the
-post-flight default, so with two plans registered an unpinned post-flight read still errors
-rather than guessing: every scheduled task stays pinned with `--campaign`. Because a closed
+alike ("campaign … is closed"), so no query, proposal or change can be built for it. What it
+does **not** change: the campaign's `ADS_READ_PLANS` entry stays, and a closed plan still counts
+as registered for the default, so with two plans registered an unpinned read still errors
+rather than guessing: every routine doc stays pinned with `--campaign`. Because a closed
 campaign's own pinned post-flight stages are refused too, add it only after its last scheduled
 stage (december) has run, not when the flight ends. A campaign that must never be read at all
 goes straight into `CLOSED_CAMPAIGN_IDS` instead; a new one never does.
 
 **Which campaign a read runs on.** `--campaign <id>` always wins, and must name a campaign in
 `CAMPAIGNS`: an empty value (an unset shell variable), a flag with no value, or an unknown id is
-an error listing the registered ids, never a fall-through to the default. Without the flag:
+an error listing the registered ids, never a fall-through to the default. Without the flag, one
+rule for `morning-read` and every `postflight-read` stage: the read defaults to the plan **only
+when exactly one campaign is registered in `ADS_READ_PLANS`**, closed ones counted. Nothing about
+dates, windows or status is inferred: a late or forced rerun, or an old unpinned task run after
+a newer campaign's window or due date, would otherwise silently read the wrong campaign. Zero or
+two or more registered plans: exit 1, listing the registered ids and saying to pass
+`--campaign`.
 
-- `morning-read` takes the **one** plan whose morning-read window covers the read's ET date;
-  none or several covering it is an error. **After the window the default has nothing to match:**
-  the retest's window ends 2026-10-03, so an unpinned morning read exits 1 from 2026-10-04 (its
-  scheduled task retires itself then; a manual run needs `--campaign 24279250691`).
-- `postflight-read` takes the plan **only when exactly one campaign is registered**, closed
-  ones counted. Nothing about dates or status is inferred: a late or forced rerun after a newer
-  campaign's stage came due would otherwise silently read the wrong one. Two or more registered
-  plans: error, listing the ids, pass `--campaign`.
-
-Existing scheduled invocations that omit the flag keep working, byte for byte, while only the
-retest is registered (checked by running every routine invocation against the base and the head).
+While only the retest is registered, the default is the retest on every date, so every
+invocation that omits the flag (before, inside or after its morning-read window, and every
+post-flight stage) behaves as it did before the registry (checked by running every routine
+invocation against the base and the head: only `--help` differs). The retest's routine docs
+pin it anyway (step 1).
 
 ## Ads data freshness
 

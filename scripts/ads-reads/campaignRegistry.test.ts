@@ -8,7 +8,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Window } from 'happy-dom'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { fixtureDeps, resolveCampaignId, type Fixture } from './cli'
+import { fixtureDeps, parseCli, resolveCampaignId, type Fixture } from './cli'
 import { runMorningRead, runPostflightRead, type MorningOptions } from './read'
 import { formatMorningReport, formatPostflightReport, withJson } from './report'
 import { auditFileFor, buildReadPage, TEMPLATE_PATH } from './read-page'
@@ -177,22 +177,31 @@ describe('a second registered campaign reads independently of the retest', () =>
 describe('defaultReadCampaignId: derived from the registry, never a constant', () => {
   const plan = (id: string, first: string, last: string): AdsReadPlan => ({ ...ADS_READ_PLANS[RETEST], campaignId: id, morningReadFirstEt: first, morningReadLastEt: last })
 
-  it('morning: the one plan whose window covers today (the retest on 2026-09-30, unchanged invocation)', () => {
-    expect(defaultReadCampaignId('morning', '2026-09-30')).toBe(RETEST)
-    expect(defaultReadCampaignId('morning', '2026-09-27')).toBe(RETEST)
-    expect(defaultReadCampaignId('morning', '2026-10-03')).toBe(RETEST)
+  it('morning: with one plan registered it resolves to it on EVERY date, before, inside or after the window (as on base)', () => {
+    for (const day of ['2026-09-26', '2026-09-27', '2026-09-30', '2026-10-03', '2026-10-04', '2026-10-06', '2026-10-10', '2027-01-15']) {
+      expect(defaultReadCampaignId('morning', day), day).toBe(RETEST)
+    }
   })
-  it('morning: outside every window it throws a one-line error listing the ids and the flag', () => {
-    expect(() => defaultReadCampaignId('morning', '2026-10-04')).toThrow(/no campaign's morning-read window covers 2026-10-04; pass --campaign <id> \(registered read plans: 24279250691/)
+  it('morning: with two plans registered it never infers one from the date, even when only one window covers today', () => {
+    // the re-review's example: the retest window 2026-09-27..10-03, a second campaign's 2026-10-05..10-11.
+    // An old unpinned retest morning task run on 2026-10-06 must not silently read the second campaign.
+    const plans = { [RETEST]: plan(RETEST, '2026-09-27', '2026-10-03'), [SECOND]: plan(SECOND, '2026-10-05', '2026-10-11') }
+    const both = new RegExp(`2 campaigns have read plans, so the morning read cannot tell which one is meant; pass --campaign <id> \\(registered read plans: ${RETEST} .*${SECOND} `)
+    for (const day of ['2026-09-26', '2026-09-28', '2026-10-03', '2026-10-04', '2026-10-05', '2026-10-06', '2026-10-11', '2026-10-12']) {
+      expect(() => defaultReadCampaignId('morning', day, undefined, plans), day).toThrow(both)
+    }
+    // overlapping windows: also an error naming both
+    const overlap = { [RETEST]: plan(RETEST, '2026-09-27', '2026-10-03'), [SECOND]: plan(SECOND, '2026-09-30', '2026-10-06') }
+    expect(() => defaultReadCampaignId('morning', '2026-10-01', undefined, overlap)).toThrow(both)
   })
-  it('morning: two windows that cover the same day is an error naming both, not a guess', () => {
-    const plans = { [RETEST]: plan(RETEST, '2026-09-27', '2026-10-03'), [SECOND]: plan(SECOND, '2026-09-30', '2026-10-06') }
-    expect(() => defaultReadCampaignId('morning', '2026-10-01', undefined, plans)).toThrow(new RegExp(`more than one.*${RETEST}, ${SECOND}.*pass --campaign`))
-    expect(defaultReadCampaignId('morning', '2026-09-28', undefined, plans)).toBe(RETEST)
-    expect(defaultReadCampaignId('morning', '2026-10-05', undefined, plans)).toBe(SECOND)
+  it('morning: a closed campaign counts as registered: a lone closed plan resolves, closed plus another throws', () => {
+    const closedId = '24234347705' // in CLOSED_CAMPAIGN_IDS
+    const closed = plan(closedId, '2026-09-27', '2026-10-03')
+    expect(defaultReadCampaignId('morning', '2026-09-30', undefined, { [closedId]: closed })).toBe(closedId)
+    expect(() => defaultReadCampaignId('morning', '2026-09-30', undefined, { [closedId]: closed, [SECOND]: plan(SECOND, '2026-09-27', '2026-10-03') })).toThrow(new RegExp(`${closedId} .*${SECOND} `))
   })
-  it('morning: a closed campaign is never a default', () => {
-    expect(() => defaultReadCampaignId('morning', '2026-09-30', undefined, { '24234347705': plan('24234347705', '2026-09-27', '2026-10-03') })).toThrow(/no campaign.s morning-read window covers 2026-09-30; pass --campaign <id> \(registered read plans: 24234347705 /)
+  it('morning with no plan at all throws', () => {
+    expect(() => defaultReadCampaignId('morning', '2026-09-30', undefined, {})).toThrow(/no campaign has a read plan.*none registered/)
   })
   it('post-flight with one registered plan always resolves to it, on every scheduled stage date (the unchanged scheduled invocations)', () => {
     const flightEnd = campaignById(RETEST)!.flightEnd
@@ -252,7 +261,7 @@ describe('resolveCampaignId (the CLI)', () => {
   })
   it('with no --campaign it uses the read\'s own clock: the fixture time, not today', () => {
     expect(resolveCampaignId({}, 'morning', Date.parse('2026-09-30T12:05:00Z'))).toBe(RETEST)
-    expect(() => resolveCampaignId({}, 'morning', Date.parse('2026-12-01T12:05:00Z'))).toThrow(/--campaign <id>/)
+    expect(resolveCampaignId({}, 'morning', Date.parse('2026-12-01T12:05:00Z'))).toBe(RETEST)
     expect(resolveCampaignId({}, 'postflight', Date.parse('2026-10-09T12:05:00Z'), 'wrapup')).toBe(RETEST)
   })
   it('with only the retest registered, every scheduled routine invocation (no --campaign) still resolves to it', () => {
@@ -264,12 +273,25 @@ describe('resolveCampaignId (the CLI)', () => {
         expect(resolveCampaignId({}, 'postflight', Date.parse(`${day}T17:00:00Z`), stage), `${stage} on ${day}`).toBe(RETEST)
       }
     }
-    // morning: 06:00 ET (10:00Z) on every day of the window
-    for (const day of ['2026-09-27', '2026-09-28', '2026-09-29', '2026-09-30', '2026-10-01', '2026-10-02', '2026-10-03']) {
+    // morning: 06:00 ET (10:00Z) before, inside and after the window: the date plays no part (as on base)
+    for (const day of ['2026-09-26', '2026-09-27', '2026-09-28', '2026-09-29', '2026-09-30', '2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04', '2026-10-06', '2026-10-10', '2027-01-15']) {
       expect(resolveCampaignId({}, 'morning', Date.parse(`${day}T10:00:00Z`)), day).toBe(RETEST)
     }
-    // after the window the morning read has nothing to default to (the routine retires itself then)
-    expect(() => resolveCampaignId({}, 'morning', Date.parse('2026-10-04T10:00:00Z'))).toThrow(/no campaign's morning-read window covers 2026-10-04/)
+    for (const t of ['2026-10-04T03:59:59Z', '2026-10-04T04:00:00Z']) expect(resolveCampaignId({}, 'morning', Date.parse(t)), t).toBe(RETEST)
+  })
+  it('with a second campaign registered, an unpinned morning read on 2026-10-06 (the re-review example) exits via the error, not the second campaign', () => {
+    CAMPAIGNS.push({ ...secondFlight, flightStart: '2026-10-04', flightEnd: '2026-10-10' })
+    ADS_READ_PLANS[SECOND] = buildReadPlan(SECOND, { ...secondSettings, morningReadFirstEt: '2026-10-05', morningReadLastEt: '2026-10-11' })
+    expect(() => resolveCampaignId({}, 'morning', Date.parse('2026-10-06T10:00:00Z'))).toThrow(new RegExp(`pass --campaign <id> \\(registered read plans: ${RETEST} .*${SECOND} `))
+    // the pinned retest task is unaffected
+    expect(resolveCampaignId({ campaign: RETEST }, 'morning', Date.parse('2026-10-06T10:00:00Z'))).toBe(RETEST)
+  })
+  it('a bare --campaign (no value) fails in parseCli with the same message, listing the registered ids', () => {
+    expect(() => parseCli({}, ['--campaign'])).toThrow(new RegExp(`--campaign with no value is not a registered campaign id \\(registered read plans: ${RETEST}\\); pass --campaign <id>`))
+    expect(() => parseCli({}, ['--dry-run', '--campaign'])).toThrow(/with no value.*registered read plans/)
+    // other parse errors are untouched
+    expect(() => parseCli({}, ['--nope'])).toThrow(/Unknown option/)
+    expect(parseCli({}, ['--campaign', RETEST]).campaign).toBe(RETEST)
   })
 })
 
