@@ -37,7 +37,6 @@ import {
   readingEntryKind,
   readingId,
   readPlanFor,
-  RETEST_AD_GROUP_PLACEMENT_COUNTS,
   round2,
   AUTH_NEW_EXISTING_LIVE_AT,
   campaignSignUps,
@@ -253,7 +252,7 @@ export interface DiagnosticsSection {
   hourly: HourlyRow[] | null
   geo: GeoRow[] | null
   devices: DeviceRow[] | null
-  /** null entries: build-spec expected count (RETEST_AD_GROUP_PLACEMENT_COUNTS), for the
+  /** null entries: build-spec expected count (the read plan's adGroupPlacementCounts), for the
    * "placement count matches the build spec" check (R2) — never for an unknown ad group. */
   targeting: (TargetingRow & { expectedPlacements: number | null })[] | null
   recommendations: RecommendationRow[] | null
@@ -643,6 +642,7 @@ async function diagnosticsRead(
   deps: ReadDeps,
   campaign: CampaignFlight,
   campaignId: string,
+  expectedCounts: AdsReadPlan['adGroupPlacementCounts'],
   spendThroughEt: string | null,
   taggedRows: Attempt<TaggedRow[]>,
 ): Promise<DiagnosticsSection> {
@@ -690,7 +690,7 @@ async function diagnosticsRead(
     hourly: hourly?.ok ? hourly.value : null,
     geo: geo?.ok ? geo.value : null,
     devices: devices?.ok ? devices.value : null,
-    targeting: targeting?.ok ? targeting.value.map((t) => ({ ...t, expectedPlacements: RETEST_AD_GROUP_PLACEMENT_COUNTS[t.adGroup] ?? null })) : null,
+    targeting: targeting?.ok ? targeting.value.map((t) => ({ ...t, expectedPlacements: expectedCounts?.[t.adGroup] ?? null })) : null,
     recommendations: recommendations?.ok ? recommendations.value : null,
     countryCounts: country?.ok ? country.value : null,
     accountCrossCheck,
@@ -1033,7 +1033,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
 
   const diagnostics: DiagnosticsSection = opts.healthOnly
     ? { spendThroughEt: null, hourly: null, geo: null, devices: null, targeting: null, recommendations: null, countryCounts: null, accountCrossCheck: null, errors: [] }
-    : await diagnosticsRead(deps, campaign, plan.campaignId, spend.throughEt, taggedRows)
+    : await diagnosticsRead(deps, campaign, plan.campaignId, plan.adGroupPlacementCounts, spend.throughEt, taggedRows)
   const playReports: PlayReportsSection | null = opts.healthOnly ? null : await playReportsRead(deps, campaign, todayEt, cumulative)
 
   const servedToday = spend.ok ? (spend.todayPartial?.cost ?? 0) > 0 : null
