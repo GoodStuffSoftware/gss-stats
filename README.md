@@ -485,6 +485,37 @@ npm run typecheck:scripts
   pushed that day is not pushed again; a failed read always pushes. The database enforces it
   with a UNIQUE index (migration 0003).
 
+### Adding a new campaign
+
+Reading a new Google Ads campaign is a registry change, not a code change: no campaign id is
+written anywhere outside the entries below (and fixtures and tests). Several campaigns can be
+live at once. Two edits, both in `src/lib`:
+
+1. **[`campaigns.ts`](src/lib/campaigns.ts) `CAMPAIGNS`** — one `CampaignFlight`: `id` (Google
+   Ads campaign id), `label`, `ucValues` (the `utm_campaign` tags), `flightStart`
+   (+ `flightStartTimeEt` if the schedule starts mid-day), `flightEnd`, `status`, `kind`,
+   `dailyBudgetUsd` and `hardCapUsd` (both required to read it: they arm the pacing line and kill
+   rule 4), `servingHoursEt`, `notes`, and `directionalThroughDay` if the first N flight days
+   are directional. This alone puts the campaign on the dashboard and in the sync.
+2. **[`adsRules.ts`](src/lib/adsRules.ts) `ADS_READ_PLANS`** — one `buildReadPlan('<id>', {...})`:
+   `thresholds` (the spend reads), `killRulesFrom`, `placementLeakMaxShare`, `ctrFloor`,
+   `approvedPlacements`, optional `adGroupPlacementCounts` (the build-spec counts the targeting
+   diagnostic checks), and `morningReadFirstEt` / `morningReadLastEt` (the morning-read window).
+
+Optional: `CAMPAIGN_DAILY_SPEND` and `CAMPAIGN_SPEND` in `campaigns.ts` (audit totals; unset
+reads as no config spend). A campaign that must never be read is added to `CLOSED_CAMPAIGN_IDS`
+instead (`readPlanFor` refuses it); a new one never goes there.
+
+**Which campaign a read runs on.** `--campaign <id>` always wins. Without it, `morning-read`
+takes the one plan whose morning-read window covers the read's ET date, and `postflight-read`
+takes the plan whose `--stage` was most recently due (a post-flight read runs long after its
+campaign's morning window, so the window can't decide it; with one plan it always resolves).
+No match, or a tie, is an error listing the registered ids: pass `--campaign`. Existing
+scheduled invocations that omit it keep working while exactly one plan is registered, and after
+a second is added the morning read needs `--campaign` whenever the two windows overlap or
+neither covers today. The Worker bundles `campaigns.ts`, so redeploy it too (see
+[The sync Worker](#the-sync-worker-workerssync-gss-stats-sync)).
+
 ## Ads data freshness
 
 Every path that needs Google Ads metrics runs **one** function,
