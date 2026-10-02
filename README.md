@@ -488,33 +488,90 @@ npm run typecheck:scripts
 ### Adding a new campaign
 
 Reading a new Google Ads campaign is a registry change, not a code change: no campaign id is
-written anywhere outside the entries below (and fixtures and tests). Several campaigns can be
-live at once. Two edits, both in `src/lib`:
+written anywhere outside the registry entries below (and fixtures, tests and the routine docs).
+Several campaigns can be live at once. Do these in order. The numbering matters: step 1 comes
+**before** anything is registered.
 
-1. **[`campaigns.ts`](src/lib/campaigns.ts) `CAMPAIGNS`** — one `CampaignFlight`: `id` (Google
-   Ads campaign id), `label`, `ucValues` (the `utm_campaign` tags), `flightStart`
-   (+ `flightStartTimeEt` if the schedule starts mid-day), `flightEnd`, `status`, `kind`,
-   `dailyBudgetUsd` and `hardCapUsd` (both required to read it: they arm the pacing line and kill
-   rule 4), `servingHoursEt`, `notes`, and `directionalThroughDay` if the first N flight days
-   are directional. This alone puts the campaign on the dashboard and in the sync.
-2. **[`adsRules.ts`](src/lib/adsRules.ts) `ADS_READ_PLANS`** — one `buildReadPlan('<id>', {...})`:
-   `thresholds` (the spend reads), `killRulesFrom`, `placementLeakMaxShare`, `ctrFloor`,
-   `approvedPlacements`, optional `adGroupPlacementCounts` (the build-spec counts the targeting
-   diagnostic checks), and `morningReadFirstEt` / `morningReadLastEt` (the morning-read window).
+**1. Pin `--campaign <current id>` on every existing scheduled invocation, first.** Today that is
+the retest, `--campaign 24279250691`, on each of the five one-time post-flight tasks (wrapup,
+day15, day30, day60, december: `npm run -s ads:postflight-read -- --stage <stage> --campaign
+24279250691 …`) and on any morning-read task still running (including its `--release-health-only`
+runs). Why first: without `--campaign`, a post-flight read defaults only when **exactly one**
+campaign is registered, and a morning read only when exactly one window covers today. The
+moment a second campaign is registered, an unpinned post-flight task exits 1 ("2 campaigns have
+read plans … pass --campaign <id>") instead of reading. That is a loud failure, never a silent
+read of the wrong campaign, but it would skip a scheduled stage. Those tasks run from `main`, so
+they pick the new rule up the day it merges: pin them before you merge the registration. (The
+task prompts live outside this repo, in the scheduled-tasks store; this README does not edit
+them.)
 
-Optional: `CAMPAIGN_DAILY_SPEND` and `CAMPAIGN_SPEND` in `campaigns.ts` (audit totals; unset
-reads as no config spend). A campaign that must never be read is added to `CLOSED_CAMPAIGN_IDS`
-instead (`readPlanFor` refuses it); a new one never goes there.
+**2. Register the campaign**, two edits, both in `src/lib`:
 
-**Which campaign a read runs on.** `--campaign <id>` always wins. Without it, `morning-read`
-takes the one plan whose morning-read window covers the read's ET date, and `postflight-read`
-takes the plan whose `--stage` was most recently due (a post-flight read runs long after its
-campaign's morning window, so the window can't decide it; with one plan it always resolves).
-No match, or a tie, is an error listing the registered ids: pass `--campaign`. Existing
-scheduled invocations that omit it keep working while exactly one plan is registered, and after
-a second is added the morning read needs `--campaign` whenever the two windows overlap or
-neither covers today. The Worker bundles `campaigns.ts`, so redeploy it too (see
-[The sync Worker](#the-sync-worker-workerssync-gss-stats-sync)).
+- **[`campaigns.ts`](src/lib/campaigns.ts) `CAMPAIGNS`** — one `CampaignFlight`: `id` (Google
+  Ads campaign id), `label`, `ucValues` (the `utm_campaign` tags), `flightStart`
+  (+ `flightStartTimeEt` if the schedule starts mid-day), `flightEnd`, `status`, `kind`,
+  `dailyBudgetUsd` and `hardCapUsd` (both required to read it: they arm the pacing line and kill
+  rule 4), `servingHoursEt`, `notes`, and `directionalThroughDay` if the first N flight days
+  are directional. This alone puts the campaign on the dashboard and in the sync.
+- **[`adsRules.ts`](src/lib/adsRules.ts) `ADS_READ_PLANS`** — one `buildReadPlan('<id>', {...})`:
+  `thresholds` (the spend reads; the report page draws its ladder from them), `killRulesFrom`,
+  `placementLeakMaxShare`, `ctrFloor`, `approvedPlacements`, optional `adGroupPlacementCounts`
+  (the build-spec counts the targeting diagnostic checks), `morningReadFirstEt` /
+  `morningReadLastEt` (the morning-read window), and the two fields that keep two live
+  campaigns' output apart:
+  - `reportLabel` — the short name that leads the report header and every push/bus line
+    ("`<reportLabel>` morning read …"). The retest's is `BSK retest`.
+  - `auditSlug` — the audit-trail folder, `docs/marketing/google-ads/<auditSlug>/data/<ET
+    date>.json`. The retest's is `retest`.
+  Both must be unique across the registry; `campaignRegistry.test.ts` fails if two plans share
+  one. Optional: `CAMPAIGN_DAILY_SPEND` and `CAMPAIGN_SPEND` in `campaigns.ts` (audit totals;
+  unset reads as no config spend). The Worker bundles `campaigns.ts`, so redeploy it too (see
+  [The sync Worker](#the-sync-worker-workerssync-gss-stats-sync)).
+
+**3. Create the new campaign's own scheduled tasks**, each with `--campaign <new id>` spelled
+out (never rely on a default again). A morning read, daily across its `morningReadFirstEt` ..
+`morningReadLastEt` window. Five post-flight tasks, one per stage, each on that stage's due date
+for the new flight end (the dates come from `postflightDueDate(stage, flightEnd)` in
+`adsRules.ts`: flight end + 7, 15, 30 and 60 days, and `december` at flight end + 62 days but no
+earlier than 2026-12-01). The routine docs
+([morning read](docs/routines/bsk-retest-morning-read.md),
+[post-flight](docs/routines/bsk-retest-postflight.md)) describe the retest's own copy of these
+tasks (its dates, its audit path, its fixed Artifact link); a new campaign's tasks need their own
+dates, the audit path above (the page builder derives it from the plan, so leave `--audit-file`
+off) and their own Artifact link.
+
+**4. Verify with fixtures before the first live read** (no network, no credentials), for each
+campaign: `npm run -s ads:morning-read -- --fixture <file> --now <iso> --dry-run --campaign
+<id>` and the same with `ads:postflight-read -- --stage <stage> … --force`. Check the header
+and push text lead with the right `reportLabel`, and the threshold ladder shows that campaign's
+read points.
+
+**5. When the old campaign is done being read, add it to `CLOSED_CAMPAIGN_IDS`** (`adsRules.ts`).
+What it changes: `readPlanFor` refuses the campaign for **every** read, morning and post-flight
+alike ("campaign … is closed"), so no query, proposal or change can be built for it, and the
+morning-read default stops counting it as a candidate. What it does **not** change: the
+campaign's `ADS_READ_PLANS` entry stays, and a closed plan still counts as registered for the
+post-flight default, so with two plans registered an unpinned post-flight read still errors
+rather than guessing: every scheduled task stays pinned with `--campaign`. Because a closed
+campaign's own pinned post-flight stages are refused too, add it only after its last scheduled
+stage (december) has run, not when the flight ends. A campaign that must never be read at all
+goes straight into `CLOSED_CAMPAIGN_IDS` instead; a new one never does.
+
+**Which campaign a read runs on.** `--campaign <id>` always wins, and must name a campaign in
+`CAMPAIGNS`: an empty value (an unset shell variable), a flag with no value, or an unknown id is
+an error listing the registered ids, never a fall-through to the default. Without the flag:
+
+- `morning-read` takes the **one** plan whose morning-read window covers the read's ET date;
+  none or several covering it is an error. **After the window the default has nothing to match:**
+  the retest's window ends 2026-10-03, so an unpinned morning read exits 1 from 2026-10-04 (its
+  scheduled task retires itself then; a manual run needs `--campaign 24279250691`).
+- `postflight-read` takes the plan **only when exactly one campaign is registered**, closed
+  ones counted. Nothing about dates or status is inferred: a late or forced rerun after a newer
+  campaign's stage came due would otherwise silently read the wrong one. Two or more registered
+  plans: error, listing the ids, pass `--campaign`.
+
+Existing scheduled invocations that omit the flag keep working, byte for byte, while only the
+retest is registered (checked by running every routine invocation against the base and the head).
 
 ## Ads data freshness
 

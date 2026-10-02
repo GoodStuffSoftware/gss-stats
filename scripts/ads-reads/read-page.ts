@@ -7,8 +7,10 @@
 // `----- JSON -----`, then the JSON). --narrative is the Step 5 narrative as JSON:
 // { headline, working[], notWorking[], soWhat[] }. --audit-commit is the Step 7 audit-trail
 // commit; leave it out when Step 7 failed and the page says the audit trail was not written.
-// The branch and file default to the routine's own (docs/ads-next-campaign,
-// docs/marketing/google-ads/retest/data/<ET date>.json).
+// The branch and file default to the routine's own (docs/ads-next-campaign, and the campaign's
+// audit path from its read plan: docs/marketing/google-ads/<auditSlug>/data/<ET date>.json, so
+// two campaigns read on one date never share a file; the retest's slug is "retest"). The
+// threshold ladder is drawn from the same campaign's read plan, looked up by the id in the JSON.
 //
 // Fails loudly (exit 1, one line on stderr, nothing written) when the JSON block is missing or
 // unparseable, or the narrative is incomplete. On success prints the output path. Read-only
@@ -18,11 +20,12 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
+import { auditPathFor, planOrThrow } from '../../src/lib/adsRules'
 
 export const JSON_SPLIT = '----- JSON -----'
 export const PLACEHOLDER = '"@@SRC@@"'
 export const DEFAULT_AUDIT_BRANCH = 'docs/ads-next-campaign'
-export const auditFileFor = (etDate: string) => `docs/marketing/google-ads/retest/data/${etDate}.json`
+export const auditFileFor = (campaignId: string, etDate: string) => auditPathFor(campaignId, etDate)
 export const TEMPLATE_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), 'read-page.template.html')
 
 export interface Narrative {
@@ -40,6 +43,8 @@ export interface PagePayload {
   raw: string
   narrative: Narrative
   audit: Audit | null
+  /** The campaign's cumulative-spend read points, from its read plan (null: no campaign id in the JSON). */
+  thresholds: number[] | null
 }
 
 /** The parsed JSON block of a morning-read's stdout; throws a one-line reason. */
@@ -78,16 +83,20 @@ export function serializePayload(p: PagePayload): string {
 export function buildReadPage(i: { template: string; raw: string; narrative: unknown; audit?: Partial<Audit> | null }): string {
   const json = parseCliJson(i.raw)
   const narrative = validateNarrative(i.narrative)
+  const campaignId = json.campaign && typeof json.campaign === 'object' && typeof (json.campaign as { id?: unknown }).id === 'string' ? (json.campaign as { id: string }).id : null
+  // Looked up by id at build time, so the template carries no campaign's ladder and the CLI's
+  // JSON does not need to carry thresholds.
+  const thresholds = campaignId ? [...planOrThrow(campaignId).thresholds] : null
   let audit: Audit | null = null
   if (i.audit?.commit) {
     const etDate = typeof json.etDate === 'string' ? json.etDate : null
-    const file = i.audit.file || (etDate ? auditFileFor(etDate) : null)
-    if (!file) throw new Error('no --audit-file given and the JSON block has no etDate to derive it from')
+    const file = i.audit.file || (etDate && campaignId ? auditFileFor(campaignId, etDate) : null)
+    if (!file) throw new Error('no --audit-file given and the JSON block has no campaign id and etDate to derive it from')
     audit = { commit: i.audit.commit, branch: i.audit.branch || DEFAULT_AUDIT_BRANCH, file }
   }
   const parts = i.template.split(PLACEHOLDER)
   if (parts.length !== 2) throw new Error(`the template must contain ${PLACEHOLDER} exactly once (found ${parts.length - 1})`)
-  const payload = serializePayload({ raw: i.raw, narrative, audit })
+  const payload = serializePayload({ raw: i.raw, narrative, audit, thresholds })
   // A replacer function, never a replacement string: the report contains "$", which a
   // replacement string would read as $&, $1 and so on.
   return i.template.replace(PLACEHOLDER, () => payload)
