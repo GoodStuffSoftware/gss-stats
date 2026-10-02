@@ -144,7 +144,7 @@ ul .nr{border:0;padding:0}
 
 <div class="wrap">
   <header class="masthead">
-    <div class="eyebrow">Best Sudoku · US+CA web retest · Google Ads campaign <span class="mono">24279250691</span></div>
+    <div class="eyebrow" id="eyebrow">Best Sudoku · Google Ads campaign</div>
     <div class="dayline" id="dayline"></div>
     <h1 id="headline">Loading the morning read</h1>
     <p class="dateline" id="dateline"></p>
@@ -314,6 +314,11 @@ try {
   const errCount = (D.errors || []).length + (D.failures || []).length;
 
   // masthead
+  // The campaign label and id come from the read's own JSON header (the registry), never the template.
+  guard("eyebrow", () => {
+    if (!camp.id) return;
+    $("eyebrow").replaceChildren(`Best Sudoku · ${camp.label || "web campaign"} · Google Ads campaign `, el("span", { class: "mono", text: camp.id }));
+  });
   guard("dateline", () => {
     const flightDays = camp.flightStart && camp.flightEnd ? dayNum(camp.flightStart, camp.flightEnd) : null;
     $("dayline").textContent = closed && camp.flightStart

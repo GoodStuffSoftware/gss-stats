@@ -51,9 +51,10 @@ export const ADS_API_VERSION = 'v25'
 /** The Best Sudoku Ads account (872-653-5246). Queried directly — NEVER through a manager
  * account: no login-customer-id header is ever sent (see scripts/ads-reads/adsApi.ts). */
 export const ADS_CUSTOMER_ID = '8726535246'
-export const RETEST_CAMPAIGN_ID = '24279250691'
 /** Closed campaigns the routine must never read-for-action or touch. readPlanFor() refuses
- * them outright, so no code path can build a query or a proposal for either. */
+ * them outright, so no code path can build a query or a proposal for either. A NEW campaign
+ * is never added here (it is registered in CAMPAIGNS + ADS_READ_PLANS instead); this list is
+ * only for campaigns that must stay unreadable. */
 export const CLOSED_CAMPAIGN_IDS: readonly string[] = ['24215315197', '24234347705']
 
 /** v1.95.3 production WEB go-live (the brief's 2026-09-26 14:25 UTC) — the lower bound for
@@ -114,14 +115,20 @@ export const RETEST_APPROVED_PLACEMENTS: readonly string[] = [
   'com.newsudoku.number.maze',
 ]
 
-/** Approved placement lists per campaign, for tagging stored placement rows (backfill and
- * routine). The twin ran the same 17 as the retest (retest spec section 5: "identical to
- * the twin's as-built"); week 1 ran the original 19 — the 17 plus the two later excluded
- * for low CTR (spec section 5, "Excluded, on both ad groups (2 of the original 19)"). */
+/** Approved placement lists for the CLOSED campaigns that have no read plan, for tagging stored
+ * placement rows (backfill). The twin ran the same 17 as the retest (retest spec section 5:
+ * "identical to the twin's as-built"); week 1 ran the original 19 — the 17 plus the two later
+ * excluded for low CTR (spec section 5, "Excluded, on both ad groups (2 of the original 19)").
+ * A campaign WITH a read plan carries its list on the plan (approvedPlacements): read it
+ * through approvedPlacementsFor(), never this map directly. */
 export const APPROVED_PLACEMENTS_BY_CAMPAIGN: Record<string, readonly string[]> = {
-  [RETEST_CAMPAIGN_ID]: RETEST_APPROVED_PLACEMENTS,
   '24234347705': RETEST_APPROVED_PLACEMENTS,
   '24215315197': [...RETEST_APPROVED_PLACEMENTS, 'com.icenta.sudoku.ui', 'com.openmygame.games.android.sudokumaster'],
+}
+/** The approved placement list for a campaign: its read plan's list when it has a plan, else
+ * the closed-campaign record above, else null (none on record). */
+export function approvedPlacementsFor(campaignId: string): readonly string[] | null {
+  return ADS_READ_PLANS[campaignId]?.approvedPlacements ?? APPROVED_PLACEMENTS_BY_CAMPAIGN[campaignId] ?? null
 }
 
 /** Build-spec section 5/6 expected ad-group placement counts (the retest campaign carries the
@@ -149,6 +156,9 @@ export interface AdsReadPlan {
   /** Kill rule 2: propose pause when cumulative CTR is BELOW this. */
   ctrFloor: number
   approvedPlacements: readonly string[]
+  /** Build-spec expected placement count per ad group, to VERIFY the live `targeting`
+   * diagnostic (informational only, never a rule). Omit when the build has no such spec. */
+  adGroupPlacementCounts?: Readonly<Record<string, number>>
   /** ET dates the scheduled morning read runs (docs/routines/bsk-retest-morning-read.md) —
    * used to notice a scheduled read that never ran. */
   morningReadFirstEt: string
@@ -157,20 +167,68 @@ export interface AdsReadPlan {
 
 // Budget and cap come from lib/campaigns.ts (the one campaign definition); only the read
 // schedule and the kill-rule constants (spec sections 11-12) live here.
-const retestFlight = campaignById(RETEST_CAMPAIGN_ID)
+type ReadPlanSettings = Omit<AdsReadPlan, 'campaignId' | 'dailyBudget' | 'hardCap'>
+/** A read plan for a campaign registered in lib/campaigns.ts CAMPAIGNS. The budget and the
+ * hard cap are taken from that entry and must exist there: a plan with no hard cap would
+ * silently arm no kill rule 4. */
+export function buildReadPlan(campaignId: string, settings: ReadPlanSettings): AdsReadPlan {
+  const flight = campaignById(campaignId)
+  if (!flight) throw new Error(`campaign ${campaignId} is not in lib/campaigns.ts CAMPAIGNS`)
+  if (flight.dailyBudgetUsd == null || flight.hardCapUsd == null) throw new Error(`campaign ${campaignId} needs dailyBudgetUsd and hardCapUsd in lib/campaigns.ts CAMPAIGNS before it can have a read plan`)
+  return { campaignId, dailyBudget: flight.dailyBudgetUsd, hardCap: flight.hardCapUsd, ...settings }
+}
+/** THE read-plan registry: one entry per campaign the routine reads (with rules). To start
+ * reading a new campaign add its CAMPAIGNS entry and a plan here — see README "Adding a new
+ * campaign". Several plans may be live at once; nothing assumes a single current campaign. */
 export const ADS_READ_PLANS: Record<string, AdsReadPlan> = {
-  [RETEST_CAMPAIGN_ID]: {
-    campaignId: RETEST_CAMPAIGN_ID,
-    dailyBudget: retestFlight?.dailyBudgetUsd ?? 13,
-    hardCap: retestFlight?.hardCapUsd ?? 100,
+  '24279250691': buildReadPlan('24279250691', {
     thresholds: [25, 50, 75, 100],
     killRulesFrom: 50,
     placementLeakMaxShare: 0.1,
     ctrFloor: 0.0015,
     approvedPlacements: RETEST_APPROVED_PLACEMENTS,
+    adGroupPlacementCounts: RETEST_AD_GROUP_PLACEMENT_COUNTS,
     morningReadFirstEt: '2026-09-27',
     morningReadLastEt: '2026-10-03',
-  },
+  }),
+}
+
+/** Which campaign a read means when the CLI gets no --campaign: derived from the registry,
+ * never a constant. `morning`: the one plan whose morning-read window covers `todayEt`.
+ * `postflight`: the plan whose `stage` was due most recently (else, when none is due yet, due
+ * soonest). A post-flight read runs long after its campaign's morning-read window, so the
+ * window cannot decide it; keying on the due date keeps an older campaign's scheduled stages
+ * resolving to it after a newer campaign is registered. Throws, listing the ids, when nothing
+ * qualifies or the choice is a tie. With one registered plan a post-flight read always
+ * resolves to it. */
+export function defaultReadCampaignId(
+  kind: 'morning' | 'postflight',
+  todayEt: string,
+  stage?: PostflightStage,
+  plans: Readonly<Record<string, AdsReadPlan>> = ADS_READ_PLANS,
+): string {
+  const all = Object.values(plans).filter((p) => !CLOSED_CAMPAIGN_IDS.includes(p.campaignId))
+  const listing = all.map((p) => `${p.campaignId} (morning reads ${p.morningReadFirstEt}..${p.morningReadLastEt})`).join(', ') || 'none registered'
+  const refuse = (why: string): never => {
+    throw new Error(`${why}; pass --campaign <id> (registered read plans: ${listing})`)
+  }
+  if (kind === 'morning') {
+    const live = all.filter((p) => p.morningReadFirstEt <= todayEt && todayEt <= p.morningReadLastEt)
+    if (live.length === 1) return live[0].campaignId
+    return refuse(live.length ? `more than one campaign's morning-read window covers ${todayEt}: ${live.map((p) => p.campaignId).join(', ')}` : `no campaign's morning-read window covers ${todayEt}`)
+  }
+  if (!stage) throw new Error('a post-flight default needs a stage')
+  const dued = all.flatMap((p) => {
+    const flight = campaignById(p.campaignId)
+    return flight ? [{ id: p.campaignId, due: postflightDueDate(stage, flight.flightEnd) }] : []
+  })
+  if (!dued.length) return refuse('no campaign has a read plan')
+  const past = dued.filter((d) => d.due <= todayEt)
+  const pool = past.length ? past : dued
+  const pickDue = past.length ? pool.reduce((a, b) => (b.due > a.due ? b : a)).due : pool.reduce((a, b) => (b.due < a.due ? b : a)).due
+  const tied = pool.filter((d) => d.due === pickDue)
+  if (tied.length > 1) return refuse(`more than one campaign's ${stage} read is due ${pickDue}: ${tied.map((d) => d.id).join(', ')}`)
+  return tied[0].id
 }
 
 /** A scheduled morning read that never ran can't report itself, so the next read that does

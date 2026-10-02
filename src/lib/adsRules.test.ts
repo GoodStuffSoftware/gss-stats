@@ -27,7 +27,6 @@ import {
   readPlanFor,
   resolveCampaignSpend,
   RETEST_APPROVED_PLACEMENTS,
-  RETEST_CAMPAIGN_ID,
   signUpsAtMost,
   signUpsAtMostLabel,
   placementShareOver,
@@ -61,6 +60,7 @@ import {
 import { campaignById } from './campaigns'
 import { MIN_COHORT, POPUP_PAGE_NOTE } from './popupEvents'
 
+const RETEST_CAMPAIGN_ID = '24279250691'
 const plan = ADS_READ_PLANS[RETEST_CAMPAIGN_ID]
 const H = (iso: string) => Date.parse(iso)
 
