@@ -216,18 +216,19 @@ export const reportLabelFor = (campaignId: string): string => planOrThrow(campai
 export const auditPathFor = (campaignId: string, etDate: string): string => `docs/marketing/google-ads/${planOrThrow(campaignId).auditSlug}/data/${etDate}.json`
 
 /** Which campaign a read means when the CLI gets no --campaign: derived from the registry,
- * never a constant, and never a guess.
- * `morning`: the one plan whose morning-read window covers `todayEt` (closed campaigns are not
- * candidates); none or several is an error.
- * `postflight`: the ONLY registered plan, counting closed campaigns too. A post-flight stage
- * runs long after its campaign's flight closes (the retest's last stage is in December), so a
- * "not closed" filter would hand those unpinned tasks the next campaign the day the old one is
- * marked closed; and no date rule is safe either (a late or forced rerun lands after the next
- * campaign's due date). With two or more plans registered the read must say which one.
- * Every error lists the registered ids and says to pass --campaign. */
+ * never a constant, and never a guess. One rule for the morning read and every post-flight
+ * stage: the default is the ONLY registered plan, counting closed campaigns too. No date rule
+ * is safe: a morning window or a post-flight due day says nothing about which campaign an
+ * unpinned task was written for (a late or forced rerun, or an old task run after the next
+ * campaign's window opens, would silently read the wrong campaign). A "not closed" filter is
+ * no better: it would hand an old campaign's last post-flight stage (the retest's is in
+ * December) to the next campaign the day the old one is marked closed. With two or more plans
+ * registered, or none, the read must say which one: every error lists the registered ids and
+ * says to pass --campaign. `_todayEt` is unused by the rule; it keeps one call shape for both
+ * kinds. */
 export function defaultReadCampaignId(
   kind: 'morning' | 'postflight',
-  todayEt: string,
+  _todayEt: string,
   stage?: PostflightStage,
   plans: Readonly<Record<string, AdsReadPlan>> = ADS_READ_PLANS,
 ): string {
@@ -236,14 +237,10 @@ export function defaultReadCampaignId(
   const refuse = (why: string): never => {
     throw new Error(`${why}; pass --campaign <id> (registered read plans: ${listing})`)
   }
-  if (kind === 'morning') {
-    const live = registered.filter((p) => !CLOSED_CAMPAIGN_IDS.includes(p.campaignId) && p.morningReadFirstEt <= todayEt && todayEt <= p.morningReadLastEt)
-    if (live.length === 1) return live[0].campaignId
-    return refuse(live.length ? `more than one campaign's morning-read window covers ${todayEt}: ${live.map((p) => p.campaignId).join(', ')}` : `no campaign's morning-read window covers ${todayEt}`)
-  }
-  if (!stage) throw new Error('a post-flight default needs a stage')
+  if (kind === 'postflight' && !stage) throw new Error('a post-flight default needs a stage')
   if (registered.length === 1) return registered[0].campaignId
-  return refuse(registered.length ? `${registered.length} campaigns have read plans, so the ${stage} read cannot tell which one is meant` : 'no campaign has a read plan')
+  const what = kind === 'morning' ? 'the morning read' : `the ${stage} read`
+  return refuse(registered.length ? `${registered.length} campaigns have read plans, so ${what} cannot tell which one is meant` : 'no campaign has a read plan')
 }
 
 /** A scheduled morning read that never ran can't report itself, so the next read that does
