@@ -156,6 +156,14 @@ export interface AdsReadPlan {
   /** Kill rule 2: propose pause when cumulative CTR is BELOW this. */
   ctrFloor: number
   approvedPlacements: readonly string[]
+  /** Short campaign name that leads this campaign's push/bus text and report header
+   * ("<label> morning read ..."). Unique across the registry, so two campaigns read the same
+   * morning never produce indistinguishable notifications. The retest keeps "BSK retest". */
+  reportLabel: string
+  /** Directory slug of this campaign's audit trail: docs/marketing/google-ads/<slug>/data/<ET
+   * date>.json. Unique across the registry, so two campaigns read on the same ET date never
+   * write the same file. The retest keeps "retest". */
+  auditSlug: string
   /** Build-spec expected placement count per ad group, to VERIFY the live `targeting`
    * diagnostic (informational only, never a rule). Omit when the build has no such spec. */
   adGroupPlacementCounts?: Readonly<Record<string, number>>
@@ -187,48 +195,55 @@ export const ADS_READ_PLANS: Record<string, AdsReadPlan> = {
     placementLeakMaxShare: 0.1,
     ctrFloor: 0.0015,
     approvedPlacements: RETEST_APPROVED_PLACEMENTS,
+    reportLabel: 'BSK retest',
+    auditSlug: 'retest',
     adGroupPlacementCounts: RETEST_AD_GROUP_PLACEMENT_COUNTS,
     morningReadFirstEt: '2026-09-27',
     morningReadLastEt: '2026-10-03',
   }),
 }
 
+/** The read plan for a campaign id, or a throw that lists every registered id. Used for labels
+ * and the report page, which only ever see campaigns that already passed readPlanFor. */
+export function planOrThrow(campaignId: string, plans: Readonly<Record<string, AdsReadPlan>> = ADS_READ_PLANS): AdsReadPlan {
+  const plan = plans[campaignId]
+  if (!plan) throw new Error(`no ads read plan for campaign ${campaignId} (registered read plans: ${Object.keys(plans).join(', ') || 'none'})`)
+  return plan
+}
+/** Where a campaign's report header and push text start (its plan's reportLabel). */
+export const reportLabelFor = (campaignId: string): string => planOrThrow(campaignId).reportLabel
+/** A campaign's audit file for an ET date (its plan's auditSlug). */
+export const auditPathFor = (campaignId: string, etDate: string): string => `docs/marketing/google-ads/${planOrThrow(campaignId).auditSlug}/data/${etDate}.json`
+
 /** Which campaign a read means when the CLI gets no --campaign: derived from the registry,
- * never a constant. `morning`: the one plan whose morning-read window covers `todayEt`.
- * `postflight`: the plan whose `stage` was due most recently (else, when none is due yet, due
- * soonest). A post-flight read runs long after its campaign's morning-read window, so the
- * window cannot decide it; keying on the due date keeps an older campaign's scheduled stages
- * resolving to it after a newer campaign is registered. Throws, listing the ids, when nothing
- * qualifies or the choice is a tie. With one registered plan a post-flight read always
- * resolves to it. */
+ * never a constant, and never a guess.
+ * `morning`: the one plan whose morning-read window covers `todayEt` (closed campaigns are not
+ * candidates); none or several is an error.
+ * `postflight`: the ONLY registered plan, counting closed campaigns too. A post-flight stage
+ * runs long after its campaign's flight closes (the retest's last stage is in December), so a
+ * "not closed" filter would hand those unpinned tasks the next campaign the day the old one is
+ * marked closed; and no date rule is safe either (a late or forced rerun lands after the next
+ * campaign's due date). With two or more plans registered the read must say which one.
+ * Every error lists the registered ids and says to pass --campaign. */
 export function defaultReadCampaignId(
   kind: 'morning' | 'postflight',
   todayEt: string,
   stage?: PostflightStage,
   plans: Readonly<Record<string, AdsReadPlan>> = ADS_READ_PLANS,
 ): string {
-  const all = Object.values(plans).filter((p) => !CLOSED_CAMPAIGN_IDS.includes(p.campaignId))
-  const listing = all.map((p) => `${p.campaignId} (morning reads ${p.morningReadFirstEt}..${p.morningReadLastEt})`).join(', ') || 'none registered'
+  const registered = Object.values(plans)
+  const listing = registered.map((p) => `${p.campaignId} (morning reads ${p.morningReadFirstEt}..${p.morningReadLastEt})`).join(', ') || 'none registered'
   const refuse = (why: string): never => {
     throw new Error(`${why}; pass --campaign <id> (registered read plans: ${listing})`)
   }
   if (kind === 'morning') {
-    const live = all.filter((p) => p.morningReadFirstEt <= todayEt && todayEt <= p.morningReadLastEt)
+    const live = registered.filter((p) => !CLOSED_CAMPAIGN_IDS.includes(p.campaignId) && p.morningReadFirstEt <= todayEt && todayEt <= p.morningReadLastEt)
     if (live.length === 1) return live[0].campaignId
     return refuse(live.length ? `more than one campaign's morning-read window covers ${todayEt}: ${live.map((p) => p.campaignId).join(', ')}` : `no campaign's morning-read window covers ${todayEt}`)
   }
   if (!stage) throw new Error('a post-flight default needs a stage')
-  const dued = all.flatMap((p) => {
-    const flight = campaignById(p.campaignId)
-    return flight ? [{ id: p.campaignId, due: postflightDueDate(stage, flight.flightEnd) }] : []
-  })
-  if (!dued.length) return refuse('no campaign has a read plan')
-  const past = dued.filter((d) => d.due <= todayEt)
-  const pool = past.length ? past : dued
-  const pickDue = past.length ? pool.reduce((a, b) => (b.due > a.due ? b : a)).due : pool.reduce((a, b) => (b.due < a.due ? b : a)).due
-  const tied = pool.filter((d) => d.due === pickDue)
-  if (tied.length > 1) return refuse(`more than one campaign's ${stage} read is due ${pickDue}: ${tied.map((d) => d.id).join(', ')}`)
-  return tied[0].id
+  if (registered.length === 1) return registered[0].campaignId
+  return refuse(registered.length ? `${registered.length} campaigns have read plans, so the ${stage} read cannot tell which one is meant` : 'no campaign has a read plan')
 }
 
 /** A scheduled morning read that never ran can't report itself, so the next read that does

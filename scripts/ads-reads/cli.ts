@@ -8,7 +8,8 @@
 
 import fs from 'node:fs'
 import { parseArgs } from 'node:util'
-import { ADS_CUSTOMER_ID, defaultReadCampaignId, etDateOf, type PostflightStage, type FirstSessionRowSite, type ReadingRecord, type ReturnRow, type ReturnSiteStat, type SpendDay, type StoredSpend, type TaggedRow } from '../../src/lib/adsRules'
+import { ADS_CUSTOMER_ID, ADS_READ_PLANS, defaultReadCampaignId, etDateOf, type PostflightStage, type FirstSessionRowSite, type ReadingRecord, type ReturnRow, type ReturnSiteStat, type SpendDay, type StoredSpend, type TaggedRow } from '../../src/lib/adsRules'
+import { campaignById } from '../../src/lib/campaigns'
 import type { PlacementDayRow } from '../../src/lib/adsStore'
 import type { HourPathCount } from '../../src/lib/popupEvents'
 import {
@@ -54,11 +55,16 @@ export function parseCli<T extends Record<string, { type: 'string' | 'boolean'; 
 /** The campaign a read runs on: an explicit `--campaign <id>`, else the registry's default for
  * this kind of read on the read's own clock (src/lib/adsRules.ts defaultReadCampaignId; throws
  * a one-line error listing the registered ids when it cannot pick exactly one). `nowMs` is the
- * fixture's clock under --fixture, else the real one. */
+ * fixture's clock under --fixture, else the real one.
+ * A flag that is given must be a known campaign: an empty value (an unset shell variable), a
+ * boolean or an unknown id fails loudly, listing the registered ids; it never falls through to
+ * the default. (A closed campaign is known: its own refusal, "is closed", comes later.) */
 export function resolveCampaignId(opts: Record<string, string | boolean | undefined>, kind: 'morning' | 'postflight', nowMs: number, stage?: PostflightStage): string {
   const given = opts.campaign
-  if (typeof given === 'string' && given) return given
-  return defaultReadCampaignId(kind, etDateOf(nowMs), stage)
+  if (given === undefined) return defaultReadCampaignId(kind, etDateOf(nowMs), stage)
+  if (typeof given === 'string' && given && (ADS_READ_PLANS[given] || campaignById(given))) return given
+  const ids = Object.keys(ADS_READ_PLANS).join(', ') || 'none registered'
+  throw new Error(`--campaign ${JSON.stringify(given)} is not a registered campaign id (registered read plans: ${ids}); pass --campaign <id>`)
 }
 
 export function loadCfToken(file: string | undefined): string | null {
