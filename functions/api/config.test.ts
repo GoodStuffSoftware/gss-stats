@@ -2,7 +2,7 @@
 // older stored config (see its header). A Map stands in for the STATS_CONFIG namespace.
 import { describe, expect, it } from 'vitest'
 import { onRequestPut, backupKeyFor } from './config'
-import { CONFIG_VERSION } from '../../src/lib/defaults'
+import { CONFIG_VERSION, LAYOUT_VERSIONS } from '../../src/lib/defaults'
 
 function fakeKv(initial: Record<string, string> = {}) {
   const store = new Map(Object.entries(initial))
@@ -124,8 +124,8 @@ describe('the v10 → v11 upgrade (the rest of the panels as cards and charts)',
 })
 
 describe('the v11 → v12 upgrade (the Overview small-sample note takes one grid row)', () => {
-  it('this code writes layout version 12', () => {
-    expect(CONFIG_VERSION).toBe(12)
+  it('this code writes layout version 12 or later', () => {
+    expect(CONFIG_VERSION).toBeGreaterThanOrEqual(12)
   })
   it('the first v12 save over a stored v11 layout backs it up to backup:v11; a v11 tab then gets 409', async () => {
     const v11 = JSON.stringify(cfg(11, 'v11 layout'))
@@ -133,6 +133,22 @@ describe('the v11 → v12 upgrade (the Overview small-sample note takes one grid
     expect((await put(kv, cfg(12, 'first v12'))).status).toBe(200)
     expect(store.get('dashboard:default:backup:v11')).toBe(v11)
     expect((await put(kv, cfg(11, 'old tab'))).status).toBe(409)
-    expect((await put(kv, cfg(13, 'crafted'))).status).toBe(400)
+    expect((await put(kv, cfg(CONFIG_VERSION + 1, 'crafted'))).status).toBe(400)
+  })
+})
+
+describe('the v12 → v13 upgrade (inline sparklines: a guard bump, no layout rewrite)', () => {
+  it('this code writes the sparkline layout version (LAYOUT_VERSIONS.sparklines) or later', () => {
+    expect(CONFIG_VERSION).toBeGreaterThanOrEqual(LAYOUT_VERSIONS.sparklines)
+  })
+  it('the first save at the sparkline version backs the stored v12 layout up to backup:v12, once; a v12 tab then gets 409', async () => {
+    const v = LAYOUT_VERSIONS.sparklines
+    const prev = JSON.stringify(cfg(v - 1, 'previous layout'))
+    const { kv, store } = fakeKv({ 'dashboard:default': prev })
+    expect((await put(kv, cfg(v, 'first save'))).status).toBe(200)
+    expect(store.get(backupKeyFor(v - 1))).toBe(prev)
+    await put(kv, cfg(v, 'second save'))
+    expect(store.get(backupKeyFor(v - 1))).toBe(prev) // never overwritten
+    expect((await put(kv, cfg(v - 1, 'old tab'))).status).toBe(409) // an older tab cannot overwrite what it cannot draw
   })
 })

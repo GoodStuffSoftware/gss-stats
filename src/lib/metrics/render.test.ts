@@ -111,9 +111,33 @@ describe('itemViewModel — display kinds (status "ok")', () => {
     expect(itemViewModel(item, { status: 'ok', value: 353 }, activeScope, opts).primary).toBe('353')
   })
 
-  it('sparkline: falls back to the current value (documented gap — MetricValue has no series)', () => {
-    const item: MetricItem = { id: 'spark', label: 'Trend', data: { metric: 'bsk.pageviews' }, display: { as: 'sparkline', series: 'daily' } }
-    expect(itemViewModel(item, { status: 'ok', value: 900 }, rootScope, opts).primary).toBe('900')
+  it('sparkline: the headline stays the current value, with the per-day series attached', () => {
+    const item: MetricItem = { id: 'spark', label: 'Trend', data: { metric: 'bsk.pageviews', window: 'page' }, display: { as: 'sparkline', series: 'daily' } }
+    const series = [
+      { day: '2026-09-25', value: 400 },
+      { day: '2026-09-26', value: 500 },
+    ]
+    const vm = itemViewModel(item, { status: 'ok', value: 900, series }, rootScope, opts)
+    expect(vm.primary).toBe('900')
+    expect(vm.series).toEqual(series)
+  })
+
+  it('sparkline: a money metric reads as money', () => {
+    const item: MetricItem = { id: 'spark', label: 'Spend', data: { metric: 'campaign.spend' }, display: { as: 'sparkline', series: 'daily' } }
+    const vm = itemViewModel(item, { status: 'ok', value: 12.5, series: [{ day: '2026-09-26', value: 12.5 }] }, activeScope, opts)
+    expect(vm.primary).toBe('$12.50')
+  })
+
+  it('sparkline: with no series from the server the number stands alone; another display never carries one', () => {
+    const spark: MetricItem = { id: 'spark', label: 'Trend', data: { metric: 'bsk.pageviews', window: 'page' }, display: { as: 'sparkline', series: 'daily' } }
+    expect(itemViewModel(spark, { status: 'ok', value: 900 }, rootScope, opts).series).toBeUndefined()
+    expect(itemViewModel(numberItem(), { status: 'ok', value: 9, series: [{ day: '2026-09-26', value: 9 }] }, activeScope, opts).series).toBeUndefined()
+  })
+
+  it('sparkline: the empty states are unchanged (unmeasured, error carry no series)', () => {
+    const spark: MetricItem = { id: 'spark', label: 'Trend', data: { metric: 'campaign.taggedArrivals' }, display: { as: 'sparkline', series: 'daily' } }
+    expect(itemViewModel(spark, { status: 'unmeasured', reason: 'not-live' }, activeScope, opts).series).toBeUndefined()
+    expect(itemViewModel(spark, { status: 'error', error: 'boom' } as MetricValue, activeScope, opts).series).toBeUndefined()
   })
 })
 

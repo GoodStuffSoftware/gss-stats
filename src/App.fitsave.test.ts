@@ -211,4 +211,79 @@ describe('App: a PUT in flight when the layout changes back', () => {
     await sleep(900)
     expect(wrapper!.find('.save-state').text()).toContain('out of date')
   }, 20000)
+
+  it('an edit made while the tab is stale keeps the "out of date" label through the 700 ms pending window', async () => {
+    await load()
+    await sleep(FIT_SETTLE_MS + 100)
+    vi.mocked(saveConfig).mockResolvedValue('stale')
+    await refit(520)
+    await sleep(900)
+    expect(vi.mocked(saveConfig).mock.calls.length).toBe(1)
+    expect(wrapper!.find('.save-state').text()).toContain('out of date')
+    // A new edit starts a fresh debounce; the label must not flip to "Saving…" before the timer fires.
+    contentBottom = 700
+    fireResize()
+    await sleep(FIT_SETTLE_MS + 100) // the edit has landed; its save timer is still pending
+    expect(vi.mocked(saveConfig).mock.calls.length).toBe(1) // not yet sent
+    expect(wrapper!.find('.save-state').text()).toContain('out of date')
+    expect(wrapper!.find('.save-state').text()).not.toContain('Saving')
+    vi.mocked(saveConfig).mockResolvedValue(true)
+  }, 20000)
+
+  it('"Save failed" clears once the tab is back on exactly what the server holds', async () => {
+    await load()
+    await sleep(FIT_SETTLE_MS + 100)
+    vi.mocked(saveConfig).mockResolvedValueOnce(false)
+    await refit(520)
+    await sleep(900)
+    expect(wrapper!.find('.save-state').text()).toContain('Save failed')
+    await refit(300) // back to the loaded layout, which is what the server still holds
+    await sleep(900)
+    expect(vi.mocked(saveConfig).mock.calls.length).toBe(1) // nothing to send
+    expect(wrapper!.find('.save-state').exists() ? wrapper!.find('.save-state').text() : '').not.toContain('Save failed')
+  }, 20000)
+})
+
+describe('App: leaving the page with an edit still in the debounce', () => {
+  it('pagehide sends the pending edit now instead of waiting out the 700 ms', async () => {
+    await load()
+    await sleep(FIT_SETTLE_MS + 100)
+    await refit(520) // the edit has landed; the save timer is pending
+    expect(saveConfig).not.toHaveBeenCalled()
+    window.dispatchEvent(new Event('pagehide'))
+    await flushPromises()
+    expect(saveConfig).toHaveBeenCalledTimes(1)
+    expect(sentCard(0).h).toBe(fitRows(520))
+    await sleep(900) // the cleared timer does not fire a second PUT
+    expect(saveConfig).toHaveBeenCalledTimes(1)
+  }, 20000)
+
+  it('unmounting sends the pending edit and clears the timer', async () => {
+    await load()
+    await sleep(FIT_SETTLE_MS + 100)
+    await refit(520)
+    expect(saveConfig).not.toHaveBeenCalled()
+    wrapper!.unmount()
+    wrapper = null
+    await flushPromises()
+    expect(saveConfig).toHaveBeenCalledTimes(1)
+    await sleep(900)
+    expect(saveConfig).toHaveBeenCalledTimes(1)
+  }, 20000)
+
+  it('an edit queued behind an in-flight PUT is sent when that PUT resolves (documented limit: a closing page may not live to see it)', async () => {
+    await load()
+    await sleep(FIT_SETTLE_MS + 100)
+    const resolveB = deferPut()
+    await refit(520)
+    await sleep(900) // B is in flight
+    await refit(300)
+    window.dispatchEvent(new Event('pagehide')) // leaving: the second edit can only queue
+    await flushPromises()
+    expect(saveConfig).toHaveBeenCalledTimes(1)
+    resolveB(true)
+    await sleep(100)
+    expect(saveConfig).toHaveBeenCalledTimes(2)
+    expect(sentCard(1).h).toBe(fitRows(300))
+  }, 20000)
 })

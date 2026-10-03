@@ -89,6 +89,9 @@ All notable changes to **gss-stats** are documented here. The format follows
   reads as "counted from" a specific time rather than a false zero. Counts only.
 - **Pop-up outcomes (signed in, returned, still playing) now show alongside the existing
   install rate** on the Pop-ups page, as counts.
+- **Count and money items can be drawn as a sparkline.** The card editor now offers "Sparkline"
+  for a count or an amount over a date range or a campaign's window, and the card shows the
+  number with a small per-day line beside it; a day not measured is a gap in the line, never a zero.
 
 ### Changed
 - **Campaign return visits now include the installed app.** A campaign's return buckets count
@@ -159,6 +162,10 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **Chart queries with many sites and pop-up filters no longer refuse to run.** The dashboard's
   documented maximums (50 sites, 16 path filters) work together again without hitting the
   underlying database's per-query parameter ceiling.
+- **"Save failed" clears when the layout is back on what the server holds.** Reverting an edit
+  that failed to save no longer leaves the failed label standing.
+- **A layout edit is sent when you leave the page.** An edit still waiting out the save delay is
+  saved on close or navigation instead of being dropped.
 
 ## [0.12.1] — 2026-09-27
 

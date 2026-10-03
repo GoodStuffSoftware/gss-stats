@@ -187,6 +187,17 @@ because `MetricValue` carries no series. The work:
 Risks: D1 rows read rise (one GROUP BY day per series fact; measure with the `docs/capacity.md`
 method); a go-live boundary inside the window must show as a gap, not a zero.
 
+**Implemented (slice 2).** The series comes from a daily twin of the metric's own fact (it is
+never derived from the scalar), so it equals the date chart's per-ET-day count by construction.
+Rules as built: only `page` and `attribution` windows (a today-so-far window is one partial day);
+no store metrics except the ad-spend twin; no ratio or instant or code unit; the popup twin
+refuses a visitor-filtered metric. A go-live inside the window drops the days before it (a gap,
+never a zero); a measured day with no rows reads 0; a spend day the store never synced has no
+point. The twins group by ET day only and blank the visitor kind on every `splitGuard` refused
+path, so a `/return` or game-complete row is never tied to a device, a time or a place. The
+sparkline draws a gap as a break in the line. `CONFIG_VERSION` moves via `LAYOUT_VERSIONS.sparklines`
+(a save guard; no stored layout is rewritten).
+
 ## Per bespoke body: what replaces it, what is missing, the risks
 
 ### Ads readings log (`AdsReadingsWidgetCard`) becomes preset `ads-readings-log`

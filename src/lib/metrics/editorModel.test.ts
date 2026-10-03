@@ -21,6 +21,7 @@ import {
   emptySection,
   emptySpec,
   firstDisplayFor,
+  sparklineBlocker,
   freshId,
   groupErrors,
   isDisplaySelectable,
@@ -200,17 +201,36 @@ describe('display compatibility matrix (DISPLAYS_FOR, via displayOptionsFor)', (
     expect(displayOptionsFor({ metric: 'not-a-real-metric' })).toEqual([])
     expect(displayOptionsFor({ metric: 'constructor' })).toEqual([])
   })
-  it('sparkline is ALWAYS disabled, even where DISPLAYS_FOR allows it (count/money)', () => {
-    for (const binding of [{ metric: 'campaign.taggedArrivals' }, { metric: 'campaign.spend' }] as const) {
+  it('sparkline is enabled where a daily series can be drawn (ADR 0005 slice 2)', () => {
+    for (const binding of [{ metric: 'campaign.taggedArrivals' }, { metric: 'campaign.spend' }, { metric: 'bsk.pageviews', window: 'page' }] as const) {
       const opt = displayOptionsFor(binding).find((o) => o.as === 'sparkline')
-      expect(opt).toBeDefined()
-      expect(opt!.disabled).toBe(true)
-      expect(isDisplaySelectable(binding, 'sparkline')).toBe(false)
+      expect(opt, JSON.stringify(binding)).toBeDefined()
+      expect(opt!.disabled).toBe(false)
+      expect(isDisplaySelectable(binding, 'sparkline')).toBe(true)
     }
   })
-  it('firstDisplayFor never returns the disabled sparkline placeholder', () => {
+  it('sparkline is disabled, with the reason, for a ratio, a country split, or a window with no daily twin', () => {
+    const blocked = [
+      { metric: 'campaign.taggedArrivals', params: { country: 'US' } },
+      { metric: 'campaign.taggedArrivals', window: 'today' },
+      { metric: 'bsk.pageviews' }, // its default window (today) is one partial day
+    ] as unknown as Parameters<typeof displayOptionsFor>[0][]
+    for (const binding of blocked) {
+      const opt = displayOptionsFor(binding).find((o) => o.as === 'sparkline')
+      expect(opt!.disabled, JSON.stringify(binding)).toBe(true)
+      expect(opt!.hint, JSON.stringify(binding)).toMatch(/sparkline/i)
+      expect(isDisplaySelectable(binding, 'sparkline')).toBe(false)
+    }
+    // A ratio never offers a sparkline (DISPLAYS_FOR has none for a proportion), so no per-day rate exists.
+    expect(isDisplaySelectable({ ratio: 'campaign.acceptPerAsk' }, 'sparkline')).toBe(false)
+    expect(sparklineBlocker({ ratio: 'campaign.acceptPerAsk' })).not.toBeNull()
+  })
+  it('firstDisplayFor never starts on the sparkline (number/currency first)', () => {
     expect(firstDisplayFor({ metric: 'campaign.taggedArrivals' })).not.toBe('sparkline')
     expect(firstDisplayFor({ metric: 'campaign.spend' })).not.toBe('sparkline')
+  })
+  it('makeDisplay("sparkline") asks for the daily series', () => {
+    expect(makeDisplay('sparkline', { as: 'number' })).toEqual({ as: 'sparkline', series: 'daily' })
   })
   it('an invalid ratio can never even be asked about: RATIOS holds only the registry\'s validated set', () => {
     // ratios.ts's own defineRatios() throws at import for anything invalid, so by the time the

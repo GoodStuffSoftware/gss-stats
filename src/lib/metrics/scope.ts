@@ -359,6 +359,8 @@ export interface MetricRequestSpec {
   params?: { campaignId?: string; popup?: string; country?: string }
   window?: string
   deltas?: DeltaName[]
+  /** 'daily': also return the metric's per-ET-day series (a sparkline display). */
+  series?: 'daily'
   minCohort?: number
 }
 
@@ -418,6 +420,7 @@ export function buildRequestSpec(item: MetricItem, scope: ScopeInstance, todayEt
   if (Object.keys(resolved.params).length) spec.params = resolved.params
   if (resolved.window) spec.window = resolved.window
   if (item.display.as === 'number' && item.display.deltas?.length) spec.deltas = item.display.deltas
+  if (item.display.as === 'sparkline') spec.series = 'daily'
   if (item.gating?.minCohort != null) spec.minCohort = item.gating.minCohort
   return spec
 }

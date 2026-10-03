@@ -374,3 +374,28 @@ harness: the real handler end to end in Node against a fake D1, a fresh cache pe
 Every figure is under the 10 ms per-request limit with room to spare. The request path for the new
 windows, facts and store metrics is compiled at isolate start-up too (`prewarm.ts` now warms a
 release window, the country split and the ads-store facts).
+
+## 9. Daily series for sparklines (ADR 0005 slice 2, 2026-10-03) — rows read
+
+A card item shown as a sparkline asks for `series: 'daily'`. The engine then plans ONE extra
+statement per distinct series fact: the metric's daily twin (`campaignDaily`, `bskRangeDaily`,
+`popupRangeDaily`, `adsSpendDaily`), the same WHERE as the scalar fact, with `GROUP BY` the ET
+date added. Method (as in §8): `EXPLAIN QUERY PLAN` on a fixture holding the two production
+`hits` indexes (`idx_hits_ts`, `idx_hits_site_ts`), pinned as a test in
+`src/lib/metrics/series.test.ts`.
+
+| Twin | Plan | Rows read vs the scalar fact |
+|---|---|---|
+| `campaignDaily` | `SEARCH hits USING INDEX idx_hits_site_ts (site=? AND ts>? AND ts<?)` | same range, same rows: one extra pass over the campaign window |
+| `bskRangeDaily` | `idx_hits_site_ts` range search (`idx_hits_ts` with no site filter) | same range, same rows |
+| `popupRangeDaily` | `idx_hits_site_ts` range search | same range, same rows |
+| `adsSpendDaily` | the ads store's `ads_daily_metrics`, one campaign | a few rows (one per stored day, at most ~92 returned) |
+
+No full-table scan and no new index. The cost is one more pass over a window the scalar already
+reads, only for a card that asks for a series, and each statement counts against
+`MAX_STATEMENTS = 40` like any other. Facts are keyed and cached like the scalar facts, so two
+items on one page that share a window share one twin read. The prewarm does not warm the twins:
+a series is asked for only by an item the owner chose to draw as a sparkline, so its first read
+is a cache miss, and an ordinary page (no sparkline) is unchanged. The `hits` table is small
+(§2), so one extra range pass is hundreds of rows, a rounding error against §4's 1.4M/day.
+
