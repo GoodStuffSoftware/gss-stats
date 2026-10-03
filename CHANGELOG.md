@@ -11,6 +11,32 @@ All notable changes to **gss-stats** are documented here. The format follows
   been idle for a minute or more reloads its charts, cards and ads readings once, without a
   loading flash and without ever polling, and the card's "Updated" time moves to the new load.
 
+## [0.14.0] — 2026-10-03
+
+### Added
+- **Count and money items can be drawn as a sparkline.** The card editor now offers "Sparkline"
+  for a count or an amount over a date range or a campaign's window, and the card shows the
+  number with a small per-day line beside it; a day not measured is a gap in the line, never a zero.
+  A saved sparkline that cannot be drawn (for example over "today so far") shows as a plain number
+  instead of hiding its card.
+
+### Fixed
+- **"Save failed" clears when the layout is back on what the server holds.** Reverting an edit
+  that failed to save no longer leaves the failed label standing.
+- **A layout edit is sent when you leave the page.** An edit still waiting out the save delay is
+  sent as the page closes (a request the browser lets finish) instead of being dropped.
+
+## [0.13.2] — 2026-10-03
+
+### Fixed
+- **The metric-card editor handles its edge cases.** A row stored as a sparkline can be switched
+  back to after trying another display; percent decimals offer 0 to 4, matching what is accepted;
+  turning off the day count on a date range removes the setting; a campaigns repeat has an
+  "organic" row control and says when it clashes with "Flighting today only"; a repeat kind
+  remembered by the editor no longer brings back an "empty" message you switched off elsewhere;
+  badge colours flag a duplicate or empty text instead of silently merging it; and "Use a preset
+  instead" asks before throwing away your edits.
+
 ## [0.13.1] — 2026-10-03
 
 ### Fixed

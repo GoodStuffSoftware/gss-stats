@@ -22,6 +22,14 @@
 //   adsCoverage, adsLastSync ← lib/adsStore.ts readFreshness's two reads (the same store)
 //   bskFirstHit         ← /api/overview's first-hit query (the release panel's lower bound)
 //   bskReleaseSides     ← /api/overview's release-panel query, both windows in one statement
+//   campaignDaily, bskRangeDaily, popupRangeDaily, adsSpendDaily ← the DAILY TWINS (ADR 0005
+//                         slice 2): the same WHERE as campaignPathVisitor / bskRangePath /
+//                         popupRangePath / adsSpend, grouped by ET DAY, so a card can draw a
+//                         per-day series. Counts per ET day only: no hour, place or device
+//                         column. The visitor kind rides along exactly as in the scalar fact (the
+//                         new-visitor arrivals tile reads it on every row), so a series sums to its
+//                         tile; a day's total is a one-day ET range of the same tile. A twin is
+//                         read only for a `series: 'daily'` request.
 //
 // The campaign fact also splits by COUNTRY BUCKET (US / CA / other — lib/campaigns.ts
 // countryBucket, the /api/campaigns country view) and, once lib/adsRules.ts
@@ -54,7 +62,7 @@
 import { applyExclusions, CAMPAIGNS, campaignAttributionClause, campaignAttributionStartMs, campaignById, etFlightRangeMs, ORGANIC_ARM_ID, type CampaignFlight } from '../campaigns'
 import { excludeInstallGapUnmeasured, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, popupIncludeClause } from '../popupEvents'
 import { last7DatesBefore, siteWindowClause } from '../overview'
-import { addDays as addEtDays, etSameTimeWindow } from '../etTime'
+import { addDays as addEtDays, etDateSql, etSameTimeWindow } from '../etTime'
 import { BEST_SUDOKU_SITES } from '../bestSudokuSites'
 import { COVERAGE_ROWS_SQL, LAST_SYNC_SQL, mapSpendSummary, SPEND_SUMMARY_SQL } from '../adsStore'
 import { UPSELL_SIGNEDOUT_FIX_AT, type SpendSummary } from '../adsRules'
@@ -74,6 +82,10 @@ export type FactId =
   | 'adsSpend'
   | 'adsCoverage'
   | 'adsLastSync'
+  | 'campaignDaily'
+  | 'bskRangeDaily'
+  | 'popupRangeDaily'
+  | 'adsSpendDaily'
 
 /** Normalized fact params. Which ones identify an instance is FactDef.keyParams. */
 export interface FactParams {
@@ -127,8 +139,26 @@ export interface LastSyncRow {
   lastSync: string | null
 }
 
+/** One aggregate row of a daily twin: the count of rows on one ET day (`dt`, YYYY-MM-DD) for a
+ * path, with the visitor kind ('' for a fact that has no visitor column) and campaign tag ('' when the fact has none). */
+export interface DailyBeaconRow {
+  dt: string
+  path: string
+  visitor: string
+  campaign: string
+  c: number
+}
+/** One stored spend day (ads_daily_metrics): gss-stats' own records, never beacon rows. */
+export interface SpendDayRow {
+  campaignId: string
+  date: string
+  costMicros: number
+}
+
 export type FactRows =
   | { kind: 'beacon'; rows: BeaconRow[] }
+  | { kind: 'beaconDaily'; rows: DailyBeaconRow[] }
+  | { kind: 'spendDaily'; rows: SpendDayRow[] }
   | { kind: 'spend'; rows: SpendSummary[] }
   | { kind: 'coverage'; rows: CoverageRow[] }
   | { kind: 'lastSync'; rows: LastSyncRow[] }
@@ -280,6 +310,21 @@ export function releaseSidesMs(releaseDateEt: string, days: number): { before: [
     after: [etMidnightMs(after0), etMidnightMs(addEtDays(after0, days))],
   }
 }
+
+// ── Daily twins (ADR 0005 slice 2) ──────────────────────────────────────────────────────
+/** The daily twin statement over a WHERE: per ET day, path (and, when `columns` says so, the
+ * visitor kind and campaign tag, exactly as the scalar fact keeps them), COUNT(*). */
+function dailyStatement(where: string, whereBinds: unknown[], columns: 'full' | 'path'): FactStatement {
+  if (columns === 'path') return { db: 'gss_geo', sql: `SELECT ${etDateSql()} AS dt, path, COUNT(*) AS c FROM hits WHERE ${where} GROUP BY dt, path`, binds: whereBinds }
+  return { db: 'gss_geo', sql: `SELECT ${etDateSql()} AS dt, path, visitor AS v, campaign, COUNT(*) AS c FROM hits WHERE ${where} GROUP BY dt, path, v, campaign`, binds: whereBinds }
+}
+const beaconDaily = (raw: Record<string, unknown>[]): FactRows => ({
+  kind: 'beaconDaily',
+  rows: raw.map((r) => ({ dt: str(r.dt), path: str(r.path), visitor: str(r.v), campaign: str(r.campaign), c: num(r.c) })),
+})
+
+/** Every stored spend day, whole micros per (campaign, ET date): the adsSpend twin. */
+export const SPEND_DAYS_SQL = 'SELECT campaign_id, date, cost_micros FROM ads_daily_metrics ORDER BY campaign_id, date'
 
 export const FACTS: Record<FactId, FactDef> = {
   campaignPathVisitor: {
@@ -486,6 +531,68 @@ export const FACTS: Record<FactId, FactDef> = {
     parse: (raw) => beacon(raw, noPf),
   },
 
+  campaignDaily: {
+    id: 'campaignDaily',
+    db: 'gss_geo',
+    keyParams: ['campaignId'],
+    honors: [],
+    bucketMs: null,
+    splitAt: null,
+    ttl: 'campaign',
+    build(p) {
+      // campaignPathVisitor's WHERE, row for row, by ET day (no install-fix, upsell-fix or country split).
+      const attr = campaignAttributionClause(campaignOf(p))
+      const w: string[] = [attr.sql]
+      const b: unknown[] = [...attr.binds]
+      applyExclusions(w, b)
+      excludeInstallGapUnmeasured(w, b)
+      return dailyStatement(w.join(' AND '), b, 'full')
+    },
+    parse: beaconDaily,
+  },
+
+  bskRangeDaily: {
+    id: 'bskRangeDaily',
+    db: 'gss_geo',
+    keyParams: ['since', 'until'],
+    honors: ['range'],
+    bucketMs: null,
+    splitAt: null,
+    ttl: 'range',
+    build(p) {
+      const [startMs, endMs] = rangeMs(p.since!, p.until!)
+      const clause = siteWindowClause(BEST_SUDOKU_SITES, startMs, endMs)
+      return dailyStatement(clause.sql, clause.binds, 'full')
+    },
+    parse: beaconDaily,
+  },
+
+  popupRangeDaily: {
+    id: 'popupRangeDaily',
+    db: 'gss_geo',
+    keyParams: ['since', 'until', 'sites', 'ownBrowser', 'ownOS'],
+    honors: ['range', 'sites', 'excludeOwn'],
+    bucketMs: null,
+    splitAt: null,
+    ttl: 'range',
+    build(p) {
+      const [startMs, endMs] = rangeMs(p.since!, p.until!)
+      const w: string[] = ['ts >= ?', 'ts < ?']
+      const b: unknown[] = [startMs, endMs]
+      if (p.sites?.length) {
+        w.push(`site IN (${p.sites.map(() => '?').join(', ')})`)
+        b.push(...p.sites)
+      }
+      excludeOwnClause(w, b, !!(p.ownBrowser && p.ownOS), p.ownBrowser, p.ownOS)
+      const inc = popupIncludeClause()
+      w.push(inc.sql)
+      b.push(...inc.binds)
+      excludeInstallGapUnmeasured(w, b) // popupRangePath drops these in JS (isUnmeasuredGapRow); here in SQL
+      return dailyStatement(w.join(' AND '), b, 'path')
+    },
+    parse: beaconDaily,
+  },
+
   adsSpend: {
     id: 'adsSpend',
     db: 'gss_stats_ads',
@@ -520,6 +627,18 @@ export const FACTS: Record<FactId, FactDef> = {
     ttl: { seconds: 60 },
     build: () => ({ db: 'gss_stats_ads', sql: LAST_SYNC_SQL, binds: [] }),
     parse: (raw) => ({ kind: 'lastSync', rows: raw.map((r) => ({ campaignId: str(r.campaign_id), lastSync: r.last_sync == null ? null : str(r.last_sync) })) }),
+  },
+
+  adsSpendDaily: {
+    id: 'adsSpendDaily',
+    db: 'gss_stats_ads',
+    keyParams: [],
+    honors: [],
+    bucketMs: null,
+    splitAt: null,
+    ttl: { seconds: 300 },
+    build: () => ({ db: 'gss_stats_ads', sql: SPEND_DAYS_SQL, binds: [] }),
+    parse: (raw) => ({ kind: 'spendDaily', rows: raw.map((r) => ({ campaignId: str(r.campaign_id), date: str(r.date), costMicros: num(r.cost_micros) })) }),
   },
 }
 

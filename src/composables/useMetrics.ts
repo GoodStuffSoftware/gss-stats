@@ -89,6 +89,8 @@ function canonicalSpec(spec: MetricRequestSpec) {
     ...(spec.params?.country !== undefined ? { country: spec.params.country } : {}),
     window: spec.window ?? null,
     deltas: spec.deltas?.length ? [...new Set(spec.deltas)].sort() : [],
+    // Only when set, so every request key made before series existed is unchanged.
+    ...(spec.series ? { series: spec.series } : {}),
     minCohort: spec.minCohort ?? null,
   }
 }
@@ -220,6 +222,7 @@ async function sendChunk(batch: Batch, reqKeys: string[]) {
       ...(entry.spec.params ? { params: entry.spec.params } : {}),
       ...(entry.spec.window ? { window: entry.spec.window } : {}),
       ...(entry.spec.deltas?.length ? { deltas: entry.spec.deltas } : {}),
+      ...(entry.spec.series ? { series: entry.spec.series } : {}),
       ...(entry.spec.minCohort != null ? { minCohort: entry.spec.minCohort } : {}),
     })
   }

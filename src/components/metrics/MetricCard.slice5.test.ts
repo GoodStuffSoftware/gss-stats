@@ -372,3 +372,36 @@ describe('MetricCard — verification fixes', () => {
     expect(retest.text()).not.toContain('not yet tracking')
   })
 })
+
+describe('MetricCard — sparkline display (ADR 0005 slice 2)', () => {
+  const spec: CardSpec = {
+    v: 1,
+    sections: [
+      { layout: 'rows', items: [{ id: 'pv', label: { metric: true }, data: { metric: 'bsk.pageviews', window: 'page' }, display: { as: 'sparkline', series: 'daily' } }] },
+      { layout: 'tiles', items: [{ id: 'pv2', label: { metric: true }, data: { metric: 'bsk.authSuccess', window: 'page' }, display: { as: 'sparkline', series: 'daily' } }] },
+    ],
+  }
+  it('requests the daily series and draws it next to the number, in a row and in a tile', async () => {
+    answer = () => ({
+      status: 'ok',
+      value: 30,
+      series: [
+        { day: '2026-09-25', value: 10 },
+        { day: '2026-09-26', value: 20 },
+      ],
+    })
+    const w = mountCard({ cardRef: { spec }, nowMs: NOW })
+    await settle()
+    expect(bodies.flatMap((b) => b.requests).every((r) => r.series === 'daily')).toBe(true)
+    expect(w.findAll('svg.mi-spark')).toHaveLength(2)
+    expect(w.findAll('svg.mi-spark polyline')).toHaveLength(2)
+    expect(w.findAll('.mi-value').map((v) => v.text())).toContain('30')
+  })
+  it('with no series in the answer, the number shows and no drawing appears', async () => {
+    answer = () => ({ status: 'ok', value: 30 })
+    const w = mountCard({ cardRef: { spec }, nowMs: NOW })
+    await settle()
+    expect(w.find('svg.mi-spark').exists()).toBe(false)
+    expect(w.findAll('.mi-value').map((v) => v.text())).toContain('30')
+  })
+})

@@ -7,6 +7,7 @@
 // MetricTableCell.vue, which is a column cell, not a labeled row/pill/tile.
 import { computed } from 'vue'
 import { useMetricItemViewModel } from '../../composables/useMetricItem'
+import { sparklineGeometry } from '../../lib/metrics/sparkline'
 import type { ScopeInstance } from '../../lib/metrics/scope'
 import type { MetricItem as MetricItemSpec, MetricsContext } from '../../lib/metrics/types'
 import MetricLabel from './MetricLabel.vue'
@@ -33,6 +34,10 @@ const barPct = computed(() => {
   const n = vm.value.barValue ?? 0
   return Number.isFinite(n) && props.barMax > 0 ? Math.max(0, Math.min(100, Math.round((n / props.barMax) * 100))) : 0
 })
+/** A 'sparkline' display's drawing: the per-ET-day series as polylines, the line broken at a day
+ * the metric was not measured. Null when the server sent no series (the number stands alone). */
+const spark = computed(() => (vm.value.series ? sparklineGeometry(vm.value.series) : null))
+const sparkTitle = computed(() => (spark.value ? `Daily, ${spark.value.firstDay} to ${spark.value.lastDay}` : ''))
 const plainLabel = computed(() => vm.value.labelTokens.map((t) => t.value).join(''))
 /** "Tagged arrivals: 353, vs yesterday +12 (+4%)" — one accessible name for a row or tile. */
 const ariaLabel = computed(() => [`${plainLabel.value}: ${vm.value.primary}`, ...vm.value.deltaLines.map((d) => d.text)].join(', '))
@@ -53,6 +58,11 @@ const showCaption = computed(() => vm.value.captionTokens.length > 0 && props.it
           <span v-for="(d, i) in vm.deltaLines" :key="i" class="mi-delta" :class="d.cls">{{ d.text }}</span>
         </span>
       </div>
+      <svg v-if="spark" class="mi-spark mi-spark-row" :viewBox="`0 0 ${spark.width} ${spark.height}`" role="img" :aria-label="sparkTitle" preserveAspectRatio="none">
+        <title>{{ sparkTitle }}</title>
+        <polyline v-for="(pts, i) in spark.lines" :key="`l${i}`" :points="pts" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" />
+        <circle v-for="(d, i) in spark.dots" :key="`d${i}`" :cx="d.x" :cy="d.y" r="1.5" fill="currentColor" />
+      </svg>
       <div v-if="item.display.as === 'bar'" class="mi-bar-track"><div class="mi-bar-fill" :style="{ width: barPct + '%' }" /></div>
       <p v-if="showCaption" class="mi-caption"><MetricLabel :tokens="vm.captionTokens" /></p>
     </template>
@@ -82,6 +92,11 @@ const showCaption = computed(() => vm.value.captionTokens.length > 0 && props.it
         </template>
         <div v-else class="mi-tile-num" :class="{ muted: vm.muted }">{{ vm.primary }}</div>
         <div v-for="(d, i) in vm.deltaLines" :key="i" class="mi-tile-delta" :class="d.cls">{{ d.text }}</div>
+        <svg v-if="spark" class="mi-spark" :viewBox="`0 0 ${spark.width} ${spark.height}`" role="img" :aria-label="sparkTitle" preserveAspectRatio="none">
+          <title>{{ sparkTitle }}</title>
+          <polyline v-for="(pts, i) in spark.lines" :key="`l${i}`" :points="pts" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" />
+          <circle v-for="(d, i) in spark.dots" :key="`d${i}`" :cx="d.x" :cy="d.y" r="1.5" fill="currentColor" />
+        </svg>
         <div v-if="item.display.as === 'bar'" class="mi-bar-track"><div class="mi-bar-fill" :style="{ width: barPct + '%' }" /></div>
         <p v-if="showCaption" class="mi-tile-caption"><MetricLabel :tokens="vm.captionTokens" /></p>
       </div>
@@ -174,6 +189,16 @@ const showCaption = computed(() => vm.value.captionTokens.length > 0 && props.it
   font-size: 10.5px;
   color: rgb(var(--ink-3));
   margin: 4px 0 0;
+}
+.mi-spark {
+  display: block;
+  width: 100%;
+  height: 22px;
+  margin: 4px 0 2px;
+  color: rgb(var(--amber-hover));
+}
+.mi-spark-row {
+  height: 18px;
 }
 .mi-bar-track {
   height: 6px;
