@@ -47,6 +47,7 @@ import {
 import { WHEN_RE, SITE_TAG_RE } from '../../src/lib/range'
 import { excludeOwnClause } from '../../src/lib/ownExclusion'
 import { MAX_SITES, statementTooLarge } from '../../src/lib/queryLimits'
+import { refusedPathExcludeClause } from '../../src/lib/splitGuard'
 
 interface Env {
   gss_geo: D1Database
@@ -123,6 +124,10 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const inc = popupIncludeClause()
   w.push(inc.sql)
   b.push(...inc.binds)
+  // Counts-only rule (src/lib/splitGuard.ts): this query buckets by UTC hour, so the rows the rule
+  // protects (returns, game starts and completions, tutorial completions, tour exits) stay out of
+  // it. None is a pop-up event (lib/popupEvents.ts classifyPopupPath), so no count changes.
+  refusedPathExcludeClause(w, b)
 
   // `pf` splits each hour bucket row-exactly at the install fix instant (lib/popupEvents.ts
   // INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS), so pre-fix gap rows stay unmeasured without

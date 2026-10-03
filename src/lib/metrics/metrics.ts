@@ -229,7 +229,10 @@ export const METRIC_DEFS: MetricDef[] = [
     caveats: ['arrivals-caveat'],
   }),
   campaignMetric({ id: 'campaign.gameViews', unit: 'pageview', path: step('played'), instrumented: [BEACON, SEEN] }),
-  campaignMetric({ id: 'campaign.completions', unit: 'completion', path: step('completed'), instrumented: [BEACON, { ...GAME_COMPLETE, against: 'flight' } as InstrumentationRule, SEEN] }),
+  // No `country` param: game completions are rows the counts-only rule protects
+  // (lib/splitGuard.ts), so they are never split by place — the fact reports them with no
+  // country bucket, and a card cannot ask for one.
+  campaignMetric({ id: 'campaign.completions', unit: 'completion', params: ['campaignId'], path: step('completed'), instrumented: [BEACON, { ...GAME_COMPLETE, against: 'flight' } as InstrumentationRule, SEEN] }),
   campaignMetric({ id: 'campaign.asks', unit: 'showing', path: step('ask'), instrumented: [BEACON, SEEN] }),
   campaignMetric({ id: 'campaign.accepts', unit: 'showing', subsetOf: 'campaign.asks', path: step('accept'), instrumented: [BEACON, SEEN] }),
   campaignMetric({
