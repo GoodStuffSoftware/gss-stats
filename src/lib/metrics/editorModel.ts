@@ -15,7 +15,7 @@ import { getNote, hasNote, NOTES_REGISTRY, noteOptions, noteRawText } from '../n
 import { POPUPS } from '../popupEvents'
 import { METRICS, metricWindows, type MetricDef, type MetricParam } from './metrics'
 import { RATIOS, ratioParamsOf, ratioWindowsOf, type RatioDef } from './ratios'
-import { DISPLAYS_FOR, kindOf, type DataKind } from './validate'
+import { CARD_LIMITS, DISPLAYS_FOR, kindOf, type DataKind } from './validate'
 import { COUNTRY_BUCKETS, WINDOW_SIDES } from './types'
 import type { CardAction, CardSpec, DataBinding, Display, DisplayAs, Gating, Label, MetricItem, ParamValue, Params, RepeatSpec, ScopePath, Section, WindowName, WindowSide, WindowSpec } from './types'
 import { PRESETS, presetById } from './presets'
@@ -208,6 +208,17 @@ export interface NoteOption {
 }
 export function noteLabelOptions(): NoteOption[] {
   return noteOptions().map((o) => ({ value: o.value, preview: noteRawText(o.value) || o.value }))
+}
+/** A card's captions after ticking (`checked`) or unticking caption `id`: the offered options
+ * that are ticked, in the picker's order, then every stored id the picker doesn't offer (one this
+ * build's registry doesn't know, written by a newer build), kept in its stored order. Only an
+ * explicit removal deletes a caption. */
+export function toggledCaptions(current: readonly string[], offered: readonly string[], id: string, checked: boolean): string[] {
+  const set = new Set(current)
+  if (checked) set.add(id)
+  else set.delete(id)
+  const offeredSet = new Set(offered)
+  return [...offered.filter((v) => set.has(v)), ...current.filter((v) => !offeredSet.has(v) && set.has(v))]
 }
 export function isKnownNote(id: string): boolean {
   return hasNote(id)
@@ -508,6 +519,9 @@ export interface ToneRow {
   value: string
   tone: BadgeTone
 }
+/** The most badge colours a card can hold: `tones` is one object, and a saved card's objects
+ * hold at most CARD_LIMITS.objectKeys keys (more loads as the invalid-card placeholder). */
+export const BADGE_TONE_MAX = CARD_LIMITS.objectKeys
 export function tonesToRows(tones: Record<string, BadgeTone> | undefined): ToneRow[] {
   return Object.entries(tones ?? {}).map(([value, tone]) => ({ value, tone }))
 }

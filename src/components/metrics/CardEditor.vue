@@ -9,8 +9,9 @@
 // filters, forwarded to the live preview only — never mutated here). Emits `update:modelValue:
 // [CardRef]` and `errors: [string[]]`.
 //
-// Validity gate: `update:modelValue` only ever fires a CardRef that `validateCard` accepts (a
-// `{ preset }` is valid iff the id resolves; a `{ spec }` iff `validateCard(spec)` returns no
+// Validity gate: `update:modelValue` only ever fires a CardRef that `validateCard` and
+// `cardLimitProblems` (the size limits normCardRef checks on load) both accept (a
+// `{ preset }` is valid iff the id resolves; a `{ spec }` iff both return no
 // errors) — every other edit shows its errors inline (grouped by section/item,
 // lib/metrics/editorModel.ts groupErrors) and simply doesn't emit, so a caller's `v-model` can
 // never receive an invalid card. Live preview always renders the current draft, valid or not, so
@@ -38,9 +39,9 @@ import CardEditorData from './editor/CardEditorData.vue'
 import CardEditorRepeat from './editor/CardEditorRepeat.vue'
 import CardEditorSection from './editor/CardEditorSection.vue'
 import { presetById } from '../../lib/metrics/presets'
-import { validateCard } from '../../lib/metrics/validate'
+import { cardLimitProblems, validateCard } from '../../lib/metrics/validate'
 import { noteLabelOptions } from '../../lib/metrics/editorModel'
-import { BADGE_TONE_OPTIONS, CARD_ACTION_OPTIONS, cloneSpec, emptySection, groupErrors, moveBy, presetOptions, rowsToTones, specFromPresetId, specsEqual, toneValueProblem, tonesToRows, withField, type BadgeTone, type ToneRow } from '../../lib/metrics/editorModel'
+import { BADGE_TONE_MAX, BADGE_TONE_OPTIONS, CARD_ACTION_OPTIONS, cloneSpec, emptySection, groupErrors, moveBy, presetOptions, rowsToTones, specFromPresetId, specsEqual, toneValueProblem, toggledCaptions, tonesToRows, withField, type BadgeTone, type ToneRow } from '../../lib/metrics/editorModel'
 import type { CardAction, CardRef, CardSpec, Label, MetricsContext } from '../../lib/metrics/types'
 
 const props = defineProps<{
@@ -55,8 +56,8 @@ const props = defineProps<{
 // `errors` fires whenever the current draft's validity changes (immediate, so a caller has the
 // answer synchronously from mount) — how a host like ChartEditor.vue knows to disable its own
 // Save button and say why, since `update:modelValue` alone never reports an invalid state (it
-// simply doesn't fire — see the doc block above). Always the SAME array validateCard would
-// produce; `[]` means the current draft is saveable.
+// simply doesn't fire — see the doc block above). Always the SAME array the gate checks
+// (validateCard + cardLimitProblems); `[]` means the current draft is saveable.
 const emit = defineEmits<{ 'update:modelValue': [CardRef]; errors: [string[]] }>()
 
 const PRESET_OPTIONS = presetOptions()
@@ -157,7 +158,9 @@ const presetErrors = computed<string[]>(() => {
   if (!presetId.value) return ['card: choose a preset, or Customize to start from a blank card']
   return presetById(presetId.value) ? [] : [`Unknown preset id "${presetId.value}".`]
 })
-const errors = computed<string[]>(() => (mode.value === 'preset' ? presetErrors.value : validateCard(spec)))
+// A custom card must also fit CARD_LIMITS (cardLimitProblems — the same check normCardRef runs on
+// load), or it would save fine and load as the invalid-card placeholder.
+const errors = computed<string[]>(() => (mode.value === 'preset' ? presetErrors.value : [...validateCard(spec), ...cardLimitProblems(spec)]))
 const grouped = computed(() => groupErrors(errors.value, spec))
 watch(errors, (e) => emit('errors', e), { immediate: true })
 
@@ -267,7 +270,11 @@ function setToneRow(i: number, patch: Partial<ToneRow>) {
   const rows = toneRows.value.map((r, j) => (j === i ? { ...r, ...patch } : r))
   if (JSON.stringify(rows) !== JSON.stringify(toneRows.value)) setToneRows(rows)
 }
+// A saved card's objects hold at most BADGE_TONE_MAX keys (CARD_LIMITS.objectKeys), so adding
+// stops there; a card that already has more (hand-edited) shows the error and can't be saved.
+const toneRowsFull = computed(() => toneRows.value.length >= BADGE_TONE_MAX)
 function addToneRow() {
+  if (toneRowsFull.value) return
   toneDrafts.value = {}
   // A fresh row needs a value no other row has (the map is keyed by it).
   let value = 'new value'
@@ -298,11 +305,9 @@ const captionsValue = computed<string[]>({
     spec.captions = v.length ? v : undefined
   },
 })
+// Ids the picker doesn't offer (a newer build's) are kept: ticking a box never drops them.
 function toggleCaption(id: string, checked: boolean) {
-  const set = new Set(captionsValue.value)
-  if (checked) set.add(id)
-  else set.delete(id)
-  captionsValue.value = NOTE_OPTIONS.map((o) => o.value).filter((v) => set.has(v))
+  captionsValue.value = toggledCaptions(captionsValue.value, NOTE_OPTIONS.map((o) => o.value), id, checked)
 }
 const linkValue = computed<boolean>({
   get: () => spec.link === 'campaigns-page',
@@ -404,7 +409,8 @@ function removeSection(i: number) {
                 </div>
                 <button type="button" class="icon-btn danger" :title="'Remove the colour for ' + r.value" @click="removeToneRow(i)">✕</button>
               </div>
-              <button type="button" class="btn" @click="addToneRow">+ Add a colour</button>
+              <button type="button" class="btn" :disabled="toneRowsFull" :aria-describedby="toneRowsFull ? `${tonesGroupId}-max` : undefined" @click="addToneRow">+ Add a colour</button>
+              <p v-if="toneRowsFull" :id="`${tonesGroupId}-max`" class="hint">Up to {{ BADGE_TONE_MAX }} colours</p>
             </div>
           </template>
 

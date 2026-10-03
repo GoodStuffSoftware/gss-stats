@@ -9,7 +9,6 @@
 
 import { MIN_COHORT, POPUPS } from '../popupEvents'
 import { CAMPAIGNS, ORGANIC_ARM_ID } from '../campaigns'
-import { hasNote } from '../notes'
 import { safeUA } from '../ownExclusion'
 import { SITE_TAG_RE, WHEN_RE } from '../range'
 import { addDays } from '../etTime'
@@ -94,6 +93,13 @@ export function kindOf(b: DataBinding): DataKind | null {
 // ── validateCard ─────────────────────────────────────────────────────────────────────────
 const SERVED_WINDOWS: ReadonlySet<string> = new Set<WindowName>(['attribution', 'todaySoFar', 'page', ...WINDOW_SIDES])
 const SCOPE_PARAM: Record<RepeatSpec['over'], MetricParam | null> = { campaigns: 'campaignId', popups: 'popup', windows: null, readings: null, countries: 'country' }
+/** The shape of a notes-registry id ('small-sample', 'label.bsk.gameViews'). A card's note ids
+ * (captions, `{ note }` labels, `whenEmpty.note`) are checked for this shape only, never for
+ * whether this build's registry has them: adding a registry id takes no layout version, so a tab
+ * on an older build loads and saves ids a newer build wrote. An id this build doesn't know is
+ * kept as stored and renders as nothing (lib/metrics/render.ts, NoteBlock.vue, MetricCard.vue). */
+export const NOTE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
+const noteIdOk = (id: unknown): boolean => typeof id === 'string' && NOTE_ID_RE.test(id)
 
 /** Errors for a card spec, [] when valid. Runs on load, in the editor and in tests. */
 export function validateCard(spec: CardSpec): string[] {
@@ -102,11 +108,11 @@ export function validateCard(spec: CardSpec): string[] {
   if (!Array.isArray(spec.sections) || !spec.sections.length) errors.push('card: needs at least one section')
   const checkLabel = (where: string, l: Label | undefined, hasData: boolean) => {
     if (l === undefined || typeof l === 'string') return
-    if ('note' in l && !hasNote(l.note)) errors.push(`${where}: unknown note id '${l.note}'`)
+    if ('note' in l && !noteIdOk(l.note)) errors.push(`${where}: ${JSON.stringify(l.note) ?? 'undefined'} is not a note id`)
     if ('metric' in l && !hasData) errors.push(`${where}: { metric: true } needs a metric or ratio binding`)
   }
-  const checkNote = (where: string, id: string) => {
-    if (!hasNote(id)) errors.push(`${where}: unknown note id '${id}'`)
+  const checkNote = (where: string, id: unknown) => {
+    if (!noteIdOk(id)) errors.push(`${where}: ${JSON.stringify(id) ?? 'undefined'} is not a note id`)
   }
   const checkRepeat = (where: string, r: RepeatSpec | undefined) => {
     if (!r) return
@@ -181,7 +187,8 @@ export function validateCard(spec: CardSpec): string[] {
   if (spec.actions !== undefined && (!Array.isArray(spec.actions) || !spec.actions.every((a) => CARD_ACTIONS.has(a)))) errors.push(`card: actions must be a list of ${[...CARD_ACTIONS].join(', ')}`)
   checkRepeat('card', spec.repeat)
   checkLabel('card.title', spec.title, false)
-  for (const id of spec.captions ?? []) checkNote('card.captions', id)
+  if (spec.captions !== undefined && !Array.isArray(spec.captions)) errors.push('card.captions: must be a list of note ids')
+  else for (const id of spec.captions ?? []) checkNote('card.captions', id)
   if (spec.badge) {
     if (!('field' in spec.badge.data)) errors.push('badge: must bind a field')
     check('badge', spec.badge.data, spec.badge.display, [spec.repeat])
@@ -213,7 +220,7 @@ export function validateCard(spec: CardSpec): string[] {
       if (it.gating?.minCohort != null && it.gating.minCohort < MIN_COHORT) errors.push(`${w}: minCohort below MIN_COHORT`)
       if (it.captionMode !== undefined && it.captionMode !== 'inline' && it.captionMode !== 'compact') errors.push(`${w}: captionMode must be 'inline' or 'compact'`)
       const empty = it.gating?.whenEmpty
-      if (empty && typeof empty === 'object') checkNote(`${w}.gating.whenEmpty`, empty.note)
+      if (empty && typeof empty === 'object') checkNote(`${w}.gating.whenEmpty`, (empty as { note?: unknown }).note)
       if (it.gating?.whenZero !== undefined && it.gating.whenZero !== 'omit') errors.push(`${w}: whenZero must be 'omit'`)
       const ns = it.gating?.whenNotStarted
       if (ns !== undefined && ns !== 'label' && ns !== 'zero') errors.push(`${w}: whenNotStarted must be 'label' or 'zero'`)
@@ -227,17 +234,82 @@ export function validateCard(spec: CardSpec): string[] {
 /** The preset id a card that failed validation is replaced with: MetricCard renders a short
  * "can't be shown" message for it, so a bad saved card is a placeholder, never a crash. */
 export const INVALID_CARD_PRESET = 'invalid-card'
-export const CARD_LIMITS = { sections: 8, items: 40, stringLength: 200, jsonBytes: 16 * 1024 } as const
+/** A saved card's size limits. normCardRef (on load) and the card editor's Save gate both check
+ * them through cardLimitProblems, so a card the editor saves always loads. `jsonBytes` counts the
+ * characters of the card's JSON. */
+export const CARD_LIMITS = { sections: 8, items: 40, stringLength: 200, jsonBytes: 16 * 1024, objectKeys: 32, arrayLength: 64, depth: 12 } as const
 const PRESET_ID_RE = /^[a-z0-9-]{1,64}$/
 
-function withinLimits(v: unknown, depth = 0): boolean {
-  if (depth > 12) return false
-  if (typeof v === 'string') return v.length <= CARD_LIMITS.stringLength
-  if (typeof v === 'number') return Number.isFinite(v)
-  if (typeof v === 'boolean' || v === null) return true
-  if (Array.isArray(v)) return v.length <= 64 && v.every((x) => withinLimits(x, depth + 1))
-  if (typeof v === 'object') return Object.keys(v as object).length <= 32 && Object.values(v as object).every((x) => withinLimits(x, depth + 1))
-  return false
+/** Where a value sits in a card, in validateCard's own `where` style so the editor's groupErrors
+ * files it under its section or item: `sections[0].<item id>.label`, `card.badge.display`. */
+function limitWhere(data: unknown, path: readonly (string | number)[]): string {
+  if (path[0] !== 'sections' || typeof path[1] !== 'number') return path.length ? `card.${path.join('.')}` : 'card'
+  let where = `sections[${path[1]}]`
+  let rest = path.slice(2)
+  if (rest[0] === 'items' && typeof rest[1] === 'number') {
+    const id = (data as { sections?: ({ items?: ({ id?: unknown } | null)[] } | null)[] }).sections?.[path[1]]?.items?.[rest[1]]?.id
+    where += typeof id === 'string' ? `.${id}` : `.items[${rest[1]}]`
+    rest = rest.slice(2)
+  }
+  return rest.length ? `${where}.${rest.join('.')}` : where
+}
+
+/** Every way a card spec breaks CARD_LIMITS, [] when it fits: its JSON size, the section and item
+ * counts, and anywhere in it a string, object or array over its limit or nesting too deep. It
+ * checks the card as it would be saved (its JSON), and never throws. normCardRef refuses any card
+ * this flags, and the card editor's Save gate runs it next to validateCard, so the editor can't
+ * save a card that would load as the placeholder. */
+export function cardLimitProblems(spec: unknown): string[] {
+  let text: string | undefined
+  try {
+    text = JSON.stringify(spec)
+  } catch {
+    return ['card: not plain data']
+  }
+  if (typeof text !== 'string') return ['card: not plain data']
+  if (text.length > CARD_LIMITS.jsonBytes) return [`card: too large to save (${text.length.toLocaleString('en-US')} characters of data; up to ${CARD_LIMITS.jsonBytes.toLocaleString('en-US')})`]
+  const data = JSON.parse(text) as unknown
+  const problems: string[] = []
+  const walk = (v: unknown, path: (string | number)[], depth: number): void => {
+    if (depth > CARD_LIMITS.depth) return void problems.push(`${limitWhere(data, path)}: nested more than ${CARD_LIMITS.depth} levels deep`)
+    if (typeof v === 'string') {
+      if (v.length > CARD_LIMITS.stringLength) problems.push(`${limitWhere(data, path)}: up to ${CARD_LIMITS.stringLength} characters (this is ${v.length})`)
+      return
+    }
+    if (typeof v === 'number') {
+      if (!Number.isFinite(v)) problems.push(`${limitWhere(data, path)}: not a finite number`)
+      return
+    }
+    if (typeof v === 'boolean' || v === null) return
+    if (Array.isArray(v)) {
+      if (v.length > CARD_LIMITS.arrayLength) problems.push(`${limitWhere(data, path)}: up to ${CARD_LIMITS.arrayLength} entries (this has ${v.length})`)
+      v.forEach((x, i) => walk(x, [...path, i], depth + 1))
+      return
+    }
+    if (typeof v === 'object') {
+      const keys = Object.keys(v as object)
+      if (keys.length > CARD_LIMITS.objectKeys) {
+        const tones = path.length === 3 && path[0] === 'badge' && path[1] === 'display' && path[2] === 'tones'
+        problems.push(tones ? `Badge colours: up to ${CARD_LIMITS.objectKeys} (this card has ${keys.length})` : `${limitWhere(data, path)}: up to ${CARD_LIMITS.objectKeys} settings (this has ${keys.length})`)
+      }
+      for (const k of keys) walk((v as Record<string, unknown>)[k], [...path, k], depth + 1)
+      return
+    }
+    problems.push(`${limitWhere(data, path)}: not plain data`)
+  }
+  walk(data, [], 0)
+  const sections = (data as { sections?: unknown } | null)?.sections
+  if (!Array.isArray(sections)) problems.push('card: sections must be a list')
+  else {
+    if (sections.length > CARD_LIMITS.sections) problems.push(`card: up to ${CARD_LIMITS.sections} sections (this card has ${sections.length})`)
+    const items = sections.reduce<number>((n, sec) => {
+      const list = (sec as { items?: unknown } | null)?.items
+      return n + (Array.isArray(list) ? list.length : Infinity)
+    }, 0)
+    if (items === Infinity) problems.push('card: every section needs a list of items')
+    else if (items > CARD_LIMITS.items) problems.push(`card: up to ${CARD_LIMITS.items} items in all (this card has ${items})`)
+  }
+  return problems
 }
 
 /** Metrics removed from the registry. A saved custom card (a copy of a preset made before the
@@ -302,9 +374,7 @@ export function normCardRef(raw: unknown): CardRef | undefined {
     const text = JSON.stringify(r.spec)
     if (typeof text !== 'string' || text.length > CARD_LIMITS.jsonBytes) return { preset: INVALID_CARD_PRESET }
     const spec = dropRetiredItems(JSON.parse(text) as CardSpec)
-    if (!withinLimits(spec) || !Array.isArray(spec.sections) || spec.sections.length > CARD_LIMITS.sections) return { preset: INVALID_CARD_PRESET }
-    const items = spec.sections.reduce((n, sec) => n + (Array.isArray(sec?.items) ? sec.items.length : Infinity), 0)
-    if (items > CARD_LIMITS.items) return { preset: INVALID_CARD_PRESET }
+    if (cardLimitProblems(spec).length) return { preset: INVALID_CARD_PRESET }
     if (validateCard(spec).length) return { preset: INVALID_CARD_PRESET }
     return from ? { spec, from } : { spec }
   } catch {
