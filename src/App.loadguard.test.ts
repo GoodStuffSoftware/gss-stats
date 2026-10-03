@@ -14,6 +14,7 @@ import Dashboard from './components/Dashboard.vue'
 import { checkSessionExpired, sessionExpired } from './session'
 import { defaultConfig, normalizeConfig } from './lib/defaults'
 import PROD_V9 from './lib/__fixtures__/prodLayout.v9.json'
+import { stubAppFetch, type AppFetch } from './testing/appFetch'
 import type { DashboardConfig } from './types'
 
 vi.mock('./api', async (importOriginal) => {
@@ -39,34 +40,40 @@ type Reply = () => Response
 const ok: Reply = () => json(JSON.stringify(stored()))
 
 // GET /api/config answers from `gets` in order (the last one repeats); every PUT is recorded.
+// Every other URL goes to the shared App-test stub (src/testing/appFetch.ts), which answers the
+// endpoints the app reaches on mount and rejects anything else loudly.
 let gets: Reply[] = []
 let puts: DashboardConfig[] = []
+let appFetch: AppFetch
 function stubServer(...replies: Reply[]) {
   gets = replies
   puts = []
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/config' && init?.method === 'PUT') {
-        puts.push(JSON.parse(String(init.body)))
-        return json('{"ok":true}')
-      }
-      if (url === '/api/config') return (gets.length > 1 ? gets.shift()! : gets[0])()
-      return json('{}', 404)
-    }),
-  )
+  appFetch = stubAppFetch()
+  const fallback = appFetch.fetch.getMockImplementation()!
+  appFetch.fetch.mockImplementation(async (input, init) => {
+    if (input === '/api/config' && init?.method === 'PUT') {
+      puts.push(JSON.parse(String(init.body)))
+      return json('{"ok":true}')
+    }
+    if (input === '/api/config') return (gets.length > 1 ? gets.shift()! : gets[0])()
+    return fallback(input, init)
+  })
 }
 
+// The app's save debounce (700 ms) runs on a fake clock: stepping it forward is instant.
 const pastDebounce = async () => {
-  await new Promise((r) => setTimeout(r, 800))
+  await vi.advanceTimersByTimeAsync(800)
   await flushPromises()
 }
 const mounted: VueWrapper[] = []
 afterEach(() => {
   while (mounted.length) mounted.pop()!.unmount()
+  vi.useRealTimers()
   vi.unstubAllGlobals()
+  expect(appFetch.unexpected).toEqual([])
 })
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   localStorage.clear()
   sessionExpired.value = false
   vi.mocked(checkSessionExpired).mockClear()
