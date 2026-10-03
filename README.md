@@ -321,8 +321,9 @@ geography is country-only** — sub-country region/city comes from the beacon.
 **Pop-up event beacons never count as page views — unless a chart opts in.** Paths under
 `/signin-prompt`, `/signin-eligible`, `/promo-first50`, `/first50-congrats`, `/upsell`,
 `/install`, `/popup-outcome`, `/return`, `/game/complete/`, the `/auth/success/<provider>/`
-status suffix, `/auth/error`, `/auth/redirect` and the first-session beacons (`/tour`,
-`/game/first-move`, `/game/abandon`, `/welcome-signed-in`) are pop-up/event beacons, not screens — `/api/geo` and `/api/sites` exclude all
+status suffix, `/auth/error`, `/auth/redirect` and the first-session beacons (`/tour`, which
+includes `/tour/exit-at/<stage>`, `/game/first-move`, `/game/abandon`, `/welcome-signed-in`,
+`/game/start/<difficulty>` and `/game/tutorial-complete/<first-run|replay>`) are pop-up/event beacons, not screens — `/api/geo` and `/api/sites` exclude all
 of them from every pageview/visit total and the top-pages breakdown by default (see
 [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) `POPUP_EVENT_PREFIXES`); `/api/popups` is
 where they're counted. Each geo chart has its own **"Include event beacons"** option (off by
@@ -341,7 +342,8 @@ medium/date, plus **screen width** (`screenw`, exact pixels) and its bucketed fo
 **path family** dimension (`pathFamily`) that groups every event-beacon prefix above into
 `page` / `signin-prompt` / `signin-eligible` / `promo-first50` / `first50-congrats` / `upsell`
 / `install` / `popup-outcome` / `return` / `game-complete` / `auth-status` / `auth-error` /
-`auth-redirect` / `tour` / `game-first-move` / `game-abandon` / `welcome-signed-in`. More derived
+`auth-redirect` / `tour` / `game-first-move` / `game-abandon` / `welcome-signed-in` /
+`game-start` / `game-tutorial-complete`. More derived
 dimensions: **pop-up** (`popupFamily`) and **pop-up outcome** (`popupOutcome`), measured rows
 only (from the tracking activation day; pre-fix install-gap rows get no value — see
 [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) `popupDimSqlCase`, where
@@ -436,15 +438,22 @@ npm run typecheck:scripts
   later-session prompts go untagged). Once the tutorial ask has any site-wide row, the downgrade
   expires and the rule reads tagged asks only. The rule's detail line says which mode applied.
   Every morning read also prints a **first-session funnel** (arrivals → game views →
-  tour start → tour complete/skip → first move → game complete, abandon-by-%-filled buckets,
-  sign-in asks shown incl. the tutorial ask, and the signed-in welcome card), tagged counts with
+  tour start → tour complete/skip → tour exit by stage (preamble / hub / section) → game starts
+  by difficulty → tutorial complete (first run vs replay) → first move → game complete,
+  abandon-by-%-filled buckets, sign-in asks shown incl. the tutorial ask, and the signed-in
+  welcome card), tagged counts with
   site-wide web counts alongside over the same window (attribution start to flight end or now).
   Arrivals are `/return/<uc>/d0` rows (one per device's first tagged visit): tagged = the
   campaign's own uc (web and app), site-wide = any uc on web. "Tracked" is decided per beacon
   family, since each family ships in one app release: tour + first move + abandon buckets; the
-  welcome card; the tutorial ask. A family with no rows yet reads "not yet tracked", never 0%;
+  welcome card; the v1.97.0 first-run counters (tour exit, game start, tutorial complete); the
+  tutorial ask. A family with no rows yet reads "not yet tracked", never 0%;
   once any member has a row, a sibling with none is a real 0. Ratios are rows over rows and never
-  use game views (page views) as a parent. Informational only — never a kill rule or a push.
+  use game views (page views) as a parent. The first-run counters are counter totals read side
+  by side, matched by path prefix only: no ratio between them and no join of any row to a
+  device, time or place — a game start counts every start (menu, play again, or the Easy game a
+  tour exit now starts), so it cannot be matched to the tour exit that led to it. Informational
+  only — never a kill rule or a push.
 - **postflight-read** covers the wrap-up (flight end + 7 days; spend after the flight and the cap are checked first on every run) and the day-15/30/60 and
   December follow-ups, split promo vs non-promo, with the d31-60 return buckets. Day 15/30/60
   add the flight-window account cohort by access tier and promo marker (sitewide, not

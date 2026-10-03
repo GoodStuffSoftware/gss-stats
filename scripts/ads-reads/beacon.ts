@@ -62,6 +62,9 @@ export function siteFirstSessionQuery(sinceMs: number, untilMs: number): Query {
     `path IN ('/tour/start', '/tour/complete', '/tour/skip', '/game/first-move')`,
     `path LIKE '/game/abandon/%'`,
     `path LIKE '/welcome-signed-in/%'`,
+    `path LIKE '/tour/exit-at/%'`,
+    `path LIKE '/game/start/%'`,
+    `path LIKE '/game/tutorial-complete/%'`,
     `path IN (${ASK_PATHS.map((p) => `'${p}'`).join(', ')})`,
     `path LIKE '/return/%/d0'`,
   ].join(' OR ')
