@@ -11,6 +11,8 @@ import { CAMPAIGNS, campaignAttributionClause, campaignById, etMidnightUtcMs, OR
 import * as campaigns from '../campaigns'
 import { SPEND_SUMMARY_SQL } from '../adsStore'
 import { etMidnightMs } from './instrumentation'
+import { etDateSql } from '../etTime'
+import { SPLIT_REFUSED_PATH_PATTERNS } from '../splitGuard'
 
 const NOW = Date.parse('2026-09-26T21:00:00Z')
 const SAMPLE_PARAMS: Record<FactId, FactParams[]> = {
@@ -28,6 +30,13 @@ const SAMPLE_PARAMS: Record<FactId, FactParams[]> = {
   adsSpend: [{}],
   adsCoverage: [{}],
   adsLastSync: [{}],
+  campaignDaily: CAMPAIGNS.map((c) => ({ campaignId: c.id })),
+  bskRangeDaily: [{ since: '2026-09-20', until: '2026-09-26' }],
+  popupRangeDaily: [
+    { since: '2026-09-20', until: '2026-09-26', sites: [] },
+    { since: '2026-09-20T00:00:00Z', until: '2026-09-26T12:00:00Z', sites: ['bestsudoku', 'bestsudoku-web'] },
+  ],
+  adsSpendDaily: [{}],
 }
 const ALL = (Object.keys(FACTS) as FactId[]).flatMap((id) => SAMPLE_PARAMS[id].map((p) => ({ id, p, stmt: buildFact({ id, params: p }, NOW) })))
 
@@ -59,6 +68,13 @@ function isBandCase(item: string): boolean {
   return /^(CASE|WHEN|THEN|ELSE|END|AND|B|-?\d+|\s)+$/.test(rest)
 }
 
+/** The visitor kind of a daily twin: collapsed to '' on every path lib/splitGuard.ts refuses, so a
+ * device property never rides along with a day on a /return or game-complete row. */
+function isRefusedVisitorCase(item: string): boolean {
+  const m = /^CASE WHEN (path LIKE \?(?: OR path LIKE \?)*) THEN '' ELSE visitor END$/.exec(item)
+  return !!m && m[1].split(' OR ').length === SPLIT_REFUSED_PATH_PATTERNS.length
+}
+
 describe('every fact is an anonymous aggregate', () => {
   // The ads store's facts read gss-stats' own records (spend, sync runs), never a beacon row.
   it.each(ALL.filter((x) => x.stmt.db === 'gss_stats_ads').map((x) => [x.id, x] as const))('%s reads only the ads store', (_name, { stmt }) => {
@@ -80,6 +96,8 @@ describe('every fact is an anonymous aggregate', () => {
       if (isBandCase(item)) continue // a segment or day index, never a raw ts
       if (item === '(ts >= ?)' || item === '0') continue // a boolean split (install fix, upsell fix, release side) or no segments
       if (item === COUNTRY_BUCKET_SQL) continue // US / CA / other, literal outputs only
+      if (item === etDateSql()) continue // the ET DAY (YYYY-MM-DD) only: never an hour, a minute or a raw ts
+      if (isRefusedVisitorCase(item)) continue // the daily twins' visitor kind, blank on every refused path
       expect(item, `select item "${item}"`).toMatch(/^[a-z_]+$/)
       expect(['ts', 'id']).not.toContain(item)
     }
@@ -87,6 +105,18 @@ describe('every fact is an anonymous aggregate', () => {
 
   it('binds are only numbers and strings (validated values, never SQL)', () => {
     for (const { stmt } of ALL) for (const b of stmt.binds) expect(['number', 'string']).toContain(typeof b)
+  })
+  it('the daily twins group by ET day and nothing finer: no hour, minute or raw ts anywhere in the output', () => {
+    const twins = ALL.filter((x) => ['campaignDaily', 'bskRangeDaily', 'popupRangeDaily'].includes(x.id))
+    expect(twins.length).toBeGreaterThan(0)
+    for (const { stmt } of twins) {
+      expect(selectItems(stmt.sql)[0]).toBe(etDateSql())
+      expect(stmt.sql).toMatch(/GROUP BY dt, path/)
+      const out = stmt.sql.slice(0, stmt.sql.indexOf(' FROM ')) + stmt.sql.slice(stmt.sql.indexOf(' GROUP BY '))
+      expect(out.replace(etDateSql(), '')).not.toMatch(/strftime|%H|hour|minute|\bts\b|\bdevice\b|\bcity\b|\bregion\b|\bcountry\b|\bscreenw\b|\bos\b|\bbrowser\b/i)
+    }
+    expect(isRefusedVisitorCase("CASE WHEN path LIKE ? THEN '' ELSE visitor END")).toBe(SPLIT_REFUSED_PATH_PATTERNS.length === 1)
+    expect(isRefusedVisitorCase("CASE WHEN path LIKE ? THEN visitor ELSE visitor END")).toBe(false)
   })
   it('the band-CASE check refuses a raw ts, any other column and any other expression inside a CASE', () => {
     expect(isBandCase('CASE WHEN ts >= ? AND ts < ? THEN 0 WHEN ts >= ? THEN 1 ELSE -1 END')).toBe(true)

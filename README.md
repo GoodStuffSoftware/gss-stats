@@ -101,6 +101,19 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   regression from this app's own code. Resizing a chart currently needs a mouse or touch;
   every other chart action (edit, remove, zoom, duplicate, set-as-default) has a real
   button and works from the keyboard.
+- **Sparkline display** — a card's count or money item can be shown as a **Sparkline**: the
+  current number, with a small per-day line beside it. The server counts the same metric per ET
+  day from a daily twin of its fact
+  ([`src/lib/metrics/series.ts`](src/lib/metrics/series.ts); at most 92 days, oldest first) and
+  [`MetricItem.vue`](src/components/metrics/MetricItem.vue) draws it
+  ([`sparkline.ts`](src/lib/metrics/sparkline.ts)). It reads the page range or a campaign's
+  attribution window (not "today so far"), never a ratio, rate or cost; the editor greys the
+  option with the reason otherwise. A day the metric was not measured (before a go-live, or an
+  unsynced spend day) is a break in the line, never a zero; a measured day with no rows is 0.
+  Days only: no hour or place split, and a `/return` or game-complete row is never split by
+  device. Each series is one extra statement against the 40-statement batch budget
+  ([`docs/capacity.md`](docs/capacity.md) §9). Saving a layout after this change raises
+  `CONFIG_VERSION` (a stale tab is told to reload; nothing is rewritten).
 - **Fit height to content** — a card's editor has a "Fit height to content" checkbox (next to
   the display and size controls) that sets `Widget.fit: 'content'`. A fit panel's height then
   follows what it renders: the dashboard measures the bottom of the card's last in-flow child

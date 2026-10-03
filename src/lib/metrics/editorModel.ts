@@ -13,7 +13,8 @@
 import { CAMPAIGNS } from '../campaigns'
 import { getNote, hasNote, NOTES_REGISTRY, noteOptions, noteRawText } from '../notes'
 import { POPUPS } from '../popupEvents'
-import { METRICS, type MetricDef } from './metrics'
+import { METRICS, metricWindows, type MetricDef } from './metrics'
+import { seriesTwin } from './series'
 import { RATIOS, type RatioDef } from './ratios'
 import { DISPLAYS_FOR, kindOf, type DataKind } from './validate'
 import type { CardSpec, DataBinding, Display, DisplayAs, Label, MetricItem, ParamValue, RepeatSpec, ScopePath, Section } from './types'
@@ -331,22 +332,37 @@ export interface DisplayOption {
   disabled: boolean
   hint?: string
 }
-/** The displays compatible with a binding's data kind (validate.ts's DISPLAYS_FOR), with
- * 'sparkline' always present-but-disabled: MetricValue carries no per-day series yet (see
- * lib/metrics/render.ts's own "GAP" comment), so the editor never lets it be picked even though
- * the kind allows it in principle. Returns [] for an unresolvable binding (unknown id), which
- * the caller renders as "pick a metric/ratio first". */
+/** Why a binding cannot be drawn as a daily sparkline, or null when it can (validate.ts's rule:
+ * a count or money METRIC, never a ratio, with no country split, read in a ranged window that
+ * has a daily twin fact: lib/metrics/series.ts seriesTwin). */
+export function sparklineBlocker(binding: DataBinding): string | null {
+  if (!('metric' in binding)) return 'A sparkline needs a count or money metric, not a ratio'
+  const def = METRICS.get(binding.metric)
+  if (!def) return null // an unknown id is reported by the picker, not here
+  if (binding.params?.country !== undefined) return 'A sparkline cannot be split by country'
+  const w = binding.window
+  const window = w === undefined ? metricWindows(def)[0] : typeof w === 'string' ? w : null
+  if (!window || !seriesTwin(def, window as never)) return 'A sparkline needs the page or campaign attribution window over a metric with daily data'
+  return null
+}
+/** The displays compatible with a binding's data kind (validate.ts's DISPLAYS_FOR). 'sparkline'
+ * is offered but disabled, with the reason, wherever the binding cannot draw a daily series
+ * (sparklineBlocker). Returns [] for an unresolvable binding (unknown id), which the caller
+ * renders as "pick a metric/ratio first". */
 export function displayOptionsFor(binding: DataBinding): DisplayOption[] {
   const k = kindOf(binding)
   if (!k) return []
-  return DISPLAYS_FOR[k].map((as) => (as === 'sparkline' ? { as, disabled: true, hint: 'Coming soon — no daily series data yet' } : { as, disabled: false }))
+  return DISPLAYS_FOR[k].map((as) => {
+    const blocker = as === 'sparkline' ? sparklineBlocker(binding) : null
+    return blocker ? { as, disabled: true, hint: blocker } : { as, disabled: false }
+  })
 }
 /** Whether `as` is a display the given binding's data kind actually allows AND the editor
- * offers (excludes the disabled sparkline placeholder) — used to auto-correct the display when
- * the user switches data under it. */
+ * offers (a sparkline only where it can draw a daily series) — used to auto-correct the display
+ * when the user switches data under it. */
 export function isDisplaySelectable(binding: DataBinding, as: DisplayAs): boolean {
   const k = kindOf(binding)
-  return !!k && DISPLAYS_FOR[k].includes(as) && as !== 'sparkline'
+  return !!k && DISPLAYS_FOR[k].includes(as) && (as !== 'sparkline' || sparklineBlocker(binding) === null)
 }
 export function dataKindOf(binding: DataBinding): DataKind | null {
   return kindOf(binding)

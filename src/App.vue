@@ -94,14 +94,17 @@ function scheduleSave() {
   saveTimer = window.setTimeout(flushSave, 700)
 }
 async function flushSave() {
+  saveTimer = undefined
   if (putInFlight) {
     putQueued = true
     return
   }
   const body = JSON.stringify(config)
   if (body === lastPersisted) {
-    // Nothing to write; do not turn a standing "stale" or "error" label into a blank one.
-    if (saveState.value === 'saving') saveState.value = labelBeforeEdit
+    // Nothing to write. A standing "stale" label stays (the tab is still out of date). A standing
+    // "Save failed" does not: the tab is back on exactly what the server holds, so nothing is
+    // failing any more.
+    if (saveState.value === 'saving') saveState.value = labelBeforeEdit === 'error' ? 'idle' : labelBeforeEdit
     return
   }
   putInFlight = true
@@ -119,6 +122,23 @@ async function flushSave() {
   }
 }
 watch(config, scheduleSave, { deep: true })
+
+// Leaving the page: do not sit out the 700 ms debounce. A pending edit is sent now (and the timer
+// cleared, so it cannot fire into an unmounted component). One PUT at a time still holds: if a PUT
+// is already in flight, the edit queues behind it and goes out when that resolves, which a page
+// that is really closing may not live to see (the browser cannot be told to wait). Only the edit
+// made inside that one in-flight window is at risk, and the next load shows the server's layout.
+function flushPendingSave() {
+  if (saveTimer === undefined) return
+  clearTimeout(saveTimer)
+  saveTimer = undefined
+  if (loaded.value && !sessionExpired.value) void flushSave()
+}
+onMounted(() => window.addEventListener('pagehide', flushPendingSave))
+onBeforeUnmount(() => {
+  window.removeEventListener('pagehide', flushPendingSave)
+  flushPendingSave()
+})
 
 const saveLabel = computed(
   () => ({ idle: '', saving: 'Saving…', saved: 'Saved', error: 'Save failed', stale: 'This tab is out of date, reload' })[saveState.value],

@@ -39,7 +39,14 @@ function w(p: Omit<Widget, 'i'>): Widget {
   return { ...p, i: p.id }
 }
 
-// Bumped to 12 for the Overview's small-sample note row (see compactSmallSampleNoteV12): the
+// Bumped to 13 for inline sparklines (ADR 0005 slice 2): a metric item may now ask for a daily
+// series (`display: { as: 'sparkline', series: 'daily' }`) and draw it. NO stored layout is
+// rewritten: no existing layout has a sparkline, so the bump is only the save guard that keeps a
+// v12 tab from overwriting a layout it cannot draw (functions/api/config.ts answers it 409 and
+// backs the stored layout up to `dashboard:default:backup:v12` on the first v13 save). The number
+// lives in LAYOUT_VERSIONS below, so renumbering this slice (another slice may take 13 first) is
+// that one literal; every migration step is keyed on a LAYOUT_VERSIONS entry, never a bare number.
+// (Bumped to 12 for the Overview's small-sample note row (see compactSmallSampleNoteV12): the
 // one-line note drops from three grid rows to one and the cards below move up to meet it.
 // (Bumped to 11 for the rest of the panels (ADR 0003 slice 7, see migratePanelsV11): every
 // remaining bespoke panel becomes a card preset (the release panel; the campaign funnel, country,
@@ -59,7 +66,13 @@ function w(p: Omit<Widget, 'i'>): Widget {
 // uncustomized layout only. (Bumped to 7 for the bespoke-page → widget conversion migration —
 // see the v7 block: Overview/Campaigns went from `widgets: []` (rendered by the now-retired
 // OverviewPage.vue/CampaignComparePage.vue) to real generic widgets.)
-export const CONFIG_VERSION = 12
+export const LAYOUT_VERSIONS = {
+  /** The Overview's small-sample note takes one grid row (compactSmallSampleNoteV12). */
+  compactNoteRow: 12,
+  /** Inline sparklines (ADR 0005 slice 2). A guard bump only: no stored layout is rewritten. */
+  sparklines: 13,
+} as const
+export const CONFIG_VERSION: number = LAYOUT_VERSIONS.sparklines
 
 // The default "basic charts available out of the box" — a sensible analytics
 // starting layout. Users can move/resize/add/remove from here.
@@ -1005,7 +1018,7 @@ export function normalizeConfig(raw: any): DashboardConfig {
     }
     // v12 migration (see CONFIG_VERSION): the Overview's small-sample note takes one grid row,
     // not three (compactSmallSampleNoteV12). Version-gated, so a later resize is never undone.
-    if ((Number(raw.version) || 0) < 12) {
+    if ((Number(raw.version) || 0) < LAYOUT_VERSIONS.compactNoteRow) {
       for (let i = 0; i < pages.length; i++) pages[i] = compactSmallSampleNoteV12(pages[i])
     }
     // v10 and v11 (see CONFIG_VERSION), run on every load: every former bespoke panel renders as
