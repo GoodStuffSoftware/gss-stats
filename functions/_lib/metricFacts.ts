@@ -16,7 +16,7 @@
 // Runs behind the auth gate (functions/_middleware.ts) like every /api/* route, so a hit never
 // bypasses sign-in.
 
-import { CAMPAIGNS, campaignById } from '../../src/lib/campaigns'
+import { CAMPAIGNS, campaignById, ORGANIC_ARM_ID } from '../../src/lib/campaigns'
 import { FACTS, rangeMs, type FactStatement, type FactTtl } from '../../src/lib/metrics/facts'
 import { buildFact, type FactResult, type Plan, type PlannedFact } from '../../src/lib/metrics/engine'
 import { etMidnightMs, servingEndMs } from '../../src/lib/metrics/instrumentation'
@@ -106,6 +106,7 @@ export function prewarmFactKeys(): void {
         factCacheKeyUrl({ id, params: { campaignId: c.id } })
       }
     }
+    factCacheKeyUrl({ id: 'campaignReturns', params: { campaignId: ORGANIC_ARM_ID } }) // the organic baseline arm
     factCacheKeyUrl({ id: 'adsSpend', params: {} })
     // The date- and range-dependent facts: their keys change daily, but their SQL text does not,
     // so hashing that text now leaves only their bound values for the first request of a day.

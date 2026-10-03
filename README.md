@@ -64,7 +64,15 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   cards, presets `campaign-funnel`, `campaign-country` — a table with the funnel steps as rows
   and US / CA / Other as columns, each cell a campaign metric with the registry's optional
   `country` param — `campaign-cost` and `campaign-returns` — d0 and each return window's rate,
-  dN over d0 with its n/d, as bars side by side. "Arrivals by ET hour of day" and "Daily
+  dN over d0 with its n/d, as bars side by side. A campaign's return rows count from the web
+  site and the installed app (`bestsudoku-app`) alike, from its attribution start (each counts
+  its own installs, so a phone that used both counts once on each). After the
+  campaigns comes one more row, "Organic (web)": the `/return/organic/` rows the web site sends
+  for untagged visitors, with no start bound and never app rows, as a baseline to read the
+  campaigns against; it stays hidden until its d0 count is above zero. It never enters the
+  site-wide "Return visits (day 1+)" tile or the routine's site-wide arrivals, which stay
+  tagged-only. Return rows are counts
+  only — never split by hour, place or device. "Arrivals by ET hour of day" and "Daily
   arrivals by flight day" are standard geo charts over the same tagged arrivals (filter
   `arrival` = tagged): a breakdown bar of `hourEt` × `campaignFlight`, and a line of
   `flightDay` × `campaignFlight` with `cumulative` running totals dashed on a right-hand axis.
@@ -93,6 +101,27 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   regression from this app's own code. Resizing a chart currently needs a mouse or touch;
   every other chart action (edit, remove, zoom, duplicate, set-as-default) has a real
   button and works from the keyboard.
+- **Fit height to content** — a card's editor has a "Fit height to content" checkbox (next to
+  the display and size controls) that sets `Widget.fit: 'content'`. A fit panel's height then
+  follows what it renders: the dashboard measures the bottom of the card's last in-flow child
+  ([`src/composables/useFitHeight.ts`](src/composables/useFitHeight.ts), a `ResizeObserver` on
+  the card's children, never on the card itself) and sets the grid height `h` to the fewest
+  whole rows that hold it ([`src/lib/fit.ts`](src/lib/fit.ts) `fitRows`: `h` rows are
+  `h*40 + (h-1)*14` px, minimum 3), so the card is neither clipped nor scrolling, and it
+  grows or shrinks as data arrives or captions appear. A fit card has no resize grip (its
+  height is the content's) and the option is not offered on canvas charts (bar, line, pie,
+  map, ...), which have no content height of their own; metric cards, stat tiles, tables and
+  notes can use it. It is off by default and absent from every existing layout, which render
+  exactly as before: no storage migration and no `CONFIG_VERSION` bump. On a phone
+  (<= 700px) the one-column stack sizes itself, so the measurement is not written back to the
+  desktop `h`; a zoomed card is not fitted either. The last fitted `h` is saved as an ordinary
+  height, so turning the option off keeps the card at that size. The height is measured with
+  the card's layout box (not its on-screen rect, so the zoom animation cannot inflate it), is
+  reported only after the content has been quiet for 300ms (data that loads in two steps saves
+  once) and never from a hidden or detached card; a layout equal to the one last loaded or
+  saved is not written back. The fitted `h` depends on the card's width (text wraps), and the
+  layout is shared: two tabs open at different widths each compute their own `h` and the
+  last save wins.
 - **The main filter bar is always visible**, in normal flow directly under the page
   tabs (range, sites, exclusions, sync-across-pages). If it scrolls out of view, a
   small "show filters" button appears top-right — see the IntersectionObserver on
@@ -543,7 +572,9 @@ lacks the pin, pin it in the same PR as the registration.
   (+ `flightStartTimeEt` if the schedule starts mid-day), `flightEnd`, `status`, `kind`,
   `dailyBudgetUsd` and `hardCapUsd` (both required to read it: they arm the pacing line and kill
   rule 4), `servingHoursEt`, `notes`, and `directionalThroughDay` if the first N flight days
-  are directional. This alone puts the campaign on the dashboard and in the sync.
+  are directional. This alone puts the campaign on the dashboard and in the sync. The id and
+  tag `organic` are reserved for the organic baseline row: a campaign using either fails at
+  load.
 - **[`adsRules.ts`](src/lib/adsRules.ts) `ADS_READ_PLANS`** — one `buildReadPlan('<id>', {...})`:
   `channel` (`'display'`, the default, or `'search'`; see
   [Adding an arm](#adding-an-arm-two-campaigns-at-once) below),

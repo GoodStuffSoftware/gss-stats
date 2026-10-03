@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it, vi } from 'vitest'
 import { COUNTRY_BUCKET_SQL, FACTS, factKey, flightPathsSeenStatement, kpiDayWindows, rangeMs, releaseSidesMs, type FactId, type FactParams } from './facts'
 import { buildFact, factCuts } from './engine'
-import { CAMPAIGNS, campaignAttributionClause, campaignById, etMidnightUtcMs } from '../campaigns'
+import { CAMPAIGNS, campaignAttributionClause, campaignById, etMidnightUtcMs, ORGANIC_ARM_ID } from '../campaigns'
 import * as campaigns from '../campaigns'
 import { SPEND_SUMMARY_SQL } from '../adsStore'
 import { etMidnightMs } from './instrumentation'
@@ -15,7 +15,7 @@ import { etMidnightMs } from './instrumentation'
 const NOW = Date.parse('2026-09-26T21:00:00Z')
 const SAMPLE_PARAMS: Record<FactId, FactParams[]> = {
   campaignPathVisitor: CAMPAIGNS.map((c) => ({ campaignId: c.id })),
-  campaignReturns: CAMPAIGNS.map((c) => ({ campaignId: c.id })),
+  campaignReturns: [...CAMPAIGNS.map((c) => ({ campaignId: c.id })), { campaignId: ORGANIC_ARM_ID }],
   flightPathsSeen: CAMPAIGNS.filter((c) => c.flightStart).map((c) => ({ campaignId: c.id })),
   bskKpiDays: [{ todayEt: '2026-09-26' }],
   bskRangePath: [{ since: '2026-09-20', until: '2026-09-26' }],
@@ -161,6 +161,38 @@ describe('each fact runs on SQLite and reuses the endpoint clause helpers', () =
     const stmt = FACTS.campaignReturns.build({ campaignId: retest.id }, NOW)
     const rows = db.prepare(stmt.sql).all(...(stmt.binds as (string | number)[])) as { path: string; c: number }[]
     expect(rows.map((r) => `${r.path}:${r.c}`).sort()).toEqual(['/return/sudoku_funnel_retest/d0:1', '/return/sudoku_funnel_retest/d31-60:1'])
+  })
+  it('campaignReturns counts a campaign return rows from the web site AND the installed app, still lower-bounded', () => {
+    const retest = campaignById('24279250691')!
+    const start = Date.parse('2026-09-26T16:00:00Z') // 12:00 EDT
+    const db = geoDb()
+    const ins = db.prepare('INSERT INTO hits (ts, site, path) VALUES (?, ?, ?)')
+    ins.run(start, 'bestsudoku-web', '/return/sudoku_funnel_retest/d0')
+    ins.run(start + 1, 'bestsudoku-app', '/return/sudoku_funnel_retest/d0') // the installed app: counts
+    ins.run(start - 60_000, 'bestsudoku-app', '/return/sudoku_funnel_retest/d0') // app row before the start: left out
+    ins.run(start + 2, 'other-site', '/return/sudoku_funnel_retest/d0') // neither Best Sudoku site
+    ins.run(start + 3, 'bestsudoku-app', '/return/organic/d0') // the organic tag is never a campaign's
+    const stmt = FACTS.campaignReturns.build({ campaignId: retest.id }, NOW)
+    expect(stmt.sql).toContain('site IN (?, ?)')
+    expect(stmt.sql).toContain('ts >= ?')
+    const rows = db.prepare(stmt.sql).all(...(stmt.binds as (string | number)[])) as { path: string; c: number }[]
+    expect(rows.map((r) => `${r.path}:${r.c}`)).toEqual(['/return/sudoku_funnel_retest/d0:2'])
+  })
+  it('campaignReturns for the organic arm: its own tag, the web site ONLY, no lower bound, exclusions kept', () => {
+    const db = geoDb()
+    const ins = db.prepare('INSERT INTO hits (ts, site, path, region, screenw) VALUES (?, ?, ?, ?, ?)')
+    ins.run(Date.parse('2020-01-01T00:00:00Z'), 'bestsudoku-web', '/return/organic/d0', '', 0) // long before any flight: counts
+    ins.run(NOW, 'bestsudoku-web', '/return/organic/d0', '', 0)
+    ins.run(NOW, 'bestsudoku-web', '/return/organic/d2-7', '', 0)
+    ins.run(NOW, 'bestsudoku-app', '/return/organic/d0', '', 0) // the installed app: never organic
+    ins.run(NOW, 'bestsudoku-web', '/return/sudoku_funnel_retest/d0', '', 0) // a campaign's tag
+    ins.run(NOW, 'bestsudoku-web', '/return/organic/d0', 'North Carolina', 412) // own household: excluded
+    const stmt = FACTS.campaignReturns.build({ campaignId: ORGANIC_ARM_ID }, NOW)
+    expect(stmt.sql).toMatch(/WHERE site = \? AND path LIKE \? AND /)
+    expect(stmt.sql).not.toContain('ts >=')
+    expect(stmt.binds.slice(0, 2)).toEqual(['bestsudoku-web', '/return/organic/%'])
+    const rows = db.prepare(stmt.sql).all(...(stmt.binds as (string | number)[])) as { path: string; c: number }[]
+    expect(rows.map((r) => `${r.path}:${r.c}`).sort()).toEqual(['/return/organic/d0:2', '/return/organic/d2-7:1'])
   })
   it('campaignReturns attributes nothing while a campaign has no confirmed flightStart', () => {
     const retest = campaignById('24279250691')!
