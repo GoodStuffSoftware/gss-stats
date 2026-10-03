@@ -141,8 +141,18 @@ export const RETEST_AD_GROUP_PLACEMENT_COUNTS: Record<string, number> = {
   'Other Sudoku placements': 16,
 }
 
+/** What a campaign buys. 'display' reads app placements (group_placement_view) and runs the
+ * placement rules against its approved list; 'search' buys keywords, has no placements, and
+ * every placement-based rule or line reads SEARCH_NA instead (never a pass, a trip or a
+ * crash). Campaign-level spend, impressions and clicks are read the same way for both. */
+export type CampaignChannel = 'display' | 'search'
+/** The fixed text every placement-based rule and report line shows for a search campaign. */
+export const SEARCH_NA = 'n/a (search campaign)'
+
 export interface AdsReadPlan {
   campaignId: string
+  /** 'display' (the default) or 'search'. See CampaignChannel. */
+  channel: CampaignChannel
   /** $/day, for pacing lines only (Google may overdeliver a day; never a finding). */
   dailyBudget: number
   /** Kill rule 4: propose pause at or above this cumulative spend. */
@@ -175,7 +185,12 @@ export interface AdsReadPlan {
 
 // Budget and cap come from lib/campaigns.ts (the one campaign definition); only the read
 // schedule and the kill-rule constants (spec sections 11-12) live here.
-type ReadPlanSettings = Omit<AdsReadPlan, 'campaignId' | 'dailyBudget' | 'hardCap'>
+// `channel` defaults to 'display'; a search plan carries no placement list (it may omit
+// approvedPlacements) and no adGroupPlacementCounts.
+type ReadPlanSettings = Omit<AdsReadPlan, 'campaignId' | 'dailyBudget' | 'hardCap' | 'channel' | 'approvedPlacements'> & {
+  channel?: CampaignChannel
+  approvedPlacements?: readonly string[]
+}
 /** A read plan for a campaign registered in lib/campaigns.ts CAMPAIGNS. The budget and the
  * hard cap are taken from that entry and must exist there: a plan with no hard cap would
  * silently arm no kill rule 4. */
@@ -183,7 +198,19 @@ export function buildReadPlan(campaignId: string, settings: ReadPlanSettings): A
   const flight = campaignById(campaignId)
   if (!flight) throw new Error(`campaign ${campaignId} is not in lib/campaigns.ts CAMPAIGNS`)
   if (flight.dailyBudgetUsd == null || flight.hardCapUsd == null) throw new Error(`campaign ${campaignId} needs dailyBudgetUsd and hardCapUsd in lib/campaigns.ts CAMPAIGNS before it can have a read plan`)
-  return { campaignId, dailyBudget: flight.dailyBudgetUsd, hardCap: flight.hardCapUsd, ...settings }
+  const channel = settings.channel ?? 'display'
+  const approvedPlacements = settings.approvedPlacements ?? []
+  if (channel === 'search' && (approvedPlacements.length || settings.adGroupPlacementCounts)) {
+    throw new Error(`campaign ${campaignId} is a search campaign: it has no placements, so its read plan must not set approvedPlacements or adGroupPlacementCounts`)
+  }
+  if (channel === 'display' && !approvedPlacements.length) {
+    throw new Error(`campaign ${campaignId} is a display campaign: its read plan needs approvedPlacements (the list kill rule 1 checks spend against)`)
+  }
+  return { campaignId, dailyBudget: flight.dailyBudgetUsd, hardCap: flight.hardCapUsd, ...settings, approvedPlacements, channel }
+}
+/** A campaign's channel: its read plan's, else 'display' (every closed campaign was Display). */
+export function channelOf(campaignId: string, plans: Readonly<Record<string, AdsReadPlan>> = ADS_READ_PLANS): CampaignChannel {
+  return plans[campaignId]?.channel ?? 'display'
 }
 /** Kept for external callers, e.g. the scheduled-task helper ~/.claude/scheduled-tasks/bsk-retest-morning-read/release-switchover.ts (line 76: `rules.readPlanFor(rules.RETEST_CAMPAIGN_ID)`); new code must take the campaign from the registry or `--campaign`. */
 export const RETEST_CAMPAIGN_ID = '24279250691'
@@ -1139,7 +1166,9 @@ export function buildHealthPairs(i: HealthInputs): HealthPair[] {
 
 // ── Kill rules (spec section 12) — evaluated only on data that came back ────────────────
 export type RuleId = 'placement-leak' | 'ctr' | 'funnel-reach' | 'hard-cap'
-export type RuleStatus = 'trip' | 'watch' | 'clear' | 'not-armed' | 'no-data'
+/** 'n/a': the rule does not apply to this campaign's channel (placement rules on a search
+ * campaign) — never a pass and never a trip. */
+export type RuleStatus = 'trip' | 'watch' | 'clear' | 'not-armed' | 'no-data' | 'n/a'
 export interface RuleResult {
   id: RuleId
   label: string
@@ -1260,7 +1289,10 @@ export function evaluateKillRules(i: KillRuleInput): KillRuleEvaluation {
   // (campaign total minus every itemized placement) counts as outside: it is not
   // attributable to an approved placement yet. Reported separately, because Google often
   // itemizes it later.
-  {
+  // A search campaign has no placements: the rule reads n/a whether or not it is armed.
+  if (plan.channel === 'search') {
+    rules.push({ id: 'placement-leak', label: 'placement leak', limit: plan.placementLeakMaxShare, status: 'n/a', value: null, detail: SEARCH_NA })
+  } else {
     const base = { id: 'placement-leak' as const, label: `>${pctStr(plan.placementLeakMaxShare, 0)} of spend outside the ${plan.approvedPlacements.length} approved placements`, limit: plan.placementLeakMaxShare }
     if (!armed) rules.push({ ...base, status: 'not-armed', value: null, detail: `armed at ${usd(plan.killRulesFrom)}` })
     else if (!i.placements || !(i.placements.campaignCost > 0)) rules.push({ ...base, status: 'no-data', value: null, detail: 'placement read returned no data' })
