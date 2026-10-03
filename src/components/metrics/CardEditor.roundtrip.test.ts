@@ -408,6 +408,29 @@ describe('fields the editor has no control for survive it: fit, a sparkline seri
     expect(validateCard(lastSpec(w))).toEqual([])
   })
 
+  it('switching the sparkline to Number and back, and a stored decimals of 3, leave the spec exactly as it was', async () => {
+    const spec = sparkReturns()
+    spec.sections[0].items.push({ id: 'rate', label: 'Rate', data: { ratio: 'campaign.returnD2to7PerD0' }, display: { as: 'percent', decimals: 3 } })
+    expect(validateCard(spec)).toEqual([])
+    const w = mountEditor({ spec: plain(spec), from: 'campaign-returns' })
+    await flushPromises()
+    await expandAll(w)
+    const spark = () => controls(w).findAll('button.tab').find((b) => b.text().startsWith('Sparkline'))!
+    const number = [...spark().element.parentElement!.querySelectorAll('button.tab')].find((b) => b.textContent!.trim() === 'Number') as HTMLButtonElement
+    number.click()
+    await flushPromises()
+    expect(heldSpec(w, spec).sections[0].items.find((i) => i.id === 'd0')!.display).toStrictEqual({ as: 'number' })
+    await spark().trigger('click')
+    await flushPromises()
+    const out = heldSpec(w, spec)
+    expect(out).toStrictEqual(spec)
+    expect(out.sections[0].items.find((i) => i.id === 'd0')!.display).toStrictEqual(SPARK)
+    expect(out.sections[0].items.find((i) => i.id === 'rate')!.display).toStrictEqual({ as: 'percent', decimals: 3 })
+    expect(out.repeat!.organic).toBe(true)
+    await noOpPass(w)
+    expect(heldSpec(w, spec)).toStrictEqual(spec)
+  }, 60_000)
+
   it('through ChartEditor: save and reload keep fit, the sparkline series and repeat.organic', async () => {
     const spec = sparkReturns()
     const widget: Widget = { id: 'w1', i: 'w1', title: 'Card', type: 'table', dimension: '', metric: 'pageviews', limit: 50, card: { spec: plain(spec), from: 'campaign-returns' }, fit: 'content', x: 0, y: 0, w: 4, h: 8 }
