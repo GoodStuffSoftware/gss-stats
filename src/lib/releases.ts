@@ -132,8 +132,9 @@ export const RELEASES: ReleaseMarker[] = [
   {
     version: 'v1.95.5',
     dateEt: NEW_BEACONS_LIVE_AT_ET,
+    // Not `major`: its go-live marker ("game + auth breakdown live") already labels 2026-09-26,
+    // so a second labelled line the same day only crowds the timeline. Shows as a tick.
     note: 'Finished games and new-vs-returning sign-ins now reported',
-    major: true,
   },
   {
     version: 'v1.95.6',
@@ -141,7 +142,19 @@ export const RELEASES: ReleaseMarker[] = [
     note: 'Install total no longer double-counted across open tabs',
   },
   {
+    version: 'v1.95.7',
+    dateEt: '2026-09-28',
+    note: 'Finished dailies no longer revert to unsolved; wrong-puzzle win summary fixed',
+  },
+  {
+    version: 'v1.95.8',
+    dateEt: '2026-09-28',
+    note: 'Daily challenges now generate themselves; test-build sign-in goes straight in',
+  },
+  {
     version: 'v1.96.0',
+    // Dated per the BSK release owner's 10-03 close-out message (live 22:21 ET on 10-02); the
+    // git tag reads 10-03 01:09 ET, but BSK is authoritative for release timing.
     dateEt: '2026-10-02',
     note: 'Tour-first for new players, sign-in invite after the tour, sign-in before install',
     major: true,
