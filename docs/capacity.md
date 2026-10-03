@@ -387,8 +387,8 @@ date added. Method (as in §8): `EXPLAIN QUERY PLAN` on a fixture holding the tw
 | Twin | Plan | Rows read vs the scalar fact |
 |---|---|---|
 | `campaignDaily` | `SEARCH hits USING INDEX idx_hits_ts (ts>?)` + `USE TEMP B-TREE FOR GROUP BY` | the scalar's rows: the campaign WHERE has no site filter and no upper bound, so it reads every site's rows since the flight start |
-| `bskRangeDaily` | `SEARCH hits USING INDEX idx_hits_site_ts (site=? AND ts>? AND ts<?)` | same range, same rows |
-| `popupRangeDaily` | with `sites`: `idx_hits_site_ts (site=? AND ts>? AND ts<?)`; without: `idx_hits_ts (ts>? AND ts<?)` | same range, same rows |
+| `bskRangeDaily` | `SEARCH hits USING INDEX idx_hits_site_ts (site=? AND ts>? AND ts<?)` + `USE TEMP B-TREE FOR GROUP BY` | same range, same rows |
+| `popupRangeDaily` | with `sites`: `idx_hits_site_ts (site=? AND ts>? AND ts<?)`; without: `idx_hits_ts (ts>? AND ts<?)`; both + `USE TEMP B-TREE FOR GROUP BY` | same range, same rows |
 | `adsSpendDaily` | a full read of the ads store's `ads_daily_metrics` (`ORDER BY campaign_id, date`) | every stored day of every campaign (tens of rows today, about 365 per campaign per year); the one campaign and the latest 92 days are picked in JS |
 
 No full-table scan of `hits` and no new index. Counting what a card adds:
@@ -401,10 +401,11 @@ No full-table scan of `hits` and no new index. Counting what a card adds:
 - **Rows read per extra statement** = the rows its scalar twin reads (§7 measured 327 rows for the
   live US+CA retest and 3,354 for the closed Android launch, 2026-09-27). For a live campaign the
   window has no upper bound, so it grows with traffic.
-- **Miss rate.** A closed campaign is cached 24 h (one miss a day), a live one 90 s. Worst case, a
-  page held open continuously on one live-campaign sparkline: 960 misses/day x 327 rows is about
-  0.31M rows/day, roughly 6% of the 5M/day account cap per live-campaign sparkline. A normal visit
-  pattern is far below that.
+- **Miss rate.** A closed campaign's `campaignDaily` is cached 15 min (about 96 misses a day), a
+  closed `range` twin 24 h, a live one 90 s. Worst case, a page held open continuously on one
+  sparkline: a live campaign 960 misses/day x 327 rows is about 0.31M rows/day; a closed one 96
+  misses/day x 3,354 rows is about 0.32M rows/day; each is roughly 6% of the 5M/day account cap.
+  A normal visit pattern is far below that.
 - **Not prewarmed.** `prewarm.ts` warms no twin: a series is asked for only by an item the owner
   chose to draw as a sparkline, so the first read after expiry pays one more statement inside the
   batch, and an ordinary page (no sparkline) is unchanged.

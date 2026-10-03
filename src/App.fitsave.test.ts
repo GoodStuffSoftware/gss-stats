@@ -62,7 +62,10 @@ let wrapper: VueWrapper | null = null
  * at the height its (stubbed) content needs. */
 function storedConfig(): DashboardConfig {
   const cfg = normalizeConfig(JSON.parse(JSON.stringify(defaultConfig())))
-  const page = cfg.pages.find((p) => p.id === cfg.activePageId)!
+  // The first page holding a metric card, opened on load (a first-time viewer lands on the
+  // config's activePageId; the viewer's own page memory is cleared before each test).
+  const page = cfg.pages.find((p) => p.widgets.some((w) => w.card))!
+  cfg.activePageId = page.id
   const card = page.widgets.find((w) => w.card)!
   card.fit = 'content'
   card.h = fitRows(300)
@@ -70,6 +73,7 @@ function storedConfig(): DashboardConfig {
 }
 
 beforeEach(() => {
+  localStorage.clear()
   contentBottom = 300
   observers.length = 0
   live.clear()
@@ -297,6 +301,18 @@ describe('App: leaving the page with an edit still in the debounce', () => {
     await load()
     await sleep(FIT_SETTLE_MS + 100)
     liveCard().title = 'x'.repeat(70_000) // a body over the 64 KiB keepalive limit
+    await flushPromises()
+    window.dispatchEvent(new Event('pagehide'))
+    await flushPromises()
+    expect(saveConfig).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(saveConfig).mock.calls[0][1]).toEqual({ keepalive: false })
+  }, 20000)
+
+  it('the keepalive size cap counts bytes, not characters (multibyte text over the cap falls back)', async () => {
+    await load()
+    await sleep(FIT_SETTLE_MS + 100)
+    // 30,000 characters, but about 90,000 UTF-8 bytes: under the cap by `.length`, over it in bytes.
+    liveCard().title = '€'.repeat(30_000)
     await flushPromises()
     window.dispatchEvent(new Event('pagehide'))
     await flushPromises()
