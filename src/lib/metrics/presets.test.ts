@@ -46,6 +46,23 @@ describe('presets', () => {
     }
   })
 
+  // validateCard checks only a note id's shape now (a newer build's id must load), so a typo in a
+  // preset would render as nothing: every { note } and caption anywhere in a preset must exist.
+  it('every note id anywhere in a preset (labels, titles, captions, whenEmpty) is registered', () => {
+    const found: string[] = []
+    const walk = (v: unknown): void => {
+      if (Array.isArray(v)) return v.forEach(walk)
+      if (!v || typeof v !== 'object') return
+      const o = v as Record<string, unknown>
+      if (typeof o.note === 'string') found.push(o.note)
+      if (Array.isArray(o.captions)) for (const c of o.captions) if (typeof c === 'string') found.push(c)
+      Object.values(o).forEach(walk)
+    }
+    walk(Object.values(PRESETS))
+    expect(found.length).toBeGreaterThan(10)
+    expect(found.filter((id) => !Object.hasOwn(NOTES_REGISTRY, id))).toEqual([])
+  })
+
   it('no text a preset can show contains a beacon path or a file path', () => {
     const ids = new Set<string>(['flight-pending', 'no-campaign-flighting', 'not-yet-tracking', 'still-arriving', 'counted-from', 'install-fix-note', 'new-today', 'too-few-to-report', 'arrivals-caveat', 'raw-install-dedupe'])
     for (const spec of Object.values(PRESETS)) {

@@ -168,7 +168,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   (`widget.noteId`), editable from the chart menu either way. Short UI names (metric and
   funnel-step labels such as "Game-screen views") are registry entries too, of kind `label`:
   never a caption and never offered in the caption pickers (the card builder's label pickers
-  list them).
+  list them). Everything under a chart (its captions, the response's own caveats, the range
+  notice) comes from one list in a fixed order,
+  [`chartNotes()`](src/lib/chartNotes.ts); a card's own captions render inside the card.
 - **Durable, multi-page dashboards** — layout + chart definitions persist in KV (not
   `localStorage`), so they follow you across devices. Duplicate / rename / delete
   pages (see *Page navigation*); a protected default page with "restore default charts"; per-page filters and
@@ -177,6 +179,13 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   first save of a newer version first copies the previous stored layout to
   `dashboard:default:backup:v<old version>` in KV ([`functions/api/config.ts`](functions/api/config.ts)),
   once, so a migration can be rolled back by copying that key over `dashboard:default`.
+  Every save that changes the stored layout also first copies the stored one to
+  `dashboard:default:prev`, and the first such save of each ET day to
+  `dashboard:default:day:<YYYY-MM-DD>` (kept 30 days); if a copy can't be written the save is
+  refused (`503`) and the stored layout and `:prev` are left as they were (see
+  [Restoring the layout](#restoring-the-layout)). That makes a changing save 2 KV writes (3 on the
+  first of an ET day) instead of 1, so the Free plan's 1,000 writes a day (account-wide) cover
+  about half as many edits; past the cap every save fails with that `503`.
   A tab saves only after it has read the stored layout ([`src/api.ts`](src/api.ts) `loadConfig`
   resolves to `null` only when nothing is stored yet): if the read fails — no answer, a non-2xx,
   or a body that isn't a layout or can't be normalized — it shows the built-in defaults under a "Couldn't load your saved
@@ -523,7 +532,9 @@ Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats
   opens showing all of its settings read-only; **Customize…** copies them into an editable card,
   where every template field has a control (badge colours, card actions, note variables, a
   repeat's ids and empty message, table headings, gating) and using a control without changing it
-  leaves the card exactly as it was.
+  leaves the card exactly as it was. A card the builder saves always loads again: it holds the
+  same size limits loading checks (up to 32 badge colours, for one), and a note id from a newer
+  version is kept as saved and shows nothing until this version knows it.
 - **Two datasets, one dashboard.** RUM (sampled, human-only) and the beacon (every
   real load, sub-country geo) are charted side by side; they're independent and never
   summed.
@@ -717,10 +728,10 @@ the routine and the dashboard can't disagree.
 
 ```powershell
 npm run ads:sync -- --dry-run --cf-token-file <path-to-cf-token>           # the shared sync only
-npm run ads:morning-read -- --dry-run --cf-token-file <path>               # daily read; no writes
-npm run ads:postflight-read -- --stage wrapup --dry-run --cf-token-file <path>
+npm run ads:morning-read -- --campaign <id> --dry-run --cf-token-file <path>   # daily read; no writes
+npm run ads:postflight-read -- --stage wrapup --campaign <id> --dry-run --cf-token-file <path>
 npm run ads:backfill -- --dry-run --cf-token-file <path>                   # full re-pull + config check
-npm run ads:morning-read -- --fixture <file.json> --now <iso>              # offline, recorded data
+npm run ads:morning-read -- --campaign <id> --fixture <file.json> --now <iso>   # offline, recorded data
 npm run -s ads:read-page -- --input <read.out> --narrative <n.json> --out <page.html> [--audit-commit <sha>]
 npm run typecheck:scripts
 ```
@@ -741,8 +752,8 @@ npm run typecheck:scripts
   an append-only readings log and fire-once threshold state). Why and how:
   [docs/adr/0001-ads-read-store.md](docs/adr/0001-ads-read-store.md). Schema:
   [`migrations/gss-stats-ads/`](migrations/gss-stats-ads/) (`npm run ads:migrate`).
-- **morning-read** syncs spend first, fires each $25/$50/$75/$100 read once (full read + kill
-  rules), appends one daily line per ET day, checks the hard cap on every read, notes any
+- **morning-read** syncs spend first, fires each of the campaign's spend-threshold reads once
+  (full read + kill rules; the retest's are $25/$50/$75/$100), appends one daily line per ET day, checks the hard cap on every read, notes any
   earlier scheduled read that never ran, and evaluates release health (a missing child of a
   non-zero parent) every run — there is no longer a time-of-day gate on it. RETIRED
   2026-09-27: release health used to be skipped between 01:00 and 12:00 ET so the run could
@@ -909,11 +920,11 @@ a newer campaign's window or due date, would otherwise silently read the wrong c
 two or more registered plans: exit 1, listing the registered ids and saying to pass
 `--campaign`.
 
-While only the retest is registered, the default is the retest on every date, so every
-invocation that omits the flag (before, inside or after its morning-read window, and every
-post-flight stage) behaves as it did before the registry (checked by running every routine
-invocation against the base and the head: only `--help` differs). The retest's routine docs
-pin it anyway (step 1).
+Three plans are registered now (the retest and flight 2's two arms), so every read must pin its
+campaign. Before flight 2's arms were registered the default was the retest on every date, and
+every invocation that omitted the flag behaved as it did before the registry (checked by running
+every routine invocation against the base and the head: only `--help` differed). The retest's
+routine docs pin it (step 1).
 
 ### Adding an arm (two campaigns at once)
 
@@ -930,7 +941,8 @@ thresholds, cap, report label and audit folder. Fill in one block per arm:
 | Leak limit | plan `placementLeakMaxShare` | `0.1` | none (omit; ignored for search) |
 | CTR floor | plan `ctrFloor` (kill rule 2) | `0.0015` (0.15%) | `0.01` (1.0%) |
 | Start / end | `CAMPAIGNS` `flightStart` (+ `flightStartTimeEt`), `flightEnd` | start, start + 6 days | same |
-| Budget / cap | `CAMPAIGNS` `dailyBudgetUsd`, `hardCapUsd` | `$50` cap over 7 days | same |
+| Budget / cap | `CAMPAIGNS` `dailyBudgetUsd`, `hardCapUsd` | `$10`/day, `$70` cap over 7 days | same |
+| Spend reads | plan `thresholds`, `killRulesFrom` | 25/50/75/100% of the cap in whole dollars (`18, 35, 53, 70`), kill rules from 50% (`35`) | same |
 | Label / audit | plan `reportLabel`, `auditSlug` (unique) | e.g. `F2 apps`, `f2-apps` | e.g. `F2 search`, `f2-search` |
 | Read window | plan `morningReadFirstEt`, `morningReadLastEt` | day 2 .. end + 1 | same |
 
@@ -1209,6 +1221,55 @@ To put a backup back, in this order:
    ```
 
 5. Open one tab and check the layout before opening any others.
+
+### Restoring the layout
+
+For when a save replaced the layout with the wrong one at the **same** layout version (say, a tab
+that never loaded the real layout saved the defaults over it). The version backups above don't
+cover that; these two copies do (`functions/api/config.ts`):
+
+- `dashboard:default:prev` — the layout as it was before the most recent save that changed it.
+  The next changing save replaces it, so it only helps if nothing was saved after the bad save.
+- `dashboard:default:day:<YYYY-MM-DD>` — the layout as it was before the first changing save of
+  that ET day. Kept 30 days. Use this when more saves followed the bad one: pick the day the bad
+  save happened (or the day before) and it holds the layout as that day began.
+
+Same order and cautions as above: **close every dashboard tab first** (the next changing save
+replaces `:prev`), then run these one at a time from the repo root, in Windows PowerShell 5.1.
+
+Read-only — list the copies, keep what's there now, and download the one you want (`:prev`, or a
+`:day:` key from the list):
+
+```powershell
+npx wrangler kv key list --remote --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --prefix "dashboard:default:"
+```
+
+```powershell
+cmd /c 'npx wrangler kv key get dashboard:default --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-current.json'
+```
+
+```powershell
+cmd /c 'npx wrangler kv key get dashboard:default:prev --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-restore.json'
+```
+
+```powershell
+cmd /c 'npx wrangler kv key get dashboard:default:day:2026-10-03 --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-restore.json'
+```
+
+Check it the same way (it must print `ok: version ..., N pages`; otherwise stop):
+
+```powershell
+Get-Content layout-restore.json -Raw -Encoding UTF8 | ConvertFrom-Json | ForEach-Object { if ($_.pages -isnot [array] -or $_.pages.Count -eq 0) { throw 'not a layout' }; "ok: version $($_.version), $($_.pages.Count) pages" }
+```
+
+Write — only after that printed `ok`. It replaces the whole stored layout, and writing with
+wrangler makes no `:prev` copy, so keep `layout-current.json` in case you need to undo it:
+
+```powershell
+npx wrangler kv key put "dashboard:default" --path layout-restore.json --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote
+```
+
+Then open one tab and check the layout before opening any others.
 
 ## Auth
 

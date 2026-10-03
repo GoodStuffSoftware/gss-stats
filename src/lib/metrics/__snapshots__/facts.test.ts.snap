@@ -47,6 +47,7 @@ exports[`fact SQL snapshots > bskFirstHit {} 1`] = `
 exports[`fact SQL snapshots > bskKpiDays {"todayEt":"2026-09-26"} 1`] = `
 {
   "binds": [
+    1791129600000,
     1791046980000,
     1790451780000,
     1790439960000,
@@ -75,7 +76,7 @@ exports[`fact SQL snapshots > bskKpiDays {"todayEt":"2026-09-26"} 1`] = `
     1790439996000,
   ],
   "db": "gss_geo",
-  "sql": "SELECT CASE WHEN ts >= 1790395200000 THEN 0 WHEN ts >= 1790308800000 THEN 1 WHEN ts >= 1790222400000 THEN 2 WHEN ts >= 1790136000000 THEN 3 WHEN ts >= 1790049600000 THEN 4 WHEN ts >= 1789963200000 THEN 5 WHEN ts >= 1789876800000 THEN 6 WHEN ts >= 1789790400000 THEN 7 ELSE -1 END AS d, CASE WHEN (path LIKE '/return/%' OR path LIKE '/game/complete/%' OR path LIKE '/game/complete-deferred/%' OR path LIKE '/game/tutorial-complete/%' OR path LIKE '/game/start/%' OR path LIKE '/tour/exit-at/%') THEN 0 WHEN ts >= 1790308800000 AND ts < 1790370000000 THEN 1 WHEN ts >= 1790222400000 AND ts < 1790283600000 THEN 1 WHEN ts >= 1790136000000 AND ts < 1790197200000 THEN 1 WHEN ts >= 1790049600000 AND ts < 1790110800000 THEN 1 WHEN ts >= 1789963200000 AND ts < 1790024400000 THEN 1 WHEN ts >= 1789876800000 AND ts < 1789938000000 THEN 1 WHEN ts >= 1789790400000 AND ts < 1789851600000 THEN 1 ELSE 0 END AS t, CASE WHEN ts >= ? THEN 8 WHEN ts >= ? THEN 7 WHEN ts >= ? THEN 6 WHEN ts >= ? THEN 5 WHEN ts >= ? THEN 4 WHEN ts >= ? THEN 3 WHEN ts >= ? THEN 2 WHEN ts >= ? THEN 1 ELSE 0 END AS s, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE site IN (?, ?, ?) AND ts >= ? AND ts < ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY d, t, s, path, visitor, campaign HAVING d >= 0",
+  "sql": "SELECT CASE WHEN ts >= 1790395200000 THEN 0 WHEN ts >= 1790308800000 THEN 1 WHEN ts >= 1790222400000 THEN 2 WHEN ts >= 1790136000000 THEN 3 WHEN ts >= 1790049600000 THEN 4 WHEN ts >= 1789963200000 THEN 5 WHEN ts >= 1789876800000 THEN 6 WHEN ts >= 1789790400000 THEN 7 ELSE -1 END AS d, CASE WHEN (path LIKE '/return/%' OR path LIKE '/game/complete/%' OR path LIKE '/game/complete-deferred/%' OR path LIKE '/game/tutorial-complete/%' OR path LIKE '/game/start/%' OR path LIKE '/tour/exit-at/%') THEN 0 WHEN ts >= 1790308800000 AND ts < 1790370000000 THEN 1 WHEN ts >= 1790222400000 AND ts < 1790283600000 THEN 1 WHEN ts >= 1790136000000 AND ts < 1790197200000 THEN 1 WHEN ts >= 1790049600000 AND ts < 1790110800000 THEN 1 WHEN ts >= 1789963200000 AND ts < 1790024400000 THEN 1 WHEN ts >= 1789876800000 AND ts < 1789938000000 THEN 1 WHEN ts >= 1789790400000 AND ts < 1789851600000 THEN 1 ELSE 0 END AS t, CASE WHEN ts >= ? THEN 9 WHEN ts >= ? THEN 8 WHEN ts >= ? THEN 7 WHEN ts >= ? THEN 6 WHEN ts >= ? THEN 5 WHEN ts >= ? THEN 4 WHEN ts >= ? THEN 3 WHEN ts >= ? THEN 2 WHEN ts >= ? THEN 1 ELSE 0 END AS s, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE site IN (?, ?, ?) AND ts >= ? AND ts < ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY d, t, s, path, visitor, campaign HAVING d >= 0",
 }
 `;
 
@@ -245,6 +246,54 @@ exports[`fact SQL snapshots > campaignDaily {"campaignId":"24279250691"} 1`] = `
 }
 `;
 
+exports[`fact SQL snapshots > campaignDaily {"campaignId":"24311309184"} 1`] = `
+{
+  "binds": [
+    "sudoku_funnel_f2_search",
+    1791129600000,
+    "lifecycle",
+    "email_%",
+    "Virginia",
+    "Reston",
+    "Verizon Business",
+    "desktop",
+    "Windows",
+    "Chrome",
+    1280,
+    "North Carolina",
+    "/popup-outcome/install-prompt/installed",
+    "/install/pwa-installed",
+    1790439996000,
+  ],
+  "db": "gss_geo",
+  "sql": "SELECT date((ts + CASE WHEN (ts >= 1710054000000 AND ts < 1730613600000) OR (ts >= 1741503600000 AND ts < 1762063200000) OR (ts >= 1772953200000 AND ts < 1793512800000) OR (ts >= 1805007600000 AND ts < 1825567200000) OR (ts >= 1836457200000 AND ts < 1857016800000) OR (ts >= 1867906800000 AND ts < 1888466400000) OR (ts >= 1899356400000 AND ts < 1919916000000) OR (ts >= 1930806000000 AND ts < 1951365600000) OR (ts >= 1962860400000 AND ts < 1983420000000) OR (ts >= 1994310000000 AND ts < 2014869600000) OR (ts >= 2025759600000 AND ts < 2046319200000) OR (ts >= 2057209200000 AND ts < 2077768800000) OR (ts >= 2088658800000 AND ts < 2109218400000) OR (ts >= 2120108400000 AND ts < 2140668000000) OR (ts >= 2152162800000 AND ts < 2172722400000) OR (ts >= 2183612400000 AND ts < 2204172000000) OR (ts >= 2215062000000 AND ts < 2235621600000) THEN -14400000 ELSE -18000000 END) / 1000, 'unixepoch') AS dt, path, visitor AS v, campaign, COUNT(*) AS c FROM hits WHERE campaign IN (?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY dt, path, v, campaign",
+}
+`;
+
+exports[`fact SQL snapshots > campaignDaily {"campaignId":"24316608605"} 1`] = `
+{
+  "binds": [
+    "sudoku_funnel_f2_apps",
+    1791129600000,
+    "lifecycle",
+    "email_%",
+    "Virginia",
+    "Reston",
+    "Verizon Business",
+    "desktop",
+    "Windows",
+    "Chrome",
+    1280,
+    "North Carolina",
+    "/popup-outcome/install-prompt/installed",
+    "/install/pwa-installed",
+    1790439996000,
+  ],
+  "db": "gss_geo",
+  "sql": "SELECT date((ts + CASE WHEN (ts >= 1710054000000 AND ts < 1730613600000) OR (ts >= 1741503600000 AND ts < 1762063200000) OR (ts >= 1772953200000 AND ts < 1793512800000) OR (ts >= 1805007600000 AND ts < 1825567200000) OR (ts >= 1836457200000 AND ts < 1857016800000) OR (ts >= 1867906800000 AND ts < 1888466400000) OR (ts >= 1899356400000 AND ts < 1919916000000) OR (ts >= 1930806000000 AND ts < 1951365600000) OR (ts >= 1962860400000 AND ts < 1983420000000) OR (ts >= 1994310000000 AND ts < 2014869600000) OR (ts >= 2025759600000 AND ts < 2046319200000) OR (ts >= 2057209200000 AND ts < 2077768800000) OR (ts >= 2088658800000 AND ts < 2109218400000) OR (ts >= 2120108400000 AND ts < 2140668000000) OR (ts >= 2152162800000 AND ts < 2172722400000) OR (ts >= 2183612400000 AND ts < 2204172000000) OR (ts >= 2215062000000 AND ts < 2235621600000) THEN -14400000 ELSE -18000000 END) / 1000, 'unixepoch') AS dt, path, visitor AS v, campaign, COUNT(*) AS c FROM hits WHERE campaign IN (?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY dt, path, v, campaign",
+}
+`;
+
 exports[`fact SQL snapshots > campaignPathVisitor {"campaignId":"24215315197"} 1`] = `
 {
   "binds": [
@@ -303,6 +352,56 @@ exports[`fact SQL snapshots > campaignPathVisitor {"campaignId":"24279250691"} 1
     1790439996000,
     "sudoku_funnel_retest",
     1790438400000,
+    "lifecycle",
+    "email_%",
+    "Virginia",
+    "Reston",
+    "Verizon Business",
+    "desktop",
+    "Windows",
+    "Chrome",
+    1280,
+    "North Carolina",
+    "/popup-outcome/install-prompt/installed",
+    "/install/pwa-installed",
+    1790439996000,
+  ],
+  "db": "gss_geo",
+  "sql": "SELECT path, visitor, (ts >= ?) AS pf, CASE WHEN (path LIKE '/return/%' OR path LIKE '/game/complete/%' OR path LIKE '/game/complete-deferred/%' OR path LIKE '/game/tutorial-complete/%' OR path LIKE '/game/start/%' OR path LIKE '/tour/exit-at/%') THEN '' ELSE CASE country WHEN 'US' THEN 'US' WHEN 'CA' THEN 'CA' ELSE 'other' END END AS cb, COUNT(*) AS c FROM hits WHERE campaign IN (?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY path, visitor, pf, cb",
+}
+`;
+
+exports[`fact SQL snapshots > campaignPathVisitor {"campaignId":"24311309184"} 1`] = `
+{
+  "binds": [
+    1790439996000,
+    "sudoku_funnel_f2_search",
+    1791129600000,
+    "lifecycle",
+    "email_%",
+    "Virginia",
+    "Reston",
+    "Verizon Business",
+    "desktop",
+    "Windows",
+    "Chrome",
+    1280,
+    "North Carolina",
+    "/popup-outcome/install-prompt/installed",
+    "/install/pwa-installed",
+    1790439996000,
+  ],
+  "db": "gss_geo",
+  "sql": "SELECT path, visitor, (ts >= ?) AS pf, CASE WHEN (path LIKE '/return/%' OR path LIKE '/game/complete/%' OR path LIKE '/game/complete-deferred/%' OR path LIKE '/game/tutorial-complete/%' OR path LIKE '/game/start/%' OR path LIKE '/tour/exit-at/%') THEN '' ELSE CASE country WHEN 'US' THEN 'US' WHEN 'CA' THEN 'CA' ELSE 'other' END END AS cb, COUNT(*) AS c FROM hits WHERE campaign IN (?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY path, visitor, pf, cb",
+}
+`;
+
+exports[`fact SQL snapshots > campaignPathVisitor {"campaignId":"24316608605"} 1`] = `
+{
+  "binds": [
+    1790439996000,
+    "sudoku_funnel_f2_apps",
+    1791129600000,
     "lifecycle",
     "email_%",
     "Virginia",
@@ -393,6 +492,52 @@ exports[`fact SQL snapshots > campaignReturns {"campaignId":"24279250691"} 1`] =
 }
 `;
 
+exports[`fact SQL snapshots > campaignReturns {"campaignId":"24311309184"} 1`] = `
+{
+  "binds": [
+    "bestsudoku-web",
+    "bestsudoku-app",
+    "/return/sudoku_funnel_f2_search/%",
+    1791129600000,
+    "lifecycle",
+    "email_%",
+    "Virginia",
+    "Reston",
+    "Verizon Business",
+    "desktop",
+    "Windows",
+    "Chrome",
+    1280,
+    "North Carolina",
+  ],
+  "db": "gss_geo",
+  "sql": "SELECT path, COUNT(*) AS c FROM hits WHERE site IN (?, ?) AND (path LIKE ?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) GROUP BY path",
+}
+`;
+
+exports[`fact SQL snapshots > campaignReturns {"campaignId":"24316608605"} 1`] = `
+{
+  "binds": [
+    "bestsudoku-web",
+    "bestsudoku-app",
+    "/return/sudoku_funnel_f2_apps/%",
+    1791129600000,
+    "lifecycle",
+    "email_%",
+    "Virginia",
+    "Reston",
+    "Verizon Business",
+    "desktop",
+    "Windows",
+    "Chrome",
+    1280,
+    "North Carolina",
+  ],
+  "db": "gss_geo",
+  "sql": "SELECT path, COUNT(*) AS c FROM hits WHERE site IN (?, ?) AND (path LIKE ?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) GROUP BY path",
+}
+`;
+
 exports[`fact SQL snapshots > campaignReturns {"campaignId":"organic","todayEt":"2026-09-26"} 1`] = `
 {
   "binds": [
@@ -446,6 +591,30 @@ exports[`fact SQL snapshots > flightPathsSeen {"campaignId":"24279250691"} 1`] =
     "bestsudoku-web",
     1790395200000,
     1791000000000,
+  ],
+  "db": "gss_geo",
+  "sql": "SELECT path, COUNT(*) AS c FROM hits WHERE site = ? AND ts >= ? AND ts < ? GROUP BY path",
+}
+`;
+
+exports[`fact SQL snapshots > flightPathsSeen {"campaignId":"24311309184"} 1`] = `
+{
+  "binds": [
+    "bestsudoku-web",
+    1791086400000,
+    1791691200000,
+  ],
+  "db": "gss_geo",
+  "sql": "SELECT path, COUNT(*) AS c FROM hits WHERE site = ? AND ts >= ? AND ts < ? GROUP BY path",
+}
+`;
+
+exports[`fact SQL snapshots > flightPathsSeen {"campaignId":"24316608605"} 1`] = `
+{
+  "binds": [
+    "bestsudoku-web",
+    1791086400000,
+    1791691200000,
   ],
   "db": "gss_geo",
   "sql": "SELECT path, COUNT(*) AS c FROM hits WHERE site = ? AND ts >= ? AND ts < ? GROUP BY path",
