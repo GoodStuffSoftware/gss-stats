@@ -50,6 +50,10 @@ tiles (8 RUM, 6 geo), 3 notes, 7 maps, 1 `rateTable` and no rate tile and no bar
 capture had 22 rate tiles; by the v9 capture the Pop-ups page used the rate table (now the
 `popup-rates` card), so a rate tile or a bar table now exists only where someone added one by hand.
 
+A `rateTable` widget without a `card` would reach the generic states and draw an empty body
+(`buildChartConfig` returns nothing for it), but `migratePanelsV11` runs on every load and puts
+the `popup-rates` card back, so that path does not occur in practice.
+
 **Summary:** 9 bodies; 4 bespoke ones to convert (ads readings, rate tile, stat tile, bar table);
 2 exceptions (note, retired-panel fallback); charts and the map are already reusable.
 
@@ -60,13 +64,17 @@ capture had 22 rate tiles; by the v9 capture the Pop-ups page used the rate tabl
    two whose data it cannot (the stat tile and the bar table, see "Exceptions" and decision (a))
    keep their data path but render through shared components, the same ones the card uses for a
    tile and a bar.
-2. **No layout migration unless one is unavoidable.** A converted widget is mapped to its card
-   at render time (`ChartCard` dispatch, the way an `overview` widget with a `card` already
-   renders), and the chart editor opens it in the card editor. Saving it writes `card`; nothing
-   rewrites a stored layout on load. This keeps `CONFIG_VERSION` at 12, so it does not collide
-   with `feat/nav`'s v13. If a slice finds it needs a stored migration after all, it takes the
-   next number on `main` and its PR says `feat/nav` must renumber. What this does and does not
-   protect is spelled out under "Saved layouts and rollback".
+2. **No layout rewrite on load; a version bump where stored output outgrows an older build.** A
+   converted widget is mapped to its card at render time (`ChartCard` dispatch, the way an
+   `overview` widget with a `card` already renders), and the chart editor opens it in the card
+   editor. Saving it writes `card`; nothing rewrites a stored layout on load. Slice 1 does not
+   bump `CONFIG_VERSION` (losing `fit` only resets a height). Slices 2, 3 and 4, whose saved
+   specs an older build cannot read, each bump it with no data migration, only to get the save
+   guard: `functions/api/config.ts` refuses a save from a lower version with 409 ("This tab is
+   out of date, reload") and backs the stored layout up to `dashboard:default:backup:v<old>`
+   before the first higher-version save. Each takes the next free number on `main`; `feat/nav`
+   holds v13, so whichever of them lands second renumbers. Why the bump, and what it does and
+   does not protect, is spelled out under "Saved layouts and rollback".
 3. **Parity is a test, not a claim.** Each conversion gets a parity test in the
    `src/components/metrics/presets.parity.test.ts` pattern: the old body's visible numbers and
    the new card's, from one fixture, every difference listed and asserted.
@@ -119,7 +127,19 @@ counts. What each choice shows on those 15 tiles once they are cards:
   "too few to report" as the tile. The engine adds what ADR 0003 row 12 asked for: the value is
   marked provisional, with the `still-arriving` caveat, while the range end is inside the
   outcome's lag (signed-in 0-1 days, installed 0-7, returned 1-7, still-playing 14-21). That
-  caveat is the one visible addition; the parity test asserts the numbers equal and lists it.
+  caveat is the one visible addition on these 15 tiles; the parity test asserts the numbers
+  equal and lists it.
+
+Under either choice, two display differences apply to all 22 tiles and the parity test pins
+each:
+
+- **Zero denominator.** The tile shows "too few to report" and "(0/0)" whenever the cohort is
+  short, including when nothing was shown; the engine reports `no-data` when the denominator is
+  0 and `too-few` only for 1-4. Default: the card's `no-data` wins for d = 0 (nothing was shown,
+  which is not a small cohort); d = 1-4 stays "too few to report".
+- **The eligibility caveat.** The `signin-eligible:rate` tile today shows no caveat; its card
+  carries the registry's `signin-eligible-caveat`. Default: keep it (it explains the partition)
+  and list it as a visible addition.
 - **Apply the page rule.** Those 15 tiles stop showing a percentage and show two counts instead,
   "N <outcome> · M shown", as the Pop-ups page does. Slice 4 then registers `pair` ratios for the
   four outcomes (or uses a two-item card), and the four outcome proportions should be
@@ -145,7 +165,9 @@ Risks: a height written back by the grid fires `layout-updated`, which saves the
 fitted height is derived, so a saved value is harmless, but the fit must not loop (measure,
 resize, re-measure). The fit must settle after fonts and async data load. An older build drops
 `fit` when it saves a layout (its `normWidget` does not know the field), so the widget falls back
-to its stored fixed height; harmless, but it is a preference lost on rollback.
+to its stored fixed height. That happens on a rollback, and also when a tab opened before the
+deploy saves afterwards (same version, so the save guard does not refuse it). Harmless: the
+preference is lost, not data.
 
 ### Inline sparklines
 
@@ -198,17 +220,27 @@ reload the readings source as well as the metrics.
 
 Every `POPUP_RATE_SPECS` key has a registered ratio (see decision (b)'s table), so a rate tile
 maps to a card with one item and the pop-up as a param. The card already shows "(n/d)" and
-"too few to report". Missing: nothing in the registry under the default; the mapping function
-and the editor change (the "Rate" type stops being offered; a new rate is a card). Under the
-page-rule choice, the outcome `pair` ratios too.
+"too few to report". Missing: nothing in the registry under the default; the mapping function;
+the editor change (the "Rate" type stops being offered; a new rate is a card); and the
+per-chart filter button. `ChartCard` hides that button for any widget it treats as a card
+(`isBespokeBody`), but the card still honours a stored `widget.filters` override, so a mapped
+rate tile would keep an override nobody can see or clear. Default: keep the filter button for
+mapped rate tiles. Under the page-rule choice, the outcome `pair` ratios too.
 
 Risks:
 
 - **Inputs.** The tile sends `/api/popups` the range, the site tags and the "hide my visits"
   fields, and nothing else (no drill, no dimension filters); `metricsContextFor` carries the same
-  three, so the inputs match. One difference: the card clamps a range longer than
-  `MAX_RANGE_DAYS - 1` days to its newest days, where `/api/popups` does not. The parity test
-  covers a long range.
+  three, but they are not read identically. Four differences, each a parity-test case:
+  - the card clamps a range longer than `MAX_RANGE_DAYS - 1` days to its newest days, where
+    `/api/popups` does not;
+  - a bare-date range (a legacy filter; live filters are ISO instants) is a UTC day to
+    `/api/popups` and an ET day to the engine;
+  - a bare-date range with `since === until` sends no range to the card at all, so its
+    page-window items fail `missing-range`, where the tile still returns a number;
+  - `metricsContextFor` sends the "hide my visits" fields only when `safeUA` leaves the browser
+    and OS strings unchanged, so for any other string the card silently counts the viewer's own
+    visits while the tile excludes them.
 - **Engine versus `computePopupRate`.** The numbers must match per key: tap over activation-gated
   showings, the install gap over post-fix showings, eligibility over the earned + capped +
   unearned partition, and the `MIN_COHORT` threshold.
@@ -228,6 +260,11 @@ and `BarTable` components that `MetricItem` (tile frame) and `MetricSection` (ba
 use, so a stat tile and a card tile look, format and gate the same way. The data path is
 unchanged, so the numbers are identical by construction; a render test pins them.
 
+The states around them are not in the data path; they live in `ChartCard` and must survive the
+move: a stat tile counts as empty on its rows, not its totals ("No data in range" even when the
+totals are not zero), and a pop-up-dataset stat tile shows "Tracking not yet active" before
+go-live. The render test pins both.
+
 Risks: card tile and stat tile styling converge, which changes the stat tile's look slightly;
 the `.stat` class is styled in `ChartCard.vue` and in the zoomed view. The rate tile also uses
 `.stat`, so slice 4 and slice 5 touch the same styles; whichever lands second rebases.
@@ -235,25 +272,38 @@ the `.stat` class is styled in `ChartCard.vue` and in the zoomed view. The rate 
 ## Saved layouts and rollback
 
 Layouts live in KV `dashboard:default` and are normalized on load (`normalizeConfig`,
-`normWidget`, `normCardRef`). With no version bump:
+`normWidget`, `normCardRef`). The app reads the layout once, when the tab mounts, and saves the
+whole layout on every change. The server's only guard is the version: it refuses a save whose
+version is lower than the stored one (409), and backs the stored layout up only when a higher
+version is first saved. Two builds with the same version always pass, last writer wins.
 
 - **Forward (new build, old layout).** Safe: nothing is rewritten; a rate tile or an
   ads-readings widget without `card` is mapped at render time, so its stored fields
   (`type`, `dataset`, `dimension`, `campaignIds`) are what the mapping reads and must stay
   readable for as long as such a widget can exist.
-- **Rollback (old build, layout saved by a new build).** Not fully safe, and the plan says so
-  rather than claiming otherwise. A widget the user re-saved through the card editor carries
-  `card`, which an older build dispatches first: `{ preset: 'ads-readings-log' }` passes the older
-  `normCardRef` (the id is well formed) but the older `presetById` does not know it, so the card
-  shows as an unknown preset instead of the old log; a `{ spec }` that uses a capability the older
-  build lacks (the readings source, the new scope paths, notices, a series) fails the older
-  `validateCard` and is normalized to the invalid-card placeholder, and if the older build then
-  saves the layout, that spec is lost. Widgets never re-saved are unaffected.
-- **Mitigation.** Each slice that adds a capability a stored spec can use keeps the old body's
-  stored fields on the widget (the editor writes `card` alongside them, never instead of them),
-  so deleting `card` restores the old body on an older build, and its PR states the rollback
-  window. Without a version bump the automatic KV backup does not
-  fire, so a rollback after such a slice is preceded by a manual copy of `dashboard:default`.
+- **A stale tab (old build, still open after a deploy).** This is the likelier case, not a
+  rollback. A tab opened before the deploy holds the old layout in memory; with no version bump
+  its next save overwrites everything the new build saved (card specs, `fit`, converted tiles),
+  with no 409 and no backup. A tab running the old build that loads a layout saved by the new
+  one also hits the loss described next. Last-writer-wins exists today; what would be new is
+  dropping the guard during a rollout that adds stored capabilities. Hence the bump on slices
+  2, 3 and 4 (decision 2): the stale tab gets 409 and "reload", and the first save under the
+  new version backs up the old layout.
+- **Rollback (old build, layout saved by a new build).** With the bump, the older build's
+  saves are refused (its version is lower than the stored one), so it cannot overwrite or lose
+  anything; it is read-only on the layout until `dashboard:default:backup:v<old>` is restored
+  or the new build returns. What it renders meanwhile: a widget re-saved through the card editor
+  carries `card`, which an older build dispatches first. `{ preset: 'ads-readings-log' }` passes
+  the older `normCardRef` (the id is well formed) but the older `presetById` does not know it, so
+  the card shows as an unknown preset instead of the old log. A `{ spec }` that uses a
+  capability the older build lacks (the readings source, the new scope paths, notices, a series)
+  fails the older `validateCard` and shows the invalid-card placeholder. Widgets never re-saved
+  are unaffected.
+- **Mitigation, beyond the bump.** Each slice that adds a capability a stored spec can use
+  keeps the old body's stored fields on the widget (the editor writes `card` alongside them,
+  never instead of them), so deleting `card` restores the old body on an older build, and its
+  PR states the rollback window. Slice 1 takes no bump: a stale tab or a rollback drops `fit`,
+  which only resets a height.
 
 ## Exceptions
 
@@ -272,10 +322,10 @@ and a README update when it is visible to users, and an adversarial parity revie
 | Slice | Scope | Tests | Depends on |
 |---|---|---|---|
 | **1. Fit-to-content height** | `Widget.fit`, `normWidget` whitelist, the measuring and grid-height logic, the editor checkbox | Row-count maths as table tests; `normWidget` round trip; canvas widgets never fit | none |
-| **2. Sparklines** | `series` on the request and value, the engine's per-day series, validation, `render.ts`, the SVG in `MetricItem`, the editor enabling it | Engine series equals the date chart's per-day counts on one `node:sqlite` fixture; a ratio series is rejected; go-live gaps; editor and render tests flipped | none |
-| **3. Readings log preset** | Readings scope source, `reading.count.*` and campaign spend/freshness/threshold scope paths, card notices, preset `ads-readings-log`, `ads-readings` widgets render it; retire `AdsReadingsWidgetCard` | Parity: every number and label the old body shows, from one readings fixture, through the card; `campaignIds` narrowing; refresh reloads readings | 1 |
-| **4. Rate tile to card** | The rate-tile-to-card mapping, the editor no longer offering "Rate", retire the inline rate markup; under the page-rule choice, the outcome `pair` ratios | Parity per `POPUP_RATE_SPECS` key (all 22): n/d, percent and too-few state, old tile versus card, a range longer than `MAX_RANGE_DAYS`, the install-gap note, differences listed | **decision (b)** |
-| **5. Shared stat and bar components** | `StatTile`, `BarTable`, used by `ChartCard` and by the card's tile frame and bars layout; retire the inline markup | Render tests pin the stat and table numbers before and after, per dataset; card tests unchanged | decision (a) (the default unblocks it) |
+| **2. Sparklines** | `series` on the request and value, the engine's per-day series, validation, `render.ts`, the SVG in `MetricItem`, the editor enabling it; `CONFIG_VERSION` bump (no data migration) | Engine series equals the date chart's per-day counts on one `node:sqlite` fixture; a ratio series is rejected; go-live gaps; editor and render tests flipped | none |
+| **3. Readings log preset** | Readings scope source, `reading.count.*` and campaign spend/freshness/threshold scope paths, card notices, preset `ads-readings-log`, `ads-readings` widgets render it; retire `AdsReadingsWidgetCard`; `CONFIG_VERSION` bump | Parity: every number and label the old body shows, from one readings fixture, through the card; `campaignIds` narrowing; refresh reloads readings | 1 |
+| **4. Rate tile to card** | The rate-tile-to-card mapping, the per-chart filter button kept for mapped tiles, the editor no longer offering "Rate", retire the inline rate markup; `CONFIG_VERSION` bump; under the page-rule choice, the outcome `pair` ratios | Parity per `POPUP_RATE_SPECS` key (all 22): n/d, percent and too-few state, old tile versus card; d = 0 and d = 1-4; a range longer than `MAX_RANGE_DAYS`; a bare-date range and `since === until`; a browser string `safeUA` rewrites; the install-gap note and the eligibility caveat; a stored filter override; differences listed | **decision (b)** |
+| **5. Shared stat and bar components** | `StatTile`, `BarTable`, used by `ChartCard` and by the card's tile frame and bars layout; retire the inline markup | Render tests pin the stat and table numbers before and after, per dataset, plus the empty-rows and "Tracking not yet active" states; card tests unchanged | decision (a) (the default unblocks it) |
 
 Slice 1 is first because it is small, self-contained, approved, and the readings log needs it.
 Slices 2, 4 and 5 are independent of each other and of slice 3, apart from the shared `.stat`
@@ -288,3 +338,6 @@ styles noted above.
 - `AdsReadingsWidgetCard.vue` and the inline rate markup are deleted.
 - Layouts are not rewritten on load, so an older build still renders every widget that was not
   re-saved through the card editor; see "Saved layouts and rollback" for the ones that were.
+- `CONFIG_VERSION` rises once per slice 2, 3 and 4 with no data migration, so a tab left open
+  across one of those deploys is told to reload instead of overwriting the new layout, and an
+  older build cannot save over it after a rollback.
