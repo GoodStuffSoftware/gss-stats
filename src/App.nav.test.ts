@@ -6,6 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import App from './App.vue'
+import { stubAppFetch } from './testing/appFetch'
 import Dashboard from './components/Dashboard.vue'
 import { saveConfig, loadConfig } from './api'
 import { VIEWER_PREFS_KEY } from './lib/viewerPrefs'
@@ -32,6 +33,12 @@ vi.mock('./session', async (importOriginal) => {
   return { ...actual, loadIdentity: vi.fn(async () => {}), checkSessionExpired: vi.fn(async () => {}) }
 })
 
+// No real network from a mounted App: every endpoint it can reach answers from the stub (src/testing/appFetch.ts).
+beforeEach(() => {
+  stubAppFetch()
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+})
+
 function storedV13(): DashboardConfig {
   const c = normalizeConfig({ ...JSON.parse(JSON.stringify(PROD_V9)), version: 11 })
   const launch = c.pages.find((p) => p.id === 'bsk-launch')!
@@ -43,6 +50,9 @@ const mounted: VueWrapper[] = []
 afterEach(() => {
   // unmount even when a test failed half-way, so its teleported menus don't leak into the next
   while (mounted.length) mounted.pop()!.unmount()
+  vi.useRealTimers()
+  // also drops the confirm stubs; the fetch stub is installed afresh by every test's beforeEach
+  vi.unstubAllGlobals()
 })
 async function mountApp(active?: string): Promise<VueWrapper> {
   if (active) localStorage.setItem(VIEWER_PREFS_KEY, JSON.stringify({ active }))
@@ -147,7 +157,7 @@ describe('App — breadcrumb (Group / Page / Drill)', () => {
     await segs(w)[1].trigger('click')
     rows('crumb-pages').at(-1)!.click()
     await flushPromises()
-    await new Promise((r) => setTimeout(r, 800))
+    await vi.advanceTimersByTimeAsync(800)
     const saved = vi.mocked(saveConfig).mock.calls.at(-1)![0]
     const added = saved.pages.at(-1)!
     expect(added).toMatchObject({ name: 'Copy of mobile', group: 'Best Sudoku' })
@@ -225,7 +235,7 @@ describe('App — page drawer, page menu, icon picker', () => {
   const menuItem = (label: string) =>
     Array.from(document.querySelectorAll<HTMLElement>('#page-menu [role="menuitem"], #page-menu [role="menuitemradio"]')).find((b) => (b.querySelector('.nm') ?? b).textContent!.trim() === label)
   const lastSave = async () => {
-    await new Promise((r) => setTimeout(r, 800))
+    await vi.advanceTimersByTimeAsync(800)
     await flushPromises()
     return vi.mocked(saveConfig).mock.calls.at(-1)?.[0]
   }
@@ -355,7 +365,6 @@ describe('App — page drawer, page menu, icon picker', () => {
     await openRowMenu('Traffic')
     menuItem('Delete (+3 drill pages)')!.click()
     await flushPromises()
-    vi.unstubAllGlobals()
     expect(confirm).toHaveBeenCalledTimes(1)
     expect(confirm.mock.calls[0]).toEqual(['Delete "Traffic" and its 3 drill pages? This can\'t be undone.'])
     const saved = (await lastSave())!
@@ -374,7 +383,6 @@ describe('App — page drawer, page menu, icon picker', () => {
     vi.stubGlobal('confirm', vi.fn(() => true))
     drawerRow('reddit.com').parentElement!.querySelector<HTMLElement>('.dr-x')!.click()
     await flushPromises()
-    vi.unstubAllGlobals()
     const saved = (await lastSave())!
     expect(saved.pages.filter((p) => p.parentId === 'bsk-launch').map((p) => p.id)).toEqual(['d-mobile', 'd-mobile-ca'])
     expect(saved.pages.some((p) => p.id === 'bsk-launch')).toBe(true)
