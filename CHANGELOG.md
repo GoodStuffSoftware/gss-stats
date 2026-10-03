@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.16.1] — 2026-10-03
+
 ### Fixed
 - **An overwritten layout can now be restored.** Before a save changes the stored layout, the
   server keeps a copy of the previous one plus a daily copy for 30 days, and refuses the save if
