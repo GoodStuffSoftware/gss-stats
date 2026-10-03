@@ -79,7 +79,7 @@ function recordingD1() {
   return { d1: d1 as any, calls }
 }
 
-async function call(handler: (ctx: any) => Promise<Response>, body: Record<string, unknown>) {
+async function call(handler: (ctx: any) => Response | Promise<Response>, body: Record<string, unknown>) {
   const { d1, calls } = recordingD1()
   const keys: string[] = []
   const cache = { match: async (r: Request) => (keys.push(r.url), undefined), put: async () => {} }
