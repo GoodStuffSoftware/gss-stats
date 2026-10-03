@@ -6,6 +6,15 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **The metric-card editor handles its edge cases.** A row stored as a sparkline can be switched
+  back to after trying another display; percent decimals offer 0 to 4, matching what is accepted;
+  turning off the day count on a date range removes the setting; a campaigns repeat has an
+  "organic" row control and says when it clashes with "Flighting today only"; a repeat kind
+  remembered by the editor no longer brings back an "empty" message you switched off elsewhere;
+  badge colours flag a duplicate or empty text instead of silently merging it; and "Use a preset
+  instead" asks before throwing away your edits.
+
 ## [0.13.1] — 2026-10-03
 
 ### Fixed
@@ -197,13 +206,6 @@ All notable changes to **gss-stats** are documented here. The format follows
   tile now loads as an invalid card.
 
 ### Fixed
-- **The metric-card editor handles its edge cases.** A row stored as a sparkline can be switched
-  back to after trying another display; percent decimals offer 0 to 4, matching what is accepted;
-  turning off the day count on a date range removes the setting; a campaigns repeat has an
-  "organic" row control and says when it clashes with "Flighting today only"; a repeat kind
-  remembered by the editor no longer brings back an "empty" message you switched off elsewhere;
-  badge colours flag a duplicate or empty text instead of silently merging it; and "Use a preset
-  instead" asks before throwing away your edits.
 - **The metric-card editor no longer loses a template's settings.** Re-picking a row's current
   metric or note, switching the badge, a title or a repeat off and back on, or changing a repeat
   and back now leaves a customized card exactly as the preset had it; picking a different metric

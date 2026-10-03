@@ -305,6 +305,35 @@ describe('badge colour rows flag a duplicate or empty text instead of dropping o
     expect(problems(w)).toEqual([])
     expect(lastSpec(w).badge!.display.tones).toStrictEqual({ 'flighting today': 'live' })
   })
+
+  it('Reset to preset drops a flagged row: the row shows the preset text, no alert', async () => {
+    const w = await scorecard()
+    await textInputs(w)[0].setValue('')
+    await textInputs(w)[0].trigger('change')
+    await flushPromises()
+    expect(problems(w)).toEqual(['Badge text cannot be empty.'])
+    await w.findAll('button').find((b) => b.text() === 'Reset to preset')!.trigger('click')
+    await flushPromises()
+    expect(problems(w)).toEqual([])
+    expect(textInputs(w)).toHaveLength(1)
+    expect((textInputs(w)[0].element as HTMLInputElement).value).toBe('flighting today')
+    expect(textInputs(w)[0].attributes('aria-invalid')).toBe('false')
+  })
+
+  it('switching the badge off and on drops a flagged row\'s draft', async () => {
+    const w = await scorecard()
+    await textInputs(w)[1].setValue('')
+    await textInputs(w)[1].trigger('change')
+    await flushPromises()
+    expect(problems(w)).toHaveLength(1)
+    const badge = () => controls(w).findAll('label').find((l) => l.text() === 'Badge')!.find('input')
+    await badge().setValue(false)
+    await flushPromises()
+    await badge().setValue(true)
+    await flushPromises()
+    expect(problems(w)).toEqual([])
+    expect((textInputs(w)[1].element as HTMLInputElement).value).toBe('new value')
+  })
 })
 
 describe('"Use a preset instead" asks before discarding edits', () => {

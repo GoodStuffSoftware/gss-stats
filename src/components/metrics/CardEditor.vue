@@ -109,6 +109,7 @@ function resetSpecTo(next: CardSpec) {
   Object.assign(spec, next)
   lastBadge = null
   lastTitle = undefined
+  toneDrafts.value = {}
   specKey.value += 1
 }
 
@@ -230,6 +231,7 @@ const repeatModel = computed({
 const hasBadge = computed(() => !!spec.badge)
 function toggleBadge(on: boolean) {
   if (on === hasBadge.value) return
+  toneDrafts.value = {}
   if (on) spec.badge = lastBadge ?? { data: { field: 'campaign.statusToday' }, display: { as: 'badge' } }
   else {
     lastBadge = JSON.parse(JSON.stringify(spec.badge)) as NonNullable<CardSpec['badge']>
