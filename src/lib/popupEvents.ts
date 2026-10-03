@@ -78,6 +78,12 @@ export const POPUP_EVENT_PREFIXES = [
   // '/game/first-move' and '/game/abandon' are exact-or-subpath anchors like every entry
   // above, so '/game' itself stays a page view.
   '/tour',
+  // v1.97.0 (live 2026-10-03T17:03:40Z, see TOUR_TRACKING_LIVE_AT below): the tutorial win's
+  // completion beacon, split by run kind: `/game/tutorial-complete/first-run` and
+  // `/game/tutorial-complete/replay`. NOT a real game completion (never a `/game/complete/`
+  // row, never a funnel "completed" step) and never a screen view. `/tour/exit-at/<preamble|
+  // hub|section>` rides the existing '/tour' prefix above. Counts only.
+  '/game/tutorial-complete',
   '/game/first-move',
   '/game/abandon',
   '/welcome-signed-in',
@@ -151,6 +157,7 @@ const PATH_FAMILY_LABELS: Record<(typeof POPUP_EVENT_PREFIXES)[number], string> 
   '/auth/error': 'auth-error',
   '/auth/redirect': 'auth-redirect',
   '/tour': 'tour',
+  '/game/tutorial-complete': 'tutorial-complete',
   '/game/first-move': 'game-first-move',
   '/game/abandon': 'game-abandon',
   '/welcome-signed-in': 'welcome-signed-in',
@@ -197,6 +204,7 @@ export const PATH_FAMILY_OPTIONS: { value: string; label: string }[] = [
   { value: 'auth-error', label: 'Sign-in failure' },
   { value: 'auth-redirect', label: 'Sign-in redirect fallback' },
   { value: 'tour', label: 'Tutorial tour' },
+  { value: 'tutorial-complete', label: 'Tutorial completed' },
   { value: 'game-first-move', label: 'First move' },
   { value: 'game-abandon', label: 'Game abandoned' },
   { value: 'welcome-signed-in', label: 'Signed-in welcome card' },
@@ -651,6 +659,31 @@ export const RAW_INSTALL_DEDUPE_NOTE =
 // A whole ET date, like TRACKING_ACTIVATION_DATE_ET — best-sudoku's changelog dates the release
 // by day, not by a deploy-log instant the way GAME_COMPLETE_LIVE_AT is known to the second.
 export const AUTH_ERROR_REDIRECT_LIVE_AT_ET: string | null = '2026-09-22'
+
+// ── v1.97.0 go-live (2026-10-03T17:03:40Z, 13:03:40 ET) ─────────────────────────────────────
+// Source: the Best Sudoku release owner's 2026-10-03 message: last 1.96.1 seen 17:03:37Z, first
+// 1.97.0 seen 17:03:40Z, prod live check passed (a hosting-only local deploy, no backend change
+// since 1.96.1). Two beacon families ship with it: the tutorial completion split
+// (`/game/tutorial-complete/first-run|replay`) and the tour exit step
+// (`/tour/exit-at/<preamble|hub|section>`). The same release makes the first-run tutorial win
+// offer "Play a real game", which starts a counted Easy game, so first-run game completions may
+// rise from this instant. Counts only: rows are never tied to a device, time or place.
+export const TOUR_TRACKING_LIVE_AT = Date.parse('2026-10-03T17:03:40Z')
+/** The ET calendar day TOUR_TRACKING_LIVE_AT falls on, a plain literal kept in sync with it. */
+export const TOUR_TRACKING_LIVE_AT_ET = '2026-10-03'
+export const TOUR_TRACKING_MARKER_LABEL = 'tutorial + tour exit beacons live'
+export const TOUR_TRACKING_NOTE = 'Tutorial completions (first run vs replay) and tour exits by step went live; the first-run win now offers a counted real game.'
+
+export const TOUR_EXIT_STEPS = ['preamble', 'hub', 'section'] as const
+export type TourExitStep = (typeof TOUR_EXIT_STEPS)[number]
+/** A `/game/tutorial-complete/<first-run|replay>` row. */
+export function isTutorialCompletePath(path: string, kind: 'first-run' | 'replay'): boolean {
+  return path === `/game/tutorial-complete/${kind}`
+}
+/** A `/tour/exit-at/<step>` row, for one step. */
+export function isTourExitPath(path: string, step: TourExitStep): boolean {
+  return path === `/tour/exit-at/${step}`
+}
 
 /** A `/auth/error/<slug>` row (any slug). */
 export function isAuthErrorPath(path: string): boolean {
