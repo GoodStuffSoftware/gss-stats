@@ -3,7 +3,9 @@
 // deltas are finite or absent.
 import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it } from 'vitest'
-import { buildFact, deriveBatch, factCuts, newSideMemo, planBatch, type FactResult } from './engine'
+import { buildFact, deriveBatch, factCuts, newSideMemo, planBatch, releaseWindowsFor, type FactResult } from './engine'
+import { releaseSubjectOn } from '../releases'
+import { etMidnightMs } from './instrumentation'
 import { FACTS, releaseSidesMs, type FactId } from './facts'
 import { METRIC_DEFS, metricWindows } from './metrics'
 import { RATIO_DEFS, ratioParamsOf, ratioWindowsOf } from './ratios'
@@ -164,5 +166,23 @@ describe('deltas are finite or absent (JSON has no Infinity/NaN; both would arri
     // A NaN count parses as 0 (lib/metrics/facts.ts), so the comparison is against zero.
     expect(nan.deltas.yesterday).toEqual({ delta: 4 })
     expect(JSON.stringify(inf) + JSON.stringify(nan)).not.toMatch(/null/)
+  })
+})
+
+describe('releaseWindowsFor', () => {
+  const FIRST_HIT = Date.parse('2026-07-13T12:00:00Z')
+  const addDaysEt = (d: string, n: number) => new Date(Date.parse(`${d}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10)
+  it('on a release day compares the older release; its after window starts the ET midnight after its date', () => {
+    const w = releaseWindowsFor(FIRST_HIT, Date.parse('2026-10-03T16:00:00Z'))
+    expect(w).not.toBeNull()
+    expect(w!.dateEt).toBe(releaseSubjectOn('2026-10-03')!.dateEt)
+    expect(w!.dateEt < '2026-10-02').toBe(true)
+    expect(w!.after[0]).toBe(etMidnightMs(addDaysEt(w!.dateEt, 1)))
+    expect(w!.before[1]).toBe(etMidnightMs(w!.dateEt))
+  })
+  it('a release dated 10-02 is the subject on 10-04 with an after window starting 10-03', () => {
+    const w = releaseWindowsFor(FIRST_HIT, Date.parse('2026-10-04T16:00:00Z'))
+    expect(w).toMatchObject({ dateEt: '2026-10-02', days: 1 })
+    expect(w!.after[0]).toBe(etMidnightMs('2026-10-03'))
   })
 })

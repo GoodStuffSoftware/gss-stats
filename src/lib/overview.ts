@@ -3,7 +3,7 @@
 // lib/popupEvents.ts, which this module builds on rather than duplicates.
 
 import { classifyPopupPath, etDateFromMs, excludeInstallGapUnmeasured, isPopupEventPath, POPUPS } from './popupEvents'
-import { etMidnightUtcMs, applyExclusions, parseReturnPath } from './campaigns'
+import { etMidnightUtcMs, applyExclusions, ORGANIC_ARM_ID, parseReturnPath } from './campaigns'
 
 // ── Row classifiers for the metrics registry (lib/metrics/) ─────────────────────────────
 // Moved here from functions/api/overview.ts (ADR 0003 slice 2) so the registry reuses them
@@ -15,10 +15,11 @@ import { etMidnightUtcMs, applyExclusions, parseReturnPath } from './campaigns'
 export function isEventPath(path: string): boolean {
   return classifyPopupPath(path) !== null || path.startsWith('/return/') || isPopupEventPath(path)
 }
-/** A `/return/<uc>/<bucket>` row for any bucket after d0. */
+/** A `/return/<uc>/<bucket>` row for any bucket after d0, from a tagged campaign link: the
+ * organic baseline's untagged rows (ORGANIC_ARM_ID) are not campaign returns. */
 export function isReturnD1Plus(path: string): boolean {
   const ev = parseReturnPath(path)
-  return !!ev && ev.bucket !== 'd0'
+  return !!ev && ev.bucket !== 'd0' && ev.uc !== ORGANIC_ARM_ID
 }
 /** A "shown" row of any registered pop-up (lib/popupEvents.ts POPUPS). */
 export function isPopupShown(path: string): boolean {
@@ -132,7 +133,7 @@ export function computeDelta(today: number, compare: number): Delta {
 // history actually exists on either side ────────────────────────────────────────────────
 /** Both windows are [start, end) ms ranges of equal length — `days` capped to whatever's
  * actually available before the release (so an early release doesn't request a "before"
- * window reaching past the start of history) and after it (so a very recent release
+ * window reaching past the start of history) and after its release day (so a very recent release
  * doesn't request an "after" window reaching into the future). `nowMs`/`firstHitMs` bound
  * the after/before windows respectively. */
 export function releaseComparisonWindows(
@@ -140,15 +141,18 @@ export function releaseComparisonWindows(
   firstHitEtDate: string,
   nowMs: number,
 ): { before: [number, number]; after: [number, number]; days: number } | null {
-  const releaseMs = etMidnightUtcMs(releaseDateEt)
-  const firstHitMs = etMidnightUtcMs(firstHitEtDate)
-  const daysAvailableBefore = Math.max(0, Math.floor((releaseMs - firstHitMs) / 86_400_000))
-  const daysAvailableAfter = Math.max(0, Math.floor((nowMs - releaseMs) / 86_400_000))
+  // The release's own ET day is excluded from "after": a late-day release (v1.96.0 went live at
+  // 22:21 ET) would otherwise fill the after side with pre-release traffic. Whole ET days, so a
+  // DST day (23 or 25 hours) counts as one. The same sides the SQL reads (facts.ts releaseSidesMs).
+  const afterStartEt = addEtDays(releaseDateEt, 1)
+  const etDiff = (a: string, b: string) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000)
+  const daysAvailableBefore = Math.max(0, etDiff(firstHitEtDate, releaseDateEt))
+  const daysAvailableAfter = Math.max(0, etDiff(afterStartEt, etDateFromMs(nowMs)))
   const days = Math.min(daysAvailableBefore, daysAvailableAfter)
   if (days <= 0) return null
   return {
-    before: [releaseMs - days * 86_400_000, releaseMs],
-    after: [releaseMs, releaseMs + days * 86_400_000],
+    before: [etMidnightUtcMs(addEtDays(releaseDateEt, -days)), etMidnightUtcMs(releaseDateEt)],
+    after: [etMidnightUtcMs(afterStartEt), etMidnightUtcMs(addEtDays(afterStartEt, days))],
     days,
   }
 }

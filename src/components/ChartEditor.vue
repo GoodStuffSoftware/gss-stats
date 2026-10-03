@@ -20,6 +20,7 @@ import {
 import { ringDims, RING_SOFT_CAP, isDateDim } from '../lib/rings'
 import { BEST_SUDOKU_SITES, syncCardWithView } from '../lib/defaults'
 import { noteOptions, defaultNoteIdsForScope, type NoteScope } from '../lib/notes'
+import { canFit, setFit } from '../lib/fit'
 import CardEditor from './metrics/CardEditor.vue'
 import { metricsContextFor } from '../lib/metrics/pageContext'
 import { presetById } from '../lib/metrics/presets'
@@ -44,7 +45,12 @@ const copyWidget = (w: Widget): Widget => ({
 const draft = reactive<Widget>(copyWidget(props.widget))
 watch(
   () => props.widget,
-  (w) => Object.assign(draft, copyWidget(w)),
+  (w) => {
+    // Replace, not merge: a key the new widget lacks (a cleared `fit`) must not survive in the draft.
+    const next = copyWidget(w)
+    for (const k of Object.keys(draft)) if (!(k in next)) delete (draft as unknown as Record<string, unknown>)[k]
+    Object.assign(draft, next)
+  },
 )
 
 // Belt and suspenders for "the sheet must scroll to the top when it opens" (review fix,
@@ -388,6 +394,15 @@ const siteValue = computed({
   },
 })
 
+// Fit-to-content height (lib/fit.ts): offered for any widget that does not hold a canvas (a chart
+// or the map). The checkbox sets `fit: 'content'` or removes the key; a widget switched to a
+// canvas type has it cleared on save.
+const fitAvailable = computed(() => canFit(draft))
+const fitValue = computed<boolean>({
+  get: () => draft.fit === 'content',
+  set: (on) => setFit(draft, on),
+})
+
 function save() {
   if (cardSaveDisabled.value) return // belt and suspenders: the Save button is disabled for this too
   // Freeze whatever the "Captions" checkboxes currently show (scope defaults, or the
@@ -402,6 +417,7 @@ function save() {
   if (!popupNeedsPopup.value) draft.popup = undefined
   if (!popupNeedsKind.value) draft.popupKind = undefined
   if (draft.type !== 'breakdownBar') draft.barMode = undefined
+  setFit(draft, draft.fit === 'content') // clears it for a widget that cannot fit (a canvas)
   // Overlays need a date axis; series need a beacon date axis. A series with no label gets one.
   if (!isDateLine.value) {
     draft.markers = undefined
@@ -525,6 +541,14 @@ function save() {
             {{ o.label }}
           </label>
         </div>
+      </div>
+
+      <!-- Height: fixed by the dashboard layout (resize from the corner), or fit to the content. -->
+      <div class="field check" v-if="fitAvailable">
+        <label>
+          <input type="checkbox" v-model="fitValue" />
+          Fit height to content <span class="hint">— the panel grows or shrinks with what it shows; the resize corner is hidden</span>
+        </label>
       </div>
 
       <template v-if="!isCardWidget">

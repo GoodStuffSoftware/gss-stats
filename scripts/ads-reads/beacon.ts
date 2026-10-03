@@ -5,7 +5,7 @@
 // charts cannot disagree about which rows count. Aggregate GROUP BY queries only: no row is ever fetched on its own, and
 // nothing is joined across rows.
 
-import { applyExclusions, campaignAttributionClause, type CampaignFlight } from '../../src/lib/campaigns'
+import { applyExclusions, campaignAttributionClause, campaignAttributionStartMs, type CampaignFlight } from '../../src/lib/campaigns'
 import { excludeInstallGapUnmeasured, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, popupIncludeClause, type HourPathCount } from '../../src/lib/popupEvents'
 import { ASK_PATHS, UPSELL_SIGNEDOUT_FIX_AT, type FirstSessionRowSite, type ReturnRow, type ReturnSiteStat, type TaggedRow } from '../../src/lib/adsRules'
 import type { D1Select } from './d1'
@@ -86,11 +86,19 @@ export function returnArrivalsQuery(campaign: CampaignFlight, sinceMs: number, u
 }
 
 /** /return/<uc>/<bucket> rows for this campaign's tags on web and app — attributed by the
- * path's own uc (lib/campaigns.ts parseReturnPath re-checks it exactly). Not date-windowed:
- * a d31-60 return fires long after the flight. */
+ * path's own uc (lib/campaigns.ts parseReturnPath re-checks it exactly). Lower-bounded by the
+ * campaign's attribution start (the same bound as the dashboard's campaignReturns fact, so the
+ * routine and the page count the same rows); no upper bound: a d31-60 return fires long after
+ * the flight. An unconfirmed flightStart attributes nothing. */
 export function returnRowsQuery(campaign: CampaignFlight): Query {
   const w = ['site IN (?, ?)', `(${campaign.ucValues.map(() => 'path LIKE ?').join(' OR ')})`]
   const b: unknown[] = [WEB_SITE, APP_SITE, ...campaign.ucValues.map((u) => `/return/${u}/%`)]
+  const startMs = campaignAttributionStartMs(campaign)
+  if (startMs === null) w.push('1 = 0')
+  else {
+    w.push('ts >= ?')
+    b.push(startMs)
+  }
   applyExclusions(w, b)
   return { sql: `SELECT site, path, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY site, path`, binds: b }
 }
