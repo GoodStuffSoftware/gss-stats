@@ -339,9 +339,10 @@ chart that maps rows (the map/globe), groups by an hour, place or device dimensi
 `country`, `region`, `city`, `postal`, `continent`, `timezone`, `colo`, `org`; `device`,
 `browser`, `os`, `lang`, `screenw`, `screenwBucket`, `visitor`), or is drilled into one of them
 leaves `/return/…`, `/game/complete/…`, `/game/complete-deferred/…` and
-`/game/tutorial-complete/…` rows out entirely, whatever "Include event beacons" says. The rows
-still count everywhere else: by path, by ET day or flight day, by campaign, and in the metric
-cards. One visible effect: the **Arrivals by ET hour of day** chart no longer counts an arrival
+`/game/tutorial-complete/…` rows out entirely, whatever "Include event beacons" says, and marks
+the response `meta.splitGuard: true`. The rows still count everywhere else: by path, by ET day
+or flight day, by campaign, and in the metric cards. The guard keys on dimensions and drills
+only; the chart's own date range is not yet clamped to whole days. One visible effect: the **Arrivals by ET hour of day** chart no longer counts an arrival
 whose first beacon was a return or completion row, so its total can sit slightly below the
 flight-day chart's. The "hide known test and household traffic" filter is unchanged. See
 [`src/lib/splitGuard.ts`](src/lib/splitGuard.ts).

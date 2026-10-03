@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import { onRequestPost, GEO_DIMS } from './geo'
 import type { CacheLike } from '../_lib/edgeCache'
-import { SPLIT_REFUSED_DIMS, SPLIT_REFUSED_PATH_PATTERNS, refusedPathExcludeClause, splitRefused } from '../../src/lib/splitGuard'
+import { SPLIT_REFUSED_DIMS, SPLIT_REFUSED_PATH_PATTERNS, refusedPathExcludeClause, splitRefused, isSplitRefusedPath } from '../../src/lib/splitGuard'
 
 const noopCache: CacheLike = { match: async () => undefined, put: async () => {} }
 
@@ -124,6 +124,17 @@ describe('splitGuard module', () => {
     const kept = (db.prepare(`SELECT DISTINCT path FROM hits WHERE ${w[0]} ORDER BY path`).all(...(b as any[])) as any[]).map((r) => r.path)
     expect(kept).toEqual([...ORDINARY].sort())
   })
+
+  it('isSplitRefusedPath agrees with the SQL LIKE row for row, case folding included', () => {
+    const paths = [...REFUSED, ...ORDINARY, '/RETURN/x/d0', '/Game/Complete/normal/easy', '/game/tutorial-complete/', '/game/tutorial-completex']
+    const ins = db.prepare('INSERT INTO hits (ts, path) VALUES (?, ?)')
+    paths.forEach((p, i) => ins.run(i, p))
+    const w: string[] = []
+    const b: unknown[] = []
+    refusedPathExcludeClause(w, b)
+    const sqlRefused = (db.prepare(`SELECT path, NOT ${w[0].slice(4)} AS kept FROM hits ORDER BY ts`).all(...(b as any[])) as any[]).map((r) => r.kept === 0)
+    expect(paths.map(isSplitRefusedPath)).toEqual(sqlRefused)
+  })
 })
 
 describe('onRequestPost applies the guard on every trigger, in every branch', () => {
@@ -200,8 +211,12 @@ describe('onRequestPost applies the guard on every trigger, in every branch', ()
   })
 
   it('a guarded query gets its own cache key; patterns travel as binds', async () => {
-    const { calls, cacheKey } = await post({ dimension: 'hourEt', includeEventBeacons: true, limit: 100, ...range })
+    const { body, calls, cacheKey } = await post({ dimension: 'hourEt', includeEventBeacons: true, limit: 100, ...range })
     expect(cacheKey).toContain('splitGuard')
+    expect(decodeURIComponent(cacheKey)).toContain('/game/tutorial-complete/%') // keyed on the list itself
+    expect(body.meta.splitGuard).toBe(true)
+    const plain = await post({ dimension: 'path', limit: 100, ...range })
+    expect(plain.body.meta.splitGuard).toBeUndefined()
     for (const p of SPLIT_REFUSED_PATH_PATTERNS) {
       expect(calls[0].binds).toContain(p)
       expect(calls[0].sql).not.toContain(p)

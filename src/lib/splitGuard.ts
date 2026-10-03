@@ -36,6 +36,17 @@ export const SPLIT_REFUSED_PATH_PATTERNS: readonly string[] = [
   '/game/tutorial-complete/%',
 ]
 
+/** The JS reading of SPLIT_REFUSED_PATH_PATTERNS, matching SQLite LIKE exactly (ASCII case
+ * folded, prefix match), so a JS-side classifier can never disagree with the SQL guard. */
+export function isSplitRefusedPath(path: string): boolean {
+  const p = path.replace(/[A-Z]/g, (c) => c.toLowerCase())
+  return SPLIT_REFUSED_PATH_PATTERNS.some((pat) => p.startsWith(pat.slice(0, -1)))
+}
+
+/** Changes whenever the pattern list does — part of a guarded query's cache key, so a cached
+ * answer is never served under a different list. */
+export const SPLIT_GUARD_KEY = SPLIT_REFUSED_PATH_PATTERNS.join('|')
+
 /** True when grouping, mapping or drilling by any of `fields` would split refused rows. */
 export function splitRefused(opts: { points: boolean; fields: readonly string[] }): boolean {
   return opts.points || opts.fields.some((f) => SPLIT_REFUSED_DIMS.has(f))

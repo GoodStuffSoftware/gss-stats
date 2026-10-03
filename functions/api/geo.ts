@@ -17,7 +17,7 @@ import { gameDimSqlCase, gameDimPrefilter, campaignFlightSqlCase, campaignFlight
 import { excludeOwnClause as sharedExcludeOwnClause, selfReferralClause as sharedSelfReferralClause } from '../../src/lib/ownExclusion'
 import { etDateSql, etHourSql } from '../../src/lib/etTime'
 import { isDateDim } from '../../src/lib/rings'
-import { splitRefused, refusedPathExcludeClause } from '../../src/lib/splitGuard'
+import { splitRefused, refusedPathExcludeClause, SPLIT_GUARD_KEY } from '../../src/lib/splitGuard'
 import { buildCacheKeyUrl, cachedJson, ttlSecondsFor, type CacheLike } from '../_lib/edgeCache'
 import { WHEN_RE, SITE_TAG_RE } from '../../src/lib/range'
 // Request-size guards (MAX_SITES/MAX_CONSTRAINTS/MAX_BOUND_PARAMS/MAX_SQL_BYTES/
@@ -361,7 +361,9 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // Counts-only rule (src/lib/splitGuard.ts): a query that maps rows (points mode), groups them
   // by an hour/place/device dimension, or drills into one leaves return, completion and
   // tutorial-completion rows out entirely. Applied in all three branches below, and independent
-  // of every toggle (event beacons, own visits, known traffic), so no combination splits them.
+  // of every toggle (event beacons, own visits, known traffic). Scope: dimensions and drills
+  // only. The request's own since/until window is not clamped to whole days, so a sub-day
+  // window still counts these rows (the same holds for /api/metrics) — a known follow-up.
   const splitGuardActive = splitRefused({ points: isPoints, fields: [...activeDims, ...constraints.map((c) => c.field)] })
   const splitGuardClause = (w: string[], b: any[]) => {
     if (splitGuardActive) refusedPathExcludeClause(w, b)
@@ -387,9 +389,10 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     excludeSelf,
     includeEventBeacons,
     excludeKnownTraffic,
-    // Only guarded queries get a new key, so an entry cached before the guard existed (closed
-    // ranges are cached long) is never served for them; every other key is unchanged.
-    ...(splitGuardActive ? { splitGuard: 1 } : {}),
+    // Only guarded queries get a new key, keyed on the pattern list itself, so an entry cached
+    // before the guard existed, or under an older list (closed ranges are cached long), is never
+    // served for them; every other key is unchanged.
+    ...(splitGuardActive ? { splitGuard: SPLIT_GUARD_KEY } : {}),
   })
   const ttl = ttlSecondsFor(until, new Date())
   const cache = (caches as unknown as { default: CacheLike }).default
@@ -434,7 +437,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       (a: any, x: any) => ({ pageviews: a.pageviews + x.pageviews, visits: a.visits + x.visits }),
       { pageviews: 0, visits: 0 },
     )
-    return json({ rows, totals, meta: { site: sites.length ? sites.join(',') : 'all', since, until, dimensions: ['points'], metric: 'pageviews', dataset: 'geo' } })
+    return json({ rows, totals, meta: { site: sites.length ? sites.join(',') : 'all', since, until, dimensions: ['points'], metric: 'pageviews', dataset: 'geo', ...(splitGuardActive ? { splitGuard: true } : {}) } })
   }
 
   if (isRing) {
@@ -485,7 +488,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     })
     const total = Number(r.results?.[0]?.total) || 0
     const totals = { pageviews: total, visits: total }
-    return json({ rows, totals, meta: { site: sites.length ? sites.join(',') : 'all', since, until, dimensions: ringDims, metric: 'pageviews', dataset: 'geo' } })
+    return json({ rows, totals, meta: { site: sites.length ? sites.join(',') : 'all', since, until, dimensions: ringDims, metric: 'pageviews', dataset: 'geo', ...(splitGuardActive ? { splitGuard: true } : {}) } })
   }
 
   // Bucket blank values under a label ("(direct)" for referrers, "(none)" otherwise)
@@ -533,7 +536,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const total = Number(res.results?.[0]?.total) || 0
   const totals = { pageviews: total, visits: total }
 
-  return json({ rows, totals, meta: { site: sites.length ? sites.join(',') : 'all', since, until, dimensions: [dim], metric: 'pageviews', dataset: 'geo' } })
+  return json({ rows, totals, meta: { site: sites.length ? sites.join(',') : 'all', since, until, dimensions: [dim], metric: 'pageviews', dataset: 'geo', ...(splitGuardActive ? { splitGuard: true } : {}) } })
   }
 }
 
