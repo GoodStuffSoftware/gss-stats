@@ -66,21 +66,57 @@ onMounted(async () => {
   config.syncRange = norm.syncRange
 
   await nextTick()
+  lastPersisted = JSON.stringify(config)
   loaded.value = true
 })
 
 // ── Persistence (debounced) ───────────────────────────────────────────────────
 let saveTimer: number | undefined
+// The config as last loaded or successfully saved: what the server holds. A save whose final state
+// equals it is skipped, so a fit card that settles back to its stored `h` (it passes through a
+// placeholder height while its data loads) does not write the layout on every page load.
+// One PUT at a time: an edit that lands while a PUT is in flight is flushed when it resolves, and
+// compared against what that PUT actually left on the server (a failed PUT leaves the old state), so
+// A -> B -> back to A with B still in flight cannot be skipped and leave the server on B.
+let lastPersisted = ''
+let putInFlight = false
+let putQueued = false
+// The label to fall back to when a save is skipped (the one showing before the edit).
+let labelBeforeEdit: typeof saveState.value = 'idle'
 function scheduleSave() {
   // Never save while signed out: a config that fell back to defaults because the load
   // was refused must not overwrite the stored one.
   if (!loaded.value || sessionExpired.value) return
-  saveState.value = 'saving'
+  if (saveState.value !== 'saving') labelBeforeEdit = saveState.value
+  // A stale tab stays labelled stale until it reloads; an edit does not clear that.
+  if (saveState.value !== 'stale') saveState.value = 'saving'
   clearTimeout(saveTimer)
-  saveTimer = window.setTimeout(async () => {
-    const ok = await saveConfig(JSON.parse(JSON.stringify(config)) as DashboardConfig)
-    saveState.value = ok === 'stale' ? 'stale' : ok ? 'saved' : 'error'
-  }, 700)
+  saveTimer = window.setTimeout(flushSave, 700)
+}
+async function flushSave() {
+  if (putInFlight) {
+    putQueued = true
+    return
+  }
+  const body = JSON.stringify(config)
+  if (body === lastPersisted) {
+    // Nothing to write; do not turn a standing "stale" or "error" label into a blank one.
+    if (saveState.value === 'saving') saveState.value = labelBeforeEdit
+    return
+  }
+  putInFlight = true
+  let ok: boolean | 'stale'
+  try {
+    ok = await saveConfig(JSON.parse(body) as DashboardConfig)
+  } finally {
+    putInFlight = false
+  }
+  if (ok === true) lastPersisted = body
+  saveState.value = ok === 'stale' ? 'stale' : ok ? 'saved' : 'error'
+  if (putQueued) {
+    putQueued = false
+    if (ok !== 'stale') await flushSave()
+  }
 }
 watch(config, scheduleSave, { deep: true })
 
@@ -207,8 +243,13 @@ function editChart(wgt: Widget) {
 function onEditorSave(wgt: Widget) {
   const list = activePage.value.widgets
   const idx = list.findIndex((x) => x.id === wgt.id)
-  if (idx >= 0) list[idx] = wgt
-  else list.push(wgt)
+  if (idx >= 0) {
+    // The editor works on a snapshot taken when it opened, and has no input for the grid box; the
+    // live entry may have moved or refitted since (a fit card refits as data loads), so keep its.
+    const live = list[idx]
+    Object.assign(wgt, { x: live.x, y: live.y, w: live.w, h: live.h })
+    list[idx] = wgt
+  } else list.push(wgt)
   editing.value = null
 }
 function onEditorRemove() {
