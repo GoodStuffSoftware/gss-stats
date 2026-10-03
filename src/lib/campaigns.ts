@@ -85,6 +85,9 @@ export interface CampaignFlight {
   dailyBudgetUsd?: number
   /** Cumulative-spend hard stop in USD, when the build spec set one. */
   hardCapUsd?: number
+  /** Flight days 1..N (day 1 = flightStart) are "directional" figures, per the brief —
+   * see isDirectionalDay. Omit for a campaign whose whole flight is read as normal. */
+  directionalThroughDay?: number
   notes: string
 }
 
@@ -176,6 +179,7 @@ export const CAMPAIGNS: CampaignFlight[] = [
     dailyBudgetUsd: 13,
     hardCapUsd: 100,
     servingHoursEt: [12, 23],
+    directionalThroughDay: 7, // week 1 is directional, per the brief
     notes:
       'Now serving as of 2026-09-26. Budget: $13/day, $100 hard stop (ads session, 2026-09-26) — see CAMPAIGN_DAILY_SPEND\'s entry for this id, left empty (and CAMPAIGN_SPEND left null) until real daily spend numbers arrive from the Google Ads API; both stay configurable per-day, same as the other two campaigns. The 9 rows tagged sudoku_funnel_retest on 2026-09-23, plus anything tagged before 2026-09-26 12:00 ET, are pre-launch validation/QA, not real traffic — excluded via flightStartTimeEt (the schedule\'s real noon-ET start), not just the calendar date.',
   },
@@ -185,11 +189,13 @@ export function campaignById(id: string): CampaignFlight | undefined {
   return CAMPAIGNS.find((c) => c.id === id)
 }
 
-/** Week 1 of the retest campaign is directional, per the brief. */
+/** A campaign's first `directionalThroughDay` flight days are directional (per the brief).
+ * Never directional when the campaign sets no such window. */
 export function isDirectionalDay(campaign: CampaignFlight, etDate: string): boolean {
-  if (campaign.id !== '24279250691') return false
+  const through = campaign.directionalThroughDay
+  if (through == null) return false
   const day = flightDayIndex(campaign, etDate)
-  return day != null && day >= 1 && day <= 7
+  return day != null && day >= 1 && day <= through
 }
 
 /** 1-based flight day (day 1 = flightStart) for aligning multiple flights on one axis

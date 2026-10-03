@@ -124,6 +124,19 @@ describe('read-page rendering', () => {
     expect(doc.getElementById('kill')!.querySelectorAll('tbody tr').length).toBeGreaterThan(0)
     expect(body).not.toMatch(/could not be read|Could not be shown/)
   })
+  it('renders the first-session funnel with site-wide counts and "not yet tracked" for untracked steps', () => {
+    const { doc } = render(buildReadPage({ template, raw, narrative }))
+    const rows = [...doc.getElementById('first-session')!.querySelectorAll('tbody tr')].map((tr) => [...tr.querySelectorAll('td')].map((td) => td.textContent))
+    expect(rows.find((r) => r[0] === 'Game views')).toEqual(['Game views', '64', '1,900', ''])
+    expect(rows.find((r) => r[0] === 'Game complete')).toEqual(['Game complete', '0', '41', '']) // no ratio against game views (mixed units)
+    expect(rows.find((r) => r[0] === 'First move')).toEqual(['First move', 'not yet tracked', 'no rows yet', ''])
+    expect(rows.find((r) => r[0] === 'Welcome card shown')![1]).toBe('not yet tracked')
+  })
+  it('the first-session panel degrades to a line when it is missing', () => {
+    const { body } = render(buildReadPage({ template, raw: degrade((d) => { d.firstSession = null }), narrative }))
+    expect(body).toContain('Not read on this run: tagged beacon rows unavailable')
+    expect(body).not.toMatch(/Could not be shown/)
+  })
   it('says the audit trail was not written when audit is null', () => {
     const { text } = render(buildReadPage({ template, raw, narrative }))
     expect(text('footer')).toContain('Audit trail: not written on this run')
