@@ -224,7 +224,13 @@ describe('bsk-kpis ≡ the bespoke "Today at a glance" tiles', () => {
     const after = newTiles(await mountNew('bsk-kpis')).filter((t) => !ADDED_AFTER_RETIREMENT.has(t.label))
     expect(after.map((t) => t.label)).toEqual(before.map((t) => t.label))
     expect(after.map((t) => t.value)).toEqual(before.map((t) => t.value))
-    expect(after.map((t) => t.deltas)).toEqual(before.map((t) => t.deltas))
+    // Tiles whose metric can count a refused row get whole-ET-day context instead of same-time
+    // deltas (decision 2026-10-03, "KPI deltas on refused-row tiles: whole-day context"): their old
+    // delta lines are gone by design. Every other tile's delta lines are unchanged. The rendered
+    // whole-day line is part 2's (render.ts); until then such a tile reads no "vs" line.
+    const WHOLE_DAY_CONTEXT = new Set(['Page views'])
+    expect(after.filter((t) => !WHOLE_DAY_CONTEXT.has(t.label)).map((t) => t.deltas)).toEqual(before.filter((t) => !WHOLE_DAY_CONTEXT.has(t.label)).map((t) => t.deltas))
+    for (const t of after.filter((x) => WHOLE_DAY_CONTEXT.has(x.label))) expect(t.deltas.some((d) => d.startsWith('vs ')), t.label).toBe(false)
     // The fixture exercises both delta states and a rate tile.
     expect(before.filter((t) => t.deltas[0] === 'new today').length).toBeGreaterThanOrEqual(5)
     expect(before.filter((t) => t.deltas[0]?.startsWith('vs yesterday')).length).toBeGreaterThanOrEqual(3)
