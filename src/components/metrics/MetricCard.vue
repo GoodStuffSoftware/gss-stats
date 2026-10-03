@@ -20,6 +20,7 @@
 // - its captions (CardSpec.captions): registry notes under the whole card.
 import { computed, effectScope, onBeforeUnmount, onMounted, onScopeDispose, reactive, ref, shallowRef, watch, type EffectScope } from 'vue'
 import { useMetrics, type MetricRequestSpec, type UseMetrics } from '../../composables/useMetrics'
+import { useReturnRefresh } from '../../composables/useReturnRefresh'
 import { noteRawText } from '../../lib/notes'
 import { resolveLabelTokens } from '../../lib/metrics/render'
 import { presetById } from '../../lib/metrics/presets'
@@ -60,6 +61,11 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (ticker) clearInterval(ticker)
 })
+// A tab that slept past midnight ET has not ticked, so on return the clock still says yesterday:
+// the return refetch would re-queue yesterday's entries and the next tick would then re-plan under
+// the new day. Moving the clock here first makes the day watcher re-plan before the queued batch
+// flushes (releasing the old keys drops them from it), so only the new day's POST goes out.
+useReturnRefresh(() => (clock.value = Date.now()))
 const nowMs = computed(() => props.nowMs ?? clock.value)
 const todayEt = computed(() => todayEtFrom(nowMs.value))
 const ctx = computed<RepeatContext>(() => ({ todayEt: todayEt.value, readings: props.readings }))
