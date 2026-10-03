@@ -8,8 +8,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ### Fixed
 - **The default "Pageviews over time" and "Visits over time" charts no longer carry the counts-only
-  caption.** They now count by Eastern-time day, so their totals include every row again; a saved
-  layout moves its untouched copies once, and a chart you changed keeps the day axis you gave it.
+  caption.** They now count by Eastern-time day, so their totals include every row again, and
+  clicking a day still opens a page for that Eastern day; a saved layout moves its untouched copies
+  once, wherever you placed them, and a chart you retitled or changed in any way is left as it is.
 - **Best Sudoku v1.97.0 game starts no longer count as page views, and the first-session funnel
   shows the new first-run counters.** Counted game starts are now an event beacon like the tour
   exit and tutorial completion already are. The morning read and its report page list the tour

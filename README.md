@@ -286,6 +286,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   (`MAX_DRILL_DEPTH`; beyond that a drill attaches to the deepest page allowed). Every load
   repairs the tree: a link to a missing page, to itself or closing a loop is dropped, and a tree
   deeper than 8 is re-attached (`normDrillLinks`).
+  Clicking a day on a trend chart opens that day as an absolute date range: the UTC day for a
+  `date` chart, and for a `dateEt` chart (the default trends) the Eastern day, from ET midnight to
+  the next ET midnight (23 or 25 hours on a daylight-saving change).
 - **Exclusions** (global across pages) — hide self-referrals, hide your own visits by
   browser+OS, and an **"exclude this device"** opt-out that works on every site (see
   [gss-beacon](https://github.com/GoodStuffSoftware/gss-beacon)).
@@ -517,8 +520,9 @@ on the event-beacon list (game starts, until that list names them). The default 
 time** (Beacon page) and **Visits over time** (Best Sudoku · Traffic) trends group by `dateEt`
 since layout version 15, so they count every row and carry no caption: layout version 15 moves a
 stored copy of either from `date` to `dateEt` once, only when it is still exactly the shipped
-default (same dataset, title, type, metric, limit and release markers, any id or position), and a
-chart with any other title or setting keeps its axis. Charts by `dateEt` are unchanged. The "hide known test and household traffic" filter is
+default (same dataset, title, type, metric, limit and release markers, any id or position; the
+match is a frozen copy of what v14 stored, not the current factories), and a chart with any other
+title or setting keeps its axis. Charts by `dateEt` are unchanged. The "hide known test and household traffic" filter is
 unchanged. The guard's path patterns are inlined as SQL literals, so it costs no D1 bound
 parameters; the heaviest in-cap `/api/geo` shapes tested bind at most 97 of D1's 100.
 

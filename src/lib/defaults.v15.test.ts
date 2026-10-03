@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import {
   CONFIG_VERSION,
   LAYOUT_VERSIONS,
+  V14_DATE_TREND_DEFAULTS,
   defaultBeaconWidgets,
   defaultBestSudokuLaunchWidgets,
   defaultConfig,
@@ -22,11 +23,14 @@ import { V15_TREND_KEYS } from './__fixtures__/dateEtTrends'
 
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x))
 
-/** The default trend widget as shipped through v14: the factory widget on the UTC `date` axis. */
-const oldTrend = (id: 'bcn-trend' | 'bsk-trend'): Widget => {
-  const w = [...defaultBeaconWidgets(), ...defaultBestSudokuLaunchWidgets()].find((x) => x.id === id)!
-  return clone({ ...w, dimension: 'date' })
+/** The two default trend widgets exactly as v14 stored them (UTC `date` axis, grid cell x3 y0 w9 h8),
+ * written out as literals and NOT read from the factories: if a factory is edited later, these
+ * stay what a stored v14 layout holds, so the migration tests keep describing real stored data. */
+const V14_TRENDS: Record<'bcn-trend' | 'bsk-trend', Widget> = {
+  'bcn-trend': { id: 'bcn-trend', i: 'bcn-trend', title: 'Pageviews over time', type: 'area', dataset: 'geo', metric: 'pageviews', dimension: 'date', limit: 90, x: 3, y: 0, w: 9, h: 8 },
+  'bsk-trend': { id: 'bsk-trend', i: 'bsk-trend', title: 'Visits over time', type: 'area', dataset: 'geo', metric: 'pageviews', dimension: 'date', limit: 90, markers: 'releases', x: 3, y: 0, w: 9, h: 8 },
 }
+const oldTrend = (id: 'bcn-trend' | 'bsk-trend'): Widget => clone(V14_TRENDS[id])
 /** A stored config at `version`: the default Overview plus a page `beacon` holding `widgets`. */
 const stored = (version: number, widgets: Widget[]): DashboardConfig => {
   const base = clone(defaultConfig())
@@ -57,6 +61,32 @@ describe('v15: the defaults', () => {
     expect(bsk()).toMatchObject({ title: 'Visits over time', dataset: 'geo', dimension: 'dateEt', type: 'area', metric: 'pageviews', limit: 90, markers: 'releases' })
     expect({ ...oldTrend('bcn-trend'), dimension: 'dateEt' }).toEqual(clone(bcn()))
     expect({ ...oldTrend('bsk-trend'), dimension: 'dateEt' }).toEqual(clone(bsk()))
+  })
+
+  it('the migration match shapes are frozen literals, pinned here: editing a factory does not move them', () => {
+    // These are the two shapes a stored v14 layout holds. If this fails, someone changed
+    // V14_DATE_TREND_DEFAULTS: stored v14 charts would stop matching and never move.
+    expect(V14_DATE_TREND_DEFAULTS).toEqual([
+      { title: 'Pageviews over time', type: 'area', dataset: 'geo', metric: 'pageviews', dimension: 'date', limit: 90 },
+      { title: 'Visits over time', type: 'area', dataset: 'geo', metric: 'pageviews', dimension: 'date', limit: 90, markers: 'releases' },
+    ])
+    expect(Object.isFrozen(V14_DATE_TREND_DEFAULTS)).toBe(true)
+  })
+
+  it('FAILS if a factory default is edited: the frozen v14 shape and the factory differ only by dimension', () => {
+    // The v15 migration does NOT follow the factories. If you change a default (title, limit,
+    // markers, a new field) this test fails on purpose: decide consciously whether stored v14
+    // charts should still migrate (they match the frozen literal, not your edit) and whether a
+    // further layout step is needed for charts stored at v15 with the old shape.
+    const content = (w: Widget) => Object.fromEntries(Object.entries(w).filter(([k, v]) => v !== undefined && !['id', 'i', 'x', 'y', 'w', 'h', 'moved'].includes(k)))
+    expect({ ...content(bcn()), dimension: 'date' }).toEqual(V14_DATE_TREND_DEFAULTS[0])
+    expect({ ...content(bsk()), dimension: 'date' }).toEqual(V14_DATE_TREND_DEFAULTS[1])
+  })
+
+  it('a stored v14 chart migrates from the literal shape whatever the factories build today', () => {
+    // Fixture is the literal (V14_TRENDS), not the factory: a changed factory cannot change this.
+    const out = widgetsOf(normalizeConfig(stored(14, [oldTrend('bcn-trend'), oldTrend('bsk-trend')])))
+    expect(out.map((w) => [w.id, w.dimension])).toEqual([['bcn-trend', 'dateEt'], ['bsk-trend', 'dateEt']])
   })
 
   it('their dimension is not one the counts-only guard refuses, so /api/geo sets no splitGuard caption', () => {
