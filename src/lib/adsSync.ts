@@ -30,7 +30,7 @@
 // with nothing due writes nothing at all.
 
 import { CAMPAIGNS, type CampaignFlight } from './campaigns'
-import { microsToDollars, round2, type SpendDay, type StoredSpend } from './adsRules'
+import { channelOf, microsToDollars, round2, type SpendDay, type StoredSpend } from './adsRules'
 import { mergePlacementDayRows, rowsToStoredSpend, type AdsSyncStore, type PlacementDayRow, type StoredDayRow, type SyncRunRecord, type SyncSource, type SyncStatus } from './adsStore'
 import { CLOSED_AFTER_ET, contiguousThrough, etDateRange, isClosedFetch } from './adsFreshness'
 import { addDays, etDateFast, etHourFast, etWallTimeMs } from './etTime'
@@ -396,7 +396,7 @@ export async function planSync(store: AdsSyncStore, opts: SyncOptions): Promise<
     const plan = planCampaignSync(c, snap.rows.get(c.id) ?? [], todayEt, {
       full: opts.full,
       includeToday: opts.includeToday,
-      placements: opts.placements,
+      placements: pullsPlacements(c.id, opts) ? opts.placements : false,
       nowMs: opts.now,
       lastPullAt: snap.lastPulls.get(c.id) ?? null,
       restatementRecheckMs: opts.restatementRecheckMs,
@@ -407,6 +407,10 @@ export async function planSync(store: AdsSyncStore, opts: SyncOptions): Promise<
   }
   return snap
 }
+
+/** Whether a sync pulls a campaign's placements: never for a search campaign (it has none;
+ * lib/adsRules.ts channelOf), and never when the caller turned placements off. */
+const pullsPlacements = (campaignId: string, opts: { placements?: boolean }): boolean => opts.placements !== false && channelOf(campaignId) === 'display'
 
 // ── One campaign ──────────────────────────────────────────────────────────────────────────
 const spanOf = (ranges: readonly SyncRange[]): SyncRange | null =>
@@ -550,7 +554,7 @@ async function syncOne(
     let placementsCovered = false
     let placementWrites: PlacementDayRow[] = []
     let rangePlacements: PlacementDayRow[] = []
-    if (opts.placements !== false) {
+    if (pullsPlacements(c.id, opts)) {
       const pl = await attempt('ads placements', () => ads.placements(c.id, range.since, range.until))
       const old = pl.ok ? await attempt('store read (placements)', () => deps.store.getPlacementRows(c.id, range.since, range.until)) : null
       if (!pl.ok || !old || !old.ok) {
@@ -621,7 +625,7 @@ async function syncOne(
       if (isClosedFetch(day, nowIso)) closedNow.add(day)
     }
     // Only a pull of the WHOLE recent window re-checks the restatement days (review L3).
-    if (plan.recheck && range.since === plan.recheck.since && range.until === plan.recheck.until && (opts.placements === false || placementsCovered)) res.pulled = true
+    if (plan.recheck && range.since === plan.recheck.since && range.until === plan.recheck.until && (!pullsPlacements(c.id, opts) || placementsCovered)) res.pulled = true
   }
 
   res.fetched = spanOf(res.ranges)
@@ -631,7 +635,7 @@ async function syncOne(
     res.spend = rowsToStoredSpend(c.id, [...after.values()])
     res.spendThrough = contiguousThrough(c.flightStart, closedNow, c.flightEnd)
   }
-  if (opts.placements !== false && (placementsPulled || placementsFailed)) res.placementsOk = !placementsFailed
+  if (pullsPlacements(c.id, opts) && (placementsPulled || placementsFailed)) res.placementsOk = !placementsFailed
   res.fetchOk = attempted === 0 || failedRanges < attempted
   res.dailyOk = res.fetchOk && failedRanges === 0 && !writeFailed
   const changed = res.daysChanged > 0 || res.placementRowsChanged > 0
@@ -778,10 +782,17 @@ export function setBuildSha(sha: string | null | undefined): void {
   buildSha = sha && /^[0-9a-f]{7,40}$/.test(sha) ? sha : null
 }
 /** FNV-1a of the campaign definitions the sync uses, over every field it writes to ads_campaigns
- * (review I1): the dashboard compares it with its own and flags a Worker built from other ones. */
+ * (review I1): the dashboard compares it with its own and flags a Worker built from other ones.
+ * A non-display campaign's channel (channelOf) is appended to its tuple, since it decides
+ * whether the sync pulls placements; a display-only config hashes exactly as before. */
 export function campaignsConfigHash(campaigns: readonly CampaignFlight[] = CAMPAIGNS): string {
   const s = JSON.stringify(
-    campaigns.map((c) => [c.id, c.label, c.kind, c.flightStart, c.flightStartTimeEt ?? null, c.flightEnd, c.status, c.ucValues, c.dailyBudgetUsd ?? null, c.hardCapUsd ?? null, c.measurement ?? null]),
+    campaigns.map((c) => {
+      const t: unknown[] = [c.id, c.label, c.kind, c.flightStart, c.flightStartTimeEt ?? null, c.flightEnd, c.status, c.ucValues, c.dailyBudgetUsd ?? null, c.hardCapUsd ?? null, c.measurement ?? null]
+      const channel = channelOf(c.id)
+      if (channel !== 'display') t.push(channel)
+      return t
+    }),
   )
   let h = 0x811c9dc5
   for (let i = 0; i < s.length; i++) {
