@@ -62,7 +62,10 @@ let wrapper: VueWrapper | null = null
  * at the height its (stubbed) content needs. */
 function storedConfig(): DashboardConfig {
   const cfg = normalizeConfig(JSON.parse(JSON.stringify(defaultConfig())))
-  const page = cfg.pages.find((p) => p.id === cfg.activePageId)!
+  // The first page holding a metric card, opened on load (a first-time viewer lands on the
+  // config's activePageId; the viewer's own page memory is cleared before each test).
+  const page = cfg.pages.find((p) => p.widgets.some((w) => w.card))!
+  cfg.activePageId = page.id
   const card = page.widgets.find((w) => w.card)!
   card.fit = 'content'
   card.h = fitRows(300)
@@ -70,6 +73,7 @@ function storedConfig(): DashboardConfig {
 }
 
 beforeEach(() => {
+  localStorage.clear()
   contentBottom = 300
   observers.length = 0
   live.clear()

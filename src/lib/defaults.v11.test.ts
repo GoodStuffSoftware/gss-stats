@@ -116,7 +116,8 @@ describe('v11: the production layout (sanitised)', () => {
   it('v8 → v11 in one load equals v8 → v9 → v11; v11 → v11 is a no-op', () => {
     expect(stable(fromV8)).toEqual(stable(fromV9))
     expect(stable(normalizeConfig(clone(fromV9)))).toEqual(stable(fromV9))
-    expect(fromV9.pages.map((p) => [p.id, p.name])).toEqual((PROD_V9 as any).pages.map((p: any) => [p.id, p.name]))
+    // Every page is kept, in order (its v13 name and group: defaults.v13.test.ts).
+    expect(fromV9.pages.map((p) => p.id)).toEqual((PROD_V9 as any).pages.map((p: any) => p.id))
   })
 })
 
@@ -180,7 +181,7 @@ describe('v11: custom, deleted and renamed variants', () => {
   })
 
   it('idempotent at every level: a swapped chart and a carded panel are left as they are', () => {
-    const p = { id: 'p', name: 'p', isDefault: false, filters: {} as any, widgets: [hourOfDayWidget({ x: 0, y: 0, w: 1, h: 1 }), { ...(panel('r', 'campaigns', 'returns') as Widget), card: { preset: 'campaign-returns' } }] }
+    const p = { id: 'p', name: 'p', isDefault: false, group: 'Mine', filters: {} as any, widgets: [hourOfDayWidget({ x: 0, y: 0, w: 1, h: 1 }), { ...(panel('r', 'campaigns', 'returns') as Widget), card: { preset: 'campaign-returns' } }] }
     expect(migratePanelsV11(p)).toBe(p)
     const once = migratePanelsV11({ ...p, widgets: [panel('x', 'campaigns', 'flightDay') as Widget] })
     expect(migratePanelsV11(once)).toBe(once)
