@@ -291,7 +291,10 @@ describe('the CLI with two arms registered (display + search)', () => {
     const now = Date.parse('2026-10-06T12:05:00Z')
     const names = new RegExp(`pass --campaign <id> \\(registered read plans: ${RETEST} .*${APPS} .*${SEARCH} `)
     expect(() => resolveCampaignId({}, 'morning', now)).toThrow(names)
-    expect(() => resolveCampaignId({}, 'morning', now)).toThrow(/3 campaigns have read plans, so the morning read cannot tell which one is meant/)
+    // The count follows the registry (the real plans plus these two made-up arms), so adding a real arm never breaks this.
+    const registered = Object.keys(ADS_READ_PLANS).length
+    expect(registered).toBeGreaterThanOrEqual(3)
+    expect(() => resolveCampaignId({}, 'morning', now)).toThrow(new RegExp(`${registered} campaigns have read plans, so the morning read cannot tell which one is meant`))
     for (const stage of POSTFLIGHT_STAGES) expect(() => resolveCampaignId({}, 'postflight', now, stage), stage).toThrow(names)
   })
   it('resolves each arm when --campaign names it', () => {

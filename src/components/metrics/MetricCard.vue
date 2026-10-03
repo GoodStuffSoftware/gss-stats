@@ -21,7 +21,7 @@
 import { computed, effectScope, onBeforeUnmount, onMounted, onScopeDispose, reactive, ref, shallowRef, watch, type EffectScope } from 'vue'
 import { useMetrics, type MetricRequestSpec, type UseMetrics } from '../../composables/useMetrics'
 import { useReturnRefresh } from '../../composables/useReturnRefresh'
-import { noteRawText } from '../../lib/notes'
+import { hasNote, noteRawText } from '../../lib/notes'
 import { isNoteIdHideable } from '../../lib/chartNotes'
 import { resolveLabelTokens } from '../../lib/metrics/render'
 import { presetById } from '../../lib/metrics/presets'
@@ -151,8 +151,11 @@ const actionCampaignIds = computed(() => {
 function onAdsRefreshed(r: RefreshResult) {
   if (r.refreshed) reload()
 }
+// Only the ids this build knows: an unknown one (a newer build's) stays stored but shows nothing,
+// so a card whose captions are all unknown gets no empty captions block. A known id the widget
+// hides (its hiddenCaveats, passed as hiddenCaptions) is dropped too, unless it may not be hidden.
 const captionIds = computed(() =>
-  (spec.value?.captions ?? []).filter((id) => !(props.hiddenCaptions?.includes(id) && isNoteIdHideable(id))),
+  (spec.value?.captions ?? []).filter((id) => hasNote(id) && !(props.hiddenCaptions?.includes(id) && isNoteIdHideable(id))),
 )
 
 // Repeated instances with nothing to show (MetricCardInstance's `hidden`), by index; reset when

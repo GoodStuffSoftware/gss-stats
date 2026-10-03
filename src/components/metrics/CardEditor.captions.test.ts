@@ -137,7 +137,8 @@ describe('Show/Hide toggles for the spec captions', () => {
 describe('unknown caption ids (N1)', () => {
   it('lists an unknown id, keeps it unchanged, and Remove drops only that id', async () => {
     const spec = releaseSpec(['gone-note'])
-    expect(validateCard(spec)).not.toEqual([])
+    // Valid as stored (slice 1a keeps a newer build's ids), so it saves unchanged until removed.
+    expect(validateCard(spec)).toEqual([])
     const w = await mountEditor({ spec: plain(spec), from: 'release-before-after' })
     expect(rows(w)).toHaveLength(2)
     expect(rows(w)[1].text()).toContain('Unknown note gone-note')

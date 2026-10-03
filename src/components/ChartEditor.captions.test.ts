@@ -224,7 +224,7 @@ describe('ChartEditor: note widget', () => {
   })
 })
 
-describe('ChartEditor: card spec captions (CardEditor wiring for part B2)', () => {
+describe('ChartEditor: card spec captions (CardEditor wiring, part B2)', () => {
   const card = () => base({ type: 'table', dataset: 'overview', card: { preset: 'release-before-after' }, hiddenCaveats: ['release-before-partial'] } as Partial<Widget>)
 
   it('passes hiddenCaveats to CardEditor and writes its update:hidden-captions back (empty deletes the key)', async () => {
@@ -257,12 +257,14 @@ describe('ChartEditor: card spec captions (CardEditor wiring for part B2)', () =
     vi.unstubAllGlobals()
   })
 
-  it('an unknown spec caption keeps Save disabled until N1 Remove drops it', async () => {
+  it('an unknown spec caption saves unchanged, and N1 Remove drops it', async () => {
     const spec = JSON.parse(JSON.stringify(PRESETS['release-before-after'])) as CardSpec
     spec.captions = [...(spec.captions ?? []), 'no-such-note-b3']
     const w = openReal(base({ type: 'table', dataset: 'overview', card: { spec } } as Partial<Widget>))
     await flushPromises()
-    expect(w.get('button.btn-primary').attributes('disabled')).toBeDefined()
+    // Slice 1a: an id this build doesn't know is valid as stored, so Save stays on.
+    expect(w.get('button.btn-primary').attributes('disabled')).toBeUndefined()
+    expect(((await save(w)).card as { spec: CardSpec }).spec.captions).toEqual(['release-before-partial', 'no-such-note-b3'])
     await w.get('button.ce-caption-remove').trigger('click')
     await flushPromises()
     expect(w.get('button.btn-primary').attributes('disabled')).toBeUndefined()
