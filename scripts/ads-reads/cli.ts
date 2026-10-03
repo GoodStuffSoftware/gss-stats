@@ -54,7 +54,7 @@ export function parseCli<T extends Record<string, { type: 'string' | 'boolean'; 
   } catch (e) {
     // A bare `--campaign` (no value) fails in parseArgs before resolveCampaignId runs: give it the
     // same message as a blank or unknown id, listing the registered ids.
-    if (e instanceof Error && /Option '--campaign\b.*argument missing/.test(e.message)) throw new Error(campaignRefusal(null))
+    if (e instanceof Error && /Option '--campaign\b.*argument (missing|is ambiguous)/.test(e.message)) throw new Error(campaignRefusal(null))
     throw e
   }
 }
