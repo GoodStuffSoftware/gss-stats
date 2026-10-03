@@ -178,6 +178,7 @@ ul .nr{border:0;padding:0}
       <div class="panel"><h3 class="ph">Tagged funnel</h3><div class="table-wrap"><table id="funnel"></table></div></div>
       <div class="panel"><h3 class="ph">Returns by path</h3><div class="table-wrap"><table id="returns"></table></div><p class="caption" id="play-line"></p></div>
     </div>
+    <div class="panel"><h3 class="ph">First-session funnel</h3><p class="caption">Informational only, never a kill rule. Row counts with no visitor join: "vs" is rows over rows, not per-visitor conversion. A beacon family (paths shipped in one app release) with no rows yet, site-wide or tagged, is not yet tracked; once any path in it has a row, a missing sibling is a real 0.</p><div class="table-wrap"><table id="first-session"></table></div></div>
     <div class="panel"><h3 class="ph">Accounts</h3><div class="kv" id="accounts"></div></div>
     <div class="panel"><h3 class="ph">Site-wide, not campaign-attributed</h3><ul class="printed" id="sitewide"></ul></div>
   </section>
@@ -417,7 +418,7 @@ try {
         ["Tagged arrivals (floor)", int(f.arrivals)],
         ["Tagged hits", int(sm.taggedHits)],
         ["Game-screen views", int(f.played)],
-        ["Sign-in asks", `${int(sm.asks.total)} (placement ${ab["/signin-prompt/placement"]}, streak ${ab["/signin-prompt/streak"]}, promo ${ab["/promo-first50/shown"]})`],
+        ["Sign-in asks", `${int(sm.asks.total)} (placement ${ab["/signin-prompt/placement"]}, streak ${ab["/signin-prompt/streak"]}, tutorial ${ab["/signin-prompt/tutorial"] ?? 0}, promo ${ab["/promo-first50/shown"]})`],
         ["Accepts", int(sm.accepts.total)],
         ["Dismisses", `sign-in ${sm.dismisses.signinPrompt}, promo ${sm.dismisses.promoFirst50}`],
         ["Auth redirects", int(sm.authRedirect)],
@@ -430,6 +431,27 @@ try {
     } else {
       notRead("funnel", "tagged beacon counts" + (D.tagged && D.tagged.error ? ` (${D.tagged.error})` : ""));
     }
+  });
+  guard("first-session", () => {
+    const fs = D.firstSession;
+    if (!fs || !fs.funnel) { notRead("first-session", "tagged beacon rows unavailable"); return; }
+    const f = fs.funnel;
+    const LABELS = { arrivals: "Arrivals (d0 devices)", gameView: "Game views", tourStart: "Tour start", tourComplete: "Tour complete", tourSkip: "Tour skip", firstMove: "First move", gameComplete: "Game complete" };
+    const untracked = () => chip("not yet tracked", "neutral");
+    const site = (x) => x.site == null ? "not read" : int(x.site);
+    const vs = (x) => {
+      const g = x.vsParent; if (!g) return "";
+      const counts = `${int(g.numerator)}/${int(g.denominator)}`;
+      const v = g.value == null ? (g.insufficientCohort ? "too few" : "n/a") : (g.value * 100).toFixed(1) + "%";
+      return `${v} of ${LABELS[g.parent].toLowerCase()} (${counts})`;
+    };
+    const row = (label, x, withVs) => x.tracked === false ? [label, untracked(), "no rows yet", ""] : [label, int(x.tagged), site(x), withVs ? vs(x) : ""];
+    const rows = Object.keys(LABELS).map(k => row(LABELS[k], f.steps[k], true));
+    for (const b of ["0", "1-25", "26-50", "51-75", "76-99"]) rows.push(row(`Abandon at ${b}% filled`, f.abandon[b]));
+    rows.push(row("Sign-in asks shown", f.asks), row("  of which tutorial", f.asksTutorial));
+    for (const [e, l] of [["shown", "Welcome card shown"], ["daily", "Welcome card: daily"], ["leaderboard", "Welcome card: leaderboard"], ["dismiss", "Welcome card dismissed"]]) rows.push(row(l, f.welcome[e]));
+    table("first-session", ["Step", "Tagged", "Site-wide", "Tagged vs parent"], rows, [1, 2]);
+    if (fs.siteError) $("first-session").closest(".table-wrap").after(el("p", { class: "nr", text: "Site-wide not read: " + fs.siteError }));
   });
   guard("returns", () => {
     if (!tr) { notRead("returns", "returns are read on threshold reads only"); return; }
