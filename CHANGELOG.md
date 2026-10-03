@@ -6,6 +6,12 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **KPI tiles for counts-only rows show whole days.** A tile that can count return, game-start,
+  completion, tutorial or tour-exit rows (Best Sudoku page views included) now shows yesterday's
+  full-day total and the 7-day daily average instead of a same-time percent change, which could
+  expose an hour-of-day split of those rows. Tiles that never count them keep their arrows.
+
 ## [0.15.1] — 2026-10-03
 
 ### Fixed

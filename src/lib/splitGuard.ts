@@ -66,17 +66,20 @@
 //     campaign. A campaign's /return/<uc>/ and tagged rows cannot predate its own link, so the
 //     cut only drops pre-launch QA rows.
 //   - `pf` (install fix) and `uf` (upsell fix): one fixed instant each, a row-exact before/after.
-//   - `d` KPI windows (today so far, and the same clock time on the 7 earlier days): the bounds
-//     come from the server clock, never the caller. Today so far is the open ET day's running
-//     total, which "ET-day totals are fine" allows, and each comparison window shows only what
-//     that day's own running total showed live at the same clock time. Residual (worth knowing):
-//     polling any running total over a day shows when it grew. Only inward snapping plus holding
-//     the open day's refused totals would close that; Mike chose live data (2026-10-03).
+//   - `d` KPI windows (today so far, and the 7 earlier days): the bounds come from the server
+//     clock, never the caller. The comparison windows now count refused rows over whole ET days:
+//     bskKpiDays' `d` is the ET day index and its `t` same-time flag is always 0 on a refused
+//     row, so the engine reads a refused-row KPI tile as yesterday's full-day total and the 7-day
+//     daily average (MetricValue.wholeDays) and never as a same-time delta. The old same-time
+//     windows gave a closed day's count up to a clock time, readable after the fact at any hour,
+//     which is an hour-of-day split of refused rows. Today so far is the open ET day's running
+//     total, which "ET-day totals are fine" allows. Residual (worth knowing): polling any running
+//     total over a day shows when it grew. Only inward snapping plus holding the open day's
+//     refused totals would close that; Mike chose live data (2026-10-03).
 //   - Flight boundaries (etFlightRangeMs, flightDaySqlCase) are ET days already.
 
 import { addDays, etDateFast, etWallTimeMs } from './etTime'
 import { isPopupEventPath, pathFamilyOf, sqlInt, sqlLit } from './popupEvents'
-import { BEST_SUDOKU_SITES } from './bestSudokuSites'
 
 /** Dimensions that tie a row to an hour, a place or a device. `dateEt` and `flightDay` are ET-day
  * totals and stay allowed; `site` (web vs. app) is a product split, not a device one. */
@@ -186,15 +189,12 @@ const refusedSamplePath = (pattern: string): string => `${pattern.slice(0, -1)}x
  *     that is not a refused path (isSplitRefusedPath) leaves none;
  *   - a `pathFamily` filter: only patterns whose family (pathFamilyOf) is the filter value
  *     (`/game/start/` is 'game-start');
- *   - a site list, or a `site` drill filter, with no BEST_SUDOKU_SITES entry: none (only Best
- *     Sudoku sends these rows). */
+ *   - a site list or a `site` drill filter narrows nothing: a site other than Best Sudoku that
+ *     sent one of these rows would be counted over whole days too (re-review of #63, NIT-A). */
 export function reachableRefusedPatterns(opts: {
   eventRowsExcluded: boolean
-  sites: readonly string[]
   constraints: readonly { field: string; value: string }[]
 }): string[] {
-  const bsk = (site: string) => BEST_SUDOKU_SITES.includes(site)
-  if (opts.sites.length && !opts.sites.some(bsk)) return []
   return SPLIT_REFUSED_PATH_PATTERNS.filter((pattern) => {
     const sample = refusedSamplePath(pattern)
     if (opts.eventRowsExcluded && isPopupEventPath(sample)) return false
@@ -202,7 +202,6 @@ export function reachableRefusedPatterns(opts: {
     return opts.constraints.every((c) => {
       if (c.field === 'path') return c.value.replace(/[A-Z]/g, (ch) => ch.toLowerCase()).startsWith(prefix)
       if (c.field === 'pathFamily') return pathFamilyOf(sample) === c.value
-      if (c.field === 'site') return bsk(c.value)
       return true
     })
   })
