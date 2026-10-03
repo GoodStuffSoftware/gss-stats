@@ -10,6 +10,7 @@ import App from './App.vue'
 import Dashboard from './components/Dashboard.vue'
 import { saveConfig, loadConfig } from './api'
 import { VIEWER_PREFS_KEY } from './lib/viewerPrefs'
+import { CONFIG_VERSION } from './lib/defaults'
 import PROD_V9 from './lib/__fixtures__/prodLayout.v9.json'
 
 vi.mock('./api', async (importOriginal) => {
@@ -88,7 +89,7 @@ describe('App — the active page is per viewer (layout version 13)', () => {
     again.unmount()
   })
 
-  it('a real change saves the config as v13, with the landing page left at ★ Overview', async () => {
+  it('a real change saves the config at the current layout version, with the landing page left at ★ Overview', async () => {
     const w = await mountApp()
     await goTo(w, 'Traffic')
     await w.find('.page-menu-btn').trigger('click')
@@ -103,7 +104,7 @@ describe('App — the active page is per viewer (layout version 13)', () => {
     await flushPromises()
     expect(saveConfig).toHaveBeenCalledTimes(1)
     const saved = vi.mocked(saveConfig).mock.calls[0][0]
-    expect(saved.version).toBe(13)
+    expect(saved.version).toBe(CONFIG_VERSION)
     expect(saved.activePageId).toBe('default')
     expect(saved.pages.find((p) => p.id === 'bsk-launch')).toMatchObject({ name: 'Traffic (all)', group: 'Best Sudoku', icon: 'trending-up' })
     w.unmount()
