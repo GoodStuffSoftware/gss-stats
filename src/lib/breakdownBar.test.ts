@@ -137,30 +137,31 @@ describe('campaignFlight breakdown: every tracked campaign, zero-filled', () => 
   const flight = (c: (typeof CAMPAIGNS)[number]) => Math.round((Date.parse(c.flightEnd) - Date.parse(c.flightStart!)) / 86_400_000) + 1
   const maxFlight = Math.max(...TRACKED.map(flight))
 
-  it('the configuration has two tracked campaigns, the longest Android at 8 days', () => {
-    expect(TRACKED.map((c) => c.id)).toEqual([android.id, retest.id])
+  it('the configuration tracks Android, the retest and the two flight-2 arms; the longest is Android at 8 days', () => {
+    expect(TRACKED.map((c) => c.id)).toEqual([android.id, retest.id, '24316608605', '24311309184'])
     expect(maxFlight).toBe(8)
     expect(flight(retest)).toBeLessThan(maxFlight)
   })
 
-  it('flight day: only the retest has rows; Android is still a series (all 0), and the axis is Day 1 to 8', () => {
+  it('flight day: only the retest has rows; every other campaign is still a series (all 0), and the axis is Day 1 to 8', () => {
     const w = widget({ type: 'line', dimension: 'flightDay', breakdown: 'campaignFlight', cumulative: true })
     const r = resp([['1', retest.id, 5], ['3', retest.id, 2]], ['flightDay', 'campaignFlight'])
     const m = breakdownBarModel({ ...w, type: 'breakdownBar', barMode: 'stacked' }, r)
-    expect(m.series).toEqual([android.id, retest.id])
+    expect(m.series).toEqual(TRACKED.map((c) => c.id))
     expect(m.axis).toEqual(Array.from({ length: maxFlight }, (_, i) => String(i + 1)))
     expect(m.values[0]).toEqual(Array(maxFlight).fill(0))
     expect(m.values[1]).toEqual([5, 0, 2, 0, 0, 0, 0, 0])
+    for (const i of m.series.keys()) if (i !== 1) expect(m.values[i], m.series[i]).toEqual(Array(maxFlight).fill(0))
     const cfg: any = buildChartConfig(w, r)
-    expect(cfg.data.datasets.map((d: any) => d.label)).toEqual([android.label, retest.label, `${android.label} (cumulative)`, `${retest.label} (cumulative)`])
-    expect(cfg.data.datasets[2].data).toEqual(Array(maxFlight).fill(0))
+    expect(cfg.data.datasets.map((d: any) => d.label)).toEqual([...TRACKED.map((c) => c.label), ...TRACKED.map((c) => `${c.label} (cumulative)`)])
+    expect(cfg.data.datasets[TRACKED.length].data).toEqual(Array(maxFlight).fill(0)) // Android's cumulative line
   })
 
   it('hour of day (grouped bars): a campaign with no arrivals is 0 in every hour, not missing', () => {
     const w = widget({ dimension: 'hourEt', breakdown: 'campaignFlight' })
     const cfg: any = buildChartConfig(w, resp([['9', android.id, 4]], ['hourEt', 'campaignFlight']))
     expect(cfg.data.labels).toHaveLength(24)
-    expect(cfg.data.datasets.map((d: any) => d.label)).toEqual([android.label, retest.label])
+    expect(cfg.data.datasets.map((d: any) => d.label)).toEqual(TRACKED.map((c) => c.label))
     expect(cfg.data.datasets[1].data).toEqual(Array(24).fill(0))
     // A campaign WITH rows still leaves an empty hour out (no zero-height bar), as before (H1).
     expect(cfg.data.datasets[0].data[8]).toBeNull()
@@ -190,7 +191,7 @@ describe('campaignFlight breakdown: every tracked campaign, zero-filled', () => 
       const w = widget({ type: 'line', dimension: 'flightDay', breakdown: 'campaignFlight', cumulative: true })
       const r = resp([['1', retest.id, 5]], ['flightDay', 'campaignFlight'])
       const m = breakdownBarModel({ ...w, type: 'breakdownBar', barMode: 'stacked' }, r)
-      expect(m.series).toEqual([android.id, retest.id, pending.id])
+      expect(m.series).toEqual([...TRACKED.map((c) => c.id), pending.id])
       expect(m.axis).toEqual(Array.from({ length: maxFlight }, (_, i) => String(i + 1))) // unchanged: still 1..8
       expect(m.values[m.series.indexOf(pending.id)]).toEqual(Array(maxFlight).fill(0))
 

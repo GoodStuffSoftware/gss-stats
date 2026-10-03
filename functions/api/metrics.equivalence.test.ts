@@ -84,8 +84,15 @@ const STEP_METRIC: Record<Exclude<FunnelStepKey, 'arrivals'>, string> = {
 }
 const STEPS = Object.keys(STEP_METRIC) as (keyof typeof STEP_METRIC)[]
 
+// A campaign registered after /api/campaigns was retired has no golden: there is nothing for it to be
+// equivalent to. Flight 2's two arms (registered 2026-10-03) are the only such campaigns; the test below
+// pins that list, so a campaign that loses its golden by accident fails loudly instead of being skipped.
+const WITHOUT_GOLDEN = ['24316608605', '24311309184']
 describe('/api/metrics ≡ /api/campaigns', () => {
-  it.each(CAMPAIGNS.filter((c) => c.measurement !== 'spend-only').map((c) => [c.label, c.id] as const))('%s: counts, rates, returns, costs', async (_label, id) => {
+  it('every measurable campaign has a golden, except the flight-2 arms registered after /api/campaigns was retired', () => {
+    expect(CAMPAIGNS.filter((c) => c.measurement !== 'spend-only' && !Object.hasOwn(CAMPAIGNS_GOLDEN, c.id)).map((c) => c.id)).toEqual(WITHOUT_GOLDEN)
+  })
+  it.each(CAMPAIGNS.filter((c) => c.measurement !== 'spend-only' && Object.hasOwn(CAMPAIGNS_GOLDEN, c.id)).map((c) => [c.label, c.id] as const))('%s: counts, rates, returns, costs', async (_label, id) => {
     const cmp = await campaignsGolden(id)
     const p = { campaignId: id }
     const r = await metrics([

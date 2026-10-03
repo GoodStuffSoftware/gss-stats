@@ -183,6 +183,40 @@ export const CAMPAIGNS: CampaignFlight[] = [
     notes:
       'Now serving as of 2026-09-26. Budget: $13/day, $100 hard stop (ads session, 2026-09-26) — see CAMPAIGN_DAILY_SPEND\'s entry for this id, left empty (and CAMPAIGN_SPEND left null) until real daily spend numbers arrive from the Google Ads API; both stay configurable per-day, same as the other two campaigns. The 9 rows tagged sudoku_funnel_retest on 2026-09-23, plus anything tagged before 2026-09-26 12:00 ET, are pre-launch validation/QA, not real traffic — excluded via flightStartTimeEt (the schedule\'s real noon-ET start), not just the calendar date.',
   },
+  // ── Flight 2: two arms run together (display apps + search), each its own campaign ──────
+  // Created PAUSED 2026-10-03 20:14Z by the best-sudoku Google Ads API tool (flight2-ops.mjs, commit
+  // e3c372d0). Both arms run 2026-10-04 .. 2026-10-10, a full week (Mike, 2026-10-03: "Start 10-04,
+  // full week"); the dates are final, set the same way as the retest's (start + 6, noon-ET start).
+  {
+    id: '24316608605',
+    label: 'Flight 2 — display, Sudoku app placements',
+    ucValues: ['sudoku_funnel_f2_apps'],
+    flightStart: '2026-10-04',
+    flightStartTimeEt: '12:00', // the ad schedule's start (12:00-23:00 ET) — see campaignAttributionClause
+    flightEnd: '2026-10-10', // 7 serving days
+    status: 'upcoming',
+    kind: 'web',
+    dailyBudgetUsd: 10,
+    hardCapUsd: 70,
+    servingHoursEt: [12, 23],
+    notes:
+      '"Best Sudoku - Display - Sudoku app placements - F2 Apps", utm google / display / sudoku_funnel_f2_apps, budget resource 15915288917. Created PAUSED 2026-10-03 20:14Z by the API tool (best-sudoku e3c372d0); US+CA, ad schedule 12:00-23:00 ET, $10/day, $70 cap over 7 days (Mike, 2026-10-03). The flight dates are final: 2026-10-04 .. 2026-10-10, a full week (Mike, 2026-10-03). directionalThroughDay is left unset: nothing in production reads it.',
+  },
+  {
+    id: '24311309184',
+    label: 'Flight 2 — search, desktop intent',
+    ucValues: ['sudoku_funnel_f2_search'],
+    flightStart: '2026-10-04',
+    flightStartTimeEt: '12:00', // the ad schedule's start (12:00-23:00 ET) — see campaignAttributionClause
+    flightEnd: '2026-10-10', // 7 serving days
+    status: 'upcoming',
+    kind: 'web',
+    dailyBudgetUsd: 10,
+    hardCapUsd: 70,
+    servingHoursEt: [12, 23],
+    notes:
+      '"Best Sudoku - Search - Desktop intent - F2 Search", utm google / cpc / sudoku_funnel_f2_search, budget resource 15915289115. Created PAUSED 2026-10-03 20:14Z by the API tool (best-sudoku e3c372d0); desktop-only search, US+CA, ad schedule 12:00-23:00 ET, $10/day, $70 cap over 7 days (Mike, 2026-10-03). No placements: its read plan has channel search. The flight dates are final: 2026-10-04 .. 2026-10-10, a full week (Mike, 2026-10-03). directionalThroughDay is left unset: nothing in production reads it.',
+  },
 ]
 
 export function campaignById(id: string): CampaignFlight | undefined {
@@ -781,11 +815,15 @@ export const CAMPAIGN_DAILY_SPEND: Record<string, Record<string, number>> = {
     '2026-09-13': 13.36,
   },
   '24279250691': {}, // serving as of 2026-09-26 ($13/day budget, $100 hard stop) — left empty until real daily spend numbers arrive from the Google Ads API
+  '24316608605': {}, // flight 2 display arm: created PAUSED 2026-10-03, no spend yet
+  '24311309184': {}, // flight 2 search arm: created PAUSED 2026-10-03, no spend yet
 }
 export const CAMPAIGN_SPEND: Record<string, number | null> = {
   '24215315197': 124.47, // Google Ads' own reported total — see CAMPAIGN_DAILY_SPEND's doc comment
   '24234347705': 75.17,
   '24279250691': null,
+  '24316608605': null,
+  '24311309184': null,
 }
 /** spend / count, or null (never NaN/Infinity/a fabricated cost) when spend is unset or
  * count is 0. */
