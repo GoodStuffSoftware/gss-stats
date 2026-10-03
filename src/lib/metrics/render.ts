@@ -96,6 +96,10 @@ const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFi
 function fmtCount(n: number | null | undefined): string {
   return finite(n) ? n.toLocaleString('en-US') : '—'
 }
+/** A per-ratio's value (completions per arrival): a plain number, two decimals, may exceed 1. */
+function fmtPer(n: number | null | undefined): string {
+  return finite(n) ? n.toFixed(2) : '—'
+}
 function fmtMoney(n: number | null | undefined): string {
   return finite(n) ? `$${n.toFixed(2)}` : '—'
 }
@@ -195,6 +199,7 @@ function formatMetricOrRatioValue(display: Display, value: MetricValue, def: Met
   switch (display.as) {
     case 'number':
       if (value.status === 'too-few') return { primary: noteRawText('too-few-to-report'), deltaLines: [] }
+      if (!('unit' in def) && def.kind === 'per') return { primary: fmtPer(value.value), deltaLines: [] }
       return { primary: fmtCount(value.value), deltaLines: deltaLinesFor(value, display.deltas) }
     case 'currency':
       if (value.status === 'too-few') return { primary: noteRawText('too-few-to-report'), deltaLines: [] }
