@@ -147,6 +147,24 @@ describe('each fact runs on SQLite and reuses the endpoint clause helpers', () =
     expect(() => db.prepare(stmt.sql).all(...(stmt.binds as (string | number)[]))).not.toThrow()
   })
 
+  it('campaignReturns leaves out return rows before the campaign\'s attribution start, like the arrivals tile; no upper bound', () => {
+    const retest = campaignById('24279250691')! // flight 2026-09-26, schedule starts 12:00 ET
+    const start = Date.parse('2026-09-26T16:00:00Z') // 12:00 EDT
+    const db = geoDb()
+    const ins = db.prepare("INSERT INTO hits (ts, site, path) VALUES (?, 'bestsudoku-web', ?)")
+    ins.run(start - 60_000, '/return/sudoku_funnel_retest/d0') // 11:59 ET: pre-launch test
+    ins.run(start - 3_600_000, '/return/sudoku_funnel_retest/d1') // pre-launch
+    ins.run(start, '/return/sudoku_funnel_retest/d0') // exactly at the start: counts
+    ins.run(start + 40 * 86_400_000, '/return/sudoku_funnel_retest/d31-60') // long after the flight: counts
+    const stmt = FACTS.campaignReturns.build({ campaignId: retest.id }, NOW)
+    const rows = db.prepare(stmt.sql).all(...(stmt.binds as (string | number)[])) as { path: string; c: number }[]
+    expect(rows.map((r) => `${r.path}:${r.c}`).sort()).toEqual(['/return/sudoku_funnel_retest/d0:1', '/return/sudoku_funnel_retest/d31-60:1'])
+  })
+  it('campaignReturns attributes nothing while a campaign has no confirmed flightStart', () => {
+    const c = CAMPAIGNS.find((x) => x.flightStart === null)
+    if (!c) return
+    expect(FACTS.campaignReturns.build({ campaignId: c.id }, NOW).sql).toContain('1 = 0')
+  })
   it('campaignPathVisitor carries campaignAttributionClause verbatim (flightStartTimeEt included)', () => {
     const retest = campaignById('24279250691')!
     const stmt = buildFact({ id: 'campaignPathVisitor', params: { campaignId: retest.id } }, NOW)
