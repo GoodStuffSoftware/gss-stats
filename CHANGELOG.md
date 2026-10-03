@@ -108,7 +108,8 @@ All notable changes to **gss-stats** are documented here. The format follows
   tutorial-completion or tour-exit rows and show the counts-only caption; charts by ET date are
   unchanged.
 - **The morning read's Play line shows dates, not hours.** It names the ET day the first app
-  return visit (or the latest web one) arrived on, never its time of day.
+  return visit (or the latest web one) arrived on, never its time of day, and readings stored
+  before this change show their Play line without the hour too.
 - **Campaign return visits now include the installed app.** A campaign's return buckets count
   return visits from the Android app as well as the web site, still from its attribution start.
 - **Return, game-completion and tutorial-completion rows can no longer be split by hour, place or device.**

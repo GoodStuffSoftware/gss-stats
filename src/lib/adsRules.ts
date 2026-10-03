@@ -990,22 +990,6 @@ export interface PlayReturnStatus {
   webContinuing: boolean
   line: string
 }
-// Formatters are built on first use, not at module load (lib/popupEvents.ts etDateFromMs says
-// why); same options, same output.
-let etHourLabelFmt: Intl.DateTimeFormat | null = null
-/** "YYYY-MM-DD HH:00 ET" — hour precision is plenty for a first-seen marker. */
-export function etHourLabel(ms: number): string {
-  etHourLabelFmt ??= new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/New_York',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    hourCycle: 'h23',
-  })
-  const p = Object.fromEntries(etHourLabelFmt.formatToParts(new Date(ms)).map((x) => [x.type, x.value]))
-  return `${p.year}-${p.month}-${p.day} ${p.hour}:00 ET`
-}
 /** No expected Play date is encoded anywhere (coordinator addendum, 2026-09-26): the app is
  * "not yet seen" until its first /return/ row, then "first seen on <ET date>". Dates only: no
  * hour or minute of a /return/ row is ever shown (counts only, src/lib/splitGuard.ts). */

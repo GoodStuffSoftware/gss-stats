@@ -126,6 +126,12 @@ export function returnSitesQuery(sinceMs: number): Query {
   return { sql: `SELECT site, COUNT(*) AS c, MIN(${d}) AS d0, MAX(${d}) AS d1 FROM hits WHERE ${w.join(' AND ')} GROUP BY site`, binds: b }
 }
 
+/** A returnSitesQuery d0/d1 cell as an ET 'YYYY-MM-DD' day, or null. Defense in depth for the
+ * counts-only rule: anything else (a raw ts, a time-bearing string) is dropped, never shown. */
+export function etDay(v: unknown): string | null {
+  return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null
+}
+
 /** Campaign-attributed arrivals by country, aggregate counts only (R5). The SAME attribution
  * and exclusion clauses as taggedRowsQuery (household etc.), so it can never disagree with the
  * funnel reads it sits alongside — no separate rule, no individual-level join. The rows the
@@ -196,7 +202,7 @@ export function createBeaconSource(select: D1Select): BeaconSource {
     async returnSites(sinceMs) {
       const q = returnSitesQuery(sinceMs)
       const rows = await select<any>(q.sql, q.binds)
-      return rows.map((x) => ({ site: String(x.site ?? ''), count: n(x.c), firstEtDate: x.d0 == null ? null : String(x.d0), lastEtDate: x.d1 == null ? null : String(x.d1) }))
+      return rows.map((x) => ({ site: String(x.site ?? ''), count: n(x.c), firstEtDate: etDay(x.d0), lastEtDate: etDay(x.d1) }))
     },
     async countryCounts(campaign) {
       const q = taggedCountryQuery(campaign)
