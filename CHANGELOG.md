@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **The page refetches its data when you come back to the tab.** Switching back to a tab that has
+  been idle for a minute or more reloads its charts, cards and ads readings once, without a
+  loading flash and without ever polling, and the card's "Updated" time moves to the new load.
+
 ## [0.13.1] — 2026-10-03
 
 ### Fixed
