@@ -394,14 +394,12 @@ export interface DisplayOption {
   disabled: boolean
   hint?: string
 }
-/** The displays compatible with a binding's data kind (validate.ts's DISPLAYS_FOR), with
- * 'sparkline' always present-but-disabled: MetricValue carries no per-day series yet (see
- * lib/metrics/render.ts's own "GAP" comment), so the editor never lets it be picked even though
- * the kind allows it in principle. Returns [] for an unresolvable binding (unknown id), which
- * the caller renders as "pick a metric/ratio first". */
-/** `pickableSparkline`: the item already had a sparkline (set outside the form), so the option
- * is enabled and the user can switch back to it after trying another display; otherwise a
- * sparkline stays the disabled placeholder (the form cannot create one). */
+/** The displays compatible with a binding's data kind (validate.ts's DISPLAYS_FOR). 'sparkline'
+ * is always present but disabled — MetricValue carries no per-day series yet (see
+ * lib/metrics/render.ts's own "GAP" comment), so the form cannot create one — unless
+ * `pickableSparkline`: the item already had one (set outside the form), so it is enabled and
+ * the user can switch back to it after trying another display. Returns [] for an unresolvable
+ * binding (unknown id), which the caller renders as "pick a metric/ratio first". */
 export function displayOptionsFor(binding: DataBinding, opts: { pickableSparkline?: boolean } = {}): DisplayOption[] {
   const k = kindOf(binding)
   if (!k) return []
