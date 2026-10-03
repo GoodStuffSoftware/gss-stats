@@ -52,12 +52,6 @@ watch(
     Object.assign(draft, next)
   },
 )
-// The editor never edits the grid position or size, but the dashboard does while it is open (a fit
-// card refits as its data loads): keep the draft's copy current so Save does not write a stale one.
-watch(
-  () => [props.widget.x, props.widget.y, props.widget.w, props.widget.h] as const,
-  ([x, y, w, h]) => Object.assign(draft, { x, y, w, h }),
-)
 
 // Belt and suspenders for "the sheet must scroll to the top when it opens" (review fix,
 // 2026-09-27): a freshly mounted .panel already starts at scrollTop 0 once .overlay's flex
