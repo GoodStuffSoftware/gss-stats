@@ -44,6 +44,7 @@ import {
   authSuccessRow,
   campaignById,
   computeFunnelCounts,
+  ORGANIC_ARM_ID,
   parseReturnPath,
   RETURN_BUCKETS,
   returnVisitRates,
@@ -902,10 +903,14 @@ export function tallyTaggedFirstSession(rows: readonly TaggedRow[], arrivals: Fi
     }
   return t
 }
-/** Site-wide side: arrivals = every /return/<any uc>/d0 row on the web site in the window. */
+/** Site-wide side: arrivals = every tagged /return/<any uc>/d0 row on the web site in the
+ * window — never the organic baseline's untagged rows (ORGANIC_ARM_ID). */
 export function tallySiteFirstSession(rows: readonly FirstSessionRowSite[]): FirstSessionTally {
   const t = emptyFirstSessionTally()
-  for (const r of rows) tally(t, r.path, r.count)
+  for (const r of rows) {
+    if (parseReturnPath(r.path)?.uc === ORGANIC_ARM_ID) continue
+    tally(t, r.path, r.count)
+  }
   return t
 }
 

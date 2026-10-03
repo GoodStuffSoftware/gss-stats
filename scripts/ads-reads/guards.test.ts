@@ -132,16 +132,20 @@ describe('beacon reads are read-only and apply the shared exclusions', () => {
     expect(q.binds).toContain(start)
     const db = new DatabaseSync(':memory:')
     db.exec("CREATE TABLE hits (id INTEGER PRIMARY KEY, ts INTEGER, site TEXT DEFAULT '', path TEXT DEFAULT '', referrer TEXT DEFAULT '', country TEXT DEFAULT '', region TEXT DEFAULT '', city TEXT DEFAULT '', org TEXT DEFAULT '', device TEXT DEFAULT '', browser TEXT DEFAULT '', os TEXT DEFAULT '', screenw INTEGER DEFAULT 0, visitor TEXT DEFAULT 'new', source TEXT DEFAULT '', medium TEXT DEFAULT '', campaign TEXT DEFAULT '')")
-    const ins = db.prepare("INSERT INTO hits (ts, site, path) VALUES (?, 'bestsudoku-web', ?)")
-    ins.run(start - 60_000, '/return/sudoku_funnel_retest/d0') // pre-launch test: excluded
-    ins.run(start, '/return/sudoku_funnel_retest/d0')
-    ins.run(start + 40 * 86_400_000, '/return/sudoku_funnel_retest/d31-60')
+    const ins = db.prepare('INSERT INTO hits (ts, site, path) VALUES (?, ?, ?)')
+    ins.run(start - 60_000, 'bestsudoku-web', '/return/sudoku_funnel_retest/d0') // pre-launch test: excluded
+    ins.run(start, 'bestsudoku-web', '/return/sudoku_funnel_retest/d0')
+    ins.run(start + 1, 'bestsudoku-app', '/return/sudoku_funnel_retest/d0') // the installed app: both count it
+    ins.run(start + 40 * 86_400_000, 'bestsudoku-web', '/return/sudoku_funnel_retest/d31-60')
     const routine = db.prepare(q.sql).all(...(q.binds as (string | number)[])) as { site: string; path: string; c: number }[]
     const stmt = FACTS.campaignReturns.build({ campaignId: retest.id }, start)
     const page = db.prepare(stmt.sql).all(...(stmt.binds as (string | number)[])) as { path: string; c: number }[]
     const key = (r: { path: string; c: number }) => `${r.path}:${r.c}`
-    expect(routine.filter((r) => r.site === 'bestsudoku-web').map(key).sort()).toEqual(page.map(key).sort())
-    expect(page.map(key).sort()).toEqual(['/return/sudoku_funnel_retest/d0:1', '/return/sudoku_funnel_retest/d31-60:1'])
+    // The routine splits by site; the dashboard counts web and app together.
+    const byPath = new Map<string, number>()
+    for (const r of routine) byPath.set(r.path, (byPath.get(r.path) ?? 0) + r.c)
+    expect([...byPath].map(([path, c]) => key({ path, c })).sort()).toEqual(page.map(key).sort())
+    expect(page.map(key).sort()).toEqual(['/return/sudoku_funnel_retest/d0:2', '/return/sudoku_funnel_retest/d31-60:1'])
   })
   it('every beacon query passes the SELECT-only guard after inlining', () => {
     for (const q of queries) expect(() => assertReadOnlySql(inlineBinds(q.sql, q.binds))).not.toThrow()

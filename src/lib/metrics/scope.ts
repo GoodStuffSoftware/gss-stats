@@ -5,13 +5,13 @@
 // scope when left unset. Pure functions only — MetricCard.vue and MetricSection.vue call
 // these to decide what to render and what to request, so the expansion is unit-testable
 // without mounting a component.
-import { CAMPAIGNS, campaignById, flightDayIndex, sharesReturnTagWith, type CampaignFlight } from '../campaigns'
+import { CAMPAIGNS, campaignById, flightDayIndex, ORGANIC_ARM_ID, sharesReturnTagWith, type CampaignFlight } from '../campaigns'
 import { noteRawText } from '../notes'
 import { etDateFromMs, POPUPS, type PopupDef } from '../popupEvents'
 import { campaignSegmentMarker, UPSELL_SIGNEDOUT_FIX_AT } from '../adsRules'
 import { releaseAwaitingFullDay, releaseSubjectOn } from '../releases'
 import { metricWindows, METRICS, rulesOf, type MetricDef, type MetricParam } from './metrics'
-import { ratioParamsOf, ratioWindowsOf, RATIOS, type RatioDef } from './ratios'
+import { ratioParamsOf, ratioSupportsOrganic, ratioWindowsOf, RATIOS, type RatioDef } from './ratios'
 import { COUNTRY_BUCKETS, WINDOW_SIDES, type CountryBucket, type DataBinding, type DeltaName, type Gating, type Label, type MetricItem, type ParamValue, type RepeatSpec, type ScopePath, type Section, type WindowSide } from './types'
 
 /** A stored ads-readings-log row (ADR 0003 slice 8 — the fact/type don't exist yet). Kept as
@@ -32,6 +32,9 @@ export interface ReadingScope {
 export type ScopeInstance = (
   | { kind: 'root' }
   | { kind: 'campaign'; campaign: CampaignFlight }
+  /** The web-only organic baseline arm (lib/campaigns.ts ORGANIC_ARM_ID): a campaigns repeat's
+   * extra instance (RepeatSpec.organic). Not a campaign: campaignOfScope never returns it. */
+  | { kind: 'organic' }
   | { kind: 'popup'; popup: PopupDef }
   | { kind: 'window'; window: WindowSide }
   | { kind: 'country'; country: CountryBucket }
@@ -46,9 +49,28 @@ export function scopeOfKind<K extends ScopeInstance['kind']>(scope: ScopeInstanc
   for (let s = scope; s; s = s.parent) if (s.kind === kind) return s as ScopeOf<K>
   return undefined
 }
-/** The campaign a scope is bound to, directly or through a parent. */
+/** The campaign a scope is bound to, directly or through a parent. The nearest arm wins: an
+ * organic instance nested inside a campaign's scope stands for the organic arm, not that
+ * campaign, so this is undefined for it (as armIdOfScope says). */
 export function campaignOfScope(scope: ScopeInstance | undefined): CampaignFlight | undefined {
-  return scopeOfKind(scope, 'campaign')?.campaign
+  for (let s = scope; s; s = s.parent) {
+    if (s.kind === 'campaign') return s.campaign
+    if (s.kind === 'organic') return undefined
+  }
+  return undefined
+}
+/** The `campaignId` a scope's nearest arm stands for: a campaign's id, or ORGANIC_ARM_ID for the
+ * organic instance; undefined when neither is in the chain. */
+export function armIdOfScope(scope: ScopeInstance | undefined): string | undefined {
+  for (let s = scope; s; s = s.parent) {
+    if (s.kind === 'campaign') return s.campaign.id
+    if (s.kind === 'organic') return ORGANIC_ARM_ID
+  }
+  return undefined
+}
+/** Whether a scope's nearest arm is the organic baseline (not a campaign). */
+export function isOrganicScope(scope: ScopeInstance | undefined): boolean {
+  return armIdOfScope(scope) === ORGANIC_ARM_ID
 }
 /** `inner` nested inside `outer` (a section, item or column repeat inside a card instance). */
 export function nestScope(inner: ScopeInstance, outer: ScopeInstance): ScopeInstance {
@@ -70,10 +92,11 @@ export function selectsCampaigns(repeat: RepeatSpec | undefined): boolean {
 }
 /** The card-level instances for a widget's campaign selection: `instances` narrowed to the
  * selected campaigns, in the repeat's own order; unchanged when nothing is selected or the
- * repeat is not over campaigns. */
+ * repeat is not over campaigns. The organic baseline is not a campaign the widget can pick, so
+ * a repeat that asks for it keeps it, whatever the selection. */
 export function narrowToCampaigns(instances: ScopeInstance[], repeat: RepeatSpec | undefined, campaignIds: readonly string[] | undefined): ScopeInstance[] {
   if (!selectsCampaigns(repeat) || !campaignIds?.length) return instances
-  return instances.filter((s) => s.kind === 'campaign' && campaignIds.includes(s.campaign.id))
+  return instances.filter((s) => s.kind === 'organic' || (s.kind === 'campaign' && campaignIds.includes(s.campaign.id)))
 }
 
 /** The instances a RepeatSpec expands to, in a stable order. `undefined` (no repeat) always
@@ -86,7 +109,10 @@ export function resolveRepeat(repeat: RepeatSpec | undefined, ctx: RepeatContext
       if (repeat.status?.length) list = list.filter((c) => repeat.status!.includes(c.status))
       if (repeat.tracked) list = list.filter((c) => c.measurement !== 'spend-only')
       if (repeat.flightingToday) list = list.filter((c) => flightDayIndex(c, ctx.todayEt) != null)
-      return list.map((campaign) => ({ kind: 'campaign', campaign }))
+      const out: ScopeInstance[] = list.map((campaign) => ({ kind: 'campaign', campaign }))
+      // The organic baseline comes last, after every campaign (RepeatSpec.organic).
+      if (repeat.organic) out.push({ kind: 'organic' })
+      return out
     }
     case 'countries': {
       const ids = (repeat.ids?.length ? repeat.ids : COUNTRY_BUCKETS) as CountryBucket[]
@@ -123,11 +149,13 @@ export function scopeField(scope: ScopeInstance, path: ScopePath, todayEt: strin
   const window = scopeOfKind(scope, 'window')?.window
   const country = scopeOfKind(scope, 'country')?.country
   const reading = scopeOfKind(scope, 'reading')?.reading
+  // The organic arm answers only its id and label; every other campaign field is null for it.
+  const organic = !campaign && isOrganicScope(scope)
   switch (path) {
     case 'campaign.id':
-      return campaign ? campaign.id : null
+      return campaign ? campaign.id : organic ? ORGANIC_ARM_ID : null
     case 'campaign.label':
-      return campaign ? campaign.label : null
+      return campaign ? campaign.label : organic ? noteRawText('label.arm.organic') : null
     case 'campaign.status':
       return campaign ? campaign.status : null
     case 'campaign.statusToday':
@@ -192,6 +220,8 @@ export function scopeVars(scope: ScopeInstance, todayEt: string = todayEtFrom(Da
       status: campaign.status,
       statusToday: scopeField(scope, 'campaign.statusToday', todayEt) ?? campaign.status,
     }
+  } else if (isOrganicScope(scope)) {
+    vars.campaign = { id: ORGANIC_ARM_ID, label: noteRawText('label.arm.organic') }
   }
   const popup = scopeOfKind(scope, 'popup')?.popup
   if (popup) vars.popup = { id: popup.id, label: popup.label }
@@ -232,7 +262,7 @@ export function resolveBinding(binding: DataBinding, scope: ScopeInstance, today
   const allowedParams: MetricParam[] = isMetric ? (def as MetricDef).params : ratioParamsOf(def as RatioDef)
   const params: { campaignId?: string; popup?: string; country?: string } = {}
   for (const p of allowedParams) {
-    const scopeVal = p === 'campaignId' ? campaignOfScope(scope)?.id : p === 'popup' ? scopeOfKind(scope, 'popup')?.popup.id : scopeOfKind(scope, 'country')?.country
+    const scopeVal = p === 'campaignId' ? armIdOfScope(scope) : p === 'popup' ? scopeOfKind(scope, 'popup')?.popup.id : scopeOfKind(scope, 'country')?.country
     const v = resolveParamValue(binding.params?.[p], scopeVal)
     if (v !== undefined) params[p] = v
   }
@@ -272,7 +302,8 @@ export function flattenSectionItems(section: Section, outerScope: ScopeInstance,
       const itemScopes = allScopes.filter((s) => !unmeasuredByConfig(item.data, s, item.gating, ctx.todayEt))
       if (!itemScopes.length) {
         if (item.repeat.empty) {
-          const untracked = allScopes.length > 0 && item.repeat.over === 'campaigns' && !!item.repeat.flightingToday
+          // Only campaign instances say "a campaign is flighting"; the organic baseline never does.
+          const untracked = allScopes.some((s) => s.kind === 'campaign') && item.repeat.over === 'campaigns' && !!item.repeat.flightingToday
           out.push({ item, scope: sScope, emptyOf: untracked ? { label: item.repeat.empty.label, text: { note: 'no-tracked-campaign-flighting' } } : item.repeat.empty })
         }
         continue
@@ -300,6 +331,7 @@ export function sectionCells(section: Section, outerScope: ScopeInstance, ctx: R
 export function columnDefaultLabel(scope: ScopeInstance): Label {
   switch (scope.kind) {
     case 'campaign':
+    case 'organic':
       return { bind: 'campaign.label' }
     case 'popup':
       return { bind: 'popup.label' }
@@ -339,14 +371,25 @@ export interface MetricRequestSpec {
 export function unmeasuredByConfig(binding: DataBinding, scope: ScopeInstance, gating?: Gating, todayEt?: string): boolean {
   const ruling = configRuling(binding, scope, todayEt)
   // A flight with no start date keeps an item whose gating says how to show "not started".
-  return ruling === 'spend-only' || (ruling === 'flight-pending' && !gating?.whenNotStarted)
+  return ruling === 'spend-only' || ruling === 'organic-unsupported' || (ruling === 'flight-pending' && !gating?.whenNotStarted)
 }
 /** Why the campaign's own config rules a binding out, or null: 'flight-pending' (no start date
- * yet: nothing but spend can be read) or 'spend-only' (never any beacon data). Such a binding is
- * never requested (buildRequestSpec); unmeasuredByConfig says whether its item is omitted. */
-export function configRuling(binding: DataBinding, scope: ScopeInstance, todayEt?: string): 'flight-pending' | 'spend-only' | null {
+ * yet: nothing but spend can be read), 'spend-only' (never any beacon data), or
+ * 'organic-unsupported' (the organic arm asked of a binding that doesn't serve it: only the
+ * return metrics, and ratios whose both sides are return metrics, do — the server refuses the
+ * rest). Such a binding is never requested (buildRequestSpec); unmeasuredByConfig says whether
+ * its item is omitted. A `field` binding never gets a ruling, so a date-dependent field (the
+ * release-awaiting `release.label`) always renders from `todayEt`, organic scope or not. */
+export function configRuling(binding: DataBinding, scope: ScopeInstance, todayEt?: string): 'flight-pending' | 'spend-only' | 'organic-unsupported' | null {
+  if ('field' in binding) return null
+  if (isOrganicScope(scope)) {
+    const resolved = resolveBinding(binding, scope, todayEt)
+    if (!resolved || resolved.kind === 'field' || resolved.params.campaignId !== ORGANIC_ARM_ID) return null
+    const ok = resolved.kind === 'metric' ? !!(resolved.def as MetricDef).organic : ratioSupportsOrganic(resolved.def as RatioDef)
+    return ok ? null : 'organic-unsupported'
+  }
   const campaign = campaignOfScope(scope)
-  if (!campaign || 'field' in binding) return null
+  if (!campaign) return null
   const resolved = resolveBinding(binding, scope, todayEt)
   if (!resolved || resolved.kind === 'field' || !resolved.window) return null
   const window = resolved.window as keyof MetricDef['windows']
