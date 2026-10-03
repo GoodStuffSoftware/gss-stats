@@ -40,6 +40,7 @@ import { __resetMetricsStateForTests } from '../../composables/useMetrics'
 import { onRequestPost as metricsPost } from '../../../functions/api/metrics'
 import { insertHits, installCaches, memoryCache, openHitsDb, pagesContext, postJson, sqliteD1 } from '../../../functions/_lib/testing/hitsDb'
 import { bskFixture, FIXTURE_NOW } from '../../../functions/_lib/testing/bskFixture'
+import { scopeCampaignsToGolden } from '../../../functions/_lib/testing/goldenCampaigns'
 import { CAMPAIGNS } from '../../lib/campaigns'
 import GOLDEN from './__fixtures__/bespokeOverview.golden.json'
 
@@ -49,6 +50,8 @@ const RETEST = CAMPAIGNS.find((c) => c.id === '24279250691')!.label
 
 let db: ReturnType<typeof openHitsDb>
 let undoCaches: () => void
+// The golden holds the three campaigns configured when it was recorded; see goldenCampaigns.ts.
+let restoreCampaigns: () => void
 const mounted: VueWrapper[] = []
 
 async function route(url: string, init: RequestInit): Promise<Response> {
@@ -62,6 +65,7 @@ async function route(url: string, init: RequestInit): Promise<Response> {
 }
 
 beforeAll(() => {
+  restoreCampaigns = scopeCampaignsToGolden()
   db = openHitsDb()
   insertHits(db, bskFixture())
   vi.useFakeTimers({ now: FIXTURE_NOW, toFake: ['Date'] })
@@ -73,6 +77,7 @@ afterEach(() => {
   __resetMetricsStateForTests()
 })
 afterAll(() => {
+  restoreCampaigns()
   undoCaches()
   vi.unstubAllGlobals()
   vi.useRealTimers()

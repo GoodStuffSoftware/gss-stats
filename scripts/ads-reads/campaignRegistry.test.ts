@@ -27,6 +27,7 @@ import {
   type AdsReadPlan,
 } from '../../src/lib/adsRules'
 import { CAMPAIGNS, campaignById, isDirectionalDay, type CampaignFlight } from '../../src/lib/campaigns'
+import { addDays } from '../../src/lib/etTime'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const RETEST = '24279250691'
@@ -91,6 +92,28 @@ function unregister() {
 }
 beforeEach(unregister)
 afterEach(unregister)
+
+// The real registry holds the retest plus flight 2's two arms. The tests below that were written for
+// "exactly one registered plan" (the single-plan default, as on base) or "exactly two" run on the
+// registry reduced to the retest, then put back; the real three-plan registry is pinned in its own
+// describe at the end of the file.
+const F2_APPS = '24316608605'
+const F2_SEARCH = '24311309184'
+const hidden: Record<string, AdsReadPlan> = {}
+function reduceToRetest() {
+  for (const id of Object.keys(ADS_READ_PLANS)) {
+    if (id === RETEST) continue
+    hidden[id] = ADS_READ_PLANS[id]
+    delete ADS_READ_PLANS[id]
+  }
+}
+function restoreRegistry() {
+  for (const id of Object.keys(hidden)) {
+    ADS_READ_PLANS[id] = hidden[id]
+    delete hidden[id]
+  }
+}
+afterEach(restoreRegistry)
 
 describe('a second registered campaign reads independently of the retest', () => {
   it('uses its own thresholds, kill-rule start, cap, placement list and window; the retest read is byte-for-byte unchanged', async () => {
@@ -176,7 +199,8 @@ describe('a second registered campaign reads independently of the retest', () =>
 })
 
 describe('defaultReadCampaignId: derived from the registry, never a constant', () => {
-  const plan = (id: string, first: string, last: string): AdsReadPlan => ({ ...ADS_READ_PLANS[RETEST], campaignId: id, morningReadFirstEt: first, morningReadLastEt: last })
+  beforeEach(reduceToRetest)
+  const plan =(id: string, first: string, last: string): AdsReadPlan => ({ ...ADS_READ_PLANS[RETEST], campaignId: id, morningReadFirstEt: first, morningReadLastEt: last })
 
   it('morning: with one plan registered it resolves to it on EVERY date, before, inside or after the window (as on base)', () => {
     for (const day of ['2026-09-26', '2026-09-27', '2026-09-30', '2026-10-03', '2026-10-04', '2026-10-06', '2026-10-10', '2027-01-15']) {
@@ -247,6 +271,7 @@ describe('defaultReadCampaignId: derived from the registry, never a constant', (
 })
 
 describe('resolveCampaignId (the CLI)', () => {
+  beforeEach(reduceToRetest)
   it('an explicit --campaign naming a registered or configured campaign wins; the clock is not consulted', () => {
     expect(resolveCampaignId({ campaign: RETEST }, 'morning', Date.parse('2030-01-01T12:00:00Z'))).toBe(RETEST)
     expect(resolveCampaignId({ campaign: RETEST }, 'postflight', Date.parse('2030-01-01T12:00:00Z'), 'december')).toBe(RETEST)
@@ -374,7 +399,7 @@ describe('concurrent campaigns do not collide in non-keyed outputs', () => {
     const raw = withJson(formatMorningReport(result), result).split(RETEST).join('12345')
     expect(() =>
       buildReadPage({ template: fs.readFileSync(TEMPLATE_PATH, 'utf8'), raw, narrative: { headline: 'h', working: ['w'], notWorking: ['n'], soWhat: ['s'] }, audit: null }),
-    ).toThrow(/no ads read plan for campaign 12345 \(registered read plans: 24279250691\)/)
+    ).toThrow(new RegExp(`no ads read plan for campaign 12345 \\(registered read plans: ${Object.keys(ADS_READ_PLANS).join(', ')}\\)`))
   })
 })
 
@@ -402,5 +427,109 @@ describe('registry accessors', () => {
     expect(approvedPlacementsFor('24234347705')).toEqual(RETEST_APPROVED_PLACEMENTS)
     expect(approvedPlacementsFor('24215315197')).toHaveLength(RETEST_APPROVED_PLACEMENTS.length + 2)
     expect(approvedPlacementsFor('00000000000')).toBeNull()
+  })
+})
+
+// Flight 2: the two arms registered together with the retest (no reduction of the registry here).
+// Created PAUSED 2026-10-03 by the best-sudoku Google Ads API tool (commit e3c372d0); the dates are
+// provisional until enable (the tool resets start to the enable day and end to start + 6), so every
+// date assertion below is about how the fields relate to each other, not about the calendar.
+describe('flight 2 arms in the real registry', () => {
+  // A literal copy of the placement list the tool created for arm A: flight2-ops.mjs L81 (the
+  // "Sudoku.com placement" group, 1 package) and L86-90 (the "Other Sudoku placements" group, 16),
+  // best-sudoku commit e3c372d0. Kept as a literal on purpose: it is the check that
+  // RETEST_APPROVED_PLACEMENTS has not drifted from what the tool actually built.
+  const TOOL_ARM_A_PLACEMENTS = [
+    'com.easybrain.sudoku.android',
+    'com.brainium.sudoku.free',
+    'easy.sudoku.puzzle.solver.free',
+    'com.theangrykraken.sudoku',
+    'com.mobilityware.Sudoku',
+    'com.gamovation.sudoku',
+    'com.kraisoft.sudoku',
+    'com.mathbrain.sudoku',
+    'com.fassor.android.sudoku',
+    'easy.killer.sudoku.puzzle.solver.free',
+    'sudoku.puzzle.free.game.brain',
+    'com.easybrain.killer.sudoku.free',
+    'com.kwalee.queenspuzzle',
+    'killer.sudoku.free.brain.puzzle',
+    'com.microsoft.sudoku',
+    'com.soodexlabs.sudoku2',
+    'com.newsudoku.number.maze',
+  ]
+  const A = () => ADS_READ_PLANS[F2_APPS]
+  const B = () => ADS_READ_PLANS[F2_SEARCH]
+
+  it('the registry reads the retest and both arms, each under its own plan', () => {
+    expect(Object.keys(ADS_READ_PLANS)).toEqual([RETEST, F2_APPS, F2_SEARCH])
+    for (const id of [F2_APPS, F2_SEARCH]) {
+      expect(campaignById(id), id).toBeDefined()
+      expect(readPlanFor(id).plan, id).toBe(ADS_READ_PLANS[id])
+    }
+  })
+
+  it('arm A (display): the tool\'s exact 17 placements, the retest\'s leak limit and CTR floor, its own label and audit folder', () => {
+    expect(A().channel).toBe('display')
+    expect([...A().approvedPlacements]).toEqual(TOOL_ARM_A_PLACEMENTS)
+    expect(A().adGroupPlacementCounts).toEqual({ 'Sudoku.com placement': 1, 'Other Sudoku placements': 16 })
+    expect(A().placementLeakMaxShare).toBe(0.1)
+    expect(A().ctrFloor).toBe(0.0015)
+    expect(reportLabelFor(F2_APPS)).toBe('F2 apps')
+    expect(auditPathFor(F2_APPS, '2026-10-08')).toBe('docs/marketing/google-ads/f2-apps/data/2026-10-08.json')
+    expect(campaignById(F2_APPS)!.ucValues).toEqual(['sudoku_funnel_f2_apps'])
+  })
+
+  it('arm B (search): no placements, no leak limit, CTR floor 1.0%, its own label and audit folder', () => {
+    expect(B().channel).toBe('search')
+    expect(B().approvedPlacements).toEqual([])
+    expect(B().adGroupPlacementCounts).toBeUndefined()
+    expect(B().placementLeakMaxShare).toBeUndefined()
+    expect(B().ctrFloor).toBe(0.01)
+    expect(reportLabelFor(F2_SEARCH)).toBe('F2 search')
+    expect(auditPathFor(F2_SEARCH, '2026-10-08')).toBe('docs/marketing/google-ads/f2-search/data/2026-10-08.json')
+    expect(campaignById(F2_SEARCH)!.ucValues).toEqual(['sudoku_funnel_f2_search'])
+  })
+
+  it('both arms: $10/day, a $70 cap, and a ladder whose top read IS the cap (so the decision table fires there)', () => {
+    for (const id of [F2_APPS, F2_SEARCH]) {
+      const plan = ADS_READ_PLANS[id]
+      expect(plan.dailyBudget, id).toBe(10)
+      expect(plan.hardCap, id).toBe(70)
+      expect(plan.thresholds, id).toEqual([18, 35, 53, 70])
+      expect(plan.thresholds.at(-1), id).toBe(plan.hardCap)
+      expect(plan.killRulesFrom, id).toBe(35)
+    }
+  })
+
+  it('both arms: a 7-day flight, noon-ET start, and a morning-read window of day 2 .. end + 1 that moves with the dates', () => {
+    for (const id of [F2_APPS, F2_SEARCH]) {
+      const c = campaignById(id)!
+      const plan = ADS_READ_PLANS[id]
+      expect(c.status, id).toBe('upcoming')
+      expect(c.flightEnd, id).toBe(addDays(c.flightStart!, 6))
+      expect(c.flightStartTimeEt, id).toBe('12:00')
+      expect(c.servingHoursEt, id).toEqual([12, 23])
+      expect(plan.morningReadFirstEt, id).toBe(addDays(c.flightStart!, 1))
+      expect(plan.morningReadLastEt, id).toBe(addDays(c.flightEnd, 1))
+    }
+  })
+
+  it('an unpinned read exits via the error, naming all three registered ids, for the morning read and every post-flight stage', () => {
+    const all = new RegExp(`3 campaigns have read plans, so .* cannot tell which one is meant; pass --campaign <id> \\(registered read plans: ${RETEST} .*${F2_APPS} .*${F2_SEARCH} `)
+    expect(() => defaultReadCampaignId('morning', '2026-10-08')).toThrow(all)
+    expect(() => resolveCampaignId({}, 'morning', Date.parse('2026-10-08T10:00:00Z'))).toThrow(all)
+    for (const stage of ['wrapup', 'day15', 'day30', 'day60', 'december'] as const) {
+      expect(() => resolveCampaignId({}, 'postflight', Date.parse('2026-10-20T17:00:00Z'), stage), stage).toThrow(all)
+    }
+  })
+
+  it('--campaign pins each arm; a bad or bare one lists all three ids', () => {
+    const now = Date.parse('2026-10-08T10:00:00Z')
+    expect(resolveCampaignId({ campaign: F2_APPS }, 'morning', now)).toBe(F2_APPS)
+    expect(resolveCampaignId({ campaign: F2_SEARCH }, 'postflight', now, 'wrapup')).toBe(F2_SEARCH)
+    const listed = `registered read plans: ${RETEST}, ${F2_APPS}, ${F2_SEARCH}\\)`
+    expect(() => resolveCampaignId({ campaign: '12345' }, 'morning', now)).toThrow(new RegExp(listed))
+    expect(() => parseCli({}, ['--campaign'])).toThrow(new RegExp(listed))
   })
 })

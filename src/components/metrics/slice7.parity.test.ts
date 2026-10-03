@@ -130,6 +130,7 @@ import { buildChartConfig } from '../../lib/charts'
 import { BEST_SUDOKU_SITES } from '../../lib/bestSudokuSites'
 import { insertHits, installCaches, memoryCache, openHitsDb, pagesContext, postJson, sqliteD1 } from '../../../functions/_lib/testing/hitsDb'
 import { bskFixture, FIXTURE_NOW } from '../../../functions/_lib/testing/bskFixture'
+import { GOLDEN_CAMPAIGN_IDS, scopeCampaignsToGolden } from '../../../functions/_lib/testing/goldenCampaigns'
 import { defaultFilters } from '../../lib/defaults'
 import type { Widget } from '../../types'
 import GOLDEN_FILE from './__fixtures__/slice7.golden.json'
@@ -167,6 +168,8 @@ const PARITY_EXTRA = [
 let db: ReturnType<typeof openHitsDb>
 let cache: ReturnType<typeof memoryCache>
 let undoCaches: () => void
+// The golden holds the three campaigns configured when it was recorded; see goldenCampaigns.ts.
+let restoreCampaigns: () => void
 const mounted: VueWrapper[] = []
 
 const HANDLERS: Record<string, (ctx: any) => Response | Promise<Response>> = {
@@ -199,6 +202,7 @@ async function route(url: string, init: RequestInit): Promise<Response> {
 }
 
 beforeAll(() => {
+  restoreCampaigns = scopeCampaignsToGolden()
   db = openHitsDb()
   insertHits(db, [...bskFixture(), ...PARITY_EXTRA])
   ads = adsDb()
@@ -214,6 +218,7 @@ afterEach(() => {
   vi.setSystemTime(FIXTURE_NOW)
 })
 afterAll(() => {
+  restoreCampaigns()
   undoCaches()
   vi.unstubAllGlobals()
   vi.useRealTimers()
@@ -760,7 +765,8 @@ describe('the arrivals charts: numbers per bucket, /api/geo against /api/campaig
     { ...ANDROID, ts: at('2026-09-05T14:00:00Z'), path: '/install/prompt/android', n: 2 }, // an event row as a first beacon
   ]
   const NOW = at('2027-03-20T16:00:00Z')
-  const beacon = CAMPAIGNS_LIST().filter((c) => c.measurement !== 'spend-only')
+  // Read while the suite is being collected (before beforeAll scopes CAMPAIGNS), so name the golden's campaigns.
+  const beacon = CAMPAIGNS_LIST().filter((c) => c.measurement !== 'spend-only' && GOLDEN_CAMPAIGN_IDS.includes(c.id))
 
   async function both() {
     const saved = db

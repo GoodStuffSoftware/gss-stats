@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Flight 2's two arms are registered.** The display arm on Sudoku-app placements and the desktop
+  search arm now appear on the dashboard and can be read on their own with `--campaign`, each with
+  a $10/day budget and a $70 cap; the flight dates are provisional until the campaigns are enabled.
+
 ## [0.14.0] — 2026-10-03
 
 ### Added
