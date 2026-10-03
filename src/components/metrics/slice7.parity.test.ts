@@ -14,6 +14,14 @@
 //   R1  "Installs" in the Before window: the old panel counted 0, because every install outcome
 //       before the install fix (26 Sep, 12:26 ET, after the release's midnight) is dropped as
 //       unmeasured; the card says "not yet tracking" instead of a 0 it could not have measured.
+//   R3  Rule change (review of PR #47): the "after" side leaves out the release's own ET day, and
+//       starts at the next ET midnight (v1.96.0 went live at 22:21 ET on its dated day, so its day
+//       is mostly pre-release traffic). The golden's After column was captured under the old
+//       rule (release day included) and is superseded: AFTER_R3 in this test is the source of
+//       truth, and the golden's old After values are kept only for the `not.toBe` check. The
+//       fixture has nothing after 26 Sep, so PARITY_EXTRA carries the 27-28 Sep rows and AFTER_R3
+//       is their totals (13 page views: the auth row counts as one, 4 tagged arrivals, 2 auth
+//       successes, 1 install). Before is unchanged and still compared to the golden.
 //   R2  No full day on each side yet (the release day itself): the old panel said "No dated
 //       release yet…" although the release is dated; the card names the release and says "no
 //       release window yet" for the days and every count.
@@ -126,6 +134,15 @@ import { defaultFilters } from '../../lib/defaults'
 import type { Widget } from '../../types'
 import GOLDEN_FILE from './__fixtures__/slice7.golden.json'
 
+// The release panel follows the newest dated release with a full day after it. The goldens were
+// captured when that was v1.95.3, so pin it here; later releases being added to the marker list
+// (or the real clock moving on) must not move them.
+vi.mock('../../lib/releases', async (importActual) => {
+  const actual = await importActual<typeof import('../../lib/releases')>()
+  const pinned = () => actual.datedReleases().find((r) => r.version === 'v1.95.3') ?? null
+  return { ...actual, latestDatedRelease: pinned, releaseSubjectOn: pinned, releaseAwaitingFullDay: () => null }
+})
+
 const GOLDEN = GOLDEN_FILE as Record<string, unknown>
 /** The old side of a comparison, as captured from the retired body (see the header). */
 function fromGolden<T = any>(key: string): T {
@@ -139,6 +156,13 @@ const PARITY_EXTRA = [
   { ts: Date.parse('2026-09-26T14:30:00Z'), site: 'bestsudoku-web', path: '/upsell/shown/limit', visitor: 'returning', browser: 'Opera', os: 'Windows', n: 3 },
   { ts: Date.parse('2026-09-26T14:31:00Z'), site: 'bestsudoku-web', path: '/upsell/accept/limit', visitor: 'returning', browser: 'Opera', os: 'Windows', n: 3 },
   { ts: Date.parse('2026-09-26T14:32:00Z'), site: 'bestsudoku-web', path: '/signin-eligible/earned', visitor: 'returning', browser: 'Opera', os: 'Windows', n: 2 },
+  // The release panel's "after" side starts the ET day after v1.95.3's date (R3), and the shared
+  // fixture has nothing past 09-26: these are the only rows in it (09-27 and 09-28).
+  { ts: Date.parse('2026-09-27T14:00:00Z'), site: 'bestsudoku-web', path: '/', visitor: 'returning', n: 5 },
+  { ts: Date.parse('2026-09-27T14:05:00Z'), site: 'bestsudoku-web', path: '/game', visitor: 'returning', n: 2 },
+  { ts: Date.parse('2026-09-28T14:00:00Z'), site: 'bestsudoku-web', campaign: 'sudoku_tired_of_ads_test', path: '/game', visitor: 'new', n: 4 },
+  { ts: Date.parse('2026-09-28T14:10:00Z'), site: 'bestsudoku-web', path: '/auth/success/google', visitor: 'returning', n: 2 },
+  { ts: Date.parse('2026-09-28T14:20:00Z'), site: 'bestsudoku-web', path: '/popup-outcome/install-prompt/installed', visitor: 'returning', n: 1 },
 ]
 let db: ReturnType<typeof openHitsDb>
 let cache: ReturnType<typeof memoryCache>
@@ -231,9 +255,10 @@ const rows = (w: VueWrapper) => new Map(w.findAll('.mi-row').map((r) => [text(r.
 // ── Release panel ─────────────────────────────────────────────────────────────────────────
 describe('release-before-after ≡ the bespoke release panel', () => {
   const LABELS = ['Page views', 'Tagged arrivals', 'Auth successes', 'Installs']
+  const AFTER_R3: Record<string, string> = { 'Page views': '13', 'Tagged arrivals': '4', 'Auth successes': '2', Installs: '1' } // R3
 
   it('two days after the release: the same four counts on each side, except R1', async () => {
-    const now = Date.parse('2026-09-28T16:00:00Z')
+    const now = Date.parse('2026-09-29T16:00:00Z')
     vi.setSystemTime(now)
     const old = fromGolden<{ caption: string; cols: Record<string, Record<string, string>> }>('release.twoDaysAfter')
     expect(old.caption).toMatch(/^v1\.95\.3 \(2026-09-26\) — 2 days before vs after\. before = partially instrumented/)
@@ -245,7 +270,7 @@ describe('release-before-after ≡ the bespoke release panel', () => {
     expect([...t.keys()]).toEqual(LABELS)
     for (const side of ['Before', 'After']) {
       for (const label of LABELS) {
-        const was = old.cols[side][label]
+        const was = side === 'After' ? AFTER_R3[label] : old.cols[side][label]
         const now = t.get(label)!.get(side)
         if (side === 'Before' && label === 'Installs') {
           expect(was, 'R1 old').toBe('0')
@@ -257,8 +282,9 @@ describe('release-before-after ≡ the bespoke release panel', () => {
     }
     // The fixture exercises real numbers on both sides.
     expect(Number(old.cols.Before['Page views'].replace(/,/g, ''))).toBeGreaterThan(0)
-    expect(Number(old.cols.After.Installs)).toBeGreaterThan(0)
-    expect(Number(old.cols.After['Tagged arrivals'])).toBeGreaterThan(0)
+    expect(Number(AFTER_R3.Installs)).toBeGreaterThan(0)
+    expect(Number(AFTER_R3['Tagged arrivals'])).toBeGreaterThan(0)
+    expect(AFTER_R3['Page views']).not.toBe(old.cols.After['Page views']) // the release day is out
     // The note under the panel is unchanged (L1).
     expect(text(card.find('.mc-captions').element)).toBe(old.caption.slice(old.caption.indexOf('before = ')))
   })
@@ -275,7 +301,7 @@ describe('release-before-after ≡ the bespoke release panel', () => {
   })
 
   it('reads the first-hit aggregate once, then the two windows in one statement', async () => {
-    const now = Date.parse('2026-09-28T16:00:00Z')
+    const now = Date.parse('2026-09-29T16:00:00Z')
     vi.setSystemTime(now)
     const d1 = sqliteD1(db)
     const res = await metricsPost(pagesContext(postJson('/api/metrics', { v: 1, requests: [
@@ -546,7 +572,7 @@ describe('Notes name each label once, however many columns repeat it', () => {
   // each count under Before and After): its Notes line names the row once, not once per column.
   it.each([
     ['campaign-country', FIXTURE_NOW],
-    ['release-before-after', Date.parse('2026-09-28T16:00:00Z')],
+    ['release-before-after', Date.parse('2026-09-29T16:00:00Z')],
   ] as const)('%s', async (preset, now) => {
     vi.setSystemTime(now)
     const card = await mountCard(preset, now)

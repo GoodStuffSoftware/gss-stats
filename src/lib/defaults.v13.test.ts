@@ -30,6 +30,7 @@ import type { DashboardConfig, DashboardPage } from '../types'
 import PROD_V8 from './__fixtures__/prodLayout.v8.json'
 import PROD_V9 from './__fixtures__/prodLayout.v9.json'
 import PROD_V12 from './__fixtures__/prodLayout.v12.json'
+import { CAMPAIGN_RETURNS } from './metrics/presets'
 
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x))
 /** Relative ranges are recomputed to "now" on every load; pin them so two loads compare equal. */
@@ -539,5 +540,58 @@ describe('clonePage (+ Page, Duplicate)', () => {
   })
   it('a copy of a drill page stays under the same root', () => {
     expect(clonePage({ ...src, isDefault: false, parentId: 'root' }, 'Copy').parentId).toBe('root')
+  })
+})
+
+describe('v13: fields main added since the nav branch point survive the nav migration', () => {
+  // Widget.fit (fit height to content), a card item's sparkline display (keeps `series`), and a
+  // repeat's `organic` arm (the Campaign returns preset). The v13 step maps pages with a spread,
+  // so none of these may be dropped or rewritten on the way from a stored v12 layout to v13.
+  const sparkSpec = (): any => {
+    const spec = clone(CAMPAIGN_RETURNS) as any
+    spec.sections[0].items.push({ id: 'd0-trend', label: { metric: true }, data: { metric: 'campaign.returnD0' }, display: { as: 'sparkline', series: 'daily' } })
+    return spec
+  }
+  const widgets = (): any[] => [
+    { id: 'w-fit-card', type: 'card', title: 'Returns', x: 0, y: 0, w: 6, h: 6, fit: 'content', card: { spec: clone(CAMPAIGN_RETURNS), from: 'campaign-returns' } },
+    { id: 'w-fit-preset', type: 'card', title: 'Scorecard', x: 6, y: 0, w: 6, h: 4, fit: 'content', card: { preset: 'campaign-scorecard' } },
+    { id: 'w-spark', type: 'card', title: 'Trend', x: 0, y: 6, w: 6, h: 4, card: { spec: sparkSpec() } },
+  ]
+  const pages = (overviewName: string) => [rawPage('bsk-overview', overviewName, { widgets: widgets() }), rawPage('p-mine', 'My page', { widgets: widgets() })]
+
+  it('migrateNavV13 itself passes every widget through untouched (fit, sparkline series, organic)', () => {
+    const before = pages('Best Sudoku · Overview')
+    const out = migrateNavV13(clone(before))
+    out.forEach((p, i) => expect(p.widgets, p.id).toEqual(before[i].widgets))
+    const spark = out[0].widgets.find((w) => w.id === 'w-spark')!.card as any
+    expect(spark.spec.sections[0].items.at(-1).display).toEqual({ as: 'sparkline', series: 'daily' })
+    expect((out[1].widgets[0].card as any).spec.repeat.organic).toBe(true)
+  })
+
+  it('a stored v12 layout keeps fit, the organic arm and the sparkline series through load, and is idempotent', () => {
+    const migrated = V12(pages('Best Sudoku · Overview'))
+    expect(migrated.version).toBe(CONFIG_VERSION)
+    for (const p of migrated.pages) {
+      const byId = Object.fromEntries(p.widgets.map((w) => [w.id, w as any]))
+      expect(byId['w-fit-card'].fit, p.id).toBe('content')
+      expect(byId['w-fit-preset'].fit, p.id).toBe('content')
+      expect(byId['w-fit-card'].card.spec.repeat.organic, p.id).toBe(true)
+      expect(byId['w-fit-card'].card.from, p.id).toBe('campaign-returns')
+      expect(byId['w-spark'].card.spec.sections[0].items.at(-1).display, p.id).toEqual({ as: 'sparkline', series: 'daily' })
+    }
+    // exactly what a load that skips the v13 step makes of the same widgets
+    const skipped = V13(pages('Overview'))
+    migrated.pages.forEach((p, i) => expect(stable(migrated).pages[i].widgets, p.id).toEqual(stable(skipped).pages[i].widgets))
+    expect(stable(normalizeConfig(clone(migrated)))).toEqual(stable(migrated))
+  })
+
+  it('the live production layout with fit on every widget keeps it through the v13 step', () => {
+    const raw = clone(PROD_V12) as any
+    for (const p of raw.pages) for (const w of p.widgets) w.fit = 'content'
+    const migrated = normalizeConfig(raw)
+    const all = migrated.pages.flatMap((p) => p.widgets)
+    expect(all.length).toBe((PROD_V12 as any).pages.reduce((n: number, p: any) => n + p.widgets.length, 0))
+    expect(all.every((w) => w.fit === 'content')).toBe(true)
+    expect(stable(normalizeConfig(clone(migrated)))).toEqual(stable(migrated))
   })
 })

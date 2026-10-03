@@ -86,7 +86,7 @@ onMounted(async () => {
 
   await nextTick()
   // What the store holds as far as this tab knows: a save only goes out when the config differs.
-  lastSavedJson = configJson(config)
+  lastPersisted = configJson(config)
   loaded.value = true
   rememberActivePage()
 })
@@ -107,9 +107,20 @@ watch(activePageId, () => {
 
 // ── Persistence (debounced) ───────────────────────────────────────────────────
 let saveTimer: number | undefined
-// The config as last loaded or saved. A change that leaves the config the same (e.g. the grid
-// re-reporting an unchanged layout when you switch pages) never goes out as a save.
-let lastSavedJson = ''
+// The config as last loaded or successfully saved: what the server holds. A save whose final state
+// equals it is skipped, so neither a fit card that settles back to its stored `h` (it passes through
+// a placeholder height while its data loads) nor the grid re-reporting an unchanged layout when you
+// switch pages writes the layout.
+// One PUT at a time: an edit that lands while a PUT is in flight is flushed when it resolves, and
+// compared against what that PUT actually left on the server (a failed PUT leaves the old state), so
+// A -> B -> back to A with B still in flight cannot be skipped and leave the server on B.
+let lastPersisted = ''
+// The body of the PUT awaiting its answer, if any. An edit is judged against it (not just against
+// lastPersisted), so reverting while a save is in flight still sends the revert.
+let inFlightBody: string | null = null
+let putQueued = false
+// The label to fall back to when a save is skipped (the one showing before the edit).
+let labelBeforeEdit: typeof saveState.value = 'idle'
 // The config as saved. grid-layout-plus writes its own bookkeeping (`moved`) onto every widget it
 // lays out — the first time each page is shown, so on every page switch — which is not part of the
 // layout (normWidget drops it on load): it never counts as a change and is never saved.
@@ -118,42 +129,43 @@ function configJson(c: DashboardConfig): string {
     return key === 'moved' && this && typeof this === 'object' && 'i' in this && 'x' in this ? undefined : value
   })
 }
-// The body of the newest PUT still awaiting its answer. A change is judged against it (not just
-// the last completed save), so reverting while a save is in flight still sends the revert.
-let inFlight: string | null = null
-// Every PUT gets the next number; lastSavedJson only moves forward, so an older PUT answering
-// after a newer one never points it back at the older body.
-let saveSeq = 0
-let savedSeq = 0
 function scheduleSave() {
   // Never save while signed out: a config that fell back to defaults because the load
   // was refused must not overwrite the stored one.
   if (!loaded.value || sessionExpired.value) return
-  if (configJson(config) === (inFlight ?? lastSavedJson)) return
-  saveState.value = 'saving'
+  // Nothing differs from what the server holds (or is about to): no save, and no "saving" flash.
+  // A timer from an earlier edit still runs, and settles the label if it finds nothing to send.
+  if (configJson(config) === (inFlightBody ?? lastPersisted)) return
+  if (saveState.value !== 'saving') labelBeforeEdit = saveState.value
+  // A stale tab stays labelled stale until it reloads; an edit does not clear that.
+  if (saveState.value !== 'stale') saveState.value = 'saving'
   clearTimeout(saveTimer)
   saveTimer = window.setTimeout(flushSave, 700)
 }
 async function flushSave() {
-  const body = configJson(config)
-  if (body === (inFlight ?? lastSavedJson)) {
-    // nothing new to send; a PUT still in flight reports its own outcome
-    if (inFlight === null) saveState.value = 'saved'
+  if (inFlightBody !== null) {
+    putQueued = true
     return
   }
-  const seq = ++saveSeq
-  inFlight = body
-  const ok = await saveConfig(JSON.parse(body) as DashboardConfig)
-  if (ok === true && seq > savedSeq) {
-    lastSavedJson = body
-    savedSeq = seq
+  const body = configJson(config)
+  if (body === lastPersisted) {
+    // Nothing to write; do not turn a standing "stale" or "error" label into a blank one.
+    if (saveState.value === 'saving') saveState.value = labelBeforeEdit
+    return
   }
-  // A newer PUT went out meanwhile: it owns inFlight and the status.
-  if (seq !== saveSeq) return
-  inFlight = null
+  inFlightBody = body
+  let ok: boolean | 'stale'
+  try {
+    ok = await saveConfig(JSON.parse(body) as DashboardConfig)
+  } finally {
+    inFlightBody = null
+  }
+  if (ok === true) lastPersisted = body
   saveState.value = ok === 'stale' ? 'stale' : ok ? 'saved' : 'error'
-  // The config moved on (or back) while this PUT was out: send what's on screen now.
-  if (ok === true && configJson(config) !== lastSavedJson) scheduleSave()
+  if (putQueued) {
+    putQueued = false
+    if (ok !== 'stale') await flushSave()
+  }
 }
 watch(config, scheduleSave, { deep: true })
 
@@ -470,8 +482,13 @@ function editChart(wgt: Widget) {
 function onEditorSave(wgt: Widget) {
   const list = activePage.value.widgets
   const idx = list.findIndex((x) => x.id === wgt.id)
-  if (idx >= 0) list[idx] = wgt
-  else list.push(wgt)
+  if (idx >= 0) {
+    // The editor works on a snapshot taken when it opened, and has no input for the grid box; the
+    // live entry may have moved or refitted since (a fit card refits as data loads), so keep its.
+    const live = list[idx]
+    Object.assign(wgt, { x: live.x, y: live.y, w: live.w, h: live.h })
+    list[idx] = wgt
+  } else list.push(wgt)
   editing.value = null
 }
 function onEditorRemove() {
