@@ -16,7 +16,6 @@ import {
   authSuccessRow,
   classifyFunnelPath,
   isAuthSuccessBase,
-  isGameCompleteDeferredPath,
   isInstallPromptInstalled,
   isRawInstallSignal,
   parseReturnPath,
@@ -319,7 +318,6 @@ export const METRIC_DEFS: MetricDef[] = [
   // (`/game/complete-deferred/<mode>/<difficulty>`, lib/campaigns.ts
   // GAME_COMPLETE_DEFERRED_PREFIX) — counts only, never gated on GAME_COMPLETE (a separate,
   // not-yet-live beacon family), so a range with no rows yet reads an explicit 0.
-  bskMetric({ id: 'bsk.deferredCompletions', unit: 'completion', path: isGameCompleteDeferredPath, instrumented: [] }),
   bskMetric({ id: 'bsk.popupShown', unit: 'showing', path: isPopupShown, instrumented: [TRACKING] }),
   bskMetric({ id: 'bsk.popupAccepts', unit: 'showing', subsetOf: 'bsk.popupShown', path: isPopupAccept, instrumented: [TRACKING] }),
   bskMetric({ id: 'bsk.authSuccess', unit: 'signin', path: isAuthSuccessBase, windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [] }),

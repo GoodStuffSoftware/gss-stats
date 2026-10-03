@@ -6,6 +6,10 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Removed
+- **The "Deferred completions (EU consent)" tile is gone.** Best Sudoku now sends those games as
+  ordinary completions, so the tile could only read 0; saved copies of it load without the tile.
+
 ### Fixed
 - **Sync all pages shows its real state.** The "Sync all pages" checkbox in the filter bar no
   longer always shows as on — it now genuinely reflects whether page date ranges are synced.
