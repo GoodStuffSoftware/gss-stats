@@ -404,6 +404,13 @@ function parseJson<T>(x: unknown, fallback: T): T {
 }
 const KINDS: readonly ReadingKind[] = ['daily', 'threshold', 'postflight', 'health']
 
+/** Readings stored before R-1b carry the old Play line, which named the ET hour of a /return/
+ * row ("... seen 2026-09-30 21:00 ET"). Keep the date only, at read time, so no stored row needs
+ * rewriting. Scoped to that line: every other note (flight starts etc.) keeps its time. */
+export function scrubPlayHour(note: string): string {
+  if (!note.startsWith('Play:') || !note.includes('/return/')) return note
+  return note.replace(/(\d{4}-\d{2}-\d{2}) \d{2}:\d{2} ET/g, '$1 ET')
+}
 export function mapReadingRow(row: Record<string, unknown>): ReadingRecord | null {
   const kind = String(row.kind ?? '') as ReadingKind
   if (!KINDS.includes(kind) || typeof row.read_at !== 'string') return null
@@ -424,7 +431,7 @@ export function mapReadingRow(row: Record<string, unknown>): ReadingRecord | nul
     proposal: str(row.proposal),
     decision: parseJson(row.decision, null),
     counts: parseJson<Record<string, number | null>>(row.counts, {}),
-    notes: parseJson<string[]>(row.notes, []),
+    notes: parseJson<string[]>(row.notes, []).map(scrubPlayHour),
   }
   // Rows from before migration 0003 carry no entry_kind: derive the same key from the fields.
   rec.entryKind = typeof row.entry_kind === 'string' && row.entry_kind ? row.entry_kind : readingEntryKind(rec)
