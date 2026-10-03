@@ -1,4 +1,4 @@
-import type { DashboardConfig, DashboardPage, GlobalFilters, LineSeries, Widget } from '../types'
+import type { DashboardConfig, DashboardPage, GlobalFilters, GroupMeta, LineSeries, Widget } from '../types'
 import { relativeRange, SINCE_FIRST_CAMPAIGN, SINCE_FIRST_UNTIL_LAST_CAMPAIGN } from './range'
 import { POPUPS, POPUP_RATE_SPECS, NO_OUTCOME_TRACKING_NOTE, SIGNIN_ELIGIBLE_CAVEAT } from './popupEvents'
 import { CAMPAIGNS } from './campaigns'
@@ -39,8 +39,17 @@ function w(p: Omit<Widget, 'i'>): Widget {
   return { ...p, i: p.id }
 }
 
-// Bumped to 12 for the Overview's small-sample note row (see compactSmallSampleNoteV12): the
-// one-line note drops from three grid rows to one and the cards below move up to meet it.
+// Bumped to 13 for page navigation (see migrateNavV13): every page gets a `group` (built-ins by id,
+// others from a name prefix, else "Mine"), drill pages can carry a `parentId`, pages an `icon`, the
+// config an optional `groupMeta` and `groupOrder` (normGroupOrder); the Best Sudoku pages lose their "Best Sudoku · " name prefix (the
+// group shows it); the pre-v13 tab order becomes the stored order (no more reorder on load); and
+// `activePageId` becomes the landing page for a first-time viewer (★ Overview) — each viewer's own
+// current page lives in their browser (lib/viewerPrefs.ts). functions/api/config.ts backs the stored
+// layout up to `dashboard:default:backup:v<stored>` on the first v13 save (production is stored at
+// v12 when this ships: `backup:v12`); a tab still running v12 code then gets 409 ("This tab is out
+// of date, reload") instead of overwriting it.
+// (Bumped to 12 for the Overview's small-sample note row (see compactSmallSampleNoteV12): the
+// one-line note drops from three grid rows to one and the cards below move up to meet it.)
 // (Bumped to 11 for the rest of the panels (ADR 0003 slice 7, see migratePanelsV11): every
 // remaining bespoke panel becomes a card preset (the release panel; the campaign funnel, country,
 // cost and returns panels; the Pop-ups rate table and sign-in eligibility) or a standard chart
@@ -59,7 +68,7 @@ function w(p: Omit<Widget, 'i'>): Widget {
 // uncustomized layout only. (Bumped to 7 for the bespoke-page → widget conversion migration —
 // see the v7 block: Overview/Campaigns went from `widgets: []` (rendered by the now-retired
 // OverviewPage.vue/CampaignComparePage.vue) to real generic widgets.)
-export const CONFIG_VERSION = 12
+export const CONFIG_VERSION = 13
 
 // The default "basic charts available out of the box" — a sensible analytics
 // starting layout. Users can move/resize/add/remove from here.
@@ -81,8 +90,31 @@ export function defaultWidgets(): Widget[] {
   ]
 }
 
+// Navigation groups (layout version 13). Groups are plain strings (DashboardPage.group), so these
+// are only the built-ins' groups and the catch-all for everything else; a new product is just a new
+// group name. BUILTIN_GROUP files each built-in page BY ID (never by name).
+export const GROUP_ALL_SITES = 'All sites'
+export const GROUP_BEST_SUDOKU = 'Best Sudoku'
+export const GROUP_MINE = 'Mine'
+const BUILTIN_GROUP: Readonly<Record<string, string>> = Object.freeze(
+  Object.assign(Object.create(null) as Record<string, string>, {
+    default: GROUP_ALL_SITES,
+    beacon: GROUP_ALL_SITES,
+    'bsk-overview': GROUP_BEST_SUDOKU,
+    'bsk-campaigns': GROUP_BEST_SUDOKU,
+    'bsk-popups': GROUP_BEST_SUDOKU,
+    'bsk-launch': GROUP_BEST_SUDOKU,
+  }),
+)
+/** The group a built-in page (by id) belongs to; undefined for any other page. */
+export function builtinGroup(id: string): string | undefined {
+  return Object.hasOwn(BUILTIN_GROUP, id) ? BUILTIN_GROUP[id] : undefined
+}
+
+// ★ Overview: the all-sites traffic page, the default page — pinned first, outside the groups,
+// and where a first-time viewer lands (defaultConfig's activePageId).
 export function defaultPage(): DashboardPage {
-  return { id: 'default', name: 'Overview', isDefault: true, filters: defaultFilters(), widgets: defaultWidgets() }
+  return { id: 'default', name: 'Overview', isDefault: true, group: GROUP_ALL_SITES, filters: defaultFilters(), widgets: defaultWidgets() }
 }
 
 // Canonical "Beacon" page — all geo-dataset charts (bot-free region/city/ISP/map).
@@ -108,10 +140,10 @@ export function defaultBeaconWidgets(): Widget[] {
 }
 export function defaultBeaconPage(): DashboardPage {
   // siteSel [] = all real sites; the multi-select picker narrows it.
-  return { id: 'beacon', name: 'Beacon', isDefault: false, filters: defaultFilters(), widgets: defaultBeaconWidgets() }
+  return { id: 'beacon', name: 'Beacon', isDefault: false, group: GROUP_ALL_SITES, filters: defaultFilters(), widgets: defaultBeaconWidgets() }
 }
 
-// "Best Sudoku · Traffic" (formerly "Best Sudoku launch") — a beacon page pre-filtered to
+// Best Sudoku "Traffic" (formerly "Best Sudoku launch") — a beacon page pre-filtered to
 // the Best Sudoku traffic (web + app). Refined 2026-09-26 now that the Overview, Campaigns,
 // and Pop-ups pages exist (see App.vue's former isBespokePage / OverviewPage.vue /
 // CampaignComparePage.vue history): every chart here is something those three pages don't
@@ -153,8 +185,12 @@ export { BEST_SUDOKU_SITES }
 export function defaultBestSudokuLaunchPage(): DashboardPage {
   return {
     id: 'bsk-launch',
-    name: 'Best Sudoku · Traffic',
+    name: 'Traffic',
     isDefault: false,
+    group: GROUP_BEST_SUDOKU,
+    // Its charts are all beacon (geo) charts, which would resolve to the map pin Beacon shows too
+    // (lib/icons.ts resolveIcon), so this one built-in carries an explicit icon.
+    icon: 'trending-up',
     filters: { ...defaultFilters(), siteSel: [...BEST_SUDOKU_SITES] },
     widgets: defaultBestSudokuLaunchWidgets(),
   }
@@ -297,8 +333,7 @@ function popupTitleMigrations(): PopupTitleMigration[] {
   return migrations
 }
 
-/** Non-destructive, idempotent, runs on every load (like reorderBskGroup — not version-
- * gated): moves SIGNIN_ELIGIBLE_CAVEAT/NO_OUTCOME_TRACKING_NOTE text that used to be baked
+/** Non-destructive, idempotent, runs on every load (not version-gated): moves SIGNIN_ELIGIBLE_CAVEAT/NO_OUTCOME_TRACKING_NOTE text that used to be baked
  * into these generated pop-up widget TITLES into a default CAPTION (widget.notes) instead,
  * restoring the plain name. Matched by widget id AND an EXACT old-title string — a title the
  * user has since edited, even by one character, no longer matches and is left completely
@@ -325,14 +360,17 @@ export function migratePopupCaveatTitles(pages: DashboardPage[]): DashboardPage[
 export function defaultBestSudokuPopupsPage(): DashboardPage {
   return {
     id: 'bsk-popups',
-    name: 'Best Sudoku · Pop-ups',
+    name: 'Pop-ups',
     isDefault: false,
+    group: GROUP_BEST_SUDOKU,
     filters: { ...defaultFilters(), siteSel: [...BEST_SUDOKU_SITES] },
     widgets: defaultBestSudokuPopupsWidgets(),
   }
 }
-export function isBestSudokuPopupsPage(p: DashboardPage): boolean {
-  return p.id === 'bsk-popups' || p.name.trim().toLowerCase() === 'best sudoku pop-ups' || p.name.trim().toLowerCase() === 'best sudoku · pop-ups'
+// Built-in page detection is BY ID ONLY (layout version 13): no name fallback, so renaming a page can
+// never change how it behaves (its notes, its filter bar, what "restore default charts" restores).
+export function isBestSudokuPopupsPage(p: Pick<DashboardPage, 'id'>): boolean {
+  return p.id === 'bsk-popups'
 }
 
 // "Best Sudoku campaigns" widgets — every panel of the former bespoke
@@ -487,13 +525,13 @@ export function migrateDeviceMixV9(page: DashboardPage): DashboardPage {
 }
 
 // Another bespoke-turned-widget page (see components/CampaignComparePage.vue — kept for
-// reference / git history only, no longer mounted by App.vue). Second in the Best Sudoku
-// group's tab order.
+// reference / git history only, no longer mounted by App.vue). Second in the Best Sudoku group.
 export function defaultCampaignComparePage(): DashboardPage {
-  return { id: 'bsk-campaigns', name: 'Best Sudoku · Campaigns', isDefault: false, filters: defaultFilters(), widgets: defaultCampaignsWidgets() }
+  return { id: 'bsk-campaigns', name: 'Campaigns', isDefault: false, group: GROUP_BEST_SUDOKU, filters: defaultFilters(), widgets: defaultCampaignsWidgets() }
 }
-export function isCampaignComparePage(p: DashboardPage): boolean {
-  return p.id === 'bsk-campaigns' || p.name.trim().toLowerCase() === 'best sudoku campaigns' || p.name.trim().toLowerCase() === 'best sudoku · campaigns'
+/** By id only (see isBestSudokuPopupsPage). */
+export function isCampaignComparePage(p: Pick<DashboardPage, 'id'>): boolean {
+  return p.id === 'bsk-campaigns'
 }
 
 // "Best Sudoku overview" (Part C) widgets — every panel of the former bespoke
@@ -690,7 +728,7 @@ export function defaultOverviewWidgets(): Widget[] {
   ]
 }
 // Another bespoke-turned-widget page (see components/OverviewPage.vue — kept for reference /
-// git history only, no longer mounted by App.vue), always FIRST among the Best Sudoku group:
+// git history only, no longer mounted by App.vue), FIRST in the Best Sudoku group:
 // "how is the release going, how is each campaign going, and what's happening right now."
 // Uses the global filter's date range for its timeline (the "existing range control"), so —
 // unlike the campaign-compare page — it keeps its own real `filters`, seeded to span since
@@ -698,26 +736,26 @@ export function defaultOverviewWidgets(): Widget[] {
 export function defaultOverviewPage(): DashboardPage {
   return {
     id: 'bsk-overview',
-    name: 'Best Sudoku · Overview',
+    name: 'Overview',
     isDefault: false,
+    group: GROUP_BEST_SUDOKU,
     filters: { ...defaultFilters(), since: '2026-01-01T00:00:00.000Z', rangeRel: '' },
     widgets: defaultOverviewWidgets(),
   }
 }
-export function isOverviewPage(p: DashboardPage): boolean {
-  return p.id === 'bsk-overview' || p.name.trim().toLowerCase() === 'best sudoku overview' || p.name.trim().toLowerCase() === 'best sudoku · overview'
+/** The Best Sudoku overview page, by id only (see isBestSudokuPopupsPage). */
+export function isOverviewPage(p: Pick<DashboardPage, 'id'>): boolean {
+  return p.id === 'bsk-overview'
 }
 
-// The GSS pages (id-identified, always first in tab order — see reorderBskGroup) and the
-// Best Sudoku group in its required tab order: Overview, Campaigns, Pop-ups, Launch/Traffic.
-// reorderBskGroup is idempotent, so running it over an already-correct list is a no-op —
-// applied here too rather than hand-ordering, so defaultConfig() can never drift out of sync
-// with what normalizeConfig() enforces on every load.
+// The built-in pages in their order, which is data (layout version 13): ★ Overview (pinned),
+// then the "All sites" group (Beacon), then the "Best Sudoku" group (Overview, Campaigns, Pop-ups,
+// Traffic). A first-time viewer lands on ★ Overview.
 export function defaultConfig(): DashboardConfig {
   return {
     version: CONFIG_VERSION,
-    activePageId: 'bsk-overview',
-    pages: reorderBskGroup([defaultPage(), defaultBeaconPage(), defaultOverviewPage(), defaultCampaignComparePage(), defaultBestSudokuPopupsPage(), defaultBestSudokuLaunchPage()]),
+    activePageId: 'default',
+    pages: [defaultPage(), defaultBeaconPage(), defaultOverviewPage(), defaultCampaignComparePage(), defaultBestSudokuPopupsPage(), defaultBestSudokuLaunchPage()],
   }
 }
 
@@ -759,15 +797,10 @@ export function beaconizeWidget(wd: Widget): Widget {
   return next
 }
 
-// The launch page, whether it's the auto-added one (id 'bsk-launch') or one the user
-// built by duplicating another page and renaming it.
-export function isBestSudokuLaunchPage(p: DashboardPage): boolean {
-  return (
-    p.id === 'bsk-launch' ||
-    p.name.trim().toLowerCase() === 'best sudoku launch' ||
-    p.name.trim().toLowerCase() === 'best sudoku · traffic' ||
-    p.name.trim().toLowerCase() === 'best sudoku traffic'
-  )
+// The Best Sudoku launch/Traffic page, by id only (see isBestSudokuPopupsPage). A page the owner
+// built by duplicating another one and renaming it no longer counts: its behaviour is its own.
+export function isBestSudokuLaunchPage(p: Pick<DashboardPage, 'id'>): boolean {
+  return p.id === 'bsk-launch'
 }
 
 // The right "factory" chart set for a page when restoring defaults. The two canonical
@@ -896,13 +929,230 @@ function normAxisTitles(raw: any): { left?: string; right?: string } | undefined
 }
 
 function normPage(p: any, i: number): DashboardPage {
-  return {
-    id: String(p.id ?? cryptoId()),
+  const id = String(p.id ?? cryptoId())
+  const page: DashboardPage = {
+    id,
     name: String(p.name ?? `Page ${i + 1}`),
     isDefault: !!p.isDefault,
+    group: cleanGroupName(p.group) || builtinGroup(id) || GROUP_MINE,
     filters: normFilters(p.filters),
     widgets: Array.isArray(p.widgets) ? p.widgets.map(normWidget) : defaultWidgets(),
   }
+  // Checked again against the other pages in normDrillLinks (it must name an existing root page).
+  if (typeof p.parentId === 'string' && p.parentId) page.parentId = p.parentId
+  if (typeof p.icon === 'string' && ICON_KEY_RE.test(p.icon)) page.icon = p.icon
+  return page
+}
+
+// ── Navigation (layout version 13) ─────────────────────────────────────────────────────────
+// Page groups, drill-page parents, page icons and group badges. The shared config only ever holds
+// short, validated strings for these (never markup or SVG): lib/icons.ts maps an icon key to a
+// component and a group name to its badge.
+export const GROUP_NAME_MAX = 60
+/** A group name as stored: whitespace collapsed, trimmed, capped; '' when there is none. */
+export function cleanGroupName(raw: unknown): string {
+  return typeof raw === 'string' ? raw.replace(/\s+/g, ' ').trim().slice(0, GROUP_NAME_MAX).trim() : ''
+}
+/** The longest page name the rename field and the wizard accept. */
+export const PAGE_NAME_MAX = 80
+/** A page name as typed in: whitespace collapsed, trimmed, capped; '' when there is none. */
+export function cleanPageName(raw: unknown): string {
+  return typeof raw === 'string' ? raw.replace(/\s+/g, ' ').trim().slice(0, PAGE_NAME_MAX).trim() : ''
+}
+// An icon registry key: lowercase letters, digits and dashes. A well-formed key the registry does
+// not know is kept (it resolves to the generic page icon, lib/icons.ts), so a key added to the
+// registry later still works for a config saved before it.
+const ICON_KEY_RE = /^[a-z0-9][a-z0-9-]{0,39}$/
+
+/** How deep drill pages nest: a top-level page is depth 0, its drill pages 1, theirs 2, … A drill
+ * made from a page already this deep attaches to its ancestor one level up (lib/nav.ts
+ * drillParentFor), and a stored tree deeper than this is re-attached the same way on load. */
+export const MAX_DRILL_DEPTH = 8
+
+/** Every load: a drill page's `parentId` must name an existing page other than itself (its
+ * IMMEDIATE parent — a drill from a drill page nests under that drill page), the chain of parents
+ * must end at a top-level page without looping, and the default page is never a drill page. A
+ * missing parent, a self-link or a link that closes a loop is dropped (leaving an ordinary page); a
+ * page nested deeper than MAX_DRILL_DEPTH is re-attached to its ancestor at depth
+ * MAX_DRILL_DEPTH - 1. Every drill page sits in its top-level page's group. Mutates the (freshly
+ * normalised) pages in place. */
+export function normDrillLinks(pages: DashboardPage[]): void {
+  const byId = new Map(pages.map((p) => [p.id, p] as const))
+  // 1) links to nothing, to itself, from the default page, or closing a loop: dropped
+  for (const p of pages) {
+    if (!p.parentId) continue
+    const parent = byId.get(p.parentId)
+    if (!parent || parent === p || p.isDefault) {
+      delete p.parentId
+      continue
+    }
+    const seen = new Set([p.id])
+    let cur: DashboardPage | undefined = parent
+    while (cur) {
+      if (seen.has(cur.id)) {
+        delete p.parentId
+        break
+      }
+      seen.add(cur.id)
+      cur = cur.parentId ? byId.get(cur.parentId) : undefined
+    }
+  }
+  // 2) the ancestors, nearest first (no loops are left)
+  const chain = (p: DashboardPage): DashboardPage[] => {
+    const out: DashboardPage[] = []
+    let cur = p.parentId ? byId.get(p.parentId) : undefined
+    while (cur) {
+      out.push(cur)
+      cur = cur.parentId ? byId.get(cur.parentId) : undefined
+    }
+    return out
+  }
+  // 3) too deep: re-attached to the ancestor at depth MAX_DRILL_DEPTH - 1 (only ever lowers depths)
+  for (const p of pages) {
+    const up = chain(p)
+    if (up.length > MAX_DRILL_DEPTH) p.parentId = up[up.length - MAX_DRILL_DEPTH].id
+  }
+  // 4) a drill page is in its top-level page's group
+  for (const p of pages) {
+    const up = chain(p)
+    if (up.length) p.group = up[up.length - 1].group
+  }
+}
+
+/** A page name that starts with a known group's name files under that group (layout version 13):
+ * "Best Sudoku · Retention" → group "Best Sudoku", name "Retention" (the " · " prefix is dropped,
+ * the group segment shows it); "Best Sudoku launch copy" → group "Best Sudoku", name unchanged. The
+ * group name must be followed by " · ", another separator, a space or the end (so "Minesweeper" is
+ * not "Mine"). Case-insensitive; the longest matching group wins. null = no group prefix. */
+export function groupFromName(name: string, groups: readonly string[]): { group: string; name: string } | null {
+  const trimmed = name.trim()
+  const lower = trimmed.toLowerCase()
+  for (const g of [...groups].sort((a, b) => b.length - a.length)) {
+    if (!g || !lower.startsWith(g.toLowerCase())) continue
+    const rest = trimmed.slice(g.length)
+    if (rest === '') return { group: g, name: trimmed }
+    const dot = /^\s*·\s*/.exec(rest)
+    if (dot) return { group: g, name: rest.slice(dot[0].length).trim() || trimmed }
+    if (/^[\s\-–—:/|]/.test(rest)) return { group: g, name: trimmed }
+  }
+  return null
+}
+
+// The pre-v13 tab order (the retired reorderBskGroup, run on every load up to layout version 12):
+// the GSS pages first, then the Best Sudoku group in a fixed order, then every other page in its
+// existing relative order. The v13 migration applies it ONCE, so the order each viewer saw before
+// becomes the stored order; after that the order is data (group order, then array order), never
+// re-sorted.
+const PRE_V13_GSS_IDS = new Set(['default', 'beacon'])
+const PRE_V13_BSK_ORDER = ['bsk-overview', 'bsk-campaigns', 'bsk-popups', 'bsk-launch']
+function preV13TabOrder(pages: DashboardPage[]): DashboardPage[] {
+  const bskFound = new Map(pages.filter((p) => PRE_V13_BSK_ORDER.includes(p.id)).map((p) => [p.id, p] as const))
+  const bsk = PRE_V13_BSK_ORDER.map((id) => bskFound.get(id)).filter((p): p is DashboardPage => !!p)
+  const gss = pages.filter((p) => PRE_V13_GSS_IDS.has(p.id))
+  const rest = pages.filter((p) => !PRE_V13_GSS_IDS.has(p.id) && !PRE_V13_BSK_ORDER.includes(p.id))
+  return [...gss, ...bsk, ...rest]
+}
+// The Best Sudoku built-ins' known default names (every name a build has given them) → their v13
+// name. A built-in the owner renamed to anything else keeps that name (a "Best Sudoku · " prefix is
+// still dropped).
+const V13_BSK_NAME: Readonly<Record<string, { from: readonly string[]; to: string }>> = Object.freeze({
+  'bsk-overview': { from: ['best sudoku overview', 'best sudoku · overview'], to: 'Overview' },
+  'bsk-campaigns': { from: ['best sudoku campaigns', 'best sudoku · campaigns'], to: 'Campaigns' },
+  'bsk-popups': { from: ['best sudoku pop-ups', 'best sudoku · pop-ups'], to: 'Pop-ups' },
+  'bsk-launch': { from: ['best sudoku launch', 'best sudoku · traffic', 'best sudoku traffic'], to: 'Traffic' },
+})
+
+/** v13 (once, version-gated): page navigation.
+ *  - The pre-v13 tab order becomes the stored order (preV13TabOrder), so nothing moves.
+ *  - Built-ins get their group by id (BUILTIN_GROUP): ★ Overview and Beacon "All sites" (★ Overview
+ *    is shown pinned first, outside the groups), the four Best Sudoku pages "Best Sudoku", named
+ *    Overview, Campaigns, Pop-ups and Traffic.
+ *  - Every other page files under the group its name starts with (groupFromName, the " · " prefix
+ *    dropped), else "Mine". Existing drill pages are NOT linked to a parent: nothing stored says
+ *    which page they came from (their widgets have fresh ids), so they stay ordinary pages in their
+ *    group; only drills made from now on are nested.
+ *  - Traffic (bsk-launch) gets `icon: "trending-up"`, the one explicit built-in icon (its beacon
+ *    charts would otherwise resolve to Beacon's map pin); every other icon stays automatic.
+ * Never adds, drops or edits a page's widgets or filters. Returns new page objects. */
+export function migrateNavV13(pages: DashboardPage[]): DashboardPage[] {
+  const nameGroups = [GROUP_ALL_SITES, GROUP_BEST_SUDOKU, GROUP_MINE]
+  return preV13TabOrder(pages).map((p) => {
+    const bg = builtinGroup(p.id)
+    if (bg) {
+      const known = Object.hasOwn(V13_BSK_NAME, p.id) ? V13_BSK_NAME[p.id] : undefined
+      let name = p.name
+      if (known && known.from.includes(name.trim().toLowerCase())) name = known.to
+      else {
+        const m = groupFromName(name, [bg])
+        if (m) name = m.name
+      }
+      const next: DashboardPage = { ...p, group: bg, name }
+      if (p.id === 'bsk-launch' && !next.icon) next.icon = 'trending-up'
+      return next
+    }
+    const m = groupFromName(p.name, nameGroups)
+    return { ...p, group: m?.group ?? GROUP_MINE, name: m?.name ?? p.name }
+  })
+}
+
+// groupMeta (layout version 13): per-group badge overrides, validated on every load because they
+// are rendered as a colour and an image source. A colour is a palette slot ("g0"…"g6") or a hex
+// colour; a logo is an https: URL, a same-origin path, or a base64 image data URL.
+const GROUP_COLOR_RE = /^(?:g[0-6]|#[0-9a-f]{3}|#[0-9a-f]{6})$/i
+const GROUP_LOGO_RE = /^(?:https:\/\/[^\s"'<>()\\]{1,2000}|\/(?!\/)[^\s"'<>()\\]{0,2000}|data:image\/(?:png|jpeg|gif|webp|svg\+xml);base64,[A-Za-z0-9+/=]{1,40000})$/
+const GROUP_META_MAX = 50
+export function normGroupMeta(raw: unknown): Record<string, GroupMeta> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const out: [string, GroupMeta][] = []
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (out.length >= GROUP_META_MAX) break
+    const group = cleanGroupName(k)
+    if (!group || group === '__proto__' || !v || typeof v !== 'object') continue
+    const m: GroupMeta = {}
+    const { color, logo } = v as { color?: unknown; logo?: unknown }
+    if (typeof color === 'string' && GROUP_COLOR_RE.test(color)) m.color = color
+    if (typeof logo === 'string' && GROUP_LOGO_RE.test(logo)) m.logo = logo
+    if (m.color || m.logo) out.push([group, m])
+  }
+  return out.length ? Object.fromEntries(out) : undefined
+}
+
+// groupOrder (layout version 13, additive): the drawer's group order, including groups that have
+// no page yet. Stored only when it says more than the pages do (see normGroupOrder).
+const GROUP_ORDER_MAX = 50
+/** The groups the pages file under, in the order they first appear: every top-level page's group
+ * except ★ Overview's (the default page is shown pinned, outside the groups). */
+export function pageGroupsOf(pages: readonly DashboardPage[]): string[] {
+  const ids = new Set(pages.map((p) => p.id))
+  const out: string[] = []
+  for (const p of pages) {
+    if (p.isDefault || (p.parentId && p.parentId !== p.id && ids.has(p.parentId))) continue
+    if (!out.includes(p.group)) out.push(p.group)
+  }
+  return out
+}
+/** Every group, in display order: `order` first, then the pages' groups it misses (pageGroupsOf). */
+export function unionGroupOrder(order: readonly string[], pages: readonly DashboardPage[]): string[] {
+  const out = [...order]
+  for (const g of pageGroupsOf(pages)) if (!out.includes(g)) out.push(g)
+  return out
+}
+/** Every load: the stored list sanitised (strings only, cleaned like a group name, no repeats, at
+ * most GROUP_ORDER_MAX kept), then every group the pages use that it misses appended in the order
+ * they first appear; groups with no page stay listed. undefined when the result is exactly the
+ * order the pages give on their own (nothing worth storing). */
+export function normGroupOrder(raw: unknown, pages: readonly DashboardPage[]): string[] | undefined {
+  const listed: string[] = []
+  if (Array.isArray(raw)) {
+    for (const x of raw.slice(0, GROUP_ORDER_MAX * 4)) {
+      if (listed.length >= GROUP_ORDER_MAX) break
+      const g = cleanGroupName(x)
+      if (g && !listed.includes(g)) listed.push(g)
+    }
+  }
+  const all = unionGroupOrder(listed, pages)
+  const derived = pageGroupsOf(pages)
+  return all.length === derived.length && all.every((g, i) => g === derived[i]) ? undefined : all
 }
 
 // Normalize a loaded config. Handles v2 (pages), migrates v1 (single page), and
@@ -951,28 +1201,12 @@ export function normalizeConfig(raw: any): DashboardConfig {
     // (this migration having already run, or a user who somehow added widgets before this
     // shipped) is left completely alone — never dropped, never re-populated, never duplicated.
     //
-    // Decide the page's kind ONCE, by id FIRST: isOverviewPage/isCampaignComparePage also
-    // match by NAME as a fallback (for a page that predates the id-based canonical scheme),
-    // so a page id'd 'bsk-campaigns' but somehow named "Best Sudoku overview" (stale/manual
-    // edit) used to match BOTH predicates — the id branch ran first, got real widgets, then
-    // the name-fallback branch's `widgets.length === 0` check was already false, silently
-    // skipping it, so a campaigns-id'd page ended up with OVERVIEW widgets. Resolving to a
-    // single `kind` per page (id checked before name, mutually exclusive) makes that
-    // impossible: a page is converted as exactly one of 'overview' | 'campaigns' | neither.
+    // The page's kind is decided by id alone (since layout version 13 there is no name fallback),
+    // so a page is converted as exactly one of 'overview' | 'campaigns' | neither, whatever its name.
     for (const p of pages) {
       if (p.widgets.length !== 0) continue
-      const kind: 'overview' | 'campaigns' | null =
-        p.id === 'bsk-overview'
-          ? 'overview'
-          : p.id === 'bsk-campaigns'
-            ? 'campaigns'
-            : isOverviewPage(p)
-              ? 'overview'
-              : isCampaignComparePage(p)
-                ? 'campaigns'
-                : null
-      if (kind === 'overview') p.widgets = defaultOverviewWidgets()
-      else if (kind === 'campaigns') p.widgets = defaultCampaignsWidgets()
+      if (isOverviewPage(p)) p.widgets = defaultOverviewWidgets()
+      else if (isCampaignComparePage(p)) p.widgets = defaultCampaignsWidgets()
     }
     // v8 migration: add the completions breakdown widget (mode × difficulty) to "Best Sudoku
     // overview" ONCE — but ONLY onto a page whose widget set still matches the exact factory
@@ -1028,14 +1262,22 @@ export function normalizeConfig(raw: any): DashboardConfig {
     // default caption instead. A title the user has since edited never matches, so it's
     // left untouched.
     const withCaptionsMigrated = migratePopupCaveatTitles(pages)
-    // Tab-order reorder + rename (every load, not version-gated — see reorderBskGroup):
-    // GSS pages first, then the Best Sudoku group in fixed order (Overview, Campaigns,
-    // Pop-ups, Launch/Traffic), then every user-created page in its existing relative
-    // order. Pure reordering + a consistent-name rename — never drops, renames, or edits
-    // a widget.
-    const ordered = reorderBskGroup(withCaptionsMigrated)
-    const activePageId = ordered.some((p: DashboardPage) => p.id === raw.activePageId) ? raw.activePageId : ordered[0].id
-    return { version: CONFIG_VERSION, activePageId, pages: ordered, syncRange: !!raw.syncRange }
+    // v13 migration (see CONFIG_VERSION and migrateNavV13): groups, the Best Sudoku short names,
+    // the pre-v13 tab order as the stored order, Traffic's icon. Version-gated, so a later rename,
+    // move or reorder is never undone. The order is data from here on: no reorder runs on load.
+    const version = Number(raw.version) || 0
+    const ordered = version < 13 ? migrateNavV13(withCaptionsMigrated) : withCaptionsMigrated
+    // Every load: drill links must name an existing root page (normDrillLinks).
+    normDrillLinks(ordered)
+    // `activePageId` is the landing page for a first-time viewer (each viewer's current page lives
+    // in their browser since v13 — lib/viewerPrefs.ts): ★ Overview after the v13 migration, and
+    // whenever the stored one no longer exists.
+    const pinnedId = (ordered.find((p: DashboardPage) => p.isDefault) ?? ordered[0]).id
+    const wanted = version < 13 ? pinnedId : raw.activePageId
+    const activePageId = ordered.some((p: DashboardPage) => p.id === wanted) ? wanted : pinnedId
+    const groupMeta = normGroupMeta(raw.groupMeta)
+    const groupOrder = normGroupOrder(raw.groupOrder, ordered)
+    return { version: CONFIG_VERSION, activePageId, pages: ordered, syncRange: !!raw.syncRange, ...(groupMeta ? { groupMeta } : {}), ...(groupOrder ? { groupOrder } : {}) }
   }
   // v1 — single page; wrap as the default page
   if (raw && typeof raw === 'object' && Array.isArray(raw.widgets)) {
@@ -1043,6 +1285,7 @@ export function normalizeConfig(raw: any): DashboardConfig {
       id: 'default',
       name: 'Overview',
       isDefault: true,
+      group: GROUP_ALL_SITES,
       filters: normFilters(raw.filters),
       widgets: raw.widgets.map(normWidget),
     }
@@ -1051,60 +1294,28 @@ export function normalizeConfig(raw: any): DashboardConfig {
   return defaultConfig()
 }
 
-// ── Tab order (Part D): GSS tab(s) first, then the Best Sudoku group together, in a fixed
-// order, then every user-created page in its existing relative order. Idempotent (running it
-// twice — or over an already-correct list, e.g. a fresh defaultConfig()) produces the exact
-// same order) and non-destructive: it only ever reorders + renames pages, it never adds,
-// drops, or touches a page's widgets/filters. ────────────────────────────────────────────
-const GSS_PAGE_IDS = new Set(['default', 'beacon'])
-const BSK_PAGE_ORDER = ['bsk-overview', 'bsk-campaigns', 'bsk-popups', 'bsk-launch']
-// Old default names this migration will rename FROM, so a page the user deliberately
-// renamed to something else entirely is left alone (only its position changes).
-const BSK_RENAME: Record<string, { from: string[]; to: string }> = {
-  'bsk-overview': { from: ['best sudoku overview', 'best sudoku · overview'], to: 'Best Sudoku · Overview' },
-  'bsk-campaigns': { from: ['best sudoku campaigns', 'best sudoku · campaigns'], to: 'Best Sudoku · Campaigns' },
-  'bsk-popups': { from: ['best sudoku pop-ups', 'best sudoku · pop-ups'], to: 'Best Sudoku · Pop-ups' },
-  'bsk-launch': { from: ['best sudoku launch', 'best sudoku · traffic', 'best sudoku traffic'], to: 'Best Sudoku · Traffic' },
-}
-function renameBskPage(p: DashboardPage): DashboardPage {
-  const r = BSK_RENAME[p.id]
-  if (!r) return p
-  const cur = p.name.trim().toLowerCase()
-  if (cur === r.to.toLowerCase()) return p // already the consistent name — no-op
-  if (!r.from.includes(cur)) return p // user renamed it to something else — leave it
-  return { ...p, name: r.to }
-}
-export function reorderBskGroup(pages: DashboardPage[]): DashboardPage[] {
-  const renamed = pages.map(renameBskPage)
-  const isBsk = (p: DashboardPage) => BSK_PAGE_ORDER.includes(p.id)
-  const gss = renamed.filter((p) => GSS_PAGE_IDS.has(p.id))
-  const bskFound = new Map(renamed.filter(isBsk).map((p) => [p.id, p]))
-  const bsk = BSK_PAGE_ORDER.map((id) => bskFound.get(id)).filter((p): p is DashboardPage => !!p)
-  const rest = renamed.filter((p) => !GSS_PAGE_IDS.has(p.id) && !isBsk(p))
-  const next = [...gss, ...bsk, ...rest]
-  // Idempotency fast-path: if nothing moved or was renamed, return the ORIGINAL array (same
-  // page objects) rather than a freshly-built one, so an already-ordered config round-trips
-  // with no spurious diff.
-  if (next.length === pages.length && next.every((p, i) => p === pages[i])) return pages
-  return next
-}
-
 export function cryptoId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID().slice(0, 8)
   return 'w' + Math.floor(Math.random() * 1e9).toString(36)
 }
 
-// Deep-clone a page with fresh ids (for duplication).
+// Deep-clone a page with fresh ids (for duplication). The copy keeps the source's group and icon,
+// and a copy of a drill page stays a drill page of the same parent (its parentId); callers that make
+// a new ROOT page (+ Page) or a new drill (App.vue openFilteredPage) set parentId/icon themselves.
 export function clonePage(src: DashboardPage, name: string): DashboardPage {
   const id = cryptoId()
-  return {
+  const copy: DashboardPage = {
     id,
     name,
     isDefault: false,
+    group: src.group,
     filters: JSON.parse(JSON.stringify(src.filters)),
     widgets: src.widgets.map((wd) => {
       const wid = cryptoId()
       return { ...JSON.parse(JSON.stringify(wd)), id: wid, i: wid }
     }),
   }
+  if (src.parentId) copy.parentId = src.parentId
+  if (src.icon) copy.icon = src.icon
+  return copy
 }

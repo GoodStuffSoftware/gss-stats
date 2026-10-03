@@ -124,8 +124,8 @@ describe('the v10 → v11 upgrade (the rest of the panels as cards and charts)',
 })
 
 describe('the v11 → v12 upgrade (the Overview small-sample note takes one grid row)', () => {
-  it('this code writes layout version 12', () => {
-    expect(CONFIG_VERSION).toBe(12)
+  it('this code writes layout version 12 or later', () => {
+    expect(CONFIG_VERSION).toBeGreaterThanOrEqual(12)
   })
   it('the first v12 save over a stored v11 layout backs it up to backup:v11; a v11 tab then gets 409', async () => {
     const v11 = JSON.stringify(cfg(11, 'v11 layout'))
@@ -133,6 +133,42 @@ describe('the v11 → v12 upgrade (the Overview small-sample note takes one grid
     expect((await put(kv, cfg(12, 'first v12'))).status).toBe(200)
     expect(store.get('dashboard:default:backup:v11')).toBe(v11)
     expect((await put(kv, cfg(11, 'old tab'))).status).toBe(409)
-    expect((await put(kv, cfg(13, 'crafted'))).status).toBe(400)
+    expect((await put(kv, cfg(CONFIG_VERSION + 1, 'crafted'))).status).toBe(400)
+  })
+})
+
+// Layout version 13 (page navigation: groups, drill parents, icons; the active page per viewer).
+// The live dashboard is stored at v12 when this ships: the first v13 save backs it up, and any tab
+// still running v12 code must fail safely from then on — refused with 409, KV untouched — never
+// overwrite the v13 layout (which would silently undo the migration for everyone).
+describe('the v12 → v13 upgrade (page navigation)', () => {
+  it('this code writes layout version 13', () => {
+    expect(CONFIG_VERSION).toBe(13)
+  })
+  it('the first v13 save over the stored v12 layout backs it up to backup:v12, once', async () => {
+    const v12 = JSON.stringify(cfg(12, 'live v12 layout'))
+    const { kv, store, puts } = fakeKv({ 'dashboard:default': v12 })
+    expect((await put(kv, cfg(13, 'first v13'))).status).toBe(200)
+    expect(puts).toEqual(['dashboard:default:backup:v12', 'dashboard:default'])
+    expect(store.get('dashboard:default:backup:v12')).toBe(v12)
+    await put(kv, cfg(13, 'second v13'))
+    expect(store.get('dashboard:default:backup:v12')).toBe(v12) // never overwritten
+  })
+  it('an old v12 tab saving over a stored v13 layout gets 409 "out of date, reload", and KV is untouched', async () => {
+    const v13 = JSON.stringify(cfg(13, 'migrated'))
+    const { kv, store, puts } = fakeKv({ 'dashboard:default': v13 })
+    const res = await put(kv, cfg(12, 'old tab'))
+    expect(res.status).toBe(409)
+    const body: any = await res.json()
+    expect(body).toMatchObject({ error: 'stale', storedVersion: 13, incomingVersion: 12 })
+    expect(body.message).toMatch(/out of date, reload/)
+    expect(puts).toEqual([])
+    expect(store.get('dashboard:default')).toBe(v13)
+    expect([...store.keys()]).toEqual(['dashboard:default']) // no backup written either
+  })
+  it('a body claiming a version above 13 gets 400 and changes nothing', async () => {
+    const { kv, puts } = fakeKv({ 'dashboard:default': JSON.stringify(cfg(13)) })
+    expect((await put(kv, cfg(14, 'crafted'))).status).toBe(400)
+    expect(puts).toEqual([])
   })
 })

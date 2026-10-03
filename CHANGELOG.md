@@ -12,6 +12,45 @@ All notable changes to **gss-stats** are documented here. The format follows
   to show, before/after window and country picks, table column and row-label headings, "leave out
   a measured 0" and the column frame now have controls, and a preset card opens with its settings
   visible (read-only) until you choose Customize.
+- **Pages belong to groups.** Every page is filed under a group — "All sites", "Best Sudoku", or
+  "Mine" for your own pages unless their name starts with a group's name — and the Best Sudoku
+  pages drop their "Best Sudoku · " prefix (Overview, Campaigns, Pop-ups, Traffic). Drill pages
+  made before this can't be traced to the page they came from, so they stay ordinary pages under
+  Mine.
+- **Every page has an icon.** It comes from what the page's charts show (traffic, map, pop-ups,
+  campaigns, completions, ads, overview) unless someone picks one; a drill page shows the icon of
+  its top-level page with a small drill mark, and Traffic gets its own traffic-line icon.
+- **A breadcrumb in the header switches pages.** Group / page / drill page / …, the whole path,
+  each opening a list: every group (and ★ Overview), the pages in the group with their drill pages
+  nested under them (and a new page there), or a drill page's siblings, its own drill pages and the
+  way back. Picking a group opens the page you last viewed in it. Each group has a lettered,
+  coloured badge. When the path is too long its middle folds into "…"; on a phone it always does,
+  and the lists open from the bottom of the screen.
+- **Every page is in a drawer behind ☰.** It opens over the charts on any screen: ★ Overview,
+  then each group (collapsible) with its pages indented under it and each level of drill pages one
+  step further in (foldable), a ⋯ menu on every page and every group, × on drill pages, and
+  "+ New". The ☰ button shows the current group's badge.
+- **Every page has a menu.** Rename, duplicate, change icon, move to another group (or a new one
+  named right there), restore default charts, delete. Drill pages have the same menu; moving one
+  makes it a page of its own. ★ Overview can't be moved or deleted.
+- **Create pages and groups from the drawer.** "+ New" asks what to make and walks through a few
+  steps: a page's name, group and starting charts (blank, a copy, or a built-in page's defaults)
+  and icon; a group's name and which pages to move into it. A group can stay empty.
+- **Rename anything where it is.** Page and group names turn into a text field in the drawer or
+  the breadcrumb (from a menu, or by double-clicking a breadcrumb segment) — no pop-up prompts —
+  and the new name shows everywhere at once, the browser tab's title included.
+- **Groups can be renamed and deleted.** Renaming onto another group's name is refused rather than
+  merged; deleting a group says how many pages it holds and moves them to the group you pick
+  (Mine by default). ★ Overview never moves.
+- **Pick a page's icon.** Search about forty icons in five groups, or choose Auto, which shows
+  what the page would get on its own.
+- **Press / to search every page.** Page names match first, then charts' titles, each result with
+  its icon and group; arrow keys move, Enter opens, Esc closes.
+- **Drill pages nest under the page they came from.** A drill opens its page straight away, in the
+  same group, named by what it adds (for example "California" under "mobile"); a drill from a
+  drill page nests under that drill page, up to eight levels deep. Deleting a page deletes every
+  drill page under it, asked once; when the page you're on goes, you land on its parent, else the
+  page before it in its group, else the group's first page, else ★ Overview.
 - **Cards can fit their height to their content.** Tick "Fit height to content" in a card's
   editor and the panel grows or shrinks to what it shows, with no clipping or scrollbar; it is
   off by default, so every existing layout looks exactly as it did.
@@ -94,6 +133,19 @@ All notable changes to **gss-stats** are documented here. The format follows
   install rate** on the Pop-ups page, as counts.
 
 ### Changed
+- **The dashboard uses the full width of the window.** The header, the filter bar and the charts
+  span the screen instead of a centred column, so wide screens show more; the pinned filter bar
+  spans it too.
+- **Deleting a page also deletes its drill pages.** You're asked once, with the count ("Delete
+  Traffic and its 3 drill pages?").
+- **The page you're on is yours alone.** It's remembered in your own browser instead of the shared
+  dashboard, so switching pages no longer saves anything or moves anyone else, and a first-time
+  visitor lands on ★ Overview.
+- **Built-in pages are recognised by what they are, not their name.** Renaming a page no longer
+  changes how it behaves (its notes, its filter bar, what "restore default charts" brings back).
+- **Saved layouts move to version 13.** The first save keeps a backup of the previous layout
+  (version 12), and a tab still running the previous version is told to reload instead of
+  overwriting the new one.
 - **Campaign return visits now include the installed app.** A campaign's return buckets count
   return visits from the Android app as well as the web site, still from its attribution start.
 - **Return, game-completion and tutorial-completion rows can no longer be split by hour, place or device.**
@@ -111,6 +163,8 @@ All notable changes to **gss-stats** are documented here. The format follows
   wired up".
 
 ### Removed
+- **The page tab strip.** The breadcrumb, the page drawer and / search replace it; "+ Page" is
+  "New page" in the drawer and in the breadcrumb's page list.
 - **The "Deferred completions (EU consent)" tile is gone.** Best Sudoku now sends those games as
   ordinary completions, so the tile could only read 0; saved copies of it load without the tile, and a saved card whose only item was that
   tile now loads as an invalid card.
@@ -123,6 +177,15 @@ All notable changes to **gss-stats** are documented here. The format follows
   showing a window the row doesn't store, and editing another chart while the editor is open
   shows that chart instead of the previous one. A row drawn as a sparkline also keeps it when
   you change its metric to one that can still draw one.
+- **The header stays on one row on a tablet or foldable.** Between 701px and 1000px wide the
+  search box shrinks to its icon and the account becomes an icon menu with your e-mail and Log out,
+  so the bar no longer wraps onto a second row.
+- **Undoing a change while it saves still saves the undo.** Reverting an edit before its save
+  finished used to leave the stored dashboard on the edit while the screen showed the original.
+- **The dashboard loads with browser storage blocked.** A private window or disabled site data no
+  longer stops it loading; the dark-mode choice just isn't remembered.
+- **The top-right corner of the header takes clicks again.** The hidden "show filters" button's
+  box no longer sits invisibly over the account menu (and, on a phone, the page menu button).
 - **The release before/after panel no longer goes blank on a release day.** It now compares the
   newest release whose first full ET day after the release date is complete (the release day
   itself is left out of the after side) and names it; a newer release still waiting shows as a
@@ -135,7 +198,7 @@ All notable changes to **gss-stats** are documented here. The format follows
   (v1.95.4 to v1.95.8, v1.96.0, v1.96.1) show on the release timeline.
 - **Sync all pages shows its real state.** The "Sync all pages" checkbox in the filter bar no
   longer always shows as on — it now genuinely reflects whether page date ranges are synced.
-- **Best Sudoku · Overview content sits right under the filter bar again.** The small-sample
+- **The Best Sudoku Overview page's content sits right under the filter bar again.** The small-sample
   note took a three-row grid cell for one line of text, leaving an empty band between the bar and
   the first card; it now takes one row and the cards below move up (layout version 12, saved
   layouts migrate once and a note you resized keeps its size). The "show filters" button also
