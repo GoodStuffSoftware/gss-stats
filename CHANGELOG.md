@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.15.5] — 2026-10-03
+
 ### Fixed
 - **A saved card that uses a newer note no longer turns into "can't be shown".** A caption, label
   or empty-message note this version doesn't know yet is kept as saved and shows nothing (a dash
