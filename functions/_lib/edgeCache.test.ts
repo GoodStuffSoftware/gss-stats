@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { buildCacheKeyUrl, cachedJson, isClosedRange, ttlSecondsFor, type CacheLike } from './edgeCache'
+import { buildCacheKeyUrl, cachedJson, isClosedRange, SKIP_EDGE_CACHE_HEADER, ttlSecondsFor, type CacheLike } from './edgeCache'
 
 // ── Cache key completeness ──────────────────────────────────────────────────────────
 //
@@ -189,5 +189,23 @@ describe('cachedJson', () => {
     await cachedJson(cache, 'https://k/5', 60, (p) => waits.push(p), compute)
     await Promise.all(waits)
     expect(cache.store.has('https://k/5')).toBe(false)
+  })
+
+  it('an ok response marked SKIP_EDGE_CACHE_HEADER is not stored, and the marker is removed from what is returned', async () => {
+    const cache = fakeCache()
+    const compute = vi.fn(async () => {
+      const res = new Response('{"notice":true}', { headers: { 'Content-Type': 'application/json' } })
+      res.headers.set(SKIP_EDGE_CACHE_HEADER, '1')
+      return res
+    })
+    const waits: Promise<unknown>[] = []
+    const res = await cachedJson(cache, 'https://k/6', 60, (p) => waits.push(p), compute)
+    await Promise.all(waits)
+    expect(res.status).toBe(200)
+    expect(res.headers.get(SKIP_EDGE_CACHE_HEADER)).toBeNull()
+    expect(await res.json()).toEqual({ notice: true })
+    expect(cache.store.has('https://k/6')).toBe(false)
+    await cachedJson(cache, 'https://k/6', 60, (p) => waits.push(p), compute)
+    expect(compute).toHaveBeenCalledTimes(2)
   })
 })
