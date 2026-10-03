@@ -100,3 +100,15 @@ describe('saveConfig keepalive', () => {
     expect(calls[1].init?.keepalive).toBe(true)
   })
 })
+
+describe('saveConfig results the save label is built from', () => {
+  const cfg = { version: 1, pages: [] } as unknown as DashboardConfig
+  it('a 503 (the server could not write its layout backup, so it refused the save) is a failed save', async () => {
+    stubFetch(new Response('{"error":"backup-failed"}', { status: 503 }), new Response('{}', { status: 200 }))
+    await expect(saveConfig(cfg)).resolves.toBe(false)
+  })
+  it('a 409 is "stale", not a failure', async () => {
+    stubFetch(new Response('{"error":"stale"}', { status: 409 }), new Response('{}', { status: 200 }))
+    await expect(saveConfig(cfg)).resolves.toBe('stale')
+  })
+})

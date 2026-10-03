@@ -177,6 +177,10 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   first save of a newer version first copies the previous stored layout to
   `dashboard:default:backup:v<old version>` in KV ([`functions/api/config.ts`](functions/api/config.ts)),
   once, so a migration can be rolled back by copying that key over `dashboard:default`.
+  Every save that changes the stored layout also first copies the stored one to
+  `dashboard:default:prev`, and the first such save of each ET day to
+  `dashboard:default:day:<YYYY-MM-DD>` (kept 30 days); if a copy can't be written the save is
+  refused (`503`) and nothing changes (see [Restoring the layout](#restoring-the-layout)).
   A tab saves only after it has read the stored layout ([`src/api.ts`](src/api.ts) `loadConfig`
   resolves to `null` only when nothing is stored yet): if the read fails — no answer, a non-2xx,
   or a body that isn't a layout or can't be normalized — it shows the built-in defaults under a "Couldn't load your saved
@@ -1176,6 +1180,55 @@ To put a backup back, in this order:
    ```
 
 5. Open one tab and check the layout before opening any others.
+
+### Restoring the layout
+
+For when a save replaced the layout with the wrong one at the **same** layout version (say, a tab
+that never loaded the real layout saved the defaults over it). The version backups above don't
+cover that; these two copies do (`functions/api/config.ts`):
+
+- `dashboard:default:prev` — the layout as it was before the most recent save that changed it.
+  The next changing save replaces it, so it only helps if nothing was saved after the bad save.
+- `dashboard:default:day:<YYYY-MM-DD>` — the layout as it was before the first changing save of
+  that ET day. Kept 30 days. Use this when more saves followed the bad one: pick the day the bad
+  save happened (or the day before) and it holds the layout as that day began.
+
+Same order and cautions as above: **close every dashboard tab first** (the next changing save
+replaces `:prev`), then run these one at a time from the repo root, in Windows PowerShell 5.1.
+
+Read-only — list the copies, keep what's there now, and download the one you want (`:prev`, or a
+`:day:` key from the list):
+
+```powershell
+npx wrangler kv key list --remote --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --prefix "dashboard:default:"
+```
+
+```powershell
+cmd /c 'npx wrangler kv key get dashboard:default --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-current.json'
+```
+
+```powershell
+cmd /c 'npx wrangler kv key get dashboard:default:prev --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-restore.json'
+```
+
+```powershell
+cmd /c 'npx wrangler kv key get dashboard:default:day:2026-10-03 --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-restore.json'
+```
+
+Check it the same way (it must print `ok: version ..., N pages`; otherwise stop):
+
+```powershell
+Get-Content layout-restore.json -Raw -Encoding UTF8 | ConvertFrom-Json | ForEach-Object { if ($_.pages -isnot [array] -or $_.pages.Count -eq 0) { throw 'not a layout' }; "ok: version $($_.version), $($_.pages.Count) pages" }
+```
+
+Write — only after that printed `ok`. It replaces the whole stored layout, and writing with
+wrangler makes no `:prev` copy, so keep `layout-current.json` in case you need to undo it:
+
+```powershell
+npx wrangler kv key put "dashboard:default" --path layout-restore.json --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote
+```
+
+Then open one tab and check the layout before opening any others.
 
 ## Auth
 
