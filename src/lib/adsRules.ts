@@ -1400,7 +1400,7 @@ export interface DecisionResult {
 }
 /** A search arm's next step at the $100 read: it IS the intent test, so it is read against
  * its sibling arm rather than told to start O3. Contains no "display" and no "O3". */
-const SEARCH_COMPARE = 'Compare against the other flight-2 arm on spend per tagged completer, per the pre-registered flight-2 read.'
+const SEARCH_COMPARE = "Compare against the sibling arm, if there is one, on spend per tagged completer, per this campaign's pre-registered read."
 /** "Rarely shown" = fewer asks than MIN_COHORT — the same floor every rate uses. The sign-up
  * figure is an upper bound, so the 2+ and 1 rows can only say "at most"; a bound of 0 is a
  * real zero. */

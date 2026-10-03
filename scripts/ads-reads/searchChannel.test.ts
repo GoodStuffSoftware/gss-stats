@@ -332,9 +332,10 @@ describe('the $100 decision for a search arm', () => {
       expect(d.next).not.toContain('O3')
     })
   }
-  it('compares the search arm against the other flight-2 arm where display was told to start O3', () => {
+  it('compares the search arm against its sibling arm (if any) where display was told to start O3', () => {
     for (const input of [{ signUpsAtMost: 3, asks: 20, accepts: 9, exact: true }, { signUpsAtMost: 3, asks: 20, accepts: 9 }, { signUpsAtMost: 0, asks: 12, accepts: 0 }]) {
-      expect(decideAt100({ ...input, channel: 'search' }).next).toContain('on spend per tagged completer, per the pre-registered flight-2 read')
+      expect(decideAt100({ ...input, channel: 'search' }).next).toContain("on spend per tagged completer, per this campaign's pre-registered read")
+      expect(decideAt100({ ...input, channel: 'search' }).next).not.toMatch(/flight[- ]2/i)
       // Display (explicit or default) keeps its O3 advice.
       expect(decideAt100({ ...input, channel: 'display' })).toEqual(decideAt100(input))
       expect(decideAt100(input).next).toContain('O3 (Search)')
