@@ -21,6 +21,7 @@ import {
   splitRefused,
   refusedPathExcludeClause,
   refusedWindowClause,
+  reachableRefusedPatterns,
   REFUSED_WINDOW_KEY,
   SPLIT_GUARD_KEY,
 } from '../../src/lib/splitGuard'
@@ -378,7 +379,12 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const tsWindow = splitGuardActive
     ? { terms: ['ts >= ?', 'ts < ?'], binds: [sinceMs, untilMs], moved: false }
     : refusedWindowClause(sinceMs, untilMs)
-  const refusedWholeDays = tsWindow.moved
+  // The caption flag needs a refused row this query can still count (review of #63, SHOULD-3:
+  // a non-Best-Sudoku site, a /home drill or excluded event rows count none). The snap and its
+  // cache-key marker still follow `moved` alone.
+  const refusedReachable =
+    reachableRefusedPatterns({ eventRowsExcluded: !includeEventBeacons && !eventDimActive, sites, constraints }).length > 0
+  const refusedWholeDays = tsWindow.moved && refusedReachable
   const splitGuardClause = (w: string[], b: any[]) => {
     if (splitGuardActive) refusedPathExcludeClause(w, b)
   }
@@ -409,7 +415,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     ...(splitGuardActive ? { splitGuard: SPLIT_GUARD_KEY } : {}),
     // Likewise only a snapped window gets a new key, keyed on the snap mode, so changing
     // REFUSED_WINDOW_SNAP never serves an entry cached under another mode.
-    ...(refusedWholeDays ? { refusedWindow: REFUSED_WINDOW_KEY } : {}),
+    ...(tsWindow.moved ? { refusedWindow: REFUSED_WINDOW_KEY } : {}),
   })
   const ttl = ttlSecondsFor(until, new Date())
   const cache = (caches as unknown as { default: CacheLike }).default

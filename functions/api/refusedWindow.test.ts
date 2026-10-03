@@ -10,7 +10,7 @@ import { onRequestPost as geoPost } from './geo'
 import { onRequestPost as completionsPost } from './completions'
 import { onRequestPost as metricsPost } from './metrics'
 import { insertHits, installCaches, memoryCache, openHitsDb, pagesContext, postJson, sqliteD1 } from '../_lib/testing/hitsDb'
-import { isSplitRefusedPath, REFUSED_WINDOW_KEY, REFUSED_WINDOW_SNAP } from '../../src/lib/splitGuard'
+import { isSplitRefusedPath, reachableRefusedPatterns, REFUSED_WINDOW_KEY, REFUSED_WINDOW_SNAP, SPLIT_REFUSED_PATH_PATTERNS } from '../../src/lib/splitGuard'
 import { etWallTimeMs } from '../../src/lib/etTime'
 import { buildFact } from '../../src/lib/metrics/engine'
 import { siteWindowClause } from '../../src/lib/overview'
@@ -277,7 +277,8 @@ describe('bind ceiling', () => {
     breakdown: 'campaignFlight',
     dims: ['referrer', 'campaignFlight', 'gameMode', 'popupFamily', 'flightDay'],
     constraints: Array.from({ length: 16 }, (_, i) => ({ field: 'campaignFlight', value: `flight-${i}` })),
-    sites: Array.from({ length: 50 }, (_, i) => `s${i}`),
+    // One Best Sudoku site, so the query can count a refused row and carries the caption flag.
+    sites: [SITE, ...Array.from({ length: 49 }, (_, i) => `s${i}`)],
     excludeOwnVisits: true,
     ownBrowser: 'Opera',
     ownOS: 'Windows',
@@ -294,5 +295,92 @@ describe('bind ceiling', () => {
     expect(sub.calls[0].binds.length).toBe(aligned.calls[0].binds.length)
     expect(sub.calls[0].binds.length).toBeLessThan(100)
     expect(sub.calls[0].binds.length).toBe(97) // measured
+  })
+})
+
+// SHOULD-3 (review of #63): /api/geo sets meta.refusedWholeDays (the caption) only when the
+// snapped query can count a refused row. The snap itself and its cache-key marker still follow
+// the window alone, so the SQL, binds and cache key of every case below are unchanged by it.
+describe('the whole-days caption flag needs a refused row the geo query can count', () => {
+  const [since, until] = HOURS[1] // 11-12 ET: snaps to the whole of 2026-10-01
+  const snapped = (r: Awaited<ReturnType<typeof geo>>) => {
+    expect(r.body.error).toBeUndefined()
+    expect(r.calls[0].sql).toContain('CASE WHEN (path LIKE')
+    expect(decodeURIComponent(r.cacheKey)).toContain(`"refusedWindow":"${REFUSED_WINDOW_KEY}"`)
+  }
+  const refusedPaths = (rows: any[]) => [...new Set(rows.map((r) => String(r.key.path)).filter(isSplitRefusedPath))].sort()
+
+  it('shown: a Best Sudoku sub-day query with event beacons counts every refused kind', async () => {
+    const r = await geo({ since, until, sites: [SITE] })
+    snapped(r)
+    expect(refusedOf(r.body.rows)).toBe(REFUSED_DAY)
+    expect(r.body.meta.refusedWholeDays).toBe(true)
+  })
+
+  it('shown: the default chart (no event beacons) still counts /game/start/ rows, which are page views', async () => {
+    const r = await geo({ since, until, includeEventBeacons: false })
+    snapped(r)
+    expect(refusedPaths(r.body.rows)).toEqual(['/game/start/easy'])
+    expect(r.body.meta.refusedWholeDays).toBe(true)
+  })
+
+  it('shown: an exclusion-lifting event dim counts event rows even without the opt-in', async () => {
+    const r = await geo({ dimension: 'gameMode', since, until, includeEventBeacons: false })
+    snapped(r)
+    expect(r.body.meta.refusedWholeDays).toBe(true)
+  })
+
+  it('hidden: a site that is not Best Sudoku', async () => {
+    const r = await geo({ since, until, sites: ['starrupture'] })
+    snapped(r)
+    expect(r.body.rows).toEqual([])
+    expect(r.body.meta.refusedWholeDays).toBeUndefined()
+  })
+
+  it('hidden: a site drill that is not Best Sudoku', async () => {
+    const r = await geo({ since, until, constraints: [{ field: 'site', value: 'starrupture' }] })
+    snapped(r)
+    expect(r.body.meta.refusedWholeDays).toBeUndefined()
+  })
+
+  it('hidden: a /home path filter; shown again for a refused path, unless event beacons leave it out', async () => {
+    const home = await geo({ since, until, constraints: [{ field: 'path', value: '/home' }] })
+    snapped(home)
+    expect(home.body.meta.refusedWholeDays).toBeUndefined()
+    const ret = await geo({ since, until, constraints: [{ field: 'path', value: '/return/organic/d1' }] })
+    expect(refusedOf(ret.body.rows)).toBe(2)
+    expect(ret.body.meta.refusedWholeDays).toBe(true)
+    const retNoEvents = await geo({ since, until, includeEventBeacons: false, constraints: [{ field: 'path', value: '/return/organic/d1' }] })
+    snapped(retNoEvents)
+    expect(retNoEvents.body.rows).toEqual([])
+    expect(retNoEvents.body.meta.refusedWholeDays).toBeUndefined()
+  })
+
+  it('hidden: a pathFamily filter no refused kind belongs to; shown for one it does', async () => {
+    const install = await geo({ since, until, constraints: [{ field: 'pathFamily', value: 'install' }] })
+    snapped(install)
+    expect(install.body.meta.refusedWholeDays).toBeUndefined()
+    for (const family of ['return', 'game-complete', 'tour', 'page']) {
+      const r = await geo({ since, until, constraints: [{ field: 'pathFamily', value: family }] })
+      expect(r.body.meta.refusedWholeDays, family).toBe(true)
+    }
+  })
+
+  it('reachableRefusedPatterns: the static rules', () => {
+    const all = { eventRowsExcluded: false, sites: [], constraints: [] }
+    expect(reachableRefusedPatterns(all)).toEqual([...SPLIT_REFUSED_PATH_PATTERNS])
+    expect(reachableRefusedPatterns({ ...all, eventRowsExcluded: true })).toEqual(['/game/start/%'])
+    expect(reachableRefusedPatterns({ ...all, sites: ['starrupture', SITE] })).toEqual([...SPLIT_REFUSED_PATH_PATTERNS])
+    expect(reachableRefusedPatterns({ ...all, sites: ['starrupture'] })).toEqual([])
+    expect(reachableRefusedPatterns({ ...all, constraints: [{ field: 'path', value: '/RETURN/x/d0' }] })).toEqual(['/return/%'])
+    expect(reachableRefusedPatterns({ ...all, constraints: [{ field: 'path', value: '(direct)' }] })).toEqual([])
+    const family = (value: string) => reachableRefusedPatterns({ ...all, constraints: [{ field: 'pathFamily', value }] })
+    expect(family('page')).toEqual(['/game/start/%'])
+    expect(family('tour')).toEqual(['/tour/exit-at/%'])
+    expect(family('tutorial-complete')).toEqual(['/game/tutorial-complete/%'])
+    expect(family('game-complete-deferred')).toEqual(['/game/complete-deferred/%'])
+    expect(family('auth-error')).toEqual([])
+    // Other filters leave every pattern reachable (erring toward showing the caption).
+    expect(reachableRefusedPatterns({ ...all, constraints: [{ field: 'referrer', value: 'x' }] })).toEqual([...SPLIT_REFUSED_PATH_PATTERNS])
   })
 })

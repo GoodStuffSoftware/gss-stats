@@ -10,8 +10,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **Return and completion rows are counted over whole ET days when a date range isn't.** A range
   that does not start and end on ET midnights now moves each end to the nearest ET midnight
   (Mike's chosen rule) for return, game-start, completion, tutorial and tour-exit rows only, so
-  short back-to-back ranges can no longer read those rows hour by hour; charts, completions and
-  metric cards say so in a caption, and today's totals stay live.
+  short back-to-back ranges can no longer read those rows hour by hour; charts that can count
+  such rows, completions and metric cards say so in a caption, and today's totals stay live.
 
 ## [0.13.1] — 2026-10-03
 

@@ -273,12 +273,20 @@ async function load() {
   error.value = null
   try {
     // A series line chart fetches one date query per series; the first also stands in as `data`
-    // for the generic empty/loaded states.
+    // for the generic empty/loaded states. The caption flags come from every series (review of
+    // #63, NIT-1): any one series' split guard or whole-days window shows its caption.
     if (hasLineSeries(props.widget)) {
       const all = await fetchSeriesStats(props.widget, effectiveFilters.value)
       if (my === reqId) {
         seriesData.value = all
-        data.value = { ...all[0], rows: all.flatMap((r) => r.rows), notice: all.find((r) => r.notice)?.notice }
+        const splitGuard = all.some((r) => r.meta?.splitGuard)
+        const refusedWholeDays = all.some((r) => r.meta?.refusedWholeDays)
+        data.value = {
+          ...all[0],
+          rows: all.flatMap((r) => r.rows),
+          notice: all.find((r) => r.notice)?.notice,
+          meta: { ...all[0].meta, ...(splitGuard ? { splitGuard } : {}), ...(refusedWholeDays ? { refusedWholeDays } : {}) },
+        }
       }
     } else {
       const r = await fetchStats(props.widget, effectiveFilters.value)
