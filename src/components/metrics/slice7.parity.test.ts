@@ -17,9 +17,11 @@
 //   R3  Rule change (review of PR #47): the "after" side leaves out the release's own ET day, and
 //       starts at the next ET midnight (v1.96.0 went live at 22:21 ET on its dated day, so its day
 //       is mostly pre-release traffic). The golden's After column was captured under the old
-//       rule (release day included), so it is regenerated: the fixture has nothing after 26 Sep,
-//       so PARITY_EXTRA carries the 27-28 Sep rows and the After column is their totals
-//       (13 page views: the auth row counts as one, 4 tagged arrivals, 2 auth successes, 1 install). Before is unchanged.
+//       rule (release day included) and is superseded: AFTER_R3 in this test is the source of
+//       truth, and the golden's old After values are kept only for the `not.toBe` check. The
+//       fixture has nothing after 26 Sep, so PARITY_EXTRA carries the 27-28 Sep rows and AFTER_R3
+//       is their totals (13 page views: the auth row counts as one, 4 tagged arrivals, 2 auth
+//       successes, 1 install). Before is unchanged and still compared to the golden.
 //   R2  No full day on each side yet (the release day itself): the old panel said "No dated
 //       release yet…" although the release is dated; the card names the release and says "no
 //       release window yet" for the days and every count.
