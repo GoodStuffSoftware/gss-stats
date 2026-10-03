@@ -88,6 +88,16 @@ All notable changes to **gss-stats** are documented here. The format follows
   install rate** on the Pop-ups page, as counts.
 
 ### Changed
+- **Game starts and tour exits are counts only too.** Hour, place and device charts (and the map)
+  now leave out game-start and tour-exit rows, as they already did for return and completion
+  rows, and a chart that leaves any out says so in a caption.
+- **The campaign country table no longer splits completed games by country.** Completions, game
+  starts, returns, tutorial completions and tour exits belong to no country column; they still
+  count in every total that is not split by country, and a card can no longer put a country
+  split over a completion count (a saved copy of the table loads without that row).
+- **Pop-up and ads-read hourly and per-country reads leave the counts-only rows out.** The
+  pop-up rates and the morning read's site-wide event and per-country lines never fetch return,
+  game-start, completion or tour-exit rows by hour or country; no pop-up count changes.
 - **Campaign return visits now include the installed app.** A campaign's return buckets count
   return visits from the Android app as well as the web site, still from its attribution start.
 - **Return, game-completion and tutorial-completion rows can no longer be split by hour, place or device.**

@@ -493,7 +493,8 @@ describe('an upcoming flight: its funnel and country cards show, as the old pane
   function expectUpcomingCountry(c: ReturnType<VueWrapper['find']>, title: string) {
     const t = c.find('table.metric-table.columns')
     const body = t.findAll('tbody tr').map((tr) => [text(tr.find('th').element), ...tr.findAll('td').map((td) => text(td.element))])
-    expect(body.map((r) => r[0]), title).toEqual(['Arrivals', ...STEPS])
+    // No 'Completed a game' row: completions are never split by place (lib/splitGuard.ts).
+    expect(body.map((r) => r[0]), title).toEqual(['Arrivals', ...STEPS.filter((s) => s !== 'Completed a game')])
     for (const r of body) expect(r.slice(1), `${title} ${r[0]}`).toEqual(['not started', 'not started', 'not started'])
   }
 
@@ -543,7 +544,10 @@ describe('campaign-country ≡ the bespoke country panel', () => {
       }),
     )
     expect([...newTables.keys()]).toEqual([...oldTables.keys()])
-    for (const [title, rowsOld] of oldTables) expect(newTables.get(title), title).toEqual(rowsOld)
+    // The one intended difference: the old panel split completed games by country, which the
+    // counts-only rule refuses (lib/splitGuard.ts), so the card has no 'Completed a game' row.
+    for (const [title, rowsOld] of oldTables) expect(newTables.get(title), title).toEqual(rowsOld.filter((r) => r[0] !== 'Completed a game'))
+    expect([...oldTables.values()].some((rows) => rows.some((r) => r[0] === 'Completed a game'))).toBe(true)
     // The fixture splits a campaign across countries, and a closed flight drops steps.
     const android = oldTables.get([...oldTables.keys()][0])!
     expect(android.length - 1).toBeLessThan(8)

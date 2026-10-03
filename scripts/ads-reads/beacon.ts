@@ -8,6 +8,7 @@
 import { applyExclusions, campaignAttributionClause, campaignAttributionStartMs, type CampaignFlight } from '../../src/lib/campaigns'
 import { excludeInstallGapUnmeasured, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, popupIncludeClause, type HourPathCount } from '../../src/lib/popupEvents'
 import { ASK_PATHS, UPSELL_SIGNEDOUT_FIX_AT, type FirstSessionRowSite, type ReturnRow, type ReturnSiteStat, type TaggedRow } from '../../src/lib/adsRules'
+import { refusedPathExcludeClause } from '../../src/lib/splitGuard'
 import type { D1Select } from './d1'
 
 export const WEB_SITE = 'bestsudoku-web'
@@ -20,7 +21,10 @@ export interface Query {
 
 /** Campaign-attributed rows, by (UTC hour, path, visitor) — and, when a segment boundary is
  * set (lib/adsRules.ts UPSELL_SIGNEDOUT_FIX_AT), by `uf` = the row is at or after it, so the
- * pre-fix / post-fix split is exact at the instant (the same device as the install fix's `pf`). */
+ * pre-fix / post-fix split is exact at the instant (the same device as the install fix's `pf`).
+ * Its rows include return and completion rows (src/lib/splitGuard.ts): the hour is only ever used
+ * to cut a count at an ET day, a flight boundary or a maturity instant, never shown as an hour of
+ * day — the same ruling as the dashboard's segment cuts (lib/metrics/facts.ts header). */
 export function taggedRowsQuery(campaign: CampaignFlight, upsellFixAtMs: number | null = UPSELL_SIGNEDOUT_FIX_AT): Query {
   const attr = campaignAttributionClause(campaign)
   const w = [attr.sql]
@@ -35,12 +39,16 @@ export function taggedRowsQuery(campaign: CampaignFlight, upsellFixAtMs: number 
 }
 
 /** Site-wide pop-up/event rows on the web site since `sinceMs`, by (UTC hour, path). NOT
- * campaign-attributed — outcome beacons fire in later, untagged sessions. */
+ * campaign-attributed — outcome beacons fire in later, untagged sessions. The rows the
+ * counts-only rule protects (src/lib/splitGuard.ts: returns, game starts and completions,
+ * tutorial completions, tour exits) are left out, bound like every other value: this read is by
+ * hour, and none of them is a pop-up event summarizeSiteEvents counts. */
 export function siteEventsQuery(sinceMs: number, fixedAtMs: number | null = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS): Query {
   const inc = popupIncludeClause()
   const w = ['site = ?', 'ts >= ?', inc.sql]
   const b: unknown[] = [WEB_SITE, sinceMs, ...inc.binds]
   applyExclusions(w, b)
+  refusedPathExcludeClause(w, b)
   // `pf` splits each hour row-exactly at the install fix (lib/popupEvents.ts
   // INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS): summarizeSiteEvents drops pre-fix gap rows and
   // counts post-fix accepts for the install health pair.
@@ -103,8 +111,9 @@ export function returnRowsQuery(campaign: CampaignFlight): Query {
   return { sql: `SELECT site, path, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY site, path`, binds: b }
 }
 
-/** Any-campaign /return/ rows per site since `sinceMs` — first/last seen (aggregates) for the
- * Play "not yet seen" line. */
+/** Every /return/ row per site since `sinceMs` — any campaign's AND the web-only organic arm's
+ * (untagged fresh installs, lib/campaigns.ts ORGANIC_ARM_ID), since the pattern is `/return/%` —
+ * with first/last seen (aggregates) for the Play "not yet seen" line. */
 export function returnSitesQuery(sinceMs: number): Query {
   const w = ['site IN (?, ?)', 'path LIKE ?', 'ts >= ?']
   const b: unknown[] = [WEB_SITE, APP_SITE, '/return/%', sinceMs]
@@ -114,12 +123,15 @@ export function returnSitesQuery(sinceMs: number): Query {
 
 /** Campaign-attributed arrivals by country, aggregate counts only (R5). The SAME attribution
  * and exclusion clauses as taggedRowsQuery (household etc.), so it can never disagree with the
- * funnel reads it sits alongside — no separate rule, no individual-level join. */
+ * funnel reads it sits alongside — no separate rule, no individual-level join. The rows the
+ * counts-only rule protects (src/lib/splitGuard.ts) are left out: none is split by place, the
+ * same as the dashboard's country columns. */
 export function taggedCountryQuery(campaign: CampaignFlight): Query {
   const attr = campaignAttributionClause(campaign)
   const w = [attr.sql]
   const b: unknown[] = [...attr.binds]
   applyExclusions(w, b)
+  refusedPathExcludeClause(w, b)
   return { sql: `SELECT country, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY country ORDER BY c DESC`, binds: b }
 }
 

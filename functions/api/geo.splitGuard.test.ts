@@ -1,8 +1,8 @@
 // The counts-only split guard (src/lib/splitGuard.ts) through the real onRequestPost handler,
 // on a REAL SQLite engine (node:sqlite, the dialect D1 speaks), the same way
 // geo.derivedDims.test.ts runs it. Each trigger (points mode, a refused single dim, a refused
-// ring dim, a drill on a refused field) must drop return / completion / tutorial-completion rows
-// and nothing else; a query with no trigger must count exactly what it counted before.
+// ring dim, a drill on a refused field) must drop return / game-start / completion / tutorial-
+// completion / tour-exit rows and nothing else; a query with no trigger must count exactly what it counted before.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import { onRequestPost, GEO_DIMS } from './geo'
@@ -65,11 +65,16 @@ const REFUSED = [
   '/game/complete-deferred/normal/medium',
   '/game/tutorial-complete/first-run',
   '/game/tutorial-complete/replay',
+  '/game/start/easy',
+  '/game/start/daily/hard',
+  '/tour/exit-at/3',
+  '/tour/exit-at/skip',
 ]
 // Ordinary rows that share a prefix or neighbour the refused ones — none may be dropped.
 const ORDINARY = [
   '/', '/game', '/game/first-move', '/game/abandon/26-50', '/game/complete', '/game/completely-new',
-  '/game/tutorial-complete', '/returns', '/return', '/tour/exit-at/3', '/tour/complete', '/settings',
+  '/game/tutorial-complete', '/returns', '/return', '/game/start', '/game/started', '/tour/start',
+  '/tour/exit-at', '/tour/complete', '/settings',
   '/signin-prompt/placement', '/install/prompt/android',
 ]
 
@@ -97,15 +102,22 @@ describe('splitGuard module', () => {
     }
   })
 
-  it('names the four refused path families', () => {
-    expect(SPLIT_REFUSED_PATH_PATTERNS).toEqual(['/return/%', '/game/complete/%', '/game/complete-deferred/%', '/game/tutorial-complete/%'])
+  it('names the six refused path families', () => {
+    expect(SPLIT_REFUSED_PATH_PATTERNS).toEqual([
+      '/return/%',
+      '/game/complete/%',
+      '/game/complete-deferred/%',
+      '/game/tutorial-complete/%',
+      '/game/start/%',
+      '/tour/exit-at/%',
+    ])
   })
 
   it('binds every pattern; none is interpolated into the SQL', () => {
     const w: string[] = []
     const b: unknown[] = []
     refusedPathExcludeClause(w, b)
-    expect(w).toEqual(['NOT (path LIKE ? OR path LIKE ? OR path LIKE ? OR path LIKE ?)'])
+    expect(w).toEqual(['NOT (path LIKE ? OR path LIKE ? OR path LIKE ? OR path LIKE ? OR path LIKE ? OR path LIKE ?)'])
     expect(b).toEqual([...SPLIT_REFUSED_PATH_PATTERNS])
     for (const p of SPLIT_REFUSED_PATH_PATTERNS) expect(w[0]).not.toContain(p)
   })
@@ -126,7 +138,7 @@ describe('splitGuard module', () => {
   })
 
   it('isSplitRefusedPath agrees with the SQL LIKE row for row, case folding included', () => {
-    const paths = [...REFUSED, ...ORDINARY, '/RETURN/x/d0', '/Game/Complete/normal/easy', '/game/tutorial-complete/', '/game/tutorial-completex']
+    const paths = [...REFUSED, ...ORDINARY, '/RETURN/x/d0', '/Game/Complete/normal/easy', '/game/tutorial-complete/', '/game/tutorial-completex', '/GAME/START/x', '/Tour/Exit-At/2', '/tour/exit-atx']
     const ins = db.prepare('INSERT INTO hits (ts, path) VALUES (?, ?)')
     paths.forEach((p, i) => ins.run(i, p))
     const w: string[] = []
@@ -200,14 +212,16 @@ describe('onRequestPost applies the guard on every trigger, in every branch', ()
 
   it('non-refused rows count the same with and without the guard (default event-beacon setting)', async () => {
     // Default: event beacons excluded, so return/completion rows are already out of a page-view
-    // chart. Tutorial-completion rows are not event-classified on main yet, so they are the only
-    // rows the guard removes here; every other row counts the same.
+    // chart. Refused rows the event classifier does not (yet) list — tutorial completions, game
+    // starts, tour exits — still reach the unguarded path chart, so they are the only rows the
+    // guard removes here; every other row counts the same.
     const region = await post({ dimension: 'region', limit: 100, ...range })
     const path = await post({ dimension: 'path', limit: 100, ...range })
     expect(guardedSql(region.calls[0].sql)).toBe(true)
     expect(guardedSql(path.calls[0].sql)).toBe(false)
-    const tutorialRows = path.body.rows.filter((r: any) => r.key.path.startsWith('/game/tutorial-complete/'))
-    expect(region.body.totals.pageviews).toBe(path.body.totals.pageviews - sum(tutorialRows))
+    const refusedRows = path.body.rows.filter((r: any) => isSplitRefusedPath(r.key.path))
+    expect(refusedRows.length).toBeGreaterThan(0)
+    expect(region.body.totals.pageviews).toBe(path.body.totals.pageviews - sum(refusedRows))
   })
 
   it('a guarded query gets its own cache key; patterns travel as binds', async () => {

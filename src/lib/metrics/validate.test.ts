@@ -1,6 +1,6 @@
 // validateCard over every preset, and the POST /api/metrics whitelist (ADR 0003 section 3).
 import { describe, expect, it } from 'vitest'
-import { KEY_RE, MAX_REQUESTS, validateCard, validateMetricsRequest, type ValidatedBatch } from './validate'
+import { KEY_RE, MAX_REQUESTS, normCardRef, validateCard, validateMetricsRequest, type ValidatedBatch } from './validate'
 import { PRESETS, presetById } from './presets'
 import { getNote, hasNote, isNoteActive, noteRawText, noteTemplate, noteTokens } from '../notes'
 import type { CardSpec, MetricItem } from './types'
@@ -176,5 +176,40 @@ describe('note ids are own keys only (review #1)', () => {
     expect(presetById('constructor')).toBeUndefined()
     expect(presetById('__proto__')).toBeUndefined()
     expect(presetById('bsk-kpis')).toBe(PRESETS['bsk-kpis'])
+  })
+})
+
+describe('country splits only over bindings that take a country (R-1b, lib/splitGuard.ts)', () => {
+  const COMPLETED: MetricItem = { id: 'completed', label: 'Completed', data: { metric: 'campaign.completions' }, display: { as: 'number' } }
+  const ARRIVALS: MetricItem = { id: 'arrivals', label: 'Arrivals', data: { metric: 'campaign.taggedArrivals' }, display: { as: 'number' } }
+  const tableCard = (items: MetricItem[]): CardSpec => ({ v: 1, repeat: { over: 'campaigns' }, sections: [{ layout: 'table', columns: { over: 'countries' }, items }] })
+  const NO_COUNTRY = /a country repeat or columns over a binding that takes no country param/
+
+  it('country columns over campaign.completions are refused; over taggedArrivals they are fine', () => {
+    expect(validateCard(tableCard([ARRIVALS]))).toEqual([])
+    expect(validateCard(tableCard([ARRIVALS, COMPLETED])).join('\n')).toMatch(NO_COUNTRY)
+  })
+
+  it('an item-level country repeat over campaign.completions is refused too', () => {
+    const spec: CardSpec = { v: 1, repeat: { over: 'campaigns' }, sections: [{ layout: 'tiles', items: [{ ...COMPLETED, repeat: { over: 'countries' } }] }] }
+    expect(validateCard(spec).join('\n')).toMatch(NO_COUNTRY)
+  })
+
+  it('no preset puts a country split over a binding that takes no country', () => {
+    for (const [id, spec] of Object.entries(PRESETS)) expect(validateCard(spec).join('\n'), id).not.toMatch(NO_COUNTRY)
+    expect(PRESETS['campaign-country'].sections.flatMap((s) => s.items).map((it) => it.id)).not.toContain('completed')
+  })
+
+  it('a copy of the campaign-country card saved before the change loads without its completed row', () => {
+    const old = structuredClone(PRESETS['campaign-country']) as CardSpec
+    old.sections[0].items.splice(2, 0, COMPLETED)
+    expect(validateCard(old).join('\n')).toMatch(NO_COUNTRY)
+    const out = normCardRef({ spec: old, from: 'campaign-country' })
+    expect(out).toEqual({ spec: PRESETS['campaign-country'], from: 'campaign-country' })
+  })
+
+  it('the same item OUTSIDE a country split is kept on load', () => {
+    const spec: CardSpec = { v: 1, repeat: { over: 'campaigns' }, sections: [{ layout: 'rows', items: [COMPLETED] }] }
+    expect(normCardRef({ spec })).toEqual({ spec })
   })
 })
