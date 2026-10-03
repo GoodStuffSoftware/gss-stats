@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, watch, ref } from 'vue'
 import type { GlobalFilters } from '../types'
-import { relativeRange, lastDays, isoToYmd, ymdRangeToISO, rangeLabel, isLastDays, isSinceFirstCampaign, SINCE_FIRST_CAMPAIGN } from '../lib/range'
+import { relativeRange, lastDays, rangeToYmd, ymdRangeToISO, rangeLabel, isLastDays, isSinceFirstCampaign, SINCE_FIRST_CAMPAIGN } from '../lib/range'
 
 const props = defineProps<{ start: GlobalFilters; active: boolean }>()
 const emit = defineEmits<{ apply: [GlobalFilters]; useGlobal: []; close: [] }>()
@@ -15,8 +15,9 @@ const toYmd = ref('')
 // a typed token or chip keeps it; a calendar range clears it.
 function syncRange() {
   rangeInput.value = rangeLabel(local.since, local.until, local.rangeRel)
-  fromYmd.value = isoToYmd(local.since)
-  toYmd.value = isoToYmd(local.until)
+  const ymd = rangeToYmd(local.since, local.until) // an ET-day range shows that one ET day
+  fromYmd.value = ymd.from
+  toYmd.value = ymd.to
 }
 watch(
   () => props.start,

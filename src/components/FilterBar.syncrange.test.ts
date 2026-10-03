@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import FilterBar from './FilterBar.vue'
 import { defaultFilters } from '../lib/defaults'
+import { etDayRangeToISO } from '../lib/range'
 
 function mountBar(syncRange: boolean) {
   return mount(FilterBar, { props: { filters: defaultFilters(), syncRange } })
@@ -43,5 +44,26 @@ describe('FilterBar — "Sync all pages" toggle reflects the syncRange prop', ()
     const w = mountBar(false)
     await w.get('.sync-toggle input[type="checkbox"]').setValue(true)
     expect(w.emitted('toggleSync')).toEqual([[true]])
+  })
+})
+
+describe('FilterBar — the date pickers on an ET-day range (a drilled dateEt page)', () => {
+  const dates = async (w: ReturnType<typeof mountBar>) => {
+    await w.get('.cal-btn').trigger('click') // the date pickers open from the calendar button
+    return w.findAll('input[type="date"]').map((i) => (i.element as HTMLInputElement).value)
+  }
+
+  it.each([
+    ['2026-03-08', 'Mar 8'],
+    ['2026-11-01', 'Nov 1'],
+  ])('shows the one ET day %s on both pickers and as the single date %s', async (d, label) => {
+    const w = mount(FilterBar, { props: { filters: { ...defaultFilters(), ...etDayRangeToISO(d), rangeRel: '' }, syncRange: false } })
+    expect(await dates(w)).toEqual([d, d])
+    expect((w.get('input.range-field').element as HTMLInputElement).value).toBe(label)
+    expect(w.emitted('change')).toBeUndefined() // showing it changes nothing
+  })
+  it('a UTC-day range still shows its own UTC dates', async () => {
+    const w = mount(FilterBar, { props: { filters: { ...defaultFilters(), since: '2026-03-08T00:00:00.000Z', until: '2026-03-09T23:59:59.999Z', rangeRel: '' }, syncRange: false } })
+    expect(await dates(w)).toEqual(['2026-03-08', '2026-03-09'])
   })
 })
