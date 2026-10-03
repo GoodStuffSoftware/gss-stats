@@ -683,7 +683,6 @@ export const TOUR_TRACKING_NOTE = 'Tutorial completions (first run vs replay) an
 // counts as neither. Organic d0 and campaign d0 are disjoint populations. The same release makes
 // starting a real game end the welcome tour. Counts only.
 export const ORGANIC_TRACKING_LIVE_AT = Date.parse('2026-10-03T20:35:04Z')
-export const ORGANIC_TRACKING_LIVE_AT_ET = '2026-10-03'
 
 export const TOUR_EXIT_STEPS = ['preamble', 'hub', 'section'] as const
 export type TourExitStep = (typeof TOUR_EXIT_STEPS)[number]
@@ -691,7 +690,7 @@ export type TourExitStep = (typeof TOUR_EXIT_STEPS)[number]
 export function isTutorialCompletePath(path: string, kind: 'first-run' | 'replay'): boolean {
   return path === `/game/tutorial-complete/${kind}`
 }
-/** A `/tour/exit-at/<step>` row, for one step. */
+/** A `/tour/exit-at/<group>` row, for one section group (preamble, hub or section; not a step id). */
 export function isTourExitPath(path: string, step: TourExitStep): boolean {
   return path === `/tour/exit-at/${step}`
 }
