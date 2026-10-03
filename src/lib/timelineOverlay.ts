@@ -17,6 +17,9 @@ import {
   NEW_BEACONS_LIVE_AT_ET,
   NEW_BEACONS_LIVE_MARKER_LABEL,
   RAW_INSTALL_DEDUPE_LIVE_AT_ET,
+  TOUR_TRACKING_LIVE_AT_ET,
+  TOUR_TRACKING_MARKER_LABEL,
+  TOUR_TRACKING_NOTE,
   RAW_INSTALL_DEDUPE_MARKER_LABEL,
   INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS,
 } from './popupEvents'
@@ -50,6 +53,7 @@ export function goLiveItems(): OverlayItem[] {
     items.push({ kind: 'go-live', date: etDateFast(INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS), label: 'install fix', note: 'Prompt-driven installs are recorded from here on; earlier ones were not.' })
   }
   items.push({ kind: 'go-live', date: RAW_INSTALL_DEDUPE_LIVE_AT_ET, label: RAW_INSTALL_DEDUPE_MARKER_LABEL, note: 'Raw install signals stopped double-sending from several open tabs.' })
+  items.push({ kind: 'go-live', date: TOUR_TRACKING_LIVE_AT_ET, label: TOUR_TRACKING_MARKER_LABEL, note: TOUR_TRACKING_NOTE })
   return items
 }
 
