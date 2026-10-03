@@ -80,6 +80,9 @@ export interface NoteDef {
   scopes: NoteScope[]
   activeWhen?: () => boolean
   vars?: Record<string, string | number>
+  /** Only `false` is meaningful: a data-cut note a viewer must not hide (per-chart hiding, notes
+   * plan slice 1c, reads it). Absent or true = it can be hidden. */
+  hideable?: boolean
 }
 
 function resolveText(n: NoteDef): string {
@@ -301,6 +304,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     kind: 'note',
     severity: 'info',
     scopes: ['campaigns'],
+    hideable: false,
   },
   // The release panel (lib/metrics/presets.ts release-before-after): why the before window reads
   // low. Plain wording, as the panel's own line had it.
