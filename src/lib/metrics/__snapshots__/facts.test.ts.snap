@@ -24,6 +24,14 @@ exports[`fact SQL snapshots > adsSpend {} 1`] = `
 }
 `;
 
+exports[`fact SQL snapshots > adsSpendDaily {} 1`] = `
+{
+  "binds": [],
+  "db": "gss_stats_ads",
+  "sql": "SELECT campaign_id, date, cost_micros FROM ads_daily_metrics ORDER BY campaign_id, date",
+}
+`;
+
 exports[`fact SQL snapshots > bskFirstHit {} 1`] = `
 {
   "binds": [
@@ -84,6 +92,33 @@ exports[`fact SQL snapshots > bskKpiDays {"todayEt":"2026-09-26"} 1`] = `
   ],
   "db": "gss_geo",
   "sql": "SELECT CASE WHEN ts >= ? AND ts < ? THEN 0 WHEN ts >= ? AND ts < ? THEN 1 WHEN ts >= ? AND ts < ? THEN 2 WHEN ts >= ? AND ts < ? THEN 3 WHEN ts >= ? AND ts < ? THEN 4 WHEN ts >= ? AND ts < ? THEN 5 WHEN ts >= ? AND ts < ? THEN 6 WHEN ts >= ? AND ts < ? THEN 7 ELSE -1 END AS d, CASE WHEN ts >= ? THEN 8 WHEN ts >= ? THEN 7 WHEN ts >= ? THEN 6 WHEN ts >= ? THEN 5 WHEN ts >= ? THEN 4 WHEN ts >= ? THEN 3 WHEN ts >= ? THEN 2 WHEN ts >= ? THEN 1 ELSE 0 END AS s, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE site IN (?, ?, ?) AND ts >= ? AND ts < ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY d, s, path, visitor, campaign HAVING d >= 0",
+}
+`;
+
+exports[`fact SQL snapshots > bskRangeDaily {"since":"2026-09-20","until":"2026-09-26"} 1`] = `
+{
+  "binds": [
+    "bestsudoku-web",
+    "bestsudoku",
+    "bestsudoku-app",
+    1789876800000,
+    1790481600000,
+    "lifecycle",
+    "email_%",
+    "Virginia",
+    "Reston",
+    "Verizon Business",
+    "desktop",
+    "Windows",
+    "Chrome",
+    1280,
+    "North Carolina",
+    "/popup-outcome/install-prompt/installed",
+    "/install/pwa-installed",
+    1790439996000,
+  ],
+  "db": "gss_geo",
+  "sql": "SELECT date((ts + CASE WHEN (ts >= 1710054000000 AND ts < 1730613600000) OR (ts >= 1741503600000 AND ts < 1762063200000) OR (ts >= 1772953200000 AND ts < 1793512800000) OR (ts >= 1805007600000 AND ts < 1825567200000) OR (ts >= 1836457200000 AND ts < 1857016800000) OR (ts >= 1867906800000 AND ts < 1888466400000) OR (ts >= 1899356400000 AND ts < 1919916000000) OR (ts >= 1930806000000 AND ts < 1951365600000) OR (ts >= 1962860400000 AND ts < 1983420000000) OR (ts >= 1994310000000 AND ts < 2014869600000) OR (ts >= 2025759600000 AND ts < 2046319200000) OR (ts >= 2057209200000 AND ts < 2077768800000) OR (ts >= 2088658800000 AND ts < 2109218400000) OR (ts >= 2120108400000 AND ts < 2140668000000) OR (ts >= 2152162800000 AND ts < 2172722400000) OR (ts >= 2183612400000 AND ts < 2204172000000) OR (ts >= 2215062000000 AND ts < 2235621600000) THEN -14400000 ELSE -18000000 END) / 1000, 'unixepoch') AS dt, path, visitor AS v, campaign, COUNT(*) AS c FROM hits WHERE site IN (?, ?, ?) AND ts >= ? AND ts < ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY dt, path, v, campaign",
 }
 `;
 
@@ -149,6 +184,80 @@ exports[`fact SQL snapshots > bskReleaseSides {"releaseDateEt":"2026-09-26","day
   ],
   "db": "gss_geo",
   "sql": "SELECT (ts >= ?) AS d, CASE WHEN ts >= ? THEN 3 WHEN ts >= ? THEN 2 WHEN ts >= ? THEN 1 ELSE 0 END AS s, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE site IN (?, ?, ?) AND ts >= ? AND ts < ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) AND (ts < ? OR ts >= ?) GROUP BY d, s, path, visitor, campaign",
+}
+`;
+
+exports[`fact SQL snapshots > campaignDaily {"campaignId":"24215315197"} 1`] = `
+{
+  "binds": [
+    "sudoku_tired_of_ads",
+    "tired_of_ads",
+    "launch_2026",
+    1788321600000,
+    "lifecycle",
+    "email_%",
+    "Virginia",
+    "Reston",
+    "Verizon Business",
+    "desktop",
+    "Windows",
+    "Chrome",
+    1280,
+    "North Carolina",
+    "/popup-outcome/install-prompt/installed",
+    "/install/pwa-installed",
+    1790439996000,
+  ],
+  "db": "gss_geo",
+  "sql": "SELECT date((ts + CASE WHEN (ts >= 1710054000000 AND ts < 1730613600000) OR (ts >= 1741503600000 AND ts < 1762063200000) OR (ts >= 1772953200000 AND ts < 1793512800000) OR (ts >= 1805007600000 AND ts < 1825567200000) OR (ts >= 1836457200000 AND ts < 1857016800000) OR (ts >= 1867906800000 AND ts < 1888466400000) OR (ts >= 1899356400000 AND ts < 1919916000000) OR (ts >= 1930806000000 AND ts < 1951365600000) OR (ts >= 1962860400000 AND ts < 1983420000000) OR (ts >= 1994310000000 AND ts < 2014869600000) OR (ts >= 2025759600000 AND ts < 2046319200000) OR (ts >= 2057209200000 AND ts < 2077768800000) OR (ts >= 2088658800000 AND ts < 2109218400000) OR (ts >= 2120108400000 AND ts < 2140668000000) OR (ts >= 2152162800000 AND ts < 2172722400000) OR (ts >= 2183612400000 AND ts < 2204172000000) OR (ts >= 2215062000000 AND ts < 2235621600000) THEN -14400000 ELSE -18000000 END) / 1000, 'unixepoch') AS dt, path, visitor AS v, campaign, COUNT(*) AS c FROM hits WHERE campaign IN (?, ?, ?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY dt, path, v, campaign",
+}
+`;
+
+exports[`fact SQL snapshots > campaignDaily {"campaignId":"24234347705"} 1`] = `
+{
+  "binds": [
+    "sudoku_tired_of_ads_play",
+    1788926400000,
+    "lifecycle",
+    "email_%",
+    "Virginia",
+    "Reston",
+    "Verizon Business",
+    "desktop",
+    "Windows",
+    "Chrome",
+    1280,
+    "North Carolina",
+    "/popup-outcome/install-prompt/installed",
+    "/install/pwa-installed",
+    1790439996000,
+  ],
+  "db": "gss_geo",
+  "sql": "SELECT date((ts + CASE WHEN (ts >= 1710054000000 AND ts < 1730613600000) OR (ts >= 1741503600000 AND ts < 1762063200000) OR (ts >= 1772953200000 AND ts < 1793512800000) OR (ts >= 1805007600000 AND ts < 1825567200000) OR (ts >= 1836457200000 AND ts < 1857016800000) OR (ts >= 1867906800000 AND ts < 1888466400000) OR (ts >= 1899356400000 AND ts < 1919916000000) OR (ts >= 1930806000000 AND ts < 1951365600000) OR (ts >= 1962860400000 AND ts < 1983420000000) OR (ts >= 1994310000000 AND ts < 2014869600000) OR (ts >= 2025759600000 AND ts < 2046319200000) OR (ts >= 2057209200000 AND ts < 2077768800000) OR (ts >= 2088658800000 AND ts < 2109218400000) OR (ts >= 2120108400000 AND ts < 2140668000000) OR (ts >= 2152162800000 AND ts < 2172722400000) OR (ts >= 2183612400000 AND ts < 2204172000000) OR (ts >= 2215062000000 AND ts < 2235621600000) THEN -14400000 ELSE -18000000 END) / 1000, 'unixepoch') AS dt, path, visitor AS v, campaign, COUNT(*) AS c FROM hits WHERE campaign IN (?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY dt, path, v, campaign",
+}
+`;
+
+exports[`fact SQL snapshots > campaignDaily {"campaignId":"24279250691"} 1`] = `
+{
+  "binds": [
+    "sudoku_funnel_retest",
+    1790438400000,
+    "lifecycle",
+    "email_%",
+    "Virginia",
+    "Reston",
+    "Verizon Business",
+    "desktop",
+    "Windows",
+    "Chrome",
+    1280,
+    "North Carolina",
+    "/popup-outcome/install-prompt/installed",
+    "/install/pwa-installed",
+    1790439996000,
+  ],
+  "db": "gss_geo",
+  "sql": "SELECT date((ts + CASE WHEN (ts >= 1710054000000 AND ts < 1730613600000) OR (ts >= 1741503600000 AND ts < 1762063200000) OR (ts >= 1772953200000 AND ts < 1793512800000) OR (ts >= 1805007600000 AND ts < 1825567200000) OR (ts >= 1836457200000 AND ts < 1857016800000) OR (ts >= 1867906800000 AND ts < 1888466400000) OR (ts >= 1899356400000 AND ts < 1919916000000) OR (ts >= 1930806000000 AND ts < 1951365600000) OR (ts >= 1962860400000 AND ts < 1983420000000) OR (ts >= 1994310000000 AND ts < 2014869600000) OR (ts >= 2025759600000 AND ts < 2046319200000) OR (ts >= 2057209200000 AND ts < 2077768800000) OR (ts >= 2088658800000 AND ts < 2109218400000) OR (ts >= 2120108400000 AND ts < 2140668000000) OR (ts >= 2152162800000 AND ts < 2172722400000) OR (ts >= 2183612400000 AND ts < 2204172000000) OR (ts >= 2215062000000 AND ts < 2235621600000) THEN -14400000 ELSE -18000000 END) / 1000, 'unixepoch') AS dt, path, visitor AS v, campaign, COUNT(*) AS c FROM hits WHERE campaign IN (?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY dt, path, v, campaign",
 }
 `;
 
@@ -354,6 +463,36 @@ exports[`fact SQL snapshots > flightPathsSeen {"campaignId":"24279250691"} 1`] =
   ],
   "db": "gss_geo",
   "sql": "SELECT path, COUNT(*) AS c FROM hits WHERE site = ? AND ts >= ? AND ts < ? GROUP BY path",
+}
+`;
+
+exports[`fact SQL snapshots > popupRangeDaily {"since":"2026-09-20","until":"2026-09-26","sites":[]} 1`] = `
+{
+  "binds": [
+    1789876800000,
+    1790481600000,
+    "/popup-outcome/install-prompt/installed",
+    "/install/pwa-installed",
+    1790439996000,
+  ],
+  "db": "gss_geo",
+  "sql": "SELECT date((ts + CASE WHEN (ts >= 1710054000000 AND ts < 1730613600000) OR (ts >= 1741503600000 AND ts < 1762063200000) OR (ts >= 1772953200000 AND ts < 1793512800000) OR (ts >= 1805007600000 AND ts < 1825567200000) OR (ts >= 1836457200000 AND ts < 1857016800000) OR (ts >= 1867906800000 AND ts < 1888466400000) OR (ts >= 1899356400000 AND ts < 1919916000000) OR (ts >= 1930806000000 AND ts < 1951365600000) OR (ts >= 1962860400000 AND ts < 1983420000000) OR (ts >= 1994310000000 AND ts < 2014869600000) OR (ts >= 2025759600000 AND ts < 2046319200000) OR (ts >= 2057209200000 AND ts < 2077768800000) OR (ts >= 2088658800000 AND ts < 2109218400000) OR (ts >= 2120108400000 AND ts < 2140668000000) OR (ts >= 2152162800000 AND ts < 2172722400000) OR (ts >= 2183612400000 AND ts < 2204172000000) OR (ts >= 2215062000000 AND ts < 2235621600000) THEN -14400000 ELSE -18000000 END) / 1000, 'unixepoch') AS dt, path, COUNT(*) AS c FROM hits WHERE ts >= ? AND ts < ? AND (path = '/signin-prompt' OR path LIKE '/signin-prompt/%' OR path = '/signin-eligible' OR path LIKE '/signin-eligible/%' OR path = '/promo-first50' OR path LIKE '/promo-first50/%' OR path = '/first50-congrats' OR path LIKE '/first50-congrats/%' OR path = '/upsell' OR path LIKE '/upsell/%' OR path = '/install' OR path LIKE '/install/%' OR path = '/popup-outcome' OR path LIKE '/popup-outcome/%' OR path = '/return' OR path LIKE '/return/%' OR path LIKE '/game/complete/%' OR path LIKE '/game/complete-deferred/%' OR path LIKE '/auth/success/google/%' OR path LIKE '/auth/success/email/%' OR path = '/auth/error' OR path LIKE '/auth/error/%' OR path = '/auth/redirect' OR path LIKE '/auth/redirect/%' OR path = '/tour' OR path LIKE '/tour/%' OR path = '/game/tutorial-complete' OR path LIKE '/game/tutorial-complete/%' OR path = '/game/first-move' OR path LIKE '/game/first-move/%' OR path = '/game/abandon' OR path LIKE '/game/abandon/%' OR path = '/welcome-signed-in' OR path LIKE '/welcome-signed-in/%' OR path LIKE '/game/start/%') AND NOT (path IN (?, ?) AND ts < ?) GROUP BY dt, path",
+}
+`;
+
+exports[`fact SQL snapshots > popupRangeDaily {"since":"2026-09-20T00:00:00Z","until":"2026-09-26T12:00:00Z","sites":["bestsudoku","bestsudoku-web"]} 1`] = `
+{
+  "binds": [
+    1789862400000,
+    1790424000000,
+    "bestsudoku",
+    "bestsudoku-web",
+    "/popup-outcome/install-prompt/installed",
+    "/install/pwa-installed",
+    1790439996000,
+  ],
+  "db": "gss_geo",
+  "sql": "SELECT date((ts + CASE WHEN (ts >= 1710054000000 AND ts < 1730613600000) OR (ts >= 1741503600000 AND ts < 1762063200000) OR (ts >= 1772953200000 AND ts < 1793512800000) OR (ts >= 1805007600000 AND ts < 1825567200000) OR (ts >= 1836457200000 AND ts < 1857016800000) OR (ts >= 1867906800000 AND ts < 1888466400000) OR (ts >= 1899356400000 AND ts < 1919916000000) OR (ts >= 1930806000000 AND ts < 1951365600000) OR (ts >= 1962860400000 AND ts < 1983420000000) OR (ts >= 1994310000000 AND ts < 2014869600000) OR (ts >= 2025759600000 AND ts < 2046319200000) OR (ts >= 2057209200000 AND ts < 2077768800000) OR (ts >= 2088658800000 AND ts < 2109218400000) OR (ts >= 2120108400000 AND ts < 2140668000000) OR (ts >= 2152162800000 AND ts < 2172722400000) OR (ts >= 2183612400000 AND ts < 2204172000000) OR (ts >= 2215062000000 AND ts < 2235621600000) THEN -14400000 ELSE -18000000 END) / 1000, 'unixepoch') AS dt, path, COUNT(*) AS c FROM hits WHERE ts >= ? AND ts < ? AND site IN (?, ?) AND (path = '/signin-prompt' OR path LIKE '/signin-prompt/%' OR path = '/signin-eligible' OR path LIKE '/signin-eligible/%' OR path = '/promo-first50' OR path LIKE '/promo-first50/%' OR path = '/first50-congrats' OR path LIKE '/first50-congrats/%' OR path = '/upsell' OR path LIKE '/upsell/%' OR path = '/install' OR path LIKE '/install/%' OR path = '/popup-outcome' OR path LIKE '/popup-outcome/%' OR path = '/return' OR path LIKE '/return/%' OR path LIKE '/game/complete/%' OR path LIKE '/game/complete-deferred/%' OR path LIKE '/auth/success/google/%' OR path LIKE '/auth/success/email/%' OR path = '/auth/error' OR path LIKE '/auth/error/%' OR path = '/auth/redirect' OR path LIKE '/auth/redirect/%' OR path = '/tour' OR path LIKE '/tour/%' OR path = '/game/tutorial-complete' OR path LIKE '/game/tutorial-complete/%' OR path = '/game/first-move' OR path LIKE '/game/first-move/%' OR path = '/game/abandon' OR path LIKE '/game/abandon/%' OR path = '/welcome-signed-in' OR path LIKE '/welcome-signed-in/%' OR path LIKE '/game/start/%') AND NOT (path IN (?, ?) AND ts < ?) GROUP BY dt, path",
 }
 `;
 
