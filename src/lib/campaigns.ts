@@ -185,38 +185,37 @@ export const CAMPAIGNS: CampaignFlight[] = [
   },
   // ── Flight 2: two arms run together (display apps + search), each its own campaign ──────
   // Created PAUSED 2026-10-03 20:14Z by the best-sudoku Google Ads API tool (flight2-ops.mjs, commit
-  // e3c372d0). BOTH arms' dates below are PROVISIONAL: at enable the tool resets start to the enable
-  // day and end to start + 6, so a follow-up PR must correct flightStart/flightEnd, the read window
-  // (adsRules.ts) and the status the day the campaigns are enabled.
+  // e3c372d0). Both arms run 2026-10-04 .. 2026-10-10, a full week (Mike, 2026-10-03: "Start 10-04,
+  // full week"); the dates are final, set the same way as the retest's (start + 6, noon-ET start).
   {
     id: '24316608605',
     label: 'Flight 2 — display, Sudoku app placements',
     ucValues: ['sudoku_funnel_f2_apps'],
-    flightStart: '2026-10-07', // PROVISIONAL until enable — the tool resets start to the enable day
+    flightStart: '2026-10-04',
     flightStartTimeEt: '12:00', // the ad schedule's start (12:00-23:00 ET) — see campaignAttributionClause
-    flightEnd: '2026-10-13', // PROVISIONAL until enable — start + 6 (7 serving days)
+    flightEnd: '2026-10-10', // 7 serving days
     status: 'upcoming',
     kind: 'web',
     dailyBudgetUsd: 10,
     hardCapUsd: 70,
     servingHoursEt: [12, 23],
     notes:
-      '"Best Sudoku - Display - Sudoku app placements - F2 Apps", utm google / display / sudoku_funnel_f2_apps, budget resource 15915288917. Created PAUSED 2026-10-03 20:14Z by the API tool (best-sudoku e3c372d0); US+CA, ad schedule 12:00-23:00 ET, $10/day, $70 cap over 7 days (Mike, 2026-10-03). The flight dates are provisional: at enable the tool resets start to the enable day and end to start + 6, so the dates here are corrected by a follow-up PR on enable day. directionalThroughDay is left unset: nothing in production reads it.',
+      '"Best Sudoku - Display - Sudoku app placements - F2 Apps", utm google / display / sudoku_funnel_f2_apps, budget resource 15915288917. Created PAUSED 2026-10-03 20:14Z by the API tool (best-sudoku e3c372d0); US+CA, ad schedule 12:00-23:00 ET, $10/day, $70 cap over 7 days (Mike, 2026-10-03). The flight dates are final: 2026-10-04 .. 2026-10-10, a full week (Mike, 2026-10-03). directionalThroughDay is left unset: nothing in production reads it.',
   },
   {
     id: '24311309184',
     label: 'Flight 2 — search, desktop intent',
     ucValues: ['sudoku_funnel_f2_search'],
-    flightStart: '2026-10-07', // PROVISIONAL until enable — the tool resets start to the enable day
+    flightStart: '2026-10-04',
     flightStartTimeEt: '12:00', // the ad schedule's start (12:00-23:00 ET) — see campaignAttributionClause
-    flightEnd: '2026-10-13', // PROVISIONAL until enable — start + 6 (7 serving days)
+    flightEnd: '2026-10-10', // 7 serving days
     status: 'upcoming',
     kind: 'web',
     dailyBudgetUsd: 10,
     hardCapUsd: 70,
     servingHoursEt: [12, 23],
     notes:
-      '"Best Sudoku - Search - Desktop intent - F2 Search", utm google / cpc / sudoku_funnel_f2_search, budget resource 15915289115. Created PAUSED 2026-10-03 20:14Z by the API tool (best-sudoku e3c372d0); desktop-only search, US+CA, ad schedule 12:00-23:00 ET, $10/day, $70 cap over 7 days (Mike, 2026-10-03). No placements: its read plan has channel search. The flight dates are provisional: at enable the tool resets start to the enable day and end to start + 6, so the dates here are corrected by a follow-up PR on enable day. directionalThroughDay is left unset: nothing in production reads it.',
+      '"Best Sudoku - Search - Desktop intent - F2 Search", utm google / cpc / sudoku_funnel_f2_search, budget resource 15915289115. Created PAUSED 2026-10-03 20:14Z by the API tool (best-sudoku e3c372d0); desktop-only search, US+CA, ad schedule 12:00-23:00 ET, $10/day, $70 cap over 7 days (Mike, 2026-10-03). No placements: its read plan has channel search. The flight dates are final: 2026-10-04 .. 2026-10-10, a full week (Mike, 2026-10-03). directionalThroughDay is left unset: nothing in production reads it.',
   },
 ]
 
