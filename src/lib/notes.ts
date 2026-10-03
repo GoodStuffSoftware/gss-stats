@@ -26,6 +26,7 @@
 //    caller can still pass its own vars to override/extend at render time (see
 //    NoteBlock/TextBlock, which call noteTokens — never noteRawText, which is plain-text
 //    only; see that function's own doc comment).
+import { REFUSED_WHOLE_DAYS_CAPTION } from './splitGuard'
 import {
   SMALL_SAMPLE_NOTE,
   POPUP_PAGE_NOTE,
@@ -440,6 +441,9 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'no-campaign-flighting': 'no campaign flighting today',
     'not-yet-tracking': 'not yet tracking',
     'still-arriving': 'still arriving',
+    // Counts only (R-1d): a page range that is not whole ET days counts refused rows over whole
+    // ET days (lib/splitGuard.ts); the engine adds this to every metric that can count one.
+    'refused-whole-days': REFUSED_WHOLE_DAYS_CAPTION,
     'counted-from': 'counted from {from}',
     'install-fix-note': INSTALL_FIX_NOTE,
     // Time-precise (unlike the generic 'counted-from' {date} template above): the new/existing/

@@ -51,12 +51,15 @@
 // small integer from a CASE over `ts` bands (a segment or a day index), or the boolean `ts >= ?`
 // split — and none joins rows.
 //
-// SEGMENT CUTS OVER REFUSED ROWS (R-1b ruling, 2026-10-03): `s`, `d`, `pf` and `uf` can cut a
-// return or completion row at a minute or an hour, and they stay as they are. Each cut is a
-// fixed instant — a go-live, an attribution start, a flight boundary, a fix, an ET midnight or
-// the same time of day on an earlier day — that a COUNT is split at; no fact groups a refused
-// row by hour of day, and no chart shows one that way. Clamping sub-day windows over refused
-// rows to whole ET days is R-1d (lib/splitGuard.ts header).
+// SEGMENT CUTS OVER REFUSED ROWS (R-1b ruling, 2026-10-03; each reviewed again for R-1d and
+// kept): `s`, `d`, `pf` and `uf` can cut a return or completion row at a minute or an hour, and
+// they stay as they are. Each cut is a fixed instant — a go-live, an attribution start, a flight
+// boundary, a fix, an ET midnight or the same time of day on an earlier day — that a COUNT is
+// split at, never a bound a caller picks; no fact groups a refused row by hour of day, and no
+// chart shows one that way. The reasoning for each is in the lib/splitGuard.ts header (SEGMENT
+// CUTS). The one caller-picked window, bskRangePath's since/until (and its daily twin
+// bskRangeDaily's), counts refused rows over whole ET days (R-1d, refusedWindowClause);
+// popupRangePath and popupRangeDaily leave refused rows out altogether.
 // facts.test.ts checks every statement.
 
 import { applyExclusions, CAMPAIGNS, campaignAttributionClause, campaignAttributionStartMs, campaignById, etFlightRangeMs, ORGANIC_ARM_ID, type CampaignFlight } from '../campaigns'
@@ -64,6 +67,7 @@ import { excludeInstallGapUnmeasured, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, po
 import { last7DatesBefore, siteWindowClause } from '../overview'
 import { addDays as addEtDays, etDateSql, etSameTimeWindow } from '../etTime'
 import { BEST_SUDOKU_SITES } from '../bestSudokuSites'
+import { refusedWindowClause } from '../splitGuard'
 import { COVERAGE_ROWS_SQL, LAST_SYNC_SQL, mapSpendSummary, SPEND_SUMMARY_SQL } from '../adsStore'
 import { UPSELL_SIGNEDOUT_FIX_AT, type SpendSummary } from '../adsRules'
 import { etMidnightMs } from './instrumentation'
@@ -444,11 +448,15 @@ export const FACTS: Record<FactId, FactDef> = {
     ttl: 'range',
     build(p, _nowMs, cuts = []) {
       const [startMs, endMs] = rangeMs(p.since!, p.until!)
-      const clause = siteWindowClause(BEST_SUDOKU_SITES, startMs, endMs)
+      // Counts only (R-1d): refused rows over whole ET days, every other row over the exact
+      // range. An ET-midnight range (every bare-date range) builds the unchanged statement.
+      const win = refusedWindowClause(startMs, endMs)
+      const clause = siteWindowClause(BEST_SUDOKU_SITES, win.binds[0], win.binds[1])
+      const where = [clause.sql, ...win.terms.slice(2)].join(' AND ')
       const seg = segmentColumn(3_600_000, cuts)
       return {
         db: 'gss_geo',
-        sql: `SELECT ${seg.sql} AS s, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE ${clause.sql} GROUP BY s, path, visitor, campaign`,
+        sql: `SELECT ${seg.sql} AS s, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE ${where} GROUP BY s, path, visitor, campaign`,
         binds: [...seg.binds, ...clause.binds],
       }
     },
@@ -560,9 +568,13 @@ export const FACTS: Record<FactId, FactDef> = {
     splitAt: null,
     ttl: 'range',
     build(p) {
+      // bskRangePath's WHERE, refused-row snap included (R-1d): a sub-day range counts refused
+      // rows over whole ET days, every other row over the exact range. An ET-midnight range (every
+      // bare-date range) builds the unchanged statement.
       const [startMs, endMs] = rangeMs(p.since!, p.until!)
-      const clause = siteWindowClause(BEST_SUDOKU_SITES, startMs, endMs)
-      return dailyStatement(clause.sql, clause.binds, 'full')
+      const win = refusedWindowClause(startMs, endMs)
+      const clause = siteWindowClause(BEST_SUDOKU_SITES, win.binds[0], win.binds[1])
+      return dailyStatement([clause.sql, ...win.terms.slice(2)].join(' AND '), clause.binds, 'full')
     },
     parse: beaconDaily,
   },
@@ -587,6 +599,9 @@ export const FACTS: Record<FactId, FactDef> = {
       const inc = popupIncludeClause()
       w.push(inc.sql)
       b.push(...inc.binds)
+      // popupRangePath's counts-only exclusion, so the twin reads the scalar's rows: no refused
+      // row at all, whatever the range (none is a pop-up event, so no count changes).
+      refusedPathExcludeClause(w, b)
       excludeInstallGapUnmeasured(w, b) // popupRangePath drops these in JS (isUnmeasuredGapRow); here in SQL
       return dailyStatement(w.join(' AND '), b, 'path')
     },

@@ -12,6 +12,23 @@ All notable changes to **gss-stats** are documented here. The format follows
   clicking a day still opens a page for that Eastern day, which the footer and date pickers name as that one day; a saved layout moves its untouched copies
   once, wherever you placed them, and a chart you retitled or changed in any way is left as it is.
 
+## [0.15.1] — 2026-10-03
+
+### Fixed
+- **Return and completion rows are counted over whole ET days when a date range isn't.** A range
+  that does not start and end on ET midnights now moves each end to the nearest ET midnight
+  (Mike's chosen rule) for return, game-start, completion, tutorial and tour-exit rows only, so
+  short back-to-back ranges can no longer read those rows hour by hour; charts that can count
+  such rows, completions and metric cards say so in a caption, and today's totals stay live.
+
+## [0.15.0] — 2026-10-03
+
+### Added
+- **The page refetches its data when you come back to the tab.** Switching back to a tab that has
+  been idle for a minute or more reloads its charts, cards and ads readings once, without a
+  loading flash and without ever polling; the card's "Updated" time moves to the new load, and a
+  refetch that fails keeps the numbers already on screen.
+
 ## [0.14.4] — 2026-10-03
 
 ### Added
