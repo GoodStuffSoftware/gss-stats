@@ -25,9 +25,10 @@
 //                         slice 2): the same WHERE as campaignPathVisitor / bskRangePath /
 //                         popupRangePath / adsSpend, grouped by ET DAY, so a card can draw a
 //                         per-day series. Counts per ET day only: no hour, place or device
-//                         column, and the visitor kind is collapsed to '' on every path in
-//                         lib/splitGuard.ts's refused list (never a device x day on /return or a
-//                         game-complete row). A twin is read only for a `series: 'daily'` request.
+//                         column. The visitor kind rides along exactly as in the scalar fact (the
+//                         new-visitor arrivals tile reads it on every row), so a series sums to its
+//                         tile; a day's total is a one-day ET range of the same tile. A twin is
+//                         read only for a `series: 'daily'` request.
 //
 // The campaign fact also splits by COUNTRY BUCKET (US / CA / other — lib/campaigns.ts
 // countryBucket, the /api/campaigns country view) and, once lib/adsRules.ts
@@ -57,7 +58,6 @@ import { COVERAGE_ROWS_SQL, LAST_SYNC_SQL, mapSpendSummary, SPEND_SUMMARY_SQL } 
 import { UPSELL_SIGNEDOUT_FIX_AT, type SpendSummary } from '../adsRules'
 import { etMidnightMs } from './instrumentation'
 import { excludeOwnClause } from '../ownExclusion'
-import { SPLIT_REFUSED_PATH_PATTERNS } from '../splitGuard'
 
 export type FactId =
   | 'campaignPathVisitor'
@@ -129,8 +129,7 @@ export interface LastSyncRow {
 }
 
 /** One aggregate row of a daily twin: the count of rows on one ET day (`dt`, YYYY-MM-DD) for a
- * path, with the visitor kind ('' wherever the path is refused for a split, and for a fact that
- * has no visitor column) and campaign tag ('' when the fact has none). */
+ * path, with the visitor kind ('' for a fact that has no visitor column) and campaign tag ('' when the fact has none). */
 export interface DailyBeaconRow {
   dt: string
   path: string
@@ -292,23 +291,11 @@ export function releaseSidesMs(releaseDateEt: string, days: number): { before: [
 }
 
 // ── Daily twins (ADR 0005 slice 2) ──────────────────────────────────────────────────────
-/** Visitor kind with every refused path collapsed to '': the daily twins group by ET DAY, so a
- * row's visitor kind (new/existing: a device property) must never ride along with a day on a
- * /return or game-complete row (lib/splitGuard.ts, "counts only"). The patterns are bound, so a
- * new refused pattern reaches this statement with no edit here. */
-function dailyVisitorColumn(): { sql: string; binds: unknown[] } {
-  return { sql: `CASE WHEN ${SPLIT_REFUSED_PATH_PATTERNS.map(() => 'path LIKE ?').join(' OR ')} THEN '' ELSE visitor END`, binds: [...SPLIT_REFUSED_PATH_PATTERNS] }
-}
 /** The daily twin statement over a WHERE: per ET day, path (and, when `columns` says so, the
- * guarded visitor kind and campaign tag), COUNT(*). */
+ * visitor kind and campaign tag, exactly as the scalar fact keeps them), COUNT(*). */
 function dailyStatement(where: string, whereBinds: unknown[], columns: 'full' | 'path'): FactStatement {
   if (columns === 'path') return { db: 'gss_geo', sql: `SELECT ${etDateSql()} AS dt, path, COUNT(*) AS c FROM hits WHERE ${where} GROUP BY dt, path`, binds: whereBinds }
-  const v = dailyVisitorColumn()
-  return {
-    db: 'gss_geo',
-    sql: `SELECT ${etDateSql()} AS dt, path, ${v.sql} AS v, campaign, COUNT(*) AS c FROM hits WHERE ${where} GROUP BY dt, path, v, campaign`,
-    binds: [...v.binds, ...whereBinds],
-  }
+  return { db: 'gss_geo', sql: `SELECT ${etDateSql()} AS dt, path, visitor AS v, campaign, COUNT(*) AS c FROM hits WHERE ${where} GROUP BY dt, path, v, campaign`, binds: whereBinds }
 }
 const beaconDaily = (raw: Record<string, unknown>[]): FactRows => ({
   kind: 'beaconDaily',

@@ -47,7 +47,7 @@ function w(p: Omit<Widget, 'i'>): Widget {
 // lives in LAYOUT_VERSIONS below, so renumbering this slice (another slice may take 13 first) is
 // that one literal; every migration step is keyed on a LAYOUT_VERSIONS entry, never a bare number.
 // (Bumped to 12 for the Overview's small-sample note row (see compactSmallSampleNoteV12): the
-// one-line note drops from three grid rows to one and the cards below move up to meet it.
+// one-line note drops from three grid rows to one and the cards below move up to meet it.)
 // (Bumped to 11 for the rest of the panels (ADR 0003 slice 7, see migratePanelsV11): every
 // remaining bespoke panel becomes a card preset (the release panel; the campaign funnel, country,
 // cost and returns panels; the Pop-ups rate table and sign-in eligibility) or a standard chart
@@ -72,7 +72,8 @@ export const LAYOUT_VERSIONS = {
   /** Inline sparklines (ADR 0005 slice 2). A guard bump only: no stored layout is rewritten. */
   sparklines: 13,
 } as const
-export const CONFIG_VERSION: number = LAYOUT_VERSIONS.sparklines
+// The newest entry, so it can never lag the map when another slice adds one.
+export const CONFIG_VERSION: number = Math.max(...Object.values(LAYOUT_VERSIONS))
 
 // The default "basic charts available out of the box" — a sensible analytics
 // starting layout. Users can move/resize/add/remove from here.

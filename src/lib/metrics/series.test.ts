@@ -3,7 +3,6 @@
 import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it } from 'vitest'
 import { etDateFast } from '../etTime'
-import { SPLIT_REFUSED_PATH_PATTERNS } from '../splitGuard'
 import { buildFact, deriveBatch, newSideMemo, planBatch, type FactResult } from './engine'
 import { FACTS, SPEND_DAYS_SQL } from './facts'
 import { METRICS } from './metrics'
@@ -100,14 +99,14 @@ describe('beaconSeries / spendSeries: gaps are not zeros', () => {
     const s = beaconSeries({ ...base, rows, firstDay: '2026-10-01', lastDay: '2026-10-02', reachCounted: true })
     expect(s[s.length - 1]).toEqual({ day: '2026-10-04', value: 2 })
   })
-  it('visitor "new" counts only new rows; a refused-path row (visitor collapsed) is never counted as new', () => {
+  it('visitor "new" counts only new rows, on any path (the visitor kind is the scalar fact row for row)', () => {
     const rows = [
       { dt: '2026-10-01', path: '/', visitor: 'new', campaign: '', c: 4 },
       { dt: '2026-10-01', path: '/', visitor: 'existing', campaign: '', c: 5 },
-      { dt: '2026-10-01', path: '/return/x/d0', visitor: '', campaign: '', c: 6 },
+      { dt: '2026-10-01', path: '/return/x/d0', visitor: 'new', campaign: '', c: 6 },
     ]
     const s = beaconSeries({ ...base, rows, onlyNew: true, firstDay: '2026-10-01', lastDay: '2026-10-01' })
-    expect(s).toEqual([{ day: '2026-10-01', value: 4 }])
+    expect(s).toEqual([{ day: '2026-10-01', value: 10 }])
   })
   it('spend: only stored days get a point (a day never synced is a gap, not $0), in dollars', () => {
     const rows = [
@@ -181,24 +180,49 @@ describe('engine series on a sqlite fixture', () => {
     expect((results.with as MetricValue).value).toBe((results.plain as MetricValue).value)
   })
 
-  it('a refused-path row never rides with a device kind: the twin collapses its visitor and only counts per day', () => {
+  it('new-visitor arrivals: the series sums to the tile even over refused-path rows (the twins keep visitor, as the scalars do)', () => {
+    const tag = 'sudoku_funnel_retest'
+    const at = (iso: string, path: string, visitor: string, campaign = tag): Hit => ({ ts: ms(iso), path, visitor, campaign })
+    const hits: Hit[] = [
+      at('2026-09-28T14:00:00Z', '/', 'new'),
+      at('2026-09-28T15:00:00Z', '/', 'existing'),
+      at('2026-09-28T16:00:00Z', '/return/sudoku_funnel_retest/d0', 'new'), // refused paths: counted by the tile, so by the series
+      at('2026-09-28T17:00:00Z', '/game/complete/classic', 'new'),
+      at('2026-09-29T14:00:00Z', '/return/sudoku_funnel_retest/d1', 'existing'),
+      at('2026-09-29T15:00:00Z', '/game/complete-deferred/classic', 'new'),
+      at('2026-09-29T16:00:00Z', '/', 'new'),
+    ]
+    const db = fixture(hits)
+    const { results } = run(db, ms('2026-09-30T16:00:00Z'), { since: '2026-09-28', until: '2026-09-29', sites: ['bestsudoku-web'] }, [
+      { key: 'c', metric: 'campaign.taggedArrivals', window: 'attribution', params: { campaignId: RETEST }, series: 'daily' },
+      { key: 'b', metric: 'bsk.taggedArrivals', window: 'page', series: 'daily' },
+    ])
+    for (const key of ['c', 'b']) {
+      const v = results[key] as MetricValue
+      expect(v.status, key).not.toBe('error')
+      expect(v.series, key).toBeDefined()
+      expect(v.value, key).toBe(5) // new rows on any path, refused ones included
+      expect(v.series!.reduce((a, p) => a + p.value, 0), key).toBe(v.value)
+    }
+    expect(asMap(results.c as MetricValue).get('2026-09-28')).toBe(3)
+    expect(asMap(results.c as MetricValue).get('2026-09-29')).toBe(2)
+  })
+
+  it('a refused-path row is only counted per ET day: the twin carries no hour, place or device column', () => {
     const hits: Hit[] = [
       { ts: ms('2026-10-01T16:00:00Z'), path: '/return/sudoku_funnel_retest/d0', visitor: 'new' },
       { ts: ms('2026-10-01T17:00:00Z'), path: '/return/sudoku_funnel_retest/d0', visitor: 'existing' },
       { ts: ms('2026-10-01T18:00:00Z'), path: '/', visitor: 'new' },
-      { ts: ms('2026-10-01T18:00:00Z'), path: '/', visitor: 'existing' },
     ]
     const db = fixture(hits)
     const stmt = buildFact({ id: 'bskRangeDaily', params: { since: '2026-10-01', until: '2026-10-01' } }, ms('2026-10-02T16:00:00Z'))
-    const rows = db.geo.prepare(stmt.sql).all(...(stmt.binds as never[])) as { dt: string; path: string; v: string; c: number }[]
-    // The two /return rows collapse into ONE group per day and path with no visitor kind.
-    const ret = rows.filter((r) => r.path.startsWith('/return/'))
-    expect(ret).toEqual([{ dt: '2026-10-01', path: '/return/sudoku_funnel_retest/d0', v: '', campaign: '', c: 2 }])
-    // Ordinary paths keep the kind (a plain site count, not a refused path).
-    expect(rows.filter((r) => r.path === '/').map((r) => r.v).sort()).toEqual(['existing', 'new'])
-    for (const p of SPLIT_REFUSED_PATH_PATTERNS) {
-      for (const r of rows) if (new RegExp('^' + p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*') + '$').test(r.path)) expect(r.v).toBe('')
-    }
+    const rows = db.geo.prepare(stmt.sql).all(...(stmt.binds as never[])) as Record<string, unknown>[]
+    for (const r of rows) expect(Object.keys(r).sort()).toEqual(['c', 'campaign', 'dt', 'path', 'v'])
+    // The two hours of /return rows land in one group per ET day, visitor kind and path.
+    expect(rows.filter((r) => String(r.path).startsWith('/return/')).map((r) => [r.dt, r.v, r.c]).sort()).toEqual([
+      ['2026-10-01', 'existing', 1],
+      ['2026-10-01', 'new', 1],
+    ])
   })
 
   it('a spend series carries one point per stored day (no gap filled with $0)', () => {
@@ -255,20 +279,31 @@ describe('validation and the statement budget', () => {
   })
 })
 
-describe('the daily twins read the same range the scalar does (docs/capacity.md method)', () => {
+describe('the daily twins read the same range the scalar does (docs/capacity.md §9 method)', () => {
   const nowMs = Date.parse('2026-10-02T16:00:00Z')
-  const plan = (db: ReturnType<typeof fixture>, id: 'campaignDaily' | 'bskRangeDaily' | 'popupRangeDaily') => {
+  const plan = (id: 'campaignDaily' | 'bskRangeDaily' | 'popupRangeDaily', withSites = true) => {
+    const db = fixture([])
     db.geo.exec('CREATE INDEX idx_hits_ts ON hits (ts); CREATE INDEX idx_hits_site_ts ON hits (site, ts)')
-    const params = id === 'campaignDaily' ? { since: '2026-09-26', until: '2026-10-02', campaignId: RETEST, sites: ['bestsudoku-web'] } : { since: '2026-09-26', until: '2026-10-02', sites: ['bestsudoku-web'] }
+    const sites = withSites ? { sites: ['bestsudoku-web'] } : {}
+    const params = id === 'campaignDaily' ? { since: '2026-09-26', until: '2026-10-02', campaignId: RETEST, ...sites } : { since: '2026-09-26', until: '2026-10-02', ...sites }
     const stmt = buildFact({ id, params } as never, nowMs)
     const rows = db.geo.prepare('EXPLAIN QUERY PLAN ' + stmt.sql).all(...(stmt.binds as never[])) as { detail: string }[]
     return rows.map((r) => r.detail).join(' | ')
   }
-  for (const id of ['campaignDaily', 'bskRangeDaily', 'popupRangeDaily'] as const) {
-    it(`${id}: an index range search on ts (no full-table scan), one GROUP BY pass`, () => {
-      const detail = plan(fixture([]), id)
-      expect(detail).toMatch(/SEARCH hits USING (COVERING )?INDEX idx_hits_(site_)?ts/)
+  // The EXACT plan per twin, as docs/capacity.md §9 states it: a twin whose plan changes (a new
+  // index, a dropped site filter) must change the doc with it. Each is one GROUP BY pass.
+  const cases: [string, 'campaignDaily' | 'bskRangeDaily' | 'popupRangeDaily', boolean, string][] = [
+    ['campaignDaily (no site filter, no upper bound: every site since the flight start)', 'campaignDaily', true, 'SEARCH hits USING INDEX idx_hits_ts (ts>?)'],
+    ['bskRangeDaily', 'bskRangeDaily', true, 'SEARCH hits USING INDEX idx_hits_site_ts (site=? AND ts>? AND ts<?)'],
+    ['popupRangeDaily with sites', 'popupRangeDaily', true, 'SEARCH hits USING INDEX idx_hits_site_ts (site=? AND ts>? AND ts<?)'],
+    ['popupRangeDaily without sites', 'popupRangeDaily', false, 'SEARCH hits USING INDEX idx_hits_ts (ts>? AND ts<?)'],
+  ]
+  for (const [name, id, withSites, want] of cases) {
+    it(`${name}: ${want}`, () => {
+      const detail = plan(id, withSites)
+      expect(detail).toContain(want)
       expect(detail).not.toMatch(/SCAN hits(?! USING)/)
+      expect(detail).toContain('USE TEMP B-TREE FOR GROUP BY')
     })
   }
 })

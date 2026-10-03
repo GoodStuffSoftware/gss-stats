@@ -261,14 +261,56 @@ describe('App: leaving the page with an edit still in the debounce', () => {
   it('unmounting sends the pending edit and clears the timer', async () => {
     await load()
     await sleep(FIT_SETTLE_MS + 100)
+    // Record the 700 ms save timer's id so the test can see it cleared (a second fire would be a
+    // no-op behind the lastPersisted check, so the PUT count alone cannot tell).
+    const saveTimerIds: unknown[] = []
+    const realSetTimeout = window.setTimeout.bind(window)
+    vi.spyOn(window, 'setTimeout').mockImplementation(((fn: () => void, ms?: number, ...a: unknown[]) => {
+      const id = realSetTimeout(fn, ms, ...a)
+      if (ms === 700) saveTimerIds.push(id)
+      return id
+    }) as typeof window.setTimeout)
     await refit(520)
     expect(saveConfig).not.toHaveBeenCalled()
+    expect(saveTimerIds).toHaveLength(1)
+    const clearSpy = vi.spyOn(window, 'clearTimeout')
     wrapper!.unmount()
     wrapper = null
     await flushPromises()
     expect(saveConfig).toHaveBeenCalledTimes(1)
+    expect(clearSpy).toHaveBeenCalledWith(saveTimerIds[0])
     await sleep(900)
     expect(saveConfig).toHaveBeenCalledTimes(1)
+  }, 20000)
+
+  it('the pagehide flush is a keepalive PUT, so the browser lets it finish after the page is gone', async () => {
+    await load()
+    await sleep(FIT_SETTLE_MS + 100)
+    await refit(520)
+    window.dispatchEvent(new Event('pagehide'))
+    await flushPromises()
+    expect(saveConfig).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(saveConfig).mock.calls[0][1]).toEqual({ keepalive: true })
+  }, 20000)
+
+  it('a layout over the keepalive size cap falls back to the ordinary PUT on pagehide', async () => {
+    await load()
+    await sleep(FIT_SETTLE_MS + 100)
+    liveCard().title = 'x'.repeat(70_000) // a body over the 64 KiB keepalive limit
+    await flushPromises()
+    window.dispatchEvent(new Event('pagehide'))
+    await flushPromises()
+    expect(saveConfig).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(saveConfig).mock.calls[0][1]).toEqual({ keepalive: false })
+  }, 20000)
+
+  it('an ordinary debounced save is never keepalive', async () => {
+    await load()
+    await sleep(FIT_SETTLE_MS + 100)
+    await refit(520)
+    await sleep(900)
+    expect(saveConfig).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(saveConfig).mock.calls[0][1]).toEqual({ keepalive: false })
   }, 20000)
 
   it('an edit queued behind an in-flight PUT is sent when that PUT resolves (documented limit: a closing page may not live to see it)', async () => {

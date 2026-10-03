@@ -12,7 +12,6 @@ import * as campaigns from '../campaigns'
 import { SPEND_SUMMARY_SQL } from '../adsStore'
 import { etMidnightMs } from './instrumentation'
 import { etDateSql } from '../etTime'
-import { SPLIT_REFUSED_PATH_PATTERNS } from '../splitGuard'
 
 const NOW = Date.parse('2026-09-26T21:00:00Z')
 const SAMPLE_PARAMS: Record<FactId, FactParams[]> = {
@@ -68,13 +67,6 @@ function isBandCase(item: string): boolean {
   return /^(CASE|WHEN|THEN|ELSE|END|AND|B|-?\d+|\s)+$/.test(rest)
 }
 
-/** The visitor kind of a daily twin: collapsed to '' on every path lib/splitGuard.ts refuses, so a
- * device property never rides along with a day on a /return or game-complete row. */
-function isRefusedVisitorCase(item: string): boolean {
-  const m = /^CASE WHEN (path LIKE \?(?: OR path LIKE \?)*) THEN '' ELSE visitor END$/.exec(item)
-  return !!m && m[1].split(' OR ').length === SPLIT_REFUSED_PATH_PATTERNS.length
-}
-
 describe('every fact is an anonymous aggregate', () => {
   // The ads store's facts read gss-stats' own records (spend, sync runs), never a beacon row.
   it.each(ALL.filter((x) => x.stmt.db === 'gss_stats_ads').map((x) => [x.id, x] as const))('%s reads only the ads store', (_name, { stmt }) => {
@@ -97,7 +89,6 @@ describe('every fact is an anonymous aggregate', () => {
       if (item === '(ts >= ?)' || item === '0') continue // a boolean split (install fix, upsell fix, release side) or no segments
       if (item === COUNTRY_BUCKET_SQL) continue // US / CA / other, literal outputs only
       if (item === etDateSql()) continue // the ET DAY (YYYY-MM-DD) only: never an hour, a minute or a raw ts
-      if (isRefusedVisitorCase(item)) continue // the daily twins' visitor kind, blank on every refused path
       expect(item, `select item "${item}"`).toMatch(/^[a-z_]+$/)
       expect(['ts', 'id']).not.toContain(item)
     }
@@ -115,8 +106,16 @@ describe('every fact is an anonymous aggregate', () => {
       const out = stmt.sql.slice(0, stmt.sql.indexOf(' FROM ')) + stmt.sql.slice(stmt.sql.indexOf(' GROUP BY '))
       expect(out.replace(etDateSql(), '')).not.toMatch(/strftime|%H|hour|minute|\bts\b|\bdevice\b|\bcity\b|\bregion\b|\bcountry\b|\bscreenw\b|\bos\b|\bbrowser\b/i)
     }
-    expect(isRefusedVisitorCase("CASE WHEN path LIKE ? THEN '' ELSE visitor END")).toBe(SPLIT_REFUSED_PATH_PATTERNS.length === 1)
-    expect(isRefusedVisitorCase("CASE WHEN path LIKE ? THEN visitor ELSE visitor END")).toBe(false)
+    // The visitor kind is the plain column, exactly as the scalar facts read it (a series must sum to
+    // its tile): no CASE and no extra bind in the daily statements, and the output columns are the
+    // ET day, path, that visitor kind, the campaign tag and the count, nothing else.
+    for (const { id, stmt } of twins) {
+      expect(stmt.sql).not.toMatch(/CASE/)
+      expect(stmt.sql).not.toMatch(/hour|%H/i)
+      const cols = selectItems(stmt.sql).map((i) => i.replace(/\s+AS\s+[a-z_]+$/i, ''))
+      expect(cols, id).toEqual(id === 'popupRangeDaily' ? [etDateSql(), 'path', 'COUNT(*)'] : [etDateSql(), 'path', 'visitor', 'campaign', 'COUNT(*)'])
+      expect(stmt.sql).toMatch(id === 'popupRangeDaily' ? /GROUP BY dt, path$/ : /GROUP BY dt, path, v, campaign$/)
+    }
   })
   it('the band-CASE check refuses a raw ts, any other column and any other expression inside a CASE', () => {
     expect(isBandCase('CASE WHEN ts >= ? AND ts < ? THEN 0 WHEN ts >= ? THEN 1 ELSE -1 END')).toBe(true)

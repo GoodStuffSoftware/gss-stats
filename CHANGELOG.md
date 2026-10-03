@@ -165,7 +165,7 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **"Save failed" clears when the layout is back on what the server holds.** Reverting an edit
   that failed to save no longer leaves the failed label standing.
 - **A layout edit is sent when you leave the page.** An edit still waiting out the save delay is
-  saved on close or navigation instead of being dropped.
+  sent as the page closes (a request the browser lets finish) instead of being dropped.
 
 ## [0.12.1] — 2026-09-27
 

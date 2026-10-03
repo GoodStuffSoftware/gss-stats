@@ -98,10 +98,6 @@ exports[`fact SQL snapshots > bskKpiDays {"todayEt":"2026-09-26"} 1`] = `
 exports[`fact SQL snapshots > bskRangeDaily {"since":"2026-09-20","until":"2026-09-26"} 1`] = `
 {
   "binds": [
-    "/return/%",
-    "/game/complete/%",
-    "/game/complete-deferred/%",
-    "/game/tutorial-complete/%",
     "bestsudoku-web",
     "bestsudoku",
     "bestsudoku-app",
@@ -122,7 +118,7 @@ exports[`fact SQL snapshots > bskRangeDaily {"since":"2026-09-20","until":"2026-
     1790439996000,
   ],
   "db": "gss_geo",
-  "sql": "SELECT date((ts + CASE WHEN (ts >= 1710054000000 AND ts < 1730613600000) OR (ts >= 1741503600000 AND ts < 1762063200000) OR (ts >= 1772953200000 AND ts < 1793512800000) OR (ts >= 1805007600000 AND ts < 1825567200000) OR (ts >= 1836457200000 AND ts < 1857016800000) OR (ts >= 1867906800000 AND ts < 1888466400000) OR (ts >= 1899356400000 AND ts < 1919916000000) OR (ts >= 1930806000000 AND ts < 1951365600000) OR (ts >= 1962860400000 AND ts < 1983420000000) OR (ts >= 1994310000000 AND ts < 2014869600000) OR (ts >= 2025759600000 AND ts < 2046319200000) OR (ts >= 2057209200000 AND ts < 2077768800000) OR (ts >= 2088658800000 AND ts < 2109218400000) OR (ts >= 2120108400000 AND ts < 2140668000000) OR (ts >= 2152162800000 AND ts < 2172722400000) OR (ts >= 2183612400000 AND ts < 2204172000000) OR (ts >= 2215062000000 AND ts < 2235621600000) THEN -14400000 ELSE -18000000 END) / 1000, 'unixepoch') AS dt, path, CASE WHEN path LIKE ? OR path LIKE ? OR path LIKE ? OR path LIKE ? THEN '' ELSE visitor END AS v, campaign, COUNT(*) AS c FROM hits WHERE site IN (?, ?, ?) AND ts >= ? AND ts < ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY dt, path, v, campaign",
+  "sql": "SELECT date((ts + CASE WHEN (ts >= 1710054000000 AND ts < 1730613600000) OR (ts >= 1741503600000 AND ts < 1762063200000) OR (ts >= 1772953200000 AND ts < 1793512800000) OR (ts >= 1805007600000 AND ts < 1825567200000) OR (ts >= 1836457200000 AND ts < 1857016800000) OR (ts >= 1867906800000 AND ts < 1888466400000) OR (ts >= 1899356400000 AND ts < 1919916000000) OR (ts >= 1930806000000 AND ts < 1951365600000) OR (ts >= 1962860400000 AND ts < 1983420000000) OR (ts >= 1994310000000 AND ts < 2014869600000) OR (ts >= 2025759600000 AND ts < 2046319200000) OR (ts >= 2057209200000 AND ts < 2077768800000) OR (ts >= 2088658800000 AND ts < 2109218400000) OR (ts >= 2120108400000 AND ts < 2140668000000) OR (ts >= 2152162800000 AND ts < 2172722400000) OR (ts >= 2183612400000 AND ts < 2204172000000) OR (ts >= 2215062000000 AND ts < 2235621600000) THEN -14400000 ELSE -18000000 END) / 1000, 'unixepoch') AS dt, path, visitor AS v, campaign, COUNT(*) AS c FROM hits WHERE site IN (?, ?, ?) AND ts >= ? AND ts < ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY dt, path, v, campaign",
 }
 `;
 
@@ -194,10 +190,6 @@ exports[`fact SQL snapshots > bskReleaseSides {"releaseDateEt":"2026-09-26","day
 exports[`fact SQL snapshots > campaignDaily {"campaignId":"24215315197"} 1`] = `
 {
   "binds": [
-    "/return/%",
-    "/game/complete/%",
-    "/game/complete-deferred/%",
-    "/game/tutorial-complete/%",
     "sudoku_tired_of_ads",
     "tired_of_ads",
     "launch_2026",
@@ -217,17 +209,13 @@ exports[`fact SQL snapshots > campaignDaily {"campaignId":"24215315197"} 1`] = `
     1790439996000,
   ],
   "db": "gss_geo",
-  "sql": "SELECT date((ts + CASE WHEN (ts >= 1710054000000 AND ts < 1730613600000) OR (ts >= 1741503600000 AND ts < 1762063200000) OR (ts >= 1772953200000 AND ts < 1793512800000) OR (ts >= 1805007600000 AND ts < 1825567200000) OR (ts >= 1836457200000 AND ts < 1857016800000) OR (ts >= 1867906800000 AND ts < 1888466400000) OR (ts >= 1899356400000 AND ts < 1919916000000) OR (ts >= 1930806000000 AND ts < 1951365600000) OR (ts >= 1962860400000 AND ts < 1983420000000) OR (ts >= 1994310000000 AND ts < 2014869600000) OR (ts >= 2025759600000 AND ts < 2046319200000) OR (ts >= 2057209200000 AND ts < 2077768800000) OR (ts >= 2088658800000 AND ts < 2109218400000) OR (ts >= 2120108400000 AND ts < 2140668000000) OR (ts >= 2152162800000 AND ts < 2172722400000) OR (ts >= 2183612400000 AND ts < 2204172000000) OR (ts >= 2215062000000 AND ts < 2235621600000) THEN -14400000 ELSE -18000000 END) / 1000, 'unixepoch') AS dt, path, CASE WHEN path LIKE ? OR path LIKE ? OR path LIKE ? OR path LIKE ? THEN '' ELSE visitor END AS v, campaign, COUNT(*) AS c FROM hits WHERE campaign IN (?, ?, ?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY dt, path, v, campaign",
+  "sql": "SELECT date((ts + CASE WHEN (ts >= 1710054000000 AND ts < 1730613600000) OR (ts >= 1741503600000 AND ts < 1762063200000) OR (ts >= 1772953200000 AND ts < 1793512800000) OR (ts >= 1805007600000 AND ts < 1825567200000) OR (ts >= 1836457200000 AND ts < 1857016800000) OR (ts >= 1867906800000 AND ts < 1888466400000) OR (ts >= 1899356400000 AND ts < 1919916000000) OR (ts >= 1930806000000 AND ts < 1951365600000) OR (ts >= 1962860400000 AND ts < 1983420000000) OR (ts >= 1994310000000 AND ts < 2014869600000) OR (ts >= 2025759600000 AND ts < 2046319200000) OR (ts >= 2057209200000 AND ts < 2077768800000) OR (ts >= 2088658800000 AND ts < 2109218400000) OR (ts >= 2120108400000 AND ts < 2140668000000) OR (ts >= 2152162800000 AND ts < 2172722400000) OR (ts >= 2183612400000 AND ts < 2204172000000) OR (ts >= 2215062000000 AND ts < 2235621600000) THEN -14400000 ELSE -18000000 END) / 1000, 'unixepoch') AS dt, path, visitor AS v, campaign, COUNT(*) AS c FROM hits WHERE campaign IN (?, ?, ?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY dt, path, v, campaign",
 }
 `;
 
 exports[`fact SQL snapshots > campaignDaily {"campaignId":"24234347705"} 1`] = `
 {
   "binds": [
-    "/return/%",
-    "/game/complete/%",
-    "/game/complete-deferred/%",
-    "/game/tutorial-complete/%",
     "sudoku_tired_of_ads_play",
     1788926400000,
     "lifecycle",
@@ -245,17 +233,13 @@ exports[`fact SQL snapshots > campaignDaily {"campaignId":"24234347705"} 1`] = `
     1790439996000,
   ],
   "db": "gss_geo",
-  "sql": "SELECT date((ts + CASE WHEN (ts >= 1710054000000 AND ts < 1730613600000) OR (ts >= 1741503600000 AND ts < 1762063200000) OR (ts >= 1772953200000 AND ts < 1793512800000) OR (ts >= 1805007600000 AND ts < 1825567200000) OR (ts >= 1836457200000 AND ts < 1857016800000) OR (ts >= 1867906800000 AND ts < 1888466400000) OR (ts >= 1899356400000 AND ts < 1919916000000) OR (ts >= 1930806000000 AND ts < 1951365600000) OR (ts >= 1962860400000 AND ts < 1983420000000) OR (ts >= 1994310000000 AND ts < 2014869600000) OR (ts >= 2025759600000 AND ts < 2046319200000) OR (ts >= 2057209200000 AND ts < 2077768800000) OR (ts >= 2088658800000 AND ts < 2109218400000) OR (ts >= 2120108400000 AND ts < 2140668000000) OR (ts >= 2152162800000 AND ts < 2172722400000) OR (ts >= 2183612400000 AND ts < 2204172000000) OR (ts >= 2215062000000 AND ts < 2235621600000) THEN -14400000 ELSE -18000000 END) / 1000, 'unixepoch') AS dt, path, CASE WHEN path LIKE ? OR path LIKE ? OR path LIKE ? OR path LIKE ? THEN '' ELSE visitor END AS v, campaign, COUNT(*) AS c FROM hits WHERE campaign IN (?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY dt, path, v, campaign",
+  "sql": "SELECT date((ts + CASE WHEN (ts >= 1710054000000 AND ts < 1730613600000) OR (ts >= 1741503600000 AND ts < 1762063200000) OR (ts >= 1772953200000 AND ts < 1793512800000) OR (ts >= 1805007600000 AND ts < 1825567200000) OR (ts >= 1836457200000 AND ts < 1857016800000) OR (ts >= 1867906800000 AND ts < 1888466400000) OR (ts >= 1899356400000 AND ts < 1919916000000) OR (ts >= 1930806000000 AND ts < 1951365600000) OR (ts >= 1962860400000 AND ts < 1983420000000) OR (ts >= 1994310000000 AND ts < 2014869600000) OR (ts >= 2025759600000 AND ts < 2046319200000) OR (ts >= 2057209200000 AND ts < 2077768800000) OR (ts >= 2088658800000 AND ts < 2109218400000) OR (ts >= 2120108400000 AND ts < 2140668000000) OR (ts >= 2152162800000 AND ts < 2172722400000) OR (ts >= 2183612400000 AND ts < 2204172000000) OR (ts >= 2215062000000 AND ts < 2235621600000) THEN -14400000 ELSE -18000000 END) / 1000, 'unixepoch') AS dt, path, visitor AS v, campaign, COUNT(*) AS c FROM hits WHERE campaign IN (?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY dt, path, v, campaign",
 }
 `;
 
 exports[`fact SQL snapshots > campaignDaily {"campaignId":"24279250691"} 1`] = `
 {
   "binds": [
-    "/return/%",
-    "/game/complete/%",
-    "/game/complete-deferred/%",
-    "/game/tutorial-complete/%",
     "sudoku_funnel_retest",
     1790438400000,
     "lifecycle",
@@ -273,7 +257,7 @@ exports[`fact SQL snapshots > campaignDaily {"campaignId":"24279250691"} 1`] = `
     1790439996000,
   ],
   "db": "gss_geo",
-  "sql": "SELECT date((ts + CASE WHEN (ts >= 1710054000000 AND ts < 1730613600000) OR (ts >= 1741503600000 AND ts < 1762063200000) OR (ts >= 1772953200000 AND ts < 1793512800000) OR (ts >= 1805007600000 AND ts < 1825567200000) OR (ts >= 1836457200000 AND ts < 1857016800000) OR (ts >= 1867906800000 AND ts < 1888466400000) OR (ts >= 1899356400000 AND ts < 1919916000000) OR (ts >= 1930806000000 AND ts < 1951365600000) OR (ts >= 1962860400000 AND ts < 1983420000000) OR (ts >= 1994310000000 AND ts < 2014869600000) OR (ts >= 2025759600000 AND ts < 2046319200000) OR (ts >= 2057209200000 AND ts < 2077768800000) OR (ts >= 2088658800000 AND ts < 2109218400000) OR (ts >= 2120108400000 AND ts < 2140668000000) OR (ts >= 2152162800000 AND ts < 2172722400000) OR (ts >= 2183612400000 AND ts < 2204172000000) OR (ts >= 2215062000000 AND ts < 2235621600000) THEN -14400000 ELSE -18000000 END) / 1000, 'unixepoch') AS dt, path, CASE WHEN path LIKE ? OR path LIKE ? OR path LIKE ? OR path LIKE ? THEN '' ELSE visitor END AS v, campaign, COUNT(*) AS c FROM hits WHERE campaign IN (?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY dt, path, v, campaign",
+  "sql": "SELECT date((ts + CASE WHEN (ts >= 1710054000000 AND ts < 1730613600000) OR (ts >= 1741503600000 AND ts < 1762063200000) OR (ts >= 1772953200000 AND ts < 1793512800000) OR (ts >= 1805007600000 AND ts < 1825567200000) OR (ts >= 1836457200000 AND ts < 1857016800000) OR (ts >= 1867906800000 AND ts < 1888466400000) OR (ts >= 1899356400000 AND ts < 1919916000000) OR (ts >= 1930806000000 AND ts < 1951365600000) OR (ts >= 1962860400000 AND ts < 1983420000000) OR (ts >= 1994310000000 AND ts < 2014869600000) OR (ts >= 2025759600000 AND ts < 2046319200000) OR (ts >= 2057209200000 AND ts < 2077768800000) OR (ts >= 2088658800000 AND ts < 2109218400000) OR (ts >= 2120108400000 AND ts < 2140668000000) OR (ts >= 2152162800000 AND ts < 2172722400000) OR (ts >= 2183612400000 AND ts < 2204172000000) OR (ts >= 2215062000000 AND ts < 2235621600000) THEN -14400000 ELSE -18000000 END) / 1000, 'unixepoch') AS dt, path, visitor AS v, campaign, COUNT(*) AS c FROM hits WHERE campaign IN (?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY dt, path, v, campaign",
 }
 `;
 
