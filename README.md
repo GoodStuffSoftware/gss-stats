@@ -490,7 +490,9 @@ Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats
   opens showing all of its settings read-only; **Customize…** copies them into an editable card,
   where every template field has a control (badge colours, card actions, note variables, a
   repeat's ids and empty message, table headings, gating) and using a control without changing it
-  leaves the card exactly as it was.
+  leaves the card exactly as it was. A card the builder saves always loads again: it holds the
+  same size limits loading checks (up to 32 badge colours, for one), and a note id from a newer
+  version is kept as saved and shows nothing until this version knows it.
 - **Two datasets, one dashboard.** RUM (sampled, human-only) and the beacon (every
   real load, sub-country geo) are charted side by side; they're independent and never
   summed.
