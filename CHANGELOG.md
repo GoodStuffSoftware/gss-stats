@@ -14,6 +14,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 ### Changed
 - **Campaign return visits now include the installed app.** A campaign's return buckets count
   return visits from the Android app as well as the web site, still from its attribution start.
+- **Return, game-completion and tutorial-completion rows can no longer be split by hour, place or device.**
+  A map, or a chart grouped or filtered by hour of day, location or device, now leaves those rows
+  out; as a result the "Arrivals by ET hour of day" chart no longer counts return and completion rows.
 
 ### Removed
 - **The "Deferred completions (EU consent)" tile is gone.** Best Sudoku now sends those games as
