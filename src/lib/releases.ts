@@ -46,7 +46,7 @@
 //  - v1.90.0–v1.94.x were bumped in CHANGELOG/package.json history but never reached a
 //    `vX.Y.Z` production tag before v1.95.3 shipped — presumed superseded/folded into
 //    v1.95.3's promotion, not separate releases; omitted.
-import { TRACKING_ACTIVATION_DATE_ET, NEW_BEACONS_LIVE_AT_ET, RAW_INSTALL_DEDUPE_LIVE_AT_ET } from './popupEvents'
+import { TRACKING_ACTIVATION_DATE_ET, NEW_BEACONS_LIVE_AT_ET, RAW_INSTALL_DEDUPE_LIVE_AT_ET, etDateFromMs } from './popupEvents'
 
 export interface ReleaseMarker {
   version: string
@@ -172,9 +172,27 @@ export function datedReleases(): DatedRelease[] {
   return RELEASES.filter((r): r is DatedRelease => r.dateEt !== null)
 }
 
-/** The most recent release with a known date, or null if none is dated yet. */
-export function latestDatedRelease(): DatedRelease | null {
-  const dated = datedReleases()
-  if (!dated.length) return null
-  return dated.reduce((a, b) => (a.dateEt >= b.dateEt ? a : b))
+function newest(list: DatedRelease[]): DatedRelease | null {
+  if (!list.length) return null
+  return list.reduce((a, b) => (a.dateEt >= b.dateEt ? a : b))
+}
+
+/** The release the before/after panel compares, given today's ET date: the newest dated release
+ * with at least one full ET day after it (release date strictly before today), or null if none
+ * qualifies. A release still on its first day is not subject yet: its "after" side is empty. */
+export function releaseSubjectOn(todayEt: string): DatedRelease | null {
+  return newest(datedReleases().filter((r) => r.dateEt < todayEt))
+}
+
+/** The newest dated release still waiting for its first full day (dated today or later), when
+ * it is newer than the subject, else null. */
+export function releaseAwaitingFullDay(todayEt: string): DatedRelease | null {
+  const waiting = newest(datedReleases().filter((r) => r.dateEt >= todayEt))
+  return waiting && waiting.dateEt > (releaseSubjectOn(todayEt)?.dateEt ?? '') ? waiting : null
+}
+
+/** The release the panel compares at `nowMs`: the newest dated release with a full ET day after
+ * it, or null if none qualifies (the panel then reads "release-pending"). */
+export function latestDatedRelease(nowMs: number): DatedRelease | null {
+  return releaseSubjectOn(etDateFromMs(nowMs))
 }

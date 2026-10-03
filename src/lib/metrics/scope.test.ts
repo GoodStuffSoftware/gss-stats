@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { CAMPAIGNS, campaignById } from '../campaigns'
 import { POPUPS } from '../popupEvents'
+import { releaseAwaitingFullDay, releaseSubjectOn } from '../releases'
 import {
   buildRequestSpec,
   flattenSectionItems,
@@ -86,6 +87,15 @@ describe('scopeField', () => {
     expect(scopeField(campaignScope(ACTIVE_RETEST), 'campaign.statusToday', '2026-09-27')).toBe('flighting today')
     expect(scopeField(campaignScope(ACTIVE_RETEST), 'campaign.statusToday', '2020-01-01')).toBe('active')
     expect(scopeField(campaignScope(CLOSED_ANDROID), 'campaign.statusToday', '2026-09-27')).toBe('closed')
+  })
+
+  it('release.label names the compared release and notes a newer one waiting for a full day', () => {
+    const root: ScopeInstance = { kind: 'root' }
+    const subject = releaseSubjectOn('2026-10-03')!
+    const waiting = releaseAwaitingFullDay('2026-10-03')!
+    expect(scopeField(root, 'release.label', '2026-10-03')).toBe(`${subject.version} (${subject.dateEt}); ${waiting.version} needs a full day`)
+    const later = releaseSubjectOn('2099-01-01')!
+    expect(scopeField(root, 'release.label', '2099-01-01')).toBe(`${later.version} (${later.dateEt})`)
   })
 
   it('a field not answerable by the current scope kind is null, not a throw', () => {

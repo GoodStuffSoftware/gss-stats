@@ -12,6 +12,9 @@ All notable changes to **gss-stats** are documented here. The format follows
   tile now loads as an invalid card.
 
 ### Fixed
+- **The release before/after panel no longer goes blank on a release day.** It now compares the
+  newest release that has at least one full ET day after it and names it; a newer release still
+  waiting for its first full day shows as a one-line note beside the version.
 - **Chart release markers now include v1.95.4 to v1.96.1.** Seven more Best Sudoku releases
   (v1.95.4 to v1.95.8, v1.96.0, v1.96.1) show on the release timeline.
 - **Sync all pages shows its real state.** The "Sync all pages" checkbox in the filter bar no

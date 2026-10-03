@@ -9,7 +9,7 @@ import { CAMPAIGNS, campaignById, flightDayIndex, sharesReturnTagWith, type Camp
 import { noteRawText } from '../notes'
 import { etDateFromMs, POPUPS, type PopupDef } from '../popupEvents'
 import { campaignSegmentMarker, UPSELL_SIGNEDOUT_FIX_AT } from '../adsRules'
-import { latestDatedRelease } from '../releases'
+import { releaseAwaitingFullDay, releaseSubjectOn } from '../releases'
 import { metricWindows, METRICS, rulesOf, type MetricDef, type MetricParam } from './metrics'
 import { ratioParamsOf, ratioWindowsOf, RATIOS, type RatioDef } from './ratios'
 import { COUNTRY_BUCKETS, WINDOW_SIDES, type CountryBucket, type DataBinding, type DeltaName, type Gating, type Label, type MetricItem, type ParamValue, type RepeatSpec, type ScopePath, type Section, type WindowSide } from './types'
@@ -158,8 +158,10 @@ export function scopeField(scope: ScopeInstance, path: ScopePath, todayEt: strin
     case 'country.label':
       return country ? COUNTRY_LABELS[country] : null
     case 'release.label': {
-      const r = latestDatedRelease()
-      return r ? `${r.version} (${r.dateEt})` : null
+      const r = releaseSubjectOn(todayEt)
+      const waiting = releaseAwaitingFullDay(todayEt)
+      if (!r) return waiting ? `${waiting.version} needs a full day` : null
+      return waiting ? `${r.version} (${r.dateEt}); ${waiting.version} needs a full day` : `${r.version} (${r.dateEt})`
     }
     case 'reading.readAt':
       return reading ? reading.readAt : null
