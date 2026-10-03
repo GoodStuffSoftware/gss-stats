@@ -179,7 +179,8 @@ All notable changes to **gss-stats** are documented here. The format follows
   and back now leaves a customized card exactly as the preset had it; picking a different metric
   keeps the window and filters it still supports, the window picker says "Default" rather than
   showing a window the row doesn't store, and editing another chart while the editor is open
-  shows that chart instead of the previous one.
+  shows that chart instead of the previous one. A row drawn as a sparkline also keeps it when
+  you change its metric to one that can still draw one.
 - **The header stays on one row on a tablet or foldable.** Between 701px and 1000px wide the
   search box shrinks to its icon and the account becomes an icon menu with your e-mail and Log out,
   so the bar no longer wraps onto a second row.
