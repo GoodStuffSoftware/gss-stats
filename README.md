@@ -488,7 +488,8 @@ npm run typecheck:scripts
 ### Adding a new campaign
 
 Reading a new Google Ads campaign is a registry change, not a code change: no campaign id is
-written anywhere outside the registry entries below (and fixtures, tests and the routine docs).
+written anywhere outside the registry entries below (and fixtures, tests and the routine docs; plus the legacy `RETEST_CAMPAIGN_ID` export in
+`adsRules.ts`, kept only for the external release-switchover helper: new code must not use it).
 Several campaigns can be live at once. Do these in order. The numbering matters: step 1 comes
 **before** anything is registered.
 

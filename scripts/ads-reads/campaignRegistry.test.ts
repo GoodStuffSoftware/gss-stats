@@ -16,6 +16,7 @@ import { MIN_COHORT } from '../../src/lib/popupEvents'
 import {
   ADS_READ_PLANS,
   RETEST_APPROVED_PLACEMENTS,
+  RETEST_CAMPAIGN_ID,
   approvedPlacementsFor,
   auditPathFor,
   buildReadPlan,
@@ -289,6 +290,11 @@ describe('resolveCampaignId (the CLI)', () => {
   it('a bare --campaign (no value) fails in parseCli with the same message, listing the registered ids', () => {
     expect(() => parseCli({}, ['--campaign'])).toThrow(new RegExp(`--campaign with no value is not a registered campaign id \\(registered read plans: ${RETEST}\\); pass --campaign <id>`))
     expect(() => parseCli({}, ['--dry-run', '--campaign'])).toThrow(/with no value.*registered read plans/)
+    // `--campaign` followed by another option (an unset shell variable) is parseArgs' "ambiguous" case
+    const extra = { 'cf-token-file': { type: 'string' }, force: { type: 'boolean' }, stage: { type: 'string' } } as const
+    for (const argv of [['--campaign', '--cf-token-file', 'X'], ['--campaign', '--force'], ['--campaign', '--stage', 'wrapup']]) {
+      expect(() => parseCli(extra, argv)).toThrow(new RegExp(`with no value.*registered read plans: ${RETEST}`))
+    }
     // other parse errors are untouched
     expect(() => parseCli({}, ['--nope'])).toThrow(/Unknown option/)
     expect(parseCli({}, ['--campaign', RETEST]).campaign).toBe(RETEST)
@@ -369,6 +375,15 @@ describe('concurrent campaigns do not collide in non-keyed outputs', () => {
     expect(() =>
       buildReadPage({ template: fs.readFileSync(TEMPLATE_PATH, 'utf8'), raw, narrative: { headline: 'h', working: ['w'], notWorking: ['n'], soWhat: ['s'] }, audit: null }),
     ).toThrow(/no ads read plan for campaign 12345 \(registered read plans: 24279250691\)/)
+  })
+})
+
+describe('legacy RETEST_CAMPAIGN_ID export (external release-switchover helper)', () => {
+  it('equals the retest registry id and readPlanFor returns the retest plan', () => {
+    expect(RETEST_CAMPAIGN_ID).toBe(RETEST)
+    expect(Object.keys(ADS_READ_PLANS)).toContain(RETEST_CAMPAIGN_ID)
+    expect(readPlanFor(RETEST_CAMPAIGN_ID).plan).toBe(ADS_READ_PLANS[RETEST])
+    expect(readPlanFor(RETEST_CAMPAIGN_ID).plan.campaignId).toBe(RETEST)
   })
 })
 
