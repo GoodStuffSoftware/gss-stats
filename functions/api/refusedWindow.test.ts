@@ -296,7 +296,7 @@ describe('bind ceiling', () => {
     expect(sub.calls[0].sql).toContain('CASE WHEN (path LIKE')
     expect(sub.calls[0].binds.length).toBe(aligned.calls[0].binds.length)
     expect(sub.calls[0].binds.length).toBeLessThan(100)
-    expect(sub.calls[0].binds.length).toBe(97) // measured
+    expect(sub.calls[0].binds.length).toBe(99) // measured: 97 with 3 registered campaigns, 99 with flight 2's two arms (each campaign adds one bind)
   })
 })
 
