@@ -8,7 +8,6 @@ import {
   isEtMidnight,
   isSplitRefusedPath,
   isWholeEtDays,
-  REFUSED_SAMPLE_PATHS,
   REFUSED_WINDOW_KEY,
   REFUSED_WINDOW_SNAP,
   refusedPathMatch,
@@ -19,6 +18,7 @@ import {
   type RefusedSnap,
 } from './splitGuard'
 import { addDays, etDateFast, etWallTimeMs } from './etTime'
+import { REFUSED_PATH_VOCABULARY, REFUSED_SAMPLE_PATHS } from './__fixtures__/refusedPaths'
 
 const MODES: RefusedSnap[] = ['nearest', 'outward', 'inward']
 const Z = (iso: string) => Date.parse(iso)
@@ -37,6 +37,13 @@ describe('the switch', () => {
       const prefix = pat.slice(0, -1)
       const own = REFUSED_SAMPLE_PATHS.filter((p) => p.startsWith(prefix) && !SPLIT_REFUSED_PATH_PATTERNS.some((o) => o !== pat && o.length > pat.length && p.startsWith(o.slice(0, -1))))
       expect(own, pat).toHaveLength(1)
+    }
+  })
+  it('has a refused-path vocabulary that covers every pattern and holds only refused paths', () => {
+    for (const p of REFUSED_PATH_VOCABULARY) expect(isSplitRefusedPath(p), p).toBe(true)
+    for (const pat of SPLIT_REFUSED_PATH_PATTERNS) {
+      const prefix = pat.slice(0, -1)
+      expect(REFUSED_PATH_VOCABULARY.filter((p) => p.startsWith(prefix)).length, pat).toBeGreaterThan(100)
     }
   })
 })

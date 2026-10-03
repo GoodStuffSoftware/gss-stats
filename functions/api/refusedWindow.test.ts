@@ -16,6 +16,7 @@ import { buildFact } from '../../src/lib/metrics/engine'
 import { siteWindowClause } from '../../src/lib/overview'
 import { BEST_SUDOKU_SITES } from '../../src/lib/bestSudokuSites'
 import type { MetricsResponseBody } from '../../src/lib/metrics/types'
+import { METRICS } from '../../src/lib/metrics/metrics'
 
 const Z = (iso: string) => Date.parse(iso)
 const iso = (ms: number) => new Date(ms).toISOString()
@@ -150,6 +151,49 @@ describe('the 3 x 1 h probe: consecutive hour windows never read back per-hour r
       expect(r.pageviews.noteIds).toContain('refused-whole-days') // counts /game/start/ rows
       expect(r.game_views.noteIds ?? []).not.toContain('refused-whole-days') // can't count a refused row
     }
+  })
+})
+
+// MUST-1 (review of #63): the note follows MetricDef.countsRefused, never a sampled path. The
+// old one-sample-per-pattern check left it off tutorial replays, the three tour-exit steps and
+// d1+ returns, all of which count refused rows; this list is the whole answer for today's registry.
+const REFUSED_NOTE_METRICS = [
+  'bsk.pageviews', // !isEventPath: counts /game/start/ rows
+  'bsk.taggedArrivals', // no path test: any first-ever beacon, refused ones included
+  'bsk.completions',
+  'bsk.tutorialFirstRun',
+  'bsk.tutorialReplay',
+  'bsk.tourExitPreamble',
+  'bsk.tourExitHub',
+  'bsk.tourExitSection',
+  'bsk.returnsD1plus',
+].sort()
+
+describe('the refused-whole-days note on every bskRangePath metric', () => {
+  const pageMetrics = [...METRICS.values()].filter((d) => d.windows.page === 'bskRangePath' && d.params.length === 0)
+  it('a sub-day page window notes exactly the metrics that can count a refused row', async () => {
+    // After every go-live these metrics carry (tour tracking 2026-10-03T17:03:40Z), so none is unmeasured.
+    const requests = pageMetrics.map((d) => ({ key: d.id.toLowerCase(), metric: d.id, window: 'page' }))
+    const waited: Promise<unknown>[] = []
+    const res = await metricsPost(pagesContext(postJson('/api/metrics', { v: 1, context: { since: '2026-10-04T14:00:00.000Z', until: '2026-10-04T15:00:00.000Z' }, requests }), { gss_geo: sqliteD1(db) }, waited) as any)
+    await Promise.all(waited)
+    expect(res.status, await res.clone().text()).toBe(200)
+    const results = ((await res.json()) as MetricsResponseBody).results
+    const noted: string[] = []
+    for (const r of requests) {
+      const v = results[r.key]
+      expect(['ok', 'partial'], `${r.metric}: ${v.status} ${v.reason ?? ''}`).toContain(v.status)
+      if ((v.noteIds ?? []).includes('refused-whole-days')) noted.push(r.metric)
+    }
+    expect(noted.sort()).toEqual(REFUSED_NOTE_METRICS)
+  })
+  it('no note on an ET-midnight page window', async () => {
+    const requests = pageMetrics.map((d) => ({ key: d.id.toLowerCase(), metric: d.id, window: 'page' }))
+    const waited: Promise<unknown>[] = []
+    const res = await metricsPost(pagesContext(postJson('/api/metrics', { v: 1, context: { since: iso(etWallTimeMs('2026-10-04')), until: iso(etWallTimeMs('2026-10-05')) }, requests }), { gss_geo: sqliteD1(db) }, waited) as any)
+    await Promise.all(waited)
+    const results = ((await res.json()) as MetricsResponseBody).results
+    for (const r of requests) expect(results[r.key].noteIds ?? [], r.metric).not.toContain('refused-whole-days')
   })
 })
 

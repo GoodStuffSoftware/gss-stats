@@ -49,7 +49,8 @@
 // ET midnights takes the unchanged path: same SQL, same binds, same cache key as before R-1d.
 // Applied by functions/api/geo.ts (every branch, unless the split guard already leaves refused
 // rows out), functions/api/completions.ts (every row is refused) and the /api/metrics `page`
-// window (facts.ts bskRangePath; the engine adds the 'refused-whole-days' note). /api/popups'
+// window (facts.ts bskRangePath; the engine adds the 'refused-whole-days' note to every metric
+// that can count a refused row, by MetricDef.countsRefused). /api/popups'
 // hourly read and the routine's per-hour and per-country reads already leave refused rows out.
 // Today's refused totals stay live (ruling 2026-10-03: no hold until the ET day closes). A hold
 // would cap refusedRowWindow's `to` at the open day's ET midnight; every caller already takes
@@ -163,17 +164,6 @@ export const REFUSED_WINDOW_KEY = `refused-${REFUSED_WINDOW_SNAP}-et-days-v1`
 /** The caption a chart shows when its query answered with `meta.refusedWholeDays: true`
  * (components/ChartCard.vue), worded to fit every snap mode. */
 export const REFUSED_WHOLE_DAYS_CAPTION = 'Return and completion rows are counted over whole ET days.'
-
-/** One sample path per SPLIT_REFUSED_PATH_PATTERNS entry (a test keeps them in step), for a
- * static "can this path predicate count a refused row" check (the metrics engine's note). */
-export const REFUSED_SAMPLE_PATHS: readonly string[] = [
-  '/return/x/d0',
-  '/game/complete/normal/easy',
-  '/game/complete-deferred/normal/easy',
-  '/game/tutorial-complete/first-run',
-  '/game/start/easy',
-  '/tour/exit-at/1',
-]
 
 /** The ET midnight at or before `ms`. ET midnight is never on a DST change (those are at 02:00). */
 function etMidnightFloor(ms: number): number {

@@ -84,6 +84,13 @@ export interface MetricDef {
   windows: Partial<Record<WindowName, FactId>>
   /** Beacon metrics: the path test (memoized per path; also the seenInFlightWindow evidence). */
   path?: (path: string, ctx: MetricCtx) => boolean
+  /** Beacon metrics: false DECLARES that `path` never passes a refused row (lib/splitGuard.ts
+   * SPLIT_REFUSED_PATH_PATTERNS: returns, game starts, completions, tutorial completions, tour
+   * exits). Unset = it may, and a sub-day range on a whole-ET-day-snapped fact carries the
+   * 'refused-whole-days' note (lib/metrics/engine.ts). Fail-closed: a new metric gets the note
+   * until it opts out, and the opt-out is checked against the full refused-path vocabulary
+   * (metrics.refused.test.ts). Only a metric with a path test may set it (checked at load). */
+  countsRefused?: false
   /** Beacon metrics: only rows of this visitor kind ('new' = a device's first-ever beacon). */
   visitor?: 'new'
   /** Beacon metrics: only rows carrying some campaign tag (any tag at all, unattributed). */
@@ -331,27 +338,27 @@ export const METRIC_DEFS: MetricDef[] = [
     store: (_rows, _ctx, env) => ({ value: env.releaseDays }),
     instrumented: [],
   },
-  bskMetric({ id: 'bsk.gameViews', unit: 'pageview', path: step('played'), instrumented: [] }),
+  bskMetric({ id: 'bsk.gameViews', countsRefused: false, unit: 'pageview', path: step('played'), instrumented: [] }),
   bskMetric({ id: 'bsk.completions', unit: 'completion', path: step('completed'), instrumented: [GAME_COMPLETE] }),
-  bskMetric({ id: 'bsk.popupShown', unit: 'showing', path: isPopupShown, instrumented: [TRACKING] }),
-  bskMetric({ id: 'bsk.popupAccepts', unit: 'showing', subsetOf: 'bsk.popupShown', path: isPopupAccept, instrumented: [TRACKING] }),
-  bskMetric({ id: 'bsk.authSuccess', unit: 'signin', path: isAuthSuccessBase, windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [] }),
+  bskMetric({ id: 'bsk.popupShown', countsRefused: false, unit: 'showing', path: isPopupShown, instrumented: [TRACKING] }),
+  bskMetric({ id: 'bsk.popupAccepts', countsRefused: false, unit: 'showing', subsetOf: 'bsk.popupShown', path: isPopupAccept, instrumented: [TRACKING] }),
+  bskMetric({ id: 'bsk.authSuccess', countsRefused: false, unit: 'signin', path: isAuthSuccessBase, windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [] }),
   // The new/existing/unknown split (A2, review round 2026-09-27): the exact sign-up count the
   // current ad flight is judged on ('new'), plus existing sign-ins and the small unknown/old-
   // client remainder. Gated on AUTH_NEW_EXISTING (the 19:43:02Z go-live) so a range reaching
   // back before it reads "counted from 2026-09-26 15:43 ET" instead of a false zero — the base
   // bsk.authSuccess metric above predates this split and stays ungated (it counts every sign-in
   // regardless of whether the status row rode alongside it).
-  bskMetric({ id: 'bsk.authSuccessNew', unit: 'signin', path: (p) => authSuccessRow(p) === 'new', windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [AUTH_NEW_EXISTING] }),
-  bskMetric({ id: 'bsk.authSuccessExisting', unit: 'signin', path: (p) => authSuccessRow(p) === 'existing', windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [AUTH_NEW_EXISTING] }),
-  bskMetric({ id: 'bsk.authSuccessUnknown', unit: 'signin', path: (p) => authSuccessRow(p) === 'unknown', windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [AUTH_NEW_EXISTING] }),
+  bskMetric({ id: 'bsk.authSuccessNew', countsRefused: false, unit: 'signin', path: (p) => authSuccessRow(p) === 'new', windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [AUTH_NEW_EXISTING] }),
+  bskMetric({ id: 'bsk.authSuccessExisting', countsRefused: false, unit: 'signin', path: (p) => authSuccessRow(p) === 'existing', windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [AUTH_NEW_EXISTING] }),
+  bskMetric({ id: 'bsk.authSuccessUnknown', countsRefused: false, unit: 'signin', path: (p) => authSuccessRow(p) === 'unknown', windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [AUTH_NEW_EXISTING] }),
   // v1.89.0 (live 2026-09-22): sign-in FAILURES (/auth/error/<slug>, any slug) and the
   // popup-to-redirect fallback (/auth/redirect/<provider>) — see lib/popupEvents.ts
   // AUTH_ERROR_REDIRECT_LIVE_AT_ET. Gated (unlike bsk.authSuccess above, which predates this
   // convention) so a window reaching back before go-live reads "counted from" rather than a
   // misleading full-history zero.
-  bskMetric({ id: 'bsk.authErrors', unit: 'row', path: isAuthErrorPath, windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [AUTH_ERROR_REDIRECT] }),
-  bskMetric({ id: 'bsk.authRedirects', unit: 'row', path: isAuthRedirectPath, windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [AUTH_ERROR_REDIRECT] }),
+  bskMetric({ id: 'bsk.authErrors', countsRefused: false, unit: 'row', path: isAuthErrorPath, windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [AUTH_ERROR_REDIRECT] }),
+  bskMetric({ id: 'bsk.authRedirects', countsRefused: false, unit: 'row', path: isAuthRedirectPath, windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [AUTH_ERROR_REDIRECT] }),
   // v1.97.0: tutorial completions split by run kind, and tour exits by step. Counts only; the
   // tutorial rows are NOT real game completions (bsk.completions never counts them).
   bskMetric({ id: 'bsk.tutorialFirstRun', unit: 'row', path: (p) => isTutorialCompletePath(p, 'first-run'), instrumented: [TOUR_TRACKING] }),
@@ -359,8 +366,8 @@ export const METRIC_DEFS: MetricDef[] = [
   bskMetric({ id: 'bsk.tourExitPreamble', unit: 'row', path: (p) => isTourExitPath(p, 'preamble'), instrumented: [TOUR_TRACKING] }),
   bskMetric({ id: 'bsk.tourExitHub', unit: 'row', path: (p) => isTourExitPath(p, 'hub'), instrumented: [TOUR_TRACKING] }),
   bskMetric({ id: 'bsk.tourExitSection', unit: 'row', path: (p) => isTourExitPath(p, 'section'), instrumented: [TOUR_TRACKING] }),
-  bskMetric({ id: 'bsk.installs', unit: 'showing', path: isInstallPromptInstalled, windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [INSTALL_FIX], lagDays: [0, 7] }),
-  bskMetric({ id: 'bsk.rawInstallSignals', unit: 'row', path: isRawInstallSignal, instrumented: [RAW_DEDUPE], caveats: ['raw-install-dedupe'] }),
+  bskMetric({ id: 'bsk.installs', countsRefused: false, unit: 'showing', path: isInstallPromptInstalled, windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [INSTALL_FIX], lagDays: [0, 7] }),
+  bskMetric({ id: 'bsk.rawInstallSignals', countsRefused: false, unit: 'row', path: isRawInstallSignal, instrumented: [RAW_DEDUPE], caveats: ['raw-install-dedupe'] }),
   bskMetric({ id: 'bsk.returnsD1plus', unit: 'row', path: isReturnD1Plus, instrumented: [TRACKING] }),
 
   // ── Pop-ups (popupRangePath over the page range, activation-gated like /api/popups) ────────
@@ -463,6 +470,8 @@ export const METRICS: ReadonlyMap<string, MetricDef> = (() => {
     if (d.organic && (!d.params.includes('campaignId') || Object.values(d.windows).some((f) => f !== 'campaignReturns'))) {
       throw new Error(`metric ${d.id}: organic needs a campaignId param and reads campaignReturns only`)
     }
+    // No path test = every row counts, refused rows included: the opt-out would be a lie.
+    if (d.countsRefused === false && !d.path) throw new Error(`metric ${d.id}: countsRefused: false needs a path test`)
     m.set(d.id, d)
   }
   for (const d of METRIC_DEFS) if (d.subsetOf && !m.has(d.subsetOf)) throw new Error(`metric ${d.id}: subsetOf unknown metric ${d.subsetOf}`)
