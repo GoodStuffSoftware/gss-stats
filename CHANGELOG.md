@@ -6,17 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
-### Changed
-- **Return, game-completion and tutorial-completion rows can no longer be split by hour, place or device.**
-  A map, or a chart grouped or filtered by hour of day, location or device, now leaves those rows
-  out; as a result the "Arrivals by ET hour of day" chart no longer counts return and completion rows.
-
-### Removed
-- **The "Deferred completions (EU consent)" tile is gone.** Best Sudoku now sends those games as
-  ordinary completions, so the tile could only read 0; saved copies of it load without the tile, and a saved card whose only item was that
-  tile now loads as an invalid card.
-
 ### Added
+- **Return visits show an "Organic (web)" baseline row.** After the campaigns, the return-visits
+  panel adds untagged web visitors' return buckets, so each campaign can be read against people
+  who came on their own; the row stays hidden until the web site starts sending them.
+
 - **Tutorial completions and tour exits (Best Sudoku v1.97.0).** The Overview "today" card now
   splits tutorial completions into first run and replay, and counts tour exits by step (preamble,
   hub, section), counted from 13:03 ET on 2026-10-03. The new rows never count as page views or
@@ -24,50 +18,6 @@ All notable changes to **gss-stats** are documented here. The format follows
   which starts a counted Easy game, so first-run game completions may rise from 13:03 ET on 10-03.
 - **v1.97.0 release marker and a go-live marker for the new beacons on the charts.**
 
-### Fixed
-- **The release before/after panel no longer goes blank on a release day.** It now compares the
-  newest release whose first full ET day after the release date is complete (the release day
-  itself is left out of the after side) and names it; a newer release still waiting shows as a
-  one-line note beside the version.
-- **Return visits now leave out pre-launch test visits, like the arrivals tile.** Returns from a
-  campaign's tagged link count only from its attribution start (for the retest, 12:00 ET on its
-  first day), so launch-day test rows no longer inflate the return buckets. The ads routine's
-  return counts use the same start, so it and the page agree.
-- **Chart release markers now include v1.95.4 to v1.96.1.** Seven more Best Sudoku releases
-  (v1.95.4 to v1.95.8, v1.96.0, v1.96.1) show on the release timeline.
-- **Sync all pages shows its real state.** The "Sync all pages" checkbox in the filter bar no
-  longer always shows as on — it now genuinely reflects whether page date ranges are synced.
-- **Best Sudoku · Overview content sits right under the filter bar again.** The small-sample
-  note took a three-row grid cell for one line of text, leaving an empty band between the bar and
-  the first card; it now takes one row and the cards below move up (layout version 12, saved
-  layouts migrate once and a note you resized keeps its size). The "show filters" button also
-  closes the pinned bar again: the open bar no longer covers it.
-- **The funnel-reach kill rule no longer trips while sign-in prompts still fire site-wide.**
-  Zero tagged asks now reads as WATCH when sign-in prompts were shown site-wide in the same
-  window (the campaign tag only rides beacons for 30 minutes, so later-session streak prompts
-  go untagged); it still trips when both are zero, and the rule always states the site-wide
-  shown count.
-- **The funnel-reach WATCH can no longer hide a broken campaign.** Zero tagged arrivals always
-  trips; the WATCH downgrade applies only until the tutorial sign-in ask is seen site-wide, after
-  which the rule reads tagged asks only; the detail line states which mode applied, the
-  site-wide cross-check counts the same asks the rule does (first-50 promo included), and the
-  threshold push names a rule on WATCH instead of saying no rule tripped.
-- **First-session funnel figures are more faithful.** Arrivals count one per device (first
-  tagged visit) instead of new-visitor page rows; a step whose sibling beacons are live reads
-  a real 0 instead of "not yet tracked"; the site-wide column now stops at the same end as the
-  tagged one; and no ratio divides by game views, which are page views.
-- **Agent worktrees no longer leak into the test run.** The test suite skips copies of the
-  repository under the agent worktree folder.
-- **Two standing retest report notes corrected.** The upsell-near-zero-for-signed-out note
-  wrongly called it a known bug (`useUpsellPrompt` returning early on `uid === null`); it is
-  expected by design (a signed-out visitor is never walled — the trial starts only once a
-  signed-in player plays a game), and the planned "fix" was cancelled. The sign-up note now
-  names both segments — bounded before the new/existing sign-in split went live (v1.95.5,
-  2026-09-26 19:43:02Z) and exact from `/auth/success/<provider>/new` after it — and the printed
-  sign-up line (`at most N campaign sign-ups (at most B + exactly E)`) shows both parts instead
-  of collapsing a mixed window to one bound.
-
-### Added
 - **Search campaigns read alongside Display ones.** A campaign can now be registered as a
   Search arm: its placement rules and lines read "n/a (search campaign)" instead of tripping on
   missing placements, while spend, clicks and every other rule read as before, and each of two
@@ -138,6 +88,12 @@ All notable changes to **gss-stats** are documented here. The format follows
   install rate** on the Pop-ups page, as counts.
 
 ### Changed
+- **Campaign return visits now include the installed app.** A campaign's return buckets count
+  return visits from the Android app as well as the web site, still from its attribution start.
+- **Return, game-completion and tutorial-completion rows can no longer be split by hour, place or device.**
+  A map, or a chart grouped or filtered by hour of day, location or device, now leaves those rows
+  out; as a result the "Arrivals by ET hour of day" chart no longer counts return and completion rows.
+
 - **The retest ads routine's release-health check now runs every morning read, at any hour.**
   The 23:15 ET backstop entry is folded into the single daily morning read (moved 08:00 → 06:00
   ET); the clock-based "01:00-12:00 ET quiet window" that used to suppress the check is retired,
@@ -149,7 +105,54 @@ All notable changes to **gss-stats** are documented here. The format follows
   or a hidden tile) once tracking is live, so "no failures yet" reads differently from "not
   wired up".
 
+### Removed
+- **The "Deferred completions (EU consent)" tile is gone.** Best Sudoku now sends those games as
+  ordinary completions, so the tile could only read 0; saved copies of it load without the tile, and a saved card whose only item was that
+  tile now loads as an invalid card.
+
 ### Fixed
+- **The release before/after panel no longer goes blank on a release day.** It now compares the
+  newest release whose first full ET day after the release date is complete (the release day
+  itself is left out of the after side) and names it; a newer release still waiting shows as a
+  one-line note beside the version.
+- **Return visits now leave out pre-launch test visits, like the arrivals tile.** Returns from a
+  campaign's tagged link count only from its attribution start (for the retest, 12:00 ET on its
+  first day), so launch-day test rows no longer inflate the return buckets. The ads routine's
+  return counts use the same start, so it and the page agree.
+- **Chart release markers now include v1.95.4 to v1.96.1.** Seven more Best Sudoku releases
+  (v1.95.4 to v1.95.8, v1.96.0, v1.96.1) show on the release timeline.
+- **Sync all pages shows its real state.** The "Sync all pages" checkbox in the filter bar no
+  longer always shows as on — it now genuinely reflects whether page date ranges are synced.
+- **Best Sudoku · Overview content sits right under the filter bar again.** The small-sample
+  note took a three-row grid cell for one line of text, leaving an empty band between the bar and
+  the first card; it now takes one row and the cards below move up (layout version 12, saved
+  layouts migrate once and a note you resized keeps its size). The "show filters" button also
+  closes the pinned bar again: the open bar no longer covers it.
+- **The funnel-reach kill rule no longer trips while sign-in prompts still fire site-wide.**
+  Zero tagged asks now reads as WATCH when sign-in prompts were shown site-wide in the same
+  window (the campaign tag only rides beacons for 30 minutes, so later-session streak prompts
+  go untagged); it still trips when both are zero, and the rule always states the site-wide
+  shown count.
+- **The funnel-reach WATCH can no longer hide a broken campaign.** Zero tagged arrivals always
+  trips; the WATCH downgrade applies only until the tutorial sign-in ask is seen site-wide, after
+  which the rule reads tagged asks only; the detail line states which mode applied, the
+  site-wide cross-check counts the same asks the rule does (first-50 promo included), and the
+  threshold push names a rule on WATCH instead of saying no rule tripped.
+- **First-session funnel figures are more faithful.** Arrivals count one per device (first
+  tagged visit) instead of new-visitor page rows; a step whose sibling beacons are live reads
+  a real 0 instead of "not yet tracked"; the site-wide column now stops at the same end as the
+  tagged one; and no ratio divides by game views, which are page views.
+- **Agent worktrees no longer leak into the test run.** The test suite skips copies of the
+  repository under the agent worktree folder.
+- **Two standing retest report notes corrected.** The upsell-near-zero-for-signed-out note
+  wrongly called it a known bug (`useUpsellPrompt` returning early on `uid === null`); it is
+  expected by design (a signed-out visitor is never walled — the trial starts only once a
+  signed-in player plays a game), and the planned "fix" was cancelled. The sign-up note now
+  names both segments — bounded before the new/existing sign-in split went live (v1.95.5,
+  2026-09-26 19:43:02Z) and exact from `/auth/success/<provider>/new` after it — and the printed
+  sign-up line (`at most N campaign sign-ups (at most B + exactly E)`) shows both parts instead
+  of collapsing a mixed window to one bound.
+
 - **Chart queries with many sites and pop-up filters no longer refuse to run.** The dashboard's
   documented maximums (50 sites, 16 path filters) work together again without hitting the
   underlying database's per-query parameter ceiling.

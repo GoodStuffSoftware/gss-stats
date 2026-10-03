@@ -233,6 +233,7 @@ exports[`fact SQL snapshots > campaignReturns {"campaignId":"24215315197"} 1`] =
 {
   "binds": [
     "bestsudoku-web",
+    "bestsudoku-app",
     "/return/sudoku_tired_of_ads/%",
     "/return/tired_of_ads/%",
     "/return/launch_2026/%",
@@ -249,7 +250,7 @@ exports[`fact SQL snapshots > campaignReturns {"campaignId":"24215315197"} 1`] =
     "North Carolina",
   ],
   "db": "gss_geo",
-  "sql": "SELECT path, COUNT(*) AS c FROM hits WHERE site = ? AND (path LIKE ? OR path LIKE ? OR path LIKE ?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) GROUP BY path",
+  "sql": "SELECT path, COUNT(*) AS c FROM hits WHERE site IN (?, ?) AND (path LIKE ? OR path LIKE ? OR path LIKE ?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) GROUP BY path",
 }
 `;
 
@@ -257,6 +258,7 @@ exports[`fact SQL snapshots > campaignReturns {"campaignId":"24234347705"} 1`] =
 {
   "binds": [
     "bestsudoku-web",
+    "bestsudoku-app",
     "/return/sudoku_tired_of_ads_play/%",
     1788926400000,
     "lifecycle",
@@ -271,7 +273,7 @@ exports[`fact SQL snapshots > campaignReturns {"campaignId":"24234347705"} 1`] =
     "North Carolina",
   ],
   "db": "gss_geo",
-  "sql": "SELECT path, COUNT(*) AS c FROM hits WHERE site = ? AND (path LIKE ?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) GROUP BY path",
+  "sql": "SELECT path, COUNT(*) AS c FROM hits WHERE site IN (?, ?) AND (path LIKE ?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) GROUP BY path",
 }
 `;
 
@@ -279,6 +281,7 @@ exports[`fact SQL snapshots > campaignReturns {"campaignId":"24279250691"} 1`] =
 {
   "binds": [
     "bestsudoku-web",
+    "bestsudoku-app",
     "/return/sudoku_funnel_retest/%",
     1790438400000,
     "lifecycle",
@@ -293,7 +296,28 @@ exports[`fact SQL snapshots > campaignReturns {"campaignId":"24279250691"} 1`] =
     "North Carolina",
   ],
   "db": "gss_geo",
-  "sql": "SELECT path, COUNT(*) AS c FROM hits WHERE site = ? AND (path LIKE ?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) GROUP BY path",
+  "sql": "SELECT path, COUNT(*) AS c FROM hits WHERE site IN (?, ?) AND (path LIKE ?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) GROUP BY path",
+}
+`;
+
+exports[`fact SQL snapshots > campaignReturns {"campaignId":"organic"} 1`] = `
+{
+  "binds": [
+    "bestsudoku-web",
+    "/return/organic/%",
+    "lifecycle",
+    "email_%",
+    "Virginia",
+    "Reston",
+    "Verizon Business",
+    "desktop",
+    "Windows",
+    "Chrome",
+    1280,
+    "North Carolina",
+  ],
+  "db": "gss_geo",
+  "sql": "SELECT path, COUNT(*) AS c FROM hits WHERE site = ? AND path LIKE ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) GROUP BY path",
 }
 `;
 
