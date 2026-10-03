@@ -14,6 +14,12 @@ All notable changes to **gss-stats** are documented here. The format follows
   tutorial completions (first run vs replay) as plain counts, "not yet tracked" until the
   first v1.97.0 row.
 
+## [0.14.3] — 2026-10-03
+
+### Changed
+- **The dashboard's own tests no longer reach for the network and no longer time out when run
+  side by side.** Nothing changes in the app.
+
 ## [0.14.2] — 2026-10-03
 
 ### Changed
