@@ -333,6 +333,20 @@ there — not just the one drilled — can show the event rows just filtered dow
 carries a caption explaining why (see [`src/lib/drill.ts`](src/lib/drill.ts)
 `drillNeedsEventBeacons`).
 
+**Return, game-completion and tutorial-completion rows are counts only: never split by hour,
+place or device.** Rule: "counts only. Never tie beacon rows to a device, time or place." A geo
+chart that maps rows (the map/globe), groups by an hour, place or device dimension (`hourEt`;
+`country`, `region`, `city`, `postal`, `continent`, `timezone`, `colo`, `org`; `device`,
+`browser`, `os`, `lang`, `screenw`, `screenwBucket`, `visitor`), or is drilled into one of them
+leaves `/return/…`, `/game/complete/…`, `/game/complete-deferred/…` and
+`/game/tutorial-complete/…` rows out entirely, whatever "Include event beacons" says, and marks
+the response `meta.splitGuard: true`. The rows still count everywhere else: by path, by ET day
+or flight day, by campaign, and in the metric cards. The guard keys on dimensions and drills
+only; the chart's own date range is not yet clamped to whole days. One visible effect: the **Arrivals by ET hour of day** chart no longer counts an arrival
+whose first beacon was a return or completion row, so its total can sit slightly below the
+flight-day chart's. The "hide known test and household traffic" filter is unchanged. See
+[`src/lib/splitGuard.ts`](src/lib/splitGuard.ts).
+
 **Every stored geo-beacon column is a chartable dimension AND a filter.** `functions/api/geo.ts`
 whitelists every analytic `hits` column (`GEO_DIMS`) — region/city/postal/country/continent/
 timezone/colo/org/referrer/refpath/path/site/device/browser/os/lang/visitor/campaign/source/
