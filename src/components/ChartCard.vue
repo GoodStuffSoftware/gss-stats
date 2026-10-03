@@ -12,7 +12,7 @@ import { isSiteDim, semanticKey } from '../lib/drill'
 import { isMobileViewport } from '../lib/responsive'
 import { isFit, widgetNeedsChartHeight } from '../lib/fit'
 import { useFitHeight } from '../composables/useFitHeight'
-import { isStale, useReturnRefresh } from '../composables/useReturnRefresh'
+import { isInFlight, isStale, useReturnRefresh } from '../composables/useReturnRefresh'
 import BaseChart from './charts/BaseChart.vue'
 import WorldMap from './charts/WorldMap.vue'
 import FilterPopover from './FilterPopover.vue'
@@ -262,7 +262,7 @@ const hasOverride = computed(() => !!props.widget.filters)
 
 // A background refetch (the user came back to the tab) keeps the chart on screen — no "Loading…"
 // flash, and a failure leaves the last good data up instead of replacing it with an error.
-let inFlight = 0
+let loadStartedAt: number | null = null // the latest load's start; null once it settles
 let settledAt: number | null = null
 async function load(background = false) {
   if (isBespokeBody.value) return // own data fetch (or none) — see MetricCard/AdsReadingsWidgetCard/NoteWidgetBody
@@ -278,7 +278,7 @@ async function load(background = false) {
     loading.value = true
     error.value = null
   }
-  inFlight++
+  loadStartedAt = Date.now()
   try {
     // A series line chart fetches one date query per series; the first also stands in as `data`
     // for the generic empty/loaded states.
@@ -306,8 +306,10 @@ async function load(background = false) {
     }
     if (isNetworkError(e) || isAuthError(e)) checkSessionExpired() // probe for an expired session
   } finally {
-    inFlight--
-    if (my === reqId) loading.value = false
+    if (my === reqId) {
+      loadStartedAt = null
+      loading.value = false
+    }
   }
 }
 
@@ -315,7 +317,7 @@ async function load(background = false) {
 // loading. Same request as any other load (never `fresh`), so the 90 s edge cache absorbs repeats.
 // A metric card is not handled here — its values go through useMetrics' own return refetch.
 function refetchOnReturn() {
-  if (isBespokeBody.value || inFlight > 0 || !isStale(settledAt)) return
+  if (isBespokeBody.value || isInFlight(loadStartedAt) || !isStale(settledAt)) return
   void load(true)
 }
 useReturnRefresh(refetchOnReturn)

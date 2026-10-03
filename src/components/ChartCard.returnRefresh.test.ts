@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import ChartCard from './ChartCard.vue'
-import { __resetReturnRefreshForTests, RETURN_DEBOUNCE_MS, RETURN_MIN_AGE_MS } from '../composables/useReturnRefresh'
+import { __resetReturnRefreshForTests, RETURN_DEBOUNCE_MS, RETURN_INFLIGHT_MAX_MS, RETURN_MIN_AGE_MS } from '../composables/useReturnRefresh'
 import { fetchStats } from '../api'
 import type { Widget, GlobalFilters } from '../types'
 
@@ -102,7 +102,7 @@ describe('ChartCard: refetch on return to the tab', () => {
       return { rows: [], totals: { pageviews: 1, visits: 1 }, meta: { site: 'all', host: null, since: 'a', until: 'b', dimensions: [], metric: 'pageviews' } } as never
     })
     await mountCard()
-    await vi.advanceTimersByTimeAsync(RETURN_MIN_AGE_MS + 1000) // the first load is still pending
+    await vi.advanceTimersByTimeAsync(RETURN_INFLIGHT_MAX_MS - 5000) // the first load is still pending, not yet hung
     await comeBack()
     expect(mocked).toHaveBeenCalledTimes(1)
     release()
@@ -127,5 +127,74 @@ describe('ChartCard: refetch on return to the tab', () => {
     await vi.advanceTimersByTimeAsync(RETURN_MIN_AGE_MS + 1000)
     await comeBack()
     expect(mocked).toHaveBeenCalledTimes(1)
+  })
+})
+
+const statResponse = (n: number) =>
+  ({ rows: [{ key: {}, pageviews: n, visits: n }], totals: { pageviews: n, visits: n }, meta: { site: 'all', host: null, since: 'a', until: 'b', dimensions: [], metric: 'pageviews' } }) as never
+function deferred<T>() {
+  let resolve!: (v: T) => void
+  const promise = new Promise<T>((r) => (resolve = r))
+  return { promise, resolve }
+}
+
+describe('ChartCard: a background refetch is quiet', () => {
+  it('shows no "Loading…" and keeps the chart on screen while the refetch is pending', async () => {
+    const w = await mountCard()
+    expect(w.text()).toContain('5')
+    const slow = deferred<never>()
+    mocked.mockImplementationOnce(() => slow.promise)
+    await vi.advanceTimersByTimeAsync(RETURN_MIN_AGE_MS + 1000)
+    await comeBack()
+    expect(mocked).toHaveBeenCalledTimes(2) // the refetch is under way and has not answered
+    expect(w.text()).not.toContain('Loading')
+    expect(w.find('.state').exists()).toBe(false)
+    expect(w.text()).toContain('5')
+    slow.resolve(statResponse(321))
+    await settle()
+    expect(w.text()).toContain('321')
+    expect(w.text()).not.toContain('Loading')
+  })
+
+  it('keeps an error that is already showing, and clears it only when the refetch succeeds', async () => {
+    mocked.mockRejectedValueOnce(new Error('first load failed'))
+    const w = await mountCard()
+    expect(w.find('.state.error').exists()).toBe(true)
+    const slow = deferred<never>()
+    mocked.mockImplementationOnce(() => slow.promise)
+    await vi.advanceTimersByTimeAsync(RETURN_MIN_AGE_MS + 1000)
+    await comeBack() // a failed first load is retried on return, under the same throttle
+    expect(mocked).toHaveBeenCalledTimes(2)
+    expect(w.find('.state.error').exists()).toBe(true) // not swapped for a spinner
+    expect(w.text()).not.toContain('Loading')
+    slow.resolve(statResponse(5))
+    await settle()
+    expect(w.find('.state.error').exists()).toBe(false)
+    expect(w.text()).toContain('5')
+  })
+})
+
+describe('ChartCard: a hung load does not block the return refetch forever', () => {
+  it('is still treated as in flight before the age limit', async () => {
+    mocked.mockImplementationOnce(() => new Promise(() => {}))
+    await mountCard()
+    await vi.advanceTimersByTimeAsync(RETURN_INFLIGHT_MAX_MS - 5000)
+    await comeBack()
+    expect(mocked).toHaveBeenCalledTimes(1)
+  })
+
+  it('past the age limit a return refetches, and the hung request answering late cannot overwrite the newer data', async () => {
+    const hung = deferred<never>()
+    mocked.mockImplementationOnce(() => hung.promise)
+    mocked.mockImplementationOnce(async () => statResponse(2222))
+    const w = await mountCard()
+    await vi.advanceTimersByTimeAsync(RETURN_INFLIGHT_MAX_MS + 1000)
+    await comeBack()
+    expect(mocked).toHaveBeenCalledTimes(2)
+    expect(w.text()).toContain('2,222')
+    hung.resolve(statResponse(1111)) // the socket finally answers, long after
+    await settle()
+    expect(w.text()).toContain('2,222')
+    expect(w.text()).not.toContain('1,111')
   })
 })

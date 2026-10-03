@@ -17,7 +17,7 @@ import { rulesSummary } from '../../lib/adsRulesSummary'
 import { freshnessLine, STALE_NOTE } from '../../lib/adsFreshness'
 import { SMALL_SAMPLE_NOTE } from '../../lib/popupEvents'
 import { fetchAdsReadings } from '../../api'
-import { isStale, useReturnRefresh } from '../../composables/useReturnRefresh'
+import { isInFlight, isStale, useReturnRefresh } from '../../composables/useReturnRefresh'
 import AdsRefreshButton from '../AdsRefreshButton.vue'
 import type { RefreshResult } from '../../lib/adsRefresh'
 
@@ -42,7 +42,8 @@ const query = computed(() => {
   return p.toString()
 })
 
-let inFlight = 0
+let reqId = 0 // a late answer to an older request must never overwrite a newer one's
+let loadStartedAt: number | null = null // the latest load's start; null once it settles
 let settledAt: number | null = null
 // `background`: a refetch on return to the tab keeps the table on screen (no "Loading…" flash) and
 // a failure leaves the last good data up.
@@ -51,24 +52,29 @@ async function load(background = false) {
     loading.value = true
     error.value = null
   }
-  inFlight++
+  const my = ++reqId
+  loadStartedAt = Date.now()
   try {
     // Through api.ts so an expired session raises the re-sign-in banner (see withSessionCheck).
-    data.value = await fetchAdsReadings(query.value)
+    const r = await fetchAdsReadings(query.value)
+    if (my !== reqId) return
+    data.value = r
     error.value = null
   } catch (e: any) {
-    if (!background || !data.value) error.value = e?.message ?? 'Failed to load'
+    if (my === reqId && (!background || !data.value)) error.value = e?.message ?? 'Failed to load'
   } finally {
-    inFlight--
-    settledAt = Date.now()
-    loading.value = false
+    if (my === reqId) {
+      loadStartedAt = null
+      settledAt = Date.now()
+      loading.value = false
+    }
   }
 }
 onMounted(() => load())
 watch(query, () => load())
 // The user came back to the tab: refetch if the last load is old enough and none is running.
 useReturnRefresh(() => {
-  if (inFlight > 0 || !isStale(settledAt)) return
+  if (isInFlight(loadStartedAt) || !isStale(settledAt)) return
   void load(true)
 })
 

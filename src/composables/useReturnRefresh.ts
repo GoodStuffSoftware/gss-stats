@@ -19,6 +19,21 @@ export const RETURN_MIN_AGE_MS = 60_000
 /** visibilitychange and focus for one return arrive together; they collapse into one fire. */
 export const RETURN_DEBOUNCE_MS = 250
 
+/** A load that has been running this long is treated as hung, not in flight, so a return may
+ * refetch past it. Reasoning: the slowest legitimate answer is the metrics endpoint's all-miss
+ * D1 path (a few seconds, well under 10 s), and the browser gives a request no timeout of its own,
+ * so a socket left half-open by laptop sleep or a dropped network would otherwise block the
+ * return refetch (the very recovery path for that tab) forever. 30 s is several times the slowest
+ * real load and half the 60 s throttle, so a slow-but-alive request is never doubled in practice,
+ * and a refetch that does start supersedes the hung one (its late answer is dropped). */
+export const RETURN_INFLIGHT_MAX_MS = 30_000
+
+/** True when a load that began at `startedAt` (epoch ms, null = none running) is still plausibly
+ * in flight — running, and not yet old enough to count as hung. */
+export function isInFlight(startedAt: number | null, now: number = Date.now()): boolean {
+  return startedAt != null && now - startedAt < RETURN_INFLIGHT_MAX_MS
+}
+
 /** True when `settledAt` (epoch ms of the last load that finished, null = never) is old enough
  * to refetch on return. The caller separately skips a card that is mid-load. */
 export function isStale(settledAt: number | null, now: number = Date.now()): boolean {
@@ -59,8 +74,9 @@ function uninstall() {
   installed = false
   document.removeEventListener('visibilitychange', onReturnEvent)
   window.removeEventListener('focus', onReturnEvent)
-  if (timer) clearTimeout(timer)
-  timer = null
+  // A pending debounce timer is left to fire: with no subscribers it just walks an empty set, and
+  // a subscriber that leaves and rejoins inside the debounce window (a card rebuilding at the ET
+  // day rollover) must not lose the return it was about to see.
 }
 
 /** Subscribes `cb` to "the user came back to the tab"; returns the unsubscribe. */
@@ -89,4 +105,6 @@ export function useReturnRefresh(cb: () => void): void {
 export function __resetReturnRefreshForTests(): void {
   subscribers.clear()
   uninstall()
+  if (timer) clearTimeout(timer)
+  timer = null
 }

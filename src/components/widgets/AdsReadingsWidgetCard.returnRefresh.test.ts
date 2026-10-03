@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import AdsReadingsWidgetCard from './AdsReadingsWidgetCard.vue'
-import { __resetReturnRefreshForTests, RETURN_DEBOUNCE_MS, RETURN_MIN_AGE_MS } from '../../composables/useReturnRefresh'
+import { __resetReturnRefreshForTests, RETURN_DEBOUNCE_MS, RETURN_INFLIGHT_MAX_MS, RETURN_MIN_AGE_MS } from '../../composables/useReturnRefresh'
 import { fetchAdsReadings } from '../../api'
 
 vi.mock('../../api', async (importOriginal) => {
@@ -77,7 +77,7 @@ describe('AdsReadingsWidgetCard: refetch on return to the tab', () => {
     })
     await comeBack() // starts the (slow) refetch
     expect(mocked).toHaveBeenCalledTimes(2)
-    await vi.advanceTimersByTimeAsync(RETURN_MIN_AGE_MS + 1000)
+    await vi.advanceTimersByTimeAsync(RETURN_INFLIGHT_MAX_MS - 5000)
     await comeBack() // still in flight: not doubled
     expect(mocked).toHaveBeenCalledTimes(2)
     release()
@@ -93,5 +93,99 @@ describe('AdsReadingsWidgetCard: refetch on return to the tab', () => {
     expect(mocked).toHaveBeenCalledTimes(2)
     expect(w.find('.state.error').exists()).toBe(false)
     expect(w.text()).toContain('Proposals only')
+  })
+})
+
+const withCampaign = (label: string) =>
+  ({
+    generatedAt: '2026-10-03T12:00:00Z',
+    storeBound: false,
+    storeReadable: false,
+    campaigns: [{ campaignId: label, label, status: 'active', readings: [], spend: { source: 'config', spend: 1 } }],
+    syncAlerts: [],
+  }) as never
+function deferred<T>() {
+  let resolve!: (v: T) => void
+  const promise = new Promise<T>((r) => (resolve = r))
+  return { promise, resolve }
+}
+
+describe('AdsReadingsWidgetCard: a background refetch is quiet', () => {
+  it('shows no "Loading…" and keeps the table on screen while the refetch is pending', async () => {
+    const w = await mountWidget()
+    expect(w.text()).toContain('Proposals only')
+    const slow = deferred<never>()
+    mocked.mockImplementationOnce(() => slow.promise)
+    await vi.advanceTimersByTimeAsync(RETURN_MIN_AGE_MS + 1000)
+    await comeBack()
+    expect(mocked).toHaveBeenCalledTimes(2) // under way, not answered
+    expect(w.text()).not.toContain('Loading')
+    expect(w.text()).toContain('Proposals only')
+    slow.resolve(response('2026-10-03T12:05:00Z'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(w.text()).not.toContain('Loading')
+    expect(w.text()).toContain('Proposals only')
+  })
+
+  it('keeps an error that is already up while the refetch is pending', async () => {
+    mocked.mockRejectedValueOnce(new Error('first load failed'))
+    const w = await mountWidget()
+    expect(w.find('.state.error').exists()).toBe(true)
+    const slow = deferred<never>()
+    mocked.mockImplementationOnce(() => slow.promise)
+    await vi.advanceTimersByTimeAsync(RETURN_MIN_AGE_MS + 1000)
+    await comeBack()
+    expect(w.find('.state.error').exists()).toBe(true) // not swapped for a spinner
+    expect(w.text()).not.toContain('Loading')
+    slow.resolve(response('2026-10-03T12:05:00Z'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(w.find('.state.error').exists()).toBe(false)
+  })
+})
+
+describe('AdsReadingsWidgetCard: an older response never overwrites a newer one', () => {
+  it('a refetch pending for the old query answers after the widget moved to a new one: the new data stays', async () => {
+    const w = await mountWidget()
+    const old = deferred<never>()
+    mocked.mockImplementationOnce(() => old.promise) // the return refetch, for the old query
+    mocked.mockImplementationOnce(async () => withCampaign('NEWQUERY')) // the edited widget's load
+    await vi.advanceTimersByTimeAsync(RETURN_MIN_AGE_MS + 1000)
+    await comeBack()
+    expect(mocked).toHaveBeenCalledTimes(2)
+    await w.setProps({ widget: { campaignIds: ['2'] } })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(w.text()).toContain('NEWQUERY')
+    old.resolve(withCampaign('OLDQUERY')) // late
+    await vi.advanceTimersByTimeAsync(0)
+    expect(w.text()).toContain('NEWQUERY')
+    expect(w.text()).not.toContain('OLDQUERY')
+  })
+
+  it('an older failure cannot put an error over newer data either', async () => {
+    const w = await mountWidget()
+    let fail!: (e: Error) => void
+    mocked.mockImplementationOnce(() => new Promise((_res, rej) => (fail = rej)))
+    mocked.mockImplementationOnce(async () => withCampaign('NEWQUERY'))
+    await vi.advanceTimersByTimeAsync(RETURN_MIN_AGE_MS + 1000)
+    await comeBack()
+    await w.setProps({ widget: { campaignIds: ['2'] } })
+    await vi.advanceTimersByTimeAsync(0)
+    fail(new Error('late failure'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(w.find('.state.error').exists()).toBe(false)
+    expect(w.text()).toContain('NEWQUERY')
+  })
+})
+
+describe('AdsReadingsWidgetCard: a hung load does not block the return refetch forever', () => {
+  it('is still in flight before the age limit; past it a return refetches', async () => {
+    mocked.mockImplementationOnce(() => new Promise(() => {}))
+    await mountWidget()
+    await vi.advanceTimersByTimeAsync(RETURN_INFLIGHT_MAX_MS - 5000)
+    await comeBack()
+    expect(mocked).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(10_000)
+    await comeBack()
+    expect(mocked).toHaveBeenCalledTimes(2)
   })
 })

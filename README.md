@@ -457,10 +457,16 @@ Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats
   loads:** on mount, when the range or a filter changes, on the ↻ / Refresh buttons, and when you
   come back to the tab (the tab turns visible or the window regains focus; one page-level listener,
   [`useReturnRefresh`](src/composables/useReturnRefresh.ts)). That last refetch is throttled — a
-  card reloads only if its last load is a minute or more old and none is in flight, never while the
-  tab is hidden — and is an ordinary request (never `fresh`), so the edge cache below still
-  absorbs it; metric cards go out as the usual batched `POST /api/metrics`. There is no polling: a
-  tab that stays in the foreground never updates itself. The Overview's
+  card reloads only if its last load is a minute or more old and none is in flight (a request
+  still running after 30 s counts as hung and no longer blocks it), never while the tab is hidden
+  — and is an ordinary request (never `fresh`); metric cards go out as the usual batched
+  `POST /api/metrics`, and a failed refetch keeps the numbers already on screen. It is not free:
+  the edge cache below only answers a return within its 90 s window of the last load, so a return
+  after more than 90 s reads D1 again, and `/api/popups` and `/api/ads/readings` are never cached
+  (cost: [docs/capacity.md](docs/capacity.md)). There is no polling: a tab that stays in the
+  foreground never updates itself, and a relative range such as "last 7 days" is resolved when the
+  page loads, so a tab left open past midnight refetches the same window until it is reloaded.
+  The Overview's
   "Today at a glance" and campaign scorecard are cards since layout version 10. **Cards are
   editable**: "Add chart" offers a metric card as a chart type, and editing one — a new card or
   an existing "Today at a glance"/scorecard — opens a card builder in place of the usual chart
