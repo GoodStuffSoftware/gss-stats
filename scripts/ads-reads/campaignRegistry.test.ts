@@ -431,9 +431,9 @@ describe('registry accessors', () => {
 })
 
 // Flight 2: the two arms registered together with the retest (no reduction of the registry here).
-// Created PAUSED 2026-10-03 by the best-sudoku Google Ads API tool (commit e3c372d0); the dates are
-// provisional until enable (the tool resets start to the enable day and end to start + 6), so every
-// date assertion below is about how the fields relate to each other, not about the calendar.
+// Created PAUSED 2026-10-03 by the best-sudoku Google Ads API tool (commit e3c372d0); both arms run
+// 2026-10-04 .. 2026-10-10 (Mike, 2026-10-03), pinned by the "both arms run" test below. The other date
+// assertions are about how the fields relate to each other, not about the calendar.
 describe('flight 2 arms in the real registry', () => {
   // A literal copy of the placement list the tool created for arm A: flight2-ops.mjs L81 (the
   // "Sudoku.com placement" group, 1 package) and L86-90 (the "Other Sudoku placements" group, 16),
@@ -512,6 +512,14 @@ describe('flight 2 arms in the real registry', () => {
       expect(c.servingHoursEt, id).toEqual([12, 23])
       expect(plan.morningReadFirstEt, id).toBe(addDays(c.flightStart!, 1))
       expect(plan.morningReadLastEt, id).toBe(addDays(c.flightEnd, 1))
+    }
+  })
+
+  it('both arms run 2026-10-04 .. 2026-10-10 (Mike, 2026-10-03), with morning reads 2026-10-05 .. 2026-10-11', () => {
+    for (const id of [F2_APPS, F2_SEARCH]) {
+      const c = campaignById(id)!
+      expect([c.flightStart, c.flightEnd], id).toEqual(['2026-10-04', '2026-10-10'])
+      expect([ADS_READ_PLANS[id].morningReadFirstEt, ADS_READ_PLANS[id].morningReadLastEt], id).toEqual(['2026-10-05', '2026-10-11'])
     }
   })
 

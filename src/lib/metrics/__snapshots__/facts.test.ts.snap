@@ -47,7 +47,7 @@ exports[`fact SQL snapshots > bskFirstHit {} 1`] = `
 exports[`fact SQL snapshots > bskKpiDays {"todayEt":"2026-09-26"} 1`] = `
 {
   "binds": [
-    1791388800000,
+    1791129600000,
     1791046980000,
     1790451780000,
     1790439960000,
@@ -250,7 +250,7 @@ exports[`fact SQL snapshots > campaignDaily {"campaignId":"24311309184"} 1`] = `
 {
   "binds": [
     "sudoku_funnel_f2_search",
-    1791388800000,
+    1791129600000,
     "lifecycle",
     "email_%",
     "Virginia",
@@ -274,7 +274,7 @@ exports[`fact SQL snapshots > campaignDaily {"campaignId":"24316608605"} 1`] = `
 {
   "binds": [
     "sudoku_funnel_f2_apps",
-    1791388800000,
+    1791129600000,
     "lifecycle",
     "email_%",
     "Virginia",
@@ -376,7 +376,7 @@ exports[`fact SQL snapshots > campaignPathVisitor {"campaignId":"24311309184"} 1
   "binds": [
     1790439996000,
     "sudoku_funnel_f2_search",
-    1791388800000,
+    1791129600000,
     "lifecycle",
     "email_%",
     "Virginia",
@@ -401,7 +401,7 @@ exports[`fact SQL snapshots > campaignPathVisitor {"campaignId":"24316608605"} 1
   "binds": [
     1790439996000,
     "sudoku_funnel_f2_apps",
-    1791388800000,
+    1791129600000,
     "lifecycle",
     "email_%",
     "Virginia",
@@ -498,7 +498,7 @@ exports[`fact SQL snapshots > campaignReturns {"campaignId":"24311309184"} 1`] =
     "bestsudoku-web",
     "bestsudoku-app",
     "/return/sudoku_funnel_f2_search/%",
-    1791388800000,
+    1791129600000,
     "lifecycle",
     "email_%",
     "Virginia",
@@ -521,7 +521,7 @@ exports[`fact SQL snapshots > campaignReturns {"campaignId":"24316608605"} 1`] =
     "bestsudoku-web",
     "bestsudoku-app",
     "/return/sudoku_funnel_f2_apps/%",
-    1791388800000,
+    1791129600000,
     "lifecycle",
     "email_%",
     "Virginia",
@@ -599,8 +599,8 @@ exports[`fact SQL snapshots > flightPathsSeen {"campaignId":"24311309184"} 1`] =
 {
   "binds": [
     "bestsudoku-web",
-    1791345600000,
-    1791950400000,
+    1791086400000,
+    1791691200000,
   ],
   "db": "gss_geo",
   "sql": "SELECT path, COUNT(*) AS c FROM hits WHERE site = ? AND ts >= ? AND ts < ? GROUP BY path",
@@ -611,8 +611,8 @@ exports[`fact SQL snapshots > flightPathsSeen {"campaignId":"24316608605"} 1`] =
 {
   "binds": [
     "bestsudoku-web",
-    1791345600000,
-    1791950400000,
+    1791086400000,
+    1791691200000,
   ],
   "db": "gss_geo",
   "sql": "SELECT path, COUNT(*) AS c FROM hits WHERE site = ? AND ts >= ? AND ts < ? GROUP BY path",
