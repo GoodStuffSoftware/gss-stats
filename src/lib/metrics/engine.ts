@@ -479,6 +479,10 @@ interface Side {
   /** Deltas for a today-so-far count: [today, day-1 … day-7]. */
   days?: number[]
   asOfMs?: number
+  /** A store metric's own gate verdict (MetricDef.store): too few to report, with the counts behind it. */
+  tooFew?: boolean
+  numerator?: number
+  denominator?: number
 }
 
 class Batch {
@@ -590,11 +594,13 @@ class Batch {
     if (plan.cannotAlign) return { status: 'error', value: null, reason: 'cannot-align', noteIds: [] }
     const noteIds = def.caveats?.length ? [...new Set([...m.noteIds, ...def.caveats])] : m.noteIds
     const status = m.status === 'partial' ? 'partial' : 'ok'
-    if (fact.rows.kind !== 'beacon') {
+    // A store reduces its fact's rows itself: any fact kind, beacon rows included (R2-7 reads the
+    // arm's campaignReturns rows).
+    if (fact.rows.kind !== 'beacon' || def.store) {
       if (def.store) {
         const r = def.store(fact.rows, ctx, { nowMs: this.env.nowMs, releaseDays: this.env.release?.days ?? null })
         const ids = r.noteIds?.length ? [...new Set([...noteIds, ...r.noteIds])] : noteIds
-        return { status, value: r.value, m, noteIds: ids, asOfMs: plan.asOfMs }
+        return { status, value: r.value, m, noteIds: ids, asOfMs: plan.asOfMs, ...(r.tooFew ? { tooFew: true } : {}), ...(r.numerator !== undefined ? { numerator: r.numerator, denominator: r.denominator } : {}) }
       }
       return { status, value: fact.rows.kind === 'spend' && def.spend ? def.spend(fact.rows.rows, ctx) : null, m, noteIds, asOfMs: plan.asOfMs }
     }
@@ -749,7 +755,11 @@ function deriveMetric(batch: Batch, req: ResolvedRequest): MetricValue {
   const side = batch.evaluate(batch.side(def, req, null))
   if (side.status === 'unmeasured' || side.status === 'error') return statusOnly(side.status, side.reason, side.noteIds)
   if (side.value !== null && !Number.isFinite(side.value)) return statusOnly('error', 'non-finite', []) // never a JSON null
-  const v: MetricValue = { status: side.value === null ? 'no-data' : side.status, value: side.value }
+  const v: MetricValue = { status: side.value === null ? (side.tooFew ? 'too-few' : 'no-data') : side.status, value: side.value }
+  if (side.numerator !== undefined) {
+    v.numerator = side.numerator
+    v.denominator = side.denominator
+  }
   if (side.value !== null) {
     if (side.status === 'partial') v.measuredFrom = side.m!.from
     const deltas = deltasFor(batch, side, req, req.params.campaignId ? campaignById(req.params.campaignId) : undefined)
