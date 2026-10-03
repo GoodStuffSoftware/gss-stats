@@ -172,27 +172,31 @@ export function datedReleases(): DatedRelease[] {
   return RELEASES.filter((r): r is DatedRelease => r.dateEt !== null)
 }
 
-function newest(list: DatedRelease[]): DatedRelease | null {
+const dayAfter = (d: string): string => new Date(Date.parse(`${d}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10)
+
+/** The newest of a chronologically listed set; on a date tie the later-listed release wins. */
+export function newest(list: DatedRelease[]): DatedRelease | null {
   if (!list.length) return null
-  return list.reduce((a, b) => (a.dateEt >= b.dateEt ? a : b))
+  return list.reduce((a, b) => (a.dateEt > b.dateEt ? a : b))
 }
 
 /** The release the before/after panel compares, given today's ET date: the newest dated release
- * with at least one full ET day after it (release date strictly before today), or null if none
- * qualifies. A release still on its first day is not subject yet: its "after" side is empty. */
+ * whose first after-day is complete (release date strictly before yesterday), or null if none
+ * qualifies. The "after" window starts at the ET midnight following the release date, so the
+ * release day itself (often mostly pre-release traffic) is never counted. */
 export function releaseSubjectOn(todayEt: string): DatedRelease | null {
-  return newest(datedReleases().filter((r) => r.dateEt < todayEt))
+  return newest(datedReleases().filter((r) => dayAfter(r.dateEt) < todayEt))
 }
 
-/** The newest dated release still waiting for its first full day (dated today or later), when
- * it is newer than the subject, else null. */
+/** The newest dated release still waiting for its first full after-day, when it is newer than
+ * the subject, else null. */
 export function releaseAwaitingFullDay(todayEt: string): DatedRelease | null {
-  const waiting = newest(datedReleases().filter((r) => r.dateEt >= todayEt))
+  const waiting = newest(datedReleases().filter((r) => dayAfter(r.dateEt) >= todayEt))
   return waiting && waiting.dateEt > (releaseSubjectOn(todayEt)?.dateEt ?? '') ? waiting : null
 }
 
-/** The release the panel compares at `nowMs`: the newest dated release with a full ET day after
- * it, or null if none qualifies (the panel then reads "release-pending"). */
+/** The release the panel compares at `nowMs`: the newest dated release whose first after-day (the
+ * ET day after its release date) is complete, or null if none qualifies (the panel then reads "release-pending"). */
 export function latestDatedRelease(nowMs: number): DatedRelease | null {
   return releaseSubjectOn(etDateFromMs(nowMs))
 }

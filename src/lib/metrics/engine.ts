@@ -61,8 +61,8 @@ export interface BatchEnv {
   release?: ReleaseWindows | null
 }
 
-/** The latest dated release's before/after windows: `days` whole days on each side of its ET
- * midnight (lib/overview.ts releaseComparisonWindows, the release panel's own rule). */
+/** The compared release's before/after windows: `days` whole days before its ET midnight and
+ * after the following one, the release day excluded (lib/overview.ts releaseComparisonWindows, the release panel's own rule). */
 export interface ReleaseWindows {
   dateEt: string
   days: number

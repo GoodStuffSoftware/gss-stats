@@ -132,7 +132,7 @@ export function computeDelta(today: number, compare: number): Delta {
 // history actually exists on either side ────────────────────────────────────────────────
 /** Both windows are [start, end) ms ranges of equal length — `days` capped to whatever's
  * actually available before the release (so an early release doesn't request a "before"
- * window reaching past the start of history) and after it (so a very recent release
+ * window reaching past the start of history) and after its release day (so a very recent release
  * doesn't request an "after" window reaching into the future). `nowMs`/`firstHitMs` bound
  * the after/before windows respectively. */
 export function releaseComparisonWindows(
@@ -141,14 +141,17 @@ export function releaseComparisonWindows(
   nowMs: number,
 ): { before: [number, number]; after: [number, number]; days: number } | null {
   const releaseMs = etMidnightUtcMs(releaseDateEt)
+  // The release's own ET day is excluded from "after": a late-day release (v1.96.0 went live at
+  // 22:21 ET) would otherwise fill the after side with pre-release traffic.
+  const afterStartMs = etMidnightUtcMs(new Date(Date.parse(`${releaseDateEt}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10))
   const firstHitMs = etMidnightUtcMs(firstHitEtDate)
   const daysAvailableBefore = Math.max(0, Math.floor((releaseMs - firstHitMs) / 86_400_000))
-  const daysAvailableAfter = Math.max(0, Math.floor((nowMs - releaseMs) / 86_400_000))
+  const daysAvailableAfter = Math.max(0, Math.floor((nowMs - afterStartMs) / 86_400_000))
   const days = Math.min(daysAvailableBefore, daysAvailableAfter)
   if (days <= 0) return null
   return {
     before: [releaseMs - days * 86_400_000, releaseMs],
-    after: [releaseMs, releaseMs + days * 86_400_000],
+    after: [afterStartMs, afterStartMs + days * 86_400_000],
     days,
   }
 }

@@ -114,18 +114,22 @@ describe('computeDelta', () => {
 
 describe('releaseComparisonWindows', () => {
   it('equal-length before/after windows capped by available history', () => {
-    // 10 days of history before the release, 3 days of "now" after it -> capped to 3.
-    const nowMs = etMidnightUtcMs('2026-09-13') // 3 days after the release
+    // 10 days of history before the release, 2 complete days after its release day -> capped to 2.
+    const nowMs = etMidnightUtcMs('2026-09-13') // 09-11 and 09-12 are complete
     const win = releaseComparisonWindows('2026-09-10', '2026-08-31', nowMs) // 10 days before available
     expect(win).not.toBeNull()
-    expect(win!.days).toBe(3)
+    expect(win!.days).toBe(2)
     expect(win!.after[1] - win!.after[0]).toBe(win!.before[1] - win!.before[0])
     expect(win!.before[1]).toBe(etMidnightUtcMs('2026-09-10')) // before window ends exactly at release
-    expect(win!.after[0]).toBe(etMidnightUtcMs('2026-09-10')) // after window starts exactly at release
+    expect(win!.after[0]).toBe(etMidnightUtcMs('2026-09-11')) // after window starts the ET midnight after the release date
   })
   it('null when there is no history on one side yet (e.g. release IS the first hit)', () => {
     const nowMs = etMidnightUtcMs('2026-09-15')
     expect(releaseComparisonWindows('2026-07-13', '2026-07-13', nowMs)).toBeNull()
+  })
+  it('null until the first full day after the release date is complete', () => {
+    expect(releaseComparisonWindows('2026-09-24', '2026-07-13', etMidnightUtcMs('2026-09-25'))).toBeNull()
+    expect(releaseComparisonWindows('2026-09-24', '2026-07-13', etMidnightUtcMs('2026-09-26'))!.days).toBe(1)
   })
   it('null when the release is today (no "after" history yet)', () => {
     const nowMs = etMidnightUtcMs('2026-09-25')
