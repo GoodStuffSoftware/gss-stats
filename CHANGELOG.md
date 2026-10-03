@@ -7,6 +7,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **The metric-card editor shows and edits every template setting.** Badge colours, the card's
+  Google Ads refresh button, a note label's variables, the message shown when a repeat has nothing
+  to show, before/after window and country picks, table column and row-label headings, "leave out
+  a measured 0" and the column frame now have controls, and a preset card opens with its settings
+  visible (read-only) until you choose Customize.
 - **Pages belong to groups.** Every page is filed under a group — "All sites", "Best Sudoku", or
   "Mine" for your own pages unless their name starts with a group's name — and the Best Sudoku
   pages drop their "Best Sudoku · " prefix (Overview, Campaigns, Pop-ups, Traffic). Drill pages
@@ -165,6 +170,13 @@ All notable changes to **gss-stats** are documented here. The format follows
   tile now loads as an invalid card.
 
 ### Fixed
+- **The metric-card editor no longer loses a template's settings.** Re-picking a row's current
+  metric or note, switching the badge, a title or a repeat off and back on, or changing a repeat
+  and back now leaves a customized card exactly as the preset had it; picking a different metric
+  keeps the window and filters it still supports, the window picker says "Default" rather than
+  showing a window the row doesn't store, and editing another chart while the editor is open
+  shows that chart instead of the previous one. A row drawn as a sparkline also keeps it when
+  you change its metric to one that can still draw one.
 - **The header stays on one row on a tablet or foldable.** Between 701px and 1000px wide the
   search box shrinks to its icon and the account becomes an icon menu with your e-mail and Log out,
   so the bar no longer wraps onto a second row.
