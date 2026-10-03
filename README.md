@@ -772,13 +772,17 @@ same workflow, so a Worker failure never fails or blocks the Pages deploy. It ru
 `npm run ads:worker-deploy` (SHA-stamped, cron attached; the Google Ads credentials stay in
 Secrets Store, nothing secret is needed in the workflow) when a push to `main` changes
 `workers/sync/**`, any non-test file under `src/lib/**` (the Worker bundles `campaigns.ts`
-and its other imports from there), `package-lock.json` (the pinned wrangler) or `deploy.yml`.
-Other pushes skip it; **Actions → Deploy → Run workflow** always deploys it. The same
+and its other imports from there), `package-lock.json` (the pinned wrangler), the root `tsconfig.json`, `scripts/ads-reads/worker-deploy.ts`
+(stamping and cron) or `deploy.yml`. Other pushes skip it; **Actions → Deploy → Run workflow** always deploys
+it, but only when run on `main` (the job is skipped on any other branch). The same
 `CLOUDFLARE_API_TOKEN` secret is used, so the token needs **Workers Scripts: Edit** in
 addition to Pages: Edit. Worker deploys queue (one at a time, never cancelled mid-flight); if
 three Worker-touching pushes land while one is deploying, the middle one's change is only picked
 up by the next Worker-touching push or a manual run. A Worker deployed by hand with `--paused`
-gets its cron back on the next automatic deploy.
+gets its cron back on the next automatic deploy, **unless you set the repo variable
+`WORKER_DEPLOY_PAUSED` to `true`** (Settings → Secrets and variables → Actions → Variables): the job
+then logs that it is paused and deploys nothing, on pushes and manual runs alike, until the
+variable is removed or set to anything else.
 
 **Manual** (local fallback / preview), with the token from a local, gitignored file:
 
