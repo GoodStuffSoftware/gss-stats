@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.14.4] — 2026-10-03
+
+### Added
+- **Best Sudoku v1.98.0 is on the release timeline.** The organic baseline is tracked from v1.98.0 (Oct 3) and earlier ranges read "not yet tracking", ad click ids are documented as not organic, and the tour-exit tiles note that starting a real game during the first-run tour now ends it as a skip.
+
 ### Fixed
 - **Return and completion rows are counted over whole ET days when a date range isn't.** A range
   that does not start and end on ET midnights now moves each end to the nearest ET midnight

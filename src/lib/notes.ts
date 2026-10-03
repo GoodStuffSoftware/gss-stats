@@ -243,6 +243,13 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     severity: 'info',
     scopes: ['overview'],
   },
+  'tour-ends-on-game-start': {
+    id: 'tour-ends-on-game-start',
+    text: 'Since Best Sudoku v1.98.0 (Oct 3), starting a real game during the first-run tour ends it as a skip, so tour exits and skips can include players who left by starting a game.',
+    kind: 'note',
+    severity: 'info',
+    scopes: ['overview'],
+  },
   'raw-install-dedupe': {
     id: 'raw-install-dedupe',
     // Plain wording for the screen (RAW_INSTALL_DEDUPE_NOTE, with its raw path, stays the ads
@@ -319,7 +326,8 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.bsk.gameViews': 'Game-screen views',
     'label.campaign.gameViews': 'Game-screen views',
     // The organic baseline arm's name (lib/campaigns.ts ORGANIC_ARM_ID): untagged fresh installs
-    // on the web site only, never the installed app.
+    // on the web site only, never the installed app. Organic = first-ever web visit with no utm and no
+    // ad click id (gclid etc. do not count); first touch wins; a malformed utm counts as neither.
     'label.arm.organic': 'Organic (web)',
     'label.funnel.arrivals': 'Arrivals',
     'label.funnel.completed': 'Completed a game',
