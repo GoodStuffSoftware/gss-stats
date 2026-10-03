@@ -226,7 +226,7 @@ const itemRepeatModel = computed({
             <option value="" disabled>Choose a note…</option>
             <option v-for="o in whenEmptyNoteChoices" :key="o.value" :value="o.value">{{ o.preview }}</option>
           </select>
-          <p v-if="whenEmptyNoteInvalid" class="hint">Unknown note id "{{ whenEmptyNote }}".</p>
+          <p v-if="whenEmptyNoteInvalid" class="hint">This version doesn't know the note "{{ whenEmptyNote }}", so it shows a dash. It stays saved unless you pick another.</p>
         </template>
 
         <CardEditorRepeat v-model="itemRepeatModel" :allow="['campaigns', 'popups', 'windows', 'readings', 'countries']" label="Repeat this item" />

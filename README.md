@@ -179,6 +179,11 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   first save of a newer version first copies the previous stored layout to
   `dashboard:default:backup:v<old version>` in KV ([`functions/api/config.ts`](functions/api/config.ts)),
   once, so a migration can be rolled back by copying that key over `dashboard:default`.
+  A tab saves only after it has read the stored layout ([`src/api.ts`](src/api.ts) `loadConfig`
+  resolves to `null` only when nothing is stored yet): if the read fails — no answer, a non-2xx,
+  or a body that isn't a layout or can't be normalized — it shows the built-in defaults under a "Couldn't load your saved
+  layout" banner, labels edits "Not saved", and sends no save until **Try again** reads the layout
+  (which replaces the defaults and any edits made on them). A `401` shows the sign-in banner instead.
 - **Page navigation** — every page belongs to a **group** (`DashboardPage.group`, a plain
   string: "All sites", "Best Sudoku", "Mine", …, so a new product is just a new group). The
   default page, **★ Overview** (all-sites traffic), is shown pinned first, outside the groups,
@@ -487,7 +492,9 @@ Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats
   opens showing all of its settings read-only; **Customize…** copies them into an editable card,
   where every template field has a control (badge colours, card actions, note variables, a
   repeat's ids and empty message, table headings, gating) and using a control without changing it
-  leaves the card exactly as it was.
+  leaves the card exactly as it was. A card the builder saves always loads again: it holds the
+  same size limits loading checks (up to 32 badge colours, for one), and a note id from a newer
+  version is kept as saved and shows nothing until this version knows it.
 - **Two datasets, one dashboard.** RUM (sampled, human-only) and the beacon (every
   real load, sub-country geo) are charted side by side; they're independent and never
   summed.

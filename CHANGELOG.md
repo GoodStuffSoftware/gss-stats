@@ -6,6 +6,22 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.15.5] — 2026-10-03
+
+### Fixed
+- **A saved card that uses a newer note no longer turns into "can't be shown".** A caption, label
+  or empty-message note this version doesn't know yet is kept as saved and shows nothing (a dash
+  where a value would be), so an older tab can't erase it on its next save.
+- **The card builder stops at 32 badge colours.** Adding more is turned off with a short note, and
+  the builder refuses any card a reload would reject, so a card it saves always loads again.
+
+## [0.15.4] — 2026-10-03
+
+### Fixed
+- **A layout that fails to load can no longer be overwritten.** If the saved layout can't be read
+  (no connection, a server error, or an answer that isn't a layout), the dashboard shows the
+  default layout with a "Try again" banner, and nothing changed on it is saved.
+
 ## [0.15.3] — 2026-10-03
 
 ### Fixed
