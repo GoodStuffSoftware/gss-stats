@@ -445,7 +445,11 @@ Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats
   each row's label (plain text, a note, a bound field, or the metric's own name), its data (a
   metric, a registered ratio, or a field — only unit-compatible display types are offered, so an
   invalid percentage can't be built), arrange sections, and watch it update live before saving; an
-  edit that would leave the card invalid is refused inline instead of being saved.
+  edit that would leave the card invalid is refused inline instead of being saved. A preset card
+  opens showing all of its settings read-only; **Customize…** copies them into an editable card,
+  where every template field has a control (badge colours, card actions, note variables, a
+  repeat's ids and empty message, table headings, gating) and using a control without changing it
+  leaves the card exactly as it was.
 - **Two datasets, one dashboard.** RUM (sampled, human-only) and the beacon (every
   real load, sub-country geo) are charted side by side; they're independent and never
   summed.
