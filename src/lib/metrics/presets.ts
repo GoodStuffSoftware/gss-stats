@@ -84,9 +84,6 @@ export const BSK_KPIS: CardSpec = {
         },
         { id: 'played', label: { metric: true }, data: { metric: 'bsk.gameViews', window: 'todaySoFar' }, display: TODAY, ...COMPACT },
         { id: 'completed', label: { metric: true }, data: { metric: 'bsk.completions', window: 'todaySoFar' }, display: TODAY, ...COMPACT },
-        // Deferred EU-consent completions (best-sudoku card 125), next to the live completions
-        // tile above — counts only; the caveat explains consent-time counting and EU scope.
-        { id: 'deferredCompletions', label: { metric: true }, data: { metric: 'bsk.deferredCompletions', window: 'todaySoFar' }, display: TODAY, caption: { note: 'game-complete-deferred-caveat' }, ...COMPACT },
         { id: 'popupShown', label: { metric: true }, data: { metric: 'bsk.popupShown', window: 'todaySoFar' }, display: TODAY, ...COMPACT },
         { id: 'popupAccept', label: { metric: true }, data: { metric: 'bsk.popupAccepts', window: 'todaySoFar' }, display: TODAY, ...COMPACT },
         { id: 'popupTapRate', label: { metric: true }, data: { ratio: 'bsk.popupTapRate', window: 'todaySoFar' }, display: { as: 'percent', decimals: 1 }, ...COMPACT },
