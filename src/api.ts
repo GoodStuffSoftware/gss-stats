@@ -257,15 +257,18 @@ export async function loadConfig(): Promise<DashboardConfig | null> {
   throw new ConfigLoadError('bad-shape', res.status)
 }
 
-/** Persist the dashboard config to KV. */
-/** true = saved, false = failed, 'stale' = the server holds a NEWER layout version than this
+/** Persist the dashboard config to KV. `keepalive` is for the pagehide flush only (the browser may
+ * cancel an ordinary request when the page goes away; a keepalive body is capped at 64 KiB).
+ * true = saved, false = failed, 'stale' = the server holds a NEWER layout version than this
  * tab's code writes (another tab or a deploy upgraded it) — the tab must reload, not overwrite. */
-export async function saveConfig(cfg: DashboardConfig): Promise<boolean | 'stale'> {
+export async function saveConfig(cfg: DashboardConfig, opts: { keepalive?: boolean } = {}): Promise<boolean | 'stale'> {
   try {
     const res = await fetch('/api/config', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(cfg),
+      // keepalive lets the request outlive a closing page; set only by the pagehide flush.
+      keepalive: opts.keepalive === true,
     })
     if (res.status === 409) return 'stale'
     return res.ok

@@ -11,6 +11,78 @@ All notable changes to **gss-stats** are documented here. The format follows
   (no connection, a server error, or an answer that isn't a layout), the dashboard shows the
   default layout with a "Try again" banner, and nothing changed on it is saved.
 
+## [0.15.2] — 2026-10-03
+
+### Fixed
+- **The default "Pageviews over time" and "Visits over time" charts no longer carry the counts-only
+  caption.** They now count by Eastern-time day, so their totals include every row again, and
+  clicking a day still opens a page for that Eastern day, which the footer and date pickers name as that one day; a saved layout moves its untouched copies
+  once, wherever you placed them, and a chart you retitled or changed in any way is left as it is.
+
+## [0.15.1] — 2026-10-03
+
+### Fixed
+- **Return and completion rows are counted over whole ET days when a date range isn't.** A range
+  that does not start and end on ET midnights now moves each end to the nearest ET midnight
+  (Mike's chosen rule) for return, game-start, completion, tutorial and tour-exit rows only, so
+  short back-to-back ranges can no longer read those rows hour by hour; charts that can count
+  such rows, completions and metric cards say so in a caption, and today's totals stay live.
+
+## [0.15.0] — 2026-10-03
+
+### Added
+- **The page refetches its data when you come back to the tab.** Switching back to a tab that has
+  been idle for a minute or more reloads its charts, cards and ads readings once, without a
+  loading flash and without ever polling; the card's "Updated" time moves to the new load, and a
+  refetch that fails keeps the numbers already on screen.
+
+## [0.14.4] — 2026-10-03
+
+### Added
+- **Best Sudoku v1.98.0 is on the release timeline.** The organic baseline is tracked from v1.98.0 (Oct 3) and earlier ranges read "not yet tracking", ad click ids are documented as not organic, and the tour-exit tiles note that starting a real game during the first-run tour now ends it as a skip.
+
+### Fixed
+- **Best Sudoku v1.97.0 game starts no longer count as page views, and the first-session funnel
+  shows the new first-run counters.** Counted game starts are now an event beacon like the tour
+  exit and tutorial completion already are. The morning read and its report page list the tour
+  skips by stage (the same rows as tour skip, split by where), game starts by difficulty and
+  tutorial completions (first run vs replay) as plain counts, "not yet tracked" until the
+  first v1.97.0 row.
+
+## [0.14.3] — 2026-10-03
+
+### Changed
+- **The dashboard's own tests no longer reach for the network and no longer time out when run
+  side by side.** Nothing changes in the app.
+
+## [0.14.2] — 2026-10-03
+
+### Changed
+- **The icon library is updated to its latest release.** Every icon the dashboard uses looks the
+  same as before; nothing else changes.
+
+## [0.14.1] — 2026-10-03
+
+### Changed
+- **The layout-restore steps in the README now work in Windows PowerShell.** Each command is its
+  own block, the downloads keep the file as plain UTF-8, the file check is a PowerShell one-liner,
+  and a note warns that putting a backup back discards every layout edit made since it was taken.
+
+## [0.14.0] — 2026-10-03
+
+### Added
+- **Count and money items can be drawn as a sparkline.** The card editor now offers "Sparkline"
+  for a count or an amount over a date range or a campaign's window, and the card shows the
+  number with a small per-day line beside it; a day not measured is a gap in the line, never a zero.
+  A saved sparkline that cannot be drawn (for example over "today so far") shows as a plain number
+  instead of hiding its card.
+
+### Fixed
+- **"Save failed" clears when the layout is back on what the server holds.** Reverting an edit
+  that failed to save no longer leaves the failed label standing.
+- **A layout edit is sent when you leave the page.** An edit still waiting out the save delay is
+  sent as the page closes (a request the browser lets finish) instead of being dropped.
+
 ## [0.13.2] — 2026-10-03
 
 ### Fixed

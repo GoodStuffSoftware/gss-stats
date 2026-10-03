@@ -17,7 +17,7 @@
 // COUNT(*) GROUP BY (or the stored-spend summary); nothing is a row fetch or a join.
 //
 // POST { v: 1, context?: { since?, until?, sites?, excludeOwnVisits?, ownBrowser?, ownOS? },
-//        fresh?: true, requests: [{ key, metric | ratio, params?, window?, deltas?, minCohort? }] }
+//        fresh?: true, requests: [{ key, metric | ratio, params?, window?, deltas?, series?, minCohort? }] }
 
 import { etDateFast } from '../../src/lib/etTime'
 import { deriveBatch, factKeyString, needsReleaseWindows, newSideMemo, planBatch, releaseWindowsFor, type BatchEnv, type FactResult, type Plan } from '../../src/lib/metrics/engine'

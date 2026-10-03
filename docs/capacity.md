@@ -100,7 +100,9 @@ Beta, 1 store per account (exists), 100 secrets/account cap. **4/100 secrets use
 
 ### GraphQL Analytics API
 
-- Rate limit (per-token, default tier): **300 queries / 5 minutes** (~1/sec sustained, or a 300-query burst). The dashboard has **no polling/auto-refresh** (grepped the codebase — none found); every GraphQL call is user-triggered (load / filter change / drill). A full 41-widget default dashboard load fires at most ~20 RUM chart queries in a few seconds — well inside the 300/5min budget even with several tabs open at once.
+- Rate limit (per-token, default tier): **300 queries / 5 minutes** (~1/sec sustained, or a 300-query burst). The dashboard has **no polling/auto-refresh** (grepped the codebase — no interval or timer fetches); every GraphQL call is user-triggered (load / filter change / drill) or the one return-to-tab refetch, which fires when a tab becomes visible or the window regains focus (one debounced page-level listener), and only for a card whose last load is 60 s or more old with none in flight (a request still running after 30 s counts as hung, so a half-open socket cannot block it), so one return costs at most one pass over the page's cards and a tab flipped back and forth inside a minute costs nothing. It never sends `fresh: true` and metric cards go out as the normal batched `POST /api/metrics`.
+
+  **What a return costs, stated plainly.** The 90 s edge cache only answers a repeat within 90 s of the previous load of the same request, and the throttle already lets a refetch through from 60 s, so only a return 60–90 s after the last load can hit the cache; **every return more than 90 s after the last load is a miss** for a live range (a closed range has a longer TTL, see §7) and reads D1 and, for charts, GraphQL again. `/api/popups` and `/api/ads/readings` are not cached at all (`Cache-Control: no-store`), so they hit D1 on every return. The cost in D1 rows read, from this doc's own measurements: the Overview's metrics batch is **~10k rows when every fact misses** (§7, 9,994), a full page of charts adds its own §4-style reads on top (up to ~20k rows for a full pass, an estimate that grows with `hits`), and each return is a fresh pass. Worked example, one tab: **60 genuine returns a day x ~10k rows = ~600k rows = 12% of the 5M/day free budget** for the Overview metrics alone, up to **~1.2M rows = 24%** with a full chart page, on top of the 29% already used (§5) — and the cap is shared with gss-stats-ads and fails hard, not softly. The cost is bounded by one pass per tab per minute and by people actually leaving and returning, never by a timer. If it ever needs tightening, `RETURN_MIN_AGE_MS` (src/composables/useReturnRefresh.ts) is the one knob: raising it makes returns refetch less often. A full 41-widget default dashboard load fires at most ~20 RUM chart queries in a few seconds — well inside the 300/5min budget even with several tabs open at once.
 - Data retention/window for **this account's** `rumPageloadEventsAdaptiveGroups` node (queried directly via the GraphQL `settings` introspection, not assumed):
   - `notOlderThan`: 15,897,600 s = **~184 days (~6 months)** of RUM history available.
   - `maxDuration`: 8,035,200 s = **~93 days** max span per single query.
@@ -169,7 +171,7 @@ No `CREATE INDEX`, `ALTER`, or write statement was run — every command above w
 | KV reads/lists/stored data | 100,000/day, 1,000/day, 1 GB | 10, 1, ~tens of KB | >99% headroom | Flat | None | None needed |
 | Pages builds/month | 500 | 6/30d (likely doesn't even count — direct upload) | >98% headroom | Flat | None | None needed |
 | Secrets Store | 100/account | 4 (unrelated project) | 96% headroom | Flat | None | None needed |
-| GraphQL Analytics API rate limit | 300 queries/5min | ~20/load, no polling | High headroom | Flat (no auto-refresh) | None | None needed |
+| GraphQL Analytics API rate limit | 300 queries/5min | ~20/load; no polling, plus one throttled refetch per tab return (at most once a minute per tab) | High headroom | Flat (no auto-refresh; return refetch bounded by the 60 s throttle) | None | None needed |
 | RUM data retention (this account) | ~184 days history, ~93-day query window | n/a | — | — | None | None needed |
 | Google Ads API ops/day (inferred) | 2,880–15,000/day depending on tier | Est. low hundreds/day incl. planned hourly sync | High headroom either tier | Rising with planned sync | Low | Confirm actual Google Cloud project access tier (not visible from here) |
 | Firestore reads/day (inferred) | 50,000/day | Infrequent ($100-threshold only) | High headroom | Flat | Low | None needed |
@@ -374,3 +376,38 @@ harness: the real handler end to end in Node against a fake D1, a fresh cache pe
 Every figure is under the 10 ms per-request limit with room to spare. The request path for the new
 windows, facts and store metrics is compiled at isolate start-up too (`prewarm.ts` now warms a
 release window, the country split and the ads-store facts).
+
+## 9. Daily series for sparklines (ADR 0005 slice 2, 2026-10-03) — rows read
+
+A card item shown as a sparkline asks for `series: 'daily'`. The engine then plans ONE extra
+statement per distinct twin read: the metric's daily twin (`campaignDaily`, `bskRangeDaily`,
+`popupRangeDaily`, `adsSpendDaily`), the same WHERE as the scalar fact, with `GROUP BY` the ET
+date added. Method (as in §8): `EXPLAIN QUERY PLAN` on a fixture holding the two production
+`hits` indexes (`idx_hits_ts`, `idx_hits_site_ts`), pinned as an exact-plan test per twin in
+`src/lib/metrics/series.test.ts`.
+
+| Twin | Plan | Rows read vs the scalar fact |
+|---|---|---|
+| `campaignDaily` | `SEARCH hits USING INDEX idx_hits_ts (ts>?)` + `USE TEMP B-TREE FOR GROUP BY` | the scalar's rows: the campaign WHERE has no site filter and no upper bound, so it reads every site's rows since the flight start |
+| `bskRangeDaily` | `SEARCH hits USING INDEX idx_hits_site_ts (site=? AND ts>? AND ts<?)` + `USE TEMP B-TREE FOR GROUP BY` | same range, same rows |
+| `popupRangeDaily` | with `sites`: `idx_hits_site_ts (site=? AND ts>? AND ts<?)`; without: `idx_hits_ts (ts>? AND ts<?)`; both + `USE TEMP B-TREE FOR GROUP BY` | same range, same rows |
+| `adsSpendDaily` | a full read of the ads store's `ads_daily_metrics` (`ORDER BY campaign_id, date`) | every stored day of every campaign (tens of rows today, about 365 per campaign per year); the one campaign and the latest 92 days are picked in JS |
+
+No full-table scan of `hits` and no new index. Counting what a card adds:
+
+- **Extra statements per card** = the number of distinct twin reads among its sparkline items.
+  `campaignDaily`: one per distinct `campaignId`. `bskRangeDaily`: one per distinct (since,
+  until). `popupRangeDaily`: one per distinct (since, until, sites, ownBrowser, ownOS).
+  `adsSpendDaily`: exactly one however many campaigns (it has no key parameters). Items that
+  share a read share one statement. Each counts against `MAX_STATEMENTS = 40` in `planBatch`.
+- **Rows read per extra statement** = the rows its scalar twin reads (§7 measured 327 rows for the
+  live US+CA retest and 3,354 for the closed Android launch, 2026-09-27). For a live campaign the
+  window has no upper bound, so it grows with traffic.
+- **Miss rate.** A closed campaign's `campaignDaily` is cached 15 min (about 96 misses a day), a
+  closed `range` twin 24 h, a live one 90 s. Worst case, a page held open continuously on one
+  sparkline: a live campaign 960 misses/day x 327 rows is about 0.31M rows/day; a closed one 96
+  misses/day x 3,354 rows is about 0.32M rows/day; each is roughly 6% of the 5M/day account cap.
+  A normal visit pattern is far below that.
+- **Not prewarmed.** `prewarm.ts` warms no twin: a series is asked for only by an item the owner
+  chose to draw as a sparkline, so the first read after expiry pays one more statement inside the
+  batch, and an ordinary page (no sparkline) is unchanged.

@@ -11,6 +11,7 @@ import { presetById } from './metrics/presets'
 import type { DashboardConfig, DashboardPage, Widget } from '../types'
 import PROD_V8 from './__fixtures__/prodLayout.v8.json'
 import PROD_V9 from './__fixtures__/prodLayout.v9.json'
+import { withV15Trends } from './__fixtures__/dateEtTrends'
 
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x))
 /** Relative ranges are recomputed on every load; blank them so layouts compare by content. */
@@ -76,7 +77,7 @@ describe('v10: the production layout (sanitised)', () => {
     // v12's note-row compaction applied to the before side too (compactSmallSampleNoteV12), so
     // this still isolates the panel changes.
     const v9 = clone(PROD_V9) as unknown as DashboardConfig
-    const before = widgetsById({ ...v9, pages: v9.pages.map(compactSmallSampleNoteV12) })
+    const before = widgetsById(withV15Trends({ ...v9, pages: v9.pages.map(compactSmallSampleNoteV12) })) // v15: the three geo trends move to dateEt (__fixtures__/dateEtTrends.ts)
     const after = widgetsById(v10FromV9)
     expect([...after.keys()]).toEqual([...before.keys()]) // no widget added, removed or reordered
     // Compared by content: key order and absent-vs-undefined fields don't count (normWidget

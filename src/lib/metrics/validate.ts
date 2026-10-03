@@ -15,6 +15,7 @@ import { SITE_TAG_RE, WHEN_RE } from '../range'
 import { addDays } from '../etTime'
 import { rangeMs } from './facts'
 import { METRICS, metricWindows, OPTIONAL_PARAMS, type MetricDef, type MetricParam } from './metrics'
+import { seriesTwin } from './series'
 import { presetById } from './presets'
 import { RATIOS, ratioParamsOf, ratioSupportsOrganic, ratioWindowsOf, type RatioDef } from './ratios'
 import { COUNTRY_BUCKETS, WINDOW_SIDES, type CardAction, type CardRef, type CardSpec, type DataBinding, type DeltaName, type Display, type DisplayAs, type Label, type RepeatSpec, type WindowName } from './types'
@@ -168,6 +169,16 @@ export function validateCard(spec: CardSpec): string[] {
     if ((b.params?.country !== undefined || scope.has('country')) && allowedParams.includes('country') && !asked.every((w) => countrySplittable(sidesOf(b), w))) {
       errors.push(`${where}: a country split needs the campaign attribution window`)
     }
+    if (d.as === 'sparkline') {
+      // A series is the metric's own count (or spend) per ET day: never a ratio (no per-day rate
+      // escapes MIN_COHORT), never a country split, only a ranged window with a daily twin fact.
+      if (!isMetric) errors.push(`${where}: a sparkline needs a count or money metric, not a ratio`)
+      else {
+        const def = METRICS.get(b.metric)!
+        if (asked.some((w) => !seriesTwin(def, w as WindowName))) errors.push(`${where}: a sparkline needs the page or attribution window over a metric with daily data`)
+      }
+      if (b.params?.country !== undefined || scope.has('country')) errors.push(`${where}: a sparkline cannot be split by country`)
+    }
     if (d.as === 'number' && d.deltas?.length) {
       const w = b.window ?? windows[0]
       if (!isMetric || k !== 'count' || w !== 'todaySoFar') errors.push(`${where}: deltas need a count metric over 'todaySoFar'`)
@@ -281,6 +292,28 @@ function dropRetiredItems(spec: CardSpec): CardSpec {
   })
   return { ...spec, sections }
 }
+/** Downgrades, on load, a stored sparkline item that cannot be drawn (a window with no daily
+ * twin such as today so far, a country split, a window main's editor never refused) to the plain
+ * form the item shows without it: Number for a count, Currency for money. Same shape as
+ * dropRetiredItems: one bad item costs only its sparkline, never the whole card. Only a count or
+ * money metric is downgraded (the plain form of anything else is not a guess to make); the editor
+ * still refuses to CREATE an undrawable sparkline (editorModel sparklineBlocker). */
+function downgradeUndrawableSparklines(spec: CardSpec): CardSpec {
+  if (!spec || !Array.isArray(spec.sections)) return spec
+  const bad = validateCard(spec).filter((e) => e.includes('sparkline'))
+  if (!bad.length) return spec
+  const sections = spec.sections.map((sec, si) => {
+    if (!sec || !Array.isArray(sec.items)) return sec
+    const items = sec.items.map((it) => {
+      if (it?.display?.as !== 'sparkline' || !bad.some((e) => e.startsWith(`sections[${si}].${it.id}: `))) return it
+      const k = kindOf(it.data)
+      if (k !== 'count' && k !== 'money') return it
+      return { ...it, display: k === 'money' ? { as: 'currency' as const } : { as: 'number' as const } }
+    })
+    return { ...sec, items }
+  })
+  return { ...spec, sections }
+}
 /** A widget's saved `card`, normalised on every load (lib/defaults.ts normWidget): absent or
  * not an object → undefined (no card); `{ preset }` → kept by id (an unknown id renders as an
  * unknown card, it is never guessed); `{ spec }` → a plain-JSON copy when it is within
@@ -301,7 +334,7 @@ export function normCardRef(raw: unknown): CardRef | undefined {
   try {
     const text = JSON.stringify(r.spec)
     if (typeof text !== 'string' || text.length > CARD_LIMITS.jsonBytes) return { preset: INVALID_CARD_PRESET }
-    const spec = dropRetiredItems(JSON.parse(text) as CardSpec)
+    const spec = downgradeUndrawableSparklines(dropRetiredItems(JSON.parse(text) as CardSpec))
     if (!withinLimits(spec) || !Array.isArray(spec.sections) || spec.sections.length > CARD_LIMITS.sections) return { preset: INVALID_CARD_PRESET }
     const items = spec.sections.reduce((n, sec) => n + (Array.isArray(sec?.items) ? sec.items.length : Infinity), 0)
     if (items > CARD_LIMITS.items) return { preset: INVALID_CARD_PRESET }
@@ -320,6 +353,8 @@ export interface ResolvedRequest {
   params: { campaignId?: string; popup?: string; country?: string }
   window: WindowName
   deltas: DeltaName[]
+  /** 'daily': the request also wants the metric's per-ET-day series (lib/metrics/series.ts). */
+  series?: 'daily'
   minCohort: number
 }
 export type RequestCheck = { key: string; ok: true; req: ResolvedRequest } | { key: string; ok: false; reason: string }
@@ -402,7 +437,7 @@ function failed(key: string, reason: string): RequestCheck {
 }
 
 function checkRequest(raw: Record<string, unknown>, key: string, context: ValidContext): RequestCheck {
-  if (only(raw, ['key', 'metric', 'ratio', 'params', 'window', 'deltas', 'minCohort'])) return failed(key, 'bad-request')
+  if (only(raw, ['key', 'metric', 'ratio', 'params', 'window', 'deltas', 'series', 'minCohort'])) return failed(key, 'bad-request')
   const hasMetric = raw.metric !== undefined
   const hasRatio = raw.ratio !== undefined
   if (hasMetric === hasRatio) return failed(key, 'bad-request') // exactly one of metric | ratio
@@ -441,13 +476,21 @@ function checkRequest(raw: Record<string, unknown>, key: string, context: ValidC
     if (deltas.length && (kind !== 'count' || window !== 'todaySoFar')) return failed(key, 'bad-deltas')
   }
 
+  let series: 'daily' | undefined
+  if (raw.series !== undefined) {
+    // Only a metric (never a ratio: no per-day rate), with no country split, in a ranged window
+    // that has a daily twin fact (lib/metrics/series.ts seriesTwin).
+    if (raw.series !== 'daily' || !metric || params.country !== undefined || seriesTwin(metric, window) === null) return failed(key, 'bad-series')
+    series = 'daily'
+  }
+
   let minCohort = MIN_COHORT
   if (raw.minCohort !== undefined) {
     if (typeof raw.minCohort !== 'number' || !Number.isInteger(raw.minCohort) || raw.minCohort < 1 || raw.minCohort > 1_000_000) return failed(key, 'bad-param')
     if (kind !== 'proportion' && kind !== 'cost') return failed(key, 'bad-param')
     minCohort = Math.max(MIN_COHORT, raw.minCohort) // may only RAISE the floor
   }
-  return { key, ok: true, req: { key, kind: metric ? 'metric' : 'ratio', id, params, window, deltas, minCohort } }
+  return { key, ok: true, req: { key, kind: metric ? 'metric' : 'ratio', id, params, window, deltas, ...(series ? { series } : {}), minCohort } }
 }
 
 /** The whole-batch whitelist. `bodyText` is the raw request body (the handler enforces

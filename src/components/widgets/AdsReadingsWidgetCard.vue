@@ -17,6 +17,7 @@ import { rulesSummary } from '../../lib/adsRulesSummary'
 import { freshnessLine, STALE_NOTE } from '../../lib/adsFreshness'
 import { SMALL_SAMPLE_NOTE } from '../../lib/popupEvents'
 import { fetchAdsReadings } from '../../api'
+import { isInFlight, isStale, useReturnRefresh } from '../../composables/useReturnRefresh'
 import AdsRefreshButton from '../AdsRefreshButton.vue'
 import type { RefreshResult } from '../../lib/adsRefresh'
 
@@ -41,20 +42,41 @@ const query = computed(() => {
   return p.toString()
 })
 
-async function load() {
-  loading.value = true
-  error.value = null
+let reqId = 0 // a late answer to an older request must never overwrite a newer one's
+let loadStartedAt: number | null = null // the latest load's start; null once it settles
+let settledAt: number | null = null
+// `background`: a refetch on return to the tab keeps the table on screen (no "Loading…" flash) and
+// a failure leaves the last good data up.
+async function load(background = false) {
+  if (!background) {
+    loading.value = true
+    error.value = null
+  }
+  const my = ++reqId
+  loadStartedAt = Date.now()
   try {
     // Through api.ts so an expired session raises the re-sign-in banner (see withSessionCheck).
-    data.value = await fetchAdsReadings(query.value)
+    const r = await fetchAdsReadings(query.value)
+    if (my !== reqId) return
+    data.value = r
+    error.value = null
   } catch (e: any) {
-    error.value = e?.message ?? 'Failed to load'
+    if (my === reqId && (!background || !data.value)) error.value = e?.message ?? 'Failed to load'
   } finally {
-    loading.value = false
+    if (my === reqId) {
+      loadStartedAt = null
+      settledAt = Date.now()
+      loading.value = false
+    }
   }
 }
-onMounted(load)
-watch(query, load)
+onMounted(() => load())
+watch(query, () => load())
+// The user came back to the tab: refetch if the last load is old enough and none is running.
+useReturnRefresh(() => {
+  if (isInFlight(loadStartedAt) || !isStale(settledAt)) return
+  void load(true)
+})
 
 // Only campaigns with something to show, unless the widget asked for specific ones.
 const campaigns = computed<AdsReadingsCampaign[]>(() => {
@@ -80,7 +102,7 @@ function spendSource(c: AdsReadingsCampaign): string {
 }
 // A sync that ran may have stored new days: reload so spend and the freshness line update.
 function onRefreshed(r: RefreshResult) {
-  if (r.refreshed) load()
+  if (r.refreshed) void load()
 }
 // "Spend through <date> · synced <relative time>" — relative to when the data was loaded.
 const loadedAt = computed(() => (data.value ? Date.parse(data.value.generatedAt) : Date.now()))

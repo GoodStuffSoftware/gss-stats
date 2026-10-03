@@ -15,6 +15,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import { onRequestPost, GEO_DIMS, DERIVED_ONLY_DIMS } from './geo'
 import type { CacheLike } from '../_lib/edgeCache'
+import { addDays, etDateFast, etWallTimeMs } from '../../src/lib/etTime'
 
 // ── A fake Cache API (see functions/_lib/edgeCache.ts's CacheLike) — always a miss, records
 // nothing, so every request runs computeGeoResponse() for real instead of short-circuiting.
@@ -187,8 +188,16 @@ describe('onRequestPost — "Include event beacons" opt-in', () => {
     const { gss_geo, db } = makeFakeD1()
     const now = Date.now()
     db.exec(`INSERT INTO hits (ts, path) VALUES (${now}, '/home'), (${now}, '/install/play'), (${now}, '/return/uc1/d0')`)
+    // Today's whole ET day: a sub-day window would count the /return/ row over whole ET days
+    // (R-1d), which is splitGuard.test's business, not this toggle's.
+    const dayEt = etDateFast(now)
     const res: any = await post(
-      { dimension: 'path', since: new Date(now - 1000).toISOString(), until: new Date(now + 1000).toISOString(), includeEventBeacons: true },
+      {
+        dimension: 'path',
+        since: new Date(etWallTimeMs(dayEt)).toISOString(),
+        until: new Date(etWallTimeMs(addDays(dayEt, 1))).toISOString(),
+        includeEventBeacons: true,
+      },
       { gss_geo },
     )
     const body = await res.json()
