@@ -14,7 +14,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import ChartCard from './ChartCard.vue'
-import type { Widget, GlobalFilters } from '../types'
+import { fetchSeriesStats } from '../api'
+import { REFUSED_WHOLE_DAYS_CAPTION, SPLIT_GUARD_CAPTION } from '../lib/splitGuard'
+import type { Widget, GlobalFilters, StatsResponse } from '../types'
 
 // Only fetchSeriesStats is overridden (a minimal fixture) — everything else in '../api' stays real,
 // so this doesn't have to track every export it has.
@@ -225,5 +227,42 @@ describe('ChartCard — the overview timeline caption renders exactly once (coor
     await flushPromises() // the composable's own .then() hop needs a second microtask flush
     const captions = w.findAll('.note-block').filter((n) => n.text().includes('Shaded bands = campaign flights'))
     expect(captions).toHaveLength(1)
+  })
+})
+
+// NIT-1 (review of #63): a series chart takes its caption flags from every series, not series 0.
+describe('ChartCard — series charts OR the caption flags across every series', () => {
+  const seriesWidget = () =>
+    baseWidget({
+      type: 'line',
+      dataset: 'geo',
+      dimension: 'date',
+      limit: 400,
+      series: [{ label: 'Page views' }, { label: 'Returns', filter: [{ field: 'path', value: '/return/organic/d1' }], axis: 'right' }],
+    } as Partial<Widget>)
+  const response = (flags: { splitGuard?: boolean; refusedWholeDays?: boolean }): StatsResponse => ({
+    rows: [{ key: { date: '2026-09-26' }, pageviews: 5, visits: 5 }],
+    totals: { pageviews: 5, visits: 5 },
+    meta: { site: 'all', host: null, since: '2026-09-26', until: '2026-09-27', dimensions: ['date'], metric: 'pageviews', ...flags },
+  })
+  const captions = async (series: StatsResponse[]) => {
+    vi.mocked(fetchSeriesStats).mockResolvedValueOnce(series)
+    const w = mountCard(seriesWidget())
+    await flushPromises()
+    await flushPromises()
+    return w.findAll('.card-captions .note-block').map((n) => n.text())
+  }
+
+  it('only series 1 carries the flags: both captions show, split guard first', async () => {
+    const texts = await captions([response({}), response({ splitGuard: true, refusedWholeDays: true })])
+    const guard = texts.findIndex((t) => t.includes(SPLIT_GUARD_CAPTION))
+    const whole = texts.findIndex((t) => t.includes(REFUSED_WHOLE_DAYS_CAPTION))
+    expect(guard).toBeGreaterThanOrEqual(0)
+    expect(whole).toBeGreaterThan(guard)
+  })
+
+  it('no series carries a flag: neither caption shows', async () => {
+    const texts = await captions([response({}), response({})])
+    expect(texts.some((t) => t.includes(SPLIT_GUARD_CAPTION) || t.includes(REFUSED_WHOLE_DAYS_CAPTION))).toBe(false)
   })
 })
