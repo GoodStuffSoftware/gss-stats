@@ -860,6 +860,9 @@ function normWidget(x: any): Widget {
     // Series line chart (Widget.series): label + optional field=value filters + axis/style.
     series: normSeries(x.series),
     axisTitles: normAxisTitles(x.axisTitles),
+    // Fit-to-content height (lib/fit.ts): only 'content' is meaningful; anything else is absent
+    // (the fixed grid height). Optional, so no version bump: an older layout loads unchanged.
+    fit: x.fit === 'content' ? 'content' : undefined,
     x: Number(x.x) || 0,
     y: Number(x.y) || 0,
     w: Number(x.w) || 4,
