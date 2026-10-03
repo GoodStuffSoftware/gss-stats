@@ -121,6 +121,8 @@ export function validateCard(spec: CardSpec): string[] {
     // The organic arm rides only on a campaigns repeat; bindings that don't serve it are left out
     // of its instance (scope.ts configRuling), never requested.
     if (r.organic !== undefined && (r.organic !== true || r.over !== 'campaigns')) errors.push(`${where}.repeat: organic is for campaigns, and only true`)
+    // The organic row is always there, so it would hide a flightingToday repeat's empty state.
+    else if (r.organic && r.flightingToday) errors.push(`${where}.repeat: organic cannot combine with flightingToday`)
     if (r.empty) {
       checkLabel(`${where}.repeat.empty.label`, r.empty.label, false)
       checkLabel(`${where}.repeat.empty.text`, r.empty.text, false)
