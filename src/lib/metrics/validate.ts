@@ -292,6 +292,28 @@ function dropRetiredItems(spec: CardSpec): CardSpec {
   })
   return { ...spec, sections }
 }
+/** Downgrades, on load, a stored sparkline item that cannot be drawn (a window with no daily
+ * twin such as today so far, a country split, a window main's editor never refused) to the plain
+ * form the item shows without it: Number for a count, Currency for money. Same shape as
+ * dropRetiredItems: one bad item costs only its sparkline, never the whole card. Only a count or
+ * money metric is downgraded (the plain form of anything else is not a guess to make); the editor
+ * still refuses to CREATE an undrawable sparkline (editorModel sparklineBlocker). */
+function downgradeUndrawableSparklines(spec: CardSpec): CardSpec {
+  if (!spec || !Array.isArray(spec.sections)) return spec
+  const bad = validateCard(spec).filter((e) => e.includes('sparkline'))
+  if (!bad.length) return spec
+  const sections = spec.sections.map((sec, si) => {
+    if (!sec || !Array.isArray(sec.items)) return sec
+    const items = sec.items.map((it) => {
+      if (it?.display?.as !== 'sparkline' || !bad.some((e) => e.startsWith(`sections[${si}].${it.id}: `))) return it
+      const k = kindOf(it.data)
+      if (k !== 'count' && k !== 'money') return it
+      return { ...it, display: k === 'money' ? { as: 'currency' as const } : { as: 'number' as const } }
+    })
+    return { ...sec, items }
+  })
+  return { ...spec, sections }
+}
 /** A widget's saved `card`, normalised on every load (lib/defaults.ts normWidget): absent or
  * not an object → undefined (no card); `{ preset }` → kept by id (an unknown id renders as an
  * unknown card, it is never guessed); `{ spec }` → a plain-JSON copy when it is within
@@ -312,7 +334,7 @@ export function normCardRef(raw: unknown): CardRef | undefined {
   try {
     const text = JSON.stringify(r.spec)
     if (typeof text !== 'string' || text.length > CARD_LIMITS.jsonBytes) return { preset: INVALID_CARD_PRESET }
-    const spec = dropRetiredItems(JSON.parse(text) as CardSpec)
+    const spec = downgradeUndrawableSparklines(dropRetiredItems(JSON.parse(text) as CardSpec))
     if (!withinLimits(spec) || !Array.isArray(spec.sections) || spec.sections.length > CARD_LIMITS.sections) return { preset: INVALID_CARD_PRESET }
     const items = spec.sections.reduce((n, sec) => n + (Array.isArray(sec?.items) ? sec.items.length : Infinity), 0)
     if (items > CARD_LIMITS.items) return { preset: INVALID_CARD_PRESET }

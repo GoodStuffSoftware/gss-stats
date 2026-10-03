@@ -1006,7 +1006,9 @@ of the migrated layout first copies the layout that was stored until then to
 stays). The backup is named after the version that was **stored**, not the one before the new
 code: a layout still stored at v8 when v11 ships is backed up as `backup:v8`, one stored at v10
 as `backup:v10`. Production is stored at v12 when layout version 13 (page navigation) ships, so
-its first v13 save writes `backup:v12`. A tab still
+its first v13 save writes `backup:v12`. Layout version 14 (sparklines) is a save-guard bump
+only: its first save over a stored v13 writes `backup:v13`, and rolling the code back past it
+needs `backup:v13` restored (same steps below, with that key). A tab still
 running older code gets `409` ("This tab is out of date, reload") instead of overwriting a
 newer layout.
 
