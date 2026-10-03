@@ -276,6 +276,9 @@ export interface StatsResponse {
     // means tracking hasn't shipped yet, in which case activationPending is always true.
     activationDate?: string | null
     activationPending?: boolean
+    // /api/geo only: true when the counts-only split guard left return, game start, completion,
+    // tutorial-completion and tour-exit rows out of this answer (src/lib/splitGuard.ts).
+    splitGuard?: boolean
   }
   // Pop-up dataset only (widget.type === 'rate'): the single computed rate, or null for
   // a zero denominator (no accepts/outcomes yet) — see lib/popupEvents.ts computeRate.
