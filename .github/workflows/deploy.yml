@@ -48,6 +48,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: a32bba62c77df5e8f6bd33d04478ec34
 
   deploy-worker:
+    if: github.ref == 'refs/heads/main' # a manual run from another branch must not deploy its Worker to production
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -60,21 +61,27 @@ jobs:
         with:
           fetch-depth: 0 # the changed-files check below diffs against the pre-push commit
       # The Worker bundles workers/sync/ and (transitively) src/lib/, so those and the pinned
-      # wrangler (package-lock.json) are its inputs; this workflow file is one too, so editing it
-      # also redeploys. A manual run, a new/forced branch or an unknown base always deploys.
+      # wrangler (package-lock.json), the root tsconfig.json and the deploy script (stamping, cron)
+      # are its inputs; this workflow file is one too, so editing it also redeploys. A manual run,
+      # a new/forced branch or an unknown base always deploys, unless the repo variable
+      # WORKER_DEPLOY_PAUSED is "true" (a deliberately held cron: nothing deploys until it is removed).
       - name: Detect Worker changes
         id: changes
         env:
           EVENT: ${{ github.event_name }}
           BEFORE: ${{ github.event.before }}
+          PAUSED: ${{ vars.WORKER_DEPLOY_PAUSED }}
         run: |
+          if [ "$PAUSED" = "true" ]; then
+            echo "deploy=false" >> "$GITHUB_OUTPUT"; echo "Worker deploy PAUSED (repo variable WORKER_DEPLOY_PAUSED=true): skipping. Remove the variable to resume."; exit 0
+          fi
           if [ "$EVENT" = "workflow_dispatch" ]; then
             echo "deploy=true" >> "$GITHUB_OUTPUT"; echo "Manual run: deploying the Worker."; exit 0
           fi
           if ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
             echo "deploy=true" >> "$GITHUB_OUTPUT"; echo "No usable base commit: deploying the Worker."; exit 0
           fi
-          changed=$(git diff --name-only "$BEFORE" "$GITHUB_SHA" | grep -E '^(workers/sync/|src/lib/|package-lock\.json$|\.github/workflows/deploy\.yml$)' | grep -vE '\.test\.ts$' || true)
+          changed=$(git diff --name-only "$BEFORE" "$GITHUB_SHA" | grep -E '^(workers/sync/|src/lib/|package-lock\.json$|tsconfig\.json$|scripts/ads-reads/worker-deploy\.ts$|\.github/workflows/deploy\.yml$)' | grep -vE '\.test\.ts$' || true)
           if [ -n "$changed" ]; then
             echo "deploy=true" >> "$GITHUB_OUTPUT"; echo "Worker inputs changed:"; echo "$changed"
           else
