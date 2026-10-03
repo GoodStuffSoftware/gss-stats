@@ -6,6 +6,13 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.15.4] — 2026-10-03
+
+### Fixed
+- **A layout that fails to load can no longer be overwritten.** If the saved layout can't be read
+  (no connection, a server error, or an answer that isn't a layout), the dashboard shows the
+  default layout with a "Try again" banner, and nothing changed on it is saved.
+
 ## [0.15.3] — 2026-10-03
 
 ### Fixed
