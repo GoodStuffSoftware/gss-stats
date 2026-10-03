@@ -22,7 +22,7 @@ import {
   SEARCH_NA,
   type CampaignChannel,
 } from '../../src/lib/adsRules'
-import { POPUP_OUTCOME_TYPES, gateRate, installOutcomeGapNote } from '../../src/lib/popupEvents'
+import { GAME_START_DIFFICULTIES, POPUP_OUTCOME_TYPES, TOUR_EXIT_STEPS, TUTORIAL_COMPLETE_KINDS, gateRate, installOutcomeGapNote } from '../../src/lib/popupEvents'
 import { RAW_INSTALL_SIGNALS_LABEL } from '../../src/lib/campaigns'
 import { noteRawText } from '../../src/lib/notes'
 import type { DiagnosticsSection, FullRead, MorningResult, PostflightResult, SpendSection } from './read'
@@ -254,12 +254,25 @@ export function firstSessionLines(fs: MorningResult['firstSession']): string[] {
   const out = [
     `First-session funnel since attribution start (informational only; never a kill rule). Tagged rows, site-wide web rows alongside; row counts with no visitor join, so "vs" figures are row ratios, not per-visitor conversion:${fs.siteError ? ` [site-wide not read: ${fs.siteError}]` : ''}${fs.arrivalsError ? ` [tagged arrivals not read: ${fs.arrivalsError}]` : ''}`,
   ]
+  const allUntracked = (xs: FirstSessionFigure[]) => xs.every((x) => x.tracked === false)
+  // One breakdown line (abandon-style): "<label>: <key> <figure>; ..." or "not yet tracked".
+  const breakdown = <K extends string>(label: string, keys: readonly K[], figs: Record<K, FirstSessionFigure>) =>
+    allUntracked(keys.map((k) => figs[k])) ? `  ${label}: ${NOT_YET_TRACKED} (no rows yet)` : `  ${label}: ${keys.map((k) => `${k} ${firstSessionFigureText(figs[k])}`).join('; ')}`
   for (const k of FIRST_SESSION_STEPS) {
     const st = f.steps[k]
     const vs = st.vsParent ? `; vs ${FIRST_SESSION_STEP_LABELS[st.vsParent.parent]} ${formatGated(st.vsParent)}` : ''
     out.push(`  ${FIRST_SESSION_STEP_LABELS[k]}: ${firstSessionFigureText(st)}${st.tracked === false ? '' : vs}`)
+    // The v1.97.0 first-run counters follow the tour outcomes. The first is NOT a further step:
+    // /tour/exit-at/<stage> fires only on a skip, straight after /tour/skip, so it is the tour
+    // skip rows split by where (it sits under that line and is labelled so). The counted game
+    // start and the tutorial win are their own counters. Plain row counts side by side, no
+    // ratio between them (a start cannot be matched to the exit that led to it).
+    if (k === 'tourSkip') {
+      out.push(breakdown('tour skip by stage (since v1.97.0; the same rows as tour skip above, split by where)', TOUR_EXIT_STEPS, f.tourExit))
+      out.push(breakdown('game starts by difficulty (since v1.97.0; every counted start, including leaving the tour for a real game)', GAME_START_DIFFICULTIES, f.gameStart))
+      out.push(breakdown('tutorial complete (since v1.97.0; first run vs replay)', TUTORIAL_COMPLETE_KINDS, f.tutorialComplete))
+    }
   }
-  const allUntracked = (xs: FirstSessionFigure[]) => xs.every((x) => x.tracked === false)
   const ab = ABANDON_BUCKETS.map((b) => f.abandon[b])
   out.push(
     allUntracked(ab)

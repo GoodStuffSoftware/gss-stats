@@ -27,9 +27,6 @@ const emit = defineEmits<{ 'move': [dir: -1 | 1]; duplicate: []; remove: [] }>()
 const item = defineModel<MetricItem>({ required: true })
 
 const open = ref(false)
-/** The sparkline display this item arrived with, if any — kept for the life of the editor so the
- * Display tab can offer it back after the user tries another display (and restore its series). */
-const storedSparkline = item.value.display.as === 'sparkline' ? { ...item.value.display } : undefined
 const innermostOver = computed<RepeatSpec['over'] | undefined>(() => item.value.repeat?.over ?? props.sectionRepeatOver ?? props.cardRepeatOver)
 
 const whenUnmeasuredId = useId()
@@ -182,7 +179,7 @@ const itemRepeatModel = computed({
     <fieldset v-if="open" class="ce-item-body ce-fieldset" :disabled="readonly">
       <CardEditorLabel v-model="item.label" :has-data="hasData" :repeat-over="innermostOver" />
       <CardEditorData v-model="item.data" :repeat-over="innermostOver" />
-      <CardEditorDisplay v-model="item.display" :binding="item.data" :stored-sparkline="storedSparkline" />
+      <CardEditorDisplay v-model="item.display" :binding="item.data" />
 
       <details class="more">
         <summary>More: gating, repeat, caption, frame ({{ dataKindLabel }})</summary>

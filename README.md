@@ -101,6 +101,22 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   regression from this app's own code. Resizing a chart currently needs a mouse or touch;
   every other chart action (edit, remove, zoom, duplicate, set-as-default) has a real
   button and works from the keyboard.
+- **Sparkline display** — a card's count or money item can be shown as a **Sparkline**: the
+  current number, with a small per-day line beside it. The server counts the same metric per ET
+  day from a daily twin of its fact
+  ([`src/lib/metrics/series.ts`](src/lib/metrics/series.ts); at most 92 days, oldest first) and
+  [`MetricItem.vue`](src/components/metrics/MetricItem.vue) draws it
+  ([`sparkline.ts`](src/lib/metrics/sparkline.ts)). It reads the page range or a campaign's
+  attribution window (not "today so far"), never a ratio, rate or cost; the editor greys the
+  option with the reason otherwise. A day the metric was not measured (before a go-live, or an
+  unsynced spend day) is a break in the line, never a zero; a measured day with no rows is 0. A
+  money series rounds each day to cents, so its points can differ from the tile's total by a cent
+  or two. Days only: no hour, place or device split (a `/return` or game-complete row gets no
+  more than the day's count and the kind the tile already reads). Each series is one extra
+  statement per distinct twin read (items that share a window share it) against the 40-statement
+  batch budget ([`docs/capacity.md`](docs/capacity.md) §9). The layout version is now 14 (a save
+  guard only; page navigation holds 13): the first save from this build backs the stored v13
+  layout up once, and a tab still on the old build is told to reload; nothing is rewritten.
 - **Full width** — there's no centred max-width column: the header (a strip across the window),
   the filter bar and the chart grid span the window with a 16px gutter (12px on a phone), so a
   wide screen shows wider charts, and the pinned filter bar (below) spans it too.
@@ -468,8 +484,9 @@ geography is country-only** — sub-country region/city comes from the beacon.
 **Pop-up event beacons never count as page views — unless a chart opts in.** Paths under
 `/signin-prompt`, `/signin-eligible`, `/promo-first50`, `/first50-congrats`, `/upsell`,
 `/install`, `/popup-outcome`, `/return`, `/game/complete/`, the `/auth/success/<provider>/`
-status suffix, `/auth/error`, `/auth/redirect` and the first-session beacons (`/tour`,
-`/game/tutorial-complete`, `/game/first-move`, `/game/abandon`, `/welcome-signed-in`) are pop-up/event beacons, not screens — `/api/geo` and `/api/sites` exclude all
+status suffix, `/auth/error`, `/auth/redirect` and the first-session beacons (`/tour`, which
+includes `/tour/exit-at/<stage>`, `/game/tutorial-complete`, `/game/first-move`, `/game/abandon`,
+`/welcome-signed-in` and `/game/start/<difficulty>`) are pop-up/event beacons, not screens — `/api/geo` and `/api/sites` exclude all
 of them from every pageview/visit total and the top-pages breakdown by default (see
 [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) `POPUP_EVENT_PREFIXES`); `/api/popups` is
 where they're counted. Each geo chart has its own **"Include event beacons"** option (off by
@@ -522,7 +539,8 @@ medium/date, plus **screen width** (`screenw`, exact pixels) and its bucketed fo
 **path family** dimension (`pathFamily`) that groups every event-beacon prefix above into
 `page` / `signin-prompt` / `signin-eligible` / `promo-first50` / `first50-congrats` / `upsell`
 / `install` / `popup-outcome` / `return` / `game-complete` / `auth-status` / `auth-error` /
-`auth-redirect` / `tour` / `tutorial-complete` / `game-first-move` / `game-abandon` / `welcome-signed-in`. More derived
+`auth-redirect` / `tour` / `tutorial-complete` / `game-first-move` / `game-abandon` /
+`welcome-signed-in` / `game-start`. More derived
 dimensions: **pop-up** (`popupFamily`) and **pop-up outcome** (`popupOutcome`), measured rows
 only (from the tracking activation day; pre-fix install-gap rows get no value — see
 [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) `popupDimSqlCase`, where
@@ -648,15 +666,25 @@ npm run typecheck:scripts
   later-session prompts go untagged). Once the tutorial ask has any site-wide row, the downgrade
   expires and the rule reads tagged asks only. The rule's detail line says which mode applied.
   Every morning read also prints a **first-session funnel** (arrivals → game views →
-  tour start → tour complete/skip → first move → game complete, abandon-by-%-filled buckets,
-  sign-in asks shown incl. the tutorial ask, and the signed-in welcome card), tagged counts with
+  tour start → tour complete/skip, with the skips split by stage (preamble / hub / section) →
+  game starts by difficulty → tutorial complete (first run vs replay) → first move → game
+  complete, abandon-by-%-filled buckets, sign-in asks shown incl. the tutorial ask, and the
+  signed-in welcome card), tagged counts with
   site-wide web counts alongside over the same window (attribution start to flight end or now).
   Arrivals are `/return/<uc>/d0` rows (one per device's first tagged visit): tagged = the
   campaign's own uc (web and app), site-wide = any uc on web. "Tracked" is decided per beacon
   family, since each family ships in one app release: tour + first move + abandon buckets; the
-  welcome card; the tutorial ask. A family with no rows yet reads "not yet tracked", never 0%;
+  welcome card; the v1.97.0 first-run counters (tour skip by stage, game start, tutorial
+  complete); the tutorial ask. A family with no rows yet reads "not yet tracked", never 0%;
   once any member has a row, a sibling with none is a real 0. Ratios are rows over rows and never
-  use game views (page views) as a parent. Informational only — never a kill rule or a push.
+  use game views (page views) as a parent. The first-run counters are counter totals read side
+  by side, matched by exact path (the same matchers that classify them as events, in
+  `popupEvents.ts`): no ratio between them and no join of any row to a device, time or place.
+  The stage line is the tour-skip rows split by where (`/tour/exit-at/<stage>` fires only on a
+  skip), so it is printed under tour skip and never counted as a further step. A game start
+  counts every counted start (menu, play again, or leaving the tour for a real game), so it
+  cannot be matched to the skip that led to it. Informational only — never a kill rule or a
+  push.
 - **postflight-read** covers the wrap-up (flight end + 7 days; spend after the flight and the cap are checked first on every run) and the day-15/30/60 and
   December follow-ups, split promo vs non-promo, with the d31-60 return buckets. Day 15/30/60
   add the flight-window account cohort by access tier and promo marker (sitewide, not
@@ -1023,7 +1051,9 @@ of the migrated layout first copies the layout that was stored until then to
 stays). The backup is named after the version that was **stored**, not the one before the new
 code: a layout still stored at v8 when v11 ships is backed up as `backup:v8`, one stored at v10
 as `backup:v10`. Production is stored at v12 when layout version 13 (page navigation) ships, so
-its first v13 save writes `backup:v12`. A tab still
+its first v13 save writes `backup:v12`. Layout version 14 (sparklines) is a save-guard bump
+only: its first save over a stored v13 writes `backup:v13`, and rolling the code back past it
+needs `backup:v13` restored (same steps below, with that key). A tab still
 running older code gets `409` ("This tab is out of date, reload") instead of overwriting a
 newer layout.
 
@@ -1041,19 +1071,43 @@ To put a backup back, in this order:
 3. **Find the backup to restore**: list the backup keys, and pick the version that was stored
    before the upgrade (the highest one below the current `CONFIG_VERSION`: `backup:v12` to undo
    the v13 page-navigation upgrade). Namespace id
-   from `wrangler.toml`; a token with Workers KV Storage: Edit.
+   from `wrangler.toml`; a token with Workers KV Storage: Edit. The commands below are for
+   Windows PowerShell 5.1; run them one at a time, from the repo root.
 
-   ```bash
+   ```powershell
    npx wrangler kv key list --remote --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --prefix "dashboard:default:backup:"
    ```
 
 4. **Download it, keep a copy of what's there now, and check the file before writing it back**:
-   it must be non-empty, valid JSON with a `pages` array. Only then put it.
+   it must be non-empty, valid JSON with a `pages` array. Run each block on its own and only
+   continue when the previous one finished cleanly. (The `cmd /c` wrapper is deliberate: in
+   PowerShell 5.1 a plain `>` writes the file as UTF-16, which is not what KV holds, and
+   `| Set-Content` re-encodes the text.)
 
-   ```bash
-   npx wrangler kv key get "dashboard:default" --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-current.json
-   npx wrangler kv key get "dashboard:default:backup:v12" --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-backup.json
-   node -e "const c=JSON.parse(require('fs').readFileSync('layout-backup.json','utf8')); if(!Array.isArray(c.pages)||!c.pages.length) throw new Error('not a layout'); console.log('ok: version', c.version, '-', c.pages.length, 'pages')"
+   Keep what's there now, in case you need to undo the restore:
+
+   ```powershell
+   cmd /c 'npx wrangler kv key get dashboard:default --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-current.json'
+   ```
+
+   Download the backup (change `v12` to the version you picked in step 3):
+
+   ```powershell
+   cmd /c 'npx wrangler kv key get dashboard:default:backup:v12 --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-backup.json'
+   ```
+
+   Check it. This must print `ok: version ..., N pages`; if it throws or prints nothing, stop
+   and do **not** run the next block:
+
+   ```powershell
+   Get-Content layout-backup.json -Raw -Encoding UTF8 | ConvertFrom-Json | ForEach-Object { if ($_.pages -isnot [array] -or $_.pages.Count -eq 0) { throw 'not a layout' }; "ok: version $($_.version), $($_.pages.Count) pages" }
+   ```
+
+   Only after that printed `ok`, put it back. **This discards every layout edit made since the
+   backup was taken** (widget and chart edits too, not only the navigation changes), because
+   it replaces the whole stored layout:
+
+   ```powershell
    npx wrangler kv key put "dashboard:default" --path layout-backup.json --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote
    ```
 
