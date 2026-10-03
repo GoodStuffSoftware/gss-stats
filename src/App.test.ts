@@ -48,7 +48,7 @@ vi.mock('./api', async (importOriginal) => {
     ...actual,
     loadConfig: vi.fn(async () => null),
     saveConfig: vi.fn(async () => true),
-    // The default active page is 'bsk-overview' (lib/defaults.ts); its cards and timeline
+    // A first-time viewer lands on ★ Overview (id 'default', lib/defaults.ts); its charts
     // fetch their own data, which this test never waits for.
   }
 })

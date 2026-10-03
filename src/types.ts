@@ -214,18 +214,46 @@ export interface GlobalFilters {
 export interface DashboardPage {
   id: string
   name: string
-  isDefault: boolean // the default page — not deletable; always restorable
+  isDefault: boolean // the default page (★ Overview) — not deletable; always restorable; shown pinned first
+  // Navigation group (layout version 13): "All sites", "Best Sudoku", "Mine", … — a plain string,
+  // so a new product is a new group with no code change. Group order is DashboardConfig.groupOrder,
+  // then the order groups first appear in `pages`; pages within a group keep their array order.
+  // The default page keeps its group in data but is shown pinned first, outside the groups.
+  group: string
+  // Drill pages only: the page this one was drilled from, its IMMEDIATE parent (a drill from a
+  // drill page nests under that drill page, up to lib/defaults.ts MAX_DRILL_DEPTH levels). Shown
+  // nested under it; deleted and moved together with it.
+  parentId?: string
+  // A lib/icons.ts registry key (e.g. "megaphone") someone picked. Unset = resolved
+  // automatically (inherited from its top-level page for a drill page, else from its charts).
+  icon?: string
   filters: GlobalFilters
   widgets: Widget[]
 }
 
+/** Optional per-group overrides (layout version 13): a pinned badge colour (a palette slot
+ * "g0"…"g6" or a hex colour) and/or a logo image URL replacing the lettered monogram. */
+export interface GroupMeta {
+  color?: string
+  logo?: string
+}
+
 export interface DashboardConfig {
   version: number
+  // The page a first-time viewer lands on. Since layout version 13 the page each viewer is on
+  // lives in their own browser (lib/viewerPrefs.ts), not here: switching pages never writes the
+  // shared config.
   activePageId: string
   pages: DashboardPage[]
   // When true, the date range is shared across every page (change it once, it applies
   // everywhere). Site selection and drill-downs stay per-page. Default off.
   syncRange?: boolean
+  groupMeta?: Record<string, GroupMeta>
+  // The drawer's group order, and the groups that exist with no page in them yet (layout version
+  // 13, additive): every group name once, in display order. Groups the pages file under but this
+  // list misses are shown after it, in the order they first appear in `pages`. Absent = exactly
+  // that derived order (lib/defaults.ts normGroupOrder only stores it when it says more).
+  groupOrder?: string[]
 }
 
 export interface StatsRow {
@@ -248,6 +276,9 @@ export interface StatsResponse {
     // means tracking hasn't shipped yet, in which case activationPending is always true.
     activationDate?: string | null
     activationPending?: boolean
+    // /api/geo only: true when the counts-only split guard left return, game start, completion,
+    // tutorial-completion and tour-exit rows out of this answer (src/lib/splitGuard.ts).
+    splitGuard?: boolean
   }
   // Pop-up dataset only (widget.type === 'rate'): the single computed rate, or null for
   // a zero denominator (no accepts/outcomes yet) — see lib/popupEvents.ts computeRate.

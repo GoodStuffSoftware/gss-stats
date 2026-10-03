@@ -23,6 +23,7 @@ import AdsReadingsWidgetCard from './widgets/AdsReadingsWidgetCard.vue'
 import NoteBlock from './NoteBlock.vue'
 import { rangeNoticeText } from '../lib/rangeNotice'
 import { noteRawText, widgetCaptionNoteIds } from '../lib/notes'
+import { SPLIT_GUARD_CAPTION } from '../lib/splitGuard'
 
 const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolean; drillOpen: boolean; forceControls?: boolean }>()
 
@@ -607,9 +608,10 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
         </li>
       </ul>
     </details>
-    <div v-if="captionNoteIds.length || data?.note || rangeNote" class="card-captions">
+    <div v-if="captionNoteIds.length || data?.note || data?.meta?.splitGuard || rangeNote" class="card-captions">
       <NoteBlock v-for="id in captionNoteIds" :key="id" :note-id="id" />
       <NoteBlock v-if="data?.note" :text="data.note" />
+      <NoteBlock v-if="data?.meta?.splitGuard" :text="SPLIT_GUARD_CAPTION" />
       <NoteBlock v-if="rangeNote" class="range-notice" data-testid="range-notice" severity="caveat" :text="rangeNote" />
     </div>
 

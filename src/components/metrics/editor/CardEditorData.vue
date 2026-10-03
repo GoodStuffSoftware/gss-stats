@@ -14,12 +14,15 @@ import {
   POPUP_ID_OPTIONS,
   ratioDef,
   ratioOptions,
+  rebindData,
+  scopePathLabel,
   scopePathOptions,
+  withField,
   type DataBindingKind,
 } from '../../../lib/metrics/editorModel'
 import { metricWindows, OPTIONAL_PARAMS, type MetricParam } from '../../../lib/metrics/metrics'
 import { ratioParamsOf, ratioWindowsOf } from '../../../lib/metrics/ratios'
-import type { DataBinding, ParamValue, RepeatSpec, ScopePath, WindowName } from '../../../lib/metrics/types'
+import type { DataBinding, Params, ParamValue, RepeatSpec, ScopePath, WindowName, WindowSpec } from '../../../lib/metrics/types'
 
 // Vue casts an absent, optional BOOLEAN prop to `false` (not `undefined`) — the same rule native
 // HTML boolean attributes follow — so `allowField`'s "default true" needs `withDefaults`, not an
@@ -58,11 +61,17 @@ const ratioChoices = computed(() => {
 
 const currentMetricId = computed(() => ('metric' in data.value ? data.value.metric : ''))
 const currentRatioId = computed(() => ('ratio' in data.value ? data.value.ratio : ''))
+// Re-picking the selected id changes nothing; picking another keeps the window and params it
+// still accepts (editorModel rebindData) — a click never silently drops a preset's settings.
+function pick(next: { metric: string } | { ratio: string }) {
+  const bound = rebindData(data.value, next)
+  if (bound !== data.value) data.value = bound
+}
 function pickMetric(id: string) {
-  data.value = { metric: id }
+  pick({ metric: id })
 }
 function pickRatio(id: string) {
-  data.value = { ratio: id }
+  pick({ ratio: id })
 }
 
 // ── params (campaignId / popup) ─────────────────────────────────────────────────────────────
@@ -88,10 +97,13 @@ function paramValue(p: MetricParam): ParamValue | undefined {
 }
 function setParam(p: MetricParam, v: string | undefined) {
   if (!('metric' in data.value || 'ratio' in data.value)) return
+  // A no-op pick (the value already shown; '' for "from the repeat scope") changes nothing.
+  const cur = paramValue(p)
+  if (v === (paramIsPinned(cur) ? cur : undefined)) return
   const params = { ...('params' in data.value ? data.value.params : undefined) }
   if (v === undefined) delete params[p]
   else params[p] = v
-  data.value = { ...data.value, params: Object.keys(params).length ? params : undefined } as DataBinding
+  data.value = withField(data.value as { metric: string; params?: Params }, 'params', Object.keys(params).length ? params : undefined) as DataBinding
 }
 function optionsFor(p: MetricParam) {
   return p === 'campaignId' ? CAMPAIGN_ID_OPTIONS : p === 'popup' ? POPUP_ID_OPTIONS : COUNTRY_OPTIONS
@@ -113,18 +125,24 @@ const windowChoices = computed<WindowName[]>(() => {
   }
   return []
 })
-/** '@repeat': the window of the repeat or table column the item sits in (`{ scope: 'window' }`). */
+/** '@repeat': the window of the repeat or table column the item sits in (`{ scope: 'window' }`);
+ * '': no window stored — the binding reads its default (the registry's first window, which is
+ * what validateCard and the server both fall back to), shown as its own "Default (…)" option so
+ * the select never displays a window the binding does not actually store. */
 const windowValue = computed<WindowName | '' | '@repeat'>({
   get: () => {
     const w = 'window' in data.value ? data.value.window : undefined
     if (typeof w === 'object' && w !== null) return '@repeat'
-    return typeof w === 'string' ? (w as WindowName) : (windowChoices.value[0] ?? '')
+    return typeof w === 'string' ? (w as WindowName) : ''
   },
   set: (v: WindowName | '' | '@repeat') => {
     if (!('metric' in data.value || 'ratio' in data.value)) return
-    data.value = { ...data.value, window: v === '@repeat' ? { scope: 'window' } : v || undefined } as DataBinding
+    if (v === windowValue.value) return
+    data.value = withField(data.value as { metric: string; window?: WindowSpec }, 'window', v === '@repeat' ? { scope: 'window' } : v || undefined) as DataBinding
   },
 })
+/** The window a binding with no stored window reads. */
+const defaultWindow = computed<WindowName | undefined>(() => windowChoices.value[0])
 /** Plain names for the windows (never the internal ids). */
 const WINDOW_NAMES: Record<WindowName, string> = {
   attribution: 'Campaign attribution',
@@ -137,9 +155,17 @@ const WINDOW_NAMES: Record<WindowName, string> = {
 }
 
 // ── field ────────────────────────────────────────────────────────────────────────────────────
+/** The fields a `field` binding may read: the repeat's own, plus the current field when it is
+ * outside them (e.g. the release label on a card with no repeat) — shown and selected, never
+ * blanked by a picker with nothing to show for it. */
+const fieldOptions = computed(() => {
+  const cur = 'field' in data.value ? data.value.field : undefined
+  return cur && !scopeOptions.value.some((o) => o.value === cur) ? [...scopeOptions.value, { value: cur, label: scopePathLabel(cur) }] : scopeOptions.value
+})
 const fieldPath = computed<ScopePath>({
   get: () => ('field' in data.value ? data.value.field : fallbackPath.value),
   set: (v) => {
+    if (!v || ('field' in data.value && data.value.field === v)) return
     data.value = { field: v }
   },
 })
@@ -185,7 +211,7 @@ const fieldPath = computed<ScopePath>({
     <template v-else-if="kind === 'field'">
       <label class="visually-hidden" :for="fieldSelectId">Field</label>
       <select :id="fieldSelectId" v-model="fieldPath">
-        <option v-for="o in scopeOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+        <option v-for="o in fieldOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
       </select>
     </template>
 
@@ -194,7 +220,7 @@ const fieldPath = computed<ScopePath>({
         <div class="field">
           <label :for="`${groupId}-param-${p}`">{{ PARAM_LABELS[p] }}</label>
           <span v-if="!paramIsPinned(paramValue(p)) && scopeProvides(p)" class="chip">from repeat scope</span>
-          <select :id="`${groupId}-param-${p}`" :value="paramValue(p) ?? ''" @change="setParam(p, ($event.target as HTMLSelectElement).value || undefined)">
+          <select :id="`${groupId}-param-${p}`" :value="paramIsPinned(paramValue(p)) ? paramValue(p) : ''" @change="setParam(p, ($event.target as HTMLSelectElement).value || undefined)">
             <option value="" :disabled="!scopeProvides(p) && !optional(p)">{{ scopeProvides(p) ? '(from repeat scope)' : optional(p) ? 'All countries' : 'Choose…' }}</option>
             <option v-for="o in optionsFor(p)" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
@@ -205,10 +231,11 @@ const fieldPath = computed<ScopePath>({
     <div class="field" v-if="kind !== 'field' && windowChoices.length > 1">
       <label :for="windowId">Window</label>
       <select :id="windowId" v-model="windowValue">
+        <option value="">Default — {{ defaultWindow ? (WINDOW_NAMES[defaultWindow] ?? defaultWindow) : 'the metric\'s own' }}</option>
         <option v-for="w in windowChoices" :key="String(w)" :value="w">{{ WINDOW_NAMES[w] ?? w }}</option>
         <option value="@repeat">From the repeat or column (before/after)</option>
       </select>
-      <p v-if="windowValue && windowValue !== 'page'" class="hint">Ignores the page's date range.</p>
+      <p v-if="(windowValue || defaultWindow) && (windowValue || defaultWindow) !== 'page'" class="hint">Ignores the page's date range.</p>
     </div>
   </div>
 </template>

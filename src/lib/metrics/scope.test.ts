@@ -244,6 +244,25 @@ describe('flattenSectionItems', () => {
     expect(out).toEqual([{ item, scope: { kind: 'root' }, emptyOf: item.repeat!.empty }])
   })
 
+  it('organic + flightingToday with no campaign flighting: the plain `empty`, never "no tracked campaign"', () => {
+    // The organic arm is the only instance, and a binding it does not serve drops it, so the repeat
+    // is empty. Only a dropped CAMPAIGN instance means "a campaign is flighting but untracked".
+    const empty = { label: 'Arrivals', text: { note: 'no-campaign-flighting' } }
+    const item: MetricItem = {
+      id: 'arr',
+      label: 'Arrivals',
+      data: { metric: 'campaign.taggedArrivals' },
+      display: { as: 'number' },
+      repeat: { over: 'campaigns', flightingToday: true, organic: true, empty },
+    }
+    const section: Section = { layout: 'tiles', items: [item] }
+    const ctx = { todayEt: '2020-01-01' }
+    expect(resolveRepeat(item.repeat, ctx)).toEqual([{ kind: 'organic' }])
+    const out = flattenSectionItems(section, { kind: 'root' }, ctx)
+    expect(out).toEqual([{ item, scope: { kind: 'root' }, emptyOf: empty }])
+    expect(JSON.stringify(out)).not.toContain('no-tracked-campaign-flighting')
+  })
+
   it('an item repeat that matches nothing and has no `empty` renders nothing', () => {
     const item: MetricItem = { ...baseItem, repeat: { over: 'campaigns', flightingToday: true } }
     const section: Section = { layout: 'tiles', items: [item] }

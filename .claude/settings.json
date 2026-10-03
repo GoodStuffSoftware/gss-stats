@@ -1,0 +1,14 @@
+{
+  "extraKnownMarketplaces": {
+    "agent-templates": {
+      "source": { "source": "github", "repo": "GoodStuffSoftware/agent-templates" }
+    },
+    "deckhand": {
+      "source": { "source": "github", "repo": "msantoro12/deckhand" }
+    }
+  },
+  "enabledPlugins": {
+    "agent-companion@agent-templates": true,
+    "deckhand@deckhand": true
+  }
+}

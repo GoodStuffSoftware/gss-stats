@@ -43,7 +43,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
 
 ## Features
 
-- **"Best Sudoku · Overview"** — the landing page: today-at-a-glance KPI tiles (vs the same
+- **Best Sudoku / Overview** — the Best Sudoku group's first page: today-at-a-glance KPI tiles (vs the same
   time yesterday and the 7-day average), the **Overall timeline**, a campaign scorecard, and a
   release before/after panel — each its own movable/editable widget. The KPI tiles and the
   scorecard are **metric cards** (presets `bsk-kpis` and `campaign-scorecard`, see *One metrics
@@ -60,10 +60,12 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   `date` dimension is a UTC day.
   [`src/lib/releases.ts`](src/lib/releases.ts) holds the hand-entered release dates (`hits` has
   no app-version column; major releases get a labelled line, minor ones a short tick).
-  "Best Sudoku · Campaigns" (its funnel, country, cost and return-visits panels are metric
+  Best Sudoku / Campaigns (its funnel, country, cost and return-visits panels are metric
   cards, presets `campaign-funnel`, `campaign-country` — a table with the funnel steps as rows
   and US / CA / Other as columns, each cell a campaign metric with the registry's optional
-  `country` param — `campaign-cost` and `campaign-returns` — d0 and each return window's rate,
+  `country` param; it has no "Completed a game" row, because completions take no `country`
+  param (counts only, below), and a card that puts a country split over such a metric is
+  refused — `campaign-cost` and `campaign-returns` — d0 and each return window's rate,
   dN over d0 with its n/d, as bars side by side. A campaign's return rows count from the web
   site and the installed app (`bestsudoku-app`) alike, from its attribution start (each counts
   its own installs, so a phone that used both counts once on each). After the
@@ -83,10 +85,8 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   bespoke panel left: the former panel bodies and their endpoints (`/api/campaigns`,
   `/api/overview`) are retired, and a saved layout's panels are swapped in place on load — see
   [`src/lib/defaults.ts`](src/lib/defaults.ts) `migratePanelsV11`)
-  and "Best Sudoku · Traffic" (per-site/geo/referrer/device detail beyond what Overview and
-  Campaigns cover) round out the Best Sudoku tab group, which is kept together and in that
-  order — after your own tabs — by a non-destructive reorder on load (see
-  [`src/lib/defaults.ts`](src/lib/defaults.ts)'s `reorderBskGroup`).
+  and Best Sudoku / Traffic (per-site/geo/referrer/device detail beyond what Overview and
+  Campaigns cover) round out the Best Sudoku group, in that order (see *Page navigation* below).
 - **Movable / composable charts** — drag the header, resize from the corner; add /
   edit / duplicate / delete charts of any type: stat, bar, horizontal bar, stacked
   bar, **breakdown bar** (one dimension on the axis × another as the series, grouped or
@@ -101,6 +101,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   regression from this app's own code. Resizing a chart currently needs a mouse or touch;
   every other chart action (edit, remove, zoom, duplicate, set-as-default) has a real
   button and works from the keyboard.
+- **Full width** — there's no centred max-width column: the header (a strip across the window),
+  the filter bar and the chart grid span the window with a 16px gutter (12px on a phone), so a
+  wide screen shows wider charts, and the pinned filter bar (below) spans it too.
 - **Fit height to content** — a card's editor has a "Fit height to content" checkbox (next to
   the display and size controls) that sets `Widget.fit: 'content'`. A fit panel's height then
   follows what it renders: the dashboard measures the bottom of the card's last in-flow child
@@ -122,13 +125,13 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   saved is not written back. The fitted `h` depends on the card's width (text wraps), and the
   layout is shared: two tabs open at different widths each compute their own `h` and the
   last save wins.
-- **The main filter bar is always visible**, in normal flow directly under the page
-  tabs (range, sites, exclusions, sync-across-pages). If it scrolls out of view, a
+- **The main filter bar is always visible**, in normal flow directly under the header
+  (range, sites, exclusions, sync-across-pages). If it scrolls out of view, a
   small "show filters" button appears top-right — see the IntersectionObserver on
   `barSectionEl` in [`src/App.vue`](src/App.vue) — and pins the same bar at the top of
   the viewport until you dismiss it (the button again, Escape, or clicking outside) or
-  scroll back to where the in-flow bar is visible. Page tabs stay always visible above
-  it either way. Hidden only on the campaign page, whose widgets aren't filter-driven.
+  scroll back to where the in-flow bar is visible. Hidden only on the campaign page
+  (`isCampaignComparePage`, by id), whose widgets aren't filter-driven.
   The button stays keyboard-reachable at all times (never `tabindex="-1"`, revealed on
   real keyboard focus even while visually hidden); activating it while the in-flow bar
   is already on screen just moves focus to the bar's first control.
@@ -148,19 +151,125 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   list them).
 - **Durable, multi-page dashboards** — layout + chart definitions persist in KV (not
   `localStorage`), so they follow you across devices. Duplicate / rename / delete
-  pages; a protected default page with "restore default charts"; per-page filters and
+  pages (see *Page navigation*); a protected default page with "restore default charts"; per-page filters and
   per-chart filter overrides. A saved layout is migrated forward on load
   ([`src/lib/defaults.ts`](src/lib/defaults.ts) `normalizeConfig`, `CONFIG_VERSION`), and the
   first save of a newer version first copies the previous stored layout to
   `dashboard:default:backup:v<old version>` in KV ([`functions/api/config.ts`](functions/api/config.ts)),
   once, so a migration can be rolled back by copying that key over `dashboard:default`.
+- **Page navigation** — every page belongs to a **group** (`DashboardPage.group`, a plain
+  string: "All sites", "Best Sudoku", "Mine", …, so a new product is just a new group). The
+  default page, **★ Overview** (all-sites traffic), is shown pinned first, outside the groups,
+  and can't be deleted. Order is data: groups appear in the config's optional `groupOrder` (which
+  also keeps a group that has no page yet), then in the order they first occur in the saved page
+  list, and pages keep their saved order within a group — nothing is re-sorted on load
+  (`normGroupOrder` sanitises the list and stores it only when it says more than the pages do).
+  Built-in pages are recognised **by id only** ([`src/lib/defaults.ts`](src/lib/defaults.ts)
+  `isOverviewPage`, `isCampaignComparePage`, …), so renaming a page never changes how it
+  behaves. The page each viewer is on (and the page they last viewed in each group) is
+  remembered **in their own browser** ([`src/lib/viewerPrefs.ts`](src/lib/viewerPrefs.ts)), not
+  in the shared KV config: switching pages never saves anything or moves anyone else, and a
+  first-time viewer lands on ★ Overview (the config's `activePageId`). Layout version 13
+  (`migrateNavV13`) filed the existing pages: the built-ins by id, the Best Sudoku pages renamed
+  Overview, Campaigns, Pop-ups and Traffic (their group shows "Best Sudoku"), and every other
+  page under the group its name starts with, else **Mine**. Drill pages made before version 13
+  can't be linked to the page they came from (nothing stored it), so they stay ordinary pages
+  under Mine.
+  - **Breadcrumb** ([`src/components/nav/NavBreadcrumb.vue`](src/components/nav/NavBreadcrumb.vue))
+    — `Group / Page / Drill / Drill…` in the header (the whole path to the page on screen), the
+    everyday way to move around. Each segment opens a menu: the group segment lists ★ Overview
+    and every group (picking a group opens the page you last viewed in it, else its first page)
+    and "Rename <group>"; the page segment lists the group's pages with their drill pages nested
+    under them, all pickable (a page with more than six folds them behind "Show N drill pages"
+    unless you're in there), plus "New page in <group>" (a copy of the page on screen, in that
+    group); a drill segment lists its sibling drill pages, its own drill pages under it, and the
+    way back to its parent. On ★ Overview the group segment is ★ Overview itself. When the path
+    doesn't fit, the middle folds into a "…" segment whose menu lists it; at phone width it
+    always does (`Group / … / Page`) and the menus open as a bottom sheet. Menus are
+    keyboard-operable (arrows, Home/End, Esc/Tab return focus to the segment).
+  - **Search** ([`src/components/nav/SearchPalette.vue`](src/components/nav/SearchPalette.vue))
+    — press <kbd>/</kbd> anywhere you're not typing (or the header's search button) to search
+    every page in every group: page names first, then pages matched only by a chart title, each
+    with its icon, its path for a drill page ("Traffic › mobile › California") and its group
+    badge. <kbd>↑</kbd> <kbd>↓</kbd> move, <kbd>↵</kbd> opens,
+    <kbd>esc</kbd> closes ([`src/lib/nav.ts`](src/lib/nav.ts) `searchPages`).
+  - **Drawer** ([`src/components/nav/NavDrawer.vue`](src/components/nav/NavDrawer.vue)) — the
+    ☰ button (it carries the current group's badge, ★ on ★ Overview) opens the whole page tree
+    as an overlay over the charts, on every screen size: ★ Overview pinned first (unindented),
+    then each group — its header collapsible (remembered per viewer), with its badge, a ⋯ group
+    menu and its page count — its pages indented under it and each level of drill pages one more
+    step in (a page with drill pages folds them away; remembered per viewer, and the path to the
+    page on screen always shows). Every page, drill pages included, has the ⋯ page menu; drill
+    pages also have × to delete them. Esc, the scrim or picking a page closes it; focus stays
+    inside while it's open and returns to ☰.
+  - **Group menu** ([`src/components/nav/GroupMenu.vue`](src/components/nav/GroupMenu.vue)) — ⋯
+    on a drawer group header: Rename (in place), New page in this group (the page wizard with
+    the group picked), Delete group… ([`DeleteGroupDialog.vue`](src/components/nav/DeleteGroupDialog.vue):
+    says how many pages it holds and moves them to the group you pick — "Mine" by default, the
+    first other group when Mine is the one going; ★ Overview never moves). A group can exist
+    with no pages. Renaming a group renames it on every page, in `groupOrder` and in `groupMeta`
+    at once; another group's name (in any case) is refused with a message, never merged
+    ([`src/lib/nav.ts`](src/lib/nav.ts) `renameGroup`, `deleteGroup`).
+  - **"+ New"** ([`src/components/nav/WizardCarousel.vue`](src/components/nav/WizardCarousel.vue),
+    [`NewWizards.vue`](src/components/nav/NewWizards.vue), [`src/lib/wizards.ts`](src/lib/wizards.ts))
+    — at the bottom of the drawer. Its label slides aside to a menu of what can be created (a
+    small registry of wizard definitions), and the chosen wizard runs as a carousel of steps with
+    Back / Next (Create on the last step), each step's Next waiting until the step is complete
+    and saying why inline. A **page**: its name; its group (an existing one or a new one named
+    there); what it starts from (blank, a copy of the page on screen, or a built-in page's
+    default charts) and its icon (Auto, shown, or one from the icon picker) — it's added to its
+    group and opened. A **group**: its name (unique); pages to move into it (optional, ★ Overview
+    excluded); a review — it's listed even when empty, and the drawer scrolls to it. Esc or ×
+    closes and starts over; with reduced motion nothing slides.
+  - **Page menu** ([`src/components/nav/PageMenu.vue`](src/components/nav/PageMenu.vue)) — ⋯
+    next to the breadcrumb (the page on screen) or on a drawer row: Rename, Duplicate (same
+    group and icon; a copy of a drill page stays under the same page), Change icon…, Move to
+    group (every group, or "New group…" named right in the menu; the page's drill pages move
+    with it — a drill page moved this way becomes a page of its own in that group), Restore
+    default charts, Delete. ★ Overview can't be moved or deleted, and **deleting a page deletes
+    every drill page under it too**, asked once ("Delete "Traffic" and its 3 drill pages?").
+    When the page on screen is deleted you land on its nearest remaining parent, else the page
+    before it in its group, else the group's first page, else ★ Overview
+    (`landingAfterDelete`).
+  - **Renaming in place** ([`src/components/nav/InlineName.vue`](src/components/nav/InlineName.vue))
+    — Rename (a ⋯ menu, or double-clicking the breadcrumb's group or page segment) turns the name
+    into a text field right where it is: Enter or leaving the field saves, Esc cancels, an empty
+    name changes nothing. No prompt dialogs. Every name on screen — breadcrumb, drawer, search,
+    menus and the browser tab's title — is rendered from the one config, so a rename shows
+    everywhere at once.
+  - **Icon picker** ([`src/components/nav/IconPicker.vue`](src/components/nav/IconPicker.vue))
+    — search the ~40 curated icons (Traffic, Engagement, Money, Product, Geography), or pick
+    **Auto**, which shows what the page would resolve to on its own.
+- **Page icons and group badges** ([`src/lib/icons.ts`](src/lib/icons.ts)) — every page shows an
+  icon without anyone setting one. The config stores at most a short registry key
+  (`DashboardPage.icon`, e.g. `megaphone`), never markup; the registry maps ~40 curated keys to
+  [Lucide](https://lucide.dev) icons (`@lucide/vue`, named imports, so only those ship), and
+  an unknown key shows the generic page icon. `resolveIcon`, first match wins: the icon someone
+  picked; for a drill page, the icon of its nearest ancestor someone picked one for, else its
+  top-level page's own icon, with a small drill mark; the icon of the dataset
+  most of the page's charts read (notes don't count, a chart with no dataset is `rum`, a tie goes
+  to the first chart in layout order: rum → trending-up, geo → map-pin, popup → app-window,
+  campaigns → megaphone, completions → trophy, ads-readings → tag, overview → layout-grid); else
+  the generic page icon. Traffic carries the one explicit built-in icon (`trending-up`), since
+  its beacon charts would otherwise show Beacon's map pin. Each group gets a lettered badge (the
+  first letters of its first two words, or a one-word name's first two letters) in one of seven
+  colours hashed from its name (FNV-1a), each with a light and a dark value; the config's
+  optional `groupMeta[group]` pins a colour (a slot `g0`…`g6` or a hex colour) or a logo image
+  (an https URL, a same-origin path or a base64 image), validated on load.
 - **Auto-built site filter** — a single multi-select of your sites and subdomains,
   built live from the data. It merges each site's RUM host and beacon tag into one
   entry, groups subdomains under their site, folds **alias hosts** (an HTTP redirect
   or a `rel="canonical"` pointing elsewhere) into their canonical site, and excludes
   dev/preview hosts from both the picker and the numbers.
 - **Click-to-drill-down** — click any chart value to open a new page filtered to it
-  (device, referrer, location, browser, …), titled by the value; drill-downs stack.
+  (device, referrer, location, browser, …). The drill page is created at once, nested under the
+  page it came from (`DashboardPage.parentId`, its immediate parent, in its group), and named by
+  what it adds to that page, e.g. "California" under "mobile" ([`src/lib/nav.ts`](src/lib/nav.ts)
+  `drillTrail`) — the drawer, breadcrumb and search show the rest of the path. Drilling again
+  from a drill page stacks the filters and nests one level deeper, up to 8 levels
+  (`MAX_DRILL_DEPTH`; beyond that a drill attaches to the deepest page allowed). Every load
+  repairs the tree: a link to a missing page, to itself or closing a loop is dropped, and a tree
+  deeper than 8 is re-attached (`normDrillLinks`).
 - **Exclusions** (global across pages) — hide self-referrals, hide your own visits by
   browser+OS, and an **"exclude this device"** opt-out that works on every site (see
   [gss-beacon](https://github.com/GoodStuffSoftware/gss-beacon)).
@@ -284,7 +393,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   campaign (Play-direct) sends its ads straight to the Play Store and so has no beacon rows
   at all; it's shown spend-only rather than an empty funnel.
 - **Locked down** — Google sign-in with an email allowlist gates every page and API
-  call; the header shows who is signed in with a **Sign out** button, and an expired
+  call; the header shows who is signed in with a **Sign out** button (between 701px and 1000px
+  wide, where the bar would wrap, the search box shrinks to its icon and the account becomes an
+  icon menu with the e-mail and **Log out** — the same `/auth/logout`), and an expired
   session shows a one-tap re-sign-in banner instead of a wall of errors.
 - Light / dark theme matching the Good Stuff Software brand.
 
@@ -334,7 +445,11 @@ Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats
   each row's label (plain text, a note, a bound field, or the metric's own name), its data (a
   metric, a registered ratio, or a field — only unit-compatible display types are offered, so an
   invalid percentage can't be built), arrange sections, and watch it update live before saving; an
-  edit that would leave the card invalid is refused inline instead of being saved.
+  edit that would leave the card invalid is refused inline instead of being saved. A preset card
+  opens showing all of its settings read-only; **Customize…** copies them into an editable card,
+  where every template field has a control (badge colours, card actions, note variables, a
+  repeat's ids and empty message, table headings, gating) and using a control without changing it
+  leaves the card exactly as it was.
 - **Two datasets, one dashboard.** RUM (sampled, human-only) and the beacon (every
   real load, sub-country geo) are charted side by side; they're independent and never
   summed.
@@ -363,18 +478,38 @@ there — not just the one drilled — can show the event rows just filtered dow
 carries a caption explaining why (see [`src/lib/drill.ts`](src/lib/drill.ts)
 `drillNeedsEventBeacons`).
 
-**Return, game-completion and tutorial-completion rows are counts only: never split by hour,
-place or device.** Rule: "counts only. Never tie beacon rows to a device, time or place." A geo
-chart that maps rows (the map/globe), groups by an hour, place or device dimension (`hourEt`;
+**Return, game-start, game-completion, tutorial-completion and tour-exit rows are counts only:
+never split by hour, place or device.** Rule: "counts only. Never tie beacon rows to a device, time or place." A geo
+chart that maps rows (the map/globe), groups by an hour, place or device dimension (`hourEt`,
+and the UTC `date`, whose count minus `dateEt`'s for the same day would give an evening band;
 `country`, `region`, `city`, `postal`, `continent`, `timezone`, `colo`, `org`; `device`,
 `browser`, `os`, `lang`, `screenw`, `screenwBucket`, `visitor`), or is drilled into one of them
-leaves `/return/…`, `/game/complete/…`, `/game/complete-deferred/…` and
-`/game/tutorial-complete/…` rows out entirely, whatever "Include event beacons" says, and marks
-the response `meta.splitGuard: true`. The rows still count everywhere else: by path, by ET day
-or flight day, by campaign, and in the metric cards. The guard keys on dimensions and drills
+leaves `/return/…`, `/game/start/…`, `/game/complete/…`, `/game/complete-deferred/…`,
+`/game/tutorial-complete/…` and `/tour/exit-at/…` rows out entirely, whatever "Include event
+beacons" says, marks the response `meta.splitGuard: true`, and the chart says so in a caption.
+The rows still count everywhere else: by path, by ET day or flight day, by campaign, and in the
+metric cards. The metric cards follow the same rule: in a country cell (`campaign-country`)
+these rows belong to no country, so they count only where no country is asked, and
+`campaign.completions` takes no `country` param at all. `/api/popups` and the ads-read
+routine's hourly site-event read and per-country read leave them out too. The guard keys on dimensions and drills
 only; the chart's own date range is not yet clamped to whole days. One visible effect: the **Arrivals by ET hour of day** chart no longer counts an arrival
 whose first beacon was a return or completion row, so its total can sit slightly below the
-flight-day chart's. The "hide known test and household traffic" filter is unchanged. See
+flight-day chart's. Another: the default **Pageviews over time** (Beacon page) and **Visits over
+time** (Best Sudoku · Traffic) trends group by the UTC `date`, so they no longer count these rows
+and always carry the caption; with event beacons excluded (their default) the only rows that
+drop are refused rows not on the event-beacon list (game starts, until that list names them).
+Charts by `dateEt` are unchanged. The "hide known test and household traffic" filter is
+unchanged. The guard's path patterns are inlined as SQL literals, so it costs no D1 bound
+parameters; the heaviest in-cap `/api/geo` shapes tested bind at most 97 of D1's 100.
+
+Two things stay allowed, by ruling (2026-10-03). **New vs returning:** the device may remember
+its own first visit, so a row's new/returning bit stays on these rows; it is what makes an
+arrival an arrival (`arrival` dimension, the Arrivals tiles and charts), and the free-form
+`visitor` dimension stays refused. **Fixed-instant cuts:** a metric may cut these rows at a
+flight start, a release, a fix go-live or an ET day boundary (the metric registry's segment and
+day indices, the routine's hour buckets cut only at such instants), which is never an
+hour-of-day split. The routine's Play line names only the ET date of the first or last
+`/return/` row, never its time; clamping a sub-day range to whole days is the next slice. See
 [`src/lib/splitGuard.ts`](src/lib/splitGuard.ts).
 
 **Every stored geo-beacon column is a chartable dimension AND a filter.** `functions/api/geo.ts`
@@ -805,6 +940,7 @@ per 10 minutes. The dashboard holds no Google Ads credential and never calls the
 | Ads routine prompts | [docs/routines/](docs/routines/) |
 | Geo beacon (companion) | [GoodStuffSoftware/gss-beacon](https://github.com/GoodStuffSoftware/gss-beacon) |
 | Capacity / free-plan limits | [docs/capacity.md](docs/capacity.md) |
+| Cloud (Claude Code on the web) sessions | [docs/cloud-sessions.md](docs/cloud-sessions.md) |
 
 ## Capacity
 
@@ -884,13 +1020,14 @@ of the migrated layout first copies the layout that was stored until then to
 (`functions/api/config.ts`; if the backup can't be written, the save fails and the old layout
 stays). The backup is named after the version that was **stored**, not the one before the new
 code: a layout still stored at v8 when v11 ships is backed up as `backup:v8`, one stored at v10
-as `backup:v10`. A tab still
+as `backup:v10`. Production is stored at v12 when layout version 13 (page navigation) ships, so
+its first v13 save writes `backup:v12`. A tab still
 running older code gets `409` ("This tab is out of date, reload") instead of overwriting a
 newer layout.
 
 **Rolling the code back needs the layout rolled back too.** An older release refuses to save
-over a newer stored layout (409), so after rolling back to v0.9.0 (layout v9), for example,
-every save fails until the stored layout is back at the version that release writes.
+over a newer stored layout (409), so after rolling back to the release before page navigation
+(layout v12), for example, every save fails until `backup:v12` is restored.
 
 To put a backup back, in this order:
 
@@ -900,8 +1037,8 @@ To put a backup back, in this order:
    next load migrates the restored layout again. Either redeploy the previous release or ship
    the fixed migration.
 3. **Find the backup to restore**: list the backup keys, and pick the version that was stored
-   before the upgrade (the highest one below the current `CONFIG_VERSION`: `backup:v8` if
-   production was still stored at v8, `backup:v10` if a v10 save happened first). Namespace id
+   before the upgrade (the highest one below the current `CONFIG_VERSION`: `backup:v12` to undo
+   the v13 page-navigation upgrade). Namespace id
    from `wrangler.toml`; a token with Workers KV Storage: Edit.
 
    ```bash
@@ -913,7 +1050,7 @@ To put a backup back, in this order:
 
    ```bash
    npx wrangler kv key get "dashboard:default" --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-current.json
-   npx wrangler kv key get "dashboard:default:backup:v8" --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-backup.json
+   npx wrangler kv key get "dashboard:default:backup:v12" --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-backup.json
    node -e "const c=JSON.parse(require('fs').readFileSync('layout-backup.json','utf8')); if(!Array.isArray(c.pages)||!c.pages.length) throw new Error('not a layout'); console.log('ok: version', c.version, '-', c.pages.length, 'pages')"
    npx wrangler kv key put "dashboard:default" --path layout-backup.json --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote
    ```
@@ -949,7 +1086,7 @@ Routes:
 |---|---|
 | `GET /auth/google/login?next=/…` | Sends the browser to Google's account chooser |
 | `GET /auth/google/callback` | Google sends the browser back here; this validates the login and sets the session |
-| `POST /auth/logout` | Sign out: clears the session and shows the signed-out page (the header's **Sign out** button) |
+| `POST /auth/logout` | Sign out: clears the session and shows the signed-out page (the header's **Sign out** button, or **Log out** in the compact account menu) |
 | `GET /auth/me` | Returns the signed-in email as JSON |
 | `GET /auth/signed-out` | The signed-out page |
 
