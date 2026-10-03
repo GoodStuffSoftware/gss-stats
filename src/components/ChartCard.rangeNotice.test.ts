@@ -74,15 +74,15 @@ describe('ChartCard — range notice', () => {
     fetchStatsMock.mockResolvedValue(response({ notice }))
     const w = await mountCard()
     const note = w.get('[data-testid="range-notice"]')
-    expect(note.text()).toContain('Showing Jul 1 – Sep 30 only.')
-    expect(note.text()).toContain('Cloudflare analytics allows up to 93 days per query')
+    expect(note.text()).toContain('Jul 1 – Sep 30 shown')
+    expect(note.text()).toContain('Cloudflare limits: 93-day span, 184 days kept')
     expect(w.element.contains(note.element)).toBe(true)
   })
 
   it('shows the generic note when Cloudflare itself refused the range', async () => {
     fetchStatsMock.mockResolvedValue(response({ rows: [], totals: { pageviews: 0, visits: 0 }, notice: { ...notice, reason: 'upstream-rejected', served: null, limitDays: null, lookbackDays: null } }))
     const w = await mountCard()
-    expect(w.get('[data-testid="range-notice"]').text()).toContain('could not serve this range')
+    expect(w.get('[data-testid="range-notice"]').text()).toContain("couldn't serve this range")
   })
 
   it('shows no note when the range was not cut', async () => {
