@@ -22,8 +22,10 @@
 // conservatively; the geo/beacon dataset (functions/api/geo.ts, exact SQL GROUP BY, no row-
 // limit-vs-cardinality tradeoff) is the intended path for charts wanting more rings than this.
 
-import { buildCacheKeyUrl, cachedJson, ttlSecondsFor, type CacheLike } from '../_lib/edgeCache'
+import { buildCacheKeyUrl, cachedJson, SKIP_EDGE_CACHE_HEADER, ttlSecondsFor, type CacheLike } from '../_lib/edgeCache'
 import { WHEN_RE } from '../../src/lib/range'
+import { gateRange, isRangeLimitError, upstreamRejectedNotice } from '../_lib/rangeGate'
+import type { RangeNotice } from '../../src/lib/rangeNotice'
 
 interface Env {
   CF_ANALYTICS_TOKEN: string
@@ -109,6 +111,19 @@ function nextDay(ymd: string): string {
   const d = new Date(ymd + 'T00:00:00Z')
   d.setUTCDate(d.getUTCDate() + 1)
   return d.toISOString().slice(0, 10)
+}
+
+// A since/until value (a day or an ISO datetime, with or without the Z) as epoch ms.
+function parseWhen(v: string): number {
+  return Date.parse(isDateOnly(v) ? `${v}T00:00:00Z` : /Z$/.test(v) ? v : `${v}Z`)
+}
+
+// A 200 the shared edge cache must not keep: cachedJson stores every ok response for up to 24h,
+// and this one is only a stopgap for limits the constants got wrong.
+function rangeRejectedResponse(data: unknown): Response {
+  const res = json(data)
+  res.headers.set(SKIP_EDGE_CACHE_HEADER, '1')
+  return res
 }
 
 function todayUTC(): string {
@@ -212,8 +227,21 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
 
   async function computeStatsResponse(): Promise<Response> {
   // Day values expand to full-day bounds; full ISO datetimes are used as-is.
-  const datetimeGeq = isDateOnly(since) ? `${since}T00:00:00Z` : since
-  const datetimeLeq = isDateOnly(until) ? `${nextDay(until)}T00:00:00Z` : until
+  let datetimeGeq = isDateOnly(since) ? `${since}T00:00:00Z` : since
+  let datetimeLeq = isDateOnly(until) ? `${nextDay(until)}T00:00:00Z` : until
+
+  // Gate BEFORE querying: Cloudflare caps one RUM query's span and how far back it reaches
+  // (functions/_lib/rangeGate.ts). A range beyond that is cut to the most recent allowed window
+  // ending at the requested end, and the cut travels back as `notice` for the chart to show.
+  const gate = gateRange('cf-rum', parseWhen(datetimeGeq), parseWhen(datetimeLeq), Date.now())
+  const notice: RangeNotice | null = gate.notice
+  if (gate.unservable) {
+    return json({ rows: [], totals: { pageviews: 0, visits: 0 }, meta: { site, host, since, until, dimensions: dims, metric }, notice })
+  }
+  if (notice) {
+    datetimeGeq = new Date(gate.fromMs).toISOString()
+    datetimeLeq = new Date(gate.toMs).toISOString()
+  }
 
   const tags = site === 'all' ? Object.values(SITE_TAGS) : [SITE_TAGS[site as string]]
 
@@ -274,6 +302,14 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   }
 
   if (payload.errors) {
+    // The range limits here are constants (rangeGate.ts); if Cloudflare's differ, say so on the
+    // chart instead of showing its raw error. Not cached (see rangeRejectedResponse), so it
+    // clears as soon as the limits are corrected.
+    if (isRangeLimitError(payload.errors)) {
+      return rangeRejectedResponse(
+        { rows: [], totals: { pageviews: 0, visits: 0 }, meta: { site, host, since, until, dimensions: dims, metric }, notice: upstreamRejectedNotice('cf-rum', parseWhen(datetimeGeq), parseWhen(datetimeLeq)) },
+      )
+    }
     return json({ error: 'graphql error', detail: payload.errors }, 502)
   }
 
@@ -329,6 +365,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     rows,
     totals,
     meta: { site, host, since, until, dimensions: dims, metric },
+    ...(notice ? { notice } : {}),
   })
   }
  } catch (e) {
