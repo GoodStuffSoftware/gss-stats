@@ -715,8 +715,8 @@ on desktop and becomes a full-screen sheet on phones.
 | `campaigns` / `cost` | preset `campaign-cost` | 7 |
 | `campaigns` / `returns` | the number rows become a preset; the line chart stays a chart | 7 |
 | `campaigns` / `hourOfDay`, `flightDay`, `country`, `deviceMix` | stay chart bodies | none |
-| `ads-readings` / `log` | preset `ads-readings-log` ([ADR 0004](0004-retire-bespoke-widgets.md) slice 3) | 8 |
-| `popup` `rate` tiles | a one-item card ([ADR 0004](0004-retire-bespoke-widgets.md) slice 4) | 8 |
+| `ads-readings` / `log` | preset `ads-readings-log` ([ADR 0005](0005-retire-bespoke-widgets.md) slice 3) | 8 |
+| `popup` `rate` tiles | a one-item card ([ADR 0005](0005-retire-bespoke-widgets.md) slice 4) | 8 |
 
 ### Rules for saved layouts (KV `dashboard:default`)
 
@@ -808,7 +808,7 @@ users, and a review gate.
 | **5. Presets and migration** | `campaign-scorecard`, `bsk-kpis`; the v8 `normalizeConfig` step; `normCardRef`; `ChartCard` dispatch; the KV backup on version bump | Migration is idempotent, keeps legacy fields, doesn't re-run at v8, and survives a round trip through the v7 normalizer; parity golden test (scorecard and KPIs render the same numbers as the bespoke bodies, except the documented changes); `config.ts` backup test | 4 |
 | **6. Editor** | `CardEditor.vue` | Pure-function tests for the draft ↔ spec mapping; the editor never offers an incompatible display; save is blocked while `validateCard` reports errors | 5 |
 | **7. The rest of the panels** | `campaign-funnel`, `campaign-cost`, the returns rows, `release-before-after`; retire the matching bespoke branches and the `kpis`/`scorecard` sections of `/api/overview` | Parity golden tests per preset; `/api/overview`'s remaining response snapshot | 5 (6 is optional) |
-| **8. Later** | Sparklines, the readings-log preset and the rest of the bespoke bodies: planned in [ADR 0004](0004-retire-bespoke-widgets.md). Still later: the timeline as a series card; device mix over arrival rows; geo filter params | As each lands | 7, all-beacon-fields |
+| **8. Later** | Sparklines, the readings-log preset and the rest of the bespoke bodies: planned in [ADR 0005](0005-retire-bespoke-widgets.md). Still later: the timeline as a series card; device mix over arrival rows; geo filter params | As each lands | 7, all-beacon-fields |
 
 ### Risks
 
