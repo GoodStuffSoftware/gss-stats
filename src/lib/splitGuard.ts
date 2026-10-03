@@ -52,12 +52,14 @@ export const SPLIT_REFUSED_DIMS: ReadonlySet<string> = new Set([
 ])
 
 /** SQL LIKE patterns for the rows the rule protects: on-device return-curve beacons, game
- * completions (live and the legacy deferred path), counted game starts, tour exit steps, and
- * tutorial completions (`first-run` / `replay` is something the device remembers about itself,
- * like the return day buckets). Each anchors on a full path segment with its trailing slash, so
- * `/game`, `/game/first-move`, `/tour/start` and other page views never match. No pattern
- * contains `_`, the other LIKE wildcard. SQLite's LIKE ignores ASCII case, so an off-vocabulary
- * `/RETURN/...` row is refused too: that errs toward refusing, never toward splitting.
+ * completions (live and the legacy deferred path), counted game starts, tour skips and tour exit
+ * steps, and tutorial completions (`first-run` / `replay` is something the device remembers about
+ * itself, like the return day buckets). A pattern ending in `%` anchors on a full path segment
+ * with its trailing slash, so `/game`, `/game/first-move`, `/tour/start` and other page views
+ * never match; a pattern with no wildcard (`/tour/skip`) matches that one path exactly, because
+ * the beacon has no segment after it. No pattern contains `_`, the other LIKE wildcard. SQLite's
+ * LIKE ignores ASCII case, so an off-vocabulary `/RETURN/...` row is refused too: that errs
+ * toward refusing, never toward splitting.
  * They are compile-time constants, never request input, so refusedPathMatch inlines them as SQL
  * literals (through sqlLit) instead of binding them. */
 export const SPLIT_REFUSED_PATH_PATTERNS: readonly string[] = [
@@ -65,18 +67,24 @@ export const SPLIT_REFUSED_PATH_PATTERNS: readonly string[] = [
   '/game/complete/%',
   '/game/complete-deferred/%',
   '/game/tutorial-complete/%',
-  // Best Sudoku 1.97.0 count-only beacons (R-1b): a counted game start and the tour step a
-  // first run was left at. Only `/tour/exit-at/...` is refused; the other `/tour/...` rows stay
-  // splittable.
+  // Best Sudoku 1.97.0 count-only beacons (R-1b): a counted game start, the tour step a first
+  // run was left at, and the tour skip itself (the exact path `/tour/skip`; `/tour/skip/%` is the
+  // same family should it ever carry a suffix). The other `/tour/...` rows (`/tour/start`,
+  // `/tour/complete`) stay splittable: they are not in the rule.
   '/game/start/%',
   '/tour/exit-at/%',
+  '/tour/skip',
+  '/tour/skip/%',
 ]
 
 /** The JS reading of SPLIT_REFUSED_PATH_PATTERNS, matching SQLite LIKE exactly (ASCII case
- * folded, prefix match), so a JS-side classifier can never disagree with the SQL guard. */
+ * folded; a pattern ending in `%` is a prefix match, any other pattern is an exact match), so a
+ * JS-side classifier can never disagree with the SQL guard. */
 export function isSplitRefusedPath(path: string): boolean {
   const p = path.replace(/[A-Z]/g, (c) => c.toLowerCase())
-  return SPLIT_REFUSED_PATH_PATTERNS.some((pat) => p.startsWith(pat.slice(0, -1)))
+  return SPLIT_REFUSED_PATH_PATTERNS.some((pat) =>
+    pat.endsWith('%') ? p.startsWith(pat.slice(0, -1)) : p === pat,
+  )
 }
 
 /** Changes whenever the pattern list does — part of a guarded query's cache key, so a cached
@@ -86,8 +94,8 @@ export const SPLIT_GUARD_KEY = SPLIT_REFUSED_PATH_PATTERNS.join('|')
 /** The caption a chart shows when /api/geo answered with `meta.splitGuard: true`
  * (components/ChartCard.vue), so a smaller total never reads as missing data. */
 export const SPLIT_GUARD_CAPTION =
-  'Counts only: this split leaves out return, game start, completion, tutorial-completion and ' +
-  'tour-exit rows, which are never shown by hour, place or device.'
+  'Counts only: this split leaves out return, game start, completion, tutorial-completion, ' +
+  'tour-skip and tour-exit rows, which are never shown by hour, place or device.'
 
 /** True when grouping, mapping or drilling by any of `fields` would split refused rows. */
 export function splitRefused(opts: { points: boolean; fields: readonly string[] }): boolean {

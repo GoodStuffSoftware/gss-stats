@@ -13,6 +13,9 @@ All notable changes to **gss-stats** are documented here. The format follows
   skips by stage (the same rows as tour skip, split by where), game starts by difficulty and
   tutorial completions (first run vs replay) as plain counts, "not yet tracked" until the
   first v1.97.0 row.
+- **Tour skips are counts only too.** Hour, place and device charts (and the map) now leave out
+  tour-skip rows, as they already did for game starts and tour exits, while skips still count per
+  day, per web or app site and in the morning read.
 
 ## [0.14.3] — 2026-10-03
 

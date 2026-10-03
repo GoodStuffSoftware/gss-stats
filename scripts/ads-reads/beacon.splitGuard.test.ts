@@ -2,14 +2,14 @@
 // group by UTC hour (siteEventsQuery) or by country (taggedCountryQuery) leave out every row the
 // rule protects, as SQL literals that cost no binds, while every other row counts as before.
 import { describe, expect, it } from 'vitest'
-import { siteEventsQuery, taggedCountryQuery, WEB_SITE } from './beacon'
+import { siteEventsQuery, siteFirstSessionQuery, taggedCountryQuery, WEB_SITE } from './beacon'
 import { DatabaseSync } from 'node:sqlite'
 import { campaignById } from '../../src/lib/campaigns'
-import { SPLIT_REFUSED_PATH_PATTERNS } from '../../src/lib/splitGuard'
+import { SPLIT_REFUSED_PATH_PATTERNS, refusedPathMatch } from '../../src/lib/splitGuard'
 
 const ANDROID = campaignById('24215315197')!
 const at = (iso: string) => Date.parse(iso)
-const REFUSED = ['/return/sudoku_tired_of_ads/d0', '/game/complete/normal/easy', '/game/complete-deferred/normal/easy', '/game/tutorial-complete/first-run', '/game/start/easy', '/tour/exit-at/3']
+const REFUSED = ['/return/sudoku_tired_of_ads/d0', '/game/complete/normal/easy', '/game/complete-deferred/normal/easy', '/game/tutorial-complete/first-run', '/game/start/easy', '/tour/skip', '/tour/exit-at/3']
 
 function guarded(q: { sql: string; binds: unknown[] }) {
   // The exclusion names each pattern as a literal (lib/splitGuard.ts refusedPathMatch); none is
@@ -46,6 +46,33 @@ describe('routine beacon reads leave the split-refused rows out', () => {
     const rows = run(db, q)
     expect(rows.map((r) => r.path).sort()).toEqual(['/install/prompt/android', '/signin-prompt/placement'])
     expect(rows.reduce((a, r) => a + Number(r.c), 0)).toBe(5)
+  })
+
+  it('siteFirstSessionQuery keeps tour skips as a per-path total (counts only: no hour, place or device column)', () => {
+    const db = openHitsDb()
+    const ts = at('2026-10-01T15:00:00Z')
+    insertHits(db, [
+      { ts, site: WEB_SITE, path: '/tour/skip', country: 'US', n: 3 },
+      { ts: ts + 1, site: WEB_SITE, path: '/tour/skip', country: 'CA', n: 2 },
+      { ts, site: WEB_SITE, path: '/tour/start', country: 'US', n: 4 },
+      { ts, site: 'bestsudoku-app', path: '/tour/skip', country: 'US', n: 9 },
+    ])
+    const q = siteFirstSessionQuery(at('2026-10-01T00:00:00Z'), at('2026-10-02T00:00:00Z'))
+    // A total per path over the window: the skips from every place and hour are summed, and the
+    // only selected columns are the path and the count.
+    expect(q.sql).toMatch(/^SELECT path AS p, COUNT\(\*\) AS c FROM hits WHERE /)
+    expect(q.sql).toMatch(/GROUP BY p$/)
+    expect(Object.fromEntries(run(db, q).map((r) => [r.p, Number(r.c)]))).toEqual({ '/tour/skip': 5, '/tour/start': 4 })
+  })
+
+  it('every guarded read binds well under the D1 100-parameter cap (the patterns are literals)', () => {
+    // Each read here carries the guard as literals, so the guard adds no binds at all.
+    for (const q of [siteEventsQuery(0), taggedCountryQuery(ANDROID), siteFirstSessionQuery(0, 1)]) {
+      expect(q.binds.length).toBeLessThan(100)
+      expect(q.sql.match(/\?/g)?.length ?? 0).toBe(q.binds.length)
+    }
+    const m = refusedPathMatch()
+    expect(m.binds).toEqual([])
   })
 
   it('taggedCountryQuery (by country): campaign rows by country, refused rows in no country', () => {

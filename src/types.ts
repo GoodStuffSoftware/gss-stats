@@ -277,7 +277,7 @@ export interface StatsResponse {
     activationDate?: string | null
     activationPending?: boolean
     // /api/geo only: true when the counts-only split guard left return, game start, completion,
-    // tutorial-completion and tour-exit rows out of this answer (src/lib/splitGuard.ts).
+    // tutorial-completion, tour-skip and tour-exit rows out of this answer (src/lib/splitGuard.ts).
     splitGuard?: boolean
   }
   // Pop-up dataset only (widget.type === 'rate'): the single computed rate, or null for

@@ -412,7 +412,7 @@ describe('morning-read: quiet days, the hard cap and release health', () => {
     expect(text).toMatch(/device: DESKTOP 3 impr, 0 clicks, \$0\.00 — ANOMALY: computers\/TV should read zero.*propose to Mike/)
     expect(text).toMatch(/targeting: Other Sudoku placements \[ENABLED\] 15 placement\(s\) \(build spec: 16\).*ANOMALY: placement count does not match the build spec, propose to Mike/)
     expect(text).toMatch(/standing verdicts \(never re-derived, never applied\): Maximize Conversions REJECT; conversion tracking REJECT PERMANENTLY; Customer Match REJECT; Optimized targeting REJECT/)
-    expect(text).toMatch(/beacon countries \(campaign-attributed rows, aggregate counts; return, completion, game-start and tour-exit rows left out\): US 5/)
+    expect(text).toMatch(/beacon countries \(campaign-attributed rows, aggregate counts; return, completion, game-start, tour-skip and tour-exit rows left out\): US 5/)
     expect(text).toMatch(/account cross-check \(2026-09-29\): Firestore new accounts 2 vs beacon \/auth\/success new/)
     expect(r.notify).toEqual((await runMorningRead(deps, opts)).notify) // an anomaly report line never changes notify.push/busCopy/reason/text
   })

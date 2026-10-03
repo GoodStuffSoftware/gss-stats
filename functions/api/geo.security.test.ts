@@ -140,7 +140,8 @@ describe('onRequestPost — dimension whitelist rejection (real handler, real SQ
     )
     const { sql, binds } = calls[0]
     expect(sql).not.toContain('DROP TABLE')
-    expect(sql).not.toContain('ip')
+    // The injected `ip` column, as a whole word: the split guard's `/tour/skip` literal contains "ip".
+    expect(sql).not.toMatch(/\bip\b/)
     expect(binds).toContain('mobile')
     expect(binds).not.toContain('1.2.3.4')
     expect(binds).not.toContain('x')
