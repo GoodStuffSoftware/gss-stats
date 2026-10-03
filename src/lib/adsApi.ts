@@ -14,7 +14,7 @@
 // login-customer-id header is never sent, and GOOGLE_ADS_LOGIN_CUSTOMER_ID is never read
 // (buildHeaders asserts it).
 
-import { ADS_API_VERSION, ADS_CUSTOMER_ID, APPROVED_PLACEMENTS_BY_CAMPAIGN, assertKnownCampaign, isApprovedPlacement, readPlanFor, round2, microsToDollars, type SpendDay } from './adsRules'
+import { ADS_API_VERSION, ADS_CUSTOMER_ID, approvedPlacementsFor, assertKnownCampaign, isApprovedPlacement, readPlanFor, round2, microsToDollars, type SpendDay } from './adsRules'
 import type { PlacementDayRow } from './adsStore'
 import { redact, registerSecret } from './adsRedact'
 
@@ -206,13 +206,13 @@ export async function fetchRangeTotal(client: AdsClient, campaignId: string, sin
 }
 
 /** Placement-level cost PER ET DAY (group_placement_view), each row tagged approved/not
- * against the campaign's approved list (lib/adsRules.ts APPROVED_PLACEMENTS_BY_CAMPAIGN;
+ * against the campaign's approved list (lib/adsRules.ts approvedPlacementsFor;
  * null when none is on record). Stored in ads_placement_daily and summed by splitPlacements
  * for kill rule 1. A READ: closed campaigns allowed for the backfill. */
 export async function fetchPlacementDaily(client: AdsClient, campaignId: string, since: string, until: string): Promise<PlacementDayRow[]> {
   assertKnownCampaign(campaignId)
   checkRange(since, until)
-  const approvedList = APPROVED_PLACEMENTS_BY_CAMPAIGN[campaignId] ?? null
+  const approvedList = approvedPlacementsFor(campaignId)
   const rows = await client.search(
     `SELECT segments.date, group_placement_view.placement, group_placement_view.display_name, group_placement_view.target_url, group_placement_view.placement_type, metrics.cost_micros, metrics.impressions, metrics.clicks FROM group_placement_view WHERE campaign.id = ${campaignId} AND segments.date BETWEEN '${since}' AND '${until}'`,
   )

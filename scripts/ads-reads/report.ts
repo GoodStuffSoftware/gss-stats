@@ -4,7 +4,12 @@
 // sign-ups and promo claims appear only as window COUNTS.
 
 import {
+  ABANDON_BUCKETS,
+  FIRST_SESSION_STEP_LABELS,
+  FIRST_SESSION_STEPS,
+  WELCOME_EVENTS,
   formatGated,
+  type FirstSessionFigure,
   isPlacementBorderline,
   PLACEMENT_BORDERLINE_NOTE,
   promoArmAbsentNote,
@@ -12,6 +17,10 @@ import {
   UPSELL_SIGNEDOUT_EXPECTED_NOTE,
   type OutcomePopup,
   type RuleResult,
+  reportLabelFor,
+  channelOf,
+  SEARCH_NA,
+  type CampaignChannel,
 } from '../../src/lib/adsRules'
 import { POPUP_OUTCOME_TYPES, gateRate, installOutcomeGapNote } from '../../src/lib/popupEvents'
 import { RAW_INSTALL_SIGNALS_LABEL } from '../../src/lib/campaigns'
@@ -95,7 +104,8 @@ export function fullReadLines(r: FullRead, title: string, opts: { postflight?: b
   out.push('Kill rules (propose only; nothing is changed):')
   for (const rule of r.kill.rules) out.push(ruleLine(rule))
   out.push(`Proposal: ${r.kill.proposal ?? `none: campaign ${r.kill.servingState === 'ended' ? 'ended' : r.kill.servingState === 'paused' ? 'paused' : 'not serving'}, nothing to pause`}`)
-  if (r.placements) {
+  if (r.kill.rules.some((x) => x.id === 'placement-leak' && x.status === 'n/a')) out.push(`Placements: ${SEARCH_NA}`)
+  else if (r.placements) {
     out.push(
       `Placements: ${money(r.placements.approvedCost)} on approved, ${money(r.placements.itemizedCost)} itemized, of ${money(r.placements.campaignCost)}; outside share ${pct(r.placements.outsideShare)}${isPlacementBorderline(r.placements.outsideShare) ? ` (${PLACEMENT_BORDERLINE_NOTE})` : ''}`,
     )
@@ -105,7 +115,7 @@ export function fullReadLines(r: FullRead, title: string, opts: { postflight?: b
   if (t) {
     const s = t.summary
     out.push(
-      `Tagged funnel (campaign tag only, exclusions applied): ${n(s.taggedArrivals)} arrivals (floor), ${n(s.taggedHits)} hits; ${GAME_VIEWS} ${n(s.funnel.played)}; asks ${n(s.asks.total)} (placement ${n(s.asks.byPath['/signin-prompt/placement'])}, streak ${n(s.asks.byPath['/signin-prompt/streak'])}, promo ${n(s.asks.byPath['/promo-first50/shown'])}${s.asks.otherShownReasons ? `, other sign-in reasons ${n(s.asks.otherShownReasons)}` : ''}); accepts ${n(s.accepts.total)}; auth redirect ${n(s.authRedirect)}, auth success ${n(s.authSuccess)}`,
+      `Tagged funnel (campaign tag only, exclusions applied): ${n(s.taggedArrivals)} arrivals (floor), ${n(s.taggedHits)} hits; ${GAME_VIEWS} ${n(s.funnel.played)}; asks ${n(s.asks.total)} (placement ${n(s.asks.byPath['/signin-prompt/placement'])}, streak ${n(s.asks.byPath['/signin-prompt/streak'])}, tutorial ${n(s.asks.byPath['/signin-prompt/tutorial'])}, promo ${n(s.asks.byPath['/promo-first50/shown'])}${s.asks.otherShownReasons ? `, other sign-in reasons ${n(s.asks.otherShownReasons)}` : ''}); accepts ${n(s.accepts.total)}; auth redirect ${n(s.authRedirect)}, auth success ${n(s.authSuccess)}`,
     )
     // Not a rate (review finding, 2026-09-26): "asks" counts event rows within a tagged
     // session, "arrivals" counts first-ever tagged beacons — dividing one by the other mixes
@@ -178,7 +188,7 @@ function header(r: MorningResult | PostflightResult, kind: string): string[] {
   const et = etMinuteLabel(Date.parse(r.readAt))
   const s = r.status
   return [
-    `BSK retest ${kind}, ${et}${r.dryRun ? ' [DRY RUN: nothing written]' : ''}`,
+    `${reportLabelFor(r.campaign.id)} ${kind}, ${et}${r.dryRun ? ' [DRY RUN: nothing written]' : ''}`,
     `Campaign ${r.campaign.id} "${r.campaign.label}" (${r.campaign.ucValues.join(', ')}): ${s ? `${s.status}/${s.servingStatus}${s.dailyBudget != null ? `, budget ${money(s.dailyBudget)}/day` : ''}` : `status NOT READ (${r.statusError})`}`,
   ]
 }
@@ -197,6 +207,7 @@ export function formatMorningReport(r: MorningResult): string {
         ? `Tagged so far: ${n(t.cumulative!.taggedArrivals)} arrivals (floor), ${n(t.cumulative!.taggedHits)} hits, ${n(t.cumulative!.asks)} asks, ${n(t.cumulative!.accepts)} accepts, ${n(t.cumulative!.authSuccess)} auth successes; yesterday ${n(t.yesterday!.taggedArrivals)} arrivals, ${n(t.yesterday!.asks)} asks`
         : `Tagged: NOT READ (${t.error})`,
     )
+    out.push(...firstSessionLines(r.firstSession))
     const th = r.thresholds
     out.push(
       th.crossedNow.length
@@ -215,7 +226,7 @@ export function formatMorningReport(r: MorningResult): string {
     for (const x of h.results ?? []) out.push(`  [${x.status}] ${x.parentLabel} ${n(x.parent)} → ${x.childLabel} ${n(x.children)}${x.status === 'known-gap' ? ' (known gap, never alerts)' : ''}`)
   }
   if (r.play) out.push(r.play.line)
-  const diag = diagnosticsLines(r.diagnostics)
+  const diag = diagnosticsLines(r.diagnostics, channelOf(r.campaign.id))
   if (diag.length) out.push('', ...diag)
   const playLines = playReportsLines(r.playReports)
   if (playLines.length) out.push('', ...playLines)
@@ -227,6 +238,44 @@ export function formatMorningReport(r: MorningResult): string {
   return out.join('\n')
 }
 
+export const NOT_YET_TRACKED = 'not yet tracked'
+
+/** "<tagged> · site-wide <site>", or "not yet tracked" when its beacon family has no rows at all (the
+ * release sending it is not live yet — never read as a zero step). */
+export function firstSessionFigureText(f: FirstSessionFigure): string {
+  if (f.tracked === false) return `${NOT_YET_TRACKED} (no rows yet)`
+  return `${f.tagged == null ? 'not read' : n(f.tagged)} · site-wide ${f.site == null ? 'not read' : n(f.site)}`
+}
+
+/** The first-session funnel block (informational only: never a kill rule, never a push). */
+export function firstSessionLines(fs: MorningResult['firstSession']): string[] {
+  if (!fs) return ['First-session funnel: not read (tagged beacon rows unavailable)']
+  const f = fs.funnel
+  const out = [
+    `First-session funnel since attribution start (informational only; never a kill rule). Tagged rows, site-wide web rows alongside; row counts with no visitor join, so "vs" figures are row ratios, not per-visitor conversion:${fs.siteError ? ` [site-wide not read: ${fs.siteError}]` : ''}${fs.arrivalsError ? ` [tagged arrivals not read: ${fs.arrivalsError}]` : ''}`,
+  ]
+  for (const k of FIRST_SESSION_STEPS) {
+    const st = f.steps[k]
+    const vs = st.vsParent ? `; vs ${FIRST_SESSION_STEP_LABELS[st.vsParent.parent]} ${formatGated(st.vsParent)}` : ''
+    out.push(`  ${FIRST_SESSION_STEP_LABELS[k]}: ${firstSessionFigureText(st)}${st.tracked === false ? '' : vs}`)
+  }
+  const allUntracked = (xs: FirstSessionFigure[]) => xs.every((x) => x.tracked === false)
+  const ab = ABANDON_BUCKETS.map((b) => f.abandon[b])
+  out.push(
+    allUntracked(ab)
+      ? `  abandon by % filled: ${NOT_YET_TRACKED} (no rows yet)`
+      : `  abandon by % filled: ${ABANDON_BUCKETS.map((b) => `${b}% ${firstSessionFigureText(f.abandon[b])}`).join('; ')}`,
+  )
+  out.push(`  sign-in asks shown: ${firstSessionFigureText(f.asks)}; of which tutorial ${firstSessionFigureText(f.asksTutorial)}`)
+  const wl = WELCOME_EVENTS.map((e) => f.welcome[e])
+  out.push(
+    allUntracked(wl)
+      ? `  welcome card (signed in): ${NOT_YET_TRACKED} (no rows yet)`
+      : `  welcome card (signed in): ${WELCOME_EVENTS.map((e) => `${e} ${firstSessionFigureText(f.welcome[e])}`).join('; ')}`,
+  )
+  return out
+}
+
 /** Standing Recommendations verdicts (R3), carried from the retired routines, never
  * re-derived and never acted on here (this file only formats text). */
 const RECOMMENDATION_STANDING_VERDICTS = 'Maximize Conversions REJECT; conversion tracking REJECT PERMANENTLY; Customer Match REJECT; Optimized targeting REJECT'
@@ -235,7 +284,9 @@ const RECOMMENDATION_STANDING_VERDICTS = 'Maximize Conversions REJECT; conversio
  * means "propose to Mike" in the sense of flagging it in the report text — it is never wired
  * to `notify.push`, never a kill rule, never an automatic action (contract sections 12-13 are
  * unchanged by this file). */
-function diagnosticsLines(d: DiagnosticsSection): string[] {
+/** Devices a desktop-only search arm should not spend on (diagnosticsLines flags them). */
+const SEARCH_OFF_DESKTOP: ReadonlySet<string> = new Set(['MOBILE', 'TABLET', 'CONNECTED_TV', 'OTHER'])
+export function diagnosticsLines(d: DiagnosticsSection, channel: CampaignChannel = 'display'): string[] {
   const empty = !d.hourly && !d.geo && !d.devices && !d.targeting && !d.recommendations && !d.countryCounts && !d.accountCrossCheck && !d.errors.length
   if (empty) return []
   const out = [`Diagnostics for ${d.spendThroughEt ?? 'the closed day'} (informational only; never a kill rule or an automatic action):`]
@@ -249,12 +300,19 @@ function diagnosticsLines(d: DiagnosticsSection): string[] {
   } else out.push('  geo: not read')
   if (d.devices) {
     for (const dv of d.devices) {
-      const shouldBeZero = dv.device === 'DESKTOP' || dv.device === 'CONNECTED_TV'
+      // The mobile-app placement check is Display-only; a search campaign's device mix is
+      // printed as is.
+      const shouldBeZero = channel === 'display' && (dv.device === 'DESKTOP' || dv.device === 'CONNECTED_TV')
       const nonZero = dv.impressions > 0 || dv.clicks > 0
-      out.push(`  device: ${dv.device} ${n(dv.impressions)} impr, ${n(dv.clicks)} clicks, ${money(dv.cost)}${shouldBeZero && nonZero ? ' — ANOMALY: computers/TV should read zero on a mobile-app placement campaign, propose to Mike' : ''}`)
+      // A search arm is desktop-only: spend on any other device on the closed day is flagged.
+      // Printed only — never a kill rule, never in `tripped` or the push text. Ads-side
+      // segments.device only; no beacon row is tied to a device.
+      const offDesktop = channel === 'search' && SEARCH_OFF_DESKTOP.has(dv.device) && dv.cost > 0
+      out.push(`  device: ${dv.device} ${n(dv.impressions)} impr, ${n(dv.clicks)} clicks, ${money(dv.cost)}${shouldBeZero && nonZero ? ' — ANOMALY: computers/TV should read zero on a mobile-app placement campaign, propose to Mike' : ''}${offDesktop ? ` — ANOMALY: yesterday's spend on ${dv.device}: ${money(dv.cost)}; arm is desktop-only (closed day only, not the flight so far), propose to Mike` : ''}`)
     }
   } else out.push('  devices: not read')
-  if (d.targeting) {
+  if (channel === 'search') out.push(`  targeting (placement count, optimized targeting): ${SEARCH_NA}`)
+  else if (d.targeting) {
     for (const t of d.targeting) {
       const placementMismatch = t.expectedPlacements != null && t.placements !== t.expectedPlacements
       const optimizedOn = t.audienceBidOnly === false

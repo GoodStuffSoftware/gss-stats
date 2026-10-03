@@ -96,7 +96,7 @@ session's scratchpad directory (`<scratchpad>` below; `<ET date>` is today's ET 
 stderr to a sibling `.err`:
 
 ```bash
-npm run -s ads:morning-read -- --cf-token-file C:/Users/msant/dev/cf-token.txt --firebase-sa C:/Users/msant/.firebase/service-accounts/best-sudoku-prod.json --play-sa C:/Users/msant/.google-play/service-accounts/best-sudoku-prod.json > <scratchpad>/morning-read-<ET date>.out 2> <scratchpad>/morning-read-<ET date>.err
+npm run -s ads:morning-read -- --campaign 24279250691 --cf-token-file C:/Users/msant/dev/cf-token.txt --firebase-sa C:/Users/msant/.firebase/service-accounts/best-sudoku-prod.json --play-sa C:/Users/msant/.google-play/service-accounts/best-sudoku-prod.json > <scratchpad>/morning-read-<ET date>.out 2> <scratchpad>/morning-read-<ET date>.err
 ```
 
 Read the `.out` file for Steps 2-8: it is the full output, and Step 8 builds the report page
@@ -161,6 +161,17 @@ The `.out` file is a short human report, then a line `----- JSON -----`, then JS
 JSON's `notify`, `errors`, `thresholds` and `thresholdRead` fields; never recompute a rule.
 The report's "Diagnostics for ..." block (R2/R3/R5/R8) is informational only, see Step 4; its
 "Play Console bulk reports" block (R4) is informational only too, see Step 4a.
+
+Kill rule 3 (`funnel-reach`, zero sign-in asks from tagged arrivals) has three outcomes:
+`clear`, `trip`, and `watch`. It reads `watch` when tagged asks are 0 but sign-in asks were
+still shown site-wide in the window and `/signin-prompt/tutorial` has no site-wide rows yet:
+the campaign tag lasts only 30 minutes, so later-session prompts go untagged. A `watch` is
+not a trip, proposes no pause and never pushes on its own; the threshold push names it
+(`WATCH (funnel-reach)`). Its detail line always states `Site-wide asks shown: N` (or
+`unavailable`, which trips) and the mode that applied; relay both exactly as printed. Once
+the tutorial ask has any site-wide row, the rule reads tagged asks only. The report's
+first-session funnel block is informational only, never a kill rule or a push. Full rule:
+README, "Kill rule 3 (funnel-reach)".
 
 ## Step 3: push (the CLI decides; you relay)
 
