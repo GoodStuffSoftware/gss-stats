@@ -6,8 +6,9 @@ name: Deploy
 #
 # One-time setup: add a repository secret CLOUDFLARE_API_TOKEN (Settings → Secrets and
 # variables → Actions). Mint it at Cloudflare → My Profile → API Tokens with the
-# "Cloudflare Pages: Edit" permission on this account, plus "Workers Scripts: Edit" for the
-# sync Worker job below. The runtime analytics secret
+# "Cloudflare Pages: Edit" permission on this account. The sync Worker job below uses the
+# optional secret CLOUDFLARE_WORKERS_API_TOKEN (Workers Scripts: Edit, plus Secrets Store if its
+# bindings need it) and falls back to CLOUDFLARE_API_TOKEN. The runtime analytics secret
 # (CF_ANALYTICS_TOKEN) is a Pages project secret and is NOT needed here — deploys keep
 # the project's existing secrets.
 on:
@@ -19,7 +20,8 @@ on:
 #   deploy         - the Pages site (every push to main).
 #   deploy-worker  - the gss-stats-sync Worker (workers/sync/), only when its inputs changed
 #                    (see "Detect Worker changes" below) or on a manual run. Its Cloudflare token
-#                    needs "Workers Scripts: Edit" as well (see the README's Deploy section).
+#                    uses CLOUDFLARE_WORKERS_API_TOKEN, or CLOUDFLARE_API_TOKEN if that is unset
+#                    (scopes: see the README's Deploy section).
 # Each job has its own concurrency group: no workflow-level group, because that would let a
 # newer push cancel the Worker job too.
 jobs:
@@ -101,8 +103,14 @@ jobs:
       # workers/sync/wrangler.toml. Reads the token from CLOUDFLARE_API_TOKEN. The D1 and Secrets
       # Store bindings are declared in wrangler.toml; no secret value is needed here.
       - name: Deploy the sync Worker
+        id: deploy
         if: steps.changes.outputs.deploy == 'true'
         run: npm run ads:worker-deploy
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # A Worker-capable token can be added without touching the Pages secret.
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: a32bba62c77df5e8f6bd33d04478ec34
+      - name: Explain a failed Worker deploy
+        if: failure() && steps.deploy.conclusion == 'failure'
+        run: |
+          echo "::error::Worker deploy failed. If the error above is an authentication or permission one (401/403, 'Authentication error', 'not authorized'), the token lacks Workers Scripts: Edit (or Secrets Store access for the secrets_store bindings). This job authenticates with the repo secret CLOUDFLARE_WORKERS_API_TOKEN when set, otherwise CLOUDFLARE_API_TOKEN (the Pages token). Add or fix either secret (README: Deploy)."
