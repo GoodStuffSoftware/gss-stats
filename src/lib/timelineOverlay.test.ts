@@ -62,7 +62,7 @@ describe('overlay items', () => {
       { id: '2', label: 'active', flightStart: '2026-09-26', flightEnd: '2026-10-02', status: 'active' },
       { id: '3', label: 'pending', flightStart: null, flightEnd: '2026-10-10', status: 'upcoming' },
     ] as unknown as CampaignFlight[]
-    const items = flightItems(cs)
+    const items = flightItems(cs, '2026-09-30') // pinned: the active fixture flight ends 2026-10-02
     expect(items.map((i) => i.label)).toEqual(['closed', 'active'])
     expect(items[0]).toMatchObject({ endDate: '2026-09-09' })
     expect(items[1]).toMatchObject({ openEnded: true })

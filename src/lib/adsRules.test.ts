@@ -27,7 +27,6 @@ import {
   readPlanFor,
   resolveCampaignSpend,
   RETEST_APPROVED_PLACEMENTS,
-  RETEST_CAMPAIGN_ID,
   signUpsAtMost,
   signUpsAtMostLabel,
   placementShareOver,
@@ -47,14 +46,21 @@ import {
   spendTotals,
   summarizeReturns,
   summarizeSiteEvents,
+  siteSigninShown,
+  siteTutorialAsksShown,
   summarizeTaggedRows,
   type KillRuleInput,
   type ReadingRecord,
   type StoredSpend,
+  buildFirstSessionFunnel,
+  firstSessionBucket,
+  tallySiteFirstSession,
+  tallyTaggedFirstSession,
 } from './adsRules'
 import { campaignById } from './campaigns'
 import { MIN_COHORT, POPUP_PAGE_NOTE } from './popupEvents'
 
+const RETEST_CAMPAIGN_ID = '24279250691'
 const plan = ADS_READ_PLANS[RETEST_CAMPAIGN_ID]
 const H = (iso: string) => Date.parse(iso)
 
@@ -257,6 +263,108 @@ describe('evaluateKillRules (spec section 12)', () => {
     expect(rule(res, 'funnel-reach').status).toBe('trip')
     expect(rule(res, 'funnel-reach').detail).toMatch(/landing URL/)
   })
+  it('rule 3: zero tagged arrivals trips even with asks showing site-wide (a broken landing URL or tag is never WATCH)', () => {
+    const res = evaluateKillRules(killInput({ beacon: { asks: 0, taggedArrivals: 0, siteSigninShown: 7 } }))
+    const r = rule(res, 'funnel-reach')
+    expect(r.status).toBe('trip')
+    expect(r.detail).toMatch(/landing URL/)
+    expect(r.detail).not.toMatch(/expires 30 min/)
+    expect(res.tripped).toContain('funnel-reach')
+  })
+  it('rule 3: once the tutorial ask has rows site-wide, rule 3 reads tagged asks only (no WATCH)', () => {
+    const res = evaluateKillRules(killInput({ beacon: { asks: 0, taggedArrivals: 40, siteSigninShown: 7, siteTutorialAsks: 3 } }))
+    const r = rule(res, 'funnel-reach')
+    expect(r.status).toBe('trip')
+    expect(r.detail).toMatch(/Mode: tagged asks only \(\/signin-prompt\/tutorial shown 3 times site-wide/)
+    expect(r.detail).not.toMatch(/expires 30 min/)
+    expect(res.tripped).toContain('funnel-reach')
+    const ok = rule(evaluateKillRules(killInput({ beacon: { asks: 2, taggedArrivals: 40, siteSigninShown: 7, siteTutorialAsks: 3 } })), 'funnel-reach')
+    expect(ok.status).toBe('clear')
+    expect(ok.detail).toMatch(/Mode: tagged asks only/)
+  })
+  it('rule 3: tagged asks > 0 clears and reports the site-wide shown count', () => {
+    const r = rule(evaluateKillRules(killInput({ beacon: { asks: 3, taggedArrivals: 40, siteSigninShown: 12 } })), 'funnel-reach')
+    expect(r.status).toBe('clear')
+    expect(r.detail).toMatch(/Site-wide asks shown: 12\./)
+  })
+  it('rule 3: while the tutorial ask has no rows site-wide, zero tagged asks with asks shown site-wide is watch, not trip', () => {
+    for (const siteTutorialAsks of [0, undefined]) {
+      const res = evaluateKillRules(killInput({ beacon: { asks: 0, taggedArrivals: 40, siteSigninShown: 7, siteTutorialAsks } }))
+      const r = rule(res, 'funnel-reach')
+      expect(r.status).toBe('watch')
+      expect(r.detail).toMatch(/Site-wide asks shown: 7\./)
+      expect(r.detail).toMatch(/expires 30 min/)
+      expect(r.detail).toMatch(/Mode: site-wide fallback \(\/signin-prompt\/tutorial (has no rows|not read) site-wide/)
+      expect(res.tripped).not.toContain('funnel-reach')
+    }
+  })
+  it('rule 3: zero tagged asks and zero site-wide prompts still trips', () => {
+    const r = rule(evaluateKillRules(killInput({ beacon: { asks: 0, taggedArrivals: 40, siteSigninShown: 0 } })), 'funnel-reach')
+    expect(r.status).toBe('trip')
+    expect(r.detail).toMatch(/Site-wide asks shown: 0\./)
+    expect(r.detail).not.toMatch(/expires 30 min/)
+  })
+  // The 2026-09-30 Day-4 read Mike retracted as a measurement gap: 0 tagged asks from 161 tagged
+  // arrivals; site-wide since the 2026-09-26 flight start /signin-prompt/streak 5,
+  // /signin-prompt/dismiss 3, /signin-prompt/placement 0, /promo-first50/shown 0, no tutorial ask.
+  const day4 = (streak: number) => {
+    const from = H('2026-09-26T00:00:00Z')
+    const to = H('2026-09-30T10:00:00Z')
+    const rows = [
+      { hourStartMs: H('2026-09-27T15:00:00Z'), path: '/signin-prompt/streak', count: streak },
+      { hourStartMs: H('2026-09-28T18:00:00Z'), path: '/signin-prompt/dismiss', count: 3 },
+      { hourStartMs: H('2026-09-28T18:00:00Z'), path: '/signin-prompt/placement', count: 0 },
+      { hourStartMs: H('2026-09-29T12:00:00Z'), path: '/promo-first50/shown', count: 0 },
+    ]
+    const site = siteSigninShown(rows, from, to)
+    const tutorial = siteTutorialAsksShown(rows, from, to)
+    return { site, tutorial, res: evaluateKillRules(killInput({ beacon: { asks: 0, taggedArrivals: 161, siteSigninShown: site, siteTutorialAsks: tutorial } })) }
+  }
+  it('rule 3, 2026-09-30 numbers: 0 asks / 161 arrivals with streak 5 + dismiss 3 site-wide reads WATCH, no pause proposal', () => {
+    const { site, tutorial, res } = day4(5)
+    expect(site).toBe(5) // shown asks only: a dismiss is not a shown prompt
+    expect(tutorial).toBe(0)
+    const r = rule(res, 'funnel-reach')
+    expect(r.status).toBe('watch')
+    expect(r.detail).toMatch(/^0 asks from 161 tagged arrivals\. Site-wide asks shown: 5\./)
+    expect(r.detail).toMatch(/Mode: site-wide fallback \(\/signin-prompt\/tutorial has no rows site-wide/)
+    expect(res.tripped).toEqual([])
+    expect(res.proposal).toBe('CONTINUE')
+  })
+  it('rule 3, 2026-09-30 zero-site-wide twin: 0 asks / 161 arrivals with no prompt shown site-wide trips and proposes a pause', () => {
+    const { site, res } = day4(0)
+    expect(site).toBe(0)
+    const r = rule(res, 'funnel-reach')
+    expect(r.status).toBe('trip')
+    expect(r.detail).toMatch(/Site-wide asks shown: 0\./)
+    expect(res.tripped).toEqual(['funnel-reach'])
+    expect(res.proposal).toBe('PROPOSE PAUSE')
+  })
+  it('rule 3: an unavailable site-wide count never reads WATCH (it trips and says the count is unavailable)', () => {
+    for (const siteSigninShown of [null, undefined]) {
+      const res = evaluateKillRules(killInput({ beacon: { asks: 0, taggedArrivals: 161, siteSigninShown, siteTutorialAsks: null } }))
+      const r = rule(res, 'funnel-reach')
+      expect(r.status).toBe('trip')
+      expect(r.detail).toMatch(/Site-wide asks shown: unavailable\./)
+      expect(res.tripped).toContain('funnel-reach')
+    }
+  })
+  it('siteSigninShown counts the ASK_PATHS shown set (promo included) inside the window; siteTutorialAsksShown only the tutorial ask', () => {
+    const t0 = H('2026-09-20T10:30:00Z')
+    const rows = [
+      { hourStartMs: H('2026-09-20T10:00:00Z'), path: '/signin-prompt/streak', count: 2 },
+      { hourStartMs: H('2026-09-20T12:00:00Z'), path: '/signin-prompt/placement', count: 3 },
+      { hourStartMs: H('2026-09-20T12:00:00Z'), path: '/signin-prompt/dismiss', count: 5 },
+      { hourStartMs: H('2026-09-20T12:00:00Z'), path: '/signin-prompt/accept', count: 1 },
+      { hourStartMs: H('2026-09-20T12:00:00Z'), path: '/promo-first50/shown', count: 4 },
+      { hourStartMs: H('2026-09-20T09:00:00Z'), path: '/signin-prompt/streak', count: 9 },
+      { hourStartMs: H('2026-09-20T14:00:00Z'), path: '/signin-prompt/streak', count: 9 },
+      { hourStartMs: H('2026-09-20T13:00:00Z'), path: '/signin-prompt/tutorial', count: 2 },
+    ]
+    expect(siteSigninShown(rows, t0, H('2026-09-20T14:00:00Z'))).toBe(11) // streak 2 + placement 3 + promo 4 + tutorial 2
+    expect(siteTutorialAsksShown(rows, t0, H('2026-09-20T14:00:00Z'))).toBe(2)
+    expect(siteTutorialAsksShown(rows, t0, H('2026-09-20T13:00:00Z'))).toBe(0)
+  })
   it('rule 4: $100 proposes a pause regardless of results', () => {
     const res = evaluateKillRules(killInput({ cumulativeSpend: 100 }))
     expect(res.tripped).toEqual(['hard-cap'])
@@ -377,6 +485,7 @@ describe('summarizeTaggedRows (campaign-attributed new indicators)', () => {
     { hourStartMs: H('2026-09-28T18:00:00Z'), path: '/signin-prompt/placement', visitor: 'returning', count: 2 },
     { hourStartMs: H('2026-09-28T18:00:00Z'), path: '/signin-prompt/streak', visitor: 'returning', count: 1 },
     { hourStartMs: H('2026-09-28T18:00:00Z'), path: '/signin-prompt/other-reason', visitor: 'returning', count: 4 },
+    { hourStartMs: H('2026-09-28T18:00:00Z'), path: '/signin-prompt/tutorial', visitor: 'returning', count: 3 },
     { hourStartMs: H('2026-09-28T18:00:00Z'), path: '/promo-first50/shown', visitor: 'returning', count: 1 },
     { hourStartMs: H('2026-09-28T18:00:00Z'), path: '/signin-prompt/dismiss', visitor: 'returning', count: 2 },
     { hourStartMs: H('2026-09-28T18:00:00Z'), path: '/promo-first50/dismiss', visitor: 'returning', count: 1 },
@@ -385,10 +494,10 @@ describe('summarizeTaggedRows (campaign-attributed new indicators)', () => {
     { hourStartMs: H('2026-09-28T19:00:00Z'), path: '/install/standalone-detected', visitor: 'returning', count: 1 },
     { hourStartMs: H('2026-09-28T19:00:00Z'), path: '/popup-outcome/install-prompt/installed', visitor: 'returning', count: 1 },
   ]
-  it('asks are EXACTLY placement + streak + promo-first50/shown; any other reason is reported separately', () => {
+  it('asks are EXACTLY placement + streak + tutorial + promo-first50/shown; any other reason is reported separately', () => {
     const s = summarizeTaggedRows(rows)
-    expect(s.asks.total).toBe(4)
-    expect(s.asks.byPath).toEqual({ '/signin-prompt/placement': 2, '/signin-prompt/streak': 1, '/promo-first50/shown': 1 })
+    expect(s.asks.total).toBe(7)
+    expect(s.asks.byPath).toEqual({ '/signin-prompt/placement': 2, '/signin-prompt/streak': 1, '/signin-prompt/tutorial': 3, '/promo-first50/shown': 1 })
     expect(s.asks.otherShownReasons).toBe(4)
     expect(s.accepts.total).toBe(1)
   })
@@ -398,7 +507,7 @@ describe('summarizeTaggedRows (campaign-attributed new indicators)', () => {
   it('arrivals are visitor=new rows; hits are every row', () => {
     const s = summarizeTaggedRows(rows)
     expect(s.taggedArrivals).toBe(15)
-    expect(s.taggedHits).toBe(50)
+    expect(s.taggedHits).toBe(53)
     expect(s.funnel.arrivals).toBe(15)
   })
   it('one install racing two raw beacons counts ONCE (the popup outcome); raw signals are secondary', () => {
@@ -690,5 +799,126 @@ describe('backfill check against the hand-entered config', () => {
 describe('caveat wording shared with the dashboard', () => {
   it('the routine says exactly what the pop-ups page says about late outcomes', () => {
     expect(MEASUREMENT_QUIET_NOTE).toBe(POPUP_PAGE_NOTE)
+  })
+})
+
+describe('first-session funnel (informational only)', () => {
+  const tagged = [
+    { hourStartMs: H('2026-09-30T12:00:00Z'), path: '/', visitor: 'new', count: 20 },
+    { hourStartMs: H('2026-09-30T12:00:00Z'), path: '/game', visitor: 'returning', count: 40 },
+    { hourStartMs: H('2026-09-30T12:00:00Z'), path: '/tour/start', visitor: 'returning', count: 10 },
+    { hourStartMs: H('2026-09-30T12:00:00Z'), path: '/tour/complete', visitor: 'returning', count: 4 },
+    { hourStartMs: H('2026-09-30T12:00:00Z'), path: '/tour/skip', visitor: 'returning', count: 5 },
+    { hourStartMs: H('2026-09-30T12:00:00Z'), path: '/game/complete/normal/easy', visitor: 'returning', count: 2 },
+    { hourStartMs: H('2026-09-30T12:00:00Z'), path: '/game/abandon/0', visitor: 'returning', count: 6 },
+    { hourStartMs: H('2026-09-30T12:00:00Z'), path: '/game/abandon/26-50', visitor: 'returning', count: 1 },
+    { hourStartMs: H('2026-09-30T12:00:00Z'), path: '/game/abandon/bogus', visitor: 'returning', count: 9 },
+    { hourStartMs: H('2026-09-30T12:00:00Z'), path: '/signin-prompt/tutorial', visitor: 'returning', count: 2 },
+    { hourStartMs: H('2026-09-30T12:00:00Z'), path: '/signin-prompt/placement', visitor: 'returning', count: 1 },
+    { hourStartMs: H('2026-09-30T12:00:00Z'), path: '/signin-prompt/dismiss', visitor: 'returning', count: 3 },
+    { hourStartMs: H('2026-09-30T12:00:00Z'), path: '/welcome-signed-in/shown', visitor: 'returning', count: 1 },
+    { hourStartMs: H('2026-09-30T12:00:00Z'), path: '/welcome-signed-in/daily', visitor: 'returning', count: 1 },
+    // a tagged d0 row is never counted from the tagged rows (arrivals come from the path-attributed read)
+    { hourStartMs: H('2026-09-30T12:00:00Z'), path: '/return/sudoku_funnel_retest/d0', visitor: 'new', count: 99 },
+  ]
+  // path-attributed d0 rows: one per device's first tagged visit; another campaign's uc is not ours
+  const arrivals = { rows: [{ path: '/return/sudoku_funnel_retest/d0', count: 18 }, { path: '/return/other_flight/d0', count: 7 }, { path: '/return/sudoku_funnel_retest/d1', count: 4 }], ucValues: ['sudoku_funnel_retest'] }
+  const site = [
+    { path: '/return/sudoku_funnel_retest/d0', count: 25 },
+    { path: '/return/other_flight/d0', count: 280 },
+    { path: '/return/other_flight/d1', count: 50 },
+    { path: '/game', count: 900 },
+    { path: '/tour/start', count: 120 },
+    { path: '/tour/complete', count: 50 },
+    { path: '/tour/skip', count: 60 },
+    { path: '/game/complete/daily/hard', count: 30 },
+    { path: '/game/abandon/0', count: 70 },
+    { path: '/signin-prompt/tutorial', count: 8 },
+    { path: '/welcome-signed-in/shown', count: 3 },
+  ]
+
+  it('buckets exactly the new beacon paths, never an unknown abandon bucket or welcome action', () => {
+    expect(firstSessionBucket('/game')).toEqual({ kind: 'step', step: 'gameView' })
+    expect(firstSessionBucket('/game/first-move')).toEqual({ kind: 'step', step: 'firstMove' })
+    expect(firstSessionBucket('/game/complete/normal/easy')).toEqual({ kind: 'step', step: 'gameComplete' })
+    expect(firstSessionBucket('/game/abandon/76-99')).toEqual({ kind: 'abandon', bucket: '76-99' })
+    expect(firstSessionBucket('/game/abandon/100')).toBeNull()
+    expect(firstSessionBucket('/welcome-signed-in/leaderboard')).toEqual({ kind: 'welcome', event: 'leaderboard' })
+    expect(firstSessionBucket('/welcome-signed-in/other')).toBeNull()
+    expect(firstSessionBucket('/signin-prompt/tutorial')).toEqual({ kind: 'ask', tutorial: true })
+    expect(firstSessionBucket('/signin-prompt/dismiss')).toBeNull()
+    expect(firstSessionBucket('/tour/start/')).toBeNull()
+    expect(firstSessionBucket('/return/sudoku_funnel_retest/d0')).toEqual({ kind: 'arrival', uc: 'sudoku_funnel_retest' })
+    expect(firstSessionBucket('/return/sudoku_funnel_retest/d1')).toBeNull()
+  })
+
+  it('tallies arrivals as /return/<uc>/d0 devices: tagged by the campaign uc, site-wide any uc', () => {
+    const t = tallyTaggedFirstSession(tagged, arrivals)
+    expect(t.steps).toEqual({ arrivals: 18, gameView: 40, tourStart: 10, tourComplete: 4, tourSkip: 5, firstMove: 0, gameComplete: 2 })
+    expect(t.abandon).toEqual({ '0': 6, '1-25': 0, '26-50': 1, '51-75': 0, '76-99': 0 })
+    expect(t.asks).toBe(3)
+    expect(t.asksTutorial).toBe(2)
+    expect(t.welcome).toEqual({ shown: 1, daily: 1, leaderboard: 0, dismiss: 0 })
+    expect(tallySiteFirstSession(site).steps.arrivals).toBe(305)
+  })
+
+  it('tracking is per beacon family: once a sibling has rows, a step with none is a real 0, not "not yet tracked"', () => {
+    const f = buildFirstSessionFunnel(tallyTaggedFirstSession(tagged, arrivals), tallySiteFirstSession(site))
+    expect(f.steps.arrivals).toMatchObject({ tagged: 18, site: 305, tracked: true })
+    expect(f.siteRead).toBe(true)
+    // first move ships with the tour and abandon beacons, which have rows: a real zero.
+    expect(f.steps.firstMove).toEqual({ tagged: 0, site: 0, tracked: true, vsParent: null })
+    expect(f.steps.gameComplete.vsParent).toMatchObject({ parent: 'firstMove', numerator: 2, denominator: 0, value: null })
+    expect(f.steps.tourComplete.vsParent).toMatchObject({ parent: 'tourStart', numerator: 4, denominator: 10, value: 0.4 })
+    // nothing divides by game views (page-view rows against once-per-event beacons mixes units).
+    expect(f.steps.tourStart.vsParent).toBeNull()
+    expect(f.steps.gameView.vsParent).toBeNull()
+    expect(f.steps.arrivals.vsParent).toBeNull()
+    expect(f.abandon['1-25']).toEqual({ tagged: 0, site: 0, tracked: true })
+    expect(f.abandon['76-99'].tracked).toBe(true)
+    expect(f.abandon['0']).toEqual({ tagged: 6, site: 70, tracked: true })
+    // a tagged row proves the path is live even when the site-wide (web) read has none
+    expect(f.abandon['26-50']).toEqual({ tagged: 1, site: 0, tracked: true })
+    // welcome is its own family: shown has rows, so dismiss / leaderboard are real zeros.
+    expect(f.welcome.dismiss).toEqual({ tagged: 0, site: 0, tracked: true })
+    expect(f.welcome.leaderboard.tracked).toBe(true)
+    expect(f.asksTutorial).toEqual({ tagged: 2, site: 8, tracked: true })
+  })
+
+  it('a family with no rows anywhere is not yet tracked, never a 0% step; its ratios are skipped and children fall back', () => {
+    const f = buildFirstSessionFunnel(
+      tallyTaggedFirstSession([{ hourStartMs: 0, path: '/game', visitor: 'new', count: 10 }, { hourStartMs: 0, path: '/game/complete/daily/easy', visitor: 'returning', count: 2 }], { rows: [], ucValues: ['x'] }),
+      tallySiteFirstSession([{ path: '/game', count: 50 }]),
+    )
+    for (const k of ['tourStart', 'tourComplete', 'tourSkip', 'firstMove'] as const) expect(f.steps[k]).toEqual({ tagged: 0, site: 0, tracked: false, vsParent: null })
+    for (const b of ['0', '1-25', '26-50', '51-75', '76-99'] as const) expect(f.abandon[b].tracked).toBe(false)
+    for (const e of ['shown', 'daily', 'leaderboard', 'dismiss'] as const) expect(f.welcome[e].tracked).toBe(false)
+    expect(f.asksTutorial.tracked).toBe(false)
+    // game complete's parent (first move) is untracked and has no parent of its own.
+    expect(f.steps.gameComplete).toMatchObject({ tagged: 2, tracked: true, vsParent: null })
+  })
+
+  it('families are independent: the tour release being live does not mark welcome or the tutorial ask tracked', () => {
+    const f = buildFirstSessionFunnel(tallyTaggedFirstSession([], { rows: [], ucValues: ['x'] }), tallySiteFirstSession([{ path: '/game/abandon/0', count: 3 }]))
+    expect(f.steps.tourStart).toMatchObject({ tagged: 0, site: 0, tracked: true })
+    expect(f.steps.firstMove.tracked).toBe(true)
+    expect(f.welcome.shown.tracked).toBe(false)
+    expect(f.asksTutorial.tracked).toBe(false)
+    const w = buildFirstSessionFunnel(tallyTaggedFirstSession([], { rows: [], ucValues: ['x'] }), tallySiteFirstSession([{ path: '/welcome-signed-in/daily', count: 1 }]))
+    expect(w.welcome.shown).toEqual({ tagged: 0, site: 0, tracked: true })
+    expect(w.steps.tourStart.tracked).toBe(false)
+  })
+
+  it('without the site-wide read tracking is unknown unless a tagged row in the family proves it, and ratios still use the tagged counts', () => {
+    const f = buildFirstSessionFunnel(tallyTaggedFirstSession(tagged, arrivals), null)
+    expect(f.siteRead).toBe(false)
+    expect(f.steps.firstMove).toMatchObject({ tagged: 0, site: null, tracked: true }) // tour start's tagged rows prove the release
+    expect(f.steps.tourStart).toMatchObject({ tagged: 10, site: null, tracked: true })
+    expect(f.steps.gameComplete.vsParent).toMatchObject({ parent: 'firstMove', numerator: 2, denominator: 0, value: null })
+    const none = buildFirstSessionFunnel(tallyTaggedFirstSession([], null), null)
+    expect(none.steps.firstMove.tracked).toBeNull()
+    // a failed arrivals read is unknown, never 0
+    expect(none.steps.arrivals).toMatchObject({ tagged: null, site: null, tracked: null })
+    expect(none.welcome.shown.tracked).toBeNull()
   })
 })

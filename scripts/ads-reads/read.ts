@@ -37,7 +37,6 @@ import {
   readingEntryKind,
   readingId,
   readPlanFor,
-  RETEST_AD_GROUP_PLACEMENT_COUNTS,
   round2,
   AUTH_NEW_EXISTING_LIVE_AT,
   campaignSignUps,
@@ -52,8 +51,14 @@ import {
   type CohortTiers,
   spendTotals,
   summarizeReturns,
+  siteSigninShown,
+  siteTutorialAsksShown,
   summarizeSiteEvents,
   summarizeTaggedRows,
+  buildFirstSessionFunnel,
+  tallySiteFirstSession,
+  tallyTaggedFirstSession,
+  type FirstSessionFunnel,
   WEB_GO_LIVE_UTC_MS,
   INSTALL_OUTCOME_GAP_NOTE,
   MEASUREMENT_QUIET_NOTE,
@@ -78,7 +83,9 @@ import {
   type SpendDay,
   type StoredSpend,
   type TaggedRow,
+  type FirstSessionRowSite,
   type TaggedSummary,
+  reportLabelFor,
 } from '../../src/lib/adsRules'
 import type { AdsStore, AppendOutcome, PlacementDayRow } from '../../src/lib/adsStore'
 import { ARRIVALS_CAVEAT, costPer, etMidnightUtcMs, etTimeUtcMs, funnelStepRates, type CampaignFlight, type FunnelStepKey } from '../../src/lib/campaigns'
@@ -246,7 +253,7 @@ export interface DiagnosticsSection {
   hourly: HourlyRow[] | null
   geo: GeoRow[] | null
   devices: DeviceRow[] | null
-  /** null entries: build-spec expected count (RETEST_AD_GROUP_PLACEMENT_COUNTS), for the
+  /** null entries: build-spec expected count (the read plan's adGroupPlacementCounts), for the
    * "placement count matches the build spec" check (R2) — never for an unknown ad group. */
   targeting: (TargetingRow & { expectedPlacements: number | null })[] | null
   recommendations: RecommendationRow[] | null
@@ -418,7 +425,9 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
   const totals = spendTotals(i.stored, i.spendThroughEt ?? addEtDays(campaign.flightStart!, -1))
   const cumulativeSpend = totals.cost
 
-  const placementRows = await placementRowsFor(deps, campaign, i.campaignSync, i.spendThroughEt)
+  // A search campaign has no placements: no pull, no error, and kill rule 1 reads n/a.
+  const isSearch = plan.channel === 'search'
+  const placementRows: Attempt<PlacementDayRow[]> = isSearch ? { ok: true, value: [] } : await placementRowsFor(deps, campaign, i.campaignSync, i.spendThroughEt)
   const placementsStored = placementRows.ok && !deps.dryRun && i.campaignSync?.placementsOk !== false
   const beacon = deps.beacon
   const siteRows = beacon ? await attempt('beacon site events', () => beacon.siteEvents(WEB_GO_LIVE_UTC_MS)) : unavailable<HourPathCount[]>('beacon site events', deps.beaconInitError)
@@ -453,7 +462,7 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
   const play = returnSites.ok ? playReturnStatus(returnSites.value, deps.nowMs) : null
 
   // Placement split for kill rule 1 — over the SAME closed range as the campaign total.
-  const split = placementRows.ok ? splitPlacements(placementRows.value, i.spendThroughEt) : null
+  const split = placementRows.ok && !isSearch ? splitPlacements(placementRows.value, i.spendThroughEt) : null
   const placementView: FullRead['placements'] = split
     ? {
         campaignCost: cumulativeSpend,
@@ -477,7 +486,14 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
     campaignState: i.campaignState,
     delivery: i.stored && i.spendThroughEt ? { impressions: totals.impressions, clicks: totals.clicks } : null,
     placements: split ? { campaignCost: cumulativeSpend, approvedCost: split.approvedCost, itemizedCost: split.itemizedCost } : null,
-    beacon: tagged ? { asks: tagged.summary.asks.total, taggedArrivals: tagged.summary.taggedArrivals } : null,
+    beacon: tagged
+      ? {
+          asks: tagged.summary.asks.total,
+          taggedArrivals: tagged.summary.taggedArrivals,
+          siteSigninShown: siteRows.ok ? siteSigninShown(siteRows.value, attributionStartMs(campaign), windowEnd) : null,
+          siteTutorialAsks: siteRows.ok ? siteTutorialAsksShown(siteRows.value, attributionStartMs(campaign), windowEnd) : null,
+        }
+      : null,
   })
 
   const authLiveAt = deps.boundaries?.authNewExistingLiveAtMs === undefined ? AUTH_NEW_EXISTING_LIVE_AT : deps.boundaries.authNewExistingLiveAtMs
@@ -486,7 +502,7 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
   if (tagged && (i.forceDecision || cumulativeSpend >= plan.hardCap)) {
     const su = campaignSignUps(tagged.summary, windowAccounts, authLiveAt)
     decision = {
-      ...decideAt100({ signUpsAtMost: su.count, asks: tagged.summary.asks.total, accepts: tagged.summary.accepts.total, exact: su.exact }),
+      ...decideAt100({ signUpsAtMost: su.count, asks: tagged.summary.asks.total, accepts: tagged.summary.accepts.total, exact: su.exact, channel: plan.channel }),
       signUpsAtMost: su.count,
       signUpsExact: su.exact,
       signUpsBounded: su.bounded,
@@ -629,8 +645,10 @@ async function diagnosticsRead(
   deps: ReadDeps,
   campaign: CampaignFlight,
   campaignId: string,
+  expectedCounts: AdsReadPlan['adGroupPlacementCounts'],
   spendThroughEt: string | null,
   taggedRows: Attempt<TaggedRow[]>,
+  channel: AdsReadPlan['channel'],
 ): Promise<DiagnosticsSection> {
   const errors: string[] = []
   const ads = deps.ads
@@ -643,7 +661,9 @@ async function diagnosticsRead(
   if (geo && !geo.ok) errors.push(geo.error)
   const devices = ads?.devices && since && until ? await attempt('ads devices', () => ads.devices!(campaignId, since, until)) : null
   if (devices && !devices.ok) errors.push(devices.error)
-  const targeting = ads?.targeting ? await attempt('ads targeting', () => ads.targeting!(campaignId)) : null
+  // A search arm has no placement/audience targeting to show (report prints SEARCH_NA), so
+  // skip the query: a failure would print an error beside a line that does not apply.
+  const targeting = ads?.targeting && channel !== 'search' ? await attempt('ads targeting', () => ads.targeting!(campaignId)) : null
   if (targeting && !targeting.ok) errors.push(targeting.error)
   const recommendations = ads?.recommendations ? await attempt('ads recommendations', () => ads.recommendations!(campaignId)) : null
   if (recommendations && !recommendations.ok) errors.push(recommendations.error)
@@ -676,7 +696,7 @@ async function diagnosticsRead(
     hourly: hourly?.ok ? hourly.value : null,
     geo: geo?.ok ? geo.value : null,
     devices: devices?.ok ? devices.value : null,
-    targeting: targeting?.ok ? targeting.value.map((t) => ({ ...t, expectedPlacements: RETEST_AD_GROUP_PLACEMENT_COUNTS[t.adGroup] ?? null })) : null,
+    targeting: targeting?.ok ? targeting.value.map((t) => ({ ...t, expectedPlacements: expectedCounts?.[t.adGroup] ?? null })) : null,
     recommendations: recommendations?.ok ? recommendations.value : null,
     countryCounts: country?.ok ? country.value : null,
     accountCrossCheck,
@@ -786,6 +806,10 @@ export interface MorningResult {
   spend: SpendSection
   thresholds: { crossedNow: number[]; consumedBefore: number[]; next: number | null; stateError: string | null }
   tagged: { ok: boolean; error: string | null; cumulative: TaggedCounts | null; yesterday: TaggedCounts | null }
+  /** First-session funnel since attribution start (informational only; never a kill rule):
+   * tagged counts with site-wide web counts alongside. null in health-only mode or when the
+   * tagged read failed; `siteError` says why the site-wide side is missing. */
+  firstSession: { funnel: FirstSessionFunnel; siteError: string | null; arrivalsError?: string | null } | null
   thresholdRead: FullRead | null
   hardCapDaily: RuleResult | null
   releaseHealth: HealthSection
@@ -820,16 +844,21 @@ export function repeatedToday(r: { dedup?: DedupSection }, kind: ReadingRecord['
  * can reach a notification. A threshold read, a cap trip or an alert already recorded (and so
  * already pushed) today is not pushed again; a failed read still is. */
 export function morningPushText(r: MorningResult): string | null {
+  const label = reportLabelFor(r.campaign.id)
   const missed = r.missedReads.length ? ` Previous scheduled read missing: ${r.missedReads.join(', ')}.` : ''
   const failed = r.failureDetails.length ? ` Read problems: ${r.failureDetails.join('; ')}.` : ''
   if (r.thresholdRead && !repeatedToday(r, 'threshold')) {
     const t = r.thresholdRead
-    const bits = [`BSK retest $${Math.max(...t.thresholds)} read: ${money(t.cumulativeSpend)} spent`]
+    const bits = [`${label} $${Math.max(...t.thresholds)} read: ${money(t.cumulativeSpend)} spent`]
     const tc = t.tagged?.summary
     if (tc) bits.push(`${tc.taggedArrivals} tagged arrivals, ${tc.asks.total} asks, ${tc.authSuccess} auth successes`)
+    const watching = t.kill.rules.filter((x) => x.status === 'watch').map((x) => x.id)
+    const onWatch = watching.length ? `WATCH (${watching.join(', ')})` : ''
     if (t.kill.tripped.length && t.kill.proposal === 'PROPOSE PAUSE') bits.push(`PROPOSE PAUSE (${t.kill.tripped.join(', ')})`)
     else if (t.kill.tripped.length) bits.push(`rules tripped (${t.kill.tripped.join(', ')}) but campaign ${t.kill.servingState}, no pause proposed`)
-    else bits.push(t.complete ? 'no kill rule tripped, continue' : 'read incomplete, will retry')
+    else if (!t.complete) bits.push('read incomplete, will retry')
+    else bits.push(onWatch ? `no kill rule tripped, ${onWatch}, continue` : 'no kill rule tripped, continue')
+    if (onWatch && (t.kill.tripped.length || !t.complete)) bits.push(onWatch)
     if (t.decision) bits.push(`${signUpsPhrase(t.decision)}, row ${t.decision.row}`)
     if (t.segments) bits.push(`split at the upsell fix: pre-fix ${t.segments.pre.asks} asks/${t.segments.pre.signUps.count} sign-ups, post-fix ${t.segments.post.asks} asks/${t.segments.post.signUps.count} sign-ups`)
     const share = t.placements?.outsideShare
@@ -837,14 +866,14 @@ export function morningPushText(r: MorningResult): string | null {
     return bits.join('; ') + '.' + borderline + failed + missed
   }
   if (r.hardCapDaily?.status === 'trip' && !repeatedToday(r, 'daily')) {
-    return `BSK retest: ${money(r.spend.cumulative.cost)} spent, at or over the ${money(r.spend.hardCap)} cap, campaign still ${r.status?.status ?? 'ENABLED'}. PROPOSE PAUSE.${failed}${missed}`
+    return `${label}: ${money(r.spend.cumulative.cost)} spent, at or over the ${money(r.spend.hardCap)} cap, campaign still ${r.status?.status ?? 'ENABLED'}. PROPOSE PAUSE.${failed}${missed}`
   }
   const alerts = r.mode === 'health-only' && !repeatedToday(r, 'health') ? (r.releaseHealth.results ?? []).filter((h) => h.status === 'alert') : []
   if (alerts.length) {
-    return `BSK retest release-health ALERT: ${alerts.map((h) => `${h.parentLabel} ${h.parent}, ${h.childLabel} 0`).join('; ')}.${failed}`
+    return `${label} release-health ALERT: ${alerts.map((h) => `${h.parentLabel} ${h.parent}, ${h.childLabel} 0`).join('; ')}.${failed}`
   }
   if (r.failures.length) {
-    return `BSK retest ${r.mode === 'health-only' ? 'release-health backstop' : 'morning read'} FAILED: ${r.failureDetails.join('; ')}. Thresholds and the $${r.spend.hardCap} cap were not fully checked.${missed}`
+    return `${label} ${r.mode === 'health-only' ? 'release-health backstop' : 'morning read'} FAILED: ${r.failureDetails.join('; ')}. Thresholds and the $${r.spend.hardCap} cap were not fully checked.${missed}`
   }
   return null
 }
@@ -893,7 +922,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
   const { section: spend, stored, sync, campaignSync } = await syncSpend(deps, plan, campaign, todayEt, opts.healthOnly ? 'backstop' : 'morning-read')
   if (spend.error) errors.push(spend.error)
   if (spend.storeError) errors.push(spend.storeError)
-  if (campaignSync.fetchOk && campaignSync.placementsOk === false && campaignSync.error && !errors.includes(campaignSync.error)) errors.push(campaignSync.error)
+  if (plan.channel !== 'search' && campaignSync.fetchOk && campaignSync.placementsOk === false && campaignSync.error && !errors.includes(campaignSync.error)) errors.push(campaignSync.error)
 
   // Consumed = the threshold-state rows PLUS any complete threshold reading (a state row lost to
   // a partial write must never make a threshold fire twice).
@@ -933,6 +962,28 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
     error: taggedRows.ok ? null : taggedRows.error,
     cumulative: taggedRows.ok ? taggedCounts(summarizeTaggedRows(taggedRows.value)) : null,
     yesterday: taggedRows.ok ? taggedCounts(summarizeTaggedRows(taggedRows.value, { fromMs: yStart, toMs: yEnd })) : null,
+  }
+
+  // First-session funnel, every morning read. The site-wide side is best-effort: a failure
+  // leaves it unread (every step's "tracked" unknown) and never fails or pushes the read.
+  let firstSession: MorningResult['firstSession'] = null
+  if (!opts.healthOnly && taggedRows.ok) {
+    const sinceMs = attributionStartMs(campaign)
+    const untilMs = Math.min(deps.nowMs, flightEndExclusiveMs(campaign)) // the tagged side's end too
+    const siteFs = beacon?.siteFirstSession
+      ? await attempt('beacon site first-session', () => beacon.siteFirstSession!(sinceMs, untilMs))
+      : unavailable<FirstSessionRowSite[]>('beacon site first-session', beacon ? 'not supported by this beacon source' : deps.beaconInitError)
+    const d0 = beacon?.returnArrivals
+      ? await attempt('beacon first-session arrivals', () => beacon.returnArrivals!(campaign, sinceMs, untilMs))
+      : unavailable<{ path: string; count: number }[]>('beacon first-session arrivals', beacon ? 'not supported by this beacon source' : deps.beaconInitError)
+    firstSession = {
+      funnel: buildFirstSessionFunnel(
+        tallyTaggedFirstSession(taggedRows.value, d0.ok ? { rows: d0.value, ucValues: campaign.ucValues } : null),
+        siteFs.ok ? tallySiteFirstSession(siteFs.value) : null,
+      ),
+      siteError: siteFs.ok ? null : siteFs.error,
+      arrivalsError: d0.ok ? null : d0.error,
+    }
   }
 
   let thresholdRead: FullRead | null = null
@@ -989,7 +1040,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
 
   const diagnostics: DiagnosticsSection = opts.healthOnly
     ? { spendThroughEt: null, hourly: null, geo: null, devices: null, targeting: null, recommendations: null, countryCounts: null, accountCrossCheck: null, errors: [] }
-    : await diagnosticsRead(deps, campaign, plan.campaignId, spend.throughEt, taggedRows)
+    : await diagnosticsRead(deps, campaign, plan.campaignId, plan.adGroupPlacementCounts, spend.throughEt, taggedRows, plan.channel)
   const playReports: PlayReportsSection | null = opts.healthOnly ? null : await playReportsRead(deps, campaign, todayEt, cumulative)
 
   const servedToday = spend.ok ? (spend.todayPartial?.cost ?? 0) > 0 : null
@@ -1122,6 +1173,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
     spend,
     thresholds: { crossedNow, consumedBefore: consumed, next: nextThreshold(cumulative, plan.thresholds), stateError: consumedA.ok ? null : consumedA.error },
     tagged,
+    firstSession,
     thresholdRead,
     hardCapDaily,
     releaseHealth: health,
@@ -1315,7 +1367,7 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
   }
   const spendTrip = base.postFlightSpend?.status === 'trip' || base.hardCap?.status === 'trip'
   const spendTripText = () =>
-    `BSK retest after the flight: ${[base.postFlightSpend?.status === 'trip' ? base.postFlightSpend.detail : null, base.hardCap?.status === 'trip' ? base.hardCap.detail : null].filter(Boolean).join('; ')}. PROPOSE PAUSE.`
+    `${plan.reportLabel} after the flight: ${[base.postFlightSpend?.status === 'trip' ? base.postFlightSpend.detail : null, base.hardCap?.status === 'trip' ? base.hardCap.detail : null].filter(Boolean).join('; ')}. PROPOSE PAUSE.`
 
   if (!due && !opts.force) {
     base.notify.reason = `not due until ${dueEt} ET; nothing recorded`
@@ -1323,7 +1375,7 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
     if (spendTrip) {
       base.notify = { push: true, busCopy: false, reason: `after-flight spend or cap trip (stage not due until ${dueEt})`, text: spendTripText() }
     } else if (base.failures.length) {
-      base.notify = { push: true, busCopy: false, reason: `failed read: ${base.failures.join(', ')}`, text: `BSK retest ${opts.stage} read FAILED: ${base.failureDetails.join('; ')}.` }
+      base.notify = { push: true, busCopy: false, reason: `failed read: ${base.failures.join(', ')}`, text: `${plan.reportLabel} ${opts.stage} read FAILED: ${base.failureDetails.join('; ')}.` }
     }
     return base
   }
@@ -1437,7 +1489,7 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
     const already = `post-flight ${opts.stage} already recorded and pushed today (${w.dedup.skipped.map((s) => s.entryKind).join(', ')})`
     base.notes.unshift(`${already}; this rerun was not stored.`)
     base.notify = base.failures.length
-      ? { push: true, busCopy: false, reason: `${already}; failed read: ${base.failures.join(', ')}`, text: `BSK retest ${opts.stage} read FAILED: ${base.failureDetails.join('; ')}.` }
+      ? { push: true, busCopy: false, reason: `${already}; failed read: ${base.failures.join(', ')}`, text: `${plan.reportLabel} ${opts.stage} read FAILED: ${base.failureDetails.join('; ')}.` }
       : { push: false, busCopy: false, reason: `${already}; not pushed again`, text: null }
     base.notes.push(INSTALL_OUTCOME_GAP_NOTE)
     return base
@@ -1446,7 +1498,7 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
     push: true,
     busCopy: true,
     reason: `post-flight ${opts.stage} read (a scheduled spec read)${trip ? ' with spend after the flight' : ''}${base.failures.length ? `; failed read: ${base.failures.join(', ')}` : ''}`,
-    text: `BSK retest ${opts.stage} read: ${money(spend.cumulative.cost)} total, ${read.tagged?.summary.taggedArrivals ?? '?'} tagged arrivals, ${read.decision ? `${signUpsPhrase(read.decision)}, row ${read.decision.row}` : 'no decision'}${read.segments ? '; split at the upsell fix (see report)' : ''}${trip ? `; PROPOSE PAUSE (${base.postFlightSpend?.status === 'trip' ? `spend after ${campaign.flightEnd}` : 'at the cap'})` : ''}.${failed}`,
+    text: `${plan.reportLabel} ${opts.stage} read: ${money(spend.cumulative.cost)} total, ${read.tagged?.summary.taggedArrivals ?? '?'} tagged arrivals, ${read.decision ? `${signUpsPhrase(read.decision)}, row ${read.decision.row}` : 'no decision'}${read.segments ? '; split at the upsell fix (see report)' : ''}${trip ? `; PROPOSE PAUSE (${base.postFlightSpend?.status === 'trip' ? `spend after ${campaign.flightEnd}` : 'at the cap'})` : ''}.${failed}`,
   }
   base.notes.push(INSTALL_OUTCOME_GAP_NOTE)
   return base
