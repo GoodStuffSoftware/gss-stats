@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.15.3] — 2026-10-03
+
 ### Fixed
 - **KPI tiles for counts-only rows show whole days.** A tile that can count return, game-start,
   completion, tutorial or tour-exit rows (Best Sudoku page views included) now shows yesterday's
