@@ -70,7 +70,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   site and the installed app (`bestsudoku-app`) alike, from its attribution start (each counts
   its own installs, so a phone that used both counts once on each). After the
   campaigns comes one more row, "Organic (web)": the `/return/organic/` rows the web site sends
-  for untagged visitors, with no start bound and never app rows, as a baseline to read the
+  for untagged visitors (organic = a device's first-ever web visit with no utm and no ad click id, so a gclid visit is not organic; first touch wins; a malformed utm counts as neither; organic and campaign d0 are disjoint), counted from v1.98.0's go-live (2026-10-03 16:35:04 ET), never app rows, as a baseline to read the
   campaigns against; it stays hidden until its d0 count is above zero. It never enters the
   site-wide "Return visits (day 1+)" tile or the routine's site-wide arrivals, which stay
   tagged-only. Return rows are counts
