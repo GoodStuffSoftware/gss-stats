@@ -619,10 +619,10 @@ the routine and the dashboard can't disagree.
 
 ```powershell
 npm run ads:sync -- --dry-run --cf-token-file <path-to-cf-token>           # the shared sync only
-npm run ads:morning-read -- --dry-run --cf-token-file <path>               # daily read; no writes
-npm run ads:postflight-read -- --stage wrapup --dry-run --cf-token-file <path>
+npm run ads:morning-read -- --campaign <id> --dry-run --cf-token-file <path>   # daily read; no writes
+npm run ads:postflight-read -- --stage wrapup --campaign <id> --dry-run --cf-token-file <path>
 npm run ads:backfill -- --dry-run --cf-token-file <path>                   # full re-pull + config check
-npm run ads:morning-read -- --fixture <file.json> --now <iso>              # offline, recorded data
+npm run ads:morning-read -- --campaign <id> --fixture <file.json> --now <iso>   # offline, recorded data
 npm run -s ads:read-page -- --input <read.out> --narrative <n.json> --out <page.html> [--audit-commit <sha>]
 npm run typecheck:scripts
 ```
@@ -643,8 +643,8 @@ npm run typecheck:scripts
   an append-only readings log and fire-once threshold state). Why and how:
   [docs/adr/0001-ads-read-store.md](docs/adr/0001-ads-read-store.md). Schema:
   [`migrations/gss-stats-ads/`](migrations/gss-stats-ads/) (`npm run ads:migrate`).
-- **morning-read** syncs spend first, fires each $25/$50/$75/$100 read once (full read + kill
-  rules), appends one daily line per ET day, checks the hard cap on every read, notes any
+- **morning-read** syncs spend first, fires each of the campaign's spend-threshold reads once
+  (full read + kill rules; the retest's are $25/$50/$75/$100), appends one daily line per ET day, checks the hard cap on every read, notes any
   earlier scheduled read that never ran, and evaluates release health (a missing child of a
   non-zero parent) every run — there is no longer a time-of-day gate on it. RETIRED
   2026-09-27: release health used to be skipped between 01:00 and 12:00 ET so the run could
@@ -801,11 +801,11 @@ a newer campaign's window or due date, would otherwise silently read the wrong c
 two or more registered plans: exit 1, listing the registered ids and saying to pass
 `--campaign`.
 
-While only the retest is registered, the default is the retest on every date, so every
-invocation that omits the flag (before, inside or after its morning-read window, and every
-post-flight stage) behaves as it did before the registry (checked by running every routine
-invocation against the base and the head: only `--help` differs). The retest's routine docs
-pin it anyway (step 1).
+Three plans are registered now (the retest and flight 2's two arms), so every read must pin its
+campaign. Before flight 2's arms were registered the default was the retest on every date, and
+every invocation that omitted the flag behaved as it did before the registry (checked by running
+every routine invocation against the base and the head: only `--help` differed). The retest's
+routine docs pin it (step 1).
 
 ### Adding an arm (two campaigns at once)
 
@@ -822,7 +822,8 @@ thresholds, cap, report label and audit folder. Fill in one block per arm:
 | Leak limit | plan `placementLeakMaxShare` | `0.1` | none (omit; ignored for search) |
 | CTR floor | plan `ctrFloor` (kill rule 2) | `0.0015` (0.15%) | `0.01` (1.0%) |
 | Start / end | `CAMPAIGNS` `flightStart` (+ `flightStartTimeEt`), `flightEnd` | start, start + 6 days | same |
-| Budget / cap | `CAMPAIGNS` `dailyBudgetUsd`, `hardCapUsd` | `$50` cap over 7 days | same |
+| Budget / cap | `CAMPAIGNS` `dailyBudgetUsd`, `hardCapUsd` | `$10`/day, `$70` cap over 7 days | same |
+| Spend reads | plan `thresholds`, `killRulesFrom` | 25/50/75/100% of the cap in whole dollars (`18, 35, 53, 70`), kill rules from 50% (`35`) | same |
 | Label / audit | plan `reportLabel`, `auditSlug` (unique) | e.g. `F2 apps`, `f2-apps` | e.g. `F2 search`, `f2-search` |
 | Read window | plan `morningReadFirstEt`, `morningReadLastEt` | day 2 .. end + 1 | same |
 

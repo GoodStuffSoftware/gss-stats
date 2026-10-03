@@ -236,6 +236,35 @@ export const ADS_READ_PLANS: Record<string, AdsReadPlan> = {
     morningReadFirstEt: '2026-09-27',
     morningReadLastEt: '2026-10-03',
   }),
+  // Flight 2, arm A (display, Sudoku app placements). The ladder is the retest's 25/50/75/100% shape
+  // applied to this arm's $70 cap (whole dollars), so the top read IS the cap and the decision table
+  // fires there; kill rules arm at 50% of the cap, as in the retest. The read window is provisional
+  // with the CAMPAIGNS dates (day 2 .. end + 1): correct both on enable day.
+  '24316608605': buildReadPlan('24316608605', {
+    thresholds: [18, 35, 53, 70],
+    killRulesFrom: 35,
+    placementLeakMaxShare: 0.1,
+    ctrFloor: 0.0015,
+    approvedPlacements: RETEST_APPROVED_PLACEMENTS,
+    reportLabel: 'F2 apps',
+    auditSlug: 'f2-apps',
+    adGroupPlacementCounts: RETEST_AD_GROUP_PLACEMENT_COUNTS,
+    morningReadFirstEt: '2026-10-08',
+    morningReadLastEt: '2026-10-14',
+  }),
+  // Flight 2, arm B (search, desktop intent). No placements, so no leak limit and no ad-group counts;
+  // the CTR floor is 1.0% (Mike, 2026-10-03). Same ladder, kill-rule arming and (provisional) read
+  // window as arm A.
+  '24311309184': buildReadPlan('24311309184', {
+    channel: 'search',
+    thresholds: [18, 35, 53, 70],
+    killRulesFrom: 35,
+    ctrFloor: 0.01,
+    reportLabel: 'F2 search',
+    auditSlug: 'f2-search',
+    morningReadFirstEt: '2026-10-08',
+    morningReadLastEt: '2026-10-14',
+  }),
 }
 
 /** The read plan for a campaign id, or a throw that lists every registered id. Used for labels
