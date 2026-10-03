@@ -131,6 +131,17 @@ describe('the catalog', () => {
     expect(rowMatcher(live, ctx)(row('/game/complete/normal/easy'))).toBe(true)
     expect(rowMatcher(live, ctx)(row('/game/complete-deferred/normal/easy'))).toBe(false)
   })
+  // v1.97.0: a tutorial row is never a game completion. Every completions metric anchors on
+  // /game/complete/, so none counts a /game/tutorial-complete/ row.
+  it('no completions metric counts a tutorial-complete row', () => {
+    const ctx = ctxFor()
+    for (const id of ['bsk.completions', 'campaign.completions']) {
+      const m = METRICS.get(id)!
+      for (const p of ['/game/tutorial-complete/first-run', '/game/tutorial-complete/replay']) {
+        expect(rowMatcher(m, ctx)(row(p)), `${id} ${p}`).toBe(false)
+      }
+    }
+  })
   it('auth successes count the base row only, never the new/existing status row beside it', () => {
     const auth = METRICS.get('bsk.authSuccess')!
     expect(rowMatcher(auth, ctxFor())(row('/auth/success/google'))).toBe(true)

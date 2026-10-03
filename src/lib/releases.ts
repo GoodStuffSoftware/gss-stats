@@ -170,8 +170,9 @@ export const RELEASES: ReleaseMarker[] = [
     // Last 1.96.1 seen 17:03:37Z, first 1.97.0 seen 17:03:40Z (13:03:40 ET; popupEvents.ts
     // TOUR_TRACKING_LIVE_AT). A hosting-only local deploy; no backend change since 1.96.1.
     dateEt: '2026-10-03',
+    // Not `major`: its go-live marker ("tutorial + tour exit beacons live") already labels
+    // 2026-10-03, so a second labelled line the same day only crowds the timeline (as v1.95.5).
     note: 'Tutorial completions split first run vs replay, tour exit step tracked; first-run win offers a real game',
-    major: true,
   },
 ]
 
