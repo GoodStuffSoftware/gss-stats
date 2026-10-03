@@ -411,6 +411,12 @@ export function scrubPlayHour(note: string): string {
   if (!note.startsWith('Play:') || !note.includes('/return/')) return note
   return note.replace(/(\d{4}-\d{2}-\d{2}) \d{2}:\d{2} ET/g, '$1 ET')
 }
+/** scrubPlayHour over stored notes, total: a malformed row (notes not an array, or holding
+ * non-strings) passes through exactly as it did before the scrub, never throwing. */
+function scrubNotes(notes: string[]): string[] {
+  if (!Array.isArray(notes)) return notes
+  return notes.map((n: unknown) => (typeof n === 'string' ? scrubPlayHour(n) : n)) as string[]
+}
 export function mapReadingRow(row: Record<string, unknown>): ReadingRecord | null {
   const kind = String(row.kind ?? '') as ReadingKind
   if (!KINDS.includes(kind) || typeof row.read_at !== 'string') return null
@@ -431,7 +437,7 @@ export function mapReadingRow(row: Record<string, unknown>): ReadingRecord | nul
     proposal: str(row.proposal),
     decision: parseJson(row.decision, null),
     counts: parseJson<Record<string, number | null>>(row.counts, {}),
-    notes: parseJson<string[]>(row.notes, []).map(scrubPlayHour),
+    notes: scrubNotes(parseJson<string[]>(row.notes, [])),
   }
   // Rows from before migration 0003 carry no entry_kind: derive the same key from the fields.
   rec.entryKind = typeof row.entry_kind === 'string' && row.entry_kind ? row.entry_kind : readingEntryKind(rec)
