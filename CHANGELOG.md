@@ -7,6 +7,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **Chart release markers now include v1.95.4 to v1.96.1.** Seven more Best Sudoku releases
+  (v1.95.4 to v1.95.8, v1.96.0, v1.96.1) show on the release timeline.
 - **Sync all pages shows its real state.** The "Sync all pages" checkbox in the filter bar no
   longer always shows as on — it now genuinely reflects whether page date ranges are synced.
 - **Best Sudoku · Overview content sits right under the filter bar again.** The small-sample

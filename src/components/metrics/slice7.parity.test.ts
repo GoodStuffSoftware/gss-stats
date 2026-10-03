@@ -126,6 +126,13 @@ import { defaultFilters } from '../../lib/defaults'
 import type { Widget } from '../../types'
 import GOLDEN_FILE from './__fixtures__/slice7.golden.json'
 
+// The release panel follows the newest dated release. The goldens were captured when that was
+// v1.95.3, so pin it here; later releases being added to the marker list must not move them.
+vi.mock('../../lib/releases', async (importActual) => {
+  const actual = await importActual<typeof import('../../lib/releases')>()
+  return { ...actual, latestDatedRelease: () => actual.datedReleases().find((r) => r.version === 'v1.95.3') ?? null }
+})
+
 const GOLDEN = GOLDEN_FILE as Record<string, unknown>
 /** The old side of a comparison, as captured from the retired body (see the header). */
 function fromGolden<T = any>(key: string): T {
