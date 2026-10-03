@@ -12,6 +12,11 @@ All notable changes to **gss-stats** are documented here. The format follows
   loading flash and without ever polling; the card's "Updated" time moves to the new load, and a
   refetch that fails keeps the numbers already on screen.
 
+## [0.14.4] — 2026-10-03
+
+### Added
+- **Best Sudoku v1.98.0 is on the release timeline.** The organic baseline is tracked from v1.98.0 (Oct 3) and earlier ranges read "not yet tracking", ad click ids are documented as not organic, and the tour-exit tiles note that starting a real game during the first-run tour now ends it as a skip.
+
 ### Fixed
 - **Best Sudoku v1.97.0 game starts no longer count as page views, and the first-session funnel
   shows the new first-run counters.** Counted game starts are now an event beacon like the tour
