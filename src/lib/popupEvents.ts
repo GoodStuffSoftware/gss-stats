@@ -81,6 +81,16 @@ export const POPUP_EVENT_PREFIXES = [
   '/game/first-move',
   '/game/abandon',
   '/welcome-signed-in',
+  // v1.97.0 count-only beacons (live on prod web 2026-10-03; the first row reached the log at
+  // 17:03:40Z, the last v1.96.1 row at 17:03:37Z). A counted game start,
+  // `/game/start/<easy|medium|hard|expert|unknown>`, and the tutorial win,
+  // `/game/tutorial-complete/<first-run|replay>`. WITH the trailing slash, like `/game/complete/`:
+  // `/game` itself is the real "played a game" page view and must keep counting as one. Without
+  // these two entries every start and tutorial win from 17:03:40Z on was counted as a page view.
+  // The third v1.97.0 beacon, `/tour/exit-at/<preamble|hub|section>`, needs no entry: it sits
+  // under '/tour' above. Read by lib/adsRules.ts firstSessionBucket (first-run counters).
+  '/game/start/',
+  '/game/tutorial-complete/',
 ] as const
 
 export function isPopupEventPath(path: string): boolean {
@@ -154,6 +164,8 @@ const PATH_FAMILY_LABELS: Record<(typeof POPUP_EVENT_PREFIXES)[number], string> 
   '/game/first-move': 'game-first-move',
   '/game/abandon': 'game-abandon',
   '/welcome-signed-in': 'welcome-signed-in',
+  '/game/start/': 'game-start',
+  '/game/tutorial-complete/': 'game-tutorial-complete',
 }
 
 /** Path → family label. 'page' for anything that isn't an event beacon (an ordinary page
@@ -200,6 +212,8 @@ export const PATH_FAMILY_OPTIONS: { value: string; label: string }[] = [
   { value: 'game-first-move', label: 'First move' },
   { value: 'game-abandon', label: 'Game abandoned' },
   { value: 'welcome-signed-in', label: 'Signed-in welcome card' },
+  { value: 'game-start', label: 'Game started' },
+  { value: 'game-tutorial-complete', label: 'Tutorial completed' },
 ]
 
 // ── Classification ──────────────────────────────────────────────────────────────────

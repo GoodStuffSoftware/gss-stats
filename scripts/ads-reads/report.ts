@@ -7,6 +7,9 @@ import {
   ABANDON_BUCKETS,
   FIRST_SESSION_STEP_LABELS,
   FIRST_SESSION_STEPS,
+  GAME_START_DIFFICULTIES,
+  TOUR_EXIT_STAGES,
+  TUTORIAL_COMPLETE_VARIANTS,
   WELCOME_EVENTS,
   formatGated,
   type FirstSessionFigure,
@@ -254,12 +257,23 @@ export function firstSessionLines(fs: MorningResult['firstSession']): string[] {
   const out = [
     `First-session funnel since attribution start (informational only; never a kill rule). Tagged rows, site-wide web rows alongside; row counts with no visitor join, so "vs" figures are row ratios, not per-visitor conversion:${fs.siteError ? ` [site-wide not read: ${fs.siteError}]` : ''}${fs.arrivalsError ? ` [tagged arrivals not read: ${fs.arrivalsError}]` : ''}`,
   ]
+  const allUntracked = (xs: FirstSessionFigure[]) => xs.every((x) => x.tracked === false)
+  // One breakdown line (abandon-style): "<label>: <key> <figure>; ..." or "not yet tracked".
+  const breakdown = <K extends string>(label: string, keys: readonly K[], figs: Record<K, FirstSessionFigure>) =>
+    allUntracked(keys.map((k) => figs[k])) ? `  ${label}: ${NOT_YET_TRACKED} (no rows yet)` : `  ${label}: ${keys.map((k) => `${k} ${firstSessionFigureText(figs[k])}`).join('; ')}`
   for (const k of FIRST_SESSION_STEPS) {
     const st = f.steps[k]
     const vs = st.vsParent ? `; vs ${FIRST_SESSION_STEP_LABELS[st.vsParent.parent]} ${formatGated(st.vsParent)}` : ''
     out.push(`  ${FIRST_SESSION_STEP_LABELS[k]}: ${firstSessionFigureText(st)}${st.tracked === false ? '' : vs}`)
+    // The v1.97.0 first-run counters follow the tour outcomes: how a tour ended, the counted
+    // game it can start, the tutorial win. Plain row counts side by side, no ratio between
+    // them (a start cannot be matched to the exit that led to it).
+    if (k === 'tourSkip') {
+      out.push(breakdown('tour exit by stage (since v1.97.0)', TOUR_EXIT_STAGES, f.tourExit))
+      out.push(breakdown('game starts by difficulty (since v1.97.0; all counted starts, tour exits included)', GAME_START_DIFFICULTIES, f.gameStart))
+      out.push(breakdown('tutorial complete (since v1.97.0; first run vs replay)', TUTORIAL_COMPLETE_VARIANTS, f.tutorialComplete))
+    }
   }
-  const allUntracked = (xs: FirstSessionFigure[]) => xs.every((x) => x.tracked === false)
   const ab = ABANDON_BUCKETS.map((b) => f.abandon[b])
   out.push(
     allUntracked(ab)

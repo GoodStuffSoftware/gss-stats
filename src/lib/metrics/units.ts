@@ -41,4 +41,6 @@ export const PATH_FAMILY_UNIT: Readonly<Record<string, Unit>> = {
   'game-first-move': 'row', // one row per game's first placed digit
   'game-abandon': 'row', // one row per abandoned game
   'welcome-signed-in': 'showing', // the card's shown row and the taps on that showing
+  'game-start': 'row', // one row per counted game start (menu, play-again and tour-exit starts alike)
+  'game-tutorial-complete': 'row', // one row per tutorial win, first run or replay
 }

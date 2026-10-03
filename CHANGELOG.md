@@ -12,6 +12,11 @@ All notable changes to **gss-stats** are documented here. The format follows
   tile now loads as an invalid card.
 
 ### Fixed
+- **Best Sudoku v1.97.0 game starts and tutorial completions no longer count as page views, and
+  the first-session funnel shows them.** Game starts and tutorial completions are now event
+  beacons like the tour exit already was, and the morning read and its report page list tour
+  exits by stage, game starts by difficulty and tutorial completions (first run vs replay) as
+  plain counts, "not yet tracked" until the first v1.97.0 row.
 - **Return visits now leave out pre-launch test visits, like the arrivals tile.** Returns from a
   campaign's tagged link count only from its attribution start (for the retest, 12:00 ET on its
   first day), so launch-day test rows no longer inflate the return buckets. The ads routine's

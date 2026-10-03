@@ -374,7 +374,7 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
   // exactly how '/return' was accidentally left off this list on this branch — see the
   // 2026-09-25 review). If this ever fails, either a prefix was removed (update this
   // literal list deliberately) or one was never added (fix the array instead).
-  it('POPUP_EVENT_PREFIXES is exactly these 18 prefixes', () => {
+  it('POPUP_EVENT_PREFIXES is exactly these 20 prefixes', () => {
     expect([...POPUP_EVENT_PREFIXES]).toEqual([
       '/signin-prompt',
       '/signin-eligible',
@@ -394,7 +394,51 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
       '/game/first-move',
       '/game/abandon',
       '/welcome-signed-in',
+      '/game/start/',
+      '/game/tutorial-complete/',
     ])
+  })
+  // v1.97.0 (first row at 2026-10-03T17:03:40Z): the three count-only first-run beacons. Until
+  // '/game/start/' and '/game/tutorial-complete/' were listed, every row of them was counted as a
+  // page view; '/tour/exit-at/*' was already covered by '/tour'.
+  it('the v1.97.0 first-run beacons are events, not page views', () => {
+    for (const p of [
+      '/tour/exit-at/preamble',
+      '/tour/exit-at/hub',
+      '/tour/exit-at/section',
+      '/game/start/easy',
+      '/game/start/medium',
+      '/game/start/hard',
+      '/game/start/expert',
+      '/game/start/unknown',
+      '/game/tutorial-complete/first-run',
+      '/game/tutorial-complete/replay',
+    ]) {
+      expect(isPopupEventPath(p), p).toBe(true)
+    }
+    // The real "played a game" page view and look-alikes still count as page views.
+    for (const p of ['/game', '/game/', '/game/start', '/game/tutorial-complete', '/game/starting', '/game/tutorial-completed/x']) {
+      expect(isPopupEventPath(p), p).toBe(false)
+    }
+  })
+  it('the v1.97.0 first-run beacons each have a path family, and the exclusion SQL drops them', () => {
+    expect(pathFamilyOf('/game/start/easy')).toBe('game-start')
+    expect(pathFamilyOf('/game/start/unknown')).toBe('game-start')
+    expect(pathFamilyOf('/game/tutorial-complete/first-run')).toBe('game-tutorial-complete')
+    expect(pathFamilyOf('/game/tutorial-complete/replay')).toBe('game-tutorial-complete')
+    expect(pathFamilyOf('/tour/exit-at/hub')).toBe('tour')
+    expect(pathFamilyOf('/game')).toBe('page')
+    const w: string[] = []
+    const b: unknown[] = []
+    popupExcludeClause(w, b)
+    const sql = w.join(' AND ')
+    expect(b).toEqual([])
+    expect(sql).toContain("path NOT LIKE '/game/start/%'")
+    expect(sql).toContain("path NOT LIKE '/game/tutorial-complete/%'")
+    // The include side (the event reads) is the exact inverse: it picks both prefixes up.
+    const inc = popupIncludeClause().sql
+    expect(inc).toContain("path LIKE '/game/start/%'")
+    expect(inc).toContain("path LIKE '/game/tutorial-complete/%'")
   })
   it('the first-session beacons are events; /game itself stays a page view', () => {
     for (const p of ['/tour/start', '/tour/complete', '/tour/skip', '/game/first-move', '/game/abandon/0', '/game/abandon/76-99', '/welcome-signed-in/shown', '/welcome-signed-in/leaderboard']) {

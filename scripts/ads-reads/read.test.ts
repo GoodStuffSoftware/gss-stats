@@ -192,7 +192,63 @@ describe('morning-read: first-session funnel (informational only)', () => {
     expect(text).toMatch(/^ {2}first move: 0 · site-wide 0$/m)
     expect(text).toMatch(/^ {2}abandon by % filled: 0% 0 · site-wide 0; 1-25% 0 · site-wide 0/m)
     expect(text).toMatch(/^ {2}welcome card \(signed in\): shown 0 · site-wide 4; daily 0 · site-wide 0; leaderboard 0 · site-wide 0; dismiss 0 · site-wide 0$/m)
-    expect(text).not.toMatch(/not yet tracked/)
+    // The v1.97.0 first-run counters have no rows in this pre-1.97.0 fixture: the three lines
+    // say so (the tour / abandon / welcome families above are live, so they do not), no error.
+    expect(text).toMatch(/^ {2}tour exit by stage \(since v1\.97\.0\): not yet tracked \(no rows yet\)$/m)
+    expect(text).toMatch(/^ {2}game starts by difficulty \(since v1\.97\.0; all counted starts, tour exits included\): not yet tracked \(no rows yet\)$/m)
+    expect(text).toMatch(/^ {2}tutorial complete \(since v1\.97\.0; first run vs replay\): not yet tracked \(no rows yet\)$/m)
+    expect(text.match(/not yet tracked/g)).toHaveLength(3)
+    expect(r.failures).toEqual([])
+    expect(f.tourExit.hub).toEqual({ tagged: 0, site: 0, tracked: false })
+    expect(f.gameStart.easy.tracked).toBe(false)
+    expect(f.tutorialComplete.replay.tracked).toBe(false)
+  })
+  it('v1.97.0 first-run counters: tour exit by stage, game starts by difficulty, tutorial complete, tagged with site-wide alongside', async () => {
+    const fx = base()
+    const hr = '2026-10-03T18:00:00Z'
+    beaconOf(fx).tagged.push(
+      { hour: hr, path: '/tour/exit-at/preamble', visitor: 'new', count: 2 },
+      { hour: hr, path: '/tour/exit-at/hub', visitor: 'new', count: 3 },
+      { hour: hr, path: '/game/start/easy', visitor: 'new', count: 6 },
+      { hour: hr, path: '/game/start/hard', visitor: 'returning', count: 1 },
+      { hour: hr, path: '/game/tutorial-complete/replay', visitor: 'returning', count: 4 },
+    )
+    beaconOf(fx).siteFirstSession!.push(
+      { path: '/tour/exit-at/preamble', count: 20 },
+      { path: '/tour/exit-at/hub', count: 30 },
+      { path: '/tour/exit-at/section', count: 10 },
+      { path: '/game/start/easy', count: 90 },
+      { path: '/game/start/medium', count: 40 },
+      { path: '/game/start/hard', count: 20 },
+      { path: '/game/start/expert', count: 7 },
+      { path: '/game/start/unknown', count: 3 },
+      { path: '/game/tutorial-complete/first-run', count: 2 },
+      { path: '/game/tutorial-complete/replay', count: 11 },
+    )
+    const r = await runMorningRead(fixtureDeps(fx, true), opts)
+    const f = r.firstSession!.funnel
+    expect(f.tourExit.section).toEqual({ tagged: 0, site: 10, tracked: true })
+    expect(f.gameStart.easy).toEqual({ tagged: 6, site: 90, tracked: true })
+    expect(f.tutorialComplete['first-run']).toEqual({ tagged: 0, site: 2, tracked: true })
+    const text = formatMorningReport(r)
+    expect(text).toMatch(/^ {2}tour exit by stage \(since v1\.97\.0\): preamble 2 · site-wide 20; hub 3 · site-wide 30; section 0 · site-wide 10$/m)
+    expect(text).toMatch(
+      /^ {2}game starts by difficulty \(since v1\.97\.0; all counted starts, tour exits included\): easy 6 · site-wide 90; medium 0 · site-wide 40; hard 1 · site-wide 20; expert 0 · site-wide 7; unknown 0 · site-wide 3$/m,
+    )
+    expect(text).toMatch(/^ {2}tutorial complete \(since v1\.97\.0; first run vs replay\): first-run 0 · site-wide 2; replay 4 · site-wide 11$/m)
+    // read in the funnel's own order: the tour outcomes, then how a tour exit / game starts, then the rest
+    const order = ['tour skip:', 'tour exit by stage', 'game starts by difficulty', 'tutorial complete', 'first move:', 'game complete:']
+    const at = order.map((s) => text.indexOf(`  ${s}`))
+    expect(at.every((i) => i >= 0)).toBe(true)
+    expect([...at].sort((a, b) => a - b)).toEqual(at)
+  })
+  it('without the site-wide read the new counters show the tagged 0 and "site-wide not read" (tracking unknown), no error', async () => {
+    const fx = base()
+    delete beaconOf(fx).siteFirstSession
+    const r = await runMorningRead(fixtureDeps(fx, true), opts)
+    expect(r.failures).toEqual([])
+    expect(r.firstSession!.funnel.tourExit.hub).toEqual({ tagged: 0, site: null, tracked: null })
+    expect(formatMorningReport(r)).toMatch(/^ {2}tour exit by stage \(since v1\.97\.0\): preamble 0 · site-wide not read; hub 0 · site-wide not read; section 0 · site-wide not read$/m)
   })
   it('a beacon source without the site-wide read leaves tracking unknown and does not fail the read', async () => {
     const fx = base()

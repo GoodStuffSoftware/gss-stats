@@ -922,3 +922,100 @@ describe('first-session funnel (informational only)', () => {
     expect(none.welcome.shown.tracked).toBeNull()
   })
 })
+
+// v1.97.0 count-only beacons (live on prod web 2026-10-03; first row 17:03:40Z): a tour exit by
+// stage, a counted game start by difficulty, the tutorial win (first run vs replay). Counter
+// totals only, matched by path: no row is joined to a device, a time or a place.
+describe('first-session funnel: v1.97.0 first-run counters', () => {
+  const at = H('2026-10-03T18:00:00Z')
+  const tagged = [
+    { hourStartMs: at, path: '/tour/exit-at/preamble', visitor: 'v', count: 2 },
+    { hourStartMs: at, path: '/tour/exit-at/hub', visitor: 'v', count: 3 },
+    { hourStartMs: at, path: '/tour/exit-at/section', visitor: 'v', count: 1 },
+    { hourStartMs: at, path: '/tour/exit-at/elsewhere', visitor: 'v', count: 50 }, // unknown stage: never guessed at
+    { hourStartMs: at, path: '/game/start/easy', visitor: 'v', count: 6 },
+    { hourStartMs: at, path: '/game/start/hard', visitor: 'v', count: 2 },
+    { hourStartMs: at, path: '/game/start/unknown', visitor: 'v', count: 1 },
+    { hourStartMs: at, path: '/game/start/impossible', visitor: 'v', count: 40 }, // unknown difficulty
+    { hourStartMs: at, path: '/game/tutorial-complete/first-run', visitor: 'v', count: 1 },
+    { hourStartMs: at, path: '/game/tutorial-complete/replay', visitor: 'v', count: 4 },
+    { hourStartMs: at, path: '/game/tutorial-complete/other', visitor: 'v', count: 30 }, // unknown variant
+    { hourStartMs: at, path: '/game/complete/normal/easy', visitor: 'v', count: 5 },
+  ]
+  const site = [
+    { path: '/tour/exit-at/preamble', count: 20 },
+    { path: '/tour/exit-at/hub', count: 30 },
+    { path: '/tour/exit-at/section', count: 10 },
+    { path: '/game/start/easy', count: 90 },
+    { path: '/game/start/medium', count: 40 },
+    { path: '/game/start/hard', count: 20 },
+    { path: '/game/start/expert', count: 7 },
+    { path: '/game/start/unknown', count: 3 },
+    { path: '/game/tutorial-complete/first-run', count: 2 },
+    { path: '/game/tutorial-complete/replay', count: 11 },
+    { path: '/game/complete/normal/easy', count: 55 },
+  ]
+  const noArrivals = { rows: [], ucValues: ['x'] }
+
+  it('buckets each new path by its stage / difficulty / variant, and nothing it does not know', () => {
+    for (const stage of ['preamble', 'hub', 'section'] as const) expect(firstSessionBucket(`/tour/exit-at/${stage}`)).toEqual({ kind: 'tourExit', stage })
+    for (const difficulty of ['easy', 'medium', 'hard', 'expert', 'unknown'] as const) expect(firstSessionBucket(`/game/start/${difficulty}`)).toEqual({ kind: 'gameStart', difficulty })
+    for (const variant of ['first-run', 'replay'] as const) expect(firstSessionBucket(`/game/tutorial-complete/${variant}`)).toEqual({ kind: 'tutorialComplete', variant })
+    for (const p of ['/tour/exit-at/', '/tour/exit-at/hub/', '/tour/exit-at/Hub', '/tour/exit-at', '/game/start', '/game/start/', '/game/start/easy/extra', '/game/tutorial-complete', '/game/tutorial-complete/first_run', '/game/tutorial-complete/replay/x']) {
+      expect(firstSessionBucket(p), p).toBeNull()
+    }
+    // the existing buckets are untouched
+    expect(firstSessionBucket('/game')).toEqual({ kind: 'step', step: 'gameView' })
+    expect(firstSessionBucket('/tour/skip')).toEqual({ kind: 'step', step: 'tourSkip' })
+    expect(firstSessionBucket('/game/complete/normal/easy')).toEqual({ kind: 'step', step: 'gameComplete' })
+  })
+
+  it('tallies each bucket as a counter total (tagged and site-wide), ignoring unknown suffixes', () => {
+    const t = tallyTaggedFirstSession(tagged, noArrivals)
+    expect(t.tourExit).toEqual({ preamble: 2, hub: 3, section: 1 })
+    expect(t.gameStart).toEqual({ easy: 6, medium: 0, hard: 2, expert: 0, unknown: 1 })
+    expect(t.tutorialComplete).toEqual({ 'first-run': 1, replay: 4 })
+    expect(t.steps.gameComplete).toBe(5)
+    const s = tallySiteFirstSession(site)
+    expect(s.tourExit).toEqual({ preamble: 20, hub: 30, section: 10 })
+    expect(s.gameStart).toEqual({ easy: 90, medium: 40, hard: 20, expert: 7, unknown: 3 })
+    expect(s.tutorialComplete).toEqual({ 'first-run': 2, replay: 11 })
+    expect(s.steps.gameComplete).toBe(55)
+  })
+
+  it('the funnel carries every new bucket as a tagged / site-wide figure, tracked once any of them has a row', () => {
+    const f = buildFirstSessionFunnel(tallyTaggedFirstSession(tagged, noArrivals), tallySiteFirstSession(site))
+    expect(f.tourExit.hub).toEqual({ tagged: 3, site: 30, tracked: true })
+    expect(f.gameStart.easy).toEqual({ tagged: 6, site: 90, tracked: true })
+    expect(f.gameStart.expert).toEqual({ tagged: 0, site: 7, tracked: true })
+    expect(f.tutorialComplete['first-run']).toEqual({ tagged: 1, site: 2, tracked: true })
+    expect(f.tutorialComplete.replay).toEqual({ tagged: 4, site: 11, tracked: true })
+    // Plain counters, no ratio: a start cannot be matched to the exit that led to it.
+    expect(Object.keys(f.gameStart.easy).sort()).toEqual(['site', 'tagged', 'tracked'])
+  })
+
+  it('one release, one family: a sibling with no rows reads a real 0 once any first-run counter has a row', () => {
+    const f = buildFirstSessionFunnel(tallyTaggedFirstSession([], noArrivals), tallySiteFirstSession([{ path: '/game/start/medium', count: 1 }]))
+    expect(f.gameStart.medium).toEqual({ tagged: 0, site: 1, tracked: true })
+    expect(f.tourExit.preamble).toEqual({ tagged: 0, site: 0, tracked: true })
+    expect(f.tutorialComplete['first-run']).toEqual({ tagged: 0, site: 0, tracked: true })
+    // a tagged row alone proves the release as well, when the site-wide read has none
+    const g = buildFirstSessionFunnel(tallyTaggedFirstSession([{ hourStartMs: at, path: '/tour/exit-at/hub', visitor: 'v', count: 1 }], noArrivals), tallySiteFirstSession([]))
+    expect(g.tutorialComplete.replay).toEqual({ tagged: 0, site: 0, tracked: true })
+  })
+
+  it('a pre-1.97.0 read (no new counters) is not yet tracked, never a zero, and cannot error', () => {
+    const preRelease = [{ path: '/game', count: 50 }, { path: '/tour/start', count: 9 }, { path: '/game/abandon/0', count: 3 }, { path: '/game/complete/daily/easy', count: 4 }]
+    const f = buildFirstSessionFunnel(tallyTaggedFirstSession([{ hourStartMs: at, path: '/game', visitor: 'v', count: 4 }], noArrivals), tallySiteFirstSession(preRelease))
+    for (const s of ['preamble', 'hub', 'section'] as const) expect(f.tourExit[s]).toEqual({ tagged: 0, site: 0, tracked: false })
+    for (const d of ['easy', 'medium', 'hard', 'expert', 'unknown'] as const) expect(f.gameStart[d]).toEqual({ tagged: 0, site: 0, tracked: false })
+    for (const v of ['first-run', 'replay'] as const) expect(f.tutorialComplete[v]).toEqual({ tagged: 0, site: 0, tracked: false })
+    // the tour / abandon release being live does not make the v1.97.0 counters tracked
+    expect(f.steps.tourStart.tracked).toBe(true)
+    // with no site-wide read at all, tracking is unknown, not 0
+    const none = buildFirstSessionFunnel(tallyTaggedFirstSession([], null), null)
+    expect(none.tourExit.hub).toEqual({ tagged: 0, site: null, tracked: null })
+    expect(none.gameStart.easy.tracked).toBeNull()
+    expect(none.tutorialComplete.replay.tracked).toBeNull()
+  })
+})
