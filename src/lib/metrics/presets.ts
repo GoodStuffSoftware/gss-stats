@@ -403,7 +403,7 @@ export const RETENTION_VERDICT: CardSpec = {
         { id: 'rate', label: { metric: true }, data: { metric: 'campaign.returnD2to7Rate' }, display: { as: 'percent', decimals: 1 }, ...COMPACT },
         { id: 'lower', label: { metric: true }, data: { metric: 'campaign.returnD2to7Lower' }, display: { as: 'percent', decimals: 1 }, ...COMPACT },
         { id: 'upper', label: { metric: true }, data: { metric: 'campaign.returnD2to7Upper' }, display: { as: 'percent', decimals: 1 }, ...COMPACT },
-        { id: 'd0', label: { metric: true }, data: { metric: 'campaign.returnD0' }, display: { as: 'number' }, ...COMPACT },
+        { id: 'd0', label: { note: 'label.card.arrivals-d0' }, data: { metric: 'campaign.returnD0' }, display: { as: 'number' }, ...COMPACT },
         { id: 'engagement', label: { metric: true }, data: { ratio: 'campaign.engagementPerArrival' }, display: { as: 'number' }, ...COMPACT },
       ],
     },

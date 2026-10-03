@@ -24,6 +24,11 @@ export const Z_90 = 1.6448536
 export const BAR_FIXED = 0.075
 /** Organic d0 (matured cohort) at which the bar switches to the organic one. */
 export const ORGANIC_MIN_D0 = 1000
+/** Matured organic ET days (tracking start through T-7) needed before the organic bar is used. The
+ * earliest organic cohorts include returners from before tracking began, so the organic rate and
+ * the bar read from it run HIGH by about (2.5 to 3.5 days) / (matured organic days); 21 days keeps
+ * that near 12 to 17%. */
+export const ORGANIC_MIN_DAYS = 21
 /** The organic bar is this fraction of the organic R2-7 point estimate. */
 export const ORGANIC_BAR_FACTOR = 0.6
 /** Below this d0 an arm gets no verdict at all. */
@@ -55,23 +60,36 @@ export function wilsonBounds(successes: number, n: number, z: number = Z_90): Wi
   }
 }
 
+/** Why the fixed bar was used (null when the organic bar is): shown beside the verdict. */
+export type FixedBarReason = 'arrivals' | 'days' | 'no-returns'
+
 export interface RetentionBar {
   bar: number
   source: 'fixed' | 'organic'
+  /** Set only when source is 'fixed': the first guard that failed. */
+  reason: FixedBarReason | null
 }
 
 /**
- * The bar an arm's R2-7 is judged against. 7.5% until the organic cohort has at
- * least ORGANIC_MIN_D0 arrivals; from there 0.6 x the organic R2-7.
+ * The bar an arm's R2-7 is judged against. The fixed 7.5% bar, unless ALL of these hold, and then
+ * 0.6 x the organic R2-7:
+ *  - at least ORGANIC_MIN_D0 matured organic arrivals;
+ *  - at least ORGANIC_MIN_DAYS matured organic ET days (the earliest organic cohorts include
+ *    returners from before tracking, which raises the organic rate: see ORGANIC_MIN_DAYS);
+ *  - organic d2-7 returns above zero. Zero returns would make the bar 0, and every arm would then
+ *    clear it: a broken or not-yet-firing organic beacon must fall back to the fixed bar, never
+ *    to a free GO.
  *
  * The organic point estimate is taken as FIXED: its own sampling error (about
  * +-1 point on the bar at d0 = 1,000) is deliberately not propagated into the
  * verdict (spec review #6, "say the bar is treated as fixed").
  */
-export function retentionBar(input: { organicD0: number; organicReturns: number }): RetentionBar {
-  const { organicD0, organicReturns } = input
-  if (!(organicD0 >= ORGANIC_MIN_D0)) return { bar: BAR_FIXED, source: 'fixed' }
-  return { bar: (ORGANIC_BAR_FACTOR * organicReturns) / organicD0, source: 'organic' }
+export function retentionBar(input: { organicD0: number; organicReturns: number; organicDays: number }): RetentionBar {
+  const { organicD0, organicReturns, organicDays } = input
+  if (!(organicD0 >= ORGANIC_MIN_D0)) return { bar: BAR_FIXED, source: 'fixed', reason: 'arrivals' }
+  if (!(organicDays >= ORGANIC_MIN_DAYS)) return { bar: BAR_FIXED, source: 'fixed', reason: 'days' }
+  if (!(organicReturns > 0)) return { bar: BAR_FIXED, source: 'fixed', reason: 'no-returns' }
+  return { bar: (ORGANIC_BAR_FACTOR * organicReturns) / organicD0, source: 'organic', reason: null }
 }
 
 export type VerdictCode = 'too-few' | 'provisional' | 'maturing' | 'go' | 'hold' | 'no-go'

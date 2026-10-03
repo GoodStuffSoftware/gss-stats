@@ -428,15 +428,25 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   layout version. The rate is the share of an arm's d0 devices that came back on any of days 2-7
   after arrival (ET days), and its bounds are a **Wilson score interval at 90%**
   (`wilsonBounds` in [`src/lib/metrics/retention.ts`](src/lib/metrics/retention.ts)). The verdict
-  compares those bounds with a **bar**: a fixed 7.5%, or 0.6 times the organic days 2-7 rate once at
-  least 1,000 *matured* organic arrivals exist. Codes: **too few** (under 200 d0, no read);
+  compares those bounds with a **bar**: a fixed 7.5%, or 0.6 times the organic days 2-7 rate once
+  the organic baseline is sound, meaning at least 1,000 *matured* organic arrivals, at least 21
+  matured organic ET days, and at least one organic day 2-7 return (zero returns would make the
+  bar 0 and hand every arm a GO, so that case keeps the fixed 7.5%). The verdict cell says which
+  bar was used and, for the fixed one, why. Codes: **too few** (under 200 d0, no read);
   **maturing** (the arm's last arrival's day 2-7 window has not closed, so returns can still
   arrive; a maturing arm never gets an early NO-GO); **provisional** (matured, 200-499 d0, the
   upper bound is not below the bar; it can still be NO-GO when it is); **GO** (matured, at least 500
   d0, lower bound at or above the bar); **NO-GO** (matured, upper bound below the bar); **HOLD**
   (matured, at least 500 d0, the bar sits inside the bounds). At 500 d0 against the fixed 7.5%
   bar, GO needs 48 or more returns (lower bound 7.65%; 47 gives 7.47%) and NO-GO needs 27 or fewer
-  (upper bound 7.32%; 28 gives 7.54%). These are Wilson thresholds, not the Wald 49 and 28. Organic d0
+  (upper bound 7.32%; 28 gives 7.54%). These are Wilson thresholds, not the Wald 49 and 28. When the organic bar is used it
+  **runs high**: the organic day 2-7 count is cut at ET midnights, so it also includes returns from
+  recent arrivals that are not yet in the matured arrival count, about 2.5 to 3.5 days of
+  arrivals' worth (2.5 if first returns are spread evenly over days 2-7, 3.5 if they come on
+  day 2). The bar is therefore too high by about that many days divided by the matured organic
+  days (roughly 12 to 17% at 21 days, about 10% at 30, and larger the fewer there are). A high bar
+  makes NO-GO easier and GO harder, never the reverse, and that is why the 21-day minimum exists.
+  Organic d0
   and campaign d0 are **disjoint populations** (a device is organic only on a first-ever web visit
   with no campaign tag, first touch wins), so the organic bar *compares* the two groups and nets
   nothing out of a campaign; that caveat can't be hidden from the card. The rates are also a lower
