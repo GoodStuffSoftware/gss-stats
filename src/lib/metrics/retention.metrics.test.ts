@@ -110,11 +110,11 @@ describe('R2-7: d2-7 / d0 with 90% Wilson bounds', () => {
     for (const id of ids) expect(METRICS.get(id)!.unit).toBe('rate')
     expect(ratioVerdict({ kind: 'pair', num: ids[0], den: 'campaign.returnD0' }).ok).toBe(false)
   })
-  it('keeps the default refused-row handling and no organic arm', () => {
+  it('keeps the default refused-row handling and serves the organic arm (its matured cohort)', () => {
     for (const id of ids) {
       const def = METRICS.get(id)!
       expect(def.countsRefused, id).toBeUndefined()
-      expect(def.organic, id).toBeUndefined()
+      expect(def.organic, id).toBe(true)
       expect(NOTES_REGISTRY[def.label]?.kind, id).toBe('label')
     }
   })

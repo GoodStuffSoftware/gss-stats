@@ -22,7 +22,7 @@
 // ET date arithmetic (day windows, serving ends, delta gates, the page range) is done once per
 // batch or memoized.
 
-import { CAMPAIGNS, campaignAttributionClause, campaignAttributionStartMs, campaignById, type CampaignAttribution, type CampaignFlight } from '../campaigns'
+import { CAMPAIGNS, campaignAttributionClause, campaignAttributionStartMs, campaignById, ORGANIC_ARM_ID, type CampaignAttribution, type CampaignFlight } from '../campaigns'
 
 import { gateRate, INSTALL_GAP_PATHS, POPUPS, rowIsPostInstallFix } from '../popupEvents'
 import { computeDelta, releaseComparisonWindows } from '../overview'
@@ -90,12 +90,19 @@ export function factKeyString(id: FactId, p: FactParams): string {
   return JSON.stringify(factKey(id, p))
 }
 
+/** The organic returns arm's fact params: the arm, and today's ET date for its maturity band. */
+function organicReturnsParams(env: Pick<BatchEnv, 'todayEt'>): FactParams {
+  return { campaignId: ORGANIC_ARM_ID, todayEt: env.todayEt }
+}
+
 /** The fact params one side of a request reads, from its window and the batch context. */
 function factParamsFor(factId: FactId, req: Pick<ResolvedRequest, 'params'>, env: BatchEnv): FactParams {
   switch (factId) {
+    case 'campaignReturns':
+      // todayEt (the organic maturity band) ONLY for the organic arm: a campaign's key is unchanged.
+      return req.params.campaignId === ORGANIC_ARM_ID ? organicReturnsParams(env) : { campaignId: req.params.campaignId }
     case 'campaignPathVisitor':
     case 'campaignDaily':
-    case 'campaignReturns':
     case 'flightPathsSeen':
       return { campaignId: req.params.campaignId }
     case 'bskKpiDays':
@@ -260,6 +267,8 @@ export function planBatch(requests: readonly ResolvedRequest[], env: BatchEnv, m
       const twin = req.series ? seriesTwin(def, req.window) : null
       if (twin) add(twin, factParamsFor(twin, req, env))
       if (side.needsSeen) add('flightPathsSeen', { campaignId: ctx.campaign!.id })
+      // A metric judged against the organic baseline (MetricDef.withOrganic) reads its rows too.
+      if (def.withOrganic) add('campaignReturns', organicReturnsParams(env))
     }
   }
   const list = [...facts.values()]
@@ -598,7 +607,13 @@ class Batch {
     // arm's campaignReturns rows).
     if (fact.rows.kind !== 'beacon' || def.store) {
       if (def.store) {
-        const r = def.store(fact.rows, ctx, { nowMs: this.env.nowMs, releaseDays: this.env.release?.days ?? null })
+        let organic: FactRows | undefined
+        if (def.withOrganic) {
+          const o = this.env.facts.get(factKeyString('campaignReturns', organicReturnsParams(this.env)))
+          if (!o || !o.ok) return { status: 'error', value: null, reason: 'fact-failed', noteIds: [] }
+          organic = o.rows
+        }
+        const r = def.store(fact.rows, ctx, { nowMs: this.env.nowMs, releaseDays: this.env.release?.days ?? null, todayEt: this.env.todayEt, ...(organic ? { organic } : {}) })
         const ids = r.noteIds?.length ? [...new Set([...noteIds, ...r.noteIds])] : noteIds
         return { status, value: r.value, m, noteIds: ids, asOfMs: plan.asOfMs, ...(r.tooFew ? { tooFew: true } : {}), ...(r.numerator !== undefined ? { numerator: r.numerator, denominator: r.denominator } : {}) }
       }

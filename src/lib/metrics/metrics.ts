@@ -46,8 +46,9 @@ import { isEventPath, isPopupAccept, isPopupShown, isReturnD1Plus } from '../ove
 import { resolveCampaignSpend, UPSELL_SIGNEDOUT_FIX_AT, AUTH_NEW_EXISTING_LIVE_AT, type SpendSummary } from '../adsRules'
 import { freshnessOf, spendThroughFromRows } from '../adsFreshness'
 import type { BeaconRow, FactId, FactRows } from './facts'
-import { etMidnightMs, type InstrumentationRule } from './instrumentation'
-import { wilsonBounds } from './retention'
+import { etDateOfMs, etMidnightMs, servingEndMs, type InstrumentationRule } from './instrumentation'
+import { retentionBar, retentionVerdict, wilsonBounds, type VerdictCode } from './retention'
+import { addDays } from '../etTime'
 import type { WindowName } from './types'
 import type { Unit } from './units'
 
@@ -61,6 +62,11 @@ export interface StoreEnv {
   nowMs: number
   /** The release windows' size in days (the release metrics), null when there is no window. */
   releaseDays: number | null
+  /** ET calendar date of nowMs (the verdict's arm maturity, in whole ET days). */
+  todayEt: string
+  /** The organic arm's campaignReturns rows (with their ET-day maturity band), passed only to a
+   * MetricDef.withOrganic store; the engine reports an error when that fact is missing. */
+  organic?: FactRows
 }
 
 /** What a store reducer returns. `tooFew` (with the counts behind it) makes the engine report
@@ -122,6 +128,10 @@ export interface MetricDef {
    * `campaignId`: the web-only `/return/organic/<bucket>` rows. Only a campaign-scoped metric
    * over campaignReturns may set it (checked at load); every other binding refuses 'organic'. */
   organic?: true
+  /** A campaign store metric judged against the organic baseline: the engine also plans the
+   * organic arm's campaignReturns fact and passes its rows as StoreEnv.organic. Only a store over
+   * campaignReturns that is not itself organic may set it (checked at load). */
+  withOrganic?: true
 }
 
 // ── Memoized classifiers (a fact has few distinct paths and many rows) ───────────────────
@@ -228,24 +238,62 @@ function armReturn(path: string, ctx: MetricCtx): ReturnType<typeof parseReturnP
   if (ctx.params.campaignId === ORGANIC_ARM_ID) return ev.uc === ORGANIC_ARM_ID ? ev : null
   return ctx.campaign?.ucValues.includes(ev.uc) ? ev : null
 }
-/** d2-7 / d0 over the arm's campaignReturns rows: the rate, or one bound of its Wilson interval.
- * Rows only, never a device: the same counts the returnD0 / returnD2to7 metrics sum. Under
- * MIN_COHORT d0 arrivals there is no figure (status 'too-few', counts attached). */
+/** The arm's d0 and d2-7 return counts over its campaignReturns rows. Rows only, never a device.
+ * A campaign arm counts every row (the same counts returnD0 / returnD2to7 sum). The organic arm
+ * counts only its MATURED cohort, by the ET-day band `s` (lib/metrics/facts.ts
+ * ORGANIC_MATURITY_SQL, which carries the full argument): d0 rows with s = 0 (exact: arrivals on
+ * or before T-8) and d2-7 rows with s <= 1 (fired on or before T-1: at or above the exact count).
+ * An exact d0 and a d2-7 that can only be high put the organic rate, and the 0.6x bar read from
+ * it, never below the exact one: the approximation NEVER LOWERS THE BAR. */
+function armReturnCounts(rows: readonly BeaconRow[], ctx: MetricCtx): { d0: number; d2to7: number } {
+  const maturedOnly = ctx.params.campaignId === ORGANIC_ARM_ID
+  let d0 = 0
+  let d2to7 = 0
+  for (const r of rows) {
+    const ev = armReturn(r.path, ctx)
+    if (ev?.bucket === 'd0') d0 += !maturedOnly || r.seg === 0 ? r.c : 0
+    else if (ev?.bucket === 'd2-7') d2to7 += !maturedOnly || r.seg <= 1 ? r.c : 0
+  }
+  return { d0, d2to7 }
+}
+/** d2-7 / d0 over the arm's campaignReturns rows (armReturnCounts: the organic arm's matured
+ * cohort only, the same quantity the verdict's bar reads): the rate, or one bound of its Wilson
+ * interval. Under MIN_COHORT d0 arrivals there is no figure (status 'too-few', counts attached). */
 function returnD2to7Of(part: 'rate' | 'lower' | 'upper') {
   return (rows: FactRows, ctx: MetricCtx): StoreResult => {
     if (rows.kind !== 'beacon') return { value: null }
-    let d0 = 0
-    let d2to7 = 0
-    for (const r of rows.rows) {
-      const ev = armReturn(r.path, ctx)
-      if (ev?.bucket === 'd0') d0 += r.c
-      else if (ev?.bucket === 'd2-7') d2to7 += r.c
-    }
+    const { d0, d2to7 } = armReturnCounts(rows.rows, ctx)
     if (d0 === 0) return { value: null }
     if (d0 < MIN_COHORT) return { value: null, tooFew: true, numerator: d2to7, denominator: d0 }
     const b = wilsonBounds(d2to7, d0)!
     return { value: part === 'rate' ? d2to7 / d0 : b[part], numerator: d2to7, denominator: d0 }
   }
+}
+
+// ── The per-arm retention verdict (retention spec section 4, lib/metrics/retention.ts) ──────────
+/** campaign.retentionVerdict's value: the index of its code here, shown as its 'verdict.<code>'
+ * label. Append only: a value never changes meaning. */
+export const VERDICT_CODES: readonly VerdictCode[] = ['too-few', 'maturing', 'provisional', 'no-go', 'hold', 'go']
+const ORGANIC_CTX: MetricCtx = { params: { campaignId: ORGANIC_ARM_ID }, window: 'attribution' }
+/** An arm is matured once its last arrival's d2-7 window has closed: 7 ET days after its serving
+ * end (servingEndMs, an ET midnight) is at or before today's ET midnight. ET DAYS only, never a
+ * clock time; daysToMature is the whole ET days left, counted on the same dates (DST-proof). */
+export function armMaturity(c: CampaignFlight, todayEt: string): { matured: boolean; daysToMature: number } {
+  const maturesEt = addDays(etDateOfMs(servingEndMs(c)), 7)
+  if (etMidnightMs(maturesEt) <= etMidnightMs(todayEt)) return { matured: true, daysToMature: 0 }
+  return { matured: false, daysToMature: Math.round((Date.parse(`${maturesEt}T00:00:00Z`) - Date.parse(`${todayEt}T00:00:00Z`)) / 86_400_000) }
+}
+/** The arm's verdict: its R2-7 (every row) against the bar set from the organic arm's MATURED
+ * cohort (retentionBar: 7.5% until 1,000 matured organic d0, then 0.6x the organic R2-7). The
+ * value is a code shown as its label, never a clock time. */
+function retentionVerdictOf(rows: FactRows, ctx: MetricCtx, env: StoreEnv): StoreResult {
+  if (rows.kind !== 'beacon' || env.organic?.kind !== 'beacon' || !ctx.campaign) return { value: null }
+  const arm = armReturnCounts(rows.rows, ctx)
+  const organic = armReturnCounts(env.organic.rows, ORGANIC_CTX)
+  const { matured, daysToMature } = armMaturity(ctx.campaign, env.todayEt)
+  const bar = retentionBar({ organicD0: organic.d0, organicReturns: organic.d2to7 }).bar
+  const v = retentionVerdict({ d0: arm.d0, returns27: arm.d2to7, matured, daysToMature, bar })
+  return { value: VERDICT_CODES.indexOf(v.code), noteIds: [`verdict.${v.code}`] }
 }
 
 // ── The ads store's freshness (lib/adsStore.ts readFreshness), per campaign ────────────────
@@ -337,7 +385,8 @@ export const METRIC_DEFS: MetricDef[] = [
   ),
   // R2-7 (retention spec section 4): returns on days 2-7 over first tagged loads, per campaign arm,
   // with the 90% Wilson interval. Store metrics over the arm's return rows; a share (unit 'rate'),
-  // never a count, so no ratio can use one. Not organic: the organic baseline needs its maturity cut.
+  // never a count, so no ratio can use one. The organic arm reads its MATURED cohort only
+  // (armReturnCounts): the baseline the verdict's bar is set from.
   ...(['rate', 'lower', 'upper'] as const).map((part) =>
     campaignMetric({
       id: `campaign.returnD2to7${part === 'rate' ? 'Rate' : part === 'lower' ? 'Lower' : 'Upper'}`,
@@ -345,10 +394,22 @@ export const METRIC_DEFS: MetricDef[] = [
       params: ['campaignId'],
       windows: { attribution: 'campaignReturns' },
       store: returnD2to7Of(part),
-      instrumented: [BEACON, TRACKING_VS_FLIGHT],
+      instrumented: (ctx) => (ctx.params.campaignId === ORGANIC_ARM_ID ? [BEACON, ORGANIC_TRACKING] : [BEACON, TRACKING_VS_FLIGHT]),
       lagDays: [2, 7],
+      organic: true,
     }),
   ),
+  // The per-arm verdict (retention spec section 4): the arm's R2-7 against the organic baseline's
+  // bar, as a code shown by its 'verdict.<code>' label. Never organic itself.
+  campaignMetric({
+    id: 'campaign.retentionVerdict',
+    unit: 'code',
+    params: ['campaignId'],
+    windows: { attribution: 'campaignReturns' },
+    store: retentionVerdictOf,
+    withOrganic: true,
+    instrumented: [BEACON, TRACKING_VS_FLIGHT],
+  }),
   campaignMetric({
     id: 'campaign.spendSource',
     unit: 'code',
@@ -530,6 +591,10 @@ export const METRICS: ReadonlyMap<string, MetricDef> = (() => {
     // any other fact would read the 'organic' campaignId as an unknown campaign.
     if (d.organic && (!d.params.includes('campaignId') || Object.values(d.windows).some((f) => f !== 'campaignReturns'))) {
       throw new Error(`metric ${d.id}: organic needs a campaignId param and reads campaignReturns only`)
+    }
+    // The organic baseline reaches a store only beside a campaign arm's own returns fact.
+    if (d.withOrganic && (!d.store || d.organic || Object.values(d.windows).some((f) => f !== 'campaignReturns'))) {
+      throw new Error(`metric ${d.id}: withOrganic needs a store over campaignReturns and is never organic`)
     }
     // No path test = every row counts, refused rows included: the opt-out would be a lie.
     if (d.countsRefused === false && !d.path) throw new Error(`metric ${d.id}: countsRefused: false needs a path test`)
