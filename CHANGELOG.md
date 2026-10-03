@@ -6,10 +6,17 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Removed
+- **The "Deferred completions (EU consent)" tile is gone.** Best Sudoku now sends those games as
+  ordinary completions, so the tile could only read 0; saved copies of it load without the tile, and a saved card whose only item was that
+  tile now loads as an invalid card.
+
 ### Fixed
 - **Return visits now leave out pre-launch test visits, like the arrivals tile.** Returns from a
   campaign's tagged link count only from its attribution start (for the retest, 12:00 ET on its
   first day), so launch-day test rows no longer inflate the return buckets.
+- **Chart release markers now include v1.95.4 to v1.96.1.** Seven more Best Sudoku releases
+  (v1.95.4 to v1.95.8, v1.96.0, v1.96.1) show on the release timeline.
 - **Sync all pages shows its real state.** The "Sync all pages" checkbox in the filter bar no
   longer always shows as on — it now genuinely reflects whether page date ranges are synced.
 - **Best Sudoku · Overview content sits right under the filter bar again.** The small-sample
