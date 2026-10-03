@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.13.2] — 2026-10-03
+
 ### Fixed
 - **The metric-card editor handles its edge cases.** A row stored as a sparkline can be switched
   back to after trying another display; percent decimals offer 0 to 4, matching what is accepted;
