@@ -43,7 +43,10 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **Search campaigns read alongside Display ones.** A campaign can now be registered as a
   Search arm: its placement rules and lines read "n/a (search campaign)" instead of tripping on
   missing placements, while spend, clicks and every other rule read as before, and each of two
-  arms running at once is read on its own `--campaign`.
+  arms running at once is read on its own `--campaign` (given twice, it is refused). A search
+  arm's $100 decision is worded for search and compared against the other flight-2 arm, its
+  morning read flags the closed day's spend on mobile, tablet or TV (the arm is desktop-only),
+  and the readings widget counts rules on watch.
 - **The retest read shows whether the first-50 offer is actually visible.** The Accounts line
   now reports the first-50 counter and the offer signed-out visitors really see side by side,
   flags when they disagree, and $50-and-later and post-flight reads note that the promo arm was
