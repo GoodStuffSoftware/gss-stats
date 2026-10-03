@@ -383,6 +383,53 @@ export const CAMPAIGN_RETURNS: CardSpec = {
   ],
 }
 
+/** The retention verdict (retention spec section 4): one table row per beacon-tracked campaign arm,
+ * then the web-only organic baseline. Each row: the verdict, the days 2-7 return rate (R2-7) with its
+ * 90% Wilson bounds and (n/d), its first tagged loads (d0), and games completed per arrival (E1).
+ * The organic row has no verdict and no E1 (bindings that don't serve it are left out of its
+ * instance); its rate is its matured cohort, the baseline the bar is set from. Counts only: no
+ * hour, place or device split, and the R2-7 figures and the verdict carry the disjoint-groups and
+ * lower-bound caveats (behind each cell's Notes). Offered in the picker only, never a default. */
+export const RETENTION_VERDICT: CardSpec = {
+  v: 1,
+  minWidth: 230,
+  sections: [
+    {
+      layout: 'table',
+      repeat: { over: 'campaigns', tracked: true, organic: true, empty: { label: '', text: { note: 'no-return-visits-yet' } } },
+      items: [
+        { id: 'arm', label: { note: 'label.card.arm' }, data: { field: 'campaign.label' }, display: { as: 'text' } },
+        { id: 'verdict', label: { metric: true }, data: { metric: 'campaign.retentionVerdict' }, display: { as: 'status' }, ...COMPACT },
+        { id: 'rate', label: { metric: true }, data: { metric: 'campaign.returnD2to7Rate' }, display: { as: 'percent', decimals: 1 }, ...COMPACT },
+        { id: 'lower', label: { metric: true }, data: { metric: 'campaign.returnD2to7Lower' }, display: { as: 'percent', decimals: 1 }, ...COMPACT },
+        { id: 'upper', label: { metric: true }, data: { metric: 'campaign.returnD2to7Upper' }, display: { as: 'percent', decimals: 1 }, ...COMPACT },
+        { id: 'd0', label: { metric: true }, data: { metric: 'campaign.returnD0' }, display: { as: 'number' }, ...COMPACT },
+        { id: 'engagement', label: { metric: true }, data: { ratio: 'campaign.engagementPerArrival' }, display: { as: 'number' }, ...COMPACT },
+      ],
+    },
+  ],
+}
+
+/** Engagement per arrival (E1): one card per beacon-tracked campaign, completed games over first
+ * tagged loads, with the two counts it is made of. A plain number that can exceed 1 (it counts
+ * games, not devices), never a percentage. Counts only; picker only, never a default. */
+export const CAMPAIGN_ENGAGEMENT: CardSpec = {
+  v: 1,
+  repeat: { over: 'campaigns', tracked: true, empty: { label: '', text: { note: 'no-return-visits-yet' } } },
+  minWidth: 230,
+  title: { bind: 'campaign.label' },
+  sections: [
+    {
+      layout: 'rows',
+      items: [
+        { id: 'engagement', label: { metric: true }, data: { ratio: 'campaign.engagementPerArrival' }, display: { as: 'number' }, ...COMPACT },
+        { id: 'completions', label: { metric: true }, data: { metric: 'campaign.completions' }, display: { as: 'number' }, ...COMPACT },
+        { id: 'd0', label: { metric: true }, data: { metric: 'campaign.returnD0' }, display: { as: 'number' }, ...COMPACT },
+      ],
+    },
+  ],
+}
+
 /** Every preset by id. A null prototype, so an id such as 'constructor' or 'toString' is
  * simply not a preset — read through presetById, never a bare bracket lookup. */
 export const PRESETS: Readonly<Record<string, CardSpec>> = Object.freeze(
@@ -396,6 +443,8 @@ export const PRESETS: Readonly<Record<string, CardSpec>> = Object.freeze(
     'campaign-funnel': CAMPAIGN_FUNNEL,
     'campaign-country': CAMPAIGN_COUNTRY,
     'campaign-returns': CAMPAIGN_RETURNS,
+    'retention-verdict': RETENTION_VERDICT,
+    'campaign-engagement': CAMPAIGN_ENGAGEMENT,
   }),
 )
 

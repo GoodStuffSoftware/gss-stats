@@ -48,6 +48,7 @@ import { tokenizeAndInterpolate, toPlainText } from './textLite'
 // out of itself), so importing the constant from lib/adsRules.ts here is fine.
 import { AUTH_NEW_EXISTING_LIVE_AT } from './adsRules'
 import { etOffsetHours } from './etTime'
+import { BAR_FIXED, ORGANIC_BAR_FACTOR, ORGANIC_MIN_D0 } from './metrics/retention'
 
 // "counted from 2026-09-26 15:43 ET" — AUTH_NEW_EXISTING_LIVE_AT's own ET wall time, for the
 // new/existing/unknown sign-up tiles' partial-window note (lib/metrics/metrics.ts
@@ -80,6 +81,8 @@ export interface NoteDef {
   scopes: NoteScope[]
   activeWhen?: () => boolean
   vars?: Record<string, string | number>
+  /** Data-cut note, never hideable: only an explicit `false` means anything; absent = hideable. */
+  hideable?: boolean
 }
 
 function resolveText(n: NoteDef): string {
@@ -228,6 +231,24 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     kind: 'note',
     severity: 'caveat',
     scopes: ['campaigns'],
+  },
+  'retention-disjoint': {
+    id: 'retention-disjoint',
+    // Built from the verdict's own constants (lib/metrics/retention.ts), so the text cannot drift
+    // from the bar the rule uses. ET-day wording only: no clock time.
+    text: () =>
+      `Organic and campaign arrivals are different devices. Organic is a first-ever web visit with no campaign tag, and the first touch wins. The bar compares the two groups. It does not net organic out of a campaign. The bar is ${ORGANIC_BAR_FACTOR} times the organic days 2-7 rate once ${ORGANIC_MIN_D0.toLocaleString('en-US')} organic arrivals have matured, and a fixed ${+(BAR_FIXED * 100).toFixed(1)}% until then.`,
+    kind: 'note',
+    severity: 'caveat',
+    scopes: [],
+    hideable: false,
+  },
+  'retention-lower-bound': {
+    id: 'retention-lower-bound',
+    text: 'These rates are a lower bound on how many people come back. A device is browser storage, not a person: cleared storage, private windows, a second browser and a move to the app all lose returns. The 90% bounds cover sampling error only, not that bias.',
+    kind: 'note',
+    severity: 'caveat',
+    scopes: [],
   },
   'return-rate-caption': {
     id: 'return-rate-caption',
@@ -498,6 +519,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.card.release': 'Release',
     'label.card.retiredPanel': 'This panel has been replaced by a card or a chart. Edit it, or restore the default charts.',
     'label.card.step': 'Step',
+    'label.card.arm': 'Arm',
     'label.card.returnTag': 'Return beacons',
     'label.card.return.d1': 'd1',
     'label.card.return.d2-7': 'd2-7',
@@ -541,6 +563,10 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.preset.campaign-returns.description': 'One card per campaign with return beacons: first tagged loads (d0) and each later window\'s return rate, left to right.',
     'label.preset.campaign-country': 'Arrivals and funnel by country',
     'label.preset.campaign-country.description': 'One card per beacon-tracked campaign: each funnel step split into US, CA and every other country.',
+    'label.preset.retention-verdict': 'Retention verdict',
+    'label.preset.retention-verdict.description': 'One row per campaign and the organic baseline: the verdict, the days 2-7 return rate with its 90% bounds, and first tagged loads.',
+    'label.preset.campaign-engagement': 'Engagement per arrival',
+    'label.preset.campaign-engagement.description': 'One card per beacon-tracked campaign: completed games per first tagged load, with the two counts it is made of.',
     'label.preset.campaign-cost': 'Campaign cost',
     'label.preset.campaign-cost.description': 'One card per campaign: spend, where it came from and how fresh it is, and the cost per arrival and per auth success.',
     'label.preset.release-before-after.description': 'The newest release with a full day after it: page views, tagged arrivals, auth successes and installs over the same number of days before and after it.',

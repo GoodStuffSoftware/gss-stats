@@ -25,12 +25,15 @@ describe('notes registry — lookups', () => {
     expect(noteRawText('nope')).toBe('')
   })
 
+  // The retention caveats ride on their metrics (MetricDef.caveats), so they must not pre-fill every new campaigns chart.
+  const METRIC_ONLY_CAVEATS = new Set(['retention-disjoint', 'retention-lower-bound'])
   it('every registry entry has a non-empty id matching its own key', () => {
     for (const [key, def] of Object.entries(NOTES_REGISTRY)) {
       expect(def.id).toBe(key)
       // A caption ('note'/'text') is a default somewhere; a 'label' never is.
       if (def.kind === 'label') expect(def.scopes).toEqual([])
-      else expect(def.scopes.length).toBeGreaterThan(0)
+      // A metric-attached caveat may have no scope: it is never a chart caption default.
+      else if (!METRIC_ONLY_CAVEATS.has(def.id)) expect(def.scopes.length).toBeGreaterThan(0)
     }
   })
 })
