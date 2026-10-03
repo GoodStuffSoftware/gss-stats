@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { allChartNotes, chartNotes, isChartNoteHidden, isNoteIdHideable } from './chartNotes'
-import { getNote } from './notes'
+import { allChartNotes, chartNotes, convertLegacyNotes, isChartNoteHidden, isNoteIdHideable } from './chartNotes'
+import { getNote, isStaticCaptionNote, libraryCaptionOptions, noteTemplate } from './notes'
 import { rangeNoticeText, type RangeNotice } from './rangeNotice'
 import { REFUSED_WHOLE_DAYS_CAPTION, SPLIT_GUARD_CAPTION } from './splitGuard'
 import type { StatsResponse, Widget } from '../types'
@@ -205,5 +205,58 @@ describe('chartNotes — hiddenCaveats (1c)', () => {
     expect(notes.filter((n) => isChartNoteHidden(n, hidden)).map((n) => n.key)).toEqual(['caption:small-sample', 'popup-note'])
     expect(notes.find((n) => n.key === 'caption:small-sample')?.hideId).toBe('small-sample')
     expect(notes.filter((n) => !n.hideable).every((n) => n.hideId === undefined)).toBe(true)
+  })
+})
+
+describe('static library captions (1c, D1)', () => {
+  it('a plain registry caption is static; gated, computed, code-tied, data-cut and unknown ids are not', () => {
+    expect(isStaticCaptionNote('small-sample')).toBe(true)
+    expect(isStaticCaptionNote('release-before-partial')).toBe(true)
+    expect(isStaticCaptionNote('tracking-not-yet-active')).toBe(false) // activeWhen
+    expect(isStaticCaptionNote('play-tracking-status')).toBe(false) // computed text
+    expect(isStaticCaptionNote('min-cohort-caveat')).toBe(false) // vars tied to code
+    expect(isStaticCaptionNote('country-split-excludes-refused')).toBe(false) // data cut
+    expect(isStaticCaptionNote('no-such-note')).toBe(false)
+  })
+
+  it('"Insert from library" offers exactly the static captions', () => {
+    const ids = libraryCaptionOptions().map((o) => o.value)
+    expect(ids).toContain('small-sample')
+    expect(ids.every(isStaticCaptionNote)).toBe(true)
+    expect(ids).not.toContain('play-tracking-status')
+  })
+})
+
+describe('convertLegacyNotes (1c, D5 convert-on-edit)', () => {
+  it('folds static ids into the caption in order, after the existing caption, and keeps unknown and caveat ids', () => {
+    const w = widget({ caption: 'Mine.  ', notes: ['small-sample', 'bogus-id', 'tracking-not-yet-active', 'release-before-partial'] })
+    const { widget: out, converted } = convertLegacyNotes(w)
+    expect(converted).toEqual(['small-sample', 'release-before-partial'])
+    expect(out.caption).toBe(`Mine.\n\n${noteTemplate('small-sample').trim()}\n\n${noteTemplate('release-before-partial').trim()}`)
+    expect(out.notes).toEqual(['bogus-id', 'tracking-not-yet-active'])
+    expect(w.notes).toHaveLength(4) // never mutates
+    expect(w.caption).toBe('Mine.  ')
+  })
+
+  it('deletes `notes` once every id is converted, and starts a caption when there was none', () => {
+    const { widget: out } = convertLegacyNotes(widget({ notes: ['small-sample'] }))
+    expect('notes' in out).toBe(false)
+    expect(out.caption).toBe(noteTemplate('small-sample').trim())
+  })
+
+  it('a hidden static id leaves `notes` without adding text, so the chart looks the same', () => {
+    const { widget: out, converted } = convertLegacyNotes(widget({ notes: ['small-sample'], hiddenCaveats: ['small-sample'] }))
+    expect(converted).toEqual(['small-sample'])
+    expect('caption' in out).toBe(false)
+    expect('notes' in out).toBe(false)
+  })
+
+  it('returns the same object when there is nothing to convert, and for every note widget', () => {
+    const plain = widget()
+    expect(convertLegacyNotes(plain).widget).toBe(plain)
+    const onlyUnknown = widget({ notes: ['bogus-id'] })
+    expect(convertLegacyNotes(onlyUnknown).widget).toBe(onlyUnknown)
+    const note = widget({ type: 'note', notes: ['small-sample'] })
+    expect(convertLegacyNotes(note).widget).toBe(note)
   })
 })
