@@ -40,7 +40,7 @@
 // split — and none joins rows.
 // facts.test.ts checks every statement.
 
-import { applyExclusions, CAMPAIGNS, campaignAttributionClause, campaignById, etFlightRangeMs, type CampaignFlight } from '../campaigns'
+import { applyExclusions, CAMPAIGNS, campaignAttributionClause, campaignAttributionStartMs, campaignById, etFlightRangeMs, type CampaignFlight } from '../campaigns'
 import { excludeInstallGapUnmeasured, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, popupIncludeClause } from '../popupEvents'
 import { last7DatesBefore, siteWindowClause } from '../overview'
 import { addDays as addEtDays, etSameTimeWindow } from '../etTime'
@@ -289,10 +289,20 @@ export const FACTS: Record<FactId, FactDef> = {
     ttl: 'campaign',
     build(p) {
       // Path-embedded uc, site-wide, NOT date-windowed: a d31-60 return can fire long after the
-      // flight ended (lib/campaigns.ts parseReturnPath).
+      // flight ended (lib/campaigns.ts parseReturnPath). Only the LOWER bound is applied, the
+      // same one campaignAttributionClause gives the arrivals tile: rows before the campaign's
+      // attribution start (pre-launch tests, e.g. before 12:00 ET on the retest's first day) are
+      // left out, and an unconfirmed flightStart attributes nothing. A row filter on the
+      // aggregate; no device is linked to anything.
       const c = campaignOf(p)
       const w: string[] = ['site = ?', `(${c.ucValues.map(() => 'path LIKE ?').join(' OR ')})`]
       const b: unknown[] = [BSK_WEB_SITE, ...c.ucValues.map((u) => `/return/${u}/%`)]
+      const startMs = campaignAttributionStartMs(c)
+      if (startMs === null) w.push('1 = 0')
+      else {
+        w.push('ts >= ?')
+        b.push(startMs)
+      }
       applyExclusions(w, b)
       return { db: 'gss_geo', sql: `SELECT path, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY path`, binds: b }
     },
