@@ -3,7 +3,9 @@
 import { describe, expect, it } from 'vitest'
 import { CAMPAIGNS, campaignById, ORGANIC_ARM_ID } from '../campaigns'
 import { noteRawText } from '../notes'
-import { METRICS, rowMatcher, type MetricCtx } from './metrics'
+import { METRICS, rowMatcher, rulesOf, type MetricCtx } from './metrics'
+import { measuredInterval } from './instrumentation'
+import { ORGANIC_TRACKING_LIVE_AT, TOUR_TRACKING_LIVE_AT } from '../popupEvents'
 import { RATIOS, ratioSupportsOrganic } from './ratios'
 import { CAMPAIGN_RETURNS } from './presets'
 import {
@@ -182,5 +184,41 @@ describe('the organic rows stay out of the tagged-only site-wide figures', () =>
       { path: '/return/organic/d0', count: 50 },
     ])
     expect(t.steps.arrivals).toBe(3)
+  })
+})
+
+describe('v1.98.0 go-live: the organic gate and the tour note', () => {
+  const GO = ORGANIC_TRACKING_LIVE_AT
+  const rulesFor = (id: string, campaignId: string) => rulesOf(METRICS.get(id)!, ctx(campaignId))
+  const organicD0 = () => rulesFor('campaign.returnD0', ORGANIC_ARM_ID)
+
+  it('the organic arm is a binary switch: not yet tracking before go-live, measured after, never partial', () => {
+    // The organic arm has no attribution start, so its window is [now, now].
+    expect(measuredInterval({ rules: organicD0(), window: [GO - 1000, GO - 1000] })).toMatchObject({ status: 'unmeasured', reason: 'not-live' })
+    expect(measuredInterval({ rules: organicD0(), window: [GO + 1000, GO + 1000] })).toMatchObject({ status: 'measured' })
+  })
+
+  it('a campaign arm is not gated by the organic go-live', () => {
+    const rules = rulesFor('campaign.returnD0', RETEST.id)
+    expect(rules.some((r) => r.kind === 'liveAt' && r.atMs === GO)).toBe(false)
+  })
+
+  const TOUR = ['bsk.tourExitPreamble', 'bsk.tourExitHub', 'bsk.tourExitSection']
+  const noteIds = (id: string, window: [number, number]) => measuredInterval({ rules: rulesOf(METRICS.get(id)!, ctx(ORGANIC_ARM_ID)), window })
+  it.each(TOUR)('%s: the note rides a window straddling go-live, not one wholly before or after, and never changes the value status', (id) => {
+    const straddle = noteIds(id, [GO - 3600_000, GO + 3600_000])
+    expect(straddle.noteIds).toContain('tour-ends-on-game-start')
+    const before = noteIds(id, [TOUR_TRACKING_LIVE_AT + 1000, GO - 1000])
+    const after = noteIds(id, [GO + 1000, GO + 3600_000])
+    expect(before.noteIds).not.toContain('tour-ends-on-game-start')
+    expect(after.noteIds).not.toContain('tour-ends-on-game-start')
+    expect(straddle.status).toBe(after.status)
+  })
+
+  it('the tour note states the verified fact and no clock time', () => {
+    const t = noteRawText('tour-ends-on-game-start')
+    expect(t).toContain('v1.98.0 (Oct 3)')
+    expect(t).toContain('starting a real game during the first-run tour ends it as a skip')
+    expect(t).not.toMatch(/\d{1,2}:\d{2}|[AP]M/)
   })
 })

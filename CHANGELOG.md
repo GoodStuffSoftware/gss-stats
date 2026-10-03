@@ -12,6 +12,55 @@ All notable changes to **gss-stats** are documented here. The format follows
   where a value would be), so an older tab can't erase it on its next save.
 - **The card builder stops at 32 badge colours.** Adding more is turned off with a short note, and
   the builder refuses any card a reload would reject, so a card it saves always loads again.
+
+## [0.15.4] — 2026-10-03
+
+### Fixed
+- **A layout that fails to load can no longer be overwritten.** If the saved layout can't be read
+  (no connection, a server error, or an answer that isn't a layout), the dashboard shows the
+  default layout with a "Try again" banner, and nothing changed on it is saved.
+
+## [0.15.3] — 2026-10-03
+
+### Fixed
+- **KPI tiles for counts-only rows show whole days.** A tile that can count return, game-start,
+  completion, tutorial or tour-exit rows (Best Sudoku page views included) now shows yesterday's
+  full-day total and the 7-day daily average instead of a same-time percent change, which could
+  expose an hour-of-day split of those rows. Tiles that never count them keep their arrows.
+- **The counts-only caption also shows on other sites.** A geo chart narrowed to a site other than
+  Best Sudoku now carries the counts-only whole-days caption too.
+
+## [0.15.2] — 2026-10-03
+
+### Fixed
+- **The default "Pageviews over time" and "Visits over time" charts no longer carry the counts-only
+  caption.** They now count by Eastern-time day, so their totals include every row again, and
+  clicking a day still opens a page for that Eastern day, which the footer and date pickers name as that one day; a saved layout moves its untouched copies
+  once, wherever you placed them, and a chart you retitled or changed in any way is left as it is.
+
+## [0.15.1] — 2026-10-03
+
+### Fixed
+- **Return and completion rows are counted over whole ET days when a date range isn't.** A range
+  that does not start and end on ET midnights now moves each end to the nearest ET midnight
+  (Mike's chosen rule) for return, game-start, completion, tutorial and tour-exit rows only, so
+  short back-to-back ranges can no longer read those rows hour by hour; charts that can count
+  such rows, completions and metric cards say so in a caption, and today's totals stay live.
+
+## [0.15.0] — 2026-10-03
+
+### Added
+- **The page refetches its data when you come back to the tab.** Switching back to a tab that has
+  been idle for a minute or more reloads its charts, cards and ads readings once, without a
+  loading flash and without ever polling; the card's "Updated" time moves to the new load, and a
+  refetch that fails keeps the numbers already on screen.
+
+## [0.14.4] — 2026-10-03
+
+### Added
+- **Best Sudoku v1.98.0 is on the release timeline.** The organic baseline is tracked from v1.98.0 (Oct 3) and earlier ranges read "not yet tracking", ad click ids are documented as not organic, and the tour-exit tiles note that starting a real game during the first-run tour now ends it as a skip.
+
+### Fixed
 - **Best Sudoku v1.97.0 game starts no longer count as page views, and the first-session funnel
   shows the new first-run counters.** Counted game starts are now an event beacon like the tour
   exit and tutorial completion already are. The morning read and its report page list the tour
