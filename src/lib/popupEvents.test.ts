@@ -5,6 +5,10 @@ import {
   isPopupEventPath,
   popupExcludeClause,
   popupIncludeClause,
+  isTutorialCompletePath,
+  isTourExitPath,
+  TOUR_TRACKING_LIVE_AT,
+  TOUR_TRACKING_LIVE_AT_ET,
   POPUP_EVENT_PREFIXES,
   GAME_COMPLETE_LIVE_AT,
   NEW_BEACONS_LIVE_AT_ET,
@@ -374,7 +378,7 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
   // exactly how '/return' was accidentally left off this list on this branch — see the
   // 2026-09-25 review). If this ever fails, either a prefix was removed (update this
   // literal list deliberately) or one was never added (fix the array instead).
-  it('POPUP_EVENT_PREFIXES is exactly these 18 prefixes', () => {
+  it('POPUP_EVENT_PREFIXES is exactly these 19 prefixes', () => {
     expect([...POPUP_EVENT_PREFIXES]).toEqual([
       '/signin-prompt',
       '/signin-eligible',
@@ -391,6 +395,7 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
       '/auth/error',
       '/auth/redirect',
       '/tour',
+      '/game/tutorial-complete',
       '/game/first-move',
       '/game/abandon',
       '/welcome-signed-in',
@@ -766,5 +771,37 @@ describe('SMALL_SAMPLE_NOTE', () => {
   it('names both the small-population caveat and the fix (read the counts)', () => {
     expect(SMALL_SAMPLE_NOTE).toMatch(/small/i)
     expect(SMALL_SAMPLE_NOTE).toMatch(/counts/i)
+  })
+})
+
+describe('v1.97.0 tutorial-complete / tour-exit beacons', () => {
+  const PATHS = [
+    '/game/tutorial-complete/first-run',
+    '/game/tutorial-complete/replay',
+    '/tour/exit-at/preamble',
+    '/tour/exit-at/hub',
+    '/tour/exit-at/section',
+  ]
+
+  it('are event beacons, never page views: isPopupEventPath is true and the page-view exclusion SQL drops them', () => {
+    for (const p of PATHS) expect(isPopupEventPath(p), p).toBe(true)
+    const w: string[] = []
+    popupExcludeClause(w, [])
+    expect(w.join(' ')).toContain("path <> '/game/tutorial-complete' AND path NOT LIKE '/game/tutorial-complete/%'")
+    // /game/complete/ stays its own, distinct prefix: a tutorial row is not a completion.
+    expect(w.join(' ')).toContain("path NOT LIKE '/game/complete/%'")
+    expect('/game/tutorial-complete/first-run'.startsWith('/game/complete/')).toBe(false)
+  })
+
+  it('the exact matchers accept only their own path', () => {
+    expect(isTutorialCompletePath('/game/tutorial-complete/first-run', 'first-run')).toBe(true)
+    expect(isTutorialCompletePath('/game/tutorial-complete/first-run', 'replay')).toBe(false)
+    expect(isTutorialCompletePath('/game/complete/normal/easy', 'replay')).toBe(false)
+    expect(isTourExitPath('/tour/exit-at/hub', 'hub')).toBe(true)
+    expect(isTourExitPath('/tour/exit-at/hub', 'section')).toBe(false)
+  })
+
+  it('the hand-synced ET date literal equals the ET date of TOUR_TRACKING_LIVE_AT', () => {
+    expect(etDateFromMs(TOUR_TRACKING_LIVE_AT)).toBe(TOUR_TRACKING_LIVE_AT_ET)
   })
 })

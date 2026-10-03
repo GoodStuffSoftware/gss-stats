@@ -24,9 +24,11 @@ import { bindingSupportsOrganic, validateCard, validateMetricsRequest } from './
 import type { CardSpec, MetricItem } from './types'
 import type { BeaconRow } from './facts'
 import { isReturnD1Plus } from '../overview'
+import { releaseAwaitingFullDay, releaseSubjectOn } from '../releases'
 import { tallySiteFirstSession } from '../adsRules'
 
 const ORGANIC: ScopeInstance = { kind: 'organic' }
+const TODAY = '2026-09-27'
 const RETEST = campaignById('24279250691')!
 const row = (path: string): BeaconRow => ({ path, visitor: 'new', ts: 0 }) as unknown as BeaconRow
 const ctx = (campaignId: string): MetricCtx => ({ params: { campaignId }, campaign: campaignById(campaignId), window: 'attribution' })
@@ -128,16 +130,32 @@ describe('the organic scope instance', () => {
   })
   it('resolves a return binding to campaignId organic; a binding that cannot serve it is left out, never requested', () => {
     expect(resolveBinding({ metric: 'campaign.returnD0' }, ORGANIC)?.params).toEqual({ campaignId: ORGANIC_ARM_ID })
-    expect(configRuling({ metric: 'campaign.returnD0' }, ORGANIC)).toBeNull()
-    expect(configRuling({ ratio: 'campaign.returnD1PerD0' }, ORGANIC)).toBeNull()
-    expect(configRuling({ metric: 'campaign.taggedArrivals' }, ORGANIC)).toBe('organic-unsupported')
-    expect(configRuling({ ratio: 'campaign.acceptPerAsk' }, ORGANIC)).toBe('organic-unsupported')
-    expect(unmeasuredByConfig({ metric: 'campaign.taggedArrivals' }, ORGANIC, { whenNotStarted: 'label' })).toBe(true)
+    expect(configRuling({ metric: 'campaign.returnD0' }, ORGANIC, TODAY)).toBeNull()
+    expect(configRuling({ ratio: 'campaign.returnD1PerD0' }, ORGANIC, TODAY)).toBeNull()
+    expect(configRuling({ metric: 'campaign.taggedArrivals' }, ORGANIC, TODAY)).toBe('organic-unsupported')
+    expect(configRuling({ ratio: 'campaign.acceptPerAsk' }, ORGANIC, TODAY)).toBe('organic-unsupported')
+    expect(unmeasuredByConfig({ metric: 'campaign.taggedArrivals' }, ORGANIC, { whenNotStarted: 'label' }, TODAY)).toBe(true)
     const item: MetricItem = { id: 'a', label: 'A', data: { metric: 'campaign.taggedArrivals' }, display: { as: 'number' } }
     expect(buildRequestSpec(item, ORGANIC)).toBeNull()
     // A site-wide binding and a pinned campaign are not the organic arm's to rule on.
-    expect(configRuling({ metric: 'bsk.pageviews' }, ORGANIC)).toBeNull()
-    expect(configRuling({ metric: 'campaign.taggedArrivals', params: { campaignId: RETEST.id } }, ORGANIC)).toBeNull()
+    expect(configRuling({ metric: 'bsk.pageviews' }, ORGANIC, TODAY)).toBeNull()
+    expect(configRuling({ metric: 'campaign.taggedArrivals', params: { campaignId: RETEST.id } }, ORGANIC, TODAY)).toBeNull()
+  })
+  it('on a release-awaiting day the organic ruling is unchanged, and a release field still renders from todayEt', () => {
+    // configRuling answers a field binding with null before any arm check, so the release-awaiting
+    // label (a field, read through scopeField with todayEt) is never ruled out under the organic
+    // arm; the organic ruling depends only on the metric/ratio, never on the day.
+    const AWAITING = '2026-10-03'
+    const waiting = releaseAwaitingFullDay(AWAITING)!
+    const subject = releaseSubjectOn(AWAITING)!
+    expect(waiting).not.toBeNull()
+    expect(configRuling({ metric: 'campaign.returnD0' }, ORGANIC, AWAITING)).toBeNull()
+    expect(configRuling({ ratio: 'campaign.returnD1PerD0' }, ORGANIC, AWAITING)).toBeNull()
+    expect(configRuling({ metric: 'campaign.taggedArrivals' }, ORGANIC, AWAITING)).toBe('organic-unsupported')
+    expect(unmeasuredByConfig({ metric: 'campaign.taggedArrivals' }, ORGANIC, undefined, AWAITING)).toBe(true)
+    expect(configRuling({ field: 'release.label' }, ORGANIC, AWAITING)).toBeNull()
+    expect(unmeasuredByConfig({ field: 'release.label' }, ORGANIC, undefined, AWAITING)).toBe(false)
+    expect(resolveBinding({ field: 'release.label' }, ORGANIC, AWAITING)?.fieldValue).toBe(`${subject.version} (${subject.dateEt}); ${waiting.version} needs a full day`)
   })
   it('every CAMPAIGN_RETURNS binding the organic instance would request passes the server whitelist', () => {
     for (const section of CAMPAIGN_RETURNS.sections) {

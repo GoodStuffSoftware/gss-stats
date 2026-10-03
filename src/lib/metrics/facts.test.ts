@@ -5,11 +5,12 @@
 // (node:sqlite, D1's dialect) and snapshotted, so any change to a statement is a reviewed diff.
 import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it, vi } from 'vitest'
-import { COUNTRY_BUCKET_SQL, FACTS, factKey, flightPathsSeenStatement, kpiDayWindows, rangeMs, type FactId, type FactParams } from './facts'
+import { COUNTRY_BUCKET_SQL, FACTS, factKey, flightPathsSeenStatement, kpiDayWindows, rangeMs, releaseSidesMs, type FactId, type FactParams } from './facts'
 import { buildFact, factCuts } from './engine'
 import { CAMPAIGNS, campaignAttributionClause, campaignById, etMidnightUtcMs, ORGANIC_ARM_ID } from '../campaigns'
 import * as campaigns from '../campaigns'
 import { SPEND_SUMMARY_SQL } from '../adsStore'
+import { etMidnightMs } from './instrumentation'
 
 const NOW = Date.parse('2026-09-26T21:00:00Z')
 const SAMPLE_PARAMS: Record<FactId, FactParams[]> = {
@@ -242,5 +243,19 @@ describe('fact identity', () => {
 describe('fact SQL snapshots', () => {
   it.each(ALL.map((x) => [`${x.id} ${JSON.stringify(x.p)}`, x] as const))('%s', (_name, { stmt }) => {
     expect(stmt).toMatchSnapshot()
+  })
+})
+
+describe('releaseSidesMs', () => {
+  it('after starts the ET midnight after the release date; the release day is in neither side', () => {
+    const s = releaseSidesMs('2026-10-02', 1)
+    expect(s.before).toEqual([etMidnightMs('2026-10-01'), etMidnightMs('2026-10-02')])
+    expect(s.after).toEqual([etMidnightMs('2026-10-03'), etMidnightMs('2026-10-04')])
+  })
+  it('counts whole ET days across the 25-hour fall-back day (2026-11-01)', () => {
+    const s = releaseSidesMs('2026-10-31', 2)
+    expect(s.after).toEqual([etMidnightMs('2026-11-01'), etMidnightMs('2026-11-03')])
+    expect(s.after[1] - s.after[0]).toBe(49 * 3_600_000)
+    expect(s.before[1] - s.before[0]).toBe(48 * 3_600_000)
   })
 })

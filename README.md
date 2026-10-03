@@ -47,8 +47,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   time yesterday and the 7-day average), the **Overall timeline**, a campaign scorecard, and a
   release before/after panel — each its own movable/editable widget. The KPI tiles and the
   scorecard are **metric cards** (presets `bsk-kpis` and `campaign-scorecard`, see *One metrics
-  registry* below), and so is the release panel (preset `release-before-after`: the latest dated
-  release's before and after windows, `days` whole days on each side of its ET midnight, bounded
+  registry* below), and so is the release panel (preset `release-before-after`: the newest release
+  with a full ET day after its release date; `days` whole days before its ET midnight and `days`
+  after the following midnight, the release day itself excluded, bounded
   by the first Best Sudoku hit, as [`src/lib/overview.ts`](src/lib/overview.ts)
   `releaseComparisonWindows` decides). The Overall timeline is a **standard line
   chart** (see *Line charts* below) with five series — page views and tagged arrivals on the left
@@ -298,7 +299,7 @@ Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats
   with `maxStatements`), caches each fact on its own in the Cache API, and derives every value in
   JS with its status (`ok`, `too-few`, `no-data`, `unmeasured`, `partial`), n/d, deltas and a
   provisional flag for lagged outcomes. Windows are the campaign's attribution window, today so
-  far, the page range, the latest release's before/after windows (sized by one cached first-hit
+  far, the page range, the compared release's before/after windows (sized by one cached first-hit
   read), and a campaign's pre/post segments at the signed-out upsell fix (only once that fix is
   set and falls in the flight). **Metric cards** render it: a widget with `card`
   (`{ preset }` from [`src/lib/metrics/presets.ts`](src/lib/metrics/presets.ts), or a saved spec)
@@ -330,7 +331,7 @@ geography is country-only** — sub-country region/city comes from the beacon.
 `/signin-prompt`, `/signin-eligible`, `/promo-first50`, `/first50-congrats`, `/upsell`,
 `/install`, `/popup-outcome`, `/return`, `/game/complete/`, the `/auth/success/<provider>/`
 status suffix, `/auth/error`, `/auth/redirect` and the first-session beacons (`/tour`,
-`/game/first-move`, `/game/abandon`, `/welcome-signed-in`) are pop-up/event beacons, not screens — `/api/geo` and `/api/sites` exclude all
+`/game/tutorial-complete`, `/game/first-move`, `/game/abandon`, `/welcome-signed-in`) are pop-up/event beacons, not screens — `/api/geo` and `/api/sites` exclude all
 of them from every pageview/visit total and the top-pages breakdown by default (see
 [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) `POPUP_EVENT_PREFIXES`); `/api/popups` is
 where they're counted. Each geo chart has its own **"Include event beacons"** option (off by
@@ -363,7 +364,7 @@ medium/date, plus **screen width** (`screenw`, exact pixels) and its bucketed fo
 **path family** dimension (`pathFamily`) that groups every event-beacon prefix above into
 `page` / `signin-prompt` / `signin-eligible` / `promo-first50` / `first50-congrats` / `upsell`
 / `install` / `popup-outcome` / `return` / `game-complete` / `auth-status` / `auth-error` /
-`auth-redirect` / `tour` / `game-first-move` / `game-abandon` / `welcome-signed-in`. More derived
+`auth-redirect` / `tour` / `tutorial-complete` / `game-first-move` / `game-abandon` / `welcome-signed-in`. More derived
 dimensions: **pop-up** (`popupFamily`) and **pop-up outcome** (`popupOutcome`), measured rows
 only (from the tracking activation day; pre-fix install-gap rows get no value — see
 [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) `popupDimSqlCase`, where

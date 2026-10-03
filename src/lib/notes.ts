@@ -352,6 +352,11 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.bsk.authSuccessUnknown': 'Auth successes — unknown',
     'label.bsk.authErrors': 'Sign-in failures',
     'label.bsk.authRedirects': 'Sign-in redirect fallbacks',
+    'label.bsk.tutorialFirstRun': 'Tutorial completed — first run',
+    'label.bsk.tutorialReplay': 'Tutorial completed — replay',
+    'label.bsk.tourExitPreamble': 'Tour exits — preamble',
+    'label.bsk.tourExitHub': 'Tour exits — hub',
+    'label.bsk.tourExitSection': 'Tour exits — section',
     'label.bsk.installs': 'Installs',
     // Short and plain, as the Overview tile reads; the caveat is 'raw-install-double-count'.
     'label.bsk.rawInstallSignals': 'Raw install signals',
@@ -497,7 +502,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.preset.campaign-country.description': 'One card per beacon-tracked campaign: each funnel step split into US, CA and every other country.',
     'label.preset.campaign-cost': 'Campaign cost',
     'label.preset.campaign-cost.description': 'One card per campaign: spend, where it came from and how fresh it is, and the cost per arrival and per auth success.',
-    'label.preset.release-before-after.description': 'The latest dated release: page views, tagged arrivals, auth successes and installs over the same number of days before and after it.',
+    'label.preset.release-before-after.description': 'The newest release with a full day after it: page views, tagged arrivals, auth successes and installs over the same number of days before and after it.',
   }),
 })
 

@@ -86,6 +86,14 @@ describe('overlay items', () => {
     for (const it of [...rel, ...live]) expect(it.note).not.toMatch(/\blib\/|\.ts\b|`/)
   })
 
+  it('the v1.97.0 go-live marker is the one labelled line on 2026-10-03; its release is an unlabelled tick', () => {
+    const live = goLiveItems().filter((l) => l.date === '2026-10-03')
+    expect(live.map((l) => l.label)).toEqual(['tutorial + tour exit beacons live'])
+    const rel = releaseItems().filter((r) => r.date === '2026-10-03')
+    expect(rel.map((r) => r.label)).toEqual(expect.arrayContaining(['v1.96.1', 'v1.97.0']))
+    for (const r of rel) expect(r.kind).toBe('minor-release')
+  })
+
   it('lists v1.95.4 to v1.96.1 (incl. v1.95.7/8) once each, on their ET release dates', () => {
     const byLabel = new Map<string, string[]>()
     for (const r of releaseItems()) byLabel.set(r.label, [...(byLabel.get(r.label) ?? []), r.date])

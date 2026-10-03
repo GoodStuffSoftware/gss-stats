@@ -37,7 +37,8 @@ export const PATH_FAMILY_UNIT: Readonly<Record<string, Unit>> = {
   'auth-status': 'signin',
   'auth-error': 'row', // one row per failed sign-in attempt
   'auth-redirect': 'row', // one row per popup-to-redirect fallback
-  tour: 'row', // one row per tour start / complete / skip
+  tour: 'row', // one row per tour start / complete / skip / exit
+  'tutorial-complete': 'row', // one row per tutorial win, first run or replay: not a real game completion
   'game-first-move': 'row', // one row per game's first placed digit
   'game-abandon': 'row', // one row per abandoned game
   'welcome-signed-in': 'showing', // the card's shown row and the taps on that showing

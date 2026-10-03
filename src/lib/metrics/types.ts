@@ -27,7 +27,7 @@ export type ScopePath =
   | 'popup.label'
   | 'window.label'
   | 'country.label'
-  /** The latest dated release (lib/releases.ts): "v1.95.3 (2026-09-26)". Config, not a query. */
+  /** The compared release (lib/releases.ts): "v1.95.3 (2026-09-26)". Config, not a query. */
   | 'release.label'
   | 'reading.readAt'
   | 'reading.kind'
@@ -56,7 +56,7 @@ export type CountryBucket = (typeof COUNTRY_BUCKETS)[number]
 /** The windows a card may ask for. `{ scope: 'window' }` takes the window from a repeat over
  * windows (RepeatSpec.over 'windows'). 'flight' and 'allTime' are reserved. */
 export type WindowSpec = 'page' | 'attribution' | 'flight' | 'todaySoFar' | 'allTime' | ReleaseSide | UpsellSide | { scope: 'window' }
-/** The latest dated release's before/after windows: the same number of days on each side of its
+/** The compared release's before/after windows: the same number of days on each side of its
  * ET date, bounded by the first Best Sudoku hit (lib/overview.ts releaseComparisonWindows). */
 export type ReleaseSide = 'before' | 'after'
 /** A campaign's attribution window split at the signed-out upsell fix (a funnel segment
