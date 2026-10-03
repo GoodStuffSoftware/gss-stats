@@ -2,7 +2,7 @@
 import { reactive, ref, watch, watchEffect, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import type { DashboardConfig, DashboardPage, Widget, GlobalFilters } from './types'
 import { defaultConfig, normalizeConfig, defaultWidgetsForPage, clonePage, cryptoId, isBestSudokuLaunchPage, isBestSudokuPopupsPage, isCampaignComparePage, BEST_SUDOKU_SITES, beaconizeWidget, cleanGroupName, cleanPageName } from './lib/defaults'
-import { rangeLabel, ymdRangeToISO } from './lib/range'
+import { rangeLabel, dayDrillRange } from './lib/range'
 import { loadConfig, saveConfig } from './api'
 import { loadSites, sitesTree, tokenLabel } from './sitesStore'
 import { isSiteDim, semanticKey, drillNeedsEventBeacons } from './lib/drill'
@@ -609,10 +609,12 @@ function openFilteredPage() {
   clone.parentId = parent.id
   clone.group = root.group
   delete clone.icon
-  if (p.dimension === 'date') {
+  const dayRange = dayDrillRange(p.dimension, p.value)
+  if (dayRange) {
     // A day isn't a filterable field (see geo.ts) — turn it into an absolute one-day RANGE
-    // instead of a drill constraint. p.value is 'YYYY-MM-DD' (from date(ts/1000,'unixepoch')).
-    const { since, until } = ymdRangeToISO(p.value, p.value)
+    // instead of a drill constraint. p.value is 'YYYY-MM-DD': a UTC day for 'date'
+    // (date(ts/1000,'unixepoch')), an ET day (ET midnight to the next ET midnight) for 'dateEt'.
+    const { since, until } = dayRange
     clone.filters.since = since
     clone.filters.until = until
     clone.filters.rangeRel = '' // absolute range — don't recompute a rolling window on load

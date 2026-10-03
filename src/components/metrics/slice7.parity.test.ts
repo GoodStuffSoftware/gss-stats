@@ -601,7 +601,11 @@ describe('Notes name each label once, however many columns repeat it', () => {
 describe('campaign-returns ≡ the bespoke return-visits panel', () => {
   const visible = (w: VueWrapper) => w.findAll('.metric-card').filter((c) => (c.element as HTMLElement).style.display !== 'none')
   function newReturns(w: VueWrapper) {
-    return visible(w).map((c) => ({
+    // The organic baseline ("Organic (web)") is not a campaign: it is gated on v1.98.0's go-live
+    // (ORGANIC_TRACKING_LIVE_AT), later than this fixture's clock, so it reads "not yet tracking"
+    // here and the bespoke-panel parity compares campaigns only. The 'organic gate' test below pins
+    // that state; the 'none left' test pins the hidden-at-d0-0 state after go-live.
+    return visible(w).filter((c) => text(c.find('.mc-title').element) !== 'Organic (web)').map((c) => ({
       title: text(c.find('.mc-title').element),
       d0: [...rows(c as unknown as VueWrapper)].find(([l]) => l === 'First tagged loads (d0)')?.[1],
       cols: c.findAll('.mi-col').map((col) => [text(col.find('.mi-col-label').element), `${text(col.find('.mi-col-num').element)}${col.find('.mi-col-sub').exists() ? ` ${text(col.find('.mi-col-sub').element)}` : ''}`]),
@@ -648,6 +652,13 @@ describe('campaign-returns ≡ the bespoke return-visits panel', () => {
     })
   })
 
+  it('organic gate: before v1.98.0 go-live the Organic card reads "not yet tracking"', async () => {
+    const card = await mountCard('campaign-returns', FIXTURE_NOW)
+    const organic = visible(card).find((c) => text(c.find('.mc-title').element) === 'Organic (web)')
+    expect(organic, 'the organic card stays on screen before go-live').toBeTruthy()
+    expect(text(organic!.element)).toMatch(/not yet tracking/i)
+  })
+
   it('none left: "No return visits recorded yet." on both', async () => {
     const none = () => bskFixture().filter((r) => !String(r.path).startsWith('/return/'))
     await withDb(none, async () => {
@@ -655,7 +666,10 @@ describe('campaign-returns ≡ the bespoke return-visits panel', () => {
       expect(old).toBe('No return visits recorded yet.')
       __resetMetricsStateForTests()
       cache.clear()
-      const card = await mountCard('campaign-returns', FIXTURE_NOW)
+      // After v1.98.0's go-live the organic arm is measured, and with no organic row it hides like
+      // a campaign; before it (FIXTURE_NOW) it reads as not yet tracked and stays on screen.
+      vi.setSystemTime(Date.parse('2026-10-04T16:00:00Z'))
+      const card = await mountCard('campaign-returns', Date.parse('2026-10-04T16:00:00Z')).finally(() => vi.setSystemTime(FIXTURE_NOW))
       expect(visible(card)).toHaveLength(0)
       expect(text(card.find('.metric-card-empty').element)).toBe('No return visits recorded yet.')
     })
