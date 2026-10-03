@@ -4,6 +4,7 @@ import { POPUPS, POPUP_RATE_SPECS, NO_OUTCOME_TRACKING_NOTE, SIGNIN_ELIGIBLE_CAV
 import { CAMPAIGNS } from './campaigns'
 import { BEST_SUDOKU_SITES } from './bestSudokuSites'
 import { normCardRef } from './metrics/validate'
+import { autoCaveatIds, isNoteIdHideable } from './notes'
 
 export function defaultDateRange(): { since: string; until: string } {
   const until = new Date()
@@ -40,10 +41,11 @@ function w(p: Omit<Widget, 'i'>): Widget {
 }
 
 // Bumped to 16 for chart captions (notes plan, slice 1c): a widget may now carry its own plain-text
-// `caption` and a `hiddenCaveats` list (normWidget whitelists and caps both). NO stored layout is
-// rewritten: legacy `notes` caption ids keep rendering and convert to caption text on the chart's
-// next edit (decision D5), so the bump is only the save guard that keeps an older tab from saving
-// the new fields away. functions/api/config.ts backs the stored layout up to
+// `caption` and a `hiddenCaveats` list (normWidget whitelists and caps both). Legacy `notes` caption
+// ids keep rendering and convert to caption text on the chart's next edit (decision D5). A scope's
+// caveats now show automatically (lib/notes.ts autoCaveatIds, D2-B), so the one rewrite is
+// seedHiddenAutoCaveatsV16: each stored chart hides the hideable automatic caveats it did not show
+// before, and looks unchanged. functions/api/config.ts backs the stored layout up to
 // `dashboard:default:backup:v<stored>` on the first v16 save.
 // Bumped to 15 for the two default trend charts' ET-day axis (see migrateDateEtTrendsV15): a
 // stored "Pageviews over time" / "Visits over time" geo trend that is still exactly the shipped
@@ -97,7 +99,7 @@ export const LAYOUT_VERSIONS = {
   /** The default geo trend charts bucket by ET day (migrateDateEtTrendsV15). */
   dateEtTrends: 15,
   /** Plain-text chart captions and per-chart hidden caveats (Widget.caption, Widget.hiddenCaveats).
-   * A guard bump only: no stored layout is rewritten (legacy `notes` ids convert on the next edit). */
+   * Automatic scope caveats (D2-B): seedHiddenAutoCaveatsV16 keeps each stored chart's look. */
   captions: 16,
 } as const
 // The newest layout version. A slice that adds an entry moves this to it.
@@ -952,8 +954,8 @@ function normWidget(x: any): Widget {
     note: typeof x.note === 'string' ? x.note : undefined,
     noteId: typeof x.noteId === 'string' ? x.noteId : undefined,
     longText: x.longText === true || undefined,
-    // Attached captions (lib/notes.ts) — absent stays absent (no scope-default notes get
-    // injected for a widget that predates this feature; see ChartCard.vue's own comment).
+    // Legacy attached captions (lib/notes.ts) — absent stays absent (= none). A scope's caveats
+    // show through autoCaveatIds instead, never by filling this in.
     notes: Array.isArray(x.notes) ? x.notes.filter((n: any) => typeof n === 'string' && n) : undefined,
     // date-dimension trend charts: release-marker overlay, go-live markers, flight bands.
     markers: x.markers === 'releases' ? 'releases' : undefined,
@@ -996,6 +998,25 @@ function normCaptionFields(x: any): Pick<Widget, 'caption' | 'hiddenCaveats'> {
     if (ids.length) out.hiddenCaveats = ids.slice(0, HIDDEN_CAVEATS_MAX)
   }
   return out
+}
+
+/** Layout v16 migration (decision D2-B, run once on a layout stored before LAYOUT_VERSIONS.captions):
+ * a scope's caveats now show automatically (lib/notes.ts autoCaveatIds), so every widget adds to
+ * `hiddenCaveats` each HIDEABLE automatic caveat it did not show before (one not in its legacy
+ * `notes`, nor a card's own spec captions: autoCaveatIds already leaves those out). The chart then
+ * looks as it did. A data-cut caveat (`hideable: false`) is never seeded: a chart that lacked it
+ * gains it (D3 wins over "unchanged"). Merged after any ids already there, deduped, capped at
+ * HIDDEN_CAVEATS_MAX. Idempotent; a widget with nothing to add is returned as is. */
+export function seedHiddenAutoCaveatsV16(p: DashboardPage): DashboardPage {
+  let changed = false
+  const widgets = p.widgets.map((w) => {
+    const have = w.hiddenCaveats ?? []
+    const add = autoCaveatIds(w).filter((id) => isNoteIdHideable(id) && !have.includes(id))
+    if (!add.length || have.length >= HIDDEN_CAVEATS_MAX) return w
+    changed = true
+    return { ...w, hiddenCaveats: [...new Set([...have, ...add])].slice(0, HIDDEN_CAVEATS_MAX) }
+  })
+  return changed ? { ...p, widgets } : p
 }
 
 function normSeries(raw: any): LineSeries[] | undefined {
@@ -1364,7 +1385,11 @@ export function normalizeConfig(raw: any): DashboardConfig {
     const navigated = version < LAYOUT_VERSIONS.navigation ? migrateNavV13(withCaptionsMigrated) : withCaptionsMigrated
     // v15 migration (see CONFIG_VERSION and migrateDateEtTrendsV15): version-gated, so a chart the
     // owner later sets back to the UTC `date` axis is never moved again.
-    const ordered = version < LAYOUT_VERSIONS.dateEtTrends ? navigated.map(migrateDateEtTrendsV15) : navigated
+    const etDays = version < LAYOUT_VERSIONS.dateEtTrends ? navigated.map(migrateDateEtTrendsV15) : navigated
+    // v16 migration (see CONFIG_VERSION and seedHiddenAutoCaveatsV16): automatic scope caveats
+    // start hidden where a chart did not show them. Version-gated, so a caveat the owner later
+    // shows again is never re-hidden, and a caveat added to the registry later shows everywhere.
+    const ordered = version < LAYOUT_VERSIONS.captions ? etDays.map(seedHiddenAutoCaveatsV16) : etDays
     // Every load: drill links must name an existing root page (normDrillLinks).
     normDrillLinks(ordered)
     // `activePageId` is the landing page for a first-time viewer (each viewer's current page lives

@@ -1,7 +1,9 @@
 // Layout version LAYOUT_VERSIONS.captions (notes plan, slice 1c): a widget may carry its own
-// plain-text `caption` and a `hiddenCaveats` list. normWidget whitelists and caps both; no stored
-// layout is rewritten (decision D5: legacy `notes` ids convert on the chart's next edit). Tests use
-// the LAYOUT_VERSIONS key, never a literal, so whichever slice lands second only renumbers the map.
+// plain-text `caption` and a `hiddenCaveats` list. normWidget whitelists and caps both. Legacy
+// `notes` ids convert on the chart's next edit (decision D5). The one rewrite at load is the v16
+// step (decision D2-B, seedHiddenAutoCaveatsV16): a pre-v16 chart hides the hideable automatic
+// scope caveats it did not show, so it looks unchanged. Tests use the LAYOUT_VERSIONS key, never a
+// literal, so whichever slice lands second only renumbers the map.
 import { describe, expect, it } from 'vitest'
 import {
   CAPTION_MAX_CHARS,
@@ -10,7 +12,11 @@ import {
   LAYOUT_VERSIONS,
   defaultConfig,
   normalizeConfig,
+  seedHiddenAutoCaveatsV16,
 } from './defaults'
+import { autoCaveatIds } from './notes'
+import { chartNotes } from './chartNotes'
+import PROD_V12 from './__fixtures__/prodLayout.v12.json'
 import { PRESETS } from './metrics/presets'
 import { validateCard } from './metrics/validate'
 import type { CardSpec } from './metrics/types'
@@ -93,10 +99,12 @@ describe('captions: a config round-trip through normalizeConfig keeps every fiel
   const specOf = (w: Widget): CardSpec => (w.card as { spec: CardSpec }).spec
   const widgets = (): Widget[] => [
     // A chart: its own caption (with a value token), hidden caveats, legacy notes with unknown ids, fit.
+    // Scope 'popup', so it has an automatic caveat (min-cohort-caveat) the v16 step hides.
     {
       ...BASE,
       id: 'chart',
       i: 'chart',
+      dataset: 'popup',
       caption: 'Counts **all** sites. Today: {=today.pageviews}',
       hiddenCaveats: ['popup-note', 'small-sample', 'range-notice'],
       notes: ['small-sample', 'not-a-note', 'also-gone'],
@@ -104,8 +112,8 @@ describe('captions: a config round-trip through normalizeConfig keeps every fiel
     },
     // A custom card: a daily sparkline item, repeat.organic + repeat.empty, fit, hidden spec caption.
     { ...BASE, id: 'returns', i: 'returns', type: 'table', card: { spec: sparkReturns(), from: 'campaign-returns' }, fit: 'content', hiddenCaveats: ['no-return-visits-yet'] },
-    // A custom card with badge tones and a spec caption it hides (D7).
-    { ...BASE, id: 'score', i: 'score', type: 'table', card: { spec: scorecard(), from: 'campaign-scorecard' }, caption: 'Mine.', hiddenCaveats: ['release-before-partial'] },
+    // A custom card with badge tones and a spec caption it hides (D7); scope 'campaigns'.
+    { ...BASE, id: 'score', i: 'score', type: 'table', dataset: 'campaigns', card: { spec: scorecard(), from: 'campaign-scorecard' }, caption: 'Mine.', hiddenCaveats: ['release-before-partial'] },
     // A custom card with an item-level repeat.empty (bsk-kpis' flighting-today item).
     { ...BASE, id: 'kpis', i: 'kpis', type: 'table', card: { spec: clone(PRESETS['bsk-kpis']), from: 'bsk-kpis' } },
   ] as Widget[]
@@ -135,10 +143,90 @@ describe('captions: a config round-trip through normalizeConfig keeps every fiel
     expect(json(widgetsOf(twice))).toEqual(json(widgetsOf(once)))
   })
 
-  it('a layout stored at the previous version loads the same widgets: no migration rewrites them', () => {
+  it('a layout stored at the previous version loads the same widgets, except the v16 step hides their new automatic caveats', () => {
     const prev = Math.max(...Object.values(LAYOUT_VERSIONS).filter((v) => v < LAYOUT_VERSIONS.captions))
     const out = normalizeConfig(stored(prev, widgets()))
     expect(out.version).toBe(CONFIG_VERSION)
-    expect(json(widgetsOf(out))).toEqual(json(widgets()))
+    const expected = widgets()
+    expected[0].hiddenCaveats = ['popup-note', 'small-sample', 'range-notice', 'min-cohort-caveat']
+    expected[2].hiddenCaveats = ['release-before-partial', 'play-tracking-status', 'min-cohort-caveat'] // not the data-cut one (D3)
+    expect(json(widgetsOf(out))).toEqual(json(expected))
+  })
+})
+
+describe('captions: the v16 step (D2-B) on a pre-v16 layout', () => {
+  const prev = LAYOUT_VERSIONS.captions - 1
+  const campaignsChart = { ...BASE, id: 'c', i: 'c', type: 'table', dataset: 'campaigns', view: 'funnel' }
+  const popupChart = { ...BASE, id: 'p', i: 'p', type: 'bar', dataset: 'popup', dimension: 'eligible' }
+
+  it('hides exactly the hideable automatic caveats a chart did not show; listed ones and data-cut ones stay visible', () => {
+    // campaigns today: play-tracking-status, min-cohort-caveat (hideable), country-split-excludes-refused (not).
+    expect(autoCaveatIds(campaignsChart as Widget)).toEqual(['play-tracking-status', 'min-cohort-caveat', 'country-split-excludes-refused'])
+    expect(load(campaignsChart, prev).hiddenCaveats).toEqual(['play-tracking-status', 'min-cohort-caveat'])
+    expect(load({ ...campaignsChart, notes: ['min-cohort-caveat'] }, prev).hiddenCaveats).toEqual(['play-tracking-status'])
+    expect(load({ ...campaignsChart, notes: ['play-tracking-status', 'min-cohort-caveat'] }, prev).hiddenCaveats).toBeUndefined()
+    expect(load(popupChart, prev).hiddenCaveats).toEqual(['min-cohort-caveat'])
+  })
+
+  it('an upgraded chart shows what it showed before, plus its data-cut caveat (D3)', () => {
+    const old = { ...campaignsChart, notes: ['arrivals-caveat'] }
+    expect(chartNotes(load(old, prev), null, null).map((n) => n.key)).toEqual(['caption:arrivals-caveat', 'caveat:country-split-excludes-refused'])
+    expect(chartNotes(load(popupChart, prev), null, null)).toEqual([])
+  })
+
+  it('merges with hidden ids already stored, deduped, capped', () => {
+    expect(load({ ...campaignsChart, hiddenCaveats: ['popup-note', 'min-cohort-caveat'] }, prev).hiddenCaveats).toEqual([
+      'popup-note',
+      'min-cohort-caveat',
+      'play-tracking-status',
+    ])
+    const full = Array.from({ length: HIDDEN_CAVEATS_MAX }, (_, i) => `id-${i}`)
+    expect(load({ ...campaignsChart, hiddenCaveats: full }, prev).hiddenCaveats).toEqual(full)
+  })
+
+  it('leaves note widgets, scope-less widgets and scopes with no automatic caveats alone', () => {
+    expect('hiddenCaveats' in load({ ...BASE, type: 'note', dataset: 'campaigns', noteId: 'arrivals-caveat' }, prev)).toBe(false)
+    expect('hiddenCaveats' in load({ ...BASE, dataset: undefined }, prev)).toBe(false)
+    for (const dataset of ['overview', 'geo', 'ads-readings']) expect('hiddenCaveats' in load({ ...BASE, dataset }, prev), dataset).toBe(false)
+  })
+
+  it('a card: its spec captions are not automatic caveats, so they are neither shown twice nor seeded', () => {
+    const card = { ...campaignsChart, card: { spec: { ...clone(PRESETS['campaign-scorecard']), captions: ['min-cohort-caveat'] } } }
+    expect(autoCaveatIds(card as Widget)).toEqual(['play-tracking-status', 'country-split-excludes-refused'])
+    expect(load(card, prev).hiddenCaveats).toEqual(['play-tracking-status'])
+    const preset = { ...campaignsChart, card: { preset: 'campaign-country' } } // its preset captions country-split-excludes-refused
+    expect(autoCaveatIds(preset as Widget)).toEqual(['play-tracking-status', 'min-cohort-caveat'])
+  })
+
+  it('is idempotent: normalizing twice gives the same layout, and the step on its own output adds nothing', () => {
+    const once = normalizeConfig(stored(prev, [campaignsChart, popupChart]))
+    // widgets only: a page's relative date range re-resolves against the clock between the two loads
+    const allWidgets = (c: DashboardConfig) => json(c.pages.map((p) => p.widgets))
+    expect(allWidgets(normalizeConfig(json(once)))).toEqual(allWidgets(once))
+    expect(widgetsOf(once).map((w) => w.hiddenCaveats)).toEqual([['play-tracking-status', 'min-cohort-caveat'], ['min-cohort-caveat']])
+    for (const p of once.pages) expect(seedHiddenAutoCaveatsV16(p)).toBe(p)
+  })
+
+  it('a layout already at the captions version is never migrated', () => {
+    expect('hiddenCaveats' in load(campaignsChart)).toBe(false)
+    expect('hiddenCaveats' in load(popupChart, LAYOUT_VERSIONS.captions)).toBe(false)
+  })
+
+  it('the production layout (v12): every non-note chart hides only hideable ids it did not list', () => {
+    const out = normalizeConfig(clone(PROD_V12) as never)
+    const before = new Map((PROD_V12 as unknown as DashboardConfig).pages.flatMap((p) => p.widgets).map((w) => [w.id, w]))
+    let seeded = 0
+    for (const w of out.pages.flatMap((p) => p.widgets)) {
+      const old = before.get(w.id)
+      if (!old) continue // a page the older migrations added
+      const added = (w.hiddenCaveats ?? []).filter((id) => !(old.hiddenCaveats ?? []).includes(id))
+      if (w.type === 'note') expect(added, w.id).toEqual([])
+      for (const id of added) {
+        expect(old.notes ?? [], w.id).not.toContain(id)
+        expect(id, w.id).not.toBe('country-split-excludes-refused')
+      }
+      seeded += added.length
+    }
+    expect(seeded).toBeGreaterThan(0)
   })
 })
