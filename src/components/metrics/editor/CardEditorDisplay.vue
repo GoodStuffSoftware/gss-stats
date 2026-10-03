@@ -47,7 +47,8 @@ function toggleDelta(name: 'yesterday' | 'avg7', checked: boolean) {
   deltas.value = (['yesterday', 'avg7'] as const).filter((d) => set.has(d))
 }
 
-const decimals = computed<0 | 1 | 2>({
+const DECIMALS_OPTIONS = [0, 1, 2, 3, 4] as const // validate.ts accepts 0-4; render.ts clamps to it
+const decimals = computed<(typeof DECIMALS_OPTIONS)[number]>({
   get: () => (display.value.as === 'percent' ? (display.value.decimals ?? 1) : 1),
   set: (v) => {
     if (display.value.as === 'percent') display.value = { as: 'percent', decimals: v }
@@ -56,7 +57,7 @@ const decimals = computed<0 | 1 | 2>({
 const dateRangeDays = computed<boolean>({
   get: () => display.value.as === 'dateRange' && !!display.value.days,
   set: (v) => {
-    if (display.value.as === 'dateRange') display.value = { as: 'dateRange', days: v }
+    if (display.value.as === 'dateRange') display.value = v ? { as: 'dateRange', days: true } : { as: 'dateRange' }
   },
 })
 </script>
@@ -94,9 +95,7 @@ const dateRangeDays = computed<boolean>({
       <div class="field">
         <label :for="decimalsId">Decimals</label>
         <select :id="decimalsId" v-model.number="decimals">
-          <option :value="0">0</option>
-          <option :value="1">1</option>
-          <option :value="2">2</option>
+          <option v-for="n in DECIMALS_OPTIONS" :key="n" :value="n">{{ n }}</option>
         </select>
       </div>
       <p class="hint">Always shows the counts, e.g. "12.1% (4/33)" — no toggle to hide them.</p>
