@@ -379,7 +379,7 @@ describe('review fixes: arrivals, raw signals, date limit, request caps', () => 
 
   // R-1b review (2026-10-03): with the split guard's six patterns BOUND, these two in-cap requests
   // reached 102 and 103 bound parameters and were refused with a 400. The patterns are now SQL
-  // literals (src/lib/splitGuard.ts refusedPathMatch), so both run. Measured: 96 and 97 binds.
+  // literals (src/lib/splitGuard.ts refusedPathMatch), so both run. Measured: 96 and 97 binds with 3 registered campaigns; 98 and 99 with the 5 of flight 2 (each campaign adds one bind).
   const maxed = {
     sites: Array.from({ length: 50 }, (_, i) => `s${i}`),
     excludeOwnVisits: true,
@@ -398,7 +398,7 @@ describe('review fixes: arrivals, raw signals, date limit, request caps', () => 
     })
     expect(body.error).toBeUndefined()
     expect(calls).toHaveLength(1)
-    expect(calls[0].binds.length).toBe(96)
+    expect(calls[0].binds.length).toBe(98)
   })
   it('a six-dim ring [referrer, device, campaignFlight, gameMode, popupFamily, flightDay] at the caps answers 200', async () => {
     const { body, calls } = await post({
@@ -410,15 +410,15 @@ describe('review fixes: arrivals, raw signals, date limit, request caps', () => 
     })
     expect(body.error).toBeUndefined()
     expect(calls).toHaveLength(1)
-    expect(calls[0].binds.length).toBe(97)
+    expect(calls[0].binds.length).toBe(99)
   })
 
   // statementTooLarge itself (src/lib/queryLimits.ts, re-exported from './geo') still refuses
   // over-cap statements — exercised directly since, with the exclusion clause now bind-free,
   // no combination of MAX_SITES (50) + MAX_CONSTRAINTS (16) + every other toggle reaches 100
   // bound parameters through the real handler any more (the referrer x device tests above are the
-  // ceiling for that shape, at 81 and 91; the heaviest measured shapes are the two rings, at 96
-  // and 97). The guard stays in place as defense in depth for when
+  // ceiling for that shape, at 81 and 91; the heaviest measured shapes are the two rings, at 98
+  // and 99; a 7th registered campaign would put the six-dim ring over 100). The guard stays in place as defense in depth for when
   // POPUP_EVENT_PREFIXES, CAMPAIGNS, or EXCLUSIONS grow enough to matter again.
   it('statementTooLarge still refuses a statement over 100 bound parameters', () => {
     const res = statementTooLarge('SELECT 1', 101)
