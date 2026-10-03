@@ -98,6 +98,11 @@ export const BSK_KPIS: CardSpec = {
         { id: 'authSuccessUnknown', label: { metric: true }, data: { metric: 'bsk.authSuccessUnknown', window: 'todaySoFar' }, display: TODAY, ...COMPACT },
         { id: 'authErrors', label: { metric: true }, data: { metric: 'bsk.authErrors', window: 'todaySoFar' }, display: TODAY, ...COMPACT },
         { id: 'authRedirects', label: { metric: true }, data: { metric: 'bsk.authRedirects', window: 'todaySoFar' }, display: TODAY, ...COMPACT },
+        { id: 'tutorialFirstRun', label: { metric: true }, data: { metric: 'bsk.tutorialFirstRun', window: 'todaySoFar' }, display: TODAY, ...COMPACT },
+        { id: 'tutorialReplay', label: { metric: true }, data: { metric: 'bsk.tutorialReplay', window: 'todaySoFar' }, display: TODAY, ...COMPACT },
+        { id: 'tourExitPreamble', label: { metric: true }, data: { metric: 'bsk.tourExitPreamble', window: 'todaySoFar' }, display: TODAY, ...COMPACT },
+        { id: 'tourExitHub', label: { metric: true }, data: { metric: 'bsk.tourExitHub', window: 'todaySoFar' }, display: TODAY, ...COMPACT },
+        { id: 'tourExitSection', label: { metric: true }, data: { metric: 'bsk.tourExitSection', window: 'todaySoFar' }, display: TODAY, ...COMPACT },
         { id: 'install', label: { metric: true }, data: { metric: 'bsk.installs', window: 'todaySoFar' }, display: TODAY, ...COMPACT },
         { id: 'installRaw', label: { metric: true }, data: { metric: 'bsk.rawInstallSignals', window: 'todaySoFar' }, display: TODAY, caption: { note: 'raw-install-double-count' }, ...COMPACT },
         { id: 'returns', label: { metric: true }, data: { metric: 'bsk.returnsD1plus', window: 'todaySoFar' }, display: TODAY, caption: { note: 'returns-d1plus-caveat' }, ...COMPACT },
@@ -106,10 +111,11 @@ export const BSK_KPIS: CardSpec = {
   ],
 }
 
-/** The release panel (OverviewWidgetBody 'releasePanel'): the latest dated release, how many
+/** The release panel (OverviewWidgetBody 'releasePanel'): the compared release, how many
  * days each side covers, and a table of the four counts with Before and After as its columns.
- * Each window is `days` whole days on its side of the release's ET midnight, bounded by the
- * first Best Sudoku hit and by today (lib/overview.ts releaseComparisonWindows). A count the
+ * Each window is `days` whole ET days: Before ends at the release date's ET midnight, After
+ * starts the ET midnight after the release date (the release day itself is in neither side),
+ * bounded by the first Best Sudoku hit and by today (lib/overview.ts releaseComparisonWindows). A count the
  * window could not measure (installs before the install fix) says so instead of reading 0. */
 export const RELEASE_BEFORE_AFTER: CardSpec = {
   v: 1,

@@ -65,6 +65,11 @@ describe('units key off the beacon path families (lib/popupEvents.ts)', () => {
     'bsk.installs': { path: '/popup-outcome/install-prompt/installed' },
     'bsk.authErrors': { path: '/auth/error/popup-blocked' },
     'bsk.authRedirects': { path: '/auth/redirect/google' },
+    'bsk.tutorialFirstRun': { path: '/game/tutorial-complete/first-run' },
+    'bsk.tutorialReplay': { path: '/game/tutorial-complete/replay' },
+    'bsk.tourExitPreamble': { path: '/tour/exit-at/preamble' },
+    'bsk.tourExitHub': { path: '/tour/exit-at/hub' },
+    'bsk.tourExitSection': { path: '/tour/exit-at/section' },
     'bsk.authSuccessNew': { path: '/auth/success/google/new' },
     'bsk.authSuccessExisting': { path: '/auth/success/email/existing' },
     'bsk.authSuccessUnknown': { path: '/auth/success/google/unknown' },
@@ -125,6 +130,17 @@ describe('the catalog', () => {
     const ctx = ctxFor()
     expect(rowMatcher(live, ctx)(row('/game/complete/normal/easy'))).toBe(true)
     expect(rowMatcher(live, ctx)(row('/game/complete-deferred/normal/easy'))).toBe(false)
+  })
+  // v1.97.0: a tutorial row is never a game completion. Every completions metric anchors on
+  // /game/complete/, so none counts a /game/tutorial-complete/ row.
+  it('no completions metric counts a tutorial-complete row', () => {
+    const ctx = ctxFor()
+    for (const id of ['bsk.completions', 'campaign.completions']) {
+      const m = METRICS.get(id)!
+      for (const p of ['/game/tutorial-complete/first-run', '/game/tutorial-complete/replay']) {
+        expect(rowMatcher(m, ctx)(row(p)), `${id} ${p}`).toBe(false)
+      }
+    }
   })
   it('auth successes count the base row only, never the new/existing status row beside it', () => {
     const auth = METRICS.get('bsk.authSuccess')!

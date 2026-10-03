@@ -32,8 +32,11 @@ import {
   INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS,
   isAuthErrorPath,
   isAuthRedirectPath,
+  isTourExitPath,
+  isTutorialCompletePath,
   POPUPS,
   RAW_INSTALL_DEDUPE_LIVE_AT_UTC_MS,
+  TOUR_TRACKING_LIVE_AT,
   TRACKING_ACTIVATION_DATE_ET,
   type PopupEvent,
 } from '../popupEvents'
@@ -125,6 +128,10 @@ const TRACKING_VS_FLIGHT: InstrumentationRule = { ...TRACKING, against: 'flight'
 const GAME_COMPLETE: InstrumentationRule = { kind: 'liveAt', atMs: GAME_COMPLETE_LIVE_AT, source: 'GAME_COMPLETE_LIVE_AT' }
 const INSTALL_FIX: InstrumentationRule = { kind: 'unmeasuredBefore', atMs: INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, source: 'INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS', noteId: 'install-fix-note' }
 const RAW_DEDUPE: InstrumentationRule = { kind: 'annotateAt', atMs: RAW_INSTALL_DEDUPE_LIVE_AT_UTC_MS, noteId: 'raw-install-dedupe' }
+// v1.97.0 (live 2026-10-03T17:03:40Z, lib/popupEvents.ts TOUR_TRACKING_LIVE_AT): the tutorial
+// completion split and the tour exit step. Known to the second, so a window reaching back before
+// it reads "counted from" rather than a false zero.
+const TOUR_TRACKING: InstrumentationRule = { kind: 'liveAt', atMs: TOUR_TRACKING_LIVE_AT, source: 'TOUR_TRACKING_LIVE_AT' }
 const AUTH_ERROR_REDIRECT: InstrumentationRule = { kind: 'liveOnEtDate', dateEt: AUTH_ERROR_REDIRECT_LIVE_AT_ET, source: 'AUTH_ERROR_REDIRECT_LIVE_AT_ET' }
 // v1.95.5 (live 2026-09-26T19:43:02Z, the same instant as GAME_COMPLETE above): the new/
 // existing/unknown split that rides alongside every base /auth/success/<provider> row (lib/
@@ -310,7 +317,7 @@ export const METRIC_DEFS: MetricDef[] = [
   // Any tagged first-ever beacon, whatever its campaign (the release panel's "Tagged arrivals":
   // no attribution window, unlike campaign.taggedArrivals).
   bskMetric({ id: 'bsk.taggedArrivals', unit: 'device', unitLabel: 'unit.arrivals', visitor: 'new', anyTag: true, windows: { page: 'bskRangePath', ...RELEASE_WINDOWS }, instrumented: [], caveats: ['arrivals-caveat'] }),
-  // How many days each release window covers (the latest dated release, bounded by the first
+  // How many days each release window covers (the compared release, bounded by the first
   // Best Sudoku hit and by today: lib/overview.ts releaseComparisonWindows).
   {
     id: 'release.windowDays',
@@ -342,6 +349,13 @@ export const METRIC_DEFS: MetricDef[] = [
   // misleading full-history zero.
   bskMetric({ id: 'bsk.authErrors', unit: 'row', path: isAuthErrorPath, windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [AUTH_ERROR_REDIRECT] }),
   bskMetric({ id: 'bsk.authRedirects', unit: 'row', path: isAuthRedirectPath, windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [AUTH_ERROR_REDIRECT] }),
+  // v1.97.0: tutorial completions split by run kind, and tour exits by step. Counts only; the
+  // tutorial rows are NOT real game completions (bsk.completions never counts them).
+  bskMetric({ id: 'bsk.tutorialFirstRun', unit: 'row', path: (p) => isTutorialCompletePath(p, 'first-run'), instrumented: [TOUR_TRACKING] }),
+  bskMetric({ id: 'bsk.tutorialReplay', unit: 'row', path: (p) => isTutorialCompletePath(p, 'replay'), instrumented: [TOUR_TRACKING] }),
+  bskMetric({ id: 'bsk.tourExitPreamble', unit: 'row', path: (p) => isTourExitPath(p, 'preamble'), instrumented: [TOUR_TRACKING] }),
+  bskMetric({ id: 'bsk.tourExitHub', unit: 'row', path: (p) => isTourExitPath(p, 'hub'), instrumented: [TOUR_TRACKING] }),
+  bskMetric({ id: 'bsk.tourExitSection', unit: 'row', path: (p) => isTourExitPath(p, 'section'), instrumented: [TOUR_TRACKING] }),
   bskMetric({ id: 'bsk.installs', unit: 'showing', path: isInstallPromptInstalled, windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [INSTALL_FIX], lagDays: [0, 7] }),
   bskMetric({ id: 'bsk.rawInstallSignals', unit: 'row', path: isRawInstallSignal, instrumented: [RAW_DEDUPE], caveats: ['raw-install-dedupe'] }),
   bskMetric({ id: 'bsk.returnsD1plus', unit: 'row', path: isReturnD1Plus, instrumented: [TRACKING] }),
