@@ -774,9 +774,13 @@ Secrets Store, nothing secret is needed in the workflow) when a push to `main` c
 `workers/sync/**`, any non-test file under `src/lib/**` (the Worker bundles `campaigns.ts`
 and its other imports from there), `package-lock.json` (the pinned wrangler), the root `tsconfig.json`, `scripts/ads-reads/worker-deploy.ts`
 (stamping and cron) or `deploy.yml`. Other pushes skip it; **Actions → Deploy → Run workflow** always deploys
-it, but only when run on `main` (the job is skipped on any other branch). The same
-`CLOUDFLARE_API_TOKEN` secret is used, so the token needs **Workers Scripts: Edit** in
-addition to Pages: Edit. Worker deploys queue (one at a time, never cancelled mid-flight); if
+it, but only when run on `main` (the job is skipped on any other branch). The job
+authenticates with the optional repo secret **`CLOUDFLARE_WORKERS_API_TOKEN`** and falls back to
+`CLOUDFLARE_API_TOKEN` when it is unset, so a Worker-capable token can be added without touching
+the Pages secret. Whichever it uses needs **Workers Scripts: Edit** (account), plus **Secrets
+Store** access if the deploy fails on the `secrets_store_secrets` bindings in
+`workers/sync/wrangler.toml`; the Pages token alone may have neither. A failed deploy logs an
+error naming both secrets. Worker deploys queue (one at a time, never cancelled mid-flight); if
 three Worker-touching pushes land while one is deploying, the middle one's change is only picked
 up by the next Worker-touching push or a manual run. A Worker deployed by hand with `--paused`
 gets its cron back on the next automatic deploy, **unless you set the repo variable
