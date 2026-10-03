@@ -17,6 +17,7 @@ import {
   UPSELL_SIGNEDOUT_EXPECTED_NOTE,
   type OutcomePopup,
   type RuleResult,
+  reportLabelFor,
 } from '../../src/lib/adsRules'
 import { POPUP_OUTCOME_TYPES, gateRate, installOutcomeGapNote } from '../../src/lib/popupEvents'
 import { RAW_INSTALL_SIGNALS_LABEL } from '../../src/lib/campaigns'
@@ -183,7 +184,7 @@ function header(r: MorningResult | PostflightResult, kind: string): string[] {
   const et = etMinuteLabel(Date.parse(r.readAt))
   const s = r.status
   return [
-    `BSK retest ${kind}, ${et}${r.dryRun ? ' [DRY RUN: nothing written]' : ''}`,
+    `${reportLabelFor(r.campaign.id)} ${kind}, ${et}${r.dryRun ? ' [DRY RUN: nothing written]' : ''}`,
     `Campaign ${r.campaign.id} "${r.campaign.label}" (${r.campaign.ucValues.join(', ')}): ${s ? `${s.status}/${s.servingStatus}${s.dailyBudget != null ? `, budget ${money(s.dailyBudget)}/day` : ''}` : `status NOT READ (${r.statusError})`}`,
   ]
 }

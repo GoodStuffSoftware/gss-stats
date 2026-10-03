@@ -37,7 +37,6 @@ import {
   readingEntryKind,
   readingId,
   readPlanFor,
-  RETEST_AD_GROUP_PLACEMENT_COUNTS,
   round2,
   AUTH_NEW_EXISTING_LIVE_AT,
   campaignSignUps,
@@ -86,6 +85,7 @@ import {
   type TaggedRow,
   type FirstSessionRowSite,
   type TaggedSummary,
+  reportLabelFor,
 } from '../../src/lib/adsRules'
 import type { AdsStore, AppendOutcome, PlacementDayRow } from '../../src/lib/adsStore'
 import { ARRIVALS_CAVEAT, costPer, etMidnightUtcMs, etTimeUtcMs, funnelStepRates, type CampaignFlight, type FunnelStepKey } from '../../src/lib/campaigns'
@@ -253,7 +253,7 @@ export interface DiagnosticsSection {
   hourly: HourlyRow[] | null
   geo: GeoRow[] | null
   devices: DeviceRow[] | null
-  /** null entries: build-spec expected count (RETEST_AD_GROUP_PLACEMENT_COUNTS), for the
+  /** null entries: build-spec expected count (the read plan's adGroupPlacementCounts), for the
    * "placement count matches the build spec" check (R2) — never for an unknown ad group. */
   targeting: (TargetingRow & { expectedPlacements: number | null })[] | null
   recommendations: RecommendationRow[] | null
@@ -643,6 +643,7 @@ async function diagnosticsRead(
   deps: ReadDeps,
   campaign: CampaignFlight,
   campaignId: string,
+  expectedCounts: AdsReadPlan['adGroupPlacementCounts'],
   spendThroughEt: string | null,
   taggedRows: Attempt<TaggedRow[]>,
 ): Promise<DiagnosticsSection> {
@@ -690,7 +691,7 @@ async function diagnosticsRead(
     hourly: hourly?.ok ? hourly.value : null,
     geo: geo?.ok ? geo.value : null,
     devices: devices?.ok ? devices.value : null,
-    targeting: targeting?.ok ? targeting.value.map((t) => ({ ...t, expectedPlacements: RETEST_AD_GROUP_PLACEMENT_COUNTS[t.adGroup] ?? null })) : null,
+    targeting: targeting?.ok ? targeting.value.map((t) => ({ ...t, expectedPlacements: expectedCounts?.[t.adGroup] ?? null })) : null,
     recommendations: recommendations?.ok ? recommendations.value : null,
     countryCounts: country?.ok ? country.value : null,
     accountCrossCheck,
@@ -838,11 +839,12 @@ export function repeatedToday(r: { dedup?: DedupSection }, kind: ReadingRecord['
  * can reach a notification. A threshold read, a cap trip or an alert already recorded (and so
  * already pushed) today is not pushed again; a failed read still is. */
 export function morningPushText(r: MorningResult): string | null {
+  const label = reportLabelFor(r.campaign.id)
   const missed = r.missedReads.length ? ` Previous scheduled read missing: ${r.missedReads.join(', ')}.` : ''
   const failed = r.failureDetails.length ? ` Read problems: ${r.failureDetails.join('; ')}.` : ''
   if (r.thresholdRead && !repeatedToday(r, 'threshold')) {
     const t = r.thresholdRead
-    const bits = [`BSK retest $${Math.max(...t.thresholds)} read: ${money(t.cumulativeSpend)} spent`]
+    const bits = [`${label} $${Math.max(...t.thresholds)} read: ${money(t.cumulativeSpend)} spent`]
     const tc = t.tagged?.summary
     if (tc) bits.push(`${tc.taggedArrivals} tagged arrivals, ${tc.asks.total} asks, ${tc.authSuccess} auth successes`)
     const watching = t.kill.rules.filter((x) => x.status === 'watch').map((x) => x.id)
@@ -859,14 +861,14 @@ export function morningPushText(r: MorningResult): string | null {
     return bits.join('; ') + '.' + borderline + failed + missed
   }
   if (r.hardCapDaily?.status === 'trip' && !repeatedToday(r, 'daily')) {
-    return `BSK retest: ${money(r.spend.cumulative.cost)} spent, at or over the ${money(r.spend.hardCap)} cap, campaign still ${r.status?.status ?? 'ENABLED'}. PROPOSE PAUSE.${failed}${missed}`
+    return `${label}: ${money(r.spend.cumulative.cost)} spent, at or over the ${money(r.spend.hardCap)} cap, campaign still ${r.status?.status ?? 'ENABLED'}. PROPOSE PAUSE.${failed}${missed}`
   }
   const alerts = r.mode === 'health-only' && !repeatedToday(r, 'health') ? (r.releaseHealth.results ?? []).filter((h) => h.status === 'alert') : []
   if (alerts.length) {
-    return `BSK retest release-health ALERT: ${alerts.map((h) => `${h.parentLabel} ${h.parent}, ${h.childLabel} 0`).join('; ')}.${failed}`
+    return `${label} release-health ALERT: ${alerts.map((h) => `${h.parentLabel} ${h.parent}, ${h.childLabel} 0`).join('; ')}.${failed}`
   }
   if (r.failures.length) {
-    return `BSK retest ${r.mode === 'health-only' ? 'release-health backstop' : 'morning read'} FAILED: ${r.failureDetails.join('; ')}. Thresholds and the $${r.spend.hardCap} cap were not fully checked.${missed}`
+    return `${label} ${r.mode === 'health-only' ? 'release-health backstop' : 'morning read'} FAILED: ${r.failureDetails.join('; ')}. Thresholds and the $${r.spend.hardCap} cap were not fully checked.${missed}`
   }
   return null
 }
@@ -1033,7 +1035,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
 
   const diagnostics: DiagnosticsSection = opts.healthOnly
     ? { spendThroughEt: null, hourly: null, geo: null, devices: null, targeting: null, recommendations: null, countryCounts: null, accountCrossCheck: null, errors: [] }
-    : await diagnosticsRead(deps, campaign, plan.campaignId, spend.throughEt, taggedRows)
+    : await diagnosticsRead(deps, campaign, plan.campaignId, plan.adGroupPlacementCounts, spend.throughEt, taggedRows)
   const playReports: PlayReportsSection | null = opts.healthOnly ? null : await playReportsRead(deps, campaign, todayEt, cumulative)
 
   const servedToday = spend.ok ? (spend.todayPartial?.cost ?? 0) > 0 : null
@@ -1360,7 +1362,7 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
   }
   const spendTrip = base.postFlightSpend?.status === 'trip' || base.hardCap?.status === 'trip'
   const spendTripText = () =>
-    `BSK retest after the flight: ${[base.postFlightSpend?.status === 'trip' ? base.postFlightSpend.detail : null, base.hardCap?.status === 'trip' ? base.hardCap.detail : null].filter(Boolean).join('; ')}. PROPOSE PAUSE.`
+    `${plan.reportLabel} after the flight: ${[base.postFlightSpend?.status === 'trip' ? base.postFlightSpend.detail : null, base.hardCap?.status === 'trip' ? base.hardCap.detail : null].filter(Boolean).join('; ')}. PROPOSE PAUSE.`
 
   if (!due && !opts.force) {
     base.notify.reason = `not due until ${dueEt} ET; nothing recorded`
@@ -1368,7 +1370,7 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
     if (spendTrip) {
       base.notify = { push: true, busCopy: false, reason: `after-flight spend or cap trip (stage not due until ${dueEt})`, text: spendTripText() }
     } else if (base.failures.length) {
-      base.notify = { push: true, busCopy: false, reason: `failed read: ${base.failures.join(', ')}`, text: `BSK retest ${opts.stage} read FAILED: ${base.failureDetails.join('; ')}.` }
+      base.notify = { push: true, busCopy: false, reason: `failed read: ${base.failures.join(', ')}`, text: `${plan.reportLabel} ${opts.stage} read FAILED: ${base.failureDetails.join('; ')}.` }
     }
     return base
   }
@@ -1482,7 +1484,7 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
     const already = `post-flight ${opts.stage} already recorded and pushed today (${w.dedup.skipped.map((s) => s.entryKind).join(', ')})`
     base.notes.unshift(`${already}; this rerun was not stored.`)
     base.notify = base.failures.length
-      ? { push: true, busCopy: false, reason: `${already}; failed read: ${base.failures.join(', ')}`, text: `BSK retest ${opts.stage} read FAILED: ${base.failureDetails.join('; ')}.` }
+      ? { push: true, busCopy: false, reason: `${already}; failed read: ${base.failures.join(', ')}`, text: `${plan.reportLabel} ${opts.stage} read FAILED: ${base.failureDetails.join('; ')}.` }
       : { push: false, busCopy: false, reason: `${already}; not pushed again`, text: null }
     base.notes.push(INSTALL_OUTCOME_GAP_NOTE)
     return base
@@ -1491,7 +1493,7 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
     push: true,
     busCopy: true,
     reason: `post-flight ${opts.stage} read (a scheduled spec read)${trip ? ' with spend after the flight' : ''}${base.failures.length ? `; failed read: ${base.failures.join(', ')}` : ''}`,
-    text: `BSK retest ${opts.stage} read: ${money(spend.cumulative.cost)} total, ${read.tagged?.summary.taggedArrivals ?? '?'} tagged arrivals, ${read.decision ? `${signUpsPhrase(read.decision)}, row ${read.decision.row}` : 'no decision'}${read.segments ? '; split at the upsell fix (see report)' : ''}${trip ? `; PROPOSE PAUSE (${base.postFlightSpend?.status === 'trip' ? `spend after ${campaign.flightEnd}` : 'at the cap'})` : ''}.${failed}`,
+    text: `${plan.reportLabel} ${opts.stage} read: ${money(spend.cumulative.cost)} total, ${read.tagged?.summary.taggedArrivals ?? '?'} tagged arrivals, ${read.decision ? `${signUpsPhrase(read.decision)}, row ${read.decision.row}` : 'no decision'}${read.segments ? '; split at the upsell fix (see report)' : ''}${trip ? `; PROPOSE PAUSE (${base.postFlightSpend?.status === 'trip' ? `spend after ${campaign.flightEnd}` : 'at the cap'})` : ''}.${failed}`,
   }
   base.notes.push(INSTALL_OUTCOME_GAP_NOTE)
   return base

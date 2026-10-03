@@ -485,6 +485,98 @@ npm run typecheck:scripts
   pushed that day is not pushed again; a failed read always pushes. The database enforces it
   with a UNIQUE index (migration 0003).
 
+### Adding a new campaign
+
+Reading a new Google Ads campaign is a registry change, not a code change: no campaign id is
+written anywhere outside the registry entries below (and fixtures, tests and the routine docs; plus the legacy `RETEST_CAMPAIGN_ID` export in
+`adsRules.ts`, kept only for the external release-switchover helper: new code must not use it).
+Several campaigns can be live at once. Do these in order. The numbering matters: step 1 comes
+**before** anything is registered.
+
+**1. Every campaign's routine doc must pin its own `--campaign`.** The command lines that run
+the reads live in the routine docs under [`docs/routines/`](docs/routines/), not in the
+scheduled-task prompts: the task prompts only say "read the doc and follow it", and each task
+checks out `main` and reads the doc at run time. The retest is already pinned there
+(`--campaign 24279250691` on the `ads:morning-read` line of
+[`bsk-retest-morning-read.md`](docs/routines/bsk-retest-morning-read.md) and the
+`ads:postflight-read` line of [`bsk-retest-postflight.md`](docs/routines/bsk-retest-postflight.md),
+which serves all five stages), so registering a second campaign needs no edit to the retest's
+routine. Why every doc must pin: without `--campaign`, a read defaults only when **exactly one**
+campaign is registered (the same rule for the morning read and every post-flight stage). The
+moment a second campaign is registered, an unpinned read exits 1 ("2 campaigns have read plans
+… pass --campaign <id>") instead of reading. That is a loud failure, never a silent read of the
+wrong campaign, but it would skip a scheduled run. A new campaign's routine docs (step 3) carry
+`--campaign <its id>` from the first commit; if any doc or prompt for an existing campaign still
+lacks the pin, pin it in the same PR as the registration.
+
+**2. Register the campaign**, two edits, both in `src/lib`:
+
+- **[`campaigns.ts`](src/lib/campaigns.ts) `CAMPAIGNS`** — one `CampaignFlight`: `id` (Google
+  Ads campaign id), `label`, `ucValues` (the `utm_campaign` tags), `flightStart`
+  (+ `flightStartTimeEt` if the schedule starts mid-day), `flightEnd`, `status`, `kind`,
+  `dailyBudgetUsd` and `hardCapUsd` (both required to read it: they arm the pacing line and kill
+  rule 4), `servingHoursEt`, `notes`, and `directionalThroughDay` if the first N flight days
+  are directional. This alone puts the campaign on the dashboard and in the sync.
+- **[`adsRules.ts`](src/lib/adsRules.ts) `ADS_READ_PLANS`** — one `buildReadPlan('<id>', {...})`:
+  `thresholds` (the spend reads; the report page draws its ladder from them), `killRulesFrom`,
+  `placementLeakMaxShare`, `ctrFloor`, `approvedPlacements`, optional `adGroupPlacementCounts`
+  (the build-spec counts the targeting diagnostic checks), `morningReadFirstEt` /
+  `morningReadLastEt` (the morning-read window), and the two fields that keep two live
+  campaigns' output apart:
+  - `reportLabel` — the short name that leads the report header and every push/bus line
+    ("`<reportLabel>` morning read …"). The retest's is `BSK retest`.
+  - `auditSlug` — the audit-trail folder, `docs/marketing/google-ads/<auditSlug>/data/<ET
+    date>.json`. The retest's is `retest`.
+  Both must be unique across the registry; `campaignRegistry.test.ts` fails if two plans share
+  one. Optional: `CAMPAIGN_DAILY_SPEND` and `CAMPAIGN_SPEND` in `campaigns.ts` (audit totals;
+  unset reads as no config spend). The Worker bundles `campaigns.ts`, so redeploy it too (see
+  [The sync Worker](#the-sync-worker-workerssync-gss-stats-sync)).
+
+**3. Create the new campaign's own routine docs and scheduled tasks**, with `--campaign <new
+id>` spelled out on the CLI command lines in the docs (never rely on a default again). A morning
+read, daily across its `morningReadFirstEt` .. `morningReadLastEt` window. Five post-flight
+tasks, one per stage, each on that stage's due date for the new flight end (the dates come from
+`postflightDueDate(stage, flightEnd)` in `adsRules.ts`: flight end + 7, 15, 30 and 60 days, and
+`december` at flight end + 62 days but no earlier than 2026-12-01). The existing routine docs
+([morning read](docs/routines/bsk-retest-morning-read.md),
+[post-flight](docs/routines/bsk-retest-postflight.md)) describe the retest's own copy of these
+tasks (its dates, its audit path, its fixed Artifact link): copy them for the new campaign, with
+its own dates, its own `--campaign` pin, the audit path above (the page builder derives it from
+the plan, so leave `--audit-file` off) and its own Artifact link. The task prompts (outside this
+repo) just point at the doc.
+
+**4. Verify with fixtures before the first live read** (no network, no credentials), for each
+campaign: `npm run -s ads:morning-read -- --fixture <file> --now <iso> --dry-run --campaign
+<id>` and the same with `ads:postflight-read -- --stage <stage> … --force`. Check the header
+and push text lead with the right `reportLabel`, and the threshold ladder shows that campaign's
+read points.
+
+**5. When the old campaign is done being read, add it to `CLOSED_CAMPAIGN_IDS`** (`adsRules.ts`).
+What it changes: `readPlanFor` refuses the campaign for **every** read, morning and post-flight
+alike ("campaign … is closed"), so no query, proposal or change can be built for it. What it
+does **not** change: the campaign's `ADS_READ_PLANS` entry stays, and a closed plan still counts
+as registered for the default, so with two plans registered an unpinned read still errors
+rather than guessing: every routine doc stays pinned with `--campaign`. Because a closed
+campaign's own pinned post-flight stages are refused too, add it only after its last scheduled
+stage (december) has run, not when the flight ends. A campaign that must never be read at all
+goes straight into `CLOSED_CAMPAIGN_IDS` instead; a new one never does.
+
+**Which campaign a read runs on.** `--campaign <id>` always wins, and must name a campaign in
+`CAMPAIGNS`: an empty value (an unset shell variable), a flag with no value, or an unknown id is
+an error listing the registered ids, never a fall-through to the default. Without the flag, one
+rule for `morning-read` and every `postflight-read` stage: the read defaults to the plan **only
+when exactly one campaign is registered in `ADS_READ_PLANS`**, closed ones counted. Nothing about
+dates, windows or status is inferred: a late or forced rerun, or an old unpinned task run after
+a newer campaign's window or due date, would otherwise silently read the wrong campaign. Zero or
+two or more registered plans: exit 1, listing the registered ids and saying to pass
+`--campaign`.
+
+While only the retest is registered, the default is the retest on every date, so every
+invocation that omits the flag (before, inside or after its morning-read window, and every
+post-flight stage) behaves as it did before the registry (checked by running every routine
+invocation against the base and the head: only `--help` differs). The retest's routine docs
+pin it anyway (step 1).
+
 ## Ads data freshness
 
 Every path that needs Google Ads metrics runs **one** function,
