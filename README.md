@@ -510,11 +510,14 @@ these rows belong to no country, so they count only where no country is asked, a
 routine's hourly site-event read and per-country read leave them out too. The guard keys on dimensions and drills
 only; the chart's own date range is not yet clamped to whole days. One visible effect: the **Arrivals by ET hour of day** chart no longer counts an arrival
 whose first beacon was a return or completion row, so its total can sit slightly below the
-flight-day chart's. Another: the default **Pageviews over time** (Beacon page) and **Visits over
-time** (Best Sudoku · Traffic) trends group by the UTC `date`, so they no longer count these rows
-and always carry the caption; with event beacons excluded (their default) the only rows that
-drop are refused rows not on the event-beacon list (game starts, until that list names them).
-Charts by `dateEt` are unchanged. The "hide known test and household traffic" filter is
+flight-day chart's. A chart that groups by the UTC `date` counts without these rows and carries the
+caption; with event beacons excluded (their default) the only rows that drop are refused rows not
+on the event-beacon list (game starts, until that list names them). The default **Pageviews over
+time** (Beacon page) and **Visits over time** (Best Sudoku · Traffic) trends group by `dateEt`
+since layout version 15, so they count every row and carry no caption: layout version 15 moves a
+stored copy of either from `date` to `dateEt` once, only when it is still exactly the shipped
+default (same dataset, title, type, metric, limit and release markers, any id or position), and a
+chart with any other title or setting keeps its axis. Charts by `dateEt` are unchanged. The "hide known test and household traffic" filter is
 unchanged. The guard's path patterns are inlined as SQL literals, so it costs no D1 bound
 parameters; the heaviest in-cap `/api/geo` shapes tested bind at most 97 of D1's 100.
 
@@ -1039,7 +1042,10 @@ code: a layout still stored at v8 when v11 ships is backed up as `backup:v8`, on
 as `backup:v10`. Production is stored at v12 when layout version 13 (page navigation) ships, so
 its first v13 save writes `backup:v12`. Layout version 14 (sparklines) is a save-guard bump
 only: its first save over a stored v13 writes `backup:v13`, and rolling the code back past it
-needs `backup:v13` restored (same steps below, with that key). A tab still
+needs `backup:v13` restored (same steps below, with that key). Layout version 15 (the default
+trend charts on `dateEt`) rewrites the dimension of those untouched charts: its first save over a
+stored v14 writes `backup:v14`, and rolling the code back past it needs `backup:v14` restored.
+A tab still
 running older code gets `409` ("This tab is out of date, reload") instead of overwriting a
 newer layout.
 
