@@ -1,6 +1,6 @@
 // The routine's beacon reads and the counts-only rule (src/lib/splitGuard.ts): the reads that
 // group by UTC hour (siteEventsQuery) or by country (taggedCountryQuery) leave out every row the
-// rule protects — bound, never interpolated — while every other row counts as before.
+// rule protects, as SQL literals that cost no binds, while every other row counts as before.
 import { describe, expect, it } from 'vitest'
 import { siteEventsQuery, taggedCountryQuery, WEB_SITE } from './beacon'
 import { DatabaseSync } from 'node:sqlite'
@@ -12,10 +12,10 @@ const at = (iso: string) => Date.parse(iso)
 const REFUSED = ['/return/sudoku_tired_of_ads/d0', '/game/complete/normal/easy', '/game/complete-deferred/normal/easy', '/game/tutorial-complete/first-run', '/game/start/easy', '/tour/exit-at/3']
 
 function guarded(q: { sql: string; binds: unknown[] }) {
-  // The exclusion is all placeholders (the pop-up include clause may itself name '/return/%' as a
-  // literal; that is lib/popupEvents.ts' own, not the guard's).
-  expect(q.sql).toContain(`NOT (${SPLIT_REFUSED_PATH_PATTERNS.map(() => 'path LIKE ?').join(' OR ')})`)
-  for (const p of SPLIT_REFUSED_PATH_PATTERNS) expect(q.binds).toContain(p)
+  // The exclusion names each pattern as a literal (lib/splitGuard.ts refusedPathMatch); none is
+  // a bind.
+  expect(q.sql).toContain(`NOT (${SPLIT_REFUSED_PATH_PATTERNS.map((p) => `path LIKE '${p}'`).join(' OR ')})`)
+  for (const p of SPLIT_REFUSED_PATH_PATTERNS) expect(q.binds).not.toContain(p)
 }
 // A local hits table (not functions/_lib/testing/hitsDb: that pulls Workers types into this
 // Node-typed project).

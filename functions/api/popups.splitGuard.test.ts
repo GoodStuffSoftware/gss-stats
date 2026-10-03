@@ -1,5 +1,5 @@
 // /api/popups groups pop-up rows by UTC hour, so the rows the counts-only rule protects
-// (src/lib/splitGuard.ts) are left out of its one query — bound, never interpolated. None is a
+// (src/lib/splitGuard.ts) are left out of its one query, as SQL literals that cost no binds. None is a
 // pop-up event, so every pop-up count is unchanged.
 import { describe, expect, it } from 'vitest'
 import { onRequestPost } from './popups'
@@ -7,7 +7,7 @@ import { insertHits, openHitsDb, sqliteD1 } from '../_lib/testing/hitsDb'
 import { SPLIT_REFUSED_PATH_PATTERNS } from '../../src/lib/splitGuard'
 
 describe('/api/popups and the split guard', () => {
-  it('its hourly query binds the refused patterns and never returns a refused row', async () => {
+  it('its hourly query names the refused patterns as literals and never returns a refused row', async () => {
     const db = openHitsDb()
     const ts = Date.parse('2026-10-01T15:00:00Z')
     insertHits(db, [
@@ -21,9 +21,9 @@ describe('/api/popups and the split guard', () => {
     const res = await (onRequestPost as any)({ request, env: { gss_geo: spy }, waitUntil: () => {} })
     expect(res.status).toBe(200)
     expect(seen).toHaveLength(1)
-    // All placeholders (the pop-up include clause names its own prefixes as literals).
-    expect(seen[0].sql).toContain(`NOT (${SPLIT_REFUSED_PATH_PATTERNS.map(() => 'path LIKE ?').join(' OR ')})`)
-    for (const p of SPLIT_REFUSED_PATH_PATTERNS) expect(seen[0].binds).toContain(p)
+    // Literals, like the pop-up include clause's own prefixes: no pattern is a bind.
+    expect(seen[0].sql).toContain(`NOT (${SPLIT_REFUSED_PATH_PATTERNS.map((p) => `path LIKE '${p}'`).join(' OR ')})`)
+    for (const p of SPLIT_REFUSED_PATH_PATTERNS) expect(seen[0].binds).not.toContain(p)
     const rows = db.prepare(seen[0].sql).all(...(seen[0].binds as (string | number)[])) as { path: string }[]
     expect([...new Set(rows.map((r) => r.path))]).toEqual(['/signin-prompt/placement'])
   })
