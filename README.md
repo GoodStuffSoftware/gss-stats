@@ -437,7 +437,14 @@ Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats
   (`{ preset }` from [`src/lib/metrics/presets.ts`](src/lib/metrics/presets.ts), or a saved spec)
   shows `MetricCard` ([`src/components/metrics/`](src/components/metrics)) — one batched request
   per page, following the page's date range and sites, with each card's caveats behind one
-  collapsed "Notes" link and "Updated Xs ago" with ↻ where the card asks for it. The Overview's
+  collapsed "Notes" link and "Updated Xs ago" with ↻ where the card asks for it. **When data
+  loads:** on mount, when the range or a filter changes, on the ↻ / Refresh buttons, and when you
+  come back to the tab (the tab turns visible or the window regains focus; one page-level listener,
+  [`useReturnRefresh`](src/composables/useReturnRefresh.ts)). That last refetch is throttled — a
+  card reloads only if its last load is a minute or more old and none is in flight, never while the
+  tab is hidden — and is an ordinary request (never `fresh`), so the edge cache below still
+  absorbs it; metric cards go out as the usual batched `POST /api/metrics`. There is no polling: a
+  tab that stays in the foreground never updates itself. The Overview's
   "Today at a glance" and campaign scorecard are cards since layout version 10. **Cards are
   editable**: "Add chart" offers a metric card as a chart type, and editing one — a new card or
   an existing "Today at a glance"/scorecard — opens a card builder in place of the usual chart
