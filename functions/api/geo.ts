@@ -17,7 +17,14 @@ import { gameDimSqlCase, gameDimPrefilter, campaignFlightSqlCase, campaignFlight
 import { excludeOwnClause as sharedExcludeOwnClause, selfReferralClause as sharedSelfReferralClause } from '../../src/lib/ownExclusion'
 import { etDateSql, etHourSql } from '../../src/lib/etTime'
 import { isDateDim } from '../../src/lib/rings'
-import { splitRefused, refusedPathExcludeClause, SPLIT_GUARD_KEY } from '../../src/lib/splitGuard'
+import {
+  splitRefused,
+  refusedPathExcludeClause,
+  refusedWindowClause,
+  reachableRefusedPatterns,
+  REFUSED_WINDOW_KEY,
+  SPLIT_GUARD_KEY,
+} from '../../src/lib/splitGuard'
 import { buildCacheKeyUrl, cachedJson, ttlSecondsFor, type CacheLike } from '../_lib/edgeCache'
 import { WHEN_RE, SITE_TAG_RE } from '../../src/lib/range'
 // Request-size guards (MAX_SITES/MAX_CONSTRAINTS/MAX_BOUND_PARAMS/MAX_SQL_BYTES/
@@ -362,10 +369,22 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // by an hour/place/device dimension (the UTC `date` included), or drills into one leaves
   // return, game-start, completion, tutorial-completion and tour-exit rows out entirely. Applied
   // in all three branches below, and independent of every toggle (event beacons, own visits,
-  // known traffic). The patterns are SQL literals, so the guard adds no binds. Scope: dimensions and drills
-  // only. The request's own since/until window is not clamped to whole days, so a sub-day
-  // window still counts these rows (the same holds for /api/metrics) — a known follow-up.
+  // known traffic). The patterns are SQL literals, so the guard adds no binds.
+  // Every other query still counts those rows, so its window counts them over whole ET days
+  // (R-1d, refusedWindowClause): a window that is not on ET midnights snaps for refused rows only,
+  // and every other row keeps the exact window. It adds no binds either, and a window already on
+  // ET midnights gets the unchanged SQL, binds and cache key. Bare-date bounds here are UTC days,
+  // so they snap too.
   const splitGuardActive = splitRefused({ points: isPoints, fields: [...activeDims, ...constraints.map((c) => c.field)] })
+  const tsWindow = splitGuardActive
+    ? { terms: ['ts >= ?', 'ts < ?'], binds: [sinceMs, untilMs], moved: false }
+    : refusedWindowClause(sinceMs, untilMs)
+  // The caption flag needs a refused row this query can still count (review of #63, SHOULD-3:
+  // a non-Best-Sudoku site, a /home drill or excluded event rows count none). The snap and its
+  // cache-key marker still follow `moved` alone.
+  const refusedReachable =
+    reachableRefusedPatterns({ eventRowsExcluded: !includeEventBeacons && !eventDimActive, sites, constraints }).length > 0
+  const refusedWholeDays = tsWindow.moved && refusedReachable
   const splitGuardClause = (w: string[], b: any[]) => {
     if (splitGuardActive) refusedPathExcludeClause(w, b)
   }
@@ -394,6 +413,9 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     // before the guard existed, or under an older list (closed ranges are cached long), is never
     // served for them; every other key is unchanged.
     ...(splitGuardActive ? { splitGuard: SPLIT_GUARD_KEY } : {}),
+    // Likewise only a snapped window gets a new key, keyed on the snap mode, so changing
+    // REFUSED_WINDOW_SNAP never serves an entry cached under another mode.
+    ...(tsWindow.moved ? { refusedWindow: REFUSED_WINDOW_KEY } : {}),
   })
   const ttl = ttlSecondsFor(until, new Date())
   const cache = (caches as unknown as { default: CacheLike }).default
@@ -403,8 +425,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   async function computeGeoResponse(): Promise<Response> {
   // Map mode: return one point per distinct lat/lon with a count (for globe/map charts).
   if (isPoints) {
-    const w: string[] = ['ts >= ?', 'ts < ?', "lat <> ''"]
-    const b: any[] = [sinceMs, untilMs]
+    const w: string[] = [...tsWindow.terms, "lat <> ''"]
+    const b: any[] = [...tsWindow.binds]
     eventRowsClause(w, b) // events, not screen views — excluded unless opted in
     splitGuardClause(w, b) // map mode: always on
     knownTrafficClause(w, b)
@@ -438,7 +460,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       (a: any, x: any) => ({ pageviews: a.pageviews + x.pageviews, visits: a.visits + x.visits }),
       { pageviews: 0, visits: 0 },
     )
-    return json({ rows, totals, meta: { site: sites.length ? sites.join(',') : 'all', since, until, dimensions: ['points'], metric: 'pageviews', dataset: 'geo', ...(splitGuardActive ? { splitGuard: true } : {}) } })
+    return json({ rows, totals, meta: { site: sites.length ? sites.join(',') : 'all', since, until, dimensions: ['points'], metric: 'pageviews', dataset: 'geo', ...(splitGuardActive ? { splitGuard: true } : {}), ...(refusedWholeDays ? { refusedWholeDays: true } : {}) } })
   }
 
   if (isRing) {
@@ -452,8 +474,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     // under a label the way single-dim breakdown does) — ringBlankExclusion is the
     // type-correct version of that per-dim test (screenw is INTEGER; every other ring
     // dimension is TEXT).
-    const w: string[] = ['ts >= ?', 'ts < ?', ...ringDims.map(ringBlankExclusion)]
-    const b: any[] = [sinceMs, untilMs]
+    const w: string[] = [...tsWindow.terms, ...ringDims.map(ringBlankExclusion)]
+    const b: any[] = [...tsWindow.binds]
     eventRowsClause(w, b) // events excluded unless opted in, or the dims describe events
     splitGuardClause(w, b)
     knownTrafficClause(w, b)
@@ -489,7 +511,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     })
     const total = Number(r.results?.[0]?.total) || 0
     const totals = { pageviews: total, visits: total }
-    return json({ rows, totals, meta: { site: sites.length ? sites.join(',') : 'all', since, until, dimensions: ringDims, metric: 'pageviews', dataset: 'geo', ...(splitGuardActive ? { splitGuard: true } : {}) } })
+    return json({ rows, totals, meta: { site: sites.length ? sites.join(',') : 'all', since, until, dimensions: ringDims, metric: 'pageviews', dataset: 'geo', ...(splitGuardActive ? { splitGuard: true } : {}), ...(refusedWholeDays ? { refusedWholeDays: true } : {}) } })
   }
 
   // Bucket blank values under a label ("(direct)" for referrers, "(none)" otherwise)
@@ -498,8 +520,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // subreddit, etc. charts. Dropping blanks made attribute charts look empty while the
   // location charts stayed full for the very same visits.
   const col = breakdownColumnExpr(dim, emptyLabelFor(dim))
-  const where = ['ts >= ?', 'ts < ?']
-  const binds: any[] = [sinceMs, untilMs]
+  const where = [...tsWindow.terms]
+  const binds: any[] = [...tsWindow.binds]
   if (BLANK_DROPPED_DIMS.has(dim)) where.push(ringBlankExclusion(dim)) // see EVENT_DIMS
   eventRowsClause(where, binds) // events excluded unless opted in, or the dim describes events
   splitGuardClause(where, binds)
@@ -537,7 +559,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const total = Number(res.results?.[0]?.total) || 0
   const totals = { pageviews: total, visits: total }
 
-  return json({ rows, totals, meta: { site: sites.length ? sites.join(',') : 'all', since, until, dimensions: [dim], metric: 'pageviews', dataset: 'geo', ...(splitGuardActive ? { splitGuard: true } : {}) } })
+  return json({ rows, totals, meta: { site: sites.length ? sites.join(',') : 'all', since, until, dimensions: [dim], metric: 'pageviews', dataset: 'geo', ...(splitGuardActive ? { splitGuard: true } : {}), ...(refusedWholeDays ? { refusedWholeDays: true } : {}) } })
   }
 }
 

@@ -28,6 +28,7 @@ import { gateRate, INSTALL_GAP_PATHS, POPUPS, rowIsPostInstallFix } from '../pop
 import { computeDelta, releaseComparisonWindows } from '../overview'
 import { latestDatedRelease } from '../releases'
 import { UPSELL_SIGNEDOUT_FIX_AT } from '../adsRules'
+import { refusedWindowMoved } from '../splitGuard'
 import { beaconSeries, seriesTwin, spendSeries } from './series'
 import { FACTS, factKey, rangeMs, type BeaconRow, type FactId, type FactParams, type FactRows, type FactStatement } from './facts'
 import { METRICS, rulesOf, type MetricCtx, type MetricDef } from './metrics'
@@ -165,14 +166,28 @@ function sideStatic(def: MetricDef, ctx: MetricCtx, window: readonly [number, nu
 interface Clock {
   todayStartMs: number
   pageRange: [number, number] | null
+  /** The page range is not whole ET days, so bskRangePath counts refused rows over whole ET days
+   * (R-1d, lib/splitGuard.ts) while the measured interval stays the page range. */
+  pageRefusedWholeDays: boolean
   release: ReleaseWindows | null
 }
 function clockOf(env: BatchEnv): Clock {
+  const pageRange = env.context.since !== undefined && env.context.until !== undefined ? rangeMs(env.context.since, env.context.until) : null
   return {
     todayStartMs: etMidnightMs(env.todayEt),
-    pageRange: env.context.since !== undefined && env.context.until !== undefined ? rangeMs(env.context.since, env.context.until) : null,
+    pageRange,
+    pageRefusedWholeDays: pageRange !== null && refusedWindowMoved(pageRange[0], pageRange[1]),
     release: env.release ?? null,
   }
+}
+
+/** Whether a metric can count a refused row: the declarative MetricDef.countsRefused flag,
+ * fail-closed (unset = it can). A sampled-path check missed metrics whose predicate matches
+ * only refused paths the sample didn't name (tutorial replay, tour exits, d1+ returns); the
+ * flag never misses one, and metrics.refused.test.ts proves every opt-out against the whole
+ * refused-path vocabulary. Static, so the note never depends on the data. */
+function countsRefusedRows(def: MetricDef): boolean {
+  return def.countsRefused !== false
 }
 
 /** W = [a, b) for a request window. `endMs` is "now" (the KPI fact's own as-of instant for
@@ -623,7 +638,13 @@ class Batch {
         sums[day] += idx.gCount[g]
       }
     }
-    return { status, value: sums[0], m, noteIds, ...(today ? { days: sums } : {}), asOfMs: plan.asOfMs }
+    // A snapped page window: say so on every metric that can count a refused row (a new array,
+    // never a push into a shared one).
+    const ids =
+      plan.factId === 'bskRangePath' && this.clock.pageRefusedWholeDays && !noteIds.includes('refused-whole-days') && countsRefusedRows(def)
+        ? [...noteIds, 'refused-whole-days']
+        : noteIds
+    return { status, value: sums[0], m, noteIds: ids, ...(today ? { days: sums } : {}), asOfMs: plan.asOfMs }
   }
 
   /** The metric's per-ET-day series (ADR 0005 slice 2) from its daily twin fact, or undefined when
