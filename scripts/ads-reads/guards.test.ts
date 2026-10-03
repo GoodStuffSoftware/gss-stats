@@ -195,6 +195,15 @@ describe('beacon reads are read-only and apply the shared exclusions', () => {
       ['bestsudoku-web', since, '/signin-prompt/tutorial', 'returning'],
       ['bestsudoku-web', since, '/welcome-signed-in/shown', 'returning'],
       ['bestsudoku-web', since, '/settings', 'returning'],
+      // v1.97.0 first-run counters: counted by path, from different devices and places alike
+      ['bestsudoku-web', since, '/tour/exit-at/hub', 'new'],
+      ['bestsudoku-web', since, '/game/start/easy', 'new'],
+      ['bestsudoku-web', since + 5, '/game/start/easy', 'returning'],
+      ['bestsudoku-web', since, '/game/tutorial-complete/replay', 'returning'],
+      ['bestsudoku-web', since, '/game/startup', 'returning'], // look-alike, not a first-session path
+      ['bestsudoku-web', since, '/tour/exit-at', 'returning'], // no stage: not a first-session path
+      ['bestsudoku-app', since, '/game/start/easy', 'new'], // another site
+      ['bestsudoku-web', since - 1, '/game/start/easy', 'new'], // before the window
       ['bestsudoku-web', since, '/return/sudoku_funnel_retest/d0', 'new'],
       ['bestsudoku-web', since, '/return/other_flight/d0', 'new'],
       ['bestsudoku-web', since, '/return/other_flight/d1', 'returning'],
@@ -211,9 +220,22 @@ describe('beacon reads are read-only and apply the shared exclusions', () => {
       '/game/abandon/1-25': 1,
       '/signin-prompt/tutorial': 1,
       '/welcome-signed-in/shown': 1,
+      '/tour/exit-at/hub': 1,
+      '/game/start/easy': 2,
+      '/game/tutorial-complete/replay': 1,
       '/return/sudoku_funnel_retest/d0': 1,
       '/return/other_flight/d0': 1,
     })
+  })
+  it('the site-wide first-session query is counts by path only: no visitor, time or place column, no join', () => {
+    const q = siteFirstSessionQuery(0, 1)
+    // The only selected columns are the path and a count; the exclusion filters (household, etc.)
+    // sit in the WHERE clause and select nothing.
+    expect(q.sql).toMatch(/^SELECT path AS p, COUNT\(\*\) AS c FROM hits WHERE /)
+    expect(q.sql).toMatch(/GROUP BY p$/)
+    expect(q.sql).not.toMatch(/\bJOIN\b/i)
+    // the new paths are matched by prefix, never by a value taken from another row
+    for (const p of ['/tour/exit-at/%', '/game/start/%', '/game/tutorial-complete/%']) expect(q.sql).toContain(`path LIKE '${p}'`)
   })
   it('the tagged arrivals query counts only this campaign\'s /return/<uc>/d0 rows, web and app, in [since, until)', () => {
     const db = new DatabaseSync(':memory:')

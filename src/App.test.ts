@@ -9,9 +9,10 @@
 // on it. This simulates the exact event sequence a touchscreen produces and asserts one tap
 // pins it, a second unpins it (App.vue's onToggleFocus gates the focus-side open to non-touch
 // input; touch relies solely on the click handler's toggle).
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import App from './App.vue'
+import { stubAppFetch } from './testing/appFetch'
 
 // The pin only does anything once the in-flow bar has scrolled out of view (App.filterbar.test.ts
 // covers that whole state machine) — while it's in view, activating the toggle moves focus to
@@ -62,6 +63,11 @@ vi.mock('./sitesStore', async (importOriginal) => {
 vi.mock('./session', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./session')>()
   return { ...actual, loadIdentity: vi.fn(async () => {}), checkSessionExpired: vi.fn(async () => {}) }
+})
+
+// No real network from a mounted App: every endpoint it can reach answers from the stub (src/testing/appFetch.ts).
+beforeEach(() => {
+  stubAppFetch()
 })
 
 // The same event sequence a real touchscreen tap produces on the element, in order — see

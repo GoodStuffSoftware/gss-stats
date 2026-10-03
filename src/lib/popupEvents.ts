@@ -87,6 +87,14 @@ export const POPUP_EVENT_PREFIXES = [
   '/game/first-move',
   '/game/abandon',
   '/welcome-signed-in',
+  // v1.97.0 count-only beacon (live on prod web 2026-10-03, see TOUR_TRACKING_LIVE_AT below): a
+  // counted game start, `/game/start/<easy|medium|hard|expert|unknown>`. WITH the trailing slash,
+  // like `/game/complete/`: `/game` itself is the real "played a game" page view and must keep
+  // counting as one. Without this entry every counted start from 17:03:40Z on was a page view.
+  // The other two v1.97.0 beacons need no entry here: `/tour/exit-at/<preamble|hub|section>`
+  // sits under '/tour' and `/game/tutorial-complete/<first-run|replay>` is covered by its own
+  // entry above. Read by lib/adsRules.ts firstSessionBucket (first-run counters).
+  '/game/start/',
 ] as const
 
 export function isPopupEventPath(path: string): boolean {
@@ -161,6 +169,7 @@ const PATH_FAMILY_LABELS: Record<(typeof POPUP_EVENT_PREFIXES)[number], string> 
   '/game/first-move': 'game-first-move',
   '/game/abandon': 'game-abandon',
   '/welcome-signed-in': 'welcome-signed-in',
+  '/game/start/': 'game-start',
 }
 
 /** Path → family label. 'page' for anything that isn't an event beacon (an ordinary page
@@ -208,6 +217,7 @@ export const PATH_FAMILY_OPTIONS: { value: string; label: string }[] = [
   { value: 'game-first-move', label: 'First move' },
   { value: 'game-abandon', label: 'Game abandoned' },
   { value: 'welcome-signed-in', label: 'Signed-in welcome card' },
+  { value: 'game-start', label: 'Game started' },
 ]
 
 // ── Classification ──────────────────────────────────────────────────────────────────
@@ -686,13 +696,23 @@ export const ORGANIC_TRACKING_LIVE_AT = Date.parse('2026-10-03T20:35:04Z')
 
 export const TOUR_EXIT_STEPS = ['preamble', 'hub', 'section'] as const
 export type TourExitStep = (typeof TOUR_EXIT_STEPS)[number]
+/** The run kinds of a `/game/tutorial-complete/<kind>` row. */
+export const TUTORIAL_COMPLETE_KINDS = ['first-run', 'replay'] as const
+export type TutorialCompleteKind = (typeof TUTORIAL_COMPLETE_KINDS)[number]
 /** A `/game/tutorial-complete/<first-run|replay>` row. */
-export function isTutorialCompletePath(path: string, kind: 'first-run' | 'replay'): boolean {
+export function isTutorialCompletePath(path: string, kind: TutorialCompleteKind): boolean {
   return path === `/game/tutorial-complete/${kind}`
 }
 /** A `/tour/exit-at/<group>` row, for one section group (preamble, hub or section; not a step id). */
 export function isTourExitPath(path: string, step: TourExitStep): boolean {
   return path === `/tour/exit-at/${step}`
+}
+/** The difficulties of a `/game/start/<difficulty>` row ('unknown' when the app can't say). */
+export const GAME_START_DIFFICULTIES = ['easy', 'medium', 'hard', 'expert', 'unknown'] as const
+export type GameStartDifficulty = (typeof GAME_START_DIFFICULTIES)[number]
+/** A `/game/start/<difficulty>` row (a counted game start), for one difficulty. */
+export function isGameStartPath(path: string, difficulty: GameStartDifficulty): boolean {
+  return path === `/game/start/${difficulty}`
 }
 
 /** A `/auth/error/<slug>` row (any slug). */
