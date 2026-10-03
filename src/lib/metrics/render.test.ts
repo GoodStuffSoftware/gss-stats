@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { campaignById } from '../campaigns'
 import { itemLabelTokens, itemViewModel, resolveLabelTokens } from './render'
 import type { ScopeInstance } from './scope'
@@ -26,8 +26,6 @@ function countsItem(overrides: Partial<MetricItem> = {}): MetricItem {
 }
 
 describe('itemViewModel — display kinds (status "ok")', () => {
-  afterEach(() => vi.useRealTimers())
-
   it('number: formatted count, no deltas when none requested', () => {
     const vm = itemViewModel(numberItem(), { status: 'ok', value: 1234 }, activeScope, opts)
     expect(vm.visible).toBe(true)
@@ -85,13 +83,21 @@ describe('itemViewModel — display kinds (status "ok")', () => {
 
   it('badge field: the tone from Display.tones, defaulting to neutral', () => {
     const item: MetricItem = { id: 'badge', label: '', data: { field: 'campaign.statusToday' }, display: { as: 'badge', tones: { 'flighting today': 'live' } } }
-    // The badge field reads the real clock, so pin it to a day inside ACTIVE_RETEST's flight.
-    vi.useFakeTimers({ now: new Date('2026-09-27T16:00:00Z'), toFake: ['Date'] })
-    const flighting = itemViewModel(item, undefined, activeScope, opts) // ACTIVE_RETEST is flighting on 2026-09-27
+    const flighting = itemViewModel(item, undefined, activeScope, { todayEt: '2026-09-27' }) // ACTIVE_RETEST is flighting on 2026-09-27
     expect(flighting.primary).toBe('flighting today')
     expect(flighting.badgeTone).toBe('live')
-    const notFlighting = itemViewModel(item, undefined, closedScope, opts)
+    const notFlighting = itemViewModel(item, undefined, closedScope, { todayEt: '2026-09-27' })
     expect(notFlighting.badgeTone).toBe('neutral')
+  })
+
+  it('badge field: follows opts.todayEt, not the real clock (inclusive flight end, then ended)', () => {
+    const item: MetricItem = { id: 'badge', label: '', data: { field: 'campaign.statusToday' }, display: { as: 'badge', tones: { 'flighting today': 'live' } } }
+    const lastDay = itemViewModel(item, undefined, activeScope, { todayEt: ACTIVE_RETEST.flightEnd })
+    expect(lastDay.primary).toBe('flighting today')
+    expect(lastDay.badgeTone).toBe('live')
+    const afterEnd = itemViewModel(item, undefined, activeScope, { todayEt: '2026-10-03' }) // the day after ACTIVE_RETEST's flightEnd
+    expect(afterEnd.primary).toBe('active') // not flighting any more: the campaign's own status
+    expect(afterEnd.badgeTone).toBe('neutral')
   })
 
   it('number/currency field: a numeric scope value formatted like the metric displays', () => {
