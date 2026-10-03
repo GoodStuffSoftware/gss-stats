@@ -1,22 +1,12 @@
 // Pure-function tests for the card-editor polish helpers (see CardEditor.polish.test.ts for the
-// mounted behaviour): the pickable sparkline option, the one decimals range, the badge-colour
+// mounted behaviour): the one decimals range, the badge-colour
 // row check and the spec comparison behind "Use a preset instead".
 import { describe, expect, it } from 'vitest'
 import { validateCard } from './validate'
-import { cloneSpec, displayOptionsFor, firstDisplayFor, makeDisplay, specFromPresetId, specsEqual, toneValueProblem } from './editorModel'
+import { cloneSpec, firstDisplayFor, makeDisplay, specFromPresetId, specsEqual, toneValueProblem } from './editorModel'
 import type { CardSpec } from './types'
 
-describe('displayOptionsFor: pickableSparkline', () => {
-  it('enables the sparkline option only when asked, where the kind allows one', () => {
-    const binding = { metric: 'campaign.taggedArrivals' } as const
-    expect(displayOptionsFor(binding).find((o) => o.as === 'sparkline')!.disabled).toBe(true)
-    const on = displayOptionsFor(binding, { pickableSparkline: true }).find((o) => o.as === 'sparkline')!
-    expect(on.disabled).toBe(false)
-    expect(on.hint).toBeUndefined()
-    // Other kinds still do not offer one at all, and nothing else changes.
-    expect(displayOptionsFor({ ratio: 'campaign.acceptPerAsk' }, { pickableSparkline: true }).some((o) => o.as === 'sparkline')).toBe(false)
-    expect(displayOptionsFor(binding, { pickableSparkline: true }).map((o) => o.as)).toEqual(displayOptionsFor(binding).map((o) => o.as))
-  })
+describe('the sparkline option (availability itself is pinned in editorModel.test.ts)', () => {
   it('firstDisplayFor still never picks the sparkline', () => {
     expect(firstDisplayFor({ metric: 'campaign.taggedArrivals' })).not.toBe('sparkline')
   })

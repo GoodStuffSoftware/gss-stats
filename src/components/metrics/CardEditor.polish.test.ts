@@ -63,6 +63,7 @@ describe('a stored sparkline can be switched back to', () => {
   const SPARK = { as: 'sparkline', series: 'daily' } as const
   function sparkSpec(): CardSpec {
     const spec = plain(PRESETS['bsk-kpis'])
+    ;(spec.sections[0].items[0].data as { window?: string }).window = 'page' // a sparkline reads the page range, not today
     spec.sections[0].items[0].display = { ...SPARK }
     expect(validateCard(spec)).toEqual([])
     return spec
@@ -86,12 +87,25 @@ describe('a stored sparkline can be switched back to', () => {
     expect(validateCard(lastSpec(w))).toEqual([])
   })
 
-  it('stays disabled ("coming soon") on an item that never had one', async () => {
-    const w = mountEditor({ spec: plain(PRESETS['bsk-kpis']), from: 'bsk-kpis' })
+  it('is offered where it can be drawn and disabled, with the reason, where it cannot', async () => {
+    const drawable = plain(PRESETS['bsk-kpis'])
+    ;(drawable.sections[0].items[0].data as { window?: string }).window = 'page'
+    const w = mountEditor({ spec: drawable, from: 'bsk-kpis' })
     await flushPromises()
     await controls(w).find('.ce-item-summary').trigger('click')
     await flushPromises()
-    expect(tab(w, 'Sparkline')!.attributes('disabled')).toBeDefined()
+    expect(tab(w, 'Sparkline')!.attributes('disabled')).toBeUndefined() // a page window has a daily twin
+    await tab(w, 'Sparkline')!.trigger('click')
+    await flushPromises()
+    expect(lastSpec(w).sections[0].items[0].display).toStrictEqual(SPARK)
+    expect(validateCard(lastSpec(w))).toEqual([])
+
+    const w2 = mountEditor({ spec: plain(PRESETS['bsk-kpis']), from: 'bsk-kpis' }) // today so far: no daily twin
+    await flushPromises()
+    await controls(w2).find('.ce-item-summary').trigger('click')
+    await flushPromises()
+    expect(tab(w2, 'Sparkline')!.attributes('disabled')).toBeDefined()
+    expect(tab(w2, 'Sparkline')!.attributes('title')).toMatch(/page or campaign attribution window/)
   })
 
   it('survives the item being collapsed and reopened after switching away', async () => {
