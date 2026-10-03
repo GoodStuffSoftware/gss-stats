@@ -4,9 +4,10 @@
 // (lib/viewerPrefs.ts), a first-time viewer lands on ★ Overview, and switching pages never writes
 // the shared config (no PUT). A real change still saves, as v13, with the landing page untouched.
 // A drill creates its page at once, nested under the root page it came from.
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import App from './App.vue'
+import { stubAppFetch } from './testing/appFetch'
 import Dashboard from './components/Dashboard.vue'
 import { saveConfig, loadConfig } from './api'
 import { VIEWER_PREFS_KEY } from './lib/viewerPrefs'
@@ -32,8 +33,19 @@ vi.mock('./session', async (importOriginal) => {
   return { ...actual, loadIdentity: vi.fn(async () => {}), checkSessionExpired: vi.fn(async () => {}) }
 })
 
+// No real network from a mounted App: every endpoint it can reach answers from the stub (src/testing/appFetch.ts).
+beforeEach(() => {
+  stubAppFetch()
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+})
+afterEach(() => {
+  vi.useRealTimers()
+})
+
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x))
-const pastDebounce = () => new Promise((r) => setTimeout(r, 800))
+// The app's save debounce (700 ms) runs on a fake clock: stepping it forward is instant and
+// cannot be stretched by a busy machine, where each real 800 ms sleep piled up past the test timeout.
+const pastDebounce = () => vi.advanceTimersByTimeAsync(800)
 function storedV12() {
   // The live layout as the v12 build stores it (before page navigation): no groups, the
   // "Best Sudoku · " names, and the Best Sudoku overview as the shared active page.

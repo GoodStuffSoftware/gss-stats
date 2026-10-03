@@ -8,6 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import App from './App.vue'
+import { stubAppFetch } from './testing/appFetch'
 import Dashboard from './components/Dashboard.vue'
 import ChartEditor from './components/ChartEditor.vue'
 import { defaultConfig, normalizeConfig } from './lib/defaults'
@@ -27,6 +28,11 @@ vi.mock('./sitesStore', async (importOriginal) => {
 vi.mock('./session', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./session')>()
   return { ...actual, loadIdentity: vi.fn(async () => {}), checkSessionExpired: vi.fn(async () => {}) }
+})
+
+// No real network from a mounted App: every endpoint it can reach answers from the stub (src/testing/appFetch.ts).
+beforeEach(() => {
+  stubAppFetch()
 })
 
 class FakeIntersectionObserver {
