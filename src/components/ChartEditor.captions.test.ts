@@ -5,8 +5,10 @@
 // `notes` ids, N1 "remove unknown note", the note widget's own text area, and the CardEditor wiring
 // for a card's spec captions. Every test reads the SAVED widget's shape: an empty value is an
 // absent key, never '' or [].
-import { afterEach, describe, expect, it } from 'vitest'
-import { mount, type VueWrapper } from '@vue/test-utils'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
+import { PRESETS } from '../lib/metrics/presets'
+import type { CardSpec } from '../lib/metrics/types'
 import ChartEditor from './ChartEditor.vue'
 import { CAPTION_MAX_CHARS, clonePage } from '../lib/defaults'
 import { noteTemplate } from '../lib/notes'
@@ -228,7 +230,7 @@ describe('ChartEditor: card spec captions (CardEditor wiring for part B2)', () =
   it('passes hiddenCaveats to CardEditor and writes its update:hidden-captions back (empty deletes the key)', async () => {
     const w = open(card())
     const ce = w.findComponent({ name: 'CardEditor' })
-    expect(ce.attributes('hidden-captions')).toBe('release-before-partial')
+    expect(ce.props('hiddenCaptions')).toEqual(['release-before-partial'])
     ce.vm.$emit('update:hiddenCaptions', ['release-before-partial', 'small-sample'])
     expect((await save(w)).hiddenCaveats).toEqual(['release-before-partial', 'small-sample'])
     w.findComponent({ name: 'CardEditor' }).vm.$emit('update:hiddenCaptions', [])
@@ -237,6 +239,36 @@ describe('ChartEditor: card spec captions (CardEditor wiring for part B2)', () =
 
   it("the chart's caveat list leaves the card's own spec captions to CardEditor", () => {
     expect(row(open(card()), 'hidden:release-before-partial').exists()).toBe(false)
+  })
+
+  // With the real CardEditor (no stub): its fetches fail quietly, which is fine for the form.
+  function openReal(widget: Widget) {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503, json: async () => ({}) }))
+    const w = mount(ChartEditor, { props: { widget, isNew: false } })
+    mounted.push(w)
+    return w
+  }
+
+  it("the real CardEditor's Hide toggle lands in the saved widget's hiddenCaveats", async () => {
+    const w = openReal(base({ type: 'table', dataset: 'overview', card: { preset: 'release-before-after' } } as Partial<Widget>))
+    await flushPromises()
+    await w.get('button.ce-caption-toggle').trigger('click')
+    expect((await save(w)).hiddenCaveats).toEqual(['release-before-partial'])
+    vi.unstubAllGlobals()
+  })
+
+  it('an unknown spec caption keeps Save disabled until N1 Remove drops it', async () => {
+    const spec = JSON.parse(JSON.stringify(PRESETS['release-before-after'])) as CardSpec
+    spec.captions = [...(spec.captions ?? []), 'no-such-note-b3']
+    const w = openReal(base({ type: 'table', dataset: 'overview', card: { spec } } as Partial<Widget>))
+    await flushPromises()
+    expect(w.get('button.btn-primary').attributes('disabled')).toBeDefined()
+    await w.get('button.ce-caption-remove').trigger('click')
+    await flushPromises()
+    expect(w.get('button.btn-primary').attributes('disabled')).toBeUndefined()
+    const out = await save(w)
+    expect((out.card as { spec: CardSpec }).spec.captions).toEqual(['release-before-partial'])
+    vi.unstubAllGlobals()
   })
 })
 
