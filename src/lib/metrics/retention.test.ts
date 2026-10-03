@@ -4,6 +4,7 @@ import {
   FULL,
   ORGANIC_BAR_FACTOR,
   ORGANIC_MIN_D0,
+  ORGANIC_MIN_DAYS,
   TOO_FEW,
   retentionBar,
   retentionVerdict,
@@ -48,16 +49,34 @@ describe('wilsonBounds', () => {
 
 describe('retentionBar', () => {
   it('exports the settled constants', () => {
-    expect([BAR_FIXED, ORGANIC_MIN_D0, ORGANIC_BAR_FACTOR, TOO_FEW, FULL]).toEqual([0.075, 1000, 0.6, 200, 500])
+    expect([BAR_FIXED, ORGANIC_MIN_D0, ORGANIC_MIN_DAYS, ORGANIC_BAR_FACTOR, TOO_FEW, FULL]).toEqual([0.075, 1000, 21, 0.6, 200, 500])
   })
   it('is fixed at organic d0 999 and organic from 1,000', () => {
-    expect(retentionBar({ organicD0: 999, organicReturns: 200 })).toEqual({ bar: 0.075, source: 'fixed' })
-    const r = retentionBar({ organicD0: 1000, organicReturns: 200 })
+    expect(retentionBar({ organicD0: 999, organicReturns: 200, organicDays: 30 })).toEqual({ bar: 0.075, source: 'fixed', reason: 'arrivals' })
+    const r = retentionBar({ organicD0: 1000, organicReturns: 200, organicDays: 30 })
     expect(r.source).toBe('organic')
+    expect(r.reason).toBeNull()
     expect(r.bar).toBeCloseTo(0.12, 12)
   })
-  it('can fall below the fixed bar once organic is large enough', () => {
-    expect(retentionBar({ organicD0: 2000, organicReturns: 100 }).bar).toBeCloseTo(0.03, 12)
+  it('is fixed at 20 matured organic days and organic from 21', () => {
+    expect(retentionBar({ organicD0: 1000, organicReturns: 200, organicDays: 20 })).toEqual({ bar: 0.075, source: 'fixed', reason: 'days' })
+    expect(retentionBar({ organicD0: 1000, organicReturns: 200, organicDays: 21 }).source).toBe('organic')
+  })
+  it('is the fixed 7.5% when there are no organic returns, however many arrivals and days', () => {
+    expect(retentionBar({ organicD0: 1000, organicReturns: 0, organicDays: 21 })).toEqual({ bar: 0.075, source: 'fixed', reason: 'no-returns' })
+    expect(retentionBar({ organicD0: 50_000, organicReturns: 0, organicDays: 400 }).bar).toBe(0.075)
+    // The failure it prevents: an arm at 25/500 clears a bar of 0 (GO) but not the fixed 7.5% (NO-GO).
+    const arm = { d0: 500, returns27: 25, matured: true, daysToMature: 0 }
+    expect(retentionVerdict({ ...arm, bar: 0 }).code).toBe('go')
+    expect(retentionVerdict({ ...arm, bar: BAR_FIXED }).code).toBe('no-go')
+  })
+  it('names the first failed guard, in order: arrivals, days, returns', () => {
+    expect(retentionBar({ organicD0: 999, organicReturns: 0, organicDays: 0 }).reason).toBe('arrivals')
+    expect(retentionBar({ organicD0: 1000, organicReturns: 0, organicDays: 20 }).reason).toBe('days')
+    expect(retentionBar({ organicD0: 1000, organicReturns: 0, organicDays: 21 }).reason).toBe('no-returns')
+  })
+  it('can fall below the fixed bar once organic is large and old enough', () => {
+    expect(retentionBar({ organicD0: 2000, organicReturns: 100, organicDays: 21 }).bar).toBeCloseTo(0.03, 12)
   })
 })
 

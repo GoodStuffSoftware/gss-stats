@@ -26,7 +26,7 @@ describe('notes registry — lookups', () => {
   })
 
   // The retention caveats ride on their metrics (MetricDef.caveats), so they must not pre-fill every new campaigns chart.
-  const METRIC_ONLY_CAVEATS = new Set(['retention-disjoint', 'retention-lower-bound'])
+  const METRIC_ONLY_CAVEATS = new Set(['retention-disjoint', 'retention-organic-bias', 'retention-lower-bound'])
   it('every registry entry has a non-empty id matching its own key', () => {
     for (const [key, def] of Object.entries(NOTES_REGISTRY)) {
       expect(def.id).toBe(key)

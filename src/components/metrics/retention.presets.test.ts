@@ -81,14 +81,28 @@ describe('retention-verdict (picker only)', () => {
     const w = await mountNew('retention-verdict')
     const lines = (await noteLines(w)).join('\n')
     expect(lines).toContain(noteRawText('retention-disjoint'))
+    expect(lines).toContain(noteRawText('retention-organic-bias'))
     expect(lines).toContain(noteRawText('retention-lower-bound'))
     expect(noteRawText('retention-disjoint')).not.toMatch(/\d\d?:\d\d|\b(am|pm|UTC|ET)\b/i)
     expect(noteRawText('retention-lower-bound')).not.toMatch(/\d\d?:\d\d|\b(am|pm|UTC|ET)\b/i)
+    expect(noteRawText('retention-organic-bias')).not.toMatch(/\d\d?:\d\d|\b(am|pm|UTC|ET)\b/i)
+  })
+
+  it('the organic-bias note says why the bar waits for 21 matured days, and the card labels the arrivals column neutrally', async () => {
+    expect(noteRawText('retention-organic-bias')).toMatch(/runs high/)
+    expect(noteRawText('retention-organic-bias')).toMatch(/21 matured days/)
+    expect(noteRawText('label.card.arrivals-d0')).toBe('Arrivals (d0)')
+    const w = await mountNew('retention-verdict')
+    const text = norm(w.text())
+    expect(text).toContain('Arrivals (d0)')
+    expect(text).not.toContain('First tagged loads')
+    expect(noteRawText('label.preset.retention-verdict.description')).toMatch(/per arrival/)
   })
 
   it('marks only the disjoint-groups caveat as never hideable', () => {
     expect(getNote('retention-disjoint')?.hideable).toBe(false)
     expect(getNote('retention-lower-bound')?.hideable).toBeUndefined()
+    expect(getNote('retention-organic-bias')?.hideable).toBeUndefined()
     expect(getNote('engagement-per-arrival')?.hideable).toBeUndefined()
   })
 

@@ -272,8 +272,8 @@ function returnD2to7Of(part: 'rate' | 'lower' | 'upper') {
 
 // ── The per-arm retention verdict (retention spec section 4, lib/metrics/retention.ts) ──────────
 /** The caveats every R2-7 figure and the verdict carry: the groups are disjoint (the bar compares,
- * it does not net out), and the rates are a lower bound. */
-const RETENTION_CAVEATS = ['retention-disjoint', 'retention-lower-bound']
+ * it does not net out), the organic bar runs high, and the rates are a lower bound. */
+const RETENTION_CAVEATS = ['retention-disjoint', 'retention-organic-bias', 'retention-lower-bound']
 /** campaign.retentionVerdict's value: the index of its code here, shown as its 'verdict.<code>'
  * label. Append only: a value never changes meaning. */
 export const VERDICT_CODES: readonly VerdictCode[] = ['too-few', 'maturing', 'provisional', 'no-go', 'hold', 'go']
@@ -286,17 +286,27 @@ export function armMaturity(c: CampaignFlight, todayEt: string): { matured: bool
   if (etMidnightMs(maturesEt) <= etMidnightMs(todayEt)) return { matured: true, daysToMature: 0 }
   return { matured: false, daysToMature: Math.round((Date.parse(`${maturesEt}T00:00:00Z`) - Date.parse(`${todayEt}T00:00:00Z`)) / 86_400_000) }
 }
+/** Matured organic ET days at today's ET date: the full ET days from the first one after organic
+ * tracking went live (ORGANIC_TRACKING_LIVE_AT is mid-day, so that day is partial) up to T-8, the
+ * last day in the organic band's matured cohort (ORGANIC_MATURITY_SQL cuts at the ET midnight of
+ * T-7). Whole ET dates only, so it is DST-proof and carries no clock time. */
+export function organicMaturedDays(todayEt: string): number {
+  const first = addDays(etDateOfMs(ORGANIC_TRACKING_LIVE_AT), 1)
+  const cutoff = addDays(todayEt, -7)
+  return Math.max(0, Math.round((Date.parse(`${cutoff}T00:00:00Z`) - Date.parse(`${first}T00:00:00Z`)) / 86_400_000))
+}
 /** The arm's verdict: its R2-7 (every row) against the bar set from the organic arm's MATURED
- * cohort (retentionBar: 7.5% until 1,000 matured organic d0, then 0.6x the organic R2-7). The
- * value is a code shown as its label, never a clock time. */
+ * cohort (retentionBar: 7.5% unless there are 1,000 matured organic d0, 21 matured organic ET days
+ * and some organic d2-7 returns, then 0.6x the organic R2-7). The value is a code shown as its
+ * label, never a clock time; the bar's source rides along as a 'bar.<source>' note. */
 function retentionVerdictOf(rows: FactRows, ctx: MetricCtx, env: StoreEnv): StoreResult {
   if (rows.kind !== 'beacon' || env.organic?.kind !== 'beacon' || !ctx.campaign) return { value: null }
   const arm = armReturnCounts(rows.rows, ctx)
   const organic = armReturnCounts(env.organic.rows, ORGANIC_CTX)
   const { matured, daysToMature } = armMaturity(ctx.campaign, env.todayEt)
-  const bar = retentionBar({ organicD0: organic.d0, organicReturns: organic.d2to7 }).bar
-  const v = retentionVerdict({ d0: arm.d0, returns27: arm.d2to7, matured, daysToMature, bar })
-  return { value: VERDICT_CODES.indexOf(v.code), noteIds: [`verdict.${v.code}`] }
+  const b = retentionBar({ organicD0: organic.d0, organicReturns: organic.d2to7, organicDays: organicMaturedDays(env.todayEt) })
+  const v = retentionVerdict({ d0: arm.d0, returns27: arm.d2to7, matured, daysToMature, bar: b.bar })
+  return { value: VERDICT_CODES.indexOf(v.code), noteIds: [`verdict.${v.code}`, b.source === 'organic' ? 'bar.organic' : `bar.fixed-${b.reason}`] }
 }
 
 // ── The ads store's freshness (lib/adsStore.ts readFreshness), per campaign ────────────────
