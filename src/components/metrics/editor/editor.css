@@ -113,6 +113,11 @@
   opacity: 0.35;
   cursor: default;
 }
+/* Turned off but still focusable, so its hint (aria-describedby) can be reached. */
+.btn[aria-disabled='true'] {
+  opacity: 0.5;
+  cursor: default;
+}
 .icon-btn.danger {
   color: #bc4749;
   border-color: rgb(188 71 73 / 0.4);
