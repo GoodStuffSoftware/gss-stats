@@ -3,6 +3,13 @@
 // (@media (max-width: 700px)) in step with it.
 export const MOBILE_MAX_WIDTH = 700
 
+// The header bar's compact band: above MOBILE_MAX_WIDTH and up to this width the bar would wrap onto a
+// second row (it needs ~855px with the full search box and the e-mail + Sign out form, ~985px with
+// a "Save failed" label and a classic scrollbar), so the search box collapses to its icon and the account
+// to an icon menu — App.vue and AccountMenu.vue, `(min-width: 701px) and (max-width: 1000px)`. At or
+// below MOBILE_MAX_WIDTH the phone layout owns the bar. Keep those media queries in step with it.
+export const TOPBAR_COMPACT_MAX_WIDTH = 1000
+
 export function isMobileViewport(): boolean {
   return typeof window !== 'undefined' && window.innerWidth <= MOBILE_MAX_WIDTH
 }

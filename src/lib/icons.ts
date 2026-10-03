@@ -76,6 +76,7 @@ export {
   Search as SearchIcon,
   Sparkles as SparklesIcon,
   Star as StarIcon,
+  User as UserIcon,
   X as CloseIcon,
 } from '@lucide/vue'
 
