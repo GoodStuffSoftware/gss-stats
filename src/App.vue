@@ -78,7 +78,7 @@ onMounted(async () => {
   // A failed load still shows the built-in defaults (the charts work), but saving stays off
   // until "Try again" reads the stored layout.
   loadFailed.value = stored === LOAD_FAILED
-  applyLayout(stored === LOAD_FAILED ? null : stored)
+  applyLayout(stored === LOAD_FAILED ? normalizeConfig(defaultConfig()) : stored)
   await nextTick()
   // What the store holds as far as this tab knows: a save only goes out when the config differs.
   lastPersisted = configJson(config)
@@ -91,12 +91,14 @@ onMounted(async () => {
 // defaults) is not what the store holds, so its first save would overwrite the real layout.
 // loadConfig throws on every failure (network, 401, 5xx, a body that is not a layout); only a
 // server answer of "nothing stored" resolves to null, and then the defaults are the layout.
+// Normalizing happens inside the same guard: a stored layout that passes loadConfig's shape check
+// but cannot be normalized (e.g. a null page) is a failed load too, not a dead editor.
 const loadFailed = ref(false)
 const retryingLoad = ref(false)
 const LOAD_FAILED = Symbol('load failed')
-async function readStoredLayout(): Promise<DashboardConfig | null | typeof LOAD_FAILED> {
+async function readStoredLayout(): Promise<DashboardConfig | typeof LOAD_FAILED> {
   try {
-    return (await loadConfig()) ?? null
+    return normalizeConfig((await loadConfig()) ?? defaultConfig())
   } catch (e) {
     // No answer at all can be an expired Cloudflare Access session (its sign-in redirect fails as a
     // network error): the same confirming probe as every data fetch raises the sign-in banner.
@@ -104,8 +106,8 @@ async function readStoredLayout(): Promise<DashboardConfig | null | typeof LOAD_
     return LOAD_FAILED
   }
 }
-function applyLayout(stored: DashboardConfig | null) {
-  const norm = normalizeConfig(stored ?? defaultConfig())
+/** Put an already-normalized layout on screen. */
+function applyLayout(norm: DashboardConfig) {
   config.version = norm.version
   config.activePageId = norm.activePageId
   config.pages = norm.pages
@@ -124,12 +126,18 @@ async function retryLoad() {
     clearTimeout(saveTimer)
     const stored = await readStoredLayout()
     if (stored === LOAD_FAILED) return
-    // An editor or rename open on the stand-in would write into the stored layout it never saw.
+    // An editor, rename, menu or dialog open on the stand-in points at pages and widgets of a layout
+    // that is about to go away; close them all.
     editing.value = null
     renaming.value = null
-    // Saving stays off (loadFailed is still set) while the stored layout replaces the stand-in and
-    // the config watcher that fires runs; it comes back on only once lastPersisted is the stored
-    // layout, so the first save after a retry can only ever be a real edit of it.
+    groupToDelete.value = null
+    iconFor.value = null
+    pageMenu.value = null
+    drillMenu.value = null
+    // What keeps the stand-in from being saved: lastPersisted becomes the stored layout before
+    // loadFailed clears, and every save path compares against lastPersisted, so the first save
+    // after a retry can only be a real edit of the stored layout. The nextTick only lets the config
+    // watcher run while saving is still off; the ordering around it is not load-bearing.
     applyLayout(stored)
     await nextTick()
     lastPersisted = configJson(config)
@@ -872,7 +880,7 @@ function toggleDark() {
     </div>
     <!-- A failed layout load (signed-out has its own banner above): saving is off until it loads. -->
     <div v-else-if="loadFailed" class="reauth-banner load-failed-banner" role="alert">
-      <span>Couldn't load your saved layout — showing the default one. Changes won't be saved until it loads.</span>
+      <span>Couldn't load your saved layout — showing the default one. Changes made now aren't saved, and are replaced when your layout loads.</span>
       <button class="btn btn-primary" :disabled="retryingLoad" @click="retryLoad">{{ retryingLoad ? 'Loading…' : 'Try again' }}</button>
     </div>
     <header class="topbar">
@@ -1437,7 +1445,8 @@ function toggleDark() {
 .save-state.saved {
   color: #6a994e;
 }
-.save-state.error {
+.save-state.error,
+.save-state.blocked {
   color: #bc4749;
 }
 .grid-area {
