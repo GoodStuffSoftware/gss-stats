@@ -174,6 +174,16 @@ export const RELEASES: ReleaseMarker[] = [
     // 2026-10-03, so a second labelled line the same day only crowds the timeline (as v1.95.5).
     note: 'Tutorial completions split first run vs replay, tour exit step tracked; first-run win offers a real game',
   },
+  {
+    version: 'v1.98.0',
+    // Per the BSK release owner's 2026-10-03 message: prod web. First cut as v1.97.1 (staging only,
+    // never prod), re-versioned to a minor. Last 1.97.0 response 20:35:02Z, first 1.98.0 response
+    // 20:35:04Z (16:35:04 ET; popupEvents.ts ORGANIC_TRACKING_LIVE_AT, first-new-response as for
+    // v1.97.0). Web only; the Play build (19800 internal, 19600 in review) is not recorded.
+    dateEt: '2026-10-03',
+    // Not `major`: same ET day as v1.97.0's labelled go-live marker (see above).
+    note: 'Organic first-touch return count goes live; ad click ids not counted as organic; starting a real game ends the welcome tour',
+  },
 ]
 
 export type DatedRelease = ReleaseMarker & { dateEt: string }

@@ -37,6 +37,7 @@ import {
   POPUPS,
   RAW_INSTALL_DEDUPE_LIVE_AT_UTC_MS,
   TOUR_TRACKING_LIVE_AT,
+  ORGANIC_TRACKING_LIVE_AT,
   TRACKING_ACTIVATION_DATE_ET,
   type PopupEvent,
 } from '../popupEvents'
@@ -132,6 +133,16 @@ const RAW_DEDUPE: InstrumentationRule = { kind: 'annotateAt', atMs: RAW_INSTALL_
 // completion split and the tour exit step. Known to the second, so a window reaching back before
 // it reads "counted from" rather than a false zero.
 const TOUR_TRACKING: InstrumentationRule = { kind: 'liveAt', atMs: TOUR_TRACKING_LIVE_AT, source: 'TOUR_TRACKING_LIVE_AT' }
+// v1.98.0 (live 2026-10-03T20:35:04Z, lib/popupEvents.ts ORGANIC_TRACKING_LIVE_AT): the organic
+// baseline arm's `/return/organic/<bucket>` rows exist only from this instant, so a window reaching
+// back before it reads "not yet tracking". The organic arm has no attribution start, so this is a
+// binary pre/post go-live switch, not a start bound (no ts bound is added to its query). Applies to
+// the organic arm only; campaigns keep TRACKING.
+const ORGANIC_TRACKING: InstrumentationRule = { kind: 'liveAt', atMs: ORGANIC_TRACKING_LIVE_AT, source: 'ORGANIC_TRACKING_LIVE_AT' }
+// v1.98.0: starting a real game during the first-run tour now ends it as a skip. Shares the organic
+// go-live instant because both shipped in v1.98.0. A note only on a window that straddles it (never
+// a gate), like the other annotateAt release notes: a window wholly after carries no note.
+const TOUR_ENDS_ON_GAME_START: InstrumentationRule = { kind: 'annotateAt', atMs: ORGANIC_TRACKING_LIVE_AT, noteId: 'tour-ends-on-game-start' }
 const AUTH_ERROR_REDIRECT: InstrumentationRule = { kind: 'liveOnEtDate', dateEt: AUTH_ERROR_REDIRECT_LIVE_AT_ET, source: 'AUTH_ERROR_REDIRECT_LIVE_AT_ET' }
 // v1.95.5 (live 2026-09-26T19:43:02Z, the same instant as GAME_COMPLETE above): the new/
 // existing/unknown split that rides alongside every base /auth/success/<provider> row (lib/
@@ -264,7 +275,7 @@ export const METRIC_DEFS: MetricDef[] = [
         if (ctx.params.campaignId === ORGANIC_ARM_ID) return ev.uc === ORGANIC_ARM_ID
         return !!ctx.campaign?.ucValues.includes(ev.uc)
       },
-      instrumented: [BEACON, TRACKING_VS_FLIGHT],
+      instrumented: (ctx) => (ctx.params.campaignId === ORGANIC_ARM_ID ? [BEACON, ORGANIC_TRACKING] : [BEACON, TRACKING_VS_FLIGHT]),
       organic: true,
     }),
   ),
@@ -352,13 +363,13 @@ export const METRIC_DEFS: MetricDef[] = [
   // misleading full-history zero.
   bskMetric({ id: 'bsk.authErrors', unit: 'row', path: isAuthErrorPath, windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [AUTH_ERROR_REDIRECT] }),
   bskMetric({ id: 'bsk.authRedirects', unit: 'row', path: isAuthRedirectPath, windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [AUTH_ERROR_REDIRECT] }),
-  // v1.97.0: tutorial completions split by run kind, and tour exits by step. Counts only; the
+  // v1.97.0: tutorial completions split by run kind, and tour exits by section group. Counts only; the
   // tutorial rows are NOT real game completions (bsk.completions never counts them).
   bskMetric({ id: 'bsk.tutorialFirstRun', unit: 'row', path: (p) => isTutorialCompletePath(p, 'first-run'), instrumented: [TOUR_TRACKING] }),
   bskMetric({ id: 'bsk.tutorialReplay', unit: 'row', path: (p) => isTutorialCompletePath(p, 'replay'), instrumented: [TOUR_TRACKING] }),
-  bskMetric({ id: 'bsk.tourExitPreamble', unit: 'row', path: (p) => isTourExitPath(p, 'preamble'), instrumented: [TOUR_TRACKING] }),
-  bskMetric({ id: 'bsk.tourExitHub', unit: 'row', path: (p) => isTourExitPath(p, 'hub'), instrumented: [TOUR_TRACKING] }),
-  bskMetric({ id: 'bsk.tourExitSection', unit: 'row', path: (p) => isTourExitPath(p, 'section'), instrumented: [TOUR_TRACKING] }),
+  bskMetric({ id: 'bsk.tourExitPreamble', unit: 'row', path: (p) => isTourExitPath(p, 'preamble'), instrumented: [TOUR_TRACKING, TOUR_ENDS_ON_GAME_START] }),
+  bskMetric({ id: 'bsk.tourExitHub', unit: 'row', path: (p) => isTourExitPath(p, 'hub'), instrumented: [TOUR_TRACKING, TOUR_ENDS_ON_GAME_START] }),
+  bskMetric({ id: 'bsk.tourExitSection', unit: 'row', path: (p) => isTourExitPath(p, 'section'), instrumented: [TOUR_TRACKING, TOUR_ENDS_ON_GAME_START] }),
   bskMetric({ id: 'bsk.installs', unit: 'showing', path: isInstallPromptInstalled, windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [INSTALL_FIX], lagDays: [0, 7] }),
   bskMetric({ id: 'bsk.rawInstallSignals', unit: 'row', path: isRawInstallSignal, instrumented: [RAW_DEDUPE], caveats: ['raw-install-dedupe'] }),
   bskMetric({ id: 'bsk.returnsD1plus', unit: 'row', path: isReturnD1Plus, instrumented: [TRACKING] }),
