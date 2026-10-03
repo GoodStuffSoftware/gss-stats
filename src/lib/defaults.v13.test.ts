@@ -12,6 +12,7 @@ import {
   GROUP_ALL_SITES,
   GROUP_BEST_SUDOKU,
   GROUP_MINE,
+  LAYOUT_VERSIONS,
   cleanGroupName,
   clonePage,
   defaultConfig,
@@ -55,8 +56,8 @@ const summary = (cfg: DashboardConfig) => cfg.pages.map((p) => [p.id, p.group, p
 describe('v13: the real default layout', () => {
   it('is version 13, lands on ★ Overview, and files the built-ins in order', () => {
     const d = defaultConfig()
-    expect(CONFIG_VERSION).toBe(13)
-    expect(d.version).toBe(13)
+    expect(CONFIG_VERSION).toBeGreaterThanOrEqual(LAYOUT_VERSIONS.navigation) // 14 since sparklines (defaults.v14.test.ts)
+    expect(d.version).toBe(CONFIG_VERSION)
     expect(d.activePageId).toBe('default')
     expect(summary(d)).toEqual([
       ['default', GROUP_ALL_SITES, 'Overview', null, null],
@@ -82,7 +83,7 @@ describe('v13: the production layout (sanitised)', () => {
   const fromV9 = normalizeConfig(clone(PROD_V9))
 
   it('files every page: built-ins by id with the short names, every other page under Mine, nothing linked', () => {
-    expect(fromV9.version).toBe(13)
+    expect(fromV9.version).toBe(CONFIG_VERSION)
     expect(summary(fromV9)).toEqual([
       ['default', GROUP_ALL_SITES, 'Overview', null, null],
       ['beacon', GROUP_ALL_SITES, 'Beacon', null, null],
@@ -152,7 +153,7 @@ describe('v13: the live production layout (stored at v12)', () => {
   })
 
   it('files every page: built-ins by id with the short names, Traffic\'s icon, every other page under Mine', () => {
-    expect(migrated.version).toBe(13)
+    expect(migrated.version).toBe(CONFIG_VERSION)
     expect(summary(migrated)).toEqual([
       ['default', GROUP_ALL_SITES, 'Overview', null, null],
       ['beacon', GROUP_ALL_SITES, 'Beacon', null, null],
@@ -549,7 +550,7 @@ describe('v13: fields main added since the nav branch point survive the nav migr
   // so none of these may be dropped or rewritten on the way from a stored v12 layout to v13.
   const sparkSpec = (): any => {
     const spec = clone(CAMPAIGN_RETURNS) as any
-    spec.sections[0].items.push({ id: 'd0-trend', label: { metric: true }, data: { metric: 'campaign.returnD0' }, display: { as: 'sparkline', series: 'daily' } })
+    spec.sections[0].items.push({ id: 'd0-trend', label: { metric: true }, data: { metric: 'campaign.taggedArrivals' }, display: { as: 'sparkline', series: 'daily' } })
     return spec
   }
   const widgets = (): any[] => [

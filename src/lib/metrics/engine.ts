@@ -29,11 +29,12 @@ import { computeDelta, releaseComparisonWindows } from '../overview'
 import { latestDatedRelease } from '../releases'
 import { UPSELL_SIGNEDOUT_FIX_AT } from '../adsRules'
 import { refusedWindowMoved } from '../splitGuard'
+import { beaconSeries, seriesTwin, spendSeries } from './series'
 import { FACTS, factKey, rangeMs, type BeaconRow, type FactId, type FactParams, type FactRows, type FactStatement } from './facts'
 import { METRICS, rulesOf, type MetricCtx, type MetricDef } from './metrics'
 import { RATIOS, type RatioDef } from './ratios'
 import { deltasAllowed, etDateOfMs, etMidnightMs, isProvisional, laterEtDate, measuredInterval, seenInFlightRequired, servingEndMs, type InstrumentationRule, type MeasuredInterval } from './instrumentation'
-import type { MetricDelta, MetricValue, WindowName } from './types'
+import type { MetricDelta, MetricValue, SeriesPoint, WindowName } from './types'
 import type { RequestCheck, ResolvedRequest, ValidContext } from './validate'
 
 // ── Planning ─────────────────────────────────────────────────────────────────────────────
@@ -93,14 +94,17 @@ export function factKeyString(id: FactId, p: FactParams): string {
 function factParamsFor(factId: FactId, req: Pick<ResolvedRequest, 'params'>, env: BatchEnv): FactParams {
   switch (factId) {
     case 'campaignPathVisitor':
+    case 'campaignDaily':
     case 'campaignReturns':
     case 'flightPathsSeen':
       return { campaignId: req.params.campaignId }
     case 'bskKpiDays':
       return { todayEt: env.todayEt }
     case 'bskRangePath':
+    case 'bskRangeDaily':
       return { since: env.context.since, until: env.context.until }
-    case 'popupRangePath': {
+    case 'popupRangePath':
+    case 'popupRangeDaily': {
       const own = env.context.excludeOwnVisits && env.context.ownBrowser && env.context.ownOS ? { ownBrowser: env.context.ownBrowser, ownOS: env.context.ownOS } : {}
       return { since: env.context.since, until: env.context.until, sites: env.context.sites, ...own }
     }
@@ -108,6 +112,7 @@ function factParamsFor(factId: FactId, req: Pick<ResolvedRequest, 'params'>, env
       return env.release ? { releaseDateEt: env.release.dateEt, days: env.release.days } : {}
     case 'bskFirstHit':
     case 'adsSpend':
+    case 'adsSpendDaily':
     case 'adsCoverage':
     case 'adsLastSync':
       return {}
@@ -244,13 +249,16 @@ export function planBatch(requests: readonly ResolvedRequest[], env: BatchEnv, m
   }
   for (const req of requests) {
     for (const def of sidesOf(req)) {
-      const sideKey = `${def.id}|${req.params.campaignId ?? ''}|${req.params.popup ?? ''}|${req.params.country ?? ''}|${req.window}`
+      const sideKey = `${def.id}|${req.params.campaignId ?? ''}|${req.params.popup ?? ''}|${req.params.country ?? ''}|${req.window}|${req.series ?? ''}`
       if (seenSides.has(sideKey)) continue
       seenSides.add(sideKey)
       const { ctx, stat: side } = resolveStatic(memo, def, req, clock, env.nowMs)
       if (side.status === 'unmeasured') continue
       const factId = def.windows[req.window]!
       add(factId, factParamsFor(factId, req, env))
+      // A series reads the metric's daily twin: one more statement, counted against the budget.
+      const twin = req.series ? seriesTwin(def, req.window) : null
+      if (twin) add(twin, factParamsFor(twin, req, env))
       if (side.needsSeen) add('flightPathsSeen', { campaignId: ctx.campaign!.id })
     }
   }
@@ -639,6 +647,41 @@ class Batch {
     return { status, value: sums[0], m, noteIds: ids, ...(today ? { days: sums } : {}), asOfMs: plan.asOfMs }
   }
 
+  /** The metric's per-ET-day series (ADR 0005 slice 2) from its daily twin fact, or undefined when
+   * the twin is unavailable (not fetched, failed, not a daily kind) or no day is drawable. The
+   * side must already be measured (the caller checks): a series never exists where the value
+   * does not. */
+  series(def: MetricDef, req: ResolvedRequest, side: Side): SeriesPoint[] | undefined {
+    const twin = seriesTwin(def, req.window)
+    if (!twin) return undefined
+    const fact = this.env.facts.get(factKeyString(twin, factParamsFor(twin, req, this.env)))
+    if (!fact || !fact.ok) return undefined
+    const plan = this.side(def, req, null)
+    let points: SeriesPoint[] = []
+    if (fact.rows.kind === 'spendDaily') {
+      points = spendSeries({ rows: fact.rows.rows, campaignId: req.params.campaignId ?? '', firstDay: null, capDay: this.env.todayEt })
+    } else if (fact.rows.kind === 'beaconDaily') {
+      const win = windowOf(plan.ctx, this.clock, this.env.nowMs)
+      if (!win) return undefined
+      const ctx = plan.ctx
+      const test = def.path
+      const attribution = req.window === 'attribution' && !!ctx.campaign
+      points = beaconSeries({
+        rows: fact.rows.rows,
+        ...(test ? { test: (path: string) => test(path, ctx) } : {}),
+        onlyNew: def.visitor === 'new',
+        anyTag: !!def.anyTag,
+        tags: null, // the daily twin of a campaign is already its attribution clause
+        firstDay: etDateOfMs(win[0]),
+        lastDay: attribution ? etDateOfMs(servingEndMs(ctx.campaign!) - 1) : etDateOfMs(Math.max(win[0], win[1] - 1)),
+        capDay: this.env.todayEt,
+        reachCounted: attribution,
+        measuredFromMs: side.status === 'partial' && side.m ? side.m.from : null,
+      })
+    }
+    return points.length ? points : undefined
+  }
+
   /** deltasAllowed for a go-live date, once per batch. */
   gate(goLiveEt: string | null): { yesterday: boolean; avg7: boolean } {
     const key = goLiveEt ?? ''
@@ -713,6 +756,10 @@ function deriveMetric(batch: Batch, req: ResolvedRequest): MetricValue {
     if (deltas) v.deltas = deltas
   }
   if (side.noteIds.length) v.noteIds = side.noteIds
+  if (req.series) {
+    const points = batch.series(def, req, side)
+    if (points) v.series = points
+  }
   return side.value === null ? v : applyLag(v, def.lagDays, batch.lagStopMs(req, def, side), batch.env.nowMs)
 }
 
@@ -766,7 +813,7 @@ export function deriveBatch(checks: readonly RequestCheck[], env: DeriveEnv, mem
       continue
     }
     const r = c.req
-    const sig = `${r.kind}|${r.id}|${r.params.campaignId ?? ''}|${r.params.popup ?? ''}|${r.params.country ?? ''}|${r.window}|${r.deltas.join(',')}|${r.minCohort}`
+    const sig = `${r.kind}|${r.id}|${r.params.campaignId ?? ''}|${r.params.popup ?? ''}|${r.params.country ?? ''}|${r.window}|${r.deltas.join(',')}|${r.series ?? ''}|${r.minCohort}`
     let v = same.get(sig)
     if (!v) {
       try {

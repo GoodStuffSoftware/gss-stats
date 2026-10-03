@@ -6,6 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import App from './App.vue'
+import { stubAppFetch } from './testing/appFetch'
 import { saveConfig, loadConfig } from './api'
 import { VIEWER_PREFS_KEY } from './lib/viewerPrefs'
 import { clonePage, normalizeConfig } from './lib/defaults'
@@ -41,6 +42,11 @@ const mounted: VueWrapper[] = []
 afterEach(() => {
   while (mounted.length) mounted.pop()!.unmount()
   vi.unstubAllGlobals()
+})
+
+// No real network from a mounted App: every endpoint it can reach answers from the stub (src/testing/appFetch.ts).
+beforeEach(() => {
+  stubAppFetch()
 })
 beforeEach(() => {
   localStorage.clear()

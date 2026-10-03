@@ -47,7 +47,10 @@ const overValue = computed<RepeatSpec['over'] | ''>({
     if ((cur?.over ?? '') === v) return
     if (cur) remembered.set(cur.over, cur)
     const prev = v ? remembered.get(v) : undefined
-    repeat.value = prev ? (cur?.empty ? { ...prev, empty: cur.empty } : prev) : withRepeatOver(cur, v)
+    // `empty` (what shows when there is nothing to repeat) does not depend on the kind, so a
+    // restored kind takes it from the repeat being left — one switched off since on another kind
+    // must not come back. Leaving None (cur undefined) has nothing to take it from: restore as was.
+    repeat.value = prev ? (cur ? withField(prev, 'empty', cur.empty) : prev) : withRepeatOver(cur, v)
   },
 })
 
@@ -101,6 +104,17 @@ const flightingToday = computed<boolean>({
     repeat.value = withField(repeat.value, 'flightingToday', v || undefined)
   },
 })
+
+// The organic arm: one extra row for traffic no campaign drove (campaigns repeats only).
+const organic = computed<boolean>({
+  get: () => !!repeat.value?.organic,
+  set: (v) => {
+    if (!repeat.value || v === organic.value) return
+    repeat.value = withField(repeat.value, 'organic', v || undefined)
+  },
+})
+/** validate.ts: the organic row is always there, so it would hide a flighting-today repeat's empty state. */
+const organicConflict = computed(() => organic.value && flightingToday.value)
 
 // ── When the repeat yields nothing (RepeatSpec.empty): a heading and a message, once. ─────────
 const lastEmpty = ref<NonNullable<RepeatSpec['empty']> | null>(null)
@@ -162,7 +176,13 @@ const emptyText = computed<Label | undefined>({
     <div class="field check">
       <label><input type="checkbox" v-model="tracked" /> Beacon-tracked only (skip spend-only campaigns)</label>
     </div>
+    <div class="field check">
+      <label><input type="checkbox" v-model="organic" /> Add an "organic" row (traffic no campaign drove)</label>
+    </div>
   </div>
+  <p v-if="organicConflict" class="hint organic-conflict" role="alert">
+    The organic row can't be combined with "Flighting today only" — the organic row is always there, so it would hide this repeat's empty message. Untick one of them.
+  </p>
 
   <template v-if="overValue">
     <div class="field check">
@@ -176,3 +196,8 @@ const emptyText = computed<Label | undefined>({
 </template>
 
 <style scoped src="./editor.css"></style>
+<style scoped>
+.organic-conflict {
+  color: #bc4749;
+}
+</style>

@@ -10,9 +10,11 @@ import { onRequestPost as geoPost } from './geo'
 import { onRequestPost as completionsPost } from './completions'
 import { onRequestPost as metricsPost } from './metrics'
 import { insertHits, installCaches, memoryCache, openHitsDb, pagesContext, postJson, sqliteD1 } from '../_lib/testing/hitsDb'
-import { isSplitRefusedPath, reachableRefusedPatterns, REFUSED_WINDOW_KEY, REFUSED_WINDOW_SNAP, SPLIT_REFUSED_PATH_PATTERNS } from '../../src/lib/splitGuard'
-import { etWallTimeMs } from '../../src/lib/etTime'
+import { isSplitRefusedPath, reachableRefusedPatterns, REFUSED_WINDOW_KEY, REFUSED_WINDOW_SNAP, refusedPathMatch, SPLIT_REFUSED_PATH_PATTERNS } from '../../src/lib/splitGuard'
+import { etDateSql, etWallTimeMs } from '../../src/lib/etTime'
 import { buildFact } from '../../src/lib/metrics/engine'
+import { FACTS, type FactId, type FactParams } from '../../src/lib/metrics/facts'
+import { excludeInstallGapUnmeasured } from '../../src/lib/popupEvents'
 import { siteWindowClause } from '../../src/lib/overview'
 import { BEST_SUDOKU_SITES } from '../../src/lib/bestSudokuSites'
 import type { MetricsResponseBody } from '../../src/lib/metrics/types'
@@ -382,5 +384,122 @@ describe('the whole-days caption flag needs a refused row the geo query can coun
     expect(family('auth-error')).toEqual([])
     // Other filters leave every pattern reachable (erring toward showing the caption).
     expect(reachableRefusedPatterns({ ...all, constraints: [{ field: 'referrer', value: 'x' }] })).toEqual([...SPLIT_REFUSED_PATH_PATTERNS])
+  })
+})
+
+// The daily twins main brought in with ADR 0005 slice 2 (sparkline series). bskRangeDaily reads
+// bskRangePath's caller-picked range, so it snaps refused rows the same way: a sub-day range
+// counts them over whole ET days, and an ET-midnight range builds main's statement unchanged.
+// popupRangeDaily, like its scalar popupRangePath, leaves refused rows out altogether.
+describe('the daily twins follow the same rule', () => {
+  /** main's bskRangeDaily statement (before the twin took the snap). */
+  const mainBskRangeDaily = (startMs: number, endMs: number) => {
+    const clause = siteWindowClause(BEST_SUDOKU_SITES, startMs, endMs)
+    return { sql: `SELECT ${etDateSql()} AS dt, path, visitor AS v, campaign, COUNT(*) AS c FROM hits WHERE ${clause.sql} GROUP BY dt, path, v, campaign`, binds: clause.binds }
+  }
+  const run = (id: FactId, params: FactParams) => {
+    const stmt = buildFact({ id, params }, Date.now())
+    const rows = db.prepare(stmt.sql).all(...(stmt.binds as any[])) as { dt: string; path: string; c: number }[]
+    return { stmt, rows }
+  }
+  const refusedRows = <R extends { path: string }>(rows: R[]) => rows.filter((r) => isSplitRefusedPath(r.path))
+  const sum = (rows: { c: number }[]) => rows.reduce((a, r) => a + Number(r.c), 0)
+
+  async function metricSeries(since: string, until: string) {
+    const waited: Promise<unknown>[] = []
+    const requests = [
+      { key: 'completions', metric: 'bsk.completions', window: 'page', series: 'daily' },
+      { key: 'game_views', metric: 'bsk.gameViews', window: 'page', series: 'daily' },
+    ]
+    const res = await metricsPost(pagesContext(postJson('/api/metrics', { v: 1, context: { since, until }, requests }), { gss_geo: sqliteD1(db) }, waited) as any)
+    await Promise.all(waited)
+    if (res.status !== 200) throw new Error(await res.text())
+    return ((await res.json()) as MetricsResponseBody).results
+  }
+
+  it('bskRangeDaily, 3 x 1 h: refused rows 0 / whole day / 0 on the ET day; /game exact per hour', () => {
+    const got = HOURS.map(([since, until]) => run('bskRangeDaily', { since, until }))
+    expect(got.map((g) => sum(refusedRows(g.rows)))).not.toEqual(REFUSED_PER_HOUR)
+    expect(got.map((g) => sum(refusedRows(g.rows)))).toEqual([0, REFUSED_DAY, 0])
+    for (const g of got) for (const r of refusedRows(g.rows)) expect(r.dt).toBe('2026-10-01')
+    expect(got.map((g) => sum(g.rows.filter((r) => r.path === '/game')))).toEqual(PER_HOUR.map((h) => h.game))
+    // nearest: 10-11 ET snaps to an empty refused window (NOT match), 11-12 ET to the whole day (CASE).
+    const m = refusedPathMatch().sql
+    expect(got.map((g) => g.stmt.sql.includes(`CASE WHEN ${m}`))).toEqual([false, true, false])
+    expect(got.map((g) => g.stmt.sql.includes(`NOT ${m}`))).toEqual([true, false, true])
+  })
+
+  it('bskRangeDaily: every window inside one ET day reads the whole-day refused count or zero', () => {
+    for (let a = 0; a < 48; a += 3) {
+      for (let b = a + 2; b <= 48; b += 5) {
+        if (a === 0 && b === 48) continue
+        const [s, u] = [iso(DAY + a * 1_800_000), iso(DAY + b * 1_800_000)]
+        expect([0, REFUSED_DAY], `${s} ${u}`).toContain(sum(refusedRows(run('bskRangeDaily', { since: s, until: u }).rows)))
+      }
+    }
+  })
+
+  it('bskRangeDaily: an ET-midnight range builds the statement and binds main built, and they bind', () => {
+    for (const p of [{ since: iso(DAY), until: iso(NEXT) }, { since: '2026-10-01', until: '2026-10-01' }]) {
+      const { stmt, rows } = run('bskRangeDaily', p)
+      expect(stmt).toEqual({ db: 'gss_geo', ...mainBskRangeDaily(DAY, NEXT) })
+      expect(sum(refusedRows(rows))).toBe(REFUSED_DAY)
+    }
+  })
+
+  it('/api/metrics series: the sparkline day matches its tile, with the note', async () => {
+    const got = []
+    for (const [since, until] of HOURS) got.push(await metricSeries(since, until))
+    expect(got.map((r) => r.completions.series)).toEqual([0, COMPLETE_DAY, 0].map((value) => [{ day: '2026-10-01', value }]))
+    expect(got.map((r) => r.completions.value)).toEqual([0, COMPLETE_DAY, 0])
+    expect(got.map((r) => r.game_views.series)).toEqual(PER_HOUR.map((h) => [{ day: '2026-10-01', value: h.game }]))
+    for (const r of got) {
+      expect(r.completions.noteIds).toContain('refused-whole-days')
+      expect(r.game_views.noteIds ?? []).not.toContain('refused-whole-days')
+    }
+    const aligned = await metricSeries(iso(DAY), iso(NEXT))
+    expect(aligned.completions.series).toEqual([{ day: '2026-10-01', value: COMPLETE_DAY }])
+    expect(aligned.completions.noteIds ?? []).not.toContain('refused-whole-days')
+  })
+
+  it('popupRangeDaily: no refused row on any range, pop-up rows exact, and the exclusion adds no bind', () => {
+    insertHits(db, [{ ts: Z('2026-10-01T15:30:00Z'), site: SITE, path: '/signin-prompt/shown', n: 3 }])
+    const sites = [SITE]
+    const gap: unknown[] = []
+    excludeInstallGapUnmeasured([], gap)
+    for (const [since, until] of [...HOURS, [iso(DAY), iso(NEXT)]]) {
+      const { stmt, rows } = run('popupRangeDaily', { since, until, sites })
+      expect(stmt.sql).toContain(`NOT ${refusedPathMatch().sql}`)
+      expect(refusedRows(rows)).toEqual([])
+      expect(stmt.binds).toEqual([Date.parse(since), Date.parse(until), ...sites, ...gap])
+    }
+    expect(sum(run('popupRangeDaily', { since: HOURS[1][0], until: HOURS[1][1], sites }).rows)).toBe(3)
+    expect(sum(run('popupRangeDaily', { since: HOURS[0][0], until: HOURS[0][1], sites }).rows)).toBe(0)
+  })
+
+  it('every fact over a caller-picked range snaps refused rows or leaves them out', () => {
+    const ranged = (Object.keys(FACTS) as FactId[]).filter((id) => FACTS[id].honors.includes('range'))
+    expect(ranged.sort()).toEqual(['bskRangeDaily', 'bskRangePath', 'popupRangeDaily', 'popupRangePath'])
+    const m = refusedPathMatch().sql
+    for (const id of ranged) {
+      const sql = buildFact({ id, params: { since: HOURS[1][0], until: HOURS[1][1], sites: [] } }, Date.now()).sql
+      expect(sql.includes(`CASE WHEN ${m}`) || sql.includes(`NOT ${m}`), id).toBe(true)
+    }
+  })
+
+  it('bind ceiling: the snap adds no bind to either twin; the worst ranged metrics statement stays under 100', () => {
+    const sub = { since: HOURS[1][0], until: HOURS[1][1] }
+    const whole = { since: iso(DAY), until: iso(NEXT) }
+    const b = (id: FactId, p: FactParams) => buildFact({ id, params: p }, Date.now()).binds.length
+    expect(b('bskRangeDaily', sub)).toBe(b('bskRangeDaily', whole))
+    expect(b('bskRangeDaily', sub)).toBe(mainBskRangeDaily(DAY, NEXT).binds.length)
+    // The heaviest daily twin: 50 sites (MAX_SITES) and both hides.
+    const heavy = { sites: Array.from({ length: 50 }, (_, i) => `s${String(i).padStart(2, '0')}`), ownBrowser: 'Opera', ownOS: 'Windows' }
+    expect(b('popupRangeDaily', { ...sub, ...heavy })).toBe(b('popupRangeDaily', { ...whole, ...heavy }))
+    const ranged = (Object.keys(FACTS) as FactId[]).filter((id) => FACTS[id].honors.includes('range'))
+    const worst = Math.max(...ranged.map((id) => b(id, { ...sub, ...heavy })))
+    expect(worst).toBeLessThan(100)
+    expect(worst).toBe(58) // measured: popupRangePath (popupRangeDaily 57, bskRangePath 23, bskRangeDaily 18)
+    expect(b('popupRangeDaily', { ...sub, ...heavy })).toBe(57) // measured: 2 + 50 sites + 2 hides + 3 install-gap
   })
 })

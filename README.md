@@ -101,6 +101,22 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   regression from this app's own code. Resizing a chart currently needs a mouse or touch;
   every other chart action (edit, remove, zoom, duplicate, set-as-default) has a real
   button and works from the keyboard.
+- **Sparkline display** — a card's count or money item can be shown as a **Sparkline**: the
+  current number, with a small per-day line beside it. The server counts the same metric per ET
+  day from a daily twin of its fact
+  ([`src/lib/metrics/series.ts`](src/lib/metrics/series.ts); at most 92 days, oldest first) and
+  [`MetricItem.vue`](src/components/metrics/MetricItem.vue) draws it
+  ([`sparkline.ts`](src/lib/metrics/sparkline.ts)). It reads the page range or a campaign's
+  attribution window (not "today so far"), never a ratio, rate or cost; the editor greys the
+  option with the reason otherwise. A day the metric was not measured (before a go-live, or an
+  unsynced spend day) is a break in the line, never a zero; a measured day with no rows is 0. A
+  money series rounds each day to cents, so its points can differ from the tile's total by a cent
+  or two. Days only: no hour, place or device split (a `/return` or game-complete row gets no
+  more than the day's count and the kind the tile already reads). Each series is one extra
+  statement per distinct twin read (items that share a window share it) against the 40-statement
+  batch budget ([`docs/capacity.md`](docs/capacity.md) §9). The layout version is now 14 (a save
+  guard only; page navigation holds 13): the first save from this build backs the stored v13
+  layout up once, and a tab still on the old build is told to reload; nothing is rewritten.
 - **Full width** — there's no centred max-width column: the header (a strip across the window),
   the filter bar and the chart grid span the window with a 16px gutter (12px on a phone), so a
   wide screen shows wider charts, and the pinned filter bar (below) spans it too.
@@ -520,16 +536,16 @@ two other rules (outward: widen to the whole days touched; inward: shrink to the
 inside) stay one constant away (`REFUSED_WINDOW_SNAP`). When the bounds meet, as for most
 ranges shorter than a day, these rows count zero. A range already on ET midnights (the date
 picker's ET days, a whole-day preset) runs exactly as before. Charts, `/api/completions` and
-the metric cards' page range (`window: 'page'`) all follow it and say so in a caption: "Any
-return, game-start, completion, tutorial-completion or tour-exit rows here are counted over
-whole ET days." A chart shows it only when it can count one of those rows, so never for a site
-other than Best Sudoku or under a path or path-family filter none of them matches. A chart that
-leaves event beacons out still counts game starts (they are page views), so it keeps the
-caption. Rolling presets (last 24 hours, last 7 days) are rarely on ET midnights, so most
-default Best Sudoku views carry that caption. It adds no D1 bound parameters. Today's totals
-stay live (ruling 2026-10-03), so polling a running total still shows when it grew; only
-shrinking to whole days and holding the open day would close that, and live data was chosen
-over it.
+the metric cards' page range (`window: 'page'`, sparkline days included) all follow it and say
+so in a caption: "Any return, game-start, completion, tutorial-completion or tour-exit rows
+here are counted over whole ET days." A chart shows it only when it can count one of those
+rows, so never for a site other than Best Sudoku or under a path or path-family filter none of
+them matches. A chart that leaves event beacons out still counts game starts (they are page
+views), so it keeps the caption. Rolling presets (last 24 hours, last 7 days) are rarely on ET
+midnights, so most default Best Sudoku views carry that caption. It adds no D1 bound
+parameters. Today's totals stay live (ruling 2026-10-03), so polling a running total still
+shows when it grew; only shrinking to whole days and holding the open day would close that, and
+live data was chosen over it.
 
 **Every stored geo-beacon column is a chartable dimension AND a filter.** `functions/api/geo.ts`
 whitelists every analytic `hits` column (`GEO_DIMS`) — region/city/postal/country/continent/
@@ -1040,7 +1056,9 @@ of the migrated layout first copies the layout that was stored until then to
 stays). The backup is named after the version that was **stored**, not the one before the new
 code: a layout still stored at v8 when v11 ships is backed up as `backup:v8`, one stored at v10
 as `backup:v10`. Production is stored at v12 when layout version 13 (page navigation) ships, so
-its first v13 save writes `backup:v12`. A tab still
+its first v13 save writes `backup:v12`. Layout version 14 (sparklines) is a save-guard bump
+only: its first save over a stored v13 writes `backup:v13`, and rolling the code back past it
+needs `backup:v13` restored (same steps below, with that key). A tab still
 running older code gets `409` ("This tab is out of date, reload") instead of overwriting a
 newer layout.
 
@@ -1058,19 +1076,43 @@ To put a backup back, in this order:
 3. **Find the backup to restore**: list the backup keys, and pick the version that was stored
    before the upgrade (the highest one below the current `CONFIG_VERSION`: `backup:v12` to undo
    the v13 page-navigation upgrade). Namespace id
-   from `wrangler.toml`; a token with Workers KV Storage: Edit.
+   from `wrangler.toml`; a token with Workers KV Storage: Edit. The commands below are for
+   Windows PowerShell 5.1; run them one at a time, from the repo root.
 
-   ```bash
+   ```powershell
    npx wrangler kv key list --remote --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --prefix "dashboard:default:backup:"
    ```
 
 4. **Download it, keep a copy of what's there now, and check the file before writing it back**:
-   it must be non-empty, valid JSON with a `pages` array. Only then put it.
+   it must be non-empty, valid JSON with a `pages` array. Run each block on its own and only
+   continue when the previous one finished cleanly. (The `cmd /c` wrapper is deliberate: in
+   PowerShell 5.1 a plain `>` writes the file as UTF-16, which is not what KV holds, and
+   `| Set-Content` re-encodes the text.)
 
-   ```bash
-   npx wrangler kv key get "dashboard:default" --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-current.json
-   npx wrangler kv key get "dashboard:default:backup:v12" --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-backup.json
-   node -e "const c=JSON.parse(require('fs').readFileSync('layout-backup.json','utf8')); if(!Array.isArray(c.pages)||!c.pages.length) throw new Error('not a layout'); console.log('ok: version', c.version, '-', c.pages.length, 'pages')"
+   Keep what's there now, in case you need to undo the restore:
+
+   ```powershell
+   cmd /c 'npx wrangler kv key get dashboard:default --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-current.json'
+   ```
+
+   Download the backup (change `v12` to the version you picked in step 3):
+
+   ```powershell
+   cmd /c 'npx wrangler kv key get dashboard:default:backup:v12 --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-backup.json'
+   ```
+
+   Check it. This must print `ok: version ..., N pages`; if it throws or prints nothing, stop
+   and do **not** run the next block:
+
+   ```powershell
+   Get-Content layout-backup.json -Raw -Encoding UTF8 | ConvertFrom-Json | ForEach-Object { if ($_.pages -isnot [array] -or $_.pages.Count -eq 0) { throw 'not a layout' }; "ok: version $($_.version), $($_.pages.Count) pages" }
+   ```
+
+   Only after that printed `ok`, put it back. **This discards every layout edit made since the
+   backup was taken** (widget and chart edits too, not only the navigation changes), because
+   it replaces the whole stored layout:
+
+   ```powershell
    npx wrangler kv key put "dashboard:default" --path layout-backup.json --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote
    ```
 
