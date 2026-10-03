@@ -64,12 +64,12 @@ describe('badge colours stop at the load limit', () => {
     await flushPromises()
     expect(Object.keys(lastSpec(w).badge!.display.tones ?? {})).toHaveLength(32)
     const btn = addColour(w)
-    expect(btn.attributes('disabled')).toBeDefined()
+    expect(btn.attributes('aria-disabled')).toBe('true')
     const hintId = btn.attributes('aria-describedby')!
     expect(controls(w).find(`#${CSS.escape(hintId)}`).text()).toBe('Up to 32 colours')
-    // A click that gets through anyway adds nothing.
+    // It stays focusable (so its hint can be reached), and a click adds nothing.
     const emits = w.emitted('update:modelValue')!.length
-    btn.element.dispatchEvent(new Event('click'))
+    await btn.trigger('click')
     await flushPromises()
     expect(w.emitted('update:modelValue')!.length).toBe(emits)
     expect(errorsText(w)).toEqual([])
@@ -84,7 +84,7 @@ describe('badge colours stop at the load limit', () => {
     const errs = w.emitted('errors')!
     expect((errs[errs.length - 1][0] as string[]).length).toBeGreaterThan(0)
     expect(w.emitted('update:modelValue')).toBeUndefined()
-    expect(addColour(w).attributes('disabled')).toBeDefined()
+    expect(addColour(w).attributes('aria-disabled')).toBe('true')
   })
 })
 
