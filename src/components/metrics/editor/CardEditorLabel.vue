@@ -6,6 +6,7 @@
 // name" option for a caption, which has no natural registry counterpart.
 import { computed, ref, useId } from 'vue'
 import { isKnownNote, labelKind, labelNoteOptions, makeLabel, noteVarNames, scopePathLabel, scopePathOptions, withNoteId, withNoteVar, type LabelKind } from '../../../lib/metrics/editorModel'
+import { CARD_LIMITS } from '../../../lib/metrics/validate'
 import type { Label, RepeatSpec, ScopePath } from '../../../lib/metrics/types'
 
 const props = withDefaults(
@@ -113,7 +114,7 @@ const bindPath = computed<ScopePath>({
 
     <template v-if="kind === 'text'">
       <label class="visually-hidden" :for="textId">{{ heading }} text</label>
-      <input :id="textId" type="text" v-model="textValue" :placeholder="placeholder" />
+      <input :id="textId" type="text" v-model="textValue" :placeholder="placeholder" :maxlength="CARD_LIMITS.stringLength" />
       <div class="field" v-if="scopeOptions.length">
         <label class="visually-hidden" :for="insertVarId">Insert a variable into the {{ heading.toLowerCase() }}</label>
         <select :id="insertVarId" @change="insertVar(($event.target as HTMLSelectElement).value as ScopePath); ($event.target as HTMLSelectElement).value = ''">
@@ -135,7 +136,7 @@ const bindPath = computed<ScopePath>({
         <option value="" disabled>Choose a note…</option>
         <option v-for="o in noteChoices" :key="o.value" :value="o.value">{{ o.preview }}</option>
       </select>
-      <p v-if="noteInvalid" class="hint">Unknown note id "{{ noteId }}".</p>
+      <p v-if="noteInvalid" class="hint">This version doesn't know the note "{{ noteId }}", so it shows nothing. It stays saved unless you pick another.</p>
       <div v-if="varRows.length" class="field" role="group" :aria-labelledby="`${groupId}-vars`">
         <label :id="`${groupId}-vars`">Variables <span class="hint">— fill the note's {placeholders} from the repeat</span></label>
         <div v-for="name in varRows" :key="name" class="row">
