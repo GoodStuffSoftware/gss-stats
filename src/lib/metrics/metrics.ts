@@ -308,7 +308,7 @@ export const METRIC_DEFS: MetricDef[] = [
   // Any tagged first-ever beacon, whatever its campaign (the release panel's "Tagged arrivals":
   // no attribution window, unlike campaign.taggedArrivals).
   bskMetric({ id: 'bsk.taggedArrivals', unit: 'device', unitLabel: 'unit.arrivals', visitor: 'new', anyTag: true, windows: { page: 'bskRangePath', ...RELEASE_WINDOWS }, instrumented: [], caveats: ['arrivals-caveat'] }),
-  // How many days each release window covers (the latest dated release, bounded by the first
+  // How many days each release window covers (the compared release, bounded by the first
   // Best Sudoku hit and by today: lib/overview.ts releaseComparisonWindows).
   {
     id: 'release.windowDays',

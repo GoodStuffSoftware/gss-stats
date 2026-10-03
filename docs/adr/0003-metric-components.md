@@ -1158,7 +1158,7 @@ charts (`defaults.v11.test.ts`).
 | `popup` / `eligible` | preset `signin-eligibility` (plus the eligibility rate) |
 
 Registry and component additions (all generic):
-- Windows `before` / `after` (the latest dated release, sized as `releaseComparisonWindows` from
+- Windows `before` / `after` (the newest release whose first after-day is complete, release day excluded, sized as `releaseComparisonWindows` from
   one cached first-hit read the endpoint makes before planning) and `upsellPre` / `upsellPost`
   (a campaign's attribution window split at `UPSELL_SIGNEDOUT_FIX_AT`; a `boundaryInFlight` rule
   keeps them unmeasured while it is unset or outside the flight). `{ scope: 'window' }` binds an
