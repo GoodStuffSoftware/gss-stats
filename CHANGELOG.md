@@ -11,6 +11,14 @@ All notable changes to **gss-stats** are documented here. The format follows
   ordinary completions, so the tile could only read 0; saved copies of it load without the tile, and a saved card whose only item was that
   tile now loads as an invalid card.
 
+### Added
+- **Tutorial completions and tour exits (Best Sudoku v1.97.0).** The Overview "today" card now
+  splits tutorial completions into first run and replay, and counts tour exits by step (preamble,
+  hub, section), counted from 13:03 ET on 2026-10-03. The new rows never count as page views or
+  real game completions. Note: from v1.97.0 the first-run tutorial win offers "Play a real game",
+  which starts a counted Easy game, so first-run game completions may rise from 13:03 ET on 10-03.
+- **v1.97.0 release marker and a go-live marker for the new beacons on the charts.**
+
 ### Fixed
 - **Chart release markers now include v1.95.4 to v1.96.1.** Seven more Best Sudoku releases
   (v1.95.4 to v1.95.8, v1.96.0, v1.96.1) show on the release timeline.

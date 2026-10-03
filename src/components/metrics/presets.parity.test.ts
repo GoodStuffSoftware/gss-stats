@@ -211,6 +211,11 @@ describe('bsk-kpis ≡ the bespoke "Today at a glance" tiles', () => {
     'Auth successes — new',
     'Auth successes — existing',
     'Auth successes — unknown',
+    'Tutorial completed — first run',
+    'Tutorial completed — replay',
+    'Tour exits — preamble',
+    'Tour exits — hub',
+    'Tour exits — section',
   ])
 
   it('same tiles in the same order, same values and the same delta lines ("new today" included)', async () => {
