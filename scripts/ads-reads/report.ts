@@ -338,7 +338,7 @@ export function diagnosticsLines(d: DiagnosticsSection, channel: CampaignChannel
     out.push(d.recommendations.length ? `  recommendations queued: ${d.recommendations.map((r) => r.type ?? 'unknown').join(', ')} (read-only; nothing applied or dismissed)` : '  recommendations: none queued')
     out.push(`  standing verdicts (never re-derived, never applied): ${RECOMMENDATION_STANDING_VERDICTS}`)
   } else out.push('  recommendations: not read')
-  if (d.countryCounts) out.push(`  beacon countries (tagged arrivals, aggregate counts): ${d.countryCounts.length ? d.countryCounts.map((c) => `${c.country} ${n(c.count)}`).join(', ') : 'none'}`)
+  if (d.countryCounts) out.push(`  beacon countries (campaign-attributed rows, aggregate counts; return, completion, game-start and tour-exit rows left out): ${d.countryCounts.length ? d.countryCounts.map((c) => `${c.country} ${n(c.count)}`).join(', ') : 'none'}`)
   else out.push('  beacon countries: not read')
   if (d.accountCrossCheck) {
     const cc = d.accountCrossCheck

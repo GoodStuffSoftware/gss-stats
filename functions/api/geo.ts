@@ -359,9 +359,10 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   }
 
   // Counts-only rule (src/lib/splitGuard.ts): a query that maps rows (points mode), groups them
-  // by an hour/place/device dimension, or drills into one leaves return, completion and
-  // tutorial-completion rows out entirely. Applied in all three branches below, and independent
-  // of every toggle (event beacons, own visits, known traffic). Scope: dimensions and drills
+  // by an hour/place/device dimension (the UTC `date` included), or drills into one leaves
+  // return, game-start, completion, tutorial-completion and tour-exit rows out entirely. Applied
+  // in all three branches below, and independent of every toggle (event beacons, own visits,
+  // known traffic). The patterns are SQL literals, so the guard adds no binds. Scope: dimensions and drills
   // only. The request's own since/until window is not clamped to whole days, so a sub-day
   // window still counts these rows (the same holds for /api/metrics) — a known follow-up.
   const splitGuardActive = splitRefused({ points: isPoints, fields: [...activeDims, ...constraints.map((c) => c.field)] })

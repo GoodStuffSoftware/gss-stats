@@ -571,7 +571,7 @@ try {
     });
     guard("countries", () => {
       if (!dg.countryCounts) notRead("countries", "beacon country breakdown");
-      else if (!dg.countryCounts.length) $("countries").append(el("span", { text: "No tagged arrivals by country yet." }));
+      else if (!dg.countryCounts.length) $("countries").append(el("span", { text: "No campaign-attributed rows by country yet." }));
       else dg.countryCounts.forEach(c => $("countries").append(el("span", {}, el("b", { text: c.country + " " }), int(c.count))));
       const cc = dg.accountCrossCheck;
       $("crosscheck").textContent = cc

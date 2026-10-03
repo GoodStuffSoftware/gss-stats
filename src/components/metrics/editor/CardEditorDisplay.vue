@@ -3,21 +3,32 @@
 // compatible with the chosen data's unit are offered (validate.ts's DISPLAYS_FOR, via
 // editorModel's displayOptionsFor) — a percent can never be offered for a pair. Percent always
 // shows "(n/d)"; there is no toggle to hide it (ADR: "no toggle to hide it"). Sparkline is
-// listed but disabled ("coming soon"): MetricValue carries no per-day series yet.
+// listed but disabled ("coming soon"): MetricValue carries no per-day series yet — unless the
+// item already had one (`storedSparkline`), which then stays pickable so trying another display
+// is never a one-way trip, and picking it back restores the stored display, series included.
 import { computed, useId } from 'vue'
 import { dataKindOf, displayAsLabel, displayOptionsFor, makeDisplay, metricDef } from '../../../lib/metrics/editorModel'
 import type { DataBinding, Display, DisplayAs } from '../../../lib/metrics/types'
 
-const props = defineProps<{ binding: DataBinding }>()
+const props = defineProps<{
+  binding: DataBinding
+  /** The item's sparkline display as it was stored, when it had one (CardEditorItem keeps it for
+   * the life of the editor). */
+  storedSparkline?: Extract<Display, { as: 'sparkline' }>
+}>()
 const display = defineModel<Display>({ required: true })
 
 const groupId = useId()
 const decimalsId = useId()
 
-const options = computed(() => displayOptionsFor(props.binding))
+const options = computed(() => displayOptionsFor(props.binding, { pickableSparkline: !!props.storedSparkline }))
 const kind = computed(() => dataKindOf(props.binding))
 
 function pick(as: DisplayAs) {
+  if (as === 'sparkline' && props.storedSparkline && display.value.as !== 'sparkline') {
+    display.value = { ...props.storedSparkline }
+    return
+  }
   display.value = makeDisplay(as, display.value)
 }
 
@@ -46,7 +57,8 @@ function toggleDelta(name: 'yesterday' | 'avg7', checked: boolean) {
   deltas.value = (['yesterday', 'avg7'] as const).filter((d) => set.has(d))
 }
 
-const decimals = computed<0 | 1 | 2>({
+const DECIMALS_OPTIONS = [0, 1, 2, 3, 4] as const // validate.ts accepts 0-4; render.ts clamps to it
+const decimals = computed<(typeof DECIMALS_OPTIONS)[number]>({
   get: () => (display.value.as === 'percent' ? (display.value.decimals ?? 1) : 1),
   set: (v) => {
     if (display.value.as === 'percent') display.value = { as: 'percent', decimals: v }
@@ -55,7 +67,7 @@ const decimals = computed<0 | 1 | 2>({
 const dateRangeDays = computed<boolean>({
   get: () => display.value.as === 'dateRange' && !!display.value.days,
   set: (v) => {
-    if (display.value.as === 'dateRange') display.value = { as: 'dateRange', days: v }
+    if (display.value.as === 'dateRange') display.value = v ? { as: 'dateRange', days: true } : { as: 'dateRange' }
   },
 })
 </script>
@@ -93,9 +105,7 @@ const dateRangeDays = computed<boolean>({
       <div class="field">
         <label :for="decimalsId">Decimals</label>
         <select :id="decimalsId" v-model.number="decimals">
-          <option :value="0">0</option>
-          <option :value="1">1</option>
-          <option :value="2">2</option>
+          <option v-for="n in DECIMALS_OPTIONS" :key="n" :value="n">{{ n }}</option>
         </select>
       </div>
       <p class="hint">Always shows the counts, e.g. "12.1% (4/33)" — no toggle to hide them.</p>
