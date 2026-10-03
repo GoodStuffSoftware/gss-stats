@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Cards can fit their height to their content.** Tick "Fit height to content" in a card's
+  editor and the panel grows or shrinks to what it shows, with no clipping or scrollbar; it is
+  off by default, so every existing layout looks exactly as it did.
+
 ### Removed
 - **The "Deferred completions (EU consent)" tile is gone.** Best Sudoku now sends those games as
   ordinary completions, so the tile could only read 0; saved copies of it load without the tile, and a saved card whose only item was that

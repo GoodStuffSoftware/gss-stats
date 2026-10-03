@@ -92,6 +92,21 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   regression from this app's own code. Resizing a chart currently needs a mouse or touch;
   every other chart action (edit, remove, zoom, duplicate, set-as-default) has a real
   button and works from the keyboard.
+- **Fit height to content** — a card's editor has a "Fit height to content" checkbox (next to
+  the display and size controls) that sets `Widget.fit: 'content'`. A fit panel's height then
+  follows what it renders: the dashboard measures the bottom of the card's last in-flow child
+  ([`src/composables/useFitHeight.ts`](src/composables/useFitHeight.ts), a `ResizeObserver` on
+  the card's children, never on the card itself) and sets the grid height `h` to the fewest
+  whole rows that hold it ([`src/lib/fit.ts`](src/lib/fit.ts) `fitRows`: `h` rows are
+  `h*40 + (h-1)*14` px, minimum 3), so the card is neither clipped nor scrolling, and it
+  grows or shrinks as data arrives or captions appear. A fit card has no resize grip (its
+  height is the content's) and the option is not offered on canvas charts (bar, line, pie,
+  map, ...), which have no content height of their own; metric cards, stat tiles, tables and
+  notes can use it. It is off by default and absent from every existing layout, which render
+  exactly as before: no storage migration and no `CONFIG_VERSION` bump. On a phone
+  (<= 700px) the one-column stack sizes itself, so the measurement is not written back to the
+  desktop `h`; a zoomed card is not fitted either. The last fitted `h` is saved as an ordinary
+  height, so turning the option off keeps the card at that size.
 - **The main filter bar is always visible**, in normal flow directly under the page
   tabs (range, sites, exclusions, sync-across-pages). If it scrolls out of view, a
   small "show filters" button appears top-right — see the IntersectionObserver on

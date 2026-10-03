@@ -20,6 +20,7 @@ import {
 import { ringDims, RING_SOFT_CAP, isDateDim } from '../lib/rings'
 import { BEST_SUDOKU_SITES, syncCardWithView } from '../lib/defaults'
 import { noteOptions, defaultNoteIdsForScope, type NoteScope } from '../lib/notes'
+import { canFit, setFit } from '../lib/fit'
 import CardEditor from './metrics/CardEditor.vue'
 import { metricsContextFor } from '../lib/metrics/pageContext'
 import { presetById } from '../lib/metrics/presets'
@@ -388,6 +389,15 @@ const siteValue = computed({
   },
 })
 
+// Fit-to-content height (lib/fit.ts): offered for any widget that does not hold a canvas (a chart
+// or the map). The checkbox sets `fit: 'content'` or removes the key; a widget switched to a
+// canvas type has it cleared on save.
+const fitAvailable = computed(() => canFit(draft))
+const fitValue = computed<boolean>({
+  get: () => draft.fit === 'content',
+  set: (on) => setFit(draft, on),
+})
+
 function save() {
   if (cardSaveDisabled.value) return // belt and suspenders: the Save button is disabled for this too
   // Freeze whatever the "Captions" checkboxes currently show (scope defaults, or the
@@ -402,6 +412,7 @@ function save() {
   if (!popupNeedsPopup.value) draft.popup = undefined
   if (!popupNeedsKind.value) draft.popupKind = undefined
   if (draft.type !== 'breakdownBar') draft.barMode = undefined
+  setFit(draft, draft.fit === 'content') // clears it for a widget that cannot fit (a canvas)
   // Overlays need a date axis; series need a beacon date axis. A series with no label gets one.
   if (!isDateLine.value) {
     draft.markers = undefined
@@ -525,6 +536,14 @@ function save() {
             {{ o.label }}
           </label>
         </div>
+      </div>
+
+      <!-- Height: fixed by the dashboard layout (resize from the corner), or fit to the content. -->
+      <div class="field check" v-if="fitAvailable">
+        <label>
+          <input type="checkbox" v-model="fitValue" />
+          Fit height to content <span class="hint">— the panel grows or shrinks with what it shows; the resize corner is hidden</span>
+        </label>
       </div>
 
       <template v-if="!isCardWidget">
