@@ -39,6 +39,13 @@ function w(p: Omit<Widget, 'i'>): Widget {
   return { ...p, i: p.id }
 }
 
+// Bumped to 14 for inline sparklines (ADR 0005 slice 2): a metric item may now ask for a daily
+// series (`display: { as: 'sparkline', series: 'daily' }`) and draw it. NO stored layout is
+// rewritten: no existing layout has a sparkline, so the bump is only the save guard that keeps a
+// v13 tab from overwriting a layout it cannot draw (functions/api/config.ts answers it 409 and
+// backs the stored layout up to `dashboard:default:backup:v13` on the first v14 save). Page
+// navigation holds 13 (migrateNavV13), so this slice is 14. The numbers live in LAYOUT_VERSIONS
+// below; every migration step is keyed on an entry there, never on a bare number.
 // Bumped to 13 for page navigation (see migrateNavV13): every page gets a `group` (built-ins by id,
 // others from a name prefix, else "Mine"), drill pages can carry a `parentId`, pages an `icon`, the
 // config an optional `groupMeta` and `groupOrder` (normGroupOrder); the Best Sudoku pages lose their "Best Sudoku · " name prefix (the
@@ -68,7 +75,16 @@ function w(p: Omit<Widget, 'i'>): Widget {
 // uncustomized layout only. (Bumped to 7 for the bespoke-page → widget conversion migration —
 // see the v7 block: Overview/Campaigns went from `widgets: []` (rendered by the now-retired
 // OverviewPage.vue/CampaignComparePage.vue) to real generic widgets.)
-export const CONFIG_VERSION = 13
+export const LAYOUT_VERSIONS = {
+  /** The Overview's small-sample note takes one grid row (compactSmallSampleNoteV12). */
+  compactNoteRow: 12,
+  /** Page navigation: groups, parentId, icons (migrateNavV13). */
+  navigation: 13,
+  /** Inline sparklines (ADR 0005 slice 2). A guard bump only: no stored layout is rewritten. */
+  sparklines: 14,
+} as const
+// The newest layout version. A slice that adds an entry moves this to it.
+export const CONFIG_VERSION: number = LAYOUT_VERSIONS.sparklines
 
 // The default "basic charts available out of the box" — a sensible analytics
 // starting layout. Users can move/resize/add/remove from here.
@@ -1239,7 +1255,7 @@ export function normalizeConfig(raw: any): DashboardConfig {
     }
     // v12 migration (see CONFIG_VERSION): the Overview's small-sample note takes one grid row,
     // not three (compactSmallSampleNoteV12). Version-gated, so a later resize is never undone.
-    if ((Number(raw.version) || 0) < 12) {
+    if ((Number(raw.version) || 0) < LAYOUT_VERSIONS.compactNoteRow) {
       for (let i = 0; i < pages.length; i++) pages[i] = compactSmallSampleNoteV12(pages[i])
     }
     // v10 and v11 (see CONFIG_VERSION), run on every load: every former bespoke panel renders as
@@ -1266,14 +1282,14 @@ export function normalizeConfig(raw: any): DashboardConfig {
     // the pre-v13 tab order as the stored order, Traffic's icon. Version-gated, so a later rename,
     // move or reorder is never undone. The order is data from here on: no reorder runs on load.
     const version = Number(raw.version) || 0
-    const ordered = version < 13 ? migrateNavV13(withCaptionsMigrated) : withCaptionsMigrated
+    const ordered = version < LAYOUT_VERSIONS.navigation ? migrateNavV13(withCaptionsMigrated) : withCaptionsMigrated
     // Every load: drill links must name an existing root page (normDrillLinks).
     normDrillLinks(ordered)
     // `activePageId` is the landing page for a first-time viewer (each viewer's current page lives
     // in their browser since v13 — lib/viewerPrefs.ts): ★ Overview after the v13 migration, and
     // whenever the stored one no longer exists.
     const pinnedId = (ordered.find((p: DashboardPage) => p.isDefault) ?? ordered[0]).id
-    const wanted = version < 13 ? pinnedId : raw.activePageId
+    const wanted = version < LAYOUT_VERSIONS.navigation ? pinnedId : raw.activePageId
     const activePageId = ordered.some((p: DashboardPage) => p.id === wanted) ? wanted : pinnedId
     const groupMeta = normGroupMeta(raw.groupMeta)
     const groupOrder = normGroupOrder(raw.groupOrder, ordered)
