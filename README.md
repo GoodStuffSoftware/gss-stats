@@ -297,7 +297,7 @@ Browser (Vue 3 + Chart.js + grid-layout-plus)
 Cloudflare Pages Functions  (functions/_middleware.ts → functions/api/*.ts)
    │  - _middleware: host guard, then Google sign-in gate on every request (see Auth)
    │  - hold CF_ANALYTICS_TOKEN (secret) — never sent to the browser
-   │  - /api/stats  → RUM GraphQL (server-side), requestHost allow-list
+   │  - /api/stats  → RUM GraphQL (server-side), requestHost allow-list, range gated (see Range limits)
    │  - /api/geo    → reads the beacon's D1 (bot-free sub-country geo)
    │  - /api/popups → pop-up funnel counts/rates from the same D1 (sign-in, upsell, install, …)
    │  - /api/completions → completed-game counts from the same D1, by mode × difficulty
@@ -425,6 +425,32 @@ household traffic) and `classifyFunnelPath` (which paths count as which funnel s
 (De Morgan `OR: [browser_neq, os_neq]`, so e.g. Chrome/Windows isn't dropped). RUM
 exposes no client IP or visitor ID, so a UA combo is the only self-exclusion proxy on
 that dataset; the beacon adds a precise per-device/per-network opt-out.
+
+## Range limits
+
+A data source that caps how wide, or how far back, one query may reach is **gated before it is
+queried**: `/api/stats` cuts the range to the most recent window the source allows (ending at
+the requested end; a start moved forward lands on an ET midnight) and returns a runtime
+`notice` — `{ kind: 'range-clamped', source, reason, requested, served, limitDays, lookbackDays }`
+— which the chart card shows as a small note under the chart ("Showing Jul 3 – Oct 3 only.
+Cloudflare analytics allows up to 93 days per query."). The notice is never saved: it is not part
+of the layout config or widget schema. A range wholly outside the lookback is not queried at all.
+If Cloudflare still refuses a range (its limits changed), the same note appears instead of the
+raw error, and that response is not cached; any other error keeps its current behaviour.
+
+| Source | Limit | Gated |
+|---|---|---|
+| Cloudflare RUM (`rumPageloadEventsAdaptiveGroups`: `/api/stats`) | 93 days (13w2d) per query; start no older than 184 days (26w2d) | yes |
+| Cloudflare `/api/sites` RUM query | fixed 90-day window, under the 93-day cap | no need |
+| D1: beacon `hits` (`/api/geo`, `/api/popups`, `/api/completions`, `/api/metrics`) and the ads store | none (SQLite scans the range given) | no |
+| Ads sync (Google Ads reads) | none that bound a dashboard range | no |
+
+The limits are constants in [`functions/_lib/rangeGate.ts`](functions/_lib/rangeGate.ts)
+`RANGE_LIMITS` (the one place), not fetched per request: a fetch would add a round trip and a
+failure mode to every chart load for numbers that only change with the account's plan.
+`npm run limits:check` compares them with the account's live settings
+(`viewer.accounts.settings.<dataset>{ maxDuration notOlderThan }`, read with the local analytics
+token, never printed) and exits 1 on a mismatch.
 
 ## Ads-read routines (Best Sudoku)
 
