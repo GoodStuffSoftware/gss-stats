@@ -12,6 +12,7 @@ import { isSiteDim, semanticKey } from '../lib/drill'
 import { isMobileViewport } from '../lib/responsive'
 import { isFit, widgetNeedsChartHeight } from '../lib/fit'
 import { useFitHeight } from '../composables/useFitHeight'
+import { isInFlight, isStale, useReturnRefresh } from '../composables/useReturnRefresh'
 import BaseChart from './charts/BaseChart.vue'
 import WorldMap from './charts/WorldMap.vue'
 import FilterPopover from './FilterPopover.vue'
@@ -259,18 +260,25 @@ const rangeNote = computed(() => (!error.value && data.value?.notice ? rangeNoti
 const effectiveFilters = computed<GlobalFilters>(() => props.widget.filters ?? props.filters)
 const hasOverride = computed(() => !!props.widget.filters)
 
-async function load() {
+// A background refetch (the user came back to the tab) keeps the chart on screen — no "Loading…"
+// flash, and a failure leaves the last good data up instead of replacing it with an error.
+let loadStartedAt: number | null = null // the latest load's start; null once it settles
+let settledAt: number | null = null
+async function load(background = false) {
   if (isBespokeBody.value) return // own data fetch (or none) — see MetricCard/AdsReadingsWidgetCard/NoteWidgetBody
   // RUM charts filter to a real-host allow-list built from /api/sites; fetching before
   // it loads would momentarily count dev/preview traffic. Wait for the tree. (Geo has
   // no dev hosts, so it needn't wait.)
   if (props.widget.dataset !== 'geo' && props.widget.dataset !== 'popup' && !sitesLoaded.value) {
-    loading.value = true
+    if (!background) loading.value = true
     return
   }
   const my = ++reqId
-  loading.value = true
-  error.value = null
+  if (!background) {
+    loading.value = true
+    error.value = null
+  }
+  loadStartedAt = Date.now()
   try {
     // A series line chart fetches one date query per series; the first also stands in as `data`
     // for the generic empty/loaded states.
@@ -287,13 +295,32 @@ async function load() {
         data.value = r
       }
     }
+    if (my === reqId) {
+      error.value = null
+      settledAt = Date.now()
+    }
   } catch (e: any) {
-    if (my === reqId) error.value = e?.message ?? 'Failed to load'
+    if (my === reqId) {
+      settledAt = Date.now()
+      if (!background || !data.value) error.value = e?.message ?? 'Failed to load'
+    }
     if (isNetworkError(e) || isAuthError(e)) checkSessionExpired() // probe for an expired session
   } finally {
-    if (my === reqId) loading.value = false
+    if (my === reqId) {
+      loadStartedAt = null
+      loading.value = false
+    }
   }
 }
+
+// The user came back to the tab: refetch this chart if its last load is old enough and nothing is
+// loading. Same request as any other load (never `fresh`), so the 90 s edge cache absorbs repeats.
+// A metric card is not handled here — its values go through useMetrics' own return refetch.
+function refetchOnReturn() {
+  if (isBespokeBody.value || isInFlight(loadStartedAt) || !isStale(settledAt)) return
+  void load(true)
+}
+useReturnRefresh(refetchOnReturn)
 
 // Refetch only when a data-affecting input changes (not on move/resize).
 const dataKey = computed(() =>
@@ -358,9 +385,9 @@ const overrideSummary = computed(() => {
   if (f.excludeOwnVisits) flags.push('−me')
   return [site, rangeLabel(f.since, f.until, f.rangeRel), ...flags].join(' · ')
 })
-watch(dataKey, load)
+watch(dataKey, () => load())
 watch(sitesLoaded, (ready) => ready && load()) // fetch RUM charts once the allow-list is ready
-onMounted(load)
+onMounted(() => load())
 
 // Every overlay item (release, go-live, campaign flight) the chart can draw inside the plotted
 // range — listed under the chart in a collapsed disclosure, so each marker's and band's date,
