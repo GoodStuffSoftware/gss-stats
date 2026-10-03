@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **The default "Pageviews over time" and "Visits over time" charts no longer carry the counts-only
+  caption.** They now count by Eastern-time day, so their totals include every row again; a saved
+  layout moves its untouched copies once, and a chart you changed keeps the day axis you gave it.
+
 ## [0.14.2] — 2026-10-03
 
 ### Changed
