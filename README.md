@@ -577,7 +577,7 @@ inside) stay one constant away (`REFUSED_WINDOW_SNAP`). When the bounds meet, as
 ranges shorter than a day, these rows count zero. A range already on ET midnights (the date
 picker's ET days, a whole-day preset) runs exactly as before. Charts, `/api/completions` and
 the metric cards' page range (`window: 'page'`, sparkline days included) all follow it and say
-so in a caption: "Any return, game-start, completion, tutorial-completion or tour-exit rows
+so in a caption: "Any return, game-start, completion, tutorial-completion, tour-skip or tour-exit rows
 here are counted over whole ET days." A chart shows it only when it can count one of those
 rows, so never under a path or path-family filter none of them matches (a site filter does not
 narrow it: it errs toward showing). A chart that leaves event beacons out (the default) counts none of them, since

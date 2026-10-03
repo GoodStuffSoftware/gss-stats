@@ -34,16 +34,16 @@ describe('the switch', () => {
     expect(REFUSED_SAMPLE_PATHS).toHaveLength(SPLIT_REFUSED_PATH_PATTERNS.length)
     for (const p of REFUSED_SAMPLE_PATHS) expect(isSplitRefusedPath(p), p).toBe(true)
     for (const pat of SPLIT_REFUSED_PATH_PATTERNS) {
-      const prefix = pat.slice(0, -1)
-      const own = REFUSED_SAMPLE_PATHS.filter((p) => p.startsWith(prefix) && !SPLIT_REFUSED_PATH_PATTERNS.some((o) => o !== pat && o.length > pat.length && p.startsWith(o.slice(0, -1))))
+      const hits = (q: string, p: string) => (q.endsWith('%') ? p.startsWith(q.slice(0, -1)) : p === q)
+      const own = REFUSED_SAMPLE_PATHS.filter((p) => hits(pat, p) && !SPLIT_REFUSED_PATH_PATTERNS.some((o) => o !== pat && o.length > pat.length && hits(o, p)))
       expect(own, pat).toHaveLength(1)
     }
   })
   it('has a refused-path vocabulary that covers every pattern and holds only refused paths', () => {
     for (const p of REFUSED_PATH_VOCABULARY) expect(isSplitRefusedPath(p), p).toBe(true)
     for (const pat of SPLIT_REFUSED_PATH_PATTERNS) {
-      const prefix = pat.slice(0, -1)
-      expect(REFUSED_PATH_VOCABULARY.filter((p) => p.startsWith(prefix)).length, pat).toBeGreaterThan(100)
+      const prefix = pat.endsWith('%') ? pat.slice(0, -1) : pat
+      expect(REFUSED_PATH_VOCABULARY.filter((p) => p.startsWith(prefix)).length, pat).toBeGreaterThan(pat.endsWith('%') ? 100 : 0)
     }
   })
 })

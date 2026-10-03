@@ -148,7 +148,7 @@ export function splitRefused(opts: { points: boolean; fields: readonly string[] 
 /** `(path LIKE '/return/%' OR ...)`, true for a refused row: for a WHERE clause or a CASE in a
  * SELECT list. The patterns are inlined as SQL literals through sqlLit, the same precedent as
  * lib/popupEvents.ts popupExcludeClause (the 2026-09-27 bind-ceiling fix): they are this module's
- * own constants, never request input, and binding them would spend six of D1's 100 bound
+ * own constants, never request input, and binding them would spend eight of D1's 100 bound
  * parameters on every guarded query. `binds` is always empty; it stays in the return type so the
  * callers need not change if a pattern ever has to travel as a value. */
 export function refusedPathMatch(): { sql: string; binds: string[] } {
@@ -179,13 +179,13 @@ export const REFUSED_WINDOW_KEY = `refused-${REFUSED_WINDOW_SNAP}-et-days-v1`
  * (components/ChartCard.vue), worded to fit every snap mode. It names every refused kind and
  * says "any", since most charts leave the event kinds out unless event beacons are included. */
 export const REFUSED_WHOLE_DAYS_CAPTION =
-  'Any return, game-start, completion, tutorial-completion or tour-exit rows here are counted ' +
+  'Any return, game-start, completion, tutorial-completion, tour-skip or tour-exit rows here are counted ' +
   'over whole ET days.'
 
 /** A path each refused pattern matches, so the pattern can be classified with the JS path helpers
  * (isPopupEventPath, pathFamilyOf). Every row a pattern matches gets the same answer from both:
  * each pattern sits wholly inside one POPUP_EVENT_PREFIXES entry. */
-const refusedSamplePath = (pattern: string): string => `${pattern.slice(0, -1)}x`
+const refusedSamplePath = (pattern: string): string => (pattern.endsWith('%') ? `${pattern.slice(0, -1)}x` : pattern)
 
 /** The SPLIT_REFUSED_PATH_PATTERNS a geo query whose window snapped can still count a row of, so
  * `meta.refusedWholeDays` (the caption) is set only when one can (review of #63, SHOULD-3). A
@@ -208,7 +208,10 @@ export function reachableRefusedPatterns(opts: {
     if (opts.eventRowsExcluded && isPopupEventPath(sample)) return false
     const prefix = pattern.slice(0, -1)
     return opts.constraints.every((c) => {
-      if (c.field === 'path') return c.value.replace(/[A-Z]/g, (ch) => ch.toLowerCase()).startsWith(prefix)
+      if (c.field === 'path') {
+        const v = c.value.replace(/[A-Z]/g, (ch) => ch.toLowerCase())
+        return pattern.endsWith('%') ? v.startsWith(prefix) : v === pattern
+      }
       if (c.field === 'pathFamily') return pathFamilyOf(sample) === c.value
       return true
     })
