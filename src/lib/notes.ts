@@ -244,7 +244,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
   },
   'tour-ends-on-game-start': {
     id: 'tour-ends-on-game-start',
-    text: 'From 4:35 PM ET on Oct 3 (v1.98.0), starting a real game ends the welcome tour, so tour exits after that time can include players who left it by starting a game.',
+    text: 'Since Best Sudoku v1.98.0 (Oct 3), starting a real game during the first-run tour ends it as a skip, so tour exits and skips can include players who left by starting a game.',
     kind: 'note',
     severity: 'info',
     scopes: ['overview'],

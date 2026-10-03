@@ -597,8 +597,9 @@ describe('campaign-returns ≡ the bespoke return-visits panel', () => {
   const visible = (w: VueWrapper) => w.findAll('.metric-card').filter((c) => (c.element as HTMLElement).style.display !== 'none')
   function newReturns(w: VueWrapper) {
     // The organic baseline ("Organic (web)") is not a campaign: it is gated on v1.98.0's go-live
-    // (ORGANIC_TRACKING_LIVE_AT), later than this fixture's clock, so the bespoke-panel parity
-    // compares campaigns only; its gate is exercised by the 'none left' test below.
+    // (ORGANIC_TRACKING_LIVE_AT), later than this fixture's clock, so it reads "not yet tracking"
+    // here and the bespoke-panel parity compares campaigns only. The 'organic gate' test below pins
+    // that state; the 'none left' test pins the hidden-at-d0-0 state after go-live.
     return visible(w).filter((c) => text(c.find('.mc-title').element) !== 'Organic (web)').map((c) => ({
       title: text(c.find('.mc-title').element),
       d0: [...rows(c as unknown as VueWrapper)].find(([l]) => l === 'First tagged loads (d0)')?.[1],
@@ -644,6 +645,13 @@ describe('campaign-returns ≡ the bespoke return-visits panel', () => {
       expect(n.d0).toBe('3')
       for (const [, v] of n.cols) expect(v).toMatch(/^too few to report \(\d+\/3\)$/)
     })
+  })
+
+  it('organic gate: before v1.98.0 go-live the Organic card reads "not yet tracking"', async () => {
+    const card = await mountCard('campaign-returns', FIXTURE_NOW)
+    const organic = visible(card).find((c) => text(c.find('.mc-title').element) === 'Organic (web)')
+    expect(organic, 'the organic card stays on screen before go-live').toBeTruthy()
+    expect(text(organic!.element)).toMatch(/not yet tracking/i)
   })
 
   it('none left: "No return visits recorded yet." on both', async () => {
