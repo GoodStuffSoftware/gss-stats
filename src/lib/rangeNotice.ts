@@ -44,26 +44,25 @@ function dayLabel(ms: number, utc: boolean, withYear: boolean): string {
   return `${MONTHS[m - 1]} ${d}${withYear ? `, ${y}` : ''}`
 }
 
-/** The note's text, e.g. "Showing Jun 10 – Sep 10 only. Cloudflare analytics allows up to 93
- * days per query." Days are ET calendar days, matching the rest of the dashboard (UTC days for a `date` series, matching its bars); the end is the
+/** The note's text, e.g. "Jun 10 – Sep 10 shown (Cloudflare limit: 93 days)." Days are ET calendar days, matching the rest of the dashboard (UTC days for a `date` series, matching its bars); the end is the
  * last day inside the served range (its `to` is exclusive). `nowMs` only decides whether years
  * are shown (they are when the range is not within the current year). */
 export function rangeNoticeText(n: RangeNotice, nowMs: number = Date.now()): string {
   if (n.reason === 'upstream-rejected') {
-    return 'Cloudflare analytics could not serve this range (it limits how long and how far back a query can reach). Try a shorter, more recent range.'
+    return "No data shown (Cloudflare couldn't serve this range; try a shorter, more recent one)."
   }
-  const days = (v: number | null) => (v == null ? 'a limited number of' : String(v))
-  if (!n.served) {
-    return `No data shown. Cloudflare analytics keeps only the last ${days(n.lookbackDays)} days, and this range is older than that.`
-  }
+  const kept = n.lookbackDays == null ? 'Cloudflare history limit' : `Cloudflare keeps ${n.lookbackDays} days`
+  if (!n.served) return `No data shown (${kept}).`
   const from = Date.parse(n.served.from)
   const lastDay = Date.parse(n.served.to) - 1
   const utc = n.dayZone === 'utc'
   const thisYear = etDateFast(nowMs).slice(0, 4)
   const withYear = dayOf(from, utc).slice(0, 4) !== thisYear || dayOf(lastDay, utc).slice(0, 4) !== thisYear
-  const span = `Showing ${dayLabel(from, utc, withYear)} – ${dayLabel(lastDay, utc, withYear)} only.`
-  const duration = `allows up to ${days(n.limitDays)} days per query`
-  const lookback = `keeps only the last ${days(n.lookbackDays)} days`
-  const why = n.reason === 'max-duration' ? duration : n.reason === 'lookback' ? lookback : `${duration} and ${lookback}`
-  return `${span} Cloudflare analytics ${why}.`
+  const span = `${dayLabel(from, utc, withYear)} – ${dayLabel(lastDay, utc, withYear)} shown`
+  const limit = n.limitDays == null ? 'Cloudflare range limit' : `Cloudflare limit: ${n.limitDays} days`
+  if (n.reason === 'max-duration') return `${span} (${limit}).`
+  if (n.reason === 'lookback') return `${span} (${kept}).`
+  const spanPart = n.limitDays == null ? 'range limit' : `${n.limitDays}-day span`
+  const keptPart = n.lookbackDays == null ? 'history limit' : `${n.lookbackDays} days kept`
+  return `${span} (Cloudflare limits: ${spanPart}, ${keptPart}).`
 }

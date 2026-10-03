@@ -434,8 +434,8 @@ the requested end), and a range it accepts is never touched. A start moved forwa
 whole day: a UTC midnight for a `date` series (RUM buckets by UTC day, so the first bar is
 complete), an ET midnight otherwise. `/api/stats` returns a runtime
 `notice` — `{ kind: 'range-clamped', source, reason, requested, served, limitDays, lookbackDays }`
-— which the chart card shows as a small note under the chart ("Showing Jul 3 – Oct 3 only.
-Cloudflare analytics allows up to 93 days per query."). When a range is cut, the response's
+— which the chart card shows as a small note under the chart ("Jul 3 – Oct 3 shown
+(Cloudflare limit: 93 days)."). When a range is cut, the response's
 `meta.since` is the served start, so chart date axes cover only the days queried; the range asked
 for stays in `notice.requested`. The notice is never saved: it is not part of the layout config
 or widget schema. A range wholly outside the lookback is not queried at all. If Cloudflare still
