@@ -6,6 +6,13 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Return and completion rows are counted over whole ET days when a date range isn't.** A range
+  that does not start and end on ET midnights now moves each end to the nearest ET midnight
+  (Mike's chosen rule) for return, game-start, completion, tutorial and tour-exit rows only, so
+  short back-to-back ranges can no longer read those rows hour by hour; charts, completions and
+  metric cards say so in a caption, and today's totals stay live.
+
 ## [0.13.1] — 2026-10-03
 
 ### Fixed
@@ -197,11 +204,6 @@ All notable changes to **gss-stats** are documented here. The format follows
   tile now loads as an invalid card.
 
 ### Fixed
-- **Return and completion rows are counted over whole ET days when a date range isn't.** A range
-  that does not start and end on ET midnights now moves each end to the nearest ET midnight
-  (Mike's chosen rule) for return, game-start, completion, tutorial and tour-exit rows only, so
-  short back-to-back ranges can no longer read those rows hour by hour; charts, completions and
-  metric cards say so in a caption, and today's totals stay live.
 - **The metric-card editor no longer loses a template's settings.** Re-picking a row's current
   metric or note, switching the badge, a title or a repeat off and back on, or changing a repeat
   and back now leaves a customized card exactly as the preset had it; picking a different metric
