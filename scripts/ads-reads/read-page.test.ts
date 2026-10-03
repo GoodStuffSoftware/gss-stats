@@ -132,6 +132,56 @@ describe('read-page rendering', () => {
     expect(rows.find((r) => r[0] === 'First move')).toEqual(['First move', 'not yet tracked', 'no rows yet', ''])
     expect(rows.find((r) => r[0] === 'Welcome card shown')![1]).toBe('not yet tracked')
   })
+  const firstSessionRows = (html: string) => {
+    const { doc } = render(html)
+    return [...doc.getElementById('first-session')!.querySelectorAll('tbody tr')].map((tr) => [...tr.querySelectorAll('td')].map((td) => td.textContent))
+  }
+  it('shows the v1.97.0 first-run counters after the tour steps, "not yet tracked" while the fixture predates v1.97.0', () => {
+    const rows = firstSessionRows(buildReadPage({ template, raw, narrative }))
+    const labels = rows.map((r) => r[0])
+    const i = labels.indexOf('Tour skip')
+    expect(labels.slice(i + 1, i + 11)).toEqual([
+      '  of which skipped at: preamble', '  of which skipped at: hub', '  of which skipped at: section',
+      'Game start: easy', 'Game start: medium', 'Game start: hard', 'Game start: expert', 'Game start: difficulty unknown',
+      'Tutorial complete: first run', 'Tutorial complete: replay',
+    ])
+    expect(labels[i + 11]).toBe('First move')
+    for (const l of labels.slice(i + 1, i + 11)) expect(rows.find((r) => r[0] === l)).toEqual([l, 'not yet tracked', 'no rows yet', ''])
+  })
+  it('shows the v1.97.0 first-run counters as tagged and site-wide counts once they have rows', () => {
+    const fig = (tagged: number, site: number) => ({ tagged, site, tracked: true })
+    const rows = firstSessionRows(
+      buildReadPage({
+        template,
+        raw: degrade((d) => {
+          const f = (d.firstSession as any).funnel
+          f.tourExit = { preamble: fig(2, 20), hub: fig(3, 30), section: fig(0, 10) }
+          f.gameStart = { easy: fig(6, 1090), medium: fig(0, 40), hard: fig(1, 20), expert: fig(0, 7), unknown: fig(0, 3) }
+          f.tutorialComplete = { 'first-run': fig(0, 2), replay: fig(4, 11) }
+        }),
+        narrative,
+      }),
+    )
+    expect(rows.find((r) => r[0] === '  of which skipped at: hub')).toEqual(['  of which skipped at: hub', '3', '30', ''])
+    expect(rows.find((r) => r[0] === 'Game start: easy')).toEqual(['Game start: easy', '6', '1,090', ''])
+    expect(rows.find((r) => r[0] === 'Tutorial complete: replay')).toEqual(['Tutorial complete: replay', '4', '11', ''])
+  })
+  it('a result saved before the v1.97.0 counters existed still renders the first-session panel, without the new rows', () => {
+    const rows = firstSessionRows(
+      buildReadPage({
+        template,
+        raw: degrade((d) => {
+          const f = (d.firstSession as any).funnel
+          delete f.tourExit
+          delete f.gameStart
+          delete f.tutorialComplete
+        }),
+        narrative,
+      }),
+    )
+    expect(rows.find((r) => r[0] === 'Game views')).toEqual(['Game views', '64', '1,900', ''])
+    expect(rows.some((r) => /^(\s*of which skipped at|Game start|Tutorial complete):/.test(r[0]!))).toBe(false)
+  })
   it('the first-session panel degrades to a line when it is missing', () => {
     const { body } = render(buildReadPage({ template, raw: degrade((d) => { d.firstSession = null }), narrative }))
     expect(body).toContain('Not read on this run: tagged beacon rows unavailable')

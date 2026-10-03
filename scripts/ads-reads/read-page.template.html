@@ -178,7 +178,7 @@ ul .nr{border:0;padding:0}
       <div class="panel"><h3 class="ph">Tagged funnel</h3><div class="table-wrap"><table id="funnel"></table></div></div>
       <div class="panel"><h3 class="ph">Returns by path</h3><div class="table-wrap"><table id="returns"></table></div><p class="caption" id="play-line"></p></div>
     </div>
-    <div class="panel"><h3 class="ph">First-session funnel</h3><p class="caption">Informational only, never a kill rule. Row counts with no visitor join: "vs" is rows over rows, not per-visitor conversion. A beacon family (paths shipped in one app release) with no rows yet, site-wide or tagged, is not yet tracked; once any path in it has a row, a missing sibling is a real 0.</p><div class="table-wrap"><table id="first-session"></table></div></div>
+    <div class="panel"><h3 class="ph">First-session funnel</h3><p class="caption">Informational only, never a kill rule. Row counts with no visitor join: "vs" is rows over rows, not per-visitor conversion. A beacon family (paths shipped in one app release) with no rows yet, site-wide or tagged, is not yet tracked; once any path in it has a row, a missing sibling is a real 0. From app v1.97.0 on, the "skipped at" rows are the tour skip rows split by where (the same rows, not a further step), and the game start and tutorial complete rows are counters read side by side: a game start counts every counted start (menu, play again, or leaving the tour for a real game), so it is not matched to a tour skip.</p><div class="table-wrap"><table id="first-session"></table></div></div>
     <div class="panel"><h3 class="ph">Accounts</h3><div class="kv" id="accounts"></div></div>
     <div class="panel"><h3 class="ph">Site-wide, not campaign-attributed</h3><ul class="printed" id="sitewide"></ul></div>
   </section>
@@ -456,7 +456,20 @@ try {
       return `${v} of ${LABELS[g.parent].toLowerCase()} (${counts})`;
     };
     const row = (label, x, withVs) => x.tracked === false ? [label, untracked(), "no rows yet", ""] : [label, int(x.tagged), site(x), withVs ? vs(x) : ""];
-    const rows = Object.keys(LABELS).map(k => row(LABELS[k], f.steps[k], true));
+    const rows = [];
+    for (const k of Object.keys(LABELS)) {
+      rows.push(row(LABELS[k], f.steps[k], true));
+      // The v1.97.0 first-run counters follow the tour outcomes. The first three rows are NOT a further
+      // step: an exit-at row fires only on a skip, so they are the tour skip rows split by where (indented
+      // "of which", like the sign-in ask split). Then the counted game start and the tutorial win: row
+      // counts side by side, no ratio (a start cannot be matched to the exit that led to it). Skipped
+      // quietly when a result carries none.
+      if (k === "tourSkip") {
+        for (const [s, l] of [["preamble", "  of which skipped at: preamble"], ["hub", "  of which skipped at: hub"], ["section", "  of which skipped at: section"]]) if (f.tourExit && f.tourExit[s]) rows.push(row(l, f.tourExit[s]));
+        for (const [d, l] of [["easy", "Game start: easy"], ["medium", "Game start: medium"], ["hard", "Game start: hard"], ["expert", "Game start: expert"], ["unknown", "Game start: difficulty unknown"]]) if (f.gameStart && f.gameStart[d]) rows.push(row(l, f.gameStart[d]));
+        for (const [v, l] of [["first-run", "Tutorial complete: first run"], ["replay", "Tutorial complete: replay"]]) if (f.tutorialComplete && f.tutorialComplete[v]) rows.push(row(l, f.tutorialComplete[v]));
+      }
+    }
     for (const b of ["0", "1-25", "26-50", "51-75", "76-99"]) rows.push(row(`Abandon at ${b}% filled`, f.abandon[b]));
     rows.push(row("Sign-in asks shown", f.asks), row("  of which tutorial", f.asksTutorial));
     for (const [e, l] of [["shown", "Welcome card shown"], ["daily", "Welcome card: daily"], ["leaderboard", "Welcome card: leaderboard"], ["dismiss", "Welcome card dismissed"]]) rows.push(row(l, f.welcome[e]));
