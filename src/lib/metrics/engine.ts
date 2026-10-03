@@ -6,7 +6,8 @@
 //
 // Derivation reuses the existing primitives: gateRate/MIN_COHORT (lib/popupEvents.ts) for every
 // proportion and cost, computeDelta/sameTimeWindowMs/last7DatesBefore (lib/overview.ts) for the
-// "today so far" comparisons, rowIsPostInstallFix for the install-fix split,
+// "today so far" comparisons (same-clock-time deltas only on a metric that never counts a refused
+// row; whole-ET-day context, `wholeDays`, on every other), rowIsPostInstallFix for the install-fix split,
 // campaignAttributionClause's rule for campaign rows inside a site-wide fact.
 //
 // COST (Workers Free: 10 ms CPU per request). Work is per batch, never per request × row:
@@ -296,6 +297,8 @@ interface FactIndex {
   gVisitorNew: Uint8Array
   gCampaign: Int32Array
   gDay: Int8Array
+  /** 1 when the KPI fact's `t` flag is set: a non-refused row before the same clock time on its day. */
+  gSameTime: Uint8Array
   gPf: Int8Array // 1 at/after the fact's split, 0 before, -1 unknown
   gUf: Int8Array // 1 at/after the upsell fix, 0 before, -1 not split
   gCountry: Int8Array // COUNTRY_CODES index, -1 not split
@@ -322,6 +325,7 @@ function buildIndex(rows: readonly BeaconRow[], cuts: readonly number[], dropGap
   const gVisitorNew = new Uint8Array(n)
   const gCampaign = new Int32Array(n)
   const gDay = new Int8Array(n)
+  const gSameTime = new Uint8Array(n)
   const gPf = new Int8Array(n)
   const gUf = new Int8Array(n)
   const gCountry = new Int8Array(n)
@@ -345,6 +349,7 @@ function buildIndex(rows: readonly BeaconRow[], cuts: readonly number[], dropGap
     gVisitorNew[g] = r.visitor === 'new' ? 1 : 0
     gCampaign[g] = c
     gDay[g] = r.day
+    gSameTime[g] = r.sameTime ? 1 : 0
     gPf[g] = r.pf === null ? -1 : r.pf ? 1 : 0
     gUf[g] = r.uf === null ? -1 : r.uf ? 1 : 0
     gCountry[g] = COUNTRY_CODES[r.cb] ?? -1
@@ -358,7 +363,7 @@ function buildIndex(rows: readonly BeaconRow[], cuts: readonly number[], dropGap
     byPath[gPath[k]].push(k)
     pathTotal[gPath[k]] += gCount[k]
   }
-  return { paths, byPath, pathTotal, campaigns, gVisitorNew, gCampaign, gDay, gPf, gUf, gCountry, gSeg, gCount, cuts }
+  return { paths, byPath, pathTotal, campaigns, gVisitorNew, gCampaign, gDay, gSameTime, gPf, gUf, gCountry, gSeg, gCount, cuts }
 }
 
 // ── Cuts: the instants a timed fact is segmented at ──────────────────────────────────────
@@ -485,8 +490,11 @@ interface Side {
   m?: MeasuredInterval
   reason?: string
   noteIds: string[]
-  /** Deltas for a today-so-far count: [today, day-1 … day-7]. */
+  /** A today-so-far count: [today so far, day-1 … day-7]. */
   days?: number[]
+  /** What days[1..7] are: 'wholeDays' (each earlier day's full ET-day total, for a metric that can
+   * count a refused row) or 'sameTime' (each up to the same clock time, for an opt-out metric). */
+  dayKind?: 'wholeDays' | 'sameTime'
   asOfMs?: number
   /** A store metric's own gate verdict (MetricDef.store): too few to report, with the counts behind it. */
   tooFew?: boolean
@@ -634,6 +642,10 @@ class Batch {
     }
     const onlyNew = def.visitor === 'new'
     const today = ctx.window === 'todaySoFar'
+    // Counts only (decision 2026-10-03): a metric that can count a refused row compares WHOLE ET
+    // days (every group of day k, whatever its `t`), so no refused count is cut at a clock time.
+    // An opt-out metric keeps its same-clock-time comparison: only its `t = 1` groups on day k.
+    const wholeDays = today && countsRefusedRows(def)
     const { onlyDay, onlyUf, country } = plan
     const sums = new Array<number>(today ? 8 : 1).fill(0)
     for (let p = 0; p < idx.paths.length; p++) {
@@ -655,7 +667,10 @@ class Batch {
         if (day === 0) {
           if (idx.gSeg[g] < need0) continue
           if (plan.alignPf && idx.gPf[g] !== 1) continue
-        } else if (idx.gSeg[g] < needAll) continue
+        } else {
+          if (idx.gSeg[g] < needAll) continue
+          if (!wholeDays && !idx.gSameTime[g]) continue
+        }
         sums[day] += idx.gCount[g]
       }
     }
@@ -665,7 +680,7 @@ class Batch {
       plan.factId === 'bskRangePath' && this.clock.pageRefusedWholeDays && !noteIds.includes('refused-whole-days') && countsRefusedRows(def)
         ? [...noteIds, 'refused-whole-days']
         : noteIds
-    return { status, value: sums[0], m, noteIds: ids, ...(today ? { days: sums } : {}), asOfMs: plan.asOfMs }
+    return { status, value: sums[0], m, noteIds: ids, ...(today ? { days: sums, dayKind: wholeDays ? ('wholeDays' as const) : ('sameTime' as const) } : {}), asOfMs: plan.asOfMs }
   }
 
   /** The metric's per-ET-day series (ADR 0005 slice 2) from its daily twin fact, or undefined when
@@ -741,10 +756,16 @@ function finiteDelta(today: number, compare: number): MetricDelta | undefined {
   return d.deltaPct !== null && Number.isFinite(d.deltaPct) ? { delta: d.delta, deltaPct: d.deltaPct } : { delta: d.delta }
 }
 
+/** The comparison gate for a today-so-far side (deltasAllowed): a campaign tile also compares only
+ * against days after its attribution start (kpiComparisonGate). */
+function comparisonGate(batch: Batch, side: Side, campaign: CampaignFlight | undefined): { yesterday: boolean; avg7: boolean } {
+  return batch.gate(laterEtDate(side.m!.goLiveEt, campaign?.flightStart ?? null))
+}
+
+/** Same-clock-time deltas: only for an opt-out metric (side.dayKind 'sameTime'). */
 function deltasFor(batch: Batch, side: Side, req: ResolvedRequest, campaign: CampaignFlight | undefined): MetricValue['deltas'] | undefined {
-  if (!req.deltas.length || !side.days || !side.m) return undefined
-  // A campaign tile also compares only against days after its attribution start (kpiComparisonGate).
-  const allowed = batch.gate(laterEtDate(side.m.goLiveEt, campaign?.flightStart ?? null))
+  if (!req.deltas.length || !side.days || !side.m || side.dayKind !== 'sameTime') return undefined
+  const allowed = comparisonGate(batch, side, campaign)
   const days = side.days
   const today = days[0]
   let yesterday: MetricDelta | undefined
@@ -756,6 +777,23 @@ function deltasFor(batch: Batch, side: Side, req: ResolvedRequest, campaign: Cam
   if (yesterday) out.yesterday = yesterday
   if (avg7) out.avg7 = avg7
   return out
+}
+
+/** Whole-ET-day context instead of deltas (side.dayKind 'wholeDays', a metric that can count a
+ * refused row): yesterday's full ET-day total and the daily average over the 7 full ET days before
+ * today (sum / 7: a count of days, never of hours, so a 23 h or 25 h DST day needs no special
+ * case). The same gate and the same requested names as the deltas; each value only when finite. */
+function wholeDaysFor(batch: Batch, side: Side, req: ResolvedRequest, campaign: CampaignFlight | undefined): MetricValue['wholeDays'] | undefined {
+  if (!req.deltas.length || !side.days || !side.m || side.dayKind !== 'wholeDays') return undefined
+  const allowed = comparisonGate(batch, side, campaign)
+  const days = side.days
+  const out: { yesterday?: number; avg7?: number } = {}
+  if (allowed.yesterday && req.deltas.includes('yesterday') && Number.isFinite(days[1])) out.yesterday = days[1]
+  if (allowed.avg7 && req.deltas.includes('avg7')) {
+    const avg7 = (days[1] + days[2] + days[3] + days[4] + days[5] + days[6] + days[7]) / 7
+    if (Number.isFinite(avg7)) out.avg7 = avg7
+  }
+  return out.yesterday === undefined && out.avg7 === undefined ? undefined : out
 }
 
 function statusOnly(status: 'unmeasured' | 'error', reason: string | undefined, noteIds: string[]): MetricValue {
@@ -777,8 +815,11 @@ function deriveMetric(batch: Batch, req: ResolvedRequest): MetricValue {
   }
   if (side.value !== null) {
     if (side.status === 'partial') v.measuredFrom = side.m!.from
-    const deltas = deltasFor(batch, side, req, req.params.campaignId ? campaignById(req.params.campaignId) : undefined)
+    const campaign = req.params.campaignId ? campaignById(req.params.campaignId) : undefined
+    const deltas = deltasFor(batch, side, req, campaign)
     if (deltas) v.deltas = deltas
+    const wholeDays = wholeDaysFor(batch, side, req, campaign)
+    if (wholeDays) v.wholeDays = wholeDays
   }
   if (side.noteIds.length) v.noteIds = side.noteIds
   if (req.series) {
@@ -839,6 +880,8 @@ export function deriveBatch(checks: readonly RequestCheck[], env: DeriveEnv, mem
       continue
     }
     const r = c.req
+    // Everything a result depends on: `wholeDays`, like `deltas`, is a function of the metric id
+    // (countsRefused is static per metric), the window and the requested names (r.deltas).
     const sig = `${r.kind}|${r.id}|${r.params.campaignId ?? ''}|${r.params.popup ?? ''}|${r.params.country ?? ''}|${r.window}|${r.deltas.join(',')}|${r.series ?? ''}|${r.minCohort}`
     let v = same.get(sig)
     if (!v) {

@@ -122,6 +122,8 @@ describe('cache keys (review finding #9): SQL and bound values, never the live "
     const live1 = FACTS.bskKpiDays.build({ todayEt: '2026-09-26' }, NOW, factCuts('bskKpiDays'))
     const live2 = FACTS.bskKpiDays.build({ todayEt: '2026-09-26' }, NOW + 60_000, factCuts('bskKpiDays'))
     expect(live1.binds).not.toEqual(live2.binds)
+    // The same-time bounds are inlined integers now, so the live statements differ as well.
+    expect(live1.sql).not.toBe(live2.sql)
   })
   it('a key carries the entry format version and a statement hash', () => {
     const url = decodeURIComponent(factCacheKeyUrl({ id: 'adsSpend', params: {} }))

@@ -380,10 +380,10 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     ? { terms: ['ts >= ?', 'ts < ?'], binds: [sinceMs, untilMs], moved: false }
     : refusedWindowClause(sinceMs, untilMs)
   // The caption flag needs a refused row this query can still count (review of #63, SHOULD-3:
-  // a non-Best-Sudoku site, a /home drill or excluded event rows count none). The snap and its
+  // a /home drill or excluded event rows count none). The snap and its
   // cache-key marker still follow `moved` alone.
   const refusedReachable =
-    reachableRefusedPatterns({ eventRowsExcluded: !includeEventBeacons && !eventDimActive, sites, constraints }).length > 0
+    reachableRefusedPatterns({ eventRowsExcluded: !includeEventBeacons && !eventDimActive, constraints }).length > 0
   const refusedWholeDays = tsWindow.moved && refusedReachable
   const splitGuardClause = (w: string[], b: any[]) => {
     if (splitGuardActive) refusedPathExcludeClause(w, b)

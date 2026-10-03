@@ -17,6 +17,23 @@ All notable changes to **gss-stats** are documented here. The format follows
   arrivals are different devices and the bar compares them without netting either out (this note
   cannot be hidden); the other says the rates are a lower bound on people.
 
+## [0.15.4] — 2026-10-03
+
+### Fixed
+- **A layout that fails to load can no longer be overwritten.** If the saved layout can't be read
+  (no connection, a server error, or an answer that isn't a layout), the dashboard shows the
+  default layout with a "Try again" banner, and nothing changed on it is saved.
+
+## [0.15.3] — 2026-10-03
+
+### Fixed
+- **KPI tiles for counts-only rows show whole days.** A tile that can count return, game-start,
+  completion, tutorial or tour-exit rows (Best Sudoku page views included) now shows yesterday's
+  full-day total and the 7-day daily average instead of a same-time percent change, which could
+  expose an hour-of-day split of those rows. Tiles that never count them keep their arrows.
+- **The counts-only caption also shows on other sites.** A geo chart narrowed to a site other than
+  Best Sudoku now carries the counts-only whole-days caption too.
+
 ## [0.15.2] — 2026-10-03
 
 ### Fixed
