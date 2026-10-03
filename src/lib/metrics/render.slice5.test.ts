@@ -33,6 +33,45 @@ describe('"new today"', () => {
   })
 })
 
+describe('whole-day context (a count that can count a refused row)', () => {
+  const lines = (display: MetricItem['display'], value: MetricValue) => itemViewModel(kpi({ display }), value, rootScope, opts).deltaLines
+  const both: MetricItem['display'] = { as: 'number', deltas: ['yesterday', 'avg7'] }
+
+  it('one neutral line: yesterday and the 7-day daily average, no arrow and no percent', () => {
+    expect(lines(both, { status: 'ok', value: 900, wholeDays: { yesterday: 1234, avg7: 1180.4 } })).toEqual([{ text: 'Yesterday 1,234 · 7-day avg 1,180/day', cls: '' }])
+  })
+  it('only the part asked for, or only the part present', () => {
+    const wd = { yesterday: 1234, avg7: 1180 }
+    expect(lines({ as: 'number', deltas: ['yesterday'] }, { status: 'ok', value: 9, wholeDays: wd })).toEqual([{ text: 'Yesterday 1,234', cls: '' }])
+    expect(lines({ as: 'number', deltas: ['avg7'] }, { status: 'ok', value: 9, wholeDays: wd })).toEqual([{ text: '7-day avg 1,180/day', cls: '' }])
+    expect(lines(both, { status: 'ok', value: 9, wholeDays: { avg7: 1180 } })).toEqual([{ text: '7-day avg 1,180/day', cls: '' }])
+    expect(lines(both, { status: 'ok', value: 9, wholeDays: { yesterday: 40 } })).toEqual([{ text: 'Yesterday 40', cls: '' }])
+  })
+  it('the average is a whole number from 10 up and one decimal below', () => {
+    const avg = (n: number) => lines(both, { status: 'ok', value: 1, wholeDays: { avg7: n } })[0]!.text
+    expect(avg(10)).toBe('7-day avg 10/day')
+    expect(avg(10.4)).toBe('7-day avg 10/day')
+    expect(avg(9.96)).toBe('7-day avg 10/day')
+    expect(avg(1234.6)).toBe('7-day avg 1,235/day')
+    expect(avg(9.94)).toBe('7-day avg 9.9/day')
+    expect(avg(3)).toBe('7-day avg 3.0/day')
+    expect(avg(0.43)).toBe('7-day avg 0.4/day')
+    expect(avg(0)).toBe('7-day avg 0.0/day')
+  })
+  it('a non-finite part (null after JSON) is absent; with both absent there is no line', () => {
+    const received = JSON.parse(JSON.stringify({ status: 'ok', value: 5, wholeDays: { yesterday: Infinity, avg7: 12 } })) as MetricValue
+    expect(lines(both, received)).toEqual([{ text: '7-day avg 12/day', cls: '' }])
+    expect(lines(both, { status: 'ok', value: 5, wholeDays: { yesterday: NaN } })).toEqual([])
+  })
+  it('is not "new today": the line replaces it, and an absent wholeDays still reads "new today"', () => {
+    expect(lines(both, { status: 'ok', value: 8, wholeDays: { yesterday: 5 } }).some((l) => l.cls === 'new')).toBe(false)
+    expect(lines(both, { status: 'ok', value: 8 })).toEqual([{ text: 'new today', cls: 'new' }])
+  })
+  it('nothing when no delta name was asked for', () => {
+    expect(lines({ as: 'number' }, { status: 'ok', value: 8, wholeDays: { yesterday: 5, avg7: 4 } })).toEqual([])
+  })
+})
+
 describe('non-finite values from the wire', () => {
   it('a non-finite delta survives JSON as null and is treated as absent: no line, no styling', () => {
     const sent: MetricValue = { status: 'ok', value: 5, deltas: { yesterday: { delta: Infinity, deltaPct: Infinity }, avg7: { delta: 3, deltaPct: NaN } } }

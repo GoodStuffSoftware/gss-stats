@@ -43,8 +43,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
 
 ## Features
 
-- **Best Sudoku / Overview** — the Best Sudoku group's first page: today-at-a-glance KPI tiles (vs the same
-  time yesterday and the 7-day average), the **Overall timeline**, a campaign scorecard, and a
+- **Best Sudoku / Overview** — the Best Sudoku group's first page: today-at-a-glance KPI tiles (today so far, with
+  "vs yesterday" and "vs 7d avg" arrows at the same clock time, except for counts-only rows: see *KPI
+  tiles for counts-only rows* below), the **Overall timeline**, a campaign scorecard, and a
   release before/after panel — each its own movable/editable widget. The KPI tiles and the
   scorecard are **metric cards** (presets `bsk-kpis` and `campaign-scorecard`, see *One metrics
   registry* below), and so is the release panel (preset `release-before-after`: the newest release
@@ -456,7 +457,7 @@ Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats
   `POST /api/metrics` answers a batch of registry ids and params (never SQL): it validates every
   id and param against the registry, plans the distinct facts (at most 40 statements, else `413`
   with `maxStatements`), caches each fact on its own in the Cache API, and derives every value in
-  JS with its status (`ok`, `too-few`, `no-data`, `unmeasured`, `partial`), n/d, deltas and a
+  JS with its status (`ok`, `too-few`, `no-data`, `unmeasured`, `partial`), n/d, deltas (or whole-day context, see *KPI tiles for counts-only rows* below) and a
   provisional flag for lagged outcomes. Windows are the campaign's attribution window, today so
   far, the page range, the compared release's before/after windows (sized by one cached first-hit
   read), and a campaign's pre/post segments at the signed-out upsell fix (only once that fix is
@@ -568,13 +569,28 @@ picker's ET days, a whole-day preset) runs exactly as before. Charts, `/api/comp
 the metric cards' page range (`window: 'page'`, sparkline days included) all follow it and say
 so in a caption: "Any return, game-start, completion, tutorial-completion or tour-exit rows
 here are counted over whole ET days." A chart shows it only when it can count one of those
-rows, so never for a site other than Best Sudoku or under a path or path-family filter none of
-them matches. A chart that leaves event beacons out (the default) counts none of them, since
+rows, so never under a path or path-family filter none of them matches (a site filter does not
+narrow it: it errs toward showing). A chart that leaves event beacons out (the default) counts none of them, since
 game starts are event beacons too, so it shows no caption. Rolling presets (last 24 hours, last
 7 days) are rarely on ET midnights, so most Best Sudoku views that count those rows carry it. It adds no D1 bound
 parameters. Today's totals stay live (ruling 2026-10-03), so polling a running total still
 shows when it grew; only shrinking to whole days and holding the open day would close that, and
 live data was chosen over it.
+
+**KPI tiles for counts-only rows show whole days, not same-time arrows.** A "today so far" count
+tile normally compares today against the same clock time yesterday and over the 7 days before
+(`vs yesterday`, `vs 7d avg`). For a metric that can count one of the counts-only rows above, that
+comparison would give a closed day's count up to a clock time, an hour-of-day split of those rows
+read after the fact. So the data layer (`bskKpiDays`) counts them over whole ET days (a same-time
+flag is always off for them), and the tile shows one plain line instead of arrows: "Yesterday
+1,234 · 7-day avg 1,180/day", yesterday's full ET-day total and the average over the 7 full ET days
+before today (a whole number from 10 up, one decimal below; the two "delta" checkboxes in the
+editor pick which part shows). **Best Sudoku Page views follows this rule** because it has not opted out of the counts-only
+rule. Its path filter already leaves out the lower-case counts-only paths, so the only such rows it
+can still include are malformed upper-case variants. A metric that never counts them (`countsRefused: false`: auth successes,
+game views, pop-up shown and accepted, and so on) keeps its same-time arrows unchanged. Like the
+arrows, the whole-day figures follow neither the page's date range nor its filters: they depend
+on today's ET date alone.
 
 **Every stored geo-beacon column is a chartable dimension AND a filter.** `functions/api/geo.ts`
 whitelists every analytic `hits` column (`GEO_DIMS`) — region/city/postal/country/continent/

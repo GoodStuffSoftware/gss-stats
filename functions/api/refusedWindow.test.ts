@@ -332,17 +332,20 @@ describe('the whole-days caption flag needs a refused row the geo query can coun
     expect(r.body.meta.refusedWholeDays).toBe(true)
   })
 
-  it('hidden: a site that is not Best Sudoku', async () => {
+  // NIT-A (re-review of #63): the site list and a site drill are not narrowing rules any more. A
+  // non-Best-Sudoku site that sent a refused-shaped row would be counted over whole days, so the
+  // caption errs toward showing like every other filter it cannot reason about.
+  it('shown: a site that is not Best Sudoku (the caption errs toward showing)', async () => {
     const r = await geo({ since, until, sites: ['starrupture'] })
     snapped(r)
     expect(r.body.rows).toEqual([])
-    expect(r.body.meta.refusedWholeDays).toBeUndefined()
+    expect(r.body.meta.refusedWholeDays).toBe(true)
   })
 
-  it('hidden: a site drill that is not Best Sudoku', async () => {
+  it('shown: a site drill that is not Best Sudoku', async () => {
     const r = await geo({ since, until, constraints: [{ field: 'site', value: 'starrupture' }] })
     snapped(r)
-    expect(r.body.meta.refusedWholeDays).toBeUndefined()
+    expect(r.body.meta.refusedWholeDays).toBe(true)
   })
 
   it('hidden: a /home path filter; shown again for a refused path, unless event beacons leave it out', async () => {
@@ -369,11 +372,11 @@ describe('the whole-days caption flag needs a refused row the geo query can coun
   })
 
   it('reachableRefusedPatterns: the static rules', () => {
-    const all = { eventRowsExcluded: false, sites: [], constraints: [] }
+    const all = { eventRowsExcluded: false, constraints: [] }
     expect(reachableRefusedPatterns(all)).toEqual([...SPLIT_REFUSED_PATH_PATTERNS])
     expect(reachableRefusedPatterns({ ...all, eventRowsExcluded: true })).toEqual([])
-    expect(reachableRefusedPatterns({ ...all, sites: ['starrupture', SITE] })).toEqual([...SPLIT_REFUSED_PATH_PATTERNS])
-    expect(reachableRefusedPatterns({ ...all, sites: ['starrupture'] })).toEqual([])
+    // A site drill is not a narrowing rule: a non-Best-Sudoku site keeps every pattern reachable.
+    expect(reachableRefusedPatterns({ ...all, constraints: [{ field: 'site', value: 'starrupture' }] })).toEqual([...SPLIT_REFUSED_PATH_PATTERNS])
     expect(reachableRefusedPatterns({ ...all, constraints: [{ field: 'path', value: '/RETURN/x/d0' }] })).toEqual(['/return/%'])
     expect(reachableRefusedPatterns({ ...all, constraints: [{ field: 'path', value: '(direct)' }] })).toEqual([])
     const family = (value: string) => reachableRefusedPatterns({ ...all, constraints: [{ field: 'pathFamily', value }] })

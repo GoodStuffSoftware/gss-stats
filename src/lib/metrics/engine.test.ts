@@ -13,6 +13,7 @@ import { MAX_REQUESTS, validateMetricsRequest } from './validate'
 import { prewarm, prewarmChunks, prewarmRequests } from './prewarm'
 import { CAMPAIGNS } from '../campaigns'
 import { POPUPS } from '../popupEvents'
+import { isSplitRefusedPath } from '../splitGuard'
 import type { MetricRequest } from './types'
 
 const NOW = Date.parse('2026-09-26T21:00:00Z')
@@ -42,7 +43,7 @@ function syntheticFacts(plan: ReturnType<typeof planBatch>): Map<string, FactRes
     const raw =
       f.id === 'adsSpend'
         ? [{ campaign_id: CAMPAIGNS[0].id, cost_micros: 5_000_000, days: 2 }]
-        : paths.flatMap((path, i) => [0, 1, 2, 3, 4, 5, 6, 7].map((d) => ({ path, visitor: (i + d) % 2 ? 'new' : 'returning', campaign: CAMPAIGNS[(i + d) % 3].ucValues[0], d, s: (i + d) % (factCuts(f.id).length + 1), pf: d % 2, c: 1 + i })))
+        : paths.flatMap((path, i) => [0, 1, 2, 3, 4, 5, 6, 7].map((d) => ({ path, visitor: (i + d) % 2 ? 'new' : 'returning', campaign: CAMPAIGNS[(i + d) % 3].ucValues[0], d, t: d > 0 && !isSplitRefusedPath(path) ? (i + d) % 2 : 0, s: (i + d) % (factCuts(f.id).length + 1), pf: d % 2, c: 1 + i })))
     facts.set(f.key, { ok: true, rows: FACTS[f.id].parse(raw), asOfMs: NOW })
   }
   return facts
@@ -102,7 +103,7 @@ describe('a fact does not grow with traffic', () => {
       const stmt = buildFact({ id: 'bskKpiDays', params: { todayEt: TODAY } }, NOW)
       return db.prepare(stmt.sql).all(...(stmt.binds as number[])).length
     }
-    const bound = 8 * (factCuts('bskKpiDays').length + 1) * paths.length * 2 // days × segments × paths × visitor kinds
+    const bound = 8 * 2 * (factCuts('bskKpiDays').length + 1) * paths.length * 2 // days × same-time flag × segments × paths × visitor kinds
     const small = count(2_000)
     const large = count(40_000)
     expect(small).toBeLessThanOrEqual(bound)
@@ -128,32 +129,81 @@ describe('identical requests share one derivation', () => {
   })
 })
 
-describe('deltas are finite or absent (JSON has no Infinity/NaN; both would arrive as null)', () => {
-  function kpi(rows: { d: number; c: number }[]) {
-    const batch = validateMetricsRequest(JSON.stringify({ v: 1, requests: [{ key: 'a', metric: 'bsk.pageviews', window: 'todaySoFar', deltas: ['yesterday', 'avg7'] }] }))
+describe('KPI comparison: refused-row metrics get whole-day context, opt-outs keep same-time deltas; all finite or absent', () => {
+  // JSON has no Infinity/NaN; both would arrive as null. Rows carry the fact's own columns: d is the
+  // whole ET day, t the same-time flag (1 only on a non-refused row before today's clock time).
+  type Row = { d: number; c: number; t?: number; path?: string }
+  function kpi(rows: Row[], metric = 'bsk.pageviews', deltas: string[] = ['yesterday', 'avg7']) {
+    const batch = validateMetricsRequest(JSON.stringify({ v: 1, requests: [{ key: 'a', metric, window: 'todaySoFar', deltas }] }))
     if (!batch.ok) throw new Error(batch.error)
     const env = { context: batch.context, nowMs: NOW, todayEt: TODAY, hasAdsDb: false }
     const plan = planBatch(batch.requests.flatMap((r) => (r.ok ? [r.req] : [])), env)
-    const facts = new Map<string, FactResult>([[plan.facts[0].key, { ok: true, rows: FACTS.bskKpiDays.parse(rows.map((r) => ({ path: '/', visitor: 'new', campaign: '', s: 0, ...r }))), asOfMs: NOW }]])
+    const facts = new Map<string, FactResult>([[plan.facts[0].key, { ok: true, rows: FACTS.bskKpiDays.parse(rows.map((r) => ({ path: '/', visitor: 'new', campaign: '', s: 0, t: 0, ...r }))), asOfMs: NOW }]])
     // A real JSON round trip, exactly what the client receives.
     return JSON.parse(JSON.stringify(deriveBatch(batch.requests, { ...env, facts }))).a
   }
-  it('against a zero day: the delta, and no percentage key at all (not null)', () => {
-    const a = kpi([{ d: 0, c: 12 }])
+
+  it('a refused-row metric (bsk.pageviews) gets whole-day yesterday and 7-day average, and no deltas', () => {
+    const a = kpi([
+      { d: 0, c: 12 },
+      { d: 1, c: 4, t: 1 }, // the flag never splits a refused-row metric: both halves of the day count
+      { d: 1, c: 2, t: 0 },
+      { d: 3, c: 7 },
+    ])
+    expect(a.value).toBe(12)
+    expect('deltas' in a).toBe(false)
+    expect(a.wholeDays).toEqual({ yesterday: 6, avg7: 13 / 7 })
+  })
+  it('wholeDays follows the requested comparisons', () => {
+    const rows = [
+      { d: 0, c: 12 },
+      { d: 1, c: 6 },
+    ]
+    expect(kpi(rows, 'bsk.pageviews', ['yesterday']).wholeDays).toEqual({ yesterday: 6 })
+    expect(kpi(rows, 'bsk.pageviews', ['avg7']).wholeDays).toEqual({ avg7: 6 / 7 })
+    expect('wholeDays' in kpi(rows, 'bsk.pageviews', [])).toBe(false)
+  })
+  it('empty days: zero whole-day context (a number, never null), and no deltas', () => {
+    for (const rows of [[], [{ d: 0, c: 12 }]]) {
+      const a = kpi(rows)
+      expect('deltas' in a).toBe(false)
+      expect(a.wholeDays).toEqual({ yesterday: 0, avg7: 0 })
+    }
+  })
+  it('an opt-out metric (bsk.gameViews) sums only the same-time rows for earlier days: its deltas are unchanged', () => {
+    // The old fact returned, for each earlier day, only the rows inside its same-time window. The
+    // new one returns the whole day with those rows flagged t = 1; the deltas must be the same.
+    const before = kpi(
+      [
+        { d: 0, c: 12, path: '/game' },
+        { d: 1, c: 6, path: '/game', t: 1 },
+        { d: 3, c: 7, path: '/game', t: 1 },
+      ],
+      'bsk.gameViews',
+    )
+    const after = kpi(
+      [
+        { d: 0, c: 12, path: '/game' },
+        { d: 1, c: 6, path: '/game', t: 1 },
+        { d: 1, c: 100, path: '/game', t: 0 }, // later in the day than now: not compared
+        { d: 3, c: 7, path: '/game', t: 1 },
+        { d: 5, c: 50, path: '/game', t: 0 },
+      ],
+      'bsk.gameViews',
+    )
+    expect(after.value).toBe(12)
+    expect(after.deltas.yesterday).toEqual({ delta: 6, deltaPct: 1 })
+    expect(after.deltas.avg7).toEqual({ delta: 12 - 13 / 7, deltaPct: (12 - 13 / 7) / (13 / 7) })
+    expect(after).toEqual(before)
+    expect('wholeDays' in after).toBe(false)
+  })
+  it('against a zero day an opt-out delta has no percentage key at all (not null)', () => {
+    const a = kpi([{ d: 0, c: 12, path: '/game' }], 'bsk.gameViews')
     expect(a.deltas.yesterday).toEqual({ delta: 12 })
     expect('deltaPct' in a.deltas.yesterday).toBe(false)
     expect(a.deltas.avg7).toEqual({ delta: 12 })
   })
-  it('an ordinary comparison keeps both numbers', () => {
-    const a = kpi([
-      { d: 0, c: 12 },
-      { d: 1, c: 6 },
-      { d: 3, c: 7 },
-    ])
-    expect(a.deltas.yesterday).toEqual({ delta: 6, deltaPct: 1 })
-    expect(a.deltas.avg7).toEqual({ delta: 12 - 13 / 7, deltaPct: (12 - 13 / 7) / (13 / 7) })
-  })
-  it('a non-finite count yields an error status, never a null value or delta', () => {
+  it('a non-finite count yields an error status, never a null value, delta or whole-day number', () => {
     const inf = kpi([
       { d: 0, c: Number.POSITIVE_INFINITY },
       { d: 1, c: 3 },
@@ -163,9 +213,17 @@ describe('deltas are finite or absent (JSON has no Infinity/NaN; both would arri
       { d: 0, c: 4 },
       { d: 1, c: Number.NaN },
     ])
-    // A NaN count parses as 0 (lib/metrics/facts.ts), so the comparison is against zero.
-    expect(nan.deltas.yesterday).toEqual({ delta: 4 })
-    expect(JSON.stringify(inf) + JSON.stringify(nan)).not.toMatch(/null/)
+    // A NaN count parses as 0 (lib/metrics/facts.ts), so yesterday is zero.
+    expect(nan.wholeDays).toEqual({ yesterday: 0, avg7: 0 })
+    const nanOptOut = kpi(
+      [
+        { d: 0, c: 4, path: '/game' },
+        { d: 1, c: Number.NaN, path: '/game', t: 1 },
+      ],
+      'bsk.gameViews',
+    )
+    expect(nanOptOut.deltas.yesterday).toEqual({ delta: 4 })
+    expect(JSON.stringify(inf) + JSON.stringify(nan) + JSON.stringify(nanOptOut)).not.toMatch(/null/)
   })
 })
 
