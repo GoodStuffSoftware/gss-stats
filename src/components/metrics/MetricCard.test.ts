@@ -73,21 +73,21 @@ describe('MetricCard', () => {
 })
 
 // Slice 1c, decision D7: a card's own spec captions stay with the spec, and the widget can hide
-// them (Widget.hiddenCaveats, passed as hiddenCaptions). A data-cut note (hideable: false) and an
-// unknown id are never hidden.
+// them (Widget.hiddenCaveats, passed as hiddenCaptions). A data-cut note (hideable: false) is never
+// hidden; an unknown id never renders at all (slice 1a).
 describe('MetricCard — hiddenCaptions', () => {
   const NOW = Date.parse('2026-09-27T12:00:00Z')
   const withCaptions = (captions: string[]): CardSpec => ({ ...JSON.parse(JSON.stringify(PRESETS['bsk-kpis'])), captions })
   const captionIds = (w: VueWrapper) => (w.find('.mc-captions').exists() ? w.findAllComponents(NoteBlock).map((c) => c.props('noteId')).filter(Boolean) : [])
 
-  it('shows every spec caption when nothing is hidden', async () => {
+  it('shows every known spec caption when nothing is hidden', async () => {
     vi.stubGlobal('fetch', mockMetricsFetch())
     const w = mountCard({ cardRef: { spec: withCaptions(['small-sample', 'country-split-excludes-refused', 'not-a-note']) }, nowMs: NOW })
     await flushPromises()
-    expect(captionIds(w)).toEqual(['small-sample', 'country-split-excludes-refused', 'not-a-note'])
+    expect(captionIds(w)).toEqual(['small-sample', 'country-split-excludes-refused'])
   })
 
-  it('hides a hideable caption, and ignores a hidden data-cut note or an unknown id', async () => {
+  it('hides a hideable caption, and ignores a hidden data-cut note', async () => {
     vi.stubGlobal('fetch', mockMetricsFetch())
     const w = mountCard({
       cardRef: { spec: withCaptions(['small-sample', 'country-split-excludes-refused', 'not-a-note']) },
@@ -95,7 +95,7 @@ describe('MetricCard — hiddenCaptions', () => {
       nowMs: NOW,
     })
     await flushPromises()
-    expect(captionIds(w)).toEqual(['country-split-excludes-refused', 'not-a-note'])
+    expect(captionIds(w)).toEqual(['country-split-excludes-refused'])
   })
 
   it('drops the captions area when every caption is hidden, and a preset caption hides by its registry id', async () => {
