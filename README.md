@@ -429,14 +429,19 @@ that dataset; the beacon adds a precise per-device/per-network opt-out.
 ## Range limits
 
 A data source that caps how wide, or how far back, one query may reach is **gated before it is
-queried**: `/api/stats` cuts the range to the most recent window the source allows (ending at
-the requested end; a start moved forward lands on an ET midnight) and returns a runtime
+queried**: a range the source would refuse is cut to the most recent window it allows (ending at
+the requested end), and a range it accepts is never touched. A start moved forward lands on a
+whole day: a UTC midnight for a `date` series (RUM buckets by UTC day, so the first bar is
+complete), an ET midnight otherwise. `/api/stats` returns a runtime
 `notice` — `{ kind: 'range-clamped', source, reason, requested, served, limitDays, lookbackDays }`
 — which the chart card shows as a small note under the chart ("Showing Jul 3 – Oct 3 only.
-Cloudflare analytics allows up to 93 days per query."). The notice is never saved: it is not part
-of the layout config or widget schema. A range wholly outside the lookback is not queried at all.
-If Cloudflare still refuses a range (its limits changed), the same note appears instead of the
-raw error, and that response is not cached; any other error keeps its current behaviour.
+Cloudflare analytics allows up to 93 days per query."). When a range is cut, the response's
+`meta.since` is the served start, so chart date axes cover only the days queried; the range asked
+for stays in `notice.requested`. The notice is never saved: it is not part of the layout config
+or widget schema. A range wholly outside the lookback is not queried at all. If Cloudflare still
+refuses a range (its limits changed), whether in a 200 `errors` payload or a non-2xx reply, the
+same note appears instead of the raw error, and that response is not cached; any other error
+keeps its current behaviour.
 
 | Source | Limit | Gated |
 |---|---|---|

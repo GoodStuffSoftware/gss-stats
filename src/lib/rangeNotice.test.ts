@@ -30,6 +30,13 @@ describe('rangeNoticeText', () => {
     expect(rangeNoticeText(n, NOW)).toContain('Showing Apr 3 – Apr 30 only.')
   })
 
+  it("a 'date' series names UTC days, matching its bars: a UTC-midnight start reads as that day, not the evening before in ET", () => {
+    const n = notice({ dayZone: 'utc', served: { from: '2026-06-30T00:00:00.000Z', to: '2026-10-01T00:00:00.000Z' } })
+    // Read in ET the same start would be "Jun 29" and the end "Sep 30".
+    expect(rangeNoticeText(n, NOW)).toContain('Showing Jun 30 – Sep 30 only.')
+    expect(rangeNoticeText({ ...n, dayZone: undefined }, NOW)).toContain('Showing Jun 29 – Sep 30 only.')
+  })
+
   it('lookback and both reasons say what Cloudflare keeps', () => {
     expect(rangeNoticeText(notice({ reason: 'lookback' }), NOW)).toBe('Showing Jul 3 – Oct 3 only. Cloudflare analytics keeps only the last 184 days.')
     expect(rangeNoticeText(notice({ reason: 'both' }), NOW)).toBe('Showing Jul 3 – Oct 3 only. Cloudflare analytics allows up to 93 days per query and keeps only the last 184 days.')

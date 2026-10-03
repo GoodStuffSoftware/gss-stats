@@ -24,7 +24,7 @@
 
 import { buildCacheKeyUrl, cachedJson, SKIP_EDGE_CACHE_HEADER, ttlSecondsFor, type CacheLike } from '../_lib/edgeCache'
 import { WHEN_RE } from '../../src/lib/range'
-import { gateRange, isRangeLimitError, upstreamRejectedNotice } from '../_lib/rangeGate'
+import { gateRange, isRangeLimitError, isRangeLimitText, upstreamRejectedNotice } from '../_lib/rangeGate'
 import type { RangeNotice } from '../../src/lib/rangeNotice'
 
 interface Env {
@@ -233,14 +233,20 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // Gate BEFORE querying: Cloudflare caps one RUM query's span and how far back it reaches
   // (functions/_lib/rangeGate.ts). A range beyond that is cut to the most recent allowed window
   // ending at the requested end, and the cut travels back as `notice` for the chart to show.
-  const gate = gateRange('cf-rum', parseWhen(datetimeGeq), parseWhen(datetimeLeq), Date.now())
+  // A `date` series buckets by UTC day, so a moved start lands on a UTC midnight (first bar whole).
+  const gate = gateRange('cf-rum', parseWhen(datetimeGeq), parseWhen(datetimeLeq), Date.now(), dims.includes('date') ? 'utc-day' : 'et-day')
   const notice: RangeNotice | null = gate.notice
+  // `meta` describes the range the DATA covers, and chart date axes are built from it, so when the
+  // range was cut it holds the served start (the end is never moved). The range asked for stays
+  // in `notice.requested`. Otherwise a cut chart would zero-fill days that were never queried.
+  let metaSince = since
   if (gate.unservable) {
     return json({ rows: [], totals: { pageviews: 0, visits: 0 }, meta: { site, host, since, until, dimensions: dims, metric }, notice })
   }
   if (notice) {
     datetimeGeq = new Date(gate.fromMs).toISOString()
     datetimeLeq = new Date(gate.toMs).toISOString()
+    metaSince = datetimeGeq
   }
 
   const tags = site === 'all' ? Object.values(SITE_TAGS) : [SITE_TAGS[site as string]]
@@ -274,6 +280,15 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     }
   }`
 
+  // The body for a range Cloudflare refused although the constants let it through: no rows, and
+  // `meta` keeps the REQUESTED range (nothing was served, so there is no axis to shorten).
+  const rejectedBody = () => ({
+    rows: [],
+    totals: { pageviews: 0, visits: 0 },
+    meta: { site, host, since, until, dimensions: dims, metric },
+    notice: upstreamRejectedNotice('cf-rum', parseWhen(datetimeGeq), parseWhen(datetimeLeq)),
+  })
+
   let payload: any
   try {
     const res = await fetch(GQL_ENDPOINT, {
@@ -292,8 +307,10 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     // A non-2xx from the API is often an HTML error page, which would make res.json()
     // throw an opaque parse error — read it as text and report the status instead.
     if (!res.ok) {
-      const body = (await res.text().catch(() => '')).slice(0, 200)
-      return json({ error: `upstream ${res.status}`, detail: body }, 502)
+      const text = await res.text().catch(() => '')
+      // The same refusal can also arrive as a non-2xx: map it to the same chart note.
+      if (isRangeLimitText(text)) return rangeRejectedResponse(rejectedBody())
+      return json({ error: `upstream ${res.status}`, detail: text.slice(0, 200) }, 502)
     }
     payload = await res.json()
   } catch (e) {
@@ -306,9 +323,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     // chart instead of showing its raw error. Not cached (see rangeRejectedResponse), so it
     // clears as soon as the limits are corrected.
     if (isRangeLimitError(payload.errors)) {
-      return rangeRejectedResponse(
-        { rows: [], totals: { pageviews: 0, visits: 0 }, meta: { site, host, since, until, dimensions: dims, metric }, notice: upstreamRejectedNotice('cf-rum', parseWhen(datetimeGeq), parseWhen(datetimeLeq)) },
-      )
+      return rangeRejectedResponse(rejectedBody())
     }
     return json({ error: 'graphql error', detail: payload.errors }, 502)
   }
@@ -364,7 +379,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   return json({
     rows,
     totals,
-    meta: { site, host, since, until, dimensions: dims, metric },
+    meta: { site, host, since: metaSince, until, dimensions: dims, metric },
     ...(notice ? { notice } : {}),
   })
   }
