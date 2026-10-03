@@ -21,7 +21,7 @@ npm run preview     # build + wrangler pages dev (Functions + KV + D1 simulated)
 # or
 npm run dev         # Vite only (UI iteration; /api/* not served)
 
-npm test            # vitest — the sign-in gate (see Auth → Tests) plus pure-logic unit tests (day bucketing, rate math, campaign attribution, …)
+npm test            # vitest (skips .claude/**, where agent worktrees live) — the sign-in gate (see Auth → Tests) plus pure-logic unit tests (day bucketing, rate math, campaign attribution, …)
 npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vue — no vue-tsc yet)
 ```
 
@@ -324,8 +324,9 @@ geography is country-only** — sub-country region/city comes from the beacon.
 
 **Pop-up event beacons never count as page views — unless a chart opts in.** Paths under
 `/signin-prompt`, `/signin-eligible`, `/promo-first50`, `/first50-congrats`, `/upsell`,
-`/install`, `/popup-outcome`, `/return`, `/game/complete/` and the `/auth/success/<provider>/`
-status suffix are pop-up/event beacons, not screens — `/api/geo` and `/api/sites` exclude all
+`/install`, `/popup-outcome`, `/return`, `/game/complete/`, the `/auth/success/<provider>/`
+status suffix, `/auth/error`, `/auth/redirect` and the first-session beacons (`/tour`,
+`/game/first-move`, `/game/abandon`, `/welcome-signed-in`) are pop-up/event beacons, not screens — `/api/geo` and `/api/sites` exclude all
 of them from every pageview/visit total and the top-pages breakdown by default (see
 [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) `POPUP_EVENT_PREFIXES`); `/api/popups` is
 where they're counted. Each geo chart has its own **"Include event beacons"** option (off by
@@ -343,7 +344,8 @@ medium/date, plus **screen width** (`screenw`, exact pixels) and its bucketed fo
 (`screenwBucket`: `<480` / `480-767` / `768-1023` / `1024-1439` / `1440+`), plus a derived
 **path family** dimension (`pathFamily`) that groups every event-beacon prefix above into
 `page` / `signin-prompt` / `signin-eligible` / `promo-first50` / `first50-congrats` / `upsell`
-/ `install` / `popup-outcome` / `return` / `game-complete` / `auth-status`. More derived
+/ `install` / `popup-outcome` / `return` / `game-complete` / `auth-status` / `auth-error` /
+`auth-redirect` / `tour` / `game-first-move` / `game-abandon` / `welcome-signed-in`. More derived
 dimensions: **pop-up** (`popupFamily`) and **pop-up outcome** (`popupOutcome`), measured rows
 only (from the tracking activation day; pre-fix install-gap rows get no value — see
 [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) `popupDimSqlCase`, where
@@ -429,7 +431,24 @@ npm run typecheck:scripts
   mode. Parent/child maturity is enforced by the run-independent `parentAgeHours` cutoff (event
   timestamps, not the clock), so removing the gate does not weaken it. Pushes go out only on a
   threshold read, a kill-rule trip, a failed read, or a real release-health alert (parent at
-  least MIN_COHORT, outcome window elapsed, child zero).
+  least MIN_COHORT, outcome window elapsed, child zero). The threshold push names any kill
+  rule on WATCH (e.g. `no kill rule tripped, WATCH (funnel-reach), continue`).
+  **Kill rule 3 (funnel-reach)** trips on zero tagged asks. Zero tagged arrivals always trips.
+  While the app's first-session ask beacon (`/signin-prompt/tutorial`) has no rows site-wide
+  in the window, zero tagged asks from tagged arrivals with asks (the ASK_PATHS set) still shown
+  site-wide reads WATCH instead (the campaign tag only rides beacons for 30 minutes, so
+  later-session prompts go untagged). Once the tutorial ask has any site-wide row, the downgrade
+  expires and the rule reads tagged asks only. The rule's detail line says which mode applied.
+  Every morning read also prints a **first-session funnel** (arrivals → game views →
+  tour start → tour complete/skip → first move → game complete, abandon-by-%-filled buckets,
+  sign-in asks shown incl. the tutorial ask, and the signed-in welcome card), tagged counts with
+  site-wide web counts alongside over the same window (attribution start to flight end or now).
+  Arrivals are `/return/<uc>/d0` rows (one per device's first tagged visit): tagged = the
+  campaign's own uc (web and app), site-wide = any uc on web. "Tracked" is decided per beacon
+  family, since each family ships in one app release: tour + first move + abandon buckets; the
+  welcome card; the tutorial ask. A family with no rows yet reads "not yet tracked", never 0%;
+  once any member has a row, a sibling with none is a real 0. Ratios are rows over rows and never
+  use game views (page views) as a parent. Informational only — never a kill rule or a push.
 - **postflight-read** covers the wrap-up (flight end + 7 days; spend after the flight and the cap are checked first on every run) and the day-15/30/60 and
   December follow-ups, split promo vs non-promo, with the d31-60 return buckets. Day 15/30/60
   add the flight-window account cohort by access tier and promo marker (sitewide, not
@@ -461,13 +480,159 @@ npm run typecheck:scripts
   `/auth/success/<provider>` (providers `google` and `email`), so every auth-success count — the
   tagged funnel, the campaign and Overview cards (`/api/metrics`), the sign-up bound — matches the exact base
   shape, and the status split reads only the three-segment rows. A prefix match would count each
-  new-client sign-in twice. Kill rule 3's asks are unchanged.
+  new-client sign-in twice. Kill rule 3's asks now include the tutorial ask
+  (`/signin-prompt/tutorial`) alongside placement, streak and the first-50 promo.
 - **One reading per entry per day.** A reading is stored once per (campaign, ET day, entry
   kind: `morning`, `backstop`, `threshold-50`, `postflight-wrapup`, …). A same-day rerun is
   stored only when it carries new information (a complete retry of an incomplete read, a new
   pause proposal, a new release-health alert), and a threshold, cap trip or alert already
   pushed that day is not pushed again; a failed read always pushes. The database enforces it
   with a UNIQUE index (migration 0003).
+
+### Adding a new campaign
+
+Reading a new Google Ads campaign is a registry change, not a code change: no campaign id is
+written anywhere outside the registry entries below (and fixtures, tests and the routine docs; plus the legacy `RETEST_CAMPAIGN_ID` export in
+`adsRules.ts`, kept only for the external release-switchover helper: new code must not use it).
+Several campaigns can be live at once. Do these in order. The numbering matters: step 1 comes
+**before** anything is registered.
+
+**1. Every campaign's routine doc must pin its own `--campaign`.** The command lines that run
+the reads live in the routine docs under [`docs/routines/`](docs/routines/), not in the
+scheduled-task prompts: the task prompts only say "read the doc and follow it", and each task
+checks out `main` and reads the doc at run time. The retest is already pinned there
+(`--campaign 24279250691` on the `ads:morning-read` line of
+[`bsk-retest-morning-read.md`](docs/routines/bsk-retest-morning-read.md) and the
+`ads:postflight-read` line of [`bsk-retest-postflight.md`](docs/routines/bsk-retest-postflight.md),
+which serves all five stages), so registering a second campaign needs no edit to the retest's
+routine. Why every doc must pin: without `--campaign`, a read defaults only when **exactly one**
+campaign is registered (the same rule for the morning read and every post-flight stage). The
+moment a second campaign is registered, an unpinned read exits 1 ("2 campaigns have read plans
+… pass --campaign <id>") instead of reading. That is a loud failure, never a silent read of the
+wrong campaign, but it would skip a scheduled run. A new campaign's routine docs (step 3) carry
+`--campaign <its id>` from the first commit; if any doc or prompt for an existing campaign still
+lacks the pin, pin it in the same PR as the registration.
+
+**2. Register the campaign**, two edits, both in `src/lib`:
+
+- **[`campaigns.ts`](src/lib/campaigns.ts) `CAMPAIGNS`** — one `CampaignFlight`: `id` (Google
+  Ads campaign id), `label`, `ucValues` (the `utm_campaign` tags), `flightStart`
+  (+ `flightStartTimeEt` if the schedule starts mid-day), `flightEnd`, `status`, `kind`,
+  `dailyBudgetUsd` and `hardCapUsd` (both required to read it: they arm the pacing line and kill
+  rule 4), `servingHoursEt`, `notes`, and `directionalThroughDay` if the first N flight days
+  are directional. This alone puts the campaign on the dashboard and in the sync.
+- **[`adsRules.ts`](src/lib/adsRules.ts) `ADS_READ_PLANS`** — one `buildReadPlan('<id>', {...})`:
+  `channel` (`'display'`, the default, or `'search'`; see
+  [Adding an arm](#adding-an-arm-two-campaigns-at-once) below),
+  `thresholds` (the spend reads; the report page draws its ladder from them), `killRulesFrom`,
+  `placementLeakMaxShare` (display only; optional and ignored for search), `ctrFloor`, `approvedPlacements` (display only), optional `adGroupPlacementCounts`
+  (the build-spec counts the targeting diagnostic checks), `morningReadFirstEt` /
+  `morningReadLastEt` (the morning-read window), and the two fields that keep two live
+  campaigns' output apart:
+  - `reportLabel` — the short name that leads the report header and every push/bus line
+    ("`<reportLabel>` morning read …"). The retest's is `BSK retest`.
+  - `auditSlug` — the audit-trail folder, `docs/marketing/google-ads/<auditSlug>/data/<ET
+    date>.json`. The retest's is `retest`.
+  Both must be unique across the registry; `campaignRegistry.test.ts` fails if two plans share
+  one. Optional: `CAMPAIGN_DAILY_SPEND` and `CAMPAIGN_SPEND` in `campaigns.ts` (audit totals;
+  unset reads as no config spend). The Worker bundles `campaigns.ts`, so redeploy it too (see
+  [The sync Worker](#the-sync-worker-workerssync-gss-stats-sync)).
+
+**3. Create the new campaign's own routine docs and scheduled tasks**, with `--campaign <new
+id>` spelled out on the CLI command lines in the docs (never rely on a default again). A morning
+read, daily across its `morningReadFirstEt` .. `morningReadLastEt` window. Five post-flight
+tasks, one per stage, each on that stage's due date for the new flight end (the dates come from
+`postflightDueDate(stage, flightEnd)` in `adsRules.ts`: flight end + 7, 15, 30 and 60 days, and
+`december` at flight end + 62 days but no earlier than 2026-12-01). The existing routine docs
+([morning read](docs/routines/bsk-retest-morning-read.md),
+[post-flight](docs/routines/bsk-retest-postflight.md)) describe the retest's own copy of these
+tasks (its dates, its audit path, its fixed Artifact link): copy them for the new campaign, with
+its own dates, its own `--campaign` pin, the audit path above (the page builder derives it from
+the plan, so leave `--audit-file` off) and its own Artifact link. The task prompts (outside this
+repo) just point at the doc.
+
+**4. Verify with fixtures before the first live read** (no network, no credentials), for each
+campaign: `npm run -s ads:morning-read -- --fixture <file> --now <iso> --dry-run --campaign
+<id>` and the same with `ads:postflight-read -- --stage <stage> … --force`. Check the header
+and push text lead with the right `reportLabel`, and the threshold ladder shows that campaign's
+read points.
+
+**5. When the old campaign is done being read, add it to `CLOSED_CAMPAIGN_IDS`** (`adsRules.ts`).
+What it changes: `readPlanFor` refuses the campaign for **every** read, morning and post-flight
+alike ("campaign … is closed"), so no query, proposal or change can be built for it. What it
+does **not** change: the campaign's `ADS_READ_PLANS` entry stays, and a closed plan still counts
+as registered for the default, so with two plans registered an unpinned read still errors
+rather than guessing: every routine doc stays pinned with `--campaign`. Because a closed
+campaign's own pinned post-flight stages are refused too, add it only after its last scheduled
+stage (december) has run, not when the flight ends. A campaign that must never be read at all
+goes straight into `CLOSED_CAMPAIGN_IDS` instead; a new one never does.
+
+**Which campaign a read runs on.** `--campaign <id>` always wins, and must name a campaign in
+`CAMPAIGNS`: an empty value (an unset shell variable), a flag with no value, or an unknown id is
+an error listing the registered ids, never a fall-through to the default. Without the flag, one
+rule for `morning-read` and every `postflight-read` stage: the read defaults to the plan **only
+when exactly one campaign is registered in `ADS_READ_PLANS`**, closed ones counted. Nothing about
+dates, windows or status is inferred: a late or forced rerun, or an old unpinned task run after
+a newer campaign's window or due date, would otherwise silently read the wrong campaign. Zero or
+two or more registered plans: exit 1, listing the registered ids and saying to pass
+`--campaign`.
+
+While only the retest is registered, the default is the retest on every date, so every
+invocation that omits the flag (before, inside or after its morning-read window, and every
+post-flight stage) behaves as it did before the registry (checked by running every routine
+invocation against the base and the head: only `--help` differs). The retest's routine docs
+pin it anyway (step 1).
+
+### Adding an arm (two campaigns at once)
+
+A test arm is one campaign, added with the steps above. Two arms running together are two
+`CAMPAIGNS` entries and two `ADS_READ_PLANS` entries, each read on its own: its own spend,
+thresholds, cap, report label and audit folder. Fill in one block per arm:
+
+| Field | Where | Arm A example | Arm B example |
+| --- | --- | --- | --- |
+| Campaign id | `CAMPAIGNS` `id`, the `ADS_READ_PLANS` key | `<arm A id>` | `<arm B id>` |
+| utm tag | `CAMPAIGNS` `ucValues` | `sudoku_funnel_f2_apps` | `sudoku_funnel_f2_search` |
+| Channel | plan `channel` | `'display'` (the default) | `'search'` |
+| Placements | plan `approvedPlacements` | the 17 `RETEST_APPROVED_PLACEMENTS` | none (omit) |
+| Leak limit | plan `placementLeakMaxShare` | `0.1` | none (omit; ignored for search) |
+| CTR floor | plan `ctrFloor` (kill rule 2) | `0.0015` (0.15%) | `0.01` (1.0%) |
+| Start / end | `CAMPAIGNS` `flightStart` (+ `flightStartTimeEt`), `flightEnd` | start, start + 6 days | same |
+| Budget / cap | `CAMPAIGNS` `dailyBudgetUsd`, `hardCapUsd` | `$50` cap over 7 days | same |
+| Label / audit | plan `reportLabel`, `auditSlug` (unique) | e.g. `F2 apps`, `f2-apps` | e.g. `F2 search`, `f2-search` |
+| Read window | plan `morningReadFirstEt`, `morningReadLastEt` | day 2 .. end + 1 | same |
+
+Why the search CTR floor is higher: a search arm buys exact and phrase keywords on a narrow
+set, so CTR under 1% means the ad is showing on irrelevant queries or losing on ad rank. The
+display floor would effectively never trip on search.
+
+What the channel changes. A **display** arm reads placements (`group_placement_view`) and runs
+kill rule 1 (spend outside the approved list), the off-list lines, approved-vs-itemized cost and
+the placement-count, optimized-targeting and computers/TV device checks. A **search** arm has no
+placements: the sync never pulls them, kill rule 1 reads `[n/a] placement leak: n/a (search
+campaign)`, the report's Placements line and the targeting check say the same, and the device
+mix is printed without the mobile-app anomaly; instead, because a search arm is desktop-only,
+any spend on MOBILE, TABLET, CONNECTED_TV or OTHER on the closed day is flagged as an ANOMALY to
+propose to Mike (a printed flag only, from Google Ads' own device segment, never a kill rule;
+it covers that one day, not the flight so far). Never a pass, never a trip. A search plan that
+sets `approvedPlacements` or `adGroupPlacementCounts` is refused at load. Spend, impressions,
+clicks, CTR (rule 2), funnel reach (rule 3), the hard cap (rule 4) and every beacon count read
+the same for both channels.
+
+With two plans registered, **every** read must name its campaign: omitting `--campaign` exits 1
+and lists the registered ids. One line per arm, in each arm's own routine doc:
+
+```bash
+npm run -s ads:morning-read -- --campaign <arm A id>
+npm run -s ads:morning-read -- --campaign <arm B id>
+npm run -s ads:postflight-read -- --stage wrapup --campaign <arm A id>
+npm run -s ads:postflight-read -- --stage wrapup --campaign <arm B id>
+```
+
+(The same for `day15`, `day30`, `day60` and `december`; dry-run either with `--fixture <file>
+--now <iso> --dry-run` first, as in step 4.) The Worker bundles `campaigns.ts` and the read
+plans, so register any arm, then redeploy the Worker, or its cron and Refresh won't sync that
+arm; the CLI reads still work (they sync for themselves).
 
 ## Ads data freshness
 
