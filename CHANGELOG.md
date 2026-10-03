@@ -31,6 +31,10 @@ All notable changes to **gss-stats** are documented here. The format follows
   skips by stage (the same rows as tour skip, split by where), game starts by difficulty and
   tutorial completions (first run vs replay) as plain counts, "not yet tracked" until the
   first v1.97.0 row.
+- **The release before/after panel no longer goes blank on a release day.** It now compares the
+  newest release whose first full ET day after the release date is complete (the release day
+  itself is left out of the after side) and names it; a newer release still waiting shows as a
+  one-line note beside the version.
 - **Return visits now leave out pre-launch test visits, like the arrivals tile.** Returns from a
   campaign's tagged link count only from its attribution start (for the retest, 12:00 ET on its
   first day), so launch-day test rows no longer inflate the return buckets. The ads routine's
