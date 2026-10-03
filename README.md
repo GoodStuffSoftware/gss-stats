@@ -101,6 +101,22 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   regression from this app's own code. Resizing a chart currently needs a mouse or touch;
   every other chart action (edit, remove, zoom, duplicate, set-as-default) has a real
   button and works from the keyboard.
+- **Sparkline display** — a card's count or money item can be shown as a **Sparkline**: the
+  current number, with a small per-day line beside it. The server counts the same metric per ET
+  day from a daily twin of its fact
+  ([`src/lib/metrics/series.ts`](src/lib/metrics/series.ts); at most 92 days, oldest first) and
+  [`MetricItem.vue`](src/components/metrics/MetricItem.vue) draws it
+  ([`sparkline.ts`](src/lib/metrics/sparkline.ts)). It reads the page range or a campaign's
+  attribution window (not "today so far"), never a ratio, rate or cost; the editor greys the
+  option with the reason otherwise. A day the metric was not measured (before a go-live, or an
+  unsynced spend day) is a break in the line, never a zero; a measured day with no rows is 0. A
+  money series rounds each day to cents, so its points can differ from the tile's total by a cent
+  or two. Days only: no hour, place or device split (a `/return` or game-complete row gets no
+  more than the day's count and the kind the tile already reads). Each series is one extra
+  statement per distinct twin read (items that share a window share it) against the 40-statement
+  batch budget ([`docs/capacity.md`](docs/capacity.md) §9). The layout version is now 14 (a save
+  guard only; page navigation holds 13): the first save from this build backs the stored v13
+  layout up once, and a tab still on the old build is told to reload; nothing is rewritten.
 - **Full width** — there's no centred max-width column: the header (a strip across the window),
   the filter bar and the chart grid span the window with a 16px gutter (12px on a phone), so a
   wide screen shows wider charts, and the pinned filter bar (below) spans it too.
@@ -1028,7 +1044,9 @@ of the migrated layout first copies the layout that was stored until then to
 stays). The backup is named after the version that was **stored**, not the one before the new
 code: a layout still stored at v8 when v11 ships is backed up as `backup:v8`, one stored at v10
 as `backup:v10`. Production is stored at v12 when layout version 13 (page navigation) ships, so
-its first v13 save writes `backup:v12`. A tab still
+its first v13 save writes `backup:v12`. Layout version 14 (sparklines) is a save-guard bump
+only: its first save over a stored v13 writes `backup:v13`, and rolling the code back past it
+needs `backup:v13` restored (same steps below, with that key). A tab still
 running older code gets `409` ("This tab is out of date, reload") instead of overwriting a
 newer layout.
 

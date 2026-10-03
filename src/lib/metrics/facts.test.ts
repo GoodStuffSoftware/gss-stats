@@ -11,6 +11,7 @@ import { CAMPAIGNS, campaignAttributionClause, campaignById, etMidnightUtcMs, OR
 import * as campaigns from '../campaigns'
 import { SPEND_SUMMARY_SQL } from '../adsStore'
 import { etMidnightMs } from './instrumentation'
+import { etDateSql } from '../etTime'
 import { SPLIT_REFUSED_PATH_PATTERNS } from '../splitGuard'
 
 const NOW = Date.parse('2026-09-26T21:00:00Z')
@@ -29,6 +30,13 @@ const SAMPLE_PARAMS: Record<FactId, FactParams[]> = {
   adsSpend: [{}],
   adsCoverage: [{}],
   adsLastSync: [{}],
+  campaignDaily: CAMPAIGNS.map((c) => ({ campaignId: c.id })),
+  bskRangeDaily: [{ since: '2026-09-20', until: '2026-09-26' }],
+  popupRangeDaily: [
+    { since: '2026-09-20', until: '2026-09-26', sites: [] },
+    { since: '2026-09-20T00:00:00Z', until: '2026-09-26T12:00:00Z', sites: ['bestsudoku', 'bestsudoku-web'] },
+  ],
+  adsSpendDaily: [{}],
 }
 const ALL = (Object.keys(FACTS) as FactId[]).flatMap((id) => SAMPLE_PARAMS[id].map((p) => ({ id, p, stmt: buildFact({ id, params: p }, NOW) })))
 
@@ -81,6 +89,7 @@ describe('every fact is an anonymous aggregate', () => {
       if (isBandCase(item)) continue // a segment or day index, never a raw ts
       if (item === '(ts >= ?)' || item === '0') continue // a boolean split (install fix, upsell fix, release side) or no segments
       if (item === COUNTRY_BUCKET_SQL) continue // US / CA / other, literal outputs only
+      if (item === etDateSql()) continue // the ET DAY (YYYY-MM-DD) only: never an hour, a minute or a raw ts
       if (item === guardedCountryBucket().sql) continue // the same, or '' on a split-refused row
       expect(item, `select item "${item}"`).toMatch(/^[a-z_]+$/)
       expect(['ts', 'id']).not.toContain(item)
@@ -89,6 +98,26 @@ describe('every fact is an anonymous aggregate', () => {
 
   it('binds are only numbers and strings (validated values, never SQL)', () => {
     for (const { stmt } of ALL) for (const b of stmt.binds) expect(['number', 'string']).toContain(typeof b)
+  })
+  it('the daily twins group by ET day and nothing finer: no hour, minute or raw ts anywhere in the output', () => {
+    const twins = ALL.filter((x) => ['campaignDaily', 'bskRangeDaily', 'popupRangeDaily'].includes(x.id))
+    expect(twins.length).toBeGreaterThan(0)
+    for (const { stmt } of twins) {
+      expect(selectItems(stmt.sql)[0]).toBe(etDateSql())
+      expect(stmt.sql).toMatch(/GROUP BY dt, path/)
+      const out = stmt.sql.slice(0, stmt.sql.indexOf(' FROM ')) + stmt.sql.slice(stmt.sql.indexOf(' GROUP BY '))
+      expect(out.replace(etDateSql(), '')).not.toMatch(/strftime|%H|hour|minute|\bts\b|\bdevice\b|\bcity\b|\bregion\b|\bcountry\b|\bscreenw\b|\bos\b|\bbrowser\b/i)
+    }
+    // The visitor kind is the plain column, exactly as the scalar facts read it (a series must sum to
+    // its tile): no CASE and no extra bind in the daily statements, and the output columns are the
+    // ET day, path, that visitor kind, the campaign tag and the count, nothing else.
+    for (const { id, stmt } of twins) {
+      expect(stmt.sql).not.toMatch(/CASE/)
+      expect(stmt.sql).not.toMatch(/hour|%H/i)
+      const cols = selectItems(stmt.sql).map((i) => i.replace(/\s+AS\s+[a-z_]+$/i, ''))
+      expect(cols, id).toEqual(id === 'popupRangeDaily' ? [etDateSql(), 'path', 'COUNT(*)'] : [etDateSql(), 'path', 'visitor', 'campaign', 'COUNT(*)'])
+      expect(stmt.sql).toMatch(id === 'popupRangeDaily' ? /GROUP BY dt, path$/ : /GROUP BY dt, path, v, campaign$/)
+    }
   })
   it('the band-CASE check refuses a raw ts, any other column and any other expression inside a CASE', () => {
     expect(isBandCase('CASE WHEN ts >= ? AND ts < ? THEN 0 WHEN ts >= ? THEN 1 ELSE -1 END')).toBe(true)
