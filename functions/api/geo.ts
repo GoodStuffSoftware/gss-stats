@@ -367,7 +367,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
 
   // Counts-only rule (src/lib/splitGuard.ts): a query that maps rows (points mode), groups them
   // by an hour/place/device dimension (the UTC `date` included), or drills into one leaves
-  // return, game-start, completion, tutorial-completion and tour-exit rows out entirely. Applied
+  // return, game-start, completion, tutorial-completion, tour-skip and tour-exit rows out entirely. Applied
   // in all three branches below, and independent of every toggle (event beacons, own visits,
   // known traffic). The patterns are SQL literals, so the guard adds no binds.
   // Every other query still counts those rows, so its window counts them over whole ET days

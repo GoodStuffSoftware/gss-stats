@@ -42,7 +42,7 @@ export function taggedRowsQuery(campaign: CampaignFlight, upsellFixAtMs: number 
 /** Site-wide pop-up/event rows on the web site since `sinceMs`, by (UTC hour, path). NOT
  * campaign-attributed — outcome beacons fire in later, untagged sessions. The rows the
  * counts-only rule protects (src/lib/splitGuard.ts: returns, game starts and completions,
- * tutorial completions, tour exits) are left out (their patterns are SQL literals, so they cost
+ * tutorial completions, tour skips and exits) are left out (their patterns are SQL literals, so they cost
  * no binds): this read is by hour, and none of them is a pop-up event summarizeSiteEvents counts. */
 export function siteEventsQuery(sinceMs: number, fixedAtMs: number | null = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS): Query {
   const inc = popupIncludeClause()

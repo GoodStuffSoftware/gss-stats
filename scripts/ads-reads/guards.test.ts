@@ -199,6 +199,10 @@ describe('beacon reads are read-only and apply the shared exclusions', () => {
       ['bestsudoku-web', since, '/tour/exit-at/hub', 'new'],
       ['bestsudoku-web', since, '/game/start/easy', 'new'],
       ['bestsudoku-web', since + 5, '/game/start/easy', 'returning'],
+      ['bestsudoku-web', since, '/tour/skip', 'new'], // a count-only tour skip: still a per-path total here
+      ['bestsudoku-web', since + 7, '/tour/skip', 'returning'],
+      ['bestsudoku-web', since, '/tour/skipped', 'returning'], // look-alike, not a first-session path
+      ['bestsudoku-app', since, '/tour/skip', 'new'], // another site
       ['bestsudoku-web', since, '/game/tutorial-complete/replay', 'returning'],
       ['bestsudoku-web', since, '/game/startup', 'returning'], // look-alike, not a first-session path
       ['bestsudoku-web', since, '/tour/exit-at', 'returning'], // no stage: not a first-session path
@@ -217,6 +221,7 @@ describe('beacon reads are read-only and apply the shared exclusions', () => {
     expect(by).toEqual({
       '/game': 2,
       '/tour/start': 1,
+      '/tour/skip': 2,
       '/game/abandon/1-25': 1,
       '/signin-prompt/tutorial': 1,
       '/welcome-signed-in/shown': 1,

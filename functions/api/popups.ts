@@ -125,7 +125,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   w.push(inc.sql)
   b.push(...inc.binds)
   // Counts-only rule (src/lib/splitGuard.ts): this query buckets by UTC hour, so the rows the rule
-  // protects (returns, game starts and completions, tutorial completions, tour exits) stay out of
+  // protects (returns, game starts and completions, tutorial completions, tour skips and exits) stay out of
   // it. None is a pop-up event (lib/popupEvents.ts classifyPopupPath), so no count changes.
   refusedPathExcludeClause(w, b)
 
