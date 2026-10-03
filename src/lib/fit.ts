@@ -56,15 +56,28 @@ export function fitRows(px: number, rowHeight = GRID_ROW_HEIGHT, margin = GRID_M
  * the bottom border. The card itself stays `height: 100%` of its grid slot, so its own height is
  * never the measure (a slot taller than the content would never shrink). The children are laid out
  * top-down in a column, so the last one's bottom edge is the end of the content. Absolutely
- * positioned children (a note's floating menu) are not content. */
+ * positioned children (a note's floating menu) are not content.
+ *
+ * Measured with the offset box (offsetTop/offsetHeight), which ignores CSS transforms:
+ * getBoundingClientRect would include the scale ChartCard's zoom-out animation puts on the card and
+ * report an inflated height mid-transition. A child's offsetTop is relative to its offsetParent:
+ * the card itself when it is `position: relative` (the animation sets that), otherwise the grid
+ * item the card also sits in, so the card's own offsetTop is subtracted in that case. */
 export function naturalCardHeight(card: HTMLElement): number {
-  const top = card.getBoundingClientRect().top
-  let bottom = top
+  const border = card.clientTop || 0
+  let bottom = 0
   for (const child of Array.from(card.children) as HTMLElement[]) {
     const pos = getComputedStyle(child).position
     if (pos === 'absolute' || pos === 'fixed') continue
-    bottom = Math.max(bottom, child.getBoundingClientRect().bottom)
+    const top = child.offsetParent === card ? child.offsetTop + border : child.offsetTop - card.offsetTop
+    bottom = Math.max(bottom, top + child.offsetHeight)
   }
-  const border = parseFloat(getComputedStyle(card).borderBottomWidth) || 0
-  return Math.ceil(bottom - top + border)
+  const borderBottom = parseFloat(getComputedStyle(card).borderBottomWidth) || 0
+  return Math.ceil(bottom + borderBottom)
+}
+
+/** Is the card laid out (connected, with a box)? A `display:none` or detached card has no
+ * geometry, which must not be read as "empty content" (it would fit to the minimum). */
+export function isLaidOut(card: HTMLElement): boolean {
+  return card.isConnected && card.offsetWidth > 0 && card.offsetHeight > 0
 }
