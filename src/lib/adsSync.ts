@@ -782,10 +782,17 @@ export function setBuildSha(sha: string | null | undefined): void {
   buildSha = sha && /^[0-9a-f]{7,40}$/.test(sha) ? sha : null
 }
 /** FNV-1a of the campaign definitions the sync uses, over every field it writes to ads_campaigns
- * (review I1): the dashboard compares it with its own and flags a Worker built from other ones. */
+ * (review I1): the dashboard compares it with its own and flags a Worker built from other ones.
+ * A non-display campaign's channel (channelOf) is appended to its tuple, since it decides
+ * whether the sync pulls placements; a display-only config hashes exactly as before. */
 export function campaignsConfigHash(campaigns: readonly CampaignFlight[] = CAMPAIGNS): string {
   const s = JSON.stringify(
-    campaigns.map((c) => [c.id, c.label, c.kind, c.flightStart, c.flightStartTimeEt ?? null, c.flightEnd, c.status, c.ucValues, c.dailyBudgetUsd ?? null, c.hardCapUsd ?? null, c.measurement ?? null]),
+    campaigns.map((c) => {
+      const t: unknown[] = [c.id, c.label, c.kind, c.flightStart, c.flightStartTimeEt ?? null, c.flightEnd, c.status, c.ucValues, c.dailyBudgetUsd ?? null, c.hardCapUsd ?? null, c.measurement ?? null]
+      const channel = channelOf(c.id)
+      if (channel !== 'display') t.push(channel)
+      return t
+    }),
   )
   let h = 0x811c9dc5
   for (let i = 0; i < s.length; i++) {

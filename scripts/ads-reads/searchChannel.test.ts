@@ -5,6 +5,7 @@
 // display campaign's do. With two plans registered the CLI must refuse to guess the campaign.
 // Fixture only: the two arm ids below are made up and registered at runtime, never in the
 // registry files. No network, no credentials.
+import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -21,6 +22,7 @@ import {
   approvedPlacementsFor,
   buildReadPlan,
   channelOf,
+  decideAt100,
   evaluateKillRules,
   type AdsReadPlan,
   type KillRuleInput,
@@ -300,5 +302,93 @@ describe('the CLI with two arms registered (display + search)', () => {
       for (const stage of POSTFLIGHT_STAGES) expect(resolveCampaignId({ campaign: id }, 'postflight', now, stage)).toBe(id)
     }
     expect(approvedPlacementsFor(APPS)).toBe(RETEST_APPROVED_PLACEMENTS)
+  })
+  it('a repeated --campaign exits the process non-zero and names both values (no last-wins)', () => {
+    const tsx = path.join(here, '..', '..', 'node_modules', 'tsx', 'dist', 'cli.mjs')
+    const r = spawnSync(process.execPath, [tsx, path.join(here, 'morning-read.ts'), '--campaign', RETEST, '--campaign', '99900000022', '--dry-run'], { encoding: 'utf8', stdio: 'pipe' })
+    expect(r.status).toBe(1)
+    expect(r.stderr).toContain(`--campaign was given 2 times ("${RETEST}" and "99900000022"); pass it once`)
+    expect(r.stdout).toBe('')
+  }, 30_000)
+})
+
+describe('the $100 decision for a search arm', () => {
+  const cases = [
+    { name: 'two-plus (exact)', input: { signUpsAtMost: 3, asks: 20, accepts: 9, exact: true }, row: 'two-plus' },
+    { name: 'two-plus (bound)', input: { signUpsAtMost: 3, asks: 20, accepts: 9 }, row: 'two-plus' },
+    { name: 'one (exact)', input: { signUpsAtMost: 1, asks: 20, accepts: 9, exact: true }, row: 'one' },
+    { name: 'one (bound)', input: { signUpsAtMost: 1, asks: 20, accepts: 9 }, row: 'one' },
+    { name: 'zero-rarely-shown', input: { signUpsAtMost: 0, asks: MIN_COHORT - 1, accepts: 0 }, row: 'zero-rarely-shown' },
+    { name: 'zero-declined', input: { signUpsAtMost: 0, asks: 12, accepts: 0 }, row: 'zero-declined' },
+    { name: 'zero-accepted-not-completed', input: { signUpsAtMost: 0, asks: 12, accepts: 2 }, row: 'zero-accepted-not-completed' },
+  ] as const
+  for (const c of cases) {
+    it(`${c.name}: no display advice and no O3`, () => {
+      const d = decideAt100({ ...c.input, channel: 'search' })
+      expect(d.row).toBe(c.row)
+      expect(d.reading).not.toMatch(/display/i)
+      expect(d.next).not.toMatch(/display/i)
+      expect(d.reading).not.toContain('O3')
+      expect(d.next).not.toContain('O3')
+    })
+  }
+  it('compares the search arm against the other flight-2 arm where display was told to start O3', () => {
+    for (const input of [{ signUpsAtMost: 3, asks: 20, accepts: 9, exact: true }, { signUpsAtMost: 3, asks: 20, accepts: 9 }, { signUpsAtMost: 0, asks: 12, accepts: 0 }]) {
+      expect(decideAt100({ ...input, channel: 'search' }).next).toContain('on spend per tagged completer, per the pre-registered flight-2 read')
+      // Display (explicit or default) keeps its O3 advice.
+      expect(decideAt100({ ...input, channel: 'display' })).toEqual(decideAt100(input))
+      expect(decideAt100(input).next).toContain('O3 (Search)')
+    }
+  })
+})
+
+describe('the search arm desktop-only device flag', () => {
+  const base: DiagnosticsSection = {
+    spendThroughEt: '2026-10-05',
+    hourly: null,
+    geo: null,
+    devices: [
+      { device: 'DESKTOP', impressions: 900, clicks: 30, ctr: 0.033, cost: 6.5 },
+      { device: 'MOBILE', impressions: 40, clicks: 2, ctr: 0.05, cost: 0.42 },
+      { device: 'TABLET', impressions: 3, clicks: 0, ctr: 0, cost: 0 },
+      { device: 'CONNECTED_TV', impressions: 1, clicks: 0, ctr: 0, cost: 0.01 },
+      { device: 'OTHER', impressions: 0, clicks: 0, ctr: 0, cost: 0.02 },
+    ],
+    targeting: null,
+    recommendations: null,
+    countryCounts: null,
+    accountCrossCheck: null,
+    errors: [],
+  }
+  it('flags closed-day spend on MOBILE, CONNECTED_TV and OTHER, not zero-cost TABLET or DESKTOP', () => {
+    const lines = diagnosticsLines(base, 'search')
+    const line = (dev: string) => lines.find((l) => l.startsWith(`  device: ${dev} `))!
+    expect(line('MOBILE')).toContain(" — ANOMALY: yesterday's spend on MOBILE: $0.42; arm is desktop-only (closed day only, not the flight so far), propose to Mike")
+    expect(line('CONNECTED_TV')).toContain("yesterday's spend on CONNECTED_TV")
+    expect(line('OTHER')).toContain("yesterday's spend on OTHER")
+    expect(line('TABLET')).not.toMatch(/ANOMALY/)
+    expect(line('DESKTOP')).not.toMatch(/ANOMALY/)
+    const withTablet = diagnosticsLines({ ...base, devices: [{ device: 'TABLET', impressions: 3, clicks: 1, ctr: 0.33, cost: 0.05 }] }, 'search')
+    expect(withTablet.join('\n')).toContain("yesterday's spend on TABLET: $0.05; arm is desktop-only")
+  })
+  it('never adds the search flag to a display read', () => {
+    expect(diagnosticsLines(base).join('\n')).not.toMatch(/desktop-only/)
+  })
+  it('is a printed flag only: the search morning read never trips or proposes on it, and skips the targeting query', async () => {
+    register()
+    const s = countedDeps(fixtureFor(SEARCH, SEARCH_UC, { noPlacements: true }), false)
+    let targetingCalls = 0
+    s.deps.ads!.devices = async () => [{ device: 'MOBILE', impressions: 40, clicks: 2, ctr: 0.05, cost: 0.42 }]
+    s.deps.ads!.targeting = async () => {
+      targetingCalls++
+      return []
+    }
+    const r = await runMorningRead(s.deps, optsFor(SEARCH))
+    expect(targetingCalls).toBe(0)
+    expect(r.diagnostics.targeting).toBeNull()
+    expect(r.diagnostics.devices).toHaveLength(1)
+    expect(r.thresholdRead!.kill.tripped).toEqual([])
+    expect(r.thresholdRead!.kill.proposal).toBe('CONTINUE')
+    expect(formatMorningReport(r)).toContain("yesterday's spend on MOBILE: $0.42")
   })
 })

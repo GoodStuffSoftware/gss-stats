@@ -79,8 +79,9 @@ function rulesSummary(rules: RuleResult[] | null): { text: string; tone: 'trip' 
   const clear = rules.filter((x) => x.status === 'clear').length
   const noData = rules.filter((x) => x.status === 'no-data').length
   const na = rules.filter((x) => x.status === 'n/a').length
-  if (!clear && !noData) return { text: `not armed${na ? `, ${na} n/a` : ''}`, tone: 'muted' }
-  return { text: `${clear} clear${noData ? `, ${noData} no data` : ''}${na ? `, ${na} n/a` : ''}`, tone: 'clear' }
+  const watch = rules.filter((x) => x.status === 'watch').length
+  if (!clear && !noData && !watch) return { text: `not armed${na ? `, ${na} n/a` : ''}`, tone: 'muted' }
+  return { text: `${clear} clear${watch ? `, ${watch} watch` : ''}${noData ? `, ${noData} no data` : ''}${na ? `, ${na} n/a` : ''}`, tone: 'clear' }
 }
 function spendSource(c: AdsReadingsCampaign): string {
   if (c.spend.source === 'google-ads-api') return 'Google Ads API'
