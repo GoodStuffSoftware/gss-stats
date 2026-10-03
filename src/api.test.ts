@@ -106,6 +106,8 @@ describe('saveConfig results the save label is built from', () => {
   it('a 503 (the server could not write its layout backup, so it refused the save) is a failed save', async () => {
     stubFetch(new Response('{"error":"backup-failed"}', { status: 503 }), new Response('{}', { status: 200 }))
     await expect(saveConfig(cfg)).resolves.toBe(false)
+    expect(calls).toHaveLength(1) // the 503 itself mapped to false, not a thrown fetch
+    expect(calls[0].init?.method).toBe('PUT')
   })
   it('a 409 is "stale", not a failure', async () => {
     stubFetch(new Response('{"error":"stale"}', { status: 409 }), new Response('{}', { status: 200 }))

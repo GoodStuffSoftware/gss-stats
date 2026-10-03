@@ -166,7 +166,7 @@ describe('the v12 → v13 upgrade (page navigation)', () => {
     const v12 = JSON.stringify(cfg(12, 'live v12 layout'))
     const { kv, store, puts } = fakeKv({ 'dashboard:default': v12 })
     expect((await put(kv, cfg(13, 'first v13'))).status).toBe(200)
-    expect(puts).toEqual(['dashboard:default:backup:v12', PREV_KEY, DAY, 'dashboard:default'])
+    expect(puts).toEqual(['dashboard:default:backup:v12', DAY, PREV_KEY, 'dashboard:default'])
     expect(store.get('dashboard:default:backup:v12')).toBe(v12)
     await put(kv, cfg(13, 'second v13'))
     expect(store.get('dashboard:default:backup:v12')).toBe(v12) // never overwritten
@@ -202,7 +202,7 @@ describe('the v13 → v14 upgrade (inline sparklines: a guard bump, no layout re
     const v13 = JSON.stringify(cfg(13, 'live v13 layout'))
     const { kv, store, puts } = fakeKv({ 'dashboard:default': v13 })
     expect((await put(kv, cfg(14, 'first v14'))).status).toBe(200)
-    expect(puts).toEqual(['dashboard:default:backup:v13', PREV_KEY, DAY, 'dashboard:default'])
+    expect(puts).toEqual(['dashboard:default:backup:v13', DAY, PREV_KEY, 'dashboard:default'])
     expect(store.get('dashboard:default:backup:v13')).toBe(v13)
     expect(store.get(backupKeyFor(13))).toBe(v13)
     await put(kv, cfg(14, 'second v14'))
@@ -232,7 +232,7 @@ describe('the v14 → v15 upgrade (default trend charts on dateEt)', () => {
     const v14 = JSON.stringify(cfg(14, 'live v14 layout'))
     const { kv, store, puts } = fakeKv({ 'dashboard:default': v14 })
     expect((await put(kv, cfg(15, 'first v15'))).status).toBe(200)
-    expect(puts).toEqual(['dashboard:default:backup:v14', PREV_KEY, DAY, 'dashboard:default'])
+    expect(puts).toEqual(['dashboard:default:backup:v14', DAY, PREV_KEY, 'dashboard:default'])
     expect(store.get(backupKeyFor(14))).toBe(v14)
     await put(kv, cfg(15, 'second v15'))
     expect(store.get('dashboard:default:backup:v14')).toBe(v14) // never overwritten
@@ -265,12 +265,14 @@ describe('rolling and daily backups before a changing save', () => {
     expect(JSON.parse(store.get('dashboard:default')!).pages[0].tag).toBe('edit')
   })
 
-  it('writes nothing at all (no :prev, no :day:, no layout) when the save is identical to what is stored', async () => {
+  it('takes no copy (no :prev, no :day:) when the save is identical to what is stored, but still writes the layout', async () => {
+    // The read can be stale at another Cloudflare location, so "identical" is not proof the key
+    // already holds this body: the layout is written anyway, only the copies are skipped.
     const { kv, store, puts } = fakeKv({ 'dashboard:default': real, [PREV_KEY]: 'older' })
     const res = await put(kv, JSON.parse(real))
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ ok: true })
-    expect(puts).toEqual([])
+    expect(puts).toEqual(['dashboard:default'])
     expect(store.get(PREV_KEY)).toBe('older')
     expect(store.has(DAY)).toBe(false)
   })
@@ -291,7 +293,7 @@ describe('rolling and daily backups before a changing save', () => {
   it('the first changing save of an ET day snapshots the stored value to :day:<date> with a 30-day TTL, once', async () => {
     const { kv, store, puts, options } = fakeKv({ 'dashboard:default': real })
     await put(kv, cfg(CONFIG_VERSION, 'first edit'))
-    expect(puts).toEqual([PREV_KEY, DAY, 'dashboard:default'])
+    expect(puts).toEqual([DAY, PREV_KEY, 'dashboard:default'])
     expect(DAY).toBe('dashboard:default:day:2026-10-03')
     expect(store.get(DAY)).toBe(real)
     expect(options.get(DAY)).toEqual({ expirationTtl: 30 * 24 * 60 * 60 })
@@ -314,7 +316,7 @@ describe('rolling and daily backups before a changing save', () => {
     vi.setSystemTime(Date.parse('2026-10-04T04:30:00Z')) // 2026-10-04 00:30 EDT
     puts.length = 0
     await put(kv, cfg(CONFIG_VERSION, 'after midnight'))
-    expect(puts).toEqual([PREV_KEY, dayKeyFor('2026-10-04'), 'dashboard:default'])
+    expect(puts).toEqual([dayKeyFor('2026-10-04'), PREV_KEY, 'dashboard:default'])
     expect(JSON.parse(store.get(dayKeyFor('2026-10-04'))!).pages[0].tag).toBe('late evening')
   })
 
@@ -322,13 +324,32 @@ describe('rolling and daily backups before a changing save', () => {
     vi.setSystemTime(Date.parse('2026-12-15T04:30:00Z')) // 2026-12-14 23:30 EST
     const { kv, puts } = fakeKv({ 'dashboard:default': real })
     await put(kv, cfg(CONFIG_VERSION, 'edit'))
-    expect(puts).toEqual([PREV_KEY, dayKeyFor('2026-12-14'), 'dashboard:default'])
+    expect(puts).toEqual([dayKeyFor('2026-12-14'), PREV_KEY, 'dashboard:default'])
   })
 
   it('an identical save never takes the daily snapshot', async () => {
     const { kv, puts } = fakeKv({ 'dashboard:default': real })
     await put(kv, JSON.parse(real))
-    expect(puts).toEqual([])
+    expect(puts).toEqual(['dashboard:default'])
+  })
+
+  it('a stale cross-location read that sees the body as identical still lands the save', async () => {
+    // Location B still reads the old layout G after location A stored A; a revert to G served by
+    // B must write G, not answer 200 and leave A in place.
+    const store = new Map([['dashboard:default', 'A-at-the-origin']])
+    const kv = {
+      get: async (k: string) => (k === 'dashboard:default' ? real : store.get(k) ?? null),
+      put: async (k: string, v: string) => void store.set(k, v),
+    }
+    expect((await put(kv, JSON.parse(real))).status).toBe(200)
+    expect(store.get('dashboard:default')).toBe(real)
+  })
+
+  it('an empty stored value is treated as nothing stored, as the version guards do', async () => {
+    const { kv, store, puts } = fakeKv({ 'dashboard:default': '', [PREV_KEY]: 'kept' })
+    expect((await put(kv, cfg(CONFIG_VERSION, 'edit'))).status).toBe(200)
+    expect(puts).toEqual(['dashboard:default'])
+    expect(store.get(PREV_KEY)).toBe('kept')
   })
 
   it('defaults saved over the owner layout, then several more edits: :day: still holds the owner layout', async () => {
@@ -340,11 +361,11 @@ describe('rolling and daily backups before a changing save', () => {
     expect(store.get(DAY)).toBe(real) // recoverable
   })
 
-  it('on a version bump the version backup still comes first, then :prev and :day:, then the layout', async () => {
+  it('on a version bump the version backup still comes first, then :day: and :prev, then the layout', async () => {
     const older = JSON.stringify(cfg(CONFIG_VERSION - 1, 'older version'))
     const { kv, store, puts } = fakeKv({ 'dashboard:default': older })
     expect((await put(kv, cfg(CONFIG_VERSION, 'migrated'))).status).toBe(200)
-    expect(puts).toEqual([backupKeyFor(CONFIG_VERSION - 1), PREV_KEY, DAY, 'dashboard:default'])
+    expect(puts).toEqual([backupKeyFor(CONFIG_VERSION - 1), DAY, PREV_KEY, 'dashboard:default'])
     expect(store.get(backupKeyFor(CONFIG_VERSION - 1))).toBe(older)
     expect(store.get(PREV_KEY)).toBe(older)
     expect(store.get(DAY)).toBe(older)
@@ -384,15 +405,47 @@ describe('rolling and daily backups before a changing save', () => {
       [':day: read throws', (op, k) => op === 'get' && k.includes(':day:')],
     ]
     for (const [name, fail] of cases) {
-      it(name, async () => {
-        const { kv, store, puts } = failingKv(fail, { 'dashboard:default': real })
+      it(`${name}: layout and :prev both untouched`, async () => {
+        const { kv, store, puts } = failingKv(fail, { 'dashboard:default': real, [PREV_KEY]: 'the good one' })
         const res = await put(kv, cfg(CONFIG_VERSION, 'would overwrite'))
         expect(res.status).toBe(503)
         expect(res.ok).toBe(false)
         expect(await res.json()).toMatchObject({ error: 'backup-failed' })
         expect(store.get('dashboard:default')).toBe(real)
         expect(puts).not.toContain('dashboard:default')
+        // A refused save must not rotate :prev either: the owner sees "Save failed" and may
+        // reasonably count on :prev still holding the layout from before the last saved change.
+        expect(store.get(PREV_KEY)).toBe('the good one')
       })
     }
+
+    it(':prev write throws after the day copy landed: the day copy holds the unchanged stored layout', async () => {
+      const { kv, store } = failingKv((op, k) => op === 'put' && k === PREV_KEY, { 'dashboard:default': real })
+      expect((await put(kv, cfg(CONFIG_VERSION, 'would overwrite'))).status).toBe(503)
+      expect(store.get(DAY)).toBe(real)
+      expect(store.get('dashboard:default')).toBe(real)
+    })
+
+    it('on a version bump, :prev failing leaves the version backup (correct content) and the layout as it was; a retry succeeds', async () => {
+      const older = JSON.stringify(cfg(CONFIG_VERSION - 1, 'older version'))
+      let failPrev = true
+      const { kv, store, puts } = failingKv((op, k) => failPrev && op === 'put' && k === PREV_KEY, { 'dashboard:default': older })
+      expect((await put(kv, cfg(CONFIG_VERSION, 'migrated'))).status).toBe(503)
+      expect(store.get('dashboard:default')).toBe(older)
+      expect(store.get(backupKeyFor(CONFIG_VERSION - 1))).toBe(older)
+      failPrev = false
+      puts.length = 0
+      expect((await put(kv, cfg(CONFIG_VERSION, 'migrated'))).status).toBe(200)
+      expect(puts).toEqual([PREV_KEY, 'dashboard:default']) // version backup and day copy already in place
+      expect(store.get(PREV_KEY)).toBe(older)
+    })
+
+    it('the layout write itself throwing fails the request; the copies already written equal the unchanged layout', async () => {
+      const { kv, store } = failingKv((op, k) => op === 'put' && k === 'dashboard:default', { 'dashboard:default': real })
+      await expect(put(kv, cfg(CONFIG_VERSION, 'would overwrite'))).rejects.toThrow()
+      expect(store.get('dashboard:default')).toBe(real)
+      expect(store.get(PREV_KEY)).toBe(real)
+      expect(store.get(DAY)).toBe(real)
+    })
   })
 })
