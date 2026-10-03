@@ -26,7 +26,7 @@ import { addEtDays } from '../lib/overview'
 import type { MetricsContext, MetricsRequestBody, MetricsResponseBody, MetricValue } from '../lib/metrics/types'
 import { MAX_REQUESTS } from '../lib/metrics/validate'
 import type { MetricRequestSpec } from '../lib/metrics/scope'
-import { isStale, useReturnRefresh } from './useReturnRefresh'
+import { isInFlight, isStale, useReturnRefresh } from './useReturnRefresh'
 
 export type { MetricRequestSpec }
 
@@ -144,6 +144,9 @@ interface CacheEntry {
   loadedAt: ShallowRef<number | null>
   /** When the last response (ok or failed) settled, for the return-refetch throttle. */
   settledAt: number | null
+  /** When the fetch now queued or in flight was queued (epoch ms): past RETURN_INFLIGHT_MAX_MS it
+   * counts as hung and a return may refetch the entry anyway. */
+  queuedAt: number
   /** The fetch now queued or in flight is a background return-refetch: a failure keeps the value
    * already on screen instead of replacing it with an error (a tab waking before its network is
    * back must not flip every card to "load failed"). */
@@ -247,9 +250,17 @@ async function sendChunk(batch: Batch, reqKeys: string[]) {
     const now = Date.now()
     for (const [reqKey, entry] of ownedEntries()) {
       const result = safeResultLookup(json.results, reqKey)
-      entry.value.value = result
-      entry.status = result ? 'ok' : 'error'
-      if (result) entry.loadedAt.value = now
+      const shown = entry.value.value
+      if (entry.background && (!result || result.status === 'error') && shown && shown.status !== 'error') {
+        // A return refetch the server answered with a per-fact error (a 200 carrying
+        // `fact-failed`, e.g. a D1 hiccup) or no result for the key: keep the last good value,
+        // exactly as a rejected fetch does. A foreground or first load still shows the error.
+        entry.status = 'ok'
+      } else {
+        entry.value.value = result
+        entry.status = result ? 'ok' : 'error'
+        if (result) entry.loadedAt.value = now
+      }
       entry.settledAt = now
       entry.background = false
       entry.inflight = undefined
@@ -272,6 +283,7 @@ async function sendChunk(batch: Batch, reqKeys: string[]) {
 
 function queueFetch(entry: CacheEntry, ctxKey: string, context: MetricsContext | undefined, reqKey: string, fresh: boolean, background = false) {
   entry.status = 'pending'
+  entry.queuedAt = Date.now()
   entry.background = background
   const batch = ensureBatch(ctxKey, context, fresh)
   batch.keys.add(reqKey)
@@ -284,7 +296,7 @@ function acquireKey(ctxKey: string, context: MetricsContext | undefined, reqKey:
   const cKey = cacheKeyOf(ctxKey, reqKey)
   let entry = cache.get(cKey)
   if (!entry) {
-    entry = { spec, ctxKey, context, value: shallowRef(undefined), loadedAt: shallowRef(null), settledAt: null, background: false, status: 'pending', refCount: 0 }
+    entry = { spec, ctxKey, context, value: shallowRef(undefined), loadedAt: shallowRef(null), settledAt: null, queuedAt: Date.now(), background: false, status: 'pending', refCount: 0 }
     cache.set(cKey, entry)
     queueFetch(entry, ctxKey, context, reqKey, false)
   }
@@ -314,12 +326,14 @@ function releaseKey(cKey: string) {
  * through the same queue as a first load — ordinary (never `fresh: true`) batches, one coalesced
  * POST per page context — so the server's 90 s fact cache keeps absorbing repeats, and the whole
  * page refetches as the same few batches it loaded with, not one request per card. An entry that
- * is queued or in flight (`status: 'pending'`), or settled under RETURN_MIN_AGE_MS ago, is left
- * alone. */
+ * is queued or in flight (`status: 'pending'`) and not yet hung (RETURN_INFLIGHT_MAX_MS), or
+ * settled under RETURN_MIN_AGE_MS ago, is left alone. A hung one is re-queued; dispatching it
+ * supersedes (and aborts) the stuck POST. */
 function refetchStaleEntries() {
   const now = Date.now()
   for (const [cKey, entry] of cache) {
-    if (entry.refCount <= 0 || entry.status === 'pending' || !isStale(entry.settledAt, now)) continue
+    if (entry.refCount <= 0) continue
+    if (entry.status === 'pending' ? isInFlight(entry.queuedAt, now) : !isStale(entry.settledAt, now)) continue
     queueFetch(entry, entry.ctxKey, entry.context, reqKeyFromCacheKey(cKey), false, true)
   }
 }
