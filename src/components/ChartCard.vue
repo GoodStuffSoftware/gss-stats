@@ -24,7 +24,7 @@ import AdsReadingsWidgetCard from './widgets/AdsReadingsWidgetCard.vue'
 import NoteBlock from './NoteBlock.vue'
 import { rangeNoticeText } from '../lib/rangeNotice'
 import { noteRawText, widgetCaptionNoteIds } from '../lib/notes'
-import { SPLIT_GUARD_CAPTION } from '../lib/splitGuard'
+import { REFUSED_WHOLE_DAYS_CAPTION, SPLIT_GUARD_CAPTION } from '../lib/splitGuard'
 
 const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolean; drillOpen: boolean; forceControls?: boolean }>()
 
@@ -281,12 +281,20 @@ async function load(background = false) {
   loadStartedAt = Date.now()
   try {
     // A series line chart fetches one date query per series; the first also stands in as `data`
-    // for the generic empty/loaded states.
+    // for the generic empty/loaded states. The caption flags come from every series (review of
+    // #63, NIT-1): any one series' split guard or whole-days window shows its caption.
     if (hasLineSeries(props.widget)) {
       const all = await fetchSeriesStats(props.widget, effectiveFilters.value)
       if (my === reqId) {
         seriesData.value = all
-        data.value = { ...all[0], rows: all.flatMap((r) => r.rows), notice: all.find((r) => r.notice)?.notice }
+        const splitGuard = all.some((r) => r.meta?.splitGuard)
+        const refusedWholeDays = all.some((r) => r.meta?.refusedWholeDays)
+        data.value = {
+          ...all[0],
+          rows: all.flatMap((r) => r.rows),
+          notice: all.find((r) => r.notice)?.notice,
+          meta: { ...all[0].meta, ...(splitGuard ? { splitGuard } : {}), ...(refusedWholeDays ? { refusedWholeDays } : {}) },
+        }
       }
     } else {
       const r = await fetchStats(props.widget, effectiveFilters.value)
@@ -635,10 +643,11 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
         </li>
       </ul>
     </details>
-    <div v-if="captionNoteIds.length || data?.note || data?.meta?.splitGuard || rangeNote" class="card-captions">
+    <div v-if="captionNoteIds.length || data?.note || data?.meta?.splitGuard || data?.meta?.refusedWholeDays || rangeNote" class="card-captions">
       <NoteBlock v-for="id in captionNoteIds" :key="id" :note-id="id" />
       <NoteBlock v-if="data?.note" :text="data.note" />
       <NoteBlock v-if="data?.meta?.splitGuard" :text="SPLIT_GUARD_CAPTION" />
+      <NoteBlock v-if="data?.meta?.refusedWholeDays" :text="REFUSED_WHOLE_DAYS_CAPTION" />
       <NoteBlock v-if="rangeNote" class="range-notice" data-testid="range-notice" severity="caveat" :text="rangeNote" />
     </div>
 
