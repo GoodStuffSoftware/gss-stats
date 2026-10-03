@@ -72,6 +72,12 @@ function cloneJson<T>(value: T): T {
 export function cloneSpec(spec: CardSpec): CardSpec {
   return cloneJson(spec)
 }
+/** Whether two specs are the same card, ignoring key order. */
+export function specsEqual(a: CardSpec, b: CardSpec): boolean {
+  const canon = (v: unknown): unknown =>
+    Array.isArray(v) ? v.map(canon) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v as Record<string, unknown>).filter(([, x]) => x !== undefined).sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)).map(([k, x]) => [k, canon(x)])) : v
+  return JSON.stringify(canon(a)) === JSON.stringify(canon(b))
+}
 export function specFromPresetId(id: string): CardSpec {
   return cloneSpec(presetById(id) ?? emptySpec())
 }
@@ -393,10 +399,13 @@ export interface DisplayOption {
  * lib/metrics/render.ts's own "GAP" comment), so the editor never lets it be picked even though
  * the kind allows it in principle. Returns [] for an unresolvable binding (unknown id), which
  * the caller renders as "pick a metric/ratio first". */
-export function displayOptionsFor(binding: DataBinding): DisplayOption[] {
+/** `pickableSparkline`: the item already had a sparkline (set outside the form), so the option
+ * is enabled and the user can switch back to it after trying another display; otherwise a
+ * sparkline stays the disabled placeholder (the form cannot create one). */
+export function displayOptionsFor(binding: DataBinding, opts: { pickableSparkline?: boolean } = {}): DisplayOption[] {
   const k = kindOf(binding)
   if (!k) return []
-  return DISPLAYS_FOR[k].map((as) => (as === 'sparkline' ? { as, disabled: true, hint: 'Coming soon — no daily series data yet' } : { as, disabled: false }))
+  return DISPLAYS_FOR[k].map((as) => (as === 'sparkline' && !opts.pickableSparkline ? { as, disabled: true, hint: 'Coming soon — no daily series data yet' } : { as, disabled: false }))
 }
 /** Whether `as` is a display the given binding's data kind actually allows AND the editor
  * offers (excludes the disabled sparkline placeholder) — used to auto-correct the display when
@@ -509,6 +518,13 @@ export function tonesToRows(tones: Record<string, BadgeTone> | undefined): ToneR
  * stored as plain data, never as the map's prototype. */
 export function rowsToTones(rows: readonly ToneRow[]): Record<string, BadgeTone> | undefined {
   return rows.length ? Object.fromEntries(rows.map((r) => [r.value, r.tone])) : undefined
+}
+/** Why `value` cannot be badge row `index`'s text, or null when it can: empty, or the same as
+ * another row (the tones map is keyed by it, so a duplicate would silently merge two rows). */
+export function toneValueProblem(rows: readonly ToneRow[], index: number, value: string): string | null {
+  if (!value.trim()) return 'Badge text cannot be empty.'
+  if (rows.some((r, j) => j !== index && r.value === value)) return `"${value}" already has a colour — each badge text can have only one.`
+  return null
 }
 export const CARD_ACTION_OPTIONS: { value: CardAction; label: string }[] = [{ value: 'ads-refresh', label: 'Refresh Google Ads spend button' }]
 
