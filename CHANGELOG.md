@@ -6,6 +6,12 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.15.6] — 2026-10-03
+
+### Changed
+- **The notes under each chart are now put together in one place, in one fixed order.** Nothing
+  changes in the app.
+
 ## [0.15.5] — 2026-10-03
 
 ### Fixed
