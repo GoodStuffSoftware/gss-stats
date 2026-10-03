@@ -10,6 +10,8 @@ import { isDateDim } from '../lib/rings'
 import { rangeLabel } from '../lib/range'
 import { isSiteDim, semanticKey } from '../lib/drill'
 import { isMobileViewport } from '../lib/responsive'
+import { isFit, widgetNeedsChartHeight } from '../lib/fit'
+import { useFitHeight } from '../composables/useFitHeight'
 import BaseChart from './charts/BaseChart.vue'
 import WorldMap from './charts/WorldMap.vue'
 import FilterPopover from './FilterPopover.vue'
@@ -66,6 +68,9 @@ const emit = defineEmits<{
   duplicate: []
   drill: [{ widgetId: string; dimension: string; dataset: 'geo' | 'rum'; value: string; label: string; x: number; y: number }]
   'open-campaigns': []
+  // Fit-to-content (Widget.fit): this card's content height in px, whenever it changes.
+  // Dashboard.vue turns it into grid rows.
+  'fit-height': [number]
 }>()
 
 const baseChartRef = ref<{ suppressForDrill: () => void } | null>(null)
@@ -89,12 +94,7 @@ const isNoteWidget = computed(() => props.widget.type === 'note')
 // ads-readings/note) and the non-canvas widget types (stat/rate/table) never had that
 // problem, so only the canvas-bearing cases below get a fixed mobile height (Dashboard.vue's
 // .needs-chart-height).
-const CHART_CANVAS_TYPES = new Set(['bar', 'hbar', 'stackedBar', 'breakdownBar', 'line', 'area', 'doughnut', 'nestedDoughnut', 'pie', 'map'])
-const needsChartHeight = computed(() => {
-  if (props.widget.dataset === 'overview') return false // content-driven panels (the timeline is a standard line chart now)
-  if (props.widget.dataset === 'campaigns' || props.widget.dataset === 'ads-readings' || isNoteWidget.value) return false
-  return CHART_CANVAS_TYPES.has(props.widget.type)
-})
+const needsChartHeight = computed(() => widgetNeedsChartHeight(props.widget)) // lib/fit.ts: the canvas types and the content-driven exceptions
 
 // A breakdown bar (legend + rotated axis labels) and a line chart with series or overlays
 // (legend, marker labels, the markers list, captions) don't fit Dashboard.vue's fixed phone chart
@@ -184,6 +184,12 @@ function onPoint(p: { index: number; datasetIndex: number; x: number; y: number 
 const zoomed = ref(false)
 const aspect = ref(1.6)
 const cardEl = ref<HTMLElement | null>(null)
+
+// Fit-to-content height (Widget.fit, lib/fit.ts): while on, the card's body is content-sized
+// (see `.fit` below) and its content height is reported for Dashboard.vue to turn into grid rows.
+// Off while zoomed (the zoomed card is a fixed-aspect panel, not a grid slot).
+const fitActive = computed(() => isFit(props.widget) && !zoomed.value)
+useFitHeight(cardEl, fitActive, (px) => emit('fit-height', px))
 
 // Animate the card from `fromRect` to wherever it now sits. Works both ways: on zoom-in
 // `fromRect` is the small grid slot (it grows to center); on zoom-out it's the big centered
@@ -449,7 +455,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
 
 <template>
   <Teleport to="body" :disabled="!zoomed">
-    <div ref="cardEl" class="chart-card" :class="{ zoomed, revealed, 'controls-revealed': forceControls, 'note-card': isNoteWidget, 'needs-chart-height': needsChartHeight, 'tall-on-phone': tallOnPhone }" :style="zoomed ? { '--ar': aspect } : undefined">
+    <div ref="cardEl" class="chart-card" :class="{ zoomed, revealed, 'controls-revealed': forceControls, 'note-card': isNoteWidget, 'needs-chart-height': needsChartHeight, 'tall-on-phone': tallOnPhone, fit: fitActive }" :style="zoomed ? { '--ar': aspect } : undefined">
     <header class="card-head" :class="{ 'note-head': isNoteWidget }">
       <div class="title-wrap" v-if="!isNoteWidget">
         <span v-if="widget.isDefault" class="pin" title="A default chart on this page — kept when you restore defaults">★</span>
@@ -864,6 +870,14 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
   min-height: 0;
   padding: 12px 14px 14px;
   position: relative;
+}
+/* Fit to content (Widget.fit): the body takes its content's height instead of the rest of the
+   fixed grid slot, so nothing inside it is clipped or scrolls; Dashboard.vue then sizes the slot
+   to this content. The card stays `height: 100%` of its slot (the slot is at most one row taller
+   than the content), and the content height is measured from the children, not the card. */
+.chart-card.fit .card-body {
+  flex: none;
+  overflow: visible;
 }
 /* Mobile only (matches Dashboard.vue's stacking breakpoint — lib/responsive.ts
    MOBILE_MAX_WIDTH): the card's own height there is `auto` so it can grow to fit content
