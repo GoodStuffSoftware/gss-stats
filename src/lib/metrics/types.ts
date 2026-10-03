@@ -199,6 +199,9 @@ export interface MetricRequest {
   params?: { campaignId?: string; popup?: string; country?: string }
   window?: string
   deltas?: DeltaName[]
+  /** 'daily': also return the metric's per-ET-day points (MetricValue.series). A count or a
+   * stored-spend amount only, in a ranged window (lib/metrics/series.ts seriesTwin). */
+  series?: 'daily'
   /** May only RAISE MIN_COHORT for a proportion or cost (Gating.minCohort); the server clamps. */
   minCohort?: number
 }
@@ -219,9 +222,18 @@ export interface MetricDelta {
   deltaPct?: number
 }
 
+/** One ET day's value: `day` is YYYY-MM-DD (ET), `value` a count (or dollars for spend). */
+export interface SeriesPoint {
+  day: string
+  value: number
+}
+
 export interface MetricValue {
   status: MetricStatus
   value?: number | null
+  /** Per-ET-day points, oldest first, for a `series: 'daily'` request (lib/metrics/series.ts):
+   * at most 92, and a day that was not measured has NO point (a gap, never a zero). */
+  series?: SeriesPoint[]
   numerator?: number
   denominator?: number
   deltas?: { yesterday?: MetricDelta; avg7?: MetricDelta }

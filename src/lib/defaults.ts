@@ -39,6 +39,19 @@ function w(p: Omit<Widget, 'i'>): Widget {
   return { ...p, i: p.id }
 }
 
+// Bumped to 15 for the two default trend charts' ET-day axis (see migrateDateEtTrendsV15): a
+// stored "Pageviews over time" / "Visits over time" geo trend that is still exactly the shipped
+// default moves from the UTC `date` to the ET-day `dateEt`, so the counts-only split-guard caption
+// (lib/splitGuard.ts) goes away. Version-gated, so an owner who later sets a chart back to `date`
+// is never reverted. functions/api/config.ts backs the stored layout up to
+// `dashboard:default:backup:v<stored>` on the first v15 save (production is stored at v14: `backup:v14`).
+// Bumped to 14 for inline sparklines (ADR 0005 slice 2): a metric item may now ask for a daily
+// series (`display: { as: 'sparkline', series: 'daily' }`) and draw it. NO stored layout is
+// rewritten: no existing layout has a sparkline, so the bump is only the save guard that keeps a
+// v13 tab from overwriting a layout it cannot draw (functions/api/config.ts answers it 409 and
+// backs the stored layout up to `dashboard:default:backup:v13` on the first v14 save). Page
+// navigation holds 13 (migrateNavV13), so this slice is 14. The numbers live in LAYOUT_VERSIONS
+// below; every migration step is keyed on an entry there, never on a bare number.
 // Bumped to 13 for page navigation (see migrateNavV13): every page gets a `group` (built-ins by id,
 // others from a name prefix, else "Mine"), drill pages can carry a `parentId`, pages an `icon`, the
 // config an optional `groupMeta` and `groupOrder` (normGroupOrder); the Best Sudoku pages lose their "Best Sudoku · " name prefix (the
@@ -68,7 +81,18 @@ function w(p: Omit<Widget, 'i'>): Widget {
 // uncustomized layout only. (Bumped to 7 for the bespoke-page → widget conversion migration —
 // see the v7 block: Overview/Campaigns went from `widgets: []` (rendered by the now-retired
 // OverviewPage.vue/CampaignComparePage.vue) to real generic widgets.)
-export const CONFIG_VERSION = 13
+export const LAYOUT_VERSIONS = {
+  /** The Overview's small-sample note takes one grid row (compactSmallSampleNoteV12). */
+  compactNoteRow: 12,
+  /** Page navigation: groups, parentId, icons (migrateNavV13). */
+  navigation: 13,
+  /** Inline sparklines (ADR 0005 slice 2). A guard bump only: no stored layout is rewritten. */
+  sparklines: 14,
+  /** The default geo trend charts bucket by ET day (migrateDateEtTrendsV15). */
+  dateEtTrends: 15,
+} as const
+// The newest layout version. A slice that adds an entry moves this to it.
+export const CONFIG_VERSION: number = LAYOUT_VERSIONS.dateEtTrends
 
 // The default "basic charts available out of the box" — a sensible analytics
 // starting layout. Users can move/resize/add/remove from here.
@@ -125,7 +149,7 @@ export function defaultBeaconWidgets(): Widget[] {
   return [
     gw({ id: 'bcn-views', title: 'Pageviews', type: 'stat', dimension: 'site', limit: 1, x: 0, y: 0, w: 3, h: 3 }),
     gw({ id: 'bcn-visitor', title: 'New vs returning', type: 'doughnut', dimension: 'visitor', limit: 5, x: 0, y: 3, w: 3, h: 6 }),
-    gw({ id: 'bcn-trend', title: 'Pageviews over time', type: 'area', dimension: 'date', limit: 90, x: 3, y: 0, w: 9, h: 8 }),
+    gw({ id: 'bcn-trend', title: 'Pageviews over time', type: 'area', dimension: 'dateEt', limit: 90, x: 3, y: 0, w: 9, h: 8 }),
     gw({ id: 'bcn-site', title: 'Pageviews by site', type: 'bar', dimension: 'site', limit: 12, x: 0, y: 9, w: 6, h: 8 }),
     gw({ id: 'bcn-device', title: 'Device split', type: 'doughnut', dimension: 'device', limit: 6, x: 6, y: 8, w: 6, h: 8 }),
     gw({ id: 'bcn-sitedevice', title: 'Site × device', type: 'nestedDoughnut', dimension: 'site', breakdown: 'device', limit: 30, x: 0, y: 50, w: 7, h: 9 }),
@@ -167,7 +191,7 @@ export function defaultBestSudokuLaunchWidgets(): Widget[] {
   return [
     gw({ id: 'bsk-views', title: 'Pageviews', type: 'stat', dimension: 'site', limit: 10, x: 0, y: 0, w: 3, h: 3 }),
     gw({ id: 'bsk-visitor', title: 'New vs returning', type: 'doughnut', dimension: 'visitor', limit: 5, x: 0, y: 3, w: 3, h: 6 }),
-    gw({ id: 'bsk-trend', title: 'Visits over time', type: 'area', dimension: 'date', limit: 90, markers: 'releases', x: 3, y: 0, w: 9, h: 8 }),
+    gw({ id: 'bsk-trend', title: 'Visits over time', type: 'area', dimension: 'dateEt', limit: 90, markers: 'releases', x: 3, y: 0, w: 9, h: 8 }),
     gw({ id: 'bsk-ref', title: 'Where they come from (referrers)', type: 'hbar', dimension: 'referrer', limit: 12, x: 0, y: 9, w: 6, h: 8 }),
     gw({ id: 'bsk-refpath', title: 'Which subreddit / section', type: 'hbar', dimension: 'refpath', limit: 12, x: 6, y: 8, w: 6, h: 8 }),
     gw({ id: 'bsk-webapp', title: 'Web vs app', type: 'doughnut', dimension: 'site', limit: 5, x: 0, y: 17, w: 3, h: 7 }),
@@ -690,6 +714,46 @@ export function migrateCardsV10(page: DashboardPage): DashboardPage {
 export function migratePanelsV11(page: DashboardPage): DashboardPage {
   const swapped = page.widgets.some((wd) => swapPanelChart(wd) !== wd) ? { ...page, widgets: page.widgets.map(swapPanelChart) } : page
   return migrateCardsV10(swapped)
+}
+// Widget fields that are placement, not content: ignored when asking whether a stored widget is
+// still the shipped default.
+const TREND_PLACEMENT_KEYS: ReadonlySet<string> = new Set(['id', 'i', 'x', 'y', 'w', 'h', 'moved'])
+/** A widget's content as a comparable string: every defined field except placement, key-sorted. */
+function trendShape(wd: object): string {
+  const entries = Object.entries(wd).filter(([k, v]) => v !== undefined && !TREND_PLACEMENT_KEYS.has(k))
+  return JSON.stringify(entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+}
+/** The shipped (v14) content of the two default trend charts on the UTC `date` axis, FROZEN as
+ * literals on purpose: the match test of a version-gated, one-shot migration has to describe what
+ * was stored through v14, not what the factories build today. Do not derive these from
+ * defaultBeaconWidgets / defaultBestSudokuLaunchWidgets: a later edit of a factory (title, limit,
+ * a new default field) would then stop a stored v14 chart from matching, the layout would still be
+ * stamped v15, and the chart would never move. defaults.v15.test.ts pins these literals and checks
+ * them against the factories, so a factory edit forces a conscious choice. */
+export const V14_DATE_TREND_DEFAULTS: readonly Readonly<Record<string, unknown>>[] = Object.freeze([
+  // bcn-trend: Beacon "Pageviews over time"
+  Object.freeze({ title: 'Pageviews over time', type: 'area', dataset: 'geo', metric: 'pageviews', dimension: 'date', limit: 90 }),
+  // bsk-trend: Best Sudoku Traffic "Visits over time"
+  Object.freeze({ title: 'Visits over time', type: 'area', dataset: 'geo', metric: 'pageviews', dimension: 'date', limit: 90, markers: 'releases' }),
+])
+const DATE_TREND_V14_SHAPES: ReadonlySet<string> = new Set(V14_DATE_TREND_DEFAULTS.map(trendShape))
+/** v15 (version-gated): the two default geo trend charts, "Pageviews over time" and "Visits over
+ * time", move from the UTC `date` axis to the ET-day `dateEt`, so the counts-only split-guard
+ * caption goes away (each bucket is a whole ET day, which the rule allows).
+ *
+ * MATCH RULE: a widget is migrated only when it has `dimension: 'date'` and, ignoring placement
+ * (id, i, x, y, w, h, moved) and absent fields, EVERY other field equals the shipped default of
+ * `bcn-trend` or `bsk-trend`: geo dataset, area type, pageviews metric, limit 90, that title, and
+ * `markers: 'releases'` only on the Visits one. The id is deliberately NOT part of the test: the
+ * stored charts carry the known ids (`bcn-trend`, `bsk-trend`, and `trend` in the prod layouts)
+ * and also random ones (a restored default gets a fresh id), and since every other field must equal
+ * the default, an id adds no information. Any other title, an extra filter, a site override, a
+ * series, a caption, a breakdown or any other param leaves the widget untouched. Only `dimension`
+ * changes. The same page object when nothing matches. */
+export function migrateDateEtTrendsV15(page: DashboardPage): DashboardPage {
+  const pristine = (wd: Widget) => wd.dimension === 'date' && DATE_TREND_V14_SHAPES.has(trendShape(wd))
+  if (!page.widgets.some(pristine)) return page
+  return { ...page, widgets: page.widgets.map((wd) => (pristine(wd) ? { ...wd, dimension: 'dateEt' } : wd)) }
 }
 /** v12: the Overview's small-sample note shipped as a 12-wide, 3-row grid cell (148px on
  * desktop) holding a single caption line, which read as an empty band under the filter bar.
@@ -1239,7 +1303,7 @@ export function normalizeConfig(raw: any): DashboardConfig {
     }
     // v12 migration (see CONFIG_VERSION): the Overview's small-sample note takes one grid row,
     // not three (compactSmallSampleNoteV12). Version-gated, so a later resize is never undone.
-    if ((Number(raw.version) || 0) < 12) {
+    if ((Number(raw.version) || 0) < LAYOUT_VERSIONS.compactNoteRow) {
       for (let i = 0; i < pages.length; i++) pages[i] = compactSmallSampleNoteV12(pages[i])
     }
     // v10 and v11 (see CONFIG_VERSION), run on every load: every former bespoke panel renders as
@@ -1266,14 +1330,17 @@ export function normalizeConfig(raw: any): DashboardConfig {
     // the pre-v13 tab order as the stored order, Traffic's icon. Version-gated, so a later rename,
     // move or reorder is never undone. The order is data from here on: no reorder runs on load.
     const version = Number(raw.version) || 0
-    const ordered = version < 13 ? migrateNavV13(withCaptionsMigrated) : withCaptionsMigrated
+    const navigated = version < LAYOUT_VERSIONS.navigation ? migrateNavV13(withCaptionsMigrated) : withCaptionsMigrated
+    // v15 migration (see CONFIG_VERSION and migrateDateEtTrendsV15): version-gated, so a chart the
+    // owner later sets back to the UTC `date` axis is never moved again.
+    const ordered = version < LAYOUT_VERSIONS.dateEtTrends ? navigated.map(migrateDateEtTrendsV15) : navigated
     // Every load: drill links must name an existing root page (normDrillLinks).
     normDrillLinks(ordered)
     // `activePageId` is the landing page for a first-time viewer (each viewer's current page lives
     // in their browser since v13 — lib/viewerPrefs.ts): ★ Overview after the v13 migration, and
     // whenever the stored one no longer exists.
     const pinnedId = (ordered.find((p: DashboardPage) => p.isDefault) ?? ordered[0]).id
-    const wanted = version < 13 ? pinnedId : raw.activePageId
+    const wanted = version < LAYOUT_VERSIONS.navigation ? pinnedId : raw.activePageId
     const activePageId = ordered.some((p: DashboardPage) => p.id === wanted) ? wanted : pinnedId
     const groupMeta = normGroupMeta(raw.groupMeta)
     const groupOrder = normGroupOrder(raw.groupOrder, ordered)

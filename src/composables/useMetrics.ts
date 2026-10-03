@@ -26,6 +26,7 @@ import { addEtDays } from '../lib/overview'
 import type { MetricsContext, MetricsRequestBody, MetricsResponseBody, MetricValue } from '../lib/metrics/types'
 import { MAX_REQUESTS } from '../lib/metrics/validate'
 import type { MetricRequestSpec } from '../lib/metrics/scope'
+import { isInFlight, isStale, useReturnRefresh } from './useReturnRefresh'
 
 export type { MetricRequestSpec }
 
@@ -88,6 +89,8 @@ function canonicalSpec(spec: MetricRequestSpec) {
     ...(spec.params?.country !== undefined ? { country: spec.params.country } : {}),
     window: spec.window ?? null,
     deltas: spec.deltas?.length ? [...new Set(spec.deltas)].sort() : [],
+    // Only when set, so every request key made before series existed is unchanged.
+    ...(spec.series ? { series: spec.series } : {}),
     minCohort: spec.minCohort ?? null,
   }
 }
@@ -132,9 +135,22 @@ interface Inflight {
 }
 interface CacheEntry {
   spec: MetricRequestSpec
+  /** The page context this entry was planned under, kept so a refetch goes out as the same
+   * kind of ordinary batch the first load did. */
+  ctxKey: string
+  context: MetricsContext | undefined
   value: ShallowRef<MetricValue | undefined>
   /** When this entry last received a successful response (epoch ms), for "Updated Xs ago". */
   loadedAt: ShallowRef<number | null>
+  /** When the last response (ok or failed) settled, for the return-refetch throttle. */
+  settledAt: number | null
+  /** When the fetch now queued or in flight was queued (epoch ms): past RETURN_INFLIGHT_MAX_MS it
+   * counts as hung and a return may refetch the entry anyway. */
+  queuedAt: number
+  /** The fetch now queued or in flight is a background return-refetch: a failure keeps the value
+   * already on screen instead of replacing it with an error (a tab waking before its network is
+   * back must not flip every card to "load failed"). */
+  background: boolean
   status: 'pending' | 'ok' | 'error'
   refCount: number
   /** The POST most recently dispatched for this entry — the only one allowed to write it. */
@@ -209,6 +225,7 @@ async function sendChunk(batch: Batch, reqKeys: string[]) {
       ...(entry.spec.params ? { params: entry.spec.params } : {}),
       ...(entry.spec.window ? { window: entry.spec.window } : {}),
       ...(entry.spec.deltas?.length ? { deltas: entry.spec.deltas } : {}),
+      ...(entry.spec.series ? { series: entry.spec.series } : {}),
       ...(entry.spec.minCohort != null ? { minCohort: entry.spec.minCohort } : {}),
     })
   }
@@ -233,23 +250,43 @@ async function sendChunk(batch: Batch, reqKeys: string[]) {
     const now = Date.now()
     for (const [reqKey, entry] of ownedEntries()) {
       const result = safeResultLookup(json.results, reqKey)
-      entry.value.value = result
-      entry.status = result ? 'ok' : 'error'
-      if (result) entry.loadedAt.value = now
+      const shown = entry.value.value
+      if (entry.background && shown && (!result || (result.status === 'error' && shown.status !== 'error'))) {
+        // A return refetch the server answered with a per-fact error (a 200 carrying
+        // `fact-failed`, e.g. a D1 hiccup) or no result for the key: keep what is on screen,
+        // exactly as a rejected fetch does — a last good value stays, and an error already up
+        // stays an error (a missing key must not blank it). Only a real value, or a real new
+        // error over a good value, replaces it. A foreground or first load still shows the error.
+        entry.status = shown.status === 'error' ? 'error' : 'ok'
+      } else {
+        entry.value.value = result
+        entry.status = result ? 'ok' : 'error'
+        if (result) entry.loadedAt.value = now
+      }
+      entry.settledAt = now
+      entry.background = false
       entry.inflight = undefined
     }
   } catch (err) {
     if ((err as { name?: string })?.name === 'AbortError') return // aborted: nobody wants it any more
     for (const [, entry] of ownedEntries()) {
-      entry.status = 'error'
-      entry.value.value = { status: 'error', reason: 'fetch-failed' }
+      entry.settledAt = Date.now()
+      const shown = entry.value.value
+      if (entry.background && shown && shown.status !== 'error') entry.status = 'ok' // keep the last good value
+      else {
+        entry.status = 'error'
+        entry.value.value = { status: 'error', reason: 'fetch-failed' }
+      }
+      entry.background = false
       entry.inflight = undefined
     }
   }
 }
 
-function queueFetch(entry: CacheEntry, ctxKey: string, context: MetricsContext | undefined, reqKey: string, fresh: boolean) {
+function queueFetch(entry: CacheEntry, ctxKey: string, context: MetricsContext | undefined, reqKey: string, fresh: boolean, background = false) {
   entry.status = 'pending'
+  entry.queuedAt = Date.now()
+  entry.background = background
   const batch = ensureBatch(ctxKey, context, fresh)
   batch.keys.add(reqKey)
   scheduleFlush(batch)
@@ -261,7 +298,7 @@ function acquireKey(ctxKey: string, context: MetricsContext | undefined, reqKey:
   const cKey = cacheKeyOf(ctxKey, reqKey)
   let entry = cache.get(cKey)
   if (!entry) {
-    entry = { spec, value: shallowRef(undefined), loadedAt: shallowRef(null), status: 'pending', refCount: 0 }
+    entry = { spec, ctxKey, context, value: shallowRef(undefined), loadedAt: shallowRef(null), settledAt: null, queuedAt: Date.now(), background: false, status: 'pending', refCount: 0 }
     cache.set(cKey, entry)
     queueFetch(entry, ctxKey, context, reqKey, false)
   }
@@ -285,6 +322,22 @@ function releaseKey(cKey: string) {
     entry.inflight = undefined
   }
   cache.delete(cKey)
+}
+
+/** The user came back to the tab: re-queue every held entry that is old enough and idle. They go
+ * through the same queue as a first load — ordinary (never `fresh: true`) batches, one coalesced
+ * POST per page context — so the server's 90 s fact cache keeps absorbing repeats, and the whole
+ * page refetches as the same few batches it loaded with, not one request per card. An entry that
+ * is queued or in flight (`status: 'pending'`) and not yet hung (RETURN_INFLIGHT_MAX_MS), or
+ * settled under RETURN_MIN_AGE_MS ago, is left alone. A hung one is re-queued; dispatching it
+ * supersedes (and aborts) the stuck POST. */
+function refetchStaleEntries() {
+  const now = Date.now()
+  for (const [cKey, entry] of cache) {
+    if (entry.refCount <= 0) continue
+    if (entry.status === 'pending' ? isInFlight(entry.queuedAt, now) : !isStale(entry.settledAt, now)) continue
+    queueFetch(entry, entry.ctxKey, entry.context, reqKeyFromCacheKey(cKey), false, true)
+  }
 }
 
 export interface UseMetrics {
@@ -349,6 +402,9 @@ export function useMetrics(rawContext?: MaybeRefOrGetter<MetricsContext | undefi
   }
 
   if (scope) {
+    // Refetch on return to the tab. Every instance subscribes the same function (the registry
+    // counts them), and it walks the shared cache once, so N cards still mean one pass.
+    useReturnRefresh(refetchStaleEntries)
     // Re-plan on a context change: acquire every consumer's entry under the new context first
     // (so they share one coalesced batch), then release the old ones. Keyed on the normalized
     // context's stable key, so a new-but-equal context object is not a change.
