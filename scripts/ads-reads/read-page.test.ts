@@ -141,7 +141,7 @@ describe('read-page rendering', () => {
     const labels = rows.map((r) => r[0])
     const i = labels.indexOf('Tour skip')
     expect(labels.slice(i + 1, i + 11)).toEqual([
-      'Tour exit: preamble', 'Tour exit: hub', 'Tour exit: section',
+      '  of which skipped at: preamble', '  of which skipped at: hub', '  of which skipped at: section',
       'Game start: easy', 'Game start: medium', 'Game start: hard', 'Game start: expert', 'Game start: difficulty unknown',
       'Tutorial complete: first run', 'Tutorial complete: replay',
     ])
@@ -162,7 +162,7 @@ describe('read-page rendering', () => {
         narrative,
       }),
     )
-    expect(rows.find((r) => r[0] === 'Tour exit: hub')).toEqual(['Tour exit: hub', '3', '30', ''])
+    expect(rows.find((r) => r[0] === '  of which skipped at: hub')).toEqual(['  of which skipped at: hub', '3', '30', ''])
     expect(rows.find((r) => r[0] === 'Game start: easy')).toEqual(['Game start: easy', '6', '1,090', ''])
     expect(rows.find((r) => r[0] === 'Tutorial complete: replay')).toEqual(['Tutorial complete: replay', '4', '11', ''])
   })
@@ -180,7 +180,7 @@ describe('read-page rendering', () => {
       }),
     )
     expect(rows.find((r) => r[0] === 'Game views')).toEqual(['Game views', '64', '1,900', ''])
-    expect(rows.some((r) => /^(Tour exit|Game start|Tutorial complete):/.test(r[0]!))).toBe(false)
+    expect(rows.some((r) => /^(\s*of which skipped at|Game start|Tutorial complete):/.test(r[0]!))).toBe(false)
   })
   it('the first-session panel degrades to a line when it is missing', () => {
     const { body } = render(buildReadPage({ template, raw: degrade((d) => { d.firstSession = null }), narrative }))

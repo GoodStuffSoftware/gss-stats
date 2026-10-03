@@ -26,10 +26,19 @@ import {
   installOutcomeGapNote,
   installOutcomeGapOpen,
   rowIsPostInstallFix,
+  GAME_START_DIFFICULTIES,
+  isGameStartPath,
+  isTourExitPath,
+  isTutorialCompletePath,
   POPUP_OUTCOME_TYPES,
   POPUP_PAGE_NOTE,
+  TOUR_EXIT_STEPS,
+  TUTORIAL_COMPLETE_KINDS,
+  type GameStartDifficulty,
   type GatedRate,
   type HourPathCount,
+  type TourExitStep,
+  type TutorialCompleteKind,
 } from './popupEvents'
 import {
   authSuccessRow,
@@ -774,24 +783,20 @@ export const ABANDON_BUCKETS = ['0', '1-25', '26-50', '51-75', '76-99'] as const
 export type AbandonBucket = (typeof ABANDON_BUCKETS)[number]
 export const WELCOME_EVENTS = ['shown', 'daily', 'leaderboard', 'dismiss'] as const
 export type WelcomeEvent = (typeof WELCOME_EVENTS)[number]
-// The v1.97.0 first-run counters (best-sudoku, live on prod web 2026-10-03). Count-only paths,
-// read as three side-by-side breakdowns of the same kind as the abandon buckets: a tour exit
-// (`/tour/exit-at/<stage>`), a counted game start (`/game/start/<difficulty>`; a tour exit now
-// starts a counted Easy game) and a tutorial win (`/game/tutorial-complete/<variant>`). Row
-// counts only, never joined: a start is not matched to the exit that led to it.
-export const TOUR_EXIT_STAGES = ['preamble', 'hub', 'section'] as const
-export type TourExitStage = (typeof TOUR_EXIT_STAGES)[number]
-export const GAME_START_DIFFICULTIES = ['easy', 'medium', 'hard', 'expert', 'unknown'] as const
-export type GameStartDifficulty = (typeof GAME_START_DIFFICULTIES)[number]
-export const TUTORIAL_COMPLETE_VARIANTS = ['first-run', 'replay'] as const
-export type TutorialCompleteVariant = (typeof TUTORIAL_COMPLETE_VARIANTS)[number]
+// The v1.97.0 first-run counters (best-sudoku, live on prod web 2026-10-03; lib/popupEvents.ts
+// TOUR_TRACKING_LIVE_AT). Count-only paths, read as three side-by-side breakdowns of the same
+// kind as the abandon buckets: the tour-exit stage (`/tour/exit-at/<stage>`: the SAME rows as
+// tour skip, split by where the visitor was, so not a later step), a counted game start
+// (`/game/start/<difficulty>`: every counted start, including leaving the tour for a real game)
+// and a tutorial win (`/game/tutorial-complete/<kind>`). The vocabularies and exact-path
+// matchers (TOUR_EXIT_STEPS, GAME_START_DIFFICULTIES, TUTORIAL_COMPLETE_KINDS; isTourExitPath,
+// isGameStartPath, isTutorialCompletePath) are lib/popupEvents.ts's, the same ones that classify
+// these rows as events, so each is defined once. Row counts only, never joined: a start is not
+// matched to the exit that led to it.
 
 const TOUR_PATHS: Partial<Record<FirstSessionStep, string>> = { tourStart: '/tour/start', tourComplete: '/tour/complete', tourSkip: '/tour/skip', firstMove: '/game/first-move' }
 const ABANDON_PREFIX = '/game/abandon/'
 const WELCOME_PREFIX = '/welcome-signed-in/'
-const TOUR_EXIT_PREFIX = '/tour/exit-at/'
-const GAME_START_PREFIX = '/game/start/'
-const TUTORIAL_COMPLETE_PREFIX = '/game/tutorial-complete/'
 
 /** The first-session bucket a path counts in, or null. Exact paths only (a trailing slash or
  * an unknown abandon bucket / welcome action is not guessed at). */
@@ -799,9 +804,9 @@ export type FirstSessionBucket =
   | { kind: 'step'; step: Exclude<FirstSessionStep, 'arrivals'> }
   | { kind: 'abandon'; bucket: AbandonBucket }
   | { kind: 'welcome'; event: WelcomeEvent }
-  | { kind: 'tourExit'; stage: TourExitStage }
+  | { kind: 'tourExit'; stage: TourExitStep }
   | { kind: 'gameStart'; difficulty: GameStartDifficulty }
-  | { kind: 'tutorialComplete'; variant: TutorialCompleteVariant }
+  | { kind: 'tutorialComplete'; variant: TutorialCompleteKind }
   | { kind: 'ask'; tutorial: boolean }
   | { kind: 'arrival'; uc: string }
 export function firstSessionBucket(path: string): FirstSessionBucket | null {
@@ -820,18 +825,12 @@ export function firstSessionBucket(path: string): FirstSessionBucket | null {
     const e = path.slice(WELCOME_PREFIX.length)
     return (WELCOME_EVENTS as readonly string[]).includes(e) ? { kind: 'welcome', event: e as WelcomeEvent } : null
   }
-  if (path.startsWith(TOUR_EXIT_PREFIX)) {
-    const s = path.slice(TOUR_EXIT_PREFIX.length)
-    return (TOUR_EXIT_STAGES as readonly string[]).includes(s) ? { kind: 'tourExit', stage: s as TourExitStage } : null
-  }
-  if (path.startsWith(GAME_START_PREFIX)) {
-    const d = path.slice(GAME_START_PREFIX.length)
-    return (GAME_START_DIFFICULTIES as readonly string[]).includes(d) ? { kind: 'gameStart', difficulty: d as GameStartDifficulty } : null
-  }
-  if (path.startsWith(TUTORIAL_COMPLETE_PREFIX)) {
-    const v = path.slice(TUTORIAL_COMPLETE_PREFIX.length)
-    return (TUTORIAL_COMPLETE_VARIANTS as readonly string[]).includes(v) ? { kind: 'tutorialComplete', variant: v as TutorialCompleteVariant } : null
-  }
+  const stage = TOUR_EXIT_STEPS.find((s) => isTourExitPath(path, s))
+  if (stage) return { kind: 'tourExit', stage }
+  const difficulty = GAME_START_DIFFICULTIES.find((d) => isGameStartPath(path, d))
+  if (difficulty) return { kind: 'gameStart', difficulty }
+  const variant = TUTORIAL_COMPLETE_KINDS.find((k) => isTutorialCompletePath(path, k))
+  if (variant) return { kind: 'tutorialComplete', variant }
   if ((ASK_PATHS as readonly string[]).includes(path)) return { kind: 'ask', tutorial: path === '/signin-prompt/tutorial' }
   return null
 }
@@ -841,9 +840,9 @@ export interface FirstSessionTally {
   steps: Record<FirstSessionStep, number>
   abandon: Record<AbandonBucket, number>
   welcome: Record<WelcomeEvent, number>
-  tourExit: Record<TourExitStage, number>
+  tourExit: Record<TourExitStep, number>
   gameStart: Record<GameStartDifficulty, number>
-  tutorialComplete: Record<TutorialCompleteVariant, number>
+  tutorialComplete: Record<TutorialCompleteKind, number>
   asks: number
   asksTutorial: number
   /** true when the tagged arrivals (d0) read failed: arrivals is unknown, not 0. */
@@ -867,9 +866,9 @@ export function emptyFirstSessionTally(): FirstSessionTally {
     steps: zero(FIRST_SESSION_STEPS),
     abandon: zero(ABANDON_BUCKETS),
     welcome: zero(WELCOME_EVENTS),
-    tourExit: zero(TOUR_EXIT_STAGES),
+    tourExit: zero(TOUR_EXIT_STEPS),
     gameStart: zero(GAME_START_DIFFICULTIES),
-    tutorialComplete: zero(TUTORIAL_COMPLETE_VARIANTS),
+    tutorialComplete: zero(TUTORIAL_COMPLETE_KINDS),
     asks: 0,
     asksTutorial: 0,
   }
@@ -928,10 +927,12 @@ export interface FirstSessionFunnel {
   abandon: Record<AbandonBucket, FirstSessionFigure>
   welcome: Record<WelcomeEvent, FirstSessionFigure>
   /** The v1.97.0 first-run counters, each a breakdown of row counts read side by side (no
-   * ratio between them: a game start cannot be matched to the tour exit that led to it). */
-  tourExit: Record<TourExitStage, FirstSessionFigure>
+   * ratio between them: a game start cannot be matched to the tour exit that led to it).
+   * tourExit is the tour-skip rows split by stage (the same rows as steps.tourSkip, never an
+   * extra step); gameStart counts every counted start, including leaving the tour for a real game. */
+  tourExit: Record<TourExitStep, FirstSessionFigure>
   gameStart: Record<GameStartDifficulty, FirstSessionFigure>
-  tutorialComplete: Record<TutorialCompleteVariant, FirstSessionFigure>
+  tutorialComplete: Record<TutorialCompleteKind, FirstSessionFigure>
   asks: FirstSessionFigure
   asksTutorial: FirstSessionFigure
   /** Whether the site-wide side was read (false: every `site` is null, `tracked` unknown). */
@@ -960,10 +961,10 @@ export function buildFirstSessionFunnel(tagged: FirstSessionTally, site: FirstSe
   const welcome = map(WELCOME_EVENTS, tagged.welcome, site?.welcome ?? null)
   trackFamily([...FIRST_SESSION_RELEASE_STEPS.map((k) => steps[k]), ...ABANDON_BUCKETS.map((b) => abandon[b])])
   trackFamily(WELCOME_EVENTS.map((e) => welcome[e]))
-  const tourExit = map(TOUR_EXIT_STAGES, tagged.tourExit, site?.tourExit ?? null)
+  const tourExit = map(TOUR_EXIT_STEPS, tagged.tourExit, site?.tourExit ?? null)
   const gameStart = map(GAME_START_DIFFICULTIES, tagged.gameStart, site?.gameStart ?? null)
-  const tutorialComplete = map(TUTORIAL_COMPLETE_VARIANTS, tagged.tutorialComplete, site?.tutorialComplete ?? null)
-  trackFamily([...TOUR_EXIT_STAGES.map((s) => tourExit[s]), ...GAME_START_DIFFICULTIES.map((d) => gameStart[d]), ...TUTORIAL_COMPLETE_VARIANTS.map((v) => tutorialComplete[v])])
+  const tutorialComplete = map(TUTORIAL_COMPLETE_KINDS, tagged.tutorialComplete, site?.tutorialComplete ?? null)
+  trackFamily([...TOUR_EXIT_STEPS.map((s) => tourExit[s]), ...GAME_START_DIFFICULTIES.map((d) => gameStart[d]), ...TUTORIAL_COMPLETE_KINDS.map((v) => tutorialComplete[v])])
   // An unknown `tracked` (no site-wide read) still gets a ratio: only a known-untracked step is skipped.
   const usable = (k: FirstSessionStep) => steps[k].tracked !== false
   for (const k of FIRST_SESSION_STEPS) {

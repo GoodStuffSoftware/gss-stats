@@ -5,6 +5,10 @@ import {
   isPopupEventPath,
   popupExcludeClause,
   popupIncludeClause,
+  isTutorialCompletePath,
+  isTourExitPath,
+  TOUR_TRACKING_LIVE_AT,
+  TOUR_TRACKING_LIVE_AT_ET,
   POPUP_EVENT_PREFIXES,
   GAME_COMPLETE_LIVE_AT,
   NEW_BEACONS_LIVE_AT_ET,
@@ -391,41 +395,31 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
       '/auth/error',
       '/auth/redirect',
       '/tour',
+      '/game/tutorial-complete',
       '/game/first-move',
       '/game/abandon',
       '/welcome-signed-in',
       '/game/start/',
-      '/game/tutorial-complete/',
     ])
   })
   // v1.97.0 (first row at 2026-10-03T17:03:40Z): the three count-only first-run beacons. Until
-  // '/game/start/' and '/game/tutorial-complete/' were listed, every row of them was counted as a
-  // page view; '/tour/exit-at/*' was already covered by '/tour'.
-  it('the v1.97.0 first-run beacons are events, not page views', () => {
-    for (const p of [
-      '/tour/exit-at/preamble',
-      '/tour/exit-at/hub',
-      '/tour/exit-at/section',
-      '/game/start/easy',
-      '/game/start/medium',
-      '/game/start/hard',
-      '/game/start/expert',
-      '/game/start/unknown',
-      '/game/tutorial-complete/first-run',
-      '/game/tutorial-complete/replay',
-    ]) {
+  // '/game/start/' was listed, every counted game start was counted as a page view;
+  // '/tour/exit-at/*' rides '/tour' and '/game/tutorial-complete/*' has its own entry (both are
+  // pinned in the 'v1.97.0 tutorial-complete / tour-exit beacons' block below).
+  it('a counted game start is an event, not a page view', () => {
+    for (const p of ['/game/start/easy', '/game/start/medium', '/game/start/hard', '/game/start/expert', '/game/start/unknown']) {
       expect(isPopupEventPath(p), p).toBe(true)
     }
     // The real "played a game" page view and look-alikes still count as page views.
-    for (const p of ['/game', '/game/', '/game/start', '/game/tutorial-complete', '/game/starting', '/game/tutorial-completed/x']) {
+    for (const p of ['/game', '/game/', '/game/start', '/game/starting', '/game/started/x']) {
       expect(isPopupEventPath(p), p).toBe(false)
     }
   })
-  it('the v1.97.0 first-run beacons each have a path family, and the exclusion SQL drops them', () => {
+  it('a counted game start has its own path family, and the exclusion SQL drops it', () => {
     expect(pathFamilyOf('/game/start/easy')).toBe('game-start')
     expect(pathFamilyOf('/game/start/unknown')).toBe('game-start')
-    expect(pathFamilyOf('/game/tutorial-complete/first-run')).toBe('game-tutorial-complete')
-    expect(pathFamilyOf('/game/tutorial-complete/replay')).toBe('game-tutorial-complete')
+    expect(pathFamilyOf('/game/tutorial-complete/first-run')).toBe('tutorial-complete')
+    expect(pathFamilyOf('/game/tutorial-complete/replay')).toBe('tutorial-complete')
     expect(pathFamilyOf('/tour/exit-at/hub')).toBe('tour')
     expect(pathFamilyOf('/game')).toBe('page')
     const w: string[] = []
@@ -434,11 +428,13 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
     const sql = w.join(' AND ')
     expect(b).toEqual([])
     expect(sql).toContain("path NOT LIKE '/game/start/%'")
-    expect(sql).toContain("path NOT LIKE '/game/tutorial-complete/%'")
-    // The include side (the event reads) is the exact inverse: it picks both prefixes up.
-    const inc = popupIncludeClause().sql
-    expect(inc).toContain("path LIKE '/game/start/%'")
-    expect(inc).toContain("path LIKE '/game/tutorial-complete/%'")
+    // The include side (the event reads) is the exact inverse: it picks the prefix up.
+    expect(popupIncludeClause().sql).toContain("path LIKE '/game/start/%'")
+  })
+  it('there is exactly one tutorial-complete family and one option for it (no shadowed duplicate)', () => {
+    expect(PATH_FAMILY_OPTIONS.filter((o) => o.value === 'tutorial-complete')).toHaveLength(1)
+    expect(PATH_FAMILY_OPTIONS.filter((o) => o.label === 'Tutorial completed')).toHaveLength(1)
+    expect(POPUP_EVENT_PREFIXES.filter((p) => p.startsWith('/game/tutorial-complete'))).toEqual(['/game/tutorial-complete'])
   })
   it('the first-session beacons are events; /game itself stays a page view', () => {
     for (const p of ['/tour/start', '/tour/complete', '/tour/skip', '/game/first-move', '/game/abandon/0', '/game/abandon/76-99', '/welcome-signed-in/shown', '/welcome-signed-in/leaderboard']) {
@@ -810,5 +806,37 @@ describe('SMALL_SAMPLE_NOTE', () => {
   it('names both the small-population caveat and the fix (read the counts)', () => {
     expect(SMALL_SAMPLE_NOTE).toMatch(/small/i)
     expect(SMALL_SAMPLE_NOTE).toMatch(/counts/i)
+  })
+})
+
+describe('v1.97.0 tutorial-complete / tour-exit beacons', () => {
+  const PATHS = [
+    '/game/tutorial-complete/first-run',
+    '/game/tutorial-complete/replay',
+    '/tour/exit-at/preamble',
+    '/tour/exit-at/hub',
+    '/tour/exit-at/section',
+  ]
+
+  it('are event beacons, never page views: isPopupEventPath is true and the page-view exclusion SQL drops them', () => {
+    for (const p of PATHS) expect(isPopupEventPath(p), p).toBe(true)
+    const w: string[] = []
+    popupExcludeClause(w, [])
+    expect(w.join(' ')).toContain("path <> '/game/tutorial-complete' AND path NOT LIKE '/game/tutorial-complete/%'")
+    // /game/complete/ stays its own, distinct prefix: a tutorial row is not a completion.
+    expect(w.join(' ')).toContain("path NOT LIKE '/game/complete/%'")
+    expect('/game/tutorial-complete/first-run'.startsWith('/game/complete/')).toBe(false)
+  })
+
+  it('the exact matchers accept only their own path', () => {
+    expect(isTutorialCompletePath('/game/tutorial-complete/first-run', 'first-run')).toBe(true)
+    expect(isTutorialCompletePath('/game/tutorial-complete/first-run', 'replay')).toBe(false)
+    expect(isTutorialCompletePath('/game/complete/normal/easy', 'replay')).toBe(false)
+    expect(isTourExitPath('/tour/exit-at/hub', 'hub')).toBe(true)
+    expect(isTourExitPath('/tour/exit-at/hub', 'section')).toBe(false)
+  })
+
+  it('the hand-synced ET date literal equals the ET date of TOUR_TRACKING_LIVE_AT', () => {
+    expect(etDateFromMs(TOUR_TRACKING_LIVE_AT)).toBe(TOUR_TRACKING_LIVE_AT_ET)
   })
 })
