@@ -25,6 +25,8 @@ export interface RatioDef {
   /** proportion only: count the denominator only where the numerator is measured (the install
    * fix: prompts shown before it could never record an "installed" outcome). */
   alignDenominator?: boolean
+  /** Note ids that travel with every value (what the figure is NOT). */
+  caveats?: string[]
 }
 
 export interface RatioVerdict {
@@ -123,7 +125,7 @@ export const RATIO_DEFS: RatioDef[] = [
   ratio('campaign.gameViewsVsArrivals', 'pair', 'campaign.gameViews', 'campaign.taggedArrivals'),
   ratio('campaign.taggedHitsVsArrivals', 'pair', 'campaign.taggedHits', 'campaign.taggedArrivals'),
   // A per: completions per arrival (E1). Can exceed 1, inflated by repeat players; NOT the share who played.
-  ratio('campaign.engagementPerArrival', 'per', 'campaign.completions', 'campaign.returnD0'),
+  ratio('campaign.engagementPerArrival', 'per', 'campaign.completions', 'campaign.returnD0', { caveats: ['engagement-per-arrival'] }),
   // Site-wide and pop-up proportions.
   ratio('bsk.popupTapRate', 'proportion', 'bsk.popupAccepts', 'bsk.popupShown'),
   ratio('popup.tapRate', 'proportion', 'popup.accepts', 'popup.shown'),

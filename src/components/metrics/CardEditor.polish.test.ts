@@ -204,7 +204,8 @@ describe('repeat.organic has a control, and its conflict with flighting today is
     const w = await returns()
     await repeatSelect(w).setValue('popups')
     await flushPromises()
-    expect(controls(w).findAll('label').some((l) => l.text().includes('organic'))).toBe(false)
+    // The control's own wording: a caveat note in the caption picker may say "organic" too.
+    expect(controls(w).findAll('label').some((l) => l.text().includes('Add an "organic" row'))).toBe(false)
   })
 
   it('organic + flighting today: says why it cannot be saved, and unticking either fixes it', async () => {

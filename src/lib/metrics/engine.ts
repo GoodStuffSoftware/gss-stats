@@ -819,7 +819,8 @@ function deriveRatio(batch: Batch, req: ResolvedRequest): MetricValue {
     v = { status: d === 0 ? 'no-data' : g.insufficientCohort ? 'too-few' : partial ? 'partial' : 'ok', value: g.value, numerator: n, denominator: d }
   }
   if (partial) v.measuredFrom = Math.max(num.status === 'partial' ? num.m!.from : -Infinity, den.status === 'partial' ? den.m!.from : -Infinity)
-  const noteIds = num.noteIds.length && den.noteIds.length ? [...new Set([...num.noteIds, ...den.noteIds])] : num.noteIds.length ? num.noteIds : den.noteIds
+  const sideNotes = num.noteIds.length && den.noteIds.length ? [...new Set([...num.noteIds, ...den.noteIds])] : num.noteIds.length ? num.noteIds : den.noteIds
+  const noteIds = r.caveats?.length ? [...new Set([...sideNotes, ...r.caveats])] : sideNotes
   if (noteIds.length) v.noteIds = noteIds
   return applyLag(v, numDef.lagDays, batch.lagStopMs(req, denDef, den), batch.env.nowMs)
 }

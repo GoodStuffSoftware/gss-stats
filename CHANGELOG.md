@@ -6,6 +6,17 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **A retention-verdict card preset.** It shows each campaign arm and the organic baseline with its
+  GO, HOLD, NO-GO, provisional, maturing or too-few verdict, the days 2-7 return rate with 90%
+  lower and upper bounds, and first tagged loads; it is in the picker only and counts rows, never
+  by hour, place or device.
+- **A campaign-engagement card preset.** It shows completed games per arrival for each campaign with
+  its two counts, and a note that repeat players push it above the share of arrivals who played.
+- **Retention caveats on every return-rate figure and the verdict.** One says organic and campaign
+  arrivals are different devices and the bar compares them without netting either out (this note
+  cannot be hidden); the other says the rates are a lower bound on people.
+
 ## [0.15.2] — 2026-10-03
 
 ### Fixed

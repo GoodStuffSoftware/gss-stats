@@ -271,6 +271,9 @@ function returnD2to7Of(part: 'rate' | 'lower' | 'upper') {
 }
 
 // ── The per-arm retention verdict (retention spec section 4, lib/metrics/retention.ts) ──────────
+/** The caveats every R2-7 figure and the verdict carry: the groups are disjoint (the bar compares,
+ * it does not net out), and the rates are a lower bound. */
+const RETENTION_CAVEATS = ['retention-disjoint', 'retention-lower-bound']
 /** campaign.retentionVerdict's value: the index of its code here, shown as its 'verdict.<code>'
  * label. Append only: a value never changes meaning. */
 export const VERDICT_CODES: readonly VerdictCode[] = ['too-few', 'maturing', 'provisional', 'no-go', 'hold', 'go']
@@ -397,6 +400,7 @@ export const METRIC_DEFS: MetricDef[] = [
       instrumented: (ctx) => (ctx.params.campaignId === ORGANIC_ARM_ID ? [BEACON, ORGANIC_TRACKING] : [BEACON, TRACKING_VS_FLIGHT]),
       lagDays: [2, 7],
       organic: true,
+      caveats: RETENTION_CAVEATS,
     }),
   ),
   // The per-arm verdict (retention spec section 4): the arm's R2-7 against the organic baseline's
@@ -408,6 +412,7 @@ export const METRIC_DEFS: MetricDef[] = [
     windows: { attribution: 'campaignReturns' },
     store: retentionVerdictOf,
     withOrganic: true,
+    caveats: RETENTION_CAVEATS,
     instrumented: [BEACON, TRACKING_VS_FLIGHT],
   }),
   campaignMetric({
