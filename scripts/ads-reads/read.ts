@@ -425,7 +425,9 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
   const totals = spendTotals(i.stored, i.spendThroughEt ?? addEtDays(campaign.flightStart!, -1))
   const cumulativeSpend = totals.cost
 
-  const placementRows = await placementRowsFor(deps, campaign, i.campaignSync, i.spendThroughEt)
+  // A search campaign has no placements: no pull, no error, and kill rule 1 reads n/a.
+  const isSearch = plan.channel === 'search'
+  const placementRows: Attempt<PlacementDayRow[]> = isSearch ? { ok: true, value: [] } : await placementRowsFor(deps, campaign, i.campaignSync, i.spendThroughEt)
   const placementsStored = placementRows.ok && !deps.dryRun && i.campaignSync?.placementsOk !== false
   const beacon = deps.beacon
   const siteRows = beacon ? await attempt('beacon site events', () => beacon.siteEvents(WEB_GO_LIVE_UTC_MS)) : unavailable<HourPathCount[]>('beacon site events', deps.beaconInitError)
@@ -460,7 +462,7 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
   const play = returnSites.ok ? playReturnStatus(returnSites.value, deps.nowMs) : null
 
   // Placement split for kill rule 1 — over the SAME closed range as the campaign total.
-  const split = placementRows.ok ? splitPlacements(placementRows.value, i.spendThroughEt) : null
+  const split = placementRows.ok && !isSearch ? splitPlacements(placementRows.value, i.spendThroughEt) : null
   const placementView: FullRead['placements'] = split
     ? {
         campaignCost: cumulativeSpend,
@@ -917,7 +919,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
   const { section: spend, stored, sync, campaignSync } = await syncSpend(deps, plan, campaign, todayEt, opts.healthOnly ? 'backstop' : 'morning-read')
   if (spend.error) errors.push(spend.error)
   if (spend.storeError) errors.push(spend.storeError)
-  if (campaignSync.fetchOk && campaignSync.placementsOk === false && campaignSync.error && !errors.includes(campaignSync.error)) errors.push(campaignSync.error)
+  if (plan.channel !== 'search' && campaignSync.fetchOk && campaignSync.placementsOk === false && campaignSync.error && !errors.includes(campaignSync.error)) errors.push(campaignSync.error)
 
   // Consumed = the threshold-state rows PLUS any complete threshold reading (a state row lost to
   // a partial write must never make a threshold fire twice).
