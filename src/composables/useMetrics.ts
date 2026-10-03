@@ -251,11 +251,13 @@ async function sendChunk(batch: Batch, reqKeys: string[]) {
     for (const [reqKey, entry] of ownedEntries()) {
       const result = safeResultLookup(json.results, reqKey)
       const shown = entry.value.value
-      if (entry.background && (!result || result.status === 'error') && shown && shown.status !== 'error') {
+      if (entry.background && shown && (!result || (result.status === 'error' && shown.status !== 'error'))) {
         // A return refetch the server answered with a per-fact error (a 200 carrying
-        // `fact-failed`, e.g. a D1 hiccup) or no result for the key: keep the last good value,
-        // exactly as a rejected fetch does. A foreground or first load still shows the error.
-        entry.status = 'ok'
+        // `fact-failed`, e.g. a D1 hiccup) or no result for the key: keep what is on screen,
+        // exactly as a rejected fetch does — a last good value stays, and an error already up
+        // stays an error (a missing key must not blank it). Only a real value, or a real new
+        // error over a good value, replaces it. A foreground or first load still shows the error.
+        entry.status = shown.status === 'error' ? 'error' : 'ok'
       } else {
         entry.value.value = result
         entry.status = result ? 'ok' : 'error'

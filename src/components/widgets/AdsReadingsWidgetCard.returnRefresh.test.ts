@@ -177,6 +177,42 @@ describe('AdsReadingsWidgetCard: an older response never overwrites a newer one'
   })
 })
 
+describe('AdsReadingsWidgetCard: a superseded FIRST load cannot touch the state of the newer one', () => {
+  it('an older first load that fails after the newer one succeeded shows no error (error-write guard)', async () => {
+    let fail!: (e: Error) => void
+    mocked.mockImplementationOnce(() => new Promise((_res, rej) => (fail = rej)))
+    mocked.mockImplementationOnce(async () => withCampaign('NEWQUERY'))
+    wrapper = mount(AdsReadingsWidgetCard, { props: { widget: {} } })
+    await vi.advanceTimersByTimeAsync(0)
+    await wrapper.setProps({ widget: { campaignIds: ['2'] } })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(wrapper.text()).toContain('NEWQUERY')
+    fail(new Error('late failure'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(wrapper.find('.state.error').exists()).toBe(false)
+    expect(wrapper.text()).toContain('NEWQUERY')
+  })
+
+  it('an older load that settles while the newer one is still pending leaves the "Loading…" state up (finally guard)', async () => {
+    const old = deferred<never>()
+    const newer = deferred<never>()
+    mocked.mockImplementationOnce(() => old.promise)
+    mocked.mockImplementationOnce(() => newer.promise)
+    wrapper = mount(AdsReadingsWidgetCard, { props: { widget: {} } })
+    await vi.advanceTimersByTimeAsync(0)
+    await wrapper.setProps({ widget: { campaignIds: ['2'] } })
+    await vi.advanceTimersByTimeAsync(0)
+    old.resolve(withCampaign('OLDQUERY'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(wrapper.text()).toContain('Loading')
+    expect(wrapper.text()).not.toContain('OLDQUERY')
+    newer.resolve(withCampaign('NEWQUERY'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(wrapper.text()).toContain('NEWQUERY')
+    expect(wrapper.text()).not.toContain('Loading')
+  })
+})
+
 describe('AdsReadingsWidgetCard: a hung load does not block the return refetch forever', () => {
   it('is still in flight before the age limit; past it a return refetches', async () => {
     mocked.mockImplementationOnce(() => new Promise(() => {}))
