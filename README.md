@@ -179,6 +179,13 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   first save of a newer version first copies the previous stored layout to
   `dashboard:default:backup:v<old version>` in KV ([`functions/api/config.ts`](functions/api/config.ts)),
   once, so a migration can be rolled back by copying that key over `dashboard:default`.
+  Every save that changes the stored layout also first copies the stored one to
+  `dashboard:default:prev`, and the first such save of each ET day to
+  `dashboard:default:day:<YYYY-MM-DD>` (kept 30 days); if a copy can't be written the save is
+  refused (`503`) and the stored layout and `:prev` are left as they were (see
+  [Restoring the layout](#restoring-the-layout)). That makes a changing save 2 KV writes (3 on the
+  first of an ET day) instead of 1, so the Free plan's 1,000 writes a day (account-wide) cover
+  about half as many edits; past the cap every save fails with that `503`.
   A tab saves only after it has read the stored layout ([`src/api.ts`](src/api.ts) `loadConfig`
   resolves to `null` only when nothing is stored yet): if the read fails — no answer, a non-2xx,
   or a body that isn't a layout or can't be normalized — it shows the built-in defaults under a "Couldn't load your saved
@@ -422,6 +429,39 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   membership, and known verification/household traffic is excluded server-side. One
   campaign (Play-direct) sends its ads straight to the Play Store and so has no beacon rows
   at all; it's shown spend-only rather than an empty funnel.
+- **Retention verdict** — a per-arm read of "did the campaign's arrivals come back", offered in
+  the card picker as the `retention-verdict` preset (a table, one row per campaign arm plus
+  "Organic (web)": the verdict, the days 2-7 return rate with its 90% lower and upper bounds,
+  first tagged loads (d0), and completed games per arrival) and, beside it, `campaign-engagement`
+  (completed games per arrival with its two counts). Neither is a default and neither bumps the
+  layout version. The rate is the share of an arm's d0 devices that came back on any of days 2-7
+  after arrival (ET days), and its bounds are a **Wilson score interval at 90%**
+  (`wilsonBounds` in [`src/lib/metrics/retention.ts`](src/lib/metrics/retention.ts)). The verdict
+  compares those bounds with a **bar**: a fixed 7.5%, or 0.6 times the organic days 2-7 rate once
+  the organic baseline is sound, meaning at least 1,000 *matured* organic arrivals, at least 21
+  matured organic ET days, and at least one organic day 2-7 return (zero returns would make the
+  bar 0 and hand every arm a GO, so that case keeps the fixed 7.5%). The verdict cell says which
+  bar was used and, for the fixed one, why. Codes: **too few** (under 200 d0, no read);
+  **maturing** (the arm's last arrival's day 2-7 window has not closed, so returns can still
+  arrive; a maturing arm never gets an early NO-GO); **provisional** (matured, 200-499 d0, the
+  upper bound is not below the bar; it can still be NO-GO when it is); **GO** (matured, at least 500
+  d0, lower bound at or above the bar); **NO-GO** (matured, upper bound below the bar); **HOLD**
+  (matured, at least 500 d0, the bar sits inside the bounds). At 500 d0 against the fixed 7.5%
+  bar, GO needs 48 or more returns (lower bound 7.65%; 47 gives 7.47%) and NO-GO needs 27 or fewer
+  (upper bound 7.32%; 28 gives 7.54%). These are Wilson thresholds, not the Wald 49 and 28. When the organic bar is used it
+  **runs high**: the organic day 2-7 count is cut at ET midnights, so it also includes returns from
+  recent arrivals that are not yet in the matured arrival count, about 2.5 to 3.5 days of
+  arrivals' worth (2.5 if first returns are spread evenly over days 2-7, 3.5 if they come on
+  day 2). The bar is therefore too high by about that many days divided by the matured organic
+  days (roughly 12 to 17% at 21 days, about 10% at 30, and larger the fewer there are). A high bar
+  makes NO-GO easier and GO harder, never the reverse, and that is why the 21-day minimum exists.
+  Organic d0
+  and campaign d0 are **disjoint populations** (a device is organic only on a first-ever web visit
+  with no campaign tag, first touch wins), so the organic bar *compares* the two groups and nets
+  nothing out of a campaign; that caveat can't be hidden from the card. The rates are also a lower
+  bound on people (d0 counts browser storage, not people), and the bounds cover sampling error
+  only. Everything is **counts only**: rows only, with no hour, place or device split offered on
+  any of it.
 - **Locked down** — Google sign-in with an email allowlist gates every page and API
   call; the header shows who is signed in with a **Sign out** button (between 701px and 1000px
   wide, where the bar would wrap, the search box shrinks to its icon and the account becomes an
@@ -1181,6 +1221,55 @@ To put a backup back, in this order:
    ```
 
 5. Open one tab and check the layout before opening any others.
+
+### Restoring the layout
+
+For when a save replaced the layout with the wrong one at the **same** layout version (say, a tab
+that never loaded the real layout saved the defaults over it). The version backups above don't
+cover that; these two copies do (`functions/api/config.ts`):
+
+- `dashboard:default:prev` — the layout as it was before the most recent save that changed it.
+  The next changing save replaces it, so it only helps if nothing was saved after the bad save.
+- `dashboard:default:day:<YYYY-MM-DD>` — the layout as it was before the first changing save of
+  that ET day. Kept 30 days. Use this when more saves followed the bad one: pick the day the bad
+  save happened (or the day before) and it holds the layout as that day began.
+
+Same order and cautions as above: **close every dashboard tab first** (the next changing save
+replaces `:prev`), then run these one at a time from the repo root, in Windows PowerShell 5.1.
+
+Read-only — list the copies, keep what's there now, and download the one you want (`:prev`, or a
+`:day:` key from the list):
+
+```powershell
+npx wrangler kv key list --remote --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --prefix "dashboard:default:"
+```
+
+```powershell
+cmd /c 'npx wrangler kv key get dashboard:default --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-current.json'
+```
+
+```powershell
+cmd /c 'npx wrangler kv key get dashboard:default:prev --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-restore.json'
+```
+
+```powershell
+cmd /c 'npx wrangler kv key get dashboard:default:day:2026-10-03 --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-restore.json'
+```
+
+Check it the same way (it must print `ok: version ..., N pages`; otherwise stop):
+
+```powershell
+Get-Content layout-restore.json -Raw -Encoding UTF8 | ConvertFrom-Json | ForEach-Object { if ($_.pages -isnot [array] -or $_.pages.Count -eq 0) { throw 'not a layout' }; "ok: version $($_.version), $($_.pages.Count) pages" }
+```
+
+Write — only after that printed `ok`. It replaces the whole stored layout, and writing with
+wrangler makes no `:prev` copy, so keep `layout-current.json` in case you need to undo it:
+
+```powershell
+npx wrangler kv key put "dashboard:default" --path layout-restore.json --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote
+```
+
+Then open one tab and check the layout before opening any others.
 
 ## Auth
 

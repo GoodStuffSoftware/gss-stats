@@ -102,7 +102,8 @@ export type FactId =
 /** Normalized fact params. Which ones identify an instance is FactDef.keyParams. */
 export interface FactParams {
   campaignId?: string
-  /** ET calendar date the KPI fact is anchored on (today, ET). */
+  /** ET calendar date (today, ET) the KPI fact is anchored on, and the organic returns arm's
+   * maturity cut (campaignReturns, organic only: ORGANIC_MATURITY_SQL). */
   todayEt?: string
   since?: string
   until?: string
@@ -358,6 +359,33 @@ const beaconDaily = (raw: Record<string, unknown>[]): FactRows => ({
 /** Every stored spend day, whole micros per (campaign, ET date): the adsSpend twin. */
 export const SPEND_DAYS_SQL = 'SELECT campaign_id, date, cost_micros FROM ads_daily_metrics ORDER BY campaign_id, date'
 
+/**
+ * The organic returns arm's MATURITY BAND (R-2b), `s` on its campaignReturns rows, by ET DAY only:
+ * 2 = the row fired on ET day T (today), 1 = on T-7 .. T-1, 0 = before T-7. Its two bounds are ET
+ * midnights from todayEt, never a clock time and never `nowMs`, so it is an ET-day total of a
+ * counts-only row (lib/splitGuard.ts: ET-day totals are fine) and it never splits a cache key
+ * within a day.
+ *
+ * A return path carries only its bucket (/return/<uc>/<bucket>), never the arrival day, so the
+ * matured cohort is cut by the day a row FIRED. With C = T-8 the last arrival day whose d2-7
+ * window (arrival +2 .. +7) has closed by T:
+ *  - matured d0 = d0 rows with s = 0: a d0 row fires on its arrival day, so s = 0 is exactly the
+ *    arrivals on days <= T-8 = C. EXACT.
+ *  - matured d2-7 = d2-7 rows with s <= 1: every row that fired on or before T-1. It holds every
+ *    d2-7 return of an arrival <= C (those fire by C+7 = T-1), plus some returns of arrivals
+ *    C+1 .. C+5 (theirs start firing at C+3 = T-5). It is therefore >= the exact count, never
+ *    below it.
+ * The bar is 0.6 x d2-7 / d0 (lib/metrics/retention.ts retentionBar): an exact denominator and a
+ * numerator that can only be at or above the exact one, so the approximation NEVER LOWERS THE BAR.
+ * A campaign arm is judged against a bar at or above the true one: the cut can only make a GO
+ * harder, never easier.
+ */
+export const ORGANIC_MATURITY_SQL = 'CASE WHEN ts >= ? THEN 2 WHEN ts >= ? THEN 1 ELSE 0 END'
+/** ORGANIC_MATURITY_SQL's binds: ET midnight of T, then ET midnight of T-7 (DST-correct). */
+export function organicMaturityBinds(todayEt: string): [number, number] {
+  return [etMidnightMs(todayEt), etMidnightMs(addEtDays(todayEt, -7))]
+}
+
 export const FACTS: Record<FactId, FactDef> = {
   campaignPathVisitor: {
     id: 'campaignPathVisitor',
@@ -391,7 +419,9 @@ export const FACTS: Record<FactId, FactDef> = {
   campaignReturns: {
     id: 'campaignReturns',
     db: 'gss_geo',
-    keyParams: ['campaignId'],
+    // todayEt is supplied ONLY for the organic arm (lib/metrics/engine.ts factParamsFor), so a
+    // campaign's key, statement and cache entry are unchanged by it.
+    keyParams: ['campaignId', 'todayEt'],
     honors: [],
     bucketMs: null,
     splitAt: null,
@@ -401,11 +431,18 @@ export const FACTS: Record<FactId, FactDef> = {
       // site ONLY (Best Sudoku never sends it from the installed app, where a late Play referrer
       // would make an app 'organic' record swallow a campaign's first touch), and no lower bound
       // (it has no flight). Counts only, like every arm: no device, hour or place column.
+      // Grouped by `s`, the ET-day maturity band (ORGANIC_MATURITY_SQL); every existing organic
+      // metric sums across it.
       if (p.campaignId === ORGANIC_ARM_ID) {
+        if (!p.todayEt) throw new Error('campaignReturns (organic) needs todayEt')
         const w: string[] = ['site = ?', 'path LIKE ?']
         const b: unknown[] = [BSK_WEB_SITE, `/return/${ORGANIC_ARM_ID}/%`]
         applyExclusions(w, b)
-        return { db: 'gss_geo', sql: `SELECT path, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY path`, binds: b }
+        return {
+          db: 'gss_geo',
+          sql: `SELECT path, ${ORGANIC_MATURITY_SQL} AS s, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY path, s`,
+          binds: [...organicMaturityBinds(p.todayEt), ...b],
+        }
       }
       // A campaign: path-embedded uc, on the web site AND the installed app, NOT date-windowed: a
       // d31-60 return can fire long after the flight ended (lib/campaigns.ts parseReturnPath).

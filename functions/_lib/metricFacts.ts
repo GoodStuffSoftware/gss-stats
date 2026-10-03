@@ -106,10 +106,12 @@ export function prewarmFactKeys(): void {
         factCacheKeyUrl({ id, params: { campaignId: c.id } })
       }
     }
-    factCacheKeyUrl({ id: 'campaignReturns', params: { campaignId: ORGANIC_ARM_ID } }) // the organic baseline arm
     factCacheKeyUrl({ id: 'adsSpend', params: {} })
     // The date- and range-dependent facts: their keys change daily, but their SQL text does not,
     // so hashing that text now leaves only their bound values for the first request of a day.
+    // The organic baseline arm keys on todayEt too (its ET-day maturity band, lib/metrics/facts.ts
+    // ORGANIC_MATURITY_SQL), exactly as lib/metrics/engine.ts factParamsFor plans it.
+    factCacheKeyUrl({ id: 'campaignReturns', params: { campaignId: ORGANIC_ARM_ID, todayEt: '2026-01-01' } })
     factCacheKeyUrl({ id: 'bskKpiDays', params: { todayEt: '2026-01-01' } })
     factCacheKeyUrl({ id: 'bskRangePath', params: { since: '2026-01-01', until: '2026-01-02' } })
     for (const sites of [[], ['bestsudoku-web'], ['bestsudoku-web', 'bestsudoku', 'bestsudoku-app']]) {
