@@ -25,9 +25,10 @@ export const BAR_FIXED = 0.075
 /** Organic d0 (matured cohort) at which the bar switches to the organic one. */
 export const ORGANIC_MIN_D0 = 1000
 /** Matured organic ET days (tracking start through T-7) needed before the organic bar is used. The
- * earliest organic cohorts include returners from before tracking began, so the organic rate and
- * the bar read from it run HIGH by about (2.5 to 3.5 days) / (matured organic days); 21 days keeps
- * that near 12 to 17%. */
+ * organic days 2-7 count is cut at ET midnights, so it also includes already-fired returns from
+ * recent arrivals that are not yet in the matured arrival count (about 2.5 to 3.5 arrival-days'
+ * worth). The organic rate and the bar read from it therefore run HIGH by about
+ * (2.5 to 3.5 days) / (matured organic days); 21 days keeps that near 12 to 17%. */
 export const ORGANIC_MIN_DAYS = 21
 /** The organic bar is this fraction of the organic R2-7 point estimate. */
 export const ORGANIC_BAR_FACTOR = 0.6
@@ -74,8 +75,9 @@ export interface RetentionBar {
  * The bar an arm's R2-7 is judged against. The fixed 7.5% bar, unless ALL of these hold, and then
  * 0.6 x the organic R2-7:
  *  - at least ORGANIC_MIN_D0 matured organic arrivals;
- *  - at least ORGANIC_MIN_DAYS matured organic ET days (the earliest organic cohorts include
- *    returners from before tracking, which raises the organic rate: see ORGANIC_MIN_DAYS);
+ *  - at least ORGANIC_MIN_DAYS matured organic ET days (the organic days 2-7 count also includes
+ *    already-fired returns from recent arrivals not yet in the matured arrival count, which
+ *    raises the organic rate: see ORGANIC_MIN_DAYS);
  *  - organic d2-7 returns above zero. Zero returns would make the bar 0, and every arm would then
  *    clear it: a broken or not-yet-firing organic beacon must fall back to the fixed bar, never
  *    to a free GO.
