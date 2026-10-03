@@ -361,7 +361,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   campaign (Play-direct) sends its ads straight to the Play Store and so has no beacon rows
   at all; it's shown spend-only rather than an empty funnel.
 - **Locked down** — Google sign-in with an email allowlist gates every page and API
-  call; the header shows who is signed in with a **Sign out** button, and an expired
+  call; the header shows who is signed in with a **Sign out** button (between 701px and 1000px
+  wide, where the bar would wrap, the search box shrinks to its icon and the account becomes an
+  icon menu with the e-mail and **Log out** — the same `/auth/logout`), and an expired
   session shows a one-tap re-sign-in banner instead of a wall of errors.
 - Light / dark theme matching the Good Stuff Software brand.
 
