@@ -5,6 +5,10 @@ import {
   isPopupEventPath,
   popupExcludeClause,
   popupIncludeClause,
+  isTutorialCompletePath,
+  isTourExitPath,
+  TOUR_TRACKING_LIVE_AT,
+  TOUR_TRACKING_LIVE_AT_ET,
   POPUP_EVENT_PREFIXES,
   GAME_COMPLETE_LIVE_AT,
   NEW_BEACONS_LIVE_AT_ET,
@@ -374,7 +378,7 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
   // exactly how '/return' was accidentally left off this list on this branch — see the
   // 2026-09-25 review). If this ever fails, either a prefix was removed (update this
   // literal list deliberately) or one was never added (fix the array instead).
-  it('POPUP_EVENT_PREFIXES is exactly these 18 prefixes', () => {
+  it('POPUP_EVENT_PREFIXES is exactly these 19 prefixes', () => {
     expect([...POPUP_EVENT_PREFIXES]).toEqual([
       '/signin-prompt',
       '/signin-eligible',
@@ -391,6 +395,7 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
       '/auth/error',
       '/auth/redirect',
       '/tour',
+      '/game/tutorial-complete',
       '/game/first-move',
       '/game/abandon',
       '/welcome-signed-in',

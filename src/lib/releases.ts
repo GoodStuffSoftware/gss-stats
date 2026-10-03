@@ -164,6 +164,15 @@ export const RELEASES: ReleaseMarker[] = [
     dateEt: '2026-10-03',
     note: 'Leaderboard sign-in invite from 3 entries; cancelled install no longer hides the suggestion',
   },
+  {
+    version: 'v1.97.0',
+    // Per the BSK release owner's 2026-10-03 message: live on prod web, prod live check passed.
+    // Last 1.96.1 seen 17:03:37Z, first 1.97.0 seen 17:03:40Z (13:03:40 ET; popupEvents.ts
+    // TOUR_TRACKING_LIVE_AT). A hosting-only local deploy; no backend change since 1.96.1.
+    dateEt: '2026-10-03',
+    note: 'Tutorial completions split first run vs replay, tour exit step tracked; first-run win offers a real game',
+    major: true,
+  },
 ]
 
 export type DatedRelease = ReleaseMarker & { dateEt: string }
