@@ -69,6 +69,17 @@ export const POPUP_EVENT_PREFIXES = [
   // — fires when the popup flow can't run (e.g. an in-app browser) and the app falls back to
   // a full-page redirect. One row per fallback. Never a screen view.
   '/auth/redirect',
+  // First-session beacons (Best Sudoku, rolling out 2026-09-30; read by the ads routine's
+  // first-session funnel, lib/adsRules.ts firstSessionBucket): the tutorial tour
+  // (/tour/start | complete | skip), the first placed digit (/game/first-move), an abandoned
+  // game by % filled (/game/abandon/<0|1-25|26-50|51-75|76-99>) and the signed-in welcome card
+  // (/welcome-signed-in/<shown|daily|leaderboard|dismiss>). All events, never screen views.
+  // '/game/first-move' and '/game/abandon' are exact-or-subpath anchors like every entry
+  // above, so '/game' itself stays a page view.
+  '/tour',
+  '/game/first-move',
+  '/game/abandon',
+  '/welcome-signed-in',
 ] as const
 
 export function isPopupEventPath(path: string): boolean {
@@ -138,6 +149,10 @@ const PATH_FAMILY_LABELS: Record<(typeof POPUP_EVENT_PREFIXES)[number], string> 
   '/auth/success/email/': 'auth-status',
   '/auth/error': 'auth-error',
   '/auth/redirect': 'auth-redirect',
+  '/tour': 'tour',
+  '/game/first-move': 'game-first-move',
+  '/game/abandon': 'game-abandon',
+  '/welcome-signed-in': 'welcome-signed-in',
 }
 
 /** Path → family label. 'page' for anything that isn't an event beacon (an ordinary page
@@ -180,6 +195,10 @@ export const PATH_FAMILY_OPTIONS: { value: string; label: string }[] = [
   { value: 'auth-status', label: 'Auth new/existing status' },
   { value: 'auth-error', label: 'Sign-in failure' },
   { value: 'auth-redirect', label: 'Sign-in redirect fallback' },
+  { value: 'tour', label: 'Tutorial tour' },
+  { value: 'game-first-move', label: 'First move' },
+  { value: 'game-abandon', label: 'Game abandoned' },
+  { value: 'welcome-signed-in', label: 'Signed-in welcome card' },
 ]
 
 // ── Classification ──────────────────────────────────────────────────────────────────
@@ -408,6 +427,16 @@ export function classifyPopupPath(path: string): PopupEvent | null {
     const [provider] = segments(path, '/auth/redirect')
     if (!provider) return null
     return { family: 'auth-redirect', kind: 'occurred', extra: provider }
+  }
+
+  // The signed-in welcome card: shown | daily / leaderboard (the two taps, as accept with the
+  // destination as extra) | dismiss. Not a POPUPS panel (no rate or outcome tracking), so the
+  // pop-ups page ignores it; classified so aggregates and the ads routine read one vocabulary.
+  if (path === '/welcome-signed-in' || path.startsWith('/welcome-signed-in/')) {
+    const [x] = segments(path, '/welcome-signed-in')
+    if (x === 'shown' || x === 'dismiss') return { family: 'welcome-signed-in', kind: x }
+    if (x === 'daily' || x === 'leaderboard') return { family: 'welcome-signed-in', kind: 'accept', extra: x }
+    return null
   }
 
   if (path === '/popup-outcome' || path.startsWith('/popup-outcome/')) {

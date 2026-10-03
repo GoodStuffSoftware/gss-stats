@@ -57,7 +57,7 @@ If `status --porcelain` prints anything, stop and report it; never discard chang
 From `C:\Users\msant\dev\gss-stats-ads-routine`, with this run's stage:
 
 ```bash
-npm run -s ads:postflight-read -- --stage <wrapup|day15|day30|day60|december> --cf-token-file C:/Users/msant/dev/cf-token.txt --firebase-sa C:/Users/msant/.firebase/service-accounts/best-sudoku-prod.json
+npm run -s ads:postflight-read -- --stage <wrapup|day15|day30|day60|december> --campaign 24279250691 --cf-token-file C:/Users/msant/dev/cf-token.txt --firebase-sa C:/Users/msant/.firebase/service-accounts/best-sudoku-prod.json
 ```
 
 If the report says the stage is **not due yet** → stop, unless `notify.push` is true: then
