@@ -35,10 +35,12 @@ const RETEST = campaignById('24279250691')!
 const row = (path: string): BeaconRow => ({ path, visitor: 'new', ts: 0 }) as unknown as BeaconRow
 const ctx = (campaignId: string): MetricCtx => ({ params: { campaignId }, campaign: campaignById(campaignId), window: 'attribution' })
 const RETURN_METRICS = ['campaign.returnD0', 'campaign.returnD1', 'campaign.returnD2to7', 'campaign.returnD8to14', 'campaign.returnD15to30', 'campaign.returnD31to60']
+/** R2-7 serves the organic arm over its matured cohort only (the verdict's baseline). */
+const R27_METRICS = ['campaign.returnD2to7Rate', 'campaign.returnD2to7Lower', 'campaign.returnD2to7Upper']
 
 describe('which bindings serve the organic arm', () => {
-  it('exactly the return metrics', () => {
-    expect([...METRICS.values()].filter((d) => d.organic).map((d) => d.id).sort()).toEqual([...RETURN_METRICS].sort())
+  it('exactly the return metrics and R2-7', () => {
+    expect([...METRICS.values()].filter((d) => d.organic).map((d) => d.id).sort()).toEqual([...RETURN_METRICS, ...R27_METRICS].sort())
   })
   it('a ratio only when BOTH sides do — never organic over campaign or the reverse', () => {
     expect([...RATIOS.values()].filter((r) => ratioSupportsOrganic(r)).map((r) => r.id).sort()).toEqual(

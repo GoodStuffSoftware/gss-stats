@@ -54,6 +54,7 @@ import type { Widget } from '../types'
 // out of itself), so importing the constant from lib/adsRules.ts here is fine.
 import { AUTH_NEW_EXISTING_LIVE_AT } from './adsRules'
 import { etOffsetHours } from './etTime'
+import { BAR_FIXED, ORGANIC_BAR_FACTOR, ORGANIC_MIN_D0, ORGANIC_MIN_DAYS } from './metrics/retention'
 
 // "counted from 2026-09-26 15:43 ET" — AUTH_NEW_EXISTING_LIVE_AT's own ET wall time, for the
 // new/existing/unknown sign-up tiles' partial-window note (lib/metrics/metrics.ts
@@ -231,6 +232,40 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     severity: 'info',
     scopes: ['campaigns'],
   },
+  'engagement-per-arrival': {
+    id: 'engagement-per-arrival',
+    text: 'Completed games per arrival (first tagged load). It can exceed 1 and repeat players inflate it: it is not the share of arrivals who played.',
+    kind: 'note',
+    severity: 'caveat',
+    scopes: ['campaigns'],
+  },
+  'retention-disjoint': {
+    id: 'retention-disjoint',
+    // Built from the verdict's own constants (lib/metrics/retention.ts), so the text cannot drift
+    // from the bar the rule uses. ET-day wording only: no clock time.
+    text: () =>
+      `Organic and campaign arrivals are different devices. Organic is a first-ever web visit with no campaign tag, and the first touch wins. The bar compares the two groups. It does not net organic out of a campaign. The bar is ${ORGANIC_BAR_FACTOR} times the organic days 2-7 rate once ${ORGANIC_MIN_D0.toLocaleString('en-US')} organic arrivals over at least ${ORGANIC_MIN_DAYS} days have matured and some of them have returned. Until then, and if none have returned, it is a fixed ${+(BAR_FIXED * 100).toFixed(1)}%.`,
+    kind: 'note',
+    severity: 'caveat',
+    scopes: [],
+    hideable: false,
+  },
+  'retention-organic-bias': {
+    id: 'retention-organic-bias',
+    // From the bar's own constants (lib/metrics/retention.ts). Days only: no clock time.
+    text: () =>
+      `The organic bar runs high. Its returns include some from recent arrivals that are not yet in the arrival count, about 2.5 to 3.5 days of arrivals' worth, so it is too high by about that many days divided by the matured organic days (${ORGANIC_MIN_DAYS} days: ${+((2.5 / ORGANIC_MIN_DAYS) * 100).toFixed(0)}% to ${+((3.5 / ORGANIC_MIN_DAYS) * 100).toFixed(0)}%). That is why the organic bar waits for ${ORGANIC_MIN_DAYS} matured days.`,
+    kind: 'note',
+    severity: 'caveat',
+    scopes: [],
+  },
+  'retention-lower-bound': {
+    id: 'retention-lower-bound',
+    text: 'These rates are a lower bound on how many people come back. A device is browser storage, not a person: cleared storage, private windows, a second browser and a move to the app all lose returns. The 90% bounds cover sampling error only, not that bias.',
+    kind: 'note',
+    severity: 'caveat',
+    scopes: [],
+  },
   'return-rate-caption': {
     id: 'return-rate-caption',
     text: 'Rate per bucket = bucket count / d0 (first tagged load).',
@@ -366,6 +401,10 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.campaign.returnD8to14': 'Came back on days 8-14',
     'label.campaign.returnD15to30': 'Came back on days 15-30',
     'label.campaign.returnD31to60': 'Came back on days 31-60',
+    'label.campaign.returnD2to7Rate': 'Came back d2-7 (rate)',
+    'label.campaign.returnD2to7Lower': 'Came back d2-7 (90% lower)',
+    'label.campaign.returnD2to7Upper': 'Came back d2-7 (90% upper)',
+    'label.campaign.retentionVerdict': 'Retention verdict',
     'label.campaign.spend': 'Spend',
     'label.bsk.pageviews': 'Page views',
     'label.bsk.completions': 'Games completed',
@@ -415,6 +454,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.campaign.installPerPrompt': 'Install rate',
     'label.campaign.returnD1PerD0': 'Return rate (d1)',
     'label.campaign.returnD2to7PerD0': 'Return rate (d2-7)',
+    'label.campaign.engagementPerArrival': 'Games completed per arrival',
     'label.campaign.returnD8to14PerD0': 'Return rate (d8-14)',
     'label.campaign.returnD15to30PerD0': 'Return rate (d15-30)',
     'label.campaign.returnD31to60PerD0': 'Return rate (d31-60)',
@@ -445,6 +485,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'unit.instant': 'time',
     'unit.hits': 'hits',
     'unit.code': 'kind',
+    'unit.rate': 'rate',
 
     // Status words and gating messages (MetricValue.status / noteIds).
     'flight-pending': 'pending — start date not yet confirmed',
@@ -469,6 +510,19 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'release-pending': 'no release window yet',
     'spend-source.ads-api': 'Ads API',
     'spend-source.config': 'hand-entered',
+    // campaign.retentionVerdict's codes (lib/metrics/metrics.ts VERDICT_CODES): short labels only.
+    'verdict.go': 'GO',
+    'verdict.hold': 'HOLD',
+    'verdict.no-go': 'NO-GO',
+    'verdict.provisional': 'provisional',
+    'verdict.maturing': 'maturing',
+    'verdict.too-few': 'too few',
+    // Where the verdict's bar came from (lib/metrics/metrics.ts retentionVerdictOf, retentionBar's
+    // source and reason): shown beside the verdict.
+    'bar.organic': 'bar: organic baseline',
+    'bar.fixed-arrivals': 'bar: fixed, organic arrivals too few',
+    'bar.fixed-days': 'bar: fixed, organic days too few',
+    'bar.fixed-no-returns': 'bar: fixed, no organic returns',
     'ads-stale': 'stale — sync pending',
     'no-spend-day-yet': 'no closed spend day stored yet',
     'not-synced-yet': 'not synced yet',
@@ -488,6 +542,9 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.card.release': 'Release',
     'label.card.retiredPanel': 'This panel has been replaced by a card or a chart. Edit it, or restore the default charts.',
     'label.card.step': 'Step',
+    'label.card.arm': 'Arm',
+    // Neutral: the organic row's arrivals are untagged first web visits, a campaign row's are tagged.
+    'label.card.arrivals-d0': 'Arrivals (d0)',
     'label.card.returnTag': 'Return beacons',
     'label.card.return.d1': 'd1',
     'label.card.return.d2-7': 'd2-7',
@@ -531,6 +588,10 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.preset.campaign-returns.description': 'One card per campaign with return beacons: first tagged loads (d0) and each later window\'s return rate, left to right.',
     'label.preset.campaign-country': 'Arrivals and funnel by country',
     'label.preset.campaign-country.description': 'One card per beacon-tracked campaign: each funnel step split into US, CA and every other country.',
+    'label.preset.retention-verdict': 'Retention verdict',
+    'label.preset.retention-verdict.description': 'One row per campaign and the organic baseline: the verdict, the days 2-7 return rate with its 90% bounds, arrivals, and completed games per arrival.',
+    'label.preset.campaign-engagement': 'Engagement per arrival',
+    'label.preset.campaign-engagement.description': 'One card per beacon-tracked campaign: completed games per first tagged load, with the two counts it is made of.',
     'label.preset.campaign-cost': 'Campaign cost',
     'label.preset.campaign-cost.description': 'One card per campaign: spend, where it came from and how fresh it is, and the cost per arrival and per auth success.',
     'label.preset.release-before-after.description': 'The newest release with a full day after it: page views, tagged arrivals, auth successes and installs over the same number of days before and after it.',

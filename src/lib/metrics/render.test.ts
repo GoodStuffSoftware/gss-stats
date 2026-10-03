@@ -58,6 +58,13 @@ describe('itemViewModel — display kinds (status "ok")', () => {
     expect(vm.primary).toBe('43% (21/49)')
   })
 
+  it("per: a plain number with two decimals (can exceed 1), never a percent; too-few says so", () => {
+    const item: MetricItem = { id: 'x', label: 'Per arrival', data: { ratio: 'campaign.engagementPerArrival' }, display: { as: 'number' } }
+    expect(itemViewModel(item, { status: 'ok', value: 1.5, numerator: 30, denominator: 20 }, activeScope, opts).primary).toBe('1.50')
+    expect(itemViewModel(item, { status: 'ok', value: 0.1234, numerator: 5, denominator: 40 }, activeScope, opts).primary).toBe('0.12')
+    expect(itemViewModel(item, { status: 'too-few', value: null, numerator: 30, denominator: 4 }, activeScope, opts).primary).toBe('too few to report')
+  })
+
   it('counts: "n unit · n unit", never a slash, always n/d regardless of size', () => {
     const vm = itemViewModel(countsItem(), { status: 'ok', numerator: 1111, denominator: 353, value: null }, activeScope, opts)
     expect(vm.primary).toBe('1,111 views · 353 arrivals')
