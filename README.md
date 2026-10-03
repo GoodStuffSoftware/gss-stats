@@ -109,11 +109,14 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   ([`sparkline.ts`](src/lib/metrics/sparkline.ts)). It reads the page range or a campaign's
   attribution window (not "today so far"), never a ratio, rate or cost; the editor greys the
   option with the reason otherwise. A day the metric was not measured (before a go-live, or an
-  unsynced spend day) is a break in the line, never a zero; a measured day with no rows is 0.
-  Days only: no hour or place split, and a `/return` or game-complete row is never split by
-  device. Each series is one extra statement against the 40-statement batch budget
-  ([`docs/capacity.md`](docs/capacity.md) §9). Saving a layout after this change raises
-  `CONFIG_VERSION` (a stale tab is told to reload; nothing is rewritten).
+  unsynced spend day) is a break in the line, never a zero; a measured day with no rows is 0. A
+  money series rounds each day to cents, so its points can differ from the tile's total by a cent
+  or two. Days only: no hour, place or device split (a `/return` or game-complete row gets no
+  more than the day's count and the kind the tile already reads). Each series is one extra
+  statement per distinct twin read (items that share a window share it) against the 40-statement
+  batch budget ([`docs/capacity.md`](docs/capacity.md) §9). The layout version is now 13 (a save
+  guard only): the first save from this build backs the stored v12 layout up once, and a tab
+  still on the old build is told to reload; nothing is rewritten.
 - **Fit height to content** — a card's editor has a "Fit height to content" checkbox (next to
   the display and size controls) that sets `Widget.fit: 'content'`. A fit panel's height then
   follows what it renders: the dashboard measures the bottom of the card's last in-flow child

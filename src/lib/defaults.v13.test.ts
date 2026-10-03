@@ -14,6 +14,7 @@ const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x))
 describe('sparkline layout version', () => {
   it('CONFIG_VERSION is at least the sparkline version, and every key is strictly increasing', () => {
     expect(CONFIG_VERSION).toBeGreaterThanOrEqual(LAYOUT_VERSIONS.sparklines)
+    expect(CONFIG_VERSION).toBe(Math.max(...Object.values(LAYOUT_VERSIONS))) // follows the map, never hand-pointed
     expect(LAYOUT_VERSIONS.sparklines).toBeGreaterThan(LAYOUT_VERSIONS.compactNoteRow)
   })
 

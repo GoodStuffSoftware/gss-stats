@@ -5,9 +5,9 @@
 // Rules, each one a guard against drawing something the scalar could not:
 //  - COUNTS AND MONEY ONLY. A ratio, a proportion or a cost never gets a series (validate.ts
 //    refuses it), so no per-day rate can slip past MIN_COHORT.
-//  - ET DAYS ONLY. Never an hour or a minute: the twins group by ET date, and the visitor kind is
-//    collapsed on every path lib/splitGuard.ts refuses, so a /return or game-complete row is
-//    never tied to a device on a day.
+//  - ET DAYS ONLY. Never an hour or a minute: the twins group by ET date, with no place or device
+//    column. The visitor kind rides along as in the scalar fact (new-visitor arrivals read it on
+//    every row), so a series sums to its tile and a day is no finer than a one-day ET range.
 //  - A GAP IS NOT A ZERO. A day the metric was not measured (before a go-live, or a spend day the
 //    store never synced) has NO point. A measured day with no rows has an explicit 0.
 //  - AT MOST SERIES_MAX_DAYS points: the latest ones.
