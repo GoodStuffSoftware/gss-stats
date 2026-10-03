@@ -1,6 +1,6 @@
-// morning-read — the daily ads read for the US+CA web retest (docs/routines/bsk-retest-morning-read.md).
+// morning-read — the daily ads read for a registered campaign (the US+CA web retest: docs/routines/bsk-retest-morning-read.md).
 //
-//   npm run ads:morning-read -- [--dry-run] [--cf-token-file <path>] [--firebase-sa <path>]
+//   npm run ads:morning-read -- [--campaign <id>] [--dry-run] [--cf-token-file <path>] [--firebase-sa <path>]
 //                               [--release-health auto|skip] [--release-health-only]
 //                               [--health-min-parent N] [--health-parent-age-hours N]
 //                               [--fixture <file.json> [--now <iso>]] [--json-only]
@@ -13,11 +13,11 @@
 // PROPOSES only.
 
 import { MIN_COHORT } from '../../src/lib/popupEvents'
-import { fail, fixtureDeps, liveDeps, loadFixture, parseCli } from './cli'
+import { fail, fixtureDeps, liveDeps, loadFixture, parseCli, resolveCampaignId } from './cli'
 import { runMorningRead } from './read'
 import { formatMorningReport, withJson } from './report'
 
-const HELP = `morning-read [--dry-run] [--cf-token-file <path>] [--firebase-sa <path>] [--release-health auto|skip] [--release-health-only] [--health-min-parent N] [--health-parent-age-hours N] [--fixture <file.json> [--now <iso>]] [--json-only]`
+const HELP = `morning-read [--campaign <id>] [--dry-run] [--cf-token-file <path>] [--firebase-sa <path>] [--release-health auto|skip] [--release-health-only] [--health-min-parent N] [--health-parent-age-hours N] [--fixture <file.json> [--now <iso>]] [--json-only]`
 
 async function main() {
   const opts = parseCli({
@@ -37,15 +37,13 @@ async function main() {
   if (!Number.isInteger(minParent) || minParent < 1) throw new Error('--health-min-parent must be a positive integer')
   if (!Number.isFinite(ageHours) || ageHours < 0) throw new Error('--health-parent-age-hours must be >= 0')
 
-  let deps
-  if (opts.fixture) {
-    const fx = loadFixture(opts.fixture as string)
-    if (opts.now) fx.now = opts.now as string
-    deps = fixtureDeps(fx, !!opts['dry-run'])
-  } else deps = await liveDeps(opts)
+  const fx = opts.fixture ? loadFixture(opts.fixture as string) : null
+  if (fx && opts.now) fx.now = opts.now as string
+  const campaignId = resolveCampaignId(opts, 'morning', fx ? Date.parse(fx.now) : Date.now())
+  const deps = fx ? fixtureDeps(fx, !!opts['dry-run']) : await liveDeps(opts)
 
   const result = await runMorningRead(deps, {
-    campaignId: opts.campaign as string,
+    campaignId,
     releaseHealth: rh,
     healthOnly: !!opts['release-health-only'],
     healthMinParent: minParent,

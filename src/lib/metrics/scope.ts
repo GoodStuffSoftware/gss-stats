@@ -220,8 +220,9 @@ export interface ResolvedBinding {
  * useMetrics request-building and by validateCard-style checks. Returns `null` for an
  * unknown metric/ratio id (the caller treats that as `status: 'error'`, matching the
  * server's `unknown-id`). */
-export function resolveBinding(binding: DataBinding, scope: ScopeInstance): ResolvedBinding | null {
-  if ('field' in binding) return { kind: 'field', params: {}, fieldValue: scopeField(scope, binding.field) }
+export function resolveBinding(binding: DataBinding, scope: ScopeInstance, todayEt?: string): ResolvedBinding | null {
+  // `todayEt` only matters to a date-dependent field (campaign.statusToday); absent, scopeField uses the real clock.
+  if ('field' in binding) return { kind: 'field', params: {}, fieldValue: scopeField(scope, binding.field, todayEt) }
   const isMetric = 'metric' in binding
   const id = isMetric ? binding.metric : binding.ratio
   const def: MetricDef | RatioDef | undefined = isMetric ? METRICS.get(id) : RATIOS.get(id)
