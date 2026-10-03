@@ -99,9 +99,13 @@ export interface CacheLike {
   put(request: Request, response: Response): Promise<void>
 }
 
+// A handler that wants ONE ok response left out of the cache sets this header on it; it is
+// removed before the response is returned, so it never reaches the browser.
+export const SKIP_EDGE_CACHE_HEADER = 'X-Skip-Edge-Cache'
+
 // Serve `keyUrl` from `cache` if present; otherwise run `compute()`, store a copy (only when
-// the response is ok — an error is never cached, so a transient D1/GraphQL failure doesn't get
-// pinned for the TTL) tagged with `ttlSeconds`, and return the fresh response. The stored copy
+// the response is ok and not marked SKIP_EDGE_CACHE_HEADER — an error is never cached, so a
+// transient D1/GraphQL failure doesn't get pinned for the TTL) tagged with `ttlSeconds`, and return the fresh response. The stored copy
 // carries `Cache-Control: max-age=<ttl>` so the Cache API knows how long to keep it; the
 // response actually sent to the browser always keeps the endpoints' existing `no-store` (a
 // stale copy is fine for the shared edge cache to reuse deliberately, but browsers must not
@@ -119,7 +123,9 @@ export async function cachedJson(
   if (hit) return withNoStore(hit)
 
   const res = await compute()
-  if (res.ok) {
+  const skip = res.headers.has(SKIP_EDGE_CACHE_HEADER)
+  if (skip) res.headers.delete(SKIP_EDGE_CACHE_HEADER)
+  if (res.ok && !skip) {
     const body = await res.clone().text()
     const stored = new Response(body, { status: res.status, headers: res.headers })
     stored.headers.set('Cache-Control', `max-age=${ttlSeconds}`)

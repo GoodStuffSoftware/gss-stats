@@ -361,10 +361,12 @@ describe('the controls for fields the form used to hide round-trip', () => {
 
 describe('fields the editor has no control for survive it: fit, a sparkline series, repeat.organic', () => {
   const SPARK = { as: 'sparkline', series: 'daily' } as const
-  /** campaign-returns (repeat.organic: true) with its d0 count drawn as a daily sparkline. */
+  /** campaign-returns (repeat.organic: true) with its d0 item a tagged-arrivals count (a metric with
+   * a daily twin) drawn as a daily sparkline. */
   function sparkReturns(): CardSpec {
     const spec = plain(PRESETS['campaign-returns'])
     const d0 = spec.sections[0].items.find((i) => i.id === 'd0')!
+    d0.data = { metric: 'campaign.taggedArrivals' }
     d0.display = { ...SPARK }
     expect(spec.repeat!.organic).toBe(true)
     expect(validateCard(spec)).toEqual([])
@@ -390,7 +392,9 @@ describe('fields the editor has no control for survive it: fit, a sparkline seri
 
   it('picking another metric of the same kind keeps a sparkline display and its series', async () => {
     const spec = plain(PRESETS['bsk-kpis'])
-    spec.sections[0].items[0].display = { ...SPARK }
+    const first = spec.sections[0].items[0]
+    first.data = { ...(first.data as { metric: string }), window: 'page' } as never // a sparkline reads the page range, not today
+    first.display = { ...SPARK }
     expect(validateCard(spec)).toEqual([])
     const w = mountEditor({ spec, from: 'bsk-kpis' })
     await flushPromises()
@@ -407,6 +411,29 @@ describe('fields the editor has no control for survive it: fit, a sparkline seri
     expect(item.display).toStrictEqual(SPARK)
     expect(validateCard(lastSpec(w))).toEqual([])
   })
+
+  it('switching the sparkline to Number and back, and a stored decimals of 3, leave the spec exactly as it was', async () => {
+    const spec = sparkReturns()
+    spec.sections[0].items.push({ id: 'rate', label: 'Rate', data: { ratio: 'campaign.returnD2to7PerD0' }, display: { as: 'percent', decimals: 3 } })
+    expect(validateCard(spec)).toEqual([])
+    const w = mountEditor({ spec: plain(spec), from: 'campaign-returns' })
+    await flushPromises()
+    await expandAll(w)
+    const spark = () => controls(w).findAll('button.tab').find((b) => b.text().startsWith('Sparkline'))!
+    const number = [...spark().element.parentElement!.querySelectorAll('button.tab')].find((b) => b.textContent!.trim() === 'Number') as HTMLButtonElement
+    number.click()
+    await flushPromises()
+    expect(heldSpec(w, spec).sections[0].items.find((i) => i.id === 'd0')!.display).toStrictEqual({ as: 'number' })
+    await spark().trigger('click')
+    await flushPromises()
+    const out = heldSpec(w, spec)
+    expect(out).toStrictEqual(spec)
+    expect(out.sections[0].items.find((i) => i.id === 'd0')!.display).toStrictEqual(SPARK)
+    expect(out.sections[0].items.find((i) => i.id === 'rate')!.display).toStrictEqual({ as: 'percent', decimals: 3 })
+    expect(out.repeat!.organic).toBe(true)
+    await noOpPass(w)
+    expect(heldSpec(w, spec)).toStrictEqual(spec)
+  }, 60_000)
 
   it('through ChartEditor: save and reload keep fit, the sparkline series and repeat.organic', async () => {
     const spec = sparkReturns()
