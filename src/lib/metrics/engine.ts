@@ -28,6 +28,7 @@ import { gateRate, INSTALL_GAP_PATHS, POPUPS, rowIsPostInstallFix } from '../pop
 import { computeDelta, releaseComparisonWindows } from '../overview'
 import { latestDatedRelease } from '../releases'
 import { UPSELL_SIGNEDOUT_FIX_AT } from '../adsRules'
+import { REFUSED_SAMPLE_PATHS, refusedWindowMoved } from '../splitGuard'
 import { FACTS, factKey, rangeMs, type BeaconRow, type FactId, type FactParams, type FactRows, type FactStatement } from './facts'
 import { METRICS, rulesOf, type MetricCtx, type MetricDef } from './metrics'
 import { RATIOS, type RatioDef } from './ratios'
@@ -160,14 +161,26 @@ function sideStatic(def: MetricDef, ctx: MetricCtx, window: readonly [number, nu
 interface Clock {
   todayStartMs: number
   pageRange: [number, number] | null
+  /** The page range is not whole ET days, so bskRangePath counts refused rows over whole ET days
+   * (R-1d, lib/splitGuard.ts) while the measured interval stays the page range. */
+  pageRefusedWholeDays: boolean
   release: ReleaseWindows | null
 }
 function clockOf(env: BatchEnv): Clock {
+  const pageRange = env.context.since !== undefined && env.context.until !== undefined ? rangeMs(env.context.since, env.context.until) : null
   return {
     todayStartMs: etMidnightMs(env.todayEt),
-    pageRange: env.context.since !== undefined && env.context.until !== undefined ? rangeMs(env.context.since, env.context.until) : null,
+    pageRange,
+    pageRefusedWholeDays: pageRange !== null && refusedWindowMoved(pageRange[0], pageRange[1]),
     release: env.release ?? null,
   }
+}
+
+/** Whether a metric's path predicate can count a refused row (one sample path per refused
+ * pattern; no predicate counts every path). Static, so the note never depends on the data. */
+function countsRefusedRows(def: MetricDef, ctx: MetricCtx): boolean {
+  const test = def.path
+  return !test || REFUSED_SAMPLE_PATHS.some((p) => test(p, ctx))
 }
 
 /** W = [a, b) for a request window. `endMs` is "now" (the KPI fact's own as-of instant for
@@ -615,7 +628,13 @@ class Batch {
         sums[day] += idx.gCount[g]
       }
     }
-    return { status, value: sums[0], m, noteIds, ...(today ? { days: sums } : {}), asOfMs: plan.asOfMs }
+    // A snapped page window: say so on every metric that can count a refused row (a new array,
+    // never a push into a shared one).
+    const ids =
+      plan.factId === 'bskRangePath' && this.clock.pageRefusedWholeDays && !noteIds.includes('refused-whole-days') && countsRefusedRows(def, ctx)
+        ? [...noteIds, 'refused-whole-days']
+        : noteIds
+    return { status, value: sums[0], m, noteIds: ids, ...(today ? { days: sums } : {}), asOfMs: plan.asOfMs }
   }
 
   /** deltasAllowed for a go-live date, once per batch. */
