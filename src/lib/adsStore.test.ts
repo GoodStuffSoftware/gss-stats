@@ -145,6 +145,19 @@ describe('row mapping', () => {
     expect(scrubPlayHour('install fix went live 26 Sep 12:26 ET')).toBe('install fix went live 26 Sep 12:26 ET')
     expect(scrubPlayHour('Play: not yet seen. Web /return/ rows last seen on 2026-09-30 ET.')).toBe('Play: not yet seen. Web /return/ rows last seen on 2026-09-30 ET.')
   })
+  it('mapReadingRow stays total for malformed stored notes', () => {
+    const st = readingInsert(rec())
+    const cols = ['reading_key', 'campaign_id', 'kind', 'stage', 'read_at', 'et_date', 'spend_through_et', 'cumulative_spend_micros', 'thresholds', 'complete', 'rules', 'proposal', 'decision', 'counts', 'notes', 'routine_version', 'entry_kind']
+    const row = Object.fromEntries(cols.map((c, i) => [c, st.binds[i]]))
+    expect(mapReadingRow({ ...row, notes: '{"a":1}' })!.notes).toEqual({ a: 1 })
+    expect(mapReadingRow({ ...row, notes: '"text"' })!.notes).toBe('text')
+    expect(mapReadingRow({ ...row, notes: 'null' })!.notes).toBeNull()
+    expect(mapReadingRow({ ...row, notes: '[1, null, "Play: Web /return/ rows last seen 2026-09-29 08:00 ET."]' })!.notes).toEqual([
+      1,
+      null,
+      'Play: Web /return/ rows last seen 2026-09-29 ET.',
+    ])
+  })
 })
 
 describe('dashboard readers fail soft', () => {
