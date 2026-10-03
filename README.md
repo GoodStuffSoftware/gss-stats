@@ -64,7 +64,15 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   cards, presets `campaign-funnel`, `campaign-country` — a table with the funnel steps as rows
   and US / CA / Other as columns, each cell a campaign metric with the registry's optional
   `country` param — `campaign-cost` and `campaign-returns` — d0 and each return window's rate,
-  dN over d0 with its n/d, as bars side by side. "Arrivals by ET hour of day" and "Daily
+  dN over d0 with its n/d, as bars side by side. A campaign's return rows count from the web
+  site and the installed app (`bestsudoku-app`) alike, from its attribution start (each counts
+  its own installs, so a phone that used both counts once on each). After the
+  campaigns comes one more row, "Organic (web)": the `/return/organic/` rows the web site sends
+  for untagged visitors, with no start bound and never app rows, as a baseline to read the
+  campaigns against; it stays hidden until its d0 count is above zero. It never enters the
+  site-wide "Return visits (day 1+)" tile or the routine's site-wide arrivals, which stay
+  tagged-only. Return rows are counts
+  only — never split by hour, place or device. "Arrivals by ET hour of day" and "Daily
   arrivals by flight day" are standard geo charts over the same tagged arrivals (filter
   `arrival` = tagged): a breakdown bar of `hourEt` × `campaignFlight`, and a line of
   `flightDay` × `campaignFlight` with `cumulative` running totals dashed on a right-hand axis.
@@ -531,7 +539,9 @@ lacks the pin, pin it in the same PR as the registration.
   (+ `flightStartTimeEt` if the schedule starts mid-day), `flightEnd`, `status`, `kind`,
   `dailyBudgetUsd` and `hardCapUsd` (both required to read it: they arm the pacing line and kill
   rule 4), `servingHoursEt`, `notes`, and `directionalThroughDay` if the first N flight days
-  are directional. This alone puts the campaign on the dashboard and in the sync.
+  are directional. This alone puts the campaign on the dashboard and in the sync. The id and
+  tag `organic` are reserved for the organic baseline row: a campaign using either fails at
+  load.
 - **[`adsRules.ts`](src/lib/adsRules.ts) `ADS_READ_PLANS`** — one `buildReadPlan('<id>', {...})`:
   `channel` (`'display'`, the default, or `'search'`; see
   [Adding an arm](#adding-an-arm-two-campaigns-at-once) below),
