@@ -773,3 +773,35 @@ describe('SMALL_SAMPLE_NOTE', () => {
     expect(SMALL_SAMPLE_NOTE).toMatch(/counts/i)
   })
 })
+
+describe('v1.97.0 tutorial-complete / tour-exit beacons', () => {
+  const PATHS = [
+    '/game/tutorial-complete/first-run',
+    '/game/tutorial-complete/replay',
+    '/tour/exit-at/preamble',
+    '/tour/exit-at/hub',
+    '/tour/exit-at/section',
+  ]
+
+  it('are event beacons, never page views: isPopupEventPath is true and the page-view exclusion SQL drops them', () => {
+    for (const p of PATHS) expect(isPopupEventPath(p), p).toBe(true)
+    const w: string[] = []
+    popupExcludeClause(w, [])
+    expect(w.join(' ')).toContain("path <> '/game/tutorial-complete' AND path NOT LIKE '/game/tutorial-complete/%'")
+    // /game/complete/ stays its own, distinct prefix: a tutorial row is not a completion.
+    expect(w.join(' ')).toContain("path NOT LIKE '/game/complete/%'")
+    expect('/game/tutorial-complete/first-run'.startsWith('/game/complete/')).toBe(false)
+  })
+
+  it('the exact matchers accept only their own path', () => {
+    expect(isTutorialCompletePath('/game/tutorial-complete/first-run', 'first-run')).toBe(true)
+    expect(isTutorialCompletePath('/game/tutorial-complete/first-run', 'replay')).toBe(false)
+    expect(isTutorialCompletePath('/game/complete/normal/easy', 'replay')).toBe(false)
+    expect(isTourExitPath('/tour/exit-at/hub', 'hub')).toBe(true)
+    expect(isTourExitPath('/tour/exit-at/hub', 'section')).toBe(false)
+  })
+
+  it('the hand-synced ET date literal equals the ET date of TOUR_TRACKING_LIVE_AT', () => {
+    expect(etDateFromMs(TOUR_TRACKING_LIVE_AT)).toBe(TOUR_TRACKING_LIVE_AT_ET)
+  })
+})

@@ -322,7 +322,7 @@ geography is country-only** — sub-country region/city comes from the beacon.
 `/signin-prompt`, `/signin-eligible`, `/promo-first50`, `/first50-congrats`, `/upsell`,
 `/install`, `/popup-outcome`, `/return`, `/game/complete/`, the `/auth/success/<provider>/`
 status suffix, `/auth/error`, `/auth/redirect` and the first-session beacons (`/tour`,
-`/game/first-move`, `/game/abandon`, `/welcome-signed-in`) are pop-up/event beacons, not screens — `/api/geo` and `/api/sites` exclude all
+`/game/tutorial-complete`, `/game/first-move`, `/game/abandon`, `/welcome-signed-in`) are pop-up/event beacons, not screens — `/api/geo` and `/api/sites` exclude all
 of them from every pageview/visit total and the top-pages breakdown by default (see
 [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) `POPUP_EVENT_PREFIXES`); `/api/popups` is
 where they're counted. Each geo chart has its own **"Include event beacons"** option (off by
@@ -341,7 +341,7 @@ medium/date, plus **screen width** (`screenw`, exact pixels) and its bucketed fo
 **path family** dimension (`pathFamily`) that groups every event-beacon prefix above into
 `page` / `signin-prompt` / `signin-eligible` / `promo-first50` / `first50-congrats` / `upsell`
 / `install` / `popup-outcome` / `return` / `game-complete` / `auth-status` / `auth-error` /
-`auth-redirect` / `tour` / `game-first-move` / `game-abandon` / `welcome-signed-in`. More derived
+`auth-redirect` / `tour` / `tutorial-complete` / `game-first-move` / `game-abandon` / `welcome-signed-in`. More derived
 dimensions: **pop-up** (`popupFamily`) and **pop-up outcome** (`popupOutcome`), measured rows
 only (from the tracking activation day; pre-fix install-gap rows get no value — see
 [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) `popupDimSqlCase`, where

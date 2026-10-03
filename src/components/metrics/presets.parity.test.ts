@@ -204,7 +204,8 @@ describe('bsk-kpis ≡ the bespoke "Today at a glance" tiles', () => {
   // Tiles added after the bespoke panel was retired — no golden equivalent exists for these, so
   // they are excluded from the strict before/after comparison below (which is a parity check
   // against the retired code, not a frozen list of every tile bsk-kpis may ever show). Each one
-  // gets its own coverage elsewhere (see the auth-error/auth-redirect describe block).
+  // gets its own coverage elsewhere (see the auth-error/auth-redirect test below; the five v1.97.0 tutorial/tour-exit tiles are
+  // rendered in both states by the 'v1.97.0 tutorial + tour-exit tiles' test).
   const ADDED_AFTER_RETIREMENT = new Set([
     'Sign-in failures',
     'Sign-in redirect fallbacks',
@@ -267,6 +268,50 @@ describe('bsk-kpis ≡ the bespoke "Today at a glance" tiles', () => {
     // Existing + new + unknown (4+0+0=4) is at most the base Auth successes count (6) — the
     // base metric predates the split and counts sign-ins with no status row too.
     expect(Number(byLabel.get('Auth successes')!.value)).toBeGreaterThanOrEqual(4)
+  })
+
+  const TOUR_TILES = [
+    'Tutorial completed — first run',
+    'Tutorial completed — replay',
+    'Tour exits — preamble',
+    'Tour exits — hub',
+    'Tour exits — section',
+  ]
+
+  it('v1.97.0 tutorial + tour-exit tiles: all five render; muted before go-live, real counts after (counts only, no splits)', async () => {
+    // Before go-live (FIXTURE_NOW is 2026-09-26): no rows can exist, so the tiles read as
+    // not-yet-tracking, never a false zero.
+    const before = newTiles(await mountNew('bsk-kpis'))
+    for (const label of TOUR_TILES) {
+      const t = before.find((x) => x.label === label)
+      expect(t, label).toBeTruthy()
+      expect(t!.value, `${label} before go-live`).not.toBe('0')
+      expect(t!.value, `${label} before go-live`).not.toMatch(/^\d/)
+    }
+    // After go-live, with rows on both sides of the first-run/replay and preamble/hub/section split.
+    const liveMs = Date.parse('2026-10-03T20:00:00Z')
+    const rows = (path: string, n: number) => ({ site: 'bestsudoku-web', ts: Date.parse('2026-10-03T18:00:00Z'), path, visitor: 'returning', n })
+    insertHits(db, [
+      rows('/game/tutorial-complete/first-run', 4),
+      rows('/game/tutorial-complete/replay', 2),
+      rows('/tour/exit-at/preamble', 3),
+      rows('/tour/exit-at/hub', 1),
+    ])
+    try {
+      vi.setSystemTime(liveMs)
+      const w = mount(MetricCard, { props: { cardRef: { preset: 'bsk-kpis' }, nowMs: liveMs } })
+      mounted.push(w)
+      await settle()
+      const byLabel = new Map(newTiles(w).map((t) => [t.label, t]))
+      expect(byLabel.get('Tutorial completed — first run')!.value).toBe('4')
+      expect(byLabel.get('Tutorial completed — replay')!.value).toBe('2')
+      expect(byLabel.get('Tour exits — preamble')!.value).toBe('3')
+      expect(byLabel.get('Tour exits — hub')!.value).toBe('1')
+      expect(byLabel.get('Tour exits — section')!.value).toBe('0') // a measured zero, not blank
+    } finally {
+      vi.setSystemTime(FIXTURE_NOW)
+      db.exec("DELETE FROM hits WHERE path LIKE '/game/tutorial-complete/%' OR path LIKE '/tour/exit-at/%'")
+    }
   })
 
   it('no-campaign days: the arrivals placeholder is a tile, as before', async () => {
