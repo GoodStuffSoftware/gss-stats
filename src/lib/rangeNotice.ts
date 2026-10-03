@@ -20,6 +20,9 @@ export interface RangeNotice {
    *    constants), so nothing was served.
    */
   reason: 'max-duration' | 'lookback' | 'both' | 'outside-lookback' | 'upstream-rejected'
+  /** Whose calendar days the served window is cut on and the note names: ET (absent) or UTC (a
+   * `date` series, whose bars are UTC days). */
+  dayZone?: 'utc'
   /** The range asked for, as ISO instants (`to` exclusive). */
   requested: { from: string; to: string }
   /** The range actually queried, or null when nothing was. */
@@ -32,14 +35,17 @@ export interface RangeNotice {
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-/** "Jun 10" (ET calendar day), with ", 2025" when `withYear`. */
-function etDay(ms: number, withYear: boolean): string {
-  const [y, m, d] = etDateFast(ms).split('-').map(Number)
+/** The calendar day of `ms` as YYYY-MM-DD, in ET or UTC. */
+const dayOf = (ms: number, utc: boolean) => (utc ? new Date(ms).toISOString().slice(0, 10) : etDateFast(ms))
+
+/** "Jun 10" (calendar day), with ", 2025" when `withYear`. */
+function dayLabel(ms: number, utc: boolean, withYear: boolean): string {
+  const [y, m, d] = dayOf(ms, utc).split('-').map(Number)
   return `${MONTHS[m - 1]} ${d}${withYear ? `, ${y}` : ''}`
 }
 
 /** The note's text, e.g. "Showing Jun 10 – Sep 10 only. Cloudflare analytics allows up to 93
- * days per query." Days are ET calendar days, matching the rest of the dashboard; the end is the
+ * days per query." Days are ET calendar days, matching the rest of the dashboard (UTC days for a `date` series, matching its bars); the end is the
  * last day inside the served range (its `to` is exclusive). `nowMs` only decides whether years
  * are shown (they are when the range is not within the current year). */
 export function rangeNoticeText(n: RangeNotice, nowMs: number = Date.now()): string {
@@ -52,9 +58,10 @@ export function rangeNoticeText(n: RangeNotice, nowMs: number = Date.now()): str
   }
   const from = Date.parse(n.served.from)
   const lastDay = Date.parse(n.served.to) - 1
+  const utc = n.dayZone === 'utc'
   const thisYear = etDateFast(nowMs).slice(0, 4)
-  const withYear = etDateFast(from).slice(0, 4) !== thisYear || etDateFast(lastDay).slice(0, 4) !== thisYear
-  const span = `Showing ${etDay(from, withYear)} – ${etDay(lastDay, withYear)} only.`
+  const withYear = dayOf(from, utc).slice(0, 4) !== thisYear || dayOf(lastDay, utc).slice(0, 4) !== thisYear
+  const span = `Showing ${dayLabel(from, utc, withYear)} – ${dayLabel(lastDay, utc, withYear)} only.`
   const duration = `allows up to ${days(n.limitDays)} days per query`
   const lookback = `keeps only the last ${days(n.lookbackDays)} days`
   const why = n.reason === 'max-duration' ? duration : n.reason === 'lookback' ? lookback : `${duration} and ${lookback}`

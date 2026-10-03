@@ -97,6 +97,29 @@ describe('gateRange — lookback (notOlderThan)', () => {
     expect(new Date(r.fromMs).toISOString()).toBe('2026-04-03T04:00:00.000Z')
   })
 
+  it('pins the 60 s clock margin: a start 59 s inside the edge is cut, one exactly 60 s inside is served as asked', () => {
+    const edge = NOW - 184 * DAY // the oldest start the API itself would accept at NOW
+    const end = T('2026-05-01T04:00:00Z')
+    const tooClose = gateRange('cf-rum', edge + 59_000, end, NOW)
+    expect(tooClose.notice?.reason).toBe('lookback')
+    expect(tooClose.fromMs).toBeGreaterThan(edge + 59_000)
+    const justOk = gateRange('cf-rum', edge + 60_000, end, NOW)
+    expect(justOk.notice).toBeNull()
+    expect(justOk.fromMs).toBe(edge + 60_000)
+  })
+
+  it('a start inside the lookback is never moved to a day boundary: no notice for a range the API accepts', () => {
+    // Apr 2 20:00Z is 4 h after the edge (Apr 2 16:00Z): accepted as is, although the next ET midnight is a day later.
+    const start = T('2026-04-02T20:00:00Z')
+    const r = gateRange('cf-rum', start, T('2026-05-01T04:00:00Z'), NOW)
+    expect(r).toMatchObject({ notice: null, unservable: false, fromMs: start })
+  })
+
+  it('a span a hair over the limit is cut, but 93 d exactly to the millisecond is not', () => {
+    expect(gateRange('cf-rum', END - MAX, END, NOW).notice).toBeNull()
+    expect(gateRange('cf-rum', END - MAX - 1, END, NOW).notice?.reason).toBe('max-duration')
+  })
+
   it('a range that is too wide AND too old is cut on both counts', () => {
     // "Jan 1 – Oct 3" asked on Oct 3: the start is past the lookback, and what is left is still > 93 d.
     const r = gateRange('cf-rum', T('2026-01-01T05:00:00Z'), END, NOW)
@@ -121,6 +144,67 @@ describe('gateRange — lookback (notOlderThan)', () => {
     expect(r.notice?.reason).toBe('lookback')
     expect(new Date(r.fromMs).toISOString()).toBe('2026-07-16T04:00:00.000Z')
   })
+})
+
+describe("gateRange — a 'date' series (UTC-day grain): the first bar is a whole UTC day", () => {
+  it('a duration cut starts at the next UTC midnight, not at an ET midnight (04:00Z) that would leave a partial first bar', () => {
+    const r = gateRange('cf-rum', T('2026-06-01T04:00:00Z'), END, NOW, 'utc-day')
+    // END - 93 d = Jul 3 04:00Z → the next UTC midnight is Jul 4 00:00Z.
+    expect(new Date(r.fromMs).toISOString()).toBe('2026-07-04T00:00:00.000Z')
+    expect(r.fromMs % DAY).toBe(0)
+    expect(r.toMs - r.fromMs).toBeLessThanOrEqual(MAX)
+    expect(r.notice).toMatchObject({ reason: 'max-duration', dayZone: 'utc', served: { from: '2026-07-04T00:00:00.000Z', to: '2026-10-04T04:00:00.000Z' } })
+  })
+
+  it('a lookback cut starts at a UTC midnight too', () => {
+    const r = gateRange('cf-rum', T('2026-03-20T00:00:00Z'), T('2026-04-10T00:00:00Z'), NOW, 'utc-day')
+    expect(new Date(r.fromMs).toISOString()).toBe('2026-04-03T00:00:00.000Z') // edge is Apr 2 16:00Z
+    expect(r.notice).toMatchObject({ reason: 'lookback', dayZone: 'utc' })
+  })
+
+  it('a start already on a UTC midnight is left alone when the span fits', () => {
+    expect(gateRange('cf-rum', T('2026-07-04T00:00:00Z'), END, NOW, 'utc-day').notice).toBeNull()
+  })
+
+  it('the ET grain (the default) carries no dayZone', () => {
+    expect(gateRange('cf-rum', T('2026-06-01T04:00:00Z'), END, NOW).notice).not.toHaveProperty('dayZone')
+  })
+})
+
+describe('gateRange — randomised: clamps only when the API would refuse, and never serves a refusable window', () => {
+  // Cloudflare's rule as measured: span = to - from, lookback = its clock (a little after ours) - from.
+  const MARGIN = 60_000
+  const refuses = (from: number, to: number, cfNow: number) => to - from > MAX || cfNow - from > 184 * DAY
+  // A small deterministic PRNG so a failure reproduces.
+  let seed = 12345
+  const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32)
+
+  it('over 20,000 random ranges, now and grains', () => {
+    for (let i = 0; i < 20_000; i++) {
+      const now = T('2026-01-01T00:00:00Z') + Math.floor(rnd() * 730 * DAY)
+      const end = now - Math.floor(rnd() * 120 * DAY) + Math.floor(rnd() * 2 * DAY)
+      const start = end - Math.floor(rnd() * 330 * DAY) - 1000
+      const grain = rnd() < 0.5 ? 'utc-day' : 'et-day'
+      const r = gateRange('cf-rum', start, end, now, grain)
+      const cfNow = now + Math.floor(rnd() * MARGIN) // the API's clock when the request lands
+      if (r.unservable) {
+        expect(end).toBeLessThanOrEqual(ceilEdge(now, grain))
+        continue
+      }
+      // never a window the API refuses
+      expect(refuses(r.fromMs, r.toMs, cfNow)).toBe(false)
+      // no notice unless the range as asked WOULD be refused (even on the slowest clock)
+      if (!refuses(start, end, now + MARGIN)) expect(r.notice).toBeNull()
+      if (r.notice) {
+        expect(r.toMs).toBe(end)
+        expect(r.fromMs).toBeGreaterThan(start)
+      }
+    }
+  })
+  const ceilEdge = (now: number, grain: string) => {
+    const e = now - 184 * DAY + MARGIN
+    return grain === 'utc-day' ? Math.ceil(e / DAY) * DAY : e + DAY // an ET midnight is within a day
+  }
 })
 
 describe('gateRange — inputs it leaves alone', () => {

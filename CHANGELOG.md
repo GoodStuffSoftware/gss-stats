@@ -116,7 +116,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 ### Fixed
 - **A date range wider than Cloudflare allows no longer breaks charts with a raw error.** The
   range is cut to the most recent 93 days (and no further back than 184 days) before querying,
-  and the chart shows a small note saying which days it is showing and why.
+  and the chart shows a small note saying which days it is showing and why; its date axis covers
+  only those days, never a flat stretch of zeros for days that were not queried.
 - **The release before/after panel no longer goes blank on a release day.** It now compares the
   newest release whose first full ET day after the release date is complete (the release day
   itself is left out of the after side) and names it; a newer release still waiting shows as a
