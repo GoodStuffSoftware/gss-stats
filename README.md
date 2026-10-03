@@ -520,12 +520,16 @@ two other rules (outward: widen to the whole days touched; inward: shrink to the
 inside) stay one constant away (`REFUSED_WINDOW_SNAP`). When the bounds meet, as for most
 ranges shorter than a day, these rows count zero. A range already on ET midnights (the date
 picker's ET days, a whole-day preset) runs exactly as before. Charts, `/api/completions` and
-the metric cards' page range (`window: 'page'`) all follow it and say so in a caption: "Return
-and completion rows are counted over whole ET days." Rolling presets (last 24 hours, last 7
-days) are rarely on ET midnights, so most default views carry that caption. It adds no D1
-bound parameters. Today's totals stay live (ruling 2026-10-03), so polling a running total
-still shows when it grew; only shrinking to whole days and holding the open day would close
-that, and live data was chosen over it.
+the metric cards' page range (`window: 'page'`) all follow it and say so in a caption: "Any
+return, game-start, completion, tutorial-completion or tour-exit rows here are counted over
+whole ET days." A chart shows it only when it can count one of those rows, so never for a site
+other than Best Sudoku or under a path or path-family filter none of them matches. A chart that
+leaves event beacons out still counts game starts (they are page views), so it keeps the
+caption. Rolling presets (last 24 hours, last 7 days) are rarely on ET midnights, so most
+default Best Sudoku views carry that caption. It adds no D1 bound parameters. Today's totals
+stay live (ruling 2026-10-03), so polling a running total still shows when it grew; only
+shrinking to whole days and holding the open day would close that, and live data was chosen
+over it.
 
 **Every stored geo-beacon column is a chartable dimension AND a filter.** `functions/api/geo.ts`
 whitelists every analytic `hits` column (`GEO_DIMS`) — region/city/postal/country/continent/

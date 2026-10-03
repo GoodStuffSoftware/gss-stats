@@ -73,7 +73,8 @@
 //   - Flight boundaries (etFlightRangeMs, flightDaySqlCase) are ET days already.
 
 import { addDays, etDateFast, etWallTimeMs } from './etTime'
-import { sqlInt, sqlLit } from './popupEvents'
+import { isPopupEventPath, pathFamilyOf, sqlInt, sqlLit } from './popupEvents'
+import { BEST_SUDOKU_SITES } from './bestSudokuSites'
 
 /** Dimensions that tie a row to an hour, a place or a device. `dateEt` and `flightDay` are ET-day
  * totals and stay allowed; `site` (web vs. app) is a product split, not a device one. */
@@ -162,8 +163,48 @@ export const REFUSED_WINDOW_SNAP: RefusedSnap = 'nearest'
 export const REFUSED_WINDOW_KEY = `refused-${REFUSED_WINDOW_SNAP}-et-days-v1`
 
 /** The caption a chart shows when its query answered with `meta.refusedWholeDays: true`
- * (components/ChartCard.vue), worded to fit every snap mode. */
-export const REFUSED_WHOLE_DAYS_CAPTION = 'Return and completion rows are counted over whole ET days.'
+ * (components/ChartCard.vue), worded to fit every snap mode. It names every refused kind and
+ * says "any", since most charts leave the event kinds out unless event beacons are included. */
+export const REFUSED_WHOLE_DAYS_CAPTION =
+  'Any return, game-start, completion, tutorial-completion or tour-exit rows here are counted ' +
+  'over whole ET days.'
+
+/** A path each refused pattern matches, so the pattern can be classified with the JS path helpers
+ * (isPopupEventPath, pathFamilyOf). Every row a pattern matches gets the same answer from both:
+ * each pattern sits wholly inside one POPUP_EVENT_PREFIXES entry (or none, for `/game/start/`). */
+const refusedSamplePath = (pattern: string): string => `${pattern.slice(0, -1)}x`
+
+/** The SPLIT_REFUSED_PATH_PATTERNS a geo query whose window snapped can still count a row of, so
+ * `meta.refusedWholeDays` (the caption) is set only when one can (review of #63, SHOULD-3). A
+ * static check on the request, never on the data: it adds no SQL and no binds, and the snap and
+ * its cache-key marker still follow `moved` alone. It errs toward showing the caption:
+ *   - event beacons excluded (no opt-in, no exclusion-lifting dim): only the patterns
+ *     POPUP_EVENT_PREFIXES does not cover, i.e. `/game/start/` (a page view);
+ *   - a `path` filter (`path = ?`, ANDed): only patterns every filter value matches, so a value
+ *     that is not a refused path (isSplitRefusedPath) leaves none;
+ *   - a `pathFamily` filter: only patterns whose family (pathFamilyOf) is the filter value
+ *     (`/game/start/` is 'page');
+ *   - a site list, or a `site` drill filter, with no BEST_SUDOKU_SITES entry: none (only Best
+ *     Sudoku sends these rows). */
+export function reachableRefusedPatterns(opts: {
+  eventRowsExcluded: boolean
+  sites: readonly string[]
+  constraints: readonly { field: string; value: string }[]
+}): string[] {
+  const bsk = (site: string) => BEST_SUDOKU_SITES.includes(site)
+  if (opts.sites.length && !opts.sites.some(bsk)) return []
+  return SPLIT_REFUSED_PATH_PATTERNS.filter((pattern) => {
+    const sample = refusedSamplePath(pattern)
+    if (opts.eventRowsExcluded && isPopupEventPath(sample)) return false
+    const prefix = pattern.slice(0, -1)
+    return opts.constraints.every((c) => {
+      if (c.field === 'path') return c.value.replace(/[A-Z]/g, (ch) => ch.toLowerCase()).startsWith(prefix)
+      if (c.field === 'pathFamily') return pathFamilyOf(sample) === c.value
+      if (c.field === 'site') return bsk(c.value)
+      return true
+    })
+  })
+}
 
 /** The ET midnight at or before `ms`. ET midnight is never on a DST change (those are at 02:00). */
 function etMidnightFloor(ms: number): number {
@@ -227,7 +268,8 @@ export function refusedWindowMoved(
  *   - empty refused window: the plain pair plus `NOT <refused>`;
  *   - otherwise the pair spans both windows and one CASE term picks each row's own window, with
  *     both windows' bounds inlined as integers (sqlInt; `ts` is an INTEGER column).
- * `moved` drives the cache-key marker, `meta.refusedWholeDays` and the metrics note. */
+ * `moved` drives the cache-key marker and the metrics note; /api/geo's `meta.refusedWholeDays`
+ * also needs a refused row the query can count (reachableRefusedPatterns). */
 export function refusedWindowClause(
   sinceMs: number,
   untilMs: number,
