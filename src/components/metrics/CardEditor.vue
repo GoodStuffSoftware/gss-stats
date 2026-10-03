@@ -39,7 +39,8 @@ import CardEditorRepeat from './editor/CardEditorRepeat.vue'
 import CardEditorSection from './editor/CardEditorSection.vue'
 import { presetById } from '../../lib/metrics/presets'
 import { validateCard } from '../../lib/metrics/validate'
-import { noteLabelOptions } from '../../lib/metrics/editorModel'
+import { notePreview } from '../../lib/metrics/editorModel'
+import { isNoteIdHideable } from '../../lib/chartNotes'
 import { BADGE_TONE_OPTIONS, CARD_ACTION_OPTIONS, cloneSpec, emptySection, groupErrors, moveBy, presetOptions, rowsToTones, specFromPresetId, specsEqual, toneValueProblem, tonesToRows, withField, type BadgeTone, type ToneRow } from '../../lib/metrics/editorModel'
 import type { CardAction, CardRef, CardSpec, Label, MetricsContext } from '../../lib/metrics/types'
 
@@ -51,13 +52,17 @@ const props = defineProps<{
   context?: MetricsContext
   /** The widget's campaign selection, so the preview shows the campaigns a saved card would. */
   campaignIds?: string[]
+  /** The widget's `hiddenCaveats`: the spec captions this card hides (decision D7). Preset
+   * captions stay in the spec; hiding one is a per-card choice that lives on the widget, never in
+   * the spec. The host writes `update:hiddenCaptions` back (an empty array = none hidden). */
+  hiddenCaptions?: string[]
 }>()
 // `errors` fires whenever the current draft's validity changes (immediate, so a caller has the
 // answer synchronously from mount) — how a host like ChartEditor.vue knows to disable its own
 // Save button and say why, since `update:modelValue` alone never reports an invalid state (it
 // simply doesn't fire — see the doc block above). Always the SAME array validateCard would
 // produce; `[]` means the current draft is saveable.
-const emit = defineEmits<{ 'update:modelValue': [CardRef]; errors: [string[]] }>()
+const emit = defineEmits<{ 'update:modelValue': [CardRef]; errors: [string[]]; 'update:hiddenCaptions': [string[]] }>()
 
 const PRESET_OPTIONS = presetOptions()
 /** The preset's plain name — never its raw id (review fix, 2026-09-27) — for "Customized from
@@ -291,18 +296,39 @@ function toggleAction(a: CardAction, on: boolean) {
   if (next.length) spec.actions = next
   else delete spec.actions
 }
-const NOTE_OPTIONS = noteLabelOptions()
-const captionsValue = computed<string[]>({
-  get: () => spec.captions ?? [],
-  set: (v) => {
-    spec.captions = v.length ? v : undefined
-  },
-})
-function toggleCaption(id: string, checked: boolean) {
-  const set = new Set(captionsValue.value)
-  if (checked) set.add(id)
-  else set.delete(id)
-  captionsValue.value = NOTE_OPTIONS.map((o) => o.value).filter((v) => set.has(v))
+// The card's own captions (D7): each one the spec carries, with a Show/Hide toggle. Show/Hide
+// edits only the widget's hidden list (emitted as `update:hiddenCaptions`), never `spec.captions`,
+// so a preset's captions stay the preset's. The one spec edit here is N1: an id the registry no
+// longer knows is listed as such, kept exactly as stored, and can be removed.
+// A local copy, so the toggles also work for a host that does not write the list back.
+const hiddenList = ref<string[]>([...(props.hiddenCaptions ?? [])])
+watch(
+  () => props.hiddenCaptions,
+  (v) => (hiddenList.value = [...(v ?? [])]),
+)
+interface CaptionRow {
+  id: string
+  /** The note's plain text; null for an id the registry does not know. */
+  preview: string | null
+  hideable: boolean
+  hidden: boolean
+}
+const captionRows = computed<CaptionRow[]>(() =>
+  (spec.captions ?? []).map((id) => {
+    const hideable = isNoteIdHideable(id)
+    return { id, preview: notePreview(id), hideable, hidden: hideable && hiddenList.value.includes(id) }
+  }),
+)
+function setCaptionHidden(id: string, hide: boolean) {
+  if (!isNoteIdHideable(id) || hide === hiddenList.value.includes(id)) return
+  const next = hide ? [...hiddenList.value, id] : hiddenList.value.filter((h) => h !== id)
+  hiddenList.value = next
+  emit('update:hiddenCaptions', [...next])
+}
+function removeUnknownCaption(id: string) {
+  const next = (spec.captions ?? []).filter((c) => c !== id)
+  if (next.length) spec.captions = next
+  else delete spec.captions
 }
 const linkValue = computed<boolean>({
   get: () => spec.link === 'campaigns-page',
@@ -408,16 +434,6 @@ function removeSection(i: number) {
             </div>
           </template>
 
-          <div class="field">
-            <label :id="captionsId">Captions <span class="hint">— notes shown under the whole card</span></label>
-            <div class="campaign-list" role="group" :aria-labelledby="captionsId">
-              <label v-for="o in NOTE_OPTIONS" :key="o.value" class="campaign-row">
-                <input type="checkbox" :checked="captionsValue.includes(o.value)" @change="toggleCaption(o.value, ($event.target as HTMLInputElement).checked)" />
-                {{ o.preview }}
-              </label>
-            </div>
-          </div>
-
           <div class="row">
             <div class="field check">
               <label><input type="checkbox" v-model="linkValue" /> Click through to the Campaigns page</label>
@@ -444,6 +460,37 @@ function removeSection(i: number) {
           </div>
         </fieldset>
 
+        <!-- Outside the card-level fieldset: hiding a caption is this card's own choice (it lives on
+             the widget, not the spec), so it works on a preset card before Customize too. -->
+        <div v-if="mode === 'custom' || presetId" class="field ce-captions">
+          <span :id="captionsId" class="ce-captions-label">Captions <span class="hint">— notes shown under the whole card</span></span>
+          <ul v-if="captionRows.length" class="ce-caption-list" role="group" :aria-labelledby="captionsId">
+            <li v-for="c in captionRows" :key="c.id" class="ce-caption-row" :class="{ 'is-hidden': c.hidden, 'is-unknown': c.preview === null }">
+              <template v-if="c.preview === null">
+                <span class="ce-caption-text">Unknown note {{ c.id }}</span>
+                <button v-if="mode === 'custom'" type="button" class="btn ce-caption-remove" :title="'Remove the unknown note ' + c.id" @click="removeUnknownCaption(c.id)">Remove</button>
+              </template>
+              <template v-else>
+                <span class="ce-caption-text">{{ c.preview }}</span>
+                <button
+                  type="button"
+                  class="btn ce-caption-toggle"
+                  :aria-pressed="c.hidden ? 'true' : 'false'"
+                  :aria-label="(c.hidden ? 'Show: ' : 'Hide: ') + c.preview"
+                  :disabled="!c.hideable"
+                  @click="setCaptionHidden(c.id, !c.hidden)"
+                >
+                  {{ c.hidden ? 'Show' : 'Hide' }}
+                </button>
+                <span v-if="!c.hideable" class="hint ce-caption-reason">always shown: affects what the data means</span>
+                <span v-else-if="c.hidden" class="hint">hidden on this card</span>
+              </template>
+            </li>
+          </ul>
+          <p v-else class="hint">This card has no captions of its own.</p>
+          <p class="hint">Add your own text in the chart's Caption field.</p>
+        </div>
+
         <!-- Outside the card-level fieldset: in preset mode each section disables its own
              controls but its items still open (a disabled fieldset would disable their toggles). -->
         <div v-if="mode === 'custom' || presetId" :key="`sections-${specKey}`">
@@ -468,7 +515,7 @@ function removeSection(i: number) {
 
       <div class="ce-preview">
         <h3>Preview</h3>
-        <MetricCard :card-ref="previewCardRef" :context="context" :campaign-ids="campaignIds" />
+        <MetricCard :card-ref="previewCardRef" :context="context" :campaign-ids="campaignIds" :hidden-captions="hiddenList" />
       </div>
     </div>
   </div>
@@ -476,6 +523,35 @@ function removeSection(i: number) {
 
 <style scoped src="./editor/editor.css"></style>
 <style scoped>
+.ce-captions-label {
+  display: block;
+  margin-bottom: 4px;
+}
+.ce-caption-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ce-caption-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.ce-caption-text {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.ce-caption-row.is-hidden .ce-caption-text {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+.ce-caption-row.is-unknown .ce-caption-text {
+  color: #bc4749;
+}
 .tone-problem {
   color: #bc4749;
   margin: 4px 0 0;
