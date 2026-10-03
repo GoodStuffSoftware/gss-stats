@@ -8,7 +8,8 @@
 
 import fs from 'node:fs'
 import { parseArgs } from 'node:util'
-import { ADS_CUSTOMER_ID, RETEST_CAMPAIGN_ID, type FirstSessionRowSite, type ReadingRecord, type ReturnRow, type ReturnSiteStat, type SpendDay, type StoredSpend, type TaggedRow } from '../../src/lib/adsRules'
+import { ADS_CUSTOMER_ID, ADS_READ_PLANS, defaultReadCampaignId, etDateOf, type PostflightStage, type FirstSessionRowSite, type ReadingRecord, type ReturnRow, type ReturnSiteStat, type SpendDay, type StoredSpend, type TaggedRow } from '../../src/lib/adsRules'
+import { campaignById } from '../../src/lib/campaigns'
 import type { PlacementDayRow } from '../../src/lib/adsStore'
 import type { HourPathCount } from '../../src/lib/popupEvents'
 import {
@@ -37,7 +38,7 @@ import { createWranglerRunner, EXTERNAL_TIMEOUT_MS, type WranglerRunner } from '
 
 export const COMMON_OPTIONS = {
   'dry-run': { type: 'boolean', default: false },
-  campaign: { type: 'string', default: RETEST_CAMPAIGN_ID },
+  campaign: { type: 'string' },
   'cf-token-file': { type: 'string' },
   'firebase-sa': { type: 'string' },
   'play-sa': { type: 'string' },
@@ -48,7 +49,34 @@ export const COMMON_OPTIONS = {
 } as const
 
 export function parseCli<T extends Record<string, { type: 'string' | 'boolean'; default?: string | boolean }>>(extra: T, argv = process.argv.slice(2)) {
-  return parseArgs({ args: argv, options: { ...COMMON_OPTIONS, ...extra }, allowPositionals: false, strict: true }).values as Record<string, string | boolean | undefined>
+  try {
+    return parseArgs({ args: argv, options: { ...COMMON_OPTIONS, ...extra }, allowPositionals: false, strict: true }).values as Record<string, string | boolean | undefined>
+  } catch (e) {
+    // A bare `--campaign` (no value) fails in parseArgs before resolveCampaignId runs: give it the
+    // same message as a blank or unknown id, listing the registered ids.
+    if (e instanceof Error && /Option '--campaign\b.*argument (missing|is ambiguous)/.test(e.message)) throw new Error(campaignRefusal(null))
+    throw e
+  }
+}
+
+/** The one message for a `--campaign` value that is not usable (blank, missing, unknown). */
+export function campaignRefusal(given: string | boolean | null): string {
+  const ids = Object.keys(ADS_READ_PLANS).join(', ') || 'none registered'
+  return `--campaign ${given === null ? 'with no value' : JSON.stringify(given)} is not a registered campaign id (registered read plans: ${ids}); pass --campaign <id>`
+}
+
+/** The campaign a read runs on: an explicit `--campaign <id>`, else the registry's default for
+ * this kind of read on the read's own clock (src/lib/adsRules.ts defaultReadCampaignId; throws
+ * a one-line error listing the registered ids when it cannot pick exactly one). `nowMs` is the
+ * fixture's clock under --fixture, else the real one.
+ * A flag that is given must be a known campaign: an empty value (an unset shell variable), a
+ * boolean or an unknown id fails loudly, listing the registered ids; it never falls through to
+ * the default. (A closed campaign is known: its own refusal, "is closed", comes later.) */
+export function resolveCampaignId(opts: Record<string, string | boolean | undefined>, kind: 'morning' | 'postflight', nowMs: number, stage?: PostflightStage): string {
+  const given = opts.campaign
+  if (given === undefined) return defaultReadCampaignId(kind, etDateOf(nowMs), stage)
+  if (typeof given === 'string' && given && (ADS_READ_PLANS[given] || campaignById(given))) return given
+  throw new Error(campaignRefusal(given))
 }
 
 export function loadCfToken(file: string | undefined): string | null {
