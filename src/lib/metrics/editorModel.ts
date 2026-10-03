@@ -405,6 +405,14 @@ export function isDisplaySelectable(binding: DataBinding, as: DisplayAs): boolea
   const k = kindOf(binding)
   return !!k && DISPLAYS_FOR[k].includes(as) && as !== 'sparkline'
 }
+/** Whether the given binding's data kind allows `as` at all (validate.ts DISPLAYS_FOR, so a
+ * display validateCard accepts), the not-yet-pickable sparkline included. The item editor's
+ * auto-correct asks this, not isDisplaySelectable: a stored `{ as: 'sparkline', series }` (set
+ * outside the form) stays as it is through any data change that keeps a kind allowing it. */
+export function isDisplayAllowed(binding: DataBinding, as: DisplayAs): boolean {
+  const k = kindOf(binding)
+  return !!k && DISPLAYS_FOR[k].includes(as)
+}
 export function dataKindOf(binding: DataBinding): DataKind | null {
   return kindOf(binding)
 }
@@ -425,7 +433,7 @@ export function makeDisplay(as: DisplayAs, current: Display): Display {
     case 'badge':
       return { as: 'badge', ...(current.as === 'badge' && current.tones ? { tones: current.tones } : {}) }
     case 'sparkline':
-      return { as: 'sparkline', series: 'daily' }
+      return current.as === 'sparkline' ? { ...current } : { as: 'sparkline', series: 'daily' }
     default:
       return { as }
   }
