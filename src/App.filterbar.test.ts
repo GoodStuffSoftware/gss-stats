@@ -91,7 +91,7 @@ describe('App — main filter bar: in-flow layout + show-filters pin state machi
     vi.stubGlobal('IntersectionObserver', realIO)
   })
 
-  it('restores the bar to normal flow, directly under the page tabs — not behind a hidden panel', async () => {
+  it('restores the bar to normal flow, directly under the header — not behind a hidden panel', async () => {
     const w = await mountApp()
     // The pre-v0.6 in-flow section exists and contains the real FilterBar (unconditionally,
     // not gated behind any `v-if="barOpen"`-style panel).
