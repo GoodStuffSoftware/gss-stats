@@ -17,6 +17,7 @@ import { gameDimSqlCase, gameDimPrefilter, campaignFlightSqlCase, campaignFlight
 import { excludeOwnClause as sharedExcludeOwnClause, selfReferralClause as sharedSelfReferralClause } from '../../src/lib/ownExclusion'
 import { etDateSql, etHourSql } from '../../src/lib/etTime'
 import { isDateDim } from '../../src/lib/rings'
+import { splitRefused, refusedPathExcludeClause } from '../../src/lib/splitGuard'
 import { buildCacheKeyUrl, cachedJson, ttlSecondsFor, type CacheLike } from '../_lib/edgeCache'
 import { WHEN_RE, SITE_TAG_RE } from '../../src/lib/range'
 // Request-size guards (MAX_SITES/MAX_CONSTRAINTS/MAX_BOUND_PARAMS/MAX_SQL_BYTES/
@@ -357,6 +358,15 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     }
   }
 
+  // Counts-only rule (src/lib/splitGuard.ts): a query that maps rows (points mode), groups them
+  // by an hour/place/device dimension, or drills into one leaves return, completion and
+  // tutorial-completion rows out entirely. Applied in all three branches below, and independent
+  // of every toggle (event beacons, own visits, known traffic), so no combination splits them.
+  const splitGuardActive = splitRefused({ points: isPoints, fields: [...activeDims, ...constraints.map((c) => c.field)] })
+  const splitGuardClause = (w: string[], b: any[]) => {
+    if (splitGuardActive) refusedPathExcludeClause(w, b)
+  }
+
   // Everything that changes the SQL (and therefore the response) goes into the cache key —
   // mode, dims/dim, the date window, site selection, drill constraints, and both exclusion
   // toggles. `sites`/`constraints` are sorted for the key only (their order never changes the
@@ -377,6 +387,9 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     excludeSelf,
     includeEventBeacons,
     excludeKnownTraffic,
+    // Only guarded queries get a new key, so an entry cached before the guard existed (closed
+    // ranges are cached long) is never served for them; every other key is unchanged.
+    ...(splitGuardActive ? { splitGuard: 1 } : {}),
   })
   const ttl = ttlSecondsFor(until, new Date())
   const cache = (caches as unknown as { default: CacheLike }).default
@@ -389,6 +402,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     const w: string[] = ['ts >= ?', 'ts < ?', "lat <> ''"]
     const b: any[] = [sinceMs, untilMs]
     eventRowsClause(w, b) // events, not screen views — excluded unless opted in
+    splitGuardClause(w, b) // map mode: always on
     knownTrafficClause(w, b)
     siteClause(w, b)
     drillClause(w, b)
@@ -437,6 +451,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     const w: string[] = ['ts >= ?', 'ts < ?', ...ringDims.map(ringBlankExclusion)]
     const b: any[] = [sinceMs, untilMs]
     eventRowsClause(w, b) // events excluded unless opted in, or the dims describe events
+    splitGuardClause(w, b)
     knownTrafficClause(w, b)
     siteClause(w, b)
     drillClause(w, b)
@@ -483,6 +498,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const binds: any[] = [sinceMs, untilMs]
   if (BLANK_DROPPED_DIMS.has(dim)) where.push(ringBlankExclusion(dim)) // see EVENT_DIMS
   eventRowsClause(where, binds) // events excluded unless opted in, or the dim describes events
+  splitGuardClause(where, binds)
   knownTrafficClause(where, binds)
   siteClause(where, binds)
   drillClause(where, binds)
