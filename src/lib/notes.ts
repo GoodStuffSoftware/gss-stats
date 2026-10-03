@@ -285,6 +285,15 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     severity: 'info',
     scopes: ['campaigns'],
   },
+  // The campaign-country card (lib/metrics/presets.ts CAMPAIGN_COUNTRY): the counts-only rule
+  // (lib/splitGuard.ts) gives return and completion rows no country bucket.
+  'country-split-excludes-refused': {
+    id: 'country-split-excludes-refused',
+    text: 'Counts only: the country columns leave out return, game-start, completion, tutorial-completion and tour-exit rows, so completed games have no row here and an arrival that came in on one of them is in no column.',
+    kind: 'note',
+    severity: 'info',
+    scopes: ['campaigns'],
+  },
   // The release panel (lib/metrics/presets.ts release-before-after): why the before window reads
   // low. Plain wording, as the panel's own line had it.
   'release-before-partial': {

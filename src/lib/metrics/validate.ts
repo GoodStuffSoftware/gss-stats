@@ -143,6 +143,10 @@ export function validateCard(spec: CardSpec): string[] {
       if (!allowedParams.includes(name as MetricParam)) errors.push(`${where}: param '${name}' not accepted`)
       else if (typeof v === 'string' && !paramValueOk(name as MetricParam, v, bindingSupportsOrganic(b))) errors.push(`${where}: unknown ${name} '${v}'`)
     }
+    // A country repeat or country columns over a binding that takes no country param would split
+    // it by place: the counts-only rule (lib/splitGuard.ts) refuses that for completions, so the
+    // card is refused here rather than the request failing later.
+    if (scope.has('country') && !allowedParams.includes('country')) errors.push(`${where}: a country repeat or columns over a binding that takes no country param`)
     for (const p of allowedParams) {
       if (OPTIONAL_PARAMS.has(p)) continue
       if (b.params?.[p] === undefined && !scope.has(p)) errors.push(`${where}: param '${p}' is neither set nor provided by a repeat`)
@@ -251,15 +255,39 @@ function withinLimits(v: unknown, depth = 0): boolean {
  * removal) may still carry an item bound to one; such items are dropped on load, and a section
  * left empty goes with them, so the card loads without it instead of turning invalid. */
 const RETIRED_METRICS: ReadonlySet<string> = new Set(['bsk.deferredCompletions'])
+/** Whether a repeat spec (stored data: anything) repeats over countries. */
+const overCountries = (r: unknown): boolean => !!r && typeof r === 'object' && (r as { over?: unknown }).over === 'countries'
+/** A KNOWN metric or ratio that takes no country param (an unknown id is left for validateCard
+ * to refuse). */
+function takesNoCountry(it: unknown): boolean {
+  const d = (it as { data?: { metric?: unknown; ratio?: unknown } } | null)?.data
+  if (typeof d?.metric === 'string') {
+    const m = METRICS.get(d.metric)
+    return !!m && !m.params.includes('country')
+  }
+  if (typeof d?.ratio === 'string') {
+    const r = RATIOS.get(d.ratio)
+    return !!r && !ratioParamsOf(r).includes('country')
+  }
+  return false
+}
+/** Drops, on load, items bound to a retired metric, and items under a country repeat or country
+ * columns whose metric no longer takes a country param (R-1b: campaign.completions, in a copy of
+ * the campaign-country card saved before the change). A section left empty goes with them, so
+ * the card loads without them instead of turning invalid. */
 function dropRetiredItems(spec: CardSpec): CardSpec {
   if (!spec || !Array.isArray(spec.sections)) return spec
-  const retired = (it: unknown): boolean => {
-    const m = (it as { data?: { metric?: unknown } } | null)?.data?.metric
-    return typeof m === 'string' && RETIRED_METRICS.has(m)
-  }
+  const cardCountries = overCountries(spec.repeat)
   const sections = spec.sections.flatMap((sec) => {
-    if (!sec || !Array.isArray(sec.items) || !sec.items.some(retired)) return [sec]
-    const items = sec.items.filter((it) => !retired(it))
+    if (!sec || !Array.isArray(sec.items)) return [sec]
+    const secCountries = cardCountries || overCountries(sec.repeat) || overCountries(sec.columns)
+    const drop = (it: unknown): boolean => {
+      const m = (it as { data?: { metric?: unknown } } | null)?.data?.metric
+      if (typeof m === 'string' && RETIRED_METRICS.has(m)) return true
+      return (secCountries || overCountries((it as { repeat?: unknown } | null)?.repeat)) && takesNoCountry(it)
+    }
+    if (!sec.items.some(drop)) return [sec]
+    const items = sec.items.filter((it) => !drop(it))
     return items.length ? [{ ...sec, items }] : []
   })
   return { ...spec, sections }

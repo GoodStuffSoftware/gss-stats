@@ -26,7 +26,7 @@ const pg = (widgets: Widget[]): DashboardPage => ({ id: 'bsk-overview', name: 'B
 
 describe('v12: the small-sample note takes one grid row', () => {
   it('ships the one-row layout for a fresh config', () => {
-    expect(CONFIG_VERSION).toBeGreaterThanOrEqual(12) // a later slice may bump on top
+    expect(CONFIG_VERSION).toBeGreaterThanOrEqual(12) // later slices bump on top (defaults.v13.test.ts, defaults.v14.test.ts)
     expect(geom(defaultConfig())).toEqual(V12_OVERVIEW)
   })
 

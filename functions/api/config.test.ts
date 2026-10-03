@@ -137,18 +137,69 @@ describe('the v11 → v12 upgrade (the Overview small-sample note takes one grid
   })
 })
 
-describe('the v12 → v13 upgrade (inline sparklines: a guard bump, no layout rewrite)', () => {
-  it('this code writes the sparkline layout version (LAYOUT_VERSIONS.sparklines) or later', () => {
-    expect(CONFIG_VERSION).toBeGreaterThanOrEqual(LAYOUT_VERSIONS.sparklines)
+// Layout version 13 (page navigation: groups, drill parents, icons; the active page per viewer).
+// The live dashboard is stored at v12 when this ships: the first v13 save backs it up, and any tab
+// still running v12 code must fail safely from then on — refused with 409, KV untouched — never
+// overwrite the v13 layout (which would silently undo the migration for everyone).
+describe('the v12 → v13 upgrade (page navigation)', () => {
+  it('this code writes layout version 13 or later', () => {
+    expect(CONFIG_VERSION).toBeGreaterThanOrEqual(LAYOUT_VERSIONS.navigation)
   })
-  it('the first save at the sparkline version backs the stored v12 layout up to backup:v12, once; a v12 tab then gets 409', async () => {
-    const v = LAYOUT_VERSIONS.sparklines
-    const prev = JSON.stringify(cfg(v - 1, 'previous layout'))
-    const { kv, store } = fakeKv({ 'dashboard:default': prev })
-    expect((await put(kv, cfg(v, 'first save'))).status).toBe(200)
-    expect(store.get(backupKeyFor(v - 1))).toBe(prev)
-    await put(kv, cfg(v, 'second save'))
-    expect(store.get(backupKeyFor(v - 1))).toBe(prev) // never overwritten
-    expect((await put(kv, cfg(v - 1, 'old tab'))).status).toBe(409) // an older tab cannot overwrite what it cannot draw
+  it('the first v13 save over the stored v12 layout backs it up to backup:v12, once', async () => {
+    const v12 = JSON.stringify(cfg(12, 'live v12 layout'))
+    const { kv, store, puts } = fakeKv({ 'dashboard:default': v12 })
+    expect((await put(kv, cfg(13, 'first v13'))).status).toBe(200)
+    expect(puts).toEqual(['dashboard:default:backup:v12', 'dashboard:default'])
+    expect(store.get('dashboard:default:backup:v12')).toBe(v12)
+    await put(kv, cfg(13, 'second v13'))
+    expect(store.get('dashboard:default:backup:v12')).toBe(v12) // never overwritten
+  })
+  it('an old v12 tab saving over a stored v13 layout gets 409 "out of date, reload", and KV is untouched', async () => {
+    const v13 = JSON.stringify(cfg(13, 'migrated'))
+    const { kv, store, puts } = fakeKv({ 'dashboard:default': v13 })
+    const res = await put(kv, cfg(12, 'old tab'))
+    expect(res.status).toBe(409)
+    const body: any = await res.json()
+    expect(body).toMatchObject({ error: 'stale', storedVersion: 13, incomingVersion: 12 })
+    expect(body.message).toMatch(/out of date, reload/)
+    expect(puts).toEqual([])
+    expect(store.get('dashboard:default')).toBe(v13)
+    expect([...store.keys()]).toEqual(['dashboard:default']) // no backup written either
+  })
+  it('a body claiming a version above CONFIG_VERSION gets 400 and changes nothing', async () => {
+    const { kv, puts } = fakeKv({ 'dashboard:default': JSON.stringify(cfg(CONFIG_VERSION)) })
+    expect((await put(kv, cfg(CONFIG_VERSION + 1, 'crafted'))).status).toBe(400)
+    expect(puts).toEqual([])
+  })
+})
+
+// Layout version 14 (inline sparklines): a guard bump only, no layout rewrite. Page navigation
+// holds 13, so a tab on the nav build (v13) must be refused once a v14 layout is stored.
+describe('the v13 → v14 upgrade (inline sparklines: a guard bump, no layout rewrite)', () => {
+  it('this code writes layout version 14', () => {
+    expect(LAYOUT_VERSIONS.navigation).toBe(13)
+    expect(LAYOUT_VERSIONS.sparklines).toBe(14)
+    expect(CONFIG_VERSION).toBe(14)
+  })
+  it('the first v14 save over a stored v13 layout backs it up to backup:v13, once', async () => {
+    const v13 = JSON.stringify(cfg(13, 'live v13 layout'))
+    const { kv, store, puts } = fakeKv({ 'dashboard:default': v13 })
+    expect((await put(kv, cfg(14, 'first v14'))).status).toBe(200)
+    expect(puts).toEqual(['dashboard:default:backup:v13', 'dashboard:default'])
+    expect(store.get('dashboard:default:backup:v13')).toBe(v13)
+    expect(store.get(backupKeyFor(13))).toBe(v13)
+    await put(kv, cfg(14, 'second v14'))
+    expect(store.get('dashboard:default:backup:v13')).toBe(v13) // never overwritten
+  })
+  it('a PUT carrying version 13 over a stored v14 layout gets 409, and KV is untouched', async () => {
+    const v14 = JSON.stringify(cfg(14, 'sparkline layout'))
+    const { kv, store, puts } = fakeKv({ 'dashboard:default': v14 })
+    const res = await put(kv, cfg(13, 'nav-build tab'))
+    expect(res.status).toBe(409)
+    expect(await res.json()).toMatchObject({ error: 'stale', storedVersion: 14, incomingVersion: 13 })
+    expect(puts).toEqual([])
+    expect(store.get('dashboard:default')).toBe(v14)
+    expect([...store.keys()]).toEqual(['dashboard:default'])
+    expect((await put(kv, cfg(15, 'crafted'))).status).toBe(400)
   })
 })

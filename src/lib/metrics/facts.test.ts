@@ -5,13 +5,14 @@
 // (node:sqlite, D1's dialect) and snapshotted, so any change to a statement is a reviewed diff.
 import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it, vi } from 'vitest'
-import { COUNTRY_BUCKET_SQL, FACTS, factKey, flightPathsSeenStatement, kpiDayWindows, rangeMs, releaseSidesMs, type FactId, type FactParams } from './facts'
+import { COUNTRY_BUCKET_SQL, FACTS, guardedCountryBucket, factKey, flightPathsSeenStatement, kpiDayWindows, rangeMs, releaseSidesMs, type FactId, type FactParams } from './facts'
 import { buildFact, factCuts } from './engine'
 import { CAMPAIGNS, campaignAttributionClause, campaignById, etMidnightUtcMs, ORGANIC_ARM_ID } from '../campaigns'
 import * as campaigns from '../campaigns'
 import { SPEND_SUMMARY_SQL } from '../adsStore'
 import { etMidnightMs } from './instrumentation'
 import { etDateSql } from '../etTime'
+import { SPLIT_REFUSED_PATH_PATTERNS } from '../splitGuard'
 
 const NOW = Date.parse('2026-09-26T21:00:00Z')
 const SAMPLE_PARAMS: Record<FactId, FactParams[]> = {
@@ -89,6 +90,7 @@ describe('every fact is an anonymous aggregate', () => {
       if (item === '(ts >= ?)' || item === '0') continue // a boolean split (install fix, upsell fix, release side) or no segments
       if (item === COUNTRY_BUCKET_SQL) continue // US / CA / other, literal outputs only
       if (item === etDateSql()) continue // the ET DAY (YYYY-MM-DD) only: never an hour, a minute or a raw ts
+      if (item === guardedCountryBucket().sql) continue // the same, or '' on a split-refused row
       expect(item, `select item "${item}"`).toMatch(/^[a-z_]+$/)
       expect(['ts', 'id']).not.toContain(item)
     }
@@ -241,7 +243,13 @@ describe('each fact runs on SQLite and reuses the endpoint clause helpers', () =
     const stmt = buildFact({ id: 'campaignPathVisitor', params: { campaignId: retest.id } }, NOW)
     const attr = campaignAttributionClause(retest)
     expect(stmt.sql).toContain(attr.sql)
-    expect(stmt.binds.slice(1, 1 + attr.binds.length)).toEqual(attr.binds) // after the pf instant
+    // The split guard's path patterns (the cb column) are SQL literals, not binds, so the
+    // attribution binds follow the pf instant directly.
+    for (const p of SPLIT_REFUSED_PATH_PATTERNS) {
+      expect(stmt.sql).toContain(`path LIKE '${p}'`)
+      expect(stmt.binds).not.toContain(p)
+    }
+    expect(stmt.binds.slice(1, 1 + attr.binds.length)).toEqual(attr.binds)
   })
   it('the flightPathsSeen fact builds flightPathsSeenStatement', () => {
     const c = campaignById('24215315197')!

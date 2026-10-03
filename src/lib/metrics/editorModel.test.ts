@@ -25,6 +25,7 @@ import {
   freshId,
   groupErrors,
   isDisplaySelectable,
+  isDisplayAllowed,
   isKnownNote,
   labelKind,
   makeData,
@@ -40,6 +41,14 @@ import {
   reorder,
   scopePathOptions,
   specFromPresetId,
+  noteVarNames,
+  rebindData,
+  repeatIdOptions,
+  rowsToTones,
+  tonesToRows,
+  withGating,
+  withNoteId,
+  withNoteVar,
   withRepeatOver,
   type LabelKind,
 } from './editorModel'
@@ -225,12 +234,19 @@ describe('display compatibility matrix (DISPLAYS_FOR, via displayOptionsFor)', (
     expect(isDisplaySelectable({ ratio: 'campaign.acceptPerAsk' }, 'sparkline')).toBe(false)
     expect(sparklineBlocker({ ratio: 'campaign.acceptPerAsk' })).not.toBeNull()
   })
+  it('isDisplayAllowed accepts a stored sparkline where the kind allows it, unlike isDisplaySelectable', () => {
+    expect(isDisplayAllowed({ metric: 'campaign.taggedArrivals' }, 'sparkline')).toBe(true)
+    expect(isDisplayAllowed({ metric: 'campaign.spend' }, 'sparkline')).toBe(true)
+    expect(isDisplayAllowed({ metric: 'campaign.taggedArrivals' }, 'percent')).toBe(false)
+    expect(isDisplayAllowed({ metric: 'not-a-real-metric' }, 'number')).toBe(false)
+  })
+  it("makeDisplay keeps a sparkline's own series and builds the daily one from another display", () => {
+    expect(makeDisplay('sparkline', { as: 'sparkline', series: 'daily' })).toEqual({ as: 'sparkline', series: 'daily' })
+    expect(makeDisplay('sparkline', { as: 'number' })).toEqual({ as: 'sparkline', series: 'daily' })
+  })
   it('firstDisplayFor never starts on the sparkline (number/currency first)', () => {
     expect(firstDisplayFor({ metric: 'campaign.taggedArrivals' })).not.toBe('sparkline')
     expect(firstDisplayFor({ metric: 'campaign.spend' })).not.toBe('sparkline')
-  })
-  it('makeDisplay("sparkline") asks for the daily series', () => {
-    expect(makeDisplay('sparkline', { as: 'number' })).toEqual({ as: 'sparkline', series: 'daily' })
   })
   it('an invalid ratio can never even be asked about: RATIOS holds only the registry\'s validated set', () => {
     // ratios.ts's own defineRatios() throws at import for anything invalid, so by the time the
@@ -347,5 +363,66 @@ describe('groupErrors', () => {
   it('never throws when errors reference an out-of-range section index', () => {
     const spec = emptySpec()
     expect(() => groupErrors(['sections[5].x: bad'], spec)).not.toThrow()
+  })
+})
+
+// ── Setters that must not drop what a template set (the card-editor data-loss fix) ─────────────
+describe('template settings survive a re-pick', () => {
+  it('makeLabel("note") on a note label keeps its vars; withNoteId keeps them across a note change', () => {
+    const l: Label = { note: 'label.card.taggedArrivalsFor', vars: { campaign: 'campaign.label' } }
+    expect(makeLabel('note', l, 'campaign.label')).toEqual(l)
+    expect(withNoteId(l, 'label.card.popupTapRate')).toEqual({ note: 'label.card.popupTapRate', vars: { campaign: 'campaign.label' } })
+    expect(withNoteId('text', 'label.card.flight')).toEqual({ note: 'label.card.flight' })
+  })
+
+  it('noteVarNames reads the template placeholders; withNoteVar binds and unbinds one', () => {
+    expect(noteVarNames('label.card.upsellSegment')).toEqual(['at', 'day'])
+    expect(noteVarNames('no-such-note')).toEqual([])
+    const l: Label = { note: 'label.card.taggedArrivalsFor', vars: { campaign: 'campaign.label' } }
+    expect(withNoteVar(l, 'campaign', '')).toEqual({ note: 'label.card.taggedArrivalsFor' })
+    expect(withNoteVar({ note: 'label.card.taggedArrivalsFor' }, 'campaign', 'campaign.id')).toEqual({ note: 'label.card.taggedArrivalsFor', vars: { campaign: 'campaign.id' } })
+    expect(withNoteVar('plain', 'x', 'campaign.id')).toBe('plain')
+  })
+
+  it('rebindData: the same id is a no-op; another id keeps the window and params it accepts', () => {
+    const cur = { metric: 'bsk.pageviews', window: 'todaySoFar' as const }
+    expect(rebindData(cur, { metric: 'bsk.pageviews' })).toBe(cur)
+    expect(rebindData(cur, { metric: 'bsk.gameViews' })).toEqual({ metric: 'bsk.gameViews', window: 'todaySoFar' })
+    // A window the new metric does not serve is dropped (campaign.returnD0 has only attribution).
+    expect(rebindData({ metric: 'campaign.taggedArrivals', window: 'todaySoFar' }, { metric: 'campaign.returnD0' })).toEqual({ metric: 'campaign.returnD0' })
+    // Params: kept when accepted, dropped when not.
+    const pinned = { ratio: 'popup.installedRate', params: { popup: 'install' }, window: 'page' as const }
+    expect(rebindData(pinned, { ratio: 'popup.tapRate' })).toEqual({ ratio: 'popup.tapRate', params: { popup: 'install' }, window: 'page' })
+    expect(rebindData(pinned, { metric: 'bsk.pageviews' })).toEqual({ metric: 'bsk.pageviews', window: 'page' })
+    // A before/after binding keeps { scope: 'window' } while the new metric serves a side.
+    expect(rebindData({ metric: 'bsk.pageviews', window: { scope: 'window' } }, { metric: 'bsk.installs' })).toEqual({ metric: 'bsk.installs', window: { scope: 'window' } })
+    expect(rebindData({ field: 'campaign.label' }, { metric: 'bsk.pageviews' })).toEqual({ metric: 'bsk.pageviews' })
+  })
+
+  it('withRepeatOver keeps `empty` when the kind changes', () => {
+    const empty = { label: '', text: { note: 'no-return-visits-yet' } }
+    expect(withRepeatOver({ over: 'campaigns', tracked: true, empty }, 'popups')).toEqual({ over: 'popups', empty })
+  })
+
+  it('repeatIdOptions lists window sides and country buckets too', () => {
+    expect(repeatIdOptions('windows').map((o) => o.value)).toEqual(['before', 'after', 'upsellPre', 'upsellPost'])
+    expect(repeatIdOptions('countries').map((o) => o.value)).toEqual(['US', 'CA', 'other'])
+    expect(repeatIdOptions('readings')).toEqual([])
+  })
+
+  it('withGating drops an emptied gating instead of leaving gating: {}', () => {
+    const item = { id: 'a', label: '', data: { metric: 'bsk.pageviews' }, display: { as: 'number' as const } }
+    expect('gating' in withGating(item, { whenUnmeasured: undefined })).toBe(false)
+    expect(withGating({ ...item, gating: { whenZero: 'omit' } }, { whenZero: undefined })).toStrictEqual(item)
+    expect(withGating(item, { whenZero: 'omit' })).toEqual({ ...item, gating: { whenZero: 'omit' } })
+  })
+
+  it('badge tones round-trip through rows, and a prototype-named value stays plain data', () => {
+    const tones = { 'flighting today': 'live' as const, closed: 'warn' as const }
+    expect(rowsToTones(tonesToRows(tones))).toEqual(tones)
+    expect(rowsToTones([])).toBeUndefined()
+    const odd = rowsToTones([{ value: '__proto__', tone: 'warn' }])!
+    expect(Object.getPrototypeOf(odd)).toBe(Object.prototype)
+    expect(Object.hasOwn(odd, '__proto__')).toBe(true)
   })
 })
