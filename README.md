@@ -323,7 +323,7 @@ geography is country-only** — sub-country region/city comes from the beacon.
 `/signin-prompt`, `/signin-eligible`, `/promo-first50`, `/first50-congrats`, `/upsell`,
 `/install`, `/popup-outcome`, `/return`, `/game/complete/`, the `/auth/success/<provider>/`
 status suffix, `/auth/error`, `/auth/redirect` and the first-session beacons (`/tour`,
-`/game/first-move`, `/game/abandon`, `/welcome-signed-in`) are pop-up/event beacons, not screens — `/api/geo` and `/api/sites` exclude all
+`/game/tutorial-complete`, `/game/first-move`, `/game/abandon`, `/welcome-signed-in`) are pop-up/event beacons, not screens — `/api/geo` and `/api/sites` exclude all
 of them from every pageview/visit total and the top-pages breakdown by default (see
 [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) `POPUP_EVENT_PREFIXES`); `/api/popups` is
 where they're counted. Each geo chart has its own **"Include event beacons"** option (off by
@@ -334,6 +334,20 @@ there — not just the one drilled — can show the event rows just filtered dow
 carries a caption explaining why (see [`src/lib/drill.ts`](src/lib/drill.ts)
 `drillNeedsEventBeacons`).
 
+**Return, game-completion and tutorial-completion rows are counts only: never split by hour,
+place or device.** Rule: "counts only. Never tie beacon rows to a device, time or place." A geo
+chart that maps rows (the map/globe), groups by an hour, place or device dimension (`hourEt`;
+`country`, `region`, `city`, `postal`, `continent`, `timezone`, `colo`, `org`; `device`,
+`browser`, `os`, `lang`, `screenw`, `screenwBucket`, `visitor`), or is drilled into one of them
+leaves `/return/…`, `/game/complete/…`, `/game/complete-deferred/…` and
+`/game/tutorial-complete/…` rows out entirely, whatever "Include event beacons" says, and marks
+the response `meta.splitGuard: true`. The rows still count everywhere else: by path, by ET day
+or flight day, by campaign, and in the metric cards. The guard keys on dimensions and drills
+only; the chart's own date range is not yet clamped to whole days. One visible effect: the **Arrivals by ET hour of day** chart no longer counts an arrival
+whose first beacon was a return or completion row, so its total can sit slightly below the
+flight-day chart's. The "hide known test and household traffic" filter is unchanged. See
+[`src/lib/splitGuard.ts`](src/lib/splitGuard.ts).
+
 **Every stored geo-beacon column is a chartable dimension AND a filter.** `functions/api/geo.ts`
 whitelists every analytic `hits` column (`GEO_DIMS`) — region/city/postal/country/continent/
 timezone/colo/org/referrer/refpath/path/site/device/browser/os/lang/visitor/campaign/source/
@@ -342,7 +356,7 @@ medium/date, plus **screen width** (`screenw`, exact pixels) and its bucketed fo
 **path family** dimension (`pathFamily`) that groups every event-beacon prefix above into
 `page` / `signin-prompt` / `signin-eligible` / `promo-first50` / `first50-congrats` / `upsell`
 / `install` / `popup-outcome` / `return` / `game-complete` / `auth-status` / `auth-error` /
-`auth-redirect` / `tour` / `game-first-move` / `game-abandon` / `welcome-signed-in`. More derived
+`auth-redirect` / `tour` / `tutorial-complete` / `game-first-move` / `game-abandon` / `welcome-signed-in`. More derived
 dimensions: **pop-up** (`popupFamily`) and **pop-up outcome** (`popupOutcome`), measured rows
 only (from the tracking activation day; pre-fix install-gap rows get no value — see
 [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) `popupDimSqlCase`, where
