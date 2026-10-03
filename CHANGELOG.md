@@ -6,7 +6,7 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
-## [0.15.6] — 2026-10-03
+## [0.16.0] — 2026-10-03
 
 ### Added
 - **Flight 2's two arms are registered.** The display arm on Sudoku-app placements and the desktop
