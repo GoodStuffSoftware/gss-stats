@@ -573,8 +573,9 @@ export function gameDimOf(dim: 'gameMode' | 'gameDifficulty', path: string): str
 // event-beacon prefix in lib/popupEvents.ts POPUP_EVENT_PREFIXES ('game-complete-deferred'
 // family), so it is excluded from page views the same way GAME_COMPLETE_PREFIX is. */
 export const GAME_COMPLETE_DEFERRED_PREFIX = '/game/complete-deferred/'
-/** A deferred-completion row (any mode/difficulty) — counts-only metric (lib/metrics/metrics.ts
- * bsk.deferredCompletions); never a live completion and never a funnel step. */
+/** A deferred-completion row (any mode/difficulty); never a live completion and never a funnel
+ * step. Best Sudoku no longer sends this family (deferred completions go out as ordinary
+ * /game/complete/ rows), so no tile counts it any more. */
 export function isGameCompleteDeferredPath(path: string): boolean {
   return path.startsWith(GAME_COMPLETE_DEFERRED_PREFIX)
 }

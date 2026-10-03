@@ -225,6 +225,23 @@ function withinLimits(v: unknown, depth = 0): boolean {
  * unknown card, it is never guessed); `{ spec }` → a plain-JSON copy when it is within
  * CARD_LIMITS and passes validateCard, otherwise the INVALID_CARD_PRESET placeholder. Never
  * throws: stored data can be anything. */
+/** Metrics removed from the registry. A saved custom card (a copy of a preset made before the
+ * removal) may still carry an item bound to one; such items are dropped on load, and a section
+ * left empty goes with them, so the card loads without it instead of turning invalid. */
+const RETIRED_METRICS: ReadonlySet<string> = new Set(['bsk.deferredCompletions'])
+function dropRetiredItems(spec: CardSpec): CardSpec {
+  if (!spec || !Array.isArray(spec.sections)) return spec
+  const retired = (it: unknown): boolean => {
+    const m = (it as { data?: { metric?: unknown } } | null)?.data?.metric
+    return typeof m === 'string' && RETIRED_METRICS.has(m)
+  }
+  const sections = spec.sections.flatMap((sec) => {
+    if (!sec || !Array.isArray(sec.items) || !sec.items.some(retired)) return [sec]
+    const items = sec.items.filter((it) => !retired(it))
+    return items.length ? [{ ...sec, items }] : []
+  })
+  return { ...spec, sections }
+}
 export function normCardRef(raw: unknown): CardRef | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
   const r = raw as Record<string, unknown>
@@ -240,7 +257,7 @@ export function normCardRef(raw: unknown): CardRef | undefined {
   try {
     const text = JSON.stringify(r.spec)
     if (typeof text !== 'string' || text.length > CARD_LIMITS.jsonBytes) return { preset: INVALID_CARD_PRESET }
-    const spec = JSON.parse(text) as CardSpec
+    const spec = dropRetiredItems(JSON.parse(text) as CardSpec)
     if (!withinLimits(spec) || !Array.isArray(spec.sections) || spec.sections.length > CARD_LIMITS.sections) return { preset: INVALID_CARD_PRESET }
     const items = spec.sections.reduce((n, sec) => n + (Array.isArray(sec?.items) ? sec.items.length : Infinity), 0)
     if (items > CARD_LIMITS.items) return { preset: INVALID_CARD_PRESET }

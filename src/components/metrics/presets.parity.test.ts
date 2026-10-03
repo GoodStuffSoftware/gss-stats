@@ -211,7 +211,6 @@ describe('bsk-kpis ≡ the bespoke "Today at a glance" tiles', () => {
     'Auth successes — new',
     'Auth successes — existing',
     'Auth successes — unknown',
-    'Deferred completions (EU consent)',
   ])
 
   it('same tiles in the same order, same values and the same delta lines ("new today" included)', async () => {
@@ -263,16 +262,6 @@ describe('bsk-kpis ≡ the bespoke "Today at a glance" tiles', () => {
     // Existing + new + unknown (4+0+0=4) is at most the base Auth successes count (6) — the
     // base metric predates the split and counts sign-ins with no status row too.
     expect(Number(byLabel.get('Auth successes')!.value)).toBeGreaterThanOrEqual(4)
-  })
-
-  it('deferred-completions tile (best-sudoku card 125): present, next to Games completed, reading an explicit zero — no rows exist in this fixture (or in production yet)', async () => {
-    const after = newTiles(await mountNew('bsk-kpis'))
-    const labels = after.map((t) => t.label)
-    const completedIdx = labels.indexOf('Games completed')
-    expect(completedIdx).toBeGreaterThanOrEqual(0)
-    expect(labels[completedIdx + 1]).toBe('Deferred completions (EU consent)')
-    const deferred = after.find((t) => t.label === 'Deferred completions (EU consent)')!
-    expect(deferred.value).toBe('0') // a real, visible "0" — never blank or hidden
   })
 
   it('no-campaign days: the arrivals placeholder is a tile, as before', async () => {
