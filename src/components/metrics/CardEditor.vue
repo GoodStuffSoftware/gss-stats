@@ -40,7 +40,7 @@ import CardEditorSection from './editor/CardEditorSection.vue'
 import { presetById } from '../../lib/metrics/presets'
 import { validateCard } from '../../lib/metrics/validate'
 import { noteLabelOptions } from '../../lib/metrics/editorModel'
-import { BADGE_TONE_OPTIONS, CARD_ACTION_OPTIONS, cloneSpec, emptySection, groupErrors, moveBy, presetOptions, rowsToTones, specFromPresetId, tonesToRows, withField, type BadgeTone, type ToneRow } from '../../lib/metrics/editorModel'
+import { BADGE_TONE_OPTIONS, CARD_ACTION_OPTIONS, cloneSpec, emptySection, groupErrors, moveBy, presetOptions, rowsToTones, specFromPresetId, specsEqual, toneValueProblem, tonesToRows, withField, type BadgeTone, type ToneRow } from '../../lib/metrics/editorModel'
 import type { CardAction, CardRef, CardSpec, Label, MetricsContext } from '../../lib/metrics/types'
 
 const props = defineProps<{
@@ -127,7 +127,16 @@ function resetToPreset() {
   if (!window.confirm(`Replace your changes with the ${label} preset?`)) return
   resetSpecTo(specFromPresetId(customizedFrom.value))
 }
+/** Leaves the editable copy for the preset picker. Edits made since Customize are in-session
+ * only (Cancel still protects the stored card) but are discarded here, so it asks first —
+ * `confirm`, like Reset to preset above and the app's other destructive prompts — whenever the
+ * spec differs from the preset it was copied from (or has no known preset to compare with). */
 function useDifferentPreset() {
+  if (mode.value === 'custom') {
+    const from = customizedFrom.value
+    const untouched = !!from && specsEqual(toRaw(spec), specFromPresetId(from))
+    if (!untouched && !window.confirm(from ? `Discard your changes to the ${presetLabel(from)} card and pick a preset instead?` : 'Discard this custom card and pick a preset instead?')) return
+  }
   mode.value = 'preset'
   if (customizedFrom.value) presetId.value = customizedFrom.value
   resetSpecTo(specFromPresetId(presetId.value))
@@ -239,17 +248,32 @@ function setToneRows(rows: ToneRow[]) {
   if (!spec.badge) return
   spec.badge.display = withField(spec.badge.display, 'tones', rowsToTones(rows))
 }
+// A badge text that cannot be stored (empty, or another row's) is not written: the row keeps what
+// was typed and says why, until it is changed to something valid or the row is removed.
+const toneDrafts = ref<Record<number, { value: string; problem: string }>>({})
 function setToneRow(i: number, patch: Partial<ToneRow>) {
+  if (patch.value !== undefined) {
+    const problem = toneValueProblem(toneRows.value, i, patch.value)
+    if (problem) {
+      toneDrafts.value = { ...toneDrafts.value, [i]: { value: patch.value, problem } }
+      return
+    }
+    const rest = { ...toneDrafts.value }
+    delete rest[i]
+    toneDrafts.value = rest
+  }
   const rows = toneRows.value.map((r, j) => (j === i ? { ...r, ...patch } : r))
   if (JSON.stringify(rows) !== JSON.stringify(toneRows.value)) setToneRows(rows)
 }
 function addToneRow() {
+  toneDrafts.value = {}
   // A fresh row needs a value no other row has (the map is keyed by it).
   let value = 'new value'
   for (let n = 2; toneRows.value.some((r) => r.value === value); n++) value = `new value ${n}`
   setToneRows([...toneRows.value, { value, tone: 'live' }])
 }
 function removeToneRow(i: number) {
+  toneDrafts.value = {}
   setToneRows(toneRows.value.filter((_, j) => j !== i))
 }
 // Card actions (CardSpec.actions): controls in the card's status row.
@@ -349,7 +373,7 @@ function removeSection(i: number) {
         </ul>
 
         <p v-if="mode === 'preset' && presetId" class="hint ce-readonly-hint">The preset's settings, for reading. Customize… to edit a copy of them.</p>
-        <fieldset v-if="mode === 'custom' || presetId" :key="specKey" class="ce-fieldset" :disabled="mode === 'preset'">
+        <fieldset v-if="mode === 'custom' || presetId" :key="`meta-${specKey}`" class="ce-fieldset" :disabled="mode === 'preset'">
           <div class="field check">
             <label><input type="checkbox" :checked="hasTitle" @change="toggleTitle(($event.target as HTMLInputElement).checked)" /> Card title</label>
           </div>
@@ -367,7 +391,8 @@ function removeSection(i: number) {
               <div v-for="(r, i) in toneRows" :key="i" class="row">
                 <div class="field">
                   <label :for="`${tonesGroupId}-v${i}`">Badge text</label>
-                  <input :id="`${tonesGroupId}-v${i}`" type="text" :value="r.value" maxlength="60" @change="setToneRow(i, { value: ($event.target as HTMLInputElement).value })" />
+                  <input :id="`${tonesGroupId}-v${i}`" type="text" :value="toneDrafts[i]?.value ?? r.value" maxlength="60" :aria-invalid="!!toneDrafts[i]" :aria-describedby="toneDrafts[i] ? `${tonesGroupId}-e${i}` : undefined" @change="setToneRow(i, { value: ($event.target as HTMLInputElement).value })" />
+                  <p v-if="toneDrafts[i]" :id="`${tonesGroupId}-e${i}`" class="hint tone-problem" role="alert">{{ toneDrafts[i].problem }}</p>
                 </div>
                 <div class="field">
                   <label :for="`${tonesGroupId}-t${i}`">Colour</label>
@@ -419,7 +444,7 @@ function removeSection(i: number) {
 
         <!-- Outside the card-level fieldset: in preset mode each section disables its own
              controls but its items still open (a disabled fieldset would disable their toggles). -->
-        <div v-if="mode === 'custom' || presetId" :key="specKey">
+        <div v-if="mode === 'custom' || presetId" :key="`sections-${specKey}`">
           <h3>Sections</h3>
           <CardEditorSection
             v-for="(section, si) in spec.sections"
@@ -449,6 +474,10 @@ function removeSection(i: number) {
 
 <style scoped src="./editor/editor.css"></style>
 <style scoped>
+.tone-problem {
+  color: #bc4749;
+  margin: 4px 0 0;
+}
 .ce-root {
   background: rgb(var(--surface));
   border: 1px solid rgb(var(--line-2));

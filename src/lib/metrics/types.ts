@@ -77,7 +77,7 @@ export type DataBinding =
 export type Display =
   | { as: 'number'; deltas?: DeltaName[] }
   | { as: 'currency' }
-  | { as: 'percent'; decimals?: 0 | 1 | 2 } // always followed by "(n/d)"
+  | { as: 'percent'; decimals?: 0 | 1 | 2 | 3 | 4 } // always followed by "(n/d)"
   | { as: 'counts' } // "1,111 game-screen views · 353 arrivals"
   | { as: 'dateRange'; days?: boolean }
   | { as: 'datetime' }
