@@ -185,6 +185,8 @@ export function buildReadPlan(campaignId: string, settings: ReadPlanSettings): A
   if (flight.dailyBudgetUsd == null || flight.hardCapUsd == null) throw new Error(`campaign ${campaignId} needs dailyBudgetUsd and hardCapUsd in lib/campaigns.ts CAMPAIGNS before it can have a read plan`)
   return { campaignId, dailyBudget: flight.dailyBudgetUsd, hardCap: flight.hardCapUsd, ...settings }
 }
+/** Kept for external callers, e.g. the scheduled-task helper ~/.claude/scheduled-tasks/bsk-retest-morning-read/release-switchover.ts (line 76: `rules.readPlanFor(rules.RETEST_CAMPAIGN_ID)`); new code must take the campaign from the registry or `--campaign`. */
+export const RETEST_CAMPAIGN_ID = '24279250691'
 /** THE read-plan registry: one entry per campaign the routine reads (with rules). To start
  * reading a new campaign add its CAMPAIGNS entry and a plan here — see README "Adding a new
  * campaign". Several plans may be live at once; nothing assumes a single current campaign. */
