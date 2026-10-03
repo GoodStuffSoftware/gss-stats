@@ -51,9 +51,10 @@ export const ADS_API_VERSION = 'v25'
 /** The Best Sudoku Ads account (872-653-5246). Queried directly — NEVER through a manager
  * account: no login-customer-id header is ever sent (see scripts/ads-reads/adsApi.ts). */
 export const ADS_CUSTOMER_ID = '8726535246'
-export const RETEST_CAMPAIGN_ID = '24279250691'
 /** Closed campaigns the routine must never read-for-action or touch. readPlanFor() refuses
- * them outright, so no code path can build a query or a proposal for either. */
+ * them outright, so no code path can build a query or a proposal for either. A NEW campaign
+ * is never added here (it is registered in CAMPAIGNS + ADS_READ_PLANS instead); this list is
+ * only for campaigns that must stay unreadable. */
 export const CLOSED_CAMPAIGN_IDS: readonly string[] = ['24215315197', '24234347705']
 
 /** v1.95.3 production WEB go-live (the brief's 2026-09-26 14:25 UTC) — the lower bound for
@@ -114,14 +115,20 @@ export const RETEST_APPROVED_PLACEMENTS: readonly string[] = [
   'com.newsudoku.number.maze',
 ]
 
-/** Approved placement lists per campaign, for tagging stored placement rows (backfill and
- * routine). The twin ran the same 17 as the retest (retest spec section 5: "identical to
- * the twin's as-built"); week 1 ran the original 19 — the 17 plus the two later excluded
- * for low CTR (spec section 5, "Excluded, on both ad groups (2 of the original 19)"). */
+/** Approved placement lists for the CLOSED campaigns that have no read plan, for tagging stored
+ * placement rows (backfill). The twin ran the same 17 as the retest (retest spec section 5:
+ * "identical to the twin's as-built"); week 1 ran the original 19 — the 17 plus the two later
+ * excluded for low CTR (spec section 5, "Excluded, on both ad groups (2 of the original 19)").
+ * A campaign WITH a read plan carries its list on the plan (approvedPlacements): read it
+ * through approvedPlacementsFor(), never this map directly. */
 export const APPROVED_PLACEMENTS_BY_CAMPAIGN: Record<string, readonly string[]> = {
-  [RETEST_CAMPAIGN_ID]: RETEST_APPROVED_PLACEMENTS,
   '24234347705': RETEST_APPROVED_PLACEMENTS,
   '24215315197': [...RETEST_APPROVED_PLACEMENTS, 'com.icenta.sudoku.ui', 'com.openmygame.games.android.sudokumaster'],
+}
+/** The approved placement list for a campaign: its read plan's list when it has a plan, else
+ * the closed-campaign record above, else null (none on record). */
+export function approvedPlacementsFor(campaignId: string): readonly string[] | null {
+  return ADS_READ_PLANS[campaignId]?.approvedPlacements ?? APPROVED_PLACEMENTS_BY_CAMPAIGN[campaignId] ?? null
 }
 
 /** Build-spec section 5/6 expected ad-group placement counts (the retest campaign carries the
@@ -134,8 +141,18 @@ export const RETEST_AD_GROUP_PLACEMENT_COUNTS: Record<string, number> = {
   'Other Sudoku placements': 16,
 }
 
+/** What a campaign buys. 'display' reads app placements (group_placement_view) and runs the
+ * placement rules against its approved list; 'search' buys keywords, has no placements, and
+ * every placement-based rule or line reads SEARCH_NA instead (never a pass, a trip or a
+ * crash). Campaign-level spend, impressions and clicks are read the same way for both. */
+export type CampaignChannel = 'display' | 'search'
+/** The fixed text every placement-based rule and report line shows for a search campaign. */
+export const SEARCH_NA = 'n/a (search campaign)'
+
 export interface AdsReadPlan {
   campaignId: string
+  /** 'display' (the default) or 'search'. See CampaignChannel. */
+  channel: CampaignChannel
   /** $/day, for pacing lines only (Google may overdeliver a day; never a finding). */
   dailyBudget: number
   /** Kill rule 4: propose pause at or above this cumulative spend. */
@@ -144,11 +161,24 @@ export interface AdsReadPlan {
   thresholds: readonly number[]
   /** Kill rules 1-3 are armed at or above this cumulative spend. */
   killRulesFrom: number
-  /** Kill rule 1: propose pause when MORE than this share of spend is outside the list. */
-  placementLeakMaxShare: number
+  /** Kill rule 1: propose pause when MORE than this share of spend is outside the list.
+   * Required for a display plan (buildReadPlan refuses one without it); optional and ignored
+   * for a search plan, whose placement-leak rule always reads SEARCH_NA. */
+  placementLeakMaxShare?: number
   /** Kill rule 2: propose pause when cumulative CTR is BELOW this. */
   ctrFloor: number
   approvedPlacements: readonly string[]
+  /** Short campaign name that leads this campaign's push/bus text and report header
+   * ("<label> morning read ..."). Unique across the registry, so two campaigns read the same
+   * morning never produce indistinguishable notifications. The retest keeps "BSK retest". */
+  reportLabel: string
+  /** Directory slug of this campaign's audit trail: docs/marketing/google-ads/<slug>/data/<ET
+   * date>.json. Unique across the registry, so two campaigns read on the same ET date never
+   * write the same file. The retest keeps "retest". */
+  auditSlug: string
+  /** Build-spec expected placement count per ad group, to VERIFY the live `targeting`
+   * diagnostic (informational only, never a rule). Omit when the build has no such spec. */
+  adGroupPlacementCounts?: Readonly<Record<string, number>>
   /** ET dates the scheduled morning read runs (docs/routines/bsk-retest-morning-read.md) —
    * used to notice a scheduled read that never ran. */
   morningReadFirstEt: string
@@ -157,20 +187,94 @@ export interface AdsReadPlan {
 
 // Budget and cap come from lib/campaigns.ts (the one campaign definition); only the read
 // schedule and the kill-rule constants (spec sections 11-12) live here.
-const retestFlight = campaignById(RETEST_CAMPAIGN_ID)
+// `channel` defaults to 'display'; a search plan carries no placement list (it may omit
+// approvedPlacements) and no adGroupPlacementCounts.
+type ReadPlanSettings = Omit<AdsReadPlan, 'campaignId' | 'dailyBudget' | 'hardCap' | 'channel' | 'approvedPlacements'> & {
+  channel?: CampaignChannel
+  approvedPlacements?: readonly string[]
+}
+/** A read plan for a campaign registered in lib/campaigns.ts CAMPAIGNS. The budget and the
+ * hard cap are taken from that entry and must exist there: a plan with no hard cap would
+ * silently arm no kill rule 4. */
+export function buildReadPlan(campaignId: string, settings: ReadPlanSettings): AdsReadPlan {
+  const flight = campaignById(campaignId)
+  if (!flight) throw new Error(`campaign ${campaignId} is not in lib/campaigns.ts CAMPAIGNS`)
+  if (flight.dailyBudgetUsd == null || flight.hardCapUsd == null) throw new Error(`campaign ${campaignId} needs dailyBudgetUsd and hardCapUsd in lib/campaigns.ts CAMPAIGNS before it can have a read plan`)
+  const channel = settings.channel ?? 'display'
+  const approvedPlacements = settings.approvedPlacements ?? []
+  if (channel === 'search' && (approvedPlacements.length || settings.adGroupPlacementCounts)) {
+    throw new Error(`campaign ${campaignId} is a search campaign: it has no placements, so its read plan must not set approvedPlacements or adGroupPlacementCounts`)
+  }
+  if (channel === 'display' && !approvedPlacements.length) {
+    throw new Error(`campaign ${campaignId} is a display campaign: its read plan needs approvedPlacements (the list kill rule 1 checks spend against)`)
+  }
+  if (channel === 'display' && settings.placementLeakMaxShare == null) {
+    throw new Error(`campaign ${campaignId} is a display campaign: its read plan needs placementLeakMaxShare (kill rule 1's limit)`)
+  }
+  return { campaignId, dailyBudget: flight.dailyBudgetUsd, hardCap: flight.hardCapUsd, ...settings, approvedPlacements, channel }
+}
+/** A campaign's channel: its read plan's, else 'display' (every closed campaign was Display). */
+export function channelOf(campaignId: string, plans: Readonly<Record<string, AdsReadPlan>> = ADS_READ_PLANS): CampaignChannel {
+  return plans[campaignId]?.channel ?? 'display'
+}
+/** Kept for external callers, e.g. the scheduled-task helper ~/.claude/scheduled-tasks/bsk-retest-morning-read/release-switchover.ts (line 76: `rules.readPlanFor(rules.RETEST_CAMPAIGN_ID)`); new code must take the campaign from the registry or `--campaign`. */
+export const RETEST_CAMPAIGN_ID = '24279250691'
+/** THE read-plan registry: one entry per campaign the routine reads (with rules). To start
+ * reading a new campaign add its CAMPAIGNS entry and a plan here — see README "Adding a new
+ * campaign". Several plans may be live at once; nothing assumes a single current campaign. */
 export const ADS_READ_PLANS: Record<string, AdsReadPlan> = {
-  [RETEST_CAMPAIGN_ID]: {
-    campaignId: RETEST_CAMPAIGN_ID,
-    dailyBudget: retestFlight?.dailyBudgetUsd ?? 13,
-    hardCap: retestFlight?.hardCapUsd ?? 100,
+  '24279250691': buildReadPlan('24279250691', {
     thresholds: [25, 50, 75, 100],
     killRulesFrom: 50,
     placementLeakMaxShare: 0.1,
     ctrFloor: 0.0015,
     approvedPlacements: RETEST_APPROVED_PLACEMENTS,
+    reportLabel: 'BSK retest',
+    auditSlug: 'retest',
+    adGroupPlacementCounts: RETEST_AD_GROUP_PLACEMENT_COUNTS,
     morningReadFirstEt: '2026-09-27',
     morningReadLastEt: '2026-10-03',
-  },
+  }),
+}
+
+/** The read plan for a campaign id, or a throw that lists every registered id. Used for labels
+ * and the report page, which only ever see campaigns that already passed readPlanFor. */
+export function planOrThrow(campaignId: string, plans: Readonly<Record<string, AdsReadPlan>> = ADS_READ_PLANS): AdsReadPlan {
+  const plan = plans[campaignId]
+  if (!plan) throw new Error(`no ads read plan for campaign ${campaignId} (registered read plans: ${Object.keys(plans).join(', ') || 'none'})`)
+  return plan
+}
+/** Where a campaign's report header and push text start (its plan's reportLabel). */
+export const reportLabelFor = (campaignId: string): string => planOrThrow(campaignId).reportLabel
+/** A campaign's audit file for an ET date (its plan's auditSlug). */
+export const auditPathFor = (campaignId: string, etDate: string): string => `docs/marketing/google-ads/${planOrThrow(campaignId).auditSlug}/data/${etDate}.json`
+
+/** Which campaign a read means when the CLI gets no --campaign: derived from the registry,
+ * never a constant, and never a guess. One rule for the morning read and every post-flight
+ * stage: the default is the ONLY registered plan, counting closed campaigns too. No date rule
+ * is safe: a morning window or a post-flight due day says nothing about which campaign an
+ * unpinned task was written for (a late or forced rerun, or an old task run after the next
+ * campaign's window opens, would silently read the wrong campaign). A "not closed" filter is
+ * no better: it would hand an old campaign's last post-flight stage (the retest's is in
+ * December) to the next campaign the day the old one is marked closed. With two or more plans
+ * registered, or none, the read must say which one: every error lists the registered ids and
+ * says to pass --campaign. `_todayEt` is unused by the rule; it keeps one call shape for both
+ * kinds. */
+export function defaultReadCampaignId(
+  kind: 'morning' | 'postflight',
+  _todayEt: string,
+  stage?: PostflightStage,
+  plans: Readonly<Record<string, AdsReadPlan>> = ADS_READ_PLANS,
+): string {
+  const registered = Object.values(plans)
+  const listing = registered.map((p) => `${p.campaignId} (morning reads ${p.morningReadFirstEt}..${p.morningReadLastEt})`).join(', ') || 'none registered'
+  const refuse = (why: string): never => {
+    throw new Error(`${why}; pass --campaign <id> (registered read plans: ${listing})`)
+  }
+  if (kind === 'postflight' && !stage) throw new Error('a post-flight default needs a stage')
+  if (registered.length === 1) return registered[0].campaignId
+  const what = kind === 'morning' ? 'the morning read' : `the ${stage} read`
+  return refuse(registered.length ? `${registered.length} campaigns have read plans, so ${what} cannot tell which one is meant` : 'no campaign has a read plan')
 }
 
 /** A scheduled morning read that never ran can't report itself, so the next read that does
@@ -410,7 +514,7 @@ export function nextThreshold(cumulative: number, thresholds: readonly number[])
 // ── Tagged (campaign-attributed) beacon rows → the funnel and the new indicators ─────────
 /** The spec's corrected sign-in ask (section 11): both prefixes, since the first-50 offer
  * REPLACES the sign-in dialog when it fires — never both. */
-export const ASK_PATHS = ['/signin-prompt/placement', '/signin-prompt/streak', '/promo-first50/shown'] as const
+export const ASK_PATHS = ['/signin-prompt/placement', '/signin-prompt/streak', '/signin-prompt/tutorial', '/promo-first50/shown'] as const
 export const ACCEPT_PATHS = ['/signin-prompt/accept', '/promo-first50/accept'] as const
 /** /popup-outcome/<popup> families, by lib/popupEvents.ts's internal id ('install' is the
  * wire name 'install-prompt'). */
@@ -610,6 +714,217 @@ export function summarizeSiteEvents(
     }
   }
   return s
+}
+
+/** Site-wide asks SHOWN — the same shown-ask set as ASK_PATHS (sign-in placement / streak /
+ * tutorial and the first-50 promo that replaces the dialog), exact paths — in hour buckets
+ * overlapping [fromMs, toMs): the untagged cross-check for kill rule 3, since the campaign tag
+ * only rides beacons for 30 minutes. `paths` narrows the set (siteTutorialAsksShown). */
+export function siteSigninShown(rows: readonly HourPathCount[], fromMs: number, toMs: number, paths: readonly string[] = ASK_PATHS): number {
+  const fromHour = Math.floor(fromMs / 3_600_000) * 3_600_000
+  let n = 0
+  for (const r of rows) {
+    if (r.hourStartMs < fromHour || r.hourStartMs >= toMs) continue
+    if (paths.includes(r.path)) n += r.count
+  }
+  return n
+}
+/** The app's first-session ask beacon. Until it has a row site-wide, first-session asks are
+ * unobservable and rule 3 may downgrade to WATCH; once it has one, rule 3 reads tagged asks only. */
+export const FIRST_SESSION_ASK_PATH = '/signin-prompt/tutorial'
+export function siteTutorialAsksShown(rows: readonly HourPathCount[], fromMs: number, toMs: number): number {
+  return siteSigninShown(rows, fromMs, toMs, [FIRST_SESSION_ASK_PATH])
+}
+
+// ── First-session funnel (informational only; never a kill rule) ─────────────────────────
+// Where ad arrivals drop between opening /game and finishing a puzzle. Tagged counts (the
+// campaign tag, as summarizeTaggedRows reads it) with site-wide web counts over the same
+// window alongside. A beacon FAMILY (paths that ship in one app release) with no rows at all,
+// site-wide or tagged, is "not yet tracked" (the release is not live), never a 0% step; once
+// any path in the family has a row, a sibling with none is a real 0. Every figure is a row count: there is
+// no visitor id to join steps on, so a "vs parent" ratio is rows over rows, not a per-visitor
+// conversion rate, and it is MIN_COHORT-gated like every other rate.
+export const FIRST_SESSION_STEPS = ['arrivals', 'gameView', 'tourStart', 'tourComplete', 'tourSkip', 'firstMove', 'gameComplete'] as const
+export type FirstSessionStep = (typeof FIRST_SESSION_STEPS)[number]
+export const FIRST_SESSION_STEP_LABELS: Record<FirstSessionStep, string> = {
+  arrivals: 'arrivals (d0 devices)',
+  gameView: 'game views',
+  tourStart: 'tour start',
+  tourComplete: 'tour complete',
+  tourSkip: 'tour skip',
+  firstMove: 'first move',
+  gameComplete: 'game complete',
+}
+/** Each step's parent for the row ratio; an untracked parent falls back to its own parent.
+ * Nothing divides by game views (or divides game views by arrivals): /game rows are page views
+ * (several per visit) against once-per-event beacons, the mixed-unit ratio lib/campaigns.ts
+ * VALID_FUNNEL_RATE_STEPS rules out. So tour start and first move carry no ratio. */
+export const FIRST_SESSION_PARENT: Record<FirstSessionStep, FirstSessionStep | null> = {
+  arrivals: null,
+  gameView: null,
+  tourStart: null,
+  tourComplete: 'tourStart',
+  tourSkip: 'tourStart',
+  firstMove: null,
+  gameComplete: 'firstMove',
+}
+/** Steps whose beacons ship in one app release with the abandon buckets: tracked together. */
+export const FIRST_SESSION_RELEASE_STEPS = ['tourStart', 'tourComplete', 'tourSkip', 'firstMove'] as const satisfies readonly FirstSessionStep[]
+export const ABANDON_BUCKETS = ['0', '1-25', '26-50', '51-75', '76-99'] as const
+export type AbandonBucket = (typeof ABANDON_BUCKETS)[number]
+export const WELCOME_EVENTS = ['shown', 'daily', 'leaderboard', 'dismiss'] as const
+export type WelcomeEvent = (typeof WELCOME_EVENTS)[number]
+
+const TOUR_PATHS: Partial<Record<FirstSessionStep, string>> = { tourStart: '/tour/start', tourComplete: '/tour/complete', tourSkip: '/tour/skip', firstMove: '/game/first-move' }
+const ABANDON_PREFIX = '/game/abandon/'
+const WELCOME_PREFIX = '/welcome-signed-in/'
+
+/** The first-session bucket a path counts in, or null. Exact paths only (a trailing slash or
+ * an unknown abandon bucket / welcome action is not guessed at). */
+export type FirstSessionBucket =
+  | { kind: 'step'; step: Exclude<FirstSessionStep, 'arrivals'> }
+  | { kind: 'abandon'; bucket: AbandonBucket }
+  | { kind: 'welcome'; event: WelcomeEvent }
+  | { kind: 'ask'; tutorial: boolean }
+  | { kind: 'arrival'; uc: string }
+export function firstSessionBucket(path: string): FirstSessionBucket | null {
+  if (path === '/game') return { kind: 'step', step: 'gameView' }
+  // Arrivals: /return/<uc>/d0, sent once per device on its first tagged visit (best-sudoku
+  // src/services/campaignReturns.ts) — devices, not page rows. Attributed by the path's own uc.
+  const ret = parseReturnPath(path)
+  if (ret) return ret.bucket === 'd0' ? { kind: 'arrival', uc: ret.uc } : null
+  if (path.startsWith('/game/complete/')) return { kind: 'step', step: 'gameComplete' } // lib/campaigns.ts classifyFunnelPath's 'completed'
+  for (const [step, p] of Object.entries(TOUR_PATHS)) if (path === p) return { kind: 'step', step: step as Exclude<FirstSessionStep, 'arrivals'> }
+  if (path.startsWith(ABANDON_PREFIX)) {
+    const b = path.slice(ABANDON_PREFIX.length)
+    return (ABANDON_BUCKETS as readonly string[]).includes(b) ? { kind: 'abandon', bucket: b as AbandonBucket } : null
+  }
+  if (path.startsWith(WELCOME_PREFIX)) {
+    const e = path.slice(WELCOME_PREFIX.length)
+    return (WELCOME_EVENTS as readonly string[]).includes(e) ? { kind: 'welcome', event: e as WelcomeEvent } : null
+  }
+  if ((ASK_PATHS as readonly string[]).includes(path)) return { kind: 'ask', tutorial: path === '/signin-prompt/tutorial' }
+  return null
+}
+
+/** Raw first-session tallies, one side (tagged or site-wide). */
+export interface FirstSessionTally {
+  steps: Record<FirstSessionStep, number>
+  abandon: Record<AbandonBucket, number>
+  welcome: Record<WelcomeEvent, number>
+  asks: number
+  asksTutorial: number
+  /** true when the tagged arrivals (d0) read failed: arrivals is unknown, not 0. */
+  arrivalsUnread?: boolean
+}
+/** One site-wide web row of the first-session read (scripts/ads-reads/beacon.ts
+ * siteFirstSessionQuery): a first-session path with its row count. */
+export interface FirstSessionRowSite {
+  path: string
+  count: number
+}
+/** Tagged arrivals: /return/<uc>/d0 rows for the campaign's own tags (scripts/ads-reads/beacon.ts
+ * returnArrivalsQuery), with the campaign's uc values to re-check each path against. */
+export interface FirstSessionArrivals {
+  rows: readonly { path: string; count: number }[]
+  ucValues: readonly string[]
+}
+export function emptyFirstSessionTally(): FirstSessionTally {
+  const zero = <K extends string>(ks: readonly K[]) => Object.fromEntries(ks.map((k) => [k, 0])) as Record<K, number>
+  return { steps: zero(FIRST_SESSION_STEPS), abandon: zero(ABANDON_BUCKETS), welcome: zero(WELCOME_EVENTS), asks: 0, asksTutorial: 0 }
+}
+function tally(t: FirstSessionTally, path: string, count: number): void {
+  const b = firstSessionBucket(path)
+  if (!b) return
+  if (b.kind === 'step') t.steps[b.step] += count
+  else if (b.kind === 'abandon') t.abandon[b.bucket] += count
+  else if (b.kind === 'welcome') t.welcome[b.event] += count
+  else if (b.kind === 'arrival') t.steps.arrivals += count
+  else {
+    t.asks += count
+    if (b.tutorial) t.asksTutorial += count
+  }
+}
+/** Tagged side: every step from the campaign-tagged rows; arrivals = /return/<uc>/d0 rows for
+ * the campaign's uc values (one per device; a d0 row can land in a later, untagged page load,
+ * so it is attributed by the path's uc, never by the row's tag). `arrivals` null = not read. */
+export function tallyTaggedFirstSession(rows: readonly TaggedRow[], arrivals: FirstSessionArrivals | null): FirstSessionTally {
+  const t = emptyFirstSessionTally()
+  for (const r of rows) if (firstSessionBucket(r.path)?.kind !== 'arrival') tally(t, r.path, r.count)
+  if (!arrivals) t.arrivalsUnread = true
+  else
+    for (const r of arrivals.rows) {
+      const b = firstSessionBucket(r.path)
+      if (b?.kind === 'arrival' && arrivals.ucValues.includes(b.uc)) t.steps.arrivals += r.count
+    }
+  return t
+}
+/** Site-wide side: arrivals = every /return/<any uc>/d0 row on the web site in the window. */
+export function tallySiteFirstSession(rows: readonly FirstSessionRowSite[]): FirstSessionTally {
+  const t = emptyFirstSessionTally()
+  for (const r of rows) tally(t, r.path, r.count)
+  return t
+}
+
+/** One figure: the tagged count (null = not read; only arrivals can be), the site-wide count
+ * beside it (null = site-wide not read), and whether the path is tracked at all (null =
+ * unknown, the site-wide read is missing). */
+export interface FirstSessionFigure {
+  tagged: number | null
+  site: number | null
+  tracked: boolean | null
+}
+export interface FirstSessionStepFigure extends FirstSessionFigure {
+  /** The step's tagged rows over its nearest tracked ancestor's (rows over rows, gated);
+   * null for the first step or an untracked step. */
+  vsParent: (GatedRate & { parent: FirstSessionStep }) | null
+}
+export interface FirstSessionFunnel {
+  steps: Record<FirstSessionStep, FirstSessionStepFigure>
+  abandon: Record<AbandonBucket, FirstSessionFigure>
+  welcome: Record<WelcomeEvent, FirstSessionFigure>
+  asks: FirstSessionFigure
+  asksTutorial: FirstSessionFigure
+  /** Whether the site-wide side was read (false: every `site` is null, `tracked` unknown). */
+  siteRead: boolean
+}
+// Tracked once either side has a row: a tagged row proves the release is live even if the
+// site-wide read (web only) has none. Families then widen it (trackFamily).
+const figure = (tagged: number | null, site: number | null): FirstSessionFigure => ({ tagged, site, tracked: (tagged ?? 0) > 0 || (site ?? 0) > 0 ? true : site == null ? null : false })
+/** A family ships in one release: once any member is tracked, every member is (a missing
+ * sibling is a real 0, not an instrumentation gap). */
+function trackFamily(members: FirstSessionFigure[]): void {
+  if (members.some((m) => m.tracked === true)) for (const m of members) m.tracked = true
+}
+
+/** Pairs the tagged tally with the site-wide one. `site` null = the site-wide read failed.
+ * Families: the tour / first-move / abandon release; the welcome-signed-in card; and the
+ * tutorial ask (its own beacon). */
+export function buildFirstSessionFunnel(tagged: FirstSessionTally, site: FirstSessionTally | null): FirstSessionFunnel {
+  const steps = {} as Record<FirstSessionStep, FirstSessionStepFigure>
+  for (const k of FIRST_SESSION_STEPS) steps[k] = { ...figure(k === 'arrivals' && tagged.arrivalsUnread ? null : tagged.steps[k], site ? site.steps[k] : null), vsParent: null }
+  const map = <K extends string>(ks: readonly K[], t: Record<K, number>, s: Record<K, number> | null) =>
+    Object.fromEntries(ks.map((k) => [k, figure(t[k], s ? s[k] : null)])) as Record<K, FirstSessionFigure>
+  const abandon = map(ABANDON_BUCKETS, tagged.abandon, site?.abandon ?? null)
+  const welcome = map(WELCOME_EVENTS, tagged.welcome, site?.welcome ?? null)
+  trackFamily([...FIRST_SESSION_RELEASE_STEPS.map((k) => steps[k]), ...ABANDON_BUCKETS.map((b) => abandon[b])])
+  trackFamily(WELCOME_EVENTS.map((e) => welcome[e]))
+  // An unknown `tracked` (no site-wide read) still gets a ratio: only a known-untracked step is skipped.
+  const usable = (k: FirstSessionStep) => steps[k].tracked !== false
+  for (const k of FIRST_SESSION_STEPS) {
+    if (!usable(k)) continue
+    let p = FIRST_SESSION_PARENT[k]
+    while (p && !usable(p)) p = FIRST_SESSION_PARENT[p]
+    if (p) steps[k].vsParent = { ...gateRate(tagged.steps[k], tagged.steps[p]), parent: p } // arrivals (the only nullable) is never in a ratio
+  }
+  return {
+    steps,
+    abandon,
+    welcome,
+    asks: figure(tagged.asks, site ? site.asks : null),
+    asksTutorial: figure(tagged.asksTutorial, site ? site.asksTutorial : null),
+    siteRead: site != null,
+  }
 }
 
 /** Sum of every outcome type for one popup. */
@@ -856,7 +1171,9 @@ export function buildHealthPairs(i: HealthInputs): HealthPair[] {
 
 // ── Kill rules (spec section 12) — evaluated only on data that came back ────────────────
 export type RuleId = 'placement-leak' | 'ctr' | 'funnel-reach' | 'hard-cap'
-export type RuleStatus = 'trip' | 'clear' | 'not-armed' | 'no-data'
+/** 'n/a': the rule does not apply to this campaign's channel (placement rules on a search
+ * campaign) — never a pass and never a trip. */
+export type RuleStatus = 'trip' | 'watch' | 'clear' | 'not-armed' | 'no-data' | 'n/a'
 export interface RuleResult {
   id: RuleId
   label: string
@@ -905,8 +1222,11 @@ export interface KillRuleInput {
   delivery: { impressions: number; clicks: number } | null
   /** Placement cost split — null when the placement read failed. */
   placements: { campaignCost: number; approvedCost: number; itemizedCost: number } | null
-  /** Tagged beacon counts — null when the beacon read failed. */
-  beacon: { asks: number; taggedArrivals: number } | null
+  /** Tagged beacon counts — null when the beacon read failed. `siteSigninShown` = site-wide
+   * (untagged) asks shown in the same window (siteSigninShown); null/absent = the site read
+   * failed. `siteTutorialAsks` = site-wide FIRST_SESSION_ASK_PATH rows (siteTutorialAsksShown);
+   * > 0 means first-session asks are observable, so rule 3 reads tagged asks only. */
+  beacon: { asks: number; taggedArrivals: number; siteSigninShown?: number | null; siteTutorialAsks?: number | null } | null
 }
 export interface KillRuleEvaluation {
   rules: RuleResult[]
@@ -974,14 +1294,20 @@ export function evaluateKillRules(i: KillRuleInput): KillRuleEvaluation {
   // (campaign total minus every itemized placement) counts as outside: it is not
   // attributable to an approved placement yet. Reported separately, because Google often
   // itemizes it later.
-  {
-    const base = { id: 'placement-leak' as const, label: `>${pctStr(plan.placementLeakMaxShare, 0)} of spend outside the ${plan.approvedPlacements.length} approved placements`, limit: plan.placementLeakMaxShare }
+  // A search campaign has no placements: the rule reads n/a whether or not it is armed.
+  if (plan.channel === 'search') {
+    // placementLeakMaxShare is ignored for search (a search plan need not set it).
+    rules.push({ id: 'placement-leak', label: 'placement leak', limit: 0, status: 'n/a', value: null, detail: SEARCH_NA })
+  } else {
+    const leakMax = plan.placementLeakMaxShare
+    if (leakMax == null) throw new Error(`campaign ${plan.campaignId} is a display campaign: its read plan needs placementLeakMaxShare`)
+    const base = { id: 'placement-leak' as const, label: `>${pctStr(leakMax, 0)} of spend outside the ${plan.approvedPlacements.length} approved placements`, limit: leakMax }
     if (!armed) rules.push({ ...base, status: 'not-armed', value: null, detail: `armed at ${usd(plan.killRulesFrom)}` })
     else if (!i.placements || !(i.placements.campaignCost > 0)) rules.push({ ...base, status: 'no-data', value: null, detail: 'placement read returned no data' })
     else {
       const { campaignCost, itemizedCost } = i.placements
       const { share, offList: itemizedOutside, unitemized, outsideMicros, denomMicros } = placementOutsideShare(i.placements)
-      const trip = placementShareOver(outsideMicros, denomMicros, plan.placementLeakMaxShare)
+      const trip = placementShareOver(outsideMicros, denomMicros, leakMax)
       const caveat = trip && unitemized > itemizedOutside ? ' Most of it is un-itemized; Google often itemizes it to approved placements within ~2 days, so confirm before pausing.' : ''
       const borderline = isPlacementBorderline(share) ? ` BORDERLINE (9-11%): ${PLACEMENT_BORDERLINE_NOTE}.` : ''
       rules.push({
@@ -1009,18 +1335,31 @@ export function evaluateKillRules(i: KillRuleInput): KillRuleEvaluation {
     }
   }
 
-  // 3. Funnel reach — zero sign-in asks from tagged arrivals.
+  // 3. Funnel reach — zero sign-in asks from tagged arrivals. The tag rides beacons for only
+  // 30 minutes and the streak prompt fires in later sessions, so while first-session asks are
+  // unobservable (FIRST_SESSION_ASK_PATH has no row site-wide), zero tagged asks from tagged
+  // arrivals with asks still showing site-wide is WATCH, not TRIP. The downgrade expires by
+  // itself: once the tutorial ask has a row site-wide, a working first session produces tagged
+  // asks directly, so rule 3 reads tagged asks only. Zero tagged arrivals is always TRIP.
   {
     const base = { id: 'funnel-reach' as const, label: 'zero sign-in asks from tagged arrivals', limit: 0 }
     if (!armed) rules.push({ ...base, status: 'not-armed', value: null, detail: `armed at ${usd(plan.killRulesFrom)}` })
     else if (!i.beacon) rules.push({ ...base, status: 'no-data', value: null, detail: 'beacon read returned no data' })
     else {
       const zeroArrivals = i.beacon.taggedArrivals === 0 ? ' Zero tagged arrivals too: check the landing URL and tagging.' : ''
+      const site = i.beacon.siteSigninShown ?? null
+      const tutorial = i.beacon.siteTutorialAsks ?? null
+      const taggedOnly = tutorial != null && tutorial > 0
+      const mode = taggedOnly
+        ? ` Mode: tagged asks only (${FIRST_SESSION_ASK_PATH} shown ${tutorial} times site-wide, so first-session asks are observable).`
+        : ` Mode: site-wide fallback (${FIRST_SESSION_ASK_PATH} ${tutorial == null ? 'not read' : 'has no rows'} site-wide, so first-session asks are not yet observable).`
+      const watch = !taggedOnly && i.beacon.asks === 0 && i.beacon.taggedArrivals > 0 && site != null && site > 0
+      const siteLine = ` Site-wide asks shown: ${site ?? 'unavailable'}.${watch ? ' Tagged attribution expires 30 min after the ad click, so later-session prompts are not counted as tagged asks.' : ''}`
       rules.push({
         ...base,
-        status: i.beacon.asks === 0 ? 'trip' : 'clear',
+        status: i.beacon.asks > 0 ? 'clear' : watch ? 'watch' : 'trip',
         value: i.beacon.asks,
-        detail: `${i.beacon.asks} asks from ${i.beacon.taggedArrivals} tagged arrivals.${zeroArrivals}`,
+        detail: `${i.beacon.asks} asks from ${i.beacon.taggedArrivals} tagged arrivals.${siteLine}${mode}${zeroArrivals}`,
       })
     }
   }
@@ -1050,21 +1389,32 @@ export interface DecisionInput {
   accepts: number
   /** true when the count is exact (every sign-up came from a tagged /auth/success/…/new row). */
   exact?: boolean
+  /** The campaign's channel (channelOf); default 'display'. A search arm gets channel-neutral
+   * wording and is compared against its sibling arm (if any) instead of being told to start O3. */
+  channel?: CampaignChannel
 }
 export interface DecisionResult {
   row: DecisionRow
   reading: string
   next: string
 }
+/** A search arm's next step at the $100 read: it IS the intent test, so it is read against
+ * its sibling arm rather than told to start O3. Contains no "display" and no "O3". */
+const SEARCH_COMPARE = "Compare against the sibling arm, if there is one, on spend per tagged completer, per this campaign's pre-registered read."
 /** "Rarely shown" = fewer asks than MIN_COHORT — the same floor every rate uses. The sign-up
  * figure is an upper bound, so the 2+ and 1 rows can only say "at most"; a bound of 0 is a
  * real zero. */
 export function decideAt100(i: DecisionInput): DecisionResult {
+  const search = i.channel === 'search'
   if (i.exact && i.signUpsAtMost >= 2) {
     return {
       row: 'two-plus',
-      reading: `${i.signUpsAtMost} campaign sign-ups (exact: tagged /auth/success/<provider>/new): the funnel converts paid display traffic at roughly 1% or better.`,
-      next: 'Compute cost per sign-up. Hold on scaling until the day-15+ follow-up reports. Run O3 (Search) at the same cap against the same funnel to compare intent. Do not scale display until a sign-up shows a trial-to-purchase path measured at day 15 or later.',
+      reading: search
+        ? `${i.signUpsAtMost} campaign sign-ups (exact: tagged /auth/success/<provider>/new): the funnel converts paid search arrivals at roughly 1% or better.`
+        : `${i.signUpsAtMost} campaign sign-ups (exact: tagged /auth/success/<provider>/new): the funnel converts paid display traffic at roughly 1% or better.`,
+      next: search
+        ? `Compute cost per sign-up. Hold on scaling until the day-15+ follow-up reports. ${SEARCH_COMPARE} Do not scale this arm until a sign-up shows a trial-to-purchase path measured at day 15 or later.`
+        : 'Compute cost per sign-up. Hold on scaling until the day-15+ follow-up reports. Run O3 (Search) at the same cap against the same funnel to compare intent. Do not scale display until a sign-up shows a trial-to-purchase path measured at day 15 or later.',
     }
   }
   if (i.exact && i.signUpsAtMost === 1) {
@@ -1078,7 +1428,9 @@ export function decideAt100(i: DecisionInput): DecisionResult {
     return {
       row: 'two-plus',
       reading: `At most ${i.signUpsAtMost} campaign sign-ups: an upper bound (tagged auth successes include returning sign-ins; new accounts are sitewide), so the spec's 2-or-more row may or may not be met. Mike decides.`,
-      next: 'If Mike judges the bound real: compute cost per sign-up, hold on scaling until the day-15+ follow-up reports, and run O3 (Search) at the same cap against the same funnel. Do not scale display on this read.',
+      next: search
+        ? `If Mike judges the bound real: compute cost per sign-up, hold on scaling until the day-15+ follow-up reports, and ${SEARCH_COMPARE.charAt(0).toLowerCase()}${SEARCH_COMPARE.slice(1)} Do not scale this arm on this read.`
+        : 'If Mike judges the bound real: compute cost per sign-up, hold on scaling until the day-15+ follow-up reports, and run O3 (Search) at the same cap against the same funnel. Do not scale display on this read.',
     }
   }
   if (i.signUpsAtMost === 1) {
@@ -1098,8 +1450,12 @@ export function decideAt100(i: DecisionInput): DecisionResult {
   if (i.accepts === 0) {
     return {
       row: 'zero-declined',
-      reading: `Paid display arrivals see the offer and decline it (${i.asks} asks, 0 accepted).`,
-      next: 'Stop display acquisition. O3 (Search) becomes the next test, since it isolates intent.',
+      reading: search
+        ? `Paid search arrivals see the offer and decline it (${i.asks} asks, 0 accepted).`
+        : `Paid display arrivals see the offer and decline it (${i.asks} asks, 0 accepted).`,
+      next: search
+        ? `Stop this arm's acquisition. ${SEARCH_COMPARE}`
+        : 'Stop display acquisition. O3 (Search) becomes the next test, since it isolates intent.',
     }
   }
   return {

@@ -334,7 +334,7 @@ function metricViewModel(item: MetricItem, value: MetricValue, def: MetricDef | 
 /** An item's label alone, resolved against its scope — used by a 'table' section's header row,
  * which needs every column's label but has no single MetricValue to pair it with. */
 export function itemLabelTokens(item: MetricItem, scope: ScopeInstance, todayEt: string): TextToken[] {
-  const resolved = resolveBinding(item.data, scope)
+  const resolved = resolveBinding(item.data, scope, todayEt)
   const metricLabelId = resolved && resolved.kind !== 'field' ? (resolved.def as MetricDef | RatioDef).label : undefined
   return resolveLabelTokens(item.label, scope, metricLabelId, todayEt)
 }
@@ -343,7 +343,7 @@ export function itemLabelTokens(item: MetricItem, scope: ScopeInstance, todayEt:
  * whether it should even be on the page. `value` is `undefined` while the batch request for a
  * metric/ratio binding is still in flight; a `field` binding never needs one. */
 export function itemViewModel(item: MetricItem, value: MetricValue | undefined, scope: ScopeInstance, opts: ItemViewOptions): ItemViewModel {
-  const resolved = resolveBinding(item.data, scope)
+  const resolved = resolveBinding(item.data, scope, opts.todayEt)
   const metricLabelId = resolved && resolved.kind !== 'field' ? (resolved.def as MetricDef | RatioDef).label : undefined
   const labelTokens = resolveLabelTokens(item.label, scope, metricLabelId, opts.todayEt)
 

@@ -144,7 +144,7 @@ ul .nr{border:0;padding:0}
 
 <div class="wrap">
   <header class="masthead">
-    <div class="eyebrow">Best Sudoku · US+CA web retest · Google Ads campaign <span class="mono">24279250691</span></div>
+    <div class="eyebrow" id="eyebrow">Best Sudoku · Google Ads campaign</div>
     <div class="dayline" id="dayline"></div>
     <h1 id="headline">Loading the morning read</h1>
     <p class="dateline" id="dateline"></p>
@@ -159,7 +159,7 @@ ul .nr{border:0;padding:0}
 
   <section id="sec-threshold">
     <h2>Spend against the thresholds</h2>
-    <p class="sub">Reads fire once each at $25, $50, $75 and $100. Kill rules only propose; Mike pauses the campaign himself.</p>
+    <p class="sub" id="ladder-sub">Kill rules only propose; Mike pauses the campaign himself.</p>
     <div class="chart" id="ladder"></div>
     <p class="caption" id="ladder-caption"></p>
     <div class="table-wrap"><table id="kill"></table></div>
@@ -178,6 +178,7 @@ ul .nr{border:0;padding:0}
       <div class="panel"><h3 class="ph">Tagged funnel</h3><div class="table-wrap"><table id="funnel"></table></div></div>
       <div class="panel"><h3 class="ph">Returns by path</h3><div class="table-wrap"><table id="returns"></table></div><p class="caption" id="play-line"></p></div>
     </div>
+    <div class="panel"><h3 class="ph">First-session funnel</h3><p class="caption">Informational only, never a kill rule. Row counts with no visitor join: "vs" is rows over rows, not per-visitor conversion. A beacon family (paths shipped in one app release) with no rows yet, site-wide or tagged, is not yet tracked; once any path in it has a row, a missing sibling is a real 0.</p><div class="table-wrap"><table id="first-session"></table></div></div>
     <div class="panel"><h3 class="ph">Accounts</h3><div class="kv" id="accounts"></div></div>
     <div class="panel"><h3 class="ph">Site-wide, not campaign-attributed</h3><ul class="printed" id="sitewide"></ul></div>
   </section>
@@ -282,6 +283,8 @@ try {
   const RAW = String(SRC.raw || "");
   const NARRATIVE = SRC.narrative || null;
   const AUDIT = SRC.audit || null;
+  // The campaign's own read points (its read plan, looked up by campaign id when the page was built).
+  const THRESHOLDS = Array.isArray(SRC.thresholds) && SRC.thresholds.length ? SRC.thresholds : null;
   const SPLIT = "----- JSON -----";
   const at = RAW.indexOf(SPLIT);
   const HUMAN = (at >= 0 ? RAW.slice(0, at) : RAW).replace(/\s+$/, "");
@@ -313,6 +316,11 @@ try {
   const errCount = (D.errors || []).length + (D.failures || []).length;
 
   // masthead
+  // The campaign label and id come from the read's own JSON header (the registry), never the template.
+  guard("eyebrow", () => {
+    if (!camp.id) return;
+    $("eyebrow").replaceChildren(`Best Sudoku · ${camp.label || "web campaign"} · Google Ads campaign `, el("span", { class: "mono", text: camp.id }));
+  });
   guard("dateline", () => {
     const flightDays = camp.flightStart && camp.flightEnd ? dayNum(camp.flightStart, camp.flightEnd) : null;
     $("dayline").textContent = closed && camp.flightStart
@@ -375,7 +383,10 @@ try {
   // threshold ladder
   guard("ladder", () => {
     if (s.ok === false || !s.cumulative) { notRead("ladder", "spend" + (s.error ? ` (${s.error})` : "")); return; }
+    if (!THRESHOLDS) { notRead("ladder", "the campaign's read points (its read plan was not found for this page)"); return; }
     const cap = s.hardCap, cum = s.cumulative.cost;
+    const labels = THRESHOLDS.map(t => "$" + t);
+    $("ladder-sub").textContent = `Reads fire once each at ${labels.length > 1 ? labels.slice(0, -1).join(", ") + " and " + labels[labels.length - 1] : labels[0]}. ${$("ladder-sub").textContent}`;
     const fired = new Set([...(th.consumedBefore || []), ...crossed]);
     const W = 640, L = 22, R = 22, top = 36, bh = 14, H = 88;
     const x = v => L + (Math.min(v, cap) / cap) * (W - L - R);
@@ -383,10 +394,10 @@ try {
     svg += `<rect class="track" x="${L}" y="${top}" width="${W - L - R}" height="${bh}" rx="3"/>`;
     svg += `<rect class="fillbar" x="${L}" y="${top}" width="${Math.max(0, x(cum) - L)}" height="${bh}" rx="3"/>`;
     svg += `<text class="tlabel" x="${L}" y="${top + bh + 22}">$0</text>`;
-    [25, 50, 75, 100].forEach(t => {
+    THRESHOLDS.forEach(t => {
       const xx = x(t), hit = fired.has(t) || cum >= t;
       svg += `<line class="${hit ? "tick-hit" : "tick-off"}" x1="${xx}" x2="${xx}" y1="${top - 6}" y2="${top + bh + 6}"/>`;
-      svg += `<text class="tlabel" x="${xx}" y="${top + bh + 22}" text-anchor="${t === 100 ? "end" : "middle"}">$${t}</text>`;
+      svg += `<text class="tlabel" x="${xx}" y="${top + bh + 22}" text-anchor="${t >= cap ? "end" : "middle"}">$${t}</text>`;
     });
     svg += `<text class="mlabel" x="${Math.min(x(cum), W - R - 30)}" y="${top - 12}" text-anchor="middle">${money(cum)}</text>`;
     $("ladder").innerHTML = svg + "</svg>";
@@ -417,7 +428,7 @@ try {
         ["Tagged arrivals (floor)", int(f.arrivals)],
         ["Tagged hits", int(sm.taggedHits)],
         ["Game-screen views", int(f.played)],
-        ["Sign-in asks", `${int(sm.asks.total)} (placement ${ab["/signin-prompt/placement"]}, streak ${ab["/signin-prompt/streak"]}, promo ${ab["/promo-first50/shown"]})`],
+        ["Sign-in asks", `${int(sm.asks.total)} (placement ${ab["/signin-prompt/placement"]}, streak ${ab["/signin-prompt/streak"]}, tutorial ${ab["/signin-prompt/tutorial"] ?? 0}, promo ${ab["/promo-first50/shown"]})`],
         ["Accepts", int(sm.accepts.total)],
         ["Dismisses", `sign-in ${sm.dismisses.signinPrompt}, promo ${sm.dismisses.promoFirst50}`],
         ["Auth redirects", int(sm.authRedirect)],
@@ -430,6 +441,27 @@ try {
     } else {
       notRead("funnel", "tagged beacon counts" + (D.tagged && D.tagged.error ? ` (${D.tagged.error})` : ""));
     }
+  });
+  guard("first-session", () => {
+    const fs = D.firstSession;
+    if (!fs || !fs.funnel) { notRead("first-session", "tagged beacon rows unavailable"); return; }
+    const f = fs.funnel;
+    const LABELS = { arrivals: "Arrivals (d0 devices)", gameView: "Game views", tourStart: "Tour start", tourComplete: "Tour complete", tourSkip: "Tour skip", firstMove: "First move", gameComplete: "Game complete" };
+    const untracked = () => chip("not yet tracked", "neutral");
+    const site = (x) => x.site == null ? "not read" : int(x.site);
+    const vs = (x) => {
+      const g = x.vsParent; if (!g) return "";
+      const counts = `${int(g.numerator)}/${int(g.denominator)}`;
+      const v = g.value == null ? (g.insufficientCohort ? "too few" : "n/a") : (g.value * 100).toFixed(1) + "%";
+      return `${v} of ${LABELS[g.parent].toLowerCase()} (${counts})`;
+    };
+    const row = (label, x, withVs) => x.tracked === false ? [label, untracked(), "no rows yet", ""] : [label, int(x.tagged), site(x), withVs ? vs(x) : ""];
+    const rows = Object.keys(LABELS).map(k => row(LABELS[k], f.steps[k], true));
+    for (const b of ["0", "1-25", "26-50", "51-75", "76-99"]) rows.push(row(`Abandon at ${b}% filled`, f.abandon[b]));
+    rows.push(row("Sign-in asks shown", f.asks), row("  of which tutorial", f.asksTutorial));
+    for (const [e, l] of [["shown", "Welcome card shown"], ["daily", "Welcome card: daily"], ["leaderboard", "Welcome card: leaderboard"], ["dismiss", "Welcome card dismissed"]]) rows.push(row(l, f.welcome[e]));
+    table("first-session", ["Step", "Tagged", "Site-wide", "Tagged vs parent"], rows, [1, 2]);
+    if (fs.siteError) $("first-session").closest(".table-wrap").after(el("p", { class: "nr", text: "Site-wide not read: " + fs.siteError }));
   });
   guard("returns", () => {
     if (!tr) { notRead("returns", "returns are read on threshold reads only"); return; }
