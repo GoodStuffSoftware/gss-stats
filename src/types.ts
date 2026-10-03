@@ -1,3 +1,5 @@
+import type { RangeNotice } from './lib/rangeNotice'
+
 export type ChartType =
   | 'bar'
   | 'hbar'
@@ -296,6 +298,9 @@ export interface StatsResponse {
   // install-outcome gap, lib/popupEvents.ts INSTALL_ACCEPT_OUTCOME_FIXED_ET), rendered under
   // the chart so saved widgets with older titles still show it.
   note?: string
+  // Runtime notice (never persisted): the server cut the requested range down to what the data
+  // source allows — see lib/rangeNotice.ts and functions/_lib/rangeGate.ts.
+  notice?: RangeNotice
 }
 
 // (The bespoke "Best Sudoku campaigns" and "Best Sudoku overview" response shapes — /api/campaigns

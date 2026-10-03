@@ -23,15 +23,15 @@ Project rules for this repo — for both AI agents and human contributors. See
 Every user-facing change adds a bullet under `## [Unreleased]` in
 [CHANGELOG.md](CHANGELOG.md), **in the same commit as the code**. Keep-a-Changelog
 format; concise bullets (bold lead + one sentence, no filenames or implementation
-detail). On release, promote `[Unreleased]` → `[vX.Y.Z] — YYYY-MM-DD` and bump
-`package.json`.
+detail). Every merge to `main` is a release: the landing PR promotes `[Unreleased]` to the
+next semver version (`## [X.Y.Z] — YYYY-MM-DD`) and bumps `package.json` in the same PR.
 
 ## Branches
 
 `main` is the deployed line. Do work on `feat/<scope>` / `fix/<scope>` /
-`docs/<scope>` / `chore/<scope>` branches. **Feature branches don't bump the
-version** — record changes under `[Unreleased]`; the version bump happens when
-merging to `main` to release.
+`docs/<scope>` / `chore/<scope>` branches. Feature branches still don't bump while in
+progress — record changes under `[Unreleased]`; the landing PR to `main` does the semver
+bump and changelog promotion (see Changelog).
 
 ## Destructive git safety
 
