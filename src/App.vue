@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { reactive, ref, watch, watchEffect, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
-import type { DashboardConfig, DashboardPage, Widget, GlobalFilters } from './types'
+import { reactive, shallowReactive, ref, watch, watchEffect, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
+import type { DashboardConfig, DashboardPage, Widget, GlobalFilters, StatsResponse } from './types'
 import { defaultConfig, normalizeConfig, defaultWidgetsForPage, clonePage, cryptoId, isBestSudokuLaunchPage, isBestSudokuPopupsPage, isCampaignComparePage, BEST_SUDOKU_SITES, beaconizeWidget, cleanGroupName, cleanPageName } from './lib/defaults'
 import { rangeLabel, dayDrillRange } from './lib/range'
 import { loadConfig, saveConfig, ConfigLoadError } from './api'
@@ -607,10 +607,23 @@ function removeWidget(id: string) {
   const list = activePage.value.widgets
   const i = list.findIndex((x) => x.id === id)
   if (i >= 0) list.splice(i, 1)
+  delete chartData[id]
 }
+// A duplicate must not share any array or object with the original (notes, hiddenCaveats, items,
+// series, ...). A widget is plain JSON (it is what gets saved), so a JSON round trip is a deep copy
+// that also copes with Vue reactive proxies, which structuredClone refuses.
 function duplicateWidget(wgt: Widget) {
   const id = cryptoId()
-  activePage.value.widgets.push({ ...wgt, id, i: id, x: 0, y: 9999, title: wgt.title + ' (copy)' })
+  const copy: Widget = JSON.parse(JSON.stringify(wgt))
+  activePage.value.widgets.push({ ...copy, id, i: id, x: 0, y: 9999, title: wgt.title + ' (copy)' })
+}
+
+// The latest response (or load error) each ChartCard reports, by widget id, so ChartEditor can show
+// runtime caveats for the chart being edited without fetching again. Never saved; shallow so the
+// responses are not made deeply reactive.
+const chartData = shallowReactive<Record<string, { data: StatsResponse | null; error: string | null }>>({})
+function onChartData(id: string, data: StatsResponse | null, error: string | null) {
+  chartData[id] = { data, error }
 }
 
 // ── Drill-down: click a chart datapoint → open a new page filtered to that value ─
@@ -1049,6 +1062,7 @@ function toggleDark() {
         @duplicate="duplicateWidget"
         @change="scheduleSave"
         @drill="onDrill"
+        @data="onChartData"
         @open-campaigns="switchPage('bsk-campaigns')"
       />
       <div v-if="loaded && activePage.widgets.length === 0" class="empty">
@@ -1065,6 +1079,8 @@ function toggleDark() {
       :widget="editing.widget"
       :is-new="editing.isNew"
       :filters="activePage.filters"
+      :data="chartData[editing.widget.id]?.data ?? null"
+      :error="chartData[editing.widget.id]?.error ?? null"
       @save="onEditorSave"
       @cancel="editing = null"
       @remove="onEditorRemove"
