@@ -1,6 +1,6 @@
 // validateCard over every preset, and the POST /api/metrics whitelist (ADR 0003 section 3).
 import { describe, expect, it } from 'vitest'
-import { KEY_RE, MAX_REQUESTS, normCardRef, validateCard, validateMetricsRequest, type ValidatedBatch } from './validate'
+import { KEY_RE, MAX_REQUESTS, NOTE_ID_RE, normCardRef, validateCard, validateMetricsRequest, type ValidatedBatch } from './validate'
 import { PRESETS, presetById } from './presets'
 import { getNote, hasNote, isNoteActive, noteRawText, noteTemplate, noteTokens } from '../notes'
 import type { CardSpec, MetricItem } from './types'
@@ -30,8 +30,6 @@ describe('validateCard', () => {
     ['a window the registry does not serve yet', card({ data: { metric: 'bsk.pageviews', window: 'flight' } }), /window "flight" is not served/],
     ['deltas on a campaign-window count', card({ data: { metric: 'campaign.asks' }, display: { as: 'number', deltas: ['yesterday'] } }, CAMPAIGNS_REPEAT), /deltas need a count metric over 'todaySoFar'/],
     ['a minCohort under the floor', card({ data: { ratio: 'campaign.acceptPerAsk' }, display: { as: 'percent' }, gating: { minCohort: MIN_COHORT - 1 } }, CAMPAIGNS_REPEAT), /minCohort below MIN_COHORT/],
-    ['an unknown note label', card({ label: { note: 'label.nope' } }), /unknown note id 'label.nope'/],
-    ['an unknown whenEmpty note', card({ gating: { whenEmpty: { note: 'nope' } } }), /whenEmpty: unknown note id 'nope'/],
     ['{ metric: true } on a field', card({ label: { metric: true }, data: { field: 'campaign.flight' }, display: { as: 'dateRange' } }, CAMPAIGNS_REPEAT), /needs a metric or ratio binding/],
     ['a repeat over an unknown campaign', card({}, { over: 'campaigns', ids: ['123'] }), /unknown campaign '123'/],
   ] as const)('rejects %s', (_n, spec, err) => {
@@ -153,12 +151,17 @@ describe('context dates are real and ordered (review #10)', () => {
 })
 
 describe('note ids are own keys only (review #1)', () => {
-  it.each(['constructor', 'toString', '__proto__', 'hasOwnProperty', 'valueOf'])('%s is not a note: validateCard refuses it, and the note helpers never throw', (id) => {
+  it.each(['constructor', 'toString', '__proto__', 'hasOwnProperty', 'valueOf'])('%s is not a note: validateCard judges it by shape only, and the note helpers never throw', (id) => {
     const spec: CardSpec = { v: 1, captions: [id], sections: [{ layout: 'rows', items: [{ id: 'x', label: { note: id }, data: { metric: 'bsk.pageviews' }, display: { as: 'number' }, gating: { whenEmpty: { note: id } } }] }] }
     const errors = validateCard(spec).join('\n')
-    expect(errors).toContain(`card.captions: unknown note id '${id}'`)
-    expect(errors).toContain(`sections[0].x.label: unknown note id '${id}'`)
-    expect(errors).toContain(`sections[0].x.gating.whenEmpty: unknown note id '${id}'`)
+    // An id this build doesn't know is kept (a newer build may have written it); only a
+    // badly-shaped one is refused — '__proto__' starts with '_', so it is.
+    if (NOTE_ID_RE.test(id)) expect(errors).toBe('')
+    else {
+      expect(errors).toContain(`card.captions: "${id}" is not a note id`)
+      expect(errors).toContain(`sections[0].x.label: "${id}" is not a note id`)
+      expect(errors).toContain(`sections[0].x.gating.whenEmpty: "${id}" is not a note id`)
+    }
     expect(hasNote(id)).toBe(false)
     expect(getNote(id)).toBeUndefined()
     expect(noteRawText(id)).toBe('')

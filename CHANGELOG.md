@@ -11,6 +11,26 @@ All notable changes to **gss-stats** are documented here. The format follows
   server keeps a copy of the previous one plus a daily copy for 30 days, and refuses the save if
   it can't keep that copy.
 
+## [0.16.0] — 2026-10-03
+
+### Added
+- **Flight 2's two arms are registered.** The display arm on Sudoku-app placements and the desktop
+  search arm now appear on the dashboard and can be read on their own with `--campaign`, each with
+  a $10/day budget and a $70 cap, running Oct 4 to Oct 10.
+
+### Changed
+- **The notes under each chart are now put together in one place, in one fixed order.** Nothing
+  changes in the app.
+
+## [0.15.5] — 2026-10-03
+
+### Fixed
+- **A saved card that uses a newer note no longer turns into "can't be shown".** A caption, label
+  or empty-message note this version doesn't know yet is kept as saved and shows nothing (a dash
+  where a value would be), so an older tab can't erase it on its next save.
+- **The card builder stops at 32 badge colours.** Adding more is turned off with a short note, and
+  the builder refuses any card a reload would reject, so a card it saves always loads again.
+
 ## [0.15.4] — 2026-10-03
 
 ### Fixed
