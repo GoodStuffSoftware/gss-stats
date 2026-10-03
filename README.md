@@ -700,9 +700,10 @@ per 10 minutes. The dashboard holds no Google Ads credential and never calls the
 - **Deploy:** `npm run ads:worker-deploy -- --cf-token-file <path> [--paused]` stamps the version
   with the git SHA (tag, message, and the `GIT_SHA` it reports with a hash of every campaign
   field the sync writes: name, kind, flight, status, uc values, budget, cap, measurement); `--paused` deploys with no cron. The Worker bundles `src/lib/campaigns.ts`, so a
-  new campaign needs a Worker redeploy as well as a Pages deploy; the dashboard's Refresh says
-  when the Worker runs other campaign definitions, and CI bundles it on every PR
-  (`npm run ads:worker-check`).
+  new campaign needs a Worker redeploy as well as a Pages deploy. **That now happens on merge
+  to `main`** (the `deploy-worker` job, see [Deploy](#deploy)); the manual command stays for a
+  paused/held deploy. The dashboard's Refresh says when the Worker runs other campaign
+  definitions, and CI bundles it on every PR (`npm run ads:worker-check`).
 - **Secrets:** the four Google Ads credentials live in Cloudflare **Secrets Store** (account
   store `default_secrets_store`, secret names = the Bitwarden key names, scope `workers`),
   bound as `ADS_CLIENT_ID`, `ADS_CLIENT_SECRET`, `ADS_REFRESH_TOKEN`, `ADS_DEVELOPER_TOKEN`.
@@ -765,6 +766,19 @@ One-time setup: add a repo secret **`CLOUDFLARE_API_TOKEN`** (Settings → Secre
 → Actions) — a Cloudflare token with **Cloudflare Pages: Edit**. The runtime `CF_ANALYTICS_TOKEN`
 and the sign-in settings ([Auth](#auth)) are Pages *project* secrets and aren't needed by the
 workflow (deploys keep existing secrets).
+
+**The sync Worker deploys on merge too** — a second, independent job (`deploy-worker`) in the
+same workflow, so a Worker failure never fails or blocks the Pages deploy. It runs
+`npm run ads:worker-deploy` (SHA-stamped, cron attached; the Google Ads credentials stay in
+Secrets Store, nothing secret is needed in the workflow) when a push to `main` changes
+`workers/sync/**`, any non-test file under `src/lib/**` (the Worker bundles `campaigns.ts`
+and its other imports from there), `package-lock.json` (the pinned wrangler) or `deploy.yml`.
+Other pushes skip it; **Actions → Deploy → Run workflow** always deploys it. The same
+`CLOUDFLARE_API_TOKEN` secret is used, so the token needs **Workers Scripts: Edit** in
+addition to Pages: Edit. Worker deploys queue (one at a time, never cancelled mid-flight); if
+three Worker-touching pushes land while one is deploying, the middle one's change is only picked
+up by the next Worker-touching push or a manual run. A Worker deployed by hand with `--paused`
+gets its cron back on the next automatic deploy.
 
 **Manual** (local fallback / preview), with the token from a local, gitignored file:
 
