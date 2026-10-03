@@ -73,6 +73,12 @@ function cloneJson<T>(value: T): T {
 export function cloneSpec(spec: CardSpec): CardSpec {
   return cloneJson(spec)
 }
+/** Whether two specs are the same card, ignoring key order. */
+export function specsEqual(a: CardSpec, b: CardSpec): boolean {
+  const canon = (v: unknown): unknown =>
+    Array.isArray(v) ? v.map(canon) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v as Record<string, unknown>).filter(([, x]) => x !== undefined).sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)).map(([k, x]) => [k, canon(x)])) : v
+  return JSON.stringify(canon(a)) === JSON.stringify(canon(b))
+}
 export function specFromPresetId(id: string): CardSpec {
   return cloneSpec(presetById(id) ?? emptySpec())
 }
@@ -525,6 +531,13 @@ export function tonesToRows(tones: Record<string, BadgeTone> | undefined): ToneR
  * stored as plain data, never as the map's prototype. */
 export function rowsToTones(rows: readonly ToneRow[]): Record<string, BadgeTone> | undefined {
   return rows.length ? Object.fromEntries(rows.map((r) => [r.value, r.tone])) : undefined
+}
+/** Why `value` cannot be badge row `index`'s text, or null when it can: empty, or the same as
+ * another row (the tones map is keyed by it, so a duplicate would silently merge two rows). */
+export function toneValueProblem(rows: readonly ToneRow[], index: number, value: string): string | null {
+  if (!value.trim()) return 'Badge text cannot be empty.'
+  if (rows.some((r, j) => j !== index && r.value === value)) return `"${value}" already has a colour — each badge text can have only one.`
+  return null
 }
 export const CARD_ACTION_OPTIONS: { value: CardAction; label: string }[] = [{ value: 'ads-refresh', label: 'Refresh Google Ads spend button' }]
 
