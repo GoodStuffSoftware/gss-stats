@@ -49,9 +49,11 @@
 // ET midnights takes the unchanged path: same SQL, same binds, same cache key as before R-1d.
 // Applied by functions/api/geo.ts (every branch, unless the split guard already leaves refused
 // rows out), functions/api/completions.ts (every row is refused) and the /api/metrics `page`
-// window (facts.ts bskRangePath; the engine adds the 'refused-whole-days' note to every metric
-// that can count a refused row, by MetricDef.countsRefused). /api/popups'
-// hourly read and the routine's per-hour and per-country reads already leave refused rows out.
+// window (facts.ts bskRangePath and its daily twin bskRangeDaily, so a sparkline's days match
+// its tile; the engine adds the 'refused-whole-days' note to every metric that can count a
+// refused row, by MetricDef.countsRefused). /api/popups' hourly read, the metrics pop-up facts
+// (popupRangePath, popupRangeDaily) and the routine's per-hour and per-country reads already
+// leave refused rows out.
 // Today's refused totals stay live (ruling 2026-10-03: no hold until the ET day closes). A hold
 // would cap refusedRowWindow's `to` at the open day's ET midnight; every caller already takes
 // its refused bounds from there.

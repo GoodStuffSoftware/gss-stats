@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchAdsReadings, fetchStats } from './api'
+import { fetchAdsReadings, fetchStats, saveConfig } from './api'
 import { isAuthError, sessionExpired } from './session'
-import type { GlobalFilters, Widget } from './types'
+import type { DashboardConfig, GlobalFilters, Widget } from './types'
 
 // Every data fetch in api.ts must end in the same expired-session handling: a 401 from
 // the auth gate (functions/_lib/auth.ts) raises the re-sign-in banner via the confirming
@@ -86,5 +86,17 @@ describe('pop-up charts go through ChartCard’s 401 handling', () => {
     expect(calls[0].url).toBe('/api/popups')
     expect(String((err as Error).message)).toMatch(/^popups 401:/)
     expect(isAuthError(err)).toBe(true)
+  })
+})
+
+describe('saveConfig keepalive', () => {
+  const cfg = { version: 1, pages: [] } as unknown as DashboardConfig
+  it('is off by default and on only when the caller asks (the pagehide flush)', async () => {
+    stubFetch(new Response('{}', { status: 200 }), new Response('{}', { status: 200 }))
+    await expect(saveConfig(cfg)).resolves.toBe(true)
+    expect(calls[0].init?.method).toBe('PUT')
+    expect(calls[0].init?.keepalive).toBe(false)
+    await saveConfig(cfg, { keepalive: true })
+    expect(calls[1].init?.keepalive).toBe(true)
   })
 })

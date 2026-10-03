@@ -8,6 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import App from './App.vue'
+import { stubAppFetch } from './testing/appFetch'
 import Dashboard from './components/Dashboard.vue'
 import ChartEditor from './components/ChartEditor.vue'
 import { defaultConfig, normalizeConfig } from './lib/defaults'
@@ -27,6 +28,11 @@ vi.mock('./sitesStore', async (importOriginal) => {
 vi.mock('./session', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./session')>()
   return { ...actual, loadIdentity: vi.fn(async () => {}), checkSessionExpired: vi.fn(async () => {}) }
+})
+
+// No real network from a mounted App: every endpoint it can reach answers from the stub (src/testing/appFetch.ts).
+beforeEach(() => {
+  stubAppFetch()
 })
 
 class FakeIntersectionObserver {
@@ -214,5 +220,134 @@ describe('App: a PUT in flight when the layout changes back', () => {
     await refit(300) // back to the loaded layout: the save is skipped
     await sleep(900)
     expect(wrapper!.find('.save-state').text()).toContain('out of date')
+  }, 20000)
+
+  it('an edit made while the tab is stale keeps the "out of date" label through the 700 ms pending window', async () => {
+    await load()
+    await sleep(FIT_SETTLE_MS + 100)
+    vi.mocked(saveConfig).mockResolvedValue('stale')
+    await refit(520)
+    await sleep(900)
+    expect(vi.mocked(saveConfig).mock.calls.length).toBe(1)
+    expect(wrapper!.find('.save-state').text()).toContain('out of date')
+    // A new edit starts a fresh debounce; the label must not flip to "Saving…" before the timer fires.
+    contentBottom = 700
+    fireResize()
+    await sleep(FIT_SETTLE_MS + 100) // the edit has landed; its save timer is still pending
+    expect(vi.mocked(saveConfig).mock.calls.length).toBe(1) // not yet sent
+    expect(wrapper!.find('.save-state').text()).toContain('out of date')
+    expect(wrapper!.find('.save-state').text()).not.toContain('Saving')
+    vi.mocked(saveConfig).mockResolvedValue(true)
+  }, 20000)
+
+  it('"Save failed" clears once the tab is back on exactly what the server holds', async () => {
+    await load()
+    await sleep(FIT_SETTLE_MS + 100)
+    vi.mocked(saveConfig).mockResolvedValueOnce(false)
+    await refit(520)
+    await sleep(900)
+    expect(wrapper!.find('.save-state').text()).toContain('Save failed')
+    await refit(300) // back to the loaded layout, which is what the server still holds
+    await sleep(900)
+    expect(vi.mocked(saveConfig).mock.calls.length).toBe(1) // nothing to send
+    expect(wrapper!.find('.save-state').exists() ? wrapper!.find('.save-state').text() : '').not.toContain('Save failed')
+  }, 20000)
+})
+
+describe('App: leaving the page with an edit still in the debounce', () => {
+  it('pagehide sends the pending edit now instead of waiting out the 700 ms', async () => {
+    await load()
+    await sleep(FIT_SETTLE_MS + 100)
+    await refit(520) // the edit has landed; the save timer is pending
+    expect(saveConfig).not.toHaveBeenCalled()
+    window.dispatchEvent(new Event('pagehide'))
+    await flushPromises()
+    expect(saveConfig).toHaveBeenCalledTimes(1)
+    expect(sentCard(0).h).toBe(fitRows(520))
+    await sleep(900) // the cleared timer does not fire a second PUT
+    expect(saveConfig).toHaveBeenCalledTimes(1)
+  }, 20000)
+
+  it('unmounting sends the pending edit and clears the timer', async () => {
+    await load()
+    await sleep(FIT_SETTLE_MS + 100)
+    // Record the 700 ms save timer's id so the test can see it cleared (a second fire would be a
+    // no-op behind the lastPersisted check, so the PUT count alone cannot tell).
+    const saveTimerIds: unknown[] = []
+    const realSetTimeout = window.setTimeout.bind(window)
+    vi.spyOn(window, 'setTimeout').mockImplementation(((fn: () => void, ms?: number, ...a: unknown[]) => {
+      const id = realSetTimeout(fn, ms, ...a)
+      if (ms === 700) saveTimerIds.push(id)
+      return id
+    }) as typeof window.setTimeout)
+    await refit(520)
+    expect(saveConfig).not.toHaveBeenCalled()
+    expect(saveTimerIds).toHaveLength(1)
+    const clearSpy = vi.spyOn(window, 'clearTimeout')
+    wrapper!.unmount()
+    wrapper = null
+    await flushPromises()
+    expect(saveConfig).toHaveBeenCalledTimes(1)
+    expect(clearSpy).toHaveBeenCalledWith(saveTimerIds[0])
+    await sleep(900)
+    expect(saveConfig).toHaveBeenCalledTimes(1)
+  }, 20000)
+
+  it('the pagehide flush is a keepalive PUT, so the browser lets it finish after the page is gone', async () => {
+    await load()
+    await sleep(FIT_SETTLE_MS + 100)
+    await refit(520)
+    window.dispatchEvent(new Event('pagehide'))
+    await flushPromises()
+    expect(saveConfig).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(saveConfig).mock.calls[0][1]).toEqual({ keepalive: true })
+  }, 20000)
+
+  it('a layout over the keepalive size cap falls back to the ordinary PUT on pagehide', async () => {
+    await load()
+    await sleep(FIT_SETTLE_MS + 100)
+    liveCard().title = 'x'.repeat(70_000) // a body over the 64 KiB keepalive limit
+    await flushPromises()
+    window.dispatchEvent(new Event('pagehide'))
+    await flushPromises()
+    expect(saveConfig).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(saveConfig).mock.calls[0][1]).toEqual({ keepalive: false })
+  }, 20000)
+
+  it('the keepalive size cap counts bytes, not characters (multibyte text over the cap falls back)', async () => {
+    await load()
+    await sleep(FIT_SETTLE_MS + 100)
+    // 30,000 characters, but about 90,000 UTF-8 bytes: under the cap by `.length`, over it in bytes.
+    liveCard().title = '€'.repeat(30_000)
+    await flushPromises()
+    window.dispatchEvent(new Event('pagehide'))
+    await flushPromises()
+    expect(saveConfig).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(saveConfig).mock.calls[0][1]).toEqual({ keepalive: false })
+  }, 20000)
+
+  it('an ordinary debounced save is never keepalive', async () => {
+    await load()
+    await sleep(FIT_SETTLE_MS + 100)
+    await refit(520)
+    await sleep(900)
+    expect(saveConfig).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(saveConfig).mock.calls[0][1]).toEqual({ keepalive: false })
+  }, 20000)
+
+  it('an edit queued behind an in-flight PUT is sent when that PUT resolves (documented limit: a closing page may not live to see it)', async () => {
+    await load()
+    await sleep(FIT_SETTLE_MS + 100)
+    const resolveB = deferPut()
+    await refit(520)
+    await sleep(900) // B is in flight
+    await refit(300)
+    window.dispatchEvent(new Event('pagehide')) // leaving: the second edit can only queue
+    await flushPromises()
+    expect(saveConfig).toHaveBeenCalledTimes(1)
+    resolveB(true)
+    await sleep(100)
+    expect(saveConfig).toHaveBeenCalledTimes(2)
+    expect(sentCard(1).h).toBe(fitRows(300))
   }, 20000)
 })

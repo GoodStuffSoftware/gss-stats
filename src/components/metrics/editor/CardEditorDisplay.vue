@@ -2,8 +2,9 @@
 // One Display editor (ADR 0003 section 1(c) / section 4 item 5, "Display"): only the displays
 // compatible with the chosen data's unit are offered (validate.ts's DISPLAYS_FOR, via
 // editorModel's displayOptionsFor) — a percent can never be offered for a pair. Percent always
-// shows "(n/d)"; there is no toggle to hide it (ADR: "no toggle to hide it"). Sparkline is
-// listed but disabled ("coming soon"): MetricValue carries no per-day series yet.
+// shows "(n/d)"; there is no toggle to hide it (ADR: "no toggle to hide it"). Sparkline (ADR
+// 0005 slice 2) is offered for a count or money metric in the page or campaign attribution window,
+// and listed but disabled, with the reason as its tooltip, anywhere it cannot draw a daily series.
 import { computed, useId } from 'vue'
 import { dataKindOf, displayAsLabel, displayOptionsFor, makeDisplay, metricDef } from '../../../lib/metrics/editorModel'
 import type { DataBinding, Display, DisplayAs } from '../../../lib/metrics/types'
@@ -46,7 +47,8 @@ function toggleDelta(name: 'yesterday' | 'avg7', checked: boolean) {
   deltas.value = (['yesterday', 'avg7'] as const).filter((d) => set.has(d))
 }
 
-const decimals = computed<0 | 1 | 2>({
+const DECIMALS_OPTIONS = [0, 1, 2, 3, 4] as const // validate.ts accepts 0-4; render.ts clamps to it
+const decimals = computed<(typeof DECIMALS_OPTIONS)[number]>({
   get: () => (display.value.as === 'percent' ? (display.value.decimals ?? 1) : 1),
   set: (v) => {
     if (display.value.as === 'percent') display.value = { as: 'percent', decimals: v }
@@ -55,7 +57,7 @@ const decimals = computed<0 | 1 | 2>({
 const dateRangeDays = computed<boolean>({
   get: () => display.value.as === 'dateRange' && !!display.value.days,
   set: (v) => {
-    if (display.value.as === 'dateRange') display.value = { as: 'dateRange', days: v }
+    if (display.value.as === 'dateRange') display.value = v ? { as: 'dateRange', days: true } : { as: 'dateRange' }
   },
 })
 </script>
@@ -77,7 +79,7 @@ const dateRangeDays = computed<boolean>({
         :title="o.hint ?? ''"
         @click="pick(o.as)"
       >
-        {{ displayAsLabel(o.as) }}{{ o.disabled ? ' (coming soon)' : '' }}
+        {{ displayAsLabel(o.as) }}{{ o.disabled ? ' (unavailable)' : '' }}
       </button>
     </div>
 
@@ -93,9 +95,7 @@ const dateRangeDays = computed<boolean>({
       <div class="field">
         <label :for="decimalsId">Decimals</label>
         <select :id="decimalsId" v-model.number="decimals">
-          <option :value="0">0</option>
-          <option :value="1">1</option>
-          <option :value="2">2</option>
+          <option v-for="n in DECIMALS_OPTIONS" :key="n" :value="n">{{ n }}</option>
         </select>
       </div>
       <p class="hint">Always shows the counts, e.g. "12.1% (4/33)" — no toggle to hide them.</p>
@@ -105,6 +105,10 @@ const dateRangeDays = computed<boolean>({
       <div class="field check">
         <label><input type="checkbox" v-model="dateRangeDays" /> Show day count, e.g. "(8d)"</label>
       </div>
+    </template>
+
+    <template v-else-if="display.as === 'sparkline'">
+      <p class="hint">Draws the metric's count (or spend) for each Eastern day in the range, next to its number. A day it was not measured is a gap in the line, not a zero.</p>
     </template>
 
     <template v-else-if="display.as === 'counts'">
