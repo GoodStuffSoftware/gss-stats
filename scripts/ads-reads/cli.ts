@@ -50,7 +50,12 @@ export const COMMON_OPTIONS = {
 
 export function parseCli<T extends Record<string, { type: 'string' | 'boolean'; default?: string | boolean }>>(extra: T, argv = process.argv.slice(2)) {
   try {
-    return parseArgs({ args: argv, options: { ...COMMON_OPTIONS, ...extra }, allowPositionals: false, strict: true }).values as Record<string, string | boolean | undefined>
+    const parsed = parseArgs({ args: argv, options: { ...COMMON_OPTIONS, ...extra }, allowPositionals: false, strict: true, tokens: true })
+    // parseArgs keeps the LAST of a repeated string option; a leftover second --campaign would
+    // silently read the wrong arm, so a repeat is refused (naming every value given).
+    const campaigns = parsed.tokens.flatMap((t) => (t.kind === 'option' && t.name === 'campaign' ? [t.value ?? ''] : []))
+    if (campaigns.length > 1) throw new Error(`--campaign was given ${campaigns.length} times (${campaigns.map((c) => JSON.stringify(c)).join(' and ')}); pass it once`)
+    return parsed.values as Record<string, string | boolean | undefined>
   } catch (e) {
     // A bare `--campaign` (no value) fails in parseArgs before resolveCampaignId runs: give it the
     // same message as a blank or unknown id, listing the registered ids.

@@ -284,6 +284,8 @@ const RECOMMENDATION_STANDING_VERDICTS = 'Maximize Conversions REJECT; conversio
  * means "propose to Mike" in the sense of flagging it in the report text — it is never wired
  * to `notify.push`, never a kill rule, never an automatic action (contract sections 12-13 are
  * unchanged by this file). */
+/** Devices a desktop-only search arm should not spend on (diagnosticsLines flags them). */
+const SEARCH_OFF_DESKTOP: ReadonlySet<string> = new Set(['MOBILE', 'TABLET', 'CONNECTED_TV', 'OTHER'])
 export function diagnosticsLines(d: DiagnosticsSection, channel: CampaignChannel = 'display'): string[] {
   const empty = !d.hourly && !d.geo && !d.devices && !d.targeting && !d.recommendations && !d.countryCounts && !d.accountCrossCheck && !d.errors.length
   if (empty) return []
@@ -302,7 +304,11 @@ export function diagnosticsLines(d: DiagnosticsSection, channel: CampaignChannel
       // printed as is.
       const shouldBeZero = channel === 'display' && (dv.device === 'DESKTOP' || dv.device === 'CONNECTED_TV')
       const nonZero = dv.impressions > 0 || dv.clicks > 0
-      out.push(`  device: ${dv.device} ${n(dv.impressions)} impr, ${n(dv.clicks)} clicks, ${money(dv.cost)}${shouldBeZero && nonZero ? ' — ANOMALY: computers/TV should read zero on a mobile-app placement campaign, propose to Mike' : ''}`)
+      // A search arm is desktop-only: spend on any other device on the closed day is flagged.
+      // Printed only — never a kill rule, never in `tripped` or the push text. Ads-side
+      // segments.device only; no beacon row is tied to a device.
+      const offDesktop = channel === 'search' && SEARCH_OFF_DESKTOP.has(dv.device) && dv.cost > 0
+      out.push(`  device: ${dv.device} ${n(dv.impressions)} impr, ${n(dv.clicks)} clicks, ${money(dv.cost)}${shouldBeZero && nonZero ? ' — ANOMALY: computers/TV should read zero on a mobile-app placement campaign, propose to Mike' : ''}${offDesktop ? ` — ANOMALY: yesterday's spend on ${dv.device}: ${money(dv.cost)}; arm is desktop-only (closed day only, not the flight so far), propose to Mike` : ''}`)
     }
   } else out.push('  devices: not read')
   if (channel === 'search') out.push(`  targeting (placement count, optimized targeting): ${SEARCH_NA}`)
