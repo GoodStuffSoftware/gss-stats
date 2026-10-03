@@ -6,6 +6,27 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.13.2] — 2026-10-03
+
+### Fixed
+- **The metric-card editor handles its edge cases.** A row stored as a sparkline can be switched
+  back to after trying another display; percent decimals offer 0 to 4, matching what is accepted;
+  turning off the day count on a date range removes the setting; a campaigns repeat has an
+  "organic" row control and says when it clashes with "Flighting today only"; a repeat kind
+  remembered by the editor no longer brings back an "empty" message you switched off elsewhere;
+  badge colours flag a duplicate or empty text instead of silently merging it; and "Use a preset
+  instead" asks before throwing away your edits.
+
+## [0.13.1] — 2026-10-03
+
+### Fixed
+- **A date range wider than Cloudflare allows no longer breaks charts with a raw error.** The
+  range is cut to the most recent 93 days (and no further back than 184 days) before querying,
+  and the chart shows a small note saying which days it is showing and why; its date axis covers
+  only those days, never a flat stretch of zeros for days that were not queried.
+
+## [0.13.0] — 2026-10-03
+
 ### Added
 - **The metric-card editor shows and edits every template setting.** Badge colours, the card's
   Google Ads refresh button, a note label's variables, the message shown when a repeat has nothing
@@ -80,9 +101,7 @@ All notable changes to **gss-stats** are documented here. The format follows
   modal was still unanswered, sent later at consent time — is excluded from page views and
   route counts everywhere the live completion family is, and is never counted as a live
   completion or a campaign funnel step (it is a sibling of `/game/complete/`, not a sub-path of
-  it). A new "Deferred completions (EU consent)" tile on the Best Sudoku dashboard, next to
-  Games completed, reads an explicit 0 while no rows exist; its caption explains it counts at
-  consent time, not completion time, and is EU-only.
+  it). (The dashboard tile that briefly showed it was removed again; see Removed.)
 - **First-session funnel in the retest morning read and its report page.** Tagged arrivals,
   game views, tutorial tour start/complete/skip, first move and game completions, abandoned
   games by % filled, sign-in asks shown and the signed-in welcome card, each with its site-wide
