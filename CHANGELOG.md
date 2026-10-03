@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-10-03
+
 ### Added
 - **The metric-card editor shows and edits every template setting.** Badge colours, the card's
   Google Ads refresh button, a note label's variables, the message shown when a repeat has nothing
@@ -80,9 +82,7 @@ All notable changes to **gss-stats** are documented here. The format follows
   modal was still unanswered, sent later at consent time — is excluded from page views and
   route counts everywhere the live completion family is, and is never counted as a live
   completion or a campaign funnel step (it is a sibling of `/game/complete/`, not a sub-path of
-  it). A new "Deferred completions (EU consent)" tile on the Best Sudoku dashboard, next to
-  Games completed, reads an explicit 0 while no rows exist; its caption explains it counts at
-  consent time, not completion time, and is EU-only.
+  it). (The dashboard tile that briefly showed it was removed again; see Removed.)
 - **First-session funnel in the retest morning read and its report page.** Tagged arrivals,
   game views, tutorial tour start/complete/skip, first move and game completions, abandoned
   games by % filled, sign-in asks shown and the signed-in welcome card, each with its site-wide
