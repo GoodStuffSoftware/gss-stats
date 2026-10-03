@@ -28,7 +28,7 @@ import { gateRate, INSTALL_GAP_PATHS, POPUPS, rowIsPostInstallFix } from '../pop
 import { computeDelta, releaseComparisonWindows } from '../overview'
 import { latestDatedRelease } from '../releases'
 import { UPSELL_SIGNEDOUT_FIX_AT } from '../adsRules'
-import { REFUSED_SAMPLE_PATHS, refusedWindowMoved } from '../splitGuard'
+import { refusedWindowMoved } from '../splitGuard'
 import { FACTS, factKey, rangeMs, type BeaconRow, type FactId, type FactParams, type FactRows, type FactStatement } from './facts'
 import { METRICS, rulesOf, type MetricCtx, type MetricDef } from './metrics'
 import { RATIOS, type RatioDef } from './ratios'
@@ -176,11 +176,13 @@ function clockOf(env: BatchEnv): Clock {
   }
 }
 
-/** Whether a metric's path predicate can count a refused row (one sample path per refused
- * pattern; no predicate counts every path). Static, so the note never depends on the data. */
-function countsRefusedRows(def: MetricDef, ctx: MetricCtx): boolean {
-  const test = def.path
-  return !test || REFUSED_SAMPLE_PATHS.some((p) => test(p, ctx))
+/** Whether a metric can count a refused row: the declarative MetricDef.countsRefused flag,
+ * fail-closed (unset = it can). A sampled-path check missed metrics whose predicate matches
+ * only refused paths the sample didn't name (tutorial replay, tour exits, d1+ returns); the
+ * flag never misses one, and metrics.refused.test.ts proves every opt-out against the whole
+ * refused-path vocabulary. Static, so the note never depends on the data. */
+function countsRefusedRows(def: MetricDef): boolean {
+  return def.countsRefused !== false
 }
 
 /** W = [a, b) for a request window. `endMs` is "now" (the KPI fact's own as-of instant for
@@ -631,7 +633,7 @@ class Batch {
     // A snapped page window: say so on every metric that can count a refused row (a new array,
     // never a push into a shared one).
     const ids =
-      plan.factId === 'bskRangePath' && this.clock.pageRefusedWholeDays && !noteIds.includes('refused-whole-days') && countsRefusedRows(def, ctx)
+      plan.factId === 'bskRangePath' && this.clock.pageRefusedWholeDays && !noteIds.includes('refused-whole-days') && countsRefusedRows(def)
         ? [...noteIds, 'refused-whole-days']
         : noteIds
     return { status, value: sums[0], m, noteIds: ids, ...(today ? { days: sums } : {}), asOfMs: plan.asOfMs }
