@@ -6,10 +6,23 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Return, game-completion and tutorial-completion rows can no longer be split by hour, place or device.**
+  A map, or a chart grouped or filtered by hour of day, location or device, now leaves those rows
+  out; as a result the "Arrivals by ET hour of day" chart no longer counts return and completion rows.
+
 ### Removed
 - **The "Deferred completions (EU consent)" tile is gone.** Best Sudoku now sends those games as
   ordinary completions, so the tile could only read 0; saved copies of it load without the tile, and a saved card whose only item was that
   tile now loads as an invalid card.
+
+### Added
+- **Tutorial completions and tour exits (Best Sudoku v1.97.0).** The Overview "today" card now
+  splits tutorial completions into first run and replay, and counts tour exits by step (preamble,
+  hub, section), counted from 13:03 ET on 2026-10-03. The new rows never count as page views or
+  real game completions. Note: from v1.97.0 the first-run tutorial win offers "Play a real game",
+  which starts a counted Easy game, so first-run game completions may rise from 13:03 ET on 10-03.
+- **v1.97.0 release marker and a go-live marker for the new beacons on the charts.**
 
 ### Fixed
 - **The release before/after panel no longer goes blank on a release day.** It now compares the

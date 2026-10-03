@@ -349,6 +349,11 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.bsk.authSuccessUnknown': 'Auth successes — unknown',
     'label.bsk.authErrors': 'Sign-in failures',
     'label.bsk.authRedirects': 'Sign-in redirect fallbacks',
+    'label.bsk.tutorialFirstRun': 'Tutorial completed — first run',
+    'label.bsk.tutorialReplay': 'Tutorial completed — replay',
+    'label.bsk.tourExitPreamble': 'Tour exits — preamble',
+    'label.bsk.tourExitHub': 'Tour exits — hub',
+    'label.bsk.tourExitSection': 'Tour exits — section',
     'label.bsk.installs': 'Installs',
     // Short and plain, as the Overview tile reads; the caveat is 'raw-install-double-count'.
     'label.bsk.rawInstallSignals': 'Raw install signals',
