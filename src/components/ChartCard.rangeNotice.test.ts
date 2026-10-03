@@ -8,6 +8,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import ChartCard from './ChartCard.vue'
 import type { GlobalFilters, StatsResponse, Widget } from '../types'
 import type { RangeNotice } from '../lib/rangeNotice'
+import { REFUSED_WHOLE_DAYS_CAPTION, SPLIT_GUARD_CAPTION } from '../lib/splitGuard'
 
 const fetchStatsMock = vi.hoisted(() => vi.fn())
 
@@ -98,5 +99,22 @@ describe('ChartCard — range notice', () => {
     const w = await mountCard()
     expect(w.get('.state.error').text()).toBe('stats 502')
     expect(w.find('[data-testid="range-notice"]').exists()).toBe(false)
+  })
+
+  // The "keep both" order, pinned in one place (the order itself is unit-tested in lib/chartNotes.test.ts).
+  it('shows the range note together with the attached captions, in order, in the one captions area', async () => {
+    fetchStatsMock.mockResolvedValue(response({ note: 'A pop-up caveat.', notice, meta: { site: 'all', host: null, since: '2026-01-01', until: '2026-09-30', dimensions: [], metric: 'pageviews', splitGuard: true, refusedWholeDays: true } }))
+    const w = mount(ChartCard, { props: { widget: { ...widget, notes: ['small-sample'] }, filters, dark: false, drillOpen: false } })
+    await flushPromises()
+    const texts = w.findAll('.card-captions .note-block').map((n) => n.text())
+    expect(texts).toHaveLength(5)
+    expect(texts[0]).toContain('small')
+    expect(texts[1]).toBe('A pop-up caveat.')
+    expect(texts[2]).toContain(SPLIT_GUARD_CAPTION)
+    expect(texts[3]).toContain(REFUSED_WHOLE_DAYS_CAPTION)
+    expect(texts[4]).toContain('Jul 1 – Sep 30 shown')
+    expect(w.findAll('.card-captions')).toHaveLength(1)
+    expect(w.findAll('[data-testid="range-notice"]')).toHaveLength(1)
+    expect(w.findAll('.card-captions .note-block')[4].classes()).toContain('range-notice')
   })
 })
