@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import FilterPopover from './FilterPopover.vue'
 import { defaultFilters } from '../lib/defaults'
-import { SINCE_FIRST_CAMPAIGN } from '../lib/range'
+import { SINCE_FIRST_CAMPAIGN, etDayRangeToISO } from '../lib/range'
 import type { GlobalFilters } from '../types'
 
 const last = (w: ReturnType<typeof mount>) => (w.emitted('apply') as GlobalFilters[][]).at(-1)![0]
@@ -37,5 +37,21 @@ describe('FilterPopover range', () => {
     await to.setValue('2026-09-10')
     await to.trigger('change')
     expect(last(w).rangeRel).toBe('')
+  })
+})
+
+describe('FilterPopover — the date pickers on an ET-day range (a drilled dateEt page)', () => {
+  const day = (d: string) => etDayRangeToISO(d)
+  const dates = (w: ReturnType<typeof mount>) => w.findAll('input[type="date"]').map((i) => (i.element as HTMLInputElement).value)
+
+  it.each(['2026-03-08', '2026-11-01', '2026-06-15'])('shows the one ET day %s on both pickers and its single-date label, not two UTC days', (d) => {
+    const w = mount(FilterPopover, { props: { start: { ...defaultFilters(), ...day(d), rangeRel: '' }, active: true } })
+    expect(dates(w)).toEqual([d, d])
+    expect((w.find('input.rangefield').element as HTMLInputElement).value).toBe(new Date(`${d}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }))
+    expect(w.emitted('apply')).toBeUndefined() // showing it changes nothing: no apply until the viewer edits a date
+  })
+  it('a UTC-day range still shows its own UTC dates', () => {
+    const w = mount(FilterPopover, { props: { start: { ...defaultFilters(), since: '2026-03-08T00:00:00.000Z', until: '2026-03-09T23:59:59.999Z', rangeRel: '' }, active: true } })
+    expect(dates(w)).toEqual(['2026-03-08', '2026-03-09'])
   })
 })

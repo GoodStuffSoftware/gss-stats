@@ -43,8 +43,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
 
 ## Features
 
-- **Best Sudoku / Overview** — the Best Sudoku group's first page: today-at-a-glance KPI tiles (vs the same
-  time yesterday and the 7-day average), the **Overall timeline**, a campaign scorecard, and a
+- **Best Sudoku / Overview** — the Best Sudoku group's first page: today-at-a-glance KPI tiles (today so far, with
+  "vs yesterday" and "vs 7d avg" arrows at the same clock time, except for counts-only rows: see *KPI
+  tiles for counts-only rows* below), the **Overall timeline**, a campaign scorecard, and a
   release before/after panel — each its own movable/editable widget. The KPI tiles and the
   scorecard are **metric cards** (presets `bsk-kpis` and `campaign-scorecard`, see *One metrics
   registry* below), and so is the release panel (preset `release-before-after`: the newest release
@@ -70,8 +71,11 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   site and the installed app (`bestsudoku-app`) alike, from its attribution start (each counts
   its own installs, so a phone that used both counts once on each). After the
   campaigns comes one more row, "Organic (web)": the `/return/organic/` rows the web site sends
-  for untagged visitors, with no start bound and never app rows, as a baseline to read the
-  campaigns against; it stays hidden until its d0 count is above zero. It never enters the
+  for untagged visitors, never app rows, as a baseline to read the
+  campaigns against. Organic means a device's first-ever web visit with no utm and no ad click id
+  (so a gclid visit is not organic); first touch wins, and a malformed utm counts as neither. Organic
+  and campaign d0 are disjoint. It is tracked from v1.98.0 (2026-10-03): earlier ranges read "not yet
+  tracking", and after that it stays hidden until its d0 count is above zero. It never enters the
   site-wide "Return visits (day 1+)" tile or the routine's site-wide arrivals, which stay
   tagged-only. Return rows are counts
   only — never split by hour, place or device. "Arrivals by ET hour of day" and "Daily
@@ -173,6 +177,11 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   first save of a newer version first copies the previous stored layout to
   `dashboard:default:backup:v<old version>` in KV ([`functions/api/config.ts`](functions/api/config.ts)),
   once, so a migration can be rolled back by copying that key over `dashboard:default`.
+  A tab saves only after it has read the stored layout ([`src/api.ts`](src/api.ts) `loadConfig`
+  resolves to `null` only when nothing is stored yet): if the read fails — no answer, a non-2xx,
+  or a body that isn't a layout or can't be normalized — it shows the built-in defaults under a "Couldn't load your saved
+  layout" banner, labels edits "Not saved", and sends no save until **Try again** reads the layout
+  (which replaces the defaults and any edits made on them). A `401` shows the sign-in banner instead.
 - **Page navigation** — every page belongs to a **group** (`DashboardPage.group`, a plain
   string: "All sites", "Best Sudoku", "Mine", …, so a new product is just a new group). The
   default page, **★ Overview** (all-sites traffic), is shown pinned first, outside the groups,
@@ -286,6 +295,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   (`MAX_DRILL_DEPTH`; beyond that a drill attaches to the deepest page allowed). Every load
   repairs the tree: a link to a missing page, to itself or closing a loop is dropped, and a tree
   deeper than 8 is re-attached (`normDrillLinks`).
+  Clicking a day on a trend chart opens that day as an absolute date range: the UTC day for a
+  `date` chart, and for a `dateEt` chart (the default trends) the Eastern day, from ET midnight to
+  the next ET midnight (23 or 25 hours on a daylight-saving change). The footer and the date pickers show that one Eastern date.
 - **Exclusions** (global across pages) — hide self-referrals, hide your own visits by
   browser+OS, and an **"exclude this device"** opt-out that works on every site (see
   [gss-beacon](https://github.com/GoodStuffSoftware/gss-beacon)).
@@ -445,7 +457,7 @@ Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats
   `POST /api/metrics` answers a batch of registry ids and params (never SQL): it validates every
   id and param against the registry, plans the distinct facts (at most 40 statements, else `413`
   with `maxStatements`), caches each fact on its own in the Cache API, and derives every value in
-  JS with its status (`ok`, `too-few`, `no-data`, `unmeasured`, `partial`), n/d, deltas and a
+  JS with its status (`ok`, `too-few`, `no-data`, `unmeasured`, `partial`), n/d, deltas (or whole-day context, see *KPI tiles for counts-only rows* below) and a
   provisional flag for lagged outcomes. Windows are the campaign's attribution window, today so
   far, the page range, the compared release's before/after windows (sized by one cached first-hit
   read), and a campaign's pre/post segments at the signed-out upsell fix (only once that fix is
@@ -453,7 +465,20 @@ Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats
   (`{ preset }` from [`src/lib/metrics/presets.ts`](src/lib/metrics/presets.ts), or a saved spec)
   shows `MetricCard` ([`src/components/metrics/`](src/components/metrics)) — one batched request
   per page, following the page's date range and sites, with each card's caveats behind one
-  collapsed "Notes" link and "Updated Xs ago" with ↻ where the card asks for it. The Overview's
+  collapsed "Notes" link and "Updated Xs ago" with ↻ where the card asks for it. **When data
+  loads:** on mount, when the range or a filter changes, on the ↻ / Refresh buttons, and when you
+  come back to the tab (the tab turns visible or the window regains focus; one page-level listener,
+  [`useReturnRefresh`](src/composables/useReturnRefresh.ts)). That last refetch is throttled — a
+  card reloads only if its last load is a minute or more old and none is in flight (a request
+  still running after 30 s counts as hung and no longer blocks it), never while the tab is hidden
+  — and is an ordinary request (never `fresh`); metric cards go out as the usual batched
+  `POST /api/metrics`, and a failed refetch keeps the numbers already on screen. It is not free:
+  the edge cache below only answers a return within its 90 s window of the last load, so a return
+  after more than 90 s reads D1 again, and `/api/popups` and `/api/ads/readings` are never cached
+  (cost: [docs/capacity.md](docs/capacity.md)). There is no polling: a tab that stays in the
+  foreground never updates itself, and a relative range such as "last 7 days" is resolved when the
+  page loads, so a tab left open past midnight refetches the same window until it is reloaded.
+  The Overview's
   "Today at a glance" and campaign scorecard are cards since layout version 10. **Cards are
   editable**: "Add chart" offers a metric card as a chart type, and editing one — a new card or
   an existing "Today at a glance"/scorecard — opens a card builder in place of the usual chart
@@ -465,7 +490,9 @@ Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats
   opens showing all of its settings read-only; **Customize…** copies them into an editable card,
   where every template field has a control (badge colours, card actions, note variables, a
   repeat's ids and empty message, table headings, gating) and using a control without changing it
-  leaves the card exactly as it was.
+  leaves the card exactly as it was. A card the builder saves always loads again: it holds the
+  same size limits loading checks (up to 32 badge colours, for one), and a note id from a newer
+  version is kept as saved and shows nothing until this version knows it.
 - **Two datasets, one dashboard.** RUM (sampled, human-only) and the beacon (every
   real load, sub-country geo) are charted side by side; they're independent and never
   summed.
@@ -516,14 +543,18 @@ first-session funnel; `/api/popups` never counts them. `/tour/start` and `/tour/
 part of the rule. The metric cards follow the same rule: in a country cell (`campaign-country`)
 these rows belong to no country, so they count only where no country is asked, and
 `campaign.completions` takes no `country` param at all. `/api/popups` and the ads-read
-routine's hourly site-event read and per-country read leave them out too. The guard keys on dimensions and drills
-only; the chart's own date range is not yet clamped to whole days. One visible effect: the **Arrivals by ET hour of day** chart no longer counts an arrival
+routine's hourly site-event read and per-country read leave them out too. The guard keys on dimensions and drills;
+a date range that is not whole ET days is handled by the whole-days rule below. One visible effect: the **Arrivals by ET hour of day** chart no longer counts an arrival
 whose first beacon was a return or completion row, so its total can sit slightly below the
-flight-day chart's. Another: the default **Pageviews over time** (Beacon page) and **Visits over
-time** (Best Sudoku · Traffic) trends group by the UTC `date`, so they no longer count these rows
-and always carry the caption; with event beacons excluded (their default) no row drops, because
-every refused path is already on the event-beacon list, so only the caption appears.
-Charts by `dateEt` are unchanged. The "hide known test and household traffic" filter is
+flight-day chart's. A chart that groups by the UTC `date` counts without these rows and carries the
+caption; with event beacons excluded (their default) the only rows that would drop are refused rows
+not on the event-beacon list, and there are none since game starts joined it. The default **Pageviews over
+time** (Beacon page) and **Visits over time** (Best Sudoku · Traffic) trends group by `dateEt`
+since layout version 15, so they count every row and carry no caption: layout version 15 moves a
+stored copy of either from `date` to `dateEt` once, only when it is still exactly the shipped
+default (same dataset, title, type, metric, limit and release markers, any id or position; the
+match is a frozen copy of what v14 stored, not the current factories), and a chart with any other
+title or setting keeps its axis. Charts by `dateEt` are unchanged. The "hide known test and household traffic" filter is
 unchanged. The guard's path patterns are inlined as SQL literals, so it costs no D1 bound
 parameters; the heaviest in-cap `/api/geo` shapes tested bind at most 97 of D1's 100.
 
@@ -534,8 +565,42 @@ arrival an arrival (`arrival` dimension, the Arrivals tiles and charts), and the
 flight start, a release, a fix go-live or an ET day boundary (the metric registry's segment and
 day indices, the routine's hour buckets cut only at such instants), which is never an
 hour-of-day split. The routine's Play line names only the ET date of the first or last
-`/return/` row, never its time; clamping a sub-day range to whole days is the next slice. See
+`/return/` row, never its time. See
 [`src/lib/splitGuard.ts`](src/lib/splitGuard.ts).
+
+**A date range that is not whole ET days counts these rows over whole ET days.** Otherwise
+three back-to-back one-hour ranges would read the rows back hour by hour. Each bound of the
+range moves to the nearest ET midnight (an exact tie, noon, goes to the later one) for these
+rows only; every other row keeps the exact range. Nearest is Mike's ruling (2026-10-03); the
+two other rules (outward: widen to the whole days touched; inward: shrink to the whole days
+inside) stay one constant away (`REFUSED_WINDOW_SNAP`). When the bounds meet, as for most
+ranges shorter than a day, these rows count zero. A range already on ET midnights (the date
+picker's ET days, a whole-day preset) runs exactly as before. Charts, `/api/completions` and
+the metric cards' page range (`window: 'page'`, sparkline days included) all follow it and say
+so in a caption: "Any return, game-start, completion, tutorial-completion or tour-exit rows
+here are counted over whole ET days." A chart shows it only when it can count one of those
+rows, so never under a path or path-family filter none of them matches (a site filter does not
+narrow it: it errs toward showing). A chart that leaves event beacons out (the default) counts none of them, since
+game starts are event beacons too, so it shows no caption. Rolling presets (last 24 hours, last
+7 days) are rarely on ET midnights, so most Best Sudoku views that count those rows carry it. It adds no D1 bound
+parameters. Today's totals stay live (ruling 2026-10-03), so polling a running total still
+shows when it grew; only shrinking to whole days and holding the open day would close that, and
+live data was chosen over it.
+
+**KPI tiles for counts-only rows show whole days, not same-time arrows.** A "today so far" count
+tile normally compares today against the same clock time yesterday and over the 7 days before
+(`vs yesterday`, `vs 7d avg`). For a metric that can count one of the counts-only rows above, that
+comparison would give a closed day's count up to a clock time, an hour-of-day split of those rows
+read after the fact. So the data layer (`bskKpiDays`) counts them over whole ET days (a same-time
+flag is always off for them), and the tile shows one plain line instead of arrows: "Yesterday
+1,234 · 7-day avg 1,180/day", yesterday's full ET-day total and the average over the 7 full ET days
+before today (a whole number from 10 up, one decimal below; the two "delta" checkboxes in the
+editor pick which part shows). **Best Sudoku Page views follows this rule** because it has not opted out of the counts-only
+rule. Its path filter already leaves out the lower-case counts-only paths, so the only such rows it
+can still include are malformed upper-case variants. A metric that never counts them (`countsRefused: false`: auth successes,
+game views, pop-up shown and accepted, and so on) keeps its same-time arrows unchanged. Like the
+arrows, the whole-day figures follow neither the page's date range nor its filters: they depend
+on today's ET date alone.
 
 **Every stored geo-beacon column is a chartable dimension AND a filter.** `functions/api/geo.ts`
 whitelists every analytic `hits` column (`GEO_DIMS`) — region/city/postal/country/continent/
@@ -1060,7 +1125,10 @@ code: a layout still stored at v8 when v11 ships is backed up as `backup:v8`, on
 as `backup:v10`. Production is stored at v12 when layout version 13 (page navigation) ships, so
 its first v13 save writes `backup:v12`. Layout version 14 (sparklines) is a save-guard bump
 only: its first save over a stored v13 writes `backup:v13`, and rolling the code back past it
-needs `backup:v13` restored (same steps below, with that key). A tab still
+needs `backup:v13` restored (same steps below, with that key). Layout version 15 (the default
+trend charts on `dateEt`) rewrites the dimension of those untouched charts: its first save over a
+stored v14 writes `backup:v14`, and rolling the code back past it needs `backup:v14` restored.
+A tab still
 running older code gets `409` ("This tab is out of date, reload") instead of overwriting a
 newer layout.
 

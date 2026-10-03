@@ -2,11 +2,11 @@
 import { reactive, ref, watch, watchEffect, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import type { DashboardConfig, DashboardPage, Widget, GlobalFilters } from './types'
 import { defaultConfig, normalizeConfig, defaultWidgetsForPage, clonePage, cryptoId, isBestSudokuLaunchPage, isBestSudokuPopupsPage, isCampaignComparePage, BEST_SUDOKU_SITES, beaconizeWidget, cleanGroupName, cleanPageName } from './lib/defaults'
-import { rangeLabel, ymdRangeToISO } from './lib/range'
-import { loadConfig, saveConfig } from './api'
+import { rangeLabel, dayDrillRange } from './lib/range'
+import { loadConfig, saveConfig, ConfigLoadError } from './api'
 import { loadSites, sitesTree, tokenLabel } from './sitesStore'
 import { isSiteDim, semanticKey, drillNeedsEventBeacons } from './lib/drill'
-import { sessionExpired, reauth } from './session'
+import { sessionExpired, reauth, checkSessionExpired } from './session'
 import { readViewerPrefs, writeViewerPrefs, initialPageId, readDarkPref, writeDarkPref } from './lib/viewerPrefs'
 import { rootOf, drillTrail, drillParentFor, groupLandingPage, pagesToDelete, movePageToGroup, landingAfterDelete, orderedGroups, pathLabel, renameGroup, deleteGroup, type GroupResult, type RenameTarget } from './lib/nav'
 import { applyGroupDraft, applyPageDraft, type GroupDraft, type PageDraft } from './lib/wizards'
@@ -30,7 +30,7 @@ const config = reactive<DashboardConfig>(defaultConfig())
 const loaded = ref(false)
 const editing = ref<{ widget: Widget; isNew: boolean } | null>(null)
 const dark = ref(false)
-const saveState = ref<'idle' | 'saving' | 'saved' | 'error' | 'stale'>('idle')
+const saveState = ref<'idle' | 'saving' | 'saved' | 'error' | 'stale' | 'blocked'>('idle')
 
 // The page currently being viewed/edited — per VIEWER (layout version 13): remembered in this
 // browser (lib/viewerPrefs.ts), never written to the shared config, so switching pages costs no KV
@@ -74,8 +74,40 @@ onMounted(async () => {
 
   // Load the durable config and the auto-built site tree in parallel; the tree must
   // be ready before charts fetch so the real-host allow-list applies from the start.
-  const [stored] = await Promise.all([loadConfig(), loadSites()])
-  const norm = normalizeConfig(stored ?? config)
+  const [stored] = await Promise.all([readStoredLayout(), loadSites()])
+  // A failed load still shows the built-in defaults (the charts work), but saving stays off
+  // until "Try again" reads the stored layout.
+  loadFailed.value = stored === LOAD_FAILED
+  applyLayout(stored === LOAD_FAILED ? normalizeConfig(defaultConfig()) : stored)
+  await nextTick()
+  // What the store holds as far as this tab knows: a save only goes out when the config differs.
+  lastPersisted = configJson(config)
+  loaded.value = true
+  if (!loadFailed.value) rememberActivePage()
+})
+
+// ── Loading the stored layout ─────────────────────────────────────────────────
+// A tab that could not read the stored layout must never save: what it shows (the built-in
+// defaults) is not what the store holds, so its first save would overwrite the real layout.
+// loadConfig throws on every failure (network, 401, 5xx, a body that is not a layout); only a
+// server answer of "nothing stored" resolves to null, and then the defaults are the layout.
+// Normalizing happens inside the same guard: a stored layout that passes loadConfig's shape check
+// but cannot be normalized (e.g. a null page) is a failed load too, not a dead editor.
+const loadFailed = ref(false)
+const retryingLoad = ref(false)
+const LOAD_FAILED = Symbol('load failed')
+async function readStoredLayout(): Promise<DashboardConfig | typeof LOAD_FAILED> {
+  try {
+    return normalizeConfig((await loadConfig()) ?? defaultConfig())
+  } catch (e) {
+    // No answer at all can be an expired Cloudflare Access session (its sign-in redirect fails as a
+    // network error): the same confirming probe as every data fetch raises the sign-in banner.
+    if (e instanceof ConfigLoadError && e.reason === 'network') void checkSessionExpired()
+    return LOAD_FAILED
+  }
+}
+/** Put an already-normalized layout on screen. */
+function applyLayout(norm: DashboardConfig) {
   config.version = norm.version
   config.activePageId = norm.activePageId
   config.pages = norm.pages
@@ -83,13 +115,39 @@ onMounted(async () => {
   config.groupMeta = norm.groupMeta
   config.groupOrder = norm.groupOrder
   activePageId.value = initialPageId(norm.pages, readViewerPrefs(), norm.activePageId)
-
-  await nextTick()
-  // What the store holds as far as this tab knows: a save only goes out when the config differs.
-  lastPersisted = configJson(config)
-  loaded.value = true
-  rememberActivePage()
-})
+}
+// "Try again" on the load-failed banner. A successful read replaces whatever is on screen with the
+// stored layout (edits made on the stand-in defaults were never saved and are dropped) and turns
+// saving back on; a failed one leaves everything as it was, saving still off.
+async function retryLoad() {
+  if (retryingLoad.value) return
+  retryingLoad.value = true
+  try {
+    clearTimeout(saveTimer)
+    const stored = await readStoredLayout()
+    if (stored === LOAD_FAILED) return
+    // An editor, rename, menu or dialog open on the stand-in points at pages and widgets of a layout
+    // that is about to go away; close them all.
+    editing.value = null
+    renaming.value = null
+    groupToDelete.value = null
+    iconFor.value = null
+    pageMenu.value = null
+    drillMenu.value = null
+    // What keeps the stand-in from being saved: lastPersisted becomes the stored layout before
+    // loadFailed clears, and every save path compares against lastPersisted, so the first save
+    // after a retry can only be a real edit of the stored layout. The nextTick only lets the config
+    // watcher run while saving is still off; the ordering around it is not load-bearing.
+    applyLayout(stored)
+    await nextTick()
+    lastPersisted = configJson(config)
+    saveState.value = 'idle'
+    loadFailed.value = false
+    rememberActivePage()
+  } finally {
+    retryingLoad.value = false
+  }
+}
 
 // Remember this viewer's page (and the page they last viewed in its group, which picking that
 // group opens) in this browser only.
@@ -102,7 +160,7 @@ function rememberActivePage() {
   writeViewerPrefs(prefs)
 }
 watch(activePageId, () => {
-  if (loaded.value) rememberActivePage()
+  if (loaded.value && !loadFailed.value) rememberActivePage()
 })
 
 // ── Persistence (debounced) ───────────────────────────────────────────────────
@@ -129,10 +187,18 @@ function configJson(c: DashboardConfig): string {
     return key === 'moved' && this && typeof this === 'object' && 'i' in this && 'x' in this ? undefined : value
   })
 }
+// Saving is off until the stored layout has been read, while signed out, and after a failed load
+// (until "Try again" succeeds): in each case the config on screen is not what the store holds.
+function canSave(): boolean {
+  return loaded.value && !loadFailed.value && !sessionExpired.value
+}
 function scheduleSave() {
-  // Never save while signed out: a config that fell back to defaults because the load
-  // was refused must not overwrite the stored one.
-  if (!loaded.value || sessionExpired.value) return
+  if (!canSave()) {
+    // An edit on the stand-in layout after a failed load is never sent; say so instead of
+    // dropping it silently (the banner explains why and offers "Try again").
+    if (loaded.value && loadFailed.value) saveState.value = configJson(config) === lastPersisted ? 'idle' : 'blocked'
+    return
+  }
   // Nothing differs from what the server holds (or is about to): no save, and no "saving" flash.
   // A timer from an earlier edit still runs, and settles the label if it finds nothing to send.
   if (configJson(config) === (inFlightBody ?? lastPersisted)) {
@@ -152,6 +218,11 @@ function scheduleSave() {
 const KEEPALIVE_MAX_BYTES = 60_000
 async function flushSave(unloading = false) {
   saveTimer = undefined // the timer has fired (or been cleared): no edit is pending any more
+  // The same gate again at send time: nothing scheduled earlier may PUT once saving is off.
+  if (!canSave()) {
+    if (saveState.value === 'saving') saveState.value = loadFailed.value ? 'blocked' : 'error'
+    return
+  }
   if (inFlightBody !== null) {
     putQueued = true
     return
@@ -199,7 +270,15 @@ onBeforeUnmount(() => {
 })
 
 const saveLabel = computed(
-  () => ({ idle: '', saving: 'Saving…', saved: 'Saved', error: 'Save failed', stale: 'This tab is out of date, reload' })[saveState.value],
+  () =>
+    ({
+      idle: '',
+      saving: 'Saving…',
+      saved: 'Saved',
+      error: 'Save failed',
+      stale: 'This tab is out of date, reload',
+      blocked: 'Not saved',
+    })[saveState.value],
 )
 
 // ── Page operations ───────────────────────────────────────────────────────────
@@ -609,10 +688,12 @@ function openFilteredPage() {
   clone.parentId = parent.id
   clone.group = root.group
   delete clone.icon
-  if (p.dimension === 'date') {
+  const dayRange = dayDrillRange(p.dimension, p.value)
+  if (dayRange) {
     // A day isn't a filterable field (see geo.ts) — turn it into an absolute one-day RANGE
-    // instead of a drill constraint. p.value is 'YYYY-MM-DD' (from date(ts/1000,'unixepoch')).
-    const { since, until } = ymdRangeToISO(p.value, p.value)
+    // instead of a drill constraint. p.value is 'YYYY-MM-DD': a UTC day for 'date'
+    // (date(ts/1000,'unixepoch')), an ET day (ET midnight to the next ET midnight) for 'dateEt'.
+    const { since, until } = dayRange
     clone.filters.since = since
     clone.filters.until = until
     clone.filters.rangeRel = '' // absolute range — don't recompute a rolling window on load
@@ -827,6 +908,11 @@ function toggleDark() {
     <div v-if="sessionExpired" class="reauth-banner">
       <span>Your sign-in session expired — the dashboard can't reach the data.</span>
       <button class="btn btn-primary" @click="reauth">Sign in again</button>
+    </div>
+    <!-- A failed layout load (signed-out has its own banner above): saving is off until it loads. -->
+    <div v-else-if="loadFailed" class="reauth-banner load-failed-banner" role="alert">
+      <span>Couldn't load your saved layout — showing the default one. Changes made now aren't saved, and are replaced when your layout loads.</span>
+      <button class="btn btn-primary" :disabled="retryingLoad" @click="retryLoad">{{ retryingLoad ? 'Loading…' : 'Try again' }}</button>
     </div>
     <header class="topbar">
       <h1 class="visually-hidden">Stats</h1>
@@ -1390,7 +1476,8 @@ function toggleDark() {
 .save-state.saved {
   color: #6a994e;
 }
-.save-state.error {
+.save-state.error,
+.save-state.blocked {
   color: #bc4749;
 }
 .grid-area {

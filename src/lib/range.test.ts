@@ -2,11 +2,15 @@
 // midnight of the earliest configured flight start to now, which grows instead of rolling.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  dayDrillRange,
+  etDayOfRange,
+  etDayRangeToISO,
   firstCampaignStartMs,
   isSinceFirstCampaign,
   isSinceFirstUntilLastCampaign,
   lastCampaignEndMs,
   rangeLabel,
+  rangeToYmd,
   relativeRange,
   SINCE_FIRST_CAMPAIGN,
   SINCE_FIRST_UNTIL_LAST_CAMPAIGN,
@@ -113,5 +117,94 @@ describe('since first campaign until last campaign ends', () => {
   it('labels itself "Since first campaign" too, not a calendar range', () => {
     const r = relativeRange(SINCE_FIRST_UNTIL_LAST_CAMPAIGN)!
     expect(rangeLabel(r.since, r.until, SINCE_FIRST_UNTIL_LAST_CAMPAIGN)).toBe('Since first campaign')
+  })
+})
+
+describe('ET-day drill range (a click on a dateEt bucket)', () => {
+  const ms = (iso: string) => Date.parse(iso)
+  const hours = (r: { since: string; until: string }) => (ms(r.until) + 1 - ms(r.since)) / 3_600_000
+
+  it('a normal day runs from ET midnight to the next ET midnight (24 h, EDT)', () => {
+    expect(etDayRangeToISO('2026-06-15')).toEqual({ since: '2026-06-15T04:00:00.000Z', until: '2026-06-16T03:59:59.999Z' })
+    expect(hours(etDayRangeToISO('2026-06-15'))).toBe(24)
+    expect(etDayRangeToISO('2026-01-15')).toEqual({ since: '2026-01-15T05:00:00.000Z', until: '2026-01-16T04:59:59.999Z' }) // EST
+  })
+  it('the spring-forward day is 23 h: it starts on EST and ends on EDT midnight', () => {
+    // 2026-03-08, the second Sunday of March: 02:00 EST jumps to 03:00 EDT.
+    const r = etDayRangeToISO('2026-03-08')
+    expect(r).toEqual({ since: '2026-03-08T05:00:00.000Z', until: '2026-03-09T03:59:59.999Z' })
+    expect(hours(r)).toBe(23)
+  })
+  it('the fall-back day is 25 h: it starts on EDT and ends on EST midnight', () => {
+    // 2026-11-01, the first Sunday of November: 02:00 EDT falls back to 01:00 EST.
+    const r = etDayRangeToISO('2026-11-01')
+    expect(r).toEqual({ since: '2026-11-01T04:00:00.000Z', until: '2026-11-02T04:59:59.999Z' })
+    expect(hours(r)).toBe(25)
+  })
+  it('consecutive ET days tile with no gap and no overlap, across both DST changes and a year end', () => {
+    for (const [a, b] of [['2026-03-07', '2026-03-08'], ['2026-03-08', '2026-03-09'], ['2026-10-31', '2026-11-01'], ['2026-11-01', '2026-11-02'], ['2026-12-31', '2027-01-01']]) {
+      expect(ms(etDayRangeToISO(b).since) - ms(etDayRangeToISO(a).until)).toBe(1)
+    }
+  })
+  it('the drill filter range is the ET day for dateEt, the UTC day for date, and nothing for other dimensions', () => {
+    expect(dayDrillRange('dateEt', '2026-11-01')).toEqual(etDayRangeToISO('2026-11-01'))
+    expect(dayDrillRange('date', '2026-11-01')).toEqual({ since: '2026-11-01T00:00:00.000Z', until: '2026-11-01T23:59:59.999Z' })
+    for (const d of ['hourEt', 'country', 'dateWeek', '']) expect(dayDrillRange(d, '2026-11-01'), d).toBeNull()
+  })
+  it('an instant just inside either edge of the ET day is in the range, the instants just outside are not', () => {
+    const r = dayDrillRange('dateEt', '2026-03-08')!
+    // `until` is EXCLUSIVE wherever the server reads it (ts < until), like the UTC path's 23:59:59.999Z.
+    const inside = (t: number) => t >= ms(r.since) && t < ms(r.until)
+    expect(inside(ms('2026-03-08T05:00:00.000Z'))).toBe(true) // 00:00 EST
+    expect(inside(ms('2026-03-09T03:59:59.998Z'))).toBe(true) // 23:59:59.998 EDT
+    expect(inside(ms('2026-03-09T03:59:59.999Z'))).toBe(false) // 23:59:59.999 EDT: the last millisecond is dropped, as on the UTC path
+    expect(inside(ms('2026-03-08T04:59:59.999Z'))).toBe(false) // 23:59:59.999 EST the day before
+    expect(inside(ms('2026-03-09T04:00:00.000Z'))).toBe(false) // 00:00 EDT the next day
+  })
+  it('a malformed dateEt key is no drill (null), never a throw; the date and other dimensions are as before', () => {
+    for (const bad of ['', 'abc', '2026-13-45', '2026-02-31', '2026-3-8', '2026-03-08T00:00', ' 2026-03-08']) {
+      expect(() => dayDrillRange('dateEt', bad), bad).not.toThrow()
+      expect(dayDrillRange('dateEt', bad), bad).toBeNull()
+    }
+    expect(dayDrillRange('dateEt', '2026-02-28')).not.toBeNull()
+    expect(dayDrillRange('dateEt', '2028-02-29')).not.toBeNull() // a leap day is a real date
+  })
+})
+
+describe('the label and date pickers of an ET-day range name that one ET day', () => {
+  const label = (day: string) => {
+    const r = etDayRangeToISO(day)
+    return rangeLabel(r.since, r.until)
+  }
+  it('a normal day, either side of DST, and a year end read as the single ET date', () => {
+    expect(label('2026-06-15')).toBe('Jun 15') // EDT
+    expect(label('2026-01-15')).toBe('Jan 15') // EST
+    expect(label('2026-12-31')).toBe('Dec 31') // its end falls on Jan 1 UTC
+  })
+  it('the spring-forward day (23 h) is "Mar 8", not "Mar 8 – Mar 9"', () => {
+    expect(label('2026-03-08')).toBe('Mar 8')
+    expect(etDayOfRange('2026-03-08T05:00:00.000Z', '2026-03-09T03:59:59.999Z')).toBe('2026-03-08')
+  })
+  it('the fall-back day (25 h) is "Nov 1", not "Nov 1 – Nov 2"', () => {
+    expect(label('2026-11-01')).toBe('Nov 1')
+    expect(etDayOfRange('2026-11-01T04:00:00.000Z', '2026-11-02T04:59:59.999Z')).toBe('2026-11-01')
+  })
+  it('a UTC day, a rolling window, a two-ET-day span and a day off by a millisecond keep their UTC label', () => {
+    expect(rangeLabel('2026-03-08T00:00:00.000Z', '2026-03-08T23:59:59.999Z')).toBe('Mar 8 – Mar 8')
+    expect(rangeLabel('2026-06-01T00:00:00.000Z', '2026-06-26T23:59:59.999Z')).toBe('Jun 1 – Jun 26')
+    expect(rangeLabel('2026-03-08T05:00:00.000Z', '2026-03-10T03:59:59.999Z')).toBe('Mar 8 – Mar 10')
+    expect(etDayOfRange('2026-03-08T05:00:00.000Z', '2026-03-09T04:00:00.000Z')).toBeNull() // ends at the next midnight itself
+    expect(etDayOfRange('2026-03-08T05:00:00.001Z', '2026-03-09T03:59:59.999Z')).toBeNull()
+    expect(etDayOfRange('2026-03-08', '2026-03-08')).toBeNull() // legacy day values
+    expect(etDayOfRange('nope', 'nope')).toBeNull()
+  })
+  it('the date pickers show the ET day on both sides of an ET-day range, and the UTC dates otherwise', () => {
+    for (const day of ['2026-03-08', '2026-11-01', '2026-06-15', '2026-12-31']) {
+      const r = etDayRangeToISO(day)
+      expect(rangeToYmd(r.since, r.until), day).toEqual({ from: day, to: day })
+    }
+    expect(rangeToYmd('2026-03-08T00:00:00.000Z', '2026-03-08T23:59:59.999Z')).toEqual({ from: '2026-03-08', to: '2026-03-08' })
+    expect(rangeToYmd('2026-06-01T00:00:00.000Z', '2026-06-26T23:59:59.999Z')).toEqual({ from: '2026-06-01', to: '2026-06-26' })
+    expect(rangeToYmd('2026-03-08T05:00:00.000Z', '2026-03-10T03:59:59.999Z')).toEqual({ from: '2026-03-08', to: '2026-03-10' })
   })
 })

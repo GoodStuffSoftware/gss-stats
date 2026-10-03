@@ -30,13 +30,56 @@
 //     a /return/<uc>/d0 row is an arrival — so blanking either would change arrival counts and
 //     break their parity with the KPI fact. The free `visitor` geo dimension stays refused: no
 //     chart needs it as a split of its own.
-//   - Segment and day cuts finer than an ET day in lib/metrics/facts.ts (`s`, `d`, `pf`, `uf`)
-//     and the routine's hour buckets on campaign-attributed rows: each is a fixed instant
-//     (a go-live, a flight boundary, a fix, an ET midnight or the same time on an earlier day)
-//     that a count is cut at, never an hour-of-day split shown to anyone. Clamping sub-day
-//     windows over refused rows to whole ET days is R-1d.
+//   - Segment and day cuts finer than an ET day in lib/metrics/facts.ts, and the routine's hour
+//     buckets on campaign-attributed rows: see SEGMENT CUTS below.
+//
+// SUB-DAY WINDOWS (R-1d). A since/until window that is not whole ET days would cut refused rows
+// at an hour the caller picks: three consecutive one-hour windows would read back per-hour counts.
+// So a query over a table that holds refused rows counts them over whole ET days
+// (refusedWindowClause, refusedRowWindow) and every other row over the exact window. Every
+// refused window is [ET midnight, ET midnight), so any refused count a caller can get is a sum of
+// whole ET-day totals, which A1 allows. The snap direction is ONE constant, REFUSED_WINDOW_SNAP:
+//   - 'nearest' (Mike's ruling, 2026-10-03, shipped): each bound goes to the closest ET
+//     midnight, by absolute distance to the one before and the one after (so 23 h and 25 h DST
+//     days need no special case); an exact tie goes to the later midnight. The date picker sends
+//     UTC 00:00 to 23:59:59.999Z, so a picked calendar day maps to the same-date ET day.
+//   - 'outward': the ET midnight at or before since, and the one at or after until.
+//   - 'inward': the first ET midnight at or after since, and the last one at or before until.
+// In every mode an empty snapped window (from >= to) counts ZERO refused rows. A window already on
+// ET midnights takes the unchanged path: same SQL, same binds, same cache key as before R-1d.
+// Applied by functions/api/geo.ts (every branch, unless the split guard already leaves refused
+// rows out), functions/api/completions.ts (every row is refused) and the /api/metrics `page`
+// window (facts.ts bskRangePath and its daily twin bskRangeDaily, so a sparkline's days match
+// its tile; the engine adds the 'refused-whole-days' note to every metric that can count a
+// refused row, by MetricDef.countsRefused). /api/popups' hourly read, the metrics pop-up facts
+// (popupRangePath, popupRangeDaily) and the routine's per-hour and per-country reads already
+// leave refused rows out.
+// Today's refused totals stay live (ruling 2026-10-03: no hold until the ET day closes). A hold
+// would cap refusedRowWindow's `to` at the open day's ET midnight; every caller already takes
+// its refused bounds from there.
+//
+// SEGMENT CUTS that stay finer than an ET day, and why (each reviewed for R-1d and kept):
+//   - `s` segments (go-lives, attribution starts, aligned-ratio go-lives): a few fixed registry
+//     instants per deploy. A count split at one constant instant cannot be moved by a caller, so
+//     it cannot build an hour-of-day series.
+//   - The campaign attribution start `ts >= ?` (the noon-ET flight start): one instant per
+//     campaign. A campaign's /return/<uc>/ and tagged rows cannot predate its own link, so the
+//     cut only drops pre-launch QA rows.
+//   - `pf` (install fix) and `uf` (upsell fix): one fixed instant each, a row-exact before/after.
+//   - `d` KPI windows (today so far, and the 7 earlier days): the bounds come from the server
+//     clock, never the caller. The comparison windows now count refused rows over whole ET days:
+//     bskKpiDays' `d` is the ET day index and its `t` same-time flag is always 0 on a refused
+//     row, so the engine reads a refused-row KPI tile as yesterday's full-day total and the 7-day
+//     daily average (MetricValue.wholeDays) and never as a same-time delta. The old same-time
+//     windows gave a closed day's count up to a clock time, readable after the fact at any hour,
+//     which is an hour-of-day split of refused rows. Today so far is the open ET day's running
+//     total, which "ET-day totals are fine" allows. Residual (worth knowing): polling any running
+//     total over a day shows when it grew. Only inward snapping plus holding the open day's
+//     refused totals would close that; Mike chose live data (2026-10-03).
+//   - Flight boundaries (etFlightRangeMs, flightDaySqlCase) are ET days already.
 
-import { sqlLit } from './popupEvents'
+import { addDays, etDateFast, etWallTimeMs } from './etTime'
+import { isPopupEventPath, pathFamilyOf, sqlInt, sqlLit } from './popupEvents'
 
 /** Dimensions that tie a row to an hour, a place or a device. `dateEt` and `flightDay` are ET-day
  * totals and stay allowed; `site` (web vs. app) is a product split, not a device one. */
@@ -119,4 +162,140 @@ export function refusedPathExcludeClause(w: string[], b: unknown[]): void {
   const m = refusedPathMatch()
   w.push(`NOT ${m.sql}`)
   b.push(...m.binds)
+}
+
+// ---- R-1d: whole ET days for refused rows on sub-day windows (header: SUB-DAY WINDOWS) ----
+
+export type RefusedSnap = 'nearest' | 'outward' | 'inward'
+
+/** THE switch. 'nearest' is Mike's ruling (2026-10-03); the other two modes stay buildable. */
+export const REFUSED_WINDOW_SNAP: RefusedSnap = 'nearest'
+
+/** Part of a snapped query's cache key (only when the window actually moved), so changing the
+ * mode never serves an answer cached under another one. */
+export const REFUSED_WINDOW_KEY = `refused-${REFUSED_WINDOW_SNAP}-et-days-v1`
+
+/** The caption a chart shows when its query answered with `meta.refusedWholeDays: true`
+ * (components/ChartCard.vue), worded to fit every snap mode. It names every refused kind and
+ * says "any", since most charts leave the event kinds out unless event beacons are included. */
+export const REFUSED_WHOLE_DAYS_CAPTION =
+  'Any return, game-start, completion, tutorial-completion or tour-exit rows here are counted ' +
+  'over whole ET days.'
+
+/** A path each refused pattern matches, so the pattern can be classified with the JS path helpers
+ * (isPopupEventPath, pathFamilyOf). Every row a pattern matches gets the same answer from both:
+ * each pattern sits wholly inside one POPUP_EVENT_PREFIXES entry. */
+const refusedSamplePath = (pattern: string): string => `${pattern.slice(0, -1)}x`
+
+/** The SPLIT_REFUSED_PATH_PATTERNS a geo query whose window snapped can still count a row of, so
+ * `meta.refusedWholeDays` (the caption) is set only when one can (review of #63, SHOULD-3). A
+ * static check on the request, never on the data: it adds no SQL and no binds, and the snap and
+ * its cache-key marker still follow `moved` alone. It errs toward showing the caption:
+ *   - event beacons excluded (no opt-in, no exclusion-lifting dim): only the patterns
+ *     POPUP_EVENT_PREFIXES does not cover, which is none since `/game/start/` joined it (#52);
+ *   - a `path` filter (`path = ?`, ANDed): only patterns every filter value matches, so a value
+ *     that is not a refused path (isSplitRefusedPath) leaves none;
+ *   - a `pathFamily` filter: only patterns whose family (pathFamilyOf) is the filter value
+ *     (`/game/start/` is 'game-start');
+ *   - a site list or a `site` drill filter narrows nothing: a site other than Best Sudoku that
+ *     sent one of these rows would be counted over whole days too (re-review of #63, NIT-A). */
+export function reachableRefusedPatterns(opts: {
+  eventRowsExcluded: boolean
+  constraints: readonly { field: string; value: string }[]
+}): string[] {
+  return SPLIT_REFUSED_PATH_PATTERNS.filter((pattern) => {
+    const sample = refusedSamplePath(pattern)
+    if (opts.eventRowsExcluded && isPopupEventPath(sample)) return false
+    const prefix = pattern.slice(0, -1)
+    return opts.constraints.every((c) => {
+      if (c.field === 'path') return c.value.replace(/[A-Z]/g, (ch) => ch.toLowerCase()).startsWith(prefix)
+      if (c.field === 'pathFamily') return pathFamilyOf(sample) === c.value
+      return true
+    })
+  })
+}
+
+/** The ET midnight at or before `ms`. ET midnight is never on a DST change (those are at 02:00). */
+function etMidnightFloor(ms: number): number {
+  return etWallTimeMs(etDateFast(ms), '00:00')
+}
+
+/** The ET midnight at or after `ms`. */
+function etMidnightCeil(ms: number): number {
+  const floor = etMidnightFloor(ms)
+  return floor === ms ? ms : etWallTimeMs(addDays(etDateFast(ms), 1), '00:00')
+}
+
+/** The closest ET midnight to `ms` by absolute distance (so 23 h and 25 h days need no special
+ * case); an exact tie goes to the later one. */
+function etMidnightNearest(ms: number): number {
+  const floor = etMidnightFloor(ms)
+  if (floor === ms) return ms
+  const ceil = etMidnightCeil(ms)
+  return ms - floor < ceil - ms ? floor : ceil
+}
+
+/** True when `ms` is an ET midnight. */
+export function isEtMidnight(ms: number): boolean {
+  return Number.isFinite(ms) && etMidnightFloor(ms) === ms
+}
+
+/** Whether [since, until) is already whole ET days (both bounds ET midnights). */
+export function isWholeEtDays(sinceMs: number, untilMs: number): boolean {
+  return isEtMidnight(sinceMs) && isEtMidnight(untilMs)
+}
+
+/** [from, to) that refused rows are counted over for a request window [since, until). Both bounds
+ * are ET midnights; from >= to means the window counts no refused rows. A window that is
+ * non-finite, reversed or already whole ET days comes back unchanged. */
+export function refusedRowWindow(
+  sinceMs: number,
+  untilMs: number,
+  snap: RefusedSnap = REFUSED_WINDOW_SNAP,
+): [number, number] {
+  if (!Number.isFinite(sinceMs) || !Number.isFinite(untilMs) || sinceMs >= untilMs) return [sinceMs, untilMs]
+  if (isWholeEtDays(sinceMs, untilMs)) return [sinceMs, untilMs]
+  if (snap === 'outward') return [etMidnightFloor(sinceMs), etMidnightCeil(untilMs)]
+  if (snap === 'inward') return [etMidnightCeil(sinceMs), etMidnightFloor(untilMs)]
+  return [etMidnightNearest(sinceMs), etMidnightNearest(untilMs)]
+}
+
+/** True when refusedRowWindow moves [since, until) (the caption, note and cache-key marker case). */
+export function refusedWindowMoved(
+  sinceMs: number,
+  untilMs: number,
+  snap: RefusedSnap = REFUSED_WINDOW_SNAP,
+): boolean {
+  const [from, to] = refusedRowWindow(sinceMs, untilMs, snap)
+  return from !== sinceMs || to !== untilMs
+}
+
+/** WHERE terms and binds for [since, until) over a table that holds refused rows. Refused rows
+ * count over refusedRowWindow, every other row over the exact window. Never more binds than the
+ * plain pair:
+ *   - unmoved: exactly ['ts >= ?', 'ts < ?'] / [since, until] (byte-identical to before R-1d);
+ *   - empty refused window: the plain pair plus `NOT <refused>`;
+ *   - otherwise the pair spans both windows and one CASE term picks each row's own window, with
+ *     both windows' bounds inlined as integers (sqlInt; `ts` is an INTEGER column).
+ * `moved` drives the cache-key marker and the metrics note; /api/geo's `meta.refusedWholeDays`
+ * also needs a refused row the query can count (reachableRefusedPatterns). */
+export function refusedWindowClause(
+  sinceMs: number,
+  untilMs: number,
+  snap: RefusedSnap = REFUSED_WINDOW_SNAP,
+): { terms: string[]; binds: number[]; moved: boolean } {
+  const [from, to] = refusedRowWindow(sinceMs, untilMs, snap)
+  if (from === sinceMs && to === untilMs) {
+    return { terms: ['ts >= ?', 'ts < ?'], binds: [sinceMs, untilMs], moved: false }
+  }
+  const m = refusedPathMatch()
+  if (from >= to) return { terms: ['ts >= ?', 'ts < ?', `NOT ${m.sql}`], binds: [sinceMs, untilMs], moved: true }
+  const pick =
+    `(CASE WHEN ${m.sql} THEN (ts >= ${sqlInt(from)} AND ts < ${sqlInt(to)}) ` +
+    `ELSE (ts >= ${sqlInt(sinceMs)} AND ts < ${sqlInt(untilMs)}) END)`
+  return {
+    terms: ['ts >= ?', 'ts < ?', pick],
+    binds: [Math.min(sinceMs, from), Math.max(untilMs, to)],
+    moved: true,
+  }
 }

@@ -684,6 +684,16 @@ export const TOUR_TRACKING_LIVE_AT_ET = '2026-10-03'
 export const TOUR_TRACKING_MARKER_LABEL = 'tutorial + tour exit beacons live'
 export const TOUR_TRACKING_NOTE = 'Tutorial completions (first run vs replay) and tour exits by step went live; the first-run win now offers a counted real game.'
 
+// ── v1.98.0 go-live (2026-10-03T20:35:04Z, 16:35:04 ET) ─────────────────────────────────────
+// Source: the Best Sudoku release owner's 2026-10-03 message: last 1.97.0 response 20:35:02Z, first
+// 1.98.0 response 20:35:04Z; the first-new-response instant is used, as for v1.97.0 above. (v1.97.1
+// was staging-only and never reached prod.) The anonymous organic first-touch return count
+// (`/return/organic/<bucket>`) goes live with it. Organic = a device's first-ever web visit with no
+// utm and no ad click id (gclid etc. do not count as organic); first touch wins, a malformed utm
+// counts as neither. Organic d0 and campaign d0 are disjoint populations. The same release makes
+// starting a real game end the welcome tour. Counts only.
+export const ORGANIC_TRACKING_LIVE_AT = Date.parse('2026-10-03T20:35:04Z')
+
 export const TOUR_EXIT_STEPS = ['preamble', 'hub', 'section'] as const
 export type TourExitStep = (typeof TOUR_EXIT_STEPS)[number]
 /** The run kinds of a `/game/tutorial-complete/<kind>` row. */
@@ -693,7 +703,7 @@ export type TutorialCompleteKind = (typeof TUTORIAL_COMPLETE_KINDS)[number]
 export function isTutorialCompletePath(path: string, kind: TutorialCompleteKind): boolean {
   return path === `/game/tutorial-complete/${kind}`
 }
-/** A `/tour/exit-at/<step>` row, for one step. */
+/** A `/tour/exit-at/<group>` row, for one section group (preamble, hub or section; not a step id). */
 export function isTourExitPath(path: string, step: TourExitStep): boolean {
   return path === `/tour/exit-at/${step}`
 }

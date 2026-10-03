@@ -12,7 +12,7 @@ import type { BeaconRow } from './facts'
 
 const ANDROID = campaignById('24215315197')!
 const ctxFor = (params: MetricCtx['params'] = {}, campaign?: CampaignFlight): MetricCtx => ({ params, campaign, window: 'attribution' })
-const row = (path: string, visitor = 'returning'): BeaconRow => ({ path, visitor, campaign: '', day: 0, seg: 0, pf: null, cb: '', uf: null, c: 1 })
+const row = (path: string, visitor = 'returning'): BeaconRow => ({ path, visitor, campaign: '', day: 0, sameTime: false, seg: 0, pf: null, cb: '', uf: null, c: 1 })
 
 describe('labels, unit words and caveats all live in the notes registry', () => {
   it('every metric and ratio label exists and is a label entry', () => {

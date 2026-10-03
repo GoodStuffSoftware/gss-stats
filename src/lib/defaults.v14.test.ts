@@ -10,13 +10,13 @@ import type { CardSpec } from './metrics/types'
 import PROD_V8 from './__fixtures__/prodLayout.v8.json'
 import PROD_V9 from './__fixtures__/prodLayout.v9.json'
 import PROD_V12 from './__fixtures__/prodLayout.v12.json'
+import { withV15Trends } from './__fixtures__/dateEtTrends'
 
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x))
 
 describe('sparkline layout version', () => {
-  it('the layout versions are exactly 12, 13 and 14, and CONFIG_VERSION is 14', () => {
-    expect(LAYOUT_VERSIONS).toEqual({ compactNoteRow: 12, navigation: 13, sparklines: 14 })
-    expect(CONFIG_VERSION).toBe(14) // a literal on purpose: a mistyped map entry cannot pass by agreeing with itself
+  it('the layout versions 12, 13 and 14 are unchanged (15 is the ET-day trends step: defaults.v15.test.ts)', () => {
+    expect(LAYOUT_VERSIONS).toMatchObject({ compactNoteRow: 12, navigation: 13, sparklines: 14 })
     expect(CONFIG_VERSION).toBeGreaterThanOrEqual(LAYOUT_VERSIONS.sparklines)
     expect(CONFIG_VERSION).toBe(Math.max(...Object.values(LAYOUT_VERSIONS))) // follows the map, never hand-pointed
     expect(LAYOUT_VERSIONS.navigation).toBeGreaterThan(LAYOUT_VERSIONS.compactNoteRow)
@@ -64,8 +64,9 @@ describe('sparkline layout version', () => {
     const mask = (c: unknown) => JSON.stringify(c).replace(/\d{4}-\d\d-\d\dT[\d:.]+Z/g, 'T')
     const stored = { ...clone(nav), version: LAYOUT_VERSIONS.navigation }
     const out = normalizeConfig(clone(stored))
-    expect(out.version).toBe(LAYOUT_VERSIONS.sparklines)
-    expect(mask({ ...out, version: stored.version })).toBe(mask(stored))
+    expect(out.version).toBe(CONFIG_VERSION)
+    // v15 (defaults.v15.test.ts) moves the geo default trends to dateEt; every other widget is as stored.
+    expect(mask({ ...out, version: stored.version })).toBe(mask(withV15Trends(stored)))
   })
 
   describe('a stored sparkline that cannot be drawn degrades to a number, the rest of the card survives', () => {
