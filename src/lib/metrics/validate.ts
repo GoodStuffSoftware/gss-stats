@@ -220,11 +220,6 @@ function withinLimits(v: unknown, depth = 0): boolean {
   return false
 }
 
-/** A widget's saved `card`, normalised on every load (lib/defaults.ts normWidget): absent or
- * not an object → undefined (no card); `{ preset }` → kept by id (an unknown id renders as an
- * unknown card, it is never guessed); `{ spec }` → a plain-JSON copy when it is within
- * CARD_LIMITS and passes validateCard, otherwise the INVALID_CARD_PRESET placeholder. Never
- * throws: stored data can be anything. */
 /** Metrics removed from the registry. A saved custom card (a copy of a preset made before the
  * removal) may still carry an item bound to one; such items are dropped on load, and a section
  * left empty goes with them, so the card loads without it instead of turning invalid. */
@@ -242,6 +237,11 @@ function dropRetiredItems(spec: CardSpec): CardSpec {
   })
   return { ...spec, sections }
 }
+/** A widget's saved `card`, normalised on every load (lib/defaults.ts normWidget): absent or
+ * not an object → undefined (no card); `{ preset }` → kept by id (an unknown id renders as an
+ * unknown card, it is never guessed); `{ spec }` → a plain-JSON copy when it is within
+ * CARD_LIMITS and passes validateCard, otherwise the INVALID_CARD_PRESET placeholder. Never
+ * throws: stored data can be anything. */
 export function normCardRef(raw: unknown): CardRef | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
   const r = raw as Record<string, unknown>

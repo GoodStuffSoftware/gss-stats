@@ -8,7 +8,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ### Removed
 - **The "Deferred completions (EU consent)" tile is gone.** Best Sudoku now sends those games as
-  ordinary completions, so the tile could only read 0; saved copies of it load without the tile.
+  ordinary completions, so the tile could only read 0; saved copies of it load without the tile, and a saved card whose only item was that
+  tile now loads as an invalid card.
 
 ### Fixed
 - **Chart release markers now include v1.95.4 to v1.96.1.** Seven more Best Sudoku releases
