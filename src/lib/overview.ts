@@ -3,7 +3,7 @@
 // lib/popupEvents.ts, which this module builds on rather than duplicates.
 
 import { classifyPopupPath, etDateFromMs, excludeInstallGapUnmeasured, isPopupEventPath, POPUPS } from './popupEvents'
-import { etMidnightUtcMs, applyExclusions, parseReturnPath } from './campaigns'
+import { etMidnightUtcMs, applyExclusions, ORGANIC_ARM_ID, parseReturnPath } from './campaigns'
 
 // ── Row classifiers for the metrics registry (lib/metrics/) ─────────────────────────────
 // Moved here from functions/api/overview.ts (ADR 0003 slice 2) so the registry reuses them
@@ -15,10 +15,11 @@ import { etMidnightUtcMs, applyExclusions, parseReturnPath } from './campaigns'
 export function isEventPath(path: string): boolean {
   return classifyPopupPath(path) !== null || path.startsWith('/return/') || isPopupEventPath(path)
 }
-/** A `/return/<uc>/<bucket>` row for any bucket after d0. */
+/** A `/return/<uc>/<bucket>` row for any bucket after d0, from a tagged campaign link: the
+ * organic baseline's untagged rows (ORGANIC_ARM_ID) are not campaign returns. */
 export function isReturnD1Plus(path: string): boolean {
   const ev = parseReturnPath(path)
-  return !!ev && ev.bucket !== 'd0'
+  return !!ev && ev.bucket !== 'd0' && ev.uc !== ORGANIC_ARM_ID
 }
 /** A "shown" row of any registered pop-up (lib/popupEvents.ts POPUPS). */
 export function isPopupShown(path: string): boolean {

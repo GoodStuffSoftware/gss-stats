@@ -64,10 +64,13 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   and US / CA / Other as columns, each cell a campaign metric with the registry's optional
   `country` param — `campaign-cost` and `campaign-returns` — d0 and each return window's rate,
   dN over d0 with its n/d, as bars side by side. A campaign's return rows count from the web
-  site and the installed app (`bestsudoku-app`) alike, from its attribution start. After the
+  site and the installed app (`bestsudoku-app`) alike, from its attribution start (each counts
+  its own installs, so a phone that used both counts once on each). After the
   campaigns comes one more row, "Organic (web)": the `/return/organic/` rows the web site sends
   for untagged visitors, with no start bound and never app rows, as a baseline to read the
-  campaigns against; it stays hidden until its d0 count is above zero. Return rows are counts
+  campaigns against; it stays hidden until its d0 count is above zero. It never enters the
+  site-wide "Return visits (day 1+)" tile or the routine's site-wide arrivals, which stay
+  tagged-only. Return rows are counts
   only — never split by hour, place or device. "Arrivals by ET hour of day" and "Daily
   arrivals by flight day" are standard geo charts over the same tagged arrivals (filter
   `arrival` = tagged): a breakdown bar of `hourEt` × `campaignFlight`, and a line of

@@ -300,7 +300,8 @@ export function flattenSectionItems(section: Section, outerScope: ScopeInstance,
       const itemScopes = allScopes.filter((s) => !unmeasuredByConfig(item.data, s, item.gating))
       if (!itemScopes.length) {
         if (item.repeat.empty) {
-          const untracked = allScopes.length > 0 && item.repeat.over === 'campaigns' && !!item.repeat.flightingToday
+          // Only campaign instances say "a campaign is flighting"; the organic baseline never does.
+          const untracked = allScopes.some((s) => s.kind === 'campaign') && item.repeat.over === 'campaigns' && !!item.repeat.flightingToday
           out.push({ item, scope: sScope, emptyOf: untracked ? { label: item.repeat.empty.label, text: { note: 'no-tracked-campaign-flighting' } } : item.repeat.empty })
         }
         continue

@@ -23,6 +23,8 @@ import {
 import { bindingSupportsOrganic, validateCard, validateMetricsRequest } from './validate'
 import type { CardSpec, MetricItem } from './types'
 import type { BeaconRow } from './facts'
+import { isReturnD1Plus } from '../overview'
+import { tallySiteFirstSession } from '../adsRules'
 
 const ORGANIC: ScopeInstance = { kind: 'organic' }
 const RETEST = campaignById('24279250691')!
@@ -85,6 +87,7 @@ describe('the server whitelist', () => {
     expect(validateCard(card({ metric: 'bsk.pageviews' }, { over: 'popups', organic: true })).join()).toMatch(/organic is for campaigns/)
     expect(validateCard(card({ metric: 'campaign.returnD0' }, { over: 'campaigns', organic: false })).join()).toMatch(/organic is for campaigns/)
     expect(validateCard(card({ metric: 'campaign.returnD0' }, { over: 'campaigns', ids: [ORGANIC_ARM_ID] })).join()).toMatch(/organic/)
+    expect(validateCard(card({ metric: 'campaign.returnD0' }, { over: 'campaigns', organic: true, flightingToday: true })).join()).toMatch(/flightingToday/)
   })
 })
 
@@ -145,5 +148,21 @@ describe('the organic scope instance', () => {
         expect(b.ok && b.requests[0].ok, item.id).toBe(true)
       }
     }
+  })
+})
+
+describe('the organic rows stay out of the tagged-only site-wide figures', () => {
+  it('the "Return visits (day 1+)" tile counts tagged returns only', () => {
+    expect(isReturnD1Plus('/return/sudoku_funnel_retest/d1')).toBe(true)
+    expect(isReturnD1Plus('/return/organic/d1')).toBe(false)
+    expect(isReturnD1Plus('/return/organic/d2-7')).toBe(false)
+    expect(rowMatcher(METRICS.get('bsk.returnsD1plus')!, { params: {}, window: 'todaySoFar' })(row('/return/organic/d1'))).toBe(false)
+  })
+  it('the routine site-wide first-session arrivals leave organic d0 out', () => {
+    const t = tallySiteFirstSession([
+      { path: '/return/sudoku_funnel_retest/d0', count: 3 },
+      { path: '/return/organic/d0', count: 50 },
+    ])
+    expect(t.steps.arrivals).toBe(3)
   })
 })
