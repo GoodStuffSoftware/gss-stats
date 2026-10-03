@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { chartNotes } from './chartNotes'
+import { allChartNotes, chartNotes, isChartNoteHidden, isNoteIdHideable } from './chartNotes'
 import { getNote } from './notes'
 import { rangeNoticeText, type RangeNotice } from './rangeNotice'
 import { REFUSED_WHOLE_DAYS_CAPTION, SPLIT_GUARD_CAPTION } from './splitGuard'
@@ -44,11 +44,19 @@ describe('chartNotes — order', () => {
   it('lists every source in the fixed order: legacy ids, popup note, split guard, whole days, range notice', () => {
     const data = response({ note: 'A pop-up caveat.', notice }, { splitGuard: true, refusedWholeDays: true })
     const notes = chartNotes(widget({ notes: ['small-sample', 'no-outcome-tracking'] }), data, null)
-    expect(keys(notes)).toEqual(['small-sample', 'no-outcome-tracking', 'popup-note', 'split-guard', 'refused-whole-days', 'range-notice'])
+    expect(keys(notes)).toEqual(['caption:small-sample', 'caption:no-outcome-tracking', 'popup-note', 'split-guard', 'refused-whole-days', 'range-notice'])
   })
 
-  it('the caption-text hook (slice 1c) is empty today: nothing comes before the legacy ids', () => {
-    expect(chartNotes(widget({ notes: ['small-sample'] }), null, null)[0].key).toBe('small-sample')
+  it("the widget's own caption (1c) comes first, before the legacy ids and every caveat", () => {
+    const data = response({ note: 'A pop-up caveat.', notice }, { splitGuard: true, refusedWholeDays: true })
+    const notes = chartNotes(widget({ caption: 'Counts **all** sites.', notes: ['small-sample'] }), data, null)
+    expect(keys(notes)).toEqual(['caption', 'caption:small-sample', 'popup-note', 'split-guard', 'refused-whole-days', 'range-notice'])
+    expect(notes[0]).toEqual({ key: 'caption', kind: 'caption', text: 'Counts **all** sites.', hideable: false })
+  })
+
+  it('without a caption, nothing comes before the legacy ids', () => {
+    expect(chartNotes(widget({ notes: ['small-sample'] }), null, null)[0].key).toBe('caption:small-sample')
+    expect(chartNotes(widget({ caption: '' }), null, null)).toEqual([])
   })
 })
 
@@ -62,8 +70,8 @@ describe('chartNotes — each source on its own', () => {
   it('legacy caption ids become registry notes, in the widget\'s own order', () => {
     const notes = chartNotes(widget({ notes: ['no-outcome-tracking', 'small-sample'] }), null, null)
     expect(notes).toEqual([
-      { key: 'no-outcome-tracking', kind: 'caption', noteId: 'no-outcome-tracking', hideable: true },
-      { key: 'small-sample', kind: 'caption', noteId: 'small-sample', hideable: true },
+      { key: 'caption:no-outcome-tracking', kind: 'caption', noteId: 'no-outcome-tracking', hideable: true, hideId: 'no-outcome-tracking' },
+      { key: 'caption:small-sample', kind: 'caption', noteId: 'small-sample', hideable: true, hideId: 'small-sample' },
     ])
   })
 
@@ -76,13 +84,24 @@ describe('chartNotes — each source on its own', () => {
     expect(chartNotes(widget({ type: 'note', notes: ['small-sample'] }), null, null)).toEqual([])
   })
 
-  it('an unknown legacy id stays in the list (it renders as nothing) and is hideable', () => {
-    expect(chartNotes(widget({ notes: ['not-a-note'] }), null, null)).toEqual([{ key: 'not-a-note', kind: 'caption', noteId: 'not-a-note', hideable: true }])
+  it('an unknown legacy id stays in the list, flagged unknown, and is not hideable (it renders as nothing)', () => {
+    expect(chartNotes(widget({ notes: ['not-a-note'] }), null, null)).toEqual([
+      { key: 'caption:not-a-note', kind: 'caption', noteId: 'not-a-note', hideable: false, unknown: true },
+    ])
+    // listing it in hiddenCaveats changes nothing: it is not hideable
+    expect(keys(chartNotes(widget({ notes: ['not-a-note'], hiddenCaveats: ['not-a-note'] }), null, null))).toEqual(['caption:not-a-note'])
+  })
+
+  it('a legacy id spelled like a runtime note key never collides with it: `caption:` keys stay unique', () => {
+    const data = response({}, { refusedWholeDays: true })
+    const notes = chartNotes(widget({ notes: ['refused-whole-days'] }), data, null)
+    expect(keys(notes)).toEqual(['caption:refused-whole-days', 'refused-whole-days'])
+    expect(new Set(keys(notes)).size).toBe(notes.length)
   })
 
   it('data.note becomes the popup-note caveat', () => {
     expect(chartNotes(widget(), response({ note: 'Install outcomes have a gap.' }), null)).toEqual([
-      { key: 'popup-note', kind: 'caveat', text: 'Install outcomes have a gap.', hideable: true },
+      { key: 'popup-note', kind: 'caveat', text: 'Install outcomes have a gap.', hideable: true, hideId: 'popup-note' },
     ])
   })
 
@@ -112,7 +131,7 @@ describe('chartNotes — each source on its own', () => {
 describe('chartNotes — the error rule', () => {
   it('drops the range notice while an error is set, keeping the others', () => {
     const data = response({ note: 'A pop-up caveat.', notice }, { splitGuard: true })
-    expect(keys(chartNotes(widget({ notes: ['small-sample'] }), data, 'stats 502'))).toEqual(['small-sample', 'popup-note', 'split-guard'])
+    expect(keys(chartNotes(widget({ notes: ['small-sample'] }), data, 'stats 502'))).toEqual(['caption:small-sample', 'popup-note', 'split-guard'])
   })
 
   it('an empty error string counts as no error', () => {
@@ -130,7 +149,7 @@ describe('chartNotes — hideable', () => {
   it('popup-note and ordinary captions are hideable', () => {
     const notes = chartNotes(widget({ notes: ['small-sample'] }), response({ note: 'x' }), null)
     expect(notes.map((n) => [n.key, n.hideable])).toEqual([
-      ['small-sample', true],
+      ['caption:small-sample', true],
       ['popup-note', true],
     ])
   })
@@ -139,8 +158,52 @@ describe('chartNotes — hideable', () => {
     expect(getNote('country-split-excludes-refused')?.hideable).toBe(false)
     const notes = chartNotes(widget({ notes: ['country-split-excludes-refused', 'small-sample'] }), null, null)
     expect(notes.map((n) => [n.key, n.hideable])).toEqual([
-      ['country-split-excludes-refused', false],
-      ['small-sample', true],
+      ['caption:country-split-excludes-refused', false],
+      ['caption:small-sample', true],
     ])
+  })
+
+  it('isNoteIdHideable: a known hideable entry only; a data-cut entry and an unknown id are not', () => {
+    expect(isNoteIdHideable('small-sample')).toBe(true)
+    expect(isNoteIdHideable('country-split-excludes-refused')).toBe(false)
+    expect(isNoteIdHideable('not-a-note')).toBe(false)
+  })
+})
+
+describe('chartNotes — hiddenCaveats (1c)', () => {
+  const data = response({ note: 'A pop-up caveat.', notice }, { splitGuard: true, refusedWholeDays: true })
+  const all = ['caption', 'caption:small-sample', 'caption:no-outcome-tracking', 'popup-note', 'split-guard', 'refused-whole-days', 'range-notice']
+  const w = (hiddenCaveats?: string[]) => widget({ caption: 'Mine.', notes: ['small-sample', 'no-outcome-tracking'], hiddenCaveats })
+
+  it('hides legacy captions by registry id and runtime caveats by their key, keeping the order of the rest', () => {
+    expect(keys(chartNotes(w(['small-sample', 'popup-note']), data, null))).toEqual(['caption', 'caption:no-outcome-tracking', 'split-guard', 'refused-whole-days', 'range-notice'])
+  })
+
+  it('ignores every entry naming a note that is not hideable: range-notice, split-guard, refused-whole-days', () => {
+    expect(keys(chartNotes(w(['range-notice', 'split-guard', 'refused-whole-days']), data, null))).toEqual(all)
+  })
+
+  it('ignores a hidden registry id whose entry is hideable: false (country-split-excludes-refused)', () => {
+    const cw = widget({ notes: ['country-split-excludes-refused'], hiddenCaveats: ['country-split-excludes-refused'] })
+    expect(keys(chartNotes(cw, null, null))).toEqual(['caption:country-split-excludes-refused'])
+  })
+
+  it("never hides the widget's own caption, and a `caption:` key is not a hide id", () => {
+    expect(keys(chartNotes(w(['caption', 'caption:small-sample']), data, null))).toEqual(all)
+  })
+
+  it('an empty or missing list hides nothing; ids naming notes the chart does not show change nothing', () => {
+    expect(keys(chartNotes(w([]), data, null))).toEqual(all)
+    expect(keys(chartNotes(w(undefined), data, null))).toEqual(all)
+    expect(keys(chartNotes(w(['min-cohort-caveat', 'whatever']), data, null))).toEqual(all)
+  })
+
+  it("allChartNotes keeps the hidden ones (the editor's list), and isChartNoteHidden says which", () => {
+    const hidden = ['small-sample', 'popup-note', 'split-guard']
+    const notes = allChartNotes(w(hidden), data, null)
+    expect(keys(notes)).toEqual(all)
+    expect(notes.filter((n) => isChartNoteHidden(n, hidden)).map((n) => n.key)).toEqual(['caption:small-sample', 'popup-note'])
+    expect(notes.find((n) => n.key === 'caption:small-sample')?.hideId).toBe('small-sample')
+    expect(notes.filter((n) => !n.hideable).every((n) => n.hideId === undefined)).toBe(true)
   })
 })

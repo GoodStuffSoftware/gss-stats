@@ -39,6 +39,12 @@ function w(p: Omit<Widget, 'i'>): Widget {
   return { ...p, i: p.id }
 }
 
+// Bumped to 16 for chart captions (notes plan, slice 1c): a widget may now carry its own plain-text
+// `caption` and a `hiddenCaveats` list (normWidget whitelists and caps both). NO stored layout is
+// rewritten: legacy `notes` caption ids keep rendering and convert to caption text on the chart's
+// next edit (decision D5), so the bump is only the save guard that keeps an older tab from saving
+// the new fields away. functions/api/config.ts backs the stored layout up to
+// `dashboard:default:backup:v<stored>` on the first v16 save.
 // Bumped to 15 for the two default trend charts' ET-day axis (see migrateDateEtTrendsV15): a
 // stored "Pageviews over time" / "Visits over time" geo trend that is still exactly the shipped
 // default moves from the UTC `date` to the ET-day `dateEt`, so the counts-only split-guard caption
@@ -90,9 +96,12 @@ export const LAYOUT_VERSIONS = {
   sparklines: 14,
   /** The default geo trend charts bucket by ET day (migrateDateEtTrendsV15). */
   dateEtTrends: 15,
+  /** Plain-text chart captions and per-chart hidden caveats (Widget.caption, Widget.hiddenCaveats).
+   * A guard bump only: no stored layout is rewritten (legacy `notes` ids convert on the next edit). */
+  captions: 16,
 } as const
 // The newest layout version. A slice that adds an entry moves this to it.
-export const CONFIG_VERSION: number = LAYOUT_VERSIONS.dateEtTrends
+export const CONFIG_VERSION: number = LAYOUT_VERSIONS.captions
 
 // The default "basic charts available out of the box" — a sensible analytics
 // starting layout. Users can move/resize/add/remove from here.
@@ -960,11 +969,33 @@ function normWidget(x: any): Widget {
     // Fit-to-content height (lib/fit.ts): only 'content' is meaningful; anything else is absent
     // (the fixed grid height). Optional, so no version bump: an older layout loads unchanged.
     fit: x.fit === 'content' ? 'content' : undefined,
+    // Plain-text caption + hidden caveats (layout v16, slice 1c). Spread in only when present, so
+    // a widget that never had them gains no new keys.
+    ...normCaptionFields(x),
     x: Number(x.x) || 0,
     y: Number(x.y) || 0,
     w: Number(x.w) || 4,
     h: Number(x.h) || 8,
   }
+}
+
+/** Longest stored caption (Widget.caption); the editor's text area has the same maxlength. */
+export const CAPTION_MAX_CHARS = 2000
+/** Most entries in Widget.hiddenCaveats, and the shape of each one. */
+export const HIDDEN_CAVEATS_MAX = 32
+export const HIDDEN_CAVEAT_ID_RE = /^[a-z0-9-]{1,64}$/
+
+/** Widget.caption and Widget.hiddenCaveats, whitelisted and capped. A longer caption is cut to
+ * CAPTION_MAX_CHARS, never dropped; an empty one is absent. hiddenCaveats keeps the first
+ * HIDDEN_CAVEATS_MAX distinct well-formed ids; none left = absent. */
+function normCaptionFields(x: any): Pick<Widget, 'caption' | 'hiddenCaveats'> {
+  const out: Pick<Widget, 'caption' | 'hiddenCaveats'> = {}
+  if (typeof x.caption === 'string' && x.caption) out.caption = x.caption.slice(0, CAPTION_MAX_CHARS)
+  if (Array.isArray(x.hiddenCaveats)) {
+    const ids = [...new Set(x.hiddenCaveats.filter((h: any) => typeof h === 'string' && HIDDEN_CAVEAT_ID_RE.test(h)))] as string[]
+    if (ids.length) out.hiddenCaveats = ids.slice(0, HIDDEN_CAVEATS_MAX)
+  }
+  return out
 }
 
 function normSeries(raw: any): LineSeries[] | undefined {

@@ -9,7 +9,9 @@ import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import MetricCard from './MetricCard.vue'
 import { __resetMetricsStateForTests } from '../../composables/useMetrics'
 import { CAMPAIGNS } from '../../lib/campaigns'
-import type { MetricsResponseBody } from '../../lib/metrics/types'
+import type { CardSpec, MetricsResponseBody } from '../../lib/metrics/types'
+import { PRESETS } from '../../lib/metrics/presets'
+import NoteBlock from '../NoteBlock.vue'
 
 // useMetrics' cache/batch state is module-level (intentionally — see useMetrics.ts), so it
 // persists across tests in this file unless reset; unmounting drops each test's own components
@@ -67,5 +69,42 @@ describe('MetricCard', () => {
   it('an unknown preset id renders an error message instead of throwing', () => {
     const wrapper = mountCard({ cardRef: { preset: 'nope-not-real' } })
     expect(wrapper.text()).toContain('nope-not-real')
+  })
+})
+
+// Slice 1c, decision D7: a card's own spec captions stay with the spec, and the widget can hide
+// them (Widget.hiddenCaveats, passed as hiddenCaptions). A data-cut note (hideable: false) and an
+// unknown id are never hidden.
+describe('MetricCard — hiddenCaptions', () => {
+  const NOW = Date.parse('2026-09-27T12:00:00Z')
+  const withCaptions = (captions: string[]): CardSpec => ({ ...JSON.parse(JSON.stringify(PRESETS['bsk-kpis'])), captions })
+  const captionIds = (w: VueWrapper) => (w.find('.mc-captions').exists() ? w.findAllComponents(NoteBlock).map((c) => c.props('noteId')).filter(Boolean) : [])
+
+  it('shows every spec caption when nothing is hidden', async () => {
+    vi.stubGlobal('fetch', mockMetricsFetch())
+    const w = mountCard({ cardRef: { spec: withCaptions(['small-sample', 'country-split-excludes-refused', 'not-a-note']) }, nowMs: NOW })
+    await flushPromises()
+    expect(captionIds(w)).toEqual(['small-sample', 'country-split-excludes-refused', 'not-a-note'])
+  })
+
+  it('hides a hideable caption, and ignores a hidden data-cut note or an unknown id', async () => {
+    vi.stubGlobal('fetch', mockMetricsFetch())
+    const w = mountCard({
+      cardRef: { spec: withCaptions(['small-sample', 'country-split-excludes-refused', 'not-a-note']) },
+      hiddenCaptions: ['small-sample', 'country-split-excludes-refused', 'not-a-note'],
+      nowMs: NOW,
+    })
+    await flushPromises()
+    expect(captionIds(w)).toEqual(['country-split-excludes-refused', 'not-a-note'])
+  })
+
+  it('drops the captions area when every caption is hidden, and a preset caption hides by its registry id', async () => {
+    vi.stubGlobal('fetch', mockMetricsFetch())
+    const [presetId] = Object.entries(PRESETS).find(([, s]) => s.captions?.includes('release-before-partial'))!
+    const shown = mountCard({ cardRef: { preset: presetId }, nowMs: NOW })
+    const hidden = mountCard({ cardRef: { preset: presetId }, hiddenCaptions: ['release-before-partial'], nowMs: NOW })
+    await flushPromises()
+    expect(shown.find('.mc-captions').exists()).toBe(true)
+    expect(hidden.find('.mc-captions').exists()).toBe(false)
   })
 })
