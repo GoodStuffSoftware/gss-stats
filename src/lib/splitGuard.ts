@@ -173,7 +173,7 @@ export const REFUSED_WHOLE_DAYS_CAPTION =
 
 /** A path each refused pattern matches, so the pattern can be classified with the JS path helpers
  * (isPopupEventPath, pathFamilyOf). Every row a pattern matches gets the same answer from both:
- * each pattern sits wholly inside one POPUP_EVENT_PREFIXES entry (or none, for `/game/start/`). */
+ * each pattern sits wholly inside one POPUP_EVENT_PREFIXES entry. */
 const refusedSamplePath = (pattern: string): string => `${pattern.slice(0, -1)}x`
 
 /** The SPLIT_REFUSED_PATH_PATTERNS a geo query whose window snapped can still count a row of, so
@@ -181,11 +181,11 @@ const refusedSamplePath = (pattern: string): string => `${pattern.slice(0, -1)}x
  * static check on the request, never on the data: it adds no SQL and no binds, and the snap and
  * its cache-key marker still follow `moved` alone. It errs toward showing the caption:
  *   - event beacons excluded (no opt-in, no exclusion-lifting dim): only the patterns
- *     POPUP_EVENT_PREFIXES does not cover, i.e. `/game/start/` (a page view);
+ *     POPUP_EVENT_PREFIXES does not cover, which is none since `/game/start/` joined it (#52);
  *   - a `path` filter (`path = ?`, ANDed): only patterns every filter value matches, so a value
  *     that is not a refused path (isSplitRefusedPath) leaves none;
  *   - a `pathFamily` filter: only patterns whose family (pathFamilyOf) is the filter value
- *     (`/game/start/` is 'page');
+ *     (`/game/start/` is 'game-start');
  *   - a site list, or a `site` drill filter, with no BEST_SUDOKU_SITES entry: none (only Best
  *     Sudoku sends these rows). */
 export function reachableRefusedPatterns(opts: {

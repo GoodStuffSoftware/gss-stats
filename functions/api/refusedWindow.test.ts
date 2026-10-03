@@ -319,11 +319,11 @@ describe('the whole-days caption flag needs a refused row the geo query can coun
     expect(r.body.meta.refusedWholeDays).toBe(true)
   })
 
-  it('shown: the default chart (no event beacons) still counts /game/start/ rows, which are page views', async () => {
+  it('hidden: the default chart (no event beacons) counts no refused row, game starts being event beacons too', async () => {
     const r = await geo({ since, until, includeEventBeacons: false })
     snapped(r)
-    expect(refusedPaths(r.body.rows)).toEqual(['/game/start/easy'])
-    expect(r.body.meta.refusedWholeDays).toBe(true)
+    expect(refusedPaths(r.body.rows)).toEqual([])
+    expect(r.body.meta.refusedWholeDays).toBeUndefined()
   })
 
   it('shown: an exclusion-lifting event dim counts event rows even without the opt-in', async () => {
@@ -362,7 +362,7 @@ describe('the whole-days caption flag needs a refused row the geo query can coun
     const install = await geo({ since, until, constraints: [{ field: 'pathFamily', value: 'install' }] })
     snapped(install)
     expect(install.body.meta.refusedWholeDays).toBeUndefined()
-    for (const family of ['return', 'game-complete', 'tour', 'page']) {
+    for (const family of ['return', 'game-complete', 'tour', 'game-start']) {
       const r = await geo({ since, until, constraints: [{ field: 'pathFamily', value: family }] })
       expect(r.body.meta.refusedWholeDays, family).toBe(true)
     }
@@ -371,13 +371,14 @@ describe('the whole-days caption flag needs a refused row the geo query can coun
   it('reachableRefusedPatterns: the static rules', () => {
     const all = { eventRowsExcluded: false, sites: [], constraints: [] }
     expect(reachableRefusedPatterns(all)).toEqual([...SPLIT_REFUSED_PATH_PATTERNS])
-    expect(reachableRefusedPatterns({ ...all, eventRowsExcluded: true })).toEqual(['/game/start/%'])
+    expect(reachableRefusedPatterns({ ...all, eventRowsExcluded: true })).toEqual([])
     expect(reachableRefusedPatterns({ ...all, sites: ['starrupture', SITE] })).toEqual([...SPLIT_REFUSED_PATH_PATTERNS])
     expect(reachableRefusedPatterns({ ...all, sites: ['starrupture'] })).toEqual([])
     expect(reachableRefusedPatterns({ ...all, constraints: [{ field: 'path', value: '/RETURN/x/d0' }] })).toEqual(['/return/%'])
     expect(reachableRefusedPatterns({ ...all, constraints: [{ field: 'path', value: '(direct)' }] })).toEqual([])
     const family = (value: string) => reachableRefusedPatterns({ ...all, constraints: [{ field: 'pathFamily', value }] })
-    expect(family('page')).toEqual(['/game/start/%'])
+    expect(family('page')).toEqual([])
+    expect(family('game-start')).toEqual(['/game/start/%'])
     expect(family('tour')).toEqual(['/tour/exit-at/%'])
     expect(family('tutorial-complete')).toEqual(['/game/tutorial-complete/%'])
     expect(family('game-complete-deferred')).toEqual(['/game/complete-deferred/%'])
