@@ -61,8 +61,8 @@ export interface BatchEnv {
   release?: ReleaseWindows | null
 }
 
-/** The latest dated release's before/after windows: `days` whole days on each side of its ET
- * midnight (lib/overview.ts releaseComparisonWindows, the release panel's own rule). */
+/** The compared release's before/after windows: `days` whole days before its ET midnight and
+ * after the following one, the release day excluded (lib/overview.ts releaseComparisonWindows, the release panel's own rule). */
 export interface ReleaseWindows {
   dateEt: string
   days: number
@@ -78,7 +78,7 @@ export function needsReleaseWindows(requests: readonly ResolvedRequest[]): boole
 /** The release windows from the first Best Sudoku hit (null when there is none: every day before
  * the release is then unavailable, as the release panel read `MIN(ts)` of nothing as now). */
 export function releaseWindowsFor(firstHitMs: number | null, nowMs: number): ReleaseWindows | null {
-  const latest = latestDatedRelease()
+  const latest = latestDatedRelease(nowMs)
   if (!latest) return null
   const w = releaseComparisonWindows(latest.dateEt, etDateOfMs(firstHitMs ?? nowMs), nowMs)
   return w ? { dateEt: latest.dateEt, days: w.days, before: w.before, after: w.after } : null

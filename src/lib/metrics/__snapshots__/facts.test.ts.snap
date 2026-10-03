@@ -122,7 +122,7 @@ exports[`fact SQL snapshots > bskRangePath {"since":"2026-09-20","until":"2026-0
 exports[`fact SQL snapshots > bskReleaseSides {"releaseDateEt":"2026-09-26","days":2} 1`] = `
 {
   "binds": [
-    1790395200000,
+    1790481600000,
     1790451780000,
     1790439960000,
     1790049600000,
@@ -130,7 +130,7 @@ exports[`fact SQL snapshots > bskReleaseSides {"releaseDateEt":"2026-09-26","day
     "bestsudoku",
     "bestsudoku-app",
     1790222400000,
-    1790568000000,
+    1790654400000,
     "lifecycle",
     "email_%",
     "Virginia",
@@ -144,9 +144,11 @@ exports[`fact SQL snapshots > bskReleaseSides {"releaseDateEt":"2026-09-26","day
     "/popup-outcome/install-prompt/installed",
     "/install/pwa-installed",
     1790439996000,
+    1790395200000,
+    1790481600000,
   ],
   "db": "gss_geo",
-  "sql": "SELECT (ts >= ?) AS d, CASE WHEN ts >= ? THEN 3 WHEN ts >= ? THEN 2 WHEN ts >= ? THEN 1 ELSE 0 END AS s, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE site IN (?, ?, ?) AND ts >= ? AND ts < ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY d, s, path, visitor, campaign",
+  "sql": "SELECT (ts >= ?) AS d, CASE WHEN ts >= ? THEN 3 WHEN ts >= ? THEN 2 WHEN ts >= ? THEN 1 ELSE 0 END AS s, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE site IN (?, ?, ?) AND ts >= ? AND ts < ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) AND (ts < ? OR ts >= ?) GROUP BY d, s, path, visitor, campaign",
 }
 `;
 

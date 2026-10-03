@@ -245,12 +245,15 @@ export const COUNTRY_BUCKET_SQL = "CASE country WHEN 'US' THEN 'US' WHEN 'CA' TH
 function ufColumn(fixAt: number | null = UPSELL_SIGNEDOUT_FIX_AT): { select: string; group: string; binds: unknown[] } {
   return fixAt === null ? { select: '', group: '', binds: [] } : { select: ', (ts >= ?) AS uf', group: ', uf', binds: [fixAt] }
 }
-const DAY_MS = 86_400_000
-/** The release windows (lib/overview.ts releaseComparisonWindows): `days` whole days before and
- * after the release's ET midnight. */
+/** The release windows (lib/overview.ts releaseComparisonWindows): `days` ET days ending at the
+ * release date's ET midnight, and `days` ET days starting at the ET midnight after the release
+ * date (the release day itself is in neither). ET-day arithmetic, so DST days stay whole. */
 export function releaseSidesMs(releaseDateEt: string, days: number): { before: [number, number]; after: [number, number] } {
-  const r = etMidnightMs(releaseDateEt)
-  return { before: [r - days * DAY_MS, r], after: [r, r + days * DAY_MS] }
+  const after0 = addEtDays(releaseDateEt, 1)
+  return {
+    before: [etMidnightMs(addEtDays(releaseDateEt, -days)), etMidnightMs(releaseDateEt)],
+    after: [etMidnightMs(after0), etMidnightMs(addEtDays(after0, days))],
+  }
 }
 
 export const FACTS: Record<FactId, FactDef> = {
@@ -433,8 +436,9 @@ export const FACTS: Record<FactId, FactDef> = {
       const seg = segmentColumn(60_000, cuts)
       return {
         db: 'gss_geo',
-        sql: `SELECT (ts >= ?) AS d, ${seg.sql} AS s, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE ${clause.sql} GROUP BY d, s, path, visitor, campaign`,
-        binds: [after[0], ...seg.binds, ...clause.binds],
+        sql: `SELECT (ts >= ?) AS d, ${seg.sql} AS s, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE ${clause.sql} AND (ts < ? OR ts >= ?) GROUP BY d, s, path, visitor, campaign`,
+        // The release's own ET day (between the sides) is in neither.
+        binds: [after[0], ...seg.binds, ...clause.binds, before[1], after[0]],
       }
     },
     parse: (raw) => beacon(raw, noPf),

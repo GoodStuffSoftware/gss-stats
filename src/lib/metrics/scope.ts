@@ -9,7 +9,7 @@ import { CAMPAIGNS, campaignById, flightDayIndex, sharesReturnTagWith, type Camp
 import { noteRawText } from '../notes'
 import { etDateFromMs, POPUPS, type PopupDef } from '../popupEvents'
 import { campaignSegmentMarker, UPSELL_SIGNEDOUT_FIX_AT } from '../adsRules'
-import { latestDatedRelease } from '../releases'
+import { releaseAwaitingFullDay, releaseSubjectOn } from '../releases'
 import { metricWindows, METRICS, rulesOf, type MetricDef, type MetricParam } from './metrics'
 import { ratioParamsOf, ratioWindowsOf, RATIOS, type RatioDef } from './ratios'
 import { COUNTRY_BUCKETS, WINDOW_SIDES, type CountryBucket, type DataBinding, type DeltaName, type Gating, type Label, type MetricItem, type ParamValue, type RepeatSpec, type ScopePath, type Section, type WindowSide } from './types'
@@ -158,8 +158,10 @@ export function scopeField(scope: ScopeInstance, path: ScopePath, todayEt: strin
     case 'country.label':
       return country ? COUNTRY_LABELS[country] : null
     case 'release.label': {
-      const r = latestDatedRelease()
-      return r ? `${r.version} (${r.dateEt})` : null
+      const r = releaseSubjectOn(todayEt)
+      const waiting = releaseAwaitingFullDay(todayEt)
+      if (!r) return waiting ? `${waiting.version} needs a full day` : null
+      return waiting ? `${r.version} (${r.dateEt}); ${waiting.version} needs a full day` : `${r.version} (${r.dateEt})`
     }
     case 'reading.readAt':
       return reading ? reading.readAt : null
@@ -267,7 +269,7 @@ export function flattenSectionItems(section: Section, outerScope: ScopeInstance,
       // Instances the campaign's own config rules out (a spend-only campaign) are dropped here, so
       // a repeat left with only those shows its empty placeholder — saying why — instead of
       // silently losing the tile.
-      const itemScopes = allScopes.filter((s) => !unmeasuredByConfig(item.data, s, item.gating))
+      const itemScopes = allScopes.filter((s) => !unmeasuredByConfig(item.data, s, item.gating, ctx.todayEt))
       if (!itemScopes.length) {
         if (item.repeat.empty) {
           const untracked = allScopes.length > 0 && item.repeat.over === 'campaigns' && !!item.repeat.flightingToday
@@ -334,18 +336,18 @@ export interface MetricRequestSpec {
  * (`measurement: 'spend-only'`) never has beacon data. Such an item is omitted whatever the
  * campaign's status, and never requested, so a card shows no "…" for it and never labels it
  * "not yet tracking" (it never will be tracked). */
-export function unmeasuredByConfig(binding: DataBinding, scope: ScopeInstance, gating?: Gating): boolean {
-  const ruling = configRuling(binding, scope)
+export function unmeasuredByConfig(binding: DataBinding, scope: ScopeInstance, gating?: Gating, todayEt?: string): boolean {
+  const ruling = configRuling(binding, scope, todayEt)
   // A flight with no start date keeps an item whose gating says how to show "not started".
   return ruling === 'spend-only' || (ruling === 'flight-pending' && !gating?.whenNotStarted)
 }
 /** Why the campaign's own config rules a binding out, or null: 'flight-pending' (no start date
  * yet: nothing but spend can be read) or 'spend-only' (never any beacon data). Such a binding is
  * never requested (buildRequestSpec); unmeasuredByConfig says whether its item is omitted. */
-export function configRuling(binding: DataBinding, scope: ScopeInstance): 'flight-pending' | 'spend-only' | null {
+export function configRuling(binding: DataBinding, scope: ScopeInstance, todayEt?: string): 'flight-pending' | 'spend-only' | null {
   const campaign = campaignOfScope(scope)
   if (!campaign || 'field' in binding) return null
-  const resolved = resolveBinding(binding, scope)
+  const resolved = resolveBinding(binding, scope, todayEt)
   if (!resolved || resolved.kind === 'field' || !resolved.window) return null
   const window = resolved.window as keyof MetricDef['windows']
   const sides = resolved.kind === 'metric' ? [resolved.def as MetricDef] : [METRICS.get((resolved.def as RatioDef).num), METRICS.get((resolved.def as RatioDef).den)]
@@ -363,10 +365,10 @@ export function configRuling(binding: DataBinding, scope: ScopeInstance): 'fligh
 /** The request a MetricItem's data binding resolves to against a scope, or `null` for a
  * `field` binding (no network round trip) or an unknown metric/ratio id (the caller treats
  * that the same as the server's `unknown-id`, i.e. an `error` status). */
-export function buildRequestSpec(item: MetricItem, scope: ScopeInstance): MetricRequestSpec | null {
-  const resolved = resolveBinding(item.data, scope)
+export function buildRequestSpec(item: MetricItem, scope: ScopeInstance, todayEt?: string): MetricRequestSpec | null {
+  const resolved = resolveBinding(item.data, scope, todayEt)
   if (!resolved || resolved.kind === 'field') return null
-  if (configRuling(item.data, scope)) return null // never asked: the answer is known
+  if (configRuling(item.data, scope, todayEt)) return null // never asked: the answer is known
   const spec: MetricRequestSpec = {}
   if (resolved.kind === 'metric') spec.metric = (item.data as { metric: string }).metric
   else spec.ratio = (item.data as { ratio: string }).ratio
