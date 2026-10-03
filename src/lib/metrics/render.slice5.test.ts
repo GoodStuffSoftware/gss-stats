@@ -99,7 +99,7 @@ describe('decided from the campaign config, on the client (spend-only, flight pe
   it('beacon items are omitted and never requested, whatever the status, even before any value arrives', () => {
     for (const scope of [spendOnly, pending]) {
       for (const item of [numberItem(), percentItem(), costItem(), countsItem()]) {
-        expect(unmeasuredByConfig(item.data, scope), `${scope.kind} ${item.data}`).toBe(true)
+        expect(unmeasuredByConfig(item.data, scope, undefined, opts.todayEt), `${scope.kind} ${item.data}`).toBe(true)
         expect(buildRequestSpec(item, scope)).toBeNull()
         expect(itemViewModel(item, undefined, scope, opts).visible).toBe(false) // no "…" flash
         expect(itemViewModel(item, { status: 'unmeasured', reason: 'spend-only' }, scope, opts).visible).toBe(false) // never "not yet tracking"
@@ -107,14 +107,14 @@ describe('decided from the campaign config, on the client (spend-only, flight pe
     }
   })
   it('spend itself stays measurable; the Flight row alone says "pending"', () => {
-    expect(unmeasuredByConfig(spend().data, spendOnly)).toBe(false)
-    expect(unmeasuredByConfig(spend().data, pending)).toBe(false)
+    expect(unmeasuredByConfig(spend().data, spendOnly, undefined, opts.todayEt)).toBe(false)
+    expect(unmeasuredByConfig(spend().data, pending, undefined, opts.todayEt)).toBe(false)
     expect(buildRequestSpec(spend(), spendOnly)).not.toBeNull()
     expect(itemViewModel(flight, undefined, pending, opts).primary).toBe('pending — start date not yet confirmed')
   })
   it('an ordinary active campaign and site-wide items are unaffected', () => {
-    expect(unmeasuredByConfig(numberItem().data, activeScope)).toBe(false)
-    expect(unmeasuredByConfig(kpi().data, spendOnly)).toBe(false) // no campaign param: site-wide
+    expect(unmeasuredByConfig(numberItem().data, activeScope, undefined, opts.todayEt)).toBe(false)
+    expect(unmeasuredByConfig(kpi().data, spendOnly, undefined, opts.todayEt)).toBe(false) // no campaign param: site-wide
   })
 })
 
@@ -127,7 +127,7 @@ describe('whenNotStarted: an upcoming flight keeps its items', () => {
   it('no start date yet: "label" reads "not started", "zero" a 0 bar; neither is ever requested', () => {
     const label = numberItem({ gating: { whenNotStarted: 'label' } })
     const zero = bar({ gating: { whenNotStarted: 'zero' } })
-    expect(unmeasuredByConfig(label.data, pending, label.gating)).toBe(false)
+    expect(unmeasuredByConfig(label.data, pending, label.gating, opts.todayEt)).toBe(false)
     expect(buildRequestSpec(label, pending)).toBeNull()
     expect(buildRequestSpec(zero, pending)).toBeNull()
     expect(itemViewModel(label, undefined, pending, opts)).toMatchObject({ visible: true, primary: 'not started', muted: true })
@@ -144,7 +144,7 @@ describe('whenNotStarted: an upcoming flight keeps its items', () => {
     expect(itemViewModel(numberItem(), undefined, pending, opts).visible).toBe(false)
     for (const whenNotStarted of ['label', 'zero'] as const) {
       const item = numberItem({ gating: { whenNotStarted } })
-      expect(unmeasuredByConfig(item.data, spendOnly, item.gating)).toBe(true)
+      expect(unmeasuredByConfig(item.data, spendOnly, item.gating, opts.todayEt)).toBe(true)
       expect(itemViewModel(item, undefined, spendOnly, opts).visible).toBe(false)
     }
   })
