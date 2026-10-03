@@ -277,6 +277,87 @@ describe('useMetrics: a 200 that carries a failure on a return refetch', () => {
   })
 })
 
+describe('useMetrics: an error already on screen survives a background refetch that lacks the key', () => {
+  it('error shown, then a return refetch answers 200 without the key: still the error, not a blank card', async () => {
+    vi.stubGlobal('fetch', replyFetch(() => ({ status: 'error', reason: 'fact-failed' })))
+    const { s, m, v } = mountOne()
+    await vi.advanceTimersByTimeAsync(20)
+    expect(v.value).toEqual({ status: 'error', reason: 'fact-failed' })
+    vi.stubGlobal('fetch', replyFetch(() => undefined))
+    await vi.advanceTimersByTimeAsync(RETURN_MIN_AGE_MS + 1000)
+    await comeBack()
+    expect(v.value).toEqual({ status: 'error', reason: 'fact-failed' })
+    expect(m.hasError.value).toBe(true)
+    s.stop()
+  })
+
+  it('error shown, then a real new error or a real value replaces it', async () => {
+    vi.stubGlobal('fetch', replyFetch(() => ({ status: 'error', reason: 'fact-failed' })))
+    const { s, m, v } = mountOne()
+    await vi.advanceTimersByTimeAsync(20)
+    vi.stubGlobal('fetch', replyFetch(() => ({ status: 'error', reason: 'timeout' })))
+    await vi.advanceTimersByTimeAsync(RETURN_MIN_AGE_MS + 1000)
+    await comeBack()
+    expect(v.value).toEqual({ status: 'error', reason: 'timeout' })
+    vi.stubGlobal('fetch', okFetch(4))
+    await vi.advanceTimersByTimeAsync(RETURN_MIN_AGE_MS + 1000)
+    await comeBack()
+    expect(v.value).toEqual({ status: 'ok', value: 4 })
+    expect(m.hasError.value).toBe(false)
+    s.stop()
+  })
+})
+
+/** A fetch whose every POST waits for the test to answer it, in any order. */
+function manualFetch() {
+  const pending: Array<(value: number) => void> = []
+  const fn = vi.fn().mockImplementation(
+    (_url: string, init: RequestInit) =>
+      new Promise((resolve) => {
+        const body = JSON.parse(init.body as string) as MetricsRequestBody
+        pending.push((value) => {
+          const results: Record<string, unknown> = {}
+          for (const r of body.requests) results[r.key] = { status: 'ok', value }
+          resolve({ ok: true, status: 200, json: async () => ({ v: 1, generatedAt: 'x', results, meta: { facts: 1, cacheHits: 0, statements: 1 } }) })
+        })
+      }),
+  )
+  return { fn, answer: async (i: number, value: number) => (pending[i](value), vi.advanceTimersByTimeAsync(0)) }
+}
+
+describe('useMetrics: a superseded POST never writes the entry (ownership check)', () => {
+  it('a hung POST that answers while its replacement is in flight, and again after it landed, is ignored both times', async () => {
+    const { fn, answer } = manualFetch()
+    vi.stubGlobal('fetch', fn)
+    const { s, v } = mountOne()
+    await vi.advanceTimersByTimeAsync(RETURN_INFLIGHT_MAX_MS + 1000) // POST 0 is hung now
+    await comeBack() // POST 1 supersedes it
+    expect(fn).toHaveBeenCalledTimes(2)
+    await answer(0, 1) // the hung one answers first, while POST 1 is still out
+    expect(v.value).toBeUndefined()
+    await answer(1, 5)
+    expect(v.value).toEqual({ status: 'ok', value: 5 })
+    await answer(0, 1) // and a duplicate late answer after the newer one landed
+    expect(v.value).toEqual({ status: 'ok', value: 5 })
+    s.stop()
+  })
+})
+
+describe('useMetrics: a re-queued hung entry counts as in flight again (queuedAt refresh)', () => {
+  it('after a return re-queues a hung entry, the next return a few seconds later does not send a third POST', async () => {
+    const hung = vi.fn().mockImplementation(() => new Promise(() => {}))
+    vi.stubGlobal('fetch', hung)
+    const { s } = mountOne()
+    await vi.advanceTimersByTimeAsync(RETURN_INFLIGHT_MAX_MS + 1000)
+    await comeBack()
+    expect(hung).toHaveBeenCalledTimes(2) // the hung first POST was superseded
+    await vi.advanceTimersByTimeAsync(5000)
+    await comeBack() // the second POST is only seconds old: in flight, not hung
+    expect(hung).toHaveBeenCalledTimes(2)
+    s.stop()
+  })
+})
+
 describe('useMetrics: a hung request does not block the return refetch forever', () => {
   const never = () => vi.fn().mockImplementation(() => new Promise(() => {}))
 
