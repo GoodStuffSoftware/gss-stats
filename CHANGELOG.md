@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Return, game-completion and tutorial-completion rows can no longer be split by hour, place or device.**
+  A map, or a chart grouped or filtered by hour of day, location or device, now leaves those rows
+  out; as a result the "Arrivals by ET hour of day" chart no longer counts return and completion rows.
+
 ### Removed
 - **The "Deferred completions (EU consent)" tile is gone.** Best Sudoku now sends those games as
   ordinary completions, so the tile could only read 0; saved copies of it load without the tile, and a saved card whose only item was that
