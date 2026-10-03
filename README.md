@@ -291,7 +291,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   deeper than 8 is re-attached (`normDrillLinks`).
   Clicking a day on a trend chart opens that day as an absolute date range: the UTC day for a
   `date` chart, and for a `dateEt` chart (the default trends) the Eastern day, from ET midnight to
-  the next ET midnight (23 or 25 hours on a daylight-saving change).
+  the next ET midnight (23 or 25 hours on a daylight-saving change). The footer and the date pickers show that one Eastern date.
 - **Exclusions** (global across pages) — hide self-referrals, hide your own visits by
   browser+OS, and an **"exclude this device"** opt-out that works on every site (see
   [gss-beacon](https://github.com/GoodStuffSoftware/gss-beacon)).

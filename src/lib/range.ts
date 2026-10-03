@@ -1,7 +1,7 @@
 // Smart date-range helpers. The filter `since`/`until` are ISO datetime strings
 // (with back-compat for legacy "YYYY-MM-DD" day values).
 import { CAMPAIGNS, etMidnightUtcMs, etFlightRangeMs } from './campaigns'
-import { addDays } from './etTime'
+import { addDays, etDateFast } from './etTime'
 
 /** A since/until value every API accepts: a YYYY-MM-DD day or an ISO datetime. One copy for
  * every endpoint (functions/api/*) and the metrics request validator (lib/metrics/validate.ts). */
@@ -122,7 +122,9 @@ export function ymdRangeToISO(fromYmd: string, toYmd: string): { since: string; 
 }
 
 /** One ET calendar day (YYYY-MM-DD) as ISO bounds: from ET midnight of the day to 1 ms before ET
- * midnight of the NEXT day, the same closed end-of-day convention as ymdRangeToISO. Both bounds are
+ * midnight of the NEXT day, the same end convention as ymdRangeToISO (23:59:59.999). `until` is
+ * EXCLUSIVE wherever the server reads it (geo, metrics: `ts < until`), so the last millisecond of
+ * the day is not counted, exactly as on the UTC path; nothing from the next day is. Both bounds are
  * real ET midnights (etMidnightUtcMs), never "+24 h", so the day is 23 h on the spring-forward date
  * and 25 h on the fall-back one. */
 export function etDayRangeToISO(dateEt: string): { since: string; until: string } {
@@ -132,22 +134,53 @@ export function etDayRangeToISO(dateEt: string): { since: string; until: string 
   }
 }
 
+/** A real calendar date written as YYYY-MM-DD (rejects "2026-13-45" and "2026-02-31" too). */
+function isYmd(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const t = Date.parse(`${value}T00:00:00Z`)
+  return Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === value
+}
+
+/** The ET day a range covers when its bounds are exactly etDayRangeToISO's (ET midnight to 1 ms
+ * before the next ET midnight), else null: the way a range made by an ET-day drill is told apart
+ * from any other, so its label and date pickers name that one day rather than the two UTC days
+ * its bounds fall on. */
+export function etDayOfRange(since: string, until: string): string | null {
+  const s = Date.parse(since)
+  const u = Date.parse(until)
+  if (!Number.isFinite(s) || !Number.isFinite(u)) return null
+  const day = etDateFast(s)
+  if (etMidnightUtcMs(day) !== s || etMidnightUtcMs(addDays(day, 1)) - 1 !== u) return null
+  return day
+}
+
+/** The "from" and "to" YYYY-MM-DD shown in a date picker for a range: the ET day on both sides for
+ * an ET-day range (etDayOfRange), else the UTC dates of the bounds (isoToYmd). */
+export function rangeToYmd(since: string, until: string): { from: string; to: string } {
+  const day = etDayOfRange(since, until)
+  return day ? { from: day, to: day } : { from: isoToYmd(since), to: isoToYmd(until) }
+}
+
 /** The page-filter range a click on a day bucket drills to: the UTC day for a `date` chart, the ET
- * day for a `dateEt` chart. Null for any other dimension. `value` is the bucket's 'YYYY-MM-DD'. */
+ * day for a `dateEt` chart. Null for any other dimension, and for a `dateEt` value that isn't a
+ * real YYYY-MM-DD date (no drill, never a throw). `value` is the bucket's 'YYYY-MM-DD'. */
 export function dayDrillRange(dimension: string, value: string): { since: string; until: string } | null {
   if (dimension === 'date') return ymdRangeToISO(value, value)
-  if (dimension === 'dateEt') return etDayRangeToISO(value)
+  if (dimension === 'dateEt') return isYmd(value) ? etDayRangeToISO(value) : null
   return null
 }
 
 /** Human label for a range: "Last 24h" / "Last 7d" when it ends ~now, else "Jun 1 – Jun 26";
- * "Since first campaign" when the stored relative token (`rel`) is that range. */
+ * "Since first campaign" when the stored relative token (`rel`) is that range; the single ET date
+ * ("Mar 8") for exactly one ET day (etDayOfRange), which a UTC reading would call two days. */
 export function rangeLabel(since: string, until: string, rel?: string): string {
   if (isSinceFirstCampaign(rel) || isSinceFirstUntilLastCampaign(rel)) return 'Since first campaign'
   const s = new Date(since).getTime()
   const u = new Date(until).getTime()
   if (!isFinite(s) || !isFinite(u)) return ''
   const span = u - s
+  const etDay = etDayOfRange(since, until)
+  if (etDay) return new Date(`${etDay}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
   const endsNow = Math.abs(Date.now() - u) < 180_000 // within 3 min of now
   if (endsNow) {
     const h = span / 3_600_000
