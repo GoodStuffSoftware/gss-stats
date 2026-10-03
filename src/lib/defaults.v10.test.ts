@@ -173,6 +173,13 @@ describe('normCardRef', () => {
     expect(out).toEqual({ spec })
     expect((out as any).spec).not.toBe(spec)
   })
+  it('a saved copy of the removed "Deferred completions" tile loads without it, not as an invalid card', () => {
+    const pv = { id: 'pv', label: { metric: true }, data: { metric: 'bsk.pageviews', window: 'todaySoFar' }, display: { as: 'number' } }
+    const deferred = { id: 'deferredCompletions', label: { metric: true }, data: { metric: 'bsk.deferredCompletions', window: 'todaySoFar' }, display: { as: 'number' }, caption: { note: 'game-complete-deferred-caveat' } }
+    expect(normCardRef({ spec: { v: 1, sections: [{ layout: 'tiles', items: [pv, deferred] }] } })).toEqual({ spec: { v: 1, sections: [{ layout: 'tiles', items: [pv] }] } })
+    // a section left empty goes with it
+    expect(normCardRef({ spec: { v: 1, sections: [{ layout: 'tiles', items: [pv] }, { layout: 'tiles', items: [deferred] }] } })).toEqual({ spec: { v: 1, sections: [{ layout: 'tiles', items: [pv] }] } })
+  })
   it('an oversized spec is the placeholder', () => {
     const big = { v: 1, sections: [{ layout: 'rows', items: Array.from({ length: 41 }, (_, i) => ({ id: `i${i}`, label: 'x', data: { field: 'campaign.label' }, display: { as: 'text' } })) }] }
     expect(normCardRef({ spec: big })).toEqual({ preset: INVALID_CARD_PRESET })

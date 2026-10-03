@@ -60,7 +60,6 @@ describe('units key off the beacon path families (lib/popupEvents.ts)', () => {
     'campaign.returnD2to7': { path: '/return/sudoku_tired_of_ads/d2-7' },
     'bsk.pageviews': { path: '/stats' },
     'bsk.completions': { path: '/game/complete/daily/hard' },
-    'bsk.deferredCompletions': { path: '/game/complete-deferred/daily/hard' },
     'bsk.popupShown': { path: '/upsell/shown/limit' },
     'bsk.popupAccepts': { path: '/promo-first50/accept' },
     'bsk.installs': { path: '/popup-outcome/install-prompt/installed' },
@@ -120,17 +119,12 @@ describe('the catalog', () => {
     expect(rowMatcher(d0, ctxFor({ campaignId: ANDROID.id }, ANDROID))(row('/return/sudoku_tired_of_ads/d0'))).toBe(true)
     expect(rowMatcher(d0, ctxFor({ campaignId: ANDROID.id }, ANDROID))(row('/return/sudoku_funnel_retest/d0'))).toBe(false)
   })
-  // best-sudoku card 125: the deferred (EU consent) completion beacon must never be counted as
-  // a live completion, and vice versa — they are sibling prefixes ('/game/complete/' vs
-  // '/game/complete-deferred/'), not one a superset of the other.
-  it('deferred completions and live completions are mutually exclusive', () => {
+  // A stray legacy /game/complete-deferred/ row is a sibling prefix, never a live completion.
+  it('live completions never count a legacy deferred row', () => {
     const live = METRICS.get('bsk.completions')!
-    const deferred = METRICS.get('bsk.deferredCompletions')!
     const ctx = ctxFor()
     expect(rowMatcher(live, ctx)(row('/game/complete/normal/easy'))).toBe(true)
     expect(rowMatcher(live, ctx)(row('/game/complete-deferred/normal/easy'))).toBe(false)
-    expect(rowMatcher(deferred, ctx)(row('/game/complete-deferred/normal/easy'))).toBe(true)
-    expect(rowMatcher(deferred, ctx)(row('/game/complete/normal/easy'))).toBe(false)
   })
   it('auth successes count the base row only, never the new/existing status row beside it', () => {
     const auth = METRICS.get('bsk.authSuccess')!
