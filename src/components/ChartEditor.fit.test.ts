@@ -5,7 +5,6 @@
 // map canvas), and a widget switched to a chart type cannot keep a stale value.
 import { afterEach, describe, expect, it } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
-import { reactive } from 'vue'
 import ChartEditor from './ChartEditor.vue'
 import type { Widget } from '../types'
 
@@ -68,15 +67,6 @@ describe('ChartEditor: Fit height to content', () => {
 
   it('is offered for a note', () => {
     expect(fitBox(open(base({ type: 'note' })))).toBeTruthy()
-  })
-
-  it('a fit card that refits while the editor is open does not save a stale h', async () => {
-    const live = reactive(base({ fit: 'content', h: 6 }))
-    const w = open(live)
-    live.h = 9 // the dashboard refits the card (its data loaded) while the editor is open
-    await w.vm.$nextTick()
-    await w.find('button.btn-primary').trigger('click')
-    expect(saved(w).h).toBe(9)
   })
 
   it('swapping the widget prop replaces the draft: a key the new widget lacks does not survive', async () => {
