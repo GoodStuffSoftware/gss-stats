@@ -54,7 +54,7 @@ export type DataBinding =
 export type Display =
   | { as: 'number'; deltas?: ('yesterday' | 'avg7')[] }
   | { as: 'currency' }
-  | { as: 'percent'; decimals?: 0 | 1 | 2 } // always followed by "(n/d)"
+  | { as: 'percent'; decimals?: 0 | 1 | 2 | 3 | 4 } // always followed by "(n/d)" — widened to 0–4 (matches validate.ts and render.ts)
   | { as: 'counts' }
   | { as: 'dateRange'; days?: boolean }
   | { as: 'datetime' }

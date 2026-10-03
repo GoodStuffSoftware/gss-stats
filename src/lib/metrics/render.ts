@@ -20,7 +20,7 @@ import { tokenizeAndInterpolate, type TextToken } from '../textLite'
 import { METRICS, rulesOf, type MetricDef } from './metrics'
 import { RATIOS, type RatioDef } from './ratios'
 import { campaignOfScope, configRuling, resolveBinding, scopeField, scopeVars, unmeasuredByConfig, type ScopeInstance } from './scope'
-import type { Display, Gating, Label, MetricItem, MetricValue } from './types'
+import type { Display, Gating, Label, MetricItem, MetricValue, SeriesPoint } from './types'
 import { unitLabelId } from './units'
 
 // A note id ever reaches here from data an author saved into a CardSpec (Label's `note`,
@@ -58,6 +58,8 @@ export interface ItemViewModel {
   error?: boolean
   /** A 'bar' display's length: the count, or the rate as a fraction. */
   barValue?: number
+  /** A 'sparkline' display's per-ET-day points (oldest first), when the server returned any. */
+  series?: readonly SeriesPoint[]
 }
 
 export interface ItemViewOptions {
@@ -207,10 +209,9 @@ function formatMetricOrRatioValue(display: Display, value: MetricValue, def: Met
       return { primary: id ? noteRawText(id) : '—', deltaLines: [] }
     }
     case 'sparkline':
-      // GAP (flagged to main): MetricValue carries only the latest value, no per-day series —
-      // there is nothing here for `{ as: 'sparkline'; series: 'daily' }` to draw. Falls back
-      // to the current value instead of rendering blank.
-      return { primary: fmtCount(value.value), deltaLines: [] }
+      // The headline stays the metric's value (the sparkline is drawn beside it, from
+      // value.series); a money metric reads as money.
+      return { primary: 'unit' in def && def.unit === 'usd' ? fmtMoney(value.value) : fmtCount(value.value), deltaLines: [] }
     default:
       return { primary: fmtCount(value.value), deltaLines: [] }
   }
@@ -328,7 +329,8 @@ function metricViewModel(item: MetricItem, value: MetricValue, def: MetricDef | 
   }
   const bar = item.display.as === 'bar' ? { barValue: finite(value.value) ? value.value : finite(value.numerator) ? value.numerator : 0 } : {}
   const mutedTooFew = value.status === 'too-few' && item.display.as !== 'percent' && item.display.as !== 'bar'
-  return { visible: true, labelTokens, primary, deltaLines, captionTokens: valueCaptionTokens(item, value, scope, todayEt), ...(split ? { split } : {}), ...bar, ...(mutedTooFew ? { muted: true } : {}) }
+  const series = item.display.as === 'sparkline' && value.series?.length ? { series: value.series } : {}
+  return { visible: true, labelTokens, primary, deltaLines, captionTokens: valueCaptionTokens(item, value, scope, todayEt), ...(split ? { split } : {}), ...bar, ...series, ...(mutedTooFew ? { muted: true } : {}) }
 }
 
 /** An item's label alone, resolved against its scope — used by a 'table' section's header row,

@@ -14,6 +14,7 @@ import { CAMPAIGNS } from '../campaigns'
 import { getNote, hasNote, NOTES_REGISTRY, noteOptions, noteRawText } from '../notes'
 import { POPUPS } from '../popupEvents'
 import { METRICS, metricWindows, type MetricDef, type MetricParam } from './metrics'
+import { seriesTwin } from './series'
 import { RATIOS, ratioParamsOf, ratioWindowsOf, type RatioDef } from './ratios'
 import { DISPLAYS_FOR, kindOf, type DataKind } from './validate'
 import { COUNTRY_BUCKETS, WINDOW_SIDES } from './types'
@@ -71,6 +72,12 @@ function cloneJson<T>(value: T): T {
  * corrupt every other widget using the preset. */
 export function cloneSpec(spec: CardSpec): CardSpec {
   return cloneJson(spec)
+}
+/** Whether two specs are the same card, ignoring key order. */
+export function specsEqual(a: CardSpec, b: CardSpec): boolean {
+  const canon = (v: unknown): unknown =>
+    Array.isArray(v) ? v.map(canon) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v as Record<string, unknown>).filter(([, x]) => x !== undefined).sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)).map(([k, x]) => [k, canon(x)])) : v
+  return JSON.stringify(canon(a)) === JSON.stringify(canon(b))
 }
 export function specFromPresetId(id: string): CardSpec {
   return cloneSpec(presetById(id) ?? emptySpec())
@@ -388,25 +395,40 @@ export interface DisplayOption {
   disabled: boolean
   hint?: string
 }
-/** The displays compatible with a binding's data kind (validate.ts's DISPLAYS_FOR), with
- * 'sparkline' always present-but-disabled: MetricValue carries no per-day series yet (see
- * lib/metrics/render.ts's own "GAP" comment), so the editor never lets it be picked even though
- * the kind allows it in principle. Returns [] for an unresolvable binding (unknown id), which
- * the caller renders as "pick a metric/ratio first". */
+/** Why a binding cannot be drawn as a daily sparkline, or null when it can (validate.ts's rule:
+ * a count or money METRIC, never a ratio, with no country split, read in a ranged window that
+ * has a daily twin fact: lib/metrics/series.ts seriesTwin). */
+export function sparklineBlocker(binding: DataBinding): string | null {
+  if (!('metric' in binding)) return 'A sparkline needs a count or money metric, not a ratio'
+  const def = METRICS.get(binding.metric)
+  if (!def) return null // an unknown id is reported by the picker, not here
+  if (binding.params?.country !== undefined) return 'A sparkline cannot be split by country'
+  const w = binding.window
+  const window = w === undefined ? metricWindows(def)[0] : typeof w === 'string' ? w : null
+  if (!window || !seriesTwin(def, window as never)) return 'A sparkline needs the page or campaign attribution window over a metric with daily data'
+  return null
+}
+/** The displays compatible with a binding's data kind (validate.ts's DISPLAYS_FOR). 'sparkline'
+ * is offered but disabled, with the reason, wherever the binding cannot draw a daily series
+ * (sparklineBlocker). Returns [] for an unresolvable binding (unknown id), which the caller
+ * renders as "pick a metric/ratio first". */
 export function displayOptionsFor(binding: DataBinding): DisplayOption[] {
   const k = kindOf(binding)
   if (!k) return []
-  return DISPLAYS_FOR[k].map((as) => (as === 'sparkline' ? { as, disabled: true, hint: 'Coming soon — no daily series data yet' } : { as, disabled: false }))
+  return DISPLAYS_FOR[k].map((as) => {
+    const blocker = as === 'sparkline' ? sparklineBlocker(binding) : null
+    return blocker ? { as, disabled: true, hint: blocker } : { as, disabled: false }
+  })
 }
 /** Whether `as` is a display the given binding's data kind actually allows AND the editor
- * offers (excludes the disabled sparkline placeholder) — used to auto-correct the display when
- * the user switches data under it. */
+ * offers (a sparkline only where it can draw a daily series) — used to auto-correct the display
+ * when the user switches data under it. */
 export function isDisplaySelectable(binding: DataBinding, as: DisplayAs): boolean {
   const k = kindOf(binding)
-  return !!k && DISPLAYS_FOR[k].includes(as) && as !== 'sparkline'
+  return !!k && DISPLAYS_FOR[k].includes(as) && (as !== 'sparkline' || sparklineBlocker(binding) === null)
 }
 /** Whether the given binding's data kind allows `as` at all (validate.ts DISPLAYS_FOR, so a
- * display validateCard accepts), the not-yet-pickable sparkline included. The item editor's
+ * display validateCard accepts), a sparkline included even where it cannot be drawn. The item editor's
  * auto-correct asks this, not isDisplaySelectable: a stored `{ as: 'sparkline', series }` (set
  * outside the form) stays as it is through any data change that keeps a kind allowing it. */
 export function isDisplayAllowed(binding: DataBinding, as: DisplayAs): boolean {
@@ -509,6 +531,13 @@ export function tonesToRows(tones: Record<string, BadgeTone> | undefined): ToneR
  * stored as plain data, never as the map's prototype. */
 export function rowsToTones(rows: readonly ToneRow[]): Record<string, BadgeTone> | undefined {
   return rows.length ? Object.fromEntries(rows.map((r) => [r.value, r.tone])) : undefined
+}
+/** Why `value` cannot be badge row `index`'s text, or null when it can: empty, or the same as
+ * another row (the tones map is keyed by it, so a duplicate would silently merge two rows). */
+export function toneValueProblem(rows: readonly ToneRow[], index: number, value: string): string | null {
+  if (!value.trim()) return 'Badge text cannot be empty.'
+  if (rows.some((r, j) => j !== index && r.value === value)) return `"${value}" already has a colour — each badge text can have only one.`
+  return null
 }
 export const CARD_ACTION_OPTIONS: { value: CardAction; label: string }[] = [{ value: 'ads-refresh', label: 'Refresh Google Ads spend button' }]
 
