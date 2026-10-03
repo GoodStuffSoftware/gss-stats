@@ -425,7 +425,9 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
   const totals = spendTotals(i.stored, i.spendThroughEt ?? addEtDays(campaign.flightStart!, -1))
   const cumulativeSpend = totals.cost
 
-  const placementRows = await placementRowsFor(deps, campaign, i.campaignSync, i.spendThroughEt)
+  // A search campaign has no placements: no pull, no error, and kill rule 1 reads n/a.
+  const isSearch = plan.channel === 'search'
+  const placementRows: Attempt<PlacementDayRow[]> = isSearch ? { ok: true, value: [] } : await placementRowsFor(deps, campaign, i.campaignSync, i.spendThroughEt)
   const placementsStored = placementRows.ok && !deps.dryRun && i.campaignSync?.placementsOk !== false
   const beacon = deps.beacon
   const siteRows = beacon ? await attempt('beacon site events', () => beacon.siteEvents(WEB_GO_LIVE_UTC_MS)) : unavailable<HourPathCount[]>('beacon site events', deps.beaconInitError)
@@ -460,7 +462,7 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
   const play = returnSites.ok ? playReturnStatus(returnSites.value, deps.nowMs) : null
 
   // Placement split for kill rule 1 — over the SAME closed range as the campaign total.
-  const split = placementRows.ok ? splitPlacements(placementRows.value, i.spendThroughEt) : null
+  const split = placementRows.ok && !isSearch ? splitPlacements(placementRows.value, i.spendThroughEt) : null
   const placementView: FullRead['placements'] = split
     ? {
         campaignCost: cumulativeSpend,
@@ -500,7 +502,7 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
   if (tagged && (i.forceDecision || cumulativeSpend >= plan.hardCap)) {
     const su = campaignSignUps(tagged.summary, windowAccounts, authLiveAt)
     decision = {
-      ...decideAt100({ signUpsAtMost: su.count, asks: tagged.summary.asks.total, accepts: tagged.summary.accepts.total, exact: su.exact }),
+      ...decideAt100({ signUpsAtMost: su.count, asks: tagged.summary.asks.total, accepts: tagged.summary.accepts.total, exact: su.exact, channel: plan.channel }),
       signUpsAtMost: su.count,
       signUpsExact: su.exact,
       signUpsBounded: su.bounded,
@@ -646,6 +648,7 @@ async function diagnosticsRead(
   expectedCounts: AdsReadPlan['adGroupPlacementCounts'],
   spendThroughEt: string | null,
   taggedRows: Attempt<TaggedRow[]>,
+  channel: AdsReadPlan['channel'],
 ): Promise<DiagnosticsSection> {
   const errors: string[] = []
   const ads = deps.ads
@@ -658,7 +661,9 @@ async function diagnosticsRead(
   if (geo && !geo.ok) errors.push(geo.error)
   const devices = ads?.devices && since && until ? await attempt('ads devices', () => ads.devices!(campaignId, since, until)) : null
   if (devices && !devices.ok) errors.push(devices.error)
-  const targeting = ads?.targeting ? await attempt('ads targeting', () => ads.targeting!(campaignId)) : null
+  // A search arm has no placement/audience targeting to show (report prints SEARCH_NA), so
+  // skip the query: a failure would print an error beside a line that does not apply.
+  const targeting = ads?.targeting && channel !== 'search' ? await attempt('ads targeting', () => ads.targeting!(campaignId)) : null
   if (targeting && !targeting.ok) errors.push(targeting.error)
   const recommendations = ads?.recommendations ? await attempt('ads recommendations', () => ads.recommendations!(campaignId)) : null
   if (recommendations && !recommendations.ok) errors.push(recommendations.error)
@@ -917,7 +922,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
   const { section: spend, stored, sync, campaignSync } = await syncSpend(deps, plan, campaign, todayEt, opts.healthOnly ? 'backstop' : 'morning-read')
   if (spend.error) errors.push(spend.error)
   if (spend.storeError) errors.push(spend.storeError)
-  if (campaignSync.fetchOk && campaignSync.placementsOk === false && campaignSync.error && !errors.includes(campaignSync.error)) errors.push(campaignSync.error)
+  if (plan.channel !== 'search' && campaignSync.fetchOk && campaignSync.placementsOk === false && campaignSync.error && !errors.includes(campaignSync.error)) errors.push(campaignSync.error)
 
   // Consumed = the threshold-state rows PLUS any complete threshold reading (a state row lost to
   // a partial write must never make a threshold fire twice).
@@ -1035,7 +1040,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
 
   const diagnostics: DiagnosticsSection = opts.healthOnly
     ? { spendThroughEt: null, hourly: null, geo: null, devices: null, targeting: null, recommendations: null, countryCounts: null, accountCrossCheck: null, errors: [] }
-    : await diagnosticsRead(deps, campaign, plan.campaignId, plan.adGroupPlacementCounts, spend.throughEt, taggedRows)
+    : await diagnosticsRead(deps, campaign, plan.campaignId, plan.adGroupPlacementCounts, spend.throughEt, taggedRows, plan.channel)
   const playReports: PlayReportsSection | null = opts.healthOnly ? null : await playReportsRead(deps, campaign, todayEt, cumulative)
 
   const servedToday = spend.ok ? (spend.todayPartial?.cost ?? 0) > 0 : null

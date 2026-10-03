@@ -18,6 +18,9 @@ import {
   type OutcomePopup,
   type RuleResult,
   reportLabelFor,
+  channelOf,
+  SEARCH_NA,
+  type CampaignChannel,
 } from '../../src/lib/adsRules'
 import { POPUP_OUTCOME_TYPES, gateRate, installOutcomeGapNote } from '../../src/lib/popupEvents'
 import { RAW_INSTALL_SIGNALS_LABEL } from '../../src/lib/campaigns'
@@ -101,7 +104,8 @@ export function fullReadLines(r: FullRead, title: string, opts: { postflight?: b
   out.push('Kill rules (propose only; nothing is changed):')
   for (const rule of r.kill.rules) out.push(ruleLine(rule))
   out.push(`Proposal: ${r.kill.proposal ?? `none: campaign ${r.kill.servingState === 'ended' ? 'ended' : r.kill.servingState === 'paused' ? 'paused' : 'not serving'}, nothing to pause`}`)
-  if (r.placements) {
+  if (r.kill.rules.some((x) => x.id === 'placement-leak' && x.status === 'n/a')) out.push(`Placements: ${SEARCH_NA}`)
+  else if (r.placements) {
     out.push(
       `Placements: ${money(r.placements.approvedCost)} on approved, ${money(r.placements.itemizedCost)} itemized, of ${money(r.placements.campaignCost)}; outside share ${pct(r.placements.outsideShare)}${isPlacementBorderline(r.placements.outsideShare) ? ` (${PLACEMENT_BORDERLINE_NOTE})` : ''}`,
     )
@@ -222,7 +226,7 @@ export function formatMorningReport(r: MorningResult): string {
     for (const x of h.results ?? []) out.push(`  [${x.status}] ${x.parentLabel} ${n(x.parent)} → ${x.childLabel} ${n(x.children)}${x.status === 'known-gap' ? ' (known gap, never alerts)' : ''}`)
   }
   if (r.play) out.push(r.play.line)
-  const diag = diagnosticsLines(r.diagnostics)
+  const diag = diagnosticsLines(r.diagnostics, channelOf(r.campaign.id))
   if (diag.length) out.push('', ...diag)
   const playLines = playReportsLines(r.playReports)
   if (playLines.length) out.push('', ...playLines)
@@ -280,7 +284,9 @@ const RECOMMENDATION_STANDING_VERDICTS = 'Maximize Conversions REJECT; conversio
  * means "propose to Mike" in the sense of flagging it in the report text — it is never wired
  * to `notify.push`, never a kill rule, never an automatic action (contract sections 12-13 are
  * unchanged by this file). */
-function diagnosticsLines(d: DiagnosticsSection): string[] {
+/** Devices a desktop-only search arm should not spend on (diagnosticsLines flags them). */
+const SEARCH_OFF_DESKTOP: ReadonlySet<string> = new Set(['MOBILE', 'TABLET', 'CONNECTED_TV', 'OTHER'])
+export function diagnosticsLines(d: DiagnosticsSection, channel: CampaignChannel = 'display'): string[] {
   const empty = !d.hourly && !d.geo && !d.devices && !d.targeting && !d.recommendations && !d.countryCounts && !d.accountCrossCheck && !d.errors.length
   if (empty) return []
   const out = [`Diagnostics for ${d.spendThroughEt ?? 'the closed day'} (informational only; never a kill rule or an automatic action):`]
@@ -294,12 +300,19 @@ function diagnosticsLines(d: DiagnosticsSection): string[] {
   } else out.push('  geo: not read')
   if (d.devices) {
     for (const dv of d.devices) {
-      const shouldBeZero = dv.device === 'DESKTOP' || dv.device === 'CONNECTED_TV'
+      // The mobile-app placement check is Display-only; a search campaign's device mix is
+      // printed as is.
+      const shouldBeZero = channel === 'display' && (dv.device === 'DESKTOP' || dv.device === 'CONNECTED_TV')
       const nonZero = dv.impressions > 0 || dv.clicks > 0
-      out.push(`  device: ${dv.device} ${n(dv.impressions)} impr, ${n(dv.clicks)} clicks, ${money(dv.cost)}${shouldBeZero && nonZero ? ' — ANOMALY: computers/TV should read zero on a mobile-app placement campaign, propose to Mike' : ''}`)
+      // A search arm is desktop-only: spend on any other device on the closed day is flagged.
+      // Printed only — never a kill rule, never in `tripped` or the push text. Ads-side
+      // segments.device only; no beacon row is tied to a device.
+      const offDesktop = channel === 'search' && SEARCH_OFF_DESKTOP.has(dv.device) && dv.cost > 0
+      out.push(`  device: ${dv.device} ${n(dv.impressions)} impr, ${n(dv.clicks)} clicks, ${money(dv.cost)}${shouldBeZero && nonZero ? ' — ANOMALY: computers/TV should read zero on a mobile-app placement campaign, propose to Mike' : ''}${offDesktop ? ` — ANOMALY: yesterday's spend on ${dv.device}: ${money(dv.cost)}; arm is desktop-only (closed day only, not the flight so far), propose to Mike` : ''}`)
     }
   } else out.push('  devices: not read')
-  if (d.targeting) {
+  if (channel === 'search') out.push(`  targeting (placement count, optimized targeting): ${SEARCH_NA}`)
+  else if (d.targeting) {
     for (const t of d.targeting) {
       const placementMismatch = t.expectedPlacements != null && t.placements !== t.expectedPlacements
       const optimizedOn = t.audienceBidOnly === false

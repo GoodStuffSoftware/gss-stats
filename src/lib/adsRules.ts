@@ -141,8 +141,18 @@ export const RETEST_AD_GROUP_PLACEMENT_COUNTS: Record<string, number> = {
   'Other Sudoku placements': 16,
 }
 
+/** What a campaign buys. 'display' reads app placements (group_placement_view) and runs the
+ * placement rules against its approved list; 'search' buys keywords, has no placements, and
+ * every placement-based rule or line reads SEARCH_NA instead (never a pass, a trip or a
+ * crash). Campaign-level spend, impressions and clicks are read the same way for both. */
+export type CampaignChannel = 'display' | 'search'
+/** The fixed text every placement-based rule and report line shows for a search campaign. */
+export const SEARCH_NA = 'n/a (search campaign)'
+
 export interface AdsReadPlan {
   campaignId: string
+  /** 'display' (the default) or 'search'. See CampaignChannel. */
+  channel: CampaignChannel
   /** $/day, for pacing lines only (Google may overdeliver a day; never a finding). */
   dailyBudget: number
   /** Kill rule 4: propose pause at or above this cumulative spend. */
@@ -151,8 +161,10 @@ export interface AdsReadPlan {
   thresholds: readonly number[]
   /** Kill rules 1-3 are armed at or above this cumulative spend. */
   killRulesFrom: number
-  /** Kill rule 1: propose pause when MORE than this share of spend is outside the list. */
-  placementLeakMaxShare: number
+  /** Kill rule 1: propose pause when MORE than this share of spend is outside the list.
+   * Required for a display plan (buildReadPlan refuses one without it); optional and ignored
+   * for a search plan, whose placement-leak rule always reads SEARCH_NA. */
+  placementLeakMaxShare?: number
   /** Kill rule 2: propose pause when cumulative CTR is BELOW this. */
   ctrFloor: number
   approvedPlacements: readonly string[]
@@ -175,7 +187,12 @@ export interface AdsReadPlan {
 
 // Budget and cap come from lib/campaigns.ts (the one campaign definition); only the read
 // schedule and the kill-rule constants (spec sections 11-12) live here.
-type ReadPlanSettings = Omit<AdsReadPlan, 'campaignId' | 'dailyBudget' | 'hardCap'>
+// `channel` defaults to 'display'; a search plan carries no placement list (it may omit
+// approvedPlacements) and no adGroupPlacementCounts.
+type ReadPlanSettings = Omit<AdsReadPlan, 'campaignId' | 'dailyBudget' | 'hardCap' | 'channel' | 'approvedPlacements'> & {
+  channel?: CampaignChannel
+  approvedPlacements?: readonly string[]
+}
 /** A read plan for a campaign registered in lib/campaigns.ts CAMPAIGNS. The budget and the
  * hard cap are taken from that entry and must exist there: a plan with no hard cap would
  * silently arm no kill rule 4. */
@@ -183,7 +200,22 @@ export function buildReadPlan(campaignId: string, settings: ReadPlanSettings): A
   const flight = campaignById(campaignId)
   if (!flight) throw new Error(`campaign ${campaignId} is not in lib/campaigns.ts CAMPAIGNS`)
   if (flight.dailyBudgetUsd == null || flight.hardCapUsd == null) throw new Error(`campaign ${campaignId} needs dailyBudgetUsd and hardCapUsd in lib/campaigns.ts CAMPAIGNS before it can have a read plan`)
-  return { campaignId, dailyBudget: flight.dailyBudgetUsd, hardCap: flight.hardCapUsd, ...settings }
+  const channel = settings.channel ?? 'display'
+  const approvedPlacements = settings.approvedPlacements ?? []
+  if (channel === 'search' && (approvedPlacements.length || settings.adGroupPlacementCounts)) {
+    throw new Error(`campaign ${campaignId} is a search campaign: it has no placements, so its read plan must not set approvedPlacements or adGroupPlacementCounts`)
+  }
+  if (channel === 'display' && !approvedPlacements.length) {
+    throw new Error(`campaign ${campaignId} is a display campaign: its read plan needs approvedPlacements (the list kill rule 1 checks spend against)`)
+  }
+  if (channel === 'display' && settings.placementLeakMaxShare == null) {
+    throw new Error(`campaign ${campaignId} is a display campaign: its read plan needs placementLeakMaxShare (kill rule 1's limit)`)
+  }
+  return { campaignId, dailyBudget: flight.dailyBudgetUsd, hardCap: flight.hardCapUsd, ...settings, approvedPlacements, channel }
+}
+/** A campaign's channel: its read plan's, else 'display' (every closed campaign was Display). */
+export function channelOf(campaignId: string, plans: Readonly<Record<string, AdsReadPlan>> = ADS_READ_PLANS): CampaignChannel {
+  return plans[campaignId]?.channel ?? 'display'
 }
 /** Kept for external callers, e.g. the scheduled-task helper ~/.claude/scheduled-tasks/bsk-retest-morning-read/release-switchover.ts (line 76: `rules.readPlanFor(rules.RETEST_CAMPAIGN_ID)`); new code must take the campaign from the registry or `--campaign`. */
 export const RETEST_CAMPAIGN_ID = '24279250691'
@@ -1139,7 +1171,9 @@ export function buildHealthPairs(i: HealthInputs): HealthPair[] {
 
 // ── Kill rules (spec section 12) — evaluated only on data that came back ────────────────
 export type RuleId = 'placement-leak' | 'ctr' | 'funnel-reach' | 'hard-cap'
-export type RuleStatus = 'trip' | 'watch' | 'clear' | 'not-armed' | 'no-data'
+/** 'n/a': the rule does not apply to this campaign's channel (placement rules on a search
+ * campaign) — never a pass and never a trip. */
+export type RuleStatus = 'trip' | 'watch' | 'clear' | 'not-armed' | 'no-data' | 'n/a'
 export interface RuleResult {
   id: RuleId
   label: string
@@ -1260,14 +1294,20 @@ export function evaluateKillRules(i: KillRuleInput): KillRuleEvaluation {
   // (campaign total minus every itemized placement) counts as outside: it is not
   // attributable to an approved placement yet. Reported separately, because Google often
   // itemizes it later.
-  {
-    const base = { id: 'placement-leak' as const, label: `>${pctStr(plan.placementLeakMaxShare, 0)} of spend outside the ${plan.approvedPlacements.length} approved placements`, limit: plan.placementLeakMaxShare }
+  // A search campaign has no placements: the rule reads n/a whether or not it is armed.
+  if (plan.channel === 'search') {
+    // placementLeakMaxShare is ignored for search (a search plan need not set it).
+    rules.push({ id: 'placement-leak', label: 'placement leak', limit: 0, status: 'n/a', value: null, detail: SEARCH_NA })
+  } else {
+    const leakMax = plan.placementLeakMaxShare
+    if (leakMax == null) throw new Error(`campaign ${plan.campaignId} is a display campaign: its read plan needs placementLeakMaxShare`)
+    const base = { id: 'placement-leak' as const, label: `>${pctStr(leakMax, 0)} of spend outside the ${plan.approvedPlacements.length} approved placements`, limit: leakMax }
     if (!armed) rules.push({ ...base, status: 'not-armed', value: null, detail: `armed at ${usd(plan.killRulesFrom)}` })
     else if (!i.placements || !(i.placements.campaignCost > 0)) rules.push({ ...base, status: 'no-data', value: null, detail: 'placement read returned no data' })
     else {
       const { campaignCost, itemizedCost } = i.placements
       const { share, offList: itemizedOutside, unitemized, outsideMicros, denomMicros } = placementOutsideShare(i.placements)
-      const trip = placementShareOver(outsideMicros, denomMicros, plan.placementLeakMaxShare)
+      const trip = placementShareOver(outsideMicros, denomMicros, leakMax)
       const caveat = trip && unitemized > itemizedOutside ? ' Most of it is un-itemized; Google often itemizes it to approved placements within ~2 days, so confirm before pausing.' : ''
       const borderline = isPlacementBorderline(share) ? ` BORDERLINE (9-11%): ${PLACEMENT_BORDERLINE_NOTE}.` : ''
       rules.push({
@@ -1349,21 +1389,32 @@ export interface DecisionInput {
   accepts: number
   /** true when the count is exact (every sign-up came from a tagged /auth/success/…/new row). */
   exact?: boolean
+  /** The campaign's channel (channelOf); default 'display'. A search arm gets channel-neutral
+   * wording and is compared against its sibling arm (if any) instead of being told to start O3. */
+  channel?: CampaignChannel
 }
 export interface DecisionResult {
   row: DecisionRow
   reading: string
   next: string
 }
+/** A search arm's next step at the $100 read: it IS the intent test, so it is read against
+ * its sibling arm rather than told to start O3. Contains no "display" and no "O3". */
+const SEARCH_COMPARE = "Compare against the sibling arm, if there is one, on spend per tagged completer, per this campaign's pre-registered read."
 /** "Rarely shown" = fewer asks than MIN_COHORT — the same floor every rate uses. The sign-up
  * figure is an upper bound, so the 2+ and 1 rows can only say "at most"; a bound of 0 is a
  * real zero. */
 export function decideAt100(i: DecisionInput): DecisionResult {
+  const search = i.channel === 'search'
   if (i.exact && i.signUpsAtMost >= 2) {
     return {
       row: 'two-plus',
-      reading: `${i.signUpsAtMost} campaign sign-ups (exact: tagged /auth/success/<provider>/new): the funnel converts paid display traffic at roughly 1% or better.`,
-      next: 'Compute cost per sign-up. Hold on scaling until the day-15+ follow-up reports. Run O3 (Search) at the same cap against the same funnel to compare intent. Do not scale display until a sign-up shows a trial-to-purchase path measured at day 15 or later.',
+      reading: search
+        ? `${i.signUpsAtMost} campaign sign-ups (exact: tagged /auth/success/<provider>/new): the funnel converts paid search arrivals at roughly 1% or better.`
+        : `${i.signUpsAtMost} campaign sign-ups (exact: tagged /auth/success/<provider>/new): the funnel converts paid display traffic at roughly 1% or better.`,
+      next: search
+        ? `Compute cost per sign-up. Hold on scaling until the day-15+ follow-up reports. ${SEARCH_COMPARE} Do not scale this arm until a sign-up shows a trial-to-purchase path measured at day 15 or later.`
+        : 'Compute cost per sign-up. Hold on scaling until the day-15+ follow-up reports. Run O3 (Search) at the same cap against the same funnel to compare intent. Do not scale display until a sign-up shows a trial-to-purchase path measured at day 15 or later.',
     }
   }
   if (i.exact && i.signUpsAtMost === 1) {
@@ -1377,7 +1428,9 @@ export function decideAt100(i: DecisionInput): DecisionResult {
     return {
       row: 'two-plus',
       reading: `At most ${i.signUpsAtMost} campaign sign-ups: an upper bound (tagged auth successes include returning sign-ins; new accounts are sitewide), so the spec's 2-or-more row may or may not be met. Mike decides.`,
-      next: 'If Mike judges the bound real: compute cost per sign-up, hold on scaling until the day-15+ follow-up reports, and run O3 (Search) at the same cap against the same funnel. Do not scale display on this read.',
+      next: search
+        ? `If Mike judges the bound real: compute cost per sign-up, hold on scaling until the day-15+ follow-up reports, and ${SEARCH_COMPARE.charAt(0).toLowerCase()}${SEARCH_COMPARE.slice(1)} Do not scale this arm on this read.`
+        : 'If Mike judges the bound real: compute cost per sign-up, hold on scaling until the day-15+ follow-up reports, and run O3 (Search) at the same cap against the same funnel. Do not scale display on this read.',
     }
   }
   if (i.signUpsAtMost === 1) {
@@ -1397,8 +1450,12 @@ export function decideAt100(i: DecisionInput): DecisionResult {
   if (i.accepts === 0) {
     return {
       row: 'zero-declined',
-      reading: `Paid display arrivals see the offer and decline it (${i.asks} asks, 0 accepted).`,
-      next: 'Stop display acquisition. O3 (Search) becomes the next test, since it isolates intent.',
+      reading: search
+        ? `Paid search arrivals see the offer and decline it (${i.asks} asks, 0 accepted).`
+        : `Paid display arrivals see the offer and decline it (${i.asks} asks, 0 accepted).`,
+      next: search
+        ? `Stop this arm's acquisition. ${SEARCH_COMPARE}`
+        : 'Stop display acquisition. O3 (Search) becomes the next test, since it isolates intent.',
     }
   }
   return {

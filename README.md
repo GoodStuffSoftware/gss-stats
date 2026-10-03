@@ -518,8 +518,10 @@ lacks the pin, pin it in the same PR as the registration.
   rule 4), `servingHoursEt`, `notes`, and `directionalThroughDay` if the first N flight days
   are directional. This alone puts the campaign on the dashboard and in the sync.
 - **[`adsRules.ts`](src/lib/adsRules.ts) `ADS_READ_PLANS`** — one `buildReadPlan('<id>', {...})`:
+  `channel` (`'display'`, the default, or `'search'`; see
+  [Adding an arm](#adding-an-arm-two-campaigns-at-once) below),
   `thresholds` (the spend reads; the report page draws its ladder from them), `killRulesFrom`,
-  `placementLeakMaxShare`, `ctrFloor`, `approvedPlacements`, optional `adGroupPlacementCounts`
+  `placementLeakMaxShare` (display only; optional and ignored for search), `ctrFloor`, `approvedPlacements` (display only), optional `adGroupPlacementCounts`
   (the build-spec counts the targeting diagnostic checks), `morningReadFirstEt` /
   `morningReadLastEt` (the morning-read window), and the two fields that keep two live
   campaigns' output apart:
@@ -576,6 +578,57 @@ invocation that omits the flag (before, inside or after its morning-read window,
 post-flight stage) behaves as it did before the registry (checked by running every routine
 invocation against the base and the head: only `--help` differs). The retest's routine docs
 pin it anyway (step 1).
+
+### Adding an arm (two campaigns at once)
+
+A test arm is one campaign, added with the steps above. Two arms running together are two
+`CAMPAIGNS` entries and two `ADS_READ_PLANS` entries, each read on its own: its own spend,
+thresholds, cap, report label and audit folder. Fill in one block per arm:
+
+| Field | Where | Arm A example | Arm B example |
+| --- | --- | --- | --- |
+| Campaign id | `CAMPAIGNS` `id`, the `ADS_READ_PLANS` key | `<arm A id>` | `<arm B id>` |
+| utm tag | `CAMPAIGNS` `ucValues` | `sudoku_funnel_f2_apps` | `sudoku_funnel_f2_search` |
+| Channel | plan `channel` | `'display'` (the default) | `'search'` |
+| Placements | plan `approvedPlacements` | the 17 `RETEST_APPROVED_PLACEMENTS` | none (omit) |
+| Leak limit | plan `placementLeakMaxShare` | `0.1` | none (omit; ignored for search) |
+| CTR floor | plan `ctrFloor` (kill rule 2) | `0.0015` (0.15%) | `0.01` (1.0%) |
+| Start / end | `CAMPAIGNS` `flightStart` (+ `flightStartTimeEt`), `flightEnd` | start, start + 6 days | same |
+| Budget / cap | `CAMPAIGNS` `dailyBudgetUsd`, `hardCapUsd` | `$50` cap over 7 days | same |
+| Label / audit | plan `reportLabel`, `auditSlug` (unique) | e.g. `F2 apps`, `f2-apps` | e.g. `F2 search`, `f2-search` |
+| Read window | plan `morningReadFirstEt`, `morningReadLastEt` | day 2 .. end + 1 | same |
+
+Why the search CTR floor is higher: a search arm buys exact and phrase keywords on a narrow
+set, so CTR under 1% means the ad is showing on irrelevant queries or losing on ad rank. The
+display floor would effectively never trip on search.
+
+What the channel changes. A **display** arm reads placements (`group_placement_view`) and runs
+kill rule 1 (spend outside the approved list), the off-list lines, approved-vs-itemized cost and
+the placement-count, optimized-targeting and computers/TV device checks. A **search** arm has no
+placements: the sync never pulls them, kill rule 1 reads `[n/a] placement leak: n/a (search
+campaign)`, the report's Placements line and the targeting check say the same, and the device
+mix is printed without the mobile-app anomaly; instead, because a search arm is desktop-only,
+any spend on MOBILE, TABLET, CONNECTED_TV or OTHER on the closed day is flagged as an ANOMALY to
+propose to Mike (a printed flag only, from Google Ads' own device segment, never a kill rule;
+it covers that one day, not the flight so far). Never a pass, never a trip. A search plan that
+sets `approvedPlacements` or `adGroupPlacementCounts` is refused at load. Spend, impressions,
+clicks, CTR (rule 2), funnel reach (rule 3), the hard cap (rule 4) and every beacon count read
+the same for both channels.
+
+With two plans registered, **every** read must name its campaign: omitting `--campaign` exits 1
+and lists the registered ids. One line per arm, in each arm's own routine doc:
+
+```bash
+npm run -s ads:morning-read -- --campaign <arm A id>
+npm run -s ads:morning-read -- --campaign <arm B id>
+npm run -s ads:postflight-read -- --stage wrapup --campaign <arm A id>
+npm run -s ads:postflight-read -- --stage wrapup --campaign <arm B id>
+```
+
+(The same for `day15`, `day30`, `day60` and `december`; dry-run either with `--fixture <file>
+--now <iso> --dry-run` first, as in step 4.) The Worker bundles `campaigns.ts` and the read
+plans, so register any arm, then redeploy the Worker, or its cron and Refresh won't sync that
+arm; the CLI reads still work (they sync for themselves).
 
 ## Ads data freshness
 
