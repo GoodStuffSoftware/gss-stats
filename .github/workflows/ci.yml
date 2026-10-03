@@ -23,6 +23,7 @@ jobs:
       - run: npm run typecheck:scripts
       - run: npm run build
       # The gss-stats-sync Worker bundles src/lib (campaigns.ts included): check it still builds.
-      # Deploying it stays a manual, SHA-stamped step (npm run ads:worker-deploy); the dashboard
-      # flags a Worker built from other campaign definitions (README "The sync Worker").
+      # Merging to main redeploys it (deploy.yml, job deploy-worker, same SHA-stamped
+      # npm run ads:worker-deploy); the dashboard flags a Worker built from other campaign
+      # definitions (README "The sync Worker").
       - run: npm run ads:worker-check

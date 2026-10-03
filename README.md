@@ -47,8 +47,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   time yesterday and the 7-day average), the **Overall timeline**, a campaign scorecard, and a
   release before/after panel — each its own movable/editable widget. The KPI tiles and the
   scorecard are **metric cards** (presets `bsk-kpis` and `campaign-scorecard`, see *One metrics
-  registry* below), and so is the release panel (preset `release-before-after`: the latest dated
-  release's before and after windows, `days` whole days on each side of its ET midnight, bounded
+  registry* below), and so is the release panel (preset `release-before-after`: the newest release
+  with a full ET day after its release date; `days` whole days before its ET midnight and `days`
+  after the following midnight, the release day itself excluded, bounded
   by the first Best Sudoku hit, as [`src/lib/overview.ts`](src/lib/overview.ts)
   `releaseComparisonWindows` decides). The Overall timeline is a **standard line
   chart** (see *Line charts* below) with five series — page views and tagged arrivals on the left
@@ -63,7 +64,15 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   cards, presets `campaign-funnel`, `campaign-country` — a table with the funnel steps as rows
   and US / CA / Other as columns, each cell a campaign metric with the registry's optional
   `country` param — `campaign-cost` and `campaign-returns` — d0 and each return window's rate,
-  dN over d0 with its n/d, as bars side by side. "Arrivals by ET hour of day" and "Daily
+  dN over d0 with its n/d, as bars side by side. A campaign's return rows count from the web
+  site and the installed app (`bestsudoku-app`) alike, from its attribution start (each counts
+  its own installs, so a phone that used both counts once on each). After the
+  campaigns comes one more row, "Organic (web)": the `/return/organic/` rows the web site sends
+  for untagged visitors, with no start bound and never app rows, as a baseline to read the
+  campaigns against; it stays hidden until its d0 count is above zero. It never enters the
+  site-wide "Return visits (day 1+)" tile or the routine's site-wide arrivals, which stay
+  tagged-only. Return rows are counts
+  only — never split by hour, place or device. "Arrivals by ET hour of day" and "Daily
   arrivals by flight day" are standard geo charts over the same tagged arrivals (filter
   `arrival` = tagged): a breakdown bar of `hourEt` × `campaignFlight`, and a line of
   `flightDay` × `campaignFlight` with `cumulative` running totals dashed on a right-hand axis.
@@ -93,6 +102,27 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
 - **Full width** — there's no centred max-width column: the header (a strip across the window),
   the filter bar and the chart grid span the window with a 16px gutter (12px on a phone), so a
   wide screen shows wider charts, and the pinned filter bar (below) spans it too.
+- **Fit height to content** — a card's editor has a "Fit height to content" checkbox (next to
+  the display and size controls) that sets `Widget.fit: 'content'`. A fit panel's height then
+  follows what it renders: the dashboard measures the bottom of the card's last in-flow child
+  ([`src/composables/useFitHeight.ts`](src/composables/useFitHeight.ts), a `ResizeObserver` on
+  the card's children, never on the card itself) and sets the grid height `h` to the fewest
+  whole rows that hold it ([`src/lib/fit.ts`](src/lib/fit.ts) `fitRows`: `h` rows are
+  `h*40 + (h-1)*14` px, minimum 3), so the card is neither clipped nor scrolling, and it
+  grows or shrinks as data arrives or captions appear. A fit card has no resize grip (its
+  height is the content's) and the option is not offered on canvas charts (bar, line, pie,
+  map, ...), which have no content height of their own; metric cards, stat tiles, tables and
+  notes can use it. It is off by default and absent from every existing layout, which render
+  exactly as before: no storage migration and no `CONFIG_VERSION` bump. On a phone
+  (<= 700px) the one-column stack sizes itself, so the measurement is not written back to the
+  desktop `h`; a zoomed card is not fitted either. The last fitted `h` is saved as an ordinary
+  height, so turning the option off keeps the card at that size. The height is measured with
+  the card's layout box (not its on-screen rect, so the zoom animation cannot inflate it), is
+  reported only after the content has been quiet for 300ms (data that loads in two steps saves
+  once) and never from a hidden or detached card; a layout equal to the one last loaded or
+  saved is not written back. The fitted `h` depends on the card's width (text wraps), and the
+  layout is shared: two tabs open at different widths each compute their own `h` and the
+  last save wins.
 - **The main filter bar is always visible**, in normal flow directly under the header
   (range, sites, exclusions, sync-across-pages). If it scrolls out of view, a
   small "show filters" button appears top-right — see the IntersectionObserver on
@@ -399,7 +429,7 @@ Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats
   with `maxStatements`), caches each fact on its own in the Cache API, and derives every value in
   JS with its status (`ok`, `too-few`, `no-data`, `unmeasured`, `partial`), n/d, deltas and a
   provisional flag for lagged outcomes. Windows are the campaign's attribution window, today so
-  far, the page range, the latest release's before/after windows (sized by one cached first-hit
+  far, the page range, the compared release's before/after windows (sized by one cached first-hit
   read), and a campaign's pre/post segments at the signed-out upsell fix (only once that fix is
   set and falls in the flight). **Metric cards** render it: a widget with `card`
   (`{ preset }` from [`src/lib/metrics/presets.ts`](src/lib/metrics/presets.ts), or a saved spec)
@@ -435,7 +465,7 @@ geography is country-only** — sub-country region/city comes from the beacon.
 `/signin-prompt`, `/signin-eligible`, `/promo-first50`, `/first50-congrats`, `/upsell`,
 `/install`, `/popup-outcome`, `/return`, `/game/complete/`, the `/auth/success/<provider>/`
 status suffix, `/auth/error`, `/auth/redirect` and the first-session beacons (`/tour`,
-`/game/first-move`, `/game/abandon`, `/welcome-signed-in`) are pop-up/event beacons, not screens — `/api/geo` and `/api/sites` exclude all
+`/game/tutorial-complete`, `/game/first-move`, `/game/abandon`, `/welcome-signed-in`) are pop-up/event beacons, not screens — `/api/geo` and `/api/sites` exclude all
 of them from every pageview/visit total and the top-pages breakdown by default (see
 [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) `POPUP_EVENT_PREFIXES`); `/api/popups` is
 where they're counted. Each geo chart has its own **"Include event beacons"** option (off by
@@ -446,6 +476,20 @@ there — not just the one drilled — can show the event rows just filtered dow
 carries a caption explaining why (see [`src/lib/drill.ts`](src/lib/drill.ts)
 `drillNeedsEventBeacons`).
 
+**Return, game-completion and tutorial-completion rows are counts only: never split by hour,
+place or device.** Rule: "counts only. Never tie beacon rows to a device, time or place." A geo
+chart that maps rows (the map/globe), groups by an hour, place or device dimension (`hourEt`;
+`country`, `region`, `city`, `postal`, `continent`, `timezone`, `colo`, `org`; `device`,
+`browser`, `os`, `lang`, `screenw`, `screenwBucket`, `visitor`), or is drilled into one of them
+leaves `/return/…`, `/game/complete/…`, `/game/complete-deferred/…` and
+`/game/tutorial-complete/…` rows out entirely, whatever "Include event beacons" says, and marks
+the response `meta.splitGuard: true`. The rows still count everywhere else: by path, by ET day
+or flight day, by campaign, and in the metric cards. The guard keys on dimensions and drills
+only; the chart's own date range is not yet clamped to whole days. One visible effect: the **Arrivals by ET hour of day** chart no longer counts an arrival
+whose first beacon was a return or completion row, so its total can sit slightly below the
+flight-day chart's. The "hide known test and household traffic" filter is unchanged. See
+[`src/lib/splitGuard.ts`](src/lib/splitGuard.ts).
+
 **Every stored geo-beacon column is a chartable dimension AND a filter.** `functions/api/geo.ts`
 whitelists every analytic `hits` column (`GEO_DIMS`) — region/city/postal/country/continent/
 timezone/colo/org/referrer/refpath/path/site/device/browser/os/lang/visitor/campaign/source/
@@ -454,7 +498,7 @@ medium/date, plus **screen width** (`screenw`, exact pixels) and its bucketed fo
 **path family** dimension (`pathFamily`) that groups every event-beacon prefix above into
 `page` / `signin-prompt` / `signin-eligible` / `promo-first50` / `first50-congrats` / `upsell`
 / `install` / `popup-outcome` / `return` / `game-complete` / `auth-status` / `auth-error` /
-`auth-redirect` / `tour` / `game-first-move` / `game-abandon` / `welcome-signed-in`. More derived
+`auth-redirect` / `tour` / `tutorial-complete` / `game-first-move` / `game-abandon` / `welcome-signed-in`. More derived
 dimensions: **pop-up** (`popupFamily`) and **pop-up outcome** (`popupOutcome`), measured rows
 only (from the tracking activation day; pre-fix install-gap rows get no value — see
 [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) `popupDimSqlCase`, where
@@ -629,7 +673,9 @@ lacks the pin, pin it in the same PR as the registration.
   (+ `flightStartTimeEt` if the schedule starts mid-day), `flightEnd`, `status`, `kind`,
   `dailyBudgetUsd` and `hardCapUsd` (both required to read it: they arm the pacing line and kill
   rule 4), `servingHoursEt`, `notes`, and `directionalThroughDay` if the first N flight days
-  are directional. This alone puts the campaign on the dashboard and in the sync.
+  are directional. This alone puts the campaign on the dashboard and in the sync. The id and
+  tag `organic` are reserved for the organic baseline row: a campaign using either fails at
+  load.
 - **[`adsRules.ts`](src/lib/adsRules.ts) `ADS_READ_PLANS`** — one `buildReadPlan('<id>', {...})`:
   `channel` (`'display'`, the default, or `'search'`; see
   [Adding an arm](#adding-an-arm-two-campaigns-at-once) below),
@@ -813,9 +859,10 @@ per 10 minutes. The dashboard holds no Google Ads credential and never calls the
 - **Deploy:** `npm run ads:worker-deploy -- --cf-token-file <path> [--paused]` stamps the version
   with the git SHA (tag, message, and the `GIT_SHA` it reports with a hash of every campaign
   field the sync writes: name, kind, flight, status, uc values, budget, cap, measurement); `--paused` deploys with no cron. The Worker bundles `src/lib/campaigns.ts`, so a
-  new campaign needs a Worker redeploy as well as a Pages deploy; the dashboard's Refresh says
-  when the Worker runs other campaign definitions, and CI bundles it on every PR
-  (`npm run ads:worker-check`).
+  new campaign needs a Worker redeploy as well as a Pages deploy. **That now happens on merge
+  to `main`** (the `deploy-worker` job, see [Deploy](#deploy)); the manual command stays for a
+  paused/held deploy. The dashboard's Refresh says when the Worker runs other campaign
+  definitions, and CI bundles it on every PR (`npm run ads:worker-check`).
 - **Secrets:** the four Google Ads credentials live in Cloudflare **Secrets Store** (account
   store `default_secrets_store`, secret names = the Bitwarden key names, scope `workers`),
   bound as `ADS_CLIENT_ID`, `ADS_CLIENT_SECRET`, `ADS_REFRESH_TOKEN`, `ADS_DEVELOPER_TOKEN`.
@@ -835,7 +882,8 @@ per 10 minutes. The dashboard holds no Google Ads credential and never calls the
 | Contributing / conventions | [CLAUDE.md](CLAUDE.md) |
 | Auth design (ADR) | [docs/adr/0002-google-auth.md](docs/adr/0002-google-auth.md) |
 | Ads store decision | [docs/adr/0001-ads-read-store.md](docs/adr/0001-ads-read-store.md) |
-| Metric components design (ADR; registry and endpoint built, cards pending) | [docs/adr/0003-metric-components.md](docs/adr/0003-metric-components.md) |
+| Metric components design (ADR; slices 1-7 built) | [docs/adr/0003-metric-components.md](docs/adr/0003-metric-components.md) |
+| Retiring the remaining bespoke widgets (ADR; plan) | [docs/adr/0005-retire-bespoke-widgets.md](docs/adr/0005-retire-bespoke-widgets.md) |
 | Ads routine prompts | [docs/routines/](docs/routines/) |
 | Geo beacon (companion) | [GoodStuffSoftware/gss-beacon](https://github.com/GoodStuffSoftware/gss-beacon) |
 | Capacity / free-plan limits | [docs/capacity.md](docs/capacity.md) |
@@ -879,6 +927,27 @@ One-time setup: add a repo secret **`CLOUDFLARE_API_TOKEN`** (Settings → Secre
 → Actions) — a Cloudflare token with **Cloudflare Pages: Edit**. The runtime `CF_ANALYTICS_TOKEN`
 and the sign-in settings ([Auth](#auth)) are Pages *project* secrets and aren't needed by the
 workflow (deploys keep existing secrets).
+
+**The sync Worker deploys on merge too** — a second, independent job (`deploy-worker`) in the
+same workflow, so a Worker failure never fails or blocks the Pages deploy. It runs
+`npm run ads:worker-deploy` (SHA-stamped, cron attached; the Google Ads credentials stay in
+Secrets Store, nothing secret is needed in the workflow) when a push to `main` changes
+`workers/sync/**`, any non-test file under `src/lib/**` (the Worker bundles `campaigns.ts`
+and its other imports from there), `package-lock.json` (the pinned wrangler), the root `tsconfig.json`, `scripts/ads-reads/worker-deploy.ts`
+(stamping and cron) or `deploy.yml`. Other pushes skip it; **Actions → Deploy → Run workflow** always deploys
+it, but only when run on `main` (the job is skipped on any other branch). The job
+authenticates with the optional repo secret **`CLOUDFLARE_WORKERS_API_TOKEN`** and falls back to
+`CLOUDFLARE_API_TOKEN` when it is unset, so a Worker-capable token can be added without touching
+the Pages secret. Whichever it uses needs **Workers Scripts: Edit** (account), plus **Secrets
+Store** access if the deploy fails on the `secrets_store_secrets` bindings in
+`workers/sync/wrangler.toml`; the Pages token alone may have neither. A failed deploy logs an
+error naming both secrets. Worker deploys queue (one at a time, never cancelled mid-flight); if
+three Worker-touching pushes land while one is deploying, the middle one's change is only picked
+up by the next Worker-touching push or a manual run. A Worker deployed by hand with `--paused`
+gets its cron back on the next automatic deploy, **unless you set the repo variable
+`WORKER_DEPLOY_PAUSED` to `true`** (Settings → Secrets and variables → Actions → Variables): the job
+then logs that it is paused and deploys nothing, on pushes and manual runs alike, until the
+variable is removed or set to anything else.
 
 **Manual** (local fallback / preview), with the token from a local, gitignored file:
 

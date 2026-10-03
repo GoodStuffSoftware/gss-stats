@@ -3,7 +3,8 @@
 // Saving the shared config while PUTs are in flight, and a browser whose localStorage throws.
 // - A change reverted while a save is in flight still reaches KV (a second PUT with the reverted
 //   body), instead of being skipped as "same as the last completed save".
-// - PUTs answering out of order never point "what the store holds" back at the older body.
+// - One PUT at a time: an edit made while a PUT is out is sent after it answers, so the store ends
+//   on the newest body (two PUTs never race).
 // - Blocked storage (private window, disabled site data) doesn't stop the dashboard loading.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
@@ -99,23 +100,24 @@ describe('App — saving while a PUT is in flight', () => {
     expect(saveConfig).toHaveBeenCalledTimes(2) // settled: nothing more to send
   })
 
-  it('PUTs answering out of order keep the newest body as what the store holds', async () => {
+  it('one PUT at a time: an edit made while a PUT is out goes next, and the store ends on the newest body', async () => {
     const pending = deferredSaves()
     const w = await mountApp()
     await rename(w, 'B')
     await pastDebounce()
     await rename(w, 'C')
     await pastDebounce()
-    expect(vi.mocked(saveConfig).mock.calls.map((c) => savedName(c[0]))).toEqual(['B', 'C'])
-    pending[1](true) // C answers first…
+    // C waits for B's answer, so two PUTs can never answer out of order
+    expect(vi.mocked(saveConfig).mock.calls.map((c) => savedName(c[0]))).toEqual(['B'])
+    pending[0](true)
     await flushPromises()
-    pending[0](true) // …then the older B
+    expect(vi.mocked(saveConfig).mock.calls.map((c) => savedName(c[0]))).toEqual(['B', 'C'])
+    pending[1](true)
     await flushPromises()
     await pastDebounce()
     expect(saveConfig).toHaveBeenCalledTimes(2) // C is on screen and saved: nothing to send
 
-    // The store holds C, so going back to B is a change and must be saved (had the late B answer
-    // been taken as "saved", this would be skipped as unchanged).
+    // The store holds C, so going back to B is a change and must be saved.
     await rename(w, 'B')
     await pastDebounce()
     expect(saveConfig).toHaveBeenCalledTimes(3)

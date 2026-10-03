@@ -6,7 +6,9 @@ name: Deploy
 #
 # One-time setup: add a repository secret CLOUDFLARE_API_TOKEN (Settings → Secrets and
 # variables → Actions). Mint it at Cloudflare → My Profile → API Tokens with the
-# "Cloudflare Pages: Edit" permission on this account. The runtime analytics secret
+# "Cloudflare Pages: Edit" permission on this account. The sync Worker job below uses the
+# optional secret CLOUDFLARE_WORKERS_API_TOKEN (Workers Scripts: Edit, plus Secrets Store if its
+# bindings need it) and falls back to CLOUDFLARE_API_TOKEN. The runtime analytics secret
 # (CF_ANALYTICS_TOKEN) is a Pages project secret and is NOT needed here — deploys keep
 # the project's existing secrets.
 on:
@@ -14,14 +16,21 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# One deploy at a time; a newer push supersedes an in-flight run.
-concurrency:
-  group: deploy-production
-  cancel-in-progress: true
-
+# Two independent jobs, so a Worker failure can never fail or block the Pages deploy:
+#   deploy         - the Pages site (every push to main).
+#   deploy-worker  - the gss-stats-sync Worker (workers/sync/), only when its inputs changed
+#                    (see "Detect Worker changes" below) or on a manual run. Its Cloudflare token
+#                    uses CLOUDFLARE_WORKERS_API_TOKEN, or CLOUDFLARE_API_TOKEN if that is unset
+#                    (scopes: see the README's Deploy section).
+# Each job has its own concurrency group: no workflow-level group, because that would let a
+# newer push cancel the Worker job too.
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # One Pages deploy at a time; a newer push supersedes an in-flight run.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: true
     permissions:
       contents: read
     steps:
@@ -39,3 +48,69 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: a32bba62c77df5e8f6bd33d04478ec34
+
+  deploy-worker:
+    if: github.ref == 'refs/heads/main' # a manual run from another branch must not deploy its Worker to production
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    # Never cancel a Worker deploy mid-flight; a newer push waits its turn.
+    concurrency:
+      group: deploy-worker
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the changed-files check below diffs against the pre-push commit
+      # The Worker bundles workers/sync/ and (transitively) src/lib/, so those and the pinned
+      # wrangler (package-lock.json), the root tsconfig.json and the deploy script (stamping, cron)
+      # are its inputs; this workflow file is one too, so editing it also redeploys. A manual run,
+      # a new/forced branch or an unknown base always deploys, unless the repo variable
+      # WORKER_DEPLOY_PAUSED is "true" (a deliberately held cron: nothing deploys until it is removed).
+      - name: Detect Worker changes
+        id: changes
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          PAUSED: ${{ vars.WORKER_DEPLOY_PAUSED }}
+        run: |
+          if [ "$PAUSED" = "true" ]; then
+            echo "deploy=false" >> "$GITHUB_OUTPUT"; echo "Worker deploy PAUSED (repo variable WORKER_DEPLOY_PAUSED=true): skipping. Remove the variable to resume."; exit 0
+          fi
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"; echo "Manual run: deploying the Worker."; exit 0
+          fi
+          if ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"; echo "No usable base commit: deploying the Worker."; exit 0
+          fi
+          changed=$(git diff --name-only "$BEFORE" "$GITHUB_SHA" | grep -E '^(workers/sync/|src/lib/|package-lock\.json$|tsconfig\.json$|scripts/ads-reads/worker-deploy\.ts$|\.github/workflows/deploy\.yml$)' | grep -vE '\.test\.ts$' || true)
+          if [ -n "$changed" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"; echo "Worker inputs changed:"; echo "$changed"
+          else
+            echo "deploy=false" >> "$GITHUB_OUTPUT"; echo "No Worker inputs changed: skipping the Worker deploy."
+          fi
+      - uses: actions/setup-node@v7
+        if: steps.changes.outputs.deploy == 'true'
+        with:
+          node-version: 24 # current LTS; wrangler 4.x requires Node >= 22
+          cache: npm
+      - if: steps.changes.outputs.deploy == 'true'
+        run: npm ci
+      - if: steps.changes.outputs.deploy == 'true'
+        run: npm test # a red test stops the Worker deploy too
+      # Same command as the manual deploy: stamps the version (tag, message, GIT_SHA var) with
+      # this commit and a hash of the campaign definitions, and attaches the cron in
+      # workers/sync/wrangler.toml. Reads the token from CLOUDFLARE_API_TOKEN. The D1 and Secrets
+      # Store bindings are declared in wrangler.toml; no secret value is needed here.
+      - name: Deploy the sync Worker
+        id: deploy
+        if: steps.changes.outputs.deploy == 'true'
+        run: npm run ads:worker-deploy
+        env:
+          # A Worker-capable token can be added without touching the Pages secret.
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: a32bba62c77df5e8f6bd33d04478ec34
+      - name: Explain a failed Worker deploy
+        if: failure() && steps.deploy.conclusion == 'failure'
+        run: |
+          echo "::error::Worker deploy failed. If the error above is an authentication or permission one (401/403, 'Authentication error', 'not authorized'), the token lacks Workers Scripts: Edit (or Secrets Store access for the secrets_store bindings). This job authenticates with the repo secret CLOUDFLARE_WORKERS_API_TOKEN when set, otherwise CLOUDFLARE_API_TOKEN (the Pages token). Add or fix either secret (README: Deploy)."
