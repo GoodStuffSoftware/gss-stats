@@ -45,7 +45,18 @@ const copyWidget = (w: Widget): Widget => ({
 const draft = reactive<Widget>(copyWidget(props.widget))
 watch(
   () => props.widget,
-  (w) => Object.assign(draft, copyWidget(w)),
+  (w) => {
+    // Replace, not merge: a key the new widget lacks (a cleared `fit`) must not survive in the draft.
+    const next = copyWidget(w)
+    for (const k of Object.keys(draft)) if (!(k in next)) delete (draft as unknown as Record<string, unknown>)[k]
+    Object.assign(draft, next)
+  },
+)
+// The editor never edits the grid position or size, but the dashboard does while it is open (a fit
+// card refits as its data loads): keep the draft's copy current so Save does not write a stale one.
+watch(
+  () => [props.widget.x, props.widget.y, props.widget.w, props.widget.h] as const,
+  ([x, y, w, h]) => Object.assign(draft, { x, y, w, h }),
 )
 
 // Belt and suspenders for "the sheet must scroll to the top when it opens" (review fix,

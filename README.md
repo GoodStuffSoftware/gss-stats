@@ -106,7 +106,13 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   exactly as before: no storage migration and no `CONFIG_VERSION` bump. On a phone
   (<= 700px) the one-column stack sizes itself, so the measurement is not written back to the
   desktop `h`; a zoomed card is not fitted either. The last fitted `h` is saved as an ordinary
-  height, so turning the option off keeps the card at that size.
+  height, so turning the option off keeps the card at that size. The height is measured with
+  the card's layout box (not its on-screen rect, so the zoom animation cannot inflate it), is
+  reported only after the content has been quiet for 300ms (data that loads in two steps saves
+  once) and never from a hidden or detached card; a layout equal to the one last loaded or
+  saved is not written back. The fitted `h` depends on the card's width (text wraps), and the
+  layout is shared: two tabs open at different widths each compute their own `h` and the
+  last save wins.
 - **The main filter bar is always visible**, in normal flow directly under the page
   tabs (range, sites, exclusions, sync-across-pages). If it scrolls out of view, a
   small "show filters" button appears top-right — see the IntersectionObserver on

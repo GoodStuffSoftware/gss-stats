@@ -66,11 +66,16 @@ onMounted(async () => {
   config.syncRange = norm.syncRange
 
   await nextTick()
+  lastPersisted = JSON.stringify(config)
   loaded.value = true
 })
 
 // ── Persistence (debounced) ───────────────────────────────────────────────────
 let saveTimer: number | undefined
+// The config as last loaded or successfully saved. A save whose final state equals it is skipped,
+// so a fit card that settles back to its stored `h` (it passes through a placeholder height while
+// its data loads) does not write the layout on every page load.
+let lastPersisted = ''
 function scheduleSave() {
   // Never save while signed out: a config that fell back to defaults because the load
   // was refused must not overwrite the stored one.
@@ -78,7 +83,13 @@ function scheduleSave() {
   saveState.value = 'saving'
   clearTimeout(saveTimer)
   saveTimer = window.setTimeout(async () => {
-    const ok = await saveConfig(JSON.parse(JSON.stringify(config)) as DashboardConfig)
+    const body = JSON.stringify(config)
+    if (body === lastPersisted) {
+      saveState.value = 'idle'
+      return
+    }
+    const ok = await saveConfig(JSON.parse(body) as DashboardConfig)
+    if (ok === true) lastPersisted = body
     saveState.value = ok === 'stale' ? 'stale' : ok ? 'saved' : 'error'
   }, 700)
 }
