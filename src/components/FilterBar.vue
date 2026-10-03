@@ -3,7 +3,7 @@ import { reactive, computed, watch, ref, onMounted, onBeforeUnmount } from 'vue'
 import type { GlobalFilters } from '../types'
 import { sitesTree } from '../sitesStore'
 import type { SiteGroup, SiteSub } from '../types'
-import { relativeRange, isoToYmd, ymdRangeToISO, rangeLabel } from '../lib/range'
+import { relativeRange, rangeToYmd, ymdRangeToISO, rangeLabel } from '../lib/range'
 
 const props = defineProps<{ filters: GlobalFilters; syncRange?: boolean }>()
 const emit = defineEmits<{ change: [GlobalFilters]; toggleSync: [boolean] }>()
@@ -20,8 +20,9 @@ const toYmd = ref('')
 // range across pages; this one just keeps this page's own controls in sync with its state).
 function syncRangeDisplay() {
   rangeInput.value = rangeLabel(local.since, local.until, local.rangeRel)
-  fromYmd.value = isoToYmd(local.since)
-  toYmd.value = isoToYmd(local.until)
+  const ymd = rangeToYmd(local.since, local.until) // an ET-day range shows that one ET day
+  fromYmd.value = ymd.from
+  toYmd.value = ymd.to
   const idx = currentStepIdx()
   if (idx >= 0) sliderIdx.value = idx
 }
