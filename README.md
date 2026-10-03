@@ -491,8 +491,8 @@ The rows still count everywhere else: by path, by ET day or flight day, by campa
 metric cards. The metric cards follow the same rule: in a country cell (`campaign-country`)
 these rows belong to no country, so they count only where no country is asked, and
 `campaign.completions` takes no `country` param at all. `/api/popups` and the ads-read
-routine's hourly site-event read and per-country read leave them out too. The guard keys on dimensions and drills
-only; the chart's own date range is not yet clamped to whole days. One visible effect: the **Arrivals by ET hour of day** chart no longer counts an arrival
+routine's hourly site-event read and per-country read leave them out too. The guard keys on dimensions and drills;
+a date range that is not whole ET days is handled by the whole-days rule below. One visible effect: the **Arrivals by ET hour of day** chart no longer counts an arrival
 whose first beacon was a return or completion row, so its total can sit slightly below the
 flight-day chart's. Another: the default **Pageviews over time** (Beacon page) and **Visits over
 time** (Best Sudoku · Traffic) trends group by the UTC `date`, so they no longer count these rows
@@ -509,8 +509,23 @@ arrival an arrival (`arrival` dimension, the Arrivals tiles and charts), and the
 flight start, a release, a fix go-live or an ET day boundary (the metric registry's segment and
 day indices, the routine's hour buckets cut only at such instants), which is never an
 hour-of-day split. The routine's Play line names only the ET date of the first or last
-`/return/` row, never its time; clamping a sub-day range to whole days is the next slice. See
+`/return/` row, never its time. See
 [`src/lib/splitGuard.ts`](src/lib/splitGuard.ts).
+
+**A date range that is not whole ET days counts these rows over whole ET days.** Otherwise
+three back-to-back one-hour ranges would read the rows back hour by hour. Each bound of the
+range moves to the nearest ET midnight (an exact tie, noon, goes to the later one) for these
+rows only; every other row keeps the exact range. Nearest is Mike's ruling (2026-10-03); the
+two other rules (outward: widen to the whole days touched; inward: shrink to the whole days
+inside) stay one constant away (`REFUSED_WINDOW_SNAP`). When the bounds meet, as for most
+ranges shorter than a day, these rows count zero. A range already on ET midnights (the date
+picker's ET days, a whole-day preset) runs exactly as before. Charts, `/api/completions` and
+the metric cards' page range (`window: 'page'`) all follow it and say so in a caption: "Return
+and completion rows are counted over whole ET days." Rolling presets (last 24 hours, last 7
+days) are rarely on ET midnights, so most default views carry that caption. It adds no D1
+bound parameters. Today's totals stay live (ruling 2026-10-03), so polling a running total
+still shows when it grew; only shrinking to whole days and holding the open day would close
+that, and live data was chosen over it.
 
 **Every stored geo-beacon column is a chartable dimension AND a filter.** `functions/api/geo.ts`
 whitelists every analytic `hits` column (`GEO_DIMS`) — region/city/postal/country/continent/
