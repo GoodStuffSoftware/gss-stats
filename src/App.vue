@@ -1365,6 +1365,20 @@ function toggleDark() {
   margin-top: 8px;
 }
 
+/* Compact bar (lib/responsive.ts TOPBAR_COMPACT_MAX_WIDTH): the bar would wrap here, so the search box
+   collapses to its icon (the button still opens the palette, "/" still works). AccountMenu does the same
+   for the account. At 700px and below the phone layout below takes over. */
+@media (min-width: 701px) and (max-width: 1000px) {
+  .nav-search-btn {
+    min-width: 0;
+    padding: 7px;
+  }
+  .nav-search-label,
+  .nav-search-btn kbd {
+    display: none;
+  }
+}
+
 @media (max-width: 700px) {
   .app {
     padding: 0 12px 48px;

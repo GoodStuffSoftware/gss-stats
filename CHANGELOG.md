@@ -13,6 +13,9 @@ All notable changes to **gss-stats** are documented here. The format follows
   keeps the window and filters it still supports, the window picker says "Default" rather than
   showing a window the row doesn't store, and editing another chart while the editor is open
   shows that chart instead of the previous one.
+- **The header stays on one row on a tablet or foldable.** Between 701px and 1000px wide the
+  search box shrinks to its icon and the account becomes an icon menu with your e-mail and Log out,
+  so the bar no longer wraps onto a second row.
 - **Undoing a change while it saves still saves the undo.** Reverting an edit before its save
   finished used to leave the stored dashboard on the edit while the screen showed the original.
 - **The dashboard loads with browser storage blocked.** A private window or disabled site data no
