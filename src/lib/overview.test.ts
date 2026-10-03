@@ -127,6 +127,12 @@ describe('releaseComparisonWindows', () => {
     const nowMs = etMidnightUtcMs('2026-09-15')
     expect(releaseComparisonWindows('2026-07-13', '2026-07-13', nowMs)).toBeNull()
   })
+  it('windows are whole ET days across the 25-hour fall-back day (2026-11-01)', () => {
+    const win = releaseComparisonWindows('2026-10-31', '2026-07-13', etMidnightUtcMs('2026-11-03'))!
+    expect(win.days).toBe(2)
+    expect(win.after).toEqual([etMidnightUtcMs('2026-11-01'), etMidnightUtcMs('2026-11-03')])
+    expect(win.after[1] - win.after[0]).toBe(49 * 3_600_000)
+  })
   it('null until the first full day after the release date is complete', () => {
     expect(releaseComparisonWindows('2026-09-24', '2026-07-13', etMidnightUtcMs('2026-09-25'))).toBeNull()
     expect(releaseComparisonWindows('2026-09-24', '2026-07-13', etMidnightUtcMs('2026-09-26'))!.days).toBe(1)
