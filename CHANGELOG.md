@@ -6,6 +6,13 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.14.1] — 2026-10-03
+
+### Changed
+- **The layout-restore steps in the README now work in Windows PowerShell.** Each command is its
+  own block, the downloads keep the file as plain UTF-8, the file check is a PowerShell one-liner,
+  and a note warns that putting a backup back discards every layout edit made since it was taken.
+
 ## [0.14.0] — 2026-10-03
 
 ### Added
