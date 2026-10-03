@@ -87,6 +87,9 @@ describe('cardLimitProblems: each limit, at and one past it', () => {
   ] as const)('%s', (_n, at, past, msg) => {
     expect(cardLimitProblems(at)).toEqual([])
     expect(cardLimitProblems(past).join('\n')).toMatch(msg)
+    // The load path refuses each one too, not only cardLimitProblems on its own.
+    expect(normCardRef({ spec: past })).toEqual({ preset: INVALID_CARD_PRESET })
+    if (!validateCard(at as CardSpec).length) expect(normCardRef({ spec: at })).toEqual({ spec: at })
   })
   it('the JSON size', () => {
     const big = rowsCard(Array.from({ length: 40 }, (_, i) => textItem(`i${i}`, 'x'.repeat(200))), 2)
@@ -184,7 +187,7 @@ describe('slice 1a: a note id this build does not know is kept, not refused', ()
     const spec = unknownNotes()
     spec.repeat = { ...spec.repeat!, organic: true, empty: { label: '', text: { note: 'future.nothingYet' } } } as any
     ;(spec.badge!.display as any).tones = tones(32)
-    spec.sections[0].items.push({ id: 'trend', label: { metric: true }, data: { metric: 'campaign.returnD0' }, display: { as: 'sparkline', series: 'daily' } } as any)
+    spec.sections[0].items.push({ id: 'trend', label: { metric: true }, data: { metric: 'bsk.pageviews', window: 'page' }, display: { as: 'sparkline', series: 'daily' } } as any)
     expect(validateCard(spec)).toEqual([])
     expect(cardLimitProblems(spec)).toEqual([])
     const widget = { id: 'w', title: 'Mine', type: 'card', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 0, w: 6, h: 6, fit: 'content', card: { spec: clone(spec) } }

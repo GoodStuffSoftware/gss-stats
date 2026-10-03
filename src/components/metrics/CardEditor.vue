@@ -409,7 +409,7 @@ function removeSection(i: number) {
                 </div>
                 <button type="button" class="icon-btn danger" :title="'Remove the colour for ' + r.value" @click="removeToneRow(i)">✕</button>
               </div>
-              <button type="button" class="btn" :disabled="toneRowsFull" :aria-describedby="toneRowsFull ? `${tonesGroupId}-max` : undefined" @click="addToneRow">+ Add a colour</button>
+              <button type="button" class="btn" :aria-disabled="toneRowsFull || undefined" :aria-describedby="toneRowsFull ? `${tonesGroupId}-max` : undefined" @click="addToneRow">+ Add a colour</button>
               <p v-if="toneRowsFull" :id="`${tonesGroupId}-max`" class="hint">Up to {{ BADGE_TONE_MAX }} colours</p>
             </div>
           </template>
