@@ -42,12 +42,13 @@ export const POPUP_EVENT_PREFIXES = [
   // '/' are matched as a raw prefix below (isPopupEventPath/popupExcludeClause/
   // popupIncludeClause), not the exact-or-prefix-plus-slash shape the other entries use.
   '/game/complete/',
-  // best-sudoku card 125 (not yet live as of this file — see GAME_COMPLETE_DEFERRED_PREFIX in
-  // lib/campaigns.ts): EU visitors whose game finished while the consent modal was still
-  // unanswered send the SAME completion later, at consent time, on
+  // best-sudoku card 125, legacy path: a game finished by an EU visitor while the consent modal
+  // was still unanswered once went out later, at consent time, on
   // `/game/complete-deferred/<mode>/<difficulty>` instead of the live `/game/complete/<mode>/
-  // <difficulty>` path. The worker stamps `ts` at ingest, so the row's time is consent time,
-  // not completion time — never a live completion, never a funnel "completed" step (see
+  // <difficulty>` path (see GAME_COMPLETE_DEFERRED_PREFIX in lib/campaigns.ts). No tagged
+  // best-sudoku build sends it any more, but the path stays classified so old rows stay out of
+  // page views. The worker stamps `ts` at ingest, so the row's time is consent time, not
+  // completion time — never a live completion, never a funnel "completed" step (see
   // lib/campaigns.ts classifyFunnelPath, whose GAME_COMPLETE_PREFIX anchors on the exact
   // `/game/complete/` segment and therefore never matches this hyphenated sibling path). Same
   // trailing-slash prefix-match convention as `/game/complete/` above, and a DISTINCT family
