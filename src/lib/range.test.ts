@@ -15,10 +15,19 @@ import {
   SINCE_FIRST_CAMPAIGN,
   SINCE_FIRST_UNTIL_LAST_CAMPAIGN,
 } from './range'
-import { CAMPAIGNS } from './campaigns'
+import { CAMPAIGNS, etMidnightUtcMs } from './campaigns'
 import { defaultCampaignsWidgets, flightDayWidget, hourOfDayWidget } from './defaults'
 
 const NOW = Date.parse('2028-06-15T12:00:00Z') // well over a year after every configured flight
+
+/** ET midnight of the day after the latest configured flightEnd: the instant a closed
+ * "until last campaign ends" range stops at. Read from the config (not a literal), so a new
+ * flight, or a correction to a flight's dates, never needs this test touched. */
+const LAST_END_MS = (() => {
+  const lastEnd = CAMPAIGNS.map((c) => c.flightEnd).filter((d): d is string => !!d).sort().at(-1)!
+  const [y, m, d] = lastEnd.split('-').map(Number)
+  return etMidnightUtcMs(new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10))
+})()
 beforeEach(() => vi.useFakeTimers({ now: NOW, toFake: ['Date'] }))
 afterEach(() => vi.useRealTimers())
 
@@ -62,9 +71,8 @@ describe('since first campaign', () => {
     for (const w of [flightDayWidget({ x: 0, y: 0, w: 12, h: 10 }), ...shipped]) {
       expect(w.filters?.rangeRel, w.id).toBe(SINCE_FIRST_UNTIL_LAST_CAMPAIGN)
       expect(w.filters?.since, w.id).toBe('2026-09-02T04:00:00.000Z')
-      // Closed, not NOW: ET midnight of the day after the retest's flightEnd (2026-10-02), the
-      // latest of the three configured flights.
-      expect(w.filters?.until, w.id).toBe('2026-10-03T04:00:00.000Z')
+      // Closed, not NOW: ET midnight of the day after the latest configured flightEnd.
+      expect(w.filters?.until, w.id).toBe(new Date(LAST_END_MS).toISOString())
       expect(w.filters?.until, w.id).not.toBe(new Date(NOW).toISOString())
     }
   })
@@ -93,25 +101,25 @@ describe('since first campaign until last campaign ends', () => {
     }
   })
 
-  it('the transition when the retest ends on 2026-10-02: open right up to ET midnight of 10-03, then closed', () => {
-    const dayAfterRetestEndsEt = Date.parse('2026-10-03T04:00:00.000Z') // EDT midnight starting 10-03
-    vi.setSystemTime(dayAfterRetestEndsEt - 1)
+  it('the transition when the last flight ends: open right up to ET midnight of the day after its flightEnd, then closed', () => {
+    const dayAfterLastEndsEt = LAST_END_MS
+    vi.setSystemTime(dayAfterLastEndsEt - 1)
     expect(lastCampaignEndMs()).toBeNull()
     expect(relativeRange(SINCE_FIRST_UNTIL_LAST_CAMPAIGN)).toEqual({
       since: '2026-09-02T04:00:00.000Z',
-      until: new Date(dayAfterRetestEndsEt - 1).toISOString(),
+      until: new Date(dayAfterLastEndsEt - 1).toISOString(),
     })
 
-    vi.setSystemTime(dayAfterRetestEndsEt)
-    expect(lastCampaignEndMs()).toBe(dayAfterRetestEndsEt)
+    vi.setSystemTime(dayAfterLastEndsEt)
+    expect(lastCampaignEndMs()).toBe(dayAfterLastEndsEt)
     expect(relativeRange(SINCE_FIRST_UNTIL_LAST_CAMPAIGN)).toEqual({
       since: '2026-09-02T04:00:00.000Z',
-      until: new Date(dayAfterRetestEndsEt).toISOString(),
+      until: new Date(dayAfterLastEndsEt).toISOString(),
     })
 
     // Any later instant still reads the same closed instant — the range has stopped growing.
-    vi.setSystemTime(dayAfterRetestEndsEt + 30 * 86_400_000)
-    expect(lastCampaignEndMs()).toBe(dayAfterRetestEndsEt)
+    vi.setSystemTime(dayAfterLastEndsEt + 30 * 86_400_000)
+    expect(lastCampaignEndMs()).toBe(dayAfterLastEndsEt)
   })
 
   it('labels itself "Since first campaign" too, not a calendar range', () => {
