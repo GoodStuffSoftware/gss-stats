@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-10-03
+
 ### Added
 - **A retention-verdict card preset.** It shows each campaign arm and the organic baseline with its
   GO, HOLD, NO-GO, provisional, maturing or too-few verdict, the days 2-7 return rate with 90%
