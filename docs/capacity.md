@@ -240,12 +240,11 @@ sections the metrics batch covers, against **9,994 for a fully uncached batch an
 one** (a cache entry is per colo). The timeline, first-hit and release-panel queries are not part of
 the batch; they stay on `/api/overview` until later slices.
 
-Two reads dominate and are candidates for later work, not changed here: `campaignReturns` scans
-every `bestsudoku-web` row (the path-embedded uc has no index to use), and a closed campaign's
-`campaignPathVisitor` scans every row since its flight start (there is no index on `campaign`).
-Bounding `campaignReturns` by the campaign's attribution start would read only rows since the flight
-began and would also drop pre-launch QA return beacons; it changes counts, so it needs an owner
-decision first.
+Two reads dominate and are candidates for later work: `campaignReturns` (now bounded below by the
+campaign's attribution start with no upper bound, so it no longer counts pre-launch QA return
+beacons, though the `site`-only index may still not use `ts`) and a closed campaign's
+`campaignPathVisitor`, which scans every row since its flight start (there is no index on
+`campaign`).
 
 ### CPU
 
@@ -334,8 +333,8 @@ minutes to 24 hours for the closed flight); the two arrivals charts scan `hits` 
 first campaign's start (they cannot use an index on `campaign`, as the old attribution scan could
 not either), so a page with nothing cached now reads about **2,650 fewer** rows than the old
 `/api/campaigns` page did — the opposite of what the stale 20,145 figure implied — and a cached
-page reads none for the cards. `campaignReturns` still scans every `bestsudoku-web` row (§7);
-bounding it is the same owner decision.
+page reads none for the cards. `campaignReturns` is now bounded below by the campaign's attribution
+start (§7) with no upper bound.
 
 **A newly added flight-day chart's range closes once every flight is over (v0.12.1,
 lib/range.ts):** the hour-of-day chart's window keeps growing forever (`since first campaign`,
