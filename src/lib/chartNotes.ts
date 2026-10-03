@@ -4,7 +4,8 @@
 // a different thing: MetricCard keeps them inside the card body (`.mc-captions`), and hides them
 // through the same `widget.hiddenCaveats` list (isNoteIdHideable below).
 import type { StatsResponse, Widget } from '../types'
-import { getNote, widgetCaptionNoteIds, type NoteSeverity } from './notes'
+import { getNote, isStaticCaptionNote, noteTemplate, widgetCaptionNoteIds, type NoteSeverity } from './notes'
+import { CAPTION_MAX_CHARS } from './defaults'
 import { rangeNoticeText } from './rangeNotice'
 import { REFUSED_WHOLE_DAYS_CAPTION, SPLIT_GUARD_CAPTION } from './splitGuard'
 
@@ -82,4 +83,36 @@ export function isChartNoteHidden(note: ChartNote, hiddenCaveats: readonly strin
 /** The notes ChartCard shows: allChartNotes minus the ones this widget hides. */
 export function chartNotes(widget: Widget, data: StatsResponse | null | undefined, error: string | null | undefined): ChartNote[] {
   return allChartNotes(widget, data, error).filter((n) => !isChartNoteHidden(n, widget.hiddenCaveats))
+}
+
+/** D5 convert-on-edit (slice 1c). ChartEditor applies this to its draft when it opens a chart that
+ * still has legacy `notes` ids, so the author sees the result and Cancel leaves the chart as it was:
+ *  - a static library caption (isStaticCaptionNote) is appended to `caption` as its text, in list
+ *    order, blank-line separated, after any existing caption; its id leaves `notes`. One the chart
+ *    hides (`hiddenCaveats`) leaves `notes` without adding text, so the chart looks the same;
+ *  - every other id stays in `notes`: an unknown id until the author removes it (N1), and a
+ *    caveat (D1: gated, computed or code-tied text, or a data-cut note), which must stay live;
+ *  - `notes` is deleted once empty. A note widget never shows `notes`, so it is left alone.
+ * Returns a new widget (never mutates) and the converted ids; with none, the same widget. */
+export function convertLegacyNotes<W extends Widget>(widget: W): { widget: W; converted: string[] } {
+  if (widget.type === 'note' || !widget.notes?.length) return { widget, converted: [] }
+  const keep: string[] = []
+  const converted: string[] = []
+  const texts: string[] = []
+  for (const id of widget.notes) {
+    if (!isStaticCaptionNote(id)) {
+      keep.push(id)
+      continue
+    }
+    converted.push(id)
+    if (!widget.hiddenCaveats?.includes(id)) texts.push(noteTemplate(id).trim())
+  }
+  if (!converted.length) return { widget, converted }
+  const next = { ...widget }
+  const caption = [widget.caption?.trimEnd() ?? '', ...texts].filter(Boolean).join('\n\n').slice(0, CAPTION_MAX_CHARS)
+  if (caption) next.caption = caption
+  else delete next.caption
+  if (keep.length) next.notes = keep
+  else delete next.notes
+  return { widget: next, converted }
 }

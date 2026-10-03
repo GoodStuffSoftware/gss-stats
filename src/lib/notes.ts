@@ -622,6 +622,21 @@ export function noteOptions(): { value: string; label: string }[] {
     })
 }
 
+/** A static library caption (decision D1, slice 1c): fixed text with no `activeWhen` gate, no
+ * computed text, no code-tied `vars`, and not a data-cut note (`hideable: false`). Only these are
+ * offered by "Insert from library" and folded into `Widget.caption` when a chart with legacy
+ * `notes` is edited (D5); every other registry entry is a caveat that stays system-owned. */
+export function isStaticCaptionNote(id: string): boolean {
+  const n = getNote(id)
+  return !!n && n.kind !== 'label' && typeof n.text === 'string' && !n.activeWhen && !n.vars && n.hideable !== false
+}
+
+/** "Insert from library" options: every static caption, id + a short plain-text preview. The
+ * entries themselves stay read-only; inserting copies the text (noteTemplate) into the caption. */
+export function libraryCaptionOptions(): { value: string; label: string }[] {
+  return noteOptions().filter((o) => isStaticCaptionNote(o.value))
+}
+
 /** Resolve which registry note ids a chart widget's attached captions should show — pulled
  * out of ChartCard.vue as a pure function so the per-widget-override rule is unit-testable
  * without mounting a component. Rules (see ChartCard.vue's own comment for the reasoning):
@@ -631,8 +646,9 @@ export function noteOptions(): { value: string; label: string }[] {
  *    feature existed (widget.notes is absent/undefined on it) — it renders exactly as it
  *    did before, never gaining a caption it never had just because the registry now HAS
  *    scope defaults. Scope defaults (defaultNoteIdsForScope) are only ever used to PRE-FILL
- *    `notes` when a widget is first created or edited (see lib/defaults.ts's widget
- *    builders and ChartEditor.vue) — never injected here at render time. */
+ *    `notes` when a widget is first created (see lib/defaults.ts's widget builders) — never
+ *    injected here at render time. Since slice 1c `notes` is legacy: ChartEditor no longer
+ *    writes it, and folds its static entries into `Widget.caption` on the next edit (D5). */
 export function widgetCaptionNoteIds(widget: { type: string; notes?: string[] }): string[] {
   if (widget.type === 'note') return []
   return widget.notes ?? []
