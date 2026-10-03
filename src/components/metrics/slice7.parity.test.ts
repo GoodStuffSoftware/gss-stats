@@ -126,11 +126,13 @@ import { defaultFilters } from '../../lib/defaults'
 import type { Widget } from '../../types'
 import GOLDEN_FILE from './__fixtures__/slice7.golden.json'
 
-// The release panel follows the newest dated release. The goldens were captured when that was
-// v1.95.3, so pin it here; later releases being added to the marker list must not move them.
+// The release panel follows the newest dated release with a full day after it. The goldens were
+// captured when that was v1.95.3, so pin it here; later releases being added to the marker list
+// (or the real clock moving on) must not move them.
 vi.mock('../../lib/releases', async (importActual) => {
   const actual = await importActual<typeof import('../../lib/releases')>()
-  return { ...actual, latestDatedRelease: () => actual.datedReleases().find((r) => r.version === 'v1.95.3') ?? null }
+  const pinned = () => actual.datedReleases().find((r) => r.version === 'v1.95.3') ?? null
+  return { ...actual, latestDatedRelease: pinned, releaseSubjectOn: pinned, releaseAwaitingFullDay: () => null }
 })
 
 const GOLDEN = GOLDEN_FILE as Record<string, unknown>

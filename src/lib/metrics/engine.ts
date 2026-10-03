@@ -78,7 +78,7 @@ export function needsReleaseWindows(requests: readonly ResolvedRequest[]): boole
 /** The release windows from the first Best Sudoku hit (null when there is none: every day before
  * the release is then unavailable, as the release panel read `MIN(ts)` of nothing as now). */
 export function releaseWindowsFor(firstHitMs: number | null, nowMs: number): ReleaseWindows | null {
-  const latest = latestDatedRelease()
+  const latest = latestDatedRelease(nowMs)
   if (!latest) return null
   const w = releaseComparisonWindows(latest.dateEt, etDateOfMs(firstHitMs ?? nowMs), nowMs)
   return w ? { dateEt: latest.dateEt, days: w.days, before: w.before, after: w.after } : null
