@@ -6,7 +6,7 @@
 // pattern (ChartEditor.vue) so it works with a keyboard and on touch.
 import { computed, ref, useId, watch } from 'vue'
 import { MIN_COHORT } from '../../../lib/popupEvents'
-import { dataKindOf, dataSummaryLabel, displayAsLabel, firstDisplayFor, isDisplaySelectable, isKnownNote, labelNoteOptions, makeDisplay, notePreview, scopePathLabel, withField, withGating } from '../../../lib/metrics/editorModel'
+import { dataKindOf, dataSummaryLabel, displayAsLabel, firstDisplayFor, isDisplayAllowed, isKnownNote, labelNoteOptions, makeDisplay, notePreview, scopePathLabel, withField, withGating } from '../../../lib/metrics/editorModel'
 import type { MetricItem, RepeatSpec } from '../../../lib/metrics/types'
 import CardEditorData from './CardEditorData.vue'
 import CardEditorDisplay from './CardEditorDisplay.vue'
@@ -38,13 +38,15 @@ const whenEmptyNoteSelectId = useId()
 const captionModeId = useId()
 const frameId = useId()
 
-// Auto-correct the display when the data binding changes under it and the current display is no
-// longer offered — never leaves an item saveable with an incompatible display (validateCard
+// Auto-correct the display when the data binding changes under it and the new data's kind no
+// longer allows it — never leaves an item saveable with an incompatible display (validateCard
 // would reject it anyway; this just avoids the interim invalid state showing as a saved error).
+// "Allows", not "offers": a stored sparkline (not pickable in the form yet) keeps its display
+// and series while the data stays a kind that can draw one.
 watch(
   () => item.value.data,
   () => {
-    if (!isDisplaySelectable(item.value.data, item.value.display.as)) {
+    if (!isDisplayAllowed(item.value.data, item.value.display.as)) {
       const next = firstDisplayFor(item.value.data)
       if (next) item.value = { ...item.value, display: makeDisplay(next, item.value.display) }
     }

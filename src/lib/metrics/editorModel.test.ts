@@ -24,6 +24,7 @@ import {
   freshId,
   groupErrors,
   isDisplaySelectable,
+  isDisplayAllowed,
   isKnownNote,
   labelKind,
   makeData,
@@ -215,6 +216,16 @@ describe('display compatibility matrix (DISPLAYS_FOR, via displayOptionsFor)', (
       expect(opt!.disabled).toBe(true)
       expect(isDisplaySelectable(binding, 'sparkline')).toBe(false)
     }
+  })
+  it('isDisplayAllowed accepts a stored sparkline where the kind allows it, unlike isDisplaySelectable', () => {
+    expect(isDisplayAllowed({ metric: 'campaign.taggedArrivals' }, 'sparkline')).toBe(true)
+    expect(isDisplayAllowed({ metric: 'campaign.spend' }, 'sparkline')).toBe(true)
+    expect(isDisplayAllowed({ metric: 'campaign.taggedArrivals' }, 'percent')).toBe(false)
+    expect(isDisplayAllowed({ metric: 'not-a-real-metric' }, 'number')).toBe(false)
+  })
+  it("makeDisplay keeps a sparkline's own series and builds the daily one from another display", () => {
+    expect(makeDisplay('sparkline', { as: 'sparkline', series: 'daily' })).toEqual({ as: 'sparkline', series: 'daily' })
+    expect(makeDisplay('sparkline', { as: 'number' })).toEqual({ as: 'sparkline', series: 'daily' })
   })
   it('firstDisplayFor never returns the disabled sparkline placeholder', () => {
     expect(firstDisplayFor({ metric: 'campaign.taggedArrivals' })).not.toBe('sparkline')

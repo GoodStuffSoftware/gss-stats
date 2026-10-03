@@ -6,7 +6,9 @@
 // another kind and to none and back) → the emitted spec is still exactly the preset. Then the
 // controls for template fields the form used to hide (badge colours, card actions, label vars,
 // repeat.empty, window/country ids, column/row headings, whenZero, the column frame) round-trip,
-// and a `{ preset }` card opens showing its settings, read-only, until Customize.
+// and a `{ preset }` card opens showing its settings, read-only, until Customize. Fields the
+// editor has no control for (Widget.fit, a sparkline's `series`, repeat.organic) ride through
+// every no-op pass, a genuine data edit, and a ChartEditor save + reload.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises, type DOMWrapper, type VueWrapper } from '@vue/test-utils'
 import CardEditor from './CardEditor.vue'
@@ -143,7 +145,7 @@ describe('Customize, then use every control without changing anything: still exa
 describe('through ChartEditor: customize, save and reload keeps every preset', () => {
   for (const [id, preset] of Object.entries(PRESETS)) {
     it(id, async () => {
-      const widget: Widget = { id: 'w1', i: 'w1', title: 'Card', type: 'table', dimension: '', metric: 'pageviews', limit: 50, card: { preset: id }, x: 0, y: 0, w: 4, h: 8 }
+      const widget: Widget = { id: 'w1', i: 'w1', title: 'Card', type: 'table', dimension: '', metric: 'pageviews', limit: 50, card: { preset: id }, fit: 'content', x: 0, y: 0, w: 4, h: 8 }
       const w = mount(ChartEditor, { props: { widget, isNew: false }, attachTo: document.body })
       mounted.push(w)
       await flushPromises()
@@ -154,8 +156,10 @@ describe('through ChartEditor: customize, save and reload keeps every preset', (
       await w.find('button.btn-primary').trigger('click')
       const saved = w.emitted('save')!.at(-1)![0] as Widget
       expect(saved.card).toStrictEqual({ spec: plain(preset), from: id })
+      expect(saved.fit).toBe('content')
       const reloaded = normalizeConfig({ version: 99, activePageId: 'p', pages: [{ id: 'p', name: 'p', filters: {}, widgets: [saved] }] } as never)
       expect(reloaded.pages[0].widgets[0].card).toStrictEqual({ spec: plain(preset), from: id })
+      expect(reloaded.pages[0].widgets[0].fit).toBe('content')
     }, 30_000)
   }
 })
@@ -353,4 +357,71 @@ describe('the controls for fields the form used to hide round-trip', () => {
       expect(named, e.outerHTML.slice(0, 120)).toBeTruthy()
     }
   })
+})
+
+describe('fields the editor has no control for survive it: fit, a sparkline series, repeat.organic', () => {
+  const SPARK = { as: 'sparkline', series: 'daily' } as const
+  /** campaign-returns (repeat.organic: true) with its d0 count drawn as a daily sparkline. */
+  function sparkReturns(): CardSpec {
+    const spec = plain(PRESETS['campaign-returns'])
+    const d0 = spec.sections[0].items.find((i) => i.id === 'd0')!
+    d0.display = { ...SPARK }
+    expect(spec.repeat!.organic).toBe(true)
+    expect(validateCard(spec)).toEqual([])
+    return spec
+  }
+  /** The spec the editor holds: its last emit, or the input when nothing was emitted. */
+  function heldSpec(w: VueWrapper, input: CardSpec): CardSpec {
+    const ev = w.emitted('update:modelValue')
+    return ev?.length ? (ev[ev.length - 1][0] as { spec: CardSpec }).spec : input
+  }
+
+  it('a no-op pass over every control keeps the sparkline display and repeat.organic', async () => {
+    const spec = sparkReturns()
+    const w = mountEditor({ spec: plain(spec), from: 'campaign-returns' })
+    await flushPromises()
+    await noOpPass(w)
+    const out = heldSpec(w, spec)
+    expect(out).toStrictEqual(spec)
+    expect(out.sections[0].items.find((i) => i.id === 'd0')!.display).toStrictEqual(SPARK)
+    expect(out.repeat!.organic).toBe(true)
+    expect(controls(w).findAll('.errors li').map((e) => e.text())).toEqual([])
+  }, 60_000)
+
+  it('picking another metric of the same kind keeps a sparkline display and its series', async () => {
+    const spec = plain(PRESETS['bsk-kpis'])
+    spec.sections[0].items[0].display = { ...SPARK }
+    expect(validateCard(spec)).toEqual([])
+    const w = mountEditor({ spec, from: 'bsk-kpis' })
+    await flushPromises()
+    await controls(w).find('.ce-item-summary').trigger('click')
+    await flushPromises()
+    await controls(w).find('input[placeholder="Search metrics…"]').setValue('bsk.gameViews')
+    await flushPromises()
+    const rows = controls(w).findAll('.option-row')
+    expect(rows).toHaveLength(1)
+    await rows[0].trigger('click')
+    await flushPromises()
+    const item = lastSpec(w).sections[0].items[0]
+    expect((item.data as { metric: string }).metric).toBe('bsk.gameViews')
+    expect(item.display).toStrictEqual(SPARK)
+    expect(validateCard(lastSpec(w))).toEqual([])
+  })
+
+  it('through ChartEditor: save and reload keep fit, the sparkline series and repeat.organic', async () => {
+    const spec = sparkReturns()
+    const widget: Widget = { id: 'w1', i: 'w1', title: 'Card', type: 'table', dimension: '', metric: 'pageviews', limit: 50, card: { spec: plain(spec), from: 'campaign-returns' }, fit: 'content', x: 0, y: 0, w: 4, h: 8 }
+    const w = mount(ChartEditor, { props: { widget, isNew: false }, attachTo: document.body })
+    mounted.push(w)
+    await flushPromises()
+    for (const b of w.findAll('.ce-item-summary')) await b.trigger('click')
+    await flushPromises()
+    await w.find('button.btn-primary').trigger('click')
+    const saved = w.emitted('save')!.at(-1)![0] as Widget
+    expect(saved.fit).toBe('content')
+    expect(saved.card).toStrictEqual({ spec, from: 'campaign-returns' })
+    const reloaded = normalizeConfig({ version: 99, activePageId: 'p', pages: [{ id: 'p', name: 'p', filters: {}, widgets: [saved] }] } as never).pages[0].widgets[0]
+    expect(reloaded.fit).toBe('content')
+    expect(reloaded.card).toStrictEqual({ spec, from: 'campaign-returns' })
+  }, 30_000)
 })
