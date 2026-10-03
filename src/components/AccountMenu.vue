@@ -4,12 +4,13 @@
 // state and lands on the server's "Signed out" page.
 //
 // Two renderings of the same account, one shown at a time by CSS (the media query is
-// lib/responsive.ts TOPBAR_COMPACT_MAX_WIDTH): the e-mail + "Sign out" form in the header, and — in
+// lib/responsive.ts TOPBAR_COMPACT_QUERY): the e-mail + "Sign out" form in the header, and — in
 // the compact band where the bar would wrap — an account icon opening a small menu with who is
 // signed in and "Log out", which posts to the same /auth/logout.
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { signedInEmail, loadIdentity } from '../session'
 import { UserIcon } from '../lib/icons'
+import { TOPBAR_COMPACT_QUERY } from '../lib/responsive'
 
 onMounted(loadIdentity)
 
@@ -17,6 +18,7 @@ const open = ref(false)
 const root = ref<HTMLElement | null>(null)
 const btn = ref<HTMLButtonElement | null>(null)
 const menu = ref<HTMLElement | null>(null)
+const inlineSignOut = ref<HTMLButtonElement | null>(null)
 
 function toggle() {
   open.value = !open.value
@@ -48,13 +50,29 @@ watch(open, async (v) => {
   await nextTick()
   menu.value?.querySelector<HTMLElement>('[role="menuitem"]')?.focus()
 })
+// The icon menu only exists inside the compact band. If the viewport leaves it while the menu is open
+// (a foldable unfolding, a window resize), CSS hides the menu but `open` would stay true — and the
+// document Escape handler would keep swallowing Escape. So close it, and if focus was still inside it,
+// hand focus to the e-mail + Sign out form's button, the same control in the layout that took over.
+let band: MediaQueryList | null = null
+async function onBandChange(e: { matches: boolean }) {
+  if (e.matches || !open.value) return
+  const hadFocus = !!root.value?.contains(document.activeElement)
+  open.value = false
+  await nextTick()
+  if (hadFocus) inlineSignOut.value?.focus()
+}
 onMounted(() => {
   document.addEventListener('pointerdown', onDocPointerDown)
   document.addEventListener('keydown', onDocKeydown)
+  band = typeof window.matchMedia === 'function' ? window.matchMedia(TOPBAR_COMPACT_QUERY) : null
+  band?.addEventListener('change', onBandChange)
 })
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', onDocPointerDown)
   document.removeEventListener('keydown', onDocKeydown)
+  band?.removeEventListener('change', onBandChange)
+  band = null
 })
 </script>
 
@@ -62,7 +80,7 @@ onBeforeUnmount(() => {
   <div v-if="signedInEmail" class="account-root">
     <form class="account" method="post" action="/auth/logout">
       <span class="account-email mono" :title="`Signed in as ${signedInEmail}`">{{ signedInEmail }}</span>
-      <button class="btn" type="submit">Sign out</button>
+      <button ref="inlineSignOut" class="btn" type="submit">Sign out</button>
     </form>
     <div ref="root" class="account-compact" @focusout="onFocusOut">
       <button
@@ -70,6 +88,7 @@ onBeforeUnmount(() => {
         type="button"
         class="btn account-btn"
         aria-label="Account menu"
+        title="Account"
         aria-haspopup="menu"
         :aria-expanded="open"
         aria-controls="account-menu"
@@ -77,14 +96,16 @@ onBeforeUnmount(() => {
       >
         <UserIcon :size="15" aria-hidden="true" />
       </button>
-      <div v-show="open" id="account-menu" ref="menu" class="account-menu" role="menu" aria-label="Account">
-        <div class="account-menu-who" role="none">
+      <div v-show="open" id="account-menu" ref="menu" class="account-menu">
+        <div class="account-menu-who">
           <span class="account-menu-hint">Signed in as</span>
           <span class="account-menu-email mono">{{ signedInEmail }}</span>
         </div>
-        <form method="post" action="/auth/logout" role="none" @submit="close(true)">
-          <button class="account-menu-item" type="submit" role="menuitem">Log out</button>
-        </form>
+        <div role="menu" aria-label="Account">
+          <form method="post" action="/auth/logout" role="none" @submit="close(true)">
+            <button class="account-menu-item" type="submit" role="menuitem">Log out</button>
+          </form>
+        </div>
       </div>
     </div>
   </div>
@@ -178,9 +199,10 @@ onBeforeUnmount(() => {
   color: rgb(var(--amber-hover));
   outline: none;
 }
-/* Compact bar (lib/responsive.ts TOPBAR_COMPACT_MAX_WIDTH): the icon + menu replace the e-mail and
-   Sign out. At 700px and below the phone layout keeps the form as it is. */
-@media (min-width: 701px) and (max-width: 1000px) {
+/* Compact bar (lib/responsive.ts TOPBAR_COMPACT_QUERY — keep this text identical): the icon + menu
+   replace the e-mail and Sign out. At 700px and below the phone layout keeps the form as it is; the
+   band is the exact complement of that `(max-width: 700px)`, so no fractional width falls between. */
+@media (width > 700px) and (width <= 1000px) {
   .account {
     display: none;
   }
