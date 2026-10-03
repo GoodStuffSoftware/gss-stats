@@ -189,6 +189,23 @@ export function campaignById(id: string): CampaignFlight | undefined {
   return CAMPAIGNS.find((c) => c.id === id)
 }
 
+/** The web-only organic baseline arm: an untagged fresh install on bestsudoku-web sends
+ * `/return/organic/<bucket>` rows (Best Sudoku's first-touch record, labelled `organic`). It is
+ * not a campaign — it has no flight, spend or attribution window — so it travels as the
+ * `campaignId` param value 'organic' only on bindings that declare support (the return
+ * metrics and the ratios over them). The label is reserved: no campaign may use it as an id or
+ * a tag, or its rows would read as the baseline's. */
+export const ORGANIC_ARM_ID = 'organic'
+
+/** Throws when a campaign uses the reserved organic label as its id or one of its tags. */
+export function assertOrganicReserved(campaigns: readonly CampaignFlight[]): void {
+  for (const c of campaigns) {
+    if (c.id === ORGANIC_ARM_ID) throw new Error(`campaign id '${ORGANIC_ARM_ID}' is reserved for the organic baseline arm`)
+    if (c.ucValues.includes(ORGANIC_ARM_ID)) throw new Error(`campaign ${c.id}: tag '${ORGANIC_ARM_ID}' is reserved for the organic baseline arm`)
+  }
+}
+assertOrganicReserved(CAMPAIGNS)
+
 /** A campaign's first `directionalThroughDay` flight days are directional (per the brief).
  * Never directional when the campaign sets no such window. */
 export function isDirectionalDay(campaign: CampaignFlight, etDate: string): boolean {

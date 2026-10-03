@@ -8,7 +8,7 @@
 // normWidget) is slice 5, where it is wired into normalizeConfig.
 
 import { MIN_COHORT, POPUPS } from '../popupEvents'
-import { CAMPAIGNS } from '../campaigns'
+import { CAMPAIGNS, ORGANIC_ARM_ID } from '../campaigns'
 import { hasNote } from '../notes'
 import { safeUA } from '../ownExclusion'
 import { SITE_TAG_RE, WHEN_RE } from '../range'
@@ -16,7 +16,7 @@ import { addDays } from '../etTime'
 import { rangeMs } from './facts'
 import { METRICS, metricWindows, OPTIONAL_PARAMS, type MetricDef, type MetricParam } from './metrics'
 import { presetById } from './presets'
-import { RATIOS, ratioParamsOf, ratioWindowsOf, type RatioDef } from './ratios'
+import { RATIOS, ratioParamsOf, ratioSupportsOrganic, ratioWindowsOf, type RatioDef } from './ratios'
 import { COUNTRY_BUCKETS, WINDOW_SIDES, type CardAction, type CardRef, type CardSpec, type DataBinding, type DeltaName, type Display, type DisplayAs, type Label, type RepeatSpec, type WindowName } from './types'
 
 // ── Limits (ADR 0003 section 3, "The security whitelist") ─────────────────────────────────
@@ -33,9 +33,20 @@ const CAMPAIGN_IDS = new Set(CAMPAIGNS.map((c) => c.id))
 const POPUP_IDS = new Set(POPUPS.map((p) => p.id))
 const COUNTRY_IDS: ReadonlySet<string> = new Set(COUNTRY_BUCKETS)
 const CARD_ACTIONS: ReadonlySet<CardAction> = new Set(['ads-refresh'])
-/** A param value is one of its set: a configured campaign, a registered pop-up, a country bucket. */
-function paramValueOk(name: MetricParam, v: unknown): boolean {
-  return typeof v === 'string' && (name === 'campaignId' ? CAMPAIGN_IDS : name === 'popup' ? POPUP_IDS : COUNTRY_IDS).has(v)
+/** A param value is one of its set: a configured campaign, a registered pop-up, a country bucket.
+ * `campaignId` may also be the organic arm (ORGANIC_ARM_ID), but only on a binding that serves it
+ * (`organicOk`: bindingSupportsOrganic). */
+function paramValueOk(name: MetricParam, v: unknown, organicOk: boolean): boolean {
+  if (typeof v !== 'string') return false
+  if (name === 'campaignId' && v === ORGANIC_ARM_ID) return organicOk
+  return (name === 'campaignId' ? CAMPAIGN_IDS : name === 'popup' ? POPUP_IDS : COUNTRY_IDS).has(v)
+}
+/** Whether a binding serves the organic arm: a metric that declares it, or a ratio whose BOTH
+ * sides do (ratioSupportsOrganic). Unknown ids never do. */
+export function bindingSupportsOrganic(b: { metric: string } | { ratio: string }): boolean {
+  if ('metric' in b) return !!METRICS.get(b.metric)?.organic
+  const r = RATIOS.get(b.ratio)
+  return !!r && ratioSupportsOrganic(r)
 }
 /** The country split is the campaign fact's (its `cb` column): every side of the binding must read
  * that fact in the window asked for. */
@@ -107,6 +118,9 @@ export function validateCard(spec: CardSpec): string[] {
       if (r.over === 'windows' && !(WINDOW_SIDES as readonly string[]).includes(id)) errors.push(`${where}.repeat: unknown window '${id}'`)
     }
     if (r.tracked !== undefined && (r.tracked !== true || r.over !== 'campaigns')) errors.push(`${where}.repeat: tracked is for campaigns, and only true`)
+    // The organic arm rides only on a campaigns repeat; bindings that don't serve it are left out
+    // of its instance (scope.ts configRuling), never requested.
+    if (r.organic !== undefined && (r.organic !== true || r.over !== 'campaigns')) errors.push(`${where}.repeat: organic is for campaigns, and only true`)
     if (r.empty) {
       checkLabel(`${where}.repeat.empty.label`, r.empty.label, false)
       checkLabel(`${where}.repeat.empty.text`, r.empty.text, false)
@@ -124,7 +138,7 @@ export function validateCard(spec: CardSpec): string[] {
     const windows = isMetric ? metricWindows(METRICS.get(b.metric)!) : ratioWindowsOf(RATIOS.get(b.ratio)!)
     for (const [name, v] of Object.entries(b.params ?? {})) {
       if (!allowedParams.includes(name as MetricParam)) errors.push(`${where}: param '${name}' not accepted`)
-      else if (typeof v === 'string' && !paramValueOk(name as MetricParam, v)) errors.push(`${where}: unknown ${name} '${v}'`)
+      else if (typeof v === 'string' && !paramValueOk(name as MetricParam, v, bindingSupportsOrganic(b))) errors.push(`${where}: unknown ${name} '${v}'`)
     }
     for (const p of allowedParams) {
       if (OPTIONAL_PARAMS.has(p)) continue
@@ -376,7 +390,7 @@ function checkRequest(raw: Record<string, unknown>, key: string, context: ValidC
     if (!isObj(raw.params)) return failed(key, 'bad-param')
     for (const [name, v] of Object.entries(raw.params)) {
       if (!allowedParams.includes(name as MetricParam)) return failed(key, 'bad-param')
-      if (!paramValueOk(name as MetricParam, v)) return failed(key, 'bad-param')
+      if (!paramValueOk(name as MetricParam, v, metric ? !!metric.organic : ratioSupportsOrganic(ratio!))) return failed(key, 'bad-param')
       params[name as MetricParam] = v as string
     }
   }

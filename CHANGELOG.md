@@ -6,6 +6,15 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Return visits show an "Organic (web)" baseline row.** After the campaigns, the return-visits
+  panel adds untagged web visitors' return buckets, so each campaign can be read against people
+  who came on their own; the row stays hidden until the web site starts sending them.
+
+### Changed
+- **Campaign return visits now include the installed app.** A campaign's return buckets count
+  return visits from the Android app as well as the web site, still from its attribution start.
+
 ### Removed
 - **The "Deferred completions (EU consent)" tile is gone.** Best Sudoku now sends those games as
   ordinary completions, so the tile could only read 0; saved copies of it load without the tile, and a saved card whose only item was that
