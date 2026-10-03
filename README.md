@@ -1057,19 +1057,43 @@ To put a backup back, in this order:
 3. **Find the backup to restore**: list the backup keys, and pick the version that was stored
    before the upgrade (the highest one below the current `CONFIG_VERSION`: `backup:v12` to undo
    the v13 page-navigation upgrade). Namespace id
-   from `wrangler.toml`; a token with Workers KV Storage: Edit.
+   from `wrangler.toml`; a token with Workers KV Storage: Edit. The commands below are for
+   Windows PowerShell 5.1; run them one at a time, from the repo root.
 
-   ```bash
+   ```powershell
    npx wrangler kv key list --remote --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --prefix "dashboard:default:backup:"
    ```
 
 4. **Download it, keep a copy of what's there now, and check the file before writing it back**:
-   it must be non-empty, valid JSON with a `pages` array. Only then put it.
+   it must be non-empty, valid JSON with a `pages` array. Run each block on its own and only
+   continue when the previous one finished cleanly. (The `cmd /c` wrapper is deliberate: in
+   PowerShell 5.1 a plain `>` writes the file as UTF-16, which is not what KV holds, and
+   `| Set-Content` re-encodes the text.)
 
-   ```bash
-   npx wrangler kv key get "dashboard:default" --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-current.json
-   npx wrangler kv key get "dashboard:default:backup:v12" --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-backup.json
-   node -e "const c=JSON.parse(require('fs').readFileSync('layout-backup.json','utf8')); if(!Array.isArray(c.pages)||!c.pages.length) throw new Error('not a layout'); console.log('ok: version', c.version, '-', c.pages.length, 'pages')"
+   Keep what's there now, in case you need to undo the restore:
+
+   ```powershell
+   cmd /c 'npx wrangler kv key get dashboard:default --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-current.json'
+   ```
+
+   Download the backup (change `v12` to the version you picked in step 3):
+
+   ```powershell
+   cmd /c 'npx wrangler kv key get dashboard:default:backup:v12 --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-backup.json'
+   ```
+
+   Check it. This must print `ok: version ..., N pages`; if it throws or prints nothing, stop
+   and do **not** run the next block:
+
+   ```powershell
+   Get-Content layout-backup.json -Raw -Encoding UTF8 | ConvertFrom-Json | ForEach-Object { if ($_.pages -isnot [array] -or $_.pages.Count -eq 0) { throw 'not a layout' }; "ok: version $($_.version), $($_.pages.Count) pages" }
+   ```
+
+   Only after that printed `ok`, put it back. **This discards every layout edit made since the
+   backup was taken** (widget and chart edits too, not only the navigation changes), because
+   it replaces the whole stored layout:
+
+   ```powershell
    npx wrangler kv key put "dashboard:default" --path layout-backup.json --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote
    ```
 
