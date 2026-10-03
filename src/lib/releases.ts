@@ -46,7 +46,7 @@
 //  - v1.90.0–v1.94.x were bumped in CHANGELOG/package.json history but never reached a
 //    `vX.Y.Z` production tag before v1.95.3 shipped — presumed superseded/folded into
 //    v1.95.3's promotion, not separate releases; omitted.
-import { TRACKING_ACTIVATION_DATE_ET } from './popupEvents'
+import { TRACKING_ACTIVATION_DATE_ET, NEW_BEACONS_LIVE_AT_ET, RAW_INSTALL_DEDUPE_LIVE_AT_ET } from './popupEvents'
 
 export interface ReleaseMarker {
   version: string
@@ -123,6 +123,33 @@ export const RELEASES: ReleaseMarker[] = [
     dateEt: TRACKING_ACTIVATION_DATE_ET,
     note: 'Pop-up + campaign-return tracking live on web',
     major: true,
+  },
+  {
+    version: 'v1.95.4',
+    dateEt: '2026-09-26',
+    note: 'Installs made from the install prompt are now counted',
+  },
+  {
+    version: 'v1.95.5',
+    dateEt: NEW_BEACONS_LIVE_AT_ET,
+    note: 'Finished games and new-vs-returning sign-ins now reported',
+    major: true,
+  },
+  {
+    version: 'v1.95.6',
+    dateEt: RAW_INSTALL_DEDUPE_LIVE_AT_ET,
+    note: 'Install total no longer double-counted across open tabs',
+  },
+  {
+    version: 'v1.96.0',
+    dateEt: '2026-10-02',
+    note: 'Tour-first for new players, sign-in invite after the tour, sign-in before install',
+    major: true,
+  },
+  {
+    version: 'v1.96.1',
+    dateEt: '2026-10-03',
+    note: 'Leaderboard sign-in invite from 3 entries; cancelled install no longer hides the suggestion',
   },
 ]
 

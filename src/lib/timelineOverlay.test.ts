@@ -86,6 +86,17 @@ describe('overlay items', () => {
     for (const it of [...rel, ...live]) expect(it.note).not.toMatch(/\blib\/|\.ts\b|`/)
   })
 
+  it('lists v1.95.4 to v1.96.1 once each, on their ET release dates', () => {
+    const byLabel = new Map<string, string[]>()
+    for (const r of releaseItems()) byLabel.set(r.label, [...(byLabel.get(r.label) ?? []), r.date])
+    expect(byLabel.get('v1.95.4')).toEqual(['2026-09-26'])
+    expect(byLabel.get('v1.95.5')).toEqual(['2026-09-26'])
+    expect(byLabel.get('v1.95.6')).toEqual(['2026-09-26'])
+    expect(byLabel.get('v1.96.0')).toEqual(['2026-10-02'])
+    expect(byLabel.get('v1.96.1')).toEqual(['2026-10-03'])
+    for (const dates of byLabel.values()) expect(dates).toHaveLength(1)
+  })
+
   it('the three toggles switch their own items on and off', () => {
     expect(overlayItems({})).toEqual([])
     const all = overlayItems({ releases: true, goLive: true, flights: true })
