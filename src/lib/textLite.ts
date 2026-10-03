@@ -1,5 +1,6 @@
-// A tiny, intentionally limited "markdown-lite" for registry note/text bodies (owner
-// requirement, 2026-09-26): **bold** and [label](url) links only. Never rendered via v-html
+// A tiny, intentionally limited "markdown-lite" for registry note/text bodies and chart captions
+// (Widget.caption): **bold** and [label](url) links only, plus `{=…}` value tokens (shown as a dash
+// until slice 1d fills them). Never rendered via v-html
 // — parseTextLite tokenizes into plain data (TextToken[]) that NoteBlock.vue/TextBlock.vue
 // render through ordinary Vue template bindings (<strong>/<a>), so there is no HTML
 // injection surface no matter what a registry entry or a user's custom widget text contains.
@@ -99,8 +100,18 @@ function substituteVars(str: string, vars: InterpolateVars): string {
   })
 }
 
-/** The ONE safe way to combine markup + data-driven values (owner requirement:
- * "{campaign.spend}" rather than baked into strings). HIGH security fix (2026-09-26 delta
+/** A value token (`{=…}`, notes plan slice 1d "Insert value"). This build has no values to put
+ * there yet, so every token shows VALUE_TOKEN_PLACEHOLDER: a caption written by a newer build
+ * shows a dash here, never the raw token text. */
+export const VALUE_TOKEN_RE = /\{=[^{}]*\}/g
+export const VALUE_TOKEN_PLACEHOLDER = '—'
+
+function substituteValueTokens(str: string): string {
+  return str.replace(VALUE_TOKEN_RE, VALUE_TOKEN_PLACEHOLDER)
+}
+
+/** The ONE safe way to combine markup + data-driven values ("{campaign.spend}" rather than
+ * values baked into strings). HIGH security fix (2026-09-26 delta
  * review): this used to interpolate {vars} into the RAW STRING first and tokenize the
  * result second — so a var whose VALUE happened to contain "**x**" or
  * "[y](javascript:...)" became live markup, exactly the injection parseTextLite's own
@@ -113,7 +124,10 @@ function substituteVars(str: string, vars: InterpolateVars): string {
  * only way to make "a variable's value can never introduce markup" categorically true
  * rather than best-effort. */
 export function tokenizeAndInterpolate(input: string, vars?: InterpolateVars): TextToken[] {
-  const tokens = parseTextLite(input)
+  // Value tokens first, in every token's visible text (a bold or a link label too, never an
+  // href), and before {vars}: the placeholder holds no markup, and a var's own value is never
+  // rewritten.
+  const tokens = parseTextLite(input).map((t) => ({ ...t, value: substituteValueTokens(t.value) }))
   if (!vars) return tokens
   return tokens.map((t) => (t.type === 'text' ? { ...t, value: substituteVars(t.value, vars) } : t))
 }

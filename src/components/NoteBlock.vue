@@ -1,7 +1,7 @@
 <script setup lang="ts">
-// ONE reusable caveat/note renderer (owner requirement, 2026-09-26) — used by the 'note'
-// widget type, by every inline caveat a widget body shows, and by App.vue's page-level
-// banners. Give it EITHER `noteId` (looked up in lib/notes.ts's registry) or `text` (custom,
+// ONE reusable caveat/note renderer — used by the 'note' widget type, by every note under a
+// chart (lib/chartNotes.ts: the widget's plain-text caption and the data caveats), by every inline
+// caveat a widget body shows, and by App.vue's page-level banners. Give it EITHER `noteId` (looked up in lib/notes.ts's registry) or `text` (custom,
 // e.g. a user's own free-text note widget) — never both meaningfully at once, but `text`
 // wins if both are somehow set. `vars` interpolates data-driven values into a registry
 // note's `{varName}` placeholders (see lib/textLite.ts) — merged over the note's own

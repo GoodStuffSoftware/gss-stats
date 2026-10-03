@@ -151,6 +151,17 @@ export interface Widget {
   // scope has defaults — set once (e.g. by ChartEditor or a default layout), never
   // recomputed out from under a user's choice.
   notes?: string[]
+  // ANY widget (layout v16, LAYOUT_VERSIONS.captions): the chart's own plain-text caption, shown
+  // first under the chart (lib/chartNotes.ts). textLite markup (**bold**, [link](url)); a `{=…}`
+  // value token renders as "—" until 1d fills it. ≤ 2,000 characters (normWidget cuts longer text).
+  // Lives on the widget, outside the card spec (decision D4). Absent = no caption.
+  caption?: string
+  // ANY widget (layout v16): the caveats hidden on this chart or card, keyed by registry id
+  // (a legacy `notes` id or a card spec's own caption id) or by a runtime note's key
+  // ('popup-note'). A data-cut note (`hideable: false`: split-guard, refused-whole-days,
+  // range-notice, …) is never hidden, even when listed here. ≤ 32 entries, each
+  // /^[a-z0-9-]{1,64}$/. Absent = nothing hidden.
+  hiddenCaveats?: string[]
   // ANY widget except one holding a canvas (a chart or the map; lib/fit.ts canFit): 'content' =
   // the card's grid height follows its rendered content instead of the fixed `h` (components/
   // Dashboard.vue sets `h` to the smallest whole number of rows that holds it, so a saved `h` is

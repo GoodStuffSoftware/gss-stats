@@ -1,13 +1,16 @@
-// The notes/text registry (owner requirement, 2026-09-26): every caveat, definition, and
-// explanatory paragraph the dashboard shows lives here, ONE place, instead of scattered
-// literal strings/constants across App.vue and the widget bodies. A note is rendered
+// The notes/text registry: every system caveat, definition, and explanatory paragraph the
+// dashboard shows lives here, ONE place, instead of scattered literal strings/constants across
+// App.vue and the widget bodies. A chart's own caption is NOT kept here: since layout v16 (notes
+// plan, slice 1c) it is plain text on the widget (Widget.caption), and the static entries below
+// are a library the editor can copy text from. Every id stays readable, so a legacy `widget.notes`
+// list keeps rendering until the chart's next edit converts it. A note is rendered
 // through NoteBlock.vue (short, single-line caveats) or TextBlock.vue (longer, possibly
 // multi-paragraph prose) — never hand-written markup — via lib/textLite.ts's safe
 // tokenizer (no v-html anywhere).
 //
 // Design:
-//  - id: stable key, referenced by widget.noteId (the 'note' widget type) or widget.notes
-//    (an attached-caption list on any other widget).
+//  - id: stable key, referenced by widget.noteId (the 'note' widget type), a card spec's
+//    `captions`, widget.hiddenCaveats, or the legacy widget.notes caption list.
 //  - text: a string, or a function for text that depends on live config (e.g. Play
 //    tracking's activation date) — always called fresh, never cached.
 //  - kind: 'note' (short caveat — NoteBlock's default styling) or 'text' (longer prose —
@@ -157,8 +160,8 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
   },
   'min-cohort-caveat': {
     id: 'min-cohort-caveat',
-    // Data-driven value templated in, not baked into the string (owner requirement) — see
-    // lib/textLite.ts interpolate.
+    // Data-driven value templated in, not baked into the string — see lib/textLite.ts
+    // tokenizeAndInterpolate. The value follows code, so this entry is a caveat (decision D1).
     text: 'Rates need at least {minCohort} in their denominator, or they show "too few to report".',
     kind: 'note',
     severity: 'caveat',

@@ -575,7 +575,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
     <div class="card-body" @dblclick="onCardBodyDblClick">
       <!-- Bespoke bodies: overview / campaigns / ads-readings datasets, and the note type —
            own data fetch (or none), skip the generic loading/error/empty states above. -->
-      <MetricCard v-if="widget.card" ref="metricCard" :card-ref="widget.card" :context="metricsContext" :campaign-ids="widget.campaignIds" :fallback-title="widget.title" @open-campaigns="emit('open-campaigns')" />
+      <MetricCard v-if="widget.card" ref="metricCard" :card-ref="widget.card" :context="metricsContext" :campaign-ids="widget.campaignIds" :hidden-captions="widget.hiddenCaveats" :fallback-title="widget.title" @open-campaigns="emit('open-campaigns')" />
       <p v-else-if="widget.dataset === 'overview' || widget.dataset === 'campaigns'" class="state mono">{{ retiredPanelText }}</p>
       <AdsReadingsWidgetCard v-else-if="widget.dataset === 'ads-readings'" :widget="widget" />
       <NoteWidgetBody v-else-if="widget.type === 'note'" :widget="widget" />
@@ -621,10 +621,11 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
       <BaseChart v-else-if="chartConfig" ref="baseChartRef" :config="chartConfig" :drill-open="drillOpen" @point="onPoint" />
     </div>
 
-    <!-- Attached captions (owner requirement, 2026-09-26): registry notes shown under the
-         chart, through the SAME NoteBlock every inline caveat/note-type-widget uses — see
-         lib/notes.ts. `widget.notes`, or the dataset's own scope defaults when unset.
-         Pop-up dataset only: `data.note` (informational review fix, 2026-09-26) — a data
+    <!-- Notes under the chart (lib/chartNotes.ts, one fixed order): the widget's own plain-text
+         caption (Widget.caption), legacy registry caption ids (`widget.notes`, read-only; they
+         convert to caption text on the chart's next edit), then the runtime caveats, minus any
+         this widget hides (Widget.hiddenCaveats). All through the SAME NoteBlock every inline
+         caveat/note-type-widget uses. Pop-up dataset only: `data.note` (informational review fix, 2026-09-26) — a data
          caveat that travels with the API RESPONSE itself (functions/api/popups.ts, e.g. the
          known install-outcome gap), computed per-request rather than being static config
          like the registry captions above, so it has to be rendered from `data` here rather
