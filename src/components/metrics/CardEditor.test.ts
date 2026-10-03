@@ -269,7 +269,7 @@ describe('display compatibility matrix, as seen through the UI', () => {
     await flushPromises()
 
     const displayTabs = wrapper.findAll('[role="radiogroup"] .tab')
-    const asValues = displayTabs.map((t) => t.text().replace(' (coming soon)', ''))
+    const asValues = displayTabs.map((t) => t.text().replace(' (unavailable)', ''))
     expect(asValues).toEqual(['Counts']) // the display's plain name, never the raw 'counts' type value
     expect(asValues).not.toContain('Percent')
 

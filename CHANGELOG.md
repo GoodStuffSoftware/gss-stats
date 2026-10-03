@@ -12,6 +12,46 @@ All notable changes to **gss-stats** are documented here. The format follows
   where a value would be), so an older tab can't erase it on its next save.
 - **The card builder stops at 32 badge colours.** Adding more is turned off with a short note, and
   the builder refuses any card a reload would reject, so a card it saves always loads again.
+- **Best Sudoku v1.97.0 game starts no longer count as page views, and the first-session funnel
+  shows the new first-run counters.** Counted game starts are now an event beacon like the tour
+  exit and tutorial completion already are. The morning read and its report page list the tour
+  skips by stage (the same rows as tour skip, split by where), game starts by difficulty and
+  tutorial completions (first run vs replay) as plain counts, "not yet tracked" until the
+  first v1.97.0 row.
+
+## [0.14.3] — 2026-10-03
+
+### Changed
+- **The dashboard's own tests no longer reach for the network and no longer time out when run
+  side by side.** Nothing changes in the app.
+
+## [0.14.2] — 2026-10-03
+
+### Changed
+- **The icon library is updated to its latest release.** Every icon the dashboard uses looks the
+  same as before; nothing else changes.
+
+## [0.14.1] — 2026-10-03
+
+### Changed
+- **The layout-restore steps in the README now work in Windows PowerShell.** Each command is its
+  own block, the downloads keep the file as plain UTF-8, the file check is a PowerShell one-liner,
+  and a note warns that putting a backup back discards every layout edit made since it was taken.
+
+## [0.14.0] — 2026-10-03
+
+### Added
+- **Count and money items can be drawn as a sparkline.** The card editor now offers "Sparkline"
+  for a count or an amount over a date range or a campaign's window, and the card shows the
+  number with a small per-day line beside it; a day not measured is a gap in the line, never a zero.
+  A saved sparkline that cannot be drawn (for example over "today so far") shows as a plain number
+  instead of hiding its card.
+
+### Fixed
+- **"Save failed" clears when the layout is back on what the server holds.** Reverting an edit
+  that failed to save no longer leaves the failed label standing.
+- **A layout edit is sent when you leave the page.** An edit still waiting out the save delay is
+  sent as the page closes (a request the browser lets finish) instead of being dropped.
 
 ## [0.13.2] — 2026-10-03
 

@@ -207,6 +207,13 @@ describe('buildRequestSpec', () => {
     })
   })
 
+  it('a sparkline display asks for the daily series; no other display does', () => {
+    const spark: MetricItem = { id: 's', label: 'S', data: { metric: 'campaign.taggedArrivals' }, display: { as: 'sparkline', series: 'daily' } }
+    expect(buildRequestSpec(spark, campaignScope(ACTIVE_RETEST))?.series).toBe('daily')
+    const num: MetricItem = { id: 'n', label: 'N', data: { metric: 'campaign.taggedArrivals' }, display: { as: 'number' } }
+    expect(buildRequestSpec(num, campaignScope(ACTIVE_RETEST))?.series).toBeUndefined()
+  })
+
   it('a percent display never carries deltas even if somehow present on the item', () => {
     const item: MetricItem = { id: 'rate', label: 'Rate', data: { ratio: 'campaign.acceptPerAsk' }, display: { as: 'percent', decimals: 1 } }
     const spec = buildRequestSpec(item, campaignScope(ACTIVE_RETEST))
