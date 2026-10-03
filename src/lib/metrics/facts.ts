@@ -11,7 +11,8 @@
 // endpoints named below; /api/overview and /api/campaigns are retired):
 //   campaignPathVisitor ← /api/overview scorecard + /api/campaigns query 1 (minus their hour /
 //                         country split), plus the row-exact install-fix split `pf`
-//   campaignReturns     ← the /return/<uc>/* query both endpoints run
+//   campaignReturns     ← the /return/<uc>/* query both endpoints run, plus the installed app's
+//                         rows for a campaign and the web-only organic baseline arm
 //   flightPathsSeen     ← functions/_lib/campaignInstrumentation.ts (retired; moved here)
 //   bskKpiDays          ← /api/overview's KPI query (same WHERE)
 //   bskRangePath        ← /api/overview's timeline query (same WHERE)
@@ -40,7 +41,7 @@
 // split — and none joins rows.
 // facts.test.ts checks every statement.
 
-import { applyExclusions, CAMPAIGNS, campaignAttributionClause, campaignAttributionStartMs, campaignById, etFlightRangeMs, type CampaignFlight } from '../campaigns'
+import { applyExclusions, CAMPAIGNS, campaignAttributionClause, campaignAttributionStartMs, campaignById, etFlightRangeMs, ORGANIC_ARM_ID, type CampaignFlight } from '../campaigns'
 import { excludeInstallGapUnmeasured, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, popupIncludeClause } from '../popupEvents'
 import { last7DatesBefore, siteWindowClause } from '../overview'
 import { addDays as addEtDays, etSameTimeWindow } from '../etTime'
@@ -153,8 +154,11 @@ export interface FactDef {
   parse(raw: Record<string, unknown>[]): FactRows
 }
 
-// Return and funnel beacons are web-only (lib/campaigns.ts; functions/api/campaigns.ts BSK_SITE).
+// Funnel beacons are web-only (lib/campaigns.ts; functions/api/campaigns.ts BSK_SITE). Return
+// beacons fire on both: a campaign's /return/ rows come from the web site and the installed app
+// alike, while the organic baseline's are web-only (campaignReturns).
 export const BSK_WEB_SITE = 'bestsudoku-web'
+export const BSK_APP_SITE = 'bestsudoku-app'
 const INSTALL_FIX = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS
 
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -288,15 +292,25 @@ export const FACTS: Record<FactId, FactDef> = {
     splitAt: null,
     ttl: 'campaign',
     build(p) {
-      // Path-embedded uc, site-wide, NOT date-windowed: a d31-60 return can fire long after the
-      // flight ended (lib/campaigns.ts parseReturnPath). Only the LOWER bound is applied, the
-      // same one campaignAttributionClause gives the arrivals tile: rows before the campaign's
-      // attribution start (pre-launch tests, e.g. before 12:00 ET on the retest's first day) are
-      // left out, and an unconfirmed flightStart attributes nothing. A row filter on the
-      // aggregate; no device is linked to anything.
+      // The organic baseline arm (lib/campaigns.ts ORGANIC_ARM_ID): its own reserved tag, the web
+      // site ONLY (Best Sudoku never sends it from the installed app, where a late Play referrer
+      // would make an app 'organic' record swallow a campaign's first touch), and no lower bound
+      // (it has no flight). Counts only, like every arm: no device, hour or place column.
+      if (p.campaignId === ORGANIC_ARM_ID) {
+        const w: string[] = ['site = ?', 'path LIKE ?']
+        const b: unknown[] = [BSK_WEB_SITE, `/return/${ORGANIC_ARM_ID}/%`]
+        applyExclusions(w, b)
+        return { db: 'gss_geo', sql: `SELECT path, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY path`, binds: b }
+      }
+      // A campaign: path-embedded uc, on the web site AND the installed app, NOT date-windowed: a
+      // d31-60 return can fire long after the flight ended (lib/campaigns.ts parseReturnPath).
+      // Only the LOWER bound is applied, the same one campaignAttributionClause gives the arrivals
+      // tile: rows before the campaign's attribution start (pre-launch tests, e.g. before 12:00
+      // ET on the retest's first day) are left out, and an unconfirmed flightStart attributes
+      // nothing. A row filter on the aggregate; no device is linked to anything.
       const c = campaignOf(p)
-      const w: string[] = ['site = ?', `(${c.ucValues.map(() => 'path LIKE ?').join(' OR ')})`]
-      const b: unknown[] = [BSK_WEB_SITE, ...c.ucValues.map((u) => `/return/${u}/%`)]
+      const w: string[] = ['site IN (?, ?)', `(${c.ucValues.map(() => 'path LIKE ?').join(' OR ')})`]
+      const b: unknown[] = [BSK_WEB_SITE, BSK_APP_SITE, ...c.ucValues.map((u) => `/return/${u}/%`)]
       const startMs = campaignAttributionStartMs(c)
       if (startMs === null) w.push('1 = 0')
       else {

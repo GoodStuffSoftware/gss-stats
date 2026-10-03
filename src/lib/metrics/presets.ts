@@ -338,7 +338,9 @@ export const CAMPAIGN_COUNTRY: CardSpec = {
  * device-deduplicated beacon's own buckets) as bars side by side, d1 to d31-60, each with its
  * (n/d): the old curve. A flight that ended before the return beacon existed (closed, unmeasured)
  * and a campaign with no return beacons yet (d0 = 0) are left out; with none left, one line says
- * so. A lagged rate is provisional ("still arriving", in the card's Notes). */
+ * so. A lagged rate is provisional ("still arriving", in the card's Notes). After the campaigns
+ * comes the web-only organic baseline ("Organic (web)": untagged fresh installs on the web site),
+ * hidden the same way until its first d0 row arrives. */
 const RETURN_BUCKETS_ITEMS: { id: string; ratio: string }[] = [
   { id: 'd1', ratio: 'campaign.returnD1PerD0' },
   { id: 'd2-7', ratio: 'campaign.returnD2to7PerD0' },
@@ -348,7 +350,7 @@ const RETURN_BUCKETS_ITEMS: { id: string; ratio: string }[] = [
 ]
 export const CAMPAIGN_RETURNS: CardSpec = {
   v: 1,
-  repeat: { over: 'campaigns', tracked: true, empty: { label: '', text: { note: 'no-return-visits-yet' } } },
+  repeat: { over: 'campaigns', tracked: true, organic: true, empty: { label: '', text: { note: 'no-return-visits-yet' } } },
   minWidth: 230,
   title: { bind: 'campaign.label' },
   sections: [

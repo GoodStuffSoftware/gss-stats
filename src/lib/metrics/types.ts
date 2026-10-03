@@ -110,6 +110,10 @@ export interface RepeatSpec {
   status?: ('closed' | 'active' | 'upcoming')[]
   /** Campaigns only: beacon-tracked ones (not `measurement: 'spend-only'`). */
   tracked?: boolean
+  /** Campaigns only: append the web-only organic baseline arm (lib/campaigns.ts ORGANIC_ARM_ID)
+   * after the campaigns. Not a campaign, so the ids/status/tracked/flightingToday filters never
+   * drop it; bindings that don't serve it are left out of its instance (scope.ts configRuling). */
+  organic?: boolean
   flightingToday?: boolean
   empty?: { label: Label; text: Label } // shown once when the repeat yields nothing
 }

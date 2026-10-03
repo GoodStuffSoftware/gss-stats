@@ -34,10 +34,26 @@ import {
   RAW_INSTALL_SIGNALS_LABEL,
   VALID_FUNNEL_RATE_STEPS,
   parseGameCompletePath,
+  ORGANIC_ARM_ID,
+  assertOrganicReserved,
   type CampaignFlight,
 } from './campaigns'
 import { funnelStepLabel } from './notes'
 import { INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS } from './popupEvents'
+
+describe('ORGANIC_ARM_ID (the reserved organic baseline label)', () => {
+  it('is "organic", passes the return-path tag shape, and no registered campaign uses it', () => {
+    expect(ORGANIC_ARM_ID).toBe('organic')
+    expect(parseReturnPath(`/return/${ORGANIC_ARM_ID}/d0`)).toEqual({ uc: ORGANIC_ARM_ID, bucket: 'd0' })
+    expect(campaignById(ORGANIC_ARM_ID)).toBeUndefined()
+    expect(() => assertOrganicReserved(CAMPAIGNS)).not.toThrow()
+  })
+  it('the load-time check throws for a campaign whose id or tag is the reserved label', () => {
+    const base = CAMPAIGNS[0]!
+    expect(() => assertOrganicReserved([...CAMPAIGNS, { ...base, id: ORGANIC_ARM_ID }])).toThrow(/reserved/)
+    expect(() => assertOrganicReserved([...CAMPAIGNS, { ...base, id: '999', ucValues: ['x_tag', ORGANIC_ARM_ID] }])).toThrow(/999.*reserved/)
+  })
+})
 
 describe('etMidnightUtcMs / etFlightRangeMs (DST-safe ET date <-> UTC ms)', () => {
   it('EST (winter, UTC-5): ET midnight is 05:00 UTC', () => {
