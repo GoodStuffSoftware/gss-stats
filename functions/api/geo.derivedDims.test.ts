@@ -352,9 +352,10 @@ describe('review fixes: arrivals, raw signals, date limit, request caps', () => 
     // Comfortably under D1's 100-parameter cap now that the exclusion clause is bind-free —
     // pre-fix, this exact combination would have bound 104 and been refused with a 400.
     expect(calls[0].binds.length).toBeLessThan(100)
-    // 81 + the split guard's 4 bound path patterns (src/lib/splitGuard.ts): a device ring is a
-    // refused split, so return/completion/tutorial-completion rows are left out.
-    expect(calls[0].binds.length).toBe(85)
+    // 81 + the split guard's 6 bound path patterns (src/lib/splitGuard.ts): a device ring is a
+    // refused split, so return / game-start / completion / tutorial-completion / tour-exit rows
+    // are left out.
+    expect(calls[0].binds.length).toBe(87)
   })
 
   it('the same worst case PLUS "hide known test/household traffic" (the old 110-bind fixture) is also allowed now', async () => {
@@ -373,7 +374,7 @@ describe('review fixes: arrivals, raw signals, date limit, request caps', () => 
     expect(body.error).toBeUndefined()
     expect(calls).toHaveLength(1)
     expect(calls[0].binds.length).toBeLessThan(100)
-    expect(calls[0].binds.length).toBe(95) // 91 + the split guard's 4 patterns, as above
+    expect(calls[0].binds.length).toBe(97) // 91 + the split guard's 6 patterns, as above
   })
 
   // statementTooLarge itself (src/lib/queryLimits.ts, re-exported from './geo') still refuses

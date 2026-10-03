@@ -156,6 +156,12 @@ exports[`fact SQL snapshots > campaignPathVisitor {"campaignId":"24215315197"} 1
 {
   "binds": [
     1790439996000,
+    "/return/%",
+    "/game/complete/%",
+    "/game/complete-deferred/%",
+    "/game/tutorial-complete/%",
+    "/game/start/%",
+    "/tour/exit-at/%",
     "sudoku_tired_of_ads",
     "tired_of_ads",
     "launch_2026",
@@ -175,7 +181,7 @@ exports[`fact SQL snapshots > campaignPathVisitor {"campaignId":"24215315197"} 1
     1790439996000,
   ],
   "db": "gss_geo",
-  "sql": "SELECT path, visitor, (ts >= ?) AS pf, CASE country WHEN 'US' THEN 'US' WHEN 'CA' THEN 'CA' ELSE 'other' END AS cb, COUNT(*) AS c FROM hits WHERE campaign IN (?, ?, ?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY path, visitor, pf, cb",
+  "sql": "SELECT path, visitor, (ts >= ?) AS pf, CASE WHEN (path LIKE ? OR path LIKE ? OR path LIKE ? OR path LIKE ? OR path LIKE ? OR path LIKE ?) THEN '' ELSE CASE country WHEN 'US' THEN 'US' WHEN 'CA' THEN 'CA' ELSE 'other' END END AS cb, COUNT(*) AS c FROM hits WHERE campaign IN (?, ?, ?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY path, visitor, pf, cb",
 }
 `;
 
@@ -183,6 +189,12 @@ exports[`fact SQL snapshots > campaignPathVisitor {"campaignId":"24234347705"} 1
 {
   "binds": [
     1790439996000,
+    "/return/%",
+    "/game/complete/%",
+    "/game/complete-deferred/%",
+    "/game/tutorial-complete/%",
+    "/game/start/%",
+    "/tour/exit-at/%",
     "sudoku_tired_of_ads_play",
     1788926400000,
     "lifecycle",
@@ -200,7 +212,7 @@ exports[`fact SQL snapshots > campaignPathVisitor {"campaignId":"24234347705"} 1
     1790439996000,
   ],
   "db": "gss_geo",
-  "sql": "SELECT path, visitor, (ts >= ?) AS pf, CASE country WHEN 'US' THEN 'US' WHEN 'CA' THEN 'CA' ELSE 'other' END AS cb, COUNT(*) AS c FROM hits WHERE campaign IN (?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY path, visitor, pf, cb",
+  "sql": "SELECT path, visitor, (ts >= ?) AS pf, CASE WHEN (path LIKE ? OR path LIKE ? OR path LIKE ? OR path LIKE ? OR path LIKE ? OR path LIKE ?) THEN '' ELSE CASE country WHEN 'US' THEN 'US' WHEN 'CA' THEN 'CA' ELSE 'other' END END AS cb, COUNT(*) AS c FROM hits WHERE campaign IN (?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY path, visitor, pf, cb",
 }
 `;
 
@@ -208,6 +220,12 @@ exports[`fact SQL snapshots > campaignPathVisitor {"campaignId":"24279250691"} 1
 {
   "binds": [
     1790439996000,
+    "/return/%",
+    "/game/complete/%",
+    "/game/complete-deferred/%",
+    "/game/tutorial-complete/%",
+    "/game/start/%",
+    "/tour/exit-at/%",
     "sudoku_funnel_retest",
     1790438400000,
     "lifecycle",
@@ -225,7 +243,7 @@ exports[`fact SQL snapshots > campaignPathVisitor {"campaignId":"24279250691"} 1
     1790439996000,
   ],
   "db": "gss_geo",
-  "sql": "SELECT path, visitor, (ts >= ?) AS pf, CASE country WHEN 'US' THEN 'US' WHEN 'CA' THEN 'CA' ELSE 'other' END AS cb, COUNT(*) AS c FROM hits WHERE campaign IN (?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY path, visitor, pf, cb",
+  "sql": "SELECT path, visitor, (ts >= ?) AS pf, CASE WHEN (path LIKE ? OR path LIKE ? OR path LIKE ? OR path LIKE ? OR path LIKE ? OR path LIKE ?) THEN '' ELSE CASE country WHEN 'US' THEN 'US' WHEN 'CA' THEN 'CA' ELSE 'other' END END AS cb, COUNT(*) AS c FROM hits WHERE campaign IN (?) AND ts >= ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY path, visitor, pf, cb",
 }
 `;
 

@@ -63,7 +63,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   "Best Sudoku · Campaigns" (its funnel, country, cost and return-visits panels are metric
   cards, presets `campaign-funnel`, `campaign-country` — a table with the funnel steps as rows
   and US / CA / Other as columns, each cell a campaign metric with the registry's optional
-  `country` param — `campaign-cost` and `campaign-returns` — d0 and each return window's rate,
+  `country` param; it has no "Completed a game" row, because completions take no `country`
+  param (counts only, below), and a card that puts a country split over such a metric is
+  refused — `campaign-cost` and `campaign-returns` — d0 and each return window's rate,
   dN over d0 with its n/d, as bars side by side. A campaign's return rows count from the web
   site and the installed app (`bestsudoku-app`) alike, from its attribution start (each counts
   its own installs, so a phone that used both counts once on each). After the
@@ -342,18 +344,30 @@ there — not just the one drilled — can show the event rows just filtered dow
 carries a caption explaining why (see [`src/lib/drill.ts`](src/lib/drill.ts)
 `drillNeedsEventBeacons`).
 
-**Return, game-completion and tutorial-completion rows are counts only: never split by hour,
-place or device.** Rule: "counts only. Never tie beacon rows to a device, time or place." A geo
+**Return, game-start, game-completion, tutorial-completion and tour-exit rows are counts only:
+never split by hour, place or device.** Rule: "counts only. Never tie beacon rows to a device, time or place." A geo
 chart that maps rows (the map/globe), groups by an hour, place or device dimension (`hourEt`;
 `country`, `region`, `city`, `postal`, `continent`, `timezone`, `colo`, `org`; `device`,
 `browser`, `os`, `lang`, `screenw`, `screenwBucket`, `visitor`), or is drilled into one of them
-leaves `/return/…`, `/game/complete/…`, `/game/complete-deferred/…` and
-`/game/tutorial-complete/…` rows out entirely, whatever "Include event beacons" says, and marks
-the response `meta.splitGuard: true`. The rows still count everywhere else: by path, by ET day
-or flight day, by campaign, and in the metric cards. The guard keys on dimensions and drills
+leaves `/return/…`, `/game/start/…`, `/game/complete/…`, `/game/complete-deferred/…`,
+`/game/tutorial-complete/…` and `/tour/exit-at/…` rows out entirely, whatever "Include event
+beacons" says, marks the response `meta.splitGuard: true`, and the chart says so in a caption.
+The rows still count everywhere else: by path, by ET day or flight day, by campaign, and in the
+metric cards. The metric cards follow the same rule: in a country cell (`campaign-country`)
+these rows belong to no country, so they count only where no country is asked, and
+`campaign.completions` takes no `country` param at all. `/api/popups` and the ads-read
+routine's hourly site-event read and per-country read leave them out too. The guard keys on dimensions and drills
 only; the chart's own date range is not yet clamped to whole days. One visible effect: the **Arrivals by ET hour of day** chart no longer counts an arrival
 whose first beacon was a return or completion row, so its total can sit slightly below the
-flight-day chart's. The "hide known test and household traffic" filter is unchanged. See
+flight-day chart's. The "hide known test and household traffic" filter is unchanged.
+
+Two things stay allowed, by ruling (2026-10-03). **New vs returning:** the device may remember
+its own first visit, so a row's new/returning bit stays on these rows; it is what makes an
+arrival an arrival (`arrival` dimension, the Arrivals tiles and charts), and the free-form
+`visitor` dimension stays refused. **Fixed-instant cuts:** a metric may cut these rows at a
+flight start, a release, a fix go-live or an ET day boundary (the metric registry's segment and
+day indices, the routine's hour buckets cut only at such instants), which is never an
+hour-of-day split; clamping a sub-day range to whole days is the next slice. See
 [`src/lib/splitGuard.ts`](src/lib/splitGuard.ts).
 
 **Every stored geo-beacon column is a chartable dimension AND a filter.** `functions/api/geo.ts`

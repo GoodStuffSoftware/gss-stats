@@ -20,6 +20,7 @@ import NoteWidgetBody from './widgets/NoteWidgetBody.vue'
 import AdsReadingsWidgetCard from './widgets/AdsReadingsWidgetCard.vue'
 import NoteBlock from './NoteBlock.vue'
 import { noteRawText, widgetCaptionNoteIds } from '../lib/notes'
+import { SPLIT_GUARD_CAPTION } from '../lib/splitGuard'
 
 const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolean; drillOpen: boolean; forceControls?: boolean }>()
 
@@ -597,9 +598,10 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
         </li>
       </ul>
     </details>
-    <div v-if="captionNoteIds.length || data?.note" class="card-captions">
+    <div v-if="captionNoteIds.length || data?.note || data?.meta?.splitGuard" class="card-captions">
       <NoteBlock v-for="id in captionNoteIds" :key="id" :note-id="id" />
       <NoteBlock v-if="data?.note" :text="data.note" />
+      <NoteBlock v-if="data?.meta?.splitGuard" :text="SPLIT_GUARD_CAPTION" />
     </div>
 
     <Teleport to="body">

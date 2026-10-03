@@ -16,7 +16,8 @@
 //   flightPathsSeen     ← functions/_lib/campaignInstrumentation.ts (retired; moved here)
 //   bskKpiDays          ← /api/overview's KPI query (same WHERE)
 //   bskRangePath        ← /api/overview's timeline query (same WHERE)
-//   popupRangePath      ← /api/popups' query (same WHERE, same `pf` split)
+//   popupRangePath      ← /api/popups' query (same WHERE, same `pf` split; /api/popups also
+//                         leaves out the split-guard rows, which no pop-up metric reads)
 //   adsSpend            ← lib/adsStore.ts SPEND_SUMMARY_SQL (gss-stats' own store)
 //   adsCoverage, adsLastSync ← lib/adsStore.ts readFreshness's two reads (the same store)
 //   bskFirstHit         ← /api/overview's first-hit query (the release panel's lower bound)
@@ -24,7 +25,9 @@
 //
 // The campaign fact also splits by COUNTRY BUCKET (US / CA / other — lib/campaigns.ts
 // countryBucket, the /api/campaigns country view) and, once lib/adsRules.ts
-// UPSELL_SIGNEDOUT_FIX_AT is set, at that instant (`uf`, row-exact like `pf`).
+// UPSELL_SIGNEDOUT_FIX_AT is set, at that instant (`uf`, row-exact like `pf`). A row the
+// counts-only rule protects (lib/splitGuard.ts SPLIT_REFUSED_PATH_PATTERNS) gets no bucket: its
+// `cb` is '' (guardedCountryBucket), so a country column never counts it.
 //
 // TIMED FACTS ARE BUCKETED IN SQL, not per minute or hour (review finding #8): a fact's row count
 // must not grow with traffic or with the range's length, because the Workers CPU budget is per
@@ -39,6 +42,13 @@
 // ANONYMITY (hard rule, lib/campaigns.ts header): no fact selects `id` or a raw `ts` — only a
 // small integer from a CASE over `ts` bands (a segment or a day index), or the boolean `ts >= ?`
 // split — and none joins rows.
+//
+// SEGMENT CUTS OVER REFUSED ROWS (R-1b ruling, 2026-10-03): `s`, `d`, `pf` and `uf` can cut a
+// return or completion row at a minute or an hour, and they stay as they are. Each cut is a
+// fixed instant — a go-live, an attribution start, a flight boundary, a fix, an ET midnight or
+// the same time of day on an earlier day — that a COUNT is split at; no fact groups a refused
+// row by hour of day, and no chart shows one that way. Clamping sub-day windows over refused
+// rows to whole ET days is R-1d (lib/splitGuard.ts header).
 // facts.test.ts checks every statement.
 
 import { applyExclusions, CAMPAIGNS, campaignAttributionClause, campaignAttributionStartMs, campaignById, etFlightRangeMs, ORGANIC_ARM_ID, type CampaignFlight } from '../campaigns'
@@ -50,6 +60,7 @@ import { COVERAGE_ROWS_SQL, LAST_SYNC_SQL, mapSpendSummary, SPEND_SUMMARY_SQL } 
 import { UPSELL_SIGNEDOUT_FIX_AT, type SpendSummary } from '../adsRules'
 import { etMidnightMs } from './instrumentation'
 import { excludeOwnClause } from '../ownExclusion'
+import { refusedPathMatch } from '../splitGuard'
 
 export type FactId =
   | 'campaignPathVisitor'
@@ -244,6 +255,15 @@ const beacon = (raw: Record<string, unknown>[], pf: (r: Record<string, unknown>)
 /** The country bucket (lib/campaigns.ts countryBucket) as a CASE over the `country` column with
  * literal outputs only: US, CA, and everything else (blank included) as 'other'. */
 export const COUNTRY_BUCKET_SQL = "CASE country WHEN 'US' THEN 'US' WHEN 'CA' THEN 'CA' ELSE 'other' END"
+/** COUNTRY_BUCKET_SQL with the counts-only split guard (lib/splitGuard.ts): a refused row
+ * (return, game start, completion, tutorial completion, tour exit) reads cb = '' — no bucket,
+ * so a country-filtered metric never counts it, while an unfiltered one still does. The path
+ * patterns are bound values (refusedPathMatch), placed in SELECT order before any later column's
+ * binds. Literal outputs only. */
+export function guardedCountryBucket(): { sql: string; binds: string[] } {
+  const m = refusedPathMatch()
+  return { sql: `CASE WHEN ${m.sql} THEN '' ELSE ${COUNTRY_BUCKET_SQL} END`, binds: m.binds }
+}
 /** `(ts >= ?) AS uf` at the signed-out upsell fix, only while it is set (lib/adsRules.ts
  * UPSELL_SIGNEDOUT_FIX_AT): until then the statement is unchanged and every row reads uf null. */
 function ufColumn(fixAt: number | null = UPSELL_SIGNEDOUT_FIX_AT): { select: string; group: string; binds: unknown[] } {
@@ -276,11 +296,15 @@ export const FACTS: Record<FactId, FactDef> = {
       applyExclusions(w, b)
       excludeInstallGapUnmeasured(w, b) // pre-fix install-gap rows are unmeasured, not zero
       const pf = pfColumn()
+      const cb = guardedCountryBucket()
       const uf = ufColumn()
+      // `visitor` is kept on refused rows on purpose (lib/splitGuard.ts header, "what stays
+      // allowed"): campaign.taggedArrivals counts visitor='new' rows on any path, and a refused
+      // row's new/returning bit is the device remembering its own first visit. Its country is not.
       return {
         db: 'gss_geo',
-        sql: `SELECT path, visitor, ${pf.sql} AS pf, ${COUNTRY_BUCKET_SQL} AS cb${uf.select}, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY path, visitor, pf, cb${uf.group}`,
-        binds: [...pf.binds, ...uf.binds, ...b],
+        sql: `SELECT path, visitor, ${pf.sql} AS pf, ${cb.sql} AS cb${uf.select}, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY path, visitor, pf, cb${uf.group}`,
+        binds: [...pf.binds, ...cb.binds, ...uf.binds, ...b],
       }
     },
     parse: (raw) => beacon(raw, pfOf),

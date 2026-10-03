@@ -314,12 +314,15 @@ export const CAMPAIGN_FUNNEL: CardSpec = {
  * campaign, a table with its funnel steps as rows and US / CA / Other as columns — every cell a
  * campaign metric split by the campaign fact's country bucket. A closed flight omits a step it
  * could not measure (every cell gated out drops the row); an upcoming one shows every cell "not
- * started" (whenNotStarted). */
+ * started" (whenNotStarted). Completed games are not a row: the counts-only rule
+ * (lib/splitGuard.ts) never splits a completion by place, and the caption says the country
+ * columns leave out return and completion rows. */
 export const CAMPAIGN_COUNTRY: CardSpec = {
   v: 1,
   repeat: { over: 'campaigns', tracked: true },
   minWidth: 230,
   title: { bind: 'campaign.label' },
+  captions: ['country-split-excludes-refused'],
   sections: [
     {
       layout: 'table',
@@ -328,7 +331,6 @@ export const CAMPAIGN_COUNTRY: CardSpec = {
       items: [
         { id: 'arrivals', label: { note: 'label.funnel.arrivals' }, data: { metric: 'campaign.taggedArrivals' }, display: { as: 'number' }, ...NOT_STARTED_LABEL },
         { id: 'played', label: { note: 'label.campaign.gameViews' }, data: { metric: 'campaign.gameViews' }, display: { as: 'number' }, ...NOT_STARTED_LABEL },
-        { id: 'completed', label: { note: 'label.funnel.completed' }, data: { metric: 'campaign.completions' }, display: { as: 'number' }, ...NOT_STARTED_LABEL },
         { id: 'ask', label: { note: 'label.funnel.ask' }, data: { metric: 'campaign.asks' }, display: { as: 'number' }, ...NOT_STARTED_LABEL },
         { id: 'accept', label: { note: 'label.funnel.accept' }, data: { metric: 'campaign.accepts' }, display: { as: 'number' }, ...NOT_STARTED_LABEL },
         { id: 'authSuccess', label: { note: 'label.funnel.authSuccess' }, data: { metric: 'campaign.authSuccess' }, display: { as: 'number' }, ...NOT_STARTED_LABEL },
