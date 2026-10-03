@@ -166,14 +166,20 @@ describe('gss-stats-sync Worker: the cron', () => {
     expect(liveFlightCampaigns(at('2026-09-27T17:05:00Z')).map((c) => c.id)).toEqual([RETEST])
     expect(cronShouldSync(at('2026-09-27T17:05:00Z')).run).toBe(true)
     expect(cronShouldSync(at('2026-10-03T17:05:00Z')).run).toBe(true) // 10-03 ET: the day after the flight
-    expect(cronShouldSync(at('2026-10-05T17:05:00Z'))).toMatchObject({ run: false })
-    expect(cronShouldSync(at('2026-10-05T05:05:00Z'))).toMatchObject({ run: false }) // 01:05 EDT: yesterday not closed yet
-    expect(cronShouldSync(at('2026-10-05T07:05:00Z'))).toMatchObject({ run: true, reason: 'daily pass' }) // 03:05 EDT
+    // flight 2's two arms (2026-10-04 .. 2026-10-10) are live through 10-11 ET, the day after the flight
+    const f2 = ['24316608605', '24311309184']
+    expect(liveFlightCampaigns(at('2026-10-03T17:05:00Z')).map((c) => c.id)).toEqual([RETEST])
+    expect(liveFlightCampaigns(at('2026-10-04T17:05:00Z')).map((c) => c.id)).toEqual(f2)
+    expect(liveFlightCampaigns(at('2026-10-11T17:05:00Z')).map((c) => c.id)).toEqual(f2)
+    expect(cronShouldSync(at('2026-10-11T17:05:00Z')).run).toBe(true)
+    expect(cronShouldSync(at('2026-10-12T17:05:00Z'))).toMatchObject({ run: false })
+    expect(cronShouldSync(at('2026-10-12T05:05:00Z'))).toMatchObject({ run: false }) // 01:05 EDT: yesterday not closed yet
+    expect(cronShouldSync(at('2026-10-12T07:05:00Z'))).toMatchObject({ run: true, reason: 'daily pass' }) // 03:05 EDT
     expect(cronShouldSync(at('2026-12-05T08:05:00Z'))).toMatchObject({ run: true, reason: 'daily pass' }) // 03:05 EST
   })
   it('a gated tick does no I/O; a due tick claims and syncs; the next tick finds nothing due and writes nothing', async () => {
     const { sqlite, env, fetchImpl, calls, secretReads } = setup()
-    expect(await handleScheduled({ scheduledTime: at('2026-10-05T17:05:00Z'), cron: '5 * * * *' }, env, { fetchImpl, nowMs: at('2026-10-05T17:05:00Z') })).toBeNull()
+    expect(await handleScheduled({ scheduledTime: at('2026-10-12T17:05:00Z'), cron: '5 * * * *' }, env, { fetchImpl, nowMs: at('2026-10-12T17:05:00Z') })).toBeNull()
     expect(calls).toEqual([])
     // cover the closed campaigns first (as in production), then the cron ticks
     for (let i = 0; i < 4; i++) await handleFetch(post(), env, at('2026-09-28T10:00:00Z') + i * 11 * 60_000, { fetchImpl })

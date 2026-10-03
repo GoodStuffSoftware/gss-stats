@@ -12,14 +12,40 @@
 // migration is recoverable by copying that key back (README "Restoring a layout backup"). One
 // KV write per version bump — well inside the Free plan's 1,000 writes a day. A save from an
 // OLDER layout version than the stored one is refused with 409 (see onRequestPut).
+//
+// ROLLING BACKUP ON EVERY CHANGE (the server-side backstop to the client's load guard): a tab
+// that never loaded the real layout (a failed or partial load, an old tab, a lost update between
+// two tabs) can still PUT a same-version layout, which the version guard cannot tell from a real
+// edit. So before a save replaces `dashboard:default` with DIFFERENT content, the stored value is
+// copied to `dashboard:default:prev`; the first changing save of each ET calendar day also copies
+// it to `dashboard:default:day:<YYYY-MM-DD>` (kept 30 days), so a good copy survives even after
+// several bad saves have rotated `:prev`. A save identical to what is stored takes no copy.
+// FAIL-CLOSED like the version backup: these copies are written BEFORE the layout (and after the
+// version backup, day copy then `:prev`), and if one cannot be written the save is refused with
+// 503 and the stored layout and `:prev` are left as they were. KV writes per changing save: 2 (3
+// on the first of an ET day), against 1 before; per identical save: 1. That halves the edits the
+// Free plan's 1,000 writes a day (account-wide, reset 00:00 UTC) allows; past the cap every save
+// fails, and the 503 then names the backup. Restore steps: README "Restoring the layout".
 
 import { CONFIG_VERSION } from '../../src/lib/defaults'
+import { etDateFast } from '../../src/lib/etTime'
 
 interface Env {
   STATS_CONFIG: KVNamespace
 }
 
 const KEY = 'dashboard:default'
+
+/** The rolling copy of the layout as it was before the most recent changing save. */
+export const PREV_KEY = `${KEY}:prev`
+
+/** The copy of the layout as it stood before the first changing save of ET calendar day `dateEt`. */
+export function dayKeyFor(dateEt: string): string {
+  return `${KEY}:day:${dateEt}`
+}
+
+/** How long a daily snapshot is kept (KV expirationTtl, in seconds): 30 days. */
+export const DAY_SNAPSHOT_TTL_SECONDS = 30 * 24 * 60 * 60
 
 /** The KV key a stored config of `version` is backed up under before a newer one replaces it. */
 export function backupKeyFor(version: number): string {
@@ -82,6 +108,23 @@ export const onRequestPut: PagesFunction<Env> = async (ctx) => {
     // its next change). A layout upgrade is never saved without its backup in place.
     const backupKey = backupKeyFor(storedVersion)
     if ((await kv.get(backupKey)) === null) await kv.put(backupKey, stored)
+  }
+  // Byte-identical to what is stored: no copy is taken (it would only rotate a useful `:prev` out
+  // for a duplicate), but the layout is still written. The `stored` read can be up to ~60 s stale
+  // at another Cloudflare location, so "identical" is not proof the key already holds this body.
+  if (stored && stored !== text) {
+    try {
+      // The day copy goes first: if it lands and the `:prev` write then fails, the day copy still
+      // holds the layout as it stood before the day's first change. Written the other way round, a
+      // refused save would already have replaced `:prev`.
+      const dayKey = dayKeyFor(etDateFast(Date.now()))
+      if ((await kv.get(dayKey)) === null) await kv.put(dayKey, stored, { expirationTtl: DAY_SNAPSHOT_TTL_SECONDS })
+      await kv.put(PREV_KEY, stored)
+    } catch {
+      // No backup, no overwrite: the stored layout and `:prev` stay as they were. The client shows
+      // "Save failed" (any non-2xx other than 409) and sends the layout again on its next change.
+      return json('{"error":"backup-failed","message":"The layout backup could not be written, so the layout was not saved."}', 503)
+    }
   }
   await kv.put(KEY, text)
   return json('{"ok":true}')

@@ -22,9 +22,8 @@ import { presetById } from '../lib/metrics/presets'
 import NoteWidgetBody from './widgets/NoteWidgetBody.vue'
 import AdsReadingsWidgetCard from './widgets/AdsReadingsWidgetCard.vue'
 import NoteBlock from './NoteBlock.vue'
-import { rangeNoticeText } from '../lib/rangeNotice'
-import { noteRawText, widgetCaptionNoteIds } from '../lib/notes'
-import { REFUSED_WHOLE_DAYS_CAPTION, SPLIT_GUARD_CAPTION } from '../lib/splitGuard'
+import { noteRawText } from '../lib/notes'
+import { chartNotes } from '../lib/chartNotes'
 
 const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolean; drillOpen: boolean; forceControls?: boolean }>()
 
@@ -61,9 +60,6 @@ function reloadThis() {
   else load()
 }
 
-// Attached captions — see lib/notes.ts widgetCaptionNoteIds for the full rule (pulled out
-// as a pure function so it's unit-testable without mounting this component).
-const captionNoteIds = computed<string[]>(() => widgetCaptionNoteIds(props.widget))
 const emit = defineEmits<{
   edit: []
   remove: []
@@ -252,9 +248,10 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 const menuOpen = ref(false)
 let reqId = 0
-// The server cut the range down to what the data source allows (RangeNotice): said inside the
-// card, under the chart, in the same note style as the other captions. Runtime only, never saved.
-const rangeNote = computed(() => (!error.value && data.value?.notice ? rangeNoticeText(data.value.notice) : ''))
+// Everything shown under the chart, in one fixed order (lib/chartNotes.ts): attached captions, the
+// response's own notes, and the range notice (the server cut the range down to what the data
+// source allows; runtime only, never saved).
+const notes = computed(() => chartNotes(props.widget, data.value, error.value))
 
 // Per-chart filter override: use widget.filters if set, else the global filter.
 const effectiveFilters = computed<GlobalFilters>(() => props.widget.filters ?? props.filters)
@@ -643,12 +640,16 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
         </li>
       </ul>
     </details>
-    <div v-if="captionNoteIds.length || data?.note || data?.meta?.splitGuard || data?.meta?.refusedWholeDays || rangeNote" class="card-captions">
-      <NoteBlock v-for="id in captionNoteIds" :key="id" :note-id="id" />
-      <NoteBlock v-if="data?.note" :text="data.note" />
-      <NoteBlock v-if="data?.meta?.splitGuard" :text="SPLIT_GUARD_CAPTION" />
-      <NoteBlock v-if="data?.meta?.refusedWholeDays" :text="REFUSED_WHOLE_DAYS_CAPTION" />
-      <NoteBlock v-if="rangeNote" class="range-notice" data-testid="range-notice" severity="caveat" :text="rangeNote" />
+    <div v-if="notes.length" class="card-captions">
+      <NoteBlock
+        v-for="n in notes"
+        :key="n.key"
+        :note-id="n.noteId"
+        :text="n.text"
+        :severity="n.severity"
+        :class="{ 'range-notice': n.key === 'range-notice' }"
+        :data-testid="n.key === 'range-notice' ? 'range-notice' : undefined"
+      />
     </div>
 
     <Teleport to="body">

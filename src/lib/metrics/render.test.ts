@@ -286,19 +286,19 @@ describe('resolveLabelTokens — every Label kind', () => {
     expect(tokens.map((t) => t.value).join('')).toBe('Game-screen views')
   })
 
-  it('{ note } with an unsafe/unregistered id (e.g. a prototype-polluting id) falls back to plain text, never crashes', () => {
+  it('{ note } with an unsafe/unregistered id (e.g. a prototype-polluting id) renders nothing (a note from a newer build), never crashes', () => {
     for (const evil of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) {
       expect(() => resolveLabelTokens({ note: evil }, activeScope, undefined, todayEt)).not.toThrow()
-      expect(resolveLabelTokens({ note: evil }, activeScope, undefined, todayEt)).toEqual([{ type: 'text', value: evil }])
+      expect(resolveLabelTokens({ note: evil }, activeScope, undefined, todayEt)).toEqual([])
     }
   })
 })
 
 describe('gating.whenEmpty note id — same unsafe-id neutralization as a label', () => {
-  it('an unregistered whenEmpty note id renders as plain text instead of crashing', () => {
+  it('an unregistered whenEmpty note id renders as a dash instead of crashing', () => {
     const item = numberItem({ gating: { whenEmpty: { note: 'constructor' } } })
     expect(() => itemViewModel(item, { status: 'no-data', value: null }, activeScope, opts)).not.toThrow()
-    expect(itemViewModel(item, { status: 'no-data', value: null }, activeScope, opts).primary).toBe('constructor')
+    expect(itemViewModel(item, { status: 'no-data', value: null }, activeScope, opts).primary).toBe('—')
   })
 })
 
