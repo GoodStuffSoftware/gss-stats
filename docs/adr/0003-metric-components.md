@@ -440,7 +440,7 @@ export interface RatioDef {
 | Fact | Statement (always `COUNT(*) ... GROUP BY`) | Params | Statements | TTL |
 |---|---|---|---|---|
 | `campaignPathVisitor` | `SELECT path, visitor, (ts >= ?) AS pf, COUNT(*) FROM hits WHERE <attribution> AND <exclusions> AND <install gap> GROUP BY path, visitor, pf` | campaignId | 1 per campaign | live 90 s; closed campaign 15 min |
-| `campaignReturns` | `SELECT path, COUNT(*) FROM hits WHERE site = 'bestsudoku-web' AND (path LIKE '/return/<uc>/%' ...) AND <exclusions> GROUP BY path` | campaignId | 1 per campaign | live 90 s; closed 15 min |
+| `campaignReturns` | `SELECT path, COUNT(*) FROM hits WHERE site = 'bestsudoku-web' AND (path LIKE '/return/<uc>/%' ...) AND ts >= ? AND <exclusions> GROUP BY path` (`ts >=` the campaign attribution start; no upper bound) | campaignId | 1 per campaign | live 90 s; closed 15 min |
 | `flightPathsSeen` | `SELECT path, COUNT(*) FROM hits WHERE site = ? AND ts >= ? AND ts < ? GROUP BY path` over the serving window (the trim branch's `notInstrumentedFunnelSteps`) | campaignId | 1 per campaign with a start date | closed window: 24 h; open: 90 s |
 | `bskKpiMinutes` | Today's KPI query: minute buckets × path × visitor × campaign over 8 ET days via `siteWindowClause` | none | 1 | 90 s |
 | `adsSpend` | `readSpendSummaries` + `readFreshness` on `gss_stats_ads` | none (all campaigns) | 2 | 5 min |
@@ -956,9 +956,9 @@ that code rather than copying it.
   difference can recur.
 - ET date conversions and each campaign's attribution are memoized within the engine: without that
   a batch spent most of its CPU formatting the same few dates through `Intl`.
-- Worth an owner decision: bounding `campaignReturns` by the attribution start would cut its
-  `rows_read` from a full `bestsudoku-web` scan to the flight's own rows, and would drop pre-launch
-  QA return beacons, which the current queries count.
+- `campaignReturns` is now bounded below by the campaign's attribution start (the same lower bound
+  as the arrivals tile), with no upper bound, so pre-launch QA return beacons are no longer counted
+  and `rows_read` covers only rows since the flight began.
 
 **Review fixes (2026-09-27).** An adversarial review passed slices 1-3 with fixes:
 - **CPU (#8).** The timed facts are renamed for what they now return: `bskKpiMinutes` →
