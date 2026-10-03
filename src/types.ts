@@ -145,11 +145,10 @@ export interface Widget {
   // type 'note' only: render via TextBlock.vue (longer/multi-paragraph prose) instead of
   // NoteBlock.vue (a single short caveat line). Undefined/false = NoteBlock.
   longText?: boolean
-  // ANY widget: registry note ids to show as an attached caption under this chart (see
-  // lib/notes.ts, components/NoteBlock.vue). Undefined = the dataset's scope defaults
-  // (lib/notes.ts defaultNoteIdsForScope); an explicit [] means "no captions", even if the
-  // scope has defaults — set once (e.g. by ChartEditor or a default layout), never
-  // recomputed out from under a user's choice.
+  // ANY widget (legacy since layout v16): registry note ids to show as an attached caption under
+  // this chart (see lib/notes.ts widgetCaptionNoteIds, components/NoteBlock.vue). Undefined = none.
+  // ChartEditor no longer writes it; a scope's caveats show automatically instead
+  // (lib/notes.ts autoCaveatIds) unless listed in `hiddenCaveats`.
   notes?: string[]
   // ANY widget (layout v16, LAYOUT_VERSIONS.captions): the chart's own plain-text caption, shown
   // first under the chart (lib/chartNotes.ts). textLite markup (**bold**, [link](url)); a `{=…}`

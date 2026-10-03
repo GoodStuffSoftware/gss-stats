@@ -143,6 +143,22 @@ describe('ChartEditor: Data caveats', () => {
     expect(out.hiddenCaveats).toEqual(['min-cohort-caveat'])
     expect(out.notes).toEqual(['min-cohort-caveat'])
   })
+
+  it("lists the scope's automatic caveats (D2-B): a hideable one toggles under its id, a data-cut one is locked", async () => {
+    const w = open(base({ dataset: 'campaigns', view: 'funnel' }))
+    const cohort = row(w, 'caveat:min-cohort-caveat')
+    expect((cohort.get('input[type="checkbox"]').element as HTMLInputElement).checked).toBe(true)
+    const cut = row(w, 'caveat:country-split-excludes-refused')
+    expect((cut.get('input[type="checkbox"]').element as HTMLInputElement).disabled).toBe(true)
+    await cohort.get('input[type="checkbox"]').setValue(false)
+    expect((await save(w)).hiddenCaveats).toEqual(['min-cohort-caveat'])
+  })
+
+  it('an automatic caveat the chart hides is listed unchecked, never twice', () => {
+    const w = open(base({ hiddenCaveats: ['min-cohort-caveat'] }))
+    expect((row(w, 'caveat:min-cohort-caveat').get('input[type="checkbox"]').element as HTMLInputElement).checked).toBe(false)
+    expect(row(w, 'hidden:min-cohort-caveat').exists()).toBe(false)
+  })
 })
 
 describe('ChartEditor: legacy notes (D5 convert-on-edit, N1)', () => {

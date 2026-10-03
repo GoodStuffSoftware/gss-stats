@@ -2,16 +2,18 @@
 // ChartCard's `.card-captions` area renders this list with a single v-for, so the order below, and
 // which source shows when, is tested here and not in the template. A card's own spec captions are
 // a different thing: MetricCard keeps them inside the card body (`.mc-captions`), and hides them
-// through the same `widget.hiddenCaveats` list (isNoteIdHideable below).
+// through the same `widget.hiddenCaveats` list (isNoteIdHideable, lib/notes.ts).
 import type { StatsResponse, Widget } from '../types'
-import { getNote, isStaticCaptionNote, noteTemplate, widgetCaptionNoteIds, type NoteSeverity } from './notes'
+import { autoCaveatIds, getNote, isNoteIdHideable, isStaticCaptionNote, noteTemplate, widgetCaptionNoteIds, type NoteSeverity } from './notes'
 import { CAPTION_MAX_CHARS } from './defaults'
 import { rangeNoticeText } from './rangeNotice'
 import { REFUSED_WHOLE_DAYS_CAPTION, SPLIT_GUARD_CAPTION } from './splitGuard'
 
 export interface ChartNote {
   /** Stable, unique render key: 'caption' (the widget's own text), `caption:<registry id>` for a
-   * legacy caption id, else the runtime note's own key ('popup-note', 'split-guard', …). */
+   * legacy caption id, `caveat:<registry id>` for an automatic scope caveat (D2-B), else the
+   * runtime note's own key ('popup-note', 'split-guard', …). Order: caption, legacy ids,
+   * automatic caveats, runtime notes. */
   key: string
   /** 'caption': text the chart's author attached. 'caveat': a system note about the data. */
   kind: 'caption' | 'caveat'
@@ -31,12 +33,8 @@ export interface ChartNote {
   unknown?: true
 }
 
-/** True when `id` names a registry note that a chart or card may hide: known, and not marked
- * `hideable: false`. An unknown id is never hideable. MetricCard uses this for spec captions. */
-export function isNoteIdHideable(id: string): boolean {
-  const def = getNote(id)
-  return !!def && def.hideable !== false
-}
+// Lives in lib/notes.ts (lib/defaults.ts's v16 migration needs it without importing this file).
+export { isNoteIdHideable }
 
 // The widget's own plain-text caption (Widget.caption) goes first.
 function captionNotes(widget: Widget): ChartNote[] {
@@ -60,6 +58,13 @@ export function allChartNotes(widget: Widget, data: StatsResponse | null | undef
     }
     const hideable = isNoteIdHideable(id)
     notes.push({ key: `caption:${id}`, kind: 'caption', noteId: id, hideable, ...(hideable ? { hideId: id } : {}) })
+  }
+
+  // Automatic caveats (D2-B): the scope's caveats this widget does not already list. Rendered
+  // like a legacy id (NoteBlock: registry text, vars, activeWhen). A hideable one hides by its id.
+  for (const id of autoCaveatIds(widget)) {
+    const hideable = isNoteIdHideable(id)
+    notes.push({ key: `caveat:${id}`, kind: 'caveat', noteId: id, hideable, ...(hideable ? { hideId: id } : {}) })
   }
 
   // Runtime notes: they travel with the response. Only the range notice is dropped on an error

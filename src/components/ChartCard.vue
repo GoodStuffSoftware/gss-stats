@@ -623,7 +623,8 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
 
     <!-- Notes under the chart (lib/chartNotes.ts, one fixed order): the widget's own plain-text
          caption (Widget.caption), legacy registry caption ids (`widget.notes`, read-only; they
-         convert to caption text on the chart's next edit), then the runtime caveats, minus any
+         convert to caption text on the chart's next edit), the scope's automatic caveats
+         (lib/notes.ts autoCaveatIds), then the runtime caveats, minus any
          this widget hides (Widget.hiddenCaveats). All through the SAME NoteBlock every inline
          caveat/note-type-widget uses. Pop-up dataset only: `data.note` (informational review fix, 2026-09-26) — a data
          caveat that travels with the API RESPONSE itself (functions/api/popups.ts, e.g. the

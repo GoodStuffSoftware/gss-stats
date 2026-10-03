@@ -260,3 +260,55 @@ describe('convertLegacyNotes (1c, D5 convert-on-edit)', () => {
     expect(convertLegacyNotes(note).widget).toBe(note)
   })
 })
+
+describe('automatic scope caveats (1c, D2-B)', () => {
+  const campaigns = (over: Partial<Widget> = {}) => widget({ type: 'table', dataset: 'campaigns', ...over })
+
+  it('a new chart shows its scope caveats after the legacy ids and before the runtime notes', () => {
+    const data = response({ note: 'A pop-up caveat.' })
+    expect(keys(chartNotes(campaigns({ caption: 'Mine.', notes: ['arrivals-caveat'] }), data, null))).toEqual([
+      'caption',
+      'caption:arrivals-caveat',
+      'caveat:play-tracking-status',
+      'caveat:min-cohort-caveat',
+      'caveat:country-split-excludes-refused',
+      'popup-note',
+    ])
+    expect(keys(chartNotes(widget({ dataset: 'popup' }), null, null))).toEqual(['caveat:min-cohort-caveat'])
+  })
+
+  it('static library captions never show automatically, and scopes with only those show none', () => {
+    for (const dataset of ['overview', 'geo', 'ads-readings'] as const) expect(chartNotes(widget({ dataset }), null, null), dataset).toEqual([])
+    expect(chartNotes(widget({ dataset: undefined }), null, null)).toEqual([])
+  })
+
+  it('an id the chart already lists in notes shows once, under its legacy key', () => {
+    expect(keys(chartNotes(campaigns({ notes: ['min-cohort-caveat'] }), null, null))).toEqual([
+      'caption:min-cohort-caveat',
+      'caveat:play-tracking-status',
+      'caveat:country-split-excludes-refused',
+    ])
+  })
+
+  it('a hidden automatic caveat stays hidden; a data-cut one cannot be hidden', () => {
+    const w = campaigns({ hiddenCaveats: ['play-tracking-status', 'min-cohort-caveat', 'country-split-excludes-refused'] })
+    expect(keys(chartNotes(w, null, null))).toEqual(['caveat:country-split-excludes-refused'])
+    const all = allChartNotes(w, null, null)
+    expect(all.find((n) => n.key === 'caveat:min-cohort-caveat')).toMatchObject({ kind: 'caveat', noteId: 'min-cohort-caveat', hideable: true, hideId: 'min-cohort-caveat' })
+    const cut = all.find((n) => n.key === 'caveat:country-split-excludes-refused')!
+    expect(cut.hideable).toBe(false)
+    expect(cut.hideId).toBeUndefined()
+  })
+
+  it('an activeWhen gate that is off keeps a gated caveat out (both tracking dates are set today)', () => {
+    expect(getNote('play-tracking-not-live')!.scopes).toContain('campaigns')
+    expect(getNote('tracking-not-yet-active')!.scopes).toContain('popup')
+    expect(keys(allChartNotes(campaigns(), null, null))).not.toContain('caveat:play-tracking-not-live')
+    expect(keys(allChartNotes(widget({ dataset: 'popup' }), null, null))).not.toContain('caveat:tracking-not-yet-active')
+  })
+
+  it("a note widget gets none, and a card's own spec captions are not repeated", () => {
+    expect(allChartNotes(campaigns({ type: 'note', noteId: 'arrivals-caveat' }), null, null)).toEqual([])
+    expect(keys(allChartNotes(campaigns({ card: { preset: 'campaign-country' } }), null, null))).not.toContain('caveat:country-split-excludes-refused')
+  })
+})
