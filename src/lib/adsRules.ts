@@ -1390,7 +1390,7 @@ export interface DecisionInput {
   /** true when the count is exact (every sign-up came from a tagged /auth/success/…/new row). */
   exact?: boolean
   /** The campaign's channel (channelOf); default 'display'. A search arm gets channel-neutral
-   * wording and is compared against the other flight-2 arm instead of being told to start O3. */
+   * wording and is compared against its sibling arm (if any) instead of being told to start O3. */
   channel?: CampaignChannel
 }
 export interface DecisionResult {
