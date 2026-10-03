@@ -14,6 +14,12 @@ All notable changes to **gss-stats** are documented here. The format follows
   tutorial completions (first run vs replay) as plain counts, "not yet tracked" until the
   first v1.97.0 row.
 
+## [0.14.2] — 2026-10-03
+
+### Changed
+- **The icon library is updated to its latest release.** Every icon the dashboard uses looks the
+  same as before; nothing else changes.
+
 ## [0.14.1] — 2026-10-03
 
 ### Changed
