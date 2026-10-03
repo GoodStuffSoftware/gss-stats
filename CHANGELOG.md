@@ -174,6 +174,10 @@ All notable changes to **gss-stats** are documented here. The format follows
   tile now loads as an invalid card.
 
 ### Fixed
+- **A date range wider than Cloudflare allows no longer breaks charts with a raw error.** The
+  range is cut to the most recent 93 days (and no further back than 184 days) before querying,
+  and the chart shows a small note saying which days it is showing and why; its date axis covers
+  only those days, never a flat stretch of zeros for days that were not queried.
 - **The metric-card editor no longer loses a template's settings.** Re-picking a row's current
   metric or note, switching the badge, a title or a repeat off and back on, or changing a repeat
   and back now leaves a customized card exactly as the preset had it; picking a different metric
