@@ -996,7 +996,7 @@ Routes:
 |---|---|
 | `GET /auth/google/login?next=/…` | Sends the browser to Google's account chooser |
 | `GET /auth/google/callback` | Google sends the browser back here; this validates the login and sets the session |
-| `POST /auth/logout` | Sign out: clears the session and shows the signed-out page (the header's **Sign out** button) |
+| `POST /auth/logout` | Sign out: clears the session and shows the signed-out page (the header's **Sign out** button, or **Log out** in the compact account menu) |
 | `GET /auth/me` | Returns the signed-in email as JSON |
 | `GET /auth/signed-out` | The signed-out page |
 
