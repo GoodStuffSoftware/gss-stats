@@ -1028,11 +1028,14 @@ export function summarizeReturns(rows: readonly ReturnRow[], ucValues: readonly 
 }
 
 // ── Play: "not yet seen" until the first bestsudoku-app /return/ row ─────────────────────
+/** Per-site /return/ row count with the ET DATES ('YYYY-MM-DD') of its first and last row, never
+ * an hour or a minute: a /return/ row is counts only (src/lib/splitGuard.ts), so the Play line may
+ * say which ET day it first appeared on, never what time (R-1b review, 2026-10-03). */
 export interface ReturnSiteStat {
   site: string
   count: number
-  firstMs: number | null
-  lastMs: number | null
+  firstEtDate: string | null
+  lastEtDate: string | null
 }
 export interface PlayReturnStatus {
   appSeen: boolean
@@ -1040,41 +1043,28 @@ export interface PlayReturnStatus {
   appFirstSeenEt: string | null
   webCount: number
   webLastSeenEt: string | null
-  /** A web /return/ row within the last 48 h — the pipeline works, the app just hasn't landed. */
+  /** A web /return/ row on an ET day no earlier than the ET day 48 h ago — the pipeline works,
+   * the app just hasn't landed. Day-level on purpose (only the row's ET date is read), so it can
+   * be up to a day more generous than an exact 48 h. */
   webContinuing: boolean
   line: string
 }
-// Formatters are built on first use, not at module load (lib/popupEvents.ts etDateFromMs says
-// why); same options, same output.
-let etHourLabelFmt: Intl.DateTimeFormat | null = null
-/** "YYYY-MM-DD HH:00 ET" — hour precision is plenty for a first-seen marker. */
-export function etHourLabel(ms: number): string {
-  etHourLabelFmt ??= new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/New_York',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    hourCycle: 'h23',
-  })
-  const p = Object.fromEntries(etHourLabelFmt.formatToParts(new Date(ms)).map((x) => [x.type, x.value]))
-  return `${p.year}-${p.month}-${p.day} ${p.hour}:00 ET`
-}
 /** No expected Play date is encoded anywhere (coordinator addendum, 2026-09-26): the app is
- * "not yet seen" until its first /return/ row, then "first seen <when>". */
+ * "not yet seen" until its first /return/ row, then "first seen on <ET date>". Dates only: no
+ * hour or minute of a /return/ row is ever shown (counts only, src/lib/splitGuard.ts). */
 export function playReturnStatus(stats: readonly ReturnSiteStat[], nowMs: number): PlayReturnStatus {
   const app = stats.find((s) => s.site === 'bestsudoku-app')
   const web = stats.find((s) => s.site === 'bestsudoku-web')
-  const appSeen = !!app && app.count > 0 && app.firstMs != null
-  const webLast = web && web.count > 0 ? web.lastMs : null
-  const webContinuing = webLast != null && nowMs - webLast <= 48 * 3_600_000
-  const appFirstSeenEt = appSeen ? etHourLabel(app!.firstMs!) : null
-  const webLastSeenEt = webLast != null ? etHourLabel(webLast) : null
+  const appSeen = !!app && app.count > 0 && app.firstEtDate != null
+  const webLast = web && web.count > 0 ? web.lastEtDate : null
+  const webContinuing = webLast != null && webLast >= etDateFromMs(nowMs - 48 * 3_600_000)
+  const appFirstSeenEt = appSeen ? `${app!.firstEtDate} ET` : null
+  const webLastSeenEt = webLast != null ? `${webLast} ET` : null
   const line = appSeen
-    ? `Play: first bestsudoku-app /return/ row seen ${appFirstSeenEt} (${app!.count} app rows since go-live).`
+    ? `Play: bestsudoku-app /return/ rows first seen on ${appFirstSeenEt} (${app!.count} app rows since go-live).`
     : webContinuing
-      ? `Play: not yet seen. Web /return/ rows are continuing (last ${webLastSeenEt}), so the pipeline works and the app build simply hasn't landed.`
-      : `Play: not yet seen. Web /return/ rows ${webLastSeenEt ? `last seen ${webLastSeenEt}` : 'not seen either'}.`
+      ? `Play: not yet seen. Web /return/ rows are continuing (last seen on ${webLastSeenEt}), so the pipeline works and the app build simply hasn't landed.`
+      : `Play: not yet seen. Web /return/ rows ${webLastSeenEt ? `last seen on ${webLastSeenEt}` : 'not seen either'}.`
   return { appSeen, appCount: app?.count ?? 0, appFirstSeenEt, webCount: web?.count ?? 0, webLastSeenEt, webContinuing, line }
 }
 

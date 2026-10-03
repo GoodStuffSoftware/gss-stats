@@ -21,7 +21,9 @@ import { presetById } from '../lib/metrics/presets'
 import NoteWidgetBody from './widgets/NoteWidgetBody.vue'
 import AdsReadingsWidgetCard from './widgets/AdsReadingsWidgetCard.vue'
 import NoteBlock from './NoteBlock.vue'
+import { rangeNoticeText } from '../lib/rangeNotice'
 import { noteRawText, widgetCaptionNoteIds } from '../lib/notes'
+import { SPLIT_GUARD_CAPTION } from '../lib/splitGuard'
 
 const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolean; drillOpen: boolean; forceControls?: boolean }>()
 
@@ -249,6 +251,9 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 const menuOpen = ref(false)
 let reqId = 0
+// The server cut the range down to what the data source allows (RangeNotice): said inside the
+// card, under the chart, in the same note style as the other captions. Runtime only, never saved.
+const rangeNote = computed(() => (!error.value && data.value?.notice ? rangeNoticeText(data.value.notice) : ''))
 
 // Per-chart filter override: use widget.filters if set, else the global filter.
 const effectiveFilters = computed<GlobalFilters>(() => props.widget.filters ?? props.filters)
@@ -273,7 +278,7 @@ async function load() {
       const all = await fetchSeriesStats(props.widget, effectiveFilters.value)
       if (my === reqId) {
         seriesData.value = all
-        data.value = { ...all[0], rows: all.flatMap((r) => r.rows) }
+        data.value = { ...all[0], rows: all.flatMap((r) => r.rows), notice: all.find((r) => r.notice)?.notice }
       }
     } else {
       const r = await fetchStats(props.widget, effectiveFilters.value)
@@ -603,9 +608,11 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
         </li>
       </ul>
     </details>
-    <div v-if="captionNoteIds.length || data?.note" class="card-captions">
+    <div v-if="captionNoteIds.length || data?.note || data?.meta?.splitGuard || rangeNote" class="card-captions">
       <NoteBlock v-for="id in captionNoteIds" :key="id" :note-id="id" />
       <NoteBlock v-if="data?.note" :text="data.note" />
+      <NoteBlock v-if="data?.meta?.splitGuard" :text="SPLIT_GUARD_CAPTION" />
+      <NoteBlock v-if="rangeNote" class="range-notice" data-testid="range-notice" severity="caveat" :text="rangeNote" />
     </div>
 
     <Teleport to="body">

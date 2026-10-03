@@ -3,10 +3,11 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { assertReadOnlySql, createD1Select, inlineBinds, parseD1Json, parseD1Response, sqlLiteral, stripSqlLiterals } from './d1'
 import { assertAdsWriteSql, createD1Store } from './d1Store'
-import { returnArrivalsQuery, returnRowsQuery, returnSitesQuery, siteEventsQuery, siteFirstSessionQuery, taggedRowsQuery } from './beacon'
+import { createBeaconSource, etDay, returnArrivalsQuery, returnRowsQuery, returnSitesQuery, siteEventsQuery, siteFirstSessionQuery, taggedRowsQuery } from './beacon'
 import { DatabaseSync } from 'node:sqlite'
 import { campaignSyncStatements, dailyRowUpserts, mergePlacementDayRows, placementDailyUpserts, readingInsert, syncRunInsert, thresholdStateInsert } from '../../src/lib/adsStore'
 import { CAMPAIGNS, campaignAttributionStartMs, campaignById } from '../../src/lib/campaigns'
+import { etDateSql } from '../../src/lib/etTime'
 import { FACTS } from '../../src/lib/metrics/facts'
 import { clearRegisteredSecrets, redact, redactedFirstLine, registerSecret, summarizeError } from '../../src/lib/adsRedact'
 import { createWranglerRunner, repoRoot } from './wrangler'
@@ -118,6 +119,23 @@ describe('inlineBinds / sqlLiteral', () => {
 
 describe('beacon reads are read-only and apply the shared exclusions', () => {
   const queries = [taggedRowsQuery(retest), taggedRowsQuery(retest, Date.parse('2026-09-29T18:26:00Z')), siteEventsQuery(0), siteFirstSessionQuery(0, 1), returnArrivalsQuery(retest, 0, 1), returnRowsQuery(retest), returnSitesQuery(0)]
+  it('returnSitesQuery reads ET days, never ts', () => {
+    const { sql } = returnSitesQuery(0)
+    expect(sql).toContain(`MIN(${etDateSql()}) AS d0, MAX(${etDateSql()}) AS d1`)
+    expect(sql).not.toMatch(/\b(MIN|MAX)\(\s*ts\s*\)/)
+  })
+  it('returnSites maps only ET days; a raw ts or a time-bearing value becomes null', async () => {
+    const src = createBeaconSource((async () => [
+      { site: 'web', c: 3, d0: '2026-09-28', d1: '2026-09-30' },
+      { site: 'app', c: 1, d0: 1790000000000, d1: '2026-09-30 21:00' },
+    ]) as never)
+    expect(await src.returnSites(0)).toEqual([
+      { site: 'web', count: 3, firstEtDate: '2026-09-28', lastEtDate: '2026-09-30' },
+      { site: 'app', count: 1, firstEtDate: null, lastEtDate: null },
+    ])
+    expect(etDay('1790000000000')).toBeNull()
+    expect(etDay(null)).toBeNull()
+  })
   it('with an upsell-fix instant, the tagged query flags each row exactly at it (uf), binding the instant first', () => {
     const fix = Date.parse('2026-09-29T18:26:00Z')
     const q = taggedRowsQuery(retest, fix)
