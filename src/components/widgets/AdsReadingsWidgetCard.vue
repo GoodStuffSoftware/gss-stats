@@ -12,7 +12,8 @@
 //   widget.limit        — readings per campaign (default 30)
 import { computed, onMounted, ref, watch } from 'vue'
 import type { AdsReadingsCampaign, AdsReadingsResponse } from '../../lib/adsStore'
-import { proposalLabel, type ReadingRecord, type RuleResult } from '../../lib/adsRules'
+import { proposalLabel, type ReadingRecord } from '../../lib/adsRules'
+import { rulesSummary } from '../../lib/adsRulesSummary'
 import { freshnessLine, STALE_NOTE } from '../../lib/adsFreshness'
 import { SMALL_SAMPLE_NOTE } from '../../lib/popupEvents'
 import { fetchAdsReadings } from '../../api'
@@ -71,17 +72,6 @@ function kindLabel(r: ReadingRecord): string {
   if (r.kind === 'threshold') return `threshold ${r.thresholds.map((t) => `$${t}`).join(', ')}`
   if (r.kind === 'postflight') return `post-flight ${r.stage ?? ''}`.trim()
   return r.kind
-}
-function rulesSummary(rules: RuleResult[] | null): { text: string; tone: 'trip' | 'clear' | 'muted' } {
-  if (!rules?.length) return { text: '—', tone: 'muted' }
-  const tripped = rules.filter((x) => x.status === 'trip')
-  if (tripped.length) return { text: `TRIPPED: ${tripped.map((x) => x.id).join(', ')}`, tone: 'trip' }
-  const clear = rules.filter((x) => x.status === 'clear').length
-  const noData = rules.filter((x) => x.status === 'no-data').length
-  const na = rules.filter((x) => x.status === 'n/a').length
-  const watch = rules.filter((x) => x.status === 'watch').length
-  if (!clear && !noData && !watch) return { text: `not armed${na ? `, ${na} n/a` : ''}`, tone: 'muted' }
-  return { text: `${clear} clear${watch ? `, ${watch} watch` : ''}${noData ? `, ${noData} no data` : ''}${na ? `, ${na} n/a` : ''}`, tone: 'clear' }
 }
 function spendSource(c: AdsReadingsCampaign): string {
   if (c.spend.source === 'google-ads-api') return 'Google Ads API'
@@ -249,6 +239,10 @@ th:nth-child(n + 6) {
 }
 .clear {
   color: rgb(var(--ink-2));
+}
+.watch {
+  color: rgb(var(--amber-hover));
+  font-weight: 600;
 }
 tr.incomplete td {
   opacity: 0.7;
