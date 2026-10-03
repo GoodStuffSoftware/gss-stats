@@ -11,6 +11,25 @@ All notable changes to **gss-stats** are documented here. The format follows
   search arm now appear on the dashboard and can be read on their own with `--campaign`, each with
   a $10/day budget and a $70 cap; the flight dates are provisional until the campaigns are enabled.
 
+## [0.14.3] — 2026-10-03
+
+### Changed
+- **The dashboard's own tests no longer reach for the network and no longer time out when run
+  side by side.** Nothing changes in the app.
+
+## [0.14.2] — 2026-10-03
+
+### Changed
+- **The icon library is updated to its latest release.** Every icon the dashboard uses looks the
+  same as before; nothing else changes.
+
+## [0.14.1] — 2026-10-03
+
+### Changed
+- **The layout-restore steps in the README now work in Windows PowerShell.** Each command is its
+  own block, the downloads keep the file as plain UTF-8, the file check is a PowerShell one-liner,
+  and a note warns that putting a backup back discards every layout edit made since it was taken.
+
 ## [0.14.0] — 2026-10-03
 
 ### Added
