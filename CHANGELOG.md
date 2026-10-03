@@ -6,6 +6,12 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.14.3] — 2026-10-03
+
+### Changed
+- **The dashboard's own tests no longer reach for the network and no longer time out when run
+  side by side.** Nothing changes in the app.
+
 ## [0.14.2] — 2026-10-03
 
 ### Changed
