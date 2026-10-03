@@ -34,6 +34,7 @@ import {
   isAuthRedirectPath,
   isTourExitPath,
   isTutorialCompletePath,
+  MIN_COHORT,
   POPUPS,
   RAW_INSTALL_DEDUPE_LIVE_AT_UTC_MS,
   TOUR_TRACKING_LIVE_AT,
@@ -46,6 +47,7 @@ import { resolveCampaignSpend, UPSELL_SIGNEDOUT_FIX_AT, AUTH_NEW_EXISTING_LIVE_A
 import { freshnessOf, spendThroughFromRows } from '../adsFreshness'
 import type { BeaconRow, FactId, FactRows } from './facts'
 import { etMidnightMs, type InstrumentationRule } from './instrumentation'
+import { wilsonBounds } from './retention'
 import type { WindowName } from './types'
 import type { Unit } from './units'
 
@@ -59,6 +61,16 @@ export interface StoreEnv {
   nowMs: number
   /** The release windows' size in days (the release metrics), null when there is no window. */
   releaseDays: number | null
+}
+
+/** What a store reducer returns. `tooFew` (with the counts behind it) makes the engine report
+ * status 'too-few' instead of 'no-data' for a null value. */
+export interface StoreResult {
+  value: number | null
+  noteIds?: string[]
+  tooFew?: true
+  numerator?: number
+  denominator?: number
 }
 
 /** What a reducer knows about the request it is serving. */
@@ -100,7 +112,7 @@ export interface MetricDef {
   spend?: (rows: readonly SpendSummary[], ctx: MetricCtx) => number | null
   /** Any other non-beacon fact (the ads store's freshness reads, the first Best Sudoku hit): the
    * value, and the registry notes that travel with it. */
-  store?: (rows: FactRows, ctx: MetricCtx, env: StoreEnv) => { value: number | null; noteIds?: string[] }
+  store?: (rows: FactRows, ctx: MetricCtx, env: StoreEnv) => StoreResult
   instrumented: readonly InstrumentationRule[] | ((ctx: MetricCtx) => readonly InstrumentationRule[])
   /** Outcome beacons that arrive after the event they describe: [min, max] days. */
   lagDays?: [number, number]
@@ -207,6 +219,35 @@ const UPSELL_METRICS: { id: string; kind: 'shown' | 'accept' | 'dismiss' }[] = [
 ]
 const UPSELL_WINDOWS = { attribution: 'campaignPathVisitor', upsellPre: 'campaignPathVisitor', upsellPost: 'campaignPathVisitor' } as const
 
+// ── R2-7: the arm's day 2-7 return rate and its 90% Wilson bounds (lib/metrics/retention.ts) ─────
+/** The return beacon a campaignReturns row is, when it belongs to the arm being read: a campaign's
+ * own uc values, or the reserved organic tag. The one test returnD0 ... returnD31to60 share. */
+function armReturn(path: string, ctx: MetricCtx): ReturnType<typeof parseReturnPath> {
+  const ev = returnOf(path)
+  if (!ev) return null
+  if (ctx.params.campaignId === ORGANIC_ARM_ID) return ev.uc === ORGANIC_ARM_ID ? ev : null
+  return ctx.campaign?.ucValues.includes(ev.uc) ? ev : null
+}
+/** d2-7 / d0 over the arm's campaignReturns rows: the rate, or one bound of its Wilson interval.
+ * Rows only, never a device: the same counts the returnD0 / returnD2to7 metrics sum. Under
+ * MIN_COHORT d0 arrivals there is no figure (status 'too-few', counts attached). */
+function returnD2to7Of(part: 'rate' | 'lower' | 'upper') {
+  return (rows: FactRows, ctx: MetricCtx): StoreResult => {
+    if (rows.kind !== 'beacon') return { value: null }
+    let d0 = 0
+    let d2to7 = 0
+    for (const r of rows.rows) {
+      const ev = armReturn(r.path, ctx)
+      if (ev?.bucket === 'd0') d0 += r.c
+      else if (ev?.bucket === 'd2-7') d2to7 += r.c
+    }
+    if (d0 === 0) return { value: null }
+    if (d0 < MIN_COHORT) return { value: null, tooFew: true, numerator: d2to7, denominator: d0 }
+    const b = wilsonBounds(d2to7, d0)!
+    return { value: part === 'rate' ? d2to7 / d0 : b[part], numerator: d2to7, denominator: d0 }
+  }
+}
+
 // ── The ads store's freshness (lib/adsStore.ts readFreshness), per campaign ────────────────
 /** 'spend-source.<source>': where campaign.spend's figure comes from (lib/adsRules.ts
  * resolveCampaignSpend). The value is a code (1 the Ads API, 0 hand-entered) shown as its label. */
@@ -275,13 +316,8 @@ export const METRIC_DEFS: MetricDef[] = [
       ...(bucket === 'd0' ? {} : { subsetOf: 'campaign.returnD0', lagDays: lag }),
       params: ['campaignId'],
       windows: { attribution: 'campaignReturns' },
-      path: (p, ctx) => {
-        const ev = returnOf(p)
-        if (!ev || ev.bucket !== bucket) return false
-        // The organic arm has no campaign: its rows carry the reserved tag itself.
-        if (ctx.params.campaignId === ORGANIC_ARM_ID) return ev.uc === ORGANIC_ARM_ID
-        return !!ctx.campaign?.ucValues.includes(ev.uc)
-      },
+      // The organic arm has no campaign: its rows carry the reserved tag itself (armReturn).
+      path: (p, ctx) => armReturn(p, ctx)?.bucket === bucket,
       instrumented: (ctx) => (ctx.params.campaignId === ORGANIC_ARM_ID ? [BEACON, ORGANIC_TRACKING] : [BEACON, TRACKING_VS_FLIGHT]),
       organic: true,
     }),
@@ -297,6 +333,20 @@ export const METRIC_DEFS: MetricDef[] = [
         return !!ev && ev.family === 'upsell' && ev.kind === kind
       },
       instrumented: (ctx) => (ctx.window === 'upsellPre' || ctx.window === 'upsellPost' ? [BEACON, UPSELL_BOUNDARY] : [BEACON]),
+    }),
+  ),
+  // R2-7 (retention spec section 4): returns on days 2-7 over first tagged loads, per campaign arm,
+  // with the 90% Wilson interval. Store metrics over the arm's return rows; a share (unit 'rate'),
+  // never a count, so no ratio can use one. Not organic: the organic baseline needs its maturity cut.
+  ...(['rate', 'lower', 'upper'] as const).map((part) =>
+    campaignMetric({
+      id: `campaign.returnD2to7${part === 'rate' ? 'Rate' : part === 'lower' ? 'Lower' : 'Upper'}`,
+      unit: 'rate',
+      params: ['campaignId'],
+      windows: { attribution: 'campaignReturns' },
+      store: returnD2to7Of(part),
+      instrumented: [BEACON, TRACKING_VS_FLIGHT],
+      lagDays: [2, 7],
     }),
   ),
   campaignMetric({

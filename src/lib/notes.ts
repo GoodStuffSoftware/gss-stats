@@ -222,6 +222,13 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     severity: 'info',
     scopes: ['campaigns'],
   },
+  'engagement-per-arrival': {
+    id: 'engagement-per-arrival',
+    text: 'Completed games per arrival (first tagged load). It can exceed 1 and repeat players inflate it: it is not the share of arrivals who played.',
+    kind: 'note',
+    severity: 'caveat',
+    scopes: ['campaigns'],
+  },
   'return-rate-caption': {
     id: 'return-rate-caption',
     text: 'Rate per bucket = bucket count / d0 (first tagged load).',
@@ -356,6 +363,9 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.campaign.returnD8to14': 'Came back on days 8-14',
     'label.campaign.returnD15to30': 'Came back on days 15-30',
     'label.campaign.returnD31to60': 'Came back on days 31-60',
+    'label.campaign.returnD2to7Rate': 'Came back d2-7 (rate)',
+    'label.campaign.returnD2to7Lower': 'Came back d2-7 (90% lower)',
+    'label.campaign.returnD2to7Upper': 'Came back d2-7 (90% upper)',
     'label.campaign.spend': 'Spend',
     'label.bsk.pageviews': 'Page views',
     'label.bsk.completions': 'Games completed',
@@ -405,6 +415,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.campaign.installPerPrompt': 'Install rate',
     'label.campaign.returnD1PerD0': 'Return rate (d1)',
     'label.campaign.returnD2to7PerD0': 'Return rate (d2-7)',
+    'label.campaign.engagementPerArrival': 'Games completed per arrival',
     'label.campaign.returnD8to14PerD0': 'Return rate (d8-14)',
     'label.campaign.returnD15to30PerD0': 'Return rate (d15-30)',
     'label.campaign.returnD31to60PerD0': 'Return rate (d31-60)',
@@ -435,6 +446,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'unit.instant': 'time',
     'unit.hits': 'hits',
     'unit.code': 'kind',
+    'unit.rate': 'rate',
 
     // Status words and gating messages (MetricValue.status / noteIds).
     'flight-pending': 'pending — start date not yet confirmed',
