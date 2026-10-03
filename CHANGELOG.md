@@ -7,6 +7,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **Return visits now leave out pre-launch test visits, like the arrivals tile.** Returns from a
+  campaign's tagged link count only from its attribution start (for the retest, 12:00 ET on its
+  first day), so launch-day test rows no longer inflate the return buckets.
 - **Sync all pages shows its real state.** The "Sync all pages" checkbox in the filter bar no
   longer always shows as on — it now genuinely reflects whether page date ranges are synced.
 - **Best Sudoku · Overview content sits right under the filter bar again.** The small-sample
