@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **A layout that fails to load can no longer be overwritten.** If the saved layout can't be read
+  (no connection, a server error, or an answer that isn't a layout), the dashboard shows the
+  default layout with a "Try again" banner, and nothing changed on it is saved.
+
 ## [0.13.2] — 2026-10-03
 
 ### Fixed
@@ -208,9 +213,6 @@ All notable changes to **gss-stats** are documented here. The format follows
   tile now loads as an invalid card.
 
 ### Fixed
-- **A layout that fails to load can no longer be overwritten.** If the saved layout can't be read
-  (no connection, a server error, or an answer that isn't a layout), the dashboard shows the
-  default layout with a "Try again" banner and saves nothing until the saved layout loads.
 - **The metric-card editor no longer loses a template's settings.** Re-picking a row's current
   metric or note, switching the badge, a title or a repeat off and back on, or changing a repeat
   and back now leaves a customized card exactly as the preset had it; picking a different metric

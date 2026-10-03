@@ -113,6 +113,8 @@ describe('App — a failed layout load never saves over the stored layout', () =
     ['an HTML page instead of JSON', () => new Response('<!doctype html><p>Sign in</p>', { status: 200, headers: { 'Content-Type': 'text/html' } })],
     ['truncated JSON', () => json('{"version":12,"pages":[{"id":"default"', 200)],
     ['JSON that is not a layout', () => json('{"oops":true}', 200)],
+    // Passes loadConfig's shape check (pages is an array) but cannot be normalized.
+    ['a layout that cannot be normalized', () => json('{"version":13,"pages":[null]}', 200)],
   ] as [string, Reply][])('%s: banner shown, edits are labelled "Not saved", and no PUT goes out', async (_name, reply) => {
     stubServer(reply)
     const w = await mountApp()
@@ -121,6 +123,10 @@ describe('App — a failed layout load never saves over the stored layout', () =
     expect(banner()!.querySelector('button')!.textContent!.trim()).toBe('Try again')
     // The stand-in on screen is the built-in default layout.
     expect(w.findComponent(Dashboard).exists()).toBe(true)
+    // Nothing is labelled "Not saved" before the viewer changes anything (no card resizes itself
+    // into a change on its own).
+    await pastDebounce()
+    expect(w.find('.save-state').exists()).toBe(false)
 
     await editEveryWay(w)
     expect(puts).toHaveLength(0)
@@ -170,6 +176,16 @@ describe('App — a failed layout load never saves over the stored layout', () =
     expect(pageIds(puts[0])).not.toEqual(pageIds(defaultConfig()))
     expect(savedName(puts[0])).toBe('After retry')
     expect(w.find('.save-state').text()).toBe('Saved')
+  })
+
+  it('signing out while an edit waits out its debounce sends nothing', async () => {
+    stubServer(ok)
+    const w = await mountApp()
+    await rename(w, 'Edited, then signed out')
+    expect(w.find('.save-state').text()).not.toBe('')
+    sessionExpired.value = true
+    await pastDebounce()
+    expect(puts).toHaveLength(0)
   })
 
   it('"Try again" that fails again keeps saving off', async () => {

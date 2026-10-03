@@ -159,7 +159,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   once, so a migration can be rolled back by copying that key over `dashboard:default`.
   A tab saves only after it has read the stored layout ([`src/api.ts`](src/api.ts) `loadConfig`
   resolves to `null` only when nothing is stored yet): if the read fails — no answer, a non-2xx,
-  or a body that isn't a layout — it shows the built-in defaults under a "Couldn't load your saved
+  or a body that isn't a layout or can't be normalized — it shows the built-in defaults under a "Couldn't load your saved
   layout" banner, labels edits "Not saved", and sends no save until **Try again** reads the layout
   (which replaces the defaults and any edits made on them). A `401` shows the sign-in banner instead.
 - **Page navigation** — every page belongs to a **group** (`DashboardPage.group`, a plain
