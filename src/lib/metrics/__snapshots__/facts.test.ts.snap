@@ -47,22 +47,6 @@ exports[`fact SQL snapshots > bskFirstHit {} 1`] = `
 exports[`fact SQL snapshots > bskKpiDays {"todayEt":"2026-09-26"} 1`] = `
 {
   "binds": [
-    1790395200000,
-    1790456400000,
-    1790308800000,
-    1790370000000,
-    1790222400000,
-    1790283600000,
-    1790136000000,
-    1790197200000,
-    1790049600000,
-    1790110800000,
-    1789963200000,
-    1790024400000,
-    1789876800000,
-    1789938000000,
-    1789790400000,
-    1789851600000,
     1791046980000,
     1790451780000,
     1790439960000,
@@ -91,7 +75,7 @@ exports[`fact SQL snapshots > bskKpiDays {"todayEt":"2026-09-26"} 1`] = `
     1790439996000,
   ],
   "db": "gss_geo",
-  "sql": "SELECT CASE WHEN ts >= ? AND ts < ? THEN 0 WHEN ts >= ? AND ts < ? THEN 1 WHEN ts >= ? AND ts < ? THEN 2 WHEN ts >= ? AND ts < ? THEN 3 WHEN ts >= ? AND ts < ? THEN 4 WHEN ts >= ? AND ts < ? THEN 5 WHEN ts >= ? AND ts < ? THEN 6 WHEN ts >= ? AND ts < ? THEN 7 ELSE -1 END AS d, CASE WHEN ts >= ? THEN 8 WHEN ts >= ? THEN 7 WHEN ts >= ? THEN 6 WHEN ts >= ? THEN 5 WHEN ts >= ? THEN 4 WHEN ts >= ? THEN 3 WHEN ts >= ? THEN 2 WHEN ts >= ? THEN 1 ELSE 0 END AS s, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE site IN (?, ?, ?) AND ts >= ? AND ts < ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY d, s, path, visitor, campaign HAVING d >= 0",
+  "sql": "SELECT CASE WHEN ts >= 1790395200000 THEN 0 WHEN ts >= 1790308800000 THEN 1 WHEN ts >= 1790222400000 THEN 2 WHEN ts >= 1790136000000 THEN 3 WHEN ts >= 1790049600000 THEN 4 WHEN ts >= 1789963200000 THEN 5 WHEN ts >= 1789876800000 THEN 6 WHEN ts >= 1789790400000 THEN 7 ELSE -1 END AS d, CASE WHEN (path LIKE '/return/%' OR path LIKE '/game/complete/%' OR path LIKE '/game/complete-deferred/%' OR path LIKE '/game/tutorial-complete/%' OR path LIKE '/game/start/%' OR path LIKE '/tour/exit-at/%') THEN 0 WHEN ts >= 1790308800000 AND ts < 1790370000000 THEN 1 WHEN ts >= 1790222400000 AND ts < 1790283600000 THEN 1 WHEN ts >= 1790136000000 AND ts < 1790197200000 THEN 1 WHEN ts >= 1790049600000 AND ts < 1790110800000 THEN 1 WHEN ts >= 1789963200000 AND ts < 1790024400000 THEN 1 WHEN ts >= 1789876800000 AND ts < 1789938000000 THEN 1 WHEN ts >= 1789790400000 AND ts < 1789851600000 THEN 1 ELSE 0 END AS t, CASE WHEN ts >= ? THEN 8 WHEN ts >= ? THEN 7 WHEN ts >= ? THEN 6 WHEN ts >= ? THEN 5 WHEN ts >= ? THEN 4 WHEN ts >= ? THEN 3 WHEN ts >= ? THEN 2 WHEN ts >= ? THEN 1 ELSE 0 END AS s, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE site IN (?, ?, ?) AND ts >= ? AND ts < ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND NOT (path IN (?, ?) AND ts < ?) GROUP BY d, t, s, path, visitor, campaign HAVING d >= 0",
 }
 `;
 
