@@ -4,16 +4,18 @@
 // KPI day index) and the boolean install-fix split. Each is also run against a real SQLite
 // (node:sqlite, D1's dialect) and snapshotted, so any change to a statement is a reviewed diff.
 import { DatabaseSync } from 'node:sqlite'
-import { describe, expect, it } from 'vitest'
-import { COUNTRY_BUCKET_SQL, FACTS, factKey, flightPathsSeenStatement, kpiDayWindows, rangeMs, type FactId, type FactParams } from './facts'
+import { describe, expect, it, vi } from 'vitest'
+import { COUNTRY_BUCKET_SQL, FACTS, factKey, flightPathsSeenStatement, kpiDayWindows, rangeMs, releaseSidesMs, type FactId, type FactParams } from './facts'
 import { buildFact, factCuts } from './engine'
-import { CAMPAIGNS, campaignAttributionClause, campaignById, etMidnightUtcMs } from '../campaigns'
+import { CAMPAIGNS, campaignAttributionClause, campaignById, etMidnightUtcMs, ORGANIC_ARM_ID } from '../campaigns'
+import * as campaigns from '../campaigns'
 import { SPEND_SUMMARY_SQL } from '../adsStore'
+import { etMidnightMs } from './instrumentation'
 
 const NOW = Date.parse('2026-09-26T21:00:00Z')
 const SAMPLE_PARAMS: Record<FactId, FactParams[]> = {
   campaignPathVisitor: CAMPAIGNS.map((c) => ({ campaignId: c.id })),
-  campaignReturns: CAMPAIGNS.map((c) => ({ campaignId: c.id })),
+  campaignReturns: [...CAMPAIGNS.map((c) => ({ campaignId: c.id })), { campaignId: ORGANIC_ARM_ID }],
   flightPathsSeen: CAMPAIGNS.filter((c) => c.flightStart).map((c) => ({ campaignId: c.id })),
   bskKpiDays: [{ todayEt: '2026-09-26' }],
   bskRangePath: [{ since: '2026-09-20', until: '2026-09-26' }],
@@ -147,6 +149,64 @@ describe('each fact runs on SQLite and reuses the endpoint clause helpers', () =
     expect(() => db.prepare(stmt.sql).all(...(stmt.binds as (string | number)[]))).not.toThrow()
   })
 
+  it('campaignReturns leaves out return rows before the campaign\'s attribution start, like the arrivals tile; no upper bound', () => {
+    const retest = campaignById('24279250691')! // flight 2026-09-26, schedule starts 12:00 ET
+    const start = Date.parse('2026-09-26T16:00:00Z') // 12:00 EDT
+    const db = geoDb()
+    const ins = db.prepare("INSERT INTO hits (ts, site, path) VALUES (?, 'bestsudoku-web', ?)")
+    ins.run(start - 60_000, '/return/sudoku_funnel_retest/d0') // 11:59 ET: pre-launch test
+    ins.run(start - 3_600_000, '/return/sudoku_funnel_retest/d1') // pre-launch
+    ins.run(start, '/return/sudoku_funnel_retest/d0') // exactly at the start: counts
+    ins.run(start + 40 * 86_400_000, '/return/sudoku_funnel_retest/d31-60') // long after the flight: counts
+    const stmt = FACTS.campaignReturns.build({ campaignId: retest.id }, NOW)
+    const rows = db.prepare(stmt.sql).all(...(stmt.binds as (string | number)[])) as { path: string; c: number }[]
+    expect(rows.map((r) => `${r.path}:${r.c}`).sort()).toEqual(['/return/sudoku_funnel_retest/d0:1', '/return/sudoku_funnel_retest/d31-60:1'])
+  })
+  it('campaignReturns counts a campaign return rows from the web site AND the installed app, still lower-bounded', () => {
+    const retest = campaignById('24279250691')!
+    const start = Date.parse('2026-09-26T16:00:00Z') // 12:00 EDT
+    const db = geoDb()
+    const ins = db.prepare('INSERT INTO hits (ts, site, path) VALUES (?, ?, ?)')
+    ins.run(start, 'bestsudoku-web', '/return/sudoku_funnel_retest/d0')
+    ins.run(start + 1, 'bestsudoku-app', '/return/sudoku_funnel_retest/d0') // the installed app: counts
+    ins.run(start - 60_000, 'bestsudoku-app', '/return/sudoku_funnel_retest/d0') // app row before the start: left out
+    ins.run(start + 2, 'other-site', '/return/sudoku_funnel_retest/d0') // neither Best Sudoku site
+    ins.run(start + 3, 'bestsudoku-app', '/return/organic/d0') // the organic tag is never a campaign's
+    const stmt = FACTS.campaignReturns.build({ campaignId: retest.id }, NOW)
+    expect(stmt.sql).toContain('site IN (?, ?)')
+    expect(stmt.sql).toContain('ts >= ?')
+    const rows = db.prepare(stmt.sql).all(...(stmt.binds as (string | number)[])) as { path: string; c: number }[]
+    expect(rows.map((r) => `${r.path}:${r.c}`)).toEqual(['/return/sudoku_funnel_retest/d0:2'])
+  })
+  it('campaignReturns for the organic arm: its own tag, the web site ONLY, no lower bound, exclusions kept', () => {
+    const db = geoDb()
+    const ins = db.prepare('INSERT INTO hits (ts, site, path, region, screenw) VALUES (?, ?, ?, ?, ?)')
+    ins.run(Date.parse('2020-01-01T00:00:00Z'), 'bestsudoku-web', '/return/organic/d0', '', 0) // long before any flight: counts
+    ins.run(NOW, 'bestsudoku-web', '/return/organic/d0', '', 0)
+    ins.run(NOW, 'bestsudoku-web', '/return/organic/d2-7', '', 0)
+    ins.run(NOW, 'bestsudoku-app', '/return/organic/d0', '', 0) // the installed app: never organic
+    ins.run(NOW, 'bestsudoku-web', '/return/sudoku_funnel_retest/d0', '', 0) // a campaign's tag
+    ins.run(NOW, 'bestsudoku-web', '/return/organic/d0', 'North Carolina', 412) // own household: excluded
+    const stmt = FACTS.campaignReturns.build({ campaignId: ORGANIC_ARM_ID }, NOW)
+    expect(stmt.sql).toMatch(/WHERE site = \? AND path LIKE \? AND /)
+    expect(stmt.sql).not.toContain('ts >=')
+    expect(stmt.binds.slice(0, 2)).toEqual(['bestsudoku-web', '/return/organic/%'])
+    const rows = db.prepare(stmt.sql).all(...(stmt.binds as (string | number)[])) as { path: string; c: number }[]
+    expect(rows.map((r) => `${r.path}:${r.c}`).sort()).toEqual(['/return/organic/d0:2', '/return/organic/d2-7:1'])
+  })
+  it('campaignReturns attributes nothing while a campaign has no confirmed flightStart', () => {
+    const retest = campaignById('24279250691')!
+    const spy = vi.spyOn(campaigns, 'campaignById').mockReturnValue({ ...retest, flightStart: null })
+    try {
+      const db = geoDb()
+      db.prepare("INSERT INTO hits (ts, site, path) VALUES (?, 'bestsudoku-web', ?)").run(Date.parse('2026-09-27T16:00:00Z'), '/return/sudoku_funnel_retest/d0')
+      const stmt = FACTS.campaignReturns.build({ campaignId: retest.id }, NOW)
+      expect(stmt.sql).toContain('1 = 0')
+      expect(db.prepare(stmt.sql).all(...(stmt.binds as (string | number)[]))).toEqual([])
+    } finally {
+      spy.mockRestore()
+    }
+  })
   it('campaignPathVisitor carries campaignAttributionClause verbatim (flightStartTimeEt included)', () => {
     const retest = campaignById('24279250691')!
     const stmt = buildFact({ id: 'campaignPathVisitor', params: { campaignId: retest.id } }, NOW)
@@ -183,5 +243,19 @@ describe('fact identity', () => {
 describe('fact SQL snapshots', () => {
   it.each(ALL.map((x) => [`${x.id} ${JSON.stringify(x.p)}`, x] as const))('%s', (_name, { stmt }) => {
     expect(stmt).toMatchSnapshot()
+  })
+})
+
+describe('releaseSidesMs', () => {
+  it('after starts the ET midnight after the release date; the release day is in neither side', () => {
+    const s = releaseSidesMs('2026-10-02', 1)
+    expect(s.before).toEqual([etMidnightMs('2026-10-01'), etMidnightMs('2026-10-02')])
+    expect(s.after).toEqual([etMidnightMs('2026-10-03'), etMidnightMs('2026-10-04')])
+  })
+  it('counts whole ET days across the 25-hour fall-back day (2026-11-01)', () => {
+    const s = releaseSidesMs('2026-10-31', 2)
+    expect(s.after).toEqual([etMidnightMs('2026-11-01'), etMidnightMs('2026-11-03')])
+    expect(s.after[1] - s.after[0]).toBe(49 * 3_600_000)
+    expect(s.before[1] - s.before[0]).toBe(48 * 3_600_000)
   })
 })

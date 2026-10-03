@@ -149,6 +149,11 @@ export interface Widget {
   // scope has defaults — set once (e.g. by ChartEditor or a default layout), never
   // recomputed out from under a user's choice.
   notes?: string[]
+  // ANY widget except one holding a canvas (a chart or the map; lib/fit.ts canFit): 'content' =
+  // the card's grid height follows its rendered content instead of the fixed `h` (components/
+  // Dashboard.vue sets `h` to the smallest whole number of rows that holds it, so a saved `h` is
+  // only the last fitted value). Absent = the fixed layout height, as before this option existed.
+  fit?: 'content'
   // grid geometry (managed by grid-layout-plus)
   x: number
   y: number

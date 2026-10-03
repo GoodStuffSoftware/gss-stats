@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { GridLayout, GridItem } from 'grid-layout-plus'
 import type { Widget, GlobalFilters } from '../types'
 import { isTouchDevice } from '../lib/responsive'
+import { GRID_MARGIN, GRID_ROW_HEIGHT, fitRows, isFit } from '../lib/fit'
 import ChartCard from './ChartCard.vue'
 
 // Two-way bound to the parent's reactive widgets array; grid-layout-plus writes
@@ -30,7 +31,9 @@ const emit = defineEmits<{
 
 // On phones we stack cards via CSS (preserving the desktop layout data) and
 // disable drag/resize so touch scrolling works.
-const isMobile = ref(false)
+// Initialised from the window, not set in onMounted: child cards mount (and measure) BEFORE this
+// component's own onMounted runs, and a fit card's first report must already see a phone.
+const isMobile = ref(typeof window !== 'undefined' && window.innerWidth <= 700)
 function check() {
   isMobile.value = window.innerWidth <= 700
 }
@@ -52,6 +55,17 @@ onBeforeUnmount(() => window.removeEventListener('resize', check))
 // device's touch capability doesn't change at runtime, so this is computed once.
 const touchCapable = isTouchDevice()
 const dragEnabled = computed(() => !isMobile.value && !touchCapable)
+
+// Fit-to-content (Widget.fit, lib/fit.ts): a fit card reports its content height and its grid
+// height follows, to the smallest whole number of rows that holds it. Phones stack every card to
+// its content already (the CSS below), so a phone's measurement must never overwrite the desktop
+// layout's `h`. A height the grid already has is not rewritten, so an unchanged card does not
+// fire a layout save.
+function onFitHeight(item: Widget, px: number) {
+  if (isMobile.value || !isFit(item)) return
+  const rows = fitRows(px, GRID_ROW_HEIGHT, GRID_MARGIN)
+  if (item.h !== rows) item.h = rows
+}
 </script>
 
 <template>
@@ -59,8 +73,8 @@ const dragEnabled = computed(() => !isMobile.value && !touchCapable)
     <GridLayout
       v-model:layout="widgets"
       :col-num="12"
-      :row-height="40"
-      :margin="[14, 14]"
+      :row-height="GRID_ROW_HEIGHT"
+      :margin="[GRID_MARGIN, GRID_MARGIN]"
       :is-draggable="dragEnabled"
       :is-resizable="dragEnabled"
       :vertical-compact="true"
@@ -77,6 +91,7 @@ const dragEnabled = computed(() => !isMobile.value && !touchCapable)
         :h="item.h"
         :min-w="2"
         :min-h="3"
+        :is-resizable="dragEnabled && !isFit(item)"
         drag-allow-from=".card-head"
       >
         <ChartCard
@@ -89,6 +104,7 @@ const dragEnabled = computed(() => !isMobile.value && !touchCapable)
           @remove="emit('remove', item.id)"
           @duplicate="emit('duplicate', item)"
           @drill="emit('drill', $event)"
+          @fit-height="onFitHeight(item, $event)"
           @open-campaigns="emit('open-campaigns')"
         />
       </GridItem>
