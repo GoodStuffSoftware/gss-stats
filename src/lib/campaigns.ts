@@ -193,7 +193,10 @@ export function campaignById(id: string): CampaignFlight | undefined {
  * `/return/organic/<bucket>` rows (Best Sudoku's first-touch record, labelled `organic`). It is
  * not a campaign — it has no flight, spend or attribution window — so it travels as the
  * `campaignId` param value 'organic' only on bindings that declare support (the return
- * metrics and the ratios over them). The label is reserved: no campaign may use it as an id or
+ * metrics and the ratios over them). Organic means a device's first-ever web visit with no utm and
+ * no ad click id (gclid etc. are not organic; first touch wins; a malformed utm counts as neither),
+ * so organic d0 and campaign d0 are disjoint. Live from v1.98.0 (popupEvents.ts
+ * ORGANIC_TRACKING_LIVE_AT). The label is reserved: no campaign may use it as an id or
  * a tag, or its rows would read as the baseline's. */
 export const ORGANIC_ARM_ID = 'organic'
 
