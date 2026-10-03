@@ -182,7 +182,10 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   Every save that changes the stored layout also first copies the stored one to
   `dashboard:default:prev`, and the first such save of each ET day to
   `dashboard:default:day:<YYYY-MM-DD>` (kept 30 days); if a copy can't be written the save is
-  refused (`503`) and nothing changes (see [Restoring the layout](#restoring-the-layout)).
+  refused (`503`) and the stored layout and `:prev` are left as they were (see
+  [Restoring the layout](#restoring-the-layout)). That makes a changing save 2 KV writes (3 on the
+  first of an ET day) instead of 1, so the Free plan's 1,000 writes a day (account-wide) cover
+  about half as many edits; past the cap every save fails with that `503`.
   A tab saves only after it has read the stored layout ([`src/api.ts`](src/api.ts) `loadConfig`
   resolves to `null` only when nothing is stored yet): if the read fails — no answer, a non-2xx,
   or a body that isn't a layout or can't be normalized — it shows the built-in defaults under a "Couldn't load your saved
