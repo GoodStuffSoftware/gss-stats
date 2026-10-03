@@ -367,7 +367,8 @@ carries a caption explaining why (see [`src/lib/drill.ts`](src/lib/drill.ts)
 
 **Return, game-start, game-completion, tutorial-completion and tour-exit rows are counts only:
 never split by hour, place or device.** Rule: "counts only. Never tie beacon rows to a device, time or place." A geo
-chart that maps rows (the map/globe), groups by an hour, place or device dimension (`hourEt`;
+chart that maps rows (the map/globe), groups by an hour, place or device dimension (`hourEt`,
+and the UTC `date`, whose count minus `dateEt`'s for the same day would give an evening band;
 `country`, `region`, `city`, `postal`, `continent`, `timezone`, `colo`, `org`; `device`,
 `browser`, `os`, `lang`, `screenw`, `screenwBucket`, `visitor`), or is drilled into one of them
 leaves `/return/…`, `/game/start/…`, `/game/complete/…`, `/game/complete-deferred/…`,
@@ -380,7 +381,13 @@ these rows belong to no country, so they count only where no country is asked, a
 routine's hourly site-event read and per-country read leave them out too. The guard keys on dimensions and drills
 only; the chart's own date range is not yet clamped to whole days. One visible effect: the **Arrivals by ET hour of day** chart no longer counts an arrival
 whose first beacon was a return or completion row, so its total can sit slightly below the
-flight-day chart's. The "hide known test and household traffic" filter is unchanged.
+flight-day chart's. Another: the default **Pageviews over time** (Beacon page) and **Visits over
+time** (Best Sudoku · Traffic) trends group by the UTC `date`, so they no longer count these rows
+and always carry the caption; with event beacons excluded (their default) the only rows that
+drop are refused rows not on the event-beacon list (game starts, until that list names them).
+Charts by `dateEt` are unchanged. The "hide known test and household traffic" filter is
+unchanged. The guard's path patterns are inlined as SQL literals, so it costs no D1 bound
+parameters; the heaviest in-cap `/api/geo` shapes tested bind at most 97 of D1's 100.
 
 Two things stay allowed, by ruling (2026-10-03). **New vs returning:** the device may remember
 its own first visit, so a row's new/returning bit stays on these rows; it is what makes an
@@ -388,7 +395,8 @@ arrival an arrival (`arrival` dimension, the Arrivals tiles and charts), and the
 `visitor` dimension stays refused. **Fixed-instant cuts:** a metric may cut these rows at a
 flight start, a release, a fix go-live or an ET day boundary (the metric registry's segment and
 day indices, the routine's hour buckets cut only at such instants), which is never an
-hour-of-day split; clamping a sub-day range to whole days is the next slice. See
+hour-of-day split. The routine's Play line names only the ET date of the first or last
+`/return/` row, never its time; clamping a sub-day range to whole days is the next slice. See
 [`src/lib/splitGuard.ts`](src/lib/splitGuard.ts).
 
 **Every stored geo-beacon column is a chartable dimension AND a filter.** `functions/api/geo.ts`

@@ -214,10 +214,13 @@ describe('each fact runs on SQLite and reuses the endpoint clause helpers', () =
     const stmt = buildFact({ id: 'campaignPathVisitor', params: { campaignId: retest.id } }, NOW)
     const attr = campaignAttributionClause(retest)
     expect(stmt.sql).toContain(attr.sql)
-    // After the pf instant, then the split guard's bound path patterns (the cb column).
-    expect(stmt.binds.slice(1, 1 + SPLIT_REFUSED_PATH_PATTERNS.length)).toEqual([...SPLIT_REFUSED_PATH_PATTERNS])
-    const at = 1 + SPLIT_REFUSED_PATH_PATTERNS.length
-    expect(stmt.binds.slice(at, at + attr.binds.length)).toEqual(attr.binds)
+    // The split guard's path patterns (the cb column) are SQL literals, not binds, so the
+    // attribution binds follow the pf instant directly.
+    for (const p of SPLIT_REFUSED_PATH_PATTERNS) {
+      expect(stmt.sql).toContain(`path LIKE '${p}'`)
+      expect(stmt.binds).not.toContain(p)
+    }
+    expect(stmt.binds.slice(1, 1 + attr.binds.length)).toEqual(attr.binds)
   })
   it('the flightPathsSeen fact builds flightPathsSeenStatement', () => {
     const c = campaignById('24215315197')!

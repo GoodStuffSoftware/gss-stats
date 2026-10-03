@@ -352,10 +352,10 @@ describe('review fixes: arrivals, raw signals, date limit, request caps', () => 
     // Comfortably under D1's 100-parameter cap now that the exclusion clause is bind-free —
     // pre-fix, this exact combination would have bound 104 and been refused with a 400.
     expect(calls[0].binds.length).toBeLessThan(100)
-    // 81 + the split guard's 6 bound path patterns (src/lib/splitGuard.ts): a device ring is a
-    // refused split, so return / game-start / completion / tutorial-completion / tour-exit rows
-    // are left out.
-    expect(calls[0].binds.length).toBe(87)
+    // A device ring is a refused split, so the counts-only guard (src/lib/splitGuard.ts) leaves
+    // return / game-start / completion / tutorial-completion / tour-exit rows out — with its
+    // patterns inlined as SQL literals, it adds no binds, so this stays at 81 (measured).
+    expect(calls[0].binds.length).toBe(81)
   })
 
   it('the same worst case PLUS "hide known test/household traffic" (the old 110-bind fixture) is also allowed now', async () => {
@@ -374,14 +374,51 @@ describe('review fixes: arrivals, raw signals, date limit, request caps', () => 
     expect(body.error).toBeUndefined()
     expect(calls).toHaveLength(1)
     expect(calls[0].binds.length).toBeLessThan(100)
-    expect(calls[0].binds.length).toBe(97) // 91 + the split guard's 6 patterns, as above
+    expect(calls[0].binds.length).toBe(91) // measured; the split guard adds no binds, as above
+  })
+
+  // R-1b review (2026-10-03): with the split guard's six patterns BOUND, these two in-cap requests
+  // reached 102 and 103 bound parameters and were refused with a 400. The patterns are now SQL
+  // literals (src/lib/splitGuard.ts refusedPathMatch), so both run. Measured: 96 and 97 binds.
+  const maxed = {
+    sites: Array.from({ length: 50 }, (_, i) => `s${i}`),
+    excludeOwnVisits: true,
+    ownBrowser: 'Opera',
+    ownOS: 'Windows',
+    excludeKnownTraffic: true,
+    ...range,
+  }
+  it('a [campaignFlight, device, referrer] ring with 16 campaignFlight filters, 50 sites and both hides answers 200', async () => {
+    const { body, calls } = await post({
+      dimension: 'campaignFlight',
+      breakdown: 'device',
+      dims: ['campaignFlight', 'device', 'referrer'],
+      constraints: Array.from({ length: 16 }, (_, i) => ({ field: 'campaignFlight', value: `flight-${i}` })),
+      ...maxed,
+    })
+    expect(body.error).toBeUndefined()
+    expect(calls).toHaveLength(1)
+    expect(calls[0].binds.length).toBe(96)
+  })
+  it('a six-dim ring [referrer, device, campaignFlight, gameMode, popupFamily, flightDay] at the caps answers 200', async () => {
+    const { body, calls } = await post({
+      dimension: 'referrer',
+      breakdown: 'device',
+      dims: ['referrer', 'device', 'campaignFlight', 'gameMode', 'popupFamily', 'flightDay'],
+      constraints: Array.from({ length: 16 }, (_, i) => ({ field: 'campaignFlight', value: `flight-${i}` })),
+      ...maxed,
+    })
+    expect(body.error).toBeUndefined()
+    expect(calls).toHaveLength(1)
+    expect(calls[0].binds.length).toBe(97)
   })
 
   // statementTooLarge itself (src/lib/queryLimits.ts, re-exported from './geo') still refuses
   // over-cap statements — exercised directly since, with the exclusion clause now bind-free,
   // no combination of MAX_SITES (50) + MAX_CONSTRAINTS (16) + every other toggle reaches 100
-  // bound parameters through the real handler any more (the two tests above are the actual
-  // ceiling today, at 81 and 91). The guard stays in place as defense in depth for when
+  // bound parameters through the real handler any more (the referrer x device tests above are the
+  // ceiling for that shape, at 81 and 91; the heaviest measured shapes are the two rings, at 96
+  // and 97). The guard stays in place as defense in depth for when
   // POPUP_EVENT_PREFIXES, CAMPAIGNS, or EXCLUSIONS grow enough to matter again.
   it('statementTooLarge still refuses a statement over 100 bound parameters', () => {
     const res = statementTooLarge('SELECT 1', 101)

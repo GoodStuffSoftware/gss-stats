@@ -11,7 +11,7 @@ import { parseArgs } from 'node:util'
 import { ADS_CUSTOMER_ID, ADS_READ_PLANS, defaultReadCampaignId, etDateOf, type PostflightStage, type FirstSessionRowSite, type ReadingRecord, type ReturnRow, type ReturnSiteStat, type SpendDay, type StoredSpend, type TaggedRow } from '../../src/lib/adsRules'
 import { campaignById } from '../../src/lib/campaigns'
 import type { PlacementDayRow } from '../../src/lib/adsStore'
-import type { HourPathCount } from '../../src/lib/popupEvents'
+import { etDateFromMs, type HourPathCount } from '../../src/lib/popupEvents'
 import {
   createAdsClient,
   fetchCampaignStatus,
@@ -157,7 +157,9 @@ export interface Fixture {
     tagged: (Omit<TaggedRow, 'hourStartMs'> & { hour?: string; hourStartMs?: number })[]
     siteEvents: (Omit<HourPathCount, 'hourStartMs'> & { hour?: string; hourStartMs?: number })[]
     returns: ReturnRow[]
-    returnSites: (Omit<ReturnSiteStat, 'firstMs' | 'lastMs'> & { first?: string | null; last?: string | null; firstMs?: number | null; lastMs?: number | null })[]
+    /** first/last (ISO) or firstMs/lastMs are reduced to ET dates on load: the read only ever
+     * sees a /return/ row's ET date (adsRules.ts ReturnSiteStat). */
+    returnSites: (Omit<ReturnSiteStat, 'firstEtDate' | 'lastEtDate'> & { first?: string | null; last?: string | null; firstMs?: number | null; lastMs?: number | null })[]
     /** Site-wide first-session rows (beacon.ts siteFirstSessionQuery); absent = not read. */
     siteFirstSession?: FirstSessionRowSite[]
   } | { error: string }
@@ -167,6 +169,10 @@ export interface Fixture {
 
 const hourMs = (x: { hour?: string; hourStartMs?: number }) => (x.hourStartMs != null ? x.hourStartMs : Date.parse(x.hour!))
 const optMs = (iso: string | null | undefined, ms: number | null | undefined) => (ms != null ? ms : iso ? Date.parse(iso) : null)
+const optEtDate = (iso: string | null | undefined, ms: number | null | undefined) => {
+  const t = optMs(iso, ms)
+  return t == null ? null : etDateFromMs(t)
+}
 
 export function fixtureDeps(fx: Fixture, dryRun: boolean): ReadDeps & { store: ReturnType<typeof createMemoryStore> } {
   const ads = fx.ads && !('error' in fx.ads) ? fx.ads : null
@@ -177,7 +183,7 @@ export function fixtureDeps(fx: Fixture, dryRun: boolean): ReadDeps & { store: R
         tagged: async () => beacon.tagged.map((r) => ({ hourStartMs: hourMs(r), path: r.path, visitor: r.visitor, count: r.count, ...(r.postUpsellFix === undefined ? {} : { postUpsellFix: r.postUpsellFix }) })),
         siteEvents: async (sinceMs) => beacon.siteEvents.map((r) => ({ hourStartMs: hourMs(r), path: r.path, count: r.count })).filter((r) => r.hourStartMs >= sinceMs),
         returns: async () => beacon.returns,
-        returnSites: async () => beacon.returnSites.map((s) => ({ site: s.site, count: s.count, firstMs: optMs(s.first, s.firstMs), lastMs: optMs(s.last, s.lastMs) })),
+        returnSites: async () => beacon.returnSites.map((s) => ({ site: s.site, count: s.count, firstEtDate: optEtDate(s.first, s.firstMs), lastEtDate: optEtDate(s.last, s.lastMs) })),
         ...(beacon.siteFirstSession ? { siteFirstSession: async () => beacon.siteFirstSession! } : {}),
         // Tagged d0 arrivals: the fixture's own /return/<uc>/d0 rows (path-attributed, like the real query).
         returnArrivals: async (c) => beacon.returns.filter((r) => c.ucValues.some((u) => r.path === `/return/${u}/d0`)).map((r) => ({ path: r.path, count: r.count })),

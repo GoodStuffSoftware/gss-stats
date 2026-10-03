@@ -50,9 +50,9 @@ async function metrics(requests: MetricRequest[]): Promise<Record<string, Metric
 describe('campaignPathVisitor: refused rows have no country bucket', () => {
   it("reports cb = '' for every refused row (case folded) and the bucket for the rest", () => {
     const stmt = buildFact({ id: 'campaignPathVisitor', params: { campaignId: ANDROID } }, FIXTURE_NOW)
-    // The patterns are bound values, never SQL text.
-    for (const p of SPLIT_REFUSED_PATH_PATTERNS) expect(stmt.sql).not.toContain(p)
-    for (const p of SPLIT_REFUSED_PATH_PATTERNS) expect(stmt.binds).toContain(p)
+    // The patterns are SQL literals (lib/splitGuard.ts refusedPathMatch), never binds.
+    for (const p of SPLIT_REFUSED_PATH_PATTERNS) expect(stmt.sql).toContain(`path LIKE '${p}'`)
+    for (const p of SPLIT_REFUSED_PATH_PATTERNS) expect(stmt.binds).not.toContain(p)
     const rows = db.prepare(stmt.sql).all(...(stmt.binds as (string | number)[])) as { path: string; visitor: string; cb: string; c: number }[]
     const cbOf = (path: string) => [...new Set(rows.filter((r) => r.path === path).map((r) => r.cb))]
     expect(cbOf('/game')).toEqual(expect.arrayContaining(['US', 'CA']))

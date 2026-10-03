@@ -609,16 +609,30 @@ describe('returns (/return/<uc>/<bucket>, attributed by the path)', () => {
 
 describe('Play "not yet seen" (no expected date encoded)', () => {
   const now = H('2026-09-30T12:00:00Z')
+  // Counts only (src/lib/splitGuard.ts): a /return/ row's ET date may show, never its hour.
+  const noTime = (line: string) => expect(line).not.toMatch(/\d{1,2}:\d{2}/)
   it('not yet seen, web continuing', () => {
-    const p = playReturnStatus([{ site: 'bestsudoku-web', count: 10, firstMs: H('2026-09-26T16:00:00Z'), lastMs: H('2026-09-29T23:00:00Z') }], now)
+    const p = playReturnStatus([{ site: 'bestsudoku-web', count: 10, firstEtDate: '2026-09-26', lastEtDate: '2026-09-29' }], now)
     expect(p.appSeen).toBe(false)
     expect(p.webContinuing).toBe(true)
-    expect(p.line).toMatch(/not yet seen.*pipeline works/)
+    expect(p.webLastSeenEt).toBe('2026-09-29 ET')
+    expect(p.line).toMatch(/not yet seen.*last seen on 2026-09-29 ET.*pipeline works/)
+    noTime(p.line)
   })
-  it('first app row reports when it appeared', () => {
-    const p = playReturnStatus([{ site: 'bestsudoku-app', count: 2, firstMs: H('2026-09-29T14:20:00Z'), lastMs: H('2026-09-29T15:00:00Z') }], now)
+  it('web continuing is day-level: the ET day 48 h ago still counts, the day before does not', () => {
+    // now = 2026-09-30 08:00 ET, so 48 h ago falls on 2026-09-28 (ET).
+    const at = (d: string) => playReturnStatus([{ site: 'bestsudoku-web', count: 3, firstEtDate: '2026-09-20', lastEtDate: d }], now)
+    expect(at('2026-09-28').webContinuing).toBe(true)
+    expect(at('2026-09-27').webContinuing).toBe(false)
+    expect(at('2026-09-27').line).toBe('Play: not yet seen. Web /return/ rows last seen on 2026-09-27 ET.')
+    expect(playReturnStatus([], now).line).toBe('Play: not yet seen. Web /return/ rows not seen either.')
+  })
+  it('first app row reports the ET day it appeared on, never the hour', () => {
+    const p = playReturnStatus([{ site: 'bestsudoku-app', count: 2, firstEtDate: '2026-09-29', lastEtDate: '2026-09-29' }], now)
     expect(p.appSeen).toBe(true)
-    expect(p.appFirstSeenEt).toBe('2026-09-29 10:00 ET')
+    expect(p.appFirstSeenEt).toBe('2026-09-29 ET')
+    expect(p.line).toBe('Play: bestsudoku-app /return/ rows first seen on 2026-09-29 ET (2 app rows since go-live).')
+    noTime(p.line)
   })
 })
 

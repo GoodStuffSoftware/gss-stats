@@ -98,9 +98,17 @@ All notable changes to **gss-stats** are documented here. The format follows
   starts, returns, tutorial completions and tour exits belong to no country column; they still
   count in every total that is not split by country, and a card can no longer put a country
   split over a completion count (a saved copy of the table loads without that row).
-- **Pop-up and ads-read hourly and per-country reads leave the counts-only rows out.** The
-  pop-up rates and the morning read's site-wide event and per-country lines never fetch return,
-  game-start, completion or tour-exit rows by hour or country; no pop-up count changes.
+- **Pop-up and ads-read hourly and per-country reads leave the counts-only rows out.** No pop-up
+  count changes, but the morning read's beacon-countries line and the read page's countries panel
+  now count fewer rows, because return, game-start, completion and tour-exit rows are no longer
+  counted by country.
+- **Charts by UTC date leave the counts-only rows out.** A UTC day ends a few evening hours off
+  the ET day, so the Beacon page's "Pageviews over time" and Best Sudoku · Traffic's "Visits over
+  time" (and any chart by UTC date) no longer count return, game-start, completion,
+  tutorial-completion or tour-exit rows and show the counts-only caption; charts by ET date are
+  unchanged.
+- **The morning read's Play line shows dates, not hours.** It names the ET day the first app
+  return visit (or the latest web one) arrived on, never its time of day.
 - **Campaign return visits now include the installed app.** A campaign's return buckets count
   return visits from the Android app as well as the web site, still from its attribution start.
 - **Return, game-completion and tutorial-completion rows can no longer be split by hour, place or device.**

@@ -9,6 +9,7 @@ import { applyExclusions, campaignAttributionClause, campaignAttributionStartMs,
 import { excludeInstallGapUnmeasured, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, popupIncludeClause, type HourPathCount } from '../../src/lib/popupEvents'
 import { ASK_PATHS, UPSELL_SIGNEDOUT_FIX_AT, type FirstSessionRowSite, type ReturnRow, type ReturnSiteStat, type TaggedRow } from '../../src/lib/adsRules'
 import { refusedPathExcludeClause } from '../../src/lib/splitGuard'
+import { etDateSql } from '../../src/lib/etTime'
 import type { D1Select } from './d1'
 
 export const WEB_SITE = 'bestsudoku-web'
@@ -41,8 +42,8 @@ export function taggedRowsQuery(campaign: CampaignFlight, upsellFixAtMs: number 
 /** Site-wide pop-up/event rows on the web site since `sinceMs`, by (UTC hour, path). NOT
  * campaign-attributed — outcome beacons fire in later, untagged sessions. The rows the
  * counts-only rule protects (src/lib/splitGuard.ts: returns, game starts and completions,
- * tutorial completions, tour exits) are left out, bound like every other value: this read is by
- * hour, and none of them is a pop-up event summarizeSiteEvents counts. */
+ * tutorial completions, tour exits) are left out (their patterns are SQL literals, so they cost
+ * no binds): this read is by hour, and none of them is a pop-up event summarizeSiteEvents counts. */
 export function siteEventsQuery(sinceMs: number, fixedAtMs: number | null = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS): Query {
   const inc = popupIncludeClause()
   const w = ['site = ?', 'ts >= ?', inc.sql]
@@ -113,12 +114,16 @@ export function returnRowsQuery(campaign: CampaignFlight): Query {
 
 /** Every /return/ row per site since `sinceMs` — any campaign's AND the web-only organic arm's
  * (untagged fresh installs, lib/campaigns.ts ORGANIC_ARM_ID), since the pattern is `/return/%` —
- * with first/last seen (aggregates) for the Play "not yet seen" line. */
+ * with the ET DATE of the first and last row (aggregates) for the Play "not yet seen" line.
+ * Counts only (src/lib/splitGuard.ts): the SQL reads each row's ET day (lib/etTime.ts
+ * etDateSql, the geo `dateEt` expression), never its ts, so no hour or minute of a /return/ row
+ * ever leaves D1. 'YYYY-MM-DD' text sorts by date, so MIN/MAX give the first and last day. */
 export function returnSitesQuery(sinceMs: number): Query {
   const w = ['site IN (?, ?)', 'path LIKE ?', 'ts >= ?']
   const b: unknown[] = [WEB_SITE, APP_SITE, '/return/%', sinceMs]
   applyExclusions(w, b)
-  return { sql: `SELECT site, COUNT(*) AS c, MIN(ts) AS t0, MAX(ts) AS t1 FROM hits WHERE ${w.join(' AND ')} GROUP BY site`, binds: b }
+  const d = etDateSql()
+  return { sql: `SELECT site, COUNT(*) AS c, MIN(${d}) AS d0, MAX(${d}) AS d1 FROM hits WHERE ${w.join(' AND ')} GROUP BY site`, binds: b }
 }
 
 /** Campaign-attributed arrivals by country, aggregate counts only (R5). The SAME attribution
@@ -191,7 +196,7 @@ export function createBeaconSource(select: D1Select): BeaconSource {
     async returnSites(sinceMs) {
       const q = returnSitesQuery(sinceMs)
       const rows = await select<any>(q.sql, q.binds)
-      return rows.map((x) => ({ site: String(x.site ?? ''), count: n(x.c), firstMs: x.t0 == null ? null : n(x.t0), lastMs: x.t1 == null ? null : n(x.t1) }))
+      return rows.map((x) => ({ site: String(x.site ?? ''), count: n(x.c), firstEtDate: x.d0 == null ? null : String(x.d0), lastEtDate: x.d1 == null ? null : String(x.d1) }))
     },
     async countryCounts(campaign) {
       const q = taggedCountryQuery(campaign)

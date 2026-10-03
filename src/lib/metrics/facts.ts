@@ -16,8 +16,8 @@
 //   flightPathsSeen     ← functions/_lib/campaignInstrumentation.ts (retired; moved here)
 //   bskKpiDays          ← /api/overview's KPI query (same WHERE)
 //   bskRangePath        ← /api/overview's timeline query (same WHERE)
-//   popupRangePath      ← /api/popups' query (same WHERE, same `pf` split; /api/popups also
-//                         leaves out the split-guard rows, which no pop-up metric reads)
+//   popupRangePath      ← /api/popups' query (same WHERE, same `pf` split; both leave out the
+//                         split-guard rows, which no pop-up metric reads)
 //   adsSpend            ← lib/adsStore.ts SPEND_SUMMARY_SQL (gss-stats' own store)
 //   adsCoverage, adsLastSync ← lib/adsStore.ts readFreshness's two reads (the same store)
 //   bskFirstHit         ← /api/overview's first-hit query (the release panel's lower bound)
@@ -60,7 +60,7 @@ import { COVERAGE_ROWS_SQL, LAST_SYNC_SQL, mapSpendSummary, SPEND_SUMMARY_SQL } 
 import { UPSELL_SIGNEDOUT_FIX_AT, type SpendSummary } from '../adsRules'
 import { etMidnightMs } from './instrumentation'
 import { excludeOwnClause } from '../ownExclusion'
-import { refusedPathMatch } from '../splitGuard'
+import { refusedPathExcludeClause, refusedPathMatch } from '../splitGuard'
 
 export type FactId =
   | 'campaignPathVisitor'
@@ -258,8 +258,9 @@ export const COUNTRY_BUCKET_SQL = "CASE country WHEN 'US' THEN 'US' WHEN 'CA' TH
 /** COUNTRY_BUCKET_SQL with the counts-only split guard (lib/splitGuard.ts): a refused row
  * (return, game start, completion, tutorial completion, tour exit) reads cb = '' — no bucket,
  * so a country-filtered metric never counts it, while an unfiltered one still does. The path
- * patterns are bound values (refusedPathMatch), placed in SELECT order before any later column's
- * binds. Literal outputs only. */
+ * patterns are SQL literals (refusedPathMatch), so the CASE costs no binds; `binds` is kept (and
+ * placed in SELECT order before any later column's) in case that ever changes. Literal outputs
+ * only. */
 export function guardedCountryBucket(): { sql: string; binds: string[] } {
   const m = refusedPathMatch()
   return { sql: `CASE WHEN ${m.sql} THEN '' ELSE ${COUNTRY_BUCKET_SQL} END`, binds: m.binds }
@@ -430,6 +431,9 @@ export const FACTS: Record<FactId, FactDef> = {
       const inc = popupIncludeClause()
       w.push(inc.sql)
       b.push(...inc.binds)
+      // The counts-only rule (lib/splitGuard.ts), as /api/popups applies it: this fact buckets by
+      // hour, so the refused rows stay out. None is a pop-up event, so no count changes.
+      refusedPathExcludeClause(w, b)
       const pf = pfColumn()
       const seg = segmentColumn(3_600_000, cuts)
       return {
