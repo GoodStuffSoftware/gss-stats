@@ -6,17 +6,31 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Return, game-completion and tutorial-completion rows can no longer be split by hour, place or device.**
+  A map, or a chart grouped or filtered by hour of day, location or device, now leaves those rows
+  out; as a result the "Arrivals by ET hour of day" chart no longer counts return and completion rows.
+
 ### Removed
 - **The "Deferred completions (EU consent)" tile is gone.** Best Sudoku now sends those games as
   ordinary completions, so the tile could only read 0; saved copies of it load without the tile, and a saved card whose only item was that
   tile now loads as an invalid card.
 
+### Added
+- **Tutorial completions and tour exits (Best Sudoku v1.97.0).** The Overview "today" card now
+  splits tutorial completions into first run and replay, and counts tour exits by step (preamble,
+  hub, section), counted from 13:03 ET on 2026-10-03. The new rows never count as page views or
+  real game completions. Note: from v1.97.0 the first-run tutorial win offers "Play a real game",
+  which starts a counted Easy game, so first-run game completions may rise from 13:03 ET on 10-03.
+- **v1.97.0 release marker and a go-live marker for the new beacons on the charts.**
+
 ### Fixed
-- **Best Sudoku v1.97.0 game starts and tutorial completions no longer count as page views, and
-  the first-session funnel shows them.** Game starts and tutorial completions are now event
-  beacons like the tour exit already was, and the morning read and its report page list tour
-  exits by stage, game starts by difficulty and tutorial completions (first run vs replay) as
-  plain counts, "not yet tracked" until the first v1.97.0 row.
+- **Best Sudoku v1.97.0 game starts no longer count as page views, and the first-session funnel
+  shows the new first-run counters.** Counted game starts are now an event beacon like the tour
+  exit and tutorial completion already are. The morning read and its report page list the tour
+  skips by stage (the same rows as tour skip, split by where), game starts by difficulty and
+  tutorial completions (first run vs replay) as plain counts, "not yet tracked" until the
+  first v1.97.0 row.
 - **Return visits now leave out pre-launch test visits, like the arrivals tile.** Returns from a
   campaign's tagged link count only from its attribution start (for the retest, 12:00 ET on its
   first day), so launch-day test rows no longer inflate the return buckets. The ads routine's

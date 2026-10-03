@@ -7,9 +7,6 @@ import {
   ABANDON_BUCKETS,
   FIRST_SESSION_STEP_LABELS,
   FIRST_SESSION_STEPS,
-  GAME_START_DIFFICULTIES,
-  TOUR_EXIT_STAGES,
-  TUTORIAL_COMPLETE_VARIANTS,
   WELCOME_EVENTS,
   formatGated,
   type FirstSessionFigure,
@@ -25,7 +22,7 @@ import {
   SEARCH_NA,
   type CampaignChannel,
 } from '../../src/lib/adsRules'
-import { POPUP_OUTCOME_TYPES, gateRate, installOutcomeGapNote } from '../../src/lib/popupEvents'
+import { GAME_START_DIFFICULTIES, POPUP_OUTCOME_TYPES, TOUR_EXIT_STEPS, TUTORIAL_COMPLETE_KINDS, gateRate, installOutcomeGapNote } from '../../src/lib/popupEvents'
 import { RAW_INSTALL_SIGNALS_LABEL } from '../../src/lib/campaigns'
 import { noteRawText } from '../../src/lib/notes'
 import type { DiagnosticsSection, FullRead, MorningResult, PostflightResult, SpendSection } from './read'
@@ -265,13 +262,15 @@ export function firstSessionLines(fs: MorningResult['firstSession']): string[] {
     const st = f.steps[k]
     const vs = st.vsParent ? `; vs ${FIRST_SESSION_STEP_LABELS[st.vsParent.parent]} ${formatGated(st.vsParent)}` : ''
     out.push(`  ${FIRST_SESSION_STEP_LABELS[k]}: ${firstSessionFigureText(st)}${st.tracked === false ? '' : vs}`)
-    // The v1.97.0 first-run counters follow the tour outcomes: how a tour ended, the counted
-    // game it can start, the tutorial win. Plain row counts side by side, no ratio between
-    // them (a start cannot be matched to the exit that led to it).
+    // The v1.97.0 first-run counters follow the tour outcomes. The first is NOT a further step:
+    // /tour/exit-at/<stage> fires only on a skip, straight after /tour/skip, so it is the tour
+    // skip rows split by where (it sits under that line and is labelled so). The counted game
+    // start and the tutorial win are their own counters. Plain row counts side by side, no
+    // ratio between them (a start cannot be matched to the exit that led to it).
     if (k === 'tourSkip') {
-      out.push(breakdown('tour exit by stage (since v1.97.0)', TOUR_EXIT_STAGES, f.tourExit))
-      out.push(breakdown('game starts by difficulty (since v1.97.0; all counted starts, tour exits included)', GAME_START_DIFFICULTIES, f.gameStart))
-      out.push(breakdown('tutorial complete (since v1.97.0; first run vs replay)', TUTORIAL_COMPLETE_VARIANTS, f.tutorialComplete))
+      out.push(breakdown('tour skip by stage (since v1.97.0; the same rows as tour skip above, split by where)', TOUR_EXIT_STEPS, f.tourExit))
+      out.push(breakdown('game starts by difficulty (since v1.97.0; every counted start, including leaving the tour for a real game)', GAME_START_DIFFICULTIES, f.gameStart))
+      out.push(breakdown('tutorial complete (since v1.97.0; first run vs replay)', TUTORIAL_COMPLETE_KINDS, f.tutorialComplete))
     }
   }
   const ab = ABANDON_BUCKETS.map((b) => f.abandon[b])
