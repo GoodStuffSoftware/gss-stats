@@ -21,7 +21,7 @@ npm run preview     # build + wrangler pages dev (Functions + KV + D1 simulated)
 # or
 npm run dev         # Vite only (UI iteration; /api/* not served)
 
-npm test            # vitest — the sign-in gate (see Auth → Tests) plus pure-logic unit tests (day bucketing, rate math, campaign attribution, …)
+npm test            # vitest (skips .claude/**, where agent worktrees live) — the sign-in gate (see Auth → Tests) plus pure-logic unit tests (day bucketing, rate math, campaign attribution, …)
 npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vue — no vue-tsc yet)
 ```
 
@@ -320,8 +320,9 @@ geography is country-only** — sub-country region/city comes from the beacon.
 
 **Pop-up event beacons never count as page views — unless a chart opts in.** Paths under
 `/signin-prompt`, `/signin-eligible`, `/promo-first50`, `/first50-congrats`, `/upsell`,
-`/install`, `/popup-outcome`, `/return`, `/game/complete/` and the `/auth/success/<provider>/`
-status suffix are pop-up/event beacons, not screens — `/api/geo` and `/api/sites` exclude all
+`/install`, `/popup-outcome`, `/return`, `/game/complete/`, the `/auth/success/<provider>/`
+status suffix, `/auth/error`, `/auth/redirect` and the first-session beacons (`/tour`,
+`/game/first-move`, `/game/abandon`, `/welcome-signed-in`) are pop-up/event beacons, not screens — `/api/geo` and `/api/sites` exclude all
 of them from every pageview/visit total and the top-pages breakdown by default (see
 [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) `POPUP_EVENT_PREFIXES`); `/api/popups` is
 where they're counted. Each geo chart has its own **"Include event beacons"** option (off by
@@ -339,7 +340,8 @@ medium/date, plus **screen width** (`screenw`, exact pixels) and its bucketed fo
 (`screenwBucket`: `<480` / `480-767` / `768-1023` / `1024-1439` / `1440+`), plus a derived
 **path family** dimension (`pathFamily`) that groups every event-beacon prefix above into
 `page` / `signin-prompt` / `signin-eligible` / `promo-first50` / `first50-congrats` / `upsell`
-/ `install` / `popup-outcome` / `return` / `game-complete` / `auth-status`. More derived
+/ `install` / `popup-outcome` / `return` / `game-complete` / `auth-status` / `auth-error` /
+`auth-redirect` / `tour` / `game-first-move` / `game-abandon` / `welcome-signed-in`. More derived
 dimensions: **pop-up** (`popupFamily`) and **pop-up outcome** (`popupOutcome`), measured rows
 only (from the tracking activation day; pre-fix install-gap rows get no value — see
 [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) `popupDimSqlCase`, where
@@ -425,7 +427,24 @@ npm run typecheck:scripts
   mode. Parent/child maturity is enforced by the run-independent `parentAgeHours` cutoff (event
   timestamps, not the clock), so removing the gate does not weaken it. Pushes go out only on a
   threshold read, a kill-rule trip, a failed read, or a real release-health alert (parent at
-  least MIN_COHORT, outcome window elapsed, child zero).
+  least MIN_COHORT, outcome window elapsed, child zero). The threshold push names any kill
+  rule on WATCH (e.g. `no kill rule tripped, WATCH (funnel-reach), continue`).
+  **Kill rule 3 (funnel-reach)** trips on zero tagged asks. Zero tagged arrivals always trips.
+  While the app's first-session ask beacon (`/signin-prompt/tutorial`) has no rows site-wide
+  in the window, zero tagged asks from tagged arrivals with asks (the ASK_PATHS set) still shown
+  site-wide reads WATCH instead (the campaign tag only rides beacons for 30 minutes, so
+  later-session prompts go untagged). Once the tutorial ask has any site-wide row, the downgrade
+  expires and the rule reads tagged asks only. The rule's detail line says which mode applied.
+  Every morning read also prints a **first-session funnel** (arrivals → game views →
+  tour start → tour complete/skip → first move → game complete, abandon-by-%-filled buckets,
+  sign-in asks shown incl. the tutorial ask, and the signed-in welcome card), tagged counts with
+  site-wide web counts alongside over the same window (attribution start to flight end or now).
+  Arrivals are `/return/<uc>/d0` rows (one per device's first tagged visit): tagged = the
+  campaign's own uc (web and app), site-wide = any uc on web. "Tracked" is decided per beacon
+  family, since each family ships in one app release: tour + first move + abandon buckets; the
+  welcome card; the tutorial ask. A family with no rows yet reads "not yet tracked", never 0%;
+  once any member has a row, a sibling with none is a real 0. Ratios are rows over rows and never
+  use game views (page views) as a parent. Informational only — never a kill rule or a push.
 - **postflight-read** covers the wrap-up (flight end + 7 days; spend after the flight and the cap are checked first on every run) and the day-15/30/60 and
   December follow-ups, split promo vs non-promo, with the d31-60 return buckets. Day 15/30/60
   add the flight-window account cohort by access tier and promo marker (sitewide, not
@@ -457,7 +476,8 @@ npm run typecheck:scripts
   `/auth/success/<provider>` (providers `google` and `email`), so every auth-success count — the
   tagged funnel, the campaign and Overview cards (`/api/metrics`), the sign-up bound — matches the exact base
   shape, and the status split reads only the three-segment rows. A prefix match would count each
-  new-client sign-in twice. Kill rule 3's asks are unchanged.
+  new-client sign-in twice. Kill rule 3's asks now include the tutorial ask
+  (`/signin-prompt/tutorial`) alongside placement, streak and the first-50 promo.
 - **One reading per entry per day.** A reading is stored once per (campaign, ET day, entry
   kind: `morning`, `backstop`, `threshold-50`, `postflight-wrapup`, …). A same-day rerun is
   stored only when it carries new information (a complete retry of an incomplete read, a new
