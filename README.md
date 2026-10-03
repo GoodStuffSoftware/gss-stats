@@ -168,7 +168,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   (`widget.noteId`), editable from the chart menu either way. Short UI names (metric and
   funnel-step labels such as "Game-screen views") are registry entries too, of kind `label`:
   never a caption and never offered in the caption pickers (the card builder's label pickers
-  list them).
+  list them). Everything under a chart (its captions, the response's own caveats, the range
+  notice) comes from one list in a fixed order,
+  [`chartNotes()`](src/lib/chartNotes.ts); a card's own captions render inside the card.
 - **Durable, multi-page dashboards** — layout + chart definitions persist in KV (not
   `localStorage`), so they follow you across devices. Duplicate / rename / delete
   pages (see *Page navigation*); a protected default page with "restore default charts"; per-page filters and
