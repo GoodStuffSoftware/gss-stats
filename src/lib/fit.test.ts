@@ -111,8 +111,8 @@ describe('editor model: setting and clearing the option', () => {
 })
 
 describe('a layout without fit loads exactly as before', () => {
-  it('keeps CONFIG_VERSION: no migration, no bump', () => {
-    expect(CONFIG_VERSION).toBe(12)
+  it('adds no migration and no bump of its own (13 is the navigation step, not fit)', () => {
+    expect(CONFIG_VERSION).toBe(13)
   })
 
   it('the production layout and the factory layout get no fit key, and the same geometry', () => {
