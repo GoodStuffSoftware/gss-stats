@@ -9,6 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import App from './App.vue'
+import { stubAppFetch } from './testing/appFetch'
 import Dashboard from './components/Dashboard.vue'
 import { saveConfig, loadConfig } from './api'
 import PROD_V9 from './lib/__fixtures__/prodLayout.v9.json'
@@ -33,14 +34,23 @@ vi.mock('./session', async (importOriginal) => {
   return { ...actual, loadIdentity: vi.fn(async () => {}), checkSessionExpired: vi.fn(async () => {}) }
 })
 
+// No real network from a mounted App: every endpoint it can reach answers from the stub (src/testing/appFetch.ts).
+beforeEach(() => {
+  stubAppFetch()
+})
+
 const stored = () => ({ ...JSON.parse(JSON.stringify(PROD_V9)), version: 11 })
+// The app's save debounce (700 ms) runs on a fake clock: stepping it forward is instant and
+// cannot be stretched by a busy machine, where a real 800 ms sleep per step piled up past the
+// test timeout.
 const pastDebounce = async () => {
-  await new Promise((r) => setTimeout(r, 800))
+  await vi.advanceTimersByTimeAsync(800)
   await flushPromises()
 }
 const mounted: VueWrapper[] = []
 afterEach(() => {
   while (mounted.length) mounted.pop()!.unmount()
+  vi.useRealTimers()
   vi.unstubAllGlobals()
 })
 async function mountApp() {
@@ -73,6 +83,7 @@ function deferredSaves() {
 
 describe('App — saving while a PUT is in flight', () => {
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     localStorage.clear()
     vi.mocked(saveConfig).mockReset()
     vi.mocked(loadConfig).mockImplementation(async () => stored())

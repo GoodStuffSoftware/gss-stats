@@ -7,6 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import App from './App.vue'
+import { stubAppFetch } from './testing/appFetch'
 import { saveConfig, loadConfig } from './api'
 import { VIEWER_PREFS_KEY } from './lib/viewerPrefs'
 import { clonePage, normalizeConfig } from './lib/defaults'
@@ -42,8 +43,15 @@ function stored(): DashboardConfig {
 const mounted: VueWrapper[] = []
 afterEach(() => {
   while (mounted.length) mounted.pop()!.unmount()
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   ;(window as any).innerWidth = 1024
+})
+
+// No real network from a mounted App: every endpoint it can reach answers from the stub (src/testing/appFetch.ts).
+beforeEach(() => {
+  stubAppFetch()
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
 })
 beforeEach(() => {
   localStorage.clear()
@@ -67,7 +75,7 @@ async function typeInto(input: HTMLInputElement, text: string) {
   await flushPromises()
 }
 const lastSave = async () => {
-  await new Promise((r) => setTimeout(r, 800))
+  await vi.advanceTimersByTimeAsync(800)
   await flushPromises()
   return vi.mocked(saveConfig).mock.calls.at(-1)?.[0]
 }

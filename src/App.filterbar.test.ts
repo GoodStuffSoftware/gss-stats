@@ -18,9 +18,10 @@
 // happy-dom ships a real `IntersectionObserver` constructor but never fires it on its own (no
 // actual layout/scrolling) — these tests stub it with a controllable fake so `observe()` is
 // captured and its callback can be driven by hand.
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import App from './App.vue'
+import { stubAppFetch } from './testing/appFetch'
 
 // ── Controllable IntersectionObserver stub ─────────────────────────────────────────────────
 // Deliberately NOT `implements IntersectionObserver` — the real interface grows non-standard
@@ -71,6 +72,11 @@ vi.mock('./sitesStore', async (importOriginal) => {
 vi.mock('./session', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./session')>()
   return { ...actual, loadIdentity: vi.fn(async () => {}), checkSessionExpired: vi.fn(async () => {}) }
+})
+
+// No real network from a mounted App: every endpoint it can reach answers from the stub (src/testing/appFetch.ts).
+beforeEach(() => {
+  stubAppFetch()
 })
 
 async function mountApp() {
