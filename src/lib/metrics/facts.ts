@@ -42,28 +42,40 @@
 // request. A timed fact groups by `s`, the row's SEGMENT: how many of the fact's cut instants
 // (lib/metrics/engine.ts factCuts — every go-live, attribution start and alignment instant a
 // metric on it can filter on) its minute/hour bucket start has reached. The KPI fact also groups
-// by `d`, the ET day window (0 = today so far, 1..7 = the same time of day on each earlier day)
-// its minute bucket falls in. Both compare the BUCKET START, exactly as the engine used to per
-// row, so every count is unchanged (the bounds are rounded to whole buckets — bucketBound — so
-// the SQL compares plain `ts`).
+// by `d`, the WHOLE ET day its minute bucket falls in (0 = today so far, 1..7 = each of the 7
+// earlier ET days, midnight to midnight), and by `t`, the same-time flag: 1 when a row that is NOT
+// a refused row (lib/splitGuard.ts refusedPathMatch) falls before the same clock time on its
+// earlier day, else 0. A refused row's `t` is always 0, so no refused count is ever cut at a
+// clock time: a metric that can count refused rows compares whole ET days (yesterday's total and
+// the 7-day daily average), and only an opt-out metric (MetricDef.countsRefused: false) sums its
+// `t = 1` groups for the same-time "vs yesterday" and "7-day avg" deltas it always had. Every
+// band compares the BUCKET START, exactly as the engine used to per row, so every count is
+// unchanged (the bounds are rounded to whole buckets — bucketBound — so the SQL compares plain
+// `ts`).
 //
 // ANONYMITY (hard rule, lib/campaigns.ts header): no fact selects `id` or a raw `ts` — only a
-// small integer from a CASE over `ts` bands (a segment or a day index), or the boolean `ts >= ?`
-// split — and none joins rows.
+// small integer from a CASE over `ts` bands (a segment, a day index or the KPI same-time flag), or
+// the boolean `ts >= ?` split — and none joins rows.
 //
-// SEGMENT CUTS OVER REFUSED ROWS (R-1b ruling, 2026-10-03): `s`, `d`, `pf` and `uf` can cut a
-// return or completion row at a minute or an hour, and they stay as they are. Each cut is a
-// fixed instant — a go-live, an attribution start, a flight boundary, a fix, an ET midnight or
-// the same time of day on an earlier day — that a COUNT is split at; no fact groups a refused
-// row by hour of day, and no chart shows one that way. Clamping sub-day windows over refused
-// rows to whole ET days is R-1d (lib/splitGuard.ts header).
+// SEGMENT CUTS OVER REFUSED ROWS (R-1b ruling, 2026-10-03; each reviewed again for R-1d and
+// kept): `s`, `pf` and `uf` can cut a return or completion row at a minute or an hour, and they
+// stay as they are. Each cut is a fixed instant — a go-live, an attribution start, a flight
+// boundary or a fix — that a COUNT is split at, never a bound a caller picks; no fact groups a
+// refused row by hour of day, and no chart shows one that way. The reasoning for each is in the
+// lib/splitGuard.ts header (SEGMENT CUTS). The KPI fact's `d` is whole ET days and its `t` is
+// always 0 on a refused row (decision 2026-10-03, "KPI deltas on refused-row tiles: whole-day
+// context"): the old same-clock-time windows gave a closed day's refused count up to a clock
+// time, readable after the fact. The one caller-picked window, bskRangePath's since/until (and
+// its daily twin bskRangeDaily's), counts refused rows over whole ET days (R-1d,
+// refusedWindowClause); popupRangePath and popupRangeDaily leave refused rows out altogether.
 // facts.test.ts checks every statement.
 
 import { applyExclusions, CAMPAIGNS, campaignAttributionClause, campaignAttributionStartMs, campaignById, etFlightRangeMs, ORGANIC_ARM_ID, type CampaignFlight } from '../campaigns'
-import { excludeInstallGapUnmeasured, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, popupIncludeClause } from '../popupEvents'
+import { excludeInstallGapUnmeasured, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, popupIncludeClause, sqlInt } from '../popupEvents'
 import { last7DatesBefore, siteWindowClause } from '../overview'
 import { addDays as addEtDays, etDateSql, etSameTimeWindow } from '../etTime'
 import { BEST_SUDOKU_SITES } from '../bestSudokuSites'
+import { refusedWindowClause } from '../splitGuard'
 import { COVERAGE_ROWS_SQL, LAST_SYNC_SQL, mapSpendSummary, SPEND_SUMMARY_SQL } from '../adsStore'
 import { UPSELL_SIGNEDOUT_FIX_AT, type SpendSummary } from '../adsRules'
 import { etMidnightMs } from './instrumentation'
@@ -114,12 +126,15 @@ export interface FactStatement {
  * fact's side (0 before, 1 after; 0 for every other fact); `seg` is the row's segment against the
  * fact's cuts (0 for an untimed fact); `pf` is the row-exact split at FactDef.splitAt (null when
  * the fact has none); `cb` the country bucket ('' when the fact has none); `uf` the row-exact
- * side of the upsell fix (null when unset or not split). `c` is the COUNT(*). */
+ * side of the upsell fix (null when unset or not split). `sameTime` is the KPI fact's same-time
+ * flag `t` (true only for a row that is not a refused row and falls before the same clock time on
+ * its earlier day; false on every other fact). `c` is the COUNT(*). */
 export interface BeaconRow {
   path: string
   visitor: string
   campaign: string
   day: number
+  sameTime: boolean
   seg: number
   pf: boolean | null
   cb: string
@@ -246,21 +261,37 @@ function segmentColumn(bucketMs: number, cuts: readonly number[]): { sql: string
   return { sql: `CASE ${whens.join(' ')} ELSE 0 END`, binds }
 }
 
-/** The KPI day windows: [0] today so far, [1..7] the same ET clock time on each of the 7 days
- * before — the retired /api/overview's windows (lib/overview.ts sameTimeWindowMs), computed without Intl
- * (lib/etTime.ts etSameTimeWindow; facts.test.ts checks they are identical). */
+/** The KPI same-time windows: [0] today so far, [1..7] the same ET clock time on each of the 7
+ * days before — the retired /api/overview's windows (lib/overview.ts sameTimeWindowMs), computed
+ * without Intl (lib/etTime.ts etSameTimeWindow; facts.test.ts checks they are identical). Days
+ * 1..7 bound the `t` flag only (a non-refused row an opt-out metric compares); `d` is whole days. */
 export function kpiDayWindows(todayEt: string, nowMs: number): [number, number][] {
   return [[etMidnightMs(todayEt), nowMs], ...last7DatesBefore(todayEt).map((d) => etSameTimeWindow(d, nowMs))]
 }
 
-/** `d`: which KPI day window the row's minute bucket start falls in (-1 for none). */
-function dayColumn(windows: readonly (readonly [number, number])[]): { sql: string; binds: unknown[] } {
-  const binds: unknown[] = []
-  const whens = windows.map(([a, z], d) => {
-    binds.push(bucketBound(a, 60_000), bucketBound(z, 60_000))
-    return `WHEN ts >= ? AND ts < ? THEN ${d}`
-  })
-  return { sql: `CASE ${whens.join(' ')} ELSE -1 END`, binds }
+/** The ET midnights the KPI fact's whole-day index `d` starts each day at: [0] today's, [k] the
+ * one k ET days before (k = 1..7). ET-day arithmetic, so a 23 h or 25 h DST day stays whole. */
+export function kpiDayStarts(todayEt: string): number[] {
+  return [0, 1, 2, 3, 4, 5, 6, 7].map((k) => etMidnightMs(addEtDays(todayEt, -k)))
+}
+
+/** `d`: the whole ET day the row's minute bucket start falls in (0 = today, k = k days before;
+ * -1 before the 7th). The bounds are integer literals (sqlInt), so the column costs no binds. */
+function kpiDayColumn(todayEt: string): string {
+  const whens = kpiDayStarts(todayEt).map((m, d) => `WHEN ts >= ${sqlInt(bucketBound(m, 60_000))} THEN ${d}`)
+  return `CASE ${whens.join(' ')} ELSE -1 END`
+}
+
+/** `t`: 1 when the row is NOT a refused row (lib/splitGuard.ts refusedPathMatch, the same
+ * predicate the split guard and R-1d use) and its minute bucket start falls in an earlier day's
+ * same-time window [ET midnight, same clock time); 0 otherwise, and ALWAYS 0 on a refused row, so
+ * a refused count is never split at a clock time. The bounds are integer literals (sqlInt). */
+function kpiSameTimeColumn(todayEt: string, nowMs: number): { sql: string; binds: unknown[] } {
+  const refused = refusedPathMatch() // binds are always empty; kept in SELECT order in case that changes
+  const whens = kpiDayWindows(todayEt, nowMs)
+    .slice(1)
+    .map(([a, z]) => `WHEN ts >= ${sqlInt(bucketBound(a, 60_000))} AND ts < ${sqlInt(bucketBound(z, 60_000))} THEN 1`)
+  return { sql: `CASE WHEN ${refused.sql} THEN 0 ${whens.join(' ')} ELSE 0 END`, binds: refused.binds }
 }
 
 const str = (x: unknown): string => (x == null ? '' : String(x))
@@ -274,6 +305,7 @@ const beacon = (raw: Record<string, unknown>[], pf: (r: Record<string, unknown>)
     visitor: str(r.visitor),
     campaign: str(r.campaign),
     day: num(r.d),
+    sameTime: num(r.t) === 1,
     seg: num(r.s),
     pf: pf(r),
     cb: str(r.cb),
@@ -421,14 +453,17 @@ export const FACTS: Record<FactId, FactDef> = {
     usesNow: true,
     build(p, nowMs, cuts = []) {
       if (!p.todayEt) throw new Error('bskKpiDays needs todayEt')
-      // Today plus the 7 ET days before it (the vs-yesterday and 7-day-average windows).
+      // Today so far plus the 7 whole ET days before it. `d` is the whole ET day; `t` marks the
+      // non-refused rows before the same clock time on their day (always 0 on a refused row), so
+      // an opt-out metric's same-time deltas are unchanged while a refused count is whole days.
       const clause = siteWindowClause(BEST_SUDOKU_SITES, etMidnightMs(addEtDays(p.todayEt, -7)), nowMs)
-      const day = dayColumn(kpiDayWindows(p.todayEt, nowMs))
+      const day = kpiDayColumn(p.todayEt)
+      const same = kpiSameTimeColumn(p.todayEt, nowMs)
       const seg = segmentColumn(60_000, cuts)
       return {
         db: 'gss_geo',
-        sql: `SELECT ${day.sql} AS d, ${seg.sql} AS s, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE ${clause.sql} GROUP BY d, s, path, visitor, campaign HAVING d >= 0`,
-        binds: [...day.binds, ...seg.binds, ...clause.binds],
+        sql: `SELECT ${day} AS d, ${same.sql} AS t, ${seg.sql} AS s, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE ${clause.sql} GROUP BY d, t, s, path, visitor, campaign HAVING d >= 0`,
+        binds: [...same.binds, ...seg.binds, ...clause.binds],
       }
     },
     parse: (raw) => beacon(raw, noPf),
@@ -444,11 +479,15 @@ export const FACTS: Record<FactId, FactDef> = {
     ttl: 'range',
     build(p, _nowMs, cuts = []) {
       const [startMs, endMs] = rangeMs(p.since!, p.until!)
-      const clause = siteWindowClause(BEST_SUDOKU_SITES, startMs, endMs)
+      // Counts only (R-1d): refused rows over whole ET days, every other row over the exact
+      // range. An ET-midnight range (every bare-date range) builds the unchanged statement.
+      const win = refusedWindowClause(startMs, endMs)
+      const clause = siteWindowClause(BEST_SUDOKU_SITES, win.binds[0], win.binds[1])
+      const where = [clause.sql, ...win.terms.slice(2)].join(' AND ')
       const seg = segmentColumn(3_600_000, cuts)
       return {
         db: 'gss_geo',
-        sql: `SELECT ${seg.sql} AS s, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE ${clause.sql} GROUP BY s, path, visitor, campaign`,
+        sql: `SELECT ${seg.sql} AS s, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE ${where} GROUP BY s, path, visitor, campaign`,
         binds: [...seg.binds, ...clause.binds],
       }
     },
@@ -560,9 +599,13 @@ export const FACTS: Record<FactId, FactDef> = {
     splitAt: null,
     ttl: 'range',
     build(p) {
+      // bskRangePath's WHERE, refused-row snap included (R-1d): a sub-day range counts refused
+      // rows over whole ET days, every other row over the exact range. An ET-midnight range (every
+      // bare-date range) builds the unchanged statement.
       const [startMs, endMs] = rangeMs(p.since!, p.until!)
-      const clause = siteWindowClause(BEST_SUDOKU_SITES, startMs, endMs)
-      return dailyStatement(clause.sql, clause.binds, 'full')
+      const win = refusedWindowClause(startMs, endMs)
+      const clause = siteWindowClause(BEST_SUDOKU_SITES, win.binds[0], win.binds[1])
+      return dailyStatement([clause.sql, ...win.terms.slice(2)].join(' AND '), clause.binds, 'full')
     },
     parse: beaconDaily,
   },
@@ -587,6 +630,9 @@ export const FACTS: Record<FactId, FactDef> = {
       const inc = popupIncludeClause()
       w.push(inc.sql)
       b.push(...inc.binds)
+      // popupRangePath's counts-only exclusion, so the twin reads the scalar's rows: no refused
+      // row at all, whatever the range (none is a pop-up event, so no count changes).
+      refusedPathExcludeClause(w, b)
       excludeInstallGapUnmeasured(w, b) // popupRangePath drops these in JS (isUnmeasuredGapRow); here in SQL
       return dailyStatement(w.join(' AND '), b, 'path')
     },
