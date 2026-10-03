@@ -4,6 +4,7 @@ import {
   dailyRowUpserts,
   MAX_BINDS,
   mapReadingRow,
+  scrubPlayHour,
   parseCampaignIdsParam,
   placementDailyUpserts,
   readingInsert,
@@ -123,6 +124,39 @@ describe('row mapping', () => {
     expect(mapReadingRow({ ...row, entry_kind: null })!.entryKind).toBe('threshold-50')
     expect(mapReadingRow({ ...row, counts: '{broken' })!.counts).toEqual({})
     expect(mapReadingRow({ ...row, kind: 'nope' })).toBeNull()
+  })
+  it('mapReadingRow drops the hour from a stored pre-R-1b Play line and leaves other times alone', () => {
+    const oldLines = [
+      'Play: not yet seen. Web /return/ rows are continuing (last 2026-09-30 21:00 ET), so the pipeline works and the app build simply hasn\'t landed.',
+      'Play: not yet seen. Web /return/ rows last seen 2026-09-29 08:00 ET.',
+      'Play: first bestsudoku-app /return/ row seen 2026-10-01 14:00 ET (2 app rows since go-live).',
+    ]
+    const flight = 'Flight 2 started 2026-09-30 12:26 ET'
+    const st = readingInsert({ ...rec(), notes: [...oldLines, flight] })
+    const cols = ['reading_key', 'campaign_id', 'kind', 'stage', 'read_at', 'et_date', 'spend_through_et', 'cumulative_spend_micros', 'thresholds', 'complete', 'rules', 'proposal', 'decision', 'counts', 'notes', 'routine_version', 'entry_kind']
+    const notes = mapReadingRow(Object.fromEntries(cols.map((c, i) => [c, st.binds[i]])))!.notes
+    expect(notes.slice(0, 3)).toEqual([
+      'Play: not yet seen. Web /return/ rows are continuing (last 2026-09-30 ET), so the pipeline works and the app build simply hasn\'t landed.',
+      'Play: not yet seen. Web /return/ rows last seen 2026-09-29 ET.',
+      'Play: first bestsudoku-app /return/ row seen 2026-10-01 ET (2 app rows since go-live).',
+    ])
+    for (const n of notes.slice(0, 3)) expect(n).not.toMatch(/\d{2}:\d{2}/)
+    expect(notes[3]).toBe(flight)
+    expect(scrubPlayHour('install fix went live 26 Sep 12:26 ET')).toBe('install fix went live 26 Sep 12:26 ET')
+    expect(scrubPlayHour('Play: not yet seen. Web /return/ rows last seen on 2026-09-30 ET.')).toBe('Play: not yet seen. Web /return/ rows last seen on 2026-09-30 ET.')
+  })
+  it('mapReadingRow stays total for malformed stored notes', () => {
+    const st = readingInsert(rec())
+    const cols = ['reading_key', 'campaign_id', 'kind', 'stage', 'read_at', 'et_date', 'spend_through_et', 'cumulative_spend_micros', 'thresholds', 'complete', 'rules', 'proposal', 'decision', 'counts', 'notes', 'routine_version', 'entry_kind']
+    const row = Object.fromEntries(cols.map((c, i) => [c, st.binds[i]]))
+    expect(mapReadingRow({ ...row, notes: '{"a":1}' })!.notes).toEqual({ a: 1 })
+    expect(mapReadingRow({ ...row, notes: '"text"' })!.notes).toBe('text')
+    expect(mapReadingRow({ ...row, notes: 'null' })!.notes).toBeNull()
+    expect(mapReadingRow({ ...row, notes: '[1, null, "Play: Web /return/ rows last seen 2026-09-29 08:00 ET."]' })!.notes).toEqual([
+      1,
+      null,
+      'Play: Web /return/ rows last seen 2026-09-29 ET.',
+    ])
   })
 })
 

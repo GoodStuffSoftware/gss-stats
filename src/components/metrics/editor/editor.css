@@ -177,3 +177,15 @@ details.more > summary {
   font-size: 12px;
   color: rgb(var(--ink-3));
 }
+
+/* A group of controls that a preset's read-only view disables as one (CardEditor preset mode):
+   no fieldset chrome, so the editable and read-only views look the same. */
+.ce-fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.ce-fieldset:disabled .option-row:not(.selected) {
+  opacity: 0.6;
+}
