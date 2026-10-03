@@ -358,8 +358,8 @@ export function itemViewModel(item: MetricItem, value: MetricValue | undefined, 
   // whatever the status, and never requested (scope.ts unmeasuredByConfig), unless the item's
   // whenNotStarted gating keeps a not-yet-started flight's item: then it reads as the server
   // would answer a window that has not opened yet.
-  if (unmeasuredByConfig(item.data, scope, item.gating)) return { visible: false, labelTokens, primary: '', deltaLines: [], captionTokens: [] }
-  if (configRuling(item.data, scope) === 'flight-pending') value = NOT_STARTED
+  if (unmeasuredByConfig(item.data, scope, item.gating, opts.todayEt)) return { visible: false, labelTokens, primary: '', deltaLines: [], captionTokens: [] }
+  if (configRuling(item.data, scope, opts.todayEt) === 'flight-pending') value = NOT_STARTED
   if (!value) {
     return { visible: true, labelTokens, primary: '…', deltaLines: [], captionTokens: [] }
   }

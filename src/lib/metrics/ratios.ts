@@ -76,6 +76,11 @@ export function ratioWindowsOf(r: Pick<RatioDef, 'num' | 'den'>, metrics: Readon
 export function ratioParamsOf(r: Pick<RatioDef, 'num' | 'den'>, metrics: ReadonlyMap<string, MetricDef> = METRICS): MetricParam[] {
   return sidesMemo(r, metrics).params
 }
+/** Whether a ratio serves the organic baseline arm: only when BOTH sides do, so an organic
+ * ratio never divides an organic count by a campaign one (or the reverse). */
+export function ratioSupportsOrganic(r: Pick<RatioDef, 'num' | 'den'>, metrics: ReadonlyMap<string, MetricDef> = METRICS): boolean {
+  return !!metrics.get(r.num)?.organic && !!metrics.get(r.den)?.organic
+}
 // Both are read for every request that names a ratio, so they are computed once per pair.
 const pairMemo = new WeakMap<ReadonlyMap<string, MetricDef>, Map<string, { windows: WindowName[]; params: MetricParam[] }>>()
 function sidesMemo(r: Pick<RatioDef, 'num' | 'den'>, metrics: ReadonlyMap<string, MetricDef>): { windows: WindowName[]; params: MetricParam[] } {
