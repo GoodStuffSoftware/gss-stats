@@ -6,6 +6,14 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Best Sudoku v1.97.0 game starts no longer count as page views, and the first-session funnel
+  shows the new first-run counters.** Counted game starts are now an event beacon like the tour
+  exit and tutorial completion already are. The morning read and its report page list the tour
+  skips by stage (the same rows as tour skip, split by where), game starts by difficulty and
+  tutorial completions (first run vs replay) as plain counts, "not yet tracked" until the
+  first v1.97.0 row.
+
 ## [0.14.3] — 2026-10-03
 
 ### Changed
