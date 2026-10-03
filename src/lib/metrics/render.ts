@@ -28,10 +28,11 @@ import { unitLabelId } from './units'
 // literal this module wrote itself. NOTES_REGISTRY is an ordinary object literal, so a bracket
 // lookup for an id like 'constructor' or '__proto__' resolves through Object.prototype instead
 // of coming back undefined (review finding, 2026-09-27) — `getNote`'s own `!n` truthiness check
-// doesn't catch that (a Function is truthy). validateCard is meant to reject such an id before
-// it's ever saved, but this checks the registry's OWN property regardless, so a save made
-// before that guard existed still renders as plain text instead of crashing (`resolveText`
-// calling `.text` on a Function, or a token walk over its `undefined` result).
+// doesn't catch that (a Function is truthy). validateCard checks a note id's shape only, never
+// whether this build knows it (an older tab keeps ids a newer build wrote), so this checks the
+// registry's OWN property: an unknown id, prototype-named or not, renders as nothing instead of
+// crashing (`resolveText` calling `.text` on a Function, or a token walk over its `undefined`
+// result).
 function hasNote(id: string): boolean {
   return Object.hasOwn(NOTES_REGISTRY, id)
 }
@@ -72,7 +73,9 @@ export interface ItemViewOptions {
 export function resolveLabelTokens(label: Label, scope: ScopeInstance, metricLabelId: string | undefined, todayEt: string): TextToken[] {
   if (typeof label === 'string') return tokenizeAndInterpolate(label, scopeVars(scope, todayEt))
   if ('note' in label) {
-    if (!hasNote(label.note)) return [{ type: 'text', value: label.note }]
+    // An id this build's registry doesn't know (a newer build's, or a retired one) is stored
+    // as-is (validateCard checks only its shape) and shows nothing — never the raw id.
+    if (!hasNote(label.note)) return []
     const vars: Record<string, string> = {}
     if (label.vars) for (const [k, path] of Object.entries(label.vars)) vars[k] = scopeField(scope, path, todayEt) ?? ''
     return noteTokens(label.note, vars)
@@ -169,7 +172,8 @@ function rangeDays(start: string, end: string): number {
 function applyEmptyGating(whenEmpty: Gating['whenEmpty']): { primary: string; visible: boolean } {
   const mode = whenEmpty ?? 'dash'
   if (mode === 'omit') return { primary: '', visible: false }
-  if (typeof mode === 'object') return { primary: hasNote(mode.note) ? noteRawText(mode.note) : mode.note, visible: true }
+  // A note this build doesn't know falls back to the default dash, never the raw id.
+  if (typeof mode === 'object') return { primary: hasNote(mode.note) ? noteRawText(mode.note) : '—', visible: true }
   return { primary: '—', visible: true }
 }
 function applyUnmeasuredGating(gating: Gating | undefined, scope: ScopeInstance, value: MetricValue): { primary: string; visible: boolean } {
