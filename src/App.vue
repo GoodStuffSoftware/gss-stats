@@ -828,7 +828,7 @@ function toggleDark() {
         <EllipsisIcon :size="17" aria-hidden="true" />
       </button>
       <span class="topbar-sp"></span>
-      <button type="button" class="nav-search-btn" aria-label="Search pages" aria-keyshortcuts="/" @click="openSearch">
+      <button type="button" class="nav-search-btn" aria-label="Search pages" title="Search pages (/)" aria-keyshortcuts="/" @click="openSearch">
         <SearchIcon :size="15" aria-hidden="true" />
         <span class="nav-search-label">Search pages</span>
         <kbd>/</kbd>
@@ -1365,10 +1365,10 @@ function toggleDark() {
   margin-top: 8px;
 }
 
-/* Compact bar (lib/responsive.ts TOPBAR_COMPACT_MAX_WIDTH): the bar would wrap here, so the search box
-   collapses to its icon (the button still opens the palette, "/" still works). AccountMenu does the same
-   for the account. At 700px and below the phone layout below takes over. */
-@media (min-width: 701px) and (max-width: 1000px) {
+/* Compact bar (lib/responsive.ts TOPBAR_COMPACT_MAX_WIDTH): the bar would wrap up to here, so the search
+   box collapses to its icon (the button still opens the palette, "/" still works). One rule for the
+   phone layout (700px and below) and the band above it, so there's no seam between them. */
+@media (max-width: 1000px) {
   .nav-search-btn {
     min-width: 0;
     padding: 7px;
@@ -1405,14 +1405,6 @@ function toggleDark() {
   }
   .top-actions {
     flex-wrap: wrap;
-  }
-  .nav-search-btn {
-    min-width: 0;
-    padding: 7px;
-  }
-  .nav-search-label,
-  .nav-search-btn kbd {
-    display: none;
   }
 }
 </style>
