@@ -18,6 +18,7 @@ import {
   isAuthSuccessBase,
   isInstallPromptInstalled,
   isRawInstallSignal,
+  ORGANIC_ARM_ID,
   parseReturnPath,
   type CampaignAttribution,
   type CampaignFlight,
@@ -97,6 +98,10 @@ export interface MetricDef {
   lagDays?: [number, number]
   /** Note ids that travel with every value. */
   caveats?: string[]
+  /** Also serves the organic baseline arm (lib/campaigns.ts ORGANIC_ARM_ID) as its
+   * `campaignId`: the web-only `/return/organic/<bucket>` rows. Only a campaign-scoped metric
+   * over campaignReturns may set it (checked at load); every other binding refuses 'organic'. */
+  organic?: true
 }
 
 // ── Memoized classifiers (a fact has few distinct paths and many rows) ───────────────────
@@ -251,9 +256,13 @@ export const METRIC_DEFS: MetricDef[] = [
       windows: { attribution: 'campaignReturns' },
       path: (p, ctx) => {
         const ev = returnOf(p)
-        return !!ev && ev.bucket === bucket && !!ctx.campaign?.ucValues.includes(ev.uc)
+        if (!ev || ev.bucket !== bucket) return false
+        // The organic arm has no campaign: its rows carry the reserved tag itself.
+        if (ctx.params.campaignId === ORGANIC_ARM_ID) return ev.uc === ORGANIC_ARM_ID
+        return !!ctx.campaign?.ucValues.includes(ev.uc)
       },
       instrumented: [BEACON, TRACKING_VS_FLIGHT],
+      organic: true,
     }),
   ),
   ...UPSELL_METRICS.map(({ id, kind }) =>
@@ -308,7 +317,7 @@ export const METRIC_DEFS: MetricDef[] = [
   // Any tagged first-ever beacon, whatever its campaign (the release panel's "Tagged arrivals":
   // no attribution window, unlike campaign.taggedArrivals).
   bskMetric({ id: 'bsk.taggedArrivals', unit: 'device', unitLabel: 'unit.arrivals', visitor: 'new', anyTag: true, windows: { page: 'bskRangePath', ...RELEASE_WINDOWS }, instrumented: [], caveats: ['arrivals-caveat'] }),
-  // How many days each release window covers (the latest dated release, bounded by the first
+  // How many days each release window covers (the compared release, bounded by the first
   // Best Sudoku hit and by today: lib/overview.ts releaseComparisonWindows).
   {
     id: 'release.windowDays',
@@ -445,6 +454,11 @@ export const METRICS: ReadonlyMap<string, MetricDef> = (() => {
     // which holds only while that fact serves exactly the today-so-far window and nothing else.
     for (const [w, f] of Object.entries(d.windows)) {
       if ((w === 'todaySoFar') !== (f === 'bskKpiDays')) throw new Error(`metric ${d.id}: todaySoFar must read bskKpiDays, and only it`)
+    }
+    // The organic arm exists only in the returns fact (its web-only, unbounded organic branch):
+    // any other fact would read the 'organic' campaignId as an unknown campaign.
+    if (d.organic && (!d.params.includes('campaignId') || Object.values(d.windows).some((f) => f !== 'campaignReturns'))) {
+      throw new Error(`metric ${d.id}: organic needs a campaignId param and reads campaignReturns only`)
     }
     m.set(d.id, d)
   }

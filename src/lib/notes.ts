@@ -308,6 +308,9 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     // rate audit, rows 1-2. One name for the site-wide KPI and the campaign funnel step.
     'label.bsk.gameViews': 'Game-screen views',
     'label.campaign.gameViews': 'Game-screen views',
+    // The organic baseline arm's name (lib/campaigns.ts ORGANIC_ARM_ID): untagged fresh installs
+    // on the web site only, never the installed app.
+    'label.arm.organic': 'Organic (web)',
     'label.funnel.arrivals': 'Arrivals',
     'label.funnel.completed': 'Completed a game',
     'label.funnel.ask': 'Sign-in ask',
@@ -499,7 +502,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.preset.campaign-country.description': 'One card per beacon-tracked campaign: each funnel step split into US, CA and every other country.',
     'label.preset.campaign-cost': 'Campaign cost',
     'label.preset.campaign-cost.description': 'One card per campaign: spend, where it came from and how fresh it is, and the cost per arrival and per auth success.',
-    'label.preset.release-before-after.description': 'The latest dated release: page views, tagged arrivals, auth successes and installs over the same number of days before and after it.',
+    'label.preset.release-before-after.description': 'The newest release with a full day after it: page views, tagged arrivals, auth successes and installs over the same number of days before and after it.',
   }),
 })
 

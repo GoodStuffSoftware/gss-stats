@@ -111,10 +111,11 @@ export const BSK_KPIS: CardSpec = {
   ],
 }
 
-/** The release panel (OverviewWidgetBody 'releasePanel'): the latest dated release, how many
+/** The release panel (OverviewWidgetBody 'releasePanel'): the compared release, how many
  * days each side covers, and a table of the four counts with Before and After as its columns.
- * Each window is `days` whole days on its side of the release's ET midnight, bounded by the
- * first Best Sudoku hit and by today (lib/overview.ts releaseComparisonWindows). A count the
+ * Each window is `days` whole ET days: Before ends at the release date's ET midnight, After
+ * starts the ET midnight after the release date (the release day itself is in neither side),
+ * bounded by the first Best Sudoku hit and by today (lib/overview.ts releaseComparisonWindows). A count the
  * window could not measure (installs before the install fix) says so instead of reading 0. */
 export const RELEASE_BEFORE_AFTER: CardSpec = {
   v: 1,
@@ -343,7 +344,9 @@ export const CAMPAIGN_COUNTRY: CardSpec = {
  * device-deduplicated beacon's own buckets) as bars side by side, d1 to d31-60, each with its
  * (n/d): the old curve. A flight that ended before the return beacon existed (closed, unmeasured)
  * and a campaign with no return beacons yet (d0 = 0) are left out; with none left, one line says
- * so. A lagged rate is provisional ("still arriving", in the card's Notes). */
+ * so. A lagged rate is provisional ("still arriving", in the card's Notes). After the campaigns
+ * comes the web-only organic baseline ("Organic (web)": untagged fresh installs on the web site),
+ * hidden the same way until its first d0 row arrives. */
 const RETURN_BUCKETS_ITEMS: { id: string; ratio: string }[] = [
   { id: 'd1', ratio: 'campaign.returnD1PerD0' },
   { id: 'd2-7', ratio: 'campaign.returnD2to7PerD0' },
@@ -353,7 +356,7 @@ const RETURN_BUCKETS_ITEMS: { id: string; ratio: string }[] = [
 ]
 export const CAMPAIGN_RETURNS: CardSpec = {
   v: 1,
-  repeat: { over: 'campaigns', tracked: true, empty: { label: '', text: { note: 'no-return-visits-yet' } } },
+  repeat: { over: 'campaigns', tracked: true, organic: true, empty: { label: '', text: { note: 'no-return-visits-yet' } } },
   minWidth: 230,
   title: { bind: 'campaign.label' },
   sections: [

@@ -47,8 +47,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   time yesterday and the 7-day average), the **Overall timeline**, a campaign scorecard, and a
   release before/after panel — each its own movable/editable widget. The KPI tiles and the
   scorecard are **metric cards** (presets `bsk-kpis` and `campaign-scorecard`, see *One metrics
-  registry* below), and so is the release panel (preset `release-before-after`: the latest dated
-  release's before and after windows, `days` whole days on each side of its ET midnight, bounded
+  registry* below), and so is the release panel (preset `release-before-after`: the newest release
+  with a full ET day after its release date; `days` whole days before its ET midnight and `days`
+  after the following midnight, the release day itself excluded, bounded
   by the first Best Sudoku hit, as [`src/lib/overview.ts`](src/lib/overview.ts)
   `releaseComparisonWindows` decides). The Overall timeline is a **standard line
   chart** (see *Line charts* below) with five series — page views and tagged arrivals on the left
@@ -63,7 +64,15 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   cards, presets `campaign-funnel`, `campaign-country` — a table with the funnel steps as rows
   and US / CA / Other as columns, each cell a campaign metric with the registry's optional
   `country` param — `campaign-cost` and `campaign-returns` — d0 and each return window's rate,
-  dN over d0 with its n/d, as bars side by side. "Arrivals by ET hour of day" and "Daily
+  dN over d0 with its n/d, as bars side by side. A campaign's return rows count from the web
+  site and the installed app (`bestsudoku-app`) alike, from its attribution start (each counts
+  its own installs, so a phone that used both counts once on each). After the
+  campaigns comes one more row, "Organic (web)": the `/return/organic/` rows the web site sends
+  for untagged visitors, with no start bound and never app rows, as a baseline to read the
+  campaigns against; it stays hidden until its d0 count is above zero. It never enters the
+  site-wide "Return visits (day 1+)" tile or the routine's site-wide arrivals, which stay
+  tagged-only. Return rows are counts
+  only — never split by hour, place or device. "Arrivals by ET hour of day" and "Daily
   arrivals by flight day" are standard geo charts over the same tagged arrivals (filter
   `arrival` = tagged): a breakdown bar of `hourEt` × `campaignFlight`, and a line of
   `flightDay` × `campaignFlight` with `cumulative` running totals dashed on a right-hand axis.
@@ -311,7 +320,7 @@ Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats
   with `maxStatements`), caches each fact on its own in the Cache API, and derives every value in
   JS with its status (`ok`, `too-few`, `no-data`, `unmeasured`, `partial`), n/d, deltas and a
   provisional flag for lagged outcomes. Windows are the campaign's attribution window, today so
-  far, the page range, the latest release's before/after windows (sized by one cached first-hit
+  far, the page range, the compared release's before/after windows (sized by one cached first-hit
   read), and a campaign's pre/post segments at the signed-out upsell fix (only once that fix is
   set and falls in the flight). **Metric cards** render it: a widget with `card`
   (`{ preset }` from [`src/lib/metrics/presets.ts`](src/lib/metrics/presets.ts), or a saved spec)
@@ -551,7 +560,9 @@ lacks the pin, pin it in the same PR as the registration.
   (+ `flightStartTimeEt` if the schedule starts mid-day), `flightEnd`, `status`, `kind`,
   `dailyBudgetUsd` and `hardCapUsd` (both required to read it: they arm the pacing line and kill
   rule 4), `servingHoursEt`, `notes`, and `directionalThroughDay` if the first N flight days
-  are directional. This alone puts the campaign on the dashboard and in the sync.
+  are directional. This alone puts the campaign on the dashboard and in the sync. The id and
+  tag `organic` are reserved for the organic baseline row: a campaign using either fails at
+  load.
 - **[`adsRules.ts`](src/lib/adsRules.ts) `ADS_READ_PLANS`** — one `buildReadPlan('<id>', {...})`:
   `channel` (`'display'`, the default, or `'search'`; see
   [Adding an arm](#adding-an-arm-two-campaigns-at-once) below),
