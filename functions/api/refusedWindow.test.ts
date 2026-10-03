@@ -382,7 +382,7 @@ describe('the whole-days caption flag needs a refused row the geo query can coun
     const family = (value: string) => reachableRefusedPatterns({ ...all, constraints: [{ field: 'pathFamily', value }] })
     expect(family('page')).toEqual([])
     expect(family('game-start')).toEqual(['/game/start/%'])
-    expect(family('tour')).toEqual(['/tour/exit-at/%'])
+    expect(family('tour')).toEqual(['/tour/exit-at/%', '/tour/skip', '/tour/skip/%'])
     expect(family('tutorial-complete')).toEqual(['/game/tutorial-complete/%'])
     expect(family('game-complete-deferred')).toEqual(['/game/complete-deferred/%'])
     expect(family('auth-error')).toEqual([])
