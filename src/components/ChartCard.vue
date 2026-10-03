@@ -174,7 +174,7 @@ function onPoint(p: { index: number; datasetIndex: number; x: number; y: number 
   // raw response rows don't line up with the point indexes) — see seriesRows.
   const value = data.value ? seriesRows(dim, data.value)[p.index]?.key?.[dim] : undefined
   if (value == null || value === '') return
-  if (dim !== 'date' && !isSiteDim(dim) && semanticKey(dim, dataset) === null) return // not drillable → keep tooltip
+  if (dim !== 'date' && dim !== 'dateEt' && !isSiteDim(dim) && semanticKey(dim, dataset) === null) return // not drillable → keep tooltip
   suppressTooltipForDrill()
   emit('drill', { widgetId: props.widget.id, dimension: dim, dataset, value: String(value), label: formatKey(dim, String(value)), x: p.x, y: p.y })
 }

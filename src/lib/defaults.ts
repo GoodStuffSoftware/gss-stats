@@ -719,17 +719,24 @@ export function migratePanelsV11(page: DashboardPage): DashboardPage {
 // still the shipped default.
 const TREND_PLACEMENT_KEYS: ReadonlySet<string> = new Set(['id', 'i', 'x', 'y', 'w', 'h', 'moved'])
 /** A widget's content as a comparable string: every defined field except placement, key-sorted. */
-function trendShape(wd: Widget): string {
+function trendShape(wd: object): string {
   const entries = Object.entries(wd).filter(([k, v]) => v !== undefined && !TREND_PLACEMENT_KEYS.has(k))
   return JSON.stringify(entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
 }
-/** The shipped (pre-v15) shapes of the two default trend charts: the factory widgets with the UTC
- * `date` axis. Read from the factories, so a changed default param is never out of step. */
-function dateTrendDefaultShapes(): Set<string> {
-  const ids = new Set(['bcn-trend', 'bsk-trend'])
-  const factories = [...defaultBeaconWidgets(), ...defaultBestSudokuLaunchWidgets()]
-  return new Set(factories.filter((wd) => ids.has(wd.id)).map((wd) => trendShape({ ...wd, dimension: 'date' })))
-}
+/** The shipped (v14) content of the two default trend charts on the UTC `date` axis, FROZEN as
+ * literals on purpose: the match test of a version-gated, one-shot migration has to describe what
+ * was stored through v14, not what the factories build today. Do not derive these from
+ * defaultBeaconWidgets / defaultBestSudokuLaunchWidgets: a later edit of a factory (title, limit,
+ * a new default field) would then stop a stored v14 chart from matching, the layout would still be
+ * stamped v15, and the chart would never move. defaults.v15.test.ts pins these literals and checks
+ * them against the factories, so a factory edit forces a conscious choice. */
+export const V14_DATE_TREND_DEFAULTS: readonly Readonly<Record<string, unknown>>[] = Object.freeze([
+  // bcn-trend: Beacon "Pageviews over time"
+  Object.freeze({ title: 'Pageviews over time', type: 'area', dataset: 'geo', metric: 'pageviews', dimension: 'date', limit: 90 }),
+  // bsk-trend: Best Sudoku Traffic "Visits over time"
+  Object.freeze({ title: 'Visits over time', type: 'area', dataset: 'geo', metric: 'pageviews', dimension: 'date', limit: 90, markers: 'releases' }),
+])
+const DATE_TREND_V14_SHAPES: ReadonlySet<string> = new Set(V14_DATE_TREND_DEFAULTS.map(trendShape))
 /** v15 (version-gated): the two default geo trend charts, "Pageviews over time" and "Visits over
  * time", move from the UTC `date` axis to the ET-day `dateEt`, so the counts-only split-guard
  * caption goes away (each bucket is a whole ET day, which the rule allows).
@@ -744,8 +751,7 @@ function dateTrendDefaultShapes(): Set<string> {
  * series, a caption, a breakdown or any other param leaves the widget untouched. Only `dimension`
  * changes. The same page object when nothing matches. */
 export function migrateDateEtTrendsV15(page: DashboardPage): DashboardPage {
-  const shapes = dateTrendDefaultShapes()
-  const pristine = (wd: Widget) => wd.dimension === 'date' && shapes.has(trendShape(wd))
+  const pristine = (wd: Widget) => wd.dimension === 'date' && DATE_TREND_V14_SHAPES.has(trendShape(wd))
   if (!page.widgets.some(pristine)) return page
   return { ...page, widgets: page.widgets.map((wd) => (pristine(wd) ? { ...wd, dimension: 'dateEt' } : wd)) }
 }

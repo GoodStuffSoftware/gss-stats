@@ -1,6 +1,7 @@
 // Smart date-range helpers. The filter `since`/`until` are ISO datetime strings
 // (with back-compat for legacy "YYYY-MM-DD" day values).
 import { CAMPAIGNS, etMidnightUtcMs, etFlightRangeMs } from './campaigns'
+import { addDays } from './etTime'
 
 /** A since/until value every API accepts: a YYYY-MM-DD day or an ISO datetime. One copy for
  * every endpoint (functions/api/*) and the metrics request validator (lib/metrics/validate.ts). */
@@ -118,6 +119,25 @@ export function isoToYmd(iso: string): string {
 /** Date-picker values → ISO bounds: start of the from-day, end of the to-day. */
 export function ymdRangeToISO(fromYmd: string, toYmd: string): { since: string; until: string } {
   return { since: `${fromYmd}T00:00:00.000Z`, until: `${toYmd}T23:59:59.999Z` }
+}
+
+/** One ET calendar day (YYYY-MM-DD) as ISO bounds: from ET midnight of the day to 1 ms before ET
+ * midnight of the NEXT day, the same closed end-of-day convention as ymdRangeToISO. Both bounds are
+ * real ET midnights (etMidnightUtcMs), never "+24 h", so the day is 23 h on the spring-forward date
+ * and 25 h on the fall-back one. */
+export function etDayRangeToISO(dateEt: string): { since: string; until: string } {
+  return {
+    since: new Date(etMidnightUtcMs(dateEt)).toISOString(),
+    until: new Date(etMidnightUtcMs(addDays(dateEt, 1)) - 1).toISOString(),
+  }
+}
+
+/** The page-filter range a click on a day bucket drills to: the UTC day for a `date` chart, the ET
+ * day for a `dateEt` chart. Null for any other dimension. `value` is the bucket's 'YYYY-MM-DD'. */
+export function dayDrillRange(dimension: string, value: string): { since: string; until: string } | null {
+  if (dimension === 'date') return ymdRangeToISO(value, value)
+  if (dimension === 'dateEt') return etDayRangeToISO(value)
+  return null
 }
 
 /** Human label for a range: "Last 24h" / "Last 7d" when it ends ~now, else "Jun 1 – Jun 26";
