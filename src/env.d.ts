@@ -8,3 +8,9 @@ declare module '*.vue' {
 
 // Side-effect-only CSS imports (e.g. `import './style.css'` in main.ts).
 declare module '*.css'
+
+// A file's source text, for the tests that pin a stylesheet rule (`import src from './X.vue?raw'`).
+declare module '*?raw' {
+  const source: string
+  export default source
+}
