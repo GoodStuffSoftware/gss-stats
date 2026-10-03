@@ -20,7 +20,8 @@
 // - its captions (CardSpec.captions): registry notes under the whole card.
 import { computed, effectScope, onBeforeUnmount, onMounted, onScopeDispose, reactive, ref, shallowRef, watch, type EffectScope } from 'vue'
 import { useMetrics, type MetricRequestSpec, type UseMetrics } from '../../composables/useMetrics'
-import { noteRawText } from '../../lib/notes'
+import { useReturnRefresh } from '../../composables/useReturnRefresh'
+import { hasNote, noteRawText } from '../../lib/notes'
 import { resolveLabelTokens } from '../../lib/metrics/render'
 import { presetById } from '../../lib/metrics/presets'
 import { INVALID_CARD_PRESET } from '../../lib/metrics/validate'
@@ -60,6 +61,11 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (ticker) clearInterval(ticker)
 })
+// A tab that slept past midnight ET has not ticked, so on return the clock still says yesterday:
+// the return refetch would re-queue yesterday's entries and the next tick would then re-plan under
+// the new day. Moving the clock here first makes the day watcher re-plan before the queued batch
+// flushes (releasing the old keys drops them from it), so only the new day's POST goes out.
+useReturnRefresh(() => (clock.value = Date.now()))
 const nowMs = computed(() => props.nowMs ?? clock.value)
 const todayEt = computed(() => todayEtFrom(nowMs.value))
 const ctx = computed<RepeatContext>(() => ({ todayEt: todayEt.value, readings: props.readings }))
@@ -140,7 +146,9 @@ const actionCampaignIds = computed(() => {
 function onAdsRefreshed(r: RefreshResult) {
   if (r.refreshed) reload()
 }
-const captionIds = computed(() => spec.value?.captions ?? [])
+// Only the ids this build knows: an unknown one (a newer build's) stays stored but shows nothing,
+// so a card whose captions are all unknown gets no empty captions block.
+const captionIds = computed(() => (spec.value?.captions ?? []).filter((id) => hasNote(id)))
 
 // Repeated instances with nothing to show (MetricCardInstance's `hidden`), by index; reset when
 // the instances are re-expanded (a new day, a new spec).

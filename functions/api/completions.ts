@@ -19,11 +19,16 @@
 //
 // ANONYMOUS AGGREGATES ONLY — one COUNT(*) GROUP BY path, classified in JS; never a row fetch.
 //
+// Counts-only rule (src/lib/splitGuard.ts, R-1d): every row here is a refused row, so the window
+// is counted over whole ET days (refusedRowWindow). A window already on ET midnights is queried
+// unchanged, under the unchanged cache key; any other one snaps (an empty snap counts nothing).
+//
 // POST { dimension?: 'mode'|'difficulty', breakdown?: 'mode'|'difficulty', since, until, sites?, limit? }
 
 import { parseGameCompletePath } from '../../src/lib/campaigns'
 import { buildCacheKeyUrl, cachedJson, ttlSecondsFor, type CacheLike } from '../_lib/edgeCache'
 import { WHEN_RE, SITE_TAG_RE } from '../../src/lib/range'
+import { refusedRowWindow, REFUSED_WINDOW_KEY } from '../../src/lib/splitGuard'
 
 interface Env {
   gss_geo: D1Database
@@ -67,6 +72,9 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const until = safeDate(body.until, today)
   const sinceMs = Date.parse(since)
   const untilMs = isDateOnly(until) ? Date.parse(until) + 86_400_000 : Date.parse(until)
+  // Whole ET days (R-1d): every completion row is a refused row.
+  const [fromMs, toMs] = refusedRowWindow(sinceMs, untilMs)
+  const refusedWholeDays = fromMs !== sinceMs || toMs !== untilMs
 
   const rawSites: unknown[] = Array.isArray(body.sites) ? body.sites : body.site != null ? [body.site] : []
   const sites = rawSites.filter((s): s is string => typeof s === 'string' && s !== 'all' && SITE_TAG_RE.test(s))
@@ -83,6 +91,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     until,
     limit,
     sites: [...sites].sort(),
+    // Only a snapped window gets a new key, keyed on the snap mode (see /api/geo.ts).
+    ...(refusedWholeDays ? { refusedWindow: REFUSED_WINDOW_KEY } : {}),
   })
   const ttl = ttlSecondsFor(until, new Date())
   const cache = (caches as unknown as { default: CacheLike }).default
@@ -91,7 +101,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
 
   async function computeCompletionsResponse(): Promise<Response> {
   const w: string[] = ['ts >= ?', 'ts < ?', `path LIKE '/game/complete/%'`]
-  const b: unknown[] = [sinceMs, untilMs]
+  const b: unknown[] = [fromMs, toMs]
   if (sites.length) {
     w.push(`site IN (${sites.map(() => '?').join(', ')})`)
     b.push(...sites)
@@ -129,7 +139,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   return json({
     rows,
     totals,
-    meta: { since, until, sites: sites.length ? sites.join(',') : 'all', dimensions: [dimension, ...(breakdown ? [breakdown] : [])], metric: 'pageviews' as const },
+    meta: { since, until, sites: sites.length ? sites.join(',') : 'all', dimensions: [dimension, ...(breakdown ? [breakdown] : [])], metric: 'pageviews' as const, ...(refusedWholeDays ? { refusedWholeDays: true } : {}) },
   })
   }
 }

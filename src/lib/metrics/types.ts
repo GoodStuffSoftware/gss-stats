@@ -236,7 +236,14 @@ export interface MetricValue {
   series?: SeriesPoint[]
   numerator?: number
   denominator?: number
+  /** Same-clock-time comparisons for a today-so-far count: only on a metric that never counts a
+   * refused row (MetricDef.countsRefused: false). */
   deltas?: { yesterday?: MetricDelta; avg7?: MetricDelta }
+  /** Whole-ET-day context for a today-so-far count that can count a refused row (instead of
+   * `deltas`, never with them): `yesterday` is yesterday's full ET-day total and `avg7` the daily
+   * average over the 7 full ET days before today (their sum / 7). Each is present only when the
+   * request asked for that delta name and the comparison gate allows it (deltasAllowed). */
+  wholeDays?: { yesterday?: number; avg7?: number }
   measuredFrom?: number // epoch ms, when partial
   provisional?: boolean // lagged numerator still arriving
   noteIds?: string[] // registry ids only, never text

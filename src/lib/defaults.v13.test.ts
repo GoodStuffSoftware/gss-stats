@@ -28,6 +28,7 @@ import {
   normGroupOrder,
 } from './defaults'
 import type { DashboardConfig, DashboardPage } from '../types'
+import { withV15Trends } from './__fixtures__/dateEtTrends'
 import PROD_V8 from './__fixtures__/prodLayout.v8.json'
 import PROD_V9 from './__fixtures__/prodLayout.v9.json'
 import PROD_V12 from './__fixtures__/prodLayout.v12.json'
@@ -178,7 +179,7 @@ describe('v13: the live production layout (stored at v12)', () => {
   it('keeps every page, in the stored order, with every widget and filter exactly as stored', () => {
     expect(migrated.pages.map((p) => p.id)).toEqual(stored.pages.map((p) => p.id))
     const after = stable(migrated)
-    const before = stable(withoutMoved(stored))
+    const before = stable(withV15Trends(withoutMoved(stored))) // v15: the three geo trends move to dateEt (__fixtures__/dateEtTrends.ts)
     after.pages.forEach((p, i) => {
       expect(p.widgets, p.id).toEqual(before.pages[i].widgets)
       expect(p.filters, p.id).toEqual(before.pages[i].filters)

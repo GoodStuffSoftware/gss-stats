@@ -28,10 +28,11 @@ import { unitLabelId } from './units'
 // literal this module wrote itself. NOTES_REGISTRY is an ordinary object literal, so a bracket
 // lookup for an id like 'constructor' or '__proto__' resolves through Object.prototype instead
 // of coming back undefined (review finding, 2026-09-27) — `getNote`'s own `!n` truthiness check
-// doesn't catch that (a Function is truthy). validateCard is meant to reject such an id before
-// it's ever saved, but this checks the registry's OWN property regardless, so a save made
-// before that guard existed still renders as plain text instead of crashing (`resolveText`
-// calling `.text` on a Function, or a token walk over its `undefined` result).
+// doesn't catch that (a Function is truthy). validateCard checks a note id's shape only, never
+// whether this build knows it (an older tab keeps ids a newer build wrote), so this checks the
+// registry's OWN property: an unknown id, prototype-named or not, renders as nothing instead of
+// crashing (`resolveText` calling `.text` on a Function, or a token walk over its `undefined`
+// result).
 function hasNote(id: string): boolean {
   return Object.hasOwn(NOTES_REGISTRY, id)
 }
@@ -72,7 +73,9 @@ export interface ItemViewOptions {
 export function resolveLabelTokens(label: Label, scope: ScopeInstance, metricLabelId: string | undefined, todayEt: string): TextToken[] {
   if (typeof label === 'string') return tokenizeAndInterpolate(label, scopeVars(scope, todayEt))
   if ('note' in label) {
-    if (!hasNote(label.note)) return [{ type: 'text', value: label.note }]
+    // An id this build's registry doesn't know (a newer build's, or a retired one) is stored
+    // as-is (validateCard checks only its shape) and shows nothing — never the raw id.
+    if (!hasNote(label.note)) return []
     const vars: Record<string, string> = {}
     if (label.vars) for (const [k, path] of Object.entries(label.vars)) vars[k] = scopeField(scope, path, todayEt) ?? ''
     return noteTokens(label.note, vars)
@@ -120,8 +123,26 @@ function deltaText(d: { delta: number; deltaPct?: number | null }): string {
   const pctPart = typeof d.deltaPct !== 'number' || !Number.isFinite(d.deltaPct) ? '' : ` (${d.delta > 0 ? '+' : ''}${(d.deltaPct * 100).toFixed(0)}%)`
   return `${sign}${rounded.toLocaleString('en-US')}${pctPart}`
 }
+/** A daily average for the whole-day line: a whole number from 10 up, one decimal below. */
+function fmtDailyAvg(n: number): string {
+  const tenth = Math.round(n * 10) / 10
+  return tenth >= 10 ? fmtCount(Math.round(n)) : tenth.toFixed(1)
+}
+/** The whole-day context line of a metric that can count a refused row (MetricValue.wholeDays):
+ * one neutral line — no arrow, no percent — with only the parts the item asked for and the
+ * server returned. A non-finite part is absent. */
+function wholeDayLine(value: MetricValue, deltas: readonly ('yesterday' | 'avg7')[]): DeltaLine[] {
+  const w = value.wholeDays
+  if (!w) return []
+  const parts: string[] = []
+  if (deltas.includes('yesterday') && finite(w.yesterday)) parts.push(`Yesterday ${fmtCount(w.yesterday)}`)
+  if (deltas.includes('avg7') && finite(w.avg7)) parts.push(`7-day avg ${fmtDailyAvg(w.avg7)}/day`)
+  return parts.length ? [{ text: parts.join(' · '), cls: '' }] : []
+}
 function deltaLinesFor(value: MetricValue, deltas: readonly ('yesterday' | 'avg7')[] | undefined): DeltaLine[] {
-  if (!deltas?.length || !value.deltas) return []
+  if (!deltas?.length) return []
+  if (value.wholeDays) return wholeDayLine(value, deltas)
+  if (!value.deltas) return []
   const out: DeltaLine[] = []
   for (const name of deltas) {
     const d = value.deltas[name]
@@ -151,7 +172,8 @@ function rangeDays(start: string, end: string): number {
 function applyEmptyGating(whenEmpty: Gating['whenEmpty']): { primary: string; visible: boolean } {
   const mode = whenEmpty ?? 'dash'
   if (mode === 'omit') return { primary: '', visible: false }
-  if (typeof mode === 'object') return { primary: hasNote(mode.note) ? noteRawText(mode.note) : mode.note, visible: true }
+  // A note this build doesn't know falls back to the default dash, never the raw id.
+  if (typeof mode === 'object') return { primary: hasNote(mode.note) ? noteRawText(mode.note) : '—', visible: true }
   return { primary: '—', visible: true }
 }
 function applyUnmeasuredGating(gating: Gating | undefined, scope: ScopeInstance, value: MetricValue): { primary: string; visible: boolean } {
@@ -220,9 +242,9 @@ function formatMetricOrRatioValue(display: Display, value: MetricValue, def: Met
 /** "new today" (the KPI tiles' go-live state): a today-so-far count asked for deltas, and the
  * server returned none, because every comparison window predates the metric's go-live (or
  * the campaign's attribution start). The server omits a gated delta rather than zeroing it,
- * so an absent `deltas` on a measured today-so-far value can only mean that. */
+ * so an absent `deltas` and `wholeDays` on a measured today-so-far value can only mean that. */
 function isNewToday(item: MetricItem, value: MetricValue, def: MetricDef | RatioDef): boolean {
-  if (item.display.as !== 'number' || !item.display.deltas?.length || value.deltas) return false
+  if (item.display.as !== 'number' || !item.display.deltas?.length || value.deltas || value.wholeDays) return false
   if (value.status !== 'ok' && value.status !== 'partial') return false
   if (!('unit' in def)) return false // a ratio never carries deltas
   const window = 'metric' in item.data ? (item.data.window ?? Object.keys(def.windows)[0]) : undefined

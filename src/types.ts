@@ -279,6 +279,11 @@ export interface StatsResponse {
     // /api/geo only: true when the counts-only split guard left return, game start, completion,
     // tutorial-completion, tour-skip and tour-exit rows out of this answer (src/lib/splitGuard.ts).
     splitGuard?: boolean
+    // /api/geo and /api/completions: true when the window was not whole ET days, so any return,
+    // game-start, completion, tutorial-completion or tour-exit rows the query counts were counted
+    // over whole ET days (src/lib/splitGuard.ts, R-1d). /api/geo sets it only when the query can
+    // count one of those rows (its site, path, path-family and event-beacon settings allow it).
+    refusedWholeDays?: boolean
   }
   // Pop-up dataset only (widget.type === 'rate'): the single computed rate, or null for
   // a zero denominator (no accepts/outcomes yet) — see lib/popupEvents.ts computeRate.

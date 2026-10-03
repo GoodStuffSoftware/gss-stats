@@ -94,6 +94,27 @@ describe('MetricCard — preset lookup and structure', () => {
     expect(w.find('.mi-tile').attributes('aria-label')).toBe('Page views: 86, vs yesterday +31 (+56%)')
   })
 
+  it('a counts-only tile shows yesterday and the 7-day average as plain text; an opt-out tile keeps its arrows', async () => {
+    answer = (r) =>
+      r.metric === 'bsk.pageviews'
+        ? { status: 'ok', value: 86, wholeDays: { yesterday: 1234, avg7: 1180.4 } }
+        : { status: 'ok', value: 9, deltas: { yesterday: { delta: 3, deltaPct: 0.5 }, avg7: { delta: -2, deltaPct: -0.18 } } }
+    const w = mountCard({ cardRef: { preset: 'bsk-kpis' }, nowMs: NOW })
+    await settle()
+    const tile = (label: string) => w.findAll('.mi-tile').find((t) => t.find('.mi-tile-label').text() === label)!
+    const pv = tile('Page views')
+    const pvLines = pv.findAll('.mi-tile-delta')
+    expect(pvLines).toHaveLength(1)
+    expect(pvLines[0]!.text()).toBe('Yesterday 1,234 · 7-day avg 1,180/day')
+    expect(pvLines[0]!.classes()).not.toContain('up')
+    expect(pvLines[0]!.classes()).not.toContain('down')
+    expect(pv.text()).not.toMatch(/[%↑↓▲▼]|vs /)
+    expect(pv.attributes('aria-label')).toBe('Page views: 86, Yesterday 1,234 · 7-day avg 1,180/day')
+    const lines = tile('Auth successes').findAll('.mi-tile-delta')
+    expect(lines.map((l) => l.text())).toEqual(['vs yesterday +3 (+50%)', 'vs 7d avg -2 (-18%)'])
+    expect(lines.map((l) => l.classes()).flat()).toEqual(expect.arrayContaining(['up', 'down']))
+  })
+
   it('a rate tile shows the rate big and its (n/d) as a small line under it', async () => {
     answer = (r) => (r.ratio === 'bsk.popupTapRate' ? { status: 'ok', value: 5 / 41, numerator: 5, denominator: 41 } : { status: 'ok', value: 1 })
     const w = mountCard({ cardRef: { preset: 'bsk-kpis' }, nowMs: NOW })

@@ -5,14 +5,15 @@
 // (node:sqlite, D1's dialect) and snapshotted, so any change to a statement is a reviewed diff.
 import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it, vi } from 'vitest'
-import { COUNTRY_BUCKET_SQL, FACTS, guardedCountryBucket, factKey, flightPathsSeenStatement, kpiDayWindows, rangeMs, releaseSidesMs, type FactId, type FactParams } from './facts'
+import { COUNTRY_BUCKET_SQL, FACTS, guardedCountryBucket, factKey, flightPathsSeenStatement, kpiDayStarts, kpiDayWindows, rangeMs, releaseSidesMs, type FactId, type FactParams } from './facts'
 import { buildFact, factCuts } from './engine'
 import { CAMPAIGNS, campaignAttributionClause, campaignById, etMidnightUtcMs, ORGANIC_ARM_ID } from '../campaigns'
 import * as campaigns from '../campaigns'
 import { SPEND_SUMMARY_SQL } from '../adsStore'
 import { etMidnightMs } from './instrumentation'
 import { etDateSql } from '../etTime'
-import { SPLIT_REFUSED_PATH_PATTERNS } from '../splitGuard'
+import { isSplitRefusedPath, refusedPathMatch, SPLIT_REFUSED_PATH_PATTERNS } from '../splitGuard'
+import { REFUSED_SAMPLE_PATHS } from '../__fixtures__/refusedPaths'
 
 const NOW = Date.parse('2026-09-26T21:00:00Z')
 const SAMPLE_PARAMS: Record<FactId, FactParams[]> = {
@@ -60,12 +61,19 @@ function selectItems(sql: string): string[] {
 }
 const AGGREGATE = /^(COUNT|SUM|MIN|MAX)\((\*|[a-z_]+)\)$/i
 /** A CASE over `ts` bands only (a segment or a KPI day index): once every `ts >= ?` / `ts < ?`
- * comparison is removed, nothing but CASE syntax and integers may remain — the value selected is
- * a small integer, never the timestamp or any other column. */
+ * comparison (bound, or an inlined integer) is removed, nothing but CASE syntax and integers may
+ * remain — the value selected is a small integer, never the timestamp or any other column. */
 function isBandCase(item: string): boolean {
   if (!/^CASE .* END$/s.test(item)) return false
-  const rest = item.replace(/\bts (>=|<) \?/g, 'B')
+  const rest = item.replace(/\bts (>=|<) (\?|\d+)/g, 'B')
   return /^(CASE|WHEN|THEN|ELSE|END|AND|B|-?\d+|\s)+$/.test(rest)
+}
+/** The KPI same-time flag `t`: a band CASE whose FIRST arm sends every refused row
+ * (refusedPathMatch, the split guard's own predicate) to a constant 0, so a refused row is never
+ * split at a clock time. */
+function isRefusedZeroBandCase(item: string): boolean {
+  const head = `CASE WHEN ${refusedPathMatch().sql} THEN 0 `
+  return item.startsWith(head) && isBandCase('CASE ' + item.slice(head.length))
 }
 
 describe('every fact is an anonymous aggregate', () => {
@@ -87,6 +95,7 @@ describe('every fact is an anonymous aggregate', () => {
     for (const item of items) {
       if (AGGREGATE.test(item)) continue
       if (isBandCase(item)) continue // a segment or day index, never a raw ts
+      if (isRefusedZeroBandCase(item)) continue // the KPI same-time flag: 0 on every refused row
       if (item === '(ts >= ?)' || item === '0') continue // a boolean split (install fix, upsell fix, release side) or no segments
       if (item === COUNTRY_BUCKET_SQL) continue // US / CA / other, literal outputs only
       if (item === etDateSql()) continue // the ET DAY (YYYY-MM-DD) only: never an hour, a minute or a raw ts
@@ -126,6 +135,19 @@ describe('every fact is an anonymous aggregate', () => {
     expect(isBandCase('CASE WHEN ts >= ? THEN path ELSE 0 END')).toBe(false)
     expect(isBandCase('CASE WHEN ts % 7 >= ? THEN 1 ELSE 0 END')).toBe(false)
     expect(isBandCase('ts')).toBe(false)
+    expect(isBandCase('CASE WHEN ts >= 1790395200000 THEN 0 ELSE -1 END')).toBe(true)
+    expect(isBandCase('CASE WHEN ts >= 17903952 + ts THEN 0 ELSE -1 END')).toBe(false)
+    const m = refusedPathMatch().sql
+    expect(isRefusedZeroBandCase(`CASE WHEN ${m} THEN 0 WHEN ts >= 1 AND ts < 2 THEN 1 ELSE 0 END`)).toBe(true)
+    expect(isRefusedZeroBandCase(`CASE WHEN ${m} THEN ts WHEN ts >= 1 AND ts < 2 THEN 1 ELSE 0 END`)).toBe(false)
+    expect(isRefusedZeroBandCase(`CASE WHEN ts >= 1 AND ts < 2 THEN 1 WHEN ${m} THEN 0 ELSE 0 END`)).toBe(false)
+  })
+  it('the KPI fact: its day index is a plain band CASE and its same-time flag the band CASE that zeroes refused rows', () => {
+    const stmt = buildFact({ id: 'bskKpiDays', params: { todayEt: '2026-09-26' } }, NOW)
+    const items = selectItems(stmt.sql)
+    expect(isBandCase(items[0])).toBe(true) // d
+    expect(isRefusedZeroBandCase(items[1])).toBe(true) // t
+    expect(stmt.sql).toMatch(/GROUP BY d, t, s, path, visitor, campaign HAVING d >= 0$/)
   })
   it('D1 allows 100 bound values per statement; every fact stays well under', () => {
     for (const { stmt } of ALL) expect(stmt.binds.length).toBeLessThanOrEqual(60)
@@ -133,35 +155,107 @@ describe('every fact is an anonymous aggregate', () => {
 })
 
 describe('SQL segments and KPI days are the rule the engine used to apply per row', () => {
-  // Rows around every cut and day boundary; the statement's d/s must equal the JS rule on the
-  // row's minute bucket start: d = the KPI day window it falls in, s = how many cuts it reached.
-  it('bskKpiDays', () => {
+  const KPI_TABLE = "CREATE TABLE hits (id INTEGER PRIMARY KEY, ts INTEGER, site TEXT DEFAULT 'bestsudoku-web', path TEXT DEFAULT '/', referrer TEXT DEFAULT '', region TEXT DEFAULT '', city TEXT DEFAULT '', org TEXT DEFAULT '', device TEXT DEFAULT '', browser TEXT DEFAULT '', os TEXT DEFAULT '', screenw INTEGER DEFAULT 0, visitor TEXT DEFAULT 'new', medium TEXT DEFAULT '', campaign TEXT DEFAULT '')"
+  type KpiRow = { d: number; t: number; s: number; path: string; c: number }
+  function runKpi(todayEt: string, nowMs: number, hits: readonly (readonly [number, string])[]): KpiRow[] {
     const db = new DatabaseSync(':memory:')
-    db.exec("CREATE TABLE hits (id INTEGER PRIMARY KEY, ts INTEGER, site TEXT DEFAULT 'bestsudoku-web', path TEXT DEFAULT '/', referrer TEXT DEFAULT '', region TEXT DEFAULT '', city TEXT DEFAULT '', org TEXT DEFAULT '', device TEXT DEFAULT '', browser TEXT DEFAULT '', os TEXT DEFAULT '', screenw INTEGER DEFAULT 0, visitor TEXT DEFAULT 'new', medium TEXT DEFAULT '', campaign TEXT DEFAULT '')")
+    db.exec(KPI_TABLE)
+    const ins = db.prepare('INSERT INTO hits (ts, path) VALUES (?, ?)')
+    for (const [ts, path] of hits) ins.run(ts, path)
+    const stmt = buildFact({ id: 'bskKpiDays', params: { todayEt } }, nowMs)
+    return db.prepare(stmt.sql).all(...(stmt.binds as number[])) as KpiRow[]
+  }
+  const sum = (rows: readonly KpiRow[]): number => rows.reduce((a, r) => a + r.c, 0)
+  const dateEtBefore = (todayEt: string, k: number): string => new Date(Date.parse(`${todayEt}T12:00:00Z`) - k * 86_400_000).toISOString().slice(0, 10)
+
+  // Rows around every cut, ET midnight and same-time boundary, each on a refused and a non-refused
+  // path; the statement's d/t/s must equal the JS rule on the row's minute bucket start:
+  //   d = the WHOLE ET day it falls in (0 today .. 7), s = how many cuts it reached,
+  //   t = 1 only for a NON-refused row inside an earlier day's same-time window, else 0.
+  it('bskKpiDays: whole ET days, and a same-time flag that is always 0 on a refused row', () => {
     const cuts = factCuts('bskKpiDays')
     expect(cuts.length).toBeGreaterThan(0)
+    const starts = kpiDayStarts('2026-09-26')
     const windows = kpiDayWindows('2026-09-26', NOW)
     const probes = new Set<number>()
-    for (const x of [...cuts, ...windows.flat()]) for (const d of [-60_001, -60_000, -1, 0, 1, 59_999, 60_000]) probes.add(x + d)
-    const ins = db.prepare('INSERT INTO hits (ts, path) VALUES (?, ?)')
-    for (const ts of probes) ins.run(ts, `/p${ts}`) // one path per probe, so each group is one row
-    const stmt = buildFact({ id: 'bskKpiDays', params: { todayEt: '2026-09-26' } }, NOW)
-    const rows = db.prepare(stmt.sql).all(...(stmt.binds as number[])) as { d: number; s: number; path: string; c: number }[]
+    for (const x of [...cuts, ...starts, ...windows.flat()]) for (const d of [-60_001, -60_000, -1, 0, 1, 59_999, 60_000]) probes.add(x + d)
+    // one path per probe and kind, so each group is one row
+    const rows = runKpi('2026-09-26', NOW, [...probes].flatMap((ts) => [[ts, `/p${ts}`], [ts, `/return/p${ts}/d0`]] as const))
     let checked = 0
+    let refusedInWindow = 0
     for (const ts of probes) {
       const b = Math.floor(ts / 60_000) * 60_000
-      const d = windows.findIndex(([a, z]) => b >= a && b < z)
-      const row = rows.find((r) => r.path === `/p${ts}`)
-      if (d < 0 || ts >= NOW || ts < etMidnightUtcMs('2026-09-19')) {
-        expect(row, `ts ${ts}`).toBeUndefined() // outside every window (or outside the WHERE)
-        continue
+      const d = starts.findIndex((m) => b >= m)
+      const inSameTime = windows.slice(1).some(([a, z]) => b >= a && b < z)
+      for (const path of [`/p${ts}`, `/return/p${ts}/d0`]) {
+        const refused = isSplitRefusedPath(path)
+        const row = rows.find((r) => r.path === path)
+        if (d < 0 || ts >= NOW || ts < etMidnightUtcMs('2026-09-19')) {
+          expect(row, `ts ${ts}`).toBeUndefined() // before day 7 (or outside the WHERE)
+          continue
+        }
+        expect(row, `ts ${ts} ${path}`).toBeDefined()
+        expect(row!.d, `ts ${ts} ${path}`).toBe(d)
+        expect(row!.t, `ts ${ts} ${path}`).toBe(!refused && inSameTime ? 1 : 0)
+        expect(row!.s).toBe(cuts.filter((c) => c <= b).length)
+        if (refused && inSameTime) refusedInWindow++
+        checked++
       }
-      expect(row, `ts ${ts}`).toBeDefined()
-      expect(row!.d).toBe(d)
-      expect(row!.s).toBe(cuts.filter((c) => c <= b).length)
-      checked++
     }
-    expect(checked).toBeGreaterThan(20)
+    expect(checked).toBeGreaterThan(40)
+    expect(refusedInWindow).toBeGreaterThan(5) // refused rows inside a same-time window really were probed
+  })
+
+  it('bskKpiDays on SQLite: refused rows come back t = 0 whatever their time, and each day total is the whole ET day', () => {
+    // Every earlier day gets rows at 00:00, 09:00, 16:59, 17:01, 21:00 and 23:59 ET (NOW is 17:00
+    // EDT) on every refused sample path and on two ordinary paths.
+    const todayEt = '2026-09-26'
+    const refusedPaths = REFUSED_SAMPLE_PATHS.filter((p) => isSplitRefusedPath(p))
+    expect(refusedPaths.length).toBeGreaterThanOrEqual(5)
+    const plainPaths = ['/', '/game']
+    const minutesEt = [0, 9 * 60, 16 * 60 + 59, 17 * 60 + 1, 21 * 60, 23 * 60 + 59]
+    const starts = kpiDayStarts(todayEt)
+    const hits: [number, string][] = []
+    for (let k = 1; k <= 7; k++) for (const min of minutesEt) for (const path of [...refusedPaths, ...plainPaths]) hits.push([starts[k] + min * 60_000, path])
+    const rows = runKpi(todayEt, NOW, hits)
+    expect(rows.some((r) => isSplitRefusedPath(r.path))).toBe(true)
+    for (const r of rows) if (isSplitRefusedPath(r.path)) expect(r.t, r.path).toBe(0)
+    for (let k = 1; k <= 7; k++) {
+      const day = rows.filter((r) => r.d === k)
+      expect(sum(day), `day ${k} whole`).toBe(minutesEt.length * (refusedPaths.length + plainPaths.length))
+      // The same-time flag picks exactly the ordinary rows before 17:00 ET (00:00, 09:00, 16:59).
+      const flagged = day.filter((r) => r.t === 1)
+      expect(sum(flagged), `day ${k} same-time`).toBe(3 * plainPaths.length)
+      expect(flagged.every((r) => !isSplitRefusedPath(r.path))).toBe(true)
+    }
+  })
+
+  it.each([
+    ['spring forward (2026-03-08 is 23 h)', '2026-03-10', '2026-03-08', 23],
+    ['fall back (2026-11-01 is 25 h)', '2026-11-03', '2026-11-01', 25],
+  ])('bskKpiDays over a DST week, %s: each earlier day is its whole ET day', (_name, todayEt, dstDay, dstHours) => {
+    const starts = kpiDayStarts(todayEt)
+    for (let k = 0; k <= 7; k++) expect(starts[k], dateEtBefore(todayEt, k)).toBe(etMidnightUtcMs(dateEtBefore(todayEt, k)))
+    for (let k = 1; k <= 7; k++) {
+      const dateEt = dateEtBefore(todayEt, k)
+      expect((starts[k - 1] - starts[k]) / 3_600_000, dateEt).toBe(dateEt === dstDay ? dstHours : 24)
+    }
+    // A refused and an ordinary row in the first and last minute of every earlier day, and three
+    // hours in (past the 02:00 shift): each lands on its own whole day; refused rows with t = 0.
+    const nowMs = starts[0] + 15 * 3_600_000
+    const hits: [number, string][] = []
+    for (let k = 1; k <= 7; k++) for (const ts of [starts[k], starts[k - 1] - 1, starts[k] + 3 * 3_600_000]) hits.push([ts, `/return/k${k}-${ts}/d0`], [ts, `/k${k}-${ts}`])
+    const rows = runKpi(todayEt, nowMs, hits)
+    expect(sum(rows)).toBe(hits.length)
+    for (const r of rows) {
+      expect(r.d, r.path).toBe(Number(/k(\d)-/.exec(r.path)![1]))
+      if (isSplitRefusedPath(r.path)) expect(r.t, r.path).toBe(0)
+    }
+    for (let k = 1; k <= 7; k++) expect(sum(rows.filter((r) => r.d === k)), dateEtBefore(todayEt, k)).toBe(6)
+  })
+
+  it('bskKpiDays with no rows returns no rows', () => {
+    expect(runKpi('2026-09-26', NOW, [])).toEqual([])
   })
 })
 
