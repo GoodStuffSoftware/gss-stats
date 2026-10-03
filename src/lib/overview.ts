@@ -140,18 +140,18 @@ export function releaseComparisonWindows(
   firstHitEtDate: string,
   nowMs: number,
 ): { before: [number, number]; after: [number, number]; days: number } | null {
-  const releaseMs = etMidnightUtcMs(releaseDateEt)
   // The release's own ET day is excluded from "after": a late-day release (v1.96.0 went live at
-  // 22:21 ET) would otherwise fill the after side with pre-release traffic.
-  const afterStartMs = etMidnightUtcMs(new Date(Date.parse(`${releaseDateEt}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10))
-  const firstHitMs = etMidnightUtcMs(firstHitEtDate)
-  const daysAvailableBefore = Math.max(0, Math.floor((releaseMs - firstHitMs) / 86_400_000))
-  const daysAvailableAfter = Math.max(0, Math.floor((nowMs - afterStartMs) / 86_400_000))
+  // 22:21 ET) would otherwise fill the after side with pre-release traffic. Whole ET days, so a
+  // DST day (23 or 25 hours) counts as one. The same sides the SQL reads (facts.ts releaseSidesMs).
+  const afterStartEt = addEtDays(releaseDateEt, 1)
+  const etDiff = (a: string, b: string) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000)
+  const daysAvailableBefore = Math.max(0, etDiff(firstHitEtDate, releaseDateEt))
+  const daysAvailableAfter = Math.max(0, etDiff(afterStartEt, etDateFromMs(nowMs)))
   const days = Math.min(daysAvailableBefore, daysAvailableAfter)
   if (days <= 0) return null
   return {
-    before: [releaseMs - days * 86_400_000, releaseMs],
-    after: [afterStartMs, afterStartMs + days * 86_400_000],
+    before: [etMidnightUtcMs(addEtDays(releaseDateEt, -days)), etMidnightUtcMs(releaseDateEt)],
+    after: [etMidnightUtcMs(afterStartEt), etMidnightUtcMs(addEtDays(afterStartEt, days))],
     days,
   }
 }

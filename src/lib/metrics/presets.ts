@@ -106,7 +106,7 @@ export const BSK_KPIS: CardSpec = {
   ],
 }
 
-/** The release panel (OverviewWidgetBody 'releasePanel'): the latest dated release, how many
+/** The release panel (OverviewWidgetBody 'releasePanel'): the compared release, how many
  * days each side covers, and a table of the four counts with Before and After as its columns.
  * Each window is `days` whole days on its side of the release's ET midnight, bounded by the
  * first Best Sudoku hit and by today (lib/overview.ts releaseComparisonWindows). A count the

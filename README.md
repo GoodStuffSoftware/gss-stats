@@ -291,7 +291,7 @@ Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats
   with `maxStatements`), caches each fact on its own in the Cache API, and derives every value in
   JS with its status (`ok`, `too-few`, `no-data`, `unmeasured`, `partial`), n/d, deltas and a
   provisional flag for lagged outcomes. Windows are the campaign's attribution window, today so
-  far, the page range, the latest release's before/after windows (sized by one cached first-hit
+  far, the page range, the compared release's before/after windows (sized by one cached first-hit
   read), and a campaign's pre/post segments at the signed-out upsell fix (only once that fix is
   set and falls in the flight). **Metric cards** render it: a widget with `card`
   (`{ preset }` from [`src/lib/metrics/presets.ts`](src/lib/metrics/presets.ts), or a saved spec)

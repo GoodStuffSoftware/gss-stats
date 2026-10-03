@@ -42,6 +42,13 @@ describe('release panel subject', () => {
   })
 })
 
+describe('RELEASES order', () => {
+  it('is listed oldest to newest (non-decreasing dates), which the same-date tie-break relies on', () => {
+    const dates = dated.map((r) => r.dateEt)
+    expect(dates.every((d, i) => i === 0 || dates[i - 1] <= d)).toBe(true)
+  })
+})
+
 describe('newest', () => {
   const r = (version: string, dateEt: string): DatedRelease => ({ version, dateEt, note: '' })
   it('on a date tie the later-listed release wins', () => {
