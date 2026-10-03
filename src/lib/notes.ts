@@ -259,15 +259,6 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     severity: 'info',
     scopes: ['overview'],
   },
-  // The "Deferred completions (EU consent)" KPI tile (best-sudoku card 125): what it counts
-  // and why it can't be compared to the live completions tile by completion time.
-  'game-complete-deferred-caveat': {
-    id: 'game-complete-deferred-caveat',
-    text: 'EU visitors whose game finished before they answered the consent prompt. Sent later, at consent time — counted then, not when the game finished.',
-    kind: 'note',
-    severity: 'info',
-    scopes: ['overview'],
-  },
   // The "Raw install signals" KPI tile: why it is secondary to the install count.
   'raw-install-double-count': {
     id: 'raw-install-double-count',
@@ -317,6 +308,9 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     // rate audit, rows 1-2. One name for the site-wide KPI and the campaign funnel step.
     'label.bsk.gameViews': 'Game-screen views',
     'label.campaign.gameViews': 'Game-screen views',
+    // The organic baseline arm's name (lib/campaigns.ts ORGANIC_ARM_ID): untagged fresh installs
+    // on the web site only, never the installed app.
+    'label.arm.organic': 'Organic (web)',
     'label.funnel.arrivals': 'Arrivals',
     'label.funnel.completed': 'Completed a game',
     'label.funnel.ask': 'Sign-in ask',
@@ -347,7 +341,6 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.campaign.spend': 'Spend',
     'label.bsk.pageviews': 'Page views',
     'label.bsk.completions': 'Games completed',
-    'label.bsk.deferredCompletions': 'Deferred completions (EU consent)',
     'label.bsk.popupShown': 'Pop-ups shown',
     'label.bsk.popupAccepts': 'Pop-ups accepted',
     'label.bsk.authSuccess': 'Auth successes',
@@ -359,6 +352,11 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.bsk.authSuccessUnknown': 'Auth successes — unknown',
     'label.bsk.authErrors': 'Sign-in failures',
     'label.bsk.authRedirects': 'Sign-in redirect fallbacks',
+    'label.bsk.tutorialFirstRun': 'Tutorial completed — first run',
+    'label.bsk.tutorialReplay': 'Tutorial completed — replay',
+    'label.bsk.tourExitPreamble': 'Tour exits — preamble',
+    'label.bsk.tourExitHub': 'Tour exits — hub',
+    'label.bsk.tourExitSection': 'Tour exits — section',
     'label.bsk.installs': 'Installs',
     // Short and plain, as the Overview tile reads; the caveat is 'raw-install-double-count'.
     'label.bsk.rawInstallSignals': 'Raw install signals',
@@ -504,7 +502,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.preset.campaign-country.description': 'One card per beacon-tracked campaign: each funnel step split into US, CA and every other country.',
     'label.preset.campaign-cost': 'Campaign cost',
     'label.preset.campaign-cost.description': 'One card per campaign: spend, where it came from and how fresh it is, and the cost per arrival and per auth success.',
-    'label.preset.release-before-after.description': 'The latest dated release: page views, tagged arrivals, auth successes and installs over the same number of days before and after it.',
+    'label.preset.release-before-after.description': 'The newest release with a full day after it: page views, tagged arrivals, auth successes and installs over the same number of days before and after it.',
   }),
 })
 

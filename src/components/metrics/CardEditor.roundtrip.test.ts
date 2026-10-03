@@ -249,7 +249,7 @@ describe('the controls for fields the form used to hide round-trip', () => {
     expect((box().element as HTMLInputElement).checked).toBe(true)
     await box().setValue(false)
     await flushPromises()
-    expect(lastSpec(w).repeat).toEqual({ over: 'campaigns', tracked: true })
+    expect(lastSpec(w).repeat).toEqual({ over: 'campaigns', tracked: true, organic: true })
     await box().setValue(true)
     await flushPromises()
     expect(lastSpec(w).repeat).toEqual(plain(PRESETS['campaign-returns'].repeat))

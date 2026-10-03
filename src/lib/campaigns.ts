@@ -189,6 +189,23 @@ export function campaignById(id: string): CampaignFlight | undefined {
   return CAMPAIGNS.find((c) => c.id === id)
 }
 
+/** The web-only organic baseline arm: an untagged fresh install on bestsudoku-web sends
+ * `/return/organic/<bucket>` rows (Best Sudoku's first-touch record, labelled `organic`). It is
+ * not a campaign — it has no flight, spend or attribution window — so it travels as the
+ * `campaignId` param value 'organic' only on bindings that declare support (the return
+ * metrics and the ratios over them). The label is reserved: no campaign may use it as an id or
+ * a tag, or its rows would read as the baseline's. */
+export const ORGANIC_ARM_ID = 'organic'
+
+/** Throws when a campaign uses the reserved organic label as its id or one of its tags. */
+export function assertOrganicReserved(campaigns: readonly CampaignFlight[]): void {
+  for (const c of campaigns) {
+    if (c.id === ORGANIC_ARM_ID) throw new Error(`campaign id '${ORGANIC_ARM_ID}' is reserved for the organic baseline arm`)
+    if (c.ucValues.includes(ORGANIC_ARM_ID)) throw new Error(`campaign ${c.id}: tag '${ORGANIC_ARM_ID}' is reserved for the organic baseline arm`)
+  }
+}
+assertOrganicReserved(CAMPAIGNS)
+
 /** A campaign's first `directionalThroughDay` flight days are directional (per the brief).
  * Never directional when the campaign sets no such window. */
 export function isDirectionalDay(campaign: CampaignFlight, etDate: string): boolean {
@@ -561,10 +578,11 @@ export function gameDimOf(dim: 'gameMode' | 'gameDifficulty', path: string): str
   return dim === 'gameMode' ? parsed.mode : parsed.difficulty
 }
 
-// ── Deferred completions (best-sudoku card 125, EU consent) ────────────────────────────
+// ── Deferred completions (best-sudoku card 125, EU consent; legacy path) ───────────────
 // `/game/complete-deferred/<mode>/<difficulty>` — a completion by an EU visitor whose consent
-// modal was still unanswered when the game finished; the SAME shape as GAME_COMPLETE_PREFIX
-// but sent later, at consent time (the worker stamps `ts` at ingest, so the row's time is
+// modal was still unanswered when the game finished. Legacy: no tagged best-sudoku build sends
+// it any more, but the path stays classified so old rows are never mistaken for anything else.
+// Same shape as GAME_COMPLETE_PREFIX but sent later, at consent time (the worker stamps `ts` at ingest, so the row's time is
 // consent time, not completion time). A SIBLING prefix, never folded into GAME_COMPLETE_PREFIX
 // — the hyphen right after "complete" means `path.startsWith(GAME_COMPLETE_PREFIX)` can never
 // match it (GAME_COMPLETE_PREFIX ends '/complete/', this path has '/complete-deferred/' at the
@@ -573,8 +591,9 @@ export function gameDimOf(dim: 'gameMode' | 'gameDifficulty', path: string): str
 // event-beacon prefix in lib/popupEvents.ts POPUP_EVENT_PREFIXES ('game-complete-deferred'
 // family), so it is excluded from page views the same way GAME_COMPLETE_PREFIX is. */
 export const GAME_COMPLETE_DEFERRED_PREFIX = '/game/complete-deferred/'
-/** A deferred-completion row (any mode/difficulty) — counts-only metric (lib/metrics/metrics.ts
- * bsk.deferredCompletions); never a live completion and never a funnel step. */
+/** A deferred-completion row (any mode/difficulty); never a live completion and never a funnel
+ * step. Best Sudoku no longer sends this family (deferred completions go out as ordinary
+ * /game/complete/ rows), so no tile counts it any more. */
 export function isGameCompleteDeferredPath(path: string): boolean {
   return path.startsWith(GAME_COMPLETE_DEFERRED_PREFIX)
 }
