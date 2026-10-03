@@ -7,6 +7,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Cards can fit their height to their content.** Tick "Fit height to content" in a card's
+  editor and the panel grows or shrinks to what it shows, with no clipping or scrollbar; it is
+  off by default, so every existing layout looks exactly as it did.
 - **Return visits show an "Organic (web)" baseline row.** After the campaigns, the return-visits
   panel adds untagged web visitors' return buckets, so each campaign can be read against people
   who came on their own; the row stays hidden until the web site starts sending them.
