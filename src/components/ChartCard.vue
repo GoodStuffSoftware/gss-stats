@@ -69,6 +69,9 @@ const emit = defineEmits<{
   // Fit-to-content (Widget.fit): this card's content height in px, whenever it changes.
   // Dashboard.vue turns it into grid rows.
   'fit-height': [number]
+  // The chart's latest response / load error, whenever either changes. App.vue keeps the newest per
+  // widget so ChartEditor can list runtime caveats without fetching again.
+  data: [StatsResponse | null, string | null]
 }>()
 
 const baseChartRef = ref<{ suppressForDrill: () => void } | null>(null)
@@ -252,6 +255,7 @@ let reqId = 0
 // response's own notes, and the range notice (the server cut the range down to what the data
 // source allows; runtime only, never saved).
 const notes = computed(() => chartNotes(props.widget, data.value, error.value))
+watch([data, error], () => emit('data', data.value, error.value))
 
 // Per-chart filter override: use widget.filters if set, else the global filter.
 const effectiveFilters = computed<GlobalFilters>(() => props.widget.filters ?? props.filters)
