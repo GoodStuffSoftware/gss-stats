@@ -72,8 +72,8 @@ the `popup-rates` card back, so that path does not occur in practice.
    specs an older build cannot read, each bump it with no data migration, only to get the save
    guard: `functions/api/config.ts` refuses a save from a lower version with 409 ("This tab is
    out of date, reload") and backs the stored layout up to `dashboard:default:backup:v<old>`
-   before the first higher-version save. Each takes the next free number on `main`; `feat/nav`
-   holds v13, so whichever of them lands second renumbers. Why the bump, and what it does and
+   before the first higher-version save. Each takes the next free number on `main`: page
+   navigation took v13, so slice 2 (sparklines) is v14. Why the bump, and what it does and
    does not protect, is spelled out under "Saved layouts and rollback".
 3. **Parity is a test, not a claim.** Each conversion gets a parity test in the
    `src/components/metrics/presets.parity.test.ts` pattern: the old body's visible numbers and
@@ -200,8 +200,8 @@ game-complete paths, ruled in R-1a/R-1b), so a series sums to its tile; a day's 
 number the tile shows for a one-day ET range, so the series exposes nothing the tile does not.
 Decision 2026-10-03 (A over B): were this reversed, drop `sparkline` from the allowed displays
 of visitor-kind metrics (B). The sparkline draws a gap as a break in the line.
-`CONFIG_VERSION` moves via `LAYOUT_VERSIONS.sparklines` (a save guard; no stored layout is
-rewritten).
+`CONFIG_VERSION` moves to 14 via `LAYOUT_VERSIONS.sparklines` (a save guard; no stored layout is
+rewritten; the first v14 save backs the stored v13 layout up to `backup:v13`).
 
 ## Per bespoke body: what replaces it, what is missing, the risks
 

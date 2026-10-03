@@ -6,14 +6,13 @@
 import { describe, expect, it } from 'vitest'
 import { etDateFromMs, installFixMarkerLabel, INSTALL_FIX_NOTE } from './popupEvents'
 import { etDateTimeFromMs, etHourFromMs } from './campaigns'
-import { etHourLabel, etHourOf, etMinuteLabel, INSTALL_OUTCOME_GAP_NOTE, SIGNUP_PROXY_NOTE } from './adsRules'
+import { etHourOf, etMinuteLabel, INSTALL_OUTCOME_GAP_NOTE, SIGNUP_PROXY_NOTE } from './adsRules'
 
 const TZ = 'America/New_York'
 const ref = {
   date: new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }),
   hour: new Intl.DateTimeFormat('en-US', { timeZone: TZ, hour: 'numeric', hourCycle: 'h23' }),
   dateTime: new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }),
-  hourLabel: new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' }),
   marker: new Intl.DateTimeFormat('en-US', { timeZone: TZ, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }),
 }
 const parts = (f: Intl.DateTimeFormat, ms: number) => Object.fromEntries(f.formatToParts(new Date(ms)).map((p) => [p.type, p.value]))
@@ -23,10 +22,6 @@ const old = {
   etDateTimeFromMs: (ms: number) => {
     const p = parts(ref.dateTime, ms)
     return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`
-  },
-  etHourLabel: (ms: number) => {
-    const p = parts(ref.hourLabel, ms)
-    return `${p.year}-${p.month}-${p.day} ${p.hour}:00 ET`
   },
   etMinuteLabel: (ms: number) => {
     const p = parts(ref.dateTime, ms)
@@ -60,7 +55,6 @@ describe('lazy formatters produce byte-identical output to the former eager ones
     ['etDateFromMs', etDateFromMs],
     ['etHourFromMs', etHourFromMs],
     ['etDateTimeFromMs', etDateTimeFromMs],
-    ['etHourLabel', etHourLabel],
     ['etHourOf', etHourOf],
     ['installFixMarkerLabel', installFixMarkerLabel],
     ['etMinuteLabel', etMinuteLabel],
