@@ -12,6 +12,10 @@ All notable changes to **gss-stats** are documented here. The format follows
   tile now loads as an invalid card.
 
 ### Fixed
+- **Return visits now leave out pre-launch test visits, like the arrivals tile.** Returns from a
+  campaign's tagged link count only from its attribution start (for the retest, 12:00 ET on its
+  first day), so launch-day test rows no longer inflate the return buckets. The ads routine's
+  return counts use the same start, so it and the page agree.
 - **Chart release markers now include v1.95.4 to v1.96.1.** Seven more Best Sudoku releases
   (v1.95.4 to v1.95.8, v1.96.0, v1.96.1) show on the release timeline.
 - **Sync all pages shows its real state.** The "Sync all pages" checkbox in the filter bar no
