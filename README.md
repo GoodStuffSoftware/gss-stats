@@ -47,8 +47,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   time yesterday and the 7-day average), the **Overall timeline**, a campaign scorecard, and a
   release before/after panel — each its own movable/editable widget. The KPI tiles and the
   scorecard are **metric cards** (presets `bsk-kpis` and `campaign-scorecard`, see *One metrics
-  registry* below), and so is the release panel (preset `release-before-after`: the latest dated
-  release's before and after windows, `days` whole days on each side of its ET midnight, bounded
+  registry* below), and so is the release panel (preset `release-before-after`: the newest release
+  with a full ET day after its release date; `days` whole days before its ET midnight and `days`
+  after the following midnight, the release day itself excluded, bounded
   by the first Best Sudoku hit, as [`src/lib/overview.ts`](src/lib/overview.ts)
   `releaseComparisonWindows` decides). The Overall timeline is a **standard line
   chart** (see *Line charts* below) with five series — page views and tagged arrivals on the left
@@ -723,7 +724,8 @@ per 10 minutes. The dashboard holds no Google Ads credential and never calls the
 | Contributing / conventions | [CLAUDE.md](CLAUDE.md) |
 | Auth design (ADR) | [docs/adr/0002-google-auth.md](docs/adr/0002-google-auth.md) |
 | Ads store decision | [docs/adr/0001-ads-read-store.md](docs/adr/0001-ads-read-store.md) |
-| Metric components design (ADR; registry and endpoint built, cards pending) | [docs/adr/0003-metric-components.md](docs/adr/0003-metric-components.md) |
+| Metric components design (ADR; slices 1-7 built) | [docs/adr/0003-metric-components.md](docs/adr/0003-metric-components.md) |
+| Retiring the remaining bespoke widgets (ADR; plan) | [docs/adr/0005-retire-bespoke-widgets.md](docs/adr/0005-retire-bespoke-widgets.md) |
 | Ads routine prompts | [docs/routines/](docs/routines/) |
 | Geo beacon (companion) | [GoodStuffSoftware/gss-beacon](https://github.com/GoodStuffSoftware/gss-beacon) |
 | Capacity / free-plan limits | [docs/capacity.md](docs/capacity.md) |

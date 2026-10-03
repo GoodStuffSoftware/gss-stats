@@ -242,7 +242,7 @@ describe('release-before-after ≡ the bespoke release panel', () => {
   const LABELS = ['Page views', 'Tagged arrivals', 'Auth successes', 'Installs']
 
   it('two days after the release: the same four counts on each side, except R1', async () => {
-    const now = Date.parse('2026-09-28T16:00:00Z')
+    const now = Date.parse('2026-09-29T16:00:00Z')
     vi.setSystemTime(now)
     const old = fromGolden<{ caption: string; cols: Record<string, Record<string, string>> }>('release.twoDaysAfter')
     expect(old.caption).toMatch(/^v1\.95\.3 \(2026-09-26\) — 2 days before vs after\. before = partially instrumented/)
@@ -284,7 +284,7 @@ describe('release-before-after ≡ the bespoke release panel', () => {
   })
 
   it('reads the first-hit aggregate once, then the two windows in one statement', async () => {
-    const now = Date.parse('2026-09-28T16:00:00Z')
+    const now = Date.parse('2026-09-29T16:00:00Z')
     vi.setSystemTime(now)
     const d1 = sqliteD1(db)
     const res = await metricsPost(pagesContext(postJson('/api/metrics', { v: 1, requests: [
@@ -555,7 +555,7 @@ describe('Notes name each label once, however many columns repeat it', () => {
   // each count under Before and After): its Notes line names the row once, not once per column.
   it.each([
     ['campaign-country', FIXTURE_NOW],
-    ['release-before-after', Date.parse('2026-09-28T16:00:00Z')],
+    ['release-before-after', Date.parse('2026-09-29T16:00:00Z')],
   ] as const)('%s', async (preset, now) => {
     vi.setSystemTime(now)
     const card = await mountCard(preset, now)

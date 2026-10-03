@@ -98,6 +98,12 @@ describe('scopeField', () => {
     expect(scopeField(root, 'release.label', '2099-01-01')).toBe(`${later.version} (${later.dateEt})`)
   })
 
+  it('release.label with no subject but a release waiting names only the waiting one', () => {
+    expect(releaseSubjectOn('2000-01-01')).toBeNull()
+    const waiting = releaseAwaitingFullDay('2000-01-01')!
+    expect(scopeField({ kind: 'root' }, 'release.label', '2000-01-01')).toBe(`${waiting.version} needs a full day`)
+  })
+
   it('a field not answerable by the current scope kind is null, not a throw', () => {
     expect(scopeField(popupScope(), 'campaign.label')).toBeNull()
     expect(scopeField({ kind: 'root' }, 'popup.id')).toBeNull()
