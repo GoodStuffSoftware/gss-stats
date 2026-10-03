@@ -502,7 +502,7 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
   if (tagged && (i.forceDecision || cumulativeSpend >= plan.hardCap)) {
     const su = campaignSignUps(tagged.summary, windowAccounts, authLiveAt)
     decision = {
-      ...decideAt100({ signUpsAtMost: su.count, asks: tagged.summary.asks.total, accepts: tagged.summary.accepts.total, exact: su.exact }),
+      ...decideAt100({ signUpsAtMost: su.count, asks: tagged.summary.asks.total, accepts: tagged.summary.accepts.total, exact: su.exact, channel: plan.channel }),
       signUpsAtMost: su.count,
       signUpsExact: su.exact,
       signUpsBounded: su.bounded,
@@ -648,6 +648,7 @@ async function diagnosticsRead(
   expectedCounts: AdsReadPlan['adGroupPlacementCounts'],
   spendThroughEt: string | null,
   taggedRows: Attempt<TaggedRow[]>,
+  channel: AdsReadPlan['channel'],
 ): Promise<DiagnosticsSection> {
   const errors: string[] = []
   const ads = deps.ads
@@ -660,7 +661,9 @@ async function diagnosticsRead(
   if (geo && !geo.ok) errors.push(geo.error)
   const devices = ads?.devices && since && until ? await attempt('ads devices', () => ads.devices!(campaignId, since, until)) : null
   if (devices && !devices.ok) errors.push(devices.error)
-  const targeting = ads?.targeting ? await attempt('ads targeting', () => ads.targeting!(campaignId)) : null
+  // A search arm has no placement/audience targeting to show (report prints SEARCH_NA), so
+  // skip the query: a failure would print an error beside a line that does not apply.
+  const targeting = ads?.targeting && channel !== 'search' ? await attempt('ads targeting', () => ads.targeting!(campaignId)) : null
   if (targeting && !targeting.ok) errors.push(targeting.error)
   const recommendations = ads?.recommendations ? await attempt('ads recommendations', () => ads.recommendations!(campaignId)) : null
   if (recommendations && !recommendations.ok) errors.push(recommendations.error)
@@ -1037,7 +1040,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
 
   const diagnostics: DiagnosticsSection = opts.healthOnly
     ? { spendThroughEt: null, hourly: null, geo: null, devices: null, targeting: null, recommendations: null, countryCounts: null, accountCrossCheck: null, errors: [] }
-    : await diagnosticsRead(deps, campaign, plan.campaignId, plan.adGroupPlacementCounts, spend.throughEt, taggedRows)
+    : await diagnosticsRead(deps, campaign, plan.campaignId, plan.adGroupPlacementCounts, spend.throughEt, taggedRows, plan.channel)
   const playReports: PlayReportsSection | null = opts.healthOnly ? null : await playReportsRead(deps, campaign, todayEt, cumulative)
 
   const servedToday = spend.ok ? (spend.todayPartial?.cost ?? 0) > 0 : null
