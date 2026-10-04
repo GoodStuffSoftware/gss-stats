@@ -7,7 +7,7 @@
 // A MANUAL, LOCAL command: it needs Mike's Play service-account key (the same read-only key the
 // morning read uses) and his Cloudflare token. Nothing in CI or the Worker runs it. Apply
 // migration 0005 first (`npm run ads:migrate`); until then this fails, and the card shows
-// "no Play figures yet" (the dashboard reads a missing table as empty).
+// "no Play figures stored yet" (the dashboard reads a missing table as empty).
 //
 // Idempotent (upserts on the Play day; Play re-posts days; a count a re-post leaves blank keeps its
 // stored value). --dry-run reads Play, writes nothing and needs no Cloudflare token. Stores whole-app per-day totals only: no country or source split.
