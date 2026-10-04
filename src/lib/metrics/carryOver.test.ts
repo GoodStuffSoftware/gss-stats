@@ -27,9 +27,10 @@ describe('carry-over completions: preset, picker and template', () => {
   })
 
   it('says in one plain sentence that the spec rates it a weak signal', () => {
-    const note = getNote('carry-over-weak-signal')!
-    expect(note.text).toMatch(/weak signal/)
-    expect(note.text.split('.').filter(Boolean)).toHaveLength(1)
+    expect(getNote('carry-over-weak-signal')).toBeDefined()
+    const text = noteRawText('carry-over-weak-signal')
+    expect(text).toMatch(/weak signal/)
+    expect(text.split('.').filter(Boolean)).toHaveLength(1)
     expect(CARRY_OVER_COMPLETIONS.captions).toContain('carry-over-weak-signal')
     expect(noteRawText('label.bsk.carryOverCompletions')).toBe('Carry-over completions')
   })
