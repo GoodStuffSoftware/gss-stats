@@ -10,6 +10,14 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **Pop-up rate tiles are metric cards** — a single pop-up rate tile now renders from the shared card engine (the percentage with its n/d, "too few to report", and the registry's notes under it); existing dashboards need no change, and a hidden install-fix note stays hidden. Before tracking went live the tile now reads "not yet tracking" instead of "—".
 - **Percent columns align right** — a percent column in a card table lines up with the other number columns.
 
+## [0.22.0] — 2026-10-03
+
+### Added
+- **Captions can show live values.** "Insert value" in the chart editor adds the chart's total, top
+  item and its share, the days it covers, or a release, web go-live or Play submission date, filled
+  in from what the chart already shows; a value that isn't there shows "—", and a value that won't
+  fit says "Caption is full".
+
 ## [0.21.0] — 2026-10-03
 
 ### Changed

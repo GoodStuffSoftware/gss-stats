@@ -69,9 +69,169 @@ describe('ChartEditor: Caption', () => {
     expect('caption' in (await save(w2))).toBe(false)
   })
 
-  it('the hint says a {=…} value token shows "—" for now', () => {
-    expect(open(base()).get('.caption-field').text()).toContain('{=…} shows "—" for now')
+  it('the hint explains Insert value and the "—" for a token with no value', () => {
+    const text = open(base()).get('.caption-field').text()
+    expect(text).toContain('Insert value adds a live number or date')
+    expect(text).toContain('shows "—" when there is no value for it')
   })
+})
+
+// Slice 1d release 1: "Insert value ▾" puts a `{=…}` token (lib/valueTokens.ts) into the caption.
+describe('ChartEditor: Insert value', () => {
+  const valueMenu = (w: VueWrapper) => w.get('.caption-field select.insert-value')
+
+  it('offers the chart values and the dates, in two groups, with what each reads right now', () => {
+    const w = open(base(), { data: response({ totals: { pageviews: 1234, visits: 5 } }) })
+    const sel = valueMenu(w)
+    expect(sel.attributes('aria-label')).toBe('Insert value')
+    expect(sel.findAll('optgroup').map((g) => g.attributes('label'))).toEqual(['This chart', 'Dates'])
+    const values = sel.findAll('option').map((o) => o.attributes('value'))
+    expect(values[0]).toBe('')
+    expect(values).toContain('{=chart.total|number}')
+    expect(values).toContain('{=chart.topShare|pct}')
+    expect(values).toContain('{=golive.web|date}')
+    expect(values).toContain('{=release.latestVersion}')
+    expect(sel.find('option[value="{=chart.total|number}"]').text()).toBe('Total (1,234)')
+    expect(sel.find('option[value="{=chart.top}"]').text()).toBe('Top item') // no rows: no value to show
+  })
+
+  it('appends with a space when the box was never focused, and the menu resets', async () => {
+    const w = open(base({ caption: 'Views:' }))
+    await valueMenu(w).setValue('{=chart.total|number}')
+    expect((valueMenu(w).element as unknown as HTMLSelectElement).value).toBe('')
+    expect((await save(w)).caption).toBe('Views: {=chart.total|number}')
+  })
+
+  it('an empty caption gets just the token', async () => {
+    const w = open(base())
+    await valueMenu(w).setValue('{=golive.web|date}')
+    expect((await save(w)).caption).toBe('{=golive.web|date}')
+  })
+
+  it('inserts at the cursor the box had when it lost focus, replacing a selection, and a second insert follows the first', async () => {
+    const w = open(base({ caption: 'A xx B' }))
+    const el = captionBox(w).element as HTMLTextAreaElement
+    el.setSelectionRange(2, 4)
+    await captionBox(w).trigger('blur')
+    await valueMenu(w).setValue('{=chart.total|number}')
+    await valueMenu(w).setValue('{=chart.topShare|pct}')
+    expect((await save(w)).caption).toBe('A {=chart.total|number}{=chart.topShare|pct} B')
+  })
+
+  it('does not insert a token that would not fit whole under the limit, and says the caption is full', async () => {
+    const full = 'x'.repeat(CAPTION_MAX_CHARS - 5)
+    const w = open(base({ caption: full }))
+    const hint = w.get('.caption-field .caption-full')
+    expect(hint.attributes('aria-live')).toBe('polite')
+    expect(hint.text()).toBe('')
+    await valueMenu(w).setValue('{=chart.total|number}')
+    expect(hint.text()).toBe('Caption is full')
+    expect((await save(w)).caption).toBe(full)
+  })
+
+  it('the "Caption is full" hint clears on the next edit: typing, or an insert that fits', async () => {
+    const full = 'x'.repeat(CAPTION_MAX_CHARS - 5)
+    const w = open(base({ caption: full }))
+    const hint = () => w.get('.caption-field .caption-full').text()
+    await valueMenu(w).setValue('{=chart.total|number}')
+    expect(hint()).toBe('Caption is full')
+    await captionBox(w).setValue('short')
+    expect(hint()).toBe('')
+    const w2 = open(base({ caption: full }))
+    const hint2 = () => w2.get('.caption-field .caption-full').text()
+    await valueMenu(w2).setValue('{=chart.total|number}')
+    expect(hint2()).toBe('Caption is full')
+    await valueMenu(w2).setValue('{=chart.top}') // 12 characters: still too long
+    expect(hint2()).toBe('Caption is full')
+    await captionBox(w2).setValue('x'.repeat(10))
+    await valueMenu(w2).setValue('{=chart.top}')
+    expect(hint2()).toBe('')
+  })
+
+  it('a token that ends exactly at the limit is inserted', async () => {
+    const token = '{=chart.total|number}'
+    const head = 'x'.repeat(CAPTION_MAX_CHARS - token.length - 1) // + the joining space = the limit
+    const w = open(base({ caption: head }))
+    await valueMenu(w).setValue(token)
+    expect(w.get('.caption-field .caption-full').text()).toBe('')
+    const out = (await save(w)).caption!
+    expect(out).toBe(`${head} ${token}`)
+    expect(out.length).toBe(CAPTION_MAX_CHARS)
+    const w2 = open(base({ caption: head + 'x' })) // one character more: refused
+    await valueMenu(w2).setValue(token)
+    expect((await save(w2)).caption).toBe(head + 'x')
+  })
+
+  it('a cursor inside an existing token inserts after that token, never inside it', async () => {
+    const w = open(base({ caption: 'A {=chart.total|number} B' }))
+    const el = captionBox(w).element as HTMLTextAreaElement
+    el.setSelectionRange(10, 10) // between "{=chart." and "total|number}"
+    await captionBox(w).trigger('blur')
+    await valueMenu(w).setValue('{=chart.top}')
+    expect((await save(w)).caption).toBe('A {=chart.total|number}{=chart.top} B')
+  })
+
+  it('a selection that starts or ends inside a token replaces up to the end of that token, never half of one', async () => {
+    const w = open(base({ caption: 'A {=chart.total} B {=chart.top} C' }))
+    const el = captionBox(w).element as HTMLTextAreaElement
+    el.setSelectionRange(5, 24) // inside {=chart.total} .. inside {=chart.top}
+    await captionBox(w).trigger('blur')
+    await valueMenu(w).setValue('{=golive.web|date}')
+    expect((await save(w)).caption).toBe('A {=chart.total}{=golive.web|date} C')
+  })
+
+  it('an insert that fits after a refusal clears "Caption is full" with no typing between (N2/N4)', async () => {
+    const full = 'x'.repeat(CAPTION_MAX_CHARS - 5)
+    const w = open(base({ caption: full }))
+    const hint = () => w.get('.caption-field .caption-full').text()
+    await valueMenu(w).setValue('{=chart.total|number}')
+    expect(hint()).toBe('Caption is full')
+    const el = captionBox(w).element as HTMLTextAreaElement
+    el.setSelectionRange(0, 20) // a selection the next token replaces, so it fits
+    await captionBox(w).trigger('blur')
+    await valueMenu(w).setValue('{=chart.top}')
+    expect(hint()).toBe('')
+    expect((await save(w)).caption).toBe('{=chart.top}' + full.slice(20))
+  })
+
+  it('a second refusal in a row is announced again: the message node is replaced (NIT-3)', async () => {
+    const w = open(base({ caption: 'x'.repeat(CAPTION_MAX_CHARS - 5) }))
+    await valueMenu(w).setValue('{=chart.total|number}')
+    const first = w.get('.caption-field .caption-full span').element
+    expect(first.textContent).toBe('Caption is full')
+    await valueMenu(w).setValue('{=chart.top}')
+    const second = w.get('.caption-field .caption-full span').element
+    expect(second.textContent).toBe('Caption is full')
+    expect(second).not.toBe(first)
+  })
+
+  it('a cursor exactly at the start of a token inserts before that token', async () => {
+    const w = open(base({ caption: 'A {=chart.total} B' }))
+    const el = captionBox(w).element as HTMLTextAreaElement
+    el.setSelectionRange(2, 2)
+    await captionBox(w).trigger('blur')
+    await valueMenu(w).setValue('{=chart.top}')
+    expect((await save(w)).caption).toBe('A {=chart.top}{=chart.total} B')
+  })
+
+  it('a popup card, which renders its own body, offers the Dates group only even with data loaded (NIT-1)', () => {
+    const card = base({ type: 'rateTable', dimension: '', card: { preset: 'popup-rates' } } as Partial<Widget>)
+    const sel = valueMenu(open(card, { data: response({ totals: { pageviews: 1234, visits: 5 } }) }))
+    expect(sel.findAll('optgroup').map((g) => g.attributes('label'))).toEqual(['Dates'])
+    expect(sel.findAll('option').some((o) => o.attributes('value')?.startsWith('{=chart.'))).toBe(false)
+  })
+
+  it.each(['overview', 'campaigns', 'ads-readings'] as const)(
+    'a %s chart, which loads no response for chart values, offers the Dates group only',
+    (dataset) => {
+      const sel = valueMenu(open(base({ dataset, type: 'table', dimension: '' })))
+      expect(sel.findAll('optgroup').map((g) => g.attributes('label'))).toEqual(['Dates'])
+      const values = sel.findAll('option').map((o) => o.attributes('value'))
+      expect(values).toContain('{=golive.web|date}')
+      expect(values).toContain('{=release.latest|date}')
+      expect(values.some((v) => v?.startsWith('{=chart.'))).toBe(false)
+    },
+  )
 })
 
 describe('ChartEditor: Insert from library', () => {
@@ -94,6 +254,57 @@ describe('ChartEditor: Insert from library', () => {
     await captionBox(w).trigger('blur')
     await w.get('.caption-field select.insert-library').setValue('release-before-partial')
     expect((await save(w)).caption).toBe(`A${RELEASE}B`)
+  })
+
+  it('text that runs past the limit is cut back to before a value token the cut would split, and says so', async () => {
+    const token = '{=chart.total|number}'
+    const pad = 'x'.repeat(CAPTION_MAX_CHARS - SMALL.length - 10) // after the insert, the token straddles the limit
+    const w = open(base({ caption: pad + token }))
+    const el = captionBox(w).element as HTMLTextAreaElement
+    el.setSelectionRange(0, 0)
+    await captionBox(w).trigger('blur')
+    await w.get('.caption-field select.insert-library').setValue('small-sample')
+    const out = (await save(w)).caption!
+    expect(out).toBe(SMALL + pad)
+    expect(out).not.toContain('{=')
+    expect(w.get('.caption-field .caption-full').text()).toBe('Caption is full')
+  })
+
+  it('a token ending exactly at the limit is kept when library text is cut back', async () => {
+    const token = '{=chart.total|number}'
+    const pad = 'x'.repeat(CAPTION_MAX_CHARS - SMALL.length - token.length) // after the insert, the token ends at the limit
+    const w = open(base({ caption: pad + token + 'yyy' }))
+    const el = captionBox(w).element as HTMLTextAreaElement
+    el.setSelectionRange(0, 0)
+    await captionBox(w).trigger('blur')
+    await w.get('.caption-field select.insert-library').setValue('small-sample')
+    const out = (await save(w)).caption!
+    expect(out).toBe(SMALL + pad + token)
+    expect(out.length).toBe(CAPTION_MAX_CHARS)
+    expect(w.get('.caption-field .caption-full').text()).toBe('Caption is full')
+  })
+
+  it('a library insert that fits after a refusal clears "Caption is full" with no typing between', async () => {
+    const full = 'x'.repeat(CAPTION_MAX_CHARS - 5)
+    const w = open(base({ caption: full }))
+    const hint = () => w.get('.caption-field .caption-full').text()
+    await w.get('.caption-field select.insert-value').setValue('{=chart.total|number}')
+    expect(hint()).toBe('Caption is full')
+    const el = captionBox(w).element as HTMLTextAreaElement
+    el.setSelectionRange(0, full.length) // replace it all, so the library text fits
+    await captionBox(w).trigger('blur')
+    await w.get('.caption-field select.insert-library').setValue('small-sample')
+    expect(hint()).toBe('')
+    expect((await save(w)).caption).toBe(SMALL)
+  })
+
+  it('a cursor inside a value token inserts library text after that token', async () => {
+    const w = open(base({ caption: '{=chart.total|number} end' }))
+    const el = captionBox(w).element as HTMLTextAreaElement
+    el.setSelectionRange(4, 4)
+    await captionBox(w).trigger('blur')
+    await w.get('.caption-field select.insert-library').setValue('small-sample')
+    expect((await save(w)).caption).toBe(`{=chart.total|number}${SMALL} end`)
   })
 
   it('library entries stay read-only: the insert copies text and records no id', async () => {

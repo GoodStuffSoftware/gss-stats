@@ -10,13 +10,15 @@
 // be interpreted as new bold/link markup — see that function's doc comment), NEVER v-html.
 import { computed } from 'vue'
 import { getNote, isNoteActive, noteTokens, type NoteSeverity } from '../lib/notes'
-import { splitParagraphs, tokenizeAndInterpolate, type TextToken } from '../lib/textLite'
+import { splitParagraphs, tokenizeAndInterpolate, type TextToken, type ValueResolver } from '../lib/textLite'
 
 const props = defineProps<{
   noteId?: string
   text?: string
   severity?: NoteSeverity
   vars?: Record<string, string | number>
+  // Fills `{=…}` value tokens in `text` (lib/valueTokens.ts); without it every token shows "—".
+  values?: ValueResolver
 }>()
 
 const def = computed(() => (props.noteId ? getNote(props.noteId) : undefined))
@@ -25,7 +27,7 @@ const active = computed(() => !props.noteId || isNoteActive(props.noteId))
 // tokenized on its own and shown as a block line inside the same note. A registry note keeps one
 // paragraph (TextBlock is the multi-paragraph renderer for those).
 const paragraphs = computed<TextToken[][]>(() => {
-  if (props.text) return splitParagraphs(props.text).map((p) => tokenizeAndInterpolate(p, props.vars))
+  if (props.text) return splitParagraphs(props.text).map((p) => tokenizeAndInterpolate(p, props.vars, props.values))
   if (props.noteId) return [noteTokens(props.noteId, props.vars)]
   return []
 })

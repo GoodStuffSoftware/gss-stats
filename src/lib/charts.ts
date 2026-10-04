@@ -434,6 +434,14 @@ function wrapText(ctx: any, text: string, maxW: number): string[] {
   return out
 }
 
+/** A widget that renders its own body (own data fetch, or none) and never loads a chart response:
+ * a metric card, the 'overview', 'campaigns' and 'ads-readings' datasets (cards since layout
+ * version 11), a pop-up rate tile (a one-item card since layout version 18) and a note. ChartCard skips its fetch for these, so their `chart.*` value tokens
+ * (lib/valueTokens.ts) can never fill, and the editor does not offer them. */
+export function rendersOwnBody(widget: Pick<Widget, 'card' | 'dataset' | 'type'>): boolean {
+  return !!widget.card || widget.dataset === 'overview' || widget.dataset === 'campaigns' || widget.dataset === 'ads-readings' || widget.type === 'note' || widget.type === 'rate'
+}
+
 /** True for a line/area chart on the beacon's date axis that draws its own series list. */
 export function hasLineSeries(widget: Pick<Widget, 'type' | 'dataset' | 'dimension' | 'series'>): boolean {
   return (widget.type === 'line' || widget.type === 'area') && widget.dataset === 'geo' && isDateDim(widget.dimension) && !!widget.series?.length

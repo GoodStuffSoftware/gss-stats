@@ -3,13 +3,15 @@
 // tokenizer (lib/textLite.ts), split into paragraphs on a blank line; never v-html.
 import { computed } from 'vue'
 import { getNote, isNoteActive, noteTemplate } from '../lib/notes'
-import { tokenizeAndInterpolate, splitParagraphs, type TextToken } from '../lib/textLite'
+import { tokenizeAndInterpolate, splitParagraphs, type TextToken, type ValueResolver } from '../lib/textLite'
 
 const props = defineProps<{
   noteId?: string
   text?: string
   title?: string
   vars?: Record<string, string | number>
+  // Fills `{=…}` value tokens (lib/valueTokens.ts); without it every token shows "—".
+  values?: ValueResolver
 }>()
 
 const def = computed(() => (props.noteId ? getNote(props.noteId) : undefined))
@@ -24,7 +26,7 @@ const mergedVars = computed<Record<string, string | number> | undefined>(() => {
   if (!defVars && !props.vars) return undefined
   return { ...(defVars as Record<string, string | number> | undefined), ...props.vars }
 })
-const paragraphs = computed<TextToken[][]>(() => splitParagraphs(rawTemplate.value).map((p) => tokenizeAndInterpolate(p, mergedVars.value)))
+const paragraphs = computed<TextToken[][]>(() => splitParagraphs(rawTemplate.value).map((p) => tokenizeAndInterpolate(p, mergedVars.value, props.values)))
 const hasContent = computed(() => paragraphs.value.some((tokens) => tokens.some((t) => t.value)))
 </script>
 
