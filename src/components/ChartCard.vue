@@ -4,7 +4,7 @@ import type { Widget, GlobalFilters, StatsResponse } from '../types'
 import { fetchStats, fetchSeriesStats } from '../api'
 import { resolveSelection, sitesLoaded } from '../sitesStore'
 import { checkSessionExpired, isAuthError, isNetworkError } from '../session'
-import { buildChartConfig, formatKey, metricValue, nestedDoughnutClickValue, seriesRows, hasLineSeries, widgetHasOverlay, widgetOverlayOptions } from '../lib/charts'
+import { buildChartConfig, formatKey, metricValue, nestedDoughnutClickValue, rendersOwnBody, seriesRows, hasLineSeries, widgetHasOverlay, widgetOverlayOptions } from '../lib/charts'
 import { overlayItems, itemsInRange } from '../lib/timelineOverlay'
 import { isDateDim } from '../lib/rings'
 import { rangeLabel } from '../lib/range'
@@ -23,6 +23,7 @@ import NoteWidgetBody from './widgets/NoteWidgetBody.vue'
 import NoteBlock from './NoteBlock.vue'
 import { noteRawText } from '../lib/notes'
 import { chartNotes } from '../lib/chartNotes'
+import { chartValueResolver } from '../lib/valueTokens'
 
 const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolean; drillOpen: boolean; forceControls?: boolean }>()
 
@@ -32,9 +33,7 @@ const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolea
 // retired); one without a card — a panel the migration does not know — says so.
 // The header (title/zoom/menu) stays generic and shared with every other widget type.
 const retiredPanelText = noteRawText('label.card.retiredPanel')
-const isBespokeBody = computed(
-  () => !!props.widget.card || props.widget.dataset === 'overview' || props.widget.dataset === 'campaigns' || props.widget.dataset === 'ads-readings' || props.widget.type === 'note',
-)
+const isBespokeBody = computed(() => rendersOwnBody(props.widget))
 
 // A metric card (ADR 0003, Widget.card): MetricCard renders it from the card reference and the
 // page context — the filter bar's range and sites, or this widget's own override — which it
@@ -252,6 +251,12 @@ let reqId = 0
 // response's own notes, and the range notice (the server cut the range down to what the data
 // source allows; runtime only, never saved).
 const notes = computed(() => chartNotes(props.widget, data.value, error.value))
+// `{=…}` value tokens in the caption (lib/valueTokens.ts): filled from this chart's own response
+// and the fixed dates, never a fetch. Only the widget's own caption takes them; every other note
+// shows "—" for a token. While a real reload is loading (a new range or spec), the previous
+// response is not this chart's any more, so the caption shows "—" rather than the old values; a
+// background refetch never sets `loading`, so it keeps the values up until the new ones arrive.
+const captionValues = computed(() => chartValueResolver(props.widget, loading.value ? null : data.value, error.value))
 watch([data, error], () => emit('data', data.value, error.value))
 
 // Per-chart filter override: use widget.filters if set, else the global filter.
@@ -649,6 +654,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
         :note-id="n.noteId"
         :text="n.text"
         :severity="n.severity"
+        :values="n.key === 'caption' ? captionValues : undefined"
         :class="{ 'range-notice': n.key === 'range-notice' }"
         :data-testid="n.key === 'range-notice' ? 'range-notice' : undefined"
       />

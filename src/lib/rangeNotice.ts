@@ -35,8 +35,9 @@ export interface RangeNotice {
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-/** The calendar day of `ms` as YYYY-MM-DD, in ET or UTC. */
-const dayOf = (ms: number, utc: boolean) => (utc ? new Date(ms).toISOString().slice(0, 10) : etDateFast(ms))
+/** The calendar day of `ms` as YYYY-MM-DD, in ET or UTC. Also how chart value tokens name a
+ * chart's days (lib/valueTokens.ts), so the note and a caption never disagree. */
+export const dayOf = (ms: number, utc: boolean) => (utc ? new Date(ms).toISOString().slice(0, 10) : etDateFast(ms))
 
 /** "Jun 10" (calendar day), with ", 2025" when `withYear`. */
 function dayLabel(ms: number, utc: boolean, withYear: boolean): string {

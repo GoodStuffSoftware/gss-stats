@@ -177,9 +177,19 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
     the chart's author writes in the chart editor, with **bold** and links; the same field on a
     chart and on a card, stored beside the card rather than in its spec. "Insert from library"
     copies a *static* registry entry's text into it (fixed text only: not date-gated, computed,
-    tied to a value from code or a data-cut note); the library stays read-only. `{=…}` is reserved for value
-    tokens and shows "—" for now, so a tab that has not got them never shows the raw token, even
-    one wrapped around bold or a link. A link whose address holds `{` or `}` stays plain text.
+    tied to a value from code or a data-cut note); the library stays read-only.
+  - **Value tokens** (`{=path|format}`; the grammar and every path are documented once, in
+    [`src/lib/valueTokens.ts`](src/lib/valueTokens.ts)). "Insert value ▾" in the chart editor puts
+    one at the caption's cursor. A token in a chart's caption is filled from that chart's own
+    response, with no extra request: its total, top item, the top item's count and share, and the
+    first and last day shown; plus the newest release, the web go-live date and the Play
+    submission date. Formats are `number`, `pct` and `date`. A token with no value (no data yet, an
+    error, a rate tile or a multi-series line for the chart values, an unknown path or a mismatched
+    format) shows "—", as every token does on a tab from before value tokens and in any note other
+    than the caption, so the raw token never shows, even one wrapped around bold or a link. A value
+    is put in only as plain text and never read again, so a value holding `**`, a link or another
+    token shows as written; a token inside bold or a link label shows "—", and a link whose address
+    holds `{` or `}` stays plain text.
   - **Caveats** are system-owned and follow the code: dated or gated entries, computed text, text
     tied to a value from code, and the runtime notes. A chart shows its data source's caveats
     automatically (`autoCaveatIds`: the `overview`, `campaigns`, `popup`, `geo` and `ads-readings`
