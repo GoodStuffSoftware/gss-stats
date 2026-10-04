@@ -249,10 +249,12 @@ describe('the v14 → v15 upgrade (default trend charts on dateEt)', () => {
   })
 })
 
-// Chart captions (notes plan slice 1c: Widget.caption, Widget.hiddenCaveats): a guard bump, no
-// layout rewrite. Written against the LAYOUT_VERSIONS key, never a literal, so whichever slice
-// lands second only renumbers the map.
-describe('the captions upgrade (plain-text captions and hidden caveats: a guard bump)', () => {
+// Chart captions (notes plan slice 1c: Widget.caption, Widget.hiddenCaveats). Unlike v14 this is a
+// layout rewrite, not a guard bump: the v16 step seeds `hiddenCaveats` once on a pre-v16 layout
+// (lib/defaults.ts seedHiddenAutoCaveatsV16), so rolling back past v16 means restoring the
+// `backup:v<stored>` copy. Written against the LAYOUT_VERSIONS key, never a literal, so whichever
+// slice lands second only renumbers the map.
+describe('the captions upgrade (plain-text captions and hidden caveats: seeds hiddenCaveats once, a layout rewrite)', () => {
   const V = LAYOUT_VERSIONS.captions
   const prev = Math.max(...Object.values(LAYOUT_VERSIONS).filter((v) => v < V))
   it('captions is the newest layout version, and this code writes it', () => {
