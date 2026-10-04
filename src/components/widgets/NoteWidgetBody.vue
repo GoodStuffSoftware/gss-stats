@@ -11,13 +11,16 @@
 import type { Widget } from '../../types'
 import NoteBlock from '../NoteBlock.vue'
 import TextBlock from '../TextBlock.vue'
-defineProps<{ widget: Widget }>()
+import type { ValueResolver } from '../../lib/textLite'
+// `values` fills `{=…}` value tokens (lib/valueTokens.ts): the fixed dates and catalog metrics;
+// `chart.*` is "—" in a note (ChartCard builds it with noteValueResolver).
+defineProps<{ widget: Widget; values?: ValueResolver }>()
 </script>
 
 <template>
   <div class="note-body">
-    <TextBlock v-if="widget.longText" :note-id="widget.noteId" :text="widget.noteId ? undefined : widget.note" />
-    <NoteBlock v-else :note-id="widget.noteId" :text="widget.noteId ? undefined : widget.note || '(empty note)'" />
+    <TextBlock v-if="widget.longText" :note-id="widget.noteId" :text="widget.noteId ? undefined : widget.note" :values="values" />
+    <NoteBlock v-else :note-id="widget.noteId" :text="widget.noteId ? undefined : widget.note || '(empty note)'" :values="values" />
   </div>
 </template>
 
