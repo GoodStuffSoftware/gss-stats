@@ -595,6 +595,10 @@ const cardErrors = ref<string[]>([])
 const cardSaveDisabled = computed(() => isCardWidget.value && cardErrors.value.length > 0)
 
 const typeDef = computed(() => CHART_TYPES.find((t) => t.value === draft.type))
+// ADR 0005 slice 5: "Rate" is no longer offered for a new chart (a new rate is a metric card). A saved
+// rate tile (saved as type 'rate', read from the prop, not the draft) keeps the option, so switching its
+// type away can be switched back.
+const typeChoices = computed(() => CHART_TYPES.filter((t) => t.value !== 'rate' || props.widget.type === 'rate'))
 // "Site override" = Widget.siteSel: this chart's own site pick, replacing the page's (dates and
 // every other page filter still apply). Best Sudoku is its beacon tags (web + app).
 const SITE_OVERRIDES: { value: string; label: string; sel: string[] }[] = [
@@ -698,7 +702,7 @@ function save() {
           <div class="field">
             <label>Chart type</label>
             <select v-model="draft.type">
-              <option v-for="t in CHART_TYPES" :key="t.value" :value="t.value">{{ t.label }}</option>
+              <option v-for="t in typeChoices" :key="t.value" :value="t.value">{{ t.label }}</option>
             </select>
           </div>
           <div class="field" v-if="!isGeo && !isPopup && !isBespokeDataset && !isNote">

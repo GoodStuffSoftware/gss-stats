@@ -6,6 +6,12 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.0] — 2026-10-03
+
+### Changed
+- **Stat tiles and bar tables are shared pieces** — the Stat and Table charts and the metric card's tile and bar now draw through the same components, with the same numbers, labels and empty states as before.
+- **"Rate" is no longer a chart type in the editor** — a new rate is a metric card; a saved rate tile still opens and edits as before.
+
 ## [0.23.1] — 2026-10-03
 
 ### Fixed
