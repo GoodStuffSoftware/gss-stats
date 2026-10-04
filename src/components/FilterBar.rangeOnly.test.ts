@@ -12,6 +12,9 @@ const labels = (rangeOnly?: boolean) =>
     .findAll('.filter-bar > .group > label:first-child')
     .map((l) => l.text())
 
+const hintShown = (filters: ReturnType<typeof defaultFilters>, rangeOnly = true) =>
+  mount(FilterBar, { props: { filters, syncRange: true, rangeOnly } }).find('.range-only-hint').exists()
+
 describe('FilterBar rangeOnly', () => {
   it('shows every group by default', () => {
     expect(labels()).toEqual(['Sites', 'Range', 'Exclusions', 'Pages'])
@@ -25,5 +28,18 @@ describe('FilterBar rangeOnly', () => {
     expect(w.find('.sync-toggle').exists()).toBe(true)
     expect(w.find('.site-btn').exists()).toBe(false)
     expect(w.find('.excl-btn').exists()).toBe(false)
+  })
+
+  it('says the hidden filters still apply only when a site or exclusion filter is not at its default', () => {
+    expect(hintShown(defaultFilters())).toBe(false)
+    expect(hintShown({ ...defaultFilters(), siteSel: ['bestsudoku.example'] })).toBe(true)
+    expect(hintShown({ ...defaultFilters(), excludeOwnVisits: false })).toBe(true)
+    expect(hintShown({ ...defaultFilters(), excludeSelfReferrals: false })).toBe(true)
+    const text = mount(FilterBar, { props: { filters: { ...defaultFilters(), siteSel: ['x'] }, syncRange: true, rangeOnly: true } }).find('.range-only-hint').text()
+    expect(text).toMatch(/still apply/)
+  })
+
+  it('never shows the hint on a bar with the full controls', () => {
+    expect(hintShown({ ...defaultFilters(), siteSel: ['bestsudoku.example'], excludeOwnVisits: false }, false)).toBe(false)
   })
 })

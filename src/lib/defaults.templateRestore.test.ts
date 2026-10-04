@@ -1,6 +1,7 @@
 // "Restore default charts" on a page built from a template brings back THAT template's set, for every
 // template, by the page's stored marker (DashboardPage.templateId). No layout version: the field is
-// optional and a page without it is read by id (and, for Retention, by its scope note).
+// optional and a page without it is read by id (and, for Retention, by its scope note). Layout key
+// `templateMarker` guards it (no migration: the field is read as is, a page without it is never rewritten).
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   CONFIG_VERSION,
@@ -126,7 +127,7 @@ describe('legacy pages (no marker)', () => {
   })
 })
 
-describe('the marker is stored, with no layout version', () => {
+describe('the marker is stored, under a guard-only layout version', () => {
   it('survives normalizeConfig; junk is dropped', () => {
     const cfg: DashboardConfig = clone(defaultConfig())
     const { result, page } = applyPageDraft(cfg, { ...newPageDraft('Best Sudoku'), name: 'Retention', start: 'tpl-bsk-retention' }, cfg.pages[0])
@@ -140,11 +141,27 @@ describe('the marker is stored, with no layout version', () => {
     }
   })
 
-  it('adds no layout version: CONFIG_VERSION is the highest key, and the fresh layout is unchanged', () => {
+  it('takes its own layout key: CONFIG_VERSION is that key, the highest, and the fresh layout carries no marker', () => {
+    expect(CONFIG_VERSION).toBe(LAYOUT_VERSIONS.templateMarker)
     expect(CONFIG_VERSION).toBe(Math.max(...Object.values(LAYOUT_VERSIONS)))
-    expect(Object.values(LAYOUT_VERSIONS)).not.toContain(19)
+    expect(LAYOUT_VERSIONS.templateMarker).toBeGreaterThan(LAYOUT_VERSIONS.rateTile)
     expect(JSON.stringify(defaultConfig())).not.toMatch(/templateId/)
   })
+
+  // A guard only: an older stored layout loads to the new version with nothing written to its pages.
+  for (const [name, stored] of [['v12', 12], ['rateTile', LAYOUT_VERSIONS.rateTile]] as const) {
+    it(`a ${name} layout loads at the new version with templateId absent, and Restore keeps its legacy fallback`, () => {
+      const cfg: DashboardConfig = clone(defaultConfig())
+      cfg.pages.push(defaultRetentionPage(), { ...built('blank'), id: 'plain-1', name: 'Plain', widgets: [] })
+      const out = normalizeConfig({ ...clone(cfg), version: stored })
+      expect(out.version).toBe(LAYOUT_VERSIONS.templateMarker)
+      for (const p of out.pages) expect(p.templateId, p.id).toBeUndefined()
+      const retention = out.pages.find((p) => p.id === 'bsk-retention')!
+      expect(defaultWidgetsForPage(trashed(retention)).map((x) => x.id)).toContain('rt-verdict')
+      const plain = out.pages.find((p) => p.id === 'plain-1')!
+      expect(shape(defaultWidgetsForPage(plain))).toEqual(shape(defaultWidgets()))
+    })
+  }
 })
 
 describe('pageFilterBar', () => {
