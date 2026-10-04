@@ -6,6 +6,12 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.26.0] — 2026-10-03
+
+### Changed
+- **Restore default charts works on every template page.** A page made from a template now restores that template’s own charts instead of the generic set.
+- **The Retention filter bar is trimmed.** It shows only the date range, with a short note when a site or exclusion filter is set.
+
 ## [0.25.3] — 2026-10-03
 
 ### Fixed
@@ -223,6 +229,7 @@ All notable changes to **gss-stats** are documented here. The format follows
   skips by stage (the same rows as tour skip, split by where), game starts by difficulty and
   tutorial completions (first run vs replay) as plain counts, "not yet tracked" until the
   first v1.97.0 row.
+
 ## [0.14.3] — 2026-10-03
 
 ### Changed

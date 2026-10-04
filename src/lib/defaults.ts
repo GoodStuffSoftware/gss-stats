@@ -112,6 +112,10 @@ export const LAYOUT_VERSIONS = {
   /** The pop-up rate tile (`type: 'rate'`) renders as a one-item metric card (ADR 0005 slice 4,
    * rateTileCard.ts). A guard bump only: no stored layout is rewritten, the tile keeps its fields. */
   rateTile: 18,
+  /** Template pages carry a `templateId` marker (DashboardPage.templateId) that Restore default charts reads.
+   * A guard bump only: no stored layout is rewritten and there is no migration. It exists so a tab still on
+   * older code, whose save would silently drop the marker, is refused with a 409 instead. */
+  templateMarker: 19,
 } as const
 // The newest layout version: derived from the map, so a slice that adds an entry never edits this line.
 export const CONFIG_VERSION: number = Math.max(...Object.values(LAYOUT_VERSIONS))
@@ -915,6 +919,39 @@ export function isBestSudokuLaunchPage(p: Pick<DashboardPage, 'id'>): boolean {
   return p.id === 'bsk-launch'
 }
 
+// ── Page templates: the marker a page built from one carries (DashboardPage.templateId) ─────────
+// Every PAGE_TEMPLATES id (lib/wizards.ts) and the chart set that template creates. wizards.ts
+// imports this file, so the table lives here; a test pins that the two lists agree.
+export const TEMPLATE_WIDGETS: Readonly<Record<string, () => Widget[]>> = {
+  'tpl-default': defaultWidgets,
+  'tpl-beacon': defaultBeaconWidgets,
+  'tpl-bsk-overview': defaultOverviewWidgets,
+  'tpl-bsk-campaigns': defaultCampaignsWidgets,
+  'tpl-bsk-popups': defaultBestSudokuPopupsWidgets,
+  'tpl-bsk-launch': defaultBestSudokuLaunchWidgets,
+  'tpl-bsk-retention': defaultRetentionWidgets,
+}
+export const RETENTION_TEMPLATE_ID = 'tpl-bsk-retention'
+const TEMPLATE_ID_RE = /^tpl-[a-z0-9][a-z0-9-]{0,39}$/
+/** The template a page was built from, or undefined. The stored marker first (only a template this
+ * build knows counts); then, for a page that predates the marker, the Retention page by its id or,
+ * on a top-level page, by the page-only scope note its template places (a drill page copies the
+ * widgets, not the origin). Read-time only: nothing stored is rewritten. */
+export function pageTemplateId(p: Pick<DashboardPage, 'id' | 'widgets'> & { templateId?: string; parentId?: string }): string | undefined {
+  if (typeof p.templateId === 'string' && Object.prototype.hasOwnProperty.call(TEMPLATE_WIDGETS, p.templateId)) return p.templateId
+  if (p.id === 'bsk-retention') return RETENTION_TEMPLATE_ID
+  if (!p.parentId && p.widgets.some((x) => x.noteId === 'retention-page-scope')) return RETENTION_TEMPLATE_ID
+  return undefined
+}
+/** How much of the main filter bar a page shows: all of it, only the date range (and sync), or none.
+ * The campaigns page covers its own fixed windows, so it shows none (by its id, as before). The
+ * Retention page's cards read only the date range, through the Play tiles: its campaign facts take no
+ * site or own-visits filter (lib/metrics/engine.ts factParamsFor), so only Range (and Sync) stay. */
+export function pageFilterBar(p: Pick<DashboardPage, 'id' | 'widgets'> & { templateId?: string; parentId?: string }): 'full' | 'range' | 'none' {
+  if (isCampaignComparePage(p)) return 'none'
+  return pageTemplateId(p) === RETENTION_TEMPLATE_ID ? 'range' : 'full'
+}
+
 // The right "factory" chart set for a page when restoring defaults. The two canonical
 // pages restore their own set; a drill-down or user-made page (no fixed identity) restores
 // the set that matches its current data source — so a beacon page comes back with beacon
@@ -929,6 +966,9 @@ export function defaultWidgetsForPage(p: DashboardPage): Widget[] {
   if (isCampaignComparePage(p)) return defaultCampaignsWidgets()
   if (isRetentionPage(p)) return defaultRetentionWidgets()
   if (isBestSudokuLaunchPage(p)) return defaultBestSudokuLaunchWidgets()
+  // A page built from a template (lib/wizards.ts) has a fresh id, so it is known by its marker.
+  const tpl = pageTemplateId(p)
+  if (tpl) return TEMPLATE_WIDGETS[tpl]()
   const geoCount = p.widgets.filter((w) => w.dataset === 'geo').length
   return geoCount > p.widgets.length / 2 ? defaultBeaconWidgets() : defaultWidgets()
 }
@@ -1138,6 +1178,8 @@ function normPage(p: any, i: number): DashboardPage {
   // Checked again against the other pages in normDrillLinks (it must name an existing root page).
   if (typeof p.parentId === 'string' && p.parentId) page.parentId = p.parentId
   if (typeof p.icon === 'string' && ICON_KEY_RE.test(p.icon)) page.icon = p.icon
+  // Which page template it was built from (restore default charts, the Retention filter bar).
+  if (typeof p.templateId === 'string' && TEMPLATE_ID_RE.test(p.templateId)) page.templateId = p.templateId
   return page
 }
 
@@ -1508,7 +1550,8 @@ export function cryptoId(): string {
 // Deep-clone a page with fresh ids (for duplication). The copy keeps the source's group and icon,
 // and a copy of a drill page stays a drill page of the same parent (its parentId); callers that make
 // a new ROOT page (+ Page) or a new drill (App.vue openFilteredPage) set parentId/icon themselves.
-export function clonePage(src: DashboardPage, name: string): DashboardPage {
+// `keepTemplate` (a duplicate) carries the template marker over; a drill page never does.
+export function clonePage(src: DashboardPage, name: string, keepTemplate = false): DashboardPage {
   const id = cryptoId()
   const copy: DashboardPage = {
     id,
@@ -1523,5 +1566,6 @@ export function clonePage(src: DashboardPage, name: string): DashboardPage {
   }
   if (src.parentId) copy.parentId = src.parentId
   if (src.icon) copy.icon = src.icon
+  if (keepTemplate && src.templateId) copy.templateId = src.templateId
   return copy
 }
