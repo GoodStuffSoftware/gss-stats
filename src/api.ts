@@ -38,10 +38,8 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters, extraCo
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        // A rate tile asks for one rate. (ChartCard no longer calls this for one: a rate tile is a metric card
-        // since layout version 18; the branch stays for the endpoint's own contract. The rate table is a card since 11.)
-        dimension: widget.type === 'rate' ? 'rate' : widget.dimension || 'kind',
-        rateKey: widget.type === 'rate' ? widget.dimension : undefined,
+        // (A rate tile is a metric card since layout version 18, the rate table since 11: neither comes here.)
+        dimension: widget.dimension || 'kind',
         popup: widget.popup,
         kind: widget.popupKind,
         since: filters.since,
