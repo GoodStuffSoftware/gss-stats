@@ -115,6 +115,7 @@ export function validateCard(spec: CardSpec): string[] {
     if (l === undefined || typeof l === 'string') return
     if ('bind' in l) checkScopePath(where, l.bind)
     if ('note' in l && !noteIdOk(l.note)) errors.push(`${where}: ${JSON.stringify(l.note) ?? 'undefined'} is not a note id`)
+    if ('note' in l && l.vars && typeof l.vars === 'object') for (const p of Object.values(l.vars)) checkScopePath(where, p)
     if ('metric' in l && !hasData) errors.push(`${where}: { metric: true } needs a metric or ratio binding`)
   }
   // A reading's counts are an allow-list (types.ts READING_COUNT_FIELDS): any other

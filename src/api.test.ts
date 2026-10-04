@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchAdsReadings, fetchStats, saveConfig } from './api'
+import { ADS_READINGS_TIMEOUT_MS, fetchAdsReadings, fetchStats, saveConfig } from './api'
 import { isAuthError, sessionExpired } from './session'
 import type { DashboardConfig, GlobalFilters, Widget } from './types'
 
@@ -75,6 +75,46 @@ describe('the readings-log fetcher raises the re-sign-in banner on an expired se
     await expect(fetchAdsReadings('limit=30')).rejects.toThrow(/^readings 401:/)
     expect(probeCalls()).toHaveLength(1)
     expect(sessionExpired.value).toBe(false)
+  })
+})
+
+describe('the readings fetcher gives up on a hung request', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+  /** A fetch that never answers on its own, but honours its AbortSignal like the real one. */
+  function hangingFetch() {
+    calls = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init?: RequestInit) => {
+        calls.push({ url, init })
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+        })
+      }),
+    )
+  }
+
+  it('fails with a timeout error after ADS_READINGS_TIMEOUT_MS, and does not probe the session', async () => {
+    vi.useFakeTimers()
+    hangingFetch()
+    const p = fetchAdsReadings('limit=30')
+    const settled = vi.fn()
+    p.catch(settled)
+    await vi.advanceTimersByTimeAsync(ADS_READINGS_TIMEOUT_MS - 1)
+    expect(settled).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(2)
+    await expect(p).rejects.toThrow(/^readings timed out/)
+    expect(probeCalls()).toHaveLength(0)
+    expect(sessionExpired.value).toBe(false)
+  })
+
+  it('a prompt answer clears the timer (no late abort)', async () => {
+    vi.useFakeTimers()
+    stubFetch(new Response(JSON.stringify({ campaigns: [] }), { status: 200 }), unauthorized())
+    await expect(fetchAdsReadings('limit=30')).resolves.toEqual({ campaigns: [] })
+    expect(vi.getTimerCount()).toBe(0)
   })
 })
 

@@ -306,6 +306,11 @@ describe('validateCard: reading counts and the limit', () => {
     expect(validateCard(card({ data: { field: 'reading.count.gameStart' as ScopePath } })).join()).toMatch(/not a reading count/)
     expect(validateCard(card({ label: { bind: 'reading.count.tour' as ScopePath } })).join()).toMatch(/not a reading count/)
   })
+  it('refuses a refused reading.count path in the vars of a note label', () => {
+    const note = 'label.card.taggedArrivalsFor'
+    expect(validateCard(card({ label: { note, vars: { campaign: 'campaign.label' } } }))).toEqual([])
+    expect(validateCard(card({ label: { note, vars: { campaign: 'reading.count.returnD0Web' as ScopePath } } })).join()).toMatch(/not a reading count/)
+  })
   it('limit: a whole number from 1 to the cap, readings only', () => {
     expect(validateCard(card({}, { over: 'readings', limit: 30 }))).toEqual([])
     expect(validateCard(card({}, { over: 'readings', limit: MAX_READINGS_LIMIT }))).toEqual([])

@@ -1,9 +1,11 @@
 // @vitest-environment happy-dom
 //
 // ADR 0005 slice 3, step A: MetricCard loads the ads readings itself (GET /api/ads/readings
-// through api.ts) when its spec repeats over readings or declares the ads-refresh action, nests
-// each campaign's own readings under its card, and reloads them on the card reload, after an ads
-// refresh and on return to the tab. A late older answer never overwrites a newer one.
+// through api.ts) when its spec needs the answer (notices, a readings repeat, or a field bound to
+// campaign.freshness / campaign.thresholds / reading.*; declaring the ads-refresh action alone is
+// not a reason), nests each campaign's own readings under its card, and reloads them on the card
+// reload, after an ads refresh and on return to the tab. A late older answer never overwrites a
+// newer one.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import MetricCard from './MetricCard.vue'
@@ -157,17 +159,34 @@ describe('MetricCard: the readings load', () => {
     expect(rowsOf(w)[0][0][1]).toBe('99')
   })
 
-  it('a card with no readings repeat and no ads-refresh never fetches readings', async () => {
+  it('a card that reads nothing from the readings (even one with ads-refresh) never fetches them', async () => {
     await mountCard({ v: 1, sections: [{ layout: 'rows', items: [{ id: 'k', label: 'K', data: { field: 'campaign.label' }, display: { as: 'text' } }] }] })
     expect(mocked).not.toHaveBeenCalled()
   })
 
-  it('an ads-refresh card without a readings repeat fetches with limit 1 (freshness only)', async () => {
+  it('a card without a readings repeat that reads campaign.freshness fetches with limit 1 (freshness only)', async () => {
     const spec: CardSpec = { v: 1, actions: ['ads-refresh'], repeat: { over: 'campaigns', ids: [A] }, sections: [{ layout: 'rows', items: [{ id: 'f', label: 'Fresh', data: { field: 'campaign.freshness' }, display: { as: 'text' } }] }] }
     const w = await mountCard(spec)
     expect(mocked).toHaveBeenCalledTimes(1)
     expect(new URLSearchParams(mocked.mock.calls[0][0] as string).get('limit')).toBe('1')
     expect(w.text()).toContain('Spend through Sep 25')
+  })
+
+  it('the campaign-cost preset (ads-refresh, no readings fields) makes no readings call and shows no Loading placeholder; refresh still reloads it', async () => {
+    wrapper = mount(MetricCard, { props: { cardRef: { preset: 'campaign-cost' } } })
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+    const w = wrapper
+    expect(mocked).not.toHaveBeenCalled()
+    expect(w.text()).not.toContain('Loading')
+    const statsCalls = () => vi.mocked(fetch).mock.calls.length
+    const before = statsCalls()
+    expect(before).toBeGreaterThan(0)
+    w.findComponent(AdsRefreshButton).vm.$emit('refreshed', { refreshed: true })
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+    expect(statsCalls()).toBeGreaterThan(before) // the refresh reloaded the card's own metrics
+    expect(mocked).not.toHaveBeenCalled()
   })
 
   it('shows the freshness and fired thresholds of its own campaign', async () => {
@@ -263,5 +282,14 @@ describe('MetricCard: a failed readings load', () => {
     await settle()
     expect(w.find('.mc-live').text()).toBe('')
     expect(rowsOf(w)[0][0][1]).toBe('5')
+  })
+
+  it('says nothing about "no campaign has readings" while the load has failed (status + Retry only)', async () => {
+    mocked.mockReset()
+    mocked.mockRejectedValue(new Error('boom'))
+    const base = logSpec()
+    const w = await mountCard({ ...base, repeat: { over: 'campaigns', withActivity: true, empty: { label: '', text: { note: 'no-ads-campaign' } } } })
+    expect(w.find('.mc-live').text()).not.toBe('')
+    expect(w.text()).not.toContain('No campaign has readings')
   })
 })

@@ -10,7 +10,7 @@ import { computed, effectScope, onScopeDispose, shallowRef, watch, type EffectSc
 import { useMetrics } from '../../composables/useMetrics'
 import { buildRequestSpec, columnDefaultLabel, flattenSectionItems, nestScope, resolveRepeat, sectionCells, type FlatItem, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
 import { itemLabelTokens, itemViewModel, resolveLabelTokens } from '../../lib/metrics/render'
-import type { MetricsContext, MetricValue, Section } from '../../lib/metrics/types'
+import type { MetricItem as MetricItemSpec, MetricsContext, MetricValue, Section } from '../../lib/metrics/types'
 import MetricItem from './MetricItem.vue'
 import MetricLabel from './MetricLabel.vue'
 import MetricPlaceholder from './MetricPlaceholder.vue'
@@ -92,6 +92,9 @@ const barMax = computed(() => {
 
 // ── table, row repeat ────────────────────────────────────────────────────────────────────────
 const tableRows = computed<ScopeInstance[]>(() => (props.section.layout === 'table' && !isColumnTable.value ? resolveRepeat(props.section.repeat, props.ctx, props.outerScope).map((r) => nestScope(r, props.outerScope)) : []))
+/** A row-table column that reads as a number is right-aligned: a number display, or a stored
+ * reading's count (the sign-ups cell is text, but still a count). */
+const isNumColumn = (it: MetricItemSpec) => it.display.as === 'number' || ('field' in it.data && it.data.field.startsWith('reading.count.'))
 const tableHeaderTokens = computed(() => props.section.items.map((it) => itemLabelTokens(it, props.outerScope, props.ctx.todayEt)))
 /** Each column's tooltip (MetricItem.hint) as plain text, or undefined. */
 const tableHeaderHints = computed(() => props.section.items.map((it) => (it.hint === undefined ? undefined : resolveLabelTokens(it.hint, props.outerScope, undefined, props.ctx.todayEt).map((t) => t.value).join('') || undefined)))
@@ -160,20 +163,23 @@ const anyVisible = computed(() => {
       <MetricLabel :tokens="tableEmptyText" />
     </p>
 
-    <table v-else-if="section.layout === 'table'" class="metric-table">
-      <thead>
-        <tr>
-          <th v-for="(tokens, i) in tableHeaderTokens" :key="i" :title="tableHeaderHints[i]"><MetricLabel :tokens="tokens" /></th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="(rowScope, ri) in tableRows" :key="ri" :class="{ incomplete: rowScope.kind === 'reading' && rowScope.reading.complete === false }">
-          <td v-for="item in section.items" :key="item.id">
-            <MetricTableCell :item="item" :scope="rowScope" :today-et="ctx.todayEt" :context="context" />
-          </td>
-        </tr>
-      </tbody>
-    </table>
+    <!-- Wrapped like the column table: a wide table scrolls inside its card instead of being clipped. -->
+    <div v-else-if="section.layout === 'table'" class="metric-table-wrap">
+      <table class="metric-table">
+        <thead>
+          <tr>
+            <th v-for="(tokens, i) in tableHeaderTokens" :key="i" :class="{ num: isNumColumn(section.items[i]) }" :title="tableHeaderHints[i]"><MetricLabel :tokens="tokens" /></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="(rowScope, ri) in tableRows" :key="ri" :class="{ incomplete: rowScope.kind === 'reading' && rowScope.reading.complete === false }">
+            <td v-for="item in section.items" :key="item.id" :class="{ num: isNumColumn(item) }">
+              <MetricTableCell :item="item" :scope="rowScope" :today-et="ctx.todayEt" :context="context" />
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
 
     <div v-else class="items-wrap">
       <template v-for="(fi, i) in flatItems" :key="`${fi.item.id}-${i}`">
@@ -256,8 +262,8 @@ const anyVisible = computed(() => {
 .metric-table tr.incomplete td {
   opacity: 0.7;
 }
-.metric-table.columns th.num,
-.metric-table.columns td.num {
+.metric-table th.num,
+.metric-table td.num {
   text-align: right;
 }
 .metric-table.columns th.row-label {
