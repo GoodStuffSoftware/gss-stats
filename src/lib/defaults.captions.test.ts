@@ -9,6 +9,7 @@ import {
   CAPTION_MAX_CHARS,
   CONFIG_VERSION,
   HIDDEN_CAVEATS_MAX,
+  HIDDEN_CAVEAT_ID_RE,
   LAYOUT_VERSIONS,
   V16_SEEDABLE_CAVEATS,
   defaultCampaignsWidgets,
@@ -49,6 +50,10 @@ describe('captions: the layout version', () => {
 })
 
 describe('captions: normWidget limits', () => {
+  it('every registry caption or caveat id (labels aside) fits HIDDEN_CAVEAT_ID_RE, so a note the editors can hide is one hiddenCaveats can store (NIT-4)', () => {
+    const bad = Object.values(NOTES_REGISTRY).filter((n) => n.kind !== 'label' && !HIDDEN_CAVEAT_ID_RE.test(n.id)).map((n) => n.id)
+    expect(bad).toEqual([])
+  })
   it(`keeps a caption up to ${CAPTION_MAX_CHARS} characters, and cuts a longer one to exactly that, never dropping it`, () => {
     expect(CAPTION_MAX_CHARS).toBe(2000)
     const exact = 'a'.repeat(CAPTION_MAX_CHARS)

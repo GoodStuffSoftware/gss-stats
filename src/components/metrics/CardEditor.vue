@@ -42,6 +42,7 @@ import { presetById } from '../../lib/metrics/presets'
 import { cardLimitProblems, validateCard } from '../../lib/metrics/validate'
 import { notePreview } from '../../lib/metrics/editorModel'
 import { isNoteIdHideable } from '../../lib/chartNotes'
+import { HIDDEN_CAVEAT_ID_RE } from '../../lib/defaults'
 import { BADGE_TONE_MAX, BADGE_TONE_OPTIONS, CARD_ACTION_OPTIONS, cloneSpec, emptySection, groupErrors, moveBy, presetOptions, rowsToTones, specFromPresetId, specsEqual, toneValueProblem, tonesToRows, withField, type BadgeTone, type ToneRow } from '../../lib/metrics/editorModel'
 import type { CardAction, CardRef, CardSpec, Label, MetricsContext } from '../../lib/metrics/types'
 
@@ -322,12 +323,16 @@ interface CaptionRow {
 }
 const captionRows = computed<CaptionRow[]>(() =>
   (spec.captions ?? []).map((id) => {
-    const hideable = isNoteIdHideable(id)
+    const hideable = isNoteIdHideable(id) && HIDDEN_CAVEAT_ID_RE.test(id)
     return { id, preview: notePreview(id), hideable, hidden: hideable && hiddenList.value.includes(id) }
   }),
 )
+/** NIT-4: an id the stored list cannot keep (Widget.hiddenCaveats takes HIDDEN_CAVEAT_ID_RE ids
+ * only, normalizeConfig drops the rest) is never hidden here, so a hide never undoes itself on
+ * reload. Every registry note id fits the pattern (defaults.captions.test.ts pins it), so this only
+ * bites a registry id added in a shape the list cannot store. */
 function setCaptionHidden(id: string, hide: boolean) {
-  if (!isNoteIdHideable(id) || hide === hiddenList.value.includes(id)) return
+  if (!isNoteIdHideable(id) || !HIDDEN_CAVEAT_ID_RE.test(id) || hide === hiddenList.value.includes(id)) return
   const next = hide ? [...hiddenList.value, id] : hiddenList.value.filter((h) => h !== id)
   hiddenList.value = next
   emit('update:hiddenCaptions', [...next])
