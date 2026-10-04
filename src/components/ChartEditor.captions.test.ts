@@ -10,7 +10,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { PRESETS } from '../lib/metrics/presets'
 import type { CardSpec } from '../lib/metrics/types'
 import ChartEditor from './ChartEditor.vue'
-import { CAPTION_MAX_CHARS, clonePage } from '../lib/defaults'
+import { CAPTION_MAX_CHARS, HIDDEN_CAVEATS_MAX, clonePage } from '../lib/defaults'
 import { noteTemplate } from '../lib/notes'
 import type { DashboardPage, StatsResponse, Widget } from '../types'
 
@@ -297,6 +297,13 @@ describe('ChartEditor: card spec captions (CardEditor wiring, part B2)', () => {
     expect((await save(w)).hiddenCaveats).toEqual(['release-before-partial'])
     w.findComponent({ name: 'CardEditor' }).vm.$emit('update:hiddenCaptions', ['Bad_Id'])
     expect('hiddenCaveats' in (await save(w))).toBe(false)
+  })
+
+  it(`keeps at most HIDDEN_CAVEATS_MAX (${HIDDEN_CAVEATS_MAX}) ids in the draft (NIT-D)`, async () => {
+    const w = open(card())
+    const many = Array.from({ length: HIDDEN_CAVEATS_MAX + 8 }, (_, i) => `id-${i}`)
+    w.findComponent({ name: 'CardEditor' }).vm.$emit('update:hiddenCaptions', many)
+    expect((await save(w)).hiddenCaveats).toEqual(many.slice(0, HIDDEN_CAVEATS_MAX))
   })
 
   it("the chart's caveat list leaves the card's own spec captions to CardEditor", () => {
