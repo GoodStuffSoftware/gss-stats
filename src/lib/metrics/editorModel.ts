@@ -170,6 +170,8 @@ export const SCOPE_PATH_OPTIONS: Record<RepeatSpec['over'], { value: ScopePath; 
     { value: 'campaign.upsellFixAt', label: 'Upsell fix time' },
     { value: 'campaign.upsellFixFlightDay', label: 'Upsell fix flight day' },
     { value: 'campaign.returnTagShared', label: 'Shared return tag note' },
+    { value: 'campaign.freshness', label: 'Ads data freshness (from the readings load)' },
+    { value: 'campaign.thresholds', label: 'Fired spend thresholds (from the readings load)' },
   ],
   popups: [
     { value: 'popup.id', label: 'Pop-up id' },
@@ -186,6 +188,12 @@ export const SCOPE_PATH_OPTIONS: Record<RepeatSpec['over'], { value: ScopePath; 
     { value: 'reading.spend', label: 'Spend' },
     { value: 'reading.rules', label: 'Rules' },
     { value: 'reading.proposal', label: 'Proposal' },
+    { value: 'reading.count.arrivals', label: 'Tagged arrivals' },
+    { value: 'reading.count.asks', label: 'Asks' },
+    { value: 'reading.count.accepts', label: 'Accepts' },
+    { value: 'reading.count.auth', label: 'Auth successes' },
+    { value: 'reading.count.signUpsAtMost', label: 'Sign-ups (upper bound, number)' },
+    { value: 'reading.count.signUps', label: 'Sign-ups (exact or at most, text)' },
   ],
 }
 export function scopePathOptions(over: RepeatSpec['over'] | undefined): { value: ScopePath; label: string }[] {
@@ -390,6 +398,7 @@ const DISPLAY_AS_LABELS: Record<DisplayAs, string> = {
   counts: 'Counts',
   dateRange: 'Date range',
   datetime: 'Date & time',
+  'datetime-et': 'Date & time (ET)',
   badge: 'Badge',
   bar: 'Bar',
   sparkline: 'Sparkline',

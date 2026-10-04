@@ -17,7 +17,7 @@ import { METRICS, metricWindows, OPTIONAL_PARAMS, type MetricDef, type MetricPar
 import { seriesTwin } from './series'
 import { presetById } from './presets'
 import { RATIOS, ratioParamsOf, ratioSupportsOrganic, ratioWindowsOf, type RatioDef } from './ratios'
-import { COUNTRY_BUCKETS, WINDOW_SIDES, type CardAction, type CardRef, type CardSpec, type DataBinding, type DeltaName, type Display, type DisplayAs, type Label, type RepeatSpec, type WindowName } from './types'
+import { COUNTRY_BUCKETS, isReadingCountPath, MAX_READINGS_LIMIT, WINDOW_SIDES, type CardAction, type CardRef, type CardSpec, type DataBinding, type DeltaName, type Display, type DisplayAs, type Label, type RepeatSpec, type WindowName } from './types'
 
 // ── Limits (ADR 0003 section 3, "The security whitelist") ─────────────────────────────────
 export const MAX_BODY_BYTES = 64 * 1024
@@ -70,7 +70,7 @@ export const DISPLAYS_FOR: Record<DataKind, readonly DisplayAs[]> = {
   proportion: ['percent', 'counts', 'bar'],
   cost: ['currency'],
   pair: ['counts'],
-  field: ['dateRange', 'datetime', 'badge', 'text', 'number', 'currency'],
+  field: ['dateRange', 'datetime', 'datetime-et', 'badge', 'text', 'number', 'currency'],
   time: ['date', 'ago'],
   code: ['status'],
 }
@@ -109,8 +109,15 @@ export function validateCard(spec: CardSpec): string[] {
   if (!Array.isArray(spec.sections) || !spec.sections.length) errors.push('card: needs at least one section')
   const checkLabel = (where: string, l: Label | undefined, hasData: boolean) => {
     if (l === undefined || typeof l === 'string') return
+    if ('bind' in l) checkScopePath(where, l.bind)
     if ('note' in l && !noteIdOk(l.note)) errors.push(`${where}: ${JSON.stringify(l.note) ?? 'undefined'} is not a note id`)
     if ('metric' in l && !hasData) errors.push(`${where}: { metric: true } needs a metric or ratio binding`)
+  }
+  // A reading's counts are an allow-list (types.ts READING_COUNT_FIELDS): any other
+  // `reading.count.*` path is refused, so a return / game-start / tutorial / tour total of a
+  // stored record can never be bound from a card.
+  const checkScopePath = (where: string, path: unknown) => {
+    if (typeof path === 'string' && path.startsWith('reading.count.') && !isReadingCountPath(path)) errors.push(`${where}: '${path}' is not a reading count a card may show`)
   }
   const checkNote = (where: string, id: unknown) => {
     if (!noteIdOk(id)) errors.push(`${where}: ${JSON.stringify(id) ?? 'undefined'} is not a note id`)
@@ -123,6 +130,9 @@ export function validateCard(spec: CardSpec): string[] {
       if (r.over === 'popups' && !POPUP_IDS.has(id)) errors.push(`${where}.repeat: unknown pop-up '${id}'`)
       if (r.over === 'countries' && !COUNTRY_IDS.has(id)) errors.push(`${where}.repeat: unknown country bucket '${id}'`)
       if (r.over === 'windows' && !(WINDOW_SIDES as readonly string[]).includes(id)) errors.push(`${where}.repeat: unknown window '${id}'`)
+    }
+    if (r.limit !== undefined && (r.over !== 'readings' || typeof r.limit !== 'number' || !Number.isInteger(r.limit) || r.limit < 1 || r.limit > MAX_READINGS_LIMIT)) {
+      errors.push(`${where}.repeat: limit is for readings, a whole number from 1 to ${MAX_READINGS_LIMIT}`)
     }
     if (r.tracked !== undefined && (r.tracked !== true || r.over !== 'campaigns')) errors.push(`${where}.repeat: tracked is for campaigns, and only true`)
     // The organic arm rides only on a campaigns repeat; bindings that don't serve it are left out
@@ -141,7 +151,7 @@ export function validateCard(spec: CardSpec): string[] {
     if (!k) return void errors.push(`${where}: unknown data id`)
     if (!DISPLAYS_FOR[k].includes(d.as)) errors.push(`${where}: display '${d.as}' not allowed for a ${k}`)
     if (d.as === 'percent' && d.decimals !== undefined && !(Number.isInteger(d.decimals) && d.decimals >= 0 && d.decimals <= 4)) errors.push(`${where}: decimals must be an integer from 0 to 4`)
-    if ('field' in b) return
+    if ('field' in b) return void checkScopePath(where, b.field)
     const isMetric = 'metric' in b
     const allowedParams = isMetric ? METRICS.get(b.metric)!.params : ratioParamsOf(RATIOS.get(b.ratio)!)
     const windows = isMetric ? metricWindows(METRICS.get(b.metric)!) : ratioWindowsOf(RATIOS.get(b.ratio)!)

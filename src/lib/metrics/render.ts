@@ -16,6 +16,7 @@
 import { getNote, NOTES_REGISTRY, noteRawText, noteTokens } from '../notes'
 import { etDateFromMs } from '../popupEvents'
 import { relativeTime } from '../adsFreshness'
+import { etDateTimeText } from '../adsReadingsFormat'
 import { tokenizeAndInterpolate, type TextToken } from '../textLite'
 import { METRICS, rulesOf, type MetricDef } from './metrics'
 import { RATIOS, type RatioDef } from './ratios'
@@ -313,6 +314,7 @@ function fieldViewModel(item: MetricItem, raw: string | null, labelTokens: TextT
     const n = Number(raw)
     return { visible: true, labelTokens, primary: Number.isFinite(n) ? fmtCount(n) : raw, deltaLines: [], captionTokens }
   }
+  if (display.as === 'datetime-et') return { visible: true, labelTokens, primary: etDateTimeText(raw), deltaLines: [], captionTokens }
   // 'datetime' | 'text': plain text, already textLite-safe by construction (scopeField never
   // returns markup — it reads config/registry data, never a beacon string).
   return { visible: true, labelTokens, primary: raw, deltaLines: [], captionTokens }

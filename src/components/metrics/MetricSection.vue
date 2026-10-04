@@ -91,11 +91,11 @@ const barMax = computed(() => {
 })
 
 // ── table, row repeat ────────────────────────────────────────────────────────────────────────
-const tableRows = computed<ScopeInstance[]>(() => (props.section.layout === 'table' && !isColumnTable.value ? resolveRepeat(props.section.repeat, props.ctx).map((r) => nestScope(r, props.outerScope)) : []))
+const tableRows = computed<ScopeInstance[]>(() => (props.section.layout === 'table' && !isColumnTable.value ? resolveRepeat(props.section.repeat, props.ctx, props.outerScope).map((r) => nestScope(r, props.outerScope)) : []))
 const tableHeaderTokens = computed(() => props.section.items.map((it) => itemLabelTokens(it, props.outerScope, props.ctx.todayEt)))
 
 // ── table, column repeat ─────────────────────────────────────────────────────────────────────
-const tableColumns = computed<ScopeInstance[]>(() => (isColumnTable.value ? resolveRepeat(props.section.columns, props.ctx).map((c) => nestScope(c, props.outerScope)) : []))
+const tableColumns = computed<ScopeInstance[]>(() => (isColumnTable.value ? resolveRepeat(props.section.columns, props.ctx, props.outerScope).map((c) => nestScope(c, props.outerScope)) : []))
 const columnHeaderTokens = computed(() => tableColumns.value.map((c) => resolveLabelTokens(props.section.columnLabel ?? columnDefaultLabel(c), c, undefined, props.ctx.todayEt)))
 const rowsHeaderTokens = computed(() => (props.section.rowsLabel !== undefined ? resolveLabelTokens(props.section.rowsLabel, props.outerScope, undefined, props.ctx.todayEt) : []))
 /** Each item row with its cells; a row whose every cell is gated out is left out. */
@@ -110,7 +110,12 @@ const anyVisible = computed(() => {
   if (isColumnTable.value) return columnRows.value.length > 0
   // A row table is shown while any of its data cells is (a field column, such as a row's own
   // name, never keeps it on its own): a gated-out segment table disappears whole.
-  if (props.section.layout === 'table') return flatItems.value.some((fi, i) => !('field' in fi.item.data) && visibleAt(i))
+  // A table with NO data column at all (a readings log: every column is a field of the row) is
+  // shown while any of its cells is: its rows, not a gated metric, are what it is.
+  if (props.section.layout === 'table') {
+    const fieldsOnly = props.section.items.every((it) => 'field' in it.data)
+    return flatItems.value.some((fi, i) => (fieldsOnly || !('field' in fi.item.data)) && visibleAt(i))
+  }
   return flatItems.value.some((_, i) => visibleAt(i))
 })
 </script>

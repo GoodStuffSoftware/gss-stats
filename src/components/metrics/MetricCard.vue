@@ -20,12 +20,16 @@
 // - its captions (CardSpec.captions): registry notes under the whole card.
 import { computed, effectScope, onBeforeUnmount, onMounted, onScopeDispose, reactive, ref, shallowRef, watch, type EffectScope } from 'vue'
 import { useMetrics, type MetricRequestSpec, type UseMetrics } from '../../composables/useMetrics'
-import { useReturnRefresh } from '../../composables/useReturnRefresh'
+import { isInFlight, isStale, useReturnRefresh } from '../../composables/useReturnRefresh'
+import { fetchAdsReadings } from '../../api'
+import { MAX_READINGS_LIMIT } from '../../lib/metrics/types'
+import { NO_READINGS, readingsLoadOf } from '../../lib/metrics/readingsScope'
+import type { AdsReadingsResponse } from '../../lib/adsStore'
 import { hasNote, noteRawText } from '../../lib/notes'
 import { resolveLabelTokens } from '../../lib/metrics/render'
 import { presetById } from '../../lib/metrics/presets'
 import { INVALID_CARD_PRESET } from '../../lib/metrics/validate'
-import { buildRequestSpec, campaignOfScope, narrowToCampaigns, ROOT_SCOPE, resolveRepeat, sectionCells, todayEtFrom, type ReadingScope, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
+import { buildRequestSpec, campaignOfScope, narrowToCampaigns, readingsLimitOf, repeatsOverReadings, ROOT_SCOPE, resolveRepeat, sectionCells, todayEtFrom, type ReadingScope, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
 import { CAMPAIGNS } from '../../lib/campaigns'
 import type { CardRef, CardSpec, MetricsContext } from '../../lib/metrics/types'
 import type { RefreshResult } from '../../lib/adsRefresh'
@@ -68,7 +72,58 @@ onBeforeUnmount(() => {
 useReturnRefresh(() => (clock.value = Date.now()))
 const nowMs = computed(() => props.nowMs ?? clock.value)
 const todayEt = computed(() => todayEtFrom(nowMs.value))
-const ctx = computed<RepeatContext>(() => ({ todayEt: todayEt.value, readings: props.readings }))
+
+// ── The ads readings load (ADR 0005 slice 3) ────────────────────────────────────────────────
+// A card that repeats over stored readings, or declares the ads-refresh action (its freshness
+// and fired-threshold fields come from the same endpoint), loads GET /api/ads/readings itself:
+// on mount, when its query changes, on the card reload, after an ads refresh and on return to
+// the tab. The `readings` prop stays as an override for the rows (tests, previews): when given,
+// a card that only needs the rows does not fetch.
+const wantsAds = computed(() => !!spec.value?.actions?.includes('ads-refresh'))
+const wantsReadings = computed(() => !!spec.value && repeatsOverReadings(spec.value))
+const loadsReadings = computed(() => wantsAds.value || (wantsReadings.value && props.readings === undefined))
+/** The most readings per campaign asked for; a card that needs only the freshness asks for one. */
+const readingsQuery = computed(() => {
+  const p = new URLSearchParams()
+  for (const id of props.campaignIds ?? []) p.append('campaignId', id)
+  const limit = spec.value && wantsReadings.value ? Math.min(readingsLimitOf(spec.value), MAX_READINGS_LIMIT) : 1
+  p.set('limit', String(limit))
+  return p.toString()
+})
+const readingsData = shallowRef<AdsReadingsResponse | null>(null)
+const readingsFailed = ref(false)
+let readingsReqId = 0 // a late answer to an older request must never overwrite a newer one
+let readingsStartedAt: number | null = null // the latest load start; null once it settles
+let readingsSettledAt: number | null = null
+// `background`: a refetch on return keeps what is on screen, and a failure leaves the last good data up.
+async function loadReadings(background = false) {
+  if (!loadsReadings.value) return
+  const my = ++readingsReqId
+  readingsStartedAt = Date.now()
+  try {
+    // Through api.ts so an expired session raises the re-sign-in banner (see withSessionCheck).
+    const r = await fetchAdsReadings(readingsQuery.value)
+    if (my !== readingsReqId) return
+    readingsData.value = r
+    readingsFailed.value = false
+  } catch {
+    if (my === readingsReqId && (!background || !readingsData.value)) readingsFailed.value = true
+  } finally {
+    if (my === readingsReqId) {
+      readingsStartedAt = null
+      readingsSettledAt = Date.now()
+    }
+  }
+}
+onMounted(() => void loadReadings())
+watch([readingsQuery, loadsReadings], () => void loadReadings())
+// The user came back to the tab: refetch if the last load is old enough and none is running.
+useReturnRefresh(() => {
+  if (!loadsReadings.value || isInFlight(readingsStartedAt) || !isStale(readingsSettledAt)) return
+  void loadReadings(true)
+})
+const readingsLoad = computed(() => (readingsData.value ? readingsLoadOf(readingsData.value) : NO_READINGS))
+const ctx = computed<RepeatContext>(() => ({ todayEt: todayEt.value, readings: props.readings ?? readingsLoad.value.readings, ads: readingsLoad.value.ads }))
 const instances = computed<ScopeInstance[]>(() => (spec.value ? narrowToCampaigns(resolveRepeat(spec.value.repeat, ctx.value), spec.value.repeat, props.campaignIds) : []))
 
 // ── Card-level requests (freshness, errors, reload) ─────────────────────────────────────────
@@ -109,10 +164,11 @@ onScopeDispose(() => dayScope?.stop())
  * calls this through the component ref too). */
 function reload() {
   cardMetrics.value?.reloadAll()
+  void loadReadings()
 }
 defineExpose({ reload })
 
-const hasError = computed(() => !!cardMetrics.value?.hasError.value)
+const hasError = computed(() => !!cardMetrics.value?.hasError.value || (loadsReadings.value && readingsFailed.value))
 const updatedPlacement = computed<'header' | 'footer' | null>(() => {
   const v = spec.value?.showUpdated
   return v === true ? 'header' : v === 'header' || v === 'footer' ? v : null
