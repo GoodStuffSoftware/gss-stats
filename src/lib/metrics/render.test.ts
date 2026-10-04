@@ -314,3 +314,27 @@ describe('value.noteIds — unsafe ids from the server are skipped, not crashed 
     expect(vm.captionTokens).toEqual([])
   })
 })
+
+describe('itemViewModel — retention verdict "maturing" shows its days left', () => {
+  const item: MetricItem = { id: 'verdict', label: 'Verdict', data: { metric: 'campaign.retentionVerdict' }, display: { as: 'status' } }
+  const maturing: MetricValue = { status: 'ok', value: 1, noteIds: ['verdict.maturing', 'bar.fixed-days'] }
+  const at = (todayEt: string, value: MetricValue = maturing, scope: ScopeInstance = activeScope) => itemViewModel(item, value, scope, { todayEt })
+  // ACTIVE_RETEST flightEnd is 2026-10-02, so its d2-7 window closes on 2026-10-10.
+  it('many days: "maturing (N days left)", whole ET days from the flight end', () => {
+    expect(at('2026-10-05').primary).toBe('maturing (5 days left)')
+    expect(at('2026-10-03').primary).toBe('maturing (7 days left)')
+  })
+  it('one day: "1 day left"', () => {
+    expect(at('2026-10-09').primary).toBe('maturing (1 day left)')
+  })
+  it('zero days or no campaign in scope: plain "maturing"', () => {
+    expect(at('2026-10-10').primary).toBe('maturing')
+    expect(at('2026-10-05', maturing, rootScope).primary).toBe('maturing')
+  })
+  it('other verdicts are untouched', () => {
+    expect(at('2026-10-05', { status: 'ok', value: 5, noteIds: ['verdict.go', 'bar.organic'] }).primary).toBe('GO')
+  })
+  it('does not repeat the status as a caption', () => {
+    expect(at('2026-10-05').captionTokens.map((t) => ('value' in t ? t.value : '')).join('')).not.toContain('maturing')
+  })
+})
