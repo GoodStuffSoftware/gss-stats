@@ -74,12 +74,12 @@ type Wrapped = { element: unknown }
 const sel = (s: Wrapped) => s.element as HTMLSelectElement
 const firstOption = (s: Wrapped) => sel(s).options[0]?.text ?? ''
 const isRepeatSelect = (s: Wrapped) => firstOption(s).startsWith('None — a single')
-const isInsertVar = (s: Wrapped) => firstOption(s).startsWith('+ Insert variable')
+const isInsertVar = (s: Wrapped) => firstOption(s).startsWith('Insert value')
 
 /** Every control, used without changing anything. */
 async function noOpPass(w: VueWrapper) {
   await expandAll(w)
-  // 1. Every select re-picks the value it shows (the "Insert variable" menu is an action, not a value).
+  // 1. Every select re-picks the value it shows (the "Insert value" menu is an action, not a value).
   for (const s of selects(w)) {
     if (isInsertVar(s) || sel(s).disabled) continue
     await s.setValue(sel(s).value)

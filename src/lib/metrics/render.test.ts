@@ -263,6 +263,11 @@ describe('resolveLabelTokens — every Label kind', () => {
     expect(tokens.map((t) => t.value).join('')).toBe(`Tagged arrivals — ${ACTIVE_RETEST.label}`)
   })
 
+  it('{=…} fills the fixed dates the card editor offers; a chart or metric path has nothing to read and shows the dash', () => {
+    const tokens = resolveLabelTokens('Live {=golive.web|date}, {=chart.total|number}, {=metric:bsk.pageviews@page|number}', activeScope, undefined, todayEt)
+    expect(tokens.map((t) => t.value).join('')).toMatch(/^Live [A-Z][a-z]{2} \d{1,2}, \d{4}, —, —$/)
+  })
+
   it('{ bind } reads a scope field as plain text', () => {
     const tokens = resolveLabelTokens({ bind: 'campaign.label' }, activeScope, undefined, todayEt)
     expect(tokens).toEqual([{ type: 'text', value: ACTIVE_RETEST.label }])

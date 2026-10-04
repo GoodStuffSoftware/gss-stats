@@ -276,3 +276,44 @@ describe('useMetrics — the epoch (client-only cache key part)', () => {
     scope.stop()
   })
 })
+
+describe('useMetrics — sites are part of the context key', () => {
+  const siteCtx = (sites: string[]): MetricsContext => ({ ...A, sites })
+  it('two widgets with different site overrides never share a value; the same sites in another order do', async () => {
+    const { fn, calls } = controllableFetch()
+    vi.stubGlobal('fetch', fn)
+    const scope = effectScope()
+    const [a, b, c] = scope.run(() => [
+      useMetrics(siteCtx(['bsk', 'play'])).request(spec),
+      useMetrics(siteCtx(['bsk'])).request(spec),
+      useMetrics(siteCtx(['play', 'bsk'])).request(spec),
+    ])!
+    await vi.advanceTimersByTimeAsync(15)
+    expect(calls).toHaveLength(2) // one per distinct site set: ['bsk','play'] and ['play','bsk'] are one
+    const sitesSent = calls.map((x) => [...(x.body.context?.sites ?? [])].sort().join('+')).sort()
+    expect(sitesSent).toEqual(['bsk', 'bsk+play'])
+    for (const call of calls) call.respond({ 'bsk.pageviews': (call.body.context?.sites?.length ?? 0) * 100 })
+    await settle()
+    expect(a.value?.value).toBe(200)
+    expect(c.value?.value).toBe(200)
+    expect(b.value?.value).toBe(100)
+    scope.stop()
+  })
+
+  it('changing only the sites (same range) refetches under the new sites', async () => {
+    const { fn, calls } = controllableFetch()
+    vi.stubGlobal('fetch', fn)
+    const ctx = ref<MetricsContext>(siteCtx(['bsk']))
+    const scope = effectScope()
+    const pv = scope.run(() => useMetrics(ctx).request(spec))!
+    await vi.advanceTimersByTimeAsync(15)
+    calls[0].respond({ 'bsk.pageviews': 1 })
+    await settle()
+    ctx.value = siteCtx(['bsk', 'play'])
+    expect(pv.value).toBeUndefined() // never the other sites' number
+    await vi.advanceTimersByTimeAsync(15)
+    expect(calls).toHaveLength(2)
+    expect(calls[1].body.context?.sites).toEqual(['bsk', 'play'])
+    scope.stop()
+  })
+})

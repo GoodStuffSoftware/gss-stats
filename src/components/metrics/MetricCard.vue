@@ -18,8 +18,9 @@
 // - its actions (CardSpec.actions): code-reviewed controls in the status row, e.g. the ads
 //   "Refresh data" button, which reloads the card once a sync ran;
 // - its captions (CardSpec.captions): registry notes under the whole card.
-import { computed, effectScope, onBeforeUnmount, onMounted, onScopeDispose, reactive, ref, shallowRef, watch, type EffectScope } from 'vue'
+import { computed, effectScope, onMounted, onScopeDispose, reactive, ref, shallowRef, watch, type EffectScope } from 'vue'
 import { useMetrics, type MetricRequestSpec, type UseMetrics } from '../../composables/useMetrics'
+import { useEtClock } from '../../composables/useEtClock'
 import { isInFlight, isStale, useReturnRefresh } from '../../composables/useReturnRefresh'
 import { fetchAdsReadings } from '../../api'
 import { MAX_READINGS_LIMIT } from '../../lib/metrics/types'
@@ -62,19 +63,9 @@ const emit = defineEmits<{ 'open-campaigns': [] }>()
 const spec = computed<CardSpec | null>(() => ('preset' in props.cardRef ? (presetById(props.cardRef.preset) ?? null) : props.cardRef.spec))
 
 // ── The clock: freshness text and the ET day ────────────────────────────────────────────────
-const clock = ref(Date.now())
-let ticker: ReturnType<typeof setInterval> | null = null
-onMounted(() => {
-  ticker = setInterval(() => (clock.value = Date.now()), 15_000)
-})
-onBeforeUnmount(() => {
-  if (ticker) clearInterval(ticker)
-})
-// A tab that slept past midnight ET has not ticked, so on return the clock still says yesterday:
-// the return refetch would re-queue yesterday's entries and the next tick would then re-plan under
-// the new day. Moving the clock here first makes the day watcher re-plan before the queued batch
-// flushes (releasing the old keys drops them from it), so only the new day's POST goes out.
-useReturnRefresh(() => (clock.value = Date.now()))
+// Shared with the metric value tokens (composables/useEtClock.ts has the 15 s tick and why a tab
+// that slept past midnight is moved on return, before the return refetch).
+const clock = useEtClock()
 const nowMs = computed(() => props.nowMs ?? clock.value)
 const todayEt = computed(() => todayEtFrom(nowMs.value))
 

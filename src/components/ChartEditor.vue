@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, computed, watch, onMounted, onBeforeUnmount, ref, useId } from 'vue'
+import { reactive, computed, watch, onMounted, onBeforeUnmount, nextTick, ref, useId } from 'vue'
 import { rateTileHasHideableNote } from '../lib/metrics/rateTileCard'
 import type { Widget, LineSeries, GlobalFilters, StatsResponse } from '../types'
 import {
@@ -23,14 +23,18 @@ import { BEST_SUDOKU_SITES, CAPTION_MAX_CHARS, HIDDEN_CAVEATS_MAX, HIDDEN_CAVEAT
 import { getNote, isStaticCaptionNote, libraryCaptionOptions, noteRawText, noteTemplate } from '../lib/notes'
 import { allChartNotes, canHideCaveatId, convertLegacyNotes, isChartNoteHidden, type ChartNote } from '../lib/chartNotes'
 import { toPlainText, VALUE_TOKEN_RE } from '../lib/textLite'
-import { chartValueResolver, VALUE_TOKEN_OPTIONS } from '../lib/valueTokens'
+import { chartValues, globalValues, resolveValueToken, VALUE_TOKEN_OPTIONS, type TokenValues } from '../lib/valueTokens'
+import { metricRequestSpec, metricTokenOptions, metricTokenValue } from '../lib/metricValueTokens'
+import { peekMetricValue } from '../composables/useMetrics'
+import { useEtClock } from '../composables/useEtClock'
+import InsertPicker, { type InsertGroup } from './InsertPicker.vue'
 import { canFit, setFit } from '../lib/fit'
 import { rendersOwnBody } from '../lib/charts'
 import CardEditor from './metrics/CardEditor.vue'
 import { metricsContextFor } from '../lib/metrics/pageContext'
 import { presetById } from '../lib/metrics/presets'
 import { ADS_READINGS_LOG_PRESET } from '../lib/metrics/readingsCard'
-import { selectsCampaigns } from '../lib/metrics/scope'
+import { selectsCampaigns, todayEtFrom } from '../lib/metrics/scope'
 import { resolveSelection } from '../sitesStore'
 import type { MetricsContext } from '../lib/metrics/types'
 
@@ -219,10 +223,22 @@ function sayCaptionFull() {
   captionFull.value = true
   captionFullTick.value++
 }
-function insertFromLibrary(t: TextTarget, e: Event) {
-  const sel = e.target as HTMLSelectElement
-  const id = sel.value
-  sel.value = ''
+/** The two text boxes an Insert button can put text into. After an Insert (or a refused one) the
+ * button is disabled, so focus goes back to the box: the author keeps typing, and Escape and the
+ * Tab trap (the dialog's keydown listener) keep working, which they stop doing once focus has
+ * left the panel. */
+const captionEl = ref<HTMLTextAreaElement | null>(null)
+const noteEl = ref<HTMLTextAreaElement | null>(null)
+function focusText(t: TextTarget, start: number, end: number = start) {
+  void nextTick(() => {
+    const el = (t === 'caption' ? captionEl : noteEl).value
+    if (!el) return
+    el.focus()
+    const max = el.value.length
+    el.setSelectionRange(Math.min(start, max), Math.min(end, max))
+  })
+}
+function insertFromLibrary(t: TextTarget, id: string) {
   const text = id ? noteTemplate(id).trim() : ''
   if (!text) return
   if (t === 'caption') captionFull.value = false
@@ -248,35 +264,48 @@ function insertFromLibrary(t: TextTarget, e: Event) {
   }
   end = Math.min(end, next.length)
   caret[t] = { start: end, end }
+  focusText(t, end)
 }
 
-// ── "Insert value ▾" (notes plan, slice 1d release 1): puts a `{=…}` value token (grammar:
-// lib/valueTokens.ts) into the caption at the cursor, replacing any selection; a box never focused
-// gets it appended. Each option shows what it reads right now, from the response already loaded
-// (no fetch). A token that would not fit whole under CAPTION_MAX_CHARS is not inserted, and the
-// box says the caption is full. A widget that renders its own body (a metric card, overview,
-// campaigns, ads-readings, a pop-up rate tile, a note: lib/charts.ts rendersOwnBody, the test ChartCard skips its fetch on)
-// loads no response a chart value could read, so it gets the Dates group only (review N2, NIT-1).
-const VALUE_GROUPS = ['This chart', 'Dates'] as const
-const valueOptions = computed(() => {
-  const resolve = chartValueResolver(props.widget, props.data ?? null, props.error ?? null)
-  const groups = VALUE_GROUPS.filter((g) => g !== 'This chart' || !rendersOwnBody(draft))
-  return groups.map((group) => ({
-    group,
-    options: VALUE_TOKEN_OPTIONS.filter((o) => o.group === group).map((o) => {
-      const now = resolve(o.token)
-      return { token: o.token, label: now ? `${o.label} (${now})` : o.label }
-    }),
-  }))
+// ── "Insert value" (notes plan, slice 1d): puts a `{=…}` value token (grammar: lib/valueTokens.ts)
+// into the caption or a note widget's text at the cursor, replacing any selection; a box never
+// focused gets it appended. Insertion is an explicit choice (the Insert button of InsertPicker.vue,
+// not the select's own change: review N3). Each option shows what it reads right now: `chart.*`
+// from the response already loaded, the dates from the build, and a metric from a value the page
+// ALREADY holds for this widget's page context (peekMetricValue; nothing is fetched to label an
+// option, so a metric nothing has loaded shows its name alone). A token that would not fit whole
+// under CAPTION_MAX_CHARS is not inserted, and the box says the caption is full. A widget that
+// renders its own body (a metric card, overview, campaigns, ads-readings: lib/charts.ts
+// rendersOwnBody, the test ChartCard skips its fetch on; a pop-up rate tile is one since #80) loads no response a chart value could
+// read, so it gets no "This chart" group (review N2, NIT-1); a note widget never does (`chart.*` is
+// "—" there), and takes Dates and Metrics.
+const metricOptionList = metricTokenOptions()
+const etClock = useEtClock() // the day the cards' (and the captions') values are keyed by
+const valueOptions = computed<InsertGroup[]>(() => {
+  const table: TokenValues = { ...globalValues(), ...(isNote.value ? {} : chartValues(props.widget, props.data ?? null, props.error ?? null)) }
+  const epoch = todayEtFrom(etClock.value)
+  for (const o of metricOptionList) table[o.ref.path] = metricTokenValue(o.ref, peekMetricValue(metricRequestSpec(o.ref), cardContext.value, epoch))
+  const groups: Array<'This chart' | 'Dates' | 'Metrics'> = ['This chart', 'Dates', 'Metrics']
+  const all = [...VALUE_TOKEN_OPTIONS, ...metricOptionList]
+  return groups
+    .filter((g) => g !== 'This chart' || (!isNote.value && !rendersOwnBody(draft)))
+    .map((group) => ({
+      group,
+      options: all
+        .filter((o) => o.group === group)
+        .map((o) => {
+          const now = resolveValueToken(o.token, table)
+          return { value: o.token, label: now ? `${o.label} (${now})` : o.label }
+        }),
+    }))
 })
-function insertValue(e: Event) {
-  const sel = e.target as HTMLSelectElement
-  const token = sel.value
-  sel.value = ''
+const libraryGroups = computed<InsertGroup[]>(() => [{ group: '', options: LIBRARY_OPTIONS.map((o) => ({ value: o.value, label: o.label })) }])
+function insertValue(t: TextTarget, token: string) {
   if (!token) return
-  captionFull.value = false
-  const cur = draft.caption ?? ''
-  const at = caret.caption && caretOutsideTokens(cur, caret.caption)
+  if (t === 'caption') captionFull.value = false
+  const cur = (t === 'caption' ? draft.caption : draft.note) ?? ''
+  const saved = caret[t]
+  const at = saved && caretOutsideTokens(cur, saved)
   let next: string
   let end: number
   if (at && at.start <= cur.length) {
@@ -286,12 +315,20 @@ function insertValue(e: Event) {
     next = cur && !/\s$/.test(cur) ? `${cur} ${token}` : cur + token
     end = next.length
   }
-  if (next.length > CAPTION_MAX_CHARS) {
-    sayCaptionFull()
-    return
+  if (t === 'caption') {
+    if (next.length > CAPTION_MAX_CHARS) {
+      sayCaptionFull()
+      // Refused: the text is as it was, so focus goes back with the selection it had.
+      const kept = saved && saved.start <= cur.length ? { start: saved.start, end: Math.min(saved.end, cur.length) } : { start: cur.length, end: cur.length }
+      focusText(t, kept.start, kept.end)
+      return
+    }
+    captionValue.value = next
+  } else {
+    draft.note = next
   }
-  captionValue.value = next
-  caret.caption = { start: end, end }
+  caret[t] = { start: end, end }
+  focusText(t, end)
 }
 
 // The "Data caveats" rows: allChartNotes minus the caption itself, plus any id this chart hides
@@ -716,6 +753,8 @@ function save() {
         <!-- "Add chart" → "Metric card" (ADR 0003, phase B): reusable, configurable stat/table
              cards, distinct from the fixed chart types above — see CardEditor.vue. -->
         <div class="field" v-if="!isNote">
+          <!-- Rate is not a chart type for a new chart (ADR 0005 slice 5), so say where a pop-up rate went. -->
+          <p v-if="!typeChoices.some((t) => t.value === 'rate')" class="hint" data-testid="rate-signpost">For a pop-up rate, make this a metric card, then pick the "Pop-up rates" preset.</p>
           <button type="button" class="btn" @click="makeCardWidget">Make this a metric card instead</button>
         </div>
       </template>
@@ -759,12 +798,12 @@ function save() {
         </div>
         <div class="field note-text" v-else>
           <label :for="noteTextFieldId">Note text</label>
-          <textarea :id="noteTextFieldId" v-model="draft.note" rows="4" placeholder="Caveat / note shown on the tile" @blur="rememberCaret('note', $event)" />
-          <select class="insert-library" aria-label="Insert from library" @change="insertFromLibrary('note', $event)">
-            <option value="">Insert from library…</option>
-            <option v-for="o in LIBRARY_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
-          </select>
-          <p class="hint">**bold** and [links](https://…) work; a blank line starts a new paragraph.</p>
+          <textarea :id="noteTextFieldId" ref="noteEl" v-model="draft.note" rows="4" placeholder="Caveat / note shown on the tile" @blur="rememberCaret('note', $event)" />
+          <div class="caption-tools">
+            <InsertPicker label="Insert from library" placeholder="Insert from library…" select-class="insert-library" :groups="libraryGroups" @insert="insertFromLibrary('note', $event)" />
+            <InsertPicker label="Insert value" placeholder="Insert value ▾" select-class="insert-value" :groups="valueOptions" @insert="insertValue('note', $event)" />
+          </div>
+          <p class="hint">**bold** and [links](https://…) work; a blank line starts a new paragraph. Insert value adds a live date or catalog number, such as {=release.latest|date}; it shows "—" when there is no value for it.</p>
         </div>
         <div class="field check">
           <label>
@@ -779,22 +818,14 @@ function save() {
       <template v-if="!isNote">
         <div class="field caption-field">
           <label :for="captionFieldId">Caption <span class="hint">— shown under the chart</span></label>
-          <textarea :id="captionFieldId" v-model="captionValue" rows="3" :maxlength="CAPTION_MAX_CHARS" @blur="rememberCaret('caption', $event)" @input="captionFull = false" />
+          <textarea :id="captionFieldId" ref="captionEl" v-model="captionValue" rows="3" :maxlength="CAPTION_MAX_CHARS" @blur="rememberCaret('caption', $event)" @input="captionFull = false" />
           <div class="caption-tools">
-            <select class="insert-library" aria-label="Insert from library" @change="insertFromLibrary('caption', $event)">
-              <option value="">Insert from library…</option>
-              <option v-for="o in LIBRARY_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
-            </select>
-            <select class="insert-value" aria-label="Insert value" @change="insertValue">
-              <option value="">Insert value ▾</option>
-              <optgroup v-for="g in valueOptions" :key="g.group" :label="g.group">
-                <option v-for="o in g.options" :key="o.token" :value="o.token">{{ o.label }}</option>
-              </optgroup>
-            </select>
+            <InsertPicker label="Insert from library" placeholder="Insert from library…" select-class="insert-library" :groups="libraryGroups" @insert="insertFromLibrary('caption', $event)" />
+            <InsertPicker label="Insert value" placeholder="Insert value ▾" select-class="insert-value" :groups="valueOptions" @insert="insertValue('caption', $event)" />
             <span class="hint caption-count">{{ captionValue.length }} / {{ CAPTION_MAX_CHARS }}</span>
             <span class="hint caption-full" aria-live="polite"><span v-if="captionFull" :key="captionFullTick">Caption is full</span></span>
           </div>
-          <p class="hint">**bold** and [links](https://…) work; a blank line starts a new paragraph. Insert value adds a live number or date, such as {=chart.total|number}; it shows "—" when there is no value for it.</p>
+          <p class="hint">**bold** and [links](https://…) work; a blank line starts a new paragraph. Insert value adds a live number or date, such as {=chart.total|number} or a catalog metric; it shows "—" when there is no value for it.</p>
           <p v-if="convertedNoteIds.length" class="hint caption-converted">The library captions this chart had are now part of its caption text. Save keeps that; Cancel leaves the chart as it was.</p>
         </div>
         <div class="field data-caveats">
@@ -1177,10 +1208,6 @@ h2 {
   display: flex;
   align-items: center;
   gap: 10px;
-}
-.caption-tools select {
-  flex: 1;
-  width: auto;
 }
 .caption-count {
   flex: none;

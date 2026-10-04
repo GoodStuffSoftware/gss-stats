@@ -18,6 +18,7 @@ import { etDateFromMs } from '../popupEvents'
 import { relativeTime } from '../adsFreshness'
 import { etDateTimeText } from '../adsReadingsFormat'
 import { tokenizeAndInterpolate, type TextToken } from '../textLite'
+import { globalValueResolver } from '../valueTokens'
 import { armMaturity, METRICS, rulesOf, type MetricDef } from './metrics'
 import { RATIOS, type RatioDef } from './ratios'
 import { campaignOfScope, configRuling, resolveBinding, scopeField, scopeTone, scopeVars, unmeasuredByConfig, type ScopeInstance } from './scope'
@@ -74,7 +75,9 @@ export interface ItemViewOptions {
 
 // ── Label resolution (ADR section 1, "Labels") ────────────────────────────────────────────
 export function resolveLabelTokens(label: Label, scope: ScopeInstance, metricLabelId: string | undefined, todayEt: string): TextToken[] {
-  if (typeof label === 'string') return tokenizeAndInterpolate(label, scopeVars(scope, todayEt))
+  // `{=…}` takes the fixed dates (release.*, golive.*, play.*): the card editor's Insert value
+  // offers them. Chart and metric values need a chart or a fetch a card label has none of: "—".
+  if (typeof label === 'string') return tokenizeAndInterpolate(label, scopeVars(scope, todayEt), globalValueResolver())
   if ('note' in label) {
     // An id this build's registry doesn't know (a newer build's, or a retired one) is stored
     // as-is (validateCard checks only its shape) and shows nothing — never the raw id.
