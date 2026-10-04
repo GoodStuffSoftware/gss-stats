@@ -22,6 +22,7 @@ import { BEST_SUDOKU_SITES, CAPTION_MAX_CHARS, HIDDEN_CAVEATS_MAX, HIDDEN_CAVEAT
 import { getNote, isStaticCaptionNote, libraryCaptionOptions, noteRawText, noteTemplate } from '../lib/notes'
 import { allChartNotes, canHideCaveatId, convertLegacyNotes, isChartNoteHidden, type ChartNote } from '../lib/chartNotes'
 import { toPlainText } from '../lib/textLite'
+import { chartValueResolver, VALUE_TOKEN_OPTIONS } from '../lib/valueTokens'
 import { canFit, setFit } from '../lib/fit'
 import CardEditor from './metrics/CardEditor.vue'
 import { metricsContextFor } from '../lib/metrics/pageContext'
@@ -213,6 +214,42 @@ function insertFromLibrary(t: TextTarget, e: Event) {
   }
   end = Math.min(end, next.length)
   caret[t] = { start: end, end }
+}
+
+// ── "Insert value ▾" (notes plan, slice 1d release 1): puts a `{=…}` value token (grammar:
+// lib/valueTokens.ts) into the caption at the cursor, replacing any selection; a box never focused
+// gets it appended. Each option shows what it reads right now, from the response already loaded
+// (no fetch). A token that would not fit whole under CAPTION_MAX_CHARS is not inserted. ─────────
+const VALUE_GROUPS = ['This chart', 'Dates'] as const
+const valueOptions = computed(() => {
+  const resolve = chartValueResolver(props.widget, props.data ?? null, props.error ?? null)
+  return VALUE_GROUPS.map((group) => ({
+    group,
+    options: VALUE_TOKEN_OPTIONS.filter((o) => o.group === group).map((o) => {
+      const now = resolve(o.token)
+      return { token: o.token, label: now ? `${o.label} (${now})` : o.label }
+    }),
+  }))
+})
+function insertValue(e: Event) {
+  const sel = e.target as HTMLSelectElement
+  const token = sel.value
+  sel.value = ''
+  if (!token) return
+  const cur = draft.caption ?? ''
+  const at = caret.caption
+  let next: string
+  let end: number
+  if (at && at.start <= cur.length) {
+    next = cur.slice(0, at.start) + token + cur.slice(Math.max(at.start, Math.min(at.end, cur.length)))
+    end = at.start + token.length
+  } else {
+    next = cur && !/\s$/.test(cur) ? `${cur} ${token}` : cur + token
+    end = next.length
+  }
+  if (next.length > CAPTION_MAX_CHARS) return
+  captionValue.value = next
+  caret.caption = { start: end, end }
 }
 
 // The "Data caveats" rows: allChartNotes minus the caption itself, plus any id this chart hides
@@ -690,9 +727,15 @@ function save() {
               <option value="">Insert from library…</option>
               <option v-for="o in LIBRARY_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
             </select>
+            <select class="insert-value" aria-label="Insert value" @change="insertValue">
+              <option value="">Insert value ▾</option>
+              <optgroup v-for="g in valueOptions" :key="g.group" :label="g.group">
+                <option v-for="o in g.options" :key="o.token" :value="o.token">{{ o.label }}</option>
+              </optgroup>
+            </select>
             <span class="hint caption-count">{{ captionValue.length }} / {{ CAPTION_MAX_CHARS }}</span>
           </div>
-          <p class="hint">**bold** and [links](https://…) work; a blank line starts a new paragraph. A value token such as {=…} shows "—" for now.</p>
+          <p class="hint">**bold** and [links](https://…) work; a blank line starts a new paragraph. Insert value adds a live number or date, such as {=chart.total|number}; it shows "—" when there is no value for it.</p>
           <p v-if="convertedNoteIds.length" class="hint caption-converted">The library captions this chart had are now part of its caption text. Save keeps that; Cancel leaves the chart as it was.</p>
         </div>
         <div class="field data-caveats">

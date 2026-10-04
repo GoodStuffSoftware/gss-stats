@@ -24,6 +24,7 @@ import AdsReadingsWidgetCard from './widgets/AdsReadingsWidgetCard.vue'
 import NoteBlock from './NoteBlock.vue'
 import { noteRawText } from '../lib/notes'
 import { chartNotes } from '../lib/chartNotes'
+import { chartValueResolver } from '../lib/valueTokens'
 
 const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolean; drillOpen: boolean; forceControls?: boolean }>()
 
@@ -255,6 +256,10 @@ let reqId = 0
 // response's own notes, and the range notice (the server cut the range down to what the data
 // source allows; runtime only, never saved).
 const notes = computed(() => chartNotes(props.widget, data.value, error.value))
+// `{=…}` value tokens in the caption (lib/valueTokens.ts): filled from this chart's own response
+// and the fixed dates, never a fetch. Only the widget's own caption takes them; every other note
+// shows "—" for a token.
+const captionValues = computed(() => chartValueResolver(props.widget, data.value, error.value))
 watch([data, error], () => emit('data', data.value, error.value))
 
 // Per-chart filter override: use widget.filters if set, else the global filter.
@@ -653,6 +658,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
         :note-id="n.noteId"
         :text="n.text"
         :severity="n.severity"
+        :values="n.key === 'caption' ? captionValues : undefined"
         :class="{ 'range-notice': n.key === 'range-notice' }"
         :data-testid="n.key === 'range-notice' ? 'range-notice' : undefined"
       />

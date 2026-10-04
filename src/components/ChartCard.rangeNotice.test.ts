@@ -119,8 +119,9 @@ describe('ChartCard — range notice', () => {
   })
 })
 
-// Slice 1c: the widget's own caption comes first in the card's notes, a value token shows "—"
-// until the token picker lands, and hiddenCaveats hides a hideable caveat but never a data-cut one.
+// Slice 1c: the widget's own caption comes first in the card's notes, an unknown value token shows
+// "—" (filled tokens: ChartCard.valueTokens.test.ts), and hiddenCaveats hides a hideable caveat but
+// never a data-cut one.
 describe('ChartCard — caption and hidden caveats (1c)', () => {
   const mountWith = async (over: Partial<Widget>) => {
     const w = mount(ChartCard, { props: { widget: { ...widget, ...over }, filters, dark: false, drillOpen: false } })

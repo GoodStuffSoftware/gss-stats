@@ -1,0 +1,217 @@
+// Value tokens (notes plan slice 1d, release 1): the `{=…}` grammar, the formats, the chart's own
+// values and the fixed dates. The injection boundary is tested where tokens render
+// (textLite.test.ts) and the card render in ChartCard.valueTokens.test.ts.
+import { describe, expect, it } from 'vitest'
+import type { StatsResponse, Widget } from '../types'
+import {
+  VALUE_TOKEN_OPTIONS,
+  chartValueResolver,
+  chartValues,
+  formatDateYmd,
+  formatValue,
+  globalValues,
+  parseValueToken,
+  resolveValueToken,
+  type TokenValues,
+} from './valueTokens'
+import { datedReleases, newest } from './releases'
+import { PLAY_TRACKING_ACTIVATION_DATE_ET, TRACKING_ACTIVATION_DATE_ET } from './popupEvents'
+
+const widget = (over: Partial<Widget> = {}): Widget =>
+  ({ id: 'w', i: 'w', title: 'T', type: 'bar', dataset: 'geo', dimension: 'country', metric: 'pageviews', limit: 10, x: 0, y: 0, w: 6, h: 6, ...over }) as Widget
+
+const response = (over: Partial<StatsResponse> = {}): StatsResponse =>
+  ({
+    rows: [
+      { key: { country: 'US' }, pageviews: 600, visits: 300 },
+      { key: { country: 'CA' }, pageviews: 250, visits: 400 },
+      { key: { country: 'US' }, pageviews: 150, visits: 10 },
+    ],
+    totals: { pageviews: 1000, visits: 710 },
+    meta: { site: 'all', host: null, since: '2026-09-01T00:00:00.000Z', until: '2026-09-30T23:59:59.999Z', dimensions: ['country'], metric: 'pageviews' },
+    ...over,
+  }) as StatsResponse
+
+describe('parseValueToken', () => {
+  it('reads a path alone and a path with a format', () => {
+    expect(parseValueToken('{=chart.total}')).toEqual({ path: 'chart.total', format: null })
+    expect(parseValueToken('{=chart.total|number}')).toEqual({ path: 'chart.total', format: 'number' })
+    expect(parseValueToken('{=chart.topShare|pct}')).toEqual({ path: 'chart.topShare', format: 'pct' })
+    expect(parseValueToken('{=golive.web|date}')).toEqual({ path: 'golive.web', format: 'date' })
+  })
+
+  it('ignores spaces around the path, the bar and the format, and the format case', () => {
+    expect(parseValueToken('{= chart.total | NUMBER }')).toEqual({ path: 'chart.total', format: 'number' })
+  })
+
+  it('parses a release-2 metric path today (so saved text keeps its meaning later)', () => {
+    expect(parseValueToken('{=metric:returns@7d|number}')).toEqual({ path: 'metric:returns@7d', format: 'number' })
+  })
+
+  it('refuses malformed tokens', () => {
+    for (const bad of ['{=}', '{= }', '{=chart total}', '{=chart.total|}', '{=chart.total|money}', '{=a|number|pct}', 'chart.total', '{chart.total}', '{=**x**}', '{=[a](https://x)}', '{=a}b']) {
+      expect(parseValueToken(bad)).toBeNull()
+    }
+  })
+})
+
+describe('formats', () => {
+  it('number: en-US grouping', () => {
+    expect(formatValue({ kind: 'number', value: 1234567 })).toBe('1,234,567')
+    expect(formatValue({ kind: 'number', value: 0 })).toBe('0')
+  })
+  it('pct: a 0..1 share with one decimal', () => {
+    expect(formatValue({ kind: 'share', value: 0.75 })).toBe('75.0%')
+    expect(formatValue({ kind: 'share', value: 1 / 3 })).toBe('33.3%')
+  })
+  it('date: month, day and year, from the calendar day as written', () => {
+    expect(formatDateYmd('2026-10-03')).toBe('Oct 3, 2026')
+    expect(formatValue({ kind: 'date', value: '2026-01-31' })).toBe('Jan 31, 2026')
+    expect(formatDateYmd('2026-02-31')).toBeNull()
+    expect(formatDateYmd('2026-10-03T00:00:00Z')).toBeNull()
+  })
+  it('text: as it is', () => {
+    expect(formatValue({ kind: 'text', value: 'v1.98.0' })).toBe('v1.98.0')
+  })
+  it('missing or wrong-typed values are null', () => {
+    expect(formatValue({ kind: 'number', value: null })).toBeNull()
+    expect(formatValue({ kind: 'number', value: NaN })).toBeNull()
+    expect(formatValue({ kind: 'number', value: '12' })).toBeNull()
+    expect(formatValue({ kind: 'date', value: 5 })).toBeNull()
+    expect(formatValue({ kind: 'text', value: '' })).toBeNull()
+  })
+})
+
+describe('resolveValueToken', () => {
+  const values: TokenValues = {
+    n: { kind: 'number', value: 4200 },
+    s: { kind: 'share', value: 0.125 },
+    d: { kind: 'date', value: '2026-09-26' },
+    t: { kind: 'text', value: 'Canada' },
+    gone: { kind: 'number', value: null },
+  }
+  it('each kind in its own format, with or without naming it', () => {
+    expect(resolveValueToken('{=n}', values)).toBe('4,200')
+    expect(resolveValueToken('{=n|number}', values)).toBe('4,200')
+    expect(resolveValueToken('{=s}', values)).toBe('12.5%')
+    expect(resolveValueToken('{=s|pct}', values)).toBe('12.5%')
+    expect(resolveValueToken('{=d}', values)).toBe('Sep 26, 2026')
+    expect(resolveValueToken('{=d|date}', values)).toBe('Sep 26, 2026')
+    expect(resolveValueToken('{=t}', values)).toBe('Canada')
+  })
+  it('a format that does not fit the kind is null', () => {
+    expect(resolveValueToken('{=n|pct}', values)).toBeNull()
+    expect(resolveValueToken('{=n|date}', values)).toBeNull()
+    expect(resolveValueToken('{=d|number}', values)).toBeNull()
+    expect(resolveValueToken('{=t|number}', values)).toBeNull()
+  })
+  it('missing data, an unknown path and a malformed token are null', () => {
+    expect(resolveValueToken('{=gone}', values)).toBeNull()
+    expect(resolveValueToken('{=nope}', values)).toBeNull()
+    expect(resolveValueToken('{=metric:returns@7d|number}', values)).toBeNull()
+    expect(resolveValueToken('{=n|money}', values)).toBeNull()
+    expect(resolveValueToken('{=toString}', values)).toBeNull() // no prototype lookups
+    expect(resolveValueToken('{=__proto__}', values)).toBeNull()
+  })
+})
+
+describe('chartValues', () => {
+  it('total, top item (summed across rows), its count and share, and the days shown', () => {
+    const v = chartValues(widget(), response())
+    expect(v['chart.total'].value).toBe(1000)
+    expect(v['chart.top'].value).toBe('United States')
+    expect(v['chart.topValue'].value).toBe(750)
+    expect(v['chart.topShare'].value).toBe(0.75)
+    expect(v['chart.from'].value).toBe('2026-09-01')
+    expect(v['chart.to'].value).toBe('2026-09-30')
+  })
+
+  it("uses the chart's metric", () => {
+    const v = chartValues(widget({ metric: 'visits' }), response())
+    expect(v['chart.total'].value).toBe(710)
+    expect(v['chart.top'].value).toBe('Canada')
+    expect(v['chart.topValue'].value).toBe(400)
+  })
+
+  it('a cut range: the served days, the last one being the day before the exclusive end (ET)', () => {
+    const notice = {
+      kind: 'range-clamped' as const,
+      source: 'cf-rum' as const,
+      reason: 'lookback' as const,
+      requested: { from: '2026-01-01T05:00:00.000Z', to: '2026-10-01T04:00:00.000Z' },
+      served: { from: '2026-07-01T04:00:00.000Z', to: '2026-10-01T04:00:00.000Z' },
+      limitDays: 93,
+      lookbackDays: 184,
+    }
+    const v = chartValues(widget(), response({ notice }))
+    expect(v['chart.from'].value).toBe('2026-07-01')
+    expect(v['chart.to'].value).toBe('2026-09-30')
+    const utc = chartValues(widget(), response({ notice: { ...notice, dayZone: 'utc', served: { from: '2026-07-01T00:00:00.000Z', to: '2026-10-01T00:00:00.000Z' } } }))
+    expect(utc['chart.from'].value).toBe('2026-07-01')
+    expect(utc['chart.to'].value).toBe('2026-09-30')
+    const none = chartValues(widget(), response({ notice: { ...notice, reason: 'outside-lookback', served: null } }))
+    expect(none['chart.from'].value).toBeNull()
+  })
+
+  it('no response or an error: every chart value is missing', () => {
+    for (const v of [chartValues(widget(), null), chartValues(widget(), response(), 'stats 502')]) {
+      expect(Object.values(v).every((x) => x.value === null)).toBe(true)
+    }
+  })
+
+  it('no rows: the total (0) but no top item or share', () => {
+    const v = chartValues(widget(), response({ rows: [], totals: { pageviews: 0, visits: 0 } }))
+    expect(v['chart.total'].value).toBe(0)
+    expect(v['chart.top'].value).toBeNull()
+    expect(v['chart.topShare'].value).toBeNull()
+  })
+
+  it('a zero total has no share; a chart without a dimension has no top item', () => {
+    const zero = chartValues(widget(), response({ rows: [{ key: { country: 'US' }, pageviews: 0, visits: 0 }], totals: { pageviews: 0, visits: 0 } }))
+    expect(zero['chart.top'].value).toBe('United States')
+    expect(zero['chart.topShare'].value).toBeNull()
+    const stat = chartValues(widget({ type: 'stat', dimension: '' }), response())
+    expect(stat['chart.total'].value).toBe(1000)
+    expect(stat['chart.top'].value).toBeNull()
+  })
+
+  it('a rate tile and a multi-series line chart have no single total or top item, only dates', () => {
+    const rate = chartValues(widget({ type: 'rate', dataset: 'popup' }), response())
+    expect(rate['chart.total'].value).toBeNull()
+    expect(rate['chart.from'].value).toBe('2026-09-01')
+    const series = chartValues(widget({ type: 'line', dimension: 'date', series: [{ label: 'a' }] as Widget['series'] }), response())
+    expect(series['chart.total'].value).toBeNull()
+    expect(series['chart.top'].value).toBeNull()
+    expect(series['chart.to'].value).toBe('2026-09-30')
+  })
+})
+
+describe('fixed dates', () => {
+  it('the newest release and the go-live days', () => {
+    const latest = newest(datedReleases())!
+    const g = globalValues()
+    expect(g['release.latest'].value).toBe(latest.dateEt)
+    expect(g['release.latestVersion'].value).toBe(latest.version)
+    expect(g['golive.web'].value).toBe(TRACKING_ACTIVATION_DATE_ET)
+    expect(g['golive.play'].value).toBe(PLAY_TRACKING_ACTIVATION_DATE_ET)
+  })
+
+  it('resolve on any chart, even one with no data', () => {
+    const r = chartValueResolver(widget(), null)
+    expect(r(`{=golive.web|date}`)).toBe(formatDateYmd(TRACKING_ACTIVATION_DATE_ET!))
+    expect(r('{=chart.total}')).toBeNull()
+  })
+})
+
+describe('the Insert value menu', () => {
+  it('every option is a well-formed token whose path the resolver knows', () => {
+    const known = new Set([...Object.keys(globalValues()), ...Object.keys(chartValues(widget(), null))])
+    for (const o of VALUE_TOKEN_OPTIONS) {
+      const t = parseValueToken(o.token)
+      expect(t, o.token).not.toBeNull()
+      expect(known.has(t!.path), o.token).toBe(true)
+    }
+    const r = chartValueResolver(widget(), response())
+    expect(VALUE_TOKEN_OPTIONS.every((o) => r(o.token) !== null)).toBe(true)
+  })
+})
