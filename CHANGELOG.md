@@ -10,6 +10,27 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **Ads readings log is a metric card** — the readings log now renders from the shared card engine, so it can be edited, repeated and fitted like any card; existing dashboards need no change.
 - **Rules and Proposal are coloured, and Sign-ups has a tooltip, on any card** — a table cell can take a colour from its reading and a column header can carry a tooltip; the readings log uses both.
 
+## [0.18.0] — 2026-10-03
+
+### Added
+- **A Best Sudoku Retention page template.** "+ New > Page > Start from" now offers it, with the
+  retention verdict, return visits and engagement per arrival; it is on no layout until
+  someone creates it, so nothing saved changes.
+
+## [0.17.0] — 2026-10-03
+
+### Added
+- **A retention-verdict card preset.** It shows each campaign arm and the organic baseline with its
+  GO, HOLD, NO-GO, provisional, maturing or too-few verdict, the days 2-7 return rate with 90%
+  lower and upper bounds, and first tagged loads; it is in the picker only and counts rows, never
+  by hour, place or device. The verdict's bar stays at a fixed 7.5% until organic data is sound
+  (1,000 matured arrivals over at least 21 days, with some returns), and says which bar it used.
+- **A campaign-engagement card preset.** It shows completed games per arrival for each campaign with
+  its two counts, and a note that repeat players push it above the share of arrivals who played.
+- **Retention caveats on every return-rate figure and the verdict.** One says organic and campaign
+  arrivals are different devices and the bar compares them without netting either out (this note
+  cannot be hidden); the other says the rates are a lower bound on people.
+
 ## [0.16.1] — 2026-10-03
 
 ### Fixed

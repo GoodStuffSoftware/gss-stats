@@ -1,7 +1,9 @@
 // Registered ratios, and the rule that decides which ones may exist (ADR 0003, "the rule this
 // ADR encodes"): a PERCENTAGE is allowed only when the numerator and denominator share a unit
 // AND the numerator is a declared subset of the denominator; a COST is money over a count and
-// never shows as a percent; any other pairing is a PAIR — counts only.
+// never shows as a percent; any other pairing is a PAIR — counts only. A PER is a count of one thing
+// per count of another (completions per arrival): n / d as a plain number that may exceed 1, never
+// a percent, and not a share of anything (no subset needed).
 //
 // The check runs when this module loads (defineRatios): an invalid registration throws at
 // import, so a bad ratio cannot ship. Clients can only name a registered ratio; there is no
@@ -11,7 +13,7 @@
 import { METRICS, metricWindows, type MetricDef, type MetricParam } from './metrics'
 import type { WindowName } from './types'
 
-export type RatioKind = 'proportion' | 'cost' | 'pair'
+export type RatioKind = 'proportion' | 'cost' | 'pair' | 'per'
 
 export interface RatioDef {
   id: string
@@ -23,6 +25,8 @@ export interface RatioDef {
   /** proportion only: count the denominator only where the numerator is measured (the install
    * fix: prompts shown before it could never record an "installed" outcome). */
   alignDenominator?: boolean
+  /** Note ids that travel with every value (what the figure is NOT). */
+  caveats?: string[]
 }
 
 export interface RatioVerdict {
@@ -30,7 +34,7 @@ export interface RatioVerdict {
   reason: string
 }
 
-const NOT_COUNTS: ReadonlySet<string> = new Set(['instant', 'code'])
+const NOT_COUNTS: ReadonlySet<string> = new Set(['instant', 'code', 'rate'])
 
 /** The validity rule (the prototype's), plus: a time or a category is never a side. */
 export function ratioVerdict(r: Pick<RatioDef, 'kind' | 'num' | 'den'>, metrics: ReadonlyMap<string, MetricDef> = METRICS): RatioVerdict {
@@ -40,6 +44,7 @@ export function ratioVerdict(r: Pick<RatioDef, 'kind' | 'num' | 'den'>, metrics:
   // A time or a category is not a count: no ratio of any kind can use one.
   if (NOT_COUNTS.has(n.unit) || NOT_COUNTS.has(d.unit)) return { ok: false, reason: `unit ${NOT_COUNTS.has(n.unit) ? n.unit : d.unit} is not a count` }
   if (r.kind === 'pair') return { ok: true, reason: 'counts only' }
+  if (r.kind === 'per') return { ok: true, reason: `${n.unit} per ${d.unit}` }
   if (r.kind === 'cost') return n.unit === 'usd' && d.unit !== 'usd' ? { ok: true, reason: 'money per ' + d.unit } : { ok: false, reason: 'cost needs usd over a count' }
   if (r.kind !== 'proportion') return { ok: false, reason: `unknown kind ${String(r.kind)}` } // a registration from untyped data
   if (n.unit !== d.unit) return { ok: false, reason: `unit ${n.unit} over ${d.unit}` }
@@ -119,6 +124,8 @@ export const RATIO_DEFS: RatioDef[] = [
   // Pairs: counts only — "1,111 game-screen views · 353 arrivals", never 314.7%.
   ratio('campaign.gameViewsVsArrivals', 'pair', 'campaign.gameViews', 'campaign.taggedArrivals'),
   ratio('campaign.taggedHitsVsArrivals', 'pair', 'campaign.taggedHits', 'campaign.taggedArrivals'),
+  // A per: completions per arrival (E1). Can exceed 1, inflated by repeat players; NOT the share who played.
+  ratio('campaign.engagementPerArrival', 'per', 'campaign.completions', 'campaign.returnD0', { caveats: ['engagement-per-arrival'] }),
   // Site-wide and pop-up proportions.
   ratio('bsk.popupTapRate', 'proportion', 'bsk.popupAccepts', 'bsk.popupShown'),
   ratio('popup.tapRate', 'proportion', 'popup.accepts', 'popup.shown'),

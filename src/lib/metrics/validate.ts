@@ -63,7 +63,7 @@ function sidesOf(b: { metric: string } | { ratio: string }): (MetricDef | undefi
 // ── Data kinds and display compatibility (ADR 0003 section 1) ────────────────────────────
 /** 'time': an instant or a day (when spend was last synced); 'code': a category shown as the
  * label note it carries (where a spend figure came from). Neither is a count. */
-export type DataKind = 'count' | 'money' | 'proportion' | 'cost' | 'pair' | 'field' | 'time' | 'code'
+export type DataKind = 'count' | 'money' | 'proportion' | 'cost' | 'pair' | 'per' | 'rate' | 'field' | 'time' | 'code'
 export const DISPLAYS_FOR: Record<DataKind, readonly DisplayAs[]> = {
   count: ['number', 'bar', 'sparkline'],
   money: ['currency', 'sparkline'],
@@ -71,13 +71,16 @@ export const DISPLAYS_FOR: Record<DataKind, readonly DisplayAs[]> = {
   proportion: ['percent', 'counts', 'bar'],
   cost: ['currency'],
   pair: ['counts'],
+  // 'per': n/d as a plain number (2 decimals); 'rate': a share in 0-1 shown as a percent.
+  per: ['number', 'counts'],
+  rate: ['percent'],
   field: ['dateRange', 'datetime', 'datetime-et', 'badge', 'text', 'number', 'currency'],
   time: ['date', 'ago'],
   code: ['status'],
 }
 
 export function metricKind(def: MetricDef): DataKind {
-  return def.unit === 'usd' ? 'money' : def.unit === 'instant' ? 'time' : def.unit === 'code' ? 'code' : 'count'
+  return def.unit === 'usd' ? 'money' : def.unit === 'instant' ? 'time' : def.unit === 'code' ? 'code' : def.unit === 'rate' ? 'rate' : 'count'
 }
 export function ratioKind(def: RatioDef): DataKind {
   return def.kind
@@ -571,7 +574,7 @@ function checkRequest(raw: Record<string, unknown>, key: string, context: ValidC
   let minCohort = MIN_COHORT
   if (raw.minCohort !== undefined) {
     if (typeof raw.minCohort !== 'number' || !Number.isInteger(raw.minCohort) || raw.minCohort < 1 || raw.minCohort > 1_000_000) return failed(key, 'bad-param')
-    if (kind !== 'proportion' && kind !== 'cost') return failed(key, 'bad-param')
+    if (kind !== 'proportion' && kind !== 'cost' && kind !== 'per') return failed(key, 'bad-param')
     minCohort = Math.max(MIN_COHORT, raw.minCohort) // may only RAISE the floor
   }
   return { key, ok: true, req: { key, kind: metric ? 'metric' : 'ratio', id, params, window, deltas, ...(series ? { series } : {}), minCohort } }

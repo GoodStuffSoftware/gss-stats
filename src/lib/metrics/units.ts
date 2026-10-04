@@ -7,8 +7,9 @@
 // shown as "arrivals") through MetricDef.unitLabel.
 
 // 'instant' (an epoch-ms time: when spend was last synced) and 'code' (a category shown as its
-// label: where a spend figure came from) are never counts: no ratio can use them.
-export const UNITS = ['device', 'row', 'pageview', 'completion', 'showing', 'signin', 'finish', 'usd', 'day', 'instant', 'code'] as const
+// label: where a spend figure came from) are never counts: no ratio can use them. Neither is
+// 'rate' (a share in 0-1, e.g. a retention rate or a bound of its interval).
+export const UNITS = ['device', 'row', 'pageview', 'completion', 'showing', 'signin', 'finish', 'usd', 'day', 'instant', 'code', 'rate'] as const
 export type Unit = (typeof UNITS)[number]
 
 /** The notes-registry label id for a unit's display word. */
