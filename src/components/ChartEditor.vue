@@ -768,6 +768,8 @@ function save() {
         <!-- "Add chart" → "Metric card" (ADR 0003, phase B): reusable, configurable stat/table
              cards, distinct from the fixed chart types above — see CardEditor.vue. -->
         <div class="field" v-if="!isNote">
+          <!-- Rate is not a chart type for a new chart (ADR 0005 slice 5), so say where a pop-up rate went. -->
+          <p v-if="!typeChoices.some((t) => t.value === 'rate')" class="hint" data-testid="rate-signpost">For a pop-up rate, make this a metric card, then pick the "Pop-up rates" preset.</p>
           <button type="button" class="btn" @click="makeCardWidget">Make this a metric card instead</button>
           <p class="hint">Overview and campaign cards are presets here.</p>
         </div>
