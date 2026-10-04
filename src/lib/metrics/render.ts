@@ -16,11 +16,12 @@
 import { getNote, NOTES_REGISTRY, noteRawText, noteTokens } from '../notes'
 import { etDateFromMs } from '../popupEvents'
 import { relativeTime } from '../adsFreshness'
+import { etDateTimeText } from '../adsReadingsFormat'
 import { tokenizeAndInterpolate, type TextToken } from '../textLite'
 import { METRICS, rulesOf, type MetricDef } from './metrics'
 import { RATIOS, type RatioDef } from './ratios'
-import { campaignOfScope, configRuling, resolveBinding, scopeField, scopeVars, unmeasuredByConfig, type ScopeInstance } from './scope'
-import type { Display, Gating, Label, MetricItem, MetricValue, SeriesPoint } from './types'
+import { campaignOfScope, configRuling, resolveBinding, scopeField, scopeTone, scopeVars, unmeasuredByConfig, type ScopeInstance } from './scope'
+import type { CellTone, Display, Gating, Label, MetricItem, MetricValue, SeriesPoint } from './types'
 import { unitLabelId } from './units'
 
 // A note id ever reaches here from data an author saved into a CardSpec (Label's `note`,
@@ -52,6 +53,8 @@ export interface ItemViewModel {
   /** The primary is a status word ("not yet tracking", "unavailable"), not a value: render it
    * small. */
   muted?: boolean
+  /** A table cell's colour, from the scope field it reads (scope.ts scopeTone). */
+  tone?: CellTone
   /** A percent's two parts, for a tile: the rate big, its "(n/d)" as a small line under it.
    * Rows and pills show `primary`, which is the two joined. */
   split?: { main: string; sub: string }
@@ -318,6 +321,7 @@ function fieldViewModel(item: MetricItem, raw: string | null, labelTokens: TextT
     const n = Number(raw)
     return { visible: true, labelTokens, primary: Number.isFinite(n) ? fmtCount(n) : raw, deltaLines: [], captionTokens }
   }
+  if (display.as === 'datetime-et') return { visible: true, labelTokens, primary: etDateTimeText(raw), deltaLines: [], captionTokens }
   // 'datetime' | 'text': plain text, already textLite-safe by construction (scopeField never
   // returns markup — it reads config/registry data, never a beacon string).
   return { visible: true, labelTokens, primary: raw, deltaLines: [], captionTokens }
@@ -381,7 +385,9 @@ export function itemViewModel(item: MetricItem, value: MetricValue | undefined, 
     return { visible: true, labelTokens, primary: '—', deltaLines: [], captionTokens: itemCaptionOnly(item, scope, opts.todayEt) }
   }
   if (resolved.kind === 'field') {
-    return fieldViewModel(item, resolved.fieldValue ?? null, labelTokens, scope, opts.todayEt)
+    const vm = fieldViewModel(item, resolved.fieldValue ?? null, labelTokens, scope, opts.todayEt)
+    const tone = 'field' in item.data && resolved.fieldValue != null ? scopeTone(scope, item.data.field) : null
+    return tone ? { ...vm, tone } : vm
   }
   // Ruled out by the campaign's own config (spend-only, or no flight start yet): omitted
   // whatever the status, and never requested (scope.ts unmeasuredByConfig), unless the item's

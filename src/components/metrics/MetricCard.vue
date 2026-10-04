@@ -20,13 +20,17 @@
 // - its captions (CardSpec.captions): registry notes under the whole card.
 import { computed, effectScope, onBeforeUnmount, onMounted, onScopeDispose, reactive, ref, shallowRef, watch, type EffectScope } from 'vue'
 import { useMetrics, type MetricRequestSpec, type UseMetrics } from '../../composables/useMetrics'
-import { useReturnRefresh } from '../../composables/useReturnRefresh'
+import { isInFlight, isStale, useReturnRefresh } from '../../composables/useReturnRefresh'
+import { fetchAdsReadings } from '../../api'
+import { MAX_READINGS_LIMIT } from '../../lib/metrics/types'
+import { NO_READINGS, readingsLoadOf } from '../../lib/metrics/readingsScope'
+import type { AdsReadingsResponse } from '../../lib/adsStore'
 import { hasNote, noteRawText } from '../../lib/notes'
 import { isNoteIdHideable } from '../../lib/chartNotes'
 import { resolveLabelTokens } from '../../lib/metrics/render'
 import { presetById } from '../../lib/metrics/presets'
 import { INVALID_CARD_PRESET } from '../../lib/metrics/validate'
-import { buildRequestSpec, campaignOfScope, narrowToCampaigns, ROOT_SCOPE, resolveRepeat, sectionCells, todayEtFrom, type ReadingScope, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
+import { buildRequestSpec, campaignOfScope, narrowToCampaigns, readingsLimitOf, repeatsOverReadings, ROOT_SCOPE, resolveRepeat, sectionCells, todayEtFrom, usesAdsInfoFields, usesReadingFields, type ReadingScope, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
 import { CAMPAIGNS } from '../../lib/campaigns'
 import type { CardRef, CardSpec, MetricsContext } from '../../lib/metrics/types'
 import type { RefreshResult } from '../../lib/adsRefresh'
@@ -73,8 +77,83 @@ onBeforeUnmount(() => {
 useReturnRefresh(() => (clock.value = Date.now()))
 const nowMs = computed(() => props.nowMs ?? clock.value)
 const todayEt = computed(() => todayEtFrom(nowMs.value))
-const ctx = computed<RepeatContext>(() => ({ todayEt: todayEt.value, readings: props.readings }))
+
+// ── The ads readings load (ADR 0005 slice 3) ────────────────────────────────────────────────
+// A card loads GET /api/ads/readings itself only when it needs the answer: it has `notices`, it
+// reads the load's per-campaign facts (`campaign.freshness` / `campaign.thresholds`), or it
+// repeats over stored readings / reads a `reading.*` field. Declaring the ads-refresh action is
+// not a reason: that button only syncs and reloads the card's own metrics (the campaign-cost
+// card has it and never reads the endpoint). It then loads on mount, when its query changes, on
+// the card reload, after an ads refresh and on return to the tab. The `readings` prop stays as
+// an override for the rows (tests, previews): when given, a card that only needs the rows does
+// not fetch.
+const wantsAds = computed(() => !!spec.value && (!!spec.value.notices || usesAdsInfoFields(spec.value)))
+const wantsReadings = computed(() => !!spec.value && (repeatsOverReadings(spec.value) || usesReadingFields(spec.value)))
+const loadsReadings = computed(() => wantsAds.value || (wantsReadings.value && props.readings === undefined))
+/** The most readings per campaign asked for; a card that needs only the freshness asks for one. */
+const readingsQuery = computed(() => {
+  const p = new URLSearchParams()
+  for (const id of props.campaignIds ?? []) p.append('campaignId', id)
+  const limit = spec.value && repeatsOverReadings(spec.value) ? Math.min(readingsLimitOf(spec.value), MAX_READINGS_LIMIT) : 1
+  p.set('limit', String(limit))
+  return p.toString()
+})
+const readingsData = shallowRef<AdsReadingsResponse | null>(null)
+const readingsFailed = ref(false)
+let readingsReqId = 0 // a late answer to an older request must never overwrite a newer one
+let readingsStartedAt: number | null = null // the latest load start; null once it settles
+let readingsSettledAt: number | null = null
+// `background`: a refetch on return keeps what is on screen, and a failure leaves the last good data up.
+async function loadReadings(background = false) {
+  if (!loadsReadings.value) return
+  const my = ++readingsReqId
+  readingsStartedAt = Date.now()
+  try {
+    // Through api.ts so an expired session raises the re-sign-in banner (see withSessionCheck).
+    const r = await fetchAdsReadings(readingsQuery.value)
+    if (my !== readingsReqId) return
+    readingsData.value = r
+    readingsFailed.value = false
+  } catch {
+    if (my === readingsReqId && (!background || !readingsData.value)) readingsFailed.value = true
+  } finally {
+    if (my === readingsReqId) {
+      readingsStartedAt = null
+      readingsSettledAt = Date.now()
+    }
+  }
+}
+onMounted(() => void loadReadings())
+watch([readingsQuery, loadsReadings], () => void loadReadings())
+// The user came back to the tab: refetch if the last load is old enough and none is running.
+useReturnRefresh(() => {
+  if (!loadsReadings.value || isInFlight(readingsStartedAt) || !isStale(readingsSettledAt)) return
+  void loadReadings(true)
+})
+const readingsLoad = computed(() => (readingsData.value ? readingsLoadOf(readingsData.value) : NO_READINGS))
+const ctx = computed<RepeatContext>(() => ({ todayEt: todayEt.value, readings: props.readings ?? readingsLoad.value.readings, ads: readingsLoad.value.ads }))
 const instances = computed<ScopeInstance[]>(() => (spec.value ? narrowToCampaigns(resolveRepeat(spec.value.repeat, ctx.value), spec.value.repeat, props.campaignIds) : []))
+
+/** The first load is still out: a card that waits on the readings shows no empty state yet. */
+const readingsPending = computed(() => loadsReadings.value && !readingsData.value && !readingsFailed.value)
+/** The first load failed and nothing is on screen: the card says so (status + Retry), not "no readings". */
+const readingsLoadFailed = computed(() => loadsReadings.value && readingsFailed.value && !readingsData.value)
+
+// ── Notices (CardSpec.notices) ──────────────────────────────────────────────────────────────
+// 'ads-readings': the readings store's warning when it is unbound or unreadable, the
+// small-numbers note, then the sync alerts that killed a run in the last week, in the order the
+// bespoke readings log showed them. Nothing until the load has answered. Plain text through the
+// notes registry (a server message is only ever substituted into a text token).
+const noticeLines = computed<{ key: string; text: string; warn: boolean }[]>(() => {
+  const d = readingsData.value
+  if (spec.value?.notices !== 'ads-readings' || !d) return []
+  const out: { key: string; text: string; warn: boolean }[] = []
+  if (!d.storeBound) out.push({ key: 'unbound', text: noteRawText('ads-store-unbound'), warn: true })
+  else if (!d.storeReadable) out.push({ key: 'unreadable', text: noteRawText('ads-store-unreadable'), warn: true })
+  out.push({ key: 'small', text: noteRawText('ads-readings-note'), warn: false })
+  for (const a of d.syncAlerts ?? []) out.push({ key: a.source + a.startedAt, text: noteRawText('label.card.syncAlert', { message: a.message }), warn: true })
+  return out
+})
 
 // ── Card-level requests (freshness, errors, reload) ─────────────────────────────────────────
 // The card holds its own reference on every request its items make (content-equal requests
@@ -114,10 +193,11 @@ onScopeDispose(() => dayScope?.stop())
  * calls this through the component ref too). */
 function reload() {
   cardMetrics.value?.reloadAll()
+  void loadReadings()
 }
 defineExpose({ reload })
 
-const hasError = computed(() => !!cardMetrics.value?.hasError.value)
+const hasError = computed(() => !!cardMetrics.value?.hasError.value || (loadsReadings.value && readingsFailed.value))
 const updatedPlacement = computed<'header' | 'footer' | null>(() => {
   const v = spec.value?.showUpdated
   return v === true ? 'header' : v === 'header' || v === 'footer' ? v : null
@@ -132,6 +212,7 @@ const updatedText = computed(() => {
   return noteRawText('label.card.updatedMinutesAgo', { n: Math.round(s / 60) })
 })
 const failedText = noteRawText('label.card.loadFailed')
+const loadingText = noteRawText('label.card.loading')
 const invalidText = noteRawText('label.card.invalid')
 /** Where the status line goes: where showUpdated puts freshness, and in the header when the
  * card shows no freshness but has an error. Header: an unrepeated card's own header row
@@ -176,6 +257,9 @@ const allHidden = computed(() => instances.value.length > 0 && instances.value.e
   <div v-else class="metric-card-root">
     <!-- Present from mount and empty until an error, so screen readers announce the change. -->
     <span class="mc-live" role="status" aria-live="polite">{{ hasError ? failedText : '' }}</span>
+    <div v-if="noticeLines.length" class="mc-notices">
+      <p v-for="n in noticeLines" :key="n.key" class="mc-notice" :class="{ warn: n.warn }">{{ n.text }}</p>
+    </div>
     <div v-if="adsRefresh" class="mc-actions">
       <AdsRefreshButton :campaign-ids="actionCampaignIds" @refreshed="onAdsRefreshed" />
     </div>
@@ -184,9 +268,11 @@ const allHidden = computed(() => instances.value.length > 0 && instances.value.e
     </div>
 
     <!-- Keyed on the ET day: a new day remounts the body, so every repeat and request rebuilds. -->
-    <div v-if="spec.repeat" :key="todayEt" class="metric-card-grid" :style="{ '--mc-min-width': `${spec.minWidth ?? 230}px` }">
+    <!-- The first readings load is out: "Loading…" in place of the grid (kept mounted, so its metric requests start now). -->
+    <p v-if="readingsPending && spec.repeat" class="metric-card-empty">{{ loadingText }}</p>
+    <div v-if="spec.repeat" v-show="!readingsPending" :key="todayEt" class="metric-card-grid" :style="{ '--mc-min-width': `${spec.minWidth ?? 230}px` }">
       <MetricCardInstance v-for="(scope, i) in instances" v-show="!hiddenInstances.has(i)" :key="i" :spec="spec" :scope="scope" :ctx="ctx" :context="context" :boxed="true" @open="emit('open-campaigns')" @hidden="(h: boolean) => onHidden(i, h)" />
-      <p v-if="(!instances.length || allHidden) && spec.repeat.empty" class="metric-card-empty">
+      <p v-if="((!instances.length && !readingsPending && !readingsLoadFailed) || allHidden) && spec.repeat.empty" class="metric-card-empty">
         <MetricLabel :tokens="resolveLabelTokens(spec.repeat.empty.label, ROOT_SCOPE, undefined, todayEt)" />
         <MetricLabel :tokens="resolveLabelTokens(spec.repeat.empty.text, ROOT_SCOPE, undefined, todayEt)" />
       </p>
@@ -213,7 +299,7 @@ const allHidden = computed(() => instances.value.length > 0 && instances.value.e
 }
 .metric-card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(var(--mc-min-width, 230px), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(var(--mc-min-width, 230px), 100%), 1fr));
   gap: 14px;
 }
 .metric-card-empty {
@@ -230,6 +316,17 @@ const allHidden = computed(() => instances.value.length > 0 && instances.value.e
 }
 .mc-actions {
   margin-bottom: 8px;
+}
+.mc-notices {
+  margin-bottom: 8px;
+}
+.mc-notice {
+  margin: 0 0 4px;
+  font-size: 11.5px;
+  color: rgb(var(--ink-3));
+}
+.mc-notice.warn {
+  color: #bc4749;
 }
 .mc-captions {
   margin-top: 8px;
