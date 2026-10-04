@@ -25,7 +25,8 @@
 // 503 and the stored layout and `:prev` are left as they were. KV writes per changing save: 2 (3
 // on the first of an ET day), against 1 before; per identical save: 1. That halves the edits the
 // Free plan's 1,000 writes a day (account-wide, reset 00:00 UTC) allows; past the cap every save
-// fails, and the 503 then names the backup. Restore steps: README "Restoring the layout".
+// fails: a changing one with that 503 (naming the backup), any other (an identical save, a save
+// onto an empty store, a first version jump) with a 500. Restore steps: README "Restoring the layout".
 
 import { CONFIG_VERSION } from '../../src/lib/defaults'
 import { etDateFast } from '../../src/lib/etTime'
