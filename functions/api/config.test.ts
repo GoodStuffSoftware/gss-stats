@@ -292,9 +292,10 @@ describe('the captions upgrade (plain-text captions and hidden caveats: seeds hi
 describe('the readingsLog upgrade (readings log card: a guard bump, no layout rewrite)', () => {
   const V = LAYOUT_VERSIONS.readingsLog
   const prev = Math.max(...Object.values(LAYOUT_VERSIONS).filter((v) => v < V))
-  it('this code writes the readingsLog layout version', () => {
+  it('this code writes at least the readingsLog layout version (a newer key may sit above it)', () => {
     expect(V).toBeGreaterThan(LAYOUT_VERSIONS.dateEtTrends)
-    expect(CONFIG_VERSION).toBe(V)
+    expect(CONFIG_VERSION).toBeGreaterThanOrEqual(V)
+    expect(CONFIG_VERSION).toBe(Math.max(...Object.values(LAYOUT_VERSIONS)))
   })
   it('the first readingsLog save over the stored previous layout backs it up to backup:v<prev>, once', async () => {
     const old = JSON.stringify(cfg(prev, 'live layout'))
@@ -304,6 +305,27 @@ describe('the readingsLog upgrade (readings log card: a guard bump, no layout re
   })
   it('a PUT carrying the previous version over a stored readingsLog layout gets 409', async () => {
     const { kv } = fakeKv({ 'dashboard:default': JSON.stringify(cfg(V, 'readings layout')) })
+    expect((await put(kv, cfg(prev, 'old tab'))).status).toBe(409)
+  })
+})
+
+// The rate tile layout version (the pop-up rate tile is a metric card, ADR 0005 slice 4): a guard bump
+// only, the newest key. Written against the LAYOUT_VERSIONS key; `prev` is the version just below it.
+describe('the rateTile upgrade (rate tile card: a guard bump, no layout rewrite)', () => {
+  const V = LAYOUT_VERSIONS.rateTile
+  const prev = Math.max(...Object.values(LAYOUT_VERSIONS).filter((v) => v < V))
+  it('sits above the readings log version, and this code writes at least it', () => {
+    expect(V).toBeGreaterThan(LAYOUT_VERSIONS.readingsLog)
+    expect(CONFIG_VERSION).toBeGreaterThanOrEqual(V)
+  })
+  it('the first rateTile save over the stored previous layout backs it up to backup:v<prev>, once', async () => {
+    const old = JSON.stringify(cfg(prev, 'live layout'))
+    const { kv, store } = fakeKv({ 'dashboard:default': old })
+    expect((await put(kv, cfg(V, 'first rate-tile save'))).status).toBe(200)
+    expect(store.get(backupKeyFor(prev))).toBe(old)
+  })
+  it('a PUT carrying the previous version over a stored rateTile layout gets 409', async () => {
+    const { kv } = fakeKv({ 'dashboard:default': JSON.stringify(cfg(V, 'rate-tile layout')) })
     expect((await put(kv, cfg(prev, 'old tab'))).status).toBe(409)
   })
 })
