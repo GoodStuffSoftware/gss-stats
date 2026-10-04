@@ -79,6 +79,18 @@ export function allChartNotes(widget: Widget, data: StatsResponse | null | undef
   return notes
 }
 
+/** The runtime notes that always show (a data cut, or the range limit): `hiddenCaveats` never hides
+ * them. allChartNotes adds each with `hideable: false`. */
+export const ALWAYS_SHOWN_RUNTIME_NOTE_IDS: ReadonlySet<string> = new Set(['split-guard', 'refused-whole-days', 'range-notice'])
+
+/** Whether an id in `hiddenCaveats` could hide anything: false for a registry note marked
+ * `hideable: false` and for an always-shown runtime note. An id nothing knows (a runtime note that
+ * is hideable, like `popup-note`, or one from a later caveat) stays true, so it can be shown again. */
+export function canHideCaveatId(id: string): boolean {
+  if (ALWAYS_SHOWN_RUNTIME_NOTE_IDS.has(id)) return false
+  return !getNote(id) || isNoteIdHideable(id)
+}
+
 /** Whether `widget.hiddenCaveats` hides this note. A note that is not hideable is never hidden,
  * whatever the list says. */
 export function isChartNoteHidden(note: ChartNote, hiddenCaveats: readonly string[] | undefined): boolean {

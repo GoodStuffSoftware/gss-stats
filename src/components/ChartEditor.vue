@@ -20,7 +20,7 @@ import {
 import { ringDims, RING_SOFT_CAP, isDateDim } from '../lib/rings'
 import { BEST_SUDOKU_SITES, CAPTION_MAX_CHARS, HIDDEN_CAVEAT_ID_RE, syncCardWithView } from '../lib/defaults'
 import { getNote, isStaticCaptionNote, libraryCaptionOptions, noteRawText, noteTemplate } from '../lib/notes'
-import { allChartNotes, convertLegacyNotes, isChartNoteHidden, type ChartNote } from '../lib/chartNotes'
+import { allChartNotes, canHideCaveatId, convertLegacyNotes, isChartNoteHidden, type ChartNote } from '../lib/chartNotes'
 import { toPlainText } from '../lib/textLite'
 import { canFit, setFit } from '../lib/fit'
 import CardEditor from './metrics/CardEditor.vue'
@@ -57,7 +57,9 @@ const copyWidget = (w: Widget): Widget => {
 const draft = reactive<Widget>(copyWidget(props.widget))
 /** D5 convert-on-edit (lib/chartNotes.ts convertLegacyNotes), applied to the draft: the author
  * sees the folded text in the Caption box; Save keeps it, Cancel leaves the chart as it was.
- * Returns the converted ids (for the hint under the Caption box). */
+ * A folded id also leaves `hiddenCaveats` (NIT-5b): nothing lists it any more, so keeping it would
+ * only leave a dead "hidden" row. One the card's own spec captions still name stays (they share the
+ * list, D7). Returns the converted ids (for the hint under the Caption box). */
 function foldLegacyNotes(): string[] {
   const { widget: next, converted } = convertLegacyNotes({ ...draft })
   if (!converted.length) return converted
@@ -65,6 +67,12 @@ function foldLegacyNotes(): string[] {
   else draft.caption = next.caption
   if (next.notes === undefined) delete draft.notes
   else draft.notes = next.notes
+  if (draft.hiddenCaveats) {
+    const spec = draft.card ? ('preset' in draft.card ? presetById(draft.card.preset) : draft.card.spec) : undefined
+    const stillNamed = new Set(spec?.captions ?? [])
+    const folded = new Set(converted.filter((id) => !stillNamed.has(id)))
+    setHiddenCaveats(draft.hiddenCaveats.filter((id) => !folded.has(id)))
+  }
   return converted
 }
 const convertedNoteIds = ref<string[]>(foldLegacyNotes())
@@ -209,7 +217,9 @@ function insertFromLibrary(t: TextTarget, e: Event) {
 
 // The "Data caveats" rows: allChartNotes minus the caption itself, plus any id this chart hides
 // that the list cannot see right now (a runtime note with no response loaded), so it can be shown
-// again. A card's own spec captions are toggled in CardEditor, not here.
+// again. An id the list could never hide (a `hideable: false` registry note, an always-shown runtime
+// note) gets no such row: the chart shows it whenever it applies, whatever the list says (NIT-5a).
+// A card's own spec captions are toggled in CardEditor, not here.
 interface CaveatRow {
   key: string
   label: string
@@ -239,7 +249,7 @@ const caveatRows = computed<CaveatRow[]>(() => {
   const listed = new Set(rows.map((r) => r.hideId))
   const specCaptions = new Set(cardSpec.value?.captions ?? [])
   for (const id of hidden) {
-    if (listed.has(id) || specCaptions.has(id)) continue
+    if (listed.has(id) || specCaptions.has(id) || !canHideCaveatId(id)) continue
     const label = getNote(id) ? noteRawText(id) || id : (RUNTIME_NOTE_LABELS[id] ?? id)
     rows.push({ key: `hidden:${id}`, label: short(label), hideable: true, hideId: id, hidden: true })
   }

@@ -158,6 +158,19 @@ describe('ChartEditor: Data caveats', () => {
     expect((cut.get('input[type="checkbox"]').element as HTMLInputElement).disabled).toBe(true)
   })
 
+  it('an id the chart can never hide gets no "hidden" row; a hideable one still does (NIT-5a)', () => {
+    const locked = ['range-notice', 'split-guard', 'refused-whole-days', 'country-split-excludes-refused']
+    const w = open(base({ hiddenCaveats: [...locked, 'popup-note'] }))
+    for (const id of locked) expect(row(w, `hidden:${id}`).exists()).toBe(false)
+    expect(row(w, 'hidden:popup-note').exists()).toBe(true)
+    // with the response, the always-shown note is listed once, locked and checked
+    const withData = open(base({ hiddenCaveats: locked }), { data: response({}, { splitGuard: true }) })
+    const keys = withData.findAll('.caveat-row').map((r) => r.attributes('data-key'))
+    expect(keys.filter((k) => k?.includes('split-guard'))).toEqual(['split-guard'])
+    expect(keys.some((k) => k?.startsWith('hidden:'))).toBe(false)
+    expect((row(withData, 'split-guard').get('input[type="checkbox"]').element as HTMLInputElement).checked).toBe(true)
+  })
+
   it('an automatic caveat the chart hides is listed unchecked, never twice', () => {
     const w = open(base({ hiddenCaveats: ['min-cohort-caveat'] }))
     expect((row(w, 'caveat:min-cohort-caveat').get('input[type="checkbox"]').element as HTMLInputElement).checked).toBe(false)
@@ -175,6 +188,27 @@ describe('ChartEditor: legacy notes (D5 convert-on-edit, N1)', () => {
     const out = await save(w)
     expect(out.caption).toBe(`Mine.\n\n${SMALL}\n\n${RELEASE}`)
     expect(out.notes).toEqual(['bogus-id', 'min-cohort-caveat'])
+  })
+
+  it('a folded id also leaves hiddenCaveats, so no dead "hidden" row stays (NIT-5b)', async () => {
+    const w = open(base({ caption: 'Mine.', notes: ['small-sample', 'min-cohort-caveat'], hiddenCaveats: ['small-sample', 'popup-note'] }))
+    expect((captionBox(w).element as HTMLTextAreaElement).value).toBe('Mine.') // hidden: folded without text
+    expect(row(w, 'hidden:small-sample').exists()).toBe(false)
+    expect(row(w, 'hidden:popup-note').exists()).toBe(true)
+    const out = await save(w)
+    expect(out.hiddenCaveats).toEqual(['popup-note'])
+    expect(out.notes).toEqual(['min-cohort-caveat'])
+    // the last hidden id folded deletes the key
+    const only = open(base({ notes: ['small-sample'], hiddenCaveats: ['small-sample'] }))
+    const saved = await save(only)
+    expect('hiddenCaveats' in saved).toBe(false)
+    expect('notes' in saved).toBe(false)
+  })
+
+  it("a folded id the card's own spec captions name stays hidden (they share the list, D7)", async () => {
+    const spec: CardSpec = { ...JSON.parse(JSON.stringify(PRESETS['campaign-country'])), captions: ['small-sample'] }
+    const w = open(base({ dataset: 'campaigns', notes: ['small-sample'], hiddenCaveats: ['small-sample'], card: { spec } }))
+    expect((await save(w)).hiddenCaveats).toEqual(['small-sample'])
   })
 
   it('never changes the chart it was given (Cancel leaves it as it was)', async () => {
