@@ -31,6 +31,7 @@ const SAMPLE_PARAMS: Record<FactId, FactParams[]> = {
   adsSpend: [{}],
   adsCoverage: [{}],
   adsLastSync: [{}],
+  adsPlayDaily: [{}],
   campaignDaily: CAMPAIGNS.map((c) => ({ campaignId: c.id })),
   bskRangeDaily: [{ since: '2026-09-20', until: '2026-09-26' }],
   popupRangeDaily: [
@@ -80,7 +81,7 @@ describe('every fact is an anonymous aggregate', () => {
   // The ads store's facts read gss-stats' own records (spend, sync runs), never a beacon row.
   it.each(ALL.filter((x) => x.stmt.db === 'gss_stats_ads').map((x) => [x.id, x] as const))('%s reads only the ads store', (_name, { stmt }) => {
     expect(stmt.sql).not.toMatch(/\bhits\b/)
-    expect(stmt.sql).toMatch(/\bFROM (ads_daily_metrics|ads_sync_runs)\b/)
+    expect(stmt.sql).toMatch(/\bFROM (ads_daily_metrics|ads_sync_runs|ads_play_daily)\b/)
   })
   it.each(ALL.filter((x) => x.stmt.db === 'gss_geo').map((x) => [`${x.id} ${JSON.stringify(x.p)}`, x] as const))('%s', (_name, { stmt }) => {
     const sql = stmt.sql
@@ -267,6 +268,7 @@ describe('each fact runs on SQLite and reuses the endpoint clause helpers', () =
     )
     db.exec('CREATE TABLE ads_daily_metrics (campaign_id TEXT, date TEXT, cost_micros INTEGER, impressions INTEGER, clicks INTEGER, fetched_at TEXT)')
     db.exec('CREATE TABLE ads_sync_runs (campaigns_ok TEXT, finished_at TEXT, status TEXT)')
+    db.exec('CREATE TABLE ads_play_daily (date TEXT, device_installs INTEGER, user_installs INTEGER, device_uninstalls INTEGER, active_device_installs INTEGER, fetched_at TEXT)')
     return db
   }
   it.each(ALL.map((x) => [`${x.id} ${JSON.stringify(x.p)}`, x] as const))('%s executes', (_name, { stmt }) => {

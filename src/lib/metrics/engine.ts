@@ -123,6 +123,7 @@ function factParamsFor(factId: FactId, req: Pick<ResolvedRequest, 'params'>, env
     case 'adsSpendDaily':
     case 'adsCoverage':
     case 'adsLastSync':
+    case 'adsPlayDaily':
       return {}
   }
 }
@@ -621,7 +622,7 @@ class Batch {
           if (!o || !o.ok) return { status: 'error', value: null, reason: 'fact-failed', noteIds: [] }
           organic = o.rows
         }
-        const r = def.store(fact.rows, ctx, { nowMs: this.env.nowMs, releaseDays: this.env.release?.days ?? null, todayEt: this.env.todayEt, ...(organic ? { organic } : {}) })
+        const r = def.store(fact.rows, ctx, { nowMs: this.env.nowMs, releaseDays: this.env.release?.days ?? null, todayEt: this.env.todayEt, pageRange: this.clock.pageRange, ...(organic ? { organic } : {}) })
         const ids = r.noteIds?.length ? [...new Set([...noteIds, ...r.noteIds])] : noteIds
         return { status, value: r.value, m, noteIds: ids, asOfMs: plan.asOfMs, ...(r.tooFew ? { tooFew: true } : {}), ...(r.numerator !== undefined ? { numerator: r.numerator, denominator: r.denominator } : {}) }
       }

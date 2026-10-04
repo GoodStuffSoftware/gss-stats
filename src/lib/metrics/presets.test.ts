@@ -9,8 +9,8 @@ import { defineRatios, RATIO_DEFS, RATIOS, ratioVerdict } from './ratios'
 import { validateCard } from './validate'
 import { isReadingCountPath, READING_COUNT_PATHS, type CardSpec, type Label, type MetricItem, type ScopePath } from './types'
 
-/** Every preset id: slice 5's two, slice 7's (the panels they replaced), and R-2's two (picker only), and slice 3's readings log. */
-const PRESET_IDS = ['bsk-kpis', 'campaign-scorecard', 'release-before-after', 'popup-rates', 'signin-eligibility', 'campaign-cost', 'campaign-funnel', 'campaign-country', 'campaign-returns', 'retention-verdict', 'campaign-engagement', 'ads-readings-log'] as const
+/** Every preset id: slice 5's two, slice 7's (the panels they replaced), R-2's two (picker only), slice 3's readings log, and R-4's Play installs. */
+const PRESET_IDS = ['bsk-kpis', 'campaign-scorecard', 'release-before-after', 'popup-rates', 'signin-eligibility', 'campaign-cost', 'campaign-funnel', 'campaign-country', 'campaign-returns', 'retention-verdict', 'campaign-engagement', 'ads-readings-log', 'play-installs'] as const
 const items = (spec: CardSpec): MetricItem[] => spec.sections.flatMap((s) => s.items)
 const labelNoteIds = (l: Label | undefined): string[] => (l && typeof l === 'object' && 'note' in l ? [l.note] : [])
 

@@ -74,9 +74,9 @@ const metricWrites = (w: { sql: string; changes: number }[]) => w.filter((x) => 
 const costOf = (sqlite: ReturnType<typeof openMigratedSqlite>, id: string, date: string) =>
   (sqlite.prepare('SELECT cost_micros FROM ads_daily_metrics WHERE campaign_id = ? AND date = ?').get(id, date) as { cost_micros: number } | undefined)?.cost_micros
 
-describe('migrations 0001-0004 in local SQLite', () => {
+describe('migrations 0001-0005 in local SQLite', () => {
   it('apply in order and create the sync-run table, the de-dup index and the no-REPLACE triggers', () => {
-    expect(migrationFiles()).toEqual(['0001_init.sql', '0002_no_replace.sql', '0003_sync_and_dedup.sql', '0004_sync_claims.sql'])
+    expect(migrationFiles()).toEqual(['0001_init.sql', '0002_no_replace.sql', '0003_sync_and_dedup.sql', '0004_sync_claims.sql', '0005_play_daily.sql'])
     const db = openMigratedSqlite()
     const names = (db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'index', 'trigger')").all() as { name: string }[]).map((r) => r.name)
     for (const n of [

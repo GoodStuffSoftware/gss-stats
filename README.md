@@ -1021,6 +1021,52 @@ npm run -s ads:postflight-read -- --stage wrapup --campaign <arm B id>
 plans, so register any arm, then redeploy the Worker, or its cron and Refresh won't sync that
 arm; the CLI reads still work (they sync for themselves).
 
+### Play installs (`ads:play-sync`, table `ads_play_daily`)
+
+The Best Sudoku Retention page's **Play installs** card (preset `play-installs`: registry
+metrics `play.deviceInstalls`, `play.deviceUninstalls`, `play.activeDeviceInstalls` and
+`play.dataThrough` over the fact `adsPlayDaily`) shows Google Play's whole-app daily totals for
+the page's date range. They live in `ads_play_daily` (migration `0005_play_daily.sql`): one row
+per Play day with four nullable counts and `fetched_at`, nothing else. Counts only, read as
+rows only: there is no hour, country, source or device column, no campaign, and no join to
+beacon rows.
+
+What the figures are, and are not:
+
+- **Lag.** Play's bulk reports trail by about 3-7 days, so the card shows a "data through" date.
+- **Play's day.** Play reports in its own day, which is not confirmed to be the ET day, so Play
+  days are never added to ET-day figures. The card follows the date range only; the sites and
+  own-visits filters do not apply to it.
+- **Active device installs is a stock**, shown as the last stored day in the range, not a sum.
+- **Household.** The counts include our own devices and cannot be attributed to a campaign (no
+  install-referrer capture).
+- **No retention.** Play's bucket has no retention report, so the card has no retention figure
+  and no ratio.
+- **Before the first sync** the card says "no Play figures stored yet". A missing table or
+  binding reads the same way and costs the page nothing. Any other read error (a D1 outage, a
+  bad statement) shows as an error on the tiles, never as "no figures yet".
+
+**How to activate (one time, run by a person; neither CI nor the Worker does it):**
+
+```powershell
+# 1. Create the table in the production ads database. First list what is pending (read-only);
+#    only 0005 should be. ads:migrate applies EVERY pending migration to the production
+#    gss-stats-ads database and uses wrangler's own auth (`npx wrangler login`, or
+#    CLOUDFLARE_API_TOKEN in the environment), not --cf-token-file.
+npx wrangler d1 migrations list gss-stats-ads --remote
+npm run ads:migrate
+# 2. Dry run: reads the Play bucket, writes nothing, needs no Cloudflare token
+npm run ads:play-sync -- --play-sa <path-to-play-service-account.json> --dry-run
+# 3. The first real sync (idempotent: re-running overwrites the same days)
+npm run ads:play-sync -- --play-sa <path-to-play-service-account.json> --cf-token-file <path-to-cf-token>
+```
+
+The default start is 2026-09-26 (the Play tracking go-live); `--since` / `--until` change the
+range. Re-run the sync whenever fresher Play days are wanted (Play re-posts recent days; the
+upsert overwrites them, except that a count Play leaves blank keeps the last stored number). A
+**new** Retention page includes the card; a page already created from the template does not
+gain it, so add it from the card picker ("Play installs").
+
 ## Ads data freshness
 
 Every path that needs Google Ads metrics runs **one** function,

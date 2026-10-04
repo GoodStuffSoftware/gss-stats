@@ -481,6 +481,30 @@ export const ADS_READINGS_LOG: CardSpec = {
   ],
 }
 
+/** Google Play's own install totals (retention build R-4): device installs and uninstalls over the
+ * page's date range, the latest active device installs in it, and how far Play's data runs. Whole-app
+ * counts by PLAY day (as Google reports them, not confirmed ET days), synced by `npm run
+ * ads:play-sync` into the ads store; the page's date range applies, its sites and own-visits
+ * filters do not. No ratio (installs and uninstalls are different things, and active is a stock);
+ * no retention (Play's bulk reports have none). Each tile reads "no Play figures stored yet" until
+ * the first sync, and the card never errors when the table is missing. Counts only. */
+export const PLAY_INSTALLS: CardSpec = {
+  v: 1,
+  minWidth: 230,
+  sections: [
+    {
+      layout: 'tiles',
+      items: [
+        { id: 'installs', label: { metric: true }, data: { metric: 'play.deviceInstalls', window: 'page' }, display: { as: 'number' }, gating: { whenEmpty: { note: 'play-not-synced-yet' } }, ...COMPACT },
+        { id: 'uninstalls', label: { metric: true }, data: { metric: 'play.deviceUninstalls', window: 'page' }, display: { as: 'number' }, gating: { whenEmpty: { note: 'play-not-synced-yet' } }, ...COMPACT },
+        { id: 'active', label: { metric: true }, data: { metric: 'play.activeDeviceInstalls', window: 'page' }, display: { as: 'number' }, gating: { whenEmpty: { note: 'play-not-synced-yet' } }, caption: { note: 'play-active-is-stock' }, captionMode: 'compact' },
+        { id: 'through', label: { metric: true }, data: { metric: 'play.dataThrough', window: 'page' }, display: { as: 'date' }, gating: { whenEmpty: { note: 'play-not-synced-yet' } }, ...COMPACT },
+      ],
+    },
+  ],
+  captions: ['play-days', 'play-household', 'play-no-retention'],
+}
+
 /** Every preset by id. A null prototype, so an id such as 'constructor' or 'toString' is
  * simply not a preset — read through presetById, never a bare bracket lookup. */
 export const PRESETS: Readonly<Record<string, CardSpec>> = Object.freeze(
@@ -497,6 +521,7 @@ export const PRESETS: Readonly<Record<string, CardSpec>> = Object.freeze(
     'retention-verdict': RETENTION_VERDICT,
     'campaign-engagement': CAMPAIGN_ENGAGEMENT,
     'ads-readings-log': ADS_READINGS_LOG,
+    'play-installs': PLAY_INSTALLS,
   }),
 )
 
