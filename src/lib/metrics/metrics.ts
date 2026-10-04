@@ -43,6 +43,7 @@ import {
   type PopupEvent,
 } from '../popupEvents'
 import { isEventPath, isPopupAccept, isPopupShown, isReturnD1Plus } from '../overview'
+import { isSplitRefusedPath } from '../splitGuard'
 import { resolveCampaignSpend, UPSELL_SIGNEDOUT_FIX_AT, AUTH_NEW_EXISTING_LIVE_AT, type SpendSummary } from '../adsRules'
 import { freshnessOf, spendThroughFromRows } from '../adsFreshness'
 import type { BeaconRow, FactId, FactRows } from './facts'
@@ -503,7 +504,7 @@ export const METRIC_DEFS: MetricDef[] = [
   ).map((d) => bskMetric({ ...d, windows: { page: 'adsPlayDaily' }, instrumented: [] })),
 
   // ── Best Sudoku site-wide (bskKpiDays for today so far; bskRangePath for a page range) ──
-  bskMetric({ id: 'bsk.pageviews', unit: 'pageview', path: (p) => !isEventPath(p), windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [] }),
+  bskMetric({ id: 'bsk.pageviews', countsRefused: false, unit: 'pageview', path: (p) => !isEventPath(p) && !isSplitRefusedPath(p), windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [] }),
   // Any tagged first-ever beacon, whatever its campaign (the release panel's "Tagged arrivals":
   // no attribution window, unlike campaign.taggedArrivals).
   bskMetric({ id: 'bsk.taggedArrivals', unit: 'device', unitLabel: 'unit.arrivals', visitor: 'new', anyTag: true, windows: { page: 'bskRangePath', ...RELEASE_WINDOWS }, instrumented: [], caveats: ['arrivals-caveat'] }),

@@ -7,13 +7,14 @@ import { buildFact, deriveBatch, factCuts, newSideMemo, planBatch, releaseWindow
 import { releaseSubjectOn } from '../releases'
 import { etMidnightMs } from './instrumentation'
 import { FACTS, releaseSidesMs, type FactId } from './facts'
-import { METRIC_DEFS, metricWindows } from './metrics'
+import { METRIC_DEFS, METRICS, metricWindows } from './metrics'
 import { RATIO_DEFS, ratioParamsOf, ratioWindowsOf } from './ratios'
 import { MAX_REQUESTS, validateMetricsRequest } from './validate'
 import { prewarm, prewarmChunks, prewarmRequests } from './prewarm'
 import { CAMPAIGNS } from '../campaigns'
 import { POPUPS } from '../popupEvents'
 import { isSplitRefusedPath } from '../splitGuard'
+import { REFUSED_PATH_VOCABULARY } from '../__fixtures__/refusedPaths'
 import type { MetricRequest } from './types'
 
 const NOW = Date.parse('2026-09-26T21:00:00Z')
@@ -135,42 +136,71 @@ describe('KPI comparison: refused-row metrics get whole-day context, opt-outs ke
   // JSON has no Infinity/NaN; both would arrive as null. Rows carry the fact's own columns: d is the
   // whole ET day, t the same-time flag (1 only on a non-refused row before today's clock time).
   type Row = { d: number; c: number; t?: number; path?: string }
-  function kpi(rows: Row[], metric = 'bsk.pageviews', deltas: string[] = ['yesterday', 'avg7']) {
+  // `late` moves the clock past the tour-tracking go-live and all of its 8 days, for the tutorial metric.
+  function kpi(rows: Row[], metric = 'bsk.pageviews', deltas: string[] = ['yesterday', 'avg7'], late = metric === 'bsk.tutorialFirstRun') {
+    const now = late ? Date.parse('2026-10-12T16:00:00Z') : NOW
+    const today = late ? '2026-10-12' : TODAY
     const batch = validateMetricsRequest(JSON.stringify({ v: 1, requests: [{ key: 'a', metric, window: 'todaySoFar', deltas }] }))
     if (!batch.ok) throw new Error(batch.error)
-    const env = { context: batch.context, nowMs: NOW, todayEt: TODAY, hasAdsDb: false }
+    const env = { context: batch.context, nowMs: now, todayEt: today, hasAdsDb: false }
     const plan = planBatch(batch.requests.flatMap((r) => (r.ok ? [r.req] : [])), env)
-    const facts = new Map<string, FactResult>([[plan.facts[0].key, { ok: true, rows: FACTS.bskKpiDays.parse(rows.map((r) => ({ path: '/', visitor: 'new', campaign: '', s: 0, t: 0, ...r }))), asOfMs: NOW }]])
+    const facts = new Map<string, FactResult>([[plan.facts[0].key, { ok: true, rows: FACTS.bskKpiDays.parse(rows.map((r) => ({ path: '/', visitor: 'new', campaign: '', s: 0, t: 0, ...r }))), asOfMs: now }]])
     // A real JSON round trip, exactly what the client receives.
     return JSON.parse(JSON.stringify(deriveBatch(batch.requests, { ...env, facts }))).a
   }
 
-  it('a refused-row metric (bsk.pageviews) gets whole-day yesterday and 7-day average, and no deltas', () => {
-    const a = kpi([
-      { d: 0, c: 12 },
-      { d: 1, c: 4, t: 1 }, // the flag never splits a refused-row metric: both halves of the day count
-      { d: 1, c: 2, t: 0 },
-      { d: 3, c: 7 },
-    ])
+  // A metric that can still count a refused row: first-run tutorial completions (its rows are refused beacons).
+  const REFUSED_METRIC = 'bsk.tutorialFirstRun'
+  const DONE = '/game/tutorial-complete/first-run'
+  it('a refused-row metric (bsk.tutorialFirstRun) gets whole-day yesterday and 7-day average, and no deltas', () => {
+    const a = kpi(
+      [
+        { d: 0, c: 12, path: DONE },
+        { d: 1, c: 4, t: 1, path: DONE }, // the flag never splits a refused-row metric: both halves of the day count
+        { d: 1, c: 2, t: 0, path: DONE },
+        { d: 3, c: 7, path: DONE },
+      ],
+      REFUSED_METRIC,
+    )
     expect(a.value).toBe(12)
     expect('deltas' in a).toBe(false)
     expect(a.wholeDays).toEqual({ yesterday: 6, avg7: 13 / 7 })
   })
   it('wholeDays follows the requested comparisons', () => {
     const rows = [
-      { d: 0, c: 12 },
-      { d: 1, c: 6 },
+      { d: 0, c: 12, path: DONE },
+      { d: 1, c: 6, path: DONE },
     ]
-    expect(kpi(rows, 'bsk.pageviews', ['yesterday']).wholeDays).toEqual({ yesterday: 6 })
-    expect(kpi(rows, 'bsk.pageviews', ['avg7']).wholeDays).toEqual({ avg7: 6 / 7 })
-    expect('wholeDays' in kpi(rows, 'bsk.pageviews', [])).toBe(false)
+    expect(kpi(rows, REFUSED_METRIC, ['yesterday']).wholeDays).toEqual({ yesterday: 6 })
+    expect(kpi(rows, REFUSED_METRIC, ['avg7']).wholeDays).toEqual({ avg7: 6 / 7 })
+    expect('wholeDays' in kpi(rows, REFUSED_METRIC, [])).toBe(false)
   })
   it('empty days: zero whole-day context (a number, never null), and no deltas', () => {
-    for (const rows of [[], [{ d: 0, c: 12 }]]) {
-      const a = kpi(rows)
+    for (const rows of [[], [{ d: 0, c: 12, path: DONE }]]) {
+      const a = kpi(rows, REFUSED_METRIC)
       expect('deltas' in a).toBe(false)
       expect(a.wholeDays).toEqual({ yesterday: 0, avg7: 0 })
     }
+  })
+  it('Page views leaves every refused row out of its count, so it keeps same-time deltas (0.27.3)', () => {
+    const def = METRICS.get('bsk.pageviews')!
+    expect(def.countsRefused).toBe(false)
+    for (const p of REFUSED_PATH_VOCABULARY) expect(def.path!(p, { params: {}, window: 'todaySoFar' }), p).toBe(false)
+    expect(def.path!('/', { params: {}, window: 'todaySoFar' })).toBe(true)
+    // Refused rows (any t) add nothing to today or to a day's same-time window; plain rows do.
+    const a = kpi([
+      { d: 0, c: 12 },
+      { d: 0, c: 99, path: '/game/start/easy' },
+      { d: 0, c: 99, path: '/TOUR/SKIP/x' },
+      { d: 1, c: 6, t: 1 },
+      { d: 1, c: 100, t: 0 }, // later in the day than now: not compared
+      { d: 1, c: 50, t: 0, path: '/tour/exit-at/3' },
+      { d: 3, c: 7, t: 1 },
+    ])
+    expect(a.value).toBe(12)
+    expect(a.deltas.yesterday).toEqual({ delta: 6, deltaPct: 1 })
+    expect(a.deltas.avg7).toEqual({ delta: 12 - 13 / 7, deltaPct: (12 - 13 / 7) / (13 / 7) })
+    expect('wholeDays' in a).toBe(false)
   })
   it('an opt-out metric (bsk.gameViews) sums only the same-time rows for earlier days: its deltas are unchanged', () => {
     // The old fact returned, for each earlier day, only the rows inside its same-time window. The
@@ -206,15 +236,21 @@ describe('KPI comparison: refused-row metrics get whole-day context, opt-outs ke
     expect(a.deltas.avg7).toEqual({ delta: 12 })
   })
   it('a non-finite count yields an error status, never a null value, delta or whole-day number', () => {
-    const inf = kpi([
-      { d: 0, c: Number.POSITIVE_INFINITY },
-      { d: 1, c: 3 },
-    ])
+    const inf = kpi(
+      [
+        { d: 0, c: Number.POSITIVE_INFINITY, path: DONE },
+        { d: 1, c: 3, path: DONE },
+      ],
+      REFUSED_METRIC,
+    )
     expect(inf).toEqual({ status: 'error', reason: 'non-finite' })
-    const nan = kpi([
-      { d: 0, c: 4 },
-      { d: 1, c: Number.NaN },
-    ])
+    const nan = kpi(
+      [
+        { d: 0, c: 4, path: DONE },
+        { d: 1, c: Number.NaN, path: DONE },
+      ],
+      REFUSED_METRIC,
+    )
     // A NaN count parses as 0 (lib/metrics/facts.ts), so yesterday is zero.
     expect(nan.wholeDays).toEqual({ yesterday: 0, avg7: 0 })
     const nanOptOut = kpi(
