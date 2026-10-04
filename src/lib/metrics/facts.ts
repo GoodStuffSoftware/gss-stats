@@ -255,16 +255,16 @@ function pfColumn(): { sql: string; binds: unknown[] } {
  * selected is still only a small integer, never the timestamp. */
 const bucketBound = (x: number, bucketMs: number) => Math.ceil(x / bucketMs) * bucketMs
 
-/** `s`: how many of the sorted `cuts` the row's bucket start has reached (0 when there are none). */
+/** `s`: how many of the sorted `cuts` the row's bucket start has reached (0 when there are none).
+ * The bounds are integer literals (sqlInt), like kpiDayColumn's: a bound parameter per cut made a
+ * fact grow by one for every campaign start and metric go-live (toward D1's 100-per-query cap), and
+ * the statement text still carries every bound, so the fact's cache key (statementHash) still
+ * changes with the cuts. `binds` stays empty so every caller keeps its (sql, binds) shape. */
 function segmentColumn(bucketMs: number, cuts: readonly number[]): { sql: string; binds: unknown[] } {
   if (!cuts.length) return { sql: '0', binds: [] }
   const whens: string[] = []
-  const binds: unknown[] = []
-  for (let k = cuts.length - 1; k >= 0; k--) {
-    whens.push(`WHEN ts >= ? THEN ${k + 1}`)
-    binds.push(bucketBound(cuts[k], bucketMs))
-  }
-  return { sql: `CASE ${whens.join(' ')} ELSE 0 END`, binds }
+  for (let k = cuts.length - 1; k >= 0; k--) whens.push(`WHEN ts >= ${sqlInt(bucketBound(cuts[k], bucketMs))} THEN ${k + 1}`)
+  return { sql: `CASE ${whens.join(' ')} ELSE 0 END`, binds: [] }
 }
 
 /** The KPI same-time windows: [0] today so far, [1..7] the same ET clock time on each of the 7

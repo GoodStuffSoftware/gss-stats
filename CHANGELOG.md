@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.27.4] — 2026-10-04
+
+### Fixed
+- **Registering a campaign no longer eats into the database's 100-parameter query limit.** The campaign, own-host and segment-cut lists are inlined as checked literals, so the busiest chart binds 81 of 100 instead of 99 and a new campaign no longer moves it, and the game-completions read now refuses more than 50 sites with a clear error.
+
 ## [0.27.3] — 2026-10-04
 
 ### Fixed
