@@ -31,4 +31,14 @@ describe('ChartEditor: the Rate type choice', () => {
   it('is kept for a saved rate tile, so it still opens as what it is', () => {
     expect(typeValues(base({ type: 'rate', dimension: 'upsell:tap' }), false)).toContain('rate')
   })
+
+  it('stays offered after a saved rate tile is switched to another type, and switching back works', async () => {
+    const w = mount(ChartEditor, { props: { widget: base({ type: 'rate', dimension: 'upsell:tap' }), isNew: false }, global: { stubs: { CardEditor: true } } })
+    mounted.push(w)
+    const select = () => w.findAll('select').find((s) => s.findAll('option').some((o) => o.attributes('value') === 'stat'))!
+    await select().setValue('stat')
+    expect(select().findAll('option').map((o) => o.attributes('value'))).toContain('rate')
+    await select().setValue('rate')
+    expect((select().element as HTMLSelectElement).value).toBe('rate')
+  })
 })
