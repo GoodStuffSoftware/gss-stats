@@ -325,6 +325,12 @@ const caveatRows = computed<CaveatRow[]>(() => {
       ...(n.unknown ? { unknownId: n.noteId } : {}),
     }))
   const listed = new Set(rows.map((r) => r.hideId))
+  // A rate tile loads no response (rendersOwnBody), so the runtime pop-up note never lists itself,
+  // yet the card shows its install-fix note by default: always offer the Show/Hide row (F1).
+  if (draft.type === 'rate' && !listed.has('popup-note')) {
+    rows.push({ key: 'runtime:popup-note', label: RUNTIME_NOTE_LABELS['popup-note'], hideable: true, hideId: 'popup-note', hidden: hidden.includes('popup-note') })
+    listed.add('popup-note')
+  }
   const specCaptions = new Set(cardSpec.value?.captions ?? [])
   for (const id of hidden) {
     if (listed.has(id) || specCaptions.has(id) || !canHideCaveatId(id)) continue

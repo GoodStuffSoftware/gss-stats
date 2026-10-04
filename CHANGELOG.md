@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Hide the pop-up note on a rate tile** — the chart editor now has a Show/Hide row for the install-fix note under a pop-up rate tile, so it can be hidden as well as brought back.
+
 ## [0.23.0] — 2026-10-03
 
 ### Changed
