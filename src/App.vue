@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { reactive, ref, watch, watchEffect, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
-import type { DashboardConfig, DashboardPage, Widget, GlobalFilters } from './types'
+import { reactive, shallowReactive, ref, watch, watchEffect, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
+import type { DashboardConfig, DashboardPage, Widget, GlobalFilters, StatsResponse } from './types'
 import { defaultConfig, normalizeConfig, defaultWidgetsForPage, clonePage, cryptoId, isBestSudokuLaunchPage, isBestSudokuPopupsPage, isCampaignComparePage, BEST_SUDOKU_SITES, beaconizeWidget, cleanGroupName, cleanPageName } from './lib/defaults'
 import { rangeLabel, dayDrillRange } from './lib/range'
 import { loadConfig, saveConfig, ConfigLoadError } from './api'
@@ -106,8 +106,10 @@ async function readStoredLayout(): Promise<DashboardConfig | typeof LOAD_FAILED>
     return LOAD_FAILED
   }
 }
-/** Put an already-normalized layout on screen. */
+/** Put an already-normalized layout on screen. Chart responses from the layout it replaces (the
+ * stand-in defaults, on a retry) are dropped: each card re-emits its own once it has data. */
 function applyLayout(norm: DashboardConfig) {
+  for (const key of Object.keys(chartData)) delete chartData[key]
   config.version = norm.version
   config.activePageId = norm.activePageId
   config.pages = norm.pages
@@ -390,6 +392,7 @@ function deletePage(id: string) {
   if (!confirm(msg)) return
   const before = [...config.pages]
   config.pages = config.pages.filter((x) => !gone.has(x.id))
+  for (const key of Object.keys(chartData)) if (gone.has(chartDataPage(key))) delete chartData[key]
   const fallback = config.pages.find((x) => x.isDefault) ?? config.pages[0]
   if (gone.has(config.activePageId)) config.activePageId = fallback.id
   if (gone.has(activePageId.value)) switchPage((landingAfterDelete(p, before, config.pages) ?? fallback).id)
@@ -607,10 +610,28 @@ function removeWidget(id: string) {
   const list = activePage.value.widgets
   const i = list.findIndex((x) => x.id === id)
   if (i >= 0) list.splice(i, 1)
+  delete chartData[chartDataKey(activePage.value.id, id)]
 }
+// A duplicate must not share any array or object with the original (notes, hiddenCaveats, items,
+// series, ...). A widget is plain JSON (it is what gets saved), so a JSON round trip is a deep copy
+// that also copes with Vue reactive proxies, which structuredClone refuses.
 function duplicateWidget(wgt: Widget) {
   const id = cryptoId()
-  activePage.value.widgets.push({ ...wgt, id, i: id, x: 0, y: 9999, title: wgt.title + ' (copy)' })
+  const copy: Widget = JSON.parse(JSON.stringify(wgt))
+  activePage.value.widgets.push({ ...copy, id, i: id, x: 0, y: 9999, title: wgt.title + ' (copy)' })
+}
+
+// The latest response (or load error) each ChartCard reports, by page and widget id, so ChartEditor
+// can show runtime caveats for the chart being edited without fetching again. Keyed per page because
+// pages reuse widget ids (`country`, `geo-map`, ...): after a page switch, a card's entry must not be
+// another page's response. Only the page on screen renders cards, so a report belongs to it. Never
+// saved; shallow so the responses are not made deeply reactive; deletePage prunes a gone page's.
+const chartData = shallowReactive<Record<string, { data: StatsResponse | null; error: string | null }>>({})
+const chartDataKey = (pageId: string, widgetId: string) => JSON.stringify([pageId, widgetId])
+const chartDataPage = (key: string) => (JSON.parse(key) as [string, string])[0]
+const editingChartData = computed(() => (editing.value ? chartData[chartDataKey(activePage.value.id, editing.value.widget.id)] : undefined))
+function onChartData(id: string, data: StatsResponse | null, error: string | null) {
+  chartData[chartDataKey(activePage.value.id, id)] = { data, error }
 }
 
 // ── Drill-down: click a chart datapoint → open a new page filtered to that value ─
@@ -1049,6 +1070,7 @@ function toggleDark() {
         @duplicate="duplicateWidget"
         @change="scheduleSave"
         @drill="onDrill"
+        @data="onChartData"
         @open-campaigns="switchPage('bsk-campaigns')"
       />
       <div v-if="loaded && activePage.widgets.length === 0" class="empty">
@@ -1065,6 +1087,8 @@ function toggleDark() {
       :widget="editing.widget"
       :is-new="editing.isNew"
       :filters="activePage.filters"
+      :data="editingChartData?.data ?? null"
+      :error="editingChartData?.error ?? null"
       @save="onEditorSave"
       @cancel="editing = null"
       @remove="onEditorRemove"
