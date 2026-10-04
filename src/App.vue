@@ -106,8 +106,10 @@ async function readStoredLayout(): Promise<DashboardConfig | typeof LOAD_FAILED>
     return LOAD_FAILED
   }
 }
-/** Put an already-normalized layout on screen. */
+/** Put an already-normalized layout on screen. Chart responses from the layout it replaces (the
+ * stand-in defaults, on a retry) are dropped: each card re-emits its own once it has data. */
 function applyLayout(norm: DashboardConfig) {
+  for (const key of Object.keys(chartData)) delete chartData[key]
   config.version = norm.version
   config.activePageId = norm.activePageId
   config.pages = norm.pages
