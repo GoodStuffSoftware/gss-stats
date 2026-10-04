@@ -52,6 +52,8 @@ export interface CampaignAdsInfo {
   thresholdsFired: { threshold: number; firedAt: string }[] | null
   /** When the data was loaded: the clock the freshness line's "synced 2h ago" counts from. */
   loadedAtMs: number
+  /** The campaign has a stored reading, Ads-API spend or an active flight (RepeatSpec.withActivity). */
+  hasActivity?: boolean
 }
 
 /** One object a card, section, item or table column is bound to. A nested repeat's instance
@@ -154,7 +156,10 @@ export function selectsCampaigns(repeat: RepeatSpec | undefined): boolean {
  * repeat is not over campaigns. The organic baseline is not a campaign the widget can pick, so
  * a repeat that asks for it keeps it, whatever the selection. */
 export function narrowToCampaigns(instances: ScopeInstance[], repeat: RepeatSpec | undefined, campaignIds: readonly string[] | undefined): ScopeInstance[] {
-  if (!selectsCampaigns(repeat) || !campaignIds?.length) return instances
+  if (!selectsCampaigns(repeat)) return instances
+  // No selection: a withActivity repeat keeps only the campaigns with something to show (none
+  // until the readings load answers). A selection names the campaigns itself.
+  if (!campaignIds?.length) return repeat?.withActivity ? instances.filter((s) => s.kind === 'organic' || (s.kind === 'campaign' && !!s.ads?.hasActivity)) : instances
   return instances.filter((s) => s.kind === 'organic' || (s.kind === 'campaign' && campaignIds.includes(s.campaign.id)))
 }
 

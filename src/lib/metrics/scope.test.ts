@@ -5,6 +5,7 @@ import { releaseAwaitingFullDay, releaseSubjectOn } from '../releases'
 import {
   buildRequestSpec,
   flattenSectionItems,
+  narrowToCampaigns,
   resolveBinding,
   resolveRepeat,
   scopeField,
@@ -298,5 +299,22 @@ describe('flattenSectionItems', () => {
 describe('todayEtFrom', () => {
   it('is a plain YYYY-MM-DD ET calendar date', () => {
     expect(todayEtFrom(Date.parse('2026-09-27T15:00:00Z'))).toBe('2026-09-27')
+  })
+})
+
+describe('narrowToCampaigns: withActivity (the ads readings log campaign filter)', () => {
+  const adsInfo = (hasActivity: boolean) => ({ spendThrough: null, lastSync: null, stale: false, storeBound: true, thresholdsFired: null, loadedAtMs: 0, hasActivity })
+  const withAds = (c = ACTIVE_RETEST, hasActivity = true): ScopeInstance => ({ kind: 'campaign', campaign: c, ads: adsInfo(hasActivity) })
+  const all: ScopeInstance[] = [campaignScope(CLOSED_ANDROID), withAds(CLOSED_SPEND_ONLY, false), withAds(ACTIVE_RETEST, true)]
+  const repeat = { over: 'campaigns', withActivity: true } as const
+
+  it('keeps only campaigns the readings load found something for; one it has not answered for yet is hidden', () => {
+    expect(narrowToCampaigns(all, repeat, undefined).map((i) => (i.kind === 'campaign' ? i.campaign.id : i.kind))).toEqual([ACTIVE_RETEST.id])
+  })
+  it('an explicit campaignIds selection wins: it shows those, active or not', () => {
+    expect(narrowToCampaigns(all, repeat, [CLOSED_SPEND_ONLY.id]).map((i) => (i.kind === 'campaign' ? i.campaign.id : i.kind))).toEqual([CLOSED_SPEND_ONLY.id])
+  })
+  it('without the flag nothing is filtered', () => {
+    expect(narrowToCampaigns(all, { over: 'campaigns' }, undefined)).toHaveLength(3)
   })
 })

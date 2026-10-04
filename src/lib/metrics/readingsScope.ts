@@ -24,7 +24,9 @@ export function readingScopeOf(r: ReadingRecord): ReadingScope {
   return {
     campaignId: r.campaignId,
     readAt: r.readAt,
-    kind: readingKindLabel(r),
+    // A read that depended on a read that returned nothing says so in the Kind text (it is also
+    // dimmed, MetricSection.vue), as the bespoke readings log did.
+    kind: r.complete ? readingKindLabel(r) : `${readingKindLabel(r)} (incomplete)`,
     spend: r.cumulativeSpend ?? null,
     rules: rulesSummary(r.rules).text,
     proposal: proposalLabel(r),
@@ -36,7 +38,9 @@ export function readingScopeOf(r: ReadingRecord): ReadingScope {
 
 /** What one campaign block of the response says about the campaign itself. */
 export function campaignAdsInfoOf(c: AdsReadingsCampaign, storeBound: boolean, loadedAtMs: number): CampaignAdsInfo {
-  return { spendThrough: c.spendThrough, lastSync: c.lastSync, stale: c.stale, storeBound, thresholdsFired: c.thresholdsFired, loadedAtMs }
+  // What the readings log shows: a campaign with a stored reading, Ads-API spend or an active flight.
+  const hasActivity = !!c.readings?.length || c.spend?.source === 'google-ads-api' || c.status === 'active'
+  return { spendThrough: c.spendThrough, lastSync: c.lastSync, stale: c.stale, storeBound, thresholdsFired: c.thresholdsFired, loadedAtMs, hasActivity }
 }
 
 export interface ReadingsLoad {
