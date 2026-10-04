@@ -9,11 +9,23 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [0.26.0] — 2026-10-03
 
 ### Changed
-- **Restore default charts works on every template page.** A page created from a template now brings back that template's own charts, not the generic set; older Retention pages are recognised too.
-- **The Retention page's filter bar shows only the date range.** The site picker and own-visit exclusions are hidden because nothing on that page reads them, and the date range still drives the Play tiles.
+- **Restore default charts works on every template page.** A page made from a template now restores that template’s own charts instead of the generic set.
+- **The Retention filter bar is trimmed.** It shows only the date range, with a short note when site or exclusion filters from other pages still apply.
 
+## [0.25.2] — 2026-10-03
 
-## [0.25.0] — 2026-10-04
+### Fixed
+- **The retention verdict says how long it is maturing** — it now reads "maturing (5 days left)" (or "1 day left") instead of just "maturing", counted in whole US-Eastern days from the end of the flight, on saved pages too.
+
+## [0.25.1] — 2026-10-03
+
+### Changed
+- **The editor says where a pop-up rate went** — under Chart type, a new chart now shows a one-line hint to make it a metric card and pick the "Pop-up rates" preset.
+
+### Removed
+- **The old single-rate query is gone from the pop-up data source** — a rate tile has been a metric card since 0.23.0, so nothing asked for it; a dashboard tab left open from an older version shows a "reload the page" message on that tile instead of an error.
+
+## [0.25.0] — 2026-10-03
 
 ### Added
 - **Captions and notes can show catalog numbers.** Insert value has a Metrics group (for example Page

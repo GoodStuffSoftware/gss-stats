@@ -19,7 +19,7 @@ import { relativeTime } from '../adsFreshness'
 import { etDateTimeText } from '../adsReadingsFormat'
 import { tokenizeAndInterpolate, type TextToken } from '../textLite'
 import { globalValueResolver } from '../valueTokens'
-import { METRICS, rulesOf, type MetricDef } from './metrics'
+import { armMaturity, METRICS, rulesOf, type MetricDef } from './metrics'
 import { RATIOS, type RatioDef } from './ratios'
 import { campaignOfScope, configRuling, resolveBinding, scopeField, scopeTone, scopeVars, unmeasuredByConfig, type ScopeInstance } from './scope'
 import type { CellTone, Display, Gating, Label, MetricItem, MetricValue, SeriesPoint } from './types'
@@ -201,7 +201,7 @@ function formatBadge(raw: string | null, display: Extract<Display, { as: 'badge'
 }
 
 // ── Metric/ratio value formatting by display kind ─────────────────────────────────────────
-function formatMetricOrRatioValue(display: Display, value: MetricValue, def: MetricDef | RatioDef, nowMs: number): { primary: string; deltaLines: DeltaLine[]; split?: { main: string; sub: string } } {
+function formatMetricOrRatioValue(display: Display, value: MetricValue, def: MetricDef | RatioDef, nowMs: number, daysLeft: number | null = null): { primary: string; deltaLines: DeltaLine[]; split?: { main: string; sub: string } } {
   switch (display.as) {
     case 'number':
       if (value.status === 'too-few') return { primary: noteRawText('too-few-to-report'), deltaLines: [] }
@@ -239,6 +239,11 @@ function formatMetricOrRatioValue(display: Display, value: MetricValue, def: Met
       return { primary: finite(value.value) ? relativeTime(new Date(value.value).toISOString(), nowMs) : '—', deltaLines: [] }
     case 'status': {
       const id = statusNoteOf(value)
+      // A maturing verdict adds its whole-ET-day count (worked out at render time from the campaign's
+      // flight, never carried in the stored value, so saved cards pick it up too).
+      if (id === 'verdict.maturing' && daysLeft !== null && daysLeft >= 1) {
+        return { primary: noteRawText(daysLeft === 1 ? 'verdict.maturing.one' : 'verdict.maturing.days', { n: daysLeft }), deltaLines: [] }
+      }
       return { primary: id ? noteRawText(id) : '—', deltaLines: [] }
     }
     case 'sparkline':
@@ -353,7 +358,9 @@ function metricViewModel(item: MetricItem, value: MetricValue, def: MetricDef | 
   }
   // 'ok' | 'partial' | 'too-few'
   if (item.gating?.whenZero === 'omit' && value.value === 0 && value.status !== 'too-few') return { visible: false, labelTokens, primary: '0', deltaLines: [], captionTokens: [] }
-  const { primary, deltaLines, split } = formatMetricOrRatioValue(item.display, value, def, nowMs)
+  const campaign = item.display.as === 'status' && statusNoteOf(value) === 'verdict.maturing' ? campaignOfScope(scope) : undefined
+  const daysLeft = campaign ? armMaturity(campaign, todayEt).daysToMature : null
+  const { primary, deltaLines, split } = formatMetricOrRatioValue(item.display, value, def, nowMs, daysLeft)
   if (isNewToday(item, value, def)) {
     // Comparisons are hidden while yesterday or the 7-day window reaches back to the go-live day
     // (or a campaign's first, partial day). On that day itself it is "new today"; on the days

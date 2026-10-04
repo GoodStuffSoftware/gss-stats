@@ -42,3 +42,35 @@ describe('ChartEditor: the Rate type choice', () => {
     expect((select().element as HTMLSelectElement).value).toBe('rate')
   })
 })
+
+describe('ChartEditor: the pop-up rate signpost', () => {
+  const COPY = 'For a pop-up rate, make this a metric card, then pick the "Pop-up rates" preset.'
+  const signpost = (widget: Widget, isNew: boolean) => {
+    const w = mount(ChartEditor, { props: { widget, isNew }, global: { stubs: { CardEditor: true } } })
+    mounted.push(w)
+    return w
+  }
+
+  it('a new chart is told where a pop-up rate went, next to the metric-card button', () => {
+    const w = signpost(base(), true)
+    const hint = w.find('[data-testid="rate-signpost"]')
+    expect(hint.exists()).toBe(true)
+    expect(hint.text()).toBe(COPY)
+    expect(w.findAll('button').some((b) => b.text() === 'Make this a metric card instead')).toBe(true)
+  })
+
+  it('the preset it names exists, so the hint points at a real path', async () => {
+    const { presetOptions } = await import('../lib/metrics/editorModel')
+    expect(presetOptions().find((o) => o.value === 'popup-rates')?.label).toMatch(/^Pop-up rates/)
+  })
+
+  it('a saved rate tile (which still offers Rate) does not get it', () => {
+    expect(signpost(base({ type: 'rate', dimension: 'upsell:tap' }), false).find('[data-testid="rate-signpost"]').exists()).toBe(false)
+  })
+
+  it('is gone once the chart is a metric card', async () => {
+    const w = signpost(base(), true)
+    await w.findAll('button').find((b) => b.text() === 'Make this a metric card instead')!.trigger('click')
+    expect(w.find('[data-testid="rate-signpost"]').exists()).toBe(false)
+  })
+})

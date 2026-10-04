@@ -2,9 +2,10 @@
 //
 // PARITY (ADR 0005 slice 4): the pop-up rate tile, rendered the NEW way (the one-item card
 // lib/metrics/rateTileCard.ts builds, over POST /api/metrics) against the OLD way, which is still
-// live: /api/popups answering `dimension: 'rate'` for a POPUP_RATE_SPECS key (the endpoint keeps
-// that branch for a rolled-back build). Both read ONE node:sqlite fixture (functions/_lib/testing),
-// all 22 keys, asserting the same visible rate and counts. Every visible difference is listed next
+// restated as an oracle: the rate the retired /api/popups `dimension: 'rate'` branch computed for a
+// POPUP_RATE_SPECS key (functions/_lib/testing/popupRateOracle.ts; the branch itself was removed in
+// 0.24.1, and the endpoint now answers that dimension with a 400). Both read ONE node:sqlite fixture
+// (functions/_lib/testing), all 22 keys, asserting the same visible rate and counts. Every visible difference is listed next
 // to its case and asserted as itself, so none can appear silently.
 //
 //   T1  The (n/d) line reads "(4/11)" on the card; the old tile printed "4/11". Same numbers.
@@ -35,8 +36,8 @@ import ChartCard from '../ChartCard.vue'
 import { sitesTree } from '../../sitesStore'
 import { __resetMetricsStateForTests } from '../../composables/useMetrics'
 import { onRequestPost as metricsPost } from '../../../functions/api/metrics'
-import { onRequestPost as popupsPost } from '../../../functions/api/popups'
 import { insertHits, installCaches, memoryCache, openHitsDb, pagesContext, postJson, sqliteD1 } from '../../../functions/_lib/testing/hitsDb'
+import { popupRateOracle } from '../../../functions/_lib/testing/popupRateOracle'
 import { bskFixture, FIXTURE_NOW } from '../../../functions/_lib/testing/bskFixture'
 import { BEST_SUDOKU_SITES } from '../../lib/bestSudokuSites'
 import { INSTALL_GAP_RATE_KEY, POPUP_RATE_SPECS, SIGNIN_ELIGIBLE_CAVEAT } from '../../lib/popupEvents'
@@ -109,12 +110,9 @@ const SITES = [...BEST_SUDOKU_SITES] as string[]
 const widgetFor = (key: string): Widget => ({ id: 'r', i: 'r', title: 'Rate', type: 'rate', dataset: 'popup', dimension: key, metric: 'pageviews', limit: 1, x: 0, y: 0, w: 3, h: 3 })
 
 interface Old { value: string; counts: string; tooFew: boolean; note: string }
-/** The retired tile's rendering of the endpoint's answer (its rateDisplay and rateCounts). */
+/** The retired tile's rendering of the retired endpoint's answer (its rateDisplay and rateCounts). */
 async function oldTile(key: string, range: Range, own: Own = OWN): Promise<Old> {
-  const res = await popupsPost(
-    pagesContext(postJson('/api/popups', { dimension: 'rate', rateKey: key, since: range.since, until: range.until, limit: 1, sites: SITES, ...own }), { gss_geo: sqliteD1(db) } as never) as never,
-  )
-  const d = (await res.json()) as { rate: number | null; insufficientCohort?: boolean; numerator?: number; denominator?: number; note?: string }
+  const d = popupRateOracle(db, key, { since: range.since, until: range.until, sites: SITES, ...own })
   const tooFew = !!d.insufficientCohort
   return {
     tooFew,

@@ -301,18 +301,6 @@ export interface StatsResponse {
     // count one of those rows (its site, path, path-family and event-beacon settings allow it).
     refusedWholeDays?: boolean
   }
-  // /api/popups rate answer (a rate tile is a metric card since layout version 18; this is the
-  // endpoint's own shape): the single computed rate, or null for
-  // a zero denominator (no accepts/outcomes yet) — see lib/popupEvents.ts computeRate.
-  rate?: number | null
-  // true when `rate` is null because the denominator was nonzero but under MIN_COHORT
-  // (see lib/popupEvents.ts gateRate) — render "too few to report", not "—".
-  insufficientCohort?: boolean
-  // The raw counts behind `rate` — see lib/popupEvents.ts GatedRate. Shown next to every
-  // rate tile (numerator/denominator) regardless of insufficientCohort, so a viewer always
-  // sees the sample size a percentage came from.
-  numerator?: number
-  denominator?: number
   // Pop-up dataset only: a data caveat that travels with the response (e.g. the known
   // install-outcome gap, lib/popupEvents.ts INSTALL_ACCEPT_OUTCOME_FIXED_ET), rendered under
   // the chart so saved widgets with older titles still show it.
