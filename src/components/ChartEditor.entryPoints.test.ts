@@ -335,6 +335,20 @@ describe('the Filters row: keyboard and focus', () => {
     await escape(w.find('.panel'))
     expect(w.emitted('cancel')).toHaveLength(1)
   })
+  it('turning the chart into a card with the popover open closes it for good: the first Escape cancels', async () => {
+    const w = mountEditor(base, true, page)
+    await flushPromises()
+    await buttonNamed(w, 'Edit').trigger('click')
+    expect(w.find('.fp').exists()).toBe(true)
+    // The card has no Edit (filtersEditable goes false), so the popover leaves with it ...
+    await buttonNamed(w, 'Make this a metric card instead').trigger('click')
+    await flushPromises()
+    expect(w.find('.fp').exists()).toBe(false)
+    expect(buttonNamed(w, 'Edit')).toBeUndefined()
+    // ... and its open flag must not outlive it: Escape is not spent on an invisible popover.
+    await escape(w.find('.panel'))
+    expect(w.emitted('cancel')).toHaveLength(1)
+  })
   it('Escape with the popover closed still cancels at once', async () => {
     const w = mountEditor(base, true, page)
     await flushPromises()
