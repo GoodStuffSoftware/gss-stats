@@ -169,7 +169,11 @@ export async function fetchFacts(plan: Plan, env: MetricFactsEnv, opts: FetchOpt
         statements++
         raw = ((await db.prepare(stmt.sql).bind(...stmt.binds).all()).results ?? []) as Record<string, unknown>[]
       } catch (e) {
-        facts.set(f.key, failSoft ? { ok: true, rows: def.parse([]), asOfMs: opts.nowMs } : { ok: false, error: String(e) })
+        // The spend facts read any error as "nothing stored" (CAMPAIGN_SPEND fills in). Play has no
+        // fallback and its card says "no Play figures stored yet", so only a missing table (migration
+        // 0005 not applied) is empty there; any other error is a real per-metric error.
+        const empty = failSoft && (f.id !== 'adsPlayDaily' || /no such table/i.test(String(e)))
+        facts.set(f.key, empty ? { ok: true, rows: def.parse([]), asOfMs: opts.nowMs } : { ok: false, error: String(e) })
         return
       }
       facts.set(f.key, { ok: true, rows: def.parse(raw), asOfMs: opts.nowMs })

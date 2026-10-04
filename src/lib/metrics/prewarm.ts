@@ -97,7 +97,9 @@ function warmChunk(requests: MetricRequest[]): boolean {
             ? CAMPAIGNS.map((c) => ({ campaign_id: c.id, date: '2026-09-20', fetched_at: '2026-09-21T12:00:00Z' }))
             : f.id === 'adsLastSync'
               ? CAMPAIGNS.map((c) => ({ campaign_id: c.id, last_sync: '2026-09-21T12:00:00Z' }))
-              : f.id === 'bskFirstHit'
+              : f.id === 'adsPlayDaily'
+                ? [{ date: '2026-09-22', device_installs: 4, user_installs: 3, device_uninstalls: 1, active_device_installs: 40 }]
+                : f.id === 'bskFirstHit'
                 ? [{ t: Date.parse('2026-09-01T12:00:00Z') }]
                 : SAMPLE_PATHS.map((path, i) => ({ path, visitor: i % 2 ? 'new' : 'returning', campaign: CAMPAIGNS[i % CAMPAIGNS.length].ucValues[0], d: i % 8, s: i % 3, pf: i % 2, cb: ['US', 'CA', 'other'][i % 3], c: i + 1 }))
       facts.set(f.key, { ok: true, rows: FACTS[f.id].parse(raw), asOfMs: NOW })
