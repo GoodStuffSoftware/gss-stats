@@ -26,6 +26,10 @@
 //    hideable one can be hidden per chart (Widget.hiddenCaveats).
 //  - activeWhen: optional gate (e.g. only while a tracking date is still null) — an
 //    inactive note is simply not returned by defaultNoteIdsForScope/isNoteActive.
+//  - appliesTo: optional per-widget condition for an AUTOMATIC caveat (autoCaveatIds): the
+//    caveat shows automatically only under a widget it is true for (e.g. the country-columns
+//    caveat only on a card that splits by country). Above all for a data-cut note, which a
+//    viewer cannot hide wherever it shows.
 //  - vars: optional default template vars (see lib/textLite.ts tokenizeAndInterpolate) — a
 //    caller can still pass its own vars to override/extend at render time (see
 //    NoteBlock/TextBlock, which call noteTokens — never noteRawText, which is plain-text
@@ -49,6 +53,7 @@ import { ARRIVALS_CAVEAT, RAW_INSTALL_SIGNALS_LABEL, type FunnelStepKey } from '
 import { tokenizeAndInterpolate, toPlainText } from './textLite'
 import { presetById } from './metrics/presets'
 import type { Widget } from '../types'
+import type { CardSpec } from './metrics/types'
 // Read-only: notes.ts is dashboard-only (never bundled into the ads-sync Worker, unlike
 // lib/popupEvents.ts — see that file's own comment on why it keeps AUTH_NEW_EXISTING_LIVE_AT
 // out of itself), so importing the constant from lib/adsRules.ts here is fine.
@@ -90,7 +95,14 @@ export interface NoteDef {
   /** Only `false` is meaningful: a data-cut note a viewer must not hide (per-chart hiding, notes
    * plan slice 1c, reads it). Absent or true = it can be hidden. */
   hideable?: boolean
+  /** An automatic caveat's widget condition (autoCaveatIds): it shows automatically only under a
+   * widget this returns true for. Absent = every widget of its scopes. A caveat that names a
+   * specific view (columns, a split) must carry one, so it never appears where it is untrue. */
+  appliesTo?: (widget: AutoCaveatWidget) => boolean
 }
+
+/** The widget fields an automatic caveat's condition (NoteDef.appliesTo) may read. */
+export type AutoCaveatWidget = Pick<Widget, 'type' | 'dataset' | 'notes' | 'card'>
 
 function resolveText(n: NoteDef): string {
   return typeof n.text === 'function' ? n.text() : n.text
@@ -346,6 +358,8 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     severity: 'info',
     scopes: ['campaigns'],
     hideable: false,
+    // Its text is about "the country columns": automatic only on a card that has them.
+    appliesTo: (w: AutoCaveatWidget) => cardSplitsByCountry(w.card),
   },
   // The release panel (lib/metrics/presets.ts release-before-after): why the before window reads
   // low. Plain wording, as the panel's own line had it.
@@ -692,7 +706,7 @@ export function noteOptions(): { value: string; label: string }[] {
  * `notes` is edited (D5); every other registry entry is a caveat that stays system-owned. */
 export function isStaticCaptionNote(id: string): boolean {
   const n = getNote(id)
-  return !!n && n.kind !== 'label' && typeof n.text === 'string' && !n.activeWhen && !n.vars && n.hideable !== false
+  return !!n && n.kind !== 'label' && typeof n.text === 'string' && !n.activeWhen && !n.vars && n.hideable !== false && !n.appliesTo
 }
 
 /** "Insert from library" options: every static caption, id + a short plain-text preview. The
@@ -733,21 +747,49 @@ export function widgetNoteScope(widget: { dataset?: string }): NoteScope | null 
 /** A card widget's own spec caption ids (CardSpec.captions; a preset ref is resolved). MetricCard
  * shows these inside the card body. */
 function cardCaptionIds(card: Widget['card']): readonly string[] {
-  if (!card) return []
-  return ('preset' in card ? presetById(card.preset)?.captions : card.spec.captions) ?? []
+  return cardSpecOf(card)?.captions ?? []
+}
+
+/** A card widget's spec: its own, or its preset's (undefined for an unknown preset or no card). */
+function cardSpecOf(card: Widget['card']): CardSpec | undefined {
+  if (!card) return undefined
+  return 'preset' in card ? presetById(card.preset) : card.spec
+}
+
+/** True when a card shows country columns or a per-country repeat anywhere: the card itself, a
+ * section's repeat or `columns`, or an item's repeat over 'countries' (the same places
+ * lib/metrics/validate.ts dropRetiredItems reads). Stored data, so every level is checked
+ * defensively. A plain chart never has country columns. */
+export function cardSplitsByCountry(card: Widget['card']): boolean {
+  const spec = cardSpecOf(card)
+  if (!spec) return false
+  const overCountries = (r: unknown): boolean => !!r && typeof r === 'object' && (r as { over?: unknown }).over === 'countries'
+  if (overCountries(spec.repeat)) return true
+  return (Array.isArray(spec.sections) ? spec.sections : []).some(
+    (sec) =>
+      !!sec &&
+      (overCountries(sec.repeat) ||
+        overCountries(sec.columns) ||
+        (Array.isArray(sec.items) ? sec.items : []).some((it) => !!it && overCountries(it.repeat))),
+  )
 }
 
 /** Decision D2-B (layout v16): the caveats a widget shows automatically, in registry order. They
  * are its scope's defaults (defaultNoteIdsForScope, so an `activeWhen` gate is honoured) that are
- * not static captions (isStaticCaptionNote: those are the author's to insert), minus the ids the
+ * not static captions (isStaticCaptionNote: those are the author's to insert) and whose widget
+ * condition (NoteDef.appliesTo) holds for this widget, minus the ids the
  * widget already shows another way: its legacy `notes` and, on a card, the spec's own captions.
  * A note widget has none. A hideable one is hidden through Widget.hiddenCaveats by its registry
  * id; a data-cut one (`hideable: false`) always shows. normalizeConfig hides, once, the hideable
  * ones a chart stored before v16 did not show (lib/defaults.ts seedHiddenAutoCaveatsV16). */
-export function autoCaveatIds(widget: Pick<Widget, 'type' | 'dataset' | 'notes' | 'card'>): string[] {
+export function autoCaveatIds(widget: AutoCaveatWidget): string[] {
   if (widget.type === 'note') return []
   const scope = widgetNoteScope(widget)
   if (!scope) return []
   const shown = new Set([...(widget.notes ?? []), ...cardCaptionIds(widget.card)])
-  return defaultNoteIdsForScope(scope).filter((id) => !isStaticCaptionNote(id) && !shown.has(id))
+  return defaultNoteIdsForScope(scope).filter((id) => {
+    if (isStaticCaptionNote(id) || shown.has(id)) return false
+    const applies = getNote(id)?.appliesTo
+    return !applies || applies(widget)
+  })
 }

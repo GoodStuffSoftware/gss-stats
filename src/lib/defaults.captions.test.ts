@@ -11,10 +11,11 @@ import {
   HIDDEN_CAVEATS_MAX,
   LAYOUT_VERSIONS,
   defaultConfig,
+  defaultWidgetsForPage,
   normalizeConfig,
   seedHiddenAutoCaveatsV16,
 } from './defaults'
-import { autoCaveatIds } from './notes'
+import { autoCaveatIds, isNoteIdHideable } from './notes'
 import { chartNotes } from './chartNotes'
 import PROD_V12 from './__fixtures__/prodLayout.v12.json'
 import { PRESETS } from './metrics/presets'
@@ -71,14 +72,14 @@ describe('captions: normWidget limits', () => {
     for (const hiddenCaveats of [[], ['BAD', ''], 'popup-note', { a: 1 }, null]) expect('hiddenCaveats' in load({ ...BASE, hiddenCaveats }), JSON.stringify(hiddenCaveats)).toBe(false)
   })
 
-  it('absent stays absent: a widget that never had them gains no keys, and no default widget has them', () => {
+  it('absent stays absent: a widget that never had them gains no keys; a default widget has no caption and hides only its unlisted hideable autos', () => {
     const w = load({ ...BASE })
     expect('caption' in w).toBe(false)
     expect('hiddenCaveats' in w).toBe(false)
     for (const p of normalizeConfig(defaultConfig()).pages)
       for (const dw of p.widgets) {
         expect('caption' in dw, dw.id).toBe(false)
-        expect('hiddenCaveats' in dw, dw.id).toBe(false)
+        expect(dw.hiddenCaveats ?? [], dw.id).toEqual(autoCaveatIds(dw).filter(isNoteIdHideable))
       }
   })
 })
@@ -161,17 +162,23 @@ describe('captions: the v16 step (D2-B) on a pre-v16 layout', () => {
 
   it('hides exactly the hideable automatic caveats a chart did not show; listed ones and data-cut ones stay visible', () => {
     // campaigns today: play-tracking-status, min-cohort-caveat (hideable), country-split-excludes-refused (not).
-    expect(autoCaveatIds(campaignsChart as Widget)).toEqual(['play-tracking-status', 'min-cohort-caveat', 'country-split-excludes-refused'])
+    // country-split-excludes-refused (not hideable) is automatic only on a card with country columns (B4a)
+    expect(autoCaveatIds(campaignsChart as Widget)).toEqual(['play-tracking-status', 'min-cohort-caveat'])
     expect(load(campaignsChart, prev).hiddenCaveats).toEqual(['play-tracking-status', 'min-cohort-caveat'])
     expect(load({ ...campaignsChart, notes: ['min-cohort-caveat'] }, prev).hiddenCaveats).toEqual(['play-tracking-status'])
     expect(load({ ...campaignsChart, notes: ['play-tracking-status', 'min-cohort-caveat'] }, prev).hiddenCaveats).toBeUndefined()
     expect(load(popupChart, prev).hiddenCaveats).toEqual(['min-cohort-caveat'])
   })
 
-  it('an upgraded chart shows what it showed before, plus its data-cut caveat (D3)', () => {
+  it('an upgraded chart shows what it showed before, plus a data-cut caveat only where it holds (D3, B4a)', () => {
     const old = { ...campaignsChart, notes: ['arrivals-caveat'] }
-    expect(chartNotes(load(old, prev), null, null).map((n) => n.key)).toEqual(['caption:arrivals-caveat', 'caveat:country-split-excludes-refused'])
+    expect(chartNotes(load(old, prev), null, null).map((n) => n.key)).toEqual(['caption:arrivals-caveat'])
     expect(chartNotes(load(popupChart, prev), null, null)).toEqual([])
+    // a saved copy of the country card without its own caption: country columns, so the cut shows
+    const country = { ...old, card: { spec: { ...clone(PRESETS['campaign-country']), captions: [] } } }
+    const loaded = load(country, prev)
+    expect(loaded.hiddenCaveats).toEqual(['play-tracking-status', 'min-cohort-caveat'])
+    expect(chartNotes(loaded, null, null).map((n) => n.key)).toEqual(['caption:arrivals-caveat', 'caveat:country-split-excludes-refused'])
   })
 
   it('merges with hidden ids already stored, deduped, capped', () => {
@@ -192,7 +199,7 @@ describe('captions: the v16 step (D2-B) on a pre-v16 layout', () => {
 
   it('a card: its spec captions are not automatic caveats, so they are neither shown twice nor seeded', () => {
     const card = { ...campaignsChart, card: { spec: { ...clone(PRESETS['campaign-scorecard']), captions: ['min-cohort-caveat'] } } }
-    expect(autoCaveatIds(card as Widget)).toEqual(['play-tracking-status', 'country-split-excludes-refused'])
+    expect(autoCaveatIds(card as Widget)).toEqual(['play-tracking-status'])
     expect(load(card, prev).hiddenCaveats).toEqual(['play-tracking-status'])
     const preset = { ...campaignsChart, card: { preset: 'campaign-country' } } // its preset captions country-split-excludes-refused
     expect(autoCaveatIds(preset as Widget)).toEqual(['play-tracking-status', 'min-cohort-caveat'])
@@ -228,5 +235,44 @@ describe('captions: the v16 step (D2-B) on a pre-v16 layout', () => {
       seeded += added.length
     }
     expect(seeded).toBeGreaterThan(0)
+  })
+})
+
+describe('built-in default charts look as they did before 1c (B4a)', () => {
+  /** The registry notes a chart shows today: caption:/caveat: entries (a card's own spec captions
+   * render inside the card, not here). */
+  const visibleRegistryIds = (w: Widget) => chartNotes(w, null, null).filter((n) => n.noteId).map((n) => n.noteId)
+  /** Before 1c a chart showed exactly its legacy notes ids, in order. */
+  const before = (w: Widget) => w.notes ?? []
+  const charts = (ws: Widget[]) => ws.filter((w) => w.type !== 'note')
+
+  it('the default layout: every chart shows exactly the caveats its legacy notes showed', () => {
+    const pages = normalizeConfig(defaultConfig()).pages
+    expect(pages.length).toBeGreaterThan(0)
+    let campaignsCharts = 0
+    for (const p of pages)
+      for (const w of charts(p.widgets)) {
+        expect(visibleRegistryIds(w), `${p.id}/${w.id}`).toEqual(before(w))
+        if (w.dataset === 'campaigns') campaignsCharts++
+      }
+    expect(campaignsCharts).toBeGreaterThan(0) // the scope with automatic caveats is covered
+  })
+
+  it('"restore defaults" on every built-in page gives charts that show exactly their legacy notes', () => {
+    for (const p of normalizeConfig(defaultConfig()).pages)
+      for (const w of charts(defaultWidgetsForPage(p))) expect(visibleRegistryIds(w), `${p.id}/${w.id}`).toEqual(before(w))
+  })
+
+  it('the default layout survives a reload unchanged (the factory seed and the v16 step agree)', () => {
+    const once = normalizeConfig(defaultConfig())
+    const twice = normalizeConfig(json(once))
+    // the caption fields only: a chart's own relative date window re-resolves against the clock
+    const fields = (w: Widget) => json({ id: w.id, notes: w.notes, caption: w.caption, hiddenCaveats: w.hiddenCaveats })
+    expect(twice.pages.map((p) => p.widgets.map(fields))).toEqual(once.pages.map((p) => p.widgets.map(fields)))
+  })
+
+  it('a new chart a user adds still gets its automatic caveats', () => {
+    const w = { ...BASE, id: 'n', i: 'n', type: 'table', dataset: 'campaigns', view: 'funnel' } as Widget
+    expect(visibleRegistryIds(w)).toEqual(['play-tracking-status', 'min-cohort-caveat'])
   })
 })

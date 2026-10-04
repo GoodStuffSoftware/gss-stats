@@ -148,10 +148,14 @@ describe('ChartEditor: Data caveats', () => {
     const w = open(base({ dataset: 'campaigns', view: 'funnel' }))
     const cohort = row(w, 'caveat:min-cohort-caveat')
     expect((cohort.get('input[type="checkbox"]').element as HTMLInputElement).checked).toBe(true)
-    const cut = row(w, 'caveat:country-split-excludes-refused')
-    expect((cut.get('input[type="checkbox"]').element as HTMLInputElement).disabled).toBe(true)
+    // the country data cut is listed only where it holds: a card with country columns (B4a)
+    expect(row(w, 'caveat:country-split-excludes-refused').exists()).toBe(false)
     await cohort.get('input[type="checkbox"]').setValue(false)
     expect((await save(w)).hiddenCaveats).toEqual(['min-cohort-caveat'])
+    const spec: CardSpec = { ...JSON.parse(JSON.stringify(PRESETS['campaign-country'])), captions: [] }
+    const country = open(base({ dataset: 'campaigns', type: 'table', card: { spec } }))
+    const cut = row(country, 'caveat:country-split-excludes-refused')
+    expect((cut.get('input[type="checkbox"]').element as HTMLInputElement).disabled).toBe(true)
   })
 
   it('an automatic caveat the chart hides is listed unchecked, never twice', () => {
