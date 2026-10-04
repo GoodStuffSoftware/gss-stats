@@ -240,7 +240,7 @@ reload the readings source as well as the metrics.
 Every `POPUP_RATE_SPECS` key has a registered ratio (see decision (b)'s table), so a rate tile
 maps to a card with one item and the pop-up as a param. The card already shows "(n/d)" and
 "too few to report". Missing: nothing in the registry under the default; the mapping function;
-the editor change (the "Rate" type stops being offered; a new rate is a card); and the
+the editor change (the "Rate" type stops being offered for new charts, in slice 5; a new rate is a card, and a saved rate tile keeps the option); and the
 per-chart filter button. `ChartCard` hides that button for any widget it treats as a card
 (`isBespokeBody`), but the card still honours a stored `widget.filters` override, so a mapped
 rate tile would keep an override nobody can see or clear. Default: keep the filter button for
@@ -285,8 +285,9 @@ totals are not zero), and a pop-up-dataset stat tile shows "Tracking not yet act
 go-live. The render test pins both.
 
 Risks: card tile and stat tile styling converge, which changes the stat tile's look slightly;
-the `.stat` class is styled in `ChartCard.vue` and in the zoomed view. The rate tile also uses
-`.stat`, so slice 4 and slice 5 touch the same styles; whichever lands second rebases.
+the `.stat` class was styled in `ChartCard.vue` and in the zoomed view; slice 5 as built replaces it
+with the shared `.stat-tile-*` styles. The rate tile is a metric card since slice 4, so it no longer
+touches those styles.
 
 ## Saved layouts and rollback
 
@@ -343,7 +344,7 @@ and a README update when it is visible to users, and an adversarial parity revie
 | **1. Fit-to-content height** | `Widget.fit`, `normWidget` whitelist, the measuring and grid-height logic, the editor checkbox | Row-count maths as table tests; `normWidget` round trip; canvas widgets never fit | none |
 | **2. Sparklines** | `series` on the request and value, the engine's per-day series, validation, `render.ts`, the SVG in `MetricItem`, the editor enabling it; `CONFIG_VERSION` bump (no data migration) | Engine series equals the date chart's per-day counts on one `node:sqlite` fixture; a ratio series is rejected; go-live gaps; editor and render tests flipped | none |
 | **3. Readings log preset** | Readings scope source, `reading.count.*` and campaign spend/freshness/threshold scope paths, card notices, preset `ads-readings-log`, `ads-readings` widgets render it; retire the bespoke readings widget; `CONFIG_VERSION` bump | Parity: every number and label the old body shows, from one readings fixture, through the card; `campaignIds` narrowing; refresh reloads readings | 1 |
-| **4. Rate tile to card** | The rate-tile-to-card mapping, the per-chart filter button kept for mapped tiles, retire the inline rate markup (the editor keeps offering "Rate": a new one stores the same `type: 'rate'` shape and is mapped at render time; dropping the option is slice 5); `CONFIG_VERSION` bump; under the page-rule choice, the outcome `pair` ratios | Parity per `POPUP_RATE_SPECS` key (all 22): n/d, percent and too-few state, old tile versus card; d = 0 and d = 1-4; a range longer than `MAX_RANGE_DAYS`; a bare-date range and `since === until`; a browser string `safeUA` rewrites; the install-gap note and the eligibility caveat; a stored filter override; differences listed | decision (b) (default taken; built as layout key `rateTile: 18`) |
+| **4. Rate tile to card** | The rate-tile-to-card mapping, the per-chart filter button kept for mapped tiles, retire the inline rate markup (until slice 5 the editor keeps offering "Rate": a new one stores the same `type: 'rate'` shape and is mapped at render time; slice 5 drops the option for new charts, and a saved rate tile keeps it so it can still be edited and switched back); `CONFIG_VERSION` bump; under the page-rule choice, the outcome `pair` ratios | Parity per `POPUP_RATE_SPECS` key (all 22): n/d, percent and too-few state, old tile versus card; d = 0 and d = 1-4; a range longer than `MAX_RANGE_DAYS`; a bare-date range and `since === until`; a browser string `safeUA` rewrites; the install-gap note and the eligibility caveat; a stored filter override; differences listed | decision (b) (default taken; built as layout key `rateTile: 18`) |
 | **5. Shared stat and bar components** | `StatTile`, `BarTable`, used by `ChartCard` and by the card's tile frame and bars layout; retire the inline markup | Render tests pin the stat and table numbers before and after, per dataset, plus the empty-rows and "Tracking not yet active" states; card tests unchanged | decision (a) (the default unblocks it) |
 
 Slice 4, as built: a saved rate tile is mapped to a one-item card when it is drawn (nothing is
