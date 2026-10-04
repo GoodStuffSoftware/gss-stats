@@ -79,7 +79,7 @@ const todayEt = computed(() => todayEtFrom(nowMs.value))
 // on mount, when its query changes, on the card reload, after an ads refresh and on return to
 // the tab. The `readings` prop stays as an override for the rows (tests, previews): when given,
 // a card that only needs the rows does not fetch.
-const wantsAds = computed(() => !!spec.value?.actions?.includes('ads-refresh'))
+const wantsAds = computed(() => !!spec.value?.actions?.includes('ads-refresh') || !!spec.value?.notices)
 const wantsReadings = computed(() => !!spec.value && repeatsOverReadings(spec.value))
 const loadsReadings = computed(() => wantsAds.value || (wantsReadings.value && props.readings === undefined))
 /** The most readings per campaign asked for; a card that needs only the freshness asks for one. */
@@ -125,6 +125,25 @@ useReturnRefresh(() => {
 const readingsLoad = computed(() => (readingsData.value ? readingsLoadOf(readingsData.value) : NO_READINGS))
 const ctx = computed<RepeatContext>(() => ({ todayEt: todayEt.value, readings: props.readings ?? readingsLoad.value.readings, ads: readingsLoad.value.ads }))
 const instances = computed<ScopeInstance[]>(() => (spec.value ? narrowToCampaigns(resolveRepeat(spec.value.repeat, ctx.value), spec.value.repeat, props.campaignIds) : []))
+
+/** The first load is still out: a card that waits on the readings shows no empty state yet. */
+const readingsPending = computed(() => loadsReadings.value && !readingsData.value && !readingsFailed.value)
+
+// ── Notices (CardSpec.notices) ──────────────────────────────────────────────────────────────
+// 'ads-readings': the readings store's warning when it is unbound or unreadable, the
+// small-numbers note, then the sync alerts that killed a run in the last week, in the order the
+// bespoke readings log showed them. Nothing until the load has answered. Plain text through the
+// notes registry (a server message is only ever substituted into a text token).
+const noticeLines = computed<{ key: string; text: string; warn: boolean }[]>(() => {
+  const d = readingsData.value
+  if (spec.value?.notices !== 'ads-readings' || !d) return []
+  const out: { key: string; text: string; warn: boolean }[] = []
+  if (!d.storeBound) out.push({ key: 'unbound', text: noteRawText('ads-store-unbound'), warn: true })
+  else if (!d.storeReadable) out.push({ key: 'unreadable', text: noteRawText('ads-store-unreadable'), warn: true })
+  out.push({ key: 'small', text: noteRawText('ads-readings-note'), warn: false })
+  for (const a of d.syncAlerts ?? []) out.push({ key: a.source + a.startedAt, text: noteRawText('label.card.syncAlert', { message: a.message }), warn: true })
+  return out
+})
 
 // ── Card-level requests (freshness, errors, reload) ─────────────────────────────────────────
 // The card holds its own reference on every request its items make (content-equal requests
@@ -224,6 +243,9 @@ const allHidden = computed(() => instances.value.length > 0 && instances.value.e
   <div v-else class="metric-card-root">
     <!-- Present from mount and empty until an error, so screen readers announce the change. -->
     <span class="mc-live" role="status" aria-live="polite">{{ hasError ? failedText : '' }}</span>
+    <div v-if="noticeLines.length" class="mc-notices">
+      <p v-for="n in noticeLines" :key="n.key" class="mc-notice" :class="{ warn: n.warn }">{{ n.text }}</p>
+    </div>
     <div v-if="adsRefresh" class="mc-actions">
       <AdsRefreshButton :campaign-ids="actionCampaignIds" @refreshed="onAdsRefreshed" />
     </div>
@@ -234,7 +256,7 @@ const allHidden = computed(() => instances.value.length > 0 && instances.value.e
     <!-- Keyed on the ET day: a new day remounts the body, so every repeat and request rebuilds. -->
     <div v-if="spec.repeat" :key="todayEt" class="metric-card-grid" :style="{ '--mc-min-width': `${spec.minWidth ?? 230}px` }">
       <MetricCardInstance v-for="(scope, i) in instances" v-show="!hiddenInstances.has(i)" :key="i" :spec="spec" :scope="scope" :ctx="ctx" :context="context" :boxed="true" @open="emit('open-campaigns')" @hidden="(h: boolean) => onHidden(i, h)" />
-      <p v-if="(!instances.length || allHidden) && spec.repeat.empty" class="metric-card-empty">
+      <p v-if="((!instances.length && !readingsPending) || allHidden) && spec.repeat.empty" class="metric-card-empty">
         <MetricLabel :tokens="resolveLabelTokens(spec.repeat.empty.label, ROOT_SCOPE, undefined, todayEt)" />
         <MetricLabel :tokens="resolveLabelTokens(spec.repeat.empty.text, ROOT_SCOPE, undefined, todayEt)" />
       </p>
@@ -278,6 +300,17 @@ const allHidden = computed(() => instances.value.length > 0 && instances.value.e
 }
 .mc-actions {
   margin-bottom: 8px;
+}
+.mc-notices {
+  margin-bottom: 8px;
+}
+.mc-notice {
+  margin: 0 0 4px;
+  font-size: 11.5px;
+  color: rgb(var(--ink-3));
+}
+.mc-notice.warn {
+  color: #bc4749;
 }
 .mc-captions {
   margin-top: 8px;

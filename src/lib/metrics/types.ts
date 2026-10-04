@@ -155,6 +155,10 @@ export interface RepeatSpec {
    * drop it; bindings that don't serve it are left out of its instance (scope.ts configRuling). */
   organic?: boolean
   flightingToday?: boolean
+  /** Campaigns only: keep the campaigns the ads readings load says have something to show — a
+   * stored reading, Ads-API spend, or an active flight — unless the widget selected campaigns
+   * itself (narrowToCampaigns). What the ads readings log shows; none until the load answers. */
+  withActivity?: boolean
   /** Readings only: at most this many (newest first; per campaign when nested in a campaign
    * repeat). A whole number, DEFAULT_READINGS_LIMIT when unset, MAX_READINGS_LIMIT at most. */
   limit?: number
@@ -196,6 +200,10 @@ export interface Section {
 
 /** A control a card can host (CardSpec.actions): a code-reviewed component, never markup. */
 export type CardAction = 'ads-refresh'
+/** Registry-backed notices a card shows above its body, from its own data load: 'ads-readings'
+ * is the readings store's warnings (unbound / unreadable), the small-numbers note and the
+ * sync alerts, in that order. */
+export type CardNotices = 'ads-readings'
 
 /** The container: a Card (one instance) or, with `repeat`, a StatList of N identical instances. */
 export interface CardSpec {
@@ -210,6 +218,9 @@ export interface CardSpec {
   /** Controls in the card's status row: 'ads-refresh' syncs the campaigns' Google Ads spend now
    * (the ads refresh flow) and reloads the card. */
   actions?: CardAction[]
+  /** Notices above the body (see CardNotices). Needs the ads readings load, so a card that
+   * sets it loads GET /api/ads/readings like one that repeats over readings. */
+  notices?: CardNotices
   /** "Updated Xs ago" (the card's latest successful load) with a reload control: top-right in
    * the card's header (`true` or 'header', where the old KPI panel had it) or in a footer. */
   showUpdated?: boolean | 'header' | 'footer'

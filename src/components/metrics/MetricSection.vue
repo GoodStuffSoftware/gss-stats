@@ -106,6 +106,16 @@ const columnRows = computed(() => {
     .filter(({ r }) => n === 0 || Array.from({ length: n }, (_, c) => visibleAt(r * n + c)).some(Boolean))
 })
 
+// A row table with no rows shows its repeat's `empty` text instead of vanishing (the readings log's
+// "No readings yet."): once the data it waits on is in (a campaign's readings load, `ads`).
+const tableEmpty = computed(() => {
+  const r = props.section.repeat
+  if (props.section.layout !== 'table' || isColumnTable.value || !r?.empty || tableRows.value.length) return false
+  return props.outerScope.kind !== 'campaign' || !!props.outerScope.ads
+})
+const tableEmptyLabel = computed(() => (props.section.repeat?.empty ? resolveLabelTokens(props.section.repeat.empty.label, props.outerScope, undefined, props.ctx.todayEt) : []))
+const tableEmptyText = computed(() => (props.section.repeat?.empty ? resolveLabelTokens(props.section.repeat.empty.text, props.outerScope, undefined, props.ctx.todayEt) : []))
+
 const anyVisible = computed(() => {
   if (isColumnTable.value) return columnRows.value.length > 0
   // A row table is shown while any of its data cells is (a field column, such as a row's own
@@ -121,7 +131,7 @@ const anyVisible = computed(() => {
 </script>
 
 <template>
-  <div v-if="anyVisible" class="metric-section" :class="`layout-${section.layout}`">
+  <div v-if="anyVisible || tableEmpty" class="metric-section" :class="`layout-${section.layout}`">
     <p v-if="titleTokens.length" class="section-title"><MetricLabel :tokens="titleTokens" /></p>
 
     <div v-if="isColumnTable" class="metric-table-wrap">
@@ -143,6 +153,11 @@ const anyVisible = computed(() => {
       </table>
     </div>
 
+    <p v-else-if="tableEmpty" class="metric-table-empty">
+      <MetricLabel :tokens="tableEmptyLabel" />
+      <MetricLabel :tokens="tableEmptyText" />
+    </p>
+
     <table v-else-if="section.layout === 'table'" class="metric-table">
       <thead>
         <tr>
@@ -150,7 +165,7 @@ const anyVisible = computed(() => {
         </tr>
       </thead>
       <tbody>
-        <tr v-for="(rowScope, ri) in tableRows" :key="ri">
+        <tr v-for="(rowScope, ri) in tableRows" :key="ri" :class="{ incomplete: rowScope.kind === 'reading' && rowScope.reading.complete === false }">
           <td v-for="item in section.items" :key="item.id">
             <MetricTableCell :item="item" :scope="rowScope" :today-et="ctx.todayEt" :context="context" />
           </td>
@@ -229,6 +244,15 @@ const anyVisible = computed(() => {
 .metric-table td {
   padding: 3px 8px 3px 0;
   border-bottom: 1px solid rgb(var(--line));
+}
+.metric-table-empty {
+  margin: 0;
+  font-size: 11.5px;
+  color: rgb(var(--ink-3));
+}
+/* A stored reading whose inputs were missing (its Kind also says so) is drawn dimmer. */
+.metric-table tr.incomplete td {
+  opacity: 0.7;
 }
 .metric-table.columns th.num,
 .metric-table.columns td.num {
