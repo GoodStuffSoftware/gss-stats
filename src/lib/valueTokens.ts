@@ -131,8 +131,9 @@ const missingChart = (): TokenValues => ({
 /** The days a response covers, named the way #55's range note names them. When the range was cut:
  * the served window (its `to` is exclusive; ET days, or UTC for a `dayZone: 'utc'` notice). Else
  * the asked-for range: an exact ET day (etDayOfRange) is that day, an exact run of whole UTC days
- * (ymdRangeToISO's shape) is those UTC days, and anything else (a relative "Last 7d") is the ET day
- * of `since` through the ET day of `until − 1 ms`, so the days don't depend on the time of viewing. */
+ * (ymdRangeToISO's shape, or bare YYYY-MM-DD bounds) is those UTC days, and anything else (a
+ * relative "Last 7d") is the ET day of `since` through the ET day of `until − 1 ms`, so the days
+ * don't depend on the time of viewing. */
 function shownDays(data: StatsResponse): { from: string; to: string } | null {
   const served = data.notice?.served
   if (data.notice) {
@@ -147,7 +148,8 @@ function shownDays(data: StatsResponse): { from: string; to: string } | null {
   const until = data.meta?.until
   if (!since || !until) return null
   const s = Date.parse(since)
-  const u = Date.parse(until)
+  // a bare-date `until` is the whole UTC day, as the server reads it (inclusive)
+  const u = Date.parse(YMD_RE.test(until) ? ymdRangeToISO(until, until).until : until)
   if (!Number.isFinite(s) || !Number.isFinite(u)) return null
   const etDay = etDayOfRange(since, until)
   if (etDay) return { from: etDay, to: etDay }
