@@ -12,6 +12,7 @@ import { __resetMetricsStateForTests } from '../../composables/useMetrics'
 import { validateCard } from '../../lib/metrics/validate'
 import { PRESETS } from '../../lib/metrics/presets'
 import type { CardRef, CardSpec } from '../../lib/metrics/types'
+import { NOTES_REGISTRY } from '../../lib/notes'
 
 const mounted: VueWrapper[] = []
 beforeEach(() => {
@@ -122,6 +123,24 @@ describe('Show/Hide toggles for the spec captions', () => {
     ;(t.element as HTMLButtonElement).click()
     await flushPromises()
     expect(hiddenEmits(w)).toEqual([])
+  })
+
+  it('a known caption whose id hiddenCaveats cannot store gets no working Hide toggle (NIT-4)', async () => {
+    const BAD = 'Bad_Id'
+    NOTES_REGISTRY[BAD] = { id: BAD, text: () => 'Shape the hidden list cannot hold.', kind: 'note', severity: 'caveat', scopes: [] }
+    try {
+      const w = await mountEditor({ spec: releaseSpec([BAD]), from: 'release-before-after' })
+      expect(rows(w)).toHaveLength(2)
+      const t = toggle(w, 1)
+      expect(t.attributes('disabled')).toBeDefined()
+      ;(t.element as HTMLButtonElement).click()
+      await flushPromises()
+      expect(hiddenEmits(w)).toEqual([])
+      await toggle(w, 0).trigger('click')
+      expect(hiddenEmits(w)).toEqual([['release-before-partial']])
+    } finally {
+      delete NOTES_REGISTRY[BAD]
+    }
   })
 
   it('points to the chart caption for new text, with or without spec captions', async () => {

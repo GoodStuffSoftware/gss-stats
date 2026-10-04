@@ -257,6 +257,14 @@ describe('ChartEditor: card spec captions (CardEditor wiring, part B2)', () => {
     expect('hiddenCaveats' in (await save(w))).toBe(false)
   })
 
+  it("keeps only ids hiddenCaveats can store, once each, from CardEditor's update (NIT-4)", async () => {
+    const w = open(card())
+    w.findComponent({ name: 'CardEditor' }).vm.$emit('update:hiddenCaptions', ['release-before-partial', 'Bad_Id', 'release-before-partial', 'x'.repeat(65)])
+    expect((await save(w)).hiddenCaveats).toEqual(['release-before-partial'])
+    w.findComponent({ name: 'CardEditor' }).vm.$emit('update:hiddenCaptions', ['Bad_Id'])
+    expect('hiddenCaveats' in (await save(w))).toBe(false)
+  })
+
   it("the chart's caveat list leaves the card's own spec captions to CardEditor", () => {
     expect(row(open(card()), 'hidden:release-before-partial').exists()).toBe(false)
   })
