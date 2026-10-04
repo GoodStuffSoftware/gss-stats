@@ -240,6 +240,7 @@ export function validateCard(spec: CardSpec): string[] {
       checkRepeat(w, it.repeat)
       checkLabel(`${w}.label`, it.label, !('field' in it.data))
       checkLabel(`${w}.caption`, it.caption, !('field' in it.data))
+      checkLabel(`${w}.hint`, it.hint, !('field' in it.data))
       check(w, it.data, it.display, [spec.repeat, s.repeat, s.columns, it.repeat])
       if (it.gating?.minCohort != null && it.gating.minCohort < MIN_COHORT) errors.push(`${w}: minCohort below MIN_COHORT`)
       if (it.captionMode !== undefined && it.captionMode !== 'inline' && it.captionMode !== 'compact') errors.push(`${w}: captionMode must be 'inline' or 'compact'`)

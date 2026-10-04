@@ -48,6 +48,7 @@ import { tokenizeAndInterpolate, toPlainText } from './textLite'
 // out of itself), so importing the constant from lib/adsRules.ts here is fine.
 import { AUTH_NEW_EXISTING_LIVE_AT } from './adsRules'
 import { etOffsetHours } from './etTime'
+import { SIGNUPS_HINT } from './adsReadingsFormat'
 
 // "counted from 2026-09-26 15:43 ET" — AUTH_NEW_EXISTING_LIVE_AT's own ET wall time, for the
 // new/existing/unknown sign-up tiles' partial-window note (lib/metrics/metrics.ts
@@ -477,6 +478,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.card.notes': 'Notes',
     'label.card.loadFailed': 'Some numbers could not be loaded.',
     'label.card.retry': 'Retry',
+    'label.card.loading': 'Loading…',
     'label.card.invalid': "This card's saved settings could not be read, so it can't be shown. Edit it or restore the default charts.",
     // The ads readings log's column heads (lib/metrics/presets.ts ADS_READINGS_LOG).
     'label.reading.read': 'Read',
@@ -487,6 +489,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.reading.accepts': 'Accepts',
     'label.reading.auth': 'Auth',
     'label.reading.signUps': 'Sign-ups',
+    'label.reading.signUpsHint': SIGNUPS_HINT,
     'label.card.syncAlert': 'Sync alert: {message}',
     'label.card.freshness': 'Data',
     'label.card.firedThresholds': 'Fired',

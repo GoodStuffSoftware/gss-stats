@@ -421,7 +421,8 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   routine stores, falling back to the hand-entered `CAMPAIGN_SPEND`), a device mix (the
   standard nested doughnut over the beacon: campaign flight → device → OS, share of tagged
   hits), an
-  on-device return-visit retention curve, and the ads routine's **readings log**. The
+  on-device return-visit retention curve, and the ads routine's **readings log** (a metric card, preset `ads-readings-log`; see *Ads data
+  freshness*). The
   funnel's Install step counts `/popup-outcome/install-prompt/installed` (once per showing);
   raw `/install/*` outcome beacons, which can double-count one install, are shown only as a
   secondary "raw install signals" line. Attribution is by the beacon's own
@@ -983,14 +984,39 @@ second finds nothing to write.
 
 The campaigns page's cost card (preset `campaign-cost`: registry metrics `campaign.spendThrough`
 and `campaign.lastSync` over the facts `adsCoverage` and `adsLastSync`, the same two reads) and
-the readings widget (`/api/ads/readings`) show **"Spend through &lt;date&gt;"** and **"synced
+the readings log card (`/api/ads/readings`) show **"Spend through &lt;date&gt;"** and **"synced
 &lt;relative time&gt;"** per campaign, and **"stale — sync pending"** when a flight day that should be stored
 by now is missing: yesterday from 09:30 ET (the 08:00 ET morning read has synced by then),
 otherwise the day before. A sync run that claimed and never finished (killed mid-run, e.g. by
-a CPU limit) shows as a **"Sync alert"** line in the readings widget once it is 15 minutes old
+a CPU limit) shows as a **"Sync alert"** line in the readings log card once it is 15 minutes old
 (for 7 days), and the morning, backstop and post-flight reports print it as `SYNC ALERT`. Their **Refresh data** button posts to `/api/ads/refresh` (behind
 the sign-in gate), which asks the sync Worker to run only when something is stale, at most once
 per 10 minutes. The dashboard holds no Google Ads credential and never calls the Ads API.
+
+### The readings log card
+
+The ads routine's readings log is a metric card like any other (preset `ads-readings-log`, ADR
+[0005](docs/adr/0005-retire-bespoke-widgets.md)): one block per campaign that has activity, each
+with its freshness lines (spend through, synced, thresholds fired, sync alerts) above a table of
+that campaign's stored readings, newest first, and the **Refresh data** button below. It is edited
+like any card (**Customize…**), can be fitted to its content, and a page can repeat it. Two small
+engine hooks serve it and any other card: a **cell tone** (the Rules and Proposal cells are
+coloured trip / watch / clear / muted by the reading itself, which styles a value already shown and
+adds no data) and a **column hint** (`MetricItem.hint`, the header cell's tooltip; Sign-ups says
+that the figure is an upper bound). First load shows "Loading…", a refetch keeps the
+rows up, and a failed load shows the card's own "couldn't load" status with Retry.
+
+A saved layout needs no change. A widget with `dataset: 'ads-readings'` and no `card` is mapped to
+the preset when it is drawn, so its stored fields (`dataset`, `view`, `campaignIds`, `limit`, `type`)
+stay as they are and an older build still reads it. `campaignIds` narrows the campaigns, `limit`
+(default 30, at most 500) sets the table's row limit, and any `view` draws the log, the only view it
+ever had. In the chart editor the View picker no longer offers "Readings log": choosing the "Best
+Sudoku ads readings log" data source for a new chart starts it as the preset card; an existing widget
+is not converted by opening it.
+
+The card shows counts only: a reading's table cells read the five whitelisted counts (tagged
+arrivals, asks, accepts, auth successes, sign-ups) and nothing else of the stored record, and no
+return, game-start, tutorial or tour figure, hour, place or device is reachable from it.
 
 ### The sync Worker (`workers/sync/`, `gss-stats-sync`)
 

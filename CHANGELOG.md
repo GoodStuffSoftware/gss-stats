@@ -6,6 +6,10 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Ads readings log is a metric card** — the readings log now renders from the shared card engine, so it can be edited, repeated and fitted like any card; existing dashboards need no change.
+- **Rules and Proposal are coloured, and Sign-ups has a tooltip, on any card** — a table cell can take a colour from its reading and a column header can carry a tooltip; the readings log uses both.
+
 ## [0.16.1] — 2026-10-03
 
 ### Fixed

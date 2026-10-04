@@ -107,6 +107,11 @@ export type DataBinding =
   | { ratio: string; params?: Params; window?: WindowSpec }
   | { field: ScopePath }
 
+/** A table cell's colour, supplied by the scope field it reads (scope.ts scopeTone): never data of
+ * its own, only how an already-shown value is drawn. The readings log's Rules and Proposal cells
+ * use it: 'trip' red and bold, 'watch' amber and bold, 'clear' the plain ink, 'muted' the dim ink. */
+export type CellTone = 'trip' | 'watch' | 'clear' | 'muted'
+
 /** (c) DISPLAY. */
 export type Display =
   | { as: 'number'; deltas?: DeltaName[] }
@@ -172,6 +177,9 @@ export interface MetricItem {
   display: Display
   gating?: Gating
   caption?: Label // rendered through NoteBlock under the value
+  /** A table column's tooltip: shown as the title of the item's header cell (a 'table' section
+   * only; other layouts ignore it). Plain text, never markup. */
+  hint?: Label
   /** How the caption and the value's own notes (install-fix, counted-from, caveats) show:
    * 'inline' (default) as a line under the value; 'compact' behind a small notes toggle next
    * to the label, collapsed by default, so the card keeps its compact look. */

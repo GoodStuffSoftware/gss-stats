@@ -202,6 +202,7 @@ const updatedText = computed(() => {
   return noteRawText('label.card.updatedMinutesAgo', { n: Math.round(s / 60) })
 })
 const failedText = noteRawText('label.card.loadFailed')
+const loadingText = noteRawText('label.card.loading')
 const invalidText = noteRawText('label.card.invalid')
 /** Where the status line goes: where showUpdated puts freshness, and in the header when the
  * card shows no freshness but has an error. Header: an unrepeated card's own header row
@@ -254,7 +255,9 @@ const allHidden = computed(() => instances.value.length > 0 && instances.value.e
     </div>
 
     <!-- Keyed on the ET day: a new day remounts the body, so every repeat and request rebuilds. -->
-    <div v-if="spec.repeat" :key="todayEt" class="metric-card-grid" :style="{ '--mc-min-width': `${spec.minWidth ?? 230}px` }">
+    <!-- The first readings load is out: "Loading…" in place of the grid (kept mounted, so its metric requests start now). -->
+    <p v-if="readingsPending && spec.repeat" class="metric-card-empty">{{ loadingText }}</p>
+    <div v-if="spec.repeat" v-show="!readingsPending" :key="todayEt" class="metric-card-grid" :style="{ '--mc-min-width': `${spec.minWidth ?? 230}px` }">
       <MetricCardInstance v-for="(scope, i) in instances" v-show="!hiddenInstances.has(i)" :key="i" :spec="spec" :scope="scope" :ctx="ctx" :context="context" :boxed="true" @open="emit('open-campaigns')" @hidden="(h: boolean) => onHidden(i, h)" />
       <p v-if="((!instances.length && !readingsPending) || allHidden) && spec.repeat.empty" class="metric-card-empty">
         <MetricLabel :tokens="resolveLabelTokens(spec.repeat.empty.label, ROOT_SCOPE, undefined, todayEt)" />
