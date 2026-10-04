@@ -69,8 +69,60 @@ describe('ChartEditor: Caption', () => {
     expect('caption' in (await save(w2))).toBe(false)
   })
 
-  it('the hint says a {=…} value token shows "—" for now', () => {
-    expect(open(base()).get('.caption-field').text()).toContain('{=…} shows "—" for now')
+  it('the hint explains Insert value and the "—" for a token with no value', () => {
+    const text = open(base()).get('.caption-field').text()
+    expect(text).toContain('Insert value adds a live number or date')
+    expect(text).toContain('shows "—" when there is no value for it')
+  })
+})
+
+// Slice 1d release 1: "Insert value ▾" puts a `{=…}` token (lib/valueTokens.ts) into the caption.
+describe('ChartEditor: Insert value', () => {
+  const valueMenu = (w: VueWrapper) => w.get('.caption-field select.insert-value')
+
+  it('offers the chart values and the dates, in two groups, with what each reads right now', () => {
+    const w = open(base(), { data: response({ totals: { pageviews: 1234, visits: 5 } }) })
+    const sel = valueMenu(w)
+    expect(sel.attributes('aria-label')).toBe('Insert value')
+    expect(sel.findAll('optgroup').map((g) => g.attributes('label'))).toEqual(['This chart', 'Dates'])
+    const values = sel.findAll('option').map((o) => o.attributes('value'))
+    expect(values[0]).toBe('')
+    expect(values).toContain('{=chart.total|number}')
+    expect(values).toContain('{=chart.topShare|pct}')
+    expect(values).toContain('{=golive.web|date}')
+    expect(values).toContain('{=release.latestVersion}')
+    expect(sel.find('option[value="{=chart.total|number}"]').text()).toBe('Total (1,234)')
+    expect(sel.find('option[value="{=chart.top}"]').text()).toBe('Top item') // no rows: no value to show
+  })
+
+  it('appends with a space when the box was never focused, and the menu resets', async () => {
+    const w = open(base({ caption: 'Views:' }))
+    await valueMenu(w).setValue('{=chart.total|number}')
+    expect((valueMenu(w).element as unknown as HTMLSelectElement).value).toBe('')
+    expect((await save(w)).caption).toBe('Views: {=chart.total|number}')
+  })
+
+  it('an empty caption gets just the token', async () => {
+    const w = open(base())
+    await valueMenu(w).setValue('{=golive.web|date}')
+    expect((await save(w)).caption).toBe('{=golive.web|date}')
+  })
+
+  it('inserts at the cursor the box had when it lost focus, replacing a selection, and a second insert follows the first', async () => {
+    const w = open(base({ caption: 'A xx B' }))
+    const el = captionBox(w).element as HTMLTextAreaElement
+    el.setSelectionRange(2, 4)
+    await captionBox(w).trigger('blur')
+    await valueMenu(w).setValue('{=chart.total|number}')
+    await valueMenu(w).setValue('{=chart.topShare|pct}')
+    expect((await save(w)).caption).toBe('A {=chart.total|number}{=chart.topShare|pct} B')
+  })
+
+  it('does not insert a token that would not fit whole under the limit', async () => {
+    const full = 'x'.repeat(CAPTION_MAX_CHARS - 5)
+    const w = open(base({ caption: full }))
+    await valueMenu(w).setValue('{=chart.total|number}')
+    expect((await save(w)).caption).toBe(full)
   })
 })
 
