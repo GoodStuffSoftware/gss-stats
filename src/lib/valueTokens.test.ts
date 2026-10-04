@@ -1,7 +1,7 @@
 // Value tokens (notes plan slice 1d, release 1): the `{=…}` grammar, the formats, the chart's own
 // values and the fixed dates. The injection boundary is tested where tokens render
 // (textLite.test.ts) and the card render in ChartCard.valueTokens.test.ts.
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { StatsResponse, Widget } from '../types'
 import {
   VALUE_TOKEN_OPTIONS,
@@ -15,6 +15,7 @@ import {
   type TokenValues,
 } from './valueTokens'
 import { datedReleases, newest } from './releases'
+import { dayDrillRange, relativeRange } from './range'
 import { PLAY_TRACKING_ACTIVATION_DATE_ET, TRACKING_ACTIVATION_DATE_ET } from './popupEvents'
 
 const widget = (over: Partial<Widget> = {}): Widget =>
@@ -151,6 +152,55 @@ describe('chartValues', () => {
     expect(utc['chart.to'].value).toBe('2026-09-30')
     const none = chartValues(widget(), response({ notice: { ...notice, reason: 'outside-lookback', served: null } }))
     expect(none['chart.from'].value).toBeNull()
+  })
+
+  describe('an uncut range names the days the chart shows (ET, as the range note does)', () => {
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+    const daysOf = (r: { since: string; until: string } | null) => {
+      const v = chartValues(widget(), response({ meta: { ...response().meta, ...r! } }))
+      return [v['chart.from'].value, v['chart.to'].value]
+    }
+    const lastAt = (iso: string, rel = '7d') => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date(iso))
+      return relativeRange(rel)
+    }
+
+    it('"Last 7d" viewed at 21:30 EDT (already the next UTC day): Sep 26 – Oct 3', () => {
+      expect(daysOf(lastAt('2026-10-04T01:30:00.000Z'))).toEqual(['2026-09-26', '2026-10-03'])
+    })
+
+    it('the same range viewed at 10:00 EDT names the same days', () => {
+      expect(daysOf(lastAt('2026-10-03T14:00:00.000Z'))).toEqual(['2026-09-26', '2026-10-03'])
+    })
+
+    it('a custom range of whole UTC days (and a `date` drill) names its own UTC days', () => {
+      expect(daysOf({ since: '2026-09-01T00:00:00.000Z', until: '2026-09-30T23:59:59.999Z' })).toEqual(['2026-09-01', '2026-09-30'])
+      expect(daysOf(dayDrillRange('date', '2026-09-05'))).toEqual(['2026-09-05', '2026-09-05'])
+      // the server may echo the bounds without milliseconds; the instants are what count
+      expect(daysOf({ since: '2026-09-01T00:00:00Z', until: '2026-09-30T23:59:59.999Z' })).toEqual(['2026-09-01', '2026-09-30'])
+    })
+
+    it('an ET-day drill names one day, on both DST change days too', () => {
+      for (const day of ['2026-09-05', '2026-11-01', '2027-03-14']) {
+        expect(daysOf(dayDrillRange('dateEt', day))).toEqual([day, day])
+      }
+    })
+
+    it('across a DST change: the ET days of `since` and `until − 1 ms`', () => {
+      // fall back (Nov 1, 2026): 21:30 EST Nov 3 is 02:30Z Nov 4; 7 days before is 22:30 EDT Oct 27
+      expect(daysOf(lastAt('2026-11-04T02:30:00.000Z'))).toEqual(['2026-10-27', '2026-11-03'])
+      // spring forward (Mar 14, 2027): 21:30 EDT Mar 16 is 01:30Z Mar 17; 7 days before is 20:30 EST Mar 9
+      expect(daysOf(lastAt('2027-03-17T01:30:00.000Z'))).toEqual(['2027-03-09', '2027-03-16'])
+      // a range ending exactly at ET midnight: its last day is the day before
+      expect(daysOf({ since: '2026-10-25T04:00:00.000Z', until: '2026-11-02T05:00:00.000Z' })).toEqual(['2026-10-25', '2026-11-01'])
+    })
+
+    it('unreadable bounds name no days', () => {
+      expect(daysOf({ since: 'soon', until: '2026-09-30T23:59:59.999Z' })).toEqual([null, null])
+    })
   })
 
   it('no response or an error: every chart value is missing', () => {
