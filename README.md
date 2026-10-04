@@ -240,7 +240,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   pages (see *Page navigation*); a protected default page with "restore default charts"; per-page filters and
   per-chart filter overrides (set from the chart's filter button, or from the Filters row in the chart
   editor, which shows "Uses the page's filters" or what the chart overrides, with Edit and Clear; a card
-  shows the summary and Clear only). A saved layout is migrated forward on load
+  shows the summary and Clear only, and a pop-up rate tile has Edit too, as on the chart). A saved layout is migrated forward on load
   ([`src/lib/defaults.ts`](src/lib/defaults.ts) `normalizeConfig`, `CONFIG_VERSION`), and the
   first save of a newer version first copies the previous stored layout to
   `dashboard:default:backup:v<old version>` in KV ([`functions/api/config.ts`](functions/api/config.ts)),

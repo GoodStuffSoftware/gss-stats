@@ -4,12 +4,13 @@
 // (those cards are Metric card -> preset), there is no View picker, and every widget but a note
 // gets a Filters row that edits widget.filters through the same FilterPopover ChartCard uses.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { nextTick } from 'vue'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import ChartEditor from './ChartEditor.vue'
 import ChartCard from './ChartCard.vue'
 import { __resetMetricsStateForTests } from '../composables/useMetrics'
-import { CARD_PRESET_FOR_PANEL, defaultBestSudokuPopupsWidgets, syncCardWithView } from '../lib/defaults'
-import { CAMPAIGNS_VIEWS, OVERVIEW_VIEWS } from '../lib/catalog'
+import { defaultBestSudokuPopupsWidgets, defaultRetentionWidgets, syncCardWithView } from '../lib/defaults'
+import { autoCaveatIds } from '../lib/notes'
 import type { GlobalFilters, Widget } from '../types'
 
 const mounted: VueWrapper[] = []
@@ -71,24 +72,46 @@ describe('"Add chart" entry points', () => {
     expect(w.findAll('label').some((l) => l.text() === 'View')).toBe(false)
   })
 
-  const ALL: Array<['overview' | 'campaigns', string]> = [
-    ...OVERVIEW_VIEWS.map((v) => ['overview', v.value] as ['overview', string]),
-    ...CAMPAIGNS_VIEWS.map((v) => ['campaigns', v.value] as ['campaigns', string]),
+  // Each view the old picker offered, with the preset it must give: written out so that breaking one
+  // mapping in CARD_PRESET_FOR_PANEL fails here (the table is not read back from it).
+  const ALL: Array<['overview' | 'campaigns', string, string]> = [
+    ['overview', 'kpis', 'bsk-kpis'],
+    ['overview', 'scorecard', 'campaign-scorecard'],
+    ['overview', 'releasePanel', 'release-before-after'],
+    ['campaigns', 'funnel', 'campaign-funnel'],
+    ['campaigns', 'country', 'campaign-country'],
+    ['campaigns', 'cost', 'campaign-cost'],
+    ['campaigns', 'returns', 'campaign-returns'],
   ]
-  for (const [dataset, view] of ALL) {
-    it(`${dataset}:${view}: Metric card -> preset saves the same card as the old View path`, async () => {
-      const oldCard = stored(dataset, view).card as { preset: string }
-      expect(oldCard.preset).toBe(CARD_PRESET_FOR_PANEL[`${dataset}:${view}`])
+  const pickPreset = async (w: VueWrapper, preset: string) => {
+    const select = w.findAll('select').find((s) => s.findAll('option').some((o) => (o.element as HTMLOptionElement).value === preset))!
+    await select.setValue(preset)
+    await flushPromises()
+  }
+  const makeCardAndPick = async (w: VueWrapper, preset: string) => {
+    await w.findAll('button').find((b) => b.text() === 'Make this a metric card instead')!.trigger('click')
+    await flushPromises()
+    await pickPreset(w, preset)
+  }
+  for (const [dataset, view, preset] of ALL) {
+    it(`${dataset}:${view}: Metric card -> preset saves the whole widget the old View path saved`, async () => {
+      const old = stored(dataset, view)
+      expect(old.card).toEqual({ preset })
       const w = mountEditor(base, true)
       await flushPromises()
-      await w.findAll('button').find((b) => b.text() === 'Make this a metric card instead')!.trigger('click')
-      await flushPromises()
-      const select = w.findAll('select').find((s) => s.findAll('option').some((o) => (o.element as HTMLOptionElement).value === oldCard.preset))!
-      await select.setValue(oldCard.preset)
-      await flushPromises()
+      await makeCardAndPick(w, preset)
       await w.find('button.btn-primary').trigger('click')
       const saved = w.emitted('save')![0][0] as Widget
-      expect(saved.card).toEqual(oldCard)
+      // The whole saved shape, not only the card: dataset and view decide the widget's note scope.
+      expect({ dataset: saved.dataset, view: saved.view, card: saved.card, dimension: saved.dimension, metric: saved.metric }).toEqual({
+        dataset: old.dataset,
+        view: old.view,
+        card: old.card,
+        dimension: old.dimension,
+        metric: old.metric,
+      })
+      expect(autoCaveatIds(saved)).toEqual(autoCaveatIds(old))
+      if (dataset === 'campaigns') expect(autoCaveatIds(saved)).toEqual(['play-tracking-status', 'min-cohort-caveat'])
     })
     it(`${dataset}:${view}: a stored widget still opens as a card`, async () => {
       const w = mountEditor(stored(dataset, view))
@@ -97,24 +120,68 @@ describe('"Add chart" entry points', () => {
       expect(w.find('.ce-root').exists()).toBe(true)
       expect(w.findAll('label').some((l) => l.text() === 'View')).toBe(false)
     })
+    it(`${dataset}:${view}: opening and saving a stored widget changes nothing`, async () => {
+      const old = stored(dataset, view)
+      const w = mountEditor(old)
+      await flushPromises()
+      await w.find('button.btn-primary').trigger('click')
+      expect(w.emitted('save')![0][0]).toEqual({ ...old, i: old.id })
+    })
   }
 
-
-  it('a stored overview widget taken out of card mode still shows its own Data source; moving it drops the preset card', async () => {
-    const w = mountEditor(stored('overview', 'kpis'))
+  it('a preset pick off the overview/campaigns panels puts the widget back as it was', async () => {
+    const w = mountEditor({ ...base, dataset: 'geo', dimension: 'country' }, true)
     await flushPromises()
-    await w.findAll('button').find((b) => b.text() === 'Switch to a regular chart')!.trigger('click')
-    await flushPromises()
-    expect(dataSourceLabels(w).some((l) => l.startsWith('Best Sudoku overview cards'))).toBe(true)
-    const select = w.findAll('select').find((s) => s.findAll('option').some((o) => o.text().startsWith('RUM')))!
-    await select.setValue('geo')
-    await flushPromises()
-    expect(dataSourceLabels(w).some((l) => l.startsWith('Best Sudoku overview cards'))).toBe(false)
+    await makeCardAndPick(w, 'campaign-funnel')
+    await pickPreset(w, 'popup-rates')
     await w.find('button.btn-primary').trigger('click')
     const saved = w.emitted('save')![0][0] as Widget
+    expect(saved.card).toEqual({ preset: 'popup-rates' })
+    expect(saved.dataset).toBe('geo')
+    expect(saved.view).toBeUndefined()
+    expect(saved.dimension).toBe('country')
+  })
+
+  const switchToChart = async (w: VueWrapper) => {
+    await w.findAll('button').find((b) => b.text() === 'Switch to a regular chart')!.trigger('click')
+    await flushPromises()
+  }
+  const sourceSelect = (w: VueWrapper) => w.findAll('select').find((s) => s.findAll('option').some((o) => o.text().startsWith('RUM')))!
+  it('"Switch to a regular chart" on an overview panel falls back to the default source; the author picks another', async () => {
+    const w = mountEditor(stored('overview', 'kpis'))
+    await flushPromises()
+    await switchToChart(w)
+    expect(dataSourceLabels(w).some((l) => l.startsWith('Best Sudoku overview cards'))).toBe(false)
+    expect((sourceSelect(w).element as HTMLSelectElement).selectedOptions[0].text).toMatch(/^RUM/)
+    await sourceSelect(w).setValue('geo')
+    await flushPromises()
+    const saved = await save(w)
     expect(saved.dataset).toBe('geo')
     expect(saved.card).toBeUndefined()
     expect(saved.view).toBeUndefined()
+  })
+  // The retention page's cards are campaigns widgets with no view (rt-returns has one): switching one
+  // to a regular chart must never save "campaigns, no card, no view" (ChartCard draws the retired-panel text).
+  for (const id of ['rt-verdict', 'rt-engagement', 'rt-play', 'rt-returns']) {
+    it(`${id}: Switch to a regular chart, then Save, never leaves a campaigns widget with no card and no view`, async () => {
+      const rt = defaultRetentionWidgets().find((x) => x.id === id)!
+      expect(rt.dataset).toBe('campaigns')
+      const w = mountEditor(rt)
+      await flushPromises()
+      await switchToChart(w)
+      const saved = await save(w)
+      expect(saved.dataset).toBeUndefined() // RUM, the default source
+      expect(saved.card).toBeUndefined()
+      expect(saved.view).toBeUndefined()
+      expect(saved.dimension).not.toBe('') // a dimension the RUM source has
+    })
+  }
+  it('a widget stored as a non-creatable dataset with no card and no view is repaired on save', async () => {
+    const w = mountEditor({ ...base, id: 'stranded', i: 'stranded', dataset: 'campaigns', dimension: '', type: 'table' })
+    await flushPromises()
+    const saved = await save(w)
+    expect(saved.dataset).toBeUndefined()
+    expect(saved.card).toBeUndefined()
   })
 })
 
@@ -219,9 +286,24 @@ describe('the Filters row', () => {
     await filtersRow(withOverride).find('button').trigger('click')
     expect((await save(withOverride)).filters).toBeNull()
   })
-  it('a widget that draws its own body (a pop-up rate tile) shows the summary and Clear only', async () => {
-    const rate: Widget = { id: 'r', i: 'r', title: 'Rate', type: 'rate', dataset: 'popup', dimension: 'install:outcome:installed', metric: 'pageviews', limit: 1, x: 0, y: 0, w: 3, h: 3, filters: override }
-    const w = mountEditor(rate, false, page)
+  it('a card on a regular dataset shows the summary and Clear only (the card guard on its own)', async () => {
+    const w = mountEditor({ ...base, dataset: 'geo', card: { preset: 'popup-rates' }, filters: override }, false, page)
+    await flushPromises()
+    expect(rowButtons(w)).toEqual(['Clear'])
+  })
+  // The chart's own filter button shows for a rate tile with a card (ChartCard), so the editor offers Edit too.
+  const rateTile = (dimension: string): Widget => ({ id: 'r', i: 'r', title: 'Rate', type: 'rate', dataset: 'popup', dimension, metric: 'pageviews', limit: 1, x: 0, y: 0, w: 3, h: 3, filters: override })
+  it('a pop-up rate tile has Edit and Clear, and an edit saves', async () => {
+    const w = mountEditor(rateTile('upsell:tap'), false, page)
+    await flushPromises()
+    expect(rowButtons(w)).toEqual(['Edit', 'Clear'])
+    await buttonNamed(w, 'Edit').trigger('click')
+    await w.findAll('.fp .chip').find((c) => c.text() === '7d')!.trigger('click')
+    await flushPromises()
+    expect((await save(w)).filters!.rangeRel).toBe('7d')
+  })
+  it('a rate tile whose rate this build does not know has no Edit (the chart has no filter button either)', async () => {
+    const w = mountEditor(rateTile('nope:tap'), false, page)
     await flushPromises()
     expect(rowButtons(w)).toEqual(['Clear'])
   })
@@ -231,5 +313,68 @@ describe('the Filters row', () => {
     await flushPromises()
     expect(filtersRow(w).exists()).toBe(false)
     expect(w.text()).not.toContain("Uses the page's filters")
+  })
+})
+
+describe('the Filters row: keyboard and focus', () => {
+  const escape = (el: { trigger: (e: string, o: object) => Promise<void> }) => el.trigger('keydown', { key: 'Escape' })
+  const active = () => document.activeElement as HTMLElement | null
+  const panelOf = (w: VueWrapper) => w.find('.panel').element as HTMLElement
+
+  it('Escape in the popover closes only the popover and returns focus to Edit; a second Escape cancels', async () => {
+    const w = mountEditor({ ...base, title: 'Edited' }, true, page)
+    await flushPromises()
+    await buttonNamed(w, 'Edit').trigger('click')
+    expect(w.find('.fp').exists()).toBe(true)
+    await escape(w.find('.fp'))
+    await flushPromises()
+    expect(w.find('.fp').exists()).toBe(false)
+    expect(w.emitted('cancel')).toBeUndefined()
+    expect(w.find('.panel').exists()).toBe(true)
+    expect(active()).toBe(buttonNamed(w, 'Edit').element)
+    await escape(w.find('.panel'))
+    expect(w.emitted('cancel')).toHaveLength(1)
+  })
+  it('Escape with the popover closed still cancels at once', async () => {
+    const w = mountEditor(base, true, page)
+    await flushPromises()
+    await escape(w.find('.panel'))
+    expect(w.emitted('cancel')).toHaveLength(1)
+  })
+  it('after Clear, focus stays in the panel on Edit', async () => {
+    const w = mountEditor({ ...base, filters: override }, false, page)
+    await flushPromises()
+    ;(buttonNamed(w, 'Clear').element as HTMLElement).focus()
+    await buttonNamed(w, 'Clear').trigger('click')
+    await nextTick()
+    expect(panelOf(w).contains(active())).toBe(true)
+    expect(active()).toBe(buttonNamed(w, 'Edit').element)
+  })
+  it('after Clear on a card (no Edit), focus stays in the panel on the summary line', async () => {
+    const w = mountEditor({ ...stored('overview', 'kpis'), filters: override }, false, page)
+    await flushPromises()
+    ;(buttonNamed(w, 'Clear').element as HTMLElement).focus()
+    await buttonNamed(w, 'Clear').trigger('click')
+    await nextTick()
+    expect(panelOf(w).contains(active())).toBe(true)
+    expect(active()).toBe(w.find('.filters-summary').element)
+  })
+  it('after "Use global filter" in the popover, focus is on Edit', async () => {
+    const w = mountEditor({ ...base, filters: override }, false, page)
+    await flushPromises()
+    await buttonNamed(w, 'Edit').trigger('click')
+    ;(w.find('.fp .btn-link').element as HTMLElement).focus()
+    await w.find('.fp .btn-link').trigger('click')
+    await nextTick()
+    expect(panelOf(w).contains(active())).toBe(true)
+    expect(active()).toBe(buttonNamed(w, 'Edit').element)
+  })
+  it('after Done in the popover, focus is on Edit', async () => {
+    const w = mountEditor(base, true, page)
+    await flushPromises()
+    await buttonNamed(w, 'Edit').trigger('click')
+    await w.find('.fp .btn-done').trigger('click')
+    await nextTick()
+    expect(active()).toBe(buttonNamed(w, 'Edit').element)
   })
 })
