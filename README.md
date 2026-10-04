@@ -316,7 +316,10 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
     and saying why inline. A **page**: its name; its group (an existing one or a new one named
     there); what it starts from (blank, a copy of the page on screen, or a built-in page's
     default charts, including **Best Sudoku · Retention**) and its icon (Auto, shown, or one from the icon picker) — it's added to its
-    group and opened. A **group**: its name (unique); pages to move into it (optional, ★ Overview
+    group and opened. A page built from a built-in page stores which one (`templateId`, an optional
+    field, guarded by layout version 19), so **Restore default charts** on it brings back that page's own
+    chart set rather than the generic one; a page without the marker is read by its id, and a
+    Retention page made before the marker by its scope note. A **group**: its name (unique); pages to move into it (optional, ★ Overview
     excluded); a review — it's listed even when empty, and the drawer scrolls to it. Esc or ×
     closes and starts over; with reduced motion nothing slides.
   - **Page menu** ([`src/components/nav/PageMenu.vue`](src/components/nav/PageMenu.vue)) — ⋯
@@ -522,9 +525,13 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   [`src/lib/wizards.ts`](src/lib/wizards.ts)) puts a scope note, the small-sample note, the verdict
   table, `campaign-returns` and `campaign-engagement` on one page. Create it from **+ New > Page >
   Start from > Best Sudoku · Retention**. It is a template only: it is not on any layout until someone
-  creates it, it is not in the fresh default layout, and it needs no layout version or migration (what
-  a person saves is an ordinary page of card widgets). Its figures are per campaign over the whole
-  flight, so the page's date range does not change them. The rate is the share of an arm's d0 devices that came back on any of days 2-7
+  creates it, it is not in the fresh default layout, and it needs no migration (what
+  a person saves is an ordinary page of card widgets). Its campaign figures are per campaign over the whole
+  flight, so the page's date range does not change them; the Play tiles do follow it. Because
+  nothing on the page reads the site picker or the own-visit exclusions, the page's filter bar
+  keeps only the date range (and Sync all pages); when the page already holds a site filter or an
+  exclusion that is off its default, the bar adds a one-line note that those still apply to any
+  chart added there. The rate is the share of an arm's d0 devices that came back on any of days 2-7
   after arrival (ET days), and its bounds are a **Wilson score interval at 90%**
   (`wilsonBounds` in [`src/lib/metrics/retention.ts`](src/lib/metrics/retention.ts)). The verdict
   compares those bounds with a **bar**: a fixed 7.5%, or 0.6 times the organic days 2-7 rate once
@@ -1340,13 +1347,14 @@ trend charts on `dateEt`) rewrites the dimension of those untouched charts: its 
 stored v14 writes `backup:v14`, and rolling the code back past it needs `backup:v14` restored.
 Layout version 16 (chart captions and hideable caveats) adds `caption` and `hiddenCaveats` to a
 chart and hides, once, the caveats an existing chart did not show: its first save over a stored
-v15 writes `backup:v15`. Layout versions 17 (the readings log as a metric card) and 18 (the
-pop-up rate tile as a metric card) are save-guard bumps only, like v14: the first save over any
+v15 writes `backup:v15`. Layout versions 17 (the readings log as a metric card), 18 (the
+pop-up rate tile as a metric card) and 19 (the template-page marker, so a tab on older code cannot
+drop it) are save-guard bumps only, like v14: the first save over any
 older stored layout writes `backup:v<stored>`, and rolling the code back past either needs that
 backup restored (same steps below, with that key).
 Production is stored at v12 until its first save, so that save writes
 `backup:v12` (the page navigation, trend-chart and caption changes of v13-v16 are all applied on
-load and written by it), and rolling the code back past v18 needs that backup restored. A tab still
+load and written by it), and rolling the code back past v19 needs that backup restored. A tab still
 running older code gets `409` ("This tab is out of date, reload") instead of overwriting a
 newer layout.
 

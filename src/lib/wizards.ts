@@ -117,7 +117,8 @@ export function buildPage(d: PageDraft, current: DashboardPage): DashboardPage {
   if (tpl) {
     const src = tpl.make()
     page = clonePage({ ...src, widgets: defaultWidgetsForPage(src) }, name)
-  } else if (d.start === 'duplicate') page = clonePage(current, name)
+    page.templateId = tpl.id
+  } else if (d.start === 'duplicate') page = clonePage(current, name, true)
   else page = { id: cryptoId(), name, isDefault: false, group, filters: defaultFilters(), widgets: [] }
   page.group = group
   delete page.parentId
