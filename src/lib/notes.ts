@@ -281,7 +281,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
   },
   'retention-page-scope': {
     id: 'retention-page-scope',
-    text: 'Every campaign figure on this page is a **count per campaign** over its whole flight, and the organic baseline over its matured days: the filters above (date range, sites, own visits) do not change them. The Play tiles follow the date range only; the sites and own-visits filters do not apply to Play, which Google reports for the whole app. These are counts and rates; nothing is split by hour, place or device.',
+    text: 'Every campaign figure on this page is a **count per campaign** over its whole flight, and the organic baseline over its matured days: the date range above does not change them. The Play tiles follow the date range; Google reports Play for the whole app. The page has no sites or own-visits filter because neither applies to anything shown here. These are counts and rates; nothing is split by hour, place or device.',
     kind: 'text',
     severity: 'info',
     scopes: [],
