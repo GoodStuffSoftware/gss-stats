@@ -11,6 +11,8 @@ import { sparklineGeometry } from '../../lib/metrics/sparkline'
 import type { ScopeInstance } from '../../lib/metrics/scope'
 import type { MetricItem as MetricItemSpec, MetricsContext } from '../../lib/metrics/types'
 import MetricLabel from './MetricLabel.vue'
+import StatTile from './StatTile.vue'
+import BarTrack from './BarTrack.vue'
 
 const props = defineProps<{
   item: MetricItemSpec
@@ -63,7 +65,7 @@ const showCaption = computed(() => vm.value.captionTokens.length > 0 && props.it
         <polyline v-for="(pts, i) in spark.lines" :key="`l${i}`" :points="pts" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" />
         <circle v-for="(d, i) in spark.dots" :key="`d${i}`" :cx="d.x" :cy="d.y" r="1.5" fill="currentColor" />
       </svg>
-      <div v-if="item.display.as === 'bar'" class="mi-bar-track"><div class="mi-bar-fill" :style="{ width: barPct + '%' }" /></div>
+      <BarTrack v-if="item.display.as === 'bar'" :pct="barPct" />
       <p v-if="showCaption" class="mi-caption"><MetricLabel :tokens="vm.captionTokens" /></p>
     </template>
 
@@ -83,23 +85,26 @@ const showCaption = computed(() => vm.value.captionTokens.length > 0 && props.it
     </template>
 
     <template v-else>
-      <div class="mi-tile" :class="item.display.as === 'badge' ? `tone-${vm.badgeTone}` : ''" role="group" :aria-label="ariaLabel">
-        <div class="mi-tile-label" :title="plainLabel"><MetricLabel :tokens="vm.labelTokens" /></div>
-        <!-- A rate: big, with its (n/d) as a small line under it (the old KPI tile's look). -->
-        <template v-if="vm.split">
-          <div class="mi-tile-num" :class="{ muted: vm.muted }">{{ vm.split.main }}</div>
-          <div class="mi-tile-sub mono">{{ vm.split.sub }}</div>
-        </template>
-        <div v-else class="mi-tile-num" :class="{ muted: vm.muted }">{{ vm.primary }}</div>
+      <StatTile
+        variant="frame"
+        :number="vm.split ? vm.split.main : vm.primary"
+        :sub="vm.split ? vm.split.sub : undefined"
+        :muted="vm.muted"
+        :tone="item.display.as === 'badge' ? vm.badgeTone : undefined"
+        :label-title="plainLabel"
+        role="group"
+        :aria-label="ariaLabel"
+      >
+        <template #label><MetricLabel :tokens="vm.labelTokens" /></template>
         <div v-for="(d, i) in vm.deltaLines" :key="i" class="mi-tile-delta" :class="d.cls">{{ d.text }}</div>
         <svg v-if="spark" class="mi-spark" :viewBox="`0 0 ${spark.width} ${spark.height}`" role="img" :aria-label="sparkTitle" preserveAspectRatio="none">
           <title>{{ sparkTitle }}</title>
           <polyline v-for="(pts, i) in spark.lines" :key="`l${i}`" :points="pts" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" />
           <circle v-for="(d, i) in spark.dots" :key="`d${i}`" :cx="d.x" :cy="d.y" r="1.5" fill="currentColor" />
         </svg>
-        <div v-if="item.display.as === 'bar'" class="mi-bar-track"><div class="mi-bar-fill" :style="{ width: barPct + '%' }" /></div>
+        <BarTrack v-if="item.display.as === 'bar'" :pct="barPct" />
         <p v-if="showCaption" class="mi-tile-caption"><MetricLabel :tokens="vm.captionTokens" /></p>
-      </div>
+      </StatTile>
     </template>
   </div>
 </template>
@@ -146,34 +151,6 @@ const showCaption = computed(() => vm.value.captionTokens.length > 0 && props.it
   color: rgb(var(--ink-3));
   display: inline-block;
 }
-.mi-tile {
-  border: 1px solid rgb(var(--line));
-  border-radius: 12px;
-  padding: 10px 12px;
-  background: rgb(var(--surface));
-  min-width: 0;
-}
-.mi-tile.tone-live {
-  border-color: rgb(var(--amber-hover));
-}
-.mi-tile.tone-warn {
-  border-color: #bc4749;
-}
-.mi-tile-label {
-  font-size: 11px;
-  color: rgb(var(--ink-3));
-  margin-bottom: 4px;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-.mi-tile-num {
-  font-family: 'Space Grotesk', sans-serif;
-  font-size: 22px;
-  font-weight: 700;
-  color: rgb(var(--ink));
-}
 .mi-tile-delta {
   font-size: 10.5px;
   color: rgb(var(--ink-3));
@@ -199,18 +176,6 @@ const showCaption = computed(() => vm.value.captionTokens.length > 0 && props.it
 }
 .mi-spark-row {
   height: 18px;
-}
-.mi-bar-track {
-  height: 6px;
-  border-radius: 3px;
-  background: rgb(var(--sunken));
-  overflow: hidden;
-  margin: 4px 0;
-}
-.mi-bar-fill {
-  height: 100%;
-  background: rgb(var(--amber-hover));
-  border-radius: 3px;
 }
 .mi-col {
   display: flex;
@@ -258,17 +223,6 @@ const showCaption = computed(() => vm.value.captionTokens.length > 0 && props.it
   font-size: 9.5px;
   color: rgb(var(--ink-3));
   margin: 2px 0 0;
-}
-.mi-tile-sub {
-  font-size: 10.5px;
-  color: rgb(var(--ink-3));
-  margin-top: 1px;
-}
-.mi-tile-num.muted {
-  font-size: 12px;
-  font-weight: 500;
-  color: rgb(var(--ink-3));
-  font-family: Inter, sans-serif;
 }
 /* A status word in a pill ("unavailable", "not yet tracking") must not read as a value. */
 .mi-pill-value.muted {

@@ -2,7 +2,8 @@
 
 - **Status:** Proposed (2026-10-03). Plan only; each slice below lands as its own PR. Two
   decisions are open (see "Open decisions"). Slice 4 (the rate tile) is built on decision (b)'s
-  default: a percentage with its n/d for every key.
+  default: a percentage with its n/d for every key. Slice 5 (the shared stat and bar components)
+  is built on decision (a)'s default.
 - **Date:** 2026-10-03
 - **Amends:** [ADR 0003](0003-metric-components.md) section 5 (the `ads-readings` and `rate` rows)
   and section 7 slice 8 ("Later"), which this ADR replaces with concrete slices.
@@ -239,7 +240,7 @@ reload the readings source as well as the metrics.
 Every `POPUP_RATE_SPECS` key has a registered ratio (see decision (b)'s table), so a rate tile
 maps to a card with one item and the pop-up as a param. The card already shows "(n/d)" and
 "too few to report". Missing: nothing in the registry under the default; the mapping function;
-the editor change (the "Rate" type stops being offered; a new rate is a card); and the
+the editor change (until slice 5 the editor keeps offering "Rate", and a new rate is stored as `type: 'rate'` and mapped at render time; slice 5 drops the option for new charts, and a saved rate tile keeps it); and the
 per-chart filter button. `ChartCard` hides that button for any widget it treats as a card
 (`isBespokeBody`), but the card still honours a stored `widget.filters` override, so a mapped
 rate tile would keep an override nobody can see or clear. Default: keep the filter button for
@@ -284,8 +285,9 @@ totals are not zero), and a pop-up-dataset stat tile shows "Tracking not yet act
 go-live. The render test pins both.
 
 Risks: card tile and stat tile styling converge, which changes the stat tile's look slightly;
-the `.stat` class is styled in `ChartCard.vue` and in the zoomed view. The rate tile also uses
-`.stat`, so slice 4 and slice 5 touch the same styles; whichever lands second rebases.
+the `.stat` class was styled in `ChartCard.vue` and in the zoomed view; slice 5 as built replaces it
+with the shared `.stat-tile-*` styles. The rate tile is a metric card since slice 4, so it no longer
+touches those styles.
 
 ## Saved layouts and rollback
 
@@ -342,7 +344,7 @@ and a README update when it is visible to users, and an adversarial parity revie
 | **1. Fit-to-content height** | `Widget.fit`, `normWidget` whitelist, the measuring and grid-height logic, the editor checkbox | Row-count maths as table tests; `normWidget` round trip; canvas widgets never fit | none |
 | **2. Sparklines** | `series` on the request and value, the engine's per-day series, validation, `render.ts`, the SVG in `MetricItem`, the editor enabling it; `CONFIG_VERSION` bump (no data migration) | Engine series equals the date chart's per-day counts on one `node:sqlite` fixture; a ratio series is rejected; go-live gaps; editor and render tests flipped | none |
 | **3. Readings log preset** | Readings scope source, `reading.count.*` and campaign spend/freshness/threshold scope paths, card notices, preset `ads-readings-log`, `ads-readings` widgets render it; retire the bespoke readings widget; `CONFIG_VERSION` bump | Parity: every number and label the old body shows, from one readings fixture, through the card; `campaignIds` narrowing; refresh reloads readings | 1 |
-| **4. Rate tile to card** | The rate-tile-to-card mapping, the per-chart filter button kept for mapped tiles, retire the inline rate markup (the editor keeps offering "Rate": a new one stores the same `type: 'rate'` shape and is mapped at render time; dropping the option is slice 5); `CONFIG_VERSION` bump; under the page-rule choice, the outcome `pair` ratios | Parity per `POPUP_RATE_SPECS` key (all 22): n/d, percent and too-few state, old tile versus card; d = 0 and d = 1-4; a range longer than `MAX_RANGE_DAYS`; a bare-date range and `since === until`; a browser string `safeUA` rewrites; the install-gap note and the eligibility caveat; a stored filter override; differences listed | decision (b) (default taken; built as layout key `rateTile: 18`) |
+| **4. Rate tile to card** | The rate-tile-to-card mapping, the per-chart filter button kept for mapped tiles, retire the inline rate markup (until slice 5 the editor keeps offering "Rate": a new one stores the same `type: 'rate'` shape and is mapped at render time; slice 5 drops the option for new charts, and a saved rate tile keeps it so it can still be edited and switched back); `CONFIG_VERSION` bump; under the page-rule choice, the outcome `pair` ratios | Parity per `POPUP_RATE_SPECS` key (all 22): n/d, percent and too-few state, old tile versus card; d = 0 and d = 1-4; a range longer than `MAX_RANGE_DAYS`; a bare-date range and `since === until`; a browser string `safeUA` rewrites; the install-gap note and the eligibility caveat; a stored filter override; differences listed | decision (b) (default taken; built as layout key `rateTile: 18`) |
 | **5. Shared stat and bar components** | `StatTile`, `BarTable`, used by `ChartCard` and by the card's tile frame and bars layout; retire the inline markup | Render tests pin the stat and table numbers before and after, per dataset, plus the empty-rows and "Tracking not yet active" states; card tests unchanged | decision (a) (the default unblocks it) |
 
 Slice 4, as built: a saved rate tile is mapped to a one-item card when it is drawn (nothing is
@@ -354,6 +356,19 @@ Eastern days, and one with `since === until` reads "unavailable"; **before track
 over "0/0"**; the registry notes (counted-from date, "still arriving", the eligibility caveat)
 are new under the tile. The install-fix note was already shown by the old tile, as the hideable
 `popup-note`; it is now the tile's caption, and a stored hide of `popup-note` still hides it.
+
+Slice 5, as built: `StatTile` and `BarTable` (with `BarTrack`, the one bar) live in
+`src/components/metrics/`. `ChartCard`'s Stat and Table bodies render them, fed by `fetchStats`
+exactly as before (decision (a): the data path did not move), and `MetricItem`'s tile frame and
+bar render the same `StatTile` and `BarTrack`. Nothing is stored differently, so there is no
+layout key and no `CONFIG_VERSION` change. `ChartCard.statTable.parity.test.ts` pins the figures
+per dataset (RUM, geo, pop-up, completions) and metric: the stat's number, label and other
+measure, and each table row's label, value and bar width, against the formulas of the retired
+markup, plus the "No data in range" and "Tracking not yet active" states. Differences: the
+`.stat` / `.t-*` class names are now `.stat-tile-*` / `.bt-*`, and the card tile and the page
+stat tile share their elements and styles but keep their own order and sizes (the page tile
+reads number, then label; the card tile reads label, then number). The editor stops offering
+"Rate" for a new chart; a saved rate tile still opens with its own type.
 
 Slice 1 is first because it is small, self-contained, approved, and the readings log needs it.
 Slices 2, 4 and 5 are independent of each other and of slice 3, apart from the shared `.stat`

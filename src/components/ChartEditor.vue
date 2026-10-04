@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { reactive, computed, watch, onMounted, onBeforeUnmount, nextTick, ref, useId } from 'vue'
+import { rateTileHasHideableNote } from '../lib/metrics/rateTileCard'
 import type { Widget, LineSeries, GlobalFilters, StatsResponse } from '../types'
 import {
   DIMENSIONS,
@@ -343,7 +344,7 @@ interface CaveatRow {
   hidden: boolean
   unknownId?: string
 }
-const RUNTIME_NOTE_LABELS: Record<string, string> = { 'popup-note': 'Pop-up note (from the data)' }
+const RUNTIME_NOTE_LABELS: Record<string, string> = { 'popup-note': 'Pop-up note (install fix)' }
 const short = (t: string) => (t.length > 90 ? t.slice(0, 87) + '…' : t)
 function noteLabel(n: ChartNote): string {
   if (n.text) return short(toPlainText(n.text))
@@ -362,6 +363,12 @@ const caveatRows = computed<CaveatRow[]>(() => {
       ...(n.unknown ? { unknownId: n.noteId } : {}),
     }))
   const listed = new Set(rows.map((r) => r.hideId))
+  // A rate tile loads no response (rendersOwnBody), so the runtime pop-up note never lists itself,
+  // yet the installed-outcome card shows its install-fix note by default: offer the Show/Hide row there (F1).
+  if (draft.type === 'rate' && rateTileHasHideableNote(draft) && !listed.has('popup-note')) {
+    rows.push({ key: 'runtime:popup-note', label: RUNTIME_NOTE_LABELS['popup-note'], hideable: true, hideId: 'popup-note', hidden: hidden.includes('popup-note') })
+    listed.add('popup-note')
+  }
   const specCaptions = new Set(cardSpec.value?.captions ?? [])
   for (const id of hidden) {
     if (listed.has(id) || specCaptions.has(id) || !canHideCaveatId(id)) continue
@@ -625,6 +632,10 @@ const cardErrors = ref<string[]>([])
 const cardSaveDisabled = computed(() => isCardWidget.value && cardErrors.value.length > 0)
 
 const typeDef = computed(() => CHART_TYPES.find((t) => t.value === draft.type))
+// ADR 0005 slice 5: "Rate" is no longer offered for a new chart (a new rate is a metric card). A saved
+// rate tile (saved as type 'rate', read from the prop, not the draft) keeps the option, so switching its
+// type away can be switched back.
+const typeChoices = computed(() => CHART_TYPES.filter((t) => t.value !== 'rate' || props.widget.type === 'rate'))
 // "Site override" = Widget.siteSel: this chart's own site pick, replacing the page's (dates and
 // every other page filter still apply). Best Sudoku is its beacon tags (web + app).
 const SITE_OVERRIDES: { value: string; label: string; sel: string[] }[] = [
@@ -728,7 +739,7 @@ function save() {
           <div class="field">
             <label>Chart type</label>
             <select v-model="draft.type">
-              <option v-for="t in CHART_TYPES" :key="t.value" :value="t.value">{{ t.label }}</option>
+              <option v-for="t in typeChoices" :key="t.value" :value="t.value">{{ t.label }}</option>
             </select>
           </div>
           <div class="field" v-if="!isGeo && !isPopup && !isBespokeDataset && !isNote">
