@@ -389,7 +389,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
   // (lib/splitGuard.ts) gives return and completion rows no country bucket.
   'country-split-excludes-refused': {
     id: 'country-split-excludes-refused',
-    text: 'Counts only: the country columns leave out return, game-start, completion, tutorial-completion and tour-exit rows, so completed games have no row here and an arrival that came in on one of them is in no column.',
+    text: 'Counts only: the country columns leave out return, game-start, completion, tutorial-completion, tour-skip and tour-exit rows, so completed games have no row here and an arrival that came in on one of them is in no column.',
     kind: 'note',
     severity: 'info',
     scopes: ['campaigns'],
@@ -572,6 +572,10 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'verdict.no-go': 'NO-GO',
     'verdict.provisional': 'provisional',
     'verdict.maturing': 'maturing',
+    // Shown instead of 'maturing' when the days left are known (lib/metrics/render.ts, worked out at
+    // render time from the campaign's flight, whole ET days).
+    'verdict.maturing.days': 'maturing ({n} days left)',
+    'verdict.maturing.one': 'maturing (1 day left)',
     'verdict.too-few': 'too few',
     // Where the verdict's bar came from (lib/metrics/metrics.ts retentionVerdictOf, retentionBar's
     // source and reason): shown beside the verdict.

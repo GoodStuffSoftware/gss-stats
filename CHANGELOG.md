@@ -19,6 +19,16 @@ All notable changes to **gss-stats** are documented here. The format follows
 ### Removed
 - **The editor's View picker.** No data source left in the Add chart list needed it.
 
+## [0.25.3] — 2026-10-03
+
+### Fixed
+- **Tour skips and tour exits are counts only.** Hour, place and device charts (and the map) now leave out tour-skip rows, and a tour exit with no stage, as they already did for game starts and staged tour exits, while skips still count per day, per web or app site and in the morning read.
+
+## [0.25.2] — 2026-10-03
+
+### Fixed
+- **The retention verdict says how long it is maturing** — it now reads "maturing (5 days left)" (or "1 day left") instead of just "maturing", counted in whole US-Eastern days from the end of the flight, on saved pages too.
+
 ## [0.25.1] — 2026-10-03
 
 ### Changed
@@ -226,7 +236,6 @@ All notable changes to **gss-stats** are documented here. The format follows
   skips by stage (the same rows as tour skip, split by where), game starts by difficulty and
   tutorial completions (first run vs replay) as plain counts, "not yet tracked" until the
   first v1.97.0 row.
-
 ## [0.14.3] — 2026-10-03
 
 ### Changed

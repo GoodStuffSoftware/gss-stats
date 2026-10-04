@@ -28,22 +28,28 @@ const mid = (dateEt: string) => etWallTimeMs(dateEt, '00:00')
 describe('the switch', () => {
   it("ships 'nearest' (Mike's ruling), and the cache-key marker names the mode", () => {
     expect(REFUSED_WINDOW_SNAP).toBe('nearest')
-    expect(REFUSED_WINDOW_KEY).toBe(`refused-${REFUSED_WINDOW_SNAP}-et-days-v1`)
+    expect(REFUSED_WINDOW_KEY).toMatch(new RegExp(`^refused-${REFUSED_WINDOW_SNAP}-et-days-[0-9a-z]+$`))
+    // not the pre-list-hash marker, so an answer cached before the pattern list was folded in is never served
+    expect(REFUSED_WINDOW_KEY).not.toBe(`refused-${REFUSED_WINDOW_SNAP}-et-days-v1`)
+  })
+  it('refuses a tour exit with no stage as well as a staged one', () => {
+    for (const p of ['/tour/exit-at', '/tour/exit-at/hub', '/TOUR/EXIT-AT']) expect(isSplitRefusedPath(p), p).toBe(true)
+    for (const p of ['/tour/exit-atx', '/tour/exit', '/tour/start']) expect(isSplitRefusedPath(p), p).toBe(false)
   })
   it('has one refused sample path per refused pattern', () => {
     expect(REFUSED_SAMPLE_PATHS).toHaveLength(SPLIT_REFUSED_PATH_PATTERNS.length)
     for (const p of REFUSED_SAMPLE_PATHS) expect(isSplitRefusedPath(p), p).toBe(true)
     for (const pat of SPLIT_REFUSED_PATH_PATTERNS) {
-      const prefix = pat.slice(0, -1)
-      const own = REFUSED_SAMPLE_PATHS.filter((p) => p.startsWith(prefix) && !SPLIT_REFUSED_PATH_PATTERNS.some((o) => o !== pat && o.length > pat.length && p.startsWith(o.slice(0, -1))))
+      const hits = (q: string, p: string) => (q.endsWith('%') ? p.startsWith(q.slice(0, -1)) : p === q)
+      const own = REFUSED_SAMPLE_PATHS.filter((p) => hits(pat, p) && !SPLIT_REFUSED_PATH_PATTERNS.some((o) => o !== pat && o.length > pat.length && hits(o, p)))
       expect(own, pat).toHaveLength(1)
     }
   })
   it('has a refused-path vocabulary that covers every pattern and holds only refused paths', () => {
     for (const p of REFUSED_PATH_VOCABULARY) expect(isSplitRefusedPath(p), p).toBe(true)
     for (const pat of SPLIT_REFUSED_PATH_PATTERNS) {
-      const prefix = pat.slice(0, -1)
-      expect(REFUSED_PATH_VOCABULARY.filter((p) => p.startsWith(prefix)).length, pat).toBeGreaterThan(100)
+      const prefix = pat.endsWith('%') ? pat.slice(0, -1) : pat
+      expect(REFUSED_PATH_VOCABULARY.filter((p) => p.startsWith(prefix)).length, pat).toBeGreaterThan(pat.endsWith('%') ? 100 : 0)
     }
   })
 })
