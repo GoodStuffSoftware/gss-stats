@@ -25,8 +25,9 @@
 //   chart.topShare  share   that value / the total
 //   chart.from      date    the first day the chart shows (the served range when it was cut)
 //   chart.to        date    the last day the chart shows
-//                           (both name ET days, as #55's range note does; UTC days only for an
-//                           exact whole-UTC-day range or a `dayZone: 'utc'` cut)
+//                           (both name the chart's own days, as #55's range note does: UTC days
+//                           for a `date` series, whose bars are UTC days; ET days otherwise, and
+//                           for an exact whole-UTC-day range its UTC days)
 //   release.latest         date  the newest dated release's day (ET)
 //   release.latestVersion  text  its version, e.g. v1.98.0
 //   golive.web      date    the day web tracking went live (ET)
@@ -42,7 +43,7 @@
 import type { StatsResponse, Widget } from '../types'
 import { formatKey, hasLineSeries, metricValue } from './charts'
 import { etDayOfRange, isoToYmd, ymdRangeToISO } from './range'
-import { etDateFast } from './etTime'
+import { dayOf } from './rangeNotice'
 import { datedReleases, newest } from './releases'
 import { TRACKING_ACTIVATION_DATE_ET, PLAY_TRACKING_ACTIVATION_DATE_ET } from './popupEvents'
 import type { ValueResolver } from './textLite'
@@ -133,20 +134,31 @@ const missingChart = (): TokenValues => ({
   'chart.to': { kind: 'date', value: null },
 })
 
-/** The days a response covers, named the way #55's range note names them. When the range was cut:
- * the served window (its `to` is exclusive; ET days, or UTC for a `dayZone: 'utc'` notice). Else
- * the asked-for range: an exact ET day (etDayOfRange) is that day, an exact run of whole UTC days
- * (ymdRangeToISO's shape, or bare YYYY-MM-DD bounds) is those UTC days, and anything else (a
- * relative "Last 7d") is the ET day of `since` through the ET day of `until − 1 ms`, so the days
- * don't depend on the time of viewing. */
-function shownDays(data: StatsResponse): { from: string; to: string } | null {
+/** Whether a chart plots UTC days. A `date` series does: Cloudflare RUM's and geo's `date` buckets
+ * are UTC days, and so is the chart's `date` axis (lib/charts.ts dayBucketsInRange). The server
+ * cuts a range on the same signal and says so with `dayZone: 'utc'` (functions/api/stats.ts), so a
+ * cut and an uncut range on one chart name their days the same way. `dateEt`, and a chart with no
+ * day dimension, plot ET days. */
+function plotsUtcDays(widget: Pick<Widget, 'dimension'>, data: StatsResponse): boolean {
+  return data.notice?.dayZone === 'utc' || widget.dimension === 'date' || !!data.meta?.dimensions?.includes('date')
+}
+
+/** The days a response covers, named the way #55's range note names them: in the chart's own day
+ * zone (plotsUtcDays). When the range was cut: the served window (its `to` is exclusive). Else the
+ * asked-for range: the day of `since` through the day of `until − 1 ms` (a bare YYYY-MM-DD `until`
+ * being the whole UTC day, as the server reads it), so the days are the chart's bars and don't
+ * depend on the time of viewing. On an ET-day chart, an exact ET day (etDayOfRange) is that day,
+ * and an exact run of whole UTC days (ymdRangeToISO's shape, or bare bounds) is those UTC days, as
+ * the filter bar names them. */
+function shownDays(widget: Pick<Widget, 'dimension'>, data: StatsResponse): { from: string; to: string } | null {
+  const utc = plotsUtcDays(widget, data)
+  const day = (ms: number) => dayOf(ms, utc)
   const served = data.notice?.served
   if (data.notice) {
     if (!served) return null
     const from = Date.parse(served.from)
     const last = Date.parse(served.to) - 1
     if (!Number.isFinite(from) || !Number.isFinite(last)) return null
-    const day = (ms: number) => (data.notice!.dayZone === 'utc' ? new Date(ms).toISOString().slice(0, 10) : etDateFast(ms))
     return { from: day(from), to: day(last) }
   }
   const since = data.meta?.since
@@ -156,12 +168,14 @@ function shownDays(data: StatsResponse): { from: string; to: string } | null {
   // a bare-date `until` is the whole UTC day, as the server reads it (inclusive)
   const u = Date.parse(YMD_RE.test(until) ? ymdRangeToISO(until, until).until : until)
   if (!Number.isFinite(s) || !Number.isFinite(u)) return null
-  const etDay = etDayOfRange(since, until)
-  if (etDay) return { from: etDay, to: etDay }
-  const utc = { from: isoToYmd(new Date(s).toISOString()), to: isoToYmd(new Date(u).toISOString()) }
-  const whole = ymdRangeToISO(utc.from, utc.to)
-  if (Date.parse(whole.since) === s && Date.parse(whole.until) === u) return utc
-  return { from: etDateFast(s), to: etDateFast(u - 1) }
+  if (!utc) {
+    const etDay = etDayOfRange(since, until)
+    if (etDay) return { from: etDay, to: etDay }
+    const whole = { from: isoToYmd(new Date(s).toISOString()), to: isoToYmd(new Date(u).toISOString()) }
+    const iso = ymdRangeToISO(whole.from, whole.to)
+    if (Date.parse(iso.since) === s && Date.parse(iso.until) === u) return whole
+  }
+  return { from: day(s), to: day(u - 1) }
 }
 
 /** The `chart.*` values for one chart, from the response it is showing (no fetch). Missing when
@@ -175,7 +189,7 @@ export function chartValues(
 ): TokenValues {
   const out = missingChart()
   if (!data || error) return out
-  const days = shownDays(data)
+  const days = shownDays(widget, data)
   if (days) {
     out['chart.from'].value = days.from
     out['chart.to'].value = days.to
