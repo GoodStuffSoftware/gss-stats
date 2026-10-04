@@ -452,3 +452,50 @@ describe('fields the editor has no control for survive it: fit, a sparkline seri
     expect(reloaded.card).toStrictEqual({ spec, from: 'campaign-returns' })
   }, 30_000)
 })
+
+describe('hidden captions and unknown caption ids round-trip (1c, D7, N1)', () => {
+  function heldSpec(w: VueWrapper, input: CardSpec): CardSpec {
+    const ev = w.emitted('update:modelValue')
+    return ev?.length ? (ev[ev.length - 1][0] as { spec: CardSpec }).spec : input
+  }
+
+  it('a no-op pass keeps the captions, an unknown id among them, and never emits a hidden list', async () => {
+    const spec = plain(PRESETS['release-before-after'])
+    spec.captions = ['release-before-partial', 'legacy-gone']
+    const w = mount(CardEditor, { props: { modelValue: { spec: plain(spec), from: 'release-before-after' }, hiddenCaptions: ['release-before-partial'] }, attachTo: document.body })
+    mounted.push(w)
+    await flushPromises()
+    await noOpPass(w)
+    expect(heldSpec(w, spec)).toStrictEqual(spec)
+    expect(heldSpec(w, spec).captions).toEqual(['release-before-partial', 'legacy-gone'])
+    expect(w.emitted('update:hiddenCaptions')).toBeUndefined()
+  }, 60_000)
+
+  it('the caption toggles and the Remove control have accessible names', async () => {
+    const spec = plain(PRESETS['release-before-after'])
+    spec.captions = ['release-before-partial', 'legacy-gone']
+    const w = mountEditor({ spec, from: 'release-before-after' })
+    await flushPromises()
+    for (const b of controls(w).findAll('.ce-caption-row button')) {
+      const name = b.attributes('aria-label') || b.attributes('title') || b.text()
+      expect(name.trim(), b.html()).not.toBe('')
+    }
+    expect(controls(w).find('.ce-caption-toggle').attributes('aria-label')).toMatch(/^Hide: /)
+  })
+
+  it('through ChartEditor: save and reload keep fit, the spec captions and hiddenCaveats', async () => {
+    const spec = plain(PRESETS['release-before-after'])
+    const widget: Widget = { id: 'w1', i: 'w1', title: 'Card', type: 'table', dimension: '', metric: 'pageviews', limit: 50, card: { spec: plain(spec), from: 'release-before-after' }, fit: 'content', hiddenCaveats: ['release-before-partial'], x: 0, y: 0, w: 4, h: 8 }
+    const w = mount(ChartEditor, { props: { widget, isNew: false }, attachTo: document.body })
+    mounted.push(w)
+    await flushPromises()
+    await w.find('button.btn-primary').trigger('click')
+    const saved = w.emitted('save')!.at(-1)![0] as Widget
+    expect(saved.fit).toBe('content')
+    expect(saved.card).toStrictEqual({ spec, from: 'release-before-after' })
+    expect(saved.hiddenCaveats).toEqual(['release-before-partial'])
+    const reloaded = normalizeConfig({ version: 99, activePageId: 'p', pages: [{ id: 'p', name: 'p', filters: {}, widgets: [saved] }] } as never).pages[0].widgets[0]
+    expect(reloaded.card).toStrictEqual({ spec, from: 'release-before-after' })
+    expect(reloaded.hiddenCaveats).toEqual(['release-before-partial'])
+  }, 30_000)
+})

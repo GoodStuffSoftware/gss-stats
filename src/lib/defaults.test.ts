@@ -22,6 +22,7 @@ import {
 } from './defaults'
 import { NO_OUTCOME_TRACKING_NOTE, SIGNIN_ELIGIBLE_CAVEAT } from './popupEvents'
 import type { DashboardConfig, DashboardPage, Widget } from '../types'
+import { widgetsWithV16Caveats } from './__fixtures__/autoCaveats'
 
 // Minimal widget fixture — only the fields tests actually inspect matter; the rest are
 // filled with harmless placeholders matching the real Widget shape.
@@ -210,8 +211,9 @@ describe('normalizeConfig — fixtures', () => {
     const order = norm.pages.map((p) => p.id)
     expect(order).toEqual(['default', 'bsk-overview', 'bsk-campaigns', 'bsk-popups', 'bsk-launch', 'user-a', 'user-b'])
     // the user's pinned widget on Campaigns survives (not replaced by the factory set), its only
-    // change the card the v11 migration gives every former bespoke panel
-    expect(norm.pages.find((p) => p.id === 'bsk-campaigns')!.widgets).toEqual([withCardForView(pinnedWidget)])
+    // change the card the v11 migration gives every former bespoke panel (and the automatic caveats
+    // it did not show, hidden by v16: __fixtures__/autoCaveats.ts)
+    expect(norm.pages.find((p) => p.id === 'bsk-campaigns')!.widgets).toEqual(widgetsWithV16Caveats([withCardForView(pinnedWidget)]))
     // the landing page becomes ★ Overview (v13: each viewer's own page lives in their browser)
     expect(norm.activePageId).toBe('default')
     // and from v13 on the order is data: a later load never re-sorts it
@@ -446,11 +448,12 @@ describe('normalizeConfig — v9 migration (Pop-ups page + device mix)', () => {
   it('leaves every other page and widget exactly as saved', () => {
     const raw = v8Config()
     const norm = normalizeConfig(raw)
-    expect(norm.pages.find((p) => p.id === 'default')!.widgets).toEqual(raw.pages[0].widgets)
+    expect(norm.pages.find((p) => p.id === 'default')!.widgets).toEqual(widgetsWithV16Caveats(raw.pages[0].widgets))
     const cw = norm.pages.find((p) => p.id === 'bsk-campaigns')!.widgets
-    // (v11 swaps every former bespoke panel in place: a card, or a standard chart)
-    expect(cw[0]).toEqual(withCardForView(swapPanelChart(raw.pages[1].widgets[0])))
-    expect(cw[2]).toEqual(withCardForView(swapPanelChart(raw.pages[1].widgets[2])))
+    // (v11 swaps every former bespoke panel in place: a card, or a standard chart; v16 hides the
+    // automatic caveats a chart did not show)
+    expect(cw[0]).toEqual(widgetsWithV16Caveats([withCardForView(swapPanelChart(raw.pages[1].widgets[0]))])[0])
+    expect(cw[2]).toEqual(widgetsWithV16Caveats([withCardForView(swapPanelChart(raw.pages[1].widgets[2]))])[0])
   })
 
   it('is idempotent: normalizing the migrated config again changes no widget', () => {

@@ -224,9 +224,9 @@ describe('the v13 → v14 upgrade (inline sparklines: a guard bump, no layout re
 // Layout version 15 (the default geo trend charts move to the ET-day axis, migrateDateEtTrendsV15):
 // a data migration, so the stored v14 layout is backed up before the first v15 save replaces it.
 describe('the v14 → v15 upgrade (default trend charts on dateEt)', () => {
-  it('this code writes layout version 15', () => {
+  it('layout version 15 is the dateEt step (this code writes a newer one: see the captions block)', () => {
     expect(LAYOUT_VERSIONS.dateEtTrends).toBe(15)
-    expect(CONFIG_VERSION).toBeGreaterThanOrEqual(15) // the newest is readingsLog (17): see the v15 → v17 block
+    expect(CONFIG_VERSION).toBeGreaterThanOrEqual(LAYOUT_VERSIONS.dateEtTrends)
   })
   it('the first v15 save over a stored v14 layout backs it up to backup:v14, once', async () => {
     const v14 = JSON.stringify(cfg(14, 'live v14 layout'))
@@ -246,6 +246,43 @@ describe('the v14 → v15 upgrade (default trend charts on dateEt)', () => {
     expect(puts).toEqual([])
     expect(store.get('dashboard:default')).toBe(v15)
     expect((await put(kv, cfg(CONFIG_VERSION + 1, 'crafted'))).status).toBe(400)
+  })
+})
+
+// Chart captions (notes plan slice 1c: Widget.caption, Widget.hiddenCaveats). Unlike v14 this is a
+// layout rewrite, not a guard bump: the v16 step seeds `hiddenCaveats` once on a pre-v16 layout
+// (lib/defaults.ts seedHiddenAutoCaveatsV16), so rolling back past v16 means restoring the
+// `backup:v<stored>` copy. Written against the LAYOUT_VERSIONS key, never a literal, so whichever
+// slice lands second only renumbers the map.
+describe('the captions upgrade (plain-text captions and hidden caveats: seeds hiddenCaveats once, a layout rewrite)', () => {
+  const V = LAYOUT_VERSIONS.captions
+  const prev = Math.max(...Object.values(LAYOUT_VERSIONS).filter((v) => v < V))
+  it('captions is the newest layout version, and this code writes it', () => {
+    expect(V).toBeGreaterThan(LAYOUT_VERSIONS.dateEtTrends)
+    expect(CONFIG_VERSION).toBe(V)
+    expect(CONFIG_VERSION).toBe(Math.max(...Object.values(LAYOUT_VERSIONS)))
+  })
+  it('the first captions save over the stored previous layout backs it up to backup:v<prev>, once', async () => {
+    const old = JSON.stringify(cfg(prev, 'live layout'))
+    const { kv, store, puts } = fakeKv({ 'dashboard:default': old })
+    expect((await put(kv, cfg(V, 'first captions save'))).status).toBe(200)
+    expect(puts).toEqual([backupKeyFor(prev), DAY, PREV_KEY, 'dashboard:default'])
+    expect(backupKeyFor(prev)).toBe(`dashboard:default:backup:v${prev}`)
+    expect(store.get(backupKeyFor(prev))).toBe(old)
+    await put(kv, cfg(V, 'second captions save'))
+    expect(store.get(backupKeyFor(prev))).toBe(old) // never overwritten
+    expect([...store.keys()].filter((k) => k.includes('backup'))).toEqual([backupKeyFor(prev)])
+  })
+  it('a PUT carrying the previous version over a stored captions layout gets 409, and KV is untouched', async () => {
+    const cur = JSON.stringify(cfg(V, 'captions layout'))
+    const { kv, store, puts } = fakeKv({ 'dashboard:default': cur })
+    const res = await put(kv, cfg(prev, 'older tab'))
+    expect(res.status).toBe(409)
+    expect(await res.json()).toMatchObject({ error: 'stale', storedVersion: V, incomingVersion: prev })
+    expect(puts).toEqual([])
+    expect(store.get('dashboard:default')).toBe(cur)
+    expect([...store.keys()]).toEqual(['dashboard:default'])
+    expect((await put(kv, cfg(V + 1, 'crafted'))).status).toBe(400)
   })
 })
 

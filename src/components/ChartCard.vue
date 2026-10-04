@@ -66,6 +66,9 @@ const emit = defineEmits<{
   // Fit-to-content (Widget.fit): this card's content height in px, whenever it changes.
   // Dashboard.vue turns it into grid rows.
   'fit-height': [number]
+  // The chart's latest response / load error, whenever either changes. App.vue keeps the newest per
+  // widget so ChartEditor can list runtime caveats without fetching again.
+  data: [StatsResponse | null, string | null]
 }>()
 
 const baseChartRef = ref<{ suppressForDrill: () => void } | null>(null)
@@ -249,6 +252,7 @@ let reqId = 0
 // response's own notes, and the range notice (the server cut the range down to what the data
 // source allows; runtime only, never saved).
 const notes = computed(() => chartNotes(props.widget, data.value, error.value))
+watch([data, error], () => emit('data', data.value, error.value))
 
 // Per-chart filter override: use widget.filters if set, else the global filter.
 const effectiveFilters = computed<GlobalFilters>(() => props.widget.filters ?? props.filters)
@@ -572,7 +576,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
     <div class="card-body" :class="{ 'is-card': isCard }" @dblclick="onCardBodyDblClick">
       <!-- Bespoke bodies: overview / campaigns / ads-readings datasets, and the note type —
            own data fetch (or none), skip the generic loading/error/empty states above. -->
-      <MetricCard v-if="cardRef" ref="metricCard" :card-ref="cardRef" :context="metricsContext" :campaign-ids="widget.campaignIds" :fallback-title="widget.title" @open-campaigns="emit('open-campaigns')" />
+      <MetricCard v-if="cardRef" ref="metricCard" :card-ref="cardRef" :context="metricsContext" :campaign-ids="widget.campaignIds" :hidden-captions="widget.hiddenCaveats" :fallback-title="widget.title" @open-campaigns="emit('open-campaigns')" />
       <p v-else-if="widget.dataset === 'overview' || widget.dataset === 'campaigns'" class="state mono">{{ retiredPanelText }}</p>
       <NoteWidgetBody v-else-if="widget.type === 'note'" :widget="widget" />
 
@@ -617,10 +621,12 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
       <BaseChart v-else-if="chartConfig" ref="baseChartRef" :config="chartConfig" :drill-open="drillOpen" @point="onPoint" />
     </div>
 
-    <!-- Attached captions (owner requirement, 2026-09-26): registry notes shown under the
-         chart, through the SAME NoteBlock every inline caveat/note-type-widget uses — see
-         lib/notes.ts. `widget.notes`, or the dataset's own scope defaults when unset.
-         Pop-up dataset only: `data.note` (informational review fix, 2026-09-26) — a data
+    <!-- Notes under the chart (lib/chartNotes.ts, one fixed order): the widget's own plain-text
+         caption (Widget.caption), legacy registry caption ids (`widget.notes`, read-only; they
+         convert to caption text on the chart's next edit), the scope's automatic caveats
+         (lib/notes.ts autoCaveatIds), then the runtime caveats, minus any
+         this widget hides (Widget.hiddenCaveats). All through the SAME NoteBlock every inline
+         caveat/note-type-widget uses. Pop-up dataset only: `data.note` (informational review fix, 2026-09-26) — a data
          caveat that travels with the API RESPONSE itself (functions/api/popups.ts, e.g. the
          known install-outcome gap), computed per-request rather than being static config
          like the registry captions above, so it has to be rendered from `data` here rather
