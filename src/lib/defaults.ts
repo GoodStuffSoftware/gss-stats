@@ -4,7 +4,7 @@ import { POPUPS, POPUP_RATE_SPECS, NO_OUTCOME_TRACKING_NOTE, SIGNIN_ELIGIBLE_CAV
 import { CAMPAIGNS } from './campaigns'
 import { BEST_SUDOKU_SITES } from './bestSudokuSites'
 import { normCardRef } from './metrics/validate'
-import { autoCaveatIds, isNoteIdHideable } from './notes'
+import { autoCaveatIds, isNoteIdHideable, widgetNoteScope } from './notes'
 
 export function defaultDateRange(): { since: string; until: string } {
   const until = new Date()
@@ -1038,14 +1038,22 @@ export function seedHiddenAutoCaveatsV16(p: DashboardPage): DashboardPage {
   return widgets === p.widgets ? p : { ...p, widgets }
 }
 
-/** The hideable automatic caveats that existed when layout v16 was cut, FROZEN as literals on
- * purpose (the same pattern as V14_DATE_TREND_DEFAULTS): the seed describes what a chart stored
- * before v16 did not show, which is fixed, not what the registry holds today. Do not derive this
- * from NOTES_REGISTRY: a hideable caveat added to a scope later would then start hidden on every
- * pre-v16 chart (production stays stored at v12 until its first save, so the seed re-runs on every
- * load until then) and on every built-in chart a fresh config or "restore default charts" builds.
- * A caveat added later is meant to show on every chart of its scope. The two gated ids are off
- * today (their tracking dates are set) and are listed because they existed at v16. */
+/** The hideable automatic caveats that existed when layout v16 was cut, FROZEN as literal
+ * (scope, id) pairs on purpose (the same pattern as V14_DATE_TREND_DEFAULTS): the seed describes
+ * what a chart stored before v16 did not show, which is fixed, not what the registry holds today.
+ * Do not derive this from NOTES_REGISTRY: a hideable caveat added later, or a frozen caveat whose
+ * `scopes` is later widened, would then start hidden on every pre-v16 chart of the new scope
+ * (production stays stored at v12 until its first save, so the seed re-runs on every load until
+ * then) and on every built-in chart a fresh config or "restore default charts" builds. A caveat
+ * added to a scope after v16 (a new id, or an existing id on a new scope) shows on every chart of
+ * that scope. The two gated ids are off today (their tracking dates are set) and are listed
+ * because they existed at v16. Keyed by widgetNoteScope. */
+export const V16_SEEDABLE: Readonly<Record<string, ReadonlySet<string>>> = {
+  campaigns: new Set(['play-tracking-status', 'play-tracking-not-live', 'min-cohort-caveat']),
+  popup: new Set(['tracking-not-yet-active', 'min-cohort-caveat']),
+}
+
+/** Every id in V16_SEEDABLE, across scopes. */
 export const V16_SEEDABLE_CAVEATS: ReadonlySet<string> = new Set([
   'play-tracking-status',
   'play-tracking-not-live',
@@ -1054,12 +1062,14 @@ export const V16_SEEDABLE_CAVEATS: ReadonlySet<string> = new Set([
 ])
 
 /** seedHiddenAutoCaveatsV16's rule over a widget list: the same array when nothing changes. Only
- * ids in V16_SEEDABLE_CAVEATS are ever seeded. */
+ * (scope, id) pairs in V16_SEEDABLE are ever seeded. */
 function seedHiddenAutoCaveats(list: Widget[]): Widget[] {
   let changed = false
   const widgets = list.map((w) => {
     const have = w.hiddenCaveats ?? []
-    const add = autoCaveatIds(w).filter((id) => V16_SEEDABLE_CAVEATS.has(id) && isNoteIdHideable(id) && !have.includes(id))
+    const scope = widgetNoteScope(w)
+    const frozen = scope ? V16_SEEDABLE[scope] : undefined
+    const add = frozen ? autoCaveatIds(w).filter((id) => frozen.has(id) && isNoteIdHideable(id) && !have.includes(id)) : []
     if (!add.length || have.length >= HIDDEN_CAVEATS_MAX) return w
     changed = true
     return { ...w, hiddenCaveats: [...new Set([...have, ...add])].slice(0, HIDDEN_CAVEATS_MAX) }
@@ -1072,7 +1082,7 @@ function seedHiddenAutoCaveats(list: Widget[]): Widget[] {
  * chart, in a fresh config, a page normalizeConfig adds (the v7 refill of an empty Overview or
  * Campaigns page included), or one "restore default charts" brings back, shows exactly the caveats
  * it showed before v16 (its legacy `notes`) plus any data-cut one whose condition holds, plus any
- * caveat added after v16 (the seed is frozen to V16_SEEDABLE_CAVEATS). A chart the owner creates
+ * caveat added after v16 (the seed is frozen to V16_SEEDABLE). A chart the owner creates
  * later is new and shows its automatic caveats. */
 function factoryWidgets(list: Widget[]): Widget[] {
   return seedHiddenAutoCaveats(list)
@@ -1447,8 +1457,8 @@ export function normalizeConfig(raw: any): DashboardConfig {
     const etDays = version < LAYOUT_VERSIONS.dateEtTrends ? navigated.map(migrateDateEtTrendsV15) : navigated
     // v16 migration (see CONFIG_VERSION and seedHiddenAutoCaveatsV16): automatic scope caveats
     // start hidden where a chart did not show them. Version-gated, so a caveat the owner later
-    // shows again is never re-hidden. Only the ids frozen in V16_SEEDABLE_CAVEATS are seeded, so a
-    // caveat added to the registry later shows on every chart of its scope, even before the first
+    // shows again is never re-hidden. Only the (scope, id) pairs frozen in V16_SEEDABLE are seeded,
+    // so a caveat added to a scope later shows on every chart of that scope, even before the first
     // v16 save.
     const ordered = version < LAYOUT_VERSIONS.captions ? etDays.map(seedHiddenAutoCaveatsV16) : etDays
     // Every load: drill links must name an existing root page (normDrillLinks).
