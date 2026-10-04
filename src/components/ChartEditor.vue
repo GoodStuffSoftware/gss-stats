@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { reactive, computed, watch, onMounted, onBeforeUnmount, ref, useId } from 'vue'
+import { rateTileHasHideableNote } from '../lib/metrics/rateTileCard'
 import type { Widget, LineSeries, GlobalFilters, StatsResponse } from '../types'
 import {
   DIMENSIONS,
@@ -306,7 +307,7 @@ interface CaveatRow {
   hidden: boolean
   unknownId?: string
 }
-const RUNTIME_NOTE_LABELS: Record<string, string> = { 'popup-note': 'Pop-up note (from the data)' }
+const RUNTIME_NOTE_LABELS: Record<string, string> = { 'popup-note': 'Pop-up note (install fix)' }
 const short = (t: string) => (t.length > 90 ? t.slice(0, 87) + '…' : t)
 function noteLabel(n: ChartNote): string {
   if (n.text) return short(toPlainText(n.text))
@@ -325,6 +326,12 @@ const caveatRows = computed<CaveatRow[]>(() => {
       ...(n.unknown ? { unknownId: n.noteId } : {}),
     }))
   const listed = new Set(rows.map((r) => r.hideId))
+  // A rate tile loads no response (rendersOwnBody), so the runtime pop-up note never lists itself,
+  // yet the installed-outcome card shows its install-fix note by default: offer the Show/Hide row there (F1).
+  if (draft.type === 'rate' && rateTileHasHideableNote(draft) && !listed.has('popup-note')) {
+    rows.push({ key: 'runtime:popup-note', label: RUNTIME_NOTE_LABELS['popup-note'], hideable: true, hideId: 'popup-note', hidden: hidden.includes('popup-note') })
+    listed.add('popup-note')
+  }
   const specCaptions = new Set(cardSpec.value?.captions ?? [])
   for (const id of hidden) {
     if (listed.has(id) || specCaptions.has(id) || !canHideCaveatId(id)) continue
