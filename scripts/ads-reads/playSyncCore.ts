@@ -11,6 +11,12 @@ import { etDateFast } from '../../src/lib/etTime'
 import { normalizePlayDays, writePlayDaily, type AdsDb, type PlayDayRow } from '../../src/lib/adsStore'
 import { HOUSEHOLD_NOTE, RETENTION_NOTE, type PlayReportsSection } from './play'
 
+/** The Cloudflare token a sync needs. A dry run writes nothing and never runs wrangler, so it needs
+ * none and does not read the token file (a wrong path must not fail it). `load` is cli.loadCfToken. */
+export function cfTokenForSync(opts: { dryRun: boolean; cfTokenFile?: string }, load: (file: string | undefined) => string | null): string | null {
+  return opts.dryRun ? null : load(opts.cfTokenFile)
+}
+
 /** The first Play day a default run reads: the Play tracking go-live (2026-09-26). */
 export const DEFAULT_PLAY_SYNC_START = PLAY_TRACKING_ACTIVATION_DATE_ET ?? '2026-09-26'
 

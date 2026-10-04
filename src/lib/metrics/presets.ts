@@ -451,7 +451,7 @@ export const PLAY_INSTALLS: CardSpec = {
       ],
     },
   ],
-  captions: ['play-tracking-status', 'play-days', 'play-household', 'play-no-retention'],
+  captions: ['play-days', 'play-household', 'play-no-retention'],
 }
 
 /** Every preset by id. A null prototype, so an id such as 'constructor' or 'toString' is

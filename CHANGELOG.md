@@ -12,8 +12,9 @@ All notable changes to **gss-stats** are documented here. The format follows
   reports lag 3-7 days), and says "no Play figures stored yet" until the first sync; the figures
   are whole-app daily totals, include our own household devices, and carry no retention (Play
   publishes none). It is a card preset, and a new Retention page includes it; pages already
-  created from the template can add it from the picker. Needs a one-time database step (see
-  README, "Play installs").
+  created from the template can add it from the picker. A real read error shows on the tiles as
+  an error rather than "no Play figures stored yet", and a count Play re-posts blank keeps the
+  last stored number. Needs a one-time database step (see README, "Play installs").
 
 ## [0.18.0] — 2026-10-03
 

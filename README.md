@@ -1007,23 +1007,29 @@ What the figures are, and are not:
 - **No retention.** Play's bucket has no retention report, so the card has no retention figure
   and no ratio.
 - **Before the first sync** the card says "no Play figures stored yet". A missing table or
-  binding reads the same way and costs the page nothing.
+  binding reads the same way and costs the page nothing. Any other read error (a D1 outage, a
+  bad statement) shows as an error on the tiles, never as "no figures yet".
 
 **How to activate (one time, run by a person; neither CI nor the Worker does it):**
 
 ```powershell
-# 1. Create the table in the production ads database
+# 1. Create the table in the production ads database. First list what is pending (read-only);
+#    only 0005 should be. ads:migrate applies EVERY pending migration to the production
+#    gss-stats-ads database and uses wrangler's own auth (`npx wrangler login`, or
+#    CLOUDFLARE_API_TOKEN in the environment), not --cf-token-file.
+npx wrangler d1 migrations list gss-stats-ads --remote
 npm run ads:migrate
-# 2. Dry run: reads the Play bucket, writes nothing
-npm run ads:play-sync -- --play-sa <path-to-play-service-account.json> --dry-run --cf-token-file <path-to-cf-token>
+# 2. Dry run: reads the Play bucket, writes nothing, needs no Cloudflare token
+npm run ads:play-sync -- --play-sa <path-to-play-service-account.json> --dry-run
 # 3. The first real sync (idempotent: re-running overwrites the same days)
 npm run ads:play-sync -- --play-sa <path-to-play-service-account.json> --cf-token-file <path-to-cf-token>
 ```
 
 The default start is 2026-09-26 (the Play tracking go-live); `--since` / `--until` change the
 range. Re-run the sync whenever fresher Play days are wanted (Play re-posts recent days; the
-upsert overwrites them). A **new** Retention page includes the card; a page already created from
-the template does not gain it, so add it from the card picker ("Play installs").
+upsert overwrites them, except that a count Play leaves blank keeps the last stored number). A
+**new** Retention page includes the card; a page already created from the template does not
+gain it, so add it from the card picker ("Play installs").
 
 ## Ads data freshness
 
