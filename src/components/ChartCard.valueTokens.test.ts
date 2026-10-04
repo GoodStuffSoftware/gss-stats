@@ -4,12 +4,13 @@
 // from the chart's own response and the fixed dates, with no extra fetch; a value never becomes
 // markup; other notes keep the dash. Uses a geo table, which needs neither the site tree nor a
 // canvas.
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import ChartCard from './ChartCard.vue'
 import type { GlobalFilters, StatsResponse, Widget } from '../types'
 import { TRACKING_ACTIVATION_DATE_ET } from '../lib/popupEvents'
 import { formatDateYmd } from '../lib/valueTokens'
+import { __resetReturnRefreshForTests, RETURN_DEBOUNCE_MS, RETURN_MIN_AGE_MS } from '../composables/useReturnRefresh'
 
 const fetchStatsMock = vi.hoisted(() => vi.fn())
 const fetchSeriesStatsMock = vi.hoisted(() => vi.fn())
@@ -121,5 +122,55 @@ describe('ChartCard: value tokens in the caption', () => {
     const texts = w.findAll('.card-captions .note-block').map((n) => n.text())
     expect(texts[0]).toBe('Mine 4,000.')
     expect(texts).toContain('Server note —.')
+  })
+})
+
+describe('ChartCard: value tokens while the chart reloads (review N1)', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+    __resetReturnRefreshForTests()
+  })
+
+  it('a reload for a new range shows — until the new response arrives, never the old values', async () => {
+    fetchStatsMock.mockResolvedValueOnce(response())
+    const w = await mountCard({ caption: 'Total {=chart.total|number}, {=chart.from|date}' })
+    expect(caption(w).text()).toBe('Total 4,000, Sep 1, 2026')
+    let release!: (r: StatsResponse) => void
+    fetchStatsMock.mockImplementationOnce(() => new Promise<StatsResponse>((r) => (release = r)))
+    await w.setProps({ filters: { ...filters, since: '2026-10-01', until: '2026-10-02' } })
+    await flushPromises()
+    expect(fetchStatsMock).toHaveBeenCalledTimes(2)
+    expect(caption(w).text()).toBe('Total —, —')
+    release(
+      response({
+        rows: [{ key: { country: 'US' }, pageviews: 7, visits: 7 }],
+        totals: { pageviews: 7, visits: 7 },
+        meta: { site: 'all', host: null, since: '2026-10-01', until: '2026-10-02', dimensions: ['country'], metric: 'pageviews' },
+      }),
+    )
+    await flushPromises()
+    expect(caption(w).text()).toBe('Total 7, Oct 1, 2026')
+  })
+
+  it('a background refetch (the user came back to the tab) keeps the values up: no flash of —', async () => {
+    __resetReturnRefreshForTests()
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+    vi.useFakeTimers()
+    fetchStatsMock.mockResolvedValueOnce(response())
+    const w = mount(ChartCard, { props: { widget: widget({ caption: 'Total {=chart.total|number}' }), filters, dark: false, drillOpen: false } })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(caption(w).text()).toBe('Total 4,000')
+    let release!: (r: StatsResponse) => void
+    fetchStatsMock.mockImplementationOnce(() => new Promise<StatsResponse>((r) => (release = r)))
+    await vi.advanceTimersByTimeAsync(RETURN_MIN_AGE_MS + 1000)
+    document.dispatchEvent(new Event('visibilitychange'))
+    window.dispatchEvent(new Event('focus'))
+    await vi.advanceTimersByTimeAsync(RETURN_DEBOUNCE_MS + 20)
+    expect(fetchStatsMock).toHaveBeenCalledTimes(2) // the refetch is in flight
+    expect(caption(w).text()).toBe('Total 4,000')
+    release(response({ totals: { pageviews: 4100, visits: 1300 } }))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(caption(w).text()).toBe('Total 4,100')
+    w.unmount()
   })
 })

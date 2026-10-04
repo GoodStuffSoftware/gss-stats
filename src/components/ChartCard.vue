@@ -258,8 +258,10 @@ let reqId = 0
 const notes = computed(() => chartNotes(props.widget, data.value, error.value))
 // `{=…}` value tokens in the caption (lib/valueTokens.ts): filled from this chart's own response
 // and the fixed dates, never a fetch. Only the widget's own caption takes them; every other note
-// shows "—" for a token.
-const captionValues = computed(() => chartValueResolver(props.widget, data.value, error.value))
+// shows "—" for a token. While a real reload is loading (a new range or spec), the previous
+// response is not this chart's any more, so the caption shows "—" rather than the old values; a
+// background refetch never sets `loading`, so it keeps the values up until the new ones arrive.
+const captionValues = computed(() => chartValueResolver(props.widget, loading.value ? null : data.value, error.value))
 watch([data, error], () => emit('data', data.value, error.value))
 
 // Per-chart filter override: use widget.filters if set, else the global filter.
