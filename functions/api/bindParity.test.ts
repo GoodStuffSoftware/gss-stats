@@ -245,7 +245,7 @@ describe('segment-cut parity: literal cuts give the rows bound cuts gave', () =>
       expect(literals.length, id).toBeGreaterThan(0)
       checked++
     }
-    expect(checked).toBeGreaterThan(0)
+    expect(checked).toBe(4) // all four facts that take cuts were compared, none skipped
   })
 })
 
