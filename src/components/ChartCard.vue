@@ -17,6 +17,8 @@ import BaseChart from './charts/BaseChart.vue'
 import WorldMap from './charts/WorldMap.vue'
 import FilterPopover from './FilterPopover.vue'
 import MetricCard from './metrics/MetricCard.vue'
+import StatTile from './metrics/StatTile.vue'
+import BarTable from './metrics/BarTable.vue'
 import { metricsContextFor } from '../lib/metrics/pageContext'
 import { cardRefFor, cardShowsOwnReload } from '../lib/metrics/readingsCard'
 import NoteWidgetBody from './widgets/NoteWidgetBody.vue'
@@ -442,7 +444,6 @@ const tableRows = computed(() =>
         value: metricValue(r, props.widget.metric),
       })),
 )
-const tableMax = computed(() => Math.max(1, ...tableRows.value.map((r) => r.value)))
 
 const isEmpty = computed(
   () =>
@@ -577,27 +578,9 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
       <div v-else-if="popupNotYetActive" class="state mono">Tracking not yet active</div>
       <div v-else-if="isEmpty" class="state mono">No data in range</div>
 
-      <!-- Stat tile -->
-      <div v-else-if="widget.type === 'stat'" class="stat">
-        <div class="stat-num">{{ fmt(statValue) }}</div>
-        <div class="stat-label overline">{{ widget.metric }}</div>
-        <div class="stat-sub">{{ fmt(statOther) }} {{ statOtherLabel }}</div>
-      </div>
-
-      <!-- Table -->
-      <div v-else-if="widget.type === 'table'" class="table-wrap">
-        <table>
-          <tbody>
-            <tr v-for="(r, idx) in tableRows" :key="idx">
-              <td class="t-label" :title="r.label">{{ r.label }}</td>
-              <td class="t-bar">
-                <span class="bar" :style="{ width: (r.value / tableMax) * 100 + '%' }"></span>
-              </td>
-              <td class="t-val mono">{{ fmt(r.value) }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      <!-- Stat tile and table: the shared StatTile / BarTable (metrics/), fed by fetchStats. -->
+      <StatTile v-else-if="widget.type === 'stat'" :number="fmt(statValue)" :label="widget.metric" :sub="`${fmt(statOther)} ${statOtherLabel}`" />
+      <BarTable v-else-if="widget.type === 'table'" :rows="tableRows" />
 
       <!-- World map (geo points) -->
       <WorldMap v-else-if="widget.type === 'map'" :data="data" />
@@ -943,52 +926,6 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
 .state.error {
   color: #bc4749;
 }
-.stat {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
-.stat-num {
-  font-family: 'Space Grotesk', sans-serif;
-  font-size: clamp(28px, 7vw, 46px);
-  font-weight: 700;
-  line-height: 1;
-  letter-spacing: -0.03em;
-  color: rgb(var(--ink));
-}
-.stat-label {
-  margin-top: 6px;
-}
-.stat-sub {
-  margin-top: 4px;
-  font-size: 12px;
-  color: rgb(var(--ink-2));
-}
-.table-wrap {
-  height: 100%;
-  overflow-y: auto;
-}
-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12.5px;
-}
-td {
-  padding: 4px 6px;
-  vertical-align: middle;
-}
-.t-label {
-  max-width: 0;
-  width: 42%;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: rgb(var(--ink));
-}
-.t-bar {
-  width: 40%;
-}
 @media (max-width: 700px) {
   .chart-card.chart-card.needs-chart-height.tall-on-phone {
     height: auto;
@@ -1043,18 +980,6 @@ td {
   padding: 0 14px 10px;
   min-width: 0;
   overflow-wrap: anywhere;
-}
-.t-bar .bar {
-  display: block;
-  height: 8px;
-  border-radius: 4px;
-  background: rgb(var(--amber));
-  min-width: 2px;
-}
-.t-val {
-  text-align: right;
-  color: rgb(var(--ink-2));
-  white-space: nowrap;
 }
 .fp-backdrop {
   position: fixed;
