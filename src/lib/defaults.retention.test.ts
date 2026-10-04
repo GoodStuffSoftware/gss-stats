@@ -11,6 +11,7 @@ import {
   defaultWidgetsForPage,
   isRetentionPage,
   normalizeConfig,
+  syncCardWithView,
 } from './defaults'
 import { getNote, noteRawText } from './notes'
 import { presetById } from './metrics/presets'
@@ -59,6 +60,12 @@ describe('the retention page template', () => {
     const text = noteRawText('retention-page-scope')
     expect(text).toMatch(/count per campaign/)
     expect(text).not.toMatch(/\d\d?:\d\d|\b(am|pm|UTC)\b/i)
+  })
+
+  it('keeps every template card when the editor saves it (syncCardWithView)', () => {
+    const cards = defaultRetentionWidgets().filter((x) => x.card)
+    expect(cards.length).toBeGreaterThan(0)
+    for (const c of cards) expect(syncCardWithView({ ...c, title: 'edited' }).card, c.id).toEqual(c.card)
   })
 
   it('is a template, found by id, whose restore set is its own widgets', () => {

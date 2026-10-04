@@ -564,13 +564,13 @@ export function isCampaignComparePage(p: Pick<DashboardPage, 'id'>): boolean {
 // layout only once someone creates it (+ New > Page > Start from), as an ordinary page of ordinary
 // card widgets. Counts only: no chart, no hour, place or device split, no clock time.
 export function defaultRetentionWidgets(): Widget[] {
-  const card = (id: string, title: string, preset: string, geom: { x: number; y: number; w: number; h: number }, notes?: string[]): Widget =>
-    w({ id, title, type: 'table', dataset: 'campaigns', card: { preset }, dimension: '', metric: 'pageviews', limit: 1, ...(notes ? { notes } : {}), ...geom })
+  const card = (id: string, title: string, preset: string, geom: { x: number; y: number; w: number; h: number }, notes?: string[], view?: string): Widget =>
+    w({ id, title, type: 'table', dataset: 'campaigns', ...(view ? { view } : {}), card: { preset }, dimension: '', metric: 'pageviews', limit: 1, ...(notes ? { notes } : {}), ...geom })
   return [
     w({ id: 'rt-note-scope', title: 'Scope note', type: 'note', dimension: '', metric: 'pageviews', limit: 1, longText: true, noteId: 'retention-page-scope', x: 0, y: 0, w: 9, h: 3 }),
     w({ id: 'rt-note-smallsample', title: 'Small sample', type: 'note', dimension: '', metric: 'pageviews', limit: 1, noteId: 'small-sample', x: 9, y: 0, w: 3, h: 3 }),
     card('rt-verdict', 'Retention verdict', 'retention-verdict', { x: 0, y: 3, w: 12, h: 13 }),
-    card('rt-returns', 'Return visits', 'campaign-returns', { x: 0, y: 16, w: 7, h: 11 }, ['play-tracking-status', 'return-rate-caption']),
+    card('rt-returns', 'Return visits', 'campaign-returns', { x: 0, y: 16, w: 7, h: 11 }, ['play-tracking-status', 'return-rate-caption'], 'returns'),
     card('rt-engagement', 'Engagement per arrival', 'campaign-engagement', { x: 7, y: 16, w: 5, h: 11 }),
   ]
 }
