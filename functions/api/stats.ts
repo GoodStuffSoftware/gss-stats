@@ -234,7 +234,11 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // (functions/_lib/rangeGate.ts). A range beyond that is cut to the most recent allowed window
   // ending at the requested end, and the cut travels back as `notice` for the chart to show.
   // A `date` series buckets by UTC day, so a moved start lands on a UTC midnight (first bar whole).
-  const gate = gateRange('cf-rum', parseWhen(datetimeGeq), parseWhen(datetimeLeq), Date.now(), dims.includes('date') ? 'utc-day' : 'et-day')
+  // The window as asked, taken before a cut moves `datetimeGeq`/`datetimeLeq`: an upstream refusal
+  // after a cut must still report this one in `notice.requested`, not the cut window.
+  const requestedFromMs = parseWhen(datetimeGeq)
+  const requestedToMs = parseWhen(datetimeLeq)
+  const gate = gateRange('cf-rum', requestedFromMs, requestedToMs, Date.now(), dims.includes('date') ? 'utc-day' : 'et-day')
   const notice: RangeNotice | null = gate.notice
   // `meta` describes the range the DATA covers, and chart date axes are built from it, so when the
   // range was cut it holds the served start (the end is never moved). The range asked for stays
@@ -286,7 +290,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     rows: [],
     totals: { pageviews: 0, visits: 0 },
     meta: { site, host, since, until, dimensions: dims, metric },
-    notice: upstreamRejectedNotice('cf-rum', parseWhen(datetimeGeq), parseWhen(datetimeLeq)),
+    notice: upstreamRejectedNotice('cf-rum', requestedFromMs, requestedToMs),
   })
 
   let payload: any
