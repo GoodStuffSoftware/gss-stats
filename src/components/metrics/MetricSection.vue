@@ -93,6 +93,8 @@ const barMax = computed(() => {
 // ── table, row repeat ────────────────────────────────────────────────────────────────────────
 const tableRows = computed<ScopeInstance[]>(() => (props.section.layout === 'table' && !isColumnTable.value ? resolveRepeat(props.section.repeat, props.ctx, props.outerScope).map((r) => nestScope(r, props.outerScope)) : []))
 const tableHeaderTokens = computed(() => props.section.items.map((it) => itemLabelTokens(it, props.outerScope, props.ctx.todayEt)))
+/** Each column's tooltip (MetricItem.hint) as plain text, or undefined. */
+const tableHeaderHints = computed(() => props.section.items.map((it) => (it.hint === undefined ? undefined : resolveLabelTokens(it.hint, props.outerScope, undefined, props.ctx.todayEt).map((t) => t.value).join('') || undefined)))
 
 // ── table, column repeat ─────────────────────────────────────────────────────────────────────
 const tableColumns = computed<ScopeInstance[]>(() => (isColumnTable.value ? resolveRepeat(props.section.columns, props.ctx, props.outerScope).map((c) => nestScope(c, props.outerScope)) : []))
@@ -161,7 +163,7 @@ const anyVisible = computed(() => {
     <table v-else-if="section.layout === 'table'" class="metric-table">
       <thead>
         <tr>
-          <th v-for="(tokens, i) in tableHeaderTokens" :key="i"><MetricLabel :tokens="tokens" /></th>
+          <th v-for="(tokens, i) in tableHeaderTokens" :key="i" :title="tableHeaderHints[i]"><MetricLabel :tokens="tokens" /></th>
         </tr>
       </thead>
       <tbody>

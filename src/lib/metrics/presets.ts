@@ -428,7 +428,7 @@ export const ADS_READINGS_LOG: CardSpec = {
         { id: 'asks', label: { note: 'label.reading.asks' }, data: { field: 'reading.count.asks' }, display: { as: 'number' } },
         { id: 'accepts', label: { note: 'label.reading.accepts' }, data: { field: 'reading.count.accepts' }, display: { as: 'number' } },
         { id: 'auth', label: { note: 'label.reading.auth' }, data: { field: 'reading.count.auth' }, display: { as: 'number' } },
-        { id: 'signUps', label: { note: 'label.reading.signUps' }, data: { field: 'reading.count.signUps' }, display: { as: 'text' } },
+        { id: 'signUps', label: { note: 'label.reading.signUps' }, hint: { note: 'label.reading.signUpsHint' }, data: { field: 'reading.count.signUps' }, display: { as: 'text' } },
       ],
     },
   ],

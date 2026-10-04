@@ -14,7 +14,7 @@ import { freshnessLine, STALE_NOTE } from '../adsFreshness'
 import { etDateTimeText, signUpsText } from '../adsReadingsFormat'
 import { metricWindows, METRICS, rulesOf, type MetricDef, type MetricParam } from './metrics'
 import { ratioParamsOf, ratioSupportsOrganic, ratioWindowsOf, RATIOS, type RatioDef } from './ratios'
-import { COUNTRY_BUCKETS, DEFAULT_READINGS_LIMIT, MAX_READINGS_LIMIT, READING_COUNT_FIELDS, WINDOW_SIDES, type CountryBucket, type DataBinding, type DeltaName, type Gating, type Label, type MetricItem, type ParamValue, type ReadingCountPath, type RepeatSpec, type ScopePath, type Section, type WindowSide } from './types'
+import { COUNTRY_BUCKETS, DEFAULT_READINGS_LIMIT, MAX_READINGS_LIMIT, READING_COUNT_FIELDS, WINDOW_SIDES, type CellTone, type CountryBucket, type DataBinding, type DeltaName, type Gating, type Label, type MetricItem, type ParamValue, type ReadingCountPath, type RepeatSpec, type ScopePath, type Section, type WindowSide } from './types'
 
 /** The count keys a reading scope carries: the record field behind each ReadingCountPath
  * (types.ts READING_COUNT_FIELDS, the allow-list). Nothing else of a record's counts gets here. */
@@ -34,6 +34,8 @@ export interface ReadingScope {
   spend: number | null
   rules?: string
   proposal?: string
+  /** How the Rules and Proposal cells are coloured (scopeTone): the text itself says the same. */
+  tones?: { rules?: CellTone; proposal?: CellTone }
   /** false when a read the record depends on returned no data. */
   complete?: boolean
   counts?: Partial<Record<ReadingCountKey, number | null>>
@@ -209,6 +211,17 @@ export function resolveRepeat(repeat: RepeatSpec | undefined, ctx: RepeatContext
  * (popupEvents.ts etDateFromMs) as every other ET-date computation in the codebase. */
 export function todayEtFrom(nowMs: number): string {
   return etDateFromMs(nowMs)
+}
+
+/** The colour a table cell reading `path` takes from its scope instance, or null for none: the
+ * per-cell tone hook (types.ts CellTone). Only a stored reading's Rules and Proposal carry one
+ * today; it styles a value that is already shown and exposes nothing of its own. */
+export function scopeTone(scope: ScopeInstance, path: ScopePath): CellTone | null {
+  const tones = scopeOfKind(scope, 'reading')?.reading?.tones
+  if (!tones) return null
+  if (path === 'reading.rules') return tones.rules ?? null
+  if (path === 'reading.proposal') return tones.proposal ?? null
+  return null
 }
 
 /** One field of the object a scope instance is bound to (Section 1, "Labels"/"field" data

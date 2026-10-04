@@ -21,6 +21,7 @@ const COUNT_KEYS = Object.values(READING_COUNT_FIELDS) as ReadingCountKey[]
 export function readingScopeOf(r: ReadingRecord): ReadingScope {
   const counts: Partial<Record<ReadingCountKey, number | null>> = {}
   for (const k of COUNT_KEYS) counts[k] = r.counts?.[k] ?? null
+  const rules = rulesSummary(r.rules)
   return {
     campaignId: r.campaignId,
     readAt: r.readAt,
@@ -28,8 +29,10 @@ export function readingScopeOf(r: ReadingRecord): ReadingScope {
     // dimmed, MetricSection.vue), as the bespoke readings log did.
     kind: r.complete ? readingKindLabel(r) : `${readingKindLabel(r)} (incomplete)`,
     spend: r.cumulativeSpend ?? null,
-    rules: rulesSummary(r.rules).text,
+    rules: rules.text,
     proposal: proposalLabel(r),
+    // Colours only, as the bespoke log drew them: the rules summary's tone, and a pause proposal red.
+    tones: { rules: rules.tone, ...(r.proposal === 'PROPOSE PAUSE' ? { proposal: 'trip' as const } : {}) },
     complete: r.complete,
     counts,
     signUpsExact: r.counts?.signUpsExact === 1,

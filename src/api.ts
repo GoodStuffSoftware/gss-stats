@@ -175,7 +175,7 @@ async function withSessionCheck<T>(run: () => Promise<T>): Promise<T> {
 
 /** Fetch the ads-read routine's readings log + stored spend (GET /api/ads/readings — see
  * lib/adsStore.ts + functions/api/ads/readings.ts). `query` is the URL-encoded
- * campaignId/limit query string AdsReadingsWidgetCard builds. */
+ * campaignId/limit query string the readings log card builds. */
 export function fetchAdsReadings(query: string): Promise<AdsReadingsResponse> {
   return withSessionCheck(async () => {
     const res = await fetch(`/api/ads/readings?${query}`)

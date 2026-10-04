@@ -2,12 +2,12 @@
 //
 // ADR 0005 slice 3, step B1: the `ads-readings-log` preset on MetricCard keeps every behaviour the
 // bespoke widget's return-refresh test (widgets/AdsReadingsWidgetCard.returnRefresh.test.ts, which
-// B2 deletes) held: it refetches the readings when the user comes back to the tab, under the same
+// B2 deleted) held: it refetches the readings when the user comes back to the tab, under the same
 // rules as every other card (60 s since its last load, nothing in flight, never while hidden); the
 // rows stay up while it reloads; an older response never overwrites a newer one (the reqId guard);
 // and the refresh action reloads the readings. Each case here is the old case, re-aimed at the
-// card; the one difference is how a load shows: the card's `.mc-live` status instead of an error
-// block, and no "Loading…" text (the rows are simply not there yet).
+// card; the one difference is how a failure shows: the card's `.mc-live` status (with Retry)
+// instead of an error block. "Loading…" is kept: shown on the first load, never on a refetch.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import MetricCard from './MetricCard.vue'
@@ -166,6 +166,7 @@ describe('ads-readings-log card: a background refetch is quiet', () => {
     expect(mocked).toHaveBeenCalledTimes(2) // under way, not answered
     expect(asks(w)).toEqual(['111'])
     expect(failed(w)).toBe(false)
+    expect(w.text()).not.toContain('Loading…')
     expect(w.text()).toContain('Proposals only')
     slow.resolve(answer(222, '2026-10-03T12:05:00Z'))
     await settle()
@@ -252,7 +253,7 @@ describe('ads-readings-log card: a superseded FIRST load cannot touch the state 
     expect(asks(w)).toEqual(['333'])
   })
 
-  it('an older load that settles while the newer one is still pending shows nothing of its own (finally guard)', async () => {
+  it('an older load that settles while the newer one is still pending leaves the "Loading…" state up (finally guard)', async () => {
     const old = deferred<never>()
     const newer = deferred<never>()
     mocked.mockReset()
@@ -265,9 +266,11 @@ describe('ads-readings-log card: a superseded FIRST load cannot touch the state 
     await settle()
     expect(asks(w)).toEqual([]) // the old answer is not drawn
     expect(w.text()).not.toContain('No campaign has readings or stored spend yet.') // still loading, not "empty"
+    expect(w.text()).toContain('Loading…')
     newer.resolve(answer(333))
     await settle()
     expect(asks(w)).toEqual(['333'])
+    expect(w.text()).not.toContain('Loading…')
   })
 })
 
