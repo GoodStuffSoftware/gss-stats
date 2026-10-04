@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { allChartNotes, chartNotes, convertLegacyNotes, isChartNoteHidden, isNoteIdHideable } from './chartNotes'
+import { ALWAYS_SHOWN_RUNTIME_NOTE_IDS, allChartNotes, canHideCaveatId, chartNotes, convertLegacyNotes, isChartNoteHidden, isNoteIdHideable } from './chartNotes'
 import { autoCaveatIds, cardSplitsByCountry, getNote, isStaticCaptionNote, libraryCaptionOptions, noteTemplate } from './notes'
 import { PRESETS } from './metrics/presets'
 import type { CardSpec, MetricItem, RepeatSpec, Section } from './metrics/types'
@@ -369,5 +369,19 @@ describe('a non-hideable automatic caveat shows only where it is true (B4a)', ()
   it('a widget condition makes a note a caveat, never a static library caption', () => {
     expect(getNote(CUT)!.appliesTo).toBeTypeOf('function')
     expect(isStaticCaptionNote(CUT)).toBe(false)
+  })
+})
+
+describe('canHideCaveatId (NIT-5a)', () => {
+  it('names exactly the runtime notes allChartNotes adds as not hideable', () => {
+    const data = response({ note: 'A pop-up caveat.', notice }, { splitGuard: true, refusedWholeDays: true })
+    const locked = allChartNotes(widget(), data, null).filter((n) => !n.hideable && !n.noteId && n.kind === 'caveat').map((n) => n.key)
+    expect(new Set(locked)).toEqual(ALWAYS_SHOWN_RUNTIME_NOTE_IDS)
+  })
+
+  it('is false for a hideable: false registry note and an always-shown runtime note, true otherwise', () => {
+    expect(isNoteIdHideable('country-split-excludes-refused')).toBe(false)
+    for (const id of ['country-split-excludes-refused', ...ALWAYS_SHOWN_RUNTIME_NOTE_IDS]) expect(canHideCaveatId(id)).toBe(false)
+    for (const id of ['popup-note', 'min-cohort-caveat', 'small-sample', 'not-a-note-yet']) expect(canHideCaveatId(id)).toBe(true)
   })
 })
