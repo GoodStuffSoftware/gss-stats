@@ -92,9 +92,9 @@ const barMax = computed(() => {
 
 // ── table, row repeat ────────────────────────────────────────────────────────────────────────
 const tableRows = computed<ScopeInstance[]>(() => (props.section.layout === 'table' && !isColumnTable.value ? resolveRepeat(props.section.repeat, props.ctx, props.outerScope).map((r) => nestScope(r, props.outerScope)) : []))
-/** A row-table column that reads as a number is right-aligned: a number display, or a stored
- * reading's count (the sign-ups cell is text, but still a count). */
-const isNumColumn = (it: MetricItemSpec) => it.display.as === 'number' || ('field' in it.data && it.data.field.startsWith('reading.count.'))
+/** A row-table column that reads as a number is right-aligned: a number or percent display, or a
+ * stored reading's count (the sign-ups cell is text, but still a count). */
+const isNumColumn = (it: MetricItemSpec) => it.display.as === 'number' || it.display.as === 'percent' || ('field' in it.data && it.data.field.startsWith('reading.count.'))
 const tableHeaderTokens = computed(() => props.section.items.map((it) => itemLabelTokens(it, props.outerScope, props.ctx.todayEt)))
 /** Each column's tooltip (MetricItem.hint) as plain text, or undefined. */
 const tableHeaderHints = computed(() => props.section.items.map((it) => (it.hint === undefined ? undefined : resolveLabelTokens(it.hint, props.outerScope, undefined, props.ctx.todayEt).map((t) => t.value).join('') || undefined)))

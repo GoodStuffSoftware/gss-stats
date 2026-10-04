@@ -115,4 +115,25 @@ describe('MetricSection — the row table', () => {
     expect(w.findAll('th').map((th) => th.classes().includes('num'))).toEqual([false, true, false])
     expect(w.findAll('tbody td').map((td) => td.classes().includes('num'))).toEqual([false, true, false])
   })
+
+  it('right-aligns a percent column the same way (header and cells)', () => {
+    vi.stubGlobal('fetch', mockFetch(() => 0))
+    const w = mount(MetricSection, {
+      props: {
+        section: {
+          layout: 'table',
+          repeat: { over: 'readings' },
+          items: [
+            { id: 'kind', label: 'Kind', data: { field: 'reading.kind' }, display: { as: 'text' } },
+            { id: 'rate', label: 'Rate', data: { ratio: 'popup.tapRate', params: { popup: 'upsell' }, window: 'page' }, display: { as: 'percent', decimals: 1 } },
+          ],
+        } satisfies Section,
+        outerScope: ROOT_SCOPE,
+        ctx: { todayEt: '2026-09-27', readings: [{ campaignId: 'c1', readAt: '2026-09-26T19:00:00Z', kind: 'daily', spend: 1, counts: { asks: 7 } }] },
+      },
+    })
+    mounted.push(w)
+    expect(w.findAll('th').map((th) => th.classes().includes('num'))).toEqual([false, true])
+    expect(w.findAll('tbody td').map((td) => td.classes().includes('num'))).toEqual([false, true])
+  })
 })

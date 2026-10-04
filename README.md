@@ -376,7 +376,16 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   layout version 11), over the page's range, sites and "hide my own visits", as before. Outcome-over-shown rates are
   not shown as percentages: outcomes land days after the showing, so a range mixes cohorts.
   Every other pop-up chart (reason/platform breakdowns, per-day trends, single rate tiles) is
-  still available from the chart editor's "Pop-up tracking" data source.
+  still available from the chart editor's "Pop-up tracking" data source. A single rate tile
+  (any `POPUP_RATE_SPECS` key) is a one-item metric card since layout version 18: it shows the
+  percentage big with its n/d under it, "too few to report" under `MIN_COHORT`, "—" over "(0/0)"
+  when nothing was shown, and the registry's notes (counted-from date, "still arriving" on a
+  lagged outcome rate, the install-fix note, the eligibility caveat). A saved rate tile is mapped
+  to the card when it is drawn (`src/lib/metrics/rateTileCard.ts`); the layout is not rewritten.
+  A key this build does not know shows a message asking you to pick a rate. Differences from the
+  old tile: the card clamps a range longer than the metrics limit to its newest days, reads a
+  bare-date range as Eastern days, and shows "unavailable" for a bare-date range whose start
+  equals its end. Percent columns in card tables are right-aligned.
   See [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) for the one place every pop-up path
   pattern is defined, matching the Best Sudoku team's final beacon path list (2026-09-25):
   - Upsell reasons are exactly `cadence` / `limit` / `daily-locked` / `upgrade-tap`; any
@@ -1283,12 +1292,13 @@ trend charts on `dateEt`) rewrites the dimension of those untouched charts: its 
 stored v14 writes `backup:v14`, and rolling the code back past it needs `backup:v14` restored.
 Layout version 16 (chart captions and hideable caveats) adds `caption` and `hiddenCaveats` to a
 chart and hides, once, the caveats an existing chart did not show: its first save over a stored
-v15 writes `backup:v15`. Layout version 17 (the readings log as a metric card) is a save-guard
-bump only, like v14: its first save over any older stored layout writes `backup:v<stored>`, and
-rolling the code back past it needs that backup restored (same steps below, with that key).
+v15 writes `backup:v15`. Layout versions 17 (the readings log as a metric card) and 18 (the
+pop-up rate tile as a metric card) are save-guard bumps only, like v14: the first save over any
+older stored layout writes `backup:v<stored>`, and rolling the code back past either needs that
+backup restored (same steps below, with that key).
 Production is stored at v12 until its first save, so that save writes
 `backup:v12` (the page navigation, trend-chart and caption changes of v13-v16 are all applied on
-load and written by it), and rolling the code back past v17 needs that backup restored. A tab still
+load and written by it), and rolling the code back past v18 needs that backup restored. A tab still
 running older code gets `409` ("This tab is out of date, reload") instead of overwriting a
 newer layout.
 
