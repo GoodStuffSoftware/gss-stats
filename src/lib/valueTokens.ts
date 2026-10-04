@@ -36,9 +36,22 @@
 // `golive.<app>` is reserved for a real go-live day; Play gets `golive.play` only once its
 // tracking is actually live, and `play.submitted` keeps meaning the submission.
 //
-// EXTENDING (release 2): catalog metrics arrive as new paths of the same shape, e.g.
-// `{=metric:<id>@<window>|number}` — ":" and "@" are already legal path characters, so release 1
-// parses them and shows "—" (unknown path), and nothing saved under release 1 changes meaning.
+// PATHS (release 2). Catalog metrics, filled from ONE batched request per page render:
+//   metric:<id>@<window>   kind from the catalog's own unit (number; share for a rate or a
+//                          proportion ratio; date for an instant), e.g.
+//                          {=metric:bsk.pageviews@page|number}  {=metric:bsk.popupTapRate@todaySoFar|pct}
+//   <id>      a catalog metric or proportion ratio that needs no campaign, popup or other parameter
+//   <window>  required; one of THAT metric's own windows: page (the page's date range), todaySoFar,
+//             before, after (the release windows)
+// Anything else (no @window, an unknown id or window, a campaign or popup metric, a dollar figure
+// or category, a cost/pair/per ratio) is an unknown path and shows "—", as do loading, an error
+// and a value the server withholds or can't fully measure (too few, no data, partial). The request
+// a token sends is only its metric and window, so it can never expose a split the catalog
+// withholds (counts-only rule; enforced server-side). Release 1 parses these paths and shows "—",
+// so nothing saved under it changes meaning. Full detail: lib/metricValueTokens.ts.
+// `chart.*` is "—" in a note widget (it belongs to a chart); release.*, golive.*, play.* and
+// metric: fill in both a chart caption and a note widget.
+//
 // New paths and new formats are additive only; an existing path never changes kind.
 import type { StatsResponse, Widget } from '../types'
 import { formatKey, hasLineSeries, metricValue } from './charts'
@@ -112,6 +125,13 @@ export function resolveValueToken(source: string, values: TokenValues): string |
   if (!v) return null
   if (t.format !== null && FORMAT_KIND[t.format] !== v.kind) return null
   return formatValue(v)
+}
+
+/** The fixed dates, as a resolver, built once: they only change with a new build. What a card's
+ * own labels use (lib/metrics/render.ts), so the card editor's Insert value fills in. */
+let globalResolver: ValueResolver | null = null
+export function globalValueResolver(): ValueResolver {
+  return (globalResolver ??= resolverOf(globalValues()))
 }
 
 /** The fixed dates: the newest release, the web go-live day and the Play submission day. */
@@ -221,18 +241,30 @@ export function chartValues(
   return out
 }
 
-/** The resolver a chart's caption uses: its own results plus the fixed dates. */
+/** A resolver over a value table (what TextBlock/NoteBlock take as `values`). */
+export function resolverOf(values: TokenValues): ValueResolver {
+  return (source) => resolveValueToken(source, values)
+}
+
+/** The resolver a chart's caption uses: its own results, the fixed dates, and `extra` (the
+ * `metric:` values, composables/useMetricTokens.ts). */
 export function chartValueResolver(
   widget: Pick<Widget, 'type' | 'dataset' | 'dimension' | 'series' | 'metric'>,
   data: StatsResponse | null | undefined,
   error?: string | null,
+  extra?: TokenValues,
 ): ValueResolver {
-  const values = { ...globalValues(), ...chartValues(widget, data, error) }
-  return (source) => resolveValueToken(source, values)
+  return resolverOf({ ...globalValues(), ...chartValues(widget, data, error), ...extra })
+}
+
+/** The resolver a note widget's text uses: the fixed dates and `extra`. `chart.*` is absent, so
+ * it shows "—": a note belongs to no chart. */
+export function noteValueResolver(extra?: TokenValues): ValueResolver {
+  return resolverOf({ ...globalValues(), ...extra })
 }
 
 export interface ValueTokenOption {
-  group: 'This chart' | 'Dates'
+  group: 'This chart' | 'Dates' | 'Metrics'
   label: string
   token: string
 }

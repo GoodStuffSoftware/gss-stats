@@ -6,10 +6,40 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
-## [0.24.1] — 2026-10-03
+## [0.25.2] — 2026-10-03
 
 ### Fixed
 - **The retention verdict says how long it is maturing** — it now reads "maturing (5 days left)" (or "1 day left") instead of just "maturing", counted in whole US-Eastern days from the end of the flight, on saved pages too.
+
+## [0.25.1] — 2026-10-03
+
+### Changed
+- **The editor says where a pop-up rate went** — under Chart type, a new chart now shows a one-line hint to make it a metric card and pick the "Pop-up rates" preset.
+
+### Removed
+- **The old single-rate query is gone from the pop-up data source** — a rate tile has been a metric card since 0.23.0, so nothing asked for it; a dashboard tab left open from an older version shows a "reload the page" message on that tile instead of an error.
+
+## [0.25.0] — 2026-10-03
+
+### Added
+- **Captions and notes can show catalog numbers.** Insert value has a Metrics group (for example Page
+  views over the page range); every widget on a page shares one request, a value that is loading,
+  failed or withheld shows "—", and the counts-only rule is unchanged.
+- **Note widgets take live values.** A note's text can use release, go-live, Play-submission and
+  catalog tokens; a chart value shows "—" in a note.
+
+### Changed
+- **One Insert value control everywhere.** A card label's "+ Insert variable…" is now the same menu as
+  the caption's, with the card's own fields and the dates, and its dates fill in.
+- **Inserting is an explicit choice.** Pick a value, then press Insert; moving through the menu with
+  the arrow keys no longer drops a token per option, for Insert value and Insert from library.
+- **Insert keeps your place.** After Insert, the cursor returns to the text box right after what was
+  added, so typing and Escape carry on as before; a card label that has no room for the value says
+  "Label is full" instead of cutting it off.
+
+### Fixed
+- **Values in captions and notes roll over at midnight.** A page left open past midnight Eastern
+  fetches the new day's values instead of keeping yesterday's.
 
 ## [0.24.0] — 2026-10-03
 

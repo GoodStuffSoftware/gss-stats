@@ -186,10 +186,30 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
     submission date. Formats are `number`, `pct` and `date`. A token with no value (no data yet, an
     error, a rate tile or a multi-series line for the chart values, an unknown path or a mismatched
     format) shows "—", as every token does on a tab from before value tokens and in any note other
-    than the caption, so the raw token never shows, even one wrapped around bold or a link. A value
+    than a caption or a note widget, so the raw token never shows, even one wrapped around bold or a link. A value
     is put in only as plain text and never read again, so a value holding `**`, a link or another
     token shows as written; a token inside bold or a link label shows "—", and a link whose address
     holds `{` or `}` stays plain text.
+  - **Catalog values** (`{=metric:<id>@<window>}`, e.g. `{=metric:bsk.pageviews@page|number}`; the
+    grammar is pinned in [`src/lib/valueTokens.ts`](src/lib/valueTokens.ts)). A caption or a note
+    widget can show any catalog metric or proportion ratio that needs no campaign or popup choice,
+    over one of its own windows (`page` for the page's date range, `todaySoFar`, `before`, `after`);
+    the window is required and the kind (number, percentage, date) is the catalog's own. Every
+    widget on a page shares ONE batched `/api/metrics` request, the same one the cards use (so a
+    value a card already loaded is never fetched twice); while it loads, on an error and for an
+    unknown id a token shows "—", and so does a value the server withholds or cannot fully measure
+    (too few, no data, a shorter span than the range). A token sends only its metric and window,
+    so it can never ask for a split the catalog withholds: the counts-only rule (return, game
+    starts, completions, tutorial and tour exits: no hour, place or device split, no visitor id)
+    stays enforced on the server, where a sub-day range counts those rows over whole ET days.
+  - **Note widgets** take values too: `release.*`, `golive.*`, `play.*` and `metric:` tokens fill
+    in; `chart.*` shows "—" (a note belongs to no chart).
+  - **Insert value** is one control in every text box that takes inserts: the caption, a note
+    widget and a card label. It groups This chart (not in a note or a card that renders its own
+    body), Dates and Metrics (a card label offers the repeat's own fields and Dates). A metric
+    option shows its current value only if the page already holds it; nothing is fetched to label
+    an option. Insertion is an explicit choice: pick in the menu, then press **Insert** (a closed
+    menu fires a change on every arrow key, which would drop a token per option).
   - **Caveats** are system-owned and follow the code: dated or gated entries, computed text, text
     tied to a value from code, and the runtime notes. A chart shows its data source's caveats
     automatically (`autoCaveatIds`: the `overview`, `campaigns`, `popup`, `geo` and `ads-readings`
@@ -394,7 +414,10 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   to the card when it is drawn (`src/lib/metrics/rateTileCard.ts`); the layout is not rewritten,
   and a stored hide of the install-fix note (`popup-note` in the chart's data caveats) still hides it.
   The chart editor no longer offers "Rate" as a chart type for a new chart (add a rate as a metric
-  card); a saved rate tile still opens and edits. The Stat and Table chart types draw through the
+  card: a one-line hint under Chart type says so, and the "Pop-up rates" preset is the starting
+  point); a saved rate tile still opens and edits. `/api/popups` no longer answers
+  `dimension: 'rate'` (removed in 0.24.1): like `rates` and `eligible`, it is a 400 naming the card
+  and asking for a reload, so a tab from an older build shows an error on that tile, not a 500. The Stat and Table chart types draw through the
   shared `StatTile` and `BarTable` components (`src/components/metrics/`), as the metric card's
   tile and bar do.
   A key this build does not know shows a message asking you to pick a rate. Differences from the
