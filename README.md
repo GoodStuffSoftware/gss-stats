@@ -381,9 +381,11 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   percentage big with its n/d under it, "too few to report" under `MIN_COHORT`, "—" over "(0/0)"
   when nothing was shown, and the registry's notes (counted-from date, "still arriving" on a
   lagged outcome rate, the install-fix note, the eligibility caveat). A saved rate tile is mapped
-  to the card when it is drawn (`src/lib/metrics/rateTileCard.ts`); the layout is not rewritten.
+  to the card when it is drawn (`src/lib/metrics/rateTileCard.ts`); the layout is not rewritten,
+  and a stored hide of the install-fix note (`popup-note` in the chart's data caveats) still hides it.
   A key this build does not know shows a message asking you to pick a rate. Differences from the
-  old tile: the card clamps a range longer than the metrics limit to its newest days, reads a
+  old tile: before tracking went live it reads "not yet tracking" where the old tile read "—"
+  over "0/0"; the card clamps a range longer than the metrics limit to its newest days, reads a
   bare-date range as Eastern days, and shows "unavailable" for a bare-date range whose start
   equals its end. Percent columns in card tables are right-aligned.
   See [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) for the one place every pop-up path

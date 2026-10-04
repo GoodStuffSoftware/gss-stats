@@ -12,6 +12,14 @@ import type { Widget } from '../../types'
 const rate = (dimension: string, extra: Partial<Widget> = {}): Widget => ({ id: 'r', i: 'r', title: 'Rate', type: 'rate', dataset: 'popup', dimension, metric: 'pageviews', limit: 1, x: 0, y: 0, w: 3, h: 3, ...extra })
 
 describe('rateTileCardRef', () => {
+  it('a stored hide of popup-note hides the install-fix note on the tile (and only then); the card still validates', () => {
+    const item = (w: Widget) => (rateTileCardRef(w) as { spec: { sections: { items: { hideNotes?: string[] }[] }[] } }).spec.sections[0].items[0]
+    expect(item(rate('install:outcome:installed')).hideNotes).toBeUndefined()
+    expect(item(rate('install:outcome:installed', { hiddenCaveats: ['other'] })).hideNotes).toBeUndefined()
+    expect(item(rate('install:outcome:installed', { hiddenCaveats: ['popup-note'] })).hideNotes).toEqual(['install-fix-note'])
+    expect(validateCard((rateTileCardRef(rate('upsell:tap', { hiddenCaveats: ['popup-note'] })) as { spec: never }).spec)).toEqual([])
+  })
+
   it('maps each of the 22 keys to a one-tile card on a registered ratio with the key\'s own label', () => {
     expect(POPUP_RATE_SPECS).toHaveLength(22)
     for (const s of POPUP_RATE_SPECS) {
