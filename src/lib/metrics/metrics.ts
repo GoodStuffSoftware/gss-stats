@@ -64,6 +64,8 @@ export interface StoreEnv {
   releaseDays: number | null
   /** ET calendar date of nowMs (the verdict's arm maturity, in whole ET days). */
   todayEt: string
+  /** The page range [from, to) in epoch ms (whole ET days), null when the request has none. */
+  pageRange: readonly [number, number] | null
   /** The organic arm's campaignReturns rows (with their ET-day maturity band), passed only to a
    * MetricDef.withOrganic store; the engine reports an error when that fact is missing. */
   organic?: FactRows
@@ -332,6 +334,37 @@ function lastSyncOf(rows: FactRows, ctx: MetricCtx): { value: number | null } {
   return { value: Number.isFinite(ms) ? ms : null }
 }
 
+// ── Google Play's own per-day totals (R-4; ads_play_daily, synced by `npm run ads:play-sync`) ──
+// Whole-app counts by PLAY day, as Google reports them: never a beacon row, never joined to one.
+// Page-range only. A day's count is null when Play's report had no such figure, and no stored day
+// in range (or only nulls) is "no figure", never a zero.
+type PlayCount = 'deviceInstalls' | 'deviceUninstalls'
+function playInRange(rows: FactRows, env: StoreEnv) {
+  if (rows.kind !== 'playDaily' || !env.pageRange) return []
+  const [from, to] = env.pageRange
+  return rows.rows.filter((r) => {
+    const t = etMidnightMs(r.date)
+    return t >= from && t < to
+  })
+}
+/** A flow (installs, uninstalls): the sum of the stored days' counts in the range. */
+const playSumOf =
+  (col: PlayCount) =>
+  (rows: FactRows, _ctx: MetricCtx, env: StoreEnv): { value: number | null } => {
+    const vals = playInRange(rows, env).flatMap((r) => (r[col] === null ? [] : [r[col] as number]))
+    return { value: vals.length ? vals.reduce((a, b) => a + b, 0) : null }
+  }
+/** A stock (active device installs): its latest figure in the range, never a sum across days. */
+function playActiveOf(rows: FactRows, _ctx: MetricCtx, env: StoreEnv): { value: number | null } {
+  const last = playInRange(rows, env).filter((r) => r.activeDeviceInstalls !== null).pop()
+  return { value: last ? (last.activeDeviceInstalls as number) : null }
+}
+/** The newest Play day stored (not limited to the range), so the card shows how far the data runs. */
+function playThroughOf(rows: FactRows): { value: number | null } {
+  if (rows.kind !== 'playDaily' || !rows.rows.length) return { value: null }
+  return { value: etMidnightMs(rows.rows.reduce((m, r) => (r.date > m ? r.date : m), rows.rows[0].date)) }
+}
+
 export const METRIC_DEFS: MetricDef[] = [
   // ── Campaign (one campaignPathVisitor statement per campaign) ────────────────────────────
   campaignMetric({ id: 'campaign.taggedHits', unit: 'row', unitLabel: 'unit.hits', instrumented: [BEACON] }),
@@ -458,6 +491,16 @@ export const METRIC_DEFS: MetricDef[] = [
     spend: (rows, ctx) => resolveCampaignSpend(rows.find((r) => r.campaignId === ctx.params.campaignId) ?? null, CAMPAIGN_SPEND[ctx.params.campaignId ?? ''] ?? null).spend,
     instrumented: [],
   }),
+
+  // ── Google Play (site-wide; the page range only; instrumented: [] since it is not a beacon) ──
+  ...(
+    [
+      { id: 'play.deviceInstalls', unit: 'device', store: playSumOf('deviceInstalls') },
+      { id: 'play.deviceUninstalls', unit: 'device', store: playSumOf('deviceUninstalls') },
+      { id: 'play.activeDeviceInstalls', unit: 'device', store: playActiveOf },
+      { id: 'play.dataThrough', unit: 'instant', store: playThroughOf },
+    ] as const
+  ).map((d) => bskMetric({ ...d, windows: { page: 'adsPlayDaily' }, instrumented: [] })),
 
   // ── Best Sudoku site-wide (bskKpiDays for today so far; bskRangePath for a page range) ──
   bskMetric({ id: 'bsk.pageviews', unit: 'pageview', path: (p) => !isEventPath(p), windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [] }),
@@ -596,7 +639,7 @@ export const METRICS: ReadonlyMap<string, MetricDef> = (() => {
     if (d.label !== `label.${d.id}`) throw new Error(`metric ${d.id}: label must be label.${d.id}`)
     if (!Object.keys(d.windows).length) throw new Error(`metric ${d.id}: no windows`)
     if (!d.path && !d.visitor && !d.spend && !d.store && Object.values(d.windows).some((f) => f === 'adsSpend')) throw new Error(`metric ${d.id}: a spend fact needs spend() or store()`)
-    if (!d.store && Object.values(d.windows).some((f) => f === 'adsCoverage' || f === 'adsLastSync' || f === 'bskFirstHit')) throw new Error(`metric ${d.id}: a store fact needs store()`)
+    if (!d.store && Object.values(d.windows).some((f) => f === 'adsCoverage' || f === 'adsLastSync' || f === 'adsPlayDaily' || f === 'bskFirstHit')) throw new Error(`metric ${d.id}: a store fact needs store()`)
     // The engine buckets the KPI fact's rows into ET days once per batch (lib/metrics/engine.ts),
     // which holds only while that fact serves exactly the today-so-far window and nothing else.
     for (const [w, f] of Object.entries(d.windows)) {
