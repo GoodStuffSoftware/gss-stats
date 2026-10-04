@@ -142,6 +142,29 @@ export function cardRepeats(spec: RepeatHolder): RepeatSpec[] {
 export function repeatsOverReadings(spec: RepeatHolder): boolean {
   return cardRepeats(spec).some((r) => r.over === 'readings')
 }
+/** Every ScopePath the card names, through an item's `data.field`, a label's `bind` or a note
+ * label's `vars` (anywhere in the spec: items, titles, captions, hints, column labels). */
+function namedScopePaths(node: unknown, out: string[] = []): string[] {
+  if (Array.isArray(node)) {
+    for (const x of node) namedScopePaths(x, out)
+  } else if (node && typeof node === 'object') {
+    for (const [k, v] of Object.entries(node)) {
+      if ((k === 'field' || k === 'bind') && typeof v === 'string') out.push(v)
+      else if (k === 'vars' && v && typeof v === 'object') out.push(...Object.values(v).filter((x): x is string => typeof x === 'string'))
+      else namedScopePaths(v, out)
+    }
+  }
+  return out
+}
+/** Whether the card reads the ads readings load's per-campaign facts (`campaign.freshness`,
+ * `campaign.thresholds`) anywhere. It then needs GET /api/ads/readings even with no readings repeat. */
+export function usesAdsInfoFields(spec: unknown): boolean {
+  return namedScopePaths(spec).some((p) => p === 'campaign.freshness' || p === 'campaign.thresholds')
+}
+/** Whether the card reads a stored reading's own fields (`reading.*`) anywhere. */
+export function usesReadingFields(spec: unknown): boolean {
+  return namedScopePaths(spec).some((p) => p.startsWith('reading.'))
+}
 /** The most readings per campaign any readings repeat of the card asks for (what to request). */
 export function readingsLimitOf(spec: RepeatHolder): number {
   const limits = cardRepeats(spec).filter((r) => r.over === 'readings').map(readingsLimit)

@@ -178,11 +178,13 @@ describe('ads-readings-log card: a background refetch is quiet', () => {
     mocked.mockRejectedValueOnce(new Error('first load failed'))
     const w = await mountLog()
     expect(failed(w)).toBe(true)
+    expect(w.text()).not.toContain('No campaign has readings') // a failed load is not "nothing to show"
     const slow = deferred<never>()
     mocked.mockImplementationOnce(() => slow.promise)
     await vi.advanceTimersByTimeAsync(RETURN_MIN_AGE_MS + 1000)
     await comeBack()
     expect(failed(w)).toBe(true) // not swapped for anything else while it is pending
+    expect(w.text()).not.toContain('No campaign has readings')
     slow.resolve(answer(222))
     await settle()
     expect(failed(w)).toBe(false)

@@ -30,7 +30,7 @@ import { isNoteIdHideable } from '../../lib/chartNotes'
 import { resolveLabelTokens } from '../../lib/metrics/render'
 import { presetById } from '../../lib/metrics/presets'
 import { INVALID_CARD_PRESET } from '../../lib/metrics/validate'
-import { buildRequestSpec, campaignOfScope, narrowToCampaigns, readingsLimitOf, repeatsOverReadings, ROOT_SCOPE, resolveRepeat, sectionCells, todayEtFrom, type ReadingScope, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
+import { buildRequestSpec, campaignOfScope, narrowToCampaigns, readingsLimitOf, repeatsOverReadings, ROOT_SCOPE, resolveRepeat, sectionCells, todayEtFrom, usesAdsInfoFields, usesReadingFields, type ReadingScope, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
 import { CAMPAIGNS } from '../../lib/campaigns'
 import type { CardRef, CardSpec, MetricsContext } from '../../lib/metrics/types'
 import type { RefreshResult } from '../../lib/adsRefresh'
@@ -79,19 +79,22 @@ const nowMs = computed(() => props.nowMs ?? clock.value)
 const todayEt = computed(() => todayEtFrom(nowMs.value))
 
 // ── The ads readings load (ADR 0005 slice 3) ────────────────────────────────────────────────
-// A card that repeats over stored readings, or declares the ads-refresh action (its freshness
-// and fired-threshold fields come from the same endpoint), loads GET /api/ads/readings itself:
-// on mount, when its query changes, on the card reload, after an ads refresh and on return to
-// the tab. The `readings` prop stays as an override for the rows (tests, previews): when given,
-// a card that only needs the rows does not fetch.
-const wantsAds = computed(() => !!spec.value?.actions?.includes('ads-refresh') || !!spec.value?.notices)
-const wantsReadings = computed(() => !!spec.value && repeatsOverReadings(spec.value))
+// A card loads GET /api/ads/readings itself only when it needs the answer: it has `notices`, it
+// reads the load's per-campaign facts (`campaign.freshness` / `campaign.thresholds`), or it
+// repeats over stored readings / reads a `reading.*` field. Declaring the ads-refresh action is
+// not a reason: that button only syncs and reloads the card's own metrics (the campaign-cost
+// card has it and never reads the endpoint). It then loads on mount, when its query changes, on
+// the card reload, after an ads refresh and on return to the tab. The `readings` prop stays as
+// an override for the rows (tests, previews): when given, a card that only needs the rows does
+// not fetch.
+const wantsAds = computed(() => !!spec.value && (!!spec.value.notices || usesAdsInfoFields(spec.value)))
+const wantsReadings = computed(() => !!spec.value && (repeatsOverReadings(spec.value) || usesReadingFields(spec.value)))
 const loadsReadings = computed(() => wantsAds.value || (wantsReadings.value && props.readings === undefined))
 /** The most readings per campaign asked for; a card that needs only the freshness asks for one. */
 const readingsQuery = computed(() => {
   const p = new URLSearchParams()
   for (const id of props.campaignIds ?? []) p.append('campaignId', id)
-  const limit = spec.value && wantsReadings.value ? Math.min(readingsLimitOf(spec.value), MAX_READINGS_LIMIT) : 1
+  const limit = spec.value && repeatsOverReadings(spec.value) ? Math.min(readingsLimitOf(spec.value), MAX_READINGS_LIMIT) : 1
   p.set('limit', String(limit))
   return p.toString()
 })
@@ -133,6 +136,8 @@ const instances = computed<ScopeInstance[]>(() => (spec.value ? narrowToCampaign
 
 /** The first load is still out: a card that waits on the readings shows no empty state yet. */
 const readingsPending = computed(() => loadsReadings.value && !readingsData.value && !readingsFailed.value)
+/** The first load failed and nothing is on screen: the card says so (status + Retry), not "no readings". */
+const readingsLoadFailed = computed(() => loadsReadings.value && readingsFailed.value && !readingsData.value)
 
 // ── Notices (CardSpec.notices) ──────────────────────────────────────────────────────────────
 // 'ads-readings': the readings store's warning when it is unbound or unreadable, the
@@ -267,7 +272,7 @@ const allHidden = computed(() => instances.value.length > 0 && instances.value.e
     <p v-if="readingsPending && spec.repeat" class="metric-card-empty">{{ loadingText }}</p>
     <div v-if="spec.repeat" v-show="!readingsPending" :key="todayEt" class="metric-card-grid" :style="{ '--mc-min-width': `${spec.minWidth ?? 230}px` }">
       <MetricCardInstance v-for="(scope, i) in instances" v-show="!hiddenInstances.has(i)" :key="i" :spec="spec" :scope="scope" :ctx="ctx" :context="context" :boxed="true" @open="emit('open-campaigns')" @hidden="(h: boolean) => onHidden(i, h)" />
-      <p v-if="((!instances.length && !readingsPending) || allHidden) && spec.repeat.empty" class="metric-card-empty">
+      <p v-if="((!instances.length && !readingsPending && !readingsLoadFailed) || allHidden) && spec.repeat.empty" class="metric-card-empty">
         <MetricLabel :tokens="resolveLabelTokens(spec.repeat.empty.label, ROOT_SCOPE, undefined, todayEt)" />
         <MetricLabel :tokens="resolveLabelTokens(spec.repeat.empty.text, ROOT_SCOPE, undefined, todayEt)" />
       </p>
@@ -294,7 +299,7 @@ const allHidden = computed(() => instances.value.length > 0 && instances.value.e
 }
 .metric-card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(var(--mc-min-width, 230px), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(var(--mc-min-width, 230px), 100%), 1fr));
   gap: 14px;
 }
 .metric-card-empty {
