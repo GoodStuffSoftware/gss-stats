@@ -23,6 +23,8 @@
 //   chart.topShare  share   that value / the total
 //   chart.from      date    the first day the chart shows (the served range when it was cut)
 //   chart.to        date    the last day the chart shows
+//                           (both name ET days, as #55's range note does; UTC days only for an
+//                           exact whole-UTC-day range or a `dayZone: 'utc'` cut)
 //   release.latest         date  the newest dated release's day (ET)
 //   release.latestVersion  text  its version, e.g. v1.98.0
 //   golive.web      date    the day web tracking went live (ET)
@@ -34,7 +36,7 @@
 // New paths and new formats are additive only; an existing path never changes kind.
 import type { StatsResponse, Widget } from '../types'
 import { formatKey, hasLineSeries, metricValue } from './charts'
-import { rangeToYmd } from './range'
+import { etDayOfRange, isoToYmd, ymdRangeToISO } from './range'
 import { etDateFast } from './etTime'
 import { datedReleases, newest } from './releases'
 import { TRACKING_ACTIVATION_DATE_ET, PLAY_TRACKING_ACTIVATION_DATE_ET } from './popupEvents'
@@ -126,8 +128,11 @@ const missingChart = (): TokenValues => ({
   'chart.to': { kind: 'date', value: null },
 })
 
-/** The days a response covers: the served window when the range was cut (its `to` is exclusive;
- * ET days, or UTC for a `dayZone: 'utc'` notice), else the asked-for range. */
+/** The days a response covers, named the way #55's range note names them. When the range was cut:
+ * the served window (its `to` is exclusive; ET days, or UTC for a `dayZone: 'utc'` notice). Else
+ * the asked-for range: an exact ET day (etDayOfRange) is that day, an exact run of whole UTC days
+ * (ymdRangeToISO's shape) is those UTC days, and anything else (a relative "Last 7d") is the ET day
+ * of `since` through the ET day of `until − 1 ms`, so the days don't depend on the time of viewing. */
 function shownDays(data: StatsResponse): { from: string; to: string } | null {
   const served = data.notice?.served
   if (data.notice) {
@@ -138,8 +143,18 @@ function shownDays(data: StatsResponse): { from: string; to: string } | null {
     const day = (ms: number) => (data.notice!.dayZone === 'utc' ? new Date(ms).toISOString().slice(0, 10) : etDateFast(ms))
     return { from: day(from), to: day(last) }
   }
-  if (!data.meta?.since || !data.meta?.until) return null
-  return rangeToYmd(data.meta.since, data.meta.until)
+  const since = data.meta?.since
+  const until = data.meta?.until
+  if (!since || !until) return null
+  const s = Date.parse(since)
+  const u = Date.parse(until)
+  if (!Number.isFinite(s) || !Number.isFinite(u)) return null
+  const etDay = etDayOfRange(since, until)
+  if (etDay) return { from: etDay, to: etDay }
+  const utc = { from: isoToYmd(new Date(s).toISOString()), to: isoToYmd(new Date(u).toISOString()) }
+  const whole = ymdRangeToISO(utc.from, utc.to)
+  if (Date.parse(whole.since) === s && Date.parse(whole.until) === u) return utc
+  return { from: etDateFast(s), to: etDateFast(u - 1) }
 }
 
 /** The `chart.*` values for one chart, from the response it is showing (no fetch). Missing when
