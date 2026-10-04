@@ -179,3 +179,20 @@ describe('the catalog', () => {
     }
   })
 })
+
+describe('the Play metrics (R-4): counts of whole-app days, never a split', () => {
+  const PLAY = ['play.deviceInstalls', 'play.deviceUninstalls', 'play.activeDeviceInstalls', 'play.dataThrough']
+  it('are four store-reducer metrics over the one Play fact, with no beacon path test', () => {
+    for (const id of PLAY) {
+      const d = METRICS.get(id)!
+      expect(d, id).toBeDefined()
+      expect(d.path, id).toBeUndefined()
+      expect(d.windows.page, id).toBe('adsPlayDaily')
+      expect(typeof d.store, id).toBe('function')
+    }
+  })
+  it('no Play metric is a ratio term and none exposes an hour, place or device split', () => {
+    for (const r of RATIO_DEFS) for (const t of [r.num, r.den]) expect(t.startsWith('play.'), r.id).toBe(false)
+    expect(METRIC_DEFS.filter((d) => d.id.startsWith('play.')).map((d) => d.id).sort()).toEqual([...PLAY].sort())
+  })
+})

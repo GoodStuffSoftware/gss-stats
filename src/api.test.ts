@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchAdsReadings, fetchStats, saveConfig } from './api'
+import { ADS_READINGS_TIMEOUT_MS, fetchAdsReadings, fetchStats, saveConfig } from './api'
 import { isAuthError, sessionExpired } from './session'
 import type { DashboardConfig, GlobalFilters, Widget } from './types'
 
@@ -78,6 +78,46 @@ describe('the readings-log fetcher raises the re-sign-in banner on an expired se
   })
 })
 
+describe('the readings fetcher gives up on a hung request', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+  /** A fetch that never answers on its own, but honours its AbortSignal like the real one. */
+  function hangingFetch() {
+    calls = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init?: RequestInit) => {
+        calls.push({ url, init })
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+        })
+      }),
+    )
+  }
+
+  it('fails with a timeout error after ADS_READINGS_TIMEOUT_MS, and does not probe the session', async () => {
+    vi.useFakeTimers()
+    hangingFetch()
+    const p = fetchAdsReadings('limit=30')
+    const settled = vi.fn()
+    p.catch(settled)
+    await vi.advanceTimersByTimeAsync(ADS_READINGS_TIMEOUT_MS - 1)
+    expect(settled).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(2)
+    await expect(p).rejects.toThrow(/^readings timed out/)
+    expect(probeCalls()).toHaveLength(0)
+    expect(sessionExpired.value).toBe(false)
+  })
+
+  it('a prompt answer clears the timer (no late abort)', async () => {
+    vi.useFakeTimers()
+    stubFetch(new Response(JSON.stringify({ campaigns: [] }), { status: 200 }), unauthorized())
+    await expect(fetchAdsReadings('limit=30')).resolves.toEqual({ campaigns: [] })
+    expect(vi.getTimerCount()).toBe(0)
+  })
+})
+
 describe('pop-up charts go through ChartCard’s 401 handling', () => {
   it('a 401 from /api/popups surfaces as an error ChartCard treats as an auth error', async () => {
     stubFetch(unauthorized(), unauthorized())
@@ -98,5 +138,19 @@ describe('saveConfig keepalive', () => {
     expect(calls[0].init?.keepalive).toBe(false)
     await saveConfig(cfg, { keepalive: true })
     expect(calls[1].init?.keepalive).toBe(true)
+  })
+})
+
+describe('saveConfig results the save label is built from', () => {
+  const cfg = { version: 1, pages: [] } as unknown as DashboardConfig
+  it('a 503 (the server could not write its layout backup, so it refused the save) is a failed save', async () => {
+    stubFetch(new Response('{"error":"backup-failed"}', { status: 503 }), new Response('{}', { status: 200 }))
+    await expect(saveConfig(cfg)).resolves.toBe(false)
+    expect(calls).toHaveLength(1) // the 503 itself mapped to false, not a thrown fetch
+    expect(calls[0].init?.method).toBe('PUT')
+  })
+  it('a 409 is "stale", not a failure', async () => {
+    stubFetch(new Response('{"error":"stale"}', { status: 409 }), new Response('{}', { status: 200 }))
+    await expect(saveConfig(cfg)).resolves.toBe('stale')
   })
 })

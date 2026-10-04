@@ -123,8 +123,9 @@ export interface Widget {
   // card (`card`, its preset — lib/defaults.ts CARD_PRESET_FOR_PANEL) since layout version 11;
   // the view only names the panel for the layout migrations. The former 'timeline', 'deviceMix',
   // 'hourOfDay' and 'flightDay' panels are standard charts (CONFIG_VERSION 9 and 11).
-  // dataset 'ads-readings': the ads-routines worker's own view value(s) (e.g. 'log') — see
-  // components/widgets/AdsReadingsWidgetCard.vue.
+  // dataset 'ads-readings': the ads-routines worker's own view value(s) (e.g. 'log'). A widget
+  // with this dataset renders as the `ads-readings-log` card preset (lib/metrics/readingsCard.ts),
+  // mapped at render time; the stored fields are never rewritten.
   view?: string
   // A metric card (ADR 0003): when set, ChartCard renders MetricCard from this reference and
   // ignores dataset/view/dimension/metric. `{ preset }` names a code-reviewed CardSpec
@@ -145,12 +146,22 @@ export interface Widget {
   // type 'note' only: render via TextBlock.vue (longer/multi-paragraph prose) instead of
   // NoteBlock.vue (a single short caveat line). Undefined/false = NoteBlock.
   longText?: boolean
-  // ANY widget: registry note ids to show as an attached caption under this chart (see
-  // lib/notes.ts, components/NoteBlock.vue). Undefined = the dataset's scope defaults
-  // (lib/notes.ts defaultNoteIdsForScope); an explicit [] means "no captions", even if the
-  // scope has defaults — set once (e.g. by ChartEditor or a default layout), never
-  // recomputed out from under a user's choice.
+  // ANY widget (legacy since layout v16): registry note ids to show as an attached caption under
+  // this chart (see lib/notes.ts widgetCaptionNoteIds, components/NoteBlock.vue). Undefined = none.
+  // ChartEditor no longer writes it; a scope's caveats show automatically instead
+  // (lib/notes.ts autoCaveatIds) unless listed in `hiddenCaveats`.
   notes?: string[]
+  // ANY widget (layout v16, LAYOUT_VERSIONS.captions): the chart's own plain-text caption, shown
+  // first under the chart (lib/chartNotes.ts). textLite markup (**bold**, [link](url)); a `{=…}`
+  // value token renders as "—" until 1d fills it. ≤ 2,000 characters (normWidget cuts longer text).
+  // Lives on the widget, outside the card spec (decision D4). Absent = no caption.
+  caption?: string
+  // ANY widget (layout v16): the caveats hidden on this chart or card, keyed by registry id
+  // (a legacy `notes` id or a card spec's own caption id) or by a runtime note's key
+  // ('popup-note'). A data-cut note (`hideable: false`: split-guard, refused-whole-days,
+  // range-notice, …) is never hidden, even when listed here. ≤ 32 entries, each
+  // /^[a-z0-9-]{1,64}$/. Absent = nothing hidden.
+  hiddenCaveats?: string[]
   // ANY widget except one holding a canvas (a chart or the map; lib/fit.ts canFit): 'content' =
   // the card's grid height follows its rendered content instead of the fixed `h` (components/
   // Dashboard.vue sets `h` to the smallest whole number of rows that holds it, so a saved `h` is
@@ -285,17 +296,6 @@ export interface StatsResponse {
     // count one of those rows (its site, path, path-family and event-beacon settings allow it).
     refusedWholeDays?: boolean
   }
-  // Pop-up dataset only (widget.type === 'rate'): the single computed rate, or null for
-  // a zero denominator (no accepts/outcomes yet) — see lib/popupEvents.ts computeRate.
-  rate?: number | null
-  // true when `rate` is null because the denominator was nonzero but under MIN_COHORT
-  // (see lib/popupEvents.ts gateRate) — render "too few to report", not "—".
-  insufficientCohort?: boolean
-  // The raw counts behind `rate` — see lib/popupEvents.ts GatedRate. Shown next to every
-  // rate tile (numerator/denominator) regardless of insufficientCohort, so a viewer always
-  // sees the sample size a percentage came from.
-  numerator?: number
-  denominator?: number
   // Pop-up dataset only: a data caveat that travels with the response (e.g. the known
   // install-outcome gap, lib/popupEvents.ts INSTALL_ACCEPT_OUTCOME_FIXED_ET), rendered under
   // the chart so saved widgets with older titles still show it.

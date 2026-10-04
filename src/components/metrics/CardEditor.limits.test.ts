@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 //
 // The card editor and the load limits (next-phases plan, Phase 2 + slice 1a): the badge colour
-// list stops at the load limit, a card over a limit shows why and is never emitted, and the
-// captions picker keeps an id it doesn't offer (a newer build's). MetricCard shows only the
+// list stops at the load limit, a card over a limit shows why and is never emitted, and an edit
+// keeps a caption id this build doesn't know (a newer build's). MetricCard shows only the
 // captions this build knows.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
@@ -88,20 +88,16 @@ describe('badge colours stop at the load limit', () => {
   })
 })
 
-describe('captions the picker does not offer are kept', () => {
-  it('ticking an offered caption keeps a newer build\'s id', async () => {
+describe('caption ids this build does not know are kept', () => {
+  // Slice 1c (D7) replaced the captions picker with Show/Hide toggles, so the only spec edit to
+  // captions is N1's Remove; any other edit must carry a newer build's id through unchanged.
+  it('an unrelated edit keeps a newer build\'s id, listed as unknown', async () => {
     const spec = plain(PRESETS['campaign-scorecard'])
     spec.captions = ['future-caveat-v99']
     const w = mountEditor({ spec })
     await flushPromises()
-    const labelId = controls(w).findAll('label').find((l) => l.text().startsWith('Captions'))!.attributes('id')!
-    const box = controls(w).find(`[aria-labelledby="${labelId}"]`).find('input[type=checkbox]')
-    await box.setValue(true)
-    await flushPromises()
-    const captions = lastSpec(w).captions!
-    expect(captions).toContain('future-caveat-v99')
-    expect(captions).toHaveLength(2)
-    await box.setValue(false)
+    expect(w.find('.ce-caption-row.is-unknown').text()).toContain('future-caveat-v99')
+    await addColour(w).trigger('click')
     await flushPromises()
     expect(lastSpec(w).captions).toEqual(['future-caveat-v99'])
   })

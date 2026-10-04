@@ -4,7 +4,7 @@ import type { Widget, GlobalFilters, StatsResponse } from '../types'
 import { fetchStats, fetchSeriesStats } from '../api'
 import { resolveSelection, sitesLoaded } from '../sitesStore'
 import { checkSessionExpired, isAuthError, isNetworkError } from '../session'
-import { buildChartConfig, formatKey, metricValue, nestedDoughnutClickValue, seriesRows, hasLineSeries, widgetHasOverlay, widgetOverlayOptions } from '../lib/charts'
+import { buildChartConfig, formatKey, metricValue, nestedDoughnutClickValue, rendersOwnBody, seriesRows, hasLineSeries, widgetHasOverlay, widgetOverlayOptions } from '../lib/charts'
 import { overlayItems, itemsInRange } from '../lib/timelineOverlay'
 import { isDateDim } from '../lib/rings'
 import { rangeLabel } from '../lib/range'
@@ -17,32 +17,39 @@ import BaseChart from './charts/BaseChart.vue'
 import WorldMap from './charts/WorldMap.vue'
 import FilterPopover from './FilterPopover.vue'
 import MetricCard from './metrics/MetricCard.vue'
+import StatTile from './metrics/StatTile.vue'
+import BarTable from './metrics/BarTable.vue'
 import { metricsContextFor } from '../lib/metrics/pageContext'
-import { presetById } from '../lib/metrics/presets'
+import { cardRefFor, cardShowsOwnReload } from '../lib/metrics/readingsCard'
 import NoteWidgetBody from './widgets/NoteWidgetBody.vue'
-import AdsReadingsWidgetCard from './widgets/AdsReadingsWidgetCard.vue'
 import NoteBlock from './NoteBlock.vue'
-import { rangeNoticeText } from '../lib/rangeNotice'
-import { noteRawText, widgetCaptionNoteIds } from '../lib/notes'
-import { REFUSED_WHOLE_DAYS_CAPTION, SPLIT_GUARD_CAPTION } from '../lib/splitGuard'
+import { noteRawText } from '../lib/notes'
+import { chartNotes } from '../lib/chartNotes'
+import { chartValueResolver, noteValueResolver } from '../lib/valueTokens'
+import { useMetricTokenValues } from '../composables/useMetricTokens'
 
 const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolean; drillOpen: boolean; forceControls?: boolean }>()
 
-// A metric card, dataset 'ads-readings' and type 'note' render their own body (own data fetch
-// or none) — no /api/stats round trip, no per-chart filter override, no drill. The datasets
+// A metric card, dataset 'ads-readings' and a pop-up rate tile (both cards too: see cardRef below)
+// and type 'note' render their own body (own data fetch or none) — no /api/stats round trip, no per-chart filter override, no drill. The datasets
 // 'overview' and 'campaigns' are card panels since layout version 11 (their bespoke bodies are
 // retired); one without a card — a panel the migration does not know — says so.
 // The header (title/zoom/menu) stays generic and shared with every other widget type.
 const retiredPanelText = noteRawText('label.card.retiredPanel')
-const isBespokeBody = computed(
-  () => !!props.widget.card || props.widget.dataset === 'overview' || props.widget.dataset === 'campaigns' || props.widget.dataset === 'ads-readings' || props.widget.type === 'note',
-)
+const isBespokeBody = computed(() => rendersOwnBody(props.widget))
 
 // A metric card (ADR 0003, Widget.card): MetricCard renders it from the card reference and the
 // page context — the filter bar's range and sites, or this widget's own override — which it
 // follows as they change (useMetrics re-plans on a context change). Its reload is the card's
 // own (a fresh refetch of every value on it), wired to this header's ↻.
-const isCard = computed(() => !!props.widget.card)
+// A legacy 'ads-readings' widget has no `card` stored (ADR 0005 decision 2: no layout rewrite);
+// it is drawn as the `ads-readings-log` preset at render time, its stored fields untouched.
+const cardRef = computed(() => cardRefFor(props.widget))
+const isCard = computed(() => !!cardRef.value)
+// A legacy pop-up rate tile (type 'rate') is drawn as a one-item card (ADR 0005 slice 4); one whose
+// rate key this build does not know has no card and says so (rateUnknownText) rather than a "—".
+const isRateTile = computed(() => props.widget.type === 'rate')
+const rateUnknownText = noteRawText('label.card.rateUnknown')
 const metricsContext = computed(() => {
   const f = effectiveFilters.value
   return metricsContextFor({ since: f.since, until: f.until }, resolveSelection(props.widget.siteSel ?? f.siteSel).tags, f)
@@ -50,20 +57,12 @@ const metricsContext = computed(() => {
 const metricCard = ref<{ reload(): void } | null>(null)
 /** A card that shows its own "Updated … ↻" (CardSpec.showUpdated) has its reload there; the
  * header's ↻ would be a second control for the same action, so it is hidden for that card. */
-const cardHasOwnReload = computed(() => {
-  const c = props.widget.card
-  if (!c) return false
-  const spec = 'preset' in c ? presetById(c.preset) : c.spec
-  return !!spec?.showUpdated
-})
+const cardHasOwnReload = computed(() => cardShowsOwnReload(cardRef.value))
 function reloadThis() {
   if (isCard.value) metricCard.value?.reload()
   else load()
 }
 
-// Attached captions — see lib/notes.ts widgetCaptionNoteIds for the full rule (pulled out
-// as a pure function so it's unit-testable without mounting this component).
-const captionNoteIds = computed<string[]>(() => widgetCaptionNoteIds(props.widget))
 const emit = defineEmits<{
   edit: []
   remove: []
@@ -73,6 +72,9 @@ const emit = defineEmits<{
   // Fit-to-content (Widget.fit): this card's content height in px, whenever it changes.
   // Dashboard.vue turns it into grid rows.
   'fit-height': [number]
+  // The chart's latest response / load error, whenever either changes. App.vue keeps the newest per
+  // widget so ChartEditor can list runtime caveats without fetching again.
+  data: [StatsResponse | null, string | null]
 }>()
 
 const baseChartRef = ref<{ suppressForDrill: () => void } | null>(null)
@@ -252,20 +254,35 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 const menuOpen = ref(false)
 let reqId = 0
-// The server cut the range down to what the data source allows (RangeNotice): said inside the
-// card, under the chart, in the same note style as the other captions. Runtime only, never saved.
-const rangeNote = computed(() => (!error.value && data.value?.notice ? rangeNoticeText(data.value.notice) : ''))
+// Everything shown under the chart, in one fixed order (lib/chartNotes.ts): attached captions, the
+// response's own notes, and the range notice (the server cut the range down to what the data
+// source allows; runtime only, never saved).
+const notes = computed(() => chartNotes(props.widget, data.value, error.value))
+watch([data, error], () => emit('data', data.value, error.value))
 
 // Per-chart filter override: use widget.filters if set, else the global filter.
 const effectiveFilters = computed<GlobalFilters>(() => props.widget.filters ?? props.filters)
 const hasOverride = computed(() => !!props.widget.filters)
+
+// `{=metric:…}` tokens (lib/metricValueTokens.ts) in the caption, or in a note widget's text, are
+// filled from ONE batched /api/metrics request per page context (composables/useMetricTokens.ts,
+// through useMetrics: shared with every card on the page), for this widget's own page context.
+// `{=…}` value tokens in the caption (lib/valueTokens.ts): `chart.*` from this chart's own response,
+// the fixed dates, and the metric values above. Only the widget's own caption takes them; every
+// other note shows "—" for a token. While a real reload is loading (a new range or spec), the
+// previous response is not this chart's any more, so `chart.*` shows "—" rather than the old
+// values; a background refetch never sets `loading`, so it keeps the values up until the new ones
+// arrive. A note widget's text takes the dates and metrics, never `chart.*`.
+const metricTokenValues = useMetricTokenValues(() => [props.widget.caption, props.widget.type === 'note' && !props.widget.noteId ? props.widget.note : undefined], metricsContext)
+const captionValues = computed(() => chartValueResolver(props.widget, loading.value ? null : data.value, error.value, metricTokenValues.value))
+const noteValues = computed(() => noteValueResolver(metricTokenValues.value))
 
 // A background refetch (the user came back to the tab) keeps the chart on screen — no "Loading…"
 // flash, and a failure leaves the last good data up instead of replacing it with an error.
 let loadStartedAt: number | null = null // the latest load's start; null once it settles
 let settledAt: number | null = null
 async function load(background = false) {
-  if (isBespokeBody.value) return // own data fetch (or none) — see MetricCard/AdsReadingsWidgetCard/NoteWidgetBody
+  if (isBespokeBody.value) return // own data fetch (or none) — see MetricCard/NoteWidgetBody
   // RUM charts filter to a real-host allow-list built from /api/sites; fetching before
   // it loads would momentarily count dev/preview traffic. Wait for the tree. (Geo has
   // no dev hosts, so it needn't wait.)
@@ -427,22 +444,6 @@ const statOther = computed(() =>
 )
 const statOtherLabel = computed(() => (props.widget.metric === 'visits' ? 'pageviews' : 'visits'))
 
-// Pop-up rate tile (widget.type === 'rate'): null (no denominator yet) renders as "—",
-// never NaN/Infinity — see lib/popupEvents.ts computeRate. A nonzero-but-too-small
-// denominator (MIN_COHORT — see lib/popupEvents.ts gateRate) is a THIRD state, distinct
-// from "no data at all": "too few to report", not "—".
-const rateValue = computed<number | null>(() => data.value?.rate ?? null)
-const rateDisplay = computed(() => {
-  if (data.value?.insufficientCohort) return 'too few to report'
-  return rateValue.value == null ? '—' : `${(rateValue.value * 100).toFixed(1)}%`
-})
-// n/d next to every rate — see lib/popupEvents.ts GatedRate.numerator/denominator. Shown
-// whenever the API sent a denominator at all (including 0, so "no data yet" still reads
-// as "0/0" rather than silently omitting the counts).
-const rateCounts = computed(() =>
-  data.value?.denominator == null ? null : `${data.value.numerator ?? 0}/${data.value.denominator}`,
-)
-
 const tableRows = computed(() =>
   !data.value
     ? []
@@ -451,7 +452,6 @@ const tableRows = computed(() =>
         value: metricValue(r, props.widget.metric),
       })),
 )
-const tableMax = computed(() => Math.max(1, ...tableRows.value.map((r) => r.value)))
 
 const isEmpty = computed(
   () =>
@@ -459,19 +459,17 @@ const isEmpty = computed(
     !error.value &&
     data.value &&
     data.value.rows.length === 0 &&
-    props.widget.type !== 'map' &&
-    props.widget.type !== 'rate', // a rate tile has no rows even when it has a real (or null) rate — never "No data"
+    props.widget.type !== 'map',
 )
 
-// Pop-up count widgets (everything except the 'rate' tile and the 'date' trend, which
-// plot full history themselves — see functions/api/popups.ts) go "excluded" rather than
+// Pop-up count widgets (everything except the 'date' trend, which
+// plots full history itself — see functions/api/popups.ts) go "excluded" rather than
 // showing a real-looking chart of zero/pre-release counts while tracking hasn't shipped
 // yet — see lib/popupEvents.ts TRACKING_ACTIVATION_DATE_ET, hard requirement "before
 // activation is unmeasured, not zero."
 const popupNotYetActive = computed(
   () =>
     props.widget.dataset === 'popup' &&
-    props.widget.type !== 'rate' &&
     props.widget.dimension !== 'date' &&
     !!data.value?.meta?.activationPending,
 )
@@ -509,7 +507,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
              (forceControls), or — desktop only — the card is hovered/focused-within. -->
         <div :id="revealId" class="revealed-controls hide-until-revealed">
           <button
-            v-if="!isBespokeBody"
+            v-if="!isBespokeBody || (isRateTile && isCard)"
             ref="filterBtn"
             class="btn-ghost icon"
             :class="{ active: hasOverride }"
@@ -575,47 +573,22 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
       </div>
     </header>
 
-    <div class="card-body" @dblclick="onCardBodyDblClick">
+    <div class="card-body" :class="{ 'is-card': isCard }" @dblclick="onCardBodyDblClick">
       <!-- Bespoke bodies: overview / campaigns / ads-readings datasets, and the note type —
            own data fetch (or none), skip the generic loading/error/empty states above. -->
-      <MetricCard v-if="widget.card" ref="metricCard" :card-ref="widget.card" :context="metricsContext" :campaign-ids="widget.campaignIds" :fallback-title="widget.title" @open-campaigns="emit('open-campaigns')" />
+      <MetricCard v-if="cardRef" ref="metricCard" :card-ref="cardRef" :context="metricsContext" :campaign-ids="widget.campaignIds" :hidden-captions="widget.hiddenCaveats" :fallback-title="widget.title" @open-campaigns="emit('open-campaigns')" />
+      <p v-else-if="isRateTile" class="state mono">{{ rateUnknownText }}</p>
       <p v-else-if="widget.dataset === 'overview' || widget.dataset === 'campaigns'" class="state mono">{{ retiredPanelText }}</p>
-      <AdsReadingsWidgetCard v-else-if="widget.dataset === 'ads-readings'" :widget="widget" />
-      <NoteWidgetBody v-else-if="widget.type === 'note'" :widget="widget" />
+      <NoteWidgetBody v-else-if="widget.type === 'note'" :widget="widget" :values="noteValues" />
 
       <div v-else-if="loading" class="state mono">Loading…</div>
       <div v-else-if="error" class="state error mono">{{ error }}</div>
       <div v-else-if="popupNotYetActive" class="state mono">Tracking not yet active</div>
       <div v-else-if="isEmpty" class="state mono">No data in range</div>
 
-      <!-- Stat tile -->
-      <div v-else-if="widget.type === 'stat'" class="stat">
-        <div class="stat-num">{{ fmt(statValue) }}</div>
-        <div class="stat-label overline">{{ widget.metric }}</div>
-        <div class="stat-sub">{{ fmt(statOther) }} {{ statOtherLabel }}</div>
-      </div>
-
-      <!-- Pop-up rate tile: "—" for a zero denominator, never 0%/NaN -->
-      <div v-else-if="widget.type === 'rate'" class="stat">
-        <div class="stat-num">{{ rateDisplay }}</div>
-        <div class="stat-label overline">rate</div>
-        <div v-if="rateCounts" class="stat-sub mono">{{ rateCounts }}</div>
-      </div>
-
-      <!-- Table -->
-      <div v-else-if="widget.type === 'table'" class="table-wrap">
-        <table>
-          <tbody>
-            <tr v-for="(r, idx) in tableRows" :key="idx">
-              <td class="t-label" :title="r.label">{{ r.label }}</td>
-              <td class="t-bar">
-                <span class="bar" :style="{ width: (r.value / tableMax) * 100 + '%' }"></span>
-              </td>
-              <td class="t-val mono">{{ fmt(r.value) }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      <!-- Stat tile and table: the shared StatTile / BarTable (metrics/), fed by fetchStats. -->
+      <StatTile v-else-if="widget.type === 'stat'" :number="fmt(statValue)" :label="widget.metric" :sub="`${fmt(statOther)} ${statOtherLabel}`" />
+      <BarTable v-else-if="widget.type === 'table'" :rows="tableRows" />
 
       <!-- World map (geo points) -->
       <WorldMap v-else-if="widget.type === 'map'" :data="data" />
@@ -624,10 +597,12 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
       <BaseChart v-else-if="chartConfig" ref="baseChartRef" :config="chartConfig" :drill-open="drillOpen" @point="onPoint" />
     </div>
 
-    <!-- Attached captions (owner requirement, 2026-09-26): registry notes shown under the
-         chart, through the SAME NoteBlock every inline caveat/note-type-widget uses — see
-         lib/notes.ts. `widget.notes`, or the dataset's own scope defaults when unset.
-         Pop-up dataset only: `data.note` (informational review fix, 2026-09-26) — a data
+    <!-- Notes under the chart (lib/chartNotes.ts, one fixed order): the widget's own plain-text
+         caption (Widget.caption), legacy registry caption ids (`widget.notes`, read-only; they
+         convert to caption text on the chart's next edit), the scope's automatic caveats
+         (lib/notes.ts autoCaveatIds), then the runtime caveats, minus any
+         this widget hides (Widget.hiddenCaveats). All through the SAME NoteBlock every inline
+         caveat/note-type-widget uses. Pop-up dataset only: `data.note` (informational review fix, 2026-09-26) — a data
          caveat that travels with the API RESPONSE itself (functions/api/popups.ts, e.g. the
          known install-outcome gap), computed per-request rather than being static config
          like the registry captions above, so it has to be rendered from `data` here rather
@@ -643,12 +618,17 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
         </li>
       </ul>
     </details>
-    <div v-if="captionNoteIds.length || data?.note || data?.meta?.splitGuard || data?.meta?.refusedWholeDays || rangeNote" class="card-captions">
-      <NoteBlock v-for="id in captionNoteIds" :key="id" :note-id="id" />
-      <NoteBlock v-if="data?.note" :text="data.note" />
-      <NoteBlock v-if="data?.meta?.splitGuard" :text="SPLIT_GUARD_CAPTION" />
-      <NoteBlock v-if="data?.meta?.refusedWholeDays" :text="REFUSED_WHOLE_DAYS_CAPTION" />
-      <NoteBlock v-if="rangeNote" class="range-notice" data-testid="range-notice" severity="caveat" :text="rangeNote" />
+    <div v-if="notes.length" class="card-captions">
+      <NoteBlock
+        v-for="n in notes"
+        :key="n.key"
+        :note-id="n.noteId"
+        :text="n.text"
+        :severity="n.severity"
+        :values="n.key === 'caption' ? captionValues : undefined"
+        :class="{ 'range-notice': n.key === 'range-notice' }"
+        :data-testid="n.key === 'range-notice' ? 'range-notice' : undefined"
+      />
     </div>
 
     <Teleport to="body">
@@ -920,6 +900,12 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
   flex: none;
   overflow: visible;
 }
+/* A metric card in a fixed grid slot scrolls when it is taller than the slot, as the bespoke ads
+   readings log did (its table is long); a fitted card takes its content's height instead. */
+.chart-card:not(.fit) .card-body.is-card {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
 /* Mobile only (matches Dashboard.vue's stacking breakpoint — lib/responsive.ts
    MOBILE_MAX_WIDTH): the card's own height there is `auto` so it can grow to fit content
    instead of scrolling internally, but a Chart.js canvas/map still needs a percentage-height
@@ -947,52 +933,6 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
 }
 .state.error {
   color: #bc4749;
-}
-.stat {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
-.stat-num {
-  font-family: 'Space Grotesk', sans-serif;
-  font-size: clamp(28px, 7vw, 46px);
-  font-weight: 700;
-  line-height: 1;
-  letter-spacing: -0.03em;
-  color: rgb(var(--ink));
-}
-.stat-label {
-  margin-top: 6px;
-}
-.stat-sub {
-  margin-top: 4px;
-  font-size: 12px;
-  color: rgb(var(--ink-2));
-}
-.table-wrap {
-  height: 100%;
-  overflow-y: auto;
-}
-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12.5px;
-}
-td {
-  padding: 4px 6px;
-  vertical-align: middle;
-}
-.t-label {
-  max-width: 0;
-  width: 42%;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: rgb(var(--ink));
-}
-.t-bar {
-  width: 40%;
 }
 @media (max-width: 700px) {
   .chart-card.chart-card.needs-chart-height.tall-on-phone {
@@ -1048,18 +988,6 @@ td {
   padding: 0 14px 10px;
   min-width: 0;
   overflow-wrap: anywhere;
-}
-.t-bar .bar {
-  display: block;
-  height: 8px;
-  border-radius: 4px;
-  background: rgb(var(--amber));
-  min-width: 2px;
-}
-.t-val {
-  text-align: right;
-  color: rgb(var(--ink-2));
-  white-space: nowrap;
 }
 .fp-backdrop {
   position: fixed;

@@ -188,6 +188,50 @@ export function placementDailyUpserts(campaignId: string, rows: readonly Placeme
   }))
 }
 
+// ── Play's own per-day install totals (migration 0005; written by `npm run ads:play-sync`) ──
+/** One Play day: Google's aggregate for the whole app (never a beacon row, never split by country,
+ * source, device or hour). A count is null when the report had no such column or value. */
+export interface PlayDayRow {
+  date: string
+  deviceInstalls: number | null
+  userInstalls: number | null
+  deviceUninstalls: number | null
+  activeDeviceInstalls: number | null
+}
+const PLAY_DATE = /^\d{4}-\d{2}-\d{2}$/
+const playCount = (n: number | null | undefined): number | null => (n == null || !Number.isFinite(n) || n < 0 ? null : Math.round(n))
+
+/** The usable Play days: a well-formed date only, one row per date (the last one wins), by date. */
+export function normalizePlayDays(rows: readonly PlayDayRow[]): PlayDayRow[] {
+  const byDate = new Map<string, PlayDayRow>()
+  for (const r of rows) if (PLAY_DATE.test(r.date)) byDate.set(r.date, { date: r.date, deviceInstalls: playCount(r.deviceInstalls), userInstalls: playCount(r.userInstalls), deviceUninstalls: playCount(r.deviceUninstalls), activeDeviceInstalls: playCount(r.activeDeviceInstalls) })
+  return [...byDate.values()].sort((a, b) => (a.date < b.date ? -1 : 1))
+}
+
+/** Upserts Play day rows, idempotent on `date` (Play re-posts days, so a re-sync overwrites; a count
+ * the re-post leaves blank keeps its stored value). */
+export function playDailyUpserts(rows: readonly PlayDayRow[], fetchedAt: string): SqlStatement[] {
+  return chunk(normalizePlayDays(rows), rowsPerStatement(6)).map((part) => ({
+    sql:
+      `INSERT INTO ads_play_daily (date, device_installs, user_installs, device_uninstalls, active_device_installs, fetched_at) VALUES ${part.map(() => '(?, ?, ?, ?, ?, ?)').join(', ')} ` +
+      `ON CONFLICT (date) DO UPDATE SET ` +
+      // A blank count in a re-post keeps the last known number (COALESCE); only fetched_at always moves.
+      `device_installs = COALESCE(excluded.device_installs, ads_play_daily.device_installs), user_installs = COALESCE(excluded.user_installs, ads_play_daily.user_installs), device_uninstalls = COALESCE(excluded.device_uninstalls, ads_play_daily.device_uninstalls), active_device_installs = COALESCE(excluded.active_device_installs, ads_play_daily.active_device_installs), fetched_at = excluded.fetched_at`,
+    binds: part.flatMap((r) => [r.date, r.deviceInstalls, r.userInstalls, r.deviceUninstalls, r.activeDeviceInstalls, fetchedAt]),
+  }))
+}
+
+/** Writes Play days through any AdsDb. Every statement passes assertAdsWriteSql first;
+ * `dryRun` sends nothing (written: false, with the statement count a real run would send). */
+export async function writePlayDaily(db: AdsDb, rows: readonly PlayDayRow[], fetchedAt: string, opts: { dryRun: boolean }): Promise<{ written: boolean; days: number; statements: number }> {
+  const stmts = playDailyUpserts(rows, fetchedAt)
+  const days = normalizePlayDays(rows).length
+  for (const s of stmts) assertAdsWriteSql(s.sql)
+  if (opts.dryRun) return { written: false, days, statements: stmts.length }
+  for (const s of stmts) await db.run(s)
+  return { written: stmts.length > 0, days, statements: stmts.length }
+}
+
 /** One append (the table is append-only by trigger). `ON CONFLICT DO NOTHING` covers both
  * uniques: a retry of the same reading_key, and a second row for the same (campaign, ET date,
  * entry kind) — migration 0003's de-dup key. */
@@ -316,6 +360,8 @@ export const THRESHOLD_STATE_SQL = 'SELECT threshold_usd, fired_at FROM ads_thre
 const READING_COLS = 'reading_key, campaign_id, kind, stage, read_at, et_date, spend_through_et, cumulative_spend_micros, thresholds, complete, rules, proposal, decision, counts, notes, routine_version, entry_kind'
 export const READINGS_SQL = `SELECT ${READING_COLS} FROM ads_readings WHERE campaign_id = ? ORDER BY read_at DESC, id DESC LIMIT ?`
 export const READINGS_ON_DAY_SQL = `SELECT ${READING_COLS} FROM ads_readings WHERE campaign_id = ? AND et_date = ? ORDER BY id`
+/** Every stored Play day (the adsPlayDaily fact; a few hundred rows at most). */
+export const PLAY_DAILY_SQL = 'SELECT date, device_installs, user_installs, device_uninstalls, active_device_installs FROM ads_play_daily ORDER BY date'
 /** Coverage rows for spendThrough (every campaign; a few hundred rows at most). */
 export const COVERAGE_ROWS_SQL = 'SELECT campaign_id, date, fetched_at FROM ads_daily_metrics ORDER BY campaign_id, date'
 /** Latest successful sync per campaign, from the 50 newest finished runs only (index on
@@ -655,7 +701,7 @@ export function createSqlAdsStore(db: AdsDb, opts: { dryRun: boolean; kind?: str
   }
 }
 
-// ── GET /api/ads/readings — shape shared by the Function and AdsReadingsWidgetCard.vue ────
+// ── GET /api/ads/readings — shape shared by the Function and the readings log card (MetricCard) ────
 export interface AdsReadingsCampaign extends AdsFreshness {
   campaignId: string
   label: string

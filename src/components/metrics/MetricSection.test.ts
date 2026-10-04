@@ -79,3 +79,61 @@ describe('MetricSection — anyVisible follows the item list', () => {
     expect(w.text()).toContain('A')
   })
 })
+
+describe('MetricSection — the row table', () => {
+  const tableSection: Section = {
+    layout: 'table',
+    repeat: { over: 'readings' },
+    items: [
+      { id: 'when', label: 'Read', data: { field: 'reading.readAt' }, display: { as: 'datetime-et' } },
+      { id: 'asks', label: 'Asks', data: { field: 'reading.count.asks' }, display: { as: 'number' } },
+      { id: 'kind', label: 'Kind', data: { field: 'reading.kind' }, display: { as: 'text' } },
+    ],
+  }
+  const mountTable = () => {
+    const w = mount(MetricSection, {
+      props: {
+        section: tableSection,
+        outerScope: ROOT_SCOPE,
+        ctx: { todayEt: '2026-09-27', readings: [{ campaignId: 'c1', readAt: '2026-09-26T19:00:00Z', kind: 'daily', spend: 1, counts: { asks: 7 } }] },
+      },
+    })
+    mounted.push(w)
+    return w
+  }
+
+  it('sits in a .metric-table-wrap, so a wide table scrolls inside its card instead of being clipped', () => {
+    const w = mountTable()
+    const wrap = w.find('.metric-table-wrap')
+    expect(wrap.exists()).toBe(true)
+    expect(wrap.find('table.metric-table').exists()).toBe(true)
+    expect(w.findAll('.metric-table')).toHaveLength(1)
+  })
+
+  it('right-aligns a number column (header and cells), not a text one', () => {
+    const w = mountTable()
+    expect(w.findAll('th').map((th) => th.classes().includes('num'))).toEqual([false, true, false])
+    expect(w.findAll('tbody td').map((td) => td.classes().includes('num'))).toEqual([false, true, false])
+  })
+
+  it('right-aligns a percent column the same way (header and cells)', () => {
+    vi.stubGlobal('fetch', mockFetch(() => 0))
+    const w = mount(MetricSection, {
+      props: {
+        section: {
+          layout: 'table',
+          repeat: { over: 'readings' },
+          items: [
+            { id: 'kind', label: 'Kind', data: { field: 'reading.kind' }, display: { as: 'text' } },
+            { id: 'rate', label: 'Rate', data: { ratio: 'popup.tapRate', params: { popup: 'upsell' }, window: 'page' }, display: { as: 'percent', decimals: 1 } },
+          ],
+        } satisfies Section,
+        outerScope: ROOT_SCOPE,
+        ctx: { todayEt: '2026-09-27', readings: [{ campaignId: 'c1', readAt: '2026-09-26T19:00:00Z', kind: 'daily', spend: 1, counts: { asks: 7 } }] },
+      },
+    })
+    mounted.push(w)
+    expect(w.findAll('th').map((th) => th.classes().includes('num'))).toEqual([false, true])
+    expect(w.findAll('tbody td').map((td) => td.classes().includes('num'))).toEqual([false, true])
+  })
+})

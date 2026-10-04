@@ -6,10 +6,154 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.25.2] — 2026-10-03
+
+### Fixed
+- **The retention verdict says how long it is maturing** — it now reads "maturing (5 days left)" (or "1 day left") instead of just "maturing", counted in whole US-Eastern days from the end of the flight, on saved pages too.
+
+## [0.25.1] — 2026-10-03
+
+### Changed
+- **The editor says where a pop-up rate went** — under Chart type, a new chart now shows a one-line hint to make it a metric card and pick the "Pop-up rates" preset.
+
+### Removed
+- **The old single-rate query is gone from the pop-up data source** — a rate tile has been a metric card since 0.23.0, so nothing asked for it; a dashboard tab left open from an older version shows a "reload the page" message on that tile instead of an error.
+
+## [0.25.0] — 2026-10-03
+
+### Added
+- **Captions and notes can show catalog numbers.** Insert value has a Metrics group (for example Page
+  views over the page range); every widget on a page shares one request, a value that is loading,
+  failed or withheld shows "—", and the counts-only rule is unchanged.
+- **Note widgets take live values.** A note's text can use release, go-live, Play-submission and
+  catalog tokens; a chart value shows "—" in a note.
+
+### Changed
+- **One Insert value control everywhere.** A card label's "+ Insert variable…" is now the same menu as
+  the caption's, with the card's own fields and the dates, and its dates fill in.
+- **Inserting is an explicit choice.** Pick a value, then press Insert; moving through the menu with
+  the arrow keys no longer drops a token per option, for Insert value and Insert from library.
+- **Insert keeps your place.** After Insert, the cursor returns to the text box right after what was
+  added, so typing and Escape carry on as before; a card label that has no room for the value says
+  "Label is full" instead of cutting it off.
+
+### Fixed
+- **Values in captions and notes roll over at midnight.** A page left open past midnight Eastern
+  fetches the new day's values instead of keeping yesterday's.
+
+## [0.24.0] — 2026-10-03
+
+### Changed
+- **Stat tiles and bar tables are shared pieces** — the Stat and Table charts and the metric card's tile and bar now draw through the same components, with the same numbers, labels and empty states as before.
+- **"Rate" is no longer a chart type in the editor** — a new rate is a metric card; a saved rate tile still opens and edits as before.
+
+## [0.23.1] — 2026-10-03
+
+### Fixed
+- **Hide the pop-up note on a rate tile** — the chart editor now has a Show/Hide row for the install-fix note on the installed-rate tile, so it can be hidden as well as brought back.
+
+## [0.23.0] — 2026-10-03
+
+### Changed
+- **Pop-up rate tiles are metric cards** — a single pop-up rate tile now renders from the shared card engine (the percentage with its n/d, "too few to report", and the registry's notes under it); existing dashboards need no change, and a hidden install-fix note stays hidden. Before tracking went live the tile now reads "not yet tracking" instead of "—".
+- **Percent columns align right** — a percent column in a card table lines up with the other number columns.
+
+## [0.22.0] — 2026-10-03
+
+### Added
+- **Captions can show live values.** "Insert value" in the chart editor adds the chart's total, top
+  item and its share, the days it covers, or a release, web go-live or Play submission date, filled
+  in from what the chart already shows; a value that isn't there shows "—", and a value that won't
+  fit says "Caption is full".
+
+## [0.21.0] — 2026-10-03
+
+### Changed
+- **Ads readings log is a metric card** — the readings log now renders from the shared card engine, so it can be edited, repeated and fitted like any card; existing dashboards need no change.
+- **Rules and Proposal are coloured, and Sign-ups has a tooltip, on any card** — a table cell can take a colour from its reading and a column header can carry a tooltip; the readings log uses both.
+- **A card taller than its slot now scrolls** — a card body that does not fit its slot scrolls vertically instead of being cut off.
+
+## [0.20.0] — 2026-10-03
+
+### Added
+- **Play installs tile on the Best Sudoku Retention page.** It shows Google Play's device installs,
+  uninstalls and active device installs for the date range, with a "data through" date (Play
+  reports lag 3-7 days), and says "no Play figures stored yet" until the first sync; the figures
+  are whole-app daily totals, include our own household devices, and carry no retention (Play
+  publishes none). It is a card preset, and a new Retention page includes it; pages already
+  created from the template can add it from the picker. A real read error shows on the tiles as
+  an error rather than "no Play figures stored yet", and a count Play re-posts blank keeps the
+  last stored number. Needs a one-time database step (see README, "Play installs").
+
+## [0.19.0] — 2026-10-03
+
+### Added
+- **Each chart has its own caption.** Type any text under a chart (bold and links work); "Insert
+  from library" copies a ready-made note into it, and a `{=…}` spot shows "—" for now until
+  value tokens arrive.
+- **A "Data caveats" list in the chart editor.** It lists every caveat the chart shows about its
+  data, each with a Show/Hide button, so one chart can drop a note another keeps.
+- **A chart shows the caveats for its data source on its own.** Nobody has to add them, and one
+  added later reaches every chart on that source. Existing charts and the built-in default
+  charts look the same after the upgrade: the caveats they did not show start hidden and can be
+  switched on in the editor.
+- **Caveats about cut or withheld data can't be hidden.** The range limit, the split guard, the
+  whole-day counting note, the country-columns note (only on charts that split by country, and
+  never on a plain chart) and the retention disjoint-populations note always show.
+- **A card's own captions have Show/Hide buttons.** The card builder lists the captions that come
+  with a card and hides any of them on that card alone; a note this version doesn't know gets a
+  Remove button.
+
+### Changed
+- **Notes saved on a chart turn into its caption on the next edit.** Fixed library text becomes
+  editable caption text; notes that follow the data (dated, computed or tied to a value) stay
+  system caveats, and a chart looks the same before and after.
+- **New charts no longer start with notes filled in.** The library's fixed text is yours to add
+  with "Insert from library", and the data caveats for the source show by themselves.
+- **A tab still open on the old version is told to reload instead of saving over captions.**
+
+### Fixed
+- **Duplicating a chart gives the copy its own settings.** Changing the copy's captions, notes
+  or card no longer touches the original.
+
+## [0.18.0] — 2026-10-03
+
+### Added
+- **A Best Sudoku Retention page template.** "+ New > Page > Start from" now offers it, with the
+  retention verdict, return visits and engagement per arrival; it is on no layout until
+  someone creates it, so nothing saved changes.
+
+## [0.17.0] — 2026-10-03
+
+### Added
+- **A retention-verdict card preset.** It shows each campaign arm and the organic baseline with its
+  GO, HOLD, NO-GO, provisional, maturing or too-few verdict, the days 2-7 return rate with 90%
+  lower and upper bounds, and first tagged loads; it is in the picker only and counts rows, never
+  by hour, place or device. The verdict's bar stays at a fixed 7.5% until organic data is sound
+  (1,000 matured arrivals over at least 21 days, with some returns), and says which bar it used.
+- **A campaign-engagement card preset.** It shows completed games per arrival for each campaign with
+  its two counts, and a note that repeat players push it above the share of arrivals who played.
+- **Retention caveats on every return-rate figure and the verdict.** One says organic and campaign
+  arrivals are different devices and the bar compares them without netting either out (this note
+  cannot be hidden); the other says the rates are a lower bound on people.
+
+## [0.16.1] — 2026-10-03
+
+### Fixed
+- **An overwritten layout can now be restored.** Before a save changes the stored layout, the
+  server keeps a copy of the previous one plus a daily copy for 30 days, and refuses the save if
+  it can't keep that copy.
+
+## [0.16.0] — 2026-10-03
+
 ### Added
 - **Flight 2's two arms are registered.** The display arm on Sudoku-app placements and the desktop
   search arm now appear on the dashboard and can be read on their own with `--campaign`, each with
   a $10/day budget and a $70 cap, running Oct 4 to Oct 10.
+
+### Changed
+- **The notes under each chart are now put together in one place, in one fixed order.** Nothing
+  changes in the app.
 
 ## [0.15.5] — 2026-10-03
 

@@ -115,6 +115,16 @@ describe('validateMetricsRequest: per-request rejections (the rest of the batch 
       req: { window: 'page', params: { popup: 'install' } },
     })
   })
+  it("a minCohort is accepted on a 'per' ratio (E1) and may only raise the floor, but not on a count", () => {
+    expect(one({ ratio: 'campaign.engagementPerArrival', params: { campaignId: C }, minCohort: 20 })).toMatchObject({ ok: true, req: { kind: 'ratio', minCohort: 20 } })
+    expect(one({ ratio: 'campaign.engagementPerArrival', params: { campaignId: C }, minCohort: 1 })).toMatchObject({ ok: true, req: { minCohort: MIN_COHORT } })
+    expect(one({ metric: 'campaign.returnD0', params: { campaignId: C }, minCohort: 20 })).toEqual({ key: 'k', ok: false, reason: 'bad-param' })
+  })
+  it('a country is refused in a window that does not read the campaign fact (the split is that fact\'s cb column)', () => {
+    // taggedArrivals declares `country` but reads the KPI fact in its todaySoFar window
+    expect(one({ metric: 'campaign.taggedArrivals', params: { campaignId: C, country: 'US' }, window: 'todaySoFar' })).toEqual({ key: 'k', ok: false, reason: 'bad-param' })
+    expect(one({ metric: 'campaign.taggedArrivals', params: { campaignId: C, country: 'US' }, window: 'attribution' })).toMatchObject({ ok: true, req: { params: { country: 'US' } } })
+  })
   it('context sites are deduplicated and sorted (a stable fact key)', () => {
     const b = batch({ v: 1, context: { since: '2026-09-20', until: '2026-09-26', sites: ['b', 'a', 'b'] }, requests: [{ key: 'a', metric: 'bsk.pageviews' }] })
     expect(b.ok && b.context.sites).toEqual(['a', 'b'])

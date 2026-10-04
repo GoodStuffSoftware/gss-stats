@@ -58,6 +58,13 @@ describe('itemViewModel — display kinds (status "ok")', () => {
     expect(vm.primary).toBe('43% (21/49)')
   })
 
+  it("per: a plain number with two decimals (can exceed 1), never a percent; too-few says so", () => {
+    const item: MetricItem = { id: 'x', label: 'Per arrival', data: { ratio: 'campaign.engagementPerArrival' }, display: { as: 'number' } }
+    expect(itemViewModel(item, { status: 'ok', value: 1.5, numerator: 30, denominator: 20 }, activeScope, opts).primary).toBe('1.50')
+    expect(itemViewModel(item, { status: 'ok', value: 0.1234, numerator: 5, denominator: 40 }, activeScope, opts).primary).toBe('0.12')
+    expect(itemViewModel(item, { status: 'too-few', value: null, numerator: 30, denominator: 4 }, activeScope, opts).primary).toBe('too few to report')
+  })
+
   it('counts: "n unit · n unit", never a slash, always n/d regardless of size', () => {
     const vm = itemViewModel(countsItem(), { status: 'ok', numerator: 1111, denominator: 353, value: null }, activeScope, opts)
     expect(vm.primary).toBe('1,111 views · 353 arrivals')
@@ -256,6 +263,11 @@ describe('resolveLabelTokens — every Label kind', () => {
     expect(tokens.map((t) => t.value).join('')).toBe(`Tagged arrivals — ${ACTIVE_RETEST.label}`)
   })
 
+  it('{=…} fills the fixed dates the card editor offers; a chart or metric path has nothing to read and shows the dash', () => {
+    const tokens = resolveLabelTokens('Live {=golive.web|date}, {=chart.total|number}, {=metric:bsk.pageviews@page|number}', activeScope, undefined, todayEt)
+    expect(tokens.map((t) => t.value).join('')).toMatch(/^Live [A-Z][a-z]{2} \d{1,2}, \d{4}, —, —$/)
+  })
+
   it('{ bind } reads a scope field as plain text', () => {
     const tokens = resolveLabelTokens({ bind: 'campaign.label' }, activeScope, undefined, todayEt)
     expect(tokens).toEqual([{ type: 'text', value: ACTIVE_RETEST.label }])
@@ -300,5 +312,29 @@ describe('value.noteIds — unsafe ids from the server are skipped, not crashed 
     const vm = itemViewModel(numberItem(), { status: 'ok', value: 10, noteIds: ['constructor', '__proto__'] }, activeScope, opts)
     expect(() => vm).not.toThrow()
     expect(vm.captionTokens).toEqual([])
+  })
+})
+
+describe('itemViewModel — retention verdict "maturing" shows its days left', () => {
+  const item: MetricItem = { id: 'verdict', label: 'Verdict', data: { metric: 'campaign.retentionVerdict' }, display: { as: 'status' } }
+  const maturing: MetricValue = { status: 'ok', value: 1, noteIds: ['verdict.maturing', 'bar.fixed-days'] }
+  const at = (todayEt: string, value: MetricValue = maturing, scope: ScopeInstance = activeScope) => itemViewModel(item, value, scope, { todayEt })
+  // ACTIVE_RETEST flightEnd is 2026-10-02, so its d2-7 window closes on 2026-10-10.
+  it('many days: "maturing (N days left)", whole ET days from the flight end', () => {
+    expect(at('2026-10-05').primary).toBe('maturing (5 days left)')
+    expect(at('2026-10-03').primary).toBe('maturing (7 days left)')
+  })
+  it('one day: "1 day left"', () => {
+    expect(at('2026-10-09').primary).toBe('maturing (1 day left)')
+  })
+  it('zero days or no campaign in scope: plain "maturing"', () => {
+    expect(at('2026-10-10').primary).toBe('maturing')
+    expect(at('2026-10-05', maturing, rootScope).primary).toBe('maturing')
+  })
+  it('other verdicts are untouched', () => {
+    expect(at('2026-10-05', { status: 'ok', value: 5, noteIds: ['verdict.go', 'bar.organic'] }).primary).toBe('GO')
+  })
+  it('does not repeat the status as a caption', () => {
+    expect(at('2026-10-05').captionTokens.map((t) => ('value' in t ? t.value : '')).join('')).not.toContain('maturing')
   })
 })

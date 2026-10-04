@@ -16,6 +16,14 @@ exports[`fact SQL snapshots > adsLastSync {} 1`] = `
 }
 `;
 
+exports[`fact SQL snapshots > adsPlayDaily {} 1`] = `
+{
+  "binds": [],
+  "db": "gss_stats_ads",
+  "sql": "SELECT date, device_installs, user_installs, device_uninstalls, active_device_installs FROM ads_play_daily ORDER BY date",
+}
+`;
+
 exports[`fact SQL snapshots > adsSpend {} 1`] = `
 {
   "binds": [],
@@ -538,9 +546,11 @@ exports[`fact SQL snapshots > campaignReturns {"campaignId":"24316608605"} 1`] =
 }
 `;
 
-exports[`fact SQL snapshots > campaignReturns {"campaignId":"organic"} 1`] = `
+exports[`fact SQL snapshots > campaignReturns {"campaignId":"organic","todayEt":"2026-09-26"} 1`] = `
 {
   "binds": [
+    1790395200000,
+    1789790400000,
     "bestsudoku-web",
     "/return/organic/%",
     "lifecycle",
@@ -555,7 +565,7 @@ exports[`fact SQL snapshots > campaignReturns {"campaignId":"organic"} 1`] = `
     "North Carolina",
   ],
   "db": "gss_geo",
-  "sql": "SELECT path, COUNT(*) AS c FROM hits WHERE site = ? AND path LIKE ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) GROUP BY path",
+  "sql": "SELECT path, CASE WHEN ts >= ? THEN 2 WHEN ts >= ? THEN 1 ELSE 0 END AS s, COUNT(*) AS c FROM hits WHERE site = ? AND path LIKE ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) GROUP BY path, s",
 }
 `;
 

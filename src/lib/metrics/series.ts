@@ -43,7 +43,7 @@ export function seriesTwin(def: MetricDef, window: WindowName): FactId | null {
   const twin = fact ? DAILY_TWIN[fact] : undefined
   if (!twin) return null
   if (twin === 'adsSpendDaily') return def.spend ? twin : null
-  if (def.unit === 'instant' || def.unit === 'code' || def.unit === 'usd') return null
+  if (def.unit === 'instant' || def.unit === 'code' || def.unit === 'rate' || def.unit === 'usd') return null
   if (twin === 'popupRangeDaily' && def.visitor) return null // that twin has no visitor column
   return twin
 }

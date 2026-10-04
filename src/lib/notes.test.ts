@@ -25,12 +25,16 @@ describe('notes registry — lookups', () => {
     expect(noteRawText('nope')).toBe('')
   })
 
+  // The retention caveats ride on their metrics (MetricDef.caveats), so they must not pre-fill every new campaigns chart.
+  // 'retention-page-scope' is a note widget on the Retention page template only: no scope, so it never pre-fills a new chart.
+  const NOTES_WITHOUT_SCOPE = new Set(['retention-disjoint', 'retention-organic-bias', 'retention-lower-bound', 'retention-page-scope', 'play-days', 'play-household', 'play-no-retention', 'play-active-is-stock'])
   it('every registry entry has a non-empty id matching its own key', () => {
     for (const [key, def] of Object.entries(NOTES_REGISTRY)) {
       expect(def.id).toBe(key)
       // A caption ('note'/'text') is a default somewhere; a 'label' never is.
       if (def.kind === 'label') expect(def.scopes).toEqual([])
-      else expect(def.scopes.length).toBeGreaterThan(0)
+      // A metric-attached caveat may have no scope: it is never a chart caption default.
+      else if (!NOTES_WITHOUT_SCOPE.has(def.id)) expect(def.scopes.length).toBeGreaterThan(0)
     }
   })
 })

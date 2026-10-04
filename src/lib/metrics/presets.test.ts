@@ -4,13 +4,13 @@
 // bespoke Overview body is components/metrics/presets.parity.test.ts.
 import { describe, expect, it } from 'vitest'
 import { noteRawText, NOTES_REGISTRY } from '../notes'
-import { BSK_KPIS, CAMPAIGN_SCORECARD, PRESETS, presetById } from './presets'
+import { ADS_READINGS_LOG, BSK_KPIS, CAMPAIGN_SCORECARD, PRESETS, presetById } from './presets'
 import { defineRatios, RATIO_DEFS, RATIOS, ratioVerdict } from './ratios'
 import { validateCard } from './validate'
-import type { CardSpec, Label, MetricItem } from './types'
+import { isReadingCountPath, READING_COUNT_PATHS, type CardSpec, type Label, type MetricItem, type ScopePath } from './types'
 
-/** Every preset id: slice 5's two, and slice 7's (the panels they replaced). */
-const PRESET_IDS = ['bsk-kpis', 'campaign-scorecard', 'release-before-after', 'popup-rates', 'signin-eligibility', 'campaign-cost', 'campaign-funnel', 'campaign-country', 'campaign-returns'] as const
+/** Every preset id: slice 5's two, slice 7's (the panels they replaced), R-2's two (picker only), slice 3's readings log, and R-4's Play installs. */
+const PRESET_IDS = ['bsk-kpis', 'campaign-scorecard', 'release-before-after', 'popup-rates', 'signin-eligibility', 'campaign-cost', 'campaign-funnel', 'campaign-country', 'campaign-returns', 'retention-verdict', 'campaign-engagement', 'ads-readings-log', 'play-installs'] as const
 const items = (spec: CardSpec): MetricItem[] => spec.sections.flatMap((s) => s.items)
 const labelNoteIds = (l: Label | undefined): string[] => (l && typeof l === 'object' && 'note' in l ? [l.note] : [])
 
@@ -84,7 +84,10 @@ describe('presets', () => {
     for (const spec of Object.values(PRESETS)) {
       // The one deliberate exception: the cost card's "stale — sync pending" line stays visible
       // under the spend-through date, as the old freshness line showed it.
-      for (const it of items(spec)) if (!('field' in it.data) && !(spec === PRESETS['campaign-cost'] && it.id === 'through')) expect(it.captionMode, it.id).toBe('compact')
+      // And the readings log: a card's compact notes are built once, at setup, before the readings
+      // (and their freshness) arrive, so its spend rows keep their captions inline.
+      for (const it of items(spec)) if (!('field' in it.data) && !(spec === PRESETS['campaign-cost'] && it.id === 'through') && spec !== PRESETS['ads-readings-log']) expect(it.captionMode, it.id).toBe('compact')
+      if (spec === PRESETS['ads-readings-log']) for (const it of items(spec)) expect(it.captionMode, it.id).not.toBe('compact')
     }
   })
 
@@ -107,5 +110,47 @@ describe('validateCard: the slice-5 fields', () => {
   it('rejects anything else', () => {
     expect(validateCard({ ...base, showUpdated: 'yes' } as unknown as CardSpec)).toContain("card: showUpdated must be a boolean, 'header' or 'footer'")
     expect(validateCard({ ...base, sections: [{ ...base.sections[0], items: [{ ...base.sections[0].items[0], captionMode: 'tooltip' }] }] } as unknown as CardSpec).join('\n')).toMatch(/captionMode must be 'inline' or 'compact'/)
+  })
+})
+
+describe('ads-readings-log (ADR 0005 slice 3)', () => {
+  const log = ADS_READINGS_LOG
+  const table = log.sections.find((s) => s.layout === 'table')!
+  const fieldOf = (it: MetricItem): string | null => ('field' in it.data ? String(it.data.field) : null)
+
+  it('is the readings table: ten columns in the old widget order, default limit 30, a campaign card each', () => {
+    expect(log.repeat?.over).toBe('campaigns')
+    expect(table.repeat).toMatchObject({ over: 'readings', limit: 30 })
+    expect(table.items.map((i) => i.id)).toEqual(['read', 'kind', 'spend', 'rules', 'proposal', 'arrivals', 'asks', 'accepts', 'auth', 'signUps'])
+    expect(log.actions).toEqual(['ads-refresh'])
+    expect(log.notices).toBe('ads-readings')
+  })
+
+  it('never uses compact captions (the card builds its notes once, readings arrive later)', () => {
+    for (const it of items(log)) expect(it.captionMode, it.id).not.toBe('compact')
+  })
+
+  it('reads counts only: its count paths are inside the allow-list, and nothing names a refused count, a time, a place or a device', () => {
+    const counts = items(log).map(fieldOf).filter((f): f is string => !!f && f.startsWith('reading.count.'))
+    expect(counts.sort()).toEqual(['reading.count.accepts', 'reading.count.arrivals', 'reading.count.asks', 'reading.count.auth', 'reading.count.signUps'])
+    for (const p of counts) expect(isReadingCountPath(p), p).toBe(true)
+    expect([...READING_COUNT_PATHS].sort()).toEqual(['reading.count.accepts', 'reading.count.arrivals', 'reading.count.asks', 'reading.count.auth', 'reading.count.signUpsAtMost'])
+    // no generic count path, no refused-count words, no hour / place / device in any binding or id
+    const everything = JSON.stringify(log)
+    expect(everything).not.toMatch(/reading\.count\.\*|return|gamestart|game-start|tutorial|tour|hour|country|device|visitor|platform|placement/i)
+    for (const f of items(log).map(fieldOf)) if (f?.startsWith('reading.')) expect(/^reading\.(readAt|kind|spend|rules|proposal)$/.test(f) || isReadingCountPath(f), f).toBe(true)
+  })
+
+  it('validateCard refuses a count path outside the allow-list, so a saved spec cannot widen it', () => {
+    const widen = (field: string): CardSpec => ({ ...log, sections: [{ ...table, items: [{ id: 'x', label: 'X', data: { field: field as ScopePath }, display: { as: 'number' } }] }] })
+    for (const field of ['reading.count.returnD0Web', 'reading.count.gameStart', 'reading.count.anything']) expect(validateCard(widen(field)).join('\n'), field).toMatch(/reading\.count/)
+    expect(validateCard(widen('reading.count.asks'))).toEqual([])
+  })
+
+  it('validateCard checks the new fields: notices is a known value, withActivity is true and for campaigns only', () => {
+    expect(validateCard({ ...log, notices: 'ads-readings' })).toEqual([])
+    expect(validateCard({ ...log, notices: 'other' } as unknown as CardSpec).join('\n')).toMatch(/notices must be one of/)
+    expect(validateCard({ ...log, repeat: { over: 'campaigns', withActivity: false } } as unknown as CardSpec).join('\n')).toMatch(/withActivity/)
+    expect(validateCard({ ...log, repeat: { over: 'countries', withActivity: true } } as unknown as CardSpec).join('\n')).toMatch(/withActivity/)
   })
 })

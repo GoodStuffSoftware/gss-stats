@@ -383,6 +383,128 @@ export const CAMPAIGN_RETURNS: CardSpec = {
   ],
 }
 
+/** The retention verdict (retention spec section 4): one table row per beacon-tracked campaign arm,
+ * then the web-only organic baseline. Each row: the verdict, the days 2-7 return rate (R2-7) with its
+ * 90% Wilson bounds and (n/d), its first tagged loads (d0), and games completed per arrival (E1).
+ * The organic row has no verdict and no E1 (bindings that don't serve it are left out of its
+ * instance); its rate is its matured cohort, the baseline the bar is set from. Counts only: no
+ * hour, place or device split, and the R2-7 figures and the verdict carry the disjoint-groups and
+ * lower-bound caveats (behind each cell's Notes). Offered in the picker only, never a default. */
+export const RETENTION_VERDICT: CardSpec = {
+  v: 1,
+  minWidth: 230,
+  sections: [
+    {
+      layout: 'table',
+      repeat: { over: 'campaigns', tracked: true, organic: true, empty: { label: '', text: { note: 'no-return-visits-yet' } } },
+      items: [
+        { id: 'arm', label: { note: 'label.card.arm' }, data: { field: 'campaign.label' }, display: { as: 'text' } },
+        { id: 'verdict', label: { metric: true }, data: { metric: 'campaign.retentionVerdict' }, display: { as: 'status' }, ...COMPACT },
+        { id: 'rate', label: { metric: true }, data: { metric: 'campaign.returnD2to7Rate' }, display: { as: 'percent', decimals: 1 }, ...COMPACT },
+        { id: 'lower', label: { metric: true }, data: { metric: 'campaign.returnD2to7Lower' }, display: { as: 'percent', decimals: 1 }, ...COMPACT },
+        { id: 'upper', label: { metric: true }, data: { metric: 'campaign.returnD2to7Upper' }, display: { as: 'percent', decimals: 1 }, ...COMPACT },
+        { id: 'd0', label: { note: 'label.card.arrivals-d0' }, data: { metric: 'campaign.returnD0' }, display: { as: 'number' }, ...COMPACT },
+        { id: 'engagement', label: { metric: true }, data: { ratio: 'campaign.engagementPerArrival' }, display: { as: 'number' }, ...COMPACT },
+      ],
+    },
+  ],
+}
+
+/** Engagement per arrival (E1): one card per beacon-tracked campaign, completed games over first
+ * tagged loads, with the two counts it is made of. A plain number that can exceed 1 (it counts
+ * games, not devices), never a percentage. Counts only; picker only, never a default. */
+export const CAMPAIGN_ENGAGEMENT: CardSpec = {
+  v: 1,
+  repeat: { over: 'campaigns', tracked: true, empty: { label: '', text: { note: 'no-return-visits-yet' } } },
+  minWidth: 230,
+  title: { bind: 'campaign.label' },
+  sections: [
+    {
+      layout: 'rows',
+      items: [
+        { id: 'engagement', label: { metric: true }, data: { ratio: 'campaign.engagementPerArrival' }, display: { as: 'number' }, ...COMPACT },
+        { id: 'completions', label: { metric: true }, data: { metric: 'campaign.completions' }, display: { as: 'number' }, ...COMPACT },
+        { id: 'd0', label: { metric: true }, data: { metric: 'campaign.returnD0' }, display: { as: 'number' }, ...COMPACT },
+      ],
+    },
+  ],
+}
+
+/** The ads-read routine's readings log (the bespoke Ads readings widget, ADR 0005 slice 3): one
+ * card per campaign that has something to show (a stored reading, Ads-API spend or an active
+ * flight; a widget's campaign selection names its own), each with its spend and where it came
+ * from, how fresh the stored data is, the thresholds it fired and the readings table — newest
+ * first, at most 30 by default (RepeatSpec.limit, 500 at most). Its action syncs spend now and
+ * reloads the card. The notices carry the store's warnings, the small-numbers note and sync
+ * alerts. Not compact captions: a card's notes are built once, before the readings arrive.
+ *
+ * PRIVACY ("counts only. Never tie beacon rows to a device, time or place", read as rows only):
+ * a reading is a stored aggregate with its own read time. The table binds ONLY the five
+ * allow-listed counts (types.ts READING_COUNT_FIELDS) and the derived sign-ups; no return,
+ * game-start, tutorial or tour total, and no hour, place or device split. */
+export const ADS_READINGS_LOG: CardSpec = {
+  v: 1,
+  repeat: { over: 'campaigns', withActivity: true, empty: { label: '', text: { note: 'no-ads-campaign' } } },
+  minWidth: 520,
+  title: { bind: 'campaign.label' },
+  actions: ['ads-refresh'],
+  notices: 'ads-readings',
+  sections: [
+    {
+      layout: 'rows',
+      items: [
+        { id: 'spend', label: { metric: true }, data: { metric: 'campaign.spend' }, display: { as: 'currency' } },
+        { id: 'source', label: { metric: true }, data: { metric: 'campaign.spendSource' }, display: { as: 'status' } },
+        { id: 'fresh', label: { note: 'label.card.freshness' }, data: { field: 'campaign.freshness' }, display: { as: 'text' }, gating: { whenEmpty: 'omit' } },
+      ],
+    },
+    {
+      layout: 'pills',
+      items: [{ id: 'fired', label: { note: 'label.card.firedThresholds' }, data: { field: 'campaign.thresholds' }, display: { as: 'text' }, gating: { whenEmpty: 'omit' } }],
+    },
+    {
+      layout: 'table',
+      repeat: { over: 'readings', limit: 30, empty: { label: '', text: { note: 'no-readings-yet' } } },
+      items: [
+        { id: 'read', label: { note: 'label.reading.read' }, data: { field: 'reading.readAt' }, display: { as: 'datetime-et' } },
+        { id: 'kind', label: { note: 'label.reading.kind' }, data: { field: 'reading.kind' }, display: { as: 'text' } },
+        { id: 'spend', label: { note: 'label.campaign.spend' }, data: { field: 'reading.spend' }, display: { as: 'currency' } },
+        { id: 'rules', label: { note: 'label.reading.rules' }, data: { field: 'reading.rules' }, display: { as: 'text' } },
+        { id: 'proposal', label: { note: 'label.reading.proposal' }, data: { field: 'reading.proposal' }, display: { as: 'text' } },
+        { id: 'arrivals', label: { note: 'label.funnel.arrivals' }, data: { field: 'reading.count.arrivals' }, display: { as: 'number' } },
+        { id: 'asks', label: { note: 'label.reading.asks' }, data: { field: 'reading.count.asks' }, display: { as: 'number' } },
+        { id: 'accepts', label: { note: 'label.reading.accepts' }, data: { field: 'reading.count.accepts' }, display: { as: 'number' } },
+        { id: 'auth', label: { note: 'label.reading.auth' }, data: { field: 'reading.count.auth' }, display: { as: 'number' } },
+        { id: 'signUps', label: { note: 'label.reading.signUps' }, hint: { note: 'label.reading.signUpsHint' }, data: { field: 'reading.count.signUps' }, display: { as: 'text' } },
+      ],
+    },
+  ],
+}
+
+/** Google Play's own install totals (retention build R-4): device installs and uninstalls over the
+ * page's date range, the latest active device installs in it, and how far Play's data runs. Whole-app
+ * counts by PLAY day (as Google reports them, not confirmed ET days), synced by `npm run
+ * ads:play-sync` into the ads store; the page's date range applies, its sites and own-visits
+ * filters do not. No ratio (installs and uninstalls are different things, and active is a stock);
+ * no retention (Play's bulk reports have none). Each tile reads "no Play figures stored yet" until
+ * the first sync, and the card never errors when the table is missing. Counts only. */
+export const PLAY_INSTALLS: CardSpec = {
+  v: 1,
+  minWidth: 230,
+  sections: [
+    {
+      layout: 'tiles',
+      items: [
+        { id: 'installs', label: { metric: true }, data: { metric: 'play.deviceInstalls', window: 'page' }, display: { as: 'number' }, gating: { whenEmpty: { note: 'play-not-synced-yet' } }, ...COMPACT },
+        { id: 'uninstalls', label: { metric: true }, data: { metric: 'play.deviceUninstalls', window: 'page' }, display: { as: 'number' }, gating: { whenEmpty: { note: 'play-not-synced-yet' } }, ...COMPACT },
+        { id: 'active', label: { metric: true }, data: { metric: 'play.activeDeviceInstalls', window: 'page' }, display: { as: 'number' }, gating: { whenEmpty: { note: 'play-not-synced-yet' } }, caption: { note: 'play-active-is-stock' }, captionMode: 'compact' },
+        { id: 'through', label: { metric: true }, data: { metric: 'play.dataThrough', window: 'page' }, display: { as: 'date' }, gating: { whenEmpty: { note: 'play-not-synced-yet' } }, ...COMPACT },
+      ],
+    },
+  ],
+  captions: ['play-days', 'play-household', 'play-no-retention'],
+}
+
 /** Every preset by id. A null prototype, so an id such as 'constructor' or 'toString' is
  * simply not a preset — read through presetById, never a bare bracket lookup. */
 export const PRESETS: Readonly<Record<string, CardSpec>> = Object.freeze(
@@ -396,6 +518,10 @@ export const PRESETS: Readonly<Record<string, CardSpec>> = Object.freeze(
     'campaign-funnel': CAMPAIGN_FUNNEL,
     'campaign-country': CAMPAIGN_COUNTRY,
     'campaign-returns': CAMPAIGN_RETURNS,
+    'retention-verdict': RETENTION_VERDICT,
+    'campaign-engagement': CAMPAIGN_ENGAGEMENT,
+    'ads-readings-log': ADS_READINGS_LOG,
+    'play-installs': PLAY_INSTALLS,
   }),
 )
 
