@@ -8,8 +8,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ### Added
 - **Captions can show live values.** "Insert value" in the chart editor adds the chart's total, top
-  item and its share, the days it covers, or a release or go-live date, filled in from what the
-  chart already shows; a value that isn't there shows "—".
+  item and its share, the days it covers, or a release, web go-live or Play submission date, filled
+  in from what the chart already shows; a value that isn't there shows "—".
 
 ## [0.20.0] — 2026-10-03
 
