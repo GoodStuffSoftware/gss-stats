@@ -23,14 +23,17 @@
 // 10; the cards that replaced them are pinned against a golden of the retired bespoke body in
 // src/components/metrics/presets.parity.test.ts, which lists D1, D3, D4 and D5 there.)
 //
+// The /api/popups side of the rate checks is functions/_lib/testing/popupRateOracle.ts: the retired
+// `dimension: 'rate'` branch (removed in 0.24.1) restated over the same fixture, not a live route.
+//
 // /api/campaigns retired with slice 7 (CONFIG_VERSION 11): its side is its response for each
 // campaign on this same fixture (__fixtures__/campaigns.golden.json), captured from the live
 // handler and checked live against that file in commit 76caad5, the commit before it was removed.
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import CAMPAIGNS_GOLDEN_FILE from './__fixtures__/campaigns.golden.json'
-import { onRequestPost as popupsPost } from './popups'
 import { onRequestPost as metricsPost } from './metrics'
 import { insertHits, installCaches, memoryCache, openHitsDb, pagesContext, postJson, sqliteD1 } from '../_lib/testing/hitsDb'
+import { popupRateOracle } from '../_lib/testing/popupRateOracle'
 import { bskFixture, FIXTURE_NOW } from '../_lib/testing/bskFixture'
 import { CAMPAIGNS, type FunnelStepKey } from '../../src/lib/campaigns'
 import type { MetricRequest, MetricValue, MetricsResponseBody } from '../../src/lib/metrics/types'
@@ -168,7 +171,7 @@ describe('/api/metrics ≡ /api/campaigns', () => {
   })
 })
 
-describe('/api/metrics ≡ /api/popups rates', () => {
+describe('/api/metrics ≡ the retired /api/popups rate (popupRateOracle)', () => {
   const context = { since: '2026-09-20', until: '2026-09-26', sites: ['bestsudoku-web'] }
   it.each([
     ['upsell:tap', { ratio: 'popup.tapRate', params: { popup: 'upsell' } }],
@@ -177,7 +180,7 @@ describe('/api/metrics ≡ /api/popups rates', () => {
     ['signin-prompt:tap', { ratio: 'popup.tapRate', params: { popup: 'signin-prompt' } }],
     ['signin-eligible:rate', { ratio: 'popup.eligibility' }],
   ] as const)('%s', async (rateKey, req) => {
-    const pop = await call(popupsPost, '/api/popups', { dimension: 'rate', rateKey, ...context })
+    const pop = popupRateOracle(db, rateKey, context)
     const { x } = await metrics([{ key: 'x', ...req }], context)
     expect(x.numerator).toBe(pop.numerator)
     expect(x.denominator).toBe(pop.denominator)
@@ -186,7 +189,7 @@ describe('/api/metrics ≡ /api/popups rates', () => {
   })
 })
 
-describe('D6: a bare-date page range is an ET day for the registry, a UTC day for /api/popups', () => {
+describe('D6: a bare-date page range is an ET day for the registry, a UTC day for the retired /api/popups rate', () => {
   it('an evening-ET event (after midnight UTC) counts in its ET day; with datetimes both agree', async () => {
     const own = openHitsDb()
     const at = (iso: string, path: string, n: number) => ({ ts: Date.parse(iso), site: 'bestsudoku-web', path, n })
@@ -198,12 +201,12 @@ describe('D6: a bare-date page range is an ET day for the registry, a UTC day fo
     const post = async (handler: (ctx: any) => Response | Promise<Response>, path: string, body: unknown) => (await handler(pagesContext(postJson(path, body), { gss_geo: sqliteD1(own) }))).json() as Promise<any>
     const bare = { since: '2026-09-26', until: '2026-09-26' }
     const m = (await post(metricsPost, '/api/metrics', { v: 1, context: bare, requests: [{ key: 'x', ratio: 'popup.tapRate', params: { popup: 'upsell' } }] })).results.x
-    const p = await post(popupsPost, '/api/popups', { dimension: 'rate', rateKey: 'upsell:tap', ...bare })
+    const p = popupRateOracle(own, 'upsell:tap', bare)
     expect(m).toMatchObject({ numerator: 2, denominator: 10 }) // the ET day holds all of it
     expect(p).toMatchObject({ numerator: 0, denominator: 6 }) // the UTC day ends at 20:00 ET
     const iso = { since: '2026-09-26T04:00:00Z', until: '2026-09-27T04:00:00Z' }
     const m2 = (await post(metricsPost, '/api/metrics', { v: 1, context: iso, requests: [{ key: 'x', ratio: 'popup.tapRate', params: { popup: 'upsell' } }] })).results.x
-    const p2 = await post(popupsPost, '/api/popups', { dimension: 'rate', rateKey: 'upsell:tap', ...iso })
+    const p2 = popupRateOracle(own, 'upsell:tap', iso)
     expect([m2.numerator, m2.denominator]).toEqual([p2.numerator, p2.denominator])
   })
 })

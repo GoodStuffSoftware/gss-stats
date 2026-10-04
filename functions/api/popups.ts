@@ -13,31 +13,28 @@
 // to its correct America/New_York calendar day (see etDateFromMs) — it is still a
 // COUNT(*) GROUP BY, not a row fetch.
 //
-// POST { dimension, since, until, sites?, popup?, kind?, rateKey?, limit?, excludeOwnVisits?, ownBrowser?, ownOS? }
+// POST { dimension, since, until, sites?, popup?, kind?, limit?, excludeOwnVisits?, ownBrowser?, ownOS? }
 //   dimension:
 //     'kind'           — shown/accept/dismiss counts for `popup` (required)
 //     'reason'         — reason/platform breakdown for `popup` + `kind` (default 'shown')
 //     'date'           — US-Eastern day trend for `popup` + `kind` (default 'shown')
 //     'outcome'        — popup-outcome counts (signed-in/installed/returned/still-playing) for `popup`
 //     'installOutcome' — install's real-outcome counts (no popup needed)
-//     'rate'           — one computed rate, selected by `rateKey` (see POPUP_RATE_SPECS)
 // (The rate table ('rates') and sign-in eligibility ('eligible') are metric cards since layout
-// version 11 — presets popup-rates and signin-eligibility over POST /api/metrics. Asking for either
-// is a 400 naming the card, not a silent fallback to 'kind', so a tab loaded before the update
-// shows an error on those panels instead of "No data".)
+// version 11 — presets popup-rates and signin-eligibility over POST /api/metrics — and a single rate
+// ('rate') is a one-item metric card since layout version 18. Asking for any of them is a 400 naming
+// the card, not a silent fallback to 'kind', so a tab loaded before the update shows an error on
+// those panels instead of "No data".)
 
 import {
   POPUPS,
   POPUP_OUTCOME_TYPES,
-  POPUP_RATE_SPECS,
   TRACKING_ACTIVATION_DATE_ET,
   aggregatePopupRows,
-  computePopupRate,
   dayCounts,
   installOutcomeGapNote,
   INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS,
   INSTALL_GAP_OUTCOME_KEY,
-  INSTALL_GAP_RATE_KEY,
   measuredCoarseCount,
   measuredDetailedBreakdown,
   measuredDetailedCount,
@@ -64,10 +61,10 @@ function safeDate(v: unknown, fallback: string): string {
 }
 const isDateOnly = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v)
 
-const POPUP_DIMS = new Set(['kind', 'reason', 'date', 'outcome', 'installOutcome', 'rate'])
+const POPUP_DIMS = new Set(['kind', 'reason', 'date', 'outcome', 'installOutcome'])
 const POPUP_IDS = new Set(POPUPS.map((p) => p.id))
-/** Dimensions retired in layout version 11, with the card that replaced each. */
-export const RETIRED_POPUP_DIMS: Record<string, string> = { rates: 'Pop-up rates', eligible: 'Sign-in eligibility' }
+/** Dimensions retired in layout version 11 ('rates', 'eligible') and 18 ('rate'), with the card that replaced each. */
+export const RETIRED_POPUP_DIMS: Record<string, string> = { rates: 'Pop-up rates', eligible: 'Sign-in eligibility', rate: 'Pop-up rate' }
 
 type Row = { key: Record<string, string>; pageviews: number; visits: number }
 const countedTotals = (rows: Row[]) => {
@@ -108,7 +105,6 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
 
   const popup = typeof body.popup === 'string' && POPUP_IDS.has(body.popup) ? body.popup : ''
   const kind = typeof body.kind === 'string' && /^[a-z0-9-]{1,30}$/i.test(body.kind) ? body.kind : ''
-  const rateKey = typeof body.rateKey === 'string' ? body.rateKey : ''
 
   // One aggregate query fetches every popup-event row in range, grouped by UTC hour
   // bucket + path (see file header — this stays an aggregate, never a row fetch).
@@ -173,25 +169,6 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     // — never silently dropped, only surfaced when present. See lib/popupEvents.ts
     // PopupAggregate.unexpectedOutcomeRows.
     ...(agg.unexpectedOutcomeRows ? { unexpectedOutcomeRows: agg.unexpectedOutcomeRows } : {}),
-  }
-
-  // ── Rate mode: one computed number, or "insufficient" for a too-small cohort (MIN_COHORT
-  // — see lib/popupEvents.ts gateRate), or null for a genuine zero denominator ────────────
-  if (dim === 'rate') {
-    const spec = POPUP_RATE_SPECS.find((s) => s.key === rateKey)
-    const gated = spec ? computePopupRate(agg, spec) : { value: null, insufficientCohort: false, numerator: 0, denominator: 0 }
-    return json({
-      rows: [],
-      totals: { pageviews: 0, visits: 0 },
-      rate: gated.value,
-      insufficientCohort: gated.insufficientCohort,
-      numerator: gated.numerator,
-      denominator: gated.denominator,
-      // Known install-outcome gap (lib/popupEvents.ts INSTALL_ACCEPT_OUTCOME_FIXED_ET) —
-      // travels with the DATA, so saved widgets with older titles still show it.
-      ...(rateKey === INSTALL_GAP_RATE_KEY && installOutcomeGapNote(range) ? { note: installOutcomeGapNote(range) } : {}),
-      meta,
-    })
   }
 
   // ── Install's real-outcome counts (pwa-installed / standalone-detected / play-detected)

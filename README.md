@@ -414,7 +414,10 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   to the card when it is drawn (`src/lib/metrics/rateTileCard.ts`); the layout is not rewritten,
   and a stored hide of the install-fix note (`popup-note` in the chart's data caveats) still hides it.
   The chart editor no longer offers "Rate" as a chart type for a new chart (add a rate as a metric
-  card); a saved rate tile still opens and edits. The Stat and Table chart types draw through the
+  card: a one-line hint under Chart type says so, and the "Pop-up rates" preset is the starting
+  point); a saved rate tile still opens and edits. `/api/popups` no longer answers
+  `dimension: 'rate'` (removed in 0.24.1): like `rates` and `eligible`, it is a 400 naming the card
+  and asking for a reload, so a tab from an older build shows an error on that tile, not a 500. The Stat and Table chart types draw through the
   shared `StatTile` and `BarTable` components (`src/components/metrics/`), as the metric card's
   tile and bar do.
   A key this build does not know shows a message asking you to pick a rate. Differences from the
