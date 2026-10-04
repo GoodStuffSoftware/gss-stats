@@ -10,20 +10,48 @@ import { noteRawText } from '../notes'
 import { etDateFromMs, POPUPS, type PopupDef } from '../popupEvents'
 import { campaignSegmentMarker, UPSELL_SIGNEDOUT_FIX_AT } from '../adsRules'
 import { releaseAwaitingFullDay, releaseSubjectOn } from '../releases'
+import { freshnessLine, STALE_NOTE } from '../adsFreshness'
+import { etDateTimeText, signUpsText } from '../adsReadingsFormat'
 import { metricWindows, METRICS, rulesOf, type MetricDef, type MetricParam } from './metrics'
 import { ratioParamsOf, ratioSupportsOrganic, ratioWindowsOf, RATIOS, type RatioDef } from './ratios'
-import { COUNTRY_BUCKETS, WINDOW_SIDES, type CountryBucket, type DataBinding, type DeltaName, type Gating, type Label, type MetricItem, type ParamValue, type RepeatSpec, type ScopePath, type Section, type WindowSide } from './types'
+import { COUNTRY_BUCKETS, DEFAULT_READINGS_LIMIT, MAX_READINGS_LIMIT, READING_COUNT_FIELDS, WINDOW_SIDES, type CountryBucket, type DataBinding, type DeltaName, type Gating, type Label, type MetricItem, type ParamValue, type ReadingCountPath, type RepeatSpec, type ScopePath, type Section, type WindowSide } from './types'
 
-/** A stored ads-readings-log row (ADR 0003 slice 8 — the fact/type don't exist yet). Kept as
- * a minimal, forward-compatible shape so `RepeatSpec.over: 'readings'` and the `reading.*`
- * ScopePaths have something concrete to bind to today; a real `Reading` type replaces this
- * import when the readings-log preset lands. */
+/** The count keys a reading scope carries: the record field behind each ReadingCountPath
+ * (types.ts READING_COUNT_FIELDS, the allow-list). Nothing else of a record's counts gets here. */
+export type ReadingCountKey = (typeof READING_COUNT_FIELDS)[ReadingCountPath]
+
+/** A stored readings-log row as a card sees it (lib/metrics/readingsScope.ts builds one from a
+ * ReadingRecord): an anonymous aggregate with its own read time, the already-formatted rule and
+ * proposal text, and ONLY the five whitelisted counts. Never a beacon row, and none of the
+ * return / game-start / game-complete / tutorial / tour totals a record also holds. */
 export interface ReadingScope {
+  /** Which campaign's log the reading belongs to: a readings repeat inside a campaign
+   * instance keeps only that campaign's readings (resolveRepeat). */
+  campaignId?: string
   readAt: string
   kind: string
-  spend: number
+  /** The reading's cumulative closed-day spend; null when the read had none. */
+  spend: number | null
   rules?: string
   proposal?: string
+  /** false when a read the record depends on returned no data. */
+  complete?: boolean
+  counts?: Partial<Record<ReadingCountKey, number | null>>
+  /** Whether signUpsAtMost is an exact figure (otherwise an upper bound). */
+  signUpsExact?: boolean
+}
+
+/** What a campaign's readings load says about it, for the `campaign.freshness` and
+ * `campaign.thresholds` fields (lib/metrics/readingsScope.ts builds it from the response). */
+export interface CampaignAdsInfo {
+  spendThrough: string | null
+  lastSync: string | null
+  stale: boolean
+  /** false when the readings store is absent or unreadable: no freshness line then. */
+  storeBound: boolean
+  thresholdsFired: { threshold: number; firedAt: string }[] | null
+  /** When the data was loaded: the clock the freshness line's "synced 2h ago" counts from. */
+  loadedAtMs: number
 }
 
 /** One object a card, section, item or table column is bound to. A nested repeat's instance
@@ -31,7 +59,7 @@ export interface ReadingScope {
  * every lookup (a param, a field, a label variable) walks that chain, nearest first. */
 export type ScopeInstance = (
   | { kind: 'root' }
-  | { kind: 'campaign'; campaign: CampaignFlight }
+  | { kind: 'campaign'; campaign: CampaignFlight; ads?: CampaignAdsInfo }
   /** The web-only organic baseline arm (lib/campaigns.ts ORGANIC_ARM_ID): a campaigns repeat's
    * extra instance (RepeatSpec.organic). Not a campaign: campaignOfScope never returns it. */
   | { kind: 'organic' }
@@ -83,6 +111,37 @@ const WINDOW_LABELS: Record<WindowSide, string> = { before: 'Before', after: 'Af
 export interface RepeatContext {
   todayEt: string
   readings?: ReadingScope[]
+  /** The readings load's per-campaign facts, by campaign id: attached to that campaign's
+   * instance for `campaign.freshness` / `campaign.thresholds`. */
+  ads?: Record<string, CampaignAdsInfo>
+}
+
+/** A readings repeat's row limit: its `limit` as a whole number from 1 to MAX_READINGS_LIMIT,
+ * DEFAULT_READINGS_LIMIT when unset or not a usable number. */
+export function readingsLimit(repeat: Pick<RepeatSpec, 'limit'> | undefined): number {
+  const n = repeat?.limit
+  return typeof n === 'number' && Number.isFinite(n) && n >= 1 ? Math.min(Math.floor(n), MAX_READINGS_LIMIT) : DEFAULT_READINGS_LIMIT
+}
+type RepeatHolder = { repeat?: RepeatSpec; sections?: { repeat?: RepeatSpec; columns?: RepeatSpec; items?: { repeat?: RepeatSpec }[] }[] }
+/** Every repeat of a card (the card's, its sections', their columns' and items'). */
+export function cardRepeats(spec: RepeatHolder): RepeatSpec[] {
+  const out: RepeatSpec[] = []
+  if (spec.repeat) out.push(spec.repeat)
+  for (const s of spec.sections ?? []) {
+    if (s.repeat) out.push(s.repeat)
+    if (s.columns) out.push(s.columns)
+    for (const it of s.items ?? []) if (it.repeat) out.push(it.repeat)
+  }
+  return out
+}
+/** Whether a card repeats over stored readings anywhere: it then needs the readings load. */
+export function repeatsOverReadings(spec: RepeatHolder): boolean {
+  return cardRepeats(spec).some((r) => r.over === 'readings')
+}
+/** The most readings per campaign any readings repeat of the card asks for (what to request). */
+export function readingsLimitOf(spec: RepeatHolder): number {
+  const limits = cardRepeats(spec).filter((r) => r.over === 'readings').map(readingsLimit)
+  return limits.length ? Math.max(...limits) : DEFAULT_READINGS_LIMIT
 }
 
 /** A widget's campaign selection (Widget.campaignIds) applies to a card whose top-level repeat
@@ -100,8 +159,11 @@ export function narrowToCampaigns(instances: ScopeInstance[], repeat: RepeatSpec
 }
 
 /** The instances a RepeatSpec expands to, in a stable order. `undefined` (no repeat) always
- * yields exactly one root-scoped instance — the "just render this once" case (KPI tiles). */
-export function resolveRepeat(repeat: RepeatSpec | undefined, ctx: RepeatContext): ScopeInstance[] {
+ * yields exactly one root-scoped instance — the "just render this once" case (KPI tiles).
+ * `outer` is the instance the repeat sits in (a section inside a campaign card): a readings
+ * repeat keeps only the readings of that instance's campaign, so a card repeated over
+ * campaigns shows each campaign's own log; with no campaign in scope it is every reading. */
+export function resolveRepeat(repeat: RepeatSpec | undefined, ctx: RepeatContext, outer?: ScopeInstance): ScopeInstance[] {
   if (!repeat) return [ROOT_SCOPE]
   switch (repeat.over) {
     case 'campaigns': {
@@ -109,7 +171,7 @@ export function resolveRepeat(repeat: RepeatSpec | undefined, ctx: RepeatContext
       if (repeat.status?.length) list = list.filter((c) => repeat.status!.includes(c.status))
       if (repeat.tracked) list = list.filter((c) => c.measurement !== 'spend-only')
       if (repeat.flightingToday) list = list.filter((c) => flightDayIndex(c, ctx.todayEt) != null)
-      const out: ScopeInstance[] = list.map((campaign) => ({ kind: 'campaign', campaign }))
+      const out: ScopeInstance[] = list.map((campaign) => (ctx.ads?.[campaign.id] ? { kind: 'campaign', campaign, ads: ctx.ads[campaign.id] } : { kind: 'campaign', campaign }))
       // The organic baseline comes last, after every campaign (RepeatSpec.organic).
       if (repeat.organic) out.push({ kind: 'organic' })
       return out
@@ -126,8 +188,12 @@ export function resolveRepeat(repeat: RepeatSpec | undefined, ctx: RepeatContext
       const ids = (repeat.ids?.length ? repeat.ids : ['before', 'after']) as WindowSide[]
       return ids.filter((w) => WINDOW_SIDES.includes(w)).map((window) => ({ kind: 'window', window }))
     }
-    case 'readings':
-      return (ctx.readings ?? []).map((reading) => ({ kind: 'reading', reading }))
+    case 'readings': {
+      const arm = armIdOfScope(outer)
+      const all = ctx.readings ?? []
+      const mine = arm === undefined ? all : all.filter((r) => r.campaignId === arm)
+      return mine.slice(0, readingsLimit(repeat)).map((reading) => ({ kind: 'reading', reading }))
+    }
     default:
       return []
   }
@@ -177,6 +243,15 @@ export function scopeField(scope: ScopeInstance, path: ScopePath, todayEt: strin
     }
     case 'campaign.returnTagShared':
       return campaign && sharesReturnTagWith(campaign) ? noteRawText('return-shared-tag') : null
+    case 'campaign.freshness': {
+      const ads = campaignInstanceOf(scope)?.ads
+      if (!ads || !ads.storeBound) return null
+      return `${freshnessLine(ads, ads.loadedAtMs)}${ads.stale ? ` · ${STALE_NOTE}` : ''}`
+    }
+    case 'campaign.thresholds': {
+      const fired = campaignInstanceOf(scope)?.ads?.thresholdsFired
+      return fired?.length ? fired.map((t) => `$${t.threshold} · ${etDateTimeText(t.firedAt)}`).join('; ') : null
+    }
     case 'popup.id':
       return popup ? popup.id : null
     case 'popup.label':
@@ -196,14 +271,35 @@ export function scopeField(scope: ScopeInstance, path: ScopePath, todayEt: strin
     case 'reading.kind':
       return reading ? reading.kind : null
     case 'reading.spend':
-      return reading ? String(reading.spend) : null
+      return reading && reading.spend != null ? String(reading.spend) : null
     case 'reading.rules':
       return reading ? (reading.rules ?? null) : null
     case 'reading.proposal':
       return reading ? (reading.proposal ?? null) : null
+    // The five whitelisted counts (types.ts READING_COUNT_FIELDS): the key is read off the path
+    // through the allow-list, never off user text, so no other count of a record is reachable.
+    case 'reading.count.arrivals':
+    case 'reading.count.asks':
+    case 'reading.count.accepts':
+    case 'reading.count.auth':
+    case 'reading.count.signUpsAtMost': {
+      const n = reading?.counts?.[READING_COUNT_FIELDS[path]]
+      return n == null ? null : String(n)
+    }
+    case 'reading.count.signUps':
+      return reading ? signUpsText(reading.counts?.signUpsAtMost, !!reading.signUpsExact) : null
     default:
       return null
   }
+}
+
+/** The nearest campaign instance in a scope's chain (not the organic arm, as campaignOfScope). */
+function campaignInstanceOf(scope: ScopeInstance | undefined): ScopeOf<'campaign'> | undefined {
+  for (let s = scope; s; s = s.parent) {
+    if (s.kind === 'campaign') return s
+    if (s.kind === 'organic') return undefined
+  }
+  return undefined
 }
 
 /** `{campaign.label}`-style vars for tokenizeAndInterpolate, built from a scope — every
@@ -284,7 +380,7 @@ export interface FlatItem {
 }
 
 export function flattenSectionItems(section: Section, outerScope: ScopeInstance, ctx: RepeatContext): FlatItem[] {
-  const sectionScopes = section.repeat ? resolveRepeat(section.repeat, ctx).map((s) => nestScope(s, outerScope)) : [outerScope]
+  const sectionScopes = section.repeat ? resolveRepeat(section.repeat, ctx, outerScope).map((s) => nestScope(s, outerScope)) : [outerScope]
   if (section.repeat && !sectionScopes.length) {
     return section.repeat.empty ? [{ item: emptyPlaceholderItem(section.items[0]?.id ?? 'empty'), scope: outerScope, emptyOf: section.repeat.empty }] : []
   }
@@ -295,7 +391,7 @@ export function flattenSectionItems(section: Section, outerScope: ScopeInstance,
         out.push({ item, scope: sScope })
         continue
       }
-      const allScopes = resolveRepeat(item.repeat, ctx).map((s) => nestScope(s, sScope))
+      const allScopes = resolveRepeat(item.repeat, ctx, sScope).map((s) => nestScope(s, sScope))
       // Instances the campaign's own config rules out (a spend-only campaign) are dropped here, so
       // a repeat left with only those shows its empty placeholder — saying why — instead of
       // silently losing the tile.
@@ -321,10 +417,10 @@ export function flattenSectionItems(section: Section, outerScope: ScopeInstance,
 export function sectionCells(section: Section, outerScope: ScopeInstance, ctx: RepeatContext): FlatItem[] {
   if (section.layout !== 'table') return flattenSectionItems(section, outerScope, ctx).filter((fi) => !fi.emptyOf)
   if (section.columns) {
-    const cols = resolveRepeat(section.columns, ctx).map((c) => nestScope(c, outerScope))
+    const cols = resolveRepeat(section.columns, ctx, outerScope).map((c) => nestScope(c, outerScope))
     return section.items.flatMap((item) => cols.map((scope) => ({ item, scope })))
   }
-  return resolveRepeat(section.repeat, ctx).flatMap((row) => section.items.map((item) => ({ item, scope: nestScope(row, outerScope) })))
+  return resolveRepeat(section.repeat, ctx, outerScope).flatMap((row) => section.items.map((item) => ({ item, scope: nestScope(row, outerScope) })))
 }
 
 /** The default heading of a table column: the column instance's own name. */

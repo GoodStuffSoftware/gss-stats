@@ -12,9 +12,10 @@
 //   widget.limit        — readings per campaign (default 30)
 import { computed, onMounted, ref, watch } from 'vue'
 import type { AdsReadingsCampaign, AdsReadingsResponse } from '../../lib/adsStore'
-import { proposalLabel, type ReadingRecord } from '../../lib/adsRules'
+import { proposalLabel } from '../../lib/adsRules'
 import { rulesSummary } from '../../lib/adsRulesSummary'
 import { freshnessLine, STALE_NOTE } from '../../lib/adsFreshness'
+import { etDateTimeText as etTime, fmtCount as fmt, readingKindLabel as kindLabel, SIGNUPS_HINT, signUpsText } from '../../lib/adsReadingsFormat'
 import { SMALL_SAMPLE_NOTE } from '../../lib/popupEvents'
 import { fetchAdsReadings } from '../../api'
 import { isInFlight, isStale, useReturnRefresh } from '../../composables/useReturnRefresh'
@@ -85,16 +86,8 @@ const campaigns = computed<AdsReadingsCampaign[]>(() => {
   return all.filter((c) => c.readings.length || c.spend.source === 'google-ads-api' || c.status === 'active')
 })
 
-const ET_FMT = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
-const etTime = (iso: string) => `${ET_FMT.format(new Date(iso))} ET`
 const money = (n: number | null | undefined) => (n == null ? '—' : `$${n.toFixed(2)}`)
-const fmt = (n: number | null | undefined) => (n == null ? '—' : n.toLocaleString('en-US'))
 
-function kindLabel(r: ReadingRecord): string {
-  if (r.kind === 'threshold') return `threshold ${r.thresholds.map((t) => `$${t}`).join(', ')}`
-  if (r.kind === 'postflight') return `post-flight ${r.stage ?? ''}`.trim()
-  return r.kind
-}
 function spendSource(c: AdsReadingsCampaign): string {
   if (c.spend.source === 'google-ads-api') return 'Google Ads API'
   if (c.spend.source === 'config') return 'hand-entered config'
@@ -134,7 +127,7 @@ const loadedAt = computed(() => (data.value ? Date.parse(data.value.generatedAt)
         <div v-else class="table-wrap">
           <table>
             <thead>
-              <tr><th>Read</th><th>Kind</th><th>Spend</th><th>Rules</th><th>Proposal</th><th>Arrivals</th><th>Asks</th><th>Accepts</th><th>Auth</th><th title="An UPPER bound: min(tagged auth successes, new accounts sitewide in the window). Auth successes include returning sign-ins.">Sign-ups</th></tr>
+              <tr><th>Read</th><th>Kind</th><th>Spend</th><th>Rules</th><th>Proposal</th><th>Arrivals</th><th>Asks</th><th>Accepts</th><th>Auth</th><th :title="SIGNUPS_HINT">Sign-ups</th></tr>
             </thead>
             <tbody>
               <tr v-for="r in c.readings" :key="r.id" :class="{ incomplete: !r.complete }">
@@ -147,7 +140,7 @@ const loadedAt = computed(() => (data.value ? Date.parse(data.value.generatedAt)
                 <td class="mono num">{{ fmt(r.counts.asks) }}</td>
                 <td class="mono num">{{ fmt(r.counts.accepts) }}</td>
                 <td class="mono num">{{ fmt(r.counts.authSuccess) }}</td>
-                <td class="mono num">{{ r.counts.signUpsAtMost == null ? '—' : r.counts.signUpsExact === 1 ? `${fmt(r.counts.signUpsAtMost)} (exact)` : `at most ${fmt(r.counts.signUpsAtMost)}` }}</td>
+                <td class="mono num">{{ signUpsText(r.counts.signUpsAtMost, r.counts.signUpsExact === 1) }}</td>
               </tr>
             </tbody>
           </table>
