@@ -264,7 +264,7 @@ describe('the captions upgrade (plain-text captions and hidden caveats: a guard 
     const old = JSON.stringify(cfg(prev, 'live layout'))
     const { kv, store, puts } = fakeKv({ 'dashboard:default': old })
     expect((await put(kv, cfg(V, 'first captions save'))).status).toBe(200)
-    expect(puts).toEqual([backupKeyFor(prev), 'dashboard:default'])
+    expect(puts).toEqual([backupKeyFor(prev), DAY, PREV_KEY, 'dashboard:default'])
     expect(backupKeyFor(prev)).toBe(`dashboard:default:backup:v${prev}`)
     expect(store.get(backupKeyFor(prev))).toBe(old)
     await put(kv, cfg(V, 'second captions save'))

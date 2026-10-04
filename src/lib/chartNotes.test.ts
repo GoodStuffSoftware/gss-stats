@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { allChartNotes, chartNotes, convertLegacyNotes, isChartNoteHidden, isNoteIdHideable } from './chartNotes'
-import { getNote, isStaticCaptionNote, libraryCaptionOptions, noteTemplate } from './notes'
+import { autoCaveatIds, cardSplitsByCountry, getNote, isStaticCaptionNote, libraryCaptionOptions, noteTemplate } from './notes'
+import { PRESETS } from './metrics/presets'
+import type { CardSpec, MetricItem, RepeatSpec, Section } from './metrics/types'
 import { rangeNoticeText, type RangeNotice } from './rangeNotice'
 import { REFUSED_WHOLE_DAYS_CAPTION, SPLIT_GUARD_CAPTION } from './splitGuard'
 import type { StatsResponse, Widget } from '../types'
@@ -271,7 +273,6 @@ describe('automatic scope caveats (1c, D2-B)', () => {
       'caption:arrivals-caveat',
       'caveat:play-tracking-status',
       'caveat:min-cohort-caveat',
-      'caveat:country-split-excludes-refused',
       'popup-note',
     ])
     expect(keys(chartNotes(widget({ dataset: 'popup' }), null, null))).toEqual(['caveat:min-cohort-caveat'])
@@ -286,12 +287,13 @@ describe('automatic scope caveats (1c, D2-B)', () => {
     expect(keys(chartNotes(campaigns({ notes: ['min-cohort-caveat'] }), null, null))).toEqual([
       'caption:min-cohort-caveat',
       'caveat:play-tracking-status',
-      'caveat:country-split-excludes-refused',
     ])
   })
 
   it('a hidden automatic caveat stays hidden; a data-cut one cannot be hidden', () => {
-    const w = campaigns({ hiddenCaveats: ['play-tracking-status', 'min-cohort-caveat', 'country-split-excludes-refused'] })
+    // the data cut shows only where it is true: a card with country columns (B4a)
+    const card: Widget['card'] = { spec: { ...JSON.parse(JSON.stringify(PRESETS['campaign-country'])), captions: [] } }
+    const w = campaigns({ card, hiddenCaveats: ['play-tracking-status', 'min-cohort-caveat', 'country-split-excludes-refused'] })
     expect(keys(chartNotes(w, null, null))).toEqual(['caveat:country-split-excludes-refused'])
     const all = allChartNotes(w, null, null)
     expect(all.find((n) => n.key === 'caveat:min-cohort-caveat')).toMatchObject({ kind: 'caveat', noteId: 'min-cohort-caveat', hideable: true, hideId: 'min-cohort-caveat' })
@@ -310,5 +312,62 @@ describe('automatic scope caveats (1c, D2-B)', () => {
   it("a note widget gets none, and a card's own spec captions are not repeated", () => {
     expect(allChartNotes(campaigns({ type: 'note', noteId: 'arrivals-caveat' }), null, null)).toEqual([])
     expect(keys(allChartNotes(campaigns({ card: { preset: 'campaign-country' } }), null, null))).not.toContain('caveat:country-split-excludes-refused')
+  })
+})
+
+describe('a non-hideable automatic caveat shows only where it is true (B4a)', () => {
+  const CUT = 'country-split-excludes-refused'
+  const campaigns = (over: Partial<Widget> = {}) => widget({ type: 'table', dataset: 'campaigns', ...over })
+  const countries: RepeatSpec = { over: 'countries' }
+  const spec = (over: Partial<CardSpec> = {}, section: Partial<Section> = {}): Widget['card'] => ({
+    spec: { v: 1, ...over, sections: [{ layout: 'table', items: [], ...section }] },
+  })
+  const item = (repeat?: RepeatSpec) => ({ ...JSON.parse(JSON.stringify(PRESETS['campaign-funnel'].sections[0].items[0])), repeat }) as MetricItem
+
+  it('a campaigns chart without country columns does not get the country caveat', () => {
+    for (const w of [
+      campaigns(),
+      campaigns({ type: 'line', dimension: 'dateEt' }),
+      campaigns({ card: { preset: 'campaign-funnel' } }),
+      campaigns({ card: { preset: 'campaign-returns' } }),
+      campaigns({ card: { preset: 'campaign-cost' } }),
+      campaigns({ card: spec({ repeat: { over: 'campaigns' } }, { columns: { over: 'windows' }, items: [item({ over: 'campaigns' })] }) }),
+      campaigns({ card: { preset: 'no-such-preset' } }),
+    ]) {
+      expect(cardSplitsByCountry(w.card), JSON.stringify(w.card)).toBe(false)
+      expect(autoCaveatIds(w), JSON.stringify(w.card)).not.toContain(CUT)
+      expect(keys(chartNotes(w, null, null))).not.toContain(`caveat:${CUT}`)
+    }
+  })
+
+  it('a campaigns card with country columns (or any per-country repeat) gets it, and it cannot be hidden', () => {
+    const cards: Widget['card'][] = [
+      { spec: { ...JSON.parse(JSON.stringify(PRESETS['campaign-country'])), captions: [] } },
+      spec({}, { columns: countries }),
+      spec({}, { repeat: countries }),
+      spec({ repeat: countries }),
+      spec({}, { items: [item(countries)] }),
+    ]
+    for (const card of cards) {
+      expect(cardSplitsByCountry(card), JSON.stringify(card)).toBe(true)
+      const w = campaigns({ card, hiddenCaveats: [CUT] })
+      expect(autoCaveatIds(w)).toContain(CUT)
+      expect(keys(chartNotes(w, null, null))).toContain(`caveat:${CUT}`)
+    }
+  })
+
+  it('the campaign-country preset shows it once, as its own card caption, never as an automatic caveat', () => {
+    const w = campaigns({ card: { preset: 'campaign-country' } })
+    expect(cardSplitsByCountry(w.card)).toBe(true)
+    expect(autoCaveatIds(w)).not.toContain(CUT)
+  })
+
+  it('outside its scope it never shows, even with country columns', () => {
+    expect(autoCaveatIds(widget({ type: 'table', dataset: 'overview', card: spec({}, { columns: countries }) }))).not.toContain(CUT)
+  })
+
+  it('a widget condition makes a note a caveat, never a static library caption', () => {
+    expect(getNote(CUT)!.appliesTo).toBeTypeOf('function')
+    expect(isStaticCaptionNote(CUT)).toBe(false)
   })
 })
