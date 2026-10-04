@@ -13,8 +13,6 @@ import {
   DATASETS,
   CHART_TYPES,
   METRICS,
-  OVERVIEW_VIEWS,
-  CAMPAIGNS_VIEWS,
   CAMPAIGN_OPTIONS,
   BAR_MODES,
 } from '../lib/catalog'
@@ -31,6 +29,8 @@ import InsertPicker, { type InsertGroup } from './InsertPicker.vue'
 import { canFit, setFit } from '../lib/fit'
 import { rendersOwnBody } from '../lib/charts'
 import CardEditor from './metrics/CardEditor.vue'
+import FilterPopover from './FilterPopover.vue'
+import { filterOverrideSummary } from '../lib/filterSummary'
 import { metricsContextFor } from '../lib/metrics/pageContext'
 import { presetById } from '../lib/metrics/presets'
 import { ADS_READINGS_LOG_PRESET } from '../lib/metrics/readingsCard'
@@ -151,13 +151,16 @@ const isPopup = computed(() => draft.dataset === 'popup')
 const isCompletions = computed(() => draft.dataset === 'completions')
 const isRate = computed(() => draft.type === 'rate')
 const isNote = computed(() => draft.type === 'note')
-// The three former-bespoke datasets: no dimension/breakdown/metric/site-override — a
-// "View" picker (+ campaign multi-select for campaigns/ads-readings) replaces them.
+// The three former-bespoke datasets: no dimension/breakdown/metric/site-override. Overview and
+// campaigns widgets are metric cards (lib/defaults.ts CARD_PRESET_FOR_PANEL), added from Metric
+// card → preset, so there is no View picker; ads readings keep the campaign multi-select below.
 const isOverviewDataset = computed(() => draft.dataset === 'overview')
 const isCampaignsDataset = computed(() => draft.dataset === 'campaigns')
 const isAdsReadingsDataset = computed(() => draft.dataset === 'ads-readings')
 const isBespokeDataset = computed(() => isOverviewDataset.value || isCampaignsDataset.value || isAdsReadingsDataset.value)
-const viewOptions = computed(() => (isOverviewDataset.value ? OVERVIEW_VIEWS : isCampaignsDataset.value ? CAMPAIGNS_VIEWS : []))
+/** "Add chart" → Data source: the creatable datasets, plus the one this widget already carries so
+ * an overview/campaigns widget taken out of card mode still shows its own data source. */
+const datasetChoices = computed(() => DATASETS.filter((d) => d.creatable !== false || d.value === draft.dataset))
 const campaignIdsValue = computed<string[]>({
   get: () => draft.campaignIds ?? [],
   set: (v: string[]) => {
@@ -425,9 +428,9 @@ const popupNeedsKind = computed(() => isPopup.value && !isRate.value && (draft.d
 // than drop it; only the metric is beacon-agnostic (it's always a count).
 function onDatasetChange() {
   if (isBespokeDataset.value) {
-    // No dimension/breakdown/metric/rings/site-override domain — a View picker (+ campaign
-    // multi-select) replaces them entirely. Chart type is irrelevant too (each view renders
-    // its own fixed layout), so pin it to 'table' as an inert placeholder value.
+    // No dimension/breakdown/metric/rings/site-override domain; the campaign multi-select
+    // replaces them. Chart type is irrelevant too (each panel renders its own fixed layout), so
+    // pin it to 'table' as an inert placeholder value.
     draft.dimension = ''
     draft.breakdown = undefined
     draft.rings = undefined
@@ -436,9 +439,7 @@ function onDatasetChange() {
     draft.site = undefined
     draft.host = undefined
     draft.metric = 'pageviews'
-    if (!draft.view || !viewOptions.value.some((v) => v.value === draft.view)) {
-      draft.view = viewOptions.value[0]?.value
-    }
+    draft.view = undefined
     // The readings log is a metric card now (ADR 0005): a new "Ads readings" chart starts as the
     // preset card, so CardEditor and the campaign picker open. Existing widgets are not converted
     // here — ChartCard maps them at render time (lib/metrics/readingsCard.ts).
@@ -593,6 +594,20 @@ watch(
 // ChartType value (that would touch the shared ChartType union / CHART_TYPES catalog, outside
 // this integration's file list).
 const isCardWidget = computed(() => !!draft.card)
+
+// ── Per-chart filters row. `draft.filters` is Widget.filters (null/absent = the page's filters);
+// Edit opens the same FilterPopover ChartCard uses, which starts from the override, else the page's
+// filters. A card or any widget that draws its own body (lib/charts.ts rendersOwnBody) has no
+// filter button on the chart, so here it shows the summary and Clear only: an override nobody can
+// see can always be removed. ────────────────────────────────────────────────────────────────────
+const filterOpen = ref(false)
+const filtersEditable = computed(() => !isCardWidget.value && !rendersOwnBody(draft) && !!(draft.filters ?? props.filters))
+const filterStart = computed<GlobalFilters | undefined>(() => draft.filters ?? props.filters)
+const filtersText = computed(() => (draft.filters ? `Overrides the page: ${filterOverrideSummary(draft.filters)}` : "Uses the page's filters"))
+function clearFilters() {
+  draft.filters = null
+  filterOpen.value = false
+}
 /** The card's own spec (preset or inline), for what the form around CardEditor offers. */
 const cardSpec = computed(() => (draft.card ? ('preset' in draft.card ? presetById(draft.card.preset) ?? null : draft.card.spec) : null))
 /** A card repeated over campaigns takes the widget's campaign selection (MetricCard
@@ -731,7 +746,7 @@ function save() {
         <div class="field" v-if="!isNote">
           <label>Data source</label>
           <select v-model="draft.dataset" @change="onDatasetChange">
-            <option v-for="d in DATASETS" :key="d.value" :value="d.value === 'rum' ? undefined : d.value">{{ d.label }}</option>
+            <option v-for="d in datasetChoices" :key="d.value" :value="d.value === 'rum' ? undefined : d.value">{{ d.label }}</option>
           </select>
         </div>
 
@@ -754,6 +769,7 @@ function save() {
              cards, distinct from the fixed chart types above — see CardEditor.vue. -->
         <div class="field" v-if="!isNote">
           <button type="button" class="btn" @click="makeCardWidget">Make this a metric card instead</button>
+          <p class="hint">Overview and campaign cards are presets here.</p>
         </div>
       </template>
 
@@ -856,17 +872,22 @@ function save() {
         </label>
       </div>
 
-      <template v-if="!isCardWidget">
-      <!-- Overview / campaigns / ads-readings datasets: a View picker replaces the
-           dimension/breakdown/metric/site-override fields below (not applicable to them). -->
-      <div class="row" v-if="isBespokeDataset && viewOptions.length">
-        <div class="field">
-          <label>View</label>
-          <select v-model="draft.view" @change="onDatasetChange">
-            <option v-for="v in viewOptions" :key="v.value" :value="v.value">{{ v.label }}</option>
-          </select>
+      <!-- Per-chart filters (every widget but a note): the widget's own override of the page's
+           filters (Widget.filters, the same one ChartCard's filter button edits). A card, or any
+           widget that draws its own body, gets the summary and Clear only. -->
+      <div class="field filters-row" v-if="!isNote" data-testid="filters-row">
+        <label>Filters</label>
+        <p class="filters-summary">{{ filtersText }}</p>
+        <div class="filters-actions">
+          <button v-if="filtersEditable" type="button" class="btn" @click="filterOpen = !filterOpen">Edit</button>
+          <button v-if="draft.filters" type="button" class="btn" @click="clearFilters">Clear</button>
         </div>
+        <FilterPopover v-if="filterOpen && filtersEditable && filterStart" :start="filterStart" :active="!!draft.filters" @apply="draft.filters = $event" @use-global="clearFilters" @close="filterOpen = false" />
       </div>
+
+      <template v-if="!isCardWidget">
+      <!-- Overview / campaigns / ads-readings datasets: no dimension/breakdown/metric/site-override
+           fields below (not applicable to them). Their panels are metric cards: no View picker. -->
       <div class="field" v-if="isCampaignsDataset || isAdsReadingsDataset">
         <label>Campaign(s) <span class="hint">— none checked = all</span></label>
         <div class="campaign-list">
@@ -1246,6 +1267,17 @@ h2 {
 .hint {
   font-size: 12px;
   color: rgb(var(--ink-3));
+}
+.filters-summary {
+  margin: 0;
+}
+.filters-actions {
+  display: flex;
+  gap: 8px;
+}
+.filters-row .fp {
+  align-self: flex-start;
+  max-width: 100%;
 }
 .save-reason {
   color: #bc4749;
