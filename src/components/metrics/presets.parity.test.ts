@@ -229,13 +229,11 @@ describe('bsk-kpis ≡ the bespoke "Today at a glance" tiles', () => {
     const after = newTiles(await mountNew('bsk-kpis')).filter((t) => !ADDED_AFTER_RETIREMENT.has(t.label))
     expect(after.map((t) => t.label)).toEqual(before.map((t) => t.label))
     expect(after.map((t) => t.value)).toEqual(before.map((t) => t.value))
-    // Tiles whose metric can count a refused row get whole-ET-day context instead of same-time
-    // deltas (decision 2026-10-03, "KPI deltas on refused-row tiles: whole-day context"): one
-    // neutral line, yesterday's full-day total and the 7-day daily average. Every other tile's
-    // delta lines are unchanged.
-    const WHOLE_DAY_CONTEXT = new Map([['Page views', ['Yesterday 105 · 7-day avg 100/day']]])
-    expect(after.filter((t) => !WHOLE_DAY_CONTEXT.has(t.label)).map((t) => t.deltas)).toEqual(before.filter((t) => !WHOLE_DAY_CONTEXT.has(t.label)).map((t) => t.deltas))
-    for (const [label, lines] of WHOLE_DAY_CONTEXT) expect(after.find((t) => t.label === label)!.deltas, label).toEqual(lines)
+    // Every tile's delta lines are unchanged. Page views counts no refused row since 0.27.3, so it
+    // has its same-time arrows again; a tile that can still count one (decision 2026-10-03, "KPI
+    // deltas on refused-row tiles: whole-day context") would show whole-ET-day context instead.
+    expect(after.map((t) => t.deltas)).toEqual(before.map((t) => t.deltas))
+    expect(after.find((t) => t.label === 'Page views')!.deltas[0]).toMatch(/^vs yesterday /)
     // The fixture exercises both delta states and a rate tile.
     expect(before.filter((t) => t.deltas[0] === 'new today').length).toBeGreaterThanOrEqual(5)
     expect(before.filter((t) => t.deltas[0]?.startsWith('vs yesterday')).length).toBeGreaterThanOrEqual(3)
