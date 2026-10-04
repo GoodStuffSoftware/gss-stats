@@ -2,7 +2,8 @@
 
 - **Status:** Proposed (2026-10-03). Plan only; each slice below lands as its own PR. Two
   decisions are open (see "Open decisions"). Slice 4 (the rate tile) is built on decision (b)'s
-  default: a percentage with its n/d for every key.
+  default: a percentage with its n/d for every key. Slice 5 (the shared stat and bar components)
+  is built on decision (a)'s default.
 - **Date:** 2026-10-03
 - **Amends:** [ADR 0003](0003-metric-components.md) section 5 (the `ads-readings` and `rate` rows)
   and section 7 slice 8 ("Later"), which this ADR replaces with concrete slices.
@@ -354,6 +355,19 @@ Eastern days, and one with `since === until` reads "unavailable"; **before track
 over "0/0"**; the registry notes (counted-from date, "still arriving", the eligibility caveat)
 are new under the tile. The install-fix note was already shown by the old tile, as the hideable
 `popup-note`; it is now the tile's caption, and a stored hide of `popup-note` still hides it.
+
+Slice 5, as built: `StatTile` and `BarTable` (with `BarTrack`, the one bar) live in
+`src/components/metrics/`. `ChartCard`'s Stat and Table bodies render them, fed by `fetchStats`
+exactly as before (decision (a): the data path did not move), and `MetricItem`'s tile frame and
+bar render the same `StatTile` and `BarTrack`. Nothing is stored differently, so there is no
+layout key and no `CONFIG_VERSION` change. `ChartCard.statTable.parity.test.ts` pins the figures
+per dataset (RUM, geo, pop-up, completions) and metric: the stat's number, label and other
+measure, and each table row's label, value and bar width, against the formulas of the retired
+markup, plus the "No data in range" and "Tracking not yet active" states. Differences: the
+`.stat` / `.t-*` class names are now `.stat-tile-*` / `.bt-*`, and the card tile and the page
+stat tile share their elements and styles but keep their own order and sizes (the page tile
+reads number, then label; the card tile reads label, then number). The editor stops offering
+"Rate" for a new chart; a saved rate tile still opens with its own type.
 
 Slice 1 is first because it is small, self-contained, approved, and the readings log needs it.
 Slices 2, 4 and 5 are independent of each other and of slice 3, apart from the shared `.stat`
