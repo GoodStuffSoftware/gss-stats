@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.27.3] — 2026-10-04
+
+### Fixed
+- **The Page views tile has its day-over-day arrows back.** It now leaves refused counts-only rows out of its own count, so it compares against the same time yesterday and the 7-day average again instead of showing whole-day totals.
+
 ## [0.27.1] — 2026-10-04
 
 ### Fixed
