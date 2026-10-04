@@ -260,7 +260,8 @@ describe('the captions upgrade (plain-text captions and hidden caveats: seeds hi
   it('captions comes after dateEtTrends, and this code writes the newest layout version', () => {
     expect(V).toBeGreaterThan(LAYOUT_VERSIONS.dateEtTrends)
     expect(CONFIG_VERSION).toBeGreaterThanOrEqual(V)
-    expect(CONFIG_VERSION).toBe(Math.max(...Object.values(LAYOUT_VERSIONS)))
+    expect(Object.values(LAYOUT_VERSIONS).every((v) => v <= CONFIG_VERSION)).toBe(true) // none above what is written
+    expect(Object.values(LAYOUT_VERSIONS)).toContain(CONFIG_VERSION) // and the newest key is what is written
   })
   it('the first captions save over the stored previous layout backs it up to backup:v<prev>, once', async () => {
     const old = JSON.stringify(cfg(prev, 'live layout'))
@@ -295,7 +296,8 @@ describe('the readingsLog upgrade (readings log card: a guard bump, no layout re
   it('this code writes at least the readingsLog layout version (a newer key may sit above it)', () => {
     expect(V).toBeGreaterThan(LAYOUT_VERSIONS.dateEtTrends)
     expect(CONFIG_VERSION).toBeGreaterThanOrEqual(V)
-    expect(CONFIG_VERSION).toBe(Math.max(...Object.values(LAYOUT_VERSIONS)))
+    expect(Object.values(LAYOUT_VERSIONS).every((v) => v <= CONFIG_VERSION)).toBe(true) // none above what is written
+    expect(Object.values(LAYOUT_VERSIONS)).toContain(CONFIG_VERSION) // and the newest key is what is written
   })
   it('the first readingsLog save over the stored previous layout backs it up to backup:v<prev>, once', async () => {
     const old = JSON.stringify(cfg(prev, 'live layout'))
