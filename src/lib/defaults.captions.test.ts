@@ -11,6 +11,7 @@ import {
   HIDDEN_CAVEATS_MAX,
   HIDDEN_CAVEAT_ID_RE,
   LAYOUT_VERSIONS,
+  V16_SEEDABLE,
   V16_SEEDABLE_CAVEATS,
   defaultCampaignsWidgets,
   defaultConfig,
@@ -337,6 +338,46 @@ describe('the v16 seed is frozen to the caveats that existed at v16 (V16_SEEDABL
       expect(again.some((w) => autoCaveatIds(w).includes(LATER))).toBe(true)
       expect(hidesLater(again)).toEqual([])
     }))
+
+  it('pins the frozen (scope, id) pairs: each id is listed under exactly the scopes it had at v16 (NIT-A)', () => {
+    expect(Object.fromEntries(Object.entries(V16_SEEDABLE).map(([k, v]) => [k, [...v]]))).toEqual({
+      campaigns: ['play-tracking-status', 'play-tracking-not-live', 'min-cohort-caveat'],
+      popup: ['tracking-not-yet-active', 'min-cohort-caveat'],
+    })
+    expect(new Set(Object.values(V16_SEEDABLE).flatMap((ids) => [...ids]))).toEqual(V16_SEEDABLE_CAVEATS)
+    for (const id of V16_SEEDABLE_CAVEATS) {
+      const frozenScopes = Object.keys(V16_SEEDABLE).filter((scope) => V16_SEEDABLE[scope].has(id))
+      expect([...getNote(id)!.scopes].sort(), id).toEqual(frozenScopes.sort())
+    }
+  })
+
+  it('a frozen caveat whose scope is widened later is not seeded on the new scope (NIT-A)', () => {
+    const widen: Record<string, string[]> = { 'min-cohort-caveat': ['overview', 'geo'], 'play-tracking-status': ['popup'] }
+    const saved = new Map(Object.keys(widen).map((id) => [id, NOTES_REGISTRY[id].scopes]))
+    for (const [id, extra] of Object.entries(widen)) (NOTES_REGISTRY[id] as { scopes: string[] }).scopes = [...saved.get(id)!, ...extra]
+    try {
+      const geoChart = { ...BASE } // dataset 'geo'
+      const popupChart = { ...BASE, id: 'p', i: 'p', type: 'bar', dataset: 'popup', dimension: 'reason' }
+      expect(autoCaveatIds(geoChart as Widget)).toContain('min-cohort-caveat') // the probe is real
+      expect(autoCaveatIds(popupChart as Widget)).toContain('play-tracking-status')
+      expect(load(geoChart, prev).hiddenCaveats ?? []).toEqual([])
+      expect(load(popupChart, prev).hiddenCaveats ?? []).not.toContain('play-tracking-status')
+      // on its frozen scope it is still seeded
+      expect(load(campaignsChart, prev).hiddenCaveats).toEqual(['play-tracking-status', 'min-cohort-caveat'])
+      // production and the built-in charts: no widget of a widened scope gains the widened id
+      const widened = (w: Widget) => {
+        const d = w.dataset ?? ''
+        return (w.hiddenCaveats ?? []).filter((id) => (widen[id] ?? []).includes(d))
+      }
+      const prod = normalizeConfig(clone(PROD_V12) as never).pages.flatMap((p) => p.widgets)
+      const fresh = normalizeConfig(defaultConfig()).pages.flatMap((p) => p.widgets)
+      expect(prod.some((w) => widen['min-cohort-caveat'].includes(w.dataset ?? '') && autoCaveatIds(w).includes('min-cohort-caveat'))).toBe(true)
+      expect(prod.flatMap(widened)).toEqual([])
+      expect(fresh.flatMap(widened)).toEqual([])
+    } finally {
+      for (const [id, scopes] of saved) (NOTES_REGISTRY[id] as { scopes: unknown }).scopes = scopes
+    }
+  })
 
   it("today's production seed is unchanged: exactly these five charts gain hidden ids", () => {
     const out = normalizeConfig(clone(PROD_V12) as never)
