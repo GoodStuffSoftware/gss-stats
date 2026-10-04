@@ -28,7 +28,10 @@
 //   release.latest         date  the newest dated release's day (ET)
 //   release.latestVersion  text  its version, e.g. v1.98.0
 //   golive.web      date    the day web tracking went live (ET)
-//   golive.play     date    the day the Play build with tracking was submitted (ET)
+//   play.submitted  date    the day the Play build with tracking was submitted (ET): a
+//                           submission, not a go-live
+// `golive.<app>` is reserved for a real go-live day; Play gets `golive.play` only once its
+// tracking is actually live, and `play.submitted` keeps meaning the submission.
 //
 // EXTENDING (release 2): catalog metrics arrive as new paths of the same shape, e.g.
 // `{=metric:<id>@<window>|number}` — ":" and "@" are already legal path characters, so release 1
@@ -108,14 +111,14 @@ export function resolveValueToken(source: string, values: TokenValues): string |
   return formatValue(v)
 }
 
-/** The fixed dates: the newest release and the go-live days. */
+/** The fixed dates: the newest release, the web go-live day and the Play submission day. */
 export function globalValues(): TokenValues {
   const latest = newest(datedReleases())
   return {
     'release.latest': { kind: 'date', value: latest?.dateEt ?? null },
     'release.latestVersion': { kind: 'text', value: latest?.version ?? null },
     'golive.web': { kind: 'date', value: TRACKING_ACTIVATION_DATE_ET },
-    'golive.play': { kind: 'date', value: PLAY_TRACKING_ACTIVATION_DATE_ET },
+    'play.submitted': { kind: 'date', value: PLAY_TRACKING_ACTIVATION_DATE_ET },
   }
 }
 
@@ -229,5 +232,5 @@ export const VALUE_TOKEN_OPTIONS: readonly ValueTokenOption[] = [
   { group: 'Dates', label: 'Latest release date', token: '{=release.latest|date}' },
   { group: 'Dates', label: 'Latest release version', token: '{=release.latestVersion}' },
   { group: 'Dates', label: 'Web tracking go-live', token: '{=golive.web|date}' },
-  { group: 'Dates', label: 'Play build submitted', token: '{=golive.play|date}' },
+  { group: 'Dates', label: 'Play submission date', token: '{=play.submitted|date}' },
 ]

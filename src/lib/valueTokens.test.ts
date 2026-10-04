@@ -239,13 +239,16 @@ describe('chartValues', () => {
 })
 
 describe('fixed dates', () => {
-  it('the newest release and the go-live days', () => {
+  it('the newest release, the web go-live day and the Play submission day', () => {
     const latest = newest(datedReleases())!
     const g = globalValues()
     expect(g['release.latest'].value).toBe(latest.dateEt)
     expect(g['release.latestVersion'].value).toBe(latest.version)
     expect(g['golive.web'].value).toBe(TRACKING_ACTIVATION_DATE_ET)
-    expect(g['golive.play'].value).toBe(PLAY_TRACKING_ACTIVATION_DATE_ET)
+    expect(g['play.submitted'].value).toBe(PLAY_TRACKING_ACTIVATION_DATE_ET)
+    // `golive.<app>` is kept for a real go-live day: the Play submission is not one
+    expect(g).not.toHaveProperty('golive.play')
+    expect(chartValueResolver(widget(), null)('{=golive.play|date}')).toBeNull()
   })
 
   it('resolve on any chart, even one with no data', () => {
