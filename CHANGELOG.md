@@ -19,6 +19,12 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **Inserting is an explicit choice.** Pick a value, then press Insert; moving through the menu with
   the arrow keys no longer drops a token per option, for Insert value and Insert from library.
 
+## [0.23.0] — 2026-10-03
+
+### Changed
+- **Pop-up rate tiles are metric cards** — a single pop-up rate tile now renders from the shared card engine (the percentage with its n/d, "too few to report", and the registry's notes under it); existing dashboards need no change, and a hidden install-fix note stays hidden. Before tracking went live the tile now reads "not yet tracking" instead of "—".
+- **Percent columns align right** — a percent column in a card table lines up with the other number columns.
+
 ## [0.22.0] — 2026-10-03
 
 ### Added

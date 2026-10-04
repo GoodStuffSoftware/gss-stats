@@ -621,6 +621,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.card.openCampaigns': 'Open the Campaigns page',
     'label.card.release': 'Release',
     'label.card.retiredPanel': 'This panel has been replaced by a card or a chart. Edit it, or restore the default charts.',
+    'label.card.rateUnknown': 'This rate is not one this version knows. Edit the chart and pick a rate.',
     'label.card.step': 'Step',
     'label.card.arm': 'Arm',
     // Neutral: the organic row's arrivals are untagged first web visits, a campaign row's are tagged.

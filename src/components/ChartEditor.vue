@@ -258,7 +258,7 @@ function insertFromLibrary(t: TextTarget, id: string) {
 // option, so a metric nothing has loaded shows its name alone). A token that would not fit whole
 // under CAPTION_MAX_CHARS is not inserted, and the box says the caption is full. A widget that
 // renders its own body (a metric card, overview, campaigns, ads-readings: lib/charts.ts
-// rendersOwnBody, the test ChartCard skips its fetch on) loads no response a chart value could
+// rendersOwnBody, the test ChartCard skips its fetch on; a pop-up rate tile is one since #80) loads no response a chart value could
 // read, so it gets no "This chart" group (review N2, NIT-1); a note widget never does (`chart.*` is
 // "—" there), and takes Dates and Metrics.
 const metricOptionList = metricTokenOptions()
