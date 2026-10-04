@@ -5,6 +5,8 @@
 //   token   = "{=" path [ "|" format ] "}"        spaces around path, "|" and format are ignored
 //   path    = 1*( ALPHA / DIGIT / "_" / "." / ":" / "@" / "-" )
 //   format  = "number" / "pct" / "date"
+// Formats are case-insensitive ({=chart.total|NUMBER} fills); paths are case-sensitive
+// ({=Chart.total} is an unknown path and shows "—").
 //
 // Every path has a kind, and a format is allowed only on its own kind:
 //   number  →  "number"   1,234 (en-US grouping)

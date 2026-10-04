@@ -109,6 +109,7 @@ describe('resolveValueToken', () => {
   it('missing data, an unknown path and a malformed token are null', () => {
     expect(resolveValueToken('{=gone}', values)).toBeNull()
     expect(resolveValueToken('{=nope}', values)).toBeNull()
+    expect(resolveValueToken('{=N}', values)).toBeNull() // paths are case-sensitive
     expect(resolveValueToken('{=metric:returns@7d|number}', values)).toBeNull()
     expect(resolveValueToken('{=n|money}', values)).toBeNull()
     expect(resolveValueToken('{=toString}', values)).toBeNull() // no prototype lookups
@@ -125,6 +126,20 @@ describe('chartValues', () => {
     expect(v['chart.topShare'].value).toBe(0.75)
     expect(v['chart.from'].value).toBe('2026-09-01')
     expect(v['chart.to'].value).toBe('2026-09-30')
+  })
+
+  it('a tie for the top value goes to the first item in the order the server sent', () => {
+    const rows = [
+      { key: { country: 'CA' }, pageviews: 300, visits: 1 },
+      { key: { country: 'US' }, pageviews: 200, visits: 1 },
+      { key: { country: 'US' }, pageviews: 100, visits: 1 },
+      { key: { country: 'MX' }, pageviews: 300, visits: 1 },
+    ]
+    const v = chartValues(widget(), response({ rows, totals: { pageviews: 900, visits: 4 } }))
+    expect(v['chart.top'].value).toBe('Canada')
+    expect(v['chart.topValue'].value).toBe(300)
+    const flipped = chartValues(widget(), response({ rows: [rows[1], rows[2], rows[0], rows[3]], totals: { pageviews: 900, visits: 4 } }))
+    expect(flipped['chart.top'].value).toBe('United States')
   })
 
   it("uses the chart's metric", () => {
