@@ -385,7 +385,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   and the eligibility panel are metric cards (presets `popup-rates` and `signin-eligibility`, since
   layout version 11), over the page's range, sites and "hide my own visits", as before. Outcome-over-shown rates are
   not shown as percentages: outcomes land days after the showing, so a range mixes cohorts.
-  Every other pop-up chart (reason/platform breakdowns, per-day trends, single rate tiles) is
+  Every other pop-up chart (reason/platform breakdowns, per-day trends) is
   still available from the chart editor's "Pop-up tracking" data source. A single rate tile
   (any `POPUP_RATE_SPECS` key) is a one-item metric card since layout version 18: it shows the
   percentage big with its n/d under it, "too few to report" under `MIN_COHORT`, "—" over "(0/0)"
@@ -393,6 +393,10 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   lagged outcome rate, the install-fix note, the eligibility caveat). A saved rate tile is mapped
   to the card when it is drawn (`src/lib/metrics/rateTileCard.ts`); the layout is not rewritten,
   and a stored hide of the install-fix note (`popup-note` in the chart's data caveats) still hides it.
+  The chart editor no longer offers "Rate" as a chart type for a new chart (add a rate as a metric
+  card); a saved rate tile still opens and edits. The Stat and Table chart types draw through the
+  shared `StatTile` and `BarTable` components (`src/components/metrics/`), as the metric card's
+  tile and bar do.
   A key this build does not know shows a message asking you to pick a rate. Differences from the
   old tile: before tracking went live it reads "not yet tracking" where the old tile read "—"
   over "0/0"; the card clamps a range longer than the metrics limit to its newest days, reads a
