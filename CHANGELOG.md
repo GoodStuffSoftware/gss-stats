@@ -6,7 +6,15 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
-## [0.25.0] — 2026-10-04
+## [0.25.1] — 2026-10-03
+
+### Changed
+- **The editor says where a pop-up rate went** — under Chart type, a new chart now shows a one-line hint to make it a metric card and pick the "Pop-up rates" preset.
+
+### Removed
+- **The old single-rate query is gone from the pop-up data source** — a rate tile has been a metric card since 0.23.0, so nothing asked for it; a dashboard tab left open from an older version shows a "reload the page" message on that tile instead of an error.
+
+## [0.25.0] — 2026-10-03
 
 ### Added
 - **Captions and notes can show catalog numbers.** Insert value has a Metrics group (for example Page
