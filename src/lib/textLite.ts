@@ -29,9 +29,14 @@ const TOKEN_RE = /\*\*(.+?)\*\*|\[([^\]]+)\]\(([^)]+)\)/g
 // whitespace character from anywhere in it, not just the ends), then classify the
 // NORMALIZED value against an explicit allowlist, and render that normalized value — never
 // the raw one — so a control character can never survive into the actual `href` either.
+//
+// Value tokens (slice 1c review, NIT-3): an href holding `{` or `}`, or the marker that
+// tokenizeAndInterpolate puts where a `{=…}` stood (VALUE_TOKEN_MARK), is never a link. A value
+// token therefore cannot reach an href by construction, whatever slice 1d substitutes.
 function safeHref(rawHref: string): string | null {
   const h = rawHref.replace(/[\u0000-\u001F\u007F\s]/g, '')
   if (!h) return null
+  if (/[{}]/.test(h) || h.includes(VALUE_TOKEN_MARK)) return null
   if (h.toLowerCase().startsWith('https://')) return h // https: only, and only the real double-slash form (bare "https:evil.com" is NOT this — some URL parsers normalize it to https://evil.com, so it must fail every branch below too)
   if (h.startsWith('#')) return h // in-page anchor
   if (h.startsWith('/')) {
@@ -105,10 +110,12 @@ function substituteVars(str: string, vars: InterpolateVars): string {
  * shows a dash here, never the raw token text. */
 export const VALUE_TOKEN_RE = /\{=[^{}]*\}/g
 export const VALUE_TOKEN_PLACEHOLDER = '—'
-
-function substituteValueTokens(str: string): string {
-  return str.replace(VALUE_TOKEN_RE, VALUE_TOKEN_PLACEHOLDER)
-}
+/** Where a value token stood, between tokenizing and rendering: a private-use character that holds
+ * no markup. tokenizeAndInterpolate swaps every `{=…}` for it in the RAW input, before
+ * parseTextLite, so a token that wraps markup (`{=**x**}`, `{=[a](https://x)}`) stays one unit
+ * and never shows as raw text; safeHref refuses an href holding it; and each token's visible text
+ * then shows VALUE_TOKEN_PLACEHOLDER in its place. */
+const VALUE_TOKEN_MARK = ''
 
 /** The ONE safe way to combine markup + data-driven values ("{campaign.spend}" rather than
  * values baked into strings). HIGH security fix (2026-09-26 delta
@@ -124,10 +131,12 @@ function substituteValueTokens(str: string): string {
  * only way to make "a variable's value can never introduce markup" categorically true
  * rather than best-effort. */
 export function tokenizeAndInterpolate(input: string, vars?: InterpolateVars): TextToken[] {
-  // Value tokens first, in every token's visible text (a bold or a link label too, never an
-  // href), and before {vars}: the placeholder holds no markup, and a var's own value is never
-  // rewritten.
-  const tokens = parseTextLite(input).map((t) => ({ ...t, value: substituteValueTokens(t.value) }))
+  // Value tokens first, on the raw input and before {vars}: each `{=…}` becomes one marker that
+  // holds no markup (VALUE_TOKEN_MARK), so a token wrapping markup cannot split, and a link whose
+  // URL held one is plain text (safeHref). The marker then shows as the placeholder in every
+  // token's visible text (a bold or a link label too). A var's own value is never rewritten.
+  const marked = input.replace(VALUE_TOKEN_RE, VALUE_TOKEN_MARK)
+  const tokens = parseTextLite(marked).map((t) => ({ ...t, value: t.value.split(VALUE_TOKEN_MARK).join(VALUE_TOKEN_PLACEHOLDER) }))
   if (!vars) return tokens
   return tokens.map((t) => (t.type === 'text' ? { ...t, value: substituteVars(t.value, vars) } : t))
 }
