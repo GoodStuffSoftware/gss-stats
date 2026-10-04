@@ -600,6 +600,8 @@ export function defaultRetentionWidgets(): Widget[] {
     card('rt-engagement', 'Engagement per arrival', 'campaign-engagement', { x: 7, y: 16, w: 5, h: 11 }),
     // Google Play's own install totals (R-4): the date range only, no campaign split.
     card('rt-play', 'Play installs', 'play-installs', { x: 0, y: 27, w: 12, h: 6 }),
+    // Carry-over completions (spec S1): completions not from a campaign, whole ET days only.
+    card('rt-carryover', 'Carry-over completions', 'carry-over-completions', { x: 0, y: 33, w: 12, h: 6 }),
   ]
 }
 export function defaultRetentionPage(): DashboardPage {

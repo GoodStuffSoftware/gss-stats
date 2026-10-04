@@ -505,6 +505,25 @@ export const PLAY_INSTALLS: CardSpec = {
   captions: ['play-days', 'play-household', 'play-no-retention'],
 }
 
+/** Carry-over completions (retention spec S1): game completions per ET day that did NOT come from an
+ * ad campaign (site-wide minus campaign-tagged), beside the site-wide total over the page's range.
+ * Whole-ET-day counts only: no hour, place or device split, no clock time, no visitor grouping. The
+ * spec rates it a weak signal, and the card's caption says so. */
+export const CARRY_OVER_COMPLETIONS: CardSpec = {
+  v: 1,
+  minWidth: 230,
+  sections: [
+    {
+      layout: 'tiles',
+      items: [
+        { id: 'sitewide', label: { metric: true }, data: { metric: 'bsk.completions', window: 'page' }, display: { as: 'number' }, ...COMPACT },
+        { id: 'carry', label: { metric: true }, data: { metric: 'bsk.carryOverCompletions', window: 'page' }, display: { as: 'sparkline', series: 'daily' }, ...COMPACT },
+      ],
+    },
+  ],
+  captions: ['carry-over-weak-signal'],
+}
+
 /** Every preset by id. A null prototype, so an id such as 'constructor' or 'toString' is
  * simply not a preset — read through presetById, never a bare bracket lookup. */
 export const PRESETS: Readonly<Record<string, CardSpec>> = Object.freeze(
@@ -522,6 +541,7 @@ export const PRESETS: Readonly<Record<string, CardSpec>> = Object.freeze(
     'campaign-engagement': CAMPAIGN_ENGAGEMENT,
     'ads-readings-log': ADS_READINGS_LOG,
     'play-installs': PLAY_INSTALLS,
+    'carry-over-completions': CARRY_OVER_COMPLETIONS,
   }),
 )
 

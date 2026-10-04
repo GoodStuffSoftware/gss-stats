@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.28.0] — 2026-10-04
+
+### Added
+- **Carry-over completions on the Retention page.** A new card shows games completed each day that did not come from an ad campaign, beside the site-wide total, and is also in the card picker.
+
 ## [0.27.1] — 2026-10-04
 
 ### Fixed
