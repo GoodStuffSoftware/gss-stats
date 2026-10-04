@@ -262,8 +262,36 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
   },
   'retention-page-scope': {
     id: 'retention-page-scope',
-    text: 'Every figure on this page is a **count per campaign** over its whole flight, and the organic baseline over its matured days: the filters above (date range, sites, own visits) do not change them. These are counts and rates per campaign; nothing is split by hour, place or device.',
+    text: 'Every campaign figure on this page is a **count per campaign** over its whole flight, and the organic baseline over its matured days: the filters above (date range, sites, own visits) do not change them. The Play tiles follow the date range only; the sites and own-visits filters do not apply to Play, which Google reports for the whole app. These are counts and rates; nothing is split by hour, place or device.',
     kind: 'text',
+    severity: 'info',
+    scopes: [],
+  },
+  'play-days': {
+    id: 'play-days',
+    text: 'Play figures are the whole-app daily totals Google Play reports, by Play day (as reported by Google Play; not confirmed to be an ET day, so they are never mixed with the ET-day figures). Google posts them 3-7 days late: see "data through".',
+    kind: 'note',
+    severity: 'caveat',
+    scopes: [],
+  },
+  'play-household': {
+    id: 'play-household',
+    text: "Play device and install counts include the developer's own household devices and cannot be attributed to any one campaign (the app captures no install referrer).",
+    kind: 'note',
+    severity: 'caveat',
+    scopes: [],
+  },
+  'play-no-retention': {
+    id: 'play-no-retention',
+    text: "Day-1 and day-7 retention are not available from Google Play's bulk reports, so there is no Play retention figure here.",
+    kind: 'note',
+    severity: 'caveat',
+    scopes: [],
+  },
+  'play-active-is-stock': {
+    id: 'play-active-is-stock',
+    text: 'Active device installs is a running total, not a count of the days: the tile shows its latest figure in the range.',
+    kind: 'note',
     severity: 'info',
     scopes: [],
   },
@@ -449,6 +477,12 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.campaign.spendThrough': 'Spend through',
     'label.campaign.lastSync': 'Synced',
 
+    // Google Play's own daily totals (lib/metrics/metrics.ts play.*).
+    'label.play.deviceInstalls': 'Play device installs',
+    'label.play.deviceUninstalls': 'Play device uninstalls',
+    'label.play.activeDeviceInstalls': 'Play active device installs',
+    'label.play.dataThrough': 'Play data through',
+
     // Ratios (lib/metrics/ratios.ts).
     'label.campaign.acceptPerAsk': 'Accept rate',
     'label.campaign.signedInPerAsk': 'Signed in after ask',
@@ -527,6 +561,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'ads-stale': 'stale — sync pending',
     'no-spend-day-yet': 'no closed spend day stored yet',
     'not-synced-yet': 'not synced yet',
+    'play-not-synced-yet': 'no Play figures stored yet',
 
     // Card labels that are not a metric's own name (lib/metrics/presets.ts).
     'label.card.flight': 'Flight',
@@ -592,6 +627,8 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.preset.retention-verdict': 'Retention verdict',
     'label.preset.retention-verdict.description': 'One row per campaign and the organic baseline: the verdict, the days 2-7 return rate with its 90% bounds, arrivals, and completed games per arrival.',
     'label.preset.campaign-engagement': 'Engagement per arrival',
+    'label.preset.play-installs': 'Play installs',
+    'label.preset.play-installs.description': "Google Play's own device installs and uninstalls over the date range, the latest active device installs in it, and how far Play's data runs. Whole-app counts; not split by campaign.",
     'label.preset.campaign-engagement.description': 'One card per beacon-tracked campaign: completed games per first tagged load, with the two counts it is made of.',
     'label.preset.campaign-cost': 'Campaign cost',
     'label.preset.campaign-cost.description': 'One card per campaign: spend, where it came from and how fresh it is, and the cost per arrival and per auth success.',

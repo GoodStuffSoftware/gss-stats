@@ -43,7 +43,9 @@ function syntheticFacts(plan: ReturnType<typeof planBatch>): Map<string, FactRes
     const raw =
       f.id === 'adsSpend'
         ? [{ campaign_id: CAMPAIGNS[0].id, cost_micros: 5_000_000, days: 2 }]
-        : paths.flatMap((path, i) => [0, 1, 2, 3, 4, 5, 6, 7].map((d) => ({ path, visitor: (i + d) % 2 ? 'new' : 'returning', campaign: CAMPAIGNS[(i + d) % 3].ucValues[0], d, t: d > 0 && !isSplitRefusedPath(path) ? (i + d) % 2 : 0, s: (i + d) % (factCuts(f.id).length + 1), pf: d % 2, c: 1 + i })))
+        : f.id === 'adsPlayDaily'
+          ? [{ date: '2026-09-22', device_installs: 4, user_installs: 3, device_uninstalls: 1, active_device_installs: 40 }]
+          : paths.flatMap((path, i) => [0, 1, 2, 3, 4, 5, 6, 7].map((d) => ({ path, visitor: (i + d) % 2 ? 'new' : 'returning', campaign: CAMPAIGNS[(i + d) % 3].ucValues[0], d, t: d > 0 && !isSplitRefusedPath(path) ? (i + d) % 2 : 0, s: (i + d) % (factCuts(f.id).length + 1), pf: d % 2, c: 1 + i })))
     facts.set(f.key, { ok: true, rows: FACTS[f.id].parse(raw), asOfMs: NOW })
   }
   return facts
