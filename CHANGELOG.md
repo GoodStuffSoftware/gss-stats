@@ -35,6 +35,13 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **Duplicating a chart gives the copy its own settings.** Changing the copy's captions, notes
   or card no longer touches the original.
 
+## [0.18.0] — 2026-10-03
+
+### Added
+- **A Best Sudoku Retention page template.** "+ New > Page > Start from" now offers it, with the
+  retention verdict, return visits and engagement per arrival; it is on no layout until
+  someone creates it, so nothing saved changes.
+
 ## [0.17.0] — 2026-10-03
 
 ### Added
