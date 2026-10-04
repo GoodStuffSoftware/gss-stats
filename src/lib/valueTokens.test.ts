@@ -17,6 +17,7 @@ import {
 import { datedReleases, newest } from './releases'
 import { dayDrillRange, relativeRange } from './range'
 import { PLAY_TRACKING_ACTIVATION_DATE_ET, TRACKING_ACTIVATION_DATE_ET } from './popupEvents'
+import { rangeNoticeText, type RangeNotice } from './rangeNotice'
 
 const widget = (over: Partial<Widget> = {}): Widget =>
   ({ id: 'w', i: 'w', title: 'T', type: 'bar', dataset: 'geo', dimension: 'country', metric: 'pageviews', limit: 10, x: 0, y: 0, w: 6, h: 6, ...over }) as Widget
@@ -169,7 +170,7 @@ describe('chartValues', () => {
     expect(none['chart.from'].value).toBeNull()
   })
 
-  describe('an uncut range names the days the chart shows (ET, as the range note does)', () => {
+  describe('an uncut range names the days the chart shows (ET on a chart without a `date` series, as the range note does)', () => {
     afterEach(() => {
       vi.useRealTimers()
     })
@@ -217,6 +218,89 @@ describe('chartValues', () => {
 
     it('unreadable bounds name no days', () => {
       expect(daysOf({ since: 'soon', until: '2026-09-30T23:59:59.999Z' })).toEqual([null, null])
+    })
+  })
+
+  // Review SHOULD-A (fix round C): the days named are the days the chart plots. A `date` series
+  // (the default Overview trend) plots UTC days; a `dateEt` one, or a chart with no day dimension,
+  // ET days. A cut and an uncut range on the same chart name days the same way.
+  describe("names the days in the chart's own day zone", () => {
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+    const trend = widget({ id: 'trend', type: 'area', dataset: undefined, dimension: 'date' })
+    const trendEt = widget({ type: 'area', dataset: 'geo', dimension: 'dateEt' })
+    const rowsFor = (w: Widget) => (w.dimension === 'country' ? response().rows : [])
+    const daysOn = (w: Widget, r: { since: string; until: string } | null, extra: Partial<StatsResponse> = {}) => {
+      const meta = { ...response().meta, ...r!, dimensions: [w.dimension] }
+      const v = chartValues(w, response({ rows: rowsFor(w), meta, ...extra }))
+      return [v['chart.from'].value, v['chart.to'].value]
+    }
+    const lastAt = (iso: string, rel = '7d') => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date(iso))
+      return relativeRange(rel)
+    }
+
+    it('a `date` chart, "Last 7d" at 21:30 EDT Oct 3 (01:30Z Oct 4): the UTC days it plots, Sep 27 – Oct 4', () => {
+      expect(daysOn(trend, lastAt('2026-10-04T01:30:00.000Z'))).toEqual(['2026-09-27', '2026-10-04'])
+    })
+
+    it('a `date` chart, "Last 7d" at 10:00 EDT Oct 3: Sep 26 – Oct 3 (the UTC and ET days agree then)', () => {
+      expect(daysOn(trend, lastAt('2026-10-03T14:00:00.000Z'))).toEqual(['2026-09-26', '2026-10-03'])
+    })
+
+    it('a `dateEt` chart, the same moments: its ET days, Sep 26 – Oct 3 both times', () => {
+      expect(daysOn(trendEt, lastAt('2026-10-04T01:30:00.000Z'))).toEqual(['2026-09-26', '2026-10-03'])
+      expect(daysOn(trendEt, lastAt('2026-10-03T14:00:00.000Z'))).toEqual(['2026-09-26', '2026-10-03'])
+    })
+
+    it('a chart with no day dimension (country): ET days, Sep 26 – Oct 3', () => {
+      expect(daysOn(widget(), lastAt('2026-10-04T01:30:00.000Z'))).toEqual(['2026-09-26', '2026-10-03'])
+    })
+
+    it('the widget alone, or the response alone, saying `date` is enough', () => {
+      const r = lastAt('2026-10-04T01:30:00.000Z')
+      const noDims = { ...response().meta, ...r, dimensions: [] }
+      const fromWidget = chartValues(trend, response({ rows: [], meta: noDims }))
+      expect([fromWidget['chart.from'].value, fromWidget['chart.to'].value]).toEqual(['2026-09-27', '2026-10-04'])
+      const fromResponse = chartValues(widget({ dimension: '' }), response({ rows: [], meta: { ...noDims, dimensions: ['date'] } }))
+      expect([fromResponse['chart.from'].value, fromResponse['chart.to'].value]).toEqual(['2026-09-27', '2026-10-04'])
+    })
+
+    it('in EST (winter) too: "Last 7d" at 20:30 EST Dec 3 (01:30Z Dec 4)', () => {
+      const r = lastAt('2026-12-04T01:30:00.000Z')
+      expect(daysOn(trend, r)).toEqual(['2026-11-27', '2026-12-04'])
+      expect(daysOn(trendEt, r)).toEqual(['2026-11-26', '2026-12-03'])
+      expect(daysOn(widget(), r)).toEqual(['2026-11-26', '2026-12-03'])
+    })
+
+    it('on a `date` chart, a cut range and an uncut one agree, and with the range note', () => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-10-04T01:30:00.000Z')) // 21:30 EDT Oct 3
+      const uncut = relativeRange('90d')
+      // "Last 120d", cut by the server on UTC days to the 93 allowed, ending where it was asked to
+      const asked = relativeRange('120d')!
+      const notice: RangeNotice = {
+        kind: 'range-clamped',
+        source: 'cf-rum',
+        reason: 'max-duration',
+        dayZone: 'utc',
+        requested: { from: asked.since, to: asked.until },
+        served: { from: '2026-07-03T00:00:00.000Z', to: asked.until },
+        limitDays: 93,
+        lookbackDays: 184,
+      }
+      const cut = daysOn(trend, { since: notice.served!.from, until: asked.until }, { notice })
+      expect(daysOn(trend, uncut)[1]).toBe('2026-10-04')
+      expect(cut).toEqual(['2026-07-03', '2026-10-04'])
+      expect(rangeNoticeText(notice, Date.now())).toContain('Jul 3 – Oct 4 shown')
+      // a `date` drill (one UTC day) and a custom whole-UTC-day range: those days
+      expect(daysOn(trend, dayDrillRange('date', '2026-10-01'))).toEqual(['2026-10-01', '2026-10-01'])
+      expect(daysOn(trend, { since: '2026-09-01', until: '2026-09-30' })).toEqual(['2026-09-01', '2026-09-30'])
+      // an ET-day drill plots two partial UTC bars on a `date` chart, and names both
+      expect(daysOn(trend, dayDrillRange('dateEt', '2026-10-01'))).toEqual(['2026-10-01', '2026-10-02'])
+      expect(daysOn(trendEt, dayDrillRange('dateEt', '2026-10-01'))).toEqual(['2026-10-01', '2026-10-01'])
     })
   })
 
