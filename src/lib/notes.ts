@@ -1,13 +1,16 @@
-// The notes/text registry (owner requirement, 2026-09-26): every caveat, definition, and
-// explanatory paragraph the dashboard shows lives here, ONE place, instead of scattered
-// literal strings/constants across App.vue and the widget bodies. A note is rendered
+// The notes/text registry: every system caveat, definition, and explanatory paragraph the
+// dashboard shows lives here, ONE place, instead of scattered literal strings/constants across
+// App.vue and the widget bodies. A chart's own caption is NOT kept here: since layout v16 (notes
+// plan, slice 1c) it is plain text on the widget (Widget.caption), and the static entries below
+// are a library the editor can copy text from. Every id stays readable, so a legacy `widget.notes`
+// list keeps rendering until the chart's next edit converts it. A note is rendered
 // through NoteBlock.vue (short, single-line caveats) or TextBlock.vue (longer, possibly
 // multi-paragraph prose) — never hand-written markup — via lib/textLite.ts's safe
 // tokenizer (no v-html anywhere).
 //
 // Design:
-//  - id: stable key, referenced by widget.noteId (the 'note' widget type) or widget.notes
-//    (an attached-caption list on any other widget).
+//  - id: stable key, referenced by widget.noteId (the 'note' widget type), a card spec's
+//    `captions`, widget.hiddenCaveats, or the legacy widget.notes caption list.
 //  - text: a string, or a function for text that depends on live config (e.g. Play
 //    tracking's activation date) — always called fresh, never cached.
 //  - kind: 'note' (short caveat — NoteBlock's default styling) or 'text' (longer prose —
@@ -18,10 +21,15 @@
 //    defaultNoteIdsForScope / noteOptions), so the caption pickers don't fill up with labels.
 //  - severity: cosmetic only (info/caveat/warning) — never changes what data means.
 //  - scopes: which dataset/view combinations this note is a DEFAULT for (see
-//    defaultNoteIdsForScope) — a widget can still opt into/out of any note regardless of
-//    scope via its own `notes` list.
+//    defaultNoteIdsForScope). Since layout v16 (decision D2-B) a scope default that is not a
+//    static caption shows AUTOMATICALLY under every chart of that scope (autoCaveatIds); a
+//    hideable one can be hidden per chart (Widget.hiddenCaveats).
 //  - activeWhen: optional gate (e.g. only while a tracking date is still null) — an
 //    inactive note is simply not returned by defaultNoteIdsForScope/isNoteActive.
+//  - appliesTo: optional per-widget condition for an AUTOMATIC caveat (autoCaveatIds): the
+//    caveat shows automatically only under a widget it is true for (e.g. the country-columns
+//    caveat only on a card that splits by country). Above all for a data-cut note, which a
+//    viewer cannot hide wherever it shows.
 //  - vars: optional default template vars (see lib/textLite.ts tokenizeAndInterpolate) — a
 //    caller can still pass its own vars to override/extend at render time (see
 //    NoteBlock/TextBlock, which call noteTokens — never noteRawText, which is plain-text
@@ -43,6 +51,9 @@ import {
 } from './popupEvents'
 import { ARRIVALS_CAVEAT, RAW_INSTALL_SIGNALS_LABEL, type FunnelStepKey } from './campaigns'
 import { tokenizeAndInterpolate, toPlainText } from './textLite'
+import { presetById } from './metrics/presets'
+import type { Widget } from '../types'
+import type { CardSpec } from './metrics/types'
 // Read-only: notes.ts is dashboard-only (never bundled into the ads-sync Worker, unlike
 // lib/popupEvents.ts — see that file's own comment on why it keeps AUTH_NEW_EXISTING_LIVE_AT
 // out of itself), so importing the constant from lib/adsRules.ts here is fine.
@@ -84,7 +95,14 @@ export interface NoteDef {
   /** Only `false` is meaningful: a data-cut note a viewer must not hide (per-chart hiding, notes
    * plan slice 1c, reads it). Absent or true = it can be hidden. */
   hideable?: boolean
+  /** An automatic caveat's widget condition (autoCaveatIds): it shows automatically only under a
+   * widget this returns true for. Absent = every widget of its scopes. A caveat that names a
+   * specific view (columns, a split) must carry one, so it never appears where it is untrue. */
+  appliesTo?: (widget: AutoCaveatWidget) => boolean
 }
+
+/** The widget fields an automatic caveat's condition (NoteDef.appliesTo) may read. */
+export type AutoCaveatWidget = Pick<Widget, 'type' | 'dataset' | 'notes' | 'card'>
 
 function resolveText(n: NoteDef): string {
   return typeof n.text === 'function' ? n.text() : n.text
@@ -158,8 +176,8 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
   },
   'min-cohort-caveat': {
     id: 'min-cohort-caveat',
-    // Data-driven value templated in, not baked into the string (owner requirement) — see
-    // lib/textLite.ts interpolate.
+    // Data-driven value templated in, not baked into the string — see lib/textLite.ts
+    // tokenizeAndInterpolate. The value follows code, so this entry is a caveat (decision D1).
     text: 'Rates need at least {minCohort} in their denominator, or they show "too few to report".',
     kind: 'note',
     severity: 'caveat',
@@ -375,6 +393,8 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     severity: 'info',
     scopes: ['campaigns'],
     hideable: false,
+    // Its text is about "the country columns": automatic only on a card that has them.
+    appliesTo: (w: AutoCaveatWidget) => cardSplitsByCountry(w.card),
   },
   // The release panel (lib/metrics/presets.ts release-before-after): why the before window reads
   // low. Plain wording, as the panel's own line had it.
@@ -702,10 +722,10 @@ export function isNoteActive(id: string): boolean {
   return !n.activeWhen || n.activeWhen()
 }
 
-/** Every registry note that DEFAULTS on for a given dataset scope and is currently active —
- * used to seed a widget's attached-caption list (widget.notes) when unset. A widget's OWN
- * `notes` array, once set, always wins over this (see components/widgets bodies /
- * ChartEditor.vue) — this is only the fallback. */
+/** Every registry note that DEFAULTS on for a given dataset scope and is currently active (an
+ * `activeWhen` gate that is off drops it). The caveats among them (not static captions) show
+ * automatically under every chart of that scope (autoCaveatIds, decision D2-B); the static
+ * captions are only offered through "Insert from library". */
 export function defaultNoteIdsForScope(scope: NoteScope): string[] {
   return Object.values(NOTES_REGISTRY)
     .filter((n) => n.kind !== 'label' && n.scopes.includes(scope) && isNoteActive(n.id))
@@ -724,6 +744,21 @@ export function noteOptions(): { value: string; label: string }[] {
     })
 }
 
+/** A static library caption (decision D1, slice 1c): fixed text with no `activeWhen` gate, no
+ * computed text, no code-tied `vars`, and not a data-cut note (`hideable: false`). Only these are
+ * offered by "Insert from library" and folded into `Widget.caption` when a chart with legacy
+ * `notes` is edited (D5); every other registry entry is a caveat that stays system-owned. */
+export function isStaticCaptionNote(id: string): boolean {
+  const n = getNote(id)
+  return !!n && n.kind !== 'label' && typeof n.text === 'string' && !n.activeWhen && !n.vars && n.hideable !== false && !n.appliesTo
+}
+
+/** "Insert from library" options: every static caption, id + a short plain-text preview. The
+ * entries themselves stay read-only; inserting copies the text (noteTemplate) into the caption. */
+export function libraryCaptionOptions(): { value: string; label: string }[] {
+  return noteOptions().filter((o) => isStaticCaptionNote(o.value))
+}
+
 /** Resolve which registry note ids a chart widget's attached captions should show — pulled
  * out of ChartCard.vue as a pure function so the per-widget-override rule is unit-testable
  * without mounting a component. Rules (see ChartCard.vue's own comment for the reasoning):
@@ -731,11 +766,74 @@ export function noteOptions(): { value: string; label: string }[] {
  *  - an EXPLICIT `widget.notes` (even []) always wins, whatever it is;
  *  - otherwise: NO captions. This is the "migration default" for a widget saved before this
  *    feature existed (widget.notes is absent/undefined on it) — it renders exactly as it
- *    did before, never gaining a caption it never had just because the registry now HAS
- *    scope defaults. Scope defaults (defaultNoteIdsForScope) are only ever used to PRE-FILL
- *    `notes` when a widget is first created or edited (see lib/defaults.ts's widget
- *    builders and ChartEditor.vue) — never injected here at render time. */
+ *    did before. A scope's caveats are never added to this list: since layout v16 they show
+ *    through a separate one (autoCaveatIds, D2-B). `notes` is legacy: ChartEditor no longer
+ *    writes it, and folds its static entries into `Widget.caption` on the next edit (D5). */
 export function widgetCaptionNoteIds(widget: { type: string; notes?: string[] }): string[] {
   if (widget.type === 'note') return []
   return widget.notes ?? []
+}
+
+/** True when `id` names a registry note that a chart or card may hide: known, and not marked
+ * `hideable: false`. An unknown id is never hideable. MetricCard uses this for spec captions. */
+export function isNoteIdHideable(id: string): boolean {
+  const def = getNote(id)
+  return !!def && def.hideable !== false
+}
+
+/** The dataset scope a widget's automatic caveats come from: its dataset when the registry has a
+ * scope of that name, else null (a plain RUM chart, completions), which has none. */
+export function widgetNoteScope(widget: { dataset?: string }): NoteScope | null {
+  const d = widget.dataset
+  return d === 'overview' || d === 'campaigns' || d === 'popup' || d === 'geo' || d === 'ads-readings' ? d : null
+}
+
+/** A card widget's own spec caption ids (CardSpec.captions; a preset ref is resolved). MetricCard
+ * shows these inside the card body. */
+function cardCaptionIds(card: Widget['card']): readonly string[] {
+  return cardSpecOf(card)?.captions ?? []
+}
+
+/** A card widget's spec: its own, or its preset's (undefined for an unknown preset or no card). */
+function cardSpecOf(card: Widget['card']): CardSpec | undefined {
+  if (!card) return undefined
+  return 'preset' in card ? presetById(card.preset) : card.spec
+}
+
+/** True when a card shows country columns or a per-country repeat anywhere: the card itself, a
+ * section's repeat or `columns`, or an item's repeat over 'countries' (the same places
+ * lib/metrics/validate.ts dropRetiredItems reads). Stored data, so every level is checked
+ * defensively. A plain chart never has country columns. */
+export function cardSplitsByCountry(card: Widget['card']): boolean {
+  const spec = cardSpecOf(card)
+  if (!spec) return false
+  const overCountries = (r: unknown): boolean => !!r && typeof r === 'object' && (r as { over?: unknown }).over === 'countries'
+  if (overCountries(spec.repeat)) return true
+  return (Array.isArray(spec.sections) ? spec.sections : []).some(
+    (sec) =>
+      !!sec &&
+      (overCountries(sec.repeat) ||
+        overCountries(sec.columns) ||
+        (Array.isArray(sec.items) ? sec.items : []).some((it) => !!it && overCountries(it.repeat))),
+  )
+}
+
+/** Decision D2-B (layout v16): the caveats a widget shows automatically, in registry order. They
+ * are its scope's defaults (defaultNoteIdsForScope, so an `activeWhen` gate is honoured) that are
+ * not static captions (isStaticCaptionNote: those are the author's to insert) and whose widget
+ * condition (NoteDef.appliesTo) holds for this widget, minus the ids the
+ * widget already shows another way: its legacy `notes` and, on a card, the spec's own captions.
+ * A note widget has none. A hideable one is hidden through Widget.hiddenCaveats by its registry
+ * id; a data-cut one (`hideable: false`) always shows. normalizeConfig hides, once, the hideable
+ * ones a chart stored before v16 did not show (lib/defaults.ts seedHiddenAutoCaveatsV16). */
+export function autoCaveatIds(widget: AutoCaveatWidget): string[] {
+  if (widget.type === 'note') return []
+  const scope = widgetNoteScope(widget)
+  if (!scope) return []
+  const shown = new Set([...(widget.notes ?? []), ...cardCaptionIds(widget.card)])
+  return defaultNoteIdsForScope(scope).filter((id) => {
+    if (isStaticCaptionNote(id) || shown.has(id)) return false
+    const applies = getNote(id)?.appliesTo
+    return !applies || applies(widget)
+  })
 }

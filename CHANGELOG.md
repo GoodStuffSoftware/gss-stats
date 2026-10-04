@@ -6,7 +6,7 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
-## [0.19.0] — 2026-10-03
+## [0.20.0] — 2026-10-03
 
 ### Added
 - **Play installs tile on the Best Sudoku Retention page.** It shows Google Play's device installs,
@@ -17,6 +17,37 @@ All notable changes to **gss-stats** are documented here. The format follows
   created from the template can add it from the picker. A real read error shows on the tiles as
   an error rather than "no Play figures stored yet", and a count Play re-posts blank keeps the
   last stored number. Needs a one-time database step (see README, "Play installs").
+
+## [0.19.0] — 2026-10-03
+
+### Added
+- **Each chart has its own caption.** Type any text under a chart (bold and links work); "Insert
+  from library" copies a ready-made note into it, and a `{=…}` spot shows "—" for now until
+  value tokens arrive.
+- **A "Data caveats" list in the chart editor.** It lists every caveat the chart shows about its
+  data, each with a Show/Hide button, so one chart can drop a note another keeps.
+- **A chart shows the caveats for its data source on its own.** Nobody has to add them, and one
+  added later reaches every chart on that source. Existing charts and the built-in default
+  charts look the same after the upgrade: the caveats they did not show start hidden and can be
+  switched on in the editor.
+- **Caveats about cut or withheld data can't be hidden.** The range limit, the split guard, the
+  whole-day counting note, the country-columns note (only on charts that split by country, and
+  never on a plain chart) and the retention disjoint-populations note always show.
+- **A card's own captions have Show/Hide buttons.** The card builder lists the captions that come
+  with a card and hides any of them on that card alone; a note this version doesn't know gets a
+  Remove button.
+
+### Changed
+- **Notes saved on a chart turn into its caption on the next edit.** Fixed library text becomes
+  editable caption text; notes that follow the data (dated, computed or tied to a value) stay
+  system caveats, and a chart looks the same before and after.
+- **New charts no longer start with notes filled in.** The library's fixed text is yours to add
+  with "Insert from library", and the data caveats for the source show by themselves.
+- **A tab still open on the old version is told to reload instead of saving over captions.**
+
+### Fixed
+- **Duplicating a chart gives the copy its own settings.** Changing the copy's captions, notes
+  or card no longer touches the original.
 
 ## [0.18.0] — 2026-10-03
 
