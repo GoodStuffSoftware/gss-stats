@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **A Best Sudoku Retention page template.** "+ New > Page > Start from" now offers it, with the
+  retention verdict, return visits and engagement per arrival side by side; it is on no layout until
+  someone creates it, so nothing saved changes.
+
 ## [0.17.0] — 2026-10-03
 
 ### Added
