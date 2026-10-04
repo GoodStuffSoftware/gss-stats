@@ -290,6 +290,15 @@ describe('value tokens {=…} (placeholder until 1d)', () => {
     expect(parseTextLite('[x](https://a.test/b)')).toEqual([{ type: 'link', value: 'x', href: 'https://a.test/b' }])
   })
 
+  it('a literal U+E000 in the input is dropped, never shown as the placeholder (NIT-B)', () => {
+    expect(toPlainText('ab')).toBe('ab')
+    expect(tokenizeAndInterpolate('**x** and {=v}')).toEqual([
+      { type: 'bold', value: 'x' },
+      { type: 'text', value: ' and —' },
+    ])
+    expect(tokenizeAndInterpolate('[x](https://a.test/b)')).toEqual([{ type: 'link', value: 'x', href: 'https://a.test/b' }])
+  })
+
   it('a var whose value looks like a value token is left as the var says', () => {
     expect(toPlainText('{a}', { a: '{=b}' })).toBe('{=b}')
   })

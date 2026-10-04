@@ -135,7 +135,9 @@ export function tokenizeAndInterpolate(input: string, vars?: InterpolateVars): T
   // holds no markup (VALUE_TOKEN_MARK), so a token wrapping markup cannot split, and a link whose
   // URL held one is plain text (safeHref). The marker then shows as the placeholder in every
   // token's visible text (a bold or a link label too). A var's own value is never rewritten.
-  const marked = input.replace(VALUE_TOKEN_RE, VALUE_TOKEN_MARK)
+  // The marker is reserved: a literal one in the input (pasted private-use text) is dropped first,
+  // so it can never show as the placeholder.
+  const marked = input.split(VALUE_TOKEN_MARK).join('').replace(VALUE_TOKEN_RE, VALUE_TOKEN_MARK)
   const tokens = parseTextLite(marked).map((t) => ({ ...t, value: t.value.split(VALUE_TOKEN_MARK).join(VALUE_TOKEN_PLACEHOLDER) }))
   if (!vars) return tokens
   return tokens.map((t) => (t.type === 'text' ? { ...t, value: substituteVars(t.value, vars) } : t))
