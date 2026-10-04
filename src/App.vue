@@ -390,6 +390,7 @@ function deletePage(id: string) {
   if (!confirm(msg)) return
   const before = [...config.pages]
   config.pages = config.pages.filter((x) => !gone.has(x.id))
+  for (const key of Object.keys(chartData)) if (gone.has(chartDataPage(key))) delete chartData[key]
   const fallback = config.pages.find((x) => x.isDefault) ?? config.pages[0]
   if (gone.has(config.activePageId)) config.activePageId = fallback.id
   if (gone.has(activePageId.value)) switchPage((landingAfterDelete(p, before, config.pages) ?? fallback).id)
@@ -607,7 +608,7 @@ function removeWidget(id: string) {
   const list = activePage.value.widgets
   const i = list.findIndex((x) => x.id === id)
   if (i >= 0) list.splice(i, 1)
-  delete chartData[id]
+  delete chartData[chartDataKey(activePage.value.id, id)]
 }
 // A duplicate must not share any array or object with the original (notes, hiddenCaveats, items,
 // series, ...). A widget is plain JSON (it is what gets saved), so a JSON round trip is a deep copy
@@ -618,12 +619,17 @@ function duplicateWidget(wgt: Widget) {
   activePage.value.widgets.push({ ...copy, id, i: id, x: 0, y: 9999, title: wgt.title + ' (copy)' })
 }
 
-// The latest response (or load error) each ChartCard reports, by widget id, so ChartEditor can show
-// runtime caveats for the chart being edited without fetching again. Never saved; shallow so the
-// responses are not made deeply reactive.
+// The latest response (or load error) each ChartCard reports, by page and widget id, so ChartEditor
+// can show runtime caveats for the chart being edited without fetching again. Keyed per page because
+// pages reuse widget ids (`country`, `geo-map`, ...): after a page switch, a card's entry must not be
+// another page's response. Only the page on screen renders cards, so a report belongs to it. Never
+// saved; shallow so the responses are not made deeply reactive; deletePage prunes a gone page's.
 const chartData = shallowReactive<Record<string, { data: StatsResponse | null; error: string | null }>>({})
+const chartDataKey = (pageId: string, widgetId: string) => JSON.stringify([pageId, widgetId])
+const chartDataPage = (key: string) => (JSON.parse(key) as [string, string])[0]
+const editingChartData = computed(() => (editing.value ? chartData[chartDataKey(activePage.value.id, editing.value.widget.id)] : undefined))
 function onChartData(id: string, data: StatsResponse | null, error: string | null) {
-  chartData[id] = { data, error }
+  chartData[chartDataKey(activePage.value.id, id)] = { data, error }
 }
 
 // ── Drill-down: click a chart datapoint → open a new page filtered to that value ─
@@ -1079,8 +1085,8 @@ function toggleDark() {
       :widget="editing.widget"
       :is-new="editing.isNew"
       :filters="activePage.filters"
-      :data="chartData[editing.widget.id]?.data ?? null"
-      :error="chartData[editing.widget.id]?.error ?? null"
+      :data="editingChartData?.data ?? null"
+      :error="editingChartData?.error ?? null"
       @save="onEditorSave"
       @cancel="editing = null"
       @remove="onEditorRemove"
