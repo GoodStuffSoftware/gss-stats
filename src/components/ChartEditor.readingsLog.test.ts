@@ -64,9 +64,9 @@ describe('ChartEditor and the ads readings log', () => {
     expect(saved.card).toBeUndefined()
     expect(saved).toMatchObject({ dataset: 'ads-readings', view: 'log', limit: 30 })
   })
-  it('the View picker stays for the other datasets', async () => {
+  it('there is no View picker for any dataset (overview and campaigns are card presets)', async () => {
     const w = mountEditor({ ...base, dataset: 'campaigns', view: 'scorecard', type: 'table', dimension: '' })
     await flushPromises()
-    expect(w.findAll('label').some((l) => l.text() === 'View')).toBe(true)
+    expect(w.findAll('label').some((l) => l.text() === 'View')).toBe(false)
   })
 })
