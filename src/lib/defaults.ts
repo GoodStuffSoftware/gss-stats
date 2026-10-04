@@ -112,6 +112,10 @@ export const LAYOUT_VERSIONS = {
   /** The pop-up rate tile (`type: 'rate'`) renders as a one-item metric card (ADR 0005 slice 4,
    * rateTileCard.ts). A guard bump only: no stored layout is rewritten, the tile keeps its fields. */
   rateTile: 18,
+  /** Template pages carry a `templateId` marker (DashboardPage.templateId) that Restore default charts reads.
+   * A guard bump only: no stored layout is rewritten and there is no migration. It exists so a tab still on
+   * older code, whose save would silently drop the marker, is refused with a 409 instead. */
+  templateMarker: 19,
 } as const
 // The newest layout version: derived from the map, so a slice that adds an entry never edits this line.
 export const CONFIG_VERSION: number = Math.max(...Object.values(LAYOUT_VERSIONS))

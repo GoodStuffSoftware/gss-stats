@@ -332,6 +332,32 @@ describe('the rateTile upgrade (rate tile card: a guard bump, no layout rewrite)
   })
 })
 
+// The template-marker layout version (pages built from a template store DashboardPage.templateId): a
+// guard bump only, so a tab on older code, whose save would drop the marker, gets 409 instead of
+// silently erasing it. Written against the LAYOUT_VERSIONS key; `prev` is the version just below it.
+describe('the templateMarker upgrade (template page marker: a guard bump, no layout rewrite)', () => {
+  const V = LAYOUT_VERSIONS.templateMarker
+  const prev = Math.max(...Object.values(LAYOUT_VERSIONS).filter((v) => v < V))
+  it('sits above the rate tile version, and is the version this code writes', () => {
+    expect(V).toBeGreaterThan(LAYOUT_VERSIONS.rateTile)
+    expect(CONFIG_VERSION).toBe(V)
+  })
+  it('the first templateMarker save over the stored previous layout backs it up to backup:v<prev>, once', async () => {
+    const old = JSON.stringify(cfg(prev, 'live layout'))
+    const { kv, store } = fakeKv({ 'dashboard:default': old })
+    expect((await put(kv, cfg(V, 'first marker save'))).status).toBe(200)
+    expect(store.get(backupKeyFor(prev))).toBe(old)
+  })
+  it('a PUT carrying the previous version over a stored templateMarker layout gets 409', async () => {
+    const cur = JSON.stringify(cfg(V, 'marked layout'))
+    const { kv, store, puts } = fakeKv({ 'dashboard:default': cur })
+    const res = await put(kv, cfg(prev, 'old tab'))
+    expect(res.status).toBe(409)
+    expect(puts).toEqual([])
+    expect(store.get('dashboard:default')).toBe(cur)
+  })
+})
+
 // The server-side backstop to the client's load guard (#62): a tab that never loaded the real
 // layout can still PUT defaults at the CURRENT layout version, which the 409 cannot catch. Every
 // save that changes the stored layout first copies what was stored to `:prev`, and the first such

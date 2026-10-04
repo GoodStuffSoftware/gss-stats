@@ -4,6 +4,7 @@ import type { GlobalFilters } from '../types'
 import { sitesTree } from '../sitesStore'
 import type { SiteGroup, SiteSub } from '../types'
 import { relativeRange, rangeToYmd, ymdRangeToISO, rangeLabel } from '../lib/range'
+import { defaultFilters } from '../lib/defaults'
 
 // rangeOnly: the page reads the date range and nothing else (the Retention page, lib/defaults.ts
 // pageFilterBar), so the Sites and Exclusions controls, which would change nothing there, are left out.
@@ -209,6 +210,17 @@ function closeCal() {
 onMounted(() => document.addEventListener('click', closeCal))
 onBeforeUnmount(() => document.removeEventListener('click', closeCal))
 
+// rangeOnly hides the Sites and Exclusions controls, but a site or exclusion setting the page already
+// holds (anything other than the defaults) still applies to a chart added there that reads it, so say so.
+const hiddenFilterActive = computed(() => {
+  const d = defaultFilters()
+  return (
+    (local.siteSel?.length || 0) > 0 ||
+    !!local.excludeSelfReferrals !== d.excludeSelfReferrals ||
+    !!local.excludeOwnVisits !== d.excludeOwnVisits
+  )
+})
+
 // ── Exclusions popout ─────────────────────────────────────────────────────────
 const exclOpen = ref(false)
 const exclCount = computed(() => (local.excludeSelfReferrals ? 1 : 0) + (local.excludeOwnVisits ? 1 : 0))
@@ -385,6 +397,10 @@ onBeforeUnmount(() => window.removeEventListener('focus', readMuteCookie))
         🔗 Sync all pages
       </label>
     </div>
+
+    <p v-if="rangeOnly && hiddenFilterActive" class="range-only-hint">
+      This page keeps its site and exclusion filters, and they still apply to charts you add here.
+    </p>
   </div>
 </template>
 
@@ -636,6 +652,12 @@ onBeforeUnmount(() => window.removeEventListener('focus', readMuteCookie))
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+.range-only-hint {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 11px;
+  color: rgb(var(--ink-3));
 }
 .excl-hint {
   margin: 0;
