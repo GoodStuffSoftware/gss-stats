@@ -39,6 +39,13 @@ export function rateSpecFor(widget: Pick<Widget, 'dimension'>): PopupRateSpec | 
   return POPUP_RATE_SPECS.find((s) => s.key === widget.dimension)
 }
 
+/** Whether this tile's card can show the install-fix note (the engine adds it for the installed
+ * outcome of the install pop-up only), so the editor offers a Show/Hide row only there. */
+export function rateTileHasHideableNote(widget: Pick<Widget, 'dimension'>): boolean {
+  const spec = rateSpecFor(widget)
+  return spec?.popup === 'install' && spec.outcome === 'installed'
+}
+
 /** Whether the widget is a legacy rate tile (any key, known or not). */
 export function isLegacyRateTile(widget: Pick<Widget, 'type' | 'dataset' | 'card'>): boolean {
   return widget.type === 'rate' && widget.dataset === 'popup' && !widget.card
