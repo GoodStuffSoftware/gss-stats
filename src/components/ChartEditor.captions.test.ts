@@ -76,6 +76,14 @@ describe('ChartEditor: Caption', () => {
   })
 })
 
+// Insertion is an explicit choice (InsertPicker.vue, review N3): pick in the select, then click Insert.
+async function pick(sel: { setValue: (v: unknown) => Promise<void>; element: Element }, value: string) {
+  await sel.setValue(value)
+  const btn = sel.element.parentElement!.querySelector('button.insert-picker-btn') as HTMLButtonElement
+  btn.click()
+  await flushPromises()
+}
+
 // Slice 1d release 1: "Insert value ▾" puts a `{=…}` token (lib/valueTokens.ts) into the caption.
 describe('ChartEditor: Insert value', () => {
   const valueMenu = (w: VueWrapper) => w.get('.caption-field select.insert-value')
@@ -84,7 +92,7 @@ describe('ChartEditor: Insert value', () => {
     const w = open(base(), { data: response({ totals: { pageviews: 1234, visits: 5 } }) })
     const sel = valueMenu(w)
     expect(sel.attributes('aria-label')).toBe('Insert value')
-    expect(sel.findAll('optgroup').map((g) => g.attributes('label'))).toEqual(['This chart', 'Dates'])
+    expect(sel.findAll('optgroup').map((g) => g.attributes('label'))).toEqual(['This chart', 'Dates', 'Metrics'])
     const values = sel.findAll('option').map((o) => o.attributes('value'))
     expect(values[0]).toBe('')
     expect(values).toContain('{=chart.total|number}')
@@ -97,14 +105,14 @@ describe('ChartEditor: Insert value', () => {
 
   it('appends with a space when the box was never focused, and the menu resets', async () => {
     const w = open(base({ caption: 'Views:' }))
-    await valueMenu(w).setValue('{=chart.total|number}')
+    await pick(valueMenu(w), '{=chart.total|number}')
     expect((valueMenu(w).element as unknown as HTMLSelectElement).value).toBe('')
     expect((await save(w)).caption).toBe('Views: {=chart.total|number}')
   })
 
   it('an empty caption gets just the token', async () => {
     const w = open(base())
-    await valueMenu(w).setValue('{=golive.web|date}')
+    await pick(valueMenu(w), '{=golive.web|date}')
     expect((await save(w)).caption).toBe('{=golive.web|date}')
   })
 
@@ -113,8 +121,8 @@ describe('ChartEditor: Insert value', () => {
     const el = captionBox(w).element as HTMLTextAreaElement
     el.setSelectionRange(2, 4)
     await captionBox(w).trigger('blur')
-    await valueMenu(w).setValue('{=chart.total|number}')
-    await valueMenu(w).setValue('{=chart.topShare|pct}')
+    await pick(valueMenu(w), '{=chart.total|number}')
+    await pick(valueMenu(w), '{=chart.topShare|pct}')
     expect((await save(w)).caption).toBe('A {=chart.total|number}{=chart.topShare|pct} B')
   })
 
@@ -124,7 +132,7 @@ describe('ChartEditor: Insert value', () => {
     const hint = w.get('.caption-field .caption-full')
     expect(hint.attributes('aria-live')).toBe('polite')
     expect(hint.text()).toBe('')
-    await valueMenu(w).setValue('{=chart.total|number}')
+    await pick(valueMenu(w), '{=chart.total|number}')
     expect(hint.text()).toBe('Caption is full')
     expect((await save(w)).caption).toBe(full)
   })
@@ -133,18 +141,18 @@ describe('ChartEditor: Insert value', () => {
     const full = 'x'.repeat(CAPTION_MAX_CHARS - 5)
     const w = open(base({ caption: full }))
     const hint = () => w.get('.caption-field .caption-full').text()
-    await valueMenu(w).setValue('{=chart.total|number}')
+    await pick(valueMenu(w), '{=chart.total|number}')
     expect(hint()).toBe('Caption is full')
     await captionBox(w).setValue('short')
     expect(hint()).toBe('')
     const w2 = open(base({ caption: full }))
     const hint2 = () => w2.get('.caption-field .caption-full').text()
-    await valueMenu(w2).setValue('{=chart.total|number}')
+    await pick(valueMenu(w2), '{=chart.total|number}')
     expect(hint2()).toBe('Caption is full')
-    await valueMenu(w2).setValue('{=chart.top}') // 12 characters: still too long
+    await pick(valueMenu(w2), '{=chart.top}') // 12 characters: still too long
     expect(hint2()).toBe('Caption is full')
     await captionBox(w2).setValue('x'.repeat(10))
-    await valueMenu(w2).setValue('{=chart.top}')
+    await pick(valueMenu(w2), '{=chart.top}')
     expect(hint2()).toBe('')
   })
 
@@ -152,13 +160,13 @@ describe('ChartEditor: Insert value', () => {
     const token = '{=chart.total|number}'
     const head = 'x'.repeat(CAPTION_MAX_CHARS - token.length - 1) // + the joining space = the limit
     const w = open(base({ caption: head }))
-    await valueMenu(w).setValue(token)
+    await pick(valueMenu(w), token)
     expect(w.get('.caption-field .caption-full').text()).toBe('')
     const out = (await save(w)).caption!
     expect(out).toBe(`${head} ${token}`)
     expect(out.length).toBe(CAPTION_MAX_CHARS)
     const w2 = open(base({ caption: head + 'x' })) // one character more: refused
-    await valueMenu(w2).setValue(token)
+    await pick(valueMenu(w2), token)
     expect((await save(w2)).caption).toBe(head + 'x')
   })
 
@@ -167,7 +175,7 @@ describe('ChartEditor: Insert value', () => {
     const el = captionBox(w).element as HTMLTextAreaElement
     el.setSelectionRange(10, 10) // between "{=chart." and "total|number}"
     await captionBox(w).trigger('blur')
-    await valueMenu(w).setValue('{=chart.top}')
+    await pick(valueMenu(w), '{=chart.top}')
     expect((await save(w)).caption).toBe('A {=chart.total|number}{=chart.top} B')
   })
 
@@ -176,7 +184,7 @@ describe('ChartEditor: Insert value', () => {
     const el = captionBox(w).element as HTMLTextAreaElement
     el.setSelectionRange(5, 24) // inside {=chart.total} .. inside {=chart.top}
     await captionBox(w).trigger('blur')
-    await valueMenu(w).setValue('{=golive.web|date}')
+    await pick(valueMenu(w), '{=golive.web|date}')
     expect((await save(w)).caption).toBe('A {=chart.total}{=golive.web|date} C')
   })
 
@@ -184,22 +192,22 @@ describe('ChartEditor: Insert value', () => {
     const full = 'x'.repeat(CAPTION_MAX_CHARS - 5)
     const w = open(base({ caption: full }))
     const hint = () => w.get('.caption-field .caption-full').text()
-    await valueMenu(w).setValue('{=chart.total|number}')
+    await pick(valueMenu(w), '{=chart.total|number}')
     expect(hint()).toBe('Caption is full')
     const el = captionBox(w).element as HTMLTextAreaElement
     el.setSelectionRange(0, 20) // a selection the next token replaces, so it fits
     await captionBox(w).trigger('blur')
-    await valueMenu(w).setValue('{=chart.top}')
+    await pick(valueMenu(w), '{=chart.top}')
     expect(hint()).toBe('')
     expect((await save(w)).caption).toBe('{=chart.top}' + full.slice(20))
   })
 
   it('a second refusal in a row is announced again: the message node is replaced (NIT-3)', async () => {
     const w = open(base({ caption: 'x'.repeat(CAPTION_MAX_CHARS - 5) }))
-    await valueMenu(w).setValue('{=chart.total|number}')
+    await pick(valueMenu(w), '{=chart.total|number}')
     const first = w.get('.caption-field .caption-full span').element
     expect(first.textContent).toBe('Caption is full')
-    await valueMenu(w).setValue('{=chart.top}')
+    await pick(valueMenu(w), '{=chart.top}')
     const second = w.get('.caption-field .caption-full span').element
     expect(second.textContent).toBe('Caption is full')
     expect(second).not.toBe(first)
@@ -210,22 +218,22 @@ describe('ChartEditor: Insert value', () => {
     const el = captionBox(w).element as HTMLTextAreaElement
     el.setSelectionRange(2, 2)
     await captionBox(w).trigger('blur')
-    await valueMenu(w).setValue('{=chart.top}')
+    await pick(valueMenu(w), '{=chart.top}')
     expect((await save(w)).caption).toBe('A {=chart.top}{=chart.total} B')
   })
 
-  it('a popup card, which renders its own body, offers the Dates group only even with data loaded (NIT-1)', () => {
+  it('a popup card, which renders its own body, offers no This chart group even with data loaded (NIT-1)', () => {
     const card = base({ type: 'rateTable', dimension: '', card: { preset: 'popup-rates' } } as Partial<Widget>)
     const sel = valueMenu(open(card, { data: response({ totals: { pageviews: 1234, visits: 5 } }) }))
-    expect(sel.findAll('optgroup').map((g) => g.attributes('label'))).toEqual(['Dates'])
+    expect(sel.findAll('optgroup').map((g) => g.attributes('label'))).toEqual(['Dates', 'Metrics'])
     expect(sel.findAll('option').some((o) => o.attributes('value')?.startsWith('{=chart.'))).toBe(false)
   })
 
   it.each(['overview', 'campaigns', 'ads-readings'] as const)(
-    'a %s chart, which loads no response for chart values, offers the Dates group only',
+    'a %s chart, which loads no response for chart values, offers no This chart group',
     (dataset) => {
       const sel = valueMenu(open(base({ dataset, type: 'table', dimension: '' })))
-      expect(sel.findAll('optgroup').map((g) => g.attributes('label'))).toEqual(['Dates'])
+      expect(sel.findAll('optgroup').map((g) => g.attributes('label'))).toEqual(['Dates', 'Metrics'])
       const values = sel.findAll('option').map((o) => o.attributes('value'))
       expect(values).toContain('{=golive.web|date}')
       expect(values).toContain('{=release.latest|date}')
@@ -242,7 +250,7 @@ describe('ChartEditor: Insert from library', () => {
     expect(ids[0]).toBe('')
     expect(ids).toContain('small-sample')
     expect(ids).not.toContain('play-tracking-status') // a caveat, never inserted as text
-    await sel.setValue('small-sample')
+    await pick(sel, 'small-sample')
     expect((sel.element as unknown as HTMLSelectElement).value).toBe('') // the menu resets
     expect((await save(w)).caption).toBe(`Mine.\n\n${SMALL}`)
   })
@@ -252,7 +260,7 @@ describe('ChartEditor: Insert from library', () => {
     const el = captionBox(w).element as HTMLTextAreaElement
     el.setSelectionRange(1, 1)
     await captionBox(w).trigger('blur')
-    await w.get('.caption-field select.insert-library').setValue('release-before-partial')
+    await pick(w.get('.caption-field select.insert-library'), 'release-before-partial')
     expect((await save(w)).caption).toBe(`A${RELEASE}B`)
   })
 
@@ -263,7 +271,7 @@ describe('ChartEditor: Insert from library', () => {
     const el = captionBox(w).element as HTMLTextAreaElement
     el.setSelectionRange(0, 0)
     await captionBox(w).trigger('blur')
-    await w.get('.caption-field select.insert-library').setValue('small-sample')
+    await pick(w.get('.caption-field select.insert-library'), 'small-sample')
     const out = (await save(w)).caption!
     expect(out).toBe(SMALL + pad)
     expect(out).not.toContain('{=')
@@ -277,7 +285,7 @@ describe('ChartEditor: Insert from library', () => {
     const el = captionBox(w).element as HTMLTextAreaElement
     el.setSelectionRange(0, 0)
     await captionBox(w).trigger('blur')
-    await w.get('.caption-field select.insert-library').setValue('small-sample')
+    await pick(w.get('.caption-field select.insert-library'), 'small-sample')
     const out = (await save(w)).caption!
     expect(out).toBe(SMALL + pad + token)
     expect(out.length).toBe(CAPTION_MAX_CHARS)
@@ -288,12 +296,12 @@ describe('ChartEditor: Insert from library', () => {
     const full = 'x'.repeat(CAPTION_MAX_CHARS - 5)
     const w = open(base({ caption: full }))
     const hint = () => w.get('.caption-field .caption-full').text()
-    await w.get('.caption-field select.insert-value').setValue('{=chart.total|number}')
+    await pick(w.get('.caption-field select.insert-value'), '{=chart.total|number}')
     expect(hint()).toBe('Caption is full')
     const el = captionBox(w).element as HTMLTextAreaElement
     el.setSelectionRange(0, full.length) // replace it all, so the library text fits
     await captionBox(w).trigger('blur')
-    await w.get('.caption-field select.insert-library').setValue('small-sample')
+    await pick(w.get('.caption-field select.insert-library'), 'small-sample')
     expect(hint()).toBe('')
     expect((await save(w)).caption).toBe(SMALL)
   })
@@ -303,13 +311,13 @@ describe('ChartEditor: Insert from library', () => {
     const el = captionBox(w).element as HTMLTextAreaElement
     el.setSelectionRange(4, 4)
     await captionBox(w).trigger('blur')
-    await w.get('.caption-field select.insert-library').setValue('small-sample')
+    await pick(w.get('.caption-field select.insert-library'), 'small-sample')
     expect((await save(w)).caption).toBe(`{=chart.total|number}${SMALL} end`)
   })
 
   it('library entries stay read-only: the insert copies text and records no id', async () => {
     const w = open(base())
-    await w.get('.caption-field select.insert-library').setValue('small-sample')
+    await pick(w.get('.caption-field select.insert-library'), 'small-sample')
     const out = await save(w)
     expect(out.caption).toBe(SMALL)
     expect('notes' in out).toBe(false)
@@ -462,7 +470,7 @@ describe('ChartEditor: note widget', () => {
     const w = open(note({ note: 'Intro.' }))
     expect(w.find('.caption-field').exists()).toBe(false)
     expect(w.findAll('select').some((s) => s.text().includes('From the notes library'))).toBe(false)
-    await w.get('.note-text select.insert-library').setValue('small-sample')
+    await pick(w.get('.note-text select.insert-library'), 'small-sample')
     const out = await save(w)
     expect(out.note).toBe(`Intro.\n\n${SMALL}`)
     expect(out.noteId).toBeUndefined()
