@@ -21,23 +21,6 @@ export const COMPLETIONS_DIMENSIONS: { key: string; label: string }[] = [
   { key: 'difficulty', label: 'Difficulty' },
 ]
 
-// dataset 'overview' — which panel a widget renders (widget.view).
-export const OVERVIEW_VIEWS: { value: string; label: string }[] = [
-  { value: 'kpis', label: 'Today at a glance (KPI tiles)' },
-  { value: 'scorecard', label: 'Campaign scorecard' },
-  { value: 'releasePanel', label: 'Release before/after panel' },
-]
-
-// dataset 'campaigns' — which panel a widget renders (widget.view). Each is a metric card
-// (lib/defaults.ts CARD_PRESET_FOR_PANEL); arrivals by ET hour and by flight day are standard
-// geo charts since layout version 11 (hourEt / flightDay × campaignFlight), not views.
-export const CAMPAIGNS_VIEWS: { value: string; label: string }[] = [
-  { value: 'funnel', label: 'Funnel per campaign' },
-  { value: 'country', label: 'Arrivals & funnel by country' },
-  { value: 'cost', label: 'Cost per arrival / auth success' },
-  { value: 'returns', label: 'Return visits' },
-]
-
 // dataset 'campaigns' / 'ads-readings' — which campaign(s) a widget covers (widget.campaignIds).
 // Empty selection = all campaigns, same as the pre-widget bespoke campaigns page.
 export const CAMPAIGN_OPTIONS: { value: string; label: string }[] = CAMPAIGNS.map((c) => ({ value: c.id, label: c.label }))

@@ -17,7 +17,7 @@ import {
   BAR_MODES,
 } from '../lib/catalog'
 import { ringDims, RING_SOFT_CAP, isDateDim } from '../lib/rings'
-import { BEST_SUDOKU_SITES, CAPTION_MAX_CHARS, HIDDEN_CAVEATS_MAX, HIDDEN_CAVEAT_ID_RE, syncCardWithView } from '../lib/defaults'
+import { BEST_SUDOKU_SITES, CAPTION_MAX_CHARS, CARD_PRESET_FOR_PANEL, HIDDEN_CAVEATS_MAX, HIDDEN_CAVEAT_ID_RE, isCardPanel, syncCardWithView } from '../lib/defaults'
 import { getNote, isStaticCaptionNote, libraryCaptionOptions, noteRawText, noteTemplate } from '../lib/notes'
 import { allChartNotes, canHideCaveatId, convertLegacyNotes, isChartNoteHidden, type ChartNote } from '../lib/chartNotes'
 import { toPlainText, VALUE_TOKEN_RE } from '../lib/textLite'
@@ -33,10 +33,10 @@ import FilterPopover from './FilterPopover.vue'
 import { filterOverrideSummary } from '../lib/filterSummary'
 import { metricsContextFor } from '../lib/metrics/pageContext'
 import { presetById } from '../lib/metrics/presets'
-import { ADS_READINGS_LOG_PRESET } from '../lib/metrics/readingsCard'
+import { ADS_READINGS_LOG_PRESET, cardRefFor } from '../lib/metrics/readingsCard'
 import { selectsCampaigns, todayEtFrom } from '../lib/metrics/scope'
 import { resolveSelection } from '../sitesStore'
-import type { MetricsContext } from '../lib/metrics/types'
+import type { CardRef, MetricsContext } from '../lib/metrics/types'
 
 // `filters` is the page's main filter bar (App.vue's `activePage.filters`) — used ONLY to build
 // the metric-card preview's context (the same range/sites a saved card would read); every other
@@ -119,6 +119,12 @@ function focusableEls(): HTMLElement[] {
 function onDialogKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     e.stopPropagation()
+    // The Filters popover is a layer of the dialog: Escape dismisses it alone and puts focus back on
+    // Edit; the next Escape cancels the editor.
+    if (filterOpen.value) {
+      closeFilters()
+      return
+    }
     emit('cancel')
     return
   }
@@ -601,12 +607,26 @@ const isCardWidget = computed(() => !!draft.card)
 // filter button on the chart, so here it shows the summary and Clear only: an override nobody can
 // see can always be removed. ────────────────────────────────────────────────────────────────────
 const filterOpen = ref(false)
-const filtersEditable = computed(() => !isCardWidget.value && !rendersOwnBody(draft) && !!(draft.filters ?? props.filters))
+const editFiltersBtn = ref<HTMLButtonElement | null>(null)
+const filtersSummaryEl = ref<HTMLElement | null>(null)
+// Edit is offered where the chart's own filter button is (ChartCard: `!isBespokeBody || (isRateTile && isCard)`),
+// so a pop-up rate tile can be edited here too; a card or any other own-body widget gets Clear only.
+const filtersEditable = computed(() => (!rendersOwnBody(draft) || (draft.type === 'rate' && !!cardRefFor(draft))) && !!(draft.filters ?? props.filters))
 const filterStart = computed<GlobalFilters | undefined>(() => draft.filters ?? props.filters)
 const filtersText = computed(() => (draft.filters ? `Overrides the page: ${filterOverrideSummary(draft.filters)}` : "Uses the page's filters"))
+/** A control that removes itself (Clear, the popover's buttons) must not leave focus on <body>:
+ * Escape and the Tab trap hang off the panel. Edit, else the summary line (tabindex -1). */
+function focusFiltersRow() {
+  void nextTick(() => (editFiltersBtn.value ?? filtersSummaryEl.value)?.focus())
+}
+function closeFilters() {
+  filterOpen.value = false
+  focusFiltersRow()
+}
 function clearFilters() {
   draft.filters = null
   filterOpen.value = false
+  focusFiltersRow()
 }
 /** The card's own spec (preset or inline), for what the form around CardEditor offers. */
 const cardSpec = computed(() => (draft.card ? ('preset' in draft.card ? presetById(draft.card.preset) ?? null : draft.card.spec) : null))
@@ -618,16 +638,63 @@ const CARD_DEFAULT_PRESET = 'campaign-scorecard'
  * customize (CardEditor's own preset → Customize… flow). */
 function makeCardWidget() {
   draft.card = { preset: CARD_DEFAULT_PRESET }
+  alignWithPreset(draft.card)
 }
+// An overview or campaigns preset card saves the widget the old View picker saved: that dataset and
+// view (so lib/notes.ts widgetNoteScope gives it the same auto-caveats, and migratePanelsV11 sees
+// the same panel on reload), with the dimension/metric pins the picker's dataset change applied.
+// `view` is KEPT: every stored widget of these panels carries it.
+const PANEL_FOR_PRESET = new Map<string, { dataset: 'overview' | 'campaigns'; view: string }>(
+  Object.entries(CARD_PRESET_FOR_PANEL)
+    .filter(([k]) => k.startsWith('overview:') || k.startsWith('campaigns:'))
+    .map(([k, preset]) => {
+      const [dataset, view] = k.split(':')
+      return [preset, { dataset: dataset as 'overview' | 'campaigns', view }]
+    }),
+)
+const PINNED = ['dataset', 'view', 'dimension', 'breakdown', 'rings', 'popup', 'popupKind', 'site', 'host', 'metric'] as const
+/** What the widget looked like before the editor first aligned it, to put back if the pick moves
+ * off the overview/campaigns presets again (or the card is dropped) in the same session. */
+let beforeAlign: Pick<Widget, (typeof PINNED)[number]> | null = null
+function alignWithPreset(card: CardRef | undefined) {
+  if (!card || !('preset' in card)) return
+  const panel = PANEL_FOR_PRESET.get(card.preset)
+  if (!panel) return restoreAlignment()
+  if (draft.dataset === panel.dataset && draft.view === panel.view) return // a stored widget already is it
+  beforeAlign ??= Object.fromEntries(PINNED.map((k) => [k, draft[k]])) as Pick<Widget, (typeof PINNED)[number]>
+  Object.assign(draft, { dataset: panel.dataset, view: panel.view, dimension: '', breakdown: undefined, rings: undefined, popup: undefined, popupKind: undefined, site: undefined, host: undefined, metric: 'pageviews' })
+}
+function restoreAlignment() {
+  if (!beforeAlign) return
+  Object.assign(draft, beforeAlign)
+  beforeAlign = null
+}
+// "Switch to a regular chart": a widget whose dataset cannot be picked in "Add chart" (overview,
+// campaigns) would otherwise save as that dataset with no card and no view, which draws the
+// retired-panel text. It goes back to what it was, else to the default source (RUM) with a valid
+// dimension, and the author picks a source from the list.
 function leaveCardMode() {
   draft.card = undefined
+  restoreAlignment()
+  dropStrandedDataset(true)
+}
+/** A dataset "Add chart" does not offer, with no card and no view to draw it, would save a widget
+ * ChartCard can only show the retired-panel text for. Falls back to the default source (RUM). */
+function dropStrandedDataset(switching = false) {
+  if (draft.card || DATASETS.find((d) => d.value === draft.dataset)?.creatable !== false) return
+  // On save, a stored overview/campaigns panel gets its card from syncCardWithView; "Switch to a
+  // regular chart" is the one asking to leave it, so that goes to the default source regardless.
+  if (!switching && isCardPanel(draft)) return
+  draft.dataset = undefined
+  onDatasetChange()
 }
 /** CardEditor needs a non-optional CardRef; the template only mounts it while isCardWidget is
  * true, which is exactly when draft.card is set — the `!` reflects that guarantee. */
-const cardModel = computed<import('../lib/metrics/types').CardRef>({
+const cardModel = computed<CardRef>({
   get: () => draft.card!,
   set: (v) => {
     draft.card = v
+    alignWithPreset(v)
   },
 })
 /** The same page-context shape ChartCard.vue builds for a saved card (lib/metrics/pageContext.ts
@@ -727,6 +794,7 @@ function save() {
   } else {
     draft.rings = undefined
   }
+  dropStrandedDataset() // also covers a widget stored in that state, not only one just switched out of card mode
   // A panel a metric card renders gets (or loses) its card with its view (lib/defaults.ts).
   emit('save', syncCardWithView({ ...draft, i: draft.id }))
 }
@@ -876,15 +944,15 @@ function save() {
 
       <!-- Per-chart filters (every widget but a note): the widget's own override of the page's
            filters (Widget.filters, the same one ChartCard's filter button edits). A card, or any
-           widget that draws its own body, gets the summary and Clear only. -->
+           widget that draws its own body (a pop-up rate tile aside), gets the summary and Clear only. -->
       <div class="field filters-row" v-if="!isNote" data-testid="filters-row">
         <label>Filters</label>
-        <p class="filters-summary">{{ filtersText }}</p>
+        <p ref="filtersSummaryEl" class="filters-summary" tabindex="-1">{{ filtersText }}</p>
         <div class="filters-actions">
-          <button v-if="filtersEditable" type="button" class="btn" @click="filterOpen = !filterOpen">Edit</button>
+          <button v-if="filtersEditable" ref="editFiltersBtn" type="button" class="btn" @click="filterOpen = !filterOpen">Edit</button>
           <button v-if="draft.filters" type="button" class="btn" @click="clearFilters">Clear</button>
         </div>
-        <FilterPopover v-if="filterOpen && filtersEditable && filterStart" :start="filterStart" :active="!!draft.filters" @apply="draft.filters = $event" @use-global="clearFilters" @close="filterOpen = false" />
+        <FilterPopover v-if="filterOpen && filtersEditable && filterStart" :start="filterStart" :active="!!draft.filters" @apply="draft.filters = $event" @use-global="clearFilters" @close="closeFilters" />
       </div>
 
       <template v-if="!isCardWidget">

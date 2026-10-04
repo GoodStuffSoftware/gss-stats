@@ -8,11 +8,13 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ### Added
 - **A Filters row in the chart editor.** It says whether the chart uses the page's filters or overrides
-  them (and how), with Edit and Clear; a card shows the summary and Clear only.
+  them (and how), with Edit and Clear; a card shows the summary and Clear only, and a pop-up rate tile has Edit too.
 
 ### Changed
 - **Add chart no longer lists Overview and Campaign cards as data sources.** They are presets of the
-  metric card now, with a hint saying so; existing widgets of both still open as cards.
+  metric card now, with a hint saying so, and a preset saves the same widget (and notes) the old picker did; existing widgets of both still open as cards.
+- **Escape in the Filters popover closes only the popover.** A second Escape cancels the editor, and focus stays in the panel after Clear.
+- **Switching a card to a regular chart starts from a source you can pick.** An Overview or Campaigns card goes back to the default source instead of saving a chart with nothing to draw.
 
 ### Removed
 - **The editor's View picker.** No data source left in the Add chart list needed it.

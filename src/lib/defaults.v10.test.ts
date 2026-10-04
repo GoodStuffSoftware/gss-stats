@@ -9,7 +9,7 @@ import { CONFIG_VERSION, compactSmallSampleNoteV12, defaultConfig, migrateCardsV
 import { INVALID_CARD_PRESET, normCardRef } from './metrics/validate'
 import { presetById } from './metrics/presets'
 import { presetOptions } from './metrics/editorModel'
-import { CAMPAIGNS_VIEWS, DATASETS, OVERVIEW_VIEWS } from './catalog'
+import { DATASETS } from './catalog'
 import type { DashboardConfig, DashboardPage, Widget } from '../types'
 import PROD_V8 from './__fixtures__/prodLayout.v8.json'
 import PROD_V9 from './__fixtures__/prodLayout.v9.json'
@@ -250,19 +250,27 @@ describe('the chart editor keeps the card in step with the view', () => {
 // way to add those cards is Metric card -> preset. Each view the old View picker offered must be
 // reachable that way and give the very card syncCardWithView made on the old path.
 describe('Metric card -> preset gives what the old View picker gave', () => {
-  const VIEWS: Array<['overview' | 'campaigns', string]> = [
-    ...OVERVIEW_VIEWS.map((v) => ['overview', v.value] as ['overview', string]),
-    ...CAMPAIGNS_VIEWS.map((v) => ['campaigns', v.value] as ['campaigns', string]),
+  // The views the old picker offered, with the preset each one must give: written out, not read
+  // back from CARD_PRESET_FOR_PANEL, so breaking one mapping fails here.
+  const VIEWS: Array<['overview' | 'campaigns', string, string]> = [
+    ['overview', 'kpis', 'bsk-kpis'],
+    ['overview', 'scorecard', 'campaign-scorecard'],
+    ['overview', 'releasePanel', 'release-before-after'],
+    ['campaigns', 'funnel', 'campaign-funnel'],
+    ['campaigns', 'country', 'campaign-country'],
+    ['campaigns', 'cost', 'campaign-cost'],
+    ['campaigns', 'returns', 'campaign-returns'],
   ]
   const offered = new Set(presetOptions().map((o) => o.value))
   it('covers every view of both datasets', () => {
     expect(VIEWS.length).toBe(7)
   })
-  for (const [dataset, view] of VIEWS) {
+  for (const [dataset, view, expected] of VIEWS) {
     it(`${dataset}:${view} -> the same card, and the preset is on offer`, () => {
       const old = syncCardWithView({ id: 'x', i: 'x', title: 'x', type: 'table', dataset, view, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 0, w: 4, h: 4 } as Widget)
       expect(old.card).toBeDefined()
       const ref = old.card as { preset: string }
+      expect(ref.preset).toBe(expected)
       expect(offered.has(ref.preset)).toBe(true) // Metric card -> "Start from" lists it
       expect(presetById(ref.preset)).toBeDefined()
       expect({ preset: ref.preset }).toEqual(old.card) // what the editor saves for that pick
