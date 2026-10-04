@@ -238,7 +238,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
 - **Durable, multi-page dashboards** — layout + chart definitions persist in KV (not
   `localStorage`), so they follow you across devices. Duplicate / rename / delete
   pages (see *Page navigation*); a protected default page with "restore default charts"; per-page filters and
-  per-chart filter overrides. A saved layout is migrated forward on load
+  per-chart filter overrides (set from the chart's filter button, or from the Filters row in the chart
+  editor, which shows "Uses the page's filters" or what the chart overrides, with Edit and Clear; a card
+  shows the summary and Clear only, and a pop-up rate tile has Edit too, as on the chart). A saved layout is migrated forward on load
   ([`src/lib/defaults.ts`](src/lib/defaults.ts) `normalizeConfig`, `CONFIG_VERSION`), and the
   first save of a newer version first copies the previous stored layout to
   `dashboard:default:backup:v<old version>` in KV ([`functions/api/config.ts`](functions/api/config.ts)),
@@ -619,7 +621,8 @@ Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats
   page loads, so a tab left open past midnight refetches the same window until it is reloaded.
   The Overview's
   "Today at a glance" and campaign scorecard are cards since layout version 10. **Cards are
-  editable**: "Add chart" offers a metric card as a chart type, and editing one — a new card or
+  editable**: "Add chart" offers a metric card as a chart type (the Overview and campaign cards
+  are presets of it, so they are not separate data sources there), and editing one — a new card or
   an existing "Today at a glance"/scorecard — opens a card builder in place of the usual chart
   fields ([`src/components/metrics/CardEditor.vue`](src/components/metrics/CardEditor.vue)): pick
   each row's label (plain text, a note, a bound field, or the metric's own name), its data (a
@@ -1200,7 +1203,7 @@ A saved layout needs no change. A widget with `dataset: 'ads-readings'` and no `
 the preset when it is drawn, so its stored fields (`dataset`, `view`, `campaignIds`, `limit`, `type`)
 stay as they are and an older build still reads it. `campaignIds` narrows the campaigns, `limit`
 (default 30, at most 500) sets the table's row limit, and any `view` draws the log, the only view it
-ever had. In the chart editor the View picker no longer offers "Readings log": choosing the "Best
+ever had. In the chart editor there is no View picker any more (no data source left to need one): choosing the "Best
 Sudoku ads readings log" data source for a new chart starts it as the preset card; an existing widget
 is not converted by opening it.
 

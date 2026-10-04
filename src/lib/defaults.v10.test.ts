@@ -8,6 +8,8 @@ import { describe, expect, it } from 'vitest'
 import { CONFIG_VERSION, compactSmallSampleNoteV12, defaultConfig, migrateCardsV10, normalizeConfig, syncCardWithView, withCardForView } from './defaults'
 import { INVALID_CARD_PRESET, normCardRef } from './metrics/validate'
 import { presetById } from './metrics/presets'
+import { presetOptions } from './metrics/editorModel'
+import { DATASETS } from './catalog'
 import type { DashboardConfig, DashboardPage, Widget } from '../types'
 import PROD_V8 from './__fixtures__/prodLayout.v8.json'
 import PROD_V9 from './__fixtures__/prodLayout.v9.json'
@@ -241,5 +243,45 @@ describe('the chart editor keeps the card in step with the view', () => {
   it('migrateCardsV10 returns the same page object when there is nothing to do', () => {
     const p = { id: 'p', name: 'p', isDefault: false, group: 'Mine', filters: {} as any, widgets: [withCardForView(panel('a', 'kpis') as Widget)] }
     expect(migrateCardsV10(p)).toBe(p)
+  })
+})
+
+// Phase 3 (editor entry points): the overview and campaigns datasets left "Add chart", so the only
+// way to add those cards is Metric card -> preset. Each view the old View picker offered must be
+// reachable that way and give the very card syncCardWithView made on the old path.
+describe('Metric card -> preset gives what the old View picker gave', () => {
+  // The views the old picker offered, with the preset each one must give: written out, not read
+  // back from CARD_PRESET_FOR_PANEL, so breaking one mapping fails here.
+  const VIEWS: Array<['overview' | 'campaigns', string, string]> = [
+    ['overview', 'kpis', 'bsk-kpis'],
+    ['overview', 'scorecard', 'campaign-scorecard'],
+    ['overview', 'releasePanel', 'release-before-after'],
+    ['campaigns', 'funnel', 'campaign-funnel'],
+    ['campaigns', 'country', 'campaign-country'],
+    ['campaigns', 'cost', 'campaign-cost'],
+    ['campaigns', 'returns', 'campaign-returns'],
+  ]
+  const offered = new Set(presetOptions().map((o) => o.value))
+  it('covers every view of both datasets', () => {
+    expect(VIEWS.length).toBe(7)
+  })
+  for (const [dataset, view, expected] of VIEWS) {
+    it(`${dataset}:${view} -> the same card, and the preset is on offer`, () => {
+      const old = syncCardWithView({ id: 'x', i: 'x', title: 'x', type: 'table', dataset, view, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 0, w: 4, h: 4 } as Widget)
+      expect(old.card).toBeDefined()
+      const ref = old.card as { preset: string }
+      expect(ref.preset).toBe(expected)
+      expect(offered.has(ref.preset)).toBe(true) // Metric card -> "Start from" lists it
+      expect(presetById(ref.preset)).toBeDefined()
+      expect({ preset: ref.preset }).toEqual(old.card) // what the editor saves for that pick
+    })
+  }
+  it('the two datasets are no longer creatable, but keep their labels', () => {
+    for (const d of ['overview', 'campaigns']) {
+      const row = DATASETS.find((x) => x.value === d)!
+      expect(row.creatable).toBe(false)
+      expect(row.label.length).toBeGreaterThan(0)
+    }
+    expect(DATASETS.filter((x) => x.creatable !== false).map((x) => x.value)).toEqual(['rum', 'geo', 'popup', 'ads-readings', 'completions'])
   })
 })
