@@ -6,6 +6,19 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Captions and notes can show catalog numbers.** Insert value has a Metrics group (for example Page
+  views over the page range); every widget on a page shares one request, a value that is loading,
+  failed or withheld shows "—", and the counts-only rule is unchanged.
+- **Note widgets take live values.** A note's text can use release, go-live, Play-submission and
+  catalog tokens; a chart value shows "—" in a note.
+
+### Changed
+- **One Insert value control everywhere.** A card label's "+ Insert variable…" is now the same menu as
+  the caption's, with the card's own fields and the dates, and its dates fill in.
+- **Inserting is an explicit choice.** Pick a value, then press Insert; moving through the menu with
+  the arrow keys no longer drops a token per option, for Insert value and Insert from library.
+
 ## [0.22.0] — 2026-10-03
 
 ### Added

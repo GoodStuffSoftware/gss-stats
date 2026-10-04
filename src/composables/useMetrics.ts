@@ -108,6 +108,10 @@ function contextKey(context: MetricsContext | undefined): string {
     ownOS: context.ownOS ?? null,
   })
 }
+/** The context key for a (context, epoch) pair, as `useMetrics` forms it. */
+function ctxKeyOf(context: MetricsContext | undefined, epoch: string | undefined): string {
+  return epoch ? `${contextKey(context)}@${epoch}` : contextKey(context)
+}
 function cacheKeyOf(ctxKey: string, reqKey: string): string {
   return `${ctxKey}::${reqKey}`
 }
@@ -165,6 +169,9 @@ interface Batch {
 }
 
 const cache = new Map<string, CacheEntry>()
+/** Bumped whenever an entry is created or dropped, so `peekMetricValue` (a plain Map read) is
+ * reactive to a value another consumer starts or stops holding. */
+const cacheVersion = shallowRef(0)
 const batches = new Map<string, Batch>()
 
 function batchMapKey(ctxKey: string, fresh: boolean): string {
@@ -300,6 +307,7 @@ function acquireKey(ctxKey: string, context: MetricsContext | undefined, reqKey:
   if (!entry) {
     entry = { spec, ctxKey, context, value: shallowRef(undefined), loadedAt: shallowRef(null), settledAt: null, queuedAt: Date.now(), background: false, status: 'pending', refCount: 0 }
     cache.set(cKey, entry)
+    cacheVersion.value++
     queueFetch(entry, ctxKey, context, reqKey, false)
   }
   entry.refCount++
@@ -322,6 +330,7 @@ function releaseKey(cKey: string) {
     entry.inflight = undefined
   }
   cache.delete(cKey)
+  cacheVersion.value++
 }
 
 /** The user came back to the tab: re-queue every held entry that is old enough and idle. They go
@@ -338,6 +347,18 @@ function refetchStaleEntries() {
     if (entry.status === 'pending' ? isInFlight(entry.queuedAt, now) : !isStale(entry.settledAt, now)) continue
     queueFetch(entry, entry.ctxKey, entry.context, reqKeyFromCacheKey(cKey), false, true)
   }
+}
+
+/** Reads the value some consumer ALREADY holds for this (spec, page context, epoch), or undefined
+ * when none does. Never acquires an entry and never queues a fetch: it is how the "Insert value"
+ * picker previews a metric the page has already loaded (a card, or a caption's own token) without
+ * asking the server just to label an option. Reactive: an entry created, filled or dropped later
+ * re-runs a computed that called it. Matches `useMetrics(context, epoch)`'s own cache key, so pass
+ * the same context and epoch the page's cards use. */
+export function peekMetricValue(spec: MetricRequestSpec, context?: MetricsContext, epoch?: string): MetricValue | undefined {
+  void cacheVersion.value
+  const entry = cache.get(cacheKeyOf(ctxKeyOf(normalizeContext(context), epoch), requestKey(spec)))
+  return entry?.value.value
 }
 
 export interface UseMetrics {
@@ -381,7 +402,7 @@ export function useMetrics(rawContext?: MaybeRefOrGetter<MetricsContext | undefi
   const readContext = () => {
     const context = normalizeContext(toValue(rawContext))
     const epoch = toValue(rawEpoch)
-    return { context, ctxKey: epoch ? `${contextKey(context)}@${epoch}` : contextKey(context) }
+    return { context, ctxKey: ctxKeyOf(context, epoch) }
   }
   let current = readContext()
   const scope = getCurrentScope()
@@ -471,4 +492,5 @@ export function __resetMetricsStateForTests(): void {
   for (const entry of cache.values()) entry.inflight?.controller.abort()
   cache.clear()
   batches.clear()
+  cacheVersion.value++
 }
