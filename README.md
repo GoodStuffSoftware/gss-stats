@@ -251,7 +251,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
     Back / Next (Create on the last step), each step's Next waiting until the step is complete
     and saying why inline. A **page**: its name; its group (an existing one or a new one named
     there); what it starts from (blank, a copy of the page on screen, or a built-in page's
-    default charts) and its icon (Auto, shown, or one from the icon picker) — it's added to its
+    default charts, including **Best Sudoku · Retention**) and its icon (Auto, shown, or one from the icon picker) — it's added to its
     group and opened. A **group**: its name (unique); pages to move into it (optional, ★ Overview
     excluded); a review — it's listed even when empty, and the drawer scrolls to it. Esc or ×
     closes and starts over; with reduced motion nothing slides.
@@ -434,7 +434,14 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   "Organic (web)": the verdict, the days 2-7 return rate with its 90% lower and upper bounds,
   first tagged loads (d0), and completed games per arrival) and, beside it, `campaign-engagement`
   (completed games per arrival with its two counts). Neither is a default and neither bumps the
-  layout version. The rate is the share of an arm's d0 devices that came back on any of days 2-7
+  layout version. **Where to find them together:** the page template **Best Sudoku · Retention**
+  (`defaultRetentionPage` in [`src/lib/defaults.ts`](src/lib/defaults.ts), offered by
+  [`src/lib/wizards.ts`](src/lib/wizards.ts)) puts a scope note, the small-sample note, the verdict
+  table, `campaign-returns` and `campaign-engagement` on one page. Create it from **+ New > Page >
+  Start from > Best Sudoku · Retention**. It is a template only: it is not on any layout until someone
+  creates it, it is not in the fresh default layout, and it needs no layout version or migration (what
+  a person saves is an ordinary page of card widgets). Its figures are per campaign over the whole
+  flight, so the page's date range does not change them. The rate is the share of an arm's d0 devices that came back on any of days 2-7
   after arrival (ET days), and its bounds are a **Wilson score interval at 90%**
   (`wilsonBounds` in [`src/lib/metrics/retention.ts`](src/lib/metrics/retention.ts)). The verdict
   compares those bounds with a **bar**: a fixed 7.5%, or 0.6 times the organic days 2-7 rate once
