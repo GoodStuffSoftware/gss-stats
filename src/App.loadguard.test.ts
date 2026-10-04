@@ -185,6 +185,45 @@ describe('App — a failed layout load never saves over the stored layout', () =
     expect(w.find('.save-state').text()).toBe('Saved')
   })
 
+  // retryLoad closes whatever was opened on the stand-in: those menus and fields point at pages of a
+  // layout that is about to be replaced.
+  it('"Try again" that loads the layout closes a page menu opened on the stand-in', async () => {
+    stubServer(() => json('upstream unavailable', 503), ok)
+    const w = await mountApp()
+    await w.find('.page-menu-btn').trigger('click')
+    await flushPromises()
+    expect(document.querySelector('#page-menu')).not.toBeNull()
+    await banner()!.querySelector('button')!.click()
+    await flushPromises()
+    expect(banner()).toBeNull()
+    expect(document.querySelector('#page-menu')).toBeNull()
+  })
+
+  it('"Try again" that loads the layout closes a rename started on the stand-in', async () => {
+    stubServer(() => json('upstream unavailable', 503), ok)
+    const w = await mountApp()
+    await w.find('.page-menu-btn').trigger('click')
+    await flushPromises()
+    Array.from(document.querySelectorAll<HTMLElement>('#page-menu [role="menuitem"]')).find((b) => b.textContent!.trim() === 'Rename')!.click()
+    await flushPromises()
+    expect(document.querySelector('nav.crumbs .seg.editing input')).not.toBeNull()
+    await banner()!.querySelector('button')!.click()
+    await flushPromises()
+    expect(banner()).toBeNull()
+    expect(document.querySelector('nav.crumbs .seg.editing input')).toBeNull()
+  })
+
+  it('"Try again" that reads a layout which cannot be normalized keeps saving off', async () => {
+    stubServer(() => json('upstream unavailable', 503), () => json('{"version":13,"pages":[null]}'))
+    const w = await mountApp()
+    await banner()!.querySelector('button')!.click()
+    await flushPromises()
+    expect(banner()).not.toBeNull()
+    await editEveryWay(w)
+    expect(puts).toHaveLength(0)
+    expect(w.find('.save-state').text()).toBe('Not saved')
+  })
+
   it('signing out while an edit waits out its debounce sends nothing', async () => {
     stubServer(ok)
     const w = await mountApp()

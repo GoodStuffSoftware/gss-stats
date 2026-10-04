@@ -9,6 +9,7 @@ import { mount, type VueWrapper } from '@vue/test-utils'
 import ChartCard from './ChartCard.vue'
 import { __resetReturnRefreshForTests, RETURN_DEBOUNCE_MS, RETURN_INFLIGHT_MAX_MS, RETURN_MIN_AGE_MS } from '../composables/useReturnRefresh'
 import { fetchStats } from '../api'
+import { stubAppFetch, type AppFetch } from '../testing/appFetch'
 import type { Widget, GlobalFilters } from '../types'
 
 vi.mock('../api', async (importOriginal) => {
@@ -21,6 +22,12 @@ vi.mock('../api', async (importOriginal) => {
       meta: { site: 'all', host: null, since: '2026-09-26', until: '2026-09-27', dimensions: [], metric: 'pageviews' },
     })),
   }
+})
+
+// A failed load runs the sign-in probe (GET /api/config); the tests here are not about that.
+vi.mock('../session', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../session')>()
+  return { ...actual, checkSessionExpired: vi.fn(async () => {}) }
 })
 
 const filters: GlobalFilters = { siteSel: [], since: '2026-09-01', until: '2026-09-26', excludeSelfReferrals: false, excludeOwnVisits: false, ownBrowser: '', ownOS: '' }
@@ -41,6 +48,9 @@ async function comeBack() {
 
 const mocked = vi.mocked(fetchStats)
 let wrapper: VueWrapper | null = null
+// fetchStats is mocked above, but the card also asks the metrics runtime for its caption values:
+// without a stand-in that is a real request to happy-dom's localhost:3000 (ECONNREFUSED noise).
+let appFetch: AppFetch
 async function mountCard() {
   wrapper = mount(ChartCard, { props: { widget, filters, dark: false, drillOpen: false } })
   await settle()
@@ -51,13 +61,16 @@ beforeEach(() => {
   __resetReturnRefreshForTests()
   setVisibility('visible')
   mocked.mockClear()
+  appFetch = stubAppFetch()
   vi.useFakeTimers()
 })
 afterEach(() => {
   wrapper?.unmount()
   wrapper = null
   vi.useRealTimers()
+  vi.unstubAllGlobals()
   __resetReturnRefreshForTests()
+  expect(appFetch.unexpected).toEqual([])
 })
 
 describe('ChartCard: refetch on return to the tab', () => {

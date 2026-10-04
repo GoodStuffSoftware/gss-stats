@@ -613,6 +613,12 @@ const filtersSummaryEl = ref<HTMLElement | null>(null)
 // so a pop-up rate tile can be edited here too; a card or any other own-body widget gets Clear only.
 const filtersEditable = computed(() => (!rendersOwnBody(draft) || (draft.type === 'rate' && !!cardRefFor(draft))) && !!(draft.filters ?? props.filters))
 const filterStart = computed<GlobalFilters | undefined>(() => draft.filters ?? props.filters)
+// The popover only exists while the row can edit; when the row stops being editable (a regular chart
+// turned into a card with the popover open) the open flag goes with it, so the next Escape cancels
+// the editor instead of being spent on a popover nobody can see.
+watch(filtersEditable, (editable) => {
+  if (!editable) filterOpen.value = false
+})
 const filtersText = computed(() => (draft.filters ? `Overrides the page: ${filterOverrideSummary(draft.filters)}` : "Uses the page's filters"))
 /** A control that removes itself (Clear, the popover's buttons) must not leave focus on <body>:
  * Escape and the Tab trap hang off the panel. Edit, else the summary line (tabindex -1). */
