@@ -70,6 +70,7 @@ routine… make sure we're not duplicating data"):
 | `ads_daily_metrics.placements_fetched_at` (nullable) | Placement rows only exist on days with placement spend, so a day's metrics row records when its placement pull succeeded; the sync re-pulls days where it is missing. |
 | `ads_readings.entry_kind` (nullable) + `UNIQUE (campaign_id, et_date, entry_kind)` + a BEFORE INSERT no-replace trigger on that key | One reading per campaign, ET day and entry (`morning`, `backstop`, `threshold-50`, `postflight-wrapup`, with `+incomplete` / `+pause` / `+alert-<pair>` qualifiers). A same-day rerun is stored only when its entry kind differs, i.e. it carries new information. Rows from before 0003 are NULL (NULLs never collide) and get the same key derived in code. |
 | `ads_sync_runs` (append-only, no-replace) | One row per completed sync run: source, start/finish, campaigns and the ones that synced, days fetched/changed, placement rows fetched/changed, status, a redacted error. `lastSync` on the dashboard comes from here. |
+| `ads_play_daily` (migration `0005`) | `date` | Google Play's whole-app daily totals: device installs, user installs, device uninstalls, active device installs (each nullable), and `fetched_at`. No campaign, hour, country, source or device column: counts only. Upsert-idempotent; written only by the local `npm run ads:play-sync`, never by the Worker or CI. Play dates are Play's own day, not an ET day. |
 
 Every new column is nullable, so the v0.4.0 writers keep working against a 0003 database.
 

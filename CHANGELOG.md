@@ -11,6 +11,18 @@ All notable changes to **gss-stats** are documented here. The format follows
   item and its share, the days it covers, or a release or go-live date, filled in from what the
   chart already shows; a value that isn't there shows "—".
 
+## [0.20.0] — 2026-10-03
+
+### Added
+- **Play installs tile on the Best Sudoku Retention page.** It shows Google Play's device installs,
+  uninstalls and active device installs for the date range, with a "data through" date (Play
+  reports lag 3-7 days), and says "no Play figures stored yet" until the first sync; the figures
+  are whole-app daily totals, include our own household devices, and carry no retention (Play
+  publishes none). It is a card preset, and a new Retention page includes it; pages already
+  created from the template can add it from the picker. A real read error shows on the tiles as
+  an error rather than "no Play figures stored yet", and a count Play re-posts blank keeps the
+  last stored number. Needs a one-time database step (see README, "Play installs").
+
 ## [0.19.0] — 2026-10-03
 
 ### Added
