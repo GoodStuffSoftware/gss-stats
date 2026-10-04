@@ -12,6 +12,13 @@ All notable changes to **gss-stats** are documented here. The format follows
   in from what the chart already shows; a value that isn't there shows "—", and a value that won't
   fit says "Caption is full".
 
+## [0.21.0] — 2026-10-03
+
+### Changed
+- **Ads readings log is a metric card** — the readings log now renders from the shared card engine, so it can be edited, repeated and fitted like any card; existing dashboards need no change.
+- **Rules and Proposal are coloured, and Sign-ups has a tooltip, on any card** — a table cell can take a colour from its reading and a column header can carry a tooltip; the readings log uses both.
+- **A card taller than its slot now scrolls** — a card body that does not fit its slot scrolls vertically instead of being cut off.
+
 ## [0.20.0] — 2026-10-03
 
 ### Added

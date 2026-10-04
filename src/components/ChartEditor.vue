@@ -27,6 +27,7 @@ import { canFit, setFit } from '../lib/fit'
 import CardEditor from './metrics/CardEditor.vue'
 import { metricsContextFor } from '../lib/metrics/pageContext'
 import { presetById } from '../lib/metrics/presets'
+import { ADS_READINGS_LOG_PRESET } from '../lib/metrics/readingsCard'
 import { selectsCampaigns } from '../lib/metrics/scope'
 import { resolveSelection } from '../sitesStore'
 import type { MetricsContext } from '../lib/metrics/types'
@@ -386,8 +387,14 @@ function onDatasetChange() {
     if (!draft.view || !viewOptions.value.some((v) => v.value === draft.view)) {
       draft.view = viewOptions.value[0]?.value
     }
+    // The readings log is a metric card now (ADR 0005): a new "Ads readings" chart starts as the
+    // preset card, so CardEditor and the campaign picker open. Existing widgets are not converted
+    // here — ChartCard maps them at render time (lib/metrics/readingsCard.ts).
+    if (isAdsReadingsDataset.value && !draft.card) draft.card = { preset: ADS_READINGS_LOG_PRESET }
     return
   }
+  // Moving off Ads readings drops the readings preset card that came with it.
+  if (draft.card && 'preset' in draft.card && draft.card.preset === ADS_READINGS_LOG_PRESET) draft.card = undefined
   draft.view = undefined
   draft.campaignIds = undefined
   if (!dimOptions.value.some((d) => d.key === draft.dimension)) {
@@ -804,11 +811,10 @@ function save() {
       <template v-if="!isCardWidget">
       <!-- Overview / campaigns / ads-readings datasets: a View picker replaces the
            dimension/breakdown/metric/site-override fields below (not applicable to them). -->
-      <div class="row" v-if="isBespokeDataset">
+      <div class="row" v-if="isBespokeDataset && viewOptions.length">
         <div class="field">
           <label>View</label>
           <select v-model="draft.view" @change="onDatasetChange">
-            <option v-if="isAdsReadingsDataset" value="log">Readings log</option>
             <option v-for="v in viewOptions" :key="v.value" :value="v.value">{{ v.label }}</option>
           </select>
         </div>

@@ -17,7 +17,7 @@ import { METRICS, metricWindows, OPTIONAL_PARAMS, type MetricDef, type MetricPar
 import { seriesTwin } from './series'
 import { presetById } from './presets'
 import { RATIOS, ratioParamsOf, ratioSupportsOrganic, ratioWindowsOf, type RatioDef } from './ratios'
-import { COUNTRY_BUCKETS, WINDOW_SIDES, type CardAction, type CardRef, type CardSpec, type DataBinding, type DeltaName, type Display, type DisplayAs, type Label, type RepeatSpec, type WindowName } from './types'
+import { COUNTRY_BUCKETS, isReadingCountPath, MAX_READINGS_LIMIT, WINDOW_SIDES, type CardAction, type CardNotices, type CardRef, type CardSpec, type DataBinding, type DeltaName, type Display, type DisplayAs, type Label, type RepeatSpec, type WindowName } from './types'
 
 // ── Limits (ADR 0003 section 3, "The security whitelist") ─────────────────────────────────
 export const MAX_BODY_BYTES = 64 * 1024
@@ -33,6 +33,7 @@ const CAMPAIGN_IDS = new Set(CAMPAIGNS.map((c) => c.id))
 const POPUP_IDS = new Set(POPUPS.map((p) => p.id))
 const COUNTRY_IDS: ReadonlySet<string> = new Set(COUNTRY_BUCKETS)
 const CARD_ACTIONS: ReadonlySet<CardAction> = new Set(['ads-refresh'])
+const CARD_NOTICES: ReadonlySet<string> = new Set<CardNotices>(['ads-readings'])
 /** A param value is one of its set: a configured campaign, a registered pop-up, a country bucket.
  * `campaignId` may also be the organic arm (ORGANIC_ARM_ID), but only on a binding that serves it
  * (`organicOk`: bindingSupportsOrganic). */
@@ -73,7 +74,7 @@ export const DISPLAYS_FOR: Record<DataKind, readonly DisplayAs[]> = {
   // 'per': n/d as a plain number (2 decimals); 'rate': a share in 0-1 shown as a percent.
   per: ['number', 'counts'],
   rate: ['percent'],
-  field: ['dateRange', 'datetime', 'badge', 'text', 'number', 'currency'],
+  field: ['dateRange', 'datetime', 'datetime-et', 'badge', 'text', 'number', 'currency'],
   time: ['date', 'ago'],
   code: ['status'],
 }
@@ -112,8 +113,16 @@ export function validateCard(spec: CardSpec): string[] {
   if (!Array.isArray(spec.sections) || !spec.sections.length) errors.push('card: needs at least one section')
   const checkLabel = (where: string, l: Label | undefined, hasData: boolean) => {
     if (l === undefined || typeof l === 'string') return
+    if ('bind' in l) checkScopePath(where, l.bind)
     if ('note' in l && !noteIdOk(l.note)) errors.push(`${where}: ${JSON.stringify(l.note) ?? 'undefined'} is not a note id`)
+    if ('note' in l && l.vars && typeof l.vars === 'object') for (const p of Object.values(l.vars)) checkScopePath(where, p)
     if ('metric' in l && !hasData) errors.push(`${where}: { metric: true } needs a metric or ratio binding`)
+  }
+  // A reading's counts are an allow-list (types.ts READING_COUNT_FIELDS): any other
+  // `reading.count.*` path is refused, so a return / game-start / tutorial / tour total of a
+  // stored record can never be bound from a card.
+  const checkScopePath = (where: string, path: unknown) => {
+    if (typeof path === 'string' && path.startsWith('reading.count.') && !isReadingCountPath(path)) errors.push(`${where}: '${path}' is not a reading count a card may show`)
   }
   const checkNote = (where: string, id: unknown) => {
     if (!noteIdOk(id)) errors.push(`${where}: ${JSON.stringify(id) ?? 'undefined'} is not a note id`)
@@ -127,6 +136,10 @@ export function validateCard(spec: CardSpec): string[] {
       if (r.over === 'countries' && !COUNTRY_IDS.has(id)) errors.push(`${where}.repeat: unknown country bucket '${id}'`)
       if (r.over === 'windows' && !(WINDOW_SIDES as readonly string[]).includes(id)) errors.push(`${where}.repeat: unknown window '${id}'`)
     }
+    if (r.limit !== undefined && (r.over !== 'readings' || typeof r.limit !== 'number' || !Number.isInteger(r.limit) || r.limit < 1 || r.limit > MAX_READINGS_LIMIT)) {
+      errors.push(`${where}.repeat: limit is for readings, a whole number from 1 to ${MAX_READINGS_LIMIT}`)
+    }
+    if (r.withActivity !== undefined && (r.withActivity !== true || r.over !== 'campaigns')) errors.push(`${where}.repeat: withActivity is for campaigns, and only true`)
     if (r.tracked !== undefined && (r.tracked !== true || r.over !== 'campaigns')) errors.push(`${where}.repeat: tracked is for campaigns, and only true`)
     // The organic arm rides only on a campaigns repeat; bindings that don't serve it are left out
     // of its instance (scope.ts configRuling), never requested.
@@ -144,7 +157,7 @@ export function validateCard(spec: CardSpec): string[] {
     if (!k) return void errors.push(`${where}: unknown data id`)
     if (!DISPLAYS_FOR[k].includes(d.as)) errors.push(`${where}: display '${d.as}' not allowed for a ${k}`)
     if (d.as === 'percent' && d.decimals !== undefined && !(Number.isInteger(d.decimals) && d.decimals >= 0 && d.decimals <= 4)) errors.push(`${where}: decimals must be an integer from 0 to 4`)
-    if ('field' in b) return
+    if ('field' in b) return void checkScopePath(where, b.field)
     const isMetric = 'metric' in b
     const allowedParams = isMetric ? METRICS.get(b.metric)!.params : ratioParamsOf(RATIOS.get(b.ratio)!)
     const windows = isMetric ? metricWindows(METRICS.get(b.metric)!) : ratioWindowsOf(RATIOS.get(b.ratio)!)
@@ -199,6 +212,7 @@ export function validateCard(spec: CardSpec): string[] {
 
   if (spec.showUpdated !== undefined && typeof spec.showUpdated !== 'boolean' && spec.showUpdated !== 'header' && spec.showUpdated !== 'footer') errors.push("card: showUpdated must be a boolean, 'header' or 'footer'")
   if (spec.actions !== undefined && (!Array.isArray(spec.actions) || !spec.actions.every((a) => CARD_ACTIONS.has(a)))) errors.push(`card: actions must be a list of ${[...CARD_ACTIONS].join(', ')}`)
+  if (spec.notices !== undefined && !CARD_NOTICES.has(spec.notices)) errors.push(`card: notices must be one of ${[...CARD_NOTICES].join(', ')}`)
   checkRepeat('card', spec.repeat)
   checkLabel('card.title', spec.title, false)
   if (spec.captions !== undefined && !Array.isArray(spec.captions)) errors.push('card.captions: must be a list of note ids')
@@ -230,6 +244,7 @@ export function validateCard(spec: CardSpec): string[] {
       checkRepeat(w, it.repeat)
       checkLabel(`${w}.label`, it.label, !('field' in it.data))
       checkLabel(`${w}.caption`, it.caption, !('field' in it.data))
+      checkLabel(`${w}.hint`, it.hint, !('field' in it.data))
       check(w, it.data, it.display, [spec.repeat, s.repeat, s.columns, it.repeat])
       if (it.gating?.minCohort != null && it.gating.minCohort < MIN_COHORT) errors.push(`${w}: minCohort below MIN_COHORT`)
       if (it.captionMode !== undefined && it.captionMode !== 'inline' && it.captionMode !== 'compact') errors.push(`${w}: captionMode must be 'inline' or 'compact'`)

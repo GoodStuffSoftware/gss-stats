@@ -173,17 +173,35 @@ async function withSessionCheck<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
+/** How long a readings load may take (headers and body) before it is given up as failed: the
+ * card then shows its load-failed status with Retry instead of "Loading…" forever. */
+export const ADS_READINGS_TIMEOUT_MS = 15_000
+
 /** Fetch the ads-read routine's readings log + stored spend (GET /api/ads/readings — see
  * lib/adsStore.ts + functions/api/ads/readings.ts). `query` is the URL-encoded
- * campaignId/limit query string AdsReadingsWidgetCard builds. */
+ * campaignId/limit query string the readings log card builds. Gives up after
+ * ADS_READINGS_TIMEOUT_MS (a plain Error, so the session check is not triggered by it). */
 export function fetchAdsReadings(query: string): Promise<AdsReadingsResponse> {
   return withSessionCheck(async () => {
-    const res = await fetch(`/api/ads/readings?${query}`)
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      throw new Error(`readings ${res.status}: ${text.slice(0, 200)}`)
+    const controller = new AbortController()
+    let timedOut = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, ADS_READINGS_TIMEOUT_MS)
+    try {
+      const res = await fetch(`/api/ads/readings?${query}`, { signal: controller.signal })
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        throw new Error(`readings ${res.status}: ${text.slice(0, 200)}`)
+      }
+      return await res.json()
+    } catch (e) {
+      if (timedOut) throw new Error(`readings timed out after ${ADS_READINGS_TIMEOUT_MS / 1000}s`)
+      throw e
+    } finally {
+      clearTimeout(timer)
     }
-    return res.json()
   })
 }
 
