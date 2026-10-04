@@ -331,7 +331,7 @@ function ratioSummary(r: RatioDef): string {
   const numLabel = METRICS.get(r.num) ? noteRawText(METRICS.get(r.num)!.label) || r.num : r.num
   const denLabel = METRICS.get(r.den) ? noteRawText(METRICS.get(r.den)!.label) || r.den : r.den
   if (r.kind === 'proportion') return `${numLabel} ÷ ${denLabel} (same ${METRICS.get(r.den)?.unit ?? ''})`
-  if (r.kind === 'cost') return `${numLabel} per ${denLabel}`
+  if (r.kind === 'cost' || r.kind === 'per') return `${numLabel} per ${denLabel}`
   return `${numLabel} and ${denLabel} — counts only`
 }
 let ratioOptionsCache: RatioOption[] | null = null

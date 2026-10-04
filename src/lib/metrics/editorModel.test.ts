@@ -3,7 +3,7 @@
 // them out of the .vue files (see editorModel.ts's own header comment).
 import { describe, expect, it } from 'vitest'
 import { CAMPAIGNS } from '../campaigns'
-import { hasNote } from '../notes'
+import { hasNote, noteRawText } from '../notes'
 import { POPUPS } from '../popupEvents'
 import { METRICS } from './metrics'
 import { RATIOS } from './ratios'
@@ -148,6 +148,13 @@ describe('metric/ratio option lists never expose an unknown or prototype-named i
     const opts = ratioOptions()
     expect(opts.length).toBe(RATIOS.size)
     for (const o of opts) expect(RATIOS.has(o.id)).toBe(true)
+  })
+  it("a 'per' ratio (E1) is summarised as 'X per Y', like a cost", () => {
+    const e1 = ratioOptions().find((o) => o.id === 'campaign.engagementPerArrival')!
+    expect(e1.kind).toBe('per')
+    expect(e1.summary).toBe(`${noteRawText(METRICS.get(e1.num)!.label)} per ${noteRawText(METRICS.get(e1.den)!.label)}`)
+    expect(e1.summary).toMatch(/ per /)
+    expect(e1.summary).not.toMatch(/counts only/)
   })
   it('metricDef/ratioDef never resolve a prototype-named id (Map#get, never a bracket lookup)', () => {
     expect(metricDef('constructor')).toBeUndefined()

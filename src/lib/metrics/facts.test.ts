@@ -5,7 +5,7 @@
 // (node:sqlite, D1's dialect) and snapshotted, so any change to a statement is a reviewed diff.
 import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it, vi } from 'vitest'
-import { COUNTRY_BUCKET_SQL, FACTS, guardedCountryBucket, factKey, flightPathsSeenStatement, kpiDayStarts, kpiDayWindows, rangeMs, releaseSidesMs, type FactId, type FactParams } from './facts'
+import { COUNTRY_BUCKET_SQL, FACTS, guardedCountryBucket, factKey, flightPathsSeenStatement, kpiDayStarts, kpiDayWindows, ORGANIC_MATURITY_SQL, rangeMs, releaseSidesMs, type FactId, type FactParams } from './facts'
 import { buildFact, factCuts } from './engine'
 import { CAMPAIGNS, campaignAttributionClause, campaignById, etMidnightUtcMs, ORGANIC_ARM_ID } from '../campaigns'
 import * as campaigns from '../campaigns'
@@ -18,7 +18,7 @@ import { REFUSED_SAMPLE_PATHS } from '../__fixtures__/refusedPaths'
 const NOW = Date.parse('2026-09-26T21:00:00Z')
 const SAMPLE_PARAMS: Record<FactId, FactParams[]> = {
   campaignPathVisitor: CAMPAIGNS.map((c) => ({ campaignId: c.id })),
-  campaignReturns: [...CAMPAIGNS.map((c) => ({ campaignId: c.id })), { campaignId: ORGANIC_ARM_ID }],
+  campaignReturns: [...CAMPAIGNS.map((c) => ({ campaignId: c.id })), { campaignId: ORGANIC_ARM_ID, todayEt: '2026-09-26' }],
   flightPathsSeen: CAMPAIGNS.filter((c) => c.flightStart).map((c) => ({ campaignId: c.id })),
   bskKpiDays: [{ todayEt: '2026-09-26' }],
   bskRangePath: [{ since: '2026-09-20', until: '2026-09-26' }],
@@ -312,12 +312,50 @@ describe('each fact runs on SQLite and reuses the endpoint clause helpers', () =
     ins.run(NOW, 'bestsudoku-app', '/return/organic/d0', '', 0) // the installed app: never organic
     ins.run(NOW, 'bestsudoku-web', '/return/sudoku_funnel_retest/d0', '', 0) // a campaign's tag
     ins.run(NOW, 'bestsudoku-web', '/return/organic/d0', 'North Carolina', 412) // own household: excluded
-    const stmt = FACTS.campaignReturns.build({ campaignId: ORGANIC_ARM_ID }, NOW)
+    const stmt = FACTS.campaignReturns.build({ campaignId: ORGANIC_ARM_ID, todayEt: '2026-09-26' }, NOW)
     expect(stmt.sql).toMatch(/WHERE site = \? AND path LIKE \? AND /)
-    expect(stmt.sql).not.toContain('ts >=')
-    expect(stmt.binds.slice(0, 2)).toEqual(['bestsudoku-web', '/return/organic/%'])
-    const rows = db.prepare(stmt.sql).all(...(stmt.binds as (string | number)[])) as { path: string; c: number }[]
-    expect(rows.map((r) => `${r.path}:${r.c}`).sort()).toEqual(['/return/organic/d0:2', '/return/organic/d2-7:1'])
+    // The only ts test is the ET-day maturity band in the SELECT list: no lower bound in WHERE.
+    expect(stmt.sql.split(' WHERE ')[1]).not.toContain('ts >=')
+    expect(stmt.binds.slice(2, 4)).toEqual(['bestsudoku-web', '/return/organic/%'])
+    const rows = db.prepare(stmt.sql).all(...(stmt.binds as (string | number)[])) as { path: string; s: number; c: number }[]
+    const sums = new Map<string, number>()
+    for (const r of rows) sums.set(r.path, (sums.get(r.path) ?? 0) + r.c)
+    expect([...sums].map(([p, c]) => `${p}:${c}`).sort()).toEqual(['/return/organic/d0:2', '/return/organic/d2-7:1'])
+  })
+  it('campaignReturns for the organic arm needs todayEt (its maturity band)', () => {
+    expect(() => FACTS.campaignReturns.build({ campaignId: ORGANIC_ARM_ID }, NOW)).toThrow(/todayEt/)
+  })
+  it('the organic maturity band cuts at ET midnight of T and of T-7, never at a clock time', () => {
+    // T = 2026-10-10 (EDT, UTC-4): band 2 from 2026-10-10 04:00Z, band 1 from 2026-10-03 04:00Z.
+    const T = '2026-10-10'
+    const stmt = FACTS.campaignReturns.build({ campaignId: ORGANIC_ARM_ID, todayEt: T }, NOW)
+    expect(stmt.sql).toContain(`SELECT path, ${ORGANIC_MATURITY_SQL} AS s, COUNT(*) AS c FROM hits`)
+    expect(stmt.sql).toMatch(/GROUP BY path, s$/)
+    expect(stmt.binds.slice(0, 2)).toEqual([Date.parse('2026-10-10T04:00:00Z'), Date.parse('2026-10-03T04:00:00Z')])
+    const db = geoDb()
+    const ins = db.prepare("INSERT INTO hits (ts, site, path, region, screenw) VALUES (?, 'bestsudoku-web', ?, '', 0)")
+    const at = (iso: string, bucket: string) => ins.run(Date.parse(iso), `/return/organic/${bucket}`)
+    at('2026-10-03T03:59:59.999Z', 'd0') // 10-02 23:59:59.999 ET: day T-8, matured  -> s 0
+    at('2026-10-03T04:00:00Z', 'd0') //     10-03 00:00 ET: day T-7, not matured      -> s 1
+    at('2026-10-09T12:00:00Z', 'd2-7') //   10-09 08:00 ET: day T-1                   -> s 1
+    at('2026-10-10T03:59:59.999Z', 'd2-7') // 10-09 23:59:59.999 ET: day T-1          -> s 1
+    at('2026-10-10T04:00:00Z', 'd2-7') //   10-10 00:00 ET: today                     -> s 2
+    at('2026-10-10T20:00:00Z', 'd0') //     10-10 16:00 ET: today                     -> s 2
+    const rows = db.prepare(stmt.sql).all(...(stmt.binds as (string | number)[])) as { path: string; s: number; c: number }[]
+    expect(rows.map((r) => `${r.path}:${r.s}:${r.c}`).sort()).toEqual(['/return/organic/d0:0:1', '/return/organic/d0:1:1', '/return/organic/d0:2:1', '/return/organic/d2-7:1:2', '/return/organic/d2-7:2:1'])
+  })
+  it('the organic maturity band holds across a DST change (T = 2026-11-03, DST ended 11-01)', () => {
+    // T midnight is EST (05:00Z); T-7 = 10-27 midnight is EDT (04:00Z), not T - 7x24h (10-27 01:00 EDT).
+    const stmt = FACTS.campaignReturns.build({ campaignId: ORGANIC_ARM_ID, todayEt: '2026-11-03' }, NOW)
+    expect(stmt.binds.slice(0, 2)).toEqual([Date.parse('2026-11-03T05:00:00Z'), Date.parse('2026-10-27T04:00:00Z')])
+    const db = geoDb()
+    const ins = db.prepare("INSERT INTO hits (ts, site, path, region, screenw) VALUES (?, 'bestsudoku-web', '/return/organic/d0', '', 0)")
+    ins.run(Date.parse('2026-10-27T04:30:00Z')) // 10-27 00:30 EDT: day T-7 -> s 1 (a naive 24h x 7 would say s 0)
+    ins.run(Date.parse('2026-10-27T03:30:00Z')) // 10-26 23:30 EDT: day T-8 -> s 0
+    ins.run(Date.parse('2026-11-03T04:30:00Z')) // 11-02 23:30 EST: day T-1 -> s 1
+    ins.run(Date.parse('2026-11-03T05:00:00Z')) // 11-03 00:00 EST: today   -> s 2
+    const rows = db.prepare(stmt.sql).all(...(stmt.binds as (string | number)[])) as { s: number; c: number }[]
+    expect(rows.map((r) => `${r.s}:${r.c}`).sort()).toEqual(['0:1', '1:2', '2:1'])
   })
   it('campaignReturns attributes nothing while a campaign has no confirmed flightStart', () => {
     const retest = campaignById('24279250691')!
