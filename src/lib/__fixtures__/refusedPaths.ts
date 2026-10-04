@@ -16,6 +16,9 @@ export const REFUSED_SAMPLE_PATHS: readonly string[] = [
   '/game/tutorial-complete/first-run',
   '/game/start/easy',
   '/tour/exit-at/1',
+  '/tour/exit-at',
+  '/tour/skip',
+  '/tour/skip/x',
 ]
 
 /** Every segment value a refused beacon is known to carry, plus junk ('x', '1', ''). */
@@ -40,9 +43,10 @@ export const REFUSED_PATH_TOKENS: readonly string[] = [
 export const REFUSED_PATH_VOCABULARY: readonly string[] = (() => {
   const out = new Set<string>()
   for (const pat of SPLIT_REFUSED_PATH_PATTERNS) {
-    const base = pat.slice(0, -1)
+    const base = pat.endsWith('%') ? pat.slice(0, -1) : pat
     for (const prefix of [base, base.toUpperCase()]) {
       out.add(prefix)
+      if (!pat.endsWith('%')) continue
       for (const a of REFUSED_PATH_TOKENS) {
         out.add(prefix + a)
         for (const b of REFUSED_PATH_TOKENS) out.add(`${prefix}${a}/${b}`)
