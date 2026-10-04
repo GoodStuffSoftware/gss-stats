@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.24.1] — 2026-10-03
+
+### Fixed
+- **The retention verdict says how long it is maturing** — it now reads "maturing (5 days left)" (or "1 day left") instead of just "maturing", counted in whole US-Eastern days from the end of the flight, on saved pages too.
+
 ## [0.24.0] — 2026-10-03
 
 ### Changed
