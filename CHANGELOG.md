@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-10-03
+
 ### Added
 - **Each chart has its own caption.** Type any text under a chart (bold and links work); "Insert
   from library" copies a ready-made note into it, and a `{=…}` spot shows "—" for now until
