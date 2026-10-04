@@ -4,7 +4,7 @@ import type { Widget, GlobalFilters, StatsResponse } from '../types'
 import { fetchStats, fetchSeriesStats } from '../api'
 import { resolveSelection, sitesLoaded } from '../sitesStore'
 import { checkSessionExpired, isAuthError, isNetworkError } from '../session'
-import { buildChartConfig, formatKey, metricValue, nestedDoughnutClickValue, seriesRows, hasLineSeries, widgetHasOverlay, widgetOverlayOptions } from '../lib/charts'
+import { buildChartConfig, formatKey, metricValue, nestedDoughnutClickValue, rendersOwnBody, seriesRows, hasLineSeries, widgetHasOverlay, widgetOverlayOptions } from '../lib/charts'
 import { overlayItems, itemsInRange } from '../lib/timelineOverlay'
 import { isDateDim } from '../lib/rings'
 import { rangeLabel } from '../lib/range'
@@ -33,9 +33,7 @@ const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolea
 // retired); one without a card — a panel the migration does not know — says so.
 // The header (title/zoom/menu) stays generic and shared with every other widget type.
 const retiredPanelText = noteRawText('label.card.retiredPanel')
-const isBespokeBody = computed(
-  () => !!props.widget.card || props.widget.dataset === 'overview' || props.widget.dataset === 'campaigns' || props.widget.dataset === 'ads-readings' || props.widget.type === 'note',
-)
+const isBespokeBody = computed(() => rendersOwnBody(props.widget))
 
 // A metric card (ADR 0003, Widget.card): MetricCard renders it from the card reference and the
 // page context — the filter bar's range and sites, or this widget's own override — which it

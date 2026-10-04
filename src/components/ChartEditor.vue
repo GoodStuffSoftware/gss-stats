@@ -24,6 +24,7 @@ import { allChartNotes, canHideCaveatId, convertLegacyNotes, isChartNoteHidden, 
 import { toPlainText, VALUE_TOKEN_RE } from '../lib/textLite'
 import { chartValueResolver, VALUE_TOKEN_OPTIONS } from '../lib/valueTokens'
 import { canFit, setFit } from '../lib/fit'
+import { rendersOwnBody } from '../lib/charts'
 import CardEditor from './metrics/CardEditor.vue'
 import { metricsContextFor } from '../lib/metrics/pageContext'
 import { presetById } from '../lib/metrics/presets'
@@ -209,8 +210,14 @@ function cutOutsideTokens(text: string, max: number): string {
   return text.slice(0, split ? split[0] : max)
 }
 /** "Caption is full": a value or library text did not fit whole under CAPTION_MAX_CHARS (review
- * N4). Announced politely; the next edit of the caption (typing, or another insert) clears it. */
+ * N4). Announced politely; the next edit of the caption (typing, or another insert) clears it. Each
+ * refusal re-keys the message node, so a second refusal in a row is announced again (NIT-3). */
 const captionFull = ref(false)
+const captionFullTick = ref(0)
+function sayCaptionFull() {
+  captionFull.value = true
+  captionFullTick.value++
+}
 function insertFromLibrary(t: TextTarget, e: Event) {
   const sel = e.target as HTMLSelectElement
   const id = sel.value
@@ -234,7 +241,7 @@ function insertFromLibrary(t: TextTarget, e: Event) {
     const whole = next
     next = cutOutsideTokens(whole, CAPTION_MAX_CHARS)
     captionValue.value = next
-    if (next.length < whole.length) captionFull.value = true
+    if (next.length < whole.length) sayCaptionFull()
   } else {
     draft.note = next
   }
@@ -246,12 +253,13 @@ function insertFromLibrary(t: TextTarget, e: Event) {
 // lib/valueTokens.ts) into the caption at the cursor, replacing any selection; a box never focused
 // gets it appended. Each option shows what it reads right now, from the response already loaded
 // (no fetch). A token that would not fit whole under CAPTION_MAX_CHARS is not inserted, and the
-// box says the caption is full. Overview, campaigns and ads-readings charts load no response a
-// chart value could read, so they get the Dates group only (review N2). ─────────────────────────
+// box says the caption is full. A widget that renders its own body (a metric card, overview,
+// campaigns, ads-readings: lib/charts.ts rendersOwnBody, the test ChartCard skips its fetch on)
+// loads no response a chart value could read, so it gets the Dates group only (review N2, NIT-1).
 const VALUE_GROUPS = ['This chart', 'Dates'] as const
 const valueOptions = computed(() => {
   const resolve = chartValueResolver(props.widget, props.data ?? null, props.error ?? null)
-  const groups = VALUE_GROUPS.filter((g) => g !== 'This chart' || !isBespokeDataset.value)
+  const groups = VALUE_GROUPS.filter((g) => g !== 'This chart' || !rendersOwnBody(draft))
   return groups.map((group) => ({
     group,
     options: VALUE_TOKEN_OPTIONS.filter((o) => o.group === group).map((o) => {
@@ -278,7 +286,7 @@ function insertValue(e: Event) {
     end = next.length
   }
   if (next.length > CAPTION_MAX_CHARS) {
-    captionFull.value = true
+    sayCaptionFull()
     return
   }
   captionValue.value = next
@@ -773,7 +781,7 @@ function save() {
               </optgroup>
             </select>
             <span class="hint caption-count">{{ captionValue.length }} / {{ CAPTION_MAX_CHARS }}</span>
-            <span class="hint caption-full" aria-live="polite">{{ captionFull ? 'Caption is full' : '' }}</span>
+            <span class="hint caption-full" aria-live="polite"><span v-if="captionFull" :key="captionFullTick">Caption is full</span></span>
           </div>
           <p class="hint">**bold** and [links](https://…) work; a blank line starts a new paragraph. Insert value adds a live number or date, such as {=chart.total|number}; it shows "—" when there is no value for it.</p>
           <p v-if="convertedNoteIds.length" class="hint caption-converted">The library captions this chart had are now part of its caption text. Save keeps that; Cancel leaves the chart as it was.</p>
