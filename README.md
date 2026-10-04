@@ -739,9 +739,11 @@ read after the fact. So the data layer (`bskKpiDays`) counts them over whole ET 
 flag is always off for them), and the tile shows one plain line instead of arrows: "Yesterday
 1,234 · 7-day avg 1,180/day", yesterday's full ET-day total and the average over the 7 full ET days
 before today (a whole number from 10 up, one decimal below; the two "delta" checkboxes in the
-editor pick which part shows). **Best Sudoku Page views follows this rule** because it has not opted out of the counts-only
-rule. Its path filter already leaves out the lower-case counts-only paths, so the only such rows it
-can still include are malformed upper-case variants. A metric that never counts them (`countsRefused: false`: auth successes,
+editor pick which part shows). **Best Sudoku Page views does not follow this rule** since 0.27.3: its
+path test leaves out every refused path (`isSplitRefusedPath`, which folds case like the SQL guard, so a malformed upper-case
+variant is out too) as well as the event beacons, so it opts out (`countsRefused: false`) and keeps
+its same-time arrows. Because those rows are not in its count at all, no refused row is cut at a
+clock time. A metric that never counts them (`countsRefused: false`: page views, auth successes,
 game views, pop-up shown and accepted, and so on) keeps its same-time arrows unchanged. Like the
 arrows, the whole-day figures follow neither the page's date range nor its filters: they depend
 on today's ET date alone.

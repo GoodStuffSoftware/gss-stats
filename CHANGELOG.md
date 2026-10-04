@@ -11,6 +11,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 ### Added
 - **Carry-over completions on the Retention page.** A new card shows games completed each day that did not come from an ad campaign, beside the site-wide total, and is also in the card picker.
 
+## [0.27.3] — 2026-10-04
+
+### Fixed
+- **The Page views tile has its day-over-day arrows back.** It now leaves refused counts-only rows out of its own count, so it compares against the same time yesterday and the 7-day average again instead of showing whole-day totals.
+
 ## [0.27.2] — 2026-10-04
 
 ### Fixed
