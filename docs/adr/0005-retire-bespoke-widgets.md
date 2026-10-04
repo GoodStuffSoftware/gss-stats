@@ -1,7 +1,8 @@
 # ADR 0005: Retire the remaining bespoke widgets; every data block is a reusable component
 
 - **Status:** Proposed (2026-10-03). Plan only; each slice below lands as its own PR. Two
-  decisions are open (see "Open decisions"); slice 4 waits for decision (b).
+  decisions are open (see "Open decisions"). Slice 4 (the rate tile) is built on decision (b)'s
+  default: a percentage with its n/d for every key.
 - **Date:** 2026-10-03
 - **Amends:** [ADR 0003](0003-metric-components.md) section 5 (the `ads-readings` and `rate` rows)
   and section 7 slice 8 ("Later"), which this ADR replaces with concrete slices.
@@ -36,7 +37,7 @@ by dataset: `rum` → `/api/stats` (Cloudflare GraphQL RUM), `geo` → `/api/geo
 | 3 | Ads readings log (`dataset: 'ads-readings'`) | the bespoke readings widget component (250 lines; deleted in slice 3) | its own `GET /api/ads/readings` | **Bespoke.** Own fetch, own table, own notices. Convert (slice 3). |
 | 4 | Note (`type: 'note'`) | `widgets/NoteWidgetBody.vue` over the notes registry | none | **Exception**: text, not data; already shared with card captions (`NoteBlock` / `TextBlock`). |
 | 5 | Stat tile (`type: 'stat'`) | inline markup in `ChartCard` | `fetchStats` totals, any dataset | **Bespoke markup** over a generic data path. Make the markup a shared component (slice 5). |
-| 6 | Rate tile (`type: 'rate'`, pop-up dataset) | inline markup in `ChartCard` | `/api/popups` `dimension: 'rate'`, `rateKey` = `widget.dimension` (a `POPUP_RATE_SPECS` key), gated by `gateRate` / `MIN_COHORT` | **Bespoke.** Duplicates the card's percent display and gating. Convert to a card (slice 4, blocked on decision (b)). |
+| 6 | Rate tile (`type: 'rate'`, pop-up dataset) | inline markup in `ChartCard` | `/api/popups` `dimension: 'rate'`, `rateKey` = `widget.dimension` (a `POPUP_RATE_SPECS` key), gated by `gateRate` / `MIN_COHORT` | **Bespoke.** Duplicates the card's percent display and gating. Converted to a card (slice 4, layout key `rateTile: 18`, on decision (b)'s default). |
 | 7 | Bar table (`type: 'table'`, any dataset except the retired panels) | inline markup in `ChartCard` | `fetchStats` dimension rows | **Bespoke markup** over a generic data path. Shared component (slice 5). |
 | 8 | Map (`type: 'map'`) | `charts/WorldMap.vue` | `/api/geo` points | **Reusable** (one generic component, config-driven). |
 | 9 | Chart.js charts (bar, hbar, line, area, doughnut, pie, nestedDoughnut, stackedBar, breakdownBar) | `charts/BaseChart.vue` via `lib/charts.ts buildChartConfig` | `fetchStats` (one call per series for a series line chart) | **Reusable** (one generic component, config-driven). |
@@ -103,8 +104,9 @@ editor and leave existing ones rendering through `BarTable` (the v9 production c
 
 ### (b) Rate tiles for outcome rates outside the page's rate rule
 
-**Slice 4 is blocked until Mike decides. Default: keep today's display** (a percentage with its
-`(n/d)` and the too-few state) for every tile.
+**Slice 4 took the default: keep today's display** (a percentage with its
+`(n/d)` and the too-few state) for every tile. Mike can still choose the page rule; it is a
+reversible follow-up.
 
 The Pop-ups page's rule (`POPUP_RATE_TABLE_KEYS`, the `popup-rates` preset) shows a percentage
 only for the tap rates and the install gap; the other outcome rates are lagged cohorts and show
@@ -340,8 +342,18 @@ and a README update when it is visible to users, and an adversarial parity revie
 | **1. Fit-to-content height** | `Widget.fit`, `normWidget` whitelist, the measuring and grid-height logic, the editor checkbox | Row-count maths as table tests; `normWidget` round trip; canvas widgets never fit | none |
 | **2. Sparklines** | `series` on the request and value, the engine's per-day series, validation, `render.ts`, the SVG in `MetricItem`, the editor enabling it; `CONFIG_VERSION` bump (no data migration) | Engine series equals the date chart's per-day counts on one `node:sqlite` fixture; a ratio series is rejected; go-live gaps; editor and render tests flipped | none |
 | **3. Readings log preset** | Readings scope source, `reading.count.*` and campaign spend/freshness/threshold scope paths, card notices, preset `ads-readings-log`, `ads-readings` widgets render it; retire the bespoke readings widget; `CONFIG_VERSION` bump | Parity: every number and label the old body shows, from one readings fixture, through the card; `campaignIds` narrowing; refresh reloads readings | 1 |
-| **4. Rate tile to card** | The rate-tile-to-card mapping, the per-chart filter button kept for mapped tiles, the editor no longer offering "Rate", retire the inline rate markup; `CONFIG_VERSION` bump; under the page-rule choice, the outcome `pair` ratios | Parity per `POPUP_RATE_SPECS` key (all 22): n/d, percent and too-few state, old tile versus card; d = 0 and d = 1-4; a range longer than `MAX_RANGE_DAYS`; a bare-date range and `since === until`; a browser string `safeUA` rewrites; the install-gap note and the eligibility caveat; a stored filter override; differences listed | **decision (b)** |
+| **4. Rate tile to card** | The rate-tile-to-card mapping, the per-chart filter button kept for mapped tiles, retire the inline rate markup (the editor keeps offering "Rate": a new one stores the same `type: 'rate'` shape and is mapped at render time; dropping the option is slice 5); `CONFIG_VERSION` bump; under the page-rule choice, the outcome `pair` ratios | Parity per `POPUP_RATE_SPECS` key (all 22): n/d, percent and too-few state, old tile versus card; d = 0 and d = 1-4; a range longer than `MAX_RANGE_DAYS`; a bare-date range and `since === until`; a browser string `safeUA` rewrites; the install-gap note and the eligibility caveat; a stored filter override; differences listed | decision (b) (default taken; built as layout key `rateTile: 18`) |
 | **5. Shared stat and bar components** | `StatTile`, `BarTable`, used by `ChartCard` and by the card's tile frame and bars layout; retire the inline markup | Render tests pin the stat and table numbers before and after, per dataset, plus the empty-rows and "Tracking not yet active" states; card tests unchanged | decision (a) (the default unblocks it) |
+
+Slice 4, as built: a saved rate tile is mapped to a one-item card when it is drawn (nothing is
+rewritten, so a rollback loses nothing). Differences from the old tile, each asserted in
+`rateTile.parity.test.ts`: the n/d line reads "(n/d)"; a zero denominator is "—" over "(0/0)"; a
+range longer than `MAX_RANGE_DAYS` is clamped to its newest days; a bare-date range is read as
+Eastern days, and one with `since === until` reads "unavailable"; **before tracking went live
+(`TRACKING_ACTIVATION_DATE_ET`) the tile reads "not yet tracking" where the old tile read "—"
+over "0/0"**; the registry notes (counted-from date, "still arriving", the eligibility caveat)
+are new under the tile. The install-fix note was already shown by the old tile, as the hideable
+`popup-note`; it is now the tile's caption, and a stored hide of `popup-note` still hides it.
 
 Slice 1 is first because it is small, self-contained, approved, and the readings log needs it.
 Slices 2, 4 and 5 are independent of each other and of slice 3, apart from the shared `.stat`
