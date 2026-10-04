@@ -171,6 +171,15 @@ describe('/api/stats — Cloudflare still refuses the range', () => {
     })
   })
 
+  it('a range the gate already cut still reports the range ASKED FOR as notice.requested when Cloudflare then refuses it', async () => {
+    fetchImpl = () => ({ body: rangeError(tooWide) })
+    const { res, json } = await post({ since: '2026-01-01', until: '2026-09-30' }) // 38 weeks: cut before querying
+    expect(res.status).toBe(200)
+    expect(sentRange().geq).toBe('2026-06-30T00:00:00.000Z') // the cut window is what was sent
+    expect(json.notice).toMatchObject({ reason: 'upstream-rejected', served: null, requested: { from: '2026-01-01T00:00:00.000Z', to: '2026-10-01T00:00:00.000Z' } })
+    expect(json.meta).toMatchObject({ since: '2026-01-01', until: '2026-09-30' })
+  })
+
   it('is not cached, so a corrected limit takes effect on the next request', async () => {
     fetchImpl = () => ({ body: rangeError(tooWide) })
     await post({ since: '2026-09-01', until: '2026-09-30' })
