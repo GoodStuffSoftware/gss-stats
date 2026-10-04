@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseTextLite, splitParagraphs, tokenizeAndInterpolate, toPlainText } from './textLite'
+import { VALUE_TOKEN_PLACEHOLDER, parseTextLite, splitParagraphs, tokenizeAndInterpolate, toPlainText } from './textLite'
 
 describe('parseTextLite', () => {
   it('tokenizes plain text as a single text token', () => {
@@ -254,5 +254,31 @@ describe('toPlainText — safe flattening for non-token call sites', () => {
   })
   it('interpolates vars, safely (a var value can never reintroduce markup)', () => {
     expect(toPlainText('Rate: {rate}', { rate: '**99%**' })).toBe('Rate: **99%**')
+  })
+})
+
+// Slice 1c: a `{=…}` value token (1d "Insert value") shows a dash on this build, never its raw text.
+describe('value tokens {=…} (placeholder until 1d)', () => {
+  it('renders every value token as an em dash, with or without vars', () => {
+    expect(VALUE_TOKEN_PLACEHOLDER).toBe('—')
+    expect(toPlainText('Arrivals: {=campaign.taggedArrivals}, rate {=rate:d0}.')).toBe('Arrivals: —, rate —.')
+    expect(toPlainText('Spend {=spend} for {name}', { name: 'Launch' })).toBe('Spend — for Launch')
+    expect(toPlainText('{=}')).toBe('—')
+  })
+
+  it('inside bold and a link label too, but never in an href', () => {
+    expect(tokenizeAndInterpolate('**{=x}** and [see {=y}](https://example.com/{=z})')).toEqual([
+      { type: 'bold', value: '—' },
+      { type: 'text', value: ' and ' },
+      { type: 'link', value: 'see —', href: 'https://example.com/{=z}' },
+    ])
+  })
+
+  it('a var whose value looks like a value token is left as the var says', () => {
+    expect(toPlainText('{a}', { a: '{=b}' })).toBe('{=b}')
+  })
+
+  it('leaves ordinary {vars} placeholders and unbalanced braces alone', () => {
+    expect(toPlainText('Keep {unknown} and {= open')).toBe('Keep {unknown} and {= open')
   })
 })

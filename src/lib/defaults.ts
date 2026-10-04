@@ -4,6 +4,7 @@ import { POPUPS, POPUP_RATE_SPECS, NO_OUTCOME_TRACKING_NOTE, SIGNIN_ELIGIBLE_CAV
 import { CAMPAIGNS } from './campaigns'
 import { BEST_SUDOKU_SITES } from './bestSudokuSites'
 import { normCardRef } from './metrics/validate'
+import { autoCaveatIds, isNoteIdHideable } from './notes'
 
 export function defaultDateRange(): { since: string; until: string } {
   const until = new Date()
@@ -39,6 +40,14 @@ function w(p: Omit<Widget, 'i'>): Widget {
   return { ...p, i: p.id }
 }
 
+// Bumped to 16 for chart captions (notes plan, slice 1c): a widget may now carry its own plain-text
+// `caption` and a `hiddenCaveats` list (normWidget whitelists and caps both). Legacy `notes` caption
+// ids keep rendering and convert to caption text on the chart's next edit (decision D5). A scope's
+// caveats now show automatically (lib/notes.ts autoCaveatIds, D2-B), so the one rewrite is
+// seedHiddenAutoCaveatsV16: each stored chart hides the hideable automatic caveats it did not show
+// before, and looks unchanged. The built-in chart factories apply the same seed (factoryWidgets),
+// so a fresh or restored default chart looks as it did too. functions/api/config.ts backs the
+// stored layout up to `dashboard:default:backup:v<stored>` on the first v16 save.
 // Bumped to 15 for the two default trend charts' ET-day axis (see migrateDateEtTrendsV15): a
 // stored "Pageviews over time" / "Visits over time" geo trend that is still exactly the shipped
 // default moves from the UTC `date` to the ET-day `dateEt`, so the counts-only split-guard caption
@@ -90,14 +99,17 @@ export const LAYOUT_VERSIONS = {
   sparklines: 14,
   /** The default geo trend charts bucket by ET day (migrateDateEtTrendsV15). */
   dateEtTrends: 15,
+  /** Plain-text chart captions and per-chart hidden caveats (Widget.caption, Widget.hiddenCaveats).
+   * Automatic scope caveats (D2-B): seedHiddenAutoCaveatsV16 keeps each stored chart's look. */
+  captions: 16,
 } as const
 // The newest layout version. A slice that adds an entry moves this to it.
-export const CONFIG_VERSION: number = LAYOUT_VERSIONS.dateEtTrends
+export const CONFIG_VERSION: number = LAYOUT_VERSIONS.captions
 
 // The default "basic charts available out of the box" — a sensible analytics
 // starting layout. Users can move/resize/add/remove from here.
 export function defaultWidgets(): Widget[] {
-  return [
+  return factoryWidgets([
     w({ id: 'kpi-views', title: 'Pageviews', type: 'stat', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 0, w: 3, h: 3 }),
     w({ id: 'kpi-visits', title: 'Visits', type: 'stat', dimension: '', metric: 'visits', limit: 1, x: 3, y: 0, w: 3, h: 3 }),
     w({ id: 'trend', title: 'Pageviews over time', type: 'area', dimension: 'date', metric: 'pageviews', limit: 90, x: 6, y: 0, w: 6, h: 8 }),
@@ -111,7 +123,7 @@ export function defaultWidgets(): Widget[] {
     w({ id: 'geo-city', title: 'Top cities (beacon)', type: 'hbar', dataset: 'geo', dimension: 'city', metric: 'pageviews', limit: 15, x: 6, y: 27, w: 6, h: 8 }),
     w({ id: 'geo-visitor', title: 'New vs returning (beacon)', type: 'doughnut', dataset: 'geo', dimension: 'visitor', metric: 'pageviews', limit: 5, x: 0, y: 35, w: 6, h: 8 }),
     w({ id: 'geo-map', title: 'Visitor map (beacon)', type: 'map', dataset: 'geo', dimension: '', metric: 'pageviews', limit: 2000, x: 0, y: 43, w: 12, h: 9 }),
-  ]
+  ])
 }
 
 // Navigation groups (layout version 13). Groups are plain strings (DashboardPage.group), so these
@@ -146,7 +158,7 @@ function gw(p: Omit<Widget, 'i' | 'metric' | 'dataset'>): Widget {
   return { metric: 'pageviews', dataset: 'geo', ...p, i: p.id }
 }
 export function defaultBeaconWidgets(): Widget[] {
-  return [
+  return factoryWidgets([
     gw({ id: 'bcn-views', title: 'Pageviews', type: 'stat', dimension: 'site', limit: 1, x: 0, y: 0, w: 3, h: 3 }),
     gw({ id: 'bcn-visitor', title: 'New vs returning', type: 'doughnut', dimension: 'visitor', limit: 5, x: 0, y: 3, w: 3, h: 6 }),
     gw({ id: 'bcn-trend', title: 'Pageviews over time', type: 'area', dimension: 'dateEt', limit: 90, x: 3, y: 0, w: 9, h: 8 }),
@@ -160,7 +172,7 @@ export function defaultBeaconWidgets(): Widget[] {
     gw({ id: 'bcn-ref', title: 'Top referrers', type: 'hbar', dimension: 'referrer', limit: 10, x: 0, y: 33, w: 6, h: 8 }),
     gw({ id: 'bcn-pages', title: 'Top pages', type: 'hbar', dimension: 'path', limit: 10, x: 6, y: 32, w: 6, h: 8 }),
     gw({ id: 'bcn-map', title: 'Visitor map', type: 'map', dimension: '', limit: 2000, x: 0, y: 41, w: 12, h: 9 }),
-  ]
+  ])
 }
 export function defaultBeaconPage(): DashboardPage {
   // siteSel [] = all real sites; the multi-select picker narrows it.
@@ -188,7 +200,7 @@ export function defaultBeaconPage(): DashboardPage {
 // popupExcludeClause, applied to all three of its query shapes), so they never inflate
 // pageviews/visits or leak into 'Top screens / pages' here — verified, not changed.
 export function defaultBestSudokuLaunchWidgets(): Widget[] {
-  return [
+  return factoryWidgets([
     gw({ id: 'bsk-views', title: 'Pageviews', type: 'stat', dimension: 'site', limit: 10, x: 0, y: 0, w: 3, h: 3 }),
     gw({ id: 'bsk-visitor', title: 'New vs returning', type: 'doughnut', dimension: 'visitor', limit: 5, x: 0, y: 3, w: 3, h: 6 }),
     gw({ id: 'bsk-trend', title: 'Visits over time', type: 'area', dimension: 'dateEt', limit: 90, markers: 'releases', x: 3, y: 0, w: 9, h: 8 }),
@@ -201,7 +213,7 @@ export function defaultBestSudokuLaunchWidgets(): Widget[] {
     gw({ id: 'bsk-city', title: 'Top cities', type: 'hbar', dimension: 'city', limit: 12, x: 6, y: 24, w: 6, h: 8 }),
     gw({ id: 'bsk-path', title: 'Top screens / pages', type: 'hbar', dimension: 'path', limit: 12, x: 0, y: 32, w: 6, h: 8 }),
     gw({ id: 'bsk-map', title: 'Visitor map', type: 'map', dimension: '', limit: 2000, x: 6, y: 32, w: 6, h: 8 }),
-  ]
+  ])
 }
 // The Best Sudoku beacon site tags (lib/bestSudokuSites.ts, a leaf module), re-exported here.
 export { BEST_SUDOKU_SITES }
@@ -238,7 +250,7 @@ export function defaultBestSudokuLaunchPage(): DashboardPage {
 // 'Pop-up tracking'), and the install real-outcomes table (its three raw signals are series of
 // the bar chart). The page-level notes (App.vue) still carry the deferral and small-sample caveats.
 export function defaultBestSudokuPopupsWidgets(): Widget[] {
-  return [
+  return factoryWidgets([
     w({
       id: 'pu-bars',
       title: 'Pop-ups: shown, taps and outcomes',
@@ -257,7 +269,7 @@ export function defaultBestSudokuPopupsWidgets(): Widget[] {
     }),
     w({ id: 'pu-rates', title: 'Rates (valid ratios only)', type: 'rateTable', dataset: 'popup', dimension: '', card: { preset: 'popup-rates' }, metric: 'pageviews', limit: 1, notes: ['min-cohort-caveat'], x: 0, y: 11, w: 8, h: 7 }),
     w({ id: 'pu-eligible-bd', title: 'Sign-in eligibility', type: 'bar', dataset: 'popup', dimension: 'eligible', card: { preset: 'signin-eligibility' }, metric: 'pageviews', limit: 3, notes: ['signin-eligible-caveat'], x: 8, y: 11, w: 4, h: 7 }),
-  ]
+  ])
 }
 
 // Every widget id a pre-v9 Pop-ups generator ever produced, by PATTERN (from the full git
@@ -403,7 +415,7 @@ export function isBestSudokuPopupsPage(p: Pick<DashboardPage, 'id'>): boolean {
 // left undefined = every campaign the card repeats over (MetricCard campaignIds), same as the
 // page's original always-every-campaign behavior.
 export function defaultCampaignsWidgets(): Widget[] {
-  return [
+  return factoryWidgets([
     w({ id: 'cw-funnel', title: 'Funnel per campaign', type: 'table', dataset: 'campaigns', view: 'funnel', card: { preset: 'campaign-funnel' }, dimension: '', metric: 'pageviews', limit: 1, notes: ['arrivals-caveat', 'min-cohort-caveat'], x: 0, y: 0, w: 12, h: 14 }),
     hourOfDayWidget({ x: 0, y: 14, w: 12, h: 8 }),
     w({ id: 'cw-country', title: 'Arrivals & funnel by country', type: 'table', dataset: 'campaigns', view: 'country', card: { preset: 'campaign-country' }, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 22, w: 12, h: 10 }),
@@ -438,7 +450,7 @@ export function defaultCampaignsWidgets(): Widget[] {
       w: 3,
       h: 4,
     }),
-  ]
+  ])
 }
 // Campaign device mix (CONFIG_VERSION 9, owner 2026-09-27: "you recreated the device mix chart
 // when we already have been using nested pie charts for that"): the SAME nested doughnut the
@@ -779,7 +791,7 @@ export function swapPanelChart(wd: Widget): Widget {
 }
 
 export function defaultOverviewWidgets(): Widget[] {
-  return [
+  return factoryWidgets([
     // The small-sample note is ONE grid row (h: 1), not three (CONFIG_VERSION 12, see
     // compactSmallSampleNoteV12): a one-line caption in a 148px cell left an empty band between
     // the filter bar and the first card that the pre-v0.6 page never had.
@@ -789,7 +801,7 @@ export function defaultOverviewWidgets(): Widget[] {
     w({ id: 'ow-scorecard', title: 'Campaign scorecard', type: 'table', dataset: 'overview', view: 'scorecard', card: { preset: 'campaign-scorecard' }, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 21, w: 12, h: 14 }),
     w({ id: 'ow-release', title: 'Release panel', type: 'table', dataset: 'overview', view: 'releasePanel', card: { preset: 'release-before-after' }, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 35, w: 12, h: 9 }),
     completionsWidget(),
-  ]
+  ])
 }
 // Another bespoke-turned-widget page (see components/OverviewPage.vue — kept for reference /
 // git history only, no longer mounted by App.vue), FIRST in the Best Sudoku group:
@@ -943,8 +955,8 @@ function normWidget(x: any): Widget {
     note: typeof x.note === 'string' ? x.note : undefined,
     noteId: typeof x.noteId === 'string' ? x.noteId : undefined,
     longText: x.longText === true || undefined,
-    // Attached captions (lib/notes.ts) — absent stays absent (no scope-default notes get
-    // injected for a widget that predates this feature; see ChartCard.vue's own comment).
+    // Legacy attached captions (lib/notes.ts) — absent stays absent (= none). A scope's caveats
+    // show through autoCaveatIds instead, never by filling this in.
     notes: Array.isArray(x.notes) ? x.notes.filter((n: any) => typeof n === 'string' && n) : undefined,
     // date-dimension trend charts: release-marker overlay, go-live markers, flight bands.
     markers: x.markers === 'releases' ? 'releases' : undefined,
@@ -960,11 +972,67 @@ function normWidget(x: any): Widget {
     // Fit-to-content height (lib/fit.ts): only 'content' is meaningful; anything else is absent
     // (the fixed grid height). Optional, so no version bump: an older layout loads unchanged.
     fit: x.fit === 'content' ? 'content' : undefined,
+    // Plain-text caption + hidden caveats (layout v16, slice 1c). Spread in only when present, so
+    // a widget that never had them gains no new keys.
+    ...normCaptionFields(x),
     x: Number(x.x) || 0,
     y: Number(x.y) || 0,
     w: Number(x.w) || 4,
     h: Number(x.h) || 8,
   }
+}
+
+/** Longest stored caption (Widget.caption); the editor's text area has the same maxlength. */
+export const CAPTION_MAX_CHARS = 2000
+/** Most entries in Widget.hiddenCaveats, and the shape of each one. */
+export const HIDDEN_CAVEATS_MAX = 32
+export const HIDDEN_CAVEAT_ID_RE = /^[a-z0-9-]{1,64}$/
+
+/** Widget.caption and Widget.hiddenCaveats, whitelisted and capped. A longer caption is cut to
+ * CAPTION_MAX_CHARS, never dropped; an empty one is absent. hiddenCaveats keeps the first
+ * HIDDEN_CAVEATS_MAX distinct well-formed ids; none left = absent. */
+function normCaptionFields(x: any): Pick<Widget, 'caption' | 'hiddenCaveats'> {
+  const out: Pick<Widget, 'caption' | 'hiddenCaveats'> = {}
+  if (typeof x.caption === 'string' && x.caption) out.caption = x.caption.slice(0, CAPTION_MAX_CHARS)
+  if (Array.isArray(x.hiddenCaveats)) {
+    const ids = [...new Set(x.hiddenCaveats.filter((h: any) => typeof h === 'string' && HIDDEN_CAVEAT_ID_RE.test(h)))] as string[]
+    if (ids.length) out.hiddenCaveats = ids.slice(0, HIDDEN_CAVEATS_MAX)
+  }
+  return out
+}
+
+/** Layout v16 migration (decision D2-B, run once on a layout stored before LAYOUT_VERSIONS.captions):
+ * a scope's caveats now show automatically (lib/notes.ts autoCaveatIds), so every widget adds to
+ * `hiddenCaveats` each HIDEABLE automatic caveat it did not show before (one not in its legacy
+ * `notes`, nor a card's own spec captions: autoCaveatIds already leaves those out). The chart then
+ * looks as it did. A data-cut caveat (`hideable: false`) is never seeded: a chart that lacked it
+ * gains it (D3 wins over "unchanged"). Merged after any ids already there, deduped, capped at
+ * HIDDEN_CAVEATS_MAX. Idempotent; a widget with nothing to add is returned as is. */
+export function seedHiddenAutoCaveatsV16(p: DashboardPage): DashboardPage {
+  const widgets = seedHiddenAutoCaveats(p.widgets)
+  return widgets === p.widgets ? p : { ...p, widgets }
+}
+
+/** seedHiddenAutoCaveatsV16's rule over a widget list: the same array when nothing changes. */
+function seedHiddenAutoCaveats(list: Widget[]): Widget[] {
+  let changed = false
+  const widgets = list.map((w) => {
+    const have = w.hiddenCaveats ?? []
+    const add = autoCaveatIds(w).filter((id) => isNoteIdHideable(id) && !have.includes(id))
+    if (!add.length || have.length >= HIDDEN_CAVEATS_MAX) return w
+    changed = true
+    return { ...w, hiddenCaveats: [...new Set([...have, ...add])].slice(0, HIDDEN_CAVEATS_MAX) }
+  })
+  return changed ? widgets : list
+}
+
+/** Every built-in chart list (the defaultXWidgets factories) goes through the v16 seed too
+ * (decision D2-B, "existing charts look unchanged", covers the built-in defaults): a default
+ * chart, in a fresh config, a page normalizeConfig adds, or one "restore default charts" brings
+ * back, shows exactly the caveats it showed before v16 (its legacy `notes`) plus any data-cut one
+ * whose condition holds. A chart the owner creates later is new and shows its automatic caveats. */
+function factoryWidgets(list: Widget[]): Widget[] {
+  return seedHiddenAutoCaveats(list)
 }
 
 function normSeries(raw: any): LineSeries[] | undefined {
@@ -1333,7 +1401,11 @@ export function normalizeConfig(raw: any): DashboardConfig {
     const navigated = version < LAYOUT_VERSIONS.navigation ? migrateNavV13(withCaptionsMigrated) : withCaptionsMigrated
     // v15 migration (see CONFIG_VERSION and migrateDateEtTrendsV15): version-gated, so a chart the
     // owner later sets back to the UTC `date` axis is never moved again.
-    const ordered = version < LAYOUT_VERSIONS.dateEtTrends ? navigated.map(migrateDateEtTrendsV15) : navigated
+    const etDays = version < LAYOUT_VERSIONS.dateEtTrends ? navigated.map(migrateDateEtTrendsV15) : navigated
+    // v16 migration (see CONFIG_VERSION and seedHiddenAutoCaveatsV16): automatic scope caveats
+    // start hidden where a chart did not show them. Version-gated, so a caveat the owner later
+    // shows again is never re-hidden, and a caveat added to the registry later shows everywhere.
+    const ordered = version < LAYOUT_VERSIONS.captions ? etDays.map(seedHiddenAutoCaveatsV16) : etDays
     // Every load: drill links must name an existing root page (normDrillLinks).
     normDrillLinks(ordered)
     // `activePageId` is the landing page for a first-time viewer (each viewer's current page lives
