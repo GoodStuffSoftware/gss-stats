@@ -370,6 +370,14 @@ stat tile share their elements and styles but keep their own order and sizes (th
 reads number, then label; the card tile reads label, then number). The editor stops offering
 "Rate" for a new chart; a saved rate tile still opens with its own type.
 
+Slice 5 follow-up (0.24.1): nothing in the app asked `/api/popups` for `dimension: 'rate'` any more
+(a rate tile is a card, so `ChartCard` never fetches for one), so the endpoint's rate branch and
+`fetchStats`' rate path are removed. The endpoint now answers that dimension with the same 400 as
+`rates` and `eligible`. The rate-tile parity test and the `/api/metrics` equivalence test keep their
+old-side numbers from `functions/_lib/testing/popupRateOracle.ts`, the retired branch's derivation
+restated over the same fixture. The editor shows a one-line hint under Chart type: a pop-up rate is
+a metric card (the "Pop-up rates" preset).
+
 Slice 1 is first because it is small, self-contained, approved, and the readings log needs it.
 Slices 2, 4 and 5 are independent of each other and of slice 3, apart from the shared `.stat`
 styles noted above.
