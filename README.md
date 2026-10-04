@@ -1135,6 +1135,24 @@ upsert overwrites them, except that a count Play leaves blank keeps the last sto
 **new** Retention page includes the card; a page already created from the template does not
 gain it, so add it from the card picker ("Play installs").
 
+### Carry-over completions (Retention page)
+
+The Retention page's **Carry-over completions** card (preset `carry-over-completions`: the
+site-wide `bsk.completions` total beside the `bsk.carryOverCompletions` per-day line) shows games
+completed per ET day that did **not** come from an ad campaign, i.e. site-wide completions minus
+campaign-tagged ones. It is a weak signal by the retention spec, and the card says so.
+
+- **Definition.** "Tagged" is the shipped `anyTag` rule (any non-empty `campaign` on the beacon row,
+  as `bsk.taggedArrivals`); carry-over is the complement, counted from the same completion rows as
+  `bsk.completions` (the page's sites, date range and refused-row whole-day snap), so tagged plus
+  carry-over is the site-wide count each day and it can never go below zero. BSK's first-touch and
+  organic rules belong to the returns metrics and are not re-derived here.
+- **Counts only.** It reads the existing `bskRangePath` / `bskRangeDaily` facts: ET-day totals, no
+  hour, place or device column, no visitor id and no clock time, and no new SQL or bind.
+- **Only new Retention pages.** It is in the page template, so a new page (and "Restore default
+  charts" on a page made from the template) includes it; a page already created does not gain it,
+  so add it from the card picker ("Carry-over completions").
+
 ## Ads data freshness
 
 Every path that needs Google Ads metrics runs **one** function,

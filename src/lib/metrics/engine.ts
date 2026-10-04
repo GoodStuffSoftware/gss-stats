@@ -634,11 +634,11 @@ class Batch {
     const needAll = this.rank(idx, plan.allFromMs)
     const need0 = Math.max(needAll, this.rank(idx, plan.day0FromMs))
     let tagOk: Uint8Array | null = null
-    if (plan.tags || def.anyTag) {
+    if (plan.tags || def.anyTag || def.untagged) {
       tagOk = new Uint8Array(idx.campaigns.length)
       for (let c = 0; c < idx.campaigns.length; c++) {
         const tag = idx.campaigns[c]
-        tagOk[c] = (!plan.tags || plan.tags.has(tag)) && (!def.anyTag || tag !== '') ? 1 : 0
+        tagOk[c] = (!plan.tags || plan.tags.has(tag)) && (!def.anyTag || tag !== '') && (!def.untagged || tag === '') ? 1 : 0
       }
     }
     const onlyNew = def.visitor === 'new'
@@ -708,6 +708,7 @@ class Batch {
         ...(test ? { test: (path: string) => test(path, ctx) } : {}),
         onlyNew: def.visitor === 'new',
         anyTag: !!def.anyTag,
+        untagged: !!def.untagged,
         tags: null, // the daily twin of a campaign is already its attribution clause
         firstDay: etDateOfMs(win[0]),
         lastDay: attribution ? etDateOfMs(servingEndMs(ctx.campaign!) - 1) : etDateOfMs(Math.max(win[0], win[1] - 1)),

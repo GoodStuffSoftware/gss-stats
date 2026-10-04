@@ -163,6 +163,7 @@ const REFUSED_NOTE_METRICS = [
   'bsk.pageviews', // !isEventPath: counts /game/start/ rows
   'bsk.taggedArrivals', // no path test: any first-ever beacon, refused ones included
   'bsk.completions',
+  'bsk.carryOverCompletions', // the same completion rows, minus campaign-tagged ones
   'bsk.tutorialFirstRun',
   'bsk.tutorialReplay',
   'bsk.tourExitPreamble',

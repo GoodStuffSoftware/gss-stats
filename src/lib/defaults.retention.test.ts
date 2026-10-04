@@ -25,7 +25,7 @@ describe('the retention page template', () => {
   it('places the shipped presets as cards and the notes by registry id', () => {
     const ws = defaultRetentionWidgets()
     const cards = ws.filter((x) => x.card)
-    expect(cards.map((x) => ('preset' in x.card! ? x.card.preset : null))).toEqual(['retention-verdict', 'campaign-returns', 'campaign-engagement', 'play-installs'])
+    expect(cards.map((x) => ('preset' in x.card! ? x.card.preset : null))).toEqual(['retention-verdict', 'campaign-returns', 'campaign-engagement', 'play-installs', 'carry-over-completions'])
     for (const c of cards) expect(presetById('preset' in c.card! ? c.card.preset : ''), c.id).toBeDefined()
     const notes = ws.filter((x) => x.type === 'note')
     expect(notes.map((n) => n.noteId)).toEqual(['retention-page-scope', 'small-sample'])

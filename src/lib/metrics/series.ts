@@ -69,6 +69,8 @@ export interface BeaconSeriesInput {
   test?: (path: string) => boolean
   onlyNew: boolean
   anyTag: boolean
+  /** Only rows with no campaign tag (MetricDef.untagged). */
+  untagged?: boolean
   /** Only these campaign tags (a campaign read from a site-wide twin), or null. */
   tags: ReadonlySet<string> | null
   /** The window's first and last ET day (inclusive). */
@@ -91,6 +93,7 @@ export function beaconSeries(i: BeaconSeriesInput): SeriesPoint[] {
   for (const r of i.rows) {
     if (i.onlyNew && r.visitor !== 'new') continue
     if (i.anyTag && r.campaign === '') continue
+    if (i.untagged && r.campaign !== '') continue
     if (i.tags && !i.tags.has(r.campaign)) continue
     if (i.test) {
       let ok = pass.get(r.path)
