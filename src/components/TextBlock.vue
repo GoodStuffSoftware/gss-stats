@@ -1,6 +1,5 @@
 <script setup lang="ts">
-// The "longer/richer" counterpart to NoteBlock.vue (owner requirement, 2026-09-26) —
-// definitions, "how to read this" captions, section intros. Same safe **bold**/[link](url)
+// The "longer/richer" counterpart to NoteBlock.vue — definitions, "how to read this" captions, section intros. Same safe **bold**/[link](url)
 // tokenizer (lib/textLite.ts), split into paragraphs on a blank line; never v-html.
 import { computed } from 'vue'
 import { getNote, isNoteActive, noteTemplate } from '../lib/notes'

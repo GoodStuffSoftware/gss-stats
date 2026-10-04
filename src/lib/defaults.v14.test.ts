@@ -11,6 +11,7 @@ import PROD_V8 from './__fixtures__/prodLayout.v8.json'
 import PROD_V9 from './__fixtures__/prodLayout.v9.json'
 import PROD_V12 from './__fixtures__/prodLayout.v12.json'
 import { withV15Trends } from './__fixtures__/dateEtTrends'
+import { withV16Caveats } from './__fixtures__/autoCaveats'
 
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x))
 
@@ -31,7 +32,7 @@ describe('sparkline layout version', () => {
     const stored = normalizeConfig(clone(defaultConfig()))
     // Some filters carry clock-derived ISO dates, so mask those and compare everything else.
     const widgetsOf = (c: typeof stored) => JSON.stringify(c.pages.map((pg) => pg.widgets)).replace(/\d{4}-\d\d-\d\dT[\d:.]+Z/g, 'T')
-    const before = widgetsOf(stored)
+    const before = widgetsOf(withV16Caveats(stored)) // v16 (defaults.captions.test.ts) hides the automatic caveats a pre-v16 chart did not show
     const older = { ...clone(stored), version: LAYOUT_VERSIONS.sparklines - 1 }
     const after = normalizeConfig(clone(older))
     expect(after.version).toBe(CONFIG_VERSION)
@@ -65,8 +66,8 @@ describe('sparkline layout version', () => {
     const stored = { ...clone(nav), version: LAYOUT_VERSIONS.navigation }
     const out = normalizeConfig(clone(stored))
     expect(out.version).toBe(CONFIG_VERSION)
-    // v15 (defaults.v15.test.ts) moves the geo default trends to dateEt; every other widget is as stored.
-    expect(mask({ ...out, version: stored.version })).toBe(mask(withV15Trends(stored)))
+    // v15 moves the geo default trends to dateEt; v16 hides the automatic caveats a chart did not show; nothing else moves.
+    expect(JSON.parse(mask({ ...out, version: stored.version }))).toEqual(JSON.parse(mask(withV16Caveats(withV15Trends(stored))))) // key order aside
   })
 
   describe('a stored sparkline that cannot be drawn degrades to a number, the rest of the card survives', () => {

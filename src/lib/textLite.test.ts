@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseTextLite, splitParagraphs, tokenizeAndInterpolate, toPlainText } from './textLite'
+import { VALUE_TOKEN_PLACEHOLDER, parseTextLite, splitParagraphs, tokenizeAndInterpolate, toPlainText } from './textLite'
 
 describe('parseTextLite', () => {
   it('tokenizes plain text as a single text token', () => {
@@ -254,5 +254,56 @@ describe('toPlainText — safe flattening for non-token call sites', () => {
   })
   it('interpolates vars, safely (a var value can never reintroduce markup)', () => {
     expect(toPlainText('Rate: {rate}', { rate: '**99%**' })).toBe('Rate: **99%**')
+  })
+})
+
+// Slice 1c: a `{=…}` value token (1d "Insert value") shows a dash on this build, never its raw text.
+describe('value tokens {=…} (placeholder until 1d)', () => {
+  it('renders every value token as an em dash, with or without vars', () => {
+    expect(VALUE_TOKEN_PLACEHOLDER).toBe('—')
+    expect(toPlainText('Arrivals: {=campaign.taggedArrivals}, rate {=rate:d0}.')).toBe('Arrivals: —, rate —.')
+    expect(toPlainText('Spend {=spend} for {name}', { name: 'Launch' })).toBe('Spend — for Launch')
+    expect(toPlainText('{=}')).toBe('—')
+  })
+
+  it('inside bold and a link label too; a link whose URL holds one is plain text, never an href', () => {
+    expect(tokenizeAndInterpolate('**{=x}** and [see {=y}](https://example.com/{=z})')).toEqual([
+      { type: 'bold', value: '—' },
+      { type: 'text', value: ' and ' },
+      { type: 'text', value: 'see —' },
+    ])
+    expect(tokenizeAndInterpolate('[a {=y}](https://example.com/ok)')).toEqual([{ type: 'link', value: 'a —', href: 'https://example.com/ok' }])
+    for (const src of ['[x](/p{=a})', '[x]({=a})', '[x](#{=a})', '[x](docs/{=a}.md)'])
+      expect(tokenizeAndInterpolate(src), src).toEqual([{ type: 'text', value: 'x' }])
+  })
+
+  it('a token that wraps markup is one dash, never its raw text (NIT-2)', () => {
+    expect(tokenizeAndInterpolate('a {=**x**} b')).toEqual([{ type: 'text', value: 'a — b' }])
+    expect(tokenizeAndInterpolate('{=[a](https://x.test)}')).toEqual([{ type: 'text', value: '—' }])
+    expect(toPlainText('see {=**x**} and **{=y}**')).toBe('see — and —')
+    expect(toPlainText('Rate {=[r](/p)} for {name}', { name: 'Launch' })).toBe('Rate — for Launch')
+  })
+
+  it('an href with a brace is never a link, value token or not (NIT-3)', () => {
+    for (const src of ['[x](https://a.test/{b})', '[x](/p{)', '[x](/p})', '[x](https://a.test/{=)'])
+      expect(parseTextLite(src), src).toEqual([{ type: 'text', value: 'x' }])
+    expect(parseTextLite('[x](https://a.test/b)')).toEqual([{ type: 'link', value: 'x', href: 'https://a.test/b' }])
+  })
+
+  it('a literal U+E000 in the input is dropped, never shown as the placeholder (NIT-B)', () => {
+    expect(toPlainText('ab')).toBe('ab')
+    expect(tokenizeAndInterpolate('**x** and {=v}')).toEqual([
+      { type: 'bold', value: 'x' },
+      { type: 'text', value: ' and —' },
+    ])
+    expect(tokenizeAndInterpolate('[x](https://a.test/b)')).toEqual([{ type: 'link', value: 'x', href: 'https://a.test/b' }])
+  })
+
+  it('a var whose value looks like a value token is left as the var says', () => {
+    expect(toPlainText('{a}', { a: '{=b}' })).toBe('{=b}')
+  })
+
+  it('leaves ordinary {vars} placeholders and unbalanced braces alone', () => {
+    expect(toPlainText('Keep {unknown} and {= open')).toBe('Keep {unknown} and {= open')
   })
 })

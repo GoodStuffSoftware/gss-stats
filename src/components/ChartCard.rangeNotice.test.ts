@@ -118,3 +118,29 @@ describe('ChartCard — range notice', () => {
     expect(w.findAll('.card-captions .note-block')[4].classes()).toContain('range-notice')
   })
 })
+
+// Slice 1c: the widget's own caption comes first in the card's notes, a value token shows "—"
+// until the token picker lands, and hiddenCaveats hides a hideable caveat but never a data-cut one.
+describe('ChartCard — caption and hidden caveats (1c)', () => {
+  const mountWith = async (over: Partial<Widget>) => {
+    const w = mount(ChartCard, { props: { widget: { ...widget, ...over }, filters, dark: false, drillOpen: false } })
+    await flushPromises()
+    return w
+  }
+
+  it("renders the widget's caption first, with a value token shown as —", async () => {
+    fetchStatsMock.mockResolvedValue(response({ note: 'A pop-up caveat.', notice }))
+    const w = await mountWith({ caption: 'Today: {=today.pageviews} views.' })
+    const texts = w.findAll('.card-captions .note-block').map((n) => n.text())
+    expect(texts[0]).toBe('Today: — views.')
+    expect(texts).toHaveLength(3)
+  })
+
+  it('hides the pop-up note when listed, but not the range notice', async () => {
+    fetchStatsMock.mockResolvedValue(response({ note: 'A pop-up caveat.', notice }))
+    const w = await mountWith({ hiddenCaveats: ['popup-note', 'range-notice'] })
+    const texts = w.findAll('.card-captions .note-block').map((n) => n.text())
+    expect(texts.some((t) => t.includes('A pop-up caveat.'))).toBe(false)
+    expect(w.findAll('[data-testid="range-notice"]')).toHaveLength(1)
+  })
+})

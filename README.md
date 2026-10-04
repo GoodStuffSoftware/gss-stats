@@ -118,8 +118,8 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   or two. Days only: no hour, place or device split (a `/return` or game-complete row gets no
   more than the day's count and the kind the tile already reads). Each series is one extra
   statement per distinct twin read (items that share a window share it) against the 40-statement
-  batch budget ([`docs/capacity.md`](docs/capacity.md) §9). The layout version is now 14 (a save
-  guard only; page navigation holds 13): the first save from this build backs the stored v13
+  batch budget ([`docs/capacity.md`](docs/capacity.md) §9). Layout version 14 was a save
+  guard only (page navigation holds 13): the first save from that build backed the stored v13
   layout up once, and a tab still on the old build is told to reload; nothing is rewritten.
 - **Full width** — there's no centred max-width column: the header (a strip across the window),
   the filter bar and the chart grid span the window with a 16px gutter (12px on a phone), so a
@@ -163,14 +163,48 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   [`NoteBlock.vue`](src/components/NoteBlock.vue) (short caveats) or
   [`TextBlock.vue`](src/components/TextBlock.vue) (longer prose) — both support
   **bold** and [links](https://example.com) via a small safe tokenizer
-  ([`src/lib/textLite.ts`](src/lib/textLite.ts), never `v-html`) — and attachable to
-  any chart as a caption (`widget.notes`) or as its own movable 'note' widget
-  (`widget.noteId`), editable from the chart menu either way. Short UI names (metric and
+  ([`src/lib/textLite.ts`](src/lib/textLite.ts), never `v-html`) — and shown as
+  their own movable 'note' widget (`widget.noteId`, whose editor also takes plain text with
+  "Insert from library"). Short UI names (metric and
   funnel-step labels such as "Game-screen views") are registry entries too, of kind `label`:
-  never a caption and never offered in the caption pickers (the card builder's label pickers
-  list them). Everything under a chart (its captions, the response's own caveats, the range
-  notice) comes from one list in a fixed order,
-  [`chartNotes()`](src/lib/chartNotes.ts); a card's own captions render inside the card.
+  never a caption, never a caveat and never offered in the editor's caption lists (the card
+  builder's label pickers list them).
+- **Chart captions and data caveats** (layout version 16). Everything under a chart comes from one
+  list in a fixed order, [`chartNotes()`](src/lib/chartNotes.ts): the chart's own caption, any
+  legacy notes, the automatic caveats, then the response's own notes (the pop-up note, the split
+  guard, whole-day counting, the range notice). A card's own captions render inside the card.
+  - **Caption** (`Widget.caption`, up to 2,000 characters, cut on load, never dropped): plain text
+    the chart's author writes in the chart editor, with **bold** and links; the same field on a
+    chart and on a card, stored beside the card rather than in its spec. "Insert from library"
+    copies a *static* registry entry's text into it (fixed text only: not date-gated, computed,
+    tied to a value from code or a data-cut note); the library stays read-only. `{=…}` is reserved for value
+    tokens and shows "—" for now, so a tab that has not got them never shows the raw token, even
+    one wrapped around bold or a link. A link whose address holds `{` or `}` stays plain text.
+  - **Caveats** are system-owned and follow the code: dated or gated entries, computed text, text
+    tied to a value from code, and the runtime notes. A chart shows its data source's caveats
+    automatically (`autoCaveatIds`: the `overview`, `campaigns`, `popup`, `geo` and `ads-readings`
+    scopes; a note widget and a chart with no such source show none), and one added to the
+    registry later reaches every chart on that source. A caveat that names a view, such as the
+    country-columns note, carries a `NoteDef.appliesTo` condition and shows only where it is true.
+  - **Hiding** (`Widget.hiddenCaveats`, up to 32 registry or runtime ids, `/^[a-z0-9-]{1,64}$/`): the
+    editor's "Data caveats" list has a Show/Hide button on each hideable caveat, per chart. A
+    caveat that says data was cut or withheld (`NoteDef.hideable: false`, the range limit, the
+    split guard, whole-day counting, the country-columns note and the retention
+    disjoint-populations note) always shows; listing one in `hiddenCaveats` does nothing. A card's
+    own captions (from its preset or spec) take the same Show/Hide buttons in the card builder,
+    and a caption id this version does not know is kept as saved until its Remove button is used.
+  - **Upgrading a chart.** Version 16 hides, once per chart, every hideable caveat that chart did
+    not show before (`seedHiddenAutoCaveatsV16`, run only on a layout stored below version 16), so
+    an existing chart looks the same; the built-in default charts, a fresh layout and "restore
+    default charts" are seeded the same way. The seed only ever hides the caveats that existed at
+    version 16 (`V16_SEEDABLE_CAVEATS`), so one added to the registry later shows on every chart,
+    a restored default chart and a layout not yet saved at version 16 included. A campaigns chart
+    gains the country-columns note only if it splits by country. A chart a person adds shows its
+    caveats at once.
+  - **Legacy notes** (`Widget.notes`, no longer written): they keep rendering. The first time a
+    chart is edited, its static entries fold into the caption as text and drop out of `notes`;
+    dated, computed, value-tied and data-cut entries stay in `notes` as caveats. A duplicated
+    chart is a deep copy, so the two never share a list.
 - **Durable, multi-page dashboards** — layout + chart definitions persist in KV (not
   `localStorage`), so they follow you across devices. Duplicate / rename / delete
   pages (see *Page navigation*); a protected default page with "restore default charts"; per-page filters and
@@ -542,7 +576,8 @@ Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats
   repeat's ids and empty message, table headings, gating) and using a control without changing it
   leaves the card exactly as it was. A card the builder saves always loads again: it holds the
   same size limits loading checks (up to 32 badge colours, for one), and a note id from a newer
-  version is kept as saved and shows nothing until this version knows it.
+  version is kept as saved and shows nothing until this version knows it. Each of a card's own
+  captions has a Show/Hide button (see *Chart captions and data caveats* above).
 - **Two datasets, one dashboard.** RUM (sampled, human-only) and the beacon (every
   real load, sub-country geo) are charted side by side; they're independent and never
   summed.
@@ -1195,7 +1230,11 @@ only: its first save over a stored v13 writes `backup:v13`, and rolling the code
 needs `backup:v13` restored (same steps below, with that key). Layout version 15 (the default
 trend charts on `dateEt`) rewrites the dimension of those untouched charts: its first save over a
 stored v14 writes `backup:v14`, and rolling the code back past it needs `backup:v14` restored.
-A tab still
+Layout version 16 (chart captions and hideable caveats) adds `caption` and `hiddenCaveats` to a
+chart and hides, once, the caveats an existing chart did not show: its first save over a stored
+v15 writes `backup:v15`. Production is stored at v12 until its first save, so that save writes
+`backup:v12` (the page navigation, trend-chart and caption changes of v13-v16 are all applied on
+load and written by it), and rolling the code back past v16 needs that backup restored. A tab still
 running older code gets `409` ("This tab is out of date, reload") instead of overwriting a
 newer layout.
 
