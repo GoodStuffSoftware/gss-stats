@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import ChartEditor from './ChartEditor.vue'
 import { __resetMetricsStateForTests, useMetrics } from '../composables/useMetrics'
+import { CAPTION_MAX_CHARS } from '../lib/defaults'
 import { todayEtFrom } from '../lib/metrics/scope'
 import { metricTokenOptions } from '../lib/metricValueTokens'
 import type { Widget } from '../types'
@@ -130,5 +131,95 @@ describe('N3: insertion is an explicit choice', () => {
     expect(box()).toBe('')
     await (sel.element.parentElement!.querySelector('button.insert-picker-btn') as HTMLButtonElement).click()
     expect(box()).not.toBe('')
+  })
+})
+
+// Review SHOULD-2: the Insert button disables itself once its pick resets, so focus has to go
+// back to the text box (caret right after what was inserted). Otherwise it is left on a disabled
+// button (or the page body), and the dialog's Escape and Tab trap, which live on the panel, stop
+// working until the author finds the box again.
+describe('focus returns to the text box after Insert', () => {
+  function openAttached(widget: Widget) {
+    const w = mount(ChartEditor, { props: { widget, isNew: false }, attachTo: document.body, global: { stubs: { CardEditor: true } } })
+    mounted.push(w)
+    return w
+  }
+  /** Put the caret in a text box, then leave it for the Insert button, as a keyboard or mouse user does. */
+  function caretIn(box: HTMLTextAreaElement, start: number, end: number = start) {
+    box.focus()
+    box.setSelectionRange(start, end)
+    box.dispatchEvent(new Event('blur'))
+  }
+  async function pickAndInsert(menu: ReturnType<typeof captionMenu>, value: string) {
+    await menu.setValue(value)
+    const btn = insertBtn(menu)
+    btn.focus()
+    expect(document.activeElement).toBe(btn)
+    await btn.click()
+    await flushPromises()
+  }
+  const escape = () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+
+  it('caption: focus is on the caption with the caret right after the token, and Escape still cancels', async () => {
+    const w = openAttached(base({ caption: 'Views: and more' }))
+    const box = w.get('.caption-field textarea').element as HTMLTextAreaElement
+    caretIn(box, 6)
+    await pickAndInsert(captionMenu(w), '{=golive.web|date}')
+    expect(box.value).toBe('Views:{=golive.web|date} and more')
+    expect(document.activeElement).toBe(box)
+    const after = 6 + '{=golive.web|date}'.length
+    expect([box.selectionStart, box.selectionEnd]).toEqual([after, after])
+    escape()
+    expect(w.emitted('cancel')).toHaveLength(1)
+  })
+
+  it('caption: a box never focused gets the token appended, and the caret goes to the end', async () => {
+    const w = openAttached(base({ caption: 'Views:' }))
+    const box = w.get('.caption-field textarea').element as HTMLTextAreaElement
+    await pickAndInsert(captionMenu(w), '{=golive.web|date}')
+    expect(document.activeElement).toBe(box)
+    expect([box.selectionStart, box.selectionEnd]).toEqual([box.value.length, box.value.length])
+  })
+
+  it('caption: when the caption is full the insert is refused, focus still returns, and the caret is where it was', async () => {
+    const full = 'x'.repeat(CAPTION_MAX_CHARS)
+    const w = openAttached(base({ caption: full }))
+    const box = w.get('.caption-field textarea').element as HTMLTextAreaElement
+    caretIn(box, 40, 45)
+    await pickAndInsert(captionMenu(w), '{=golive.web|date}')
+    expect(w.find('.caption-full').text()).toBe('Caption is full')
+    expect(box.value).toBe(full)
+    expect(document.activeElement).toBe(box)
+    expect([box.selectionStart, box.selectionEnd]).toEqual([40, 45])
+    escape()
+    expect(w.emitted('cancel')).toHaveLength(1)
+  })
+
+  it('caption: Insert from library returns focus too, after the inserted text', async () => {
+    const w = openAttached(base({ caption: 'A B' }))
+    const box = w.get('.caption-field textarea').element as HTMLTextAreaElement
+    caretIn(box, 1)
+    const sel = w.get('.caption-field select.insert-library')
+    await sel.setValue('small-sample')
+    const btn = sel.element.parentElement!.querySelector('button.insert-picker-btn') as HTMLButtonElement
+    btn.focus()
+    await btn.click()
+    await flushPromises()
+    expect(document.activeElement).toBe(box)
+    expect(box.value.startsWith('A')).toBe(true)
+    expect(box.value.endsWith(' B')).toBe(true)
+    const end = box.value.length - ' B'.length
+    expect([box.selectionStart, box.selectionEnd]).toEqual([end, end])
+  })
+
+  it('note widget: focus returns to the note text, caret after the token', async () => {
+    const w = openAttached(noteWidget({ note: 'Live since' }))
+    const box = noteBox(w).element as HTMLTextAreaElement
+    caretIn(box, 4)
+    await pickAndInsert(noteMenu(w), '{=golive.web|date}')
+    expect(box.value).toBe('Live{=golive.web|date} since')
+    expect(document.activeElement).toBe(box)
+    const after = 4 + '{=golive.web|date}'.length
+    expect([box.selectionStart, box.selectionEnd]).toEqual([after, after])
   })
 })

@@ -14,6 +14,7 @@ import type { MetricsContext, MetricValue } from '../lib/metrics/types'
 import { todayEtFrom } from '../lib/metrics/scope'
 import { metricRefsIn, metricRequestSpec, metricTokenValue, type MetricTokenRef } from '../lib/metricValueTokens'
 import type { TokenValues } from '../lib/valueTokens'
+import { useEtClock } from './useEtClock'
 import { useMetrics, type UseMetrics } from './useMetrics'
 
 /** The `metric:` values for every addressable token in `texts`, keyed by path, for the page
@@ -35,7 +36,14 @@ export function useMetricTokenValues(
       if (!refs.length || !scope?.active) return
       // Requests are made once per path and kept until the component goes (useMetrics releases
       // them on scope dispose): the set of addressable paths is small and bounded.
-      metrics ??= scope.run(() => useMetrics(context, () => todayEtFrom(Date.now()))) ?? null
+      // The day key follows the shared ET clock (the one MetricCard reads), so a "today so far"
+      // token left open across ET midnight re-plans to the new day and refetches, instead of
+      // keeping yesterday's entry alive under its own refcount.
+      metrics ??=
+        scope.run(() => {
+          const clock = useEtClock()
+          return useMetrics(context, () => todayEtFrom(clock.value))
+        }) ?? null
       if (!metrics) return
       let next: Map<string, { ref: MetricTokenRef; value: Readonly<Ref<MetricValue | undefined>> }> | null = null
       for (const ref of refs) {

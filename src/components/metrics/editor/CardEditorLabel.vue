@@ -4,7 +4,7 @@
 // plain-text preview), a bound scope field, or "use the metric's own label". Reused for both an
 // item's `label` and its `caption` (both are `Label`) — `allowMetricOwn` hides the "metric's own
 // name" option for a caption, which has no natural registry counterpart.
-import { computed, ref, useId } from 'vue'
+import { computed, nextTick, ref, useId } from 'vue'
 import InsertPicker, { type InsertGroup } from '../../InsertPicker.vue'
 import { VALUE_TOKEN_OPTIONS } from '../../../lib/valueTokens'
 import { isKnownNote, labelKind, labelNoteOptions, makeLabel, noteVarNames, scopePathLabel, scopePathOptions, withNoteId, withNoteVar, type LabelKind } from '../../../lib/metrics/editorModel'
@@ -57,8 +57,29 @@ const insertGroups = computed<InsertGroup[]>(() => [
   ...(scopeOptions.value.length ? [{ group: 'Fields', options: scopeOptions.value.map((o) => ({ value: `{${o.value}}`, label: `{${o.value}} — ${o.label}` })) }] : []),
   { group: 'Dates', options: VALUE_TOKEN_OPTIONS.filter((o) => o.group === 'Dates').map((o) => ({ value: o.token, label: o.label })) },
 ])
+// A token is appended whole or not at all: one that would take the label past the 200-character
+// limit (the input's maxlength stops typing there, not a programmatic append) is refused, and the
+// box says so, as the chart caption does. Either way focus goes back to the input with the caret
+// at the end, so the author keeps typing and the dialog's Escape and Tab trap keep working (the
+// Insert button is disabled once its pick resets).
+const textEl = ref<HTMLInputElement | null>(null)
+const labelFull = ref(false)
+const labelFullTick = ref(0)
 function insertText(token: string) {
-  textValue.value = `${textValue.value}${token}`
+  const next = `${textValue.value}${token}`
+  if (next.length > CARD_LIMITS.stringLength) {
+    labelFull.value = true
+    labelFullTick.value++
+  } else {
+    labelFull.value = false
+    textValue.value = next
+  }
+  void nextTick(() => {
+    const el = textEl.value
+    if (!el) return
+    el.focus()
+    el.setSelectionRange(el.value.length, el.value.length)
+  })
 }
 
 const noteId = computed<string>({
@@ -122,9 +143,10 @@ const bindPath = computed<ScopePath>({
 
     <template v-if="kind === 'text'">
       <label class="visually-hidden" :for="textId">{{ heading }} text</label>
-      <input :id="textId" type="text" v-model="textValue" :placeholder="placeholder" :maxlength="CARD_LIMITS.stringLength" />
+      <input :id="textId" ref="textEl" type="text" v-model="textValue" :placeholder="placeholder" :maxlength="CARD_LIMITS.stringLength" @input="labelFull = false" />
       <div class="field">
         <InsertPicker :label="`Insert a value into the ${heading.toLowerCase()}`" placeholder="Insert value ▾" select-class="insert-value" :groups="insertGroups" @insert="insertText" />
+        <span class="hint label-full" aria-live="polite"><span v-if="labelFull" :key="labelFullTick">{{ heading }} is full</span></span>
       </div>
     </template>
 

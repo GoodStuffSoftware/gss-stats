@@ -18,6 +18,13 @@ All notable changes to **gss-stats** are documented here. The format follows
   the caption's, with the card's own fields and the dates, and its dates fill in.
 - **Inserting is an explicit choice.** Pick a value, then press Insert; moving through the menu with
   the arrow keys no longer drops a token per option, for Insert value and Insert from library.
+- **Insert keeps your place.** After Insert, the cursor returns to the text box right after what was
+  added, so typing and Escape carry on as before; a card label that has no room for the value says
+  "Label is full" instead of cutting it off.
+
+### Fixed
+- **Values in captions and notes roll over at midnight.** A page left open past midnight Eastern
+  fetches the new day's values instead of keeping yesterday's.
 
 ## [0.23.0] — 2026-10-03
 

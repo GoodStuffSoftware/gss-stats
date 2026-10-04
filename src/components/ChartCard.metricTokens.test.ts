@@ -112,6 +112,14 @@ describe('ChartCard: metric tokens', () => {
     expect(c.text()).toContain('x — y')
   })
 
+  it('a note that shows a library entry (noteId) never fetches for the text it does not show', async () => {
+    serve(() => ({ status: 'ok', value: 1 }) as MetricValue)
+    const c = card(note('stale {=metric:bsk.pageviews@page|number}', { noteId: 'small-sample' }))
+    await settle()
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(c.text()).not.toContain('stale')
+  })
+
   it('a widget with no metric token makes no metrics request at all', async () => {
     serve(() => ({ status: 'ok', value: 1 }) as MetricValue)
     card(widget({ caption: 'Plain {=chart.total|number}' }))
