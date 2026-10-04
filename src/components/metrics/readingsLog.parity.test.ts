@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 //
 // PARITY (ADR 0005 slice 3, step B2): the `ads-readings-log` preset, rendered by MetricCard, shows
-// what the bespoke widget it replaced (widgets/AdsReadingsWidgetCard.vue, deleted in B2) showed for
+// what the bespoke widget it replaced (the readings widget component, deleted in B2) showed for
 // one GET /api/ads/readings fixture. B1 compared the two live, cell for cell; the expected text and
 // tone classes below were captured from the old widget just before it was deleted, so the
 // regression guard outlives it. The fixture covers an incomplete reading, sign-ups exact / at-most

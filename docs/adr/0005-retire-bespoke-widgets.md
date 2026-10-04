@@ -33,7 +33,7 @@ by dataset: `rum` → `/api/stats` (Cloudflare GraphQL RUM), `geo` → `/api/geo
 |---|---|---|---|---|
 | 1 | Metric card (`widget.card`) | `MetricCard` / `MetricSection` / `MetricItem` | `POST /api/metrics` | **Reusable.** The 9 presets (`bsk-kpis`, `campaign-scorecard`, `release-before-after`, `popup-rates`, `signin-eligibility`, `campaign-funnel`, `campaign-country`, `campaign-cost`, `campaign-returns`) and any saved `{ spec }`. The stored type `rateTable` lands here too: since layout v11 it always carries `card: { preset: 'popup-rates' }`. |
 | 2 | Retired-panel text (`overview`/`campaigns` with no `card`) | inline in `ChartCard` | none | **Exception** (see below): a fallback for a layout the v10/v11 migrations could not map, not a data block. |
-| 3 | Ads readings log (`dataset: 'ads-readings'`) | `widgets/AdsReadingsWidgetCard.vue` (250 lines) | its own `GET /api/ads/readings` | **Bespoke.** Own fetch, own table, own notices. Convert (slice 3). |
+| 3 | Ads readings log (`dataset: 'ads-readings'`) | the bespoke readings widget component (250 lines; deleted in slice 3) | its own `GET /api/ads/readings` | **Bespoke.** Own fetch, own table, own notices. Convert (slice 3). |
 | 4 | Note (`type: 'note'`) | `widgets/NoteWidgetBody.vue` over the notes registry | none | **Exception**: text, not data; already shared with card captions (`NoteBlock` / `TextBlock`). |
 | 5 | Stat tile (`type: 'stat'`) | inline markup in `ChartCard` | `fetchStats` totals, any dataset | **Bespoke markup** over a generic data path. Make the markup a shared component (slice 5). |
 | 6 | Rate tile (`type: 'rate'`, pop-up dataset) | inline markup in `ChartCard` | `/api/popups` `dimension: 'rate'`, `rateKey` = `widget.dimension` (a `POPUP_RATE_SPECS` key), gated by `gateRate` / `MIN_COHORT` | **Bespoke.** Duplicates the card's percent display and gating. Convert to a card (slice 4, blocked on decision (b)). |
@@ -205,7 +205,7 @@ rewritten; the first v14 save backs the stored v13 layout up to `backup:v13`).
 
 ## Per bespoke body: what replaces it, what is missing, the risks
 
-### Ads readings log (`AdsReadingsWidgetCard`) becomes preset `ads-readings-log`
+### Ads readings log (bespoke readings widget) becomes preset `ads-readings-log`
 
 What it shows today: notices (store not bound, store unreadable, `SMALL_SAMPLE_NOTE`,
 "Proposals only…"), the refresh button, sync alerts; per campaign its label, spend with its
@@ -339,7 +339,7 @@ and a README update when it is visible to users, and an adversarial parity revie
 |---|---|---|---|
 | **1. Fit-to-content height** | `Widget.fit`, `normWidget` whitelist, the measuring and grid-height logic, the editor checkbox | Row-count maths as table tests; `normWidget` round trip; canvas widgets never fit | none |
 | **2. Sparklines** | `series` on the request and value, the engine's per-day series, validation, `render.ts`, the SVG in `MetricItem`, the editor enabling it; `CONFIG_VERSION` bump (no data migration) | Engine series equals the date chart's per-day counts on one `node:sqlite` fixture; a ratio series is rejected; go-live gaps; editor and render tests flipped | none |
-| **3. Readings log preset** | Readings scope source, `reading.count.*` and campaign spend/freshness/threshold scope paths, card notices, preset `ads-readings-log`, `ads-readings` widgets render it; retire `AdsReadingsWidgetCard`; `CONFIG_VERSION` bump | Parity: every number and label the old body shows, from one readings fixture, through the card; `campaignIds` narrowing; refresh reloads readings | 1 |
+| **3. Readings log preset** | Readings scope source, `reading.count.*` and campaign spend/freshness/threshold scope paths, card notices, preset `ads-readings-log`, `ads-readings` widgets render it; retire the bespoke readings widget; `CONFIG_VERSION` bump | Parity: every number and label the old body shows, from one readings fixture, through the card; `campaignIds` narrowing; refresh reloads readings | 1 |
 | **4. Rate tile to card** | The rate-tile-to-card mapping, the per-chart filter button kept for mapped tiles, the editor no longer offering "Rate", retire the inline rate markup; `CONFIG_VERSION` bump; under the page-rule choice, the outcome `pair` ratios | Parity per `POPUP_RATE_SPECS` key (all 22): n/d, percent and too-few state, old tile versus card; d = 0 and d = 1-4; a range longer than `MAX_RANGE_DAYS`; a bare-date range and `since === until`; a browser string `safeUA` rewrites; the install-gap note and the eligibility caveat; a stored filter override; differences listed | **decision (b)** |
 | **5. Shared stat and bar components** | `StatTile`, `BarTable`, used by `ChartCard` and by the card's tile frame and bars layout; retire the inline markup | Render tests pin the stat and table numbers before and after, per dataset, plus the empty-rows and "Tracking not yet active" states; card tests unchanged | decision (a) (the default unblocks it) |
 
@@ -351,7 +351,7 @@ styles noted above.
 
 - `ChartCard.vue` keeps only the dispatch: card, map, chart, note, the retired-panel fallback,
   and the stat and table components.
-- `AdsReadingsWidgetCard.vue` and the inline rate markup are deleted.
+- The bespoke readings widget component and the inline rate markup are deleted.
 - Layouts are not rewritten on load, so an older build still renders every widget that was not
   re-saved through the card editor; see "Saved layouts and rollback" for the ones that were.
 - `CONFIG_VERSION` rises once per slice 2, 3 and 4 with no data migration, so a tab left open

@@ -226,7 +226,7 @@ describe('the v13 → v14 upgrade (inline sparklines: a guard bump, no layout re
 describe('the v14 → v15 upgrade (default trend charts on dateEt)', () => {
   it('this code writes layout version 15', () => {
     expect(LAYOUT_VERSIONS.dateEtTrends).toBe(15)
-    expect(CONFIG_VERSION).toBe(15) // a literal on purpose
+    expect(CONFIG_VERSION).toBeGreaterThanOrEqual(15) // the newest is readingsLog (17): see the v15 → v17 block
   })
   it('the first v15 save over a stored v14 layout backs it up to backup:v14, once', async () => {
     const v14 = JSON.stringify(cfg(14, 'live v14 layout'))
@@ -245,7 +245,26 @@ describe('the v14 → v15 upgrade (default trend charts on dateEt)', () => {
     expect(await res.json()).toMatchObject({ error: 'stale', storedVersion: 15, incomingVersion: 14 })
     expect(puts).toEqual([])
     expect(store.get('dashboard:default')).toBe(v15)
-    expect((await put(kv, cfg(16, 'crafted'))).status).toBe(400)
+    expect((await put(kv, cfg(CONFIG_VERSION + 1, 'crafted'))).status).toBe(400)
+  })
+})
+
+// Layout version 17 (the ads readings log is a metric card, ADR 0005 slice 3): a guard bump only. The
+// number is provisional (16 belongs to `captions`); it follows LAYOUT_VERSIONS.readingsLog.
+describe('the v15 → v17 upgrade (readings log card: a guard bump, no layout rewrite)', () => {
+  it('this code writes layout version 17', () => {
+    expect(LAYOUT_VERSIONS.readingsLog).toBe(17)
+    expect(CONFIG_VERSION).toBe(LAYOUT_VERSIONS.readingsLog)
+  })
+  it('the first v17 save over a stored v15 layout backs it up to backup:v15, once', async () => {
+    const v15 = JSON.stringify(cfg(15, 'live v15 layout'))
+    const { kv, store } = fakeKv({ 'dashboard:default': v15 })
+    expect((await put(kv, cfg(17, 'first v17'))).status).toBe(200)
+    expect(store.get(backupKeyFor(15))).toBe(v15)
+  })
+  it('a PUT carrying version 15 over a stored v17 layout gets 409', async () => {
+    const { kv } = fakeKv({ 'dashboard:default': JSON.stringify(cfg(17, 'readings layout')) })
+    expect((await put(kv, cfg(15, 'old tab'))).status).toBe(409)
   })
 })
 
