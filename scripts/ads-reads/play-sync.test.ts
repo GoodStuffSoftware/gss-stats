@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest'
 import { assertAdsWriteSql, normalizePlayDays, playDailyUpserts, type PlayDayRow } from '../../src/lib/adsStore'
 import { HOUSEHOLD_NOTE, RETENTION_NOTE, type PlayInstallDay, type PlayReportsSection } from './play'
-import { DEFAULT_PLAY_SYNC_START, runPlaySync } from './playSyncCore'
+import { cfTokenForSync, DEFAULT_PLAY_SYNC_START, runPlaySync } from './playSyncCore'
 import { count, migrationFiles, openMigratedSqlite, sqliteAdsDb } from './sqliteDb'
 
 const NOW = Date.parse('2026-10-03T16:00:00Z') // 12:00 ET, 2026-10-03
@@ -132,6 +132,23 @@ describe('runPlaySync', () => {
     expect(h.db.writes).toEqual([])
     expect(count(h.sqlite, 'ads_play_daily')).toBe(0)
     expect(r.lines.join('\n')).toMatch(/DRY RUN, nothing written/)
+  })
+  it('a re-post that leaves a count blank keeps the stored number; a given count still overwrites', async () => {
+    const h = harness()
+    await h.go() // 09-26: installs 5, users 4, uninstalls 1, active 50
+    await h.go({ report: section({ installsByDay: [day('2026-09-26', null, 9, null, null)] }) })
+    expect(rows(h.sqlite).find((x) => x.date === '2026-09-26')).toMatchObject({ device_installs: 5, user_installs: 9, device_uninstalls: 1, active_device_installs: 50 })
+    for (const w of h.db.writes) expect(() => assertAdsWriteSql(w.sql)).not.toThrow()
+  })
+  it('--dry-run needs no Cloudflare token: the token file is not read, so a missing one cannot fail it', () => {
+    const load = (file: string | undefined): string | null => {
+      if (file) throw new Error('ENOENT: token file')
+      return null
+    }
+    expect(cfTokenForSync({ dryRun: true }, load)).toBeNull()
+    expect(cfTokenForSync({ dryRun: true, cfTokenFile: 'missing.txt' }, load)).toBeNull()
+    expect(() => cfTokenForSync({ dryRun: false, cfTokenFile: 'missing.txt' }, load)).toThrow(/ENOENT/)
+    expect(cfTokenForSync({ dryRun: false }, load)).toBeNull() // no flag, no env var: wrangler's own login is used
   })
   it('an unreadable Play report fails with nothing written', async () => {
     const h = harness()

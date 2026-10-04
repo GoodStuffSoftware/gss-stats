@@ -208,12 +208,15 @@ export function normalizePlayDays(rows: readonly PlayDayRow[]): PlayDayRow[] {
   return [...byDate.values()].sort((a, b) => (a.date < b.date ? -1 : 1))
 }
 
-/** Upserts Play day rows, idempotent on `date` (Play re-posts days, so a re-sync overwrites). */
+/** Upserts Play day rows, idempotent on `date` (Play re-posts days, so a re-sync overwrites; a count
+ * the re-post leaves blank keeps its stored value). */
 export function playDailyUpserts(rows: readonly PlayDayRow[], fetchedAt: string): SqlStatement[] {
   return chunk(normalizePlayDays(rows), rowsPerStatement(6)).map((part) => ({
     sql:
       `INSERT INTO ads_play_daily (date, device_installs, user_installs, device_uninstalls, active_device_installs, fetched_at) VALUES ${part.map(() => '(?, ?, ?, ?, ?, ?)').join(', ')} ` +
-      `ON CONFLICT (date) DO UPDATE SET device_installs = excluded.device_installs, user_installs = excluded.user_installs, device_uninstalls = excluded.device_uninstalls, active_device_installs = excluded.active_device_installs, fetched_at = excluded.fetched_at`,
+      `ON CONFLICT (date) DO UPDATE SET ` +
+      // A blank count in a re-post keeps the last known number (COALESCE); only fetched_at always moves.
+      `device_installs = COALESCE(excluded.device_installs, ads_play_daily.device_installs), user_installs = COALESCE(excluded.user_installs, ads_play_daily.user_installs), device_uninstalls = COALESCE(excluded.device_uninstalls, ads_play_daily.device_uninstalls), active_device_installs = COALESCE(excluded.active_device_installs, ads_play_daily.active_device_installs), fetched_at = excluded.fetched_at`,
     binds: part.flatMap((r) => [r.date, r.deviceInstalls, r.userInstalls, r.deviceUninstalls, r.activeDeviceInstalls, fetchedAt]),
   }))
 }

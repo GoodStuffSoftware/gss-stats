@@ -9,8 +9,8 @@
 // migration 0005 first (`npm run ads:migrate`); until then this fails, and the card shows
 // "no Play figures yet" (the dashboard reads a missing table as empty).
 //
-// Idempotent (upserts on the Play day; Play re-posts days). --dry-run reads Play
-// and writes nothing. Stores whole-app per-day totals only: no country or source split.
+// Idempotent (upserts on the Play day; Play re-posts days; a count a re-post leaves blank keeps its
+// stored value). --dry-run reads Play, writes nothing and needs no Cloudflare token. Stores whole-app per-day totals only: no country or source split.
 // Default start: the Play tracking go-live (2026-09-26). The CSV day is "as reported by Google
 // Play": it is not confirmed to be an ET day.
 
@@ -19,7 +19,7 @@ import { ADS_DB_NAME } from '../../src/lib/adsStore'
 import { fail, loadCfToken } from './cli'
 import { wranglerAdsDb } from './d1Store'
 import { readPlayReports } from './play'
-import { runPlaySync } from './playSyncCore'
+import { cfTokenForSync, runPlaySync } from './playSyncCore'
 import { createWranglerRunner } from './wrangler'
 
 const HELP = 'ads:play-sync --play-sa <service-account.json> [--dry-run] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--cf-token-file <path>] [--json-only]'
@@ -43,7 +43,7 @@ async function main() {
   }
   const saPath = opts['play-sa']
   if (!saPath) throw new Error('--play-sa <service-account.json> is required (the read-only Play key; see scripts/ads-reads/play.ts)')
-  const run = createWranglerRunner({ cfToken: loadCfToken(opts['cf-token-file']) })
+  const run = createWranglerRunner({ cfToken: cfTokenForSync({ dryRun: !!opts['dry-run'], cfTokenFile: opts['cf-token-file'] }, loadCfToken) })
   const res = await runPlaySync({
     read: (o) => readPlayReports(saPath, o),
     db: wranglerAdsDb(run, ADS_DB_NAME),

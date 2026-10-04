@@ -31,17 +31,20 @@ function seeded(): DatabaseSync {
   return db
 }
 
-async function run(ads: DatabaseSync | undefined | 'broken', ctx: Ctx) {
+// A D1 whose every statement fails the way a real outage does (not a missing table).
+const throwingD1 = (message: string) => ({ prepare: () => ({ bind: () => ({ all: async () => { throw new Error(message) } }) }) }) as unknown as D1Database
+
+async function run(ads: DatabaseSync | undefined | 'broken' | D1Database, ctx: Ctx, cache = memoryCache()) {
   const hits = openHitsDb()
   insertHits(hits, [])
   const requests = IDS.map((id) => ({ key: id.toLowerCase(), metric: id, window: 'page' }))
   const batch = validateMetricsRequest(JSON.stringify({ v: 1, context: { ...ctx, sites: ['bestsudoku-web'] }, requests }))
   if (!batch.ok) throw new Error(batch.error)
   expect(batch.requests.filter((r) => !r.ok)).toEqual([])
-  const adsD1 = ads === undefined ? undefined : ads === 'broken' ? sqliteD1(new DatabaseSync(':memory:')) : sqliteD1(ads)
+  const adsD1 = ads === undefined ? undefined : ads === 'broken' ? sqliteD1(new DatabaseSync(':memory:')) : ads instanceof DatabaseSync ? sqliteD1(ads) : ads
   const env = { context: batch.context, nowMs: NOW, todayEt: etDateFromMs(NOW), hasAdsDb: !!adsD1 }
   const plan = planBatch(batch.requests.flatMap((r) => (r.ok ? [r.req] : [])), env)
-  const fetched = await fetchFacts(plan, { gss_geo: sqliteD1(hits), gss_stats_ads: adsD1 }, { nowMs: NOW, fresh: false, cache: memoryCache(), waitUntil: () => {} })
+  const fetched = await fetchFacts(plan, { gss_geo: sqliteD1(hits), gss_stats_ads: adsD1 }, { nowMs: NOW, fresh: false, cache, waitUntil: () => {} })
   return { out: deriveBatch(batch.requests, { ...env, facts: fetched.facts }), plan }
 }
 
@@ -84,6 +87,15 @@ describe('the Play tiles before the first sync (not yet active)', () => {
   it('a missing table (migration 0005 not applied yet) reads as empty, never an error', async () => {
     const { out } = await run('broken', { since: '2026-09-26', until: '2026-09-29' })
     for (const id of IDS) expect(out[id.toLowerCase()], id).toMatchObject(none)
+  })
+  it('any other read error is a per-metric error, not "no figures yet", and is not cached', async () => {
+    const cache = memoryCache()
+    const { out } = await run(throwingD1('D1_ERROR: network connection lost'), { since: '2026-09-26', until: '2026-09-29' }, cache)
+    for (const id of IDS) {
+      expect(out[id.toLowerCase()], id).toMatchObject({ status: 'error' })
+      expect(out[id.toLowerCase()], id).not.toMatchObject({ status: 'no-data' })
+    }
+    expect(cache.keys()).toEqual([])
   })
   it('no ads binding at all reads as empty and costs no statement', async () => {
     const { out, plan } = await run(undefined, { since: '2026-09-26', until: '2026-09-29' })
