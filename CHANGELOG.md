@@ -11,6 +11,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 ### Fixed
 - **The Page views tile has its day-over-day arrows back.** It now leaves refused counts-only rows out of its own count, so it compares against the same time yesterday and the 7-day average again instead of showing whole-day totals.
 
+## [0.27.2] — 2026-10-04
+
+### Fixed
+- **The stats API's range notice names the range you asked for** when the data source refuses a request whose range was already shortened.
+
 ## [0.27.1] — 2026-10-04
 
 ### Fixed
