@@ -178,7 +178,8 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
     chart and on a card, stored beside the card rather than in its spec. "Insert from library"
     copies a *static* registry entry's text into it (fixed text only: not date-gated, computed,
     tied to a value from code or a data-cut note); the library stays read-only. `{=…}` is reserved for value
-    tokens and shows "—" for now, so a tab that has not got them never shows the raw token.
+    tokens and shows "—" for now, so a tab that has not got them never shows the raw token, even
+    one wrapped around bold or a link. A link whose address holds `{` or `}` stays plain text.
   - **Caveats** are system-owned and follow the code: dated or gated entries, computed text, text
     tied to a value from code, and the runtime notes. A chart shows its data source's caveats
     automatically (`autoCaveatIds`: the `overview`, `campaigns`, `popup`, `geo` and `ads-readings`
