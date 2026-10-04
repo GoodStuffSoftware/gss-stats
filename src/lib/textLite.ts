@@ -1,5 +1,6 @@
-// A tiny, intentionally limited "markdown-lite" for registry note/text bodies (owner
-// requirement, 2026-09-26): **bold** and [label](url) links only. Never rendered via v-html
+// A tiny, intentionally limited "markdown-lite" for registry note/text bodies and chart captions
+// (Widget.caption): **bold** and [label](url) links only, plus `{=…}` value tokens (filled in by a
+// caller's resolver, lib/valueTokens.ts; a dash otherwise). Never rendered via v-html
 // — parseTextLite tokenizes into plain data (TextToken[]) that NoteBlock.vue/TextBlock.vue
 // render through ordinary Vue template bindings (<strong>/<a>), so there is no HTML
 // injection surface no matter what a registry entry or a user's custom widget text contains.
@@ -28,9 +29,14 @@ const TOKEN_RE = /\*\*(.+?)\*\*|\[([^\]]+)\]\(([^)]+)\)/g
 // whitespace character from anywhere in it, not just the ends), then classify the
 // NORMALIZED value against an explicit allowlist, and render that normalized value — never
 // the raw one — so a control character can never survive into the actual `href` either.
+//
+// Value tokens (slice 1c review, NIT-3): an href holding `{` or `}`, or the marker that
+// tokenizeAndInterpolate puts where a `{=…}` stood (VALUE_TOKEN_MARK), is never a link. A value
+// token therefore cannot reach an href by construction, whatever slice 1d substitutes.
 function safeHref(rawHref: string): string | null {
   const h = rawHref.replace(/[\u0000-\u001F\u007F\s]/g, '')
   if (!h) return null
+  if (/[{}]/.test(h) || h.includes(VALUE_TOKEN_MARK)) return null
   if (h.toLowerCase().startsWith('https://')) return h // https: only, and only the real double-slash form (bare "https:evil.com" is NOT this — some URL parsers normalize it to https://evil.com, so it must fail every branch below too)
   if (h.startsWith('#')) return h // in-page anchor
   if (h.startsWith('/')) {
@@ -99,8 +105,28 @@ function substituteVars(str: string, vars: InterpolateVars): string {
   })
 }
 
-/** The ONE safe way to combine markup + data-driven values (owner requirement:
- * "{campaign.spend}" rather than baked into strings). HIGH security fix (2026-09-26 delta
+/** A value token (`{=…}`, notes plan slice 1d "Insert value"; grammar and paths: lib/valueTokens.ts).
+ * A caller that has values passes a ValueResolver; without one, or when it returns null, a token
+ * shows VALUE_TOKEN_PLACEHOLDER — so a caption written by a newer build shows a dash on an older
+ * one, never the raw token text. */
+export const VALUE_TOKEN_RE = /\{=[^{}]*\}/g
+export const VALUE_TOKEN_PLACEHOLDER = '—'
+/** Where a value token stood, between tokenizing and rendering: VALUE_TOKEN_MARK, the token's index
+ * in its input, then VALUE_TOKEN_MARK_END — private-use characters and digits, which hold no
+ * markup. tokenizeAndInterpolate swaps every `{=…}` for one in the RAW input, before parseTextLite,
+ * so a token that wraps markup (`{=**x**}`, `{=[a](https://x)}`) stays one unit and never shows as
+ * raw text, and safeHref refuses an href holding one. Both characters are reserved: literal ones
+ * in the input are dropped first. */
+const VALUE_TOKEN_MARK = ''
+const VALUE_TOKEN_MARK_END = ''
+const VALUE_MARKER_RE = /(\d+)/g
+const VALUE_MARKER_SPLIT_RE = /(\d+)/
+
+/** Renders one whole `{=…}` source as text, or null for the placeholder (lib/valueTokens.ts). */
+export type ValueResolver = (source: string) => string | null
+
+/** The ONE safe way to combine markup + data-driven values ("{campaign.spend}" rather than
+ * values baked into strings). HIGH security fix (2026-09-26 delta
  * review): this used to interpolate {vars} into the RAW STRING first and tokenize the
  * result second — so a var whose VALUE happened to contain "**x**" or
  * "[y](javascript:...)" became live markup, exactly the injection parseTextLite's own
@@ -111,11 +137,47 @@ function substituteVars(str: string, vars: InterpolateVars): string {
  * A registry/custom-text author therefore cannot put a variable inside **bold** or a
  * [link](...) — an accepted limitation; no current registry entry needs that, and it's the
  * only way to make "a variable's value can never introduce markup" categorically true
- * rather than best-effort. */
-export function tokenizeAndInterpolate(input: string, vars?: InterpolateVars): TextToken[] {
-  const tokens = parseTextLite(input)
-  if (!vars) return tokens
-  return tokens.map((t) => (t.type === 'text' ? { ...t, value: substituteVars(t.value, vars) } : t))
+ * rather than best-effort.
+ *
+ * Value tokens (`{=…}`, slice 1d) follow the same boundary: a resolved value is put in ONLY inside
+ * a plain 'text' token, after {vars} were substituted around it, and is never re-scanned — so a
+ * value holding `**`, a `[x](javascript:…)` link, a `{var}` or another `{=…}` shows as literal
+ * text. A token inside **bold** or a link label shows the placeholder; one inside an href turns
+ * the link into plain text (safeHref). */
+export function tokenizeAndInterpolate(input: string, vars?: InterpolateVars, values?: ValueResolver): TextToken[] {
+  // Value tokens first, on the raw input and before {vars}: each `{=…}` becomes an indexed marker
+  // that holds no markup, so a token wrapping markup cannot split, and a link whose URL held one is
+  // plain text (safeHref). The markers are reserved: literal ones in the input (pasted private-use
+  // text) are dropped first, so they can never stand for a token.
+  const sources: string[] = []
+  const marked = input
+    .split(VALUE_TOKEN_MARK)
+    .join('')
+    .split(VALUE_TOKEN_MARK_END)
+    .join('')
+    .replace(VALUE_TOKEN_RE, (source) => {
+      sources.push(source)
+      return `${VALUE_TOKEN_MARK}${sources.length - 1}${VALUE_TOKEN_MARK_END}`
+    })
+  const resolve = (index: string): string => {
+    if (!values) return VALUE_TOKEN_PLACEHOLDER
+    let out: string | null = null
+    try {
+      out = values(sources[Number(index)] ?? '')
+    } catch {
+      out = null
+    }
+    return out == null || out === '' ? VALUE_TOKEN_PLACEHOLDER : out
+  }
+  return parseTextLite(marked).map((t) => {
+    // Bold and link labels never take a value or a var: a marker there is the placeholder.
+    if (t.type !== 'text') return { ...t, value: t.value.replace(VALUE_MARKER_RE, VALUE_TOKEN_PLACEHOLDER) }
+    // Text: split on the markers (odd parts are token indexes), substitute {vars} in the literal
+    // parts only, then join with the values — a value is never scanned for vars or markup.
+    const parts = t.value.split(VALUE_MARKER_SPLIT_RE)
+    const value = parts.map((p, i) => (i % 2 === 1 ? resolve(p) : vars ? substituteVars(p, vars) : p)).join('')
+    return { ...t, value }
+  })
 }
 
 /** Plain-text rendering for call sites that can't render TextToken[] (a `:title`
@@ -124,8 +186,8 @@ export function tokenizeAndInterpolate(input: string, vars?: InterpolateVars): T
  * character/href stripped (a bold segment keeps only its text; a link keeps only its
  * visible label, never its href). This is how registry text with bold/link markup reaches
  * a plain-string context without ever leaking raw markup syntax as literal on-screen text. */
-export function toPlainText(input: string, vars?: InterpolateVars): string {
-  return tokenizeAndInterpolate(input, vars)
+export function toPlainText(input: string, vars?: InterpolateVars, values?: ValueResolver): string {
+  return tokenizeAndInterpolate(input, vars, values)
     .map((t) => t.value)
     .join('')
 }

@@ -34,6 +34,7 @@ import {
   isAuthRedirectPath,
   isTourExitPath,
   isTutorialCompletePath,
+  MIN_COHORT,
   POPUPS,
   RAW_INSTALL_DEDUPE_LIVE_AT_UTC_MS,
   TOUR_TRACKING_LIVE_AT,
@@ -45,7 +46,9 @@ import { isEventPath, isPopupAccept, isPopupShown, isReturnD1Plus } from '../ove
 import { resolveCampaignSpend, UPSELL_SIGNEDOUT_FIX_AT, AUTH_NEW_EXISTING_LIVE_AT, type SpendSummary } from '../adsRules'
 import { freshnessOf, spendThroughFromRows } from '../adsFreshness'
 import type { BeaconRow, FactId, FactRows } from './facts'
-import { etMidnightMs, type InstrumentationRule } from './instrumentation'
+import { etDateOfMs, etMidnightMs, servingEndMs, type InstrumentationRule } from './instrumentation'
+import { retentionBar, retentionVerdict, wilsonBounds, type VerdictCode } from './retention'
+import { addDays } from '../etTime'
 import type { WindowName } from './types'
 import type { Unit } from './units'
 
@@ -59,6 +62,23 @@ export interface StoreEnv {
   nowMs: number
   /** The release windows' size in days (the release metrics), null when there is no window. */
   releaseDays: number | null
+  /** ET calendar date of nowMs (the verdict's arm maturity, in whole ET days). */
+  todayEt: string
+  /** The page range [from, to) in epoch ms (whole ET days), null when the request has none. */
+  pageRange: readonly [number, number] | null
+  /** The organic arm's campaignReturns rows (with their ET-day maturity band), passed only to a
+   * MetricDef.withOrganic store; the engine reports an error when that fact is missing. */
+  organic?: FactRows
+}
+
+/** What a store reducer returns. `tooFew` (with the counts behind it) makes the engine report
+ * status 'too-few' instead of 'no-data' for a null value. */
+export interface StoreResult {
+  value: number | null
+  noteIds?: string[]
+  tooFew?: true
+  numerator?: number
+  denominator?: number
 }
 
 /** What a reducer knows about the request it is serving. */
@@ -100,7 +120,7 @@ export interface MetricDef {
   spend?: (rows: readonly SpendSummary[], ctx: MetricCtx) => number | null
   /** Any other non-beacon fact (the ads store's freshness reads, the first Best Sudoku hit): the
    * value, and the registry notes that travel with it. */
-  store?: (rows: FactRows, ctx: MetricCtx, env: StoreEnv) => { value: number | null; noteIds?: string[] }
+  store?: (rows: FactRows, ctx: MetricCtx, env: StoreEnv) => StoreResult
   instrumented: readonly InstrumentationRule[] | ((ctx: MetricCtx) => readonly InstrumentationRule[])
   /** Outcome beacons that arrive after the event they describe: [min, max] days. */
   lagDays?: [number, number]
@@ -110,6 +130,10 @@ export interface MetricDef {
    * `campaignId`: the web-only `/return/organic/<bucket>` rows. Only a campaign-scoped metric
    * over campaignReturns may set it (checked at load); every other binding refuses 'organic'. */
   organic?: true
+  /** A campaign store metric judged against the organic baseline: the engine also plans the
+   * organic arm's campaignReturns fact and passes its rows as StoreEnv.organic. Only a store over
+   * campaignReturns that is not itself organic may set it (checked at load). */
+  withOrganic?: true
 }
 
 // ── Memoized classifiers (a fact has few distinct paths and many rows) ───────────────────
@@ -207,6 +231,86 @@ const UPSELL_METRICS: { id: string; kind: 'shown' | 'accept' | 'dismiss' }[] = [
 ]
 const UPSELL_WINDOWS = { attribution: 'campaignPathVisitor', upsellPre: 'campaignPathVisitor', upsellPost: 'campaignPathVisitor' } as const
 
+// ── R2-7: the arm's day 2-7 return rate and its 90% Wilson bounds (lib/metrics/retention.ts) ─────
+/** The return beacon a campaignReturns row is, when it belongs to the arm being read: a campaign's
+ * own uc values, or the reserved organic tag. The one test returnD0 ... returnD31to60 share. */
+function armReturn(path: string, ctx: MetricCtx): ReturnType<typeof parseReturnPath> {
+  const ev = returnOf(path)
+  if (!ev) return null
+  if (ctx.params.campaignId === ORGANIC_ARM_ID) return ev.uc === ORGANIC_ARM_ID ? ev : null
+  return ctx.campaign?.ucValues.includes(ev.uc) ? ev : null
+}
+/** The arm's d0 and d2-7 return counts over its campaignReturns rows. Rows only, never a device.
+ * A campaign arm counts every row (the same counts returnD0 / returnD2to7 sum). The organic arm
+ * counts only its MATURED cohort, by the ET-day band `s` (lib/metrics/facts.ts
+ * ORGANIC_MATURITY_SQL, which carries the full argument): d0 rows with s = 0 (exact: arrivals on
+ * or before T-8) and d2-7 rows with s <= 1 (fired on or before T-1: at or above the exact count).
+ * An exact d0 and a d2-7 that can only be high put the organic rate, and the 0.6x bar read from
+ * it, never below the exact one: the approximation NEVER LOWERS THE BAR. */
+function armReturnCounts(rows: readonly BeaconRow[], ctx: MetricCtx): { d0: number; d2to7: number } {
+  const maturedOnly = ctx.params.campaignId === ORGANIC_ARM_ID
+  let d0 = 0
+  let d2to7 = 0
+  for (const r of rows) {
+    const ev = armReturn(r.path, ctx)
+    if (ev?.bucket === 'd0') d0 += !maturedOnly || r.seg === 0 ? r.c : 0
+    else if (ev?.bucket === 'd2-7') d2to7 += !maturedOnly || r.seg <= 1 ? r.c : 0
+  }
+  return { d0, d2to7 }
+}
+/** d2-7 / d0 over the arm's campaignReturns rows (armReturnCounts: the organic arm's matured
+ * cohort only, the same quantity the verdict's bar reads): the rate, or one bound of its Wilson
+ * interval. Under MIN_COHORT d0 arrivals there is no figure (status 'too-few', counts attached). */
+function returnD2to7Of(part: 'rate' | 'lower' | 'upper') {
+  return (rows: FactRows, ctx: MetricCtx): StoreResult => {
+    if (rows.kind !== 'beacon') return { value: null }
+    const { d0, d2to7 } = armReturnCounts(rows.rows, ctx)
+    if (d0 === 0) return { value: null }
+    if (d0 < MIN_COHORT) return { value: null, tooFew: true, numerator: d2to7, denominator: d0 }
+    const b = wilsonBounds(d2to7, d0)!
+    return { value: part === 'rate' ? d2to7 / d0 : b[part], numerator: d2to7, denominator: d0 }
+  }
+}
+
+// ── The per-arm retention verdict (retention spec section 4, lib/metrics/retention.ts) ──────────
+/** The caveats every R2-7 figure and the verdict carry: the groups are disjoint (the bar compares,
+ * it does not net out), the organic bar runs high, and the rates are a lower bound. */
+const RETENTION_CAVEATS = ['retention-disjoint', 'retention-organic-bias', 'retention-lower-bound']
+/** campaign.retentionVerdict's value: the index of its code here, shown as its 'verdict.<code>'
+ * label. Append only: a value never changes meaning. */
+export const VERDICT_CODES: readonly VerdictCode[] = ['too-few', 'maturing', 'provisional', 'no-go', 'hold', 'go']
+const ORGANIC_CTX: MetricCtx = { params: { campaignId: ORGANIC_ARM_ID }, window: 'attribution' }
+/** An arm is matured once its last arrival's d2-7 window has closed: 7 ET days after its serving
+ * end (servingEndMs, an ET midnight) is at or before today's ET midnight. ET DAYS only, never a
+ * clock time; daysToMature is the whole ET days left, counted on the same dates (DST-proof). */
+export function armMaturity(c: CampaignFlight, todayEt: string): { matured: boolean; daysToMature: number } {
+  const maturesEt = addDays(etDateOfMs(servingEndMs(c)), 7)
+  if (etMidnightMs(maturesEt) <= etMidnightMs(todayEt)) return { matured: true, daysToMature: 0 }
+  return { matured: false, daysToMature: Math.round((Date.parse(`${maturesEt}T00:00:00Z`) - Date.parse(`${todayEt}T00:00:00Z`)) / 86_400_000) }
+}
+/** Matured organic ET days at today's ET date: the full ET days from the first one after organic
+ * tracking went live (ORGANIC_TRACKING_LIVE_AT is mid-day, so that day is partial) up to T-8, the
+ * last day in the organic band's matured cohort (ORGANIC_MATURITY_SQL cuts at the ET midnight of
+ * T-7). Whole ET dates only, so it is DST-proof and carries no clock time. */
+export function organicMaturedDays(todayEt: string): number {
+  const first = addDays(etDateOfMs(ORGANIC_TRACKING_LIVE_AT), 1)
+  const cutoff = addDays(todayEt, -7)
+  return Math.max(0, Math.round((Date.parse(`${cutoff}T00:00:00Z`) - Date.parse(`${first}T00:00:00Z`)) / 86_400_000))
+}
+/** The arm's verdict: its R2-7 (every row) against the bar set from the organic arm's MATURED
+ * cohort (retentionBar: 7.5% unless there are 1,000 matured organic d0, 21 matured organic ET days
+ * and some organic d2-7 returns, then 0.6x the organic R2-7). The value is a code shown as its
+ * label, never a clock time; the bar's source rides along as a 'bar.<source>' note. */
+function retentionVerdictOf(rows: FactRows, ctx: MetricCtx, env: StoreEnv): StoreResult {
+  if (rows.kind !== 'beacon' || env.organic?.kind !== 'beacon' || !ctx.campaign) return { value: null }
+  const arm = armReturnCounts(rows.rows, ctx)
+  const organic = armReturnCounts(env.organic.rows, ORGANIC_CTX)
+  const { matured, daysToMature } = armMaturity(ctx.campaign, env.todayEt)
+  const b = retentionBar({ organicD0: organic.d0, organicReturns: organic.d2to7, organicDays: organicMaturedDays(env.todayEt) })
+  const v = retentionVerdict({ d0: arm.d0, returns27: arm.d2to7, matured, daysToMature, bar: b.bar })
+  return { value: VERDICT_CODES.indexOf(v.code), noteIds: [`verdict.${v.code}`, b.source === 'organic' ? 'bar.organic' : `bar.fixed-${b.reason}`] }
+}
+
 // ── The ads store's freshness (lib/adsStore.ts readFreshness), per campaign ────────────────
 /** 'spend-source.<source>': where campaign.spend's figure comes from (lib/adsRules.ts
  * resolveCampaignSpend). The value is a code (1 the Ads API, 0 hand-entered) shown as its label. */
@@ -228,6 +332,37 @@ function lastSyncOf(rows: FactRows, ctx: MetricCtx): { value: number | null } {
   const iso = rows.rows.find((r) => r.campaignId === ctx.params.campaignId)?.lastSync ?? null
   const ms = iso === null ? NaN : Date.parse(iso)
   return { value: Number.isFinite(ms) ? ms : null }
+}
+
+// ── Google Play's own per-day totals (R-4; ads_play_daily, synced by `npm run ads:play-sync`) ──
+// Whole-app counts by PLAY day, as Google reports them: never a beacon row, never joined to one.
+// Page-range only. A day's count is null when Play's report had no such figure, and no stored day
+// in range (or only nulls) is "no figure", never a zero.
+type PlayCount = 'deviceInstalls' | 'deviceUninstalls'
+function playInRange(rows: FactRows, env: StoreEnv) {
+  if (rows.kind !== 'playDaily' || !env.pageRange) return []
+  const [from, to] = env.pageRange
+  return rows.rows.filter((r) => {
+    const t = etMidnightMs(r.date)
+    return t >= from && t < to
+  })
+}
+/** A flow (installs, uninstalls): the sum of the stored days' counts in the range. */
+const playSumOf =
+  (col: PlayCount) =>
+  (rows: FactRows, _ctx: MetricCtx, env: StoreEnv): { value: number | null } => {
+    const vals = playInRange(rows, env).flatMap((r) => (r[col] === null ? [] : [r[col] as number]))
+    return { value: vals.length ? vals.reduce((a, b) => a + b, 0) : null }
+  }
+/** A stock (active device installs): its latest figure in the range, never a sum across days. */
+function playActiveOf(rows: FactRows, _ctx: MetricCtx, env: StoreEnv): { value: number | null } {
+  const last = playInRange(rows, env).filter((r) => r.activeDeviceInstalls !== null).pop()
+  return { value: last ? (last.activeDeviceInstalls as number) : null }
+}
+/** The newest Play day stored (not limited to the range), so the card shows how far the data runs. */
+function playThroughOf(rows: FactRows): { value: number | null } {
+  if (rows.kind !== 'playDaily' || !rows.rows.length) return { value: null }
+  return { value: etMidnightMs(rows.rows.reduce((m, r) => (r.date > m ? r.date : m), rows.rows[0].date)) }
 }
 
 export const METRIC_DEFS: MetricDef[] = [
@@ -275,13 +410,8 @@ export const METRIC_DEFS: MetricDef[] = [
       ...(bucket === 'd0' ? {} : { subsetOf: 'campaign.returnD0', lagDays: lag }),
       params: ['campaignId'],
       windows: { attribution: 'campaignReturns' },
-      path: (p, ctx) => {
-        const ev = returnOf(p)
-        if (!ev || ev.bucket !== bucket) return false
-        // The organic arm has no campaign: its rows carry the reserved tag itself.
-        if (ctx.params.campaignId === ORGANIC_ARM_ID) return ev.uc === ORGANIC_ARM_ID
-        return !!ctx.campaign?.ucValues.includes(ev.uc)
-      },
+      // The organic arm has no campaign: its rows carry the reserved tag itself (armReturn).
+      path: (p, ctx) => armReturn(p, ctx)?.bucket === bucket,
       instrumented: (ctx) => (ctx.params.campaignId === ORGANIC_ARM_ID ? [BEACON, ORGANIC_TRACKING] : [BEACON, TRACKING_VS_FLIGHT]),
       organic: true,
     }),
@@ -299,6 +429,35 @@ export const METRIC_DEFS: MetricDef[] = [
       instrumented: (ctx) => (ctx.window === 'upsellPre' || ctx.window === 'upsellPost' ? [BEACON, UPSELL_BOUNDARY] : [BEACON]),
     }),
   ),
+  // R2-7 (retention spec section 4): returns on days 2-7 over first tagged loads, per campaign arm,
+  // with the 90% Wilson interval. Store metrics over the arm's return rows; a share (unit 'rate'),
+  // never a count, so no ratio can use one. The organic arm reads its MATURED cohort only
+  // (armReturnCounts): the baseline the verdict's bar is set from.
+  ...(['rate', 'lower', 'upper'] as const).map((part) =>
+    campaignMetric({
+      id: `campaign.returnD2to7${part === 'rate' ? 'Rate' : part === 'lower' ? 'Lower' : 'Upper'}`,
+      unit: 'rate',
+      params: ['campaignId'],
+      windows: { attribution: 'campaignReturns' },
+      store: returnD2to7Of(part),
+      instrumented: (ctx) => (ctx.params.campaignId === ORGANIC_ARM_ID ? [BEACON, ORGANIC_TRACKING] : [BEACON, TRACKING_VS_FLIGHT]),
+      lagDays: [2, 7],
+      organic: true,
+      caveats: RETENTION_CAVEATS,
+    }),
+  ),
+  // The per-arm verdict (retention spec section 4): the arm's R2-7 against the organic baseline's
+  // bar, as a code shown by its 'verdict.<code>' label. Never organic itself.
+  campaignMetric({
+    id: 'campaign.retentionVerdict',
+    unit: 'code',
+    params: ['campaignId'],
+    windows: { attribution: 'campaignReturns' },
+    store: retentionVerdictOf,
+    withOrganic: true,
+    caveats: RETENTION_CAVEATS,
+    instrumented: [BEACON, TRACKING_VS_FLIGHT],
+  }),
   campaignMetric({
     id: 'campaign.spendSource',
     unit: 'code',
@@ -332,6 +491,16 @@ export const METRIC_DEFS: MetricDef[] = [
     spend: (rows, ctx) => resolveCampaignSpend(rows.find((r) => r.campaignId === ctx.params.campaignId) ?? null, CAMPAIGN_SPEND[ctx.params.campaignId ?? ''] ?? null).spend,
     instrumented: [],
   }),
+
+  // ── Google Play (site-wide; the page range only; instrumented: [] since it is not a beacon) ──
+  ...(
+    [
+      { id: 'play.deviceInstalls', unit: 'device', store: playSumOf('deviceInstalls') },
+      { id: 'play.deviceUninstalls', unit: 'device', store: playSumOf('deviceUninstalls') },
+      { id: 'play.activeDeviceInstalls', unit: 'device', store: playActiveOf },
+      { id: 'play.dataThrough', unit: 'instant', store: playThroughOf },
+    ] as const
+  ).map((d) => bskMetric({ ...d, windows: { page: 'adsPlayDaily' }, instrumented: [] })),
 
   // ── Best Sudoku site-wide (bskKpiDays for today so far; bskRangePath for a page range) ──
   bskMetric({ id: 'bsk.pageviews', unit: 'pageview', path: (p) => !isEventPath(p), windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [] }),
@@ -470,7 +639,7 @@ export const METRICS: ReadonlyMap<string, MetricDef> = (() => {
     if (d.label !== `label.${d.id}`) throw new Error(`metric ${d.id}: label must be label.${d.id}`)
     if (!Object.keys(d.windows).length) throw new Error(`metric ${d.id}: no windows`)
     if (!d.path && !d.visitor && !d.spend && !d.store && Object.values(d.windows).some((f) => f === 'adsSpend')) throw new Error(`metric ${d.id}: a spend fact needs spend() or store()`)
-    if (!d.store && Object.values(d.windows).some((f) => f === 'adsCoverage' || f === 'adsLastSync' || f === 'bskFirstHit')) throw new Error(`metric ${d.id}: a store fact needs store()`)
+    if (!d.store && Object.values(d.windows).some((f) => f === 'adsCoverage' || f === 'adsLastSync' || f === 'adsPlayDaily' || f === 'bskFirstHit')) throw new Error(`metric ${d.id}: a store fact needs store()`)
     // The engine buckets the KPI fact's rows into ET days once per batch (lib/metrics/engine.ts),
     // which holds only while that fact serves exactly the today-so-far window and nothing else.
     for (const [w, f] of Object.entries(d.windows)) {
@@ -480,6 +649,10 @@ export const METRICS: ReadonlyMap<string, MetricDef> = (() => {
     // any other fact would read the 'organic' campaignId as an unknown campaign.
     if (d.organic && (!d.params.includes('campaignId') || Object.values(d.windows).some((f) => f !== 'campaignReturns'))) {
       throw new Error(`metric ${d.id}: organic needs a campaignId param and reads campaignReturns only`)
+    }
+    // The organic baseline reaches a store only beside a campaign arm's own returns fact.
+    if (d.withOrganic && (!d.store || d.organic || Object.values(d.windows).some((f) => f !== 'campaignReturns'))) {
+      throw new Error(`metric ${d.id}: withOrganic needs a store over campaignReturns and is never organic`)
     }
     // No path test = every row counts, refused rows included: the opt-out would be a lie.
     if (d.countsRefused === false && !d.path) throw new Error(`metric ${d.id}: countsRefused: false needs a path test`)

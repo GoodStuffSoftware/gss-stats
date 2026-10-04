@@ -41,14 +41,14 @@ const widgetsOf = (cfg: DashboardConfig) => cfg.pages.find((p) => p.id === 'beac
 const mask = (x: unknown) => JSON.stringify(x).replace(/\d{4}-\d\d-\d\dT[\d:.]+Z/g, 'T')
 
 describe('v15: the layout version', () => {
-  it('is 15 and the newest, after navigation (13) and sparklines (14)', () => {
+  it('is 15, after navigation (13) and sparklines (14); a newer step (captions) follows it', () => {
     expect(LAYOUT_VERSIONS.dateEtTrends).toBe(15)
-    expect(CONFIG_VERSION).toBe(15) // a literal on purpose
+    expect(CONFIG_VERSION).toBeGreaterThan(LAYOUT_VERSIONS.dateEtTrends)
     expect(CONFIG_VERSION).toBe(Math.max(...Object.values(LAYOUT_VERSIONS)))
     expect(LAYOUT_VERSIONS.dateEtTrends).toBeGreaterThan(LAYOUT_VERSIONS.sparklines)
   })
-  it('a fresh config is written at 15', () => {
-    expect(defaultConfig().version).toBe(15)
+  it('a fresh config is written at the newest version (15 or later)', () => {
+    expect(defaultConfig().version).toBe(CONFIG_VERSION)
   })
 })
 
@@ -113,12 +113,12 @@ describe('v15: the migration (stored version below 15 only)', () => {
     const bcn = oldTrend('bcn-trend')
     const bsk = oldTrend('bsk-trend')
     const out = normalizeConfig(stored(14, [bcn, bsk]))
-    expect(out.version).toBe(15)
+    expect(out.version).toBe(CONFIG_VERSION)
     const [a, b] = widgetsOf(out)
     expect(a).toMatchObject({ id: 'bcn-trend', dimension: 'dateEt', title: 'Pageviews over time', dataset: 'geo', limit: 90, x: 3, y: 0, w: 9, h: 8 })
     expect(b).toMatchObject({ id: 'bsk-trend', dimension: 'dateEt', title: 'Visits over time', dataset: 'geo', limit: 90, markers: 'releases', x: 3, y: 0, w: 9, h: 8 })
     // the same load of the same widgets stored at 15 (no step) differs only by the dimension
-    const same = widgetsOf(normalizeConfig(stored(15, [bcn, bsk])))
+    const same = widgetsOf(normalizeConfig(stored(LAYOUT_VERSIONS.dateEtTrends, [bcn, bsk])))
     expect(mask([{ ...a, dimension: 'date' }, { ...b, dimension: 'date' }])).toBe(mask(same))
   })
 
@@ -167,7 +167,7 @@ describe('v15: the migration (stored version below 15 only)', () => {
 
   it('is version-gated: a layout already at 15 with a date chart is left as it is, so a later choice of `date` sticks', () => {
     const w = oldTrend('bcn-trend')
-    expect(widgetsOf(normalizeConfig(stored(15, [w])))[0].dimension).toBe('date')
+    expect(widgetsOf(normalizeConfig(stored(LAYOUT_VERSIONS.dateEtTrends, [w])))[0].dimension).toBe('date')
     // idempotent: loading the migrated result again changes nothing
     const once = normalizeConfig(stored(14, [w]))
     expect(mask(normalizeConfig(clone(once)))).toBe(mask(once))

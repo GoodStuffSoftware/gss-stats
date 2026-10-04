@@ -1,13 +1,16 @@
-// The notes/text registry (owner requirement, 2026-09-26): every caveat, definition, and
-// explanatory paragraph the dashboard shows lives here, ONE place, instead of scattered
-// literal strings/constants across App.vue and the widget bodies. A note is rendered
+// The notes/text registry: every system caveat, definition, and explanatory paragraph the
+// dashboard shows lives here, ONE place, instead of scattered literal strings/constants across
+// App.vue and the widget bodies. A chart's own caption is NOT kept here: since layout v16 (notes
+// plan, slice 1c) it is plain text on the widget (Widget.caption), and the static entries below
+// are a library the editor can copy text from. Every id stays readable, so a legacy `widget.notes`
+// list keeps rendering until the chart's next edit converts it. A note is rendered
 // through NoteBlock.vue (short, single-line caveats) or TextBlock.vue (longer, possibly
 // multi-paragraph prose) — never hand-written markup — via lib/textLite.ts's safe
 // tokenizer (no v-html anywhere).
 //
 // Design:
-//  - id: stable key, referenced by widget.noteId (the 'note' widget type) or widget.notes
-//    (an attached-caption list on any other widget).
+//  - id: stable key, referenced by widget.noteId (the 'note' widget type), a card spec's
+//    `captions`, widget.hiddenCaveats, or the legacy widget.notes caption list.
 //  - text: a string, or a function for text that depends on live config (e.g. Play
 //    tracking's activation date) — always called fresh, never cached.
 //  - kind: 'note' (short caveat — NoteBlock's default styling) or 'text' (longer prose —
@@ -18,10 +21,15 @@
 //    defaultNoteIdsForScope / noteOptions), so the caption pickers don't fill up with labels.
 //  - severity: cosmetic only (info/caveat/warning) — never changes what data means.
 //  - scopes: which dataset/view combinations this note is a DEFAULT for (see
-//    defaultNoteIdsForScope) — a widget can still opt into/out of any note regardless of
-//    scope via its own `notes` list.
+//    defaultNoteIdsForScope). Since layout v16 (decision D2-B) a scope default that is not a
+//    static caption shows AUTOMATICALLY under every chart of that scope (autoCaveatIds); a
+//    hideable one can be hidden per chart (Widget.hiddenCaveats).
 //  - activeWhen: optional gate (e.g. only while a tracking date is still null) — an
 //    inactive note is simply not returned by defaultNoteIdsForScope/isNoteActive.
+//  - appliesTo: optional per-widget condition for an AUTOMATIC caveat (autoCaveatIds): the
+//    caveat shows automatically only under a widget it is true for (e.g. the country-columns
+//    caveat only on a card that splits by country). Above all for a data-cut note, which a
+//    viewer cannot hide wherever it shows.
 //  - vars: optional default template vars (see lib/textLite.ts tokenizeAndInterpolate) — a
 //    caller can still pass its own vars to override/extend at render time (see
 //    NoteBlock/TextBlock, which call noteTokens — never noteRawText, which is plain-text
@@ -43,11 +51,16 @@ import {
 } from './popupEvents'
 import { ARRIVALS_CAVEAT, RAW_INSTALL_SIGNALS_LABEL, type FunnelStepKey } from './campaigns'
 import { tokenizeAndInterpolate, toPlainText } from './textLite'
+import { presetById } from './metrics/presets'
+import type { Widget } from '../types'
+import type { CardSpec } from './metrics/types'
 // Read-only: notes.ts is dashboard-only (never bundled into the ads-sync Worker, unlike
 // lib/popupEvents.ts — see that file's own comment on why it keeps AUTH_NEW_EXISTING_LIVE_AT
 // out of itself), so importing the constant from lib/adsRules.ts here is fine.
 import { AUTH_NEW_EXISTING_LIVE_AT } from './adsRules'
 import { etOffsetHours } from './etTime'
+import { SIGNUPS_HINT } from './adsReadingsFormat'
+import { BAR_FIXED, ORGANIC_BAR_FACTOR, ORGANIC_MIN_D0, ORGANIC_MIN_DAYS } from './metrics/retention'
 
 // "counted from 2026-09-26 15:43 ET" — AUTH_NEW_EXISTING_LIVE_AT's own ET wall time, for the
 // new/existing/unknown sign-up tiles' partial-window note (lib/metrics/metrics.ts
@@ -80,7 +93,17 @@ export interface NoteDef {
   scopes: NoteScope[]
   activeWhen?: () => boolean
   vars?: Record<string, string | number>
+  /** Only `false` is meaningful: a data-cut note a viewer must not hide (per-chart hiding, notes
+   * plan slice 1c, reads it). Absent or true = it can be hidden. */
+  hideable?: boolean
+  /** An automatic caveat's widget condition (autoCaveatIds): it shows automatically only under a
+   * widget this returns true for. Absent = every widget of its scopes. A caveat that names a
+   * specific view (columns, a split) must carry one, so it never appears where it is untrue. */
+  appliesTo?: (widget: AutoCaveatWidget) => boolean
 }
+
+/** The widget fields an automatic caveat's condition (NoteDef.appliesTo) may read. */
+export type AutoCaveatWidget = Pick<Widget, 'type' | 'dataset' | 'notes' | 'card'>
 
 function resolveText(n: NoteDef): string {
   return typeof n.text === 'function' ? n.text() : n.text
@@ -154,8 +177,8 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
   },
   'min-cohort-caveat': {
     id: 'min-cohort-caveat',
-    // Data-driven value templated in, not baked into the string (owner requirement) — see
-    // lib/textLite.ts interpolate.
+    // Data-driven value templated in, not baked into the string — see lib/textLite.ts
+    // tokenizeAndInterpolate. The value follows code, so this entry is a caveat (decision D1).
     text: 'Rates need at least {minCohort} in their denominator, or they show "too few to report".',
     kind: 'note',
     severity: 'caveat',
@@ -221,6 +244,75 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     kind: 'note',
     severity: 'info',
     scopes: ['campaigns'],
+  },
+  'engagement-per-arrival': {
+    id: 'engagement-per-arrival',
+    text: 'Completed games per arrival (first tagged load). It can exceed 1 and repeat players inflate it: it is not the share of arrivals who played.',
+    kind: 'note',
+    severity: 'caveat',
+    scopes: ['campaigns'],
+  },
+  'retention-disjoint': {
+    id: 'retention-disjoint',
+    // Built from the verdict's own constants (lib/metrics/retention.ts), so the text cannot drift
+    // from the bar the rule uses. ET-day wording only: no clock time.
+    text: () =>
+      `Organic and campaign arrivals are different devices. Organic is a first-ever web visit with no campaign tag, and the first touch wins. The bar compares the two groups. It does not net organic out of a campaign. The bar is ${ORGANIC_BAR_FACTOR} times the organic days 2-7 rate once ${ORGANIC_MIN_D0.toLocaleString('en-US')} organic arrivals over at least ${ORGANIC_MIN_DAYS} days have matured and some of them have returned. Until then, and if none have returned, it is a fixed ${+(BAR_FIXED * 100).toFixed(1)}%.`,
+    kind: 'note',
+    severity: 'caveat',
+    scopes: [],
+    hideable: false,
+  },
+  'retention-organic-bias': {
+    id: 'retention-organic-bias',
+    // From the bar's own constants (lib/metrics/retention.ts). Days only: no clock time.
+    text: () =>
+      `The organic bar runs high. Its returns include some from recent arrivals that are not yet in the arrival count, about 2.5 to 3.5 days of arrivals' worth, so it is too high by about that many days divided by the matured organic days (${ORGANIC_MIN_DAYS} days: ${+((2.5 / ORGANIC_MIN_DAYS) * 100).toFixed(0)}% to ${+((3.5 / ORGANIC_MIN_DAYS) * 100).toFixed(0)}%). That is why the organic bar waits for ${ORGANIC_MIN_DAYS} matured days.`,
+    kind: 'note',
+    severity: 'caveat',
+    scopes: [],
+  },
+  'retention-lower-bound': {
+    id: 'retention-lower-bound',
+    text: 'These rates are a lower bound on how many people come back. A device is browser storage, not a person: cleared storage, private windows, a second browser and a move to the app all lose returns. The 90% bounds cover sampling error only, not that bias.',
+    kind: 'note',
+    severity: 'caveat',
+    scopes: [],
+  },
+  'retention-page-scope': {
+    id: 'retention-page-scope',
+    text: 'Every campaign figure on this page is a **count per campaign** over its whole flight, and the organic baseline over its matured days: the filters above (date range, sites, own visits) do not change them. The Play tiles follow the date range only; the sites and own-visits filters do not apply to Play, which Google reports for the whole app. These are counts and rates; nothing is split by hour, place or device.',
+    kind: 'text',
+    severity: 'info',
+    scopes: [],
+  },
+  'play-days': {
+    id: 'play-days',
+    text: 'Play figures are the whole-app daily totals Google Play reports, by Play day (as reported by Google Play; not confirmed to be an ET day, so they are never mixed with the ET-day figures). Google posts them 3-7 days late: see "data through".',
+    kind: 'note',
+    severity: 'caveat',
+    scopes: [],
+  },
+  'play-household': {
+    id: 'play-household',
+    text: "Play device and install counts include the developer's own household devices and cannot be attributed to any one campaign (the app captures no install referrer).",
+    kind: 'note',
+    severity: 'caveat',
+    scopes: [],
+  },
+  'play-no-retention': {
+    id: 'play-no-retention',
+    text: "Day-1 and day-7 retention are not available from Google Play's bulk reports, so there is no Play retention figure here.",
+    kind: 'note',
+    severity: 'caveat',
+    scopes: [],
+  },
+  'play-active-is-stock': {
+    id: 'play-active-is-stock',
+    text: 'Active device installs is a running total, not a count of the days: the tile shows its latest figure in the range.',
+    kind: 'note',
+    severity: 'info',
+    scopes: [],
   },
   'return-rate-caption': {
     id: 'return-rate-caption',
@@ -301,6 +393,9 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     kind: 'note',
     severity: 'info',
     scopes: ['campaigns'],
+    hideable: false,
+    // Its text is about "the country columns": automatic only on a card that has them.
+    appliesTo: (w: AutoCaveatWidget) => cardSplitsByCountry(w.card),
   },
   // The release panel (lib/metrics/presets.ts release-before-after): why the before window reads
   // low. Plain wording, as the panel's own line had it.
@@ -356,6 +451,10 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.campaign.returnD8to14': 'Came back on days 8-14',
     'label.campaign.returnD15to30': 'Came back on days 15-30',
     'label.campaign.returnD31to60': 'Came back on days 31-60',
+    'label.campaign.returnD2to7Rate': 'Came back d2-7 (rate)',
+    'label.campaign.returnD2to7Lower': 'Came back d2-7 (90% lower)',
+    'label.campaign.returnD2to7Upper': 'Came back d2-7 (90% upper)',
+    'label.campaign.retentionVerdict': 'Retention verdict',
     'label.campaign.spend': 'Spend',
     'label.bsk.pageviews': 'Page views',
     'label.bsk.completions': 'Games completed',
@@ -399,12 +498,19 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.campaign.spendThrough': 'Spend through',
     'label.campaign.lastSync': 'Synced',
 
+    // Google Play's own daily totals (lib/metrics/metrics.ts play.*).
+    'label.play.deviceInstalls': 'Play device installs',
+    'label.play.deviceUninstalls': 'Play device uninstalls',
+    'label.play.activeDeviceInstalls': 'Play active device installs',
+    'label.play.dataThrough': 'Play data through',
+
     // Ratios (lib/metrics/ratios.ts).
     'label.campaign.acceptPerAsk': 'Accept rate',
     'label.campaign.signedInPerAsk': 'Signed in after ask',
     'label.campaign.installPerPrompt': 'Install rate',
     'label.campaign.returnD1PerD0': 'Return rate (d1)',
     'label.campaign.returnD2to7PerD0': 'Return rate (d2-7)',
+    'label.campaign.engagementPerArrival': 'Games completed per arrival',
     'label.campaign.returnD8to14PerD0': 'Return rate (d8-14)',
     'label.campaign.returnD15to30PerD0': 'Return rate (d15-30)',
     'label.campaign.returnD31to60PerD0': 'Return rate (d31-60)',
@@ -435,6 +541,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'unit.instant': 'time',
     'unit.hits': 'hits',
     'unit.code': 'kind',
+    'unit.rate': 'rate',
 
     // Status words and gating messages (MetricValue.status / noteIds).
     'flight-pending': 'pending — start date not yet confirmed',
@@ -459,9 +566,27 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'release-pending': 'no release window yet',
     'spend-source.ads-api': 'Ads API',
     'spend-source.config': 'hand-entered',
+    // campaign.retentionVerdict's codes (lib/metrics/metrics.ts VERDICT_CODES): short labels only.
+    'verdict.go': 'GO',
+    'verdict.hold': 'HOLD',
+    'verdict.no-go': 'NO-GO',
+    'verdict.provisional': 'provisional',
+    'verdict.maturing': 'maturing',
+    // Shown instead of 'maturing' when the days left are known (lib/metrics/render.ts, worked out at
+    // render time from the campaign's flight, whole ET days).
+    'verdict.maturing.days': 'maturing ({n} days left)',
+    'verdict.maturing.one': 'maturing (1 day left)',
+    'verdict.too-few': 'too few',
+    // Where the verdict's bar came from (lib/metrics/metrics.ts retentionVerdictOf, retentionBar's
+    // source and reason): shown beside the verdict.
+    'bar.organic': 'bar: organic baseline',
+    'bar.fixed-arrivals': 'bar: fixed, organic arrivals too few',
+    'bar.fixed-days': 'bar: fixed, organic days too few',
+    'bar.fixed-no-returns': 'bar: fixed, no organic returns',
     'ads-stale': 'stale — sync pending',
     'no-spend-day-yet': 'no closed spend day stored yet',
     'not-synced-yet': 'not synced yet',
+    'play-not-synced-yet': 'no Play figures stored yet',
 
     // Card labels that are not a metric's own name (lib/metrics/presets.ts).
     'label.card.flight': 'Flight',
@@ -473,11 +598,38 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.card.notes': 'Notes',
     'label.card.loadFailed': 'Some numbers could not be loaded.',
     'label.card.retry': 'Retry',
+    'label.card.loading': 'Loading…',
     'label.card.invalid': "This card's saved settings could not be read, so it can't be shown. Edit it or restore the default charts.",
+    // The ads readings log's column heads (lib/metrics/presets.ts ADS_READINGS_LOG).
+    'label.reading.read': 'Read',
+    'label.reading.kind': 'Kind',
+    'label.reading.rules': 'Rules',
+    'label.reading.proposal': 'Proposal',
+    'label.reading.asks': 'Asks',
+    'label.reading.accepts': 'Accepts',
+    'label.reading.auth': 'Auth',
+    'label.reading.signUps': 'Sign-ups',
+    'label.reading.signUpsHint': SIGNUPS_HINT,
+    'label.card.syncAlert': 'Sync alert: {message}',
+    'label.card.freshness': 'Data',
+    'label.card.firedThresholds': 'Fired',
+    // The ads readings log's notices (CardSpec.notices 'ads-readings'): the readings store's state,
+    // and the small-numbers note with what the routine does and does not do.
+    'ads-store-unbound': 'Readings store not bound (gss_stats_ads) — showing config spend only.',
+    'ads-store-unreadable': 'Readings store unreadable — showing config spend only.',
+    'ads-readings-note': `${SMALL_SAMPLE_NOTE} Proposals only; the routine never changes a campaign.`,
+    'no-ads-campaign': 'No campaign has readings or stored spend yet.',
+    'no-readings-yet': 'No readings yet.',
+    'label.preset.ads-readings-log': 'Ads readings log',
+    'label.preset.ads-readings-log.description': 'One card per campaign: its spend and freshness, the thresholds it fired, and the ads-read routine readings log with its rule results and proposals.',
     'label.card.openCampaigns': 'Open the Campaigns page',
     'label.card.release': 'Release',
     'label.card.retiredPanel': 'This panel has been replaced by a card or a chart. Edit it, or restore the default charts.',
+    'label.card.rateUnknown': 'This rate is not one this version knows. Edit the chart and pick a rate.',
     'label.card.step': 'Step',
+    'label.card.arm': 'Arm',
+    // Neutral: the organic row's arrivals are untagged first web visits, a campaign row's are tagged.
+    'label.card.arrivals-d0': 'Arrivals (d0)',
     'label.card.returnTag': 'Return beacons',
     'label.card.return.d1': 'd1',
     'label.card.return.d2-7': 'd2-7',
@@ -521,6 +673,12 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.preset.campaign-returns.description': 'One card per campaign with return beacons: first tagged loads (d0) and each later window\'s return rate, left to right.',
     'label.preset.campaign-country': 'Arrivals and funnel by country',
     'label.preset.campaign-country.description': 'One card per beacon-tracked campaign: each funnel step split into US, CA and every other country.',
+    'label.preset.retention-verdict': 'Retention verdict',
+    'label.preset.retention-verdict.description': 'One row per campaign and the organic baseline: the verdict, the days 2-7 return rate with its 90% bounds, arrivals, and completed games per arrival.',
+    'label.preset.campaign-engagement': 'Engagement per arrival',
+    'label.preset.play-installs': 'Play installs',
+    'label.preset.play-installs.description': "Google Play's own device installs and uninstalls over the date range, the latest active device installs in it, and how far Play's data runs. Whole-app counts; not split by campaign.",
+    'label.preset.campaign-engagement.description': 'One card per beacon-tracked campaign: completed games per first tagged load, with the two counts it is made of.',
     'label.preset.campaign-cost': 'Campaign cost',
     'label.preset.campaign-cost.description': 'One card per campaign: spend, where it came from and how fresh it is, and the cost per arrival and per auth success.',
     'label.preset.release-before-after.description': 'The newest release with a full day after it: page views, tagged arrivals, auth successes and installs over the same number of days before and after it.',
@@ -593,10 +751,10 @@ export function isNoteActive(id: string): boolean {
   return !n.activeWhen || n.activeWhen()
 }
 
-/** Every registry note that DEFAULTS on for a given dataset scope and is currently active —
- * used to seed a widget's attached-caption list (widget.notes) when unset. A widget's OWN
- * `notes` array, once set, always wins over this (see components/widgets bodies /
- * ChartEditor.vue) — this is only the fallback. */
+/** Every registry note that DEFAULTS on for a given dataset scope and is currently active (an
+ * `activeWhen` gate that is off drops it). The caveats among them (not static captions) show
+ * automatically under every chart of that scope (autoCaveatIds, decision D2-B); the static
+ * captions are only offered through "Insert from library". */
 export function defaultNoteIdsForScope(scope: NoteScope): string[] {
   return Object.values(NOTES_REGISTRY)
     .filter((n) => n.kind !== 'label' && n.scopes.includes(scope) && isNoteActive(n.id))
@@ -615,6 +773,21 @@ export function noteOptions(): { value: string; label: string }[] {
     })
 }
 
+/** A static library caption (decision D1, slice 1c): fixed text with no `activeWhen` gate, no
+ * computed text, no code-tied `vars`, and not a data-cut note (`hideable: false`). Only these are
+ * offered by "Insert from library" and folded into `Widget.caption` when a chart with legacy
+ * `notes` is edited (D5); every other registry entry is a caveat that stays system-owned. */
+export function isStaticCaptionNote(id: string): boolean {
+  const n = getNote(id)
+  return !!n && n.kind !== 'label' && typeof n.text === 'string' && !n.activeWhen && !n.vars && n.hideable !== false && !n.appliesTo
+}
+
+/** "Insert from library" options: every static caption, id + a short plain-text preview. The
+ * entries themselves stay read-only; inserting copies the text (noteTemplate) into the caption. */
+export function libraryCaptionOptions(): { value: string; label: string }[] {
+  return noteOptions().filter((o) => isStaticCaptionNote(o.value))
+}
+
 /** Resolve which registry note ids a chart widget's attached captions should show — pulled
  * out of ChartCard.vue as a pure function so the per-widget-override rule is unit-testable
  * without mounting a component. Rules (see ChartCard.vue's own comment for the reasoning):
@@ -622,11 +795,74 @@ export function noteOptions(): { value: string; label: string }[] {
  *  - an EXPLICIT `widget.notes` (even []) always wins, whatever it is;
  *  - otherwise: NO captions. This is the "migration default" for a widget saved before this
  *    feature existed (widget.notes is absent/undefined on it) — it renders exactly as it
- *    did before, never gaining a caption it never had just because the registry now HAS
- *    scope defaults. Scope defaults (defaultNoteIdsForScope) are only ever used to PRE-FILL
- *    `notes` when a widget is first created or edited (see lib/defaults.ts's widget
- *    builders and ChartEditor.vue) — never injected here at render time. */
+ *    did before. A scope's caveats are never added to this list: since layout v16 they show
+ *    through a separate one (autoCaveatIds, D2-B). `notes` is legacy: ChartEditor no longer
+ *    writes it, and folds its static entries into `Widget.caption` on the next edit (D5). */
 export function widgetCaptionNoteIds(widget: { type: string; notes?: string[] }): string[] {
   if (widget.type === 'note') return []
   return widget.notes ?? []
+}
+
+/** True when `id` names a registry note that a chart or card may hide: known, and not marked
+ * `hideable: false`. An unknown id is never hideable. MetricCard uses this for spec captions. */
+export function isNoteIdHideable(id: string): boolean {
+  const def = getNote(id)
+  return !!def && def.hideable !== false
+}
+
+/** The dataset scope a widget's automatic caveats come from: its dataset when the registry has a
+ * scope of that name, else null (a plain RUM chart, completions), which has none. */
+export function widgetNoteScope(widget: { dataset?: string }): NoteScope | null {
+  const d = widget.dataset
+  return d === 'overview' || d === 'campaigns' || d === 'popup' || d === 'geo' || d === 'ads-readings' ? d : null
+}
+
+/** A card widget's own spec caption ids (CardSpec.captions; a preset ref is resolved). MetricCard
+ * shows these inside the card body. */
+function cardCaptionIds(card: Widget['card']): readonly string[] {
+  return cardSpecOf(card)?.captions ?? []
+}
+
+/** A card widget's spec: its own, or its preset's (undefined for an unknown preset or no card). */
+function cardSpecOf(card: Widget['card']): CardSpec | undefined {
+  if (!card) return undefined
+  return 'preset' in card ? presetById(card.preset) : card.spec
+}
+
+/** True when a card shows country columns or a per-country repeat anywhere: the card itself, a
+ * section's repeat or `columns`, or an item's repeat over 'countries' (the same places
+ * lib/metrics/validate.ts dropRetiredItems reads). Stored data, so every level is checked
+ * defensively. A plain chart never has country columns. */
+export function cardSplitsByCountry(card: Widget['card']): boolean {
+  const spec = cardSpecOf(card)
+  if (!spec) return false
+  const overCountries = (r: unknown): boolean => !!r && typeof r === 'object' && (r as { over?: unknown }).over === 'countries'
+  if (overCountries(spec.repeat)) return true
+  return (Array.isArray(spec.sections) ? spec.sections : []).some(
+    (sec) =>
+      !!sec &&
+      (overCountries(sec.repeat) ||
+        overCountries(sec.columns) ||
+        (Array.isArray(sec.items) ? sec.items : []).some((it) => !!it && overCountries(it.repeat))),
+  )
+}
+
+/** Decision D2-B (layout v16): the caveats a widget shows automatically, in registry order. They
+ * are its scope's defaults (defaultNoteIdsForScope, so an `activeWhen` gate is honoured) that are
+ * not static captions (isStaticCaptionNote: those are the author's to insert) and whose widget
+ * condition (NoteDef.appliesTo) holds for this widget, minus the ids the
+ * widget already shows another way: its legacy `notes` and, on a card, the spec's own captions.
+ * A note widget has none. A hideable one is hidden through Widget.hiddenCaveats by its registry
+ * id; a data-cut one (`hideable: false`) always shows. normalizeConfig hides, once, the hideable
+ * ones a chart stored before v16 did not show (lib/defaults.ts seedHiddenAutoCaveatsV16). */
+export function autoCaveatIds(widget: AutoCaveatWidget): string[] {
+  if (widget.type === 'note') return []
+  const scope = widgetNoteScope(widget)
+  if (!scope) return []
+  const shown = new Set([...(widget.notes ?? []), ...cardCaptionIds(widget.card)])
+  return defaultNoteIdsForScope(scope).filter((id) => {
+    if (isStaticCaptionNote(id) || shown.has(id)) return false
+    const applies = getNote(id)?.appliesTo
+    return !applies || applies(widget)
+  })
 }

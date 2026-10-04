@@ -106,10 +106,12 @@ export function prewarmFactKeys(): void {
         factCacheKeyUrl({ id, params: { campaignId: c.id } })
       }
     }
-    factCacheKeyUrl({ id: 'campaignReturns', params: { campaignId: ORGANIC_ARM_ID } }) // the organic baseline arm
     factCacheKeyUrl({ id: 'adsSpend', params: {} })
     // The date- and range-dependent facts: their keys change daily, but their SQL text does not,
     // so hashing that text now leaves only their bound values for the first request of a day.
+    // The organic baseline arm keys on todayEt too (its ET-day maturity band, lib/metrics/facts.ts
+    // ORGANIC_MATURITY_SQL), exactly as lib/metrics/engine.ts factParamsFor plans it.
+    factCacheKeyUrl({ id: 'campaignReturns', params: { campaignId: ORGANIC_ARM_ID, todayEt: '2026-01-01' } })
     factCacheKeyUrl({ id: 'bskKpiDays', params: { todayEt: '2026-01-01' } })
     factCacheKeyUrl({ id: 'bskRangePath', params: { since: '2026-01-01', until: '2026-01-02' } })
     for (const sites of [[], ['bestsudoku-web'], ['bestsudoku-web', 'bestsudoku', 'bestsudoku-app']]) {
@@ -167,7 +169,11 @@ export async function fetchFacts(plan: Plan, env: MetricFactsEnv, opts: FetchOpt
         statements++
         raw = ((await db.prepare(stmt.sql).bind(...stmt.binds).all()).results ?? []) as Record<string, unknown>[]
       } catch (e) {
-        facts.set(f.key, failSoft ? { ok: true, rows: def.parse([]), asOfMs: opts.nowMs } : { ok: false, error: String(e) })
+        // The spend facts read any error as "nothing stored" (CAMPAIGN_SPEND fills in). Play has no
+        // fallback and its card says "no Play figures stored yet", so only a missing table (migration
+        // 0005 not applied) is empty there; any other error is a real per-metric error.
+        const empty = failSoft && (f.id !== 'adsPlayDaily' || /no such table/i.test(String(e)))
+        facts.set(f.key, empty ? { ok: true, rows: def.parse([]), asOfMs: opts.nowMs } : { ok: false, error: String(e) })
         return
       }
       facts.set(f.key, { ok: true, rows: def.parse(raw), asOfMs: opts.nowMs })

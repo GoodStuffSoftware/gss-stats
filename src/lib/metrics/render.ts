@@ -16,11 +16,13 @@
 import { getNote, NOTES_REGISTRY, noteRawText, noteTokens } from '../notes'
 import { etDateFromMs } from '../popupEvents'
 import { relativeTime } from '../adsFreshness'
+import { etDateTimeText } from '../adsReadingsFormat'
 import { tokenizeAndInterpolate, type TextToken } from '../textLite'
-import { METRICS, rulesOf, type MetricDef } from './metrics'
+import { globalValueResolver } from '../valueTokens'
+import { armMaturity, METRICS, rulesOf, type MetricDef } from './metrics'
 import { RATIOS, type RatioDef } from './ratios'
-import { campaignOfScope, configRuling, resolveBinding, scopeField, scopeVars, unmeasuredByConfig, type ScopeInstance } from './scope'
-import type { Display, Gating, Label, MetricItem, MetricValue, SeriesPoint } from './types'
+import { campaignOfScope, configRuling, resolveBinding, scopeField, scopeTone, scopeVars, unmeasuredByConfig, type ScopeInstance } from './scope'
+import type { CellTone, Display, Gating, Label, MetricItem, MetricValue, SeriesPoint } from './types'
 import { unitLabelId } from './units'
 
 // A note id ever reaches here from data an author saved into a CardSpec (Label's `note`,
@@ -52,6 +54,8 @@ export interface ItemViewModel {
   /** The primary is a status word ("not yet tracking", "unavailable"), not a value: render it
    * small. */
   muted?: boolean
+  /** A table cell's colour, from the scope field it reads (scope.ts scopeTone). */
+  tone?: CellTone
   /** A percent's two parts, for a tile: the rate big, its "(n/d)" as a small line under it.
    * Rows and pills show `primary`, which is the two joined. */
   split?: { main: string; sub: string }
@@ -71,7 +75,9 @@ export interface ItemViewOptions {
 
 // ── Label resolution (ADR section 1, "Labels") ────────────────────────────────────────────
 export function resolveLabelTokens(label: Label, scope: ScopeInstance, metricLabelId: string | undefined, todayEt: string): TextToken[] {
-  if (typeof label === 'string') return tokenizeAndInterpolate(label, scopeVars(scope, todayEt))
+  // `{=…}` takes the fixed dates (release.*, golive.*, play.*): the card editor's Insert value
+  // offers them. Chart and metric values need a chart or a fetch a card label has none of: "—".
+  if (typeof label === 'string') return tokenizeAndInterpolate(label, scopeVars(scope, todayEt), globalValueResolver())
   if ('note' in label) {
     // An id this build's registry doesn't know (a newer build's, or a retired one) is stored
     // as-is (validateCard checks only its shape) and shows nothing — never the raw id.
@@ -95,6 +101,10 @@ export function resolveLabelTokens(label: Label, scope: ScopeInstance, metricLab
 const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n)
 function fmtCount(n: number | null | undefined): string {
   return finite(n) ? n.toLocaleString('en-US') : '—'
+}
+/** A per-ratio's value (completions per arrival): a plain number, two decimals, may exceed 1. */
+function fmtPer(n: number | null | undefined): string {
+  return finite(n) ? n.toFixed(2) : '—'
 }
 function fmtMoney(n: number | null | undefined): string {
   return finite(n) ? `$${n.toFixed(2)}` : '—'
@@ -191,10 +201,11 @@ function formatBadge(raw: string | null, display: Extract<Display, { as: 'badge'
 }
 
 // ── Metric/ratio value formatting by display kind ─────────────────────────────────────────
-function formatMetricOrRatioValue(display: Display, value: MetricValue, def: MetricDef | RatioDef, nowMs: number): { primary: string; deltaLines: DeltaLine[]; split?: { main: string; sub: string } } {
+function formatMetricOrRatioValue(display: Display, value: MetricValue, def: MetricDef | RatioDef, nowMs: number, daysLeft: number | null = null): { primary: string; deltaLines: DeltaLine[]; split?: { main: string; sub: string } } {
   switch (display.as) {
     case 'number':
       if (value.status === 'too-few') return { primary: noteRawText('too-few-to-report'), deltaLines: [] }
+      if (!('unit' in def) && def.kind === 'per') return { primary: fmtPer(value.value), deltaLines: [] }
       return { primary: fmtCount(value.value), deltaLines: deltaLinesFor(value, display.deltas) }
     case 'currency':
       if (value.status === 'too-few') return { primary: noteRawText('too-few-to-report'), deltaLines: [] }
@@ -228,6 +239,11 @@ function formatMetricOrRatioValue(display: Display, value: MetricValue, def: Met
       return { primary: finite(value.value) ? relativeTime(new Date(value.value).toISOString(), nowMs) : '—', deltaLines: [] }
     case 'status': {
       const id = statusNoteOf(value)
+      // A maturing verdict adds its whole-ET-day count (worked out at render time from the campaign's
+      // flight, never carried in the stored value, so saved cards pick it up too).
+      if (id === 'verdict.maturing' && daysLeft !== null && daysLeft >= 1) {
+        return { primary: noteRawText(daysLeft === 1 ? 'verdict.maturing.one' : 'verdict.maturing.days', { n: daysLeft }), deltaLines: [] }
+      }
       return { primary: id ? noteRawText(id) : '—', deltaLines: [] }
     }
     case 'sparkline':
@@ -276,7 +292,7 @@ function valueCaptionTokens(item: MetricItem, value: MetricValue, scope: ScopeIn
   // A 'status' display already shows its note as the value: never again as a caption.
   const shown = item.display.as === 'status' ? statusNoteOf(value) : null
   for (const id of value.noteIds ?? []) {
-    if (!hasNote(id) || id === shown) continue
+    if (!hasNote(id) || id === shown || item.hideNotes?.includes(id)) continue
     const vars = id === 'counted-from' && value.measuredFrom != null ? { from: etDateFromMs(value.measuredFrom) } : undefined
     groups.push(noteTokens(id, vars))
   }
@@ -313,6 +329,7 @@ function fieldViewModel(item: MetricItem, raw: string | null, labelTokens: TextT
     const n = Number(raw)
     return { visible: true, labelTokens, primary: Number.isFinite(n) ? fmtCount(n) : raw, deltaLines: [], captionTokens }
   }
+  if (display.as === 'datetime-et') return { visible: true, labelTokens, primary: etDateTimeText(raw), deltaLines: [], captionTokens }
   // 'datetime' | 'text': plain text, already textLite-safe by construction (scopeField never
   // returns markup — it reads config/registry data, never a beacon string).
   return { visible: true, labelTokens, primary: raw, deltaLines: [], captionTokens }
@@ -341,7 +358,9 @@ function metricViewModel(item: MetricItem, value: MetricValue, def: MetricDef | 
   }
   // 'ok' | 'partial' | 'too-few'
   if (item.gating?.whenZero === 'omit' && value.value === 0 && value.status !== 'too-few') return { visible: false, labelTokens, primary: '0', deltaLines: [], captionTokens: [] }
-  const { primary, deltaLines, split } = formatMetricOrRatioValue(item.display, value, def, nowMs)
+  const campaign = item.display.as === 'status' && statusNoteOf(value) === 'verdict.maturing' ? campaignOfScope(scope) : undefined
+  const daysLeft = campaign ? armMaturity(campaign, todayEt).daysToMature : null
+  const { primary, deltaLines, split } = formatMetricOrRatioValue(item.display, value, def, nowMs, daysLeft)
   if (isNewToday(item, value, def)) {
     // Comparisons are hidden while yesterday or the 7-day window reaches back to the go-live day
     // (or a campaign's first, partial day). On that day itself it is "new today"; on the days
@@ -376,7 +395,9 @@ export function itemViewModel(item: MetricItem, value: MetricValue | undefined, 
     return { visible: true, labelTokens, primary: '—', deltaLines: [], captionTokens: itemCaptionOnly(item, scope, opts.todayEt) }
   }
   if (resolved.kind === 'field') {
-    return fieldViewModel(item, resolved.fieldValue ?? null, labelTokens, scope, opts.todayEt)
+    const vm = fieldViewModel(item, resolved.fieldValue ?? null, labelTokens, scope, opts.todayEt)
+    const tone = 'field' in item.data && resolved.fieldValue != null ? scopeTone(scope, item.data.field) : null
+    return tone ? { ...vm, tone } : vm
   }
   // Ruled out by the campaign's own config (spend-only, or no flight start yet): omitted
   // whatever the status, and never requested (scope.ts unmeasuredByConfig), unless the item's

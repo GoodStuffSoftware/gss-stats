@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { reactive, computed, watch, onMounted, onBeforeUnmount, ref, useId } from 'vue'
-import type { Widget, LineSeries, GlobalFilters } from '../types'
+import { reactive, computed, watch, onMounted, onBeforeUnmount, nextTick, ref, useId } from 'vue'
+import { rateTileHasHideableNote } from '../lib/metrics/rateTileCard'
+import type { Widget, LineSeries, GlobalFilters, StatsResponse } from '../types'
 import {
   DIMENSIONS,
   GEO_DIMENSIONS,
@@ -18,13 +19,22 @@ import {
   BAR_MODES,
 } from '../lib/catalog'
 import { ringDims, RING_SOFT_CAP, isDateDim } from '../lib/rings'
-import { BEST_SUDOKU_SITES, syncCardWithView } from '../lib/defaults'
-import { noteOptions, defaultNoteIdsForScope, type NoteScope } from '../lib/notes'
+import { BEST_SUDOKU_SITES, CAPTION_MAX_CHARS, HIDDEN_CAVEATS_MAX, HIDDEN_CAVEAT_ID_RE, syncCardWithView } from '../lib/defaults'
+import { getNote, isStaticCaptionNote, libraryCaptionOptions, noteRawText, noteTemplate } from '../lib/notes'
+import { allChartNotes, canHideCaveatId, convertLegacyNotes, isChartNoteHidden, type ChartNote } from '../lib/chartNotes'
+import { toPlainText, VALUE_TOKEN_RE } from '../lib/textLite'
+import { chartValues, globalValues, resolveValueToken, VALUE_TOKEN_OPTIONS, type TokenValues } from '../lib/valueTokens'
+import { metricRequestSpec, metricTokenOptions, metricTokenValue } from '../lib/metricValueTokens'
+import { peekMetricValue } from '../composables/useMetrics'
+import { useEtClock } from '../composables/useEtClock'
+import InsertPicker, { type InsertGroup } from './InsertPicker.vue'
 import { canFit, setFit } from '../lib/fit'
+import { rendersOwnBody } from '../lib/charts'
 import CardEditor from './metrics/CardEditor.vue'
 import { metricsContextFor } from '../lib/metrics/pageContext'
 import { presetById } from '../lib/metrics/presets'
-import { selectsCampaigns } from '../lib/metrics/scope'
+import { ADS_READINGS_LOG_PRESET } from '../lib/metrics/readingsCard'
+import { selectsCampaigns, todayEtFrom } from '../lib/metrics/scope'
 import { resolveSelection } from '../sitesStore'
 import type { MetricsContext } from '../lib/metrics/types'
 
@@ -33,16 +43,47 @@ import type { MetricsContext } from '../lib/metrics/types'
 // field here is unaffected by it, same as before this prop existed.
 // `filters` is optional defensively (a caller that hasn't wired it yet still gets a working
 // editor — the card preview just has no page range for a `window: 'page'` item until it does).
-const props = defineProps<{ widget: Widget; isNew: boolean; filters?: GlobalFilters }>()
+// `data`/`error` (optional) are the chart's current response, for the "Data caveats" list: a
+// runtime caveat (a pop-up note, a split guard, …) is only listed while the response carries it.
+// Without them the list still shows the legacy caption ids and every id this chart hides.
+const props = defineProps<{ widget: Widget; isNew: boolean; filters?: GlobalFilters; data?: StatsResponse | null; error?: string | null }>()
 const emit = defineEmits<{ save: [Widget]; cancel: []; remove: [] }>()
 
-// Series/axis titles are nested objects: copy them, so Cancel leaves the saved widget untouched.
-const copyWidget = (w: Widget): Widget => ({
-  ...w,
-  series: w.series?.map((x) => ({ ...x, filter: x.filter?.map((f) => ({ ...f })) })),
-  axisTitles: w.axisTitles ? { ...w.axisTitles } : undefined,
-})
+// Series/axis titles and the note-id lists are nested: copy them, so Cancel leaves the saved
+// widget untouched. The legacy caption ids are folded into the caption text on open (D5,
+// foldLegacyNotes below).
+const copyWidget = (w: Widget): Widget => {
+  const c: Widget = {
+    ...w,
+    series: w.series?.map((x) => ({ ...x, filter: x.filter?.map((f) => ({ ...f })) })),
+    axisTitles: w.axisTitles ? { ...w.axisTitles } : undefined,
+  }
+  if (w.notes) c.notes = [...w.notes]
+  if (w.hiddenCaveats) c.hiddenCaveats = [...w.hiddenCaveats]
+  return c
+}
 const draft = reactive<Widget>(copyWidget(props.widget))
+/** D5 convert-on-edit (lib/chartNotes.ts convertLegacyNotes), applied to the draft: the author
+ * sees the folded text in the Caption box; Save keeps it, Cancel leaves the chart as it was.
+ * A folded id also leaves `hiddenCaveats` (NIT-5b): nothing lists it any more, so keeping it would
+ * only leave a dead "hidden" row. One the card's own spec captions still name stays (they share the
+ * list, D7). Returns the converted ids (for the hint under the Caption box). */
+function foldLegacyNotes(): string[] {
+  const { widget: next, converted } = convertLegacyNotes({ ...draft })
+  if (!converted.length) return converted
+  if (next.caption === undefined) delete draft.caption
+  else draft.caption = next.caption
+  if (next.notes === undefined) delete draft.notes
+  else draft.notes = next.notes
+  if (draft.hiddenCaveats) {
+    const spec = draft.card ? ('preset' in draft.card ? presetById(draft.card.preset) : draft.card.spec) : undefined
+    const stillNamed = new Set(spec?.captions ?? [])
+    const folded = new Set(converted.filter((id) => !stillNamed.has(id)))
+    setHiddenCaveats(draft.hiddenCaveats.filter((id) => !folded.has(id)))
+  }
+  return converted
+}
+const convertedNoteIds = ref<string[]>(foldLegacyNotes())
 watch(
   () => props.widget,
   (w) => {
@@ -50,6 +91,7 @@ watch(
     const next = copyWidget(w)
     for (const k of Object.keys(draft)) if (!(k in next)) delete (draft as unknown as Record<string, unknown>)[k]
     Object.assign(draft, next)
+    convertedNoteIds.value = foldLegacyNotes()
   },
 )
 
@@ -129,34 +171,244 @@ function toggleCampaign(id: string, checked: boolean) {
   campaignIdsValue.value = CAMPAIGN_OPTIONS.map((o) => o.value).filter((v) => set.has(v))
 }
 
-// ── Notes/text registry (lib/notes.ts) — 'note' widgets pick a registry entry OR type
-// custom text; every OTHER widget can attach registry notes as captions. ──────────────────
-const NOTE_OPTIONS = noteOptions()
-const isCustomNote = computed({
-  get: () => !draft.noteId,
-  set: (custom: boolean) => {
-    draft.noteId = custom ? undefined : NOTE_OPTIONS[0]?.value
-    if (!custom) draft.note = undefined
+// ── Text on a chart (notes plan, slice 1c). Every chart: the author's own Caption (plain text,
+// textLite markup, `{=…}` value tokens) and a "Data caveats" list of the system's notes, each
+// with a Show/Hide toggle that writes `hiddenCaveats`. A note widget: its own text. "Insert from
+// library" copies a static registry caption's TEXT into either box; library entries stay
+// read-only, and a chart never references them by id again (`notes` is legacy, D5). ──────────
+const LIBRARY_OPTIONS = libraryCaptionOptions()
+const captionFieldId = useId()
+const noteTextFieldId = useId()
+const captionValue = computed<string>({
+  get: () => draft.caption ?? '',
+  set: (v: string) => {
+    if (v) draft.caption = v
+    else delete draft.caption
   },
 })
-// The dataset scope an attached-notes picker should default from — mirrors lib/notes.ts's
-// NoteScope union; a widget with no recognizable scope (plain RUM) gets no defaults, only
-// whatever the user explicitly attaches.
-const draftScope = computed<NoteScope | null>(() => {
-  const d = draft.dataset
-  return d === 'overview' || d === 'campaigns' || d === 'popup' || d === 'geo' || d === 'ads-readings' ? d : null
+/** Where the cursor was when a text box last lost focus (picking from the library menu blurs
+ * it). null = never focused: an insert then appends, after a blank line. */
+type TextTarget = 'caption' | 'note'
+const caret: Record<TextTarget, { start: number; end: number } | null> = { caption: null, note: null }
+function rememberCaret(t: TextTarget, e: Event) {
+  const el = e.target as HTMLTextAreaElement
+  const start = el.selectionStart ?? 0
+  caret[t] = { start, end: el.selectionEnd ?? start }
+}
+/** Where each `{=…}` value token in `text` starts and ends. */
+function valueTokenSpans(text: string): Array<[number, number]> {
+  return [...text.matchAll(VALUE_TOKEN_RE)].map((m) => [m.index, m.index + m[0].length])
+}
+/** The caret, with each end that falls inside a value token moved to that token's end, so an
+ * insert never splits one (review N5). */
+function caretOutsideTokens(text: string, at: { start: number; end: number }): { start: number; end: number } {
+  const spans = valueTokenSpans(text)
+  const snap = (pos: number) => spans.find(([a, b]) => a < pos && pos < b)?.[1] ?? pos
+  const start = snap(at.start)
+  return { start, end: Math.max(start, snap(at.end)) }
+}
+/** `text` cut to `max` characters, and further back to before a value token the cut would split
+ * (review N6): a caption never keeps half a token. */
+function cutOutsideTokens(text: string, max: number): string {
+  if (text.length <= max) return text
+  const split = valueTokenSpans(text).find(([a, b]) => a < max && b > max)
+  return text.slice(0, split ? split[0] : max)
+}
+/** "Caption is full": a value or library text did not fit whole under CAPTION_MAX_CHARS (review
+ * N4). Announced politely; the next edit of the caption (typing, or another insert) clears it. Each
+ * refusal re-keys the message node, so a second refusal in a row is announced again (NIT-3). */
+const captionFull = ref(false)
+const captionFullTick = ref(0)
+function sayCaptionFull() {
+  captionFull.value = true
+  captionFullTick.value++
+}
+/** The two text boxes an Insert button can put text into. After an Insert (or a refused one) the
+ * button is disabled, so focus goes back to the box: the author keeps typing, and Escape and the
+ * Tab trap (the dialog's keydown listener) keep working, which they stop doing once focus has
+ * left the panel. */
+const captionEl = ref<HTMLTextAreaElement | null>(null)
+const noteEl = ref<HTMLTextAreaElement | null>(null)
+function focusText(t: TextTarget, start: number, end: number = start) {
+  void nextTick(() => {
+    const el = (t === 'caption' ? captionEl : noteEl).value
+    if (!el) return
+    el.focus()
+    const max = el.value.length
+    el.setSelectionRange(Math.min(start, max), Math.min(end, max))
+  })
+}
+function insertFromLibrary(t: TextTarget, id: string) {
+  const text = id ? noteTemplate(id).trim() : ''
+  if (!text) return
+  if (t === 'caption') captionFull.value = false
+  const cur = (t === 'caption' ? draft.caption : draft.note) ?? ''
+  const at = t === 'caption' && caret[t] ? caretOutsideTokens(cur, caret[t]) : caret[t]
+  let next: string
+  let end: number
+  if (at && at.start <= cur.length) {
+    next = cur.slice(0, at.start) + text + cur.slice(Math.max(at.start, Math.min(at.end, cur.length)))
+    end = at.start + text.length
+  } else {
+    const head = cur.trimEnd()
+    next = head ? `${head}\n\n${text}` : text
+    end = next.length
+  }
+  if (t === 'caption') {
+    const whole = next
+    next = cutOutsideTokens(whole, CAPTION_MAX_CHARS)
+    captionValue.value = next
+    if (next.length < whole.length) sayCaptionFull()
+  } else {
+    draft.note = next
+  }
+  end = Math.min(end, next.length)
+  caret[t] = { start: end, end }
+  focusText(t, end)
+}
+
+// ── "Insert value" (notes plan, slice 1d): puts a `{=…}` value token (grammar: lib/valueTokens.ts)
+// into the caption or a note widget's text at the cursor, replacing any selection; a box never
+// focused gets it appended. Insertion is an explicit choice (the Insert button of InsertPicker.vue,
+// not the select's own change: review N3). Each option shows what it reads right now: `chart.*`
+// from the response already loaded, the dates from the build, and a metric from a value the page
+// ALREADY holds for this widget's page context (peekMetricValue; nothing is fetched to label an
+// option, so a metric nothing has loaded shows its name alone). A token that would not fit whole
+// under CAPTION_MAX_CHARS is not inserted, and the box says the caption is full. A widget that
+// renders its own body (a metric card, overview, campaigns, ads-readings: lib/charts.ts
+// rendersOwnBody, the test ChartCard skips its fetch on; a pop-up rate tile is one since #80) loads no response a chart value could
+// read, so it gets no "This chart" group (review N2, NIT-1); a note widget never does (`chart.*` is
+// "—" there), and takes Dates and Metrics.
+const metricOptionList = metricTokenOptions()
+const etClock = useEtClock() // the day the cards' (and the captions') values are keyed by
+const valueOptions = computed<InsertGroup[]>(() => {
+  const table: TokenValues = { ...globalValues(), ...(isNote.value ? {} : chartValues(props.widget, props.data ?? null, props.error ?? null)) }
+  const epoch = todayEtFrom(etClock.value)
+  for (const o of metricOptionList) table[o.ref.path] = metricTokenValue(o.ref, peekMetricValue(metricRequestSpec(o.ref), cardContext.value, epoch))
+  const groups: Array<'This chart' | 'Dates' | 'Metrics'> = ['This chart', 'Dates', 'Metrics']
+  const all = [...VALUE_TOKEN_OPTIONS, ...metricOptionList]
+  return groups
+    .filter((g) => g !== 'This chart' || (!isNote.value && !rendersOwnBody(draft)))
+    .map((group) => ({
+      group,
+      options: all
+        .filter((o) => o.group === group)
+        .map((o) => {
+          const now = resolveValueToken(o.token, table)
+          return { value: o.token, label: now ? `${o.label} (${now})` : o.label }
+        }),
+    }))
 })
-const attachedNotesValue = computed<string[]>({
-  get: () => draft.notes ?? (draftScope.value ? defaultNoteIdsForScope(draftScope.value) : []),
-  set: (v: string[]) => {
-    draft.notes = v
-  },
+const libraryGroups = computed<InsertGroup[]>(() => [{ group: '', options: LIBRARY_OPTIONS.map((o) => ({ value: o.value, label: o.label })) }])
+function insertValue(t: TextTarget, token: string) {
+  if (!token) return
+  if (t === 'caption') captionFull.value = false
+  const cur = (t === 'caption' ? draft.caption : draft.note) ?? ''
+  const saved = caret[t]
+  const at = saved && caretOutsideTokens(cur, saved)
+  let next: string
+  let end: number
+  if (at && at.start <= cur.length) {
+    next = cur.slice(0, at.start) + token + cur.slice(Math.max(at.start, Math.min(at.end, cur.length)))
+    end = at.start + token.length
+  } else {
+    next = cur && !/\s$/.test(cur) ? `${cur} ${token}` : cur + token
+    end = next.length
+  }
+  if (t === 'caption') {
+    if (next.length > CAPTION_MAX_CHARS) {
+      sayCaptionFull()
+      // Refused: the text is as it was, so focus goes back with the selection it had.
+      const kept = saved && saved.start <= cur.length ? { start: saved.start, end: Math.min(saved.end, cur.length) } : { start: cur.length, end: cur.length }
+      focusText(t, kept.start, kept.end)
+      return
+    }
+    captionValue.value = next
+  } else {
+    draft.note = next
+  }
+  caret[t] = { start: end, end }
+  focusText(t, end)
+}
+
+// The "Data caveats" rows: allChartNotes minus the caption itself, plus any id this chart hides
+// that the list cannot see right now (a runtime note with no response loaded), so it can be shown
+// again. An id the list could never hide (a `hideable: false` registry note, an always-shown runtime
+// note) gets no such row: the chart shows it whenever it applies, whatever the list says (NIT-5a).
+// A card's own spec captions are toggled in CardEditor, not here.
+interface CaveatRow {
+  key: string
+  label: string
+  hideable: boolean
+  hideId?: string
+  hidden: boolean
+  unknownId?: string
+}
+const RUNTIME_NOTE_LABELS: Record<string, string> = { 'popup-note': 'Pop-up note (install fix)' }
+const short = (t: string) => (t.length > 90 ? t.slice(0, 87) + '…' : t)
+function noteLabel(n: ChartNote): string {
+  if (n.text) return short(toPlainText(n.text))
+  return short(n.noteId ? noteRawText(n.noteId) || n.noteId : n.key)
+}
+const caveatRows = computed<CaveatRow[]>(() => {
+  const hidden = draft.hiddenCaveats ?? []
+  const rows: CaveatRow[] = allChartNotes(draft, props.data, props.error)
+    .filter((n) => n.key !== 'caption')
+    .map((n) => ({
+      key: n.key,
+      label: n.unknown ? `Unknown note ${n.noteId}` : noteLabel(n),
+      hideable: n.hideable,
+      hideId: n.hideId,
+      hidden: isChartNoteHidden(n, hidden),
+      ...(n.unknown ? { unknownId: n.noteId } : {}),
+    }))
+  const listed = new Set(rows.map((r) => r.hideId))
+  // A rate tile loads no response (rendersOwnBody), so the runtime pop-up note never lists itself,
+  // yet the installed-outcome card shows its install-fix note by default: offer the Show/Hide row there (F1).
+  if (draft.type === 'rate' && rateTileHasHideableNote(draft) && !listed.has('popup-note')) {
+    rows.push({ key: 'runtime:popup-note', label: RUNTIME_NOTE_LABELS['popup-note'], hideable: true, hideId: 'popup-note', hidden: hidden.includes('popup-note') })
+    listed.add('popup-note')
+  }
+  const specCaptions = new Set(cardSpec.value?.captions ?? [])
+  for (const id of hidden) {
+    if (listed.has(id) || specCaptions.has(id) || !canHideCaveatId(id)) continue
+    const label = getNote(id) ? noteRawText(id) || id : (RUNTIME_NOTE_LABELS[id] ?? id)
+    rows.push({ key: `hidden:${id}`, label: short(label), hideable: true, hideId: id, hidden: true })
+  }
+  return rows
 })
-function toggleAttachedNote(id: string, checked: boolean) {
-  const set = new Set(attachedNotesValue.value)
-  if (checked) set.add(id)
+/** Writes `hiddenCaveats`; an empty list deletes the key. Also takes CardEditor's
+ * `update:hidden-captions` (a card's spec captions share the list, D7). Keeps only ids the stored
+ * list can hold (HIDDEN_CAVEAT_ID_RE, NIT-4), deduped, at most HIDDEN_CAVEATS_MAX, so what the
+ * editor shows is what reloads. */
+function setHiddenCaveats(ids: readonly string[] | undefined) {
+  const keep = [...new Set((ids ?? []).filter((id) => HIDDEN_CAVEAT_ID_RE.test(id)))].slice(0, HIDDEN_CAVEATS_MAX)
+  if (keep.length) draft.hiddenCaveats = keep
+  else delete draft.hiddenCaveats
+}
+function setCaveatHidden(id: string, hide: boolean) {
+  const set = new Set(draft.hiddenCaveats ?? [])
+  if (hide) set.add(id)
   else set.delete(id)
-  attachedNotesValue.value = NOTE_OPTIONS.map((o) => o.value).filter((v) => set.has(v))
+  setHiddenCaveats([...set])
+}
+/** N1: drop a legacy caption id the registry does not know; `notes` goes once empty. */
+function removeUnknownNote(id: string) {
+  const rest = (draft.notes ?? []).filter((x) => x !== id)
+  if (rest.length) draft.notes = rest
+  else delete draft.notes
+}
+
+// A note widget with a legacy library `noteId` still renders that entry (NoteWidgetBody). A static
+// entry can be turned into editable text; a caveat (it follows the data) or an unknown id can be
+// replaced with the author's own text.
+const noteIdKnown = computed(() => !!draft.noteId && !!getNote(draft.noteId))
+const noteIdPreview = computed(() => (draft.noteId ? short(noteRawText(draft.noteId)) : ''))
+const noteIdEditable = computed(() => !!draft.noteId && isStaticCaptionNote(draft.noteId))
+function noteIdToText() {
+  if (!draft.noteId) return
+  if (isStaticCaptionNote(draft.noteId)) draft.note = noteTemplate(draft.noteId).trim()
+  draft.noteId = undefined
 }
 // A rate tile's "dimension" is a POPUP_RATE_SPECS key, not a group-by field — a wholly
 // different picker domain from the count-mode dimensions below it.
@@ -187,8 +439,14 @@ function onDatasetChange() {
     if (!draft.view || !viewOptions.value.some((v) => v.value === draft.view)) {
       draft.view = viewOptions.value[0]?.value
     }
+    // The readings log is a metric card now (ADR 0005): a new "Ads readings" chart starts as the
+    // preset card, so CardEditor and the campaign picker open. Existing widgets are not converted
+    // here — ChartCard maps them at render time (lib/metrics/readingsCard.ts).
+    if (isAdsReadingsDataset.value && !draft.card) draft.card = { preset: ADS_READINGS_LOG_PRESET }
     return
   }
+  // Moving off Ads readings drops the readings preset card that came with it.
+  if (draft.card && 'preset' in draft.card && draft.card.preset === ADS_READINGS_LOG_PRESET) draft.card = undefined
   draft.view = undefined
   draft.campaignIds = undefined
   if (!dimOptions.value.some((d) => d.key === draft.dimension)) {
@@ -315,7 +573,8 @@ watch(
       draft.popupKind = undefined
       draft.view = undefined
       draft.campaignIds = undefined
-      if (draft.notes != null) draft.notes = undefined // captions attach to a CHART, not a note
+      // `notes` is kept: a note widget never shows it, and an unknown legacy id must not vanish
+      // without the author removing it (N1). save() drops the chart-only caption fields.
     } else {
       if (draft.note != null) draft.note = undefined
       if (draft.noteId != null) draft.noteId = undefined
@@ -373,6 +632,10 @@ const cardErrors = ref<string[]>([])
 const cardSaveDisabled = computed(() => isCardWidget.value && cardErrors.value.length > 0)
 
 const typeDef = computed(() => CHART_TYPES.find((t) => t.value === draft.type))
+// ADR 0005 slice 5: "Rate" is no longer offered for a new chart (a new rate is a metric card). A saved
+// rate tile (saved as type 'rate', read from the prop, not the draft) keeps the option, so switching its
+// type away can be switched back.
+const typeChoices = computed(() => CHART_TYPES.filter((t) => t.value !== 'rate' || props.widget.type === 'rate'))
 // "Site override" = Widget.siteSel: this chart's own site pick, replacing the page's (dates and
 // every other page filter still apply). Best Sudoku is its beacon tags (web + app).
 const SITE_OVERRIDES: { value: string; label: string; sel: string[] }[] = [
@@ -405,11 +668,20 @@ const fitValue = computed<boolean>({
 
 function save() {
   if (cardSaveDisabled.value) return // belt and suspenders: the Save button is disabled for this too
-  // Freeze whatever the "Captions" checkboxes currently show (scope defaults, or the
-  // user's own edit) into draft.notes, so what the editor DISPLAYED is exactly what gets
-  // saved — ChartCard.vue only ever reads widget.notes directly, never recomputes scope
-  // defaults at render time (see its own comment).
-  if (draft.type !== 'note') draft.notes = attachedNotesValue.value
+  // Text on the chart (slice 1c). A blank caption, an empty hidden list and an empty legacy
+  // `notes` list are deleted, never saved as '' or []. A note widget is its own text: the
+  // chart-only caption fields go. `notes` is never written, only folded (D5) or emptied (N1).
+  foldLegacyNotes() // a no-op unless the type changed from note to a chart in this session
+  if (draft.type === 'note') {
+    delete draft.caption
+    delete draft.hiddenCaveats
+  } else {
+    const caption = draft.caption?.trim()
+    if (caption) draft.caption = caption.slice(0, CAPTION_MAX_CHARS)
+    else delete draft.caption
+    setHiddenCaveats(draft.hiddenCaveats)
+  }
+  if (!draft.notes?.length) delete draft.notes
   if (typeDef.value && !typeDef.value.needsDimension) draft.dimension = ''
   if (!breakdownAllowed.value) draft.breakdown = undefined
   if (!isBreakdownLine.value) draft.cumulative = undefined
@@ -467,7 +739,7 @@ function save() {
           <div class="field">
             <label>Chart type</label>
             <select v-model="draft.type">
-              <option v-for="t in CHART_TYPES" :key="t.value" :value="t.value">{{ t.label }}</option>
+              <option v-for="t in typeChoices" :key="t.value" :value="t.value">{{ t.label }}</option>
             </select>
           </div>
           <div class="field" v-if="!isGeo && !isPopup && !isBespokeDataset && !isNote">
@@ -481,6 +753,8 @@ function save() {
         <!-- "Add chart" → "Metric card" (ADR 0003, phase B): reusable, configurable stat/table
              cards, distinct from the fixed chart types above — see CardEditor.vue. -->
         <div class="field" v-if="!isNote">
+          <!-- Rate is not a chart type for a new chart (ADR 0005 slice 5), so say where a pop-up rate went. -->
+          <p v-if="!typeChoices.some((t) => t.value === 'rate')" class="hint" data-testid="rate-signpost">For a pop-up rate, make this a metric card, then pick the "Pop-up rates" preset.</p>
           <button type="button" class="btn" @click="makeCardWidget">Make this a metric card instead</button>
         </div>
       </template>
@@ -499,29 +773,37 @@ function save() {
             </label>
           </div>
         </div>
-        <CardEditor v-model="cardModel" :context="cardContext" :campaign-ids="cardSelectsCampaigns ? draft.campaignIds : undefined" @errors="cardErrors = $event" />
+        <CardEditor
+          v-model="cardModel"
+          :context="cardContext"
+          :campaign-ids="cardSelectsCampaigns ? draft.campaignIds : undefined"
+          :hidden-captions="draft.hiddenCaveats"
+          @update:hidden-captions="setHiddenCaveats($event)"
+          @errors="cardErrors = $event"
+        />
       </template>
 
-      <!-- Note: pick a registry entry, or write custom text (owner requirement, 2026-09-26:
-           every note/caveat/explanatory block goes through the shared registry — see
-           lib/notes.ts — with a custom-text escape hatch for anything not worth registering). -->
+      <!-- Note widget: its own text, written here (notes plan, slice 1c). "Insert from library"
+           copies a static registry entry's text in; the entry itself stays read-only. A legacy
+           `noteId` still renders that entry (NoteWidgetBody.vue) until it is turned into text. -->
       <template v-if="isNote">
-        <div class="field">
-          <label>Source</label>
-          <select v-model="isCustomNote">
-            <option :value="false">From the notes library</option>
-            <option :value="true">Custom text</option>
-          </select>
-        </div>
-        <div class="field" v-if="!isCustomNote">
+        <div class="field library-note" v-if="draft.noteId">
           <label>Note</label>
-          <select v-model="draft.noteId">
-            <option v-for="o in NOTE_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
-          </select>
+          <p v-if="noteIdKnown" class="hint">From the notes library: {{ noteIdPreview }}</p>
+          <p v-else class="hint">Unknown library note {{ draft.noteId }}: it shows nothing.</p>
+          <p v-if="noteIdKnown && !noteIdEditable" class="hint">It follows the data, so it updates by itself.</p>
+          <div>
+            <button type="button" class="btn note-to-text" @click="noteIdToText">{{ noteIdEditable ? 'Edit as text' : 'Replace with my own text' }}</button>
+          </div>
         </div>
-        <div class="field" v-else>
-          <label>Note text</label>
-          <textarea v-model="draft.note" rows="4" placeholder="Caveat / note shown on the tile — **bold** and [links](https://…) supported" />
+        <div class="field note-text" v-else>
+          <label :for="noteTextFieldId">Note text</label>
+          <textarea :id="noteTextFieldId" ref="noteEl" v-model="draft.note" rows="4" placeholder="Caveat / note shown on the tile" @blur="rememberCaret('note', $event)" />
+          <div class="caption-tools">
+            <InsertPicker label="Insert from library" placeholder="Insert from library…" select-class="insert-library" :groups="libraryGroups" @insert="insertFromLibrary('note', $event)" />
+            <InsertPicker label="Insert value" placeholder="Insert value ▾" select-class="insert-value" :groups="valueOptions" @insert="insertValue('note', $event)" />
+          </div>
+          <p class="hint">**bold** and [links](https://…) work; a blank line starts a new paragraph. Insert value adds a live date or catalog number, such as {=release.latest|date}; it shows "—" when there is no value for it.</p>
         </div>
         <div class="field check">
           <label>
@@ -531,17 +813,42 @@ function save() {
         </div>
       </template>
 
-      <!-- Any OTHER widget: attach registry notes as a caption under the chart. Defaults to
-           the dataset's own scope defaults until the user picks their own set. -->
-      <div class="field" v-if="!isNote">
-        <label>Captions <span class="hint">— shown under the chart; defaults per data source</span></label>
-        <div class="campaign-list">
-          <label v-for="o in NOTE_OPTIONS" :key="o.value" class="campaign-row">
-            <input type="checkbox" :checked="attachedNotesValue.includes(o.value)" @change="toggleAttachedNote(o.value, ($event.target as HTMLInputElement).checked)" />
-            {{ o.label }}
-          </label>
+      <!-- Any OTHER widget: the author's caption, then the data caveats (lib/chartNotes.ts), all
+           shown under the chart in that order. -->
+      <template v-if="!isNote">
+        <div class="field caption-field">
+          <label :for="captionFieldId">Caption <span class="hint">— shown under the chart</span></label>
+          <textarea :id="captionFieldId" ref="captionEl" v-model="captionValue" rows="3" :maxlength="CAPTION_MAX_CHARS" @blur="rememberCaret('caption', $event)" @input="captionFull = false" />
+          <div class="caption-tools">
+            <InsertPicker label="Insert from library" placeholder="Insert from library…" select-class="insert-library" :groups="libraryGroups" @insert="insertFromLibrary('caption', $event)" />
+            <InsertPicker label="Insert value" placeholder="Insert value ▾" select-class="insert-value" :groups="valueOptions" @insert="insertValue('caption', $event)" />
+            <span class="hint caption-count">{{ captionValue.length }} / {{ CAPTION_MAX_CHARS }}</span>
+            <span class="hint caption-full" aria-live="polite"><span v-if="captionFull" :key="captionFullTick">Caption is full</span></span>
+          </div>
+          <p class="hint">**bold** and [links](https://…) work; a blank line starts a new paragraph. Insert value adds a live number or date, such as {=chart.total|number} or a catalog metric; it shows "—" when there is no value for it.</p>
+          <p v-if="convertedNoteIds.length" class="hint caption-converted">The library captions this chart had are now part of its caption text. Save keeps that; Cancel leaves the chart as it was.</p>
         </div>
-      </div>
+        <div class="field data-caveats">
+          <label>Data caveats <span class="hint">— notes the data brings with it</span></label>
+          <p v-if="!caveatRows.length" class="hint">None for this chart right now.</p>
+          <ul v-else class="caveat-list">
+            <li v-for="row in caveatRows" :key="row.key" class="caveat-row" :data-key="row.key">
+              <template v-if="row.unknownId">
+                <span class="caveat-label">{{ row.label }}</span>
+                <button type="button" class="btn caveat-remove" @click="removeUnknownNote(row.unknownId)">Remove</button>
+              </template>
+              <template v-else>
+                <label class="caveat-toggle">
+                  <input type="checkbox" :checked="!row.hidden" :disabled="!row.hideable" @change="row.hideId && setCaveatHidden(row.hideId, !($event.target as HTMLInputElement).checked)" />
+                  Show
+                </label>
+                <span class="caveat-label">{{ row.label }}</span>
+                <span v-if="!row.hideable" class="hint caveat-why">always shown: affects what the data means</span>
+              </template>
+            </li>
+          </ul>
+        </div>
+      </template>
 
       <!-- Height: fixed by the dashboard layout (resize from the corner), or fit to the content. -->
       <div class="field check" v-if="fitAvailable">
@@ -554,11 +861,10 @@ function save() {
       <template v-if="!isCardWidget">
       <!-- Overview / campaigns / ads-readings datasets: a View picker replaces the
            dimension/breakdown/metric/site-override fields below (not applicable to them). -->
-      <div class="row" v-if="isBespokeDataset">
+      <div class="row" v-if="isBespokeDataset && viewOptions.length">
         <div class="field">
           <label>View</label>
           <select v-model="draft.view" @change="onDatasetChange">
-            <option v-if="isAdsReadingsDataset" value="log">Readings log</option>
             <option v-for="v in viewOptions" :key="v.value" :value="v.value">{{ v.label }}</option>
           </select>
         </div>
@@ -897,6 +1203,47 @@ h2 {
 .ring-btn.danger {
   color: #bc4749;
   border-color: rgb(188 71 73 / 0.4);
+}
+.caption-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.caption-count {
+  flex: none;
+}
+.caveat-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid rgb(var(--line));
+  border-radius: 8px;
+}
+.caveat-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  font-size: 12.5px;
+}
+.caveat-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  cursor: pointer;
+}
+.caveat-label {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.caveat-remove {
+  flex: none;
+  padding: 4px 9px;
 }
 .hint {
   font-size: 12px;

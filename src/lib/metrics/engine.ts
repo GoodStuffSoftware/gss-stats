@@ -23,7 +23,7 @@
 // ET date arithmetic (day windows, serving ends, delta gates, the page range) is done once per
 // batch or memoized.
 
-import { CAMPAIGNS, campaignAttributionClause, campaignAttributionStartMs, campaignById, type CampaignAttribution, type CampaignFlight } from '../campaigns'
+import { CAMPAIGNS, campaignAttributionClause, campaignAttributionStartMs, campaignById, ORGANIC_ARM_ID, type CampaignAttribution, type CampaignFlight } from '../campaigns'
 
 import { gateRate, INSTALL_GAP_PATHS, POPUPS, rowIsPostInstallFix } from '../popupEvents'
 import { computeDelta, releaseComparisonWindows } from '../overview'
@@ -91,12 +91,19 @@ export function factKeyString(id: FactId, p: FactParams): string {
   return JSON.stringify(factKey(id, p))
 }
 
+/** The organic returns arm's fact params: the arm, and today's ET date for its maturity band. */
+function organicReturnsParams(env: Pick<BatchEnv, 'todayEt'>): FactParams {
+  return { campaignId: ORGANIC_ARM_ID, todayEt: env.todayEt }
+}
+
 /** The fact params one side of a request reads, from its window and the batch context. */
 function factParamsFor(factId: FactId, req: Pick<ResolvedRequest, 'params'>, env: BatchEnv): FactParams {
   switch (factId) {
+    case 'campaignReturns':
+      // todayEt (the organic maturity band) ONLY for the organic arm: a campaign's key is unchanged.
+      return req.params.campaignId === ORGANIC_ARM_ID ? organicReturnsParams(env) : { campaignId: req.params.campaignId }
     case 'campaignPathVisitor':
     case 'campaignDaily':
-    case 'campaignReturns':
     case 'flightPathsSeen':
       return { campaignId: req.params.campaignId }
     case 'bskKpiDays':
@@ -116,6 +123,7 @@ function factParamsFor(factId: FactId, req: Pick<ResolvedRequest, 'params'>, env
     case 'adsSpendDaily':
     case 'adsCoverage':
     case 'adsLastSync':
+    case 'adsPlayDaily':
       return {}
   }
 }
@@ -261,6 +269,8 @@ export function planBatch(requests: readonly ResolvedRequest[], env: BatchEnv, m
       const twin = req.series ? seriesTwin(def, req.window) : null
       if (twin) add(twin, factParamsFor(twin, req, env))
       if (side.needsSeen) add('flightPathsSeen', { campaignId: ctx.campaign!.id })
+      // A metric judged against the organic baseline (MetricDef.withOrganic) reads its rows too.
+      if (def.withOrganic) add('campaignReturns', organicReturnsParams(env))
     }
   }
   const list = [...facts.values()]
@@ -487,6 +497,10 @@ interface Side {
    * count a refused row) or 'sameTime' (each up to the same clock time, for an opt-out metric). */
   dayKind?: 'wholeDays' | 'sameTime'
   asOfMs?: number
+  /** A store metric's own gate verdict (MetricDef.store): too few to report, with the counts behind it. */
+  tooFew?: boolean
+  numerator?: number
+  denominator?: number
 }
 
 class Batch {
@@ -598,11 +612,19 @@ class Batch {
     if (plan.cannotAlign) return { status: 'error', value: null, reason: 'cannot-align', noteIds: [] }
     const noteIds = def.caveats?.length ? [...new Set([...m.noteIds, ...def.caveats])] : m.noteIds
     const status = m.status === 'partial' ? 'partial' : 'ok'
-    if (fact.rows.kind !== 'beacon') {
+    // A store reduces its fact's rows itself: any fact kind, beacon rows included (R2-7 reads the
+    // arm's campaignReturns rows).
+    if (fact.rows.kind !== 'beacon' || def.store) {
       if (def.store) {
-        const r = def.store(fact.rows, ctx, { nowMs: this.env.nowMs, releaseDays: this.env.release?.days ?? null })
+        let organic: FactRows | undefined
+        if (def.withOrganic) {
+          const o = this.env.facts.get(factKeyString('campaignReturns', organicReturnsParams(this.env)))
+          if (!o || !o.ok) return { status: 'error', value: null, reason: 'fact-failed', noteIds: [] }
+          organic = o.rows
+        }
+        const r = def.store(fact.rows, ctx, { nowMs: this.env.nowMs, releaseDays: this.env.release?.days ?? null, todayEt: this.env.todayEt, pageRange: this.clock.pageRange, ...(organic ? { organic } : {}) })
         const ids = r.noteIds?.length ? [...new Set([...noteIds, ...r.noteIds])] : noteIds
-        return { status, value: r.value, m, noteIds: ids, asOfMs: plan.asOfMs }
+        return { status, value: r.value, m, noteIds: ids, asOfMs: plan.asOfMs, ...(r.tooFew ? { tooFew: true } : {}), ...(r.numerator !== undefined ? { numerator: r.numerator, denominator: r.denominator } : {}) }
       }
       return { status, value: fact.rows.kind === 'spend' && def.spend ? def.spend(fact.rows.rows, ctx) : null, m, noteIds, asOfMs: plan.asOfMs }
     }
@@ -787,7 +809,11 @@ function deriveMetric(batch: Batch, req: ResolvedRequest): MetricValue {
   const side = batch.evaluate(batch.side(def, req, null))
   if (side.status === 'unmeasured' || side.status === 'error') return statusOnly(side.status, side.reason, side.noteIds)
   if (side.value !== null && !Number.isFinite(side.value)) return statusOnly('error', 'non-finite', []) // never a JSON null
-  const v: MetricValue = { status: side.value === null ? 'no-data' : side.status, value: side.value }
+  const v: MetricValue = { status: side.value === null ? (side.tooFew ? 'too-few' : 'no-data') : side.status, value: side.value }
+  if (side.numerator !== undefined) {
+    v.numerator = side.numerator
+    v.denominator = side.denominator
+  }
   if (side.value !== null) {
     if (side.status === 'partial') v.measuredFrom = side.m!.from
     const campaign = req.params.campaignId ? campaignById(req.params.campaignId) : undefined
@@ -835,7 +861,8 @@ function deriveRatio(batch: Batch, req: ResolvedRequest): MetricValue {
     v = { status: d === 0 ? 'no-data' : g.insufficientCohort ? 'too-few' : partial ? 'partial' : 'ok', value: g.value, numerator: n, denominator: d }
   }
   if (partial) v.measuredFrom = Math.max(num.status === 'partial' ? num.m!.from : -Infinity, den.status === 'partial' ? den.m!.from : -Infinity)
-  const noteIds = num.noteIds.length && den.noteIds.length ? [...new Set([...num.noteIds, ...den.noteIds])] : num.noteIds.length ? num.noteIds : den.noteIds
+  const sideNotes = num.noteIds.length && den.noteIds.length ? [...new Set([...num.noteIds, ...den.noteIds])] : num.noteIds.length ? num.noteIds : den.noteIds
+  const noteIds = r.caveats?.length ? [...new Set([...sideNotes, ...r.caveats])] : sideNotes
   if (noteIds.length) v.noteIds = noteIds
   return applyLag(v, numDef.lagDays, batch.lagStopMs(req, denDef, den), batch.env.nowMs)
 }

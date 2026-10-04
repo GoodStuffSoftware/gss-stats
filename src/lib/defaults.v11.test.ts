@@ -12,6 +12,7 @@ import type { DashboardConfig, Widget } from '../types'
 import PROD_V8 from './__fixtures__/prodLayout.v8.json'
 import PROD_V9 from './__fixtures__/prodLayout.v9.json'
 import { withV15Trends } from './__fixtures__/dateEtTrends'
+import { withV16Caveats } from './__fixtures__/autoCaveats'
 
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x))
 function stable(cfg: DashboardConfig): DashboardConfig {
@@ -37,7 +38,7 @@ const panel = (id: string, dataset: string, view: string, extra: Partial<Widget>
 // the "before" side up front, so these checks still isolate exactly what the panel swaps change.
 const withV12 = (cfg: unknown): DashboardConfig => {
   const c = clone(cfg) as DashboardConfig
-  return withV15Trends({ ...c, pages: c.pages.map(compactSmallSampleNoteV12) }) // v15: the three geo trends move to dateEt
+  return withV16Caveats(withV15Trends({ ...c, pages: c.pages.map(compactSmallSampleNoteV12) })) // v15: the three geo trends move to dateEt; v16: hidden automatic caveats
 }
 const load = (pages: any[], version = 10) => normalizeConfig({ version, activePageId: pages[0].id, pages })
 

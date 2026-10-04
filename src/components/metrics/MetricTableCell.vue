@@ -18,7 +18,7 @@ const vm = useMetricItemViewModel(
 </script>
 
 <template>
-  <span v-if="vm.visible" class="mtc mono" :class="{ muted: vm.muted }">
+  <span v-if="vm.visible" class="mtc mono" :class="[{ muted: vm.muted }, vm.tone ? `tone-${vm.tone}` : '']">
     {{ vm.primary }}
     <span v-for="(d, i) in vm.deltaLines" :key="i" class="mtc-delta" :class="d.cls">{{ d.text }}</span>
     <!-- captionMode 'compact': listed behind the card's one Notes toggle instead (MetricCardInstance). -->
@@ -39,6 +39,21 @@ const vm = useMetricItemViewModel(
   font-size: 11.5px;
   color: rgb(var(--ink-2));
   white-space: nowrap;
+}
+/* The tone a scope field supplies (scope.ts scopeTone), as the readings log's Rules and Proposal. */
+.mtc.tone-trip {
+  color: #bc4749;
+  font-weight: 600;
+}
+.mtc.tone-watch {
+  color: rgb(var(--amber-hover));
+  font-weight: 600;
+}
+.mtc.tone-clear {
+  color: rgb(var(--ink-2));
+}
+.mtc.tone-muted {
+  color: rgb(var(--ink-3));
 }
 .mtc-delta {
   font-size: 10px;

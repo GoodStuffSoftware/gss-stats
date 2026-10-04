@@ -23,6 +23,12 @@ export type ScopePath =
   /** The shared-tag note when another flight uses the same tag (its return beacons can't be told
    * apart); null otherwise. */
   | 'campaign.returnTagShared'
+  /** The ads store's freshness line for the campaign ("Spend through Sep 27 · synced 2h ago",
+   * plus "stale — sync pending" while a closed day is missing). From the readings load. */
+  | 'campaign.freshness'
+  /** The spend thresholds the campaign has fired, with the time each fired:
+   * "$50 · Sep 26, 3:00 PM ET; $100 · …". null when none have. From the readings load. */
+  | 'campaign.thresholds'
   | 'popup.id'
   | 'popup.label'
   | 'window.label'
@@ -34,6 +40,34 @@ export type ScopePath =
   | 'reading.spend'
   | 'reading.rules'
   | 'reading.proposal'
+  /** The five whitelisted count columns of a stored reading (READING_COUNT_FIELDS), each tied to
+   * ONE field of the record: no generic `reading.count.<key>` path, so a return, game-start,
+   * game-complete, tutorial or tour total can never be reached from a card. */
+  | 'reading.count.arrivals'
+  | 'reading.count.asks'
+  | 'reading.count.accepts'
+  | 'reading.count.auth'
+  | 'reading.count.signUpsAtMost'
+  /** Derived from signUpsAtMost and its exactness: "N (exact)", "at most N", or an em dash. */
+  | 'reading.count.signUps'
+
+/** The ScopePaths that read a count off a stored reading, and the record field each one reads
+ * (privacy: the counts-only rule, read as rows only. This is the ALLOW-LIST: nothing else of
+ * `ReadingRecord.counts` is ever copied into a card's scope, in particular none of the /return,
+ * game-start, game-complete, tutorial or tour totals). */
+export const READING_COUNT_FIELDS = {
+  'reading.count.arrivals': 'taggedArrivals',
+  'reading.count.asks': 'asks',
+  'reading.count.accepts': 'accepts',
+  'reading.count.auth': 'authSuccess',
+  'reading.count.signUpsAtMost': 'signUpsAtMost',
+} as const
+export type ReadingCountPath = keyof typeof READING_COUNT_FIELDS
+export const READING_COUNT_PATHS = Object.keys(READING_COUNT_FIELDS) as ReadingCountPath[]
+/** Every `reading.count.*` path a card may use: the five above and the derived sign-ups text. */
+export function isReadingCountPath(path: string): boolean {
+  return Object.hasOwn(READING_COUNT_FIELDS, path) || path === 'reading.count.signUps'
+}
 
 /** (a) LABEL: literal text, or a bound object. */
 export type Label =
@@ -73,6 +107,11 @@ export type DataBinding =
   | { ratio: string; params?: Params; window?: WindowSpec }
   | { field: ScopePath }
 
+/** A table cell's colour, supplied by the scope field it reads (scope.ts scopeTone): never data of
+ * its own, only how an already-shown value is drawn. The readings log's Rules and Proposal cells
+ * use it: 'trip' red and bold, 'watch' amber and bold, 'clear' the plain ink, 'muted' the dim ink. */
+export type CellTone = 'trip' | 'watch' | 'clear' | 'muted'
+
 /** (c) DISPLAY. */
 export type Display =
   | { as: 'number'; deltas?: DeltaName[] }
@@ -81,6 +120,8 @@ export type Display =
   | { as: 'counts' } // "1,111 game-screen views · 353 arrivals"
   | { as: 'dateRange'; days?: boolean }
   | { as: 'datetime' }
+  /** An ISO instant as Eastern time, "Sep 26, 3:00 PM ET" (a stored reading's read time). */
+  | { as: 'datetime-et' }
   | { as: 'badge'; tones?: Record<string, 'neutral' | 'live' | 'warn'> }
   | { as: 'bar' } // a bar scaled to the section's largest value: a count, or a rate with its (n/d)
   | { as: 'date' } // a day (a 'time' metric): "Sep 26"
@@ -104,6 +145,10 @@ export interface Gating {
   whenNotStarted?: 'label' | 'zero'
 }
 
+/** RepeatSpec.limit for a readings repeat: the default and the cap (the readings endpoint's own). */
+export const DEFAULT_READINGS_LIMIT = 30
+export const MAX_READINGS_LIMIT = 500
+
 export interface RepeatSpec {
   over: 'campaigns' | 'popups' | 'windows' | 'readings' | 'countries'
   ids?: string[] // campaigns, popups, countries (COUNTRY_BUCKETS); windows: WINDOW_SIDES
@@ -115,6 +160,13 @@ export interface RepeatSpec {
    * drop it; bindings that don't serve it are left out of its instance (scope.ts configRuling). */
   organic?: boolean
   flightingToday?: boolean
+  /** Campaigns only: keep the campaigns the ads readings load says have something to show — a
+   * stored reading, Ads-API spend, or an active flight — unless the widget selected campaigns
+   * itself (narrowToCampaigns). What the ads readings log shows; none until the load answers. */
+  withActivity?: boolean
+  /** Readings only: at most this many (newest first; per campaign when nested in a campaign
+   * repeat). A whole number, DEFAULT_READINGS_LIMIT when unset, MAX_READINGS_LIMIT at most. */
+  limit?: number
   empty?: { label: Label; text: Label } // shown once when the repeat yields nothing
 }
 
@@ -125,10 +177,17 @@ export interface MetricItem {
   display: Display
   gating?: Gating
   caption?: Label // rendered through NoteBlock under the value
+  /** A table column's tooltip: shown as the title of the item's header cell (a 'table' section
+   * only; other layouts ignore it). Plain text, never markup. */
+  hint?: Label
   /** How the caption and the value's own notes (install-fix, counted-from, caveats) show:
    * 'inline' (default) as a line under the value; 'compact' behind a small notes toggle next
    * to the label, collapsed by default, so the card keeps its compact look. */
   captionMode?: 'inline' | 'compact'
+  /** Registry note ids from the value's own notes (not the item's `caption`) this item never shows.
+   * Set at render time by a mapping that must honour a stored hide (rateTileCard.ts: the legacy
+   * `popup-note`); a saved card's author has no use for it. */
+  hideNotes?: string[]
   frame?: 'row' | 'pill' | 'tile' | 'column' // overrides the section layout for this item
   repeat?: RepeatSpec // expands in place, e.g. one tile per flighting campaign
 }
@@ -153,6 +212,10 @@ export interface Section {
 
 /** A control a card can host (CardSpec.actions): a code-reviewed component, never markup. */
 export type CardAction = 'ads-refresh'
+/** Registry-backed notices a card shows above its body, from its own data load: 'ads-readings'
+ * is the readings store's warnings (unbound / unreadable), the small-numbers note and the
+ * sync alerts, in that order. */
+export type CardNotices = 'ads-readings'
 
 /** The container: a Card (one instance) or, with `repeat`, a StatList of N identical instances. */
 export interface CardSpec {
@@ -167,6 +230,9 @@ export interface CardSpec {
   /** Controls in the card's status row: 'ads-refresh' syncs the campaigns' Google Ads spend now
    * (the ads refresh flow) and reloads the card. */
   actions?: CardAction[]
+  /** Notices above the body (see CardNotices). Needs the ads readings load, so a card that
+   * sets it loads GET /api/ads/readings like one that repeats over readings. */
+  notices?: CardNotices
   /** "Updated Xs ago" (the card's latest successful load) with a reload control: top-right in
    * the card's header (`true` or 'header', where the old KPI panel had it) or in a footer. */
   showUpdated?: boolean | 'header' | 'footer'

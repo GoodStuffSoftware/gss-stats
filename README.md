@@ -118,8 +118,8 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   or two. Days only: no hour, place or device split (a `/return` or game-complete row gets no
   more than the day's count and the kind the tile already reads). Each series is one extra
   statement per distinct twin read (items that share a window share it) against the 40-statement
-  batch budget ([`docs/capacity.md`](docs/capacity.md) §9). The layout version is now 14 (a save
-  guard only; page navigation holds 13): the first save from this build backs the stored v13
+  batch budget ([`docs/capacity.md`](docs/capacity.md) §9). Layout version 14 was a save
+  guard only (page navigation holds 13): the first save from that build backed the stored v13
   layout up once, and a tab still on the old build is told to reload; nothing is rewritten.
 - **Full width** — there's no centred max-width column: the header (a strip across the window),
   the filter bar and the chart grid span the window with a 16px gutter (12px on a phone), so a
@@ -163,12 +163,78 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   [`NoteBlock.vue`](src/components/NoteBlock.vue) (short caveats) or
   [`TextBlock.vue`](src/components/TextBlock.vue) (longer prose) — both support
   **bold** and [links](https://example.com) via a small safe tokenizer
-  ([`src/lib/textLite.ts`](src/lib/textLite.ts), never `v-html`) — and attachable to
-  any chart as a caption (`widget.notes`) or as its own movable 'note' widget
-  (`widget.noteId`), editable from the chart menu either way. Short UI names (metric and
+  ([`src/lib/textLite.ts`](src/lib/textLite.ts), never `v-html`) — and shown as
+  their own movable 'note' widget (`widget.noteId`, whose editor also takes plain text with
+  "Insert from library"). Short UI names (metric and
   funnel-step labels such as "Game-screen views") are registry entries too, of kind `label`:
-  never a caption and never offered in the caption pickers (the card builder's label pickers
-  list them).
+  never a caption, never a caveat and never offered in the editor's caption lists (the card
+  builder's label pickers list them).
+- **Chart captions and data caveats** (layout version 16). Everything under a chart comes from one
+  list in a fixed order, [`chartNotes()`](src/lib/chartNotes.ts): the chart's own caption, any
+  legacy notes, the automatic caveats, then the response's own notes (the pop-up note, the split
+  guard, whole-day counting, the range notice). A card's own captions render inside the card.
+  - **Caption** (`Widget.caption`, up to 2,000 characters, cut on load, never dropped): plain text
+    the chart's author writes in the chart editor, with **bold** and links; the same field on a
+    chart and on a card, stored beside the card rather than in its spec. "Insert from library"
+    copies a *static* registry entry's text into it (fixed text only: not date-gated, computed,
+    tied to a value from code or a data-cut note); the library stays read-only.
+  - **Value tokens** (`{=path|format}`; the grammar and every path are documented once, in
+    [`src/lib/valueTokens.ts`](src/lib/valueTokens.ts)). "Insert value ▾" in the chart editor puts
+    one at the caption's cursor. A token in a chart's caption is filled from that chart's own
+    response, with no extra request: its total, top item, the top item's count and share, and the
+    first and last day shown; plus the newest release, the web go-live date and the Play
+    submission date. Formats are `number`, `pct` and `date`. A token with no value (no data yet, an
+    error, a rate tile or a multi-series line for the chart values, an unknown path or a mismatched
+    format) shows "—", as every token does on a tab from before value tokens and in any note other
+    than a caption or a note widget, so the raw token never shows, even one wrapped around bold or a link. A value
+    is put in only as plain text and never read again, so a value holding `**`, a link or another
+    token shows as written; a token inside bold or a link label shows "—", and a link whose address
+    holds `{` or `}` stays plain text.
+  - **Catalog values** (`{=metric:<id>@<window>}`, e.g. `{=metric:bsk.pageviews@page|number}`; the
+    grammar is pinned in [`src/lib/valueTokens.ts`](src/lib/valueTokens.ts)). A caption or a note
+    widget can show any catalog metric or proportion ratio that needs no campaign or popup choice,
+    over one of its own windows (`page` for the page's date range, `todaySoFar`, `before`, `after`);
+    the window is required and the kind (number, percentage, date) is the catalog's own. Every
+    widget on a page shares ONE batched `/api/metrics` request, the same one the cards use (so a
+    value a card already loaded is never fetched twice); while it loads, on an error and for an
+    unknown id a token shows "—", and so does a value the server withholds or cannot fully measure
+    (too few, no data, a shorter span than the range). A token sends only its metric and window,
+    so it can never ask for a split the catalog withholds: the counts-only rule (return, game
+    starts, completions, tutorial and tour exits: no hour, place or device split, no visitor id)
+    stays enforced on the server, where a sub-day range counts those rows over whole ET days.
+  - **Note widgets** take values too: `release.*`, `golive.*`, `play.*` and `metric:` tokens fill
+    in; `chart.*` shows "—" (a note belongs to no chart).
+  - **Insert value** is one control in every text box that takes inserts: the caption, a note
+    widget and a card label. It groups This chart (not in a note or a card that renders its own
+    body), Dates and Metrics (a card label offers the repeat's own fields and Dates). A metric
+    option shows its current value only if the page already holds it; nothing is fetched to label
+    an option. Insertion is an explicit choice: pick in the menu, then press **Insert** (a closed
+    menu fires a change on every arrow key, which would drop a token per option).
+  - **Caveats** are system-owned and follow the code: dated or gated entries, computed text, text
+    tied to a value from code, and the runtime notes. A chart shows its data source's caveats
+    automatically (`autoCaveatIds`: the `overview`, `campaigns`, `popup`, `geo` and `ads-readings`
+    scopes; a note widget and a chart with no such source show none), and one added to the
+    registry later reaches every chart on that source. A caveat that names a view, such as the
+    country-columns note, carries a `NoteDef.appliesTo` condition and shows only where it is true.
+  - **Hiding** (`Widget.hiddenCaveats`, up to 32 registry or runtime ids, `/^[a-z0-9-]{1,64}$/`): the
+    editor's "Data caveats" list has a Show/Hide button on each hideable caveat, per chart. A
+    caveat that says data was cut or withheld (`NoteDef.hideable: false`, the range limit, the
+    split guard, whole-day counting, the country-columns note and the retention
+    disjoint-populations note) always shows; listing one in `hiddenCaveats` does nothing. A card's
+    own captions (from its preset or spec) take the same Show/Hide buttons in the card builder,
+    and a caption id this version does not know is kept as saved until its Remove button is used.
+  - **Upgrading a chart.** Version 16 hides, once per chart, every hideable caveat that chart did
+    not show before (`seedHiddenAutoCaveatsV16`, run only on a layout stored below version 16), so
+    an existing chart looks the same; the built-in default charts, a fresh layout and "restore
+    default charts" are seeded the same way. The seed only ever hides the caveats that existed at
+    version 16 (`V16_SEEDABLE_CAVEATS`), so one added to the registry later shows on every chart,
+    a restored default chart and a layout not yet saved at version 16 included. A campaigns chart
+    gains the country-columns note only if it splits by country. A chart a person adds shows its
+    caveats at once.
+  - **Legacy notes** (`Widget.notes`, no longer written): they keep rendering. The first time a
+    chart is edited, its static entries fold into the caption as text and drop out of `notes`;
+    dated, computed, value-tied and data-cut entries stay in `notes` as caveats. A duplicated
+    chart is a deep copy, so the two never share a list.
 - **Durable, multi-page dashboards** — layout + chart definitions persist in KV (not
   `localStorage`), so they follow you across devices. Duplicate / rename / delete
   pages (see *Page navigation*); a protected default page with "restore default charts"; per-page filters and
@@ -177,6 +243,13 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   first save of a newer version first copies the previous stored layout to
   `dashboard:default:backup:v<old version>` in KV ([`functions/api/config.ts`](functions/api/config.ts)),
   once, so a migration can be rolled back by copying that key over `dashboard:default`.
+  Every save that changes the stored layout also first copies the stored one to
+  `dashboard:default:prev`, and the first such save of each ET day to
+  `dashboard:default:day:<YYYY-MM-DD>` (kept 30 days); if a copy can't be written the save is
+  refused (`503`) and the stored layout and `:prev` are left as they were (see
+  [Restoring the layout](#restoring-the-layout)). That makes a changing save 2 KV writes (3 on the
+  first of an ET day) instead of 1, so the Free plan's 1,000 writes a day (account-wide) cover
+  about half as many edits; past the cap every save fails with that `503`.
   A tab saves only after it has read the stored layout ([`src/api.ts`](src/api.ts) `loadConfig`
   resolves to `null` only when nothing is stored yet): if the read fails — no answer, a non-2xx,
   or a body that isn't a layout or can't be normalized — it shows the built-in defaults under a "Couldn't load your saved
@@ -242,7 +315,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
     Back / Next (Create on the last step), each step's Next waiting until the step is complete
     and saying why inline. A **page**: its name; its group (an existing one or a new one named
     there); what it starts from (blank, a copy of the page on screen, or a built-in page's
-    default charts) and its icon (Auto, shown, or one from the icon picker) — it's added to its
+    default charts, including **Best Sudoku · Retention**) and its icon (Auto, shown, or one from the icon picker) — it's added to its
     group and opened. A **group**: its name (unique); pages to move into it (optional, ★ Overview
     excluded); a review — it's listed even when empty, and the drawer scrolls to it. Esc or ×
     closes and starts over; with reduced motion nothing slides.
@@ -332,8 +405,26 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   and the eligibility panel are metric cards (presets `popup-rates` and `signin-eligibility`, since
   layout version 11), over the page's range, sites and "hide my own visits", as before. Outcome-over-shown rates are
   not shown as percentages: outcomes land days after the showing, so a range mixes cohorts.
-  Every other pop-up chart (reason/platform breakdowns, per-day trends, single rate tiles) is
-  still available from the chart editor's "Pop-up tracking" data source.
+  Every other pop-up chart (reason/platform breakdowns, per-day trends) is
+  still available from the chart editor's "Pop-up tracking" data source. A single rate tile
+  (any `POPUP_RATE_SPECS` key) is a one-item metric card since layout version 18: it shows the
+  percentage big with its n/d under it, "too few to report" under `MIN_COHORT`, "—" over "(0/0)"
+  when nothing was shown, and the registry's notes (counted-from date, "still arriving" on a
+  lagged outcome rate, the install-fix note, the eligibility caveat). A saved rate tile is mapped
+  to the card when it is drawn (`src/lib/metrics/rateTileCard.ts`); the layout is not rewritten,
+  and a stored hide of the install-fix note (`popup-note` in the chart's data caveats) still hides it.
+  The chart editor no longer offers "Rate" as a chart type for a new chart (add a rate as a metric
+  card: a one-line hint under Chart type says so, and the "Pop-up rates" preset is the starting
+  point); a saved rate tile still opens and edits. `/api/popups` no longer answers
+  `dimension: 'rate'` (removed in 0.24.1): like `rates` and `eligible`, it is a 400 naming the card
+  and asking for a reload, so a tab from an older build shows an error on that tile, not a 500. The Stat and Table chart types draw through the
+  shared `StatTile` and `BarTable` components (`src/components/metrics/`), as the metric card's
+  tile and bar do.
+  A key this build does not know shows a message asking you to pick a rate. Differences from the
+  old tile: before tracking went live it reads "not yet tracking" where the old tile read "—"
+  over "0/0"; the card clamps a range longer than the metrics limit to its newest days, reads a
+  bare-date range as Eastern days, and shows "unavailable" for a bare-date range whose start
+  equals its end. Percent columns in card tables are right-aligned.
   See [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) for the one place every pop-up path
   pattern is defined, matching the Best Sudoku team's final beacon path list (2026-09-25):
   - Upsell reasons are exactly `cadence` / `limit` / `daily-locked` / `upgrade-tap`; any
@@ -412,7 +503,8 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   routine stores, falling back to the hand-entered `CAMPAIGN_SPEND`), a device mix (the
   standard nested doughnut over the beacon: campaign flight → device → OS, share of tagged
   hits), an
-  on-device return-visit retention curve, and the ads routine's **readings log**. The
+  on-device return-visit retention curve, and the ads routine's **readings log** (a metric card, preset `ads-readings-log`; see *Ads data
+  freshness*). The
   funnel's Install step counts `/popup-outcome/install-prompt/installed` (once per showing);
   raw `/install/*` outcome beacons, which can double-count one install, are shown only as a
   secondary "raw install signals" line. Attribution is by the beacon's own
@@ -420,6 +512,46 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   membership, and known verification/household traffic is excluded server-side. One
   campaign (Play-direct) sends its ads straight to the Play Store and so has no beacon rows
   at all; it's shown spend-only rather than an empty funnel.
+- **Retention verdict** — a per-arm read of "did the campaign's arrivals come back", offered in
+  the card picker as the `retention-verdict` preset (a table, one row per campaign arm plus
+  "Organic (web)": the verdict, the days 2-7 return rate with its 90% lower and upper bounds,
+  first tagged loads (d0), and completed games per arrival) and, beside it, `campaign-engagement`
+  (completed games per arrival with its two counts). Neither is a default and neither bumps the
+  layout version. **Where to find them together:** the page template **Best Sudoku · Retention**
+  (`defaultRetentionPage` in [`src/lib/defaults.ts`](src/lib/defaults.ts), offered by
+  [`src/lib/wizards.ts`](src/lib/wizards.ts)) puts a scope note, the small-sample note, the verdict
+  table, `campaign-returns` and `campaign-engagement` on one page. Create it from **+ New > Page >
+  Start from > Best Sudoku · Retention**. It is a template only: it is not on any layout until someone
+  creates it, it is not in the fresh default layout, and it needs no layout version or migration (what
+  a person saves is an ordinary page of card widgets). Its figures are per campaign over the whole
+  flight, so the page's date range does not change them. The rate is the share of an arm's d0 devices that came back on any of days 2-7
+  after arrival (ET days), and its bounds are a **Wilson score interval at 90%**
+  (`wilsonBounds` in [`src/lib/metrics/retention.ts`](src/lib/metrics/retention.ts)). The verdict
+  compares those bounds with a **bar**: a fixed 7.5%, or 0.6 times the organic days 2-7 rate once
+  the organic baseline is sound, meaning at least 1,000 *matured* organic arrivals, at least 21
+  matured organic ET days, and at least one organic day 2-7 return (zero returns would make the
+  bar 0 and hand every arm a GO, so that case keeps the fixed 7.5%). The verdict cell says which
+  bar was used and, for the fixed one, why. Codes: **too few** (under 200 d0, no read);
+  **maturing** (the arm's last arrival's day 2-7 window has not closed, so returns can still
+  arrive; a maturing arm never gets an early NO-GO); **provisional** (matured, 200-499 d0, the
+  upper bound is not below the bar; it can still be NO-GO when it is); **GO** (matured, at least 500
+  d0, lower bound at or above the bar); **NO-GO** (matured, upper bound below the bar); **HOLD**
+  (matured, at least 500 d0, the bar sits inside the bounds). At 500 d0 against the fixed 7.5%
+  bar, GO needs 48 or more returns (lower bound 7.65%; 47 gives 7.47%) and NO-GO needs 27 or fewer
+  (upper bound 7.32%; 28 gives 7.54%). These are Wilson thresholds, not the Wald 49 and 28. When the organic bar is used it
+  **runs high**: the organic day 2-7 count is cut at ET midnights, so it also includes returns from
+  recent arrivals that are not yet in the matured arrival count, about 2.5 to 3.5 days of
+  arrivals' worth (2.5 if first returns are spread evenly over days 2-7, 3.5 if they come on
+  day 2). The bar is therefore too high by about that many days divided by the matured organic
+  days (roughly 12 to 17% at 21 days, about 10% at 30, and larger the fewer there are). A high bar
+  makes NO-GO easier and GO harder, never the reverse, and that is why the 21-day minimum exists.
+  Organic d0
+  and campaign d0 are **disjoint populations** (a device is organic only on a first-ever web visit
+  with no campaign tag, first touch wins), so the organic bar *compares* the two groups and nets
+  nothing out of a campaign; that caveat can't be hidden from the card. The rates are also a lower
+  bound on people (d0 counts browser storage, not people), and the bounds cover sampling error
+  only. Everything is **counts only**: rows only, with no hour, place or device split offered on
+  any of it.
 - **Locked down** — Google sign-in with an email allowlist gates every page and API
   call; the header shows who is signed in with a **Sign out** button (between 701px and 1000px
   wide, where the bar would wrap, the search box shrinks to its icon and the account becomes an
@@ -492,7 +624,8 @@ Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats
   repeat's ids and empty message, table headings, gating) and using a control without changing it
   leaves the card exactly as it was. A card the builder saves always loads again: it holds the
   same size limits loading checks (up to 32 badge colours, for one), and a note id from a newer
-  version is kept as saved and shows nothing until this version knows it.
+  version is kept as saved and shows nothing until this version knows it. Each of a card's own
+  captions has a Show/Hide button (see *Chart captions and data caveats* above).
 - **Two datasets, one dashboard.** RUM (sampled, human-only) and the beacon (every
   real load, sub-country geo) are charted side by side; they're independent and never
   summed.
@@ -945,6 +1078,52 @@ npm run -s ads:postflight-read -- --stage wrapup --campaign <arm B id>
 plans, so register any arm, then redeploy the Worker, or its cron and Refresh won't sync that
 arm; the CLI reads still work (they sync for themselves).
 
+### Play installs (`ads:play-sync`, table `ads_play_daily`)
+
+The Best Sudoku Retention page's **Play installs** card (preset `play-installs`: registry
+metrics `play.deviceInstalls`, `play.deviceUninstalls`, `play.activeDeviceInstalls` and
+`play.dataThrough` over the fact `adsPlayDaily`) shows Google Play's whole-app daily totals for
+the page's date range. They live in `ads_play_daily` (migration `0005_play_daily.sql`): one row
+per Play day with four nullable counts and `fetched_at`, nothing else. Counts only, read as
+rows only: there is no hour, country, source or device column, no campaign, and no join to
+beacon rows.
+
+What the figures are, and are not:
+
+- **Lag.** Play's bulk reports trail by about 3-7 days, so the card shows a "data through" date.
+- **Play's day.** Play reports in its own day, which is not confirmed to be the ET day, so Play
+  days are never added to ET-day figures. The card follows the date range only; the sites and
+  own-visits filters do not apply to it.
+- **Active device installs is a stock**, shown as the last stored day in the range, not a sum.
+- **Household.** The counts include our own devices and cannot be attributed to a campaign (no
+  install-referrer capture).
+- **No retention.** Play's bucket has no retention report, so the card has no retention figure
+  and no ratio.
+- **Before the first sync** the card says "no Play figures stored yet". A missing table or
+  binding reads the same way and costs the page nothing. Any other read error (a D1 outage, a
+  bad statement) shows as an error on the tiles, never as "no figures yet".
+
+**How to activate (one time, run by a person; neither CI nor the Worker does it):**
+
+```powershell
+# 1. Create the table in the production ads database. First list what is pending (read-only);
+#    only 0005 should be. ads:migrate applies EVERY pending migration to the production
+#    gss-stats-ads database and uses wrangler's own auth (`npx wrangler login`, or
+#    CLOUDFLARE_API_TOKEN in the environment), not --cf-token-file.
+npx wrangler d1 migrations list gss-stats-ads --remote
+npm run ads:migrate
+# 2. Dry run: reads the Play bucket, writes nothing, needs no Cloudflare token
+npm run ads:play-sync -- --play-sa <path-to-play-service-account.json> --dry-run
+# 3. The first real sync (idempotent: re-running overwrites the same days)
+npm run ads:play-sync -- --play-sa <path-to-play-service-account.json> --cf-token-file <path-to-cf-token>
+```
+
+The default start is 2026-09-26 (the Play tracking go-live); `--since` / `--until` change the
+range. Re-run the sync whenever fresher Play days are wanted (Play re-posts recent days; the
+upsert overwrites them, except that a count Play leaves blank keeps the last stored number). A
+**new** Retention page includes the card; a page already created from the template does not
+gain it, so add it from the card picker ("Play installs").
+
 ## Ads data freshness
 
 Every path that needs Google Ads metrics runs **one** function,
@@ -983,14 +1162,44 @@ second finds nothing to write.
 
 The campaigns page's cost card (preset `campaign-cost`: registry metrics `campaign.spendThrough`
 and `campaign.lastSync` over the facts `adsCoverage` and `adsLastSync`, the same two reads) and
-the readings widget (`/api/ads/readings`) show **"Spend through &lt;date&gt;"** and **"synced
+the readings log card (`/api/ads/readings`) show **"Spend through &lt;date&gt;"** and **"synced
 &lt;relative time&gt;"** per campaign, and **"stale — sync pending"** when a flight day that should be stored
 by now is missing: yesterday from 09:30 ET (the 08:00 ET morning read has synced by then),
 otherwise the day before. A sync run that claimed and never finished (killed mid-run, e.g. by
-a CPU limit) shows as a **"Sync alert"** line in the readings widget once it is 15 minutes old
+a CPU limit) shows as a **"Sync alert"** line in the readings log card once it is 15 minutes old
 (for 7 days), and the morning, backstop and post-flight reports print it as `SYNC ALERT`. Their **Refresh data** button posts to `/api/ads/refresh` (behind
 the sign-in gate), which asks the sync Worker to run only when something is stale, at most once
 per 10 minutes. The dashboard holds no Google Ads credential and never calls the Ads API.
+
+### The readings log card
+
+The ads routine's readings log is a metric card like any other (preset `ads-readings-log`, ADR
+[0005](docs/adr/0005-retire-bespoke-widgets.md)): one block per campaign that has activity, each
+with its freshness lines (spend through, synced, thresholds fired, sync alerts) above a table of
+that campaign's stored readings, newest first. The **Refresh data** button sits above the blocks,
+after the page notices. A stale freshness line ("stale — sync pending") is plain text, no longer
+red. It is edited
+like any card (**Customize…**), can be fitted to its content, and a page can repeat it. Two small
+engine hooks serve it and any other card: a **cell tone** (the Rules and Proposal cells are
+coloured trip / watch / clear / muted by the reading itself, which styles a value already shown and
+adds no data) and a **column hint** (`MetricItem.hint`, the header cell's tooltip; Sign-ups says
+that the figure is an upper bound). First load shows "Loading…", a refetch keeps the
+rows up, and a failed load (including one that takes longer than 15 seconds) shows the card's own
+"couldn't load" status with Retry and no "no campaign has readings" line. A wide table scrolls
+sideways inside its block, and a card only loads the readings when it reads them: the campaign
+cost card, which shares the Refresh data button, never calls `/api/ads/readings`.
+
+A saved layout needs no change. A widget with `dataset: 'ads-readings'` and no `card` is mapped to
+the preset when it is drawn, so its stored fields (`dataset`, `view`, `campaignIds`, `limit`, `type`)
+stay as they are and an older build still reads it. `campaignIds` narrows the campaigns, `limit`
+(default 30, at most 500) sets the table's row limit, and any `view` draws the log, the only view it
+ever had. In the chart editor the View picker no longer offers "Readings log": choosing the "Best
+Sudoku ads readings log" data source for a new chart starts it as the preset card; an existing widget
+is not converted by opening it.
+
+The card shows counts only: a reading's table cells read the five whitelisted counts (tagged
+arrivals, asks, accepts, auth successes, sign-ups) and nothing else of the stored record, and no
+return, game-start, tutorial or tour figure, hour, place or device is reachable from it.
 
 ### The sync Worker (`workers/sync/`, `gss-stats-sync`)
 
@@ -1129,7 +1338,15 @@ only: its first save over a stored v13 writes `backup:v13`, and rolling the code
 needs `backup:v13` restored (same steps below, with that key). Layout version 15 (the default
 trend charts on `dateEt`) rewrites the dimension of those untouched charts: its first save over a
 stored v14 writes `backup:v14`, and rolling the code back past it needs `backup:v14` restored.
-A tab still
+Layout version 16 (chart captions and hideable caveats) adds `caption` and `hiddenCaveats` to a
+chart and hides, once, the caveats an existing chart did not show: its first save over a stored
+v15 writes `backup:v15`. Layout versions 17 (the readings log as a metric card) and 18 (the
+pop-up rate tile as a metric card) are save-guard bumps only, like v14: the first save over any
+older stored layout writes `backup:v<stored>`, and rolling the code back past either needs that
+backup restored (same steps below, with that key).
+Production is stored at v12 until its first save, so that save writes
+`backup:v12` (the page navigation, trend-chart and caption changes of v13-v16 are all applied on
+load and written by it), and rolling the code back past v18 needs that backup restored. A tab still
 running older code gets `409` ("This tab is out of date, reload") instead of overwriting a
 newer layout.
 
@@ -1188,6 +1405,55 @@ To put a backup back, in this order:
    ```
 
 5. Open one tab and check the layout before opening any others.
+
+### Restoring the layout
+
+For when a save replaced the layout with the wrong one at the **same** layout version (say, a tab
+that never loaded the real layout saved the defaults over it). The version backups above don't
+cover that; these two copies do (`functions/api/config.ts`):
+
+- `dashboard:default:prev` — the layout as it was before the most recent save that changed it.
+  The next changing save replaces it, so it only helps if nothing was saved after the bad save.
+- `dashboard:default:day:<YYYY-MM-DD>` — the layout as it was before the first changing save of
+  that ET day. Kept 30 days. Use this when more saves followed the bad one: pick the day the bad
+  save happened (or the day before) and it holds the layout as that day began.
+
+Same order and cautions as above: **close every dashboard tab first** (the next changing save
+replaces `:prev`), then run these one at a time from the repo root, in Windows PowerShell 5.1.
+
+Read-only — list the copies, keep what's there now, and download the one you want (`:prev`, or a
+`:day:` key from the list):
+
+```powershell
+npx wrangler kv key list --remote --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --prefix "dashboard:default:"
+```
+
+```powershell
+cmd /c 'npx wrangler kv key get dashboard:default --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-current.json'
+```
+
+```powershell
+cmd /c 'npx wrangler kv key get dashboard:default:prev --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-restore.json'
+```
+
+```powershell
+cmd /c 'npx wrangler kv key get dashboard:default:day:2026-10-03 --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote > layout-restore.json'
+```
+
+Check it the same way (it must print `ok: version ..., N pages`; otherwise stop):
+
+```powershell
+Get-Content layout-restore.json -Raw -Encoding UTF8 | ConvertFrom-Json | ForEach-Object { if ($_.pages -isnot [array] -or $_.pages.Count -eq 0) { throw 'not a layout' }; "ok: version $($_.version), $($_.pages.Count) pages" }
+```
+
+Write — only after that printed `ok`. It replaces the whole stored layout, and writing with
+wrangler makes no `:prev` copy, so keep `layout-current.json` in case you need to undo it:
+
+```powershell
+npx wrangler kv key put "dashboard:default" --path layout-restore.json --namespace-id f1fa625cdb844c109c4db4acc02d00f5 --remote
+```
+
+Then open one tab and check the layout before opening any others.
 
 ## Auth
 

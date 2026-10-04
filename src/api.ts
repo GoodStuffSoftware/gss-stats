@@ -38,9 +38,8 @@ export async function fetchStats(widget: Widget, filters: GlobalFilters, extraCo
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        // A rate tile asks for one rate. (The rate table is a metric card since layout version 11.)
-        dimension: widget.type === 'rate' ? 'rate' : widget.dimension || 'kind',
-        rateKey: widget.type === 'rate' ? widget.dimension : undefined,
+        // (A rate tile is a metric card since layout version 18, the rate table since 11: neither comes here.)
+        dimension: widget.dimension || 'kind',
         popup: widget.popup,
         kind: widget.popupKind,
         since: filters.since,
@@ -173,17 +172,35 @@ async function withSessionCheck<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
+/** How long a readings load may take (headers and body) before it is given up as failed: the
+ * card then shows its load-failed status with Retry instead of "Loading…" forever. */
+export const ADS_READINGS_TIMEOUT_MS = 15_000
+
 /** Fetch the ads-read routine's readings log + stored spend (GET /api/ads/readings — see
  * lib/adsStore.ts + functions/api/ads/readings.ts). `query` is the URL-encoded
- * campaignId/limit query string AdsReadingsWidgetCard builds. */
+ * campaignId/limit query string the readings log card builds. Gives up after
+ * ADS_READINGS_TIMEOUT_MS (a plain Error, so the session check is not triggered by it). */
 export function fetchAdsReadings(query: string): Promise<AdsReadingsResponse> {
   return withSessionCheck(async () => {
-    const res = await fetch(`/api/ads/readings?${query}`)
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      throw new Error(`readings ${res.status}: ${text.slice(0, 200)}`)
+    const controller = new AbortController()
+    let timedOut = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, ADS_READINGS_TIMEOUT_MS)
+    try {
+      const res = await fetch(`/api/ads/readings?${query}`, { signal: controller.signal })
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        throw new Error(`readings ${res.status}: ${text.slice(0, 200)}`)
+      }
+      return await res.json()
+    } catch (e) {
+      if (timedOut) throw new Error(`readings timed out after ${ADS_READINGS_TIMEOUT_MS / 1000}s`)
+      throw e
+    } finally {
+      clearTimeout(timer)
     }
-    return res.json()
   })
 }
 
