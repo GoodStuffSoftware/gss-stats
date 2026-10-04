@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-10-03
+
 ### Added
 - **Play installs tile on the Best Sudoku Retention page.** It shows Google Play's device installs,
   uninstalls and active device installs for the date range, with a "data through" date (Play
