@@ -316,7 +316,10 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
     and saying why inline. A **page**: its name; its group (an existing one or a new one named
     there); what it starts from (blank, a copy of the page on screen, or a built-in page's
     default charts, including **Best Sudoku · Retention**) and its icon (Auto, shown, or one from the icon picker) — it's added to its
-    group and opened. A **group**: its name (unique); pages to move into it (optional, ★ Overview
+    group and opened. A page built from a built-in page stores which one (`templateId`, an optional
+    field with no layout version), so **Restore default charts** on it brings back that page's own
+    chart set rather than the generic one; a page without the marker is read by its id, and a
+    Retention page made before the marker by its scope note. A **group**: its name (unique); pages to move into it (optional, ★ Overview
     excluded); a review — it's listed even when empty, and the drawer scrolls to it. Esc or ×
     closes and starts over; with reduced motion nothing slides.
   - **Page menu** ([`src/components/nav/PageMenu.vue`](src/components/nav/PageMenu.vue)) — ⋯
@@ -520,8 +523,10 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   table, `campaign-returns` and `campaign-engagement` on one page. Create it from **+ New > Page >
   Start from > Best Sudoku · Retention**. It is a template only: it is not on any layout until someone
   creates it, it is not in the fresh default layout, and it needs no layout version or migration (what
-  a person saves is an ordinary page of card widgets). Its figures are per campaign over the whole
-  flight, so the page's date range does not change them. The rate is the share of an arm's d0 devices that came back on any of days 2-7
+  a person saves is an ordinary page of card widgets). Its campaign figures are per campaign over the whole
+  flight, so the page's date range does not change them; the Play tiles do follow it. Because
+  nothing on the page reads the site picker or the own-visit exclusions, the page's filter bar
+  keeps only the date range (and Sync all pages). The rate is the share of an arm's d0 devices that came back on any of days 2-7
   after arrival (ET days), and its bounds are a **Wilson score interval at 90%**
   (`wilsonBounds` in [`src/lib/metrics/retention.ts`](src/lib/metrics/retention.ts)). The verdict
   compares those bounds with a **bar**: a fixed 7.5%, or 0.6 times the organic days 2-7 rate once

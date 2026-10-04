@@ -6,6 +6,13 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.26.0] — 2026-10-03
+
+### Changed
+- **Restore default charts works on every template page.** A page created from a template now brings back that template's own charts, not the generic set; older Retention pages are recognised too.
+- **The Retention page's filter bar shows only the date range.** The site picker and own-visit exclusions are hidden because nothing on that page reads them, and the date range still drives the Play tiles.
+
+
 ## [0.25.0] — 2026-10-04
 
 ### Added
