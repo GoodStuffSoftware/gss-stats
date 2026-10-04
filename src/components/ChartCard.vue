@@ -27,8 +27,8 @@ import { chartValueResolver } from '../lib/valueTokens'
 
 const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolean; drillOpen: boolean; forceControls?: boolean }>()
 
-// A metric card, dataset 'ads-readings' (a card too: see cardRef below) and type 'note' render
-// their own body (own data fetch or none) — no /api/stats round trip, no per-chart filter override, no drill. The datasets
+// A metric card, dataset 'ads-readings' and a pop-up rate tile (both cards too: see cardRef below)
+// and type 'note' render their own body (own data fetch or none) — no /api/stats round trip, no per-chart filter override, no drill. The datasets
 // 'overview' and 'campaigns' are card panels since layout version 11 (their bespoke bodies are
 // retired); one without a card — a panel the migration does not know — says so.
 // The header (title/zoom/menu) stays generic and shared with every other widget type.
@@ -43,6 +43,10 @@ const isBespokeBody = computed(() => rendersOwnBody(props.widget))
 // it is drawn as the `ads-readings-log` preset at render time, its stored fields untouched.
 const cardRef = computed(() => cardRefFor(props.widget))
 const isCard = computed(() => !!cardRef.value)
+// A legacy pop-up rate tile (type 'rate') is drawn as a one-item card (ADR 0005 slice 4); one whose
+// rate key this build does not know has no card and says so (rateUnknownText) rather than a "—".
+const isRateTile = computed(() => props.widget.type === 'rate')
+const rateUnknownText = noteRawText('label.card.rateUnknown')
 const metricsContext = computed(() => {
   const f = effectiveFilters.value
   return metricsContextFor({ since: f.since, until: f.until }, resolveSelection(props.widget.siteSel ?? f.siteSel).tags, f)
@@ -430,22 +434,6 @@ const statOther = computed(() =>
 )
 const statOtherLabel = computed(() => (props.widget.metric === 'visits' ? 'pageviews' : 'visits'))
 
-// Pop-up rate tile (widget.type === 'rate'): null (no denominator yet) renders as "—",
-// never NaN/Infinity — see lib/popupEvents.ts computeRate. A nonzero-but-too-small
-// denominator (MIN_COHORT — see lib/popupEvents.ts gateRate) is a THIRD state, distinct
-// from "no data at all": "too few to report", not "—".
-const rateValue = computed<number | null>(() => data.value?.rate ?? null)
-const rateDisplay = computed(() => {
-  if (data.value?.insufficientCohort) return 'too few to report'
-  return rateValue.value == null ? '—' : `${(rateValue.value * 100).toFixed(1)}%`
-})
-// n/d next to every rate — see lib/popupEvents.ts GatedRate.numerator/denominator. Shown
-// whenever the API sent a denominator at all (including 0, so "no data yet" still reads
-// as "0/0" rather than silently omitting the counts).
-const rateCounts = computed(() =>
-  data.value?.denominator == null ? null : `${data.value.numerator ?? 0}/${data.value.denominator}`,
-)
-
 const tableRows = computed(() =>
   !data.value
     ? []
@@ -462,19 +450,17 @@ const isEmpty = computed(
     !error.value &&
     data.value &&
     data.value.rows.length === 0 &&
-    props.widget.type !== 'map' &&
-    props.widget.type !== 'rate', // a rate tile has no rows even when it has a real (or null) rate — never "No data"
+    props.widget.type !== 'map',
 )
 
-// Pop-up count widgets (everything except the 'rate' tile and the 'date' trend, which
-// plot full history themselves — see functions/api/popups.ts) go "excluded" rather than
+// Pop-up count widgets (everything except the 'date' trend, which
+// plots full history itself — see functions/api/popups.ts) go "excluded" rather than
 // showing a real-looking chart of zero/pre-release counts while tracking hasn't shipped
 // yet — see lib/popupEvents.ts TRACKING_ACTIVATION_DATE_ET, hard requirement "before
 // activation is unmeasured, not zero."
 const popupNotYetActive = computed(
   () =>
     props.widget.dataset === 'popup' &&
-    props.widget.type !== 'rate' &&
     props.widget.dimension !== 'date' &&
     !!data.value?.meta?.activationPending,
 )
@@ -512,7 +498,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
              (forceControls), or — desktop only — the card is hovered/focused-within. -->
         <div :id="revealId" class="revealed-controls hide-until-revealed">
           <button
-            v-if="!isBespokeBody"
+            v-if="!isBespokeBody || (isRateTile && isCard)"
             ref="filterBtn"
             class="btn-ghost icon"
             :class="{ active: hasOverride }"
@@ -582,6 +568,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
       <!-- Bespoke bodies: overview / campaigns / ads-readings datasets, and the note type —
            own data fetch (or none), skip the generic loading/error/empty states above. -->
       <MetricCard v-if="cardRef" ref="metricCard" :card-ref="cardRef" :context="metricsContext" :campaign-ids="widget.campaignIds" :hidden-captions="widget.hiddenCaveats" :fallback-title="widget.title" @open-campaigns="emit('open-campaigns')" />
+      <p v-else-if="isRateTile" class="state mono">{{ rateUnknownText }}</p>
       <p v-else-if="widget.dataset === 'overview' || widget.dataset === 'campaigns'" class="state mono">{{ retiredPanelText }}</p>
       <NoteWidgetBody v-else-if="widget.type === 'note'" :widget="widget" />
 
@@ -595,13 +582,6 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
         <div class="stat-num">{{ fmt(statValue) }}</div>
         <div class="stat-label overline">{{ widget.metric }}</div>
         <div class="stat-sub">{{ fmt(statOther) }} {{ statOtherLabel }}</div>
-      </div>
-
-      <!-- Pop-up rate tile: "—" for a zero denominator, never 0%/NaN -->
-      <div v-else-if="widget.type === 'rate'" class="stat">
-        <div class="stat-num">{{ rateDisplay }}</div>
-        <div class="stat-label overline">rate</div>
-        <div v-if="rateCounts" class="stat-sub mono">{{ rateCounts }}</div>
       </div>
 
       <!-- Table -->

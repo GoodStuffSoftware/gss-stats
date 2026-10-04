@@ -296,7 +296,8 @@ export interface StatsResponse {
     // count one of those rows (its site, path, path-family and event-beacon settings allow it).
     refusedWholeDays?: boolean
   }
-  // Pop-up dataset only (widget.type === 'rate'): the single computed rate, or null for
+  // /api/popups rate answer (a rate tile is a metric card since layout version 18; this is the
+  // endpoint's own shape): the single computed rate, or null for
   // a zero denominator (no accepts/outcomes yet) — see lib/popupEvents.ts computeRate.
   rate?: number | null
   // true when `rate` is null because the denominator was nonzero but under MIN_COHORT

@@ -40,6 +40,10 @@ function w(p: Omit<Widget, 'i'>): Widget {
   return { ...p, i: p.id }
 }
 
+// Bumped to 18 for the pop-up rate tile as a metric card (ADR 0005 slice 4): a `type: 'rate'` widget
+// is drawn from a one-item card built at render time (lib/metrics/rateTileCard.ts), its stored fields
+// untouched. NO stored layout is rewritten: the bump is only the save guard (a v17 tab gets 409,
+// functions/api/config.ts backs the stored layout up on the first v18 save). Numbers: LAYOUT_VERSIONS.
 // Bumped to 16 for chart captions (notes plan, slice 1c): a widget may now carry its own plain-text
 // `caption` and a `hiddenCaveats` list (normWidget whitelists and caps both). Legacy `notes` caption
 // ids keep rendering and convert to caption text on the chart's next edit (decision D5). A scope's
@@ -105,6 +109,9 @@ export const LAYOUT_VERSIONS = {
   /** The ads readings log renders as a metric card (ADR 0005 slice 3). A guard bump only: no stored layout is rewritten.
    * Sits after `captions`; renumbering it is this one value (CONFIG_VERSION is derived from the map). */
   readingsLog: 17,
+  /** The pop-up rate tile (`type: 'rate'`) renders as a one-item metric card (ADR 0005 slice 4,
+   * rateTileCard.ts). A guard bump only: no stored layout is rewritten, the tile keeps its fields. */
+  rateTile: 18,
 } as const
 // The newest layout version: derived from the map, so a slice that adds an entry never edits this line.
 export const CONFIG_VERSION: number = Math.max(...Object.values(LAYOUT_VERSIONS))

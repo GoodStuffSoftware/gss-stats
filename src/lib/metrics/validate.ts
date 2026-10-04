@@ -248,6 +248,7 @@ export function validateCard(spec: CardSpec): string[] {
       check(w, it.data, it.display, [spec.repeat, s.repeat, s.columns, it.repeat])
       if (it.gating?.minCohort != null && it.gating.minCohort < MIN_COHORT) errors.push(`${w}: minCohort below MIN_COHORT`)
       if (it.captionMode !== undefined && it.captionMode !== 'inline' && it.captionMode !== 'compact') errors.push(`${w}: captionMode must be 'inline' or 'compact'`)
+      if (it.hideNotes !== undefined && (!Array.isArray(it.hideNotes) || it.hideNotes.some((id) => typeof id !== 'string'))) errors.push(`${w}: hideNotes must be a list of note ids`)
       const empty = it.gating?.whenEmpty
       if (empty && typeof empty === 'object') checkNote(`${w}.gating.whenEmpty`, (empty as { note?: unknown }).note)
       if (it.gating?.whenZero !== undefined && it.gating.whenZero !== 'omit') errors.push(`${w}: whenZero must be 'omit'`)
