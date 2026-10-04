@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.27.1] — 2026-10-04
+
+### Fixed
+- **Escape in the chart editor after turning a chart into a card.** If the Filters popover was open at the time, the first Escape no longer vanishes into it; it cancels the editor.
+
 ## [0.27.0] — 2026-10-04
 
 ### Added

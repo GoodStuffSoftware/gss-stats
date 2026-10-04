@@ -251,7 +251,8 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   refused (`503`) and the stored layout and `:prev` are left as they were (see
   [Restoring the layout](#restoring-the-layout)). That makes a changing save 2 KV writes (3 on the
   first of an ET day) instead of 1, so the Free plan's 1,000 writes a day (account-wide) cover
-  about half as many edits; past the cap every save fails with that `503`.
+  about half as many edits; past the cap every save fails (a changing one with that `503`, another kind
+  with a `500`).
   A tab saves only after it has read the stored layout ([`src/api.ts`](src/api.ts) `loadConfig`
   resolves to `null` only when nothing is stored yet): if the read fails — no answer, a non-2xx,
   or a body that isn't a layout or can't be normalized — it shows the built-in defaults under a "Couldn't load your saved
@@ -1425,6 +1426,9 @@ cover that; these two copies do (`functions/api/config.ts`):
 
 - `dashboard:default:prev` — the layout as it was before the most recent save that changed it.
   The next changing save replaces it, so it only helps if nothing was saved after the bad save.
+  A save that failed after its copies were written (a `500`, say the layout write itself hitting the
+  daily write cap) has already replaced it with the layout still stored: if `layout-restore.json` matches
+  `layout-current.json`, use a `:day:` key instead.
 - `dashboard:default:day:<YYYY-MM-DD>` — the layout as it was before the first changing save of
   that ET day. Kept 30 days. Use this when more saves followed the bad one: pick the day the bad
   save happened (or the day before) and it holds the layout as that day began.
