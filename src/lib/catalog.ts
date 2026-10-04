@@ -2,12 +2,15 @@ import type { SiteKey, ChartType, Metric, Dataset } from '../types'
 import { POPUPS, POPUP_RATE_SPECS } from './popupEvents'
 import { CAMPAIGNS } from './campaigns'
 
-export const DATASETS: { value: Dataset; label: string }[] = [
+// `creatable: false` keeps a dataset out of "Add chart" → Data source while its label stays here for
+// the widgets that still carry it: the overview and campaigns panels are metric-card presets now, so
+// they are added from Metric card → preset (lib/defaults.ts CARD_PRESET_FOR_PANEL), not as a dataset.
+export const DATASETS: { value: Dataset; label: string; creatable?: boolean }[] = [
   { value: 'rum', label: 'RUM — pageviews / visits' },
   { value: 'geo', label: 'Geo beacon — region / city (bot-free)' },
   { value: 'popup', label: 'Pop-up tracking — sign-in / promo / upsell / install' },
-  { value: 'overview', label: 'Best Sudoku overview cards — KPIs / scorecard / release panel' },
-  { value: 'campaigns', label: 'Best Sudoku campaign cards — funnel / country / cost / returns' },
+  { value: 'overview', label: 'Best Sudoku overview cards — KPIs / scorecard / release panel', creatable: false },
+  { value: 'campaigns', label: 'Best Sudoku campaign cards — funnel / country / cost / returns', creatable: false },
   { value: 'ads-readings', label: 'Best Sudoku ads readings log' },
   { value: 'completions', label: 'Best Sudoku completions — mode × difficulty' },
 ]
