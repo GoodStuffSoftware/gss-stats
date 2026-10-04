@@ -1073,13 +1073,18 @@ per 10 minutes. The dashboard holds no Google Ads credential and never calls the
 The ads routine's readings log is a metric card like any other (preset `ads-readings-log`, ADR
 [0005](docs/adr/0005-retire-bespoke-widgets.md)): one block per campaign that has activity, each
 with its freshness lines (spend through, synced, thresholds fired, sync alerts) above a table of
-that campaign's stored readings, newest first, and the **Refresh data** button below. It is edited
+that campaign's stored readings, newest first. The **Refresh data** button sits above the blocks,
+after the page notices. A stale freshness line ("stale — sync pending") is plain text, no longer
+red. It is edited
 like any card (**Customize…**), can be fitted to its content, and a page can repeat it. Two small
 engine hooks serve it and any other card: a **cell tone** (the Rules and Proposal cells are
 coloured trip / watch / clear / muted by the reading itself, which styles a value already shown and
 adds no data) and a **column hint** (`MetricItem.hint`, the header cell's tooltip; Sign-ups says
 that the figure is an upper bound). First load shows "Loading…", a refetch keeps the
-rows up, and a failed load shows the card's own "couldn't load" status with Retry.
+rows up, and a failed load (including one that takes longer than 15 seconds) shows the card's own
+"couldn't load" status with Retry and no "no campaign has readings" line. A wide table scrolls
+sideways inside its block, and a card only loads the readings when it reads them: the campaign
+cost card, which shares the Refresh data button, never calls `/api/ads/readings`.
 
 A saved layout needs no change. A widget with `dataset: 'ads-readings'` and no `card` is mapped to
 the preset when it is drawn, so its stored fields (`dataset`, `view`, `campaignIds`, `limit`, `type`)
@@ -1232,9 +1237,12 @@ trend charts on `dateEt`) rewrites the dimension of those untouched charts: its 
 stored v14 writes `backup:v14`, and rolling the code back past it needs `backup:v14` restored.
 Layout version 16 (chart captions and hideable caveats) adds `caption` and `hiddenCaveats` to a
 chart and hides, once, the caveats an existing chart did not show: its first save over a stored
-v15 writes `backup:v15`. Production is stored at v12 until its first save, so that save writes
+v15 writes `backup:v15`. Layout version 17 (the readings log as a metric card) is a save-guard
+bump only, like v14: its first save over any older stored layout writes `backup:v<stored>`, and
+rolling the code back past it needs that backup restored (same steps below, with that key).
+Production is stored at v12 until its first save, so that save writes
 `backup:v12` (the page navigation, trend-chart and caption changes of v13-v16 are all applied on
-load and written by it), and rolling the code back past v16 needs that backup restored. A tab still
+load and written by it), and rolling the code back past v17 needs that backup restored. A tab still
 running older code gets `409` ("This tab is out of date, reload") instead of overwriting a
 newer layout.
 
