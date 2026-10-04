@@ -700,7 +700,11 @@ default (same dataset, title, type, metric, limit and release markers, any id or
 match is a frozen copy of what v14 stored, not the current factories), and a chart with any other
 title or setting keeps its axis. Charts by `dateEt` are unchanged. The "hide known test and household traffic" filter is
 unchanged. The guard's path patterns are inlined as SQL literals, so it costs no D1 bound
-parameters; the heaviest in-cap `/api/geo` shapes tested bind at most 99 of D1's 100.
+parameters. So are the other registry-driven lists (the campaign `utm_campaign` values, the game-completion
+prefix, the own-hosts exclusion and the metric segment cuts, each checked by `sqlLit` / `sqlInt`, which refuse
+a quote), so a server query's bind count does not grow with the campaigns or patterns registered: every
+`/api/geo` shape binds at most 81 of D1's 100, and a test fails any query that binds more than 90, with extra
+campaigns registered.
 
 Two things stay allowed, by ruling (2026-10-03). **New vs returning:** the device may remember
 its own first visit, so a row's new/returning bit stays on these rows; it is what makes an
