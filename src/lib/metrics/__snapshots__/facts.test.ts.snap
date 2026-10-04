@@ -16,6 +16,14 @@ exports[`fact SQL snapshots > adsLastSync {} 1`] = `
 }
 `;
 
+exports[`fact SQL snapshots > adsPlayDaily {} 1`] = `
+{
+  "binds": [],
+  "db": "gss_stats_ads",
+  "sql": "SELECT date, device_installs, user_installs, device_uninstalls, active_device_installs FROM ads_play_daily ORDER BY date",
+}
+`;
+
 exports[`fact SQL snapshots > adsSpend {} 1`] = `
 {
   "binds": [],
