@@ -262,7 +262,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
   },
   'retention-page-scope': {
     id: 'retention-page-scope',
-    text: 'Every figure on this page is a **count per campaign** over its whole flight, and the organic baseline over its matured days: the date range above does not change them. Rows only. Nothing here is split by hour, place or device.',
+    text: 'Every figure on this page is a **count per campaign** over its whole flight, and the organic baseline over its matured days: the filters above (date range, sites, own visits) do not change them. These are counts and rates per campaign; nothing is split by hour, place or device.',
     kind: 'text',
     severity: 'info',
     scopes: [],
