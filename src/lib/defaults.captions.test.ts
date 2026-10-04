@@ -10,12 +10,14 @@ import {
   CONFIG_VERSION,
   HIDDEN_CAVEATS_MAX,
   LAYOUT_VERSIONS,
+  V16_SEEDABLE_CAVEATS,
+  defaultCampaignsWidgets,
   defaultConfig,
   defaultWidgetsForPage,
   normalizeConfig,
   seedHiddenAutoCaveatsV16,
 } from './defaults'
-import { autoCaveatIds, isNoteIdHideable } from './notes'
+import { NOTES_REGISTRY, autoCaveatIds, getNote, isNoteIdHideable, isStaticCaptionNote } from './notes'
 import { chartNotes } from './chartNotes'
 import PROD_V12 from './__fixtures__/prodLayout.v12.json'
 import { PRESETS } from './metrics/presets'
@@ -274,5 +276,79 @@ describe('built-in default charts look as they did before 1c (B4a)', () => {
   it('a new chart a user adds still gets its automatic caveats', () => {
     const w = { ...BASE, id: 'n', i: 'n', type: 'table', dataset: 'campaigns', view: 'funnel' } as Widget
     expect(visibleRegistryIds(w)).toEqual(['play-tracking-status', 'min-cohort-caveat'])
+  })
+})
+
+describe('the v16 seed is frozen to the caveats that existed at v16 (V16_SEEDABLE_CAVEATS)', () => {
+  const prev = LAYOUT_VERSIONS.captions - 1
+  const LATER = 'zz-later-caveat'
+  const campaignsChart = { ...BASE, id: 'c', i: 'c', type: 'table', dataset: 'campaigns', view: 'funnel' }
+  const hidesLater = (ws: Widget[]) => ws.filter((w) => (w.hiddenCaveats ?? []).includes(LATER)).map((w) => w.id)
+
+  /** Runs `fn` with a hideable automatic caveat added to the campaigns and popup scopes, as a
+   * later deploy might add one (computed text, so it is a caveat, not a static caption). */
+  const withLaterCaveat = (fn: () => void) => {
+    NOTES_REGISTRY[LATER] = { id: LATER, text: () => 'A caveat added after v16.', kind: 'note', severity: 'caveat', scopes: ['campaigns', 'popup'] }
+    try {
+      fn()
+    } finally {
+      delete NOTES_REGISTRY[LATER]
+    }
+  }
+
+  it("pins the frozen set: v16's hideable automatic caveats, all known and hideable", () => {
+    expect([...V16_SEEDABLE_CAVEATS]).toEqual(['play-tracking-status', 'play-tracking-not-live', 'tracking-not-yet-active', 'min-cohort-caveat'])
+    for (const id of V16_SEEDABLE_CAVEATS) {
+      expect(getNote(id), id).toBeDefined()
+      expect(isNoteIdHideable(id), id).toBe(true)
+      expect(isStaticCaptionNote(id), id).toBe(false)
+    }
+  })
+
+  it('a caveat added to a scope later is automatic, and the pre-v16 migration does not hide it', () =>
+    withLaterCaveat(() => {
+      expect(autoCaveatIds(campaignsChart as Widget)).toContain(LATER) // the probe is real
+      const loaded = load(campaignsChart, prev)
+      expect(loaded.hiddenCaveats).toEqual(['play-tracking-status', 'min-cohort-caveat'])
+      expect(chartNotes(loaded, null, null).map((n) => n.key)).toEqual([`caveat:${LATER}`])
+      // production, stored at v12 until its first save: the seed re-runs on every load
+      const prod = normalizeConfig(clone(PROD_V12) as never)
+      expect(hidesLater(prod.pages.flatMap((p) => p.widgets))).toEqual([])
+    }))
+
+  it('the default and restored built-in charts do not hide it either, nor the v7 refill of an empty page', () =>
+    withLaterCaveat(() => {
+      const fresh = normalizeConfig(defaultConfig())
+      const all = fresh.pages.flatMap((p) => p.widgets)
+      expect(all.some((w) => autoCaveatIds(w).includes(LATER))).toBe(true) // some built-in chart has the scope
+      expect(hidesLater(all)).toEqual([])
+      expect(hidesLater(defaultCampaignsWidgets())).toEqual([])
+      for (const p of fresh.pages) expect(hidesLater(defaultWidgetsForPage(p)), p.id).toEqual([])
+      // v7: a built-in page stored empty is refilled from its factory on load
+      const base = defaultConfig()
+      const camp = base.pages.find((p) => defaultWidgetsForPage(p).some((w) => autoCaveatIds(w).includes(LATER)))!
+      const emptied = { ...clone(base), version: prev, pages: clone(base.pages).map((p) => (p.id === camp.id ? { ...p, widgets: [] } : p)) }
+      const again = normalizeConfig(emptied).pages.find((p) => p.id === camp.id)!.widgets
+      expect(again.some((w) => autoCaveatIds(w).includes(LATER))).toBe(true)
+      expect(hidesLater(again)).toEqual([])
+    }))
+
+  it("today's production seed is unchanged: exactly these five charts gain hidden ids", () => {
+    const out = normalizeConfig(clone(PROD_V12) as never)
+    const before = new Map((PROD_V12 as unknown as DashboardConfig).pages.flatMap((p) => p.widgets.map((w) => [`${p.id}/${w.id}`, w] as const)))
+    const seeded: Record<string, string[]> = {}
+    for (const p of out.pages)
+      for (const w of p.widgets) {
+        const old = before.get(`${p.id}/${w.id}`)
+        const added = (w.hiddenCaveats ?? []).filter((id) => !(old?.hiddenCaveats ?? []).includes(id))
+        if (added.length) seeded[`${p.id}/${w.id}`] = added
+      }
+    expect(seeded).toEqual({
+      'bsk-campaigns/cw-funnel': ['play-tracking-status'],
+      'bsk-campaigns/cw-country': ['play-tracking-status', 'min-cohort-caveat'],
+      'bsk-campaigns/cw-cost': ['play-tracking-status', 'min-cohort-caveat'],
+      'bsk-campaigns/cw-returns': ['min-cohort-caveat'],
+      'bsk-popups/pu-eligible-bd': ['min-cohort-caveat'],
+    })
   })
 })

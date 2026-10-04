@@ -195,8 +195,11 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   - **Upgrading a chart.** Version 16 hides, once per chart, every hideable caveat that chart did
     not show before (`seedHiddenAutoCaveatsV16`, run only on a layout stored below version 16), so
     an existing chart looks the same; the built-in default charts, a fresh layout and "restore
-    default charts" are seeded the same way. A campaigns chart gains the country-columns note
-    only if it splits by country. A chart a person adds shows its caveats at once.
+    default charts" are seeded the same way. The seed only ever hides the caveats that existed at
+    version 16 (`V16_SEEDABLE_CAVEATS`), so one added to the registry later shows on every chart,
+    a restored default chart and a layout not yet saved at version 16 included. A campaigns chart
+    gains the country-columns note only if it splits by country. A chart a person adds shows its
+    caveats at once.
   - **Legacy notes** (`Widget.notes`, no longer written): they keep rendering. The first time a
     chart is edited, its static entries fold into the caption as text and drop out of `notes`;
     dated, computed, value-tied and data-cut entries stay in `notes` as caveats. A duplicated
