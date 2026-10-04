@@ -558,6 +558,30 @@ export function isCampaignComparePage(p: Pick<DashboardPage, 'id'>): boolean {
   return p.id === 'bsk-campaigns'
 }
 
+// The Best Sudoku retention page (R-3): the shipped retention presets placed as cards. It is a
+// TEMPLATE only (lib/wizards.ts PAGE_TEMPLATES): not in defaultConfig() and not touched by
+// normalizeConfig, so no layout version covers it and no stored layout is rewritten. It exists on a
+// layout only once someone creates it (+ New > Page > Start from), as an ordinary page of ordinary
+// card widgets. Counts only: no chart, no hour, place or device split, no clock time.
+export function defaultRetentionWidgets(): Widget[] {
+  const card = (id: string, title: string, preset: string, geom: { x: number; y: number; w: number; h: number }, notes?: string[]): Widget =>
+    w({ id, title, type: 'table', dataset: 'campaigns', card: { preset }, dimension: '', metric: 'pageviews', limit: 1, ...(notes ? { notes } : {}), ...geom })
+  return [
+    w({ id: 'rt-note-scope', title: 'Scope note', type: 'note', dimension: '', metric: 'pageviews', limit: 1, longText: true, noteId: 'retention-page-scope', x: 0, y: 0, w: 9, h: 3 }),
+    w({ id: 'rt-note-smallsample', title: 'Small sample', type: 'note', dimension: '', metric: 'pageviews', limit: 1, noteId: 'small-sample', x: 9, y: 0, w: 3, h: 3 }),
+    card('rt-verdict', 'Retention verdict', 'retention-verdict', { x: 0, y: 3, w: 12, h: 13 }),
+    card('rt-returns', 'Return visits', 'campaign-returns', { x: 0, y: 16, w: 7, h: 11 }, ['play-tracking-status', 'return-rate-caption']),
+    card('rt-engagement', 'Engagement per arrival', 'campaign-engagement', { x: 7, y: 16, w: 5, h: 11 }),
+  ]
+}
+export function defaultRetentionPage(): DashboardPage {
+  return { id: 'bsk-retention', name: 'Retention', isDefault: false, group: GROUP_BEST_SUDOKU, filters: defaultFilters(), widgets: defaultRetentionWidgets() }
+}
+/** By id only (see isBestSudokuPopupsPage). A page created from the template has a fresh id. */
+export function isRetentionPage(p: Pick<DashboardPage, 'id'>): boolean {
+  return p.id === 'bsk-retention'
+}
+
 // "Best Sudoku overview" (Part C) widgets — every panel of the former bespoke
 // OverviewPage.vue as its own movable/resizable/editable widget: metric cards (dataset
 // 'overview', `view` naming the panel) and the standard timeline chart. One widget per panel,
@@ -879,6 +903,7 @@ export function defaultWidgetsForPage(p: DashboardPage): Widget[] {
   if (p.id === 'bsk-popups') return defaultBestSudokuPopupsWidgets()
   if (isOverviewPage(p)) return defaultOverviewWidgets()
   if (isCampaignComparePage(p)) return defaultCampaignsWidgets()
+  if (isRetentionPage(p)) return defaultRetentionWidgets()
   if (isBestSudokuLaunchPage(p)) return defaultBestSudokuLaunchWidgets()
   const geoCount = p.widgets.filter((w) => w.dataset === 'geo').length
   return geoCount > p.widgets.length / 2 ? defaultBeaconWidgets() : defaultWidgets()

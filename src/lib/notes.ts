@@ -260,6 +260,13 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     severity: 'caveat',
     scopes: [],
   },
+  'retention-page-scope': {
+    id: 'retention-page-scope',
+    text: 'Every figure on this page is a **count per campaign** over its whole flight, and the organic baseline over its matured days: the date range above does not change them. Rows only. Nothing here is split by hour, place or device.',
+    kind: 'text',
+    severity: 'info',
+    scopes: [],
+  },
   'return-rate-caption': {
     id: 'return-rate-caption',
     text: 'Rate per bucket = bucket count / d0 (first tagged load).',
