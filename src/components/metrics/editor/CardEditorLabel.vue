@@ -1,10 +1,12 @@
 <script setup lang="ts">
-// One Label editor (ADR 0003 section 1(a) / section 4 item 5): plain text (with an "insert
-// variable" menu limited to the repeat's own ScopePaths), a notes-registry entry (searchable,
+// One Label editor (ADR 0003 section 1(a) / section 4 item 5): plain text (with the shared
+// "Insert value" menu: the repeat's own ScopePaths, and the fixed dates), a notes-registry entry (searchable,
 // plain-text preview), a bound scope field, or "use the metric's own label". Reused for both an
 // item's `label` and its `caption` (both are `Label`) — `allowMetricOwn` hides the "metric's own
 // name" option for a caption, which has no natural registry counterpart.
 import { computed, ref, useId } from 'vue'
+import InsertPicker, { type InsertGroup } from '../../InsertPicker.vue'
+import { VALUE_TOKEN_OPTIONS } from '../../../lib/valueTokens'
 import { isKnownNote, labelKind, labelNoteOptions, makeLabel, noteVarNames, scopePathLabel, scopePathOptions, withNoteId, withNoteVar, type LabelKind } from '../../../lib/metrics/editorModel'
 import { CARD_LIMITS } from '../../../lib/metrics/validate'
 import type { Label, RepeatSpec, ScopePath } from '../../../lib/metrics/types'
@@ -26,7 +28,6 @@ const label = defineModel<Label | undefined>({ required: true })
 
 const groupId = useId()
 const textId = useId()
-const insertVarId = useId()
 const noteSearchId = useId()
 const noteSelectId = useId()
 const bindSelectId = useId()
@@ -49,8 +50,15 @@ const textValue = computed<string>({
     label.value = v
   },
 })
-function insertVar(path: ScopePath) {
-  textValue.value = `${textValue.value}{${path}}`
+// ONE "Insert value" control, the one the chart caption has (InsertPicker.vue): the repeat's own
+// fields (`{campaign.label}`, as before) and the fixed dates (`{=release.latest|date}`). Chart and
+// metric values are not offered: a card label has no chart, and fetches nothing of its own.
+const insertGroups = computed<InsertGroup[]>(() => [
+  ...(scopeOptions.value.length ? [{ group: 'Fields', options: scopeOptions.value.map((o) => ({ value: `{${o.value}}`, label: `{${o.value}} — ${o.label}` })) }] : []),
+  { group: 'Dates', options: VALUE_TOKEN_OPTIONS.filter((o) => o.group === 'Dates').map((o) => ({ value: o.token, label: o.label })) },
+])
+function insertText(token: string) {
+  textValue.value = `${textValue.value}${token}`
 }
 
 const noteId = computed<string>({
@@ -115,12 +123,8 @@ const bindPath = computed<ScopePath>({
     <template v-if="kind === 'text'">
       <label class="visually-hidden" :for="textId">{{ heading }} text</label>
       <input :id="textId" type="text" v-model="textValue" :placeholder="placeholder" :maxlength="CARD_LIMITS.stringLength" />
-      <div class="field" v-if="scopeOptions.length">
-        <label class="visually-hidden" :for="insertVarId">Insert a variable into the {{ heading.toLowerCase() }}</label>
-        <select :id="insertVarId" @change="insertVar(($event.target as HTMLSelectElement).value as ScopePath); ($event.target as HTMLSelectElement).value = ''">
-          <option value="" disabled selected>+ Insert variable…</option>
-          <option v-for="o in scopeOptions" :key="o.value" :value="o.value">{{ '{' + o.value + '}' }} — {{ o.label }}</option>
-        </select>
+      <div class="field">
+        <InsertPicker :label="`Insert a value into the ${heading.toLowerCase()}`" placeholder="Insert value ▾" select-class="insert-value" :groups="insertGroups" @insert="insertText" />
       </div>
     </template>
 

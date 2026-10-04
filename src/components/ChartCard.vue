@@ -23,7 +23,8 @@ import NoteWidgetBody from './widgets/NoteWidgetBody.vue'
 import NoteBlock from './NoteBlock.vue'
 import { noteRawText } from '../lib/notes'
 import { chartNotes } from '../lib/chartNotes'
-import { chartValueResolver } from '../lib/valueTokens'
+import { chartValueResolver, noteValueResolver } from '../lib/valueTokens'
+import { useMetricTokenValues } from '../composables/useMetricTokens'
 
 const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolean; drillOpen: boolean; forceControls?: boolean }>()
 
@@ -251,17 +252,24 @@ let reqId = 0
 // response's own notes, and the range notice (the server cut the range down to what the data
 // source allows; runtime only, never saved).
 const notes = computed(() => chartNotes(props.widget, data.value, error.value))
-// `{=…}` value tokens in the caption (lib/valueTokens.ts): filled from this chart's own response
-// and the fixed dates, never a fetch. Only the widget's own caption takes them; every other note
-// shows "—" for a token. While a real reload is loading (a new range or spec), the previous
-// response is not this chart's any more, so the caption shows "—" rather than the old values; a
-// background refetch never sets `loading`, so it keeps the values up until the new ones arrive.
-const captionValues = computed(() => chartValueResolver(props.widget, loading.value ? null : data.value, error.value))
 watch([data, error], () => emit('data', data.value, error.value))
 
 // Per-chart filter override: use widget.filters if set, else the global filter.
 const effectiveFilters = computed<GlobalFilters>(() => props.widget.filters ?? props.filters)
 const hasOverride = computed(() => !!props.widget.filters)
+
+// `{=metric:…}` tokens (lib/metricValueTokens.ts) in the caption, or in a note widget's text, are
+// filled from ONE batched /api/metrics request per page context (composables/useMetricTokens.ts,
+// through useMetrics: shared with every card on the page), for this widget's own page context.
+// `{=…}` value tokens in the caption (lib/valueTokens.ts): `chart.*` from this chart's own response,
+// the fixed dates, and the metric values above. Only the widget's own caption takes them; every
+// other note shows "—" for a token. While a real reload is loading (a new range or spec), the
+// previous response is not this chart's any more, so `chart.*` shows "—" rather than the old
+// values; a background refetch never sets `loading`, so it keeps the values up until the new ones
+// arrive. A note widget's text takes the dates and metrics, never `chart.*`.
+const metricTokenValues = useMetricTokenValues(() => [props.widget.caption, props.widget.type === 'note' ? props.widget.note : undefined], metricsContext)
+const captionValues = computed(() => chartValueResolver(props.widget, loading.value ? null : data.value, error.value, metricTokenValues.value))
+const noteValues = computed(() => noteValueResolver(metricTokenValues.value))
 
 // A background refetch (the user came back to the tab) keeps the chart on screen — no "Loading…"
 // flash, and a failure leaves the last good data up instead of replacing it with an error.
@@ -583,7 +591,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
            own data fetch (or none), skip the generic loading/error/empty states above. -->
       <MetricCard v-if="cardRef" ref="metricCard" :card-ref="cardRef" :context="metricsContext" :campaign-ids="widget.campaignIds" :hidden-captions="widget.hiddenCaveats" :fallback-title="widget.title" @open-campaigns="emit('open-campaigns')" />
       <p v-else-if="widget.dataset === 'overview' || widget.dataset === 'campaigns'" class="state mono">{{ retiredPanelText }}</p>
-      <NoteWidgetBody v-else-if="widget.type === 'note'" :widget="widget" />
+      <NoteWidgetBody v-else-if="widget.type === 'note'" :widget="widget" :values="noteValues" />
 
       <div v-else-if="loading" class="state mono">Loading…</div>
       <div v-else-if="error" class="state error mono">{{ error }}</div>
