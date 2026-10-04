@@ -42,11 +42,11 @@ const load = (w: Record<string, unknown>, version = CONFIG_VERSION) => widgetsOf
 const BASE = { id: 'w1', i: 'w1', title: 'Pageviews', type: 'stat', dataset: 'geo', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 0, w: 3, h: 3 }
 
 describe('captions: the layout version', () => {
-  it('is the newest layout version and the one this code writes', () => {
+  it('comes after dateEtTrends, and CONFIG_VERSION (written by this code) is the newest key, captions or a later one', () => {
     expect(LAYOUT_VERSIONS.captions).toBeGreaterThan(LAYOUT_VERSIONS.dateEtTrends)
-    expect(CONFIG_VERSION).toBe(LAYOUT_VERSIONS.captions)
+    expect(CONFIG_VERSION).toBeGreaterThanOrEqual(LAYOUT_VERSIONS.captions)
     expect(CONFIG_VERSION).toBe(Math.max(...Object.values(LAYOUT_VERSIONS)))
-    expect(defaultConfig().version).toBe(LAYOUT_VERSIONS.captions)
+    expect(defaultConfig().version).toBe(CONFIG_VERSION)
   })
 })
 
