@@ -90,9 +90,12 @@ export const LAYOUT_VERSIONS = {
   sparklines: 14,
   /** The default geo trend charts bucket by ET day (migrateDateEtTrendsV15). */
   dateEtTrends: 15,
+  /** The ads readings log renders as a metric card (ADR 0005 slice 3). A guard bump only: no stored layout is rewritten.
+   * PROVISIONAL: 16 is taken by `captions` (PR #76); this renumbers to 16 if it lands first. */
+  readingsLog: 17,
 } as const
 // The newest layout version. A slice that adds an entry moves this to it.
-export const CONFIG_VERSION: number = LAYOUT_VERSIONS.dateEtTrends
+export const CONFIG_VERSION: number = LAYOUT_VERSIONS.readingsLog
 
 // The default "basic charts available out of the box" — a sensible analytics
 // starting layout. Users can move/resize/add/remove from here.

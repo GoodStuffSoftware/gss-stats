@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 //
 // ADR 0005 slice 3, step B1: the `ads-readings-log` preset on MetricCard keeps every behaviour the
-// bespoke widget's return-refresh test (widgets/AdsReadingsWidgetCard.returnRefresh.test.ts, which
+// bespoke widget's return-refresh test (the deleted widget's own return-refresh test, which
 // B2 deleted) held: it refetches the readings when the user comes back to the tab, under the same
 // rules as every other card (60 s since its last load, nothing in flight, never while hidden); the
 // rows stay up while it reloads; an older response never overwrites a newer one (the reqId guard);
