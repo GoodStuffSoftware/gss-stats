@@ -325,7 +325,7 @@ const beacon = (raw: Record<string, unknown>[], pf: (r: Record<string, unknown>)
  * literal outputs only: US, CA, and everything else (blank included) as 'other'. */
 export const COUNTRY_BUCKET_SQL = "CASE country WHEN 'US' THEN 'US' WHEN 'CA' THEN 'CA' ELSE 'other' END"
 /** COUNTRY_BUCKET_SQL with the counts-only split guard (lib/splitGuard.ts): a refused row
- * (return, game start, completion, tutorial completion, tour exit) reads cb = '' — no bucket,
+ * (return, game start, completion, tutorial completion, tour skip, tour exit) reads cb = '' — no bucket,
  * so a country-filtered metric never counts it, while an unfiltered one still does. The path
  * patterns are SQL literals (refusedPathMatch), so the CASE costs no binds; `binds` is kept (and
  * placed in SELECT order before any later column's) in case that ever changes. Literal outputs

@@ -200,7 +200,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
     unknown id a token shows "—", and so does a value the server withholds or cannot fully measure
     (too few, no data, a shorter span than the range). A token sends only its metric and window,
     so it can never ask for a split the catalog withholds: the counts-only rule (return, game
-    starts, completions, tutorial and tour exits: no hour, place or device split, no visitor id)
+    starts, completions, tutorial completions, tour skips and tour exits: no hour, place or device split, no visitor id)
     stays enforced on the server, where a sub-day range counts those rows over whole ET days.
   - **Note widgets** take values too: `release.*`, `golive.*`, `play.*` and `metric:` tokens fill
     in; `chart.*` shows "—" (a note belongs to no chart).
@@ -646,8 +646,11 @@ status suffix, `/auth/error`, `/auth/redirect` and the first-session beacons (`/
 includes `/tour/exit-at/<stage>`, `/game/tutorial-complete`, `/game/first-move`, `/game/abandon`,
 `/welcome-signed-in` and `/game/start/<difficulty>`) are pop-up/event beacons, not screens — `/api/geo` and `/api/sites` exclude all
 of them from every pageview/visit total and the top-pages breakdown by default (see
-[`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) `POPUP_EVENT_PREFIXES`); `/api/popups` is
-where they're counted. Each geo chart has its own **"Include event beacons"** option (off by
+[`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) `POPUP_EVENT_PREFIXES`). `/api/popups` counts
+only the pop-up events among them (the sign-in, first-50, upsell, install and pop-up-outcome
+families); it never counts the first-session beacons (`/tour/…`, `/game/start/…`,
+`/game/tutorial-complete/…`, `/game/first-move`, `/game/abandon/…`, `/welcome-signed-in/…`), and
+the counts-only rule below says where those are counted. Each geo chart has its own **"Include event beacons"** option (off by
 default, so nothing existing changes) to lift that exclusion and chart event paths directly —
 e.g. with the **path family** dimension below. Drilling into an event-family `pathFamily`
 value (e.g. "install") carries that option onto the filtered page it opens, so every chart
@@ -655,17 +658,22 @@ there — not just the one drilled — can show the event rows just filtered dow
 carries a caption explaining why (see [`src/lib/drill.ts`](src/lib/drill.ts)
 `drillNeedsEventBeacons`).
 
-**Return, game-start, game-completion, tutorial-completion and tour-exit rows are counts only:
-never split by hour, place or device.** Rule: "counts only. Never tie beacon rows to a device, time or place." A geo
+**Return, game-start, game-completion, tutorial-completion, tour-skip and tour-exit rows are
+counts only: never split by hour, place or device.** Rule: "counts only. Never tie beacon rows to a device, time or place." A geo
 chart that maps rows (the map/globe), groups by an hour, place or device dimension (`hourEt`,
 and the UTC `date`, whose count minus `dateEt`'s for the same day would give an evening band;
 `country`, `region`, `city`, `postal`, `continent`, `timezone`, `colo`, `org`; `device`,
 `browser`, `os`, `lang`, `screenw`, `screenwBucket`, `visitor`), or is drilled into one of them
 leaves `/return/…`, `/game/start/…`, `/game/complete/…`, `/game/complete-deferred/…`,
-`/game/tutorial-complete/…` and `/tour/exit-at/…` rows out entirely, whatever "Include event
-beacons" says, marks the response `meta.splitGuard: true`, and the chart says so in a caption.
+`/game/tutorial-complete/…`, `/tour/skip` and `/tour/exit-at/…` rows out entirely, whatever
+"Include event beacons" says, marks the response `meta.splitGuard: true`, and the chart says so in a caption.
 The rows still count everywhere else: by path, by ET day or flight day, by campaign, and in the
-metric cards. The metric cards follow the same rule: in a country cell (`campaign-country`)
+metric cards. For the Best Sudoku v1.97.0 first-run counters that means plain totals: a game
+start (`/game/start/<difficulty>`), a tour skip (the exact path `/tour/skip`) and a tour exit
+(`/tour/exit-at/<stage>`, sent only right after a skip) are counted by path, by ET day and by web
+or app site in the geo charts (with "Include event beacons" on), and in the morning read's
+first-session funnel; `/api/popups` never counts them. `/tour/start` and `/tour/complete` are not
+part of the rule. The metric cards follow the same rule: in a country cell (`campaign-country`)
 these rows belong to no country, so they count only where no country is asked, and
 `campaign.completions` takes no `country` param at all. `/api/popups` and the ads-read
 routine's hourly site-event read and per-country read leave them out too. The guard keys on dimensions and drills;
@@ -681,7 +689,7 @@ default (same dataset, title, type, metric, limit and release markers, any id or
 match is a frozen copy of what v14 stored, not the current factories), and a chart with any other
 title or setting keeps its axis. Charts by `dateEt` are unchanged. The "hide known test and household traffic" filter is
 unchanged. The guard's path patterns are inlined as SQL literals, so it costs no D1 bound
-parameters; the heaviest in-cap `/api/geo` shapes tested bind at most 97 of D1's 100.
+parameters; the heaviest in-cap `/api/geo` shapes tested bind at most 99 of D1's 100.
 
 Two things stay allowed, by ruling (2026-10-03). **New vs returning:** the device may remember
 its own first visit, so a row's new/returning bit stays on these rows; it is what makes an
@@ -702,7 +710,7 @@ inside) stay one constant away (`REFUSED_WINDOW_SNAP`). When the bounds meet, as
 ranges shorter than a day, these rows count zero. A range already on ET midnights (the date
 picker's ET days, a whole-day preset) runs exactly as before. Charts, `/api/completions` and
 the metric cards' page range (`window: 'page'`, sparkline days included) all follow it and say
-so in a caption: "Any return, game-start, completion, tutorial-completion or tour-exit rows
+so in a caption: "Any return, game-start, completion, tutorial-completion, tour-skip or tour-exit rows
 here are counted over whole ET days." A chart shows it only when it can count one of those
 rows, so never under a path or path-family filter none of them matches (a site filter does not
 narrow it: it errs toward showing). A chart that leaves event beacons out (the default) counts none of them, since
@@ -875,7 +883,8 @@ npm run typecheck:scripts
   once any member has a row, a sibling with none is a real 0. Ratios are rows over rows and never
   use game views (page views) as a parent. The first-run counters are counter totals read side
   by side, matched by exact path (the same matchers that classify them as events, in
-  `popupEvents.ts`): no ratio between them and no join of any row to a device, time or place.
+  `popupEvents.ts`): no ratio between them and no join of any row to a device, time or place (the counts-only
+  rule, under Data & dimensions).
   The stage line is the tour-skip rows split by where (`/tour/exit-at/<stage>` fires only on a
   skip), so it is printed under tour skip and never counted as a further step. A game start
   counts every counted start (menu, play again, or leaving the tour for a real game), so it

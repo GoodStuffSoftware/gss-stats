@@ -353,7 +353,7 @@ describe('review fixes: arrivals, raw signals, date limit, request caps', () => 
     // pre-fix, this exact combination would have bound 104 and been refused with a 400.
     expect(calls[0].binds.length).toBeLessThan(100)
     // A device ring is a refused split, so the counts-only guard (src/lib/splitGuard.ts) leaves
-    // return / game-start / completion / tutorial-completion / tour-exit rows out — with its
+    // return / game-start / completion / tutorial-completion / tour-skip / tour-exit rows out — with its
     // patterns inlined as SQL literals, it adds no binds, so this stays at 81 (measured).
     expect(calls[0].binds.length).toBe(81)
   })
