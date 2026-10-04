@@ -238,6 +238,11 @@ export interface DashboardPage {
   // A lib/icons.ts registry key (e.g. "megaphone") someone picked. Unset = resolved
   // automatically (inherited from its top-level page for a drill page, else from its charts).
   icon?: string
+  // The PAGE_TEMPLATES id (lib/wizards.ts, e.g. "tpl-bsk-retention") a page was built from. Absent
+  // on a blank page, a drill page and any page that predates the field (defaults.ts pageTemplateId
+  // falls back by id for the Retention page). "Restore default charts" brings back that template's
+  // own set and the Retention page trims its filter bar by it. Optional: no layout version.
+  templateId?: string
   filters: GlobalFilters
   widgets: Widget[]
 }

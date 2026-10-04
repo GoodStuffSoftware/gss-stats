@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { reactive, shallowReactive, ref, watch, watchEffect, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import type { DashboardConfig, DashboardPage, Widget, GlobalFilters, StatsResponse } from './types'
-import { defaultConfig, normalizeConfig, defaultWidgetsForPage, clonePage, cryptoId, isBestSudokuLaunchPage, isBestSudokuPopupsPage, isCampaignComparePage, BEST_SUDOKU_SITES, beaconizeWidget, cleanGroupName, cleanPageName } from './lib/defaults'
+import { defaultConfig, normalizeConfig, defaultWidgetsForPage, clonePage, cryptoId, isBestSudokuLaunchPage, isBestSudokuPopupsPage, pageFilterBar, BEST_SUDOKU_SITES, beaconizeWidget, cleanGroupName, cleanPageName } from './lib/defaults'
 import { rangeLabel, dayDrillRange } from './lib/range'
 import { loadConfig, saveConfig, ConfigLoadError } from './api'
 import { loadSites, sitesTree, tokenLabel } from './sitesStore'
@@ -66,7 +66,12 @@ const showSmallSampleNote = computed(() => isBestSudokuPopupsPage(activePage.val
 // charts, so "Add chart" / "restore default charts" apply to them too. The campaign page still
 // hides the global FilterBar (its widgets aren't filter-driven: each card reads its campaign's
 // own attribution window, and each chart carries its own range — lib/defaults.ts).
-const isCampaignPage = computed(() => isCampaignComparePage(activePage.value))
+// The Retention page keeps the date range only (its Play tiles follow it; its campaign facts take no
+// site or own-visits filter): the same rule, read from the page's template marker (lib/defaults.ts
+// pageFilterBar).
+const filterBarMode = computed(() => pageFilterBar(activePage.value))
+const showFilterBar = computed(() => filterBarMode.value !== 'none')
+const rangeOnlyBar = computed(() => filterBarMode.value === 'range')
 
 onMounted(async () => {
   dark.value = readDarkPref()
@@ -297,7 +302,7 @@ function switchGroup(group: string) {
 // + Page: a new ROOT page, a copy of the active one, in its group with its icon (clonePage).
 function addPage(group?: string) {
   const src = activePage.value
-  const clone = clonePage(src, 'Copy of ' + src.name)
+  const clone = clonePage(src, 'Copy of ' + src.name, true)
   delete clone.parentId
   clone.group = group ?? rootOf(src, config.pages).group
   config.pages.push(clone)
@@ -307,7 +312,7 @@ function addPage(group?: string) {
 // page of the same root.
 function duplicatePage(id: string) {
   const src = config.pages.find((p) => p.id === id) ?? activePage.value
-  const clone = clonePage(src, 'Copy of ' + src.name)
+  const clone = clonePage(src, 'Copy of ' + src.name, true)
   config.pages.push(clone)
   switchPage(clone.id)
 }
@@ -769,7 +774,7 @@ function openFilteredPage() {
 // see commit 8692b0f's src/App.vue (the last commit before that merge): directly under the page
 // navigation (the header since layout version 13), always visible, no overlay/collapse. It's
 // restored in the template below as a plain
-// in-flow section (`barSectionEl`), unconditionally rendered whenever `!isCampaignPage` (the
+// in-flow section (`barSectionEl`), unconditionally rendered whenever `showFilterBar` (the
 // campaign page still doesn't use it — unchanged from before).
 //
 // What's new here: since the page can be taller than the viewport, an IntersectionObserver on
@@ -1004,10 +1009,11 @@ function toggleDark() {
          breadcrumb is the everyday page switcher; the full page tree is in the ☰ drawer). Hidden
          only on the campaign page, whose widgets each cover their own fixed campaign window and
          aren't filter-driven. -->
-    <div v-if="!isCampaignPage" ref="barSectionEl" class="filterbar-inflow">
+    <div v-if="showFilterBar" ref="barSectionEl" class="filterbar-inflow">
       <FilterBar
         :filters="activePage.filters"
         :sync-range="config.syncRange"
+        :range-only="rangeOnlyBar"
         @change="onFiltersChange"
         @toggle-sync="onToggleSync"
       />
@@ -1023,7 +1029,7 @@ function toggleDark() {
          again, Esc, or a click outside it) or until scrolling back to where the in-flow bar is
          visible again; while the in-flow bar IS visible, activating it just moves focus to the
          bar's first control instead (nothing to pin — see activateToggle). -->
-    <div v-if="!isCampaignPage" class="fb-anchor">
+    <div v-if="showFilterBar" class="fb-anchor">
       <button
         ref="fbToggleBtn"
         type="button"
@@ -1046,6 +1052,7 @@ function toggleDark() {
             <FilterBar
               :filters="activePage.filters"
               :sync-range="config.syncRange"
+              :range-only="rangeOnlyBar"
               @change="onFiltersChange"
               @toggle-sync="onToggleSync"
             />

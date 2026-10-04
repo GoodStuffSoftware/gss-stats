@@ -5,7 +5,9 @@ import { sitesTree } from '../sitesStore'
 import type { SiteGroup, SiteSub } from '../types'
 import { relativeRange, rangeToYmd, ymdRangeToISO, rangeLabel } from '../lib/range'
 
-const props = defineProps<{ filters: GlobalFilters; syncRange?: boolean }>()
+// rangeOnly: the page reads the date range and nothing else (the Retention page, lib/defaults.ts
+// pageFilterBar), so the Sites and Exclusions controls, which would change nothing there, are left out.
+const props = defineProps<{ filters: GlobalFilters; syncRange?: boolean; rangeOnly?: boolean }>()
 const emit = defineEmits<{ change: [GlobalFilters]; toggleSync: [boolean] }>()
 
 const local = reactive<GlobalFilters>({ ...props.filters })
@@ -240,7 +242,7 @@ onBeforeUnmount(() => window.removeEventListener('focus', readMuteCookie))
 
 <template>
   <div class="filter-bar">
-    <div class="group">
+    <div v-if="!rangeOnly" class="group">
       <label>Sites</label>
       <div class="site-anchor">
         <button class="site-btn" :class="{ active: (local.siteSel?.length || 0) > 0 }" @click.stop="siteOpen = !siteOpen">
@@ -329,7 +331,7 @@ onBeforeUnmount(() => window.removeEventListener('focus', readMuteCookie))
       </div>
     </div>
 
-    <div class="group">
+    <div v-if="!rangeOnly" class="group">
       <label>Exclusions</label>
       <div class="excl-anchor">
         <button class="excl-btn" :class="{ active: exclCount > 0 }" @click.stop="exclOpen = !exclOpen">
