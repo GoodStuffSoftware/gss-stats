@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, computed, watch, onMounted, onBeforeUnmount, ref, useId } from 'vue'
+import { reactive, computed, watch, onMounted, onBeforeUnmount, nextTick, ref, useId } from 'vue'
 import type { Widget, LineSeries, GlobalFilters, StatsResponse } from '../types'
 import {
   DIMENSIONS,
@@ -25,6 +25,7 @@ import { toPlainText, VALUE_TOKEN_RE } from '../lib/textLite'
 import { chartValues, globalValues, resolveValueToken, VALUE_TOKEN_OPTIONS, type TokenValues } from '../lib/valueTokens'
 import { metricRequestSpec, metricTokenOptions, metricTokenValue } from '../lib/metricValueTokens'
 import { peekMetricValue } from '../composables/useMetrics'
+import { useEtClock } from '../composables/useEtClock'
 import InsertPicker, { type InsertGroup } from './InsertPicker.vue'
 import { canFit, setFit } from '../lib/fit'
 import { rendersOwnBody } from '../lib/charts'
@@ -221,6 +222,21 @@ function sayCaptionFull() {
   captionFull.value = true
   captionFullTick.value++
 }
+/** The two text boxes an Insert button can put text into. After an Insert (or a refused one) the
+ * button is disabled, so focus goes back to the box: the author keeps typing, and Escape and the
+ * Tab trap (the dialog's keydown listener) keep working, which they stop doing once focus has
+ * left the panel. */
+const captionEl = ref<HTMLTextAreaElement | null>(null)
+const noteEl = ref<HTMLTextAreaElement | null>(null)
+function focusText(t: TextTarget, start: number, end: number = start) {
+  void nextTick(() => {
+    const el = (t === 'caption' ? captionEl : noteEl).value
+    if (!el) return
+    el.focus()
+    const max = el.value.length
+    el.setSelectionRange(Math.min(start, max), Math.min(end, max))
+  })
+}
 function insertFromLibrary(t: TextTarget, id: string) {
   const text = id ? noteTemplate(id).trim() : ''
   if (!text) return
@@ -247,6 +263,7 @@ function insertFromLibrary(t: TextTarget, id: string) {
   }
   end = Math.min(end, next.length)
   caret[t] = { start: end, end }
+  focusText(t, end)
 }
 
 // ── "Insert value" (notes plan, slice 1d): puts a `{=…}` value token (grammar: lib/valueTokens.ts)
@@ -262,9 +279,10 @@ function insertFromLibrary(t: TextTarget, id: string) {
 // read, so it gets no "This chart" group (review N2, NIT-1); a note widget never does (`chart.*` is
 // "—" there), and takes Dates and Metrics.
 const metricOptionList = metricTokenOptions()
+const etClock = useEtClock() // the day the cards' (and the captions') values are keyed by
 const valueOptions = computed<InsertGroup[]>(() => {
   const table: TokenValues = { ...globalValues(), ...(isNote.value ? {} : chartValues(props.widget, props.data ?? null, props.error ?? null)) }
-  const epoch = todayEtFrom(Date.now())
+  const epoch = todayEtFrom(etClock.value)
   for (const o of metricOptionList) table[o.ref.path] = metricTokenValue(o.ref, peekMetricValue(metricRequestSpec(o.ref), cardContext.value, epoch))
   const groups: Array<'This chart' | 'Dates' | 'Metrics'> = ['This chart', 'Dates', 'Metrics']
   const all = [...VALUE_TOKEN_OPTIONS, ...metricOptionList]
@@ -299,6 +317,9 @@ function insertValue(t: TextTarget, token: string) {
   if (t === 'caption') {
     if (next.length > CAPTION_MAX_CHARS) {
       sayCaptionFull()
+      // Refused: the text is as it was, so focus goes back with the selection it had.
+      const kept = saved && saved.start <= cur.length ? { start: saved.start, end: Math.min(saved.end, cur.length) } : { start: cur.length, end: cur.length }
+      focusText(t, kept.start, kept.end)
       return
     }
     captionValue.value = next
@@ -306,6 +327,7 @@ function insertValue(t: TextTarget, token: string) {
     draft.note = next
   }
   caret[t] = { start: end, end }
+  focusText(t, end)
 }
 
 // The "Data caveats" rows: allChartNotes minus the caption itself, plus any id this chart hides
@@ -763,7 +785,7 @@ function save() {
         </div>
         <div class="field note-text" v-else>
           <label :for="noteTextFieldId">Note text</label>
-          <textarea :id="noteTextFieldId" v-model="draft.note" rows="4" placeholder="Caveat / note shown on the tile" @blur="rememberCaret('note', $event)" />
+          <textarea :id="noteTextFieldId" ref="noteEl" v-model="draft.note" rows="4" placeholder="Caveat / note shown on the tile" @blur="rememberCaret('note', $event)" />
           <div class="caption-tools">
             <InsertPicker label="Insert from library" placeholder="Insert from library…" select-class="insert-library" :groups="libraryGroups" @insert="insertFromLibrary('note', $event)" />
             <InsertPicker label="Insert value" placeholder="Insert value ▾" select-class="insert-value" :groups="valueOptions" @insert="insertValue('note', $event)" />
@@ -783,7 +805,7 @@ function save() {
       <template v-if="!isNote">
         <div class="field caption-field">
           <label :for="captionFieldId">Caption <span class="hint">— shown under the chart</span></label>
-          <textarea :id="captionFieldId" v-model="captionValue" rows="3" :maxlength="CAPTION_MAX_CHARS" @blur="rememberCaret('caption', $event)" @input="captionFull = false" />
+          <textarea :id="captionFieldId" ref="captionEl" v-model="captionValue" rows="3" :maxlength="CAPTION_MAX_CHARS" @blur="rememberCaret('caption', $event)" @input="captionFull = false" />
           <div class="caption-tools">
             <InsertPicker label="Insert from library" placeholder="Insert from library…" select-class="insert-library" :groups="libraryGroups" @insert="insertFromLibrary('caption', $event)" />
             <InsertPicker label="Insert value" placeholder="Insert value ▾" select-class="insert-value" :groups="valueOptions" @insert="insertValue('caption', $event)" />

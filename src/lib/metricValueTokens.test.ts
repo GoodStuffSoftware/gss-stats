@@ -23,6 +23,12 @@ describe('parseMetricPath', () => {
     expect(parseMetricPath('chart.total')).toBeNull()
   })
 
+  it('is case-sensitive: a window or id in the wrong case names nothing (the dash), never the right one', () => {
+    expect(parseMetricPath('metric:bsk.pageviews@page')).not.toBeNull()
+    for (const p of ['metric:bsk.pageviews@Page', 'metric:bsk.pageviews@PAGE', 'metric:bsk.pageviews@TODAYSOFAR', 'metric:bsk.pageviews@todaysofar', 'metric:bsk.popupTapRate@Page', 'metric:BSK.pageviews@page', 'metric:bsk.popuptaprate@page']) expect(parseMetricPath(p), p).toBeNull()
+    expect(metricRefsIn(['{=metric:bsk.pageviews@Page|number}'])).toEqual([])
+  })
+
   it('every offered window is one of the metric\'s own (the catalog is the authority)', () => {
     for (const o of metricTokenOptions()) {
       const def = METRICS.get(o.ref.id)
@@ -62,6 +68,11 @@ describe('metricRefsIn', () => {
       '{=metric:play.deviceInstalls@page|number} {=metric:nope@page} {=metric:bsk.pageviews}',
     ])
     expect(refs.map((r) => r.path)).toEqual(['metric:bsk.pageviews@page', 'metric:play.deviceInstalls@page'])
+  })
+
+  it('one path written with different formats (or none) is still ONE ref, so one request', () => {
+    const refs = metricRefsIn(['{=metric:bsk.pageviews@page|number} then {=metric:bsk.pageviews@page} and {=metric:bsk.pageviews@page|pct}', '{=metric:bsk.pageviews@page|date}'])
+    expect(refs.map((r) => r.path)).toEqual(['metric:bsk.pageviews@page'])
   })
 })
 

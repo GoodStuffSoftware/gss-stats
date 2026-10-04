@@ -271,7 +271,7 @@ const hasOverride = computed(() => !!props.widget.filters)
 // previous response is not this chart's any more, so `chart.*` shows "—" rather than the old
 // values; a background refetch never sets `loading`, so it keeps the values up until the new ones
 // arrive. A note widget's text takes the dates and metrics, never `chart.*`.
-const metricTokenValues = useMetricTokenValues(() => [props.widget.caption, props.widget.type === 'note' ? props.widget.note : undefined], metricsContext)
+const metricTokenValues = useMetricTokenValues(() => [props.widget.caption, props.widget.type === 'note' && !props.widget.noteId ? props.widget.note : undefined], metricsContext)
 const captionValues = computed(() => chartValueResolver(props.widget, loading.value ? null : data.value, error.value, metricTokenValues.value))
 const noteValues = computed(() => noteValueResolver(metricTokenValues.value))
 
