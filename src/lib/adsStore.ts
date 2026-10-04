@@ -701,7 +701,7 @@ export function createSqlAdsStore(db: AdsDb, opts: { dryRun: boolean; kind?: str
   }
 }
 
-// ── GET /api/ads/readings — shape shared by the Function and AdsReadingsWidgetCard.vue ────
+// ── GET /api/ads/readings — shape shared by the Function and the readings log card (MetricCard) ────
 export interface AdsReadingsCampaign extends AdsFreshness {
   campaignId: string
   label: string

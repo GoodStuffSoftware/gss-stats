@@ -10,7 +10,7 @@ import { computed, effectScope, onScopeDispose, shallowRef, watch, type EffectSc
 import { useMetrics } from '../../composables/useMetrics'
 import { buildRequestSpec, columnDefaultLabel, flattenSectionItems, nestScope, resolveRepeat, sectionCells, type FlatItem, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
 import { itemLabelTokens, itemViewModel, resolveLabelTokens } from '../../lib/metrics/render'
-import type { MetricsContext, MetricValue, Section } from '../../lib/metrics/types'
+import type { MetricItem as MetricItemSpec, MetricsContext, MetricValue, Section } from '../../lib/metrics/types'
 import MetricItem from './MetricItem.vue'
 import MetricLabel from './MetricLabel.vue'
 import MetricPlaceholder from './MetricPlaceholder.vue'
@@ -91,11 +91,16 @@ const barMax = computed(() => {
 })
 
 // ── table, row repeat ────────────────────────────────────────────────────────────────────────
-const tableRows = computed<ScopeInstance[]>(() => (props.section.layout === 'table' && !isColumnTable.value ? resolveRepeat(props.section.repeat, props.ctx).map((r) => nestScope(r, props.outerScope)) : []))
+const tableRows = computed<ScopeInstance[]>(() => (props.section.layout === 'table' && !isColumnTable.value ? resolveRepeat(props.section.repeat, props.ctx, props.outerScope).map((r) => nestScope(r, props.outerScope)) : []))
+/** A row-table column that reads as a number is right-aligned: a number display, or a stored
+ * reading's count (the sign-ups cell is text, but still a count). */
+const isNumColumn = (it: MetricItemSpec) => it.display.as === 'number' || ('field' in it.data && it.data.field.startsWith('reading.count.'))
 const tableHeaderTokens = computed(() => props.section.items.map((it) => itemLabelTokens(it, props.outerScope, props.ctx.todayEt)))
+/** Each column's tooltip (MetricItem.hint) as plain text, or undefined. */
+const tableHeaderHints = computed(() => props.section.items.map((it) => (it.hint === undefined ? undefined : resolveLabelTokens(it.hint, props.outerScope, undefined, props.ctx.todayEt).map((t) => t.value).join('') || undefined)))
 
 // ── table, column repeat ─────────────────────────────────────────────────────────────────────
-const tableColumns = computed<ScopeInstance[]>(() => (isColumnTable.value ? resolveRepeat(props.section.columns, props.ctx).map((c) => nestScope(c, props.outerScope)) : []))
+const tableColumns = computed<ScopeInstance[]>(() => (isColumnTable.value ? resolveRepeat(props.section.columns, props.ctx, props.outerScope).map((c) => nestScope(c, props.outerScope)) : []))
 const columnHeaderTokens = computed(() => tableColumns.value.map((c) => resolveLabelTokens(props.section.columnLabel ?? columnDefaultLabel(c), c, undefined, props.ctx.todayEt)))
 const rowsHeaderTokens = computed(() => (props.section.rowsLabel !== undefined ? resolveLabelTokens(props.section.rowsLabel, props.outerScope, undefined, props.ctx.todayEt) : []))
 /** Each item row with its cells; a row whose every cell is gated out is left out. */
@@ -106,17 +111,32 @@ const columnRows = computed(() => {
     .filter(({ r }) => n === 0 || Array.from({ length: n }, (_, c) => visibleAt(r * n + c)).some(Boolean))
 })
 
+// A row table with no rows shows its repeat's `empty` text instead of vanishing (the readings log's
+// "No readings yet."): once the data it waits on is in (a campaign's readings load, `ads`).
+const tableEmpty = computed(() => {
+  const r = props.section.repeat
+  if (props.section.layout !== 'table' || isColumnTable.value || !r?.empty || tableRows.value.length) return false
+  return props.outerScope.kind !== 'campaign' || !!props.outerScope.ads
+})
+const tableEmptyLabel = computed(() => (props.section.repeat?.empty ? resolveLabelTokens(props.section.repeat.empty.label, props.outerScope, undefined, props.ctx.todayEt) : []))
+const tableEmptyText = computed(() => (props.section.repeat?.empty ? resolveLabelTokens(props.section.repeat.empty.text, props.outerScope, undefined, props.ctx.todayEt) : []))
+
 const anyVisible = computed(() => {
   if (isColumnTable.value) return columnRows.value.length > 0
   // A row table is shown while any of its data cells is (a field column, such as a row's own
   // name, never keeps it on its own): a gated-out segment table disappears whole.
-  if (props.section.layout === 'table') return flatItems.value.some((fi, i) => !('field' in fi.item.data) && visibleAt(i))
+  // A table with NO data column at all (a readings log: every column is a field of the row) is
+  // shown while any of its cells is: its rows, not a gated metric, are what it is.
+  if (props.section.layout === 'table') {
+    const fieldsOnly = props.section.items.every((it) => 'field' in it.data)
+    return flatItems.value.some((fi, i) => (fieldsOnly || !('field' in fi.item.data)) && visibleAt(i))
+  }
   return flatItems.value.some((_, i) => visibleAt(i))
 })
 </script>
 
 <template>
-  <div v-if="anyVisible" class="metric-section" :class="`layout-${section.layout}`">
+  <div v-if="anyVisible || tableEmpty" class="metric-section" :class="`layout-${section.layout}`">
     <p v-if="titleTokens.length" class="section-title"><MetricLabel :tokens="titleTokens" /></p>
 
     <div v-if="isColumnTable" class="metric-table-wrap">
@@ -138,20 +158,28 @@ const anyVisible = computed(() => {
       </table>
     </div>
 
-    <table v-else-if="section.layout === 'table'" class="metric-table">
-      <thead>
-        <tr>
-          <th v-for="(tokens, i) in tableHeaderTokens" :key="i"><MetricLabel :tokens="tokens" /></th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="(rowScope, ri) in tableRows" :key="ri">
-          <td v-for="item in section.items" :key="item.id">
-            <MetricTableCell :item="item" :scope="rowScope" :today-et="ctx.todayEt" :context="context" />
-          </td>
-        </tr>
-      </tbody>
-    </table>
+    <p v-else-if="tableEmpty" class="metric-table-empty">
+      <MetricLabel :tokens="tableEmptyLabel" />
+      <MetricLabel :tokens="tableEmptyText" />
+    </p>
+
+    <!-- Wrapped like the column table: a wide table scrolls inside its card instead of being clipped. -->
+    <div v-else-if="section.layout === 'table'" class="metric-table-wrap">
+      <table class="metric-table">
+        <thead>
+          <tr>
+            <th v-for="(tokens, i) in tableHeaderTokens" :key="i" :class="{ num: isNumColumn(section.items[i]) }" :title="tableHeaderHints[i]"><MetricLabel :tokens="tokens" /></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="(rowScope, ri) in tableRows" :key="ri" :class="{ incomplete: rowScope.kind === 'reading' && rowScope.reading.complete === false }">
+            <td v-for="item in section.items" :key="item.id" :class="{ num: isNumColumn(item) }">
+              <MetricTableCell :item="item" :scope="rowScope" :today-et="ctx.todayEt" :context="context" />
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
 
     <div v-else class="items-wrap">
       <template v-for="(fi, i) in flatItems" :key="`${fi.item.id}-${i}`">
@@ -225,8 +253,17 @@ const anyVisible = computed(() => {
   padding: 3px 8px 3px 0;
   border-bottom: 1px solid rgb(var(--line));
 }
-.metric-table.columns th.num,
-.metric-table.columns td.num {
+.metric-table-empty {
+  margin: 0;
+  font-size: 11.5px;
+  color: rgb(var(--ink-3));
+}
+/* A stored reading whose inputs were missing (its Kind also says so) is drawn dimmer. */
+.metric-table tr.incomplete td {
+  opacity: 0.7;
+}
+.metric-table th.num,
+.metric-table td.num {
   text-align: right;
 }
 .metric-table.columns th.row-label {

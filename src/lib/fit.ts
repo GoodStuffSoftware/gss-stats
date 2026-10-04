@@ -18,8 +18,8 @@ export const FIT_MAX_ROWS = 100
 export const CHART_CANVAS_TYPES: ReadonlySet<string> = new Set(['bar', 'hbar', 'stackedBar', 'breakdownBar', 'line', 'area', 'doughnut', 'nestedDoughnut', 'pie', 'map'])
 
 /** Does this widget hold a canvas that needs a definite pixel height (ChartCard's
- * `needs-chart-height`)? Content-driven bodies (the overview/campaigns/ads-readings panels and
- * notes) never do. */
+ * `needs-chart-height`)? Content-driven bodies (the overview/campaigns panels, notes, and a
+ * legacy ads-readings widget, which renders as a card without storing one) never do. */
 export function widgetNeedsChartHeight(w: Pick<Widget, 'dataset' | 'type'>): boolean {
   if (w.dataset === 'overview') return false
   if (w.dataset === 'campaigns' || w.dataset === 'ads-readings' || w.type === 'note') return false

@@ -430,6 +430,57 @@ export const CAMPAIGN_ENGAGEMENT: CardSpec = {
   ],
 }
 
+/** The ads-read routine's readings log (the bespoke Ads readings widget, ADR 0005 slice 3): one
+ * card per campaign that has something to show (a stored reading, Ads-API spend or an active
+ * flight; a widget's campaign selection names its own), each with its spend and where it came
+ * from, how fresh the stored data is, the thresholds it fired and the readings table — newest
+ * first, at most 30 by default (RepeatSpec.limit, 500 at most). Its action syncs spend now and
+ * reloads the card. The notices carry the store's warnings, the small-numbers note and sync
+ * alerts. Not compact captions: a card's notes are built once, before the readings arrive.
+ *
+ * PRIVACY ("counts only. Never tie beacon rows to a device, time or place", read as rows only):
+ * a reading is a stored aggregate with its own read time. The table binds ONLY the five
+ * allow-listed counts (types.ts READING_COUNT_FIELDS) and the derived sign-ups; no return,
+ * game-start, tutorial or tour total, and no hour, place or device split. */
+export const ADS_READINGS_LOG: CardSpec = {
+  v: 1,
+  repeat: { over: 'campaigns', withActivity: true, empty: { label: '', text: { note: 'no-ads-campaign' } } },
+  minWidth: 520,
+  title: { bind: 'campaign.label' },
+  actions: ['ads-refresh'],
+  notices: 'ads-readings',
+  sections: [
+    {
+      layout: 'rows',
+      items: [
+        { id: 'spend', label: { metric: true }, data: { metric: 'campaign.spend' }, display: { as: 'currency' } },
+        { id: 'source', label: { metric: true }, data: { metric: 'campaign.spendSource' }, display: { as: 'status' } },
+        { id: 'fresh', label: { note: 'label.card.freshness' }, data: { field: 'campaign.freshness' }, display: { as: 'text' }, gating: { whenEmpty: 'omit' } },
+      ],
+    },
+    {
+      layout: 'pills',
+      items: [{ id: 'fired', label: { note: 'label.card.firedThresholds' }, data: { field: 'campaign.thresholds' }, display: { as: 'text' }, gating: { whenEmpty: 'omit' } }],
+    },
+    {
+      layout: 'table',
+      repeat: { over: 'readings', limit: 30, empty: { label: '', text: { note: 'no-readings-yet' } } },
+      items: [
+        { id: 'read', label: { note: 'label.reading.read' }, data: { field: 'reading.readAt' }, display: { as: 'datetime-et' } },
+        { id: 'kind', label: { note: 'label.reading.kind' }, data: { field: 'reading.kind' }, display: { as: 'text' } },
+        { id: 'spend', label: { note: 'label.campaign.spend' }, data: { field: 'reading.spend' }, display: { as: 'currency' } },
+        { id: 'rules', label: { note: 'label.reading.rules' }, data: { field: 'reading.rules' }, display: { as: 'text' } },
+        { id: 'proposal', label: { note: 'label.reading.proposal' }, data: { field: 'reading.proposal' }, display: { as: 'text' } },
+        { id: 'arrivals', label: { note: 'label.funnel.arrivals' }, data: { field: 'reading.count.arrivals' }, display: { as: 'number' } },
+        { id: 'asks', label: { note: 'label.reading.asks' }, data: { field: 'reading.count.asks' }, display: { as: 'number' } },
+        { id: 'accepts', label: { note: 'label.reading.accepts' }, data: { field: 'reading.count.accepts' }, display: { as: 'number' } },
+        { id: 'auth', label: { note: 'label.reading.auth' }, data: { field: 'reading.count.auth' }, display: { as: 'number' } },
+        { id: 'signUps', label: { note: 'label.reading.signUps' }, hint: { note: 'label.reading.signUpsHint' }, data: { field: 'reading.count.signUps' }, display: { as: 'text' } },
+      ],
+    },
+  ],
+}
+
 /** Google Play's own install totals (retention build R-4): device installs and uninstalls over the
  * page's date range, the latest active device installs in it, and how far Play's data runs. Whole-app
  * counts by PLAY day (as Google reports them, not confirmed ET days), synced by `npm run
@@ -469,6 +520,7 @@ export const PRESETS: Readonly<Record<string, CardSpec>> = Object.freeze(
     'campaign-returns': CAMPAIGN_RETURNS,
     'retention-verdict': RETENTION_VERDICT,
     'campaign-engagement': CAMPAIGN_ENGAGEMENT,
+    'ads-readings-log': ADS_READINGS_LOG,
     'play-installs': PLAY_INSTALLS,
   }),
 )

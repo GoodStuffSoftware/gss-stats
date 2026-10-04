@@ -4,7 +4,7 @@
 //
 // The ads-read routine's readings log, stored spend and fired thresholds, from gss-stats' own
 // D1 store (binding gss_stats_ads — docs/adr/0001-ads-read-store.md). Feeds the
-// self-contained AdsReadingsWidgetCard.vue. No campaign id (or none known) = every campaign.
+// `ads-readings-log` metric card (lib/metrics/readingsCard.ts). No campaign id (or none known) = every campaign.
 //
 // FAIL SOFT: no binding, a missing table or a D1 error returns storeBound/storeReadable
 // flags and empty readings, with spend falling back to lib/campaigns.ts CAMPAIGN_SPEND —
