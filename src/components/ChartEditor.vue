@@ -21,8 +21,10 @@ import { ringDims, RING_SOFT_CAP, isDateDim } from '../lib/rings'
 import { BEST_SUDOKU_SITES, CAPTION_MAX_CHARS, HIDDEN_CAVEATS_MAX, HIDDEN_CAVEAT_ID_RE, syncCardWithView } from '../lib/defaults'
 import { getNote, isStaticCaptionNote, libraryCaptionOptions, noteRawText, noteTemplate } from '../lib/notes'
 import { allChartNotes, canHideCaveatId, convertLegacyNotes, isChartNoteHidden, type ChartNote } from '../lib/chartNotes'
-import { toPlainText } from '../lib/textLite'
+import { toPlainText, VALUE_TOKEN_RE } from '../lib/textLite'
+import { chartValueResolver, VALUE_TOKEN_OPTIONS } from '../lib/valueTokens'
 import { canFit, setFit } from '../lib/fit'
+import { rendersOwnBody } from '../lib/charts'
 import CardEditor from './metrics/CardEditor.vue'
 import { metricsContextFor } from '../lib/metrics/pageContext'
 import { presetById } from '../lib/metrics/presets'
@@ -188,14 +190,43 @@ function rememberCaret(t: TextTarget, e: Event) {
   const start = el.selectionStart ?? 0
   caret[t] = { start, end: el.selectionEnd ?? start }
 }
+/** Where each `{=…}` value token in `text` starts and ends. */
+function valueTokenSpans(text: string): Array<[number, number]> {
+  return [...text.matchAll(VALUE_TOKEN_RE)].map((m) => [m.index, m.index + m[0].length])
+}
+/** The caret, with each end that falls inside a value token moved to that token's end, so an
+ * insert never splits one (review N5). */
+function caretOutsideTokens(text: string, at: { start: number; end: number }): { start: number; end: number } {
+  const spans = valueTokenSpans(text)
+  const snap = (pos: number) => spans.find(([a, b]) => a < pos && pos < b)?.[1] ?? pos
+  const start = snap(at.start)
+  return { start, end: Math.max(start, snap(at.end)) }
+}
+/** `text` cut to `max` characters, and further back to before a value token the cut would split
+ * (review N6): a caption never keeps half a token. */
+function cutOutsideTokens(text: string, max: number): string {
+  if (text.length <= max) return text
+  const split = valueTokenSpans(text).find(([a, b]) => a < max && b > max)
+  return text.slice(0, split ? split[0] : max)
+}
+/** "Caption is full": a value or library text did not fit whole under CAPTION_MAX_CHARS (review
+ * N4). Announced politely; the next edit of the caption (typing, or another insert) clears it. Each
+ * refusal re-keys the message node, so a second refusal in a row is announced again (NIT-3). */
+const captionFull = ref(false)
+const captionFullTick = ref(0)
+function sayCaptionFull() {
+  captionFull.value = true
+  captionFullTick.value++
+}
 function insertFromLibrary(t: TextTarget, e: Event) {
   const sel = e.target as HTMLSelectElement
   const id = sel.value
   sel.value = ''
   const text = id ? noteTemplate(id).trim() : ''
   if (!text) return
+  if (t === 'caption') captionFull.value = false
   const cur = (t === 'caption' ? draft.caption : draft.note) ?? ''
-  const at = caret[t]
+  const at = t === 'caption' && caret[t] ? caretOutsideTokens(cur, caret[t]) : caret[t]
   let next: string
   let end: number
   if (at && at.start <= cur.length) {
@@ -207,13 +238,59 @@ function insertFromLibrary(t: TextTarget, e: Event) {
     end = next.length
   }
   if (t === 'caption') {
-    next = next.slice(0, CAPTION_MAX_CHARS)
+    const whole = next
+    next = cutOutsideTokens(whole, CAPTION_MAX_CHARS)
     captionValue.value = next
+    if (next.length < whole.length) sayCaptionFull()
   } else {
     draft.note = next
   }
   end = Math.min(end, next.length)
   caret[t] = { start: end, end }
+}
+
+// ── "Insert value ▾" (notes plan, slice 1d release 1): puts a `{=…}` value token (grammar:
+// lib/valueTokens.ts) into the caption at the cursor, replacing any selection; a box never focused
+// gets it appended. Each option shows what it reads right now, from the response already loaded
+// (no fetch). A token that would not fit whole under CAPTION_MAX_CHARS is not inserted, and the
+// box says the caption is full. A widget that renders its own body (a metric card, overview,
+// campaigns, ads-readings: lib/charts.ts rendersOwnBody, the test ChartCard skips its fetch on)
+// loads no response a chart value could read, so it gets the Dates group only (review N2, NIT-1).
+const VALUE_GROUPS = ['This chart', 'Dates'] as const
+const valueOptions = computed(() => {
+  const resolve = chartValueResolver(props.widget, props.data ?? null, props.error ?? null)
+  const groups = VALUE_GROUPS.filter((g) => g !== 'This chart' || !rendersOwnBody(draft))
+  return groups.map((group) => ({
+    group,
+    options: VALUE_TOKEN_OPTIONS.filter((o) => o.group === group).map((o) => {
+      const now = resolve(o.token)
+      return { token: o.token, label: now ? `${o.label} (${now})` : o.label }
+    }),
+  }))
+})
+function insertValue(e: Event) {
+  const sel = e.target as HTMLSelectElement
+  const token = sel.value
+  sel.value = ''
+  if (!token) return
+  captionFull.value = false
+  const cur = draft.caption ?? ''
+  const at = caret.caption && caretOutsideTokens(cur, caret.caption)
+  let next: string
+  let end: number
+  if (at && at.start <= cur.length) {
+    next = cur.slice(0, at.start) + token + cur.slice(Math.max(at.start, Math.min(at.end, cur.length)))
+    end = at.start + token.length
+  } else {
+    next = cur && !/\s$/.test(cur) ? `${cur} ${token}` : cur + token
+    end = next.length
+  }
+  if (next.length > CAPTION_MAX_CHARS) {
+    sayCaptionFull()
+    return
+  }
+  captionValue.value = next
+  caret.caption = { start: end, end }
 }
 
 // The "Data caveats" rows: allChartNotes minus the caption itself, plus any id this chart hides
@@ -691,15 +768,22 @@ function save() {
       <template v-if="!isNote">
         <div class="field caption-field">
           <label :for="captionFieldId">Caption <span class="hint">— shown under the chart</span></label>
-          <textarea :id="captionFieldId" v-model="captionValue" rows="3" :maxlength="CAPTION_MAX_CHARS" @blur="rememberCaret('caption', $event)" />
+          <textarea :id="captionFieldId" v-model="captionValue" rows="3" :maxlength="CAPTION_MAX_CHARS" @blur="rememberCaret('caption', $event)" @input="captionFull = false" />
           <div class="caption-tools">
             <select class="insert-library" aria-label="Insert from library" @change="insertFromLibrary('caption', $event)">
               <option value="">Insert from library…</option>
               <option v-for="o in LIBRARY_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
             </select>
+            <select class="insert-value" aria-label="Insert value" @change="insertValue">
+              <option value="">Insert value ▾</option>
+              <optgroup v-for="g in valueOptions" :key="g.group" :label="g.group">
+                <option v-for="o in g.options" :key="o.token" :value="o.token">{{ o.label }}</option>
+              </optgroup>
+            </select>
             <span class="hint caption-count">{{ captionValue.length }} / {{ CAPTION_MAX_CHARS }}</span>
+            <span class="hint caption-full" aria-live="polite"><span v-if="captionFull" :key="captionFullTick">Caption is full</span></span>
           </div>
-          <p class="hint">**bold** and [links](https://…) work; a blank line starts a new paragraph. A value token such as {=…} shows "—" for now.</p>
+          <p class="hint">**bold** and [links](https://…) work; a blank line starts a new paragraph. Insert value adds a live number or date, such as {=chart.total|number}; it shows "—" when there is no value for it.</p>
           <p v-if="convertedNoteIds.length" class="hint caption-converted">The library captions this chart had are now part of its caption text. Save keeps that; Cancel leaves the chart as it was.</p>
         </div>
         <div class="field data-caveats">

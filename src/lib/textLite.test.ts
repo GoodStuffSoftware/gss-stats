@@ -307,3 +307,66 @@ describe('value tokens {=…} (placeholder until 1d)', () => {
     expect(toPlainText('Keep {unknown} and {= open')).toBe('Keep {unknown} and {= open')
   })
 })
+
+// Slice 1d: a resolver fills value tokens, but only inside plain text, and its output is never
+// read again as markup, a {var} or another token.
+describe('value tokens {=…} with a resolver (1d)', () => {
+  const table: Record<string, string | null> = {
+    '{=n}': '1,234',
+    '{=bold}': '**not bold**',
+    '{=link}': '[x](javascript:alert(1))',
+    '{=safeLink}': '[x](https://example.com)',
+    '{=nested}': '{=n}',
+    '{=var}': '{who}',
+    '{=mark}': '0',
+    '{=missing}': null,
+  }
+  const values = (source: string) => (source in table ? table[source] : null)
+
+  it('fills a token in text, and the placeholder when the resolver has nothing', () => {
+    expect(tokenizeAndInterpolate('Total {=n} views', undefined, values)).toEqual([{ type: 'text', value: 'Total 1,234 views' }])
+    expect(toPlainText('{=missing} and {=unknown}', undefined, values)).toBe(`${VALUE_TOKEN_PLACEHOLDER} and ${VALUE_TOKEN_PLACEHOLDER}`)
+  })
+
+  it('a value holding **, a link (javascript: or https:), a {=…} or a {var} renders as literal text', () => {
+    for (const k of ['bold', 'link', 'safeLink', 'nested', 'var']) {
+      const tokens = tokenizeAndInterpolate(`a {=${k}} b`, { who: 'Ann' }, values)
+      expect(tokens).toEqual([{ type: 'text', value: `a ${table[`{=${k}}`]} b` }])
+    }
+  })
+
+  it("a value holding the reserved marker characters can't stand for another token", () => {
+    expect(toPlainText('{=mark}|{=n}', undefined, values)).toBe('0|1,234')
+  })
+
+  it('never fills inside bold, a link label or an href', () => {
+    expect(tokenizeAndInterpolate('**{=n}**', undefined, values)).toEqual([{ type: 'bold', value: VALUE_TOKEN_PLACEHOLDER }])
+    expect(tokenizeAndInterpolate('[{=n}](https://x.test)', undefined, values)).toEqual([{ type: 'link', value: VALUE_TOKEN_PLACEHOLDER, href: 'https://x.test' }])
+    expect(tokenizeAndInterpolate('[go](https://x.test/{=n})', undefined, values)).toEqual([{ type: 'text', value: 'go' }])
+  })
+
+  it('keeps each token with its own value when an href holding a token was dropped before it', () => {
+    expect(toPlainText('[go](https://x/{=bold}) then {=n}', undefined, values)).toBe('go then 1,234')
+  })
+
+  it('substitutes {vars} around a value, never inside it', () => {
+    expect(toPlainText('{who}: {=var}', { who: 'Ann' }, values)).toBe('Ann: {who}')
+  })
+
+  it('a resolver that throws or returns empty shows the placeholder', () => {
+    const throws = () => {
+      throw new Error('boom')
+    }
+    expect(toPlainText('x {=n}', undefined, throws)).toBe(`x ${VALUE_TOKEN_PLACEHOLDER}`)
+    expect(toPlainText('x {=n}', undefined, () => '')).toBe(`x ${VALUE_TOKEN_PLACEHOLDER}`)
+  })
+
+  it('passes the whole token source, spaces and format included', () => {
+    const seen: string[] = []
+    toPlainText('{= chart.total | number } {=a|pct}', undefined, (s) => {
+      seen.push(s)
+      return null
+    })
+    expect(seen).toEqual(['{= chart.total | number }', '{=a|pct}'])
+  })
+})
