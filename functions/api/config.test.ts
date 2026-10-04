@@ -231,18 +231,18 @@ describe('the v14 → v15 upgrade (default trend charts on dateEt)', () => {
   it('the first v15 save over a stored v14 layout backs it up to backup:v14, once', async () => {
     const v14 = JSON.stringify(cfg(14, 'live v14 layout'))
     const { kv, store, puts } = fakeKv({ 'dashboard:default': v14 })
-    expect((await put(kv, cfg(15, 'first v15'))).status).toBe(200)
+    expect((await put(kv, cfg(LAYOUT_VERSIONS.dateEtTrends, 'first v15'))).status).toBe(200)
     expect(puts).toEqual(['dashboard:default:backup:v14', DAY, PREV_KEY, 'dashboard:default'])
     expect(store.get(backupKeyFor(14))).toBe(v14)
-    await put(kv, cfg(15, 'second v15'))
+    await put(kv, cfg(LAYOUT_VERSIONS.dateEtTrends, 'second v15'))
     expect(store.get('dashboard:default:backup:v14')).toBe(v14) // never overwritten
   })
   it('a PUT carrying version 14 over a stored v15 layout gets 409, and KV is untouched', async () => {
-    const v15 = JSON.stringify(cfg(15, 'dateEt layout'))
+    const v15 = JSON.stringify(cfg(LAYOUT_VERSIONS.dateEtTrends, 'dateEt layout'))
     const { kv, store, puts } = fakeKv({ 'dashboard:default': v15 })
     const res = await put(kv, cfg(14, 'sparkline-build tab'))
     expect(res.status).toBe(409)
-    expect(await res.json()).toMatchObject({ error: 'stale', storedVersion: 15, incomingVersion: 14 })
+    expect(await res.json()).toMatchObject({ error: 'stale', storedVersion: LAYOUT_VERSIONS.dateEtTrends, incomingVersion: 14 })
     expect(puts).toEqual([])
     expect(store.get('dashboard:default')).toBe(v15)
     expect((await put(kv, cfg(CONFIG_VERSION + 1, 'crafted'))).status).toBe(400)
@@ -257,9 +257,9 @@ describe('the v14 → v15 upgrade (default trend charts on dateEt)', () => {
 describe('the captions upgrade (plain-text captions and hidden caveats: seeds hiddenCaveats once, a layout rewrite)', () => {
   const V = LAYOUT_VERSIONS.captions
   const prev = Math.max(...Object.values(LAYOUT_VERSIONS).filter((v) => v < V))
-  it('captions is the newest layout version, and this code writes it', () => {
+  it('captions comes after dateEtTrends, and this code writes the newest layout version', () => {
     expect(V).toBeGreaterThan(LAYOUT_VERSIONS.dateEtTrends)
-    expect(CONFIG_VERSION).toBe(V)
+    expect(CONFIG_VERSION).toBeGreaterThanOrEqual(V)
     expect(CONFIG_VERSION).toBe(Math.max(...Object.values(LAYOUT_VERSIONS)))
   })
   it('the first captions save over the stored previous layout backs it up to backup:v<prev>, once', async () => {
@@ -282,7 +282,29 @@ describe('the captions upgrade (plain-text captions and hidden caveats: seeds hi
     expect(puts).toEqual([])
     expect(store.get('dashboard:default')).toBe(cur)
     expect([...store.keys()]).toEqual(['dashboard:default'])
-    expect((await put(kv, cfg(V + 1, 'crafted'))).status).toBe(400)
+    expect((await put(kv, cfg(CONFIG_VERSION + 1, 'crafted'))).status).toBe(400)
+  })
+})
+
+// The readings log layout version (the ads readings log is a metric card, ADR 0005 slice 3): a guard
+// bump only. Written against the LAYOUT_VERSIONS key, never a literal, so renumbering it is one edit in
+// lib/defaults.ts. `prev` is the version just below it, whatever that is.
+describe('the readingsLog upgrade (readings log card: a guard bump, no layout rewrite)', () => {
+  const V = LAYOUT_VERSIONS.readingsLog
+  const prev = Math.max(...Object.values(LAYOUT_VERSIONS).filter((v) => v < V))
+  it('this code writes the readingsLog layout version', () => {
+    expect(V).toBeGreaterThan(LAYOUT_VERSIONS.dateEtTrends)
+    expect(CONFIG_VERSION).toBe(V)
+  })
+  it('the first readingsLog save over the stored previous layout backs it up to backup:v<prev>, once', async () => {
+    const old = JSON.stringify(cfg(prev, 'live layout'))
+    const { kv, store } = fakeKv({ 'dashboard:default': old })
+    expect((await put(kv, cfg(V, 'first readings-log save'))).status).toBe(200)
+    expect(store.get(backupKeyFor(prev))).toBe(old)
+  })
+  it('a PUT carrying the previous version over a stored readingsLog layout gets 409', async () => {
+    const { kv } = fakeKv({ 'dashboard:default': JSON.stringify(cfg(V, 'readings layout')) })
+    expect((await put(kv, cfg(prev, 'old tab'))).status).toBe(409)
   })
 })
 

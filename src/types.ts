@@ -123,8 +123,9 @@ export interface Widget {
   // card (`card`, its preset — lib/defaults.ts CARD_PRESET_FOR_PANEL) since layout version 11;
   // the view only names the panel for the layout migrations. The former 'timeline', 'deviceMix',
   // 'hourOfDay' and 'flightDay' panels are standard charts (CONFIG_VERSION 9 and 11).
-  // dataset 'ads-readings': the ads-routines worker's own view value(s) (e.g. 'log') — see
-  // components/widgets/AdsReadingsWidgetCard.vue.
+  // dataset 'ads-readings': the ads-routines worker's own view value(s) (e.g. 'log'). A widget
+  // with this dataset renders as the `ads-readings-log` card preset (lib/metrics/readingsCard.ts),
+  // mapped at render time; the stored fields are never rewritten.
   view?: string
   // A metric card (ADR 0003): when set, ChartCard renders MetricCard from this reference and
   // ignores dataset/view/dimension/metric. `{ preset }` names a code-reviewed CardSpec

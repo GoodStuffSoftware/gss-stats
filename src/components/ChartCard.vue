@@ -18,17 +18,16 @@ import WorldMap from './charts/WorldMap.vue'
 import FilterPopover from './FilterPopover.vue'
 import MetricCard from './metrics/MetricCard.vue'
 import { metricsContextFor } from '../lib/metrics/pageContext'
-import { presetById } from '../lib/metrics/presets'
+import { cardRefFor, cardShowsOwnReload } from '../lib/metrics/readingsCard'
 import NoteWidgetBody from './widgets/NoteWidgetBody.vue'
-import AdsReadingsWidgetCard from './widgets/AdsReadingsWidgetCard.vue'
 import NoteBlock from './NoteBlock.vue'
 import { noteRawText } from '../lib/notes'
 import { chartNotes } from '../lib/chartNotes'
 
 const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolean; drillOpen: boolean; forceControls?: boolean }>()
 
-// A metric card, dataset 'ads-readings' and type 'note' render their own body (own data fetch
-// or none) — no /api/stats round trip, no per-chart filter override, no drill. The datasets
+// A metric card, dataset 'ads-readings' (a card too: see cardRef below) and type 'note' render
+// their own body (own data fetch or none) — no /api/stats round trip, no per-chart filter override, no drill. The datasets
 // 'overview' and 'campaigns' are card panels since layout version 11 (their bespoke bodies are
 // retired); one without a card — a panel the migration does not know — says so.
 // The header (title/zoom/menu) stays generic and shared with every other widget type.
@@ -41,7 +40,10 @@ const isBespokeBody = computed(
 // page context — the filter bar's range and sites, or this widget's own override — which it
 // follows as they change (useMetrics re-plans on a context change). Its reload is the card's
 // own (a fresh refetch of every value on it), wired to this header's ↻.
-const isCard = computed(() => !!props.widget.card)
+// A legacy 'ads-readings' widget has no `card` stored (ADR 0005 decision 2: no layout rewrite);
+// it is drawn as the `ads-readings-log` preset at render time, its stored fields untouched.
+const cardRef = computed(() => cardRefFor(props.widget))
+const isCard = computed(() => !!cardRef.value)
 const metricsContext = computed(() => {
   const f = effectiveFilters.value
   return metricsContextFor({ since: f.since, until: f.until }, resolveSelection(props.widget.siteSel ?? f.siteSel).tags, f)
@@ -49,12 +51,7 @@ const metricsContext = computed(() => {
 const metricCard = ref<{ reload(): void } | null>(null)
 /** A card that shows its own "Updated … ↻" (CardSpec.showUpdated) has its reload there; the
  * header's ↻ would be a second control for the same action, so it is hidden for that card. */
-const cardHasOwnReload = computed(() => {
-  const c = props.widget.card
-  if (!c) return false
-  const spec = 'preset' in c ? presetById(c.preset) : c.spec
-  return !!spec?.showUpdated
-})
+const cardHasOwnReload = computed(() => cardShowsOwnReload(cardRef.value))
 function reloadThis() {
   if (isCard.value) metricCard.value?.reload()
   else load()
@@ -266,7 +263,7 @@ const hasOverride = computed(() => !!props.widget.filters)
 let loadStartedAt: number | null = null // the latest load's start; null once it settles
 let settledAt: number | null = null
 async function load(background = false) {
-  if (isBespokeBody.value) return // own data fetch (or none) — see MetricCard/AdsReadingsWidgetCard/NoteWidgetBody
+  if (isBespokeBody.value) return // own data fetch (or none) — see MetricCard/NoteWidgetBody
   // RUM charts filter to a real-host allow-list built from /api/sites; fetching before
   // it loads would momentarily count dev/preview traffic. Wait for the tree. (Geo has
   // no dev hosts, so it needn't wait.)
@@ -576,12 +573,11 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
       </div>
     </header>
 
-    <div class="card-body" @dblclick="onCardBodyDblClick">
+    <div class="card-body" :class="{ 'is-card': isCard }" @dblclick="onCardBodyDblClick">
       <!-- Bespoke bodies: overview / campaigns / ads-readings datasets, and the note type —
            own data fetch (or none), skip the generic loading/error/empty states above. -->
-      <MetricCard v-if="widget.card" ref="metricCard" :card-ref="widget.card" :context="metricsContext" :campaign-ids="widget.campaignIds" :hidden-captions="widget.hiddenCaveats" :fallback-title="widget.title" @open-campaigns="emit('open-campaigns')" />
+      <MetricCard v-if="cardRef" ref="metricCard" :card-ref="cardRef" :context="metricsContext" :campaign-ids="widget.campaignIds" :hidden-captions="widget.hiddenCaveats" :fallback-title="widget.title" @open-campaigns="emit('open-campaigns')" />
       <p v-else-if="widget.dataset === 'overview' || widget.dataset === 'campaigns'" class="state mono">{{ retiredPanelText }}</p>
-      <AdsReadingsWidgetCard v-else-if="widget.dataset === 'ads-readings'" :widget="widget" />
       <NoteWidgetBody v-else-if="widget.type === 'note'" :widget="widget" />
 
       <div v-else-if="loading" class="state mono">Loading…</div>
@@ -926,6 +922,12 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
 .chart-card.fit .card-body {
   flex: none;
   overflow: visible;
+}
+/* A metric card in a fixed grid slot scrolls when it is taller than the slot, as the bespoke ads
+   readings log did (its table is long); a fitted card takes its content's height instead. */
+.chart-card:not(.fit) .card-body.is-card {
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 /* Mobile only (matches Dashboard.vue's stacking breakpoint — lib/responsive.ts
    MOBILE_MAX_WIDTH): the card's own height there is `auto` so it can grow to fit content

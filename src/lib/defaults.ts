@@ -102,9 +102,12 @@ export const LAYOUT_VERSIONS = {
   /** Plain-text chart captions and per-chart hidden caveats (Widget.caption, Widget.hiddenCaveats).
    * Automatic scope caveats (D2-B): seedHiddenAutoCaveatsV16 keeps each stored chart's look. */
   captions: 16,
+  /** The ads readings log renders as a metric card (ADR 0005 slice 3). A guard bump only: no stored layout is rewritten.
+   * Sits after `captions`; renumbering it is this one value (CONFIG_VERSION is derived from the map). */
+  readingsLog: 17,
 } as const
-// The newest layout version. A slice that adds an entry moves this to it.
-export const CONFIG_VERSION: number = LAYOUT_VERSIONS.captions
+// The newest layout version: derived from the map, so a slice that adds an entry never edits this line.
+export const CONFIG_VERSION: number = Math.max(...Object.values(LAYOUT_VERSIONS))
 
 // The default "basic charts available out of the box" — a sensible analytics
 // starting layout. Users can move/resize/add/remove from here.

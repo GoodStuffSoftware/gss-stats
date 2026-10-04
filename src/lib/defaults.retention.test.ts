@@ -93,9 +93,9 @@ describe('the retention page template', () => {
 })
 
 describe('no layout version, no migration', () => {
-  it('adds no layout version of its own (the newest is the captions slice)', () => {
-    expect(CONFIG_VERSION).toBe(LAYOUT_VERSIONS.captions)
-    expect(Object.keys(LAYOUT_VERSIONS)).toEqual(['compactNoteRow', 'navigation', 'sparklines', 'dateEtTrends', 'captions'])
+  it('adds no layout version of its own (the history is fixed; later slices add keys after it)', () => {
+    expect(CONFIG_VERSION).toBe(Math.max(...Object.values(LAYOUT_VERSIONS)))
+    expect(LAYOUT_VERSIONS).toMatchObject({ compactNoteRow: 12, navigation: 13, sparklines: 14, dateEtTrends: 15 })
   })
 
   it('does not put the page in a fresh layout', () => {

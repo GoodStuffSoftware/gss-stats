@@ -118,7 +118,7 @@ describe('v15: the migration (stored version below 15 only)', () => {
     expect(a).toMatchObject({ id: 'bcn-trend', dimension: 'dateEt', title: 'Pageviews over time', dataset: 'geo', limit: 90, x: 3, y: 0, w: 9, h: 8 })
     expect(b).toMatchObject({ id: 'bsk-trend', dimension: 'dateEt', title: 'Visits over time', dataset: 'geo', limit: 90, markers: 'releases', x: 3, y: 0, w: 9, h: 8 })
     // the same load of the same widgets stored at 15 (no step) differs only by the dimension
-    const same = widgetsOf(normalizeConfig(stored(15, [bcn, bsk])))
+    const same = widgetsOf(normalizeConfig(stored(LAYOUT_VERSIONS.dateEtTrends, [bcn, bsk])))
     expect(mask([{ ...a, dimension: 'date' }, { ...b, dimension: 'date' }])).toBe(mask(same))
   })
 
@@ -167,7 +167,7 @@ describe('v15: the migration (stored version below 15 only)', () => {
 
   it('is version-gated: a layout already at 15 with a date chart is left as it is, so a later choice of `date` sticks', () => {
     const w = oldTrend('bcn-trend')
-    expect(widgetsOf(normalizeConfig(stored(15, [w])))[0].dimension).toBe('date')
+    expect(widgetsOf(normalizeConfig(stored(LAYOUT_VERSIONS.dateEtTrends, [w])))[0].dimension).toBe('date')
     // idempotent: loading the migrated result again changes nothing
     const once = normalizeConfig(stored(14, [w]))
     expect(mask(normalizeConfig(clone(once)))).toBe(mask(once))
