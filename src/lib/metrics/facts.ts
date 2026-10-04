@@ -20,6 +20,8 @@
 //                         split-guard rows, which no pop-up metric reads)
 //   adsSpend            ← lib/adsStore.ts SPEND_SUMMARY_SQL (gss-stats' own store)
 //   adsCoverage, adsLastSync ← lib/adsStore.ts readFreshness's two reads (the same store)
+//   adsPlayDaily        ← lib/adsStore.ts PLAY_DAILY_SQL (Google Play's own per-day install totals,
+//                         synced by `npm run ads:play-sync`; the Play tiles, R-4)
 //   bskFirstHit         ← /api/overview's first-hit query (the release panel's lower bound)
 //   bskReleaseSides     ← /api/overview's release-panel query, both windows in one statement
 //   campaignDaily, bskRangeDaily, popupRangeDaily, adsSpendDaily ← the DAILY TWINS (ADR 0005
@@ -76,7 +78,8 @@ import { last7DatesBefore, siteWindowClause } from '../overview'
 import { addDays as addEtDays, etDateSql, etSameTimeWindow } from '../etTime'
 import { BEST_SUDOKU_SITES } from '../bestSudokuSites'
 import { refusedWindowClause } from '../splitGuard'
-import { COVERAGE_ROWS_SQL, LAST_SYNC_SQL, mapSpendSummary, SPEND_SUMMARY_SQL } from '../adsStore'
+import type { PlayDayRow } from '../adsStore'
+import { COVERAGE_ROWS_SQL, LAST_SYNC_SQL, mapSpendSummary, PLAY_DAILY_SQL, SPEND_SUMMARY_SQL } from '../adsStore'
 import { UPSELL_SIGNEDOUT_FIX_AT, type SpendSummary } from '../adsRules'
 import { etMidnightMs } from './instrumentation'
 import { excludeOwnClause } from '../ownExclusion'
@@ -94,6 +97,7 @@ export type FactId =
   | 'adsSpend'
   | 'adsCoverage'
   | 'adsLastSync'
+  | 'adsPlayDaily'
   | 'campaignDaily'
   | 'bskRangeDaily'
   | 'popupRangeDaily'
@@ -178,6 +182,7 @@ export type FactRows =
   | { kind: 'spend'; rows: SpendSummary[] }
   | { kind: 'coverage'; rows: CoverageRow[] }
   | { kind: 'lastSync'; rows: LastSyncRow[] }
+  | { kind: 'playDaily'; rows: PlayDayRow[] }
   /** A single aggregate (the first Best Sudoku hit, epoch ms), null when there is none. */
   | { kind: 'scalar'; value: number | null }
 
@@ -297,6 +302,7 @@ function kpiSameTimeColumn(todayEt: string, nowMs: number): { sql: string; binds
 
 const str = (x: unknown): string => (x == null ? '' : String(x))
 const num = (x: unknown): number => Number(x) || 0
+const nullableNum = (x: unknown): number | null => (x == null || x === '' || !Number.isFinite(Number(x)) ? null : Number(x))
 const pfOf = (r: Record<string, unknown>): boolean | null => (INSTALL_FIX === null ? false : num(r.pf) === 1)
 const noPf = (): null => null
 const beacon = (raw: Record<string, unknown>[], pf: (r: Record<string, unknown>) => boolean | null): FactRows => ({
@@ -710,6 +716,21 @@ export const FACTS: Record<FactId, FactDef> = {
     ttl: { seconds: 60 },
     build: () => ({ db: 'gss_stats_ads', sql: LAST_SYNC_SQL, binds: [] }),
     parse: (raw) => ({ kind: 'lastSync', rows: raw.map((r) => ({ campaignId: str(r.campaign_id), lastSync: r.last_sync == null ? null : str(r.last_sync) })) }),
+  },
+
+  adsPlayDaily: {
+    id: 'adsPlayDaily',
+    db: 'gss_stats_ads',
+    keyParams: [],
+    honors: [],
+    bucketMs: null,
+    splitAt: null,
+    ttl: { seconds: 300 },
+    build: () => ({ db: 'gss_stats_ads', sql: PLAY_DAILY_SQL, binds: [] }),
+    parse: (raw) => ({
+      kind: 'playDaily',
+      rows: raw.map((r) => ({ date: str(r.date), deviceInstalls: nullableNum(r.device_installs), userInstalls: nullableNum(r.user_installs), deviceUninstalls: nullableNum(r.device_uninstalls), activeDeviceInstalls: nullableNum(r.active_device_installs) })),
+    }),
   },
 
   adsSpendDaily: {

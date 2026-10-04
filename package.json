@@ -1,6 +1,6 @@
 {
   "name": "gss-stats",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "private": true,
   "type": "module",
   "description": "Private bot-free traffic dashboard for Good Stuff Software (RUM via Cloudflare GraphQL).",
@@ -17,6 +17,7 @@
     "ads:read-page": "tsx scripts/ads-reads/read-page.ts",
     "ads:backfill": "tsx scripts/ads-reads/backfill.ts",
     "ads:sync": "tsx scripts/ads-reads/sync.ts",
+    "ads:play-sync": "tsx scripts/ads-reads/play-sync.ts",
     "ads:worker-secrets": "tsx scripts/ads-reads/worker-secrets.ts",
     "ads:worker-deploy": "tsx scripts/ads-reads/worker-deploy.ts",
     "ads:worker-check": "wrangler deploy --dry-run -c workers/sync/wrangler.toml --outdir .wrangler/worker-check",
