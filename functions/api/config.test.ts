@@ -226,7 +226,7 @@ describe('the v13 → v14 upgrade (inline sparklines: a guard bump, no layout re
 describe('the v14 → v15 upgrade (default trend charts on dateEt)', () => {
   it('layout version 15 is the dateEt step (this code writes a newer one: see the captions block)', () => {
     expect(LAYOUT_VERSIONS.dateEtTrends).toBe(15)
-    expect(CONFIG_VERSION).toBeGreaterThanOrEqual(15)
+    expect(CONFIG_VERSION).toBeGreaterThanOrEqual(LAYOUT_VERSIONS.dateEtTrends)
   })
   it('the first v15 save over a stored v14 layout backs it up to backup:v14, once', async () => {
     const v14 = JSON.stringify(cfg(14, 'live v14 layout'))
