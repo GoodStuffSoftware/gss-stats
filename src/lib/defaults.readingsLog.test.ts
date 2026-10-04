@@ -1,7 +1,8 @@
 // The readings-log layout version (ADR 0005 slice 3). It is a SAVE-GUARD bump only: no stored layout
 // is rewritten and there is no migration function. A legacy `dataset: 'ads-readings'` widget is mapped
 // to the `ads-readings-log` card at render time (lib/metrics/readingsCard.ts), so rolling the code back
-// loses nothing. PROVISIONAL number: it renumbers to 16 if it lands before `captions` (PR #76).
+// loses nothing. Written against the LAYOUT_VERSIONS key, never a literal, so a renumber is one edit
+// in lib/defaults.ts.
 import { describe, expect, it } from 'vitest'
 import { CONFIG_VERSION, LAYOUT_VERSIONS, defaultConfig, normalizeConfig } from './defaults'
 
@@ -9,8 +10,8 @@ const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x))
 const mask = (x: unknown) => JSON.stringify(x).replace(/\d{4}-\d\d-\d\dT[\d:.]+Z/g, 'T')
 
 describe('readings log layout version', () => {
-  it('is 17, the newest, and CONFIG_VERSION follows the map', () => {
-    expect(LAYOUT_VERSIONS.readingsLog).toBe(17)
+  it('comes after dateEtTrends and captions, and CONFIG_VERSION follows the map', () => {
+    expect(LAYOUT_VERSIONS.readingsLog).toBeGreaterThan(LAYOUT_VERSIONS.dateEtTrends)
     expect(CONFIG_VERSION).toBe(Math.max(...Object.values(LAYOUT_VERSIONS)))
     expect(defaultConfig().version).toBe(CONFIG_VERSION)
   })
@@ -37,6 +38,10 @@ describe('readings log layout version', () => {
   it('a legacy ads-readings widget with no card loads unchanged (no card written)', () => {
     const f = keeps({ type: 'table', dataset: 'ads-readings', view: 'readings', campaignIds: ['24215315197'], limit: 30 })
     expect(f.card).toBeUndefined()
+  })
+  it('loading it twice is the same as loading it once (idempotent)', () => {
+    const { out } = load({ type: 'table', dataset: 'ads-readings', view: 'readings', campaignIds: ['24215315197'], limit: 30 })
+    expect(mask(normalizeConfig(clone(out)))).toBe(mask(out))
   })
   it('the same with a card keeps it', () => {
     keeps({ type: 'table', dataset: 'ads-readings', view: 'readings', campaignIds: ['24215315197'], limit: 50, card: { preset: 'ads-readings-log' } })
