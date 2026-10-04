@@ -50,7 +50,15 @@ function stored(): DashboardConfig {
     fit: 'content',
   } as unknown as Widget
   page.widgets.push(geo, full)
+  // Another page reuses the geo chart's id, as production pages do (`country`, `geo-map`, ...). A
+  // note widget never loads, so it never reports a response of its own.
+  const other = cfg.pages.find((p) => p.id !== page.id && !p.isDefault)!
+  other.widgets.push({ ...base, id: GEO_ID, i: GEO_ID, title: 'Same id, other page', type: 'note', note: 'Hi.' } as unknown as Widget)
   return cfg
+}
+const otherPageId = () => {
+  const cfg = stored()
+  return cfg.pages.find((p) => p.id !== cfg.activePageId && !p.isDefault)!.id
 }
 
 let wrapper: VueWrapper | null = null
@@ -134,5 +142,52 @@ describe('App: the editor gets the chart’s current response', () => {
     dash.vm.$emit('edit', widgets().find((w) => w.id === FULL_ID)!)
     await flushPromises()
     expect(wrapper!.findComponent(ChartEditor).props('error')).not.toBe('Failed to load')
+  })
+})
+
+describe('App: chart responses are kept per page (NIT-7)', () => {
+  type AppVm = { switchPage(id: string): void; deletePage(id: string): void; chartData: Record<string, unknown> }
+  const vm = () => wrapper!.vm as unknown as AppVm
+
+  it("an editor on another page never gets a same-id chart's response, and deleting a page drops its responses", async () => {
+    await load()
+    const dash = wrapper!.findComponent(Dashboard)
+    dash.vm.$emit('data', GEO_ID, null, 'Failed on the first page')
+    await flushPromises()
+
+    const other = otherPageId()
+    vm().switchPage(other)
+    await flushPromises()
+    const same = widgets().find((w) => w.id === GEO_ID)!
+    expect(same.type).toBe('note')
+    dash.vm.$emit('edit', same)
+    await flushPromises()
+    expect(wrapper!.findComponent(ChartEditor).props('error')).toBeNull()
+    expect(wrapper!.findComponent(ChartEditor).props('data')).toBeNull()
+    wrapper!.findComponent(ChartEditor).vm.$emit('cancel')
+    await flushPromises()
+
+    // A response reported on this page is this page's; deleting the page drops it, the first page's stays.
+    dash.vm.$emit('data', GEO_ID, null, 'Failed on the other page')
+    await flushPromises()
+    const pageOf = (key: string) => (JSON.parse(key) as string[])[0]
+    expect(Object.keys(vm().chartData).some((k) => pageOf(k) === other)).toBe(true)
+    vi.stubGlobal('confirm', () => true)
+    vm().deletePage(other)
+    await flushPromises()
+    expect(Object.keys(vm().chartData).some((k) => pageOf(k) === other)).toBe(false)
+    expect(Object.keys(vm().chartData).length).toBeGreaterThan(0)
+  })
+
+  it('duplicating a chart still works, and the editor still gets the edited chart’s own error', async () => {
+    await load()
+    const dash = wrapper!.findComponent(Dashboard)
+    dash.vm.$emit('data', GEO_ID, null, 'Failed to load')
+    dash.vm.$emit('duplicate', widgets().find((w) => w.id === GEO_ID)!)
+    await flushPromises()
+    expect(widgets().filter((w) => w.title.startsWith('Geo chart'))).toHaveLength(2)
+    dash.vm.$emit('edit', widgets().find((w) => w.id === GEO_ID)!)
+    await flushPromises()
+    expect(wrapper!.findComponent(ChartEditor).props('error')).toBe('Failed to load')
   })
 })
