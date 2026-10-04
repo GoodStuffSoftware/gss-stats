@@ -16,6 +16,7 @@ export const REFUSED_SAMPLE_PATHS: readonly string[] = [
   '/game/tutorial-complete/first-run',
   '/game/start/easy',
   '/tour/exit-at/1',
+  '/tour/exit-at',
   '/tour/skip',
   '/tour/skip/x',
 ]

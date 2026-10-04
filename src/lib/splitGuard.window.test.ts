@@ -28,7 +28,13 @@ const mid = (dateEt: string) => etWallTimeMs(dateEt, '00:00')
 describe('the switch', () => {
   it("ships 'nearest' (Mike's ruling), and the cache-key marker names the mode", () => {
     expect(REFUSED_WINDOW_SNAP).toBe('nearest')
-    expect(REFUSED_WINDOW_KEY).toBe(`refused-${REFUSED_WINDOW_SNAP}-et-days-v1`)
+    expect(REFUSED_WINDOW_KEY).toMatch(new RegExp(`^refused-${REFUSED_WINDOW_SNAP}-et-days-[0-9a-z]+$`))
+    // not the pre-list-hash marker, so an answer cached before the pattern list was folded in is never served
+    expect(REFUSED_WINDOW_KEY).not.toBe(`refused-${REFUSED_WINDOW_SNAP}-et-days-v1`)
+  })
+  it('refuses a tour exit with no stage as well as a staged one', () => {
+    for (const p of ['/tour/exit-at', '/tour/exit-at/hub', '/TOUR/EXIT-AT']) expect(isSplitRefusedPath(p), p).toBe(true)
+    for (const p of ['/tour/exit-atx', '/tour/exit', '/tour/start']) expect(isSplitRefusedPath(p), p).toBe(false)
   })
   it('has one refused sample path per refused pattern', () => {
     expect(REFUSED_SAMPLE_PATHS).toHaveLength(SPLIT_REFUSED_PATH_PATTERNS.length)

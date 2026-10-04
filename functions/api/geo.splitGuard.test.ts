@@ -69,6 +69,7 @@ const REFUSED = [
   '/game/start/daily/hard',
   '/tour/exit-at/3',
   '/tour/exit-at/skip',
+  '/tour/exit-at',
   '/tour/skip',
   '/tour/skip/later',
 ]
@@ -76,7 +77,7 @@ const REFUSED = [
 const ORDINARY = [
   '/', '/game', '/game/first-move', '/game/abandon/26-50', '/game/complete', '/game/completely-new',
   '/game/tutorial-complete', '/returns', '/return', '/game/start', '/game/started', '/tour/start',
-  '/tour/exit-at', '/tour/complete', '/tour/skipped', '/tour/skip-all', '/settings',
+  '/tour/complete', '/tour/skipped', '/tour/skip-all', '/settings',
   '/signin-prompt/placement', '/install/prompt/android',
 ]
 
@@ -112,6 +113,7 @@ describe('splitGuard module', () => {
       '/game/tutorial-complete/%',
       '/game/start/%',
       '/tour/exit-at/%',
+      '/tour/exit-at',
       '/tour/skip',
       '/tour/skip/%',
     ])
@@ -124,7 +126,8 @@ describe('splitGuard module', () => {
     expect(w).toEqual([
       "NOT (path LIKE '/return/%' OR path LIKE '/game/complete/%' OR " +
         "path LIKE '/game/complete-deferred/%' OR path LIKE '/game/tutorial-complete/%' OR " +
-        "path LIKE '/game/start/%' OR path LIKE '/tour/exit-at/%' OR path LIKE '/tour/skip' OR " +
+        "path LIKE '/game/start/%' OR path LIKE '/tour/exit-at/%' OR path LIKE '/tour/exit-at' OR " +
+        "path LIKE '/tour/skip' OR " +
         "path LIKE '/tour/skip/%')",
     ])
     expect(b).toEqual([])
