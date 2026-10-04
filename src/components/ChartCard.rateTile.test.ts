@@ -53,7 +53,7 @@ describe('ChartCard: a legacy rate tile', () => {
     expect(w.find('.mi-tile-num').text()).toBe('36.4%')
     expect(w.find('.mi-tile-sub').text()).toBe('(4/11)')
     expect(w.find('.mi-tile-label').text()).toBe('Upsell — tap rate (accept / shown)')
-    expect(w.find('.stat').exists()).toBe(false) // the old inline tile markup is gone
+    expect(w.find('.stat-tile.is-page').exists()).toBe(false) // the old inline tile markup is gone
     const sent = JSON.parse(String(fetchMock.mock.calls[0][1].body))
     expect(sent.requests[0]).toMatchObject({ ratio: 'popup.tapRate', params: { popup: 'upsell' }, window: 'page' })
     expect(sent.context).toMatchObject({ since: filters.since, until: filters.until })
@@ -114,7 +114,7 @@ describe('ChartCard: a legacy rate tile', () => {
     const w = mountCard({ ...rate(''), type: 'stat', dataset: undefined, dimension: '' })
     await settle()
     expect(fetchStatsMock).toHaveBeenCalled()
-    expect(w.find('.stat-num').text()).toBe('5')
+    expect(w.find('.stat-tile-num').text()).toBe('5')
     expect(w.find('.mi-tile').exists()).toBe(false)
   })
 })

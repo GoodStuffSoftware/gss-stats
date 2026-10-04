@@ -26,6 +26,17 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **Values in captions and notes roll over at midnight.** A page left open past midnight Eastern
   fetches the new day's values instead of keeping yesterday's.
 
+## [0.24.0] — 2026-10-03
+
+### Changed
+- **Stat tiles and bar tables are shared pieces** — the Stat and Table charts and the metric card's tile and bar now draw through the same components, with the same numbers, labels and empty states as before.
+- **"Rate" is no longer a chart type in the editor** — a new rate is a metric card; a saved rate tile still opens and edits as before.
+
+## [0.23.1] — 2026-10-03
+
+### Fixed
+- **Hide the pop-up note on a rate tile** — the chart editor now has a Show/Hide row for the install-fix note on the installed-rate tile, so it can be hidden as well as brought back.
+
 ## [0.23.0] — 2026-10-03
 
 ### Changed

@@ -39,7 +39,7 @@ import { onRequestPost as popupsPost } from '../../../functions/api/popups'
 import { insertHits, installCaches, memoryCache, openHitsDb, pagesContext, postJson, sqliteD1 } from '../../../functions/_lib/testing/hitsDb'
 import { bskFixture, FIXTURE_NOW } from '../../../functions/_lib/testing/bskFixture'
 import { BEST_SUDOKU_SITES } from '../../lib/bestSudokuSites'
-import { INSTALL_GAP_RATE_KEY, POPUP_RATE_SPECS } from '../../lib/popupEvents'
+import { INSTALL_GAP_RATE_KEY, POPUP_RATE_SPECS, SIGNIN_ELIGIBLE_CAVEAT } from '../../lib/popupEvents'
 import { rateTileCardRef } from '../../lib/metrics/rateTileCard'
 import { metricsContextFor } from '../../lib/metrics/pageContext'
 import { cardRefFor } from '../../lib/metrics/readingsCard'
@@ -174,7 +174,10 @@ describe('the rate tile card matches the retired rate tile, every key (all 22)',
     expect((await oldTile(INSTALL_GAP_RATE_KEY, WINDOW)).note).not.toBe('')
     expect((await newTile('upsell:tap', WINDOW)).notes).not.toContain(INSTALL_FIX_TEXT)
     // the eligibility caveat and the still-arriving note on a lagged outcome rate
-    expect((await newTile('signin-eligible:rate', WINDOW)).notes).not.toBe('')
+    // placement: the caveat is the tile's caption (.mi-tile-caption, under the figure), not elsewhere
+    const eligible = await newTile('signin-eligible:rate', WINDOW)
+    expect(eligible.notes).toContain(norm(SIGNIN_ELIGIBLE_CAVEAT))
+    expect((await newTile('upsell:tap', WINDOW)).notes).not.toContain(norm(SIGNIN_ELIGIBLE_CAVEAT))
     expect((await newTile('install:outcome:still-playing', WINDOW)).notes).toMatch(/still arriving/i)
   })
 })
