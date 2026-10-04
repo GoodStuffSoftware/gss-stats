@@ -22,6 +22,7 @@ import { computed, effectScope, onBeforeUnmount, onMounted, onScopeDispose, reac
 import { useMetrics, type MetricRequestSpec, type UseMetrics } from '../../composables/useMetrics'
 import { useReturnRefresh } from '../../composables/useReturnRefresh'
 import { hasNote, noteRawText } from '../../lib/notes'
+import { isNoteIdHideable } from '../../lib/chartNotes'
 import { resolveLabelTokens } from '../../lib/metrics/render'
 import { presetById } from '../../lib/metrics/presets'
 import { INVALID_CARD_PRESET } from '../../lib/metrics/validate'
@@ -47,6 +48,10 @@ const props = defineProps<{
   /** The widget's campaign selection (Widget.campaignIds): narrows a card-level campaign repeat
    * to those campaigns; none selected = the repeat as it is. */
   campaignIds?: string[]
+  /** The widget's hidden caveats (Widget.hiddenCaveats): spec caption ids listed here are not
+   * shown (decision D7: preset captions stay with the preset, and each card can hide them). A
+   * data-cut note (`hideable: false`) or an unknown id still shows, whatever the list says. */
+  hiddenCaptions?: string[]
 }>()
 const emit = defineEmits<{ 'open-campaigns': [] }>()
 
@@ -147,8 +152,11 @@ function onAdsRefreshed(r: RefreshResult) {
   if (r.refreshed) reload()
 }
 // Only the ids this build knows: an unknown one (a newer build's) stays stored but shows nothing,
-// so a card whose captions are all unknown gets no empty captions block.
-const captionIds = computed(() => (spec.value?.captions ?? []).filter((id) => hasNote(id)))
+// so a card whose captions are all unknown gets no empty captions block. A known id the widget
+// hides (its hiddenCaveats, passed as hiddenCaptions) is dropped too, unless it may not be hidden.
+const captionIds = computed(() =>
+  (spec.value?.captions ?? []).filter((id) => hasNote(id) && !(props.hiddenCaptions?.includes(id) && isNoteIdHideable(id))),
+)
 
 // Repeated instances with nothing to show (MetricCardInstance's `hidden`), by index; reset when
 // the instances are re-expanded (a new day, a new spec).

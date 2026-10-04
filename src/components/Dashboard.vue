@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { GridLayout, GridItem } from 'grid-layout-plus'
-import type { Widget, GlobalFilters } from '../types'
+import type { Widget, GlobalFilters, StatsResponse } from '../types'
 import { isTouchDevice } from '../lib/responsive'
 import { GRID_MARGIN, GRID_ROW_HEIGHT, fitRows, isFit } from '../lib/fit'
 import ChartCard from './ChartCard.vue'
@@ -27,6 +27,7 @@ const emit = defineEmits<{
   change: []
   drill: [{ widgetId: string; dimension: string; dataset: 'geo' | 'rum'; value: string; label: string; x: number; y: number }]
   'open-campaigns': []
+  data: [string, StatsResponse | null, string | null]
 }>()
 
 // On phones we stack cards via CSS (preserving the desktop layout data) and
@@ -106,6 +107,7 @@ function onFitHeight(item: Widget, px: number) {
           @drill="emit('drill', $event)"
           @fit-height="onFitHeight(item, $event)"
           @open-campaigns="emit('open-campaigns')"
+          @data="(d, e) => emit('data', item.id, d, e)"
         />
       </GridItem>
     </GridLayout>
