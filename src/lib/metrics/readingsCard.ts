@@ -1,3 +1,4 @@
+// (Pop-up rate tiles map the same way: see rateTileCard.ts.)
 // The render-time mapping of a legacy Ads readings widget onto the metric-card engine (ADR 0005,
 // decision 2). A saved widget with `dataset: 'ads-readings'` and no `card` is NOT rewritten on load:
 // its stored fields (dataset, view, campaignIds, limit, type) stay as they are, so a rollback to a
@@ -9,6 +10,7 @@ import type { CardRef, CardSpec } from './types'
 import type { Widget } from '../../types'
 import { ADS_READINGS_LOG, presetById } from './presets'
 import { DEFAULT_READINGS_LIMIT, MAX_READINGS_LIMIT } from './types'
+import { rateTileCardRef } from './rateTileCard'
 
 export const ADS_READINGS_LOG_PRESET = 'ads-readings-log'
 
@@ -19,11 +21,13 @@ export function legacyReadingsLimit(widget: Pick<Widget, 'limit'>): number {
   return Number.isFinite(n) && n >= 1 ? Math.min(Math.floor(n), MAX_READINGS_LIMIT) : DEFAULT_READINGS_LIMIT
 }
 
-/** The card a widget draws: its own `card`, or for an ads-readings widget without one the preset
- * (a clone, with the widget's limit set on the readings table); null for every other widget.
+/** The card a widget draws: its own `card`; for an ads-readings widget without one the preset
+ * (a clone, with the widget's limit set on the readings table); for a legacy pop-up rate tile
+ * (`type: 'rate'`) its one-item rate card (rateTileCard.ts); null for every other widget.
  * Never writes to the widget or to the preset. */
 export function cardRefFor(widget: Widget): CardRef | null {
   if (widget.card) return widget.card
+  if (widget.type === 'rate') return rateTileCardRef(widget)
   if (widget.dataset !== 'ads-readings') return null
   const limit = legacyReadingsLimit(widget)
   if (limit === DEFAULT_READINGS_LIMIT) return { preset: ADS_READINGS_LOG_PRESET }

@@ -254,7 +254,7 @@ function insertFromLibrary(t: TextTarget, e: Event) {
 // gets it appended. Each option shows what it reads right now, from the response already loaded
 // (no fetch). A token that would not fit whole under CAPTION_MAX_CHARS is not inserted, and the
 // box says the caption is full. A widget that renders its own body (a metric card, overview,
-// campaigns, ads-readings: lib/charts.ts rendersOwnBody, the test ChartCard skips its fetch on)
+// campaigns, ads-readings, a pop-up rate tile, a note: lib/charts.ts rendersOwnBody, the test ChartCard skips its fetch on)
 // loads no response a chart value could read, so it gets the Dates group only (review N2, NIT-1).
 const VALUE_GROUPS = ['This chart', 'Dates'] as const
 const valueOptions = computed(() => {

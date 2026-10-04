@@ -184,6 +184,10 @@ export interface MetricItem {
    * 'inline' (default) as a line under the value; 'compact' behind a small notes toggle next
    * to the label, collapsed by default, so the card keeps its compact look. */
   captionMode?: 'inline' | 'compact'
+  /** Registry note ids from the value's own notes (not the item's `caption`) this item never shows.
+   * Set at render time by a mapping that must honour a stored hide (rateTileCard.ts: the legacy
+   * `popup-note`); a saved card's author has no use for it. */
+  hideNotes?: string[]
   frame?: 'row' | 'pill' | 'tile' | 'column' // overrides the section layout for this item
   repeat?: RepeatSpec // expands in place, e.g. one tile per flighting campaign
 }

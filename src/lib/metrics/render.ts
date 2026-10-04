@@ -284,7 +284,7 @@ function valueCaptionTokens(item: MetricItem, value: MetricValue, scope: ScopeIn
   // A 'status' display already shows its note as the value: never again as a caption.
   const shown = item.display.as === 'status' ? statusNoteOf(value) : null
   for (const id of value.noteIds ?? []) {
-    if (!hasNote(id) || id === shown) continue
+    if (!hasNote(id) || id === shown || item.hideNotes?.includes(id)) continue
     const vars = id === 'counted-from' && value.measuredFrom != null ? { from: etDateFromMs(value.measuredFrom) } : undefined
     groups.push(noteTokens(id, vars))
   }
