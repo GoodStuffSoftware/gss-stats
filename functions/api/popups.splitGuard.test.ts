@@ -12,7 +12,9 @@ describe('/api/popups and the split guard', () => {
     const ts = Date.parse('2026-10-01T15:00:00Z')
     insertHits(db, [
       { ts, site: 'bestsudoku-web', path: '/signin-prompt/placement', n: 3 },
-      ...['/return/x/d0', '/game/complete/normal/easy', '/game/start/easy', '/tour/exit-at/2', '/game/tutorial-complete/first-run'].map((path) => ({ ts, site: 'bestsudoku-web', path, n: 2 })),
+      ...['/return/x/d0', '/game/complete/normal/easy', '/game/start/easy', '/tour/skip', '/tour/exit-at/2', '/game/tutorial-complete/first-run'].map((path) => ({ ts, site: 'bestsudoku-web', path, n: 2 })),
+      // Not in the rule: the query still reads them (the `/tour` event prefix), nothing here counts them.
+      ...['/tour/start', '/tour/complete'].map((path) => ({ ts, site: 'bestsudoku-web', path, n: 2 })),
     ])
     const d1 = sqliteD1(db)
     const seen: { sql: string; binds: unknown[] }[] = []
@@ -24,7 +26,12 @@ describe('/api/popups and the split guard', () => {
     // Literals, like the pop-up include clause's own prefixes: no pattern is a bind.
     expect(seen[0].sql).toContain(`NOT (${SPLIT_REFUSED_PATH_PATTERNS.map((p) => `path LIKE '${p}'`).join(' OR ')})`)
     for (const p of SPLIT_REFUSED_PATH_PATTERNS) expect(seen[0].binds).not.toContain(p)
+    // Every `?` is a bind, and the statement stays far under D1's 100-parameter cap.
+    expect(seen[0].sql.match(/\?/g)?.length ?? 0).toBe(seen[0].binds.length)
+    expect(seen[0].binds.length).toBeLessThan(100)
     const rows = db.prepare(seen[0].sql).all(...(seen[0].binds as (string | number)[])) as { path: string }[]
-    expect([...new Set(rows.map((r) => r.path))]).toEqual(['/signin-prompt/placement'])
+    // Only the tour-skip row (and the rest of the rule's list) is gone; /tour/start and
+    // /tour/complete are outside the rule, so the query still returns them.
+    expect([...new Set(rows.map((r) => r.path))].sort()).toEqual(['/signin-prompt/placement', '/tour/complete', '/tour/start'])
   })
 })

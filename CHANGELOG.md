@@ -12,6 +12,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **Restore default charts works on every template page.** A page made from a template now restores that template’s own charts instead of the generic set.
 - **The Retention filter bar is trimmed.** It shows only the date range, with a short note when site or exclusion filters from other pages still apply.
 
+## [0.25.3] — 2026-10-03
+
+### Fixed
+- **Tour skips and tour exits are counts only.** Hour, place and device charts (and the map) now leave out tour-skip rows, and a tour exit with no stage, as they already did for game starts and staged tour exits, while skips still count per day, per web or app site and in the morning read.
+
 ## [0.25.2] — 2026-10-03
 
 ### Fixed
@@ -224,7 +229,6 @@ All notable changes to **gss-stats** are documented here. The format follows
   skips by stage (the same rows as tour skip, split by where), game starts by difficulty and
   tutorial completions (first run vs replay) as plain counts, "not yet tracked" until the
   first v1.97.0 row.
-
 ## [0.14.3] — 2026-10-03
 
 ### Changed

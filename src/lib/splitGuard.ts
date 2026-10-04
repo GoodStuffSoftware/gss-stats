@@ -95,12 +95,14 @@ export const SPLIT_REFUSED_DIMS: ReadonlySet<string> = new Set([
 ])
 
 /** SQL LIKE patterns for the rows the rule protects: on-device return-curve beacons, game
- * completions (live and the legacy deferred path), counted game starts, tour exit steps, and
- * tutorial completions (`first-run` / `replay` is something the device remembers about itself,
- * like the return day buckets). Each anchors on a full path segment with its trailing slash, so
- * `/game`, `/game/first-move`, `/tour/start` and other page views never match. No pattern
- * contains `_`, the other LIKE wildcard. SQLite's LIKE ignores ASCII case, so an off-vocabulary
- * `/RETURN/...` row is refused too: that errs toward refusing, never toward splitting.
+ * completions (live and the legacy deferred path), counted game starts, tour skips and tour exit
+ * steps, and tutorial completions (`first-run` / `replay` is something the device remembers about
+ * itself, like the return day buckets). A pattern ending in `%` anchors on a full path segment
+ * with its trailing slash, so `/game`, `/game/first-move`, `/tour/start` and other page views
+ * never match; a pattern with no wildcard (`/tour/skip`) matches that one path exactly, because
+ * the beacon has no segment after it. No pattern contains `_`, the other LIKE wildcard. SQLite's
+ * LIKE ignores ASCII case, so an off-vocabulary `/RETURN/...` row is refused too: that errs
+ * toward refusing, never toward splitting.
  * They are compile-time constants, never request input, so refusedPathMatch inlines them as SQL
  * literals (through sqlLit) instead of binding them. */
 export const SPLIT_REFUSED_PATH_PATTERNS: readonly string[] = [
@@ -108,18 +110,25 @@ export const SPLIT_REFUSED_PATH_PATTERNS: readonly string[] = [
   '/game/complete/%',
   '/game/complete-deferred/%',
   '/game/tutorial-complete/%',
-  // Best Sudoku 1.97.0 count-only beacons (R-1b): a counted game start and the tour step a
-  // first run was left at. Only `/tour/exit-at/...` is refused; the other `/tour/...` rows stay
-  // splittable.
+  // Best Sudoku 1.97.0 count-only beacons (R-1b): a counted game start, the tour step a first
+  // run was left at (`/tour/exit-at` bare, with no stage, too), and the tour skip itself (the exact path `/tour/skip`; `/tour/skip/%` is the
+  // same family should it ever carry a suffix). The other `/tour/...` rows (`/tour/start`,
+  // `/tour/complete`) stay splittable: they are not in the rule.
   '/game/start/%',
   '/tour/exit-at/%',
+  '/tour/exit-at',
+  '/tour/skip',
+  '/tour/skip/%',
 ]
 
 /** The JS reading of SPLIT_REFUSED_PATH_PATTERNS, matching SQLite LIKE exactly (ASCII case
- * folded, prefix match), so a JS-side classifier can never disagree with the SQL guard. */
+ * folded; a pattern ending in `%` is a prefix match, any other pattern is an exact match), so a
+ * JS-side classifier can never disagree with the SQL guard. */
 export function isSplitRefusedPath(path: string): boolean {
   const p = path.replace(/[A-Z]/g, (c) => c.toLowerCase())
-  return SPLIT_REFUSED_PATH_PATTERNS.some((pat) => p.startsWith(pat.slice(0, -1)))
+  return SPLIT_REFUSED_PATH_PATTERNS.some((pat) =>
+    pat.endsWith('%') ? p.startsWith(pat.slice(0, -1)) : p === pat,
+  )
 }
 
 /** Changes whenever the pattern list does — part of a guarded query's cache key, so a cached
@@ -129,8 +138,8 @@ export const SPLIT_GUARD_KEY = SPLIT_REFUSED_PATH_PATTERNS.join('|')
 /** The caption a chart shows when /api/geo answered with `meta.splitGuard: true`
  * (components/ChartCard.vue), so a smaller total never reads as missing data. */
 export const SPLIT_GUARD_CAPTION =
-  'Counts only: this split leaves out return, game start, completion, tutorial-completion and ' +
-  'tour-exit rows, which are never shown by hour, place or device.'
+  'Counts only: this split leaves out return, game start, completion, tutorial-completion, ' +
+  'tour-skip and tour-exit rows, which are never shown by hour, place or device.'
 
 /** True when grouping, mapping or drilling by any of `fields` would split refused rows. */
 export function splitRefused(opts: { points: boolean; fields: readonly string[] }): boolean {
@@ -140,7 +149,7 @@ export function splitRefused(opts: { points: boolean; fields: readonly string[] 
 /** `(path LIKE '/return/%' OR ...)`, true for a refused row: for a WHERE clause or a CASE in a
  * SELECT list. The patterns are inlined as SQL literals through sqlLit, the same precedent as
  * lib/popupEvents.ts popupExcludeClause (the 2026-09-27 bind-ceiling fix): they are this module's
- * own constants, never request input, and binding them would spend six of D1's 100 bound
+ * own constants, never request input, and binding them would spend eight of D1's 100 bound
  * parameters on every guarded query. `binds` is always empty; it stays in the return type so the
  * callers need not change if a pattern ever has to travel as a value. */
 export function refusedPathMatch(): { sql: string; binds: string[] } {
@@ -163,21 +172,29 @@ export type RefusedSnap = 'nearest' | 'outward' | 'inward'
 /** THE switch. 'nearest' is Mike's ruling (2026-10-03); the other two modes stay buildable. */
 export const REFUSED_WINDOW_SNAP: RefusedSnap = 'nearest'
 
+/** A short FNV-1a hash of the refused pattern list, so a marker that carries it changes whenever
+ * the list does. */
+const hashOf = (text: string): string => {
+  let h = 0x811c9dc5
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193)
+  return (h >>> 0).toString(36)
+}
+
 /** Part of a snapped query's cache key (only when the window actually moved), so changing the
- * mode never serves an answer cached under another one. */
-export const REFUSED_WINDOW_KEY = `refused-${REFUSED_WINDOW_SNAP}-et-days-v1`
+ * mode or the refused pattern list never serves an answer cached under another one. */
+export const REFUSED_WINDOW_KEY = `refused-${REFUSED_WINDOW_SNAP}-et-days-${hashOf(SPLIT_GUARD_KEY)}`
 
 /** The caption a chart shows when its query answered with `meta.refusedWholeDays: true`
  * (components/ChartCard.vue), worded to fit every snap mode. It names every refused kind and
  * says "any", since most charts leave the event kinds out unless event beacons are included. */
 export const REFUSED_WHOLE_DAYS_CAPTION =
-  'Any return, game-start, completion, tutorial-completion or tour-exit rows here are counted ' +
+  'Any return, game-start, completion, tutorial-completion, tour-skip or tour-exit rows here are counted ' +
   'over whole ET days.'
 
 /** A path each refused pattern matches, so the pattern can be classified with the JS path helpers
  * (isPopupEventPath, pathFamilyOf). Every row a pattern matches gets the same answer from both:
  * each pattern sits wholly inside one POPUP_EVENT_PREFIXES entry. */
-const refusedSamplePath = (pattern: string): string => `${pattern.slice(0, -1)}x`
+const refusedSamplePath = (pattern: string): string => (pattern.endsWith('%') ? `${pattern.slice(0, -1)}x` : pattern)
 
 /** The SPLIT_REFUSED_PATH_PATTERNS a geo query whose window snapped can still count a row of, so
  * `meta.refusedWholeDays` (the caption) is set only when one can (review of #63, SHOULD-3). A
@@ -200,7 +217,10 @@ export function reachableRefusedPatterns(opts: {
     if (opts.eventRowsExcluded && isPopupEventPath(sample)) return false
     const prefix = pattern.slice(0, -1)
     return opts.constraints.every((c) => {
-      if (c.field === 'path') return c.value.replace(/[A-Z]/g, (ch) => ch.toLowerCase()).startsWith(prefix)
+      if (c.field === 'path') {
+        const v = c.value.replace(/[A-Z]/g, (ch) => ch.toLowerCase())
+        return pattern.endsWith('%') ? v.startsWith(prefix) : v === pattern
+      }
       if (c.field === 'pathFamily') return pathFamilyOf(sample) === c.value
       return true
     })

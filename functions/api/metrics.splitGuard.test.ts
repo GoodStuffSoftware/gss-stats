@@ -1,6 +1,6 @@
 // The counts-only split guard on the metrics side (R-1b, src/lib/splitGuard.ts): through the
 // real POST /api/metrics handler over one node:sqlite `hits` fixture, a row the rule protects
-// (a return, a game start or completion) has no country bucket, so a country cell never counts
+// (a return, a game start or completion, a tour skip) has no country bucket, so a country cell never counts
 // it, while an unfiltered count still does; completions take no country param at all; and the
 // new/returning `visitor` bit stays on a refused row, because campaign.taggedArrivals reads it
 // there (an arrival that came in on a /return/<uc>/d0 row is still an arrival).
@@ -28,6 +28,10 @@ beforeAll(() => {
     { ...TAG, ts: at('2026-09-03T15:10:00Z'), path: '/game/complete/classic/easy', visitor: 'returning', country: 'US', n: 4 },
     { ...TAG, ts: at('2026-09-03T15:11:00Z'), path: '/GAME/COMPLETE/classic/hard', visitor: 'new', country: 'CA', n: 2 },
     { ...TAG, ts: at('2026-09-03T15:12:00Z'), path: '/game/start/easy', visitor: 'new', country: 'CA', n: 6 },
+    { ...TAG, ts: at('2026-09-03T15:13:00Z'), path: '/tour/skip', visitor: 'new', country: 'US', n: 2 },
+    { ...TAG, ts: at('2026-09-03T15:13:30Z'), path: '/TOUR/SKIP', visitor: 'returning', country: 'CA', n: 1 },
+    // Not in the rule: the other tour beacons keep their country bucket.
+    { ...TAG, ts: at('2026-09-03T15:14:00Z'), path: '/tour/start', visitor: 'returning', country: 'US', n: 3 },
   ])
 })
 beforeEach(() => {
@@ -53,10 +57,14 @@ describe('campaignPathVisitor: refused rows have no country bucket', () => {
     // The patterns are SQL literals (lib/splitGuard.ts refusedPathMatch), never binds.
     for (const p of SPLIT_REFUSED_PATH_PATTERNS) expect(stmt.sql).toContain(`path LIKE '${p}'`)
     for (const p of SPLIT_REFUSED_PATH_PATTERNS) expect(stmt.binds).not.toContain(p)
+    // The guard costs no bound parameter: every `?` is a real bind, well under D1's 100.
+    expect(stmt.sql.match(/\?/g)?.length ?? 0).toBe(stmt.binds.length)
+    expect(stmt.binds.length).toBeLessThan(100)
     const rows = db.prepare(stmt.sql).all(...(stmt.binds as (string | number)[])) as { path: string; visitor: string; cb: string; c: number }[]
     const cbOf = (path: string) => [...new Set(rows.filter((r) => r.path === path).map((r) => r.cb))]
     expect(cbOf('/game')).toEqual(expect.arrayContaining(['US', 'CA']))
-    for (const p of ['/return/sudoku_tired_of_ads/d0', '/game/complete/classic/easy', '/GAME/COMPLETE/classic/hard', '/game/start/easy']) expect(cbOf(p), p).toEqual([''])
+    for (const p of ['/return/sudoku_tired_of_ads/d0', '/game/complete/classic/easy', '/GAME/COMPLETE/classic/hard', '/game/start/easy', '/tour/skip', '/TOUR/SKIP']) expect(cbOf(p), p).toEqual([''])
+    expect(cbOf('/tour/start')).toEqual(['US'])
     // `visitor` is kept on a refused row (the arrivals ruling).
     expect(rows.find((r) => r.path === '/return/sudoku_tired_of_ads/d0')?.visitor).toBe('new')
   })
@@ -73,13 +81,14 @@ describe('/api/metrics over the guarded fact', () => {
       { key: 'hits_us', metric: 'campaign.taggedHits', params: { ...p, country: 'US' } },
       { key: 'hits_other', metric: 'campaign.taggedHits', params: { ...p, country: 'other' } },
     ])
-    // Arrivals: 5 (/game) + 3 (d0 return) + 2 (completion) + 6 (start) — visitor='new' on any path.
-    expect(r.arrivals.value).toBe(16)
+    // Arrivals: 5 (/game) + 3 (d0 return) + 2 (completion) + 6 (start) + 2 (tour skip) — visitor='new' on any path.
+    expect(r.arrivals.value).toBe(18)
     // By country: only the non-refused /game rows have a bucket.
     expect(r.arrivals_us.value).toBe(5)
     expect(r.arrivals_ca.value).toBe(0)
-    expect(r.hits.value).toBe(27)
-    expect(r.hits_us.value).toBe(5)
+    // Totals still count the skips: 27 + 3 (tour skips) + 3 (/tour/start).
+    expect(r.hits.value).toBe(33)
+    expect(r.hits_us.value).toBe(8) // 5 (/game) + 3 (/tour/start); a tour skip has no bucket
     expect(r.hits_other.value).toBe(0) // a refused row is never folded into 'other' either
   })
 

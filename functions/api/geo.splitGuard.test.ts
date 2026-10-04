@@ -2,7 +2,7 @@
 // on a REAL SQLite engine (node:sqlite, the dialect D1 speaks), the same way
 // geo.derivedDims.test.ts runs it. Each trigger (points mode, a refused single dim, a refused
 // ring dim, a drill on a refused field) must drop return / game-start / completion / tutorial-
-// completion / tour-exit rows and nothing else; a query with no trigger must count exactly what it counted before.
+// completion / tour-skip / tour-exit rows and nothing else; a query with no trigger must count exactly what it counted before.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import { onRequestPost, GEO_DIMS } from './geo'
@@ -69,12 +69,15 @@ const REFUSED = [
   '/game/start/daily/hard',
   '/tour/exit-at/3',
   '/tour/exit-at/skip',
+  '/tour/exit-at',
+  '/tour/skip',
+  '/tour/skip/later',
 ]
 // Ordinary rows that share a prefix or neighbour the refused ones — none may be dropped.
 const ORDINARY = [
   '/', '/game', '/game/first-move', '/game/abandon/26-50', '/game/complete', '/game/completely-new',
   '/game/tutorial-complete', '/returns', '/return', '/game/start', '/game/started', '/tour/start',
-  '/tour/exit-at', '/tour/complete', '/settings',
+  '/tour/complete', '/tour/skipped', '/tour/skip-all', '/settings',
   '/signin-prompt/placement', '/install/prompt/android',
 ]
 
@@ -102,7 +105,7 @@ describe('splitGuard module', () => {
     }
   })
 
-  it('names the six refused path families', () => {
+  it('names the refused path families', () => {
     expect(SPLIT_REFUSED_PATH_PATTERNS).toEqual([
       '/return/%',
       '/game/complete/%',
@@ -110,6 +113,9 @@ describe('splitGuard module', () => {
       '/game/tutorial-complete/%',
       '/game/start/%',
       '/tour/exit-at/%',
+      '/tour/exit-at',
+      '/tour/skip',
+      '/tour/skip/%',
     ])
   })
 
@@ -120,7 +126,9 @@ describe('splitGuard module', () => {
     expect(w).toEqual([
       "NOT (path LIKE '/return/%' OR path LIKE '/game/complete/%' OR " +
         "path LIKE '/game/complete-deferred/%' OR path LIKE '/game/tutorial-complete/%' OR " +
-        "path LIKE '/game/start/%' OR path LIKE '/tour/exit-at/%')",
+        "path LIKE '/game/start/%' OR path LIKE '/tour/exit-at/%' OR path LIKE '/tour/exit-at' OR " +
+        "path LIKE '/tour/skip' OR " +
+        "path LIKE '/tour/skip/%')",
     ])
     expect(b).toEqual([])
   })
@@ -142,7 +150,7 @@ describe('splitGuard module', () => {
   })
 
   it('isSplitRefusedPath agrees with the SQL LIKE row for row, case folding included', () => {
-    const paths = [...REFUSED, ...ORDINARY, '/RETURN/x/d0', '/Game/Complete/normal/easy', '/game/tutorial-complete/', '/game/tutorial-completex', '/GAME/START/x', '/Tour/Exit-At/2', '/tour/exit-atx']
+    const paths = [...REFUSED, ...ORDINARY, '/RETURN/x/d0', '/Game/Complete/normal/easy', '/game/tutorial-complete/', '/game/tutorial-completex', '/GAME/START/x', '/Tour/Exit-At/2', '/tour/exit-atx', '/TOUR/SKIP', '/Tour/Skip/x', '/tour/skip/', '/tour/skipx', '/tour/skip ']
     const ins = db.prepare('INSERT INTO hits (ts, path) VALUES (?, ?)')
     paths.forEach((p, i) => ins.run(i, p))
     const w: string[] = []
@@ -216,10 +224,9 @@ describe('onRequestPost applies the guard on every trigger, in every branch', ()
 
   it('non-refused rows count the same with and without the guard (default event-beacon setting)', async () => {
     // Default: event beacons excluded, so the rows on the event list are already out of a
-    // page-view chart. Whether any refused row is NOT on that list (and so still reaches the
-    // unguarded path chart) depends on the list: game starts were off it until the first-run
-    // counters change. Either way the guard removes only refused rows, so the region total is
-    // the path total minus whatever refused rows the path chart still shows (possibly none).
+    // page-view chart. Every refused path is on that list today, but the guard must not depend
+    // on it: it removes only refused rows, so the region total is the path total minus whatever
+    // refused rows the path chart still shows (possibly none).
     const region = await post({ dimension: 'region', limit: 100, ...range })
     const path = await post({ dimension: 'path', limit: 100, ...range })
     expect(guardedSql(region.calls[0].sql)).toBe(true)
@@ -258,6 +265,82 @@ describe('onRequestPost applies the guard on every trigger, in every branch', ()
     expect(guardedSql(byEtDay.calls[0].sql)).toBe(false)
     expect(byEtDay.body.meta.splitGuard).toBeUndefined()
     expect(sum(byEtDay.body.rows)).toBe(N_REFUSED + N_ORDINARY)
+  })
+
+  it('tour skips (/tour/skip) are refused by every hour, place and device split', async () => {
+    // Seeded: 2 rows each of '/tour/skip' and '/tour/skip/later' (both in REFUSED) plus the
+    // '/tour/skipped' and '/tour/skip-all' look-alikes (ORDINARY, kept).
+    const skipRows = (rows: any[]) => rows.filter((r: any) => /^\/tour\/skip(\/|$)/i.test(String(r.key?.path ?? '')))
+    for (const dimension of ['hourEt', 'date', 'country', 'region', 'city', 'device', 'browser', 'os', 'screenwBucket']) {
+      const { body, calls } = await post({ dimension, includeEventBeacons: true, limit: 100, ...range })
+      expect(guardedSql(calls[0].sql), dimension).toBe(true)
+      expect(calls[0].sql, dimension).toContain("path LIKE '/tour/skip'")
+      expect(body.totals.pageviews, dimension).toBe(N_ORDINARY)
+    }
+    // A path chart drilled by place: the skip rows are out of the paths it lists.
+    const drilled = await post({ dimension: 'path', constraints: [{ field: 'country', value: 'US' }], includeEventBeacons: true, limit: 100, ...range })
+    expect(skipRows(drilled.body.rows)).toEqual([])
+    expect(drilled.body.rows.map((r: any) => r.key.path)).toContain('/tour/skipped')
+    // The map (points mode) carries no tour-skip row either.
+    const points = await post({ dimension: 'points', includeEventBeacons: true, limit: 100, ...range })
+    expect(sum(points.body.rows)).toBe(N_ORDINARY)
+  })
+
+  it('tour skips still count as totals: per ET day, per web/app site, and by path', async () => {
+    // Add skips on the app site too, so the web/app total is a real two-sided one.
+    const ins = db.prepare('INSERT INTO hits (ts, site, path, country, device, visitor) VALUES (?, ?, ?, ?, ?, ?)')
+    for (let i = 0; i < 3; i++) ins.run(T + 10 + i, 'bestsudoku-app', '/tour/skip', 'CA', 'tablet', 'new')
+    const skipsOf = (rows: any[], pick: (r: any) => unknown, want: unknown) =>
+      sum(rows.filter((r: any) => pick(r) === want))
+
+    const bySite = await post({ dimension: 'path', dims: ['path', 'site'], includeEventBeacons: true, limit: 200, ...range })
+    expect(guardedSql(bySite.calls[0].sql)).toBe(false)
+    const siteSkips = bySite.body.rows.filter((r: any) => r.key.path === '/tour/skip')
+    expect(skipsOf(siteSkips, (r) => r.key.site, 'bestsudoku-web')).toBe(2)
+    expect(skipsOf(siteSkips, (r) => r.key.site, 'bestsudoku-app')).toBe(3)
+
+    // A per-ET-day chart drilled to the one path (a date dimension never joins a ring).
+    const byDay = await post({ dimension: 'dateEt', constraints: [{ field: 'path', value: '/tour/skip' }], includeEventBeacons: true, limit: 200, ...range })
+    expect(guardedSql(byDay.calls[0].sql)).toBe(false)
+    expect(sum(byDay.body.rows)).toBe(5)
+
+    const byPath = await post({ dimension: 'path', includeEventBeacons: true, limit: 200, ...range })
+    expect(guardedSql(byPath.calls[0].sql)).toBe(false)
+    expect(sum(byPath.body.rows.filter((r: any) => r.key.path === '/tour/skip'))).toBe(5)
+    expect(byPath.body.totals.pageviews).toBe(N_REFUSED + N_ORDINARY + 3)
+
+    // The same rows through a refused split: gone, web and app alike.
+    const byDevice = await post({ dimension: 'device', includeEventBeacons: true, limit: 200, ...range })
+    expect(guardedSql(byDevice.calls[0].sql)).toBe(true)
+    expect(byDevice.body.totals.pageviews).toBe(N_ORDINARY)
+  })
+
+  it('the guard binds nothing: a maxed-out guarded request binds exactly what its unguarded twin does, under the 100-bind cap', async () => {
+    // 50 sites + 16 path filters + both hides is the heaviest input the handler accepts (the
+    // 81 / 91 / 96 / 97 pins in geo.derivedDims.test.ts are the same shapes). The refused ring
+    // dim `device` is a trigger; `campaign` is not, so the pair differs only by the guard.
+    const maxed = {
+      sites: Array.from({ length: 50 }, (_, i) => `s${i}`),
+      constraints: Array.from({ length: 16 }, (_, i) => ({ field: 'path', value: `/p${i}` })),
+      excludeOwnVisits: true,
+      ownBrowser: 'Opera',
+      ownOS: 'Windows',
+      excludeKnownTraffic: true,
+      includeEventBeacons: true,
+      limit: 100,
+      ...range,
+    }
+    const guarded = await post({ ...maxed, dimension: 'referrer', dims: ['referrer', 'device'] })
+    const plain = await post({ ...maxed, dimension: 'referrer', dims: ['referrer', 'campaign'] })
+    expect(guarded.body.error).toBeUndefined()
+    expect(plain.body.error).toBeUndefined()
+    expect(guardedSql(guarded.calls[0].sql)).toBe(true)
+    expect(guardedSql(plain.calls[0].sql)).toBe(false)
+    expect(guarded.calls[0].binds.length).toBe(plain.calls[0].binds.length)
+    expect(guarded.calls[0].binds.length).toBeLessThan(100)
+    // Every placeholder in the guarded statement is one of its binds: no pattern hides in a `?`.
+    expect(guarded.calls[0].sql.match(/\?/g)?.length ?? 0).toBe(guarded.calls[0].binds.length)
+    for (const p of SPLIT_REFUSED_PATH_PATTERNS) expect(guarded.calls[0].binds).not.toContain(p)
   })
 
   it('a guarded query gets its own cache key; patterns travel as SQL literals, not binds', async () => {
