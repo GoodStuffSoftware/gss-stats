@@ -148,9 +148,12 @@ describe('the 3 x 1 h probe: consecutive hour windows never read back per-hour r
     for (const [since, until] of HOURS) got.push(await metrics(since, until))
     expect(got.map((r) => r.completions.value)).toEqual([0, COMPLETE_DAY, 0])
     expect(got.map((r) => r.game_views.value)).toEqual(PER_HOUR.map((h) => h.game))
+    // Page views leaves every refused row out, so it reads each hour exactly: the refused rows of
+    // the hour (start, return, tour exit) add nothing, and its total never carries a whole-day snap.
+    expect(got.map((r) => r.pageviews.value)).toEqual(PER_HOUR.map((h) => h.game))
     for (const r of got) {
       expect(r.completions.noteIds).toContain('refused-whole-days')
-      expect(r.pageviews.noteIds).toContain('refused-whole-days') // counts /game/start/ rows
+      expect(r.pageviews.noteIds ?? []).not.toContain('refused-whole-days') // counts no refused row (0.27.3)
       expect(r.game_views.noteIds ?? []).not.toContain('refused-whole-days') // can't count a refused row
     }
   })
@@ -160,7 +163,6 @@ describe('the 3 x 1 h probe: consecutive hour windows never read back per-hour r
 // old one-sample-per-pattern check left it off tutorial replays, the three tour-exit steps and
 // d1+ returns, all of which count refused rows; this list is the whole answer for today's registry.
 const REFUSED_NOTE_METRICS = [
-  'bsk.pageviews', // !isEventPath: counts /game/start/ rows
   'bsk.taggedArrivals', // no path test: any first-ever beacon, refused ones included
   'bsk.completions',
   'bsk.carryOverCompletions', // the same completion rows, minus campaign-tagged ones
