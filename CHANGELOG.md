@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.25.0] — 2026-10-04
+
 ### Added
 - **Captions and notes can show catalog numbers.** Insert value has a Metrics group (for example Page
   views over the page range); every widget on a page shares one request, a value that is loading,
