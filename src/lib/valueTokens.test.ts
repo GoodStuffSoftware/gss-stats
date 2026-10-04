@@ -181,6 +181,8 @@ describe('chartValues', () => {
       expect(daysOf(dayDrillRange('date', '2026-09-05'))).toEqual(['2026-09-05', '2026-09-05'])
       // the server may echo the bounds without milliseconds; the instants are what count
       expect(daysOf({ since: '2026-09-01T00:00:00Z', until: '2026-09-30T23:59:59.999Z' })).toEqual(['2026-09-01', '2026-09-30'])
+      // bare days: the server reads a bare `until` as the whole UTC day
+      expect(daysOf({ since: '2026-09-01', until: '2026-09-30' })).toEqual(['2026-09-01', '2026-09-30'])
     })
 
     it('an ET-day drill names one day, on both DST change days too', () => {
