@@ -18,7 +18,7 @@ import {
   BAR_MODES,
 } from '../lib/catalog'
 import { ringDims, RING_SOFT_CAP, isDateDim } from '../lib/rings'
-import { BEST_SUDOKU_SITES, CAPTION_MAX_CHARS, HIDDEN_CAVEAT_ID_RE, syncCardWithView } from '../lib/defaults'
+import { BEST_SUDOKU_SITES, CAPTION_MAX_CHARS, HIDDEN_CAVEATS_MAX, HIDDEN_CAVEAT_ID_RE, syncCardWithView } from '../lib/defaults'
 import { getNote, isStaticCaptionNote, libraryCaptionOptions, noteRawText, noteTemplate } from '../lib/notes'
 import { allChartNotes, canHideCaveatId, convertLegacyNotes, isChartNoteHidden, type ChartNote } from '../lib/chartNotes'
 import { toPlainText } from '../lib/textLite'
@@ -257,9 +257,10 @@ const caveatRows = computed<CaveatRow[]>(() => {
 })
 /** Writes `hiddenCaveats`; an empty list deletes the key. Also takes CardEditor's
  * `update:hidden-captions` (a card's spec captions share the list, D7). Keeps only ids the stored
- * list can hold (HIDDEN_CAVEAT_ID_RE, NIT-4), deduped, so what the editor shows is what reloads. */
+ * list can hold (HIDDEN_CAVEAT_ID_RE, NIT-4), deduped, at most HIDDEN_CAVEATS_MAX, so what the
+ * editor shows is what reloads. */
 function setHiddenCaveats(ids: readonly string[] | undefined) {
-  const keep = [...new Set((ids ?? []).filter((id) => HIDDEN_CAVEAT_ID_RE.test(id)))]
+  const keep = [...new Set((ids ?? []).filter((id) => HIDDEN_CAVEAT_ID_RE.test(id)))].slice(0, HIDDEN_CAVEATS_MAX)
   if (keep.length) draft.hiddenCaveats = keep
   else delete draft.hiddenCaveats
 }
