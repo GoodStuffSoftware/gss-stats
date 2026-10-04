@@ -200,7 +200,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
     unknown id a token shows "—", and so does a value the server withholds or cannot fully measure
     (too few, no data, a shorter span than the range). A token sends only its metric and window,
     so it can never ask for a split the catalog withholds: the counts-only rule (return, game
-    starts, completions, tutorial and tour exits: no hour, place or device split, no visitor id)
+    starts, completions, tutorial completions, tour skips and tour exits: no hour, place or device split, no visitor id)
     stays enforced on the server, where a sub-day range counts those rows over whole ET days.
   - **Note widgets** take values too: `release.*`, `golive.*`, `play.*` and `metric:` tokens fill
     in; `chart.*` shows "—" (a note belongs to no chart).

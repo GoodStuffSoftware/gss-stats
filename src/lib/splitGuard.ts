@@ -111,11 +111,12 @@ export const SPLIT_REFUSED_PATH_PATTERNS: readonly string[] = [
   '/game/complete-deferred/%',
   '/game/tutorial-complete/%',
   // Best Sudoku 1.97.0 count-only beacons (R-1b): a counted game start, the tour step a first
-  // run was left at, and the tour skip itself (the exact path `/tour/skip`; `/tour/skip/%` is the
+  // run was left at (`/tour/exit-at` bare, with no stage, too), and the tour skip itself (the exact path `/tour/skip`; `/tour/skip/%` is the
   // same family should it ever carry a suffix). The other `/tour/...` rows (`/tour/start`,
   // `/tour/complete`) stay splittable: they are not in the rule.
   '/game/start/%',
   '/tour/exit-at/%',
+  '/tour/exit-at',
   '/tour/skip',
   '/tour/skip/%',
 ]
@@ -171,9 +172,17 @@ export type RefusedSnap = 'nearest' | 'outward' | 'inward'
 /** THE switch. 'nearest' is Mike's ruling (2026-10-03); the other two modes stay buildable. */
 export const REFUSED_WINDOW_SNAP: RefusedSnap = 'nearest'
 
+/** A short FNV-1a hash of the refused pattern list, so a marker that carries it changes whenever
+ * the list does. */
+const hashOf = (text: string): string => {
+  let h = 0x811c9dc5
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193)
+  return (h >>> 0).toString(36)
+}
+
 /** Part of a snapped query's cache key (only when the window actually moved), so changing the
- * mode never serves an answer cached under another one. */
-export const REFUSED_WINDOW_KEY = `refused-${REFUSED_WINDOW_SNAP}-et-days-v1`
+ * mode or the refused pattern list never serves an answer cached under another one. */
+export const REFUSED_WINDOW_KEY = `refused-${REFUSED_WINDOW_SNAP}-et-days-${hashOf(SPLIT_GUARD_KEY)}`
 
 /** The caption a chart shows when its query answered with `meta.refusedWholeDays: true`
  * (components/ChartCard.vue), worded to fit every snap mode. It names every refused kind and
