@@ -240,3 +240,38 @@ describe('a campaign card honours the widget\'s campaign selection', () => {
     expect(titles(one)).toEqual(['US+CA web retest'])
   })
 })
+
+describe('a pop-up rate tile in the editor (ADR 0005 slice 4 follow-ups)', () => {
+  const rate: Widget = { id: 'r', i: 'r', title: 'Rate', type: 'rate', dataset: 'popup', dimension: 'install:outcome:installed', metric: 'pageviews', limit: 1, x: 0, y: 0, w: 3, h: 3 }
+  const row = (w: VueWrapper) => w.find('.caveat-row[data-key="runtime:popup-note"]')
+  it('has no "This chart" value group, only Dates (it renders its own body)', async () => {
+    const w = mountEditor(rate)
+    await flushPromises()
+    const groups = w.findAll('optgroup').map((g) => g.attributes('label'))
+    expect(groups).toContain('Dates')
+    expect(groups).not.toContain('This chart')
+  })
+  it('offers a Show/Hide row for the pop-up note with no data loaded; hide then show round-trips', async () => {
+    const w = mountEditor(rate)
+    await flushPromises()
+    const box = () => row(w).get('input[type="checkbox"]')
+    expect((box().element as HTMLInputElement).checked).toBe(true)
+    await box().setValue(false)
+    await w.get('button.btn-primary').trigger('click')
+    expect((w.emitted('save')!.at(-1)![0] as Widget).hiddenCaveats).toEqual(['popup-note'])
+    await box().setValue(true)
+    await w.get('button.btn-primary').trigger('click')
+    expect('hiddenCaveats' in (w.emitted('save')!.at(-1)![0] as Widget)).toBe(false)
+  })
+  it('has no pop-up note row on a key with no install-fix note (upsell:tap)', async () => {
+    const w = mountEditor({ ...rate, dimension: 'upsell:tap' })
+    await flushPromises()
+    expect(row(w).exists()).toBe(false)
+  })
+  it('a stored hide shows as an unchecked row (one row, not two)', async () => {
+    const w = mountEditor({ ...rate, hiddenCaveats: ['popup-note'] })
+    await flushPromises()
+    expect((row(w).get('input[type="checkbox"]').element as HTMLInputElement).checked).toBe(false)
+    expect(w.findAll('.caveat-row[data-key$="popup-note"]')).toHaveLength(1)
+  })
+})

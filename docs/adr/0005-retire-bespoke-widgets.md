@@ -240,7 +240,7 @@ reload the readings source as well as the metrics.
 Every `POPUP_RATE_SPECS` key has a registered ratio (see decision (b)'s table), so a rate tile
 maps to a card with one item and the pop-up as a param. The card already shows "(n/d)" and
 "too few to report". Missing: nothing in the registry under the default; the mapping function;
-the editor change (the "Rate" type stops being offered for new charts, in slice 5; a new rate is a card, and a saved rate tile keeps the option); and the
+the editor change (until slice 5 the editor keeps offering "Rate", and a new rate is stored as `type: 'rate'` and mapped at render time; slice 5 drops the option for new charts, and a saved rate tile keeps it); and the
 per-chart filter button. `ChartCard` hides that button for any widget it treats as a card
 (`isBespokeBody`), but the card still honours a stored `widget.filters` override, so a mapped
 rate tile would keep an override nobody can see or clear. Default: keep the filter button for
