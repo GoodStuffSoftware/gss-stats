@@ -9,6 +9,12 @@ import type { CardRef, CardSpec } from './types'
 import type { Widget } from '../../types'
 import { POPUP_RATE_SPECS, type PopupRateSpec } from '../popupEvents'
 
+/** The id the retired tile's install-fix note was hidden by (`hiddenCaveats`, chartNotes.ts: the
+ * runtime note `popup-note`) and the registry note that text is now, in the tile's caption. A stored
+ * hide of the first hides the second on this tile, so a user who hid the note keeps it hidden. */
+export const RATE_TILE_NOTE_HIDE_ID = 'popup-note'
+const INSTALL_FIX_NOTE_ID = 'install-fix-note'
+
 /** The ratio (registry id) each kind of rate reads: a tap is accepts over shown; an outcome is
  * that outcome's cohort over shown; eligibility is earned over all signed-out finishes. */
 const OUTCOME_RATIO: Record<string, string> = {
@@ -40,7 +46,7 @@ export function isLegacyRateTile(widget: Pick<Widget, 'type' | 'dataset' | 'card
 
 /** The one-item card a legacy rate tile draws; null when its key is not one this build knows
  * (ChartCard then says so instead of drawing a "—"). Never writes to the widget. */
-export function rateTileCardRef(widget: Pick<Widget, 'type' | 'dataset' | 'card' | 'dimension'>): CardRef | null {
+export function rateTileCardRef(widget: Pick<Widget, 'type' | 'dataset' | 'card' | 'dimension' | 'hiddenCaveats'>): CardRef | null {
   if (!isLegacyRateTile(widget)) return null
   const spec = rateSpecFor(widget)
   const r = spec && ratioFor(spec)
@@ -57,6 +63,7 @@ export function rateTileCardRef(widget: Pick<Widget, 'type' | 'dataset' | 'card'
             data: { ratio: r.ratio, ...(r.popup ? { params: { popup: r.popup } } : {}), window: 'page' },
             display: { as: 'percent', decimals: 1 },
             frame: 'tile',
+            ...(widget.hiddenCaveats?.includes(RATE_TILE_NOTE_HIDE_ID) ? { hideNotes: [INSTALL_FIX_NOTE_ID] } : {}),
           },
         ],
       },

@@ -75,6 +75,40 @@ describe('ChartCard: a legacy rate tile', () => {
     expect(w.find('.state').text()).toMatch(/not one this version knows/)
   })
 
+  // The retired tile showed the install-fix note as the hideable runtime note `popup-note`
+  // (chartNotes.ts); on the card the same text is the tile's caption, and the stored hide still works.
+  describe('the install-fix note (popup-note)', () => {
+    const INSTALL = 'install:outcome:installed'
+    beforeEach(() => {
+      fetchMock.mockImplementation(async (_url: string, init: RequestInit) => {
+        const req = JSON.parse(String(init.body)) as { requests: { key: string }[] }
+        const results = Object.fromEntries(req.requests.map((r) => [r.key, { status: 'ok', value: 0.3, numerator: 6, denominator: 20, noteIds: ['install-fix-note'] }]))
+        return new Response(JSON.stringify({ results, meta: { statements: 1 } }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      })
+    })
+
+    it('shows by default', async () => {
+      const w = mountCard(rate(INSTALL))
+      await settle()
+      expect(w.find('.mi-tile-num').text()).toBe('30.0%')
+      expect(w.find('.mi-tile-caption').text()).toMatch(/earlier prompt-driven installs not recorded/)
+    })
+
+    it('is hidden when the widget stores a hide of popup-note, the figures unchanged', async () => {
+      const w = mountCard({ ...rate(INSTALL), hiddenCaveats: ['popup-note'] })
+      await settle()
+      expect(w.find('.mi-tile-num').text()).toBe('30.0%')
+      expect(w.find('.mi-tile-sub').text()).toBe('(6/20)')
+      expect(w.text()).not.toMatch(/earlier prompt-driven installs not recorded/)
+    })
+
+    it('another stored hide does not hide it', async () => {
+      const w = mountCard({ ...rate(INSTALL), hiddenCaveats: ['some-other-caveat'] })
+      await settle()
+      expect(w.find('.mi-tile-caption').text()).toMatch(/earlier prompt-driven installs not recorded/)
+    })
+  })
+
   it('a stat tile is not a rate tile: it keeps its own body and fetch', async () => {
     fetchStatsMock.mockResolvedValue({ rows: [{ key: {}, pageviews: 5, visits: 3 }], totals: { pageviews: 5, visits: 3 }, meta: {} })
     const w = mountCard({ ...rate(''), type: 'stat', dataset: undefined, dimension: '' })

@@ -12,9 +12,17 @@
 //       its n/d). Old and card both say "—", never 0% or NaN.
 //   T3  A key this build does not know has no card: ChartCard says so (ChartCard.rateTile.test.ts);
 //       the old tile drew "—" over "0/0" for it.
-//   T4  Added on the card: the registry's notes for a value (the install-fix note on the installed
-//       rate, the eligibility caveat, the still-arriving note on a lagged outcome rate) show under
-//       the tile; the old tile drew none of them.
+//   T4  Notes. The old tile drew ONE note: the install-fix note on the installed rate, from the
+//       endpoint's `note`, as the hideable runtime note `popup-note` (chartNotes.ts). The card
+//       draws that same text in the tile's caption, and a stored hide of `popup-note` still hides
+//       it (ChartCard.rateTile.test.ts). Added on the card: the eligibility caveat, "counted from
+//       <date>" and "still arriving" on a lagged outcome rate. Asserted per key below.
+//   T5  Before tracking went live (TRACKING_ACTIVATION_DATE_ET): the old tile read "—" over
+//       "0/0"; the card reads "not yet tracking" (status unmeasured) with no n/d line.
+//   T6  The safeUA rules: a browser string safeUA rewrites to '' excludes nothing on the old path
+//       (server) and on the card (pageContext), so both read the unfiltered counts.
+//   T7  A stored per-chart filter override (widget.filters) drives the card's range, sites and
+//       own-visit exclusion, as it did the old tile.
 //   I1  A range longer than MAX_RANGE_DAYS: the card keeps the newest days (pageContext.ts), the
 //       old tile sent the whole range to /api/popups.
 //   I2  A bare-date range ('2026-09-20'): /api/popups reads it as UTC days, the engine as ET days.
@@ -23,13 +31,15 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import MetricCard from './MetricCard.vue'
+import ChartCard from '../ChartCard.vue'
+import { sitesTree } from '../../sitesStore'
 import { __resetMetricsStateForTests } from '../../composables/useMetrics'
 import { onRequestPost as metricsPost } from '../../../functions/api/metrics'
 import { onRequestPost as popupsPost } from '../../../functions/api/popups'
 import { insertHits, installCaches, memoryCache, openHitsDb, pagesContext, postJson, sqliteD1 } from '../../../functions/_lib/testing/hitsDb'
 import { bskFixture, FIXTURE_NOW } from '../../../functions/_lib/testing/bskFixture'
 import { BEST_SUDOKU_SITES } from '../../lib/bestSudokuSites'
-import { POPUP_RATE_SPECS } from '../../lib/popupEvents'
+import { INSTALL_GAP_RATE_KEY, POPUP_RATE_SPECS } from '../../lib/popupEvents'
 import { rateTileCardRef } from '../../lib/metrics/rateTileCard'
 import { metricsContextFor } from '../../lib/metrics/pageContext'
 import { cardRefFor } from '../../lib/metrics/readingsCard'
@@ -90,31 +100,34 @@ async function settle() {
 const norm = (s: string | null | undefined) => (s ?? '').replace(/\s+/g, ' ').trim()
 
 interface Range { since: string; until: string }
-const OWN = { excludeOwnVisits: true, ownBrowser: 'Opera', ownOS: 'Windows' }
+interface Own { excludeOwnVisits: boolean; ownBrowser: string; ownOS: string }
+const OWN: Own = { excludeOwnVisits: true, ownBrowser: 'Opera', ownOS: 'Windows' }
 const WINDOW: Range = { since: '2026-09-20T04:00:00.000Z', until: '2026-09-27T04:00:00.000Z' }
+const INSTALL_FIX_TEXT = 'earlier prompt-driven installs not recorded'
 const SITES = [...BEST_SUDOKU_SITES] as string[]
 
 const widgetFor = (key: string): Widget => ({ id: 'r', i: 'r', title: 'Rate', type: 'rate', dataset: 'popup', dimension: key, metric: 'pageviews', limit: 1, x: 0, y: 0, w: 3, h: 3 })
 
-interface Old { value: string; counts: string; tooFew: boolean }
+interface Old { value: string; counts: string; tooFew: boolean; note: string }
 /** The retired tile's rendering of the endpoint's answer (its rateDisplay and rateCounts). */
-async function oldTile(key: string, range: Range): Promise<Old> {
+async function oldTile(key: string, range: Range, own: Own = OWN): Promise<Old> {
   const res = await popupsPost(
-    pagesContext(postJson('/api/popups', { dimension: 'rate', rateKey: key, since: range.since, until: range.until, limit: 1, sites: SITES, ...OWN }), { gss_geo: sqliteD1(db) } as never) as never,
+    pagesContext(postJson('/api/popups', { dimension: 'rate', rateKey: key, since: range.since, until: range.until, limit: 1, sites: SITES, ...own }), { gss_geo: sqliteD1(db) } as never) as never,
   )
-  const d = (await res.json()) as { rate: number | null; insufficientCohort?: boolean; numerator?: number; denominator?: number }
+  const d = (await res.json()) as { rate: number | null; insufficientCohort?: boolean; numerator?: number; denominator?: number; note?: string }
   const tooFew = !!d.insufficientCohort
   return {
     tooFew,
+    note: d.note ?? '',
     value: tooFew ? 'too few to report' : d.rate == null ? '—' : `${(d.rate * 100).toFixed(1)}%`,
     counts: d.denominator == null ? '' : `${d.numerator ?? 0}/${d.denominator}`,
   }
 }
 interface New { value: string; counts: string; label: string; notes: string }
-async function newTile(key: string, range: Range): Promise<New> {
+async function newTile(key: string, range: Range, own: Own = OWN): Promise<New> {
   const ref = cardRefFor(widgetFor(key))
   expect(ref, key).not.toBeNull()
-  const context = metricsContextFor(range, SITES, OWN)
+  const context = metricsContextFor(range, SITES, own)
   const w = mount(MetricCard, { props: { cardRef: ref!, context, nowMs: FIXTURE_NOW } })
   mounted.push(w)
   await settle()
@@ -133,22 +146,85 @@ describe('the rate tile card matches the retired rate tile, every key (all 22)',
     for (const s of POPUP_RATE_SPECS) expect(rateTileCardRef(widgetFor(s.key)), s.key).not.toBeNull()
   })
 
-  it('shows the same rate and counts (T1, T2) and the spec label, over the pop-up window', async () => {
-    const seen = new Set<string>()
-    const table: string[] = []
-    for (const spec of POPUP_RATE_SPECS) {
+  for (const spec of POPUP_RATE_SPECS) {
+    it(`${spec.key}: the same rate and counts (T1, T2), the spec label and the install-fix note (T4)`, async () => {
       const o = await oldTile(spec.key, WINDOW)
       const n = await newTile(spec.key, WINDOW)
-      table.push(`${spec.key} | old ${o.value} ${o.counts} | new ${n.value} ${n.counts} | ${n.notes}`)
-      expect(n.label, `${spec.key} label`).toBe(spec.label)
-      expect(n.value, `${spec.key} rate`).toBe(o.value)
-      expect(n.counts, `${spec.key} n/d (T1)`).toBe(o.counts ? `(${o.counts})` : '')
+      expect(n.label, 'label').toBe(spec.label)
+      expect(n.value, 'rate').toBe(o.value)
+      expect(n.counts, 'n/d (T1)').toBe(o.counts ? `(${o.counts})` : '')
+      // T4: the old tile's one note (the install-fix note) is on the card's caption exactly when
+      // the old endpoint sent it.
+      expect(n.notes.includes(INSTALL_FIX_TEXT), 'install-fix note').toBe(o.note !== '')
+    })
+  }
+
+  it('the fixture exercises a real rate, a gated "too few to report" and an empty denominator', async () => {
+    const seen = new Set<string>()
+    for (const spec of POPUP_RATE_SPECS) {
+      const o = await oldTile(spec.key, WINDOW)
       seen.add(o.tooFew ? 'too-few' : o.value === '—' ? 'dash' : 'rate')
     }
-    console.log(table.join('\n'))
-    // The fixture exercises a real rate, a gated "too few to report" and an empty denominator.
     expect([...seen].sort()).toEqual(['dash', 'rate', 'too-few'])
-  }, 60_000)
+  })
+
+  it('T4: the notes the card draws, by kind', async () => {
+    // the install-fix note: on the installed rate only (the old tile's one note)
+    expect((await newTile(INSTALL_GAP_RATE_KEY, WINDOW)).notes).toContain(INSTALL_FIX_TEXT)
+    expect((await oldTile(INSTALL_GAP_RATE_KEY, WINDOW)).note).not.toBe('')
+    expect((await newTile('upsell:tap', WINDOW)).notes).not.toContain(INSTALL_FIX_TEXT)
+    // the eligibility caveat and the still-arriving note on a lagged outcome rate
+    expect((await newTile('signin-eligible:rate', WINDOW)).notes).not.toBe('')
+    expect((await newTile('install:outcome:still-playing', WINDOW)).notes).toMatch(/still arriving/i)
+  })
+})
+
+describe('T5 to T7: before activation, the safeUA rules and a stored filter override', () => {
+  const key = 'upsell:tap'
+
+  it('T5: before tracking went live the old tile read "—" over "0/0"; the card reads "not yet tracking"', async () => {
+    const before: Range = { since: '2026-09-14T04:00:00.000Z', until: '2026-09-20T04:00:00.000Z' }
+    const o = await oldTile(key, before)
+    const n = await newTile(key, before)
+    expect(o).toMatchObject({ value: '—', counts: '0/0' })
+    expect(n.value).toBe('not yet tracking')
+    expect(n.counts).toBe('')
+  })
+
+  it('T6: a browser string safeUA rewrites excludes nothing, on both paths (the unfiltered counts)', async () => {
+    const unsafe: Own = { excludeOwnVisits: true, ownBrowser: 'Opera<script>', ownOS: 'Windows' }
+    const none: Own = { excludeOwnVisits: false, ownBrowser: '', ownOS: '' }
+    const o = await oldTile(key, WINDOW, unsafe)
+    const n = await newTile(key, WINDOW, unsafe)
+    const unfiltered = await oldTile(key, WINDOW, none)
+    expect(n.counts).toBe(`(${o.counts})`)
+    expect(o.counts).toBe(unfiltered.counts)
+    expect(n.value).toBe(o.value)
+    // not vacuous: a safe browser string really does drop the owner's rows
+    expect((await oldTile(key, WINDOW, OWN)).counts).not.toBe(unfiltered.counts)
+  })
+
+  it('T7: a stored per-chart filter override drives the card, as it drove the old tile', async () => {
+    const other: Range = { since: '2026-09-01T04:00:00.000Z', until: '2026-09-05T04:00:00.000Z' }
+    sitesTree.value = [{ domain: 'bestsudoku.app', subs: [{ host: 'bestsudoku.app', tags: SITES } as never] } as never]
+    try {
+      const override = { siteSel: ['bestsudoku.app'], since: WINDOW.since, until: WINDOW.until, excludeSelfReferrals: false, ...OWN }
+      const global = { siteSel: [] as string[], since: other.since, until: other.until, excludeSelfReferrals: false, excludeOwnVisits: false, ownBrowser: '', ownOS: '' }
+      const o = await oldTile(key, WINDOW)
+      const w = mount(ChartCard, { props: { widget: { ...widgetFor(key), filters: override }, filters: global, dark: false, drillOpen: false } })
+      mounted.push(w)
+      await settle()
+      expect(norm(w.find('.mi-tile-num').text())).toBe(o.value)
+      expect(norm(w.find('.mi-tile-sub').text())).toBe(`(${o.counts})`)
+      // not vacuous: the global filter alone reads another window (before tracking went live)
+      const g = mount(ChartCard, { props: { widget: widgetFor(key), filters: global, dark: false, drillOpen: false } })
+      mounted.push(g)
+      await settle()
+      expect(norm(g.find('.mi-tile').text())).not.toContain(`(${o.counts})`)
+    } finally {
+      sitesTree.value = []
+    }
+  })
 })
 
 describe('the differences that come from the card engine reading the range (I1 to I3)', () => {
