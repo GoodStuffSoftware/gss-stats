@@ -299,6 +299,10 @@ let liveSafeKey: string | null = null
 const NON_REQUEST_FIELDS = new Set([
   'x', 'y', 'w', 'h', 'i', 'id', 'fit', 'title', 'note', 'noteId', 'longText', 'notes', 'caption', 'hiddenCaveats', 'isDefault',
   'markers', 'goLiveMarkers', 'flightBands', 'cumulative', 'axisTitles', 'barMode',
+  // grid-layout-plus writes `moved` onto every widget it lays out (after ChartCard's first load, so the
+  // key would change under the answer's flag and never match again). It is the only field the library
+  // adds in our configuration (`static` is touched only under restoreOnDrag, which Dashboard never sets).
+  'moved',
 ])
 const requestKey = computed(() =>
   JSON.stringify({
