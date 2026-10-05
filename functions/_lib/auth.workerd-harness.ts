@@ -10,7 +10,15 @@
 // mock in auth.workerd.test.mjs (the Worker's globalOutbound), never to the network.
 // The mock token endpoint replies with whatever the authorization code asks for.
 
-import { authGate, b64urlEncode, GOOGLE_TOKEN_ENDPOINT, tokenRequestInit, type AuthEnv } from './auth'
+import {
+  authGate,
+  b64urlEncode,
+  createSessionCookie,
+  GOOGLE_TOKEN_ENDPOINT,
+  readAuthConfig,
+  tokenRequestInit,
+  type AuthEnv,
+} from './auth'
 
 const ORIGIN = 'https://stats.goodstuff.software'
 const CLIENT_ID = 'workerd-check.apps.googleusercontent.com'
@@ -136,5 +144,44 @@ export const callbackTurnsAGoogleRejectionInto502 = {
     }))
     check(res.status === 502, `expected 502, got ${res.status}`)
     check(!issuesSession(res), 'a session was issued after Google refused the exchange')
+  },
+}
+
+/** A WebSocket upgrade passes the gate intact (/api/live): with a valid session, a
+ *  `next()` that answers 101 with a WebSocket comes back 101 with that same `webSocket`
+ *  (gatedResponse rebuilds the response, which must not drop or reject the socket); the
+ *  dev bypass on loopback does the same; with no session the gate answers 401 and never
+ *  calls `next()`. */
+export const webSocketUpgradePassesTheGate = {
+  async test() {
+    let calls = 0
+    let sent: WebSocket | null = null
+    const upgrade = async () => {
+      calls++
+      // Neither end is accept()ed: an accepted socket with no peer keeps the test's
+      // context open until workerd cancels it as hung.
+      const pair = new WebSocketPair()
+      sent = pair[0]
+      return new Response(null, { status: 101, webSocket: pair[0] })
+    }
+    const wsHeaders = { Upgrade: 'websocket', Origin: ORIGIN }
+    const resolved = readAuthConfig(ENV)
+    check(resolved.ok, 'harness ENV is not a valid auth config')
+    const url = new URL(`${ORIGIN}/api/live`)
+    const cookie = (await createSessionCookie(url, resolved.config, { email: 'owner@example.com', sub: '42' }, Date.now())).split(';')[0]
+
+    const signedIn = await authGate(new Request(url, { headers: { ...wsHeaders, Cookie: cookie } }), ENV, upgrade)
+    check(signedIn.status === 101, `session: expected 101, got ${signedIn.status}: ${await signedIn.text()}`)
+    check(signedIn.webSocket !== null && signedIn.webSocket === sent, 'session: the webSocket was dropped or replaced')
+
+    const dev = await authGate(new Request('http://localhost/api/live', { headers: wsHeaders }), { AUTH_DEV_BYPASS: '1' }, upgrade)
+    check(dev.status === 101, `dev bypass: expected 101, got ${dev.status}: ${await dev.text()}`)
+    check(dev.webSocket !== null && dev.webSocket === sent, 'dev bypass: the webSocket was dropped or replaced')
+
+    const before = calls
+    const anon = await authGate(new Request(url, { headers: wsHeaders }), ENV, upgrade)
+    check(anon.status === 401, `no session: expected 401, got ${anon.status}`)
+    check(anon.webSocket === null, 'no session: a webSocket came back')
+    check(calls === before, 'no session: next() was called')
   },
 }
