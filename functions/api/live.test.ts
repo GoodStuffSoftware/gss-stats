@@ -41,7 +41,8 @@ async function errorOf(res: Response) {
 
 describe('GET /api/live', () => {
   it('426 without Upgrade: websocket, and gss-live is never called', async () => {
-    for (const headers of [{ Origin: ORIGIN }, { Origin: ORIGIN, Upgrade: 'h2c' }, { Origin: ORIGIN, Upgrade: '' }]) {
+    const cases: Record<string, string>[] = [{ Origin: ORIGIN }, { Origin: ORIGIN, Upgrade: 'h2c' }, { Origin: ORIGIN, Upgrade: '' }]
+    for (const headers of cases) {
       const live = fakeLive()
       const res = await call(headers, { LIVE: live.binding })
       expect(res.status).toBe(426)
