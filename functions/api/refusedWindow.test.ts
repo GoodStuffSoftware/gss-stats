@@ -165,6 +165,7 @@ describe('the 3 x 1 h probe: consecutive hour windows never read back per-hour r
 const REFUSED_NOTE_METRICS = [
   'bsk.taggedArrivals', // no path test: any first-ever beacon, refused ones included
   'bsk.completions',
+  'bsk.carryOverCompletions', // the same completion rows, minus campaign-tagged ones
   'bsk.tutorialFirstRun',
   'bsk.tutorialReplay',
   'bsk.tourExitPreamble',

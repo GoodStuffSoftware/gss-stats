@@ -470,6 +470,7 @@ is the growth path, and it keeps the SQL surface small and auditable.
 | `campaign.returnD1` ... `campaign.returnD31to60` | device | returnD0 | per bucket | same; lag per bucket (d1: 1 d, d2-7: 7 d, d8-14: 14 d, ...) |
 | `campaign.spend` | usd | | adsSpend, `resolveCampaignSpend` | |
 | `bsk.pageviews` | pageview | | bskKpiMinutes, not `isEventPath` | |
+| `bsk.carryOverCompletions` | completion | | as `bsk.completions`, only rows with no campaign tag (`untagged`, the complement of `anyTag`) | |
 | `bsk.gameViews`, `bsk.completions`, `bsk.authSuccess`, `bsk.installs`, `bsk.rawInstallSignals` | as the campaign versions | | bskKpiMinutes | as above |
 | `bsk.popupShown` | showing | | `isPopupShown` | liveOnEtDate `TRACKING_ACTIVATION_DATE_ET` |
 | `bsk.popupAccepts` | showing | popupShown | `isPopupAccept` | same |
