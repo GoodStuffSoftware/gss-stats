@@ -411,3 +411,33 @@ No full-table scan of `hits` and no new index. Counting what a card adds:
 - **Not prewarmed.** `prewarm.ts` warms no twin: a series is asked for only by an item the owner
   chose to draw as a sparkline, so the first read after expiry pays one more statement inside the
   batch, and an ordinary page (no sparkline) is unchanged.
+
+## 10. Live push (`gss-live`, 0.29.0, 2026-10-05) — D1 rows read and Durable Object load
+
+A new Worker, `gss-live` (README → Live updates), tells open dashboard tabs "something changed" at
+each 15-minute ET boundary. It reads no D1 and writes no D1. What it adds is the refetches the
+tabs then make, and a small Durable Object load. Figures are from the design note (2026-10-04) and
+are estimates, not measurements; nothing here was re-read against the account.
+
+**D1 rows read.** A ping refetch re-reads what the page's load reads: about 10k rows for an
+Overview batch (§7) and about 20k for a full chart page. Only `liveSafe` cards refetch.
+
+| Case (a tab visible all day, a non-refused row in every window) | Rows/day | Share of the 5M cap |
+|---|---|---|
+| Overview, uncapped: 96 x ~10k | ~960k | 19 % |
+| Full chart page, uncapped: 96 x ~20k | ~1.92M | 38 % |
+| Full chart page with the shipped caps (input within 2 h; a chart at most hourly), about 8 h of use | ~400k | 8 % |
+
+All of it sits on the ~29 % baseline (§2) and adds up across tabs and colos: two all-day uncapped
+chart tabs plus the baseline would reach the cap, which is why the idle cutoff and the hourly
+per-chart cap ship. The edge cache (90 s while live) and the 60 s return throttle still apply.
+`/api/stats` (RUM) and `/api/completions` never refetch on a ping. On Workers Paid none of this matters
+(25B rows/month included).
+
+**Durable Object and Worker requests (Workers Free: 100k Durable Object requests/day).** One
+`notify` per written non-refused beacon (hundreds to about 2,000 a day during a flight; none
+when no tab is connected, and a request that sets no new alarm still counts as one request), at most 96
+alarms a day, plus one request per tab connect and reconnect (backoff 1 s doubling to 5 min). The
+50 s keepalive is answered by the runtime (`setWebSocketAutoResponse`) without waking the object, and
+hibernation bills about zero duration (13,000 GB-s/day allowed); outgoing messages are free. The
+object is capped at 100 sockets. Expected load is a few percent of the daily allowance, and $0.

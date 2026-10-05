@@ -6,6 +6,16 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.29.0] — 2026-10-05
+
+### Added
+- **Open dashboards refresh themselves after new traffic.** A visible, recently used tab gets an empty "something changed" ping at the next 15-minute boundary and refetches its cards about two minutes later, at most hourly per chart. Nothing is sent while nothing happens, and with no connection the dashboard works as before.
+- **Counts only is kept.** Refused rows (returns, game completions, tutorial completions, tour skip and exit, game starts) never trigger a ping, the ping carries nothing, and any card that can count one ignores it. The stats (RUM) and completions charts never refresh this way.
+- **A new `gss-live` Worker deploys with the site.** It is not public, deploys before the dashboard, and needs the beacon update to start sending pings.
+
+### Fixed
+- **A path with a NUL byte now counts as refused**, matching how the database compares it, so a hand-made address cannot slip past the guard.
+
 ## [0.27.3] — 2026-10-04
 
 ### Fixed
