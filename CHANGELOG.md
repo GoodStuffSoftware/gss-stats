@@ -16,6 +16,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 ### Fixed
 - **A path with a NUL byte now counts as refused**, matching how the database compares it, so a hand-made address cannot slip past the guard.
 
+## [0.28.0] — 2026-10-05
+
+### Added
+- **Carry-over completions on the Retention page.** A new card shows games completed each day with no campaign tag (mostly players coming back on their own, a weak signal), beside the site-wide total, and is also in the card picker.
+
 ## [0.27.4] — 2026-10-04
 
 ### Fixed
