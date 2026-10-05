@@ -25,6 +25,11 @@ import FilterBar from './components/FilterBar.vue'
 import Dashboard from './components/Dashboard.vue'
 import ChartEditor from './components/ChartEditor.vue'
 import AccountMenu from './components/AccountMenu.vue'
+import { useLiveChanges } from './composables/useLiveChanges'
+
+// Live push (composables/useLiveChanges.ts): ONE fail-soft socket for the whole app, open only while
+// the tab is visible and in use. It adds a refetch trigger on top of today's; it never replaces one.
+useLiveChanges()
 
 const config = reactive<DashboardConfig>(defaultConfig())
 const loaded = ref(false)
