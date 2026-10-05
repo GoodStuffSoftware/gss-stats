@@ -1281,6 +1281,105 @@ return, game-start, tutorial or tour figure, hour, place or device is reachable 
   written to disk; the Worker picks the new value up on its next run, no redeploy. The local
   routines keep reading Bitwarden directly.
 
+## Live updates
+
+An open dashboard tab refreshes its numbers by itself shortly after new traffic is counted, with no
+polling. It is push, not a timer: nothing is sent while nothing happens.
+
+**How it works.**
+
+1. The beacon ([gss-beacon](https://github.com/GoodStuffSoftware/gss-beacon)) tells the
+   `gss-live` Worker (`workers/live/`) after it has written a **non-refused** row. The call is
+   fire-and-forget and swallowed on any error, so the pixel never fails because of it.
+2. `gss-live` holds one Durable Object (`LiveHub`) with the open tabs' hibernating WebSockets.
+   It sets one alarm for the **next 15-minute ET boundary** (:00/:15/:30/:45, which are also the
+   epoch boundaries, since ET offsets are whole hours). Any number of notifies before then share
+   that alarm. With no tab connected, a notify sets nothing.
+3. At the boundary the alarm sends every socket the literal text `{"t":"changed"}`.
+4. A tab that is **open, visible and recently used** (input in the last 2 h) holds the socket
+   (`/api/live`, a same-origin Pages Function behind the normal sign-in, bound to `gss-live` by
+   the `LIVE` service binding). On a ping it waits 95–120 s after the ping arrives (the server sends it at the
+   boundary, so that is past the 90 s edge-cache TTL and the refetch cannot be served the answer
+   from before the change; the spread keeps tabs from all hitting at once; counted from receipt,
+   never from the browser's clock, so a skewed clock cannot fire early) and then refetches **only
+   the cards flagged `liveSafe`**, in the background, never while a load is running. A chart
+   refetches at most once an hour this way, and a chart whose request has changed since the flagged
+   answer (an editor change to its type, rings, dataset or filters) waits for a fresh flagged
+   answer first. A hidden or idle tab closes its socket and drops pings; the existing
+   return-to-tab refetch catches it up. With no socket at all, the dashboard behaves exactly as
+   it did before live updates.
+5. The hub holds at most 100 open sockets. Each socket carries its accept time (a bare number,
+   set when it is accepted). At the cap a new connection **closes the open socket with the oldest
+   accept time** (close code 1013, "try again later"; a socket that is already closing does not
+   count toward the cap) and is accepted, so one leaky tab or script evicts itself instead of
+   locking everyone else out; an evicted tab reconnects with backoff. Any answer from
+   `gss-live` other than a real WebSocket upgrade reaches the browser as a bare `503`, with no
+   detail.
+
+**Privacy: counts only (rows only).**
+
+- A refused row (`SPLIT_REFUSED_PATH_PATTERNS`: `/return`, game-complete, game-complete-deferred,
+  tutorial-complete, tour skip and exit, game-start; any path containing a NUL byte counts as
+  refused too, because SQLite LIKE stops reading at a NUL) **never triggers or shifts a ping**: the
+  beacon does not call `gss-live` for it. The beacon keeps its own copy of the list, pinned equal to
+  this one by a literal in both repos' tests (`src/lib/splitGuard.beaconParity.test.ts`).
+- The ping carries nothing: no row, id, count, path, site or clock time, and it only ever lands on a
+  15-minute boundary, so it adds no time resolution to any count.
+- The Durable Object's storage holds only its alarm. Each socket carries only its accept time (used
+  to evict the oldest at the cap), never any row data and never a count.
+- The Durable Object stores **only its alarm**. It keeps no row data and `notify()` takes no
+  arguments. No client ever sees a row id or a count through this path.
+- Fail closed: the server marks a response `liveSafe: true` only when it cannot count a refused row
+  (a `/api/geo` answer whose request reaches no refused pattern; a `/api/metrics` value whose
+  metric, or both sides of a ratio, has `countsRefused === false`). The client refetches on a ping
+  only on an explicit `true`. A missing flag, an error or an older server means no ping refetch.
+  Charts over event beacons and every `/api/completions` chart never refetch on a ping.
+- **`/api/stats` (Cloudflare RUM) never refreshes on a ping.** RUM is not beacon data, so a beacon
+  ping says nothing about it. It still loads on page load, filter change, Refresh, return and ET
+  midnight, as before.
+- **`/api/completions` never refreshes on a ping.** Its rows *are* refused paths.
+
+**D1 cost (every figure here is an estimate from the design note, not a measurement).** The free account allows 5M D1 rows read per day account-wide (about 29 % used on an
+ordinary day, see [Capacity](#capacity)). A live refetch re-reads about 10k rows for an Overview
+batch and about 20k for a full chart page. Uncapped, a tab left visible 24 h with a non-refused row in
+every window would cost an estimated 96 × 10k = 960k rows a day (19 %) on the Overview and 96 × 20k = 1.92M (38 %) on
+a full chart page. Two caps bring this down: pings are ignored after 2 h without input, and a chart
+refetches on a ping at most hourly (metric cards are not capped, only charts are; the socket stays up to
+2 h after the last input); a full chart page left open and used for 8 hours is then about
+400k rows (8 %, an estimate that leaves out that 2 h tail, which would make it roughly 500k). The edge cache and the 60 s return throttle still apply. Workers and the
+Durable Object are estimated at $0 on Workers Free: about one notify per written non-refused beacon (hundreds
+to about 2,000 a day during a flight; each is one Durable Object request even with no tab open, though it
+sets no alarm then), at most 96 alarms a day plus reconnects, plus the 50 s keepalive, which may count as
+incoming messages at 20:1 (about 86 requests per all-day tab), against 100k
+Durable Object requests a day, with about zero billed duration under hibernation. No plan change
+and no D1 migration. Load detail: [docs/capacity.md §10](docs/capacity.md).
+
+**Deploy order and recovery.** `gss-live` has no public URL (`workers_dev = false`, no routes). Its
+only callers are two service bindings.
+
+1. On the first deploy, `deploy-live` (see [Deploy](#deploy)) deploys `gss-live` before the Pages
+   `deploy` job runs, because Pages' `LIVE` binding needs the Worker to exist.
+2. Check `gss-live` is in the Cloudflare Workers dashboard.
+3. Only then merge and deploy the beacon (`npm run deploy` in gss-beacon). Deployed earlier, its
+   binding would point at nothing and the beacon would simply not notify.
+4. Check it works: load a normal page, then look at the `gss-live` Observability log for a `Notify`
+   call (a real, non-refused hit; the owner's own IP is excluded, so use real traffic or another
+   network). If none appears, the beacon's binding or `entrypoint` is not wired.
+
+If `deploy-live` fails on the first merge (usually a token that lacks **Workers Scripts: Edit**),
+`gss-live` does not exist. **UNKNOWN: Cloudflare's docs do not say what a Pages deploy does when its
+`[[services]]` binding targets a Worker that does not exist.** It may reject the deploy (production
+stays on the previous version), accept it with `/api/live` answering `503` (the dashboard works without
+live updates), or accept it with the Functions bundle failing (every `/api/*` call breaks). If
+`deploy-live` is red but `deploy` is green, open stats.goodstuff.software at once and confirm the
+dashboard loads; `/api/live` returns `503` until `gss-live` exists. Fix the token
+(`CLOUDFLARE_WORKERS_API_TOKEN`, or `CLOUDFLARE_API_TOKEN`), then **Actions → Deploy → Run
+workflow** on `main`: a manual run (when not paused) deploys `gss-live` first and then Pages. If `gss-live` is down
+later, notifies fail silently, sockets drop, tabs reconnect with backoff (1 s doubling to 5 min, kept across a tab switch) and
+the dashboard works as it did before. To stop `gss-live` deploys, set the repo variable
+`LIVE_DEPLOY_PAUSED` to `true`: nothing deploys it then, a manual run included. After removing the
+variable, use **Run workflow** to ship what merged meanwhile.
+
 ## Docs
 
 | Area | Entry point |
@@ -1355,6 +1454,19 @@ gets its cron back on the next automatic deploy, **unless you set the repo varia
 `WORKER_DEPLOY_PAUSED` to `true`** (Settings → Secrets and variables → Actions → Variables): the job
 then logs that it is paused and deploys nothing, on pushes and manual runs alike, until the
 variable is removed or set to anything else.
+
+**The live-push Worker (`gss-live`) deploys on merge too, and before Pages** — a third job
+(`deploy-live`) that the Pages `deploy` job waits for (`needs`, with `if: !cancelled()`, so a red
+`deploy-live` does not by itself stop the Pages deploy). Pages binds `gss-live` as the `LIVE`
+service (`wrangler.toml`), so the Worker must exist first. It runs `npx vitest run workers/live`,
+then `npx wrangler deploy -c workers/live/wrangler.toml`, when a push to `main` changes
+`workers/live/**` (non-test files) or `deploy.yml`; **Run workflow** deploys it (unless paused), on `main` only.
+`package-lock.json` is deliberately not a trigger, because every release changes it and each deploy
+drops every open socket: after a wrangler bump, use **Run workflow** to redeploy `gss-live`. It uses the same token rule as `deploy-worker` (**Workers Scripts:
+Edit**; `CLOUDFLARE_WORKERS_API_TOKEN`, falling back to `CLOUDFLARE_API_TOKEN`), and the repo
+variable `LIVE_DEPLOY_PAUSED=true` skips it. `gss-live` has no secrets and no D1 access; its
+Durable Object migration ships in its own config. Dry run, no auth needed: `npm run live:check`.
+See [Live updates](#live-updates) for the first-merge order and recovery.
 
 **Manual** (local fallback / preview), with the token from a local, gitignored file:
 

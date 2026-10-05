@@ -123,8 +123,15 @@ export const SPLIT_REFUSED_PATH_PATTERNS: readonly string[] = [
 
 /** The JS reading of SPLIT_REFUSED_PATH_PATTERNS, matching SQLite LIKE exactly (ASCII case
  * folded; a pattern ending in `%` is a prefix match, any other pattern is an exact match), so a
- * JS-side classifier can never disagree with the SQL guard. */
+ * JS-side classifier can never disagree with the SQL guard.
+ *
+ * NUL: SQLite LIKE reads its operands as NUL-terminated text, so a stored `/tour/skip<NUL>x` is
+ * matched by the exact pattern `/tour/skip` in SQL while a plain string comparison says no. Any
+ * path containing U+0000 is therefore refused here (fail closed: it can only err toward refused).
+ * The beacon mirrors this rule (gss-beacon functions/_lib/refused.ts treats a stored path with a
+ * NUL as refused and never pings for it), so a hand-made `%00` URL is refused on both sides. */
 export function isSplitRefusedPath(path: string): boolean {
+  if (path.includes('\u0000')) return true
   const p = path.replace(/[A-Z]/g, (c) => c.toLowerCase())
   return SPLIT_REFUSED_PATH_PATTERNS.some((pat) =>
     pat.endsWith('%') ? p.startsWith(pat.slice(0, -1)) : p === pat,
