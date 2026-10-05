@@ -26,7 +26,7 @@ describe('carry-over completions: preset, picker and template', () => {
     expect(METRICS.get('bsk.carryOverCompletions')).toMatchObject({ unit: 'completion', untagged: true, subsetOf: 'bsk.completions' })
   })
 
-  it('says in one plain sentence that the spec rates it a weak signal', () => {
+  it('says in one plain sentence that it is a weak signal', () => {
     expect(getNote('carry-over-weak-signal')).toBeDefined()
     const text = noteRawText('carry-over-weak-signal')
     expect(text).toMatch(/weak signal/)

@@ -117,8 +117,8 @@ export interface MetricDef {
   visitor?: 'new'
   /** Beacon metrics: only rows carrying some campaign tag (any tag at all, unattributed). */
   anyTag?: true
-  /** Beacon metrics: only rows carrying NO campaign tag (the complement of `anyTag`, so a metric
-   * with it plus the same metric with `anyTag` always sum to the untagged-blind site-wide count). */
+  /** Beacon metrics: only rows carrying NO campaign tag (the complement of `anyTag`: by definition
+   * the two partition the same rows, though no tagged-completions metric ships). */
   untagged?: true
   /** Spend metrics: the value from the stored-spend summaries (null = no spend known). */
   spend?: (rows: readonly SpendSummary[], ctx: MetricCtx) => number | null
@@ -527,7 +527,7 @@ export const METRIC_DEFS: MetricDef[] = [
   // Carry-over completions (retention spec S1): site-wide completions minus campaign-tagged ones,
   // i.e. the completion rows carrying no campaign tag at all (the complement of anyTag, as
   // bsk.taggedArrivals defines "tagged"). A row count over the same whole-ET-day facts as
-  // bsk.completions, so it can never go below zero and tagged + carry-over = site-wide per day.
+  // bsk.completions, so it can never go below zero or above the site-wide count.
   // Counts only: no hour, place or device split is possible (no such column is read).
   bskMetric({ id: 'bsk.carryOverCompletions', unit: 'completion', untagged: true, path: step('completed'), subsetOf: 'bsk.completions', instrumented: [GAME_COMPLETE] }),
   bskMetric({ id: 'bsk.popupShown', countsRefused: false, unit: 'showing', path: isPopupShown, instrumented: [TRACKING] }),

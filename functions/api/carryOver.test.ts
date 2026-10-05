@@ -18,7 +18,7 @@ const SITE = 'bestsudoku-web'
 const DONE = '/game/complete/normal/easy'
 // Three whole ET days (EDT): tagged and untagged on the 1st, NO tagged row on the 2nd, ONLY tagged on the 3rd.
 // Binds of the two facts the carry-over metric reads (recorded; a change here means the bind budget moved).
-const WORST_BINDS = { bskRangePath: 23, bskRangeDaily: 18 } as const
+const WORST_BINDS = { bskRangePath: 18, bskRangeDaily: 18 } as const
 const D1 = '2026-10-01T15:00:00Z'
 const D2 = '2026-10-02T15:00:00Z'
 const D3 = '2026-10-03T15:00:00Z'
