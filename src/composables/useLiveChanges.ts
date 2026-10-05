@@ -15,8 +15,9 @@
 //   be served the answer from before the change, and spread out so tabs do not all hit at once.
 //   A ping that comes due while the tab is hidden or idle is dropped; the return refetch
 //   (useReturnRefresh) catches up when the user is back.
-// - Reconnects back off from 1 s, doubling to a 5 min cap with jitter, reset when a socket opens.
-//   A "ping" text goes out every 50 s so an idle-but-open socket is not dropped by a proxy (the
+// - Reconnects back off from 1 s, doubling to a 5 min cap with jitter. The backoff resets only
+//   after a socket has stayed open for LIVE_STABLE_MS (60 s), not on open: a server that accepts and
+//   then closes at once must not be retried about once a second. A "ping" text goes out every 50 s so an idle-but-open socket is not dropped by a proxy (the
 //   server answers it itself without waking the Durable Object).
 // - Fail-soft: every error is swallowed, and none of today's refresh paths (load, filter change,
 //   Refresh button, return to the tab, ET midnight) depends on this module. With no socket the
@@ -41,6 +42,8 @@ export const LIVE_IDLE_MS = 2 * 60 * 60_000
 export const LIVE_KEEPALIVE_MS = 50_000
 export const LIVE_BACKOFF_BASE_MS = 1_000
 export const LIVE_BACKOFF_CAP_MS = 5 * 60_000
+/** A socket must stay open this long before the backoff resets (accept-then-close keeps growing it). */
+export const LIVE_STABLE_MS = 60_000
 
 const INPUT_EVENTS = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const
 
@@ -63,6 +66,7 @@ let lastInputAt = 0
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let keepaliveTimer: ReturnType<typeof setInterval> | null = null
 let idleTimer: ReturnType<typeof setTimeout> | null = null
+let stableTimer: ReturnType<typeof setTimeout> | null = null
 let fireTimer: ReturnType<typeof setTimeout> | null = null
 
 const isVisible = () => typeof document !== 'undefined' && document.visibilityState !== 'hidden'
@@ -84,6 +88,8 @@ function stopSocketTimers() {
   keepaliveTimer = null
   clearTimer(idleTimer)
   idleTimer = null
+  clearTimer(stableTimer)
+  stableTimer = null
 }
 
 function closeSocket() {
@@ -154,7 +160,12 @@ function open() {
   ws = s
   s.onopen = () => {
     if (ws !== s) return
-    attempt = 0
+    // Not reset yet: only a socket that stays open for LIVE_STABLE_MS counts as a good connection.
+    clearTimer(stableTimer)
+    stableTimer = setTimeout(() => {
+      stableTimer = null
+      if (ws === s) attempt = 0
+    }, LIVE_STABLE_MS)
     try {
       if (keepaliveTimer) clearInterval(keepaliveTimer)
       keepaliveTimer = setInterval(() => {
