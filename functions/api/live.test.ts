@@ -7,7 +7,7 @@ import { LIVE_UPSTREAM_URL, onRequestGet } from './live'
 const ORIGIN = 'https://stats.goodstuff.software'
 // Node's Response refuses status 101, so the fake gss-live returns this stand-in, and the tests
 // check the handler hands back exactly what the binding returned.
-const UPGRADED = { upgraded: true } as unknown as Response
+const UPGRADED = { status: 101, webSocket: { socket: true }, upgraded: true } as unknown as Response
 
 function fakeLive(reply: () => Promise<Response> = async () => UPGRADED) {
   const seen: Request[] = []
@@ -101,10 +101,20 @@ describe('GET /api/live', () => {
     expect(live.seen).toHaveLength(1)
   })
 
-  it('passes a gss-live refusal (e.g. the socket cap) through unchanged', async () => {
-    const full = new Response('full', { status: 503 })
-    const live = fakeLive(async () => full)
-    expect(await call(upgradeFrom(ORIGIN), { LIVE: live.binding })).toBe(full)
+  it.each([
+    ['its own 503 (socket cap)', () => new Response('Too many connections', { status: 503, headers: { 'X-Detail': 'secret' } })],
+    ['a 404', () => new Response('Not found', { status: 404 })],
+    ['a 426', () => new Response('Expected a WebSocket upgrade', { status: 426, headers: { Upgrade: 'websocket' } })],
+    ['a 500 with a stack-like body', () => new Response('TypeError: at index.ts:42', { status: 500 })],
+    ['a 200 that is not an upgrade', () => new Response('hub', { status: 200 })],
+    ['a 101 without a socket', () => ({ status: 101, webSocket: null }) as unknown as Response],
+  ])('maps %s from gss-live to a bare 503 with no detail', async (_label, make) => {
+    const live = fakeLive(async () => make())
+    const res = await call(upgradeFrom(ORIGIN), { LIVE: live.binding })
+    expect(res.status).toBe(503)
+    expect(res.headers.get('X-Detail')).toBeNull()
+    expect(res.headers.get('Upgrade')).toBeNull()
+    expect(await errorOf(res)).toBe('live updates unavailable')
   })
 
   it('forwards nothing from the incoming request: only GET + Upgrade: websocket to the fixed URL', async () => {

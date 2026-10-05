@@ -11,21 +11,10 @@
 // ever sent is the literal ping. Refused rows never reach this Worker (the beacon filters them).
 
 import { DurableObject, WorkerEntrypoint } from 'cloudflare:workers'
+import { MAX_SOCKETS, nextBoundary, PING } from './hub'
 
 export interface Env {
   HUB: DurableObjectNamespace<LiveHub>
-}
-
-/** The only message the hub ever sends. Carries no row id, count, time or place. */
-export const PING = '{"t":"changed"}'
-/** Pings are batched to fixed 15-minute boundaries. ET offsets are whole hours, so these are also the ET :00/:15/:30/:45. */
-export const BOUNDARY_MS = 900_000
-/** Open dashboard tabs allowed at once (gss-stats is a handful of people). */
-export const MAX_SOCKETS = 100
-
-/** The next 15-minute boundary, strictly after `now`. */
-export function nextBoundary(now: number): number {
-  return Math.floor(now / BOUNDARY_MS) * BOUNDARY_MS + BOUNDARY_MS
 }
 
 function isUpgrade(request: Request): boolean {
@@ -68,7 +57,17 @@ export class LiveHub extends DurableObject<Env> {
 
   async fetch(request: Request): Promise<Response> {
     if (!isUpgrade(request)) return notUpgradeResponse(request)
-    if (this.ctx.getWebSockets().length >= MAX_SOCKETS) return new Response('Too many connections', { status: 503 })
+    // At the cap, close the OLDEST socket to make room (getWebSockets() lists them in accept order),
+    // so one leaky tab or script evicts itself instead of locking everyone else out. The evicted
+    // client reconnects with backoff.
+    const open = this.ctx.getWebSockets()
+    if (open.length >= MAX_SOCKETS) {
+      try {
+        open[0].close(1013, 'try again later')
+      } catch {
+        // Already closing.
+      }
+    }
     const pair = new WebSocketPair()
     const [client, server] = [pair[0], pair[1]]
     this.ctx.acceptWebSocket(server)
@@ -78,9 +77,19 @@ export class LiveHub extends DurableObject<Env> {
   // Tabs never send anything meaningful (the keepalive 'ping' is answered by the auto-response).
   async webSocketMessage(): Promise<void> {}
 
-  async webSocketClose(ws: WebSocket): Promise<void> {
+  async webSocketClose(ws: WebSocket, code: number): Promise<void> {
+    // Close with the received code when it is one that may be sent (1005 and 1006 are reserved for
+    // "no status" and "abnormal" and must never go on the wire), else a normal 1000.
     try {
-      ws.close(1000, 'closed')
+      ws.close(code === 1005 || code === 1006 ? 1000 : code, 'closed')
+    } catch {
+      // Already closed (the runtime auto-replies to close on current compatibility dates).
+    }
+  }
+
+  async webSocketError(ws: WebSocket): Promise<void> {
+    try {
+      ws.close(1011, 'error')
     } catch {
       // Already closed.
     }
