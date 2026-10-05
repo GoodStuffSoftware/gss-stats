@@ -35,6 +35,7 @@
 import { computed, onBeforeUnmount, ref, watch, reactive, toRaw, useId } from 'vue'
 import MetricCard from './MetricCard.vue'
 import CardEditorLabel from './editor/CardEditorLabel.vue'
+import { provideEditorContext } from './editor/editorContext'
 import CardEditorData from './editor/CardEditorData.vue'
 import CardEditorRepeat from './editor/CardEditorRepeat.vue'
 import CardEditorSection from './editor/CardEditorSection.vue'
@@ -64,6 +65,8 @@ const props = defineProps<{
 // Save button and say why, since `update:modelValue` alone never reports an invalid state (it
 // simply doesn't fire — see the doc block above). Always the SAME array the gate checks
 // (validateCard + cardLimitProblems); `[]` means the current draft is saveable.
+// The label editors below peek the values their Metrics inserts read right now from this context.
+provideEditorContext(() => props.context)
 const emit = defineEmits<{ 'update:modelValue': [CardRef]; errors: [string[]]; 'update:hiddenCaptions': [string[]] }>()
 
 const PRESET_OPTIONS = presetOptions()

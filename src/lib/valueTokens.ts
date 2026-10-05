@@ -50,7 +50,7 @@
 // withholds (counts-only rule; enforced server-side). Release 1 parses these paths and shows "—",
 // so nothing saved under it changes meaning. Full detail: lib/metricValueTokens.ts.
 // `chart.*` is "—" in a note widget (it belongs to a chart); release.*, golive.*, play.* and
-// metric: fill in both a chart caption and a note widget.
+// metric: fill in a chart caption, a note widget and a metric card's labels (MetricCard.vue).
 //
 // New paths and new formats are additive only; an existing path never changes kind.
 import type { StatsResponse, Widget } from '../types'

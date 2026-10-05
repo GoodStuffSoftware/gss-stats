@@ -6,14 +6,16 @@
 import { useMetricItemViewModel } from '../../composables/useMetricItem'
 import type { ScopeInstance } from '../../lib/metrics/scope'
 import type { MetricItem, MetricsContext } from '../../lib/metrics/types'
+import type { ValueResolver } from '../../lib/textLite'
 import MetricLabel from './MetricLabel.vue'
 
-const props = defineProps<{ item: MetricItem; scope: ScopeInstance; todayEt: string; context?: MetricsContext }>()
+const props = defineProps<{ item: MetricItem; scope: ScopeInstance; todayEt: string; context?: MetricsContext; values?: ValueResolver }>()
 const vm = useMetricItemViewModel(
   () => props.item,
   () => props.scope,
   () => props.context,
   props.todayEt,
+  () => props.values,
 )
 </script>
 
