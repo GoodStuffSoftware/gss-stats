@@ -69,6 +69,23 @@ describe('/api/geo meta.liveSafe', () => {
     const { meta } = await post({ dimension: 'country', constraints: [{ field: 'path', value: '/return/organic/d1' }], includeEventBeacons: true, ...range })
     expect('liveSafe' in meta).toBe(false)
   })
+  it('a NUL (U+0000) in a path drill value lacks it, whichever mode and toggle (fail-closed)', async () => {
+    for (const body of [{ dimension: 'country' }, { dimension: 'points' }, { dimensions: ['country', 'region'] }]) {
+      for (const includeEventBeacons of [true, false]) {
+        const { meta } = await post({ ...body, constraints: [{ field: 'path', value: '/tour/skip\u0000x' }], includeEventBeacons, ...range })
+        expect('liveSafe' in meta).toBe(false)
+      }
+    }
+    // A NUL inside the value, not only at its end, and a NUL in a pathFamily value.
+    for (const c of [{ field: 'path', value: '/\u0000' }, { field: 'path', value: '\u0000/tour/skip' }, { field: 'pathFamily', value: 'page\u0000' }]) {
+      const { meta } = await post({ dimension: 'country', constraints: [c], includeEventBeacons: true, ...range })
+      expect('liveSafe' in meta).toBe(false)
+    }
+  })
+  it('a NUL in a drill value on a non-path dimension does not change it', async () => {
+    const { meta } = await post({ dimension: 'country', constraints: [{ field: 'referrer', value: 'a\u0000b' }], ...range })
+    expect(meta.liveSafe).toBe(true)
+  })
   it('is computed whether or not the window moved (a whole-day window still has it)', async () => {
     const { meta } = await post({ dimension: 'country', since: '2026-09-30', until: '2026-10-02', limit: 100 })
     expect(meta.liveSafe).toBe(true)

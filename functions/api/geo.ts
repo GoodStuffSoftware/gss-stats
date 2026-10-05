@@ -387,7 +387,11 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const refusedWholeDays = tsWindow.moved && refusedReachable
   // Live-update opt-in (meta.liveSafe): only when no refused path can be counted by this query, so a
   // live "changed" ping may refetch it. Fail-closed, and independent of `moved`; omitted otherwise.
-  const liveSafe = !refusedReachable
+  // A NUL (U+0000) in a path or pathFamily drill value is never safe: the stored row may read as a
+  // refused path to the SQL guard (which sees the text up to the NUL) while the JS pattern match
+  // above finds none, so fail closed.
+  const nulPathValue = constraints.some((c) => (c.field === 'path' || c.field === 'pathFamily') && c.value.includes('\u0000'))
+  const liveSafe = !refusedReachable && !nulPathValue
   const splitGuardClause = (w: string[], b: any[]) => {
     if (splitGuardActive) refusedPathExcludeClause(w, b)
   }
