@@ -79,7 +79,7 @@
 //   - Flight boundaries (etFlightRangeMs, flightDaySqlCase) are ET days already.
 
 import { addDays, etDateFast, etWallTimeMs } from './etTime'
-import { isPopupEventPath, pathFamilyOf, sqlInt, sqlLit } from './popupEvents'
+import { NUL_PATH_SQL, isPopupEventPath, pathFamilyOf, sqlInt, sqlLit } from './popupEvents'
 
 /** Dimensions that tie a row to an hour, a place or a device. `dateEt` and `flightDay` are ET-day
  * totals and stay allowed; `site` (web vs. app) is a product split, not a device one. */
@@ -152,9 +152,6 @@ export const SPLIT_GUARD_CAPTION =
 export function splitRefused(opts: { points: boolean; fields: readonly string[] }): boolean {
   return opts.points || opts.fields.some((f) => SPLIT_REFUSED_DIMS.has(f))
 }
-
-/** True for a stored path that contains U+0000 (the JS matcher refuses those too). Literal SQL, no binds. */
-const NUL_PATH_SQL = 'instr(path, char(0)) > 0'
 
 /** `(path LIKE '/return/%' OR ... OR instr(path, char(0)) > 0)`, true for a refused row: for a WHERE clause or a CASE in a
  * SELECT list. The patterns are inlined as SQL literals through sqlLit, the same precedent as

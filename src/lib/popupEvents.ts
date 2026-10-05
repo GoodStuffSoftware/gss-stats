@@ -101,6 +101,10 @@ export function isPopupEventPath(path: string): boolean {
   return POPUP_EVENT_PREFIXES.some((p) => (p.endsWith('/') ? path.startsWith(p) : path === p || path.startsWith(p + '/')))
 }
 
+/** True for a stored path that contains U+0000 (the JS matcher refuses those too). Literal SQL, no binds. LIKE reads text
+ * only up to its first NUL; instr() sees the whole value. Lives here, not in splitGuard.ts, which imports this module. */
+export const NUL_PATH_SQL = 'instr(path, char(0)) > 0'
+
 /** Appends `path <> '<prefix>' AND path NOT LIKE '<prefix>/%'` (ANDed) for every prefix —
  * excludes all popup-event rows. A prefix that already ends in '/' (see
  * POPUP_EVENT_PREFIXES' `/game/complete/`) is matched with a single `path NOT LIKE
@@ -125,6 +129,11 @@ export function isPopupEventPath(path: string): boolean {
  * meant to bound. See functions/api/geo.derivedDims.test.ts's boundary tests for the
  * before/after bind counts, executed against the real handler. */
 export function popupExcludeClause(w: string[], _b: unknown[]): void {
+  // A path with a NUL is refused everywhere else (lib/splitGuard.ts), and LIKE stops reading at one, so the
+  // prefix tests below see a forged `/return<NUL>x` as `/return` (excluded) but `/page<NUL>x` as `/page` (kept).
+  // One AND-ed term, never folded into an OR: a NULL path gives NULL here, as it already does for the LIKE terms, so it is
+  // dropped exactly as before; '' and clean paths give true.
+  w.push(`NOT (${NUL_PATH_SQL})`)
   for (const prefix of POPUP_EVENT_PREFIXES) {
     if (prefix.endsWith('/')) {
       w.push(`path NOT LIKE ${sqlLit(`${prefix}%`)}`)
