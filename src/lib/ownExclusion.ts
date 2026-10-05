@@ -4,6 +4,8 @@
 // (lib/metrics/facts.ts) as well as geo.ts — uses the EXACT same semantics instead of
 // re-implementing the same De Morgan logic. Pure refactor: geo.ts's behavior is unchanged.
 
+import { sqlLit } from './popupEvents'
+
 // Hosts that count as "us" for excludeSelfReferrals — same list functions/api/stats.ts (RUM)
 // uses for its OWN_HOSTS, so every dataset agrees on what a self-referral is.
 export const OWN_HOSTS = [
@@ -40,9 +42,13 @@ export function excludeOwnClause(w: string[], b: unknown[], excludeOwn: boolean,
 // "Hide self-referrals" — on by default, but only actually filters a query that groups by
 // 'referrer' (so a region/city/etc. chart is never silently zeroed by a referrer-only
 // exclusion). Also drops blank/direct rows when active.
-export function selfReferralClause(activeDims: string[], w: string[], b: unknown[], excludeSelf: boolean): void {
+//
+// The host list is inlined as checked SQL literals (sqlLit refuses anything outside a plain
+// hostname alphabet, never a quote), so this clause binds NOTHING: ten bound parameters here were
+// a tenth of D1's 100-per-query cap on the referrer chart (functions/api/bindHeadroom.test.ts).
+// `_b` stays so every caller's (activeDims, w, b) shape is unchanged.
+export function selfReferralClause(activeDims: string[], w: string[], _b: unknown[], excludeSelf: boolean): void {
   if (!excludeSelf || !activeDims.includes('referrer')) return
   w.push(`referrer <> ''`)
-  w.push(`referrer NOT IN (${OWN_HOSTS.map(() => '?').join(', ')})`)
-  b.push(...OWN_HOSTS)
+  w.push(`referrer NOT IN (${OWN_HOSTS.map(sqlLit).join(', ')})`)
 }

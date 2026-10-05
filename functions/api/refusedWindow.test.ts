@@ -298,7 +298,7 @@ describe('bind ceiling', () => {
     expect(sub.calls[0].sql).toContain('CASE WHEN (path LIKE')
     expect(sub.calls[0].binds.length).toBe(aligned.calls[0].binds.length)
     expect(sub.calls[0].binds.length).toBeLessThan(100)
-    expect(sub.calls[0].binds.length).toBe(99) // measured: 97 with 3 registered campaigns, 99 with flight 2's two arms (each campaign adds one bind)
+    expect(sub.calls[0].binds.length).toBe(81) // measured: flat at 81 however many campaigns are registered (it was 97 with 3 and 99 with flight 2's two arms: each campaign added a bind until the lists were inlined)
   })
 })
 
@@ -505,7 +505,7 @@ describe('the daily twins follow the same rule', () => {
     const ranged = (Object.keys(FACTS) as FactId[]).filter((id) => FACTS[id].honors.includes('range'))
     const worst = Math.max(...ranged.map((id) => b(id, { ...sub, ...heavy })))
     expect(worst).toBeLessThan(100)
-    expect(worst).toBe(58) // measured: popupRangePath (popupRangeDaily 57, bskRangePath 23, bskRangeDaily 18)
+    expect(worst).toBe(57) // measured: popupRangePath and popupRangeDaily (bskRangePath and bskRangeDaily bind far fewer)
     expect(b('popupRangeDaily', { ...sub, ...heavy })).toBe(57) // measured: 2 + 50 sites + 2 hides + 3 install-gap
   })
 })
