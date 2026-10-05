@@ -1,5 +1,6 @@
 import { configDefaults, defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
+import { fileURLToPath } from 'node:url'
 
 // Build output goes to dist/ which Pages serves; functions/ is picked up by wrangler.
 // `defineConfig` comes from 'vitest/config' (re-exports vite's own) so component tests
@@ -19,6 +20,10 @@ export default defineConfig({
     port: 5173,
   },
   test: {
+    // workers/live imports the Workers runtime module `cloudflare:workers`, which Node does not have.
+    alias: {
+      'cloudflare:workers': fileURLToPath(new URL('./workers/live/test/cloudflare-workers-stub.ts', import.meta.url)),
+    },
     // Agent worktrees under .claude/worktrees/ are full checkouts with their own
     // test files; without this, `npm test` from the main checkout collects every
     // worktree's suite too, producing large numbers of spurious failing files.
