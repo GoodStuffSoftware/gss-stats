@@ -153,7 +153,10 @@ export function splitRefused(opts: { points: boolean; fields: readonly string[] 
   return opts.points || opts.fields.some((f) => SPLIT_REFUSED_DIMS.has(f))
 }
 
-/** `(path LIKE '/return/%' OR ...)`, true for a refused row: for a WHERE clause or a CASE in a
+/** True for a stored path that contains U+0000 (the JS matcher refuses those too). Literal SQL, no binds. */
+const NUL_PATH_SQL = 'instr(path, char(0)) > 0'
+
+/** `(path LIKE '/return/%' OR ... OR instr(path, char(0)) > 0)`, true for a refused row: for a WHERE clause or a CASE in a
  * SELECT list. The patterns are inlined as SQL literals through sqlLit, the same precedent as
  * lib/popupEvents.ts popupExcludeClause (the 2026-09-27 bind-ceiling fix): they are this module's
  * own constants, never request input, and binding them would spend eight of D1's 100 bound
@@ -161,10 +164,12 @@ export function splitRefused(opts: { points: boolean; fields: readonly string[] 
  * callers need not change if a pattern ever has to travel as a value. */
 export function refusedPathMatch(): { sql: string; binds: string[] } {
   const likes = SPLIT_REFUSED_PATH_PATTERNS.map((p) => `path LIKE ${sqlLit(p)}`)
-  return { sql: `(${likes.join(' OR ')})`, binds: [] }
+  // LIKE reads text up to its first NUL, so a stored `/return<NUL>x` looks like `/return` and
+  // slips past every pattern above; instr() sees the whole value. Same rule as isSplitRefusedPath.
+  return { sql: `(${likes.join(' OR ')} OR ${NUL_PATH_SQL})`, binds: [] }
 }
 
-/** Appends `NOT (path LIKE '/return/%' OR ...)` to `w`. Pushes nothing to `b` (see
+/** Appends `NOT (path LIKE '/return/%' OR ... OR instr(path, char(0)) > 0)` to `w`. Pushes nothing to `b` (see
  * refusedPathMatch). */
 export function refusedPathExcludeClause(w: string[], b: unknown[]): void {
   const m = refusedPathMatch()
