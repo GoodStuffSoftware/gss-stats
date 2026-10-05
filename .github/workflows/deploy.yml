@@ -62,6 +62,9 @@ jobs:
   deploy-live:
     if: github.ref == 'refs/heads/main' # a manual run from another branch must not deploy gss-live to production
     runs-on: ubuntu-latest
+    # Pages `deploy` waits on this job (needs), so a hung npm ci or wrangler must not hold it for the
+    # 360-minute default. A job timeout does not cancel the run, so Pages still runs.
+    timeout-minutes: 10
     permissions:
       contents: read
     # Never cancel a Worker deploy mid-flight; a newer push waits its turn.
@@ -72,9 +75,11 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # the changed-files check below diffs against the pre-push commit
-      # gss-live bundles workers/live/ only; the pinned wrangler (package-lock.json) and this workflow
-      # file are its other inputs. A manual run, a new/forced branch or an unknown base always deploys,
-      # unless the repo variable LIVE_DEPLOY_PAUSED is "true" (nothing deploys until it is removed).
+      # gss-live bundles workers/live/ only; this workflow file is its other input. package-lock.json is
+      # NOT a trigger: every release bumps its version fields, and a deploy drops every open socket. After
+      # a wrangler bump, use "Run workflow" to redeploy gss-live. A manual run, a new/forced branch or an
+      # unknown base deploys, unless the repo variable LIVE_DEPLOY_PAUSED is "true": then nothing deploys,
+      # a manual run included. After removing the variable, use "Run workflow" to ship what merged meanwhile.
       - name: Detect gss-live changes
         id: changes
         env:
@@ -83,7 +88,7 @@ jobs:
           PAUSED: ${{ vars.LIVE_DEPLOY_PAUSED }}
         run: |
           if [ "$PAUSED" = "true" ]; then
-            echo "deploy=false" >> "$GITHUB_OUTPUT"; echo "gss-live deploy PAUSED (repo variable LIVE_DEPLOY_PAUSED=true): skipping. Remove the variable to resume."; exit 0
+            echo "deploy=false" >> "$GITHUB_OUTPUT"; echo "gss-live deploy PAUSED (repo variable LIVE_DEPLOY_PAUSED=true): skipping. Remove the variable, then Run workflow to ship what merged meanwhile."; exit 0
           fi
           if [ "$EVENT" = "workflow_dispatch" ]; then
             echo "deploy=true" >> "$GITHUB_OUTPUT"; echo "Manual run: deploying gss-live."; exit 0
@@ -91,7 +96,7 @@ jobs:
           if ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
             echo "deploy=true" >> "$GITHUB_OUTPUT"; echo "No usable base commit: deploying gss-live."; exit 0
           fi
-          changed=$(git diff --name-only "$BEFORE" "$GITHUB_SHA" | grep -E '^(workers/live/|package-lock\.json$|\.github/workflows/deploy\.yml$)' | grep -vE '\.test\.ts$' || true)
+          changed=$(git diff --name-only "$BEFORE" "$GITHUB_SHA" | grep -E '^(workers/live/|\.github/workflows/deploy\.yml$)' | grep -vE '\.(test|spec)\.[cm]?[jt]s$' || true)
           if [ -n "$changed" ]; then
             echo "deploy=true" >> "$GITHUB_OUTPUT"; echo "gss-live inputs changed:"; echo "$changed"
           else

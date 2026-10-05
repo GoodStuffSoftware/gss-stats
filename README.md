@@ -1304,6 +1304,11 @@ polling. It is push, not a timer: nothing is sent while nothing happens.
    answer first. A hidden or idle tab closes its socket and drops pings; the existing
    return-to-tab refetch catches it up. With no socket at all, the dashboard behaves exactly as
    it did before live updates.
+5. The hub holds at most 100 sockets. At the cap a new connection **closes the oldest socket**
+   (close code 1013, "try again later") and is accepted, so one leaky tab or script evicts itself
+   instead of locking everyone else out; an evicted tab reconnects with backoff. Any answer from
+   `gss-live` other than a real WebSocket upgrade reaches the browser as a bare `503`, with no
+   detail.
 
 **Privacy: counts only (rows only).**
 
@@ -1326,22 +1331,25 @@ polling. It is push, not a timer: nothing is sent while nothing happens.
   midnight, as before.
 - **`/api/completions` never refreshes on a ping.** Its rows *are* refused paths.
 
-**D1 cost.** The free account allows 5M D1 rows read per day account-wide (about 29 % used on an
+**D1 cost (every figure here is an estimate from the design note, not a measurement).** The free account allows 5M D1 rows read per day account-wide (about 29 % used on an
 ordinary day, see [Capacity](#capacity)). A live refetch re-reads about 10k rows for an Overview
 batch and about 20k for a full chart page. Uncapped, a tab left visible 24 h with a non-refused row in
-every window would cost 96 × 10k = 960k rows a day (19 %) on the Overview and 96 × 20k = 1.92M (38 %) on
+every window would cost an estimated 96 × 10k = 960k rows a day (19 %) on the Overview and 96 × 20k = 1.92M (38 %) on
 a full chart page. Two caps bring this down: pings are ignored after 2 h without input, and a chart
-refetches on a ping at most hourly; a full chart page left open and used for 8 hours is then about
-400k rows (8 %). The edge cache and the 60 s return throttle still apply. Workers and the
-Durable Object cost $0 on Workers Free: about one notify per written non-refused beacon (hundreds
-to about 2,000 a day during a flight), at most 96 alarms a day plus reconnects, against 100k
+refetches on a ping at most hourly (metric cards are not capped, only charts are; the socket stays up to
+2 h after the last input); a full chart page left open and used for 8 hours is then about
+400k rows (8 %, an estimate that leaves out that 2 h tail, which would make it roughly 500k). The edge cache and the 60 s return throttle still apply. Workers and the
+Durable Object are estimated at $0 on Workers Free: about one notify per written non-refused beacon (hundreds
+to about 2,000 a day during a flight; each is one Durable Object request even with no tab open, though it
+sets no alarm then), at most 96 alarms a day plus reconnects, plus the 50 s keepalive, which may count as
+incoming messages at 20:1 (about 86 requests per all-day tab), against 100k
 Durable Object requests a day, with about zero billed duration under hibernation. No plan change
 and no D1 migration. Load detail: [docs/capacity.md §10](docs/capacity.md).
 
 **Deploy order and recovery.** `gss-live` has no public URL (`workers_dev = false`, no routes). Its
 only callers are two service bindings.
 
-1. Merge this PR first. `deploy-live` (see [Deploy](#deploy)) deploys `gss-live` before the Pages
+1. On the first deploy, `deploy-live` (see [Deploy](#deploy)) deploys `gss-live` before the Pages
    `deploy` job runs, because Pages' `LIVE` binding needs the Worker to exist.
 2. Check `gss-live` is in the Cloudflare Workers dashboard.
 3. Only then merge and deploy the beacon (`npm run deploy` in gss-beacon). Deployed earlier, its
@@ -1351,12 +1359,18 @@ only callers are two service bindings.
    network). If none appears, the beacon's binding or `entrypoint` is not wired.
 
 If `deploy-live` fails on the first merge (usually a token that lacks **Workers Scripts: Edit**),
-`gss-live` does not exist and the Pages deploy can fail on the missing binding target. Fix the token
+`gss-live` does not exist. **UNKNOWN: Cloudflare's docs do not say what a Pages deploy does when its
+`[[services]]` binding targets a Worker that does not exist.** It may reject the deploy (production
+stays on the previous version), accept it with `/api/live` answering `503` (the dashboard works without
+live updates), or accept it with the Functions bundle failing (every `/api/*` call breaks). If
+`deploy-live` is red but `deploy` is green, open stats.goodstuff.software at once and confirm the
+dashboard loads; `/api/live` returns `503` until `gss-live` exists. Fix the token
 (`CLOUDFLARE_WORKERS_API_TOKEN`, or `CLOUDFLARE_API_TOKEN`), then **Actions → Deploy → Run
-workflow** on `main`: a manual run always deploys `gss-live` first and then Pages. If `gss-live` is down
+workflow** on `main`: a manual run (when not paused) deploys `gss-live` first and then Pages. If `gss-live` is down
 later, notifies fail silently, sockets drop, tabs reconnect with backoff (1 s doubling to 5 min, kept across a tab switch) and
-the dashboard works as it did before. To stop automatic `gss-live` deploys, set the repo variable
-`LIVE_DEPLOY_PAUSED` to `true`.
+the dashboard works as it did before. To stop `gss-live` deploys, set the repo variable
+`LIVE_DEPLOY_PAUSED` to `true`: nothing deploys it then, a manual run included. After removing the
+variable, use **Run workflow** to ship what merged meanwhile.
 
 ## Docs
 
@@ -1438,8 +1452,9 @@ variable is removed or set to anything else.
 `deploy-live` does not by itself stop the Pages deploy). Pages binds `gss-live` as the `LIVE`
 service (`wrangler.toml`), so the Worker must exist first. It runs `npx vitest run workers/live`,
 then `npx wrangler deploy -c workers/live/wrangler.toml`, when a push to `main` changes
-`workers/live/**` (non-test files), `package-lock.json` or `deploy.yml`; **Run workflow** always
-deploys it, on `main` only. It uses the same token rule as `deploy-worker` (**Workers Scripts:
+`workers/live/**` (non-test files) or `deploy.yml`; **Run workflow** deploys it (unless paused), on `main` only.
+`package-lock.json` is deliberately not a trigger, because every release changes it and each deploy
+drops every open socket: after a wrangler bump, use **Run workflow** to redeploy `gss-live`. It uses the same token rule as `deploy-worker` (**Workers Scripts:
 Edit**; `CLOUDFLARE_WORKERS_API_TOKEN`, falling back to `CLOUDFLARE_API_TOKEN`), and the repo
 variable `LIVE_DEPLOY_PAUSED=true` skips it. `gss-live` has no secrets and no D1 access; its
 Durable Object migration ships in its own config. Dry run, no auth needed: `npm run live:check`.
