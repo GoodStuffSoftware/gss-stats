@@ -4,7 +4,7 @@
 // guarantee 6 (gating): a ping that arrives or comes due while the tab is hidden or idle is dropped,
 // and the socket is only open while the tab is visible and in use. Plus the contract: the same-origin
 // ws/wss URL, the ping timing (15-minute boundary + 95 s + 0-25 s), only the exact ping text acted
-// on, backoff 1 s doubling to 5 min with jitter and reset on open, the 50 s keepalive, and a
+// on, backoff 1 s doubling to 5 min with jitter and reset only after 60 s open, the 50 s keepalive, and a
 // constructor that throws being fail-soft.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -16,6 +16,7 @@ import {
   LIVE_FIRE_JITTER_MS,
   LIVE_IDLE_MS,
   LIVE_KEEPALIVE_MS,
+  LIVE_STABLE_MS,
   liveBackoffMs,
   liveFireAt,
   startLiveChanges,
@@ -448,7 +449,7 @@ describe('reconnect backoff', () => {
     expect(sockets()).toHaveLength(2)
   })
 
-  it('resets to 1 s when a socket opens', () => {
+  it('resets to 1 s only after the socket has stayed open for 60 s', () => {
     random = 1
     startLiveChanges()
     for (let i = 0; i < 5; i++) {
@@ -456,12 +457,42 @@ describe('reconnect backoff', () => {
       vi.advanceTimersByTime(LIVE_BACKOFF_CAP_MS)
     }
     expect(sockets()).toHaveLength(6)
-    last().open() // connected: the backoff resets
+    last().open()
+    vi.advanceTimersByTime(LIVE_STABLE_MS) // stayed open long enough: the backoff resets
     last().drop()
     vi.advanceTimersByTime(999)
     expect(sockets()).toHaveLength(6)
     vi.advanceTimersByTime(1)
     expect(sockets()).toHaveLength(7)
+  })
+
+  it('does not reset when a socket opens and closes before 60 s', () => {
+    random = 1
+    startLiveChanges()
+    last().drop() // attempt 0 -> 1 s
+    vi.advanceTimersByTime(1000)
+    last().open()
+    vi.advanceTimersByTime(LIVE_STABLE_MS - 1)
+    last().drop() // closed 1 ms short of stable: the next delay is 2 s, not 1 s
+    vi.advanceTimersByTime(1999)
+    expect(sockets()).toHaveLength(2)
+    vi.advanceTimersByTime(1)
+    expect(sockets()).toHaveLength(3)
+  })
+
+  it('a server that accepts then closes at once grows the backoff to the 5 min cap', () => {
+    random = 1
+    startLiveChanges()
+    const delays = [1000, 2000, 4000, 8000, 16000, 32000, 64000, 128000, 256000, 300000, 300000, 300000]
+    for (const d of delays) {
+      const n = sockets().length
+      last().open() // accepted...
+      last().drop() // ...and closed at once
+      vi.advanceTimersByTime(d - 1)
+      expect(sockets()).toHaveLength(n)
+      vi.advanceTimersByTime(1)
+      expect(sockets()).toHaveLength(n + 1)
+    }
   })
 
   it('an error followed by a close schedules ONE retry', () => {
