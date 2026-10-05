@@ -387,6 +387,15 @@ export interface UseMetrics {
    * component's `setup()` (a `MetricItem` mounted via `v-for` gets its own effect scope, same
    * as any other component). */
   request(spec: MetricRequestSpec): Readonly<Ref<MetricValue | undefined>>
+  /** Gives back one hold taken by a `request()` of this spec. When it was the last hold this
+   * instance has on the spec, the instance lets go of its cache entry: the entry leaves the
+   * shared cache (and with it the live-refetch set) unless another consumer still holds it, an
+   * unsent request is dropped, and an in-flight one is aborted only if nothing else is waiting on
+   * that POST (otherwise it carries on and its answer for this entry is discarded). Asking for the spec again later
+   * acquires a brand-new entry — no value and no liveSafe flag until a fresh response arrives. A
+   * spec this instance never requested is ignored. Not automatic: only a consumer whose set of
+   * wanted specs shrinks (a label or caption that dropped a token) needs it. */
+  release(spec: MetricRequestSpec): void
   /** Force a fresh fetch for exactly these specs, bypassing the server's Cache API entry
    * (`fresh: true`) — a reload control, never automatic. Always its own batch, so it never
    * drags an unrelated pending request into `fresh: true` with it. */
@@ -408,6 +417,9 @@ interface Consumer {
   entry: ShallowRef<CacheEntry>
   /** That entry's cache key, for release. */
   cKey: string
+  /** How many `request()` calls of this instance want the spec: `release()` gives them back one at
+   * a time, and the entry is let go with the last. A spec first seen by `reload()` has none. */
+  holds: number
 }
 
 /** `epoch` is a client-only part of the cache key, never sent: MetricCard passes today's ET
@@ -433,7 +445,7 @@ export function useMetrics(rawContext?: MaybeRefOrGetter<MetricsContext | undefi
     const existing = byReqKey.get(reqKey)
     if (existing) return existing
     const entry = acquireKey(current.ctxKey, current.context, reqKey, spec)
-    const c: Consumer = { spec, reqKey, entry: shallowRef(entry), cKey: cacheKeyOf(current.ctxKey, reqKey) }
+    const c: Consumer = { spec, reqKey, entry: shallowRef(entry), cKey: cacheKeyOf(current.ctxKey, reqKey), holds: 0 }
     byReqKey.set(reqKey, c)
     consumers.value = [...consumers.value, c]
     return c
@@ -470,6 +482,16 @@ export function useMetrics(rawContext?: MaybeRefOrGetter<MetricsContext | undefi
     })
   }
 
+  function release(spec: MetricRequestSpec) {
+    const c = byReqKey.get(requestKey(spec))
+    if (!c || disposed) return
+    c.holds = Math.max(0, c.holds - 1)
+    if (c.holds > 0) return
+    byReqKey.delete(c.reqKey)
+    consumers.value = consumers.value.filter((x) => x !== c)
+    releaseKey(c.cKey)
+  }
+
   function reload(specs: MetricRequestSpec[]) {
     for (const spec of specs) {
       const existing = byReqKey.get(requestKey(spec))
@@ -494,8 +516,10 @@ export function useMetrics(rawContext?: MaybeRefOrGetter<MetricsContext | undefi
   return {
     request: (spec) => {
       const c = addConsumer(spec)
+      c.holds++
       return computed(() => c.entry.value.value.value)
     },
+    release,
     reload,
     reloadAll: () => reload(consumers.value.map((c) => c.spec)),
     lastUpdated,
