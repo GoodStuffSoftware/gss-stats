@@ -28,6 +28,7 @@ const HARNESS_TESTS = [
   'callbackSignsInWithTheRuntimeFetch',
   'callbackRefusesATokenEndpointRedirect',
   'callbackTurnsAGoogleRejectionInto502',
+  'webSocketUpgradePassesTheGate',
 ]
 
 // Stands in for every host the harness fetches. The token endpoint replies with the
