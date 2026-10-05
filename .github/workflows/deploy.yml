@@ -16,8 +16,12 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Two independent jobs, so a Worker failure can never fail or block the Pages deploy:
-#   deploy         - the Pages site (every push to main).
+# Independent outcomes, so a Worker failure can never fail or block the Pages deploy:
+#   deploy         - the Pages site (every push to main). It waits for deploy-live (a Pages service
+#                    binding to gss-live needs that Worker to exist first) but runs even when
+#                    deploy-live fails or is skipped (see its `if`).
+#   deploy-live    - the gss-live Worker (workers/live/, the Durable Object behind live updates),
+#                    only when its inputs changed or on a manual run. Same token as deploy-worker.
 #   deploy-worker  - the gss-stats-sync Worker (workers/sync/), only when its inputs changed
 #                    (see "Detect Worker changes" below) or on a manual run. Its Cloudflare token
 #                    uses CLOUDFLARE_WORKERS_API_TOKEN, or CLOUDFLARE_API_TOKEN if that is unset
@@ -26,6 +30,12 @@ on:
 # newer push cancel the Worker job too.
 jobs:
   deploy:
+    # Order Pages after gss-live: Pages binds it as a service binding, and Cloudflare requires the
+    # target Worker to be deployed first. `!cancelled()` is a status function, so it replaces the
+    # implicit `success()`: Pages still runs when deploy-live failed or was skipped (without it a
+    # failed or skipped need skips this job too) and stops only if the whole run is cancelled.
+    needs: deploy-live
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     # One Pages deploy at a time; a newer push supersedes an in-flight run.
     concurrency:
@@ -48,6 +58,68 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: a32bba62c77df5e8f6bd33d04478ec34
+
+  deploy-live:
+    if: github.ref == 'refs/heads/main' # a manual run from another branch must not deploy gss-live to production
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    # Never cancel a Worker deploy mid-flight; a newer push waits its turn.
+    concurrency:
+      group: deploy-live
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the changed-files check below diffs against the pre-push commit
+      # gss-live bundles workers/live/ only; the pinned wrangler (package-lock.json) and this workflow
+      # file are its other inputs. A manual run, a new/forced branch or an unknown base always deploys,
+      # unless the repo variable LIVE_DEPLOY_PAUSED is "true" (nothing deploys until it is removed).
+      - name: Detect gss-live changes
+        id: changes
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          PAUSED: ${{ vars.LIVE_DEPLOY_PAUSED }}
+        run: |
+          if [ "$PAUSED" = "true" ]; then
+            echo "deploy=false" >> "$GITHUB_OUTPUT"; echo "gss-live deploy PAUSED (repo variable LIVE_DEPLOY_PAUSED=true): skipping. Remove the variable to resume."; exit 0
+          fi
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"; echo "Manual run: deploying gss-live."; exit 0
+          fi
+          if ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"; echo "No usable base commit: deploying gss-live."; exit 0
+          fi
+          changed=$(git diff --name-only "$BEFORE" "$GITHUB_SHA" | grep -E '^(workers/live/|package-lock\.json$|\.github/workflows/deploy\.yml$)' | grep -vE '\.test\.ts$' || true)
+          if [ -n "$changed" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"; echo "gss-live inputs changed:"; echo "$changed"
+          else
+            echo "deploy=false" >> "$GITHUB_OUTPUT"; echo "No gss-live inputs changed: skipping the gss-live deploy."
+          fi
+      - uses: actions/setup-node@v7
+        if: steps.changes.outputs.deploy == 'true'
+        with:
+          node-version: 24 # current LTS; wrangler 4.x requires Node >= 22
+          cache: npm
+      - if: steps.changes.outputs.deploy == 'true'
+        run: npm ci
+      - if: steps.changes.outputs.deploy == 'true'
+        run: npx vitest run workers/live # a red gss-live unit test stops its deploy too
+      # Declares the HUB Durable Object (migration v1) and the Notify entrypoint in
+      # workers/live/wrangler.toml; no secret value is needed beyond the API token.
+      - name: Deploy gss-live
+        id: deploy
+        if: steps.changes.outputs.deploy == 'true'
+        run: npx wrangler deploy -c workers/live/wrangler.toml
+        env:
+          # A Worker-capable token can be added without touching the Pages secret.
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: a32bba62c77df5e8f6bd33d04478ec34
+      - name: Explain a failed gss-live deploy
+        if: failure() && steps.deploy.conclusion == 'failure'
+        run: |
+          echo "::error::gss-live deploy failed. If the error above is an authentication or permission one (401/403, 'Authentication error', 'not authorized'), the token lacks Workers Scripts: Edit. This job authenticates with the repo secret CLOUDFLARE_WORKERS_API_TOKEN when set, otherwise CLOUDFLARE_API_TOKEN (the Pages token). Add or fix either secret (README: Deploy). Pages still deploys, but until gss-live exists a Pages deploy that binds it can fail: fix the token, then use Run workflow (a manual run forces this job)."
 
   deploy-worker:
     if: github.ref == 'refs/heads/main' # a manual run from another branch must not deploy its Worker to production
