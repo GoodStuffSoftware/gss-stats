@@ -20,7 +20,7 @@
 //        fresh?: true, requests: [{ key, metric | ratio, params?, window?, deltas?, series?, minCohort? }] }
 
 import { etDateFast } from '../../src/lib/etTime'
-import { deriveBatch, factKeyString, needsReleaseWindows, newSideMemo, planBatch, releaseWindowsFor, type BatchEnv, type FactResult, type Plan } from '../../src/lib/metrics/engine'
+import { deriveBatch, factKeyString, needsReleaseWindows, newSideMemo, planBatch, releaseWindowsFor, requestNeverCountsRefused, type BatchEnv, type FactResult, type Plan } from '../../src/lib/metrics/engine'
 import { prewarm } from '../../src/lib/metrics/prewarm'
 import { MAX_BODY_BYTES, MAX_STATEMENTS, validateMetricsRequest } from '../../src/lib/metrics/validate'
 import type { MetricsResponseBody } from '../../src/lib/metrics/types'
@@ -104,10 +104,18 @@ export const onRequestPost: PagesFunction<MetricFactsEnv> = async (ctx) => {
   const rest = plan.facts.filter((f) => !facts.has(f.key))
   const fetched = await fetchFacts({ facts: rest, statements: rest.reduce((a, f) => a + f.statements, 0) }, ctx.env, opts)
   for (const [k, v] of fetched.facts) facts.set(k, v)
+  const results = deriveBatch(batch.requests, { ...env, facts }, memo)
+  // `liveSafe: true` only where the metric (or both ratio sides) can never count a refused row
+  // (countsRefused === false), so a live "changed" ping may refetch it without moving a refused
+  // count. Fail-closed: anything else gets no key. deriveBatch shares one object across identical
+  // requests, so each flagged value is a copy.
+  for (const r of batch.requests) {
+    if (r.ok && requestNeverCountsRefused(r.req)) results[r.key] = { ...results[r.key], liveSafe: true }
+  }
   const body: MetricsResponseBody = {
     v: 1,
     generatedAt: new Date(nowMs).toISOString(),
-    results: deriveBatch(batch.requests, { ...env, facts }, memo),
+    results,
     meta: { facts: plan.facts.length, cacheHits: cacheHits + fetched.cacheHits, statements: statements + fetched.statements },
   }
   return json(body)

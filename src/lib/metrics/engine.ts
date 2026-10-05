@@ -238,6 +238,24 @@ function resolveStatic(memo: SideMemo, def: MetricDef, req: Pick<ResolvedRequest
   return v
 }
 
+/** Whether a request can never count a refused row: its metric, or BOTH sides of its ratio, set
+ * countsRefused: false. Fail-closed: an unknown id or a missing side is false. The live-update
+ * flag (`liveSafe`) is derived from this alone; the registries are injectable for tests. */
+export function requestNeverCountsRefused(
+  req: Pick<ResolvedRequest, 'kind' | 'id'>,
+  metrics: ReadonlyMap<string, MetricDef> = METRICS,
+  ratios: ReadonlyMap<string, RatioDef> = RATIOS,
+): boolean {
+  const sides: (MetricDef | undefined)[] =
+    req.kind === 'metric'
+      ? [metrics.get(req.id)]
+      : (() => {
+          const r = ratios.get(req.id)
+          return r ? [metrics.get(r.num), metrics.get(r.den)] : []
+        })()
+  return sides.length > 0 && sides.every((d) => d !== undefined && !countsRefusedRows(d))
+}
+
 function sidesOf(req: ResolvedRequest): MetricDef[] {
   if (req.kind === 'metric') return [METRICS.get(req.id)!]
   const r = RATIOS.get(req.id)!
