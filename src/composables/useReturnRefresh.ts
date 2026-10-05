@@ -101,9 +101,50 @@ export function useReturnRefresh(cb: () => void): void {
   else off()
 }
 
+// ── Live changes (composables/useLiveChanges.ts) ─────────────────────────────────────────────
+// A second, separate source: the server's "something changed" push, already delayed past the edge
+// cache and dropped while hidden or idle by the socket composable. Its subscribers are their own
+// set, so a return never wakes a live subscriber and a push never wakes a return subscriber. Each
+// live subscriber applies its own gate (isStale / isInFlight above, plus its own opt-in: only data
+// the server marked `liveSafe`), exactly as the return subscribers do.
+const liveSubscribers = new Map<() => void, number>() // callback -> subscription count
+
+/** Subscribes `cb` to "the server pushed a change"; returns the unsubscribe. */
+export function onLiveChange(cb: () => void): () => void {
+  liveSubscribers.set(cb, (liveSubscribers.get(cb) ?? 0) + 1)
+  let done = false
+  return () => {
+    if (done) return
+    done = true
+    const n = (liveSubscribers.get(cb) ?? 1) - 1
+    if (n > 0) liveSubscribers.set(cb, n)
+    else liveSubscribers.delete(cb)
+  }
+}
+
+/** `onLiveChange` tied to the current effect scope (a component's setup): unsubscribed when it ends. */
+export function useLiveRefresh(cb: () => void): void {
+  const off = onLiveChange(cb)
+  if (getCurrentScope()) onScopeDispose(off)
+  else off()
+}
+
+/** Fires every live subscriber once (never while hidden). Called by useLiveChanges only. */
+export function emitLiveChange(): void {
+  if (isHidden()) return
+  for (const cb of [...liveSubscribers.keys()]) {
+    try {
+      cb()
+    } catch {
+      // one subscriber's failure must not stop the others
+    }
+  }
+}
+
 /** Test-only: drops every subscriber and the listener. */
 export function __resetReturnRefreshForTests(): void {
   subscribers.clear()
+  liveSubscribers.clear()
   uninstall()
   if (timer) clearTimeout(timer)
   timer = null
