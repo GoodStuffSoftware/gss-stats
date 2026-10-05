@@ -309,7 +309,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
   },
   'carry-over-weak-signal': {
     id: 'carry-over-weak-signal',
-    text: 'Carry-over completions are games finished by visitors who did not arrive through an ad campaign; the retention spec rates this a weak signal.',
+    text: 'Carry-over completions are games finished with no campaign tag on the visit, mostly players coming back on their own but also ad-acquired players who return after the 30-minute tag expires, so a weak signal.',
     kind: 'note',
     severity: 'caveat',
     scopes: [],
@@ -685,7 +685,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.preset.retention-verdict.description': 'One row per campaign and the organic baseline: the verdict, the days 2-7 return rate with its 90% bounds, arrivals, and completed games per arrival.',
     'label.preset.campaign-engagement': 'Engagement per arrival',
     'label.preset.carry-over-completions': 'Carry-over completions',
-    'label.preset.carry-over-completions.description': 'Games completed per day by visitors who did not come from an ad campaign, beside the site-wide total. Whole-day counts only; the spec rates it a weak signal.',
+    'label.preset.carry-over-completions.description': 'Games completed per day with no campaign tag, mostly players coming back on their own, beside the site-wide total. Whole-day counts only; a weak signal.',
     'label.preset.play-installs': 'Play installs',
     'label.preset.play-installs.description': "Google Play's own device installs and uninstalls over the date range, the latest active device installs in it, and how far Play's data runs. Whole-app counts; not split by campaign.",
     'label.preset.campaign-engagement.description': 'One card per beacon-tracked campaign: completed games per first tagged load, with the two counts it is made of.',

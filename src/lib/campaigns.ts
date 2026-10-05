@@ -503,11 +503,14 @@ export function keyEventOf(path: string, tsMs: number, fixedAtMs: number | null 
   return ''
 }
 
-/** Bound prefilter for a campaignFlight query: rows carrying any flight's uc value. */
-export function campaignFlightPrefilter(w: string[], b: unknown[]): void {
+/** Prefilter for a campaignFlight query: rows carrying any flight's uc value. The values are
+ * inlined as checked literals (sqlLit), NOT bound: a bind per registered uc value made this query
+ * grow by one parameter for every campaign, toward D1's 100-per-query cap (the worst /api/geo shape
+ * reached 99 once flight 2's arms registered; functions/api/bindHeadroom.test.ts holds it flat).
+ * `_b` stays so every prefilter keeps one (w, b) shape. */
+export function campaignFlightPrefilter(w: string[], _b: unknown[]): void {
   const ucs = [...new Set(CAMPAIGNS.flatMap((c) => c.ucValues))]
-  w.push(`campaign IN (${ucs.map(() => '?').join(', ')})`)
-  b.push(...ucs)
+  w.push(`campaign IN (${ucs.map(sqlLit).join(', ')})`)
 }
 
 // ── Funnel steps ─────────────────────────────────────────────────────────────────────
@@ -602,10 +605,10 @@ export function gameDimSqlCase(dim: 'gameMode' | 'gameDifficulty', emptyLabel: s
   const value = dim === 'gameMode' ? `substr(${rest}, 1, ${slash} - 1)` : tail
   return `CASE WHEN substr(path, 1, ${sqlInt(P.length)}) <> ${sqlLit(P)} THEN ${sqlLit(emptyLabel)} WHEN ${wellFormed} THEN ${value} ELSE ${sqlLit(GAME_OTHER_BUCKET)} END`
 }
-/** Bound prefilter for a gameMode/gameDifficulty query: completion rows only. */
-export function gameDimPrefilter(w: string[], b: unknown[]): void {
-  w.push('path LIKE ?')
-  b.push(`${GAME_COMPLETE_PREFIX}%`)
+/** Prefilter for a gameMode/gameDifficulty query: completion rows only (the prefix is an inlined
+ * checked literal, no bound parameter). */
+export function gameDimPrefilter(w: string[], _b: unknown[]): void {
+  w.push(`path LIKE ${sqlLit(`${GAME_COMPLETE_PREFIX}%`)}`)
 }
 /** JS reading of the gameMode / gameDifficulty dimension ('' = not a completion). */
 export function gameDimOf(dim: 'gameMode' | 'gameDifficulty', path: string): string {

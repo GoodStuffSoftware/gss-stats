@@ -700,7 +700,11 @@ default (same dataset, title, type, metric, limit and release markers, any id or
 match is a frozen copy of what v14 stored, not the current factories), and a chart with any other
 title or setting keeps its axis. Charts by `dateEt` are unchanged. The "hide known test and household traffic" filter is
 unchanged. The guard's path patterns are inlined as SQL literals, so it costs no D1 bound
-parameters; the heaviest in-cap `/api/geo` shapes tested bind at most 99 of D1's 100.
+parameters. So are the other registry-driven lists (the campaign `utm_campaign` values, the game-completion
+prefix, the own-hosts exclusion and the metric segment cuts, each checked by `sqlLit` / `sqlInt`, which refuse
+a quote), so a server query's bind count does not grow with the campaigns or patterns registered: every
+`/api/geo` shape binds at most 81 of D1's 100, and a test fails any query that binds more than 90, with extra
+campaigns registered.
 
 Two things stay allowed, by ruling (2026-10-03). **New vs returning:** the device may remember
 its own first visit, so a row's new/returning bit stays on these rows; it is what makes an
@@ -1141,14 +1145,17 @@ gain it, so add it from the card picker ("Play installs").
 
 The Retention page's **Carry-over completions** card (preset `carry-over-completions`: the
 site-wide `bsk.completions` total beside the `bsk.carryOverCompletions` per-day line) shows games
-completed per ET day that did **not** come from an ad campaign, i.e. site-wide completions minus
-campaign-tagged ones. It is a weak signal by the retention spec, and the card says so.
+completed per ET day with **no campaign tag** on the beacon row: mostly players coming back on their
+own, but a weak signal. The campaign tag lasts only 30 minutes, so an ad-acquired player who returns
+later is untagged and counts here too. The card says so.
 
 - **Definition.** "Tagged" is the shipped `anyTag` rule (any non-empty `campaign` on the beacon row,
   as `bsk.taggedArrivals`); carry-over is the complement, counted from the same completion rows as
-  `bsk.completions` (the page's sites, date range and refused-row whole-day snap), so tagged plus
-  carry-over is the site-wide count each day and it can never go below zero. BSK's first-touch and
-  organic rules belong to the returns metrics and are not re-derived here.
+  `bsk.completions` (the page's sites, date range and refused-row whole-day snap), so it is never
+  above the site-wide count and can never go below zero. BSK's first-touch and organic rules belong
+  to the returns metrics and are not re-derived here. No tagged-completions metric ships, and
+  `campaign.completions` uses a different tagged rule (registered tags from the flight start), so
+  carry-over plus the campaign completions is not the site-wide count.
 - **Counts only.** It reads the existing `bskRangePath` / `bskRangeDaily` facts: ET-day totals, no
   hour, place or device column, no visitor id and no clock time, and no new SQL or bind.
 - **Only new Retention pages.** It is in the page template, so a new page (and "Restore default

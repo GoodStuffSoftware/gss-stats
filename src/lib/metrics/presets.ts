@@ -505,10 +505,10 @@ export const PLAY_INSTALLS: CardSpec = {
   captions: ['play-days', 'play-household', 'play-no-retention'],
 }
 
-/** Carry-over completions (retention spec S1): game completions per ET day that did NOT come from an
- * ad campaign (site-wide minus campaign-tagged), beside the site-wide total over the page's range.
+/** Carry-over completions (retention spec S1): game completions per ET day with no campaign tag
+ * (mostly returning players; the tag lasts 30 minutes, so some are ad-acquired), beside the site-wide total over the page's range.
  * Whole-ET-day counts only: no hour, place or device split, no clock time, no visitor grouping. The
- * spec rates it a weak signal, and the card's caption says so. */
+ * card's caption says it is a weak signal. */
 export const CARRY_OVER_COMPLETIONS: CardSpec = {
   v: 1,
   minWidth: 230,
