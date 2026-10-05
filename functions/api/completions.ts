@@ -29,6 +29,7 @@ import { parseGameCompletePath } from '../../src/lib/campaigns'
 import { buildCacheKeyUrl, cachedJson, ttlSecondsFor, type CacheLike } from '../_lib/edgeCache'
 import { WHEN_RE, SITE_TAG_RE } from '../../src/lib/range'
 import { refusedRowWindow, REFUSED_WINDOW_KEY } from '../../src/lib/splitGuard'
+import { MAX_SITES, statementTooLarge } from '../../src/lib/queryLimits'
 
 interface Env {
   gss_geo: D1Database
@@ -77,6 +78,9 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const refusedWholeDays = fromMs !== sinceMs || toMs !== untilMs
 
   const rawSites: unknown[] = Array.isArray(body.sites) ? body.sites : body.site != null ? [body.site] : []
+  // Same cap as /api/geo and /api/popups (src/lib/queryLimits.ts): this reader had none, so 99 or
+  // more sites would have reached D1 as 101+ bound parameters and come back a raw 500.
+  if (rawSites.length > MAX_SITES) return json({ error: `too many sites (at most ${MAX_SITES})` }, 400)
   const sites = rawSites.filter((s): s is string => typeof s === 'string' && s !== 'all' && SITE_TAG_RE.test(s))
 
   // Same per-colo edge cache as /api/geo.ts — everything that changes the SQL (and therefore
@@ -107,6 +111,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     b.push(...sites)
   }
   const sql = `SELECT path, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY path`
+  const tooLarge = statementTooLarge(sql, b.length)
+  if (tooLarge) return tooLarge
   let res: any
   try {
     res = await ctx.env.gss_geo.prepare(sql).bind(...b).all()

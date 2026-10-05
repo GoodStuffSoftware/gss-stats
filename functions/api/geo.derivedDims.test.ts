@@ -354,8 +354,9 @@ describe('review fixes: arrivals, raw signals, date limit, request caps', () => 
     expect(calls[0].binds.length).toBeLessThan(100)
     // A device ring is a refused split, so the counts-only guard (src/lib/splitGuard.ts) leaves
     // return / game-start / completion / tutorial-completion / tour-skip / tour-exit rows out — with its
-    // patterns inlined as SQL literals, it adds no binds, so this stays at 81 (measured).
-    expect(calls[0].binds.length).toBe(81)
+    // patterns inlined as SQL literals, it adds no binds. 71 = 2 window + 10 exclusions + 50 sites + 16
+    // path filters + 2 hide-my-own-visits + 1 limit (measured; the 10 own-host binds are literals now).
+    expect(calls[0].binds.length).toBe(71)
   })
 
   it('the same worst case PLUS "hide known test/household traffic" (the old 110-bind fixture) is also allowed now', async () => {
@@ -374,12 +375,14 @@ describe('review fixes: arrivals, raw signals, date limit, request caps', () => 
     expect(body.error).toBeUndefined()
     expect(calls).toHaveLength(1)
     expect(calls[0].binds.length).toBeLessThan(100)
-    expect(calls[0].binds.length).toBe(91) // measured; the split guard adds no binds, as above
+    expect(calls[0].binds.length).toBe(81) // measured; the 10 known-traffic exclusions are the only addition to the 71 above
   })
 
   // R-1b review (2026-10-03): with the split guard's six patterns BOUND, these two in-cap requests
   // reached 102 and 103 bound parameters and were refused with a 400. The patterns are now SQL
-  // literals (src/lib/splitGuard.ts refusedPathMatch), so both run. Measured: 96 and 97 binds with 3 registered campaigns; 98 and 99 with the 5 of flight 2 (each campaign adds one bind).
+  // literals (src/lib/splitGuard.ts refusedPathMatch), so both run. Both bind 81 (measured): the campaign
+  // list, the game prefix and the own hosts are inlined as checked literals, so registering a campaign
+  // adds no bind (it added one each, reaching 98 and 99 with flight 2's arms; bindHeadroom.test.ts guards it).
   const maxed = {
     sites: Array.from({ length: 50 }, (_, i) => `s${i}`),
     excludeOwnVisits: true,
@@ -398,7 +401,7 @@ describe('review fixes: arrivals, raw signals, date limit, request caps', () => 
     })
     expect(body.error).toBeUndefined()
     expect(calls).toHaveLength(1)
-    expect(calls[0].binds.length).toBe(98)
+    expect(calls[0].binds.length).toBe(81)
   })
   it('a six-dim ring [referrer, device, campaignFlight, gameMode, popupFamily, flightDay] at the caps answers 200', async () => {
     const { body, calls } = await post({
@@ -410,16 +413,16 @@ describe('review fixes: arrivals, raw signals, date limit, request caps', () => 
     })
     expect(body.error).toBeUndefined()
     expect(calls).toHaveLength(1)
-    expect(calls[0].binds.length).toBe(99)
+    expect(calls[0].binds.length).toBe(81)
   })
 
   // statementTooLarge itself (src/lib/queryLimits.ts, re-exported from './geo') still refuses
   // over-cap statements — exercised directly since, with the exclusion clause now bind-free,
   // no combination of MAX_SITES (50) + MAX_CONSTRAINTS (16) + every other toggle reaches 100
   // bound parameters through the real handler any more (the referrer x device tests above are the
-  // ceiling for that shape, at 81 and 91; the heaviest measured shapes are the two rings, at 98
-  // and 99; a 7th registered campaign would put the six-dim ring over 100). The guard stays in place as defense in depth for when
-  // POPUP_EVENT_PREFIXES, CAMPAIGNS, or EXCLUSIONS grow enough to matter again.
+  // ceiling for that shape, at 71 and 81; the heaviest measured shapes, the two rings, also bind 81 and
+  // stay there however many campaigns are registered). The guard stays in place as defense in depth for
+  // when POPUP_EVENT_PREFIXES or EXCLUSIONS grow enough to matter again.
   it('statementTooLarge still refuses a statement over 100 bound parameters', () => {
     const res = statementTooLarge('SELECT 1', 101)
     expect(res).not.toBeNull()
