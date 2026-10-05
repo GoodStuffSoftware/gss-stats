@@ -221,4 +221,57 @@ describe('useMetrics: refetch on a live change', () => {
     expect(all[1].requests).toHaveLength(3)
     stop()
   })
+
+  // The flag lives on the cache entry of ONE request (context + canonical spec). A spec change in a
+  // card is a different request, so a new entry that starts with no value and no flag: the old
+  // request's flag cannot carry over to it (the class of bug PR #93's review found in ChartCard).
+  describe('the flag belongs to the request it answered', () => {
+    // campaign 1 answers flagged; any other campaign answers without the flag
+    function perCampaignFetch(hangFor?: string) {
+      return vi.fn().mockImplementation(async (_u: string, init: RequestInit) => {
+        const body = JSON.parse(init.body as string) as MetricsRequestBody
+        if (hangFor && body.requests.every((r) => r.params?.campaignId === hangFor)) return new Promise(() => {})
+        const results = Object.fromEntries(
+          body.requests.map((r) => [r.key, { status: 'ok', value: 1, ...(r.params?.campaignId === '1' ? { liveSafe: true } : {}) }]),
+        )
+        return { ok: true, status: 200, json: async () => ({ v: 1, generatedAt: 'x', results }) }
+      })
+    }
+    const edited = (patch: Partial<MetricRequestSpec>): MetricRequestSpec => ({ ...safe, ...patch })
+
+    it('a card whose spec changes (another campaign, another window): only the answer that came back flagged refetches', async () => {
+      const fetchMock = perCampaignFetch()
+      vi.stubGlobal('fetch', fetchMock)
+      const scope = effectScope()
+      const m = scope.run(() => useMetrics())!
+      m.request(safe)
+      await vi.advanceTimersByTimeAsync(20)
+      m.request(edited({ params: { campaignId: '2' } })) // the spec changed: a new request, answered without the flag
+      m.request(edited({ window: 'flight' as never })) // ...and a new window (a new request; its own answer is flagged)
+      await vi.advanceTimersByTimeAsync(20)
+      await vi.advanceTimersByTimeAsync(RETURN_MIN_AGE_MS + 1000)
+      await live()
+      const last = posts(fetchMock).at(-1)!
+      expect(last.requests).toHaveLength(2) // campaign 1 under both windows (each answered flagged on its own); campaign 2 is left out
+      expect(last.requests.every((r) => r.params?.campaignId === '1')).toBe(true)
+      scope.stop()
+    })
+
+    it('a changed spec whose answer is still on its way is not refetched by a push', async () => {
+      const fetchMock = perCampaignFetch('2')
+      vi.stubGlobal('fetch', fetchMock)
+      const scope = effectScope()
+      const m = scope.run(() => useMetrics())!
+      m.request(safe)
+      await vi.advanceTimersByTimeAsync(20)
+      m.request(edited({ params: { campaignId: '2' } })) // hangs: never settles, never carries a flag
+      await vi.advanceTimersByTimeAsync(20)
+      const before = fetchMock.mock.calls.length
+      await vi.advanceTimersByTimeAsync(RETURN_MIN_AGE_MS + 1000)
+      await live()
+      const sent = posts(fetchMock).slice(before)
+      expect(sent.flatMap((b) => b.requests).filter((r) => r.params?.campaignId === '2')).toHaveLength(0)
+      scope.stop()
+    })
+  })
 })

@@ -286,7 +286,30 @@ let settledAt: number | null = null
 // row"; a series chart makes one query per series). Fail-closed: cleared whenever a foreground
 // load starts or a response without the flag lands, so absent, false, an error or an old server
 // never refetches on a push. /api/completions, /api/stats and /api/popups never set it.
+// The flag is bound to the exact request it answered (`liveSafeKey` = `requestKey` at the load's
+// start): any change to the request (type, rings, dataset, a filter, a drill... anything but the
+// layout and drawing-only fields) invalidates it until a NEW response for the new request arrives
+// flagged. It is also cleared the moment the request changes, so a field that is added later (and
+// not listed in `dataKey`) cannot keep an old answer's flag alive.
 let liveSafe = false
+let liveSafeKey: string | null = null
+// Everything that is not the chart's request: grid geometry and drawing/caption-only fields. The
+// request identity is the REST of the widget (deny-list, so a new field defaults to part of it) plus
+// the effective filters.
+const NON_REQUEST_FIELDS = new Set([
+  'x', 'y', 'w', 'h', 'i', 'id', 'fit', 'title', 'note', 'noteId', 'longText', 'notes', 'caption', 'hiddenCaveats', 'isDefault',
+  'markers', 'goLiveMarkers', 'flightBands', 'cumulative', 'axisTitles', 'barMode',
+])
+const requestKey = computed(() =>
+  JSON.stringify({
+    w: Object.fromEntries(Object.entries(props.widget).filter(([k]) => !NON_REQUEST_FIELDS.has(k))),
+    f: effectiveFilters.value,
+  }),
+)
+watch(requestKey, () => {
+  liveSafe = false
+  liveSafeKey = null
+}, { flush: 'sync' })
 let lastLiveRefetchAt: number | null = null
 async function load(background = false) {
   if (isBespokeBody.value) return // own data fetch (or none) — see MetricCard/NoteWidgetBody
@@ -298,10 +321,12 @@ async function load(background = false) {
     return
   }
   const my = ++reqId
+  const sentKey = requestKey.value // the request this load sends (it reads props synchronously below)
   if (!background) {
     loading.value = true
     error.value = null
     liveSafe = false
+    liveSafeKey = null
   }
   loadStartedAt = Date.now()
   try {
@@ -312,6 +337,7 @@ async function load(background = false) {
       const all = await fetchSeriesStats(props.widget, effectiveFilters.value)
       if (my === reqId) {
         liveSafe = all.length > 0 && all.every((r) => r.meta?.liveSafe === true)
+        liveSafeKey = sentKey
         seriesData.value = all
         const splitGuard = all.some((r) => r.meta?.splitGuard)
         const refusedWholeDays = all.some((r) => r.meta?.refusedWholeDays)
@@ -326,6 +352,7 @@ async function load(background = false) {
       const r = await fetchStats(props.widget, effectiveFilters.value)
       if (my === reqId) {
         liveSafe = r.meta?.liveSafe === true
+        liveSafeKey = sentKey
         seriesData.value = null
         data.value = r
       }
@@ -369,7 +396,7 @@ const liveBlocked = computed(
   () => props.widget.dataset === 'completions' || props.widget.includeEventBeacons === true || effectiveFilters.value.includeEventBeacons === true,
 )
 function refetchOnLive() {
-  if (isBespokeBody.value || liveBlocked.value || !liveSafe || isInFlight(loadStartedAt) || !isStale(settledAt)) return
+  if (isBespokeBody.value || liveBlocked.value || !liveSafe || liveSafeKey !== requestKey.value || isInFlight(loadStartedAt) || !isStale(settledAt)) return
   const now = Date.now()
   if (lastLiveRefetchAt != null && now < lastLiveRefetchAt + LIVE_REFETCH_MIN_GAP_MS) return
   lastLiveRefetchAt = now
@@ -380,6 +407,12 @@ useLiveRefresh(refetchOnLive)
 // Refetch only when a data-affecting input changes (not on move/resize).
 const dataKey = computed(() =>
   JSON.stringify({
+    // The widget's type, ring list and dataset decide the query too (api.ts maps type 'map' to the
+    // `points` dimension, sends the rings, and routes on the dataset), so an editor save that
+    // changes only one of them must reload.
+    t: props.widget.type,
+    r: props.widget.rings,
+    ds: props.widget.dataset,
     d: props.widget.dimension,
     b: props.widget.breakdown,
     m: props.widget.metric,

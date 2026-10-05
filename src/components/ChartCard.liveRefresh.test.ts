@@ -34,6 +34,9 @@ vi.mock('../session', async (importOriginal) => {
 
 const filters: GlobalFilters = { siteSel: [], since: '2026-09-01', until: '2026-09-26', excludeSelfReferrals: false, excludeOwnVisits: false, ownBrowser: '', ownOS: '' }
 const stat: Widget = { id: 'w1', i: 'w1', title: 'Pageviews', type: 'stat', dataset: 'geo', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 0, w: 3, h: 3 }
+// NOTE (fixture realism): the real server never flags a keyEvent-filtered series liveSafe (keyEvent lifts
+// the refused-path exclusion). The unit mock below flags every side so the CLIENT's every-side rule can
+// be exercised; it is not the server contract (see functions/api/geo.ts).
 const series: Widget = {
   ...stat,
   type: 'line',
@@ -272,6 +275,94 @@ describe('ChartCard: refetch on a live change', () => {
       await vi.advanceTimersByTimeAsync(RETURN_MIN_AGE_MS + 1000)
       await live()
       expect(w.text()).toContain('321')
+    })
+  })
+
+  // The editor saves a NEW widget object with the same id: the card stays mounted. A response's
+  // `liveSafe` answers only the request it was fetched for, so any change to the request must drop
+  // the flag until a response for the new request arrives flagged. These pin the review of PR #93
+  // (S1-1): the ping used to refetch the edited, refused-capable request on the old flag.
+  describe('the flag belongs to the request it answered', () => {
+    const geo: Widget = { ...stat, type: 'doughnut' as never, dimension: 'region', breakdown: 'device', limit: 10 }
+    // The server's side: a query that can reach a refused row (keyEvent lifts the exclusion) or any
+    // dataset but geo comes back unflagged.
+    const refusedCapable = (w: Widget) =>
+      w.dataset !== 'geo' ||
+      (w.rings ?? []).includes('keyEvent') ||
+      w.breakdown === 'keyEvent' ||
+      (w.type !== 'map' && w.dimension === 'keyEvent')
+    beforeEach(() => {
+      stats.mockImplementation(async (w) => resp(5, refusedCapable(w) ? undefined : true))
+    })
+    async function editThenPing(before: Widget, after: Widget) {
+      const w = await mountCard(before)
+      await vi.advanceTimersByTimeAsync(RETURN_MIN_AGE_MS + 1000)
+      await w.setProps({ widget: after })
+      await settle()
+      const afterEdit = stats.mock.calls.length
+      await vi.advanceTimersByTimeAsync(RETURN_MIN_AGE_MS + 1000)
+      await live()
+      return { afterEdit, afterPing: stats.mock.calls.length }
+    }
+
+    it('adding a keyEvent ring: the ping does not refetch the new, refused-capable request', async () => {
+      const { afterEdit, afterPing } = await editThenPing(geo, { ...geo, rings: ['keyEvent'] })
+      expect(afterPing).toBe(afterEdit)
+    })
+
+    it('changing the type from map to bar (a stored keyEvent dimension now reaches the query): no refetch on the ping', async () => {
+      const map: Widget = { ...geo, type: 'map', dimension: 'keyEvent', breakdown: undefined }
+      const { afterEdit, afterPing } = await editThenPing(map, { ...map, type: 'bar' })
+      expect(afterPing).toBe(afterEdit)
+    })
+
+    it('changing the dataset: no refetch on the ping (only /api/geo answers are ever flagged)', async () => {
+      const { afterEdit, afterPing } = await editThenPing(geo, { ...geo, dataset: 'popup' })
+      expect(afterPing).toBe(afterEdit)
+    })
+
+    it('a request field that is NOT in the reload key still drops the flag (fail-closed by construction)', async () => {
+      const { afterEdit, afterPing } = await editThenPing(geo, { ...geo, campaignIds: ['1'] })
+      expect(afterEdit).toBe(1) // no reload for this edit: only the flag clearing protects the ping
+      expect(afterPing).toBe(afterEdit)
+    })
+
+    it('a page filter change that is still loading (a hung response) is not doubled by the ping', async () => {
+      const w = await mountCard(geo)
+      await vi.advanceTimersByTimeAsync(RETURN_MIN_AGE_MS + 1000)
+      stats.mockImplementation(() => new Promise(() => {}))
+      await w.setProps({ filters: { ...filters, drill: [{ key: 'device', value: 'mobile', label: 'mobile' }] } })
+      await settle()
+      expect(stats).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(RETURN_MIN_AGE_MS + 1000)
+      await live()
+      expect(stats).toHaveBeenCalledTimes(2)
+    })
+
+    it('after an edit, the NEW response flags the card again and live refetching resumes', async () => {
+      const { afterEdit, afterPing } = await editThenPing(geo, { ...geo, limit: 20 })
+      expect(afterEdit).toBe(2) // the edit reloaded (limit is in the reload key) and came back flagged
+      expect(afterPing).toBe(3)
+    })
+
+    it('moving or resizing the card, or renaming it, keeps the flag (not part of the request)', async () => {
+      const { afterEdit, afterPing } = await editThenPing(geo, { ...geo, x: 6, y: 2, w: 6, h: 5, title: 'Renamed', caption: 'new' })
+      expect(afterEdit).toBe(1)
+      expect(afterPing).toBe(2)
+    })
+
+    it('an edit that is undone before the ping still needs a new response', async () => {
+      const w = await mountCard(geo)
+      await vi.advanceTimersByTimeAsync(RETURN_MIN_AGE_MS + 1000)
+      stats.mockImplementation(() => new Promise(() => {})) // the edited request never answers
+      await w.setProps({ widget: { ...geo, rings: ['keyEvent'] } })
+      await settle()
+      await w.setProps({ widget: geo })
+      await settle()
+      const n = stats.mock.calls.length
+      await vi.advanceTimersByTimeAsync(RETURN_MIN_AGE_MS + 1000)
+      await live()
+      expect(stats).toHaveBeenCalledTimes(n)
     })
   })
 })
