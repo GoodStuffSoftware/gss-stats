@@ -17,7 +17,7 @@ import { getNote, NOTES_REGISTRY, noteRawText, noteTokens } from '../notes'
 import { etDateFromMs } from '../popupEvents'
 import { relativeTime } from '../adsFreshness'
 import { etDateTimeText } from '../adsReadingsFormat'
-import { tokenizeAndInterpolate, type TextToken } from '../textLite'
+import { tokenizeAndInterpolate, type TextToken, type ValueResolver } from '../textLite'
 import { globalValueResolver } from '../valueTokens'
 import { armMaturity, METRICS, rulesOf, type MetricDef } from './metrics'
 import { RATIOS, type RatioDef } from './ratios'
@@ -71,13 +71,17 @@ export interface ItemViewOptions {
   todayEt: string
   /** "Now" for a relative time ('ago'); the real clock when absent. */
   nowMs?: number
+  /** What a `{=…}` token in the item's label or caption fills from: the fixed dates plus the
+   * card's metric values (MetricCard). The fixed dates alone when absent. */
+  values?: ValueResolver
 }
 
 // ── Label resolution (ADR section 1, "Labels") ────────────────────────────────────────────
-export function resolveLabelTokens(label: Label, scope: ScopeInstance, metricLabelId: string | undefined, todayEt: string): TextToken[] {
-  // `{=…}` takes the fixed dates (release.*, golive.*, play.*): the card editor's Insert value
-  // offers them. Chart and metric values need a chart or a fetch a card label has none of: "—".
-  if (typeof label === 'string') return tokenizeAndInterpolate(label, scopeVars(scope, todayEt), globalValueResolver())
+export function resolveLabelTokens(label: Label, scope: ScopeInstance, metricLabelId: string | undefined, todayEt: string, values?: ValueResolver): TextToken[] {
+  // `{=…}` takes `values`: the fixed dates (release.*, golive.*, play.*) and the card's metric
+  // values (`metric:<id>@<window>`, MetricCard fetches them in one batch). A caller with no values
+  // gets the fixed dates alone; a chart path needs a chart a card label has none of: "—".
+  if (typeof label === 'string') return tokenizeAndInterpolate(label, scopeVars(scope, todayEt), values ?? globalValueResolver())
   if ('note' in label) {
     // An id this build's registry doesn't know (a newer build's, or a retired one) is stored
     // as-is (validateCard checks only its shape) and shows nothing — never the raw id.
@@ -283,11 +287,11 @@ function goLiveEtFor(def: MetricDef, scope: ScopeInstance): string | null {
   return best
 }
 
-function itemCaptionOnly(item: MetricItem, scope: ScopeInstance, todayEt: string): TextToken[] {
-  return item.caption ? resolveLabelTokens(item.caption, scope, undefined, todayEt) : []
+function itemCaptionOnly(item: MetricItem, scope: ScopeInstance, todayEt: string, values?: ValueResolver): TextToken[] {
+  return item.caption ? resolveLabelTokens(item.caption, scope, undefined, todayEt, values) : []
 }
 const CAPTION_SEPARATOR: TextToken = { type: 'text', value: ' · ' }
-function valueCaptionTokens(item: MetricItem, value: MetricValue, scope: ScopeInstance, todayEt: string): TextToken[] {
+function valueCaptionTokens(item: MetricItem, value: MetricValue, scope: ScopeInstance, todayEt: string, values?: ValueResolver): TextToken[] {
   const groups: TextToken[][] = []
   // A 'status' display already shows its note as the value: never again as a caption.
   const shown = item.display.as === 'status' ? statusNoteOf(value) : null
@@ -296,13 +300,13 @@ function valueCaptionTokens(item: MetricItem, value: MetricValue, scope: ScopeIn
     const vars = id === 'counted-from' && value.measuredFrom != null ? { from: etDateFromMs(value.measuredFrom) } : undefined
     groups.push(noteTokens(id, vars))
   }
-  groups.push(itemCaptionOnly(item, scope, todayEt))
+  groups.push(itemCaptionOnly(item, scope, todayEt, values))
   // One caption line, its notes separated — never run together ("…not recordedstill arriving").
   return groups.filter((g) => g.length).flatMap((g, i) => (i ? [CAPTION_SEPARATOR, ...g] : g))
 }
 
-function fieldViewModel(item: MetricItem, raw: string | null, labelTokens: TextToken[], scope: ScopeInstance, todayEt: string): ItemViewModel {
-  const captionTokens = itemCaptionOnly(item, scope, todayEt)
+function fieldViewModel(item: MetricItem, raw: string | null, labelTokens: TextToken[], scope: ScopeInstance, todayEt: string, values?: ValueResolver): ItemViewModel {
+  const captionTokens = itemCaptionOnly(item, scope, todayEt, values)
   const display = item.display
   if (display.as === 'dateRange') {
     if (raw == null) {
@@ -337,12 +341,12 @@ function fieldViewModel(item: MetricItem, raw: string | null, labelTokens: TextT
 
 /** A flight that has not begun, as the server reports a window that has not opened yet. */
 const NOT_STARTED: MetricValue = { status: 'unmeasured', reason: 'not-started', noteIds: ['not-started'] }
-function metricViewModel(item: MetricItem, value: MetricValue, def: MetricDef | RatioDef, labelTokens: TextToken[], scope: ScopeInstance, todayEt: string, nowMs: number): ItemViewModel {
+function metricViewModel(item: MetricItem, value: MetricValue, def: MetricDef | RatioDef, labelTokens: TextToken[], scope: ScopeInstance, todayEt: string, nowMs: number, values?: ValueResolver): ItemViewModel {
   // whenNotStarted 'zero': a count that cannot have happened yet reads a measured 0.
   if (value.status === 'unmeasured' && value.reason === 'not-started' && item.gating?.whenNotStarted === 'zero') value = { status: 'ok', value: 0 }
   if (value.status === 'error') {
     // A status word, never a dash: a dash reads as "no value", an error means "not loaded".
-    return { visible: true, labelTokens, primary: noteRawText('metric-unavailable'), deltaLines: [], captionTokens: itemCaptionOnly(item, scope, todayEt), muted: true, error: true }
+    return { visible: true, labelTokens, primary: noteRawText('metric-unavailable'), deltaLines: [], captionTokens: itemCaptionOnly(item, scope, todayEt, values), muted: true, error: true }
   }
   if (value.status === 'no-data') {
     const { primary, visible } = applyEmptyGating(item.gating?.whenEmpty)
@@ -350,11 +354,11 @@ function metricViewModel(item: MetricItem, value: MetricValue, def: MetricDef | 
     // sees WHY there is no rate (ADR 0003, "n/d is always returned").
     const nd = item.display.as === 'percent' && (item.gating?.whenEmpty ?? 'dash') === 'dash' ? ndSuffix(value) : ''
     // The notes a value carries travel with an empty one too ("stale" with no spend day stored).
-    return { visible, labelTokens, primary: primary + nd, deltaLines: [], captionTokens: valueCaptionTokens(item, value, scope, todayEt), ...(nd ? { split: { main: primary, sub: nd.trim() } } : {}) }
+    return { visible, labelTokens, primary: primary + nd, deltaLines: [], captionTokens: valueCaptionTokens(item, value, scope, todayEt, values), ...(nd ? { split: { main: primary, sub: nd.trim() } } : {}) }
   }
   if (value.status === 'unmeasured') {
     const { primary, visible } = applyUnmeasuredGating(item.gating, scope, value)
-    return { visible, labelTokens, primary, deltaLines: [], captionTokens: itemCaptionOnly(item, scope, todayEt), muted: true }
+    return { visible, labelTokens, primary, deltaLines: [], captionTokens: itemCaptionOnly(item, scope, todayEt, values), muted: true }
   }
   // 'ok' | 'partial' | 'too-few'
   if (item.gating?.whenZero === 'omit' && value.value === 0 && value.status !== 'too-few') return { visible: false, labelTokens, primary: '0', deltaLines: [], captionTokens: [] }
@@ -371,15 +375,15 @@ function metricViewModel(item: MetricItem, value: MetricValue, def: MetricDef | 
   const bar = item.display.as === 'bar' ? { barValue: finite(value.value) ? value.value : finite(value.numerator) ? value.numerator : 0 } : {}
   const mutedTooFew = value.status === 'too-few' && item.display.as !== 'percent' && item.display.as !== 'bar'
   const series = item.display.as === 'sparkline' && value.series?.length ? { series: value.series } : {}
-  return { visible: true, labelTokens, primary, deltaLines, captionTokens: valueCaptionTokens(item, value, scope, todayEt), ...(split ? { split } : {}), ...bar, ...series, ...(mutedTooFew ? { muted: true } : {}) }
+  return { visible: true, labelTokens, primary, deltaLines, captionTokens: valueCaptionTokens(item, value, scope, todayEt, values), ...(split ? { split } : {}), ...bar, ...series, ...(mutedTooFew ? { muted: true } : {}) }
 }
 
 /** An item's label alone, resolved against its scope — used by a 'table' section's header row,
  * which needs every column's label but has no single MetricValue to pair it with. */
-export function itemLabelTokens(item: MetricItem, scope: ScopeInstance, todayEt: string): TextToken[] {
+export function itemLabelTokens(item: MetricItem, scope: ScopeInstance, todayEt: string, values?: ValueResolver): TextToken[] {
   const resolved = resolveBinding(item.data, scope, todayEt)
   const metricLabelId = resolved && resolved.kind !== 'field' ? (resolved.def as MetricDef | RatioDef).label : undefined
-  return resolveLabelTokens(item.label, scope, metricLabelId, todayEt)
+  return resolveLabelTokens(item.label, scope, metricLabelId, todayEt, values)
 }
 
 /** The whole rendering decision for one MetricItem: what its label says, what its value says,
@@ -388,14 +392,14 @@ export function itemLabelTokens(item: MetricItem, scope: ScopeInstance, todayEt:
 export function itemViewModel(item: MetricItem, value: MetricValue | undefined, scope: ScopeInstance, opts: ItemViewOptions): ItemViewModel {
   const resolved = resolveBinding(item.data, scope, opts.todayEt)
   const metricLabelId = resolved && resolved.kind !== 'field' ? (resolved.def as MetricDef | RatioDef).label : undefined
-  const labelTokens = resolveLabelTokens(item.label, scope, metricLabelId, opts.todayEt)
+  const labelTokens = resolveLabelTokens(item.label, scope, metricLabelId, opts.todayEt, opts.values)
 
   if (!resolved) {
     // Unknown metric/ratio id — treat like the server's own 'unknown-id' error.
-    return { visible: true, labelTokens, primary: '—', deltaLines: [], captionTokens: itemCaptionOnly(item, scope, opts.todayEt) }
+    return { visible: true, labelTokens, primary: '—', deltaLines: [], captionTokens: itemCaptionOnly(item, scope, opts.todayEt, opts.values) }
   }
   if (resolved.kind === 'field') {
-    const vm = fieldViewModel(item, resolved.fieldValue ?? null, labelTokens, scope, opts.todayEt)
+    const vm = fieldViewModel(item, resolved.fieldValue ?? null, labelTokens, scope, opts.todayEt, opts.values)
     const tone = 'field' in item.data && resolved.fieldValue != null ? scopeTone(scope, item.data.field) : null
     return tone ? { ...vm, tone } : vm
   }
@@ -408,7 +412,7 @@ export function itemViewModel(item: MetricItem, value: MetricValue | undefined, 
   if (!value) {
     return { visible: true, labelTokens, primary: '…', deltaLines: [], captionTokens: [] }
   }
-  return metricViewModel(item, value, resolved.def as MetricDef | RatioDef, labelTokens, scope, opts.todayEt, opts.nowMs ?? Date.now())
+  return metricViewModel(item, value, resolved.def as MetricDef | RatioDef, labelTokens, scope, opts.todayEt, opts.nowMs ?? Date.now(), opts.values)
 }
 
 /** The badge's own view (always a `field` binding — validateCard rejects anything else). */
