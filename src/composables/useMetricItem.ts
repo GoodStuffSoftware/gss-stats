@@ -21,6 +21,7 @@ import { useMetrics } from './useMetrics'
 import { buildRequestSpec, type ScopeInstance } from '../lib/metrics/scope'
 import { itemViewModel, type ItemViewModel } from '../lib/metrics/render'
 import type { MetricItem, MetricsContext, MetricValue } from '../lib/metrics/types'
+import type { ValueResolver } from '../lib/textLite'
 
 /** A stable content key for what this item+scope would actually REQUEST (or '' for a `field`
  * binding, which makes no request) — used only to decide whether the underlying fetch needs to
@@ -38,6 +39,8 @@ export function useMetricItemViewModel(
   scope: MaybeRefOrGetter<ScopeInstance>,
   context: MaybeRefOrGetter<MetricsContext | undefined>,
   todayEt: string,
+  /** What a `{=…}` token in a label fills from; absent, the fixed dates only. */
+  values?: MaybeRefOrGetter<ValueResolver | undefined>,
 ): ComputedRef<ItemViewModel> {
   // The live value, swapped in place whenever the request is re-planned — never the ComputedRef
   // useMetrics().request() itself returns (that ref is tied to ONE cache entry; re-planning
@@ -74,5 +77,5 @@ export function useMetricItemViewModel(
   )
   onScopeDispose(() => requestScope?.stop())
 
-  return computed(() => itemViewModel(toValue(item), valueRef.value, toValue(scope), { todayEt }))
+  return computed(() => itemViewModel(toValue(item), valueRef.value, toValue(scope), { todayEt, values: toValue(values) }))
 }

@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Metric values in card labels.** A card's title, headings, item labels, captions and hints can now show a live catalog value, picked from the label's Insert value menu (Metrics) the same way as in a chart caption, and the card editor's preview shows it.
+
 ## [0.28.0] — 2026-10-05
 
 ### Added
