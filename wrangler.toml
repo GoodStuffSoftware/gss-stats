@@ -33,6 +33,14 @@ migrations_dir = "migrations/gss-stats-ads"
 binding = "ADS_SYNC"
 service = "gss-stats-sync"
 
+# The gss-live Worker (workers/live/), reachable ONLY through this Service Binding: no workers.dev
+# URL, no route. /api/live (functions/api/live.ts) hands it the dashboard's same-origin WebSocket
+# upgrade; it sends the empty live-push ping. Without it (e.g. `wrangler pages dev` while gss-live
+# isn't running) /api/live answers 503 and nothing else changes.
+[[services]]
+binding = "LIVE"
+service = "gss-live"
+
 # Secret (NOT here): CF_ANALYTICS_TOKEN — set per-environment via
 #   npx wrangler pages secret put CF_ANALYTICS_TOKEN
 # and locally via .dev.vars (gitignored).
