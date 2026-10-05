@@ -1,0 +1,26 @@
+# gss-live — the live-push Worker: one Durable Object (LiveHub) holds the dashboard tabs' hibernating
+# WebSockets and sends each an EMPTY {"t":"changed"} ping, at most once per fixed 15-minute boundary,
+# after gss-beacon reports that a new non-refused beacon row was written. It stores nothing but its
+# alarm. See src/index.ts.
+#
+# Deploy (CI, deploy-live job; or from the repo root):  npx wrangler deploy -c workers/live/wrangler.toml
+# Dry run (no auth):  npm run live:check
+name = "gss-live"
+main = "src/index.ts"
+compatibility_date = "2026-09-26"
+
+# NOT public: no workers.dev URL, no preview URLs, no route. The only ways in are Service Bindings:
+# gss-stats Pages (default fetch, the WebSocket upgrade) and gss-beacon (the Notify entrypoint, RPC).
+workers_dev = false
+preview_urls = false
+
+[observability]
+enabled = true
+
+[[durable_objects.bindings]]
+name = "HUB"
+class_name = "LiveHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["LiveHub"]
