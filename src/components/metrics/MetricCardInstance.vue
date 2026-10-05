@@ -18,7 +18,7 @@ import { noteRawText } from '../../lib/notes'
 import { badgeViewModel, itemViewModel, resolveLabelTokens } from '../../lib/metrics/render'
 import { buildRequestSpec, scopeField, sectionCells, type FlatItem, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
 import type { CardSpec, MetricsContext } from '../../lib/metrics/types'
-import type { TextToken } from '../../lib/textLite'
+import type { TextToken, ValueResolver } from '../../lib/textLite'
 import MetricLabel from './MetricLabel.vue'
 import MetricSection from './MetricSection.vue'
 
@@ -31,11 +31,13 @@ const props = defineProps<{
   boxed: boolean
   /** Names the card (Notes toggle) when the spec has no title: the widget's own title. */
   fallbackTitle?: string
+  /** What a `{=…}` token in a label fills from: the fixed dates and the card's metric values (MetricCard). */
+  values?: ValueResolver
 }>()
 const emit = defineEmits<{ open: []; hidden: [boolean] }>()
 
 const todayEt = props.ctx.todayEt
-const titleTokens = computed(() => (props.spec.title !== undefined ? resolveLabelTokens(props.spec.title, props.scope, undefined, todayEt) : []))
+const titleTokens = computed(() => (props.spec.title !== undefined ? resolveLabelTokens(props.spec.title, props.scope, undefined, todayEt, props.values) : []))
 const badge = computed(() => {
   const b = props.spec.badge
   if (!b || !('field' in b.data)) return null
@@ -58,7 +60,7 @@ const compactItems = noteItems
 const notes = computed(() => {
   const byCaption = new Map<string, { key: string; labels: TextToken[][]; names: Set<string>; captionTokens: TextToken[] }>()
   compactItems.forEach((fi, i) => {
-    const vm = itemViewModel(fi.item, fi.value?.value, fi.scope, { todayEt })
+    const vm = itemViewModel(fi.item, fi.value?.value, fi.scope, { todayEt, values: props.values })
     if (!vm.visible || !vm.captionTokens.length) return
     const text = vm.captionTokens.map((t) => t.value).join('')
     const entry = byCaption.get(text)
@@ -80,7 +82,7 @@ const allCells = noteItems.map((fi) => {
   const spec = buildRequestSpec(fi.item, fi.scope)
   return { ...fi, value: spec ? request(spec) : null }
 })
-const nothingVisible = computed(() => allCells.length > 0 && allCells.every((fi) => !itemViewModel(fi.item, fi.value?.value, fi.scope, { todayEt }).visible))
+const nothingVisible = computed(() => allCells.length > 0 && allCells.every((fi) => !itemViewModel(fi.item, fi.value?.value, fi.scope, { todayEt, values: props.values }).visible))
 watch(nothingVisible, (h) => emit('hidden', h), { immediate: true })
 
 const notesOpen = ref(false)
@@ -116,7 +118,7 @@ function onBoxClick() {
     <ul v-if="notes.length" v-show="notesOpen" :id="notesId" class="mc-notes" @click.stop>
       <li v-for="n in notes" :key="n.key"><MetricLabel :tokens="n.labelTokens" />: <MetricLabel :tokens="n.captionTokens" /></li>
     </ul>
-    <MetricSection v-for="(section, si) in spec.sections" :key="si" :section="section" :outer-scope="scope" :ctx="ctx" :context="context" />
+    <MetricSection v-for="(section, si) in spec.sections" :key="si" :section="section" :outer-scope="scope" :ctx="ctx" :context="context" :values="values" />
   </div>
 </template>
 

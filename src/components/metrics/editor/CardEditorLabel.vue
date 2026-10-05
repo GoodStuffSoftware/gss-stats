@@ -4,9 +4,14 @@
 // plain-text preview), a bound scope field, or "use the metric's own label". Reused for both an
 // item's `label` and its `caption` (both are `Label`) — `allowMetricOwn` hides the "metric's own
 // name" option for a caption, which has no natural registry counterpart.
-import { computed, nextTick, ref, useId } from 'vue'
+import { computed, nextTick, ref, toValue, useId } from 'vue'
 import InsertPicker, { type InsertGroup } from '../../InsertPicker.vue'
-import { VALUE_TOKEN_OPTIONS } from '../../../lib/valueTokens'
+import { VALUE_TOKEN_OPTIONS, resolveValueToken, type TokenValues } from '../../../lib/valueTokens'
+import { metricRequestSpec, metricTokenOptions, metricTokenValue } from '../../../lib/metricValueTokens'
+import { peekMetricValue } from '../../../composables/useMetrics'
+import { useEtClock } from '../../../composables/useEtClock'
+import { todayEtFrom } from '../../../lib/metrics/scope'
+import { injectEditorContext } from './editorContext'
 import { isKnownNote, labelKind, labelNoteOptions, makeLabel, noteVarNames, scopePathLabel, scopePathOptions, withNoteId, withNoteVar, type LabelKind } from '../../../lib/metrics/editorModel'
 import { CARD_LIMITS } from '../../../lib/metrics/validate'
 import type { Label, RepeatSpec, ScopePath } from '../../../lib/metrics/types'
@@ -51,11 +56,29 @@ const textValue = computed<string>({
   },
 })
 // ONE "Insert value" control, the one the chart caption has (InsertPicker.vue): the repeat's own
-// fields (`{campaign.label}`, as before) and the fixed dates (`{=release.latest|date}`). Chart and
-// metric values are not offered: a card label has no chart, and fetches nothing of its own.
+// fields (`{campaign.label}`, as before), the fixed dates (`{=release.latest|date}`) and the
+// catalog metrics (`{=metric:<id>@<window>}`, the same group a caption has). Chart values are not
+// offered: a card label has no chart. A metric option shows what it reads right now, from a value
+// the page ALREADY holds for the editor's context (peekMetricValue; nothing is fetched to label an
+// option, so a metric nothing has loaded shows its name alone). The card itself fetches a label's
+// metric token (MetricCard.vue, batched with the card's own requests).
+const metricOptionList = metricTokenOptions()
+const editorContext = injectEditorContext()
+const etClock = useEtClock()
+const metricGroupOptions = computed<InsertGroup['options']>(() => {
+  const context = toValue(editorContext)
+  const epoch = todayEtFrom(etClock.value)
+  const table: TokenValues = {}
+  for (const o of metricOptionList) table[o.ref.path] = metricTokenValue(o.ref, peekMetricValue(metricRequestSpec(o.ref), context, epoch))
+  return metricOptionList.map((o) => {
+    const now = resolveValueToken(o.token, table)
+    return { value: o.token, label: now ? `${o.label} (${now})` : o.label }
+  })
+})
 const insertGroups = computed<InsertGroup[]>(() => [
   ...(scopeOptions.value.length ? [{ group: 'Fields', options: scopeOptions.value.map((o) => ({ value: `{${o.value}}`, label: `{${o.value}} — ${o.label}` })) }] : []),
   { group: 'Dates', options: VALUE_TOKEN_OPTIONS.filter((o) => o.group === 'Dates').map((o) => ({ value: o.token, label: o.label })) },
+  { group: 'Metrics', options: metricGroupOptions.value },
 ])
 // A token is appended whole or not at all: one that would take the label past the 200-character
 // limit (the input's maxlength stops typing there, not a programmatic append) is refused, and the
