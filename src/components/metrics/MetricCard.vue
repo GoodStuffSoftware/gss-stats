@@ -21,6 +21,7 @@
 import { computed, effectScope, onMounted, onScopeDispose, reactive, ref, shallowRef, watch, type EffectScope } from 'vue'
 import { useMetrics, type MetricRequestSpec, type UseMetrics } from '../../composables/useMetrics'
 import { useEtClock } from '../../composables/useEtClock'
+import { useMetricTokens } from '../../composables/useMetricTokens'
 import { isInFlight, isStale, useReturnRefresh } from '../../composables/useReturnRefresh'
 import { fetchAdsReadings } from '../../api'
 import { MAX_READINGS_LIMIT } from '../../lib/metrics/types'
@@ -29,6 +30,8 @@ import type { AdsReadingsResponse } from '../../lib/adsStore'
 import { hasNote, noteRawText } from '../../lib/notes'
 import { isNoteIdHideable } from '../../lib/chartNotes'
 import { resolveLabelTokens } from '../../lib/metrics/render'
+import { cardLabelTexts } from '../../lib/metricValueTokens'
+import { noteValueResolver } from '../../lib/valueTokens'
 import { presetById } from '../../lib/metrics/presets'
 import { INVALID_CARD_PRESET } from '../../lib/metrics/validate'
 import { buildRequestSpec, campaignOfScope, narrowToCampaigns, readingsLimitOf, repeatsOverReadings, ROOT_SCOPE, resolveRepeat, sectionCells, todayEtFrom, usesAdsInfoFields, usesReadingFields, type ReadingScope, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
@@ -68,6 +71,14 @@ const spec = computed<CardSpec | null>(() => ('preset' in props.cardRef ? (prese
 const clock = useEtClock()
 const nowMs = computed(() => props.nowMs ?? clock.value)
 const todayEt = computed(() => todayEtFrom(nowMs.value))
+
+// `{=metric:<id>@<window>}` in any of the card's labels (title, section headings, item label,
+// caption, hint, a repeat's empty message): the values come from the same batched POST the card's
+// own items use, and are handed down as one resolver. Lazy: a card with no metric token creates no
+// request here. The resolver is a prop of its own, never part of `ctx`, so a value arriving does
+// not rebuild the repeat instances.
+const labelTokens = useMetricTokens(() => cardLabelTexts(spec.value), () => props.context)
+const labelValues = computed(() => noteValueResolver(labelTokens.values.value))
 
 // ── The ads readings load (ADR 0005 slice 3) ────────────────────────────────────────────────
 // A card loads GET /api/ads/readings itself only when it needs the answer: it has `notices`, it
@@ -184,18 +195,22 @@ onScopeDispose(() => dayScope?.stop())
  * calls this through the component ref too). */
 function reload() {
   cardMetrics.value?.reloadAll()
+  labelTokens.reload()
   void loadReadings()
 }
 defineExpose({ reload })
 
-const hasError = computed(() => !!cardMetrics.value?.hasError.value || (loadsReadings.value && readingsFailed.value))
+// A label token that failed to load counts as the card's error too (its label shows "—" and Retry
+// refetches it), so the "Updated" stamp never claims fresh while a label is stale.
+const hasError = computed(() => !!cardMetrics.value?.hasError.value || labelTokens.hasError.value || (loadsReadings.value && readingsFailed.value))
 const updatedPlacement = computed<'header' | 'footer' | null>(() => {
   const v = spec.value?.showUpdated
   return v === true ? 'header' : v === 'header' || v === 'footer' ? v : null
 })
 const updatedText = computed(() => {
-  const at = cardMetrics.value?.lastUpdated.value
-  if (at == null) return ''
+  // The latest load among the card's items and its label tokens (a card whose only values are label tokens still has a stamp).
+  const at = Math.max(cardMetrics.value?.lastUpdated.value ?? -Infinity, labelTokens.lastUpdated.value ?? -Infinity)
+  if (!Number.isFinite(at)) return ''
   // Freshness is wall-clock time (the nowMs seam only pins the ET day).
   const s = Math.max(0, Math.round((Math.max(clock.value, at) - at) / 1000))
   if (s < 5) return noteRawText('label.card.updatedJustNow')
@@ -262,13 +277,13 @@ const allHidden = computed(() => instances.value.length > 0 && instances.value.e
     <!-- The first readings load is out: "Loading…" in place of the grid (kept mounted, so its metric requests start now). -->
     <p v-if="readingsPending && spec.repeat" class="metric-card-empty">{{ loadingText }}</p>
     <div v-if="spec.repeat" v-show="!readingsPending" :key="todayEt" class="metric-card-grid" :style="{ '--mc-min-width': `${spec.minWidth ?? 230}px` }">
-      <MetricCardInstance v-for="(scope, i) in instances" v-show="!hiddenInstances.has(i)" :key="i" :spec="spec" :scope="scope" :ctx="ctx" :context="context" :boxed="true" @open="emit('open-campaigns')" @hidden="(h: boolean) => onHidden(i, h)" />
+      <MetricCardInstance v-for="(scope, i) in instances" v-show="!hiddenInstances.has(i)" :key="i" :spec="spec" :scope="scope" :ctx="ctx" :context="context" :values="labelValues" :boxed="true" @open="emit('open-campaigns')" @hidden="(h: boolean) => onHidden(i, h)" />
       <p v-if="((!instances.length && !readingsPending && !readingsLoadFailed) || allHidden) && spec.repeat.empty" class="metric-card-empty">
-        <MetricLabel :tokens="resolveLabelTokens(spec.repeat.empty.label, ROOT_SCOPE, undefined, todayEt)" />
-        <MetricLabel :tokens="resolveLabelTokens(spec.repeat.empty.text, ROOT_SCOPE, undefined, todayEt)" />
+        <MetricLabel :tokens="resolveLabelTokens(spec.repeat.empty.label, ROOT_SCOPE, undefined, todayEt, labelValues)" />
+        <MetricLabel :tokens="resolveLabelTokens(spec.repeat.empty.text, ROOT_SCOPE, undefined, todayEt, labelValues)" />
       </p>
     </div>
-    <MetricCardInstance v-else :key="todayEt" class="metric-card-plain" :spec="spec" :scope="ROOT_SCOPE" :ctx="ctx" :context="context" :boxed="false" :fallback-title="fallbackTitle" @open="emit('open-campaigns')">
+    <MetricCardInstance v-else :key="todayEt" class="metric-card-plain" :spec="spec" :scope="ROOT_SCOPE" :ctx="ctx" :context="context" :values="labelValues" :boxed="false" :fallback-title="fallbackTitle" @open="emit('open-campaigns')">
       <template v-if="statusInInstanceHeader" #status>
         <MetricCardStatus :has-error="hasError" :updated-text="updatedText" @reload="reload" />
       </template>

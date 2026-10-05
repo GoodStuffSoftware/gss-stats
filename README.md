@@ -191,12 +191,14 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
     token shows as written; a token inside bold or a link label shows "—", and a link whose address
     holds `{` or `}` stays plain text.
   - **Catalog values** (`{=metric:<id>@<window>}`, e.g. `{=metric:bsk.pageviews@page|number}`; the
-    grammar is pinned in [`src/lib/valueTokens.ts`](src/lib/valueTokens.ts)). A caption or a note
-    widget can show any catalog metric or proportion ratio that needs no campaign or popup choice,
+    grammar is pinned in [`src/lib/valueTokens.ts`](src/lib/valueTokens.ts)). A caption, a note
+    widget or a metric card's label (its title, a section heading, an item's label, caption or
+    column hint, a repeat's empty message) can show any catalog metric or proportion ratio that needs no campaign or popup choice,
     over one of its own windows (`page` for the page's date range, `todaySoFar`, `before`, `after`);
     the window is required and the kind (number, percentage, date) is the catalog's own. Every
     widget on a page shares ONE batched `/api/metrics` request, the same one the cards use (so a
-    value a card already loaded is never fetched twice); while it loads, on an error and for an
+    value a card already loaded is never fetched twice; a card's label tokens ride in the card's
+    own request, and a card with none fetches nothing extra); while it loads, on an error and for an
     unknown id a token shows "—", and so does a value the server withholds or cannot fully measure
     (too few, no data, a shorter span than the range). A token sends only its metric and window,
     so it can never ask for a split the catalog withholds: the counts-only rule (return, game
@@ -206,9 +208,11 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
     in; `chart.*` shows "—" (a note belongs to no chart).
   - **Insert value** is one control in every text box that takes inserts: the caption, a note
     widget and a card label. It groups This chart (not in a note or a card that renders its own
-    body), Dates and Metrics (a card label offers the repeat's own fields and Dates). A metric
-    option shows its current value only if the page already holds it; nothing is fetched to label
-    an option. Insertion is an explicit choice: pick in the menu, then press **Insert** (a closed
+    body), Dates and Metrics (a card label offers the repeat's own fields, Dates and Metrics, not
+    This chart). A metric option shows its current value only if the page already holds it
+    (a card label's menu reads the value for the card editor's page context); nothing is fetched
+    to label an option, and a token that would not fit whole under the label's 200 characters is
+    not inserted. Insertion is an explicit choice: pick in the menu, then press **Insert** (a closed
     menu fires a change on every arrow key, which would drop a token per option).
   - **Caveats** are system-owned and follow the code: dated or gated entries, computed text, text
     tied to a value from code, and the runtime notes. A chart shows its data source's caveats

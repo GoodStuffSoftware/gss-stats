@@ -412,7 +412,7 @@ No full-table scan of `hits` and no new index. Counting what a card adds:
   chose to draw as a sparkline, so the first read after expiry pays one more statement inside the
   batch, and an ordinary page (no sparkline) is unchanged.
 
-## 10. Live push (`gss-live`, 0.29.0, 2026-10-05) — D1 rows read and Durable Object load
+## 10. Live push (`gss-live`, 0.30.0, 2026-10-05) — D1 rows read and Durable Object load
 
 A new Worker, `gss-live` (README → Live updates), tells open dashboard tabs "something changed" at
 each 15-minute ET boundary. It reads no D1 and writes no D1. What it adds is the refetches the

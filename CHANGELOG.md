@@ -6,7 +6,7 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
-## [0.29.0] — 2026-10-05
+## [0.30.0] — 2026-10-05
 
 ### Added
 - **Open dashboards refresh themselves after new traffic.** A visible, recently used tab gets an empty "something changed" ping at the next 15-minute boundary and refetches its cards about two minutes later (at most hourly per chart), and with no connection the dashboard works as before.
@@ -15,6 +15,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ### Fixed
 - **A path with a NUL byte now counts as refused**, matching how the database compares it, so a hand-made address cannot slip past the guard.
+
+## [0.29.0] — 2026-10-05
+
+### Added
+- **Metric values in card labels.** A card's title, headings, item labels, captions and hints can now show a live catalog value, picked from the label's Insert value menu (Metrics) the same way as in a chart caption, and the card editor's preview shows it. The card's Reload and Retry refresh those values too.
 
 ## [0.28.0] — 2026-10-05
 

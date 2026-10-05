@@ -10,6 +10,7 @@ import { useMetricItemViewModel } from '../../composables/useMetricItem'
 import { sparklineGeometry } from '../../lib/metrics/sparkline'
 import type { ScopeInstance } from '../../lib/metrics/scope'
 import type { MetricItem as MetricItemSpec, MetricsContext } from '../../lib/metrics/types'
+import type { ValueResolver } from '../../lib/textLite'
 import MetricLabel from './MetricLabel.vue'
 import StatTile from './StatTile.vue'
 import BarTrack from './BarTrack.vue'
@@ -22,6 +23,9 @@ const props = defineProps<{
   context?: MetricsContext
   /** The largest value in this item's section — a 'bar' display scales its width against it. */
   barMax?: number
+  /** What a `{=…}` token in the item's label or caption fills from (MetricCard). A hint's token is
+   * filled by MetricSection (a row-repeat table's column tooltip), not here. */
+  values?: ValueResolver
 }>()
 
 const vm = useMetricItemViewModel(
@@ -29,6 +33,7 @@ const vm = useMetricItemViewModel(
   () => props.scope,
   () => props.context,
   props.todayEt,
+  () => props.values,
 )
 
 const barPct = computed(() => {

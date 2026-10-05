@@ -11,6 +11,7 @@ import { useMetrics } from '../../composables/useMetrics'
 import { buildRequestSpec, columnDefaultLabel, flattenSectionItems, nestScope, resolveRepeat, sectionCells, type FlatItem, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
 import { itemLabelTokens, itemViewModel, resolveLabelTokens } from '../../lib/metrics/render'
 import type { MetricItem as MetricItemSpec, MetricsContext, MetricValue, Section } from '../../lib/metrics/types'
+import type { ValueResolver } from '../../lib/textLite'
 import MetricItem from './MetricItem.vue'
 import MetricLabel from './MetricLabel.vue'
 import MetricPlaceholder from './MetricPlaceholder.vue'
@@ -21,12 +22,14 @@ const props = defineProps<{
   outerScope: ScopeInstance
   ctx: RepeatContext
   context?: MetricsContext
+  /** What a `{=…}` token in a label fills from (MetricCard): the fixed dates and the card's metric values. */
+  values?: ValueResolver
 }>()
 
 const defaultFrame = computed<'row' | 'pill' | 'tile' | 'column'>(() => (props.section.layout === 'pills' ? 'pill' : props.section.layout === 'tiles' ? 'tile' : props.section.layout === 'columns' ? 'column' : 'row'))
 const scaled = computed(() => props.section.layout === 'bars' || props.section.layout === 'columns')
 
-const titleTokens = computed(() => (props.section.title !== undefined ? resolveLabelTokens(props.section.title, props.outerScope, undefined, props.ctx.todayEt) : []))
+const titleTokens = computed(() => (props.section.title !== undefined ? resolveLabelTokens(props.section.title, props.outerScope, undefined, props.ctx.todayEt, props.values) : []))
 
 const isColumnTable = computed(() => props.section.layout === 'table' && !!props.section.columns)
 
@@ -75,7 +78,7 @@ onScopeDispose(() => requestScope?.stop())
 
 const visibleAt = (i: number): boolean => {
   const fi = flatItems.value[i]
-  return !!fi && (!!fi.emptyOf || itemViewModel(fi.item, activeRefs.value[i]?.value, fi.scope, { todayEt: props.ctx.todayEt }).visible)
+  return !!fi && (!!fi.emptyOf || itemViewModel(fi.item, activeRefs.value[i]?.value, fi.scope, { todayEt: props.ctx.todayEt, values: props.values }).visible)
 }
 
 const barMax = computed(() => {
@@ -84,7 +87,7 @@ const barMax = computed(() => {
   const refs = activeRefs.value
   const nums = items.flatMap((fi, i) => {
     if (fi.emptyOf || fi.item.display.as !== 'bar') return []
-    const vm = itemViewModel(fi.item, refs[i]?.value, fi.scope, { todayEt: props.ctx.todayEt })
+    const vm = itemViewModel(fi.item, refs[i]?.value, fi.scope, { todayEt: props.ctx.todayEt, values: props.values })
     return [vm.barValue ?? 0]
   })
   return nums.length ? Math.max(0, ...nums) : 0
@@ -95,19 +98,19 @@ const tableRows = computed<ScopeInstance[]>(() => (props.section.layout === 'tab
 /** A row-table column that reads as a number is right-aligned: a number or percent display, or a
  * stored reading's count (the sign-ups cell is text, but still a count). */
 const isNumColumn = (it: MetricItemSpec) => it.display.as === 'number' || it.display.as === 'percent' || ('field' in it.data && it.data.field.startsWith('reading.count.'))
-const tableHeaderTokens = computed(() => props.section.items.map((it) => itemLabelTokens(it, props.outerScope, props.ctx.todayEt)))
+const tableHeaderTokens = computed(() => props.section.items.map((it) => itemLabelTokens(it, props.outerScope, props.ctx.todayEt, props.values)))
 /** Each column's tooltip (MetricItem.hint) as plain text, or undefined. */
-const tableHeaderHints = computed(() => props.section.items.map((it) => (it.hint === undefined ? undefined : resolveLabelTokens(it.hint, props.outerScope, undefined, props.ctx.todayEt).map((t) => t.value).join('') || undefined)))
+const tableHeaderHints = computed(() => props.section.items.map((it) => (it.hint === undefined ? undefined : resolveLabelTokens(it.hint, props.outerScope, undefined, props.ctx.todayEt, props.values).map((t) => t.value).join('') || undefined)))
 
 // ── table, column repeat ─────────────────────────────────────────────────────────────────────
 const tableColumns = computed<ScopeInstance[]>(() => (isColumnTable.value ? resolveRepeat(props.section.columns, props.ctx, props.outerScope).map((c) => nestScope(c, props.outerScope)) : []))
-const columnHeaderTokens = computed(() => tableColumns.value.map((c) => resolveLabelTokens(props.section.columnLabel ?? columnDefaultLabel(c), c, undefined, props.ctx.todayEt)))
-const rowsHeaderTokens = computed(() => (props.section.rowsLabel !== undefined ? resolveLabelTokens(props.section.rowsLabel, props.outerScope, undefined, props.ctx.todayEt) : []))
+const columnHeaderTokens = computed(() => tableColumns.value.map((c) => resolveLabelTokens(props.section.columnLabel ?? columnDefaultLabel(c), c, undefined, props.ctx.todayEt, props.values)))
+const rowsHeaderTokens = computed(() => (props.section.rowsLabel !== undefined ? resolveLabelTokens(props.section.rowsLabel, props.outerScope, undefined, props.ctx.todayEt, props.values) : []))
 /** Each item row with its cells; a row whose every cell is gated out is left out. */
 const columnRows = computed(() => {
   const n = tableColumns.value.length
   return props.section.items
-    .map((item, r) => ({ item, r, labelTokens: itemLabelTokens(item, props.outerScope, props.ctx.todayEt) }))
+    .map((item, r) => ({ item, r, labelTokens: itemLabelTokens(item, props.outerScope, props.ctx.todayEt, props.values) }))
     .filter(({ r }) => n === 0 || Array.from({ length: n }, (_, c) => visibleAt(r * n + c)).some(Boolean))
 })
 
@@ -118,8 +121,8 @@ const tableEmpty = computed(() => {
   if (props.section.layout !== 'table' || isColumnTable.value || !r?.empty || tableRows.value.length) return false
   return props.outerScope.kind !== 'campaign' || !!props.outerScope.ads
 })
-const tableEmptyLabel = computed(() => (props.section.repeat?.empty ? resolveLabelTokens(props.section.repeat.empty.label, props.outerScope, undefined, props.ctx.todayEt) : []))
-const tableEmptyText = computed(() => (props.section.repeat?.empty ? resolveLabelTokens(props.section.repeat.empty.text, props.outerScope, undefined, props.ctx.todayEt) : []))
+const tableEmptyLabel = computed(() => (props.section.repeat?.empty ? resolveLabelTokens(props.section.repeat.empty.label, props.outerScope, undefined, props.ctx.todayEt, props.values) : []))
+const tableEmptyText = computed(() => (props.section.repeat?.empty ? resolveLabelTokens(props.section.repeat.empty.text, props.outerScope, undefined, props.ctx.todayEt, props.values) : []))
 
 const anyVisible = computed(() => {
   if (isColumnTable.value) return columnRows.value.length > 0
@@ -151,7 +154,7 @@ const anyVisible = computed(() => {
           <tr v-for="row in columnRows" :key="row.item.id">
             <th scope="row" class="row-label"><MetricLabel :tokens="row.labelTokens" /></th>
             <td v-for="(col, ci) in tableColumns" :key="ci" class="num">
-              <MetricTableCell :item="row.item" :scope="col" :today-et="ctx.todayEt" :context="context" />
+              <MetricTableCell :item="row.item" :scope="col" :today-et="ctx.todayEt" :context="context" :values="values" />
             </td>
           </tr>
         </tbody>
@@ -174,7 +177,7 @@ const anyVisible = computed(() => {
         <tbody>
           <tr v-for="(rowScope, ri) in tableRows" :key="ri" :class="{ incomplete: rowScope.kind === 'reading' && rowScope.reading.complete === false }">
             <td v-for="item in section.items" :key="item.id" :class="{ num: isNumColumn(item) }">
-              <MetricTableCell :item="item" :scope="rowScope" :today-et="ctx.todayEt" :context="context" />
+              <MetricTableCell :item="item" :scope="rowScope" :today-et="ctx.todayEt" :context="context" :values="values" />
             </td>
           </tr>
         </tbody>
@@ -185,11 +188,11 @@ const anyVisible = computed(() => {
       <template v-for="(fi, i) in flatItems" :key="`${fi.item.id}-${i}`">
         <MetricPlaceholder
           v-if="fi.emptyOf"
-          :label-tokens="resolveLabelTokens(fi.emptyOf.label, fi.scope, undefined, ctx.todayEt)"
-          :text-tokens="resolveLabelTokens(fi.emptyOf.text, fi.scope, undefined, ctx.todayEt)"
+          :label-tokens="resolveLabelTokens(fi.emptyOf.label, fi.scope, undefined, ctx.todayEt, values)"
+          :text-tokens="resolveLabelTokens(fi.emptyOf.text, fi.scope, undefined, ctx.todayEt, values)"
           :frame="fi.item.frame ?? defaultFrame"
         />
-        <MetricItem v-else :item="fi.item" :scope="fi.scope" :frame="fi.item.frame ?? defaultFrame" :today-et="ctx.todayEt" :context="context" :bar-max="scaled ? barMax : undefined" />
+        <MetricItem v-else :item="fi.item" :scope="fi.scope" :frame="fi.item.frame ?? defaultFrame" :today-et="ctx.todayEt" :context="context" :values="values" :bar-max="scaled ? barMax : undefined" />
       </template>
     </div>
   </div>
