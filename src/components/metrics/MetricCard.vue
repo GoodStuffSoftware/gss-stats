@@ -21,7 +21,7 @@
 import { computed, effectScope, onMounted, onScopeDispose, reactive, ref, shallowRef, watch, type EffectScope } from 'vue'
 import { useMetrics, type MetricRequestSpec, type UseMetrics } from '../../composables/useMetrics'
 import { useEtClock } from '../../composables/useEtClock'
-import { useMetricTokenValues } from '../../composables/useMetricTokens'
+import { useMetricTokens } from '../../composables/useMetricTokens'
 import { isInFlight, isStale, useReturnRefresh } from '../../composables/useReturnRefresh'
 import { fetchAdsReadings } from '../../api'
 import { MAX_READINGS_LIMIT } from '../../lib/metrics/types'
@@ -77,8 +77,8 @@ const todayEt = computed(() => todayEtFrom(nowMs.value))
 // own items use, and are handed down as one resolver. Lazy: a card with no metric token creates no
 // request here. The resolver is a prop of its own, never part of `ctx`, so a value arriving does
 // not rebuild the repeat instances.
-const metricTokenValues = useMetricTokenValues(() => cardLabelTexts(spec.value), () => props.context)
-const labelValues = computed(() => noteValueResolver(metricTokenValues.value))
+const labelTokens = useMetricTokens(() => cardLabelTexts(spec.value), () => props.context)
+const labelValues = computed(() => noteValueResolver(labelTokens.values.value))
 
 // ── The ads readings load (ADR 0005 slice 3) ────────────────────────────────────────────────
 // A card loads GET /api/ads/readings itself only when it needs the answer: it has `notices`, it
@@ -195,18 +195,22 @@ onScopeDispose(() => dayScope?.stop())
  * calls this through the component ref too). */
 function reload() {
   cardMetrics.value?.reloadAll()
+  labelTokens.reload()
   void loadReadings()
 }
 defineExpose({ reload })
 
-const hasError = computed(() => !!cardMetrics.value?.hasError.value || (loadsReadings.value && readingsFailed.value))
+// A label token that failed to load counts as the card's error too (its label shows "—" and Retry
+// refetches it), so the "Updated" stamp never claims fresh while a label is stale.
+const hasError = computed(() => !!cardMetrics.value?.hasError.value || labelTokens.hasError.value || (loadsReadings.value && readingsFailed.value))
 const updatedPlacement = computed<'header' | 'footer' | null>(() => {
   const v = spec.value?.showUpdated
   return v === true ? 'header' : v === 'header' || v === 'footer' ? v : null
 })
 const updatedText = computed(() => {
-  const at = cardMetrics.value?.lastUpdated.value
-  if (at == null) return ''
+  // The latest load among the card's items and its label tokens (a card whose only values are label tokens still has a stamp).
+  const at = Math.max(cardMetrics.value?.lastUpdated.value ?? -Infinity, labelTokens.lastUpdated.value ?? -Infinity)
+  if (!Number.isFinite(at)) return ''
   // Freshness is wall-clock time (the nowMs seam only pins the ET day).
   const s = Math.max(0, Math.round((Math.max(clock.value, at) - at) / 1000))
   if (s < 5) return noteRawText('label.card.updatedJustNow')

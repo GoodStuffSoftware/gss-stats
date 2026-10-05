@@ -23,7 +23,8 @@ const props = defineProps<{
   context?: MetricsContext
   /** The largest value in this item's section — a 'bar' display scales its width against it. */
   barMax?: number
-  /** What a `{=…}` token in the item's label, caption or hint fills from (MetricCard). */
+  /** What a `{=…}` token in the item's label or caption fills from (MetricCard). A hint's token is
+   * filled by MetricSection (a row-repeat table's column tooltip), not here. */
   values?: ValueResolver
 }>()
 
