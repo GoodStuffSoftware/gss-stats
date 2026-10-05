@@ -8,7 +8,8 @@
 //  - the Notify entrypoint: RPC from gss-beacon after a non-refused row was written.
 //
 // Counts-only: the DO stores NO row data, only its alarm; notify() takes no arguments; the only thing
-// ever sent is the literal ping. Refused rows never reach this Worker (the beacon filters them).
+// ever sent is the literal ping. Each socket carries only its accept time (a bare number, used to
+// evict the oldest at the cap). Refused rows never reach this Worker (the beacon filters them).
 
 import { DurableObject, WorkerEntrypoint } from 'cloudflare:workers'
 import { MAX_SOCKETS, nextBoundary, PING } from './hub'
@@ -25,6 +26,19 @@ function isUpgrade(request: Request): boolean {
 function notUpgradeResponse(request: Request): Response {
   if (request.method !== 'GET') return new Response('Not found', { status: 404 })
   return new Response('Expected a WebSocket upgrade', { status: 426, headers: { Upgrade: 'websocket' } })
+}
+
+/** WebSocket.readyState of an open socket (the constant is not on the Workers runtime's WebSocket). */
+const WS_OPEN = 1
+
+/** A socket's accept time (its attachment). Missing or not a finite number counts as the oldest. */
+function acceptedAt(ws: WebSocket): number {
+  try {
+    const at: unknown = ws.deserializeAttachment()
+    return typeof at === 'number' && Number.isFinite(at) ? at : -Infinity
+  } catch {
+    return -Infinity
+  }
 }
 
 export class LiveHub extends DurableObject<Env> {
@@ -57,13 +71,25 @@ export class LiveHub extends DurableObject<Env> {
 
   async fetch(request: Request): Promise<Response> {
     if (!isUpgrade(request)) return notUpgradeResponse(request)
-    // At the cap, close the OLDEST socket to make room (getWebSockets() lists them in accept order),
-    // so one leaky tab or script evicts itself instead of locking everyone else out. The evicted
-    // client reconnects with backoff.
-    const open = this.ctx.getWebSockets()
+    // At the cap, close the OLDEST open socket to make room, so one leaky tab or script evicts itself
+    // instead of locking everyone else out. The evicted client reconnects with backoff. Age comes
+    // from each socket's attachment (its accept time, see below), never from the order of
+    // getWebSockets(): in workerd that list is newest-first, and its order is not documented anyway.
+    // A socket that is already closing still shows up in the list but frees no room, so only OPEN
+    // sockets count toward the cap.
+    const open = this.ctx.getWebSockets().filter((ws) => ws.readyState === WS_OPEN)
     if (open.length >= MAX_SOCKETS) {
+      let oldest = open[0]
+      let oldestAt = acceptedAt(oldest)
+      for (const ws of open) {
+        const at = acceptedAt(ws)
+        if (at < oldestAt) {
+          oldest = ws
+          oldestAt = at
+        }
+      }
       try {
-        open[0].close(1013, 'try again later')
+        oldest.close(1013, 'try again later')
       } catch {
         // Already closing.
       }
@@ -71,6 +97,9 @@ export class LiveHub extends DurableObject<Env> {
     const pair = new WebSocketPair()
     const [client, server] = [pair[0], pair[1]]
     this.ctx.acceptWebSocket(server)
+    // The attachment is the socket's accept time (a bare number, no row data and no count). It
+    // survives hibernation and is only ever used to pick the oldest socket at the cap.
+    server.serializeAttachment(Date.now())
     return new Response(null, { status: 101, webSocket: client })
   }
 
@@ -79,11 +108,17 @@ export class LiveHub extends DurableObject<Env> {
 
   async webSocketClose(ws: WebSocket, code: number): Promise<void> {
     // Close with the received code when it is one that may be sent (1005 and 1006 are reserved for
-    // "no status" and "abnormal" and must never go on the wire), else a normal 1000.
+    // "no status" and "abnormal" and must never go on the wire), else a normal 1000. Other reserved
+    // codes (1004, 1015, 5000 ...) make close() throw; retry with a plain 1000 so the server side
+    // still closes instead of leaving the peer's socket open.
     try {
       ws.close(code === 1005 || code === 1006 ? 1000 : code, 'closed')
     } catch {
-      // Already closed (the runtime auto-replies to close on current compatibility dates).
+      try {
+        ws.close(1000, 'closed')
+      } catch {
+        // Already closed (the runtime auto-replies to close on current compatibility dates).
+      }
     }
   }
 

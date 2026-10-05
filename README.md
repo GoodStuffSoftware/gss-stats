@@ -1308,9 +1308,11 @@ polling. It is push, not a timer: nothing is sent while nothing happens.
    answer first. A hidden or idle tab closes its socket and drops pings; the existing
    return-to-tab refetch catches it up. With no socket at all, the dashboard behaves exactly as
    it did before live updates.
-5. The hub holds at most 100 sockets. At the cap a new connection **closes the oldest socket**
-   (close code 1013, "try again later") and is accepted, so one leaky tab or script evicts itself
-   instead of locking everyone else out; an evicted tab reconnects with backoff. Any answer from
+5. The hub holds at most 100 open sockets. Each socket carries its accept time (a bare number,
+   set when it is accepted). At the cap a new connection **closes the open socket with the oldest
+   accept time** (close code 1013, "try again later"; a socket that is already closing does not
+   count toward the cap) and is accepted, so one leaky tab or script evicts itself instead of
+   locking everyone else out; an evicted tab reconnects with backoff. Any answer from
    `gss-live` other than a real WebSocket upgrade reaches the browser as a bare `503`, with no
    detail.
 
@@ -1323,6 +1325,8 @@ polling. It is push, not a timer: nothing is sent while nothing happens.
   this one by a literal in both repos' tests (`src/lib/splitGuard.beaconParity.test.ts`).
 - The ping carries nothing: no row, id, count, path, site or clock time, and it only ever lands on a
   15-minute boundary, so it adds no time resolution to any count.
+- The Durable Object's storage holds only its alarm. Each socket carries only its accept time (used
+  to evict the oldest at the cap), never any row data and never a count.
 - The Durable Object stores **only its alarm**. It keeps no row data and `notify()` takes no
   arguments. No client ever sees a row id or a count through this path.
 - Fail closed: the server marks a response `liveSafe: true` only when it cannot count a refused row

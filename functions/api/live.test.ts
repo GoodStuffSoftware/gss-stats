@@ -117,6 +117,28 @@ describe('GET /api/live', () => {
     expect(await errorOf(res)).toBe('live updates unavailable')
   })
 
+  it('cancels the unused upstream body of a non-101 answer before returning the bare 503', async () => {
+    let cancelled = 0
+    const upstream = new Response('Too many connections', { status: 503 })
+    Object.defineProperty(upstream, 'body', {
+      value: { cancel: async () => void cancelled++ },
+    })
+    const res = await call(upgradeFrom(ORIGIN), { LIVE: fakeLive(async () => upstream).binding })
+    expect(res.status).toBe(503)
+    expect(cancelled).toBe(1)
+    expect(await errorOf(res)).toBe('live updates unavailable')
+  })
+
+  it('still returns the bare 503 when cancelling the upstream body throws', async () => {
+    const upstream = new Response('x', { status: 500 })
+    Object.defineProperty(upstream, 'body', {
+      value: { cancel: async () => { throw new Error('already released') } },
+    })
+    const res = await call(upgradeFrom(ORIGIN), { LIVE: fakeLive(async () => upstream).binding })
+    expect(res.status).toBe(503)
+    expect(await errorOf(res)).toBe('live updates unavailable')
+  })
+
   it('forwards nothing from the incoming request: only GET + Upgrade: websocket to the fixed URL', async () => {
     const live = fakeLive()
     const res = await call(
