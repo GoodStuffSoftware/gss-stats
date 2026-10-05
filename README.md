@@ -203,7 +203,10 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
     (too few, no data, a shorter span than the range). A token sends only its metric and window,
     so it can never ask for a split the catalog withholds: the counts-only rule (return, game
     starts, completions, tutorial completions, tour skips and tour exits: no hour, place or device split, no visitor id)
-    stays enforced on the server, where a sub-day range counts those rows over whole ET days.
+    stays enforced on the server, where a sub-day range counts those rows over whole ET days. A
+    chart's ↻ (or a metric card's own ↻ / Retry) refetches its caption's tokens along with the chart, and a token deleted from a
+    caption or label stops loading; a live push refetches a token only when the server flagged that
+    token's own last value safe, as it does for a chart.
   - **Note widgets** take values too: `release.*`, `golive.*`, `play.*` and `metric:` tokens fill
     in; `chart.*` shows "—" (a note belongs to no chart).
   - **Insert value** is one control in every text box that takes inserts: the caption, a note
