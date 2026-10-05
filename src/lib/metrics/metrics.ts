@@ -117,6 +117,9 @@ export interface MetricDef {
   visitor?: 'new'
   /** Beacon metrics: only rows carrying some campaign tag (any tag at all, unattributed). */
   anyTag?: true
+  /** Beacon metrics: only rows carrying NO campaign tag (the complement of `anyTag`: by definition
+   * the two partition the same rows, though no tagged-completions metric ships). */
+  untagged?: true
   /** Spend metrics: the value from the stored-spend summaries (null = no spend known). */
   spend?: (rows: readonly SpendSummary[], ctx: MetricCtx) => number | null
   /** Any other non-beacon fact (the ads store's freshness reads, the first Best Sudoku hit): the
@@ -521,6 +524,12 @@ export const METRIC_DEFS: MetricDef[] = [
   },
   bskMetric({ id: 'bsk.gameViews', countsRefused: false, unit: 'pageview', path: step('played'), instrumented: [] }),
   bskMetric({ id: 'bsk.completions', unit: 'completion', path: step('completed'), instrumented: [GAME_COMPLETE] }),
+  // Carry-over completions (retention spec S1): site-wide completions minus campaign-tagged ones,
+  // i.e. the completion rows carrying no campaign tag at all (the complement of anyTag, as
+  // bsk.taggedArrivals defines "tagged"). A row count over the same whole-ET-day facts as
+  // bsk.completions, so it can never go below zero or above the site-wide count.
+  // Counts only: no hour, place or device split is possible (no such column is read).
+  bskMetric({ id: 'bsk.carryOverCompletions', unit: 'completion', untagged: true, path: step('completed'), subsetOf: 'bsk.completions', instrumented: [GAME_COMPLETE] }),
   bskMetric({ id: 'bsk.popupShown', countsRefused: false, unit: 'showing', path: isPopupShown, instrumented: [TRACKING] }),
   bskMetric({ id: 'bsk.popupAccepts', countsRefused: false, unit: 'showing', subsetOf: 'bsk.popupShown', path: isPopupAccept, instrumented: [TRACKING] }),
   bskMetric({ id: 'bsk.authSuccess', countsRefused: false, unit: 'signin', path: isAuthSuccessBase, windows: { ...BSK_WINDOWS, ...RELEASE_WINDOWS }, instrumented: [] }),
@@ -656,6 +665,7 @@ export const METRICS: ReadonlyMap<string, MetricDef> = (() => {
       throw new Error(`metric ${d.id}: withOrganic needs a store over campaignReturns and is never organic`)
     }
     // No path test = every row counts, refused rows included: the opt-out would be a lie.
+    if (d.anyTag && d.untagged) throw new Error(`metric ${d.id}: anyTag and untagged exclude each other`)
     if (d.countsRefused === false && !d.path) throw new Error(`metric ${d.id}: countsRefused: false needs a path test`)
     m.set(d.id, d)
   }
@@ -680,6 +690,10 @@ export function rowMatcher(def: MetricDef, ctx: MetricCtx): (r: BeaconRow) => bo
   if (def.anyTag) {
     const inner = rowMatcher({ ...def, anyTag: undefined }, ctx)
     return (r) => r.campaign !== '' && inner(r)
+  }
+  if (def.untagged) {
+    const inner = rowMatcher({ ...def, untagged: undefined }, ctx)
+    return (r) => r.campaign === '' && inner(r)
   }
   if (!pathTest) return visitor ? (r) => r.visitor === visitor : () => true
   const byPath = new Map<string, boolean>()
