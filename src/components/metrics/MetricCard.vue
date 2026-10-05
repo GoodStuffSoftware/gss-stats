@@ -61,7 +61,7 @@ const props = defineProps<{
    * data-cut note (`hideable: false`) or an unknown id still shows, whatever the list says. */
   hiddenCaptions?: string[]
 }>()
-const emit = defineEmits<{ 'open-campaigns': [] }>()
+const emit = defineEmits<{ 'open-campaigns': []; reload: [] }>()
 
 const spec = computed<CardSpec | null>(() => ('preset' in props.cardRef ? (presetById(props.cardRef.preset) ?? null) : props.cardRef.spec))
 
@@ -199,6 +199,13 @@ function reload() {
   void loadReadings()
 }
 defineExpose({ reload })
+/** The card's own ↻ / Retry, pressed by the user. Tells the widget around the card (ChartCard) so
+ * it can refresh what it loads itself, such as its caption's metric tokens. Only this user path
+ * emits: a live push and ChartCard's own header ↻ (which calls the exposed `reload`) never do. */
+function onStatusReload() {
+  reload()
+  emit('reload')
+}
 
 // A label token that failed to load counts as the card's error too (its label shows "—" and Retry
 // refetches it), so the "Updated" stamp never claims fresh while a label is stale.
@@ -270,7 +277,7 @@ const allHidden = computed(() => instances.value.length > 0 && instances.value.e
       <AdsRefreshButton :campaign-ids="actionCampaignIds" @refreshed="onAdsRefreshed" />
     </div>
     <div v-if="statusAboveGrid" class="mc-status-row">
-      <MetricCardStatus :has-error="hasError" :updated-text="updatedText" @reload="reload" />
+      <MetricCardStatus :has-error="hasError" :updated-text="updatedText" @reload="onStatusReload" />
     </div>
 
     <!-- Keyed on the ET day: a new day remounts the body, so every repeat and request rebuilds. -->
@@ -285,12 +292,12 @@ const allHidden = computed(() => instances.value.length > 0 && instances.value.e
     </div>
     <MetricCardInstance v-else :key="todayEt" class="metric-card-plain" :spec="spec" :scope="ROOT_SCOPE" :ctx="ctx" :context="context" :values="labelValues" :boxed="false" :fallback-title="fallbackTitle" @open="emit('open-campaigns')">
       <template v-if="statusInInstanceHeader" #status>
-        <MetricCardStatus :has-error="hasError" :updated-text="updatedText" @reload="reload" />
+        <MetricCardStatus :has-error="hasError" :updated-text="updatedText" @reload="onStatusReload" />
       </template>
     </MetricCardInstance>
 
     <div v-if="statusPlacement === 'footer'" class="mc-status-row mc-footer">
-      <MetricCardStatus :has-error="hasError" :updated-text="updatedText" @reload="reload" />
+      <MetricCardStatus :has-error="hasError" :updated-text="updatedText" @reload="onStatusReload" />
     </div>
     <div v-if="captionIds.length" class="mc-captions">
       <NoteBlock v-for="id in captionIds" :key="id" :note-id="id" />

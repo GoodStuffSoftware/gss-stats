@@ -21,7 +21,8 @@ import { useMetrics, type UseMetrics } from './useMetrics'
 export interface MetricTokens {
   values: ComputedRef<TokenValues>
   /** Refetches every token requested so far, bypassing the server cache (a reload control,
-   * never automatic). Nothing happens before the first token has appeared. */
+   * never automatic, and never wired to a live push: a push refetches only what the server
+   * flagged liveSafe, inside useMetrics). Nothing happens before the first token has appeared. */
   reload: () => void
   /** True while a requested token's value is an error. */
   hasError: Readonly<Ref<boolean>>
@@ -54,22 +55,33 @@ export function useMetricTokens(
     () => metricRefsIn(toValue(texts)).map((r) => r.path).join('\n'),
     () => {
       const refs = metricRefsIn(toValue(texts))
-      if (!refs.length || !scope?.active) return
-      // Requests are made once per path and kept until the component goes (useMetrics releases
-      // them on scope dispose): the set of addressable paths is small and bounded.
+      if (!scope?.active) return
+      // Requests are made once per path while the text names it. A path the text no longer names is
+      // released below (its cache entry goes unless another consumer holds it), so a token removed
+      // from a label or caption stops loading and stops refetching.
       // The day key follows the shared ET clock (the one MetricCard reads), so a "today so far"
       // token left open across ET midnight re-plans to the new day and refetches, instead of
       // keeping yesterday's entry alive under its own refcount.
-      metrics.value ??=
-        scope.run(() => {
-          const clock = useEtClock()
-          return useMetrics(context, () => todayEtFrom(clock.value))
-        }) ?? null
+      if (!refs.length && !metrics.value) return
+      if (refs.length) {
+        metrics.value ??=
+          scope.run(() => {
+            const clock = useEtClock()
+            return useMetrics(context, () => todayEtFrom(clock.value))
+          }) ?? null
+      }
       const m = metrics.value
       if (!m) return
+      const wanted = new Set(refs.map((r) => r.path))
       let next: Map<string, { ref: MetricTokenRef; value: Readonly<Ref<MetricValue | undefined>> }> | null = null
+      for (const [path, h] of held.value) {
+        if (wanted.has(path)) continue
+        next ??= new Map(held.value)
+        next.delete(path)
+        m.release(metricRequestSpec(h.ref))
+      }
       for (const ref of refs) {
-        if (held.value.has(ref.path)) continue
+        if ((next ?? held.value).has(ref.path)) continue
         next ??= new Map(held.value)
         next.set(ref.path, { ref, value: m.request(metricRequestSpec(ref)) })
       }
