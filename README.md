@@ -1294,11 +1294,14 @@ polling. It is push, not a timer: nothing is sent while nothing happens.
 3. At the boundary the alarm sends every socket the literal text `{"t":"changed"}`.
 4. A tab that is **open, visible and recently used** (input in the last 2 h) holds the socket
    (`/api/live`, a same-origin Pages Function behind the normal sign-in, bound to `gss-live` by
-   the `LIVE` service binding). On a ping it waits until about 95–120 s after the boundary (past
-   the 90 s edge-cache TTL, so the refetch cannot be served the answer from before the change;
-   the spread keeps tabs from all hitting at once) and then refetches **only the cards flagged
-   `liveSafe`**, in the background, never while a load is running. A chart refetches at most once an
-   hour this way. A hidden or idle tab closes its socket and drops pings; the existing
+   the `LIVE` service binding). On a ping it waits 95–120 s after the ping arrives (the server sends it at the
+   boundary, so that is past the 90 s edge-cache TTL and the refetch cannot be served the answer
+   from before the change; the spread keeps tabs from all hitting at once; counted from receipt,
+   never from the browser's clock, so a skewed clock cannot fire early) and then refetches **only
+   the cards flagged `liveSafe`**, in the background, never while a load is running. A chart
+   refetches at most once an hour this way, and a chart whose request has changed since the flagged
+   answer (an editor change to its type, rings, dataset or filters) waits for a fresh flagged
+   answer first. A hidden or idle tab closes its socket and drops pings; the existing
    return-to-tab refetch catches it up. With no socket at all, the dashboard behaves exactly as
    it did before live updates.
 
@@ -1351,7 +1354,7 @@ If `deploy-live` fails on the first merge (usually a token that lacks **Workers 
 `gss-live` does not exist and the Pages deploy can fail on the missing binding target. Fix the token
 (`CLOUDFLARE_WORKERS_API_TOKEN`, or `CLOUDFLARE_API_TOKEN`), then **Actions → Deploy → Run
 workflow** on `main`: a manual run always deploys `gss-live` first and then Pages. If `gss-live` is down
-later, notifies fail silently, sockets drop, tabs reconnect with backoff (1 s doubling to 5 min) and
+later, notifies fail silently, sockets drop, tabs reconnect with backoff (1 s doubling to 5 min, kept across a tab switch) and
 the dashboard works as it did before. To stop automatic `gss-live` deploys, set the repo variable
 `LIVE_DEPLOY_PAUSED` to `true`.
 

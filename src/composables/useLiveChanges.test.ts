@@ -3,7 +3,7 @@
 // The live socket (useLiveChanges.ts) against a fake WebSocket and fake timers. Counts-only
 // guarantee 6 (gating): a ping that arrives or comes due while the tab is hidden or idle is dropped,
 // and the socket is only open while the tab is visible and in use. Plus the contract: the same-origin
-// ws/wss URL, the ping timing (15-minute boundary + 95 s + 0-25 s), only the exact ping text acted
+// ws/wss URL, the ping timing (95 s + 0-25 s after the ping arrives, whatever the client clock says), only the exact ping text acted
 // on, backoff 1 s doubling to 5 min with jitter and reset only after 60 s open, the 50 s keepalive, and a
 // constructor that throws being fail-soft.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -18,7 +18,7 @@ import {
   LIVE_KEEPALIVE_MS,
   LIVE_STABLE_MS,
   liveBackoffMs,
-  liveFireAt,
+  liveFireDelayMs,
   startLiveChanges,
   useLiveChanges,
 } from './useLiveChanges'
@@ -99,12 +99,11 @@ function startOpen() {
 }
 
 describe('pure helpers', () => {
-  it('liveFireAt: the 15-minute boundary + 95 s + jitter', () => {
+  it('liveFireDelayMs: 95 s + jitter, past the 90 s edge cache for any jitter', () => {
     expect(LIVE_BOUNDARY_MS).toBe(900_000)
-    expect(liveFireAt(B0 + 10_000, 0)).toBe(B0 + 95_000)
-    expect(liveFireAt(B0 + 10_000, 25_000)).toBe(B0 + 120_000)
-    expect(liveFireAt(B0 + 899_999, 0)).toBe(B0 + 95_000) // still the same window
-    expect(liveFireAt(B0 + 900_000, 0)).toBe(B0 + 900_000 + 95_000)
+    expect(liveFireDelayMs(0)).toBe(95_000)
+    expect(liveFireDelayMs(25_000)).toBe(120_000)
+    expect(liveFireDelayMs(0)).toBeGreaterThan(90_000)
   })
 
   it('liveBackoffMs: 1 s doubling to a 5 min cap, jitter within [base/2, base]', () => {
@@ -234,15 +233,15 @@ describe('keepalive', () => {
   })
 })
 
-describe('a ping: boundary + 95 s + jitter', () => {
-  it('fires live subscribers at the boundary + 95 s when the jitter is 0', () => {
+describe('a ping: 95 s + jitter after it arrives', () => {
+  it('fires live subscribers 95 s after the ping arrives when the jitter is 0', () => {
     const cb = vi.fn()
     onLiveChange(cb)
     const s = startOpen()
     vi.advanceTimersByTime(10_000) // now B0 + 10 s
     s.message(LIVE_CHANGED_TEXT)
     random = 0
-    vi.advanceTimersByTime(LIVE_FIRE_DELAY_MS - 10_000 - 1)
+    vi.advanceTimersByTime(LIVE_FIRE_DELAY_MS - 1)
     expect(cb).not.toHaveBeenCalled()
     vi.advanceTimersByTime(1)
     expect(cb).toHaveBeenCalledTimes(1)
@@ -264,12 +263,50 @@ describe('a ping: boundary + 95 s + jitter', () => {
     expect(LIVE_FIRE_DELAY_MS).toBeGreaterThan(90_000)
   })
 
-  it('a ping that arrives late (past boundary + 95 s) fires straight away, not at the next boundary', () => {
+  // The server sends the ping at the boundary B; the client must wait out the 90 s edge cache from
+  // when the ping ARRIVES, not from a boundary rebuilt from its own clock. A clock that reads just
+  // before B used to pick the previous window and fire at once (inside the cache window, eating the
+  // chart's hourly cap on the stale answer).
+  it.each([
+    ['-0.5 s (slow)', -500],
+    ['-5 s (slow)', -5_000],
+    ['+5 s (fast)', 5_000],
+    ['-3 min (slow)', -180_000],
+    ['+3 min (fast)', 180_000],
+    ['on time', 0],
+  ])('a client clock %s: fires no earlier than 95 s after receipt, and by 120 s', (_name, skew) => {
+    const cb = vi.fn()
+    onLiveChange(cb)
+    const s = startOpen()
+    vi.setSystemTime(B0 + 200 + skew) // the ping arrives 200 ms after the true boundary
+    s.message(LIVE_CHANGED_TEXT) // jitter 0 (random = 0)
+    vi.advanceTimersByTime(LIVE_FIRE_DELAY_MS - 1)
+    expect(cb).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1)
+    expect(cb).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([-500, 5_000, -180_000])('a client clock off by %i ms, largest jitter: waits the full 120 s', (skew) => {
+    const cb = vi.fn()
+    onLiveChange(cb)
+    const s = startOpen()
+    vi.setSystemTime(B0 + 200 + skew)
+    random = 0.999999
+    s.message(LIVE_CHANGED_TEXT)
+    vi.advanceTimersByTime(LIVE_FIRE_DELAY_MS + LIVE_FIRE_JITTER_MS - 10)
+    expect(cb).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(10)
+    expect(cb).toHaveBeenCalledTimes(1)
+  })
+
+  it('a ping that arrives late (minutes past the boundary) still waits the full delay, never fires at once', () => {
     const cb = vi.fn()
     onLiveChange(cb)
     const s = startOpen()
     vi.advanceTimersByTime(5 * 60_000)
     s.message(LIVE_CHANGED_TEXT)
+    vi.advanceTimersByTime(LIVE_FIRE_DELAY_MS - 1)
+    expect(cb).not.toHaveBeenCalled()
     vi.advanceTimersByTime(1)
     expect(cb).toHaveBeenCalledTimes(1)
   })
@@ -514,6 +551,46 @@ describe('reconnect backoff', () => {
     vi.advanceTimersByTime(LIVE_BACKOFF_CAP_MS)
     expect(sockets()).toHaveLength(1)
   })
+
+  it('does not retry while idle either (no input for 2 h): no timer reopens the socket', () => {
+    random = 1
+    startLiveChanges()
+    last().drop() // a retry is pending in 1 s
+    vi.setSystemTime(B0 + LIVE_IDLE_MS + 1) // the retry's timer is still armed, but the tab is now idle
+    vi.advanceTimersByTime(LIVE_BACKOFF_CAP_MS)
+    expect(sockets()).toHaveLength(1)
+    input() // input brings it back
+    expect(sockets()).toHaveLength(2)
+  })
+
+  it('hidden then visible during a backoff waits out the rest of it instead of opening at once', () => {
+    random = 1
+    startLiveChanges()
+    for (let i = 0; i < 6; i++) {
+      last().drop() // refused upgrades: the delays grow 1, 2, 4, 8, 16, 32 s
+      vi.advanceTimersByTime(liveBackoffMs(i, 1))
+    }
+    expect(sockets()).toHaveLength(7)
+    last().drop() // the 7th failure: next retry in 64 s
+    setVisibility('hidden')
+    vi.advanceTimersByTime(5_000)
+    setVisibility('visible')
+    expect(sockets()).toHaveLength(7) // not opened straight away
+    vi.advanceTimersByTime(58_000)
+    expect(sockets()).toHaveLength(7)
+    vi.advanceTimersByTime(2_000)
+    expect(sockets()).toHaveLength(8) // 64 s after the failure
+  })
+
+  it('hidden for longer than the backoff, then visible: opens at once', () => {
+    random = 1
+    startLiveChanges()
+    last().drop()
+    setVisibility('hidden')
+    vi.advanceTimersByTime(60_000)
+    setVisibility('visible')
+    expect(sockets()).toHaveLength(2)
+  })
 })
 
 describe('fail-soft', () => {
@@ -566,13 +643,24 @@ describe('fail-soft', () => {
     expect(() => s.onmessage?.({ get data(): unknown { throw new Error('x') } })).not.toThrow()
   })
 
-  it('a socket that is closed while connecting and answers late cannot revive anything', () => {
-    const s = startOpen()
+  it('a socket that is closed while still connecting (never opened) cannot revive anything', () => {
+    startLiveChanges() // connecting: no open() yet
+    const s = last()
+    expect(s.readyState).toBe(0)
     setVisibility('hidden')
     expect(s.closed).toBe(true)
     // late events from the closed socket: handlers were detached
     expect(s.onopen).toBeNull()
     expect(s.onmessage).toBeNull()
     expect(s.onclose).toBeNull()
+    // the same events delivered anyway (a late handshake, a message, a drop) change nothing
+    const cb = vi.fn()
+    onLiveChange(cb)
+    s.onopen?.()
+    s.onmessage?.({ data: LIVE_CHANGED_TEXT })
+    s.drop()
+    vi.advanceTimersByTime(LIVE_BACKOFF_CAP_MS)
+    expect(cb).not.toHaveBeenCalled()
+    expect(sockets()).toHaveLength(1)
   })
 })

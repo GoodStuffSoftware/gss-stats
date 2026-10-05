@@ -11,8 +11,11 @@
 // - It acts on the exact ping text and nothing else. Anything else the server (or anything in
 //   between) sends is ignored.
 // - A ping fires the live subscribers (useReturnRefresh.ts `onLiveChange`) at the 15-minute
-//   boundary + 95 s + rand(0-25 s): past the server's 90 s edge-cache TTL, so the refetch cannot
-//   be served the answer from before the change, and spread out so tabs do not all hit at once.
+//   95 s + rand(0-25 s) after the ping ARRIVES: the server sends it at the 15-minute boundary, so
+//   that is past its 90 s edge-cache TTL and the refetch cannot be served the answer from before
+//   the change, and spread out so tabs do not all hit at once. The delay is counted from receipt, not
+//   from a boundary rebuilt from the client's clock: a clock a little slow or fast would pick the
+//   wrong window and fire at once (or inside the cache window).
 //   A ping that comes due while the tab is hidden or idle is dropped; the return refetch
 //   (useReturnRefresh) catches up when the user is back.
 // - Reconnects back off from 1 s, doubling to a 5 min cap with jitter. The backoff resets only
@@ -31,11 +34,12 @@ import { emitLiveChange } from './useReturnRefresh'
 /** The only message acted on. */
 export const LIVE_CHANGED_TEXT = '{"t":"changed"}'
 export const LIVE_PATH = '/api/live'
-/** The ping lands at a fixed boundary; the refetch waits this long past it (edge cache is 90 s)... */
+/** The server sends the ping at a fixed boundary; the refetch waits this long after it arrives (edge cache is 90 s)... */
 export const LIVE_FIRE_DELAY_MS = 95_000
 /** ...plus up to this much random spread. */
 export const LIVE_FIRE_JITTER_MS = 25_000
-/** Fixed 15-minute boundaries (ET offsets are whole hours, so they equal epoch boundaries). */
+/** The server's fixed batching period (a ping goes out at most once per 15-minute boundary). The client
+ * never computes a boundary: it only counts from when the ping arrives. */
 export const LIVE_BOUNDARY_MS = 15 * 60_000
 /** No input for this long: the socket closes and pings are dropped until the next input. */
 export const LIVE_IDLE_MS = 2 * 60 * 60_000
@@ -54,9 +58,10 @@ export function liveBackoffMs(attempt: number, random: number = Math.random()): 
   return Math.round(base * (0.5 + 0.5 * random))
 }
 
-/** When a ping that arrived at `now` should fire: its 15-minute boundary + 95 s + `jitter` (0-25 s). */
-export function liveFireAt(now: number, jitterMs: number): number {
-  return Math.floor(now / LIVE_BOUNDARY_MS) * LIVE_BOUNDARY_MS + LIVE_FIRE_DELAY_MS + jitterMs
+/** How long after a ping arrives its subscribers fire: 95 s + `jitterMs` (0-25 s). Independent of the
+ * client's clock, so a skewed clock cannot fire early, inside the 90 s edge-cache window. */
+export function liveFireDelayMs(jitterMs: number): number {
+  return LIVE_FIRE_DELAY_MS + jitterMs
 }
 
 let started = false
@@ -64,6 +69,8 @@ let ws: WebSocket | null = null
 let attempt = 0
 let lastInputAt = 0
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+// Earliest time the next socket may open after a failed one: a hide/show flip must not skip the backoff.
+let nextAllowedAt = 0
 let keepaliveTimer: ReturnType<typeof setInterval> | null = null
 let idleTimer: ReturnType<typeof setTimeout> | null = null
 let stableTimer: ReturnType<typeof setTimeout> | null = null
@@ -107,10 +114,12 @@ function closeSocket() {
 
 function scheduleReconnect() {
   if (reconnectTimer || !wanted()) return
+  const delay = liveBackoffMs(attempt)
+  nextAllowedAt = Date.now() + delay
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null
     evaluate()
-  }, liveBackoffMs(attempt))
+  }, delay)
   attempt++
 }
 
@@ -136,8 +145,7 @@ function armIdleTimer() {
 
 function onChanged() {
   if (fireTimer) return // one fire is already pending for this boundary
-  const now = Date.now()
-  const delay = Math.max(0, liveFireAt(now, Math.random() * LIVE_FIRE_JITTER_MS) - now)
+  const delay = liveFireDelayMs(Math.random() * LIVE_FIRE_JITTER_MS)
   fireTimer = setTimeout(() => {
     fireTimer = null
     if (!isVisible() || isIdle()) return // hidden or idle at fire time: dropped
@@ -201,6 +209,16 @@ function evaluate() {
       return
     }
     if (ws || reconnectTimer) return
+    // Back from hidden (or idle) while a backoff was still running: wait out what is left of it
+    // rather than opening at once, so a tab switch cannot hammer a server that refuses the upgrade.
+    const wait = Math.min(LIVE_BACKOFF_CAP_MS, nextAllowedAt - Date.now())
+    if (wait > 0) {
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null
+        evaluate()
+      }, wait)
+      return
+    }
     open()
   } catch {
     // fail-soft
@@ -222,6 +240,7 @@ export function startLiveChanges(): () => void {
   if (started || typeof window === 'undefined' || typeof document === 'undefined') return () => {}
   started = true
   attempt = 0
+  nextAllowedAt = 0
   lastInputAt = Date.now()
   try {
     document.addEventListener('visibilitychange', onVisibility)
@@ -259,5 +278,6 @@ export function useLiveChanges(): void {
 export function __resetLiveChangesForTests(): void {
   stopLiveChanges()
   attempt = 0
+  nextAllowedAt = 0
   lastInputAt = 0
 }
