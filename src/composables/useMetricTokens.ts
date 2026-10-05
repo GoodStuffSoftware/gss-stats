@@ -17,6 +17,18 @@ import type { TokenValues } from '../lib/valueTokens'
 import { useEtClock } from './useEtClock'
 import { useMetrics, type UseMetrics } from './useMetrics'
 
+/** The values plus the handles a reload control needs (MetricCard's Reload / Retry). */
+export interface MetricTokens {
+  values: ComputedRef<TokenValues>
+  /** Refetches every token requested so far, bypassing the server cache (a reload control,
+   * never automatic). Nothing happens before the first token has appeared. */
+  reload: () => void
+  /** True while a requested token's value is an error. */
+  hasError: Readonly<Ref<boolean>>
+  /** The latest successful token load (epoch ms), or null while none has loaded. */
+  lastUpdated: Readonly<Ref<number | null>>
+}
+
 /** The `metric:` values for every addressable token in `texts`, keyed by path, for the page
  * context `context`. Call during `setup()`. A path whose value is not (yet) known is present with
  * a null value, so it renders the placeholder; a malformed or unknown path is absent (also the
@@ -25,8 +37,17 @@ export function useMetricTokenValues(
   texts: MaybeRefOrGetter<readonly (string | undefined | null)[]>,
   context: MaybeRefOrGetter<MetricsContext | undefined>,
 ): ComputedRef<TokenValues> {
+  return useMetricTokens(texts, context).values
+}
+
+/** `useMetricTokenValues` plus a reload and the error / freshness state of the token requests. */
+export function useMetricTokens(
+  texts: MaybeRefOrGetter<readonly (string | undefined | null)[]>,
+  context: MaybeRefOrGetter<MetricsContext | undefined>,
+): MetricTokens {
   const scope = getCurrentScope()
-  let metrics: UseMetrics | null = null
+  // A ref, not a plain variable: hasError / lastUpdated must start tracking once the instance exists.
+  const metrics = shallowRef<UseMetrics | null>(null)
   const held = shallowRef(new Map<string, { ref: MetricTokenRef; value: Readonly<Ref<MetricValue | undefined>> }>())
 
   watch(
@@ -39,27 +60,34 @@ export function useMetricTokenValues(
       // The day key follows the shared ET clock (the one MetricCard reads), so a "today so far"
       // token left open across ET midnight re-plans to the new day and refetches, instead of
       // keeping yesterday's entry alive under its own refcount.
-      metrics ??=
+      metrics.value ??=
         scope.run(() => {
           const clock = useEtClock()
           return useMetrics(context, () => todayEtFrom(clock.value))
         }) ?? null
-      if (!metrics) return
+      const m = metrics.value
+      if (!m) return
       let next: Map<string, { ref: MetricTokenRef; value: Readonly<Ref<MetricValue | undefined>> }> | null = null
       for (const ref of refs) {
         if (held.value.has(ref.path)) continue
         next ??= new Map(held.value)
-        next.set(ref.path, { ref, value: metrics.request(metricRequestSpec(ref)) })
+        next.set(ref.path, { ref, value: m.request(metricRequestSpec(ref)) })
       }
       if (next) held.value = next
     },
     { immediate: true, flush: 'sync' },
   )
 
-  return computed(() => {
+  const values = computed(() => {
     const wanted = new Set(metricRefsIn(toValue(texts)).map((r) => r.path))
     const out: TokenValues = {}
     for (const [path, h] of held.value) if (wanted.has(path)) out[path] = metricTokenValue(h.ref, h.value.value)
     return out
   })
+  return {
+    values,
+    reload: () => metrics.value?.reloadAll(),
+    hasError: computed(() => !!metrics.value?.hasError.value),
+    lastUpdated: computed(() => metrics.value?.lastUpdated.value ?? null),
+  }
 }

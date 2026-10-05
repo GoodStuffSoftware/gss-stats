@@ -30,7 +30,7 @@ import { notePreview } from './metrics/editorModel'
 import { METRICS, OPTIONAL_PARAMS, metricWindows } from './metrics/metrics'
 import { RATIOS, ratioParamsOf, ratioWindowsOf } from './metrics/ratios'
 import type { MetricRequestSpec } from './metrics/scope'
-import type { MetricValue } from './metrics/types'
+import type { CardSpec, Label, MetricValue, RepeatSpec } from './metrics/types'
 import type { Unit } from './metrics/units'
 import { etDateFast } from './etTime'
 import { VALUE_TOKEN_RE } from './textLite'
@@ -141,5 +141,36 @@ export function metricTokenOptions(): MetricTokenOption[] {
   }
   for (const def of METRICS.values()) add(def.id, def.label, metricWindows(def))
   for (const r of RATIOS.values()) add(r.id, r.label, ratioWindowsOf(r))
+  return out
+}
+
+/** Every plain-text Label a card renders, for the metric tokens a card's labels may carry: its
+ * title, each section's title and column/row headings, each item's label, caption and hint, and
+ * every repeat's "empty" heading and message. A note, bound or "metric's own" label is no text. */
+export function cardLabelTexts(spec: CardSpec | null | undefined): string[] {
+  const out: string[] = []
+  const add = (l: Label | undefined) => {
+    if (typeof l === 'string') out.push(l)
+  }
+  const addRepeat = (r: RepeatSpec | undefined) => {
+    add(r?.empty?.label)
+    add(r?.empty?.text)
+  }
+  if (!spec) return out
+  add(spec.title)
+  addRepeat(spec.repeat)
+  for (const s of spec.sections ?? []) {
+    add(s.title)
+    add(s.columnLabel)
+    add(s.rowsLabel)
+    addRepeat(s.repeat)
+    addRepeat(s.columns)
+    for (const it of s.items ?? []) {
+      add(it.label)
+      add(it.caption)
+      add(it.hint)
+      addRepeat(it.repeat)
+    }
+  }
   return out
 }
