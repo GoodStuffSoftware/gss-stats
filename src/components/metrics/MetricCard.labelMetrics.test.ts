@@ -157,4 +157,175 @@ describe('MetricCard: metric tokens in labels', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(w.text()).toContain('Today 1,000')
   })
+
+  // ── Surfaces beyond the title and item labels: each is a separate branch in cardLabelTexts or a
+  // separate prop threading, so each gets its own guard (a missed one silently shows "—") ──
+  const tokenOf = (m: string) => `{=metric:${m}@page|number}`
+  const byMetric = (r: Record<string, unknown>) => ({ status: 'ok', value: ({ 'bsk.pageviews': 111, 'bsk.completions': 222, 'bsk.popupShown': 333, 'bsk.authSuccess': 444, 'bsk.gameViews': 555 } as Record<string, number>)[r.metric as string] ?? 1 }) as MetricValue
+
+  it("a table section's column heading and row-label heading take tokens, fetched in the card's one request", async () => {
+    serve(byMetric)
+    const w = card(
+      spec({
+        sections: [
+          {
+            layout: 'table',
+            columns: { over: 'windows' },
+            columnLabel: `Col ${tokenOf('bsk.pageviews')}`,
+            rowsLabel: `Rows ${tokenOf('bsk.completions')}`,
+            items: [itemOf('Views') as never],
+          } as never,
+        ],
+      }),
+      { nowMs: undefined }, // the live clock, as on a page: the card's day and the tokens' day agree
+    )
+    await settle()
+    expect(w.text()).toContain('Col 111')
+    expect(w.text()).toContain('Rows 222')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(keysOf(posts()[0])).toEqual(['bsk.completions@page', 'bsk.gameViews@page', 'bsk.pageviews@page'])
+  })
+
+  it("a card repeat's empty heading and message take tokens", async () => {
+    serve(byMetric)
+    const w = card({
+      v: 1,
+      repeat: { over: 'campaigns', ids: ['__none__'], empty: { label: `None ${tokenOf('bsk.pageviews')}`, text: `Add one ${tokenOf('bsk.completions')}` } } as never,
+      sections: [{ layout: 'rows', items: [fieldItem as never] }],
+    })
+    await settle()
+    expect(w.text()).toContain('None 111')
+    expect(w.text()).toContain('Add one 222')
+    expect(keysOf(posts()[0])).toEqual(['bsk.completions@page', 'bsk.pageviews@page'])
+  })
+
+  it("a section's own repeat empty heading and message are fetched too", async () => {
+    serve(byMetric)
+    card({
+      v: 1,
+      sections: [
+        {
+          layout: 'rows',
+          repeat: { over: 'campaigns', ids: ['__none__'], empty: { label: tokenOf('bsk.popupShown'), text: tokenOf('bsk.authSuccess') } },
+          items: [fieldItem as never],
+        } as never,
+      ],
+    })
+    await settle()
+    expect(keysOf(posts()[0])).toEqual(expect.arrayContaining(['bsk.authSuccess@page', 'bsk.popupShown@page']))
+  })
+
+  it("a column repeat's empty heading and message, and an item repeat's, are fetched too", async () => {
+    serve(byMetric)
+    card(
+      {
+        v: 1,
+        sections: [
+          {
+            layout: 'table',
+            columns: { over: 'windows', ids: ['__none__'], empty: { label: tokenOf('bsk.popupShown'), text: tokenOf('bsk.authSuccess') } },
+            items: [itemOf('Views') as never],
+          } as never,
+        ],
+      },
+      { nowMs: undefined },
+    )
+    await settle()
+    expect(keysOf(posts()[0])).toEqual(expect.arrayContaining(['bsk.authSuccess@page', 'bsk.popupShown@page']))
+    __resetMetricsStateForTests()
+    fetchMock.mockClear()
+    card(
+      { v: 1, sections: [{ layout: 'rows', items: [itemOf('Views', { repeat: { over: 'campaigns', ids: ['__none__'], empty: { label: tokenOf('bsk.completions'), text: tokenOf('bsk.pageviews') } } }) as never] }] },
+      { nowMs: undefined },
+    )
+    await settle()
+    expect(keysOf(posts()[0])).toEqual(expect.arrayContaining(['bsk.completions@page', 'bsk.pageviews@page']))
+  })
+
+  it("a table column's hint takes tokens: fetched, and shown as the header's tooltip", async () => {
+    serve(byMetric)
+    const w = card({
+      v: 1,
+      sections: [{ layout: 'table', repeat: { over: 'campaigns' }, items: [itemOf('Views', { hint: `Of ${tokenOf('bsk.pageviews')} loads` }) as never] } as never],
+    })
+    await settle()
+    expect(keysOf(posts()[0])).toContain('bsk.pageviews@page')
+    expect(w.findAll('th').some((th) => th.attributes('title') === 'Of 111 loads')).toBe(true)
+  })
+
+  it('a campaign-repeat card fills tokens in its instance labels (the repeat branch passes the values down)', async () => {
+    serve(byMetric)
+    const w = card({
+      v: 1,
+      repeat: { over: 'campaigns' } as never,
+      title: `{campaign.label} ${tokenOf('bsk.pageviews')}`,
+      sections: [{ layout: 'rows', title: `S ${tokenOf('bsk.completions')}`, items: [itemOf(`L ${tokenOf('bsk.popupShown')}`, { caption: `C ${tokenOf('bsk.authSuccess')}` }) as never] }],
+    })
+    await settle()
+    const text = w.text()
+    expect(text).toContain('111')
+    expect(text).toContain('S 222')
+    expect(text).toContain('L 333')
+    expect(text).toContain('C 444')
+    expect(text.match(/S 222/g)!.length).toBeGreaterThan(1) // every instance, not just the first
+    expect(text).not.toMatch(/[SLC] —/) // no unfilled label token
+  })
+
+  // ── Reload and Retry refresh the label tokens too (review SHOULD-1) ──
+  const reloadBtn = (w: VueWrapper) => w.get('button.mc-reload')
+  const freshOf = (b: MetricsRequestBody) => (b as unknown as { fresh?: boolean }).fresh
+
+  it("Reload refetches a title token fresh, with the card's own items", async () => {
+    let pv = 7
+    serve((r) => ({ status: 'ok', value: r.metric === 'bsk.pageviews' ? pv : 50 }) as MetricValue)
+    const w = card(spec({ title: `T ${tokenOf('bsk.pageviews')}`, showUpdated: 'header' }))
+    await settle()
+    expect(w.text()).toContain('T 7')
+    const before = fetchMock.mock.calls.length
+    pv = 99
+    await reloadBtn(w).trigger('click')
+    await settle()
+    const after = posts().slice(before)
+    expect(after.length).toBeGreaterThan(0)
+    expect(after.every(freshOf)).toBe(true)
+    expect(after.flatMap(keysOf)).toEqual(expect.arrayContaining(['bsk.pageviews@page', 'bsk.gameViews@page']))
+    expect(w.text()).toContain('T 99')
+  })
+
+  it('Reload on a card whose only metric values are label tokens still sends a fresh request', async () => {
+    serve(() => ({ status: 'ok', value: 5 }) as MetricValue)
+    const w = card({ v: 1, title: `T ${tokenOf('bsk.pageviews')}`, showUpdated: 'header', sections: [{ layout: 'rows', items: [fieldItem as never] }] })
+    await settle()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(w.find('.mc-updated').exists()).toBe(true) // the stamp follows the token load, not only item loads
+    await reloadBtn(w).trigger('click')
+    await settle()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(freshOf(posts()[1])).toBe(true)
+    expect(keysOf(posts()[1])).toEqual(['bsk.pageviews@page'])
+  })
+
+  it("a label token that failed shows the card's error, not a fresh stamp, and Retry refetches it", async () => {
+    let ok = false
+    serve((r) => (r.metric === 'bsk.pageviews' && !ok ? ({ status: 'error', reason: 'boom' } as unknown as MetricValue) : ({ status: 'ok', value: 8 } as MetricValue)))
+    const w = card({ v: 1, title: `T ${tokenOf('bsk.pageviews')}`, showUpdated: 'header', sections: [{ layout: 'rows', items: [fieldItem as never] }] })
+    await settle()
+    expect(w.find('.mc-error').exists()).toBe(true)
+    expect(w.find('.mc-updated').exists()).toBe(false)
+    expect(w.text()).toContain('T —')
+    ok = true
+    await w.get('button.mc-retry').trigger('click')
+    await settle()
+    expect(w.find('.mc-error').exists()).toBe(false)
+    expect(w.text()).toContain('T 8')
+  })
+
+  it('Reload on a card with no metric token sends only its own items', async () => {
+    serve(() => ({ status: 'ok', value: 3 }) as MetricValue)
+    const w = card(spec({ title: 'Plain', showUpdated: 'header' }))
+    await settle()
+    await reloadBtn(w).trigger('click')
+    await settle()
+    expect(posts().flatMap(keysOf).every((k) => k === 'bsk.gameViews@page')).toBe(true)
+  })
 })

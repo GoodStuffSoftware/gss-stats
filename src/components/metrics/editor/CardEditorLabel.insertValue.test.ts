@@ -98,6 +98,25 @@ describe('CardEditorLabel: Insert value', () => {
     expect(lastModel(w)).toBe(`${full.slice(0, 170)}{=golive.web|date}`)
   })
 
+  it('a token that lands the label at exactly 200 characters is accepted, and one more character is refused', async () => {
+    const token = '{=golive.web|date}'
+    const exact = 'y'.repeat(200 - token.length)
+    const w = openLive(exact)
+    await menu(w).setValue(token)
+    await btn(w).click()
+    await flushPromises()
+    expect(lastModel(w)).toBe(`${exact}${token}`)
+    expect((lastModel(w) as string).length).toBe(200)
+    expect(w.get('.label-full').text()).toBe('')
+
+    const over = openLive('y'.repeat(200 - token.length + 1))
+    await menu(over).setValue(token)
+    await btn(over).click()
+    await flushPromises()
+    expect(lastModel(over)).toBeUndefined()
+    expect(over.get('.label-full').text()).toBe('Label is full')
+  })
+
   it('with no repeat there are no fields, only the dates and the metrics', () => {
     const w = open('Hello')
     expect(menu(w).findAll('optgroup').map((g) => g.attributes('label'))).toEqual(['Dates', 'Metrics'])
