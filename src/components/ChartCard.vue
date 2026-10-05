@@ -26,7 +26,7 @@ import NoteBlock from './NoteBlock.vue'
 import { noteRawText } from '../lib/notes'
 import { chartNotes } from '../lib/chartNotes'
 import { chartValueResolver, noteValueResolver } from '../lib/valueTokens'
-import { useMetricTokenValues } from '../composables/useMetricTokens'
+import { useMetricTokens } from '../composables/useMetricTokens'
 
 const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolean; drillOpen: boolean; forceControls?: boolean }>()
 
@@ -61,6 +61,9 @@ const cardHasOwnReload = computed(() => cardShowsOwnReload(cardRef.value))
 function reloadThis() {
   if (isCard.value) metricCard.value?.reload()
   else load()
+  // The caption's metric tokens refetch too (bypassing the server cache). Only this user-pressed
+  // path: a live push goes through refetchOnLive and useMetrics' own liveSafe-gated refetch, never here.
+  metricTokens.reload()
 }
 
 const emit = defineEmits<{
@@ -273,7 +276,8 @@ const hasOverride = computed(() => !!props.widget.filters)
 // previous response is not this chart's any more, so `chart.*` shows "—" rather than the old
 // values; a background refetch never sets `loading`, so it keeps the values up until the new ones
 // arrive. A note widget's text takes the dates and metrics, never `chart.*`.
-const metricTokenValues = useMetricTokenValues(() => [props.widget.caption, props.widget.type === 'note' && !props.widget.noteId ? props.widget.note : undefined], metricsContext)
+const metricTokens = useMetricTokens(() => [props.widget.caption, props.widget.type === 'note' && !props.widget.noteId ? props.widget.note : undefined], metricsContext)
+const metricTokenValues = metricTokens.values
 const captionValues = computed(() => chartValueResolver(props.widget, loading.value ? null : data.value, error.value, metricTokenValues.value))
 const noteValues = computed(() => noteValueResolver(metricTokenValues.value))
 
