@@ -26,7 +26,7 @@ import { addEtDays } from '../lib/overview'
 import type { MetricsContext, MetricsRequestBody, MetricsResponseBody, MetricValue } from '../lib/metrics/types'
 import { MAX_REQUESTS } from '../lib/metrics/validate'
 import type { MetricRequestSpec } from '../lib/metrics/scope'
-import { isInFlight, isStale, useReturnRefresh } from './useReturnRefresh'
+import { isInFlight, isStale, useLiveRefresh, useReturnRefresh } from './useReturnRefresh'
 
 export type { MetricRequestSpec }
 
@@ -349,6 +349,23 @@ function refetchStaleEntries() {
   }
 }
 
+/** The server pushed "something changed" (composables/useLiveChanges.ts, already delayed past the
+ * edge cache and dropped while hidden or idle): refetch the held entries the server marked
+ * `liveSafe === true` on their last value, under the same gates as a return refetch (old enough,
+ * idle) and the same ordinary batched, background path (no spinner flash, a failure keeps the value
+ * on screen). Fail-closed: an entry whose value never carried the flag (absent, false, still
+ * loading, an error, an old server) is left alone, so nothing that can count a refused row ever
+ * refetches on a push. */
+function refetchLiveEntries() {
+  const now = Date.now()
+  for (const [cKey, entry] of cache) {
+    if (entry.refCount <= 0) continue
+    if (entry.value.value?.liveSafe !== true) continue
+    if (entry.status === 'pending' ? isInFlight(entry.queuedAt, now) : !isStale(entry.settledAt, now)) continue
+    queueFetch(entry, entry.ctxKey, entry.context, reqKeyFromCacheKey(cKey), false, true)
+  }
+}
+
 /** Reads the value some consumer ALREADY holds for this (spec, page context, epoch), or undefined
  * when none does. Never acquires an entry and never queues a fetch: it is how the "Insert value"
  * picker previews a metric the page has already loaded (a card, or a caption's own token) without
@@ -426,6 +443,8 @@ export function useMetrics(rawContext?: MaybeRefOrGetter<MetricsContext | undefi
     // Refetch on return to the tab. Every instance subscribes the same function (the registry
     // counts them), and it walks the shared cache once, so N cards still mean one pass.
     useReturnRefresh(refetchStaleEntries)
+    // And on a live push, for the entries the server flagged liveSafe (a separate subscriber set).
+    useLiveRefresh(refetchLiveEntries)
     // Re-plan on a context change: acquire every consumer's entry under the new context first
     // (so they share one coalesced batch), then release the old ones. Keyed on the normalized
     // context's stable key, so a new-but-equal context object is not a change.

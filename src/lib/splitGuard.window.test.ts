@@ -36,6 +36,11 @@ describe('the switch', () => {
     for (const p of ['/tour/exit-at', '/tour/exit-at/hub', '/TOUR/EXIT-AT']) expect(isSplitRefusedPath(p), p).toBe(true)
     for (const p of ['/tour/exit-atx', '/tour/exit', '/tour/start']) expect(isSplitRefusedPath(p), p).toBe(false)
   })
+  it('refuses any path containing a NUL, as SQLite LIKE (NUL-terminated) does', () => {
+    for (const p of ['/tour/skip\u0000x', '/tour/exit-at\u0000/1', '/TOUR/SKIP\u0000', '/return/x\u0000', '\u0000', '/ordinary\u0000', '/a/\u0000/b']) expect(isSplitRefusedPath(p), JSON.stringify(p)).toBe(true)
+    // no NUL: unchanged
+    for (const p of ['/tour/start', '/tour/skipx', '/ordinary', '']) expect(isSplitRefusedPath(p), p).toBe(false)
+  })
   it('has one refused sample path per refused pattern', () => {
     expect(REFUSED_SAMPLE_PATHS).toHaveLength(SPLIT_REFUSED_PATH_PATTERNS.length)
     for (const p of REFUSED_SAMPLE_PATHS) expect(isSplitRefusedPath(p), p).toBe(true)

@@ -149,8 +149,9 @@ describe('splitGuard module', () => {
     expect(kept).toEqual([...ORDINARY].sort())
   })
 
-  it('isSplitRefusedPath agrees with the SQL LIKE row for row, case folding included', () => {
-    const paths = [...REFUSED, ...ORDINARY, '/RETURN/x/d0', '/Game/Complete/normal/easy', '/game/tutorial-complete/', '/game/tutorial-completex', '/GAME/START/x', '/Tour/Exit-At/2', '/tour/exit-atx', '/TOUR/SKIP', '/Tour/Skip/x', '/tour/skip/', '/tour/skipx', '/tour/skip ']
+  it('isSplitRefusedPath agrees with the SQL LIKE row for row, case folding and NUL included', () => {
+    // the NUL rows: SQLite LIKE stops at the NUL, so an exact pattern followed by NUL-junk is refused in SQL too
+    const paths = [...REFUSED, ...ORDINARY, '/RETURN/x/d0', '/Game/Complete/normal/easy', '/game/tutorial-complete/', '/game/tutorial-completex', '/GAME/START/x', '/Tour/Exit-At/2', '/tour/exit-atx', '/TOUR/SKIP', '/Tour/Skip/x', '/tour/skip/', '/tour/skipx', '/tour/skip ', '/tour/skip\u0000x', '/tour/exit-at\u0000/1', '/TOUR/SKIP\u0000']
     const ins = db.prepare('INSERT INTO hits (ts, path) VALUES (?, ?)')
     paths.forEach((p, i) => ins.run(i, p))
     const w: string[] = []
