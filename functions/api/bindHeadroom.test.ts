@@ -12,8 +12,10 @@ import { MAX_SQL_BYTES } from '../../src/lib/queryLimits'
 
 /** Binds a statement may carry: D1's limit is 100, and ten stay free. */
 const HEADROOM_CEILING = 90
-/** Fake campaigns registered on top of the real ones, each with two uc values. */
-const EXTRA = Number(process.env.BIND_EXTRA ?? 6)
+/** Fake campaigns registered on top of the real ones, each with two uc values. 5 is the most the worst-case geo ring
+ * (16 filters, 50 sites) holds under MAX_SQL_BYTES: each campaign adds about 3.7 KB to it, and at 6 the statement is
+ * 91 KB, refused with a 400. BIND_EXTRA=6 or 7 therefore fails the byte and no-refusal tests below, on purpose. */
+const EXTRA = Number(process.env.BIND_EXTRA ?? 5)
 const SITES50 = ['bestsudoku-web', ...Array.from({ length: 49 }, (_, i) => `s${i}`)]
 const SUB_DAY = { since: '2026-10-01T15:00:00.000Z', until: '2026-10-01T16:00:00.000Z' }
 const ALIGNED = { since: '2026-10-01', until: '2026-10-01' }
@@ -22,8 +24,11 @@ const OWN = { excludeOwnVisits: true, ownBrowser: 'Opera', ownOS: 'Windows' }
 interface Worst {
   max: number
   shape: string
-  /** Largest SQL text (UTF-8 bytes) seen for this category, against statementTooLarge's MAX_SQL_BYTES. */
+  /** Largest SQL text (UTF-8 bytes) seen for this category, against statementTooLarge's MAX_SQL_BYTES. A 400 from the guard
+   * contributes the byte count its own message reports, never 0. */
   bytes: number
+  /** First worst-case request the guard refused with a 400 (before D1 saw it), as shape + message; '' when none. */
+  refused: string
 }
 interface Measured {
   campaigns: number
@@ -65,8 +70,9 @@ async function load(extra: number) {
   return { campaigns, geo, popups, completions, sites, engine, facts }
 }
 
-/** Runs a handler against a D1 stub that records the statement and its binds. The bind count of a
- * statement a guard refuses (400) is read from the guard's message, so a refused shape is still measured. */
+/** Runs a handler against a D1 stub that records the statement and its binds. A statement the guard refuses with a 400
+ * never reaches prepare(), so its size is read from the guard's own message (bind count from "(N values; at most",
+ * SQL bytes from "(N bytes; at most"): a refused shape is still measured, never recorded as 0 binds or 0 bytes. */
 async function run(handler: (ctx: any) => Response | Promise<Response>, body: Record<string, unknown>) {
   const calls: { sql: string; binds: unknown[] }[] = []
   const d1 = {
@@ -80,19 +86,23 @@ async function run(handler: (ctx: any) => Response | Promise<Response>, body: Re
   ;(globalThis as any).caches = { default: { match: async () => undefined, put: async () => {} } }
   const res = await handler({ request: { json: async () => body }, env: { gss_geo: d1 }, waitUntil: () => {} })
   const out = (await res.json()) as any
-  if (calls.length) return { binds: calls[0].binds.length, sql: calls[0].sql, status: res.status, error: undefined as string | undefined }
-  const m = /\((\d+) values; at most/.exec(String(out.error ?? ''))
-  return { binds: m ? Number(m[1]) : 0, sql: '', status: res.status, error: out.error as string | undefined }
+  if (calls.length) return { binds: calls[0].binds.length, sql: calls[0].sql, bytes: new TextEncoder().encode(calls[0].sql).length, refused: '' }
+  const error = String(out.error ?? '')
+  const vals = /\((\d+) values; at most/.exec(error)
+  const bytes = /\((\d+) bytes; at most/.exec(error)
+  if (res.status !== 400 || !(vals || bytes)) throw new Error(`worst-case request neither reached D1 nor was refused by statementTooLarge: ${res.status} ${error}`)
+  return { binds: vals ? Number(vals[1]) : 0, sql: '', bytes: bytes ? Number(bytes[1]) : 0, refused: error }
 }
 
-const track = (w: Worst, binds: number, shape: string, sql = '') => {
-  w.bytes = Math.max(w.bytes, new TextEncoder().encode(sql).length)
+const track = (w: Worst, binds: number, shape: string, sql = '', r?: { bytes: number; refused: string }) => {
+  w.bytes = Math.max(w.bytes, r ? r.bytes : new TextEncoder().encode(sql).length)
+  if (r?.refused && !w.refused) w.refused = `${shape}: ${r.refused}`
   if (binds > w.max) {
     w.max = binds
     w.shape = shape
   }
 }
-const worst = (): Worst => ({ max: -1, shape: '', bytes: 0 })
+const worst = (): Worst => ({ max: -1, shape: '', bytes: 0, refused: '' })
 const countQ = (sql: string) => (sql.match(/\?/g) ?? []).length
 
 async function measure(extra: number): Promise<Measured> {
@@ -114,12 +124,12 @@ async function measure(extra: number): Promise<Measured> {
       for (const [cname, constraints] of constraintSets) {
         const base = { ...common, ...win, includeEventBeacons, constraints }
         const tag = `${win === SUB_DAY ? 'sub-day' : 'aligned'}, eventBeacons=${includeEventBeacons}, ${cname}`
-        { const r = await run(m.geo.onRequestPost, { ...base, dimension: 'points' }); track(geoRes.points, r.binds, `points, ${tag}`, r.sql) }
-        for (const d of m.geo.GEO_DIMS) { const r = await run(m.geo.onRequestPost, { ...base, dimension: d }); track(geoRes.breakdown, r.binds, `breakdown ${d}, ${tag}`, r.sql) }
+        { const r = await run(m.geo.onRequestPost, { ...base, dimension: 'points' }); track(geoRes.points, r.binds, `points, ${tag}`, r.sql, r) }
+        for (const d of m.geo.GEO_DIMS) { const r = await run(m.geo.onRequestPost, { ...base, dimension: d }); track(geoRes.breakdown, r.binds, `breakdown ${d}, ${tag}`, r.sql, r) }
         for (let mask = 0; mask < 1 << BIND_DIMS.length; mask++) {
           const dims = [...BIND_DIMS.filter((_, i) => mask & (1 << i)), 'region'].slice(0, 8)
           if (dims.length < 2) continue
-          { const r = await run(m.geo.onRequestPost, { ...base, dimension: dims[0], dims }); track(geoRes.ring, r.binds, `ring [${dims.join(', ')}], ${tag}`, r.sql) }
+          { const r = await run(m.geo.onRequestPost, { ...base, dimension: dims[0], dims }); track(geoRes.ring, r.binds, `ring [${dims.join(', ')}], ${tag}`, r.sql, r) }
         }
       }
     }
@@ -127,11 +137,11 @@ async function measure(extra: number): Promise<Measured> {
 
   const popups = worst()
   for (const win of [SUB_DAY, ALIGNED]) for (const d of ['kind', 'reason', 'date', 'outcome', 'installOutcome']) {
-    { const r = await run(m.popups.onRequestPost, { ...win, dimension: d, sites: SITES50, ...OWN }); track(popups, r.binds, `popups ${d}`, r.sql) }
+    { const r = await run(m.popups.onRequestPost, { ...win, dimension: d, sites: SITES50, ...OWN }); track(popups, r.binds, `popups ${d}`, r.sql, r) }
   }
   const completions = worst()
   for (const win of [SUB_DAY, ALIGNED]) {
-    { const r = await run(m.completions.onRequestPost, { ...win, dimension: 'mode', breakdown: 'difficulty', sites: SITES50 }); track(completions, r.binds, 'completions, 50 sites', r.sql) }
+    { const r = await run(m.completions.onRequestPost, { ...win, dimension: 'mode', breakdown: 'difficulty', sites: SITES50 }); track(completions, r.binds, 'completions, 50 sites', r.sql, r) }
   }
 
   // /api/metrics: every fact, built exactly as the planner builds it (real segment cuts), per campaign and organic arm.
@@ -162,7 +172,7 @@ async function measure(extra: number): Promise<Measured> {
     completions,
     facts,
     perFact,
-    sites: { max: 1, shape: '/api/sites: one window bind (no registry input)', bytes: 0 },
+    sites: { max: 1, shape: '/api/sites: one window bind (no registry input)', bytes: 0, refused: '' },
   }
 }
 
@@ -205,5 +215,8 @@ describe('D1 bind headroom (worst-case statements, by execution)', () => {
   })
   it('every worst-case statement stays under the MAX_SQL_BYTES cap of statementTooLarge', () => {
     for (const m of [base, grown]) for (const [name, w] of rows(m)) expect(w.bytes, `${name}: ${w.shape}`).toBeLessThan(MAX_SQL_BYTES)
+  })
+  it('no worst-case request is refused by statementTooLarge (a 400 is a failure, not a smaller statement)', () => {
+    for (const m of [base, grown]) for (const [name, w] of rows(m)) expect(w.refused, `${name}`).toBe('')
   })
 })

@@ -7,13 +7,16 @@
 //   2. through the real /api/geo handler, every refused-capable split (each dim in
 //      SPLIT_REFUSED_DIMS plain and as a ring, points mode, a refused-field drill) leaves all three
 //      NUL rows out, while a total that is allowed to count everything (dateEt) is unchanged;
-//   3. /api/metrics' country bucket reads '' on a NUL row, like any refused row.
+//   3. /api/metrics' country bucket reads '' on a NUL row, like any refused row;
+//   4. the default view (event beacons excluded, popupExcludeClause) drops NUL rows too, so its
+//      meta.liveSafe (no refused row can be counted) is true only when that is so.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import { openHitsDb, insertHits, sqliteD1, pagesContext, postJson } from '../_lib/testing/hitsDb'
 import { FIXTURE_NOW } from '../_lib/testing/bskFixture'
 import { buildFact } from '../../src/lib/metrics/engine'
 import { SPLIT_REFUSED_DIMS, isSplitRefusedPath, refusedPathMatch } from '../../src/lib/splitGuard'
+import { popupExcludeClause } from '../../src/lib/popupEvents'
 
 const NUL = '\u0000'
 const T = Date.parse('2026-10-01T15:30:00Z')
@@ -131,5 +134,78 @@ describe('/api/metrics: a NUL row has no country bucket', () => {
     expect(cbOf('/game')).toEqual(['US'])
     for (const p of NUL_PATHS) expect(cbOf(p), JSON.stringify(p)).toEqual([''])
     expect(rows.filter((r) => r.path !== '/game').reduce((a, r) => a + r.c, 0)).toBe(NUL_PATHS.length * 2)
+  })
+})
+
+describe('the default view (event beacons excluded) drops NUL rows: popupExcludeClause and meta.liveSafe', () => {
+  const noCache = { match: async () => undefined, put: async () => {} }
+  const post = async (body: Record<string, unknown>) => {
+    ;(globalThis as any).caches = { default: noCache }
+    const { onRequestPost } = await import('./geo')
+    const res = await onRequestPost(pagesContext(postJson('/api/geo', { ...range, limit: 200, ...body }), { gss_geo: sqliteD1(db) }) as any)
+    return { status: res.status, body: (await res.json()) as any }
+  }
+  const ORDINARY_ROWS = 2
+  const seed = () => {
+    const base = { site: 'bestsudoku-web', country: 'US', region: 'Ohio', device: 'mobile' }
+    insertHits(db, [
+      { ...base, ts: T, path: '/' },
+      { ...base, ts: T + 3_600_000, path: '/game' },
+      ...NUL_PATHS.map((path, i) => ({ ...base, ts: T + (i + 2) * 3_600_000, path, n: 3 })),
+    ])
+  }
+
+  it('popupExcludeClause keeps NULL, empty and clean paths, drops event and NUL paths: only NUL rows differ from the LIKE-only clause', () => {
+    insertHits(db, [{ ts: T, path: '' }, ...['/', '/game', '/return', '/page'].map((path) => ({ ts: T, path }))])
+    db.exec(`INSERT INTO hits (ts, path) VALUES (${T}, NULL)`)
+    insertHits(db, [...CLEAN_REFUSED, ...NUL_SQL_VISIBLE, ...NUL_SQL_INVISIBLE].map((path) => ({ ts: T, path })))
+    const w: string[] = []
+    popupExcludeClause(w, [])
+    const kept = (terms: string[]) => (db.prepare(`SELECT path FROM hits WHERE ${terms.join(' AND ')} ORDER BY id`).all() as { path: string | null }[]).map((r) => r.path)
+    const after = kept(w)
+    const before = kept(w.slice(1)) // the clause as it was: the prefix tests alone
+    expect(before).not.toContain(null) // a NULL path never matched, before or after
+    expect(after).not.toContain(null)
+    expect(after).toContain('')
+    for (const p of ['/', '/game', '/page']) expect(after, p).toContain(p)
+    for (const p of before) expect(after.includes(p), JSON.stringify(p)).toBe(!(p as string).includes(NUL)) // only NUL paths drop
+    for (const p of [...NUL_PATHS, ...NUL_SQL_VISIBLE, ...NUL_SQL_INVISIBLE]) expect(after, JSON.stringify(p)).not.toContain(p)
+    expect(before.some((p) => (p as string).includes(NUL)), 'the LIKE-only clause let a NUL path through').toBe(true)
+    expect(w.join(' ')).not.toContain('?')
+  })
+
+  it('default dateEt and path views count the NUL rows 0 and are liveSafe', async () => {
+    seed()
+    for (const body of [{ dimension: 'dateEt' }, { dimension: 'path' }, { dimension: 'pathFamily' }]) {
+      const { status, body: out } = await post(body)
+      expect(status, JSON.stringify(body)).toBe(200)
+      expect(out.totals.pageviews, JSON.stringify(body)).toBe(ORDINARY_ROWS)
+      expect(out.meta.liveSafe, JSON.stringify(body)).toBe(true)
+      expect(JSON.stringify(out.rows ?? out), JSON.stringify(body)).not.toContain('\u0000')
+    }
+  })
+
+  it('liveSafe is true only when no NUL row can be counted: opting into event beacons counts them and turns it off', async () => {
+    seed()
+    const on = await post({ dimension: 'dateEt', includeEventBeacons: true })
+    expect(on.body.totals.pageviews).toBe(ORDINARY_ROWS + NUL_PATHS.length * 3)
+    expect('liveSafe' in on.body.meta).toBe(false)
+    const off = await post({ dimension: 'dateEt' })
+    expect(off.body.meta.liveSafe).toBe(true)
+  })
+
+  it('a path drill on a NUL value is never liveSafe, and counts nothing in the default view', async () => {
+    seed()
+    for (const value of NUL_PATHS) {
+      const r = await post({ dimension: 'dateEt', constraints: [{ field: 'path', value }] })
+      expect(r.body.totals.pageviews, JSON.stringify(value)).toBe(0)
+      expect('liveSafe' in r.body.meta, JSON.stringify(value)).toBe(false)
+    }
+  })
+
+  it('the clause /api/sites tallies with counts no NUL row', async () => {
+    seed()
+    const [row] = db.prepare(`SELECT COUNT(*) c FROM hits WHERE site <> '' AND ts >= 0 AND ${(() => { const w: string[] = []; popupExcludeClause(w, []); return w.join(' AND ') })()}`).all() as { c: number }[]
+    expect(row.c).toBe(ORDINARY_ROWS)
   })
 })

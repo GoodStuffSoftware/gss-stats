@@ -9,7 +9,7 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [0.30.1] — 2026-10-05
 
 ### Fixed
-- **A path containing a NUL byte is now left out of every hour, place and device split.** The SQL guard missed such a row where the JavaScript check refused it, so a hand-made `/return` or tour-skip path with a NUL in it could be counted; the two now agree.
+- **A path containing a NUL byte is now left out of every hour, place and device split, and out of the default view.** The SQL guard missed such a row where the JavaScript check refused it, so a hand-made `/return`, tour-skip or page path with a NUL in it could be counted, and the default view (event beacons off) still counted it and could mark the chart safe for live refresh; the two now agree.
 
 ## [0.30.0] — 2026-10-05
 
