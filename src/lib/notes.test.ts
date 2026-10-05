@@ -27,7 +27,7 @@ describe('notes registry — lookups', () => {
 
   // The retention caveats ride on their metrics (MetricDef.caveats), so they must not pre-fill every new campaigns chart.
   // 'retention-page-scope' is a note widget on the Retention page template only: no scope, so it never pre-fills a new chart.
-  const NOTES_WITHOUT_SCOPE = new Set(['retention-disjoint', 'retention-organic-bias', 'retention-lower-bound', 'retention-page-scope', 'play-days', 'play-household', 'play-no-retention', 'play-active-is-stock'])
+  const NOTES_WITHOUT_SCOPE = new Set(['retention-disjoint', 'retention-organic-bias', 'retention-lower-bound', 'retention-page-scope', 'play-days', 'play-household', 'play-no-retention', 'play-active-is-stock', 'carry-over-weak-signal'])
   it('every registry entry has a non-empty id matching its own key', () => {
     for (const [key, def] of Object.entries(NOTES_REGISTRY)) {
       expect(def.id).toBe(key)

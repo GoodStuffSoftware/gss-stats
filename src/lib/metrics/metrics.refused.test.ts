@@ -35,6 +35,6 @@ describe('MetricDef.countsRefused', () => {
   })
   it('names the metrics that keep the note (the refused-whole-days set)', () => {
     const noted = all.filter((d) => Object.values(d.windows).includes('bskRangePath') && d.countsRefused !== false).map((d) => d.id)
-    expect(noted.sort()).toEqual(['bsk.completions', 'bsk.returnsD1plus', 'bsk.taggedArrivals', 'bsk.tourExitHub', 'bsk.tourExitPreamble', 'bsk.tourExitSection', 'bsk.tutorialFirstRun', 'bsk.tutorialReplay'])
+    expect(noted.sort()).toEqual(['bsk.carryOverCompletions', 'bsk.completions', 'bsk.returnsD1plus', 'bsk.taggedArrivals', 'bsk.tourExitHub', 'bsk.tourExitPreamble', 'bsk.tourExitSection', 'bsk.tutorialFirstRun', 'bsk.tutorialReplay'])
   })
 })
