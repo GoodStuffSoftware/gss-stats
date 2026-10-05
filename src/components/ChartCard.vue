@@ -12,7 +12,7 @@ import { isSiteDim, semanticKey } from '../lib/drill'
 import { isMobileViewport } from '../lib/responsive'
 import { isFit, widgetNeedsChartHeight } from '../lib/fit'
 import { useFitHeight } from '../composables/useFitHeight'
-import { isInFlight, isStale, useReturnRefresh } from '../composables/useReturnRefresh'
+import { isInFlight, isStale, useLiveRefresh, useReturnRefresh } from '../composables/useReturnRefresh'
 import BaseChart from './charts/BaseChart.vue'
 import WorldMap from './charts/WorldMap.vue'
 import FilterPopover from './FilterPopover.vue'
@@ -281,6 +281,13 @@ const noteValues = computed(() => noteValueResolver(metricTokenValues.value))
 // flash, and a failure leaves the last good data up instead of replacing it with an error.
 let loadStartedAt: number | null = null // the latest load's start; null once it settles
 let settledAt: number | null = null
+// Live push (composables/useLiveChanges.ts): true only when EVERY query behind the response on
+// screen came back flagged `meta.liveSafe === true` (the server's "this can never count a refused
+// row"; a series chart makes one query per series). Fail-closed: cleared whenever a foreground
+// load starts or a response without the flag lands, so absent, false, an error or an old server
+// never refetches on a push. /api/completions, /api/stats and /api/popups never set it.
+let liveSafe = false
+let lastLiveRefetchAt: number | null = null
 async function load(background = false) {
   if (isBespokeBody.value) return // own data fetch (or none) — see MetricCard/NoteWidgetBody
   // RUM charts filter to a real-host allow-list built from /api/sites; fetching before
@@ -294,6 +301,7 @@ async function load(background = false) {
   if (!background) {
     loading.value = true
     error.value = null
+    liveSafe = false
   }
   loadStartedAt = Date.now()
   try {
@@ -303,6 +311,7 @@ async function load(background = false) {
     if (hasLineSeries(props.widget)) {
       const all = await fetchSeriesStats(props.widget, effectiveFilters.value)
       if (my === reqId) {
+        liveSafe = all.length > 0 && all.every((r) => r.meta?.liveSafe === true)
         seriesData.value = all
         const splitGuard = all.some((r) => r.meta?.splitGuard)
         const refusedWholeDays = all.some((r) => r.meta?.refusedWholeDays)
@@ -316,6 +325,7 @@ async function load(background = false) {
     } else {
       const r = await fetchStats(props.widget, effectiveFilters.value)
       if (my === reqId) {
+        liveSafe = r.meta?.liveSafe === true
         seriesData.value = null
         data.value = r
       }
@@ -346,6 +356,26 @@ function refetchOnReturn() {
   void load(true)
 }
 useReturnRefresh(refetchOnReturn)
+
+// The server pushed "something changed" (already delayed past the edge cache, dropped while hidden or
+// idle): refetch in the background, but only a chart whose last response was liveSafe (see above),
+// never a bespoke body, never while a load is running, and at most once an hour per chart (a full
+// chart page is ~20k D1 rows per pass; the cap keeps an all-day tab to a few passes).
+const LIVE_REFETCH_MIN_GAP_MS = 3_600_000
+// Belt and braces on top of the server's flag: a completions chart (its rows ARE refused paths) and
+// an event-beacon geo chart (it lifts the refused-path exclusion) never refetch on a push, whatever
+// a response claimed.
+const liveBlocked = computed(
+  () => props.widget.dataset === 'completions' || props.widget.includeEventBeacons === true || effectiveFilters.value.includeEventBeacons === true,
+)
+function refetchOnLive() {
+  if (isBespokeBody.value || liveBlocked.value || !liveSafe || isInFlight(loadStartedAt) || !isStale(settledAt)) return
+  const now = Date.now()
+  if (lastLiveRefetchAt != null && now < lastLiveRefetchAt + LIVE_REFETCH_MIN_GAP_MS) return
+  lastLiveRefetchAt = now
+  void load(true)
+}
+useLiveRefresh(refetchOnLive)
 
 // Refetch only when a data-affecting input changes (not on move/resize).
 const dataKey = computed(() =>

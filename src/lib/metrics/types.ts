@@ -314,6 +314,10 @@ export interface MetricValue {
   provisional?: boolean // lagged numerator still arriving
   noteIds?: string[] // registry ids only, never text
   reason?: string // machine code: 'spend-only' | 'not-live' | 'not-seen-in-flight' | 'unknown-id' | ...
+  /** Set by the server only when this value can never count a refused row (the metric, or both
+   * sides of a ratio, have countsRefused: false). The live-push refetch (useMetrics
+   * refetchLiveEntries) acts on `=== true` and nothing else. */
+  liveSafe?: boolean
 }
 
 export interface MetricsResponseBody {
