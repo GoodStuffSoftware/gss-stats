@@ -42,7 +42,10 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
   }
   if (!env.LIVE) return json(503, 'live updates unavailable')
   try {
-    return await env.LIVE.fetch(new Request(LIVE_UPSTREAM_URL, { headers: { Upgrade: 'websocket' } }))
+    const res = await env.LIVE.fetch(new Request(LIVE_UPSTREAM_URL, { headers: { Upgrade: 'websocket' } }))
+    // Only a real upgrade is handed back. Any other gss-live answer (its own refusals, an error
+    // page) becomes a bare 503 so no upstream status, header or body detail reaches the client.
+    return res.status === 101 && res.webSocket ? res : json(503, 'live updates unavailable')
   } catch {
     // e.g. local `wrangler pages dev` with gss-live not running: the dashboard just stays on
     // its other refresh paths.

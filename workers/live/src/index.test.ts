@@ -4,7 +4,9 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { etDateFast, etWallTimeMs } from '../../../src/lib/etTime'
-import worker, { BOUNDARY_MS, LiveHub, MAX_SOCKETS, nextBoundary, Notify, PING, type Env } from './index'
+import { BOUNDARY_MS, MAX_SOCKETS, nextBoundary, PING } from './hub'
+import worker, * as entry from './index'
+import { LiveHub, Notify, type Env } from './index'
 
 class FakeAutoResponsePair {
   constructor(
@@ -31,8 +33,9 @@ function makeCtx(sockets: FakeSocket[] = []) {
   const setAlarm = vi.fn(async (t: number) => {
     alarm = t
   })
+  const getAlarm = vi.fn(async () => alarm)
   const storage = new Proxy(
-    { getAlarm: async () => alarm, setAlarm },
+    { getAlarm, setAlarm },
     {
       get(target, prop) {
         if (prop in target) return (target as Record<string | symbol, unknown>)[prop]
@@ -50,7 +53,7 @@ function makeCtx(sockets: FakeSocket[] = []) {
     },
     setWebSocketAutoResponse: autoResponse,
   }
-  return { ctx, setAlarm, accepted, autoResponse, getAlarmValue: () => alarm, clearAlarm: () => (alarm = null) }
+  return { ctx, setAlarm, getAlarm, accepted, autoResponse, getAlarmValue: () => alarm, clearAlarm: () => (alarm = null) }
 }
 
 function makeHub(sockets: FakeSocket[] = []) {
@@ -81,8 +84,9 @@ describe('LiveHub.notify', () => {
   })
 
   it('does nothing when no tab is connected: no alarm, no storage call', async () => {
-    const { hub, setAlarm, getAlarmValue } = makeHub([])
+    const { hub, setAlarm, getAlarm, getAlarmValue } = makeHub([])
     await hub.notify()
+    expect(getAlarm).not.toHaveBeenCalled() // the socket check comes first: no storage read at all
     expect(setAlarm).not.toHaveBeenCalled()
     expect(getAlarmValue()).toBeNull()
   })
@@ -98,12 +102,11 @@ describe('LiveHub.notify', () => {
   })
 
   it('stores nothing but the alarm (any other storage method throws and would fail the test)', async () => {
-    const { hub, ctx, getAlarmValue } = makeHub([new FakeSocket()])
+    const { hub, getAlarmValue } = makeHub([new FakeSocket()])
     await hub.notify()
     await hub.alarm()
     await hub.fetch(new Request('https://gss-live/ws')) // 426, still no storage use
     expect(getAlarmValue()).not.toBeNull()
-    expect(() => (ctx.storage as unknown as { put: unknown }).put).toThrow(/may only hold its alarm/)
   })
 
   it('sets a new alarm after the previous one has fired', async () => {
@@ -153,15 +156,8 @@ describe('LiveHub.fetch', () => {
     expect(accepted).toHaveLength(0)
   })
 
-  it('refuses the 101st connection with 503', async () => {
-    const full = Array.from({ length: MAX_SOCKETS }, () => new FakeSocket())
-    const { hub, accepted } = makeHub(full)
-    const res = await hub.fetch(new Request('https://gss-live/ws', { headers: { Upgrade: 'websocket' } }))
-    expect(res.status).toBe(503)
-    expect(accepted).toHaveLength(0)
-  })
-
-  it('accepts an upgrade through ctx.acceptWebSocket (hibernating) and returns 101', async () => {
+  /** Stand-ins for WebSocketPair and Response (Node's Response rejects status 101). */
+  function stubUpgrade() {
     const client = new FakeSocket()
     const server = new FakeSocket()
     class FakePair {
@@ -181,21 +177,100 @@ describe('LiveHub.fetch', () => {
       }
     }
     vi.stubGlobal('WebSocketPair', FakePair)
-    vi.stubGlobal('Response', FakeResponse) // Node's Response rejects status 101
-    const { hub, accepted } = makeHub(Array.from({ length: MAX_SOCKETS - 1 }, () => new FakeSocket()))
-    const res = (await hub.fetch(new Request('https://gss-live/ws', { headers: { Upgrade: 'WebSocket' } }))) as unknown as FakeResponse
+    vi.stubGlobal('Response', FakeResponse)
+    return { client, server }
+  }
+  const upgradeReq = () => new Request('https://gss-live/ws', { headers: { Upgrade: 'websocket' } })
+
+  it('at the 100-socket cap closes the OLDEST socket (1013) and accepts the new one with 101', async () => {
+    const full = Array.from({ length: MAX_SOCKETS }, () => new FakeSocket())
+    const { client, server } = stubUpgrade()
+    const { hub, accepted } = makeHub(full)
+    const res = (await hub.fetch(upgradeReq())) as unknown as { status: number; webSocket: unknown }
     expect(res.status).toBe(101)
     expect(res.webSocket).toBe(client)
     expect(accepted).toEqual([server])
+    expect(full[0].closed).toEqual([1013, 'try again later'])
+    for (const s of full.slice(1)) expect(s.closed).toBeNull()
   })
 
-  it('ignores incoming messages and closes on close', async () => {
+  it('below the cap closes nobody', async () => {
+    const some = Array.from({ length: MAX_SOCKETS - 1 }, () => new FakeSocket())
+    stubUpgrade()
+    const { hub, accepted } = makeHub(some)
+    expect(((await hub.fetch(upgradeReq())) as unknown as { status: number }).status).toBe(101)
+    expect(accepted).toHaveLength(1)
+    for (const s of some) expect(s.closed).toBeNull()
+  })
+
+  it('an oldest socket that throws on close still lets the new one in', async () => {
+    const full = Array.from({ length: MAX_SOCKETS }, () => new FakeSocket())
+    full[0].close = () => {
+      throw new Error('already closed')
+    }
+    stubUpgrade()
+    const { hub, accepted } = makeHub(full)
+    expect(((await hub.fetch(upgradeReq())) as unknown as { status: number }).status).toBe(101)
+    expect(accepted).toHaveLength(1)
+  })
+
+  it('accepts an upgrade through ctx.acceptWebSocket (hibernating, no tags) and returns 101', async () => {
+    const { client, server } = stubUpgrade()
+    const { hub, accepted, ctx } = makeHub()
+    const accept = vi.spyOn(ctx, 'acceptWebSocket')
+    const res = (await hub.fetch(new Request('https://gss-live/ws', { headers: { Upgrade: 'WebSocket' } }))) as unknown as {
+      status: number
+      webSocket: unknown
+    }
+    expect(res.status).toBe(101)
+    expect(res.webSocket).toBe(client)
+    expect(accepted).toEqual([server])
+    expect(accept.mock.calls[0]).toEqual([server]) // no tags argument: nothing about the socket is stored
+  })
+
+  it('ignores incoming messages: never echoes, never closes', async () => {
     const { hub } = makeHub()
     const ws = new FakeSocket()
     await expect((hub.webSocketMessage as (...a: unknown[]) => Promise<void>)(ws, 'anything')).resolves.toBeUndefined()
     expect(ws.sent).toEqual([])
-    await hub.webSocketClose(ws as unknown as WebSocket)
-    expect(ws.closed).not.toBeNull()
+    expect(ws.closed).toBeNull()
+  })
+
+  it.each([
+    [1000, 1000],
+    [1001, 1001],
+    [1013, 1013],
+    [3000, 3000],
+    [1005, 1000], // "no status received": reserved, must never be sent
+    [1006, 1000], // "abnormal closure": reserved, must never be sent
+  ])('webSocketClose with received code %i closes with %i', async (received, sent) => {
+    const { hub } = makeHub()
+    const ws = new FakeSocket()
+    await hub.webSocketClose(ws as unknown as WebSocket, received)
+    expect(ws.closed).toEqual([sent, 'closed'])
+  })
+
+  it('webSocketClose and webSocketError survive a socket that is already closed', async () => {
+    const { hub } = makeHub()
+    const ws = new FakeSocket()
+    ws.close = () => {
+      throw new Error('already closed')
+    }
+    await expect(hub.webSocketClose(ws as unknown as WebSocket, 1000)).resolves.toBeUndefined()
+    await expect(hub.webSocketError(ws as unknown as WebSocket)).resolves.toBeUndefined()
+  })
+
+  it('webSocketError closes the socket with 1011', async () => {
+    const { hub } = makeHub()
+    const ws = new FakeSocket()
+    await hub.webSocketError(ws as unknown as WebSocket)
+    expect(ws.closed).toEqual([1011, 'error'])
+  })
+})
+
+describe('module exports (workerd treats every named export of index.ts as an entrypoint)', () => {
+  it('index.ts exports only LiveHub, Notify and the default handler', () => {
+    expect(Object.keys(entry).sort()).toEqual(['LiveHub', 'Notify', 'default'])
   })
 })
 
