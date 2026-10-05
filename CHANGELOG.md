@@ -6,6 +6,10 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **A chart's Reload refreshes its caption values.** Metric values in a caption used to keep their old numbers until the page reloaded; Reload now refetches them with the chart.
+- **A metric value removed from a label or caption stops loading in the background.** It no longer keeps being requested for as long as the card is open.
+
 ## [0.30.0] — 2026-10-05
 
 ### Added
