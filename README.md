@@ -204,7 +204,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
     so it can never ask for a split the catalog withholds: the counts-only rule (return, game
     starts, completions, tutorial completions, tour skips and tour exits: no hour, place or device split, no visitor id)
     stays enforced on the server, where a sub-day range counts those rows over whole ET days. A
-    chart's ↻ refetches its caption's tokens along with the chart, and a token deleted from a
+    chart's ↻ (or a metric card's own ↻ / Retry) refetches its caption's tokens along with the chart, and a token deleted from a
     caption or label stops loading; a live push refetches a token only when the server flagged that
     token's own last value safe, as it does for a chart.
   - **Note widgets** take values too: `release.*`, `golive.*`, `play.*` and `metric:` tokens fill
