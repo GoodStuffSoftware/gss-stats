@@ -301,6 +301,9 @@ export interface StatsResponse {
     // over whole ET days (src/lib/splitGuard.ts, R-1d). /api/geo sets it only when the query can
     // count one of those rows (its site, path, path-family and event-beacon settings allow it).
     refusedWholeDays?: boolean
+    // /api/geo only, only ever `true`: no refused path can be counted by this query, so a live
+    // "changed" ping may refetch it. Absent means do not (fail-closed). Never on /api/completions or /api/stats.
+    liveSafe?: true
   }
   // Pop-up dataset only: a data caveat that travels with the response (e.g. the known
   // install-outcome gap, lib/popupEvents.ts INSTALL_ACCEPT_OUTCOME_FIXED_ET), rendered under

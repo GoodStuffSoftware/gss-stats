@@ -314,6 +314,9 @@ export interface MetricValue {
   provisional?: boolean // lagged numerator still arriving
   noteIds?: string[] // registry ids only, never text
   reason?: string // machine code: 'spend-only' | 'not-live' | 'not-seen-in-flight' | 'unknown-id' | ...
+  /** Server-set, only ever `true`: this metric (or both ratio sides) can never count a refused row,
+   * so a live "changed" ping may refetch it. Absent means do not (fail-closed). */
+  liveSafe?: true
 }
 
 export interface MetricsResponseBody {
