@@ -390,7 +390,8 @@ export interface UseMetrics {
   /** Gives back one hold taken by a `request()` of this spec. When it was the last hold this
    * instance has on the spec, the instance lets go of its cache entry: the entry leaves the
    * shared cache (and with it the live-refetch set) unless another consumer still holds it, an
-   * unsent request is dropped and an in-flight one is aborted. Asking for the spec again later
+   * unsent request is dropped, and an in-flight one is aborted only if nothing else is waiting on
+   * that POST (otherwise it carries on and its answer for this entry is discarded). Asking for the spec again later
    * acquires a brand-new entry — no value and no liveSafe flag until a fresh response arrives. A
    * spec this instance never requested is ignored. Not automatic: only a consumer whose set of
    * wanted specs shrinks (a label or caption that dropped a token) needs it. */

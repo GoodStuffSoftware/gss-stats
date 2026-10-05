@@ -2,7 +2,7 @@
 // pure half; lib/valueTokens.ts the table of every token's path). Every caption or note on a page
 // goes through useMetrics, so N tokens across N widgets are ONE batched POST /api/metrics per
 // page context, identical (metric, window, context) requests share one cache entry, and a card
-// that already loaded the same value shares it too â€” nothing is fetched twice, and a token
+// that already loaded the same value shares it too — nothing is fetched twice, and a token
 // sends no more than a card does (see metricRequestSpec).
 //
 // Lazy on purpose: most widgets carry no metric token, so useMetrics (a return-refresh

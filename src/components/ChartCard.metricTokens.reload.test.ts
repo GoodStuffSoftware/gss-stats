@@ -34,6 +34,7 @@ const stat: Widget = {
 
 const stats = vi.mocked(fetchStats)
 let metricsFetch: ReturnType<typeof vi.fn>
+let failAll = false // every metric answers with an error while this is set
 let wrapper: VueWrapper | null = null
 const posts = () => metricsFetch.mock.calls.map((c) => JSON.parse(c[1].body) as MetricsRequestBody)
 const ids = (p: MetricsRequestBody) => p.requests.map((r) => r.metric ?? r.ratio).sort()
@@ -43,6 +44,7 @@ beforeEach(() => {
   __resetReturnRefreshForTests()
   Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
   vi.useFakeTimers()
+  failAll = false
   stats.mockReset()
   stats.mockImplementation(
     async () =>
@@ -55,7 +57,10 @@ beforeEach(() => {
   metricsFetch = vi.fn().mockImplementation(async (_u: string, init: RequestInit) => {
     const body = JSON.parse(init.body as string) as MetricsRequestBody
     const results = Object.fromEntries(
-      body.requests.map((r) => [r.key, { status: 'ok', value: 0.5, ...((r.metric ?? r.ratio) === SAFE ? { liveSafe: true } : {}) }]),
+      body.requests.map((r) => [
+        r.key,
+        failAll ? { status: 'error', reason: 'fetch-failed' } : { status: 'ok', value: 0.5, ...((r.metric ?? r.ratio) === SAFE ? { liveSafe: true } : {}) },
+      ]),
     )
     return { ok: true, status: 200, json: async () => ({ v: 1, generatedAt: 'x', results, meta: { facts: 1, cacheHits: 0, statements: 1 } }) }
   })
@@ -139,5 +144,55 @@ describe('ChartCard: reload and caption metric tokens', () => {
     emitLiveChange()
     await vi.advanceTimersByTimeAsync(50)
     expect(posts()).toHaveLength(1) // nothing was refetched: the SAFE token was dropped from the caption
+  })
+})
+
+// A metric card shows its own "Updated ... ↻" (CardSpec.showUpdated), which hides the chart's ↻, so
+// that ↻ (and Retry) is the user's only reload there: it must refresh the caption's tokens too.
+// Caption tokens ask for the `page` window; the card's own values ask for `todaySoFar`.
+const kpiCard: Widget = {
+  id: 'ow-kpis', i: 'ow-kpis', title: 'Today at a glance', type: 'table', dataset: 'overview', view: 'kpis', card: { preset: 'bsk-kpis' },
+  dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 0, w: 12, h: 8,
+  caption: `Views {=metric:${SAFE}@page|number}, tap rate {=metric:${UNSAFE}@page|pct}`,
+}
+const captionPosts = () => posts().filter((p) => p.requests.some((r) => r.window === 'page'))
+
+describe('ChartCard: a metric card own reload and caption metric tokens', () => {
+  it('the card own ↻ refetches the caption tokens (fresh) as well as the card values', async () => {
+    const c = await mountCard(kpiCard)
+    expect(c.find('button[title="Reload"]').exists()).toBe(false) // the chart's own ↻ is hidden: this is the only one
+    expect(captionPosts()).toHaveLength(1)
+    expect(captionPosts()[0].fresh).toBeUndefined()
+
+    await c.get('.mc-reload').trigger('click')
+    await vi.advanceTimersByTimeAsync(50)
+
+    expect(captionPosts()).toHaveLength(2)
+    expect(captionPosts()[1].fresh).toBe(true)
+    expect(captionPosts()[1].requests.filter((r) => r.window === 'page').map((r) => r.metric ?? r.ratio).sort()).toEqual([UNSAFE, SAFE].sort())
+    expect(captionPosts()[1].requests.some((r) => r.window === 'todaySoFar')).toBe(true) // the card itself reloaded in the same fresh batch
+  })
+
+  it('the card Retry refetches the caption tokens too', async () => {
+    failAll = true
+    const c = await mountCard(kpiCard)
+    failAll = false
+    const before = captionPosts().length
+    await c.get('.mc-retry').trigger('click')
+    await vi.advanceTimersByTimeAsync(50)
+    const after = captionPosts().slice(before)
+    expect(after).toHaveLength(1)
+    expect(after[0].fresh).toBe(true)
+  })
+
+  it('a live push never reloads the caption tokens of a metric card', async () => {
+    await mountCard(kpiCard)
+    const before = captionPosts().length
+    await vi.advanceTimersByTimeAsync(RETURN_MIN_AGE_MS + 1000)
+    emitLiveChange()
+    await vi.advanceTimersByTimeAsync(50)
+    const after = captionPosts().slice(before)
+    expect(after.every((p) => !p.fresh)).toBe(true) // never a reload...
+    expect(after.flatMap((p) => p.requests.map((r) => r.metric ?? r.ratio))).not.toContain(UNSAFE) // ...and the unflagged token is left alone
   })
 })
