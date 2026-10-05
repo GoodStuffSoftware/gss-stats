@@ -440,5 +440,5 @@ connected no alarm is set, but each notify is still one request, because the bea
 alarms a day, plus one request per tab connect and reconnect (backoff 1 s doubling to 5 min). The
 50 s keepalive is answered by the runtime (`setWebSocketAutoResponse`) without waking the object, but it may
 still count as an incoming message at 20:1 (about 86 requests per all-day tab, so 10 all-day tabs are under 1 %); hibernation bills about zero duration (13,000 GB-s/day allowed); outgoing messages are free. The
-object holds at most 100 sockets; at the cap the oldest is closed (1013) to admit the new one. All of this is an estimate: expected load is
+object holds at most 100 sockets; at the cap the open socket with the oldest accept time (a number each socket carries) is closed (1013) to admit the new one. All of this is an estimate: expected load is
 a few percent of the daily allowance, and $0.

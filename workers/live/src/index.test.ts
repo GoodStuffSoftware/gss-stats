@@ -18,6 +18,15 @@ class FakeSocket {
   sent: unknown[] = []
   closed: unknown[] | null = null
   throwOnSend = false
+  /** WebSocket.readyState: 1 = OPEN, 2 = CLOSING, 3 = CLOSED. */
+  readyState = 1
+  attachment: unknown = null
+  serializeAttachment(v: unknown) {
+    this.attachment = v
+  }
+  deserializeAttachment() {
+    return this.attachment
+  }
   send(m: unknown) {
     if (this.throwOnSend) throw new Error('socket is dead')
     this.sent.push(m)
@@ -47,7 +56,9 @@ function makeCtx(sockets: FakeSocket[] = []) {
   const autoResponse = vi.fn()
   const ctx = {
     storage,
-    getWebSockets: () => [...sockets, ...accepted],
+    // workerd lists the NEWEST socket first (verified under wrangler dev), so the fake does too: `sockets`
+    // is given oldest-first (accept order) and `accepted` are newer than all of them.
+    getWebSockets: () => [...accepted].reverse().concat([...sockets].reverse()),
     acceptWebSocket: (s: FakeSocket) => {
       accepted.push(s)
     },
@@ -182,16 +193,77 @@ describe('LiveHub.fetch', () => {
   }
   const upgradeReq = () => new Request('https://gss-live/ws', { headers: { Upgrade: 'websocket' } })
 
-  it('at the 100-socket cap closes the OLDEST socket (1013) and accepts the new one with 101', async () => {
-    const full = Array.from({ length: MAX_SOCKETS }, () => new FakeSocket())
+  /** `n` open sockets, given oldest-first, with accept times 1000, 1001, ... (what fetch() stamps). */
+  const aged = (n: number) =>
+    Array.from({ length: n }, (_, i) => {
+      const s = new FakeSocket()
+      s.attachment = 1000 + i
+      return s
+    })
+
+  it('at the 100-socket cap closes the OLDEST socket (1013) even though getWebSockets() lists newest first', async () => {
+    const full = aged(MAX_SOCKETS)
     const { client, server } = stubUpgrade()
-    const { hub, accepted } = makeHub(full)
+    const { hub, accepted, ctx } = makeHub(full)
+    expect(ctx.getWebSockets()[0]).toBe(full[MAX_SOCKETS - 1]) // premise: newest first
     const res = (await hub.fetch(upgradeReq())) as unknown as { status: number; webSocket: unknown }
     expect(res.status).toBe(101)
     expect(res.webSocket).toBe(client)
     expect(accepted).toEqual([server])
     expect(full[0].closed).toEqual([1013, 'try again later'])
     for (const s of full.slice(1)) expect(s.closed).toBeNull()
+  })
+
+  it('picks the oldest by attachment wherever it sits in the list', async () => {
+    const full = aged(MAX_SOCKETS)
+    // Shuffle the stamps so the oldest is in the middle of the list.
+    full[37].attachment = 5
+    stubUpgrade()
+    const { hub } = makeHub(full)
+    await hub.fetch(upgradeReq())
+    expect(full[37].closed).toEqual([1013, 'try again later'])
+    expect(full.filter((s) => s.closed !== null)).toHaveLength(1)
+  })
+
+  it('stamps the new socket with its accept time: a bare number, nothing else', async () => {
+    const { server } = stubUpgrade()
+    const { hub } = makeHub()
+    await hub.fetch(upgradeReq())
+    expect(server.attachment).toBe(NOW)
+  })
+
+  it('a socket whose attachment is missing or not a number counts as the oldest', async () => {
+    for (const bad of [null, undefined, 'x', Number.NaN, { at: 1 }]) {
+      const full = aged(MAX_SOCKETS)
+      full[60].attachment = bad
+      stubUpgrade()
+      const { hub } = makeHub(full)
+      await hub.fetch(upgradeReq())
+      expect(full[60].closed).toEqual([1013, 'try again later'])
+      expect(full.filter((s) => s.closed !== null)).toHaveLength(1)
+    }
+  })
+
+  it('a socket that is already CLOSING does not count toward the cap and is never the one evicted', async () => {
+    const full = aged(MAX_SOCKETS)
+    full[10].readyState = 2 // CLOSING, and the oldest stamp: still must not be picked
+    full[10].attachment = 1
+    full[11].readyState = 3 // CLOSED
+    stubUpgrade()
+    const { hub, accepted } = makeHub(full) // 98 open: room for one more
+    expect(((await hub.fetch(upgradeReq())) as unknown as { status: number }).status).toBe(101)
+    expect(accepted).toHaveLength(1)
+    for (const s of full) expect(s.closed).toBeNull()
+  })
+
+  it('at the cap with a CLOSING socket in the list, the oldest OPEN socket is the one evicted', async () => {
+    const full = aged(MAX_SOCKETS + 1)
+    full[0].readyState = 2 // oldest, but closing already
+    stubUpgrade()
+    const { hub } = makeHub(full) // 100 open
+    await hub.fetch(upgradeReq())
+    expect(full[0].closed).toBeNull()
+    expect(full[1].closed).toEqual([1013, 'try again later'])
   })
 
   it('below the cap closes nobody', async () => {
@@ -204,7 +276,7 @@ describe('LiveHub.fetch', () => {
   })
 
   it('an oldest socket that throws on close still lets the new one in', async () => {
-    const full = Array.from({ length: MAX_SOCKETS }, () => new FakeSocket())
+    const full = aged(MAX_SOCKETS)
     full[0].close = () => {
       throw new Error('already closed')
     }
@@ -248,6 +320,20 @@ describe('LiveHub.fetch', () => {
     const ws = new FakeSocket()
     await hub.webSocketClose(ws as unknown as WebSocket, received)
     expect(ws.closed).toEqual([sent, 'closed'])
+  })
+
+  it.each([1004, 1015, 5000])('webSocketClose with a reserved code %i that close() rejects still closes with 1000', async (received) => {
+    const { hub } = makeHub()
+    const ws = new FakeSocket()
+    const calls: unknown[][] = []
+    ws.close = (...args: unknown[]) => {
+      calls.push(args)
+      if (args[0] === received) throw new Error('InvalidAccessError: invalid close code')
+      ws.closed = args
+    }
+    await hub.webSocketClose(ws as unknown as WebSocket, received)
+    expect(calls).toEqual([[received, 'closed'], [1000, 'closed']])
+    expect(ws.closed).toEqual([1000, 'closed'])
   })
 
   it('webSocketClose and webSocketError survive a socket that is already closed', async () => {
