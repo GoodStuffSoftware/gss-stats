@@ -6,10 +6,16 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
-## [0.30.1] — 2026-10-05
+## [0.30.2] — 2026-10-05
 
 ### Fixed
 - **A path containing a NUL byte is now left out of every hour, place and device split, and out of the default view.** The SQL guard missed such a row where the JavaScript check refused it, so a hand-made `/return`, tour-skip or page path with a NUL in it could be counted, and the default view (event beacons off) still counted it and could mark the chart safe for live refresh; the two now agree.
+
+## [0.30.1] — 2026-10-05
+
+### Fixed
+- **A chart's Reload refreshes its caption values.** Metric values in a caption used to keep their old numbers until the page reloaded; Reload now refetches them with the chart, and so does a metric card's own ↻ and Retry.
+- **A metric value removed from a label or caption stops loading in the background.** It no longer keeps being requested for as long as the card is open.
 
 ## [0.30.0] — 2026-10-05
 
