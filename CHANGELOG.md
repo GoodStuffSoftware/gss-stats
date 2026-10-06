@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.30.3] — 2026-10-05
+
+### Fixed
+- **Registering more ad campaigns no longer breaks a chart.** The widest chart would have been refused at the eleventh campaign; it now fits about 19 to 48 even with the heaviest filters, and far more for charts built in the editor, with the same results.
+
 ## [0.30.2] — 2026-10-05
 
 ### Fixed
