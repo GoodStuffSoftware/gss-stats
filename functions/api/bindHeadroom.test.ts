@@ -12,11 +12,14 @@ import { MAX_SQL_BYTES } from '../../src/lib/queryLimits'
 
 /** Binds a statement may carry: D1's limit is 100, and ten stay free. */
 const HEADROOM_CEILING = 90
-/** EXTRA sits on top of the real registered campaigns (5 today), so this suite goes red when the 6th real campaign registers; the planned 90 KB guard follow-up lifts that ceiling.
- * Fake campaigns registered on top of the real ones, each with two uc values. 5 is the most the worst-case geo ring
- * (16 filters, 50 sites) holds under MAX_SQL_BYTES: each campaign adds about 3.7 KB to it, and at 6 the statement is
- * 91 KB, refused with a 400. BIND_EXTRA=6 or 7 therefore fails the byte and no-refusal tests below, on purpose. */
-const EXTRA = Number(process.env.BIND_EXTRA ?? 5)
+/** Fake campaigns registered on top of the real ones (5 today), each with two uc values. The flight dims (campaignFlight,
+ * flightDay, arrival) read the registry through one flight_reg CTE stated once per statement (lib/campaigns.ts), so the
+ * worst-case geo ring (16 filters, 50 sites) grows only about 0.22 KB per added campaign and carries 81 binds at any count:
+ * the 90,000-byte cap is reached at about 176 campaigns in all, and the bind cap is never reached by campaigns. 50 extra
+ * (55 in all, about 63 KB) is real headroom, and BIND_EXTRA=180 or more fails the byte and no-refusal tests below, on purpose. */
+const EXTRA = Number(process.env.BIND_EXTRA ?? 50)
+/** The fewest extra campaigns the worst-case ring must still have room for (the extrapolated headroom test below). */
+const MIN_ROOM_CAMPAIGNS = 100
 const SITES50 = ['bestsudoku-web', ...Array.from({ length: 49 }, (_, i) => `s${i}`)]
 const SUB_DAY = { since: '2026-10-01T15:00:00.000Z', until: '2026-10-01T16:00:00.000Z' }
 const ALIGNED = { since: '2026-10-01', until: '2026-10-01' }
@@ -52,9 +55,9 @@ async function load(extra: number) {
       id: `9000000000${i}`,
       label: `Fake ${i}`,
       ucValues: [`fake_uc_${i}_a`, `fake_uc_${i}_b`],
-      flightStart: `2026-10-${String(12 + i).padStart(2, '0')}`, // a distinct start each: every campaign start is a segment cut
+      flightStart: new Date(Date.UTC(2026, 9, 12 + i)).toISOString().slice(0, 10), // a distinct start each: every campaign start is a segment cut
       flightStartTimeEt: '12:00',
-      flightEnd: '2026-11-30',
+      flightEnd: '2099-12-31',
       status: 'upcoming',
       kind: 'web',
       notes: 'bind headroom guard fixture',
@@ -216,6 +219,13 @@ describe('D1 bind headroom (worst-case statements, by execution)', () => {
   })
   it('every worst-case statement stays under the MAX_SQL_BYTES cap of statementTooLarge', () => {
     for (const m of [base, grown]) for (const [name, w] of rows(m)) expect(w.bytes, `${name}: ${w.shape}`).toBeLessThan(MAX_SQL_BYTES)
+  })
+  it('registering campaigns costs the worst geo ring little: room for at least MIN_ROOM_CAMPAIGNS more under MAX_SQL_BYTES', () => {
+    const perCampaign = (grown.geo.ring.bytes - base.geo.ring.bytes) / EXTRA
+    expect(perCampaign, 'ring bytes added per campaign').toBeGreaterThan(0)
+    expect(perCampaign, 'ring bytes added per campaign').toBeLessThan(1000)
+    const room = (MAX_SQL_BYTES - grown.geo.ring.bytes) / perCampaign
+    expect(room, 'more campaigns the worst-case ring holds under MAX_SQL_BYTES').toBeGreaterThanOrEqual(MIN_ROOM_CAMPAIGNS)
   })
   it('no worst-case request is refused by statementTooLarge (a 400 is a failure, not a smaller statement)', () => {
     for (const m of [base, grown]) for (const [name, w] of rows(m)) expect(w.refused, `${name}`).toBe('')
