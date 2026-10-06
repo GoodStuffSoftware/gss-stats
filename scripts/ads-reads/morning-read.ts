@@ -15,7 +15,7 @@
 import { MIN_COHORT } from '../../src/lib/popupEvents'
 import { fail, fixtureDeps, liveDeps, loadFixture, parseCli, resolveCampaignId } from './cli'
 import { runMorningRead } from './read'
-import { formatMorningReport, withJson } from './report'
+import { formatMorningReport, jsonOnly, withJson } from './report'
 
 const HELP = `morning-read [--campaign <id>] [--dry-run] [--cf-token-file <path>] [--firebase-sa <path>] [--release-health auto|skip] [--release-health-only] [--health-min-parent N] [--health-parent-age-hours N] [--fixture <file.json> [--now <iso>]] [--json-only]`
 
@@ -49,7 +49,7 @@ async function main() {
     healthMinParent: minParent,
     healthParentAgeHours: ageHours,
   })
-  process.stdout.write(opts['json-only'] ? JSON.stringify(result, null, 2) + '\n' : withJson(formatMorningReport(result), result))
+  process.stdout.write(opts['json-only'] ? jsonOnly(result) : withJson(formatMorningReport(result), result))
 }
 
 main().catch(fail)

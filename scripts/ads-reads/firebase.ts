@@ -35,11 +35,11 @@
 // can never make a read incomplete or change a push (see read.ts `complete` / failedDetails).
 
 import fs from 'node:fs'
-import { createSign } from 'node:crypto'
 import type { CohortTierCounts } from '../../src/lib/adsRules'
 import { redact, registerSecret } from '../../src/lib/adsRedact'
 import { createTimedFetch, type FetchLike } from '../../src/lib/adsApi'
 import { EXTERNAL_TIMEOUT_MS } from './wrangler'
+import { DATASTORE_SCOPE, GOOGLE_TOKEN_URL, serviceAccountAccessToken } from './googleSa'
 
 export interface FirebaseCounts {
   projectId: string | null
@@ -131,8 +131,7 @@ function loadServiceAccount(source: ServiceAccountSource): { sa: any; error: str
   return { sa, error: null }
 }
 
-const TOKEN_URL = 'https://oauth2.googleapis.com/token'
-const b64url = (b: Buffer | string) => Buffer.from(b).toString('base64').replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_')
+const TOKEN_URL = GOOGLE_TOKEN_URL
 
 /** The only four requests this module may make. Anything else throws before it is sent. */
 export function fencedFetch(f: FetchLike, documentsBase: string): FetchLike {
@@ -147,24 +146,8 @@ export function fencedFetch(f: FetchLike, documentsBase: string): FetchLike {
   }
 }
 
-async function accessToken(sa: { client_email: string; private_key: string }, fetchImpl: FetchLike): Promise<string> {
-  const now = Math.floor(Date.now() / 1000)
-  const unsigned = `${b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }))}.${b64url(
-    JSON.stringify({ iss: sa.client_email, scope: 'https://www.googleapis.com/auth/datastore', aud: TOKEN_URL, iat: now, exp: now + 3600 }),
-  )}`
-  const sig = createSign('RSA-SHA256').update(unsigned).sign(sa.private_key)
-  const res = await fetchImpl(TOKEN_URL, {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: `${unsigned}.${b64url(sig)}` }).toString(),
-  })
-  const body = await res.text()
-  if (!res.ok) throw new Error(`service-account token exchange failed, HTTP ${res.status}`)
-  const tok = JSON.parse(body).access_token
-  if (!tok) throw new Error('service-account token exchange returned no access_token')
-  registerSecret(tok)
-  return tok
-}
+/** The datastore-scoped token, through the shared signer (googleSa.ts). */
+const accessToken = (sa: { client_email: string; private_key: string }, fetchImpl: FetchLike): Promise<string> => serviceAccountAccessToken(sa, DATASTORE_SCOPE, fetchImpl)
 
 type Value = { timestampValue: string } | { stringValue: string }
 type Op = 'GREATER_THAN_OR_EQUAL' | 'GREATER_THAN' | 'LESS_THAN' | 'LESS_THAN_OR_EQUAL'

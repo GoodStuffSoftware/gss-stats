@@ -987,7 +987,8 @@ changes the local default: with `BWS_ACCESS_TOKEN` set, the Ads keys still come 
 
 | Variable | Used for |
 |---|---|
-| `ADS_CLIENT_ID`, `ADS_CLIENT_SECRET`, `ADS_REFRESH_TOKEN`, `ADS_DEVELOPER_TOKEN` | Google Ads API, when `BWS_ACCESS_TOKEN` is unset. All four are required. The names match the sync Worker's bindings ([`workers/sync/wrangler.toml`](workers/sync/wrangler.toml)). |
+| `ADS_SA_B64`, `ADS_DEVELOPER_TOKEN` | Google Ads API through a service account, when `BWS_ACCESS_TOKEN` is unset: the service account's JSON key, base64 on one line, signed in with an RS256 JWT for the `adwords` scope (the same signer the Firestore reads use). The service account is added in Google Ads as a **Read only** user. Wins over the four variables below when set. The search requests carry the same headers either way. |
+| `ADS_CLIENT_ID`, `ADS_CLIENT_SECRET`, `ADS_REFRESH_TOKEN`, `ADS_DEVELOPER_TOKEN` | Google Ads API through a refresh token, when `BWS_ACCESS_TOKEN` and `ADS_SA_B64` are unset. All four are required. The names match the sync Worker's bindings ([`workers/sync/wrangler.toml`](workers/sync/wrangler.toml)). |
 | `FIRESTORE_SA_B64` | Firestore COUNT reads, when `--firebase-sa` is not given: the service-account JSON, base64-encoded on one line. It is decoded in memory and never written to disk. |
 | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | wrangler's D1 reads and writes (`gss-stats-ads` and the beacon's `gss-geo`), with no `--cf-token-file`. |
 
@@ -1005,7 +1006,45 @@ line shows every required variable NAME as `present` or `missing`, then `ok` or
 Firestore COUNT the post-flight read already runs, and `SELECT 1` on each D1 database. A failure
 prints only a fixed class (`missing-env`, `auth`, `timeout`, `network`, `http-4xx`,
 `http-5xx`, `bad-credential`, `wrangler-missing`, `wrangler-exit`, `bad-response`, `error`),
-never a value, token, id, count or error message. It exits non-zero if any line fails.
+never a value, token, id, count or error message. It exits non-zero if any line fails. The
+`ads` line accepts either Ads credential set.
+
+Every read CLI (`ads:morning-read`, `ads:postflight-read`) prints plain ASCII: the report, the
+push text and the JSON block. Typography in shared labels (em dashes, arrows, `>=`) is folded
+at print time, so a routine can relay the text exactly and still send ASCII.
+
+#### Minting the cloud keys into Bitwarden
+
+Three argument-free scripts mint the cloud routine's keys straight into Bitwarden (project
+`prod`), for an agent to run locally with `BWS_ACCESS_TOKEN` set. Each one refuses if its key
+already exists, hands the value to `bws secret create` from inside Node, and prints only
+`stored <KEY> (prod)` plus non-secret names (a service-account email, a project id, a key id,
+a token name and id). Service-account keys are created through the IAM REST API, so no key
+file ever touches disk; if the Bitwarden store fails, the new key is deleted again. A reused
+service account that holds any role beyond the expected one is refused. bws has no stdin form,
+so a value is briefly on the `bws` command line (visible to the same user's processes).
+
+| Script | Mints | Bitwarden key |
+|---|---|---|
+| `npm run ads:mint-firestore-sa` | Service account `gss-ads-reads-ro@best-sudoku-prod` with `roles/datastore.viewer`, and a JSON key | `infra--cloud-routine-env--FIRESTORE_SA_B64` |
+| `npm run ads:mint-ads-sa` | Service account `gss-ads-reads-ads` in the Ads OAuth client's own GCP project (`best-sudoku-17306`, re-verified from the client id and the enabled Google Ads API), no IAM role, and a JSON key. Prints the email to add in Google Ads as **Read only**. | `infra--cloud-routine-env--ADS_SA_B64` |
+| `npm run ads:mint-cf-d1` | Account-scoped Cloudflare token `gss-ads-reads-cloud-d1` with D1 Read and D1 Write (the CLI stores readings), no expiry, made with the local admin token | `infra--cloud-routine-env--CLOUDFLARE_API_TOKEN` |
+
+#### Handing the env to the cloud environment
+
+```powershell
+npm run ads:cloud-env
+```
+
+It reads Bitwarden in-process, builds the `.env` block (`ADS_SA_B64`, `ADS_DEVELOPER_TOKEN`,
+`FIRESTORE_SA_B64`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`,
+`WRANGLER_SEND_METRICS=false`, `ADS_ROUTINE_MODE=SHADOW`; never `BWS_ACCESS_TOKEN`) and copies
+it to the Windows clipboard through PowerShell's standard input, marked to stay out of clipboard
+history and cloud sync. It prints the variable names only, then clears the clipboard after 60 s
+if it still holds the block (Ctrl+C or closing the window clears it at once). A third-party
+clipboard manager may ignore the history exclusion. Paste it into claude.ai/code, environment
+`gss-ads-reads`, **Edit environment**, **Environment variables**. The routine itself is
+[`docs/routines/ads-cloud-daily.md`](docs/routines/ads-cloud-daily.md).
 
 ### Adding a new campaign
 
