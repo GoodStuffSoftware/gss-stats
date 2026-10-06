@@ -46,3 +46,36 @@ describe('ChartEditor: a breakdown survives a type switch', () => {
     expect(open(base({ type: 'stackedBar' })).find('[data-testid="pair-breakdown-hint"]').exists()).toBe(false)
   })
 })
+
+const saved = async (w: VueWrapper) => {
+  const save = w.findAll('button').find((b) => /save|apply|done/i.test(b.text()))!
+  await save.trigger('click')
+  const emitted = w.emitted() as Record<string, unknown[][]>
+  return Object.values(emitted).flat().map((a) => a[0] as Partial<Widget>).find((x) => x && 'type' in x)
+}
+const breakdownSelectOffered = (w: VueWrapper) => w.findAll('label').some((l) => /break down by|one line per/i.test(l.text()))
+
+describe('ChartEditor: a breakdown is never dropped without saying so', () => {
+  it.each(['bar', 'hbar', 'pie', 'doughnut', 'line', 'area', 'table'])('a %s on a date axis warns before Save removes the breakdown', async (type) => {
+    const w = open(base({ type: type as Widget['type'], dataset: 'geo', dimension: 'dateEt', breakdown: 'device' }))
+    const hint = w.find('[data-testid="stranded-breakdown-hint"]')
+    expect(hint.exists()).toBe(true)
+    expect(hint.text()).toContain('Saving removes')
+    expect(breakdownSelectOffered(w)).toBe(false)
+    expect((await saved(w))?.breakdown).toBeUndefined()
+  })
+
+  it('the pop-up dataset does not offer a breakdown (its API ignores one) and warns about a stored one', () => {
+    const w = open(base({ type: 'pie', dataset: 'popup', dimension: 'kind', breakdown: 'reason', popup: 'upsell', popupKind: 'shown' }))
+    expect(breakdownSelectOffered(w)).toBe(false)
+    expect(w.find('[data-testid="stranded-breakdown-hint"]').text()).toContain('data source')
+    expect(w.find('[data-testid="pair-breakdown-hint"]').exists()).toBe(false)
+  })
+
+  it('a supported combination shows no warning and keeps the breakdown', async () => {
+    const w = open(base({ type: 'bar' }))
+    expect(w.find('[data-testid="stranded-breakdown-hint"]').exists()).toBe(false)
+    expect(breakdownSelectOffered(w)).toBe(true)
+    expect((await saved(w))?.breakdown).toBe('difficulty')
+  })
+})

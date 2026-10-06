@@ -1,6 +1,6 @@
 import type { ChartConfiguration } from 'chart.js'
 import type { DrillConstraint, GlobalFilters, Widget, StatsResponse, StatsRow, Metric } from '../types'
-import { COUNTRY_NAMES } from './catalog'
+import { COUNTRY_NAMES, datasetSupportsBreakdown } from './catalog'
 import { ringDims, isDateDim } from './rings'
 import { etDateFast } from './etTime'
 import { TRACKING_ACTIVATION_DATE_ET, PLAY_TRACKING_MARKER_LABEL, POPUPS, POPUP_FAMILY_ORDER, POPUP_OUTCOME_ORDER, POPUP_OUTCOME_LABELS } from './popupEvents'
@@ -722,9 +722,11 @@ export function seriesRows(dim: string, resp: StatsResponse): StatsRow[] {
  * `key[dimension]` would repeat each dimension value once per breakdown value (a table) or,
  * after the editor dropped the breakdown, sum the breakdown away (a pie of one slice). A date
  * axis never pairs: the query itself drops a date from a multi-dimension request (rings.ts). */
-export function pairBreakdown(widget: Pick<Widget, 'dimension' | 'breakdown'>): string | null {
+export function pairBreakdown(widget: Pick<Widget, 'dimension' | 'breakdown' | 'dataset'>): string | null {
   const bd = widget.breakdown
-  if (!bd || bd === widget.dimension || isDateDim(widget.dimension) || isDateDim(bd)) return null
+  // A dataset whose API ignores a breakdown (catalog.ts DATASET_BREAKDOWN) returns rows with no
+  // second key: pairing them would label every mark "<value> · (none)", so those chart plainly.
+  if (!bd || !datasetSupportsBreakdown(widget.dataset) || bd === widget.dimension || isDateDim(widget.dimension) || isDateDim(bd)) return null
   return bd
 }
 
@@ -738,7 +740,7 @@ export interface PairRow {
 }
 /** The response's pairs in response order (the server's count order), or null when the widget
  * has no breakdown to pair (see pairBreakdown). A repeated pair is summed, never listed twice. */
-export function pairRows(widget: Pick<Widget, 'dimension' | 'breakdown' | 'metric'>, resp: StatsResponse): PairRow[] | null {
+export function pairRows(widget: Pick<Widget, 'dimension' | 'breakdown' | 'dataset' | 'metric'>, resp: StatsResponse): PairRow[] | null {
   const bd = pairBreakdown(widget)
   if (!bd) return null
   const dim = widget.dimension
@@ -757,14 +759,21 @@ export function pairRows(widget: Pick<Widget, 'dimension' | 'breakdown' | 'metri
 
 /** One color per pair: a hue per dimension value (its fixed color where it has one), lightened
  * step by step per breakdown value in the breakdown's own order — the nested doughnut's scheme,
- * so every pair of one dimension value reads as one family. */
+ * so every pair of one dimension value reads as one family. The lightening step narrows as the
+ * breakdown grows (0.16 for up to 5 values, then fitting the 0..0.72 range) so a long breakdown
+ * keeps distinct shades; a dimension value past the palette reuses a hue, darkened one notch per
+ * lap, so no two pairs share a colour however many there are. */
 export function pairColors(widget: Pick<Widget, 'dimension' | 'breakdown'>, pairs: PairRow[]): string[] {
   const bd = widget.breakdown ?? ''
   const aOrder = [...new Set(pairs.map((p) => p.a))]
   const bOrder = orderDimValues(bd, [...new Set(pairs.map((p) => p.b))])
+  const step = bOrder.length <= 5 ? 0.16 : 0.72 / (bOrder.length - 1)
   return pairs.map((p) => {
-    const base = stableColor(widget.dimension, p.a) ?? PALETTE[aOrder.indexOf(p.a) % PALETTE.length]
-    return shade(base, Math.min(bOrder.indexOf(p.b) * 0.16, 0.64))
+    const ai = aOrder.indexOf(p.a)
+    const stable = stableColor(widget.dimension, p.a)
+    const lap = Math.floor(ai / PALETTE.length)
+    const base = stable ?? shade(PALETTE[ai % PALETTE.length], -0.22 * lap)
+    return shade(base, bOrder.indexOf(p.b) * step)
   })
 }
 

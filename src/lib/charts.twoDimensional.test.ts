@@ -4,7 +4,7 @@
 // one) and the pie then plotted only the first dimension, summing the difficulties away.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { buildChartConfig, formatKey, pairBreakdown, pairColors, pairRows } from './charts'
-import { CHART_TYPES } from './catalog'
+import { CHART_TYPES, breakdownCapability, datasetSupportsBreakdown } from './catalog'
 import { defaultOverviewWidgets } from './defaults'
 import { etWallTimeMs } from './etTime'
 import type { ChartType, StatsResponse, Widget } from '../types'
@@ -58,6 +58,46 @@ describe('pairRows / pairBreakdown', () => {
     expect(c[0]).not.toBe(c[1])
     expect(c[0]).not.toBe(c[3])
     expect(pairColors(widget(), p)).toEqual(c)
+  })
+})
+
+describe('capability map: which widgets can carry a breakdown', () => {
+  it('only datasets whose API honours a breakdown offer one', () => {
+    for (const ds of ['rum', 'geo', 'completions'] as const) expect(datasetSupportsBreakdown(ds)).toBe(true)
+    expect(datasetSupportsBreakdown(undefined)).toBe(true) // no dataset = rum
+    for (const ds of ['popup', 'overview', 'campaigns', 'ads-readings'] as const) expect(datasetSupportsBreakdown(ds)).toBe(false)
+  })
+  it('a popup pie says why: the dataset ignores a breakdown', () => {
+    expect(breakdownCapability({ type: 'pie', dataset: 'popup', dimension: 'kind' })).toEqual({ ok: false, reason: 'dataset' })
+    expect(breakdownCapability({ type: 'bar', dataset: 'completions', dimension: 'mode' })).toEqual({ ok: true })
+  })
+  it.each(['line', 'area', 'bar', 'hbar', 'doughnut', 'pie', 'table'] as const)('%s over a date axis cannot break down', (type) => {
+    expect(breakdownCapability({ type, dataset: 'geo', dimension: 'dateEt' })).toEqual({ ok: false, reason: 'dateAxis' })
+  })
+  it('a type that does not break down at all says so', () => {
+    expect(breakdownCapability({ type: 'stat', dataset: 'geo', dimension: 'region' })).toEqual({ ok: false, reason: 'type' })
+  })
+  it('a popup widget with a stored breakdown charts plainly: no "(none)" half-pairs', () => {
+    const w = widget({ dataset: 'popup', dimension: 'kind', breakdown: 'reason', type: 'pie' })
+    const r = resp([['shown', '', 9], ['accepted', '', 4]], ['kind', 'reason'])
+    expect(pairBreakdown(w)).toBeNull()
+    expect(pairRows(w, r)).toBeNull()
+    const cfg: any = buildChartConfig(w, r)
+    expect(cfg.data.labels.some((l: string) => l.includes('(none)'))).toBe(false)
+  })
+})
+
+describe('pairColors at scale', () => {
+  const grid = (nA: number, nB: number) => {
+    const rows: [string, string, number][] = []
+    for (let a = 0; a < nA; a++) for (let b = 0; b < nB; b++) rows.push([`a${a}`, `b${b}`, 100 - a - b])
+    return resp(rows, ['path', 'refpath'])
+  }
+  const w = widget({ dataset: 'geo', dimension: 'path', breakdown: 'refpath' })
+  it.each([[3, 12], [6, 6], [9, 4], [13, 3], [2, 30], [20, 3]])('%i x %i pairs all get distinct colours', (nA, nB) => {
+    const p = pairRows(w, grid(nA, nB))!
+    expect(p).toHaveLength(nA * nB)
+    expect(new Set(pairColors(w, p)).size).toBe(nA * nB)
   })
 })
 
