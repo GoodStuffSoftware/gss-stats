@@ -2,9 +2,11 @@
 // live dependency graph (Ads API via bws, beacon D1 read-only, gss-stats-ads store) and the
 // --fixture graph (everything from one recorded JSON file, in-memory store, no network).
 //
-// Credentials: Google Ads keys come from Bitwarden (secrets.ts). The Cloudflare token comes
-// from --cf-token-file (read into memory) or an already-set CLOUDFLARE_API_TOKEN, else
-// wrangler's own login. None of them is ever printed.
+// Credentials: Google Ads keys come from Bitwarden, or from ADS_* env vars when
+// BWS_ACCESS_TOKEN is unset (secrets.ts). The Cloudflare token comes from --cf-token-file (read
+// into memory) or an already-set CLOUDFLARE_API_TOKEN, else wrangler's own login; wrangler
+// inherits CLOUDFLARE_ACCOUNT_ID from the environment. Firestore uses --firebase-sa <path>, else
+// FIRESTORE_SA_B64 (firebase.ts). None of them is ever printed.
 
 import fs from 'node:fs'
 import { parseArgs } from 'node:util'
@@ -29,7 +31,7 @@ import {
 import { createBeaconSource, type BeaconSource } from './beacon'
 import { createD1Select } from './d1'
 import { createD1Store, createMemoryStore } from './d1Store'
-import { readFirebaseCounts, type FirebaseCounts } from './firebase'
+import { readFirebaseCounts, serviceAccountFromEnv, type FirebaseCounts, type ServiceAccountSource } from './firebase'
 import { readPlayReports } from './play'
 import type { AdsSource, ReadDeps } from './read'
 import { redact, registerSecret } from '../../src/lib/adsRedact'
@@ -131,7 +133,9 @@ export async function liveDeps(opts: Record<string, string | boolean | undefined
   const dryRun = !!opts['dry-run']
   const run = createWranglerRunner({ cfToken: loadCfToken(opts['cf-token-file'] as string | undefined) })
   const { ads, adsInitError } = await liveAdsClient()
+  // An explicit --firebase-sa wins; otherwise FIRESTORE_SA_B64 (decoded in memory) if set.
   const saPath = opts['firebase-sa'] as string | undefined
+  const saSource: ServiceAccountSource | null = saPath ?? serviceAccountFromEnv()
   const playSaPath = opts['play-sa'] as string | undefined
   return {
     nowMs: Date.now(),
@@ -140,7 +144,7 @@ export async function liveDeps(opts: Record<string, string | boolean | undefined
     beacon: createBeaconSource(createD1Select(run)),
     store: createD1Store({ run, dryRun }),
     // --firebase-sa is a plain path so the key can be swapped for a read-only one later.
-    firebase: saPath ? { counts: (s, e, at) => readFirebaseCounts(saPath, s, e, { cohortTiersAtMs: at ?? null }) } : null,
+    firebase: saSource ? { counts: (s, e, at) => readFirebaseCounts(saSource, s, e, { cohortTiersAtMs: at ?? null }) } : null,
     // --play-sa: Play Console bulk-reports (R4), read-only, informational (see play.ts header
     // for the bucket/credential facts settled by execution). Same existing SA credential works
     // (~/.google-play/service-accounts/best-sudoku-prod.json) — no new secret plumbing.
