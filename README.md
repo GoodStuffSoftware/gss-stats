@@ -791,7 +791,14 @@ unrelated rows as a "(none)" bar. Every derived dimension except `date` can be o
 dimensions (a nested-doughnut ring, a breakdown bar's series); they're `CASE` expressions over
 the row, built only from those modules' own constants — never request input — with every
 literal passed through `sqlLit` (inlined rather than bound because a two-dimension chart would
-otherwise pass D1's 100-bound-parameter cap). They filter exactly like a column — the same
+otherwise pass D1's 100-bound-parameter cap). The three that read the campaign registry
+(`campaignFlight`, `flightDay`, `arrival`) look it up in one `flight_reg` table stated once at the
+start of the statement (`withFlightRegistry`), not once per use, so a registered campaign adds
+about 0.2 KB to the worst-case statement and no bound parameter: the 90,000-byte statement cap
+holds about 48 campaigns for the heaviest ring the headroom test sweeps (the 8 costliest dims with 16 filters; API-only, the chart
+editor stops at 5 dims) and about 19 with realistic campaigns, which have more ad groups and longer names and cost about 0.63 KB each
+(a typical 5-dim ring holds about 280 more). The old per-use copy held 10 on a lighter ring (`bindHeadroom.test.ts` guards the heaviest
+ring with 15 two-ad-group campaigns of room left). They filter exactly like a column — the same
 whitelisted expression is compared as `(<expr>) = ?`, the value always bound. A
 dimension or filter field name never reaches D1 unless it's a `GEO_DIMS` member — that Set is
 the whole security boundary. **Never exposed:** `id` (row id), raw `ts` (only the `date`

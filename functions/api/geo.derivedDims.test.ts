@@ -19,7 +19,7 @@ import {
   trackingActivationStartMs,
   etDateFromMs,
 } from '../../src/lib/popupEvents'
-import { CAMPAIGNS, etMidnightUtcMs, gameDimOf, keyEventOf, arrivalOf, campaignAttributionClause, etFlightRangeMs, flightDayIndex } from '../../src/lib/campaigns'
+import { CAMPAIGNS, etMidnightUtcMs, gameDimOf, keyEventOf, arrivalOf, campaignAttributionClause, etFlightRangeMs, flightDayIndex, withFlightRegistry } from '../../src/lib/campaigns'
 import { etWallTimeMs, etDateFast, etHourFast } from '../../src/lib/etTime'
 
 const noopCache: CacheLike = { match: async () => undefined, put: async () => {} }
@@ -57,7 +57,7 @@ function insert(r: Row) {
 }
 function exprValues(dim: string, rows: Row[]): string[] {
   for (const r of rows) insert(r)
-  const sql = `SELECT ${breakdownColumnExpr(dim, '')} AS v FROM hits ORDER BY rowid`
+  const sql = withFlightRegistry(`SELECT ${breakdownColumnExpr(dim, '')} AS v FROM hits ORDER BY rowid`)
   return (db.prepare(sql).all() as any[]).map((x) => String(x.v))
 }
 
@@ -243,7 +243,7 @@ describe('arrival / keyEvent SQL (the Overall timeline series filters)', () => {
     ] as const) {
       db.prepare('INSERT INTO hits (ts, path, campaign, visitor) VALUES (?, ?, ?, ?)').run(ts, '/', campaign, visitor)
     }
-    const got = (db.prepare(`SELECT ${breakdownColumnExpr('arrival', '')} AS v FROM hits ORDER BY rowid`).all() as any[]).map((x) => x.v)
+    const got = (db.prepare(withFlightRegistry(`SELECT ${breakdownColumnExpr('arrival', '')} AS v FROM hits ORDER BY rowid`)).all() as any[]).map((x) => x.v)
     expect(got).toEqual(['tagged', 'untagged', 'untagged', ''])
     expect(arrivalOf('new', android.id)).toBe('tagged')
     expect(arrivalOf('returning', android.id)).toBe('')
