@@ -135,7 +135,8 @@ export async function liveDeps(opts: Record<string, string | boolean | undefined
   const { ads, adsInitError } = await liveAdsClient()
   // An explicit --firebase-sa wins; otherwise FIRESTORE_SA_B64 (decoded in memory) if set.
   const saPath = opts['firebase-sa'] as string | undefined
-  const saSource: ServiceAccountSource | null = saPath ?? serviceAccountFromEnv()
+  const envSa = serviceAccountFromEnv() // always registers FIRESTORE_SA_B64 for redaction, even when --firebase-sa wins
+  const saSource: ServiceAccountSource | null = saPath ?? envSa
   const playSaPath = opts['play-sa'] as string | undefined
   return {
     nowMs: Date.now(),
