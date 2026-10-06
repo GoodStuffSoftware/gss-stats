@@ -109,6 +109,10 @@ export interface FactParams {
   /** ET calendar date (today, ET) the KPI fact is anchored on, and the organic returns arm's
    * maturity cut (campaignReturns, organic only: ORGANIC_MATURITY_SQL). */
   todayEt?: string
+  /** The KPI fact only: `todayEt` is a PAST day, read whole (every window a whole ET day, bounded at
+   * the day's end) instead of today so far. Part of the key, so a closed day never answers for the
+   * live one. */
+  closed?: boolean
   since?: string
   until?: string
   sites?: string[]
@@ -271,7 +275,8 @@ function segmentColumn(bucketMs: number, cuts: readonly number[]): { sql: string
  * days before — the retired /api/overview's windows (lib/overview.ts sameTimeWindowMs), computed
  * without Intl (lib/etTime.ts etSameTimeWindow; facts.test.ts checks they are identical). Days
  * 1..7 bound the `t` flag only (a non-refused row an opt-out metric compares); `d` is whole days. */
-export function kpiDayWindows(todayEt: string, nowMs: number): [number, number][] {
+export function kpiDayWindows(todayEt: string, nowMs: number, closed = false): [number, number][] {
+  if (closed) return [todayEt, ...last7DatesBefore(todayEt)].map((d) => [etMidnightMs(d), etMidnightMs(addEtDays(d, 1))] as [number, number])
   return [[etMidnightMs(todayEt), nowMs], ...last7DatesBefore(todayEt).map((d) => etSameTimeWindow(d, nowMs))]
 }
 
@@ -292,9 +297,9 @@ function kpiDayColumn(todayEt: string): string {
  * predicate the split guard and R-1d use) and its minute bucket start falls in an earlier day's
  * same-time window [ET midnight, same clock time); 0 otherwise, and ALWAYS 0 on a refused row, so
  * a refused count is never split at a clock time. The bounds are integer literals (sqlInt). */
-function kpiSameTimeColumn(todayEt: string, nowMs: number): { sql: string; binds: unknown[] } {
+function kpiSameTimeColumn(todayEt: string, nowMs: number, closed = false): { sql: string; binds: unknown[] } {
   const refused = refusedPathMatch() // binds are always empty; kept in SELECT order in case that changes
-  const whens = kpiDayWindows(todayEt, nowMs)
+  const whens = kpiDayWindows(todayEt, nowMs, closed)
     .slice(1)
     .map(([a, z]) => `WHEN ts >= ${sqlInt(bucketBound(a, 60_000))} AND ts < ${sqlInt(bucketBound(z, 60_000))} THEN 1`)
   return { sql: `CASE WHEN ${refused.sql} THEN 0 ${whens.join(' ')} ELSE 0 END`, binds: refused.binds }
@@ -488,7 +493,7 @@ export const FACTS: Record<FactId, FactDef> = {
   bskKpiDays: {
     id: 'bskKpiDays',
     db: 'gss_geo',
-    keyParams: ['todayEt'],
+    keyParams: ['todayEt', 'closed'],
     honors: [],
     bucketMs: 60_000,
     splitAt: null,
@@ -499,9 +504,13 @@ export const FACTS: Record<FactId, FactDef> = {
       // Today so far plus the 7 whole ET days before it. `d` is the whole ET day; `t` marks the
       // non-refused rows before the same clock time on their day (always 0 on a refused row), so
       // an opt-out metric's same-time deltas are unchanged while a refused count is whole days.
-      const clause = siteWindowClause(BEST_SUDOKU_SITES, etMidnightMs(addEtDays(p.todayEt, -7)), nowMs)
+      // A closed day (the day picker) reads that day whole: its upper bound is the day's end, and every
+      // comparison day is a whole day too. The statement never depends on `nowMs` then.
+      const closed = p.closed === true
+      const endMs = closed ? etMidnightMs(addEtDays(p.todayEt, 1)) : nowMs
+      const clause = siteWindowClause(BEST_SUDOKU_SITES, etMidnightMs(addEtDays(p.todayEt, -7)), endMs)
       const day = kpiDayColumn(p.todayEt)
-      const same = kpiSameTimeColumn(p.todayEt, nowMs)
+      const same = kpiSameTimeColumn(p.todayEt, nowMs, closed)
       const seg = segmentColumn(60_000, cuts)
       return {
         db: 'gss_geo',

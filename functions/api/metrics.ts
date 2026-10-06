@@ -69,12 +69,15 @@ async function readCapped(request: Request, max: number): Promise<string | null>
 export const onRequestPost: PagesFunction<MetricFactsEnv> = async (ctx) => {
   const text = await readCapped(ctx.request, MAX_BODY_BYTES)
   if (text === null) return json({ error: 'body too large', maxBytes: MAX_BODY_BYTES }, 413)
-  const batch = validateMetricsRequest(text)
+  const nowMs = Date.now()
+  const batch = validateMetricsRequest(text, nowMs)
   if (!batch.ok) return json({ error: batch.error, ...batch.detail }, batch.status)
   if (!ctx.env.gss_geo) return json({ error: 'geo DB not bound' }, 500)
 
-  const nowMs = Date.now()
-  const env: BatchEnv = { context: batch.context, nowMs, todayEt: etDateFast(nowMs), hasAdsDb: !!ctx.env.gss_stats_ads }
+  const todayEt = etDateFast(nowMs)
+  // context.day is today or a past ET day (validated): a past one reads that day whole.
+  const dayEt = batch.context.day !== undefined && batch.context.day < todayEt ? batch.context.day : undefined
+  const env: BatchEnv = { context: batch.context, nowMs, todayEt, ...(dayEt ? { dayEt } : {}), hasAdsDb: !!ctx.env.gss_stats_ads }
   const valid = batch.requests.flatMap((r) => (r.ok ? [r.req] : []))
   const cache = (caches as unknown as { default: CacheLike }).default
   const opts = { nowMs, todayEt: env.todayEt, fresh: batch.fresh, cache, waitUntil: (p: Promise<unknown>) => ctx.waitUntil(p) }
@@ -108,9 +111,10 @@ export const onRequestPost: PagesFunction<MetricFactsEnv> = async (ctx) => {
   // `liveSafe: true` only where the metric (or both ratio sides) can never count a refused row
   // (countsRefused === false), so a live "changed" ping may refetch it without moving a refused
   // count. Fail-closed: anything else gets no key. deriveBatch shares one object across identical
-  // requests, so each flagged value is a copy.
+  // requests, so each flagged value is a copy. A chosen past day is closed data: its today-so-far values
+  // never change, so a live ping must not refetch them.
   for (const r of batch.requests) {
-    if (r.ok && requestNeverCountsRefused(r.req)) results[r.key] = { ...results[r.key], liveSafe: true }
+    if (r.ok && !(dayEt && r.req.window === 'todaySoFar') && requestNeverCountsRefused(r.req)) results[r.key] = { ...results[r.key], liveSafe: true }
   }
   const body: MetricsResponseBody = {
     v: 1,

@@ -78,7 +78,7 @@ onScopeDispose(() => requestScope?.stop())
 
 const visibleAt = (i: number): boolean => {
   const fi = flatItems.value[i]
-  return !!fi && (!!fi.emptyOf || itemViewModel(fi.item, activeRefs.value[i]?.value, fi.scope, { todayEt: props.ctx.todayEt, values: props.values }).visible)
+  return !!fi && (!!fi.emptyOf || itemViewModel(fi.item, activeRefs.value[i]?.value, fi.scope, { todayEt: props.ctx.todayEt, values: props.values, pastDay: props.context?.day !== undefined }).visible)
 }
 
 const barMax = computed(() => {
@@ -87,7 +87,7 @@ const barMax = computed(() => {
   const refs = activeRefs.value
   const nums = items.flatMap((fi, i) => {
     if (fi.emptyOf || fi.item.display.as !== 'bar') return []
-    const vm = itemViewModel(fi.item, refs[i]?.value, fi.scope, { todayEt: props.ctx.todayEt, values: props.values })
+    const vm = itemViewModel(fi.item, refs[i]?.value, fi.scope, { todayEt: props.ctx.todayEt, values: props.values, pastDay: props.context?.day !== undefined })
     return [vm.barValue ?? 0]
   })
   return nums.length ? Math.max(0, ...nums) : 0

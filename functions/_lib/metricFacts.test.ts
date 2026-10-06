@@ -79,6 +79,12 @@ describe('cache lifetimes', () => {
     expect(factTtlSeconds('campaign', { params: { campaignId: ANDROID } }, today)).toBe(900)
     expect(factTtlSeconds('campaign', { params: { campaignId: RETEST } }, today)).toBe(90)
   })
+  it('a closed KPI day (the day picker): yesterday 15 minutes, an older day 24 hours, the live read 90 seconds', () => {
+    const kpi = (todayEt: string, closed?: boolean) => ({ params: { todayEt, ...(closed ? { closed } : {}) } })
+    expect(factTtlSeconds({ seconds: 90 }, kpi('2026-09-25', true), today)).toBe(900)
+    expect(factTtlSeconds({ seconds: 90 }, kpi('2026-09-24', true), today)).toBe(86_400)
+    expect(factTtlSeconds({ seconds: 90 }, kpi('2026-09-26'), today)).toBe(90)
+  })
   it('a finished serving window lives a day; an open one 90 seconds; a page range by its end', () => {
     expect(factTtlSeconds('flightWindow', { params: { campaignId: ANDROID } }, today)).toBe(86_400)
     expect(factTtlSeconds('flightWindow', { params: { campaignId: RETEST } }, today)).toBe(90)

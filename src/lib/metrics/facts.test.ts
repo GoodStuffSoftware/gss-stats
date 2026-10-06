@@ -430,3 +430,61 @@ describe('releaseSidesMs', () => {
     expect(s.before[1] - s.before[0]).toBe(48 * 3_600_000)
   })
 })
+
+describe('bskKpiDays for a chosen past day (the day picker): closed, whole days', () => {
+  const DAY = '2026-10-03'
+  const LATER = Date.parse('2026-10-06T15:00:00Z')
+  const KPI_TABLE = "CREATE TABLE hits (id INTEGER PRIMARY KEY, ts INTEGER, site TEXT DEFAULT 'bestsudoku-web', path TEXT DEFAULT '/', referrer TEXT DEFAULT '', region TEXT DEFAULT '', city TEXT DEFAULT '', org TEXT DEFAULT '', device TEXT DEFAULT '', browser TEXT DEFAULT '', os TEXT DEFAULT '', screenw INTEGER DEFAULT 0, visitor TEXT DEFAULT 'new', medium TEXT DEFAULT '', campaign TEXT DEFAULT '')"
+  const run = (nowMs: number, hits: readonly (readonly [number, string])[]) => {
+    const db = new DatabaseSync(':memory:')
+    db.exec(KPI_TABLE)
+    const ins = db.prepare('INSERT INTO hits (ts, path) VALUES (?, ?)')
+    for (const [ts, path] of hits) ins.run(ts, path)
+    const stmt = buildFact({ id: 'bskKpiDays', params: { todayEt: DAY, closed: true } }, nowMs)
+    return db.prepare(stmt.sql).all(...(stmt.binds as number[])) as { d: number; t: number; path: string; c: number }[]
+  }
+
+  it('closed is part of the cache key: a past day never answers for the live fact, and the live key is unchanged', () => {
+    expect(factKey('bskKpiDays', { todayEt: DAY, closed: true })).toEqual({ id: 'bskKpiDays', params: { todayEt: DAY, closed: true } })
+    expect(factKey('bskKpiDays', { todayEt: DAY })).toEqual({ id: 'bskKpiDays', params: { todayEt: DAY } })
+  })
+  it('every window is a whole ET day, today first', () => {
+    const w = kpiDayWindows(DAY, LATER, true)
+    expect(w).toHaveLength(8)
+    expect(w[0]).toEqual([etMidnightMs(DAY), etMidnightMs('2026-10-04')])
+    expect(w[1]).toEqual([etMidnightMs('2026-10-02'), etMidnightMs(DAY)])
+    expect(w[7]).toEqual([etMidnightMs('2026-09-26'), etMidnightMs('2026-09-27')])
+  })
+  it('the statement does not depend on the clock', () => {
+    const a = buildFact({ id: 'bskKpiDays', params: { todayEt: DAY, closed: true } }, LATER)
+    const b = buildFact({ id: 'bskKpiDays', params: { todayEt: DAY, closed: true } }, LATER + 86_400_000 * 30)
+    expect(b).toEqual(a)
+    expect(a.sql).not.toBe(buildFact({ id: 'bskKpiDays', params: { todayEt: DAY } }, LATER).sql)
+  })
+  it('reads the chosen day to its end and no further, with the 7 whole days before it', () => {
+    const start = etMidnightMs(DAY)
+    const end = etMidnightMs('2026-10-04')
+    const rows = run(LATER, [
+      [start, '/'],
+      [end - 60_000, '/'], // the last minute of the day
+      [end, '/'], // the next day: out
+      [LATER - 60_000, '/'], // today: out
+      [start - 1, '/'], // the last millisecond of the day before: day 1
+      [etMidnightMs('2026-09-26'), '/'], // the 7th day before: in
+      [etMidnightMs('2026-09-26') - 1, '/'], // the 8th: out
+    ])
+    const byDay = (d: number) => rows.filter((r) => r.d === d).reduce((a, r) => a + r.c, 0)
+    expect(byDay(0)).toBe(2)
+    expect(byDay(1)).toBe(1)
+    expect(byDay(7)).toBe(1)
+    expect(rows.reduce((a, r) => a + r.c, 0)).toBe(4)
+  })
+  it('a refused row is never flagged same-time, in a past day either', () => {
+    const start = etMidnightMs(DAY)
+    const rows = run(LATER, [
+      [start - 3_600_000, '/return/x/d0'],
+      [start - 3_600_000, '/'],
+    ])
+    for (const r of rows) expect(r.t, r.path).toBe(isSplitRefusedPath(r.path) ? 0 : 1)
+  })
+})
