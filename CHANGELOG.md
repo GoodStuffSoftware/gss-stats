@@ -15,6 +15,18 @@ All notable changes to **gss-stats** are documented here. The format follows
 ### Changed
 - **The read reports print plain ASCII.** The report, the push text and the JSON block no longer carry em dashes, arrows or other typography, so they can be relayed exactly as printed.
 
+## [0.32.1] — 2026-10-06
+
+### Fixed
+- **A chart with a breakdown keeps it when its type changes.** "Completions by mode × difficulty" switched to a pie used to lose the difficulty and draw a single "Normal" slice; pie, doughnut, bar, horizontal bar and table now draw one slice, bar or row per mode · difficulty pair, and area stacks one area per difficulty.
+- **A breakdown is never dropped silently.** The editor says so when Save would remove one (a date axis, or a data source that cannot break down), and the pop-up data source no longer offers a breakdown it ignored, so its bars and slices stop reading "shown · (none)".
+- **Clicking a bar or slice of a mode · difficulty pair drills on its first value.** Pair colours also stay distinct however many pairs a chart has.
+
+## [0.32.0] — 2026-10-06
+
+### Added
+- **Day selector on Today at a glance.** Step back through past days with the arrows or a date pick; the card reads that Eastern day whole, compares it with the day before and the seven days before that, and shows no "Updated" countdown for a day that is over.
+
 ## [0.31.0] — 2026-10-06
 
 ### Added

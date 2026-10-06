@@ -1,6 +1,6 @@
 // validateCard over every preset, and the POST /api/metrics whitelist (ADR 0003 section 3).
 import { describe, expect, it } from 'vitest'
-import { KEY_RE, MAX_REQUESTS, NOTE_ID_RE, normCardRef, validateCard, validateMetricsRequest, type ValidatedBatch } from './validate'
+import { KEY_RE, MAX_DAY_LOOKBACK_DAYS, MAX_REQUESTS, NOTE_ID_RE, normCardRef, validateCard, validateMetricsRequest, type ValidatedBatch } from './validate'
 import { PRESETS, presetById } from './presets'
 import { getNote, hasNote, isNoteActive, noteRawText, noteTemplate, noteTokens } from '../notes'
 import type { CardSpec, MetricItem } from './types'
@@ -157,6 +157,42 @@ describe('context dates are real and ordered (review #10)', () => {
     ['the leap day', '2028-02-29', '2028-03-01'],
   ])('%s is accepted', (_n, since, until) => {
     expect(ctx(since, until).ok).toBe(true)
+  })
+})
+
+describe('context.day (the day selector)', () => {
+  const NOW = Date.parse('2026-10-06T15:00:00Z') // 11:00 ET on 2026-10-06
+  const day = (d: unknown, nowMs = NOW) => validateMetricsRequest(JSON.stringify({ v: 1, context: { day: d }, requests: [{ key: 'a', metric: 'bsk.pageviews' }] }), nowMs)
+  it.each([
+    ['a datetime', '2026-10-03T00:00:00Z', 'context.day must be a real YYYY-MM-DD date'],
+    ['a month only', '2026-10', 'context.day must be a real YYYY-MM-DD date'],
+    ['a day the month does not have', '2026-02-30', 'context.day must be a real YYYY-MM-DD date'],
+    ['a number', 20261003, 'context.day must be a real YYYY-MM-DD date'],
+    ['an empty string', '', 'context.day must be a real YYYY-MM-DD date'],
+    ['tomorrow', '2026-10-07', 'context.day cannot be in the future'],
+    ['91 days back', '2026-07-07', `context.day is more than ${MAX_DAY_LOOKBACK_DAYS} days back`],
+  ])('%s is a 400', (_n, d, error) => {
+    expect(day(d)).toMatchObject({ ok: false, status: 400, error })
+  })
+  it('today, yesterday and the floor (90 days back) are accepted, and the day is carried', () => {
+    for (const d of ['2026-10-06', '2026-10-05', '2026-07-08']) {
+      const b = day(d)
+      expect(b.ok).toBe(true)
+      if (b.ok) expect(b.context.day).toBe(d)
+    }
+  })
+  it('today is the ET day: 00:00:30 ET on the 7th (still the 6th in UTC) allows the 7th, 23:59:30 ET on the 6th does not', () => {
+    expect(day('2026-10-07', Date.parse('2026-10-07T04:00:30Z')).ok).toBe(true)
+    expect(day('2026-10-07', Date.parse('2026-10-07T03:59:30Z')).ok).toBe(false)
+  })
+})
+
+describe('card.dayPicker', () => {
+  const base = (dayPicker: unknown) => ({ v: 1, dayPicker, sections: [{ layout: 'pills', items: [{ id: 'x', label: 'X', data: { metric: 'bsk.pageviews' }, display: { as: 'number' } }] }] }) as unknown as CardSpec
+  it('a boolean is accepted; anything else is named', () => {
+    expect(validateCard(base(true))).toEqual([])
+    expect(validateCard(base(false))).toEqual([])
+    expect(validateCard(base('yes')).join('\n')).toContain('card: dayPicker must be a boolean')
   })
 })
 

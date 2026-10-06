@@ -1,6 +1,7 @@
 import type { SiteKey, ChartType, Metric, Dataset } from '../types'
 import { POPUPS, POPUP_RATE_SPECS } from './popupEvents'
 import { CAMPAIGNS } from './campaigns'
+import { isDateDim } from './rings'
 
 // `creatable: false` keeps a dataset out of "Add chart" → Data source while its label stays here for
 // the widgets that still carry it: the overview and campaigns panels are metric-card presets now, so
@@ -14,6 +15,38 @@ export const DATASETS: { value: Dataset; label: string; creatable?: boolean }[] 
   { value: 'ads-readings', label: 'Best Sudoku ads readings log' },
   { value: 'completions', label: 'Best Sudoku completions — mode × difficulty' },
 ]
+
+// Which datasets' APIs honour a `breakdown` (a second group-by dimension). One map, read by the
+// editor (whether to offer it) and by lib/charts.ts (whether a response can be paired), so the two
+// can never disagree. /api/popups ignores it (its dimension is a fixed funnel family), and the
+// bespoke datasets have no dimension picker at all: a breakdown there would only mislabel rows.
+// `rum` also covers a widget with no dataset.
+export const DATASET_BREAKDOWN: Record<Dataset, boolean> = {
+  rum: true,
+  geo: true,
+  completions: true,
+  popup: false,
+  overview: false,
+  campaigns: false,
+  'ads-readings': false,
+}
+export function datasetSupportsBreakdown(dataset?: Dataset): boolean {
+  return DATASET_BREAKDOWN[dataset ?? 'rum'] ?? false
+}
+
+// Chart types that draw a trend over a date axis with no breakdown: a line/area takes its lines
+// from `series`, and the one-mark-per-row types pair dimension x breakdown, which a date axis
+// cannot do (rings.ts drops a date from a multi-dimension query).
+export const NO_BREAKDOWN_ON_DATE_AXIS: readonly ChartType[] = ['line', 'area', 'bar', 'hbar', 'doughnut', 'pie', 'table']
+
+export type BreakdownVerdict = { ok: true } | { ok: false; reason: 'type' | 'dataset' | 'dateAxis' }
+/** Whether a widget can carry a breakdown, and if not, why. The ONE capability check. */
+export function breakdownCapability(w: { type: ChartType; dataset?: Dataset; dimension?: string }): BreakdownVerdict {
+  if (!CHART_TYPES.find((t) => t.value === w.type)?.allowsBreakdown) return { ok: false, reason: 'type' }
+  if (!datasetSupportsBreakdown(w.dataset)) return { ok: false, reason: 'dataset' }
+  if (NO_BREAKDOWN_ON_DATE_AXIS.includes(w.type) && isDateDim(w.dimension)) return { ok: false, reason: 'dateAxis' }
+  return { ok: true }
+}
 
 // dataset 'completions' — the only two dimensions a completed-game beacon carries.
 export const COMPLETIONS_DIMENSIONS: { key: string; label: string }[] = [
@@ -136,15 +169,15 @@ export const DIMENSIONS: DimensionDef[] = [
 
 export const CHART_TYPES: { value: ChartType; label: string; needsDimension: boolean; allowsBreakdown: boolean }[] = [
   { value: 'stat', label: 'Stat (big number)', needsDimension: false, allowsBreakdown: false },
-  { value: 'bar', label: 'Bar (vertical)', needsDimension: true, allowsBreakdown: false },
-  { value: 'hbar', label: 'Bar (horizontal)', needsDimension: true, allowsBreakdown: false },
+  { value: 'bar', label: 'Bar (vertical)', needsDimension: true, allowsBreakdown: true },
+  { value: 'hbar', label: 'Bar (horizontal)', needsDimension: true, allowsBreakdown: true },
   { value: 'stackedBar', label: 'Stacked bar', needsDimension: true, allowsBreakdown: true },
   { value: 'breakdownBar', label: 'Breakdown bar (axis × series, grouped or stacked)', needsDimension: true, allowsBreakdown: true },
   { value: 'line', label: 'Line (a breakdown draws one line per value)', needsDimension: true, allowsBreakdown: true },
-  { value: 'area', label: 'Area', needsDimension: true, allowsBreakdown: false },
-  { value: 'doughnut', label: 'Doughnut', needsDimension: true, allowsBreakdown: false },
+  { value: 'area', label: 'Area (a breakdown stacks one area per value)', needsDimension: true, allowsBreakdown: true },
+  { value: 'doughnut', label: 'Doughnut (a breakdown draws one slice per pair)', needsDimension: true, allowsBreakdown: true },
   { value: 'nestedDoughnut', label: 'Nested doughnut (ring × ring)', needsDimension: true, allowsBreakdown: true },
-  { value: 'pie', label: 'Pie', needsDimension: true, allowsBreakdown: false },
+  { value: 'pie', label: 'Pie (a breakdown draws one slice per pair)', needsDimension: true, allowsBreakdown: true },
   { value: 'map', label: 'World map (geo points · beacon only)', needsDimension: false, allowsBreakdown: false },
   { value: 'table', label: 'Table', needsDimension: true, allowsBreakdown: true },
   { value: 'rate', label: 'Rate (% tile · pop-up dataset only)', needsDimension: true, allowsBreakdown: false },

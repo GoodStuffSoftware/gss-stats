@@ -69,6 +69,7 @@ const TODAY: Display = { as: 'number', deltas: ['yesterday', 'avg7'] }
 export const BSK_KPIS: CardSpec = {
   v: 1,
   showUpdated: 'header',
+  dayPicker: true,
   sections: [
     {
       layout: 'tiles',
