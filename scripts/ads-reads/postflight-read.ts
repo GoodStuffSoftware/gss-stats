@@ -27,7 +27,7 @@ async function main() {
   const campaignId = resolveCampaignId(opts, 'postflight', fx ? Date.parse(fx.now) : Date.now(), stage)
   const deps = fx ? fixtureDeps(fx, !!opts['dry-run']) : await liveDeps(opts)
   const result = await runPostflightRead(deps, { campaignId, stage, force: !!opts.force })
-  process.stdout.write(opts['json-only'] ? JSON.stringify(result, null, 2) + '\n' : withJson(formatPostflightReport(result), result))
+  process.stdout.write(opts['json-only'] ? jsonOnly(result) : withJson(formatPostflightReport(result), result))
 }
 
 main().catch(fail)

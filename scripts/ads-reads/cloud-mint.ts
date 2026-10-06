@@ -11,16 +11,18 @@
 //
 // Hard rules, by construction:
 // - Refuses when the bws key already exists (no overwrite, no rotate).
-// - A minted value only ever lives in this process: from the minting call (a key file in a fresh
-//   temp dir that is deleted in a finally block, or the Cloudflare API response) into
-//   `bws secret create KEY VALUE <prod id>` through execFile. Never stdout, a log, a shell
-//   variable or the repo.
+// - A minted value only ever lives in this process: from the minting call (the IAM REST API's
+//   keys.create response, whose privateKeyData is already the base64 JSON key, or the
+//   Cloudflare API response) into `bws secret create -- KEY VALUE <prod id>` through execFile.
+//   Never disk, stdout, a log, a shell variable or the repo. If the bws store fails after a
+//   service-account key was created, that key is deleted again through the API (keys.delete).
+// - A reused service account is refused if it holds any project role beyond the expected one.
+// - Residual risk (accepted): bws 2.1.0 has no stdin form, so the value is on bws.exe's command
+//   line while that call runs, readable by processes of the same user.
 // - Prints only `stored <KEY> (prod)` plus non-secret identifiers (an SA email, a project id,
 //   a token name and id). Errors are redacted and never carry a response body.
 
 import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
 import { exec, execFile } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { redact, redactedFirstLine, registerSecret } from '../../src/lib/adsRedact'
@@ -57,8 +59,6 @@ export interface MintDeps {
   gcloud: (args: string[]) => Promise<ExecResult>
   fetch: FetchLike
   readFile: (p: string) => string
-  mkdtemp: () => string
-  rmDir: (dir: string) => void
   sleep: (ms: number) => Promise<void>
   log: (line: string) => void
 }
@@ -91,14 +91,19 @@ async function gcloudOk(d: MintDeps, args: string[], what: string): Promise<stri
   return r.stdout
 }
 
+async function retryWait(d: MintDeps, i: number, tries: number): Promise<boolean> {
+  if (i >= tries) return false
+  await d.sleep(4_000)
+  return true
+}
+
 /** Retries a gcloud step a few times: a just-created service account takes a moment to appear. */
 async function withRetry<T>(d: MintDeps, fn: () => Promise<T>, tries = 5): Promise<T> {
   for (let i = 1; ; i++) {
     try {
       return await fn()
     } catch (e) {
-      if (i >= tries) throw e
-      await d.sleep(4_000)
+      if (!(await retryWait(d, i, tries))) throw e
     }
   }
 }
@@ -121,34 +126,120 @@ async function ensureServiceAccount(d: MintDeps, id: string, project: string): P
     d.log(`service account ${email} already exists; reusing it`)
     return email
   }
+  if (!/NOT_FOUND|does not exist|not found/i.test(desc.stderr)) throw new Error(`gcloud iam service-accounts describe failed (exit ${desc.code}): ${redactedFirstLine(desc.stderr)}`)
   await gcloudOk(d, ['iam', 'service-accounts', 'create', id, `--project=${project}`, `--display-name=${id}`, '--format=none'], 'gcloud iam service-accounts create')
   d.log(`created service account ${email}`)
   return email
 }
 
-/** Creates a JSON key in a fresh temp dir, reads it into memory and deletes the dir in finally.
- * Returns the key as base64 on one line; every form of it is registered with redact(). */
-async function mintKeyB64(d: MintDeps, email: string, project: string): Promise<{ b64: string; keyId: string | null }> {
-  const dir = d.mkdtemp()
+/** The project roles a service account holds (from the project IAM policy), sorted. */
+export async function projectRolesOf(d: MintDeps, project: string, email: string): Promise<string[]> {
+  const out = await gcloudOk(d, ['projects', 'get-iam-policy', project, '--format=json'], 'gcloud projects get-iam-policy')
+  let policy: any
   try {
-    const file = path.join(dir, 'key.json')
-    await withRetry(d, () => gcloudOk(d, ['iam', 'service-accounts', 'keys', 'create', file, `--iam-account=${email}`, `--project=${project}`, '--format=none'], 'gcloud iam service-accounts keys create'))
-    const json = d.readFile(file)
-    registerSecret(json)
-    let sa: any
-    try {
-      sa = JSON.parse(json)
-    } catch {
-      throw new Error('the new key file is not JSON')
-    }
-    if (typeof sa?.private_key === 'string') registerSecret(sa.private_key)
-    if (sa?.client_email !== email || typeof sa?.private_key !== 'string') throw new Error('the new key file does not belong to the expected service account')
-    const b64 = Buffer.from(json, 'utf8').toString('base64')
-    registerSecret(b64)
-    return { b64, keyId: typeof sa.private_key_id === 'string' ? sa.private_key_id : null }
-  } finally {
-    d.rmDir(dir)
+    policy = JSON.parse(out)
+  } catch {
+    throw new Error('gcloud projects get-iam-policy returned output that is not JSON')
   }
+  const member = `serviceAccount:${email}`
+  const roles: string[] = (Array.isArray(policy?.bindings) ? policy.bindings : [])
+    .filter((b: any) => Array.isArray(b?.members) && b.members.includes(member))
+    .map((b: any) => String(b.role))
+  return [...new Set(roles)].sort()
+}
+
+/** Refuses unless every project role the SA holds is in `allowed` (none allowed = no role). */
+export async function assertOnlyRoles(d: MintDeps, project: string, email: string, allowed: readonly string[]): Promise<void> {
+  const extra = (await projectRolesOf(d, project, email)).filter((r) => !allowed.includes(r))
+  if (extra.length) throw new Error(`${email} holds roles beyond ${allowed.length ? allowed.join(', ') : 'none'} on ${project}: ${extra.join(', ')}; refusing to mint a key for it`)
+}
+
+export const IAM_API = 'https://iam.googleapis.com/v1'
+
+/** The caller's gcloud access token, captured in-process and registered; never printed. */
+async function gcloudAccessToken(d: MintDeps): Promise<string> {
+  const tok = (await gcloudOk(d, ['auth', 'print-access-token'], 'gcloud auth print-access-token')).trim()
+  if (!tok) throw new Error('gcloud auth print-access-token returned nothing')
+  registerSecret(tok)
+  return tok
+}
+
+async function iamCall(d: MintDeps, token: string, method: 'POST' | 'DELETE', url: string, body?: unknown): Promise<{ status: number; ok: boolean; json: any }> {
+  const res = await d.fetch(url, { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
+  const text = await res.text()
+  let json: any = null
+  try {
+    json = text ? JSON.parse(text) : null
+  } catch {
+    json = null
+  }
+  return { status: res.status, ok: res.ok, json }
+}
+
+export interface MintedKey {
+  b64: string
+  keyId: string
+  /** The key's resource name, for keys.delete. */
+  name: string
+}
+
+/** Creates a JSON key through the IAM REST API (projects.serviceAccounts.keys.create). Nothing
+ * touches disk: privateKeyData is already the base64 JSON key file, the *_SA_B64 format. Every
+ * form of it is registered with redact() at once. Only a 404 (a just-created SA not visible
+ * yet) is retried, so a retry never mints a second key behind a failure that made one. */
+export async function createKeyViaApi(d: MintDeps, token: string, email: string, project: string): Promise<MintedKey> {
+  const url = `${IAM_API}/projects/${encodeURIComponent(project)}/serviceAccounts/${encodeURIComponent(email)}/keys`
+  let r: { status: number; ok: boolean; json: any }
+  for (let i = 1; ; i++) {
+    r = await iamCall(d, token, 'POST', url, { privateKeyType: 'TYPE_GOOGLE_CREDENTIALS_FILE', keyAlgorithm: 'KEY_ALG_RSA_2048' })
+    if (r.ok || r.status !== 404 || !(await retryWait(d, i, 5))) break
+  }
+  const b64 = typeof r.json?.privateKeyData === 'string' ? r.json.privateKeyData.trim() : ''
+  if (b64) registerSecret(b64)
+  const name = typeof r.json?.name === 'string' ? r.json.name : ''
+  const keyId = name.split('/').pop() || '(unknown id)'
+  if (!r.ok) throw new Error(`IAM keys.create for ${email} failed, HTTP ${r.status}`)
+  if (!b64 || !name) {
+    if (name) await deleteKeyViaApi(d, token, name)
+    throw new Error(`IAM keys.create for ${email} returned no key data${name ? `; deleted key ${keyId}` : ''}`)
+  }
+  const json = Buffer.from(b64, 'base64').toString('utf8')
+  registerSecret(json)
+  let sa: any = null
+  try {
+    sa = JSON.parse(json)
+  } catch {
+    sa = null
+  }
+  if (typeof sa?.private_key === 'string') registerSecret(sa.private_key)
+  if (sa?.client_email !== email || typeof sa?.private_key !== 'string') {
+    const deleted = await deleteKeyViaApi(d, token, name)
+    throw new Error(`IAM keys.create returned a key that does not belong to ${email}; ${deleted ? 'deleted' : 'could NOT delete'} key ${keyId}`)
+  }
+  return { b64, keyId, name }
+}
+
+export async function deleteKeyViaApi(d: MintDeps, token: string, name: string): Promise<boolean> {
+  try {
+    return (await iamCall(d, token, 'DELETE', `${IAM_API}/${name.split('/').map(encodeURIComponent).join('/')}`)).ok
+  } catch {
+    return false
+  }
+}
+
+/** Mints a key via the API and stores it; on a failed store, deletes the key again and says so
+ * by key id only. */
+async function mintAndStoreKey(d: MintDeps, key: string, email: string, project: string, prodId: string): Promise<void> {
+  const token = await gcloudAccessToken(d)
+  const k = await createKeyViaApi(d, token, email, project)
+  d.log(`created key ${k.keyId} for ${email}`)
+  try {
+    await createProdSecret(d.bws, key, k.b64, prodId)
+  } catch (e) {
+    const deleted = await deleteKeyViaApi(d, token, k.name)
+    throw new Error(`${redact(e)}; ${deleted ? `deleted key ${k.keyId} of ${email} again` : `could NOT delete key ${k.keyId} of ${email}: delete it by hand`}`)
+  }
+  d.log(`stored ${key} (prod)`)
 }
 
 async function storeOrExplain(d: MintDeps, key: string, value: string, projectId: string, orphan: string): Promise<void> {
@@ -164,12 +255,13 @@ export async function mintFirestoreSa(d: MintDeps): Promise<void> {
   const key = MINT_KEYS['firestore-sa']
   const projectId = await refuseIfExists(d, key)
   const email = await ensureServiceAccount(d, FIRESTORE_SA_ID, FIRESTORE_PROJECT)
+  await assertOnlyRoles(d, FIRESTORE_PROJECT, email, [FIRESTORE_ROLE])
   await withRetry(d, () =>
     gcloudOk(d, ['projects', 'add-iam-policy-binding', FIRESTORE_PROJECT, `--member=serviceAccount:${email}`, `--role=${FIRESTORE_ROLE}`, '--condition=None', '--format=none'], 'gcloud projects add-iam-policy-binding'),
   )
   d.log(`granted ${FIRESTORE_ROLE} on ${FIRESTORE_PROJECT} to ${email}`)
-  const { b64, keyId } = await mintKeyB64(d, email, FIRESTORE_PROJECT)
-  await storeOrExplain(d, key, b64, projectId, `key ${keyId ?? '(unknown id)'} of ${email}`)
+  await assertOnlyRoles(d, FIRESTORE_PROJECT, email, [FIRESTORE_ROLE])
+  await mintAndStoreKey(d, key, email, FIRESTORE_PROJECT, projectId)
 }
 
 /** Finds the GCP project that owns the Ads OAuth client: the client id's numeric prefix is the
@@ -211,8 +303,8 @@ export async function mintAdsSa(d: MintDeps): Promise<void> {
   const prodId = await refuseIfExists(d, key)
   const project = await findAdsProject(d, prodId)
   const email = await ensureServiceAccount(d, ADS_SA_ID, project)
-  const { b64, keyId } = await mintKeyB64(d, email, project)
-  await storeOrExplain(d, key, b64, prodId, `key ${keyId ?? '(unknown id)'} of ${email}`)
+  await assertOnlyRoles(d, project, email, [])
+  await mintAndStoreKey(d, key, email, project, prodId)
   d.log(`next (Mike): ads.google.com > Admin > Access and security > Users > + > ${email} > Read only > Add account`)
 }
 
@@ -299,8 +391,6 @@ export function liveMintDeps(): MintDeps {
     gcloud: runGcloud,
     fetch: createTimedFetch(EXTERNAL_TIMEOUT_MS),
     readFile: (p) => fs.readFileSync(p, 'utf8'),
-    mkdtemp: () => fs.mkdtempSync(path.join(os.tmpdir(), 'gss-mint-')),
-    rmDir: (dir) => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     log: (line) => process.stdout.write(`${line}\n`),
   }
@@ -308,12 +398,13 @@ export function liveMintDeps(): MintDeps {
 
 async function main() {
   const kind = process.argv[2] as MintKind
-  if (!(kind in MINTERS) || process.argv.length !== 3) {
+  if (!Object.hasOwn(MINTERS, kind) || process.argv.length !== 3) {
     process.stdout.write(`cloud-mint <${Object.keys(MINTERS).join('|')}> (use the npm scripts ads:mint-firestore-sa, ads:mint-ads-sa, ads:mint-cf-d1)\n`)
     process.exitCode = 1
     return
   }
   if (!process.env.BWS_ACCESS_TOKEN) throw new Error('BWS_ACCESS_TOKEN is not set (the key goes straight into Bitwarden)')
+  registerSecret(process.env.BWS_ACCESS_TOKEN)
   await MINTERS[kind](liveMintDeps())
 }
 
