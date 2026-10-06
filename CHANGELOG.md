@@ -11,6 +11,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 - **A breakdown is never dropped silently.** The editor says so when Save would remove one (a date axis, or a data source that cannot break down), and the pop-up data source no longer offers a breakdown it ignored, so its bars and slices stop reading "shown · (none)".
 - **Clicking a bar or slice of a mode · difficulty pair drills on its first value.** Pair colours also stay distinct however many pairs a chart has.
 
+## [0.31.0] — 2026-10-06
+
+### Added
+- **The ads reads can run from plain environment variables, with a preflight check.** Without Bitwarden, the Google Ads, Firestore and Cloudflare credentials now come from named env vars, and `npm run ads:cloud-check` reports which are present and whether each service answers a read-only probe, without printing any value.
+
 ## [0.30.3] — 2026-10-05
 
 ### Fixed
