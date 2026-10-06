@@ -125,7 +125,7 @@ function loadServiceAccount(source: ServiceAccountSource): { sa: any; error: str
     return { sa: null, error: typeof source === 'string' ? 'service-account file unreadable' : `${FIRESTORE_SA_ENV} service account unreadable` }
   }
   if (!sa?.private_key || !sa?.client_email || !sa?.project_id) {
-    return { sa: null, error: 'service-account file is missing project_id/client_email/private_key' }
+    return { sa: null, error: `${typeof source === 'string' ? 'service-account file' : FIRESTORE_SA_ENV + ' service account'} is missing project_id/client_email/private_key` }
   }
   registerSecret(sa.private_key)
   return { sa, error: null }
