@@ -1,8 +1,10 @@
 // OPTIONAL, READ-ONLY Firestore counts for the ads routine: new prod accounts and first-50
 // promo claims in a window, the promos/first50 status doc, and (day-15/30/60 stages) the
 // flight-window account cohort by access tier and promo marker. Enabled only when the CLI is
-// given --firebase-sa <path to an existing service-account JSON on this machine>; otherwise
-// every figure reads "not read".
+// given --firebase-sa <path to an existing service-account JSON on this machine>, or (the cloud
+// routine, which has no key file) FIRESTORE_SA_B64 holds that JSON base64-encoded on one line;
+// otherwise every figure reads "not read". The env form is decoded in memory only — this module
+// signs its own JWT, so no client library needs a key file and nothing is written to disk.
 //
 // COUNTS ONLY: every user figure comes from a Firestore COUNT aggregation query, so no user
 // document, email or uid ever enters this process. fencedFetch() below is the only way a
@@ -86,6 +88,47 @@ export function parseFirst50Client(status: number, ok: boolean, text: string): F
   const open = typeof raw === 'boolean' ? raw : null
   const updateTime = typeof doc?.updateTime === 'string' ? doc.updateTime : null
   return { state: open === true ? 'visible' : 'hidden', exists: true, open, updateTime, error: null }
+}
+
+/** Where the service-account JSON comes from: a key file path (--firebase-sa), or the JSON text
+ * itself, already decoded in memory (FIRESTORE_SA_B64). A bare string is a path. */
+export type ServiceAccountSource = string | { json: string }
+
+export const FIRESTORE_SA_ENV = 'FIRESTORE_SA_B64'
+
+/** Decodes FIRESTORE_SA_B64 in memory. Returns null when unset. Never throws: the encoded
+ * value, the decoded text and (when it parses) its private_key are registered with redact()
+ * first, and a malformed value surfaces later as "FIRESTORE_SA_B64 service account unreadable"
+ * (the variable's name, never its content) through the normal Firestore error path. */
+export function serviceAccountFromEnv(env: Record<string, string | undefined> = process.env): { json: string } | null {
+  const b64 = env[FIRESTORE_SA_ENV]?.trim()
+  if (!b64) return null
+  registerSecret(b64)
+  const json = Buffer.from(b64, 'base64').toString('utf8')
+  registerSecret(json)
+  try {
+    const key = JSON.parse(json)?.private_key
+    if (typeof key === 'string') registerSecret(key)
+  } catch {
+    /* reported as unreadable when used */
+  }
+  return { json }
+}
+
+/** Reads and parses the service account, registering its private_key. Errors never carry the
+ * file's or variable's content. */
+function loadServiceAccount(source: ServiceAccountSource): { sa: any; error: string | null } {
+  let sa: any
+  try {
+    sa = JSON.parse(typeof source === 'string' ? fs.readFileSync(source, 'utf8') : source.json)
+  } catch {
+    return { sa: null, error: typeof source === 'string' ? 'service-account file unreadable' : `${FIRESTORE_SA_ENV} service account unreadable` }
+  }
+  if (!sa?.private_key || !sa?.client_email || !sa?.project_id) {
+    return { sa: null, error: 'service-account file is missing project_id/client_email/private_key' }
+  }
+  registerSecret(sa.private_key)
+  return { sa, error: null }
 }
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'
@@ -183,7 +226,7 @@ export function shortReason(msg: string): string {
 }
 
 export async function readFirebaseCounts(
-  saPath: string,
+  saSource: ServiceAccountSource,
   windowStartMs: number,
   windowEndMs: number,
   opts: { fetchImpl?: FetchLike; cohortTiersAtMs?: number | null } = {},
@@ -199,18 +242,12 @@ export async function readFirebaseCounts(
     first50Client: first50ClientUnknown('not read'),
     errors: [],
   }
-  let sa: any
-  try {
-    sa = JSON.parse(fs.readFileSync(saPath, 'utf8'))
-  } catch {
-    out.errors.push('service-account file unreadable')
+  const loaded = loadServiceAccount(saSource)
+  if (loaded.error) {
+    out.errors.push(loaded.error)
     return out
   }
-  if (!sa?.private_key || !sa?.client_email || !sa?.project_id) {
-    out.errors.push('service-account file is missing project_id/client_email/private_key')
-    return out
-  }
-  registerSecret(sa.private_key)
+  let sa: any = loaded.sa
   out.projectId = String(sa.project_id)
   const base = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(out.projectId)}/databases/(default)/documents`
   const f = fencedFetch(raw, base)
@@ -292,4 +329,31 @@ export async function readFirebaseCounts(
     out.first50Client = first50ClientUnknown(shortReason(redact(e)))
   }
   return out
+}
+
+/** ads:cloud-check's Firestore probe: sign in and run ONE COUNT aggregation the post-flight read
+ * already runs (users with any createdAt). Resolves with nothing — the count is never returned
+ * or printed; throws on any failure. Same fence as readFirebaseCounts. */
+export async function probeFirestoreCount(saSource: ServiceAccountSource, opts: { fetchImpl?: FetchLike } = {}): Promise<void> {
+  const loaded = loadServiceAccount(saSource)
+  if (loaded.error) throw new Error(loaded.error)
+  let sa: any = loaded.sa
+  const base = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(String(sa.project_id))}/databases/(default)/documents`
+  const f = fencedFetch(opts.fetchImpl ?? createTimedFetch(EXTERNAL_TIMEOUT_MS), base)
+  let token: string
+  try {
+    token = await accessToken(sa, f)
+  } finally {
+    sa = null
+  }
+  const res = await f(`${base}:runAggregationQuery`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify(countQueryBody('createdAt', { timestampValue: '1970-01-01T00:00:00Z' }, null)),
+  })
+  const text = await res.text()
+  if (!res.ok) throw new Error(`runAggregationQuery HTTP ${res.status}`)
+  const arr = JSON.parse(text)
+  const v = (Array.isArray(arr) ? arr : [arr]).find((x: any) => x?.result)?.result?.aggregateFields?.n?.integerValue
+  if (v == null) throw new Error('runAggregationQuery returned no count')
 }
