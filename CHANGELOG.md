@@ -9,6 +9,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 ### Added
 - **Day selector on Today at a glance.** Step back through past days with the arrows or a date pick; the card reads that Eastern day whole, compares it with the day before and the seven days before that, and shows no "Updated" countdown for a day that is over.
 
+## [0.31.0] — 2026-10-06
+
+### Added
+- **The ads reads can run from plain environment variables, with a preflight check.** Without Bitwarden, the Google Ads, Firestore and Cloudflare credentials now come from named env vars, and `npm run ads:cloud-check` reports which are present and whether each service answers a read-only probe, without printing any value.
+
 ## [0.30.3] — 2026-10-05
 
 ### Fixed
