@@ -888,8 +888,10 @@ npm run typecheck:scripts
   or an incomplete narrative fails the build and writes nothing.
 - **Spend** comes from the Google Ads REST API only (customer 8726535246, no manager
   header), and only through the shared sync (see [Ads data freshness](#ads-data-freshness)).
-  Credentials are read from Bitwarden Secrets Manager with `bws` (needs `BWS_ACCESS_TOKEN`)
-  into process memory and are never printed, logged or written.
+  Credentials are read from Bitwarden Secrets Manager with `bws` (needs `BWS_ACCESS_TOKEN`),
+  or from env vars when that is unset (see
+  [Running the ads reads from env vars](#running-the-ads-reads-from-env-vars-cloud)), into
+  process memory, and are never printed, logged or written.
 - **Beacon reads** use `wrangler d1 execute gss-geo --remote --json --command`: single
   `SELECT`s only, enforced before wrangler runs.
 - **Store:** gss-stats' own D1 database `gss-stats-ads` (spend per day, placement-day cost,
@@ -974,6 +976,34 @@ npm run typecheck:scripts
   pause proposal, a new release-health alert), and a threshold, cap trip or alert already
   pushed that day is not pushed again; a failed read always pushes. The database enforces it
   with a UNIQUE index (migration 0003).
+
+### Running the ads reads from env vars (cloud)
+
+The claude.ai cloud routine has no `bws`, no key files and no `--cf-token-file`, so every
+credential the reads need can come from plain environment variables instead. Nothing here
+changes the local default: with `BWS_ACCESS_TOKEN` set, the Ads keys still come from Bitwarden.
+
+| Variable | Used for |
+|---|---|
+| `ADS_CLIENT_ID`, `ADS_CLIENT_SECRET`, `ADS_REFRESH_TOKEN`, `ADS_DEVELOPER_TOKEN` | Google Ads API, when `BWS_ACCESS_TOKEN` is unset. All four are required. The names match the sync Worker's bindings ([`workers/sync/wrangler.toml`](workers/sync/wrangler.toml)). |
+| `FIRESTORE_SA_B64` | Firestore COUNT reads, when `--firebase-sa` is not given: the service-account JSON, base64-encoded on one line. It is decoded in memory and never written to disk. |
+| `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | wrangler's D1 reads and writes (`gss-stats-ads` and the beacon's `gss-geo`), with no `--cf-token-file`. |
+
+Every secret is registered for redaction as it loads (`CLOUDFLARE_ACCOUNT_ID` is an identifier, not a secret). A missing-credential error names
+variables, never values.
+
+```powershell
+npm run ads:cloud-check   # preflight: env var presence + one read-only probe per dependency
+npm run ads:postflight-read -- --stage wrapup
+```
+
+`ads:cloud-check` prints one line each for `ads`, `firestore`, `d1-ads` and `d1-beacon`. Each
+line shows every required variable NAME as `present` or `missing`, then `ok` or
+`fail: <class>`. The probes are read-only: GAQL `SELECT customer.id FROM customer LIMIT 1`, one
+Firestore COUNT the post-flight read already runs, and `SELECT 1` on each D1 database. A failure
+prints only a fixed class (`missing-env`, `auth`, `timeout`, `network`, `http-4xx`,
+`http-5xx`, `bad-credential`, `wrangler-missing`, `wrangler-exit`, `bad-response`, `error`),
+never a value, token, id, count or error message. It exits non-zero if any line fails.
 
 ### Adding a new campaign
 
