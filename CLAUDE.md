@@ -23,15 +23,17 @@ Project rules for this repo — for both AI agents and human contributors. See
 Every user-facing change adds a bullet under `## [Unreleased]` in
 [CHANGELOG.md](CHANGELOG.md), **in the same commit as the code**. Keep-a-Changelog
 format; concise bullets (bold lead + one sentence, no filenames or implementation
-detail). Every merge to `main` is a release: the landing PR promotes `[Unreleased]` to the
-next semver version (`## [X.Y.Z] — YYYY-MM-DD`) and bumps `package.json` in the same PR.
+detail). Every merge to `main` is a release: the landing merge promotes `[Unreleased]` to the
+next semver version (`## [X.Y.Z] — YYYY-MM-DD`) and bumps `package.json` in the same commit.
 
 ## Branches
 
 `main` is the deployed line. Do work on `feat/<scope>` / `fix/<scope>` /
 `docs/<scope>` / `chore/<scope>` branches. Feature branches still don't bump while in
-progress — record changes under `[Unreleased]`; the landing PR to `main` does the semver
+progress — record changes under `[Unreleased]`; the landing merge to `main` does the semver
 bump and changelog promotion (see Changelog).
+
+Mike doesn't review PRs (2026-10-06): the writer spawns its own parity reviewer, runs one fix round, then merges to main and verifies the deploy; Mike looks at the live result.
 
 ## Destructive git safety
 

@@ -171,12 +171,12 @@ describe('slice 5 parity: bar table', () => {
     expect(pending.find('.bar-table').exists()).toBe(false)
   })
 
-  it('ignores a breakdown (the editor allows one for Table; the table never drew it)', async () => {
+  it('draws a breakdown as one row per dimension x breakdown pair (it used to ignore it, listing duplicate labels)', async () => {
     const r = resp([{ key: { deviceType: 'mobile', countryName: 'US' }, pageviews: 9, visits: 3 }], { pageviews: 9, visits: 3 })
     fetchStatsMock.mockResolvedValue(r)
     const w = widget({ type: 'table', dimension: 'deviceType', breakdown: 'countryName' })
     const card = mountCard(w)
     await settle()
-    expect(readTable(card)).toEqual(oldTable(w, r))
+    expect(readTable(card)).toEqual([{ label: 'mobile · United States', value: '9', width: 100 }])
   })
 })

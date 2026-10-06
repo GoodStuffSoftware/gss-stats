@@ -11,7 +11,7 @@ import { MIN_COHORT, POPUPS } from '../popupEvents'
 import { CAMPAIGNS, ORGANIC_ARM_ID } from '../campaigns'
 import { safeUA } from '../ownExclusion'
 import { SITE_TAG_RE, WHEN_RE } from '../range'
-import { addDays } from '../etTime'
+import { addDays, etDateFast } from '../etTime'
 import { rangeMs } from './facts'
 import { METRICS, metricWindows, OPTIONAL_PARAMS, type MetricDef, type MetricParam } from './metrics'
 import { seriesTwin } from './series'
@@ -28,6 +28,8 @@ export const KEY_RE = /^[a-z0-9_.:-]{1,64}$/
 const MAX_SITES = 50
 /** The longest page range a batch may ask for (review finding #10). */
 export const MAX_RANGE_DAYS = 400
+/** How many ET days back a card's `context.day` may reach (the day picker's floor). */
+export const MAX_DAY_LOOKBACK_DAYS = 90
 const DELTA_NAMES: readonly DeltaName[] = ['yesterday', 'avg7']
 const CAMPAIGN_IDS = new Set(CAMPAIGNS.map((c) => c.id))
 const POPUP_IDS = new Set(POPUPS.map((p) => p.id))
@@ -211,6 +213,7 @@ export function validateCard(spec: CardSpec): string[] {
   }
 
   if (spec.showUpdated !== undefined && typeof spec.showUpdated !== 'boolean' && spec.showUpdated !== 'header' && spec.showUpdated !== 'footer') errors.push("card: showUpdated must be a boolean, 'header' or 'footer'")
+  if (spec.dayPicker !== undefined && typeof spec.dayPicker !== 'boolean') errors.push('card: dayPicker must be a boolean')
   if (spec.actions !== undefined && (!Array.isArray(spec.actions) || !spec.actions.every((a) => CARD_ACTIONS.has(a)))) errors.push(`card: actions must be a list of ${[...CARD_ACTIONS].join(', ')}`)
   if (spec.notices !== undefined && !CARD_NOTICES.has(spec.notices)) errors.push(`card: notices must be one of ${[...CARD_NOTICES].join(', ')}`)
   checkRepeat('card', spec.repeat)
@@ -449,6 +452,8 @@ export interface ResolvedRequest {
 export type RequestCheck = { key: string; ok: true; req: ResolvedRequest } | { key: string; ok: false; reason: string }
 
 export interface ValidContext {
+  /** An ET calendar day a today-so-far card is read for (today or a past day). Absent: today, live. */
+  day?: string
   since?: string
   until?: string
   sites: string[]
@@ -487,11 +492,25 @@ function rangeTooLong(since: string, until: string, a: number, b: number): boole
   return b - a > MAX_RANGE_DAYS * 86_400_000
 }
 
-function validateContext(raw: unknown): ValidContext | string {
+/** Why `context.day` is refused, or null: a real YYYY-MM-DD ET calendar day, not in the future
+ * (ET) and not before the oldest day a card may be read for (MAX_DAY_LOOKBACK_DAYS back). */
+export function dayProblem(day: unknown, nowMs: number): string | null {
+  if (typeof day !== 'string' || !BARE_DATE_RE.test(day) || addDays(day, 0) !== day) return 'context.day must be a real YYYY-MM-DD date'
+  const today = etDateFast(nowMs)
+  if (day > today) return 'context.day cannot be in the future'
+  if (day < addDays(today, -MAX_DAY_LOOKBACK_DAYS)) return `context.day is more than ${MAX_DAY_LOOKBACK_DAYS} days back`
+  return null
+}
+
+function validateContext(raw: unknown, nowMs: number): ValidContext | string {
   if (raw === undefined) return { sites: [], excludeOwnVisits: false, ownBrowser: '', ownOS: '' }
   if (!isObj(raw)) return 'context must be an object'
-  const extra = only(raw, ['since', 'until', 'sites', 'excludeOwnVisits', 'ownBrowser', 'ownOS'])
+  const extra = only(raw, ['day', 'since', 'until', 'sites', 'excludeOwnVisits', 'ownBrowser', 'ownOS'])
   if (extra) return `context.${extra} is not accepted`
+  if (raw.day !== undefined) {
+    const problem = dayProblem(raw.day, nowMs)
+    if (problem) return problem
+  }
   for (const k of ['since', 'until'] as const) {
     if (raw[k] !== undefined && (typeof raw[k] !== 'string' || !isRealWhen(raw[k] as string))) return `context.${k} must be YYYY-MM-DD or an ISO datetime`
   }
@@ -513,6 +532,7 @@ function validateContext(raw: unknown): ValidContext | string {
     if (raw[k] !== undefined && (typeof raw[k] !== 'string' || safeUA(raw[k]) !== raw[k])) return `context.${k} is not a valid user-agent value`
   }
   return {
+    ...(raw.day !== undefined ? { day: raw.day as string } : {}),
     ...(raw.since !== undefined ? { since: raw.since as string, until: raw.until as string } : {}),
     sites,
     excludeOwnVisits: raw.excludeOwnVisits === true,
@@ -585,7 +605,7 @@ function checkRequest(raw: Record<string, unknown>, key: string, context: ValidC
 /** The whole-batch whitelist. `bodyText` is the raw request body (the handler enforces
  * MAX_BODY_BYTES before reading it). Batch-level problems are a 400/413; a problem with one
  * request is that request's `error` result, so the rest of the batch still answers. */
-export function validateMetricsRequest(bodyText: string): ValidatedBatch {
+export function validateMetricsRequest(bodyText: string, nowMs: number = Date.now()): ValidatedBatch {
   let body: unknown
   try {
     body = JSON.parse(bodyText)
@@ -599,7 +619,7 @@ export function validateMetricsRequest(bodyText: string): ValidatedBatch {
   if (body.fresh !== undefined && body.fresh !== true) return bad('fresh must be exactly true when set')
   if (!Array.isArray(body.requests) || !body.requests.length) return bad('requests must be a non-empty array')
   if (body.requests.length > MAX_REQUESTS) return { ok: false, status: 413, error: 'too many requests', detail: { maxRequests: MAX_REQUESTS } }
-  const context = validateContext(body.context)
+  const context = validateContext(body.context, nowMs)
   if (typeof context === 'string') return bad(context)
   const seen = new Set<string>()
   const requests: RequestCheck[] = []

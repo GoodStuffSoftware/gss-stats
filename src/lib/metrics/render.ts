@@ -74,6 +74,9 @@ export interface ItemViewOptions {
   /** What a `{=…}` token in the item's label or caption fills from: the fixed dates plus the
    * card's metric values (MetricCard). The fixed dates alone when absent. */
   values?: ValueResolver
+  /** The card shows a chosen past day (CardSpec.dayPicker), not today so far: its comparison is
+   * the prior day, not "yesterday", and a go-live that day is "new that day", not "new today". */
+  pastDay?: boolean
 }
 
 // ── Label resolution (ADR section 1, "Labels") ────────────────────────────────────────────
@@ -145,17 +148,17 @@ function fmtDailyAvg(n: number): string {
 /** The whole-day context line of a metric that can count a refused row (MetricValue.wholeDays):
  * one neutral line — no arrow, no percent — with only the parts the item asked for and the
  * server returned. A non-finite part is absent. */
-function wholeDayLine(value: MetricValue, deltas: readonly ('yesterday' | 'avg7')[]): DeltaLine[] {
+function wholeDayLine(value: MetricValue, deltas: readonly ('yesterday' | 'avg7')[], pastDay: boolean): DeltaLine[] {
   const w = value.wholeDays
   if (!w) return []
   const parts: string[] = []
-  if (deltas.includes('yesterday') && finite(w.yesterday)) parts.push(`Yesterday ${fmtCount(w.yesterday)}`)
+  if (deltas.includes('yesterday') && finite(w.yesterday)) parts.push(`${pastDay ? 'Prior day' : 'Yesterday'} ${fmtCount(w.yesterday)}`)
   if (deltas.includes('avg7') && finite(w.avg7)) parts.push(`7-day avg ${fmtDailyAvg(w.avg7)}/day`)
   return parts.length ? [{ text: parts.join(' · '), cls: '' }] : []
 }
-function deltaLinesFor(value: MetricValue, deltas: readonly ('yesterday' | 'avg7')[] | undefined): DeltaLine[] {
+function deltaLinesFor(value: MetricValue, deltas: readonly ('yesterday' | 'avg7')[] | undefined, pastDay = false): DeltaLine[] {
   if (!deltas?.length) return []
-  if (value.wholeDays) return wholeDayLine(value, deltas)
+  if (value.wholeDays) return wholeDayLine(value, deltas, pastDay)
   if (!value.deltas) return []
   const out: DeltaLine[] = []
   for (const name of deltas) {
@@ -163,7 +166,7 @@ function deltaLinesFor(value: MetricValue, deltas: readonly ('yesterday' | 'avg7
     // A non-finite delta (today N over a zero day) arrives as null after JSON; so can a
     // malformed one. Either way it is absent: no line, no up/down styling.
     if (!d || typeof d.delta !== 'number' || !Number.isFinite(d.delta)) continue
-    out.push({ text: `${name === 'yesterday' ? 'vs yesterday' : 'vs 7d avg'} ${deltaText(d)}`, cls: d.delta === 0 ? '' : d.delta > 0 ? 'up' : 'down' })
+    out.push({ text: `${name === 'yesterday' ? (pastDay ? 'vs prior day' : 'vs yesterday') : 'vs 7d avg'} ${deltaText(d)}`, cls: d.delta === 0 ? '' : d.delta > 0 ? 'up' : 'down' })
   }
   return out
 }
@@ -205,12 +208,12 @@ function formatBadge(raw: string | null, display: Extract<Display, { as: 'badge'
 }
 
 // ── Metric/ratio value formatting by display kind ─────────────────────────────────────────
-function formatMetricOrRatioValue(display: Display, value: MetricValue, def: MetricDef | RatioDef, nowMs: number, daysLeft: number | null = null): { primary: string; deltaLines: DeltaLine[]; split?: { main: string; sub: string } } {
+function formatMetricOrRatioValue(display: Display, value: MetricValue, def: MetricDef | RatioDef, nowMs: number, daysLeft: number | null = null, pastDay = false): { primary: string; deltaLines: DeltaLine[]; split?: { main: string; sub: string } } {
   switch (display.as) {
     case 'number':
       if (value.status === 'too-few') return { primary: noteRawText('too-few-to-report'), deltaLines: [] }
       if (!('unit' in def) && def.kind === 'per') return { primary: fmtPer(value.value), deltaLines: [] }
-      return { primary: fmtCount(value.value), deltaLines: deltaLinesFor(value, display.deltas) }
+      return { primary: fmtCount(value.value), deltaLines: deltaLinesFor(value, display.deltas, pastDay) }
     case 'currency':
       if (value.status === 'too-few') return { primary: noteRawText('too-few-to-report'), deltaLines: [] }
       return { primary: fmtMoney(value.value), deltaLines: [] }
@@ -341,7 +344,7 @@ function fieldViewModel(item: MetricItem, raw: string | null, labelTokens: TextT
 
 /** A flight that has not begun, as the server reports a window that has not opened yet. */
 const NOT_STARTED: MetricValue = { status: 'unmeasured', reason: 'not-started', noteIds: ['not-started'] }
-function metricViewModel(item: MetricItem, value: MetricValue, def: MetricDef | RatioDef, labelTokens: TextToken[], scope: ScopeInstance, todayEt: string, nowMs: number, values?: ValueResolver): ItemViewModel {
+function metricViewModel(item: MetricItem, value: MetricValue, def: MetricDef | RatioDef, labelTokens: TextToken[], scope: ScopeInstance, todayEt: string, nowMs: number, values?: ValueResolver, pastDay = false): ItemViewModel {
   // whenNotStarted 'zero': a count that cannot have happened yet reads a measured 0.
   if (value.status === 'unmeasured' && value.reason === 'not-started' && item.gating?.whenNotStarted === 'zero') value = { status: 'ok', value: 0 }
   if (value.status === 'error') {
@@ -364,13 +367,13 @@ function metricViewModel(item: MetricItem, value: MetricValue, def: MetricDef | 
   if (item.gating?.whenZero === 'omit' && value.value === 0 && value.status !== 'too-few') return { visible: false, labelTokens, primary: '0', deltaLines: [], captionTokens: [] }
   const campaign = item.display.as === 'status' && statusNoteOf(value) === 'verdict.maturing' ? campaignOfScope(scope) : undefined
   const daysLeft = campaign ? armMaturity(campaign, todayEt).daysToMature : null
-  const { primary, deltaLines, split } = formatMetricOrRatioValue(item.display, value, def, nowMs, daysLeft)
+  const { primary, deltaLines, split } = formatMetricOrRatioValue(item.display, value, def, nowMs, daysLeft, pastDay)
   if (isNewToday(item, value, def)) {
     // Comparisons are hidden while yesterday or the 7-day window reaches back to the go-live day
     // (or a campaign's first, partial day). On that day itself it is "new today"; on the days
     // after, the metric is not new any more: there is simply no full day to compare with yet.
     const goLive = goLiveEtFor(def as MetricDef, scope)
-    deltaLines.push(goLive && goLive < todayEt ? { text: noteRawText('no-comparison-yet'), cls: '' } : { text: noteRawText('new-today'), cls: 'new' })
+    deltaLines.push(goLive && goLive < todayEt ? { text: noteRawText('no-comparison-yet'), cls: '' } : { text: noteRawText(pastDay ? 'new-that-day' : 'new-today'), cls: 'new' })
   }
   const bar = item.display.as === 'bar' ? { barValue: finite(value.value) ? value.value : finite(value.numerator) ? value.numerator : 0 } : {}
   const mutedTooFew = value.status === 'too-few' && item.display.as !== 'percent' && item.display.as !== 'bar'
@@ -412,7 +415,7 @@ export function itemViewModel(item: MetricItem, value: MetricValue | undefined, 
   if (!value) {
     return { visible: true, labelTokens, primary: '…', deltaLines: [], captionTokens: [] }
   }
-  return metricViewModel(item, value, resolved.def as MetricDef | RatioDef, labelTokens, scope, opts.todayEt, opts.nowMs ?? Date.now(), opts.values)
+  return metricViewModel(item, value, resolved.def as MetricDef | RatioDef, labelTokens, scope, opts.todayEt, opts.nowMs ?? Date.now(), opts.values, opts.pastDay === true)
 }
 
 /** The badge's own view (always a `field` binding — validateCard rejects anything else). */

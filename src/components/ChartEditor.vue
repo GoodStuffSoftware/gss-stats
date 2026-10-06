@@ -15,6 +15,7 @@ import {
   METRICS,
   CAMPAIGN_OPTIONS,
   BAR_MODES,
+  breakdownCapability,
 } from '../lib/catalog'
 import { ringDims, RING_SOFT_CAP, isDateDim } from '../lib/rings'
 import { BEST_SUDOKU_SITES, CAPTION_MAX_CHARS, CARD_PRESET_FOR_PANEL, HIDDEN_CAVEATS_MAX, HIDDEN_CAVEAT_ID_RE, isCardPanel, syncCardWithView } from '../lib/defaults'
@@ -532,7 +533,24 @@ function moveRing(idx: number, dir: -1 | 1) {
 const isDateLine = computed(() => (draft.type === 'line' || draft.type === 'area') && isDateDim(draft.dimension))
 // A line over a non-date axis may break down into one line per value (lib/charts.ts); a date
 // axis draws its lines from `series` instead, so it offers no breakdown there.
-const breakdownAllowed = computed(() => !!typeDef.value?.allowsBreakdown && !isDateLine.value)
+// The one-mark-per-row types (bar, pie, table...) draw a breakdown as dimension × breakdown pairs
+// (lib/charts.ts pairRows). Whether a widget can carry a breakdown at all (type, dataset, date axis)
+// is ONE check: breakdownCapability in lib/catalog.ts.
+const PAIR_TYPES: readonly string[] = ['bar', 'hbar', 'doughnut', 'pie', 'table']
+const breakdownVerdict = computed(() => breakdownCapability({ type: draft.type, dataset: draft.dataset, dimension: draft.dimension }))
+const breakdownAllowed = computed(() => breakdownVerdict.value.ok)
+// A breakdown the widget carries but can no longer use (a date axis, a data source whose API has
+// none): Save drops it, so say so here instead of dropping it silently.
+const strandedBreakdownWhy = computed<string>(() => {
+  const v = breakdownVerdict.value
+  if (v.ok || !draft.breakdown || isBespokeDataset.value || isNote.value || isCardWidget.value) return ''
+  const name = dimLabel(draft.breakdown)
+  if (v.reason === 'dateAxis') return `A ${draft.type} over a date axis cannot break down by "${name}". Saving removes the breakdown; pick another "Group by" to keep it.`
+  if (v.reason === 'dataset') return `This data source cannot break down by "${name}". Saving removes the breakdown; pick another data source to keep it.`
+  return `A ${draft.type} chart does not use a breakdown. Saving removes "${name}"; pick a chart type that breaks down to keep it.`
+})
+const dimLabel = (key?: string) => dimOptions.value.find((d) => d.key === key)?.label ?? DIMENSIONS.find((d) => d.key === key)?.label ?? key ?? ''
+const isPairBreakdown = computed(() => PAIR_TYPES.includes(draft.type) && !!draft.breakdown && breakdownAllowed.value)
 const isBreakdownLine = computed(() => (draft.type === 'line' || draft.type === 'area') && !isDateLine.value && !!draft.breakdown)
 const canUseSeries = computed(() => isDateLine.value && isGeo.value)
 const SERIES_FIELDS = GEO_DIMENSIONS.filter((d) => !isDateDim(d.key))
@@ -989,6 +1007,11 @@ function save() {
           </select>
         </div>
       </div>
+
+      <p class="hint" role="status" v-if="strandedBreakdownWhy" data-testid="stranded-breakdown-hint">{{ strandedBreakdownWhy }}</p>
+      <p class="hint" v-if="isPairBreakdown" data-testid="pair-breakdown-hint">
+        Each "{{ dimLabel(draft.dimension) }} · {{ dimLabel(draft.breakdown) }}" pair gets its own {{ draft.type === 'table' ? 'row' : draft.type === 'bar' || draft.type === 'hbar' ? 'bar' : 'slice' }}.
+      </p>
 
       <!-- Line with a breakdown: also each line's running total, dashed on a right-hand axis -->
       <div class="field check" v-if="isBreakdownLine">
