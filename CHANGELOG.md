@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.33.0] — 2026-10-06
+
 ### Added
 - **The ads reads can sign in to Google Ads with a read-only service account.** In the cloud the Google Ads key can now be a service account added as a Read only user, which does not expire, instead of a refresh token.
 - **The cloud routine's keys can be minted straight into Bitwarden.** Three no-argument scripts create the read-only Firestore account, the Google Ads service account and a D1-only Cloudflare token, store each in Bitwarden and print only names.
