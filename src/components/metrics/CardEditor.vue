@@ -369,6 +369,15 @@ const showUpdatedValue = computed<'' | 'header' | 'footer'>({
     else delete spec.showUpdated
   },
 })
+// The day selector (CardSpec.dayPicker): meaningful for cards that read today-so-far windows.
+const dayPickerValue = computed<boolean>({
+  get: () => spec.dayPicker === true,
+  set: (v) => {
+    if (v === dayPickerValue.value) return
+    if (v) spec.dayPicker = true
+    else delete spec.dayPicker
+  },
+})
 const TONE_OPTIONS = BADGE_TONE_OPTIONS
 const tonesGroupId = useId()
 const actionsGroupId = useId()
@@ -465,6 +474,9 @@ function removeSection(i: number) {
               <input type="checkbox" :checked="hasAction(o.value)" @change="toggleAction(o.value, ($event.target as HTMLInputElement).checked)" />
               {{ o.label }}
             </label>
+          </div>
+          <div class="field">
+            <label><input type="checkbox" v-model="dayPickerValue" /> Day selector (read a past day)</label>
           </div>
           <div class="field">
             <label :for="showUpdatedId">"Updated Xs ago"</label>

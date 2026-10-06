@@ -72,6 +72,22 @@ describe('whole-day context (a count that can count a refused row)', () => {
   })
 })
 
+describe('a chosen past day (pastDay)', () => {
+  const past = { ...opts, pastDay: true }
+  const vm = (display: MetricItem['display'], value: MetricValue, o: { todayEt: string; pastDay?: boolean } = past) => itemViewModel(kpi({ display }), value, rootScope, o).deltaLines
+  const both: MetricItem['display'] = { as: 'number', deltas: ['yesterday', 'avg7'] }
+  it('names the comparison the prior day, not yesterday', () => {
+    expect(vm(both, { status: 'ok', value: 8, deltas: { yesterday: { delta: 2, deltaPct: 0.33 } } })[0]!.text).toBe('vs prior day +2 (+33%)')
+    expect(vm(both, { status: 'ok', value: 900, wholeDays: { yesterday: 1234, avg7: 1180.4 } })).toEqual([{ text: 'Prior day 1,234 · 7-day avg 1,180/day', cls: '' }])
+  })
+  it('a go-live that very day reads "new that day", not "new today"', () => {
+    expect(vm(both, { status: 'ok', value: 8 })).toEqual([{ text: 'new that day', cls: 'new' }])
+  })
+  it('today keeps its wording', () => {
+    expect(vm(both, { status: 'ok', value: 8, deltas: { yesterday: { delta: 2, deltaPct: 0.33 } } }, opts)[0]!.text).toBe('vs yesterday +2 (+33%)')
+  })
+})
+
 describe('non-finite values from the wire', () => {
   it('a non-finite delta survives JSON as null and is treated as absent: no line, no styling', () => {
     const sent: MetricValue = { status: 'ok', value: 5, deltas: { yesterday: { delta: Infinity, deltaPct: Infinity }, avg7: { delta: 3, deltaPct: NaN } } }

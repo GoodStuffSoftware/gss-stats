@@ -20,7 +20,7 @@ import { CAMPAIGNS, campaignById, ORGANIC_ARM_ID } from '../../src/lib/campaigns
 import { FACTS, rangeMs, type FactStatement, type FactTtl } from '../../src/lib/metrics/facts'
 import { buildFact, type FactResult, type Plan, type PlannedFact } from '../../src/lib/metrics/engine'
 import { etMidnightMs, servingEndMs } from '../../src/lib/metrics/instrumentation'
-import { etDateFast } from '../../src/lib/etTime'
+import { addDays, etDateFast } from '../../src/lib/etTime'
 import { buildCacheKeyUrl, type CacheLike } from './edgeCache'
 
 export interface MetricFactsEnv {
@@ -113,6 +113,7 @@ export function prewarmFactKeys(): void {
     // ORGANIC_MATURITY_SQL), exactly as lib/metrics/engine.ts factParamsFor plans it.
     factCacheKeyUrl({ id: 'campaignReturns', params: { campaignId: ORGANIC_ARM_ID, todayEt: '2026-01-01' } })
     factCacheKeyUrl({ id: 'bskKpiDays', params: { todayEt: '2026-01-01' } })
+    factCacheKeyUrl({ id: 'bskKpiDays', params: { todayEt: '2026-01-01', closed: true } })
     factCacheKeyUrl({ id: 'bskRangePath', params: { since: '2026-01-01', until: '2026-01-02' } })
     for (const sites of [[], ['bestsudoku-web'], ['bestsudoku-web', 'bestsudoku', 'bestsudoku-app']]) {
       factCacheKeyUrl({ id: 'popupRangePath', params: { since: '2026-01-01', until: '2026-01-02', sites } })
@@ -125,6 +126,9 @@ export function prewarmFactKeys(): void {
 /** A cache entry's lifetime. A window counts as closed once it ends at or before today's ET
  * midnight: nothing more can be written into it. */
 export function factTtlSeconds(ttl: FactTtl, f: Pick<PlannedFact, 'params'>, todayEt: string): number {
+  // A closed KPI day (the day picker): nothing is written into it any more, bar a late beacon from a
+  // session that straddled midnight, so yesterday is re-read within 15 minutes and older days daily.
+  if (f.params.closed && f.params.todayEt) return addDays(f.params.todayEt, 1) >= todayEt ? CLOSED_CAMPAIGN_SECONDS : CLOSED_SECONDS
   if (typeof ttl === 'object') return ttl.seconds
   const todayStart = etMidnightMs(todayEt)
   if (ttl === 'range') {
