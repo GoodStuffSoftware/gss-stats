@@ -219,7 +219,7 @@ describe('ads:cloud-check output', () => {
     expect(ok).toBe(false)
     expect(p.calls).toEqual([])
     for (const l of lines) expect(l).toMatch(LINE)
-    expect(lines[0]).toBe('ads       ADS_CLIENT_ID=present ADS_CLIENT_SECRET=missing ADS_REFRESH_TOKEN=missing ADS_DEVELOPER_TOKEN=missing -> fail: missing-env')
+    expect(lines[0]).toBe('ads       ADS_SA_B64=missing ADS_CLIENT_ID=present ADS_CLIENT_SECRET=missing ADS_REFRESH_TOKEN=missing ADS_DEVELOPER_TOKEN=missing -> fail: missing-env')
     const text = lines.join('\n')
     expect(text).not.toContain(VALUES.ADS_CLIENT_ID)
     expect(text).not.toContain('cf-env-token-value-555')

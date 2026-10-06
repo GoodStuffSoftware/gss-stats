@@ -12,7 +12,7 @@
 import { POSTFLIGHT_STAGES, type PostflightStage } from '../../src/lib/adsRules'
 import { fail, fixtureDeps, liveDeps, loadFixture, parseCli, resolveCampaignId } from './cli'
 import { runPostflightRead } from './read'
-import { formatPostflightReport, withJson } from './report'
+import { formatPostflightReport, jsonOnly, withJson } from './report'
 
 async function main() {
   const opts = parseCli({ stage: { type: 'string' }, force: { type: 'boolean', default: false } })
@@ -27,7 +27,7 @@ async function main() {
   const campaignId = resolveCampaignId(opts, 'postflight', fx ? Date.parse(fx.now) : Date.now(), stage)
   const deps = fx ? fixtureDeps(fx, !!opts['dry-run']) : await liveDeps(opts)
   const result = await runPostflightRead(deps, { campaignId, stage, force: !!opts.force })
-  process.stdout.write(opts['json-only'] ? JSON.stringify(result, null, 2) + '\n' : withJson(formatPostflightReport(result), result))
+  process.stdout.write(opts['json-only'] ? jsonOnly(result) : withJson(formatPostflightReport(result), result))
 }
 
 main().catch(fail)

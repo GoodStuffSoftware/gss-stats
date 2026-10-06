@@ -2,7 +2,7 @@
 // live dependency graph (Ads API via bws, beacon D1 read-only, gss-stats-ads store) and the
 // --fixture graph (everything from one recorded JSON file, in-memory store, no network).
 //
-// Credentials: Google Ads keys come from Bitwarden, or from ADS_* env vars when
+// Credentials: Google Ads keys come from Bitwarden, or from env vars (ADS_SA_B64 or the ADS_* set) when
 // BWS_ACCESS_TOKEN is unset (secrets.ts). The Cloudflare token comes from --cf-token-file (read
 // into memory) or an already-set CLOUDFLARE_API_TOKEN, else wrangler's own login; wrangler
 // inherits CLOUDFLARE_ACCOUNT_ID from the environment. Firestore uses --firebase-sa <path>, else
@@ -35,7 +35,7 @@ import { readFirebaseCounts, serviceAccountFromEnv, type FirebaseCounts, type Se
 import { readPlayReports } from './play'
 import type { AdsSource, ReadDeps } from './read'
 import { redact, registerSecret } from '../../src/lib/adsRedact'
-import { loadAdsCredentials } from './secrets'
+import { loadAdsAuth } from './secrets'
 import { createWranglerRunner, EXTERNAL_TIMEOUT_MS, type WranglerRunner } from './wrangler'
 
 export const COMMON_OPTIONS = {
@@ -106,7 +106,7 @@ export interface LiveGraph {
 
 export async function liveAdsClient(): Promise<{ ads: AdsClient | null; adsInitError: string | null }> {
   try {
-    return { ads: await createAdsClient(await loadAdsCredentials(), { timeoutMs: EXTERNAL_TIMEOUT_MS }), adsInitError: null }
+    return { ads: await createAdsClient(await loadAdsAuth(), { timeoutMs: EXTERNAL_TIMEOUT_MS }), adsInitError: null }
   } catch (e) {
     return { ads: null, adsInitError: redact(e) }
   }
