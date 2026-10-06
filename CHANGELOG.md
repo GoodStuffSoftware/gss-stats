@@ -9,7 +9,7 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [0.30.3] — 2026-10-05
 
 ### Fixed
-- **Registering more ad campaigns no longer breaks a chart.** The heaviest ring the guard tests holds about 48 campaigns (about 19 with realistic names) and typical rings hold far more, where each extra campaign costs about 210 B, down from about 3.9 KB (the widest chart would have been refused at the eleventh); results are unchanged.
+- **Registering more ad campaigns no longer breaks a chart.** The widest chart would have been refused at the eleventh campaign; it now fits about 19 to 48 even with the heaviest filters, and far more for charts built in the editor, with the same results.
 
 ## [0.30.2] — 2026-10-05
 
