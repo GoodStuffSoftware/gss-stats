@@ -96,8 +96,10 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   bar, **breakdown bar** (one dimension on the axis × another as the series, grouped or
   stacked — `Widget.barMode`), line (over a non-date axis, a breakdown draws one line per
   value, and `Widget.cumulative` adds each one's running total dashed on a right-hand axis),
-  area, doughnut, nested doughnut, pie, table, a geo point
-  map, and a note/text tile. Zoom is a single click, always available on every chart; its other
+  area (a breakdown stacks one area per value), doughnut, nested doughnut, pie, table, a geo point
+  map, and a note/text tile. A breakdown never drops on a type switch: bar, horizontal bar,
+  doughnut, pie and table draw one bar / slice / row per dimension × breakdown pair, labelled
+  `<dimension> · <breakdown>` (`pairRows` in `src/lib/charts.ts`), and the editor says so. Zoom is a single click, always available on every chart; its other
   modification chrome (edit/remove/drag/resize) tucks away until you hover that chart
   — or tap that chart's own reveal icon on touch, which has no hover.
   **Known gap:** the resize grip (drag-to-resize corner) isn't keyboard-operable — it's a

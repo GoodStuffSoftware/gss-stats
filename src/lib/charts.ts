@@ -716,6 +716,58 @@ export function seriesRows(dim: string, resp: StatsResponse): StatsRow[] {
   return buckets.map((day) => byDay.get(day) ?? { key: { [dim]: day }, pageviews: 0, visits: 0 })
 }
 
+/** The breakdown a one-mark-per-row chart (bar, horizontal bar, doughnut, pie, table) draws as
+ * pairs, or null when it has none to draw. A response with a breakdown has one row per
+ * (dimension, breakdown) pair; those charts plot ONE mark per row, so reading only
+ * `key[dimension]` would repeat each dimension value once per breakdown value (a table) or,
+ * after the editor dropped the breakdown, sum the breakdown away (a pie of one slice). A date
+ * axis never pairs: the query itself drops a date from a multi-dimension request (rings.ts). */
+export function pairBreakdown(widget: Pick<Widget, 'dimension' | 'breakdown'>): string | null {
+  const bd = widget.breakdown
+  if (!bd || bd === widget.dimension || isDateDim(widget.dimension) || isDateDim(bd)) return null
+  return bd
+}
+
+/** One (dimension value, breakdown value) pair of a 2-D response: its raw values, the shared
+ * label `<dimension> · <breakdown>` every one-mark-per-row chart shows, and its metric. */
+export interface PairRow {
+  a: string
+  b: string
+  label: string
+  value: number
+}
+/** The response's pairs in response order (the server's count order), or null when the widget
+ * has no breakdown to pair (see pairBreakdown). A repeated pair is summed, never listed twice. */
+export function pairRows(widget: Pick<Widget, 'dimension' | 'breakdown' | 'metric'>, resp: StatsResponse): PairRow[] | null {
+  const bd = pairBreakdown(widget)
+  if (!bd) return null
+  const dim = widget.dimension
+  const sums = new Map<string, PairRow>()
+  for (const r of resp.rows) {
+    const a = r.key[dim] ?? ''
+    const b = r.key[bd] ?? ''
+    const k = JSON.stringify([a, b])
+    const v = metricValue(r, widget.metric)
+    const cur = sums.get(k)
+    if (cur) cur.value += v
+    else sums.set(k, { a, b, label: `${formatKey(dim, a)} · ${formatKey(bd, b)}`, value: v })
+  }
+  return [...sums.values()]
+}
+
+/** One color per pair: a hue per dimension value (its fixed color where it has one), lightened
+ * step by step per breakdown value in the breakdown's own order — the nested doughnut's scheme,
+ * so every pair of one dimension value reads as one family. */
+export function pairColors(widget: Pick<Widget, 'dimension' | 'breakdown'>, pairs: PairRow[]): string[] {
+  const bd = widget.breakdown ?? ''
+  const aOrder = [...new Set(pairs.map((p) => p.a))]
+  const bOrder = orderDimValues(bd, [...new Set(pairs.map((p) => p.b))])
+  return pairs.map((p) => {
+    const base = stableColor(widget.dimension, p.a) ?? PALETTE[aOrder.indexOf(p.a) % PALETTE.length]
+    return shade(base, Math.min(bOrder.indexOf(p.b) * 0.16, 0.64))
+  })
+}
+
 // Known value order for a dimension's values, wherever one reads better than count order: the
 // pop-ups in registry order, shown → taps → outcomes, modes and difficulties in game order.
 const DIM_VALUE_ORDER: Record<string, readonly string[]> = {
@@ -867,7 +919,10 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse, seriesResp
       label: formatKey(widget.breakdown!, b),
       data: model.values[i] as number[],
       borderColor: color(b, i),
-      backgroundColor: color(b, i),
+      // An area stacks its series (each fills down to the one below, the first to the axis), so
+      // the top edge is the total and a breakdown reads as an area, not as overlapping lines.
+      backgroundColor: widget.type === 'area' ? `${color(b, i)}99` : color(b, i),
+      ...(widget.type === 'area' ? { fill: i === 0 ? 'origin' : '-1' } : {}),
       tension: 0.25,
       pointRadius: 2,
       pointHitRadius: 24,
@@ -904,6 +959,7 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse, seriesResp
         },
         scales: {
           ...baseScales(),
+          ...(widget.type === 'area' ? { y: { ...baseScales().y, stacked: true } } : {}),
           ...(running.length ? { y1: { position: 'right', beginAtZero: true, grid: { drawOnChartArea: false }, ticks: { color: tickColor(), font: { family: 'Inter', size: 11 } }, title: { display: true, text: 'cumulative', color: tickColor() } } } : {}),
         },
       },
@@ -1001,10 +1057,13 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse, seriesResp
   // 'date' gets zero-filled to every day in range; every other dimension is untouched. Shared
   // with the drill-down click handler so point index → value can't drift (see seriesRows).
   const rows = seriesRows(dim, resp)
-  const labels = rows.map((r) => formatKey(dim, r.key[dim] ?? ''))
-  const values = rows.map((r) => metricValue(r, m))
+  // A 2-D response (a breakdown is set) on a one-mark-per-row chart: one mark per
+  // dimension × breakdown pair, labelled "<dimension> · <breakdown>".
+  const pairs = pairRows(widget, resp)
+  const labels = pairs ? pairs.map((p) => p.label) : rows.map((r) => formatKey(dim, r.key[dim] ?? ''))
+  const values = pairs ? pairs.map((p) => p.value) : rows.map((r) => metricValue(r, m))
   const rawValues = rows.map((r) => String(r.key[dim] ?? ''))
-  const colors = seriesColors(dim, rawValues)
+  const colors = pairs ? pairColors(widget, pairs) : seriesColors(dim, rawValues)
 
   if (widget.type === 'doughnut' || widget.type === 'pie' || widget.type === 'nestedDoughnut') {
     return {
