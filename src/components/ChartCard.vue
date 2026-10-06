@@ -4,7 +4,7 @@ import type { Widget, GlobalFilters, StatsResponse } from '../types'
 import { fetchStats, fetchSeriesStats } from '../api'
 import { resolveSelection, sitesLoaded } from '../sitesStore'
 import { checkSessionExpired, isAuthError, isNetworkError } from '../session'
-import { buildChartConfig, formatKey, metricValue, nestedDoughnutClickValue, rendersOwnBody, seriesRows, hasLineSeries, widgetHasOverlay, widgetOverlayOptions } from '../lib/charts'
+import { buildChartConfig, formatKey, metricValue, nestedDoughnutClickValue, pairRows, rendersOwnBody, seriesRows, hasLineSeries, widgetHasOverlay, widgetOverlayOptions } from '../lib/charts'
 import { overlayItems, itemsInRange } from '../lib/timelineOverlay'
 import { isDateDim } from '../lib/rings'
 import { dayTitle } from '../lib/glanceDay'
@@ -162,14 +162,30 @@ function suppressTooltipForDrill() {
   baseChartRef.value?.suppressForDrill()
 }
 
+// Chart types whose point index is a dimension × breakdown PAIR index (see lib/charts.ts pairRows).
+const PAIR_DRILL_TYPES: readonly Widget['type'][] = ['bar', 'hbar', 'doughnut', 'pie']
+
 function onPoint(p: { index: number; datasetIndex: number; x: number; y: number }) {
   const dim = props.widget.dimension
   if (!dim) return
   const dataset = props.widget.dataset === 'geo' ? 'geo' : 'rum'
 
   // Breakdown charts (nested doughnut): the two rings are two DIFFERENT dimensions — resolve
-  // which one this arc belongs to (and its value) instead of reading widget.dimension. Other
-  // breakdown chart types (e.g. stackedBar) aren't wired for this yet, so leave them be.
+  // which one this arc belongs to (and its value) instead of reading widget.dimension.
+  // A bar/hbar/pie/doughnut that draws dimension × breakdown pairs (lib/charts.ts pairRows) has one
+  // mark per pair: it drills on the pair's primary dimension value (a drill carries one value, so
+  // the breakdown value is not part of it). Only those four types plot pairs: stackedBar,
+  // breakdownBar, line and area index the AXIS (deduped dimension values), not the pairs, so a
+  // pair lookup would drill on the wrong value — they fall through to the breakdown guard below.
+  const pairs = props.widget.breakdown && PAIR_DRILL_TYPES.includes(props.widget.type) && data.value ? pairRows(props.widget, data.value) : null
+  if (pairs) {
+    const value = pairs[p.index]?.a
+    if (value == null || value === '') return
+    if (!isSiteDim(dim) && semanticKey(dim, dataset) === null) return // not drillable → keep tooltip
+    suppressTooltipForDrill()
+    emit('drill', { widgetId: props.widget.id, dimension: dim, dataset, value, label: formatKey(dim, value), x: p.x, y: p.y })
+    return
+  }
   if (props.widget.breakdown) {
     if (props.widget.type !== 'nestedDoughnut' || !data.value) return
     const hit = nestedDoughnutClickValue(props.widget, data.value, p.datasetIndex, p.index)
@@ -502,14 +518,17 @@ const statOther = computed(() =>
 )
 const statOtherLabel = computed(() => (props.widget.metric === 'visits' ? 'pageviews' : 'visits'))
 
-const tableRows = computed(() =>
-  !data.value
-    ? []
-    : data.value.rows.map((r) => ({
-        label: formatKey(props.widget.dimension, r.key[props.widget.dimension] ?? ''),
-        value: metricValue(r, props.widget.metric),
-      })),
-)
+// A table row per response row — or, when the widget has a breakdown, one per dimension ×
+// breakdown pair labelled "<dimension> · <breakdown>" (the same pairs the bar/pie charts draw).
+const tableRows = computed(() => {
+  if (!data.value) return []
+  const pairs = pairRows(props.widget, data.value)
+  if (pairs) return pairs.map((p) => ({ label: p.label, value: p.value }))
+  return data.value.rows.map((r) => ({
+    label: formatKey(props.widget.dimension, r.key[props.widget.dimension] ?? ''),
+    value: metricValue(r, props.widget.metric),
+  }))
+})
 
 const isEmpty = computed(
   () =>
