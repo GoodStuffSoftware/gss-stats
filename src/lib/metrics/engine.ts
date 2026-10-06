@@ -28,6 +28,7 @@ import { CAMPAIGNS, campaignAttributionClause, campaignAttributionStartMs, campa
 import { gateRate, INSTALL_GAP_PATHS, POPUPS, rowIsPostInstallFix } from '../popupEvents'
 import { computeDelta, releaseComparisonWindows } from '../overview'
 import { latestDatedRelease } from '../releases'
+import { addDays as addEtDays } from '../etTime'
 import { UPSELL_SIGNEDOUT_FIX_AT } from '../adsRules'
 import { refusedWindowMoved } from '../splitGuard'
 import { beaconSeries, seriesTwin, spendSeries } from './series'
@@ -56,6 +57,9 @@ export interface BatchEnv {
   nowMs: number
   /** ET calendar date of nowMs (the KPI fact's anchor). */
   todayEt: string
+  /** A PAST ET day the today-so-far windows are read for (context.day, when it is before todayEt):
+   * that day whole, compared with whole days before it. Absent: today so far, live. */
+  dayEt?: string
   /** Whether the gss_stats_ads binding exists (an ads-store fact costs nothing without it). */
   hasAdsDb: boolean
   /** The release panel's windows (releaseWindowsFor), resolved from the first Best Sudoku hit
@@ -107,7 +111,8 @@ function factParamsFor(factId: FactId, req: Pick<ResolvedRequest, 'params'>, env
     case 'flightPathsSeen':
       return { campaignId: req.params.campaignId }
     case 'bskKpiDays':
-      return { todayEt: env.todayEt }
+      // A chosen past day is its own (closed) fact: `closed` is in the key, so it never answers for today.
+      return env.dayEt ? { todayEt: env.dayEt, closed: true } : { todayEt: env.todayEt }
     case 'bskRangePath':
     case 'bskRangeDaily':
       return { since: env.context.since, until: env.context.until }
@@ -173,7 +178,10 @@ function sideStatic(def: MetricDef, ctx: MetricCtx, window: readonly [number, nu
 
 /** Per-batch date maths: the page range and today's midnight, computed once. */
 interface Clock {
+  /** The start of the day the today-so-far windows read: today's, or the chosen past day's. */
   todayStartMs: number
+  /** The end of a chosen past day (its closed window's end); null for today, which runs to now. */
+  dayEndMs: number | null
   pageRange: [number, number] | null
   /** The page range is not whole ET days, so bskRangePath counts refused rows over whole ET days
    * (R-1d, lib/splitGuard.ts) while the measured interval stays the page range. */
@@ -183,7 +191,8 @@ interface Clock {
 function clockOf(env: BatchEnv): Clock {
   const pageRange = env.context.since !== undefined && env.context.until !== undefined ? rangeMs(env.context.since, env.context.until) : null
   return {
-    todayStartMs: etMidnightMs(env.todayEt),
+    todayStartMs: etMidnightMs(env.dayEt ?? env.todayEt),
+    dayEndMs: env.dayEt ? etMidnightMs(addEtDays(env.dayEt, 1)) : null,
     pageRange,
     pageRefusedWholeDays: pageRange !== null && refusedWindowMoved(pageRange[0], pageRange[1]),
     release: env.release ?? null,
@@ -544,7 +553,9 @@ class Batch {
     const factId = def.windows[req.window]!
     const factKey = factKeyString(factId, factParamsFor(factId, req, this.env))
     const fact = this.env.facts.get(factKey)
-    const asOfMs = fact?.ok ? fact.asOfMs : this.env.nowMs
+    // A closed day's data ends with the day: its as-of instant is the day's end, not the fetch time.
+    const closedEnd = req.window === 'todaySoFar' ? this.clock.dayEndMs : null
+    const asOfMs = closedEnd ?? (fact?.ok ? fact.asOfMs : this.env.nowMs)
     const { ctx, stat } = resolveStatic(this.memo, def, req, this.clock, req.window === 'todaySoFar' ? asOfMs : this.env.nowMs)
     const factDef = FACTS[factId]
     const bucket = factDef.bucketMs
@@ -742,7 +753,7 @@ class Batch {
   gate(goLiveEt: string | null): { yesterday: boolean; avg7: boolean } {
     const key = goLiveEt ?? ''
     let g = this.gates.get(key)
-    if (!g) this.gates.set(key, (g = deltasAllowed(goLiveEt, this.env.todayEt)))
+    if (!g) this.gates.set(key, (g = deltasAllowed(goLiveEt, this.env.dayEt ?? this.env.todayEt)))
     return g
   }
 

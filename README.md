@@ -603,7 +603,9 @@ Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats
   GROUP BY` statement) it is counted from, its params, windows and go-live rules. A percentage is
   registered only when numerator and denominator share a unit and the numerator is a declared
   subset of the denominator; an invalid ratio fails at import. Labels are notes-registry entries.
-  `POST /api/metrics` answers a batch of registry ids and params (never SQL): it validates every
+  `POST /api/metrics` answers a batch of registry ids and params (never SQL; `context.day`, a
+  `YYYY-MM-DD` Eastern day that is not in the future and at most 90 days back, reads the today-so-far
+  windows for that day instead, whole, else `400`): it validates every
   id and param against the registry, plans the distinct facts (at most 40 statements, else `413`
   with `maxStatements`), caches each fact on its own in the Cache API, and derives every value in
   JS with its status (`ok`, `too-few`, `no-data`, `unmeasured`, `partial`), n/d, deltas (or whole-day context, see *KPI tiles for counts-only rows* below) and a
@@ -627,6 +629,16 @@ Cloudflare GraphQL Analytics API  ·  D1 (gss-geo, read-only)  ·  D1 (gss-stats
   (cost: [docs/capacity.md](docs/capacity.md)). There is no polling: a tab that stays in the
   foreground never updates itself, and a relative range such as "last 7 days" is resolved when the
   page loads, so a tab left open past midnight refetches the same window until it is reloaded.
+  **Day selector** (`dayPicker: true` on a card spec; the "Today at a glance" preset sets it, and the
+  card editor has a checkbox): previous and next arrows and a date pick beside the card's status
+  line, today by default with "next" disabled at today. A past day is an Eastern calendar day, up to
+  90 days back, and the title says it ("Mon Oct 5 at a glance"; "Today at a glance" stays for
+  today). The card then reads that day whole instead of today so far: the prior day and the 7 days
+  before it are the comparisons, the rate tiles and the "too few to report" thresholds are unchanged,
+  and a go-live that day reads "new that day". The choice is view state in the card (not in the URL,
+  never stored server-side); it goes to the server as `context.day` (below). A past day is static, so
+  it shows no "Updated Ns ago" and a live ping never refetches it; picking today is the live card
+  again.
   The Overview's
   "Today at a glance" and campaign scorecard are cards since layout version 10. **Cards are
   editable**: "Add chart" offers a metric card as a chart type (the Overview and campaign cards
@@ -1425,8 +1437,8 @@ query. Mitigations (`functions/_lib/edgeCache.ts`, `functions/api/geo.ts`, `func
   query) with a long TTL for date ranges that end before today (immutable — they can't change)
   and a short TTL for ranges that include today.
 
-- `/api/metrics` caches per fact (90 s while live, 15 min for a closed campaign, 24 h for a closed
-  flight window), so one fact read serves every card and page that shows it; a representative
+- `/api/metrics` caches per fact (90 s while live, 15 min for a closed campaign or yesterday read as a
+  chosen day, 24 h for a closed flight window or an older chosen day), so one fact read serves every card and page that shows it; a representative
   Overview batch reads about 10,000 rows uncached against about 14,100 for the same sections of
   the retired `/api/overview`, and a full Campaigns page batch is measured in docs/capacity.md §8.
 

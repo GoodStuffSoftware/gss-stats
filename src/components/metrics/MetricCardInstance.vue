@@ -60,7 +60,7 @@ const compactItems = noteItems
 const notes = computed(() => {
   const byCaption = new Map<string, { key: string; labels: TextToken[][]; names: Set<string>; captionTokens: TextToken[] }>()
   compactItems.forEach((fi, i) => {
-    const vm = itemViewModel(fi.item, fi.value?.value, fi.scope, { todayEt, values: props.values })
+    const vm = itemViewModel(fi.item, fi.value?.value, fi.scope, { todayEt, values: props.values, pastDay: props.context?.day !== undefined })
     if (!vm.visible || !vm.captionTokens.length) return
     const text = vm.captionTokens.map((t) => t.value).join('')
     const entry = byCaption.get(text)
@@ -82,7 +82,7 @@ const allCells = noteItems.map((fi) => {
   const spec = buildRequestSpec(fi.item, fi.scope)
   return { ...fi, value: spec ? request(spec) : null }
 })
-const nothingVisible = computed(() => allCells.length > 0 && allCells.every((fi) => !itemViewModel(fi.item, fi.value?.value, fi.scope, { todayEt, values: props.values }).visible))
+const nothingVisible = computed(() => allCells.length > 0 && allCells.every((fi) => !itemViewModel(fi.item, fi.value?.value, fi.scope, { todayEt, values: props.values, pastDay: props.context?.day !== undefined }).visible))
 watch(nothingVisible, (h) => emit('hidden', h), { immediate: true })
 
 const notesOpen = ref(false)
