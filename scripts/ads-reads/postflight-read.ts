@@ -12,7 +12,7 @@
 import { POSTFLIGHT_STAGES, type PostflightStage } from '../../src/lib/adsRules'
 import { fail, fixtureDeps, liveDeps, loadFixture, parseCli, resolveCampaignId } from './cli'
 import { runPostflightRead } from './read'
-import { formatPostflightReport, withJson } from './report'
+import { formatPostflightReport, jsonOnly, withJson } from './report'
 
 async function main() {
   const opts = parseCli({ stage: { type: 'string' }, force: { type: 'boolean', default: false } })

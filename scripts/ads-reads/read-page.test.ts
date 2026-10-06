@@ -11,7 +11,7 @@ import { Window } from 'happy-dom'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { fixtureDeps, type Fixture } from './cli'
 import { runMorningRead, type MorningOptions, type MorningResult } from './read'
-import { formatMorningReport, withJson } from './report'
+import { asciiFold, asciiResult, formatMorningReport, withJson } from './report'
 import { buildReadPage, JSON_SPLIT, PLACEHOLDER, TEMPLATE_PATH, type Narrative } from './read-page'
 import { MIN_COHORT } from '../../src/lib/popupEvents'
 
@@ -118,8 +118,8 @@ describe('read-page rendering', () => {
     const { text, doc, body } = render(buildReadPage({ template, raw, narrative, audit: { commit: 'abc1234' } }))
     expect(text('headline')).toBe(narrative.headline)
     expect(text('narrative')).toContain('Watch asks at $75.')
-    expect(text('raw-human')).toBe(human.replace(/\s+$/, ''))
-    expect(JSON.parse(text('raw-json'))).toEqual(result)
+    expect(text('raw-human')).toBe(asciiFold(human).replace(/\s+$/, ''))
+    expect(JSON.parse(text('raw-json'))).toEqual(asciiResult(result))
     expect(text('footer')).toContain('abc1234')
     expect(doc.getElementById('kill')!.querySelectorAll('tbody tr').length).toBeGreaterThan(0)
     expect(body).not.toMatch(/could not be read|Could not be shown/)
@@ -213,7 +213,7 @@ describe('read-page rendering', () => {
     expect(body).toContain('Not read on this run: returns are read on threshold reads only')
     expect(body).toContain('Not read on this run: tagged beacon counts (beacon: synthetic outage)')
     expect(text('dateline')).toContain('Campaign status not read on this run (status: synthetic outage)')
-    expect(text('raw-human')).toBe(human.replace(/\s+$/, ''))
+    expect(text('raw-human')).toBe(asciiFold(human).replace(/\s+$/, ''))
   })
   it('shows diagnostics errors and per-sub-read gaps, and a READ FAILED line as a callout', () => {
     const r = degrade((d) => {

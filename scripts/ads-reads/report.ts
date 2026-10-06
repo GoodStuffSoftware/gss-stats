@@ -419,7 +419,63 @@ export function formatPostflightReport(r: PostflightResult): string {
   return out.join('\n')
 }
 
-/** The report followed by the machine-readable block the routine prompt parses. */
+// Plain ASCII on every CLI surface (report, push text, bus copy, JSON): the cloud routine relays
+// CLI text exactly AND sends plain ASCII, so the CLI output itself must already be ASCII. The
+// shared labels (dashboard, adsRules, campaigns) keep their typography; it is folded here, at
+// the one place the read CLIs print.
+const ASCII_MAP: Record<string, string> = {
+  '—': '-', // em dash
+  '–': '-', // en dash
+  '−': '-', // minus sign
+  '·': '|', // middle dot (a list separator in the report)
+  '•': '*', // bullet
+  '→': '->',
+  '←': '<-',
+  '≥': '>=',
+  '≤': '<=',
+  '≠': '!=',
+  '×': 'x',
+  '…': '...',
+  '‘': "'",
+  '’': "'",
+  '“': '"',
+  '”': '"',
+  ' ': ' ',
+  '≈': '~',
+}
+
+/** Folds a string to plain ASCII: the typography above to its ASCII stand-in, accents dropped,
+ * anything else left over to '?'. */
+export function asciiFold(text: string): string {
+  if (!/[^\x00-\x7f]/.test(text)) return text
+  return Array.from(text)
+    .map((c) => {
+      if (c.charCodeAt(0) < 0x80) return c
+      if (ASCII_MAP[c] !== undefined) return ASCII_MAP[c]
+      const base = c.normalize('NFKD').replace(/[̀-ͯ]/g, '')
+      return /^[\x00-\x7f]+$/.test(base) ? base : '?'
+    })
+    .join('')
+}
+
+/** A deep copy of a read result with every string (object keys included) folded to ASCII, so
+ * the JSON block, and notify.text inside it, are plain ASCII too. */
+export function asciiResult<T>(result: T): T {
+  const fold = (v: unknown): unknown => {
+    if (typeof v === 'string') return asciiFold(v)
+    if (Array.isArray(v)) return v.map(fold)
+    if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [asciiFold(k), fold(x)]))
+    return v
+  }
+  return fold(JSON.parse(JSON.stringify(result) ?? 'null')) as T
+}
+
+/** The report followed by the machine-readable block the routine prompt parses, both ASCII. */
 export function withJson(text: string, result: unknown): string {
-  return `${text}\n\n----- JSON -----\n${JSON.stringify(result, null, 2)}\n`
+  return `${asciiFold(text)}\n\n----- JSON -----\n${JSON.stringify(asciiResult(result), null, 2)}\n`
+}
+
+/** The --json-only output, ASCII like withJson. */
+export function jsonOnly(result: unknown): string {
+  return JSON.stringify(asciiResult(result), null, 2) + '\n'
 }

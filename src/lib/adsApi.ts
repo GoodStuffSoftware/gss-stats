@@ -25,6 +25,16 @@ export interface AdsCredentials {
   developerToken: string
 }
 
+/** A caller-supplied sign-in instead of a refresh token: the Node CLIs' service-account path
+ * (scripts/ads-reads/secrets.ts ADS_SA_B64, signed by scripts/ads-reads/googleSa.ts). Only the
+ * way the access token is obtained differs; the search requests carry the same headers. */
+export interface AdsTokenAuth {
+  developerToken: string
+  accessToken(fetchImpl: FetchLike): Promise<string>
+}
+
+export type AdsAuth = AdsCredentials | AdsTokenAuth
+
 export type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body?: string }) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'
@@ -73,15 +83,8 @@ function adsErrorMessage(status: number, body: string): string {
   }
 }
 
-export interface AdsClient {
-  search(query: string): Promise<any[]>
-}
-
-export async function createAdsClient(
-  creds: AdsCredentials,
-  opts: { customerId?: string; apiVersion?: string; fetchImpl?: FetchLike; timeoutMs?: number } = {},
-): Promise<AdsClient> {
-  const fetchImpl: FetchLike = opts.fetchImpl ?? createTimedFetch(opts.timeoutMs)
+/** The refresh-token exchange (bws, the ADS_* env set, and the sync Worker). */
+async function refreshAccessToken(creds: AdsCredentials, fetchImpl: FetchLike): Promise<string> {
   const tokenRes = await fetchImpl(TOKEN_URL, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -110,6 +113,19 @@ export async function createAdsClient(
     throw new Error('OAuth refresh returned a body that is not JSON')
   }
   if (!accessToken) throw new Error('OAuth refresh returned no access_token')
+  return accessToken
+}
+
+export interface AdsClient {
+  search(query: string): Promise<any[]>
+}
+
+export async function createAdsClient(
+  creds: AdsAuth,
+  opts: { customerId?: string; apiVersion?: string; fetchImpl?: FetchLike; timeoutMs?: number } = {},
+): Promise<AdsClient> {
+  const fetchImpl: FetchLike = opts.fetchImpl ?? createTimedFetch(opts.timeoutMs)
+  const accessToken = 'accessToken' in creds ? await creds.accessToken(fetchImpl) : await refreshAccessToken(creds, fetchImpl)
   registerSecret(accessToken)
   const url = searchUrl(opts.customerId, opts.apiVersion)
   const headers = buildHeaders(accessToken, creds.developerToken)
