@@ -128,7 +128,7 @@ describe('splitGuard module', () => {
         "path LIKE '/game/complete-deferred/%' OR path LIKE '/game/tutorial-complete/%' OR " +
         "path LIKE '/game/start/%' OR path LIKE '/tour/exit-at/%' OR path LIKE '/tour/exit-at' OR " +
         "path LIKE '/tour/skip' OR " +
-        "path LIKE '/tour/skip/%')",
+        "path LIKE '/tour/skip/%' OR instr(path, char(0)) > 0)",
     ])
     expect(b).toEqual([])
   })

@@ -24,7 +24,7 @@ describe('/api/popups and the split guard', () => {
     expect(res.status).toBe(200)
     expect(seen).toHaveLength(1)
     // Literals, like the pop-up include clause's own prefixes: no pattern is a bind.
-    expect(seen[0].sql).toContain(`NOT (${SPLIT_REFUSED_PATH_PATTERNS.map((p) => `path LIKE '${p}'`).join(' OR ')})`)
+    expect(seen[0].sql).toContain(`NOT (${SPLIT_REFUSED_PATH_PATTERNS.map((p) => `path LIKE '${p}'`).join(' OR ')} OR instr(path, char(0)) > 0)`)
     for (const p of SPLIT_REFUSED_PATH_PATTERNS) expect(seen[0].binds).not.toContain(p)
     // Every `?` is a bind, and the statement stays far under D1's 100-parameter cap.
     expect(seen[0].sql.match(/\?/g)?.length ?? 0).toBe(seen[0].binds.length)
