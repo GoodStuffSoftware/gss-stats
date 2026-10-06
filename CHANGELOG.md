@@ -9,7 +9,7 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [0.30.3] — 2026-10-05
 
 ### Fixed
-- **Registering more ad campaigns no longer breaks a chart.** The widest geo chart's database query grew about 3.9 KB per campaign and would have been refused at the eleventh; it now grows about 0.2 KB per campaign and holds about 95 campaigns for the heaviest legal filters (about 170 for lighter ones, fewer for realistic campaigns with longer names), with the same results.
+- **Registering more ad campaigns no longer breaks a chart.** The heaviest ring the guard tests holds about 48 campaigns (about 19 with realistic names) and typical rings hold far more, where each extra campaign costs about 210 B, down from about 3.9 KB (the widest chart would have been refused at the eleventh); results are unchanged.
 
 ## [0.30.2] — 2026-10-05
 
