@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.32.0] — 2026-10-06
+
 ### Added
 - **Day selector on Today at a glance.** Step back through past days with the arrows or a date pick; the card reads that Eastern day whole, compares it with the day before and the seven days before that, and shows no "Updated" countdown for a day that is over.
 
