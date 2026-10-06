@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.31.1] — 2026-10-06
+
 ### Fixed
 - **A chart with a breakdown keeps it when its type changes.** "Completions by mode × difficulty" switched to a pie used to lose the difficulty and draw a single "Normal" slice; pie, doughnut, bar, horizontal bar and table now draw one slice, bar or row per mode · difficulty pair, and area stacks one area per difficulty.
 - **A breakdown is never dropped silently.** The editor says so when Save would remove one (a date axis, or a data source that cannot break down), and the pop-up data source no longer offers a breakdown it ignored, so its bars and slices stop reading "shown · (none)".
