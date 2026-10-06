@@ -795,8 +795,9 @@ otherwise pass D1's 100-bound-parameter cap). The three that read the campaign r
 (`campaignFlight`, `flightDay`, `arrival`) look it up in one `flight_reg` table stated once at the
 start of the statement (`withFlightRegistry`), not once per use, so a registered campaign adds
 about 0.2 KB to the worst-case statement and no bound parameter: the 90,000-byte statement cap
-holds about 176 campaigns, where the old per-use copy held 10 (`bindHeadroom.test.ts` guards
-it with 55 registered). They filter exactly like a column — the same
+holds about 95 campaigns for the heaviest legal ring (16 `flightDay` filters) and about 170 with lighter
+filters, where the old per-use copy held 10 on the lighter one; realistic campaigns with more ad groups and longer names
+cost 2-3x more (`bindHeadroom.test.ts` guards the heaviest ring with 55 registered). They filter exactly like a column — the same
 whitelisted expression is compared as `(<expr>) = ?`, the value always bound. A
 dimension or filter field name never reaches D1 unless it's a `GEO_DIMS` member — that Set is
 the whole security boundary. **Never exposed:** `id` (row id), raw `ts` (only the `date`

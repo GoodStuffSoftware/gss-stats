@@ -12,14 +12,21 @@ import { MAX_SQL_BYTES } from '../../src/lib/queryLimits'
 
 /** Binds a statement may carry: D1's limit is 100, and ten stay free. */
 const HEADROOM_CEILING = 90
-/** Fake campaigns registered on top of the real ones (5 today), each with two uc values. The flight dims (campaignFlight,
- * flightDay, arrival) read the registry through one flight_reg CTE stated once per statement (lib/campaigns.ts), so the
- * worst-case geo ring (16 filters, 50 sites) grows only about 0.22 KB per added campaign and carries 81 binds at any count:
- * the 90,000-byte cap is reached at about 176 campaigns in all, and the bind cap is never reached by campaigns. 50 extra
- * (55 in all, about 63 KB) is real headroom, and BIND_EXTRA=180 or more fails the byte and no-refusal tests below, on purpose. */
+/** Fake campaigns registered on top of the real ones (5 today), each with two short uc values. The flight dims (campaignFlight,
+ * flightDay, arrival) read the registry through one flight_reg CTE stated once per statement (lib/campaigns.ts), so a worst-case
+ * geo ring carries 81 binds at any count and grows about 0.21 KB per added campaign. The worst legal ring is 8 dims with 16
+ * flightDay filters (70.5 KB at 5 campaigns, 81.1 KB at the default 55). The byte cap is what campaigns hit, never the bind cap.
+ * Measured by bisecting BIND_EXTRA: the room test first goes red at BIND_EXTRA=68 (73 campaigns in all), and the byte and
+ * no-refusal tests first go red at BIND_EXTRA=93 (98 in all: 92 extra is 89,961 B and fits, 93 is 90,173 B and is refused).
+ * Lighter filters hold more (16 campaignFlight filters about 170 campaigns), but the guard is judged on the worst ring.
+ * The per-campaign cost grows with the uc count and name length: a realistic campaign (4 ucs, ~38-char names) costs about
+ * 0.63 KB, 3x the fakes here, so the worst ring reaches the cap at about 36 of them in all. Keep that in mind before reading
+ * "55 campaigns" as comfortable. MIN_ROOM_CAMPAIGNS below is the warning margin. */
 const EXTRA = Number(process.env.BIND_EXTRA ?? 50)
-/** The fewest extra campaigns the worst-case ring must still have room for (the extrapolated headroom test below). */
-const MIN_ROOM_CAMPAIGNS = 100
+/** The fewest extra campaigns the worst-case ring must still have room for (the extrapolated headroom test below). The
+ * worst ring has room for about 42 more at the default EXTRA=50, so a floor of 25 goes red while real room remains (about 8
+ * realistic campaigns at 3x cost): early enough to act on, with slack for a filter or two added later. */
+const MIN_ROOM_CAMPAIGNS = 25
 const SITES50 = ['bestsudoku-web', ...Array.from({ length: 49 }, (_, i) => `s${i}`)]
 const SUB_DAY = { since: '2026-10-01T15:00:00.000Z', until: '2026-10-01T16:00:00.000Z' }
 const ALIGNED = { since: '2026-10-01', until: '2026-10-01' }
@@ -31,6 +38,8 @@ interface Worst {
   /** Largest SQL text (UTF-8 bytes) seen for this category, against statementTooLarge's MAX_SQL_BYTES. A 400 from the guard
    * contributes the byte count its own message reports, never 0. */
   bytes: number
+  /** The shape that produced `bytes` (the byte-worst request), which is not always the bind-worst `shape`. */
+  bytesShape: string
   /** First worst-case request the guard refused with a 400 (before D1 saw it), as shape + message; '' when none. */
   refused: string
 }
@@ -99,14 +108,18 @@ async function run(handler: (ctx: any) => Response | Promise<Response>, body: Re
 }
 
 const track = (w: Worst, binds: number, shape: string, sql = '', r?: { bytes: number; refused: string }) => {
-  w.bytes = Math.max(w.bytes, r ? r.bytes : new TextEncoder().encode(sql).length)
+  const bytes = r ? r.bytes : new TextEncoder().encode(sql).length
+  if (bytes > w.bytes) {
+    w.bytes = bytes
+    w.bytesShape = shape
+  }
   if (r?.refused && !w.refused) w.refused = `${shape}: ${r.refused}`
   if (binds > w.max) {
     w.max = binds
     w.shape = shape
   }
 }
-const worst = (): Worst => ({ max: -1, shape: '', bytes: 0, refused: '' })
+const worst = (): Worst => ({ max: -1, shape: '', bytes: 0, bytesShape: '', refused: '' })
 const countQ = (sql: string) => (sql.match(/\?/g) ?? []).length
 
 async function measure(extra: number): Promise<Measured> {
@@ -118,9 +131,21 @@ async function measure(extra: number): Promise<Measured> {
   const constraintSets: [string, { field: string; value: string }[]][] = [
     ['16 region filters', Array.from({ length: 16 }, (_, i) => ({ field: 'region', value: `r${i}` }))],
     ['16 campaignFlight filters', Array.from({ length: 16 }, (_, i) => ({ field: 'campaignFlight', value: `flight-${i}` }))],
+    // flightDay and arrival clauses each carry their own registry lookup, so these are the heavy ones: 16 flightDay is the worst
+    // legal ring (the byte maximum), and the mixed set is the largest realistic drill (6 + 5 + 5 = 16 constraints).
+    ['16 flightDay filters', Array.from({ length: 16 }, (_, i) => ({ field: 'flightDay', value: `2026-10-${String(1 + i).padStart(2, '0')}` }))],
+    ['16 arrival filters', Array.from({ length: 16 }, (_, i) => ({ field: 'arrival', value: `arrival-${i}` }))],
+    [
+      'mixed 16 (6 campaignFlight, 5 flightDay, 5 arrival)',
+      [
+        ...Array.from({ length: 6 }, (_, i) => ({ field: 'campaignFlight', value: `flight-${i}` })),
+        ...Array.from({ length: 5 }, (_, i) => ({ field: 'flightDay', value: `2026-10-${String(1 + i).padStart(2, '0')}` })),
+        ...Array.from({ length: 5 }, (_, i) => ({ field: 'arrival', value: `arrival-${i}` })),
+      ],
+    ],
   ]
   // Dims whose clause adds binds, plus a filler; the rest of GEO_DIMS add none (the single-dim sweep below covers them).
-  const BIND_DIMS = ['referrer', 'gameMode', 'gameDifficulty', 'campaignFlight', 'flightDay', 'popupFamily', 'popupOutcome']
+  const BIND_DIMS = ['referrer', 'gameMode', 'gameDifficulty', 'campaignFlight', 'flightDay', 'arrival', 'popupFamily', 'popupOutcome']
   const common = { sites: SITES50, excludeKnownTraffic: true, ...OWN }
 
   for (const win of [SUB_DAY, ALIGNED]) {
@@ -176,7 +201,7 @@ async function measure(extra: number): Promise<Measured> {
     completions,
     facts,
     perFact,
-    sites: { max: 1, shape: '/api/sites: one window bind (no registry input)', bytes: 0, refused: '' },
+    sites: { max: 1, shape: '/api/sites: one window bind (no registry input)', bytes: 0, bytesShape: '', refused: '' },
   }
 }
 
@@ -198,7 +223,10 @@ describe('D1 bind headroom (worst-case statements, by execution)', () => {
     grown = await measure(EXTRA)
     for (const [label, m] of [['today', base], ['+' + EXTRA + ' fake campaigns', grown]] as [string, Measured][]) {
       console.log(`BINDS ${label}: ${m.campaigns} campaigns, ${m.ucValues} uc values`)
-      for (const [name, w] of rows(m)) console.log(`BINDS   ${name.padEnd(14)} ${String(w.max).padStart(3)}  ${String(w.bytes).padStart(6)} B  ${w.shape}`)
+      for (const [name, w] of rows(m)) {
+        console.log(`BINDS   ${name.padEnd(14)} ${String(w.max).padStart(3)} binds  ${w.shape}`)
+        console.log(`BINDS   ${''.padEnd(14)} ${String(w.bytes).padStart(6)} B      ${w.bytesShape}`)
+      }
       console.log('BINDS   per fact: ' + Object.entries(m.perFact).map(([k, v]) => `${k}=${v}`).join(' '))
     }
   }, 120_000)
@@ -218,7 +246,7 @@ describe('D1 bind headroom (worst-case statements, by execution)', () => {
     expect(flat(grown)).toEqual(flat(base))
   })
   it('every worst-case statement stays under the MAX_SQL_BYTES cap of statementTooLarge', () => {
-    for (const m of [base, grown]) for (const [name, w] of rows(m)) expect(w.bytes, `${name}: ${w.shape}`).toBeLessThan(MAX_SQL_BYTES)
+    for (const m of [base, grown]) for (const [name, w] of rows(m)) expect(w.bytes, `${name}: ${w.bytesShape}`).toBeLessThan(MAX_SQL_BYTES)
   })
   it('registering campaigns costs the worst geo ring little: room for at least MIN_ROOM_CAMPAIGNS more under MAX_SQL_BYTES', () => {
     const perCampaign = (grown.geo.ring.bytes - base.geo.ring.bytes) / EXTRA
