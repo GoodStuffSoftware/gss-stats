@@ -77,5 +77,5 @@ export function useMetricItemViewModel(
   )
   onScopeDispose(() => requestScope?.stop())
 
-  return computed(() => itemViewModel(toValue(item), valueRef.value, toValue(scope), { todayEt, values: toValue(values) }))
+  return computed(() => itemViewModel(toValue(item), valueRef.value, toValue(scope), { todayEt, values: toValue(values), pastDay: toValue(context)?.day !== undefined }))
 }
