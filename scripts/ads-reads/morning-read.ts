@@ -49,7 +49,7 @@ async function main() {
     healthMinParent: minParent,
     healthParentAgeHours: ageHours,
   })
-  process.stdout.write(opts['json-only'] ? JSON.stringify(result, null, 2) + '\n' : withJson(formatMorningReport(result), result))
+  process.stdout.write(opts['json-only'] ? jsonOnly(result) : withJson(formatMorningReport(result), result))
 }
 
 main().catch(fail)

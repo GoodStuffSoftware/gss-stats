@@ -114,25 +114,33 @@ export interface CloudEnvDeps {
   bws: BwsRunner
   ps: PowerShellRunner
   log: (line: string) => void
-  /** Resolves when it is time to clear: after CLEAR_AFTER_MS, or at once on Ctrl+C. */
+  /** Arms the clear: resolves after CLEAR_AFTER_MS, or at once on Ctrl+C, a closed console or a
+   * kill. Called BEFORE the copy, so the handler is in place when the block lands. */
   waitForClear: () => Promise<'timer' | 'interrupt'>
 }
 
 export async function runCloudEnv(d: CloudEnvDeps): Promise<void> {
   if (d.platform !== 'win32') throw new Error('ads:cloud-env copies to the Windows clipboard; run it on Windows')
   if (!d.env.BWS_ACCESS_TOKEN) throw new Error('BWS_ACCESS_TOKEN is not set')
+  registerSecret(d.env.BWS_ACCESS_TOKEN)
   const prodId = await prodProjectId(d.bws)
   const secrets = await prodSecrets(d.bws, prodId)
   let built: { block: string; names: string[] } | null = buildEnvBlock(secrets)
   secrets.clear()
   const hash = sha256Hex(built.block)
-  await copyToClipboard(d.ps, built.block)
+  const clearSignal = d.waitForClear()
+  try {
+    await copyToClipboard(d.ps, built.block)
+  } catch (e) {
+    await clearIfUnchanged(d.ps, hash)
+    throw e
+  }
   const names = built.names
   built = null
   for (const n of names) d.log(n)
   d.log(`copied ${names.length} vars; paste into claude.ai/code > environment gss-ads-reads > Edit environment > Environment variables`)
   d.log(`clipboard clears in ${CLEAR_AFTER_MS / 1000} s (Ctrl+C clears now)`)
-  const why = await d.waitForClear()
+  const why = await clearSignal
   const r = await clearIfUnchanged(d.ps, hash)
   d.log(
     r === 'cleared'
@@ -160,10 +168,12 @@ async function main() {
     waitForClear: () =>
       new Promise((resolve) => {
         const t = setTimeout(() => resolve('timer'), CLEAR_AFTER_MS)
-        process.once('SIGINT', () => {
+        const stop = () => {
           clearTimeout(t)
           resolve('interrupt')
-        })
+        }
+        // Ctrl+C, a closed console window (SIGHUP on Windows) and a kill all clear at once.
+        for (const sig of ['SIGINT', 'SIGHUP', 'SIGTERM', 'SIGBREAK'] as const) process.once(sig, stop)
       }),
   })
 }

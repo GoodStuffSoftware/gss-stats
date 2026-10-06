@@ -4,7 +4,7 @@
 // touches is ever printed. Errors carry the redacted first stderr line, never stdout.
 
 import { execFile } from 'node:child_process'
-import { redactedFirstLine } from '../../src/lib/adsRedact'
+import { redactedFirstLine, registerSecret } from '../../src/lib/adsRedact'
 import { EXTERNAL_TIMEOUT_MS, TIMED_OUT_TEXT } from './wrangler'
 import type { BwsRunner } from './secrets'
 
@@ -14,6 +14,7 @@ export const PROD_PROJECT_NAME = 'prod'
 export const cloudEnvKey = (envVar: string) => `infra--cloud-routine-env--${envVar}`
 
 export function runBwsBinary(args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+  registerSecret(process.env.BWS_ACCESS_TOKEN)
   const bin = process.env.BWS_BIN || 'bws'
   return new Promise((resolve) => {
     execFile(bin, args, { maxBuffer: 32 * 1024 * 1024, windowsHide: true, env: process.env, timeout: EXTERNAL_TIMEOUT_MS }, (err, stdout, stderr) => {
@@ -48,7 +49,7 @@ export async function prodProjectId(bws: BwsRunner): Promise<string> {
 /** The prod project's secrets as key -> value, in memory. Keys that appear twice are refused
  * (ambiguous), since a wrong pick would hand the routine a stale credential. */
 export async function prodSecrets(bws: BwsRunner, projectId: string): Promise<Map<string, string>> {
-  const res = await bws(['secret', 'list', projectId, '--output', 'json', '--color', 'no'])
+  const res = await bws(['secret', 'list', '--output', 'json', '--color', 'no', '--', projectId])
   if (res.code !== 0) throw new Error(`bws secret list failed (exit ${res.code}): ${redactedFirstLine(res.stderr)}`)
   const out = new Map<string, string>()
   const dup = new Set<string>()
@@ -65,6 +66,7 @@ export async function prodSecrets(bws: BwsRunner, projectId: string): Promise<Ma
 /** Creates KEY=VALUE in the prod project. The value goes to bws as an execFile argument from
  * this process (never a shell, stdout or a log); bws prints nothing (--output none). */
 export async function createProdSecret(bws: BwsRunner, key: string, value: string, projectId: string): Promise<void> {
-  const res = await bws(['secret', 'create', key, value, projectId, '--output', 'none', '--color', 'no'])
+  // `--` ends the options, so a value that starts with '-' is never read as a flag.
+  const res = await bws(['secret', 'create', '--output', 'none', '--color', 'no', '--', key, value, projectId])
   if (res.code !== 0) throw new Error(`bws secret create ${key} failed (exit ${res.code}): ${redactedFirstLine(res.stderr)}`)
 }

@@ -2,13 +2,14 @@
 // CLI output. No network: every remote is a fake fetch.
 
 import fs from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createVerify, generateKeyPairSync } from 'node:crypto'
 import { afterEach, describe, expect, it } from 'vitest'
 import { clearRegisteredSecrets, redact } from '../../src/lib/adsRedact'
 import { createAdsClient, type FetchLike } from '../../src/lib/adsApi'
-import { ADS_SA_ENV, adsCredentialSource, loadAdsAuth } from './secrets'
+import { ADS_SA_ENV, adsCredentialSource, loadAdsAuth, loadAdsCredentials } from './secrets'
 import { ADWORDS_SCOPE, GOOGLE_TOKEN_URL, signedAssertion } from './googleSa'
 import { errorClass, runCloudCheck, type CloudCheckProbes } from './cloud-check'
 import { fixtureDeps, type Fixture } from './cli'
@@ -46,6 +47,14 @@ describe('Ads service account (ADS_SA_B64)', () => {
     expect(adsCredentialSource({ [ADS_SA_ENV]: SA_B64, BWS_ACCESS_TOKEN: 'x' })).toBe('bws')
   })
 
+  it('registers BWS_ACCESS_TOKEN with redact when the bws path is taken', async () => {
+    const token = '0.1234abcd-0000-1111-2222-333344445555.ShortPart:OtherPartXYZ'
+    expect(adsCredentialSource({ BWS_ACCESS_TOKEN: token })).toBe('bws')
+    expect(redact(`x ${token} y`)).not.toContain(token)
+    clearRegisteredSecrets()
+    await loadAdsCredentials({ env: { BWS_ACCESS_TOKEN: token }, runBws: async () => ({ code: 1, stdout: '', stderr: `failed ${token}` }) }).catch((e: Error) => expect(e.message).not.toContain(token))
+    expect(redact(token)).not.toContain(token)
+  })
   it('signs an RS256 JWT for the adwords scope that the public key verifies', () => {
     const jwt = signedAssertion(SA, ADWORDS_SCOPE, 1_000)
     const [h, p, s] = jwt.split('.')
@@ -131,6 +140,17 @@ describe('plain-ASCII CLI output', () => {
     expect(asciiFold('a — b · c → d ≥ e ’s … café 中')).toBe("a - b | c -> d >= e 's ... cafe ?")
     expect(asciiResult({ 'k—': ['x — y', 1, null, { t: '≤' }] })).toEqual({ 'k-': ['x - y', 1, null, { t: '<=' }] })
   })
+  it('--json-only prints ASCII too (the real CLI, on the fixture)', () => {
+    const tsx = path.join(here, '..', '..', 'node_modules', 'tsx', 'dist', 'cli.mjs')
+    const fx = path.join(here, 'fixtures', 'threshold-50.json')
+    const env = { ...process.env, BWS_ACCESS_TOKEN: '', ADS_SA_B64: '' }
+    const m = execFileSync(process.execPath, [tsx, path.join(here, 'morning-read.ts'), '--fixture', fx, '--campaign', '24279250691', '--json-only'], { encoding: 'utf8', env, windowsHide: true })
+    const p = execFileSync(process.execPath, [tsx, path.join(here, 'postflight-read.ts'), '--fixture', fx, '--campaign', '24279250691', '--stage', 'wrapup', '--now', '2026-10-09T13:00:00Z', '--json-only'], { encoding: 'utf8', env, windowsHide: true })
+    for (const out of [m, p]) {
+      expect(out.match(NON_ASCII)).toBeNull()
+      expect(() => JSON.parse(out)).not.toThrow()
+    }
+  }, 60_000)
   it('morning-read and every post-flight stage print ASCII only, and the JSON still parses', async () => {
     const fx: Fixture = JSON.parse(fs.readFileSync(path.join(here, 'fixtures', 'threshold-50.json'), 'utf8'))
     const m = await runMorningRead(fixtureDeps(fx, true), { campaignId: '24279250691', releaseHealth: 'auto', healthOnly: false, healthMinParent: 5, healthParentAgeHours: 24 })

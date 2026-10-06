@@ -123,7 +123,10 @@ function runBws(args: string[]): Promise<{ code: number; stdout: string; stderr:
 /** Which source loadAdsAuth() will use for this env (no I/O): bws, the service account
  * (env-sa), the refresh-token env set (env), or none. */
 export function adsCredentialSource(env: Env = process.env): 'bws' | 'env-sa' | 'env' | null {
-  if (env.BWS_ACCESS_TOKEN) return 'bws'
+  if (env.BWS_ACCESS_TOKEN) {
+    registerSecret(env.BWS_ACCESS_TOKEN)
+    return 'bws'
+  }
   if (env[ADS_SA_ENV]?.trim()) return 'env-sa'
   return adsCredentialsFromEnv(env).creds ? 'env' : null
 }
@@ -155,6 +158,7 @@ export async function loadAdsCredentials(opts: { env?: Env; runBws?: BwsRunner }
     for (const v of Object.values(creds)) registerSecret(v)
     return creds
   }
+  registerSecret(env.BWS_ACCESS_TOKEN)
   const res = await (opts.runBws ?? runBws)(['secret', 'list', '--output', 'json', '--color', 'no'])
   if (res.code !== 0) throw new Error(`bws secret list failed (exit ${res.code}): ${redactedFirstLine(res.stderr)}`)
   let parsed: unknown

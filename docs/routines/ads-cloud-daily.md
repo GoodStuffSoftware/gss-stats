@@ -93,7 +93,8 @@ Call the printed date DATE and the printed mode MODE. MODE applies to Part B onl
 - ARMS = the `live` legs-table rows whose read window contains DATE (zero, one or more).
 - STAGE = the Part B stage for DATE, or none. Exception: if a routine-fire payload is present
   and its whole text is exactly `stage=wrapup`, `stage=day15`, `stage=day30`, `stage=day60` or
-  `stage=december`, STAGE is that value (a manual rerun).
+  `stage=december`, STAGE is that value (a manual rerun), and ARMS is empty: a `stage=` fire
+  runs Part B only, with no Part A read, daily push or bus copy.
 - TEST mode: if a routine-fire payload is present and its whole text is exactly `test`, this is
   an end-to-end test run (see "TEST mode" below): ARMS = every `live` legs-table row (read
   window ignored), STAGE = wrapup.
@@ -237,10 +238,13 @@ A build or publish failure is one Step 3 line (`report page not published: <shor
 it never pushes and never blocks anything else. Never create a new page: a missing link is
 `artifact: n/a`.
 
-## Known gaps
+## Known gaps and accepted risks
 
 - Play bulk reports read "not read" in the cloud: a Play reporting service account would need
   Mike to add it in Play Console first.
+- Accepted risk: `npm ci` runs dependency install scripts with the credentials in the
+  environment, and the setup script installs `n` unpinned. The lockfile, the narrow network
+  allowlist and the scoped keys bound the damage.
 
 ## Part B: post-flight read (campaign 24279250691)
 

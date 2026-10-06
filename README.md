@@ -1004,9 +1004,11 @@ at print time, so a routine can relay the text exactly and still send ASCII.
 Three argument-free scripts mint the cloud routine's keys straight into Bitwarden (project
 `prod`), for an agent to run locally with `BWS_ACCESS_TOKEN` set. Each one refuses if its key
 already exists, hands the value to `bws secret create` from inside Node, and prints only
-`stored <KEY> (prod)` plus non-secret names (a service-account email, a project id, a token
-name and id). A service-account key file is written to a fresh temp folder, read into memory
-and deleted in a `finally` block.
+`stored <KEY> (prod)` plus non-secret names (a service-account email, a project id, a key id,
+a token name and id). Service-account keys are created through the IAM REST API, so no key
+file ever touches disk; if the Bitwarden store fails, the new key is deleted again. A reused
+service account that holds any role beyond the expected one is refused. bws has no stdin form,
+so a value is briefly on the `bws` command line (visible to the same user's processes).
 
 | Script | Mints | Bitwarden key |
 |---|---|---|
@@ -1025,7 +1027,8 @@ It reads Bitwarden in-process, builds the `.env` block (`ADS_SA_B64`, `ADS_DEVEL
 `WRANGLER_SEND_METRICS=false`, `ADS_ROUTINE_MODE=SHADOW`; never `BWS_ACCESS_TOKEN`) and copies
 it to the Windows clipboard through PowerShell's standard input, marked to stay out of clipboard
 history and cloud sync. It prints the variable names only, then clears the clipboard after 60 s
-if it still holds the block (Ctrl+C clears it at once). Paste it into claude.ai/code, environment
+if it still holds the block (Ctrl+C or closing the window clears it at once). A third-party
+clipboard manager may ignore the history exclusion. Paste it into claude.ai/code, environment
 `gss-ads-reads`, **Edit environment**, **Environment variables**. The routine itself is
 [`docs/routines/ads-cloud-daily.md`](docs/routines/ads-cloud-daily.md).
 
