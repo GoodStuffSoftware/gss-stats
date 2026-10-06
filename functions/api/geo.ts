@@ -391,7 +391,11 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // refused path to the SQL guard (which sees the text up to the NUL) while the JS pattern match
   // above finds none, so fail closed.
   const nulPathValue = constraints.some((c) => (c.field === 'path' || c.field === 'pathFamily') && c.value.includes('\u0000'))
-  const liveSafe = !refusedReachable && !nulPathValue
+  // The pathFamily drill's CASE is NUL-blind, so with event rows counted (opt-in, or an
+  // exclusion-lifting dim) a forged `/return<NUL>x` row can land in a page family while
+  // reachableRefusedPatterns finds nothing to flag: fail closed there. Counts are unchanged.
+  const nulBlindFamilyDrill = (includeEventBeacons || eventDimActive) && constraints.some((c) => c.field === 'pathFamily')
+  const liveSafe = !refusedReachable && !nulPathValue && !nulBlindFamilyDrill
   const splitGuardClause = (w: string[], b: any[]) => {
     if (splitGuardActive) refusedPathExcludeClause(w, b)
   }
