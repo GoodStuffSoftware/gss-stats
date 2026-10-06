@@ -19,7 +19,7 @@ import { loadCfToken } from './cli'
 import { createD1Select, BEACON_DB } from './d1'
 import { wranglerAdsDb } from './d1Store'
 import { FIRESTORE_SA_ENV, probeFirestoreCount, serviceAccountFromEnv } from './firebase'
-import { adsCredentialSource, ENV_KEYS, loadAdsCredentials } from './secrets'
+import { ADS_SA_ENV, adsCredentialSource, ENV_KEYS, loadAdsAuth, SA_ENV_NAMES } from './secrets'
 import { createWranglerRunner, EXTERNAL_TIMEOUT_MS } from './wrangler'
 
 type Env = Record<string, string | undefined>
@@ -62,11 +62,21 @@ interface CheckSpec {
 
 function specs(env: Env, probes: CloudCheckProbes): CheckSpec[] {
   const adsNames = Object.values(ENV_KEYS)
-  const viaBws = adsCredentialSource(env) === 'bws'
+  const source = adsCredentialSource(env)
+  // With BWS_ACCESS_TOKEN set the CLI takes the bws path (the local default), so the ADS_*
+  // names are reported but not required. Otherwise either credential set passes:
+  // ADS_SA_B64 + ADS_DEVELOPER_TOKEN (the service account, which wins when ADS_SA_B64 is set),
+  // or the four refresh-token names. With neither, every name is listed so the gap is plain.
+  const ads =
+    source === 'bws'
+      ? { names: [...adsNames, 'BWS_ACCESS_TOKEN'], required: ['BWS_ACCESS_TOKEN'] }
+      : source === 'env-sa'
+        ? { names: [...SA_ENV_NAMES], required: [...SA_ENV_NAMES] }
+        : source === 'env'
+          ? { names: adsNames, required: adsNames }
+          : { names: [ADS_SA_ENV, ...adsNames], required: adsNames }
   return [
-    // With BWS_ACCESS_TOKEN set the CLI takes the bws path (the local default), so the ADS_*
-    // names are reported but not required.
-    { label: 'ads', names: viaBws ? [...adsNames, 'BWS_ACCESS_TOKEN'] : adsNames, required: viaBws ? ['BWS_ACCESS_TOKEN'] : adsNames, probe: probes.ads },
+    { label: 'ads', names: ads.names, required: ads.required, probe: probes.ads },
     { label: 'firestore', names: [FIRESTORE_SA_ENV], required: [FIRESTORE_SA_ENV], probe: probes.firestore },
     { label: 'd1-ads', names: CF_ENV, required: CF_ENV, probe: probes.d1Ads },
     { label: 'd1-beacon', names: CF_ENV, required: CF_ENV, probe: probes.d1Beacon },
@@ -104,7 +114,7 @@ export function liveProbes(): CloudCheckProbes {
   const run = createWranglerRunner({ cfToken: loadCfToken(undefined) })
   return {
     async ads() {
-      const client = await createAdsClient(await loadAdsCredentials(), { timeoutMs: EXTERNAL_TIMEOUT_MS })
+      const client = await createAdsClient(await loadAdsAuth(), { timeoutMs: EXTERNAL_TIMEOUT_MS })
       await client.search('SELECT customer.id FROM customer LIMIT 1')
     },
     async firestore() {

@@ -2,9 +2,11 @@
 // the JSON block, passed on a command line, or written to disk. Two sources, in this order:
 //  1. Bitwarden Secrets Manager (`bws secret list`) when BWS_ACCESS_TOKEN is set — the local
 //     default, unchanged.
-//  2. Otherwise plain env vars ADS_CLIENT_ID / ADS_CLIENT_SECRET / ADS_REFRESH_TOKEN /
-//     ADS_DEVELOPER_TOKEN (the gss-stats-sync Worker's binding names, workers/sync/wrangler.toml),
-//     for the claude.ai cloud routine, which has no bws. All four must be set.
+//  2. Otherwise plain env vars, for the claude.ai cloud routine, which has no bws. Either
+//     ADS_SA_B64 (a read-only service account's JSON key, base64 on one line, signed in with an
+//     RS256 JWT for the adwords scope) plus ADS_DEVELOPER_TOKEN, or all four of ADS_CLIENT_ID /
+//     ADS_CLIENT_SECRET / ADS_REFRESH_TOKEN / ADS_DEVELOPER_TOKEN (the gss-stats-sync Worker's
+//     binding names, workers/sync/wrangler.toml). ADS_SA_B64 wins when it is set.
 // Either way every value is registered with redact(), and errors name variables, never values.
 //
 // `bws secret list` prints every secret the machine account can see, so its stdout is parsed
@@ -14,7 +16,8 @@
 import { execFile } from 'node:child_process'
 import { registerSecret, redactedFirstLine } from '../../src/lib/adsRedact'
 import { EXTERNAL_TIMEOUT_MS, TIMED_OUT_TEXT } from './wrangler'
-import type { AdsCredentials } from '../../src/lib/adsApi'
+import type { AdsAuth, AdsCredentials, AdsTokenAuth } from '../../src/lib/adsApi'
+import { ADWORDS_SCOPE, serviceAccountAccessToken, type ServiceAccountKey } from './googleSa'
 
 export type { AdsCredentials }
 
@@ -46,7 +49,42 @@ export function adsCredentialsFromEnv(env: Env): { creds: AdsCredentials | null;
 
 /** The error when neither source is usable: variable NAMES only. */
 export function missingAdsCredentialsMessage(missingEnv: readonly string[]): string {
-  return `no Google Ads credentials: set BWS_ACCESS_TOKEN (Bitwarden Secrets Manager), or set all of ${Object.values(ENV_KEYS).join(', ')} (missing: ${missingEnv.join(', ')})`
+  return `no Google Ads credentials: set BWS_ACCESS_TOKEN (Bitwarden Secrets Manager), or ${ADS_SA_ENV} and ${ENV_KEYS.developerToken}, or all of ${Object.values(ENV_KEYS).join(', ')} (missing: ${missingEnv.join(', ')})`
+}
+
+/** The service-account alternative to the refresh-token env set. */
+export const ADS_SA_ENV = 'ADS_SA_B64'
+/** The env NAMES the service-account path needs, in report order. */
+export const SA_ENV_NAMES = [ADS_SA_ENV, ENV_KEYS.developerToken] as const
+
+/** Decodes ADS_SA_B64 in memory and registers the encoded value, the decoded JSON and its
+ * private_key with redact() BEFORE anything else touches them. Errors name the variable only. */
+export function adsServiceAccountFromEnv(env: Env): ServiceAccountKey {
+  const b64 = env[ADS_SA_ENV]?.trim()
+  if (!b64) throw new Error(`${ADS_SA_ENV} is not set`)
+  registerSecret(b64)
+  const json = Buffer.from(b64, 'base64').toString('utf8')
+  registerSecret(json)
+  let sa: any
+  try {
+    sa = JSON.parse(json)
+  } catch {
+    throw new Error(`${ADS_SA_ENV} service account unreadable`)
+  }
+  if (typeof sa?.private_key === 'string') registerSecret(sa.private_key)
+  if (typeof sa?.private_key !== 'string' || typeof sa?.client_email !== 'string' || !sa.private_key || !sa.client_email) {
+    throw new Error(`${ADS_SA_ENV} service account unreadable (missing client_email/private_key)`)
+  }
+  return { client_email: sa.client_email, private_key: sa.private_key }
+}
+
+/** The service-account sign-in for the Ads client. Pure apart from registering secrets. */
+export function adsServiceAccountAuth(env: Env): AdsTokenAuth {
+  const developerToken = env[ENV_KEYS.developerToken]?.trim()
+  if (!developerToken) throw new Error(missingAdsCredentialsMessage([ENV_KEYS.developerToken]))
+  registerSecret(developerToken)
+  const sa = adsServiceAccountFromEnv(env)
+  return { developerToken, accessToken: (fetchImpl) => serviceAccountAccessToken(sa, ADWORDS_SCOPE, fetchImpl) }
 }
 
 /** Picks the four Ads keys out of a parsed `bws secret list` array. Pure, for tests. */
@@ -82,13 +120,29 @@ function runBws(args: string[]): Promise<{ code: number; stdout: string; stderr:
   })
 }
 
-/** Which source loadAdsCredentials() will use for this env (no I/O). */
-export function adsCredentialSource(env: Env = process.env): 'bws' | 'env' | null {
+/** Which source loadAdsAuth() will use for this env (no I/O): bws, the service account
+ * (env-sa), the refresh-token env set (env), or none. */
+export function adsCredentialSource(env: Env = process.env): 'bws' | 'env-sa' | 'env' | null {
   if (env.BWS_ACCESS_TOKEN) return 'bws'
+  if (env[ADS_SA_ENV]?.trim()) return 'env-sa'
   return adsCredentialsFromEnv(env).creds ? 'env' : null
 }
 
-/** `opts` is for tests only: the env to read and a stand-in for the bws binary. */
+/** What the reads use: bws (local default), else ADS_SA_B64 + ADS_DEVELOPER_TOKEN, else the
+ * refresh-token env set. Every value is registered with redact() before any use. */
+export async function loadAdsAuth(opts: { env?: Env; runBws?: BwsRunner } = {}): Promise<AdsAuth> {
+  const env = opts.env ?? process.env
+  if (!env.BWS_ACCESS_TOKEN && env[ADS_SA_ENV]?.trim()) {
+    if (env.GOOGLE_ADS_LOGIN_CUSTOMER_ID) {
+      process.stderr.write('note: GOOGLE_ADS_LOGIN_CUSTOMER_ID is set in the environment and is ignored (no login-customer-id header is ever sent)\n')
+    }
+    return adsServiceAccountAuth(env)
+  }
+  return loadAdsCredentials(opts)
+}
+
+/** The refresh-token credentials only (bws or the ADS_* env set); worker-secrets uses this.
+ * `opts` is for tests only: the env to read and a stand-in for the bws binary. */
 export async function loadAdsCredentials(opts: { env?: Env; runBws?: BwsRunner } = {}): Promise<AdsCredentials> {
   const env = opts.env ?? process.env
   if (env.GOOGLE_ADS_LOGIN_CUSTOMER_ID) {
