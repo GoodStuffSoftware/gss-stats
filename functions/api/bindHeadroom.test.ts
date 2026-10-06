@@ -14,19 +14,24 @@ import { MAX_SQL_BYTES } from '../../src/lib/queryLimits'
 const HEADROOM_CEILING = 90
 /** Fake campaigns registered on top of the real ones (5 today), each with two short uc values. The flight dims (campaignFlight,
  * flightDay, arrival) read the registry through one flight_reg CTE stated once per statement (lib/campaigns.ts), so a worst-case
- * geo ring carries 81 binds at any count and grows about 0.21 KB per added campaign. The worst legal ring is 8 dims with 16
- * flightDay filters (70.5 KB at 5 campaigns, 81.1 KB at the default 55). The byte cap is what campaigns hit, never the bind cap.
- * Measured by bisecting BIND_EXTRA: the room test first goes red at BIND_EXTRA=68 (73 campaigns in all), and the byte and
- * no-refusal tests first go red at BIND_EXTRA=93 (98 in all: 92 extra is 89,961 B and fits, 93 is 90,173 B and is refused).
- * Lighter filters hold more (16 campaignFlight filters about 170 campaigns), but the guard is judged on the worst ring.
- * The per-campaign cost grows with the uc count and name length: a realistic campaign (4 ucs, ~38-char names) costs about
- * 0.63 KB, 3x the fakes here, so the worst ring reaches the cap at about 36 of them in all. Keep that in mind before reading
- * "55 campaigns" as comfortable. MIN_ROOM_CAMPAIGNS below is the warning margin. */
-const EXTRA = Number(process.env.BIND_EXTRA ?? 50)
-/** The fewest extra campaigns the worst-case ring must still have room for (the extrapolated headroom test below). The
- * worst ring has room for about 42 more at the default EXTRA=50, so a floor of 25 goes red while real room remains (about 8
- * realistic campaigns at 3x cost): early enough to act on, with slack for a filter or two added later. */
-const MIN_ROOM_CAMPAIGNS = 25
+ * geo ring carries 81 binds at any count and grows about 0.21 KB per added campaign. The byte cap is what campaigns hit, never
+ * the bind cap. The byte-heaviest ring the sweep finds is the RING_DIMS_HARD_CAP (8) costliest dims, measured one by one
+ * (popupFamily, popupOutcome, keyEvent, flightDay, pathFamily, arrival, hourEt, campaignFlight; API-only, the UI stops at 5
+ * dims) with 16 pathFamily filters: 80.9 KB at 5 campaigns. It holds about 43 more two-uc campaigns (48 in all). With
+ * realistic ones (4 ucs, ~38-char names, about 0.63 KB each) it holds about 14 more (about 19 in all). Typical rings hold far
+ * more: a 5-dim UI ring (referrer, gameMode, gameDifficulty, campaignFlight, flightDay, with 16 flightDay filters) is 30.7 KB
+ * at 5 campaigns and holds about 280 more.
+ * Measured by bisecting BIND_EXTRA (two-uc fakes, MIN_ROOM_CAMPAIGNS = 5): the room test first goes red at BIND_EXTRA=39
+ * (44 campaigns in all), and the byte and no-refusal tests first go red at BIND_EXTRA=44 (49 in all: 43 extra is 89,924 B and
+ * fits, 44 is 90,136 B and is refused). The default EXTRA = 10 plus MIN_ROOM_CAMPAIGNS = 5 puts the tripwire at 15 two-uc
+ * campaigns (about 5 realistic ones) of room left on today's registry: the room test reads red when the registry plus EXTRA
+ * fakes leaves under 5 of room, i.e. when the real ring has under 15. Keep that in mind before reading "48 campaigns" as comfortable. */
+const EXTRA = Number(process.env.BIND_EXTRA ?? 10)
+/** The fewest further campaigns the worst-case ring must still hold after the EXTRA fakes (the extrapolated headroom test
+ * below). At the default EXTRA=10 the ring has room for about 33 more, so a floor of 5 goes red once today's registry leaves
+ * under about 15 two-uc campaigns of room (about 5 realistic ones at 3x cost): early enough to act on, with slack for a
+ * filter or two added later. */
+const MIN_ROOM_CAMPAIGNS = 5
 const SITES50 = ['bestsudoku-web', ...Array.from({ length: 49 }, (_, i) => `s${i}`)]
 const SUB_DAY = { since: '2026-10-01T15:00:00.000Z', until: '2026-10-01T16:00:00.000Z' }
 const ALIGNED = { since: '2026-10-01', until: '2026-10-01' }
@@ -53,7 +58,18 @@ interface Measured {
   /** Each fact's own worst bind count. */
   perFact: Record<string, number>
   sites: Worst
+  /** Each ring-eligible dim's own byte cost (see measure()), costliest first. */
+  dimCosts: { dim: string; bytes: number; filters: string }[]
+  /** The byte-heaviest legal ring found by principle (the RING_DIMS_HARD_CAP costliest dims), and the explicit API-only ring
+   * a reviewer found; each with its worst bytes over every filter set and window variant, and the shape that produced them. */
+  heavy: { dims: string[]; bytes: number; shape: string }
+  reviewer: { dims: string[]; bytes: number; shape: string }
 }
+
+/** The byte-heavy 8-dim ring a reviewer found by hand (API-only: the UI stops at 5 dims), kept as an explicit case. */
+const REVIEWER_RING = ['popupFamily', 'popupOutcome', 'keyEvent', 'flightDay', 'pathFamily', 'hourEt', 'arrival', 'campaignFlight']
+/** geo.ts's RING_DIMS_HARD_CAP (a local const there): the most dims one ring request may carry. */
+const RING_DIMS_HARD_CAP = 8
 
 /** Loads every server module against a fresh registry holding the real campaigns plus `extra` fake ones. */
 async function load(extra: number) {
@@ -122,7 +138,7 @@ const track = (w: Worst, binds: number, shape: string, sql = '', r?: { bytes: nu
 const worst = (): Worst => ({ max: -1, shape: '', bytes: 0, bytesShape: '', refused: '' })
 const countQ = (sql: string) => (sql.match(/\?/g) ?? []).length
 
-async function measure(extra: number): Promise<Measured> {
+async function measure(extra: number, ringDims?: string[]): Promise<Measured> {
   const m = await load(extra)
   const { CAMPAIGNS } = m.campaigns
   const geoRes = { points: worst(), breakdown: worst(), ring: worst() }
@@ -141,6 +157,19 @@ async function measure(extra: number): Promise<Measured> {
         ...Array.from({ length: 6 }, (_, i) => ({ field: 'campaignFlight', value: `flight-${i}` })),
         ...Array.from({ length: 5 }, (_, i) => ({ field: 'flightDay', value: `2026-10-${String(1 + i).padStart(2, '0')}` })),
         ...Array.from({ length: 5 }, (_, i) => ({ field: 'arrival', value: `arrival-${i}` })),
+      ],
+    ],
+  ]
+  // The heaviest filter sets only the principled sweep below runs (the mask sweep keeps the sets above): 16 derived-expression
+  // filters on pathFamily cost more per filter than flightDay on some rings, and 8 + 8 mixes them.
+  const heavySets: [string, { field: string; value: string }[]][] = [
+    ...constraintSets,
+    ['16 pathFamily filters', Array.from({ length: 16 }, (_, i) => ({ field: 'pathFamily', value: `family-${i}` }))],
+    [
+      '8 flightDay + 8 pathFamily filters',
+      [
+        ...Array.from({ length: 8 }, (_, i) => ({ field: 'flightDay', value: `2026-10-${String(1 + i).padStart(2, '0')}` })),
+        ...Array.from({ length: 8 }, (_, i) => ({ field: 'pathFamily', value: `family-${i}` })),
       ],
     ],
   ]
@@ -163,6 +192,43 @@ async function measure(extra: number): Promise<Measured> {
       }
     }
   }
+
+  // The byte-heaviest legal ring, found on principle rather than by hand. Step 1: every ring-eligible dim's own byte cost, as the
+  // extra bytes of the 2-dim ring [dim, partner] over the cheapest ring [region, country], worst over every heavy filter set and
+  // the four window / eventBeacons variants. Step 2: the RING_DIMS_HARD_CAP costliest dims form one ring, swept over the same
+  // variants. The reviewer's ring runs as its own case. Costs are not strictly additive (popupFamily and popupOutcome share a
+  // prefilter), so the explicit ring is the cross-check: the guard also asserts the principled ring is at least as heavy.
+  const variants: [string, Record<string, unknown>][] = []
+  for (const win of [SUB_DAY, ALIGNED]) for (const includeEventBeacons of [true, false]) variants.push([`${win === SUB_DAY ? 'sub-day' : 'aligned'}, eventBeacons=${includeEventBeacons}`, { ...common, ...win, includeEventBeacons }])
+  const ringBytes = async (dims: string[], v: Record<string, unknown>, constraints: unknown[]) => run(m.geo.onRequestPost, { ...v, constraints, dimension: dims[0], dims })
+  let dimCosts: Measured['dimCosts'] = []
+  if (!ringDims) {
+    const eligible = [...m.geo.GEO_DIMS].filter((d) => !m.geo.RING_EXCLUDED_DIMS.has(d))
+    const floor = new Map<string, number>()
+    for (const [vname, v] of variants) for (const [cname, cs] of heavySets) floor.set(`${vname}|${cname}`, (await ringBytes(['region', 'country'], v, cs)).bytes)
+    for (const d of eligible) {
+      let best = { bytes: -1, filters: '' }
+      for (const [vname, v] of variants) for (const [cname, cs] of heavySets) {
+        const r = await ringBytes([d, d === 'country' ? 'region' : 'country'], v, cs)
+        const cost = r.bytes - floor.get(`${vname}|${cname}`)!
+        if (cost > best.bytes) best = { bytes: cost, filters: `${cname}, ${vname}` }
+      }
+      dimCosts.push({ dim: d, ...best })
+    }
+    dimCosts.sort((a, b) => b.bytes - a.bytes || a.dim.localeCompare(b.dim))
+    ringDims = dimCosts.slice(0, RING_DIMS_HARD_CAP).map((c) => c.dim)
+  }
+  const ringCase = async (dims: string[], label: string) => {
+    const out = { dims, bytes: 0, shape: '' }
+    for (const [vname, v] of variants) for (const [cname, cs] of heavySets) {
+      const r = await ringBytes(dims, v, cs)
+      track(geoRes.ring, r.binds, `${label} [${dims.join(', ')}], ${vname}, ${cname}`, r.sql, r)
+      if (r.bytes > out.bytes) out.bytes = r.bytes, out.shape = `${cname}, ${vname}`
+    }
+    return out
+  }
+  const heavy = await ringCase(ringDims, 'heaviest ring')
+  const reviewer = await ringCase(REVIEWER_RING, 'reviewer ring')
 
   const popups = worst()
   for (const win of [SUB_DAY, ALIGNED]) for (const d of ['kind', 'reason', 'date', 'outcome', 'installOutcome']) {
@@ -202,6 +268,9 @@ async function measure(extra: number): Promise<Measured> {
     facts,
     perFact,
     sites: { max: 1, shape: '/api/sites: one window bind (no registry input)', bytes: 0, bytesShape: '', refused: '' },
+    dimCosts,
+    heavy,
+    reviewer,
   }
 }
 
@@ -220,13 +289,16 @@ describe('D1 bind headroom (worst-case statements, by execution)', () => {
   let grown: Measured
   beforeAll(async () => {
     base = await measure(0)
-    grown = await measure(EXTRA)
+    grown = await measure(EXTRA, base.heavy.dims)
     for (const [label, m] of [['today', base], ['+' + EXTRA + ' fake campaigns', grown]] as [string, Measured][]) {
       console.log(`BINDS ${label}: ${m.campaigns} campaigns, ${m.ucValues} uc values`)
       for (const [name, w] of rows(m)) {
         console.log(`BINDS   ${name.padEnd(14)} ${String(w.max).padStart(3)} binds  ${w.shape}`)
         console.log(`BINDS   ${''.padEnd(14)} ${String(w.bytes).padStart(6)} B      ${w.bytesShape}`)
       }
+      console.log(`BINDS   heaviest ring [${m.heavy.dims.join(', ')}] ${m.heavy.bytes} B (${m.heavy.shape})`)
+      console.log(`BINDS   reviewer ring ${m.reviewer.bytes} B (${m.reviewer.shape})`)
+      if (m.dimCosts.length) console.log('BINDS   dim costs (B over [region, country]): ' + m.dimCosts.map((c) => `${c.dim}=${c.bytes}`).join(' '))
       console.log('BINDS   per fact: ' + Object.entries(m.perFact).map(([k, v]) => `${k}=${v}`).join(' '))
     }
   }, 120_000)
@@ -247,6 +319,13 @@ describe('D1 bind headroom (worst-case statements, by execution)', () => {
   })
   it('every worst-case statement stays under the MAX_SQL_BYTES cap of statementTooLarge', () => {
     for (const m of [base, grown]) for (const [name, w] of rows(m)) expect(w.bytes, `${name}: ${w.bytesShape}`).toBeLessThan(MAX_SQL_BYTES)
+  })
+  it('the swept heaviest ring is a full ring and at least as heavy as the reviewer ring (the sweep really finds the byte worst)', () => {
+    for (const m of [base, grown]) {
+      expect(m.heavy.dims.length, 'heaviest ring dims').toBe(RING_DIMS_HARD_CAP)
+      expect(m.heavy.bytes, `heaviest ring vs reviewer ring: ${m.heavy.shape} / ${m.reviewer.shape}`).toBeGreaterThanOrEqual(m.reviewer.bytes)
+      expect(m.geo.ring.bytes, 'geo ring worst includes both').toBeGreaterThanOrEqual(m.heavy.bytes)
+    }
   })
   it('registering campaigns costs the worst geo ring little: room for at least MIN_ROOM_CAMPAIGNS more under MAX_SQL_BYTES', () => {
     const perCampaign = (grown.geo.ring.bytes - base.geo.ring.bytes) / EXTRA
