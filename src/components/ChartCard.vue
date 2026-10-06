@@ -158,6 +158,9 @@ function suppressTooltipForDrill() {
   baseChartRef.value?.suppressForDrill()
 }
 
+// Chart types whose point index is a dimension × breakdown PAIR index (see lib/charts.ts pairRows).
+const PAIR_DRILL_TYPES: readonly Widget['type'][] = ['bar', 'hbar', 'doughnut', 'pie']
+
 function onPoint(p: { index: number; datasetIndex: number; x: number; y: number }) {
   const dim = props.widget.dimension
   if (!dim) return
@@ -167,9 +170,10 @@ function onPoint(p: { index: number; datasetIndex: number; x: number; y: number 
   // which one this arc belongs to (and its value) instead of reading widget.dimension.
   // A bar/hbar/pie/doughnut that draws dimension × breakdown pairs (lib/charts.ts pairRows) has one
   // mark per pair: it drills on the pair's primary dimension value (a drill carries one value, so
-  // the breakdown value is not part of it). Other breakdown chart types (e.g. stackedBar) aren't
-  // wired for this yet, so leave them be.
-  const pairs = props.widget.breakdown && props.widget.type !== 'nestedDoughnut' && data.value ? pairRows(props.widget, data.value) : null
+  // the breakdown value is not part of it). Only those four types plot pairs: stackedBar,
+  // breakdownBar, line and area index the AXIS (deduped dimension values), not the pairs, so a
+  // pair lookup would drill on the wrong value — they fall through to the breakdown guard below.
+  const pairs = props.widget.breakdown && PAIR_DRILL_TYPES.includes(props.widget.type) && data.value ? pairRows(props.widget, data.value) : null
   if (pairs) {
     const value = pairs[p.index]?.a
     if (value == null || value === '') return

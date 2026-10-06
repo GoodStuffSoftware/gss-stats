@@ -86,6 +86,13 @@ describe('ChartCard: clicking a pair slice or bar drills on its primary dimensio
     fetchStatsMock.mockResolvedValue(geoResp())
     expect((await click(geo('pie'), 1))?.[0][0]).toMatchObject({ dimension: 'os', value: 'Windows' })
   })
+  // These types index the AXIS (deduped dimension values: Windows, iOS), not the pairs, so a pair
+  // lookup would drill on the wrong value. They behave as on origin/main: no drill with a breakdown.
+  it.each(['stackedBar', 'breakdownBar', 'line', 'area'] as const)('%s: a breakdown click emits no drill (axis index, not pair index)', async (type) => {
+    fetchStatsMock.mockResolvedValue(geoResp())
+    expect(await click(geo(type), 1)).toBeUndefined()
+    expect(await click(geo(type), 0)).toBeUndefined()
+  })
   it('a pair whose dimension is not drillable emits nothing (the tooltip stays)', async () => {
     fetchStatsMock.mockResolvedValue(resp())
     expect(await click(widget({ type: 'pie' }), 0)).toBeUndefined()
