@@ -236,6 +236,9 @@ export interface CardSpec {
   /** "Updated Xs ago" (the card's latest successful load) with a reload control: top-right in
    * the card's header (`true` or 'header', where the old KPI panel had it) or in a footer. */
   showUpdated?: boolean | 'header' | 'footer'
+  /** A day selector in the card's status row (previous / next arrows and a date): the card's
+   * today-so-far figures are read for the chosen ET day (MetricsContext.day). View state only. */
+  dayPicker?: boolean
 }
 
 /** What a Widget stores. A preset is a code-reviewed CardSpec in lib/metrics/presets.ts.
@@ -250,6 +253,9 @@ export type CardRef = { preset: string } | { spec: CardSpec; from?: string }
 
 /** Page filters a fact may honour (FactDef.honors). Validated by lib/metrics/validate.ts. */
 export interface MetricsContext {
+  /** An ET calendar day (YYYY-MM-DD, today or earlier) a today-so-far card is read for: that day
+   * whole, compared with the whole days before it. Absent (or today): today so far, live. */
+  day?: string
   since?: string
   until?: string
   sites?: string[]

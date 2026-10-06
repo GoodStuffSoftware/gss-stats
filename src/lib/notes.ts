@@ -567,6 +567,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     // the same way lib/popupEvents.ts INSTALL_FIX_NOTE does for the install fix.
     'auth-new-existing-note': AUTH_NEW_EXISTING_COUNTED_FROM_NOTE,
     'new-today': 'new today',
+    'new-that-day': 'new that day',
     'no-comparison-yet': 'no comparison yet (first day partial)',
     'metric-unavailable': 'unavailable',
     'not-started': 'not started',

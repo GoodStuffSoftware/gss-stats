@@ -41,6 +41,8 @@ import type { RefreshResult } from '../../lib/adsRefresh'
 import MetricCardInstance from './MetricCardInstance.vue'
 import MetricCardStatus from './MetricCardStatus.vue'
 import MetricLabel from './MetricLabel.vue'
+import MetricDayPicker from './MetricDayPicker.vue'
+import { effectiveDay } from '../../lib/glanceDay'
 import AdsRefreshButton from '../AdsRefreshButton.vue'
 import NoteBlock from '../NoteBlock.vue'
 
@@ -61,7 +63,7 @@ const props = defineProps<{
    * data-cut note (`hideable: false`) or an unknown id still shows, whatever the list says. */
   hiddenCaptions?: string[]
 }>()
-const emit = defineEmits<{ 'open-campaigns': []; reload: [] }>()
+const emit = defineEmits<{ 'open-campaigns': []; reload: []; 'day-change': [day: string | null] }>()
 
 const spec = computed<CardSpec | null>(() => ('preset' in props.cardRef ? (presetById(props.cardRef.preset) ?? null) : props.cardRef.spec))
 
@@ -70,14 +72,29 @@ const spec = computed<CardSpec | null>(() => ('preset' in props.cardRef ? (prese
 // that slept past midnight is moved on return, before the return refetch).
 const clock = useEtClock()
 const nowMs = computed(() => props.nowMs ?? clock.value)
-const todayEt = computed(() => todayEtFrom(nowMs.value))
+const realTodayEt = computed(() => todayEtFrom(nowMs.value))
+
+// ── The shown day (CardSpec.dayPicker) ──────────────────────────────────────────────────────
+// A card with the day selector reads a chosen ET day instead of today: `todayEt` below is then
+// that day (it anchors the "today so far" windows, the client cache epoch and the body key), and
+// the context sent to the server carries `day`. View state only: a reload starts on today, and
+// nothing is stored. `null` = today, live. A choice of today (or of a day the clock has since
+// made today, or one past the server's floor) falls back through effectiveDay.
+const chosenDay = ref<string | null>(null)
+const viewDay = computed(() => (spec.value?.dayPicker ? effectiveDay(chosenDay.value, realTodayEt.value) : null))
+const todayEt = computed(() => viewDay.value ?? realTodayEt.value)
+/** The page context plus the shown day, when it is a past one (today sends no `day`). */
+const viewContext = computed<MetricsContext | undefined>(() => (viewDay.value ? { ...props.context, day: viewDay.value } : props.context))
+watch(viewDay, (d) => emit('day-change', d))
+const pickerInHeader = computed(() => !!spec.value?.dayPicker && !spec.value.repeat)
+const pickerAboveGrid = computed(() => !!spec.value?.dayPicker && !!spec.value.repeat)
 
 // `{=metric:<id>@<window>}` in any of the card's labels (title, section headings, item label,
 // caption, hint, a repeat's empty message): the values come from the same batched POST the card's
 // own items use, and are handed down as one resolver. Lazy: a card with no metric token creates no
 // request here. The resolver is a prop of its own, never part of `ctx`, so a value arriving does
 // not rebuild the repeat instances.
-const labelTokens = useMetricTokens(() => cardLabelTexts(spec.value), () => props.context)
+const labelTokens = useMetricTokens(() => cardLabelTexts(spec.value), () => viewContext.value)
 const labelValues = computed(() => noteValueResolver(labelTokens.values.value))
 
 // ── The ads readings load (ADR 0005 slice 3) ────────────────────────────────────────────────
@@ -182,7 +199,7 @@ function buildCardRequests() {
   dayScope?.stop()
   dayScope = effectScope(true)
   cardMetrics.value = dayScope.run(() => {
-    const m = useMetrics(() => props.context, () => todayEt.value)
+    const m = useMetrics(() => viewContext.value, () => todayEt.value)
     for (const r of cardRequestSpecs()) m.request(r)
     return m
   })!
@@ -218,6 +235,8 @@ const updatedText = computed(() => {
   // The latest load among the card's items and its label tokens (a card whose only values are label tokens still has a stamp).
   const at = Math.max(cardMetrics.value?.lastUpdated.value ?? -Infinity, labelTokens.lastUpdated.value ?? -Infinity)
   if (!Number.isFinite(at)) return ''
+  // A past day is closed data: "Updated Ns ago" would only suggest it is still moving.
+  if (viewDay.value) return ''
   // Freshness is wall-clock time (the nowMs seam only pins the ET day).
   const s = Math.max(0, Math.round((Math.max(clock.value, at) - at) / 1000))
   if (s < 5) return noteRawText('label.card.updatedJustNow')
@@ -276,23 +295,25 @@ const allHidden = computed(() => instances.value.length > 0 && instances.value.e
     <div v-if="adsRefresh" class="mc-actions">
       <AdsRefreshButton :campaign-ids="actionCampaignIds" @refreshed="onAdsRefreshed" />
     </div>
-    <div v-if="statusAboveGrid" class="mc-status-row">
-      <MetricCardStatus :has-error="hasError" :updated-text="updatedText" @reload="onStatusReload" />
+    <div v-if="statusAboveGrid || pickerAboveGrid" class="mc-status-row">
+      <MetricDayPicker v-if="pickerAboveGrid" :day="viewDay" :today-et="realTodayEt" @update:day="(d) => (chosenDay = d)" />
+      <MetricCardStatus v-if="statusAboveGrid" :has-error="hasError" :updated-text="updatedText" @reload="onStatusReload" />
     </div>
 
     <!-- Keyed on the ET day: a new day remounts the body, so every repeat and request rebuilds. -->
     <!-- The first readings load is out: "Loading…" in place of the grid (kept mounted, so its metric requests start now). -->
     <p v-if="readingsPending && spec.repeat" class="metric-card-empty">{{ loadingText }}</p>
     <div v-if="spec.repeat" v-show="!readingsPending" :key="todayEt" class="metric-card-grid" :style="{ '--mc-min-width': `${spec.minWidth ?? 230}px` }">
-      <MetricCardInstance v-for="(scope, i) in instances" v-show="!hiddenInstances.has(i)" :key="i" :spec="spec" :scope="scope" :ctx="ctx" :context="context" :values="labelValues" :boxed="true" @open="emit('open-campaigns')" @hidden="(h: boolean) => onHidden(i, h)" />
+      <MetricCardInstance v-for="(scope, i) in instances" v-show="!hiddenInstances.has(i)" :key="i" :spec="spec" :scope="scope" :ctx="ctx" :context="viewContext" :values="labelValues" :boxed="true" @open="emit('open-campaigns')" @hidden="(h: boolean) => onHidden(i, h)" />
       <p v-if="((!instances.length && !readingsPending && !readingsLoadFailed) || allHidden) && spec.repeat.empty" class="metric-card-empty">
         <MetricLabel :tokens="resolveLabelTokens(spec.repeat.empty.label, ROOT_SCOPE, undefined, todayEt, labelValues)" />
         <MetricLabel :tokens="resolveLabelTokens(spec.repeat.empty.text, ROOT_SCOPE, undefined, todayEt, labelValues)" />
       </p>
     </div>
-    <MetricCardInstance v-else :key="todayEt" class="metric-card-plain" :spec="spec" :scope="ROOT_SCOPE" :ctx="ctx" :context="context" :values="labelValues" :boxed="false" :fallback-title="fallbackTitle" @open="emit('open-campaigns')">
-      <template v-if="statusInInstanceHeader" #status>
-        <MetricCardStatus :has-error="hasError" :updated-text="updatedText" @reload="onStatusReload" />
+    <MetricCardInstance v-else :key="todayEt" class="metric-card-plain" :spec="spec" :scope="ROOT_SCOPE" :ctx="ctx" :context="viewContext" :values="labelValues" :boxed="false" :fallback-title="fallbackTitle" @open="emit('open-campaigns')">
+      <template v-if="statusInInstanceHeader || pickerInHeader" #status>
+        <MetricDayPicker v-if="pickerInHeader" :day="viewDay" :today-et="realTodayEt" @update:day="(d) => (chosenDay = d)" />
+        <MetricCardStatus v-if="statusInInstanceHeader" :has-error="hasError" :updated-text="updatedText" @reload="onStatusReload" />
       </template>
     </MetricCardInstance>
 

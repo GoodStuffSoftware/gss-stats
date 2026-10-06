@@ -7,6 +7,7 @@ import { checkSessionExpired, isAuthError, isNetworkError } from '../session'
 import { buildChartConfig, formatKey, metricValue, nestedDoughnutClickValue, pairRows, rendersOwnBody, seriesRows, hasLineSeries, widgetHasOverlay, widgetOverlayOptions } from '../lib/charts'
 import { overlayItems, itemsInRange } from '../lib/timelineOverlay'
 import { isDateDim } from '../lib/rings'
+import { dayTitle } from '../lib/glanceDay'
 import { filterOverrideSummary } from '../lib/filterSummary'
 import { isSiteDim, semanticKey } from '../lib/drill'
 import { isMobileViewport } from '../lib/responsive'
@@ -55,6 +56,9 @@ const metricsContext = computed(() => {
   return metricsContextFor({ since: f.since, until: f.until }, resolveSelection(props.widget.siteSel ?? f.siteSel).tags, f)
 })
 const metricCard = ref<{ reload(): void } | null>(null)
+// The day a day-picker card (the KPI tiles) is showing, reported by MetricCard: null = today. The title names a past day.
+const shownDay = ref<string | null>(null)
+const displayTitle = computed(() => (cardRef.value ? dayTitle(props.widget.title, shownDay.value) : props.widget.title))
 /** A card that shows its own "Updated … ↻" (CardSpec.showUpdated) has its reload there; the
  * header's ↻ would be a second control for the same action, so it is hidden for that card. */
 const cardHasOwnReload = computed(() => cardShowsOwnReload(cardRef.value))
@@ -569,7 +573,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
     <header class="card-head" :class="{ 'note-head': isNoteWidget }">
       <div class="title-wrap" v-if="!isNoteWidget">
         <span v-if="widget.isDefault" class="pin" title="A default chart on this page — kept when you restore defaults">★</span>
-        <span class="title" :title="widget.title">{{ widget.title }}</span>
+        <span class="title" :title="displayTitle">{{ displayTitle }}</span>
         <span v-if="overrideSummary" class="ovr" :title="'Filter override: ' + overrideSummary"
           >· {{ overrideSummary }}</span
         >
@@ -649,7 +653,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
     <div class="card-body" :class="{ 'is-card': isCard }" @dblclick="onCardBodyDblClick">
       <!-- Bespoke bodies: overview / campaigns / ads-readings datasets, and the note type —
            own data fetch (or none), skip the generic loading/error/empty states above. -->
-      <MetricCard v-if="cardRef" ref="metricCard" :card-ref="cardRef" :context="metricsContext" :campaign-ids="widget.campaignIds" :hidden-captions="widget.hiddenCaveats" :fallback-title="widget.title" @open-campaigns="emit('open-campaigns')" @reload="metricTokens.reload()" />
+      <MetricCard v-if="cardRef" ref="metricCard" :card-ref="cardRef" :context="metricsContext" :campaign-ids="widget.campaignIds" :hidden-captions="widget.hiddenCaveats" :fallback-title="displayTitle" @day-change="(d: string | null) => (shownDay = d)" @open-campaigns="emit('open-campaigns')" @reload="metricTokens.reload()" />
       <p v-else-if="isRateTile" class="state mono">{{ rateUnknownText }}</p>
       <p v-else-if="widget.dataset === 'overview' || widget.dataset === 'campaigns'" class="state mono">{{ retiredPanelText }}</p>
       <NoteWidgetBody v-else-if="widget.type === 'note'" :widget="widget" :values="noteValues" />
