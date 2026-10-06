@@ -14,7 +14,7 @@ const REFUSED = ['/return/sudoku_tired_of_ads/d0', '/game/complete/normal/easy',
 function guarded(q: { sql: string; binds: unknown[] }) {
   // The exclusion names each pattern as a literal (lib/splitGuard.ts refusedPathMatch); none is
   // a bind.
-  expect(q.sql).toContain(`NOT (${SPLIT_REFUSED_PATH_PATTERNS.map((p) => `path LIKE '${p}'`).join(' OR ')})`)
+  expect(q.sql).toContain(`NOT (${SPLIT_REFUSED_PATH_PATTERNS.map((p) => `path LIKE '${p}'`).join(' OR ')} OR instr(path, char(0)) > 0)`)
   for (const p of SPLIT_REFUSED_PATH_PATTERNS) expect(q.binds).not.toContain(p)
 }
 // A local hits table (not functions/_lib/testing/hitsDb: that pulls Workers types into this
@@ -40,6 +40,8 @@ describe('routine beacon reads leave the split-refused rows out', () => {
       { ts, site: WEB_SITE, path: '/signin-prompt/placement', n: 3 },
       { ts, site: WEB_SITE, path: '/install/prompt/android', n: 2 },
       ...REFUSED.map((path) => ({ ts, site: WEB_SITE, path, n: 4 })),
+      // A NUL-bearing path is refused too (LIKE cannot see past the NUL, so the SQL tests instr).
+      { ts, site: WEB_SITE, path: '/signin-prompt/placement\u0000x', n: 6 },
     ])
     const q = siteEventsQuery(at('2026-09-30T00:00:00Z'))
     guarded(q)

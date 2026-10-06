@@ -47,7 +47,9 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
     // page) becomes a bare 503 so no upstream status, header or body detail reaches the client.
     if (res.status === 101 && res.webSocket) return res
     try {
-      await res.body?.cancel() // release the unused upstream body
+      // Release the unused upstream body, fire and forget: a cancel that never settles must not
+      // hang the handler, and a rejection must not surface.
+      res.body?.cancel().catch(() => {})
     } catch {
       // Nothing to release.
     }

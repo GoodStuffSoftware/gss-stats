@@ -683,7 +683,9 @@ and the UTC `date`, whose count minus `dateEt`'s for the same day would give an 
 `country`, `region`, `city`, `postal`, `continent`, `timezone`, `colo`, `org`; `device`,
 `browser`, `os`, `lang`, `screenw`, `screenwBucket`, `visitor`), or is drilled into one of them
 leaves `/return/…`, `/game/start/…`, `/game/complete/…`, `/game/complete-deferred/…`,
-`/game/tutorial-complete/…`, `/tour/skip` and `/tour/exit-at/…` rows out entirely, whatever
+`/game/tutorial-complete/…`, `/tour/skip` and `/tour/exit-at/…` rows out entirely, and any row whose
+path contains a NUL byte (SQLite LIKE stops reading at one, so the SQL guard tests `instr(path, char(0))`
+too, in step with the JS matcher `isSplitRefusedPath`), whatever
 "Include event beacons" says, marks the response `meta.splitGuard: true`, and the chart says so in a caption.
 The rows still count everywhere else: by path, by ET day or flight day, by campaign, and in the
 metric cards. For the Best Sudoku v1.97.0 first-run counters that means plain totals: a game
@@ -1328,9 +1330,8 @@ polling. It is push, not a timer: nothing is sent while nothing happens.
   this one by a literal in both repos' tests (`src/lib/splitGuard.beaconParity.test.ts`).
 - The ping carries nothing: no row, id, count, path, site or clock time, and it only ever lands on a
   15-minute boundary, so it adds no time resolution to any count.
-- The Durable Object's storage holds only its alarm. Each socket carries only its accept time (used
-  to evict the oldest at the cap), never any row data and never a count.
-- The Durable Object stores **only its alarm**. It keeps no row data and `notify()` takes no
+- The Durable Object stores **only its alarm**, and each socket carries only its accept time (used
+  to evict the oldest at the cap). It keeps no row data and no count, and `notify()` takes no
   arguments. No client ever sees a row id or a count through this path.
 - Fail closed: the server marks a response `liveSafe: true` only when it cannot count a refused row
   (a `/api/geo` answer whose request reaches no refused pattern; a `/api/metrics` value whose
