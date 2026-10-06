@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.30.3] — 2026-10-05
+
+### Fixed
+- **Registering more ad campaigns no longer breaks a chart.** The widest geo chart's database query grew about 3.9 KB per campaign and would have been refused at the eleventh; it now grows about 0.2 KB per campaign and holds roughly 176, with the same results.
+
 ## [0.30.2] — 2026-10-05
 
 ### Fixed

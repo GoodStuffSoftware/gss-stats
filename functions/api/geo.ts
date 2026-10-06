@@ -13,7 +13,7 @@
 // { dimension, breakdown } and get the same result via a fallback.
 
 import { popupExcludeClause, pathFamilySqlCase, popupDimSqlCase, popupDimPrefilter } from '../../src/lib/popupEvents'
-import { gameDimSqlCase, gameDimPrefilter, campaignFlightSqlCase, campaignFlightPrefilter, arrivalSqlCase, keyEventSqlCase, flightDaySqlCase, applyExclusions } from '../../src/lib/campaigns'
+import { gameDimSqlCase, gameDimPrefilter, campaignFlightSqlCase, campaignFlightPrefilter, arrivalSqlCase, keyEventSqlCase, flightDaySqlCase, withFlightRegistry, applyExclusions } from '../../src/lib/campaigns'
 import { excludeOwnClause as sharedExcludeOwnClause, selfReferralClause as sharedSelfReferralClause } from '../../src/lib/ownExclusion'
 import { etDateSql, etHourSql } from '../../src/lib/etTime'
 import { isDateDim } from '../../src/lib/rings'
@@ -116,7 +116,7 @@ export function ringBlankExclusion(dim: string): string {
 // (a bare GROUP BY vs. one wrapped in a subquery) aren't guaranteed to break ties the same way,
 // even reading the identical data. The caller (onRequestPost below) always supplies a full order.
 export function buildMergedBreakdownSql(col: string, whereSql: string, orderBy: string): string {
-  return `SELECT k, c, SUM(c) OVER () AS total FROM (SELECT ${col} AS k, COUNT(*) AS c FROM hits WHERE ${whereSql} GROUP BY k) ORDER BY ${orderBy} LIMIT ?`
+  return withFlightRegistry(`SELECT k, c, SUM(c) OVER () AS total FROM (SELECT ${col} AS k, COUNT(*) AS c FROM hits WHERE ${whereSql} GROUP BY k) ORDER BY ${orderBy} LIMIT ?`)
 }
 
 // `cols` (e.g. `["region AS k0", "device AS k1"]`) aliases the real columns to k0..kN for the
@@ -126,7 +126,7 @@ export function buildMergedBreakdownSql(col: string, whereSql: string, orderBy: 
 // `c DESC` — without it, which rows LIMIT keeps among an exact-count tie is unspecified, and
 // can differ from one query PLAN to another even for the same data (see buildMergedBreakdownSql).
 export function buildMergedRingSql(cols: string[], whereSql: string, groupBy: string): string {
-  return `SELECT ${groupBy}, c, SUM(c) OVER () AS total FROM (SELECT ${cols.join(', ')}, COUNT(*) AS c FROM hits WHERE ${whereSql} GROUP BY ${groupBy}) ORDER BY c DESC, ${groupBy} LIMIT ?`
+  return withFlightRegistry(`SELECT ${groupBy}, c, SUM(c) OVER () AS total FROM (SELECT ${cols.join(', ')}, COUNT(*) AS c FROM hits WHERE ${whereSql} GROUP BY ${groupBy}) ORDER BY c DESC, ${groupBy} LIMIT ?`)
 }
 
 // Every analytic column on `hits`, plus the derived (non-column) dimensions below — this Set
@@ -445,7 +445,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     drillClause(w, b)
     excludeOwnClause(w, b)
     selfReferralClause([], w, b) // points mode has no group-by dim, so this is always inert
-    const sql = `SELECT lat, lon, city, region, country, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY lat, lon ORDER BY c DESC LIMIT ?`
+    const sql = withFlightRegistry(`SELECT lat, lon, city, region, country, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY lat, lon ORDER BY c DESC LIMIT ?`)
     b.push(Math.min(limit, 2000))
     const tooLarge = statementTooLarge(sql, b.length)
     if (tooLarge) return tooLarge

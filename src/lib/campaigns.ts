@@ -417,16 +417,47 @@ function inlineBinds(sql: string, binds: unknown[]): string {
   if (i !== binds.length) throw new Error('bind count mismatch')
   return out
 }
+/** The campaign registry as a SQL table, stated ONCE per statement (the `flight_reg` CTE that
+ * withFlightRegistry puts in front of a statement). campaignFlightSqlCase and flightDaySqlCase read
+ * it with a correlated lookup instead of inlining one WHEN branch per campaign, so a chart that
+ * evaluates a flight expression many times (a ring, 16 drill filters) no longer repeats the
+ * registry for every use: a registered campaign adds one table row (about 0.2 KB) to a statement
+ * instead of a branch to every use (about 3.9 KB on the worst ring), and no bind. One row per
+ * (campaign, uc value); fr_ord is the registry order, so the FIRST campaign whose attribution matches
+ * wins, exactly as the old WHEN chain did. A campaign with no confirmed flightStart attributes
+ * nothing (campaignAttributionClause's `1 = 0`), so it has no rows. */
+export const FLIGHT_REGISTRY_TABLE = 'flight_reg'
+export function flightRegistryCte(): string {
+  const rows: string[] = []
+  CAMPAIGNS.forEach((c, i) => {
+    const attrStart = campaignAttributionStartMs(c)
+    if (attrStart === null || !c.flightStart) return
+    const [from, to] = etFlightRangeMs(c.flightStart, c.flightEnd)
+    for (const uc of c.ucValues) rows.push(`(${i},${sqlLit(c.id)},${sqlLit(uc)},${sqlInt(attrStart)},${sqlLit(c.flightStart)},${sqlInt(from)},${sqlInt(to)})`)
+  })
+  // VALUES needs a row: a registry with nothing attributable gets one that matches no hit (NULL = x is never true).
+  if (!rows.length) rows.push('(0,NULL,NULL,0,NULL,0,0)')
+  return `${FLIGHT_REGISTRY_TABLE}(fr_ord,fr_id,fr_uc,fr_att,fr_day0,fr_from,fr_to) AS (VALUES ${rows.join(',')})`
+}
+/** `sql` with the flight registry CTE in front when the statement reads it, else unchanged (so a
+ * statement without a flight expression keeps its exact text). Every statement that embeds
+ * campaignFlightSqlCase / flightDaySqlCase / arrivalSqlCase must pass through this. */
+export function withFlightRegistry(sql: string): string {
+  return sql.includes(FLIGHT_REGISTRY_TABLE) ? `WITH ${flightRegistryCte()} ${sql}` : sql
+}
+/** The registry lookup shared by both flight expressions: the first registered campaign (by
+ * registry order) whose uc equals the row's `campaign` and whose attribution start the row's `ts` has
+ * reached (campaignAttributionClause's rule, with no upper bound). `cols` is what to read from it. */
+function flightLookupSql(cols: string): string {
+  return `SELECT ${cols} FROM ${FLIGHT_REGISTRY_TABLE} WHERE fr_uc = campaign AND ts >= fr_att ORDER BY fr_ord LIMIT 1`
+}
 export function campaignFlightSqlCase(emptyLabel: string): string {
   const ew: string[] = []
   const eb: unknown[] = []
   applyExclusions(ew, eb)
   const excluded = `NOT (${inlineBinds(ew.join(' AND '), eb)})`
-  const whens = CAMPAIGNS.map((c) => {
-    const attr = campaignAttributionClause(c)
-    return `WHEN ${inlineBinds(attr.sql, attr.binds)} THEN ${sqlLit(c.id)}`
-  })
-  return `CASE WHEN ${excluded} THEN ${sqlLit(emptyLabel)} ${whens.join(' ')} ELSE ${sqlLit(emptyLabel)} END`
+  const E = sqlLit(emptyLabel)
+  return `CASE WHEN ${excluded} THEN ${E} ELSE COALESCE((${flightLookupSql('fr_id')}), ${E}) END`
 }
 /** SQL CASE for the geo 'flightDay' dimension: the day of the row's campaign flight ('1' for its
  * first ET day), attributed exactly as campaignFlightSqlCase (the same EXCLUSIONS, the same
@@ -439,15 +470,8 @@ export function flightDaySqlCase(emptyLabel: string): string {
   applyExclusions(ew, eb)
   const excluded = `NOT (${inlineBinds(ew.join(' AND '), eb)})`
   const E = sqlLit(emptyLabel)
-  const etDate = etDateSql()
-  const whens = CAMPAIGNS.map((c) => {
-    const attr = campaignAttributionClause(c)
-    if (!c.flightStart) return `WHEN ${inlineBinds(attr.sql, attr.binds)} THEN ${E}`
-    const [startMs, endMs] = etFlightRangeMs(c.flightStart, c.flightEnd)
-    const day = `CAST(CAST(julianday(${etDate}) - julianday(${sqlLit(c.flightStart)}) AS INTEGER) + 1 AS TEXT)`
-    return `WHEN ${inlineBinds(attr.sql, attr.binds)} THEN CASE WHEN ts >= ${sqlInt(startMs)} AND ts < ${sqlInt(endMs)} THEN ${day} ELSE ${E} END`
-  })
-  return `CASE WHEN ${excluded} THEN ${E} ${whens.join(' ')} ELSE ${E} END`
+  const day = `CASE WHEN ts >= fr_from AND ts < fr_to THEN CAST(CAST(julianday(${etDateSql()}) - julianday(fr_day0) AS INTEGER) + 1 AS TEXT) ELSE ${E} END`
+  return `CASE WHEN ${excluded} THEN ${E} ELSE COALESCE((${flightLookupSql(day)}), ${E}) END`
 }
 
 // ── Derived dimensions arrival / keyEvent (functions/api/geo.ts) — what the Overview timeline's
