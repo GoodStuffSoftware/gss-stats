@@ -153,7 +153,37 @@ describe('D1 from CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID only', () => {
       else process.env.CLOUDFLARE_ACCOUNT_ID = prev
       fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
     }
-  })
+  }, 30_000)
+
+  it('the wrangler child does not inherit the Ads, Firestore or Bitwarden secrets, but keeps CLOUDFLARE_* and PATH', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gss-wr-strip-'))
+    const bin = path.join(root, 'node_modules', 'wrangler', 'bin')
+    fs.mkdirSync(bin, { recursive: true })
+    // Reports the NAMES of the stripped keys that are present in its env (never values), plus keepers.
+    fs.writeFileSync(
+      path.join(bin, 'wrangler.js'),
+      [
+        "const stripped = ['ADS_CLIENT_ID','ADS_CLIENT_SECRET','ADS_REFRESH_TOKEN','ADS_DEVELOPER_TOKEN','ADS_SA_B64','FIRESTORE_SA_B64','BWS_ACCESS_TOKEN']",
+        "const leaked = stripped.filter((k) => k in process.env).join(',')",
+        "const kept = ['CLOUDFLARE_API_TOKEN','CLOUDFLARE_ACCOUNT_ID','PATH'].every((k) => !!process.env[k] || (k === 'PATH' && !!process.env.Path))",
+        'process.stdout.write(JSON.stringify([{ success: true, results: [{ leaked, kept }] }]))',
+        '',
+      ].join('\n'),
+    )
+    const keys = ['ADS_CLIENT_ID', 'ADS_CLIENT_SECRET', 'ADS_REFRESH_TOKEN', 'ADS_DEVELOPER_TOKEN', 'ADS_SA_B64', 'FIRESTORE_SA_B64', 'BWS_ACCESS_TOKEN', 'CLOUDFLARE_ACCOUNT_ID']
+    const prev = Object.fromEntries(keys.map((k) => [k, process.env[k]]))
+    for (const k of keys) process.env[k] = `strip-test-${k}`
+    try {
+      const run = createWranglerRunner({ root, cfToken: 'cf-env-token-value-555' })
+      expect(await createD1Select(run)('SELECT 1')).toEqual([{ leaked: '', kept: true }])
+    } finally {
+      for (const k of keys) {
+        if (prev[k] === undefined) delete process.env[k]
+        else process.env[k] = prev[k]
+      }
+      fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+    }
+  }, 30_000)
 })
 
 describe('ads:cloud-check output', () => {

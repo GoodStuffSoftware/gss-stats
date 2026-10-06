@@ -978,7 +978,7 @@ changes the local default: with `BWS_ACCESS_TOKEN` set, the Ads keys still come 
 | `FIRESTORE_SA_B64` | Firestore COUNT reads, when `--firebase-sa` is not given: the service-account JSON, base64-encoded on one line. It is decoded in memory and never written to disk. |
 | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | wrangler's D1 reads and writes (`gss-stats-ads` and the beacon's `gss-geo`), with no `--cf-token-file`. |
 
-Every value is registered for redaction as it loads. A missing-credential error names
+Every secret is registered for redaction as it loads (`CLOUDFLARE_ACCOUNT_ID` is an identifier, not a secret). A missing-credential error names
 variables, never values.
 
 ```powershell

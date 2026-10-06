@@ -12,6 +12,7 @@ import { ADS_SA_ENV, adsCredentialSource, loadAdsAuth } from './secrets'
 import { ADWORDS_SCOPE, GOOGLE_TOKEN_URL, signedAssertion } from './googleSa'
 import { errorClass, runCloudCheck, type CloudCheckProbes } from './cloud-check'
 import { fixtureDeps, type Fixture } from './cli'
+import { WRANGLER_WITHHELD_ENV } from './wrangler'
 import { runMorningRead, runPostflightRead } from './read'
 import { asciiFold, asciiResult, formatMorningReport, formatPostflightReport, jsonOnly, withJson } from './report'
 
@@ -93,6 +94,14 @@ describe('Ads service account (ADS_SA_B64)', () => {
     const f: FetchLike = async () => ({ ok: false, status: 400, text: async () => JSON.stringify({ error: 'invalid_grant', leaked: SA.client_email }) })
     const msg = await createAdsClient(await loadAdsAuth({ env: { [ADS_SA_ENV]: SA_B64, ADS_DEVELOPER_TOKEN: DEV } }), { fetchImpl: f }).then(() => '', (e: Error) => e.message)
     expect(msg).toBe('service-account token exchange failed, HTTP 400')
+  })
+})
+
+describe('wrangler child env', () => {
+  it('withholds ADS_SA_B64 (and the other read credentials) from wrangler', () => {
+    expect(WRANGLER_WITHHELD_ENV).toContain(ADS_SA_ENV)
+    expect(WRANGLER_WITHHELD_ENV).toContain('ADS_DEVELOPER_TOKEN')
+    expect(WRANGLER_WITHHELD_ENV).toContain('FIRESTORE_SA_B64')
   })
 })
 
