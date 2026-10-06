@@ -532,7 +532,14 @@ function moveRing(idx: number, dir: -1 | 1) {
 const isDateLine = computed(() => (draft.type === 'line' || draft.type === 'area') && isDateDim(draft.dimension))
 // A line over a non-date axis may break down into one line per value (lib/charts.ts); a date
 // axis draws its lines from `series` instead, so it offers no breakdown there.
-const breakdownAllowed = computed(() => !!typeDef.value?.allowsBreakdown && !isDateLine.value)
+// The one-mark-per-row types (bar, pie, table...) draw a breakdown as dimension × breakdown pairs
+// (lib/charts.ts pairRows), which has no meaning on a date axis, so none is offered there.
+const PAIR_TYPES: readonly string[] = ['bar', 'hbar', 'doughnut', 'pie', 'table']
+const breakdownAllowed = computed(
+  () => !!typeDef.value?.allowsBreakdown && !isDateLine.value && !(PAIR_TYPES.includes(draft.type) && isDateDim(draft.dimension)),
+)
+const dimLabel = (key?: string) => dimOptions.value.find((d) => d.key === key)?.label ?? key ?? ''
+const isPairBreakdown = computed(() => PAIR_TYPES.includes(draft.type) && !!draft.breakdown && breakdownAllowed.value)
 const isBreakdownLine = computed(() => (draft.type === 'line' || draft.type === 'area') && !isDateLine.value && !!draft.breakdown)
 const canUseSeries = computed(() => isDateLine.value && isGeo.value)
 const SERIES_FIELDS = GEO_DIMENSIONS.filter((d) => !isDateDim(d.key))
@@ -989,6 +996,10 @@ function save() {
           </select>
         </div>
       </div>
+
+      <p class="hint" v-if="isPairBreakdown" data-testid="pair-breakdown-hint">
+        Each "{{ dimLabel(draft.dimension) }} · {{ dimLabel(draft.breakdown) }}" pair gets its own {{ draft.type === 'table' ? 'row' : draft.type === 'bar' || draft.type === 'hbar' ? 'bar' : 'slice' }}.
+      </p>
 
       <!-- Line with a breakdown: also each line's running total, dashed on a right-hand axis -->
       <div class="field check" v-if="isBreakdownLine">

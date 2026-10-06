@@ -4,7 +4,7 @@ import type { Widget, GlobalFilters, StatsResponse } from '../types'
 import { fetchStats, fetchSeriesStats } from '../api'
 import { resolveSelection, sitesLoaded } from '../sitesStore'
 import { checkSessionExpired, isAuthError, isNetworkError } from '../session'
-import { buildChartConfig, formatKey, metricValue, nestedDoughnutClickValue, rendersOwnBody, seriesRows, hasLineSeries, widgetHasOverlay, widgetOverlayOptions } from '../lib/charts'
+import { buildChartConfig, formatKey, metricValue, nestedDoughnutClickValue, pairRows, rendersOwnBody, seriesRows, hasLineSeries, widgetHasOverlay, widgetOverlayOptions } from '../lib/charts'
 import { overlayItems, itemsInRange } from '../lib/timelineOverlay'
 import { isDateDim } from '../lib/rings'
 import { filterOverrideSummary } from '../lib/filterSummary'
@@ -498,14 +498,17 @@ const statOther = computed(() =>
 )
 const statOtherLabel = computed(() => (props.widget.metric === 'visits' ? 'pageviews' : 'visits'))
 
-const tableRows = computed(() =>
-  !data.value
-    ? []
-    : data.value.rows.map((r) => ({
-        label: formatKey(props.widget.dimension, r.key[props.widget.dimension] ?? ''),
-        value: metricValue(r, props.widget.metric),
-      })),
-)
+// A table row per response row — or, when the widget has a breakdown, one per dimension ×
+// breakdown pair labelled "<dimension> · <breakdown>" (the same pairs the bar/pie charts draw).
+const tableRows = computed(() => {
+  if (!data.value) return []
+  const pairs = pairRows(props.widget, data.value)
+  if (pairs) return pairs.map((p) => ({ label: p.label, value: p.value }))
+  return data.value.rows.map((r) => ({
+    label: formatKey(props.widget.dimension, r.key[props.widget.dimension] ?? ''),
+    value: metricValue(r, props.widget.metric),
+  }))
+})
 
 const isEmpty = computed(
   () =>

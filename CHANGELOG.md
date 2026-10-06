@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **A chart with a breakdown keeps it when its type changes.** "Completions by mode × difficulty" switched to a pie used to lose the difficulty and draw a single "Normal" slice; pie, doughnut, bar, horizontal bar and table now draw one slice, bar or row per mode · difficulty pair, and area stacks one area per difficulty.
+
 ## [0.30.3] — 2026-10-05
 
 ### Fixed
