@@ -4,7 +4,7 @@
 // untouched, and the size contract (a registered campaign adds a table row, never a branch per use).
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DatabaseSync } from 'node:sqlite'
-import { CAMPAIGNS, FLIGHT_REGISTRY_TABLE, campaignFlightSqlCase, arrivalSqlCase, flightDaySqlCase, flightRegistryCte, withFlightRegistry, type CampaignFlight } from '../../src/lib/campaigns'
+import { CAMPAIGNS, FLIGHT_REGISTRY_TABLE, campaignAttributionStartMs, etFlightRangeMs, campaignFlightSqlCase, arrivalSqlCase, flightDaySqlCase, flightRegistryCte, withFlightRegistry, type CampaignFlight } from '../../src/lib/campaigns'
 import { buildMergedBreakdownSql, buildMergedRingSql } from './geo'
 import { insertHits, openHitsDb } from '../_lib/testing/hitsDb'
 
@@ -39,6 +39,38 @@ describe('flight registry CTE', () => {
     expect(values(campaignFlightSqlCase('(none)'))).toEqual(['A', 'B', '(none)', 'B', 'A', '(none)'])
     // The day belongs to the campaign campaignFlight names, and only inside its serving window.
     expect(values(flightDaySqlCase('(none)'))).toEqual(['2', '2', '(none)', '(none)', '2', '(none)'])
+  })
+
+  it('two started campaigns claiming one uc: the first registered wins, whatever their start order', () => {
+    const first = fake('FIRST', ['dup'], '2026-10-03', '2026-10-09')
+    const second = fake('SECOND', ['dup'], '2026-10-01', '2026-10-09') // started earlier, registered later
+    insertHits(db, [{ ts: T('2026-10-06T16:00:00Z'), campaign: 'dup' }])
+    setRegistry([first, second])
+    expect(values(campaignFlightSqlCase('-'))).toEqual(['FIRST'])
+    setRegistry([second, first])
+    expect(values(campaignFlightSqlCase('-'))).toEqual(['SECOND'])
+    expect(values(flightDaySqlCase('-'))).toEqual(['6']) // SECOND's day 1 is 10-01
+  })
+
+  it('pins the window boundaries: attribution starts AT the start, the serving window is [from, to)', () => {
+    // A starts at noon ET (a start time, so its attribution start is later than its ET-midnight window start);
+    // B starts at ET midnight (attribution start = window start). Both end 10-07, so the window ends at ET midnight of 10-08.
+    const a = fake('A', ['a'], '2026-10-05', '2026-10-07', { flightStartTimeEt: '12:00' })
+    const b = fake('B', ['b'], '2026-10-05', '2026-10-07')
+    setRegistry([a, b])
+    const att = campaignAttributionStartMs(a)!
+    const [from, to] = etFlightRangeMs('2026-10-05', '2026-10-07')
+    expect(att).toBeGreaterThan(from)
+    insertHits(db, [
+      { ts: att - 1, campaign: 'a' }, // one ms before A's attribution start: not A's
+      { ts: att, campaign: 'a' }, // exactly at the start: A's, and inside its window (day 1)
+      { ts: from - 1, campaign: 'b' }, // one ms before B's start
+      { ts: from, campaign: 'b' }, // exactly at the window start: B, day 1
+      { ts: to - 1, campaign: 'b' }, // last ms of the window: day 3
+      { ts: to, campaign: 'b' }, // exactly at the window end: still B's (no upper bound on attribution), but outside the day window
+    ])
+    expect(values(campaignFlightSqlCase('-'))).toEqual(['-', 'A', '-', 'B', 'B', 'B'])
+    expect(values(flightDaySqlCase('-'))).toEqual(['-', '1', '-', '1', '3', '-'])
   })
 
   it('a campaign with no confirmed flightStart attributes nothing', () => {

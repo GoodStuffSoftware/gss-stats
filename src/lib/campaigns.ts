@@ -449,6 +449,9 @@ export function withFlightRegistry(sql: string): string {
  * registry order) whose uc equals the row's `campaign` and whose attribution start the row's `ts` has
  * reached (campaignAttributionClause's rule, with no upper bound). `cols` is what to read from it. */
 function flightLookupSql(cols: string): string {
+  // `fr_uc = campaign` compares with BINARY collation; the old `campaign IN (...)` used the column's. Production hits.campaign is plain
+  // `TEXT NOT NULL DEFAULT ''` with no COLLATE (read from sqlite_master on gss-geo, 2026-10-05), so the two are identical.
+  // ORDER BY is deliberate insurance: SQLite scans VALUES in written order today, so no test can pin it.
   return `SELECT ${cols} FROM ${FLIGHT_REGISTRY_TABLE} WHERE fr_uc = campaign AND ts >= fr_att ORDER BY fr_ord LIMIT 1`
 }
 export function campaignFlightSqlCase(emptyLabel: string): string {
