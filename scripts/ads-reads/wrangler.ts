@@ -27,6 +27,17 @@ export type WranglerRunner = (args: string[]) => Promise<WranglerResult>
 export const EXTERNAL_TIMEOUT_MS = Number(process.env.ADS_READS_TIMEOUT_MS) > 0 ? Number(process.env.ADS_READS_TIMEOUT_MS) : 60_000
 export const TIMED_OUT_TEXT = timedOutText(EXTERNAL_TIMEOUT_MS)
 
+/** Secrets the wrangler child never needs; stripped from its inherited environment. */
+export const WRANGLER_WITHHELD_ENV = [
+  'ADS_CLIENT_ID',
+  'ADS_CLIENT_SECRET',
+  'ADS_REFRESH_TOKEN',
+  'ADS_DEVELOPER_TOKEN',
+  'ADS_SA_B64',
+  'FIRESTORE_SA_B64',
+  'BWS_ACCESS_TOKEN',
+] as const
+
 export function createWranglerRunner(opts: { cfToken?: string | null; root?: string; timeoutMs?: number } = {}): WranglerRunner {
   const root = opts.root ?? repoRoot()
   const entry = path.join(root, 'node_modules', 'wrangler', 'bin', 'wrangler.js')
@@ -37,7 +48,10 @@ export function createWranglerRunner(opts: { cfToken?: string | null; root?: str
         resolve({ code: 127, stdout: '', stderr: 'wrangler is not installed in this checkout (run npm ci)' })
         return
       }
+      // Defence in depth: wrangler needs only CLOUDFLARE_* and the basics, so the Ads, Firestore and
+      // Bitwarden secrets are withheld from the child.
       const env: NodeJS.ProcessEnv = { ...process.env, WRANGLER_SEND_METRICS: 'false', NO_COLOR: '1', FORCE_COLOR: '0' }
+      for (const k of WRANGLER_WITHHELD_ENV) delete env[k]
       if (opts.cfToken) env.CLOUDFLARE_API_TOKEN = opts.cfToken
       const child = spawn(process.execPath, [entry, ...args], { cwd: root, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
       let stdout = ''
