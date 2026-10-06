@@ -209,3 +209,57 @@ describe('the default view (event beacons excluded) drops NUL rows: popupExclude
     expect(row.c).toBe(ORDINARY_ROWS)
   })
 })
+
+describe('a pathFamily drill that counts event rows is never liveSafe (its CASE cannot see a NUL)', () => {
+  const noCache = { match: async () => undefined, put: async () => {} }
+  const SUBDAY = { since: '2026-10-01T15:00:00.000Z', until: '2026-10-01T17:00:00.000Z' }
+  const post = async (body: Record<string, unknown>) => {
+    ;(globalThis as any).caches = { default: noCache }
+    const { onRequestPost } = await import('./geo')
+    const res = await onRequestPost(pagesContext(postJson('/api/geo', { ...range, limit: 200, ...body }), { gss_geo: sqliteD1(db) }) as any)
+    return { status: res.status, body: (await res.json()) as any }
+  }
+  const FORGED = [`/return${NUL}x`, `/game${NUL}x`, `/${NUL}`]
+  const seed = () => {
+    const base = { site: 'bestsudoku-web', country: 'US', device: 'mobile' }
+    insertHits(db, [
+      { ...base, ts: T, path: '/page' },
+      ...FORGED.map((path, i) => ({ ...base, ts: T + (i + 1) * 60_000, path, n: 10_000 })),
+    ])
+  }
+  const drill = { constraints: [{ field: 'pathFamily', value: 'page' }] }
+
+  it('events included + pathFamily=page: a forged NUL row is counted, so liveSafe is off (every dim, aligned and sub-day)', async () => {
+    seed()
+    for (const win of [{}, SUBDAY]) {
+      for (const dimension of ['dateEt', 'path', 'site']) {
+        const label = `${dimension} ${'since' in win ? 'subday' : 'aligned'}`
+        const r = await post({ ...win, dimension, includeEventBeacons: true, ...drill })
+        expect(r.status, label).toBe(200)
+        expect(r.body.totals.pageviews, `${label}: control, the NUL rows are counted`).toBeGreaterThanOrEqual(10_000)
+        expect('liveSafe' in r.body.meta, label).toBe(false)
+      }
+    }
+  })
+
+  it('an exclusion-lifting dim (arrival) + pathFamily=page is not liveSafe either', async () => {
+    seed()
+    for (const win of [{}, SUBDAY]) {
+      const r = await post({ ...win, dimension: 'arrival', ...drill })
+      expect(r.status).toBe(200)
+      expect('liveSafe' in r.body.meta).toBe(false)
+    }
+  })
+
+  it('controls: the same drill in the default view, and an events-included view with no pathFamily drill, keep their liveSafe', async () => {
+    seed()
+    for (const dimension of ['dateEt', 'path', 'site']) {
+      const r = await post({ dimension, ...drill })
+      expect(r.body.totals.pageviews, dimension).toBe(1)
+      expect(r.body.meta.liveSafe, dimension).toBe(true)
+    }
+    // events included, no pathFamily drill: still off, by the existing refused-pattern rule (unchanged)
+    const on = await post({ dimension: 'dateEt', includeEventBeacons: true })
+    expect('liveSafe' in on.body.meta).toBe(false)
+  })
+})

@@ -12,7 +12,8 @@ import { MAX_SQL_BYTES } from '../../src/lib/queryLimits'
 
 /** Binds a statement may carry: D1's limit is 100, and ten stay free. */
 const HEADROOM_CEILING = 90
-/** Fake campaigns registered on top of the real ones, each with two uc values. 5 is the most the worst-case geo ring
+/** EXTRA sits on top of the real registered campaigns (5 today), so this suite goes red when the 6th real campaign registers; the planned 90 KB guard follow-up lifts that ceiling.
+ * Fake campaigns registered on top of the real ones, each with two uc values. 5 is the most the worst-case geo ring
  * (16 filters, 50 sites) holds under MAX_SQL_BYTES: each campaign adds about 3.7 KB to it, and at 6 the statement is
  * 91 KB, refused with a 400. BIND_EXTRA=6 or 7 therefore fails the byte and no-refusal tests below, on purpose. */
 const EXTRA = Number(process.env.BIND_EXTRA ?? 5)

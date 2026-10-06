@@ -143,7 +143,8 @@ export function popupExcludeClause(w: string[], _b: unknown[]): void {
   }
 }
 
-/** The inverse of popupExcludeClause: one OR'd fragment matching ANY popup-event row. Same
+/** One OR'd fragment matching ANY popup-event row, by prefix. Not the exact complement of popupExcludeClause: a NUL row with a non-event
+ * prefix (`/page<NUL>x`) is in neither set, since popupExcludeClause drops every NUL path and this matches only event prefixes. Same
  * literal-not-bind rationale as popupExcludeClause above — `binds` stays present (empty) so
  * existing callers (functions/api/popups.ts, popupDimPrefilter below) that spread it into
  * their own bind array don't need to change. */
