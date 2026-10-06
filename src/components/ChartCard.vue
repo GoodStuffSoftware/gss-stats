@@ -164,8 +164,20 @@ function onPoint(p: { index: number; datasetIndex: number; x: number; y: number 
   const dataset = props.widget.dataset === 'geo' ? 'geo' : 'rum'
 
   // Breakdown charts (nested doughnut): the two rings are two DIFFERENT dimensions — resolve
-  // which one this arc belongs to (and its value) instead of reading widget.dimension. Other
-  // breakdown chart types (e.g. stackedBar) aren't wired for this yet, so leave them be.
+  // which one this arc belongs to (and its value) instead of reading widget.dimension.
+  // A bar/hbar/pie/doughnut that draws dimension × breakdown pairs (lib/charts.ts pairRows) has one
+  // mark per pair: it drills on the pair's primary dimension value (a drill carries one value, so
+  // the breakdown value is not part of it). Other breakdown chart types (e.g. stackedBar) aren't
+  // wired for this yet, so leave them be.
+  const pairs = props.widget.breakdown && props.widget.type !== 'nestedDoughnut' && data.value ? pairRows(props.widget, data.value) : null
+  if (pairs) {
+    const value = pairs[p.index]?.a
+    if (value == null || value === '') return
+    if (!isSiteDim(dim) && semanticKey(dim, dataset) === null) return // not drillable → keep tooltip
+    suppressTooltipForDrill()
+    emit('drill', { widgetId: props.widget.id, dimension: dim, dataset, value, label: formatKey(dim, value), x: p.x, y: p.y })
+    return
+  }
   if (props.widget.breakdown) {
     if (props.widget.type !== 'nestedDoughnut' || !data.value) return
     const hit = nestedDoughnutClickValue(props.widget, data.value, p.datasetIndex, p.index)
