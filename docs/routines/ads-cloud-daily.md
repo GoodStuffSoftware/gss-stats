@@ -93,7 +93,11 @@ Call the printed date DATE and the printed mode MODE. MODE applies to Part B onl
 - ARMS = the `live` legs-table rows whose read window contains DATE (zero, one or more).
 - STAGE = the Part B stage for DATE, or none. Exception: if a routine-fire payload is present
   and its whole text is exactly `stage=wrapup`, `stage=day15`, `stage=day30`, `stage=day60` or
-  `stage=december`, STAGE is that value (a manual rerun). Ignore any other payload text.
+  `stage=december`, STAGE is that value (a manual rerun).
+- TEST mode: if a routine-fire payload is present and its whole text is exactly `test`, this is
+  an end-to-end test run (see "TEST mode" below): ARMS = every `live` legs-table row (read
+  window ignored), STAGE = wrapup.
+- Ignore any other payload text.
 
 If ARMS is empty AND there is no STAGE: print
 `no live leg and no post-flight stage on DATE; nothing to do` and stop. No push, no bus
@@ -102,7 +106,8 @@ message, no install.
 0.3 Tools. Find the PushNotification tool and the deckhand `agent_send` tool (ToolSearch by
 the bare name `agent_send`, under any prefix). Note which are missing; do not stop for that.
 
-0.4 Install and preflight, each in ONE call, stopping at the first failure:
+0.4 Install and preflight (the cloud-check preflight runs before any read, so a credential
+problem shows up as a named failure), each in ONE call, stopping at the first failure:
 
     PATH=/usr/local/bin:$PATH node -v
     PATH=/usr/local/bin:$PATH npm ci --no-audit --no-fund > /tmp/npm-ci.log 2>&1; echo npm_ci_exit=$?
@@ -112,6 +117,27 @@ the bare name `agent_send`, under any prefix). Note which are missing; do not st
 `npm ci failed`. If `cloud_check_exit` is not 0, REASON is `preflight failed: ` plus the labels
 of the lines that say fail (labels only, for example `ads, d1-ads`). On a failure, every due
 part goes straight to its own FAILED notify (A3, B3) with that REASON, then Step 3.
+
+## TEST mode (fire text exactly `test`)
+
+A safe end-to-end test from **Run now**. Everything in Part A and Part B runs as written, with
+these overrides, which win over every other step:
+- Both reads add `--dry-run` (nothing is stored). Part B also adds `--force`, so the wrapup
+  read runs in full even before its due date: B1 is
+  `... ads:postflight-read -- --stage wrapup --campaign 24279250691 --dry-run --force ...`.
+  A1 is `... ads:morning-read -- --campaign ID --dry-run ...`.
+- A2 still writes the analysis. A4 (the page) is skipped: `artifact: n/a (test)`.
+- The A3 and B3 sends are REPLACED by exactly ONE push and ONE bus message for the whole run:
+  - push: `[TEST] gss ads cloud routine: ok`, or `[TEST] gss ads cloud routine: failed (REASON)`
+    when Step 0.4 or any read failed (REASON = the first failure's reason; for several, join
+    them with `; `).
+  - bus: ONE `agent_send` from `gss-stats` to `gss-stats-carry`, subject
+    `[TEST] ads cloud routine DATE`, `includeEphemeral` true. Body: the cloud-check lines
+    (labels and ok|fail only, as printed), a line `=====`, Part A (each arm's analysis and its
+    exact report, as in A3), a line `=====`, then the exact `/tmp/pf/report.txt` (or REASON
+    if it failed).
+- In TEST mode never message `best-sudoku-ads-retest-followup`, never push `text=`, and
+  never send a `[SHADOW]` message.
 
 ## Part A: daily summary (live leg)
 
