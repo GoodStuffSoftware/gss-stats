@@ -13,14 +13,20 @@ approves.
 and the app-install popups, so that sign-ins come from players likely to purchase eventually (not
 people who want something for nothing). This is precondition P1 and needs a BSK builder.
 
-Decision cards ads-f3-1..7 (ads-f3-1 and 2 are in the artifact):
+Decision cards (state 2026-10-11 evening; ads-f3-1 and 2 are in the artifact):
 
-- ads-f3-3: price in the ad + buyer-intent exact terms (sudoku app no ads, ad free sudoku app,
-  premium sudoku, sudoku pro); no "cheap" terms.
-- ads-f3-5: sign-in ask after game 1 vs game 2.
-- ads-f3-6: keep the 14-day trial through flight 3 (recommended).
-- ads-f3-7: first-50: keep the engaged bar, reward a founding price instead of 60 free days
-  (recommended).
+- ads-f3-1: reopened. Recommend $0 until signin-p1 is live; ads-f3-9 is closed and the 10-17 re-read is done.
+- ads-f3-2: reopened. The in-app data is real; hold Apps until the mobile tour fix, rather than retire.
+- ads-f3-3: open, waiting on keyword data. Price in the ad + buyer-intent exact terms (sudoku app no ads,
+  ad free sudoku app, premium sudoku, sudoku pro); no "cheap" terms.
+- ads-f3-4: open.
+- ads-f3-5: closed (superseded by signin-p1-1).
+- ads-f3-6: closed, answered a (keep the 14-day trial). Mike's "is the long trial helping or hurting"
+  is carried as an open measure.
+- ads-f3-7: open. First-50: keep the engaged bar, reward a founding price instead of 60 free days (recommended).
+- ads-f3-8: Basic API access how-to (Cloud Console path, brand verification, review in minutes).
+- ads-f3-9: six measurement gaps.
+- ads-f3-10: read-only Stripe key.
 
 Sources:
 
@@ -30,6 +36,24 @@ Sources:
 - Flight 2 build and rules: best-sudoku repo `docs/marketing/google-ads/HANDOFF-flight-2-api.md`
   (sections 2, 7, 8). The write tool is `flight2-write.mjs` in best-sudoku
   `docs/marketing/google-ads/api/`.
+
+## Data pull 2026-10-11 (evening)
+
+Counts, read-only. Raw pulls live in the analyst session scratchpad only (not committed); report v5
+(<https://claude.ai/artifact/5ndcrub2p1EuhY8Gb7UUH7>) has the summary.
+
+- Search: next-day returns 1 of 87 arrivals (Apps 13 of 204, F1 22 of 271, unpaid 4 of 48). 38 of 53
+  Search completes came on 10-09. Re-read the 2-to-7-day window on 10-17 and the 8-to-14-day on 10-24.
+- The 10-09/10-10 Search jump had no change behind it (change_event shows nothing after the 10-04 00:27
+  enable). Rank-lost impression share fell 90% to 45% to 30%; budget-lost rose 0% to 53% to 68%; the
+  query 'sudoku' went from 7 to 32 to 27 clicks.
+- In-app Display data is real: the tag-strip bug was fixed 2026-09-01 (v1.86.6, best-sudoku
+  src/services/analyticsBeacon.ts:196-208). About 30% of clicks never load the page, about 3% lose the
+  tag, 66% are counted. The loss is inside the mobile tour (294 starts, 2 completes, 17 skips).
+- Money: 0 purchases ever (Stripe 0 charges, 7 expired checkout sessions; Play 3 tester purchases).
+  5 trials started, 4 ended, 0 bought, none a real test. First-50 4 of 50.
+- Beacon gaps: no trial, paywall, checkout or purchase paths; sign-in outcomes carry no ask reason; the
+  30-minute tag (analyticsBeacon.ts:101) misses later visits.
 
 ## Flight 2 verdict
 
@@ -78,6 +102,10 @@ Preconditions:
 - Go: 5 or more new accounts within $70. Iterate: 2 to 4. Stop paid acquisition: 0 to 1 with 20 or more asks.
 - Traffic-held check: complete rows at $3 or less each and CTR at 1% or more.
 - Kill rules only propose; Mike pauses.
+- Held gss-stats edits (land after Mike answers signin-p1-1): add /signin-prompt/committed-repeat and
+  /signin-prompt/committed-challenge to ASK_PATHS (src/lib/adsRules.ts:556); retire
+  FIRST_SESSION_ASK_PATH and kill rule 3's first-session mode (adsRules.ts:773). Read the install-prompt
+  effect across all traffic over weeks, not inside the 30-minute tag.
 
 ## Where to register
 
