@@ -57,6 +57,8 @@ code, relay what it says, and (Part A only) write a short analysis from its own 
 
 ## Legs (the lead edits this table; nothing else in this file changes per campaign)
 
+Flight 3 plan: see [docs/campaigns/flight-3-handoff.md](../campaigns/flight-3-handoff.md).
+
 <!-- LEGS TABLE: one row per campaign. Read window = the ET dates on which Part A reads it
      (src/lib/adsRules.ts ADS_READ_PLANS morningReadFirstEt..morningReadLastEt). Page = a fixed
      claude.ai artifact link for that arm's daily page (A4), or none; the lead creates the page

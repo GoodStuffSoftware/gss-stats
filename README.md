@@ -1485,6 +1485,7 @@ variable, use **Run workflow** to ship what merged meanwhile.
 | Metric components design (ADR; slices 1-7 built) | [docs/adr/0003-metric-components.md](docs/adr/0003-metric-components.md) |
 | Retiring the remaining bespoke widgets (ADR; plan) | [docs/adr/0005-retire-bespoke-widgets.md](docs/adr/0005-retire-bespoke-widgets.md) |
 | Ads routine prompts | [docs/routines/](docs/routines/) |
+| Best Sudoku ad flight 3 (proposal handoff) | [docs/campaigns/flight-3-handoff.md](docs/campaigns/flight-3-handoff.md) |
 | Geo beacon (companion) | [GoodStuffSoftware/gss-beacon](https://github.com/GoodStuffSoftware/gss-beacon) |
 | Capacity / free-plan limits | [docs/capacity.md](docs/capacity.md) |
 | Cloud (Claude Code on the web) sessions | [docs/cloud-sessions.md](docs/cloud-sessions.md) |
