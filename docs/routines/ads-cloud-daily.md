@@ -49,7 +49,8 @@ code, relay what it says, and (Part A only) write a short analysis from its own 
 5. No git writes: never create a branch, commit, push, tag, issue or pull request. Never send
    email.
 6. At most ONE push notification per part (Part A, Part B), as defined below. Bus messages:
-   ONE per report (one per Part A arm, one per Part B stage), plus numbered parts only for a
+   ONE per report (one per Part A arm, one per Part B stage; in TEST mode also one for the
+   cloud-check lines), plus numbered parts only for a
    report over 15000 characters (see "Bus delivery of a report"). No artifact except Part A's
    optional A4 page update.
 7. Relay CLI text exactly as printed (the CLI prints plain ASCII). Everything you write
@@ -156,14 +157,21 @@ stage):
 - ONE `agent_send` per report, never two reports in one message. The subject carries the arm
   name or the stage.
 - The body is the exact report file with only its final newline dropped. Never summarize,
-  trim, reflow or retype it; the model never cuts it, a shell command does.
+  trim, reflow or reword it; copy it character for character. The model never decides where
+  to cut: a shell command does. `cat` the file (or each part file) right before its send and
+  copy from that output.
 - Size check by shell: `wc -c < FILE`. If it is 15000 characters or fewer, send the file
   content as one message. If more, split by shell at line boundaries into parts of at most
-  15000 characters, for example
-  `awk -v max=15000 'BEGIN{n=1} {if (len+length($0)+1>max && len>0) {n++; len=0} print > sprintf("/tmp/bus/part%02d.txt", n); len+=length($0)+1}' FILE`
-  (after `mkdir -p /tmp/bus`), then send each part file as its own `agent_send` with
-  ` (k/N)` appended to the subject (k from 1, N = number of parts), in order. Each part's
-  body is that part file's exact content, nothing added.
+  15000 characters, using a fresh directory per report (`D=/tmp/bus/ID`, `ID` being the arm id
+  or the stage), for example
+  `rm -rf $D; mkdir -p $D; awk -v max=15000 -v d=$D 'BEGIN{n=1} {if (len+length($0)+1>max && len>0) {n++; len=0} print > sprintf("%s/part%02d.txt", d, n); len+=length($0)+1} END{print "parts=" n}' FILE`
+  The printed `parts=N` is the part count. Then `cat` and send each part file as its own
+  `agent_send`, in order, with ` (k/N)` appended to the subject (k from 1). Each part's body
+  is that part file's exact content with only its final newline dropped, nothing added. A
+  line over 15000 characters cannot be split and is sent whole as its own part.
+- Check each `agent_send` response: if it reports `truncated`, say so in Step 3 as a failed
+  bus send.
+- `ARM_NAME` in a subject is the arm's name from the legs table.
 - Any analysis or commentary you write goes in the Step 3 final output, never in a bus body.
 - This adds bus messages only; the push limits are unchanged (at most one push per part).
 
@@ -327,7 +335,7 @@ In this order, plain ASCII:
 1. If any report has a `READ FAILED` line or a release-health `ALERT` line, lead with it
    exactly as reported (for an alert: its parent and child counts).
 2. Part A: each arm's A2 analysis, then at most three lines: push sent|not sent|tool missing,
-   bus sent|not sent|failed|tool missing, artifact published|not published|n/a; any `errors` in plain words (no paths, no values);
+   bus sent (count)|not sent|failed|tool missing, artifact published|not published|n/a; any `errors` in plain words (no paths, no values);
    on a threshold read, the proposal and kill-rule results exactly as the report states them.
    Name any diagnostics ANOMALY line as a proposal for Mike.
 3. Part B: `/tmp/pf/report.txt` verbatim (if it exists), then at most three lines:
