@@ -44,6 +44,14 @@ Preconditions:
 
 - P1: BSK ships the sign-in ask after the first completed real game, live on prod web, with its
   own counter path.
+  - Part of P1 (Mike, 2026-10-11: handle it with the changes, not as a separate task). The agent
+    making the P1 sign-in/monetization changes in best-sudoku also corrects two stale texts to
+    match what P1 ships: (1) docs/specs/monetization.md says a 30-day trial at $1.50/$12.99, but
+    the code has a 14-day trial (functions/src/trial-constants.ts:20) and passes at $1.99/30 days,
+    $9.99/180 days and $14.99/365 days (src/composables/useBilling.ts:90-106); verify the real
+    amounts in Stripe and Play. (2) functions/src/email/welcomeTemplates.ts:84 says puzzles need no
+    pass, but expired users get 1 puzzle a day (src/composables/useAccess.ts). The final trial and
+    first-50 terms depend on ads-f3-6 and ads-f3-7.
 - P2: gss-stats confirms the post-game ask and its outcome fall inside the 30-minute campaign
   utm tag, or a session-scoped first-party tag lifetime covers them (no visitor id, no device
   signature).
