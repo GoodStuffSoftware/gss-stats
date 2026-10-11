@@ -5,9 +5,22 @@ For whoever builds and reads flight 3. This file points to the sources; it does 
 ## Status
 
 PROPOSAL awaiting Mike on the BSK Decision Desk
-(<https://claude.ai/artifact/VutC3bQKX4jLErr52o3cBv>, cards ads-f3-1..ads-f3-4). Nothing is
+(<https://claude.ai/artifact/VutC3bQKX4jLErr52o3cBv>, cards ads-f3-1..ads-f3-7). Nothing is
 built. Do not register flight 3 in `src/lib/campaigns.ts` or `src/lib/adsRules.ts` until Mike
 approves.
+
+2026-10-11, Mike's direction: remove the sign-in ask after the tutorial, and tune the sign-in ask
+and the app-install popups, so that sign-ins come from players likely to purchase eventually (not
+people who want something for nothing). This is precondition P1 and needs a BSK builder.
+
+Decision cards ads-f3-1..7 (ads-f3-1 and 2 are in the artifact):
+
+- ads-f3-3: price in the ad + buyer-intent exact terms (sudoku app no ads, ad free sudoku app,
+  premium sudoku, sudoku pro); no "cheap" terms.
+- ads-f3-5: sign-in ask after game 1 vs game 2.
+- ads-f3-6: keep the 14-day trial through flight 3 (recommended).
+- ads-f3-7: first-50: keep the engaged bar, reward a founding price instead of 60 free days
+  (recommended).
 
 Sources:
 
@@ -46,6 +59,8 @@ Preconditions:
 - Fixed window Sunday 00:00 to Saturday 23:59:59 ET; end date set at create and again at enable.
 - AI Max off, Search partners off, Display expansion off, auto assets opted out.
 - No day-3 bid rule (retired).
+- Ad copy and keywords depend on ads-f3-3. If option a: add a price headline ('No ads. Passes from
+  $1.99', verify that Play prices match) and the 4 buyer-intent exact terms.
 
 ### Read plan (register once approved)
 
@@ -79,3 +94,6 @@ Preconditions:
 - No per-placement spend.
 - The Search volume jump on 10-09 and 10-10 ($20.00 and $20.60 on a $10 budget, 69 of 95
   clicks) is unexplained, and no change is logged.
+- Keyword Planner volumes are unavailable through the API: the developer token is Explorer-level
+  (403 DEVELOPER_TOKEN_NOT_APPROVED, 2026-10-11). Use the Ads UI Keyword Planner or apply for Basic
+  access.
