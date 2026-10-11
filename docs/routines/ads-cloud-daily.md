@@ -88,10 +88,10 @@ counts, so each read shows every bucket the flight has reached.
 |---|---|---|---|---|
 | 2026-10-09 | 24279250691 | BSK retest | wrapup | flight 1 wrap-up |
 | 2026-10-17 | 24279250691 | BSK retest | day15 | flight 1 day 15 |
-| 2026-10-17 | 24311309184 | F2 search | wrapup | F2 search returns, day 2-7 window closed (flight end 10-10 + 7) |
-| 2026-10-17 | 24316608605 | F2 apps | wrapup | F2 apps returns, day 2-7 window closed |
-| 2026-10-25 | 24311309184 | F2 search | day15 | F2 search returns, day 8-14 window closed (flight end + 15; 10-24 is the last day a 10-10 arrival can return in it) |
-| 2026-10-25 | 24316608605 | F2 apps | day15 | F2 apps returns, day 8-14 window closed |
+| 2026-10-17 | 24311309184 | F2 search | wrapup | F2 search returns, day 2-7 read (flight end 10-10 + 7; the last arrival day is still maturing, fully matured 10-18, so the 10-25 report carries the settled day 2-7) |
+| 2026-10-17 | 24316608605 | F2 apps | wrapup | F2 apps returns, day 2-7 read (same maturing caveat) |
+| 2026-10-25 | 24311309184 | F2 search | day15 | F2 search returns, day 8-14 read (flight end + 15; 10-24 is the last day a 10-10 arrival can return in it) |
+| 2026-10-25 | 24316608605 | F2 apps | day15 | F2 apps returns, day 8-14 read |
 | 2026-11-01 | 24279250691 | BSK retest | day30 | flight 1 day 30 |
 | 2026-12-01 | 24279250691 | BSK retest | day60 | flight 1 day 60 |
 | 2026-12-03 | 24279250691 | BSK retest | december | flight 1 December |
@@ -180,7 +180,7 @@ stage):
 - Size check by shell: `wc -c < FILE`. If it is 15000 characters or fewer, send the file
   content as one message. If more, split by shell at line boundaries into parts of at most
   15000 characters, using a fresh directory per report (`D=/tmp/bus/ID`, `ID` being the arm id
-  or the report's campaign id and stage), for example
+  or the report's campaign id and stage, e.g. `24311309184-wrapup`), for example
   `rm -rf $D; mkdir -p $D; awk -v max=15000 -v d=$D 'BEGIN{n=1} {if (len+length($0)+1>max && len>0) {n++; len=0} print > sprintf("%s/part%02d.txt", d, n); len+=length($0)+1} END{print "parts=" n}' FILE`
   The printed `parts=N` is the part count. Then `cat` and send each part file as its own
   `agent_send`, in order, with ` (k/N)` appended to the subject (k from 1). Each part's body

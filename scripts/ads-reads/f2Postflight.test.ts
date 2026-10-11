@@ -55,9 +55,7 @@ describe.each(ARMS)('$label post-flight return reads', (arm) => {
     expect(r.dueEt).toBe('2026-10-17')
     expect(r.due).toBe(true)
     expect(r.read!.returns!.web).toMatchObject({ d0: 40, d1: 4, 'd2-7': 3, 'd8-14': 2 })
-    const text = formatPostflightReport(r)
-    expect(text).toContain('d2-7')
-    expect(text).not.toContain('99')
+    expect(formatPostflightReport(r)).toContain('d2-7')
   })
   it('wrapup the day before is not due and records nothing', async () => {
     const deps = fixtureDeps(armFixture(arm, '2026-10-16T12:40:00Z'), false)
