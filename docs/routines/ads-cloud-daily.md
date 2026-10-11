@@ -1,6 +1,6 @@
 ---
 name: ads-cloud-daily
-description: ONE claude.ai cloud routine, daily at 08:37 ET, for the Best Sudoku Google Ads reads. Part A is the daily summary (the morning read) for the live leg's campaigns, with analysis and recommendations. Part B is the post-flight read for the retest (campaign 24279250691) on its five stage dates, in SHADOW mode until switched live. Runs the gss-stats CLIs from env-var credentials, pushes Mike and copies to the deckhand bus. Proposes only.
+description: ONE claude.ai cloud routine, daily at 08:37 ET, for the Best Sudoku Google Ads reads. Part A is the daily summary (the morning read) for the live leg's campaigns, with analysis and recommendations. Part B is the post-flight reads: the retest (campaign 24279250691) on its five stage dates, and flight 2's two arms (24311309184 search, 24316608605 apps) on the 2026-10-17 and 2026-10-25 return reads, in SHADOW mode until switched live. Runs the gss-stats CLIs from env-var credentials, pushes Mike and copies to the deckhand bus. Proposes only.
 ---
 
 <!--
@@ -49,7 +49,7 @@ code, relay what it says, and (Part A only) write a short analysis from its own 
 5. No git writes: never create a branch, commit, push, tag, issue or pull request. Never send
    email.
 6. At most ONE push notification per part (Part A, Part B), as defined below. Bus messages:
-   ONE per report (one per Part A arm, one per Part B stage; in TEST mode also one for the
+   ONE per report (one per Part A arm, one per Part B report; in TEST mode also one for the
    cloud-check lines), plus numbered parts only for a
    report over 15000 characters (see "Bus delivery of a report"). No artifact except Part A's
    optional A4 page update.
@@ -74,17 +74,29 @@ Flight 3 plan: see [docs/campaigns/flight-3-handoff.md](../campaigns/flight-3-ha
 | past | 24279250691 | Flight 1: US+CA web retest | 2026-09-26 | 2026-10-02 | 2026-09-27..2026-10-03 (done) | none |
 
 Part A reads every `live` row whose read window contains today's ET date. `past` rows are
-never read by Part A (flight 1's post-flight reads are Part B).
+never read by Part A (the post-flight reads of past legs are Part B).
 
-## Post-flight stages (Part B, campaign 24279250691)
+## Post-flight reports (Part B)
 
-| DATE (ET) | STAGE |
-|---|---|
-| 2026-10-09 | wrapup |
-| 2026-10-17 | day15 |
-| 2026-11-01 | day30 |
-| 2026-12-01 | day60 |
-| 2026-12-03 | december |
+One report per row. Each row is one campaign at one stage on one date; a date can hold several
+rows (they run one after another). LABEL is the report name used in subjects and pushes. Stage
+dates come from the CLI itself (flight end + 7 for wrapup, + 15 for day15, ...); this table
+only says which ones the routine runs. The return windows are cumulative `/return/<uc>/` bucket
+counts, so each read shows every bucket the flight has reached.
+
+| DATE (ET) | CAMPAIGN | LABEL | STAGE | What it adds |
+|---|---|---|---|---|
+| 2026-10-09 | 24279250691 | BSK retest | wrapup | flight 1 wrap-up |
+| 2026-10-17 | 24279250691 | BSK retest | day15 | flight 1 day 15 |
+| 2026-10-17 | 24311309184 | F2 search | wrapup | F2 search returns, day 2-7 window closed (flight end 10-10 + 7) |
+| 2026-10-17 | 24316608605 | F2 apps | wrapup | F2 apps returns, day 2-7 window closed |
+| 2026-10-25 | 24311309184 | F2 search | day15 | F2 search returns, day 8-14 window closed (flight end + 15; 10-24 is the last day a 10-10 arrival can return in it) |
+| 2026-10-25 | 24316608605 | F2 apps | day15 | F2 apps returns, day 8-14 window closed |
+| 2026-11-01 | 24279250691 | BSK retest | day30 | flight 1 day 30 |
+| 2026-12-01 | 24279250691 | BSK retest | day60 | flight 1 day 60 |
+| 2026-12-03 | 24279250691 | BSK retest | december | flight 1 December |
+
+Flight 2 has no day30, day60 or december rows yet; add them here when Mike asks for them.
 
 ## Step 0: date, mode, tools, install, preflight
 
@@ -96,17 +108,22 @@ Call the printed date DATE and the printed mode MODE. MODE applies to Part B onl
 
 0.2 Decide what is due:
 - ARMS = the `live` legs-table rows whose read window contains DATE (zero, one or more).
-- STAGE = the Part B stage for DATE, or none. Exception: if a routine-fire payload is present
-  and its whole text is exactly `stage=wrapup`, `stage=day15`, `stage=day30`, `stage=day60` or
-  `stage=december`, STAGE is that value (a manual rerun), and ARMS is empty: a `stage=` fire
-  runs Part B only, with no Part A read, daily push or bus copy.
+- REPORTS = the Part B rows whose DATE is today (zero, one or more), each with its CAMPAIGN,
+  LABEL and STAGE. Exception: if a routine-fire payload is present and its whole text is
+  exactly `stage=wrapup`, `stage=day15`, `stage=day30`, `stage=day60` or `stage=december`,
+  REPORTS is the single row (campaign 24279250691, LABEL BSK retest) with that STAGE (a manual
+  rerun of flight 1); if the whole text is `stage=STAGE campaign=ID` with STAGE as above and ID
+  a CAMPAIGN in the table, REPORTS is that campaign at that STAGE (LABEL from its row). In
+  both cases ARMS is empty: a `stage=` fire runs Part B only, with no Part A read, daily push
+  or bus copy.
 - TEST mode: if a routine-fire payload is present and its whole text is exactly `test`, this is
   an end-to-end test run (see "TEST mode" below): ARMS = every `live` legs-table row (read
-  window ignored), STAGE = wrapup.
+  window ignored), REPORTS = the single row (campaign 24279250691, LABEL BSK retest, STAGE
+  wrapup).
 - Ignore any other payload text.
 
-If ARMS is empty AND there is no STAGE: print
-`no live leg and no post-flight stage on DATE; nothing to do` and stop. No push, no bus
+If ARMS is empty AND REPORTS is empty: print
+`no live leg and no post-flight report on DATE; nothing to do` and stop. No push, no bus
 message, no install.
 
 0.3 Tools. Find the PushNotification tool and the deckhand `agent_send` tool (ToolSearch by
@@ -143,7 +160,7 @@ these overrides, which win over every other step:
     (labels and ok|fail only, as printed), subject `[TEST] ads cloud routine DATE checks`;
     then one per Part A arm with subject `[TEST] ads cloud routine DATE ARM_NAME`, body the
     exact `/tmp/am/ID.report.txt` (or REASON if that arm failed); then one for
-    `/tmp/pf/report.txt` with subject `[TEST] ads cloud routine DATE wrapup` (or REASON if it
+    `/tmp/pf/24279250691/report.txt` with subject `[TEST] ads cloud routine DATE wrapup` (or REASON if it
     failed). Parts of a long report follow the numbered-parts rule.
 - In TEST mode never message `best-sudoku-ads-retest-followup`, never push `text=`, and
   never send a `[SHADOW]` message.
@@ -155,7 +172,7 @@ never packed together with another and never shortened. This applies in every mo
 SHADOW, TEST). For each report that is sent on the bus (Part A: one per arm; Part B: one per
 stage):
 - ONE `agent_send` per report, never two reports in one message. The subject carries the arm
-  name or the stage.
+  name or the report.
 - The body is the exact report file with only its final newline dropped. Never summarize,
   trim, reflow or reword it; copy it character for character. The model never decides where
   to cut: a shell command does. `cat` the file (or each part file) right before its send and
@@ -163,7 +180,7 @@ stage):
 - Size check by shell: `wc -c < FILE`. If it is 15000 characters or fewer, send the file
   content as one message. If more, split by shell at line boundaries into parts of at most
   15000 characters, using a fresh directory per report (`D=/tmp/bus/ID`, `ID` being the arm id
-  or the stage), for example
+  or the report's campaign id and stage), for example
   `rm -rf $D; mkdir -p $D; awk -v max=15000 -v d=$D 'BEGIN{n=1} {if (len+length($0)+1>max && len>0) {n++; len=0} print > sprintf("%s/part%02d.txt", d, n); len+=length($0)+1} END{print "parts=" n}' FILE`
   The printed `parts=N` is the part count. Then `cat` and send each part file as its own
   `agent_send`, in order, with ` (k/N)` appended to the subject (k from 1). Each part's body
@@ -283,47 +300,55 @@ it never pushes and never blocks anything else. Never create a new page: a missi
   environment, and the setup script installs `n` unpinned. The lockfile, the narrow network
   allowlist and the scoped keys bound the damage.
 
-## Part B: post-flight read (campaign 24279250691)
+## Part B: post-flight reads (campaigns in the Post-flight reports table)
 
-Skip Part B entirely (print `Part B: no post-flight stage on DATE`) when there is no STAGE.
+Skip Part B entirely (print `Part B: no post-flight report on DATE`) when REPORTS is empty.
+Otherwise run B1 and B2 for each report in REPORTS in table order, one report fully (B1, B2)
+before the next, each with its own directory `/tmp/pf/CAMPAIGN` (CAMPAIGN is the report's
+campaign id, so reports never share files). A failure in one report does not stop the others.
+Then B3 for all of them.
 
-B1. Run (one call). LIVE:
+B1. Run (one call per report). LIVE:
 
-    mkdir -p /tmp/pf && PATH=/usr/local/bin:$PATH WRANGLER_SEND_METRICS=false npm run -s ads:postflight-read -- --stage STAGE --campaign 24279250691 > /tmp/pf/out.txt 2> /tmp/pf/err.txt; echo read_exit=$?
+    mkdir -p /tmp/pf/CAMPAIGN && PATH=/usr/local/bin:$PATH WRANGLER_SEND_METRICS=false npm run -s ads:postflight-read -- --stage STAGE --campaign CAMPAIGN > /tmp/pf/CAMPAIGN/out.txt 2> /tmp/pf/CAMPAIGN/err.txt; echo read_exit=$?
 
-SHADOW: the same command with `--dry-run` added after `--campaign 24279250691` (every read
+SHADOW: the same command with `--dry-run` added after `--campaign CAMPAIGN` (every read
 happens, nothing is stored).
 
-B2. Split (no other processing):
+B2. Split (no other processing), per report:
 
-    grep -qx -- '----- JSON -----' /tmp/pf/out.txt && echo marker=yes || echo marker=no
-    sed '/^----- JSON -----$/,$d' /tmp/pf/out.txt > /tmp/pf/report.txt
-    sed '1,/^----- JSON -----$/d' /tmp/pf/out.txt > /tmp/pf/result.json
-    PATH=/usr/local/bin:$PATH node -e "const r=JSON.parse(require('fs').readFileSync('/tmp/pf/result.json','utf8'));const n=r.notify||{};console.log('push='+!!n.push);console.log('busCopy='+!!n.busCopy);console.log('reason='+(n.reason||''));console.log('text='+(n.text||''))"
-    cat /tmp/pf/report.txt
+    grep -qx -- '----- JSON -----' /tmp/pf/CAMPAIGN/out.txt && echo marker=yes || echo marker=no
+    sed '/^----- JSON -----$/,$d' /tmp/pf/CAMPAIGN/out.txt > /tmp/pf/CAMPAIGN/report.txt
+    sed '1,/^----- JSON -----$/d' /tmp/pf/CAMPAIGN/out.txt > /tmp/pf/CAMPAIGN/result.json
+    PATH=/usr/local/bin:$PATH node -e "const r=JSON.parse(require('fs').readFileSync('/tmp/pf/CAMPAIGN/result.json','utf8'));const n=r.notify||{};console.log('push='+!!n.push);console.log('busCopy='+!!n.busCopy);console.log('reason='+(n.reason||''));console.log('text='+(n.text||''))"
+    cat /tmp/pf/CAMPAIGN/report.txt
 
-If marker=no or the node command fails: REASON = `read crashed (exit N)`, N = read_exit.
-Never print `/tmp/pf/err.txt`.
+If marker=no or the node command fails: that report's REASON = `read crashed (exit N)`, N =
+read_exit. Never print `/tmp/pf/CAMPAIGN/err.txt`.
 
-B3. Notify. BODY = the exact content of `/tmp/pf/report.txt` with only its final newline
-removed. Copy it character for character; do not summarize, reflow or add anything.
+B3. Notify. BODY = the exact content of that report's `/tmp/pf/CAMPAIGN/report.txt` with only
+its final newline removed. Copy it character for character; do not summarize, reflow or add
+anything. The mode rules are the same for every campaign; only LABEL, CAMPAIGN and STAGE
+change. Part B sends ONE push in total (one line per report, in table order, each line plain
+ASCII and under 200 characters) and ONE bus message per report (numbered parts if BODY is over
+15000 characters). The push is skipped when no report has a line to send.
 
-FAILED (Step 0.4 or B1/B2 failed):
-- LIVE: ONE push `BSK retest post-flight STAGE did not run: REASON`. No bus message.
-- SHADOW: ONE push `[SHADOW] BSK post-flight STAGE cloud run: failed (REASON)`. ONE bus
-  message from `gss-stats` to `gss-stats`, subject `[SHADOW] BSK retest post-flight STAGE DATE
+FAILED (Step 0.4 or B1/B2 failed for a report):
+- LIVE: push line `LABEL post-flight STAGE did not run: REASON`. No bus message.
+- SHADOW: push line `[SHADOW] LABEL post-flight STAGE cloud run: failed (REASON)`. ONE bus
+  message from `gss-stats` to `gss-stats`, subject `[SHADOW] LABEL post-flight STAGE DATE
   FAILED`, body REASON, `includeEphemeral` true.
 
 OK, LIVE:
-- push=true: ONE PushNotification whose text is exactly the `text=` value.
+- push=true: that report's push line is exactly its `text=` value.
 - busCopy=true: one `agent_send` (numbered parts if BODY is over 15000 characters) from `gss-stats` to `best-sudoku-ads-retest-followup`,
-  subject `BSK retest post-flight STAGE DATE`, body BODY, `includeEphemeral` true.
-- Both false (not due yet, or a same-day rerun already recorded): send nothing.
+  subject `LABEL post-flight STAGE DATE`, body BODY, `includeEphemeral` true.
+- Both false (not due yet, or a same-day rerun already recorded): send nothing for that report.
 
 OK, SHADOW:
-- ONE push: `[SHADOW] BSK post-flight STAGE cloud run: ok`. Never `text=`.
+- push line: `[SHADOW] LABEL post-flight STAGE cloud run: ok`. Never `text=`.
 - one `agent_send` (numbered parts if BODY is over 15000 characters) from `gss-stats` to
-  `gss-stats`, subject `[SHADOW] BSK retest post-flight STAGE DATE`, `includeEphemeral` true; body BODY when
+  `gss-stats`, subject `[SHADOW] LABEL post-flight STAGE DATE`, `includeEphemeral` true; body BODY when
   busCopy=true, else `[SHADOW] no bus copy: ` plus the `reason=` value.
 
 The `notify` JSON both CLIs print (fields the steps above read):
@@ -338,7 +363,7 @@ In this order, plain ASCII:
    bus sent (count)|not sent|failed|tool missing, artifact published|not published|n/a; any `errors` in plain words (no paths, no values);
    on a threshold read, the proposal and kill-rule results exactly as the report states them.
    Name any diagnostics ANOMALY line as a proposal for Mike.
-3. Part B: `/tmp/pf/report.txt` verbatim (if it exists), then at most three lines:
+3. Part B: for each report, `/tmp/pf/CAMPAIGN/report.txt` verbatim (if it exists), then at most three lines:
    `MODE / push: ... / bus: ...`; errors in plain words or `errors: none`; the decision-table
    row with its "next" text exactly as the report gives it, with the report's standing caveats.
 

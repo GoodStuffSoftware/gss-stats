@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.34.1] — 2026-10-11
+
+### Added
+- **Flight 2 return reads in the cloud routine.** Both flight 2 arms (Search and Apps) now get a day 2-to-7 returns report on 2026-10-17 and a day 8-to-14 returns report on 2026-10-25, one report per arm, in the same SHADOW or LIVE mode as flight 1.
+
 ## [0.34.0] — 2026-10-11
 
 ### Security
