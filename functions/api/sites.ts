@@ -15,9 +15,11 @@
 
 import { popupExcludeClause } from '../../src/lib/popupEvents'
 import { cachedJson, type CacheLike } from '../_lib/edgeCache'
+import { cfAccountId } from '../_lib/cfAccount'
 
 interface Env {
   CF_ANALYTICS_TOKEN: string
+  CF_ACCOUNT_ID?: string
   gss_geo: D1Database
   STATS_CONFIG: KVNamespace
 }
@@ -37,7 +39,6 @@ const RESPONSE_CACHE_TTL_SECONDS = 300 // 5 min
 // and keeps this endpoint bounded as `hits` grows. See docs/capacity.md.
 const GEO_COUNT_WINDOW_MS = 90 * 86_400_000
 
-const ACCOUNT_ID = 'REDACTED-CF-ACCOUNT'
 const GQL_ENDPOINT = 'https://api.cloudflare.com/client/v4/graphql'
 const SITE_TAGS = [
   '7dd3bcb059af40f79f8df92d6d0be750', // goodstuff.software (+ starrupture/simpletile)
@@ -157,14 +158,15 @@ async function computeSitesResponse(ctx: Parameters<PagesFunction<Env>>[0]): Pro
 
   // ── RUM requestHosts (GraphQL, rolling 90d) ──────────────────────────────────
   const token = (ctx.env.CF_ANALYTICS_TOKEN ?? '').trim()
-  if (token) {
+  const accountId = cfAccountId(ctx.env) // CF_ACCOUNT_ID secret; without it the RUM half is skipped, as without a token
+  if (token && accountId) {
     const until = new Date().toISOString()
     const since = new Date(Date.now() - 90 * 86_400_000).toISOString()
     const fields = SITE_TAGS.map(
       (t, i) =>
         `s${i}: rumPageloadEventsAdaptiveGroups(limit: 200, filter: { datetime_geq: "${since}", datetime_leq: "${until}", siteTag: "${t}" }) { count dimensions { requestHost } }`,
     ).join('\n')
-    const query = `query { viewer { accounts(filter: { accountTag: "${ACCOUNT_ID}" }) { ${fields} } } }`
+    const query = `query { viewer { accounts(filter: { accountTag: "${accountId}" }) { ${fields} } } }`
     try {
       const res = await fetch(GQL_ENDPOINT, {
         method: 'POST',

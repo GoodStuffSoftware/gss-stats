@@ -6,6 +6,15 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.34.0] — 2026-10-11
+
+### Security
+- **No env data in the public repo.** The Cloudflare account id now comes from Cloudflare and GitHub secrets (and Bitwarden for the local scripts) instead of the code and workflows, and the owner's email address is gone from the docs.
+- **Every push is scanned for secrets.** A pinned gitleaks check fails any push or pull request that adds a token, key, personal email address, public IP address or account id.
+
+### Changed
+- **Local stats need the account id in `.dev.vars`.** `wrangler pages dev` and `npm run limits:check` read `CF_ACCOUNT_ID` next to `CF_ANALYTICS_TOKEN`; without it `/api/stats` says it is not configured.
+
 ## [0.33.1] — 2026-10-11
 
 ### Fixed

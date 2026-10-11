@@ -426,7 +426,7 @@ describe('Google Ads client: read-only, no manager header', () => {
     expect(searchUrl()).toBe('https://googleads.googleapis.com/v25/customers/8726535246/googleAds:search')
   })
   it('refreshes the token, sends only authorization + developer-token, follows pagination', async () => {
-    process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID = '2775673007' // must be ignored
+    process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID = '1112223333' // made up; must be ignored
     try {
       const { f, calls } = fakeFetch([
         { results: [{ segments: { date: '2026-09-26' }, metrics: { costMicros: '10500000', impressions: '2600', clicks: '21' } }], nextPageToken: 'p2' },

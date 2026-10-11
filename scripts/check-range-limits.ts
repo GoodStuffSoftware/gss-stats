@@ -4,22 +4,28 @@
 //
 //   npm run limits:check
 //
-// The token is read from CF_ANALYTICS_TOKEN, or from the gitignored .dev.vars (see README
-// "Local development"). It is only sent to Cloudflare's API and never printed.
+// The token and the account id are read from CF_ANALYTICS_TOKEN and CF_ACCOUNT_ID, or from the
+// gitignored .dev.vars (see README "Local development"). Neither is in this repo or ever printed;
+// the token is only sent to Cloudflare's API.
 import { existsSync, readFileSync } from 'node:fs'
 import { RANGE_LIMITS } from '../functions/_lib/rangeGate'
+import { cfAccountId } from '../functions/_lib/cfAccount'
 
-const ACCOUNT_ID = 'REDACTED-CF-ACCOUNT' // same constant as functions/api/stats.ts
-
-function readToken(): string | undefined {
-  if (process.env.CF_ANALYTICS_TOKEN) return process.env.CF_ANALYTICS_TOKEN
+function readVar(name: string): string | undefined {
+  if (process.env[name]) return process.env[name]!.trim()
   if (!existsSync('.dev.vars')) return undefined
-  return readFileSync('.dev.vars', 'utf8').match(/^CF_ANALYTICS_TOKEN=(.*)$/m)?.[1]?.trim()
+  return readFileSync('.dev.vars', 'utf8').match(new RegExp(`^${name}=(.*)$`, 'm'))?.[1]?.trim()
 }
 
-const token = readToken()
+const token = readVar('CF_ANALYTICS_TOKEN')
 if (!token) {
   console.error('No CF_ANALYTICS_TOKEN in the environment or .dev.vars.')
+  process.exit(2)
+}
+// The same secret functions/api/stats.ts reads (functions/_lib/cfAccount.ts).
+const ACCOUNT_ID = cfAccountId({ CF_ACCOUNT_ID: readVar('CF_ACCOUNT_ID') })
+if (!ACCOUNT_ID) {
+  console.error('No CF_ACCOUNT_ID (32 hex) in the environment or .dev.vars.')
   process.exit(2)
 }
 

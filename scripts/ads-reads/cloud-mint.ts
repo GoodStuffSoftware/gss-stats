@@ -23,12 +23,15 @@
 //   a token name and id). Errors are redacted and never carry a response body.
 
 import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { exec, execFile } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { redact, redactedFirstLine, registerSecret } from '../../src/lib/adsRedact'
 import { createTimedFetch, type FetchLike } from '../../src/lib/adsApi'
 import { cloudEnvKey, createProdSecret, prodProjectId, prodSecrets, runBwsBinary } from './bwsProd'
 import { BWS_KEYS, type BwsRunner } from './secrets'
+import { resolveCfAccountId } from './cfAccount'
 import { EXTERNAL_TIMEOUT_MS } from './wrangler'
 
 export const FIRESTORE_PROJECT = 'best-sudoku-prod'
@@ -40,8 +43,8 @@ export const ADS_SA_ID = 'gss-ads-reads-ads'
  * account with googleads.googleapis.com enabled; the mint re-verifies it from the client id. */
 export const EXPECTED_ADS_PROJECT = 'best-sudoku-17306'
 export const ADS_API_SERVICE = 'googleads.googleapis.com'
-export const CF_ACCOUNT_ID = 'REDACTED-CF-ACCOUNT'
-export const CF_TOKEN_FILE = 'C:/Users/msant/dev/cf-token.txt'
+/** The Cloudflare admin token file (read into memory only): CF_TOKEN_FILE, else ~/dev/cf-token.txt. */
+export const CF_TOKEN_FILE = process.env.CF_TOKEN_FILE?.trim() || path.join(os.homedir(), 'dev', 'cf-token.txt')
 export const CF_TOKEN_NAME = 'gss-ads-reads-cloud-d1'
 export const CF_PERMISSION_GROUPS = ['D1 Read', 'D1 Write'] as const
 const CF_API = 'https://api.cloudflare.com/client/v4'
@@ -61,6 +64,8 @@ export interface MintDeps {
   readFile: (p: string) => string
   sleep: (ms: number) => Promise<void>
   log: (line: string) => void
+  /** Where CLOUDFLARE_ACCOUNT_ID is looked up first (cfAccount.ts); process.env when absent. */
+  env?: Record<string, string | undefined>
 }
 
 // gcloud on Windows is gcloud.cmd, which Node can only start through a shell (exec, hidden). Every argument is
@@ -346,28 +351,29 @@ export function pickPermissionGroups(groups: unknown): { id: string; name: strin
 }
 
 /** The create body: account-scoped, D1 Read + D1 Write, and deliberately no expires_on. */
-export function cfTokenBody(groups: { id: string }[]): unknown {
+export function cfTokenBody(groups: { id: string }[], accountId: string): unknown {
   return {
     name: CF_TOKEN_NAME,
-    policies: [{ effect: 'allow', resources: { [`com.cloudflare.api.account.${CF_ACCOUNT_ID}`]: '*' }, permission_groups: groups.map((g) => ({ id: g.id })) }],
+    policies: [{ effect: 'allow', resources: { [`com.cloudflare.api.account.${accountId}`]: '*' }, permission_groups: groups.map((g) => ({ id: g.id })) }],
   }
 }
 
 export async function mintCfD1(d: MintDeps): Promise<void> {
   const key = MINT_KEYS['cf-d1']
   const prodId = await refuseIfExists(d, key)
+  const accountId = await resolveCfAccountId({ env: d.env, bws: d.bws })
   let admin: string | null = d.readFile(CF_TOKEN_FILE).trim()
   if (!admin) throw new Error('the Cloudflare admin token file is empty')
   registerSecret(admin)
   try {
-    const acct = `/accounts/${CF_ACCOUNT_ID}`
+    const acct = `/accounts/${accountId}`
     const groups = pickPermissionGroups((await cf(d, admin, 'GET', `${acct}/tokens/permission_groups`)).result)
     for (let page = 1; page <= 20; page++) {
       const r = await cf(d, admin, 'GET', `${acct}/tokens?per_page=50&page=${page}`)
       if ((r.result ?? []).some((t: any) => t?.name === CF_TOKEN_NAME)) throw new Error(`a Cloudflare token named ${CF_TOKEN_NAME} already exists; refusing to mint a second one`)
       if (!r.result_info?.total_pages || page >= r.result_info.total_pages) break
     }
-    const created = (await cf(d, admin, 'POST', `${acct}/tokens`, cfTokenBody(groups))).result
+    const created = (await cf(d, admin, 'POST', `${acct}/tokens`, cfTokenBody(groups, accountId))).result
     const value = created?.value
     const id = typeof created?.id === 'string' ? created.id : '(unknown id)'
     if (typeof value !== 'string' || !value) throw new Error(`Cloudflare created token ${id} but returned no value; revoke it`)

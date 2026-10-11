@@ -861,7 +861,8 @@ The limits are constants in [`functions/_lib/rangeGate.ts`](functions/_lib/range
 failure mode to every chart load for numbers that only change with the account's plan.
 `npm run limits:check` compares them with the account's live settings
 (`viewer.accounts.settings.<dataset>{ maxDuration notOlderThan }`, read with the local analytics
-token, never printed) and exits 1 on a mismatch.
+token and `CF_ACCOUNT_ID`, from the environment or `.dev.vars`, neither printed) and exits 1 on a
+mismatch.
 
 ## Ads-read routines (Best Sudoku)
 
@@ -1525,9 +1526,12 @@ runs the tests (`npm test`), then builds and publishes to Cloudflare Pages autom
 GitHub's runners (nothing local); a red test stops the deploy. Pull requests run the same
 tests and build ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 One-time setup: add a repo secret **`CLOUDFLARE_API_TOKEN`** (Settings → Secrets and variables
-→ Actions) — a Cloudflare token with **Cloudflare Pages: Edit**. The runtime `CF_ANALYTICS_TOKEN`
-and the sign-in settings ([Auth](#auth)) are Pages *project* secrets and aren't needed by the
-workflow (deploys keep existing secrets).
+→ Actions) — a Cloudflare token with **Cloudflare Pages: Edit** — and a repo secret
+**`CLOUDFLARE_ACCOUNT_ID`** (the account id, which every deploy job passes to wrangler). The
+manual gss-geo workflows (`diagnose-geo.yml`, `migrate-campaign.yml`) also read
+**`GSS_GEO_D1_ID`**. The runtime `CF_ANALYTICS_TOKEN`, `CF_ACCOUNT_ID` and the sign-in settings
+([Auth](#auth)) are Pages *project* secrets and aren't needed by the workflow (deploys keep
+existing secrets). See [Environment data](#environment-data).
 
 **The sync Worker deploys on merge too** — a second, independent job (`deploy-worker`) in the
 same workflow, so a Worker failure never fails or blocks the Pages deploy. It runs
@@ -1757,10 +1761,11 @@ cookie; a copied cookie stays valid until it expires (see the ADR).
 
 | Name | Required | Value |
 |---|---|---|
+| `CF_ACCOUNT_ID` | yes | The Cloudflare account id (32 hex) that `/api/stats` and `/api/sites` query RUM for, alongside `CF_ANALYTICS_TOKEN`. Without it `/api/stats` answers 500 `CF_ACCOUNT_ID not configured` and the site list falls back to beacon hosts only |
 | `GOOGLE_CLIENT_ID` | yes | The OAuth client ID (`….apps.googleusercontent.com`) |
 | `GOOGLE_CLIENT_SECRET` | yes | That client's secret |
 | `SESSION_SECRET` | yes | At least 32 random characters. Generate with `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"` |
-| `ALLOWED_EMAILS` | yes | Comma-separated, case-insensitive, exact addresses, no wildcards. Same format as deckhand's `DECKHAND_ADMIN_EMAILS`. Example: `REDACTED-EMAIL`. **Only `gmail.com` or Google Workspace addresses.** A Google account registered with any other email (e.g. an ISP or work address that isn't Workspace) can show that email as "verified", but Google doesn't vouch for it later: whoever controls that mailbox afterwards can create a Google account with the same email and sign in |
+| `ALLOWED_EMAILS` | yes | Comma-separated, case-insensitive, exact addresses, no wildcards. Same format as deckhand's `DECKHAND_ADMIN_EMAILS`. Example: `you@gmail.com`. **Only `gmail.com` or Google Workspace addresses.** A Google account registered with any other email (e.g. an ISP or work address that isn't Workspace) can show that email as "verified", but Google doesn't vouch for it later: whoever controls that mailbox afterwards can create a Google account with the same email and sign in |
 | `SESSION_TTL_HOURS` | no | Session length in hours: a plain number from `1` to `720`. Default `168` (7 days). Any other value (text, `0`, `1e3`, over `720`) is a configuration error, so sign-in is locked with the 503 below until it is fixed |
 | `AUTH_DEV_BYPASS` | **never set on Pages** | Local-only escape hatch (see Local development below). Only the exact value `1` turns it on, and it is ignored off loopback anyway |
 
@@ -1790,7 +1795,7 @@ dashboard is never without a gate.
    - Leave JavaScript origins empty.
    - On the consent screen, check that `goodstuff.software` is an authorized domain. It
      should already be there for deckhand. If the app's publishing status is
-     **Testing**, `REDACTED-EMAIL` must be listed under **Test users**.
+     **Testing**, every address in `ALLOWED_EMAILS` must be listed under **Test users**.
 2. **Set the four required secrets** on the `gss-stats` Pages project, Production
    environment. Use the dashboard (**Settings → Variables and Secrets → Add**, type
    **Secret**), or run:
@@ -1922,9 +1927,37 @@ exchange. No test calls Google.
   `*.pages.dev` and preview URLs, so there is exactly one origin for cookies and the
   OAuth redirect.
 - **Token hygiene.** The real tokens live only in a gitignored `.dev.vars` (local) and in
-  Cloudflare Pages secrets (production), never in the repo. Follow-up: mint a
+  Cloudflare Pages secrets (production), never in the repo (see [Environment data](#environment-data)). Follow-up: mint a
   least-privilege token with only "Account Analytics Read" and set it as the
   `CF_ANALYTICS_TOKEN` secret.
+
+## Environment data
+
+**The repo is public, so it holds no env data.** Every secret (tokens, keys, client secrets,
+session secrets), every piece of personal or ops data (email addresses, IP addresses, names) and
+the Cloudflare account id come from one of these at run time, never from a committed file:
+
+| Where it runs | Source | Set with |
+|---|---|---|
+| Pages Functions (production) | Pages project secrets: `CF_ANALYTICS_TOKEN`, `CF_ACCOUNT_ID`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET`, `ALLOWED_EMAILS` | `npx wrangler pages secret put <NAME> --project-name gss-stats`, value on stdin |
+| `gss-stats-sync` Worker | Cloudflare Secrets Store (the four Google Ads credentials) | `npm run ads:worker-secrets` (from Bitwarden) |
+| GitHub Actions | Repo secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_WORKERS_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `GSS_GEO_D1_ID` | `gh secret set <NAME>`, value on stdin |
+| Local scripts (`scripts/`) | Bitwarden Secrets Manager (`bws`, `BWS_ACCESS_TOKEN`) or env vars; the account id is `CLOUDFLARE_ACCOUNT_ID`, else bws prod `infra--cloud-routine-env--CLOUDFLARE_ACCOUNT_ID` | `bws secret create` |
+| Local `wrangler pages dev` | The gitignored `.dev.vars` ([`.dev.vars.example`](.dev.vars.example) lists the names) | by hand |
+
+What stays committed, on purpose: the binding ids `wrangler.toml` and `workers/sync/wrangler.toml`
+need (the KV namespace, the two D1 databases, the Secrets Store), the Web Analytics site tags
+(public in every page's beacon snippet), and the Google Ads customer id and GCP project ids the
+Ads guards pin. None of them grants access on its own. Tests and examples use made-up values
+(`example.com`, `0123…` ids).
+
+**Guard.** `.github/workflows/secret-scan.yml` runs [gitleaks](https://github.com/gitleaks/gitleaks)
+(pinned, checksum-verified) on every push and pull request, with the rules in
+[`.gitleaks.toml`](.gitleaks.toml) (the defaults plus personal email addresses, public IP
+addresses, account ids and Google OAuth client ids). A finding fails the run. To run it before
+you push, with a local gitleaks binary: `gitleaks git --config .gitleaks.toml --redact .`
+Findings from commits made before the guard existed are listed by fingerprint (never by value)
+in [`.gitleaksignore`](.gitleaksignore).
 
 ## Branch
 

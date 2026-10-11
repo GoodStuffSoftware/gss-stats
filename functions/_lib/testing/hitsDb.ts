@@ -84,6 +84,10 @@ export function installCaches(cache: CacheLike): () => void {
   }
 }
 
+/** A made-up Cloudflare account id (32 hex) for the CF_ACCOUNT_ID secret in tests; the real one
+ * is env data and is never in this repo (README "Environment data"). */
+export const TEST_ACCOUNT_ID = '0123456789abcdef0123456789abcdef'
+
 /** The minimal EventContext a Pages Function handler reads (request, env, waitUntil). */
 export function pagesContext<E>(request: Request, env: E, waited: Promise<unknown>[] = []): EventContext<E, string, Record<string, unknown>> {
   return {
