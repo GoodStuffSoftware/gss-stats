@@ -15,6 +15,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 ### Changed
 - **Local stats need the account id in `.dev.vars`.** `wrangler pages dev` and `npm run limits:check` read `CF_ACCOUNT_ID` next to `CF_ANALYTICS_TOKEN`; without it `/api/stats` says it is not configured.
 
+## [0.33.1] — 2026-10-11
+
+### Fixed
+- **The cloud routine sends one bus message per report.** Each arm's and each stage's report goes out on its own, cut into numbered parts by the shell when over 15000 characters, so nothing is truncated or abridged. The bus body is the exact report; the written analysis stays in the routine's own output.
+
 ## [0.33.0] — 2026-10-06
 
 ### Added
