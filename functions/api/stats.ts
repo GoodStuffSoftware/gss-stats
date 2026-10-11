@@ -1,8 +1,9 @@
 /// <reference types="@cloudflare/workers-types" />
 //
 // Server-side analytics proxy. Holds the Cloudflare API token (CF_ANALYTICS_TOKEN
-// secret) and queries the GraphQL Analytics API for bot-free RUM pageviews. The
-// browser calls THIS endpoint; the token never reaches client-side code.
+// secret) and the account id (CF_ACCOUNT_ID secret, functions/_lib/cfAccount.ts), and
+// queries the GraphQL Analytics API for bot-free RUM pageviews. The browser calls THIS
+// endpoint; the token never reaches client-side code.
 //
 // POST body: {
 //   site: 'goodstuff.software' | 'goodstuffsoftware.com' | 'bestsudoku.app' | 'all',
@@ -26,13 +27,14 @@ import { buildCacheKeyUrl, cachedJson, SKIP_EDGE_CACHE_HEADER, ttlSecondsFor, ty
 import { WHEN_RE } from '../../src/lib/range'
 import { gateRange, isRangeLimitError, isRangeLimitText, upstreamRejectedNotice } from '../_lib/rangeGate'
 import type { RangeNotice } from '../../src/lib/rangeNotice'
+import { cfAccountId } from '../_lib/cfAccount'
 
 interface Env {
   CF_ANALYTICS_TOKEN: string
+  CF_ACCOUNT_ID?: string
   STATS_CONFIG: KVNamespace
 }
 
-const ACCOUNT_ID = 'a32bba62c77df5e8f6bd33d04478ec34'
 const GQL_ENDPOINT = 'https://api.cloudflare.com/client/v4/graphql'
 
 const SITE_TAGS: Record<string, string> = {
@@ -150,6 +152,10 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const apiToken = (ctx.env.CF_ANALYTICS_TOKEN ?? '').trim()
   if (!apiToken) {
     return json({ error: 'CF_ANALYTICS_TOKEN not configured' }, 500)
+  }
+  const accountId = cfAccountId(ctx.env)
+  if (!accountId) {
+    return json({ error: 'CF_ACCOUNT_ID not configured' }, 500)
   }
 
   const site = body.site === 'all' || (body.site && body.site in SITE_TAGS) ? body.site : 'goodstuff.software'
@@ -278,7 +284,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
 
   const query = `query {
     viewer {
-      accounts(filter: { accountTag: "${ACCOUNT_ID}" }) {
+      accounts(filter: { accountTag: "${accountId}" }) {
         ${fields}
       }
     }

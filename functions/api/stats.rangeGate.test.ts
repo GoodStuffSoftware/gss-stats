@@ -3,7 +3,7 @@
 // notice instead of raw JSON. The GraphQL endpoint is a stubbed fetch; nothing leaves the process.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { onRequestPost } from './stats'
-import { installCaches, memoryCache, pagesContext, postJson } from '../_lib/testing/hitsDb'
+import { installCaches, memoryCache, pagesContext, postJson, TEST_ACCOUNT_ID } from '../_lib/testing/hitsDb'
 
 const NOW = Date.parse('2026-10-03T16:00:00Z') // noon EDT
 
@@ -40,7 +40,7 @@ const rangeError = (msg: string) => ({ data: null, errors: [{ message: msg, path
 async function post(body: Record<string, unknown>) {
   const waited: Promise<unknown>[] = []
   const req = postJson('/api/stats', { site: 'all', dimensions: ['date'], metric: 'pageviews', limit: 50, ...body })
-  const res = await onRequestPost(pagesContext(req, { CF_ANALYTICS_TOKEN: 'test-token-not-real', STATS_CONFIG: {} as KVNamespace }, waited))
+  const res = await onRequestPost(pagesContext(req, { CF_ANALYTICS_TOKEN: 'test-token-not-real', CF_ACCOUNT_ID: TEST_ACCOUNT_ID, STATS_CONFIG: {} as KVNamespace }, waited))
   await Promise.all(waited)
   return { res, json: (await res.json()) as any }
 }
@@ -147,8 +147,8 @@ describe('/api/stats — gate before querying', () => {
 })
 
 describe('/api/stats — Cloudflare still refuses the range', () => {
-  const tooWide = 'account "a32bba62c77df5e8f6bd33d04478ec34" cannot request a time range wider than 13w2d, but your query time range spans 38w2d15h32m42s924ms'
-  const tooOld = 'account "a32bba62c77df5e8f6bd33d04478ec34" cannot request data older than 26w2d, but your query requests data from 28w4d6s ago'
+  const tooWide = `account "${TEST_ACCOUNT_ID}" cannot request a time range wider than 13w2d, but your query time range spans 38w2d15h32m42s924ms`
+  const tooOld = `account "${TEST_ACCOUNT_ID}" cannot request data older than 26w2d, but your query requests data from 28w4d6s ago`
 
   it.each([
     ['too wide', tooWide],
@@ -158,7 +158,7 @@ describe('/api/stats — Cloudflare still refuses the range', () => {
     const { res, json } = await post({ since: '2026-09-01', until: '2026-09-30' })
     expect(res.status).toBe(200)
     expect(json.error).toBeUndefined()
-    expect(JSON.stringify(json)).not.toContain('a32bba62') // the account id is not echoed back
+    expect(JSON.stringify(json)).not.toContain(TEST_ACCOUNT_ID) // the account id is not echoed back
     expect(json.rows).toEqual([])
     expect(json.notice).toEqual({
       kind: 'range-clamped',
@@ -208,7 +208,7 @@ describe('/api/stats — Cloudflare still refuses the range', () => {
     expect(json.error).toBeUndefined()
     expect(json.rows).toEqual([])
     expect(json.notice).toMatchObject({ reason: 'upstream-rejected', served: null, requested: { from: '2026-09-01T00:00:00.000Z', to: '2026-10-01T00:00:00.000Z' } })
-    expect(JSON.stringify(json)).not.toContain('a32bba62')
+    expect(JSON.stringify(json)).not.toContain(TEST_ACCOUNT_ID)
     expect(res.headers.get('X-Skip-Edge-Cache')).toBeNull()
     expect(cache.keys()).toEqual([])
   })

@@ -14,8 +14,8 @@ jobs:
       - name: Query gss-geo
         env:
           TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          ACCT: a32bba62c77df5e8f6bd33d04478ec34
-          DB: fa0b2929-0086-479e-ae10-50509c34ebf8
+          ACCT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DB: ${{ secrets.GSS_GEO_D1_ID }}
         run: |
           q() {
             echo ""

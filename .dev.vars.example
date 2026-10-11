@@ -1,6 +1,8 @@
 # Local dev secrets for `wrangler pages dev`. Copy to .dev.vars (gitignored).
 # Value = a Cloudflare API token with Account Analytics Read.
 CF_ANALYTICS_TOKEN=your-cloudflare-analytics-token
+# The Cloudflare account id (32 hex, dashboard → Account home → Account ID). Env data: never commit it.
+CF_ACCOUNT_ID=your-32-hex-cloudflare-account-id
 
 # Sign-in (README "Auth"). Pick ONE of the two options below.
 #

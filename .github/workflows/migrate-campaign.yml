@@ -5,8 +5,8 @@ name: Migrate gss-geo — campaign columns
 # re-running just reports "already exists" for columns that are present.
 #
 # Requires the CLOUDFLARE_API_TOKEN repo secret to include **Account · D1 · Edit**
-# (the deploy token is Pages-only by default). Account + database IDs are already
-# public in this repo (wrangler.toml / functions), so they're inlined here.
+# (the deploy token is Pages-only by default). The account id and the gss-geo database id
+# come from the CLOUDFLARE_ACCOUNT_ID and GSS_GEO_D1_ID repo secrets (README "Environment data").
 on:
   workflow_dispatch:
 
@@ -17,8 +17,8 @@ jobs:
       - name: Add source/medium/campaign columns to hits
         env:
           TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          ACCT: a32bba62c77df5e8f6bd33d04478ec34
-          DB: fa0b2929-0086-479e-ae10-50509c34ebf8
+          ACCT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DB: ${{ secrets.GSS_GEO_D1_ID }}
         run: |
           set -euo pipefail
           fail=0

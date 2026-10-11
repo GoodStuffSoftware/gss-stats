@@ -17,19 +17,28 @@
 // Worker reads the new value on its next invocation (no redeploy).
 
 import { spawn } from 'node:child_process'
+import fs from 'node:fs'
+import path from 'node:path'
 import { parseArgs } from 'node:util'
 import { redact, registerSecret } from '../../src/lib/adsRedact'
 import type { AdsCredentials } from '../../src/lib/adsApi'
 import { fail, loadCfToken } from './cli'
 import { BWS_KEYS, loadAdsCredentials } from './secrets'
 import { repoRoot } from './wrangler'
+import { resolveCfAccountId } from './cfAccount'
 
-export const CF_ACCOUNT_ID = 'a32bba62c77df5e8f6bd33d04478ec34'
-export const SECRETS_STORE_ID = 'deb0011dfe80443091c08d92874ddf06'
-const API = `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/secrets_store/stores/${SECRETS_STORE_ID}/secrets`
+/** The Secrets Store id, read from workers/sync/wrangler.toml (its bindings need it there), so it is
+ * stated once. Every store_id in the file must agree. */
+export function secretsStoreIdFromToml(toml: string): string {
+  const ids = [...new Set([...toml.matchAll(/^\s*store_id\s*=\s*"([0-9a-f]{32})"\s*$/gm)].map((m) => m[1]))]
+  if (ids.length !== 1) throw new Error(`expected one Secrets Store id in workers/sync/wrangler.toml, found ${ids.length}`)
+  return ids[0]
+}
 
-async function api(token: string, method: string, path: string, body?: unknown): Promise<any> {
-  const res = await fetch(`${API}${path}`, {
+const apiBase = (accountId: string, storeId: string) => `https://api.cloudflare.com/client/v4/accounts/${accountId}/secrets_store/stores/${storeId}/secrets`
+
+async function api(base: string, token: string, method: string, path: string, body?: unknown): Promise<any> {
+  const res = await fetch(`${base}${path}`, {
     method,
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -41,13 +50,13 @@ async function api(token: string, method: string, path: string, body?: unknown):
 }
 
 /** Pipes `value` into `wrangler secrets-store secret create` on stdin. */
-function createWithWrangler(name: string, value: string, token: string): Promise<{ code: number; message: string }> {
+function createWithWrangler(name: string, value: string, token: string, accountId: string, storeId: string): Promise<{ code: number; message: string }> {
   const root = repoRoot()
   return new Promise((resolve) => {
     const child = spawn(
       process.execPath,
-      [`${root}/node_modules/wrangler/bin/wrangler.js`, 'secrets-store', 'secret', 'create', SECRETS_STORE_ID, '--name', name, '--scopes', 'workers', '--comment', 'from Bitwarden via npm run ads:worker-secrets', '--remote'],
-      { cwd: root, env: { ...process.env, CLOUDFLARE_API_TOKEN: token, CLOUDFLARE_ACCOUNT_ID: CF_ACCOUNT_ID, WRANGLER_SEND_METRICS: 'false', NO_COLOR: '1' }, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] },
+      [`${root}/node_modules/wrangler/bin/wrangler.js`, 'secrets-store', 'secret', 'create', storeId, '--name', name, '--scopes', 'workers', '--comment', 'from Bitwarden via npm run ads:worker-secrets', '--remote'],
+      { cwd: root, env: { ...process.env, CLOUDFLARE_API_TOKEN: token, CLOUDFLARE_ACCOUNT_ID: accountId, WRANGLER_SEND_METRICS: 'false', NO_COLOR: '1' }, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] },
     )
     let out = ''
     child.stdout.on('data', (d) => (out += d))
@@ -65,7 +74,10 @@ async function main() {
   const token = loadCfToken(opts['cf-token-file'])
   if (!token) throw new Error('needs a Cloudflare API token (--cf-token-file or CLOUDFLARE_API_TOKEN) with Secrets Store Edit')
   const creds = await loadAdsCredentials() // bws, in memory, each value registered with redact()
-  const list = (await api(token, 'GET', '?per_page=100')) as { id: string; name: string }[]
+  const accountId = await resolveCfAccountId() // CLOUDFLARE_ACCOUNT_ID, else bws prod (cfAccount.ts)
+  const storeId = secretsStoreIdFromToml(fs.readFileSync(path.join(repoRoot(), 'workers', 'sync', 'wrangler.toml'), 'utf8'))
+  const base = apiBase(accountId, storeId)
+  const list = (await api(base, token, 'GET', '?per_page=100')) as { id: string; name: string }[]
   const existing = new Map(list.map((s) => [s.name, s.id]))
   const lines: string[] = []
   for (const [field, name] of Object.entries(BWS_KEYS) as [keyof AdsCredentials, string][]) {
@@ -77,15 +89,15 @@ async function main() {
       continue
     }
     if (id) {
-      await api(token, 'PATCH', `/${id}`, { value })
+      await api(base, token, 'PATCH', `/${id}`, { value })
       lines.push(`${name}: updated`)
     } else {
-      const r = await createWithWrangler(name, value, token)
+      const r = await createWithWrangler(name, value, token, accountId, storeId)
       if (r.code !== 0) throw new Error(`creating ${name} failed (exit ${r.code}): ${r.message}`)
       lines.push(`${name}: created`)
     }
   }
-  const after = (await api(token, 'GET', '?per_page=100')) as { name: string; scopes?: string[] }[]
+  const after = (await api(base, token, 'GET', '?per_page=100')) as { name: string; scopes?: string[] }[]
   for (const name of Object.values(BWS_KEYS)) {
     const s = after.find((x) => x.name === name)
     lines.push(`  check ${name}: ${s ? `present, scopes ${(s.scopes ?? []).join(',') || '—'}` : 'MISSING'}`)

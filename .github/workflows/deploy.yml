@@ -6,10 +6,12 @@ name: Deploy
 #
 # One-time setup: add a repository secret CLOUDFLARE_API_TOKEN (Settings → Secrets and
 # variables → Actions). Mint it at Cloudflare → My Profile → API Tokens with the
-# "Cloudflare Pages: Edit" permission on this account. The sync Worker job below uses the
-# optional secret CLOUDFLARE_WORKERS_API_TOKEN (Workers Scripts: Edit, plus Secrets Store if its
-# bindings need it) and falls back to CLOUDFLARE_API_TOKEN. The runtime analytics secret
-# (CF_ANALYTICS_TOKEN) is a Pages project secret and is NOT needed here — deploys keep
+# "Cloudflare Pages: Edit" permission on this account, and a repository secret
+# CLOUDFLARE_ACCOUNT_ID (the account id: env data, never committed; README "Environment data").
+# The sync Worker job below uses the optional secret CLOUDFLARE_WORKERS_API_TOKEN (Workers
+# Scripts: Edit, plus Secrets Store if its bindings need it) and falls back to
+# CLOUDFLARE_API_TOKEN. The runtime analytics secrets (CF_ANALYTICS_TOKEN, CF_ACCOUNT_ID) are
+# Pages project secrets and are NOT needed here — deploys keep
 # the project's existing secrets.
 on:
   push:
@@ -57,7 +59,7 @@ jobs:
         run: npx wrangler pages deploy dist --project-name=gss-stats --branch=main
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: a32bba62c77df5e8f6bd33d04478ec34
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
   deploy-live:
     if: github.ref == 'refs/heads/main' # a manual run from another branch must not deploy gss-live to production
@@ -120,7 +122,7 @@ jobs:
         env:
           # A Worker-capable token can be added without touching the Pages secret.
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: a32bba62c77df5e8f6bd33d04478ec34
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       - name: Explain a failed gss-live deploy
         if: failure() && steps.deploy.conclusion == 'failure'
         run: |
@@ -186,7 +188,7 @@ jobs:
         env:
           # A Worker-capable token can be added without touching the Pages secret.
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: a32bba62c77df5e8f6bd33d04478ec34
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       - name: Explain a failed Worker deploy
         if: failure() && steps.deploy.conclusion == 'failure'
         run: |

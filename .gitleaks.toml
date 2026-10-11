@@ -1,0 +1,87 @@
+# gitleaks rules for this PUBLIC repo (README "Environment data"). The secret-scan workflow runs
+# them on every push and pull request; locally: gitleaks git --config .gitleaks.toml --redact .
+# The defaults catch tokens and keys; the rules below add the env data they miss. Allowlists
+# name made-up test values only, never a real one.
+
+title = "gss-stats"
+
+[extend]
+useDefault = true
+
+# Default-rule false positives: public constants, not secrets.
+[[allowlists]]
+targetRules = ["generic-api-key"]
+regexTarget = "line"
+regexes = [
+  '''dGhlIHNhbXBsZSBub25jZQ==''',             # the RFC 6455 sample Sec-WebSocket-Key
+  '''keyAlgorithm: 'KEY_ALG_RSA_2048'(?:\W|$)''', # an IAM API enum
+  '''const ids = \['bsk\.pageviews',''',      # metric ids in a test
+]
+
+[[rules]]
+id = "personal-email"
+description = "An email address that is not a made-up example (env data: ALLOWED_EMAILS and the like live in secrets)"
+regex = '''[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}'''
+keywords = ["@"]
+[[rules.allowlists]]
+regexes = [
+  '''(?i)@(?:[a-z0-9-]+\.)*example(?:\.[a-z]+)*$''',   # example.com and its test variants
+  '''(?i)^[a-z]@[a-z]\.com$''',                         # a@x.com style fixtures
+  '''(?i)^(?:stranger|x)@gmail\.com$''',                # the auth tests' outsiders
+  '''(?i)\.iam\.gserviceaccount\.com$''',               # service-account identifiers, not people
+  '''^noreply@anthropic\.com$''',                       # the commit trailer in CLAUDE.md
+  '''^git@github\.com$''',
+  '''^you@gmail\.com$''',                               # the README placeholder
+]
+
+[[rules]]
+id = "public-ipv4"
+description = "A public IPv4 address (e.g. an excluded home IP: env data, keep it in D1 or a secret)"
+regex = '''\b((?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d))\b'''
+secretGroup = 1
+keywords = ["."]
+[[rules.allowlists]]
+regexes = [
+  '''^(?:0|10|127)\.''',
+  '''^192\.168\.''',
+  '''^172\.(?:1[6-9]|2\d|3[01])\.''',
+  '''^169\.254\.''',
+  '''^(?:192\.0\.2|198\.51\.100|203\.0\.113)\.''',      # RFC 5737 documentation ranges
+  '''^255\.255\.''',
+  '''^1\.2\.3\.4$''',                                   # the geo tests' sample address
+]
+[[rules.allowlists]]
+regexTarget = "line"
+regexes = ['''Core\s+§?3\.1\.3\.7''']                  # an OIDC spec section number, not an address
+[[rules.allowlists]]
+paths = ['''(?:^|/)package-lock\.json$''']
+
+[[rules]]
+id = "cloudflare-account-id"
+description = "A Cloudflare account id (env data: CF_ACCOUNT_ID / CLOUDFLARE_ACCOUNT_ID secrets)"
+regex = '''(?i)(?:account[_-]?id|accounttag|acct|/accounts/|cloudflare\.api\.account\.)["'\s:=]{0,4}([0-9a-f]{32})\b'''
+secretGroup = 1
+keywords = ["account", "acct"]
+[[rules.allowlists]]
+regexes = [
+  '''^0123456789abcdef0123456789abcdef$''',
+  '''^fedcba9876543210fedcba9876543210$''',
+]
+
+[[rules]]
+id = "google-oauth-client-id"
+description = "A Google OAuth client id (env data: GOOGLE_CLIENT_ID secret, or bws)"
+regex = '''\b\d{6,}-[a-z0-9]{20,}\.apps\.googleusercontent\.com\b'''
+keywords = ["googleusercontent"]
+
+[[rules]]
+id = "google-oauth-client-secret"
+description = "A Google OAuth client secret"
+regex = '''\bGOCSPX-[A-Za-z0-9_-]{20,}'''
+keywords = ["gocspx"]
+
+[[rules]]
+id = "bitwarden-access-token"
+description = "A Bitwarden Secrets Manager machine-account access token (BWS_ACCESS_TOKEN)"
+regex = '''\b0\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[A-Za-z0-9]{20,}:[A-Za-z0-9+/=]{20,}'''
+keywords = ["0."]
