@@ -17,7 +17,6 @@ import { spawn } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { redact, redactedFirstLine, registerSecret } from '../../src/lib/adsRedact'
 import { cloudEnvKey, prodProjectId, prodSecrets, runBwsBinary } from './bwsProd'
-import { CF_ACCOUNT_ID } from './cloud-mint'
 import { BWS_KEYS, type BwsRunner } from './secrets'
 
 /** The block, in order: env var name -> where its value comes from. */
@@ -26,7 +25,7 @@ export const CLOUD_ENV_SPEC: readonly { name: string; bwsKey?: string; constant?
   { name: 'ADS_DEVELOPER_TOKEN', bwsKey: BWS_KEYS.developerToken },
   { name: 'FIRESTORE_SA_B64', bwsKey: cloudEnvKey('FIRESTORE_SA_B64') },
   { name: 'CLOUDFLARE_API_TOKEN', bwsKey: cloudEnvKey('CLOUDFLARE_API_TOKEN') },
-  { name: 'CLOUDFLARE_ACCOUNT_ID', constant: CF_ACCOUNT_ID },
+  { name: 'CLOUDFLARE_ACCOUNT_ID', bwsKey: cloudEnvKey('CLOUDFLARE_ACCOUNT_ID') }, // env data: bws, never a repo constant
   { name: 'WRANGLER_SEND_METRICS', constant: 'false' },
   { name: 'ADS_ROUTINE_MODE', constant: 'SHADOW' },
 ]

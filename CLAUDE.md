@@ -35,6 +35,14 @@ bump and changelog promotion (see Changelog).
 
 Mike doesn't review PRs (2026-10-06): the writer spawns its own parity reviewer, runs one fix round, then merges to main and verifies the deploy; Mike looks at the live result.
 
+## Environment data
+
+The repo is **public**. Env data (tokens, keys, secrets, email addresses, IP addresses, the
+Cloudflare account id) comes **only** from Cloudflare secrets (Pages secrets, Secrets Store),
+GitHub Actions secrets, or Bitwarden (`bws`) / env vars at run time; never commit it, and use
+made-up values in tests. See [README → Environment data](README.md#environment-data); the
+`secret-scan` workflow (gitleaks, `.gitleaks.toml`) fails a push that adds any.
+
 ## Destructive git safety
 
 Before any `push --force`, `reset --hard`, or deleting an origin-tracked branch:

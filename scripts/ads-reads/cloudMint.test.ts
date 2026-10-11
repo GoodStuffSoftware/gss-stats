@@ -9,7 +9,6 @@ import { createProdSecret, prodSecrets } from './bwsProd'
 import {
   ADS_SA_ID,
   assertSafeGcloudArgs,
-  CF_ACCOUNT_ID,
   CF_TOKEN_FILE,
   CF_TOKEN_NAME,
   cfTokenBody,
@@ -24,13 +23,17 @@ import {
   type ExecResult,
   type MintDeps,
 } from './cloud-mint'
+import { CF_ACCOUNT_BWS_KEY, resolveCfAccountId } from './cfAccount'
 import { buildEnvBlock, CLEAR_SCRIPT, CLOUD_ENV_SPEC, powershellArgs, runCloudEnv, SET_SCRIPT, sha256Hex, type PowerShellRunner } from './cloud-env'
 
 afterEach(() => clearRegisteredSecrets())
 
+/** A made-up account id: the real one is env data, read at run time (cfAccount.ts). */
+const CF_ACCOUNT_ID = 'fedcba9876543210fedcba9876543210'
+
 const PROD = 'prod-project-uuid'
 const KEY_JSON = (email: string) => JSON.stringify({ type: 'service_account', client_email: email, private_key: '-----BEGIN PRIVATE KEY-----\nMIIfakeprivatekeymaterial\n-----END PRIVATE KEY-----\n', private_key_id: 'keyid123' })
-const CLIENT_ID = '353430848249-abcdef123.apps.googleusercontent.com'
+const CLIENT_ID = '111122223333-abcdef123.apps.googleusercontent.com'
 const CF_ADMIN = 'cf-admin-token-value-0123456789'
 const CF_NEW = 'cf-minted-d1-token-value-9876543210'
 
@@ -66,7 +69,7 @@ function fakeGcloud(opts: { saExists?: boolean; projectNumber?: string; projectI
       const bindings = Object.entries(opts.roles ?? {}).map(([role, members]) => ({ role, members }))
       return { code: 0, stdout: JSON.stringify({ bindings }), stderr: '' }
     }
-    if (j.startsWith('projects describe')) return { code: 0, stdout: JSON.stringify({ projectId: opts.projectId ?? EXPECTED_ADS_PROJECT, projectNumber: opts.projectNumber ?? '353430848249' }), stderr: '' }
+    if (j.startsWith('projects describe')) return { code: 0, stdout: JSON.stringify({ projectId: opts.projectId ?? EXPECTED_ADS_PROJECT, projectNumber: opts.projectNumber ?? '111122223333' }), stderr: '' }
     if (j.startsWith('services list')) return { code: 0, stdout: JSON.stringify(opts.adsEnabled === false ? [] : [{ config: { name: 'googleads.googleapis.com' } }]), stderr: '' }
     return { code: 0, stdout: '', stderr: '' }
   }
@@ -107,6 +110,7 @@ function deps(over: Partial<MintDeps>) {
     },
     sleep: async () => {},
     log: (l) => void logs.push(l),
+    env: over.env ?? { CLOUDFLARE_ACCOUNT_ID: CF_ACCOUNT_ID },
   }
   return { d, logs, reads }
 }
@@ -189,7 +193,7 @@ describe('cloud-mint: Ads SA', () => {
     const iam = fakeIam()
     const { d, logs } = deps({ bws: b.bws, gcloud: g.gcloud, fetch: iam.f })
     await mintAdsSa(d)
-    expect(g.calls.find((c) => c[0] === 'projects' && c[1] === 'describe')).toEqual(['projects', 'describe', '353430848249', '--format=json'])
+    expect(g.calls.find((c) => c[0] === 'projects' && c[1] === 'describe')).toEqual(['projects', 'describe', '111122223333', '--format=json'])
     expect(g.calls.some((c) => c.join(' ').includes('add-iam-policy-binding'))).toBe(false)
     expect(iam.calls[0].url).toContain(`/projects/${EXPECTED_ADS_PROJECT}/serviceAccounts/`)
     expect(b.created).toEqual([{ key: MINT_KEYS['ads-sa'], value: Buffer.from(KEY_JSON(ADS_EMAIL)).toString('base64'), project: PROD }])
@@ -250,7 +254,7 @@ describe('cloud-mint: Cloudflare D1 token', () => {
     expect(post.url).toBe(`https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/tokens`)
     expect(post.auth).toBe(`Bearer ${CF_ADMIN}`)
     const body = JSON.parse(post.body!)
-    expect(body).toEqual(cfTokenBody([{ id: 'g-d1-read' }, { id: 'g-d1-write' }]))
+    expect(body).toEqual(cfTokenBody([{ id: 'g-d1-read' }, { id: 'g-d1-write' }], CF_ACCOUNT_ID))
     expect(body).not.toHaveProperty('expires_on')
     expect(body.name).toBe(CF_TOKEN_NAME)
     expect(body.policies[0].resources).toEqual({ [`com.cloudflare.api.account.${CF_ACCOUNT_ID}`]: '*' })
@@ -265,6 +269,21 @@ describe('cloud-mint: Cloudflare D1 token', () => {
     const cf2 = fakeCf()
     await expect(mintCfD1(deps({ bws: fakeBws([{ key: MINT_KEYS['cf-d1'], value: 'old-token-value' }]).bws, fetch: cf2.f }).d)).rejects.toThrow(/already exists in bws prod/)
     expect(cf2.calls).toEqual([])
+  })
+  it('reads the account id from bws prod when CLOUDFLARE_ACCOUNT_ID is unset, and refuses without either', async () => {
+    const cf = fakeCf()
+    const b = fakeBws([{ key: CF_ACCOUNT_BWS_KEY, value: CF_ACCOUNT_ID }])
+    await mintCfD1(deps({ bws: b.bws, fetch: cf.f, env: {} }).d)
+    expect(cf.calls.find((c) => c.method === 'POST')!.url).toBe(`https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/tokens`)
+    const cf2 = fakeCf()
+    await expect(mintCfD1(deps({ bws: fakeBws([]).bws, fetch: cf2.f, env: {} }).d)).rejects.toThrow(`bws prod ${CF_ACCOUNT_BWS_KEY} is missing`)
+    expect(cf2.calls).toEqual([])
+  })
+  it('refuses a malformed CLOUDFLARE_ACCOUNT_ID, and needs bws or the variable', async () => {
+    await expect(resolveCfAccountId({ env: { CLOUDFLARE_ACCOUNT_ID: 'acct" } x' } })).rejects.toThrow('not a 32-hex')
+    await expect(resolveCfAccountId({ env: {} })).rejects.toThrow(/set CLOUDFLARE_ACCOUNT_ID, or BWS_ACCESS_TOKEN/)
+    expect(await resolveCfAccountId({ env: { CLOUDFLARE_ACCOUNT_ID: ` ${CF_ACCOUNT_ID.toUpperCase()}
+` } })).toBe(CF_ACCOUNT_ID)
   })
   it('picks exactly the D1 Read and D1 Write groups', () => {
     expect(pickPermissionGroups(groups).map((g) => g.id)).toEqual(['g-d1-read', 'g-d1-write'])
@@ -291,6 +310,7 @@ describe('cloud-env', () => {
     ['google-ads-api-rep-developer-token', 'dev-token-value-777'],
     ['infra--cloud-routine-env--FIRESTORE_SA_B64', 'ZmlyZXN0b3JlLXNhLXZhbHVl'],
     ['infra--cloud-routine-env--CLOUDFLARE_API_TOKEN', 'cf-d1-token-value-888'],
+    [CF_ACCOUNT_BWS_KEY, CF_ACCOUNT_ID],
     ['BWS_ACCESS_TOKEN', 'should-never-appear-123'],
   ])
   it('builds the block in order with the constants and never BWS_ACCESS_TOKEN', () => {

@@ -15,7 +15,7 @@ import { buildChartConfig, buildSeriesLineConfig, seriesRows } from '../lib/char
 import { itemsInRange, overlayItems } from '../lib/timelineOverlay'
 import type { GlobalFilters, StatsResponse, Widget } from '../types'
 import { onRequestPost } from '../../functions/api/stats'
-import { installCaches, memoryCache, pagesContext, postJson } from '../../functions/_lib/testing/hitsDb'
+import { installCaches, memoryCache, pagesContext, postJson, TEST_ACCOUNT_ID } from '../../functions/_lib/testing/hitsDb'
 
 const NOW = Date.parse('2026-10-03T16:00:00Z')
 // Requested Jan 1 - Sep 30; served (93 d ending Oct 1 00:00Z, on a UTC day) Jun 30 - Sep 30.
@@ -57,7 +57,7 @@ afterEach(() => {
 async function serve(since: string, until: string): Promise<StatsResponse> {
   const waited: Promise<unknown>[] = []
   const req = postJson('/api/stats', { site: 'all', dimensions: ['date'], metric: 'pageviews', limit: 500, since, until })
-  const res = await onRequestPost(pagesContext(req, { CF_ANALYTICS_TOKEN: 'test-token-not-real', STATS_CONFIG: {} as KVNamespace }, waited))
+  const res = await onRequestPost(pagesContext(req, { CF_ANALYTICS_TOKEN: 'test-token-not-real', CF_ACCOUNT_ID: TEST_ACCOUNT_ID, STATS_CONFIG: {} as KVNamespace }, waited))
   await Promise.all(waited)
   return (await res.json()) as StatsResponse
 }
