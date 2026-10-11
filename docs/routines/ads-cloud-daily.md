@@ -48,8 +48,10 @@ code, relay what it says, and (Part A only) write a short analysis from its own 
    are the ones the CLI makes itself (Part A always; Part B only in LIVE mode).
 5. No git writes: never create a branch, commit, push, tag, issue or pull request. Never send
    email.
-6. At most ONE push notification and ONE bus message per part (Part A, Part B), as defined
-   below. No artifact except Part A's optional A4 page update.
+6. At most ONE push notification per part (Part A, Part B), as defined below. Bus messages:
+   ONE per report (one per Part A arm, one per Part B stage), plus numbered parts only for a
+   report over 15000 characters (see "Bus delivery of a report"). No artifact except Part A's
+   optional A4 page update.
 7. Relay CLI text exactly as printed (the CLI prints plain ASCII). Everything you write
    yourself is plain ASCII too: no em-dashes, no arrows, no curly quotes.
 8. No trackers, no PII: sign-ups and promo claims are window COUNTS. Never join rows to
@@ -130,17 +132,40 @@ these overrides, which win over every other step:
   `... ads:postflight-read -- --stage wrapup --campaign 24279250691 --dry-run --force ...`.
   A1 is `... ads:morning-read -- --campaign ID --dry-run ...`.
 - A2 still writes the analysis. A4 (the page) is skipped: `artifact: n/a (test)`.
-- The A3 and B3 sends are REPLACED by exactly ONE push and ONE bus message for the whole run:
+- The A3 and B3 sends are REPLACED by exactly ONE push for the whole run and the bus
+  messages below (one per report, per "Bus delivery of a report"):
   - push: `[TEST] gss ads cloud routine: ok`, or `[TEST] gss ads cloud routine: failed (REASON)`
     when Step 0.4 or any read failed (REASON = the first failure's reason; for several, join
     them with `; `).
-  - bus: ONE `agent_send` from `gss-stats` to `gss-stats-carry`, subject
-    `[TEST] ads cloud routine DATE`, `includeEphemeral` true. Body: the cloud-check lines
-    (labels and ok|fail only, as printed), a line `=====`, Part A (each arm's analysis and its
-    exact report, as in A3), a line `=====`, then the exact `/tmp/pf/report.txt` (or REASON
-    if it failed).
+  - bus: one `agent_send` per report from `gss-stats` to `gss-stats-carry`,
+    `includeEphemeral` true, in this order: first ONE message for the cloud-check lines
+    (labels and ok|fail only, as printed), subject `[TEST] ads cloud routine DATE checks`;
+    then one per Part A arm with subject `[TEST] ads cloud routine DATE ARM_NAME`, body the
+    exact `/tmp/am/ID.report.txt` (or REASON if that arm failed); then one for
+    `/tmp/pf/report.txt` with subject `[TEST] ads cloud routine DATE wrapup` (or REASON if it
+    failed). Parts of a long report follow the numbered-parts rule.
 - In TEST mode never message `best-sudoku-ads-retest-followup`, never push `text=`, and
   never send a `[SHADOW]` message.
+
+## Bus delivery of a report
+
+The bus caps a message body at about 16000 characters and truncates silently, so a report is
+never packed together with another and never shortened. This applies in every mode (LIVE,
+SHADOW, TEST). For each report that is sent on the bus (Part A: one per arm; Part B: one per
+stage):
+- ONE `agent_send` per report, never two reports in one message. The subject carries the arm
+  name or the stage.
+- The body is the exact report file with only its final newline dropped. Never summarize,
+  trim, reflow or retype it; the model never cuts it, a shell command does.
+- Size check by shell: `wc -c < FILE`. If it is 15000 characters or fewer, send the file
+  content as one message. If more, split by shell at line boundaries into parts of at most
+  15000 characters, for example
+  `awk -v max=15000 'BEGIN{n=1} {if (len+length($0)+1>max && len>0) {n++; len=0} print > sprintf("/tmp/bus/part%02d.txt", n); len+=length($0)+1}' FILE`
+  (after `mkdir -p /tmp/bus`), then send each part file as its own `agent_send` with
+  ` (k/N)` appended to the subject (k from 1, N = number of parts), in order. Each part's
+  body is that part file's exact content, nothing added.
+- Any analysis or commentary you write goes in the Step 3 final output, never in a bus body.
+- This adds bus messages only; the push limits are unchanged (at most one push per part).
 
 ## Part A: daily summary (live leg)
 
@@ -207,7 +232,8 @@ Reading rules for the analysis (they are the local morning read's rules, unchang
   installs include Mike's household.
 
 A3. Notify. Part A is the DAILY summary: every run with at least one arm in ARMS sends ONE
-push and ONE bus message (never more, across all arms).
+push (never more, across all arms) and one bus message per arm (per "Bus delivery of a
+report").
 - Push: ONE PushNotification, one line per arm in table order, each line plain ASCII and under
   200 characters:
   - an arm with push=true: its exact `text=` value;
@@ -216,12 +242,13 @@ push and ONE bus message (never more, across all arms).
     tagged arrivals, <installs> installs; <proposal or no change>`, every figure copied from
     that arm's report (write `?` for one the report does not give; never invent one). The
     proposal is the A2 "So what" proposal in a few words, or `no change`.
-- Bus: ONE `agent_send` from `gss-stats`, to `best-sudoku-ads-retest-followup`,
-  `includeEphemeral` true, subject `BSK ads daily read DATE` with ` (threshold read)` appended
-  when any arm has busCopy=true. Body = for each arm, in table order: its A2 analysis (or
-  `<arm name> daily read did not run: REASON` for a FAILED arm), a blank line, then the exact
-  content of `/tmp/am/ID.report.txt` if it exists; arms separated by a line `=====`. Copy the
-  report text character for character; drop only its final newline.
+- Bus: for each arm, in table order, ONE `agent_send` from `gss-stats` to
+  `best-sudoku-ads-retest-followup`, `includeEphemeral` true, subject
+  `BSK ads daily read DATE ARM_NAME` with ` (threshold read)` appended when that arm has
+  busCopy=true. Body = the exact content of `/tmp/am/ID.report.txt`, with only its final
+  newline dropped (numbered parts if over 15000 characters). A FAILED arm sends one message
+  with body `<arm name> daily read did not run: REASON`. The A2 analysis is not in the bus
+  body; it goes in Step 3.
 - If PushNotification or `agent_send` is missing, skip that send and say so in Step 3.
 
 A4. Report page (optional). Only when an Artifact tool exists in this session AND the arm's
@@ -281,14 +308,14 @@ FAILED (Step 0.4 or B1/B2 failed):
 
 OK, LIVE:
 - push=true: ONE PushNotification whose text is exactly the `text=` value.
-- busCopy=true: ONE `agent_send` from `gss-stats` to `best-sudoku-ads-retest-followup`,
+- busCopy=true: one `agent_send` (numbered parts if BODY is over 15000 characters) from `gss-stats` to `best-sudoku-ads-retest-followup`,
   subject `BSK retest post-flight STAGE DATE`, body BODY, `includeEphemeral` true.
 - Both false (not due yet, or a same-day rerun already recorded): send nothing.
 
 OK, SHADOW:
 - ONE push: `[SHADOW] BSK post-flight STAGE cloud run: ok`. Never `text=`.
-- ONE `agent_send` from `gss-stats` to `gss-stats`, subject
-  `[SHADOW] BSK retest post-flight STAGE DATE`, `includeEphemeral` true; body BODY when
+- one `agent_send` (numbered parts if BODY is over 15000 characters) from `gss-stats` to
+  `gss-stats`, subject `[SHADOW] BSK retest post-flight STAGE DATE`, `includeEphemeral` true; body BODY when
   busCopy=true, else `[SHADOW] no bus copy: ` plus the `reason=` value.
 
 The `notify` JSON both CLIs print (fields the steps above read):

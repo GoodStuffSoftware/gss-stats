@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.33.1] — 2026-10-11
+
+### Fixed
+- **The cloud routine sends one bus message per report.** Each arm's and each stage's report goes out on its own, cut into numbered parts by the shell when over 15000 characters, so nothing is truncated or abridged.
+
 ## [0.33.0] — 2026-10-06
 
 ### Added
