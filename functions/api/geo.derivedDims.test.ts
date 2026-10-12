@@ -105,6 +105,7 @@ const POPUP_PATHS = [
   ),
   '/popup-outcome/signin-prompt/placement/bogus', '/popup-outcome/signin-prompt/placement/', '/popup-outcome/first50-congrats/placement/returned',
   '/popup-outcome//upsell//cadence//returned/', '/popup-outcome/upsell/returned/extra', '/popup-outcome/upsell/Weird_Reason/returned',
+  '/popup-outcome/signin-prompt/unknown/signed-in', '/popup-outcome/upsell/unknown/returned', '/upsell/shown', '/signin-eligible/earned',
   '/signin-eligible/earned/placement', '/signin-eligible/below-floor', '/signin-eligible/not-now', '/signin-eligible/stopped',
   '/funnel/trial-start', '/funnel/checkout-start/web', '/funnel/purchase/play',
   '/install/prompt/ios-inapp', '/install/prompt/android-inapp', '/install/inapp/seen/ios/facebook', '/install/inapp/copy-link', '/install/inapp/arrived/open',

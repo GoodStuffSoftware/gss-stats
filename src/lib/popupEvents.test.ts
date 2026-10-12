@@ -199,6 +199,39 @@ describe('classifyPopupPath', () => {
     // an unexpected reason shape is bucketed 'other', not dropped
     expect(classifyPopupPath('/popup-outcome/upsell/Weird_Reason/returned')).toEqual({ family: 'popup-outcome:upsell', kind: 'returned', extra: 'other' })
   })
+  it('popup-outcome: a literal "unknown" reason (tracker entry from before the release) parses as reason unknown, never as an outcome', () => {
+    expect(POPUP_OUTCOME_TYPES).not.toContain('unknown')
+    expect(classifyPopupPath('/popup-outcome/signin-prompt/unknown/signed-in')).toEqual({ family: 'popup-outcome:signin-prompt', kind: 'signed-in', extra: 'unknown' })
+    expect(classifyPopupPath('/popup-outcome/upsell/unknown/returned')).toEqual({ family: 'popup-outcome:upsell', kind: 'returned', extra: 'unknown' })
+    expect(classifyPopupPath('/popup-outcome/install-prompt/unknown/still-playing')).toEqual({ family: 'popup-outcome:install', kind: 'still-playing', extra: 'unknown' })
+    const h = Date.parse('2026-10-20T15:00:00Z')
+    const agg = aggregatePopupRows([{ hourStartMs: h, path: '/popup-outcome/signin-prompt/unknown/signed-in', count: 2 }, { hourStartMs: h, path: '/popup-outcome/signin-prompt/signed-in', count: 1 }], '2026-09-25')
+    expect(measuredCoarseCount(agg, 'popup-outcome:signin-prompt', 'signed-in')).toBe(3)
+    expect(Object.fromEntries(measuredDetailedBreakdown(agg, 'popup-outcome:signin-prompt', 'signed-in'))).toEqual({ unknown: 2, legacy: 1 })
+    expect(agg.unexpectedOutcomeRows).toBe(0)
+  })
+  it('upsell: /upsell/shown with no reason segment is an event (never a page view), adds to no total and does not throw', () => {
+    const h = Date.parse('2026-10-20T15:00:00Z')
+    expect(isPopupEventPath('/upsell/shown')).toBe(true)
+    expect(classifyPopupPath('/upsell/shown')).toBeNull()
+    expect(popupFamilyOf('/upsell/shown', h)).toBe('')
+    const agg = aggregatePopupRows([{ hourStartMs: h, path: '/upsell/shown', count: 4 }, { hourStartMs: h, path: '/upsell/shown/cadence', count: 1 }], '2026-09-25')
+    expect(measuredCoarseCount(agg, 'upsell', 'shown')).toBe(1)
+    expect(agg.unexpectedOutcomeRows).toBe(0)
+  })
+  it('signin-eligible: a bare /earned row arriving after the new shapes exist still counts, as legacy', () => {
+    const h = Date.parse('2026-10-20T15:00:00Z')
+    const agg = aggregatePopupRows(
+      [
+        { hourStartMs: h, path: '/signin-eligible/earned/placement', count: 3 },
+        { hourStartMs: h + 3600000, path: '/signin-eligible/earned/first50', count: 1 },
+        { hourStartMs: h + 7200000, path: '/signin-eligible/earned', count: 2 },
+      ],
+      '2026-09-25',
+    )
+    expect(measuredCoarseCount(agg, 'signin-eligible', 'earned')).toBe(6)
+    expect(Object.fromEntries(measuredDetailedBreakdown(agg, 'signin-eligible', 'earned'))).toEqual({ placement: 3, first50: 1, legacy: 2 })
+  })
   it('popup-outcome: old and new rows land in the same outcome totals, split by reason with the old ones as legacy', () => {
     const h = Date.parse('2026-10-20T15:00:00Z')
     const agg = aggregatePopupRows(
