@@ -215,6 +215,8 @@ describe('classifyPopupPath', () => {
     expect(isPopupEventPath('/upsell/shown')).toBe(true)
     expect(classifyPopupPath('/upsell/shown')).toBeNull()
     expect(popupFamilyOf('/upsell/shown', h)).toBe('')
+    // what the client really sends when it has no reason
+    expect(classifyPopupPath('/upsell/shown/unknown')).toEqual({ family: 'upsell', kind: 'shown', extra: 'other' })
     const agg = aggregatePopupRows([{ hourStartMs: h, path: '/upsell/shown', count: 4 }, { hourStartMs: h, path: '/upsell/shown/cadence', count: 1 }], '2026-09-25')
     expect(measuredCoarseCount(agg, 'upsell', 'shown')).toBe(1)
     expect(agg.unexpectedOutcomeRows).toBe(0)
