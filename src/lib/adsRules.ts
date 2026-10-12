@@ -1502,10 +1502,10 @@ export function evaluateKillRules(i: KillRuleInput): KillRuleEvaluation {
 
   // 3. Funnel reach — zero sign-in asks from tagged arrivals. The tag rides beacons for only
   // 30 minutes and the streak prompt fires in later sessions, so first-session asks are only
-  // observable while FIRST_SESSION_ASK_PATH (/signin-prompt/tutorial) has rows site-wide in the
-  // window. Once the P1 client silences that beacon (provisional), zero tagged asks can no longer
-  // tell "the funnel is broken" from "the first-session ask isn't sent": rule 3 is then NOT
-  // COMPUTABLE ('no-data'), never a TRIP, so it cannot produce a false kill proposal. A tagged ask
+  // observable from /signin-prompt/tutorial rows. The P1 client silences that beacon (provisional) and
+  // cached PWA clients may keep sending a few, so a stale tutorial row must not turn zero tagged asks
+  // into a verdict: rule 3 is NOT COMPUTABLE ('no-data') whenever there are tagged arrivals, no
+  // tagged ask and site-wide asks are not known to be zero. It is never a TRIP on that evidence, so it cannot produce a false kill proposal. A tagged ask
   // is always CLEAR, and zero tagged arrivals is always TRIP (landing URL or tagging broken).
   {
     const base = { id: 'funnel-reach' as const, label: 'zero sign-in asks from tagged arrivals', limit: 0 }
@@ -1515,14 +1515,11 @@ export function evaluateKillRules(i: KillRuleInput): KillRuleEvaluation {
       const zeroArrivals = i.beacon.taggedArrivals === 0 ? ' Zero tagged arrivals too: check the landing URL and tagging.' : ''
       const site = i.beacon.siteSigninShown ?? null
       const tutorial = i.beacon.siteTutorialAsks ?? null
-      const taggedOnly = tutorial != null && tutorial > 0
-      const mode = taggedOnly
-        ? ` Mode: tagged asks only (${FIRST_SESSION_ASK_PATH} shown ${tutorial} times site-wide, so first-session asks are observable).`
-        : ` Mode: site-wide fallback (${FIRST_SESSION_ASK_PATH} ${tutorial == null ? 'not read' : 'has no rows'} site-wide, so first-session asks are not yet observable).`
-      // Arrivals present, no tagged ask, the first-session ask is unobservable, and asks are not
+      const mode = ` First-session ask (${FIRST_SESSION_ASK_PATH}) site-wide: ${tutorial ?? 'not read'}; it is never trusted to make tagged-only zero decisive (cached clients may keep sending it).`
+      // Arrivals present, no tagged ask, and asks are not
       // known to be absent site-wide: the rule cannot be decided. A KNOWN zero site-wide (the new
       // committed-* asks included, ASK_PATHS) is an observable dead ask surface and still trips.
-      const notComputable = !taggedOnly && i.beacon.asks === 0 && i.beacon.taggedArrivals > 0 && site !== 0
+      const notComputable = i.beacon.asks === 0 && i.beacon.taggedArrivals > 0 && site !== 0
       const siteLine = ` Site-wide asks shown: ${site ?? 'unavailable'}.${notComputable ? ' NOT COMPUTABLE: tagged attribution expires 30 min after the ad click, so later-session prompts are not tagged asks, and with no first-session ask beacon in the window zero tagged asks cannot be told from a funnel that works.' : ''}`
       rules.push({
         ...base,

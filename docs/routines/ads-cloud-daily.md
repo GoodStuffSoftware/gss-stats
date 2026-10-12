@@ -246,7 +246,7 @@ Reading rules for the analysis (they are the local morning read's rules, unchang
   bound to "N sign-ups" or "verified".
 - If the report has a "Segments at the signed-out upsell fix" block, keep pre-fix and post-fix
   figures separate; never add them into one verdict.
-- Kill rule 3 (`funnel-reach`) can read `watch`: not a trip, no pause, no push of its own.
+- Kill rule 3 (`funnel-reach`) can read `no-data` with NOT COMPUTABLE in its detail: not a trip, no pause, no push of its own.
 - A diagnostics `ANOMALY: ... propose to Mike` line is a proposal in your text ("propose Mike
   check ..."), never a push of its own.
 - Standing Recommendations verdicts, never re-derived or applied: Maximize Conversions REJECT;

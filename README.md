@@ -922,12 +922,12 @@ npm run typecheck:scripts
   timestamps, not the clock), so removing the gate does not weaken it. Pushes go out only on a
   threshold read, a kill-rule trip, a failed read, or a real release-health alert (parent at
   least MIN_COHORT, outcome window elapsed, child zero). The threshold push names any kill
-  rule on WATCH (e.g. `no kill rule tripped, WATCH (funnel-reach), continue`).
+  rule on WATCH and any rule that is NOT COMPUTABLE (e.g. `no kill rule tripped, NOT COMPUTABLE (funnel-reach), continue`).
   **Kill rule 3 (funnel-reach)** trips on zero tagged asks. Zero tagged arrivals always trips.
-  The first-session mode is gone: the tutorial ask is being silenced by the client, so zero tagged
-  asks with tagged arrivals and no site-wide ask known reads **NOT COMPUTABLE** (status no-data, named
-  in the push), never a false trip or WATCH. Zero tagged asks while site-wide asks are known to be
-  exactly zero still trips. Asks are counted over ASK_PATHS (placement, streak, tutorial,
+  The first-session mode is gone: the tutorial ask is being silenced by the client (and cached PWA
+  clients may keep sending a few), so no tutorial row, stale or not, makes zero tagged asks decisive.
+  Zero tagged asks with tagged arrivals reads **NOT COMPUTABLE** (status no-data, named in the push),
+  never a false trip or WATCH, unless site-wide asks are known to be exactly zero, which still trips. Asks are counted over ASK_PATHS (placement, streak, tutorial,
   committed-repeat, committed-challenge, first-50 promo).
   Every morning read also prints a **first-session funnel** (arrivals → game views →
   tour start → tour complete/skip, with the skips split by stage (preamble / hub / section) →

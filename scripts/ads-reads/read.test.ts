@@ -83,7 +83,7 @@ describe('morning-read: the $50 threshold read', () => {
     const watch = await runMorningRead(fixtureDeps(fx, false), opts)
     const w = watch.thresholdRead!.kill.rules.find((x) => x.id === 'funnel-reach')!
     expect(w.status).toBe('no-data') // asks still show site-wide, and the tutorial ask has no site-wide rows: not computable
-    expect(w.detail).toMatch(/Mode: site-wide fallback/)
+    expect(w.detail).toMatch(/First-session ask/)
     expect(w.detail).toMatch(/NOT COMPUTABLE/)
     // the push names the undecided rule instead of a bare "no kill rule tripped"
     expect(watch.notify.text).toMatch(/no kill rule tripped, NOT COMPUTABLE \(funnel-reach\), continue/)
@@ -91,17 +91,16 @@ describe('morning-read: the $50 threshold read', () => {
     const r = await runMorningRead(fixtureDeps(fx, false), opts)
     expect(r.thresholdRead!.kill.tripped).toContain('funnel-reach')
   })
-  it('once the tutorial ask has rows site-wide, zero tagged asks trips rule 3 (the WATCH downgrade has expired)', async () => {
+  it('a stale tutorial row site-wide does not make zero tagged asks trip rule 3 (NOT COMPUTABLE)', async () => {
     const fx = base()
     const b = fx.beacon as Extract<Fixture['beacon'], { tagged: unknown }>
     b.tagged = b.tagged.filter((t) => !['/signin-prompt/placement', '/promo-first50/shown'].includes(t.path))
     b.siteEvents.push({ hour: '2026-09-28T19:00:00Z', path: '/signin-prompt/tutorial', count: 4 })
     const r = await runMorningRead(fixtureDeps(fx, false), opts)
     const rule = r.thresholdRead!.kill.rules.find((x) => x.id === 'funnel-reach')!
-    expect(rule.status).toBe('trip')
-    expect(rule.detail).toMatch(/Mode: tagged asks only \(\/signin-prompt\/tutorial shown 4 times site-wide/)
-    expect(r.notify.text).toMatch(/PROPOSE PAUSE \(funnel-reach\)/)
-    expect(r.notify.text).not.toMatch(/WATCH/)
+    expect(rule.status).toBe('no-data')
+    expect(rule.detail).toMatch(/NOT COMPUTABLE/)
+    expect(r.notify.text).not.toMatch(/PROPOSE PAUSE/)
   })
   it('an Ads API failure evaluates nothing and fires nothing, but PUSHES a short failure notice with no error detail', async () => {
     const fx = base()

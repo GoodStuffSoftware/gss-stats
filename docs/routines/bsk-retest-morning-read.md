@@ -163,13 +163,13 @@ The report's "Diagnostics for ..." block (R2/R3/R5/R8) is informational only, se
 "Play Console bulk reports" block (R4) is informational only too, see Step 4a.
 
 Kill rule 3 (`funnel-reach`, zero sign-in asks from tagged arrivals) has three outcomes:
-`clear`, `trip`, and `watch`. It reads `watch` when tagged asks are 0 but sign-in asks were
-still shown site-wide in the window and `/signin-prompt/tutorial` has no site-wide rows yet:
-the campaign tag lasts only 30 minutes, so later-session prompts go untagged. A `watch` is
-not a trip, proposes no pause and never pushes on its own; the threshold push names it
-(`WATCH (funnel-reach)`). Its detail line always states `Site-wide asks shown: N` (or
-`unavailable`, which trips) and the mode that applied; relay both exactly as printed. Once
-the tutorial ask has any site-wide row, the rule reads tagged asks only. The report's
+`clear`, `trip`, and NOT COMPUTABLE (status `no-data`). It reads NOT COMPUTABLE when tagged
+arrivals exist, tagged asks are 0 and site-wide asks are not known to be zero: the campaign tag
+lasts only 30 minutes, so later-session prompts go untagged, and the first-session
+`/signin-prompt/tutorial` ask is being silenced, so it no longer decides the rule. NOT COMPUTABLE
+is not a trip, proposes no pause and never pushes on its own; the threshold push names it
+(`NOT COMPUTABLE (funnel-reach)`). Its detail line states `Site-wide asks shown: N` (or
+`unavailable`); relay it exactly as printed. The report's
 first-session funnel block is informational only, never a kill rule or a push. Full rule:
 README, "Kill rule 3 (funnel-reach)".
 
