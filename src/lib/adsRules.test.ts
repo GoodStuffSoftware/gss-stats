@@ -20,6 +20,7 @@ import {
   newlyCrossedThresholds,
   nextThreshold,
   outcomeRates,
+  p1Line,
   placementOutsideShare,
   playReturnStatus,
   postflightDueDate,
@@ -287,16 +288,40 @@ describe('evaluateKillRules (spec section 12)', () => {
     expect(r.status).toBe('clear')
     expect(r.detail).toMatch(/Site-wide asks shown: 12\./)
   })
-  it('rule 3: while the tutorial ask has no rows site-wide, zero tagged asks with asks shown site-wide is watch, not trip', () => {
+  // The P1 client silences /signin-prompt/tutorial (provisional): with no tutorial-ask rows in the
+  // window rule 3 is NOT COMPUTABLE ('no-data'), never a trip, so it cannot propose a pause on its own.
+  it('rule 3: while the tutorial ask has no rows site-wide, zero tagged asks with asks shown site-wide is NOT COMPUTABLE, not a trip', () => {
     for (const siteTutorialAsks of [0, undefined]) {
       const res = evaluateKillRules(killInput({ beacon: { asks: 0, taggedArrivals: 40, siteSigninShown: 7, siteTutorialAsks } }))
       const r = rule(res, 'funnel-reach')
-      expect(r.status).toBe('watch')
+      expect(r.status).toBe('no-data')
       expect(r.detail).toMatch(/Site-wide asks shown: 7\./)
+      expect(r.detail).toMatch(/NOT COMPUTABLE/)
       expect(r.detail).toMatch(/expires 30 min/)
       expect(r.detail).toMatch(/Mode: site-wide fallback \(\/signin-prompt\/tutorial (has no rows|not read) site-wide/)
       expect(res.tripped).not.toContain('funnel-reach')
+      expect(res.proposal).toBe('CONTINUE')
     }
+  })
+  it('rule 3: tutorial asks gone and only the new committed-* asks showing site-wide is still NOT COMPUTABLE, and a tagged committed ask clears', () => {
+    const from = H('2026-10-20T00:00:00Z')
+    const to = H('2026-10-21T00:00:00Z')
+    const rows = [
+      { hourStartMs: H('2026-10-20T15:00:00Z'), path: '/signin-prompt/committed-repeat', count: 3 },
+      { hourStartMs: H('2026-10-20T16:00:00Z'), path: '/signin-prompt/committed-challenge', count: 2 },
+    ]
+    const site = siteSigninShown(rows, from, to)
+    expect(site).toBe(5)
+    expect(siteTutorialAsksShown(rows, from, to)).toBe(0)
+    const res = evaluateKillRules(killInput({ beacon: { asks: 0, taggedArrivals: 40, siteSigninShown: site, siteTutorialAsks: 0 } }))
+    expect(rule(res, 'funnel-reach').status).toBe('no-data')
+    expect(res.tripped).toEqual([])
+    const tagged = summarizeTaggedRows([
+      { hourStartMs: H('2026-10-20T15:00:00Z'), path: '/signin-prompt/committed-repeat', visitor: 'new', count: 1 },
+      { hourStartMs: H('2026-10-20T15:00:00Z'), path: '/ab/ask-order/A/signin-prompt/committed-repeat', visitor: 'new', count: 9 },
+    ])
+    expect(tagged.asks.total).toBe(1) // the twin row is not an ask
+    expect(rule(evaluateKillRules(killInput({ beacon: { asks: tagged.asks.total, taggedArrivals: 40, siteSigninShown: site, siteTutorialAsks: 0 } })), 'funnel-reach').status).toBe('clear')
   })
   it('rule 3: zero tagged asks and zero site-wide prompts still trips', () => {
     const r = rule(evaluateKillRules(killInput({ beacon: { asks: 0, taggedArrivals: 40, siteSigninShown: 0 } })), 'funnel-reach')
@@ -320,12 +345,12 @@ describe('evaluateKillRules (spec section 12)', () => {
     const tutorial = siteTutorialAsksShown(rows, from, to)
     return { site, tutorial, res: evaluateKillRules(killInput({ beacon: { asks: 0, taggedArrivals: 161, siteSigninShown: site, siteTutorialAsks: tutorial } })) }
   }
-  it('rule 3, 2026-09-30 numbers: 0 asks / 161 arrivals with streak 5 + dismiss 3 site-wide reads WATCH, no pause proposal', () => {
+  it('rule 3, 2026-09-30 numbers: 0 asks / 161 arrivals with streak 5 + dismiss 3 site-wide is NOT COMPUTABLE, no pause proposal', () => {
     const { site, tutorial, res } = day4(5)
     expect(site).toBe(5) // shown asks only: a dismiss is not a shown prompt
     expect(tutorial).toBe(0)
     const r = rule(res, 'funnel-reach')
-    expect(r.status).toBe('watch')
+    expect(r.status).toBe('no-data')
     expect(r.detail).toMatch(/^0 asks from 161 tagged arrivals\. Site-wide asks shown: 5\./)
     expect(r.detail).toMatch(/Mode: site-wide fallback \(\/signin-prompt\/tutorial has no rows site-wide/)
     expect(res.tripped).toEqual([])
@@ -340,13 +365,13 @@ describe('evaluateKillRules (spec section 12)', () => {
     expect(res.tripped).toEqual(['funnel-reach'])
     expect(res.proposal).toBe('PROPOSE PAUSE')
   })
-  it('rule 3: an unavailable site-wide count never reads WATCH (it trips and says the count is unavailable)', () => {
+  it('rule 3: an unavailable site-wide count with no tutorial rows is NOT COMPUTABLE and says the count is unavailable', () => {
     for (const siteSigninShown of [null, undefined]) {
       const res = evaluateKillRules(killInput({ beacon: { asks: 0, taggedArrivals: 161, siteSigninShown, siteTutorialAsks: null } }))
       const r = rule(res, 'funnel-reach')
-      expect(r.status).toBe('trip')
+      expect(r.status).toBe('no-data')
       expect(r.detail).toMatch(/Site-wide asks shown: unavailable\./)
-      expect(res.tripped).toContain('funnel-reach')
+      expect(res.tripped).not.toContain('funnel-reach')
     }
   })
   it('siteSigninShown counts the ASK_PATHS shown set (promo included) inside the window; siteTutorialAsksShown only the tutorial ask', () => {
@@ -497,7 +522,7 @@ describe('summarizeTaggedRows (campaign-attributed new indicators)', () => {
   it('asks are EXACTLY placement + streak + tutorial + promo-first50/shown; any other reason is reported separately', () => {
     const s = summarizeTaggedRows(rows)
     expect(s.asks.total).toBe(7)
-    expect(s.asks.byPath).toEqual({ '/signin-prompt/placement': 2, '/signin-prompt/streak': 1, '/signin-prompt/tutorial': 3, '/promo-first50/shown': 1 })
+    expect(s.asks.byPath).toEqual({ '/signin-prompt/placement': 2, '/signin-prompt/streak': 1, '/signin-prompt/tutorial': 3, '/signin-prompt/committed-repeat': 0, '/signin-prompt/committed-challenge': 0, '/promo-first50/shown': 1 })
     expect(s.asks.otherShownReasons).toBe(4)
     expect(s.accepts.total).toBe(1)
   })
@@ -1031,5 +1056,51 @@ describe('first-session funnel: v1.97.0 first-run counters', () => {
     expect(none.tourExit.hub).toEqual({ tagged: 0, site: null, tracked: null })
     expect(none.gameStart.easy.tracked).toBeNull()
     expect(none.tutorialComplete.replay.tracked).toBeNull()
+  })
+})
+
+// PROVISIONAL P1 beacon names (best-sudoku docs/design/signin-ask-buyer-intent.md section 7.4 @ ffc46239).
+describe('provisional P1 beacon rows in the ads read summaries', () => {
+  const at = H('2026-10-20T15:00:00Z')
+  const r = (path: string, count: number) => ({ hourStartMs: at, path, visitor: 'returning', count })
+  const rows = [
+    r('/signin-prompt/committed-repeat', 3),
+    r('/signin-prompt/committed-challenge', 2),
+    r('/signin-prompt/tutorial', 1), // silenced by the new client, still counted from history
+    r('/signin-eligible/earned', 4),
+    r('/signin-eligible/earned/placement', 5),
+    r('/signin-eligible/below-floor', 30),
+    r('/popup-outcome/signin-prompt/signed-in', 2),
+    r('/popup-outcome/signin-prompt/committed-repeat/signed-in', 3),
+    r('/funnel/trial-start', 1),
+    r('/funnel/purchase/web', 2),
+    r('/install/inapp/open/instagram', 6),
+    r('/ab/ask-order/A/signin-prompt/committed-repeat', 100),
+    r('/ab/ask-order/A/signin-eligible/earned/placement', 100),
+    r('/ab/ask-order/A/popup-outcome/signin-prompt/placement/signed-in', 100),
+  ]
+  it('tagged: the new asks count, the A/B twins are in no total, and old and new eligible / outcome rows share totals', () => {
+    const s = summarizeTaggedRows(rows)
+    expect(s.asks.total).toBe(6)
+    expect(s.asks.byPath['/signin-prompt/committed-repeat']).toBe(3)
+    expect(s.asks.byPath['/signin-prompt/committed-challenge']).toBe(2)
+    expect(s.asks.otherShownReasons).toBe(0)
+    expect(s.signinEligible).toEqual({ earned: 9, capped: 0, unearned: 0 })
+    expect(s.popupOutcomes['signin-prompt']['signed-in']).toBe(5)
+    expect(s.taggedHits).toBe(rows.reduce((n, x) => n + (x.path.startsWith('/ab/') ? 0 : x.count), 0))
+    expect(s.p1.earnedByReason).toEqual({ legacy: 4, placement: 5 })
+    expect(s.p1.eligibleOther['below-floor']).toBe(30)
+    expect(s.p1.outcomeByReason).toEqual({ 'signin-prompt/signed-in/legacy': 2, 'signin-prompt/signed-in/committed-repeat': 3 })
+    expect(s.p1.funnel).toEqual({ 'trial-start': 1, 'checkout-start': {}, purchase: { web: 2 } })
+    expect(s.p1.inapp).toEqual({ open: 6 })
+  })
+  it('site-wide: same totals, and the line names old rows as legacy', () => {
+    const s = summarizeSiteEvents(rows.map(({ hourStartMs, path, count }) => ({ hourStartMs, path, count })), at + 86_400_000)
+    expect(s.shown['signin-prompt']).toBe(6)
+    expect(s.signinEligible.earned).toBe(9)
+    expect(s.outcomes['signin-prompt']['signed-in']).toBe(5)
+    expect(p1Line(s.p1)).toMatch(/eligible-earned by reason: legacy 4, placement 5/)
+    expect(p1Line(s.p1)).toMatch(/provisional beacon names/)
+    expect(p1Line(summarizeTaggedRows([]).p1)).toBeNull()
   })
 })

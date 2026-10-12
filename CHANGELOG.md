@@ -6,6 +6,12 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.35.0] — 2026-10-12
+
+### Added
+- **Tolerant parsing for the provisional P1 beacon names.** Old and new `/popup-outcome` and `/signin-eligible` shapes both count, reasons show in breakdowns (old rows as legacy), A/B twin rows stay out of totals, and the new funnel, in-app and eligible-kind rows are counted as plain rows.
+- **Kill rule 3 reads NOT COMPUTABLE without a first-session ask beacon.** The committed-repeat and committed-challenge asks join the ask set, and the tutorial-ask mode no longer produces a false trip.
+
 ## [0.34.1] — 2026-10-11
 
 ### Added

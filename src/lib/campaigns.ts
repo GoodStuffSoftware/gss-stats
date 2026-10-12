@@ -24,7 +24,7 @@
 // small query per campaign rather than one UNIONed mega-query across all of them.
 
 import { etDateSql } from './etTime'
-import { classifyPopupPath, computeRate, TRACKING_ACTIVATION_DATE_ET, NEW_BEACONS_LIVE_AT_ET, etDateFromMs, sqlLit, sqlInt, INSTALL_OUTCOMES, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, INSTALL_GAP_PATHS, isInstallGapUnmeasured, pathSegmentsSql } from './popupEvents'
+import { classifyPopupPath, computeRate, TRACKING_ACTIVATION_DATE_ET, NEW_BEACONS_LIVE_AT_ET, etDateFromMs, sqlLit, sqlInt, INSTALL_OUTCOMES, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, INSTALL_GAP_PATHS, isInstallGapUnmeasured, pathSegmentsSql, pathRestSql, POPUP_OUTCOME_TYPES } from './popupEvents'
 
 // ET hour-of-day (0-23) for "Arrivals by ET hour of day" — same DST-safe Intl approach as
 // popupEvents.ts's etDateFromMs, just formatting the hour instead of the calendar date.
@@ -505,11 +505,13 @@ export function keyEventSqlCase(emptyLabel: string, fixedAtMs: number | null = I
   // Segment parsing exactly as classifyPopupPath does it (isInstallPromptInstalled and
   // isRawInstallSignal are built on it), so off-vocabulary shapes agree with the JS.
   const po = pathSegmentsSql('/popup-outcome')
+  const poc = pathSegmentsSql('/popup-outcome', '_r')
   const ins = pathSegmentsSql('/install')
   const installed = fixedAtMs === null ? E : `CASE WHEN ts >= ${sqlInt(fixedAtMs)} THEN 'install' ELSE ${E} END`
   return (
     `CASE WHEN path IN (${list(AUTH_SUCCESS_PATHS)}) THEN 'auth-success' ` +
-    `WHEN ${po.match} AND ${po.s1} = 'install-prompt' AND ${po.s2} = 'installed' THEN ${installed} ` +
+    // outcome = third segment when it is an outcome type (provisional /<popup>/<reason>/<outcome>), else the second
+    `WHEN ${po.match} AND (SELECT ${poc.s1} = 'install-prompt' AND (${poc.s3} = 'installed' OR (${poc.s2} = 'installed' AND ${poc.s3} NOT IN (${list(POPUP_OUTCOME_TYPES)}))) FROM (SELECT ${pathRestSql('/popup-outcome')} AS _r)) THEN ${installed} ` +
     `WHEN ${ins.match} AND ${ins.s1} IN (${list(INSTALL_OUTCOMES)}) THEN CASE WHEN ${installGapUnmeasuredSql(fixedAtMs)} THEN ${E} ELSE 'raw-install-signal' END ` +
     `WHEN substr(path, 1, ${sqlInt(GAME_COMPLETE_PREFIX.length)}) = ${sqlLit(GAME_COMPLETE_PREFIX)} THEN 'game-complete' ` +
     `ELSE ${E} END`

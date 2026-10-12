@@ -453,6 +453,16 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   - `first50-congrats` has no outcome beacon at all — its charts carry a one-time "no
     outcome tracking" note instead of an outcome-rate row or a "not instrumented"
     placeholder.
+  - **Provisional P1 beacon names** (best-sudoku `docs/design/signin-ask-buyer-intent.md` §7.4 @
+    ffc46239; may still change): both shapes are accepted at once. `/popup-outcome/<popup>/<outcome>`
+    (old) and `/popup-outcome/<popup>/<reason>/<outcome>` (new) both feed the outcome totals; the
+    reason is shown in the pop-ups page's `reason` breakdown, with old rows as `legacy`. An outcome
+    is never read as a reason. `/signin-eligible/earned` (old, reason `legacy`) and
+    `/signin-eligible/earned/<reason>` (new) share the earned total. `/ab/ask-order/<group>/...`
+    twin rows are in no ask, eligible or outcome total. New families are counted as plain rows:
+    `/funnel/trial-start`, `/funnel/checkout-start/<web|play>`, `/funnel/purchase/<web|play>`,
+    `/signin-eligible/{below-floor,not-now,stopped}`, `/install/inapp/*` and
+    `/install/prompt/{ios,android}-inapp`. The morning read prints them on a "P1 beacons" line.
   - `/signin-eligible` (the sign-in denominator) is deferred at least 30 minutes after the
     finish, so its row time is not the finish time — every chart of it carries that caveat,
     and it's never used to bucket by hour of day (see `SIGNIN_ELIGIBLE_CAVEAT`). The pop-ups
@@ -673,7 +683,7 @@ geography is country-only** — sub-country region/city comes from the beacon.
 
 **Pop-up event beacons never count as page views — unless a chart opts in.** Paths under
 `/signin-prompt`, `/signin-eligible`, `/promo-first50`, `/first50-congrats`, `/upsell`,
-`/install`, `/popup-outcome`, `/return`, `/game/complete/`, the `/auth/success/<provider>/`
+`/install`, `/popup-outcome`, `/return`, `/funnel`, `/ab/ask-order`, `/game/complete/`, the `/auth/success/<provider>/`
 status suffix, `/auth/error`, `/auth/redirect` and the first-session beacons (`/tour`, which
 includes `/tour/exit-at/<stage>`, `/game/tutorial-complete`, `/game/first-move`, `/game/abandon`,
 `/welcome-signed-in` and `/game/start/<difficulty>`) are pop-up/event beacons, not screens — `/api/geo` and `/api/sites` exclude all
@@ -784,7 +794,7 @@ medium/date, plus **screen width** (`screenw`, exact pixels) and its bucketed fo
 `page` / `signin-prompt` / `signin-eligible` / `promo-first50` / `first50-congrats` / `upsell`
 / `install` / `popup-outcome` / `return` / `game-complete` / `auth-status` / `auth-error` /
 `auth-redirect` / `tour` / `tutorial-complete` / `game-first-move` / `game-abandon` /
-`welcome-signed-in` / `game-start`. More derived
+`welcome-signed-in` / `game-start` / `funnel` / `ab-ask-order`. More derived
 dimensions: **pop-up** (`popupFamily`) and **pop-up outcome** (`popupOutcome`), measured rows
 only (from the tracking activation day; pre-fix install-gap rows get no value — see
 [`src/lib/popupEvents.ts`](src/lib/popupEvents.ts) `popupDimSqlCase`, where
@@ -914,11 +924,11 @@ npm run typecheck:scripts
   least MIN_COHORT, outcome window elapsed, child zero). The threshold push names any kill
   rule on WATCH (e.g. `no kill rule tripped, WATCH (funnel-reach), continue`).
   **Kill rule 3 (funnel-reach)** trips on zero tagged asks. Zero tagged arrivals always trips.
-  While the app's first-session ask beacon (`/signin-prompt/tutorial`) has no rows site-wide
-  in the window, zero tagged asks from tagged arrivals with asks (the ASK_PATHS set) still shown
-  site-wide reads WATCH instead (the campaign tag only rides beacons for 30 minutes, so
-  later-session prompts go untagged). Once the tutorial ask has any site-wide row, the downgrade
-  expires and the rule reads tagged asks only. The rule's detail line says which mode applied.
+  The first-session mode is gone: the tutorial ask is being silenced by the client, so zero tagged
+  asks with tagged arrivals and no site-wide ask known reads **NOT COMPUTABLE** (status no-data, named
+  in the push), never a false trip or WATCH. Zero tagged asks while site-wide asks are known to be
+  exactly zero still trips. Asks are counted over ASK_PATHS (placement, streak, tutorial,
+  committed-repeat, committed-challenge, first-50 promo).
   Every morning read also prints a **first-session funnel** (arrivals → game views →
   tour start → tour complete/skip, with the skips split by stage (preamble / hub / section) →
   game starts by difficulty → tutorial complete (first run vs replay) → first move → game
@@ -971,8 +981,9 @@ npm run typecheck:scripts
   `/auth/success/<provider>` (providers `google` and `email`), so every auth-success count — the
   tagged funnel, the campaign and Overview cards (`/api/metrics`), the sign-up bound — matches the exact base
   shape, and the status split reads only the three-segment rows. A prefix match would count each
-  new-client sign-in twice. Kill rule 3's asks now include the tutorial ask
-  (`/signin-prompt/tutorial`) alongside placement, streak and the first-50 promo.
+  new-client sign-in twice. Kill rule 3's asks include the tutorial ask
+  (`/signin-prompt/tutorial`) and the provisional `committed-repeat` / `committed-challenge` asks
+  alongside placement, streak and the first-50 promo.
 - **One reading per entry per day.** A reading is stored once per (campaign, ET day, entry
   kind: `morning`, `backstop`, `threshold-50`, `postflight-wrapup`, …). A same-day rerun is
   stored only when it carries new information (a complete retry of an incomplete read, a new

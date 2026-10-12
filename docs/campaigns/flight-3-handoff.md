@@ -102,9 +102,11 @@ Preconditions:
 - Go: 5 or more new accounts within $70. Iterate: 2 to 4. Stop paid acquisition: 0 to 1 with 20 or more asks.
 - Traffic-held check: complete rows at $3 or less each and CTR at 1% or more.
 - Kill rules only propose; Mike pauses.
-- Held gss-stats edits (land after Mike answers signin-p1-1): add /signin-prompt/committed-repeat and
-  /signin-prompt/committed-challenge to ASK_PATHS (src/lib/adsRules.ts:556); retire
-  FIRST_SESSION_ASK_PATH and kill rule 3's first-session mode (adsRules.ts:773). Read the install-prompt
+- gss-stats edits LANDED in 0.35.0 (tolerant, ahead of the client ship; names still provisional per
+  best-sudoku signin-ask-buyer-intent.md section 7.4 @ ffc46239): /signin-prompt/committed-repeat and
+  /signin-prompt/committed-challenge are in ASK_PATHS; kill rule 3's first-session mode is retired in
+  favour of NOT COMPUTABLE (no-data) when no ask is known; old and new popup-outcome / signin-eligible
+  shapes parse together, A/B twins are excluded, new funnel / in-app rows are counted. Read the install-prompt
   effect across all traffic over weeks, not inside the 30-minute tag.
 
 ## Where to register

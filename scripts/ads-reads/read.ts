@@ -853,7 +853,9 @@ export function morningPushText(r: MorningResult): string | null {
     const tc = t.tagged?.summary
     if (tc) bits.push(`${tc.taggedArrivals} tagged arrivals, ${tc.asks.total} asks, ${tc.authSuccess} auth successes`)
     const watching = t.kill.rules.filter((x) => x.status === 'watch').map((x) => x.id)
-    const onWatch = watching.length ? `WATCH (${watching.join(', ')})` : ''
+    // A rule that cannot be decided (rule 3 with no first-session ask beacon in the window) is named, never silent.
+    const undecided = t.kill.rules.filter((x) => x.status === 'no-data' && x.detail.includes('NOT COMPUTABLE')).map((x) => x.id)
+    const onWatch = [watching.length ? `WATCH (${watching.join(', ')})` : '', undecided.length ? `NOT COMPUTABLE (${undecided.join(', ')})` : ''].filter(Boolean).join(', ')
     if (t.kill.tripped.length && t.kill.proposal === 'PROPOSE PAUSE') bits.push(`PROPOSE PAUSE (${t.kill.tripped.join(', ')})`)
     else if (t.kill.tripped.length) bits.push(`rules tripped (${t.kill.tripped.join(', ')}) but campaign ${t.kill.servingState}, no pause proposed`)
     else if (!t.complete) bits.push('read incomplete, will retry')

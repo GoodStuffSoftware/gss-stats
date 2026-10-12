@@ -82,10 +82,11 @@ describe('morning-read: the $50 threshold read', () => {
     b.tagged = b.tagged.filter((t) => !['/signin-prompt/placement', '/promo-first50/shown'].includes(t.path))
     const watch = await runMorningRead(fixtureDeps(fx, false), opts)
     const w = watch.thresholdRead!.kill.rules.find((x) => x.id === 'funnel-reach')!
-    expect(w.status).toBe('watch') // asks still show site-wide, and the tutorial ask has no site-wide rows yet
+    expect(w.status).toBe('no-data') // asks still show site-wide, and the tutorial ask has no site-wide rows: not computable
     expect(w.detail).toMatch(/Mode: site-wide fallback/)
-    // the push names the WATCH instead of a bare "no kill rule tripped"
-    expect(watch.notify.text).toMatch(/no kill rule tripped, WATCH \(funnel-reach\), continue/)
+    expect(w.detail).toMatch(/NOT COMPUTABLE/)
+    // the push names the undecided rule instead of a bare "no kill rule tripped"
+    expect(watch.notify.text).toMatch(/no kill rule tripped, NOT COMPUTABLE \(funnel-reach\), continue/)
     b.siteEvents = b.siteEvents.filter((x) => !(['/signin-prompt/placement', '/signin-prompt/streak', '/signin-prompt/tutorial', '/promo-first50/shown'].includes(x.path)))
     const r = await runMorningRead(fixtureDeps(fx, false), opts)
     expect(r.thresholdRead!.kill.tripped).toContain('funnel-reach')

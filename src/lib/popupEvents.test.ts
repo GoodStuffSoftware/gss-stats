@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   classifyPopupPath,
+  LEGACY_REASON,
+  isAbTwinPath,
+  popupOutcomeOf,
   popupFamilyOf,
   isPopupEventPath,
   popupExcludeClause,
@@ -145,11 +148,118 @@ describe('classifyPopupPath', () => {
     expect(popupFamilyOf('/welcome-signed-in/shown', Date.parse('2026-09-30T12:00:00Z'))).toBe('') // not a POPUPS panel
   })
 
-  it('signin-eligible: earned/capped/unearned only', () => {
-    expect(classifyPopupPath('/signin-eligible/earned')).toEqual({ family: 'signin-eligible', kind: 'earned' })
+  it('signin-eligible: earned/capped/unearned plus the provisional below-floor / not-now / stopped', () => {
+    expect(classifyPopupPath('/signin-eligible/earned')).toEqual({ family: 'signin-eligible', kind: 'earned', extra: 'legacy' })
     expect(classifyPopupPath('/signin-eligible/capped')).toEqual({ family: 'signin-eligible', kind: 'capped' })
     expect(classifyPopupPath('/signin-eligible/unearned')).toEqual({ family: 'signin-eligible', kind: 'unearned' })
     expect(classifyPopupPath('/signin-eligible/other')).toBeNull()
+  })
+
+  // PROVISIONAL P1 names (best-sudoku docs/design/signin-ask-buyer-intent.md section 7.4 @ ffc46239).
+  it('signin-eligible: /earned/<reason> (new) and /earned (old) both classify as earned; the old shape reads as the legacy reason', () => {
+    for (const reason of ['placement', 'committed-repeat', 'committed-challenge', 'first50']) {
+      expect(classifyPopupPath(`/signin-eligible/earned/${reason}`)).toEqual({ family: 'signin-eligible', kind: 'earned', extra: reason })
+    }
+    expect(classifyPopupPath('/signin-eligible/earned')).toEqual({ family: 'signin-eligible', kind: 'earned', extra: 'legacy' })
+    expect(classifyPopupPath('/signin-eligible/earned/some-future-reason')).toEqual({ family: 'signin-eligible', kind: 'earned', extra: 'other' })
+    expect(LEGACY_REASON).toBe('legacy')
+  })
+  it('signin-eligible: below-floor / not-now / stopped are rows of their own, outside the earned/capped/unearned denominator', () => {
+    for (const k of ['below-floor', 'not-now', 'stopped']) {
+      expect(classifyPopupPath(`/signin-eligible/${k}`)).toEqual({ family: 'signin-eligible', kind: k })
+    }
+    const rows = [
+      { hourStartMs: Date.parse('2026-10-20T15:00:00Z'), path: '/signin-eligible/earned/placement', count: 3 },
+      { hourStartMs: Date.parse('2026-10-20T15:00:00Z'), path: '/signin-eligible/earned', count: 2 },
+      { hourStartMs: Date.parse('2026-10-20T15:00:00Z'), path: '/signin-eligible/capped', count: 1 },
+      { hourStartMs: Date.parse('2026-10-20T15:00:00Z'), path: '/signin-eligible/below-floor', count: 40 },
+      { hourStartMs: Date.parse('2026-10-20T15:00:00Z'), path: '/signin-eligible/not-now', count: 5 },
+    ]
+    const agg = aggregatePopupRows(rows, '2026-09-25')
+    expect(coarseCount(agg, 'signin-eligible', 'earned')).toBe(5)
+    expect(detailedCount(agg, 'signin-eligible', 'earned', 'placement')).toBe(3)
+    expect(detailedCount(agg, 'signin-eligible', 'earned', 'legacy')).toBe(2)
+    expect(coarseCount(agg, 'signin-eligible', 'below-floor')).toBe(40)
+    expect(computePopupRate(agg, { key: 'signin-eligible:rate', label: '', kind: 'eligibility' })).toEqual(gateRate(5, 6))
+  })
+
+  it('popup-outcome: the new /<popup>/<reason>/<outcome> shape classifies by its LAST segment, never reading an outcome as a reason', () => {
+    expect(classifyPopupPath('/popup-outcome/signin-prompt/placement/signed-in')).toEqual({ family: 'popup-outcome:signin-prompt', kind: 'signed-in', extra: 'placement' })
+    expect(classifyPopupPath('/popup-outcome/signin-prompt/committed-repeat/returned')).toEqual({ family: 'popup-outcome:signin-prompt', kind: 'returned', extra: 'committed-repeat' })
+    expect(classifyPopupPath('/popup-outcome/install-prompt/ios-inapp/installed')).toEqual({ family: 'popup-outcome:install', kind: 'installed', extra: 'ios-inapp' })
+    expect(classifyPopupPath('/popup-outcome/first50-offer/first50/still-playing')).toEqual({ family: 'popup-outcome:promo-first50', kind: 'still-playing', extra: 'first50' })
+    // old shape: the second segment IS the outcome, and the reason is legacy
+    expect(classifyPopupPath('/popup-outcome/signin-prompt/signed-in')).toEqual({ family: 'popup-outcome:signin-prompt', kind: 'signed-in', extra: 'legacy' })
+    // a stray extra segment after an old-shape outcome keeps classifying as the old shape
+    expect(classifyPopupPath('/popup-outcome/upsell/signed-in/extra')).toEqual({ family: 'popup-outcome:upsell', kind: 'signed-in', extra: 'legacy' })
+    // neither segment an outcome type, or an unknown popup name: not classified (and counted as unexpected)
+    expect(classifyPopupPath('/popup-outcome/signin-prompt/placement/bogus')).toBeNull()
+    expect(classifyPopupPath('/popup-outcome/unknown-popup/placement/signed-in')).toBeNull()
+    expect(classifyPopupPath('/popup-outcome/first50-congrats/placement/signed-in')).toBeNull()
+    // an unexpected reason shape is bucketed 'other', not dropped
+    expect(classifyPopupPath('/popup-outcome/upsell/Weird_Reason/returned')).toEqual({ family: 'popup-outcome:upsell', kind: 'returned', extra: 'other' })
+  })
+  it('popup-outcome: old and new rows land in the same outcome totals, split by reason with the old ones as legacy', () => {
+    const h = Date.parse('2026-10-20T15:00:00Z')
+    const agg = aggregatePopupRows(
+      [
+        { hourStartMs: h, path: '/popup-outcome/signin-prompt/signed-in', count: 4 },
+        { hourStartMs: h, path: '/popup-outcome/signin-prompt/placement/signed-in', count: 3 },
+        { hourStartMs: h, path: '/popup-outcome/signin-prompt/committed-repeat/signed-in', count: 2 },
+        { hourStartMs: h, path: '/popup-outcome/signin-prompt/placement/nonsense', count: 7 },
+      ],
+      '2026-09-25',
+    )
+    expect(measuredCoarseCount(agg, 'popup-outcome:signin-prompt', 'signed-in')).toBe(9)
+    expect(Object.fromEntries(measuredDetailedBreakdown(agg, 'popup-outcome:signin-prompt', 'signed-in'))).toEqual({ legacy: 4, placement: 3, 'committed-repeat': 2 })
+    expect(agg.unexpectedOutcomeRows).toBe(7)
+  })
+
+  it('/ab/ask-order twin rows are events, classify to nothing and are in no ask, eligible or outcome total', () => {
+    const paths = ['/ab/ask-order/A/signin-prompt/placement', '/ab/ask-order/B/signin-eligible/earned/placement', '/ab/ask-order/A/popup-outcome/signin-prompt/placement/signed-in']
+    for (const p of paths) {
+      expect(isPopupEventPath(p), p).toBe(true)
+      expect(isAbTwinPath(p), p).toBe(true)
+      expect(classifyPopupPath(p), p).toBeNull()
+      expect(pathFamilyOf(p), p).toBe('ab-ask-order')
+    }
+    expect(isPopupEventPath('/about')).toBe(false)
+    expect(isAbTwinPath('/ab/other')).toBe(false)
+    const agg = aggregatePopupRows(paths.map((path) => ({ hourStartMs: Date.parse('2026-10-20T15:00:00Z'), path, count: 5 })), '2026-09-25')
+    expect(agg.coarse.size).toBe(0)
+    expect(agg.unexpectedOutcomeRows).toBe(0)
+  })
+
+  it('funnel: trial-start / checkout-start / purchase classify as their own family and are counted as rows', () => {
+    expect(classifyPopupPath('/funnel/trial-start')).toEqual({ family: 'funnel', kind: 'trial-start' })
+    expect(classifyPopupPath('/funnel/checkout-start/web')).toEqual({ family: 'funnel', kind: 'checkout-start', extra: 'web' })
+    expect(classifyPopupPath('/funnel/purchase/play')).toEqual({ family: 'funnel', kind: 'purchase', extra: 'play' })
+    expect(classifyPopupPath('/funnel/purchase/mars')).toBeNull()
+    expect(classifyPopupPath('/funnel/purchase')).toBeNull()
+    expect(classifyPopupPath('/funnel')).toBeNull()
+    expect(isPopupEventPath('/funnel/trial-start')).toBe(true)
+    expect(pathFamilyOf('/funnel/purchase/web')).toBe('funnel')
+    const agg = aggregatePopupRows([{ hourStartMs: Date.parse('2026-10-20T15:00:00Z'), path: '/funnel/purchase/web', count: 2 }], '2026-09-25')
+    expect(detailedCount(agg, 'funnel', 'purchase', 'web')).toBe(2)
+    expect(popupFamilyOf('/funnel/purchase/web', Date.parse('2026-10-20T15:00:00Z'))).toBe('') // not a pop-up
+  })
+
+  it('install: in-app browser help rows are their own family and never inflate the install prompt counts', () => {
+    expect(classifyPopupPath('/install/prompt/ios-inapp')).toEqual({ family: 'install-inapp', kind: 'prompt', extra: 'ios' })
+    expect(classifyPopupPath('/install/prompt/android-inapp')).toEqual({ family: 'install-inapp', kind: 'prompt', extra: 'android' })
+    expect(classifyPopupPath('/install/inapp/seen/ios/facebook')).toEqual({ family: 'install-inapp', kind: 'seen', extra: 'ios/facebook' })
+    expect(classifyPopupPath('/install/inapp/open/instagram')).toEqual({ family: 'install-inapp', kind: 'open', extra: 'instagram' })
+    expect(classifyPopupPath('/install/inapp/no-switch/android/tiktok')).toEqual({ family: 'install-inapp', kind: 'no-switch', extra: 'android/tiktok' })
+    expect(classifyPopupPath('/install/inapp/copy-link')).toEqual({ family: 'install-inapp', kind: 'copy-link' })
+    expect(classifyPopupPath('/install/inapp/copy-link-failed')).toEqual({ family: 'install-inapp', kind: 'copy-link-failed' })
+    expect(classifyPopupPath('/install/inapp/arrived/open')).toEqual({ family: 'install-inapp', kind: 'arrived', extra: 'open' })
+    expect(classifyPopupPath('/install/inapp')).toBeNull()
+    const h = Date.parse('2026-10-20T15:00:00Z')
+    const agg = aggregatePopupRows([{ hourStartMs: h, path: '/install/prompt/ios-inapp', count: 6 }, { hourStartMs: h, path: '/install/prompt/ios', count: 2 }], '2026-09-25')
+    expect(measuredCoarseCount(agg, 'install', 'shown')).toBe(2)
+    expect(measuredCoarseCount(agg, 'install-inapp', 'prompt')).toBe(6)
+    expect(popupFamilyOf('/install/inapp/open/x', h)).toBe('')
+    expect(popupOutcomeOf('/install/inapp/open/x', h)).toBe('')
   })
 
   it('promo-first50: shown/accept/dismiss are literal segments', () => {
@@ -204,16 +314,16 @@ describe('classifyPopupPath', () => {
   })
 
   it('popup-outcome: dynamic <popup> name, fixed outcome vocabulary', () => {
-    expect(classifyPopupPath('/popup-outcome/signin-prompt/signed-in')).toEqual({ family: 'popup-outcome:signin-prompt', kind: 'signed-in' })
-    expect(classifyPopupPath('/popup-outcome/promo-first50/installed')).toEqual({ family: 'popup-outcome:promo-first50', kind: 'installed' })
-    expect(classifyPopupPath('/popup-outcome/upsell/installed')).toEqual({ family: 'popup-outcome:upsell', kind: 'installed' })
-    expect(classifyPopupPath('/popup-outcome/install-prompt/returned')).toEqual({ family: 'popup-outcome:install', kind: 'returned' })
+    expect(classifyPopupPath('/popup-outcome/signin-prompt/signed-in')).toEqual({ family: 'popup-outcome:signin-prompt', kind: 'signed-in', extra: 'legacy' })
+    expect(classifyPopupPath('/popup-outcome/promo-first50/installed')).toEqual({ family: 'popup-outcome:promo-first50', kind: 'installed', extra: 'legacy' })
+    expect(classifyPopupPath('/popup-outcome/upsell/installed')).toEqual({ family: 'popup-outcome:upsell', kind: 'installed', extra: 'legacy' })
+    expect(classifyPopupPath('/popup-outcome/install-prompt/returned')).toEqual({ family: 'popup-outcome:install', kind: 'returned', extra: 'legacy' })
     expect(classifyPopupPath('/popup-outcome/install-prompt/bogus')).toBeNull()
   })
 
   it('popup-outcome: still-playing is a valid outcome type (FINAL LIST, new)', () => {
-    expect(classifyPopupPath('/popup-outcome/signin-prompt/still-playing')).toEqual({ family: 'popup-outcome:signin-prompt', kind: 'still-playing' })
-    expect(classifyPopupPath('/popup-outcome/install-prompt/still-playing')).toEqual({ family: 'popup-outcome:install', kind: 'still-playing' })
+    expect(classifyPopupPath('/popup-outcome/signin-prompt/still-playing')).toEqual({ family: 'popup-outcome:signin-prompt', kind: 'still-playing', extra: 'legacy' })
+    expect(classifyPopupPath('/popup-outcome/install-prompt/still-playing')).toEqual({ family: 'popup-outcome:install', kind: 'still-playing', extra: 'legacy' })
     expect(POPUP_OUTCOME_TYPES).toContain('still-playing')
   })
 
@@ -236,12 +346,12 @@ describe('classifyPopupPath', () => {
   // /popup-outcome/first50-offer/* row classified as unknown and was silently dropped.
   it("popup-outcome: 'first50-offer' (the real wire name) lands on the promo-first50 family, for every outcome type", () => {
     for (const outcome of POPUP_OUTCOME_TYPES) {
-      expect(classifyPopupPath(`/popup-outcome/first50-offer/${outcome}`)).toEqual({ family: 'popup-outcome:promo-first50', kind: outcome })
+      expect(classifyPopupPath(`/popup-outcome/first50-offer/${outcome}`)).toEqual({ family: 'popup-outcome:promo-first50', kind: outcome, extra: 'legacy' })
     }
   })
   it("popup-outcome: 'promo-first50' still classifies too, as a tolerated alias of the same family", () => {
     for (const outcome of POPUP_OUTCOME_TYPES) {
-      expect(classifyPopupPath(`/popup-outcome/promo-first50/${outcome}`)).toEqual({ family: 'popup-outcome:promo-first50', kind: outcome })
+      expect(classifyPopupPath(`/popup-outcome/promo-first50/${outcome}`)).toEqual({ family: 'popup-outcome:promo-first50', kind: outcome, extra: 'legacy' })
     }
   })
   it('popup-outcome: every FINAL LIST wire name classifies for every outcome type — full cross product, real path strings', () => {
@@ -254,7 +364,7 @@ describe('classifyPopupPath', () => {
     }
     for (const [wireName, family] of Object.entries(wireNameToFamily)) {
       for (const outcome of POPUP_OUTCOME_TYPES) {
-        expect(classifyPopupPath(`/popup-outcome/${wireName}/${outcome}`)).toEqual({ family: `popup-outcome:${family}`, kind: outcome })
+        expect(classifyPopupPath(`/popup-outcome/${wireName}/${outcome}`)).toEqual({ family: `popup-outcome:${family}`, kind: outcome, extra: 'legacy' })
       }
     }
   })
@@ -378,7 +488,7 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
   // exactly how '/return' was accidentally left off this list on this branch — see the
   // 2026-09-25 review). If this ever fails, either a prefix was removed (update this
   // literal list deliberately) or one was never added (fix the array instead).
-  it('POPUP_EVENT_PREFIXES is exactly these 20 prefixes', () => {
+  it('POPUP_EVENT_PREFIXES is exactly these 22 prefixes', () => {
     expect([...POPUP_EVENT_PREFIXES]).toEqual([
       '/signin-prompt',
       '/signin-eligible',
@@ -400,6 +510,8 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
       '/game/abandon',
       '/welcome-signed-in',
       '/game/start/',
+      '/funnel',
+      '/ab/ask-order',
     ])
   })
   // v1.97.0 (first row at 2026-10-03T17:03:40Z): the three count-only first-run beacons. Until

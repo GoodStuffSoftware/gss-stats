@@ -18,6 +18,7 @@
 import {
   MIN_COHORT,
   classifyPopupPath,
+  isAbTwinPath,
   etDateFromMs,
   gateRate,
   INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS,
@@ -553,7 +554,18 @@ export function nextThreshold(cumulative: number, thresholds: readonly number[])
 // ── Tagged (campaign-attributed) beacon rows → the funnel and the new indicators ─────────
 /** The spec's corrected sign-in ask (section 11): both prefixes, since the first-50 offer
  * REPLACES the sign-in dialog when it fires — never both. */
-export const ASK_PATHS = ['/signin-prompt/placement', '/signin-prompt/streak', '/signin-prompt/tutorial', '/promo-first50/shown'] as const
+// PROVISIONAL path names: planned, not shipped (best-sudoku docs/design/signin-ask-buyer-intent.md
+// section 7.4 @ ffc46239). /signin-prompt/tutorial and /signin-prompt/streak are being SILENCED by the
+// client but stay here so history keeps counting; committed-repeat and committed-challenge are the new asks.
+// The /ab/ask-order/<group>/... twin rows duplicate real rows and are never part of any list here.
+export const ASK_PATHS = [
+  '/signin-prompt/placement',
+  '/signin-prompt/streak',
+  '/signin-prompt/tutorial',
+  '/signin-prompt/committed-repeat',
+  '/signin-prompt/committed-challenge',
+  '/promo-first50/shown',
+] as const
 export const ACCEPT_PATHS = ['/signin-prompt/accept', '/promo-first50/accept'] as const
 /** /popup-outcome/<popup> families, by lib/popupEvents.ts's internal id ('install' is the
  * wire name 'install-prompt'). */
@@ -575,6 +587,65 @@ function emptyOutcomes(): OutcomeCounts {
  * a new-client sign-in twice. */
 export type AuthSuccessKind = 'base' | AuthSuccessStatus
 export const authSuccessKind = (path: string): AuthSuccessKind | null => authSuccessRow(path)
+
+/** Row counts of the provisional P1 / in-app-help beacon families (lib/popupEvents.ts). Counts of
+ * rows only, never joined to a visitor; the reason keys are `legacy` for rows from before the reason segment. */
+export interface P1BeaconCounts {
+  /** /signin-eligible/earned[/<reason>] by reason. Sums to signinEligible.earned. */
+  earnedByReason: Record<string, number>
+  /** /signin-eligible/{below-floor,not-now,stopped}: rows of their own, NOT in the earned/capped/unearned denominator. */
+  eligibleOther: { 'below-floor': number; 'not-now': number; stopped: number }
+  /** /popup-outcome/<popup>/[<reason>/]<outcome>, keyed `<popup>/<outcome>/<reason>`. */
+  outcomeByReason: Record<string, number>
+  /** /funnel/trial-start, /funnel/checkout-start/<web|play>, /funnel/purchase/<web|play>. */
+  funnel: { 'trial-start': number; 'checkout-start': Record<string, number>; purchase: Record<string, number> }
+  /** /install/inapp/* and /install/prompt/<ios|android>-inapp rows, by kind. */
+  inapp: Record<string, number>
+}
+/** One report line for the P1 counters, or null while every counter is zero (nothing shipped yet).
+ * Row counts only; old rows without a reason segment read as `legacy`. */
+export function p1Line(c: P1BeaconCounts): string | null {
+  const list = (m: Record<string, number>) => Object.entries(m).filter(([, v]) => v > 0).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]) => `${k} ${v}`).join(', ')
+  const parts: string[] = []
+  const earned = list(c.earnedByReason)
+  if (earned) parts.push(`eligible-earned by reason: ${earned}`)
+  const other = list(c.eligibleOther)
+  if (other) parts.push(`eligible other (not in the earned/capped/unearned denominator): ${other}`)
+  const outcomes = list(c.outcomeByReason)
+  if (outcomes) parts.push(`outcomes by popup/outcome/reason: ${outcomes}`)
+  const f = c.funnel
+  const funnel = [f['trial-start'] ? `trial-start ${f['trial-start']}` : '', ...Object.entries(f['checkout-start']).map(([k, v]) => `checkout-start/${k} ${v}`), ...Object.entries(f.purchase).map(([k, v]) => `purchase/${k} ${v}`)].filter(Boolean).join(', ')
+  if (funnel) parts.push(`paid funnel (rows): ${funnel}`)
+  const inapp = list(c.inapp)
+  if (inapp) parts.push(`in-app browser help (rows): ${inapp}`)
+  return parts.length ? `${parts.join('; ')} [provisional beacon names]` : null
+}
+export function emptyP1Counts(): P1BeaconCounts {
+  return {
+    earnedByReason: {},
+    eligibleOther: { 'below-floor': 0, 'not-now': 0, stopped: 0 },
+    outcomeByReason: {},
+    funnel: { 'trial-start': 0, 'checkout-start': {}, purchase: {} },
+    inapp: {},
+  }
+}
+const addTo = (m: Record<string, number>, k: string, n: number) => {
+  m[k] = (m[k] ?? 0) + n
+}
+/** Folds one classified row into the P1 counters (a no-op for every other family). */
+export function addP1Row(c: P1BeaconCounts, ev: { family: string; kind: string; extra?: string }, n: number): void {
+  if (ev.family === 'signin-eligible') {
+    if (ev.kind === 'earned') addTo(c.earnedByReason, ev.extra ?? 'legacy', n)
+    else if (ev.kind === 'below-floor' || ev.kind === 'not-now' || ev.kind === 'stopped') c.eligibleOther[ev.kind] += n
+  } else if (ev.family.startsWith('popup-outcome:')) {
+    addTo(c.outcomeByReason, `${ev.family.slice('popup-outcome:'.length)}/${ev.kind}/${ev.extra ?? 'legacy'}`, n)
+  } else if (ev.family === 'funnel') {
+    if (ev.kind === 'trial-start') c.funnel['trial-start'] += n
+    else if (ev.kind === 'checkout-start' || ev.kind === 'purchase') addTo(c.funnel[ev.kind], ev.extra ?? 'unknown', n)
+  } else if (ev.family === 'install-inapp') {
+    addTo(c.inapp, ev.kind, n)
+  }
+}
 
 export interface TaggedRow {
   hourStartMs: number
@@ -615,6 +686,8 @@ export interface TaggedSummary {
   upsell: { shown: number; accept: number; dismiss: number }
   signinEligible: { earned: number; capped: number; unearned: number }
   popupOutcomes: OutcomeCounts
+  /** Provisional P1 / in-app-help beacon row counts (see P1BeaconCounts). */
+  p1: P1BeaconCounts
 }
 
 /** Aggregates tagged rows (already attribution-filtered and exclusion-filtered in SQL).
@@ -636,8 +709,11 @@ export function summarizeTaggedRows(rows: readonly TaggedRow[], opts: { fromMs?:
     upsell: { shown: 0, accept: 0, dismiss: 0 },
     signinEligible: { earned: 0, capped: 0, unearned: 0 },
     popupOutcomes: emptyOutcomes(),
+    p1: emptyP1Counts(),
   }
   for (const r of inWindow) {
+    // The /ab/ask-order twin rows duplicate real rows: out of every total, taggedHits included.
+    if (isAbTwinPath(r.path)) continue
     s.taggedHits += r.count
     if (r.visitor === 'new') s.taggedArrivals += r.count
     if ((ASK_PATHS as readonly string[]).includes(r.path)) {
@@ -657,6 +733,7 @@ export function summarizeTaggedRows(rows: readonly TaggedRow[], opts: { fromMs?:
     else if (auth) s.authSuccessSplit[auth] += r.count
     const ev = classifyPopupPath(r.path)
     if (!ev) continue
+    addP1Row(s.p1, ev, r.count)
     if (ev.family === 'signin-prompt' && ev.kind === 'shown' && !(ASK_PATHS as readonly string[]).includes(r.path)) s.asks.otherShownReasons += r.count
     if (ev.family === 'signin-prompt' && ev.kind === 'dismiss') s.dismisses.signinPrompt += r.count
     if (ev.family === 'promo-first50') {
@@ -700,6 +777,8 @@ export interface SiteEventSummary {
   signinEligible: { earned: number; capped: number; unearned: number }
   promoFirst50: { shown: number; accept: number; dismiss: number }
   upsell: { shown: number; accept: number; dismiss: number }
+  /** Provisional P1 / in-app-help beacon row counts (see P1BeaconCounts). */
+  p1: P1BeaconCounts
   /** /install/pwa-accept taps on or after the install fix (all / hour ended before
    * `maturedBeforeMs`) — the parent of the install health pair. */
   installAcceptPostFix: number
@@ -725,12 +804,14 @@ export function summarizeSiteEvents(
     signinEligible: { earned: 0, capped: 0, unearned: 0 },
     promoFirst50: { shown: 0, accept: 0, dismiss: 0 },
     upsell: { shown: 0, accept: 0, dismiss: 0 },
+    p1: emptyP1Counts(),
     installAcceptPostFix: 0,
     installAcceptPostFixMatured: 0,
   }
   for (const r of rows) {
     const ev = classifyPopupPath(r.path)
     if (!ev) continue
+    addP1Row(s.p1, ev, r.count)
     const postFix = rowIsPostInstallFix(r, fixedAtMs)
     if ((INSTALL_GAP_PATHS as readonly string[]).includes(r.path) && !postFix) continue // unmeasured
     const matured = r.hourStartMs + 3_600_000 <= maturedBeforeMs
@@ -768,8 +849,9 @@ export function siteSigninShown(rows: readonly HourPathCount[], fromMs: number, 
   }
   return n
 }
-/** The app's first-session ask beacon. Until it has a row site-wide, first-session asks are
- * unobservable and rule 3 may downgrade to WATCH; once it has one, rule 3 reads tagged asks only. */
+/** The app's first-session ask beacon. Provisional: the P1 client silences it. Until it has a row
+ * site-wide in the window, first-session asks are unobservable and rule 3 is NOT COMPUTABLE
+ * (evaluateKillRules); once it has one, rule 3 reads tagged asks only. */
 export const FIRST_SESSION_ASK_PATH = '/signin-prompt/tutorial'
 export function siteTutorialAsksShown(rows: readonly HourPathCount[], fromMs: number, toMs: number): number {
   return siteSigninShown(rows, fromMs, toMs, [FIRST_SESSION_ASK_PATH])
@@ -1419,11 +1501,12 @@ export function evaluateKillRules(i: KillRuleInput): KillRuleEvaluation {
   }
 
   // 3. Funnel reach — zero sign-in asks from tagged arrivals. The tag rides beacons for only
-  // 30 minutes and the streak prompt fires in later sessions, so while first-session asks are
-  // unobservable (FIRST_SESSION_ASK_PATH has no row site-wide), zero tagged asks from tagged
-  // arrivals with asks still showing site-wide is WATCH, not TRIP. The downgrade expires by
-  // itself: once the tutorial ask has a row site-wide, a working first session produces tagged
-  // asks directly, so rule 3 reads tagged asks only. Zero tagged arrivals is always TRIP.
+  // 30 minutes and the streak prompt fires in later sessions, so first-session asks are only
+  // observable while FIRST_SESSION_ASK_PATH (/signin-prompt/tutorial) has rows site-wide in the
+  // window. Once the P1 client silences that beacon (provisional), zero tagged asks can no longer
+  // tell "the funnel is broken" from "the first-session ask isn't sent": rule 3 is then NOT
+  // COMPUTABLE ('no-data'), never a TRIP, so it cannot produce a false kill proposal. A tagged ask
+  // is always CLEAR, and zero tagged arrivals is always TRIP (landing URL or tagging broken).
   {
     const base = { id: 'funnel-reach' as const, label: 'zero sign-in asks from tagged arrivals', limit: 0 }
     if (!armed) rules.push({ ...base, status: 'not-armed', value: null, detail: `armed at ${usd(plan.killRulesFrom)}` })
@@ -1436,11 +1519,14 @@ export function evaluateKillRules(i: KillRuleInput): KillRuleEvaluation {
       const mode = taggedOnly
         ? ` Mode: tagged asks only (${FIRST_SESSION_ASK_PATH} shown ${tutorial} times site-wide, so first-session asks are observable).`
         : ` Mode: site-wide fallback (${FIRST_SESSION_ASK_PATH} ${tutorial == null ? 'not read' : 'has no rows'} site-wide, so first-session asks are not yet observable).`
-      const watch = !taggedOnly && i.beacon.asks === 0 && i.beacon.taggedArrivals > 0 && site != null && site > 0
-      const siteLine = ` Site-wide asks shown: ${site ?? 'unavailable'}.${watch ? ' Tagged attribution expires 30 min after the ad click, so later-session prompts are not counted as tagged asks.' : ''}`
+      // Arrivals present, no tagged ask, the first-session ask is unobservable, and asks are not
+      // known to be absent site-wide: the rule cannot be decided. A KNOWN zero site-wide (the new
+      // committed-* asks included, ASK_PATHS) is an observable dead ask surface and still trips.
+      const notComputable = !taggedOnly && i.beacon.asks === 0 && i.beacon.taggedArrivals > 0 && site !== 0
+      const siteLine = ` Site-wide asks shown: ${site ?? 'unavailable'}.${notComputable ? ' NOT COMPUTABLE: tagged attribution expires 30 min after the ad click, so later-session prompts are not tagged asks, and with no first-session ask beacon in the window zero tagged asks cannot be told from a funnel that works.' : ''}`
       rules.push({
         ...base,
-        status: i.beacon.asks > 0 ? 'clear' : watch ? 'watch' : 'trip',
+        status: i.beacon.asks > 0 ? 'clear' : notComputable ? 'no-data' : 'trip',
         value: i.beacon.asks,
         detail: `${i.beacon.asks} asks from ${i.beacon.taggedArrivals} tagged arrivals.${siteLine}${mode}${zeroArrivals}`,
       })

@@ -210,7 +210,10 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // 'reason' — activation-gated.
   if (dim === 'reason') {
     const k = kind || 'shown'
-    const rowsOut: Row[] = measuredDetailedBreakdown(agg, popup, k)
+    // An outcome kind (signed-in / installed / ...) breaks down the popup-outcome family by its
+    // reason; rows from before the reason segment existed show as 'legacy' (lib/popupEvents.ts).
+    const family = (POPUP_OUTCOME_TYPES as readonly string[]).includes(k) ? `popup-outcome:${popup}` : popup
+    const rowsOut: Row[] = measuredDetailedBreakdown(agg, family, k)
       .map(([reason, c]) => ({ key: { reason }, pageviews: c, visits: c }))
       .sort((a, b) => b.pageviews - a.pageviews)
       .slice(0, limit)

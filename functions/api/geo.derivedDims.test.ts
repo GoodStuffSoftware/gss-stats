@@ -98,6 +98,17 @@ const POPUP_PATHS = [
   '/popup-outcome/upsell/signed-in/extra',
   '/popup-outcome//first50-offer//returned/',
   '/popup-outcome/install-prompt/installed/',
+  // PROVISIONAL P1 shapes (lib/popupEvents.ts): /popup-outcome/<popup>/<reason>/<outcome>, the new
+  // eligible / funnel / in-app / A/B-twin rows. Both shapes must agree with classifyPopupPath.
+  ...['signin-prompt', 'first50-offer', 'upsell', 'install-prompt'].flatMap((n) =>
+    ['signed-in', 'installed', 'returned', 'still-playing'].map((o) => `/popup-outcome/${n}/placement/${o}`),
+  ),
+  '/popup-outcome/signin-prompt/placement/bogus', '/popup-outcome/signin-prompt/placement/', '/popup-outcome/first50-congrats/placement/returned',
+  '/popup-outcome//upsell//cadence//returned/', '/popup-outcome/upsell/returned/extra', '/popup-outcome/upsell/Weird_Reason/returned',
+  '/signin-eligible/earned/placement', '/signin-eligible/below-floor', '/signin-eligible/not-now', '/signin-eligible/stopped',
+  '/funnel/trial-start', '/funnel/checkout-start/web', '/funnel/purchase/play',
+  '/install/prompt/ios-inapp', '/install/prompt/android-inapp', '/install/inapp/seen/ios/facebook', '/install/inapp/copy-link', '/install/inapp/arrived/open',
+  '/ab/ask-order/A/signin-prompt/placement', '/ab/ask-order/B/popup-outcome/signin-prompt/placement/signed-in',
 ]
 
 describe('popupFamily / popupOutcome SQL match classifyPopupPath row for row', () => {
@@ -233,6 +244,15 @@ describe('arrival / keyEvent SQL (the Overall timeline series filters)', () => {
     const got = exprValues('keyEvent', rows)
     expect(got).toEqual(rows.map((r) => keyEventOf(r.path!, r.ts)))
     expect(got).toEqual(['auth-success', 'auth-success', '', 'install', 'raw-install-signal', 'raw-install-signal', 'raw-install-signal', '', 'game-complete', '', '', ''])
+  })
+  it('keyEvent: the provisional /popup-outcome/install-prompt/<reason>/installed shape counts as an install too, and agrees with the JS', () => {
+    const rows: Row[] = [
+      '/popup-outcome/install-prompt/installed', '/popup-outcome/install-prompt/ios-inapp/installed', '/popup-outcome/install-prompt/ios-inapp/returned',
+      '/popup-outcome/install-prompt/installed/extra', '/popup-outcome/signin-prompt/placement/installed', '/ab/ask-order/A/popup-outcome/install-prompt/x/installed',
+    ].map((path) => ({ ts: LIVE, path }))
+    const got = exprValues('keyEvent', rows)
+    expect(got).toEqual(rows.map((r) => keyEventOf(r.path!, r.ts)))
+    expect(got).toEqual(['install', 'install', '', 'install', '', ''])
   })
   it("arrival: a first-ever beacon is 'tagged' only when a campaign flight claims it", () => {
     for (const [visitor, campaign, ts] of [

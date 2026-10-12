@@ -95,7 +95,23 @@ export const POPUP_EVENT_PREFIXES = [
   // sits under '/tour' and `/game/tutorial-complete/<first-run|replay>` is covered by its own
   // entry above. Read by lib/adsRules.ts firstSessionBucket (first-run counters).
   '/game/start/',
+  // PROVISIONAL (best-sudoku sign-in ask P1, planned and not shipped; names per best-sudoku
+  // docs/design/signin-ask-buyer-intent.md section 7.4 @ ffc46239): the paid-conversion funnel
+  // counters `/funnel/trial-start`, `/funnel/checkout-start/<web|play>` and
+  // `/funnel/purchase/<web|play>` (counts only, deferred at least 30 min like /signin-eligible).
+  '/funnel',
+  // PROVISIONAL (same source): the A/B twin rows `/ab/ask-order/<group>/...`. They DUPLICATE the
+  // real ask / eligible / outcome rows, so they are events (never page views) and classify to
+  // nothing: never added into any ask, eligible or outcome total. Anchored on the full
+  // `/ab/ask-order` so an unrelated `/ab...` page keeps counting as a page view.
+  '/ab/ask-order',
 ] as const
+
+/** The provisional `/ab/ask-order/<group>/...` A/B twin rows: duplicates of real ask / eligible /
+ * outcome rows, so they are excluded from every total (the prefix is in POPUP_EVENT_PREFIXES). */
+export function isAbTwinPath(path: string): boolean {
+  return path === '/ab/ask-order' || path.startsWith('/ab/ask-order/')
+}
 
 export function isPopupEventPath(path: string): boolean {
   return POPUP_EVENT_PREFIXES.some((p) => (p.endsWith('/') ? path.startsWith(p) : path === p || path.startsWith(p + '/')))
@@ -180,6 +196,8 @@ const PATH_FAMILY_LABELS: Record<(typeof POPUP_EVENT_PREFIXES)[number], string> 
   '/game/abandon': 'game-abandon',
   '/welcome-signed-in': 'welcome-signed-in',
   '/game/start/': 'game-start',
+  '/funnel': 'funnel',
+  '/ab/ask-order': 'ab-ask-order',
 }
 
 /** Path → family label. 'page' for anything that isn't an event beacon (an ordinary page
@@ -228,6 +246,8 @@ export const PATH_FAMILY_OPTIONS: { value: string; label: string }[] = [
   { value: 'game-abandon', label: 'Game abandoned' },
   { value: 'welcome-signed-in', label: 'Signed-in welcome card' },
   { value: 'game-start', label: 'Game started' },
+  { value: 'funnel', label: 'Paid funnel (trial / checkout / purchase)' },
+  { value: 'ab-ask-order', label: 'Ask-order A/B twin (duplicate rows)' },
 ]
 
 // ── Classification ──────────────────────────────────────────────────────────────────
@@ -262,6 +282,23 @@ export const INSTALL_PROMPT_DISMISS = ['dismiss', 'dismiss-forever', 'have-it'] 
 //   returned      — days 1-7 after shown
 //   still-playing — days 14-21 after shown (NEW)
 export const POPUP_OUTCOME_TYPES = ['signed-in', 'installed', 'returned', 'still-playing'] as const
+
+// PROVISIONAL BEACON NAMES (best-sudoku sign-in ask P1 + in-app browser help): planned, not shipped,
+// per best-sudoku docs/design/signin-ask-buyer-intent.md section 7.4 @ ffc46239. Old and new shapes
+// are both read, because old-shape rows stay in D1 history:
+//   /popup-outcome/<popup>/<outcome>            (old)  and  /popup-outcome/<popup>/<reason>/<outcome>  (new)
+//   /signin-eligible/earned                     (old)  and  /signin-eligible/earned/<reason>           (new)
+// A row with no reason segment reads as reason LEGACY_REASON, never dropped and never read the
+// other way round (an outcome is never taken for a reason: the LAST segment is the outcome
+// whenever it is a known outcome type).
+export const LEGACY_REASON = 'legacy'
+/** Reasons of /signin-eligible/earned/<reason>; any other value is bucketed 'other'. */
+export const ELIGIBLE_EARNED_REASONS = ['placement', 'committed-repeat', 'committed-challenge', 'first50'] as const
+/** /signin-eligible/<kind> kinds that are NOT part of the earned/capped/unearned denominator. */
+export const ELIGIBLE_OTHER_KINDS = ['below-floor', 'not-now', 'stopped'] as const
+export const FUNNEL_KINDS = ['trial-start', 'checkout-start', 'purchase'] as const
+const FUNNEL_STORES = ['web', 'play'] as const
+const REASON_SLUG_RE = /^[a-z0-9-]{1,40}$/
 
 // The /popup-outcome/<popup>/<outcome> wire vocabulary (FINAL LIST) differs from the
 // internal family id in two places:
@@ -393,8 +430,24 @@ export function classifyPopupPath(path: string): PopupEvent | null {
   }
 
   if (path === '/signin-eligible' || path.startsWith('/signin-eligible/')) {
-    const [x] = segments(path, '/signin-eligible')
-    if (x === 'earned' || x === 'capped' || x === 'unearned') return { family: 'signin-eligible', kind: x }
+    const [x, reason] = segments(path, '/signin-eligible')
+    // earned carries a reason from the P1 client on (provisional); older rows have none = LEGACY_REASON.
+    if (x === 'earned') {
+      const known = !reason ? LEGACY_REASON : (ELIGIBLE_EARNED_REASONS as readonly string[]).includes(reason) ? reason : 'other'
+      return { family: 'signin-eligible', kind: x, extra: known }
+    }
+    if (x === 'capped' || x === 'unearned') return { family: 'signin-eligible', kind: x }
+    // Provisional new kinds: counted as rows of their own, never part of the eligibility rate.
+    if ((ELIGIBLE_OTHER_KINDS as readonly string[]).includes(x)) return { family: 'signin-eligible', kind: x }
+    return null
+  }
+
+  // PROVISIONAL paid funnel (counts only): /funnel/trial-start, /funnel/checkout-start/<web|play>,
+  // /funnel/purchase/<web|play>. Its own family, so it never lands in a pop-up bucket.
+  if (path === '/funnel' || path.startsWith('/funnel/')) {
+    const [k, store] = segments(path, '/funnel')
+    if (k === 'trial-start') return { family: 'funnel', kind: k }
+    if ((k === 'checkout-start' || k === 'purchase') && store && (FUNNEL_STORES as readonly string[]).includes(store)) return { family: 'funnel', kind: k, extra: store }
     return null
   }
 
@@ -427,6 +480,16 @@ export function classifyPopupPath(path: string): PopupEvent | null {
   if (path === '/install' || path.startsWith('/install/')) {
     const [a, b] = segments(path, '/install')
     if (!a) return null
+    // PROVISIONAL in-app browser help (counts only). Its own family 'install-inapp', so it never
+    // inflates the install prompt's shown / tap / outcome counts or rates.
+    //   /install/prompt/<ios|android>-inapp, /install/inapp/seen/<ios|android>/<app>, open/<app>,
+    //   no-switch/<ios|android>/<app>, copy-link, copy-link-failed, arrived/<open|copy>.
+    if (a === 'prompt' && (b === 'ios-inapp' || b === 'android-inapp')) return { family: 'install-inapp', kind: 'prompt', extra: b.replace('-inapp', '') }
+    if (a === 'inapp') {
+      const [, k, ...rest] = segments(path, '/install')
+      if (!k) return null
+      return rest.length ? { family: 'install-inapp', kind: k, extra: rest.join('/') } : { family: 'install-inapp', kind: k }
+    }
     if (a === 'prompt' && b && (INSTALL_SHOWN_PLATFORMS as readonly string[]).includes(b)) {
       return { family: 'install', kind: 'shown', extra: b }
     }
@@ -469,7 +532,14 @@ export function classifyPopupPath(path: string): PopupEvent | null {
   }
 
   if (path === '/popup-outcome' || path.startsWith('/popup-outcome/')) {
-    const [name, outcome] = segments(path, '/popup-outcome')
+    const [name, seg2, seg3] = segments(path, '/popup-outcome')
+    // Old shape /<popup>/<outcome>; provisional new shape /<popup>/<reason>/<outcome>. The third
+    // segment is the outcome whenever it is a known outcome type, else the second is (so a stray
+    // extra segment on an old-shape row keeps classifying as before).
+    const isOutcome = (v: string | undefined): v is string => !!v && (POPUP_OUTCOME_TYPES as readonly string[]).includes(v)
+    const newShape = isOutcome(seg3)
+    const outcome = newShape ? seg3 : seg2
+    const reason = newShape ? (REASON_SLUG_RE.test(seg2) ? seg2 : 'other') : LEGACY_REASON
     // FINAL LIST: <popup> is exactly {signin-prompt, promo-first50, first50-offer, upsell,
     // install-prompt} — resolved through POPUP_OUTCOME_NAME_TO_FAMILY so 'install-prompt'
     // lands on the 'install' family, and both 'first50-offer' (the real wire name) and
@@ -479,8 +549,8 @@ export function classifyPopupPath(path: string): PopupEvent | null {
     // its rows return null here, same as any other unrecognized name, but they are still
     // counted — never silently dropped — via aggregatePopupRows' unexpectedOutcomeRows.
     const family = name ? POPUP_OUTCOME_NAME_TO_FAMILY[name] : undefined
-    if (family && outcome && (POPUP_OUTCOME_TYPES as readonly string[]).includes(outcome)) {
-      return { family: `popup-outcome:${family}`, kind: outcome }
+    if (family && isOutcome(outcome)) {
+      return { family: `popup-outcome:${family}`, kind: outcome, extra: reason }
     }
     return null
   }
@@ -948,17 +1018,27 @@ const sqlList = (values: readonly string[]) => values.map(sqlLit).join(', ')
  * way `segments()` does, IGNORING empty segments (runs of slashes, a trailing slash) and
  * anything past the segments a rule reads. So `/signin-prompt/accept/`, `/install/prompt/
  * android/` and `/popup-outcome/upsell/signed-in/extra` classify exactly as the JS does. */
-export function pathSegmentsSql(prefix: string): { match: string; s1: string; s2: string } {
+/** The normalized remainder after `prefix` ('a/b/c': slash runs collapsed, ends trimmed). */
+export function pathRestSql(prefix: string): string {
+  let rest = `substr(path, ${sqlInt(prefix.length) + 2})`
+  // Collapse slash runs (5 passes: runs up to 32) and trim the ends, leaving 'a/b/c'.
+  for (let i = 0; i < 5; i++) rest = `replace(${rest}, '//', '/')`
+  return `trim(${rest}, '/')`
+}
+/** With `col`, the segment expressions read that column instead of inlining pathRestSql() at every
+ * use (the statement-size cap, MAX_SQL_BYTES): the caller supplies a column holding pathRestSql(). */
+export function pathSegmentsSql(prefix: string, col?: string): { match: string; s1: string; s2: string; s3: string } {
   const n = sqlInt(prefix.length)
   const match = `(path = ${sqlLit(prefix)} OR substr(path, 1, ${n + 1}) = ${sqlLit(prefix + '/')})`
-  // Collapse slash runs (5 passes: runs up to 32) and trim the ends, leaving 'a/b/c'.
-  let rest = `substr(path, ${n + 2})`
-  for (let i = 0; i < 5; i++) rest = `replace(${rest}, '//', '/')`
-  const r = `trim(${rest}, '/')`
+  const r = col ?? pathRestSql(prefix)
   const s1 = `(CASE WHEN instr(${r}, '/') > 0 THEN substr(${r}, 1, instr(${r}, '/') - 1) ELSE ${r} END)`
   const tail = `substr(${r}, instr(${r}, '/') + 1)`
   const s2 = `(CASE WHEN instr(${r}, '/') = 0 THEN '' WHEN instr(${tail}, '/') > 0 THEN substr(${tail}, 1, instr(${tail}, '/') - 1) ELSE ${tail} END)`
-  return { match, s1, s2 }
+  // Third segment (the provisional /popup-outcome/<popup>/<reason>/<outcome> shape). tail has no
+  // slash when there is no third segment, which also covers a path with no second one.
+  const tail2 = `substr(${tail}, instr(${tail}, '/') + 1)`
+  const s3 = `(CASE WHEN instr(${tail}, '/') = 0 THEN '' WHEN instr(${tail2}, '/') > 0 THEN substr(${tail2}, 1, instr(${tail2}, '/') - 1) ELSE ${tail2} END)`
+  return { match, s1, s2, s3 }
 }
 
 /** UTC ms of ET midnight starting TRACKING_ACTIVATION_DATE_ET — the instant from which
@@ -1025,15 +1105,20 @@ export function popupDimSqlCase(dim: 'popupFamily' | 'popupOutcome', emptyLabel:
     const directPairs = fam ? direct.map(([k]): [string, string] => [k, 'install']) : direct
     branch.push(`WHEN ${g.match} THEN CASE ${g.s1} WHEN 'prompt' THEN ${promptCase} ${directPairs.map(([k, v]) => `WHEN ${sqlLit(k)} THEN ${sqlLit(v)}`).join(' ')} ELSE ${E} END`)
   }
-  // /popup-outcome/<name>/<outcome>: <name> through POPUP_OUTCOME_NAME_TO_FAMILY (first50-offer →
+  // /popup-outcome/<name>/<outcome> or <name>/<reason>/<outcome>: <name> through POPUP_OUTCOME_NAME_TO_FAMILY (first50-offer →
   // promo-first50, install-prompt → install), <outcome> one of POPUP_OUTCOME_TYPES.
   {
     const g = pathSegmentsSql('/popup-outcome')
+    // Segments read once, in a correlated sub-select, not re-derived at every use: three segments
+    // inlined this many times would push the heaviest chart past MAX_SQL_BYTES.
+    const c = pathSegmentsSql('/popup-outcome', '_r')
     const names = Object.keys(POPUP_OUTCOME_NAME_TO_FAMILY)
-    const value = fam
-      ? caseMap(g.s1, names.map((n): [string, string] => [n, POPUP_OUTCOME_NAME_TO_FAMILY[n]]), E)
-      : `CASE WHEN ${g.s1} IN (${sqlList(names)}) THEN ${caseMap(g.s2, same(POPUP_OUTCOME_TYPES), E)} ELSE ${E} END`
-    branch.push(fam ? `WHEN ${g.match} THEN CASE WHEN ${g.s2} IN (${sqlList(POPUP_OUTCOME_TYPES)}) THEN ${value} ELSE ${E} END` : `WHEN ${g.match} THEN ${value}`)
+    const types = sqlList(POPUP_OUTCOME_TYPES)
+    // The outcome is the third segment when that is an outcome type (new shape), else the second.
+    const body = fam
+      ? `CASE WHEN _c IN (${types}) OR _b IN (${types}) THEN ${caseMap('_a', names.map((n): [string, string] => [n, POPUP_OUTCOME_NAME_TO_FAMILY[n]]), E)} ELSE ${E} END`
+      : `CASE WHEN _a IN (${sqlList(names)}) THEN CASE WHEN _c IN (${types}) THEN _c ELSE ${caseMap('_b', same(POPUP_OUTCOME_TYPES), E)} END ELSE ${E} END`
+    branch.push(`WHEN ${g.match} THEN (SELECT ${body} FROM (SELECT ${c.s1} AS _a, ${c.s2} AS _b, ${c.s3} AS _c FROM (SELECT ${pathRestSql('/popup-outcome')} AS _r)))`)
   }
   return `CASE WHEN ${popupUnmeasuredSql()} THEN ${E} ${branch.join(' ')} ELSE ${E} END`
 }

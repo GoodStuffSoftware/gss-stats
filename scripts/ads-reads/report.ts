@@ -13,6 +13,7 @@ import {
   isPlacementBorderline,
   PLACEMENT_BORDERLINE_NOTE,
   promoArmAbsentNote,
+  p1Line,
   SIGNIN_ELIGIBLE_COUNT_NOTE,
   UPSELL_SIGNEDOUT_EXPECTED_NOTE,
   type OutcomePopup,
@@ -115,7 +116,7 @@ export function fullReadLines(r: FullRead, title: string, opts: { postflight?: b
   if (t) {
     const s = t.summary
     out.push(
-      `Tagged funnel (campaign tag only, exclusions applied): ${n(s.taggedArrivals)} arrivals (floor), ${n(s.taggedHits)} hits; ${GAME_VIEWS} ${n(s.funnel.played)}; asks ${n(s.asks.total)} (placement ${n(s.asks.byPath['/signin-prompt/placement'])}, streak ${n(s.asks.byPath['/signin-prompt/streak'])}, tutorial ${n(s.asks.byPath['/signin-prompt/tutorial'])}, promo ${n(s.asks.byPath['/promo-first50/shown'])}${s.asks.otherShownReasons ? `, other sign-in reasons ${n(s.asks.otherShownReasons)}` : ''}); accepts ${n(s.accepts.total)}; auth redirect ${n(s.authRedirect)}, auth success ${n(s.authSuccess)}`,
+      `Tagged funnel (campaign tag only, exclusions applied): ${n(s.taggedArrivals)} arrivals (floor), ${n(s.taggedHits)} hits; ${GAME_VIEWS} ${n(s.funnel.played)}; asks ${n(s.asks.total)} (placement ${n(s.asks.byPath['/signin-prompt/placement'])}, streak ${n(s.asks.byPath['/signin-prompt/streak'])}, tutorial ${n(s.asks.byPath['/signin-prompt/tutorial'])}, ${(['committed-repeat', 'committed-challenge'] as const).map((k) => (s.asks.byPath[`/signin-prompt/${k}`] ? `${k} ${n(s.asks.byPath[`/signin-prompt/${k}`])}, ` : '')).join('')}promo ${n(s.asks.byPath['/promo-first50/shown'])}${s.asks.otherShownReasons ? `, other sign-in reasons ${n(s.asks.otherShownReasons)}` : ''}); accepts ${n(s.accepts.total)}; auth redirect ${n(s.authRedirect)}, auth success ${n(s.authSuccess)}`,
     )
     // Not a rate (review finding, 2026-09-26): "asks" counts event rows within a tagged
     // session, "arrivals" counts first-ever tagged beacons — dividing one by the other mixes
@@ -125,6 +126,8 @@ export function fullReadLines(r: FullRead, title: string, opts: { postflight?: b
     out.push(`  ${n(s.asks.total)} asks · ${n(s.taggedArrivals)} arrivals; accept rate ${formatGated(t.acceptRate)}; cost per tagged arrival ${money(t.costPerArrival)}`)
     out.push(`  dismisses (read separately): sign-in ${n(s.dismisses.signinPrompt)}, promo ${n(s.dismisses.promoFirst50)}`)
     out.push(`  install: prompt shown ${n(s.install.promptShown)}, taps ${n(s.install.taps)}, installed ${n(s.install.installed)} [${installOutcomeGapNote()}]; ${RAW_INSTALL_SIGNALS_LABEL} ${n(s.install.rawSignals)}; signin-eligible (count of asks) earned ${n(s.signinEligible.earned)}, capped ${n(s.signinEligible.capped)}, unearned ${n(s.signinEligible.unearned)}`)
+    const tp1 = p1Line(s.p1)
+    if (tp1) out.push(`  tagged P1 beacons: ${tp1}`)
   }
   if (r.site) {
     const s = r.site.summary
@@ -141,6 +144,8 @@ export function fullReadLines(r: FullRead, title: string, opts: { postflight?: b
     }
     out.push(`  promo accept/dismiss ${n(s.promoFirst50.accept)}/${n(s.promoFirst50.dismiss)}; upsell accept/dismiss ${n(s.upsell.accept)}/${n(s.upsell.dismiss)}; install-prompt installed ${n(s.outcomes.install.installed)} [${installOutcomeGapNote()}]; ${RAW_INSTALL_SIGNALS_LABEL} ${n(s.rawInstallSignals)}`)
     out.push(`  signin-eligible: earned ${n(s.signinEligible.earned)}, capped ${n(s.signinEligible.capped)}, unearned ${n(s.signinEligible.unearned)} (${SIGNIN_ELIGIBLE_COUNT_NOTE})`)
+    const sp1 = p1Line(s.p1)
+    if (sp1) out.push(`  site-wide P1 beacons: ${sp1}`)
     if (s.upsell.shown <= 1) out.push(`  ${UPSELL_SIGNEDOUT_EXPECTED_NOTE}`)
   }
   if (r.returns) {
