@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.35.1] — 2026-10-13
+
+### Security
+- **Old commits scrubbed.** The git history no longer holds the owner’s email addresses or the Cloudflare account and Access ids; replace any clone made before the history rewrite (2026-10-13) with a fresh one.
+
 ## [0.35.0] — 2026-10-12
 
 ### Added

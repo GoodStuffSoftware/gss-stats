@@ -1967,8 +1967,9 @@ Ads guards pin. None of them grants access on its own. Tests and examples use ma
 [`.gitleaks.toml`](.gitleaks.toml) (the defaults plus personal email addresses, public IP
 addresses, account ids and Google OAuth client ids). A finding fails the run. To run it before
 you push, with a local gitleaks binary: `gitleaks git --config .gitleaks.toml --redact .`
-Findings from commits made before the guard existed are listed by fingerprint (never by value)
-in [`.gitleaksignore`](.gitleaksignore).
+Old commits were rewritten on 2026-10-13 to drop personal and account data; a clone made before
+the rewrite still holds them, so replace it with a fresh clone. The two false positives left in old
+commits are listed by fingerprint (never by value) in [`.gitleaksignore`](.gitleaksignore).
 
 ## Branch
 

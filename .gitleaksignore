@@ -1,26 +1,6 @@
-# gitleaks findings in commits made before the secret-scan guard (2026-10-11), by fingerprint
-# (commit:file:rule:line), never by value. The values were moved out of the tree; rewriting
-# history to drop them is the owner's call (README "Environment data"). Add nothing new here:
-# fix the commit instead.
-006cac9f1bafb3039ba4084a3fed3280deaf6de4:.github/workflows/diagnose-geo.yml:cloudflare-account-id:17
-26d851e1e4483465334349ba6136c2d757f881b2:scripts/check-range-limits.ts:cloudflare-account-id:12
-4cf4402a54a4350fbf132375816e0cd7f3ebd2e1:.github/workflows/deploy.yml:cloudflare-account-id:101
-52d6052718e0c41d22a6742e311b30b9865c53c2:README.md:personal-email:184
-5f1ca521208cdbeb9906006a04449ae3638181d4:scripts/ads-reads/cloud-mint.ts:cloudflare-account-id:41
-70512c10c2679f51ae4bebfae73fbea142246847:docs/adr/0004-cloud-ads-routines.md:personal-email:796
-70512c10c2679f51ae4bebfae73fbea142246847:docs/adr/0004-cloud-ads-routines.md:personal-email:913
-83654ce5d2b6430c08b25bade60796726313ed2f:functions/api/sites.ts:cloudflare-account-id:17
-8a99ed4fd7a595bb2e0cbc8b415739d2200fd523:.github/workflows/deploy.yml:cloudflare-account-id:123
-8f78689ee112e261013876093f5618ca5c878708:.github/workflows/deploy.yml:cloudflare-account-id:112
-9d5405df4a5cf2d3e69df76cbd8b82359522b697:.github/workflows/deploy.yml:cloudflare-account-id:39
-a0faa4c02bbbda2975a7cb55024044403a35aa65:scripts/ads-reads/cloud-mint.ts:cloudflare-account-id:43
-a72f86733ebd7a7748ab90b6abe79ab7cea47464:functions/api/overview.kpi.test.ts:generic-api-key:45
-aa2eb16c5cb2b5a99585b095524cd5431f0879b6:scripts/check-range-limits.ts:cloudflare-account-id:12
-b043fe26de25c92910cededd91ade27282355f63:.github/workflows/deploy.yml:cloudflare-account-id:118
-ba7f6de54ebe4ef61a2667a97759ecda5f0ba210:scripts/ads-reads/worker-secrets.ts:cloudflare-account-id:27
-ba7f6de54ebe4ef61a2667a97759ecda5f0ba210:scripts/ads-reads/worker-secrets.ts:generic-api-key:28
-cd60fdceff9ed6cf30be750c0a04634b8ad552f2:.github/workflows/migrate-campaign.yml:cloudflare-account-id:20
-ce68e376c23ebb7a0ae74fa5ff9d284b15c28302:README.md:personal-email:102
-ce68e376c23ebb7a0ae74fa5ff9d284b15c28302:functions/api/stats.ts:cloudflare-account-id:22
-ceb788ebdc9508033ba21d731842798afa672636:README.md:personal-email:177
-ceb788ebdc9508033ba21d731842798afa672636:README.md:personal-email:206
+# gitleaks false positives in old commits, by fingerprint (commit:file:rule:line), never by value.
+# History was rewritten on 2026-10-13 to drop personal and account data, so the fingerprints of
+# the pre-guard findings were refreshed then; these two are not secrets (a metric id in a test and
+# the Secrets Store binding id). Add nothing new here: fix the commit instead.
+46d05ec7e88945f0ea736f426185ca1f82cbef52:functions/api/overview.kpi.test.ts:generic-api-key:45
+1cb90c6758a05d8387bc7620c66e9236b9548ebd:scripts/ads-reads/worker-secrets.ts:generic-api-key:28
