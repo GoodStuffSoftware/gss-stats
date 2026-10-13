@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.35.2] — 2026-10-13
+
+### Changed
+- **Dev tooling.** The repo no longer installs the agent-companion plugin at project scope; the user-scope install is the only copy.
+
 ## [0.35.1] — 2026-10-13
 
 ### Security

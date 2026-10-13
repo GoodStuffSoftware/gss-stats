@@ -8,7 +8,6 @@
     }
   },
   "enabledPlugins": {
-    "agent-companion@agent-templates": true,
     "deckhand@deckhand": true
   }
 }
