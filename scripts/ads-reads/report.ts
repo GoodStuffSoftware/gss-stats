@@ -130,11 +130,11 @@ export function fullReadLines(r: FullRead, title: string, opts: { postflight?: b
     out.push(
       `Tagged funnel (campaign tag only, exclusions applied): ${n(s.taggedArrivals)} arrivals (floor), ${n(s.taggedHits)} hits; ${GAME_VIEWS} ${n(s.funnel.played)}; asks ${n(s.asks.total)} (placement ${n(s.asks.byPath['/signin-prompt/placement'])}, streak ${n(s.asks.byPath['/signin-prompt/streak'])}, tutorial ${n(s.asks.byPath['/signin-prompt/tutorial'])}, ${(['committed-repeat', 'committed-challenge'] as const).map((k) => (s.asks.byPath[`/signin-prompt/${k}`] ? `${k} ${n(s.asks.byPath[`/signin-prompt/${k}`])}, ` : '')).join('')}promo ${n(s.asks.byPath['/promo-first50/shown'])}${s.asks.otherShownReasons ? `, other sign-in reasons ${n(s.asks.otherShownReasons)}` : ''}); accepts ${n(s.accepts.total)}; auth redirect ${n(s.authRedirect)}, auth success ${n(s.authSuccess)}`,
     )
+    out.push(`  ${trackingCheckCounts({ completeRows: s.funnel.completed, flight3Asks: s.flight3Asks, coachShownPlace: s.coachShownPlace })}`)
     // Not a rate (review finding, 2026-09-26): "asks" counts event rows within a tagged
     // session, "arrivals" counts first-ever tagged beacons — dividing one by the other mixes
     // units with no shared visitor id to join them on, so this is a count pair, not a percent.
     // acceptRate IS a real rate (accepts/asks — the same popup, the same session).
-    out.push(`  ${trackingCheckCounts({ completeRows: s.funnel.completed, flight3Asks: s.flight3Asks, coachShownPlace: s.coachShownPlace })}`)
     if (promoNote) out.push(`  promo asks: ${promoArmAbsentNote()}`)
     out.push(`  ${n(s.asks.total)} asks · ${n(s.taggedArrivals)} arrivals; accept rate ${formatGated(t.acceptRate)}; cost per tagged arrival ${money(t.costPerArrival)} (cumulative spend / tagged arrivals; benchmark about ${money(COST_PER_ARRIVAL_BENCHMARK)}, the F1/F2 in-app figure)`)
     out.push(`  dismisses (read separately): sign-in ${n(s.dismisses.signinPrompt)}, promo ${n(s.dismisses.promoFirst50)}`)

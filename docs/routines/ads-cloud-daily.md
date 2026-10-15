@@ -175,8 +175,11 @@ end date set at build and again at enable).
   yesterday in brackets): complete rows N (N), sign-in ask rows (placement, committed-repeat,
   committed-challenge) N (N), /coach/shown/place rows N (N)`) and on the tagged-funnel block of
   threshold and post-flight reads (the same three counts, cumulative). The first figure of each
-  pair is cumulative since the arm's start; on days 1-2 that is the days 1-2 total. Tagged
-  arrivals are on the same line. Each count prints a real `0` when there are none, never "—":
+  pair is cumulative since the arm's start; the bracket is yesterday's ET day. The arms start at
+  12:00 ET, so the Day 3 morning report is the first one holding days 1-2 (cumulative is then days
+  1-2; the bracket is Day 2); the Day 2 report holds Day 1 only. A minimum met earlier counts,
+  and a printed cumulative 0 is a true 0 for days 1-2 on any of these reads. Tagged arrivals are
+  on the same line. Each count prints a real `0` when there are none, never "—":
   take a printed 0 as 0. Judge over the arm's days 1-2:
   - **Search:** 10 or more tagged complete rows over days 1-2 but 0 tagged sign-in ask rows
     (the printed ask-rows count: `/signin-prompt/committed-repeat`, `committed-challenge` or
