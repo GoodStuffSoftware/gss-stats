@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.36.0] — 2026-10-14
+
 ### Added
 - **View-only access.** People on a viewer list can sign in and see every page and chart; every edit control is greyed out for them, and the server refuses any change they send.
 
