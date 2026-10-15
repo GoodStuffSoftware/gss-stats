@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.38.0] — 2026-10-15
+
 ### Added
 - **Ad flight 3 staged.** Best Sudoku's two flight 3 arms (Apps and Search) have their tags, $10/day budget, $70 cap and read settings ready, and the daily ads routine lists them as staged rows it never reads; only the campaign ids and dates are left to fill in. Flight 2's rows are marked past.
 

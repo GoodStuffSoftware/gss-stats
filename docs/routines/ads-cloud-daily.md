@@ -162,7 +162,7 @@ end date set at build and again at enable).
   can show zero with tracking working. Only the coded rule 3 may trip, and rule 3's own guards
   decide whether it is computable (see "Kill rule 3" below). A /coach/* row that the report
   does not print is "not readable" (name it in Step 3); never infer it. /coach/* rows are
-  printed once the coach counting change is on main.
+  printed (the coach counting change is on main since 0.37.0).
 
 ### Secondary measures (counts only, never per-person)
 
