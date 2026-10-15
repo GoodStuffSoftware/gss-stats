@@ -204,7 +204,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
     unknown id a token shows "—", and so does a value the server withholds or cannot fully measure
     (too few, no data, a shorter span than the range). A token sends only its metric and window,
     so it can never ask for a split the catalog withholds: the counts-only rule (return, game
-    starts, completions, tutorial completions, tour skips and tour exits, coach-strip dismisses and closes: no hour, place or device split, no visitor id)
+    starts, completions, tutorial completions, tour skips and tour exits, coach-strip shows, dismisses and closes: no hour, place or device split, no visitor id)
     stays enforced on the server, where a sub-day range counts those rows over whole ET days. A
     chart's ↻ (or a metric card's own ↻ / Retry) refetches its caption's tokens along with the chart, and a token deleted from a
     caption or label stops loading; a live push refetches a token only when the server flagged that
@@ -707,7 +707,7 @@ and the UTC `date`, whose count minus `dateEt`'s for the same day would give an 
 `country`, `region`, `city`, `postal`, `continent`, `timezone`, `colo`, `org`; `device`,
 `browser`, `os`, `lang`, `screenw`, `screenwBucket`, `visitor`), or is drilled into one of them
 leaves `/return/…`, `/game/start/…`, `/game/complete/…`, `/game/complete-deferred/…`,
-`/game/tutorial-complete/…`, `/tour/skip`, `/tour/exit-at/…`, `/coach/dismissed/…` and `/coach/closed-at/…` rows out entirely, and any row whose
+`/game/tutorial-complete/…`, `/tour/skip`, `/tour/exit-at/…`, `/coach/dismissed/…`, `/coach/closed-at/…` and `/coach/shown/…` rows out entirely, and any row whose
 path contains a NUL byte (SQLite LIKE stops reading at one, so the SQL guard tests `instr(path, char(0))`
 too, in step with the JS matcher `isSplitRefusedPath`), whatever
 "Include event beacons" says, marks the response `meta.splitGuard: true`, and the chart says so in a caption.
@@ -719,7 +719,7 @@ or app site in the geo charts (with "Include event beacons" on), and in the morn
 first-session funnel; `/api/popups` never counts them. `/tour/start` and `/tour/complete` are not
 part of the rule. Likewise the Best Sudoku coach strip (`/coach/shown/<tip>`, `/coach/dismissed/<tip>`,
 `/coach/closed-at/<tip>`, `/coach/tour-opened`; tip is place, wheel, notes, hint or clash) is an event family (path family
-`coach`), kept out of page views; `/coach/shown/…` and `/coach/tour-opened` stay splittable like `/tour/start`. The metric cards follow the same rule: in a country cell (`campaign-country`)
+`coach`), kept out of page views; only `/coach/tour-opened` stays splittable, like `/tour/start` (`/coach/shown/…` is once per tip per device, so it is counts only like `/return`). The metric cards follow the same rule: in a country cell (`campaign-country`)
 these rows belong to no country, so they count only where no country is asked, and
 `campaign.completions` takes no `country` param at all. `/api/popups` and the ads-read
 routine's hourly site-event read and per-country read leave them out too. The guard keys on dimensions and drills;

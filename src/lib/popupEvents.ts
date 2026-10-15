@@ -107,7 +107,7 @@ export const POPUP_EVENT_PREFIXES = [
   '/ab/ask-order',
   // Best Sudoku coach strip (flight 3): `/coach/shown/<tip>`, `/coach/dismissed/<tip>`,
   // `/coach/closed-at/<tip>` and `/coach/tour-opened`, <tip> one of place|wheel|notes|hint|clash.
-  // Events, never screen views. `closed-at` and `dismissed` are count-only (splitGuard.ts).
+  // Events, never screen views. `shown`, `closed-at` and `dismissed` are count-only (splitGuard.ts).
   '/coach',
 ] as const
 
