@@ -547,6 +547,7 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
       '/game/start/',
       '/funnel',
       '/ab/ask-order',
+      '/coach',
     ])
   })
   // v1.97.0 (first row at 2026-10-03T17:03:40Z): the three count-only first-run beacons. Until
@@ -985,5 +986,31 @@ describe('v1.97.0 tutorial-complete / tour-exit beacons', () => {
 
   it('the hand-synced ET date literal equals the ET date of TOUR_TRACKING_LIVE_AT', () => {
     expect(etDateFromMs(TOUR_TRACKING_LIVE_AT)).toBe(TOUR_TRACKING_LIVE_AT_ET)
+  })
+})
+
+describe('coach-strip beacons', () => {
+  const tips = ['place', 'wheel', 'notes', 'hint', 'clash']
+  const paths = [
+    ...tips.flatMap((t) => [`/coach/shown/${t}`, `/coach/dismissed/${t}`, `/coach/closed-at/${t}`]),
+    '/coach/tour-opened',
+  ]
+  it('all 16 paths are events with the coach family and drop out of page views', () => {
+    expect(paths).toHaveLength(16)
+    for (const p of paths) {
+      expect(isPopupEventPath(p), p).toBe(true)
+      expect(pathFamilyOf(p), p).toBe('coach')
+    }
+    expect(PATH_FAMILY_OPTIONS.filter((o) => o.value === 'coach')).toHaveLength(1)
+    // SQL side: the page-view exclusion drops /coach and /coach/*, the include side picks them up.
+    const w: string[] = []
+    const b: unknown[] = []
+    popupExcludeClause(w, b)
+    expect(b).toEqual([])
+    expect(w.join(' AND ')).toContain("path NOT LIKE '/coach/%'")
+    expect(w.join(' AND ')).toContain("path <> '/coach'")
+    expect(popupIncludeClause().sql).toContain("path LIKE '/coach/%'")
+    expect(isPopupEventPath('/coaching')).toBe(false)
+    expect(isPopupEventPath('/coach-tips')).toBe(false)
   })
 })

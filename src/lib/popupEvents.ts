@@ -105,6 +105,10 @@ export const POPUP_EVENT_PREFIXES = [
   // nothing: never added into any ask, eligible or outcome total. Anchored on the full
   // `/ab/ask-order` so an unrelated `/ab...` page keeps counting as a page view.
   '/ab/ask-order',
+  // Best Sudoku coach strip (flight 3): `/coach/shown/<tip>`, `/coach/dismissed/<tip>`,
+  // `/coach/closed-at/<tip>` and `/coach/tour-opened`, <tip> one of place|wheel|notes|hint|clash.
+  // Events, never screen views. `closed-at` and `dismissed` are count-only (splitGuard.ts).
+  '/coach',
 ] as const
 
 /** The provisional `/ab/ask-order/<group>/...` A/B twin rows: duplicates of real ask / eligible /
@@ -198,6 +202,7 @@ const PATH_FAMILY_LABELS: Record<(typeof POPUP_EVENT_PREFIXES)[number], string> 
   '/game/start/': 'game-start',
   '/funnel': 'funnel',
   '/ab/ask-order': 'ab-ask-order',
+  '/coach': 'coach',
 }
 
 /** Path → family label. 'page' for anything that isn't an event beacon (an ordinary page
@@ -248,6 +253,7 @@ export const PATH_FAMILY_OPTIONS: { value: string; label: string }[] = [
   { value: 'game-start', label: 'Game started' },
   { value: 'funnel', label: 'Paid funnel (trial / checkout / purchase)' },
   { value: 'ab-ask-order', label: 'Ask-order A/B twin (duplicate rows)' },
+  { value: 'coach', label: 'Coach strip (tips shown / dismissed / closed, tour opened)' },
 ]
 
 // ── Classification ──────────────────────────────────────────────────────────────────

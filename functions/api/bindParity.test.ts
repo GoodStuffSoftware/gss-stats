@@ -32,7 +32,7 @@ const REFUSED = [
   '/tour/exit-at', '/tour/exit-at/3', '/tour/skip', '/tour/skip/later', '/RETURN/x/d0', '/Game/Complete/normal/easy',
 ]
 // Neighbours of the refused families that are ordinary page views: none may be dropped.
-const ORDINARY = ['/', '/game', '/game/first-move', '/tour/start', '/tour/complete', '/tour/skipped', '/tour/skip-all', '/settings']
+const ORDINARY = ['/', '/game', '/game/first-move', '/tour/start', '/tour/complete', '/tour/skipped', '/tour/skip-all', '/settings', '/coach/shown/place', '/coach/tour-opened']
 const CAMPAIGN_TAGS = ['', 'sudoku_funnel_retest', 'tired_of_ads', 'launch_2026', 'sudoku_funnel_f2_apps', 'unrelated_beta']
 const REFERRERS = ['', 'google.com', ...OWN_HOSTS, 'goodstuff.software.evil.com', 'WWW.GOODSTUFF.SOFTWARE', 'bestsudoku.app.example']
 const UC_COUNT = new Set(CAMPAIGNS.flatMap((c) => c.ucValues)).size
@@ -260,10 +260,10 @@ describe('counts only: the hour, place and device splits still refuse every refu
   // Companions are the changed clauses: own hosts, uc list, game prefix, and all three together.
   const COMPANIONS: string[][] = [['referrer'], ['campaignFlight'], ['gameMode'], ['flightDay'], ['referrer', 'gameMode', 'campaignFlight']]
 
-  it('the refused set is exactly the nine patterns, and each fixture path is refused', () => {
+  it('the refused set is exactly the eleven patterns, and each fixture path is refused', () => {
     expect(SPLIT_REFUSED_PATH_PATTERNS).toEqual([
       '/return/%', '/game/complete/%', '/game/complete-deferred/%', '/game/tutorial-complete/%', '/game/start/%',
-      '/tour/exit-at/%', '/tour/exit-at', '/tour/skip', '/tour/skip/%',
+      '/tour/exit-at/%', '/tour/exit-at', '/tour/skip', '/tour/skip/%', '/coach/dismissed/%', '/coach/closed-at/%',
     ])
     for (const p of REFUSED) expect(isSplitRefusedPath(p), p).toBe(true)
     for (const p of ORDINARY) expect(isSplitRefusedPath(p), p).toBe(false)

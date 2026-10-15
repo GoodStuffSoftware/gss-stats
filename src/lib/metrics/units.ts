@@ -46,4 +46,5 @@ export const PATH_FAMILY_UNIT: Readonly<Record<string, Unit>> = {
   'game-start': 'row', // one row per counted game start (menu, play-again and leaving-the-tour starts alike)
   funnel: 'row', // provisional paid-funnel counters: one row per trial start / checkout start / purchase
   'ab-ask-order': 'row', // provisional A/B twin rows: duplicates, counted nowhere
+  coach: 'row', // one row per coach-strip tip shown / dismissed / closed-at, or tour-opened tap
 }

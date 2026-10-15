@@ -119,6 +119,10 @@ export const SPLIT_REFUSED_PATH_PATTERNS: readonly string[] = [
   '/tour/exit-at',
   '/tour/skip',
   '/tour/skip/%',
+  // Best Sudoku coach strip: the × button and the page-hidden-while-shown close, like a tour skip
+  // and exit. `/coach/shown/%` and `/coach/tour-opened` stay splittable, like `/tour/start`.
+  '/coach/dismissed/%',
+  '/coach/closed-at/%',
 ]
 
 /** The JS reading of SPLIT_REFUSED_PATH_PATTERNS, matching SQLite LIKE exactly (ASCII case
@@ -146,7 +150,7 @@ export const SPLIT_GUARD_KEY = SPLIT_REFUSED_PATH_PATTERNS.join('|')
  * (components/ChartCard.vue), so a smaller total never reads as missing data. */
 export const SPLIT_GUARD_CAPTION =
   'Counts only: this split leaves out return, game start, completion, tutorial-completion, ' +
-  'tour-skip and tour-exit rows, which are never shown by hour, place or device.'
+  'tour-skip, tour-exit and coach-strip dismiss and close rows, which are never shown by hour, place or device.'
 
 /** True when grouping, mapping or drilling by any of `fields` would split refused rows. */
 export function splitRefused(opts: { points: boolean; fields: readonly string[] }): boolean {

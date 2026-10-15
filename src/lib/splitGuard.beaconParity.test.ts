@@ -16,6 +16,8 @@ describe('SPLIT_REFUSED_PATH_PATTERNS beacon parity', () => {
       '/tour/exit-at',
       '/tour/skip',
       '/tour/skip/%',
+      '/coach/dismissed/%',
+      '/coach/closed-at/%',
     ])
   })
 })
@@ -37,6 +39,9 @@ describe('isSplitRefusedPath beacon parity (matcher)', () => {
       '/tour/skip',
       '/TOUR/SKIP',
       '/tour/skip/x',
+      '/coach/dismissed/place',
+      '/coach/closed-at/clash',
+      '/COACH/Closed-At/hint',
     ]) {
       expect(isSplitRefusedPath(p), p).toBe(true)
     }
@@ -47,6 +52,10 @@ describe('isSplitRefusedPath beacon parity (matcher)', () => {
       '/tour/start',
       '/tour/complete',
       '/tour/skipped',
+      '/coach/shown/place',
+      '/coach/tour-opened',
+      '/coach/dismissed',
+      '/coach/closed-at',
       '/tour/exit-atx',
       '/returns',
       '/return',

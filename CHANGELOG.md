@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.37.0] — 2026-10-15
+
+### Added
+- **Coach-strip beacons counted.** Best Sudoku's coach tips (shown, dismissed, closed, and "Show me around" taps) are counted as events, kept out of page views, and listed under a Coach strip path family; dismiss and close rows are counts only, never split by hour, place or device.
+
 ## [0.36.0] — 2026-10-14
 
 ### Added
