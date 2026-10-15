@@ -6,6 +6,13 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Reset to default in the chart editor.** A built-in chart can be put back to its factory settings in one click, keeping its place on the grid; nothing changes until Save.
+
+### Fixed
+- **Completions by mode × difficulty shows difficulty again.** The Overview card had been saved as a pie with no breakdown, so it drew Normal and Daily only; it is restored, and a pie or doughnut's legend now names what each slice is, so a chart that lost its breakdown says so.
+- **A breakdown cannot repeat the Group by dimension**, and a completions chart no longer offers the world map, which would have switched it to geo data.
+
 ## [0.35.2] — 2026-10-13
 
 ### Changed

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { reactive, shallowReactive, ref, watch, watchEffect, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import type { DashboardConfig, DashboardPage, Widget, GlobalFilters, StatsResponse } from './types'
-import { defaultConfig, normalizeConfig, defaultWidgetsForPage, clonePage, cryptoId, isBestSudokuLaunchPage, isBestSudokuPopupsPage, pageFilterBar, BEST_SUDOKU_SITES, beaconizeWidget, cleanGroupName, cleanPageName } from './lib/defaults'
+import { defaultConfig, normalizeConfig, defaultWidgetsForPage, factoryWidget, clonePage, cryptoId, isBestSudokuLaunchPage, isBestSudokuPopupsPage, pageFilterBar, BEST_SUDOKU_SITES, beaconizeWidget, cleanGroupName, cleanPageName } from './lib/defaults'
 import { rangeLabel, dayDrillRange } from './lib/range'
 import { loadConfig, saveConfig, ConfigLoadError } from './api'
 import { loadSites, sitesTree, tokenLabel } from './sitesStore'
@@ -600,6 +600,9 @@ function addChart() {
 function editChart(wgt: Widget) {
   editing.value = { isNew: false, widget: JSON.parse(JSON.stringify(wgt)) }
 }
+// The chart's factory version, for the editor's "Reset to default" (none for a new chart, or one on a
+// page without a fixed default set).
+const editingDefault = computed(() => (editing.value && !editing.value.isNew ? factoryWidget(activePage.value, editing.value.widget.id) : undefined))
 function onEditorSave(wgt: Widget) {
   const list = activePage.value.widgets
   const idx = list.findIndex((x) => x.id === wgt.id)
@@ -1101,6 +1104,7 @@ function toggleDark() {
       :filters="activePage.filters"
       :data="editingChartData?.data ?? null"
       :error="editingChartData?.error ?? null"
+      :default-widget="editingDefault"
       @save="onEditorSave"
       @cancel="editing = null"
       @remove="onEditorRemove"

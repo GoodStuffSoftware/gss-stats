@@ -218,3 +218,17 @@ export const COUNTRY_NAMES: Record<string, string> = {
   KR: 'South Korea',
   CN: 'China',
 }
+
+/** The dimension catalog a widget's data source picks from (the editor's Group by / Break down by). */
+export function dimensionsFor(dataset?: Dataset): { key: string; label: string }[] {
+  if (dataset === 'geo') return GEO_DIMENSIONS
+  if (dataset === 'completions') return COMPLETIONS_DIMENSIONS
+  if (dataset === 'popup') return POPUP_DIMENSIONS
+  return DIMENSIONS
+}
+/** A dimension's short name for a legend title: its catalog label without the parenthetical
+ * ("Mode (normal / daily)" reads "Mode"); the key itself when no catalog names it. */
+export function dimensionTitle(dataset: Dataset | undefined, key: string): string {
+  const label = dimensionsFor(dataset).find((d) => d.key === key)?.label ?? DIMENSIONS.find((d) => d.key === key)?.label ?? key
+  return label.replace(/\s*\(.*\)\s*$/, '')
+}

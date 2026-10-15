@@ -1,6 +1,6 @@
 import type { ChartConfiguration } from 'chart.js'
 import type { DrillConstraint, GlobalFilters, Widget, StatsResponse, StatsRow, Metric } from '../types'
-import { COUNTRY_NAMES, datasetSupportsBreakdown } from './catalog'
+import { COUNTRY_NAMES, datasetSupportsBreakdown, dimensionTitle } from './catalog'
 import { ringDims, isDateDim } from './rings'
 import { etDateFast } from './etTime'
 import { TRACKING_ACTIVATION_DATE_ET, PLAY_TRACKING_MARKER_LABEL, POPUPS, POPUP_FAMILY_ORDER, POPUP_OUTCOME_ORDER, POPUP_OUTCOME_LABELS } from './popupEvents'
@@ -664,6 +664,16 @@ const baseScales = () => ({
 })
 
 const noLegend = { legend: { display: false } }
+/** A legend title naming what each legend entry is (see sliceTitle). */
+function legendTitle(text: string, size: number) {
+  return { display: !!text, text, color: tickColor(), font: { family: 'Inter', size, weight: 600 } }
+}
+/** What one slice / bar / row of a one-mark-per-row chart is: "<dimension> · <breakdown>" when it
+ * draws pairs (pairRows), else the dimension alone. */
+export function sliceTitle(widget: Pick<Widget, 'dataset' | 'dimension' | 'breakdown'>, paired: boolean): string {
+  const dim = dimensionTitle(widget.dataset, widget.dimension)
+  return paired && widget.breakdown ? `${dim} · ${dimensionTitle(widget.dataset, widget.breakdown)}` : dim
+}
 
 // Zero-fill a date series: every day between since/until gets a bucket (0 if it had no rows),
 // so a sparse range doesn't visually collapse into just its non-empty days — e.g. a 4-day
@@ -909,8 +919,8 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse, seriesResp
         plugins: {
           // Phone width: a compact legend under the bars, so the series names don't eat the plot.
           legend: narrow
-            ? { display: true, position: 'bottom', labels: { color: tickColor(), font: { family: 'Inter', size: 10 }, boxWidth: 8, boxHeight: 8, padding: 6 } }
-            : { display: true, labels: { color: tickColor(), font: { family: 'Inter', size: 11 }, boxWidth: 12 } },
+            ? { display: true, position: 'bottom', title: legendTitle(dimensionTitle(widget.dataset, widget.breakdown!), 10), labels: { color: tickColor(), font: { family: 'Inter', size: 10 }, boxWidth: 8, boxHeight: 8, padding: 6 } }
+            : { display: true, title: legendTitle(dimensionTitle(widget.dataset, widget.breakdown!), 11), labels: { color: tickColor(), font: { family: 'Inter', size: 11 }, boxWidth: 12 } },
           tooltip: { filter: (item: any) => item.raw != null },
         },
         scales: { x: axis(model.stacked), y: { ...axis(model.stacked), beginAtZero: true } },
@@ -963,8 +973,8 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse, seriesResp
         interaction: { mode: 'index', intersect: false },
         plugins: {
           legend: narrow
-            ? { display: true, position: 'bottom', labels: { color: tickColor(), font: { family: 'Inter', size: 10 }, boxWidth: 8, boxHeight: 8, padding: 6 } }
-            : { display: true, position: 'bottom', labels: { color: tickColor(), font: { family: 'Inter', size: 11 }, boxWidth: 12 } },
+            ? { display: true, position: 'bottom', title: legendTitle(dimensionTitle(widget.dataset, widget.breakdown!), 10), labels: { color: tickColor(), font: { family: 'Inter', size: 10 }, boxWidth: 8, boxHeight: 8, padding: 6 } }
+            : { display: true, position: 'bottom', title: legendTitle(dimensionTitle(widget.dataset, widget.breakdown!), 11), labels: { color: tickColor(), font: { family: 'Inter', size: 11 }, boxWidth: 12 } },
         },
         scales: {
           ...baseScales(),
@@ -1084,7 +1094,9 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse, seriesResp
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        plugins: { legend: { position: 'right', labels: { color: tickColor(), font: { family: 'Inter', size: 11 }, boxWidth: 12 } } },
+        // The legend's title names what a slice is: "Mode · Difficulty" for pairs, "Mode" for one
+        // dimension, so a pie that lost its breakdown can never pass for the paired one.
+        plugins: { legend: { position: 'right', title: legendTitle(sliceTitle(widget, !!pairs), 11), labels: { color: tickColor(), font: { family: 'Inter', size: 11 }, boxWidth: 12 } } },
       },
     }
   }

@@ -47,7 +47,9 @@ import type { CardRef, MetricsContext } from '../lib/metrics/types'
 // `data`/`error` (optional) are the chart's current response, for the "Data caveats" list: a
 // runtime caveat (a pop-up note, a split guard, …) is only listed while the response carries it.
 // Without them the list still shows the legacy caption ids and every id this chart hides.
-const props = defineProps<{ widget: Widget; isNew: boolean; filters?: GlobalFilters; data?: StatsResponse | null; error?: string | null }>()
+// defaultWidget: the chart's factory version (lib/defaults.ts factoryWidget), when it has one; it
+// enables "Reset to default".
+const props = defineProps<{ widget: Widget; isNew: boolean; filters?: GlobalFilters; data?: StatsResponse | null; error?: string | null; defaultWidget?: Widget }>()
 const emit = defineEmits<{ save: [Widget]; cancel: []; remove: [] }>()
 
 // Series/axis titles and the note-id lists are nested: copy them, so Cancel leaves the saved
@@ -550,6 +552,14 @@ const strandedBreakdownWhy = computed<string>(() => {
   return `A ${draft.type} chart does not use a breakdown. Saving removes "${name}"; pick a chart type that breaks down to keep it.`
 })
 const dimLabel = (key?: string) => dimOptions.value.find((d) => d.key === key)?.label ?? DIMENSIONS.find((d) => d.key === key)?.label ?? key ?? ''
+// Break down by: every dimension but the one already grouped by (that would split nothing).
+const breakdownOptions = computed(() => dimOptions.value.filter((d) => d.key !== draft.dimension))
+watch(
+  () => draft.dimension,
+  (d) => {
+    if (draft.breakdown && draft.breakdown === d) draft.breakdown = undefined
+  },
+)
 const isPairBreakdown = computed(() => PAIR_TYPES.includes(draft.type) && !!draft.breakdown && breakdownAllowed.value)
 const isBreakdownLine = computed(() => (draft.type === 'line' || draft.type === 'area') && !isDateLine.value && !!draft.breakdown)
 const canUseSeries = computed(() => isDateLine.value && isGeo.value)
@@ -741,7 +751,9 @@ const typeDef = computed(() => CHART_TYPES.find((t) => t.value === draft.type))
 // ADR 0005 slice 5: "Rate" is no longer offered for a new chart (a new rate is a metric card). A saved
 // rate tile (saved as type 'rate', read from the prop, not the draft) keeps the option, so switching its
 // type away can be switched back.
-const typeChoices = computed(() => CHART_TYPES.filter((t) => t.value !== 'rate' || props.widget.type === 'rate'))
+// The world map draws beacon geo points only (picking it switches the source to geo), so a completions
+// chart does not offer it: it would stop being a completions chart.
+const typeChoices = computed(() => CHART_TYPES.filter((t) => (t.value !== 'rate' || props.widget.type === 'rate') && (t.value !== 'map' || draft.dataset !== 'completions')))
 // "Site override" = Widget.siteSel: this chart's own site pick, replacing the page's (dates and
 // every other page filter still apply). Best Sudoku is its beacon tags (web + app).
 const SITE_OVERRIDES: { value: string; label: string; sel: string[] }[] = [
@@ -792,6 +804,8 @@ function save() {
   if (!breakdownAllowed.value) draft.breakdown = undefined
   if (!isBreakdownLine.value) draft.cumulative = undefined
   if (draft.breakdown === '') draft.breakdown = undefined
+  // A breakdown by the Group by dimension itself splits nothing (the APIs ignore it).
+  if (draft.breakdown && draft.breakdown === draft.dimension) draft.breakdown = undefined
   if (!popupNeedsPopup.value) draft.popup = undefined
   if (!popupNeedsKind.value) draft.popupKind = undefined
   if (draft.type !== 'breakdownBar') draft.barMode = undefined
@@ -821,6 +835,20 @@ function save() {
   dropStrandedDataset() // also covers a widget stored in that state, not only one just switched out of card mode
   // A panel a metric card renders gets (or loses) its card with its view (lib/defaults.ts).
   emit('save', syncCardWithView({ ...draft, i: draft.id }))
+}
+
+// "Reset to default": put the chart's factory settings into the form (its place and size on the
+// grid stay). Nothing is saved until Save; Cancel leaves the chart as it was.
+const resetCount = ref(0)
+function resetToDefault() {
+  const d = props.defaultWidget
+  if (!d) return
+  const fresh = copyWidget({ ...JSON.parse(JSON.stringify(d)), id: draft.id, i: draft.i, x: draft.x, y: draft.y, w: draft.w, h: draft.h })
+  for (const k of Object.keys(draft) as (keyof Widget)[]) if (!(k in fresh)) delete draft[k]
+  Object.assign(draft, fresh)
+  beforeAlign = null
+  filterOpen.value = false
+  resetCount.value++ // remounts CardEditor, which reads its card once
 }
 </script>
 
@@ -882,6 +910,7 @@ function save() {
           </div>
         </div>
         <CardEditor
+          :key="resetCount"
           v-model="cardModel"
           :context="cardContext"
           :campaign-ids="cardSelectsCampaigns ? draft.campaignIds : undefined"
@@ -1003,7 +1032,7 @@ function save() {
           <label>{{ draft.type === 'breakdownBar' ? 'Series (break down by)' : draft.type === 'line' || draft.type === 'area' ? 'One line per' : 'Break down by' }}</label>
           <select v-model="draft.breakdown">
             <option :value="undefined">— none —</option>
-            <option v-for="d in dimOptions" :key="d.key" :value="d.key">{{ d.label }}</option>
+            <option v-for="d in breakdownOptions" :key="d.key" :value="d.key">{{ d.label }}</option>
           </select>
         </div>
       </div>
@@ -1168,9 +1197,11 @@ function save() {
       </div>
       </template>
 
+      <p v-if="resetCount" class="hint" role="status" data-testid="reset-default-hint">Default settings filled in. Save to keep them, or Cancel to leave the chart as it was.</p>
       <p v-if="cardSaveDisabled" class="hint save-reason" role="alert">Fix the highlighted fields to save.</p>
       <div class="actions">
         <button v-if="!isNew" class="btn danger" @click="emit('remove')">Delete</button>
+        <button v-if="!isNew && defaultWidget" class="btn" data-testid="reset-default" title="Fill in this chart's default settings. Save keeps them; Cancel leaves the chart as it was." @click="resetToDefault">Reset to default</button>
         <span class="spacer"></span>
         <button class="btn" @click="emit('cancel')">Cancel</button>
         <button class="btn btn-primary" :disabled="cardSaveDisabled" :title="cardSaveDisabled ? 'Fix the highlighted fields to save.' : ''" @click="save">{{ isNew ? 'Add chart' : 'Save' }}</button>

@@ -975,6 +975,18 @@ export function defaultWidgetsForPage(p: DashboardPage): Widget[] {
   return geoCount > p.widgets.length / 2 ? defaultBeaconWidgets() : defaultWidgets()
 }
 
+/** The factory version of one chart, for the editor's "Reset to default": the widget with that id
+ * in its page's own default set. Only a page with a fixed identity (the built-in pages and template
+ * pages) has one; a drill-down or user-made page does not, since defaultWidgetsForPage only guesses
+ * a set for it by data source and a same-id widget there is not this chart's factory version.
+ * A fresh deep copy each call. */
+export function factoryWidget(p: DashboardPage, widgetId: string): Widget | undefined {
+  const known = p.id === 'default' || p.id === 'beacon' || p.id === 'bsk-popups' || isOverviewPage(p) || isCampaignComparePage(p) || isRetentionPage(p) || isBestSudokuLaunchPage(p) || !!pageTemplateId(p)
+  if (!known) return undefined
+  const w = defaultWidgetsForPage(p).find((x) => x.id === widgetId)
+  return w ? (JSON.parse(JSON.stringify(w)) as Widget) : undefined
+}
+
 // Normalize a filter object, migrating legacy { site, host } → siteSel tokens.
 function normFilters(raw: any): GlobalFilters {
   const base = defaultFilters()
