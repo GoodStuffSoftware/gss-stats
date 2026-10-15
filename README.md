@@ -1193,6 +1193,14 @@ sets `approvedPlacements` or `adGroupPlacementCounts` is refused at load. Spend,
 clicks, CTR (rule 2), funnel reach (rule 3), the hard cap (rule 4) and every beacon count read
 the same for both channels.
 
+**Staging an arm before its campaign exists.** Flight 3's two arms are staged, not registered:
+`STAGED_FLIGHT_3` in `campaigns.ts` and `STAGED_FLIGHT_3_PLAN_SETTINGS` in `adsRules.ts` hold
+everything except the Google Ads id and the dates, and nothing reads them yet (no sync, chart or
+read sees a staged arm). Activating one is `stagedCampaign(arm, { id, flightStart, flightEnd })` in
+`CAMPAIGNS` plus `stagedReadPlan(arm, id)` in `ADS_READ_PLANS`; the steps, with the matching
+runbook edits, are in [docs/routines/ads-cloud-daily.md](docs/routines/ads-cloud-daily.md), "To
+activate flight 3".
+
 With two plans registered, **every** read must name its campaign: omitting `--campaign` exits 1
 and lists the registered ids. One line per arm, in each arm's own routine doc:
 

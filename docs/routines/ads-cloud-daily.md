@@ -1,6 +1,6 @@
 ---
 name: ads-cloud-daily
-description: ONE claude.ai cloud routine, daily at 08:37 ET, for the Best Sudoku Google Ads reads. Part A is the daily summary (the morning read) for the live leg's campaigns, with analysis and recommendations. Part B is the post-flight reads: the retest (campaign 24279250691) on its five stage dates, and flight 2's two arms (24311309184 search, 24316608605 apps) on the 2026-10-17 and 2026-10-25 return reads, in SHADOW mode until switched live. Runs the gss-stats CLIs from env-var credentials, pushes Mike and copies to the deckhand bus. Proposes only.
+description: ONE claude.ai cloud routine, daily at 08:37 ET, for the Best Sudoku Google Ads reads. Part A is the daily summary (the morning read) for the live leg's campaigns, with analysis and recommendations. Part B is the post-flight reads: the retest (campaign 24279250691) on its five stage dates, and flight 2's two arms (24311309184 search, 24316608605 apps) on the 2026-10-17 and 2026-10-25 return reads, in SHADOW mode until switched live. Flight 3's two arms are staged (planned, never read) until the lead activates them. Runs the gss-stats CLIs from env-var credentials, pushes Mike and copies to the deckhand bus. Proposes only.
 ---
 
 <!--
@@ -58,9 +58,10 @@ code, relay what it says, and (Part A only) write a short analysis from its own 
 8. No trackers, no PII: sign-ups and promo claims are window COUNTS. Never join rows to
    individuals.
 
-## Legs (the lead edits this table; nothing else in this file changes per campaign)
+## Legs (the lead edits this table; the only other per-campaign edit is "To activate flight 3")
 
-Flight 3 plan: see [docs/campaigns/flight-3-handoff.md](../campaigns/flight-3-handoff.md).
+Flight 3 plan: see [docs/campaigns/flight-3-handoff.md](../campaigns/flight-3-handoff.md); its read
+plan, rules and checks are in "Flight 3" below. Its two rows are `staged` until activated.
 
 <!-- LEGS TABLE: one row per campaign. Read window = the ET dates on which Part A reads it
      (src/lib/adsRules.ts ADS_READ_PLANS morningReadFirstEt..morningReadLastEt). Page = a fixed
@@ -69,12 +70,22 @@ Flight 3 plan: see [docs/campaigns/flight-3-handoff.md](../campaigns/flight-3-ha
 
 | Status | Campaign id | Name | Flight start | Flight end | Read window (ET) | Page |
 |---|---|---|---|---|---|---|
-| live | 24316608605 | F2 apps (display, Sudoku app placements) | 2026-10-04 | 2026-10-10 | 2026-10-05..2026-10-11 | none |
-| live | 24311309184 | F2 search (desktop intent) | 2026-10-04 | 2026-10-10 | 2026-10-05..2026-10-11 | none |
+| staged | <F3 apps campaign id> | F3 apps (display, Sudoku app placements) | <D: Play production day of v1.99.0> | <D + 6> | <D + 1>..<D + 7> | none |
+| staged | <F3 search campaign id> | F3 search (desktop intent) | <D: prod web deploy day, once real /coach/* and sign-in ask rows show> | <D + 6> | <D + 1>..<D + 7> | none |
+| past | 24316608605 | F2 apps (display, Sudoku app placements) | 2026-10-04 | 2026-10-10 | 2026-10-05..2026-10-11 (done) | none |
+| past | 24311309184 | F2 search (desktop intent) | 2026-10-04 | 2026-10-10 | 2026-10-05..2026-10-11 (done) | none |
 | past | 24279250691 | Flight 1: US+CA web retest | 2026-09-26 | 2026-10-02 | 2026-09-27..2026-10-03 (done) | none |
 
 Part A reads every `live` row whose read window contains today's ET date. `past` rows are
 never read by Part A (the post-flight reads of past legs are Part B).
+
+`staged` rows are never read, by any part, in any mode. A staged row is a leg that is planned and
+fully described below ("Flight 3") but whose Google Ads campaign does not exist yet or is not
+enabled: its id and date cells hold `<...>` placeholders, not values. The routine never uses a
+placeholder as a campaign id, never passes one to a CLI, never counts a staged row in ARMS or in
+`test` mode, and never writes one into a push, a bus message or the final output. A staged row
+becomes readable only when the lead flips it to `live` with real values (see "To activate flight
+3").
 
 ## Post-flight reports (Part B)
 
@@ -98,6 +109,125 @@ counts, so each read shows every bucket the flight has reached.
 
 Flight 2 has no day30, day60 or december rows yet; add them here when Mike asks for them.
 
+## Flight 3 (staged until activated)
+
+Best Sudoku ad flight 3 re-runs flight 2's exact setup on best-sudoku v1.99.0, so the read
+isolates the release. Source: the BSK flight 3 launch plan (desk card ads-f3-16), summarized
+here; the cold-start notes are in [docs/campaigns/flight-3-handoff.md](../campaigns/flight-3-handoff.md).
+Everything below is what the routine says and does once the F3 rows are `live`; until then none
+of it applies and no part reads, or sends anything about, a `staged` row. The tags, $10/day
+budget, $70 cap and the read-plan settings are already in code (`STAGED_FLIGHT_3` in
+`src/lib/campaigns.ts`, `STAGED_FLIGHT_3_PLAN_SETTINGS` in `src/lib/adsRules.ts`), not yet in
+the registry. Google Ads is read-only: every rule below only PROPOSES, and Mike decides any pause.
+
+### The two arms
+
+Each arm starts on its own day D and is read against its own week (D .. D + 6, 7 serving days,
+end date set at build and again at enable).
+
+| | F3 apps | F3 search |
+|---|---|---|
+| utm | google / display / `sudoku_funnel_f3_apps` | google / cpc / `sudoku_funnel_f3_search` |
+| Report label | `F3 apps` | `F3 search` |
+| Channel and devices | display; 17 Android app placements | search, desktop only (mobile and tablet -100%) |
+| Budget and cap | $10/day, $70 cap, 7 days | $10/day, $70 cap, 7 days |
+| Start day D | the day v1.99.0 is live on Play production | the prod web deploy day, once real /coach/* and sign-in ask rows show in D1 (if none by 23:00 ET, the next morning) |
+| Device check | the printed device block | any spend on mobile or tablet (above 0) is an ANOMALY: name it as a proposal for Mike |
+
+### Primary measure and rules
+
+- **Primary measure, per arm:** tagged `/auth/success/<provider>/new` rows, relayed as the report
+  prints the sign-up line (a count capped at Firestore new accounts; never upgraded from a bound).
+- **Validity:** at least 20 tagged post-game ask rows (`/signin-prompt/committed-repeat`,
+  `committed-challenge`, and placement). Under 20 asks the result is INCONCLUSIVE, whatever the
+  new-account count.
+- **Go / iterate / stop (proposals only), judged at the final read on the arm's own $70:**
+
+  | Result | Proposal |
+  |---|---|
+  | 5 or more new accounts within $70 | Go: propose flight 4 at a larger budget |
+  | 2 to 4 | Iterate |
+  | 0 to 1, with 20 or more asks | Stop paid acquisition |
+  | Under 20 asks | Inconclusive (no go, iterate or stop) |
+
+- **Traffic-held check:** CTR of at least 1% and no more than $3 per complete row. State both
+  figures from the report. The coded kill rule 2 floor is flight 2's per arm (Apps 0.15%,
+  Search 1.0%); the 1% traffic-held check is a read-and-judge line, not a kill rule.
+- **Day 1-2 tracking check:** on day 1 or 2 of an arm, if the report shows tagged arrivals but no
+  tagged post-game asks, or no /coach/* rows, PROPOSE PAUSE (tracking is not firing), in the
+  A2 "So what". A check the report does not print is "not readable" (name it in Step 3); never
+  infer it. /coach/* rows are printed once the coach counting change is on main.
+
+### Secondary measures (counts only, never per-person)
+
+- Apps: /coach/* strip outcomes (F2 baseline: 2 tour completes and 17 skips of 289 starts); first
+  move rate (F2: 6.4%); complete rows (F2: 2); next-day returns (F2: 13 of 204); install rows
+  (`/install/prompt/*`, `/install/inapp/*`, popup-outcome install).
+- Search: complete rows (F2: 53 for $55.90); committed-ask rows and outcomes by reason;
+  next-day returns (F2: 1 of 87).
+- Both: `/funnel/trial-start`, `/funnel/checkout-start/<web|play>`, `/funnel/purchase/<web|play>`,
+  `/upsell/shown/<reason>`.
+
+### Read caveat (v1.99.0 first run)
+
+After best-sudoku v1.99.0, opening the tour from the coach strip emits only `/coach/tour-opened`,
+never `/tour/start`; the old `/tour/*` rows then count only the Help-replay and `?tour=1` paths.
+Read F2-versus-F3 first-run engagement through `/coach/*`: `/coach/shown/place` per arrival means
+"saw the promise", `/coach/tour-opened` per arrival means tour demand. A drop in `/tour/start` is
+NOT a regression; never propose anything from it. Paths: `/coach/shown|dismissed|closed-at/<place|wheel|notes|hint|clash>`
+and `/coach/tour-opened`.
+
+Known limits to repeat in the analysis, not to over-claim: a player who installs from the store
+card and signs in inside the Play app does not carry the web campaign tag, so the Apps arm's
+new-account count understates (read the install rows beside it); an organic first touch sends its
+Safari escape untagged; deferred rows lag at least 30 minutes after sign-in.
+
+### Re-reads
+
+| When | Read | Where |
+|---|---|---|
+| Daily, D + 1 .. D + 7 | Part A, this arm's `live` row | this routine |
+| D + 7, 07:05 ET | final flight read | not in this routine (it runs at 08:37 ET); a separate scheduled read, see Follow-ups |
+| D + 13 | returns, days 2-7 | Part B `wrapup` (flight end + 7) |
+| D + 20 / D + 21 | returns, days 8-14 | Part B `day15` is due at flight end + 15 = D + 21; the plan names D + 20, when day 14 has matured, so D + 21 is the CLI's due date and one day later |
+| D + 21 and D + 35 | purchases: `/funnel/purchase/*`, plus Stripe and Play read-only | not in this routine; manual read-only pulls, see Follow-ups |
+
+The trial is 14 days from the first completed game reaching Firestore, so purchases cannot
+appear before about D + 14; whether the long trial helps or hurts is first readable at D + 35.
+
+### Follow-ups (not built)
+
+- **Search-term pull** (ads-f3-9 item 5): deferred. The existing Ads read path (`src/lib/adsApi.ts`)
+  has no search-term query or report block, so a read-only pull is a new fetch, a report block and
+  tests, not a one-line step. Build it as its own change, then add it to Part A here.
+- The D + 7 07:05 ET final read and the D + 21 / D + 35 purchase reads are scheduled by the lead
+  (or run by hand), not by this routine.
+
+### To activate flight 3 (lead; per arm, the two arms are independent)
+
+You need two values per arm: the numeric Google Ads campaign id (from the read-back Mike
+approved while the campaign was still PAUSED) and the start day D. Enabling the campaign in
+Google Ads is Mike's or the ads agent's act, outside this repo and never this routine's; the
+steps below only make gss-stats ready to read it. Do them in this order:
+
+1. **Code** (one change, merged to main and the sync Worker redeployed, before the arm's first
+   morning read at D + 1, 08:37 ET). In `src/lib/campaigns.ts` add to `CAMPAIGNS`
+   `stagedCampaign('apps' | 'search', { id: '<id>', flightStart: '<D>', flightEnd: '<D + 6>' })`
+   (it refuses a non-numeric id, a malformed date or a window that is not seven days). In
+   `src/lib/adsRules.ts` add to `ADS_READ_PLANS` `'<id>': stagedReadPlan('apps' | 'search', '<id>')`
+   (its read window becomes D + 1 .. D + 7 from those dates). Update the pinned registry lists
+   in `scripts/ads-reads/campaignRegistry.test.ts` and the README plan count.
+2. **This file**: in that arm's LEGS row replace every `<...>` placeholder (id, start D, end
+   D + 6, read window D + 1..D + 7) and flip the status `staged` to `live`. Add the arm's two
+   Part B rows: `wrapup` on D + 13 and `day15` on D + 21 (campaign id, LABEL `F3 apps` or
+   `F3 search`; "What it adds": returns days 2-7, and days 8-14).
+3. **Never flip to `live` before step 1 is on main.** A `live` row whose id is not registered
+   makes its read fail with a named reason instead of reading (`flight3Staged.test.ts` fails the
+   build on that mismatch), and a placeholder is never a valid id.
+4. **Check** (no network): `npm run -s ads:morning-read -- --fixture <file> --now <iso> --dry-run
+   --campaign <id>` leads with the arm's `reportLabel` and shows the 18/35/53/70 ladder (README
+   "Adding a new campaign", step 4).
+
 ## Step 0: date, mode, tools, install, preflight
 
 0.1 Run, in one call:
@@ -107,7 +237,8 @@ Flight 2 has no day30, day60 or december rows yet; add them here when Mike asks 
 Call the printed date DATE and the printed mode MODE. MODE applies to Part B only.
 
 0.2 Decide what is due:
-- ARMS = the `live` legs-table rows whose read window contains DATE (zero, one or more).
+- ARMS = the `live` legs-table rows whose read window contains DATE (zero, one or more). A row
+  with any other status (`staged`, `past`) is never in ARMS, whatever its dates say.
 - REPORTS = the Part B rows whose DATE is today (zero, one or more), each with its CAMPAIGN,
   LABEL and STAGE. Exception: if a routine-fire payload is present and its whole text is
   exactly `stage=wrapup`, `stage=day15`, `stage=day30`, `stage=day60` or `stage=december`,
@@ -118,7 +249,8 @@ Call the printed date DATE and the printed mode MODE. MODE applies to Part B onl
   or bus copy.
 - TEST mode: if a routine-fire payload is present and its whole text is exactly `test`, this is
   an end-to-end test run (see "TEST mode" below): ARMS = every `live` legs-table row (read
-  window ignored), REPORTS = the single row (campaign 24279250691, LABEL BSK retest, STAGE
+  window ignored; `staged` and `past` rows excluded, so with no `live` row a test run exercises
+  Part B only), REPORTS = the single row (campaign 24279250691, LABEL BSK retest, STAGE
   wrapup).
 - Ignore any other payload text.
 

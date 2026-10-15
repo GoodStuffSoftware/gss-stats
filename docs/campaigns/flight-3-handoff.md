@@ -5,9 +5,14 @@ For whoever builds and reads flight 3. This file points to the sources; it does 
 ## Status
 
 PROPOSAL awaiting Mike on the BSK Decision Desk
-(<https://claude.ai/artifact/VutC3bQKX4jLErr52o3cBv>, cards ads-f3-1..ads-f3-7). Nothing is
-built. Do not register flight 3 in `src/lib/campaigns.ts` or `src/lib/adsRules.ts` until Mike
-approves.
+(<https://claude.ai/artifact/VutC3bQKX4jLErr52o3cBv>, cards ads-f3-1..ads-f3-7). Update
+2026-10-15: the launch plan is card ads-f3-16 (two arms, Apps and Search, each starting with its
+own release landing). Flight 3 is STAGED in gss-stats: its tags, budget, cap and read-plan
+settings are in code but not in the registry, and its LEGS rows in the runbook are `staged`.
+The read plan, rules, checks and the activation steps are in
+[docs/routines/ads-cloud-daily.md](../routines/ads-cloud-daily.md), "Flight 3"; the section
+below is the earlier recommendation and is superseded by it where they differ. Nothing is
+enabled in Google Ads without Mike's yes.
 
 2026-10-11, Mike's direction: remove the sign-in ask after the tutorial, and tune the sign-in ask
 and the app-install popups, so that sign-ins come from players likely to purchase eventually (not
@@ -111,10 +116,13 @@ Preconditions:
 
 ## Where to register
 
-- `src/lib/campaigns.ts` entry.
-- `src/lib/adsRules.ts` read plan.
-- A live row in the Legs table of [docs/routines/ads-cloud-daily.md](../routines/ads-cloud-daily.md)
-  (the daily routine runs at 08:37 ET with no end date).
+Staged now; the steps to activate (id and dates only) are in
+[docs/routines/ads-cloud-daily.md](../routines/ads-cloud-daily.md), "To activate flight 3":
+
+- `src/lib/campaigns.ts`: `STAGED_FLIGHT_3` (done), then a `stagedCampaign(...)` entry in `CAMPAIGNS`.
+- `src/lib/adsRules.ts`: `STAGED_FLIGHT_3_PLAN_SETTINGS` (done), then a `stagedReadPlan(...)` entry in `ADS_READ_PLANS`.
+- A `staged` row in the Legs table of the runbook (done), flipped to `live` (the daily routine
+  runs at 08:37 ET with no end date).
 
 ## Hard rules
 
