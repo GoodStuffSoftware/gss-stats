@@ -67,7 +67,24 @@ Counts, read-only. Raw pulls live in the analyst session scratchpad only (not co
   each vs $34.97), but 57 sign-in asks led to 1 auth success.
 - The funnel breaks at the sign-in ask, which fires in the tutorial.
 
-## Recommended flight 3 (if Mike picks option A on ads-f3-1)
+## Revised arms (Mike, 2026-10-15, desk card ads-f3-16): this overrides the build spec below
+
+- **Search is a buyer-intent test.** Keywords: the "no ads" family only (sudoku no ads, sudoku
+  without ads, sudoku app no ads, ad free sudoku and the rest), exact + phrase; flight 2's
+  free-seeker terms are dropped. Max CPC **$0.99** (a hard ceiling under $1), ALL devices (the
+  mobile and tablet hard stops and the gss-stats desktop-only anomaly flag are dropped).
+  Negatives: flight 2's 10 plus free, online free, printable and puzzle book. Flight 2's RSA plus a
+  price headline. Expected volume is about 15-25 clicks a week, so one week will likely read
+  inconclusive (under 20 asks); the rules are unchanged.
+- **Apps:** the same 17 placements, max CPC **$0.35**, flight 2 copy plus a price line ("No ads.
+  Passes from $1.99").
+- **Both arms:** $10/day, $70 cap, the utm tags unchanged.
+- **Cost per arrival:** every tagged read prints cumulative spend / tagged arrivals with Mike's
+  benchmark of about $0.32 an arrival (the F1/F2 in-app figure) beside it.
+- **Day 1-2 tracking check:** a read-and-judge line in the runbook ("Flight 3"), never coded; it
+  replaces rule 3 for this flight and only proposes a pause.
+
+## Recommended flight 3 (if Mike picks option A on ads-f3-1; superseded where the revised arms above differ)
 
 Preconditions:
 
@@ -89,7 +106,7 @@ Preconditions:
 
 ### Build spec (diff from F2 Search)
 
-- Name "Best Sudoku - Search - Desktop intent - F3 Search"; utm_campaign `sudoku_funnel_f3_search`, medium `cpc`.
+- (Superseded: see the revised arms above for bid, keywords and devices.) Name "Best Sudoku - Search - Desktop intent - F3 Search"; utm_campaign `sudoku_funnel_f3_search`, medium `cpc`.
 - $10/day standard budget; Manual CPC $0.60.
 - Same 12 keywords and 10 negatives, plus 4 negatives: nytimes, nyt, easybrain, juego.
 - Mobile and tablet -100% hard stops; US+CA Presence; English; 12:00-23:00 ET.

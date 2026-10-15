@@ -129,10 +129,10 @@ end date set at build and again at enable).
 |---|---|---|
 | utm | google / display / `sudoku_funnel_f3_apps` | google / cpc / `sudoku_funnel_f3_search` |
 | Report label | `F3 apps` | `F3 search` |
-| Channel and devices | display; 17 Android app placements | search, desktop only (mobile and tablet -100%) |
+| Channel and devices | display; 17 Android app placements | search, ALL devices (no device exclusion) |
 | Budget and cap | $10/day, $70 cap, 7 days | $10/day, $70 cap, 7 days |
 | Start day D | the day v1.99.0 is live on Play production | the prod web deploy day, once real /coach/* and sign-in ask rows show in D1 (if none by 23:00 ET, the next morning) |
-| Device check | the printed device block | any spend on mobile or tablet (above 0) is an ANOMALY: name it as a proposal for Mike |
+| Device check | the printed device block | none: Search runs on all devices, so the device block is informational and no device spend is an anomaly |
 
 ### Primary measure and rules
 
@@ -158,11 +158,28 @@ end date set at build and again at enable).
   flight 3 verdict. The table above governs: judge on the new-account count and on the 20 asks
   counted from committed-repeat, committed-challenge and placement rows only. If the printed row
   and this table disagree, say so and follow this table.
-- **Day 1-2 tracking:** zero tagged post-game asks on day 1 or 2 is not by itself a pause: day 1
-  can show zero with tracking working. Only the coded rule 3 may trip, and rule 3's own guards
-  decide whether it is computable (see "Kill rule 3" below). A /coach/* row that the report
-  does not print is "not readable" (name it in Step 3); never infer it. /coach/* rows are
-  printed (the coach counting change is on main since 0.37.0).
+- **Cost per arrival (per arm):** the report's "cost per tagged arrival" line (cumulative spend
+  divided by tagged arrivals; "—" while there are no arrivals) prints Mike's benchmark beside it,
+  about $0.32 an arrival (the F1/F2 in-app figure). Quote both; it is a comparison, not a rule.
+- **Search volume:** about 15-25 clicks a week are expected, so one week will likely read
+  inconclusive (under 20 asks). That is the expected outcome, not a fault; the rules above are
+  unchanged.
+- **Day 1-2 tracking check (read-and-judge; NOT a coded kill rule; it only PROPOSES a pause).**
+  It catches a week of spend on broken tracking. Judge it from the report's tagged counts over the
+  arm's days 1-2:
+  - **Search:** 10 or more tagged complete rows over days 1-2 but 0 tagged sign-in ask rows
+    (`/signin-prompt/committed-repeat`, `committed-challenge` or placement): propose pausing
+    Search and checking the live bundle.
+  - **Apps:** 30 or more tagged arrivals over days 1-2 but 0 tagged `/coach/shown/place` rows:
+    propose pausing Apps and checking the live bundle. The strip shows on a first game, so this
+    fires only if the coach beacons or the tagging are broken.
+  - The thresholds are minimums: a quiet day reads "too few rows", not a false alarm.
+  - **Relation to rule 3:** this check replaces coded rule 3 for flight 3. Rule 3 checks
+    first-session (tutorial) asks, and v1.99.0 removes the tutorial ask, so from release on rule 3
+    always reads NOT COMPUTABLE, by design (0.35.0). This check uses the new ask and coach paths
+    instead. It does not touch rule 3's code and does not contradict the NOT COMPUTABLE guard.
+    A /coach/* row that the report does not print is "not readable" (name it in Step 3); never
+    infer it. /coach/* rows are printed (the coach counting change is on main since 0.37.0).
 
 ### Secondary measures (counts only, never per-person)
 

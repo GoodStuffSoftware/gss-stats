@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   ADS_READ_PLANS,
   RETEST_APPROVED_PLACEMENTS,
+  allDevicesOf,
   STAGED_FLIGHT_3_PLAN_SETTINGS,
   auditPathFor,
   channelOf,
@@ -132,6 +133,24 @@ describe('activation is an id and dates only', () => {
     expect(campaignAttributionClause(campaignById(APPS_ID)!).matches('sudoku_funnel_f3_apps', Date.parse('2026-10-20T15:59:00Z'))).toBe(false) // 11:59 EDT
     expect(campaignAttributionClause(campaignById(APPS_ID)!).matches('sudoku_funnel_f3_search', Date.parse('2026-10-21T17:00:00Z'))).toBe(false)
     expect(flightDayIndex(campaignById(SEARCH_ID)!, '2026-10-21')).toBe(1)
+  })
+  it('the revised Search arm runs on all devices (no desktop-only flag); Apps and flight 2 Search are unchanged', () => {
+    CAMPAIGNS.push(stagedCampaign('apps', { id: APPS_ID, flightStart: START, flightEnd: END }), stagedCampaign('search', { id: SEARCH_ID, flightStart: START, flightEnd: END }))
+    ADS_READ_PLANS[APPS_ID] = stagedReadPlan('apps', APPS_ID)
+    ADS_READ_PLANS[SEARCH_ID] = stagedReadPlan('search', SEARCH_ID)
+    expect(STAGED_FLIGHT_3_PLAN_SETTINGS.search.allDevices).toBe(true)
+    expect(allDevicesOf(SEARCH_ID)).toBe(true)
+    expect(allDevicesOf(APPS_ID)).toBe(false)
+    expect(allDevicesOf('24311309184')).toBe(false) // flight 2 Search keeps its desktop-only flag
+    expect(allDevicesOf('0')).toBe(false)
+  })
+  it('records the revised bids and keyword family in the staged notes', () => {
+    expect(STAGED_FLIGHT_3.search.notes).toMatch(/\$0\.99 max/)
+    expect(STAGED_FLIGHT_3.search.notes).toMatch(/ALL devices/)
+    expect(STAGED_FLIGHT_3.search.notes).toMatch(/15-25 clicks a week/)
+    expect(STAGED_FLIGHT_3.search.notes).not.toMatch(/\$0\.60|mobile and tablet -100%/)
+    expect(STAGED_FLIGHT_3.apps.notes).toMatch(/\$0\.35 max/)
+    expect(STAGED_FLIGHT_3.apps.notes).toMatch(/Passes from \$1\.99/)
   })
   it('stagedReadPlan refuses a campaign that is not registered yet', () => {
     expect(() => stagedReadPlan('apps', APPS_ID)).toThrow(/must be in CAMPAIGNS/)

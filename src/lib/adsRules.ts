@@ -180,6 +180,11 @@ export interface AdsReadPlan {
   /** Kill rule 2: propose pause when cumulative CTR is BELOW this. */
   ctrFloor: number
   approvedPlacements: readonly string[]
+  /** A search plan that serves on ALL devices: the report does not flag closed-day spend on
+   * mobile, tablet, connected TV or other as a desktop-only ANOMALY (flight 3's Search arm, a
+   * buyer-intent test on every device). Unset keeps the flag, as flight 2's desktop-only
+   * Search arm needs. Ignored for a display plan. */
+  allDevices?: boolean
   /** Short campaign name that leads this campaign's push/bus text and report header
    * ("<label> morning read ..."). Unique across the registry, so two campaigns read the same
    * morning never produce indistinguishable notifications. The retest keeps "BSK retest". */
@@ -229,6 +234,10 @@ export function buildReadPlan(campaignId: string, settings: ReadPlanSettings): A
 export function channelOf(campaignId: string, plans: Readonly<Record<string, AdsReadPlan>> = ADS_READ_PLANS): CampaignChannel {
   return plans[campaignId]?.channel ?? 'display'
 }
+/** Whether a campaign's plan serves on all devices (AdsReadPlan.allDevices); false when unset or unregistered. */
+export function allDevicesOf(campaignId: string, plans: Readonly<Record<string, AdsReadPlan>> = ADS_READ_PLANS): boolean {
+  return plans[campaignId]?.allDevices === true
+}
 /** Kept for external callers, e.g. the scheduled-task helper ~/.claude/scheduled-tasks/bsk-retest-morning-read/release-switchover.ts (line 76: `rules.readPlanFor(rules.RETEST_CAMPAIGN_ID)`); new code must take the campaign from the registry or `--campaign`. */
 export const RETEST_CAMPAIGN_ID = '24279250691'
 /** Flight 3's read-plan settings per arm, staged: not in ADS_READ_PLANS, because its campaigns
@@ -236,11 +245,11 @@ export const RETEST_CAMPAIGN_ID = '24279250691'
  * arming and CTR floors as flight 2, so the read isolates the release: the $70 cap in whole
  * dollars (the top read IS the cap), kill rules from 50% of it, Apps with the 17 approved
  * placements and flight 2's 10% leak limit and 0.15% CTR floor, Search with no placements and
- * a 1.0% CTR floor. Search is desktop-only, so the printed device anomaly (any spend on mobile,
- * tablet, connected TV or other on the closed day) already covers "flag mobile or tablet spend
- * above 0". Everything else flight 3 adds (the new-account primary measure, the 20-ask validity
- * floor, go / iterate / stop, the traffic-held check) is read from the report and judged in
- * the runbook (docs/routines/ads-cloud-daily.md, "Flight 3"); none of it is a kill rule. */
+ * a 1.0% CTR floor. Search is a buyer-intent test on ALL devices (Mike, 2026-10-15), so its plan
+ * sets `allDevices` and the desktop-only device anomaly is not printed for it. Everything else
+ * flight 3 adds (the new-account primary measure, the 20-ask validity floor, go / iterate /
+ * stop, the traffic-held check, the day 1-2 tracking check) is read from the report and judged
+ * in the runbook (docs/routines/ads-cloud-daily.md, "Flight 3"); none of it is a kill rule. */
 export const STAGED_FLIGHT_3_PLAN_SETTINGS: Record<StagedArm, Omit<ReadPlanSettings, 'morningReadFirstEt' | 'morningReadLastEt'>> = {
   apps: {
     thresholds: [18, 35, 53, 70],
@@ -257,6 +266,7 @@ export const STAGED_FLIGHT_3_PLAN_SETTINGS: Record<StagedArm, Omit<ReadPlanSetti
     thresholds: [18, 35, 53, 70],
     killRulesFrom: 35,
     ctrFloor: 0.01,
+    allDevices: true,
     reportLabel: 'F3 search',
     auditSlug: 'f3-search',
   },

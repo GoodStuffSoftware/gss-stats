@@ -19,6 +19,7 @@ import {
   type OutcomePopup,
   type RuleResult,
   reportLabelFor,
+  allDevicesOf,
   channelOf,
   SEARCH_NA,
   type CampaignChannel,
@@ -35,6 +36,8 @@ const GAME_VIEWS = noteRawText('label.campaign.gameViews').toLowerCase()
 
 const money = (x: number | null | undefined) => (x == null ? '—' : `$${x.toFixed(2)}`)
 const n = (x: number | null | undefined) => (x == null ? '—' : x.toLocaleString('en-US'))
+/** Mike's cost-per-arrival benchmark (2026-10-15): the F1/F2 in-app campaign, about $0.32 a tagged arrival. */
+export const COST_PER_ARRIVAL_BENCHMARK = 0.32
 const pct = (x: number | null | undefined, dp = 2) => (x == null ? '—' : `${(x * 100).toFixed(dp)}%`)
 
 /** What the shared sync (src/lib/adsSync.ts) did before the read. */
@@ -123,7 +126,7 @@ export function fullReadLines(r: FullRead, title: string, opts: { postflight?: b
     // units with no shared visitor id to join them on, so this is a count pair, not a percent.
     // acceptRate IS a real rate (accepts/asks — the same popup, the same session).
     if (promoNote) out.push(`  promo asks: ${promoArmAbsentNote()}`)
-    out.push(`  ${n(s.asks.total)} asks · ${n(s.taggedArrivals)} arrivals; accept rate ${formatGated(t.acceptRate)}; cost per tagged arrival ${money(t.costPerArrival)}`)
+    out.push(`  ${n(s.asks.total)} asks · ${n(s.taggedArrivals)} arrivals; accept rate ${formatGated(t.acceptRate)}; cost per tagged arrival ${money(t.costPerArrival)} (cumulative spend / tagged arrivals; benchmark about ${money(COST_PER_ARRIVAL_BENCHMARK)}, the F1/F2 in-app figure)`)
     out.push(`  dismisses (read separately): sign-in ${n(s.dismisses.signinPrompt)}, promo ${n(s.dismisses.promoFirst50)}`)
     out.push(`  install: prompt shown ${n(s.install.promptShown)}, taps ${n(s.install.taps)}, installed ${n(s.install.installed)} [${installOutcomeGapNote()}]; ${RAW_INSTALL_SIGNALS_LABEL} ${n(s.install.rawSignals)}; signin-eligible (count of asks) earned ${n(s.signinEligible.earned)}, capped ${n(s.signinEligible.capped)}, unearned ${n(s.signinEligible.unearned)}`)
     const tp1 = p1Line(s.p1)
@@ -231,7 +234,7 @@ export function formatMorningReport(r: MorningResult): string {
     for (const x of h.results ?? []) out.push(`  [${x.status}] ${x.parentLabel} ${n(x.parent)} → ${x.childLabel} ${n(x.children)}${x.status === 'known-gap' ? ' (known gap, never alerts)' : ''}`)
   }
   if (r.play) out.push(r.play.line)
-  const diag = diagnosticsLines(r.diagnostics, channelOf(r.campaign.id))
+  const diag = diagnosticsLines(r.diagnostics, channelOf(r.campaign.id), { allDevices: allDevicesOf(r.campaign.id) })
   if (diag.length) out.push('', ...diag)
   const playLines = playReportsLines(r.playReports)
   if (playLines.length) out.push('', ...playLines)
@@ -304,7 +307,7 @@ const RECOMMENDATION_STANDING_VERDICTS = 'Maximize Conversions REJECT; conversio
  * unchanged by this file). */
 /** Devices a desktop-only search arm should not spend on (diagnosticsLines flags them). */
 const SEARCH_OFF_DESKTOP: ReadonlySet<string> = new Set(['MOBILE', 'TABLET', 'CONNECTED_TV', 'OTHER'])
-export function diagnosticsLines(d: DiagnosticsSection, channel: CampaignChannel = 'display'): string[] {
+export function diagnosticsLines(d: DiagnosticsSection, channel: CampaignChannel = 'display', opts: { allDevices?: boolean } = {}): string[] {
   const empty = !d.hourly && !d.geo && !d.devices && !d.targeting && !d.recommendations && !d.countryCounts && !d.accountCrossCheck && !d.errors.length
   if (empty) return []
   const out = [`Diagnostics for ${d.spendThroughEt ?? 'the closed day'} (informational only; never a kill rule or an automatic action):`]
@@ -325,7 +328,7 @@ export function diagnosticsLines(d: DiagnosticsSection, channel: CampaignChannel
       // A search arm is desktop-only: spend on any other device on the closed day is flagged.
       // Printed only — never a kill rule, never in `tripped` or the push text. Ads-side
       // segments.device only; no beacon row is tied to a device.
-      const offDesktop = channel === 'search' && SEARCH_OFF_DESKTOP.has(dv.device) && dv.cost > 0
+      const offDesktop = channel === 'search' && !opts.allDevices && SEARCH_OFF_DESKTOP.has(dv.device) && dv.cost > 0
       out.push(`  device: ${dv.device} ${n(dv.impressions)} impr, ${n(dv.clicks)} clicks, ${money(dv.cost)}${shouldBeZero && nonZero ? ' — ANOMALY: computers/TV should read zero on a mobile-app placement campaign, propose to Mike' : ''}${offDesktop ? ` — ANOMALY: yesterday's spend on ${dv.device}: ${money(dv.cost)}; arm is desktop-only (closed day only, not the flight so far), propose to Mike` : ''}`)
     }
   } else out.push('  devices: not read')

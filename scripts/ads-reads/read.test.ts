@@ -8,6 +8,7 @@ import { fixtureDeps, type Fixture } from './cli'
 import { runMorningRead, runPostflightRead, type MorningOptions } from './read'
 import { formatMorningReport, formatPostflightReport, withJson } from './report'
 import { MIN_COHORT } from '../../src/lib/popupEvents'
+import { costPer } from '../../src/lib/campaigns'
 import { AUTH_SUCCESS_SPLIT_RECOMMENDATION } from '../../src/lib/adsRules'
 import { syncAdsData } from '../../src/lib/adsSync'
 
@@ -156,6 +157,23 @@ describe('morning-read: review lows', () => {
     const line = formatMorningReport(r).split('\n').find((l) => l.startsWith('Tagged funnel'))!
     expect(line).toMatch(/hits; game-screen views \d+; asks/)
     expect(line).not.toMatch(/\bplayed\b/)
+  })
+  it('the cost-per-arrival line is cumulative spend / tagged arrivals, with the $0.32 benchmark beside it', async () => {
+    const r = await runMorningRead(fixtureDeps(base(), true), opts)
+    const tagged = r.thresholdRead!.tagged!
+    expect(tagged.summary.taggedArrivals).toBeGreaterThan(0)
+    expect(tagged.costPerArrival).toBeCloseTo(r.thresholdRead!.cumulativeSpend / tagged.summary.taggedArrivals, 10)
+    const line = formatMorningReport(r).split('\n').find((l) => l.includes('cost per tagged arrival'))!
+    expect(line).toContain(`cost per tagged arrival $${tagged.costPerArrival!.toFixed(2)} (cumulative spend / tagged arrivals; benchmark about $0.32, the F1/F2 in-app figure)`)
+  })
+  it('the cost-per-arrival line reads "—" (never NaN, Infinity or $0.00) with zero tagged arrivals, and still shows the benchmark', async () => {
+    const r = await runMorningRead(fixtureDeps(base(), true), opts)
+    r.thresholdRead!.tagged!.summary.taggedArrivals = 0
+    r.thresholdRead!.tagged!.costPerArrival = costPer(r.thresholdRead!.cumulativeSpend, 0)
+    expect(r.thresholdRead!.tagged!.costPerArrival).toBeNull()
+    const line = formatMorningReport(r).split('\n').find((l) => l.includes('cost per tagged arrival'))!
+    expect(line).toContain('cost per tagged arrival — (cumulative spend / tagged arrivals; benchmark about $0.32')
+    expect(line).not.toMatch(/NaN|Infinity/)
   })
   it('L11: the report (the bus copy) names off-list placements by package id, never the display name', async () => {
     const r = await runMorningRead(fixtureDeps(base(), true), opts)

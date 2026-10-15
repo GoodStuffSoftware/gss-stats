@@ -123,7 +123,7 @@ export const STAGED_FLIGHT_3: Record<StagedArm, StagedArmConfig> = {
     flightStartTimeEt: '12:00',
     servingHoursEt: [12, 23],
     notes:
-      '"Best Sudoku - Display - Sudoku app placements - F3 Apps", utm google / display / sudoku_funnel_f3_apps. Flight 2\'s Apps setup re-run on best-sudoku v1.99.0: the same 17 Android app placements, optimized targeting off, manual CPC $0.35, US+CA, ad schedule 12:00-23:00 ET, $10/day, $70 cap over 7 serving days. Starts the day v1.99.0 is live on Play production. Created PAUSED from a dry run; enabled by Mike\'s yes, status and dates only.',
+      '"Best Sudoku - Display - Sudoku app placements - F3 Apps", utm google / display / sudoku_funnel_f3_apps. Flight 2\'s Apps setup re-run on best-sudoku v1.99.0: the same 17 Android app placements, optimized targeting off, manual CPC $0.35 max, F2 copy plus a price line (\"No ads. Passes from $1.99\"), US+CA, ad schedule 12:00-23:00 ET, $10/day, $70 cap over 7 serving days. Starts the day v1.99.0 is live on Play production. Created PAUSED from a dry run; enabled by Mike\'s yes, status and dates only.',
   },
   search: {
     label: 'Flight 3 — search, desktop intent',
@@ -133,7 +133,7 @@ export const STAGED_FLIGHT_3: Record<StagedArm, StagedArmConfig> = {
     flightStartTimeEt: '12:00',
     servingHoursEt: [12, 23],
     notes:
-      '"Best Sudoku - Search - Desktop intent - F3 Search", utm google / cpc / sudoku_funnel_f3_search. Flight 2\'s Search setup re-run on best-sudoku v1.99.0: desktop only (mobile and tablet -100%), the same 6 terms as exact + phrase, manual CPC $0.60 with no day-3 raise, US+CA, ad schedule 12:00-23:00 ET, $10/day, $70 cap over 7 serving days. No placements: its read plan has channel search. Starts the prod web deploy day once real /coach/* and sign-in ask rows show. Created PAUSED from a dry run; enabled by Mike\'s yes, status and dates only.',
+      '"Best Sudoku - Search - Desktop intent - F3 Search", utm google / cpc / sudoku_funnel_f3_search. A buyer-intent test on best-sudoku v1.99.0 (Mike, 2026-10-15; desk card ads-f3-16): the \"no ads\" keyword family only (sudoku no ads, sudoku without ads, sudoku app no ads, ad free sudoku and the rest), exact + phrase, F2\'s free-seeker terms dropped; manual CPC $0.99 max (a hard ceiling under $1, no day-3 raise); ALL devices, no mobile or tablet hard stop; F2\'s 10 negatives plus free, online free, printable and puzzle book; F2\'s RSA plus a price headline; US+CA, ad schedule 12:00-23:00 ET, $10/day, $70 cap over 7 serving days. No placements: its read plan has channel search. Expected volume is about 15-25 clicks a week, so one week will likely read inconclusive (under 20 asks). Starts the prod web deploy day once real /coach/* and sign-in ask rows show. Created PAUSED from a dry run; enabled by Mike\'s yes, status and dates only.',
   },
 }
 

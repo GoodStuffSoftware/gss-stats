@@ -1188,7 +1188,8 @@ campaign)`, the report's Placements line and the targeting check say the same, a
 mix is printed without the mobile-app anomaly; instead, because a search arm is desktop-only,
 any spend on MOBILE, TABLET, CONNECTED_TV or OTHER on the closed day is flagged as an ANOMALY to
 propose to Mike (a printed flag only, from Google Ads' own device segment, never a kill rule;
-it covers that one day, not the flight so far). Never a pass, never a trip. A search plan that
+it covers that one day, not the flight so far); a search plan that serves on all devices sets
+`allDevices` (flight 3's Search arm) and gets no such flag. Never a pass, never a trip. A search plan that
 sets `approvedPlacements` or `adGroupPlacementCounts` is refused at load. Spend, impressions,
 clicks, CTR (rule 2), funnel reach (rule 3), the hard cap (rule 4) and every beacon count read
 the same for both channels.

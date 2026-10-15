@@ -375,6 +375,11 @@ describe('the search arm desktop-only device flag', () => {
     const withTablet = diagnosticsLines({ ...base, devices: [{ device: 'TABLET', impressions: 3, clicks: 1, ctr: 0.33, cost: 0.05 }] }, 'search')
     expect(withTablet.join('\n')).toContain("yesterday's spend on TABLET: $0.05; arm is desktop-only")
   })
+  it('an all-devices search plan (flight 3 Search) prints the device mix with no desktop-only flag', () => {
+    const joined = diagnosticsLines(base, 'search', { allDevices: true }).join('\n')
+    expect(joined).toContain('device: MOBILE 40 impr, 2 clicks, $0.42')
+    expect(joined).not.toMatch(/ANOMALY|desktop-only/)
+  })
   it('never adds the search flag to a display read', () => {
     expect(diagnosticsLines(base).join('\n')).not.toMatch(/desktop-only/)
   })
