@@ -5,7 +5,7 @@ Cloudflare's **RUM** (Real User Monitoring) data — the same human-only dataset
 powers Web Analytics — plus a companion **geo beacon** for the sub-country geography
 RUM doesn't provide, rendered as a movable/composable dashboard you control.
 
-🔒 Live at **https://stats.goodstuff.software** — owner-only, behind Google sign-in (see [Auth](#auth)).
+🔒 Live at **https://stats.goodstuff.software** — the owner, plus any [view-only](#view-only-access) viewers, behind Google sign-in (see [Auth](#auth)).
 
 The API token stays server-side (in a Pages Function); it never reaches the browser.
 
@@ -1735,14 +1735,15 @@ static assets, `/api/*` and `/auth/*`.
 
 1. A host guard 404s every host except `stats.goodstuff.software` and loopback. That
    includes `*.pages.dev` and preview-branch URLs.
-2. The auth gate then needs a valid session cookie belonging to an email on
-   `ALLOWED_EMAILS`:
+2. The auth gate then needs a valid session cookie belonging to the owner (an email on
+   `ALLOWED_EMAILS`) or a viewer (see [View-only access](#view-only-access), which also
+   covers the 403 on a viewer's writes):
    - With no valid session, `/api/*` returns **401 JSON**
      (`{"error":"unauthenticated","signIn":"/auth/google/login"}`).
    - A page load **redirects** to Google sign-in and comes back to the same page
      afterwards.
-   - An account that signs in with Google but isn't on the list gets a **403 "Not
-     allowed"** page and no session.
+   - An account that signs in with Google but is neither the owner nor a viewer gets a
+     **403 "Not allowed"** page and no session.
 3. **It fails closed.** If any required setting below is missing, every request gets a
    **503 "sign-in not configured"** that names the missing variable, never a value.
 

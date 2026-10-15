@@ -1,7 +1,9 @@
 /// <reference types="@cloudflare/workers-types" />
 //
 // Google sign-in gate for gss-stats. Every page and every /api/* route needs a
-// signed-in Google account on the ALLOWED_EMAILS allowlist. Design and alternatives:
+// signed-in Google account that is the owner (the ALLOWED_EMAILS allowlist) or a viewer
+// (KV STATS_CONFIG `auth:viewer:<email>`; a viewer's writes get 403, see roleFor and
+// the gate below; README "Auth → View-only access"). Design and alternatives:
 // docs/adr/0002-google-auth.md. Rollout order and owner setup: README "Auth".
 //
 // Shape (adapted from deckhand's core/oauth-google.mjs + routes/auth.mjs):

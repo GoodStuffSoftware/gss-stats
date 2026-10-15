@@ -1,6 +1,10 @@
 # ADR 0002: Google sign-in in the app, replacing Cloudflare Access
 
 - **Status:** Accepted (shipped in v0.5.0). The rollout is manual; see README "Auth".
+- **Amended 2026-10-14 (v0.36.0): one role added.** "No roles" below no longer holds: besides
+  the owner (`ALLOWED_EMAILS`), a **viewer** list in KV can sign in and read everything, and the
+  gate refuses every write a viewer sends. Both lists are still re-checked on every request, and
+  the role is never stored in the cookie. Details: README "Auth → View-only access".
 - **Date:** 2026-09-25
 - **Code:** `functions/_middleware.ts` (host guard, then the auth gate),
   `functions/_lib/auth.ts` (gate and OAuth flow), `functions/_lib/auth.test.ts`,
