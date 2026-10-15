@@ -689,9 +689,9 @@ export function timelineWidget(geom: { x: number; y: number; w: number; h: numbe
   }
 }
 // "Web vs app activity" (Mike, 2026-10-15: feature tracking is ambiguous between web and app, but
-// "we should track how much web and app activity we're getting"): the ONE place web and app are
-// told apart. Page views per US-Eastern day, one line per beacon site tag: the website, the app,
-// and the small host-tagged bucket the web build falls back to. A per-ET-day total of rows, so the
+// "we should track how much web and app activity we're getting"): the Overview's view of how much
+// each platform gets. Page views per US-Eastern day, one line each for the website and the app (the
+// 'bestsudoku' host-tag bucket has no rows in production, so it gets no line). A per-ET-day total of rows, so the
 // counts-only rule (lib/splitGuard.ts) is untouched: `site` is not a split-guard dimension and the
 // event-beacon rows the guard protects (returns, completions, game starts, tour) are not page views.
 // Every feature card (coach tips, tour, pop-ups, game starts and completions, hints) counts web and
@@ -699,7 +699,6 @@ export function timelineWidget(geom: { x: number; y: number; w: number; h: numbe
 export const WEB_APP_SERIES: LineSeries[] = [
   { label: 'Web', filter: [{ field: 'site', value: 'bestsudoku-web' }], axis: 'left', style: 'solid', color: 0 },
   { label: 'App', filter: [{ field: 'site', value: 'bestsudoku-app' }], axis: 'left', style: 'solid', color: 1 },
-  { label: 'Web (host-tagged)', filter: [{ field: 'site', value: 'bestsudoku' }], axis: 'left', style: 'dotted', color: 2 },
 ]
 export function webAppActivityWidget(geom: { x: number; y: number; w: number; h: number }): Widget {
   return w({

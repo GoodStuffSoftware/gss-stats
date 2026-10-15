@@ -25,19 +25,17 @@ describe('Web vs app activity card', () => {
     expect(card?.title).toBe('Web vs app activity')
     expect(defaultOverviewWidgets().some((x) => x.id === 'ow-webapp')).toBe(true)
   })
-  it('counts page views per ET day, one line per site tag, all Best Sudoku sites in scope', () => {
+  it('counts page views per ET day, one line for web and one for app, all Best Sudoku sites in scope', () => {
     const c = webAppActivityWidget({ x: 0, y: 0, w: 12, h: 9 })
     expect(c).toMatchObject({ type: 'line', dataset: 'geo', dimension: 'dateEt', metric: 'pageviews' })
     expect(c.siteSel && sameSet(c.siteSel, BEST_SUDOKU_SITES)).toBe(true)
-    // the three series cover exactly the three Best Sudoku site tags, each once
-    const tags = WEB_APP_SERIES.map((s) => s.filter!.map((f) => `${f.field}=${f.value}`).join(','))
-    expect(tags.sort()).toEqual(BEST_SUDOKU_SITES.map((s) => `site=${s}`).sort())
-    expect(c.series!.map((s) => s.label)).toEqual(['Web', 'App', 'Web (host-tagged)'])
+    expect(WEB_APP_SERIES.map((s) => s.filter!.map((f) => `${f.field}=${f.value}`).join(','))).toEqual(['site=bestsudoku-web', 'site=bestsudoku-app'])
+    expect(c.series!.map((s) => s.label)).toEqual(['Web', 'App'])
   })
   it('splits by an ET day and a site tag only, neither of which the split guard refuses', () => {
     const c = webAppActivityWidget({ x: 0, y: 0, w: 12, h: 9 })
     const fields = [c.dimension, ...c.series!.flatMap((s) => s.filter!.map((f) => f.field))]
-    expect(fields).toEqual(['dateEt', 'site', 'site', 'site'])
+    expect(fields).toEqual(['dateEt', 'site', 'site'])
     expect(splitRefused({ points: false, fields })).toBe(false)
     // and the guard still refuses what it refused: hour, UTC day, place and device
     for (const d of ['hourEt', 'date', 'country', 'region', 'city', 'device', 'browser', 'os', 'visitor']) expect(SPLIT_REFUSED_DIMS.has(d)).toBe(true)
