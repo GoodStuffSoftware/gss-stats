@@ -28,6 +28,7 @@ import { noteRawText } from '../lib/notes'
 import { chartNotes } from '../lib/chartNotes'
 import { chartValueResolver, noteValueResolver } from '../lib/valueTokens'
 import { useMetricTokens } from '../composables/useMetricTokens'
+import { viewOnly, vEdit } from '../lib/viewOnly'
 
 const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolean; drillOpen: boolean; forceControls?: boolean }>()
 
@@ -468,6 +469,7 @@ const filterBtn = ref<HTMLElement | null>(null)
 const popoverStyle = ref<Record<string, string>>({})
 
 function openFilter() {
+  if (viewOnly.value) return // a chart's filter override is part of the saved layout
   const r = filterBtn.value?.getBoundingClientRect()
   if (r) {
     const left = Math.min(r.left, window.innerWidth - 286)
@@ -476,9 +478,11 @@ function openFilter() {
   filterOpen.value = true
 }
 function onApplyOverride(f: GlobalFilters) {
+  if (viewOnly.value) return
   props.widget.filters = f
 }
 function onUseGlobal() {
+  if (viewOnly.value) return
   props.widget.filters = null
   filterOpen.value = false
 }
@@ -557,6 +561,7 @@ function fmt(n: number) {
 
 // Mark/unmark this chart as one of the page's defaults (kept on "Restore default charts").
 function toggleDefault() {
+  if (viewOnly.value) return
   props.widget.isDefault = !props.widget.isDefault
 }
 
@@ -569,7 +574,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
 
 <template>
   <Teleport to="body" :disabled="!zoomed">
-    <div ref="cardEl" class="chart-card" :class="{ zoomed, revealed, 'controls-revealed': forceControls, 'note-card': isNoteWidget, 'needs-chart-height': needsChartHeight, 'tall-on-phone': tallOnPhone, fit: fitActive }" :style="zoomed ? { '--ar': aspect } : undefined">
+    <div ref="cardEl" class="chart-card" :class="{ zoomed, revealed, 'controls-revealed': forceControls, 'note-card': isNoteWidget, 'needs-chart-height': needsChartHeight, 'tall-on-phone': tallOnPhone, fit: fitActive, 'view-only': viewOnly }" :style="zoomed ? { '--ar': aspect } : undefined">
     <header class="card-head" :class="{ 'note-head': isNoteWidget }">
       <div class="title-wrap" v-if="!isNoteWidget">
         <span v-if="widget.isDefault" class="pin" title="A default chart on this page — kept when you restore defaults">★</span>
@@ -586,6 +591,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
           <button
             v-if="!isBespokeBody || (isRateTile && isCard)"
             ref="filterBtn"
+            v-edit
             class="btn-ghost icon"
             :class="{ active: hasOverride }"
             title="Filter this chart"
@@ -599,12 +605,12 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
           <div class="menu-anchor">
             <button class="btn-ghost icon" title="Options" @click.stop="menuOpen = !menuOpen">⋯</button>
             <div v-if="menuOpen" class="menu" @click.stop>
-              <button @click="emit('edit'); menuOpen = false">Edit</button>
-              <button @click="emit('duplicate'); menuOpen = false">Duplicate</button>
-              <button @click="toggleDefault(); menuOpen = false">
+              <button v-edit @click="emit('edit'); menuOpen = false">Edit</button>
+              <button v-edit @click="emit('duplicate'); menuOpen = false">Duplicate</button>
+              <button v-edit @click="toggleDefault(); menuOpen = false">
                 {{ widget.isDefault ? 'Remove from default' : 'Set as default' }}
               </button>
-              <button class="danger" @click="emit('remove'); menuOpen = false">Delete</button>
+              <button v-edit class="danger" @click="emit('remove'); menuOpen = false">Delete</button>
             </div>
           </div>
         </div>
@@ -767,6 +773,10 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
   .chart-card.controls-revealed .card-head,
   .chart-card.revealed .card-head {
     cursor: grab;
+  }
+  /* View-only access: the grid can't be dragged (Dashboard.vue), so don't look draggable. */
+  .chart-card.view-only .card-head {
+    cursor: default;
   }
 }
 .title-wrap {

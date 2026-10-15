@@ -7,6 +7,7 @@ import { mount, type VueWrapper } from '@vue/test-utils'
 import ChartEditor from './ChartEditor.vue'
 import { defaultConfig, factoryWidget } from '../lib/defaults'
 import type { DashboardPage, Widget } from '../types'
+import { viewOnly, VIEW_ONLY_TITLE } from '../lib/viewOnly'
 
 const mounted: VueWrapper[] = []
 afterEach(() => {
@@ -94,5 +95,22 @@ describe('ChartEditor: the completions card offers only what it can draw', () =>
     const w = open({ ...prodCard(), breakdown: 'difficulty' } as Widget)
     await selectByLabel(w, /group by/i)!.setValue('difficulty')
     expect((await saved(w))?.breakdown).toBeUndefined()
+  })
+})
+
+describe('ChartEditor: Reset to default for a viewer (README "Auth → View-only access")', () => {
+  afterEach(() => {
+    viewOnly.value = false
+  })
+  it('is greyed out with the View-only tooltip and fills nothing in', async () => {
+    viewOnly.value = true
+    const w = open(prodCard(), factoryWidget(overview(), 'ow-completions'))
+    const reset = w.find('[data-testid="reset-default"]')
+    expect(reset.attributes('disabled')).toBeDefined()
+    expect(reset.attributes('title')).toBe(VIEW_ONLY_TITLE)
+    // A click that slips through the disabled attribute still changes nothing.
+    ;(reset.element as HTMLButtonElement).removeAttribute('disabled')
+    await reset.trigger('click')
+    expect(w.find('[data-testid="reset-default-hint"]').exists()).toBe(false)
   })
 })

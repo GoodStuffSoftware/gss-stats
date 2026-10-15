@@ -26,6 +26,7 @@ import Dashboard from './components/Dashboard.vue'
 import ChartEditor from './components/ChartEditor.vue'
 import AccountMenu from './components/AccountMenu.vue'
 import { useLiveChanges } from './composables/useLiveChanges'
+import { viewOnly, vEdit } from './lib/viewOnly'
 
 // Live push (composables/useLiveChanges.ts): ONE fail-soft socket for the whole app, open only while
 // the tab is visible and in use. It adds a refetch trigger on top of today's; it never replaces one.
@@ -201,8 +202,10 @@ function configJson(c: DashboardConfig): string {
 }
 // Saving is off until the stored layout has been read, while signed out, and after a failed load
 // (until "Try again" succeeds): in each case the config on screen is not what the store holds.
+// A viewer (view-only access, lib/viewOnly.ts) never saves: what they change on screen (filters,
+// a drill page) stays in this tab, and the server would refuse the PUT anyway.
 function canSave(): boolean {
-  return loaded.value && !loadFailed.value && !sessionExpired.value
+  return loaded.value && !loadFailed.value && !sessionExpired.value && !viewOnly.value
 }
 function scheduleSave() {
   if (!canSave()) {
@@ -281,9 +284,10 @@ onBeforeUnmount(() => {
   flushPendingSave()
 })
 
-const saveLabel = computed(
-  () =>
-    ({
+const saveLabel = computed(() =>
+  viewOnly.value
+    ? 'View only'
+    : ({
       idle: '',
       saving: 'Saving…',
       saved: 'Saved',
@@ -306,6 +310,7 @@ function switchGroup(group: string) {
 
 // + Page: a new ROOT page, a copy of the active one, in its group with its icon (clonePage).
 function addPage(group?: string) {
+  if (viewOnly.value) return // view-only: never edits
   const src = activePage.value
   const clone = clonePage(src, 'Copy of ' + src.name, true)
   delete clone.parentId
@@ -316,6 +321,7 @@ function addPage(group?: string) {
 // Duplicate: a copy of that page — same group and icon, and a copy of a drill page stays a drill
 // page of the same root.
 function duplicatePage(id: string) {
+  if (viewOnly.value) return // view-only: never edits
   const src = config.pages.find((p) => p.id === id) ?? activePage.value
   const clone = clonePage(src, 'Copy of ' + src.name, true)
   config.pages.push(clone)
@@ -327,9 +333,11 @@ function duplicatePage(id: string) {
 // edited and where its field is (the drawer row or the breadcrumb segment).
 const renaming = ref<RenameTarget | null>(null)
 function startRename(t: RenameTarget) {
+  if (viewOnly.value) return // view-only: never edits
   renaming.value = t
 }
 function renamePageTo(id: string, raw: string) {
+  if (viewOnly.value) return // view-only: never edits
   renaming.value = null
   const p = config.pages.find((x) => x.id === id)
   const name = cleanPageName(raw)
@@ -342,6 +350,7 @@ function applyGroups(r: GroupResult) {
   config.groupMeta = r.groupMeta
 }
 function renameGroupTo(from: string, raw: string) {
+  if (viewOnly.value) return // view-only: never edits
   renaming.value = null
   const r = renameGroup(config, from, raw)
   if (!r.ok) return
@@ -362,9 +371,11 @@ function renameGroupTo(from: string, raw: string) {
 // Delete group…: its pages go where the dialog says; ★ Overview never moves.
 const groupToDelete = ref<{ name: string; returnTo: HTMLElement | null } | null>(null)
 function askDeleteGroup(name: string, anchor: HTMLElement | null) {
+  if (viewOnly.value) return // view-only: never edits
   groupToDelete.value = { name, returnTo: anchor }
 }
 function confirmDeleteGroup(name: string, dest: string | null) {
+  if (viewOnly.value) return // view-only: never edits
   groupToDelete.value = null
   const r = deleteGroup(config, name, dest)
   if (!r) return
@@ -377,12 +388,14 @@ function confirmDeleteGroup(name: string, dest: string | null) {
 // + New (the drawer's wizards): a page, put in its group and opened; a group, listed (even empty)
 // with the pages picked for it moved in.
 function createPage(d: PageDraft) {
+  if (viewOnly.value) return // view-only: never edits
   const { result, page } = applyPageDraft(config, d, activePage.value)
   applyGroups(result)
   drawerOpen.value = false
   switchPage(page.id)
 }
 function createGroup(d: GroupDraft) {
+  if (viewOnly.value) return // view-only: never edits
   const r = applyGroupDraft(config, d)
   if (r) applyGroups(r)
 }
@@ -391,6 +404,7 @@ function createGroup(d: GroupDraft) {
 // ancestor left, else the page before it in its group, else the group's first page, else ★ Overview
 // (lib/nav.ts landingAfterDelete).
 function deletePage(id: string) {
+  if (viewOnly.value) return // view-only: never edits
   const p = config.pages.find((x) => x.id === id)
   if (!p || p.isDefault || config.pages.length <= 1) return
   const gone = new Set(pagesToDelete(id, config.pages))
@@ -410,6 +424,7 @@ function deletePage(id: string) {
 // Move to group: the page and its drill pages join the group, after the pages already there (a drill
 // page becomes a page of its own there); a group named just now is listed last.
 function movePage(id: string, group: string) {
+  if (viewOnly.value) return // view-only: never edits
   const g = cleanGroupName(group)
   if (!g) return
   const groups = orderedGroups(config.pages, config.groupOrder)
@@ -418,6 +433,7 @@ function movePage(id: string, group: string) {
 }
 // Change icon…: a registry key, or null for Auto (resolved from the page's charts / its page).
 function setIcon(id: string, key: IconKey | null) {
+  if (viewOnly.value) return // view-only: never edits
   const p = config.pages.find((x) => x.id === id)
   if (!p) return
   if (key) p.icon = key
@@ -456,6 +472,7 @@ const pageMenu = ref<{ id: string; anchor: HTMLElement } | null>(null)
 const pageMenuPage = computed(() => (pageMenu.value ? config.pages.find((p) => p.id === pageMenu.value!.id) ?? null : null))
 const pageMenuBtn = ref<HTMLElement | null>(null)
 function openPageMenu(id: string, anchor: HTMLElement) {
+  if (viewOnly.value) return // view-only: never edits
   pageMenu.value = pageMenu.value?.id === id && pageMenu.value.anchor === anchor ? null : { id, anchor }
 }
 function closePageMenu(reason: 'action' | 'dismiss' = 'dismiss') {
@@ -473,9 +490,11 @@ function closePageMenu(reason: 'action' | 'dismiss' = 'dismiss') {
 const iconFor = ref<{ id: string; returnTo: HTMLElement | null } | null>(null)
 const iconPage = computed(() => (iconFor.value ? config.pages.find((p) => p.id === iconFor.value!.id) ?? null : null))
 function openIconPicker(id: string) {
+  if (viewOnly.value) return // view-only: never edits
   iconFor.value = { id, returnTo: pageMenu.value?.anchor ?? null }
 }
 function pickIcon(key: IconKey | null) {
+  if (viewOnly.value) return // view-only: never edits
   if (iconFor.value) setIcon(iconFor.value.id, key)
   iconFor.value = null
 }
@@ -491,6 +510,7 @@ function togglePageFold(id: string) {
   writeViewerPrefs({ ...readViewerPrefs(), collapsedPages: next })
 }
 function renameFromMenu(id: string) {
+  if (viewOnly.value) return // view-only: never edits
   startRename({ kind: 'page', key: id, where: pageMenu.value?.anchor.closest('#nav-drawer') ? 'drawer' : 'crumb' })
 }
 function toggleGroup(name: string) {
@@ -512,6 +532,7 @@ watchEffect(() => {
 })
 
 function restoreDefaultCharts(id: string) {
+  if (viewOnly.value) return // view-only: never edits
   const p = config.pages.find((x) => x.id === id) ?? activePage.value
   const launch = isBestSudokuLaunchPage(p)
   const popups = isBestSudokuPopupsPage(p)
@@ -572,6 +593,7 @@ function onToggleSync(on: boolean) {
 
 // ── Widget CRUD (operate on the active page) ──────────────────────────────────
 function addChart() {
+  if (viewOnly.value) return // view-only: never edits
   const id = cryptoId()
   // On the Best Sudoku launch page, new charts default to the beacon dataset (its only
   // real data source) instead of Cloudflare RUM, so the whole page stays beacon-backed.
@@ -598,12 +620,14 @@ function addChart() {
   }
 }
 function editChart(wgt: Widget) {
+  if (viewOnly.value) return // view-only: never edits
   editing.value = { isNew: false, widget: JSON.parse(JSON.stringify(wgt)) }
 }
 // The chart's factory version, for the editor's "Reset to default" (none for a new chart, or one on a
 // page without a fixed default set).
 const editingDefault = computed(() => (editing.value && !editing.value.isNew ? factoryWidget(activePage.value, editing.value.widget.id) : undefined))
 function onEditorSave(wgt: Widget) {
+  if (viewOnly.value) return void (editing.value = null) // view-only: never edits
   const list = activePage.value.widgets
   const idx = list.findIndex((x) => x.id === wgt.id)
   if (idx >= 0) {
@@ -616,10 +640,12 @@ function onEditorSave(wgt: Widget) {
   editing.value = null
 }
 function onEditorRemove() {
+  if (viewOnly.value) return void (editing.value = null) // view-only: never edits
   if (editing.value) removeWidget(editing.value.widget.id)
   editing.value = null
 }
 function removeWidget(id: string) {
+  if (viewOnly.value) return // view-only: never edits
   const list = activePage.value.widgets
   const i = list.findIndex((x) => x.id === id)
   if (i >= 0) list.splice(i, 1)
@@ -629,6 +655,7 @@ function removeWidget(id: string) {
 // series, ...). A widget is plain JSON (it is what gets saved), so a JSON round trip is a deep copy
 // that also copes with Vue reactive proxies, which structuredClone refuses.
 function duplicateWidget(wgt: Widget) {
+  if (viewOnly.value) return // view-only: never edits
   const id = cryptoId()
   const copy: Widget = JSON.parse(JSON.stringify(wgt))
   activePage.value.widgets.push({ ...copy, id, i: id, x: 0, y: 9999, title: wgt.title + ' (copy)' })
@@ -984,6 +1011,7 @@ function toggleDark() {
       />
       <button
         ref="pageMenuBtn"
+        v-edit
         type="button"
         class="page-menu-btn"
         :aria-label="`Page options: ${activePage.name}`"
@@ -1008,7 +1036,7 @@ function toggleDark() {
         <button class="btn" @click="toggleDark" :title="dark ? 'Light mode' : 'Dark mode'">
           {{ dark ? '☀' : '☾' }}
         </button>
-        <button class="btn btn-primary" @click="addChart">＋ Add chart</button>
+        <button v-edit class="btn btn-primary" data-testid="add-chart" @click="addChart">＋ Add chart</button>
         <AccountMenu />
       </div>
     </header>
@@ -1090,7 +1118,7 @@ function toggleDark() {
       />
       <div v-if="loaded && activePage.widgets.length === 0" class="empty">
         <p>No charts on this page.</p>
-        <button class="btn btn-primary" @click="addChart">＋ Add a chart</button>
+        <button v-edit class="btn btn-primary" @click="addChart">＋ Add a chart</button>
       </div>
     </main>
 

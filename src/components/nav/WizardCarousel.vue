@@ -10,6 +10,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { WizardDef } from '../../lib/wizards'
 import { BackIcon, CloseIcon, ForwardIcon, PlusIcon } from '../../lib/icons'
+import { vEdit } from '../../lib/viewOnly'
 
 const props = withDefaults(
   defineProps<{
@@ -203,6 +204,7 @@ defineExpose({ start, reset })
     <div ref="bar" class="wz-bar">
       <button
         ref="newBtn"
+        v-edit
         type="button"
         class="wz-new"
         :aria-expanded="phase === 'choose'"

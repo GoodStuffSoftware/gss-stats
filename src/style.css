@@ -127,6 +127,13 @@ button {
   background: rgb(var(--sunken));
   border-color: transparent;
 }
+/* View-only access (src/lib/viewOnly.ts `v-edit`): an edit control a viewer can see but not use.
+   Greyed and inert, never hidden; it keeps its "View-only access" tooltip on hover. */
+.view-only-disabled,
+.view-only-disabled:hover {
+  opacity: 0.45 !important;
+  cursor: not-allowed !important;
+}
 
 select,
 input[type='text'],

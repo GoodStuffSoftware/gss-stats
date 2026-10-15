@@ -17,6 +17,7 @@ import NavPopover from './NavPopover.vue'
 import PageIcon from './PageIcon.vue'
 import GroupBadge from './GroupBadge.vue'
 import InlineName from './InlineName.vue'
+import { vEdit } from '../../lib/viewOnly'
 
 const props = defineProps<{
   pages: DashboardPage[]
@@ -302,7 +303,7 @@ function cancelRename(key: string) {
       </button>
       <template v-if="!pinnedRoot">
         <div class="nav-sep" role="separator"></div>
-        <button type="button" role="menuitem" class="nav-row new" @click="startRenameGroupSeg">
+        <button v-edit type="button" role="menuitem" class="nav-row new" @click="startRenameGroupSeg">
           <RenameIcon :size="15" aria-hidden="true" />
           <span class="nm">Rename {{ group }}</span>
         </button>
@@ -344,7 +345,7 @@ function cancelRename(key: string) {
         </template>
       </template>
       <div class="nav-sep" role="separator"></div>
-      <button type="button" role="menuitem" class="nav-row new" @click="newPage">
+      <button v-edit type="button" role="menuitem" class="nav-row new" @click="newPage">
         <PlusIcon :size="16" aria-hidden="true" />
         <span class="nm">New page in {{ group }}</span>
       </button>

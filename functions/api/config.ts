@@ -2,8 +2,9 @@
 //
 // Durable dashboard config storage backed by Cloudflare KV (binding STATS_CONFIG).
 // Survives across browsers/devices — more durable than localStorage. Access is
-// gated by Cloudflare Access (only the owner reaches this Function), so a single
-// shared key is fine.
+// gated by the Google sign-in gate (functions/_lib/auth.ts): only the owner can PUT
+// here (a view-only account gets 403 at the gate, before this Function runs; it may
+// GET), so a single shared key is fine.
 //
 // BACKUP ON A LAYOUT-VERSION BUMP: the client migrates a saved layout forward on load
 // (src/lib/defaults.ts normalizeConfig, CONFIG_VERSION) and saves the result back here. Before

@@ -5,6 +5,7 @@ import type { Widget, GlobalFilters, StatsResponse } from '../types'
 import { isTouchDevice } from '../lib/responsive'
 import { GRID_MARGIN, GRID_ROW_HEIGHT, fitRows, isFit } from '../lib/fit'
 import ChartCard from './ChartCard.vue'
+import { viewOnly } from '../lib/viewOnly'
 
 // Two-way bound to the parent's reactive widgets array; grid-layout-plus writes
 // item geometry back on move/resize and we persist via @layout-updated.
@@ -55,7 +56,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', check))
 // keeps that class from ever applying, so the whole card is normal-scrollable again. A
 // device's touch capability doesn't change at runtime, so this is computed once.
 const touchCapable = isTouchDevice()
-const dragEnabled = computed(() => !isMobile.value && !touchCapable)
+// A viewer (view-only access, lib/viewOnly.ts) can't move or resize cards either.
+const dragEnabled = computed(() => !isMobile.value && !touchCapable && !viewOnly.value)
 
 // Fit-to-content (Widget.fit, lib/fit.ts): a fit card reports its content height and its grid
 // height follows, to the smallest whole number of rows that holds it. Phones stack every card to

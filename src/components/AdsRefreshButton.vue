@@ -6,6 +6,8 @@
 import { ref } from 'vue'
 import { refreshAdsData } from '../api'
 import type { RefreshResult } from '../lib/adsRefresh'
+// View-only access: a viewer sees the button greyed out (the server refuses the POST anyway).
+import { viewOnly, vEdit } from '../lib/viewOnly'
 
 const props = defineProps<{ campaignIds: readonly string[] }>()
 const emit = defineEmits<{ refreshed: [RefreshResult] }>()
@@ -26,6 +28,7 @@ function describePlain(r: RefreshResult): string {
 }
 
 async function refresh() {
+  if (viewOnly.value) return
   busy.value = true
   message.value = null
   try {
@@ -42,7 +45,7 @@ async function refresh() {
 
 <template>
   <span class="ads-refresh">
-    <button type="button" class="btn" :disabled="busy" @click="refresh">{{ busy ? 'Refreshing…' : 'Refresh data' }}</button>
+    <button v-edit type="button" class="btn" data-testid="ads-refresh" :disabled="busy" @click="refresh">{{ busy ? 'Refreshing…' : 'Refresh data' }}</button>
     <span v-if="message" class="msg mono">{{ message }}</span>
   </span>
 </template>

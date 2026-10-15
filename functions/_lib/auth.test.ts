@@ -903,7 +903,7 @@ describe('local dev bypass', () => {
     expect(next).toHaveBeenCalledOnce()
     expect(res.headers.get('X-Auth-Dev-Bypass')).toBe('1')
     const me = await gate(req('/auth/me', {}, LOCAL), { AUTH_DEV_BYPASS: '1' })
-    expect(await me.res.json()).toEqual({ email: 'dev@localhost', devBypass: true })
+    expect(await me.res.json()).toEqual({ email: 'dev@localhost', role: 'owner', devBypass: true })
   })
 
   it('AUTH_DEV_BYPASS=1 is ignored on the production host', async () => {

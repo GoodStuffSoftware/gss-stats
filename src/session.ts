@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { viewOnly } from './lib/viewOnly'
 
 // Sign-in is enforced server-side by functions/_middleware.ts (Google sign-in; see
 // README "Auth"). When the session lapses while the SPA is open, every /api/* call
@@ -54,8 +55,10 @@ export async function loadIdentity(): Promise<void> {
       return
     }
     if (!res.ok) return
-    const data = (await res.json()) as { email?: unknown }
+    const data = (await res.json()) as { email?: unknown; role?: unknown }
     signedInEmail.value = typeof data?.email === 'string' ? data.email : null
+    // Only an explicit "viewer" turns the edit controls off; the server enforces it either way.
+    viewOnly.value = data?.role === 'viewer'
   } catch {
     // no Functions (vite-only dev) or offline — just don't show the account
   }

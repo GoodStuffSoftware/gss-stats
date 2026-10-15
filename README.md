@@ -1753,7 +1753,7 @@ Routes:
 | `GET /auth/google/login?next=/…` | Sends the browser to Google's account chooser |
 | `GET /auth/google/callback` | Google sends the browser back here; this validates the login and sets the session |
 | `POST /auth/logout` | Sign out: clears the session and shows the signed-out page (the header's **Sign out** button, or **Log out** in the compact account menu) |
-| `GET /auth/me` | Returns the signed-in email as JSON |
+| `GET /auth/me` | Returns the signed-in email and its `role` (`owner` or `viewer`) as JSON |
 | `GET /auth/signed-out` | The signed-out page |
 
 The session is a signed cookie, HMAC-SHA256 under `SESSION_SECRET`. It is `HttpOnly`,
@@ -1767,6 +1767,38 @@ and `X-Frame-Options: DENY`: no shared cache keeps it, the browser doesn't store
 Back after **Sign out** can't bring the dashboard back), and no other site can frame it.
 Sign out also sends `Clear-Site-Data: "cache"`. Sign out only deletes this browser's
 cookie; a copied cookie stays valid until it expires (see the ADR).
+
+### View-only access
+
+A **viewer** signs in with Google like the owner and sees every page and chart, but can't
+change anything:
+
+- **Can:** open every page, chart and drill-down, and use filters. Those
+  stay in the browser tab and are never saved.
+- **Can't:** add, edit, duplicate, move, resize or delete a chart; add, rename, move or delete a
+  page or group; set or reset a default; refresh the ads data. Every edit control is shown
+  greyed out with the tooltip "View-only access", and the server refuses every write a viewer
+  sends with **403** `{"error":"view_only"}`. A viewer may only `GET`/`HEAD`, plus `POST` to the
+  read-only query routes (`/api/stats`, `/api/geo`, `/api/metrics`, `/api/popups`,
+  `/api/completions`); everything else is refused.
+- **The owner** (`ALLOWED_EMAILS`) is unchanged. An email on both lists is the owner.
+
+The viewer list lives in the `STATS_CONFIG` KV namespace, never in the repo: one key per
+viewer, `auth:viewer:<lower-case email>`, with the value `viewer`. Nothing is sent to the
+viewer; tell them yourself. The commands below read the binding from `wrangler.toml`:
+
+```bash
+# add
+npx wrangler kv key put "auth:viewer:viewer@example.com" viewer --binding STATS_CONFIG --remote
+# remove (takes effect within about 60 s, the KV edge cache)
+npx wrangler kv key delete "auth:viewer:viewer@example.com" --binding STATS_CONFIG --remote
+# list
+npx wrangler kv key list --binding STATS_CONFIG --remote --prefix "auth:viewer:"
+```
+
+The same Gmail-or-Workspace rule as `ALLOWED_EMAILS` applies. If the Google OAuth app is still
+in **Testing**, add the viewer under Google Auth Platform → Audience → Test users too, or Google
+won't let them sign in.
 
 ### Settings (Pages project secrets, Production)
 
@@ -1951,6 +1983,7 @@ the Cloudflare account id come from one of these at run time, never from a commi
 | Where it runs | Source | Set with |
 |---|---|---|
 | Pages Functions (production) | Pages project secrets: `CF_ANALYTICS_TOKEN`, `CF_ACCOUNT_ID`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET`, `ALLOWED_EMAILS` | `npx wrangler pages secret put <NAME> --project-name gss-stats`, value on stdin |
+| Pages Functions (viewer list) | KV `STATS_CONFIG` keys `auth:viewer:<email>` ([View-only access](#view-only-access)) | `npx wrangler kv key put … --binding STATS_CONFIG --remote` |
 | `gss-stats-sync` Worker | Cloudflare Secrets Store (the four Google Ads credentials) | `npm run ads:worker-secrets` (from Bitwarden) |
 | GitHub Actions | Repo secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_WORKERS_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `GSS_GEO_D1_ID` | `gh secret set <NAME>`, value on stdin |
 | Local scripts (`scripts/`) | Bitwarden Secrets Manager (`bws`, `BWS_ACCESS_TOKEN`) or env vars; the account id is `CLOUDFLARE_ACCOUNT_ID`, else bws prod `infra--cloud-routine-env--CLOUDFLARE_ACCOUNT_ID` | `bws secret create` |

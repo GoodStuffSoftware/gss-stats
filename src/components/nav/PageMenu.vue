@@ -12,6 +12,7 @@ import { CheckIcon, ChevronRightIcon, PlusIcon } from '../../lib/icons'
 import NavPopover from './NavPopover.vue'
 import GroupBadge from './GroupBadge.vue'
 import InlineName from './InlineName.vue'
+import { vEdit } from '../../lib/viewOnly'
 
 const props = defineProps<{
   open: boolean
@@ -84,11 +85,12 @@ function moveToNew(name: string) {
   <NavPopover :open="open && !!page" :anchor="anchor" :label="page ? `Page options: ${page.name}` : 'Page options'" :sheet="sheet" :width="250" :teleport-to="teleportTo" panel-id="page-menu" @close="emit('close', 'dismiss')">
     <template v-if="page">
       <div v-if="sheet" class="nav-head">{{ page.name }}</div>
-      <button type="button" role="menuitem" class="nav-row" @click="act(() => emit('rename', page!.id))"><span class="nm">Rename</span></button>
-      <button type="button" role="menuitem" class="nav-row" @click="act(() => emit('duplicate', page!.id))"><span class="nm">Duplicate</span></button>
-      <button type="button" role="menuitem" class="nav-row" @click="act(() => emit('change-icon', page!.id))"><span class="nm">Change icon…</span></button>
+      <button v-edit type="button" role="menuitem" class="nav-row" @click="act(() => emit('rename', page!.id))"><span class="nm">Rename</span></button>
+      <button v-edit type="button" role="menuitem" class="nav-row" @click="act(() => emit('duplicate', page!.id))"><span class="nm">Duplicate</span></button>
+      <button v-edit type="button" role="menuitem" class="nav-row" @click="act(() => emit('change-icon', page!.id))"><span class="nm">Change icon…</span></button>
       <template v-if="canMove">
         <button
+          v-edit
           type="button"
           role="menuitem"
           class="nav-row"
@@ -126,10 +128,10 @@ function moveToNew(name: string) {
           </button>
         </div>
       </template>
-      <button type="button" role="menuitem" class="nav-row" @click="act(() => emit('restore', page!.id))"><span class="nm">Restore default charts</span></button>
+      <button v-edit type="button" role="menuitem" class="nav-row" @click="act(() => emit('restore', page!.id))"><span class="nm">Restore default charts</span></button>
       <template v-if="canDelete">
         <div class="nav-sep" role="separator"></div>
-        <button type="button" role="menuitem" class="nav-row danger" @click="act(() => emit('delete', page!.id))"><span class="nm">{{ deleteLabel }}</span></button>
+        <button v-edit type="button" role="menuitem" class="nav-row danger" @click="act(() => emit('delete', page!.id))"><span class="nm">{{ deleteLabel }}</span></button>
       </template>
     </template>
   </NavPopover>

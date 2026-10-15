@@ -17,6 +17,17 @@
 //     re-checked on every request, so removing an email locks that account out at once,
 //     and rotating SESSION_SECRET ends every session.
 //
+// ROLES. An email on ALLOWED_EMAILS is the OWNER (full access). Any other signed-in email is a
+// VIEWER only if the KV namespace STATS_CONFIG holds the key `auth:viewer:<lower-case email>`
+// with the exact value "viewer" (README "Auth → View-only access"). The list is env data, so it
+// lives in KV, never in the repo; ALLOWED_EMAILS wins if an email is on both. The role is
+// resolved again on EVERY request (never stored in the cookie), so deleting the key locks the
+// viewer out once KV's edge cache lets go (up to about a minute). A viewer reads everything and
+// writes nothing: the gate answers 403 to every request a viewer makes except GET/HEAD and a
+// POST to one of the read-only query endpoints in VIEWER_READ_POSTS (deny by default, so a
+// write endpoint added later is closed to viewers without touching this file). A KV miss, a
+// missing binding or a KV error is "not a viewer" (fail closed); the owner never needs KV.
+//
 // FAIL CLOSED: if any required setting is missing or invalid, nobody gets in (503).
 // The only way past the gate without Google is AUTH_DEV_BYPASS set to exactly "1", and
 // even then only when the request host is loopback (wrangler pages dev), never a
@@ -30,6 +41,39 @@ export interface AuthEnv {
   SESSION_TTL_HOURS?: string
   AUTH_DEV_BYPASS?: string
   AUTH_DEV_EMAIL?: string
+  /** The dashboard's KV namespace; only its `auth:viewer:*` keys are read here. */
+  STATS_CONFIG?: ViewerStore
+}
+
+/** The slice of KVNamespace the viewer lookup needs. */
+export interface ViewerStore {
+  get(key: string): Promise<string | null>
+}
+
+export type Role = 'owner' | 'viewer'
+
+/** KV key prefix of the view-only list: `auth:viewer:<lower-case email>` → "viewer". */
+export const VIEWER_KEY_PREFIX = 'auth:viewer:'
+/** The only KV value that makes an email a viewer. */
+export const VIEWER_KEY_VALUE = 'viewer'
+
+/** The read-only endpoints that take their query as a POST body. A viewer may POST to these
+ *  exact paths and to nothing else. Each one only reads (Cloudflare GraphQL, D1 SELECTs, the
+ *  edge cache); keep this list to endpoints that never change stored state. */
+export const VIEWER_READ_POSTS: ReadonlySet<string> = new Set([
+  '/api/stats',
+  '/api/geo',
+  '/api/metrics',
+  '/api/popups',
+  '/api/completions',
+])
+
+/** Whether a viewer may make this request. GET and HEAD read; POST only to VIEWER_READ_POSTS
+ *  (exact path match); every other method or path is a write and is refused. */
+export function viewerMayRequest(method: string, pathname: string): boolean {
+  const m = method.toUpperCase()
+  if (m === 'GET' || m === 'HEAD') return true
+  return m === 'POST' && VIEWER_READ_POSTS.has(pathname)
 }
 
 export interface AuthDeps {
@@ -273,6 +317,21 @@ export interface Session {
   sub: string
   iat: number
   exp: number
+  role: Role
+}
+
+/** The role of a verified, lower-cased Google email, or null (not allowed in). The owner
+ *  allowlist is checked first and needs no KV. Fails closed on anything unexpected. */
+export async function roleFor(email: unknown, config: AuthConfig, viewers?: ViewerStore): Promise<Role | null> {
+  if (isAllowedEmail(email, config.allowedEmails)) return 'owner'
+  if (typeof email !== 'string' || !PRINTABLE_ASCII.test(email) || !viewers) return null
+  try {
+    const value = await viewers.get(VIEWER_KEY_PREFIX + email.toLowerCase())
+    return value === VIEWER_KEY_VALUE ? 'viewer' : null
+  } catch (err) {
+    console.error(`auth: viewer lookup failed: ${String((err as Error)?.message ?? err)}`)
+    return null
+  }
 }
 
 export async function createSessionCookie(
@@ -282,15 +341,22 @@ export async function createSessionCookie(
   nowMs: number,
 ): Promise<string> {
   const iat = Math.floor(nowMs / 1000)
-  const session: Session & { v: 1 } = { v: 1, email: identity.email, sub: identity.sub, iat, exp: iat + config.ttlSeconds }
+  // The role is never signed into the cookie: readSession looks it up on every request.
+  const session: Omit<Session, 'role'> & { v: 1 } = { v: 1, email: identity.email, sub: identity.sub, iat, exp: iat + config.ttlSeconds }
   const token = await signToken(config.sessionSecret, PURPOSE_SESSION, session)
   return setCookie(url, sessionCookieName(url), token, config.ttlSeconds)
 }
 
 /** The request's valid session, or null. Valid = signature checks out, not expired
  *  under BOTH its own exp and the CURRENT TTL setting, not issued in the future (beyond
- *  a small clock skew), and the email is STILL on the allowlist. */
-export async function readSession(request: Request, config: AuthConfig, nowMs: number): Promise<Session | null> {
+ *  a small clock skew), and the email STILL has a role: on the owner allowlist, or on the
+ *  view-only list in `viewers` (looked up now, on this request). */
+export async function readSession(
+  request: Request,
+  config: AuthConfig,
+  nowMs: number,
+  viewers?: ViewerStore,
+): Promise<Session | null> {
   const url = new URL(request.url)
   const data = await verifyToken(config.sessionSecret, PURPOSE_SESSION, getCookie(request, sessionCookieName(url)))
   if (!data || typeof data !== 'object') return null
@@ -301,8 +367,9 @@ export async function readSession(request: Request, config: AuthConfig, nowMs: n
   if (s.exp <= now) return null
   if (s.iat > now + CLOCK_SKEW_SECONDS) return null
   if (s.iat + config.ttlSeconds <= now) return null
-  if (!isAllowedEmail(s.email, config.allowedEmails)) return null
-  return { email: s.email, sub: s.sub, iat: s.iat, exp: s.exp }
+  const role = await roleFor(s.email, config, viewers)
+  if (!role) return null
+  return { email: s.email, sub: s.sub, iat: s.iat, exp: s.exp, role }
 }
 
 // ── OAuth flow ───────────────────────────────────────────────────────────────────
@@ -481,6 +548,7 @@ export async function handleCallback(
   config: AuthConfig,
   nowMs: number,
   fetchImpl: typeof fetch,
+  viewers?: ViewerStore,
 ): Promise<Response> {
   const url = new URL(request.url)
   // The one-time state cookie is cleared on EVERY outcome, success or failure.
@@ -560,7 +628,7 @@ export async function handleCallback(
     })
   }
 
-  if (!isAllowedEmail(result.email, config.allowedEmails)) {
+  if (!(await roleFor(result.email, config, viewers))) {
     return htmlPage(
       403,
       'Not allowed',
@@ -634,7 +702,7 @@ export async function authGate(
   // Local-dev bypass (explicit flag + loopback host only).
   const devEmail = devBypassEmail(env, url)
   if (devEmail) {
-    if (path === ME_PATH) return jsonResponse(200, { email: devEmail, devBypass: true })
+    if (path === ME_PATH) return jsonResponse(200, { email: devEmail, role: 'owner', devBypass: true })
     if (path === LOGIN_PATH || path === CALLBACK_PATH) return redirect(safeNext(url.searchParams.get('next')))
     // POST only, as in production, so a link or prefetch can't sign out (or clear the cache).
     if (path === LOGOUT_PATH) return method === 'POST' ? signOutRedirect([]) : methodNotAllowed('POST')
@@ -662,23 +730,29 @@ export async function authGate(
     return method === 'GET' || method === 'HEAD' ? handleLogin(request, config, nowMs) : methodNotAllowed('GET')
   }
   if (path === CALLBACK_PATH) {
-    return method === 'GET' ? handleCallback(request, config, nowMs, fetchImpl) : methodNotAllowed('GET')
+    return method === 'GET' ? handleCallback(request, config, nowMs, fetchImpl, env.STATS_CONFIG) : methodNotAllowed('GET')
   }
   if (path === LOGOUT_PATH) {
     return method === 'POST' ? handleLogout(request) : methodNotAllowed('POST')
   }
   if (path === SIGNED_OUT_PATH) return signedOutPage()
 
-  const session = await readSession(request, config, nowMs)
+  const session = await readSession(request, config, nowMs, env.STATS_CONFIG)
 
   if (path === ME_PATH) {
-    return session ? jsonResponse(200, { email: session.email, exp: session.exp }) : unauthenticated(request, url)
+    return session ? jsonResponse(200, { email: session.email, exp: session.exp, role: session.role }) : unauthenticated(request, url)
   }
   if (path === '/auth' || path.startsWith('/auth/')) {
     return new Response('Not found', { status: 404, headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' } })
   }
 
-  if (session) return gatedResponse(await next())
+  if (session) {
+    // View-only: every write is refused here, before any Function runs (see ROLES above).
+    if (session.role !== 'owner' && !viewerMayRequest(method, path)) {
+      return gatedResponse(jsonResponse(403, { error: 'view_only', message: 'View-only access: this account can’t change anything.' }))
+    }
+    return gatedResponse(await next())
+  }
 
   // No valid session. APIs get a machine-readable 401; page loads go to sign-in.
   if (isApiPath(path) || !(method === 'GET' || method === 'HEAD')) return unauthenticated(request, url)

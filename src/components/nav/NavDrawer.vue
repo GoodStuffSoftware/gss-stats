@@ -18,6 +18,7 @@ import GroupBadge from './GroupBadge.vue'
 import GroupMenu from './GroupMenu.vue'
 import InlineName from './InlineName.vue'
 import NewWizards from './NewWizards.vue'
+import { vEdit } from '../../lib/viewOnly'
 
 const props = defineProps<{
   open: boolean
@@ -234,6 +235,7 @@ async function onCreateGroup(d: GroupDraft) {
                 </template>
               </button>
               <button
+                v-edit
                 type="button"
                 class="dr-act dr-more"
                 :aria-label="`Page options: ${r.page.name}`"
@@ -243,7 +245,7 @@ async function onCreateGroup(d: GroupDraft) {
               >
                 <EllipsisIcon :size="16" aria-hidden="true" />
               </button>
-              <button v-if="r.depth > 0" type="button" class="dr-act dr-x" :aria-label="`Delete drill page ${r.page.name}`" @click="emit('delete', r.page.id)">
+              <button v-if="r.depth > 0" v-edit type="button" class="dr-act dr-x" :aria-label="`Delete drill page ${r.page.name}`" @click="emit('delete', r.page.id)">
                 <CloseIcon :size="14" aria-hidden="true" />
               </button>
             </li>
@@ -272,6 +274,7 @@ async function onCreateGroup(d: GroupDraft) {
                 </button>
               </h3>
               <button
+                v-edit
                 type="button"
                 class="dr-gmore"
                 :aria-label="`Group options: ${g.name}`"
@@ -311,6 +314,7 @@ async function onCreateGroup(d: GroupDraft) {
                   <span class="nm">{{ r.page.name }}</span>
                 </button>
                 <button
+                  v-edit
                   type="button"
                   class="dr-act dr-more"
                   :aria-label="`Page options: ${r.page.name}`"
@@ -320,7 +324,7 @@ async function onCreateGroup(d: GroupDraft) {
                 >
                   <EllipsisIcon :size="16" aria-hidden="true" />
                 </button>
-                <button v-if="r.depth > 1" type="button" class="dr-act dr-x" :aria-label="`Delete drill page ${r.page.name}`" @click="emit('delete', r.page.id)">
+                <button v-if="r.depth > 1" v-edit type="button" class="dr-act dr-x" :aria-label="`Delete drill page ${r.page.name}`" @click="emit('delete', r.page.id)">
                   <CloseIcon :size="14" aria-hidden="true" />
                 </button>
               </li>

@@ -38,6 +38,7 @@ import { ADS_READINGS_LOG_PRESET, cardRefFor } from '../lib/metrics/readingsCard
 import { selectsCampaigns, todayEtFrom } from '../lib/metrics/scope'
 import { resolveSelection } from '../sitesStore'
 import type { CardRef, MetricsContext } from '../lib/metrics/types'
+import { viewOnly, vEdit } from '../lib/viewOnly'
 
 // `filters` is the page's main filter bar (App.vue's `activePage.filters`) — used ONLY to build
 // the metric-card preview's context (the same range/sites a saved card would read); every other
@@ -785,6 +786,8 @@ const fitValue = computed<boolean>({
 })
 
 function save() {
+  // View-only access: App.vue never opens the editor for a viewer; if it ever did, nothing saves.
+  if (viewOnly.value) return
   if (cardSaveDisabled.value) return // belt and suspenders: the Save button is disabled for this too
   // Text on the chart (slice 1c). A blank caption, an empty hidden list and an empty legacy
   // `notes` list are deleted, never saved as '' or []. A note widget is its own text: the
@@ -841,6 +844,7 @@ function save() {
 // grid stay). Nothing is saved until Save; Cancel leaves the chart as it was.
 const resetCount = ref(0)
 function resetToDefault() {
+  if (viewOnly.value) return
   const d = props.defaultWidget
   if (!d) return
   const fresh = copyWidget({ ...JSON.parse(JSON.stringify(d)), id: draft.id, i: draft.i, x: draft.x, y: draft.y, w: draft.w, h: draft.h })
@@ -1200,11 +1204,11 @@ function resetToDefault() {
       <p v-if="resetCount" class="hint" role="status" data-testid="reset-default-hint">Default settings filled in. Save to keep them, or Cancel to leave the chart as it was.</p>
       <p v-if="cardSaveDisabled" class="hint save-reason" role="alert">Fix the highlighted fields to save.</p>
       <div class="actions">
-        <button v-if="!isNew" class="btn danger" @click="emit('remove')">Delete</button>
-        <button v-if="!isNew && defaultWidget" class="btn" data-testid="reset-default" title="Fill in this chart's default settings. Save keeps them; Cancel leaves the chart as it was." @click="resetToDefault">Reset to default</button>
+        <button v-if="!isNew" v-edit class="btn danger" @click="emit('remove')">Delete</button>
+        <button v-if="!isNew && defaultWidget" v-edit class="btn" data-testid="reset-default" title="Fill in this chart's default settings. Save keeps them; Cancel leaves the chart as it was." @click="resetToDefault">Reset to default</button>
         <span class="spacer"></span>
         <button class="btn" @click="emit('cancel')">Cancel</button>
-        <button class="btn btn-primary" :disabled="cardSaveDisabled" :title="cardSaveDisabled ? 'Fix the highlighted fields to save.' : ''" @click="save">{{ isNew ? 'Add chart' : 'Save' }}</button>
+        <button v-edit class="btn btn-primary" :disabled="cardSaveDisabled" :title="cardSaveDisabled ? 'Fix the highlighted fields to save.' : ''" @click="save">{{ isNew ? 'Add chart' : 'Save' }}</button>
       </div>
     </div>
   </div>
