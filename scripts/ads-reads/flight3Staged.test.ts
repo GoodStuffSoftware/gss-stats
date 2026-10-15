@@ -184,3 +184,19 @@ describe('runbook LEGS table', () => {
     expect(RUNBOOK).toMatch(/`staged` rows are never read/)
   })
 })
+
+describe('staged blocks are declared before the registries that activation edits', () => {
+  // The activation steps put stagedCampaign(...) / stagedReadPlan(...) INSIDE the CAMPAIGNS and
+  // ADS_READ_PLANS literals; a const declared after the literal throws at module load (TDZ).
+  const src = (f: string) => fs.readFileSync(path.join(here, '..', '..', 'src', 'lib', f), 'utf8')
+  it('campaigns.ts declares STAGED_FLIGHT_3 above CAMPAIGNS', () => {
+    const s = src('campaigns.ts')
+    expect(s.indexOf('export const STAGED_FLIGHT_3')).toBeGreaterThan(-1)
+    expect(s.indexOf('export const STAGED_FLIGHT_3')).toBeLessThan(s.indexOf('export const CAMPAIGNS'))
+  })
+  it('adsRules.ts declares STAGED_FLIGHT_3_PLAN_SETTINGS above ADS_READ_PLANS', () => {
+    const s = src('adsRules.ts')
+    expect(s.indexOf('export const STAGED_FLIGHT_3_PLAN_SETTINGS')).toBeGreaterThan(-1)
+    expect(s.indexOf('export const STAGED_FLIGHT_3_PLAN_SETTINGS')).toBeLessThan(s.indexOf('export const ADS_READ_PLANS'))
+  })
+})

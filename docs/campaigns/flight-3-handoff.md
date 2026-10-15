@@ -101,11 +101,11 @@ Preconditions:
 
 ### Read plan (register once approved)
 
-- Cap $70; thresholds 18/35/53/70; ctrFloor 0.01; device anomaly on.
+- Cap $70; thresholds 18/35/53/70; ctrFloor per arm (Apps 0.0015, Search 0.01, as flight 2); device anomaly on.
 - Primary measure: tagged `/auth/success/<provider>/new` rows (count, capped at Firestore new accounts).
 - Validity: at least 20 tagged post-game ask rows.
 - Go: 5 or more new accounts within $70. Iterate: 2 to 4. Stop paid acquisition: 0 to 1 with 20 or more asks.
-- Traffic-held check: complete rows at $3 or less each and CTR at 1% or more.
+- Traffic-held check: complete rows at $3 or less each and CTR at or above the arm's flight 2 floor (Apps 0.15%, Search 1.0%).
 - Kill rules only propose; Mike pauses.
 - gss-stats edits LANDED in 0.35.0 (tolerant, ahead of the client ship; names still provisional per
   best-sudoku signin-ask-buyer-intent.md section 7.4 @ ffc46239): /signin-prompt/committed-repeat and

@@ -231,6 +231,36 @@ export function channelOf(campaignId: string, plans: Readonly<Record<string, Ads
 }
 /** Kept for external callers, e.g. the scheduled-task helper ~/.claude/scheduled-tasks/bsk-retest-morning-read/release-switchover.ts (line 76: `rules.readPlanFor(rules.RETEST_CAMPAIGN_ID)`); new code must take the campaign from the registry or `--campaign`. */
 export const RETEST_CAMPAIGN_ID = '24279250691'
+/** Flight 3's read-plan settings per arm, staged: not in ADS_READ_PLANS, because its campaigns
+ * are not registered yet (lib/campaigns.ts STAGED_FLIGHT_3 says why). The same ladder, kill-rule
+ * arming and CTR floors as flight 2, so the read isolates the release: the $70 cap in whole
+ * dollars (the top read IS the cap), kill rules from 50% of it, Apps with the 17 approved
+ * placements and flight 2's 10% leak limit and 0.15% CTR floor, Search with no placements and
+ * a 1.0% CTR floor. Search is desktop-only, so the printed device anomaly (any spend on mobile,
+ * tablet, connected TV or other on the closed day) already covers "flag mobile or tablet spend
+ * above 0". Everything else flight 3 adds (the new-account primary measure, the 20-ask validity
+ * floor, go / iterate / stop, the traffic-held check) is read from the report and judged in
+ * the runbook (docs/routines/ads-cloud-daily.md, "Flight 3"); none of it is a kill rule. */
+export const STAGED_FLIGHT_3_PLAN_SETTINGS: Record<StagedArm, Omit<ReadPlanSettings, 'morningReadFirstEt' | 'morningReadLastEt'>> = {
+  apps: {
+    thresholds: [18, 35, 53, 70],
+    killRulesFrom: 35,
+    placementLeakMaxShare: 0.1,
+    ctrFloor: 0.0015,
+    approvedPlacements: RETEST_APPROVED_PLACEMENTS,
+    reportLabel: 'F3 apps',
+    auditSlug: 'f3-apps',
+    adGroupPlacementCounts: RETEST_AD_GROUP_PLACEMENT_COUNTS,
+  },
+  search: {
+    channel: 'search',
+    thresholds: [18, 35, 53, 70],
+    killRulesFrom: 35,
+    ctrFloor: 0.01,
+    reportLabel: 'F3 search',
+    auditSlug: 'f3-search',
+  },
+}
 /** THE read-plan registry: one entry per campaign the routine reads (with rules). To start
  * reading a new campaign add its CAMPAIGNS entry and a plan here — see README "Adding a new
  * campaign". Several plans may be live at once; nothing assumes a single current campaign. */
@@ -278,36 +308,6 @@ export const ADS_READ_PLANS: Record<string, AdsReadPlan> = {
   }),
 }
 
-/** Flight 3's read-plan settings per arm, staged: not in ADS_READ_PLANS, because its campaigns
- * are not registered yet (lib/campaigns.ts STAGED_FLIGHT_3 says why). The same ladder, kill-rule
- * arming and CTR floors as flight 2, so the read isolates the release: the $70 cap in whole
- * dollars (the top read IS the cap), kill rules from 50% of it, Apps with the 17 approved
- * placements and flight 2's 10% leak limit and 0.15% CTR floor, Search with no placements and
- * a 1.0% CTR floor. Search is desktop-only, so the printed device anomaly (any spend on mobile,
- * tablet, connected TV or other on the closed day) already covers "flag mobile or tablet spend
- * above 0". Everything else flight 3 adds (the new-account primary measure, the 20-ask validity
- * floor, go / iterate / stop, the day 1-2 tracking check) is read from the report and judged in
- * the runbook (docs/routines/ads-cloud-daily.md, "Flight 3"); none of it is a kill rule. */
-export const STAGED_FLIGHT_3_PLAN_SETTINGS: Record<StagedArm, Omit<ReadPlanSettings, 'morningReadFirstEt' | 'morningReadLastEt'>> = {
-  apps: {
-    thresholds: [18, 35, 53, 70],
-    killRulesFrom: 35,
-    placementLeakMaxShare: 0.1,
-    ctrFloor: 0.0015,
-    approvedPlacements: RETEST_APPROVED_PLACEMENTS,
-    reportLabel: 'F3 apps',
-    auditSlug: 'f3-apps',
-    adGroupPlacementCounts: RETEST_AD_GROUP_PLACEMENT_COUNTS,
-  },
-  search: {
-    channel: 'search',
-    thresholds: [18, 35, 53, 70],
-    killRulesFrom: 35,
-    ctrFloor: 0.01,
-    reportLabel: 'F3 search',
-    auditSlug: 'f3-search',
-  },
-}
 /** A staged flight 3 arm's read plan, once its campaign is in CAMPAIGNS (as `stagedCampaign(...)`):
  * the arm's settings plus the morning-read window, day 2 .. flight end + 1, from that campaign's
  * own dates. Use as `'<id>': stagedReadPlan('apps' | 'search', '<id>')` in ADS_READ_PLANS. */

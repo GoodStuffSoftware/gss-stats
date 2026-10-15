@@ -141,7 +141,7 @@ end date set at build and again at enable).
 - **Validity:** at least 20 tagged post-game ask rows (`/signin-prompt/committed-repeat`,
   `committed-challenge`, and placement). Under 20 asks the result is INCONCLUSIVE, whatever the
   new-account count.
-- **Go / iterate / stop (proposals only), judged at the final read on the arm's own $70:**
+- **Go / iterate / stop (proposals only), judged at the final read on the arm's own $70 (the routine's own D + 7 08:37 read, which comes after the flight ends, may state the verdict as a proposal; the 07:05 final read is the authoritative one):**
 
   | Result | Proposal |
   |---|---|
@@ -150,13 +150,19 @@ end date set at build and again at enable).
   | 0 to 1, with 20 or more asks | Stop paid acquisition |
   | Under 20 asks | Inconclusive (no go, iterate or stop) |
 
-- **Traffic-held check:** CTR of at least 1% and no more than $3 per complete row. State both
-  figures from the report. The coded kill rule 2 floor is flight 2's per arm (Apps 0.15%,
-  Search 1.0%); the 1% traffic-held check is a read-and-judge line, not a kill rule.
-- **Day 1-2 tracking check:** on day 1 or 2 of an arm, if the report shows tagged arrivals but no
-  tagged post-game asks, or no /coach/* rows, PROPOSE PAUSE (tracking is not firing), in the
-  A2 "So what". A check the report does not print is "not readable" (name it in Step 3); never
-  infer it. /coach/* rows are printed once the coach counting change is on main.
+- **Traffic-held check:** complete rows at no more than $3 each, and CTR at or above the arm's
+  flight 2 floor (Apps 0.15%, Search 1.0%), the same floor the coded kill rule 2 uses. State both
+  figures from the report.
+- **Printed decision row at the $70 cap:** the report's decision row at the cap is flight 2's
+  table and counts every ask row (tutorial, streak and promo-first50 as well). It is not the
+  flight 3 verdict. The table above governs: judge on the new-account count and on the 20 asks
+  counted from committed-repeat, committed-challenge and placement rows only. If the printed row
+  and this table disagree, say so and follow this table.
+- **Day 1-2 tracking:** zero tagged post-game asks on day 1 or 2 is not by itself a pause: day 1
+  can show zero with tracking working. Only the coded rule 3 may trip, and rule 3's own guards
+  decide whether it is computable (see "Kill rule 3" below). A /coach/* row that the report
+  does not print is "not readable" (name it in Step 3); never infer it. /coach/* rows are
+  printed once the coach counting change is on main.
 
 ### Secondary measures (counts only, never per-person)
 
@@ -189,7 +195,7 @@ Safari escape untagged; deferred rows lag at least 30 minutes after sign-in.
 | Daily, D + 1 .. D + 7 | Part A, this arm's `live` row | this routine |
 | D + 7, 07:05 ET | final flight read | not in this routine (it runs at 08:37 ET); a separate scheduled read, see Follow-ups |
 | D + 13 | returns, days 2-7 | Part B `wrapup` (flight end + 7) |
-| D + 20 / D + 21 | returns, days 8-14 | Part B `day15` is due at flight end + 15 = D + 21; the plan names D + 20, when day 14 has matured, so D + 21 is the CLI's due date and one day later |
+| D + 21 | returns, days 8-14 | Part B `day15` (flight end + 15 = D + 21, the CLI's due date) |
 | D + 21 and D + 35 | purchases: `/funnel/purchase/*`, plus Stripe and Play read-only | not in this routine; manual read-only pulls, see Follow-ups |
 
 The trial is 14 days from the first completed game reaching Firestore, so purchases cannot
