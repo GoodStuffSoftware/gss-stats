@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.40.0] — 2026-10-15
+
+### Added
+- **Web vs app activity on the Overview.** One line chart of page views per ET day, for the website and for the app, so you can see how much activity each gets; every feature card keeps counting web and app together as one number.
+
 ## [0.39.0] — 2026-10-15
 
 ### Added

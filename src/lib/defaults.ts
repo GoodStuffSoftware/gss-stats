@@ -688,6 +688,34 @@ export function timelineWidget(geom: { x: number; y: number; w: number; h: numbe
     ...geom,
   }
 }
+// "Web vs app activity" (Mike, 2026-10-15: feature tracking is ambiguous between web and app, but
+// "we should track how much web and app activity we're getting"): the ONE place web and app are
+// told apart. Page views per US-Eastern day, one line per beacon site tag: the website, the app,
+// and the small host-tagged bucket the web build falls back to. A per-ET-day total of rows, so the
+// counts-only rule (lib/splitGuard.ts) is untouched: `site` is not a split-guard dimension and the
+// event-beacon rows the guard protects (returns, completions, game starts, tour) are not page views.
+// Every feature card (coach tips, tour, pop-ups, game starts and completions, hints) counts web and
+// app together.
+export const WEB_APP_SERIES: LineSeries[] = [
+  { label: 'Web', filter: [{ field: 'site', value: 'bestsudoku-web' }], axis: 'left', style: 'solid', color: 0 },
+  { label: 'App', filter: [{ field: 'site', value: 'bestsudoku-app' }], axis: 'left', style: 'solid', color: 1 },
+  { label: 'Web (host-tagged)', filter: [{ field: 'site', value: 'bestsudoku' }], axis: 'left', style: 'dotted', color: 2 },
+]
+export function webAppActivityWidget(geom: { x: number; y: number; w: number; h: number }): Widget {
+  return w({
+    id: 'ow-webapp',
+    title: 'Web vs app activity',
+    type: 'line',
+    dataset: 'geo',
+    dimension: 'dateEt',
+    metric: 'pageviews',
+    limit: 500,
+    excludeKnownTraffic: true,
+    siteSel: [...BEST_SUDOKU_SITES],
+    series: WEB_APP_SERIES.map((x) => ({ ...x, filter: x.filter?.map((f) => ({ ...f })) })),
+    ...geom,
+  })
+}
 /** A saved widget that is the retired bespoke Overview timeline panel. */
 export function isBespokeTimeline(wd: Widget): boolean {
   return wd.dataset === 'overview' && wd.view === 'timeline'
@@ -843,6 +871,7 @@ export function defaultOverviewWidgets(): Widget[] {
     w({ id: 'ow-scorecard', title: 'Campaign scorecard', type: 'table', dataset: 'overview', view: 'scorecard', card: { preset: 'campaign-scorecard' }, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 21, w: 12, h: 14 }),
     w({ id: 'ow-release', title: 'Release panel', type: 'table', dataset: 'overview', view: 'releasePanel', card: { preset: 'release-before-after' }, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 35, w: 12, h: 9 }),
     completionsWidget(),
+    webAppActivityWidget({ x: 0, y: 54, w: 12, h: 9 }),
   ])
 }
 // Another bespoke-turned-widget page (see components/OverviewPage.vue — kept for reference /

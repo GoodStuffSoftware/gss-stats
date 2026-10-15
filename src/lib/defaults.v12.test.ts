@@ -19,6 +19,9 @@ const V12_OVERVIEW = {
   'ow-release': [0, 35, 12, 9],
   'ow-completions': [0, 44, 12, 10],
 }
+// A fresh config also carries the Web vs app activity card, added after v12 (no layout migration: a stored layout
+// gets it from Restore default charts, and the prod layout was edited by hand).
+const FRESH_OVERVIEW = { ...V12_OVERVIEW, 'ow-webapp': [0, 54, 12, 9] }
 const wd = (id: string, x: number, y: number, w: number, h: number, extra: Partial<Widget> = {}): Widget =>
   ({ id, i: id, title: id, type: 'table', dimension: '', metric: 'pageviews', limit: 1, x, y, w, h, ...extra }) as Widget
 const note = (h = 3, extra: Partial<Widget> = {}) => wd('ow-note-smallsample', 0, 0, 12, h, { type: 'note', noteId: 'small-sample', ...extra })
@@ -27,7 +30,7 @@ const pg = (widgets: Widget[]): DashboardPage => ({ id: 'bsk-overview', name: 'B
 describe('v12: the small-sample note takes one grid row', () => {
   it('ships the one-row layout for a fresh config', () => {
     expect(CONFIG_VERSION).toBeGreaterThanOrEqual(12) // later slices bump on top (defaults.v13.test.ts, defaults.v14.test.ts)
-    expect(geom(defaultConfig())).toEqual(V12_OVERVIEW)
+    expect(geom(defaultConfig())).toEqual(FRESH_OVERVIEW)
   })
 
   it('moves the production layout (v8 and v9) to exactly the new default geometry', () => {

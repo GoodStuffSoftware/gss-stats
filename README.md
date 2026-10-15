@@ -58,7 +58,13 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   range and Best Sudoku sites, with campaign-flight bands, release markers and go-live markers
   on. It buckets by **US-Eastern day** (the `dateEt` beacon dimension, "Date (trend, ET)":
   DST-aware, the same days as `etDateFast` and the flight bands and markers), where the plain
-  `date` dimension is a UTC day.
+  `date` dimension is a UTC day. **Web vs app activity** (last card on the Overview) is the one place
+  web and app are told apart: a line chart of page views per ET day for each Best Sudoku site tag
+  (`bestsudoku-web`, `bestsudoku-app`, and the small host-tagged `bestsudoku` bucket). Every feature
+  card (coach tips, tour, pop-ups, game starts and completions, hints, mode × difficulty) counts web
+  and app together by default; the beacons still carry the site tag, and a chart can still be
+  scoped to one site from its editor, but no default does. `site` is not a split-guard dimension
+  (an ET-day count of page views is not an hour, place or device split).
   [`src/lib/releases.ts`](src/lib/releases.ts) holds the hand-entered release dates (`hits` has
   no app-version column; major releases get a labelled line, minor ones a short tick).
   Best Sudoku / Campaigns (its funnel, country, cost and return-visits panels are metric
