@@ -21,6 +21,7 @@ export const REFUSED_SAMPLE_PATHS: readonly string[] = [
   '/tour/skip/x',
   '/coach/dismissed/place',
   '/coach/closed-at/place',
+  '/coach/shown/place',
 ]
 
 /** Every segment value a refused beacon is known to carry, plus junk ('x', '1', ''). */

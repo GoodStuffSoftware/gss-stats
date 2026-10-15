@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { DatabaseSync } from 'node:sqlite'
+import { isSplitRefusedPath, refusedPathMatch } from './splitGuard'
 import {
   classifyPopupPath,
   LEGACY_REASON,
@@ -8,6 +10,7 @@ import {
   isPopupEventPath,
   popupExcludeClause,
   popupIncludeClause,
+  pathFamilySqlCase,
   isTutorialCompletePath,
   isTourExitPath,
   TOUR_TRACKING_LIVE_AT,
@@ -1012,5 +1015,24 @@ describe('coach-strip beacons', () => {
     expect(popupIncludeClause().sql).toContain("path LIKE '/coach/%'")
     expect(isPopupEventPath('/coaching')).toBe(false)
     expect(isPopupEventPath('/coach-tips')).toBe(false)
+  })
+
+  it('differential: real SQLite agrees with the JS twins on all 16 paths, and refuses 15 of them (not tour-opened)', () => {
+    const db = new DatabaseSync(':memory:')
+    db.exec('CREATE TABLE hits (path TEXT)')
+    const ins = db.prepare('INSERT INTO hits (path) VALUES (?)')
+    for (const p of paths) ins.run(p)
+    const w: string[] = []
+    popupExcludeClause(w, [])
+    const val = (sql: string, p: string) => (db.prepare(`SELECT ${sql} AS v FROM hits WHERE path = ?`).get(p) as { v: number | string }).v
+    const refusedSql = refusedPathMatch().sql
+    for (const p of paths) {
+      expect(val(`(${popupIncludeClause().sql})`, p), `include ${p}`).toBe(1)
+      expect(val(`(${w.join(' AND ')})`, p), `exclude ${p}`).toBe(0)
+      expect(val(`(${pathFamilySqlCase()})`, p), `family ${p}`).toBe('coach')
+      expect(val(refusedSql, p) === 1, `refused sql ${p}`).toBe(p !== '/coach/tour-opened')
+      expect(isSplitRefusedPath(p), `refused js ${p}`).toBe(p !== '/coach/tour-opened')
+    }
+    expect(paths.filter((p) => p.startsWith('/coach/shown/'))).toHaveLength(5)
   })
 })

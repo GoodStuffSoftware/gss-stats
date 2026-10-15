@@ -120,9 +120,11 @@ export const SPLIT_REFUSED_PATH_PATTERNS: readonly string[] = [
   '/tour/skip',
   '/tour/skip/%',
   // Best Sudoku coach strip: the × button and the page-hidden-while-shown close, like a tour skip
-  // and exit. `/coach/shown/%` and `/coach/tour-opened` stay splittable, like `/tour/start`.
+  // and exit. `/coach/shown/%` is once per tip per device, ever, so each row marks "this device
+  // remembered it" like `/return` (0.37.1). Only `/coach/tour-opened` stays splittable, like `/tour/start`.
   '/coach/dismissed/%',
   '/coach/closed-at/%',
+  '/coach/shown/%',
 ]
 
 /** The JS reading of SPLIT_REFUSED_PATH_PATTERNS, matching SQLite LIKE exactly (ASCII case
@@ -150,7 +152,7 @@ export const SPLIT_GUARD_KEY = SPLIT_REFUSED_PATH_PATTERNS.join('|')
  * (components/ChartCard.vue), so a smaller total never reads as missing data. */
 export const SPLIT_GUARD_CAPTION =
   'Counts only: this split leaves out return, game start, completion, tutorial-completion, ' +
-  'tour-skip, tour-exit and coach-strip dismiss and close rows, which are never shown by hour, place or device.'
+  'tour-skip, tour-exit and coach-strip shown, dismiss and close rows, which are never shown by hour, place or device.'
 
 /** True when grouping, mapping or drilling by any of `fields` would split refused rows. */
 export function splitRefused(opts: { points: boolean; fields: readonly string[] }): boolean {
@@ -201,7 +203,7 @@ export const REFUSED_WINDOW_KEY = `refused-${REFUSED_WINDOW_SNAP}-et-days-${hash
  * (components/ChartCard.vue), worded to fit every snap mode. It names every refused kind and
  * says "any", since most charts leave the event kinds out unless event beacons are included. */
 export const REFUSED_WHOLE_DAYS_CAPTION =
-  'Any return, game-start, completion, tutorial-completion, tour-skip, tour-exit or coach-strip dismiss and close rows here are counted ' +
+  'Any return, game-start, completion, tutorial-completion, tour-skip, tour-exit or coach-strip shown, dismiss and close rows here are counted ' +
   'over whole ET days.'
 
 /** A path each refused pattern matches, so the pattern can be classified with the JS path helpers

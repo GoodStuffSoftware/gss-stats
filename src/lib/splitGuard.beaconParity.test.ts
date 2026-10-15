@@ -18,11 +18,12 @@ describe('SPLIT_REFUSED_PATH_PATTERNS beacon parity', () => {
       '/tour/skip/%',
       '/coach/dismissed/%',
       '/coach/closed-at/%',
+      '/coach/shown/%',
     ])
   })
 })
 
-// The matcher, pinned with the same cases as gss-beacon test/refused.test.ts @0f0046e (isSplitRefusedPath),
+// The matcher, pinned with the same cases as gss-beacon test/refused.test.ts @6ad3b65 (isSplitRefusedPath),
 // so one file here states the whole contract. The beacon also judges refusal on the stored 200-char clip of
 // the path (b.ts); a prefix pattern is length-independent, so the clip cases are pinned here too.
 describe('isSplitRefusedPath beacon parity (matcher)', () => {
@@ -42,6 +43,8 @@ describe('isSplitRefusedPath beacon parity (matcher)', () => {
       '/coach/dismissed/place',
       '/coach/closed-at/clash',
       '/COACH/Closed-At/hint',
+      '/coach/shown/place',
+      '/COACH/Shown/hint',
     ]) {
       expect(isSplitRefusedPath(p), p).toBe(true)
     }
@@ -52,8 +55,8 @@ describe('isSplitRefusedPath beacon parity (matcher)', () => {
       '/tour/start',
       '/tour/complete',
       '/tour/skipped',
-      '/coach/shown/place',
       '/coach/tour-opened',
+      '/coach/shown',
       '/coach/dismissed',
       '/coach/closed-at',
       '/tour/exit-atx',

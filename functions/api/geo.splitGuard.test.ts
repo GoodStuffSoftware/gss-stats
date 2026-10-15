@@ -72,6 +72,7 @@ const REFUSED = [
   '/tour/exit-at',
   '/tour/skip',
   '/tour/skip/later',
+  '/coach/shown/place', '/coach/shown/hint', '/coach/dismissed/place', '/coach/closed-at/clash',
 ]
 // Ordinary rows that share a prefix or neighbour the refused ones — none may be dropped.
 const ORDINARY = [
@@ -79,6 +80,7 @@ const ORDINARY = [
   '/game/tutorial-complete', '/returns', '/return', '/game/start', '/game/started', '/tour/start',
   '/tour/complete', '/tour/skipped', '/tour/skip-all', '/settings',
   '/signin-prompt/placement', '/install/prompt/android',
+  '/coach/tour-opened', '/coach/shown', '/coach/dismissed', '/coach/closed-at',
 ]
 
 function seed() {
@@ -118,6 +120,7 @@ describe('splitGuard module', () => {
       '/tour/skip/%',
       '/coach/dismissed/%',
       '/coach/closed-at/%',
+      '/coach/shown/%',
     ])
   })
 
@@ -131,7 +134,7 @@ describe('splitGuard module', () => {
         "path LIKE '/game/start/%' OR path LIKE '/tour/exit-at/%' OR path LIKE '/tour/exit-at' OR " +
         "path LIKE '/tour/skip' OR " +
         "path LIKE '/tour/skip/%' OR path LIKE '/coach/dismissed/%' OR " +
-        "path LIKE '/coach/closed-at/%' OR instr(path, char(0)) > 0)",
+        "path LIKE '/coach/closed-at/%' OR path LIKE '/coach/shown/%' OR instr(path, char(0)) > 0)",
     ])
     expect(b).toEqual([])
   })

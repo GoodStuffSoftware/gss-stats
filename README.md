@@ -700,7 +700,7 @@ there — not just the one drilled — can show the event rows just filtered dow
 carries a caption explaining why (see [`src/lib/drill.ts`](src/lib/drill.ts)
 `drillNeedsEventBeacons`).
 
-**Return, game-start, game-completion, tutorial-completion, tour-skip, tour-exit and coach-strip dismiss and close rows are
+**Return, game-start, game-completion, tutorial-completion, tour-skip, tour-exit and coach-strip shown, dismiss and close rows are
 counts only: never split by hour, place or device.** Rule: "counts only. Never tie beacon rows to a device, time or place." A geo
 chart that maps rows (the map/globe), groups by an hour, place or device dimension (`hourEt`,
 and the UTC `date`, whose count minus `dateEt`'s for the same day would give an evening band;
@@ -760,7 +760,7 @@ inside) stay one constant away (`REFUSED_WINDOW_SNAP`). When the bounds meet, as
 ranges shorter than a day, these rows count zero. A range already on ET midnights (the date
 picker's ET days, a whole-day preset) runs exactly as before. Charts, `/api/completions` and
 the metric cards' page range (`window: 'page'`, sparkline days included) all follow it and say
-so in a caption: "Any return, game-start, completion, tutorial-completion, tour-skip, tour-exit or coach-strip dismiss and close rows
+so in a caption: "Any return, game-start, completion, tutorial-completion, tour-skip, tour-exit or coach-strip shown, dismiss and close rows
 here are counted over whole ET days." A chart shows it only when it can count one of those
 rows, so never under a path or path-family filter none of them matches (a site filter does not
 narrow it: it errs toward showing). A chart that leaves event beacons out (the default) counts none of them, since
@@ -1436,7 +1436,7 @@ polling. It is push, not a timer: nothing is sent while nothing happens.
 **Privacy: counts only (rows only).**
 
 - A refused row (`SPLIT_REFUSED_PATH_PATTERNS`: `/return`, game-complete, game-complete-deferred,
-  tutorial-complete, tour skip and exit, coach dismissed and closed-at, game-start; any path containing a NUL byte counts as
+  tutorial-complete, tour skip and exit, coach shown, dismissed and closed-at, game-start; any path containing a NUL byte counts as
   refused too, because SQLite LIKE stops reading at a NUL) **never triggers or shifts a ping**: the
   beacon does not call `gss-live` for it. The beacon keeps its own copy of the list, pinned equal to
   this one by a literal in both repos' tests (`src/lib/splitGuard.beaconParity.test.ts`).
