@@ -111,8 +111,9 @@ Flight 2 has no day30, day60 or december rows yet; add them here when Mike asks 
 
 ## Flight 3 (staged until activated)
 
-Best Sudoku ad flight 3 re-runs flight 2's exact setup on best-sudoku v1.99.0, so the read
-isolates the release. Source: the BSK flight 3 launch plan (desk card ads-f3-16), summarized
+Best Sudoku ad flight 3 re-runs flight 2's setup on best-sudoku v1.99.0 (Apps with a price
+line; Search revised on 2026-10-15 to a buyer-intent test, so the Search read no longer isolates
+the release alone). Source: the BSK flight 3 launch plan (desk card ads-f3-16), summarized
 here; the cold-start notes are in [docs/campaigns/flight-3-handoff.md](../campaigns/flight-3-handoff.md).
 Everything below is what the routine says and does once the F3 rows are `live`; until then none
 of it applies and no part reads, or sends anything about, a `staged` row. The tags, $10/day
@@ -159,8 +160,11 @@ end date set at build and again at enable).
   counted from committed-repeat, committed-challenge and placement rows only. If the printed row
   and this table disagree, say so and follow this table.
 - **Cost per arrival (per arm):** the report's "cost per tagged arrival" line (cumulative spend
-  divided by tagged arrivals; "—" while there are no arrivals) prints Mike's benchmark beside it,
-  about $0.32 an arrival (the F1/F2 in-app figure). Quote both; it is a comparison, not a rule.
+  divided by tagged arrivals) prints Mike's benchmark beside it, about $0.32 an arrival (the
+  F1/F2 in-app figure). It prints in the threshold and post-flight reads' tagged-funnel block, not
+  in the daily "Tagged so far" line, and reads "—" under 5 tagged arrivals (the small-sample
+  gate; likely early on for Search). Quote the line as printed with the benchmark; never compute
+  a figure for a "—". It is a comparison, not a rule.
 - **Search volume:** about 15-25 clicks a week are expected, so one week will likely read
   inconclusive (under 20 asks). That is the expected outcome, not a fault; the rules above are
   unchanged.
@@ -178,8 +182,11 @@ end date set at build and again at enable).
     first-session (tutorial) asks, and v1.99.0 removes the tutorial ask, so from release on rule 3
     always reads NOT COMPUTABLE, by design (0.35.0). This check uses the new ask and coach paths
     instead. It does not touch rule 3's code and does not contradict the NOT COMPUTABLE guard.
-    A /coach/* row that the report does not print is "not readable" (name it in Step 3); never
-    infer it. /coach/* rows are printed (the coach counting change is on main since 0.37.0).
+    The ads report does not print tagged `/coach/shown/place` counts (the coach counting change
+    of 0.37.0 counts them for the stats pages, not in the ads report), so the Apps check needs
+    that count from a read-only, counts-only tagged read of the stats data. When the routine
+    cannot read it, the Apps check is "not readable" (name it in Step 3): never infer it, and
+    never propose a pause from it.
 
 ### Secondary measures (counts only, never per-person)
 

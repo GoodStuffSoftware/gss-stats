@@ -79,8 +79,9 @@ Counts, read-only. Raw pulls live in the analyst session scratchpad only (not co
 - **Apps:** the same 17 placements, max CPC **$0.35**, flight 2 copy plus a price line ("No ads.
   Passes from $1.99").
 - **Both arms:** $10/day, $70 cap, the utm tags unchanged.
-- **Cost per arrival:** every tagged read prints cumulative spend / tagged arrivals with Mike's
-  benchmark of about $0.32 an arrival (the F1/F2 in-app figure) beside it.
+- **Cost per arrival:** the tagged-funnel block of the threshold and post-flight reads prints
+  cumulative spend / tagged arrivals with Mike's benchmark of about $0.32 an arrival (the F1/F2
+  in-app figure) beside it; the figure reads "—" under 5 tagged arrivals (the small-sample gate).
 - **Day 1-2 tracking check:** a read-and-judge line in the runbook ("Flight 3"), never coded; it
   replaces rule 3 for this flight and only proposes a pause.
 
@@ -107,18 +108,18 @@ Preconditions:
 ### Build spec (diff from F2 Search)
 
 - (Superseded: see the revised arms above for bid, keywords and devices.) Name "Best Sudoku - Search - Desktop intent - F3 Search"; utm_campaign `sudoku_funnel_f3_search`, medium `cpc`.
-- $10/day standard budget; Manual CPC $0.60.
-- Same 12 keywords and 10 negatives, plus 4 negatives: nytimes, nyt, easybrain, juego.
-- Mobile and tablet -100% hard stops; US+CA Presence; English; 12:00-23:00 ET.
+- $10/day standard budget; Manual CPC $0.99 max (revised; was $0.60).
+- Revised: the "no ads" keyword family only, exact + phrase (flight 2's free-seeker terms dropped); flight 2's 10 negatives plus free, online free, printable and puzzle book (the earlier nytimes, nyt, easybrain, juego additions are not in the revised list).
+- ALL devices (revised: no mobile or tablet hard stop); US+CA Presence; English; 12:00-23:00 ET.
 - Fixed window Sunday 00:00 to Saturday 23:59:59 ET; end date set at create and again at enable.
 - AI Max off, Search partners off, Display expansion off, auto assets opted out.
 - No day-3 bid rule (retired).
-- Ad copy and keywords depend on ads-f3-3. If option a: add a price headline ('No ads. Passes from
-  $1.99', verify that Play prices match) and the 4 buyer-intent exact terms.
+- Revised: flight 2's RSA plus the price headline ('No ads. Passes from $1.99', verify that Play
+  prices match); the buyer-intent keywords above replace flight 2's terms.
 
 ### Read plan (register once approved)
 
-- Cap $70; thresholds 18/35/53/70; ctrFloor per arm (Apps 0.0015, Search 0.01, as flight 2); device anomaly on.
+- Cap $70; thresholds 18/35/53/70; ctrFloor per arm (Apps 0.0015, Search 0.01, as flight 2); the Apps device check stays, and Search (all devices) has no desktop-only anomaly flag.
 - Primary measure: tagged `/auth/success/<provider>/new` rows (count, capped at Firestore new accounts).
 - Validity: at least 20 tagged post-game ask rows.
 - Go: 5 or more new accounts within $70. Iterate: 2 to 4. Stop paid acquisition: 0 to 1 with 20 or more asks.

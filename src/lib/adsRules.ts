@@ -242,7 +242,7 @@ export function allDevicesOf(campaignId: string, plans: Readonly<Record<string, 
 export const RETEST_CAMPAIGN_ID = '24279250691'
 /** Flight 3's read-plan settings per arm, staged: not in ADS_READ_PLANS, because its campaigns
  * are not registered yet (lib/campaigns.ts STAGED_FLIGHT_3 says why). The same ladder, kill-rule
- * arming and CTR floors as flight 2, so the read isolates the release: the $70 cap in whole
+ * arming and CTR floors as flight 2: the $70 cap in whole
  * dollars (the top read IS the cap), kill rules from 50% of it, Apps with the 17 approved
  * placements and flight 2's 10% leak limit and 0.15% CTR floor, Search with no placements and
  * a 1.0% CTR floor. Search is a buyer-intent test on ALL devices (Mike, 2026-10-15), so its plan

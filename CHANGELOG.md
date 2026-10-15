@@ -10,7 +10,7 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ### Changed
 - **Flight 3 revised.** The staged Search arm is now a buyer-intent test (the "no ads" keywords, $0.99 max, all devices), so it no longer flags spend on mobile or tablet; the Apps arm carries a price line at $0.35 max. Search is expected to be slow (about 15-25 clicks a week), so one week will likely read inconclusive.
-- **Cost per arrival has a benchmark.** The tagged-funnel line in every ads read now shows Mike's benchmark of about $0.32 an arrival beside the cost per arrival.
+- **Cost per arrival has a benchmark.** The tagged-funnel line in the ads threshold and post-flight reads now shows Mike's benchmark of about $0.32 an arrival beside the cost per arrival (blank until there are 5 arrivals).
 
 ### Added
 - **Day 1-2 tracking check for flight 3.** The runbook has a read-and-judge check (Search: 10 or more complete rows but no sign-in asks; Apps: 30 or more arrivals but no coach tips shown) that only proposes a pause; it stands in for kill rule 3, which can no longer be computed after v1.99.0.

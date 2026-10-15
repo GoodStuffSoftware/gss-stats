@@ -92,7 +92,7 @@ export interface CampaignFlight {
 }
 
 // ── Flight 3: STAGED, not registered ────────────────────────────────────────────────────
-// Best Sudoku's ad flight 3 re-runs flight 2's exact setup on v1.99.0 (plan: best-sudoku desk card
+// Best Sudoku's ad flight 3 re-runs flight 2's setup on v1.99.0, Search revised 2026-10-15 to a buyer-intent test (plan: best-sudoku desk card
 // ads-f3-16; docs/campaigns/flight-3-handoff.md, docs/routines/ads-cloud-daily.md "Flight 3").
 // Its two Google Ads campaigns do not exist yet, so neither arm is in CAMPAIGNS: a registered
 // campaign needs a real id, and an invented one would be synced, charted and read as live.

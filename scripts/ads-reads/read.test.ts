@@ -166,14 +166,26 @@ describe('morning-read: review lows', () => {
     const line = formatMorningReport(r).split('\n').find((l) => l.includes('cost per tagged arrival'))!
     expect(line).toContain(`cost per tagged arrival $${tagged.costPerArrival!.toFixed(2)} (cumulative spend / tagged arrivals; benchmark about $0.32, the F1/F2 in-app figure)`)
   })
-  it('the cost-per-arrival line reads "—" (never NaN, Infinity or $0.00) with zero tagged arrivals, and still shows the benchmark', async () => {
-    const r = await runMorningRead(fixtureDeps(base(), true), opts)
-    r.thresholdRead!.tagged!.summary.taggedArrivals = 0
-    r.thresholdRead!.tagged!.costPerArrival = costPer(r.thresholdRead!.cumulativeSpend, 0)
-    expect(r.thresholdRead!.tagged!.costPerArrival).toBeNull()
-    const line = formatMorningReport(r).split('\n').find((l) => l.includes('cost per tagged arrival'))!
-    expect(line).toContain('cost per tagged arrival — (cumulative spend / tagged arrivals; benchmark about $0.32')
-    expect(line).not.toMatch(/NaN|Infinity/)
+  it('the cost-per-arrival line reads "—" (never NaN, Infinity or $0.00) with zero tagged arrivals, and under the 5-arrival small-sample gate; the benchmark still shows', async () => {
+    const lineFor = async (arrivals: number) => {
+      const fx = base()
+      const b = fx.beacon as Extract<Fixture['beacon'], { tagged: unknown }>
+      const row = b.tagged.find((x) => x.visitor === 'new')!
+      b.tagged = b.tagged.filter((x) => x.visitor !== 'new')
+      if (arrivals > 0) b.tagged.push({ ...row, count: arrivals })
+      const r = await runMorningRead(fixtureDeps(fx, true), opts)
+      return { r, line: formatMorningReport(r).split('\n').find((l) => l.includes('cost per tagged arrival'))! }
+    }
+    for (const arrivals of [0, 3]) {
+      const { r, line } = await lineFor(arrivals)
+      expect(r.thresholdRead!.tagged!.summary.taggedArrivals).toBe(arrivals)
+      expect(r.thresholdRead!.tagged!.costPerArrival).toBeNull()
+      expect(line).toContain('cost per tagged arrival — (cumulative spend / tagged arrivals; benchmark about $0.32')
+      expect(line).not.toMatch(/NaN|Infinity/)
+    }
+    const { r, line } = await lineFor(5) // exactly at the gate: a real figure
+    expect(r.thresholdRead!.tagged!.costPerArrival).toBeCloseTo(r.thresholdRead!.cumulativeSpend / 5, 10)
+    expect(line).toContain(`cost per tagged arrival $${(r.thresholdRead!.cumulativeSpend / 5).toFixed(2)} (`)
   })
   it('L11: the report (the bus copy) names off-list placements by package id, never the display name', async () => {
     const r = await runMorningRead(fixtureDeps(base(), true), opts)

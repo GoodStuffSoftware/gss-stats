@@ -1098,7 +1098,7 @@ lacks the pin, pin it in the same PR as the registration.
   `channel` (`'display'`, the default, or `'search'`; see
   [Adding an arm](#adding-an-arm-two-campaigns-at-once) below),
   `thresholds` (the spend reads; the report page draws its ladder from them), `killRulesFrom`,
-  `placementLeakMaxShare` (display only; optional and ignored for search), `ctrFloor`, `approvedPlacements` (display only), optional `adGroupPlacementCounts`
+  `placementLeakMaxShare` (display only; optional and ignored for search), `ctrFloor`, `approvedPlacements` (display only), optional `allDevices` (search only: no desktop-only device flag), optional `adGroupPlacementCounts`
   (the build-spec counts the targeting diagnostic checks), `morningReadFirstEt` /
   `morningReadLastEt` (the morning-read window), and the two fields that keep two live
   campaigns' output apart:

@@ -383,6 +383,19 @@ describe('the search arm desktop-only device flag', () => {
   it('never adds the search flag to a display read', () => {
     expect(diagnosticsLines(base).join('\n')).not.toMatch(/desktop-only/)
   })
+  it('the morning report for a registered all-devices search plan (flight 3 Search) carries no desktop-only flag; the same spend on a desktop-only plan does', async () => {
+    register()
+    ADS_READ_PLANS[SEARCH] = buildReadPlan(SEARCH, { ...searchSettings, allDevices: true, reportLabel: 'F3 search (test)', auditSlug: 'f3-search-test' })
+    const s = countedDeps(fixtureFor(SEARCH, SEARCH_UC, { noPlacements: true }), false)
+    s.deps.ads!.devices = async () => [{ device: 'MOBILE', impressions: 40, clicks: 2, ctr: 0.05, cost: 0.42 }]
+    const allDev = formatMorningReport(await runMorningRead(s.deps, optsFor(SEARCH)))
+    expect(allDev).toContain('device: MOBILE 40 impr, 2 clicks, $0.42')
+    expect(allDev).not.toMatch(/ANOMALY|desktop-only/)
+    ADS_READ_PLANS[SEARCH] = buildReadPlan(SEARCH, searchSettings)
+    const s2 = countedDeps(fixtureFor(SEARCH, SEARCH_UC, { noPlacements: true }), false)
+    s2.deps.ads!.devices = async () => [{ device: 'MOBILE', impressions: 40, clicks: 2, ctr: 0.05, cost: 0.42 }]
+    expect(formatMorningReport(await runMorningRead(s2.deps, optsFor(SEARCH)))).toContain("yesterday's spend on MOBILE: $0.42")
+  })
   it('is a printed flag only: the search morning read never trips or proposes on it, and skips the targeting query', async () => {
     register()
     const s = countedDeps(fixtureFor(SEARCH, SEARCH_UC, { noPlacements: true }), false)
