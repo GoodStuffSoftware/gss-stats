@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.35.3] — 2026-10-14
+
 ### Added
 - **Reset to default in the chart editor.** A built-in chart can be put back to its factory settings in one click, keeping its place on the grid; nothing changes until Save.
 
