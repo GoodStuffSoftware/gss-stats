@@ -683,7 +683,7 @@ geography is country-only** — sub-country region/city comes from the beacon.
 
 **Pop-up event beacons never count as page views — unless a chart opts in.** Paths under
 `/signin-prompt`, `/signin-eligible`, `/promo-first50`, `/first50-congrats`, `/upsell`,
-`/install`, `/popup-outcome`, `/return`, `/funnel`, `/ab/ask-order`, `/game/complete/`, the `/auth/success/<provider>/`
+`/install`, `/popup-outcome`, `/return`, `/funnel`, `/ab/ask-order`, `/coach`, `/game/complete/`, the `/auth/success/<provider>/`
 status suffix, `/auth/error`, `/auth/redirect` and the first-session beacons (`/tour`, which
 includes `/tour/exit-at/<stage>`, `/game/tutorial-complete`, `/game/first-move`, `/game/abandon`,
 `/welcome-signed-in` and `/game/start/<difficulty>`) are pop-up/event beacons, not screens — `/api/geo` and `/api/sites` exclude all
@@ -760,7 +760,7 @@ inside) stay one constant away (`REFUSED_WINDOW_SNAP`). When the bounds meet, as
 ranges shorter than a day, these rows count zero. A range already on ET midnights (the date
 picker's ET days, a whole-day preset) runs exactly as before. Charts, `/api/completions` and
 the metric cards' page range (`window: 'page'`, sparkline days included) all follow it and say
-so in a caption: "Any return, game-start, completion, tutorial-completion, tour-skip or tour-exit rows
+so in a caption: "Any return, game-start, completion, tutorial-completion, tour-skip, tour-exit or coach-strip dismiss and close rows
 here are counted over whole ET days." A chart shows it only when it can count one of those
 rows, so never under a path or path-family filter none of them matches (a site filter does not
 narrow it: it errs toward showing). A chart that leaves event beacons out (the default) counts none of them, since
@@ -795,7 +795,7 @@ medium/date, plus **screen width** (`screenw`, exact pixels) and its bucketed fo
 **path family** dimension (`pathFamily`) that groups every event-beacon prefix above into
 `page` / `signin-prompt` / `signin-eligible` / `promo-first50` / `first50-congrats` / `upsell`
 / `install` / `popup-outcome` / `return` / `game-complete` / `auth-status` / `auth-error` /
-`auth-redirect` / `tour` / `tutorial-complete` / `game-first-move` / `game-abandon` /
+`auth-redirect` / `coach` / `tour` / `tutorial-complete` / `game-first-move` / `game-abandon` /
 `welcome-signed-in` / `game-start` / `funnel` / `ab-ask-order`. More derived
 dimensions: **pop-up** (`popupFamily`) and **pop-up outcome** (`popupOutcome`), measured rows
 only (from the tracking activation day; pre-fix install-gap rows get no value — see
@@ -1428,7 +1428,7 @@ polling. It is push, not a timer: nothing is sent while nothing happens.
 **Privacy: counts only (rows only).**
 
 - A refused row (`SPLIT_REFUSED_PATH_PATTERNS`: `/return`, game-complete, game-complete-deferred,
-  tutorial-complete, tour skip and exit, game-start; any path containing a NUL byte counts as
+  tutorial-complete, tour skip and exit, coach dismissed and closed-at, game-start; any path containing a NUL byte counts as
   refused too, because SQLite LIKE stops reading at a NUL) **never triggers or shifts a ping**: the
   beacon does not call `gss-live` for it. The beacon keeps its own copy of the list, pinned equal to
   this one by a literal in both repos' tests (`src/lib/splitGuard.beaconParity.test.ts`).

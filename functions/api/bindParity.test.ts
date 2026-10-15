@@ -30,6 +30,7 @@ const range = { since: '2026-09-27', until: '2026-09-30' }
 const REFUSED = [
   ...SPLIT_REFUSED_PATH_PATTERNS.flatMap((p) => (p.endsWith('%') ? [`${p.slice(0, -1)}x`, `${p.slice(0, -1)}a/b`] : [p])),
   '/tour/exit-at', '/tour/exit-at/3', '/tour/skip', '/tour/skip/later', '/RETURN/x/d0', '/Game/Complete/normal/easy',
+  '/coach/dismissed/place', '/coach/closed-at/clash', '/COACH/Closed-At/hint',
 ]
 // Neighbours of the refused families that are ordinary page views: none may be dropped.
 const ORDINARY = ['/', '/game', '/game/first-move', '/tour/start', '/tour/complete', '/tour/skipped', '/tour/skip-all', '/settings', '/coach/shown/place', '/coach/tour-opened']

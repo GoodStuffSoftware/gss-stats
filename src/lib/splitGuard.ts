@@ -201,7 +201,7 @@ export const REFUSED_WINDOW_KEY = `refused-${REFUSED_WINDOW_SNAP}-et-days-${hash
  * (components/ChartCard.vue), worded to fit every snap mode. It names every refused kind and
  * says "any", since most charts leave the event kinds out unless event beacons are included. */
 export const REFUSED_WHOLE_DAYS_CAPTION =
-  'Any return, game-start, completion, tutorial-completion, tour-skip or tour-exit rows here are counted ' +
+  'Any return, game-start, completion, tutorial-completion, tour-skip, tour-exit or coach-strip dismiss and close rows here are counted ' +
   'over whole ET days.'
 
 /** A path each refused pattern matches, so the pattern can be classified with the JS path helpers
