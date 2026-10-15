@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.38.1] — 2026-10-15
+
+### Fixed
+- **Coach tips shown are counts only.** The shown rows are once per tip per device, so they are no longer split by hour, place or device, like returns; the tour-opened taps stay splittable.
+
 ## [0.38.0] — 2026-10-15
 
 ### Added
