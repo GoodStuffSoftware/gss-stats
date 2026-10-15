@@ -25,7 +25,9 @@ export interface Query {
  * pre-fix / post-fix split is exact at the instant (the same device as the install fix's `pf`).
  * Its rows include return and completion rows (src/lib/splitGuard.ts): the hour is only ever used
  * to cut a count at an ET day, a flight boundary or a maturity instant, never shown as an hour of
- * day — the same ruling as the dashboard's segment cuts (lib/metrics/facts.ts header). */
+ * day — the same ruling as the dashboard's segment cuts (lib/metrics/facts.ts header).
+ * The report's tagged `/coach/shown/place` count (a refused path) comes from these rows too, printed only as
+ * cumulative and yesterday's-ET-day totals (lib/adsRules.ts summarizeTaggedRows), never by hour. */
 export function taggedRowsQuery(campaign: CampaignFlight, upsellFixAtMs: number | null = UPSELL_SIGNEDOUT_FIX_AT): Query {
   const attr = campaignAttributionClause(campaign)
   const w = [attr.sql]

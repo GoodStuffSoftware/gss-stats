@@ -153,12 +153,13 @@ end date set at build and again at enable).
 
 - **Traffic-held check:** complete rows at no more than $3 each, and CTR at or above the arm's
   flight 2 floor (Apps 0.15%, Search 1.0%), the same floor the coded kill rule 2 uses. State both
-  figures from the report.
+  figures from the report (the tagged complete rows are on the `tracking-check counts` line).
 - **Printed decision row at the $70 cap:** the report's decision row at the cap is flight 2's
   table and counts every ask row (tutorial, streak and promo-first50 as well). It is not the
   flight 3 verdict. The table above governs: judge on the new-account count and on the 20 asks
   counted from committed-repeat, committed-challenge and placement rows only. If the printed row
-  and this table disagree, say so and follow this table.
+  and this table disagree, say so and follow this table. The `tracking-check counts` line's
+  sign-in ask rows count is exactly those three paths.
 - **Cost per arrival (per arm):** the report's "cost per tagged arrival" line (cumulative spend
   divided by tagged arrivals) prints Mike's benchmark beside it, about $0.32 an arrival (the
   F1/F2 in-app figure). It prints in the threshold and post-flight reads' tagged-funnel block, not
@@ -169,24 +170,32 @@ end date set at build and again at enable).
   inconclusive (under 20 asks). That is the expected outcome, not a fault; the rules above are
   unchanged.
 - **Day 1-2 tracking check (read-and-judge; NOT a coded kill rule; it only PROPOSES a pause).**
-  It catches a week of spend on broken tracking. Judge it from the report's tagged counts over the
-  arm's days 1-2:
+  It catches a week of spend on broken tracking. Read both counts from the report's own output,
+  on the daily "Tagged so far" line (it ends with `tracking-check counts (tagged ET-day totals;
+  yesterday in brackets): complete rows N (N), sign-in ask rows (placement, committed-repeat,
+  committed-challenge) N (N), /coach/shown/place rows N (N)`) and on the tagged-funnel block of
+  threshold and post-flight reads (the same three counts, cumulative). The first figure of each
+  pair is cumulative since the arm's start; on days 1-2 that is the days 1-2 total. Tagged
+  arrivals are on the same line. Each count prints a real `0` when there are none, never "—":
+  take a printed 0 as 0. Judge over the arm's days 1-2:
   - **Search:** 10 or more tagged complete rows over days 1-2 but 0 tagged sign-in ask rows
-    (`/signin-prompt/committed-repeat`, `committed-challenge` or placement): propose pausing
-    Search and checking the live bundle.
-  - **Apps:** 30 or more tagged arrivals over days 1-2 but 0 tagged `/coach/shown/place` rows:
-    propose pausing Apps and checking the live bundle. The strip shows on a first game, so this
-    fires only if the coach beacons or the tagging are broken.
+    (the printed ask-rows count: `/signin-prompt/committed-repeat`, `committed-challenge` or
+    placement; it leaves streak, tutorial and promo asks out): propose pausing Search and
+    checking the live bundle.
+  - **Apps:** 30 or more tagged arrivals over days 1-2 but 0 tagged `/coach/shown/place` rows
+    (the printed `/coach/shown/place rows` count): propose pausing Apps and checking the live
+    bundle. The strip shows on a first game, so this fires only if the coach beacons or the
+    tagging are broken.
   - The thresholds are minimums: a quiet day reads "too few rows", not a false alarm.
+  - If the whole tagged read failed, the line reads "Tagged: NOT READ": the check is then not
+    readable that day (name it in Step 3); never infer a count or propose a pause from it.
   - **Relation to rule 3:** this check replaces coded rule 3 for flight 3. Rule 3 checks
     first-session (tutorial) asks, and v1.99.0 removes the tutorial ask, so from release on rule 3
     always reads NOT COMPUTABLE, by design (0.35.0). This check uses the new ask and coach paths
     instead. It does not touch rule 3's code and does not contradict the NOT COMPUTABLE guard.
-    The ads report does not print tagged `/coach/shown/place` counts (the coach counting change
-    of 0.37.0 counts them for the stats pages, not in the ads report), so the Apps check needs
-    that count from a read-only, counts-only tagged read of the stats data. When the routine
-    cannot read it, the Apps check is "not readable" (name it in Step 3): never infer it, and
-    never propose a pause from it.
+  - **Counts only:** the coach count is a campaign-tagged ET-day total, like the other tagged
+    counts. `/coach/shown/%` is on the refused-split list, so the report never splits it by hour,
+    place or device; do not ask for such a split.
 
 ### Secondary measures (counts only, never per-person)
 

@@ -102,6 +102,15 @@ export function first50FlagLine(f: FirebaseCounts): string | null {
   return null
 }
 
+type TrackingCounts = { completeRows: number; flight3Asks: number; coachShownPlace: number }
+/** The flight 3 day 1-2 tracking check's counts (docs/routines/ads-cloud-daily.md): campaign-tagged
+ * ET-day totals only (cumulative since the flight start, plus yesterday's ET day when given), never
+ * by hour, place or device. A zero prints as 0, not "—": the check needs a real zero. */
+function trackingCheckCounts(c: TrackingCounts, y?: TrackingCounts): string {
+  const f = (pick: (x: TrackingCounts) => number) => `${n(pick(c))}${y ? ` (${n(pick(y))})` : ''}`
+  return `tracking-check counts (tagged ET-day totals${y ? '; yesterday in brackets' : ''}): complete rows ${f((x) => x.completeRows)}, sign-in ask rows (placement, committed-repeat, committed-challenge) ${f((x) => x.flight3Asks)}, /coach/shown/place rows ${f((x) => x.coachShownPlace)}`
+}
+
 export function fullReadLines(r: FullRead, title: string, opts: { postflight?: boolean } = {}): string[] {
   const promoNote = promoArmNoteApplies(r, !!opts.postflight)
   const out: string[] = [`=== ${title} (cumulative ${money(r.cumulativeSpend)}, closed days through ${r.spendThroughEt ?? '—'}) — ${r.complete ? 'complete' : 'INCOMPLETE, retried next run'} ===`]
@@ -125,6 +134,7 @@ export function fullReadLines(r: FullRead, title: string, opts: { postflight?: b
     // session, "arrivals" counts first-ever tagged beacons — dividing one by the other mixes
     // units with no shared visitor id to join them on, so this is a count pair, not a percent.
     // acceptRate IS a real rate (accepts/asks — the same popup, the same session).
+    out.push(`  ${trackingCheckCounts({ completeRows: s.funnel.completed, flight3Asks: s.flight3Asks, coachShownPlace: s.coachShownPlace })}`)
     if (promoNote) out.push(`  promo asks: ${promoArmAbsentNote()}`)
     out.push(`  ${n(s.asks.total)} asks · ${n(s.taggedArrivals)} arrivals; accept rate ${formatGated(t.acceptRate)}; cost per tagged arrival ${money(t.costPerArrival)} (cumulative spend / tagged arrivals; benchmark about ${money(COST_PER_ARRIVAL_BENCHMARK)}, the F1/F2 in-app figure)`)
     out.push(`  dismisses (read separately): sign-in ${n(s.dismisses.signinPrompt)}, promo ${n(s.dismisses.promoFirst50)}`)
@@ -212,7 +222,7 @@ export function formatMorningReport(r: MorningResult): string {
     const t = r.tagged
     out.push(
       t.ok
-        ? `Tagged so far: ${n(t.cumulative!.taggedArrivals)} arrivals (floor), ${n(t.cumulative!.taggedHits)} hits, ${n(t.cumulative!.asks)} asks, ${n(t.cumulative!.accepts)} accepts, ${n(t.cumulative!.authSuccess)} auth successes; yesterday ${n(t.yesterday!.taggedArrivals)} arrivals, ${n(t.yesterday!.asks)} asks`
+        ? `Tagged so far: ${n(t.cumulative!.taggedArrivals)} arrivals (floor), ${n(t.cumulative!.taggedHits)} hits, ${n(t.cumulative!.asks)} asks, ${n(t.cumulative!.accepts)} accepts, ${n(t.cumulative!.authSuccess)} auth successes; yesterday ${n(t.yesterday!.taggedArrivals)} arrivals, ${n(t.yesterday!.asks)} asks; ${trackingCheckCounts(t.cumulative!, t.yesterday!)}`
         : `Tagged: NOT READ (${t.error})`,
     )
     out.push(...firstSessionLines(r.firstSession))

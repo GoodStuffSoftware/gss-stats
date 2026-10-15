@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Ads report prints the day 1-2 tracking-check counts.** The daily "Tagged so far" line and the tagged-funnel block of threshold and post-flight reads now show tagged complete rows, sign-in ask rows (placement, committed-repeat, committed-challenge) and `/coach/shown/place` rows per arm, as ET-day totals with a real 0 when there are none, so the flight 3 check can be read from the report alone.
+
 ## [0.38.2] — 2026-10-15
 
 ### Changed

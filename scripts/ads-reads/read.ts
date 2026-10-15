@@ -189,6 +189,11 @@ export interface TaggedCounts {
   asks: number
   accepts: number
   authSuccess: number
+  /** Tagged /game/complete/ rows, tagged placement + committed-repeat + committed-challenge ask
+   * rows, and tagged /coach/shown/place rows: the day 1-2 tracking check's counts. Real zeros. */
+  completeRows: number
+  flight3Asks: number
+  coachShownPlace: number
 }
 export interface FullRead {
   thresholds: number[]
@@ -398,7 +403,16 @@ async function placementRowsFor(deps: ReadDeps, campaign: CampaignFlight, cs: Ca
 }
 
 function taggedCounts(s: TaggedSummary): TaggedCounts {
-  return { taggedArrivals: s.taggedArrivals, taggedHits: s.taggedHits, asks: s.asks.total, accepts: s.accepts.total, authSuccess: s.authSuccess }
+  return {
+    taggedArrivals: s.taggedArrivals,
+    taggedHits: s.taggedHits,
+    asks: s.asks.total,
+    accepts: s.accepts.total,
+    authSuccess: s.authSuccess,
+    completeRows: s.funnel.completed,
+    flight3Asks: s.flight3Asks,
+    coachShownPlace: s.coachShownPlace,
+  }
 }
 
 // ── The full read (threshold crossings and post-flight stages) ───────────────────────────

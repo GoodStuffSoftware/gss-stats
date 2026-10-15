@@ -616,6 +616,14 @@ export const ASK_PATHS = [
   '/signin-prompt/committed-challenge',
   '/promo-first50/shown',
 ] as const
+/** The sign-in asks flight 3's v1.99.0 client can send: placement, committed-repeat and
+ * committed-challenge (streak, tutorial and promo-first50 are silenced or separate). The day 1-2
+ * tracking check for Search counts exactly these (docs/routines/ads-cloud-daily.md). */
+export const FLIGHT3_ASK_PATHS = ['/signin-prompt/placement', '/signin-prompt/committed-repeat', '/signin-prompt/committed-challenge'] as const
+/** The coach strip's first-game "place" tip beacon. `/coach/shown/%` is split-refused
+ * (lib/splitGuard.ts), so it is only ever read as a campaign-tagged ET-day total, never by
+ * hour, place or device. */
+export const COACH_SHOWN_PLACE_PATH = '/coach/shown/place'
 export const ACCEPT_PATHS = ['/signin-prompt/accept', '/promo-first50/accept'] as const
 /** /popup-outcome/<popup> families, by lib/popupEvents.ts's internal id ('install' is the
  * wire name 'install-prompt'). */
@@ -719,6 +727,10 @@ export interface TaggedSummary {
   taggedArrivals: number
   funnel: Record<FunnelStepKey, number>
   asks: { total: number; byPath: Record<string, number>; otherShownReasons: number }
+  /** Tagged ask rows on FLIGHT3_ASK_PATHS only (the Search day 1-2 tracking check's ask count). */
+  flight3Asks: number
+  /** Tagged `/coach/shown/place` rows (the Apps day 1-2 tracking check). A real 0 when none. */
+  coachShownPlace: number
   accepts: { total: number; byPath: Record<string, number> }
   /** Read separately, never summed — the two dialogs dismiss differently (spec section 11). */
   dismisses: { signinPrompt: number; promoFirst50: number }
@@ -749,6 +761,8 @@ export function summarizeTaggedRows(rows: readonly TaggedRow[], opts: { fromMs?:
     taggedArrivals: 0,
     funnel: computeFunnelCounts([], 0),
     asks: { total: 0, byPath: Object.fromEntries(ASK_PATHS.map((p) => [p, 0])), otherShownReasons: 0 },
+    flight3Asks: 0,
+    coachShownPlace: 0,
     accepts: { total: 0, byPath: Object.fromEntries(ACCEPT_PATHS.map((p) => [p, 0])) },
     dismisses: { signinPrompt: 0, promoFirst50: 0 },
     authRedirect: 0,
@@ -770,6 +784,8 @@ export function summarizeTaggedRows(rows: readonly TaggedRow[], opts: { fromMs?:
       s.asks.total += r.count
       s.asks.byPath[r.path] += r.count
     }
+    if ((FLIGHT3_ASK_PATHS as readonly string[]).includes(r.path)) s.flight3Asks += r.count
+    if (r.path === COACH_SHOWN_PLACE_PATH) s.coachShownPlace += r.count
     if ((ACCEPT_PATHS as readonly string[]).includes(r.path)) {
       s.accepts.total += r.count
       s.accepts.byPath[r.path] += r.count
