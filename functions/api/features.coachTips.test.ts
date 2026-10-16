@@ -159,14 +159,22 @@ describe('coach tips: counts only (no refused dimension)', () => {
 
   it('a request window that is not ET-midnight aligned is snapped to whole ET days', async () => {
     insertHits(db, [hit('/coach/shown/place', at(LATEST, 1)), hit('/coach/shown/place', at(LATEST, 23))])
-    const { body } = await post({ since: `${LATEST}T12:00:00Z`, until: `${LATEST}T13:00:00Z`, view: COACH_TIPS_VIEW })
-    expect(st(body, 'place', 'shown').latest).toBe(2)
+    // 02:00 ET on the latest day to 02:00 ET the next day: not ET midnights, snapped to the nearest ones.
+    const { body } = await post({ since: new Date(at(LATEST, 2)).toISOString(), until: new Date(at(TODAY, 2)).toISOString(), view: COACH_TIPS_VIEW })
+    expect(st(body, 'place', 'shown').range).toBe(2) // the whole day, including the row before 02:00
   })
 
   it('the response carries no hour, place or device field', async () => {
     insertHits(db, [hit('/coach/shown/place', at(LATEST, 9), { country: 'US', device: 'mobile' })])
     const text = JSON.stringify((await post(range)).body)
     expect(text).not.toMatch(/hour|country|region|city|device|visitor|browser/i)
+  })
+
+  it('everSeen ignores the site and exclusion filters, so a narrowed selection never reads as not shipped', async () => {
+    insertHits(db, [hit('/coach/shown/place', at('2026-09-20', 9), { site: 'other-site' })])
+    const { body } = await post({ ...range, sites: ['bestsudoku-web'], excludeKnownTraffic: true })
+    expect(body.everSeen).toBe(true)
+    expect(st(body, 'place', 'shown').range).toBe(0)
   })
 
   it('a view-only session may read it (the same POST /api/features)', () => {

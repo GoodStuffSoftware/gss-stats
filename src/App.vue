@@ -162,6 +162,7 @@ async function retryLoad() {
     saveState.value = 'idle'
     loadFailed.value = false
     rememberActivePage()
+    syncPageUrl()
   } finally {
     retryingLoad.value = false
   }

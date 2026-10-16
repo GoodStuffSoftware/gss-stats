@@ -138,7 +138,9 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     // The Coach tips card asks "any row ever" (before tomorrow's ET midnight); the health table asks "any row before the new-days cutoff".
     const w2: string[] = ['ts < ?', anyStepWhere(features)]
     const b2: unknown[] = [coachTips ? hd.tomorrowMs : hd.newCutoffMs]
-    filterTerms(w2, b2)
+    // "Has any coach row ever arrived" is about the beacons, not the viewer's selection: a narrowed site or
+    // exclusion filter must not turn a shipped feature back into "hasn't shipped".
+    if (!coachTips) filterTerms(w2, b2)
     const before = beforeCutoffSql(w2, features)
     const tooLarge2 = statementTooLarge(before, b2.length)
     if (tooLarge2) return tooLarge2
