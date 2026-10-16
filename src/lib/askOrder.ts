@@ -14,6 +14,9 @@
 // or report reads these paths (isAbTwinPath, classifyPopupPath, summarizeTagged and the Feature health
 // config all leave them out); this card is the one reader, and it never adds them into anything else.
 //
+// RETURNS come only from the group-carrying twin rows .../returned and .../still-playing, never from the
+// ordinary /return/* rows (that would be a join). Organic vs tagged are per-event counts.
+//
 // COUNTS ONLY (src/lib/splitGuard.ts). The card reads per-ET-day totals of rows, and one all-time total
 // per step, split only by the row's campaign tag (organic or tagged) and by PATH (group, ask, outcome),
 // never by hour, place, device or visitor. The whole `/ab/ask-order/%` family is also refused for any
@@ -105,11 +108,16 @@ export const ASK_ORDER_FEATURES: readonly FeatureDef[] = ASK_ORDER_GROUPS.map(
 )
 
 export const ASK_ORDER_CAPTION =
-  'Counts are rows per ET day, web and app combined, organic (no campaign tag) vs tagged. Every figure is a plain ratio of two row counts, not a per-person rate: ' +
-  '"per assigned" divides a count by the devices assigned to that group, and a device that answers both asks counts for both. ' +
-  'The progress, responses and rule read below use every day so far, whatever range is selected. ' +
+  'Counts are rows per ET day, web and app combined, organic (no campaign tag) vs tagged. Every figure is a plain ratio of two row counts (a row ratio), not a per-person rate: ' +
+  '"per assigned row" divides a count of rows by the assigned rows of that group. ' +
+  'Signed-in rows and installed rows are read separately; the combined figure counts a device that both signs in and installs twice. ' +
+  'A true per-device primary needs the app to send one first-response row per device. ' +
+  'Returns come only from the group-carrying returned and still-playing rows, never from the ordinary return rows, so no row is joined to a device. ' +
+  'Organic and tagged are per-event counts, so a ratio inside the tagged column is approximate (a device can carry a different tag on different rows); ' +
+  'the progress and the rule use every row, organic plus tagged. ' +
+  'The progress and the rule read use every day so far, whatever range is selected. ' +
   `The call is made at about ${ASK_ORDER_CALL_ASKS} asks shown per group, or 8 weeks after v1.99.2 ships (first look at flight 3 day 7): ` +
-  `one order responding at ${ASK_ORDER_SWITCH_MULTIPLE}x or more of the other's switches everyone to it, otherwise sign-in first stays. ` +
+  `for each of signed-in and installed, one order at ${ASK_ORDER_SWITCH_MULTIPLE}x or more of the other's switches everyone to it, otherwise sign-in first stays. ` +
   "Purchases can't be split by group, so they are not shown. Twin rows: never added into any other total."
 export const ASK_ORDER_EMPTY_NOTE = "No ask-order A/B data yet — the game version that sends it (v1.99.2) hasn't shipped"
 
@@ -118,32 +126,50 @@ export const ASK_ORDER_EMPTY_NOTE = "No ask-order A/B data yet — the game vers
 /** All-time counts, keyed `<featureId>.<stepId>` (what /api/features answers as `allTime`). */
 export type AskOrderAllTime = Readonly<Record<string, number>>
 
+/** The two kinds of response the rule is applied to, each on its own. */
+export type ResponseKind = 'signed-in' | 'installed'
+
 export interface AskOrderGroupRead {
   group: AskOrderGroupId
   label: string
+  /** Assigned rows, organic + tagged. */
   assigned: number
   /** Asks shown, both asks, organic + tagged. */
   asksShown: number
   /** asksShown / ASK_ORDER_CALL_ASKS, capped at 1: the progress bar. */
   progress: number
   reachedCall: boolean
-  /** Signed-in + installed outcome rows, either ask, organic + tagged. */
-  responses: number
-  /** responses / assigned (a ratio of two row counts), or null with nobody assigned. */
-  responsesPerAssigned: number | null
-  /** Each outcome's rows (either ask) per assigned, separately: the secondary read. */
+  /** Each outcome's rows (either ask, organic + tagged) and that count per assigned row (a row ratio, or null with no assigned rows). */
   perOutcome: Record<OutcomeId, { count: number; perAssigned: number | null }>
+  /** Signed-in rows + installed rows. A device that does both counts twice: shown only with that label. */
+  responseRows: number
+  responseRowsPerAssigned: number | null
 }
 export type AskOrderVerdict =
   | { state: 'preliminary'; note: string }
   | { state: 'call'; switchTo: AskOrderGroupId | null; multiple: number | null; note: string }
-export interface AskOrderRead {
-  groups: AskOrderGroupRead[]
-  /** Larger responses-per-assigned over the smaller, or null when either group has nobody assigned or both read zero. */
-  multiple: number | null
+/** The rule applied to one kind of response. */
+export interface AskOrderKindRead {
+  kind: ResponseKind
+  label: string
+  /** The group with the larger rows-per-assigned-row for this kind, or null on a tie or with nobody assigned. */
   larger: AskOrderGroupId | null
+  /** Larger over smaller, or null when either group has no assigned rows or the smaller reads zero. */
+  multiple: number | null
   verdict: AskOrderVerdict
 }
+export interface AskOrderRead {
+  groups: AskOrderGroupRead[]
+  /** True once BOTH groups have reached ASK_ORDER_CALL_ASKS asks shown. */
+  bothReachedCall: boolean
+  /** One per response kind, signed-in then installed: the 1.5x rule applies to each separately. */
+  kinds: AskOrderKindRead[]
+}
+
+export const ASK_ORDER_RESPONSE_KINDS: readonly { id: ResponseKind; label: string }[] = [
+  { id: 'signed-in', label: 'Signed-in rows' },
+  { id: 'installed', label: 'Installed rows' },
+]
 
 const at = (allTime: AskOrderAllTime, g: AskOrderGroupId, stepId: string) => Number(allTime[`${askOrderFeatureId(g)}.${stepId}`]) || 0
 const sumTags = (allTime: AskOrderAllTime, g: AskOrderGroupId, stepIdOf: (t: StepTag) => string) =>
@@ -151,8 +177,9 @@ const sumTags = (allTime: AskOrderAllTime, g: AskOrderGroupId, stepIdOf: (t: Ste
 const per = (num: number, den: number): number | null => (den > 0 ? num / den : null)
 const groupLabel = (g: AskOrderGroupId) => ASK_ORDER_GROUPS.find((x) => x.id === g)!.label
 
-/** The pre-registered read of the A/B from all-time counts. The rule is applied ONLY once both groups have
- * reached the call point; before that the multiple is shown as preliminary. */
+/** The pre-registered read of the A/B from all-time counts (organic + tagged together). The rule is applied
+ * to signed-in rows and installed rows separately, and ONLY once both groups have reached the call point;
+ * before that the multiple is shown as preliminary. */
 export function readAskOrder(allTime: AskOrderAllTime): AskOrderRead {
   const groups: AskOrderGroupRead[] = ASK_ORDER_GROUPS.map((g) => {
     const assigned = sumTags(allTime, g.id, assignedStepId)
@@ -164,7 +191,7 @@ export function readAskOrder(allTime: AskOrderAllTime): AskOrderRead {
         return [o.id, { count, perAssigned: per(count, assigned) }]
       }),
     ) as AskOrderGroupRead['perOutcome']
-    const responses = ASK_ORDER_RESPONSE_OUTCOMES.reduce((a, o) => a + perOutcome[o].count, 0)
+    const responseRows = ASK_ORDER_RESPONSE_OUTCOMES.reduce((a, o) => a + perOutcome[o].count, 0)
     return {
       group: g.id,
       label: g.label,
@@ -172,42 +199,51 @@ export function readAskOrder(allTime: AskOrderAllTime): AskOrderRead {
       asksShown,
       progress: Math.min(1, asksShown / ASK_ORDER_CALL_ASKS),
       reachedCall: asksShown >= ASK_ORDER_CALL_ASKS,
-      responses,
-      responsesPerAssigned: per(responses, assigned),
       perOutcome,
+      responseRows,
+      responseRowsPerAssigned: per(responseRows, assigned),
     }
   })
-  const [a, b] = groups
-  const ra = a.responsesPerAssigned
-  const rb = b.responsesPerAssigned
-  let larger: AskOrderGroupId | null = null
-  let multiple: number | null = null
-  if (ra !== null && rb !== null) {
-    if (ra !== rb) {
+  const bothReachedCall = groups.every((g) => g.reachedCall)
+  const short = groups.filter((g) => !g.reachedCall).map((g) => `${g.label} ${g.asksShown} of ${ASK_ORDER_CALL_ASKS}`)
+
+  const kinds = ASK_ORDER_RESPONSE_KINDS.map((k): AskOrderKindRead => {
+    const [a, b] = groups
+    const ra = a.perOutcome[k.id].perAssigned
+    const rb = b.perOutcome[k.id].perAssigned
+    let larger: AskOrderGroupId | null = null
+    let multiple: number | null = null
+    // The 1.5x test on the integer counts (hi/hiAssigned >= 1.5 * lo/loAssigned), so exactly 1.5x is not lost to float division.
+    let meetsRule = false
+    if (ra !== null && rb !== null && ra !== rb) {
       const [hi, lo] = ra > rb ? [a, b] : [b, a]
       larger = hi.group
-      multiple = lo.responsesPerAssigned! > 0 ? hi.responsesPerAssigned! / lo.responsesPerAssigned! : null
+      const loRatio = lo.perOutcome[k.id].perAssigned!
+      multiple = loRatio > 0 ? hi.perOutcome[k.id].perAssigned! / loRatio : null
+      meetsRule = hi.perOutcome[k.id].count * lo.assigned >= ASK_ORDER_SWITCH_MULTIPLE * lo.perOutcome[k.id].count * hi.assigned
     }
-  }
-  const bothReached = a.reachedCall && b.reachedCall
-  let verdict: AskOrderVerdict
-  if (!bothReached) {
-    const short = groups.filter((g) => !g.reachedCall).map((g) => `${g.label} ${g.asksShown} of ${ASK_ORDER_CALL_ASKS}`)
-    verdict = { state: 'preliminary', note: `Preliminary, not at the call point yet (${short.join(', ')} asks shown).` }
-  } else {
-    // At the call point. A larger group with a zero smaller rate is an unbounded multiple: the rule switches.
-    const switches = larger !== null && (multiple === null || multiple >= ASK_ORDER_SWITCH_MULTIPLE)
-    const switchTo = switches ? larger : null
-    verdict = {
-      state: 'call',
-      switchTo,
-      multiple,
-      note: switches
-        ? `Call point reached: ${groupLabel(larger!)} responds at ${multiple === null ? 'more than the other order, which has none' : `${multiple.toFixed(2)}x the other`}, ${ASK_ORDER_SWITCH_MULTIPLE}x or more: switch everyone to ${groupLabel(larger!).toLowerCase()}.`
-        : `Call point reached: ${multiple === null ? 'no difference' : `${multiple.toFixed(2)}x`}, below ${ASK_ORDER_SWITCH_MULTIPLE}x: keep ${groupLabel(ASK_ORDER_DEFAULT_GROUP).toLowerCase()}.`,
+    const noun = k.id === 'signed-in' ? 'signed-in rows' : 'installed rows'
+    let verdict: AskOrderVerdict
+    if (!bothReachedCall) {
+      verdict = { state: 'preliminary', note: `Preliminary, not at the call point yet (${short.join(', ')} asks shown).` }
+    } else {
+      // At the call point. A larger group with a zero smaller rate is an unbounded multiple: the rule switches.
+      const switches = larger !== null && larger !== ASK_ORDER_DEFAULT_GROUP && meetsRule
+      const switchTo = switches ? larger : null
+      verdict = {
+        state: 'call',
+        switchTo,
+        multiple,
+        note: switches
+          ? `Call point reached: ${groupLabel(larger!)} has ${multiple === null ? `more ${noun} per assigned row than the other order, which has none` : `${multiple.toFixed(2)}x the ${noun} per assigned row of the other`}, ${ASK_ORDER_SWITCH_MULTIPLE}x or more: switch everyone to ${groupLabel(larger!).toLowerCase()}.`
+          : larger === ASK_ORDER_DEFAULT_GROUP
+            ? `Call point reached: ${groupLabel(larger)} already has the more ${noun} per assigned row (${multiple === null ? 'the other has none' : `${multiple.toFixed(2)}x`}): keep ${groupLabel(ASK_ORDER_DEFAULT_GROUP).toLowerCase()}.`
+            : `Call point reached: ${multiple === null ? 'no difference' : `${multiple.toFixed(2)}x`} in ${noun} per assigned row, below ${ASK_ORDER_SWITCH_MULTIPLE}x: keep ${groupLabel(ASK_ORDER_DEFAULT_GROUP).toLowerCase()}.`,
+      }
     }
-  }
-  return { groups, multiple, larger, verdict }
+    return { kind: k.id, label: k.label, larger, multiple, verdict }
+  })
+  return { groups, bothReachedCall, kinds }
 }
 
 // ── Reading the range model (the table) ──────────────────────────────────────────────────────────
@@ -217,10 +253,11 @@ export function stepCount(f: FeatureHealth | undefined, stepId: string, which: '
   return f?.steps.find((s) => s.id === stepId)?.[which] ?? 0
 }
 
-/** Signed-in + installed outcome rows of one group and tag, either ask, for latest/range. */
-export function responsesOf(f: FeatureHealth | undefined, tag: StepTag, which: 'latest' | 'range'): number {
-  return ASK_ORDER_ASKS.reduce(
-    (a, k) => a + ASK_ORDER_RESPONSE_OUTCOMES.reduce((b, o) => b + stepCount(f, outcomeStepId(k.id, o, tag), which), 0),
-    0,
-  )
+/** Rows of the given outcomes (either ask) for one group and tag, latest/range. */
+export function outcomeRowsOf(f: FeatureHealth | undefined, tag: StepTag, outcomes: readonly OutcomeId[], which: 'latest' | 'range'): number {
+  return ASK_ORDER_ASKS.reduce((a, k) => a + outcomes.reduce((b, o) => b + stepCount(f, outcomeStepId(k.id, o, tag), which), 0), 0)
 }
+
+/** Signed-in rows + installed rows of one group and tag (a device that does both counts twice). */
+export const responseRowsOf = (f: FeatureHealth | undefined, tag: StepTag, which: 'latest' | 'range'): number =>
+  outcomeRowsOf(f, tag, ASK_ORDER_RESPONSE_OUTCOMES, which)

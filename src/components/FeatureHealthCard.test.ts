@@ -8,6 +8,7 @@ import { featureHealthWidget, defaultFeaturesWidgets } from '../lib/defaults'
 import { buildStepChartConfig } from '../lib/featureHealthChart'
 import { HEALTH_CAPTION, stepsViewFor, featureIdOfView, type FeatureHealth, type FeatureHealthModel } from '../lib/featureHealth'
 import { COACH_TIPS_CAPTION, COACH_TIPS_EMPTY_NOTE, COACH_TIPS_VIEW } from '../lib/coachTips'
+import { ASK_ORDER_CAPTION, ASK_ORDER_EMPTY_NOTE, ASK_ORDER_FEATURES, ASK_ORDER_VIEW, askOrderFeatureId } from '../lib/askOrder'
 import type { GlobalFilters } from '../types'
 
 const feature: FeatureHealth = {
@@ -86,7 +87,7 @@ describe('step chart and defaults', () => {
     expect(featureIdOfView(stepsViewFor('abc'))).toBe('abc')
     expect(featureIdOfView('health')).toBeNull()
     const widgets = defaultFeaturesWidgets()
-    for (const w of widgets.filter((x) => x.view !== COACH_TIPS_VIEW)) {
+    for (const w of widgets.filter((x) => x.view !== COACH_TIPS_VIEW && x.view !== ASK_ORDER_VIEW)) {
       expect(w.dataset).toBe('features')
       expect(featureIdOfView(w.view)).toBeTruthy()
     }
@@ -94,7 +95,13 @@ describe('step chart and defaults', () => {
     const tips = widgets.filter((x) => x.view === COACH_TIPS_VIEW)
     expect(tips).toHaveLength(1)
     expect(tips[0]).toMatchObject({ dataset: 'features', x: 0, w: 12, excludeKnownTraffic: true })
-    expect(tips[0].y).toBeGreaterThanOrEqual(Math.max(...widgets.filter((x) => x !== tips[0]).map((x) => x.y + x.h)))
+    const charts = widgets.filter((x) => x.view !== COACH_TIPS_VIEW && x.view !== ASK_ORDER_VIEW)
+    expect(tips[0].y).toBeGreaterThanOrEqual(Math.max(...charts.map((x) => x.y + x.h)))
+    // The Ask-order card sits under the Coach tips, full width, and appears once.
+    const ask = widgets.filter((x) => x.view === ASK_ORDER_VIEW)
+    expect(ask).toHaveLength(1)
+    expect(ask[0]).toMatchObject({ id: 'fw-ask-order', dataset: 'features', x: 0, w: 12, excludeKnownTraffic: true })
+    expect(ask[0].y).toBeGreaterThanOrEqual(tips[0].y + tips[0].h)
   })
 })
 
@@ -170,5 +177,147 @@ describe('Coach tips card', () => {
   it('shows no such note once rows exist', async () => {
     const w = await mountCoach(coachModel(true))
     expect(w.find('[data-testid="coach-tips-empty"]').exists()).toBe(false)
+  })
+})
+
+describe('Ask-order card', () => {
+  type Cell = { latest?: number; range?: number }
+  /** A group's FeatureHealth with the given step counts (everything else 0). */
+  const group = (g: 'signin-first' | 'install-first', cells: Record<string, Cell>): FeatureHealth => ({
+    id: askOrderFeatureId(g),
+    label: g,
+    blurb: '',
+    status: 'ok',
+    statusNote: '',
+    latest: 0,
+    prev: 0,
+    range: 0,
+    steps: ASK_ORDER_FEATURES.find((f) => f.id === askOrderFeatureId(g))!.steps.map((s) => ({
+      id: s.id,
+      label: s.label,
+      latest: cells[s.id]?.latest ?? 0,
+      prev: 0,
+      range: cells[s.id]?.range ?? 0,
+      perDay: [],
+    })),
+  })
+  const askModel = (everSeen: boolean, allTime: Record<string, number> = {}, a: Record<string, Cell> = {}, b: Record<string, Cell> = {}) => ({
+    ...model,
+    everSeen,
+    allTime,
+    features: [group('signin-first', a), group('install-first', b)],
+  })
+  const mountAsk = async (m: unknown) => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => m, text: async () => '' })))
+    return mountCard(ASK_ORDER_VIEW)
+  }
+  const k = (g: string, step: string) => `ao-${g}.${step}`
+
+  it('asks the features endpoint for the ask-order view and nothing split by hour, place or device', async () => {
+    await mountAsk(askModel(true))
+    const body = JSON.parse((fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1].body)
+    expect(body.view).toBe(ASK_ORDER_VIEW)
+    expect(Object.keys(body).sort()).toEqual(['excludeKnownTraffic', 'excludeOwnVisits', 'ownBrowser', 'ownOS', 'since', 'sites', 'until', 'view'])
+  })
+
+  it('says the game version has not shipped while no row has ever arrived, and not afterwards', async () => {
+    const empty = await mountAsk(askModel(false))
+    expect(empty.find('[data-testid="ask-order-empty"]').text()).toBe(ASK_ORDER_EMPTY_NOTE)
+    const live = await mountAsk(askModel(true))
+    expect(live.find('[data-testid="ask-order-empty"]').exists()).toBe(false)
+  })
+
+  it('draws the progress toward 150 asks per group and a preliminary read per response kind below it', async () => {
+    const w = await mountAsk(
+      askModel(true, {
+        [k('signin-first', 'assigned-organic')]: 50,
+        [k('signin-first', 'shown-signin-organic')]: 30,
+        [k('signin-first', 'shown-install-tagged')]: 10,
+        [k('signin-first', 'signin-signed-in-organic')]: 5,
+        [k('install-first', 'assigned-organic')]: 20,
+        [k('install-first', 'shown-install-organic')]: 25,
+      }),
+    )
+    const groups = w.findAll('.ao-group')
+    expect(groups.map((g) => g.attributes('data-group'))).toEqual(['signin-first', 'install-first'])
+    expect(groups[0].find('[data-col="asks-progress"]').text()).toBe('asks shown 40 / 150')
+    expect(groups[1].find('[data-col="asks-progress"]').text()).toBe('asks shown 25 / 150')
+    expect(groups[0].find('.ao-bar').attributes('aria-valuenow')).toBe('40')
+    expect(groups[0].find('[data-col="assigned"]').text()).toBe('assigned rows 50')
+    // Signed-in rows and installed rows are separate row ratios, each labelled as such.
+    expect(groups[0].find('[data-col="per-assigned-signed-in"]').text()).toContain('signed-in rows per assigned row 0.10 (5 rows)')
+    expect(groups[0].find('[data-col="per-assigned-installed"]').text()).toContain('installed rows per assigned row 0.00 (0 rows)')
+    expect(groups[0].find('[data-col="response-rows-per-assigned"]').text()).toContain('(a device that both signs in and installs counts twice)')
+    const verdicts = w.findAll('[data-testid="ask-order-verdict"]')
+    expect(verdicts.map((v) => v.attributes('data-kind'))).toEqual(['signed-in', 'installed'])
+    for (const v of verdicts) {
+      expect(v.attributes('data-state')).toBe('preliminary')
+      expect(v.text()).toContain('Preliminary')
+    }
+  })
+
+  it('makes the call per kind once both groups reach 150', async () => {
+    const w = await mountAsk(
+      askModel(true, {
+        [k('signin-first', 'assigned-organic')]: 100,
+        [k('signin-first', 'shown-signin-organic')]: 150,
+        [k('signin-first', 'signin-signed-in-organic')]: 10,
+        [k('signin-first', 'install-installed-organic')]: 20,
+        [k('install-first', 'assigned-organic')]: 100,
+        [k('install-first', 'shown-install-organic')]: 100,
+        [k('install-first', 'shown-signin-tagged')]: 50,
+        [k('install-first', 'signin-signed-in-organic')]: 20,
+        [k('install-first', 'install-installed-tagged')]: 21,
+      }),
+    )
+    const [signedIn, installed] = w.findAll('[data-testid="ask-order-verdict"]')
+    expect(signedIn.attributes('data-state')).toBe('call')
+    expect(signedIn.text()).toContain('2.00x')
+    expect(signedIn.text()).toContain('switch everyone to install first')
+    expect(installed.text()).toContain('1.05x')
+    expect(installed.text()).toContain('keep sign-in first')
+  })
+
+  it('fills the table by window, group and tag, with row ratios and a dash for a zero denominator', async () => {
+    const w = await mountAsk(
+      askModel(
+        true,
+        {},
+        {
+          'assigned-tagged': { latest: 8, range: 40 },
+          'signin-signed-in-tagged': { latest: 2, range: 10 },
+          'install-signed-in-tagged': { latest: 2, range: 6 },
+          'install-installed-tagged': { latest: 1, range: 4 },
+        },
+        { 'signin-returned-organic': { latest: 3, range: 3 } },
+      ),
+    )
+    const cell = (row: string, col: string) => w.find(`tr[data-row="${row}"] [data-col="${col}"]`).text()
+    expect(cell('assigned', 'latest-signin-first-tagged')).toBe('8')
+    expect(cell('assigned', 'range-signin-first-tagged')).toBe('40')
+    expect(cell('signin-signed-in', 'range-signin-first-tagged')).toBe('10')
+    expect(cell('response-rows', 'latest-signin-first-tagged')).toBe('5') // 2 + 2 signed in, 1 installed
+    expect(cell('response-rows', 'range-signin-first-tagged')).toBe('20')
+    expect(cell('signed-in-per-assigned', 'range-signin-first-tagged')).toBe('0.40') // (10 + 6) / 40
+    expect(cell('installed-per-assigned', 'range-signin-first-tagged')).toBe('0.10')
+    expect(cell('response-rows-per-assigned', 'latest-signin-first-tagged')).toBe('0.63')
+    // No assigned rows: a dash, never Infinity or NaN.
+    expect(cell('signed-in-per-assigned', 'latest-signin-first-organic')).toBe('—')
+    expect(cell('returned-per-assigned', 'latest-install-first-organic')).toBe('—')
+    expect(cell('assigned', 'latest-install-first-organic')).toBe('0')
+    expect(w.findAll('tr[data-row] .fh-name').map((c) => c.text())).toContain('Returned rows per assigned row (group rows only)')
+  })
+
+  it('captions the row ratios, the approximate tagged column, the group-only returns and the per-device gap', async () => {
+    const w = await mountAsk(askModel(true))
+    const cap = w.find('[data-testid="ask-order-caption"]').text()
+    expect(cap).toBe(ASK_ORDER_CAPTION)
+    expect(cap).toContain('row ratio')
+    expect(cap).toContain('a device that both signs in and installs')
+    expect(cap).toContain('one first-response row per device')
+    expect(cap).toContain('never from the ordinary return rows')
+    expect(cap).toContain('per-event counts')
+    expect(cap).toContain('approximate')
+    expect(cap).toContain('organic plus tagged')
   })
 })

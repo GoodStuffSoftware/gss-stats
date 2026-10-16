@@ -21,7 +21,7 @@ import { formatKey } from '../lib/charts'
 import { COACH_TIPS_CAPTION, COACH_TIPS_EMPTY_NOTE, COACH_TIPS_VIEW } from '../lib/coachTips'
 import {
   ASK_ORDER_ASKS, ASK_ORDER_CALL_ASKS, ASK_ORDER_CAPTION, ASK_ORDER_EMPTY_NOTE, ASK_ORDER_GROUPS, ASK_ORDER_OUTCOMES, ASK_ORDER_TAGS, ASK_ORDER_VIEW,
-  askOrderFeatureId, assignedStepId, outcomeStepId, readAskOrder, responsesOf, shownStepId, stepCount,
+  askOrderFeatureId, assignedStepId, outcomeRowsOf, outcomeStepId, readAskOrder, responseRowsOf, shownStepId, stepCount, type OutcomeId,
 } from '../lib/askOrder'
 import BaseChart from './charts/BaseChart.vue'
 
@@ -94,12 +94,25 @@ const askRowDefs = [
       value: (c: AskCol) => stepCount(askFeature(c.group), outcomeStepId(a.id, o.id, c.tag), c.which),
     })),
   ),
-  { key: 'responses', label: 'Responses (signed in or installed)', cls: 'fh-total', value: (c: AskCol) => responsesOf(askFeature(c.group), c.tag, c.which) },
+  {
+    key: 'response-rows',
+    label: 'Response rows (signed-in + installed; a device doing both counts twice)',
+    cls: 'fh-total',
+    value: (c: AskCol) => responseRowsOf(askFeature(c.group), c.tag, c.which),
+  },
 ]
 const askCell = (c: AskCol, value: (c: AskCol) => number) => fmt(askFeature(c.group) ? value(c) : 0)
-const askResponsesPerAssigned = (c: AskCol) => {
+// Row ratios: a count of rows over the assigned rows of the same group, tag and window.
+const askRatioRows = [
+  { key: 'signed-in-per-assigned', label: 'Signed-in rows per assigned row', outcomes: ['signed-in'] as OutcomeId[] },
+  { key: 'installed-per-assigned', label: 'Installed rows per assigned row', outcomes: ['installed'] as OutcomeId[] },
+  { key: 'response-rows-per-assigned', label: 'Response rows per assigned row (a device that both signs in and installs counts twice)', outcomes: ['signed-in', 'installed'] as OutcomeId[] },
+  { key: 'returned-per-assigned', label: 'Returned rows per assigned row (group rows only)', outcomes: ['returned'] as OutcomeId[] },
+  { key: 'still-playing-per-assigned', label: 'Still-playing rows per assigned row (group rows only)', outcomes: ['still-playing'] as OutcomeId[] },
+]
+const askRatio = (c: AskCol, outcomes: OutcomeId[]) => {
   const f = askFeature(c.group)
-  return formatRatio(ratio(responsesOf(f, c.tag, c.which), stepCount(f, assignedStepId(c.tag), c.which)))
+  return formatRatio(ratio(outcomeRowsOf(f, c.tag, outcomes, c.which), stepCount(f, assignedStepId(c.tag), c.which)))
 }
 const pct = (x: number) => `${Math.round(x * 100)}%`
 
@@ -188,20 +201,21 @@ const ratioCells = (f: FeatureHealth, i: number) => {
               <div class="ao-bar-fill" :class="{ done: g.reachedCall }" :style="{ width: pct(g.progress) }"></div>
             </div>
             <div class="ao-nums mono">
-              <span data-col="assigned">assigned {{ fmt(g.assigned) }}</span>
-              <span data-col="responses">responses {{ fmt(g.responses) }}</span>
-              <span data-col="responses-per-assigned" title="Signed-in plus installed outcome rows divided by devices assigned: a ratio of two row counts, not a per-person rate">responses per assigned {{ formatRatio(g.responsesPerAssigned) }}</span>
+              <span data-col="assigned">assigned rows {{ fmt(g.assigned) }}</span>
+              <span data-col="per-assigned-signed-in" title="Signed-in rows divided by assigned rows: a row ratio, not a per-person rate">signed-in rows per assigned row {{ formatRatio(g.perOutcome['signed-in'].perAssigned) }} ({{ fmt(g.perOutcome['signed-in'].count) }} rows)</span>
+              <span data-col="per-assigned-installed" title="Installed rows divided by assigned rows: a row ratio, not a per-person rate">installed rows per assigned row {{ formatRatio(g.perOutcome['installed'].perAssigned) }} ({{ fmt(g.perOutcome['installed'].count) }} rows)</span>
             </div>
             <div class="ao-nums mono ao-secondary">
-              <span v-for="o in ASK_ORDER_OUTCOMES.filter((x) => x.id !== 'still-playing')" :key="o.id" :data-col="'per-assigned-' + o.id">
-                {{ o.label.toLowerCase() }} per assigned {{ formatRatio(g.perOutcome[o.id].perAssigned) }}
+              <span data-col="response-rows-per-assigned" title="Signed-in rows plus installed rows divided by assigned rows. A device that both signs in and installs counts twice.">response rows per assigned row (a device that both signs in and installs counts twice) {{ formatRatio(g.responseRowsPerAssigned) }}</span>
+              <span v-for="o in ASK_ORDER_OUTCOMES.filter((x) => x.id === 'returned' || x.id === 'still-playing')" :key="o.id" :data-col="'per-assigned-' + o.id" title="From the group-carrying twin rows only, never from the ordinary return rows">
+                {{ o.label.toLowerCase() }} rows per assigned row {{ formatRatio(g.perOutcome[o.id].perAssigned) }}
               </span>
             </div>
           </div>
         </div>
-        <p class="ao-verdict" :data-state="askRead.verdict.state" data-testid="ask-order-verdict">
-          <span class="mono" data-col="multiple">Larger over smaller: {{ askRead.multiple === null ? '—' : `${askRead.multiple.toFixed(2)}x` }}.</span>
-          {{ askRead.verdict.note }}
+        <p v-for="k in askRead.kinds" :key="k.kind" class="ao-verdict" :data-state="k.verdict.state" :data-kind="k.kind" data-testid="ask-order-verdict">
+          <span class="mono" :data-col="'multiple-' + k.kind">{{ k.label }}, larger over smaller: {{ k.multiple === null ? '—' : `${k.multiple.toFixed(2)}x` }}.</span>
+          {{ k.verdict.note }}
         </p>
         <table class="fh-table" data-testid="ask-order-table">
           <thead>
@@ -228,9 +242,9 @@ const ratioCells = (f: FeatureHealth, i: number) => {
               <td class="l fh-name">{{ r.label }}</td>
               <td v-for="c in askCols" :key="c.which + c.group + c.tag" class="r mono" :data-col="`${c.which}-${c.group}-${c.tag}`">{{ askCell(c, r.value) }}</td>
             </tr>
-            <tr data-row="responses-per-assigned">
-              <td class="l fh-name" title="Responses divided by assigned: a ratio of two row counts">Responses per assigned</td>
-              <td v-for="c in askCols" :key="c.which + c.group + c.tag" class="r mono" :data-col="`${c.which}-${c.group}-${c.tag}`">{{ askResponsesPerAssigned(c) }}</td>
+            <tr v-for="r in askRatioRows" :key="r.key" :data-row="r.key">
+              <td class="l fh-name" title="A count of rows divided by assigned rows: a row ratio, not a per-person rate">{{ r.label }}</td>
+              <td v-for="c in askCols" :key="c.which + c.group + c.tag" class="r mono" :data-col="`${c.which}-${c.group}-${c.tag}`">{{ askRatio(c, r.outcomes) }}</td>
             </tr>
           </tbody>
         </table>
