@@ -15,8 +15,8 @@ const HEADROOM_CEILING = 90
 /** Fake campaigns registered on top of the real ones (5 today), each with two short uc values. The flight dims (campaignFlight,
  * flightDay, arrival) read the registry through one flight_reg CTE stated once per statement (lib/campaigns.ts), so a worst-case
  * geo ring carries 81 binds at any count and grows about 0.21 KB per added campaign. The byte cap is what campaigns hit, never
- * the bind cap. The byte-heaviest ring the sweep finds is the RING_DIMS_HARD_CAP (8) costliest dims, measured one by one
- * (popupFamily, popupOutcome, keyEvent, flightDay, pathFamily, arrival, hourEt, campaignFlight; API-only, the UI stops at 5
+ * the bind cap. The byte-heaviest ring the sweep finds is the RING_DIMS_HARD_CAP (8) costliest dims, measured one by one,
+ * then improved by swaps (popupFamily, popupOutcome, keyEvent, flightDay, pathFamily, arrival, hourEt, campaignFlight; API-only, the UI stops at 5
  * dims) with 16 pathFamily filters: 80.9 KB at 5 campaigns. It holds about 43 more two-uc campaigns (48 in all). With
  * realistic ones (4 ucs, ~38-char names, about 0.63 KB each) it holds about 14 more (about 19 in all). Typical rings hold far
  * more: a 5-dim UI ring (referrer, gameMode, gameDifficulty, campaignFlight, flightDay, with 16 flightDay filters) is 30.7 KB
@@ -60,7 +60,7 @@ interface Measured {
   sites: Worst
   /** Each ring-eligible dim's own byte cost (see measure()), costliest first. */
   dimCosts: { dim: string; bytes: number; filters: string }[]
-  /** The byte-heaviest legal ring found by principle (the RING_DIMS_HARD_CAP costliest dims), and the explicit API-only ring
+  /** The byte-heaviest legal ring found by principle (the RING_DIMS_HARD_CAP costliest dims, then swapped while heavier), and the explicit API-only ring
    * a reviewer found; each with its worst bytes over every filter set and window variant, and the shape that produced them. */
   heavy: { dims: string[]; bytes: number; shape: string }
   reviewer: { dims: string[]; bytes: number; shape: string }
@@ -70,6 +70,8 @@ interface Measured {
 const REVIEWER_RING = ['popupFamily', 'popupOutcome', 'keyEvent', 'flightDay', 'pathFamily', 'hourEt', 'arrival', 'campaignFlight']
 /** geo.ts's RING_DIMS_HARD_CAP (a local const there): the most dims one ring request may carry. */
 const RING_DIMS_HARD_CAP = 8
+/** How many of the next-costliest dims (after the top RING_DIMS_HARD_CAP) the swap step of measure() tries in the heaviest ring. */
+const SWAP_POOL = 4
 
 /** Loads every server module against a fresh registry holding the real campaigns plus `extra` fake ones. */
 async function load(extra: number) {
@@ -202,6 +204,7 @@ async function measure(extra: number, ringDims?: string[]): Promise<Measured> {
   for (const win of [SUB_DAY, ALIGNED]) for (const includeEventBeacons of [true, false]) variants.push([`${win === SUB_DAY ? 'sub-day' : 'aligned'}, eventBeacons=${includeEventBeacons}`, { ...common, ...win, includeEventBeacons }])
   const ringBytes = async (dims: string[], v: Record<string, unknown>, constraints: unknown[]) => run(m.geo.onRequestPost, { ...v, constraints, dimension: dims[0], dims })
   let dimCosts: Measured['dimCosts'] = []
+  const givenRing = ringDims !== undefined
   if (!ringDims) {
     const eligible = [...m.geo.GEO_DIMS].filter((d) => !m.geo.RING_EXCLUDED_DIMS.has(d))
     const floor = new Map<string, number>()
@@ -227,7 +230,28 @@ async function measure(extra: number, ringDims?: string[]): Promise<Measured> {
     }
     return out
   }
-  const heavy = await ringCase(ringDims, 'heaviest ring')
+  let heavy = await ringCase(ringDims, 'heaviest ring')
+  if (!givenRing) {
+    // Step 3: the per-dim costs are not additive (a dim that is cheap beside [region, country] can cost more in a full ring, because
+    // the clauses share prefilters and the registry CTEs), so the top-8 ring is only a start. Swap in the costliest dims (the next few and any swapped out)
+    // for any member while that makes the ring heavier, up to two passes: the sweep then finds the byte worst without a hand-kept ring.
+    const pool = dimCosts.slice(0, RING_DIMS_HARD_CAP + SWAP_POOL).map((c) => c.dim) // the top dims too: a dim swapped out can come back in
+    for (let pass = 0; pass < 2; pass++) {
+      let improved = false
+      for (let i = 0; i < heavy.dims.length; i++) {
+        for (const cand of pool) {
+          if (heavy.dims.includes(cand)) continue
+          const dims = heavy.dims.map((d, j) => (j === i ? cand : d))
+          const c = await ringCase(dims, 'swapped ring')
+          if (c.bytes > heavy.bytes) {
+            heavy = c
+            improved = true
+          }
+        }
+      }
+      if (!improved) break
+    }
+  }
   const reviewer = await ringCase(REVIEWER_RING, 'reviewer ring')
 
   const popups = worst()

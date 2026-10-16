@@ -12,6 +12,7 @@ import { landingLegendText } from '../../src/lib/charts'
 import { insertHits, installCaches, memoryCache, openHitsDb, sqliteD1, type HitRow } from '../_lib/testing/hitsDb'
 
 const real = CAMPAIGNS.slice()
+const F3_IDS = new Set([STAGED_FLIGHT_3.apps.ids.campaignId, STAGED_FLIGHT_3.search.ids.campaignId])
 const fake = (ucValues: string[], extra: Partial<CampaignFlight> = {}): CampaignFlight => ({
   id: 'F3-TEST', label: 'F3 test', ucValues, flightStart: '2026-10-10', flightEnd: '2026-10-16', status: 'active', kind: 'web', notes: 'landingTag test', ...extra,
 })
@@ -98,7 +99,9 @@ describe('landingTag: slices and shares', () => {
 
 describe('landingTag: a staged arm is never read', () => {
   it('with no registered campaign carrying the tags the prefilter is `1 = 0` and nothing matches', async () => {
-    // The real registry: the Apps arm is only STAGED_FLIGHT_3, not in CAMPAIGNS.
+    // The registry with the Apps arm staged (its dates null in STAGED_FLIGHT_3_DATES): the arm is only STAGED_FLIGHT_3, not in CAMPAIGNS.
+    // Built from the real list minus the F3 ids so that filling the dates (the activation) never turns this red.
+    setRegistry(real.filter((c) => !F3_IDS.has(c.id)))
     expect(liveLandingTags()).toEqual([])
     expect(STAGED_FLIGHT_3.apps.ucValues).toEqual(expect.arrayContaining(ALL_TAGS))
     const w: string[] = []

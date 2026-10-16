@@ -7,8 +7,10 @@ For whoever builds and reads flight 3. This file points to the sources; it does 
 PROPOSAL awaiting Mike on the BSK Decision Desk
 (<https://claude.ai/artifact/VutC3bQKX4jLErr52o3cBv>, cards ads-f3-1..ads-f3-7). Update
 2026-10-15: the launch plan is card ads-f3-16 (two arms, Apps and Search, each starting with its
-own release landing). Flight 3 is STAGED in gss-stats: its tags, budget, cap and read-plan
-settings are in code but not in the registry, and its LEGS rows in the runbook are `staged`.
+own release landing). In gss-stats each arm is activated by its dates alone: its ids, tags, budget, cap and
+read-plan settings are in code, and it joins the registry once `STAGED_FLIGHT_3_DATES` holds its
+flight start and end (both arms: 2026-10-17..2026-10-23; Apps started ahead of the Play release). Its LEGS rows in the runbook
+are `by-date`.
 The read plan, rules, checks and the activation steps are in
 [docs/routines/ads-cloud-daily.md](../routines/ads-cloud-daily.md), "Flight 3"; the section
 below is the earlier recommendation and is superseded by it where they differ. Nothing is
@@ -140,13 +142,15 @@ Preconditions:
 
 ## Where to register
 
-Staged now; the steps to activate (id and dates only) are in
-[docs/routines/ads-cloud-daily.md](../routines/ads-cloud-daily.md), "To activate flight 3":
+Registered by date. The ids are in code already; the only edit is each arm's two dates, with the
+manual steps listed in [docs/routines/ads-cloud-daily.md](../routines/ads-cloud-daily.md), "To activate flight 3":
 
-- `src/lib/campaigns.ts`: `STAGED_FLIGHT_3` (done), then a `stagedCampaign(...)` entry in `CAMPAIGNS`.
-- `src/lib/adsRules.ts`: `STAGED_FLIGHT_3_PLAN_SETTINGS` (done), then a `stagedReadPlan(...)` entry in `ADS_READ_PLANS`.
-- A `staged` row in the Legs table of the runbook (done), flipped to `live` (the daily routine
-  runs at 08:37 ET with no end date).
+- `src/lib/campaigns.ts`: `STAGED_FLIGHT_3_DATES.<arm>` `flightStart` and `flightEnd` (both arms are
+  filled, 2026-10-17..2026-10-23). Filling both registers the arm and its read plan.
+- A `by-date` row in the Legs table of the runbook, with the same two dates (a test fails if they
+  differ). Its post-flight reads (wrapup on flight end + 7, day15 on flight end + 15) are derived.
+- Not driven by a date: the D + 7 07:05 ET final read, the D + 21 and D + 35 purchase reads, and
+  enabling the campaign in Google Ads.
 
 ## Hard rules
 

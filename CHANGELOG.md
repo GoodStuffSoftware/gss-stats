@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.47.0] — 2026-10-16
+
+### Added
+- **Flight 3 Search and Apps are live in the stats site for 2026-10-17 to 2026-10-23.** Each arm registers, syncs, charts and reads from its two dates alone, with its return reads derived from them and a Play-install caveat on the Apps report.
+
 ## [0.46.0] — 2026-10-16
 
 ### Added

@@ -14,7 +14,11 @@ import { etMidnightMs } from './instrumentation'
 import { etDateSql } from '../etTime'
 import { isSplitRefusedPath, refusedPathMatch, SPLIT_REFUSED_PATH_PATTERNS } from '../splitGuard'
 import { REFUSED_SAMPLE_PATHS } from '../__fixtures__/refusedPaths'
+import { hideLiveFlight3 } from '../../testing/stagedFlight3'
 
+// The snapshots pin the statements for the registry while flight 3 is staged: the statements embed the registered campaigns, so
+// a live flight 3 arm (its dates filled in STAGED_FLIGHT_3_DATES) must not change them. They are built with flight 3 hidden.
+const restoreFlight3 = hideLiveFlight3()
 const NOW = Date.parse('2026-09-26T21:00:00Z')
 const SAMPLE_PARAMS: Record<FactId, FactParams[]> = {
   campaignPathVisitor: CAMPAIGNS.map((c) => ({ campaignId: c.id })),
@@ -41,6 +45,7 @@ const SAMPLE_PARAMS: Record<FactId, FactParams[]> = {
   adsSpendDaily: [{}],
 }
 const ALL = (Object.keys(FACTS) as FactId[]).flatMap((id) => SAMPLE_PARAMS[id].map((p) => ({ id, p, stmt: buildFact({ id, params: p }, NOW) })))
+restoreFlight3()
 
 /** The SELECT list, split on top-level commas. */
 function selectItems(sql: string): string[] {
