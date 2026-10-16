@@ -91,6 +91,17 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   `flightDay` × `campaignFlight` with `cumulative` running totals dashed on a right-hand axis.
   A `campaignFlight` breakdown draws every beacon-tracked campaign with a start date, one with
   no arrivals yet at 0, and the flight-day axis runs to the longest of those flights.
+  Below the notes, "Flight 3 Apps: No ads (hero) vs Features" is a donut of the Apps arm's arrivals
+  per ad landing tag (`landingTag`: `sudoku_funnel_f3_apps_hero` "No ads (hero)",
+  `sudoku_funnel_f3_apps_feat` "Features", and the bare `sudoku_funnel_f3_apps` as a small "Untagged"
+  slice only when it has arrivals). A slice is the `/return/<tag>/d0` arrival rows over the card's own
+  range (since the first campaign; the page has no filter bar), the legend reads "Label · count · share"
+  with the share taken over the plotted slices, and the note under it says the two ads rotate evenly so
+  the share reflects how well each ad converts to arrivals. It is counts only: no cost and no
+  impressions, because the ads sync keeps campaign-level spend, not per-ad. While the arm is staged
+  (not yet in `CAMPAIGNS`) the card reads "Flight 3 isn't live yet" and sends no query; it fills in
+  when the arm is activated. Like every `/return/` read it is whole ET days and never split by hour,
+  place or device. The card is in the defaults only; a saved layout gets it by adding the widget.
   The funnel card also carries the signed-out upsell fix's pre/post-fix segment table, which
   appears on its own once `UPSELL_SIGNEDOUT_FIX_AT` is set. Since layout version 11 no page has a
   bespoke panel left: the former panel bodies and their endpoints (`/api/campaigns`,
@@ -862,7 +873,9 @@ only (from the tracking activation day; pre-fix install-gap rows get no value �
 and **difficulty** (`gameMode` / `gameDifficulty`, from `/game/complete/<mode>/<difficulty>`,
 malformed rows as `(other)`); **campaign flight** (`campaignFlight`, decided by the same
 `campaignAttributionClause` + `EXCLUSIONS` the campaigns endpoint uses); **arrival** (`arrival`:
-a first-ever beacon, `tagged` when a flight claims it, else `untagged`); and **key event**
+a first-ever beacon, `tagged` when a flight claims it, else `untagged`); the Flight 3 Apps **landing tag**
+(`landingTag`, the `/return/<tag>/d0` arrival rows of a tag a registered campaign claims; see the Campaigns
+page card above); and **key event**
 (`keyEvent`: `auth-success` base rows, `install` from the install fix on, `raw-install-signal`,
 `game-complete`); the **ET hour of day** (`hourEt`, `0`-`23`, DST-aware like `dateEt`); and the
 **campaign flight day** (`flightDay`: `1` for the first ET day of the flight the row is

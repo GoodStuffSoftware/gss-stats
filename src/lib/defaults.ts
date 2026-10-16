@@ -2,6 +2,7 @@ import type { DashboardConfig, DashboardPage, GlobalFilters, GroupMeta, LineSeri
 import { relativeRange, SINCE_FIRST_CAMPAIGN, SINCE_FIRST_UNTIL_LAST_CAMPAIGN } from './range'
 import { POPUPS, POPUP_RATE_SPECS, NO_OUTCOME_TRACKING_NOTE, SIGNIN_ELIGIBLE_CAVEAT } from './popupEvents'
 import { CAMPAIGNS } from './campaigns'
+import { LANDING_TAG_NOTE } from './landingTags'
 import { BEST_SUDOKU_SITES } from './bestSudokuSites'
 import { normCardRef } from './metrics/validate'
 import { autoCaveatIds, isNoteIdHideable, widgetNoteScope } from './notes'
@@ -466,7 +467,29 @@ export function defaultCampaignsWidgets(): Widget[] {
       w: 3,
       h: 4,
     }),
+    f3HeroDonutWidget({ x: 0, y: 78, w: 6, h: 10 }),
   ])
+}
+// Flight 3 Apps arm: "No ads (hero)" vs "Features", arrivals per landing tag as a donut (geo dimension
+// 'landingTag', lib/campaigns.ts landingTagSqlCase; counts only, no cost: ad-level spend is not in D1).
+// The page has no filter bar, so the card carries its own filters. While the arm is staged (not in
+// CAMPAIGNS) the card says "Flight 3 isn't live yet" and sends no query (ChartCard.vue). The note is
+// the card's caption.
+export const F3_HERO_DONUT_ID = 'cw-f3-hero-donut'
+export function f3HeroDonutWidget(geom: { x: number; y: number; w: number; h: number }, id = F3_HERO_DONUT_ID): Widget {
+  return {
+    id,
+    i: id,
+    title: 'Flight 3 Apps: No ads (hero) vs Features',
+    type: 'doughnut',
+    dataset: 'geo',
+    dimension: 'landingTag',
+    metric: 'pageviews',
+    limit: 10,
+    filters: normFilters({ ...defaultFilters(), siteSel: [], rangeRel: SINCE_FIRST_CAMPAIGN, excludeOwnVisits: false }),
+    caption: LANDING_TAG_NOTE,
+    ...geom,
+  }
 }
 // Campaign device mix (CONFIG_VERSION 9, owner 2026-09-27: "you recreated the device mix chart
 // when we already have been using nested pie charts for that"): the SAME nested doughnut the

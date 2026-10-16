@@ -39,7 +39,7 @@ afterEach(() => {
 describe('flight 3 staged config matches the launch plan', () => {
   it('apps: tag sudoku_funnel_f3_apps, $10/day, $70 cap, noon-ET schedule 12:00-23:00', () => {
     const c = STAGED_FLIGHT_3.apps
-    expect(c.ucValues).toEqual(['sudoku_funnel_f3_apps'])
+    expect(c.ucValues).toEqual(['sudoku_funnel_f3_apps_hero', 'sudoku_funnel_f3_apps_feat', 'sudoku_funnel_f3_apps'])
     expect([c.dailyBudgetUsd, c.hardCapUsd, c.flightStartTimeEt, c.servingHoursEt]).toEqual([10, 70, '12:00', [12, 23]])
     expect(c.notes).toContain('google / display / sudoku_funnel_f3_apps')
   })

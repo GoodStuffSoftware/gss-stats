@@ -16,6 +16,7 @@ import {
   defaultCampaignsWidgets,
   defaultConfig,
   defaultWidgetsForPage,
+  F3_HERO_DONUT_ID,
   normalizeConfig,
   seedHiddenAutoCaveatsV16,
 } from './defaults'
@@ -86,7 +87,8 @@ describe('captions: normWidget limits', () => {
     expect('hiddenCaveats' in w).toBe(false)
     for (const p of normalizeConfig(defaultConfig()).pages)
       for (const dw of p.widgets) {
-        expect('caption' in dw, dw.id).toBe(false)
+        // the hero-vs-features donut is the one default that ships its caption (its one-line note)
+        expect('caption' in dw, dw.id).toBe(dw.id === F3_HERO_DONUT_ID)
         expect(dw.hiddenCaveats ?? [], dw.id).toEqual(autoCaveatIds(dw).filter(isNoteIdHideable))
       }
   })

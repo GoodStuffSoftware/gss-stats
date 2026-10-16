@@ -10,6 +10,8 @@ import { isDateDim } from '../lib/rings'
 import { dayTitle } from '../lib/glanceDay'
 import { filterOverrideSummary } from '../lib/filterSummary'
 import { isSiteDim, semanticKey } from '../lib/drill'
+import { liveLandingTags } from '../lib/campaigns'
+import { LANDING_NOT_LIVE_TEXT } from '../lib/landingTags'
 import { isMobileViewport } from '../lib/responsive'
 import { isFit, widgetNeedsChartHeight } from '../lib/fit'
 import { useFitHeight } from '../composables/useFitHeight'
@@ -341,8 +343,23 @@ watch(requestKey, () => {
   liveSafeKey = null
 }, { flush: 'sync' })
 let lastLiveRefetchAt: number | null = null
+// The Flight 3 Apps hero-vs-features donut while its arm is staged (no registered campaign carries the
+// landing tags): it says so and sends NO query at all. A function, not a computed: CAMPAIGNS is a
+// plain module constant, so the answer is read fresh at each render and load.
+const LANDING_TAG_DIM = 'landingTag'
+function landingNotLive(): boolean {
+  return props.widget.dataset === 'geo' && props.widget.dimension === LANDING_TAG_DIM && liveLandingTags().length === 0
+}
 async function load(background = false) {
   if (isBespokeBody.value) return // own data fetch (or none) — see MetricCard/NoteWidgetBody
+  if (landingNotLive()) {
+    reqId++ // drop any answer still in flight
+    data.value = null
+    seriesData.value = null
+    error.value = null
+    loading.value = false
+    return
+  }
   // RUM charts filter to a real-host allow-list built from /api/sites; fetching before
   // it loads would momentarily count dev/preview traffic. Wait for the tree. (Geo has
   // no dev hosts, so it needn't wait.)
@@ -666,6 +683,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
       <p v-else-if="widget.dataset === 'overview' || widget.dataset === 'campaigns'" class="state mono">{{ retiredPanelText }}</p>
       <NoteWidgetBody v-else-if="widget.type === 'note'" :widget="widget" :values="noteValues" />
 
+      <div v-else-if="landingNotLive()" class="state mono">{{ LANDING_NOT_LIVE_TEXT }}</div>
       <div v-else-if="loading" class="state mono">Loading…</div>
       <div v-else-if="error" class="state error mono">{{ error }}</div>
       <div v-else-if="popupNotYetActive" class="state mono">Tracking not yet active</div>
