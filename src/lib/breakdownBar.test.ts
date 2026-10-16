@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest'
 import { breakdownBarModel, buildChartConfig, orderDimValues, formatKey } from './charts'
 import type { StatsResponse, Widget } from '../types'
-import { CAMPAIGNS } from './campaigns'
+import { CAMPAIGNS, liveStagedCampaigns } from './campaigns'
 
 function resp(rows: [string, string, number][], dims = ['popupFamily', 'popupOutcome']): StatsResponse {
   return {
@@ -137,8 +137,8 @@ describe('campaignFlight breakdown: every tracked campaign, zero-filled', () => 
   const flight = (c: (typeof CAMPAIGNS)[number]) => Math.round((Date.parse(c.flightEnd) - Date.parse(c.flightStart!)) / 86_400_000) + 1
   const maxFlight = Math.max(...TRACKED.map(flight))
 
-  it('the configuration tracks Android, the retest and the two flight-2 arms; the longest is Android at 8 days', () => {
-    expect(TRACKED.map((c) => c.id)).toEqual([android.id, retest.id, '24316608605', '24311309184'])
+  it('the configuration tracks Android, the retest, the two flight-2 arms and any live flight-3 arm; the longest is Android at 8 days', () => {
+    expect(TRACKED.map((c) => c.id)).toEqual([android.id, retest.id, '24316608605', '24311309184', ...liveStagedCampaigns().map((c) => c.id)])
     expect(maxFlight).toBe(8)
     expect(flight(retest)).toBeLessThan(maxFlight)
   })

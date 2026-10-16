@@ -35,7 +35,7 @@ import { onRequestPost as metricsPost } from './metrics'
 import { insertHits, installCaches, memoryCache, openHitsDb, pagesContext, postJson, sqliteD1 } from '../_lib/testing/hitsDb'
 import { popupRateOracle } from '../_lib/testing/popupRateOracle'
 import { bskFixture, FIXTURE_NOW } from '../_lib/testing/bskFixture'
-import { CAMPAIGNS, type FunnelStepKey } from '../../src/lib/campaigns'
+import { CAMPAIGNS, liveStagedCampaigns, type FunnelStepKey } from '../../src/lib/campaigns'
 import type { MetricRequest, MetricValue, MetricsResponseBody } from '../../src/lib/metrics/types'
 
 const ANDROID = '24215315197'
@@ -90,7 +90,8 @@ const STEPS = Object.keys(STEP_METRIC) as (keyof typeof STEP_METRIC)[]
 // A campaign registered after /api/campaigns was retired has no golden: there is nothing for it to be
 // equivalent to. Flight 2's two arms (registered 2026-10-03) are the only such campaigns; the test below
 // pins that list, so a campaign that loses its golden by accident fails loudly instead of being skipped.
-const WITHOUT_GOLDEN = ['24316608605', '24311309184']
+// A flight 3 arm that is live (its dates filled in STAGED_FLIGHT_3_DATES) joins the list: it is registered after the retirement too.
+const WITHOUT_GOLDEN = ['24316608605', '24311309184', ...liveStagedCampaigns().map((c) => c.id)]
 describe('/api/metrics ≡ /api/campaigns', () => {
   it('every measurable campaign has a golden, except the flight-2 arms registered after /api/campaigns was retired', () => {
     expect(CAMPAIGNS.filter((c) => c.measurement !== 'spend-only' && !Object.hasOwn(CAMPAIGNS_GOLDEN, c.id)).map((c) => c.id)).toEqual(WITHOUT_GOLDEN)

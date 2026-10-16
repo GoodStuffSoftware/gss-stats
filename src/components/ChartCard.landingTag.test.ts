@@ -10,6 +10,7 @@ import ChartCard from './ChartCard.vue'
 import { sitesLoaded } from '../sitesStore'
 import { CAMPAIGNS, type CampaignFlight } from '../lib/campaigns'
 import { f3HeroDonutWidget } from '../lib/defaults'
+import { hideLiveFlight3 } from '../testing/stagedFlight3'
 import { F3_APPS_FEATURES_TAG, F3_APPS_HERO_TAG, LANDING_NOT_LIVE_TEXT, LANDING_TAG_NOTE } from '../lib/landingTags'
 import type { GlobalFilters, StatsResponse } from '../types'
 
@@ -31,13 +32,17 @@ const resp = (rows: [string, number][]): StatsResponse => ({
 const filters: GlobalFilters = { siteSel: [], since: '2026-10-01', until: '2026-10-16', excludeSelfReferrals: false, excludeOwnVisits: false, ownBrowser: '', ownOS: '' }
 const widget = () => f3HeroDonutWidget({ x: 0, y: 0, w: 6, h: 10 })
 
+// The staged state is pinned with flight 3 hidden, so filling STAGED_FLIGHT_3_DATES never turns these red.
+let restoreFlight3: () => void
 beforeEach(() => {
+  restoreFlight3 = hideLiveFlight3()
   sitesLoaded.value = true
   fetchStatsMock.mockResolvedValue(resp([[F3_APPS_HERO_TAG, 6], [F3_APPS_FEATURES_TAG, 3]]))
 })
 afterEach(() => {
   fetchStatsMock.mockReset()
   CAMPAIGNS.splice(0, CAMPAIGNS.length, ...real)
+  restoreFlight3()
 })
 
 const Stub = defineComponent({ props: ['config'], emits: ['point'], methods: { suppressForDrill() {} }, template: '<div class="chart-stub" />' })
