@@ -283,3 +283,19 @@ describe('/api/features: viewer read', () => {
     expect(viewerMayRequest('POST', '/api/features')).toBe(true)
   })
 })
+
+describe('/api/features: manual production checks', () => {
+  it('never count, with known traffic shown or hidden, and never make a feature OK', async () => {
+    insertHits(db, [
+      hit('/tour/start', at(LATEST, 9), { n: 5 }),
+      hit('/tour/start', at(LATEST, 9), { n: 4, campaign: 'manual_check' }),
+      hit('/welcome-signed-in/shown', at('2026-09-20', 9), { n: 2, campaign: 'manual_check' }),
+      hit('/welcome-signed-in/shown', at(LATEST, 9), { n: 3 }),
+    ])
+    for (const excludeKnownTraffic of [false, true]) {
+      const { body } = await post({ ...range, excludeKnownTraffic })
+      expect(step(body, 'tour', 'start').latest).toBe(5)
+      expect(feature(body, 'welcome').status).toBe('new') // the old manual row does not make it OK
+    }
+  })
+})

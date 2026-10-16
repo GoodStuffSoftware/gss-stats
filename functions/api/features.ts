@@ -42,7 +42,7 @@ import { buildCacheKeyUrl, cachedJson, type CacheLike } from '../_lib/edgeCache'
 import { WHEN_RE, SITE_TAG_RE } from '../../src/lib/range'
 import { refusedRowWindow, REFUSED_WINDOW_KEY } from '../../src/lib/splitGuard'
 import { MAX_SITES, statementTooLarge } from '../../src/lib/queryLimits'
-import { applyExclusions } from '../../src/lib/campaigns'
+import { applyAlwaysExclusions, applyExclusions } from '../../src/lib/campaigns'
 import { excludeOwnClause } from '../../src/lib/ownExclusion'
 import { addDays, etDateFast, etWallTimeMs } from '../../src/lib/etTime'
 import { FEATURES, assembleHealth, flatSteps, healthDays, type DayCounts, type FeatureDef } from '../../src/lib/featureHealth'
@@ -138,7 +138,9 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
         w.push(`site IN (${sites.map(() => '?').join(', ')})`)
         b.push(...sites)
       }
+      // Manual production checks are never visitors: dropped whatever the known-traffic toggle says.
       if (excludeKnownTraffic) applyExclusions(w, b)
+      else applyAlwaysExclusions(w, b)
       excludeOwnClause(w, b, excludeOwn, body.ownBrowser, body.ownOS)
     }
 
@@ -154,6 +156,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     // "Has any coach row ever arrived" is about the beacons, not the viewer's selection: a narrowed site or
     // exclusion filter must not turn a shipped feature back into "hasn't shipped".
     if (!everView) filterTerms(w2, b2)
+    else applyAlwaysExclusions(w2, b2)
     const before = beforeCutoffSql(w2, features)
     const tooLarge2 = statementTooLarge(before, b2.length)
     if (tooLarge2) return tooLarge2

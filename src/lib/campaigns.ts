@@ -514,6 +514,8 @@ export function campaignAttributionStartMs(campaign: CampaignFlight): number | n
 // ── Exclusions (row filters — single-row predicates, never a cross-row join) ───────────
 export interface ExclusionRule {
   label: string
+  /** True for rows that are never visitors under any filter setting (applyAlwaysExclusions). */
+  always?: boolean
   clause(w: string[], b: unknown[]): void
 }
 export const EXCLUSIONS: ExclusionRule[] = [
@@ -542,6 +544,7 @@ export const EXCLUSIONS: ExclusionRule[] = [
     // The app's own manual production checks land with utm_campaign=manual_check (and arrival paths
     // /return/manual_check/...): never visitors, so no tagged, site, flight or dashboard count takes them.
     label: 'manual production checks',
+    always: true,
     clause(w, b) {
       w.push(`(COALESCE(campaign, '') <> 'manual_check' AND COALESCE(path, '') NOT LIKE '/return/manual\\_check/%' ESCAPE '\\')`)
     },
@@ -549,6 +552,11 @@ export const EXCLUSIONS: ExclusionRule[] = [
 ]
 export function applyExclusions(w: string[], b: unknown[]): void {
   for (const rule of EXCLUSIONS) rule.clause(w, b)
+}
+/** Only the rules marked `always` (the manual production checks): for statements that must drop those rows
+ * even when the viewer shows known traffic. */
+export function applyAlwaysExclusions(w: string[], b: unknown[]): void {
+  for (const rule of EXCLUSIONS) if (rule.always) rule.clause(w, b)
 }
 
 // ── Derived dimension campaignFlight (functions/api/geo.ts) ────────────────────────────

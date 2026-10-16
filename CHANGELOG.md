@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Manual checks stay out of feature cards.** Rows from the app's manual production checks no longer count on the Features page, even with known traffic shown.
+
 ## [0.48.0] — 2026-10-16
 
 ### Added
