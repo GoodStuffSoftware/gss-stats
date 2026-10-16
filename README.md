@@ -229,7 +229,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
     unknown id a token shows "—", and so does a value the server withholds or cannot fully measure
     (too few, no data, a shorter span than the range). A token sends only its metric and window,
     so it can never ask for a split the catalog withholds: the counts-only rule (return, game
-    starts, completions, tutorial completions, tour skips and tour exits, coach-strip shows, dismisses and closes: no hour, place or device split, no visitor id)
+    starts, completions, tutorial completions, tour skips and tour exits, coach-strip shows, dismisses and closes, ask-order A/B rows: no hour, place or device split, no visitor id)
     stays enforced on the server, where a sub-day range counts those rows over whole ET days. A
     chart's ↻ (or a metric card's own ↻ / Retry) refetches its caption's tokens along with the chart, and a token deleted from a
     caption or label stops loading; a live push refetches a token only when the server flagged that
@@ -670,7 +670,7 @@ why (`ASK_ORDER_PRIMARY_MODE` in [`src/lib/askOrder.ts`](src/lib/askOrder.ts) is
 primary switches everyone to it (compared as integers, so exactly 1.5x counts), otherwise sign-in
 first stays. If sign-ins and installs point opposite ways between the groups, the sign-ins
 decide: the same 1.5x test is then run on the signed-in (or responded sign-in) rows. The read uses
-every day so far whatever range is picked. It is the same `/api/features` endpoint with
+every day so far whatever range or site is picked. It is the same `/api/features` endpoint with
 `view: 'ask-order'`. Caveat it states: tagged-cell ratios are approximate because organic and
 tagged are per-event counts. The whole `/ab/ask-order/%` family
 is counts only: read as per-ET-day totals, never split by hour, place or device, and never added
@@ -800,7 +800,7 @@ there — not just the one drilled — can show the event rows just filtered dow
 carries a caption explaining why (see [`src/lib/drill.ts`](src/lib/drill.ts)
 `drillNeedsEventBeacons`).
 
-**Return, game-start, game-completion, tutorial-completion, tour-skip, tour-exit and coach-strip shown, dismiss and close rows are
+**Return, game-start, game-completion, tutorial-completion, tour-skip, tour-exit, coach-strip shown, dismiss and close and ask-order A/B rows are
 counts only: never split by hour, place or device.** Rule: "counts only. Never tie beacon rows to a device, time or place." A geo
 chart that maps rows (the map/globe), groups by an hour, place or device dimension (`hourEt`,
 and the UTC `date`, whose count minus `dateEt`'s for the same day would give an evening band;
@@ -861,7 +861,7 @@ inside) stay one constant away (`REFUSED_WINDOW_SNAP`). When the bounds meet, as
 ranges shorter than a day, these rows count zero. A range already on ET midnights (the date
 picker's ET days, a whole-day preset) runs exactly as before. Charts, `/api/completions` and
 the metric cards' page range (`window: 'page'`, sparkline days included) all follow it and say
-so in a caption: "Any return, game-start, completion, tutorial-completion, tour-skip, tour-exit or coach-strip shown, dismiss and close rows
+so in a caption: "Any return, game-start, completion, tutorial-completion, tour-skip, tour-exit, coach-strip shown, dismiss and close or ask-order A/B rows
 here are counted over whole ET days." A chart shows it only when it can count one of those
 rows, so never under a path or path-family filter none of them matches (a site filter does not
 narrow it: it errs toward showing). A chart that leaves event beacons out (the default) counts none of them, since

@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.46.0] — 2026-10-16
+
 ### Added
 - **Ask-order A/B card.** The Features page counts which ask order, sign in first or install first, gets more people to respond, as plain row ratios per group (organic vs tagged), with progress to 150 asks per group and one 1.5x rule on a single primary (responded per assigned once the once-per-device row is seen, else combined response rows), where sign-ins decide if sign-ins and installs disagree, counts only.
 - **Measurement-change marker.** Once the day the game's sign-in first-touch fallback starts is entered (and, separately, the day of its Play release, which reaches the Apps arm), the Overall timeline marks it, the tagged new-account cards say the rise is partly measurement, and the ads reports print a marker on and after that day; nothing shows until it is set.

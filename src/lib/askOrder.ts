@@ -63,7 +63,7 @@ export const ASK_ORDER_TAGS: readonly { id: StepTag; label: string }[] = [
 /** An outcome that counts as a response to the asks (the PRIMARY measure): the player signed in or installed. */
 export const ASK_ORDER_RESPONSE_OUTCOMES: readonly OutcomeId[] = ['signed-in', 'installed']
 
-/** Asks shown per group at which the call is made (pre-registered 2026-10-16), or at 8 weeks after v1.99.2 ships. */
+/** Asks shown per group at which the call is made (pre-registered 2026-10-16). */
 export const ASK_ORDER_CALL_ASKS = 150
 /** The rule: one order responding at this multiple of the other's or more, everyone switches to it. */
 export const ASK_ORDER_SWITCH_MULTIPLE = 1.5
@@ -130,8 +130,8 @@ export const ASK_ORDER_CAPTION =
   'Returns come only from the group-carrying returned and still-playing rows, never from the ordinary return rows, so no row is joined to a device. ' +
   'Organic and tagged are per-event counts, so a ratio inside the tagged column is approximate (a device can carry a different tag on different rows); ' +
   'the progress and the rule use every row, organic plus tagged. ' +
-  'The progress and the rule read use every day so far, whatever range is selected. ' +
-  `The call is made at about ${ASK_ORDER_CALL_ASKS} asks shown per group, or 8 weeks after v1.99.2 ships (first look at flight 3 day 7): ` +
+  'The progress and the rule read use every day so far, whatever range or site is selected. ' +
+  `The call is made at about ${ASK_ORDER_CALL_ASKS} asks shown per group: ` +
   `on the primary figure, one order at ${ASK_ORDER_SWITCH_MULTIPLE}x or more of the other's switches everyone to it, otherwise sign-in first stays; if sign-ins and installs point opposite ways between the groups, sign-ins decide. ` +
   "Purchases can't be split by group, so they are not shown. Twin rows: never added into any other total."
 export const ASK_ORDER_EMPTY_NOTE = "No ask-order A/B data yet — the game version that sends it (v1.99.2) hasn't shipped"
