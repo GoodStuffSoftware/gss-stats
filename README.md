@@ -559,7 +559,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   raw `/install/*` outcome beacons, which can double-count one install, are shown only as a
   secondary "raw install signals" line. Attribution is by the beacon's own
   campaign tag only, with no date-based split — one swappable function decides row
-  membership, and known verification/household traffic is excluded server-side. One
+  membership, and known verification/household traffic, lifecycle email and the app's own manual
+  production checks (`utm_campaign=manual_check`, `/return/manual_check/` paths) are excluded
+  server-side. One
   campaign (Play-direct) sends its ads straight to the Play Store and so has no beacon rows
   at all; it's shown spend-only rather than an empty funnel.
 - **Retention verdict** — a per-arm read of "did the campaign's arrivals come back", offered in
@@ -1296,6 +1298,20 @@ it covers that one day, not the flight so far); a search plan that serves on all
 sets `approvedPlacements` or `adGroupPlacementCounts` is refused at load. Spend, impressions,
 clicks, CTR (rule 2), funnel reach (rule 3), the hard cap (rule 4) and every beacon count read
 the same for both channels.
+
+**Flight 3 rule readouts.** Every flight 3 morning read prints an `F3 rules (proposals only; nothing
+is paused)` block between the first-session lines and `Thresholds:`: nine numbered lines, each
+`Rule <n> · <name>: <number> | threshold <t> → PASS | PROPOSE PAUSE | NOT YET | NO DATA`, then a
+`Proposal:` line. Rules 1-4 are the coded kill rules above; 5 is the day 1-2 tracking check, 6 cost
+per tagged complete row (at most $3), 7 the Apps first-move row ratio (at least 20% of d0 rows),
+8 traffic held (derived from rules 2 and 6) and 9 the D+7 go / iterate / stop table
+(`decideFlight3`, `src/lib/flight3Rules.ts`). Rules 5-7 read NOT YET until their data exists and CTR
+arms from flight day 3; rule 9 reads NOT YET until the final read. A rules 1-7 pause proposal pushes
+once per ET day per arm; the cap decision push on a flight 3 row reads `F3 verdict GO | ITERATE |
+STOP | INCONCLUSIVE`. Every figure is a tagged row count or dollars (counts only), and flight 2 and
+retest reads print exactly what they did before (pinned byte for byte by `f2ReportGolden.test.ts`).
+Rows the app's own manual production checks write (`utm_campaign=manual_check`, `/return/manual_check/`
+paths) sit in the standing exclusions, so no tagged, site, flight or dashboard count takes them.
 
 **Staging an arm, activated by its dates.** Flight 3's two arms hold everything in code: the
 Google Ads ids and tags (`STAGED_FLIGHT_3` in `campaigns.ts`) and the read-plan settings

@@ -169,6 +169,31 @@ link that lost its suffix still counts. All three tags are the one arm.
 
 ### Primary measure and rules
 
+- **F3 rules block (every F3 morning read; proposals only, nothing is paused).** After the
+  first-session lines and before `Thresholds:` the morning report prints `F3 rules (proposals only;
+  nothing is paused):`, nine numbered lines, each
+  `Rule <n> · <name>: <number> | threshold <t> → PASS | PROPOSE PAUSE | NOT YET | NO DATA`
+  (an n/a rule prints its number only), then a `Proposal:` line (`PROPOSE PAUSE`, `CONTINUE`, or
+  none when the campaign is not serving). Relay the block as printed; never recompute a rule.
+  Rules 1-4 are the coded kill rules (placement leak, CTR, funnel reach, hard cap); 5 is the tracking
+  check; 6 cost per complete row; 7 first-move row ratio (Apps only; Search prints n/a); 8 traffic
+  held, derived from rules 2 and 6 and never counted twice; 9 the D+7 verdict.
+  - **NOT YET** is day 1 for rule 5 (and day 2 while under its minimum rows) and days 1-2 for rules
+    6 and 7 (the first read holding two days of data is day 3, the morning of the arm's third ET
+    day); rule 2 (CTR) arms from day 3 too. Rule 9
+    reads NOT YET with the running figure ("the table would say ...") until the final read (day 8),
+    where it states the verdict word from the table below.
+  - **NO DATA** means the count could not be read or is too small to judge; it is never a pass and
+    never a trip. A printed 0 is a true 0.
+  - Rule 6 reads a tagged complete row at most $3; zero complete rows once cumulative spend is over
+    $3 is PROPOSE PAUSE (the arm bought no completes), under that it is NO DATA.
+  - **Pause push.** A PROPOSE PAUSE from rules 1-7 pushes Mike once per ET day per arm (a same-day
+    rerun that repeats the stored daily record is not pushed again), flight 3 only. Flight 2 reads and
+    pushes are unchanged. At the final read the cap decision push reads `F3 verdict GO | ITERATE |
+    STOP | INCONCLUSIVE`, not flight 2's `row N`.
+  - **Counts only.** Every figure in the block is a tagged row count or dollars: no visitor id, no
+    hour, place or device split.
+
 - **Primary measure, per arm:** tagged `/auth/success/<provider>/new` rows, relayed as the report
   prints the sign-up line (a count capped at Firestore new accounts; never upgraded from a bound).
 - **Validity:** at least 20 tagged post-game ask rows (`/signin-prompt/committed-repeat`,
@@ -184,15 +209,15 @@ link that lost its suffix still counts. All three tags are the one arm.
   | Under 20 asks | Inconclusive (no go, iterate or stop) |
 
 - **Measurement change:** when a read prints a "MEASUREMENT CHANGE TODAY" or "Measurement change since" line, on or after that marked day do not read the tagged new-account rise as performance.
-- **Traffic-held check:** complete rows at no more than $3 each, and CTR at or above the arm's
-  flight 2 floor (Apps 0.15%, Search 1.0%), the same floor the coded kill rule 2 uses. State both
-  figures from the report (the tagged complete rows are on the `tracking-check counts` line).
-- **Printed decision row at the $70 cap:** the report's decision row at the cap is flight 2's
-  table and counts every ask row (tutorial, streak and promo-first50 as well). It is not the
-  flight 3 verdict. The table above governs: judge on the new-account count and on the 20 asks
-  counted from committed-repeat, committed-challenge and placement rows only. If the printed row
-  and this table disagree, say so and follow this table. The `tracking-check counts` line's
-  sign-in ask rows count is exactly those three paths.
+- **Traffic-held check:** coded as rule 8 of the F3 rules block (complete rows at no more than $3
+  each, from rule 6, and CTR at or above the arm's flight 2 floor, Apps 0.15% and Search 1.0%, the
+  floor rule 2 uses). Relay rule 8 and the cost per complete row on the "Tagged so far" line as
+  printed; do not compute them.
+- **Printed decision row at the $70 cap:** on an F3 row the report prints `Decision (flight 3
+  table, spec section 2)` and the verdict word (GO, ITERATE, STOP, INCONCLUSIVE) from the table
+  above, judged on the new-account count and on the 20 asks counted from committed-repeat,
+  committed-challenge and placement rows only. Flight 2's table (every ask row) still applies to
+  F2 rows. The `tracking-check counts` line's sign-in ask rows count is exactly those three paths.
 - **Cost per arrival (per arm):** the report's "cost per tagged arrival" line (cumulative spend
   divided by tagged arrivals) prints Mike's benchmark beside it, about $0.32 an arrival (the
   F1/F2 in-app figure). It prints in the threshold and post-flight reads' tagged-funnel block, not
@@ -203,8 +228,9 @@ link that lost its suffix still counts. All three tags are the one arm.
   inconclusive (under 20 asks). That is the expected outcome, not a fault; the rules above are
   unchanged.
 - **Pre-flight gate line (flight 3 enable gate).** The morning report prints `Pre-flight gate (organic since v1.99.1 web, 2026-10-16 21:07Z): /coach/* N · /signin-prompt/committed-* N · /signin-eligible/* N → MET | NOT YET`, right after the per-tag split: cumulative organic (no campaign tag, own and known traffic excluded) web rows since that release. MET means /coach/* above 0 AND (committed + eligible) above 0; the rule lives in `preflightGateMet` (scripts/ads-reads/beacon.ts).
-- **Day 1-2 tracking check (read-and-judge; NOT a coded kill rule; it only PROPOSES a pause).**
-  It catches a week of spend on broken tracking. Read both counts from the report's own output,
+- **Day 1-2 tracking check (coded as rule 5 of the F3 rules block; it only PROPOSES a pause).**
+  Relay rule 5 as printed. It catches a week of spend on broken tracking; the description below is
+  what the rule counts and why it can read NOT YET or NO DATA. Read both counts from the report's own output,
   on the daily "Tagged so far" line (it ends with `tracking-check counts (tagged ET-day totals;
   yesterday in brackets): complete rows N (N), sign-in ask rows (placement, committed-repeat,
   committed-challenge) N (N), /coach/shown/place rows N (N)`) and on the tagged-funnel block of

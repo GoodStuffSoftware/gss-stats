@@ -6,6 +6,10 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Flight 3 rule readouts.** Every flight 3 morning read prints nine numbered rules (the four kill rules plus the tracking check, cost per complete row, first-move row ratio, traffic held and the D+7 verdict), each with its number, threshold and PASS, PROPOSE PAUSE, NOT YET or NO DATA. A pause proposal pushes once per day per arm and the cap decision push names the flight 3 verdict. Flight 2 and retest reads are unchanged.
+- **Manual production checks leave every count.** Rows the app's own manual checks write (`manual_check` campaign or paths) are now part of the standing exclusions, so no tagged, site or dashboard count takes them.
+
 ## [0.47.1] — 2026-10-16
 
 ### Changed
