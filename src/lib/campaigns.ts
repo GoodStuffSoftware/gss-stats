@@ -150,7 +150,7 @@ export const STAGED_FLIGHT_3: Record<StagedArm, StagedArmConfig> = {
     flightStartTimeEt: '12:00',
     servingHoursEt: [12, 23],
     notes:
-      '"Best Sudoku - Display - Sudoku app placements - F3 Apps", budget resource 15948080534, utm google / display / sudoku_funnel_f3_apps_hero and sudoku_funnel_f3_apps_feat (two responsive display ads in the one campaign, HERO and FEATURES; the arm sums both, the bare sudoku_funnel_f3_apps is a catch-all). Flight 2\'s Apps setup re-run on best-sudoku v1.99.0: the same 17 Android app placements, optimized targeting off, manual CPC $0.35 max, F2 copy plus a price line (\"No ads. Passes from $1.99\"), US+CA, ad schedule 12:00-23:00 ET, $10/day, $70 cap over 7 serving days. Starts the day v1.99.0 is live on Play production. Created PAUSED 2026-10-16 by the API tool; enabled by Mike\'s yes, which with the arm\'s dates (STAGED_FLIGHT_3_DATES) is the whole activation.',
+      '"Best Sudoku - Display - Sudoku app placements - F3 Apps", budget resource 15948080534, utm google / display / sudoku_funnel_f3_apps_hero and sudoku_funnel_f3_apps_feat (two responsive display ads in the one campaign, HERO and FEATURES; the arm sums both, the bare sudoku_funnel_f3_apps is a catch-all). Flight 2\'s Apps setup re-run on the best-sudoku v1.99.x build: the same 17 Android app placements, optimized targeting off, manual CPC $0.35 max, F2 copy plus a price line (\"No ads. Passes from $1.99\"), US+CA, ad schedule 12:00-23:00 ET, $10/day, $70 cap over 7 serving days. Started 2026-10-17, ahead of the Play release (installs get the older Play app until it ships). Created PAUSED 2026-10-16 by the API tool; enabled by Mike\'s yes, which with the arm\'s dates (STAGED_FLIGHT_3_DATES) is the whole activation.',
   },
   search: {
     label: 'Flight 3 — search, desktop intent',
@@ -214,8 +214,9 @@ export interface StagedArmDates {
   flightEnd: string | null
 }
 export const STAGED_FLIGHT_3_DATES: Record<StagedArm, StagedArmDates> = {
-  apps: { flightStart: null, flightEnd: null },
-  search: { flightStart: null, flightEnd: null },
+  // Both arms: approved to auto-enable by Mike (relayed by the ads session); ET days. Apps starts 2026-10-17, ahead of the Play release.
+  apps: { flightStart: '2026-10-17', flightEnd: '2026-10-23' },
+  search: { flightStart: '2026-10-17', flightEnd: '2026-10-23' },
 }
 export const STAGED_ARMS: readonly StagedArm[] = ['apps', 'search']
 /** Whether an arm's dates are filled (live) or null (staged). Throws on exactly one date set: a

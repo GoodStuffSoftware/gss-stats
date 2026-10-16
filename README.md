@@ -106,8 +106,8 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   with the share taken over the plotted slices, and the note under it says the two ads rotate evenly so
   the share reflects how well each ad converts to arrivals. It is counts only: no cost and no
   impressions, because the ads sync keeps campaign-level spend, not per-ad. While the arm is staged
-  (not yet in `CAMPAIGNS`) the card reads "Flight 3 isn't live yet" and sends no query; it fills in
-  when the arm is activated. Like every `/return/` read it is whole ET days and never split by hour,
+  (its dates in `STAGED_FLIGHT_3_DATES` still null, so not yet in `CAMPAIGNS`) the card reads "Flight 3
+  isn't live yet" and sends no query; it fills in when the arm's dates are filled. Like every `/return/` read it is whole ET days and never split by hour,
   place or device. The card is in the defaults only; a saved layout gets it by adding the widget.
 - **Movable / composable charts** — drag the header, resize from the corner; add /
   edit / duplicate / delete charts of any type: stat, bar, horizontal bar, stacked
@@ -1222,8 +1222,8 @@ a newer campaign's window or due date, would otherwise silently read the wrong c
 two or more registered plans: exit 1, listing the registered ids and saying to pass
 `--campaign`.
 
-Three plans are registered now (the retest and flight 2's two arms), so every read must pin its
-campaign. Before flight 2's arms were registered the default was the retest on every date, and
+Five plans are registered now (the retest, flight 2's two arms and flight 3's two arms, which
+register from their dates), so every read must pin its campaign. Before flight 2's arms were registered the default was the retest on every date, and
 every invocation that omitted the flag behaved as it did before the registry (checked by running
 every routine invocation against the base and the head: only `--help` differed). The retest's
 routine docs pin it (step 1).
@@ -1266,13 +1266,17 @@ sets `approvedPlacements` or `adGroupPlacementCounts` is refused at load. Spend,
 clicks, CTR (rule 2), funnel reach (rule 3), the hard cap (rule 4) and every beacon count read
 the same for both channels.
 
-**Staging an arm before its campaign exists.** Flight 3's two arms are staged, not registered:
-`STAGED_FLIGHT_3` in `campaigns.ts` and `STAGED_FLIGHT_3_PLAN_SETTINGS` in `adsRules.ts` hold
-everything except the Google Ads id and the dates, and nothing reads them yet (no sync, chart or
-read sees a staged arm). Activating one is `stagedCampaign(arm, { id, flightStart, flightEnd })` in
-`CAMPAIGNS` plus `stagedReadPlan(arm, id)` in `ADS_READ_PLANS`; the steps, with the matching
-runbook edits, are in [docs/routines/ads-cloud-daily.md](docs/routines/ads-cloud-daily.md), "To
-activate flight 3".
+**Staging an arm, activated by its dates.** Flight 3's two arms hold everything in code: the
+Google Ads ids and tags (`STAGED_FLIGHT_3` in `campaigns.ts`) and the read-plan settings
+(`STAGED_FLIGHT_3_PLAN_SETTINGS` in `adsRules.ts`). An arm is registered, and so synced, charted and
+read, only once both its `flightStart` and `flightEnd` are filled in `STAGED_FLIGHT_3_DATES`
+(`campaigns.ts`); with both null it is in neither `CAMPAIGNS` nor `ADS_READ_PLANS`, and exactly one
+set throws at load. Both arms are live for 2026-10-17..2026-10-23 (Apps started ahead of the Play release, so
+its report carries a one-line Play-install caveat). The same two dates go in the arm's `by-date` row of the runbook (a test
+fails if they differ), and the flight 3 post-flight reads are derived from them (wrapup on flight
+end + 7, day15 on flight end + 15). The remaining manual steps (the D + 7 07:05 ET final read, the
+D + 21 and D + 35 purchase reads, enabling the campaign in Google Ads) are in
+[docs/routines/ads-cloud-daily.md](docs/routines/ads-cloud-daily.md), "To activate flight 3".
 
 With two plans registered, **every** read must name its campaign: omitting `--campaign` exits 1
 and lists the registered ids. One line per arm, in each arm's own routine doc:

@@ -42,7 +42,7 @@ import { addDays } from '../../src/lib/etTime'
 import { hideLiveFlight3 } from '../../src/testing/stagedFlight3'
 import { fixtureDeps, resolveCampaignId, type Fixture } from './cli'
 import { runMorningRead, type MorningOptions } from './read'
-import { formatMorningReport } from './report'
+import { APPS_PLAY_RELEASE_CAVEAT, formatMorningReport } from './report'
 import { MIN_COHORT } from '../../src/lib/popupEvents'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -370,26 +370,44 @@ function legsRows(): string[][] {
 }
 
 describe('runbook LEGS table', () => {
-  it('has the two flight 3 rows staged, with a placeholder id that is not a number', () => {
-    const rows = legsRows()
-    const f3 = rows.filter((r) => /F3/.test(r[2]))
+  const ISO = /^\d{4}-\d{2}-\d{2}$/
+  it('has the two flight 3 rows by-date, each with the arm real numeric campaign id (no placeholder)', () => {
+    const f3 = legsRows().filter((r) => /F3/.test(r[2]))
     expect(f3.map((r) => r[2])).toEqual(['F3 apps (display, Sudoku app placements)', 'F3 search (desktop intent)'])
     for (const r of f3) {
-      expect(r[0], r[2]).toBe('staged')
-      expect(r[1], r[2]).toMatch(/^<.*>$/) // <F3 apps campaign id>, never digits
-      expect(r[1], r[2]).not.toMatch(/\d{5,}/)
+      expect(r[0], r[2]).toBe('by-date')
+      expect(r[1], r[2]).toMatch(/^\d{10,}$/)
+      expect(r[5], r[2]).toBe('start+1..end+1')
+    }
+    expect(f3[0][1]).toBe(STAGED_FLIGHT_3.apps.ids.campaignId)
+    expect(f3[1][1]).toBe(STAGED_FLIGHT_3.search.ids.campaignId)
+  })
+  it('a by-date row holds two ISO dates or two dashes, never one of each', () => {
+    for (const r of legsRows().filter((x) => x[0] === 'by-date')) {
+      const filled = [r[3], r[4]].map((v) => ISO.test(v))
+      expect(filled[0], r[2]).toBe(filled[1])
+      if (!filled[0]) expect([r[3], r[4]], r[2]).toEqual(['-', '-'])
     }
   })
-  it('every row the routine can read (`live`) names a registered campaign with a read plan; staged rows name none', () => {
+  it('every row the routine can read (`live`, or by-date with both dates) names a registered campaign with a read plan', () => {
+    restoreFlight3() // the REAL registry: the rows are checked against what the deployed code registers
     for (const r of legsRows()) {
-      if (r[0] === 'live') {
+      const readable = r[0] === 'live' || (r[0] === 'by-date' && ISO.test(r[3]) && ISO.test(r[4]))
+      if (readable) {
         expect(campaignById(r[1]), r[1]).toBeDefined()
         expect(ADS_READ_PLANS[r[1]], r[1]).toBeDefined()
       }
-      if (r[0] === 'staged') {
-        expect(campaignById(r[1]), r[1]).toBeUndefined()
-        expect(ADS_READ_PLANS[r[1]], r[1]).toBeUndefined()
-      }
+    }
+  })
+  it('a by-date row with dashes is not registered, and no row carries a placeholder or the old staged status', () => {
+    restoreFlight3()
+    for (const r of legsRows().filter((x) => x[0] === 'by-date' && x[3] === '-')) {
+      expect(campaignById(r[1]), r[1]).toBeUndefined()
+      expect(ADS_READ_PLANS[r[1]], r[1]).toBeUndefined()
+    }
+    for (const r of legsRows()) {
+      expect(r[0], r[2]).not.toBe('staged')
+      expect(r.join('|'), r[2]).not.toMatch(/<[^>]*>/)
     }
   })
   it('flight 2\'s rows are past, since the 10-11 read window ended', () => {
@@ -397,19 +415,41 @@ describe('runbook LEGS table', () => {
     expect(f2).toHaveLength(2)
     for (const r of f2) expect(r[0], r[2]).toBe('past')
   })
-  it('Part A selects only `live` rows, and the staged status is documented as never read', () => {
+  it('Part A selects live rows and by-date rows with both dates; a by-date row with dashes is documented as never read', () => {
     expect(RUNBOOK).toContain('Part A reads every `live` row whose read window contains')
-    expect(RUNBOOK).toMatch(/`staged` rows are never read/)
+    expect(RUNBOOK).toMatch(/and every `by-date` row\nwhose Flight start and Flight end both hold a YYYY-MM-DD date/)
+    expect(RUNBOOK).toMatch(/A staged `by-date` row \(dates\n`-`\) is never read, by any part, in any mode/)
+    expect(RUNBOOK).not.toMatch(/`staged` rows are never read/)
+  })
+  it('step 0.2 and Part B derive the flight 3 reports from the dates: wrapup on end + 7, day15 on end + 15', () => {
+    expect(RUNBOOK).toMatch(/`wrapup` when DATE is Flight end \+ 7 and `day15` when DATE is Flight end \+ 15/)
+    expect(RUNBOOK).not.toMatch(/\| F3 (apps|search) \| (wrapup|day15) \|/) // no hand-written Part B rows
+  })
+  it('the activation steps are the dates plus the manual steps; the old hand edits are gone', () => {
+    const i = RUNBOOK.indexOf('### To activate flight 3')
+    const section = RUNBOOK.slice(i, RUNBOOK.indexOf('## Step 0:'))
+    expect(section).toMatch(/STAGED_FLIGHT_3_DATES/)
+    expect(section).toMatch(/07:05 ET/)
+    expect(section).toMatch(/D \+ 21 and D \+ 35 purchase reads/)
+    expect(section).not.toMatch(/stagedCampaign\(|stagedReadPlan\(|flip the status/)
+  })
+  it('does not say the Apps arm starts on v1.99.0, and rule 3 is not described as always NOT COMPUTABLE', () => {
+    expect(RUNBOOK).not.toMatch(/v1\.99\.0/)
+    expect(RUNBOOK).toMatch(/Apps started ahead of the Play release/)
+    expect(RUNBOOK).not.toMatch(/Play production day of whichever build/)
+    expect(RUNBOOK).not.toMatch(/always reads NOT COMPUTABLE/)
+    expect(RUNBOOK).toMatch(/does NOT always read NOT COMPUTABLE/)
+  })
+  it('the day 1-2 tracking check is documented as applying from the moment an arm\'s dates are filled', () => {
+    expect(RUNBOOK).toMatch(/From the moment the dates are filled/)
+    expect(RUNBOOK).toMatch(/Day 1-2 tracking check/)
   })
 })
 
 describe('runbook LEGS rows track STAGED_FLIGHT_3_DATES', () => {
-  // SKIPPED until leg 3 rewrites the runbook LEGS rows to the by-date format (leg 3 of the flight 3 id registration;
-  // see HANDOFF-f3ids.md): `| by-date | <campaign id> | F3 apps (...) | - | - | start+1..end+1 | none |`, where `-` means the
-  // arm's date is null (staged) and a YYYY-MM-DD cell is the same date as STAGED_FLIGHT_3_DATES. When leg 3 lands the new
-  // rows, change `it.skip` to `it`, and update the 'runbook LEGS table' tests above (the F3 rows now carry real ids and
-  // status by-date; "Part A reads every `live` row ..." text changes with them).
-  it.skip('each F3 row carries the arm real campaign id and exactly the dates in STAGED_FLIGHT_3_DATES (`-` is null)', () => {
+  // The by-date format: `| by-date | <campaign id> | F3 apps (...) | <start or -> | <end or -> | start+1..end+1 | none |`,
+  // where `-` is a null date (staged) and a YYYY-MM-DD cell is the same date as STAGED_FLIGHT_3_DATES.
+  it('each F3 row carries the arm real campaign id and exactly the dates in STAGED_FLIGHT_3_DATES (`-` is null)', () => {
     const f3 = legsRows().filter((r) => /F3/.test(r[2]))
     expect(f3).toHaveLength(2)
     for (const [arm, label] of [['apps', 'F3 apps'], ['search', 'F3 search']] as const) {
@@ -419,6 +459,23 @@ describe('runbook LEGS rows track STAGED_FLIGHT_3_DATES', () => {
       const cell = (v: string) => (v === '-' ? null : v)
       expect([cell(row[3]), cell(row[4])], label).toEqual([STAGED_FLIGHT_3_DATES[arm].flightStart, STAGED_FLIGHT_3_DATES[arm].flightEnd])
     }
+  })
+  it('both arms are live for 2026-10-17..2026-10-23 (the committed activation): D-days, read window, end', () => {
+    restoreFlight3() // the REAL registry, with the committed dates
+    for (const arm of ['apps', 'search'] as const) {
+      expect(STAGED_FLIGHT_3_DATES[arm], arm).toEqual({ flightStart: '2026-10-17', flightEnd: '2026-10-23' })
+      expect(stagedArmIsLive(arm), arm).toBe(true)
+      const c = campaignById(STAGED_FLIGHT_3[arm].ids.campaignId)!
+      expect(c.flightStart, arm).toBe('2026-10-17')
+      expect(c.flightEnd, arm).toBe('2026-10-23')
+      const plan = ADS_READ_PLANS[c.id]
+      expect(plan.morningReadFirstEt, arm).toBe('2026-10-18')
+      expect(plan.morningReadLastEt, arm).toBe('2026-10-24')
+    }
+  })
+  it('the Apps read caveat is one constant in the report code and the runbook states it in the same words', () => {
+    expect(APPS_PLAY_RELEASE_CAVEAT).toMatch(/older Play app.*untagged until v1\.99\.2 reaches Play/)
+    expect(RUNBOOK).toContain('Until the Play release ships, Apps-arm installs get the older Play app; in-app\nsign-ins after 30 minutes are untagged until v1.99.2 reaches Play.')
   })
 })
 

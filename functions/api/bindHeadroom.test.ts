@@ -233,9 +233,9 @@ async function measure(extra: number, ringDims?: string[]): Promise<Measured> {
   let heavy = await ringCase(ringDims, 'heaviest ring')
   if (!givenRing) {
     // Step 3: the per-dim costs are not additive (a dim that is cheap beside [region, country] can cost more in a full ring, because
-    // the clauses share prefilters and the registry CTEs), so the top-8 ring is only a start. Swap in the next few costliest dims
+    // the clauses share prefilters and the registry CTEs), so the top-8 ring is only a start. Swap in the costliest dims (the next few and any swapped out)
     // for any member while that makes the ring heavier, up to two passes: the sweep then finds the byte worst without a hand-kept ring.
-    const pool = dimCosts.slice(RING_DIMS_HARD_CAP, RING_DIMS_HARD_CAP + SWAP_POOL).map((c) => c.dim)
+    const pool = dimCosts.slice(0, RING_DIMS_HARD_CAP + SWAP_POOL).map((c) => c.dim) // the top dims too: a dim swapped out can come back in
     for (let pass = 0; pass < 2; pass++) {
       let improved = false
       for (let i = 0; i < heavy.dims.length; i++) {
