@@ -411,8 +411,8 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
   'measurement-change-note': {
     id: 'measurement-change-note',
     text: () => {
-      const c = markedChanges().pop()
-      return c ? `From ${c.dateEt} (${c.id}): ${c.note}. Do not read the rise as performance.` : `Measurement change (${MEASUREMENT_CHANGES[0].id}, date not set yet): ${MEASUREMENT_CHANGES[0].note}.`
+      const marked = markedChanges()
+      return marked.length > 0 ? `${marked.map((c) => `From ${c.dateEt} (${c.id}): ${c.note}.`).join(' ')} Do not read the rise as performance.` : `Measurement change (${MEASUREMENT_CHANGES[0].id}, date not set yet): ${MEASUREMENT_CHANGES[0].note}.`
     },
     kind: 'note',
     severity: 'caveat',

@@ -134,3 +134,52 @@ describe('once the date is set', () => {
     expect(allChartNotes(w, null, null).some((n) => JSON.stringify(n).includes(NOTE_ID))).toBe(true)
   })
 })
+
+describe('the Play release of v1.99.2 (second entry, own date)', () => {
+  const play = MEASUREMENT_CHANGES[1]
+  const PLAY_SHIPPED = play.dateEt
+  const WEB_DAY = '2099-01-10'
+  const PLAY_DAY = '2099-01-14'
+  afterEach(() => {
+    play.dateEt = PLAY_SHIPPED
+  })
+
+  it('is listed after the web entry and ships undated', () => {
+    expect(play.id).toBe('v1.99.2 Play')
+    expect(play.note).toMatch(/^Play release of v1\.99\.2: Apps-arm installs get the new app and in-app sign-ins carry the first-touch tag/)
+    expect(PLAY_SHIPPED).toBeNull()
+  })
+
+  it('while undated it shows nowhere, even with the web entry dated', () => {
+    change.dateEt = WEB_DAY
+    expect(markedChanges().map((c) => c.id)).toEqual([change.id])
+    expect(datedReleases().some((r) => r.version === play.id)).toBe(false)
+    expect(releaseItems().some((m) => m.label === play.id)).toBe(false)
+    expect(measurementReportLines('2099-01-20').join('\n')).not.toContain(play.id)
+    expect(noteRawText(NOTE_ID)).not.toContain(play.id)
+  })
+
+  it('once dated it is on the timeline, in the report and in the generic caveat under the tagged cards', () => {
+    play.dateEt = PLAY_DAY
+    expect(markedChanges().map((c) => c.id)).toEqual([play.id]) // the web entry is still undated
+    expect(datedReleases().find((r) => r.version === play.id)).toMatchObject({ dateEt: PLAY_DAY, note: play.note })
+    expect(releaseItems().some((m) => m.label === play.id && m.date === PLAY_DAY)).toBe(true)
+    expect(measurementReportLines(PLAY_DAY)).toEqual([`MEASUREMENT CHANGE TODAY, ${play.id}: ${play.note}`])
+    expect(measurementReportLines('2099-01-20')).toEqual([`Measurement change since ${PLAY_DAY}, ${play.id}: ${play.note}`])
+    expect(isNoteActive(NOTE_ID)).toBe(true)
+    expect(noteRawText(NOTE_ID)).toContain(`From ${PLAY_DAY} (${play.id}): ${play.note}.`)
+    const w = widget({ card: { preset: 'campaign-scorecard' } })
+    expect(autoCaveatIds(w)).toContain(NOTE_ID)
+  })
+
+  it('both dated: both listed oldest first, the caveat names both days, one "do not read" line', () => {
+    change.dateEt = WEB_DAY
+    play.dateEt = PLAY_DAY
+    expect(markedChanges().map((c) => c.id)).toEqual([change.id, play.id])
+    expect(measurementReportLines('2099-01-20')).toHaveLength(2)
+    const text = noteRawText(NOTE_ID)
+    expect(text).toContain(`From ${WEB_DAY} (${change.id})`)
+    expect(text).toContain(`From ${PLAY_DAY} (${play.id})`)
+    expect(text.match(/not read the rise as performance/g)).toHaveLength(1)
+  })
+})

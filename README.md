@@ -70,7 +70,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   no app-version column; major releases get a labelled line, minor ones a short tick).
   [`src/lib/measurementChanges.ts`](src/lib/measurementChanges.ts) marks a day when *how we count*
   changed (v1.99.2's sign-in first-touch fallback): its one `dateEt` is entered by hand once the
-  version is live, and stays `null` until then, when nothing shows. Once set, the timeline marks the
+  version is live, and stays `null` until then, when nothing shows. The Play release of v1.99.2 is a
+  second entry with its own `dateEt` (the notes registry has no per-arm targeting, so it uses the
+  same caveat under the tagged cards, listing both days). Once set, the timeline marks the
   day, the tagged auth-success and new-account cards carry a caveat that the rise is partly
   measurement, and the ads read reports print a marker line on that day and a "since" line after it.
   Best Sudoku / Campaigns (its funnel, country, cost and return-visits panels are metric

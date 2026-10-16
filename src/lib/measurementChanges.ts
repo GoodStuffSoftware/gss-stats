@@ -7,6 +7,11 @@
 // ET calendar day (YYYY-MM-DD). While it is null NOTHING shows anywhere: no timeline marker, no
 // card caveat, no read-report line (the ads-cloud-daily routine's judge line is inert then too).
 //
+// The Play release of v1.99.2 is a second entry with its own date, entered the same way once that
+// build is live on Play (it reaches the Apps arm, not the web arm). The notes registry has no
+// per-arm targeting, so its caveat is the generic one under the tagged new-account cards, listed
+// together with the web entry once each is dated.
+//
 // Where it shows once set: the Overview timeline (lib/releases.ts RELEASES), a caveat under the
 // tagged new-account and auth-success cards (lib/notes.ts 'measurement-change-note'), and the ads
 // read reports (scripts/ads-reads/report.ts).
@@ -26,6 +31,11 @@ export const MEASUREMENT_CHANGES: MeasurementChange[] = [
     id: 'v1.99.2',
     dateEt: null,
     note: 'sign-in first-touch fallback starts; the tagged new-account jump is partly measurement',
+  },
+  {
+    id: 'v1.99.2 Play',
+    dateEt: null,
+    note: 'Play release of v1.99.2: Apps-arm installs get the new app and in-app sign-ins carry the first-touch tag from here',
   },
 ]
 

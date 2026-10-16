@@ -185,19 +185,22 @@ export const RELEASES: ReleaseMarker[] = [
     // Not `major`: same ET day as v1.97.0's labelled go-live marker (see above).
     note: 'Organic first-touch return count goes live; ad click ids not counted as organic; starting a real game ends the welcome tour',
   },
-  {
-    // A measurement change, not a feature: its date and note come from lib/measurementChanges.ts
-    // (the one place the date is entered). Getters, so the entry follows that config: while the
-    // date is null this is undated and datedReleases() drops it, so nothing shows on the timeline.
-    version: MEASUREMENT_CHANGES[0].id,
-    get dateEt() {
-      return MEASUREMENT_CHANGES[0].dateEt
-    },
-    get note() {
-      return MEASUREMENT_CHANGES[0].note
-    },
-    major: true,
-  },
+  // Measurement changes, not features: each one's date and note come from lib/measurementChanges.ts
+  // (the one place the date is entered; the web and the Play release of v1.99.2). Getters, so an entry
+  // follows that config: while its date is null it is undated and datedReleases() drops it, so nothing
+  // shows on the timeline.
+  ...MEASUREMENT_CHANGES.map(
+    (c): ReleaseMarker => ({
+      version: c.id,
+      get dateEt() {
+        return c.dateEt
+      },
+      get note() {
+        return c.note
+      },
+      major: true,
+    }),
+  ),
 ]
 
 export type DatedRelease = ReleaseMarker & { dateEt: string }
