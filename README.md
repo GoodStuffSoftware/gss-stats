@@ -91,6 +91,13 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   `flightDay` × `campaignFlight` with `cumulative` running totals dashed on a right-hand axis.
   A `campaignFlight` breakdown draws every beacon-tracked campaign with a start date, one with
   no arrivals yet at 0, and the flight-day axis runs to the longest of those flights.
+  The funnel card also carries the signed-out upsell fix's pre/post-fix segment table, which
+  appears on its own once `UPSELL_SIGNEDOUT_FIX_AT` is set. Since layout version 11 no page has a
+  bespoke panel left: the former panel bodies and their endpoints (`/api/campaigns`,
+  `/api/overview`) are retired, and a saved layout's panels are swapped in place on load — see
+  [`src/lib/defaults.ts`](src/lib/defaults.ts) `migratePanelsV11`)
+  and Best Sudoku / Traffic (per-site/geo/referrer/device detail beyond what Overview and
+  Campaigns cover) round out the Best Sudoku group, in that order (see *Page navigation* below).
   Below the notes, "Flight 3 Apps: No ads (hero) vs Features" is a donut of the Apps arm's arrivals
   per ad landing tag (`landingTag`: `sudoku_funnel_f3_apps_hero` "No ads (hero)",
   `sudoku_funnel_f3_apps_feat` "Features", and the bare `sudoku_funnel_f3_apps` as a small "Untagged"
@@ -102,13 +109,6 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   (not yet in `CAMPAIGNS`) the card reads "Flight 3 isn't live yet" and sends no query; it fills in
   when the arm is activated. Like every `/return/` read it is whole ET days and never split by hour,
   place or device. The card is in the defaults only; a saved layout gets it by adding the widget.
-  The funnel card also carries the signed-out upsell fix's pre/post-fix segment table, which
-  appears on its own once `UPSELL_SIGNEDOUT_FIX_AT` is set. Since layout version 11 no page has a
-  bespoke panel left: the former panel bodies and their endpoints (`/api/campaigns`,
-  `/api/overview`) are retired, and a saved layout's panels are swapped in place on load — see
-  [`src/lib/defaults.ts`](src/lib/defaults.ts) `migratePanelsV11`)
-  and Best Sudoku / Traffic (per-site/geo/referrer/device detail beyond what Overview and
-  Campaigns cover) round out the Best Sudoku group, in that order (see *Page navigation* below).
 - **Movable / composable charts** — drag the header, resize from the corner; add /
   edit / duplicate / delete charts of any type: stat, bar, horizontal bar, stacked
   bar, **breakdown bar** (one dimension on the axis × another as the series, grouped or

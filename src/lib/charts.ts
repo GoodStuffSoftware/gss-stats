@@ -38,10 +38,10 @@ const LINE = '#E7E2D7'
 const STABLE_COLORS: Record<string, Record<string, string>> = {
   device: { desktop: PALETTE[0], mobile: PALETTE[1], tablet: PALETTE[2], tv: PALETTE[5], bot: PALETTE[7] },
   visitor: { returning: PALETTE[0], new: PALETTE[1] },
-  // Pop-up outcomes: shown is the brand hue, then one fixed color per tap/outcome, so the same
-  // series reads the same on every breakdown chart. Install's raw signals share muted tones.
   // The hero-vs-features donut: one fixed color per landing tag (the bare tag is a muted grey).
   landingTag: Object.fromEntries(LANDING_TAGS.map((t, i) => [t.tag, i === LANDING_TAGS.length - 1 ? PALETTE[7] : PALETTE[i === 0 ? 1 : 0]])),
+  // Pop-up outcomes: shown is the brand hue, then one fixed color per tap/outcome, so the same
+  // series reads the same on every breakdown chart. Install's raw signals share muted tones.
   popupOutcome: {
     shown: PALETTE[0],
     accept: PALETTE[1],
