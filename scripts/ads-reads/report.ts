@@ -29,6 +29,7 @@ import { GAME_START_DIFFICULTIES, POPUP_OUTCOME_TYPES, TOUR_EXIT_STEPS, TUTORIAL
 import { RAW_INSTALL_SIGNALS_LABEL } from '../../src/lib/campaigns'
 import { measurementReportLines } from '../../src/lib/measurementChanges'
 import { noteRawText } from '../../src/lib/notes'
+import { ruleReadoutLine, type Flight3Block } from '../../src/lib/flight3Rules'
 import type { DiagnosticsSection, FullRead, MorningResult, PostflightResult, SpendSection } from './read'
 import type { FirebaseCounts } from './firebase'
 import type { TagSplit } from '../../src/lib/tagSplit'
@@ -141,12 +142,26 @@ export function tagSplitLines(sp: TagSplit | null | undefined): string[] {
   return out
 }
 
-export function fullReadLines(r: FullRead, title: string, opts: { postflight?: boolean } = {}): string[] {
+const proposalText = (proposal: string | null, serving: string) => proposal ?? `none: campaign ${serving === 'ended' ? 'ended' : serving === 'paused' ? 'paused' : 'not serving'}, nothing to pause`
+
+/** The flight 3 rules block, printed on every F3 morning read: nine numbered rule lines and the
+ * proposal. Proposals only: nothing here pauses a campaign. */
+export function flight3RulesLines(b: Flight3Block): string[] {
+  const tripped = b.tripped.map((x) => `rule ${x} ${b.readouts[x - 1].name}`).join(', ')
+  const proposal = b.proposal === 'PROPOSE PAUSE' ? `PROPOSE PAUSE (${tripped})` : proposalText(b.proposal, b.servingState)
+  return ['F3 rules (proposals only; nothing is paused):', ...b.readouts.map(ruleReadoutLine), `Proposal: ${proposal}`]
+}
+
+export function fullReadLines(r: FullRead, title: string, opts: { postflight?: boolean; f3Block?: boolean } = {}): string[] {
   const promoNote = promoArmNoteApplies(r, !!opts.postflight)
   const out: string[] = [`=== ${title} (cumulative ${money(r.cumulativeSpend)}, closed days through ${r.spendThroughEt ?? '—'}) — ${r.complete ? 'complete' : 'INCOMPLETE, retried next run'} ===`]
-  out.push('Kill rules (propose only; nothing is changed):')
-  for (const rule of r.kill.rules) out.push(ruleLine(rule))
-  out.push(`Proposal: ${r.kill.proposal ?? `none: campaign ${r.kill.servingState === 'ended' ? 'ended' : r.kill.servingState === 'paused' ? 'paused' : 'not serving'}, nothing to pause`}`)
+  if (r.f3Rules && opts.f3Block) out.push('Kill rules and Proposal: see the F3 rules block above (rules 1-4).')
+  else {
+    out.push('Kill rules (propose only; nothing is changed):')
+    if (r.f3Rules) for (const x of r.f3Rules) out.push(ruleReadoutLine(x))
+    else for (const rule of r.kill.rules) out.push(ruleLine(rule))
+    out.push(`Proposal: ${proposalText(r.kill.proposal, r.kill.servingState)}`)
+  }
   if (r.kill.rules.some((x) => x.id === 'placement-leak' && x.status === 'n/a')) out.push(`Placements: ${SEARCH_NA}`)
   else if (r.placements) {
     out.push(
@@ -208,7 +223,7 @@ export function fullReadLines(r: FullRead, title: string, opts: { postflight?: b
     if (flag) out.push(`  ${flag}`)
   } else out.push('Accounts: not read (no --firebase-sa)')
   if (r.decision) {
-    out.push(`Decision table (spec section 13): row ${r.decision.row}; ${r.decision.label}`)
+    out.push(r.decision.row.startsWith('f3-') ? `Decision (flight 3 table, spec section 2): row ${r.decision.row}; ${r.decision.label}` : `Decision table (spec section 13): row ${r.decision.row}; ${r.decision.label}`)
     out.push(`  reading: ${r.decision.reading}`)
     out.push(`  next: ${r.decision.next}`)
   }
@@ -259,12 +274,13 @@ export function formatMorningReport(r: MorningResult): string {
     const t = r.tagged
     out.push(
       t.ok
-        ? `Tagged so far: ${n(t.cumulative!.taggedArrivals)} arrivals (floor), ${n(t.cumulative!.taggedHits)} hits, ${n(t.cumulative!.asks)} asks, ${n(t.cumulative!.accepts)} accepts, ${n(t.cumulative!.authSuccess)} auth successes; yesterday ${n(t.yesterday!.taggedArrivals)} arrivals, ${n(t.yesterday!.asks)} asks; ${trackingCheckCounts(t.cumulative!, t.yesterday!)}`
+        ? `Tagged so far: ${n(t.cumulative!.taggedArrivals)} arrivals (floor), ${n(t.cumulative!.taggedHits)} hits, ${n(t.cumulative!.asks)} asks, ${n(t.cumulative!.accepts)} accepts, ${n(t.cumulative!.authSuccess)} auth successes; yesterday ${n(t.yesterday!.taggedArrivals)} arrivals, ${n(t.yesterday!.asks)} asks; ${trackingCheckCounts(t.cumulative!, t.yesterday!)}${r.flight3 ? `; cost per complete row ${money(r.flight3.costPerRow.cumulative)} (yesterday ${money(r.flight3.costPerRow.yesterday)})` : ''}`
         : `Tagged: NOT READ (${t.error})`,
     )
     out.push(...tagSplitLines(r.tagSplit))
     if (r.preflightGate) out.push(r.preflightGate.ok ? preflightGateLine(r.preflightGate.counts) : `Pre-flight gate: NOT READ (${r.preflightGate.error})`)
     out.push(...firstSessionLines(r.firstSession))
+    if (r.flight3) out.push(...flight3RulesLines(r.flight3))
     const th = r.thresholds
     out.push(
       th.crossedNow.length
@@ -287,7 +303,7 @@ export function formatMorningReport(r: MorningResult): string {
   if (diag.length) out.push('', ...diag)
   const playLines = playReportsLines(r.playReports)
   if (playLines.length) out.push('', ...playLines)
-  if (r.thresholdRead) out.push('', ...fullReadLines(r.thresholdRead, `THRESHOLD READ at $${Math.max(...r.thresholdRead.thresholds)}`))
+  if (r.thresholdRead) out.push('', ...fullReadLines(r.thresholdRead, `THRESHOLD READ at $${Math.max(...r.thresholdRead.thresholds)}`, { f3Block: !!r.flight3 }))
   out.push('', storeLine(r))
   out.push(`Errors: ${r.errors.length ? r.errors.join(' | ') : 'none'}`)
   out.push(`Push: ${r.notify.push ? `YES (${r.notify.reason}): ${r.notify.text}` : `no (${r.notify.reason})`}${r.notify.busCopy ? ' + bus copy' : ''}`)

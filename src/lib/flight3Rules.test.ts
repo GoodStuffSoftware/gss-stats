@@ -1,0 +1,315 @@
+// Flight 3's rule readouts (src/lib/flight3Rules.ts): every rule's PASS / PROPOSE PAUSE / NOT YET /
+// NO DATA state at flight days 1, 2, 3 and 8 for both arms, the go / iterate / stop table, and the
+// numbered line shape. Pure functions of made-up counts: no network, no credentials.
+import { describe, expect, it } from 'vitest'
+import type { RuleResult } from './adsRules'
+import {
+  buildFlight3Rules,
+  costPerCompleteRow,
+  decideFlight3,
+  F3_VALIDITY_ASKS,
+  flight3VerdictWord,
+  flightDayOf,
+  killRuleReadout,
+  ruleReadoutLine,
+  type Flight3RulesInput,
+  type ReadoutVerdict,
+  type RuleReadout,
+} from './flight3Rules'
+import type { StagedArm } from './campaigns'
+
+const DAYS = [1, 2, 3, 8] as const
+const ARMS: StagedArm[] = ['search', 'apps']
+
+const kill = (id: RuleResult['id'], status: RuleResult['status'], value: number | null = null, limit = 0.01): RuleResult => ({ id, label: id, status, value, limit, detail: `${id} ${status}` })
+const KILLS_CLEAR: RuleResult[] = [kill('placement-leak', 'clear', 0.02, 0.1), kill('ctr', 'clear', 0.02, 0.01), kill('funnel-reach', 'clear', 4, 1), kill('hard-cap', 'clear', 20, 70)]
+
+const tagged = (o: Partial<NonNullable<Flight3RulesInput['tagged']>> = {}) => ({ taggedArrivals: 100, completeRows: 40, flight3Asks: 5, coachShownPlace: 5, ...o })
+const input = (arm: StagedArm, flightDay: number, o: Partial<Flight3RulesInput> = {}): Flight3RulesInput => ({
+  arm,
+  flightDay,
+  killRules: KILLS_CLEAR,
+  servingState: 'serving',
+  spendOk: true,
+  closedSpend: 40,
+  tagged: tagged(),
+  closedCompletes: 40,
+  firstSession: { firstMove: 30, arrivals: 100 },
+  signUps: { count: 3, note: 'exact' },
+  ...o,
+})
+const rule = (b: ReturnType<typeof buildFlight3Rules>, n: number): RuleReadout => b.readouts[n - 1]
+const verdictOf = (arm: StagedArm, day: number, n: number, o: Partial<Flight3RulesInput> = {}): ReadoutVerdict => rule(buildFlight3Rules(input(arm, day, o)), n).verdict
+
+describe('line shape', () => {
+  it('prints Rule <n> · <name>: <number> | threshold <t> → <verdict>', () => {
+    expect(ruleReadoutLine({ n: 6, name: 'cost per complete row', number: '$2.00 per complete row', threshold: 'at most $3.00 a complete row', verdict: 'PASS' })).toBe(
+      'Rule 6 · cost per complete row: $2.00 per complete row | threshold at most $3.00 a complete row → PASS',
+    )
+  })
+  it('an n/a rule has no threshold or verdict', () => {
+    expect(ruleReadoutLine({ n: 7, name: 'first-move row ratio', number: 'n/a (Apps arm only)', threshold: null, verdict: 'n/a' })).toBe('Rule 7 · first-move row ratio: n/a (Apps arm only)')
+  })
+  it('the block always has rules 1-9 in order, for both arms on every judged day', () => {
+    for (const arm of ARMS)
+      for (const day of DAYS) {
+        const b = buildFlight3Rules(input(arm, day))
+        expect(b.readouts.map((r) => r.n)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9])
+        expect(b.flightDay).toBe(day)
+        expect(b.arm).toBe(arm)
+        expect(rule(b, 7).verdict === 'n/a').toBe(arm === 'search')
+      }
+  })
+})
+
+describe('killRuleReadout (rules 1-4)', () => {
+  it('maps each coded status to a readout verdict', () => {
+    expect(killRuleReadout(kill('ctr', 'trip', 0.0005, 0.01))).toMatchObject({ n: 2, name: 'CTR', verdict: 'PROPOSE PAUSE' })
+    expect(killRuleReadout(kill('ctr', 'clear', 0.02, 0.01))).toMatchObject({ n: 2, verdict: 'PASS' })
+    expect(killRuleReadout(kill('ctr', 'not-armed'))).toMatchObject({ n: 2, verdict: 'NOT YET' })
+    expect(killRuleReadout(kill('ctr', 'no-data'))).toMatchObject({ n: 2, verdict: 'NO DATA' })
+    expect(killRuleReadout(kill('funnel-reach', 'watch', 1, 1))).toMatchObject({ n: 3, verdict: 'PASS' })
+  })
+  it('the hard cap is always armed: not-armed reads PASS, not NOT YET', () => {
+    expect(killRuleReadout(kill('hard-cap', 'not-armed', 5, 70))).toMatchObject({ n: 4, name: 'hard cap', verdict: 'PASS' })
+    expect(killRuleReadout(kill('hard-cap', 'trip', 70, 70))).toMatchObject({ n: 4, verdict: 'PROPOSE PAUSE' })
+    expect(killRuleReadout(kill('hard-cap', 'no-data'))).toMatchObject({ n: 4, number: 'campaign status unreadable', verdict: 'NO DATA' })
+  })
+  it('an n/a rule (placement leak on Search) has no threshold', () => {
+    const r = killRuleReadout(kill('placement-leak', 'n/a'))
+    expect(r).toMatchObject({ n: 1, threshold: null, verdict: 'n/a' })
+  })
+  it('names the number and the threshold', () => {
+    expect(killRuleReadout(kill('placement-leak', 'clear', 0.034, 0.1))).toMatchObject({ number: '3.4% of spend outside the approved list', threshold: 'at most 10% of spend outside the approved list' })
+    expect(killRuleReadout(kill('funnel-reach', 'clear', 2, 1), { taggedArrivals: 40 })).toMatchObject({ number: '2 asks from 40 tagged arrivals', threshold: 'at least 1 tagged sign-in ask' })
+    expect(killRuleReadout(kill('hard-cap', 'clear', 20, 70))).toMatchObject({ number: '$20.00 of $70.00', threshold: 'under $70.00' })
+  })
+  it('a rule the caller did not supply reads NO DATA, not a silent gap', () => {
+    const b = buildFlight3Rules(input('search', 3, { killRules: [kill('hard-cap', 'clear', 10, 70)] }))
+    expect(rule(b, 1)).toMatchObject({ verdict: 'NO DATA', number: 'not evaluated' })
+    expect(rule(b, 2).verdict).toBe('NO DATA')
+    expect(rule(b, 4).verdict).toBe('PASS')
+  })
+})
+
+describe('rule 5: tracking check', () => {
+  it('Search: day 1 is always NOT YET', () => {
+    expect(verdictOf('search', 1, 5, { tagged: tagged({ completeRows: 50, flight3Asks: 0 }) })).toBe('NOT YET')
+    expect(verdictOf('search', 1, 5, { tagged: null })).toBe('NOT YET')
+  })
+  it.each([2, 3, 8])('Search day %i: 10+ completes with 0 ask rows proposes a pause, with an ask passes', (day) => {
+    expect(verdictOf('search', day, 5, { tagged: tagged({ completeRows: 10, flight3Asks: 0 }) })).toBe('PROPOSE PAUSE')
+    expect(verdictOf('search', day, 5, { tagged: tagged({ completeRows: 10, flight3Asks: 1 }) })).toBe('PASS')
+    expect(verdictOf('search', day, 5, { tagged: tagged({ completeRows: 200, flight3Asks: 0 }) })).toBe('PROPOSE PAUSE')
+  })
+  it('Search: under 10 completes is NOT YET on days 1-2 and NO DATA from day 3', () => {
+    const t = tagged({ completeRows: 9, flight3Asks: 0 })
+    expect(verdictOf('search', 2, 5, { tagged: t })).toBe('NOT YET')
+    expect(verdictOf('search', 3, 5, { tagged: t })).toBe('NO DATA')
+    expect(verdictOf('search', 8, 5, { tagged: t })).toBe('NO DATA')
+    expect(rule(buildFlight3Rules(input('search', 3, { tagged: t })), 5).number).toContain('too few rows to judge')
+  })
+  it.each([2, 3, 8])('Apps day %i: 30+ arrivals with 0 /coach/shown/place rows proposes a pause, with coach rows passes', (day) => {
+    expect(verdictOf('apps', day, 5, { tagged: tagged({ taggedArrivals: 30, coachShownPlace: 0 }) })).toBe('PROPOSE PAUSE')
+    expect(verdictOf('apps', day, 5, { tagged: tagged({ taggedArrivals: 30, coachShownPlace: 1 }) })).toBe('PASS')
+  })
+  it('Apps: day 1 NOT YET; under 30 arrivals NOT YET on day 2 and NO DATA from day 3', () => {
+    expect(verdictOf('apps', 1, 5, { tagged: tagged({ taggedArrivals: 90, coachShownPlace: 0 }) })).toBe('NOT YET')
+    const t = tagged({ taggedArrivals: 29, coachShownPlace: 0 })
+    expect(verdictOf('apps', 2, 5, { tagged: t })).toBe('NOT YET')
+    expect(verdictOf('apps', 3, 5, { tagged: t })).toBe('NO DATA')
+    expect(verdictOf('apps', 8, 5, { tagged: t })).toBe('NO DATA')
+  })
+  it.each(ARMS)('%s: a failed tagged read is NO DATA from day 2', (arm) => {
+    expect(verdictOf(arm, 2, 5, { tagged: null })).toBe('NO DATA')
+    expect(verdictOf(arm, 8, 5, { tagged: null })).toBe('NO DATA')
+  })
+  it('names the counts it judged', () => {
+    expect(rule(buildFlight3Rules(input('search', 3, { tagged: tagged({ completeRows: 12, flight3Asks: 0 }) })), 5).number).toBe('12 complete rows, 0 sign-in ask rows')
+    expect(rule(buildFlight3Rules(input('apps', 3, { tagged: tagged({ taggedArrivals: 31, coachShownPlace: 0 }) })), 5).number).toBe('31 tagged arrivals, 0 /coach/shown/place rows')
+  })
+})
+
+describe('rule 6: cost per complete row', () => {
+  it.each(ARMS)('%s: days 1 and 2 are NOT YET whatever the spend', (arm) => {
+    for (const day of [1, 2]) {
+      expect(verdictOf(arm, day, 6, { closedSpend: 50, closedCompletes: 2 })).toBe('NOT YET')
+      expect(verdictOf(arm, day, 6, { closedSpend: 50, closedCompletes: 0 })).toBe('NOT YET')
+    }
+  })
+  it.each(ARMS)('%s: from day 3 over $3 a row proposes a pause, at or under passes', (arm) => {
+    for (const day of [3, 8]) {
+      expect(verdictOf(arm, day, 6, { closedSpend: 20, closedCompletes: 10 })).toBe('PASS')
+      expect(verdictOf(arm, day, 6, { closedSpend: 30, closedCompletes: 10 })).toBe('PASS') // exactly $3.00
+      expect(verdictOf(arm, day, 6, { closedSpend: 40, closedCompletes: 10 })).toBe('PROPOSE PAUSE')
+    }
+  })
+  it.each(ARMS)('%s: 0 complete rows is a pause once spend is over $3, else NO DATA', (arm) => {
+    for (const day of [3, 8]) {
+      expect(verdictOf(arm, day, 6, { closedSpend: 3.01, closedCompletes: 0 })).toBe('PROPOSE PAUSE')
+      expect(verdictOf(arm, day, 6, { closedSpend: 3, closedCompletes: 0 })).toBe('NO DATA')
+    }
+    expect(rule(buildFlight3Rules(input(arm, 3, { closedSpend: 12.5, closedCompletes: 0 })), 6).number).toBe('0 complete rows from $12.50')
+  })
+  it.each(ARMS)('%s: unread spend or rows is NO DATA from day 3', (arm) => {
+    expect(verdictOf(arm, 3, 6, { spendOk: false })).toBe('NO DATA')
+    expect(verdictOf(arm, 8, 6, { closedCompletes: null })).toBe('NO DATA')
+  })
+  it('prints the division it made', () => {
+    expect(rule(buildFlight3Rules(input('search', 3, { closedSpend: 24, closedCompletes: 12 })), 6).number).toBe('$2.00 per complete row ($24.00 / 12 rows)')
+  })
+  it('the block carries cost per row for the Tagged so far line, null under 1 row', () => {
+    expect(buildFlight3Rules(input('apps', 3, { closedSpend: 24, closedCompletes: 12 }), { costPerRowYesterday: 1.5 }).costPerRow).toEqual({ cumulative: 2, yesterday: 1.5 })
+    expect(buildFlight3Rules(input('apps', 3, { closedSpend: 24, closedCompletes: 0 })).costPerRow).toEqual({ cumulative: null, yesterday: null })
+    expect(costPerCompleteRow(10, 0)).toBeNull()
+    expect(costPerCompleteRow(null, 5)).toBeNull()
+    expect(costPerCompleteRow(10, 4)).toBe(2.5)
+  })
+})
+
+describe('rule 7: Apps first-move row ratio', () => {
+  it.each(DAYS)('Search day %i: n/a, no threshold', (day) => {
+    const r = rule(buildFlight3Rules(input('search', day)), 7)
+    expect(r).toMatchObject({ verdict: 'n/a', threshold: null, number: 'n/a (Apps arm only)' })
+  })
+  it('Apps: days 1 and 2 are NOT YET', () => {
+    for (const day of [1, 2]) expect(verdictOf('apps', day, 7, { firstSession: { firstMove: 0, arrivals: 100 } })).toBe('NOT YET')
+  })
+  it.each([3, 8])('Apps day %i: under 20% proposes a pause, 20% and over passes', (day) => {
+    expect(verdictOf('apps', day, 7, { firstSession: { firstMove: 7, arrivals: 40 } })).toBe('PROPOSE PAUSE') // 17.5%
+    expect(verdictOf('apps', day, 7, { firstSession: { firstMove: 8, arrivals: 40 } })).toBe('PASS') // exactly 20%
+    expect(verdictOf('apps', day, 7, { firstSession: { firstMove: 0, arrivals: 40 } })).toBe('PROPOSE PAUSE')
+  })
+  it.each([3, 8])('Apps day %i: under 5 d0 rows or an unread first-session block is NO DATA', (day) => {
+    expect(verdictOf('apps', day, 7, { firstSession: { firstMove: 0, arrivals: 4 } })).toBe('NO DATA')
+    expect(verdictOf('apps', day, 7, { firstSession: { firstMove: null, arrivals: 40 } })).toBe('NO DATA')
+    expect(verdictOf('apps', day, 7, { firstSession: null })).toBe('NO DATA')
+  })
+  it('names the ratio as a row ratio with F2s definition', () => {
+    expect(rule(buildFlight3Rules(input('apps', 3, { firstSession: { firstMove: 8, arrivals: 40 } })), 7).number).toBe("20.0% (8 first-move rows / 40 d0 rows; row ratio, same definition as F2's 6.4%)")
+  })
+})
+
+describe('rule 8: traffic held (derived from rules 2 and 6)', () => {
+  const ctr = (status: RuleResult['status']) => [kill('placement-leak', 'clear', 0.02, 0.1), kill('ctr', status, 0.02, 0.01), kill('funnel-reach', 'clear', 4, 1), kill('hard-cap', 'clear', 20, 70)]
+  it.each(ARMS)('%s: both pass -> PASS', (arm) => {
+    expect(verdictOf(arm, 3, 8, { killRules: ctr('clear'), closedSpend: 20, closedCompletes: 10 })).toBe('PASS')
+    expect(verdictOf(arm, 8, 8, { killRules: ctr('clear'), closedSpend: 20, closedCompletes: 10 })).toBe('PASS')
+  })
+  it.each(ARMS)('%s: a CTR trip or a cost trip proposes a pause', (arm) => {
+    expect(verdictOf(arm, 3, 8, { killRules: ctr('trip'), closedSpend: 20, closedCompletes: 10 })).toBe('PROPOSE PAUSE')
+    expect(verdictOf(arm, 3, 8, { killRules: ctr('clear'), closedSpend: 40, closedCompletes: 10 })).toBe('PROPOSE PAUSE')
+    // a trip outranks a not-yet on the other side
+    expect(verdictOf(arm, 3, 8, { killRules: ctr('not-armed'), closedSpend: 40, closedCompletes: 10 })).toBe('PROPOSE PAUSE')
+  })
+  it.each(ARMS)('%s: days 1 and 2 are NOT YET (rule 6 is not yet judged)', (arm) => {
+    for (const day of [1, 2]) expect(verdictOf(arm, day, 8, { killRules: ctr('not-armed'), closedSpend: 20, closedCompletes: 10 })).toBe('NOT YET')
+  })
+  it('a not-armed CTR keeps it NOT YET even once cost is judged; NO DATA on either side without a trip reads NO DATA', () => {
+    expect(verdictOf('search', 3, 8, { killRules: ctr('not-armed'), closedSpend: 20, closedCompletes: 10 })).toBe('NOT YET')
+    expect(verdictOf('search', 3, 8, { killRules: ctr('no-data'), closedSpend: 20, closedCompletes: 10 })).toBe('NO DATA')
+    expect(verdictOf('search', 3, 8, { killRules: ctr('clear'), spendOk: false })).toBe('NO DATA')
+  })
+  it('is never counted twice: a cost-per-row trip lists rule 6 only, and rule 8 is not in the tripped list', () => {
+    const b = buildFlight3Rules(input('search', 3, { closedSpend: 40, closedCompletes: 10 }))
+    expect(rule(b, 8).verdict).toBe('PROPOSE PAUSE')
+    expect(b.tripped).toEqual([6])
+  })
+})
+
+describe('rule 9: D+7 verdict', () => {
+  it.each(ARMS)('%s: days 1-3 are NOT YET and show what the table would say', (arm) => {
+    for (const day of [1, 2, 3]) {
+      const r = rule(buildFlight3Rules(input(arm, day, { tagged: tagged({ flight3Asks: 25 }), signUps: { count: 6, note: 'exact' } })), 9)
+      expect(r.verdict).toBe('NOT YET')
+      expect(r.number).toContain('running, the table would say GO')
+    }
+  })
+  it.each(ARMS)('%s: day 8 states GO / ITERATE / STOP / INCONCLUSIVE', (arm) => {
+    const v = (count: number, asks: number) => verdictOf(arm, 8, 9, { tagged: tagged({ flight3Asks: asks }), signUps: { count, note: 'exact' } })
+    expect(v(5, 20)).toBe('GO')
+    expect(v(4, 20)).toBe('ITERATE')
+    expect(v(1, 20)).toBe('STOP')
+    expect(v(9, 19)).toBe('INCONCLUSIVE')
+  })
+  it.each(ARMS)('%s: a failed tagged read is NOT YET before day 8 and NO DATA on it', (arm) => {
+    expect(verdictOf(arm, 3, 9, { tagged: null })).toBe('NOT YET')
+    expect(verdictOf(arm, 8, 9, { tagged: null })).toBe('NO DATA')
+    expect(verdictOf(arm, 8, 9, { signUps: null })).toBe('NO DATA')
+  })
+  it('is a verdict, not a pause: it never trips', () => {
+    const b = buildFlight3Rules(input('search', 8, { tagged: tagged({ flight3Asks: 30 }), signUps: { count: 0, note: 'exact' } }))
+    expect(rule(b, 9).verdict).toBe('STOP')
+    expect(b.tripped).toEqual([])
+    expect(b.proposal).toBe('CONTINUE')
+  })
+})
+
+describe('proposal', () => {
+  it('CONTINUE when nothing tripped', () => {
+    for (const arm of ARMS) for (const day of DAYS) expect(buildFlight3Rules(input(arm, day)).proposal).toBe('CONTINUE')
+  })
+  it('PROPOSE PAUSE lists the tripped rules for a serving or unknown-state campaign', () => {
+    const t = tagged({ completeRows: 12, flight3Asks: 0 })
+    const serving = buildFlight3Rules(input('search', 3, { tagged: t, closedSpend: 50, closedCompletes: 12 }))
+    expect(serving.tripped).toEqual([5, 6])
+    expect(serving.proposal).toBe('PROPOSE PAUSE')
+    expect(buildFlight3Rules(input('search', 3, { tagged: t, closedSpend: 50, closedCompletes: 12, servingState: 'unknown' })).proposal).toBe('PROPOSE PAUSE')
+  })
+  it('null (nothing to pause) when rules tripped but the campaign is ended, paused or not serving', () => {
+    const t = tagged({ completeRows: 12, flight3Asks: 0 })
+    for (const servingState of ['ended', 'paused', 'not-serving'] as const) {
+      const b = buildFlight3Rules(input('search', 8, { tagged: t, servingState }))
+      expect(b.tripped).toEqual([5])
+      expect(b.proposal).toBeNull()
+      expect(b.servingState).toBe(servingState)
+    }
+  })
+  it('a coded kill-rule trip (1-4) counts as tripped', () => {
+    const b = buildFlight3Rules(input('apps', 3, { killRules: [kill('placement-leak', 'trip', 0.4, 0.1), ...KILLS_CLEAR.slice(1)] }))
+    expect(b.tripped).toEqual([1])
+    expect(b.proposal).toBe('PROPOSE PAUSE')
+  })
+})
+
+describe('decideFlight3: the go / iterate / stop table', () => {
+  it.each([
+    [0, 20, 'f3-stop'],
+    [1, 20, 'f3-stop'],
+    [2, 20, 'f3-iterate'],
+    [4, 20, 'f3-iterate'],
+    [5, 20, 'f3-go'],
+    [9, 45, 'f3-go'],
+    [0, 500, 'f3-stop'],
+  ])('%i new accounts with %i asks -> %s', (accounts, asks, row) => {
+    expect(decideFlight3(accounts, asks).row).toBe(row)
+  })
+  it.each([0, 1, 2, 4, 5, 12])('%i new accounts under %i asks is inconclusive, whatever the count', (accounts) => {
+    expect(decideFlight3(accounts, F3_VALIDITY_ASKS - 1).row).toBe('f3-inconclusive')
+    expect(decideFlight3(accounts, 0).row).toBe('f3-inconclusive')
+  })
+  it('puts the figure and the next step in the result, proposal only', () => {
+    const go = decideFlight3(5, 30)
+    expect(go.reading).toContain('5 new accounts')
+    expect(go.reading).toContain('30 ask rows')
+    expect(go.next).toContain('Mike decides')
+    expect(decideFlight3(1, 20).reading).toContain('1 new account ')
+  })
+  it('verdict words for the push text; null for a flight 2 row', () => {
+    expect(flight3VerdictWord('f3-go')).toBe('GO')
+    expect(flight3VerdictWord('f3-iterate')).toBe('ITERATE')
+    expect(flight3VerdictWord('f3-stop')).toBe('STOP')
+    expect(flight3VerdictWord('f3-inconclusive')).toBe('INCONCLUSIVE')
+    expect(flight3VerdictWord('two-plus')).toBeNull()
+  })
+})
+
+describe('flightDayOf', () => {
+  it('day 1 is the flight start, the D+7 final read is day 8', () => {
+    expect(flightDayOf('2026-10-17', '2026-10-17')).toBe(1)
+    expect(flightDayOf('2026-10-17', '2026-10-18')).toBe(2)
+    expect(flightDayOf('2026-10-17', '2026-10-19')).toBe(3)
+    expect(flightDayOf('2026-10-17', '2026-10-24')).toBe(8)
+    expect(flightDayOf('2026-10-28', '2026-11-04')).toBe(8)
+  })
+})
