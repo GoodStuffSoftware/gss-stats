@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.44.0] — 2026-10-16
+
+### Added
+- **Ads report: hero and features split.** Flight 3's Apps arm runs two display ads, and the ads report now prints each ad's arrivals, completes, sign-in asks, new accounts and cost per arrival (counts only, "—" under 5 arrivals), while every rule still judges the arm's combined total.
+
 ## [0.43.0] — 2026-10-16
 
 ### Added

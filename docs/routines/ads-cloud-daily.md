@@ -128,12 +128,38 @@ end date set at build and again at enable).
 
 | | F3 apps | F3 search |
 |---|---|---|
-| utm | google / display / `sudoku_funnel_f3_apps` | google / cpc / `sudoku_funnel_f3_search` |
+| utm | google / display / `sudoku_funnel_f3_apps_hero` and `sudoku_funnel_f3_apps_feat` (plus the bare `sudoku_funnel_f3_apps` as a catch-all) | google / cpc / `sudoku_funnel_f3_search` |
 | Report label | `F3 apps` | `F3 search` |
 | Channel and devices | display; 17 Android app placements | search, ALL devices (no device exclusion) |
 | Budget and cap | $10/day, $70 cap, 7 days | $10/day, $70 cap, 7 days |
 | Start day D | the day v1.99.0 is live on Play production | the prod web deploy day, once real /coach/* and sign-in ask rows show in D1 (if none by 23:00 ET, the next morning) |
 | Device check | the printed device block | none: Search runs on all devices, so the device block is informational and no device spend is an anomaly |
+
+### Apps: two ads, one arm (hero and features)
+
+The Apps arm runs two responsive display ads in the one Google Ads campaign: the hero ad's link
+carries `utm_campaign=sudoku_funnel_f3_apps_hero` and the features ad's
+`utm_campaign=sudoku_funnel_f3_apps_feat`; the bare `sudoku_funnel_f3_apps` stays in the arm so a
+link that lost its suffix still counts. All three tags are the one arm.
+
+- **Every rule reads the arm's SUMMED total.** The kill rules, thresholds, verdict table, validity
+  gate, day 1-2 check, returns and first-session funnel are unchanged and read all three tags
+  together, exactly as they read the one tag before. Nothing is judged per ad.
+- **The split is display only.** Under the tagged block of the morning, threshold and post-flight
+  reports a "Per-tag split" block prints, per tag: arrivals, completes, sign-in asks and new
+  accounts (cumulative, with the previous ET day in brackets), and ad spend with a cost per
+  arrival. Relay it as printed, to say which ad is carrying the arm; it never changes a proposal.
+  A single-tag arm (Search, every earlier flight) prints no split.
+- **Counts only.** Tagged rows per tag as cumulative and per-ET-day totals: no visitor join, no
+  hour, place or device split. The tagged read groups the rows the counts-only rule protects
+  (returns, completions, game starts, tour skips and exits, tutorial completions) by ET day, never
+  by hour.
+- **Ad-level cost.** A responsive display ad has no name, so the report maps each ad to its tag
+  by the `utm_campaign` in the ad's `final_urls`, from one read-only `ad_group_ad` query over the
+  closed days. An ad whose links carry no tag, a tag outside the arm, or two different tags is
+  printed on an "untagged" line with its cost and is never assigned to a tag. Cost per arrival is
+  the tag's ad spend over its tagged arrivals, "—" under 5 arrivals. If the ad query fails, the
+  block says "ad cost: not read" with the reason; that is not a read failure and is not a blocker.
 
 ### Primary measure and rules
 

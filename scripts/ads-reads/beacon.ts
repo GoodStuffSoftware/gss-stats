@@ -8,8 +8,8 @@
 import { applyExclusions, campaignAttributionClause, campaignAttributionStartMs, type CampaignFlight } from '../../src/lib/campaigns'
 import { excludeInstallGapUnmeasured, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, popupIncludeClause, type HourPathCount } from '../../src/lib/popupEvents'
 import { ASK_PATHS, UPSELL_SIGNEDOUT_FIX_AT, type FirstSessionRowSite, type ReturnRow, type ReturnSiteStat, type TaggedRow } from '../../src/lib/adsRules'
-import { refusedPathExcludeClause } from '../../src/lib/splitGuard'
-import { etDateSql } from '../../src/lib/etTime'
+import { refusedPathExcludeClause, refusedPathMatch } from '../../src/lib/splitGuard'
+import { etDateSql, etWallTimeMs } from '../../src/lib/etTime'
 import type { D1Select } from './d1'
 
 export const WEB_SITE = 'bestsudoku-web'
@@ -23,26 +23,42 @@ export interface Query {
 /** Campaign-attributed rows, by (UTC hour, path, visitor, campaign tag) — and, when a segment boundary is
  * set (lib/adsRules.ts UPSELL_SIGNEDOUT_FIX_AT), by `uf` = the row is at or after it, so the
  * pre-fix / post-fix split is exact at the instant (the same device as the install fix's `pf`).
- * Its rows include return and completion rows (src/lib/splitGuard.ts): the hour is only ever used
- * to cut a count at an ET day, a flight boundary or a maturity instant, never shown as an hour of
- * day — the same ruling as the dashboard's segment cuts (lib/metrics/facts.ts header).
+ * COUNTS ONLY (src/lib/splitGuard.ts): the rows the rule protects (returns, completions, game
+ * starts, tour skips and exits, tutorial completions) are grouped by their ET DAY (`etd`, the SQL
+ * etDateSql expression), never by hour: their `hr` is NULL, so no hour of day, or UTC hour, of one
+ * ever leaves D1. Every other row keeps its UTC hour `hr` (the maturity and window cuts of the
+ * pop-up reads). Every window the routine cuts these rows at is an ET midnight, so the day group
+ * is exact. The one other cut is the health pair's maturity instant: with `maturedBeforeMs` set,
+ * `mat` = the row's hour starts at or before it, a single row-exact flag (like `uf`) so a refused
+ * row can still be counted against that moving instant without an hour (a running total up to an
+ * instant, the same residual as "today so far", splitGuard.ts SEGMENT CUTS).
  * The report's tagged `/coach/shown/place` count (a refused path) comes from these rows too, printed only as
  * cumulative and yesterday's-ET-day totals (lib/adsRules.ts summarizeTaggedRows), never by hour.
  * `campaign` is the row's own utm_campaign (always one of the arm's ucValues: the WHERE is an IN),
  * carried so an arm with several tags can print a per-tag split (lib/tagSplit.ts). A tag is not an
  * hour, a place or a device (src/lib/splitGuard.ts), and the split is only ever printed as
  * cumulative and ET-day row totals; every rule still sums the rows of all the arm's tags. */
-export function taggedRowsQuery(campaign: CampaignFlight, upsellFixAtMs: number | null = UPSELL_SIGNEDOUT_FIX_AT): Query {
+export function taggedRowsQuery(campaign: CampaignFlight, upsellFixAtMs: number | null = UPSELL_SIGNEDOUT_FIX_AT, maturedBeforeMs: number | null = null): Query {
   const attr = campaignAttributionClause(campaign)
   const w = [attr.sql]
   const b: unknown[] = [...attr.binds]
   applyExclusions(w, b)
   excludeInstallGapUnmeasured(w, b) // pre-fix install-gap rows are unmeasured, not zero
-  if (upsellFixAtMs == null) return { sql: `SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY hr, path, visitor, campaign`, binds: b }
-  return {
-    sql: `SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, visitor, campaign, (ts >= ?) AS uf, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY hr, path, visitor, campaign, uf`,
-    binds: [upsellFixAtMs, ...b],
+  const refused = refusedPathMatch().sql
+  const cols = [`CASE WHEN ${refused} THEN NULL ELSE CAST(ts / 3600000 AS INTEGER) END AS hr`, `CASE WHEN ${refused} THEN ${etDateSql()} ELSE NULL END AS etd`, 'path', 'visitor', 'campaign']
+  const groups = ['hr', 'etd', 'path', 'visitor', 'campaign']
+  const selBinds: unknown[] = []
+  if (upsellFixAtMs != null) {
+    cols.push('(ts >= ?) AS uf')
+    groups.push('uf')
+    selBinds.push(upsellFixAtMs)
   }
+  if (maturedBeforeMs != null) {
+    cols.push('(CAST(ts / 3600000 AS INTEGER) * 3600000 <= ?) AS mat')
+    groups.push('mat')
+    selBinds.push(maturedBeforeMs)
+  }
+  return { sql: `SELECT ${cols.join(', ')}, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY ${groups.join(', ')}`, binds: [...selBinds, ...b] }
 }
 
 /** Site-wide pop-up/event rows on the web site since `sinceMs`, by (UTC hour, path). NOT
@@ -161,7 +177,7 @@ export interface CountryCount {
 }
 export interface BeaconSource {
   /** `upsellFixAtMs`: undefined = the configured instant; null = no segment flag. */
-  tagged(campaign: CampaignFlight, upsellFixAtMs?: number | null): Promise<TaggedRow[]>
+  tagged(campaign: CampaignFlight, upsellFixAtMs?: number | null, maturedBeforeMs?: number | null): Promise<TaggedRow[]>
   siteEvents(sinceMs: number): Promise<HourPathCount[]>
   returns(campaign: CampaignFlight): Promise<ReturnRow[]>
   returnSites(sinceMs: number): Promise<ReturnSiteStat[]>
@@ -177,17 +193,23 @@ const n = (x: unknown) => Number(x) || 0
 
 export function createBeaconSource(select: D1Select): BeaconSource {
   return {
-    async tagged(campaign, upsellFixAtMs) {
-      const q = taggedRowsQuery(campaign, upsellFixAtMs === undefined ? UPSELL_SIGNEDOUT_FIX_AT : upsellFixAtMs)
+    async tagged(campaign, upsellFixAtMs, maturedBeforeMs) {
+      const q = taggedRowsQuery(campaign, upsellFixAtMs === undefined ? UPSELL_SIGNEDOUT_FIX_AT : upsellFixAtMs, maturedBeforeMs ?? null)
       const rows = await select<any>(q.sql, q.binds)
-      return rows.map((x) => ({
-        hourStartMs: n(x.hr) * 3_600_000,
-        path: String(x.path ?? ''),
-        visitor: String(x.visitor ?? ''),
-        campaign: String(x.campaign ?? ''),
-        count: n(x.c),
-        ...(x.uf === undefined ? {} : { postUpsellFix: n(x.uf) === 1 }),
-      }))
+      return rows.map((x) => {
+        // A refused-path row carries its ET day (hr is NULL): placed at that day's ET midnight, so every
+        // ET-day window reads it exactly and no hour of it is ever known.
+        const day = etDay(x.etd)
+        return {
+          hourStartMs: day ? etWallTimeMs(day) : n(x.hr) * 3_600_000,
+          path: String(x.path ?? ''),
+          visitor: String(x.visitor ?? ''),
+          campaign: String(x.campaign ?? ''),
+          count: n(x.c),
+          ...(x.uf === undefined ? {} : { postUpsellFix: n(x.uf) === 1 }),
+          ...(x.mat === undefined ? {} : { matured: n(x.mat) === 1 }),
+        }
+      })
     },
     async siteEvents(sinceMs) {
       const q = siteEventsQuery(sinceMs)

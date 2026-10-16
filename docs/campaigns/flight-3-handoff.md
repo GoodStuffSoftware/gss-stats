@@ -78,7 +78,13 @@ Counts, read-only. Raw pulls live in the analyst session scratchpad only (not co
   inconclusive (under 20 asks); the rules are unchanged.
 - **Apps:** the same 17 placements, max CPC **$0.35**, flight 2 copy plus a price line ("No ads.
   Passes from $1.99").
-- **Both arms:** $10/day, $70 cap, the utm tags unchanged.
+- **Both arms:** $10/day, $70 cap. Search keeps its one utm tag. Apps runs two display ads,
+  hero (`sudoku_funnel_f3_apps_hero`) and features (`sudoku_funnel_f3_apps_feat`), with the bare
+  `sudoku_funnel_f3_apps` kept as a catch-all; every rule reads the three tags as one arm's total.
+  The reports also print a per-tag split (arrivals, completes, sign-in asks, new accounts, and
+  ad-level cost per arrival from the ads' `final_urls`, "—" under 5 arrivals), counts only. Set
+  each ad's final URL with its own `utm_campaign` at build; an ad with no usable tag shows as
+  "untagged" in the split, never on a tag.
 - **Cost per arrival:** the tagged-funnel block of the threshold and post-flight reads prints
   cumulative spend / tagged arrivals with Mike's benchmark of about $0.32 an arrival (the F1/F2
   in-app figure) beside it; the figure reads "—" under 5 tagged arrivals (the small-sample gate).
