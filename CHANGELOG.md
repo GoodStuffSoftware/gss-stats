@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Feature health.** An Overview card and a Features page show each feature's daily counts, plain count-per-count ratios and an OK / New / Went silent status, so a feature that quietly stops firing stands out.
+
 ## [0.40.0] — 2026-10-15
 
 ### Added

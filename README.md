@@ -595,6 +595,29 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   session shows a one-tap re-sign-in banner instead of a wall of errors.
 - Light / dark theme matching the Good Stuff Software brand.
 
+## Feature health
+
+The **Feature health** card sits on the Best Sudoku Overview under the KPIs, and the
+**Features** page (last in the Best Sudoku group) charts every step of every feature, one
+line per step and one point per ET day. Both read `/api/features`
+([`functions/api/features.ts`](functions/api/features.ts)), web and app combined, and follow
+the page's range, sites and exclusions.
+
+- **Card:** a row per feature with its status, and per step the count for the latest complete
+  ET day, the day before and the selected range, plus the ratio of those counts.
+- **Ratios are counts per count**, e.g. "tapped per shown". They are not per-person rates:
+  rows are independent counts, never joined into a path, so a ratio can exceed 1. A zero
+  denominator shows "—".
+- **Status:** *Went silent* if the feature averaged at least 5 rows a day over the prior 7
+  complete ET days and had 0 on the latest complete day; *New* if it has no rows before the
+  last 7 days; otherwise *OK*. A quiet day below 5 a day stays OK.
+- **Coach:** the coach strip reads "New / no rows yet" until the app ships its `/coach`
+  beacons.
+- **Adding a feature** is one entry in `FEATURES` in
+  [`src/lib/featureHealth.ts`](src/lib/featureHealth.ts): it adds a card row and a Features
+  chart.
+- Counts only: nothing here splits by hour, place, device or visitor.
+
 ## Architecture
 
 ```
