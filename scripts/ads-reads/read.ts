@@ -95,7 +95,7 @@ import { splitPlacements, type AdDayRow, type CampaignStatus, type DeviceRow, ty
 import { syncAdsData, type AdsMetricsSource, type CampaignSyncResult, type SyncResult } from '../../src/lib/adsSync'
 import type { SyncSource } from '../../src/lib/adsStore'
 import { buildTagSplit, isMultiTag, type TagSplit } from '../../src/lib/tagSplit'
-import type { BeaconSource } from './beacon'
+import type { BeaconSource, PreflightCounts } from './beacon'
 import type { FirebaseCounts } from './firebase'
 import { HOUSEHOLD_NOTE, RETENTION_NOTE, type PlayReportsSection } from './play'
 import { redact, summarizeError } from '../../src/lib/adsRedact'
@@ -864,6 +864,8 @@ export interface MorningResult {
   firstSession: { funnel: FirstSessionFunnel; siteError: string | null; arrivalsError?: string | null } | null
   /** The per-tag split of an arm with more than one tag (display only; see FullRead.tagSplit). */
   tagSplit: TagSplit | null
+  /** Pre-flight gate counts (beacon.ts preflightGateQuery); null when the beacon source has no such read. */
+  preflightGate: { ok: true; counts: PreflightCounts } | { ok: false; error: string } | null
   thresholdRead: FullRead | null
   hardCapDaily: RuleResult | null
   releaseHealth: HealthSection
@@ -1023,6 +1025,9 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
   // Per-tag split for a multi-tag arm (flight 3 Apps): cumulative and yesterday's ET day, plus the
   // ad-level cost of the closed days. Display only: the totals above and every rule read the arm sum.
   const tagSplit = opts.healthOnly ? null : await tagSplitRead(deps, campaign, taggedRows, spend.throughEt, { fromMs: yStart, toMs: yEnd })
+
+  const pg = !opts.healthOnly && beacon?.preflightGate ? await attempt('beacon pre-flight gate', () => beacon.preflightGate!()) : null
+  const preflightGate: MorningResult['preflightGate'] = pg ? (pg.ok ? { ok: true, counts: pg.value } : { ok: false, error: pg.error }) : null
 
   // First-session funnel, every morning read. The site-wide side is best-effort: a failure
   // leaves it unread (every step's "tracked" unknown) and never fails or pushes the read.
@@ -1236,6 +1241,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
     tagged,
     firstSession,
     tagSplit,
+    preflightGate,
     thresholdRead,
     hardCapDaily,
     releaseHealth: health,

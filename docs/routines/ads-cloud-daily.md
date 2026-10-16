@@ -196,6 +196,7 @@ link that lost its suffix still counts. All three tags are the one arm.
 - **Search volume:** about 15-25 clicks a week are expected, so one week will likely read
   inconclusive (under 20 asks). That is the expected outcome, not a fault; the rules above are
   unchanged.
+- **Pre-flight gate line (flight 3 enable gate).** The morning report prints `Pre-flight gate (organic since v1.99.1 web, 2026-10-16 21:07Z): /coach/* N · /signin-prompt/committed-* N · /signin-eligible/* N → MET | NOT YET`, right after the per-tag split: cumulative organic (no campaign tag, own and known traffic excluded) web rows since that release. MET means /coach/* above 0 AND (committed + eligible) above 0; the rule lives in `preflightGateMet` (scripts/ads-reads/beacon.ts).
 - **Day 1-2 tracking check (read-and-judge; NOT a coded kill rule; it only PROPOSES a pause).**
   It catches a week of spend on broken tracking. Read both counts from the report's own output,
   on the daily "Tagged so far" line (it ends with `tracking-check counts (tagged ET-day totals;
