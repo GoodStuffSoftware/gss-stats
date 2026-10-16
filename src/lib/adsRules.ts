@@ -49,11 +49,16 @@ import {
   parseReturnPath,
   RETURN_BUCKETS,
   returnVisitRates,
+  STAGED_ARMS,
+  STAGED_FLIGHT_3,
+  STAGED_FLIGHT_3_DATES,
+  stagedArmIsLive,
   type AuthSuccessStatus,
   type CampaignFlight,
   type FunnelStepKey,
   type ReturnBucket,
   type StagedArm,
+  type StagedArmDates,
 } from './campaigns'
 import { etOffsetHours } from './etTime'
 
@@ -240,8 +245,8 @@ export function allDevicesOf(campaignId: string, plans: Readonly<Record<string, 
 }
 /** Kept for external callers, e.g. the scheduled-task helper ~/.claude/scheduled-tasks/bsk-retest-morning-read/release-switchover.ts (line 76: `rules.readPlanFor(rules.RETEST_CAMPAIGN_ID)`); new code must take the campaign from the registry or `--campaign`. */
 export const RETEST_CAMPAIGN_ID = '24279250691'
-/** Flight 3's read-plan settings per arm, staged: not in ADS_READ_PLANS, because its campaigns
- * are not registered yet (lib/campaigns.ts STAGED_FLIGHT_3 says why). The same ladder, kill-rule
+/** Flight 3's read-plan settings per arm: in ADS_READ_PLANS only once the arm's dates are filled
+ * (lib/campaigns.ts STAGED_FLIGHT_3 and STAGED_FLIGHT_3_DATES say why). The same ladder, kill-rule
  * arming and CTR floors as flight 2: the $70 cap in whole
  * dollars (the top read IS the cap), kill rules from 50% of it, Apps with the 17 approved
  * placements and flight 2's 10% leak limit and 0.15% CTR floor, Search with no placements and
@@ -270,6 +275,28 @@ export const STAGED_FLIGHT_3_PLAN_SETTINGS: Record<StagedArm, Omit<ReadPlanSetti
     reportLabel: 'F3 search',
     auditSlug: 'f3-search',
   },
+}
+/** A staged flight 3 arm's read plan, once its campaign is in CAMPAIGNS (as `stagedCampaign(...)`):
+ * the arm's settings plus the morning-read window, day 2 .. flight end + 1, from that campaign's
+ * own dates. liveStagedReadPlans() uses it; ADS_READ_PLANS spreads that in. */
+export function stagedReadPlan(arm: StagedArm, campaignId: string): AdsReadPlan {
+  const flight = campaignById(campaignId)
+  if (!flight?.flightStart) throw new Error(`staged flight 3 ${arm}: campaign ${campaignId} must be in CAMPAIGNS with its flightStart before it can have a read plan`)
+  return buildReadPlan(campaignId, { ...STAGED_FLIGHT_3_PLAN_SETTINGS[arm], morningReadFirstEt: addDays(flight.flightStart, 1), morningReadLastEt: addDays(flight.flightEnd, 1) })
+}
+
+/** The read plans of the staged flight 3 arms whose dates are filled in STAGED_FLIGHT_3_DATES, keyed by
+ * each arm's campaign id (empty while both are staged, so a staged arm is never read). The campaigns
+ * must already be in CAMPAIGNS (campaigns.ts spreads liveStagedCampaigns() into it, so they are).
+ * `dates` is injectable for tests. */
+export function liveStagedReadPlans(dates: Record<StagedArm, StagedArmDates> = STAGED_FLIGHT_3_DATES): Record<string, AdsReadPlan> {
+  const out: Record<string, AdsReadPlan> = {}
+  for (const arm of STAGED_ARMS) {
+    if (!stagedArmIsLive(arm, dates)) continue
+    const id = STAGED_FLIGHT_3[arm].ids.campaignId
+    out[id] = stagedReadPlan(arm, id)
+  }
+  return out
 }
 /** THE read-plan registry: one entry per campaign the routine reads (with rules). To start
  * reading a new campaign add its CAMPAIGNS entry and a plan here — see README "Adding a new
@@ -316,15 +343,8 @@ export const ADS_READ_PLANS: Record<string, AdsReadPlan> = {
     morningReadFirstEt: '2026-10-05',
     morningReadLastEt: '2026-10-11',
   }),
-}
-
-/** A staged flight 3 arm's read plan, once its campaign is in CAMPAIGNS (as `stagedCampaign(...)`):
- * the arm's settings plus the morning-read window, day 2 .. flight end + 1, from that campaign's
- * own dates. Use as `'<id>': stagedReadPlan('apps' | 'search', '<id>')` in ADS_READ_PLANS. */
-export function stagedReadPlan(arm: StagedArm, campaignId: string): AdsReadPlan {
-  const flight = campaignById(campaignId)
-  if (!flight?.flightStart) throw new Error(`staged flight 3 ${arm}: campaign ${campaignId} must be in CAMPAIGNS with its flightStart before it can have a read plan`)
-  return buildReadPlan(campaignId, { ...STAGED_FLIGHT_3_PLAN_SETTINGS[arm], morningReadFirstEt: addDays(flight.flightStart, 1), morningReadLastEt: addDays(flight.flightEnd, 1) })
+  // Flight 3 arms whose dates are filled in STAGED_FLIGHT_3_DATES (campaigns.ts); none while both are staged.
+  ...liveStagedReadPlans(),
 }
 
 /** The read plan for a campaign id, or a throw that lists every registered id. Used for labels
