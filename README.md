@@ -608,11 +608,11 @@ the page's range, sites and exclusions.
 - **Ratios are counts per count**, e.g. "tapped per shown". They are not per-person rates:
   rows are independent counts, never joined into a path, so a ratio can exceed 1. A zero
   denominator shows "—".
-- **Status:** *Went silent* if the feature averaged at least 5 rows a day over the prior 7
-  complete ET days, had rows on at least 6 of those 7 days, and had 0 on the latest complete
-  day; *New* if it has no rows before the last 7 days; otherwise *OK*. A quiet day below 5 a
-  day, or a gap in a bursty feature (rows on fewer than 6 of the 7 days), stays OK. A real
-  outage shows for its first day or two, until zero days push the active-day count under 6.
+- **Status:** *Went silent* if the latest complete ET day had 0 rows, and the 7 days before the
+  current run of zero days averaged at least 5 rows a day with rows on at least 6 of those 7
+  days; *New* if it has no rows before the last 7 days; otherwise *OK*. A quiet day below 5 a
+  day, or a gap in a bursty feature (rows on fewer than 6 of the 7 days), stays OK. An outage
+  keeps flagging for up to 7 zero days, then stops being news.
 - **Coach:** the coach strip reads "New / no rows yet" until the app ships its `/coach`
   beacons.
 - **Adding a feature** is one entry in `FEATURES` in

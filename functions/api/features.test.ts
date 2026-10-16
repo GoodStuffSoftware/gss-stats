@@ -145,7 +145,7 @@ describe('/api/features: status', () => {
     insertHits(db, rows)
     const { body } = await post(range)
     expect(feature(body, 'first50-promo').status).toBe('silent')
-    expect(feature(body, 'first50-promo').statusNote).toMatch(/none on 2026-10-14/)
+    expect(feature(body, 'first50-promo').statusNote).toMatch(/none for 1 day up to 2026-10-14/)
   })
 
   it('a quiet day on a low-volume feature stays OK', async () => {

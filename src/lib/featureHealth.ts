@@ -191,13 +191,32 @@ export const HEALTH_NEW_DAYS = 7
 export type HealthStatus = 'silent' | 'new' | 'ok'
 export const HEALTH_STATUS_LABEL: Record<HealthStatus, string> = { silent: 'Went silent', new: 'New', ok: 'OK' }
 
-/** Silent wins over new (a feature that fired and stopped is the alarming reading). `baseline` is the
- * daily total of each of the prior HEALTH_BASELINE_DAYS days, `before` the count of rows before the
- * new-days cutoff. */
-export function statusOf(input: { latest: number; baseline: readonly number[]; before: number }): HealthStatus {
-  const avg = input.baseline.length ? input.baseline.reduce((a, b) => a + b, 0) / input.baseline.length : 0
-  const active = input.baseline.filter((n) => n > 0).length
-  if (avg >= HEALTH_SILENT_MIN_AVG && active >= HEALTH_SILENT_MIN_ACTIVE_DAYS && input.latest === 0) return 'silent'
+/** An outage keeps flagging for at most this many complete ET days (the latest one included). */
+export const HEALTH_SILENT_MAX_RUN = 7
+/** How many complete ET days before the latest the status reads: a baseline taken before the longest
+ * flagged zero run. */
+export const HEALTH_HISTORY_DAYS = HEALTH_BASELINE_DAYS + HEALTH_SILENT_MAX_RUN - 1
+
+/** The zero run ending at the latest day (latest included, so 0 when the latest day had rows) and the
+ * HEALTH_BASELINE_DAYS days before that run: an outage's own zero days never dilute its baseline, so
+ * a real outage keeps flagging for up to HEALTH_SILENT_MAX_RUN days. `history` is the daily totals of
+ * the days before the latest, oldest first. */
+export function silentReading(latest: number, history: readonly number[]): { run: number; baseline: number[] } {
+  if (latest !== 0) return { run: 0, baseline: history.slice(-HEALTH_BASELINE_DAYS) }
+  let run = 1
+  while (run <= history.length && history[history.length - run] === 0) run++
+  const end = history.length - (run - 1)
+  return { run, baseline: history.slice(Math.max(0, end - HEALTH_BASELINE_DAYS), end) }
+}
+
+/** Silent wins over new (a feature that fired and stopped is the alarming reading). `history` is the
+ * daily totals of the HEALTH_HISTORY_DAYS days before the latest, oldest first; `before` the count of
+ * rows before the new-days cutoff. */
+export function statusOf(input: { latest: number; history: readonly number[]; before: number }): HealthStatus {
+  const { run, baseline } = silentReading(input.latest, input.history)
+  const avg = baseline.length ? baseline.reduce((a, b) => a + b, 0) / baseline.length : 0
+  const active = baseline.filter((n) => n > 0).length
+  if (run > 0 && run <= HEALTH_SILENT_MAX_RUN && avg >= HEALTH_SILENT_MIN_AVG && active >= HEALTH_SILENT_MIN_ACTIVE_DAYS) return 'silent'
   if (input.before === 0) return 'new'
   return 'ok'
 }
@@ -249,7 +268,7 @@ export interface HealthDays {
   latest: string
   /** The complete ET day before it. */
   prev: string
-  /** The first of the HEALTH_BASELINE_DAYS days before `latest`. */
+  /** The first of the HEALTH_HISTORY_DAYS days before `latest`. */
   baselineStart: string
   /** ET midnight of the first of the last HEALTH_NEW_DAYS complete days: rows before it make a feature not new. */
   newCutoffMs: number
@@ -259,7 +278,7 @@ export interface HealthDays {
 }
 export function healthDays(nowMs: number): HealthDays {
   const today = etDateFast(nowMs)
-  const baselineStart = addDays(today, -(HEALTH_BASELINE_DAYS + 1))
+  const baselineStart = addDays(today, -(HEALTH_HISTORY_DAYS + 1))
   return {
     today,
     latest: addDays(today, -1),
@@ -338,7 +357,7 @@ export function assembleHealth(input: {
   const flat = flatSteps(features)
   const days = dayRange(input.rangeFrom, input.rangeTo)
   const hd = healthDays(input.nowMs)
-  const baseline = dayRange(hd.baselineStart, hd.latest)
+  const history = dayRange(hd.baselineStart, hd.latest)
   const byDay = new Map<string, readonly number[]>()
   for (const r of input.rows) byDay.set(r.d, r.s)
   const at = (day: string, stepIndex: number) => Number(byDay.get(day)?.[stepIndex]) || 0
@@ -368,14 +387,15 @@ export function assembleHealth(input: {
     }
     const total = (day: string) => mine.reduce((a, m) => a + at(day, m.index), 0)
     const latest = total(hd.latest)
-    const baselineCounts = baseline.map(total)
+    const historyCounts = history.map(total)
     const before = Number(input.before[fi]) || 0
-    const status = statusOf({ latest, baseline: baselineCounts, before })
+    const status = statusOf({ latest, history: historyCounts, before })
+    const { run, baseline: baselineCounts } = silentReading(latest, historyCounts)
     const avg = baselineCounts.reduce((a, b) => a + b, 0) / (baselineCounts.length || 1)
-    const recent = [...baseline, hd.latest].reduce((a, d) => a + total(d), 0) + total(hd.today)
+    const recent = [...history, hd.latest].reduce((a, d) => a + total(d), 0) + total(hd.today)
     const statusNote =
       status === 'silent'
-        ? `averaged ${avg.toFixed(1)} rows a day over the prior ${HEALTH_BASELINE_DAYS} days, none on ${hd.latest}`
+        ? `averaged ${avg.toFixed(1)} rows a day over the ${HEALTH_BASELINE_DAYS} days before it went quiet, none for ${run} ${run === 1 ? 'day' : 'days'} up to ${hd.latest}`
         : status === 'new'
           ? recent === 0 && before === 0
             ? 'no rows yet'

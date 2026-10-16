@@ -5,6 +5,8 @@ import {
   HEALTH_CAPTION,
   HEALTH_SILENT_MIN_AVG,
   HEALTH_SILENT_MIN_ACTIVE_DAYS,
+  HEALTH_SILENT_MAX_RUN,
+  HEALTH_HISTORY_DAYS,
   assembleHealth,
   flatSteps,
   formatRatio,
@@ -125,48 +127,59 @@ describe('ratio', () => {
 })
 
 describe('statusOf', () => {
+  // `history` is the days before the latest, oldest first (the status reads the last 13).
   const steady = [5, 5, 5, 5, 5, 5, 5] // exactly the threshold
-  it('has the threshold as a named constant at 5 rows a day over 7 days', () => {
+  it('has the thresholds as named constants', () => {
     expect(HEALTH_SILENT_MIN_AVG).toBe(5)
     expect(HEALTH_BASELINE_DAYS).toBe(7)
     expect(HEALTH_SILENT_MIN_ACTIVE_DAYS).toBe(6)
+    expect(HEALTH_SILENT_MAX_RUN).toBe(7)
+    expect(HEALTH_HISTORY_DAYS).toBe(13)
   })
-  it('a bursty feature on a quiet day is OK: 7.9 a day in bursts with 3 empty days (Games, hard, 10-14)', () => {
-    expect(statusOf({ latest: 0, baseline: [20, 15, 20, 0, 0, 0, 0], before: 100 })).toBe('ok')
-    expect(statusOf({ latest: 0, baseline: [30, 25, 0, 0, 0, 0, 0], before: 100 })).toBe('ok')
+  it('went silent: the baseline averaged the threshold or more on 6+ days and the latest day is zero', () => {
+    expect(statusOf({ latest: 0, history: steady, before: 100 })).toBe('silent')
+    expect(statusOf({ latest: 0, history: [30, 1, 1, 1, 1, 1, 0], before: 100 })).toBe('silent') // 35 / 7 = 5, 6 active
   })
-  it('a steady feature that drops to zero still flags, even at 6 of 7 active days', () => {
-    expect(statusOf({ latest: 0, baseline: [9, 8, 7, 9, 10, 8, 9], before: 100 })).toBe('silent')
-    expect(statusOf({ latest: 0, baseline: [0, 12, 9, 10, 8, 9, 7], before: 100 })).toBe('silent') // two days into an outage
-    expect(statusOf({ latest: 0, baseline: [0, 0, 9, 10, 8, 9, 7], before: 100 })).toBe('ok') // 5 of 7 active: bursty reading
+  it('a bursty feature on a quiet day is OK: 7.9 a day in bursts with empty days (Games, hard, 10-14)', () => {
+    expect(statusOf({ latest: 0, history: [20, 15, 20, 0, 0, 0, 0], before: 100 })).toBe('ok')
+    expect(statusOf({ latest: 0, history: [30, 25, 0, 0, 0, 0, 0], before: 100 })).toBe('ok')
+    expect(statusOf({ latest: 0, history: [9, 10, 8, 0, 0, 9, 7], before: 100 })).toBe('ok') // 5 of 7 active
   })
-  it('went silent: the baseline averaged the threshold or more and the latest day is zero', () => {
-    expect(statusOf({ latest: 0, baseline: steady, before: 100 })).toBe('silent')
-    expect(statusOf({ latest: 0, baseline: [30, 1, 1, 1, 1, 1, 0], before: 100 })).toBe('silent') // 35 / 7 = 5, 6 active
+  it('a steady feature that drops to zero flags, and keeps flagging through the outage', () => {
+    const steady8 = [9, 8, 7, 9, 10, 8, 9]
+    expect(statusOf({ latest: 0, history: steady8, before: 100 })).toBe('silent') // day 1
+    expect(statusOf({ latest: 0, history: [...steady8.slice(1), 0], before: 100 })).toBe('silent') // day 2
+    const outage = (days: number) => [...steady8, ...Array(days - 1).fill(0)]
+    for (let d = 1; d <= HEALTH_SILENT_MAX_RUN; d++) expect(statusOf({ latest: 0, history: outage(d), before: 100 }), `day ${d}`).toBe('silent')
+    expect(statusOf({ latest: 0, history: outage(HEALTH_SILENT_MAX_RUN + 1), before: 100 })).toBe('ok') // a week old: no longer news
+  })
+  it('an outage after a baseline with one gap still flags on later days', () => {
+    expect(statusOf({ latest: 0, history: [10, 10, 10, 0, 10, 10, 10], before: 100 })).toBe('silent')
+    expect(statusOf({ latest: 0, history: [10, 10, 10, 10, 10, 10, 10, 10, 0, 10, 10, 10, 0], before: 100 })).toBe('silent') // day 2 of the outage
   })
   it('a quiet feature that is zero today stays OK (average below the threshold)', () => {
-    expect(statusOf({ latest: 0, baseline: [4, 5, 5, 5, 5, 5, 5], before: 100 })).toBe('ok') // 34 / 7 < 5
-    expect(statusOf({ latest: 0, baseline: [1, 0, 2, 0, 0, 1, 0], before: 100 })).toBe('ok')
-    expect(statusOf({ latest: 0, baseline: [0, 0, 0, 0, 0, 0, 0], before: 100 })).toBe('ok')
+    expect(statusOf({ latest: 0, history: [4, 5, 5, 5, 5, 5, 5], before: 100 })).toBe('ok') // 34 / 7 < 5
+    expect(statusOf({ latest: 0, history: [1, 0, 2, 0, 0, 1, 0], before: 100 })).toBe('ok')
+    expect(statusOf({ latest: 0, history: [0, 0, 0, 0, 0, 0, 0], before: 100 })).toBe('ok')
   })
   it('a busy feature that fired on the latest day is OK', () => {
-    expect(statusOf({ latest: 1, baseline: [50, 50, 50, 50, 50, 50, 50], before: 100 })).toBe('ok')
+    expect(statusOf({ latest: 1, history: [50, 50, 50, 50, 50, 50, 50], before: 100 })).toBe('ok')
   })
   it('new: no rows before the cutoff', () => {
-    expect(statusOf({ latest: 3, baseline: [0, 0, 0, 0, 0, 2, 2], before: 0 })).toBe('new')
-    expect(statusOf({ latest: 0, baseline: [0, 0, 0, 0, 0, 0, 0], before: 0 })).toBe('new') // no rows at all
+    expect(statusOf({ latest: 3, history: [0, 0, 0, 0, 0, 2, 2], before: 0 })).toBe('new')
+    expect(statusOf({ latest: 0, history: [0, 0, 0, 0, 0, 0, 0], before: 0 })).toBe('new') // no rows at all
   })
   it('silent beats new', () => {
-    expect(statusOf({ latest: 0, baseline: [1, 9, 9, 9, 9, 9, 9], before: 0 })).toBe('silent')
+    expect(statusOf({ latest: 0, history: [1, 9, 9, 9, 9, 9, 9], before: 0 })).toBe('silent')
   })
 })
 
 describe('healthDays', () => {
   it('puts the latest complete ET day at yesterday and the new-days cutoff at an ET midnight', () => {
     const hd = healthDays(NOW)
-    expect([hd.today, hd.latest, hd.prev, hd.baselineStart]).toEqual(['2026-10-15', '2026-10-14', '2026-10-13', '2026-10-07'])
+    expect([hd.today, hd.latest, hd.prev, hd.baselineStart]).toEqual(['2026-10-15', '2026-10-14', '2026-10-13', '2026-10-01'])
     expect(hd.newCutoffMs).toBe(etWallTimeMs('2026-10-08'))
-    expect(hd.baselineStartMs).toBe(etWallTimeMs('2026-10-07'))
+    expect(hd.baselineStartMs).toBe(etWallTimeMs('2026-10-01'))
     expect(hd.tomorrowMs).toBe(etWallTimeMs('2026-10-16'))
   })
   it('reads the ET date, not the UTC date: 01:00Z on the 16th is still the evening of the 15th in ET', () => {
@@ -221,7 +234,7 @@ describe('assembleHealth', () => {
     const rows = ['2026-10-07', '2026-10-08', '2026-10-09', '2026-10-10', '2026-10-11', '2026-10-12', '2026-10-13'].map((d) => day(d, 4, 2))
     const m = assembleHealth({ ...base, rows, before: [500] })
     expect(m.features[0].status).toBe('silent')
-    expect(m.features[0].statusNote).toMatch(/averaged 6\.0 rows a day/)
+    expect(m.features[0].statusNote).toMatch(/averaged 6\.0 rows a day over the 7 days before it went quiet, none for 1 day/)
   })
 
   it('the baseline does not include the latest day, nor the day before the baseline starts', () => {
