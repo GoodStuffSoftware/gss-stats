@@ -13,7 +13,7 @@
 // { dimension, breakdown } and get the same result via a fallback.
 
 import { popupExcludeClause, pathFamilySqlCase, popupDimSqlCase, popupDimPrefilter } from '../../src/lib/popupEvents'
-import { gameDimSqlCase, gameDimPrefilter, campaignFlightSqlCase, campaignFlightPrefilter, arrivalSqlCase, keyEventSqlCase, flightDaySqlCase, withFlightRegistry, applyExclusions } from '../../src/lib/campaigns'
+import { gameDimSqlCase, gameDimPrefilter, campaignFlightSqlCase, campaignFlightPrefilter, landingTagSqlCase, landingTagPrefilter, arrivalSqlCase, keyEventSqlCase, flightDaySqlCase, withFlightRegistry, applyExclusions } from '../../src/lib/campaigns'
 import { excludeOwnClause as sharedExcludeOwnClause, selfReferralClause as sharedSelfReferralClause } from '../../src/lib/ownExclusion'
 import { etDateSql, etHourSql } from '../../src/lib/etTime'
 import { isDateDim } from '../../src/lib/rings'
@@ -71,6 +71,7 @@ export function breakdownColumnExpr(dim: string, emptyLabel: string): string {
   if (dim === 'gameMode' || dim === 'gameDifficulty') return gameDimSqlCase(dim, emptyLabel)
   if (dim === 'campaignFlight') return campaignFlightSqlCase(emptyLabel)
   if (dim === 'flightDay') return flightDaySqlCase(emptyLabel)
+  if (dim === 'landingTag') return landingTagSqlCase(emptyLabel)
   if (dim === 'arrival') return arrivalSqlCase(emptyLabel)
   if (dim === 'keyEvent') return keyEventSqlCase(emptyLabel)
   // screenw is INTEGER, default 0 when the client never reported a viewport width (JS
@@ -149,6 +150,7 @@ export const GEO_DIMS = new Set([
   'campaignFlight', // campaign flight by campaignAttributionClause — see campaigns.ts campaignFlightSqlCase
   'arrival', 'keyEvent', // first-ever beacon tagged/untagged; sign-in/install/completion rows — see campaigns.ts
   'hourEt', // US-Eastern hour of day — see etTime.ts etHourSql
+  'landingTag', // the Flight 3 Apps arm's landing tag on its /return/<tag>/d0 arrival rows — see campaigns.ts landingTagSqlCase
   'flightDay', // day of the row's campaign flight, '1' = its first ET day — see campaigns.ts flightDaySqlCase
 ])
 
@@ -161,7 +163,7 @@ export const GEO_DIMS = new Set([
 // equality instead of a bare column reference. 'date' alone stays fully out of filtering too:
 // a click on a date bucket becomes a day RANGE client-side (lib/drill.ts), never an equality
 // constraint, so nothing ever sends it as one.
-export const DERIVED_ONLY_DIMS = new Set(['date', 'dateEt', 'screenwBucket', 'pathFamily', 'popupFamily', 'popupOutcome', 'gameMode', 'gameDifficulty', 'campaignFlight', 'arrival', 'keyEvent', 'hourEt', 'flightDay'])
+export const DERIVED_ONLY_DIMS = new Set(['date', 'dateEt', 'screenwBucket', 'pathFamily', 'popupFamily', 'popupOutcome', 'gameMode', 'gameDifficulty', 'campaignFlight', 'arrival', 'keyEvent', 'hourEt', 'flightDay', 'landingTag'])
 // Of those, only 'date' stays out of multi-dimension (ring / breakdown-bar) queries: every other
 // derived dim groups like a column (its CASE runs per row in the inner SELECT, and
 // ringBlankExclusion drops its blank rows). A date axis is a trend, which lib/rings.ts
@@ -173,7 +175,7 @@ export const RING_EXCLUDED_DIMS = new Set(['date', 'dateEt'])
 // dimension describes), so the exclusion is lifted for that chart and the dimension's own bound
 // prefilter applies instead (only rows of that event family). Their blank rows are dropped even
 // in single-dim mode, so a page view never shows up as a "(none)" bar.
-export const EVENT_DIMS = new Set(['popupFamily', 'popupOutcome', 'gameMode', 'gameDifficulty', 'keyEvent'])
+export const EVENT_DIMS = new Set(['popupFamily', 'popupOutcome', 'gameMode', 'gameDifficulty', 'keyEvent', 'landingTag'])
 // Dims whose charts/filters lift the standing event-beacon exclusion: the event dims, plus
 // 'arrival' — a device's first-ever beacon can itself be an event row (e.g. an install prompt),
 // and the metrics registry counts it as a tagged arrival (campaign.taggedArrivals), so the
@@ -190,6 +192,7 @@ const DIM_PREFILTERS: Record<string, (w: string[], b: unknown[]) => void> = {
   gameDifficulty: gameDimPrefilter,
   campaignFlight: campaignFlightPrefilter,
   flightDay: campaignFlightPrefilter, // only a tagged row can be in a flight
+  landingTag: landingTagPrefilter, // only the arrival rows of a live landing tag; none live = no rows
 }
 // Dims whose blank rows are dropped in single-dim mode too (see EVENT_DIMS above).
 const BLANK_DROPPED_DIMS = new Set([...EVENT_DIMS, 'campaignFlight', 'arrival', 'flightDay'])
@@ -214,6 +217,7 @@ const DERIVED_FILTER_EXPR: Record<string, string> = {
   keyEvent: breakdownColumnExpr('keyEvent', ''),
   hourEt: breakdownColumnExpr('hourEt', ''),
   flightDay: breakdownColumnExpr('flightDay', ''),
+  landingTag: breakdownColumnExpr('landingTag', ''),
 }
 
 const json = (data: unknown, status = 200): Response =>

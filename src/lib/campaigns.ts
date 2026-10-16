@@ -24,6 +24,7 @@
 // small query per campaign rather than one UNIONed mega-query across all of them.
 
 import { addDays, etDateSql } from './etTime'
+import { LANDING_TAGS, LANDING_SITES, landingArrivalPath } from './landingTags'
 import { classifyPopupPath, computeRate, TRACKING_ACTIVATION_DATE_ET, NEW_BEACONS_LIVE_AT_ET, etDateFromMs, sqlLit, sqlInt, INSTALL_OUTCOMES, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, INSTALL_GAP_PATHS, isInstallGapUnmeasured, pathSegmentsSql, pathRestSql, POPUP_OUTCOME_TYPES } from './popupEvents'
 
 // ET hour-of-day (0-23) for "Arrivals by ET hour of day" — same DST-safe Intl approach as
@@ -117,7 +118,7 @@ export interface StagedArmConfig {
 export const STAGED_FLIGHT_3: Record<StagedArm, StagedArmConfig> = {
   apps: {
     label: 'Flight 3 — display, Sudoku app placements',
-    ucValues: ['sudoku_funnel_f3_apps'],
+    ucValues: ['sudoku_funnel_f3_apps_hero', 'sudoku_funnel_f3_apps_feat', 'sudoku_funnel_f3_apps'],
     dailyBudgetUsd: 10,
     hardCapUsd: 70,
     flightStartTimeEt: '12:00',
@@ -548,6 +549,36 @@ export function flightDaySqlCase(emptyLabel: string): string {
   const E = sqlLit(emptyLabel)
   const day = `CASE WHEN ts >= fr_from AND ts < fr_to THEN CAST(CAST(julianday(${etDateSql()}) - julianday(fr_day0) AS INTEGER) + 1 AS TEXT) ELSE ${E} END`
   return `CASE WHEN ${excluded} THEN ${E} ELSE COALESCE((${flightLookupSql(day)}), ${E}) END`
+}
+
+// ── Derived dimension landingTag (functions/api/geo.ts) — the Flight 3 Apps arm's two ads ─────
+// Which landing tag an ARRIVAL row carries: the row's own path `/return/<tag>/d0` (one per device on
+// its first tagged visit; the path embeds the tag, so this needs no `campaign` column and no visitor
+// join), for the tags in LANDING_TAGS only, on the web and app sites, minus the standing EXCLUSIONS.
+// The tag must be one a REGISTERED campaign claims, from its attribution start on (the same flight_reg
+// lookup campaignFlightSqlCase uses): an arm that is only staged (STAGED_FLIGHT_3, not in CAMPAIGNS)
+// has no registry row, so nothing matches and nothing is read for it. '' -> `emptyLabel`.
+export function landingTagSqlCase(emptyLabel: string): string {
+  const ew: string[] = []
+  const eb: unknown[] = []
+  applyExclusions(ew, eb)
+  const excluded = `NOT (${inlineBinds(ew.join(' AND '), eb)})`
+  const E = sqlLit(emptyLabel)
+  const tags = LANDING_TAGS.map((t) => sqlLit(t.tag)).join(', ')
+  const sites = LANDING_SITES.map(sqlLit).join(', ')
+  const lookup = `SELECT fr_uc FROM ${FLIGHT_REGISTRY_TABLE} WHERE fr_uc IN (${tags}) AND path = '/return/' || fr_uc || '/d0' AND ts >= fr_att ORDER BY fr_ord LIMIT 1`
+  return `CASE WHEN ${excluded} OR site NOT IN (${sites}) THEN ${E} ELSE COALESCE((${lookup}), ${E}) END`
+}
+/** The landing tags a registered, dated campaign claims: what the donut can ever show. Empty while the
+ * Apps arm is staged (STAGED_FLIGHT_3 is not CAMPAIGNS). */
+export function liveLandingTags(): string[] {
+  return LANDING_TAGS.map((t) => t.tag).filter((tag) => CAMPAIGNS.some((c) => c.ucValues.includes(tag) && campaignAttributionStartMs(c) !== null))
+}
+/** Prefilter for a landingTag query: only the arrival rows of a live landing tag, as literal paths (no
+ * binds). With none live the query matches nothing (`1 = 0`), so a staged arm is never read. */
+export function landingTagPrefilter(w: string[], _b: unknown[]): void {
+  const paths = liveLandingTags().map((t) => sqlLit(landingArrivalPath(t)))
+  w.push(paths.length ? `path IN (${paths.join(', ')})` : '1 = 0')
 }
 
 // ── Derived dimensions arrival / keyEvent (functions/api/geo.ts) — what the Overview timeline's
