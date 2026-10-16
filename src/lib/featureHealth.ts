@@ -65,12 +65,14 @@ export const FEATURES: readonly FeatureDef[] = [
   {
     id: 'tour',
     label: 'Tour',
-    blurb: 'The first-run tour: started, then completed, skipped, or left at a step.',
+    blurb: 'The first-run tour: started, then completed or skipped.',
     steps: [
       { id: 'start', label: 'Started', match: { exact: ['/tour/start'] } },
       { id: 'complete', label: 'Completed', match: { exact: ['/tour/complete'] }, ratioOf: { per: 'start' } },
       { id: 'skip', label: 'Skipped', match: { exact: ['/tour/skip'] }, ratioOf: { per: 'start' } },
-      { id: 'exit-at', label: 'Exited at a step', match: { exact: ['/tour/exit-at'], prefix: ['/tour/exit-at/'] }, ratioOf: { per: 'start' } },
+      // No "exited at a step" leg: /tour/exit-at/<stage> is a second beacon for every skip (checked in
+      // production D1 2026-10-15: identical counts on all 10 days, 74 and 74), so it would only repeat
+      // Skipped and double the feature total.
     ],
   },
   {
@@ -174,9 +176,13 @@ export function featureIdOfView(view: string | undefined): string | null {
 // ── Status ──────────────────────────────────────────────────────────────────────────────────
 
 /** "Went silent" needs an average of at least this many rows a day over the prior
- * HEALTH_BASELINE_DAYS complete ET days, and none at all on the latest complete ET day. Below it a
- * zero day is ordinary noise (at 5 a day, a quiet day is already rare), so the feature stays OK. */
+ * HEALTH_BASELINE_DAYS complete ET days, rows on at least HEALTH_SILENT_MIN_ACTIVE_DAYS of those
+ * days, and none at all on the latest complete ET day. Below the average a zero day is ordinary
+ * noise (at 5 a day, a quiet day is already rare); below the active-day count the feature is bursty
+ * (a week's rows in a few days), and a quiet day is the normal gap between bursts, not an outage. */
 export const HEALTH_SILENT_MIN_AVG = 5
+/** Of the HEALTH_BASELINE_DAYS baseline days, how many must have had any rows (steady, not bursty). */
+export const HEALTH_SILENT_MIN_ACTIVE_DAYS = 6
 /** The complete ET days before the latest complete day that the silent average is taken over. */
 export const HEALTH_BASELINE_DAYS = 7
 /** "New": no rows before this many complete ET days ago. */
@@ -190,7 +196,8 @@ export const HEALTH_STATUS_LABEL: Record<HealthStatus, string> = { silent: 'Went
  * new-days cutoff. */
 export function statusOf(input: { latest: number; baseline: readonly number[]; before: number }): HealthStatus {
   const avg = input.baseline.length ? input.baseline.reduce((a, b) => a + b, 0) / input.baseline.length : 0
-  if (avg >= HEALTH_SILENT_MIN_AVG && input.latest === 0) return 'silent'
+  const active = input.baseline.filter((n) => n > 0).length
+  if (avg >= HEALTH_SILENT_MIN_AVG && active >= HEALTH_SILENT_MIN_ACTIVE_DAYS && input.latest === 0) return 'silent'
   if (input.before === 0) return 'new'
   return 'ok'
 }

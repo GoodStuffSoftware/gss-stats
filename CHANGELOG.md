@@ -6,6 +6,12 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.41.1] — 2026-10-15
+
+### Fixed
+- **Feature health no longer cries wolf on bursty features.** "Went silent" now also needs rows on at least 6 of the prior 7 days, so a normal gap between bursts stays OK.
+- **Tour card shows one skip count.** The duplicate "Exited at a step" row, which counted the same skips as "Skipped", is gone.
+
 ## [0.41.0] — 2026-10-15
 
 ### Added

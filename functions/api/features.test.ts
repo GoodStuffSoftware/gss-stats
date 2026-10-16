@@ -52,7 +52,7 @@ describe('/api/features: windows and counts', () => {
       hit('/tour/start', at(LATEST, 9), { n: 10 }),
       hit('/tour/complete', at(LATEST, 10), { n: 4 }),
       hit('/tour/skip', at(LATEST, 11), { n: 2 }),
-      hit('/tour/exit-at/hub', at(LATEST, 12), { n: 1 }),
+      hit('/tour/exit-at/hub', at(LATEST, 12), { n: 1 }), // the same skip again: counted nowhere
       hit('/tour/start', at(PREV, 9), { n: 6 }),
       hit('/tour/complete', at(PREV, 10), { n: 3 }),
       hit('/tour/start', at('2026-10-09', 9), { n: 5 }),
@@ -69,13 +69,13 @@ describe('/api/features: windows and counts', () => {
     const complete = step(body, 'tour', 'complete')
     expect([complete.latest, complete.prev]).toEqual([4, 3])
     expect(step(body, 'tour', 'skip').latest).toBe(2)
-    expect(step(body, 'tour', 'exit-at').latest).toBe(1)
+    expect(body.features.find((f: any) => f.id === 'tour').steps.map((x: any) => x.id)).not.toContain('exit-at')
     // Plain ratios of counts.
     expect(complete.ratio.latest).toBeCloseTo(0.4)
     expect(complete.ratio.prev).toBeCloseTo(0.5)
     expect(complete.ratio.label).toMatch(/per started/)
     // The feature rows: the sum of its steps.
-    expect([feature(body, 'tour').latest, feature(body, 'tour').prev]).toEqual([17, 9])
+    expect([feature(body, 'tour').latest, feature(body, 'tour').prev]).toEqual([16, 9])
   })
 
   it('splits days at ET midnight, not UTC midnight', async () => {

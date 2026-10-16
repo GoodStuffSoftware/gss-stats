@@ -609,8 +609,10 @@ the page's range, sites and exclusions.
   rows are independent counts, never joined into a path, so a ratio can exceed 1. A zero
   denominator shows "—".
 - **Status:** *Went silent* if the feature averaged at least 5 rows a day over the prior 7
-  complete ET days and had 0 on the latest complete day; *New* if it has no rows before the
-  last 7 days; otherwise *OK*. A quiet day below 5 a day stays OK.
+  complete ET days, had rows on at least 6 of those 7 days, and had 0 on the latest complete
+  day; *New* if it has no rows before the last 7 days; otherwise *OK*. A quiet day below 5 a
+  day, or a gap in a bursty feature (rows on fewer than 6 of the 7 days), stays OK. A real
+  outage shows for its first day or two, until zero days push the active-day count under 6.
 - **Coach:** the coach strip reads "New / no rows yet" until the app ships its `/coach`
   beacons.
 - **Adding a feature** is one entry in `FEATURES` in

@@ -4,6 +4,7 @@ import {
   HEALTH_BASELINE_DAYS,
   HEALTH_CAPTION,
   HEALTH_SILENT_MIN_AVG,
+  HEALTH_SILENT_MIN_ACTIVE_DAYS,
   assembleHealth,
   flatSteps,
   formatRatio,
@@ -56,7 +57,8 @@ describe('the config list', () => {
     for (const id of ['coach', 'tour', 'signin', 'first50-promo', 'upsell', 'install', 'games']) expect(ids).toContain(id)
     const paths = (id: string) => FEATURES.find((f) => f.id === id)!.steps.flatMap((s) => [...(s.match.exact ?? []), ...(s.match.prefix ?? [])])
     expect(paths('coach')).toEqual(expect.arrayContaining(['/coach/shown/', '/coach/tour-opened', '/coach/dismissed/', '/coach/closed-at/']))
-    expect(paths('tour')).toEqual(expect.arrayContaining(['/tour/start', '/tour/complete', '/tour/skip', '/tour/exit-at/']))
+    expect(paths('tour')).toEqual(expect.arrayContaining(['/tour/start', '/tour/complete', '/tour/skip']))
+    expect(paths('tour')).not.toContain('/tour/exit-at/') // the same skips again (production D1, 2026-10-15)
     expect(paths('signin')).toEqual(expect.arrayContaining(['/signin-prompt/accept', '/signin-prompt/dismiss', '/auth/success/google/']))
   })
 
@@ -127,10 +129,20 @@ describe('statusOf', () => {
   it('has the threshold as a named constant at 5 rows a day over 7 days', () => {
     expect(HEALTH_SILENT_MIN_AVG).toBe(5)
     expect(HEALTH_BASELINE_DAYS).toBe(7)
+    expect(HEALTH_SILENT_MIN_ACTIVE_DAYS).toBe(6)
+  })
+  it('a bursty feature on a quiet day is OK: 7.9 a day in bursts with 3 empty days (Games, hard, 10-14)', () => {
+    expect(statusOf({ latest: 0, baseline: [20, 15, 20, 0, 0, 0, 0], before: 100 })).toBe('ok')
+    expect(statusOf({ latest: 0, baseline: [30, 25, 0, 0, 0, 0, 0], before: 100 })).toBe('ok')
+  })
+  it('a steady feature that drops to zero still flags, even at 6 of 7 active days', () => {
+    expect(statusOf({ latest: 0, baseline: [9, 8, 7, 9, 10, 8, 9], before: 100 })).toBe('silent')
+    expect(statusOf({ latest: 0, baseline: [0, 12, 9, 10, 8, 9, 7], before: 100 })).toBe('silent') // two days into an outage
+    expect(statusOf({ latest: 0, baseline: [0, 0, 9, 10, 8, 9, 7], before: 100 })).toBe('ok') // 5 of 7 active: bursty reading
   })
   it('went silent: the baseline averaged the threshold or more and the latest day is zero', () => {
     expect(statusOf({ latest: 0, baseline: steady, before: 100 })).toBe('silent')
-    expect(statusOf({ latest: 0, baseline: [35, 0, 0, 0, 0, 0, 0], before: 100 })).toBe('silent') // 35 / 7 = 5
+    expect(statusOf({ latest: 0, baseline: [30, 1, 1, 1, 1, 1, 0], before: 100 })).toBe('silent') // 35 / 7 = 5, 6 active
   })
   it('a quiet feature that is zero today stays OK (average below the threshold)', () => {
     expect(statusOf({ latest: 0, baseline: [4, 5, 5, 5, 5, 5, 5], before: 100 })).toBe('ok') // 34 / 7 < 5
@@ -145,7 +157,7 @@ describe('statusOf', () => {
     expect(statusOf({ latest: 0, baseline: [0, 0, 0, 0, 0, 0, 0], before: 0 })).toBe('new') // no rows at all
   })
   it('silent beats new', () => {
-    expect(statusOf({ latest: 0, baseline: [0, 9, 9, 9, 9, 9, 9], before: 0 })).toBe('silent')
+    expect(statusOf({ latest: 0, baseline: [1, 9, 9, 9, 9, 9, 9], before: 0 })).toBe('silent')
   })
 })
 
@@ -217,7 +229,10 @@ describe('assembleHealth', () => {
     const rows = [day('2026-10-06', 35, 0), day('2026-10-14', 0, 0)]
     expect(assembleHealth({ ...base, rows, before: [35] }).features[0].status).toBe('ok')
     // 35 rows inside the baseline do.
-    expect(assembleHealth({ ...base, rows: [day('2026-10-07', 35, 0)], before: [35] }).features[0].status).toBe('silent')
+    const steadyRows = [day('2026-10-07', 30, 0), ...['08', '09', '10', '11', '12'].map((d) => day(`2026-10-${d}`, 1, 0))]
+    expect(assembleHealth({ ...base, rows: steadyRows, before: [35] }).features[0].status).toBe('silent')
+    // The same 35 rows in one burst (1 active day of 7) are a bursty feature on a quiet day.
+    expect(assembleHealth({ ...base, rows: [day('2026-10-07', 35, 0)], before: [35] }).features[0].status).toBe('ok')
   })
 
   it('a quiet day is not an alarm: 3 a day on average and none yesterday is OK', () => {
