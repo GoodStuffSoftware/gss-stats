@@ -631,6 +631,7 @@ Cloudflare Pages Functions  (functions/_middleware.ts → functions/api/*.ts)
    │  - /api/geo    → reads the beacon's D1 (bot-free sub-country geo)
    │  - /api/popups → pop-up funnel counts/rates from the same D1 (sign-in, upsell, install, …)
    │  - /api/completions → completed-game counts from the same D1, by mode × difficulty
+   │  - /api/features → Feature health: per-step daily counts from the same D1 (web and app combined)
    │  - /api/metrics  → one batch of registry metrics/ratios by id (ADR 0003): every metric card
    │                      (Overview, Campaigns, Pop-ups), from the same D1 and the ads store
    │  - /api/ads/readings → the ads routine's readings log + stored spend (D1 gss-stats-ads)
@@ -895,7 +896,7 @@ keeps its current behaviour.
 |---|---|---|
 | Cloudflare RUM (`rumPageloadEventsAdaptiveGroups`: `/api/stats`) | 93 days (13w2d) per query; start no older than 184 days (26w2d) | yes |
 | Cloudflare `/api/sites` RUM query | fixed 90-day window, under the 93-day cap | no need |
-| D1: beacon `hits` (`/api/geo`, `/api/popups`, `/api/completions`, `/api/metrics`) and the ads store | none (SQLite scans the range given) | no |
+| D1: beacon `hits` (`/api/geo`, `/api/popups`, `/api/completions`, `/api/features`, `/api/metrics`) and the ads store | none (SQLite scans the range given) | no |
 | Ads sync (Google Ads reads) | none that bound a dashboard range | no |
 
 The limits are constants in [`functions/_lib/rangeGate.ts`](functions/_lib/rangeGate.ts)
@@ -1822,7 +1823,7 @@ change anything:
   greyed out with the tooltip "View-only access", and the server refuses every write a viewer
   sends with **403** `{"error":"view_only"}`. A viewer may only `GET`/`HEAD`, plus `POST` to the
   read-only query routes (`/api/stats`, `/api/geo`, `/api/metrics`, `/api/popups`,
-  `/api/completions`); everything else is refused.
+  `/api/completions`, `/api/features`); everything else is refused.
 - **The owner** (`ALLOWED_EMAILS`) is unchanged. An email on both lists is the owner.
 
 The viewer list lives in the `STATS_CONFIG` KV namespace, never in the repo: one key per
