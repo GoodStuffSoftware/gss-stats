@@ -8,8 +8,8 @@ import { DatabaseSync } from 'node:sqlite'
 import { openHitsDb, insertHits, sqliteD1, pagesContext, postJson } from '../_lib/testing/hitsDb'
 import { etWallTimeMs } from '../../src/lib/etTime'
 import {
-  ASK_ORDER_FEATURES, ASK_ORDER_VIEW, askOrderAssignedPath, askOrderFeatureId, askOrderOutcomePath, askOrderShownPath,
-  assignedStepId, outcomeStepId, shownStepId,
+  ASK_ORDER_FEATURES, ASK_ORDER_VIEW, askOrderAssignedPath, askOrderFeatureId, askOrderOutcomePath, askOrderRespondedPath, askOrderShownPath,
+  assignedStepId, outcomeStepId, respondedStepId, shownStepId,
 } from '../../src/lib/askOrder'
 import { COACH_TIPS_VIEW } from '../../src/lib/coachTips'
 import { flatSteps } from '../../src/lib/featureHealth'
@@ -49,11 +49,11 @@ const st = (body: any, g: string, step: string) => feature(body, g).steps.find((
 const TAGGED = { campaign: 'sudoku_tired_of_ads' }
 
 describe('ask-order: per group, tag and step counts', () => {
-  it('answers one feature per group with 22 steps, the latest day and a range', async () => {
+  it('answers one feature per group with 26 steps, the latest day and a range', async () => {
     const { status, body } = await post(range)
     expect(status).toBe(200)
     expect(body.features.map((f: any) => f.id)).toEqual(['ao-signin-first', 'ao-install-first'])
-    for (const f of body.features) expect(f.steps).toHaveLength(22)
+    for (const f of body.features) expect(f.steps).toHaveLength(26)
     expect(body.latestDay).toBe(LATEST)
     expect(body.everSeen).toBe(false)
   })
@@ -69,8 +69,13 @@ describe('ask-order: per group, tag and step counts', () => {
       hit(askOrderOutcomePath('signin-first', 'signin', 'signed-in'), at(LATEST, 9), { n: 2, ...TAGGED }),
       hit(askOrderOutcomePath('signin-first', 'install', 'installed'), at('2026-10-09', 9), { n: 3 }),
       hit(askOrderOutcomePath('install-first', 'install', 'returned'), at(PREV, 9), { n: 6, ...TAGGED }),
+      hit(askOrderRespondedPath('signin-first', 'signin'), at(LATEST, 9), { n: 2 }),
+      hit(askOrderRespondedPath('install-first', 'install'), at(LATEST, 9), { n: 3, ...TAGGED }),
     ])
     const { body } = await post(range)
+    expect(st(body, 'signin-first', respondedStepId('signin', 'organic'))).toMatchObject({ latest: 2, range: 2 })
+    expect(st(body, 'install-first', respondedStepId('install', 'tagged'))).toMatchObject({ latest: 3, range: 3 })
+    expect(st(body, 'install-first', respondedStepId('install', 'organic'))).toMatchObject({ latest: 0, range: 0 })
     expect(st(body, 'signin-first', assignedStepId('organic'))).toMatchObject({ latest: 5, range: 5 })
     expect(st(body, 'signin-first', assignedStepId('tagged'))).toMatchObject({ latest: 3, range: 3 })
     expect(st(body, 'install-first', assignedStepId('organic'))).toMatchObject({ latest: 4, range: 4 })
@@ -138,7 +143,7 @@ describe('ask-order: allTime', () => {
     expect(body.allTime['ao-signin-first.assigned-tagged']).toBe(3)
     expect(body.allTime['ao-install-first.shown-install-organic']).toBe(4) // today is counted too
     expect(st(body, 'signin-first', assignedStepId('organic')).range).toBe(0)
-    expect(Object.keys(body.allTime)).toHaveLength(ASK_ORDER_FEATURES.length * 22)
+    expect(Object.keys(body.allTime)).toHaveLength(ASK_ORDER_FEATURES.length * 26)
   })
 
   it('ignores the site selection but honours the own-visit and known-traffic exclusions', async () => {

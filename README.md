@@ -655,15 +655,22 @@ the card says so and every row reads 0.
 The **Ask-order A/B** card (Features page, under Coach tips; `?page=bsk-features`) reads the test
 of which ask goes first, sign in or install. Each device is put in one group once, and the game
 sends twin rows under `/ab/ask-order/<group>/…` (assigned, shown per ask, and the outcome after
-each ask). The card shows, per group and organic vs tagged, assigned and shown rows, the
-signed-in rows and installed rows per assigned row (read separately, as plain row ratios, never
-a per-person rate), and returned and still-playing rows from the group's own twin rows. The
-pre-registered read is progress to about 150 asks shown per group and the 1.5x rule per kind of
-response; it uses every day so far whatever range is picked. It is the same `/api/features`
-endpoint with `view: 'ask-order'` ([`src/lib/askOrder.ts`](src/lib/askOrder.ts)). Caveats it
-states: a device that both signs in and installs counts twice in the combined figure, a true
-per-device primary needs one first-response row per device, and tagged-cell ratios are
-approximate because organic and tagged are per-event counts. The whole `/ab/ask-order/%` family
+each ask, plus a once-per-device `responded` row on a device's first response). The card shows, per
+group and organic vs tagged, assigned and shown rows, the responded rows, the signed-in rows and
+installed rows per assigned row (display only, as plain row ratios, never a per-person rate), and
+returned and still-playing rows from the group's own twin rows. The pre-registered read is
+progress to about 150 asks shown per group (all traffic, organic plus tagged) and one 1.5x rule on
+one **primary**: responded rows per assigned row once any once-per-device responded row has been
+seen, and until then the combined response rows (signed-in plus installed; a device that both
+signs in and installs counts twice) per assigned row. The card says which primary is active and
+why (`ASK_ORDER_PRIMARY_MODE` in [`src/lib/askOrder.ts`](src/lib/askOrder.ts) is `auto`, or can force
+`combined` or `responded`). At the call point, one order at 1.5x or more of the other on the
+primary switches everyone to it (compared as integers, so exactly 1.5x counts), otherwise sign-in
+first stays. If sign-ins and installs point opposite ways between the groups, the sign-ins
+decide: the same 1.5x test is then run on the signed-in (or responded sign-in) rows. The read uses
+every day so far whatever range is picked. It is the same `/api/features` endpoint with
+`view: 'ask-order'`. Caveat it states: tagged-cell ratios are approximate because organic and
+tagged are per-event counts. The whole `/ab/ask-order/%` family
 is counts only: read as per-ET-day totals, never split by hour, place or device, and never added
 into any other total. Purchases cannot be split by group, so they are not shown.
 

@@ -12,7 +12,9 @@ const T = Date.parse('2026-10-20T15:00:00Z')
 
 describe('ask-order twin rows: classification', () => {
   it('the new-shape paths are twins, popup-event paths of family ab-ask-order, and nothing else', () => {
-    expect(twinPaths).toHaveLength(2 * 11)
+    expect(twinPaths).toHaveLength(2 * 13)
+    expect(twinPaths).toContain('/ab/ask-order/signin-first/responded/install')
+    expect(twinPaths).toContain('/ab/ask-order/install-first/responded/signin')
     for (const p of twinPaths) {
       expect(isAbTwinPath(p), p).toBe(true)
       expect(isPopupEventPath(p), p).toBe(true)

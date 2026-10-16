@@ -227,7 +227,7 @@ describe('Ask-order card', () => {
     expect(live.find('[data-testid="ask-order-empty"]').exists()).toBe(false)
   })
 
-  it('draws the progress toward 150 asks per group and a preliminary read per response kind below it', async () => {
+  it('draws the progress toward 150 asks per group and ONE preliminary read below it', async () => {
     const w = await mountAsk(
       askModel(true, {
         [k('signin-first', 'assigned-organic')]: 50,
@@ -249,14 +249,44 @@ describe('Ask-order card', () => {
     expect(groups[0].find('[data-col="per-assigned-installed"]').text()).toContain('installed rows per assigned row 0.00 (0 rows)')
     expect(groups[0].find('[data-col="response-rows-per-assigned"]').text()).toContain('(a device that both signs in and installs counts twice)')
     const verdicts = w.findAll('[data-testid="ask-order-verdict"]')
-    expect(verdicts.map((v) => v.attributes('data-kind'))).toEqual(['signed-in', 'installed'])
-    for (const v of verdicts) {
-      expect(v.attributes('data-state')).toBe('preliminary')
-      expect(v.text()).toContain('Preliminary')
-    }
+    expect(verdicts).toHaveLength(1)
+    expect(verdicts[0].attributes('data-state')).toBe('preliminary')
+    expect(verdicts[0].text()).toContain('Preliminary')
+    // Progress counts every row, organic plus tagged.
+    expect(groups[0].find('[data-col="primary-per-assigned"]').text()).toContain('0.10 (5 rows)')
   })
 
-  it('makes the call per kind once both groups reach 150', async () => {
+  it('states which primary is active and why: combined until a responded row is seen, then responded', async () => {
+    const combined = await mountAsk(askModel(true, { [k('signin-first', 'assigned-organic')]: 10 }))
+    const p1 = combined.find('[data-testid="ask-order-primary"]')
+    expect(p1.attributes('data-primary')).toBe('combined')
+    expect(p1.text()).toBe('Primary: combined response rows (responded row not seen yet)')
+    const seen = await mountAsk(askModel(true, { [k('signin-first', 'assigned-organic')]: 10, [k('install-first', 'responded-install-tagged')]: 2 }))
+    const p2 = seen.find('[data-testid="ask-order-primary"]')
+    expect(p2.attributes('data-primary')).toBe('responded')
+    expect(p2.text()).toBe('Primary: responded per assigned (once-per-device row)')
+    expect(seen.find('.ao-group[data-group="install-first"] [data-col="responded-per-assigned"]').text()).toContain('(2 rows)')
+  })
+
+  it('shows signed-in and installed row ratios as display only, beside the primary', async () => {
+    const w = await mountAsk(
+      askModel(true, {
+        [k('signin-first', 'assigned-organic')]: 100,
+        [k('signin-first', 'signin-signed-in-organic')]: 10,
+        [k('signin-first', 'install-installed-organic')]: 20,
+      }),
+    )
+    const g = w.find('.ao-group[data-group="signin-first"]')
+    expect(g.find('[data-col="per-assigned-signed-in"]').text()).toContain('signed-in rows per assigned row 0.10 (10 rows)')
+    expect(g.find('[data-col="per-assigned-installed"]').text()).toContain('installed rows per assigned row 0.20 (20 rows)')
+    expect(g.find('[data-col="per-assigned-signed-in"]').attributes('title')).toContain('Display only')
+    expect(g.find('[data-col="per-assigned-installed"]').attributes('title')).toContain('Display only')
+    expect(g.find('[data-col="primary-per-assigned"]').text()).toContain('combined response rows')
+    expect(g.find('[data-col="primary-per-assigned"]').text()).toContain('0.30 (30 rows)')
+    expect(w.find('[data-testid="ask-order-kinds"]').text()).toContain('(display only)')
+  })
+
+  it('makes ONE call on the combined primary once both groups reach 150, with the 1.5x result', async () => {
     const w = await mountAsk(
       askModel(true, {
         [k('signin-first', 'assigned-organic')]: 100,
@@ -267,15 +297,51 @@ describe('Ask-order card', () => {
         [k('install-first', 'shown-install-organic')]: 100,
         [k('install-first', 'shown-signin-tagged')]: 50,
         [k('install-first', 'signin-signed-in-organic')]: 20,
-        [k('install-first', 'install-installed-tagged')]: 21,
+        [k('install-first', 'install-installed-tagged')]: 40,
       }),
     )
-    const [signedIn, installed] = w.findAll('[data-testid="ask-order-verdict"]')
-    expect(signedIn.attributes('data-state')).toBe('call')
-    expect(signedIn.text()).toContain('2.00x')
-    expect(signedIn.text()).toContain('switch everyone to install first')
-    expect(installed.text()).toContain('1.05x')
-    expect(installed.text()).toContain('keep sign-in first')
+    const verdicts = w.findAll('[data-testid="ask-order-verdict"]')
+    expect(verdicts).toHaveLength(1)
+    const v = verdicts[0]
+    expect(v.attributes('data-state')).toBe('call')
+    expect(v.attributes('data-basis')).toBe('primary')
+    expect(v.find('[data-col="rule-multiple"]').text()).toContain('2.00x')
+    expect(v.find('[data-col="rule-multiple"]').text()).toContain('1.5x rule on the primary')
+    expect(v.text()).toContain('switch everyone to install first')
+  })
+
+  it('keeps sign-in first below 1.5x on the responded primary, and switches at exactly 1.5x', async () => {
+    const base = {
+      [k('signin-first', 'assigned-organic')]: 100,
+      [k('signin-first', 'shown-signin-organic')]: 150,
+      [k('install-first', 'assigned-organic')]: 100,
+      [k('install-first', 'shown-install-organic')]: 150,
+      [k('signin-first', 'responded-signin-organic')]: 10,
+    }
+    const below = await mountAsk(askModel(true, { ...base, [k('install-first', 'responded-signin-organic')]: 14 }))
+    expect(below.find('[data-testid="ask-order-verdict"]').text()).toContain('keep sign-in first')
+    const exact = await mountAsk(askModel(true, { ...base, [k('install-first', 'responded-signin-organic')]: 15 }))
+    expect(exact.find('[data-testid="ask-order-primary"]').attributes('data-primary')).toBe('responded')
+    expect(exact.find('[data-testid="ask-order-verdict"]').text()).toContain('switch everyone to install first')
+  })
+
+  it('says sign-ins decide when the kinds point opposite ways', async () => {
+    const w = await mountAsk(
+      askModel(true, {
+        [k('signin-first', 'assigned-organic')]: 100,
+        [k('signin-first', 'shown-signin-organic')]: 150,
+        [k('signin-first', 'signin-signed-in-organic')]: 10,
+        [k('install-first', 'assigned-organic')]: 100,
+        [k('install-first', 'shown-install-organic')]: 150,
+        [k('install-first', 'signin-signed-in-organic')]: 5,
+        [k('install-first', 'install-installed-organic')]: 20,
+      }),
+    )
+    const v = w.find('[data-testid="ask-order-verdict"]')
+    expect(v.attributes('data-basis')).toBe('sign-ins')
+    expect(v.find('[data-col="rule-multiple"]').text()).toContain('rule on sign-ins')
+    expect(v.text()).toContain('sign-ins decide')
+    expect(v.text()).toContain('keep sign-in first')
   })
 
   it('fills the table by window, group and tag, with row ratios and a dash for a zero denominator', async () => {
@@ -301,6 +367,8 @@ describe('Ask-order card', () => {
     expect(cell('signed-in-per-assigned', 'range-signin-first-tagged')).toBe('0.40') // (10 + 6) / 40
     expect(cell('installed-per-assigned', 'range-signin-first-tagged')).toBe('0.10')
     expect(cell('response-rows-per-assigned', 'latest-signin-first-tagged')).toBe('0.63')
+    expect(cell('responded-signin', 'range-signin-first-tagged')).toBe('0')
+    expect(cell('responded-per-assigned', 'range-signin-first-tagged')).toBe('0.00')
     // No assigned rows: a dash, never Infinity or NaN.
     expect(cell('signed-in-per-assigned', 'latest-signin-first-organic')).toBe('—')
     expect(cell('returned-per-assigned', 'latest-install-first-organic')).toBe('—')
@@ -314,7 +382,10 @@ describe('Ask-order card', () => {
     expect(cap).toBe(ASK_ORDER_CAPTION)
     expect(cap).toContain('row ratio')
     expect(cap).toContain('a device that both signs in and installs')
-    expect(cap).toContain('one first-response row per device')
+    expect(cap).toContain('once-per-device responded row')
+    expect(cap).toContain('for display only')
+    expect(cap).toContain('sign-ins decide')
+    expect(cap).toContain('1.5x')
     expect(cap).toContain('never from the ordinary return rows')
     expect(cap).toContain('per-event counts')
     expect(cap).toContain('approximate')

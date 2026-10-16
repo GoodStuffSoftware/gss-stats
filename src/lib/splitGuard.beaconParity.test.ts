@@ -49,6 +49,8 @@ describe('isSplitRefusedPath beacon parity (matcher)', () => {
       '/ab/ask-order/signin-first/assigned',
       '/ab/ask-order/install-first/shown/install',
       '/ab/ask-order/signin-first/signin/signed-in',
+      '/ab/ask-order/install-first/responded/signin',
+      '/ab/ask-order/signin-first/responded/install',
       '/AB/Ask-Order/x',
     ]) {
       expect(isSplitRefusedPath(p), p).toBe(true)
