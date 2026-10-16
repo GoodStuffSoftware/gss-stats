@@ -177,7 +177,41 @@ export interface CountryCount {
   country: string
   count: number
 }
+/** The v1.99.1 web release instant (UTC wall time). One constant: the SQL below turns it into epoch ms
+ * with strftime, never a hand-computed epoch. Not in the releases registry, so it lives here. */
+export const PREFLIGHT_RELEASE_UTC = '2026-10-16 21:07:00'
+export const PREFLIGHT_RELEASE_LABEL = 'v1.99.1 web, 2026-10-16 21:07Z'
+
+export interface PreflightCounts {
+  coach: number
+  committed: number
+  eligible: number
+}
+/** The flight 3 pre-flight gate rule, stated once (stats-requirements §6: real organic /coach/* rows plus
+ * a /signin-prompt/committed-* or /signin-eligible/* row). §6 does not say how many; the choice is
+ * MET when coach > 0 AND (committed + eligible) > 0. */
+export function preflightGateMet(c: PreflightCounts): boolean {
+  return c.coach > 0 && c.committed + c.eligible > 0
+}
+export function preflightGateLine(c: PreflightCounts): string {
+  return `Pre-flight gate (organic since ${PREFLIGHT_RELEASE_LABEL}): /coach/* ${c.coach} · /signin-prompt/committed-* ${c.committed} · /signin-eligible/* ${c.eligible} → ${preflightGateMet(c) ? 'MET' : 'NOT YET'}`
+}
+
+/** Organic (no uc / campaign tag) web rows on the new paths since the release, with the standing
+ * own-traffic and known-traffic exclusions. Counts only: one cumulative row, no hour, place or device. */
+export function preflightGateQuery(): Query {
+  const w = ['site = ?', `ts >= strftime('%s','${PREFLIGHT_RELEASE_UTC}')*1000`, `(campaign IS NULL OR campaign = '')`, `(path LIKE '/coach/%' OR path LIKE '/signin-prompt/committed-%' OR path LIKE '/signin-eligible/%')`]
+  const b: unknown[] = [WEB_SITE]
+  applyExclusions(w, b)
+  return {
+    sql: `SELECT COALESCE(SUM(path LIKE '/coach/%'), 0) AS coach, COALESCE(SUM(path LIKE '/signin-prompt/committed-%'), 0) AS committed, COALESCE(SUM(path LIKE '/signin-eligible/%'), 0) AS eligible FROM hits WHERE ${w.join(' AND ')}`,
+    binds: b,
+  }
+}
+
 export interface BeaconSource {
+  /** Optional: the pre-flight gate counts (preflightGateQuery). Absent = line not printed. */
+  preflightGate?(): Promise<PreflightCounts>
   /** `upsellFixAtMs`: undefined = the configured instant; null = no segment flag. */
   tagged(campaign: CampaignFlight, upsellFixAtMs?: number | null, maturedBeforeMs?: number | null): Promise<TaggedRow[]>
   siteEvents(sinceMs: number): Promise<HourPathCount[]>
@@ -195,6 +229,11 @@ const n = (x: unknown) => Number(x) || 0
 
 export function createBeaconSource(select: D1Select): BeaconSource {
   return {
+    async preflightGate() {
+      const q = preflightGateQuery()
+      const r = (await select<any>(q.sql, q.binds))[0] ?? {}
+      return { coach: n(r.coach), committed: n(r.committed), eligible: n(r.eligible) }
+    },
     async tagged(campaign, upsellFixAtMs, maturedBeforeMs) {
       const q = taggedRowsQuery(campaign, upsellFixAtMs === undefined ? UPSELL_SIGNEDOUT_FIX_AT : upsellFixAtMs, maturedBeforeMs ?? null)
       const rows = await select<any>(q.sql, q.binds)

@@ -3,6 +3,7 @@
 // text shows. Every rate is printed with its counts (formatGated) and MIN_COHORT-gated;
 // sign-ups and promo claims appear only as window COUNTS.
 
+import { preflightGateLine } from './beacon'
 import {
   ABANDON_BUCKETS,
   FIRST_SESSION_STEP_LABELS,
@@ -250,6 +251,7 @@ export function formatMorningReport(r: MorningResult): string {
         : `Tagged: NOT READ (${t.error})`,
     )
     out.push(...tagSplitLines(r.tagSplit))
+    if (r.preflightGate) out.push(r.preflightGate.ok ? preflightGateLine(r.preflightGate.counts) : `Pre-flight gate: NOT READ (${r.preflightGate.error})`)
     out.push(...firstSessionLines(r.firstSession))
     const th = r.thresholds
     out.push(

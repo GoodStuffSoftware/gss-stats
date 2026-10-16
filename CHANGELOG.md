@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Ads report: pre-flight gate line.** The morning report now prints whether real organic coach and sign-in rows have appeared since the v1.99.1 web release (MET or NOT YET), the check flight 3's Search arm waits on.
+
 ## [0.44.0] — 2026-10-16
 
 ### Added
