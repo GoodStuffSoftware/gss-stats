@@ -12,6 +12,7 @@ import fs from 'node:fs'
 import { parseArgs } from 'node:util'
 import { ADS_CUSTOMER_ID, ADS_READ_PLANS, defaultReadCampaignId, etDateOf, type PostflightStage, type FirstSessionRowSite, type ReadingRecord, type ReturnRow, type ReturnSiteStat, type SpendDay, type StoredSpend, type TaggedRow } from '../../src/lib/adsRules'
 import { campaignById } from '../../src/lib/campaigns'
+import type { SearchSideRaw } from '../../src/lib/searchAdsSide'
 import type { PlacementDayRow } from '../../src/lib/adsStore'
 import { etDateFromMs, type HourPathCount } from '../../src/lib/popupEvents'
 import {
@@ -25,6 +26,9 @@ import {
   fetchPlacementDaily,
   fetchRangeTotal,
   fetchRecommendations,
+  fetchSearchDaily,
+  fetchSearchKeywords,
+  fetchSearchRange,
   fetchTargeting,
   type AdDayRow,
   type AdsClient,
@@ -128,6 +132,18 @@ export function adsSource(client: AdsClient): AdsSource {
     recommendations: (id) => fetchRecommendations(client, ADS_CUSTOMER_ID, id),
     // Ad-level cost for the per-tag split of an arm with several tags (a read-only SELECT).
     adDaily: (id, since, until) => fetchAdDaily(client, id, since, until),
+    // The flight 3 Search Ads-side block: three read-only SELECTs. The keyword query failing leaves only the keyword part out.
+    searchSide: async (id, since, until) => {
+      const [daily, cumulative] = await Promise.all([fetchSearchDaily(client, id, since, until), fetchSearchRange(client, id, since, until)])
+      let keywords = null
+      let keywordsError: string | null = null
+      try {
+        keywords = await fetchSearchKeywords(client, id, since, until)
+      } catch (e) {
+        keywordsError = redact(e)
+      }
+      return { daily, cumulative, keywords, keywordsError }
+    },
   }
 }
 
@@ -161,7 +177,7 @@ export async function liveDeps(opts: Record<string, string | boolean | undefined
 // ── --fixture: one recorded JSON file drives the whole read ───────────────────────────────
 export interface Fixture {
   now: string
-  ads?: { status: CampaignStatus; daily: Record<string, SpendDay>; placements: PlacementDayRow[]; adDaily?: AdDayRow[] } | { error: string }
+  ads?: { status: CampaignStatus; daily: Record<string, SpendDay>; placements: PlacementDayRow[]; adDaily?: AdDayRow[]; searchSide?: SearchSideRaw } | { error: string }
   beacon?: {
     tagged: (Omit<TaggedRow, 'hourStartMs'> & { hour?: string; hourStartMs?: number })[]
     siteEvents: (Omit<HourPathCount, 'hourStartMs'> & { hour?: string; hourStartMs?: number })[]
@@ -205,6 +221,7 @@ export function fixtureDeps(fx: Fixture, dryRun: boolean): ReadDeps & { store: R
           status: async () => ads.status,
           daily: async (_id, since, until) => Object.fromEntries(Object.entries(ads.daily).filter(([d]) => inRange(d, since, until))),
           placements: async (_id, since, until) => ads.placements.filter((p) => inRange(p.date, since, until)),
+          ...(ads.searchSide ? { searchSide: async () => ads.searchSide! } : {}),
           ...(ads.adDaily ? { adDaily: async (_id: string, since: string, until: string) => ads.adDaily!.filter((a) => inRange(a.date, since, until)) } : {}),
           rangeTotal: async (_id, since, until) => {
             const days = Object.entries(ads.daily).filter(([d]) => inRange(d, since, until)).map(([, v]) => v)

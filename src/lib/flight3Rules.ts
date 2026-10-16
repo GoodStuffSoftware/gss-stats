@@ -29,6 +29,14 @@ export const F3_JUDGE_FROM_DAY = 3
 /** First flight day whose read states the D+7 verdict (the final read, flight end + 1 = day 8). */
 export const F3_VERDICT_FROM_DAY = 8
 
+/** Baselines printed beside each arm's Spend line (stats-requirements spec section 1): what the earlier
+ * flights paid per tagged ARRIVAL (not per click), and the F2 Apps first-move row ratio rule 7 uses. A
+ * comparison only, never a rule. */
+export const F3_ARM_BASELINES: Record<StagedArm, string> = {
+  apps: 'F1/F2 Apps $0.32-0.34 per arrival, first-move 6.4% (see rule 7)',
+  search: 'F2 Search $0.64 per arrival',
+}
+
 export type ReadoutVerdict = 'PASS' | 'PROPOSE PAUSE' | 'NOT YET' | 'NO DATA' | 'n/a' | 'GO' | 'ITERATE' | 'STOP' | 'INCONCLUSIVE'
 export interface RuleReadout {
   /** 1-9. */

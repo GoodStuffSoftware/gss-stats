@@ -17,6 +17,7 @@
 import { ADS_API_VERSION, ADS_CUSTOMER_ID, approvedPlacementsFor, assertKnownCampaign, isApprovedPlacement, readPlanFor, round2, microsToDollars, type SpendDay } from './adsRules'
 import type { PlacementDayRow } from './adsStore'
 import { redact, registerSecret } from './adsRedact'
+import type { KeywordRaw, SearchDayRaw, SearchMetricsRaw } from './searchAdsSide'
 
 export interface AdsCredentials {
   clientId: string
@@ -287,6 +288,67 @@ export async function fetchAdDaily(client: AdsClient, campaignId: string, since:
       impressions: Number(r.metrics?.impressions ?? 0),
       clicks: Number(r.metrics?.clicks ?? 0),
     })
+  }
+  return out
+}
+
+// ── Search campaign, Ads side (flight 3 Search; src/lib/searchAdsSide.ts) ─────────────────
+// Three READ-ONLY SELECTs. The impression-share fields are passed through RAW (a fraction, "--" or
+// absent): searchAdsSide.ts decides what a sentinel means. keyword_view cannot carry
+// search_budget_lost_impression_share (the API refuses it, verified 2026-10-16), so the keyword
+// query asks for impression share and lost-to-rank only.
+const SEARCH_SHARE_FIELDS = 'metrics.search_impression_share, metrics.search_rank_lost_impression_share, metrics.search_budget_lost_impression_share'
+const finiteOrNull = (v: unknown): number | null => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v))
+const rawShare = (v: unknown): number | string | null => (typeof v === 'number' || typeof v === 'string' ? v : null)
+function searchMetricsOf(m: any): SearchMetricsRaw {
+  return {
+    impressions: Number(m?.impressions ?? 0),
+    clicks: Number(m?.clicks ?? 0),
+    costMicros: Number(m?.costMicros ?? 0),
+    avgCpcMicros: finiteOrNull(m?.averageCpc),
+    impressionShare: rawShare(m?.searchImpressionShare),
+    rankLost: rawShare(m?.searchRankLostImpressionShare),
+    budgetLost: rawShare(m?.searchBudgetLostImpressionShare),
+  }
+}
+/** Campaign level, one row per ET day. */
+export const searchDailyQuery = (campaignId: string, since: string, until: string): string =>
+  `SELECT segments.date, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.average_cpc, ${SEARCH_SHARE_FIELDS} FROM campaign WHERE campaign.id = ${campaignId} AND segments.date BETWEEN '${since}' AND '${until}' ORDER BY segments.date`
+/** Campaign level, ONE row for the whole range (no date segment, so Google aggregates the shares itself). */
+export const searchRangeQuery = (campaignId: string, since: string, until: string): string =>
+  `SELECT metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.average_cpc, ${SEARCH_SHARE_FIELDS} FROM campaign WHERE campaign.id = ${campaignId} AND segments.date BETWEEN '${since}' AND '${until}'`
+/** Keyword level (keyword_view), one row per keyword over the range. */
+export const searchKeywordQuery = (campaignId: string, since: string, until: string): string =>
+  `SELECT ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, metrics.clicks, metrics.impressions, metrics.average_cpc, metrics.search_impression_share, metrics.search_rank_lost_impression_share FROM keyword_view WHERE campaign.id = ${campaignId} AND segments.date BETWEEN '${since}' AND '${until}'`
+
+export async function fetchSearchDaily(client: AdsClient, campaignId: string, since: string, until: string): Promise<SearchDayRaw[]> {
+  assertKnownCampaign(campaignId)
+  checkRange(since, until)
+  const rows = await client.search(searchDailyQuery(campaignId, since, until))
+  const out: SearchDayRaw[] = []
+  for (const r of rows) {
+    const date = r.segments?.date
+    if (typeof date === 'string' && DATE_RE.test(date)) out.push({ date, ...searchMetricsOf(r.metrics) })
+  }
+  return out
+}
+/** null = Google returned no row at all. */
+export async function fetchSearchRange(client: AdsClient, campaignId: string, since: string, until: string): Promise<SearchMetricsRaw | null> {
+  assertKnownCampaign(campaignId)
+  checkRange(since, until)
+  const rows = await client.search(searchRangeQuery(campaignId, since, until))
+  return rows.length ? searchMetricsOf(rows[0].metrics) : null
+}
+export async function fetchSearchKeywords(client: AdsClient, campaignId: string, since: string, until: string): Promise<KeywordRaw[]> {
+  assertKnownCampaign(campaignId)
+  checkRange(since, until)
+  const rows = await client.search(searchKeywordQuery(campaignId, since, until))
+  const out: KeywordRaw[] = []
+  for (const r of rows) {
+    const kw = r.adGroupCriterion?.keyword
+    if (typeof kw?.text !== 'string') continue
+    const m = searchMetricsOf(r.metrics)
+    out.push({ text: kw.text, matchType: String(kw.matchType ?? ''), impressions: m.impressions, clicks: m.clicks, avgCpcMicros: m.avgCpcMicros, impressionShare: m.impressionShare, rankLost: m.rankLost })
   }
   return out
 }

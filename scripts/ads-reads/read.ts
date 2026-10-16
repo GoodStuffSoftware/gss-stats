@@ -100,6 +100,7 @@ import type { BeaconSource, PreflightCounts } from './beacon'
 import type { FirebaseCounts } from './firebase'
 import { HOUSEHOLD_NOTE, RETENTION_NOTE, type PlayReportsSection } from './play'
 import { redact, summarizeError } from '../../src/lib/adsRedact'
+import { buildSearchAdsSide, type SearchAdsSideBlock, type SearchSideRaw } from '../../src/lib/searchAdsSide'
 
 // ── Dependencies ─────────────────────────────────────────────────────────────────────────
 /** The Ads API as the reads see it: the metrics the shared sync pulls, plus campaign status.
@@ -116,6 +117,9 @@ export interface AdsSource extends AdsMetricsSource {
   /** Ad-level cost per ET day (src/lib/adsApi.ts fetchAdDaily), for the per-tag cost of an arm
    * with several tags. Optional like the others: absent = the split prints without cost. */
   adDaily?(campaignId: string, since: string, until: string): Promise<AdDayRow[]>
+  /** Flight 3 Search's Ads-side block (src/lib/searchAdsSide.ts): campaign per day, campaign over the
+   * range and keyword_view. Optional like the others: absent = the block says it was not read. */
+  searchSide?(campaignId: string, since: string, until: string): Promise<SearchSideRaw>
 }
 export interface FirebaseSource {
   /** cohortTiersAtMs: also read the day-15/30/60 cohort-by-tier COUNTs as of that instant. */
@@ -877,6 +881,8 @@ export interface MorningResult {
   hardCapDaily: RuleResult | null
   /** Flight 3 plans only (absent for flight 2 and the retest): the numbered rules 1-9 block, printed on every morning read. Proposals only. */
   flight3?: Flight3Block
+  /** Flight 3 Search plans only: the Ads-side block (Google Ads metrics only) and the day-3 readout. Display and proposals only. */
+  searchAdsSide?: SearchAdsSideBlock
   releaseHealth: HealthSection
   diagnostics: DiagnosticsSection
   play: PlayReturnStatus | null
@@ -1091,6 +1097,27 @@ async function flight3BlockRead(
   )
 }
 
+/** The Search Ads-side block: a best-effort READ-ONLY Ads pull over the closed flight days. A failure
+ * is carried in the block and never reaches `errors`, a kill rule or `notify`. Before the first
+ * closed day nothing is queried. */
+async function searchSideRead(deps: ReadDeps, campaign: CampaignFlight, todayEt: string, throughEt: string | null): Promise<SearchAdsSideBlock> {
+  const flightStartEt = campaign.flightStart!
+  const until = throughEt && throughEt > campaign.flightEnd ? campaign.flightEnd : throughEt
+  const flightDay = flightDayOf(flightStartEt, todayEt)
+  let raw: SearchSideRaw | null = null
+  let error: string | null = null
+  if (until && until >= flightStartEt) {
+    const ads = deps.ads
+    if (!ads?.searchSide) error = deps.adsInitError ? `Ads not available: ${summarizeError(deps.adsInitError)}` : 'not supported by this Ads source'
+    else {
+      const r = await attempt('ads search side', () => ads.searchSide!(campaign.id, flightStartEt, until))
+      if (r.ok) raw = r.value
+      else error = summarizeError(r.error)
+    }
+  }
+  return buildSearchAdsSide({ flightDay, flightStartEt, throughEt: until, raw, error })
+}
+
 export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Promise<MorningResult> {
   const { plan, campaign } = readPlanFor(opts.campaignId)
   const readAt = new Date(deps.nowMs).toISOString()
@@ -1227,6 +1254,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
       ? await flight3BlockRead(deps, { plan, campaign, todayEt, spend, campaignSync, taggedRows, tagged, firstSession, thresholdRead, hardCapDaily, campaignState: status.ok ? status.value : null })
       : undefined
   const flight3Pause = flight3?.proposal === 'PROPOSE PAUSE'
+  const searchAdsSide = plan.flight3Arm === 'search' && !opts.healthOnly ? await searchSideRead(deps, campaign, todayEt, spend.throughEt) : undefined
 
   let play = thresholdRead?.play ?? null
   if (!play) {
@@ -1377,6 +1405,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
     thresholdRead,
     hardCapDaily,
     ...(flight3 ? { flight3 } : {}),
+    ...(searchAdsSide ? { searchAdsSide } : {}),
     releaseHealth: health,
     diagnostics,
     play,

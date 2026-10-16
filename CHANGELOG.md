@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Flight 3 Search Ads-side block and day 3 readout.** The Search morning read prints Google's impressions, clicks, average CPC and impression-share figures per day and per keyword, then from flight day 3 a bid-limited, budget-limited or fine line with a raise-or-hold proposal for Mike, and both flight 3 arms' spend line shows average CPC beside the earlier flights' baselines.
+
 ## [0.48.0] — 2026-10-16
 
 ### Added

@@ -26,10 +26,11 @@ import {
   type CampaignChannel,
 } from '../../src/lib/adsRules'
 import { GAME_START_DIFFICULTIES, POPUP_OUTCOME_TYPES, TOUR_EXIT_STEPS, TUTORIAL_COMPLETE_KINDS, etDateFromMs, gateRate, installOutcomeGapNote } from '../../src/lib/popupEvents'
-import { RAW_INSTALL_SIGNALS_LABEL } from '../../src/lib/campaigns'
+import { RAW_INSTALL_SIGNALS_LABEL, type StagedArm } from '../../src/lib/campaigns'
 import { measurementReportLines } from '../../src/lib/measurementChanges'
 import { noteRawText } from '../../src/lib/notes'
-import { ruleReadoutLine, type Flight3Block } from '../../src/lib/flight3Rules'
+import { F3_ARM_BASELINES, ruleReadoutLine, type Flight3Block } from '../../src/lib/flight3Rules'
+import { searchAdsSideLines } from '../../src/lib/searchAdsSide'
 import type { DiagnosticsSection, FullRead, MorningResult, PostflightResult, SpendSection } from './read'
 import type { FirebaseCounts } from './firebase'
 import type { TagSplit } from '../../src/lib/tagSplit'
@@ -57,12 +58,20 @@ export function syncAlertLines(s: SpendSection): string[] {
   return (s.syncAlerts ?? []).map((m) => `  SYNC ALERT: ${m}`)
 }
 
-function spendLines(s: SpendSection): string[] {
+/** Cost per click: "—" under 1 click. */
+const avgCpcText = (cost: number, clicks: number) => (clicks > 0 ? money(cost / clicks) : '—')
+
+/** `arm` = a flight 3 arm: adds the average CPC and that arm's baselines to the Spend line. Any other
+ * campaign prints the Spend line exactly as it always has. */
+function spendLines(s: SpendSection, arm?: StagedArm): string[] {
   if (!s.ok) return [`Spend: NOT READ (${s.error})`, syncLine(s), ...syncAlertLines(s)]
   const ctr = gateRate(s.cumulative.clicks, s.cumulative.impressions)
   const lines = [
     `Spend (Google Ads API, closed days through ${s.throughEt ?? 'none yet'}): yesterday ${s.yesterday ? `${money(s.yesterday.cost)} (budget ${money(s.dailyBudget)}), ${n(s.yesterday.impressions)} impr, ${n(s.yesterday.clicks)} clicks` : '—'}`,
     `  cumulative ${money(s.cumulative.cost)} of the ${money(s.hardCap)} cap over ${s.cumulative.days} day(s); CTR ${ctr.value == null ? '—' : pct(ctr.value)} (${n(s.cumulative.clicks)}/${n(s.cumulative.impressions)})${s.todayPartial ? `; today so far ${money(s.todayPartial.cost)} (partial, not counted)` : ''}`,
+    ...(arm
+      ? [`  avg CPC (cost / clicks): yesterday ${s.yesterday ? avgCpcText(s.yesterday.cost, s.yesterday.clicks) : '—'}, cumulative ${avgCpcText(s.cumulative.cost, s.cumulative.clicks)}; baselines (cost per arrival, not per click): ${F3_ARM_BASELINES[arm]}`]
+      : []),
     syncLine(s),
     ...syncAlertLines(s),
   ]
@@ -270,7 +279,7 @@ export function formatMorningReport(r: MorningResult): string {
   if (flag1) out.push(flag1)
   if (r.missedReads.length) out.push(`Previous scheduled read missing: ${r.missedReads.join(', ')}`)
   if (r.mode === 'morning') {
-    out.push(...spendLines(r.spend))
+    out.push(...spendLines(r.spend, r.flight3?.arm))
     const t = r.tagged
     out.push(
       t.ok
@@ -281,6 +290,7 @@ export function formatMorningReport(r: MorningResult): string {
     if (r.preflightGate) out.push(r.preflightGate.ok ? preflightGateLine(r.preflightGate.counts) : `Pre-flight gate: NOT READ (${r.preflightGate.error})`)
     out.push(...firstSessionLines(r.firstSession))
     if (r.flight3) out.push(...flight3RulesLines(r.flight3))
+    if (r.searchAdsSide) out.push(...searchAdsSideLines(r.searchAdsSide))
     const th = r.thresholds
     out.push(
       th.crossedNow.length

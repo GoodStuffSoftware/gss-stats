@@ -227,6 +227,27 @@ link that lost its suffix still counts. All three tags are the one arm.
   in the daily "Tagged so far" line, and reads "—" under 5 tagged arrivals (the small-sample
   gate; likely early on for Search). Quote the line as printed with the benchmark; never compute
   a figure for a "—". It is a comparison, not a rule.
+- **Spend line average CPC and baselines (both F3 arms):** the `Spend (Google Ads API ...)` block gains
+  a line `avg CPC (cost / clicks): yesterday $X, cumulative $Y; baselines (cost per arrival, not per
+  click): ...`. The baselines are the earlier flights' cost per tagged ARRIVAL (Apps $0.32-0.34, F2
+  Search $0.64, plus F2 Apps first-move 6.4% on the Apps line), so they are a different measure from the
+  average CPC beside them: quote both as printed and never compare a CPC to a per-arrival baseline.
+  "—" means no clicks. A comparison, not a rule.
+- **Search Ads side and the day 3 readout (Search arm only, Google Ads metrics only; nothing from the
+  beacon).** After the F3 rules block the Search read prints `Search Ads side (Google Ads only ...)`:
+  one line per closed ET day and a cumulative line (impressions, clicks, average CPC, search
+  impression share, share lost to rank, share lost to budget), then a keyword_view table (clicks,
+  impressions, average CPC, impression share, lost to rank; Google does not allow lost-to-budget
+  per keyword; the ten busiest keywords print, the rest are counted). Sentinels print as Google
+  means them: `<10%` is an impression share under Google's 10% floor, `>90%` a lost share over its
+  90% cap, `n/a` a figure Google did not send (never read it as 0%). From flight day 3 the block ends with
+  `Search: X clicks/day, avg CPC $Y, lost to rank Z% → bid-limited | budget-limited | fine`
+  (bid-limited at 30% or more lost to rank, else budget-limited at 20% or more lost to budget,
+  else fine; `n/a` when Google sent no share) and one proposal line: `PROPOSE: raise the 'app' keywords
+  only to $1.25 max CPC (Mike decides)` when Search averages under 2 clicks a day AND 50% or more is
+  lost to rank, else `HOLD $0.99`. Before day 3 the readout line reads `NOT YET`. Relay the lines as
+  printed. They are proposals: no Google Ads setting is ever changed here, and the max CPC stays
+  Mike's decision. The cut-offs live in one constant, `SEARCH_READOUT` in `src/lib/searchAdsSide.ts`.
 - **Search volume:** about 15-25 clicks a week are expected, so one week will likely read
   inconclusive (under 20 asks). That is the expected outcome, not a fault; the rules above are
   unchanged.

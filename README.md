@@ -1314,6 +1314,19 @@ Rows the app's own manual production checks write (`utm_campaign=manual_check`, 
 paths) sit in the standing exclusions (`EXCLUSIONS` in `campaigns.ts`), so the campaign reads, the
 morning read and every chart or fact that applies "hide known test and household traffic" leave them out.
 
+**Flight 3 Search, Ads side.** The Search arm's morning read also prints a `Search Ads side` block built
+from Google Ads alone (three read-only GAQL SELECTs in `src/lib/adsApi.ts`: campaign per ET day,
+campaign over the range so Google aggregates the shares, and `keyword_view`): impressions, clicks,
+average CPC, search impression share and the shares lost to rank and to budget, per closed ET day and
+cumulative, plus a per-keyword table (`keyword_view` refuses lost-to-budget, so keywords carry impression
+share and lost-to-rank only). Google's sentinels print as `<10%` (impression share below its 10%
+floor), `>90%` (a lost share over its 90% cap) and `n/a` (no figure), never 0%. From flight day 3 the block
+ends with `Search: X clicks/day, avg CPC $Y, lost to rank Z% → bid-limited | budget-limited | fine` and a
+proposal (`PROPOSE: raise the 'app' keywords only to $1.25 max CPC (Mike decides)` at under 2 clicks a day
+and 50%+ lost to rank, else `HOLD $0.99`); before day 3 it reads `NOT YET`. Cut-offs: `SEARCH_READOUT` in
+`src/lib/searchAdsSide.ts`. Proposals only: no Google Ads setting is changed. Both flight 3 arms' Spend
+line also carries the average CPC (cost / clicks) and that arm's baseline cost per arrival (`F3_ARM_BASELINES`).
+
 **Staging an arm, activated by its dates.** Flight 3's two arms hold everything in code: the
 Google Ads ids and tags (`STAGED_FLIGHT_3` in `campaigns.ts`) and the read-plan settings
 (`STAGED_FLIGHT_3_PLAN_SETTINGS` in `adsRules.ts`). An arm is registered, and so synced, charted and
