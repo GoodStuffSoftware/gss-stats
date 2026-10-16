@@ -621,7 +621,8 @@ The **Feature health** card sits on the Best Sudoku Overview under the KPIs, and
 **Features** page (last in the Best Sudoku group) charts every step of every feature, one
 line per step and one point per ET day. Both read `/api/features`
 ([`functions/api/features.ts`](functions/api/features.ts)), web and app combined, and follow
-the page's range, sites and exclusions.
+the page's range, sites and exclusions. Rows from the app's manual production checks
+(`manual_check` campaign or paths) never count here, even with known traffic shown.
 
 - **Card:** a row per feature with its status, and per step the count for the latest complete
   ET day, the day before and the selected range, plus the ratio of those counts.
