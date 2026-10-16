@@ -61,11 +61,13 @@ export function writeViewerPrefs(prefs: ViewerPrefs): void {
   }
 }
 
-/** The page to show on load: the one this viewer was last on if it still exists, else the
+/** The page to show on load: the one a `?page=<id>` link names if it exists (a copied URL wins over
+ * the remembered page), else the one this viewer was last on if it still exists, else the
  * config's landing page (`activePageId`, ★ Overview for a first-time viewer), else the default
  * page, else the first page. */
-export function initialPageId(pages: readonly DashboardPage[], prefs: ViewerPrefs, landingId: string): string {
+export function initialPageId(pages: readonly DashboardPage[], prefs: ViewerPrefs, landingId: string, linkedId?: string): string {
   const has = (id: string | undefined): id is string => !!id && pages.some((p) => p.id === id)
+  if (has(linkedId)) return linkedId
   if (has(prefs.active)) return prefs.active
   if (has(landingId)) return landingId
   return (pages.find((p) => p.isDefault) ?? pages[0]).id

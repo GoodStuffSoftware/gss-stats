@@ -836,6 +836,14 @@ describe('safeNext (open-redirect guard)', () => {
   it.each([
     ['/', '/'],
     ['/?page=x', '/?page=x'],
+    // Page deep links (src/lib/pageLink.ts): the page param rides in the query of a same-origin path.
+    ['/?page=bsk-features', '/?page=bsk-features'],
+    ['/?page=bsk-features&utm_source=x#top', '/?page=bsk-features&utm_source=x#top'],
+    ['/?page=//evil.example', '/?page=//evil.example'], // inside the query, not a redirect target
+    ['/?page=https://evil.example', '/?page=https://evil.example'],
+    ['?page=bsk-features', '/'], // not a path
+    ['/\\?page=bsk-features', '/'],
+    ['/auth/google/login?page=bsk-features', '/'],
     ['//evil.example', '/'],
     ['/\\evil.example', '/'],
     ['https://evil.example', '/'],
@@ -864,6 +872,28 @@ describe('safeNext (open-redirect guard)', () => {
     )
     expect(res.status).toBe(302)
     expect(res.headers.get('Location')).toBe('/%E4%B8%AD?q=%C3%A9')
+  })
+
+  it('a page deep link survives the sign-in redirect: gate -> login -> callback lands on the same page', async () => {
+    const first = await gate(req('/?page=bsk-features'))
+    expect(first.res.status).toBe(302)
+    const loginLocation = first.res.headers.get('Location')!
+    expect(loginLocation).toBe('/auth/google/login?next=%2F%3Fpage%3Dbsk-features')
+    const nextParam = new URL(loginLocation, 'https://stats.goodstuff.software').searchParams.get('next')!
+    const { res } = await completeLogin({ next: nextParam })
+    expect(res.status).toBe(302)
+    expect(res.headers.get('Location')).toBe('/?page=bsk-features')
+  })
+
+  it('a hostile page link never leaves the origin: the return-to stays a same-origin path', async () => {
+    for (const raw of ['/?page=//evil.example', '/?page=https://evil.example/x', '/?page=%2F%2Fevil.example']) {
+      const first = await gate(req(raw))
+      const nextParam = new URL(first.res.headers.get('Location')!, 'https://stats.goodstuff.software').searchParams.get('next')!
+      const { res } = await completeLogin({ next: nextParam })
+      const loc = res.headers.get('Location')!
+      expect(loc.startsWith('/') && !loc.startsWith('//') && !loc.startsWith('/\\'), loc).toBe(true)
+      expect(new URL(loc, 'https://stats.goodstuff.software').origin).toBe('https://stats.goodstuff.software')
+    }
   })
 
   it('login ignores a hostile next and returns to /', async () => {

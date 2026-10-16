@@ -3,7 +3,10 @@
 //   view 'health'        the Feature health table: a row per feature with its status, and per step the
 //                        counts for the latest complete ET day, the day before and the selected range,
 //                        plus the plain ratios of those counts;
-//   view 'steps:<id>'    that feature's step chart: a line per step, a point per ET day.
+//   view 'steps:<id>'    that feature's step chart: a line per step, a point per ET day;
+//   view 'coach-tips'    the Coach tips table (src/lib/coachTips.ts): a row per coach tip with shown,
+//                        dismissed and closed-while-showing counts and their ratios, for the latest
+//                        complete ET day and the selected range, plus the "Show me around" total.
 // Web and app are combined. Counts only: nothing here is a per-person rate, and the caption says so.
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import type { ChartConfiguration } from 'chart.js'
@@ -12,6 +15,7 @@ import { fetchFeatureHealth, type FeatureHealthResponse } from '../api'
 import { HEALTH_CAPTION, HEALTH_STATUS_LABEL, featureIdOfView, formatRatio, type FeatureHealth } from '../lib/featureHealth'
 import { buildStepChartConfig } from '../lib/featureHealthChart'
 import { formatKey } from '../lib/charts'
+import { COACH_TIPS_CAPTION, COACH_TIPS_EMPTY_NOTE, COACH_TIPS_VIEW } from '../lib/coachTips'
 import BaseChart from './charts/BaseChart.vue'
 
 const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolean }>()
@@ -47,6 +51,17 @@ onBeforeUnmount(() => {
   seq++ // a response that lands after unmount is dropped
 })
 
+// The Coach tips table: one row per tip (every feature but the last), then the tour-opened total.
+const isCoachTips = computed(() => props.widget.view === COACH_TIPS_VIEW)
+const coachStep = (f: FeatureHealth, id: string) => f.steps.find((s) => s.id === id)
+const coachRatio = (f: FeatureHealth, id: string, which: 'latest' | 'range') => formatRatio(coachStep(f, id)?.ratio?.[which] ?? null)
+const coachTourOpened = computed(() => {
+  const f = model.value?.features.find((x) => x.id === 'tour-opened')
+  const s = f?.steps.find((x) => x.id === 'opened')
+  return f && s ? { label: f.label, blurb: f.blurb, latest: s.latest, range: s.range } : null
+})
+const coachTipRows = computed(() => (model.value?.features ?? []).filter((f) => f.id.startsWith('tip-')))
+
 const stepsFeatureId = computed(() => featureIdOfView(props.widget.view))
 const stepsFeature = computed<FeatureHealth | null>(() => {
   const id = stepsFeatureId.value
@@ -72,6 +87,51 @@ const ratioCells = (f: FeatureHealth, i: number) => {
   <div class="fh-body">
     <p v-if="loading && !model" class="state mono">Loading…</p>
     <p v-else-if="error" class="state error mono">{{ error }}</p>
+
+    <!-- The Coach tips table -->
+    <template v-else-if="isCoachTips && model">
+      <p v-if="model.everSeen === false" class="fh-caption" data-testid="coach-tips-empty">{{ COACH_TIPS_EMPTY_NOTE }}</p>
+      <div class="fh-scroll">
+        <table class="fh-table" data-testid="coach-tips-table">
+          <thead>
+            <tr>
+              <th class="l" rowspan="2">Tip</th>
+              <th class="c" colspan="5" :title="model.latestDay">Latest day ({{ dayLabel(model.latestDay) }})</th>
+              <th class="c" colspan="5" :title="rangeTitle">Range</th>
+            </tr>
+            <tr>
+              <template v-for="g in ['latest', 'range']" :key="g">
+                <th class="r">Shown</th>
+                <th class="r">Dismissed</th>
+                <th class="r">Closed while showing</th>
+                <th class="r" title="Dismissed divided by shown">Dismissed per shown</th>
+                <th class="r" title="Closed while showing divided by shown">Closed per shown</th>
+              </template>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="f in coachTipRows" :key="f.id" :data-tip="f.id">
+              <td class="l fh-name" :title="f.blurb">{{ f.label }}</td>
+              <template v-for="g in (['latest', 'range'] as const)" :key="g">
+                <td class="r mono" :data-col="g + '-shown'">{{ fmt(coachStep(f, 'shown')?.[g] ?? 0) }}</td>
+                <td class="r mono" :data-col="g + '-dismissed'">{{ fmt(coachStep(f, 'dismissed')?.[g] ?? 0) }}</td>
+                <td class="r mono" :data-col="g + '-closed'">{{ fmt(coachStep(f, 'closed')?.[g] ?? 0) }}</td>
+                <td class="r mono" :data-col="g + '-dismissed-ratio'">{{ coachRatio(f, 'dismissed', g) }}</td>
+                <td class="r mono" :data-col="g + '-closed-ratio'">{{ coachRatio(f, 'closed', g) }}</td>
+              </template>
+            </tr>
+            <tr v-if="coachTourOpened" class="fh-total" data-tip="tour-opened">
+              <td class="l fh-name" :title="coachTourOpened.blurb">{{ coachTourOpened.label }} (taps, no tip)</td>
+              <td class="r mono" data-col="latest-opened">{{ fmt(coachTourOpened.latest) }}</td>
+              <td class="l" colspan="4"></td>
+              <td class="r mono" data-col="range-opened">{{ fmt(coachTourOpened.range) }}</td>
+              <td class="l" colspan="4"></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="fh-caption" data-testid="coach-tips-caption">{{ COACH_TIPS_CAPTION }}</p>
+    </template>
 
     <!-- A feature's step chart -->
     <template v-else-if="stepsFeatureId">
@@ -168,6 +228,12 @@ const ratioCells = (f: FeatureHealth, i: number) => {
 }
 .l {
   text-align: left;
+}
+.c {
+  text-align: center;
+}
+.fh-total td {
+  border-top: 1px solid rgb(var(--line));
 }
 .r {
   text-align: right;

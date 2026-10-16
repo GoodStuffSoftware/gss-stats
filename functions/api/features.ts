@@ -20,7 +20,14 @@
 // /coach/shown/…) are only ever read as per-ET-day totals, which the rule allows. The step columns
 // carry the paths as checked literals, never binds.
 //
-// POST { since, until, sites?, excludeOwnVisits?, ownBrowser?, ownOS?, excludeKnownTraffic? }
+// The same endpoint also answers the Coach tips card (view 'coach-tips', src/lib/coachTips.ts): the same
+// two statements built from COACH_TIP_FEATURES (a feature per tip, three exact paths each, and the
+// tour-opened total) instead of FEATURES. Splitting by tip is a split by PATH; the grouping is still
+// the ET day alone, so the refused /coach/shown/%, /coach/dismissed/% and /coach/closed-at/% paths
+// are read only as per-ET-day totals. Its second statement is the count of such rows ever (not
+// MIN or MAX of ts), which tells "the game version that sends it hasn't shipped" from a quiet range.
+//
+// POST { since, until, sites?, excludeOwnVisits?, ownBrowser?, ownOS?, excludeKnownTraffic?, view? }
 
 import { buildCacheKeyUrl, cachedJson, type CacheLike } from '../_lib/edgeCache'
 import { WHEN_RE, SITE_TAG_RE } from '../../src/lib/range'
@@ -29,7 +36,8 @@ import { MAX_SITES, statementTooLarge } from '../../src/lib/queryLimits'
 import { applyExclusions } from '../../src/lib/campaigns'
 import { excludeOwnClause } from '../../src/lib/ownExclusion'
 import { addDays, etDateFast, etWallTimeMs } from '../../src/lib/etTime'
-import { FEATURES, assembleHealth, flatSteps, healthDays, type DayCounts } from '../../src/lib/featureHealth'
+import { FEATURES, assembleHealth, flatSteps, healthDays, type DayCounts, type FeatureDef } from '../../src/lib/featureHealth'
+import { COACH_TIPS_VIEW, COACH_TIP_FEATURES } from '../../src/lib/coachTips'
 import { anyStepWhere, beforeCutoffSql, dailyStepsSql } from '../../src/lib/featureHealthSql'
 
 interface Env {
@@ -75,6 +83,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const sites = rawSites.filter((s): s is string => typeof s === 'string' && s !== 'all' && SITE_TAG_RE.test(s))
   const excludeOwn = body.excludeOwnVisits === true
   const excludeKnownTraffic = body.excludeKnownTraffic === true
+  const coachTips = body.view === COACH_TIPS_VIEW
+  const features: readonly FeatureDef[] = coachTips ? COACH_TIP_FEATURES : FEATURES
 
   // The window, in whole ET days (R-1d): the selected range snapped to ET midnights, widened to also
   // cover the baseline days and today, both ET midnights by construction.
@@ -102,6 +112,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     excludeKnownTraffic,
     today: hd.today,
     window: REFUSED_WINDOW_KEY,
+    view: coachTips ? COACH_TIPS_VIEW : '',
   })
   const cache = (caches as unknown as { default: CacheLike }).default
   return cachedJson(cache, cacheKeyUrl, CACHE_TTL_SECONDS, ctx.waitUntil.bind(ctx), compute)
@@ -117,17 +128,18 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       excludeOwnClause(w, b, excludeOwn, body.ownBrowser, body.ownOS)
     }
 
-    const w1: string[] = ['ts >= ?', 'ts < ?', anyStepWhere()]
+    const w1: string[] = ['ts >= ?', 'ts < ?', anyStepWhere(features)]
     const b1: unknown[] = [fromMs, toMs]
     filterTerms(w1, b1)
-    const daily = dailyStepsSql(w1)
+    const daily = dailyStepsSql(w1, features)
     const tooLarge1 = statementTooLarge(daily, b1.length)
     if (tooLarge1) return tooLarge1
 
-    const w2: string[] = ['ts < ?', anyStepWhere()]
-    const b2: unknown[] = [hd.newCutoffMs]
+    // The Coach tips card asks "any row ever" (before tomorrow's ET midnight); the health table asks "any row before the new-days cutoff".
+    const w2: string[] = ['ts < ?', anyStepWhere(features)]
+    const b2: unknown[] = [coachTips ? hd.tomorrowMs : hd.newCutoffMs]
     filterTerms(w2, b2)
-    const before = beforeCutoffSql(w2)
+    const before = beforeCutoffSql(w2, features)
     const tooLarge2 = statementTooLarge(before, b2.length)
     if (tooLarge2) return tooLarge2
 
@@ -140,17 +152,18 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       return json({ error: 'd1 query failed', detail: String(e) }, 500)
     }
 
-    const stepCount = flatSteps().length
+    const stepCount = flatSteps(features).length
     const rows: DayCounts[] = (dayRes.results ?? []).map((r: any) => ({
       d: String(r.d),
       s: Array.from({ length: stepCount }, (_, i) => Number(r[`s${i}`]) || 0),
     }))
     const beforeRow = (beforeRes.results ?? [])[0] ?? {}
-    const beforeCounts = FEATURES.map((_, i) => Number(beforeRow[`f${i}`]) || 0)
+    const beforeCounts = features.map((_, i) => Number(beforeRow[`f${i}`]) || 0)
 
-    const model = assembleHealth({ rows, before: beforeCounts, nowMs, rangeFrom: rangeFrom || hd.today, rangeTo: rangeTo || hd.today })
+    const model = assembleHealth({ features, rows, before: beforeCounts, nowMs, rangeFrom: rangeFrom || hd.today, rangeTo: rangeTo || hd.today })
     return json({
       ...model,
+      ...(coachTips ? { everSeen: beforeCounts.some((n) => n > 0) } : {}),
       meta: { since, until, rangeFrom, rangeTo, sites: sites.length ? sites.join(',') : 'all', today: hd.today },
     })
   }

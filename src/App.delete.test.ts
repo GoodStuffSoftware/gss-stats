@@ -119,6 +119,7 @@ describe('App — where deleting the page on screen lands', () => {
     expect(remembered()).toBe('bsk-campaigns')
     w.unmount()
     mounted.length = 0
+    history.replaceState(null, '', '/') // a fresh tab: the first mount left ?page=… in the address bar
     w = await mountApp('bsk-overview')
     await deleteFromHeader(w)
     expect(shownPage(w)).toBe('Campaigns') // the first page left in Best Sudoku

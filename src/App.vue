@@ -8,6 +8,7 @@ import { loadSites, sitesTree, tokenLabel } from './sitesStore'
 import { isSiteDim, semanticKey, drillNeedsEventBeacons } from './lib/drill'
 import { sessionExpired, reauth, checkSessionExpired } from './session'
 import { readViewerPrefs, writeViewerPrefs, initialPageId, readDarkPref, writeDarkPref } from './lib/viewerPrefs'
+import { linkedPageId, searchWithPage } from './lib/pageLink'
 import { rootOf, drillTrail, drillParentFor, groupLandingPage, pagesToDelete, movePageToGroup, landingAfterDelete, orderedGroups, pathLabel, renameGroup, deleteGroup, type GroupResult, type RenameTarget } from './lib/nav'
 import { applyGroupDraft, applyPageDraft, type GroupDraft, type PageDraft } from './lib/wizards'
 import { SearchIcon, MenuIcon, EllipsisIcon, StarIcon, type IconKey } from './lib/icons'
@@ -94,7 +95,10 @@ onMounted(async () => {
   // What the store holds as far as this tab knows: a save only goes out when the config differs.
   lastPersisted = configJson(config)
   loaded.value = true
-  if (!loadFailed.value) rememberActivePage()
+  if (!loadFailed.value) {
+    rememberActivePage()
+    syncPageUrl()
+  }
 })
 
 // ── Loading the stored layout ─────────────────────────────────────────────────
@@ -127,7 +131,8 @@ function applyLayout(norm: DashboardConfig) {
   config.syncRange = norm.syncRange
   config.groupMeta = norm.groupMeta
   config.groupOrder = norm.groupOrder
-  activePageId.value = initialPageId(norm.pages, readViewerPrefs(), norm.activePageId)
+  activePageId.value = initialPageId(norm.pages, readViewerPrefs(), norm.activePageId, linkedPageId(globalThis.location?.search ?? ''))
+  syncPageUrl()
 }
 // "Try again" on the load-failed banner. A successful read replaces whatever is on screen with the
 // stored layout (edits made on the stand-in defaults were never saved and are dropped) and turns
@@ -172,8 +177,24 @@ function rememberActivePage() {
   if (!root.isDefault) prefs.lastByGroup = { ...prefs.lastByGroup, [root.group]: p.id }
   writeViewerPrefs(prefs)
 }
+// Deep link: the address bar always names the page on screen (`?page=<id>`), so a copied URL reopens it.
+// replaceState, not pushState: switching pages adds no history entries. Skipped until a layout is on
+// screen, so an unknown id in the URL is only replaced once the real page is known.
+function syncPageUrl() {
+  if (!loaded.value || loadFailed.value) return
+  try {
+    const loc = globalThis.location
+    const search = searchWithPage(loc.search, activePage.value.id)
+    if (search !== loc.search) globalThis.history.replaceState(globalThis.history.state, '', loc.pathname + search + loc.hash)
+  } catch {
+    // history unavailable or sandboxed: the link just isn't kept up to date
+  }
+}
 watch(activePageId, () => {
-  if (loaded.value && !loadFailed.value) rememberActivePage()
+  if (loaded.value && !loadFailed.value) {
+    rememberActivePage()
+    syncPageUrl()
+  }
 })
 
 // ── Persistence (debounced) ───────────────────────────────────────────────────

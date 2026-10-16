@@ -6,6 +6,7 @@ import { BEST_SUDOKU_SITES } from './bestSudokuSites'
 import { normCardRef } from './metrics/validate'
 import { autoCaveatIds, isNoteIdHideable, widgetNoteScope } from './notes'
 import { FEATURES, stepsViewFor } from './featureHealth'
+import { COACH_TIPS_VIEW } from './coachTips'
 
 export function defaultDateRange(): { since: string; until: string } {
   const until = new Date()
@@ -735,10 +736,12 @@ export function featureHealthWidget(geom: { x: number; y: number; w: number; h: 
     ...geom,
   })
 }
-/** The Features page's charts: one step chart per feature in FEATURES, two to a row, in config order. */
+/** The Features page's charts: one step chart per feature in FEATURES, two to a row, in config order,
+ * then the Coach tips table (per-tip counts, src/lib/coachTips.ts) full width under them. */
 export function defaultFeaturesWidgets(): Widget[] {
-  return factoryWidgets(
-    FEATURES.map((f, i) =>
+  const chartRows = Math.ceil(FEATURES.length / 2)
+  return factoryWidgets([
+    ...FEATURES.map((f, i) =>
       w({
         id: `fw-${f.id}`,
         title: f.label,
@@ -755,7 +758,24 @@ export function defaultFeaturesWidgets(): Widget[] {
         h: 8,
       }),
     ),
-  )
+    coachTipsWidget({ x: 0, y: chartRows * 8, w: 12, h: 10 }),
+  ])
+}
+/** The Coach tips table (Features page): per tip shown / dismissed / closed while showing and their
+ * ratios, plus the "Show me around" total. */
+export function coachTipsWidget(geom: { x: number; y: number; w: number; h: number }): Widget {
+  return w({
+    id: 'fw-coach-tips',
+    title: 'Coach tips',
+    type: 'table',
+    dataset: 'features',
+    view: COACH_TIPS_VIEW,
+    dimension: '',
+    metric: 'pageviews',
+    limit: 1,
+    excludeKnownTraffic: true,
+    ...geom,
+  })
 }
 /** By id only (see isBestSudokuPopupsPage). */
 export function isFeaturesPage(p: Pick<DashboardPage, 'id'>): boolean {

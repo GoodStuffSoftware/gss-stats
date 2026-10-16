@@ -45,6 +45,9 @@ function answer(path: string): Response | undefined {
 }
 
 export function stubAppFetch(): AppFetch {
+  // The App now keeps ?page=<id> in the address bar (page deep links); each test starts from a clean URL,
+  // as a fresh browser tab would, so one test's page never leaks into the next one's load.
+  globalThis.history?.replaceState(null, '', '/')
   const unexpected: string[] = []
   const fn = vi.fn(async (input: FetchInput) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url

@@ -620,6 +620,31 @@ the page's range, sites and exclusions.
   chart.
 - Counts only: nothing here splits by hour, place, device or visitor.
 
+### Coach tips
+
+The **Coach tips** card (bottom of the Features page) has a row per coach-strip tip (place,
+wheel, notes, hint, clash): shown, dismissed and closed while showing, with dismissed per shown
+and closed per shown (ratios of counts, "—" for 0), for the latest complete ET day and the
+selected range. "Show me around" taps (`/coach/tour-opened`, no tip) are a separate total row.
+It is the same `/api/features` endpoint with `view: 'coach-tips'`
+([`src/lib/coachTips.ts`](src/lib/coachTips.ts)): same two statements, grouped by ET day only.
+Splitting by *which tip* is a split by path, not by hour, place or device, so the refused
+`/coach/shown/%`, `/coach/dismissed/%` and `/coach/closed-at/%` paths are still read only as
+per-ET-day totals. Web and app combined, humans only, the same exclusions as the other cards;
+viewers can read it. Until the game version that sends the beacons ships (no coach row ever),
+the card says so and every row reads 0.
+
+## Page links
+
+`https://stats.goodstuff.software/?page=<page id>` opens that page (for example `?page=bsk-features`
+for Features); the link wins over the page remembered in the browser, and an unknown id falls back
+to the remembered or landing page. Switching pages updates the address bar (`replaceState`), so a
+copied URL reopens the same page. Through sign-in, the existing same-origin-only return path
+(`next`, `safeNext` in [`functions/_lib/auth.ts`](functions/_lib/auth.ts)) carries the query, so you
+land on the page you asked for; `//host`, absolute URLs and `/auth/…` still return to `/`.
+The param only picks among existing pages ([`src/lib/pageLink.ts`](src/lib/pageLink.ts)); it is
+never used as a URL.
+
 ## Architecture
 
 ```
