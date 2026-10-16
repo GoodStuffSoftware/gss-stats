@@ -113,6 +113,10 @@ function trackingCheckCounts(c: TrackingCounts, y?: TrackingCounts): string {
   return `tracking-check counts (tagged ET-day totals${y ? '; yesterday in brackets' : ''}): complete rows ${f((x) => x.completeRows)}, sign-in ask rows (placement, committed-repeat, committed-challenge) ${f((x) => x.flight3Asks)}, /coach/shown/place rows ${f((x) => x.coachShownPlace)}`
 }
 
+/** One static read caveat printed under the Apps arm's per-tag split (the only multi-tag arm). The Apps arm started 2026-10-17, ahead of the Play release. A Play-release-day marker will come later through the measurement-changes list. */
+export const APPS_PLAY_RELEASE_CAVEAT =
+  'Read caveat: until the Play release ships, Apps-arm installs get the older Play app; in-app sign-ins after 30 minutes are untagged until v1.99.2 reaches Play.'
+
 /** The per-tag split block for an arm with more than one tag (flight 3 Apps: HERO and FEATURES).
  * null / absent for a single-tag arm, which prints as it always has. Display only: every rule and
  * the arm totals above it read the SUM of the tags. Counts only (src/lib/splitGuard.ts): rows per
@@ -132,6 +136,7 @@ export function tagSplitLines(sp: TagSplit | null | undefined): string[] {
   if (sp.untagged) out.push(`  untagged: ${n(sp.untagged.ads)} ad(s) whose final URLs carry no usable utm_campaign for this arm; ad spend ${money(sp.untagged.cost)} (${n(sp.untagged.clicks)} clicks, ${n(sp.untagged.impressions)} impr), not assigned to a tag`)
   if (sp.unsplitHits) out.push(`  not on a tag: ${n(sp.unsplitHits)} tagged hit(s) have no campaign tag on the row`)
   out.push(sp.costRead ? `  ad cost through ${sp.costThroughEt ?? '—'} (closed days; Google Ads ad_group_ad, read-only)` : `  ad cost: not read (${sp.costError ?? 'unknown'})`)
+  out.push(APPS_PLAY_RELEASE_CAVEAT)
   return out
 }
 
