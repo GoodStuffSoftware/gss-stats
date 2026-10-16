@@ -538,6 +538,14 @@ export const EXCLUSIONS: ExclusionRule[] = [
       b.push('North Carolina')
     },
   },
+  {
+    // The app's own manual production checks land with utm_campaign=manual_check (and arrival paths
+    // /return/manual_check/...): never visitors, so no tagged, site, flight or dashboard count takes them.
+    label: 'manual production checks',
+    clause(w, b) {
+      w.push(`(COALESCE(campaign, '') <> 'manual_check' AND path NOT LIKE '/return/manual_check/%')`)
+    },
+  },
 ]
 export function applyExclusions(w: string[], b: unknown[]): void {
   for (const rule of EXCLUSIONS) rule.clause(w, b)

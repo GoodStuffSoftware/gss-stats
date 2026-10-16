@@ -593,3 +593,22 @@ describe('onRequestPost with the derived dims', () => {
     expect(EVENT_DIMS.has('campaignFlight')).toBe(false)
   })
 })
+
+describe('manual production checks are a standing exclusion', () => {
+  it('hide-known-traffic drops utm_campaign=manual_check rows from a site count and from a tagged count', async () => {
+    insert({ ts: LIVE, path: '/', site: 'bestsudoku-web' })
+    insert({ ts: LIVE + 1, path: '/', site: 'bestsudoku-web', campaign: 'manual_check' })
+    insert({ ts: LIVE + 2, path: '/return/manual_check/d0', site: 'bestsudoku-web' })
+    insert({ ts: LIVE + 3, path: '/game', site: 'bestsudoku-web', campaign: 'sudoku_tired_of_ads' })
+    insert({ ts: LIVE + 4, path: '/return/manual_check/d0', site: 'bestsudoku-web', campaign: 'sudoku_tired_of_ads' })
+    insert({ ts: LIVE + 5, path: '/', site: 'bestsudoku-app' })
+    insert({ ts: LIVE + 6, path: '/', site: 'bestsudoku-app', campaign: 'manual_check' })
+    const kept = await post({ dimension: 'site', limit: 50, excludeKnownTraffic: true, ...range })
+    const bySite = Object.fromEntries(kept.body.rows.map((r: any) => [r.key.site, r.pageviews]))
+    expect(bySite).toEqual({ 'bestsudoku-web': 2, 'bestsudoku-app': 1 })
+    const raw = await post({ dimension: 'site', limit: 50, ...range })
+    expect(raw.body.totals.pageviews).toBe(5) // the two /return/ rows are event beacons, out of every default count
+    const tagged = await post({ dimension: 'site', limit: 50, excludeKnownTraffic: true, constraints: [{ field: 'campaign', value: 'sudoku_tired_of_ads' }], ...range })
+    expect(tagged.body.totals.pageviews).toBe(1)
+  })
+})

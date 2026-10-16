@@ -310,6 +310,28 @@ describe('each fact runs on SQLite and reuses the endpoint clause helpers', () =
     const rows = db.prepare(stmt.sql).all(...(stmt.binds as (string | number)[])) as { path: string; c: number }[]
     expect(rows.map((r) => `${r.path}:${r.c}`)).toEqual(['/return/sudoku_funnel_retest/d0:2'])
   })
+  it('manual production checks (utm_campaign=manual_check, /return/manual_check/ paths) drop from tagged counts', () => {
+    const db = geoDb()
+    const ins = db.prepare('INSERT INTO hits (ts, site, path, campaign) VALUES (?, ?, ?, ?)')
+    const retest = campaignById('24279250691')!
+    const start = Date.parse('2026-09-26T16:00:00Z')
+    ins.run(start + 1, 'bestsudoku-web', '/return/sudoku_funnel_retest/d0', 'sudoku_funnel_retest') // a real tagged return
+    ins.run(start + 2, 'bestsudoku-web', '/return/sudoku_funnel_retest/d0', 'manual_check') // marked by utm_campaign
+    ins.run(start + 3, 'bestsudoku-web', '/return/manual_check/d0', 'sudoku_funnel_retest') // marked by path
+    ins.run(start + 4, 'bestsudoku-web', '/return/organic/d0', '') // organic
+    ins.run(start + 5, 'bestsudoku-web', '/return/organic/d0', 'manual_check') // marked organic row
+    ins.run(start + 6, 'bestsudoku-web', '/return/manual_check/d0', '') // marked organic row, no campaign
+    const sum = (id: string) => {
+      const stmt = FACTS.campaignReturns.build({ campaignId: id, todayEt: '2026-09-26' }, NOW)
+      const rows = db.prepare(stmt.sql).all(...(stmt.binds as (string | number)[])) as { c: number }[]
+      return rows.reduce((a, r) => a + r.c, 0)
+    }
+    expect(sum(retest.id)).toBe(1)
+    expect(sum(ORGANIC_ARM_ID)).toBe(1)
+    const tagged = FACTS.campaignPathVisitor.build({ campaignId: retest.id }, NOW)
+    const trows = db.prepare(tagged.sql).all(...(tagged.binds as (string | number)[])) as { c: number }[]
+    expect(trows.reduce((a, r) => a + r.c, 0)).toBe(1) // the path-marked row is gone; the utm-marked one never matched the tag
+  })
   it('campaignReturns for the organic arm: its own tag, the web site ONLY, no lower bound, exclusions kept', () => {
     const db = geoDb()
     const ins = db.prepare('INSERT INTO hits (ts, site, path, region, screenw) VALUES (?, ?, ?, ?, ?)')
