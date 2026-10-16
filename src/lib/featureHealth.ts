@@ -124,7 +124,8 @@ export const FEATURES: readonly FeatureDef[] = [
       { id: 'shown', label: 'Shown', match: { exact: ['/install/prompt/android', '/install/prompt/ios', '/install/prompt/desktop'] } },
       { id: 'accept', label: 'Accepted', match: { exact: ['/install/play', '/install/pwa-accept', '/install/app-store'] }, ratioOf: { per: 'shown' } },
       { id: 'dismiss', label: 'Declined', match: { exact: ['/install/prompt/dismiss', '/install/prompt/dismiss-forever', '/install/prompt/have-it', '/install/pwa-decline'] }, ratioOf: { per: 'shown' } },
-      { id: 'installed', label: 'Installed', match: { exact: ['/install/pwa-installed'] }, ratioOf: { per: 'accept' } },
+      // No ratio: Accepted also counts Play and app-store taps, which never produce a PWA-installed row.
+      { id: 'installed', label: 'Installed (PWA)', match: { exact: ['/install/pwa-installed'] } },
     ],
   },
   {
