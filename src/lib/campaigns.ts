@@ -93,7 +93,7 @@ export interface CampaignFlight {
 }
 
 // ── Flight 3: staged until an arm's dates are filled ────────────────────────────────────
-// Best Sudoku's ad flight 3 re-runs flight 2's setup on v1.99.0, Search revised 2026-10-15 to a buyer-intent test (plan: best-sudoku desk card
+// Best Sudoku's ad flight 3 re-runs flight 2's setup on the v1.99.x build, Search revised 2026-10-15 to a buyer-intent test (plan: best-sudoku desk card
 // ads-f3-16; docs/campaigns/flight-3-handoff.md, docs/routines/ads-cloud-daily.md "Flight 3").
 // Its two Google Ads campaigns exist since 2026-10-16, created PAUSED, and their ids are below
 // (STAGED_FLIGHT_3[arm].ids). An arm is registered, charted, synced and read ONLY once its dates are
@@ -102,7 +102,7 @@ export interface CampaignFlight {
 // code (liveStagedCampaigns() adds the CampaignFlight to CAMPAIGNS, adsRules.ts liveStagedReadPlans()
 // its read plan); the runbook's matching edits and the steps no date can drive are listed in
 // "To activate flight 3" in docs/routines/ads-cloud-daily.md. The two arms start independently
-// (Search on the prod web deploy day, Apps on the Play production day), each with its own 7-day week.
+// (both started 2026-10-17, Apps ahead of the Play release), each with its own 7-day week.
 export type StagedArm = 'apps' | 'search'
 /** The Google Ads objects built for a staged arm (a read-side record; nothing here changes Google Ads).
  * The customer id is not stored here: README "Spend" names it once. */
@@ -172,7 +172,7 @@ export const STAGED_FLIGHT_3: Record<StagedArm, StagedArmConfig> = {
     flightStartTimeEt: '12:00',
     servingHoursEt: [12, 23],
     notes:
-      '"Best Sudoku - Search - Desktop intent - F3 Search", budget resource 15958435831, utm google / cpc / sudoku_funnel_f3_search. A buyer-intent test on best-sudoku v1.99.0 (Mike, 2026-10-15; desk card ads-f3-16): the \"no ads\" keyword family only (sudoku no ads, sudoku without ads, sudoku app no ads, ad free sudoku and the rest), exact + phrase, F2\'s free-seeker terms dropped; manual CPC $0.99 max (a hard ceiling under $1, no day-3 raise); ALL devices, no mobile or tablet hard stop; F2\'s 10 negatives plus free, online free, printable and puzzle book; F2\'s RSA plus a price headline; US+CA, ad schedule 12:00-23:00 ET, $10/day, $70 cap over 7 serving days. No placements: its read plan has channel search. Expected volume is about 15-25 clicks a week, so one week will likely read inconclusive (under 20 asks). Starts the prod web deploy day once real /coach/* and sign-in ask rows show. Created PAUSED 2026-10-16 by the API tool; enabled by Mike\'s yes, which with the arm\'s dates (STAGED_FLIGHT_3_DATES) is the whole activation.',
+      '"Best Sudoku - Search - Desktop intent - F3 Search", budget resource 15958435831, utm google / cpc / sudoku_funnel_f3_search. A buyer-intent test on best-sudoku v1.99.0 (Mike, 2026-10-15; desk card ads-f3-16): the \"no ads\" keyword family only (sudoku no ads, sudoku without ads, sudoku app no ads, ad free sudoku and the rest), exact + phrase, F2\'s free-seeker terms dropped; manual CPC $0.99 max (a hard ceiling under $1, no day-3 raise); ALL devices, no mobile or tablet hard stop; F2\'s 10 negatives plus free, online free, printable and puzzle book; F2\'s RSA plus a price headline; US+CA, ad schedule 12:00-23:00 ET, $10/day, $70 cap over 7 serving days. No placements: its read plan has channel search. Expected volume is about 15-25 clicks a week, so one week will likely read inconclusive (under 20 asks). Started 2026-10-17, the prod web deploy day. Created PAUSED 2026-10-16 by the API tool; enabled by Mike\'s yes, which with the arm\'s dates (STAGED_FLIGHT_3_DATES) is the whole activation.',
   },
 }
 

@@ -460,17 +460,18 @@ describe('runbook LEGS rows track STAGED_FLIGHT_3_DATES', () => {
       expect([cell(row[3]), cell(row[4])], label).toEqual([STAGED_FLIGHT_3_DATES[arm].flightStart, STAGED_FLIGHT_3_DATES[arm].flightEnd])
     }
   })
-  it('both arms are live for 2026-10-17..2026-10-23 (the committed activation): D-days, read window, end', () => {
+  it('both arms are live with a seven-day week; the read window is start + 1 .. end + 1 (dates read from the code, so a slip never turns this red)', () => {
     restoreFlight3() // the REAL registry, with the committed dates
     for (const arm of ['apps', 'search'] as const) {
-      expect(STAGED_FLIGHT_3_DATES[arm], arm).toEqual({ flightStart: '2026-10-17', flightEnd: '2026-10-23' })
+      const { flightStart, flightEnd } = STAGED_FLIGHT_3_DATES[arm]
+      expect(flightEnd, arm).toBe(addDays(flightStart!, 6))
       expect(stagedArmIsLive(arm), arm).toBe(true)
       const c = campaignById(STAGED_FLIGHT_3[arm].ids.campaignId)!
-      expect(c.flightStart, arm).toBe('2026-10-17')
-      expect(c.flightEnd, arm).toBe('2026-10-23')
+      expect(c.flightStart, arm).toBe(flightStart)
+      expect(c.flightEnd, arm).toBe(flightEnd)
       const plan = ADS_READ_PLANS[c.id]
-      expect(plan.morningReadFirstEt, arm).toBe('2026-10-18')
-      expect(plan.morningReadLastEt, arm).toBe('2026-10-24')
+      expect(plan.morningReadFirstEt, arm).toBe(addDays(flightStart!, 1))
+      expect(plan.morningReadLastEt, arm).toBe(addDays(flightEnd!, 1))
     }
   })
   it('the Apps read caveat is one constant in the report code and the runbook states it in the same words', () => {

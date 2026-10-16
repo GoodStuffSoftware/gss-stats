@@ -1278,7 +1278,7 @@ end + 7, day15 on flight end + 15). The remaining manual steps (the D + 7 07:05 
 D + 21 and D + 35 purchase reads, enabling the campaign in Google Ads) are in
 [docs/routines/ads-cloud-daily.md](docs/routines/ads-cloud-daily.md), "To activate flight 3".
 
-With two plans registered, **every** read must name its campaign: omitting `--campaign` exits 1
+With several plans registered, **every** read must name its campaign: omitting `--campaign` exits 1
 and lists the registered ids. One line per arm, in each arm's own routine doc:
 
 ```bash

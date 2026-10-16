@@ -138,7 +138,7 @@ end date set at build and again at enable).
 | Report label | `F3 apps` | `F3 search` |
 | Channel and devices | display; 17 Android app placements | search, ALL devices (no device exclusion) |
 | Budget and cap | $10/day, $70 cap, 7 days | $10/day, $70 cap, 7 days |
-| Start day D | 2026-10-17: Apps started ahead of the Play release | the prod web deploy day, once real /coach/* and sign-in ask rows show in D1 (if none by 23:00 ET, the next morning) |
+| Start day D | 2026-10-17: Apps started ahead of the Play release | 2026-10-17, the prod web deploy day |
 | Device check | the printed device block | none: Search runs on all devices, so the device block is informational and no device spend is an anomaly |
 
 ### Apps: two ads, one arm (hero and features)
@@ -265,8 +265,8 @@ card and signs in inside the Play app does not carry the web campaign tag, so th
 new-account count understates (read the install rows beside it); an organic first touch sends its
 Safari escape untagged; deferred rows lag at least 30 minutes after sign-in.
 
-Apps-arm Play caveat (printed under the Apps per-tag split in every Apps report, one constant in the
-report code): "Until the Play release ships, Apps-arm installs get the older Play app; in-app
+Apps-arm Play caveat (printed under the Apps per-tag split whenever the split is read, one constant in
+the report code; when the split is not read, state it yourself from this paragraph): "Until the Play release ships, Apps-arm installs get the older Play app; in-app
 sign-ins after 30 minutes are untagged until v1.99.2 reaches Play." Repeat it when you read Apps
 new-account and sign-in figures, and do not read a low Apps new-account count as a failed arm.
 
@@ -334,7 +334,8 @@ Call the printed date DATE and the printed mode MODE. MODE applies to Part B onl
   exactly `stage=wrapup`, `stage=day15`, `stage=day30`, `stage=day60` or `stage=december`,
   REPORTS is the single row (campaign 24279250691, LABEL BSK retest) with that STAGE (a manual
   rerun of flight 1); if the whole text is `stage=STAGE campaign=ID` with STAGE as above and ID
-  a CAMPAIGN in the table, REPORTS is that campaign at that STAGE (LABEL from its row). In
+  a CAMPAIGN in the table or a flight 3 arm with both dates filled (F3 apps 24358792494, F3 search
+  24358792551), REPORTS is that campaign at that STAGE (LABEL from its row, or `F3 apps` / `F3 search`). In
   both cases ARMS is empty: a `stage=` fire runs Part B only, with no Part A read, daily push
   or bus copy.
 - TEST mode: if a routine-fire payload is present and its whole text is exactly `test`, this is
