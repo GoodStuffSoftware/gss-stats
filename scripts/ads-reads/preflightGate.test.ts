@@ -3,6 +3,13 @@
 import { describe, expect, it } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import { createBeaconSource, preflightGateLine, preflightGateMet, preflightGateQuery, PREFLIGHT_RELEASE_UTC, WEB_SITE } from './beacon'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { fixtureDeps, type Fixture } from './cli'
+import { runMorningRead, type MorningOptions } from './read'
+import { formatMorningReport } from './report'
+import { MIN_COHORT } from '../../src/lib/popupEvents'
 import { assertReadOnlySql, inlineBinds } from './d1'
 
 const REL = Date.parse(PREFLIGHT_RELEASE_UTC.replace(' ', 'T') + 'Z')
@@ -62,5 +69,40 @@ describe('pre-flight gate', () => {
       { path: '/coach/shown/place', ts: REL }, // at the instant: counts
     ])
     expect(await read(db)).toEqual({ coach: 1, committed: 0, eligible: 0 })
+  })
+})
+
+describe('pre-flight gate in the morning read and report', () => {
+  const here = path.dirname(fileURLToPath(import.meta.url))
+  const fx = (): Fixture => JSON.parse(fs.readFileSync(path.join(here, 'fixtures', 'threshold-50.json'), 'utf8'))
+  const opts: MorningOptions = { campaignId: '24279250691', releaseHealth: 'auto', healthOnly: false, healthMinParent: MIN_COHORT, healthParentAgeHours: 24 }
+  const run = async (gate: (() => Promise<{ coach: number; committed: number; eligible: number }>) | undefined) => {
+    const d = fixtureDeps(fx(), true)
+    const deps = { ...d, beacon: { ...d.beacon!, ...(gate ? { preflightGate: gate } : {}) } }
+    const r = await runMorningRead(deps as never, opts)
+    return { r, lines: formatMorningReport(r).split(String.fromCharCode(10)) }
+  }
+  it('prints the line right after the tag split block, MET', async () => {
+    const { r, lines } = await run(async () => ({ coach: 2, committed: 1, eligible: 0 }))
+    expect(r.preflightGate).toEqual({ ok: true, counts: { coach: 2, committed: 1, eligible: 0 } })
+    const i = lines.findIndex((l) => l.startsWith('Pre-flight gate'))
+    expect(lines[i]).toBe('Pre-flight gate (organic since v1.99.1 web, 2026-10-16 21:07Z): /coach/* 2 · /signin-prompt/committed-* 1 · /signin-eligible/* 0 → MET')
+    expect(lines[i - 1]).toMatch(/^Tagged so far|^  /)
+  })
+  it('prints NOT YET', async () => {
+    const { lines } = await run(async () => ({ coach: 0, committed: 0, eligible: 0 }))
+    expect(lines.find((l) => l.startsWith('Pre-flight gate'))).toMatch(/→ NOT YET$/)
+  })
+  it('a failed read prints NOT READ and does not throw', async () => {
+    const { r, lines } = await run(async () => {
+      throw new Error('boom')
+    })
+    expect(r.preflightGate?.ok).toBe(false)
+    expect(lines.find((l) => l.startsWith('Pre-flight gate'))).toContain('NOT READ')
+  })
+  it('a source without the read prints no gate line', async () => {
+    const { r, lines } = await run(undefined)
+    expect(r.preflightGate).toBeNull()
+    expect(lines.some((l) => l.startsWith('Pre-flight gate'))).toBe(false)
   })
 })

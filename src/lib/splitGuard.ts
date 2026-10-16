@@ -68,6 +68,8 @@
 //     campaign. A campaign's /return/<uc>/ and tagged rows cannot predate its own link, so the
 //     cut only drops pre-launch QA rows.
 //   - `pf` (install fix) and `uf` (upsell fix): one fixed instant each, a row-exact before/after.
+//   - The ads report's pre-flight gate (scripts/ads-reads/beacon.ts preflightGateQuery): one fixed release
+//     instant `ts >= ?` and ONE cumulative row of three path-family totals, no hour, place or device.
 //   - `d` KPI windows (today so far, and the 7 earlier days): the bounds come from the server
 //     clock, never the caller. The comparison windows now count refused rows over whole ET days:
 //     bskKpiDays' `d` is the ET day index and its `t` same-time flag is always 0 on a refused
