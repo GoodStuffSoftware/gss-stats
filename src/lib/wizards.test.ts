@@ -69,7 +69,7 @@ describe('new group', () => {
   })
   it('offers every top-level page but ★ Overview', () => {
     const c = cfg()
-    expect(movablePages(c.pages).map((p: DashboardPage) => p.id)).toEqual(['beacon', 'bsk-overview', 'bsk-campaigns', 'bsk-popups', 'bsk-launch'])
+    expect(movablePages(c.pages).map((p: DashboardPage) => p.id)).toEqual(['beacon', 'bsk-overview', 'bsk-campaigns', 'bsk-popups', 'bsk-launch', 'bsk-features'])
   })
   it('Create lists the group (even empty) and moves the picked pages with their drill pages', () => {
     const c = cfg()

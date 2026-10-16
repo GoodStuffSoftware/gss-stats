@@ -14,6 +14,7 @@ export const DATASETS: { value: Dataset; label: string; creatable?: boolean }[] 
   { value: 'campaigns', label: 'Best Sudoku campaign cards — funnel / country / cost / returns', creatable: false },
   { value: 'ads-readings', label: 'Best Sudoku ads readings log' },
   { value: 'completions', label: 'Best Sudoku completions — mode × difficulty' },
+  { value: 'features', label: 'Feature health — is each feature firing, and do people move through it', creatable: false },
 ]
 
 // Which datasets' APIs honour a `breakdown` (a second group-by dimension). One map, read by the
@@ -29,6 +30,7 @@ export const DATASET_BREAKDOWN: Record<Dataset, boolean> = {
   overview: false,
   campaigns: false,
   'ads-readings': false,
+  features: false,
 }
 export function datasetSupportsBreakdown(dataset?: Dataset): boolean {
   return DATASET_BREAKDOWN[dataset ?? 'rum'] ?? false

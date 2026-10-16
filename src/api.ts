@@ -1,6 +1,7 @@
 import type { StatsResponse, Widget, GlobalFilters, DashboardConfig, Dataset } from './types'
 import type { AdsReadingsResponse } from './lib/adsStore'
 import type { RefreshResult } from './lib/adsRefresh'
+import type { FeatureHealthModel } from './lib/featureHealth'
 import { resolveSelection } from './sitesStore'
 import { nativeField } from './lib/drill'
 import { queryDims } from './lib/rings'
@@ -170,6 +171,43 @@ async function withSessionCheck<T>(run: () => Promise<T>): Promise<T> {
     if (isNetworkError(e) || isAuthError(e)) await checkSessionExpired()
     throw e
   }
+}
+
+/** The Feature health response: the model plus the request echo (functions/api/features.ts). */
+export type FeatureHealthResponse = FeatureHealthModel & { meta: { since: string; until: string; rangeFrom: string; rangeTo: string; sites: string; today: string } }
+
+const FEATURE_HEALTH_SHARE_MS = 30_000
+const featureHealthInflight = new Map<string, { at: number; promise: Promise<FeatureHealthResponse> }>()
+
+/** Fetch the feature-health model (POST /api/features). The Overview card and every step chart on
+ * the Features page ask the same question, so one request is shared by identical bodies for
+ * FEATURE_HEALTH_SHARE_MS; a failed request is never kept. `fresh` skips the shared copy. */
+export function fetchFeatureHealth(widget: Widget, filters: GlobalFilters, fresh = false): Promise<FeatureHealthResponse> {
+  const { tags } = resolveSelection(widget.siteSel ?? filters.siteSel)
+  const body = JSON.stringify({
+    since: filters.since,
+    until: filters.until,
+    sites: tags,
+    excludeOwnVisits: filters.excludeOwnVisits,
+    ownBrowser: filters.ownBrowser,
+    ownOS: filters.ownOS,
+    excludeKnownTraffic: widget.excludeKnownTraffic === true,
+  })
+  const hit = featureHealthInflight.get(body)
+  if (!fresh && hit && Date.now() - hit.at < FEATURE_HEALTH_SHARE_MS) return hit.promise
+  const promise = withSessionCheck(async () => {
+    const res = await fetch('/api/features', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(`features ${res.status}: ${text.slice(0, 200)}`)
+    }
+    return (await res.json()) as FeatureHealthResponse
+  })
+  featureHealthInflight.set(body, { at: Date.now(), promise })
+  promise.catch(() => {
+    if (featureHealthInflight.get(body)?.promise === promise) featureHealthInflight.delete(body)
+  })
+  return promise
 }
 
 /** How long a readings load may take (headers and body) before it is given up as failed: the

@@ -68,6 +68,7 @@ describe('v13: the real default layout', () => {
       ['bsk-campaigns', GROUP_BEST_SUDOKU, 'Campaigns', null, null],
       ['bsk-popups', GROUP_BEST_SUDOKU, 'Pop-ups', null, null],
       ['bsk-launch', GROUP_BEST_SUDOKU, 'Traffic', 'trending-up', null],
+      ['bsk-features', GROUP_BEST_SUDOKU, 'Features', null, null],
     ])
     expect(d.pages.find((p) => p.isDefault)!.id).toBe('default')
   })

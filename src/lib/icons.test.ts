@@ -32,9 +32,9 @@ describe('the icon registry', () => {
   })
 
   it('maps every dataset to a registered icon', () => {
-    const datasets: Dataset[] = ['rum', 'geo', 'popup', 'campaigns', 'completions', 'ads-readings', 'overview']
+    const datasets: Dataset[] = ['rum', 'geo', 'popup', 'campaigns', 'completions', 'ads-readings', 'overview', 'features']
     expect(Object.keys(DATASET_ICON).sort()).toEqual([...datasets].sort())
-    expect(datasets.map((d) => DATASET_ICON[d])).toEqual(['trending-up', 'map-pin', 'app-window', 'megaphone', 'trophy', 'tag', 'layout-grid'])
+    expect(datasets.map((d) => DATASET_ICON[d])).toEqual(['trending-up', 'map-pin', 'app-window', 'megaphone', 'trophy', 'tag', 'layout-grid', 'activity'])
     for (const d of datasets) expect(isIconKey(DATASET_ICON[d])).toBe(true)
   })
 
@@ -110,6 +110,7 @@ describe('resolveIcon', () => {
       ['bsk-campaigns', 'megaphone', 'charts'], // campaigns 4 · geo 3
       ['bsk-popups', 'app-window', 'charts'], // popup 2 · geo 1
       ['bsk-launch', 'trending-up', 'explicit'], // geo 12 would be the map pin: explicit instead
+      ['bsk-features', 'activity', 'charts'], // features 13
     ])
     const launch = pages.find((p) => p.id === 'bsk-launch')!
     expect(autoIcon(launch, pages)).toMatchObject({ key: 'map-pin', source: 'charts', dataset: 'geo' })

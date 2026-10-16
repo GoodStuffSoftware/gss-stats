@@ -23,6 +23,7 @@ import BarTable from './metrics/BarTable.vue'
 import { metricsContextFor } from '../lib/metrics/pageContext'
 import { cardRefFor, cardShowsOwnReload } from '../lib/metrics/readingsCard'
 import NoteWidgetBody from './widgets/NoteWidgetBody.vue'
+import FeatureHealthCard from './FeatureHealthCard.vue'
 import NoteBlock from './NoteBlock.vue'
 import { noteRawText } from '../lib/notes'
 import { chartNotes } from '../lib/chartNotes'
@@ -660,6 +661,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
       <!-- Bespoke bodies: overview / campaigns / ads-readings datasets, and the note type —
            own data fetch (or none), skip the generic loading/error/empty states above. -->
       <MetricCard v-if="cardRef" ref="metricCard" :card-ref="cardRef" :context="metricsContext" :campaign-ids="widget.campaignIds" :hidden-captions="widget.hiddenCaveats" :fallback-title="displayTitle" @day-change="(d: string | null) => (shownDay = d)" @open-campaigns="emit('open-campaigns')" @reload="metricTokens.reload()" />
+      <FeatureHealthCard v-else-if="widget.dataset === 'features'" :widget="widget" :filters="effectiveFilters" :dark="dark" />
       <p v-else-if="isRateTile" class="state mono">{{ rateUnknownText }}</p>
       <p v-else-if="widget.dataset === 'overview' || widget.dataset === 'campaigns'" class="state mono">{{ retiredPanelText }}</p>
       <NoteWidgetBody v-else-if="widget.type === 'note'" :widget="widget" :values="noteValues" />

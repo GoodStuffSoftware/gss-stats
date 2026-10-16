@@ -160,6 +160,16 @@ export const FEATURES: readonly FeatureDef[] = [
   ),
 ]
 
+/** The widget view that draws a feature's step chart: `steps:<featureId>`. */
+export const STEPS_VIEW_PREFIX = 'steps:'
+export function stepsViewFor(featureId: string): string {
+  return `${STEPS_VIEW_PREFIX}${featureId}`
+}
+/** The feature id a `steps:` view names, or null for any other view. */
+export function featureIdOfView(view: string | undefined): string | null {
+  return view && view.startsWith(STEPS_VIEW_PREFIX) && view.length > STEPS_VIEW_PREFIX.length ? view.slice(STEPS_VIEW_PREFIX.length) : null
+}
+
 // ── Status ──────────────────────────────────────────────────────────────────────────────────
 
 /** "Went silent" needs an average of at least this many rows a day over the prior

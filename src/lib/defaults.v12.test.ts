@@ -19,9 +19,19 @@ const V12_OVERVIEW = {
   'ow-release': [0, 35, 12, 9],
   'ow-completions': [0, 44, 12, 10],
 }
-// A fresh config also carries the Web vs app activity card, added after v12 (no layout migration: a stored layout
-// gets it from Restore default charts, and the prod layout was edited by hand).
-const FRESH_OVERVIEW = { ...V12_OVERVIEW, 'ow-webapp': [0, 54, 12, 9] }
+// A fresh config also carries the Web vs app activity card and the Feature health card, added after v12 (no
+// layout migration: a stored layout gets them from Restore default charts, and the prod layout was edited by
+// hand). Feature health sits under the KPIs, so everything below the KPIs is 20 rows lower than in v12.
+const FRESH_OVERVIEW = {
+  'ow-note-smallsample': [0, 0, 12, 1],
+  'ow-kpis': [0, 1, 12, 8],
+  'ow-feature-health': [0, 9, 12, 20],
+  'ow-timeline': [0, 29, 12, 12],
+  'ow-scorecard': [0, 41, 12, 14],
+  'ow-release': [0, 55, 12, 9],
+  'ow-completions': [0, 64, 12, 10],
+  'ow-webapp': [0, 74, 12, 9],
+}
 const wd = (id: string, x: number, y: number, w: number, h: number, extra: Partial<Widget> = {}): Widget =>
   ({ id, i: id, title: id, type: 'table', dimension: '', metric: 'pageviews', limit: 1, x, y, w, h, ...extra }) as Widget
 const note = (h = 3, extra: Partial<Widget> = {}) => wd('ow-note-smallsample', 0, 0, 12, h, { type: 'note', noteId: 'small-sample', ...extra })

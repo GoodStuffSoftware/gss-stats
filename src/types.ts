@@ -29,7 +29,10 @@ export type Metric = 'pageviews' | 'visits'
 // 'completions' is an ordinary GENERIC dataset (dimension/breakdown, same pipeline as
 // 'geo'/'popup') — NOT bespoke — see functions/api/completions.ts + lib/catalog.ts
 // COMPLETIONS_DIMENSIONS.
-export type Dataset = 'rum' | 'geo' | 'popup' | 'overview' | 'campaigns' | 'ads-readings' | 'completions'
+// 'features' is bespoke: the Feature health table (view 'health') and the per-feature step
+// charts (view 'steps:<featureId>'), both drawn by components/FeatureHealthCard.vue from
+// functions/api/features.ts. No dimension/breakdown.
+export type Dataset = 'rum' | 'geo' | 'popup' | 'overview' | 'campaigns' | 'ads-readings' | 'completions' | 'features'
 
 export type SiteKey = 'goodstuff.software' | 'goodstuffsoftware.com' | 'bestsudoku.app' | 'all'
 

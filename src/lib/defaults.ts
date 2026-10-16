@@ -5,6 +5,7 @@ import { CAMPAIGNS } from './campaigns'
 import { BEST_SUDOKU_SITES } from './bestSudokuSites'
 import { normCardRef } from './metrics/validate'
 import { autoCaveatIds, isNoteIdHideable, widgetNoteScope } from './notes'
+import { FEATURES, stepsViewFor } from './featureHealth'
 
 export function defaultDateRange(): { since: string; until: string } {
   const until = new Date()
@@ -715,6 +716,62 @@ export function webAppActivityWidget(geom: { x: number; y: number; w: number; h:
     ...geom,
   })
 }
+// "Feature health" (Mike, 2026-10-15: "is it firing, and do people move through it"): one table, a row
+// per feature in lib/featureHealth.ts FEATURES, with its status (OK / New / Went silent), its step
+// counts for the latest complete ET day, the day before and the selected range, and the plain ratios of
+// those counts. Web and app are combined. Per-ET-day totals only, so the counts-only rule
+// (lib/splitGuard.ts) is untouched. A bespoke body (dataset 'features', components/FeatureHealthCard.vue).
+export function featureHealthWidget(geom: { x: number; y: number; w: number; h: number }): Widget {
+  return w({
+    id: 'ow-feature-health',
+    title: 'Feature health',
+    type: 'table',
+    dataset: 'features',
+    view: 'health',
+    dimension: '',
+    metric: 'pageviews',
+    limit: 1,
+    excludeKnownTraffic: true,
+    ...geom,
+  })
+}
+/** The Features page's charts: one step chart per feature in FEATURES, two to a row, in config order. */
+export function defaultFeaturesWidgets(): Widget[] {
+  return factoryWidgets(
+    FEATURES.map((f, i) =>
+      w({
+        id: `fw-${f.id}`,
+        title: f.label,
+        type: 'line',
+        dataset: 'features',
+        view: stepsViewFor(f.id),
+        dimension: '',
+        metric: 'pageviews',
+        limit: 1,
+        excludeKnownTraffic: true,
+        x: (i % 2) * 6,
+        y: Math.floor(i / 2) * 8,
+        w: 6,
+        h: 8,
+      }),
+    ),
+  )
+}
+/** By id only (see isBestSudokuPopupsPage). */
+export function isFeaturesPage(p: Pick<DashboardPage, 'id'>): boolean {
+  return p.id === 'bsk-features'
+}
+export function defaultFeaturesPage(): DashboardPage {
+  return {
+    id: 'bsk-features',
+    name: 'Features',
+    isDefault: false,
+    group: GROUP_BEST_SUDOKU,
+    // A month of days shows whether a feature fires every day; "went silent" itself reads the last 8 days whatever the range.
+    filters: { ...defaultFilters(), ...relativeRange('30d'), rangeRel: '30d', siteSel: [...BEST_SUDOKU_SITES] },
+    widgets: defaultFeaturesWidgets(),
+  }
+}
 /** A saved widget that is the retired bespoke Overview timeline panel. */
 export function isBespokeTimeline(wd: Widget): boolean {
   return wd.dataset === 'overview' && wd.view === 'timeline'
@@ -866,11 +923,14 @@ export function defaultOverviewWidgets(): Widget[] {
     // the filter bar and the first card that the pre-v0.6 page never had.
     w({ id: 'ow-note-smallsample', title: 'Small sample', type: 'note', dimension: '', metric: 'pageviews', limit: 1, noteId: 'small-sample', x: 0, y: 0, w: 12, h: 1 }),
     w({ id: 'ow-kpis', title: 'Today at a glance', type: 'table', dataset: 'overview', view: 'kpis', card: { preset: 'bsk-kpis' }, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 1, w: 12, h: 8 }),
-    timelineWidget({ x: 0, y: 9, w: 12, h: 12 }),
-    w({ id: 'ow-scorecard', title: 'Campaign scorecard', type: 'table', dataset: 'overview', view: 'scorecard', card: { preset: 'campaign-scorecard' }, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 21, w: 12, h: 14 }),
-    w({ id: 'ow-release', title: 'Release panel', type: 'table', dataset: 'overview', view: 'releasePanel', card: { preset: 'release-before-after' }, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 35, w: 12, h: 9 }),
-    completionsWidget(),
-    webAppActivityWidget({ x: 0, y: 54, w: 12, h: 9 }),
+    // Feature health sits right under the day's numbers (no CONFIG_VERSION bump: a stored layout gets it
+    // from Restore default charts, and the prod layout is edited by hand, like the web-vs-app card).
+    featureHealthWidget({ x: 0, y: 9, w: 12, h: 20 }),
+    timelineWidget({ x: 0, y: 29, w: 12, h: 12 }),
+    w({ id: 'ow-scorecard', title: 'Campaign scorecard', type: 'table', dataset: 'overview', view: 'scorecard', card: { preset: 'campaign-scorecard' }, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 41, w: 12, h: 14 }),
+    w({ id: 'ow-release', title: 'Release panel', type: 'table', dataset: 'overview', view: 'releasePanel', card: { preset: 'release-before-after' }, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 55, w: 12, h: 9 }),
+    completionsWidget(64),
+    webAppActivityWidget({ x: 0, y: 74, w: 12, h: 9 }),
   ])
 }
 // Another bespoke-turned-widget page (see components/OverviewPage.vue — kept for reference /
@@ -901,7 +961,7 @@ export function defaultConfig(): DashboardConfig {
   return {
     version: CONFIG_VERSION,
     activePageId: 'default',
-    pages: [defaultPage(), defaultBeaconPage(), defaultOverviewPage(), defaultCampaignComparePage(), defaultBestSudokuPopupsPage(), defaultBestSudokuLaunchPage()],
+    pages: [defaultPage(), defaultBeaconPage(), defaultOverviewPage(), defaultCampaignComparePage(), defaultBestSudokuPopupsPage(), defaultBestSudokuLaunchPage(), defaultFeaturesPage()],
   }
 }
 
@@ -993,6 +1053,7 @@ export function defaultWidgetsForPage(p: DashboardPage): Widget[] {
   if (p.id === 'beacon') return defaultBeaconWidgets()
   if (p.id === 'bsk-popups') return defaultBestSudokuPopupsWidgets()
   if (isOverviewPage(p)) return defaultOverviewWidgets()
+  if (isFeaturesPage(p)) return defaultFeaturesWidgets()
   if (isCampaignComparePage(p)) return defaultCampaignsWidgets()
   if (isRetentionPage(p)) return defaultRetentionWidgets()
   if (isBestSudokuLaunchPage(p)) return defaultBestSudokuLaunchWidgets()
@@ -1032,7 +1093,7 @@ function normFilters(raw: any): GlobalFilters {
   return merged
 }
 
-const KNOWN_DATASETS = new Set(['geo', 'popup', 'overview', 'campaigns', 'ads-readings', 'completions'])
+const KNOWN_DATASETS = new Set(['geo', 'popup', 'overview', 'campaigns', 'ads-readings', 'completions', 'features'])
 function normWidget(x: any): Widget {
   return {
     id: String(x.id ?? cryptoId()),

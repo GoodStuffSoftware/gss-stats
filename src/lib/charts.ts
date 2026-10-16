@@ -439,7 +439,7 @@ function wrapText(ctx: any, text: string, maxW: number): string[] {
  * version 11), a pop-up rate tile (a one-item card since layout version 18) and a note. ChartCard skips its fetch for these, so their `chart.*` value tokens
  * (lib/valueTokens.ts) can never fill, and the editor does not offer them. */
 export function rendersOwnBody(widget: Pick<Widget, 'card' | 'dataset' | 'type'>): boolean {
-  return !!widget.card || widget.dataset === 'overview' || widget.dataset === 'campaigns' || widget.dataset === 'ads-readings' || widget.type === 'note' || widget.type === 'rate'
+  return !!widget.card || widget.dataset === 'overview' || widget.dataset === 'campaigns' || widget.dataset === 'ads-readings' || widget.dataset === 'features' || widget.type === 'note' || widget.type === 'rate'
 }
 
 /** True for a line/area chart on the beacon's date axis that draws its own series list. */
@@ -651,10 +651,10 @@ export function formatKey(dimension: string, value: string): string {
 
 const isDark = () => typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
 
-function gridColor() {
+export function gridColor() {
   return isDark() ? 'rgba(231,226,215,0.10)' : 'rgba(26,23,21,0.07)'
 }
-function tickColor() {
+export function tickColor() {
   return isDark() ? '#A8A096' : INK_3
 }
 

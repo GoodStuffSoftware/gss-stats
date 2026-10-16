@@ -179,6 +179,7 @@ export const DATASET_ICON: Readonly<Record<Dataset, IconKey>> = Object.freeze({
   campaigns: 'megaphone',
   completions: 'trophy',
   'ads-readings': 'tag',
+  features: 'activity',
   overview: 'layout-grid',
 })
 
