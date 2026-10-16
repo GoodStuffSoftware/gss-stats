@@ -19,6 +19,7 @@ import { adTagOf, buildTagSplit, isMultiTag, utmCampaignOf } from '../../src/lib
 import { summarizeTaggedRows, type TaggedRow } from '../../src/lib/adsRules'
 import { CAMPAIGNS, STAGED_FLIGHT_3, campaignById, etMidnightUtcMs, stagedCampaign, type CampaignFlight } from '../../src/lib/campaigns'
 import { addDays } from '../../src/lib/etTime'
+import { hideLiveFlight3 } from '../../src/testing/stagedFlight3'
 import { etDateFromMs, MIN_COHORT } from '../../src/lib/popupEvents'
 import { SPLIT_REFUSED_DIMS, isEtMidnight, isSplitRefusedPath } from '../../src/lib/splitGuard'
 
@@ -484,8 +485,13 @@ describe('flight 3 staged Apps arm', () => {
     for (const t of STAGED_FLIGHT_3.search.ucValues) expect(apps).not.toContain(t)
     expect(new Set(apps).size).toBe(3)
   })
-  it('stays inert: neither arm is registered, and activation copies the tags unchanged', () => {
-    expect(CAMPAIGNS.some((c) => c.ucValues.some((u) => u.startsWith('sudoku_funnel_f3_')))).toBe(false)
+  it('stays inert while staged: neither arm is registered, and activation copies the tags unchanged', () => {
+    const restore = hideLiveFlight3() // the staged state, whatever the real STAGED_FLIGHT_3_DATES hold
+    try {
+      expect(CAMPAIGNS.some((c) => c.ucValues.some((u) => u.startsWith('sudoku_funnel_f3_')))).toBe(false)
+    } finally {
+      restore()
+    }
     const c = stagedCampaign('apps', { id: '99900000011', flightStart: '2026-10-20', flightEnd: '2026-10-26' })
     expect(c.ucValues).toEqual(STAGED_FLIGHT_3.apps.ucValues)
     expect(isMultiTag(c.ucValues)).toBe(true)

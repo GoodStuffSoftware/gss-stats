@@ -28,6 +28,7 @@ import {
 } from '../../src/lib/adsRules'
 import { CAMPAIGNS, campaignById, isDirectionalDay, type CampaignFlight } from '../../src/lib/campaigns'
 import { addDays } from '../../src/lib/etTime'
+import { hideLiveFlight3 } from '../../src/testing/stagedFlight3'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const RETEST = '24279250691'
@@ -435,6 +436,10 @@ describe('registry accessors', () => {
 // 2026-10-04 .. 2026-10-10 (Mike, 2026-10-03), pinned by the "both arms run" test below. The other date
 // assertions are about how the fields relate to each other, not about the calendar.
 describe('flight 2 arms in the real registry', () => {
+  // These pin the registry as it is before flight 3 goes live; filling STAGED_FLIGHT_3_DATES must not turn them red.
+  let restoreFlight3: () => void
+  beforeEach(() => { restoreFlight3 = hideLiveFlight3() })
+  afterEach(() => restoreFlight3())
   // A literal copy of the placement list the tool created for arm A: flight2-ops.mjs L81 (the
   // "Sudoku.com placement" group, 1 package) and L86-90 (the "Other Sudoku placements" group, 16),
   // best-sudoku commit e3c372d0. Kept as a literal on purpose: it is the check that
