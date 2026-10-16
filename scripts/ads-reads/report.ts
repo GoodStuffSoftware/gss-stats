@@ -24,8 +24,9 @@ import {
   SEARCH_NA,
   type CampaignChannel,
 } from '../../src/lib/adsRules'
-import { GAME_START_DIFFICULTIES, POPUP_OUTCOME_TYPES, TOUR_EXIT_STEPS, TUTORIAL_COMPLETE_KINDS, gateRate, installOutcomeGapNote } from '../../src/lib/popupEvents'
+import { GAME_START_DIFFICULTIES, POPUP_OUTCOME_TYPES, TOUR_EXIT_STEPS, TUTORIAL_COMPLETE_KINDS, etDateFromMs, gateRate, installOutcomeGapNote } from '../../src/lib/popupEvents'
 import { RAW_INSTALL_SIGNALS_LABEL } from '../../src/lib/campaigns'
+import { measurementReportLines } from '../../src/lib/measurementChanges'
 import { noteRawText } from '../../src/lib/notes'
 import type { DiagnosticsSection, FullRead, MorningResult, PostflightResult, SpendSection } from './read'
 import type { FirebaseCounts } from './firebase'
@@ -226,12 +227,18 @@ function etMinuteLabel(ms: number): string {
   return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute} ET`
 }
 
+/** The measurement-change lines for a read at `readAt` (lib/measurementChanges.ts): a marker on the change's ET day, a "since" line after it, nothing while no date is set. */
+export function measurementLinesAt(readAt: string): string[] {
+  return measurementReportLines(etDateFromMs(Date.parse(readAt)))
+}
+
 function header(r: MorningResult | PostflightResult, kind: string): string[] {
   const et = etMinuteLabel(Date.parse(r.readAt))
   const s = r.status
   return [
     `${reportLabelFor(r.campaign.id)} ${kind}, ${et}${r.dryRun ? ' [DRY RUN: nothing written]' : ''}`,
     `Campaign ${r.campaign.id} "${r.campaign.label}" (${r.campaign.ucValues.join(', ')}): ${s ? `${s.status}/${s.servingStatus}${s.dailyBudget != null ? `, budget ${money(s.dailyBudget)}/day` : ''}` : `status NOT READ (${r.statusError})`}`,
+    ...measurementLinesAt(r.readAt),
   ]
 }
 

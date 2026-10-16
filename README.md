@@ -68,6 +68,11 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   is not an hour, place or device split).
   [`src/lib/releases.ts`](src/lib/releases.ts) holds the hand-entered release dates (`hits` has
   no app-version column; major releases get a labelled line, minor ones a short tick).
+  [`src/lib/measurementChanges.ts`](src/lib/measurementChanges.ts) marks a day when *how we count*
+  changed (v1.99.2's sign-in first-touch fallback): its one `dateEt` is entered by hand once the
+  version is live, and stays `null` until then, when nothing shows. Once set, the timeline marks the
+  day, the tagged auth-success and new-account cards carry a caveat that the rise is partly
+  measurement, and the ads read reports print a marker line on that day and a "since" line after it.
   Best Sudoku / Campaigns (its funnel, country, cost and return-visits panels are metric
   cards, presets `campaign-funnel`, `campaign-country` — a table with the funnel steps as rows
   and US / CA / Other as columns, each cell a campaign metric with the registry's optional
@@ -645,6 +650,23 @@ per-ET-day totals. Web and app combined, humans only, the same exclusions as the
 viewers can read it. Until the game version that sends the beacons ships (no coach row ever),
 the card says so and every row reads 0.
 
+### Ask-order A/B
+
+The **Ask-order A/B** card (Features page, under Coach tips; `?page=bsk-features`) reads the test
+of which ask goes first, sign in or install. Each device is put in one group once, and the game
+sends twin rows under `/ab/ask-order/<group>/…` (assigned, shown per ask, and the outcome after
+each ask). The card shows, per group and organic vs tagged, assigned and shown rows, the
+signed-in rows and installed rows per assigned row (read separately, as plain row ratios, never
+a per-person rate), and returned and still-playing rows from the group's own twin rows. The
+pre-registered read is progress to about 150 asks shown per group and the 1.5x rule per kind of
+response; it uses every day so far whatever range is picked. It is the same `/api/features`
+endpoint with `view: 'ask-order'` ([`src/lib/askOrder.ts`](src/lib/askOrder.ts)). Caveats it
+states: a device that both signs in and installs counts twice in the combined figure, a true
+per-device primary needs one first-response row per device, and tagged-cell ratios are
+approximate because organic and tagged are per-event counts. The whole `/ab/ask-order/%` family
+is counts only: read as per-ET-day totals, never split by hour, place or device, and never added
+into any other total. Purchases cannot be split by group, so they are not shown.
+
 ## Page links
 
 `https://stats.goodstuff.software/?page=<page id>` opens that page (for example `?page=bsk-features`
@@ -776,7 +798,7 @@ and the UTC `date`, whose count minus `dateEt`'s for the same day would give an 
 `country`, `region`, `city`, `postal`, `continent`, `timezone`, `colo`, `org`; `device`,
 `browser`, `os`, `lang`, `screenw`, `screenwBucket`, `visitor`), or is drilled into one of them
 leaves `/return/…`, `/game/start/…`, `/game/complete/…`, `/game/complete-deferred/…`,
-`/game/tutorial-complete/…`, `/tour/skip`, `/tour/exit-at/…`, `/coach/dismissed/…`, `/coach/closed-at/…` and `/coach/shown/…` rows out entirely, and any row whose
+`/game/tutorial-complete/…`, `/tour/skip`, `/tour/exit-at/…`, `/coach/dismissed/…`, `/coach/closed-at/…`, `/coach/shown/…` and `/ab/ask-order/…` rows out entirely, and any row whose
 path contains a NUL byte (SQLite LIKE stops reading at one, so the SQL guard tests `instr(path, char(0))`
 too, in step with the JS matcher `isSplitRefusedPath`), whatever
 "Include event beacons" says, marks the response `meta.splitGuard: true`, and the chart says so in a caption.

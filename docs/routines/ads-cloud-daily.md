@@ -177,6 +177,7 @@ link that lost its suffix still counts. All three tags are the one arm.
   | 0 to 1, with 20 or more asks | Stop paid acquisition |
   | Under 20 asks | Inconclusive (no go, iterate or stop) |
 
+- **Measurement change:** when a read prints a "MEASUREMENT CHANGE TODAY" or "Measurement change since" line, on or after that marked day do not read the tagged new-account rise as performance.
 - **Traffic-held check:** complete rows at no more than $3 each, and CTR at or above the arm's
   flight 2 floor (Apps 0.15%, Search 1.0%), the same floor the coded kill rule 2 uses. State both
   figures from the report (the tagged complete rows are on the `tracking-check counts` line).

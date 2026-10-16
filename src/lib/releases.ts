@@ -47,6 +47,7 @@
 //    `vX.Y.Z` production tag before v1.95.3 shipped — presumed superseded/folded into
 //    v1.95.3's promotion, not separate releases; omitted.
 import { TRACKING_ACTIVATION_DATE_ET, NEW_BEACONS_LIVE_AT_ET, RAW_INSTALL_DEDUPE_LIVE_AT_ET, etDateFromMs } from './popupEvents'
+import { MEASUREMENT_CHANGES } from './measurementChanges'
 
 export interface ReleaseMarker {
   version: string
@@ -183,6 +184,19 @@ export const RELEASES: ReleaseMarker[] = [
     dateEt: '2026-10-03',
     // Not `major`: same ET day as v1.97.0's labelled go-live marker (see above).
     note: 'Organic first-touch return count goes live; ad click ids not counted as organic; starting a real game ends the welcome tour',
+  },
+  {
+    // A measurement change, not a feature: its date and note come from lib/measurementChanges.ts
+    // (the one place the date is entered). Getters, so the entry follows that config: while the
+    // date is null this is undated and datedReleases() drops it, so nothing shows on the timeline.
+    version: MEASUREMENT_CHANGES[0].id,
+    get dateEt() {
+      return MEASUREMENT_CHANGES[0].dateEt
+    },
+    get note() {
+      return MEASUREMENT_CHANGES[0].note
+    },
+    major: true,
   },
 ]
 

@@ -58,6 +58,7 @@ import type { CardSpec } from './metrics/types'
 // lib/popupEvents.ts — see that file's own comment on why it keeps AUTH_NEW_EXISTING_LIVE_AT
 // out of itself), so importing the constant from lib/adsRules.ts here is fine.
 import { AUTH_NEW_EXISTING_LIVE_AT } from './adsRules'
+import { MEASUREMENT_CHANGES, markedChanges } from './measurementChanges'
 import { etOffsetHours } from './etTime'
 import { SIGNUPS_HINT } from './adsReadingsFormat'
 import { BAR_FIXED, ORGANIC_BAR_FACTOR, ORGANIC_MIN_D0, ORGANIC_MIN_DAYS } from './metrics/retention'
@@ -403,6 +404,22 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     hideable: false,
     // Its text is about "the country columns": automatic only on a card that has them.
     appliesTo: (w: AutoCaveatWidget) => cardSplitsByCountry(w.card),
+  },
+  // A counting change marked in lib/measurementChanges.ts: from its day, tagged new accounts and
+  // auth successes rise partly because they are counted differently. Inactive (nothing shows) while
+  // no change has a date; on the cards that show those counts only.
+  'measurement-change-note': {
+    id: 'measurement-change-note',
+    text: () => {
+      const c = markedChanges().pop()
+      return c ? `From ${c.dateEt} (${c.id}): ${c.note}. Do not read the rise as performance.` : `Measurement change (${MEASUREMENT_CHANGES[0].id}, date not set yet): ${MEASUREMENT_CHANGES[0].note}.`
+    },
+    kind: 'note',
+    severity: 'caveat',
+    scopes: ['campaigns', 'overview'],
+    hideable: false,
+    activeWhen: () => markedChanges().length > 0,
+    appliesTo: (w: AutoCaveatWidget) => cardShowsAuthSuccess(w.card),
   },
   // The release panel (lib/metrics/presets.ts release-before-after): why the before window reads
   // low. Plain wording, as the panel's own line had it.
@@ -855,6 +872,23 @@ export function cardSplitsByCountry(card: Widget['card']): boolean {
       (overCountries(sec.repeat) ||
         overCountries(sec.columns) ||
         (Array.isArray(sec.items) ? sec.items : []).some((it) => !!it && overCountries(it.repeat))),
+  )
+}
+
+/** The metrics a measurement change moves: tagged auth successes and the new-account split. */
+const AUTH_SUCCESS_METRICS: ReadonlySet<string> = new Set(['campaign.authSuccess', 'bsk.authSuccess', 'bsk.authSuccessNew'])
+
+/** True when a card shows a tagged auth-success or new-account count anywhere (a section item or
+ * the badge). Stored data, so every level is checked defensively. */
+export function cardShowsAuthSuccess(card: Widget['card']): boolean {
+  const spec = cardSpecOf(card)
+  if (!spec) return false
+  const isAuth = (d: unknown): boolean => {
+    const m = !!d && typeof d === 'object' ? (d as { metric?: unknown }).metric : undefined
+    return typeof m === 'string' && AUTH_SUCCESS_METRICS.has(m)
+  }
+  return (Array.isArray(spec.sections) ? spec.sections : []).some(
+    (sec) => !!sec && (Array.isArray(sec.items) ? sec.items : []).some((it) => !!it && isAuth(it.data)),
   )
 }
 
