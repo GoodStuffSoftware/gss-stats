@@ -68,6 +68,7 @@ export const VIEWER_READ_POSTS: ReadonlySet<string> = new Set([
   '/api/metrics',
   '/api/popups',
   '/api/completions',
+  '/api/features',
 ])
 
 /** Whether a viewer may make this request. GET and HEAD read; POST only to VIEWER_READ_POSTS

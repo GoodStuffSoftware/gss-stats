@@ -141,6 +141,11 @@ describe('viewerMayRequest', () => {
     expect(viewerMayRequest('GET', '/api/config')).toBe(true)
     expect(viewerMayRequest('head', '/')).toBe(true)
     for (const p of VIEWER_READ_POSTS) expect(viewerMayRequest('post', p)).toBe(true)
+    // The feature-health endpoint is a read (two aggregate SELECTs): a viewer sees the Feature health card.
+    expect(VIEWER_READ_POSTS.has('/api/features')).toBe(true)
+    expect(viewerMayRequest('POST', '/api/features')).toBe(true)
+    expect(viewerMayRequest('PUT', '/api/features')).toBe(false)
+    expect(viewerMayRequest('POST', '/api/features/')).toBe(false)
     for (const [m, p] of [
       ['PUT', '/api/config'],
       ['POST', '/api/config'],
