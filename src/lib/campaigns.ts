@@ -106,7 +106,7 @@ export type StagedArm = 'apps' | 'search'
 export interface StagedArmConfig {
   /** CampaignFlight.label. */
   label: string
-  /** The utm_campaign tag; the medium (display, cpc) is in `notes` only, as for flight 2. */
+  /** The utm_campaign tag(s), matched exactly (IN); an arm with several sums them. The medium (display, cpc) is in `notes` only, as for flight 2. */
   ucValues: string[]
   dailyBudgetUsd: number
   hardCapUsd: number
@@ -118,13 +118,17 @@ export interface StagedArmConfig {
 export const STAGED_FLIGHT_3: Record<StagedArm, StagedArmConfig> = {
   apps: {
     label: 'Flight 3 — display, Sudoku app placements',
+    // Two responsive display ads in the one campaign (Mike, 2026-10-16): HERO and FEATURES, each
+    // with its own landing-link utm_campaign. The arm sums them (every rule reads the Apps total);
+    // the bare tag is a catch-all for a link left without a variant. The ads report prints the
+    // per-tag split (scripts/ads-reads/report.ts tagSplitLines) for any arm with more than one tag.
     ucValues: ['sudoku_funnel_f3_apps_hero', 'sudoku_funnel_f3_apps_feat', 'sudoku_funnel_f3_apps'],
     dailyBudgetUsd: 10,
     hardCapUsd: 70,
     flightStartTimeEt: '12:00',
     servingHoursEt: [12, 23],
     notes:
-      '"Best Sudoku - Display - Sudoku app placements - F3 Apps", utm google / display / sudoku_funnel_f3_apps. Flight 2\'s Apps setup re-run on best-sudoku v1.99.0: the same 17 Android app placements, optimized targeting off, manual CPC $0.35 max, F2 copy plus a price line (\"No ads. Passes from $1.99\"), US+CA, ad schedule 12:00-23:00 ET, $10/day, $70 cap over 7 serving days. Starts the day v1.99.0 is live on Play production. Created PAUSED from a dry run; enabled by Mike\'s yes, status and dates only.',
+      '"Best Sudoku - Display - Sudoku app placements - F3 Apps", utm google / display / sudoku_funnel_f3_apps_hero and sudoku_funnel_f3_apps_feat (two responsive display ads in the one campaign, HERO and FEATURES; the arm sums both, the bare sudoku_funnel_f3_apps is a catch-all). Flight 2\'s Apps setup re-run on best-sudoku v1.99.0: the same 17 Android app placements, optimized targeting off, manual CPC $0.35 max, F2 copy plus a price line (\"No ads. Passes from $1.99\"), US+CA, ad schedule 12:00-23:00 ET, $10/day, $70 cap over 7 serving days. Starts the day v1.99.0 is live on Play production. Created PAUSED from a dry run; enabled by Mike\'s yes, status and dates only.',
   },
   search: {
     label: 'Flight 3 — search, desktop intent',

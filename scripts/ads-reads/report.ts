@@ -29,6 +29,7 @@ import { RAW_INSTALL_SIGNALS_LABEL } from '../../src/lib/campaigns'
 import { noteRawText } from '../../src/lib/notes'
 import type { DiagnosticsSection, FullRead, MorningResult, PostflightResult, SpendSection } from './read'
 import type { FirebaseCounts } from './firebase'
+import type { TagSplit } from '../../src/lib/tagSplit'
 
 // `/game` rows are page views, not games played (ADR 0003): the registry label, lower-cased
 // for the middle of a sentence.
@@ -111,6 +112,28 @@ function trackingCheckCounts(c: TrackingCounts, y?: TrackingCounts): string {
   return `tracking-check counts (tagged ET-day totals${y ? '; yesterday in brackets' : ''}): complete rows ${f((x) => x.completeRows)}, sign-in ask rows (placement, committed-repeat, committed-challenge) ${f((x) => x.flight3Asks)}, /coach/shown/place rows ${f((x) => x.coachShownPlace)}`
 }
 
+/** The per-tag split block for an arm with more than one tag (flight 3 Apps: HERO and FEATURES).
+ * null / absent for a single-tag arm, which prints as it always has. Display only: every rule and
+ * the arm totals above it read the SUM of the tags. Counts only (src/lib/splitGuard.ts): rows per
+ * tag, cumulative and one ET day's total (in brackets), no visitor join, no hour, place or device.
+ * Cost per arrival is the tag's ad-level spend on closed days over its tagged arrivals, "—" under
+ * 5 arrivals (MIN_COHORT, like the arm's own). */
+export function tagSplitLines(sp: TagSplit | null | undefined): string[] {
+  if (!sp) return []
+  const out = [
+    `Per-tag split (display only; every rule and total above reads the sum of the tags; counts only: tagged rows per tag, ET-day totals${sp.tags.some((t) => t.yesterday) ? ', yesterday in brackets' : ''}; cost per arrival is closed-day ad spend / tagged arrivals, "—" under 5 arrivals):`,
+  ]
+  for (const t of sp.tags) {
+    const f = (pick: (c: typeof t.total) => number) => `${n(pick(t.total))}${t.yesterday ? ` (${n(pick(t.yesterday))})` : ''}`
+    const cost = sp.costRead ? `; ad spend ${money(t.cost)} (${n(t.clicks)} clicks, ${n(t.impressions)} impr), cost per arrival ${money(t.costPerArrival)}` : ''
+    out.push(`  ${t.tag}: arrivals ${f((c) => c.arrivals)}, completes ${f((c) => c.completes)}, sign-in asks ${f((c) => c.asks)}, new accounts ${f((c) => c.newAccounts)}${cost}`)
+  }
+  if (sp.untagged) out.push(`  untagged: ${n(sp.untagged.ads)} ad(s) whose final URLs carry no usable utm_campaign for this arm; ad spend ${money(sp.untagged.cost)} (${n(sp.untagged.clicks)} clicks, ${n(sp.untagged.impressions)} impr), not assigned to a tag`)
+  if (sp.unsplitHits) out.push(`  not on a tag: ${n(sp.unsplitHits)} tagged hit(s) have no campaign tag on the row`)
+  out.push(sp.costRead ? `  ad cost through ${sp.costThroughEt ?? '—'} (closed days; Google Ads ad_group_ad, read-only)` : `  ad cost: not read (${sp.costError ?? 'unknown'})`)
+  return out
+}
+
 export function fullReadLines(r: FullRead, title: string, opts: { postflight?: boolean } = {}): string[] {
   const promoNote = promoArmNoteApplies(r, !!opts.postflight)
   const out: string[] = [`=== ${title} (cumulative ${money(r.cumulativeSpend)}, closed days through ${r.spendThroughEt ?? '—'}) — ${r.complete ? 'complete' : 'INCOMPLETE, retried next run'} ===`]
@@ -142,6 +165,7 @@ export function fullReadLines(r: FullRead, title: string, opts: { postflight?: b
     const tp1 = p1Line(s.p1)
     if (tp1) out.push(`  tagged P1 beacons: ${tp1}`)
   }
+  out.push(...tagSplitLines(r.tagSplit))
   if (r.site) {
     const s = r.site.summary
     out.push('Site-wide on bestsudoku-web since the 2026-09-26 go-live (NOT campaign-attributed):')
@@ -225,6 +249,7 @@ export function formatMorningReport(r: MorningResult): string {
         ? `Tagged so far: ${n(t.cumulative!.taggedArrivals)} arrivals (floor), ${n(t.cumulative!.taggedHits)} hits, ${n(t.cumulative!.asks)} asks, ${n(t.cumulative!.accepts)} accepts, ${n(t.cumulative!.authSuccess)} auth successes; yesterday ${n(t.yesterday!.taggedArrivals)} arrivals, ${n(t.yesterday!.asks)} asks; ${trackingCheckCounts(t.cumulative!, t.yesterday!)}`
         : `Tagged: NOT READ (${t.error})`,
     )
+    out.push(...tagSplitLines(r.tagSplit))
     out.push(...firstSessionLines(r.firstSession))
     const th = r.thresholds
     out.push(

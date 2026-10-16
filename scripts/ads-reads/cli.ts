@@ -17,6 +17,7 @@ import { etDateFromMs, type HourPathCount } from '../../src/lib/popupEvents'
 import {
   createAdsClient,
   fetchCampaignStatus,
+  fetchAdDaily,
   fetchDailySpend,
   fetchDevices,
   fetchGeo,
@@ -25,6 +26,7 @@ import {
   fetchRangeTotal,
   fetchRecommendations,
   fetchTargeting,
+  type AdDayRow,
   type AdsClient,
   type CampaignStatus,
 } from '../../src/lib/adsApi'
@@ -124,6 +126,8 @@ export function adsSource(client: AdsClient): AdsSource {
     devices: (id, since, until) => fetchDevices(client, id, since, until),
     targeting: (id) => fetchTargeting(client, id),
     recommendations: (id) => fetchRecommendations(client, ADS_CUSTOMER_ID, id),
+    // Ad-level cost for the per-tag split of an arm with several tags (a read-only SELECT).
+    adDaily: (id, since, until) => fetchAdDaily(client, id, since, until),
   }
 }
 
@@ -157,7 +161,7 @@ export async function liveDeps(opts: Record<string, string | boolean | undefined
 // ── --fixture: one recorded JSON file drives the whole read ───────────────────────────────
 export interface Fixture {
   now: string
-  ads?: { status: CampaignStatus; daily: Record<string, SpendDay>; placements: PlacementDayRow[] } | { error: string }
+  ads?: { status: CampaignStatus; daily: Record<string, SpendDay>; placements: PlacementDayRow[]; adDaily?: AdDayRow[] } | { error: string }
   beacon?: {
     tagged: (Omit<TaggedRow, 'hourStartMs'> & { hour?: string; hourStartMs?: number })[]
     siteEvents: (Omit<HourPathCount, 'hourStartMs'> & { hour?: string; hourStartMs?: number })[]
@@ -185,7 +189,7 @@ export function fixtureDeps(fx: Fixture, dryRun: boolean): ReadDeps & { store: R
   const inRange = (d: string, since: string, until: string) => d >= since && d <= until
   const b: BeaconSource | null = beacon
     ? {
-        tagged: async () => beacon.tagged.map((r) => ({ hourStartMs: hourMs(r), path: r.path, visitor: r.visitor, count: r.count, ...(r.postUpsellFix === undefined ? {} : { postUpsellFix: r.postUpsellFix }) })),
+        tagged: async () => beacon.tagged.map((r) => ({ hourStartMs: hourMs(r), path: r.path, visitor: r.visitor, count: r.count, ...(r.campaign === undefined ? {} : { campaign: r.campaign }), ...(r.postUpsellFix === undefined ? {} : { postUpsellFix: r.postUpsellFix }) })),
         siteEvents: async (sinceMs) => beacon.siteEvents.map((r) => ({ hourStartMs: hourMs(r), path: r.path, count: r.count })).filter((r) => r.hourStartMs >= sinceMs),
         returns: async () => beacon.returns,
         returnSites: async () => beacon.returnSites.map((s) => ({ site: s.site, count: s.count, firstEtDate: optEtDate(s.first, s.firstMs), lastEtDate: optEtDate(s.last, s.lastMs) })),
@@ -201,6 +205,7 @@ export function fixtureDeps(fx: Fixture, dryRun: boolean): ReadDeps & { store: R
           status: async () => ads.status,
           daily: async (_id, since, until) => Object.fromEntries(Object.entries(ads.daily).filter(([d]) => inRange(d, since, until))),
           placements: async (_id, since, until) => ads.placements.filter((p) => inRange(p.date, since, until)),
+          ...(ads.adDaily ? { adDaily: async (_id: string, since: string, until: string) => ads.adDaily!.filter((a) => inRange(a.date, since, until)) } : {}),
           rangeTotal: async (_id, since, until) => {
             const days = Object.entries(ads.daily).filter(([d]) => inRange(d, since, until)).map(([, v]) => v)
             return days.length ? days.reduce((a, v) => ({ costMicros: a.costMicros + v.costMicros, impressions: a.impressions + v.impressions, clicks: a.clicks + v.clicks }), { costMicros: 0, impressions: 0, clicks: 0 }) : null

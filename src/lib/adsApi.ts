@@ -254,6 +254,43 @@ export async function fetchPlacementDaily(client: AdsClient, campaignId: string,
   return out
 }
 
+/** One ad's cost for one ET day (ad_group_ad). `finalUrls` is the ad's own landing link(s): a
+ * responsive display ad has no name, so the link's utm_campaign (lib/tagSplit.ts) is what says
+ * which arm tag the ad feeds. */
+export interface AdDayRow {
+  date: string
+  adId: string
+  finalUrls: string[]
+  costMicros: number
+  impressions: number
+  clicks: number
+}
+/** Ad-level cost/impressions/clicks PER ET DAY for one campaign (flight 3 Apps runs two ads whose
+ * links carry different utm_campaign tags). A READ-ONLY SELECT, like every query here: the client
+ * refuses anything else, and nothing about an ad is ever changed. */
+export async function fetchAdDaily(client: AdsClient, campaignId: string, since: string, until: string): Promise<AdDayRow[]> {
+  assertKnownCampaign(campaignId)
+  checkRange(since, until)
+  const rows = await client.search(
+    `SELECT ad_group_ad.ad.id, ad_group_ad.ad.final_urls, segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks FROM ad_group_ad WHERE campaign.id = ${campaignId} AND segments.date BETWEEN '${since}' AND '${until}' ORDER BY segments.date`,
+  )
+  const out: AdDayRow[] = []
+  for (const r of rows) {
+    const date = r.segments?.date
+    const ad = r.adGroupAd?.ad
+    if (typeof date !== 'string' || !DATE_RE.test(date) || ad?.id == null) continue
+    out.push({
+      date,
+      adId: String(ad.id),
+      finalUrls: Array.isArray(ad.finalUrls) ? ad.finalUrls.filter((u: unknown): u is string => typeof u === 'string') : [],
+      costMicros: Number(r.metrics?.costMicros ?? 0),
+      impressions: Number(r.metrics?.impressions ?? 0),
+      clicks: Number(r.metrics?.clicks ?? 0),
+    })
+  }
+  return out
+}
+
 export interface PlacementTotal {
   placement: string
   displayName: string | null

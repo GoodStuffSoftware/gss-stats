@@ -91,9 +91,10 @@ import type { AdsStore, AppendOutcome, PlacementDayRow } from '../../src/lib/ads
 import { ARRIVALS_CAVEAT, costPer, etMidnightUtcMs, etTimeUtcMs, funnelStepRates, type CampaignFlight, type FunnelStepKey } from '../../src/lib/campaigns'
 import { etDateFromMs, gateRate, SMALL_SAMPLE_NOTE, type GatedRate, type HourPathCount } from '../../src/lib/popupEvents'
 import { addEtDays } from '../../src/lib/overview'
-import { splitPlacements, type CampaignStatus, type DeviceRow, type GeoRow, type HourlyRow, type RecommendationRow, type TargetingRow } from '../../src/lib/adsApi'
+import { splitPlacements, type AdDayRow, type CampaignStatus, type DeviceRow, type GeoRow, type HourlyRow, type RecommendationRow, type TargetingRow } from '../../src/lib/adsApi'
 import { syncAdsData, type AdsMetricsSource, type CampaignSyncResult, type SyncResult } from '../../src/lib/adsSync'
 import type { SyncSource } from '../../src/lib/adsStore'
+import { buildTagSplit, isMultiTag, type TagSplit } from '../../src/lib/tagSplit'
 import type { BeaconSource } from './beacon'
 import type { FirebaseCounts } from './firebase'
 import { HOUSEHOLD_NOTE, RETENTION_NOTE, type PlayReportsSection } from './play'
@@ -111,6 +112,9 @@ export interface AdsSource extends AdsMetricsSource {
   devices?(campaignId: string, since: string, until: string): Promise<DeviceRow[]>
   targeting?(campaignId: string): Promise<TargetingRow[]>
   recommendations?(campaignId: string): Promise<RecommendationRow[]>
+  /** Ad-level cost per ET day (src/lib/adsApi.ts fetchAdDaily), for the per-tag cost of an arm
+   * with several tags. Optional like the others: absent = the split prints without cost. */
+  adDaily?(campaignId: string, since: string, until: string): Promise<AdDayRow[]>
 }
 export interface FirebaseSource {
   /** cohortTiersAtMs: also read the day-15/30/60 cohort-by-tier COUNTs as of that instant. */
@@ -238,6 +242,9 @@ export interface FullRead {
   returns: ReturnSummary | null
   play: PlayReturnStatus | null
   firebase: FirebaseCounts | null
+  /** Per-tag split for an arm with more than one tag (display only: every figure above, and every
+   * rule, reads the arm total). null for a single-tag arm or an unreadable tagged read. */
+  tagSplit: TagSplit | null
 }
 export interface HealthSection {
   evaluated: boolean
@@ -432,7 +439,34 @@ interface FullReadInput {
   campaignState: { status: string | null; servingStatus: string | null } | null
   /** Day-15/30/60: also read the cohort-by-tier counts as of this instant. */
   cohortTiersAtMs?: number | null
+  /** The per-tag split already read for this run (the morning read); undefined = read it here. */
+  tagSplit?: TagSplit | null
 }
+/** The per-tag split (src/lib/tagSplit.ts) for an arm with more than one tag; null for a single-tag
+ * arm or when the tagged read failed. The ad-level cost is a best-effort READ-ONLY Ads query over
+ * the closed days: a failure leaves the cost out and says why in the split, and never fails the
+ * read it sits beside or reaches `errors`, a kill rule or `notify`. */
+async function tagSplitRead(
+  deps: ReadDeps,
+  campaign: CampaignFlight,
+  tagged: Attempt<TaggedRow[]>,
+  throughEt: string | null,
+  yesterday?: { fromMs: number; toMs: number },
+): Promise<TagSplit | null> {
+  if (!isMultiTag(campaign.ucValues) || !tagged.ok) return null
+  const ads = deps.ads
+  let adRows: AdDayRow[] | null = null
+  let costError: string | null = null
+  if (!ads?.adDaily) costError = deps.adsInitError ? `Ads not available: ${summarizeError(deps.adsInitError)}` : 'not supported by this Ads source'
+  else if (!throughEt || throughEt < campaign.flightStart!) costError = 'no closed day yet'
+  else {
+    const r = await attempt('ads ad-level cost', () => ads.adDaily!(campaign.id, campaign.flightStart!, throughEt))
+    if (r.ok) adRows = r.value
+    else costError = summarizeError(r.error)
+  }
+  return buildTagSplit({ rows: tagged.value, ucValues: campaign.ucValues, yesterday, adRows, costError, costThroughEt: throughEt })
+}
+
 async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullRead; siteRows: Attempt<HourPathCount[]>; returns: Attempt<ReturnSummary> }> {
   const { plan, campaign } = i
   const errors: string[] = []
@@ -454,6 +488,7 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
   if (fb && !fb.ok) errors.push(fb.error)
   if (fb && fb.ok) for (const e of fb.value.errors) errors.push(`firebase: ${e}`)
 
+  const tagSplit = i.tagSplit !== undefined ? i.tagSplit : await tagSplitRead(deps, campaign, i.tagged, i.spendThroughEt)
   let tagged: FullRead['tagged'] = null
   if (i.tagged.ok) {
     const summary = summarizeTaggedRows(i.tagged.value)
@@ -554,7 +589,7 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
   // makes it incomplete (review L6): the sign-up bound would silently loosen without it.
   const complete = placementRows.ok && i.tagged.ok && siteRows.ok && returnRaw.ok && returnSites.ok && i.stored != null && !(decision && fbErr)
   return {
-    read: { thresholds: i.thresholds, spendThroughEt: i.spendThroughEt, cumulativeSpend, complete, errors, failedSources, failedDetails, placements: placementView, kill, decision, segments, tagged, site, returns, play, firebase: fb && fb.ok ? fb.value : null },
+    read: { thresholds: i.thresholds, spendThroughEt: i.spendThroughEt, cumulativeSpend, complete, errors, failedSources, failedDetails, placements: placementView, kill, decision, segments, tagged, site, returns, play, firebase: fb && fb.ok ? fb.value : null, tagSplit },
     siteRows,
     returns: returns ? { ok: true, value: returns } : { ok: false, error: returnRaw.ok ? 'returns unavailable' : returnRaw.error },
   }
@@ -824,6 +859,8 @@ export interface MorningResult {
    * tagged counts with site-wide web counts alongside. null in health-only mode or when the
    * tagged read failed; `siteError` says why the site-wide side is missing. */
   firstSession: { funnel: FirstSessionFunnel; siteError: string | null; arrivalsError?: string | null } | null
+  /** The per-tag split of an arm with more than one tag (display only; see FullRead.tagSplit). */
+  tagSplit: TagSplit | null
   thresholdRead: FullRead | null
   hardCapDaily: RuleResult | null
   releaseHealth: HealthSection
@@ -980,6 +1017,10 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
     yesterday: taggedRows.ok ? taggedCounts(summarizeTaggedRows(taggedRows.value, { fromMs: yStart, toMs: yEnd })) : null,
   }
 
+  // Per-tag split for a multi-tag arm (flight 3 Apps): cumulative and yesterday's ET day, plus the
+  // ad-level cost of the closed days. Display only: the totals above and every rule read the arm sum.
+  const tagSplit = opts.healthOnly ? null : await tagSplitRead(deps, campaign, taggedRows, spend.throughEt, { fromMs: yStart, toMs: yEnd })
+
   // First-session funnel, every morning read. The site-wide side is best-effort: a failure
   // leaves it unread (every step's "tracked" unknown) and never fails or pushes the read.
   let firstSession: MorningResult['firstSession'] = null
@@ -1016,6 +1057,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
       forceDecision: false,
       readAt,
       campaignState: status.ok ? status.value : null,
+      tagSplit,
     })
     thresholdRead = fr.read
     cached = { siteRows: fr.siteRows, returns: fr.returns }
@@ -1190,6 +1232,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
     thresholds: { crossedNow, consumedBefore: consumed, next: nextThreshold(cumulative, plan.thresholds), stateError: consumedA.ok ? null : consumedA.error },
     tagged,
     firstSession,
+    tagSplit,
     thresholdRead,
     hardCapDaily,
     releaseHealth: health,

@@ -139,7 +139,7 @@ describe('beacon reads are read-only and apply the shared exclusions', () => {
   it('with an upsell-fix instant, the tagged query flags each row exactly at it (uf), binding the instant first', () => {
     const fix = Date.parse('2026-09-29T18:26:00Z')
     const q = taggedRowsQuery(retest, fix)
-    expect(q.sql).toMatch(/^SELECT CAST\(ts \/ 3600000 AS INTEGER\) AS hr, path, visitor, \(ts >= \?\) AS uf, COUNT\(\*\) AS c FROM hits WHERE .* GROUP BY hr, path, visitor, uf$/)
+    expect(q.sql).toMatch(/^SELECT CAST\(ts \/ 3600000 AS INTEGER\) AS hr, path, visitor, \(ts >= \?\) AS uf, COUNT\(\*\) AS c FROM hits WHERE .* GROUP BY hr, path, visitor, campaign, uf$/)
     expect(q.binds[0]).toBe(fix)
     expect(taggedRowsQuery(retest, null).sql).not.toMatch(/\buf\b/)
   })

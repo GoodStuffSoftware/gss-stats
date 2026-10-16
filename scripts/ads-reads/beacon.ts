@@ -20,23 +20,27 @@ export interface Query {
   binds: unknown[]
 }
 
-/** Campaign-attributed rows, by (UTC hour, path, visitor) — and, when a segment boundary is
+/** Campaign-attributed rows, by (UTC hour, path, visitor, campaign tag) — and, when a segment boundary is
  * set (lib/adsRules.ts UPSELL_SIGNEDOUT_FIX_AT), by `uf` = the row is at or after it, so the
  * pre-fix / post-fix split is exact at the instant (the same device as the install fix's `pf`).
  * Its rows include return and completion rows (src/lib/splitGuard.ts): the hour is only ever used
  * to cut a count at an ET day, a flight boundary or a maturity instant, never shown as an hour of
  * day — the same ruling as the dashboard's segment cuts (lib/metrics/facts.ts header).
  * The report's tagged `/coach/shown/place` count (a refused path) comes from these rows too, printed only as
- * cumulative and yesterday's-ET-day totals (lib/adsRules.ts summarizeTaggedRows), never by hour. */
+ * cumulative and yesterday's-ET-day totals (lib/adsRules.ts summarizeTaggedRows), never by hour.
+ * `campaign` is the row's own utm_campaign (always one of the arm's ucValues: the WHERE is an IN),
+ * carried so an arm with several tags can print a per-tag split (lib/tagSplit.ts). A tag is not an
+ * hour, a place or a device (src/lib/splitGuard.ts), and the split is only ever printed as
+ * cumulative and ET-day row totals; every rule still sums the rows of all the arm's tags. */
 export function taggedRowsQuery(campaign: CampaignFlight, upsellFixAtMs: number | null = UPSELL_SIGNEDOUT_FIX_AT): Query {
   const attr = campaignAttributionClause(campaign)
   const w = [attr.sql]
   const b: unknown[] = [...attr.binds]
   applyExclusions(w, b)
   excludeInstallGapUnmeasured(w, b) // pre-fix install-gap rows are unmeasured, not zero
-  if (upsellFixAtMs == null) return { sql: `SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, visitor, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY hr, path, visitor`, binds: b }
+  if (upsellFixAtMs == null) return { sql: `SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, visitor, campaign, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY hr, path, visitor, campaign`, binds: b }
   return {
-    sql: `SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, visitor, (ts >= ?) AS uf, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY hr, path, visitor, uf`,
+    sql: `SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, visitor, campaign, (ts >= ?) AS uf, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY hr, path, visitor, campaign, uf`,
     binds: [upsellFixAtMs, ...b],
   }
 }
@@ -180,6 +184,7 @@ export function createBeaconSource(select: D1Select): BeaconSource {
         hourStartMs: n(x.hr) * 3_600_000,
         path: String(x.path ?? ''),
         visitor: String(x.visitor ?? ''),
+        campaign: String(x.campaign ?? ''),
         count: n(x.c),
         ...(x.uf === undefined ? {} : { postUpsellFix: n(x.uf) === 1 }),
       }))

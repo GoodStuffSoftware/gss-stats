@@ -709,6 +709,9 @@ export interface TaggedRow {
   hourStartMs: number
   path: string
   visitor: string
+  /** The row's own utm_campaign (one of the arm's ucValues). Read only by the per-tag split
+   * (lib/tagSplit.ts); no rule reads it, and absent (recorded fixtures) = not split. */
+  campaign?: string
   count: number
   /** Row-exact side of the signed-out upsell fix (SQL `ts >= UPSELL_SIGNEDOUT_FIX_AT`, like the
    * install fix's `pf`); absent (recorded fixtures) = decided by the row's hour bucket. */
