@@ -24,7 +24,11 @@ export interface StepMatch {
   exact?: readonly string[]
   prefix?: readonly string[]
   except?: readonly string[]
+  /** Only rows whose campaign tag (`hits.campaign`, the row's uc) is set ('tagged') or empty ('organic'). The Ask-order A/B
+   * card (askOrder.ts) is the one user. Unset: the tag is ignored. */
+  tag?: StepTag
 }
+export type StepTag = 'tagged' | 'organic'
 
 export interface StepDef {
   /** Unique within its feature. */
@@ -254,8 +258,9 @@ export function flatSteps(features: readonly FeatureDef[] = FEATURES): FlatStep[
 
 /** Whether a stored path counts toward a step. The SQL (functions/api/features.ts stepMatchSql)
  * says the same thing; a test runs both over the same paths. */
-export function stepMatches(match: StepMatch, path: string): boolean {
+export function stepMatches(match: StepMatch, path: string, campaign?: string | null): boolean {
   if (path.includes('\u0000')) return false
+  if (match.tag && match.tag !== (campaign ? 'tagged' : 'organic')) return false
   if (match.except?.includes(path)) return false
   return !!(match.exact?.includes(path) || match.prefix?.some((p) => path.startsWith(p)))
 }

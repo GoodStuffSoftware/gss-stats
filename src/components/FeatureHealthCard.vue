@@ -6,16 +6,23 @@
 //   view 'steps:<id>'    that feature's step chart: a line per step, a point per ET day;
 //   view 'coach-tips'    the Coach tips table (src/lib/coachTips.ts): a row per coach tip with shown,
 //                        dismissed and closed-while-showing counts and their ratios, for the latest
-//                        complete ET day and the selected range, plus the "Show me around" total.
+//                        complete ET day and the selected range, plus the "Show me around" total;
+//   view 'ask-order'     the Ask-order A/B (src/lib/askOrder.ts): progress toward the call point and the
+//                        pre-registered read per group (all days so far), then a table of the counts per group,
+//                        organic vs tagged, for the latest complete ET day and the selected range.
 // Web and app are combined. Counts only: nothing here is a per-person rate, and the caption says so.
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import type { ChartConfiguration } from 'chart.js'
 import type { GlobalFilters, Widget } from '../types'
 import { fetchFeatureHealth, type FeatureHealthResponse } from '../api'
-import { HEALTH_CAPTION, HEALTH_STATUS_LABEL, featureIdOfView, formatRatio, type FeatureHealth } from '../lib/featureHealth'
+import { HEALTH_CAPTION, HEALTH_STATUS_LABEL, featureIdOfView, formatRatio, ratio, type FeatureHealth } from '../lib/featureHealth'
 import { buildStepChartConfig } from '../lib/featureHealthChart'
 import { formatKey } from '../lib/charts'
 import { COACH_TIPS_CAPTION, COACH_TIPS_EMPTY_NOTE, COACH_TIPS_VIEW } from '../lib/coachTips'
+import {
+  ASK_ORDER_ASKS, ASK_ORDER_CALL_ASKS, ASK_ORDER_CAPTION, ASK_ORDER_EMPTY_NOTE, ASK_ORDER_GROUPS, ASK_ORDER_OUTCOMES, ASK_ORDER_TAGS, ASK_ORDER_VIEW,
+  askOrderFeatureId, assignedStepId, outcomeStepId, readAskOrder, responsesOf, shownStepId, stepCount,
+} from '../lib/askOrder'
 import BaseChart from './charts/BaseChart.vue'
 
 const props = defineProps<{ widget: Widget; filters: GlobalFilters; dark: boolean }>()
@@ -61,6 +68,40 @@ const coachTourOpened = computed(() => {
   return f && s ? { label: f.label, blurb: f.blurb, latest: s.latest, range: s.range } : null
 })
 const coachTipRows = computed(() => (model.value?.features ?? []).filter((f) => f.id.startsWith('tip-')))
+
+// The Ask-order A/B: the pre-registered read (all days so far) and the range table (a column per
+// window, group and tag; a row per measure).
+const isAskOrder = computed(() => props.widget.view === ASK_ORDER_VIEW)
+const askRead = computed(() => readAskOrder(model.value?.allTime ?? {}))
+const askFeature = (g: string) => model.value?.features.find((f) => f.id === askOrderFeatureId(g as (typeof ASK_ORDER_GROUPS)[number]['id']))
+const askCols = (['latest', 'range'] as const).flatMap((which) =>
+  ASK_ORDER_GROUPS.flatMap((g) => ASK_ORDER_TAGS.map((t) => ({ which, group: g.id, groupLabel: g.label, tag: t.id, tagLabel: t.label }))),
+)
+type AskCol = (typeof askCols)[number]
+const askRowDefs = [
+  { key: 'assigned', label: 'Assigned', cls: '', value: (c: AskCol) => stepCount(askFeature(c.group), assignedStepId(c.tag), c.which) },
+  ...ASK_ORDER_ASKS.map((a) => ({
+    key: `shown-${a.id}`,
+    label: `${a.label} shown`,
+    cls: '',
+    value: (c: AskCol) => stepCount(askFeature(c.group), shownStepId(a.id, c.tag), c.which),
+  })),
+  ...ASK_ORDER_ASKS.flatMap((a) =>
+    ASK_ORDER_OUTCOMES.map((o) => ({
+      key: `${a.id}-${o.id}`,
+      label: `${a.label}: ${o.label.toLowerCase()}`,
+      cls: '',
+      value: (c: AskCol) => stepCount(askFeature(c.group), outcomeStepId(a.id, o.id, c.tag), c.which),
+    })),
+  ),
+  { key: 'responses', label: 'Responses (signed in or installed)', cls: 'fh-total', value: (c: AskCol) => responsesOf(askFeature(c.group), c.tag, c.which) },
+]
+const askCell = (c: AskCol, value: (c: AskCol) => number) => fmt(askFeature(c.group) ? value(c) : 0)
+const askResponsesPerAssigned = (c: AskCol) => {
+  const f = askFeature(c.group)
+  return formatRatio(ratio(responsesOf(f, c.tag, c.which), stepCount(f, assignedStepId(c.tag), c.which)))
+}
+const pct = (x: number) => `${Math.round(x * 100)}%`
 
 const stepsFeatureId = computed(() => featureIdOfView(props.widget.view))
 const stepsFeature = computed<FeatureHealth | null>(() => {
@@ -133,6 +174,70 @@ const ratioCells = (f: FeatureHealth, i: number) => {
       <p class="fh-caption" data-testid="coach-tips-caption">{{ COACH_TIPS_CAPTION }}</p>
     </template>
 
+    <!-- The Ask-order A/B -->
+    <template v-else-if="isAskOrder && model">
+      <p v-if="model.everSeen === false" class="fh-caption" data-testid="ask-order-empty">{{ ASK_ORDER_EMPTY_NOTE }}</p>
+      <div class="fh-scroll">
+        <div class="ao-read" data-testid="ask-order-read">
+          <div v-for="g in askRead.groups" :key="g.group" class="ao-group" :data-group="g.group">
+            <div class="ao-head">
+              <span class="fh-name">{{ g.label }}</span>
+              <span class="mono" data-col="asks-progress">asks shown {{ fmt(g.asksShown) }} / {{ ASK_ORDER_CALL_ASKS }}</span>
+            </div>
+            <div class="ao-bar" role="progressbar" :aria-valuenow="g.asksShown" aria-valuemin="0" :aria-valuemax="ASK_ORDER_CALL_ASKS" :aria-label="`${g.label}: asks shown toward ${ASK_ORDER_CALL_ASKS}`">
+              <div class="ao-bar-fill" :class="{ done: g.reachedCall }" :style="{ width: pct(g.progress) }"></div>
+            </div>
+            <div class="ao-nums mono">
+              <span data-col="assigned">assigned {{ fmt(g.assigned) }}</span>
+              <span data-col="responses">responses {{ fmt(g.responses) }}</span>
+              <span data-col="responses-per-assigned" title="Signed-in plus installed outcome rows divided by devices assigned: a ratio of two row counts, not a per-person rate">responses per assigned {{ formatRatio(g.responsesPerAssigned) }}</span>
+            </div>
+            <div class="ao-nums mono ao-secondary">
+              <span v-for="o in ASK_ORDER_OUTCOMES.filter((x) => x.id !== 'still-playing')" :key="o.id" :data-col="'per-assigned-' + o.id">
+                {{ o.label.toLowerCase() }} per assigned {{ formatRatio(g.perOutcome[o.id].perAssigned) }}
+              </span>
+            </div>
+          </div>
+        </div>
+        <p class="ao-verdict" :data-state="askRead.verdict.state" data-testid="ask-order-verdict">
+          <span class="mono" data-col="multiple">Larger over smaller: {{ askRead.multiple === null ? '—' : `${askRead.multiple.toFixed(2)}x` }}.</span>
+          {{ askRead.verdict.note }}
+        </p>
+        <table class="fh-table" data-testid="ask-order-table">
+          <thead>
+            <tr>
+              <th class="l" rowspan="3">Measure</th>
+              <th class="c" colspan="4" :title="model.latestDay">Latest day ({{ dayLabel(model.latestDay) }})</th>
+              <th class="c" colspan="4" :title="rangeTitle">Range</th>
+            </tr>
+            <tr>
+              <template v-for="w in ['latest', 'range']" :key="w">
+                <th v-for="g in ASK_ORDER_GROUPS" :key="g.id" class="c" colspan="2">{{ g.label }}</th>
+              </template>
+            </tr>
+            <tr>
+              <template v-for="w in ['latest', 'range']" :key="w">
+                <template v-for="g in ASK_ORDER_GROUPS" :key="g.id">
+                  <th v-for="t in ASK_ORDER_TAGS" :key="t.id" class="r">{{ t.label }}</th>
+                </template>
+              </template>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="r in askRowDefs" :key="r.key" :class="r.cls" :data-row="r.key">
+              <td class="l fh-name">{{ r.label }}</td>
+              <td v-for="c in askCols" :key="c.which + c.group + c.tag" class="r mono" :data-col="`${c.which}-${c.group}-${c.tag}`">{{ askCell(c, r.value) }}</td>
+            </tr>
+            <tr data-row="responses-per-assigned">
+              <td class="l fh-name" title="Responses divided by assigned: a ratio of two row counts">Responses per assigned</td>
+              <td v-for="c in askCols" :key="c.which + c.group + c.tag" class="r mono" :data-col="`${c.which}-${c.group}-${c.tag}`">{{ askResponsesPerAssigned(c) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="fh-caption" data-testid="ask-order-caption">{{ ASK_ORDER_CAPTION }}</p>
+    </template>
+
     <!-- A feature's step chart -->
     <template v-else-if="stepsFeatureId">
       <p v-if="!stepsFeature" class="state mono">No such feature: {{ stepsFeatureId }}</p>
@@ -185,6 +290,56 @@ const ratioCells = (f: FeatureHealth, i: number) => {
 </template>
 
 <style scoped>
+.ao-read {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 12px;
+  padding-bottom: 6px;
+}
+.ao-group {
+  border: 1px solid rgb(var(--line));
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.ao-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12.5px;
+}
+.ao-bar {
+  height: 8px;
+  margin: 6px 0;
+  border-radius: 999px;
+  background: rgb(var(--line));
+  overflow: hidden;
+}
+.ao-bar-fill {
+  height: 100%;
+  background: rgb(var(--g6));
+}
+.ao-bar-fill.done {
+  background: rgb(var(--g5));
+}
+.ao-nums {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 12px;
+  color: rgb(var(--ink-2));
+}
+.ao-secondary {
+  color: rgb(var(--ink-3));
+}
+.ao-verdict {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  color: rgb(var(--ink-2));
+}
+.ao-verdict[data-state='preliminary'] {
+  color: rgb(var(--ink-3));
+}
 .fh-body {
   height: 100%;
   min-height: 0;

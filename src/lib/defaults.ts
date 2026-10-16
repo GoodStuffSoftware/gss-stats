@@ -8,6 +8,7 @@ import { normCardRef } from './metrics/validate'
 import { autoCaveatIds, isNoteIdHideable, widgetNoteScope } from './notes'
 import { FEATURES, stepsViewFor } from './featureHealth'
 import { COACH_TIPS_VIEW } from './coachTips'
+import { ASK_ORDER_VIEW } from './askOrder'
 
 export function defaultDateRange(): { since: string; until: string } {
   const until = new Date()
@@ -782,7 +783,24 @@ export function defaultFeaturesWidgets(): Widget[] {
       }),
     ),
     coachTipsWidget({ x: 0, y: chartRows * 8, w: 12, h: 10 }),
+    askOrderWidget({ x: 0, y: chartRows * 8 + 10, w: 12, h: 17 }),
   ])
+}
+/** The Ask-order A/B card (Features page): progress toward the call point and the pre-registered read per
+ * group, then the counts per group, organic vs tagged (src/lib/askOrder.ts). */
+export function askOrderWidget(geom: { x: number; y: number; w: number; h: number }): Widget {
+  return w({
+    id: 'fw-ask-order',
+    title: 'Ask-order A/B',
+    type: 'table',
+    dataset: 'features',
+    view: ASK_ORDER_VIEW,
+    dimension: '',
+    metric: 'pageviews',
+    limit: 1,
+    excludeKnownTraffic: true,
+    ...geom,
+  })
 }
 /** The Coach tips table (Features page): per tip shown / dismissed / closed while showing and their
  * ratios, plus the "Show me around" total. */

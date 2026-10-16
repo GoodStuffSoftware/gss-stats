@@ -19,6 +19,7 @@ describe('SPLIT_REFUSED_PATH_PATTERNS beacon parity', () => {
       '/coach/dismissed/%',
       '/coach/closed-at/%',
       '/coach/shown/%',
+      '/ab/ask-order/%',
     ])
   })
 })
@@ -45,6 +46,10 @@ describe('isSplitRefusedPath beacon parity (matcher)', () => {
       '/COACH/Closed-At/hint',
       '/coach/shown/place',
       '/COACH/Shown/hint',
+      '/ab/ask-order/signin-first/assigned',
+      '/ab/ask-order/install-first/shown/install',
+      '/ab/ask-order/signin-first/signin/signed-in',
+      '/AB/Ask-Order/x',
     ]) {
       expect(isSplitRefusedPath(p), p).toBe(true)
     }
@@ -59,6 +64,9 @@ describe('isSplitRefusedPath beacon parity (matcher)', () => {
       '/coach/shown',
       '/coach/dismissed',
       '/coach/closed-at',
+      '/ab/ask-order',
+      '/ab/ask-orders/x',
+      '/ab',
       '/tour/exit-atx',
       '/returns',
       '/return',

@@ -10,8 +10,12 @@ import { etDateSql } from './etTime'
 import { FEATURES, flatSteps, type FeatureDef, type StepMatch } from './featureHealth'
 import { NUL_PATH_SQL, sqlInt, sqlLit } from './popupEvents'
 
+/** A row's campaign tag (`campaign`, the row's uc): tagged = set and not empty. Literals, never binds. */
+const TAG_SQL = { tagged: "(campaign IS NOT NULL AND campaign <> '')", organic: "(campaign IS NULL OR campaign = '')" } as const
+
 /** The SQL twin of stepMatches (featureHealth.ts): equals one exact path, or starts with a prefix
- * (substr, case-exact, no LIKE wildcards), and is not an excepted path. */
+ * (substr, case-exact, no LIKE wildcards), and is not an excepted path; with a `tag`, the row's
+ * campaign is also set (tagged) or empty (organic). */
 export function stepMatchSql(match: StepMatch): string {
   const terms = [
     ...(match.exact ?? []).map((p) => `path = ${sqlLit(p)}`),
@@ -19,7 +23,8 @@ export function stepMatchSql(match: StepMatch): string {
   ]
   if (!terms.length) return '0'
   const except = match.except?.length ? ` AND path NOT IN (${match.except.map(sqlLit).join(', ')})` : ''
-  return `((${terms.join(' OR ')})${except})`
+  const tag = match.tag ? ` AND ${TAG_SQL[match.tag]}` : ''
+  return `((${terms.join(' OR ')})${except}${tag})`
 }
 
 /** A feature matches a row when any of its steps does. */
@@ -37,6 +42,14 @@ export function anyStepWhere(features: readonly FeatureDef[] = FEATURES): string
 export function dailyStepsSql(whereTerms: readonly string[], features: readonly FeatureDef[] = FEATURES): string {
   const cols = flatSteps(features).map((f) => `SUM(CASE WHEN ${stepMatchSql(f.step.match)} THEN 1 ELSE 0 END) AS s${f.index}`)
   return `SELECT ${etDateSql()} AS d, ${cols.join(', ')} FROM hits WHERE ${whereTerms.join(' AND ')} GROUP BY d ORDER BY d`
+}
+
+/** One count per step over every row the where terms leave (columns s0..sN in flatSteps order): a single
+ * total row, never grouped by anything, so a refused path is read as one total (the Ask-order card's
+ * all-time progress toward its call point). */
+export function totalStepsSql(whereTerms: readonly string[], features: readonly FeatureDef[] = FEATURES): string {
+  const cols = flatSteps(features).map((f) => `SUM(CASE WHEN ${stepMatchSql(f.step.match)} THEN 1 ELSE 0 END) AS s${f.index}`)
+  return `SELECT ${cols.join(', ')} FROM hits WHERE ${whereTerms.join(' AND ')}`
 }
 
 /** The count of rows before the cutoff, one total per feature (columns f0..fN in config order): the

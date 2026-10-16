@@ -27,6 +27,15 @@
 // are read only as per-ET-day totals. Its second statement is the count of such rows ever (not
 // MIN or MAX of ts), which tells "the game version that sends it hasn't shipped" from a quiet range.
 //
+// The same endpoint answers the Ask-order A/B card (view 'ask-order', src/lib/askOrder.ts): FEATURES is replaced by a
+// feature per group whose steps are the group's /ab/ask-order/<group>/... paths split by the row's campaign tag
+// (organic vs tagged; step tag in featureHealthSql.ts). Splitting by tag and by path is no hour, place or device split,
+// and the grouping is still the ET day alone, so the refused /ab/ask-order/% family is read only as per-ET-day totals.
+// Two more answers only this view gives: `everSeen` (any row ever, as for the Coach tips), and `allTime`, one count per
+// step over every day so far (a third statement, a single total row, never grouped), because the 150-asks progress and the
+// pre-registered read are cumulative, not the selected range. It honors the known-traffic and own-visit exclusions but not
+// the site selection (the A/B is read over all traffic).
+//
 // POST { since, until, sites?, excludeOwnVisits?, ownBrowser?, ownOS?, excludeKnownTraffic?, view? }
 
 import { buildCacheKeyUrl, cachedJson, type CacheLike } from '../_lib/edgeCache'
@@ -38,7 +47,8 @@ import { excludeOwnClause } from '../../src/lib/ownExclusion'
 import { addDays, etDateFast, etWallTimeMs } from '../../src/lib/etTime'
 import { FEATURES, assembleHealth, flatSteps, healthDays, type DayCounts, type FeatureDef } from '../../src/lib/featureHealth'
 import { COACH_TIPS_VIEW, COACH_TIP_FEATURES } from '../../src/lib/coachTips'
-import { anyStepWhere, beforeCutoffSql, dailyStepsSql } from '../../src/lib/featureHealthSql'
+import { ASK_ORDER_FEATURES, ASK_ORDER_VIEW } from '../../src/lib/askOrder'
+import { anyStepWhere, beforeCutoffSql, dailyStepsSql, totalStepsSql } from '../../src/lib/featureHealthSql'
 
 interface Env {
   gss_geo: D1Database
@@ -84,7 +94,11 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const excludeOwn = body.excludeOwnVisits === true
   const excludeKnownTraffic = body.excludeKnownTraffic === true
   const coachTips = body.view === COACH_TIPS_VIEW
-  const features: readonly FeatureDef[] = coachTips ? COACH_TIP_FEATURES : FEATURES
+  const askOrder = body.view === ASK_ORDER_VIEW
+  const view = coachTips ? COACH_TIPS_VIEW : askOrder ? ASK_ORDER_VIEW : ''
+  const features: readonly FeatureDef[] = coachTips ? COACH_TIP_FEATURES : askOrder ? ASK_ORDER_FEATURES : FEATURES
+  // The two card views ask "any row ever" (before tomorrow's ET midnight); the health table asks "any row before the new-days cutoff".
+  const everView = coachTips || askOrder
 
   // The window, in whole ET days (R-1d): the selected range snapped to ET midnights, widened to also
   // cover the baseline days and today, both ET midnights by construction.
@@ -112,15 +126,15 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     excludeKnownTraffic,
     today: hd.today,
     window: REFUSED_WINDOW_KEY,
-    view: coachTips ? COACH_TIPS_VIEW : '',
+    view,
   })
   const cache = (caches as unknown as { default: CacheLike }).default
   return cachedJson(cache, cacheKeyUrl, CACHE_TTL_SECONDS, ctx.waitUntil.bind(ctx), compute)
 
   async function compute(): Promise<Response> {
     // The shared row filters, after the window and the path term, in the order the binds follow.
-    const filterTerms = (w: string[], b: unknown[]) => {
-      if (sites.length) {
+    const filterTerms = (w: string[], b: unknown[], withSites = true) => {
+      if (withSites && sites.length) {
         w.push(`site IN (${sites.map(() => '?').join(', ')})`)
         b.push(...sites)
       }
@@ -135,21 +149,33 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     const tooLarge1 = statementTooLarge(daily, b1.length)
     if (tooLarge1) return tooLarge1
 
-    // The Coach tips card asks "any row ever" (before tomorrow's ET midnight); the health table asks "any row before the new-days cutoff".
     const w2: string[] = ['ts < ?', anyStepWhere(features)]
-    const b2: unknown[] = [coachTips ? hd.tomorrowMs : hd.newCutoffMs]
+    const b2: unknown[] = [everView ? hd.tomorrowMs : hd.newCutoffMs]
     // "Has any coach row ever arrived" is about the beacons, not the viewer's selection: a narrowed site or
     // exclusion filter must not turn a shipped feature back into "hasn't shipped".
-    if (!coachTips) filterTerms(w2, b2)
+    if (!everView) filterTerms(w2, b2)
     const before = beforeCutoffSql(w2, features)
     const tooLarge2 = statementTooLarge(before, b2.length)
     if (tooLarge2) return tooLarge2
 
+    // The Ask-order card only: one total per step over every day so far (cumulative progress and read), exclusions yes, site selection no.
+    let allTimeSql = ''
+    const b3: unknown[] = [hd.tomorrowMs]
+    if (askOrder) {
+      const w3: string[] = ['ts < ?', anyStepWhere(features)]
+      filterTerms(w3, b3, false)
+      allTimeSql = totalStepsSql(w3, features)
+      const tooLarge3 = statementTooLarge(allTimeSql, b3.length)
+      if (tooLarge3) return tooLarge3
+    }
+
     let dayRes: any
     let beforeRes: any
+    let allTimeRes: any
     try {
       dayRes = await ctx.env.gss_geo.prepare(daily).bind(...b1).all()
       beforeRes = await ctx.env.gss_geo.prepare(before).bind(...b2).all()
+      if (askOrder) allTimeRes = await ctx.env.gss_geo.prepare(allTimeSql).bind(...b3).all()
     } catch (e) {
       return json({ error: 'd1 query failed', detail: String(e) }, 500)
     }
@@ -163,9 +189,14 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     const beforeCounts = features.map((_, i) => Number(beforeRow[`f${i}`]) || 0)
 
     const model = assembleHealth({ features, rows, before: beforeCounts, nowMs, rangeFrom: rangeFrom || hd.today, rangeTo: rangeTo || hd.today })
+    // allTime: `<featureId>.<stepId>` -> count over every day so far (Ask-order only).
+    const allTimeRow = (allTimeRes?.results ?? [])[0] ?? {}
+    const allTime: Record<string, number> = {}
+    if (askOrder) for (const f of flatSteps(features)) allTime[`${f.feature.id}.${f.step.id}`] = Number(allTimeRow[`s${f.index}`]) || 0
     return json({
       ...model,
-      ...(coachTips ? { everSeen: beforeCounts.some((n) => n > 0) } : {}),
+      ...(everView ? { everSeen: beforeCounts.some((n) => n > 0) } : {}),
+      ...(askOrder ? { allTime } : {}),
       meta: { since, until, rangeFrom, rangeTo, sites: sites.length ? sites.join(',') : 'all', today: hd.today },
     })
   }

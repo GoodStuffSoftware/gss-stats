@@ -3,6 +3,7 @@ import type { AdsReadingsResponse } from './lib/adsStore'
 import type { RefreshResult } from './lib/adsRefresh'
 import type { FeatureHealthModel } from './lib/featureHealth'
 import { COACH_TIPS_VIEW } from './lib/coachTips'
+import { ASK_ORDER_VIEW } from './lib/askOrder'
 import { resolveSelection } from './sitesStore'
 import { nativeField } from './lib/drill'
 import { queryDims } from './lib/rings'
@@ -177,8 +178,10 @@ async function withSessionCheck<T>(run: () => Promise<T>): Promise<T> {
 /** The Feature health response: the model plus the request echo (functions/api/features.ts). */
 export type FeatureHealthResponse = FeatureHealthModel & {
   meta: { since: string; until: string; rangeFrom: string; rangeTo: string; sites: string; today: string }
-  /** Only on the Coach tips view: whether any coach row exists at all (false: the game version that sends it hasn't shipped). */
+  /** Only on the Coach tips and Ask-order views: whether any such row exists at all (false: the game version that sends it hasn't shipped). */
   everSeen?: boolean
+  /** Only on the Ask-order view: every step's count over all days so far, keyed `<featureId>.<stepId>`. */
+  allTime?: Record<string, number>
 }
 
 const FEATURE_HEALTH_SHARE_MS = 30_000
@@ -197,7 +200,7 @@ export function fetchFeatureHealth(widget: Widget, filters: GlobalFilters, fresh
     ownBrowser: filters.ownBrowser,
     ownOS: filters.ownOS,
     excludeKnownTraffic: widget.excludeKnownTraffic === true,
-    ...(widget.view === COACH_TIPS_VIEW ? { view: COACH_TIPS_VIEW } : {}),
+    ...(widget.view === COACH_TIPS_VIEW || widget.view === ASK_ORDER_VIEW ? { view: widget.view } : {}),
   })
   const hit = featureHealthInflight.get(body)
   if (!fresh && hit && Date.now() - hit.at < FEATURE_HEALTH_SHARE_MS) return hit.promise
