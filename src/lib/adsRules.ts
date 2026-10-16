@@ -205,6 +205,13 @@ export interface AdsReadPlan {
    * used to notice a scheduled read that never ran. */
   morningReadFirstEt: string
   morningReadLastEt: string
+  /** Flight 3 only: which arm this plan reads. Set = the morning read prints the flight 3 rules
+   * block (src/lib/flight3Rules.ts) and the cap decision uses the flight 3 table (decideFlight3)
+   * instead of flight 2's decideAt100. Unset (flight 2, the retest) leaves every output as it was. */
+  flight3Arm?: StagedArm
+  /** Flight 3 only: kill rule 2 (CTR) arms from this flight day (day 1 = flightStart) instead of
+   * at `killRulesFrom` dollars. Rules 1 and 3 stay armed at `killRulesFrom`. Unset = spend-armed. */
+  ctrFromFlightDay?: number
 }
 
 // Budget and cap come from lib/campaigns.ts (the one campaign definition); only the read
@@ -265,6 +272,8 @@ export const STAGED_FLIGHT_3_PLAN_SETTINGS: Record<StagedArm, Omit<ReadPlanSetti
     reportLabel: 'F3 apps',
     auditSlug: 'f3-apps',
     adGroupPlacementCounts: RETEST_AD_GROUP_PLACEMENT_COUNTS,
+    flight3Arm: 'apps',
+    ctrFromFlightDay: 3,
   },
   search: {
     channel: 'search',
@@ -274,6 +283,8 @@ export const STAGED_FLIGHT_3_PLAN_SETTINGS: Record<StagedArm, Omit<ReadPlanSetti
     allDevices: true,
     reportLabel: 'F3 search',
     auditSlug: 'f3-search',
+    flight3Arm: 'search',
+    ctrFromFlightDay: 3,
   },
 }
 /** A staged flight 3 arm's read plan, once its campaign is in CAMPAIGNS (as `stagedCampaign(...)`):
@@ -1484,6 +1495,9 @@ export interface KillRuleInput {
    * failed. `siteTutorialAsks` = site-wide FIRST_SESSION_ASK_PATH rows (siteTutorialAsksShown);
    * > 0 means first-session asks are observable, so rule 3 reads tagged asks only. */
   beacon: { asks: number; taggedArrivals: number; siteSigninShown?: number | null; siteTutorialAsks?: number | null } | null
+  /** The read's flight day (day 1 = flightStart's ET date). Only used by a plan with ctrFromFlightDay:
+   * kill rule 2 is then armed from that day instead of at killRulesFrom dollars. */
+  flightDay?: number | null
 }
 export interface KillRuleEvaluation {
   rules: RuleResult[]
@@ -1545,6 +1559,10 @@ const usd = (x: number) => `$${x.toFixed(2)}`
 export function evaluateKillRules(i: KillRuleInput): KillRuleEvaluation {
   const { plan } = i
   const armed = i.cumulativeSpend >= plan.killRulesFrom
+  // Kill rule 2 alone may arm by flight day (flight 3: the CTR floor reads from day 3, since the
+  // spend threshold comes late on a small budget); rules 1 and 3 stay armed at killRulesFrom.
+  const ctrByDay = plan.ctrFromFlightDay != null
+  const ctrArmed = ctrByDay ? i.flightDay != null && i.flightDay >= plan.ctrFromFlightDay! : armed
   const rules: RuleResult[] = []
 
   // 1. Placement leak — share of spend NOT on the 17 approved placements. Un-itemized spend
@@ -1579,7 +1597,7 @@ export function evaluateKillRules(i: KillRuleInput): KillRuleEvaluation {
   // 2. CTR under the floor.
   {
     const base = { id: 'ctr' as const, label: `CTR under ${pctStr(plan.ctrFloor)}`, limit: plan.ctrFloor }
-    if (!armed) rules.push({ ...base, status: 'not-armed', value: null, detail: `armed at ${usd(plan.killRulesFrom)}` })
+    if (!ctrArmed) rules.push({ ...base, status: 'not-armed', value: null, detail: ctrByDay ? `armed from flight day ${plan.ctrFromFlightDay}` : `armed at ${usd(plan.killRulesFrom)}` })
     else if (!i.delivery || i.delivery.impressions < MIN_COHORT) rules.push({ ...base, status: 'no-data', value: null, detail: 'no impressions returned' })
     else {
       const ctr = i.delivery.clicks / i.delivery.impressions
@@ -1639,7 +1657,10 @@ export function evaluateKillRules(i: KillRuleInput): KillRuleEvaluation {
 }
 
 // ── Decision table at the $100 read (spec section 13) ───────────────────────────────────
-export type DecisionRow = 'two-plus' | 'one' | 'zero-declined' | 'zero-rarely-shown' | 'zero-accepted-not-completed'
+export type DecisionRow = 'two-plus' | 'one' | 'zero-declined' | 'zero-rarely-shown' | 'zero-accepted-not-completed' | Flight3DecisionRow
+/** The flight 3 verdict rows (decideFlight3, src/lib/flight3Rules.ts), used instead of flight 2's
+ * table for a plan with flight3Arm. */
+export type Flight3DecisionRow = 'f3-go' | 'f3-iterate' | 'f3-stop' | 'f3-inconclusive'
 export interface DecisionInput {
   /** Campaign sign-ups: an UPPER bound (signUpsAtMost) unless `exact` (campaignSignUps). */
   signUpsAtMost: number

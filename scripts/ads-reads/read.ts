@@ -95,6 +95,7 @@ import { splitPlacements, type AdDayRow, type CampaignStatus, type DeviceRow, ty
 import { syncAdsData, type AdsMetricsSource, type CampaignSyncResult, type SyncResult } from '../../src/lib/adsSync'
 import type { SyncSource } from '../../src/lib/adsStore'
 import { buildTagSplit, isMultiTag, type TagSplit } from '../../src/lib/tagSplit'
+import { buildFlight3Rules, costPerCompleteRow, decideFlight3, F3_VERDICT_FROM_DAY, flight3VerdictWord, flightDayOf, killRuleReadout, type Flight3Block, type RuleReadout } from '../../src/lib/flight3Rules'
 import type { BeaconSource, PreflightCounts } from './beacon'
 import type { FirebaseCounts } from './firebase'
 import { HOUSEHOLD_NOTE, RETENTION_NOTE, type PlayReportsSection } from './play'
@@ -211,6 +212,8 @@ export interface FullRead {
   failedDetails: { name: string; reason: string }[]
   placements: { campaignCost: number; approvedCost: number; itemizedCost: number; outsideShare: number | null; offList: { name: string; cost: number }[]; stored: boolean } | null
   kill: KillRuleEvaluation
+  /** Flight 3 plans only: kill rules 1-4 in the numbered readout shape (the key is absent for flight 2 and the retest). */
+  f3Rules?: RuleReadout[]
   /** signUpsAtMost is an UPPER bound ("at most N campaign sign-ups"), with both inputs. */
   decision:
     | (DecisionResult & {
@@ -532,6 +535,7 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
   const kill = evaluateKillRules({
     plan,
     cumulativeSpend,
+    flightDay: flightDayOf(campaign.flightStart!, etDateFromMs(Date.parse(i.readAt))),
     campaignState: i.campaignState,
     delivery: i.stored && i.spendThroughEt ? { impressions: totals.impressions, clicks: totals.clicks } : null,
     placements: split ? { campaignCost: cumulativeSpend, approvedCost: split.approvedCost, itemizedCost: split.itemizedCost } : null,
@@ -551,7 +555,10 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
   if (tagged && (i.forceDecision || cumulativeSpend >= plan.hardCap)) {
     const su = campaignSignUps(tagged.summary, windowAccounts, authLiveAt)
     decision = {
-      ...decideAt100({ signUpsAtMost: su.count, asks: tagged.summary.asks.total, accepts: tagged.summary.accepts.total, exact: su.exact, channel: plan.channel }),
+      // A flight 3 arm is read against flight 3's table (new accounts, 20-ask validity floor), not flight 2's.
+      ...(plan.flight3Arm
+        ? decideFlight3(su.count, tagged.summary.flight3Asks)
+        : decideAt100({ signUpsAtMost: su.count, asks: tagged.summary.asks.total, accepts: tagged.summary.accepts.total, exact: su.exact, channel: plan.channel })),
       signUpsAtMost: su.count,
       signUpsExact: su.exact,
       signUpsBounded: su.bounded,
@@ -589,7 +596,7 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
   // makes it incomplete (review L6): the sign-up bound would silently loosen without it.
   const complete = placementRows.ok && i.tagged.ok && siteRows.ok && returnRaw.ok && returnSites.ok && i.stored != null && !(decision && fbErr)
   return {
-    read: { thresholds: i.thresholds, spendThroughEt: i.spendThroughEt, cumulativeSpend, complete, errors, failedSources, failedDetails, placements: placementView, kill, decision, segments, tagged, site, returns, play, firebase: fb && fb.ok ? fb.value : null, tagSplit },
+    read: { thresholds: i.thresholds, spendThroughEt: i.spendThroughEt, cumulativeSpend, complete, errors, failedSources, failedDetails, placements: placementView, kill, ...(plan.flight3Arm ? { f3Rules: kill.rules.map((r) => killRuleReadout(r, { taggedArrivals: tagged?.summary.taggedArrivals })) } : {}), decision, segments, tagged, site, returns, play, firebase: fb && fb.ok ? fb.value : null, tagSplit },
     siteRows,
     returns: returns ? { ok: true, value: returns } : { ok: false, error: returnRaw.ok ? 'returns unavailable' : returnRaw.error },
   }
@@ -868,6 +875,8 @@ export interface MorningResult {
   preflightGate: { ok: true; counts: PreflightCounts } | { ok: false; error: string } | null
   thresholdRead: FullRead | null
   hardCapDaily: RuleResult | null
+  /** Flight 3 plans only (absent for flight 2 and the retest): the numbered rules 1-9 block, printed on every morning read. Proposals only. */
+  flight3?: Flight3Block
   releaseHealth: HealthSection
   diagnostics: DiagnosticsSection
   play: PlayReturnStatus | null
@@ -895,6 +904,16 @@ export function repeatedToday(r: { dedup?: DedupSection }, kind: ReadingRecord['
   return (r.dedup?.skipped ?? []).some((s) => s.kind === kind)
 }
 
+/** "row <table row>" for flight 2's decision table, "F3 verdict GO/ITERATE/STOP/INCONCLUSIVE" for flight 3's. */
+export function decisionRowText(row: string): string {
+  const f3 = flight3VerdictWord(row)
+  return f3 ? `F3 verdict ${f3}` : `row ${row}`
+}
+/** "rule 5 tracking check, rule 6 cost per complete row": the flight 3 rules behind a pause proposal (names only). */
+export function flight3TrippedText(b: Flight3Block): string {
+  return b.tripped.map((n) => `rule ${n} ${b.readouts[n - 1].name}`).join(', ')
+}
+
 /** The push text for a morning or backstop run, or null for a quiet run. Built only from
  * counts, rule ids and short read names — never an error message, so nothing secret-shaped
  * can reach a notification. A threshold read, a cap trip or an alert already recorded (and so
@@ -917,7 +936,8 @@ export function morningPushText(r: MorningResult): string | null {
     else if (!t.complete) bits.push('read incomplete, will retry')
     else bits.push(onWatch ? `no kill rule tripped, ${onWatch}, continue` : 'no kill rule tripped, continue')
     if (onWatch && (t.kill.tripped.length || !t.complete)) bits.push(onWatch)
-    if (t.decision) bits.push(`${signUpsPhrase(t.decision)}, row ${t.decision.row}`)
+    if (t.decision) bits.push(`${signUpsPhrase(t.decision)}, ${decisionRowText(t.decision.row)}`)
+    if (r.flight3?.proposal === 'PROPOSE PAUSE' && r.flight3.tripped.some((n) => n >= 5)) bits.push(`F3 rules PROPOSE PAUSE (${flight3TrippedText(r.flight3)})`)
     if (t.segments) bits.push(`split at the upsell fix: pre-fix ${t.segments.pre.asks} asks/${t.segments.pre.signUps.count} sign-ups, post-fix ${t.segments.post.asks} asks/${t.segments.post.signUps.count} sign-ups`)
     const share = t.placements?.outsideShare
     const borderline = isPlacementBorderline(share) ? ` Placement share ${((share ?? 0) * 100).toFixed(1)}% is ${PLACEMENT_BORDERLINE_NOTE}.` : ''
@@ -925,6 +945,9 @@ export function morningPushText(r: MorningResult): string | null {
   }
   if (r.hardCapDaily?.status === 'trip' && !repeatedToday(r, 'daily')) {
     return `${label}: ${money(r.spend.cumulative.cost)} spent, at or over the ${money(r.spend.hardCap)} cap, campaign still ${r.status?.status ?? 'ENABLED'}. PROPOSE PAUSE.${failed}${missed}`
+  }
+  if (r.flight3?.proposal === 'PROPOSE PAUSE' && !repeatedToday(r, 'daily')) {
+    return `${label}: F3 rules PROPOSE PAUSE (${flight3TrippedText(r.flight3)}); ${money(r.spend.cumulative.cost)} spent, campaign ${r.status?.status ?? 'ENABLED'}, flight day ${r.flight3.flightDay}.${failed}${missed}`
   }
   const alerts = r.mode === 'health-only' && !repeatedToday(r, 'health') ? (r.releaseHealth.results ?? []).filter((h) => h.status === 'alert') : []
   if (alerts.length) {
@@ -963,6 +986,109 @@ export function morningFailures(i: {
   if (!i.dryRun && i.storeErrors.length) add('store write', i.storeErrors[0])
   for (const f of i.thresholdReadFailures ?? []) if (!found.some((x) => x.name === f.name)) found.push(f)
   return { names: found.map((f) => f.name), details: found.map((f) => `${f.name} (${f.reason})`) }
+}
+
+/** The flight 3 rules block of a morning read (rules 1-9, proposals only). Rules 1-3 come from the
+ * threshold read when one ran today, else from a daily evaluation of the same function over the
+ * same figures (placements and site-wide asks are only pulled once spend has armed them); rule 4
+ * is the daily hard-cap read. A failure in the extra daily pulls leaves that rule NO DATA and is
+ * never added to the read's errors (it cannot fail or push the read). */
+async function flight3BlockRead(
+  deps: ReadDeps,
+  i: {
+    plan: AdsReadPlan
+    campaign: CampaignFlight
+    todayEt: string
+    spend: SpendSection
+    campaignSync: CampaignSyncResult | null
+    taggedRows: Attempt<TaggedRow[]>
+    tagged: MorningResult['tagged']
+    firstSession: MorningResult['firstSession']
+    thresholdRead: FullRead | null
+    hardCapDaily: RuleResult | null
+    campaignState: { status: string | null; servingStatus: string | null } | null
+  },
+): Promise<Flight3Block> {
+  const { plan, campaign, spend } = i
+  const arm = plan.flight3Arm!
+  const flightDay = flightDayOf(campaign.flightStart!, i.todayEt)
+  const cumulative = spend.cumulative.cost
+  const windowEnd = Math.min(deps.nowMs, flightEndExclusiveMs(campaign))
+  let kill: RuleResult[]
+  if (i.thresholdRead) kill = i.thresholdRead.kill.rules
+  else {
+    const spendArmed = cumulative >= plan.killRulesFrom
+    let placements: { campaignCost: number; approvedCost: number; itemizedCost: number } | null = null
+    if (spendArmed && plan.channel !== 'search') {
+      const rows = await placementRowsFor(deps, campaign, i.campaignSync, spend.throughEt)
+      if (rows.ok) {
+        const split = splitPlacements(rows.value, spend.throughEt)
+        placements = { campaignCost: cumulative, approvedCost: split.approvedCost, itemizedCost: split.itemizedCost }
+      }
+    }
+    let siteSigninShownN: number | null = null
+    let siteTutorialAsksN: number | null = null
+    if (spendArmed && deps.beacon) {
+      const beacon = deps.beacon
+      const sr = await attempt('beacon site events', () => beacon.siteEvents(WEB_GO_LIVE_UTC_MS))
+      if (sr.ok) {
+        siteSigninShownN = siteSigninShown(sr.value, attributionStartMs(campaign), windowEnd)
+        siteTutorialAsksN = siteTutorialAsksShown(sr.value, attributionStartMs(campaign), windowEnd)
+      }
+    }
+    const c = i.tagged.cumulative
+    kill = evaluateKillRules({
+      plan,
+      cumulativeSpend: cumulative,
+      flightDay,
+      campaignState: i.campaignState,
+      delivery: spend.ok && spend.throughEt ? { impressions: spend.cumulative.impressions, clicks: spend.cumulative.clicks } : null,
+      placements,
+      beacon: c ? { asks: c.asks, taggedArrivals: c.taggedArrivals, siteSigninShown: siteSigninShownN, siteTutorialAsks: siteTutorialAsksN } : null,
+    }).rules
+  }
+  // Rule 4 is the state-aware daily read when there is one.
+  const killRules = [...kill.filter((r) => r.id !== 'hard-cap'), ...(i.hardCapDaily ? [i.hardCapDaily] : kill.filter((r) => r.id === 'hard-cap'))]
+
+  // Complete rows in the same closed days the spend covers; yesterday's cost per row beside it.
+  const closedCompletes = i.taggedRows.ok
+    ? spend.throughEt
+      ? summarizeTaggedRows(i.taggedRows.value, { toMs: etMidnightUtcMs(addEtDays(spend.throughEt, 1)) }).funnel.completed
+      : 0
+    : null
+  const yDate = addEtDays(i.todayEt, -1)
+  const yesterdayCost = spend.ok && spend.yesterday?.date === yDate && i.tagged.yesterday ? costPerCompleteRow(spend.yesterday.cost, i.tagged.yesterday.completeRows) : null
+
+  const steps = i.firstSession?.funnel.steps
+  let signUps: { count: number; note: string } | null = null
+  if (i.taggedRows.ok) {
+    const summary = summarizeTaggedRows(i.taggedRows.value)
+    let windowNew: number | null = null
+    if (flightDay >= F3_VERDICT_FROM_DAY && deps.firebase) {
+      const fb = deps.firebase
+      const r = await attempt('firebase counts', () => fb.counts(attributionStartMs(campaign), windowEnd, null))
+      if (r.ok) windowNew = r.value.newAccountsInWindow
+    }
+    const authLiveAt = deps.boundaries?.authNewExistingLiveAtMs === undefined ? AUTH_NEW_EXISTING_LIVE_AT : deps.boundaries.authNewExistingLiveAtMs
+    const su = campaignSignUps(summary, windowNew, authLiveAt)
+    signUps = { count: su.count, note: `${su.exact ? 'exact' : 'upper bound'} from tagged /auth/success/<provider>/new rows${windowNew == null ? '; Firestore new accounts not read' : ', capped at Firestore new accounts'}` }
+  }
+  const c = i.tagged.cumulative
+  return buildFlight3Rules(
+    {
+      arm,
+      flightDay,
+      killRules,
+      servingState: servingStateOf(i.campaignState),
+      spendOk: spend.ok,
+      closedSpend: cumulative,
+      tagged: c ? { taggedArrivals: c.taggedArrivals, completeRows: c.completeRows, flight3Asks: c.flight3Asks, coachShownPlace: c.coachShownPlace } : null,
+      closedCompletes,
+      firstSession: steps ? { firstMove: steps.firstMove.tagged, arrivals: steps.arrivals.tagged } : null,
+      signUps,
+    },
+    { ctrFloor: plan.ctrFloor, costPerRowYesterday: yesterdayCost },
+  )
 }
 
 export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Promise<MorningResult> {
@@ -1096,6 +1222,11 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
     }
   }
   const campaignServing = status.ok ? servingStateOf(status.value) : 'unknown'
+  const flight3: Flight3Block | undefined =
+    plan.flight3Arm && !opts.healthOnly
+      ? await flight3BlockRead(deps, { plan, campaign, todayEt, spend, campaignSync, taggedRows, tagged, firstSession, thresholdRead, hardCapDaily, campaignState: status.ok ? status.value : null })
+      : undefined
+  const flight3Pause = flight3?.proposal === 'PROPOSE PAUSE'
 
   let play = thresholdRead?.play ?? null
   if (!play) {
@@ -1135,7 +1266,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
       thresholds: [],
       complete: spend.ok && taggedRows.ok,
       rules: hardCapDaily ? [hardCapDaily] : null,
-      proposal: hardCapDaily?.status === 'trip' ? 'PROPOSE PAUSE' : null,
+      proposal: hardCapDaily?.status === 'trip' || flight3Pause ? 'PROPOSE PAUSE' : null,
       decision: null,
       counts: {
         yesterdaySpend: spend.yesterday?.cost ?? null,
@@ -1153,6 +1284,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
       },
       notes: [
         status.ok ? `campaign ${status.value.status}/${status.value.servingStatus}` : 'campaign status unreadable',
+        ...(flight3Pause ? [`F3 rules PROPOSE PAUSE (${flight3TrippedText(flight3!)})`] : []),
         ...(play ? [play.line] : []),
         ...(missedReads.length ? [`previous scheduled read missing: ${missedReads.join(', ')}`] : []),
       ],
@@ -1181,7 +1313,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
     })
     if (!thresholdRead.complete) notes.push('The threshold read was incomplete, so it does not consume the threshold: the next run retries it.')
   }
-  if (hardCapDaily && hardCapDaily.status === 'clear' && records[0]?.kind === 'daily' && !canProposePause(campaignServing)) {
+  if ((hardCapDaily?.status === 'clear' || (flight3 && flight3.tripped.length && flight3.proposal === null)) && records[0]?.kind === 'daily' && !canProposePause(campaignServing)) {
     records[0].notes.unshift(noPauseNote(campaignServing, status.ok ? status.value : null))
   }
   if (opts.healthOnly && health.evaluated) {
@@ -1244,6 +1376,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
     preflightGate,
     thresholdRead,
     hardCapDaily,
+    ...(flight3 ? { flight3 } : {}),
     releaseHealth: health,
     diagnostics,
     play,
@@ -1274,9 +1407,12 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
   const newCapTrip = hardCapDaily?.status === 'trip' && !repeatedToday(result, 'daily')
   const killTrip = (newThreshold && thresholdRead?.kill.proposal === 'PROPOSE PAUSE') || newCapTrip
   const healthAlert = opts.healthOnly && health.alerts > 0 && !repeatedToday(result, 'health')
+  // A flight 3 rules proposal pushes once per ET day per arm: the daily record is stored once a day, and a rerun that repeats it is not pushed again.
+  const newF3Trip = flight3Pause && !repeatedToday(result, 'daily')
   const reasons: string[] = []
   if (newThreshold) reasons.push(`threshold read at $${Math.max(...thresholdRead!.thresholds)}`)
   if (killTrip) reasons.push(newThreshold ? 'kill-rule trip' : 'kill-rule trip (hard cap, campaign still enabled)')
+  if (newF3Trip) reasons.push(`F3 rules proposal (${flight3TrippedText(flight3!)})`)
   if (healthAlert) reasons.push(`release-health alert (${health.alerts})`)
   if (result.failures.length) reasons.push(`failed read: ${result.failures.join(', ')}`)
   if (reasons.length) {
@@ -1566,7 +1702,7 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
     push: true,
     busCopy: true,
     reason: `post-flight ${opts.stage} read (a scheduled spec read)${trip ? ' with spend after the flight' : ''}${base.failures.length ? `; failed read: ${base.failures.join(', ')}` : ''}`,
-    text: `${plan.reportLabel} ${opts.stage} read: ${money(spend.cumulative.cost)} total, ${read.tagged?.summary.taggedArrivals ?? '?'} tagged arrivals, ${read.decision ? `${signUpsPhrase(read.decision)}, row ${read.decision.row}` : 'no decision'}${read.segments ? '; split at the upsell fix (see report)' : ''}${trip ? `; PROPOSE PAUSE (${base.postFlightSpend?.status === 'trip' ? `spend after ${campaign.flightEnd}` : 'at the cap'})` : ''}.${failed}`,
+    text: `${plan.reportLabel} ${opts.stage} read: ${money(spend.cumulative.cost)} total, ${read.tagged?.summary.taggedArrivals ?? '?'} tagged arrivals, ${read.decision ? `${signUpsPhrase(read.decision)}, ${decisionRowText(read.decision.row)}` : 'no decision'}${read.segments ? '; split at the upsell fix (see report)' : ''}${trip ? `; PROPOSE PAUSE (${base.postFlightSpend?.status === 'trip' ? `spend after ${campaign.flightEnd}` : 'at the cap'})` : ''}.${failed}`,
   }
   base.notes.push(INSTALL_OUTCOME_GAP_NOTE)
   return base
