@@ -59,7 +59,7 @@ describe('siteWindowClause (shared WHERE-builder for KPI/timeline/release-panel 
   it('includes the site + ts-range predicates, all 4 exclusion rules, and the pre-fix install-gap drop', () => {
     const { sql, binds } = siteWindowClause(['bestsudoku-web', 'bestsudoku'], 1000, 2000)
     expect(sql).toBe(
-      `site IN (?, ?) AND ts >= ? AND ts < ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND (COALESCE(campaign, '') <> 'manual_check' AND path NOT LIKE '/return/manual_check/%') AND NOT (path IN (?, ?) AND ts < ?)`,
+      `site IN (?, ?) AND ts >= ? AND ts < ? AND NOT (medium = ? OR campaign LIKE ?) AND NOT (region = ? AND city = ? AND org = ? AND device = ? AND os = ? AND browser = ? AND screenw = ?) AND NOT (region = ? AND screenw IN (412, 444, 852)) AND (COALESCE(campaign, '') <> 'manual_check' AND COALESCE(path, '') NOT LIKE '/return/manual\\_check/%' ESCAPE '\\') AND NOT (path IN (?, ?) AND ts < ?)`,
     )
     expect(binds).toEqual([
       'bestsudoku-web',

@@ -192,7 +192,7 @@ describe('applyExclusions (single-row predicates, never a cross-row join)', () =
     expect(w.join(' AND ')).toContain('medium = ?')
     expect(w.join(' AND ')).toContain('region = ? AND city = ? AND org = ?')
     expect(w.join(' AND ')).toContain("region = ? AND screenw IN (412, 444, 852)")
-    expect(w.join(' AND ')).toContain("COALESCE(campaign, '') <> 'manual_check' AND path NOT LIKE '/return/manual_check/%'")
+    expect(w.join(' AND ')).toContain("COALESCE(campaign, '') <> 'manual_check' AND COALESCE(path, '') NOT LIKE '/return/manual\\_check/%' ESCAPE '\\'")
     expect(b).toEqual([
       'lifecycle',
       'email_%',

@@ -193,6 +193,9 @@ link that lost its suffix still counts. All three tags are the one arm.
     STOP | INCONCLUSIVE`, not flight 2's `row N`.
   - **Counts only.** Every figure in the block is a tagged row count or dollars: no visitor id, no
     hour, place or device split.
+  - **Manual checks are excluded.** Rows with `utm_campaign=manual_check` or a `/return/manual_check/`
+    path (the app's own manual production checks) are part of the standing known-traffic exclusions
+    that every tagged read, arrival, first-session and rule count applies, so they never move a rule.
 
 - **Primary measure, per arm:** tagged `/auth/success/<provider>/new` rows, relayed as the report
   prints the sign-up line (a count capped at Firestore new accounts; never upgraded from a bound).

@@ -543,7 +543,7 @@ export const EXCLUSIONS: ExclusionRule[] = [
     // /return/manual_check/...): never visitors, so no tagged, site, flight or dashboard count takes them.
     label: 'manual production checks',
     clause(w, b) {
-      w.push(`(COALESCE(campaign, '') <> 'manual_check' AND path NOT LIKE '/return/manual_check/%')`)
+      w.push(`(COALESCE(campaign, '') <> 'manual_check' AND COALESCE(path, '') NOT LIKE '/return/manual\\_check/%' ESCAPE '\\')`)
     },
   },
 ]

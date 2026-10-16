@@ -1311,7 +1311,8 @@ once per ET day per arm; the cap decision push on a flight 3 row reads `F3 verdi
 STOP | INCONCLUSIVE`. Every figure is a tagged row count or dollars (counts only), and flight 2 and
 retest reads print exactly what they did before (pinned byte for byte by `f2ReportGolden.test.ts`).
 Rows the app's own manual production checks write (`utm_campaign=manual_check`, `/return/manual_check/`
-paths) sit in the standing exclusions, so no tagged, site, flight or dashboard count takes them.
+paths) sit in the standing exclusions (`EXCLUSIONS` in `campaigns.ts`), so the campaign reads, the
+morning read and every chart or fact that applies "hide known test and household traffic" leave them out.
 
 **Staging an arm, activated by its dates.** Flight 3's two arms hold everything in code: the
 Google Ads ids and tags (`STAGED_FLIGHT_3` in `campaigns.ts`) and the read-plan settings
