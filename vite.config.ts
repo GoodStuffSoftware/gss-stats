@@ -1,6 +1,10 @@
 import { configDefaults, defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath } from 'node:url'
+import os from 'node:os'
+
+// Keeps hooks and the editor responsive during parallel test runs; worker processes inherit it on Windows.
+try { os.setPriority(0, os.constants.priority.PRIORITY_BELOW_NORMAL) } catch {}
 
 // Build output goes to dist/ which Pages serves; functions/ is picked up by wrangler.
 // `defineConfig` comes from 'vitest/config' (re-exports vite's own) so component tests

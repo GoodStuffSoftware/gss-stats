@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.47.1] — 2026-10-16
+
+### Changed
+- **Test runs yield CPU.** The test suite runs at below-normal priority so other tools on the machine stay responsive.
+
 ## [0.47.0] — 2026-10-16
 
 ### Added
