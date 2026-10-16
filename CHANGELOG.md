@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.42.0] — 2026-10-16
+
 ### Added
 - **Coach tips card.** The bottom of the Features page counts each coach-strip tip (place, wheel, notes, hint, clash) shown, dismissed and closed while showing, with dismissed and closed per shown, for the latest complete day and the range, plus a separate total for "Show me around" taps.
 - **Page links.** `?page=<page id>` opens that page (for example `?page=bsk-features`), the address bar follows the page you are on, and the link survives sign-in.
