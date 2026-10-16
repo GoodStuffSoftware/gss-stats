@@ -1009,7 +1009,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
   }
 
   const beacon = deps.beacon
-  const taggedRows = beacon ? await attempt('beacon tagged', () => beacon.tagged(campaign, deps.boundaries?.upsellFixAtMs, deps.nowMs - HEALTH_ARRIVAL_AGE_MS)) : unavailable<TaggedRow[]>('beacon tagged', deps.beaconInitError)
+  const taggedRows = beacon ? await attempt('beacon tagged', () => beacon.tagged(campaign, deps.boundaries?.upsellFixAtMs, opts.releaseHealth === 'skip' ? null : deps.nowMs - HEALTH_ARRIVAL_AGE_MS)) : unavailable<TaggedRow[]>('beacon tagged', deps.beaconInitError)
   if (!taggedRows.ok) errors.push(taggedRows.error)
   const yStart = etMidnightUtcMs(yesterdayEt)
   const yEnd = etMidnightUtcMs(todayEt)
@@ -1443,7 +1443,7 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
   }
 
   const beacon = deps.beacon
-  const taggedRows = beacon ? await attempt('beacon tagged', () => beacon.tagged(campaign, deps.boundaries?.upsellFixAtMs, deps.nowMs - HEALTH_ARRIVAL_AGE_MS)) : unavailable<TaggedRow[]>('beacon tagged', deps.beaconInitError)
+  const taggedRows = beacon ? await attempt('beacon tagged', () => beacon.tagged(campaign, deps.boundaries?.upsellFixAtMs, null)) : unavailable<TaggedRow[]>('beacon tagged', deps.beaconInitError)
   const wantsCohort = COHORT_TIER_STAGES.includes(opts.stage)
   const { read } = await fullRead(deps, {
     plan,

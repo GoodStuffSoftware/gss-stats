@@ -15,8 +15,9 @@
 //     refuses it (lib/metrics/validate.ts).
 //   - /api/popups: its UTC-hour query leaves refused rows out (none is a pop-up event).
 //   - the ads routine (scripts/ads-reads/beacon.ts): the site-wide hourly event read and the
-//     per-country read leave refused rows out, and the Play line's /return/ read
-//     (returnSitesQuery) fetches only each row's ET date, never its ts.
+//     per-country read leave refused rows out, the Play line's /return/ read
+//     (returnSitesQuery) fetches only each row's ET date, never its ts, and the tagged read
+//     (taggedRowsQuery) groups refused rows by ET day with `hr` NULL (never by hour).
 // The UTC `date` dimension is refused alongside `hourEt` (R-1b review): a UTC day minus the ET
 // day of the same date is an evening band of hours. `dateEt` and `flightDay` stay allowed.
 // Every JS-side check of "is this a refused row" is isSplitRefusedPath, never its own prefix test.
@@ -30,8 +31,9 @@
 //     a /return/<uc>/d0 row is an arrival — so blanking either would change arrival counts and
 //     break their parity with the KPI fact. The free `visitor` geo dimension stays refused: no
 //     chart needs it as a split of its own.
-//   - Segment and day cuts finer than an ET day in lib/metrics/facts.ts, and the routine's hour
-//     buckets on campaign-attributed rows: see SEGMENT CUTS below.
+//   - Segment and day cuts finer than an ET day in lib/metrics/facts.ts, and the routine's
+//     tagged read, which groups refused rows by ET day (never by hour) and cuts a `new`-visitor
+//     refused row only by the release-health maturity flag `mat`: see SEGMENT CUTS below.
 //
 // SUB-DAY WINDOWS (R-1d). A since/until window that is not whole ET days would cut refused rows
 // at an hour the caller picks: three consecutive one-hour windows would read back per-hour counts.
@@ -76,6 +78,11 @@
 //     total, which "ET-day totals are fine" allows. Residual (worth knowing): polling any running
 //     total over a day shows when it grew. Only inward snapping plus holding the open day's
 //     refused totals would close that; Mike chose live data (2026-10-03).
+//   - The routine's tagged read (taggedRowsQuery) groups refused rows by ET day with `hr` NULL. Its
+//     one sub-day cut is `mat` (the row's hour starts at or before the release-health maturity
+//     instant), fetched only for `new`-visitor refused rows and only when the morning read will
+//     evaluate health (not for the post-flight read or `--release-health skip`). It is a running
+//     total up to a moving instant, the same residual as "today so far" above.
 //   - Flight boundaries (etFlightRangeMs, flightDaySqlCase) are ET days already.
 
 import { addDays, etDateFast, etWallTimeMs } from './etTime'

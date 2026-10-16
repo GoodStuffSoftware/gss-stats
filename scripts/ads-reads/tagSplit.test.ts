@@ -303,6 +303,23 @@ describe('taggedRowsQuery groups the refused paths by ET day, never by hour', ()
     // the instant flag exists only when asked for
     expect((await src.tagged(twoTag, null)).every((r) => r.matured === undefined)).toBe(true)
   })
+  it('the maturity flag is on non-refused rows and on new-visitor refused rows only; a returning refused row has none', async () => {
+    const db = openDb()
+    load(db)
+    const q = taggedRowsQuery(twoTag, null, NOW - 2 * H)
+    const raws = await select(db)(q.sql, q.binds)
+    const refusedReturning = raws.filter((r) => isSplitRefusedPath(String(r.path)) && r.visitor !== 'new')
+    const refusedNew = raws.filter((r) => isSplitRefusedPath(String(r.path)) && r.visitor === 'new')
+    expect(refusedReturning.length).toBeGreaterThan(0)
+    expect(refusedNew.length).toBeGreaterThan(0)
+    for (const r of refusedReturning) expect(r.mat, String(r.path)).toBeNull()
+    for (const r of [...refusedNew, ...raws.filter((x) => !isSplitRefusedPath(String(x.path)))]) expect([0, 1], String(r.path)).toContain(r.mat)
+    // mapped: a returning refused row carries no flag, so nothing sub-day of it reaches a rule
+    const got = await createBeaconSource(select(db) as never).tagged(twoTag, null, NOW - 2 * H)
+    for (const r of got) if (isSplitRefusedPath(r.path) && r.visitor !== 'new') expect(r.matured).toBeUndefined()
+    // the health pair's count is unchanged
+    expect(matured(got)).toBe(matured(hourRef()))
+  })
   it('with the upsell-fix flag too, the pre/post split is unchanged and the binds line up with the placeholders', async () => {
     const db = openDb()
     load(db)

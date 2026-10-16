@@ -927,3 +927,26 @@ describe('review I2 (2026-09-26): the reads report a sync run that was killed', 
     expect(formatMorningReport(quiet)).not.toMatch(/SYNC ALERT/)
   })
 })
+
+describe('the tagged read fetches the maturity flag only when the morning read will use it', () => {
+  const spy = (deps: ReturnType<typeof fixtureDeps>) => {
+    const seen: (number | null | undefined)[] = []
+    const real = deps.beacon!.tagged
+    return { seen, deps: { ...deps, beacon: { ...deps.beacon!, tagged: (c: never, u?: number | null, m?: number | null) => (seen.push(m), real(c, u, m)) } } as typeof deps }
+  }
+  it('the morning read with health on passes the maturity instant', async () => {
+    const s = spy(fixtureDeps(base(), true))
+    await runMorningRead(s.deps, opts)
+    expect(s.seen).toEqual([s.deps.nowMs - 2 * 3_600_000])
+  })
+  it('--release-health skip passes none', async () => {
+    const s = spy(fixtureDeps(base(), true))
+    await runMorningRead(s.deps, { ...opts, releaseHealth: 'skip' })
+    expect(s.seen).toEqual([null])
+  })
+  it('the post-flight read passes none', async () => {
+    const s = spy(fixtureDeps(base(), true))
+    await runPostflightRead(s.deps, { campaignId: '24279250691', stage: 'wrapup', force: true })
+    expect(s.seen).toEqual([null])
+  })
+})

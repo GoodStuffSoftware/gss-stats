@@ -791,7 +791,7 @@ part of the rule. Likewise the Best Sudoku coach strip (`/coach/shown/<tip>`, `/
 `coach`), kept out of page views; only `/coach/tour-opened` stays splittable, like `/tour/start` (`/coach/shown/…` is once per tip per device, so it is counts only like `/return`). The metric cards follow the same rule: in a country cell (`campaign-country`)
 these rows belong to no country, so they count only where no country is asked, and
 `campaign.completions` takes no `country` param at all. `/api/popups` and the ads-read
-routine's hourly site-event read and per-country read leave them out too. The guard keys on dimensions and drills;
+routine's hourly site-event read and per-country read leave them out too, and the routine's tagged read groups them by ET day (never by hour). The guard keys on dimensions and drills;
 a date range that is not whole ET days is handled by the whole-days rule below. One visible effect: the **Arrivals by ET hour of day** chart no longer counts an arrival
 whose first beacon was a return or completion row, so its total can sit slightly below the
 flight-day chart's. A chart that groups by the UTC `date` counts without these rows and carries the
@@ -815,8 +815,9 @@ its own first visit, so a row's new/returning bit stays on these rows; it is wha
 arrival an arrival (`arrival` dimension, the Arrivals tiles and charts), and the free-form
 `visitor` dimension stays refused. **Fixed-instant cuts:** a metric may cut these rows at a
 flight start, a release, a fix go-live or an ET day boundary (the metric registry's segment and
-day indices, the routine's hour buckets cut only at such instants), which is never an
-hour-of-day split. The routine's Play line names only the ET date of the first or last
+day indices, and the routine's tagged read, which groups these rows by ET day and cuts only
+`new`-visitor rows at the release-health maturity instant, a running total up to an instant like "today
+so far"), which is never an hour-of-day split. The routine's Play line names only the ET date of the first or last
 `/return/` row, never its time. See
 [`src/lib/splitGuard.ts`](src/lib/splitGuard.ts).
 

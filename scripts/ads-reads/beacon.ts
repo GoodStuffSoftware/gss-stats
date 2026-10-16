@@ -54,7 +54,9 @@ export function taggedRowsQuery(campaign: CampaignFlight, upsellFixAtMs: number 
     selBinds.push(upsellFixAtMs)
   }
   if (maturedBeforeMs != null) {
-    cols.push('(CAST(ts / 3600000 AS INTEGER) * 3600000 <= ?) AS mat')
+    // Only a `new`-visitor refused row carries the flag (the health pair counts new arrivals only); a
+    // returning-visitor refused row gets NULL, so it has no sub-day cut at all.
+    cols.push(`CASE WHEN ${refused} AND COALESCE(visitor, '') <> 'new' THEN NULL ELSE (CAST(ts / 3600000 AS INTEGER) * 3600000 <= ?) END AS mat`)
     groups.push('mat')
     selBinds.push(maturedBeforeMs)
   }
@@ -207,7 +209,7 @@ export function createBeaconSource(select: D1Select): BeaconSource {
           campaign: String(x.campaign ?? ''),
           count: n(x.c),
           ...(x.uf === undefined ? {} : { postUpsellFix: n(x.uf) === 1 }),
-          ...(x.mat === undefined ? {} : { matured: n(x.mat) === 1 }),
+          ...(x.mat == null ? {} : { matured: n(x.mat) === 1 }),
         }
       })
     },
