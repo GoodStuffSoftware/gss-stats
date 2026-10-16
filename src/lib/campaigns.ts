@@ -92,20 +92,33 @@ export interface CampaignFlight {
   notes: string
 }
 
-// ── Flight 3: STAGED, not registered ────────────────────────────────────────────────────
+// ── Flight 3: staged until an arm's dates are filled ────────────────────────────────────
 // Best Sudoku's ad flight 3 re-runs flight 2's setup on v1.99.0, Search revised 2026-10-15 to a buyer-intent test (plan: best-sudoku desk card
 // ads-f3-16; docs/campaigns/flight-3-handoff.md, docs/routines/ads-cloud-daily.md "Flight 3").
-// Its two Google Ads campaigns do not exist yet, so neither arm is in CAMPAIGNS: a registered
-// campaign needs a real id, and an invented one would be synced, charted and read as live.
-// Everything that is already known is fixed here; the id and the dates arrive at activation, and
-// stagedCampaign() turns one arm plus those three values into the CampaignFlight (and adsRules.ts
-// stagedReadPlan() into its read plan). TO ACTIVATE an arm, see "To activate flight 3" in the
-// runbook docs/routines/ads-cloud-daily.md. The two arms start independently (Search on the
-// prod web deploy day, Apps on the Play production day), each with its own 7-day week.
+// Its two Google Ads campaigns exist since 2026-10-16, created PAUSED, and their ids are below
+// (STAGED_FLIGHT_3[arm].ids). An arm is registered, charted, synced and read ONLY once its dates are
+// filled in STAGED_FLIGHT_3_DATES: a null date keeps it staged, and a staged arm is in neither
+// CAMPAIGNS nor ADS_READ_PLANS, so nothing reads it. Filling both dates is the whole activation in
+// code (liveStagedCampaigns() adds the CampaignFlight to CAMPAIGNS, adsRules.ts liveStagedReadPlans()
+// its read plan); the runbook's matching edits and the steps no date can drive are listed in
+// "To activate flight 3" in docs/routines/ads-cloud-daily.md. The two arms start independently
+// (Search on the prod web deploy day, Apps on the Play production day), each with its own 7-day week.
 export type StagedArm = 'apps' | 'search'
+/** The Google Ads objects built for a staged arm (a read-side record; nothing here changes Google Ads).
+ * The customer id is not stored here: README "Spend" names it once. */
+export interface StagedArmIds {
+  /** The Google Ads campaign id (CampaignFlight.id once registered). */
+  campaignId: string
+  /** The campaign budget id (resource customers/<customer>/campaignBudgets/<budgetId>). */
+  budgetId: string
+  adGroups: { id: string; name: string; maxCpcUsd: number }[]
+  /** One per ad: `tag` is the utm_campaign in the ad's landing link (a member of the arm's ucValues). */
+  ads: { id: string; label: string; tag: string }[]
+}
 export interface StagedArmConfig {
   /** CampaignFlight.label. */
   label: string
+  ids: StagedArmIds
   /** The utm_campaign tag(s), matched exactly (IN); an arm with several sums them. The medium (display, cpc) is in `notes` only, as for flight 2. */
   ucValues: string[]
   dailyBudgetUsd: number
@@ -118,6 +131,15 @@ export interface StagedArmConfig {
 export const STAGED_FLIGHT_3: Record<StagedArm, StagedArmConfig> = {
   apps: {
     label: 'Flight 3 — display, Sudoku app placements',
+    ids: {
+      campaignId: '24358792494',
+      budgetId: '15948080534',
+      adGroups: [{ id: '202688183753', name: 'Sudoku app placements - F3', maxCpcUsd: 0.35 }],
+      ads: [
+        { id: '828331825090', label: 'HERO', tag: 'sudoku_funnel_f3_apps_hero' },
+        { id: '828331825093', label: 'FEATURES', tag: 'sudoku_funnel_f3_apps_feat' },
+      ],
+    },
     // Two responsive display ads in the one campaign (Mike, 2026-10-16): HERO and FEATURES, each
     // with its own landing-link utm_campaign. The arm sums them (every rule reads the Apps total);
     // the bare tag is a catch-all for a link left without a variant. The ads report prints the
@@ -128,32 +150,45 @@ export const STAGED_FLIGHT_3: Record<StagedArm, StagedArmConfig> = {
     flightStartTimeEt: '12:00',
     servingHoursEt: [12, 23],
     notes:
-      '"Best Sudoku - Display - Sudoku app placements - F3 Apps", utm google / display / sudoku_funnel_f3_apps_hero and sudoku_funnel_f3_apps_feat (two responsive display ads in the one campaign, HERO and FEATURES; the arm sums both, the bare sudoku_funnel_f3_apps is a catch-all). Flight 2\'s Apps setup re-run on best-sudoku v1.99.0: the same 17 Android app placements, optimized targeting off, manual CPC $0.35 max, F2 copy plus a price line (\"No ads. Passes from $1.99\"), US+CA, ad schedule 12:00-23:00 ET, $10/day, $70 cap over 7 serving days. Starts the day v1.99.0 is live on Play production. Created PAUSED from a dry run; enabled by Mike\'s yes, status and dates only.',
+      '"Best Sudoku - Display - Sudoku app placements - F3 Apps", budget resource 15948080534, utm google / display / sudoku_funnel_f3_apps_hero and sudoku_funnel_f3_apps_feat (two responsive display ads in the one campaign, HERO and FEATURES; the arm sums both, the bare sudoku_funnel_f3_apps is a catch-all). Flight 2\'s Apps setup re-run on best-sudoku v1.99.0: the same 17 Android app placements, optimized targeting off, manual CPC $0.35 max, F2 copy plus a price line (\"No ads. Passes from $1.99\"), US+CA, ad schedule 12:00-23:00 ET, $10/day, $70 cap over 7 serving days. Starts the day v1.99.0 is live on Play production. Created PAUSED 2026-10-16 by the API tool; enabled by Mike\'s yes, which with the arm\'s dates (STAGED_FLIGHT_3_DATES) is the whole activation.',
   },
   search: {
     label: 'Flight 3 — search, desktop intent',
+    ids: {
+      campaignId: '24358792551',
+      budgetId: '15958435831',
+      adGroups: [
+        { id: '204274116714', name: 'No ads intent - exact and phrase', maxCpcUsd: 0.99 },
+        { id: '204274117594', name: 'Ad free intent - exact and phrase', maxCpcUsd: 0.99 },
+      ],
+      ads: [
+        { id: '828285503241', label: 'RSA, no ads intent', tag: 'sudoku_funnel_f3_search' },
+        { id: '828285503250', label: 'RSA, ad free intent', tag: 'sudoku_funnel_f3_search' },
+      ],
+    },
     ucValues: ['sudoku_funnel_f3_search'],
     dailyBudgetUsd: 10,
     hardCapUsd: 70,
     flightStartTimeEt: '12:00',
     servingHoursEt: [12, 23],
     notes:
-      '"Best Sudoku - Search - Desktop intent - F3 Search", utm google / cpc / sudoku_funnel_f3_search. A buyer-intent test on best-sudoku v1.99.0 (Mike, 2026-10-15; desk card ads-f3-16): the \"no ads\" keyword family only (sudoku no ads, sudoku without ads, sudoku app no ads, ad free sudoku and the rest), exact + phrase, F2\'s free-seeker terms dropped; manual CPC $0.99 max (a hard ceiling under $1, no day-3 raise); ALL devices, no mobile or tablet hard stop; F2\'s 10 negatives plus free, online free, printable and puzzle book; F2\'s RSA plus a price headline; US+CA, ad schedule 12:00-23:00 ET, $10/day, $70 cap over 7 serving days. No placements: its read plan has channel search. Expected volume is about 15-25 clicks a week, so one week will likely read inconclusive (under 20 asks). Starts the prod web deploy day once real /coach/* and sign-in ask rows show. Created PAUSED from a dry run; enabled by Mike\'s yes, status and dates only.',
+      '"Best Sudoku - Search - Desktop intent - F3 Search", budget resource 15958435831, utm google / cpc / sudoku_funnel_f3_search. A buyer-intent test on best-sudoku v1.99.0 (Mike, 2026-10-15; desk card ads-f3-16): the \"no ads\" keyword family only (sudoku no ads, sudoku without ads, sudoku app no ads, ad free sudoku and the rest), exact + phrase, F2\'s free-seeker terms dropped; manual CPC $0.99 max (a hard ceiling under $1, no day-3 raise); ALL devices, no mobile or tablet hard stop; F2\'s 10 negatives plus free, online free, printable and puzzle book; F2\'s RSA plus a price headline; US+CA, ad schedule 12:00-23:00 ET, $10/day, $70 cap over 7 serving days. No placements: its read plan has channel search. Expected volume is about 15-25 clicks a week, so one week will likely read inconclusive (under 20 asks). Starts the prod web deploy day once real /coach/* and sign-in ask rows show. Created PAUSED 2026-10-16 by the API tool; enabled by Mike\'s yes, which with the arm\'s dates (STAGED_FLIGHT_3_DATES) is the whole activation.',
   },
 }
 
-/** The CampaignFlight for a staged arm, from the three values only the build knows: the Google Ads
- * campaign id, the flight start (the enable day) and the flight end (start + 6, 7 serving days).
- * Throws on anything that would register a wrong campaign: a non-numeric id, a malformed date,
- * or a window that is not seven days. Add the result to CAMPAIGNS as `stagedCampaign(...)`. */
-export function stagedCampaign(arm: StagedArm, v: { id: string; flightStart: string; flightEnd: string }): CampaignFlight {
-  if (!/^\d+$/.test(v.id)) throw new Error(`staged flight 3 ${arm}: campaign id must be the numeric Google Ads id, got ${JSON.stringify(v.id)}`)
+/** The CampaignFlight for a staged arm from its dates: the flight start (the enable day) and the
+ * flight end (start + 6, 7 serving days). The campaign id is the arm's own (STAGED_FLIGHT_3[arm].ids);
+ * `v.id` overrides it for tests that use a made-up id. Throws on anything that would register a wrong
+ * campaign: a non-numeric id, a malformed date, or a window that is not seven days. */
+export function stagedCampaign(arm: StagedArm, v: { id?: string; flightStart: string; flightEnd: string }): CampaignFlight {
+  const id = v.id ?? STAGED_FLIGHT_3[arm].ids.campaignId
+  if (!/^\d+$/.test(id)) throw new Error(`staged flight 3 ${arm}: campaign id must be the numeric Google Ads id, got ${JSON.stringify(id)}`)
   const dateRe = /^\d{4}-\d{2}-\d{2}$/
   if (!dateRe.test(v.flightStart) || !dateRe.test(v.flightEnd)) throw new Error(`staged flight 3 ${arm}: flightStart and flightEnd must be YYYY-MM-DD`)
   if (v.flightEnd !== addDays(v.flightStart, 6)) throw new Error(`staged flight 3 ${arm}: flightEnd must be flightStart + 6 (7 serving days), got ${v.flightStart} .. ${v.flightEnd}`)
   const c = STAGED_FLIGHT_3[arm]
   return {
-    id: v.id,
+    id,
     label: c.label,
     ucValues: [...c.ucValues],
     flightStart: v.flightStart,
@@ -166,6 +201,35 @@ export function stagedCampaign(arm: StagedArm, v: { id: string; flightStart: str
     servingHoursEt: [...c.servingHoursEt],
     notes: c.notes,
   }
+}
+
+/** Each flight 3 arm's ET flight dates, THE activation switch (the one place in code to edit; the
+ * runbook's LEGS row for the arm takes the same two dates, and a test fails if they differ). Both
+ * null = staged: the arm is in neither CAMPAIGNS nor ADS_READ_PLANS, so nothing syncs, charts or
+ * reads it. Both set = live: the arm registers from `flightStart` (noon ET) with its read window
+ * `flightStart + 1 .. flightEnd + 1`. The real D-days come per arm at enable (flightEnd is
+ * flightStart + 6); fill them only then. Exactly one set throws at load. */
+export interface StagedArmDates {
+  flightStart: string | null
+  flightEnd: string | null
+}
+export const STAGED_FLIGHT_3_DATES: Record<StagedArm, StagedArmDates> = {
+  apps: { flightStart: null, flightEnd: null },
+  search: { flightStart: null, flightEnd: null },
+}
+export const STAGED_ARMS: readonly StagedArm[] = ['apps', 'search']
+/** Whether an arm's dates are filled (live) or null (staged). Throws on exactly one date set: a
+ * half-filled arm is a mistake, never a staged arm. */
+export function stagedArmIsLive(arm: StagedArm, dates: Record<StagedArm, StagedArmDates> = STAGED_FLIGHT_3_DATES): boolean {
+  const d = dates[arm]
+  if (d.flightStart == null && d.flightEnd == null) return false
+  if (d.flightStart == null || d.flightEnd == null) throw new Error(`staged flight 3 ${arm}: set both flightStart and flightEnd in STAGED_FLIGHT_3_DATES, or neither`)
+  return true
+}
+/** The CampaignFlights of the staged arms whose dates are filled (empty while both are staged);
+ * CAMPAIGNS spreads this in. */
+export function liveStagedCampaigns(dates: Record<StagedArm, StagedArmDates> = STAGED_FLIGHT_3_DATES): CampaignFlight[] {
+  return STAGED_ARMS.filter((arm) => stagedArmIsLive(arm, dates)).map((arm) => stagedCampaign(arm, { flightStart: dates[arm].flightStart!, flightEnd: dates[arm].flightEnd! }))
 }
 
 
@@ -295,6 +359,8 @@ export const CAMPAIGNS: CampaignFlight[] = [
     notes:
       '"Best Sudoku - Search - Desktop intent - F2 Search", utm google / cpc / sudoku_funnel_f2_search, budget resource 15915289115. Created PAUSED 2026-10-03 20:14Z by the API tool (best-sudoku e3c372d0); desktop-only search, US+CA, ad schedule 12:00-23:00 ET, $10/day, $70 cap over 7 days (Mike, 2026-10-03). No placements: its read plan has channel search. The flight dates are final: 2026-10-04 .. 2026-10-10, a full week (Mike, 2026-10-03). directionalThroughDay is left unset: nothing in production reads it.',
   },
+  // Flight 3 arms whose dates are filled in STAGED_FLIGHT_3_DATES; none while both are staged.
+  ...liveStagedCampaigns(),
 ]
 
 export function campaignById(id: string): CampaignFlight | undefined {
