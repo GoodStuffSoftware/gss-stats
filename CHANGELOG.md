@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.43.0] — 2026-10-16
+
 ### Added
 - **Flight 3 Apps: No ads (hero) vs Features.** A Campaigns donut splits the Apps arm's arrivals by ad with each slice's count and share, counts only, and reads "Flight 3 isn't live yet" until the arm is activated.
 
