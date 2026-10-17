@@ -222,8 +222,8 @@ link that lost its suffix still counts. All three tags are the one arm.
   committed-challenge and placement rows only. Flight 2's table (every ask row) still applies to
   F2 rows. The `tracking-check counts` line's sign-in ask rows count is exactly those three paths.
 - **Cost per arrival (per arm):** the report's "cost per tagged arrival" line (cumulative spend
-  divided by tagged arrivals) prints Mike's benchmark beside it, about $0.32 an arrival (the
-  F1/F2 in-app figure). It prints in the threshold and post-flight reads' tagged-funnel block, not
+  divided by tagged arrivals) prints the arm's benchmark beside it: F3 Apps "about $0.32-0.34, the
+  F1/F2 in-app figure", F3 Search "about $0.64, the F2 Search figure" (flight 2 stays at about $0.32). It prints in the threshold and post-flight reads' tagged-funnel block, not
   in the daily "Tagged so far" line, and reads "—" under 5 tagged arrivals (the small-sample
   gate; likely early on for Search). Quote the line as printed with the benchmark; never compute
   a figure for a "—". It is a comparison, not a rule.
@@ -291,6 +291,27 @@ link that lost its suffix still counts. All three tags are the one arm.
   - **Counts only:** the coach count is a campaign-tagged ET-day total, like the other tagged
     counts. `/coach/shown/%` is on the refused-split list, so the report never splits it by hour,
     place or device; do not ask for such a split.
+
+### Flight 3 report lines added with the report-gaps change (counts only; relay as printed)
+
+- **Coach strip line (Tagged so far).** `coach strip (tagged ET-day totals; yesterday in brackets;
+  counts only): ...` lists, per coach tip, tagged `/coach/shown/*`, dismissed and closed-at rows plus
+  `tour-opened`, as cumulative ET-day totals with yesterday's ET day in brackets. Never an hour,
+  place or device grouping; do not ask for one.
+- **Tagged new accounts (end of the Tagged so far line).** `tagged new accounts N cumulative
+  (/auth/success/<provider>/new rows; counts, not rates; measurement change v1.99.2 (from 2026-10-16):
+  ...)`. A count, never a rate. The v1.99.2 caveat appears only once its date has come; quote it with
+  the count, because new accounts before and after that release are not measured the same way.
+- **Impressions balance (per-tag split).** Each tag row also prints `% of tagged-ad impressions`,
+  then one line `impressions balance: UNEVEN | even enough`. UNEVEN means the largest and smallest
+  ad share are more than 20 points apart (60/40 is the edge; 64/36 flags). On UNEVEN the ads are not
+  rotating evenly: compare each ad's rates, not its totals. A split with fewer than two ads with
+  impressions reads "not checked".
+- **Arrival labels.** The report's `arrivals (new-visitor tagged rows)` (first-ever tagged beacons, a
+  floor) and the first-session step `d0 devices (/return/<tag>/d0)` (one row per device, the donut's
+  basis) are different counts by design. Name both labels when quoting either; never reconcile them.
+- **Serving hours.** Both F3 arms serve 12:00-24:00 ET (changed from 12:00-23:00 once flight 3 was
+  live); flight 2 stays 12:00-23:00.
 
 ### Secondary measures (counts only, never per-person)
 

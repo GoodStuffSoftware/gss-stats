@@ -110,8 +110,11 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   `sudoku_funnel_f3_apps_feat` "Features", and the bare `sudoku_funnel_f3_apps` as a small "Untagged"
   slice only when it has arrivals). A slice is the `/return/<tag>/d0` arrival rows over the card's own
   range (since the first campaign; the page has no filter bar), the legend reads "Label · count · share"
-  with the share taken over the plotted slices, and the note under it says the two ads rotate evenly so
-  the share reflects how well each ad converts to arrivals. It is counts only: no cost and no
+  with the share taken over the plotted slices, and the note under it says a slice counts d0 devices,
+  which differ from the report's arrivals (first-ever tagged rows), and that the ads may not rotate
+  evenly (check the report's impressions balance before reading the share as how well each ad
+  converts). A saved layout still carrying the old caption gets the new one on load; an edited caption
+  is left alone. It is counts only: no cost and no
   impressions, because the ads sync keeps campaign-level spend, not per-ad. While the arm is staged
   (its dates in `STAGED_FLIGHT_3_DATES` still null, so not yet in `CAMPAIGNS`) the card reads "Flight 3
   isn't live yet" and sends no query; it fills in when the arm's dates are filled. Like every `/return/` read it is whole ET days and never split by hour,
@@ -1314,6 +1317,15 @@ retest reads print exactly what they did before (pinned byte for byte by `f2Repo
 Rows the app's own manual production checks write (`utm_campaign=manual_check`, `/return/manual_check/`
 paths) sit in the standing exclusions (`EXCLUSIONS` in `campaigns.ts`), so the campaign reads, the
 morning read and every chart or fact that applies "hide known test and household traffic" leave them out.
+
+**Flight 3 report gaps.** The flight 3 morning read also prints: an `impressions balance: UNEVEN | even
+enough` line under the per-tag split (each ad's share of tagged-ad impressions; UNEVEN when the shares are
+more than 20 points apart, then compare rates, not totals), a `coach strip` line (tagged coach tip rows as
+ET-day totals, never split by hour, place or device), tagged new accounts as a cumulative count with the
+v1.99.2 measurement-change caveat, the two arrival counts under distinct labels (`arrivals (new-visitor
+tagged rows)` vs `d0 devices (/return/<tag>/d0)`), and the per-arm cost-per-arrival baselines (Apps about
+$0.32-0.34, Search about $0.64). Both flight 3 arms serve 12:00-24:00 ET. Flight 2 and retest reads are
+unchanged (pinned by `f2ReportGolden.test.ts`).
 
 **Flight 3 Search, Ads side.** The Search arm's morning read also prints a `Search Ads side` block built
 from Google Ads alone (three read-only GAQL SELECTs in `src/lib/adsApi.ts`: campaign per ET day,

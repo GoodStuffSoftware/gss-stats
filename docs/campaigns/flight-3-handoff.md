@@ -88,8 +88,9 @@ Counts, read-only. Raw pulls live in the analyst session scratchpad only (not co
   each ad's final URL with its own `utm_campaign` at build; an ad with no usable tag shows as
   "untagged" in the split, never on a tag.
 - **Cost per arrival:** the tagged-funnel block of the threshold and post-flight reads prints
-  cumulative spend / tagged arrivals with Mike's benchmark of about $0.32 an arrival (the F1/F2
-  in-app figure) beside it; the figure reads "—" under 5 tagged arrivals (the small-sample gate).
+  cumulative spend / tagged arrivals with the arm's benchmark beside it (Apps about $0.32-0.34, the
+  F1/F2 in-app figure; Search about $0.64, the F2 Search figure); the figure reads "—" under 5 tagged
+  arrivals (the small-sample gate).
 - **Day 1-2 tracking check:** a read-and-judge line in the runbook ("Flight 3"), never coded; it
   replaces rule 3 for this flight and only proposes a pause.
 
