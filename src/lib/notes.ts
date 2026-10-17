@@ -58,7 +58,7 @@ import type { CardSpec } from './metrics/types'
 // lib/popupEvents.ts — see that file's own comment on why it keeps AUTH_NEW_EXISTING_LIVE_AT
 // out of itself), so importing the constant from lib/adsRules.ts here is fine.
 import { AUTH_NEW_EXISTING_LIVE_AT } from './adsRules'
-import { MEASUREMENT_CHANGES, authMarkedChanges } from './measurementChanges'
+import { MEASUREMENT_CHANGES, authMarkedChanges, markedChanges } from './measurementChanges'
 import { etOffsetHours } from './etTime'
 import { SIGNUPS_HINT } from './adsReadingsFormat'
 import { BAR_FIXED, ORGANIC_BAR_FACTOR, ORGANIC_MIN_D0, ORGANIC_MIN_DAYS } from './metrics/retention'
