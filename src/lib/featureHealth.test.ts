@@ -101,11 +101,18 @@ describe('the config list', () => {
     expect(stepMatches(complete, '/game/complete/normal/easy\u0000x')).toBe(false)
   })
 
-  it('the Tour and Upsell features carry their flight 3 comparison captions; no other feature has one', () => {
+  it('the Tour, Upsell, Sign-in, Install and Money funnel features carry their flight 3 captions; no other feature has one', () => {
     const cap = (id: string) => FEATURES.find((f) => f.id === id)!.caption
     expect(cap('tour')).toBe('/tour/start no longer counts tours opened from the coach strip (from v1.99.1).')
-    expect(cap('upsell')).toBe('Not comparable to flight 2: the guest trial changed in v1.99.1.')
-    expect(FEATURES.filter((f) => f.caption).map((f) => f.id).sort()).toEqual(['tour', 'upsell'])
+    expect(cap('upsell')).toBe(
+      'Not comparable to flight 2: the guest trial changed in v1.99.1. A dismiss can be a sign-in tap: net it against the signed-in outcome for that reason before calling it rejection. From v1.99.1 the post-sign-in passes upsell shows but sends no shown beacon, so /upsell/shown does not count its views.',
+    )
+    expect(cap('signin')).toBe('Sign-in asks wait while a coach tip is showing, so ask impressions dip where coach tips run more often.')
+    expect(cap('install')).toBe(
+      'Install asks wait while a coach tip is showing, so prompt impressions dip where coach tips run more often. iPhone users outside Safari count under /install/prompt/ios, and a dismissal after an in-app App Store tap counts as a dismissal.',
+    )
+    expect(cap('funnel')).toBe('From v1.99.1, a checkout start after sign-in can come from the passes upsell, whose views /upsell/shown does not count.')
+    expect(FEATURES.filter((f) => f.caption).map((f) => f.id).sort()).toEqual(['funnel', 'install', 'signin', 'tour', 'upsell'])
   })
 
   it('assembleHealth passes a feature caption through and leaves the key off a feature without one', () => {

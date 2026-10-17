@@ -382,6 +382,23 @@ describe('a non-hideable automatic caveat shows only where it is true (B4a)', ()
   })
 })
 
+describe('upsell sign-in tap caveats (Pop-ups pu-upsell-* cards)', () => {
+  const pu = (popupKind: string, popup = 'upsell') => widget({ type: 'hbar', dataset: 'popup', dimension: 'reason', popup, popupKind })
+  it('the dismissals-by-reason card gets the net-it caveat and the sign-ins card gets its pair, each only on its own card', () => {
+    expect(autoCaveatIds(pu('dismiss'))).toContain('upsell-dismiss-signin-tap')
+    expect(autoCaveatIds(pu('dismiss'))).not.toContain('upsell-signedin-from-dismiss')
+    expect(autoCaveatIds(pu('signed-in'))).toContain('upsell-signedin-from-dismiss')
+    expect(autoCaveatIds(pu('signed-in'))).not.toContain('upsell-dismiss-signin-tap')
+    expect(getNote('upsell-dismiss-signin-tap')!.text).toBe('A dismiss can be a sign-in tap: net it against the signed-in outcome for that reason before calling it rejection.')
+  })
+  it('other pop-up cards and other pop-ups never get them', () => {
+    for (const w of [pu('dismiss', 'signin'), pu('shown'), widget({ type: 'bar', dataset: 'popup', dimension: 'popupFamily' })]) {
+      expect(autoCaveatIds(w)).not.toContain('upsell-dismiss-signin-tap')
+      expect(autoCaveatIds(w)).not.toContain('upsell-signedin-from-dismiss')
+    }
+  })
+})
+
 describe('canHideCaveatId (NIT-5a)', () => {
   it('names exactly the runtime notes allChartNotes adds as not hideable', () => {
     const data = response({ note: 'A pop-up caveat.', notice }, { splitGuard: true, refusedWholeDays: true })

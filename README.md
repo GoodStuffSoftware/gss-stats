@@ -457,7 +457,9 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   any other) and counts, outside the rate, finishes below the floor, "not now" and stopped
   (`/signin-eligible/{below-floor,not-now,stopped}`; counts only). The two upsell charts
   (`pu-upsell-dismiss-reasons`, `pu-upsell-signedin-reasons`) are the `reason` breakdown of the
-  upsell's dismissals and of the sign-ins after it; the chart editor's Pop-up stage picker also
+  upsell's dismissals and of the sign-ins after it (each carries a caption: a dismiss can be a
+  sign-in tap, so net it against the signed-in outcome for that reason before calling it
+  rejection); the chart editor's Pop-up stage picker also
   offers the outcome stages (signed in, installed, returned, still playing) for any pop-up's
   reason or per-day chart. The rate table
   and the eligibility panel are metric cards (presets `popup-rates` and `signin-eligibility`, since
@@ -643,7 +645,13 @@ the page's range, sites and exclusions. Rows from the app's manual production ch
 (`manual_check` campaign or paths) never count here, even with known traffic shown. A feature can
 carry a one-sentence caption, shown on its step chart and under the card table: Tour says
 `/tour/start` no longer counts tours opened from the coach strip (from v1.99.1), and Upsell says
-it is not comparable to flight 2 because the guest trial changed in v1.99.1.
+it is not comparable to flight 2 because the guest trial changed in v1.99.1. Upsell also says a
+dismiss can be a sign-in tap (net it against the signed-in outcome) and that the post-sign-in
+passes upsell, shown from v1.99.1, sends no shown beacon; the Money funnel says a checkout start
+after sign-in can come from that upsell. The Sign-in ask and Install prompt say asks wait while a
+coach tip shows, so impressions dip where tips run more often; Install adds that iPhone users outside
+Safari count under `/install/prompt/ios` and a dismissal after an in-app App Store tap
+counts as a dismissal.
 
 - **Card:** a row per feature with its status, and per step the count for the latest complete
   ET day, the day before and the selected range, plus the ratio of those counts.

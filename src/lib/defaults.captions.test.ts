@@ -259,11 +259,16 @@ describe('captions: the v16 step (D2-B) on a pre-v16 layout', () => {
 })
 
 describe('built-in default charts look as they did before 1c (B4a)', () => {
+  /** The one intended difference: the two upsell reason charts carry a data-cut caveat each (not hideable). */
+  const UPSELL_REASON_CAVEATS: Record<string, string[]> = {
+    'pu-upsell-dismiss-reasons': ['upsell-dismiss-signin-tap'],
+    'pu-upsell-signedin-reasons': ['upsell-signedin-from-dismiss'],
+  }
   /** The registry notes a chart shows today: caption:/caveat: entries (a card's own spec captions
    * render inside the card, not here). */
   const visibleRegistryIds = (w: Widget) => chartNotes(w, null, null).filter((n) => n.noteId).map((n) => n.noteId)
   /** Before 1c a chart showed exactly its legacy notes ids, in order. */
-  const before = (w: Widget) => w.notes ?? []
+  const before = (w: Widget) => [...(w.notes ?? []), ...(UPSELL_REASON_CAVEATS[w.id] ?? [])]
   const charts = (ws: Widget[]) => ws.filter((w) => w.type !== 'note')
 
   it('the default layout: every chart shows exactly the caveats its legacy notes showed', () => {

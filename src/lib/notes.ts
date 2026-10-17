@@ -104,7 +104,7 @@ export interface NoteDef {
 }
 
 /** The widget fields an automatic caveat's condition (NoteDef.appliesTo) may read. */
-export type AutoCaveatWidget = Pick<Widget, 'type' | 'dataset' | 'notes' | 'card'>
+export type AutoCaveatWidget = Pick<Widget, 'type' | 'dataset' | 'notes' | 'card'> & Partial<Pick<Widget, 'popup' | 'popupKind'>>
 
 function resolveText(n: NoteDef): string {
   return typeof n.text === 'function' ? n.text() : n.text
@@ -392,6 +392,26 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     kind: 'note',
     severity: 'info',
     scopes: ['campaigns'],
+  },
+  // Upsell by reason (Pop-ups page): a guest who taps Sign in on the upsell sends the dismiss row first and the
+  // signed-in outcome once sign-in succeeds, so the two cards overlap. Shown only on those two cards.
+  'upsell-dismiss-signin-tap': {
+    id: 'upsell-dismiss-signin-tap',
+    text: 'A dismiss can be a sign-in tap: net it against the signed-in outcome for that reason before calling it rejection.',
+    kind: 'note',
+    severity: 'caveat',
+    scopes: ['popup'],
+    hideable: false,
+    appliesTo: (w: AutoCaveatWidget) => w.popup === 'upsell' && w.popupKind === 'dismiss',
+  },
+  'upsell-signedin-from-dismiss': {
+    id: 'upsell-signedin-from-dismiss',
+    text: 'A sign-in here began as a dismiss on the same upsell: subtract these from the dismissals for that reason before calling them rejection.',
+    kind: 'note',
+    severity: 'caveat',
+    scopes: ['popup'],
+    hideable: false,
+    appliesTo: (w: AutoCaveatWidget) => w.popup === 'upsell' && w.popupKind === 'signed-in',
   },
   // The campaign-country card (lib/metrics/presets.ts CAMPAIGN_COUNTRY): the counts-only rule
   // (lib/splitGuard.ts) gives return and completion rows no country bucket.

@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Captions explain four Flight 3 count effects.** Upsell, Sign-in ask, Install prompt, Money funnel and the two upsell reason charts now say how sign-in taps, the passes upsell, coach-tip holds and iOS install counting change what the counts mean.
+
 ## [0.54.7] — 2026-10-17
 
 ### Fixed

@@ -87,6 +87,7 @@ export const FEATURES: readonly FeatureDef[] = [
     id: 'signin',
     label: 'Sign-in ask',
     blurb: 'The sign-in pop-up (any reason), accepted or declined, and the sign-ins that completed.',
+    caption: 'Sign-in asks wait while a coach tip is showing, so ask impressions dip where coach tips run more often.',
     steps: [
       { id: 'shown', label: 'Shown', match: { prefix: ['/signin-prompt/'], except: ['/signin-prompt/accept', '/signin-prompt/dismiss'] } },
       { id: 'accept', label: 'Accepted', match: { exact: ['/signin-prompt/accept'] }, ratioOf: { per: 'shown' } },
@@ -120,7 +121,7 @@ export const FEATURES: readonly FeatureDef[] = [
     label: 'Upsell',
     blurb: 'The upgrade pop-up (any reason): shown, accepted or declined.',
     // The device-anchored guest trial (and its limit pop-up) rode in v1.99.0, which went live as v1.99.1.
-    caption: 'Not comparable to flight 2: the guest trial changed in v1.99.1.',
+    caption: 'Not comparable to flight 2: the guest trial changed in v1.99.1. A dismiss can be a sign-in tap: net it against the signed-in outcome for that reason before calling it rejection. From v1.99.1 the post-sign-in passes upsell shows but sends no shown beacon, so /upsell/shown does not count its views.',
     steps: [
       { id: 'shown', label: 'Shown', match: { prefix: ['/upsell/shown/'] } },
       // No rows yet (one shown row has arrived).
@@ -132,6 +133,7 @@ export const FEATURES: readonly FeatureDef[] = [
     id: 'install',
     label: 'Install prompt',
     blurb: 'The install-the-app prompt: shown, accepted (Play, PWA or store link), declined, installed.',
+    caption: 'Install asks wait while a coach tip is showing, so prompt impressions dip where coach tips run more often. iPhone users outside Safari count under /install/prompt/ios, and a dismissal after an in-app App Store tap counts as a dismissal.',
     steps: [
       { id: 'shown', label: 'Shown', match: { exact: ['/install/prompt/android', '/install/prompt/ios', '/install/prompt/desktop'] } },
       { id: 'accept', label: 'Accepted', match: { exact: ['/install/play', '/install/pwa-accept', '/install/app-store'] }, ratioOf: { per: 'shown' } },
@@ -179,6 +181,7 @@ export const FEATURES: readonly FeatureDef[] = [
     label: 'Money funnel',
     blurb: 'Paid conversion: a trial started, a checkout opened and a purchase made, on the web and on Google Play.',
     // Provisional beacons (counts only, sent at least 30 minutes after the event), not checked against production D1: the feature reads "New" until rows arrive.
+    caption: 'From v1.99.1, a checkout start after sign-in can come from the passes upsell, whose views /upsell/shown does not count.',
     steps: [
       { id: 'trial', label: 'Trial started', match: { exact: ['/funnel/trial-start'] } },
       { id: 'checkout-web', label: 'Checkout started (web)', match: { exact: ['/funnel/checkout-start/web'] } },
