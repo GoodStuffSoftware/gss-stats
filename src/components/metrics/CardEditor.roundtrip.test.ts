@@ -110,10 +110,11 @@ async function noOpPass(w: VueWrapper) {
   for (const o of controls(w).findAll('.option-row.selected')) await o.trigger('click')
   await flushPromises()
   // 5. Every repeat switched to another kind and back, and to none and back.
-  const repeatIds = selects(w)
-    .filter(isRepeatSelect)
-    .map((s) => s.attributes('id')!)
-  for (const id of repeatIds) {
+  // The ids are read fresh by position: switching one repeat can remount a sibling's select (a table
+  // section with no repeat offers a Columns select, which goes while the section repeat is on).
+  const repeatSelects = () => selects(w).filter(isRepeatSelect)
+  for (let k = 0, n = repeatSelects().length; k < n; k++) {
+    const id = repeatSelects()[k].attributes('id')!
     const cur = sel(byId(w, id)).value
     const others = [...sel(byId(w, id)).options].map((o) => o.value).filter((v) => v !== cur)
     for (const other of [others.find((v) => v !== ''), ''].filter((v): v is string => v !== undefined)) {
