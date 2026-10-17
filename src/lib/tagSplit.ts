@@ -81,13 +81,28 @@ export interface TagSplitTag {
   impressions: number | null
   /** cost / arrivals, null under MIN_COHORT (5) arrivals or with no cost read: the small-sample gate. */
   costPerArrival: number | null
+  /** This tag's share of the arm's TAGGED-ad impressions (untagged ads left out); null with no cost read or no impressions. */
+  impressionShare: number | null
 }
+/** The impressions-balance check (spec section 3): the arm's ads should rotate about evenly. */
+export interface ImpressionsBalance {
+  /** The tags that have impressions, in arm order, with their share of the tagged-ad impressions. */
+  shares: { tag: string; share: number }[]
+  /** Largest share minus smallest, in share points (0.28 = 28 points). */
+  gap: number
+  /** gap is more than IMPRESSIONS_UNEVEN_GAP. */
+  uneven: boolean
+}
+/** The one constant: the split is flagged uneven when the largest and smallest ad share differ by more than this (0.2 = 20 share points; 60/40 is the edge, 64/36 is flagged). */
+export const IMPRESSIONS_UNEVEN_GAP = 0.2
 export interface TagSplit {
   tags: TagSplitTag[]
   /** Ads whose links give no usable tag, with their cost; null when none (or cost not read). */
   untagged: { ads: number; cost: number; clicks: number; impressions: number } | null
   /** Tagged rows that could not be put on a tag (no `campaign` on the row, or a tag outside the arm). 0 in a real read. */
   unsplitHits: number
+  /** null with no cost read, or fewer than two tags that have impressions (nothing to compare). */
+  balance: ImpressionsBalance | null
   costRead: boolean
   costError: string | null
   /** The last closed ET day the cost covers. */
@@ -95,6 +110,16 @@ export interface TagSplit {
 }
 
 const round2 = (x: number) => Math.round(x * 100) / 100
+
+/** The balance check over per-tag impressions. Only tags with impressions are compared; fewer than two = null. */
+export function impressionsBalance(perTag: readonly { tag: string; impressions: number }[]): ImpressionsBalance | null {
+  const live = perTag.filter((t) => t.impressions > 0)
+  if (live.length < 2) return null
+  const total = live.reduce((a, t) => a + t.impressions, 0)
+  const shares = live.map((t) => ({ tag: t.tag, share: t.impressions / total }))
+  const gap = Math.max(...shares.map((x) => x.share)) - Math.min(...shares.map((x) => x.share))
+  return { shares, gap, uneven: gap > IMPRESSIONS_UNEVEN_GAP }
+}
 
 function countsFor(rows: readonly TaggedRow[], win?: { fromMs: number; toMs: number }): TagCounts {
   const s = summarizeTaggedRows(rows, win ? { fromMs: win.fromMs, toMs: win.toMs } : {})
@@ -130,6 +155,7 @@ export function buildTagSplit(i: BuildTagSplitInput): TagSplit | null {
       if (!tag) untaggedAds.add(r.adId)
     }
   }
+  const taggedImpressions = i.adRows ? i.ucValues.reduce((a, t) => a + byTag.get(t)!.impressions, 0) : 0
   const tags: TagSplitTag[] = i.ucValues.map((tag) => {
     const mine = i.rows.filter((r) => r.campaign === tag)
     const total = countsFor(mine)
@@ -143,6 +169,7 @@ export function buildTagSplit(i: BuildTagSplitInput): TagSplit | null {
       clicks: i.adRows ? c.clicks : null,
       impressions: i.adRows ? c.impressions : null,
       costPerArrival: cost == null ? null : costPer(cost, total.arrivals),
+      impressionShare: i.adRows && taggedImpressions > 0 ? c.impressions / taggedImpressions : null,
     }
   })
   const unsplitHits = i.rows.filter((r) => r.campaign == null || !i.ucValues.includes(r.campaign)).reduce((a, r) => a + r.count, 0)
@@ -150,6 +177,7 @@ export function buildTagSplit(i: BuildTagSplitInput): TagSplit | null {
     tags,
     untagged: i.adRows && untaggedAds.size > 0 ? { ads: untaggedAds.size, cost: round2(untagged.cost), clicks: untagged.clicks, impressions: untagged.impressions } : null,
     unsplitHits,
+    balance: i.adRows ? impressionsBalance(i.ucValues.map((tag) => ({ tag, impressions: byTag.get(tag)!.impressions }))) : null,
     costRead: i.adRows != null,
     costError: i.adRows ? null : (i.costError ?? 'not read'),
     costThroughEt: i.adRows ? (i.costThroughEt ?? null) : null,

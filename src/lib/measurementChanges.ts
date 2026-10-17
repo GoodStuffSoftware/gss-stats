@@ -56,6 +56,12 @@ export function measurementNoteSince(etDay: string): string | null {
   return c ? `${c.id} (from ${c.dateEt}): ${c.note}` : null
 }
 
+/** The v1.99.2 note for a tagged new-account readout on `etDay` (the sign-in first-touch fallback lifts the tagged new-account count partly through measurement), else null before its date or while it is unmarked. */
+export function newAccountMeasurementNote(etDay: string): string | null {
+  const c = markedChanges().find((x) => x.id === 'v1.99.2')
+  return c && c.dateEt <= etDay ? `${c.id} (from ${c.dateEt}): ${c.note}` : null
+}
+
 /** The report lines for a read on `etDay`: a marker on the change's day, a "since" line on later
  * reads, nothing before it or while no date is set. Every change is listed, oldest first. */
 export function measurementReportLines(etDay: string): string[] {

@@ -67,6 +67,7 @@ import {
   SIGNUP_PROXY_NOTE,
   UPSELL_SIGNEDOUT_EXPECTED_NOTE,
   type AdsReadPlan,
+  type CoachCounts,
   type DecisionResult,
   type HealthResult,
   type KillRuleEvaluation,
@@ -88,7 +89,7 @@ import {
   reportLabelFor,
 } from '../../src/lib/adsRules'
 import type { AdsStore, AppendOutcome, PlacementDayRow } from '../../src/lib/adsStore'
-import { ARRIVALS_CAVEAT, costPer, etMidnightUtcMs, etTimeUtcMs, funnelStepRates, type CampaignFlight, type FunnelStepKey } from '../../src/lib/campaigns'
+import { ARRIVALS_CAVEAT, costPer, etMidnightUtcMs, etTimeUtcMs, funnelStepRates, type CampaignFlight, type FunnelStepKey, type StagedArm } from '../../src/lib/campaigns'
 import { etDateFromMs, gateRate, SMALL_SAMPLE_NOTE, type GatedRate, type HourPathCount } from '../../src/lib/popupEvents'
 import { addEtDays } from '../../src/lib/overview'
 import { splitPlacements, type AdDayRow, type CampaignStatus, type DeviceRow, type GeoRow, type HourlyRow, type RecommendationRow, type TargetingRow } from '../../src/lib/adsApi'
@@ -203,6 +204,10 @@ export interface TaggedCounts {
   completeRows: number
   flight3Asks: number
   coachShownPlace: number
+  /** Tagged /auth/success/<provider>/new rows (the headline new-account count; counts, not rates). */
+  newAccounts: number
+  /** Tagged coach-strip rows per tip and tour-opened: ET-day totals, never by hour, place or device. */
+  coach: CoachCounts
 }
 export interface FullRead {
   thresholds: number[]
@@ -218,6 +223,8 @@ export interface FullRead {
   kill: KillRuleEvaluation
   /** Flight 3 plans only: kill rules 1-4 in the numbered readout shape (the key is absent for flight 2 and the retest). */
   f3Rules?: RuleReadout[]
+  /** Flight 3 plans only: the arm (apps or search), for the arm's baseline text. */
+  f3Arm?: StagedArm
   /** signUpsAtMost is an UPPER bound ("at most N campaign sign-ups"), with both inputs. */
   decision:
     | (DecisionResult & {
@@ -426,6 +433,8 @@ function taggedCounts(s: TaggedSummary): TaggedCounts {
     completeRows: s.funnel.completed,
     flight3Asks: s.flight3Asks,
     coachShownPlace: s.coachShownPlace,
+    newAccounts: s.authSuccessSplit.new,
+    coach: s.coach,
   }
 }
 
@@ -600,7 +609,7 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
   // makes it incomplete (review L6): the sign-up bound would silently loosen without it.
   const complete = placementRows.ok && i.tagged.ok && siteRows.ok && returnRaw.ok && returnSites.ok && i.stored != null && !(decision && fbErr)
   return {
-    read: { thresholds: i.thresholds, spendThroughEt: i.spendThroughEt, cumulativeSpend, complete, errors, failedSources, failedDetails, placements: placementView, kill, ...(plan.flight3Arm ? { f3Rules: kill.rules.map((r) => killRuleReadout(r, { taggedArrivals: tagged?.summary.taggedArrivals })) } : {}), decision, segments, tagged, site, returns, play, firebase: fb && fb.ok ? fb.value : null, tagSplit },
+    read: { thresholds: i.thresholds, spendThroughEt: i.spendThroughEt, cumulativeSpend, complete, errors, failedSources, failedDetails, placements: placementView, kill, ...(plan.flight3Arm ? { f3Arm: plan.flight3Arm, f3Rules: kill.rules.map((r) => killRuleReadout(r, { taggedArrivals: tagged?.summary.taggedArrivals })) } : {}), decision, segments, tagged, site, returns, play, firebase: fb && fb.ok ? fb.value : null, tagSplit },
     siteRows,
     returns: returns ? { ok: true, value: returns } : { ok: false, error: returnRaw.ok ? 'returns unavailable' : returnRaw.error },
   }

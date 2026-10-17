@@ -118,7 +118,7 @@ Preconditions:
 - (Superseded: see the revised arms above for bid, keywords and devices.) Name "Best Sudoku - Search - Desktop intent - F3 Search"; utm_campaign `sudoku_funnel_f3_search`, medium `cpc`.
 - $10/day standard budget; Manual CPC $0.99 max (revised; was $0.60).
 - Revised: the "no ads" keyword family only, exact + phrase (flight 2's free-seeker terms dropped); flight 2's 10 negatives plus free, online free, printable and puzzle book (the earlier nytimes, nyt, easybrain, juego additions are not in the revised list).
-- ALL devices (revised: no mobile or tablet hard stop); US+CA Presence; English; 12:00-23:00 ET.
+- ALL devices (revised: no mobile or tablet hard stop); US+CA Presence; English; 12:00-24:00 ET (changed from 12:00-23:00 once flight 3 was live).
 - Fixed window Sunday 00:00 to Saturday 23:59:59 ET; end date set at create and again at enable.
 - AI Max off, Search partners off, Display expansion off, auto assets opted out.
 - No day-3 bid rule (retired).

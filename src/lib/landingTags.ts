@@ -41,4 +41,7 @@ export function landingTagLabel(value: string): string {
  * not activated), and the reason the card sends no query at all in that state. */
 export const LANDING_NOT_LIVE_TEXT = "Flight 3 isn't live yet"
 /** The one-line note under the donut. */
-export const LANDING_TAG_NOTE = 'The two ads rotate evenly, so the slice share reflects how well each ad converts to arrivals.'
+export const LANDING_TAG_NOTE =
+  "Slices are d0 devices (/return/<tag>/d0), which differ from the report's arrivals (new-visitor tagged rows). The two ads may not rotate evenly: check the report's impressions balance before reading a share as how well an ad converts."
+/** The caption before the balance check existed: it asserted even rotation. A saved layout that still carries it is moved to LANDING_TAG_NOTE on load (migrateLandingTagCaption). */
+export const LANDING_TAG_NOTE_LEGACY = 'The two ads rotate evenly, so the slice share reflects how well each ad converts to arrivals.'

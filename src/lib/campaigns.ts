@@ -123,7 +123,7 @@ export interface StagedArmConfig {
   ucValues: string[]
   dailyBudgetUsd: number
   hardCapUsd: number
-  /** The ad schedule's start (12:00-23:00 ET, as flight 2): the attribution lower bound. */
+  /** The ad schedule's start (serves 12:00-24:00 ET): the attribution lower bound. */
   flightStartTimeEt: string
   servingHoursEt: [number, number]
   notes: string
@@ -148,9 +148,9 @@ export const STAGED_FLIGHT_3: Record<StagedArm, StagedArmConfig> = {
     dailyBudgetUsd: 10,
     hardCapUsd: 70,
     flightStartTimeEt: '12:00',
-    servingHoursEt: [12, 23],
+    servingHoursEt: [12, 24],
     notes:
-      '"Best Sudoku - Display - Sudoku app placements - F3 Apps", budget resource 15948080534, utm google / display / sudoku_funnel_f3_apps_hero and sudoku_funnel_f3_apps_feat (two responsive display ads in the one campaign, HERO and FEATURES; the arm sums both, the bare sudoku_funnel_f3_apps is a catch-all). Flight 2\'s Apps setup re-run on the best-sudoku v1.99.x build: the same 17 Android app placements, optimized targeting off, manual CPC $0.35 max, F2 copy plus a price line (\"No ads. Passes from $1.99\"), US+CA, ad schedule 12:00-23:00 ET, $10/day, $70 cap over 7 serving days. Started 2026-10-17, ahead of the Play release (installs get the older Play app until it ships). Created PAUSED 2026-10-16 by the API tool; enabled by Mike\'s yes, which with the arm\'s dates (STAGED_FLIGHT_3_DATES) is the whole activation.',
+      '"Best Sudoku - Display - Sudoku app placements - F3 Apps", budget resource 15948080534, utm google / display / sudoku_funnel_f3_apps_hero and sudoku_funnel_f3_apps_feat (two responsive display ads in the one campaign, HERO and FEATURES; the arm sums both, the bare sudoku_funnel_f3_apps is a catch-all). Flight 2\'s Apps setup re-run on the best-sudoku v1.99.x build: the same 17 Android app placements, optimized targeting off, manual CPC $0.35 max, F2 copy plus a price line (\"No ads. Passes from $1.99\"), US+CA, ad schedule 12:00-24:00 ET, $10/day, $70 cap over 7 serving days. Started 2026-10-17, ahead of the Play release (installs get the older Play app until it ships). Created PAUSED 2026-10-16 by the API tool; enabled by Mike\'s yes, which with the arm\'s dates (STAGED_FLIGHT_3_DATES) is the whole activation.',
   },
   search: {
     label: 'Flight 3 — search, desktop intent',
@@ -170,9 +170,9 @@ export const STAGED_FLIGHT_3: Record<StagedArm, StagedArmConfig> = {
     dailyBudgetUsd: 10,
     hardCapUsd: 70,
     flightStartTimeEt: '12:00',
-    servingHoursEt: [12, 23],
+    servingHoursEt: [12, 24],
     notes:
-      '"Best Sudoku - Search - Desktop intent - F3 Search", budget resource 15958435831, utm google / cpc / sudoku_funnel_f3_search. A buyer-intent test on best-sudoku v1.99.0 (Mike, 2026-10-15; desk card ads-f3-16): the \"no ads\" keyword family only (sudoku no ads, sudoku without ads, sudoku app no ads, ad free sudoku and the rest), exact + phrase, F2\'s free-seeker terms dropped; manual CPC $0.99 max (a hard ceiling under $1, no day-3 raise); ALL devices, no mobile or tablet hard stop; F2\'s 10 negatives plus free, online free, printable and puzzle book; F2\'s RSA plus a price headline; US+CA, ad schedule 12:00-23:00 ET, $10/day, $70 cap over 7 serving days. No placements: its read plan has channel search. Expected volume is about 15-25 clicks a week, so one week will likely read inconclusive (under 20 asks). Started 2026-10-17, the prod web deploy day. Created PAUSED 2026-10-16 by the API tool; enabled by Mike\'s yes, which with the arm\'s dates (STAGED_FLIGHT_3_DATES) is the whole activation.',
+      '"Best Sudoku - Search - Desktop intent - F3 Search", budget resource 15958435831, utm google / cpc / sudoku_funnel_f3_search. A buyer-intent test on best-sudoku v1.99.0 (Mike, 2026-10-15; desk card ads-f3-16): the \"no ads\" keyword family only (sudoku no ads, sudoku without ads, sudoku app no ads, ad free sudoku and the rest), exact + phrase, F2\'s free-seeker terms dropped; manual CPC $0.99 max (a hard ceiling under $1, no day-3 raise); ALL devices, no mobile or tablet hard stop; F2\'s 10 negatives plus free, online free, printable and puzzle book; F2\'s RSA plus a price headline; US+CA, ad schedule 12:00-24:00 ET, $10/day, $70 cap over 7 serving days. No placements: its read plan has channel search. Expected volume is about 15-25 clicks a week, so one week will likely read inconclusive (under 20 asks). Started 2026-10-17, the prod web deploy day. Created PAUSED 2026-10-16 by the API tool; enabled by Mike\'s yes, which with the arm\'s dates (STAGED_FLIGHT_3_DATES) is the whole activation.',
   },
 }
 

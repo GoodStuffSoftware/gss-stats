@@ -17,6 +17,7 @@ import {
   p1Line,
   SIGNIN_ELIGIBLE_COUNT_NOTE,
   UPSELL_SIGNEDOUT_EXPECTED_NOTE,
+  type CoachCounts,
   type OutcomePopup,
   type RuleResult,
   reportLabelFor,
@@ -27,13 +28,13 @@ import {
 } from '../../src/lib/adsRules'
 import { GAME_START_DIFFICULTIES, POPUP_OUTCOME_TYPES, TOUR_EXIT_STEPS, TUTORIAL_COMPLETE_KINDS, etDateFromMs, gateRate, installOutcomeGapNote } from '../../src/lib/popupEvents'
 import { RAW_INSTALL_SIGNALS_LABEL, type StagedArm } from '../../src/lib/campaigns'
-import { measurementReportLines } from '../../src/lib/measurementChanges'
+import { measurementReportLines, newAccountMeasurementNote } from '../../src/lib/measurementChanges'
 import { noteRawText } from '../../src/lib/notes'
 import { F3_ARM_BASELINES, ruleReadoutLine, type Flight3Block } from '../../src/lib/flight3Rules'
 import { searchAdsSideLines } from '../../src/lib/searchAdsSide'
 import type { DiagnosticsSection, FullRead, MorningResult, PostflightResult, SpendSection } from './read'
 import type { FirebaseCounts } from './firebase'
-import type { TagSplit } from '../../src/lib/tagSplit'
+import { IMPRESSIONS_UNEVEN_GAP, type ImpressionsBalance, type TagSplit } from '../../src/lib/tagSplit'
 
 // `/game` rows are page views, not games played (ADR 0003): the registry label, lower-cased
 // for the middle of a sentence.
@@ -43,6 +44,14 @@ const money = (x: number | null | undefined) => (x == null ? '—' : `$${x.toFix
 const n = (x: number | null | undefined) => (x == null ? '—' : x.toLocaleString('en-US'))
 /** Mike's cost-per-arrival benchmark (2026-10-15): the F1/F2 in-app campaign, about $0.32 a tagged arrival. */
 export const COST_PER_ARRIVAL_BENCHMARK = 0.32
+/** Flight 3 baselines beside the cost per arrival (spec section 1): Apps $0.32-0.34 (F1/F2 in-app), Search $0.64 (F2 Search). Flight 2 and the retest keep the single $0.32 above. */
+export const F3_COST_PER_ARRIVAL_BENCHMARK_TEXT: Record<StagedArm, string> = {
+  apps: 'about $0.32-0.34, the F1/F2 in-app figure',
+  search: 'about $0.64, the F2 Search figure',
+}
+/** The two arrival definitions, labelled the same way wherever flight 3 prints them. The numbers differ on purpose: the report counts first-ever tagged beacons (a floor), the donut and the return reads count one /return/<tag>/d0 row per device. */
+export const ARRIVALS_TAGGED_ROWS_LABEL = 'arrivals (new-visitor tagged rows)'
+export const D0_DEVICES_LABEL = 'd0 devices (/return/<tag>/d0)'
 const pct = (x: number | null | undefined, dp = 2) => (x == null ? '—' : `${(x * 100).toFixed(dp)}%`)
 
 /** What the shared sync (src/lib/adsSync.ts) did before the read. */
@@ -124,6 +133,26 @@ function trackingCheckCounts(c: TrackingCounts, y?: TrackingCounts): string {
   return `tracking-check counts (tagged ET-day totals${y ? '; yesterday in brackets' : ''}): complete rows ${f((x) => x.completeRows)}, sign-in ask rows (placement, committed-repeat, committed-challenge) ${f((x) => x.flight3Asks)}, /coach/shown/place rows ${f((x) => x.coachShownPlace)}`
 }
 
+/** The impressions-balance check line (spec section 3): flags a split more than IMPRESSIONS_UNEVEN_GAP apart. Counts only: ad-level impressions per tag, no hour, place or device. */
+export function impressionsBalanceLine(b: ImpressionsBalance | null): string {
+  if (!b) return '  impressions balance: not checked (fewer than two ads with impressions)'
+  const label = (tag: string) => tag.split('_').pop() ?? tag
+  const shares = b.shares.map((x) => `${label(x.tag)} ${pct(x.share, 0)}`).join(' / ')
+  return b.uneven
+    ? `  impressions balance: UNEVEN: ${shares} of impressions; ad rotation isn't even, compare rates not totals`
+    : `  impressions balance: even enough (${shares} of impressions; flagged when the shares are more than ${pct(IMPRESSIONS_UNEVEN_GAP, 0)} apart)`
+}
+
+/** The tagged coach-strip line of a flight 3 morning read: per tip shown, dismissed and closed-at, plus tour-opened. Campaign-tagged ET-day totals only (cumulative, yesterday in brackets), counts only: never by hour, place or device. Tips sorted. */
+export function coachCountsLine(c: CoachCounts, y?: CoachCounts): string {
+  const f = (a: number, b: number) => `${n(a)}${y ? ` (${n(b)})` : ''}`
+  const group = (label: string, pick: (x: CoachCounts) => Record<string, number>) => {
+    const tips = [...new Set([...Object.keys(pick(c)), ...(y ? Object.keys(pick(y)) : [])])].sort()
+    return tips.length ? `${label} ${tips.map((t) => `${t} ${f(pick(c)[t] ?? 0, y ? (pick(y)[t] ?? 0) : 0)}`).join(', ')}` : `${label} none`
+  }
+  return `coach strip (tagged ET-day totals${y ? '; yesterday in brackets' : ''}; counts only): ${group('shown', (x) => x.shown)}; ${group('dismissed', (x) => x.dismissed)}; ${group('closed-at', (x) => x.closedAt)}; tour-opened ${f(c.tourOpened, y?.tourOpened ?? 0)}`
+}
+
 /** One static read caveat printed under the Apps arm's per-tag split (the only multi-tag arm). The Apps arm started 2026-10-17, ahead of the Play release. A Play-release-day marker will come later through the measurement-changes list. */
 export const APPS_PLAY_RELEASE_CAVEAT =
   'Read caveat: until the Play release ships, Apps-arm installs get the older Play app; in-app sign-ins after 30 minutes are untagged until v1.99.3 reaches Play.'
@@ -137,13 +166,15 @@ export const APPS_PLAY_RELEASE_CAVEAT =
 export function tagSplitLines(sp: TagSplit | null | undefined): string[] {
   if (!sp) return []
   const out = [
-    `Per-tag split (display only; every rule and total above reads the sum of the tags; counts only: tagged rows per tag, ET-day totals${sp.tags.some((t) => t.yesterday) ? ', yesterday in brackets' : ''}; cost per arrival is closed-day ad spend / tagged arrivals, "—" under 5 arrivals):`,
+    `Per-tag split (display only; every rule and total above reads the sum of the tags; counts only: tagged rows per tag, arrivals are new-visitor tagged rows (not the donut's /return/<tag>/d0 devices), ET-day totals${sp.tags.some((t) => t.yesterday) ? ', yesterday in brackets' : ''}; cost per arrival is closed-day ad spend / tagged arrivals, "—" under 5 arrivals):`,
   ]
   for (const t of sp.tags) {
     const f = (pick: (c: typeof t.total) => number) => `${n(pick(t.total))}${t.yesterday ? ` (${n(pick(t.yesterday))})` : ''}`
-    const cost = sp.costRead ? `; ad spend ${money(t.cost)} (${n(t.clicks)} clicks, ${n(t.impressions)} impr), cost per arrival ${money(t.costPerArrival)}` : ''
+    const share = t.impressionShare == null ? '' : `, ${pct(t.impressionShare, 0)} of tagged-ad impressions`
+    const cost = sp.costRead ? `; ad spend ${money(t.cost)} (${n(t.clicks)} clicks, ${n(t.impressions)} impr${share}), cost per arrival ${money(t.costPerArrival)}` : ''
     out.push(`  ${t.tag}: arrivals ${f((c) => c.arrivals)}, completes ${f((c) => c.completes)}, sign-in asks ${f((c) => c.asks)}, new accounts ${f((c) => c.newAccounts)}${cost}`)
   }
+  if (sp.costRead) out.push(impressionsBalanceLine(sp.balance))
   if (sp.untagged) out.push(`  untagged: ${n(sp.untagged.ads)} ad(s) whose final URLs carry no usable utm_campaign for this arm; ad spend ${money(sp.untagged.cost)} (${n(sp.untagged.clicks)} clicks, ${n(sp.untagged.impressions)} impr), not assigned to a tag`)
   if (sp.unsplitHits) out.push(`  not on a tag: ${n(sp.unsplitHits)} tagged hit(s) have no campaign tag on the row`)
   out.push(sp.costRead ? `  ad cost through ${sp.costThroughEt ?? '—'} (closed days; Google Ads ad_group_ad, read-only)` : `  ad cost: not read (${sp.costError ?? 'unknown'})`)
@@ -163,6 +194,7 @@ export function flight3RulesLines(b: Flight3Block): string[] {
 
 export function fullReadLines(r: FullRead, title: string, opts: { postflight?: boolean; f3Block?: boolean } = {}): string[] {
   const promoNote = promoArmNoteApplies(r, !!opts.postflight)
+  const isF3 = !!r.f3Rules
   const out: string[] = [`=== ${title} (cumulative ${money(r.cumulativeSpend)}, closed days through ${r.spendThroughEt ?? '—'}) — ${r.complete ? 'complete' : 'INCOMPLETE, retried next run'} ===`]
   if (r.f3Rules && opts.f3Block) out.push('Kill rules and Proposal: see the F3 rules block above (rules 1-4).')
   else {
@@ -182,7 +214,7 @@ export function fullReadLines(r: FullRead, title: string, opts: { postflight?: b
   if (t) {
     const s = t.summary
     out.push(
-      `Tagged funnel (campaign tag only, exclusions applied): ${n(s.taggedArrivals)} arrivals (floor), ${n(s.taggedHits)} hits; ${GAME_VIEWS} ${n(s.funnel.played)}; asks ${n(s.asks.total)} (placement ${n(s.asks.byPath['/signin-prompt/placement'])}, streak ${n(s.asks.byPath['/signin-prompt/streak'])}, tutorial ${n(s.asks.byPath['/signin-prompt/tutorial'])}, ${(['committed-repeat', 'committed-challenge'] as const).map((k) => (s.asks.byPath[`/signin-prompt/${k}`] ? `${k} ${n(s.asks.byPath[`/signin-prompt/${k}`])}, ` : '')).join('')}promo ${n(s.asks.byPath['/promo-first50/shown'])}${s.asks.otherShownReasons ? `, other sign-in reasons ${n(s.asks.otherShownReasons)}` : ''}); accepts ${n(s.accepts.total)}; auth redirect ${n(s.authRedirect)}, auth success ${n(s.authSuccess)}`,
+      `Tagged funnel (campaign tag only, exclusions applied): ${n(s.taggedArrivals)} ${isF3 ? `${ARRIVALS_TAGGED_ROWS_LABEL}, a floor` : 'arrivals (floor)'}, ${n(s.taggedHits)} hits; ${GAME_VIEWS} ${n(s.funnel.played)}; asks ${n(s.asks.total)} (placement ${n(s.asks.byPath['/signin-prompt/placement'])}, streak ${n(s.asks.byPath['/signin-prompt/streak'])}, tutorial ${n(s.asks.byPath['/signin-prompt/tutorial'])}, ${(['committed-repeat', 'committed-challenge'] as const).map((k) => (s.asks.byPath[`/signin-prompt/${k}`] ? `${k} ${n(s.asks.byPath[`/signin-prompt/${k}`])}, ` : '')).join('')}promo ${n(s.asks.byPath['/promo-first50/shown'])}${s.asks.otherShownReasons ? `, other sign-in reasons ${n(s.asks.otherShownReasons)}` : ''}); accepts ${n(s.accepts.total)}; auth redirect ${n(s.authRedirect)}, auth success ${n(s.authSuccess)}`,
     )
     out.push(`  ${trackingCheckCounts({ completeRows: s.funnel.completed, flight3Asks: s.flight3Asks, coachShownPlace: s.coachShownPlace })}`)
     // Not a rate (review finding, 2026-09-26): "asks" counts event rows within a tagged
@@ -190,7 +222,7 @@ export function fullReadLines(r: FullRead, title: string, opts: { postflight?: b
     // units with no shared visitor id to join them on, so this is a count pair, not a percent.
     // acceptRate IS a real rate (accepts/asks — the same popup, the same session).
     if (promoNote) out.push(`  promo asks: ${promoArmAbsentNote()}`)
-    out.push(`  ${n(s.asks.total)} asks · ${n(s.taggedArrivals)} arrivals; accept rate ${formatGated(t.acceptRate)}; cost per tagged arrival ${money(t.costPerArrival)} (cumulative spend / tagged arrivals; benchmark about ${money(COST_PER_ARRIVAL_BENCHMARK)}, the F1/F2 in-app figure)`)
+    out.push(`  ${n(s.asks.total)} asks · ${n(s.taggedArrivals)} ${isF3 ? ARRIVALS_TAGGED_ROWS_LABEL : 'arrivals'}; accept rate ${formatGated(t.acceptRate)}; cost per tagged arrival ${money(t.costPerArrival)} (cumulative spend / tagged arrivals; benchmark ${isF3 && r.f3Arm ? F3_COST_PER_ARRIVAL_BENCHMARK_TEXT[r.f3Arm] : `about ${money(COST_PER_ARRIVAL_BENCHMARK)}, the F1/F2 in-app figure`})`)
     out.push(`  dismisses (read separately): sign-in ${n(s.dismisses.signinPrompt)}, promo ${n(s.dismisses.promoFirst50)}`)
     out.push(`  install: prompt shown ${n(s.install.promptShown)}, taps ${n(s.install.taps)}, installed ${n(s.install.installed)} [${installOutcomeGapNote()}]; ${RAW_INSTALL_SIGNALS_LABEL} ${n(s.install.rawSignals)}; signin-eligible (count of asks) earned ${n(s.signinEligible.earned)}, capped ${n(s.signinEligible.capped)}, unearned ${n(s.signinEligible.unearned)}`)
     const tp1 = p1Line(s.p1)
@@ -218,7 +250,7 @@ export function fullReadLines(r: FullRead, title: string, opts: { postflight?: b
   }
   if (r.returns) {
     const fmt = (c: Record<string, number>, rates: Record<string, number | null>) =>
-      `d0 ${n(c.d0)}; ` + ['d1', 'd2-7', 'd8-14', 'd15-30', 'd31-60'].map((b) => `${b} ${formatGated(gateRate(c[b], c.d0))}`).join(', ')
+      `${isF3 ? D0_DEVICES_LABEL : 'd0'} ${n(c.d0)}; ` + ['d1', 'd2-7', 'd8-14', 'd15-30', 'd31-60'].map((b) => `${b} ${formatGated(gateRate(c[b], c.d0))}`).join(', ')
     out.push(`Returns /return/<uc>/ (attributed by the path): web ${fmt(r.returns.web, r.returns.webRates)}`)
     out.push(`  app ${fmt(r.returns.app, r.returns.appRates)}`)
   }
@@ -272,6 +304,12 @@ function header(r: MorningResult | PostflightResult, kind: string): string[] {
   ]
 }
 
+/** Tagged new accounts, cumulative, for the flight 3 "Tagged so far" line: /auth/success/<provider>/new rows, counts not rates, with the v1.99.2 measurement-change caveat once that date has come. */
+function newAccountsText(count: number, readAt: string): string {
+  const note = newAccountMeasurementNote(etDateFromMs(Date.parse(readAt)))
+  return `; tagged new accounts ${n(count)} cumulative (/auth/success/<provider>/new rows; counts, not rates${note ? `; measurement change ${note}` : ''})`
+}
+
 export function formatMorningReport(r: MorningResult): string {
   const out = header(r, r.mode === 'health-only' ? 'release-health backstop' : 'morning read')
   if (r.failures.length) out.push(`READ FAILED: ${r.failureDetails.join("; ")}`)
@@ -283,12 +321,13 @@ export function formatMorningReport(r: MorningResult): string {
     const t = r.tagged
     out.push(
       t.ok
-        ? `Tagged so far: ${n(t.cumulative!.taggedArrivals)} arrivals (floor), ${n(t.cumulative!.taggedHits)} hits, ${n(t.cumulative!.asks)} asks, ${n(t.cumulative!.accepts)} accepts, ${n(t.cumulative!.authSuccess)} auth successes; yesterday ${n(t.yesterday!.taggedArrivals)} arrivals, ${n(t.yesterday!.asks)} asks; ${trackingCheckCounts(t.cumulative!, t.yesterday!)}${r.flight3 ? `; cost per complete row ${money(r.flight3.costPerRow.cumulative)} (yesterday ${money(r.flight3.costPerRow.yesterday)})` : ''}`
+        ? `Tagged so far: ${n(t.cumulative!.taggedArrivals)} ${r.flight3 ? `${ARRIVALS_TAGGED_ROWS_LABEL}, a floor` : 'arrivals (floor)'}, ${n(t.cumulative!.taggedHits)} hits, ${n(t.cumulative!.asks)} asks, ${n(t.cumulative!.accepts)} accepts, ${n(t.cumulative!.authSuccess)} auth successes; yesterday ${n(t.yesterday!.taggedArrivals)} arrivals, ${n(t.yesterday!.asks)} asks; ${trackingCheckCounts(t.cumulative!, t.yesterday!)}${r.flight3 ? `; cost per complete row ${money(r.flight3.costPerRow.cumulative)} (yesterday ${money(r.flight3.costPerRow.yesterday)})${newAccountsText(t.cumulative!.newAccounts, r.readAt)}` : ''}`
         : `Tagged: NOT READ (${t.error})`,
     )
+    if (r.flight3 && t.ok) out.push(`  ${coachCountsLine(t.cumulative!.coach, t.yesterday!.coach)}`)
     out.push(...tagSplitLines(r.tagSplit))
     if (r.preflightGate) out.push(r.preflightGate.ok ? preflightGateLine(r.preflightGate.counts) : `Pre-flight gate: NOT READ (${r.preflightGate.error})`)
-    out.push(...firstSessionLines(r.firstSession))
+    out.push(...firstSessionLines(r.firstSession, !!r.flight3))
     if (r.flight3) out.push(...flight3RulesLines(r.flight3))
     if (r.searchAdsSide) out.push(...searchAdsSideLines(r.searchAdsSide))
     const th = r.thresholds
@@ -331,7 +370,9 @@ export function firstSessionFigureText(f: FirstSessionFigure): string {
 }
 
 /** The first-session funnel block (informational only: never a kill rule, never a push). */
-export function firstSessionLines(fs: MorningResult['firstSession']): string[] {
+export function firstSessionLines(fs: MorningResult['firstSession'], f3 = false): string[] {
+  // Flight 3 labels the arrivals step as the /return/<tag>/d0 device count, so it reads apart from the report's tagged-row arrivals.
+  const stepLabels = f3 ? { ...FIRST_SESSION_STEP_LABELS, arrivals: D0_DEVICES_LABEL } : FIRST_SESSION_STEP_LABELS
   if (!fs) return ['First-session funnel: not read (tagged beacon rows unavailable)']
   const f = fs.funnel
   const out = [
@@ -343,8 +384,8 @@ export function firstSessionLines(fs: MorningResult['firstSession']): string[] {
     allUntracked(keys.map((k) => figs[k])) ? `  ${label}: ${NOT_YET_TRACKED} (no rows yet)` : `  ${label}: ${keys.map((k) => `${k} ${firstSessionFigureText(figs[k])}`).join('; ')}`
   for (const k of FIRST_SESSION_STEPS) {
     const st = f.steps[k]
-    const vs = st.vsParent ? `; vs ${FIRST_SESSION_STEP_LABELS[st.vsParent.parent]} ${formatGated(st.vsParent)}` : ''
-    out.push(`  ${FIRST_SESSION_STEP_LABELS[k]}: ${firstSessionFigureText(st)}${st.tracked === false ? '' : vs}`)
+    const vs = st.vsParent ? `; vs ${stepLabels[st.vsParent.parent]} ${formatGated(st.vsParent)}` : ''
+    out.push(`  ${stepLabels[k]}: ${firstSessionFigureText(st)}${st.tracked === false ? '' : vs}`)
     // The v1.97.0 first-run counters follow the tour outcomes. The first is NOT a further step:
     // /tour/exit-at/<stage> fires only on a skip, straight after /tour/skip, so it is the tour
     // skip rows split by where (it sits under that line and is labelled so). The counted game

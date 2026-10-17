@@ -655,6 +655,39 @@ export const FLIGHT3_ASK_PATHS = ['/signin-prompt/placement', '/signin-prompt/co
  * (lib/splitGuard.ts), so it is only ever read as a campaign-tagged ET-day total, never by
  * hour, place or device. */
 export const COACH_SHOWN_PLACE_PATH = '/coach/shown/place'
+/** Tagged coach-strip row counts (the F3 report line): per tip for `/coach/shown/<tip>`,
+ * `/coach/dismissed/<tip>` and `/coach/closed-at/<tip>`, plus `/coach/tour-opened`. Counts only,
+ * ET-day totals (the first three are split-refused paths, read with `hr` NULL; tour-opened is
+ * windowed by its hour bucket at an ET midnight): never an hour, a place or a device. */
+export interface CoachCounts {
+  shown: Record<string, number>
+  dismissed: Record<string, number>
+  closedAt: Record<string, number>
+  tourOpened: number
+}
+export const COACH_TOUR_OPENED_PATH = '/coach/tour-opened'
+export function emptyCoachCounts(): CoachCounts {
+  return { shown: {}, dismissed: {}, closedAt: {}, tourOpened: 0 }
+}
+const COACH_TIP_PREFIXES = [
+  ['/coach/shown/', 'shown'],
+  ['/coach/dismissed/', 'dismissed'],
+  ['/coach/closed-at/', 'closedAt'],
+] as const
+/** Adds one tagged row to `c` when its path is a coach-strip path; any other path is ignored. */
+export function addCoachRow(c: CoachCounts, path: string, count: number): void {
+  if (path === COACH_TOUR_OPENED_PATH) {
+    c.tourOpened += count
+    return
+  }
+  for (const [prefix, key] of COACH_TIP_PREFIXES) {
+    if (!path.startsWith(prefix)) continue
+    const tip = path.slice(prefix.length)
+    if (tip === '' || tip.includes('/')) return
+    c[key][tip] = (c[key][tip] ?? 0) + count
+    return
+  }
+}
 export const ACCEPT_PATHS = ['/signin-prompt/accept', '/promo-first50/accept'] as const
 /** /popup-outcome/<popup> families, by lib/popupEvents.ts's internal id ('install' is the
  * wire name 'install-prompt'). */
@@ -768,6 +801,8 @@ export interface TaggedSummary {
   flight3Asks: number
   /** Tagged `/coach/shown/place` rows (the Apps day 1-2 tracking check). A real 0 when none. */
   coachShownPlace: number
+  /** Tagged coach-strip rows per tip (shown, dismissed, closed-at) and tour-opened: ET-day totals. */
+  coach: CoachCounts
   accepts: { total: number; byPath: Record<string, number> }
   /** Read separately, never summed — the two dialogs dismiss differently (spec section 11). */
   dismisses: { signinPrompt: number; promoFirst50: number }
@@ -800,6 +835,7 @@ export function summarizeTaggedRows(rows: readonly TaggedRow[], opts: { fromMs?:
     asks: { total: 0, byPath: Object.fromEntries(ASK_PATHS.map((p) => [p, 0])), otherShownReasons: 0 },
     flight3Asks: 0,
     coachShownPlace: 0,
+    coach: emptyCoachCounts(),
     accepts: { total: 0, byPath: Object.fromEntries(ACCEPT_PATHS.map((p) => [p, 0])) },
     dismisses: { signinPrompt: 0, promoFirst50: 0 },
     authRedirect: 0,
@@ -823,6 +859,7 @@ export function summarizeTaggedRows(rows: readonly TaggedRow[], opts: { fromMs?:
     }
     if ((FLIGHT3_ASK_PATHS as readonly string[]).includes(r.path)) s.flight3Asks += r.count
     if (r.path === COACH_SHOWN_PLACE_PATH) s.coachShownPlace += r.count
+    addCoachRow(s.coach, r.path, r.count)
     if ((ACCEPT_PATHS as readonly string[]).includes(r.path)) {
       s.accepts.total += r.count
       s.accepts.byPath[r.path] += r.count

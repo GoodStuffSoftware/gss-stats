@@ -21,7 +21,7 @@ The review ran partially (see "Not completed").
    The runbook's own Part A rule says Day N counts from the flight start as Day 1, and the read window is
    D+1..D+7, so the first read is the Day 2 morning read (08:37 ET). Both arms have
    `flightStartTimeEt: '12:00'` (`src/lib/campaigns.ts` STAGED_FLIGHT_3) and an ad schedule of
-   12:00-23:00 ET, so:
+   12:00-24:00 ET, so:
    - Day 2 report: cumulative = Day 1 (12:00-24:00) plus Day 2 up to 08:37; the bracket (yesterday) = Day 1.
      This is NOT the days 1-2 total.
    - Day 3 report: cumulative = days 1-2 plus Day 3 up to 08:37 (before serving starts, so close to the

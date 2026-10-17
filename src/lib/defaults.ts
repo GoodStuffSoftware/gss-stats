@@ -2,7 +2,7 @@ import type { DashboardConfig, DashboardPage, GlobalFilters, GroupMeta, LineSeri
 import { relativeRange, SINCE_FIRST_CAMPAIGN, SINCE_FIRST_UNTIL_LAST_CAMPAIGN } from './range'
 import { POPUPS, POPUP_RATE_SPECS, NO_OUTCOME_TRACKING_NOTE, SIGNIN_ELIGIBLE_CAVEAT } from './popupEvents'
 import { CAMPAIGNS } from './campaigns'
-import { LANDING_TAG_NOTE } from './landingTags'
+import { LANDING_TAG_NOTE, LANDING_TAG_NOTE_LEGACY } from './landingTags'
 import { BEST_SUDOKU_SITES } from './bestSudokuSites'
 import { normCardRef } from './metrics/validate'
 import { autoCaveatIds, isNoteIdHideable, widgetNoteScope } from './notes'
@@ -403,6 +403,23 @@ export function migratePopupCaveatTitles(pages: DashboardPage[]): DashboardPage[
       pageChanged = true
       const notes = w.notes ?? []
       return { ...w, title: m.newTitle, notes: notes.includes(m.noteId) ? notes : [...notes, m.noteId] }
+    })
+    if (!pageChanged) return p
+    anyPageChanged = true
+    return { ...p, widgets }
+  })
+  return anyPageChanged ? next : pages
+}
+
+/** Every load, not version-gated: a saved layout whose Flight 3 hero donut still carries the old caption (it asserted that the two ads rotate evenly) gets the new one. Matches the old text exactly, so a caption the owner has edited is left alone. Returns the same array when nothing matches. */
+export function migrateLandingTagCaption(pages: DashboardPage[]): DashboardPage[] {
+  let anyPageChanged = false
+  const next = pages.map((p) => {
+    let pageChanged = false
+    const widgets = p.widgets.map((w) => {
+      if (w.dimension !== 'landingTag' || w.caption !== LANDING_TAG_NOTE_LEGACY) return w
+      pageChanged = true
+      return { ...w, caption: LANDING_TAG_NOTE }
     })
     if (!pageChanged) return p
     anyPageChanged = true
@@ -1664,7 +1681,7 @@ export function normalizeConfig(raw: any): DashboardConfig {
     // whose title is STILL EXACTLY the old "name + caveat" string, moving the caveat to a
     // default caption instead. A title the user has since edited never matches, so it's
     // left untouched.
-    const withCaptionsMigrated = migratePopupCaveatTitles(pages)
+    const withCaptionsMigrated = migrateLandingTagCaption(migratePopupCaveatTitles(pages))
     // v13 migration (see CONFIG_VERSION and migrateNavV13): groups, the Best Sudoku short names,
     // the pre-v13 tab order as the stored order, Traffic's icon. Version-gated, so a later rename,
     // move or reorder is never undone. The order is data from here on: no reorder runs on load.
