@@ -63,6 +63,13 @@ describe('the Search label cut-offs', () => {
     expect(searchLabel(v(0.3), v(0.9))).toBe('bid-limited')
     expect(searchLabel(parseShare(0.9001, 'lost'), NA)).toBe('bid-limited')
   })
+  it('judges the whole percent the report prints: 29.5% prints 30% and is bid-limited, 29.4% prints 29% and is not', () => {
+    expect(shareText(v(0.295))).toBe('30%')
+    expect(searchLabel(v(0.295), v(0))).toBe('bid-limited')
+    expect(shareText(v(0.294))).toBe('29%')
+    expect(searchLabel(v(0.294), v(0))).toBe('fine')
+    expect(searchProposal(1, v(0.495))).toBe('PROPOSE')
+  })
   it('budget-limited when rank-lost is under 30% and budget-lost is 20% or more', () => {
     expect(searchLabel(v(0.29), v(0.2))).toBe('budget-limited')
     expect(searchLabel(v(0), v(0.55))).toBe('budget-limited')

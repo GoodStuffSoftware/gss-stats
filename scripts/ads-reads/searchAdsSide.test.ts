@@ -48,6 +48,8 @@ describe('the Search Ads-side GAQL', () => {
     expect(q).toContain('metrics.search_impression_share')
     expect(q).toContain('metrics.search_rank_lost_impression_share')
     expect(q).not.toContain('budget_lost')
+    expect(q).toContain('ad_group_criterion.negative = false')
+    expect(q).toContain("ad_group_criterion.status != 'REMOVED'")
     expect(q).not.toContain('segments.date,')
   })
   it('the fetchers send exactly those queries, read-only, and map the REST camelCase rows with sentinels left raw', async () => {

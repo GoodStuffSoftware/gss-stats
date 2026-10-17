@@ -317,9 +317,9 @@ export const searchDailyQuery = (campaignId: string, since: string, until: strin
 /** Campaign level, ONE row for the whole range (no date segment, so Google aggregates the shares itself). */
 export const searchRangeQuery = (campaignId: string, since: string, until: string): string =>
   `SELECT metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.average_cpc, ${SEARCH_SHARE_FIELDS} FROM campaign WHERE campaign.id = ${campaignId} AND segments.date BETWEEN '${since}' AND '${until}'`
-/** Keyword level (keyword_view), one row per keyword over the range. */
+/** Keyword level (keyword_view), one row per live positive keyword over the range (negatives and removed criteria left out, checked against the live API 2026-10-16: 20 rows became 18). */
 export const searchKeywordQuery = (campaignId: string, since: string, until: string): string =>
-  `SELECT ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, metrics.clicks, metrics.impressions, metrics.average_cpc, metrics.search_impression_share, metrics.search_rank_lost_impression_share FROM keyword_view WHERE campaign.id = ${campaignId} AND segments.date BETWEEN '${since}' AND '${until}'`
+  `SELECT ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, metrics.clicks, metrics.impressions, metrics.average_cpc, metrics.search_impression_share, metrics.search_rank_lost_impression_share FROM keyword_view WHERE campaign.id = ${campaignId} AND ad_group_criterion.negative = false AND ad_group_criterion.status != 'REMOVED' AND segments.date BETWEEN '${since}' AND '${until}'`
 
 export async function fetchSearchDaily(client: AdsClient, campaignId: string, since: string, until: string): Promise<SearchDayRaw[]> {
   assertKnownCampaign(campaignId)

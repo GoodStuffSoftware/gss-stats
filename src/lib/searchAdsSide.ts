@@ -103,9 +103,9 @@ export function shareText(s: Share): string {
       return `${Math.round(s.v * 100)}%`
   }
 }
-/** The figure a rule compares: null for n/a (never 0) and for "<10%" (not a lost share). */
+/** The figure a rule compares: null for n/a (never 0) and for "<10%" (not a lost share). A value is rounded to the whole percent shareText prints, so what the report shows is what the cut-off judged. */
 export function shareNumber(s: Share): number | null {
-  return s.kind === 'value' ? s.v : s.kind === 'above90' ? ABOVE_90 : null
+  return s.kind === 'value' ? Math.round(s.v * 100) / 100 : s.kind === 'above90' ? ABOVE_90 : null
 }
 
 export interface SearchMetricsView {
