@@ -23,6 +23,7 @@ export const REFUSED_SAMPLE_PATHS: readonly string[] = [
   '/coach/closed-at/place',
   '/coach/shown/place',
   '/ab/ask-order/signin-first/assigned',
+  '/funnel/purchase/web',
 ]
 
 /** Every segment value a refused beacon is known to carry, plus junk ('x', '1', ''). */

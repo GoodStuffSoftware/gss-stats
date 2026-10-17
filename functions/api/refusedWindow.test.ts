@@ -392,6 +392,7 @@ describe('the whole-days caption flag needs a refused row the geo query can coun
     expect(family('tour')).toEqual(['/tour/exit-at/%', '/tour/exit-at', '/tour/skip', '/tour/skip/%'])
     expect(family('coach')).toEqual(['/coach/dismissed/%', '/coach/closed-at/%', '/coach/shown/%'])
     expect(family('tutorial-complete')).toEqual(['/game/tutorial-complete/%'])
+    expect(family('funnel')).toEqual(['/funnel/%'])
     expect(family('game-complete-deferred')).toEqual(['/game/complete-deferred/%'])
     expect(family('auth-error')).toEqual([])
     // Other filters leave every pattern reachable (erring toward showing the caption).

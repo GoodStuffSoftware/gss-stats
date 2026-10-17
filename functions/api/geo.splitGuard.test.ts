@@ -74,6 +74,7 @@ const REFUSED = [
   '/tour/skip/later',
   '/coach/shown/place', '/coach/shown/hint', '/coach/dismissed/place', '/coach/closed-at/clash',
   '/ab/ask-order/signin-first/assigned', '/ab/ask-order/install-first/shown/signin', '/ab/ask-order/signin-first/install/installed',
+  '/funnel/trial-start', '/funnel/checkout-start/web', '/funnel/checkout-start/play', '/funnel/purchase/web', '/funnel/purchase/play',
 ]
 // Ordinary rows that share a prefix or neighbour the refused ones — none may be dropped.
 const ORDINARY = [
@@ -82,6 +83,7 @@ const ORDINARY = [
   '/tour/complete', '/tour/skipped', '/tour/skip-all', '/settings',
   '/signin-prompt/placement', '/install/prompt/android',
   '/coach/tour-opened', '/coach/shown', '/coach/dismissed', '/coach/closed-at', '/ab', '/ab/ask-order', '/ab/other/x',
+  '/funnel', '/funnels/x', '/funnel-test',
 ]
 
 function seed() {
@@ -123,6 +125,7 @@ describe('splitGuard module', () => {
       '/coach/closed-at/%',
       '/coach/shown/%',
       '/ab/ask-order/%',
+      '/funnel/%',
     ])
   })
 
@@ -137,7 +140,7 @@ describe('splitGuard module', () => {
         "path LIKE '/tour/skip' OR " +
         "path LIKE '/tour/skip/%' OR path LIKE '/coach/dismissed/%' OR " +
         "path LIKE '/coach/closed-at/%' OR path LIKE '/coach/shown/%' OR " +
-        "path LIKE '/ab/ask-order/%' OR instr(path, char(0)) > 0)",
+        "path LIKE '/ab/ask-order/%' OR path LIKE '/funnel/%' OR instr(path, char(0)) > 0)",
     ])
     expect(b).toEqual([])
   })
@@ -320,6 +323,49 @@ describe('onRequestPost applies the guard on every trigger, in every branch', ()
     expect(byPath.body.totals.pageviews).toBe(N_REFUSED + N_ORDINARY + 3)
 
     // The same rows through a refused split: gone, web and app alike.
+    const byDevice = await post({ dimension: 'device', includeEventBeacons: true, limit: 200, ...range })
+    expect(guardedSql(byDevice.calls[0].sql)).toBe(true)
+    expect(byDevice.body.totals.pageviews).toBe(N_ORDINARY)
+  })
+
+  it('paid-funnel rows (/funnel/...) are refused by every hour, place and device split, event beacons on or off', async () => {
+    // Seeded: 2 rows each of five /funnel/<step>[/<web|play>] shapes (in REFUSED) plus the bare '/funnel',
+    // '/funnels/x' and '/funnel-test' look-alikes (ORDINARY, kept).
+    const funnelRows = (rows: any[]) => rows.filter((r: any) => /^\/funnel\//i.test(String(r.key?.path ?? '')))
+    for (const includeEventBeacons of [true, false]) {
+      for (const dimension of ['hourEt', 'date', 'country', 'region', 'city', 'device', 'browser', 'os', 'screenwBucket']) {
+        const { body, calls } = await post({ dimension, includeEventBeacons, limit: 100, ...range })
+        expect(guardedSql(calls[0].sql), dimension).toBe(true)
+        expect(calls[0].sql, dimension).toContain("path LIKE '/funnel/%'")
+        if (includeEventBeacons) expect(body.totals.pageviews, dimension).toBe(N_ORDINARY)
+      }
+    }
+    const drilled = await post({ dimension: 'path', constraints: [{ field: 'country', value: 'US' }], includeEventBeacons: true, limit: 100, ...range })
+    expect(funnelRows(drilled.body.rows)).toEqual([])
+    expect(drilled.body.rows.map((r: any) => r.key.path)).toContain('/funnels/x')
+    const points = await post({ dimension: 'points', includeEventBeacons: true, limit: 100, ...range })
+    expect(sum(points.body.rows)).toBe(N_ORDINARY)
+  })
+
+  it('paid-funnel rows still count as totals: per ET day, per web/app site, and by path', async () => {
+    const ins = db.prepare('INSERT INTO hits (ts, site, path, country, device, visitor) VALUES (?, ?, ?, ?, ?, ?)')
+    for (let i = 0; i < 3; i++) ins.run(T + 10 + i, 'bestsudoku-app', '/funnel/purchase/play', 'CA', 'tablet', 'new')
+
+    const bySite = await post({ dimension: 'path', dims: ['path', 'site'], includeEventBeacons: true, limit: 200, ...range })
+    expect(guardedSql(bySite.calls[0].sql)).toBe(false)
+    const purchases = bySite.body.rows.filter((r: any) => r.key.path === '/funnel/purchase/play')
+    expect(sum(purchases.filter((r: any) => r.key.site === 'bestsudoku-app'))).toBe(3)
+    expect(sum(purchases.filter((r: any) => r.key.site === 'bestsudoku-web'))).toBe(2)
+
+    const byDay = await post({ dimension: 'dateEt', constraints: [{ field: 'path', value: '/funnel/purchase/play' }], includeEventBeacons: true, limit: 200, ...range })
+    expect(guardedSql(byDay.calls[0].sql)).toBe(false)
+    expect(sum(byDay.body.rows)).toBe(5)
+
+    const byPath = await post({ dimension: 'path', includeEventBeacons: true, limit: 200, ...range })
+    expect(guardedSql(byPath.calls[0].sql)).toBe(false)
+    expect(sum(byPath.body.rows.filter((r: any) => r.key.path === '/funnel/trial-start'))).toBe(2)
+    expect(byPath.body.totals.pageviews).toBe(N_REFUSED + N_ORDINARY + 3)
+
     const byDevice = await post({ dimension: 'device', includeEventBeacons: true, limit: 200, ...range })
     expect(guardedSql(byDevice.calls[0].sql)).toBe(true)
     expect(byDevice.body.totals.pageviews).toBe(N_ORDINARY)

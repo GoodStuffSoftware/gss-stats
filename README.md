@@ -239,7 +239,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
     unknown id a token shows "—", and so does a value the server withholds or cannot fully measure
     (too few, no data, a shorter span than the range). A token sends only its metric and window,
     so it can never ask for a split the catalog withholds: the counts-only rule (return, game
-    starts, completions, tutorial completions, tour skips and tour exits, coach-strip shows, dismisses and closes, ask-order A/B rows: no hour, place or device split, no visitor id)
+    starts, completions, tutorial completions, tour skips and tour exits, coach-strip shows, dismisses and closes, ask-order A/B and paid-funnel rows: no hour, place or device split, no visitor id)
     stays enforced on the server, where a sub-day range counts those rows over whole ET days. A
     chart's ↻ (or a metric card's own ↻ / Retry) refetches its caption's tokens along with the chart, and a token deleted from a
     caption or label stops loading; a live push refetches a token only when the server flagged that
@@ -832,14 +832,14 @@ there — not just the one drilled — can show the event rows just filtered dow
 carries a caption explaining why (see [`src/lib/drill.ts`](src/lib/drill.ts)
 `drillNeedsEventBeacons`).
 
-**Return, game-start, game-completion, tutorial-completion, tour-skip, tour-exit, coach-strip shown, dismiss and close and ask-order A/B rows are
+**Return, game-start, game-completion, tutorial-completion, tour-skip, tour-exit, coach-strip shown, dismiss and close, ask-order A/B and paid-funnel (trial, checkout, purchase) rows are
 counts only: never split by hour, place or device.** Rule: "counts only. Never tie beacon rows to a device, time or place." A geo
 chart that maps rows (the map/globe), groups by an hour, place or device dimension (`hourEt`,
 and the UTC `date`, whose count minus `dateEt`'s for the same day would give an evening band;
 `country`, `region`, `city`, `postal`, `continent`, `timezone`, `colo`, `org`; `device`,
 `browser`, `os`, `lang`, `screenw`, `screenwBucket`, `visitor`), or is drilled into one of them
 leaves `/return/…`, `/game/start/…`, `/game/complete/…`, `/game/complete-deferred/…`,
-`/game/tutorial-complete/…`, `/tour/skip`, `/tour/exit-at/…`, `/coach/dismissed/…`, `/coach/closed-at/…`, `/coach/shown/…` and `/ab/ask-order/…` rows out entirely, and any row whose
+`/game/tutorial-complete/…`, `/tour/skip`, `/tour/exit-at/…`, `/coach/dismissed/…`, `/coach/closed-at/…`, `/coach/shown/…`, `/ab/ask-order/…` and `/funnel/…` rows out entirely, and any row whose
 path contains a NUL byte (SQLite LIKE stops reading at one, so the SQL guard tests `instr(path, char(0))`
 too, in step with the JS matcher `isSplitRefusedPath`), whatever
 "Include event beacons" says, marks the response `meta.splitGuard: true`, and the chart says so in a caption.
@@ -893,7 +893,7 @@ inside) stay one constant away (`REFUSED_WINDOW_SNAP`). When the bounds meet, as
 ranges shorter than a day, these rows count zero. A range already on ET midnights (the date
 picker's ET days, a whole-day preset) runs exactly as before. Charts, `/api/completions` and
 the metric cards' page range (`window: 'page'`, sparkline days included) all follow it and say
-so in a caption: "Any return, game-start, completion, tutorial-completion, tour-skip, tour-exit, coach-strip shown, dismiss and close or ask-order A/B rows
+so in a caption: "Any return, game-start, completion, tutorial-completion, tour-skip, tour-exit, coach-strip shown, dismiss and close, ask-order A/B or paid-funnel rows
 here are counted over whole ET days." A chart shows it only when it can count one of those
 rows, so never under a path or path-family filter none of them matches (a site filter does not
 narrow it: it errs toward showing). A chart that leaves event beacons out (the default) counts none of them, since
@@ -1644,7 +1644,7 @@ polling. It is push, not a timer: nothing is sent while nothing happens.
 **Privacy: counts only (rows only).**
 
 - A refused row (`SPLIT_REFUSED_PATH_PATTERNS`: `/return`, game-complete, game-complete-deferred,
-  tutorial-complete, tour skip and exit, coach shown, dismissed and closed-at, game-start; any path containing a NUL byte counts as
+  tutorial-complete, tour skip and exit, coach shown, dismissed and closed-at, ask-order A/B, paid funnel, game-start; any path containing a NUL byte counts as
   refused too, because SQLite LIKE stops reading at a NUL) **never triggers or shifts a ping**: the
   beacon does not call `gss-live` for it. The beacon keeps its own copy of the list, pinned equal to
   this one by a literal in both repos' tests (`src/lib/splitGuard.beaconParity.test.ts`).
