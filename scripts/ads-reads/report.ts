@@ -29,7 +29,7 @@ import {
 } from '../../src/lib/adsRules'
 import { GAME_START_DIFFICULTIES, POPUP_OUTCOME_TYPES, TOUR_EXIT_STEPS, TUTORIAL_COMPLETE_KINDS, etDateFromMs, gateRate, installOutcomeGapNote } from '../../src/lib/popupEvents'
 import { RAW_INSTALL_SIGNALS_LABEL, type StagedArm } from '../../src/lib/campaigns'
-import { measurementReportLines, newAccountMeasurementNote } from '../../src/lib/measurementChanges'
+import { coachMeasurementNote, measurementReportLines, newAccountMeasurementNote } from '../../src/lib/measurementChanges'
 import { noteRawText } from '../../src/lib/notes'
 import { F3_ARM_BASELINES, ruleReadoutLine, type Flight3Block } from '../../src/lib/flight3Rules'
 import { searchAdsSideLines } from '../../src/lib/searchAdsSide'
@@ -145,13 +145,13 @@ export function impressionsBalanceLine(b: ImpressionsBalance | null): string {
 }
 
 /** The tagged coach-strip line of a flight 3 morning read: per tip shown, dismissed and closed-at, plus tour-opened. Campaign-tagged ET-day totals only (cumulative, yesterday in brackets), counts only: never by hour, place or device. Tips sorted. */
-export function coachCountsLine(c: CoachCounts, y?: CoachCounts): string {
+export function coachCountsLine(c: CoachCounts, y?: CoachCounts, meaningNote?: string | null): string {
   const f = (a: number, b: number) => `${n(a)}${y ? ` (${n(b)})` : ''}`
   const group = (label: string, pick: (x: CoachCounts) => Record<string, number>) => {
     const tips = [...new Set([...Object.keys(pick(c)), ...(y ? Object.keys(pick(y)) : [])])].sort()
     return tips.length ? `${label} ${tips.map((t) => `${t} ${f(pick(c)[t] ?? 0, y ? (pick(y)[t] ?? 0) : 0)}`).join(', ')}` : `${label} none`
   }
-  return `coach strip (tagged ET-day totals${y ? '; yesterday in brackets' : ''}; counts only): ${group('shown', (x) => x.shown)}; ${group('dismissed', (x) => x.dismissed)}; ${group('closed-at', (x) => x.closedAt)}; tour-opened ${f(c.tourOpened, y?.tourOpened ?? 0)}`
+  return `coach strip (tagged ET-day totals${y ? '; yesterday in brackets' : ''}; counts only): ${group('shown', (x) => x.shown)}; ${group('dismissed', (x) => x.dismissed)}; ${group('closed-at', (x) => x.closedAt)}; tour-opened ${f(c.tourOpened, y?.tourOpened ?? 0)}${meaningNote ? `; meaning change ${meaningNote}` : ''}`
 }
 
 /** One static read caveat printed under the Apps arm's per-tag split (the only multi-tag arm). The Apps arm started 2026-10-17, ahead of the Play release. A Play-release-day marker will come later through the measurement-changes list. */
@@ -325,7 +325,7 @@ export function formatMorningReport(r: MorningResult): string {
         ? `Tagged so far: ${n(t.cumulative!.taggedArrivals)} ${r.flight3 ? `${ARRIVALS_TAGGED_ROWS_LABEL}, a floor` : 'arrivals (floor)'}, ${n(t.cumulative!.taggedHits)} hits, ${n(t.cumulative!.asks)} asks, ${n(t.cumulative!.accepts)} accepts, ${n(t.cumulative!.authSuccess)} auth successes; yesterday ${n(t.yesterday!.taggedArrivals)} arrivals, ${n(t.yesterday!.asks)} asks; ${trackingCheckCounts(t.cumulative!, t.yesterday!)}${r.flight3 ? `; cost per complete row ${money(r.flight3.costPerRow.cumulative)} (yesterday ${money(r.flight3.costPerRow.yesterday)})${newAccountsText(t.cumulative!.newAccounts ?? 0, r.readAt)}` : ''}`
         : `Tagged: NOT READ (${t.error})`,
     )
-    if (r.flight3 && t.ok) out.push(`  ${coachCountsLine(t.cumulative!.coach ?? emptyCoachCounts(), t.yesterday!.coach ?? emptyCoachCounts())}`)
+    if (r.flight3 && t.ok) out.push(`  ${coachCountsLine(t.cumulative!.coach ?? emptyCoachCounts(), t.yesterday!.coach ?? emptyCoachCounts(), coachMeasurementNote(etDateFromMs(Date.parse(r.readAt))))}`)
     out.push(...tagSplitLines(r.tagSplit))
     if (r.preflightGate) out.push(r.preflightGate.ok ? preflightGateLine(r.preflightGate.counts) : `Pre-flight gate: NOT READ (${r.preflightGate.error})`)
     out.push(...firstSessionLines(r.firstSession, !!r.flight3))

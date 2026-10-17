@@ -53,5 +53,5 @@ export const COACH_TIP_FEATURES: readonly FeatureDef[] = [
 ]
 
 export const COACH_TIPS_CAPTION =
-  'Counts are rows per ET day, web and app combined. "Per shown" figures are plain ratios of two counts, not per-person rates: a tip is shown once per device, so a ratio can exceed 1. Latest day is the latest complete ET day.'
+  'Counts are rows per ET day, web and app combined. "Per shown" figures are plain ratios of two counts, not per-person rates: a tip is shown once per device, so a ratio can exceed 1. Latest day is the latest complete ET day. Reading rule per tip: shown, then dismissed, closed-at, or nothing. From v1.99.3, × closes one tip (it no longer retires the schedule) and nothing after shown/notes can also mean a note was written. Tip-to-tip comparisons and any "dismissed = stopped" reading are not comparable across v1.99.3.'
 export const COACH_TIPS_EMPTY_NOTE = "No coach data yet — the game version that sends it hasn't shipped"

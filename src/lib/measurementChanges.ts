@@ -35,7 +35,12 @@ export const MEASUREMENT_CHANGES: MeasurementChange[] = [
   {
     id: 'v1.99.3 Play',
     dateEt: null,
-    note: 'Play release of v1.99.3: Apps-arm installs get the new app and in-app sign-ins carry the first-touch tag from here',
+    note: 'Play release of v1.99.3: Apps-arm installs get the new app and in-app sign-ins carry the first-touch tag from here. Coach strip: from v1.99.3 the coach × closes one tip instead of retiring the schedule and writing a pencil note ends the notes tip with no beacon, so later-tip shown counts rise and a dismissed row no longer means the tips stopped; shown/notes with nothing after it can also mean a note was written',
+  },
+  {
+    id: 'v1.99.3 web',
+    dateEt: null,
+    note: 'web release of v1.99.3, coach strip meaning change: from v1.99.3 the coach × closes one tip instead of retiring the schedule and writing a pencil note ends the notes tip with no beacon, so later-tip shown counts rise and a dismissed row no longer means the tips stopped; shown/notes with nothing after it can also mean a note was written',
   },
 ]
 
@@ -59,6 +64,12 @@ export function measurementNoteSince(etDay: string): string | null {
 /** The v1.99.2 note for a tagged new-account readout on `etDay` (the sign-in first-touch fallback lifts the tagged new-account count partly through measurement), else null before its date or while it is unmarked. */
 export function newAccountMeasurementNote(etDay: string): string | null {
   const c = markedChanges().find((x) => x.id === 'v1.99.2')
+  return c && c.dateEt <= etDay ? `${c.id} (from ${c.dateEt}): ${c.note}` : null
+}
+
+/** The coach-strip meaning-change note for a coach readout on `etDay` (v1.99.3 web: × closes one tip, a written note ends the notes tip), else null before its date or while it is unmarked. */
+export function coachMeasurementNote(etDay: string): string | null {
+  const c = markedChanges().find((x) => x.id === 'v1.99.3 web')
   return c && c.dateEt <= etDay ? `${c.id} (from ${c.dateEt}): ${c.note}` : null
 }
 

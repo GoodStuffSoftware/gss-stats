@@ -18,6 +18,7 @@ import { fetchFeatureHealth, type FeatureHealthResponse } from '../api'
 import { HEALTH_CAPTION, HEALTH_STATUS_LABEL, featureIdOfView, formatRatio, ratio, type FeatureHealth } from '../lib/featureHealth'
 import { buildStepChartConfig } from '../lib/featureHealthChart'
 import { formatKey } from '../lib/charts'
+import { coachMeasurementNote } from '../lib/measurementChanges'
 import { COACH_TIPS_CAPTION, COACH_TIPS_EMPTY_NOTE, COACH_TIPS_VIEW } from '../lib/coachTips'
 import {
   ASK_ORDER_ASKS, ASK_ORDER_CALL_ASKS, ASK_ORDER_CAPTION, ASK_ORDER_EMPTY_NOTE, ASK_ORDER_GROUPS, ASK_ORDER_OUTCOMES, ASK_ORDER_SWITCH_MULTIPLE, ASK_ORDER_TAGS, ASK_ORDER_VIEW,
@@ -67,6 +68,8 @@ const coachTourOpened = computed(() => {
   const s = f?.steps.find((x) => x.id === 'opened')
   return f && s ? { label: f.label, blurb: f.blurb, latest: s.latest, range: s.range } : null
 })
+// The v1.99.3 coach meaning-change note: shown once its date is set and has come (against the latest complete day), nothing while null.
+const coachNote = computed(() => (model.value ? coachMeasurementNote(model.value.latestDay) : null))
 const coachTipRows = computed(() => (model.value?.features ?? []).filter((f) => f.id.startsWith('tip-')))
 
 // The Ask-order A/B: the pre-registered read (all days so far) and the range table (a column per
@@ -193,6 +196,7 @@ const ratioCells = (f: FeatureHealth, i: number) => {
         </table>
       </div>
       <p class="fh-caption" data-testid="coach-tips-caption">{{ COACH_TIPS_CAPTION }}</p>
+      <p v-if="coachNote" class="fh-caption" data-testid="coach-tips-measurement">{{ coachNote }}</p>
     </template>
 
     <!-- The Ask-order A/B -->
@@ -315,6 +319,7 @@ const ratioCells = (f: FeatureHealth, i: number) => {
         </table>
       </div>
       <p class="fh-caption" data-testid="feature-health-caption">{{ HEALTH_CAPTION }}</p>
+      <p v-if="coachNote" class="fh-caption" data-testid="feature-health-coach-measurement">Coach strip row: {{ coachNote }}</p>
     </template>
   </div>
 </template>

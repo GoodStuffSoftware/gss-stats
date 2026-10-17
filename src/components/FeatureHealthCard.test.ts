@@ -9,6 +9,7 @@ import { buildStepChartConfig } from '../lib/featureHealthChart'
 import { HEALTH_CAPTION, stepsViewFor, featureIdOfView, type FeatureHealth, type FeatureHealthModel } from '../lib/featureHealth'
 import { COACH_TIPS_CAPTION, COACH_TIPS_EMPTY_NOTE, COACH_TIPS_VIEW } from '../lib/coachTips'
 import { ASK_ORDER_CAPTION, ASK_ORDER_EMPTY_NOTE, ASK_ORDER_FEATURES, ASK_ORDER_VIEW, askOrderFeatureId } from '../lib/askOrder'
+import { MEASUREMENT_CHANGES } from '../lib/measurementChanges'
 import type { GlobalFilters } from '../types'
 
 const feature: FeatureHealth = {
@@ -166,6 +167,39 @@ describe('Coach tips card', () => {
     expect(tour.find('[data-col="range-opened"]').text()).toBe('9')
     expect(w.findAll('tr[data-tip]').map((r) => r.attributes('data-tip'))).toEqual(['tip-place', 'tip-hint', 'tour-opened'])
     expect(w.find('[data-testid="coach-tips-caption"]').text()).toBe(COACH_TIPS_CAPTION)
+  })
+
+  it('captions the reading rule and the v1.99.3 meaning change', async () => {
+    const w = await mountCoach(coachModel(true))
+    const cap = w.find('[data-testid="coach-tips-caption"]').text()
+    expect(cap).toContain('shown, then dismissed, closed-at, or nothing')
+    expect(cap).toContain('From v1.99.3, × closes one tip')
+    expect(cap).toContain('a note was written')
+    expect(cap).toContain('not comparable across v1.99.3')
+  })
+
+  describe('the v1.99.3 web measurement note', () => {
+    const web = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.99.3 web')!
+    afterEach(() => {
+      web.dateEt = null
+    })
+    it('shows nothing on the Coach tips card or the Feature health row while the date is null', async () => {
+      web.dateEt = null
+      const w = await mountCoach(coachModel(true))
+      expect(w.find('[data-testid="coach-tips-measurement"]').exists()).toBe(false)
+      const h = await mountCard('health')
+      expect(h.find('[data-testid="feature-health-coach-measurement"]').exists()).toBe(false)
+    })
+    it('shows it on both once the date has come, and not before it', async () => {
+      web.dateEt = '2026-10-14'
+      const w = await mountCoach(coachModel(true))
+      expect(w.find('[data-testid="coach-tips-measurement"]').text()).toContain('v1.99.3 web (from 2026-10-14)')
+      const h = await mountCard('health')
+      expect(h.find('[data-testid="feature-health-coach-measurement"]').text()).toContain('Coach strip row: v1.99.3 web')
+      web.dateEt = '2026-10-15'
+      const early = await mountCoach(coachModel(true))
+      expect(early.find('[data-testid="coach-tips-measurement"]').exists()).toBe(false)
+    })
   })
 
   it('says the game version has not shipped while no coach row has ever arrived', async () => {

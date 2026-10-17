@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Coach tip meaning change is marked.** v1.99.3 makes × close one tip and lets a written note end the notes tip; coach readouts flag the switch once its date is set.
+
 ## [0.50.0] — 2026-10-16
 
 ### Added
