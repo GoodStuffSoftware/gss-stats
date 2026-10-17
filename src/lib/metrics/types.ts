@@ -138,7 +138,7 @@ export type Display =
   | { as: 'date' } // a day (a 'time' metric): "Sep 26"
   | { as: 'ago' } // an instant (a 'time' metric), relative: "3h ago"
   | { as: 'status' } // the label note the value carries (e.g. where a spend figure came from), not the number
-  | { as: 'sparkline'; series: 'daily' }
+  | { as: 'sparkline'; series: 'daily'; days?: true } // days: also list the latest ET days' counts ("Oct 17 12 · Oct 18 9")
   | { as: 'text' }
 export type DisplayAs = Display['as']
 

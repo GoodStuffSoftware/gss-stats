@@ -202,6 +202,7 @@ export function validateCard(spec: CardSpec): string[] {
         if (asked.some((w) => !seriesTwin(def, w as WindowName))) errors.push(`${where}: a sparkline needs the page or attribution window over a metric with daily data`)
       }
       if (b.params?.country !== undefined || scope.has('country')) errors.push(`${where}: a sparkline cannot be split by country`)
+      if (d.days !== undefined && d.days !== true) errors.push(`${where}: a sparkline's days must be true`)
     }
     if (d.as === 'number' && d.deltas?.length) {
       const w = b.window ?? windows[0]

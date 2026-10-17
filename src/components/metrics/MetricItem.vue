@@ -70,6 +70,7 @@ const showCaption = computed(() => vm.value.captionTokens.length > 0 && props.it
         <polyline v-for="(pts, i) in spark.lines" :key="`l${i}`" :points="pts" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" />
         <circle v-for="(d, i) in spark.dots" :key="`d${i}`" :cx="d.x" :cy="d.y" r="1.5" fill="currentColor" />
       </svg>
+      <p v-if="vm.days" class="mi-days mono">{{ vm.days }}</p>
       <BarTrack v-if="item.display.as === 'bar'" :pct="barPct" />
       <p v-if="showCaption" class="mi-caption"><MetricLabel :tokens="vm.captionTokens" /></p>
     </template>
@@ -107,6 +108,7 @@ const showCaption = computed(() => vm.value.captionTokens.length > 0 && props.it
           <polyline v-for="(pts, i) in spark.lines" :key="`l${i}`" :points="pts" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" />
           <circle v-for="(d, i) in spark.dots" :key="`d${i}`" :cx="d.x" :cy="d.y" r="1.5" fill="currentColor" />
         </svg>
+        <p v-if="vm.days" class="mi-days mono">{{ vm.days }}</p>
         <BarTrack v-if="item.display.as === 'bar'" :pct="barPct" />
         <p v-if="showCaption" class="mi-tile-caption"><MetricLabel :tokens="vm.captionTokens" /></p>
       </StatTile>
@@ -181,6 +183,12 @@ const showCaption = computed(() => vm.value.captionTokens.length > 0 && props.it
 }
 .mi-spark-row {
   height: 18px;
+}
+.mi-days {
+  margin: 2px 0 0;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: rgb(var(--ink-3));
 }
 .mi-col {
   display: flex;

@@ -240,7 +240,7 @@ describe('defaultOverviewWidgets / defaultCampaignsWidgets', () => {
     const campaignsViews = defaultCampaignsWidgets()
       .filter((w) => w.dataset === 'campaigns')
       .map((w) => w.view)
-    expect(new Set(campaignsViews)).toEqual(new Set(['funnel', 'country', 'cost', 'returns', 'f3Rules']))
+    expect(new Set(campaignsViews)).toEqual(new Set(['funnel', 'country', 'cost', 'returns', 'f3Rules', 'f3Daily']))
     // Every campaigns panel left on that dataset is a card (v11); hour of day and flight day
     // are standard geo charts over the same tagged arrivals.
     for (const w of defaultCampaignsWidgets().filter((x) => x.dataset === 'campaigns')) expect(w.card, w.id).toBeDefined()

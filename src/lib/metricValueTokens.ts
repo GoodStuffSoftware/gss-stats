@@ -48,7 +48,7 @@ export interface MetricTokenRef {
   kind: ValueKind
 }
 
-const NUMBER_UNITS: ReadonlySet<Unit> = new Set(['device', 'row', 'pageview', 'completion', 'showing', 'signin', 'finish', 'day'])
+const NUMBER_UNITS: ReadonlySet<Unit> = new Set(['device', 'row', 'pageview', 'completion', 'showing', 'signin', 'finish', 'click', 'day'])
 const PATH_RE = /^metric:([A-Za-z0-9_.-]+)@([A-Za-z0-9]+)$/
 
 function metricKind(unit: Unit): ValueKind | null {
