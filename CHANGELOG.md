@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.54.0] — 2026-10-16
+
 ### Added
 - **Money funnel on the Features page.** A new Money funnel feature charts trials started, checkouts opened and purchases made, on the web and on Google Play, and it joins the Overview Feature health card.
 - **In-app install help is counted.** The Install prompt feature gains an In-app install help step for the help shown inside another app's browser.
