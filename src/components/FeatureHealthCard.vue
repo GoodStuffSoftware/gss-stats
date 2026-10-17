@@ -280,6 +280,7 @@ const ratioCells = (f: FeatureHealth, i: number) => {
           <span class="fh-chip" :class="`st-${stepsFeature.status}`" :title="stepsFeature.statusNote">{{ HEALTH_STATUS_LABEL[stepsFeature.status] }}</span>
           <span class="fh-blurb">{{ stepsFeature.blurb }}</span>
         </div>
+        <p v-if="stepsFeature.caption" class="fh-caption" data-testid="feature-caption">{{ stepsFeature.caption }}</p>
         <div class="fh-chart-canvas"><BaseChart v-if="chartConfig" :config="chartConfig" :drill-open="false" /></div>
       </div>
     </template>
@@ -320,6 +321,7 @@ const ratioCells = (f: FeatureHealth, i: number) => {
       </div>
       <p class="fh-caption" data-testid="feature-health-caption">{{ HEALTH_CAPTION }}</p>
       <p v-if="coachNote" class="fh-caption" data-testid="feature-health-coach-measurement">Coach strip row: {{ coachNote }}</p>
+      <p v-for="f in model.features.filter((x) => x.caption)" :key="f.id" class="fh-caption" :data-testid="`feature-health-caption-${f.id}`">{{ f.label }} row: {{ f.caption }}</p>
     </template>
   </div>
 </template>

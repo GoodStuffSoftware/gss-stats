@@ -101,6 +101,20 @@ describe('the config list', () => {
     expect(stepMatches(complete, '/game/complete/normal/easy\u0000x')).toBe(false)
   })
 
+  it('the Tour and Upsell features carry their flight 3 comparison captions; no other feature has one', () => {
+    const cap = (id: string) => FEATURES.find((f) => f.id === id)!.caption
+    expect(cap('tour')).toBe('/tour/start no longer counts tours opened from the coach strip (from v1.99.1).')
+    expect(cap('upsell')).toBe('Not comparable to flight 2: the guest trial changed in v1.99.1.')
+    expect(FEATURES.filter((f) => f.caption).map((f) => f.id).sort()).toEqual(['tour', 'upsell'])
+  })
+
+  it('assembleHealth passes a feature caption through and leaves the key off a feature without one', () => {
+    const n = flatSteps().length
+    const m = assembleHealth({ rows: [{ d: '2026-10-14', s: new Array(n).fill(1) }], before: FEATURES.map(() => 1), nowMs: NOW, rangeFrom: '2026-10-14', rangeTo: '2026-10-15' })
+    expect(m.features.find((f) => f.id === 'tour')!.caption).toBe(FEATURES.find((f) => f.id === 'tour')!.caption)
+    expect('caption' in m.features.find((f) => f.id === 'coach')!).toBe(false)
+  })
+
   it('has one feature per difficulty next to the overall games feature', () => {
     expect(FEATURES.map((f) => f.id)).toEqual(expect.arrayContaining(['games', 'games-easy', 'games-medium', 'games-hard', 'games-expert']))
   })

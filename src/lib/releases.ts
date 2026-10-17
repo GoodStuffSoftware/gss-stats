@@ -185,6 +185,17 @@ export const RELEASES: ReleaseMarker[] = [
     // Not `major`: same ET day as v1.97.0's labelled go-live marker (see above).
     note: 'Organic first-touch return count goes live; ad click ids not counted as organic; starting a real game ends the welcome tour',
   },
+  {
+    // Web live 2026-10-16 21:07Z = 17:07 ET (the pre-flight gate's release instant, scripts/ads-reads/beacon.ts).
+    // v1.99.0 is NOT its own marker: it never reached production (the BSK release owner shipped v1.99.0 plus a
+    // fix as v1.99.1), so this one carries the v1.99.0 content: the coach strip that replaces the first-run tour,
+    // the device-anchored guest trial and the new sign-in asks. Major: flight 3 is read against it. Listed before
+    // the v1.99.2 measurement entry below, which wins the same-day tie in the release panel.
+    version: 'v1.99.1',
+    dateEt: '2026-10-16',
+    note: 'Web: coach strip replaces the first-run tour, guest trial anchored to the device, new sign-in asks; flight 3 runs on this',
+    major: true,
+  },
   // Measurement changes, not features: each one's date and note come from lib/measurementChanges.ts
   // (the one place the date is entered; the web and the Play release of v1.99.2). Getters, so an entry
   // follows that config: while its date is null it is undated and datedReleases() drops it, so nothing

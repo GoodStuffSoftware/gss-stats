@@ -25,7 +25,7 @@
 //
 // POST { dimension?: 'mode'|'difficulty', breakdown?: 'mode'|'difficulty', since, until, sites?, limit? }
 
-import { parseGameCompletePath } from '../../src/lib/campaigns'
+import { applyAlwaysExclusions, parseGameCompletePath } from '../../src/lib/campaigns'
 import { buildCacheKeyUrl, cachedJson, ttlSecondsFor, type CacheLike } from '../_lib/edgeCache'
 import { WHEN_RE, SITE_TAG_RE } from '../../src/lib/range'
 import { refusedRowWindow, REFUSED_WINDOW_KEY } from '../../src/lib/splitGuard'
@@ -110,6 +110,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     w.push(`site IN (${sites.map(() => '?').join(', ')})`)
     b.push(...sites)
   }
+  // Manual production checks (utm_campaign=manual_check) are never visitors.
+  applyAlwaysExclusions(w, b)
   const sql = `SELECT path, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY path`
   const tooLarge = statementTooLarge(sql, b.length)
   if (tooLarge) return tooLarge

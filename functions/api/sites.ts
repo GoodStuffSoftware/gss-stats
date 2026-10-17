@@ -14,6 +14,7 @@
 // `geo`/`rum` are last-90-days counts, not all-time.
 
 import { popupExcludeClause } from '../../src/lib/popupEvents'
+import { applyAlwaysExclusions } from '../../src/lib/campaigns'
 import { cachedJson, type CacheLike } from '../_lib/edgeCache'
 import { cfAccountId } from '../_lib/cfAccount'
 
@@ -200,6 +201,7 @@ async function computeSitesResponse(ctx: Parameters<PagesFunction<Env>>[0]): Pro
     const w = ["site <> ''", 'ts >= ?']
     const b: unknown[] = [Date.now() - GEO_COUNT_WINDOW_MS]
     popupExcludeClause(w, b)
+    applyAlwaysExclusions(w, b) // manual production checks are never visitors
     const r = await ctx.env.gss_geo.prepare(`SELECT site, COUNT(*) c FROM hits WHERE ${w.join(' AND ')} GROUP BY site`).bind(...b).all()
     for (const row of (r.results ?? []) as any[]) {
       const tag = CANON_ALIAS[String(row.site)] ?? String(row.site)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { datedReleases, latestDatedRelease, newest, releaseAwaitingFullDay, releaseSubjectOn, type DatedRelease } from './releases'
+import { RELEASES, datedReleases, latestDatedRelease, newest, releaseAwaitingFullDay, releaseSubjectOn, type DatedRelease } from './releases'
 import { etMidnightMs } from './metrics/instrumentation'
 
 // Derived from the marker list so adding a release never breaks these.
@@ -46,6 +46,28 @@ describe('RELEASES order', () => {
   it('is listed oldest to newest (non-decreasing dates), which the same-date tie-break relies on', () => {
     const dates = dated.map((r) => r.dateEt)
     expect(dates.every((d, i) => i === 0 || dates[i - 1] <= d)).toBe(true)
+  })
+})
+
+describe('the flight 3 web releases', () => {
+  const at = (v: string) => RELEASES.findIndex((r) => r.version === v)
+  it('v1.99.1 web (live 2026-10-16 21:07Z) is a labelled marker on its ET day, listed before v1.99.2', () => {
+    const r = RELEASES[at('v1.99.1')]
+    expect(r).toMatchObject({ dateEt: '2026-10-16', major: true })
+    expect(at('v1.99.1')).toBeGreaterThan(at('v1.98.0'))
+    expect(at('v1.99.1')).toBeLessThan(at('v1.99.2'))
+  })
+  it('v1.99.0 has no marker of its own: it never went live (v1.99.1 carries it)', () => {
+    expect(at('v1.99.0')).toBe(-1)
+  })
+  it('the release panel picks the newest: v1.99.2 wins the 10-16 tie with v1.99.1, waiting on 10-16 and the subject two days on', () => {
+    expect(newest(datedReleases())?.version).toBe('v1.99.2')
+    expect(releaseAwaitingFullDay('2026-10-16')?.version).toBe('v1.99.2')
+    expect(releaseSubjectOn('2026-10-16')?.version).toBe('v1.98.0')
+    expect(releaseSubjectOn('2026-10-18')?.version).toBe('v1.99.2')
+  })
+  it('no Play-store marker is dated yet', () => {
+    expect(datedReleases().some((r) => /play/i.test(r.version))).toBe(false)
   })
 })
 

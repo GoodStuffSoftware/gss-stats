@@ -67,7 +67,10 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   range, not a per-day trend. `site` is not a split-guard dimension (an ET-day count of page views
   is not an hour, place or device split).
   [`src/lib/releases.ts`](src/lib/releases.ts) holds the hand-entered release dates (`hits` has
-  no app-version column; major releases get a labelled line, minor ones a short tick).
+  no app-version column; major releases get a labelled line, minor ones a short tick). The v1.99.1
+  web release (live 2026-10-16 21:07Z) is a labelled marker that carries the v1.99.0 content, since
+  v1.99.0 never went live on its own and so has no marker; the release panel takes the newest
+  release, v1.99.2 on that same day. No Play-store release is marked until its date is confirmed.
   [`src/lib/measurementChanges.ts`](src/lib/measurementChanges.ts) marks a day when *how we count*
   changed (v1.99.2's sign-in first-touch fallback): its one `dateEt` is entered by hand once the
   version is live, and (dated 2026-10-16 for the web). The Play release of v1.99.3 (still undated) is a
@@ -629,7 +632,10 @@ The **Feature health** card sits on the Best Sudoku Overview under the KPIs, and
 line per step and one point per ET day. Both read `/api/features`
 ([`functions/api/features.ts`](functions/api/features.ts)), web and app combined, and follow
 the page's range, sites and exclusions. Rows from the app's manual production checks
-(`manual_check` campaign or paths) never count here, even with known traffic shown.
+(`manual_check` campaign or paths) never count here, even with known traffic shown. A feature can
+carry a one-sentence caption, shown on its step chart and under the card table: Tour says
+`/tour/start` no longer counts tours opened from the coach strip (from v1.99.1), and Upsell says
+it is not comparable to flight 2 because the guest trial changed in v1.99.1.
 
 - **Card:** a row per feature with its status, and per step the count for the latest complete
   ET day, the day before and the selected range, plus the ratio of those counts.
@@ -1324,6 +1330,8 @@ retest reads print exactly what they did before (pinned byte for byte by `f2Repo
 Rows the app's own manual production checks write (`utm_campaign=manual_check`, `/return/manual_check/`
 paths) sit in the standing exclusions (`EXCLUSIONS` in `campaigns.ts`), so the campaign reads, the
 morning read and every chart or fact that applies "hide known test and household traffic" leave them out.
+A few readers have no such setting and always drop them: the pop-ups reader (`/api/popups`) and its
+two range facts, `/api/completions` and the site tag counts in `/api/sites`.
 
 **Flight 3 report gaps.** The flight 3 morning read also prints: an `impressions balance: UNEVEN | even
 enough` line under the per-tag split (each ad's share of tagged-ad impressions; UNEVEN when the shares are

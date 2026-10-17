@@ -20,6 +20,18 @@ describe('layoutMarkerLabels (owner-reported regression, 2026-09-26: overlapping
     expect(out.map((p) => p.label)).toEqual(['v1.86.40', 'v1.87.0'])
   })
 
+  it('the two same-day flight 3 releases (v1.99.1 and v1.99.2 share an ET day, hence an x) stagger instead of overlapping', () => {
+    const out = layoutMarkerLabels(
+      [
+        { x: 400, label: 'v1.99.1' },
+        { x: 400, label: 'v1.99.2' },
+      ],
+      { measureWidth: measure, areaLeft: 0, areaRight: 500 },
+    )
+    expect(out).toHaveLength(2)
+    expect(out[0].y).not.toBe(out[1].y)
+  })
+
   it('two markers close together stagger into different rows instead of overlapping', () => {
     // 'v1.86.40' is 8 chars = 48px wide; placed at x=10 it occupies roughly [14, 62]. A second
     // marker at x=20 would start well inside that span on the same row.

@@ -69,6 +69,20 @@ describe('FeatureHealthCard', () => {
     expect(w.find('tr[data-feature="made-up"]').text()).toContain('— · 0.33 · 0.40')
   })
 
+  it('shows a feature caption on its step chart and under the table, and nothing for a feature without one', async () => {
+    feature.caption = 'A made-up caption.'
+    try {
+      const chart = await mountCard(stepsViewFor('made-up'))
+      expect(chart.find('[data-testid="feature-caption"]').text()).toBe('A made-up caption.')
+      const table = await mountCard('health')
+      expect(table.find('[data-testid="feature-health-caption-made-up"]').text()).toBe('Made-up feature row: A made-up caption.')
+    } finally {
+      delete feature.caption
+    }
+    const plain = await mountCard(stepsViewFor('made-up'))
+    expect(plain.find('[data-testid="feature-caption"]').exists()).toBe(false)
+  })
+
   it('renders a step view as a chart with the status badge and no table', async () => {
     const w = await mountCard(stepsViewFor('made-up'))
     expect(w.find('table').exists()).toBe(false)

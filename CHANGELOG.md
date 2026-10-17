@@ -6,6 +6,13 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **The v1.99.1 web release is marked.** The Overview timeline shows the release flight 3 runs on (live 2026-10-16 21:07Z), and the release panel keeps reading the newest release.
+- **Tour and Upsell carry a comparison caption.** Tour says its start count no longer includes tours opened from the coach strip (from v1.99.1), and Upsell says it is not comparable to flight 2 because the guest trial changed in v1.99.1.
+
+### Fixed
+- **Manual checks stay out of pop-up, completion and site counts.** Rows from the app's manual production checks no longer count in the pop-ups readers, game completions or the site list, whatever the known-traffic setting.
+
 ## [0.51.0] — 2026-10-16
 
 ### Added

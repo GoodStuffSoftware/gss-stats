@@ -44,6 +44,8 @@ export interface FeatureDef {
   label: string
   /** One line: what the feature is, shown under the name on the Features page. */
   blurb: string
+  /** An optional one-sentence reading caveat (a counting change, a comparison that does not hold): shown on the feature's step chart and under the Feature health table. */
+  caption?: string
   steps: readonly StepDef[]
 }
 
@@ -70,6 +72,8 @@ export const FEATURES: readonly FeatureDef[] = [
     id: 'tour',
     label: 'Tour',
     blurb: 'The first-run tour: started, then completed or skipped.',
+    // v1.99.1 is the first web release with the coach strip live (v1.99.0 never shipped on its own); from it the strip opens the tour without a /tour/start row.
+    caption: '/tour/start no longer counts tours opened from the coach strip (from v1.99.1).',
     steps: [
       { id: 'start', label: 'Started', match: { exact: ['/tour/start'] } },
       { id: 'complete', label: 'Completed', match: { exact: ['/tour/complete'] }, ratioOf: { per: 'start' } },
@@ -115,6 +119,8 @@ export const FEATURES: readonly FeatureDef[] = [
     id: 'upsell',
     label: 'Upsell',
     blurb: 'The upgrade pop-up (any reason): shown, accepted or declined.',
+    // The device-anchored guest trial (and its limit pop-up) rode in v1.99.0, which went live as v1.99.1.
+    caption: 'Not comparable to flight 2: the guest trial changed in v1.99.1.',
     steps: [
       { id: 'shown', label: 'Shown', match: { prefix: ['/upsell/shown/'] } },
       // No rows yet (one shown row has arrived).
@@ -318,6 +324,7 @@ export interface FeatureHealth {
   id: string
   label: string
   blurb: string
+  caption?: string
   status: HealthStatus
   /** Why: "averaged 12.3 a day over the prior 7 days, none yesterday", "no rows yet", … */
   statusNote: string
@@ -410,6 +417,7 @@ export function assembleHealth(input: {
       id: feature.id,
       label: feature.label,
       blurb: feature.blurb,
+      ...(feature.caption ? { caption: feature.caption } : {}),
       status,
       statusNote,
       latest,

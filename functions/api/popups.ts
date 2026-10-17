@@ -45,6 +45,7 @@ import { WHEN_RE, SITE_TAG_RE } from '../../src/lib/range'
 import { excludeOwnClause } from '../../src/lib/ownExclusion'
 import { MAX_SITES, statementTooLarge } from '../../src/lib/queryLimits'
 import { refusedPathExcludeClause } from '../../src/lib/splitGuard'
+import { applyAlwaysExclusions } from '../../src/lib/campaigns'
 
 interface Env {
   gss_geo: D1Database
@@ -124,6 +125,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // protects (returns, game starts and completions, tutorial completions, tour skips and exits) stay out of
   // it. None is a pop-up event (lib/popupEvents.ts classifyPopupPath), so no count changes.
   refusedPathExcludeClause(w, b)
+  // Manual production checks (utm_campaign=manual_check, /return/manual_check/ paths) are never visitors.
+  applyAlwaysExclusions(w, b)
 
   // `pf` splits each hour bucket row-exactly at the install fix instant (lib/popupEvents.ts
   // INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS), so pre-fix gap rows stay unmeasured without

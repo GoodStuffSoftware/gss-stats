@@ -72,7 +72,7 @@
 // refusedWindowClause); popupRangePath and popupRangeDaily leave refused rows out altogether.
 // facts.test.ts checks every statement.
 
-import { applyExclusions, CAMPAIGNS, campaignAttributionClause, campaignAttributionStartMs, campaignById, etFlightRangeMs, ORGANIC_ARM_ID, type CampaignFlight } from '../campaigns'
+import { applyAlwaysExclusions, applyExclusions, CAMPAIGNS, campaignAttributionClause, campaignAttributionStartMs, campaignById, etFlightRangeMs, ORGANIC_ARM_ID, type CampaignFlight } from '../campaigns'
 import { excludeInstallGapUnmeasured, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, popupIncludeClause, sqlInt } from '../popupEvents'
 import { last7DatesBefore, siteWindowClause } from '../overview'
 import { addDays as addEtDays, etDateSql, etSameTimeWindow } from '../etTime'
@@ -570,6 +570,7 @@ export const FACTS: Record<FactId, FactDef> = {
       // The counts-only rule (lib/splitGuard.ts), as /api/popups applies it: this fact buckets by
       // hour, so the refused rows stay out. None is a pop-up event, so no count changes.
       refusedPathExcludeClause(w, b)
+      applyAlwaysExclusions(w, b) // manual production checks are never visitors (as /api/popups)
       const pf = pfColumn()
       const seg = segmentColumn(3_600_000, cuts)
       return {
@@ -685,6 +686,7 @@ export const FACTS: Record<FactId, FactDef> = {
       // popupRangePath's counts-only exclusion, so the twin reads the scalar's rows: no refused
       // row at all, whatever the range (none is a pop-up event, so no count changes).
       refusedPathExcludeClause(w, b)
+      applyAlwaysExclusions(w, b) // popupRangePath's manual-check exclusion, so the twin reads the same rows
       excludeInstallGapUnmeasured(w, b) // popupRangePath drops these in JS (isUnmeasuredGapRow); here in SQL
       return dailyStatement(w.join(' AND '), b, 'path')
     },

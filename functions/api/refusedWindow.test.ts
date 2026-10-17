@@ -12,6 +12,7 @@ import { onRequestPost as metricsPost } from './metrics'
 import { insertHits, installCaches, memoryCache, openHitsDb, pagesContext, postJson, sqliteD1 } from '../_lib/testing/hitsDb'
 import { isSplitRefusedPath, reachableRefusedPatterns, REFUSED_WINDOW_KEY, REFUSED_WINDOW_SNAP, refusedPathMatch, SPLIT_REFUSED_PATH_PATTERNS } from '../../src/lib/splitGuard'
 import { etDateSql, etWallTimeMs } from '../../src/lib/etTime'
+import { applyAlwaysExclusions } from '../../src/lib/campaigns'
 import { buildFact } from '../../src/lib/metrics/engine'
 import { FACTS, type FactId, type FactParams } from '../../src/lib/metrics/facts'
 import { excludeInstallGapUnmeasured } from '../../src/lib/popupEvents'
@@ -248,7 +249,10 @@ describe('ET-midnight bounds take the unchanged path', () => {
     const r = await completions({ since, until })
     expect(r.body.totals.pageviews).toBe(COMPLETE_DAY)
     expect(r.body.meta.refusedWholeDays).toBeUndefined()
-    expect(r.calls[0]).toEqual({ sql: "SELECT path, COUNT(*) AS c FROM hits WHERE ts >= ? AND ts < ? AND path LIKE '/game/complete/%' GROUP BY path", binds: [DAY, NEXT] })
+    // The statement the snap leaves alone, plus the always-on manual-check exclusion (no binds).
+    const always: string[] = []
+    applyAlwaysExclusions(always, [])
+    expect(r.calls[0]).toEqual({ sql: `SELECT path, COUNT(*) AS c FROM hits WHERE ts >= ? AND ts < ? AND path LIKE '/game/complete/%' AND ${always.join(' AND ')} GROUP BY path`, binds: [DAY, NEXT] })
     expect(r.cacheKey).not.toContain('refusedWindow')
     const sub = await completions({ since: iso(DAY + 1), until })
     expect(decodeURIComponent(sub.cacheKey)).toContain(`"refusedWindow":"${REFUSED_WINDOW_KEY}"`)
