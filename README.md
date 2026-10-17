@@ -79,7 +79,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   day, the tagged auth-success and new-account cards carry a caveat that the rise is partly
   measurement, and the ads read reports print a marker line on that day and a "since" line after it.
   The v1.99.3 coach-strip meaning change (× closes one tip; a written note ends the notes tip) is a
-  separate `v1.99.3 web` entry (dated 2026-10-17: live 05:58:55Z, 01:58 ET, before the first flight-3 serve; its note also lists the release's reset/duplicate fix, cross-device pop-up notices, no mid-game reloads and the save after email verification, and says notes-tip completions are not counted after it) plus a `v1.99.3 Play` entry (both coach-only; the Play one is undated and carries no install caveat): it marks the timeline
+  separate `v1.99.3 web` entry (dated 2026-10-17: live 05:58:55Z, 01:58 ET, before the first flight-3 serve; its note also lists the release's reset/duplicate fix, cross-device pop-up notices, no mid-game reloads and the save after email verification, and says notes-tip completions are not counted after it) plus a `v1.99.3 Play` entry (both coach-only; the Play one is dated 2026-10-17, promoted to production 06:09:41Z = 02:09 ET and reaching users when Google's review clears, and carries no install caveat; Android beacons carry no app version, so Android coach rows after it mix old and new semantics until updates spread): it marks the timeline
   and shows only on the coach readouts (Coach tips card, Feature health Coach row, the report's
   tagged coach line), never under the auth-success cards.
   Best Sudoku / Campaigns (its funnel, country, cost and return-visits panels are metric

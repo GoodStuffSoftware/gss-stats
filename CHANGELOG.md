@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.54.5] — 2026-10-17
+
+### Fixed
+- **The v1.99.3 Play release is marked on 2026-10-17.** It is dated at its production promotion (06:09:41Z, 02:09 ET) and listed after the web entry so it is the release panel's newest; Android coach rows after it are a mix of old and new semantics until updates spread, and the Apps Play-install caveat now waits on v1.99.2 or later clearing Play review.
+
 ## [0.54.4] — 2026-10-17
 
 ### Added

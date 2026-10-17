@@ -1,21 +1,27 @@
 // The v1.99.3 coach meaning-change entries (lib/measurementChanges.ts): the web one is dated
-// 2026-10-17 (live 05:58:55Z); the Play one ships undated. The coach readouts get the note and nothing else does.
-import { afterEach, describe, expect, it } from 'vitest'
+// 2026-10-17 (live 05:58:55Z); the Play one is dated 2026-10-17 (promoted 06:09:41Z, 02:09 ET). The coach readouts get the note and nothing else does.
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { MEASUREMENT_CHANGES, authMarkedChanges, coachMeasurementNote, markedChanges, measurementReportLines } from './measurementChanges'
 import { noteRawText } from './notes'
 
 const web = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.99.3 web')!
 const play = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.99.3 Play')!
 const WEB_DATE = web.dateEt
+const PLAY_DATE = play.dateEt
+beforeEach(() => {
+  play.dateEt = null // most tests read the web entry alone
+})
 afterEach(() => {
   web.dateEt = WEB_DATE
-  play.dateEt = null
+  play.dateEt = PLAY_DATE
 })
 
 describe('v1.99.3 coach entries', () => {
-  it('the web entry is dated 2026-10-17, the Play one is undated, and both name the coach change', () => {
+  it('the web entry is dated 2026-10-17, the Play one is dated 2026-10-17 too, and both name the coach change', () => {
     expect(web.dateEt).toBe('2026-10-17')
-    expect(play.dateEt).toBeNull()
+    expect(PLAY_DATE).toBe('2026-10-17')
+    expect(play.note).toContain('Committed 02:09 ET; reaches users when review clears. Android installs after it may be a mix of 19902 and 19903 until then.')
+    expect(play.note).toContain('Android coach rows after this are a mix of old and new semantics until updates spread')
     expect(web.note).toContain('×')
     expect(play.note).toContain('×')
     expect(play.coachOnly).toBe(true) // coach semantics only: no Play-install caveat on it

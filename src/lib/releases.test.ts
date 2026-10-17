@@ -60,19 +60,21 @@ describe('the flight 3 web releases', () => {
   it('v1.99.0 has no marker of its own: it never went live (v1.99.1 carries it)', () => {
     expect(at('v1.99.0')).toBe(-1)
   })
-  it('the release panel picks the newest: v1.99.3 web (10-17, listed after v1.99.2 Play) is newest; v1.99.2 wins the 10-16 tie with v1.99.1 as the subject once its day is full', () => {
-    expect(newest(datedReleases())?.version).toBe('v1.99.3 web')
-    expect(releaseAwaitingFullDay('2026-10-16')?.version).toBe('v1.99.3 web')
+  it('the release panel picks the newest: v1.99.3 Play (10-17 06:09:41Z, listed last so it wins the same-day tie over v1.99.3 web 05:58:55Z) is newest; v1.99.2 wins the 10-16 tie with v1.99.1 as the subject once its day is full', () => {
+    expect(newest(datedReleases())?.version).toBe('v1.99.3 Play')
+    expect(releaseAwaitingFullDay('2026-10-16')?.version).toBe('v1.99.3 Play')
     expect(releaseSubjectOn('2026-10-16')?.version).toBe('v1.98.0')
     expect(releaseSubjectOn('2026-10-18')?.version).toBe('v1.99.2')
-    expect(releaseSubjectOn('2026-10-19')?.version).toBe('v1.99.3 web')
+    expect(releaseSubjectOn('2026-10-19')?.version).toBe('v1.99.3 Play')
   })
-  it('v1.99.3 web is dated 2026-10-17 (live 05:58:55Z); only the v1.99.2 Play marker is dated among the Play ones, the v1.99.3 Play coach marker waits', () => {
+  it('v1.99.3 web is dated 2026-10-17 (live 05:58:55Z); the v1.99.3 Play marker is dated separately below', () => {
     expect(at('v1.99.3 web')).toBeGreaterThan(-1)
     expect(datedReleases().find((r) => r.version === 'v1.99.3 web')?.dateEt).toBe('2026-10-17')
   })
-  it('only the v1.99.2 Play marker is dated (2026-10-17); the v1.99.3 Play coach marker waits', () => {
-    expect(datedReleases().filter((r) => /play/i.test(r.version))).toMatchObject([{ version: 'v1.99.2 Play', dateEt: '2026-10-17' }])
+  it('both Play markers are dated 2026-10-17, v1.99.3 Play listed after v1.99.3 web (the later-timed one wins the same-day tie)', () => {
+    expect(datedReleases().filter((r) => /play/i.test(r.version))).toMatchObject([{ version: 'v1.99.2 Play', dateEt: '2026-10-17' }, { version: 'v1.99.3 Play', dateEt: '2026-10-17' }])
+    expect(at('v1.99.3 Play')).toBeGreaterThan(at('v1.99.3 web'))
+    expect(at('v1.99.3 web')).toBeGreaterThan(at('v1.99.2 Play'))
   })
 })
 

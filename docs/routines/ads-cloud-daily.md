@@ -340,7 +340,7 @@ Safari escape untagged; deferred rows lag at least 30 minutes after sign-in.
 
 Apps-arm Play caveat (printed under the Apps per-tag split whenever the split is read, one constant in
 the report code; when the split is not read, state it yourself from this paragraph): "Until the Play release ships, Apps-arm installs get the older Play app; in-app
-sign-ins after 30 minutes are untagged until v1.99.2 (19902) clears Play review, expected 10-17. Installs on 19800 aren't credited." Repeat it when you read Apps
+sign-ins after 30 minutes are untagged until v1.99.2 (19902) or later clears Play review, expected 10-17. Installs on 19800 aren't credited." Repeat it when you read Apps
 new-account and sign-in figures, and do not read a low Apps new-account count as a failed arm.
 
 ### Re-reads
