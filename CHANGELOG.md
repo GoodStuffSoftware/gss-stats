@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **The v1.99.2 web release is marked.** Tagged new-account readouts flag the day the sign-in first-touch fallback started; the Play marker now waits for v1.99.3.
+
 ### Fixed
 - **Manual checks stay out of feature cards.** Rows from the app's manual production checks no longer count on the Features page, even with known traffic shown.
 

@@ -4,7 +4,8 @@
 // step (decision D2-B, seedHiddenAutoCaveatsV16): a pre-v16 chart hides the hideable automatic
 // scope caveats it did not show, so it looks unchanged. Tests use the LAYOUT_VERSIONS key, never a
 // literal, so whichever slice lands second only renumbers the map.
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { MEASUREMENT_CHANGES } from './measurementChanges'
 import {
   CAPTION_MAX_CHARS,
   CONFIG_VERSION,
@@ -41,6 +42,15 @@ const widgetsOf = (cfg: DashboardConfig) => cfg.pages.find((p) => p.id === 'p1')
 const load = (w: Record<string, unknown>, version = CONFIG_VERSION) => widgetsOf(normalizeConfig(stored(version, [w])))[0]
 
 const BASE = { id: 'w1', i: 'w1', title: 'Pageviews', type: 'stat', dataset: 'geo', dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 0, w: 3, h: 3 }
+
+// These tests pin the layout/notes with no counting-change marker active; the live entries carry real dates, so blank them here.
+const LIVE_DATES = MEASUREMENT_CHANGES.map((c) => c.dateEt)
+beforeEach(() => {
+  for (const c of MEASUREMENT_CHANGES) c.dateEt = null
+})
+afterEach(() => {
+  MEASUREMENT_CHANGES.forEach((c, i) => (c.dateEt = LIVE_DATES[i]))
+})
 
 describe('captions: the layout version', () => {
   it('comes after dateEtTrends, and CONFIG_VERSION (written by this code) is the newest key, captions or a later one', () => {

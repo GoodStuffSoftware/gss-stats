@@ -6,7 +6,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { MEASUREMENT_CHANGES } from '../../src/lib/measurementChanges'
 import { fixtureDeps, type Fixture } from './cli'
 import { runMorningRead, runPostflightRead, type MorningOptions } from './read'
 import { formatMorningReport, formatPostflightReport } from './report'
@@ -70,6 +71,15 @@ async function scenarios(): Promise<Record<string, string>> {
   }
   return out
 }
+
+// The golden predates any counting-change marker: blank the live dates so its text stays byte-identical.
+const LIVE_DATES = MEASUREMENT_CHANGES.map((c) => c.dateEt)
+beforeEach(() => {
+  for (const c of MEASUREMENT_CHANGES) c.dateEt = null
+})
+afterEach(() => {
+  MEASUREMENT_CHANGES.forEach((c, i) => (c.dateEt = LIVE_DATES[i]))
+})
 
 describe('flight 2 and retest report output is unchanged by the flight 3 rule readouts', () => {
   it('reproduces the pre-F3 golden text and result JSON exactly', async () => {

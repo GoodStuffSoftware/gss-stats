@@ -11,6 +11,7 @@ import ChartCard from './ChartCard.vue'
 import { __resetMetricsStateForTests } from '../composables/useMetrics'
 import { defaultBestSudokuPopupsWidgets, defaultRetentionWidgets, syncCardWithView } from '../lib/defaults'
 import { autoCaveatIds } from '../lib/notes'
+import { MEASUREMENT_CHANGES } from '../lib/measurementChanges'
 import type { GlobalFilters, Widget } from '../types'
 
 const mounted: VueWrapper[] = []
@@ -19,7 +20,10 @@ function mountEditor(widget: Widget, isNew = false, filters?: GlobalFilters) {
   mounted.push(w)
   return w
 }
+// These expectations pin the caveats with no counting-change marker active; the live entries carry real dates, so blank them here.
+const LIVE_DATES = MEASUREMENT_CHANGES.map((c) => c.dateEt)
 beforeEach(() => {
+  for (const c of MEASUREMENT_CHANGES) c.dateEt = null
   __resetMetricsStateForTests()
   vi.stubGlobal(
     'fetch',
@@ -32,6 +36,7 @@ beforeEach(() => {
   )
 })
 afterEach(() => {
+  MEASUREMENT_CHANGES.forEach((c, i) => (c.dateEt = LIVE_DATES[i]))
   for (const w of mounted.splice(0)) w.unmount()
   __resetMetricsStateForTests()
   vi.unstubAllGlobals()
