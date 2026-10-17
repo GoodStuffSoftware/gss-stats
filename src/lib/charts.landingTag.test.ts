@@ -59,7 +59,8 @@ describe('landing-tag donut: labels and legend', () => {
   it('shows no cost, spend or impressions text in the labels, title or caption', () => {
     const w = widget()
     const cfg = buildChartConfig(w, resp([[F3_APPS_HERO_TAG, 6], [F3_APPS_FEATURES_TAG, 3]]))!
-    const text = JSON.stringify([w.title, w.caption, cfg.data.labels])
+    // The caption may POINT at the report's "impressions balance" line (it carries no figure); nothing else may name impressions.
+    const text = JSON.stringify([w.title, w.caption, cfg.data.labels]).replace("the report's impressions balance", '')
     expect(text).not.toMatch(/cost|spend|impress|\$|cpc|cpa/i)
   })
 })
@@ -71,7 +72,7 @@ describe('landing-tag donut: the default card and the pinned constants', () => {
     expect([w.x, w.y, w.w, w.h]).toEqual([0, 78, 6, 10])
     expect([w.type, w.dataset, w.dimension, w.metric]).toEqual(['doughnut', 'geo', 'landingTag', 'pageviews'])
     expect(w.caption).toBe(LANDING_TAG_NOTE)
-    expect(w.caption).toBe('The two ads rotate evenly, so the slice share reflects how well each ad converts to arrivals.')
+    expect(w.caption).not.toContain('The two ads rotate evenly') // the old caption asserted even rotation; the report's impressions balance check says whether it holds
     expect(w.filters?.rangeRel).toBe(SINCE_FIRST_CAMPAIGN)
     expect(w.filters?.siteSel).toEqual([])
     expect(w.filters?.excludeOwnVisits).toBe(false)

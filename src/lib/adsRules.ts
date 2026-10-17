@@ -674,6 +674,11 @@ const COACH_TIP_PREFIXES = [
   ['/coach/dismissed/', 'dismissed'],
   ['/coach/closed-at/', 'closedAt'],
 ] as const
+/** Whether `path` is a coach-strip path addCoachRow counts (a tip path with one segment, or tour-opened). */
+export function isCoachPath(path: string): boolean {
+  if (path === COACH_TOUR_OPENED_PATH) return true
+  return COACH_TIP_PREFIXES.some(([prefix]) => path.startsWith(prefix) && path.length > prefix.length && !path.slice(prefix.length).includes('/'))
+}
 /** Adds one tagged row to `c` when its path is a coach-strip path; any other path is ignored. */
 export function addCoachRow(c: CoachCounts, path: string, count: number): void {
   if (path === COACH_TOUR_OPENED_PATH) {
@@ -801,8 +806,8 @@ export interface TaggedSummary {
   flight3Asks: number
   /** Tagged `/coach/shown/place` rows (the Apps day 1-2 tracking check). A real 0 when none. */
   coachShownPlace: number
-  /** Tagged coach-strip rows per tip (shown, dismissed, closed-at) and tour-opened: ET-day totals. */
-  coach: CoachCounts
+  /** Tagged coach-strip rows per tip (shown, dismissed, closed-at) and tour-opened: ET-day totals. Created on the first coach row, so a summary with none (flight 2, the retest) is unchanged. */
+  coach?: CoachCounts
   accepts: { total: number; byPath: Record<string, number> }
   /** Read separately, never summed — the two dialogs dismiss differently (spec section 11). */
   dismisses: { signinPrompt: number; promoFirst50: number }
@@ -835,7 +840,6 @@ export function summarizeTaggedRows(rows: readonly TaggedRow[], opts: { fromMs?:
     asks: { total: 0, byPath: Object.fromEntries(ASK_PATHS.map((p) => [p, 0])), otherShownReasons: 0 },
     flight3Asks: 0,
     coachShownPlace: 0,
-    coach: emptyCoachCounts(),
     accepts: { total: 0, byPath: Object.fromEntries(ACCEPT_PATHS.map((p) => [p, 0])) },
     dismisses: { signinPrompt: 0, promoFirst50: 0 },
     authRedirect: 0,
@@ -859,7 +863,7 @@ export function summarizeTaggedRows(rows: readonly TaggedRow[], opts: { fromMs?:
     }
     if ((FLIGHT3_ASK_PATHS as readonly string[]).includes(r.path)) s.flight3Asks += r.count
     if (r.path === COACH_SHOWN_PLACE_PATH) s.coachShownPlace += r.count
-    addCoachRow(s.coach, r.path, r.count)
+    if (isCoachPath(r.path)) addCoachRow((s.coach ??= emptyCoachCounts()), r.path, r.count)
     if ((ACCEPT_PATHS as readonly string[]).includes(r.path)) {
       s.accepts.total += r.count
       s.accepts.byPath[r.path] += r.count

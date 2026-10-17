@@ -81,9 +81,11 @@ describe('ChartCard: Flight 3 hero-vs-features donut', () => {
   })
 
   it('shows no cost, spend or impressions text, staged or live', async () => {
-    expect((await card()).text()).not.toMatch(/cost|spend|impress|\$/i)
+    // The caption may POINT at the report's "impressions balance" line (no figure); nothing else may name impressions.
+    const text = async () => (await card()).text().replace("the report's impressions balance", '')
+    expect(await text()).not.toMatch(/cost|spend|impress|\$/i)
     CAMPAIGNS.splice(0, CAMPAIGNS.length, live)
-    expect((await card()).text()).not.toMatch(/cost|spend|impress|\$/i)
+    expect(await text()).not.toMatch(/cost|spend|impress|\$/i)
   })
 
   it('live with no arrivals yet reads the ordinary "No data in range"', async () => {

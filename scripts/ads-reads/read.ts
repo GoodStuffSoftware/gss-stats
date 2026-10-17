@@ -67,6 +67,7 @@ import {
   SIGNUP_PROXY_NOTE,
   UPSELL_SIGNEDOUT_EXPECTED_NOTE,
   type AdsReadPlan,
+  emptyCoachCounts,
   type CoachCounts,
   type DecisionResult,
   type HealthResult,
@@ -204,10 +205,10 @@ export interface TaggedCounts {
   completeRows: number
   flight3Asks: number
   coachShownPlace: number
-  /** Tagged /auth/success/<provider>/new rows (the headline new-account count; counts, not rates). */
-  newAccounts: number
-  /** Tagged coach-strip rows per tip and tour-opened: ET-day totals, never by hour, place or device. */
-  coach: CoachCounts
+  /** Tagged /auth/success/<provider>/new rows (the headline new-account count; counts, not rates). Flight 3 reads only: left off flight 2 and the retest so their result JSON is unchanged. */
+  newAccounts?: number
+  /** Tagged coach-strip rows per tip and tour-opened: ET-day totals, never by hour, place or device. Flight 3 reads only. */
+  coach?: CoachCounts
 }
 export interface FullRead {
   thresholds: number[]
@@ -423,7 +424,7 @@ async function placementRowsFor(deps: ReadDeps, campaign: CampaignFlight, cs: Ca
   return { ok: true, value: rows }
 }
 
-function taggedCounts(s: TaggedSummary): TaggedCounts {
+function taggedCounts(s: TaggedSummary, f3: boolean): TaggedCounts {
   return {
     taggedArrivals: s.taggedArrivals,
     taggedHits: s.taggedHits,
@@ -433,8 +434,7 @@ function taggedCounts(s: TaggedSummary): TaggedCounts {
     completeRows: s.funnel.completed,
     flight3Asks: s.flight3Asks,
     coachShownPlace: s.coachShownPlace,
-    newAccounts: s.authSuccessSplit.new,
-    coach: s.coach,
+    ...(f3 ? { newAccounts: s.authSuccessSplit.new, coach: s.coach ?? emptyCoachCounts() } : {}),
   }
 }
 
@@ -1180,8 +1180,8 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
   const tagged = {
     ok: taggedRows.ok,
     error: taggedRows.ok ? null : taggedRows.error,
-    cumulative: taggedRows.ok ? taggedCounts(summarizeTaggedRows(taggedRows.value)) : null,
-    yesterday: taggedRows.ok ? taggedCounts(summarizeTaggedRows(taggedRows.value, { fromMs: yStart, toMs: yEnd })) : null,
+    cumulative: taggedRows.ok ? taggedCounts(summarizeTaggedRows(taggedRows.value), !!plan.flight3Arm) : null,
+    yesterday: taggedRows.ok ? taggedCounts(summarizeTaggedRows(taggedRows.value, { fromMs: yStart, toMs: yEnd }), !!plan.flight3Arm) : null,
   }
 
   // Per-tag split for a multi-tag arm (flight 3 Apps): cumulative and yesterday's ET day, plus the

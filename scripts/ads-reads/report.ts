@@ -17,6 +17,7 @@ import {
   p1Line,
   SIGNIN_ELIGIBLE_COUNT_NOTE,
   UPSELL_SIGNEDOUT_EXPECTED_NOTE,
+  emptyCoachCounts,
   type CoachCounts,
   type OutcomePopup,
   type RuleResult,
@@ -166,7 +167,7 @@ export const APPS_PLAY_RELEASE_CAVEAT =
 export function tagSplitLines(sp: TagSplit | null | undefined): string[] {
   if (!sp) return []
   const out = [
-    `Per-tag split (display only; every rule and total above reads the sum of the tags; counts only: tagged rows per tag, arrivals are new-visitor tagged rows (not the donut's /return/<tag>/d0 devices), ET-day totals${sp.tags.some((t) => t.yesterday) ? ', yesterday in brackets' : ''}; cost per arrival is closed-day ad spend / tagged arrivals, "—" under 5 arrivals):`,
+    `Per-tag split (display only; every rule and total above reads the sum of the tags; counts only: tagged rows per tag, arrivals are first-ever tagged rows (not the donut's /return/<tag>/d0 count), ET-day totals${sp.tags.some((t) => t.yesterday) ? ', yesterday in brackets' : ''}; cost per arrival is closed-day ad spend / tagged arrivals, "—" under 5 arrivals):`,
   ]
   for (const t of sp.tags) {
     const f = (pick: (c: typeof t.total) => number) => `${n(pick(t.total))}${t.yesterday ? ` (${n(pick(t.yesterday))})` : ''}`
@@ -321,10 +322,10 @@ export function formatMorningReport(r: MorningResult): string {
     const t = r.tagged
     out.push(
       t.ok
-        ? `Tagged so far: ${n(t.cumulative!.taggedArrivals)} ${r.flight3 ? `${ARRIVALS_TAGGED_ROWS_LABEL}, a floor` : 'arrivals (floor)'}, ${n(t.cumulative!.taggedHits)} hits, ${n(t.cumulative!.asks)} asks, ${n(t.cumulative!.accepts)} accepts, ${n(t.cumulative!.authSuccess)} auth successes; yesterday ${n(t.yesterday!.taggedArrivals)} arrivals, ${n(t.yesterday!.asks)} asks; ${trackingCheckCounts(t.cumulative!, t.yesterday!)}${r.flight3 ? `; cost per complete row ${money(r.flight3.costPerRow.cumulative)} (yesterday ${money(r.flight3.costPerRow.yesterday)})${newAccountsText(t.cumulative!.newAccounts, r.readAt)}` : ''}`
+        ? `Tagged so far: ${n(t.cumulative!.taggedArrivals)} ${r.flight3 ? `${ARRIVALS_TAGGED_ROWS_LABEL}, a floor` : 'arrivals (floor)'}, ${n(t.cumulative!.taggedHits)} hits, ${n(t.cumulative!.asks)} asks, ${n(t.cumulative!.accepts)} accepts, ${n(t.cumulative!.authSuccess)} auth successes; yesterday ${n(t.yesterday!.taggedArrivals)} arrivals, ${n(t.yesterday!.asks)} asks; ${trackingCheckCounts(t.cumulative!, t.yesterday!)}${r.flight3 ? `; cost per complete row ${money(r.flight3.costPerRow.cumulative)} (yesterday ${money(r.flight3.costPerRow.yesterday)})${newAccountsText(t.cumulative!.newAccounts ?? 0, r.readAt)}` : ''}`
         : `Tagged: NOT READ (${t.error})`,
     )
-    if (r.flight3 && t.ok) out.push(`  ${coachCountsLine(t.cumulative!.coach, t.yesterday!.coach)}`)
+    if (r.flight3 && t.ok) out.push(`  ${coachCountsLine(t.cumulative!.coach ?? emptyCoachCounts(), t.yesterday!.coach ?? emptyCoachCounts())}`)
     out.push(...tagSplitLines(r.tagSplit))
     if (r.preflightGate) out.push(r.preflightGate.ok ? preflightGateLine(r.preflightGate.counts) : `Pre-flight gate: NOT READ (${r.preflightGate.error})`)
     out.push(...firstSessionLines(r.firstSession, !!r.flight3))

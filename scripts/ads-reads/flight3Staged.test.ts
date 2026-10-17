@@ -78,16 +78,16 @@ function goLive(dates: Dates) {
 }
 
 describe('flight 3 staged config matches the launch plan', () => {
-  it('apps: tags sudoku_funnel_f3_apps_hero, _feat and the bare catch-all, $10/day, $70 cap, noon-ET schedule 12:00-23:00', () => {
+  it('apps: tags sudoku_funnel_f3_apps_hero, _feat and the bare catch-all, $10/day, $70 cap, noon-ET schedule 12:00-24:00', () => {
     const c = STAGED_FLIGHT_3.apps
     expect(c.ucValues).toEqual(['sudoku_funnel_f3_apps_hero', 'sudoku_funnel_f3_apps_feat', 'sudoku_funnel_f3_apps'])
-    expect([c.dailyBudgetUsd, c.hardCapUsd, c.flightStartTimeEt, c.servingHoursEt]).toEqual([10, 70, '12:00', [12, 23]])
+    expect([c.dailyBudgetUsd, c.hardCapUsd, c.flightStartTimeEt, c.servingHoursEt]).toEqual([10, 70, '12:00', [12, 24]])
     expect(c.notes).toContain('google / display / sudoku_funnel_f3_apps_hero and sudoku_funnel_f3_apps_feat')
   })
-  it('search: tag sudoku_funnel_f3_search, $10/day, $70 cap, noon-ET schedule 12:00-23:00', () => {
+  it('search: tag sudoku_funnel_f3_search, $10/day, $70 cap, noon-ET schedule 12:00-24:00', () => {
     const c = STAGED_FLIGHT_3.search
     expect(c.ucValues).toEqual(['sudoku_funnel_f3_search'])
-    expect([c.dailyBudgetUsd, c.hardCapUsd, c.flightStartTimeEt, c.servingHoursEt]).toEqual([10, 70, '12:00', [12, 23]])
+    expect([c.dailyBudgetUsd, c.hardCapUsd, c.flightStartTimeEt, c.servingHoursEt]).toEqual([10, 70, '12:00', [12, 24]])
     expect(c.notes).toContain('google / cpc / sudoku_funnel_f3_search')
   })
   it('apps plan settings: display, the 17 approved placements, flight 2 leak limit and CTR floor, the 18/35/53/70 ladder', () => {
@@ -297,7 +297,7 @@ describe('activation is an id and dates only', () => {
   it('stagedCampaign builds a 7-day upcoming web flight with the arm\'s tag, budget, cap and noon-ET start', () => {
     for (const [arm, id] of [['apps', APPS_ID], ['search', SEARCH_ID]] as const) {
       const c = stagedCampaign(arm, { id, flightStart: START, flightEnd: END })
-      expect(c).toMatchObject({ id, flightStart: START, flightEnd: END, flightStartTimeEt: '12:00', status: 'upcoming', kind: 'web', dailyBudgetUsd: 10, hardCapUsd: 70, servingHoursEt: [12, 23] })
+      expect(c).toMatchObject({ id, flightStart: START, flightEnd: END, flightStartTimeEt: '12:00', status: 'upcoming', kind: 'web', dailyBudgetUsd: 10, hardCapUsd: 70, servingHoursEt: [12, 24] })
       expect(c.ucValues).toEqual(STAGED_FLIGHT_3[arm].ucValues)
       expect(c.ucValues).not.toBe(STAGED_FLIGHT_3[arm].ucValues) // a copy: registering cannot mutate the staged config
     }
