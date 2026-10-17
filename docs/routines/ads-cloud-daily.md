@@ -338,10 +338,13 @@ card and signs in inside the Play app does not carry the web campaign tag, so th
 new-account count understates (read the install rows beside it); an organic first touch sends its
 Safari escape untagged; deferred rows lag at least 30 minutes after sign-in.
 
-Apps-arm Play caveat (printed under the Apps per-tag split whenever the split is read, one constant in
-the report code; when the split is not read, state it yourself from this paragraph): "Until the Play release ships, Apps-arm installs get the older Play app; in-app
-sign-ins after 30 minutes are untagged until v1.99.2 (19902) or later clears Play review, expected 10-17. Installs on 19800 aren't credited." Repeat it when you read Apps
-new-account and sign-in figures, and do not read a low Apps new-account count as a failed arm.
+Apps-arm Play caveat: v1.99.3 (19903) went public on Google Play 2026-10-17 06:34Z, before flight 3's first
+serve (12:00 ET 10-17), so flight 3 reads print no caveat (one constant in the report code, shown only for a
+reading that starts before 06:34:32Z). The note, if a reading ever spans it: "Play installs credited from v1.99.2+,
+public 10-17 06:34Z, before flight 3's first serve." New installs from the Apps arm get 19903, which carries the
+install referrer into the first sign-in, so flight 3 installs are credited from the first serve. A low Apps
+new-account count is still not a failed arm (a store install that signs in inside the app understates it; read the
+install rows beside it).
 
 ### Re-reads
 

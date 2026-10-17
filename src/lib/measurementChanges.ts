@@ -55,10 +55,18 @@ export const MEASUREMENT_CHANGES: MeasurementChange[] = [
   {
     id: 'v1.99.3 Play',
     dateEt: '2026-10-17', // promoted to Play production 2026-10-17T06:09:41Z = 02:09:41 ET (full rollout, managed publishing off); reaches users when Google's review clears. Listed after the web entry: the same-day release-panel tie goes to the later-listed one, and this is the later-timed (web 05:58:55Z)
-    note: 'Play release of v1.99.3, coach strip meaning change: from v1.99.3 the coach × closes one tip instead of retiring the schedule and writing a pencil note ends the notes tip with no beacon, so later-tip shown counts rise and a dismissed row no longer means the tips stopped; shown/notes with no dismissed or closed-at row after it can also mean a note was written. Committed 02:09 ET; reaches users when review clears. Android installs after it may be a mix of 19902 and 19903 until then. Android coach rows after this are a mix of old and new semantics until updates spread',
+    note: 'Play release of v1.99.3, coach strip meaning change: from v1.99.3 the coach × closes one tip instead of retiring the schedule and writing a pencil note ends the notes tip with no beacon, so later-tip shown counts rise and a dismissed row no longer means the tips stopped; shown/notes with no dismissed or closed-at row after it can also mean a note was written. Committed 02:09 ET. Public on Play 06:34Z 10-17. Android installs after it may be a mix of 19902 and 19903 until updates spread. Android coach rows after this are a mix of old and new semantics until updates spread',
     coachOnly: true,
   },
 ]
+
+/** The Apps-arm Play-install read caveat ends here: v1.99.3 (19903) went public on Google Play between 06:31:47Z and 06:34:32Z on 2026-10-17 (the listing first showed its "What's new" at 06:34:32Z), before flight 3's first serve (12:00 ET 10-17). */
+export const APPS_PLAY_CAVEAT_ENDS_AT_MS = Date.parse('2026-10-17T06:34:32Z')
+
+/** Whether the Apps-arm Play-install caveat shows for a reading that starts at `readStartMs`: a reading that starts before the cut still shows it (for the part before); one wholly after does not. An unknown start (null / undefined) shows it. */
+export function appsPlayCaveatApplies(readStartMs: number | null | undefined): boolean {
+  return readStartMs == null || readStartMs < APPS_PLAY_CAVEAT_ENDS_AT_MS
+}
 
 /** The marked changes that move the auth-success counts (everything but the coach-only entries): the caveat under the tagged cards and the generic report lines use these. */
 export function authMarkedChanges(): MarkedChange[] {

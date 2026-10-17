@@ -12,7 +12,8 @@ import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import { fixtureDeps, type Fixture } from './cli'
 import { runMorningRead, runPostflightRead, type MorningOptions } from './read'
-import { formatMorningReport, tagSplitLines } from './report'
+import { APPS_PLAY_RELEASE_CAVEAT, formatMorningReport, tagSplitLines } from './report'
+import { APPS_PLAY_CAVEAT_ENDS_AT_MS, appsPlayCaveatApplies } from '../../src/lib/measurementChanges'
 import { createBeaconSource, taggedRowsQuery, WEB_SITE } from './beacon'
 import { fetchAdDaily, type AdDayRow, type AdsClient } from '../../src/lib/adsApi'
 import { adTagOf, buildTagSplit, isMultiTag, utmCampaignOf } from '../../src/lib/tagSplit'
@@ -496,5 +497,25 @@ describe('flight 3 staged Apps arm', () => {
     expect(c.ucValues).toEqual(STAGED_FLIGHT_3.apps.ucValues)
     expect(isMultiTag(c.ucValues)).toBe(true)
     expect(isMultiTag(STAGED_FLIGHT_3.search.ucValues)).toBe(false)
+  })
+})
+
+describe('the Apps Play-install caveat ends when v1.99.3 went public on Play (2026-10-17T06:34:32Z)', () => {
+  const split = buildTagSplit({ rows: [row(TAG_A, '/', 6, D1 + H), row(TAG_B, '/', 3, D1 + H)], ucValues: UC2, adRows: null, costError: 'x' })
+  const END = Date.parse('2026-10-17T06:34:32Z')
+  it('the cut is 06:34:32Z and the note text is the one-liner', () => {
+    expect(APPS_PLAY_CAVEAT_ENDS_AT_MS).toBe(END)
+    expect(APPS_PLAY_RELEASE_CAVEAT).toBe("Read caveat: Play installs credited from v1.99.2+, public 10-17 06:34Z, before flight 3's first serve.")
+  })
+  it('shows for a reading that starts before the cut (and for an unknown start)', () => {
+    expect(appsPlayCaveatApplies(END - 1)).toBe(true)
+    expect(tagSplitLines(split, END - 1)).toContain(APPS_PLAY_RELEASE_CAVEAT)
+    expect(tagSplitLines(split, etMidnightUtcMs('2026-10-17'))).toContain(APPS_PLAY_RELEASE_CAVEAT) // 00:00 ET 10-17 spans the cut
+    expect(tagSplitLines(split)).toContain(APPS_PLAY_RELEASE_CAVEAT)
+  })
+  it('does not show for a flight 3 reading (12:00 ET 10-17 on), nor from the cut itself', () => {
+    expect(appsPlayCaveatApplies(END)).toBe(false)
+    expect(tagSplitLines(split, END)).not.toContain(APPS_PLAY_RELEASE_CAVEAT)
+    expect(tagSplitLines(split, Date.parse('2026-10-17T16:00:00Z'))).not.toContain(APPS_PLAY_RELEASE_CAVEAT) // 12:00 ET
   })
 })

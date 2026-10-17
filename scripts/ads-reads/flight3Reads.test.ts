@@ -93,12 +93,12 @@ describe.each(ARMS)('$label', (a) => {
       expect((await postflight(a, addDays(due, -1), stage)).due).toBe(false)
     }
   })
-  it(a.caveat ? 'prints the Play-install caveat on the morning reads' : 'does not print the Play-install caveat', async () => {
+  it('does not print the Apps Play-install caveat: a flight 3 reading starts at 12:00 ET 10-17, after v1.99.3 went public on Play (06:34:32Z)', async () => {
     for (const day of [addDays(startOf(a), 1), addDays(endOf(a), 1)]) {
       const report = await morning(a, day)
-      if (a.caveat) expect(report).toContain(APPS_PLAY_RELEASE_CAVEAT)
-      else expect(report).not.toMatch(/Read caveat|until the Play release/)
+      expect(report).not.toContain(APPS_PLAY_RELEASE_CAVEAT)
+      expect(report).not.toMatch(/Read caveat|until the Play release/)
     }
-    if (!a.caveat) expect(formatPostflightReport(await postflight(a, addDays(endOf(a), 7), 'wrapup'))).not.toMatch(/Read caveat|until the Play release/)
+    expect(formatPostflightReport(await postflight(a, addDays(endOf(a), 7), 'wrapup'))).not.toMatch(/Read caveat|until the Play release/)
   })
 })

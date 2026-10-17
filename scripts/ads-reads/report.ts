@@ -28,8 +28,8 @@ import {
   type CampaignChannel,
 } from '../../src/lib/adsRules'
 import { GAME_START_DIFFICULTIES, POPUP_OUTCOME_TYPES, TOUR_EXIT_STEPS, TUTORIAL_COMPLETE_KINDS, etDateFromMs, gateRate, installOutcomeGapNote } from '../../src/lib/popupEvents'
-import { RAW_INSTALL_SIGNALS_LABEL, type StagedArm } from '../../src/lib/campaigns'
-import { coachMeasurementNote, measurementReportLines, newAccountMeasurementNote } from '../../src/lib/measurementChanges'
+import { RAW_INSTALL_SIGNALS_LABEL, campaignAttributionStartMs, campaignById, type StagedArm } from '../../src/lib/campaigns'
+import { appsPlayCaveatApplies, coachMeasurementNote, measurementReportLines, newAccountMeasurementNote } from '../../src/lib/measurementChanges'
 import { noteRawText } from '../../src/lib/notes'
 import { F3_ARM_BASELINES, ruleReadoutLine, type Flight3Block } from '../../src/lib/flight3Rules'
 import { searchAdsSideLines } from '../../src/lib/searchAdsSide'
@@ -154,9 +154,14 @@ export function coachCountsLine(c: CoachCounts, y?: CoachCounts, meaningNote?: s
   return `coach strip (tagged ET-day totals${y ? '; yesterday in brackets' : ''}; counts only): ${group('shown', (x) => x.shown)}; ${group('dismissed', (x) => x.dismissed)}; ${group('closed-at', (x) => x.closedAt)}; tour-opened ${f(c.tourOpened, y?.tourOpened ?? 0)}${meaningNote ? `; meaning change ${meaningNote}` : ''}`
 }
 
-/** One static read caveat printed under the Apps arm's per-tag split (the only multi-tag arm). The Apps arm started 2026-10-17, ahead of the Play release. A Play-release-day marker will come later through the measurement-changes list. */
-export const APPS_PLAY_RELEASE_CAVEAT =
-  "Read caveat: until the Play release ships, Apps-arm installs get the older Play app; in-app sign-ins after 30 minutes are untagged until v1.99.2 (19902) or later clears Play review, expected 10-17. Installs on 19800 aren't credited."
+/** The Apps-arm Play-install read caveat, printed under the Apps arm's per-tag split (the only multi-tag arm) while a reading starts before the cut (APPS_PLAY_CAVEAT_ENDS_AT_MS, lib/measurementChanges.ts: v1.99.3 went public on Play 2026-10-17T06:34:32Z). A flight 3 reading starts at 12:00 ET 10-17, after it, so it prints nothing. */
+export const APPS_PLAY_RELEASE_CAVEAT = "Read caveat: Play installs credited from v1.99.2+, public 10-17 06:34Z, before flight 3's first serve."
+
+/** Where a campaign's reading window starts (its attribution start), null when unknown. */
+function readStartOf(campaignId: string): number | null {
+  const c = campaignById(campaignId)
+  return c ? campaignAttributionStartMs(c) : null
+}
 
 /** The per-tag split block for an arm with more than one tag (flight 3 Apps: HERO and FEATURES).
  * null / absent for a single-tag arm, which prints as it always has. Display only: every rule and
@@ -164,7 +169,7 @@ export const APPS_PLAY_RELEASE_CAVEAT =
  * tag, cumulative and one ET day's total (in brackets), no visitor join, no hour, place or device.
  * Cost per arrival is the tag's ad-level spend on closed days over its tagged arrivals, "—" under
  * 5 arrivals (MIN_COHORT, like the arm's own). */
-export function tagSplitLines(sp: TagSplit | null | undefined): string[] {
+export function tagSplitLines(sp: TagSplit | null | undefined, readStartMs?: number | null): string[] {
   if (!sp) return []
   const out = [
     `Per-tag split (display only; every rule and total above reads the sum of the tags; counts only: tagged rows per tag, arrivals are first-ever tagged rows (not the donut's /return/<tag>/d0 count), ET-day totals${sp.tags.some((t) => t.yesterday) ? ', yesterday in brackets' : ''}; cost per arrival is closed-day ad spend / tagged arrivals, "—" under 5 arrivals):`,
@@ -179,7 +184,7 @@ export function tagSplitLines(sp: TagSplit | null | undefined): string[] {
   if (sp.untagged) out.push(`  untagged: ${n(sp.untagged.ads)} ad(s) whose final URLs carry no usable utm_campaign for this arm; ad spend ${money(sp.untagged.cost)} (${n(sp.untagged.clicks)} clicks, ${n(sp.untagged.impressions)} impr), not assigned to a tag`)
   if (sp.unsplitHits) out.push(`  not on a tag: ${n(sp.unsplitHits)} tagged hit(s) have no campaign tag on the row`)
   out.push(sp.costRead ? `  ad cost through ${sp.costThroughEt ?? '—'} (closed days; Google Ads ad_group_ad, read-only)` : `  ad cost: not read (${sp.costError ?? 'unknown'})`)
-  out.push(APPS_PLAY_RELEASE_CAVEAT)
+  if (appsPlayCaveatApplies(readStartMs)) out.push(APPS_PLAY_RELEASE_CAVEAT)
   return out
 }
 
@@ -193,7 +198,7 @@ export function flight3RulesLines(b: Flight3Block): string[] {
   return ['F3 rules (proposals only; nothing is paused):', ...b.readouts.map(ruleReadoutLine), `Proposal: ${proposal}`]
 }
 
-export function fullReadLines(r: FullRead, title: string, opts: { postflight?: boolean; f3Block?: boolean } = {}): string[] {
+export function fullReadLines(r: FullRead, title: string, opts: { postflight?: boolean; f3Block?: boolean; readStartMs?: number | null } = {}): string[] {
   const promoNote = promoArmNoteApplies(r, !!opts.postflight)
   const isF3 = !!r.f3Rules
   const out: string[] = [`=== ${title} (cumulative ${money(r.cumulativeSpend)}, closed days through ${r.spendThroughEt ?? '—'}) — ${r.complete ? 'complete' : 'INCOMPLETE, retried next run'} ===`]
@@ -229,7 +234,7 @@ export function fullReadLines(r: FullRead, title: string, opts: { postflight?: b
     const tp1 = p1Line(s.p1)
     if (tp1) out.push(`  tagged P1 beacons: ${tp1}`)
   }
-  out.push(...tagSplitLines(r.tagSplit))
+  out.push(...tagSplitLines(r.tagSplit, opts.readStartMs))
   if (r.site) {
     const s = r.site.summary
     out.push('Site-wide on bestsudoku-web since the 2026-09-26 go-live (NOT campaign-attributed):')
@@ -326,7 +331,7 @@ export function formatMorningReport(r: MorningResult): string {
         : `Tagged: NOT READ (${t.error})`,
     )
     if (r.flight3 && t.ok) out.push(`  ${coachCountsLine(t.cumulative!.coach ?? emptyCoachCounts(), t.yesterday!.coach ?? emptyCoachCounts(), coachMeasurementNote(etDateFromMs(Date.parse(r.readAt))))}`)
-    out.push(...tagSplitLines(r.tagSplit))
+    out.push(...tagSplitLines(r.tagSplit, readStartOf(r.campaign.id)))
     if (r.preflightGate) out.push(r.preflightGate.ok ? preflightGateLine(r.preflightGate.counts) : `Pre-flight gate: NOT READ (${r.preflightGate.error})`)
     out.push(...firstSessionLines(r.firstSession, !!r.flight3))
     if (r.flight3) out.push(...flight3RulesLines(r.flight3))
@@ -353,7 +358,7 @@ export function formatMorningReport(r: MorningResult): string {
   if (diag.length) out.push('', ...diag)
   const playLines = playReportsLines(r.playReports)
   if (playLines.length) out.push('', ...playLines)
-  if (r.thresholdRead) out.push('', ...fullReadLines(r.thresholdRead, `THRESHOLD READ at $${Math.max(...r.thresholdRead.thresholds)}`, { f3Block: !!r.flight3 }))
+  if (r.thresholdRead) out.push('', ...fullReadLines(r.thresholdRead, `THRESHOLD READ at $${Math.max(...r.thresholdRead.thresholds)}`, { f3Block: !!r.flight3, readStartMs: readStartOf(r.campaign.id) }))
   out.push('', storeLine(r))
   out.push(`Errors: ${r.errors.length ? r.errors.join(' | ') : 'none'}`)
   out.push(`Push: ${r.notify.push ? `YES (${r.notify.reason}): ${r.notify.text}` : `no (${r.notify.reason})`}${r.notify.busCopy ? ' + bus copy' : ''}`)
@@ -521,7 +526,7 @@ export function formatPostflightReport(r: PostflightResult): string {
   out.push(`Spend ended ${r.spendEndEt ?? '—'}; this stage is due ${r.dueEt ?? '—'} (${r.due ? 'due' : 'NOT due yet'})`)
   if (r.postFlightSpend) out.push(`After-flight spend: [${r.postFlightSpend.status}] ${r.postFlightSpend.detail}`)
   if (r.hardCap) out.push(`Hard cap: [${r.hardCap.status}] ${r.hardCap.detail}`)
-  if (r.read) out.push('', ...fullReadLines(r.read, `POST-FLIGHT ${r.stage.toUpperCase()}`, { postflight: true }))
+  if (r.read) out.push('', ...fullReadLines(r.read, `POST-FLIGHT ${r.stage.toUpperCase()}`, { postflight: true, readStartMs: readStartOf(r.campaign.id) }))
   const b = r.promoSplit.beacon
   if (b) {
     const row = (o: Record<string, number>, shown: number) => POPUP_OUTCOME_TYPES.map((t) => `${t} ${formatGated(gateRate(o[t], shown))}`).join(', ')

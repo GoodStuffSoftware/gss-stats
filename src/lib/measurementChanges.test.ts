@@ -206,3 +206,10 @@ describe('the Play release of v1.99.2 (second entry, own date)', () => {
     expect(text.match(/not read the rise as performance/g)).toHaveLength(1)
   })
 })
+
+describe('v1.99.3 Play caption', () => {
+  it('says it was public on Play 06:34Z 10-17, keeps the coach mixed-semantics sentence', () => {
+    expect(V1993_PLAY.note).toContain('Public on Play 06:34Z 10-17.')
+    expect(V1993_PLAY.note).toContain('Android coach rows after this are a mix of old and new semantics until updates spread')
+  })
+})

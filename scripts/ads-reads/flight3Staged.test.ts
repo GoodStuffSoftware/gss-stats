@@ -474,9 +474,9 @@ describe('runbook LEGS rows track STAGED_FLIGHT_3_DATES', () => {
       expect(plan.morningReadLastEt, arm).toBe(addDays(flightEnd!, 1))
     }
   })
-  it('the Apps read caveat is one constant in the report code and the runbook states it in the same words', () => {
-    expect(APPS_PLAY_RELEASE_CAVEAT).toMatch(/older Play app.*untagged until v1\.99\.2 \(19902\) or later clears Play review, expected 10-17\. Installs on 19800 aren't credited\./)
-    expect(RUNBOOK).toContain("Until the Play release ships, Apps-arm installs get the older Play app; in-app\nsign-ins after 30 minutes are untagged until v1.99.2 (19902) or later clears Play review, expected 10-17. Installs on 19800 aren't credited.")
+  it('the Apps read caveat is one constant in the report code and the runbook states its note', () => {
+    expect(APPS_PLAY_RELEASE_CAVEAT).toBe("Read caveat: Play installs credited from v1.99.2+, public 10-17 06:34Z, before flight 3's first serve.")
+    expect(RUNBOOK).toContain("Play installs credited from v1.99.2+,\npublic 10-17 06:34Z, before flight 3's first serve.")
   })
 })
 

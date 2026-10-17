@@ -20,7 +20,7 @@ describe('v1.99.3 coach entries', () => {
   it('the web entry is dated 2026-10-17, the Play one is dated 2026-10-17 too, and both name the coach change', () => {
     expect(web.dateEt).toBe('2026-10-17')
     expect(PLAY_DATE).toBe('2026-10-17')
-    expect(play.note).toContain('Committed 02:09 ET; reaches users when review clears. Android installs after it may be a mix of 19902 and 19903 until then.')
+    expect(play.note).toContain('Committed 02:09 ET. Public on Play 06:34Z 10-17. Android installs after it may be a mix of 19902 and 19903 until updates spread.')
     expect(play.note).toContain('Android coach rows after this are a mix of old and new semantics until updates spread')
     expect(web.note).toContain('×')
     expect(play.note).toContain('×')

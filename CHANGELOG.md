@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.54.6] — 2026-10-17
+
+### Fixed
+- **The Apps Play-install caveat ends when v1.99.3 went public on Play.** The release is public from 06:34Z 10-17, before flight 3's first serve, so flight 3 reads print no caveat and the v1.99.3 Play marker says so.
+
 ## [0.54.5] — 2026-10-17
 
 ### Fixed
