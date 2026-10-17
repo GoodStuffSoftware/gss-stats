@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.48.1] — 2026-10-16
+
 ### Changed
 - **The v1.99.2 web release is marked.** Tagged new-account readouts flag the day the sign-in first-touch fallback started; the Play marker now waits for v1.99.3.
 
