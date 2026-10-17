@@ -124,7 +124,7 @@ export const GEO_DIMENSIONS: { key: string; label: string }[] = [
   { key: 'keyEvent', label: 'Key event (sign-in / install / raw install / completion)' },
   { key: 'hourEt', label: 'Hour of day (ET)' },
   { key: 'flightDay', label: 'Campaign flight day (day 1 = first day)' },
-  { key: 'landingTag', label: 'Flight 3 Apps landing tag (arrivals)' },
+  { key: 'landingTag', label: 'Flight 3 Apps landing tag (d0 devices)' },
   { key: 'date', label: 'Date (trend)' },
   { key: 'dateEt', label: 'Date (trend, ET)' },
 ]

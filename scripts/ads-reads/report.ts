@@ -50,7 +50,7 @@ export const F3_COST_PER_ARRIVAL_BENCHMARK_TEXT: Record<StagedArm, string> = {
   apps: 'about $0.32-0.34, the F1/F2 in-app figure',
   search: 'about $0.64, the F2 Search figure',
 }
-/** The two arrival definitions, labelled the same way wherever flight 3 prints them. The numbers differ on purpose: the report counts first-ever tagged beacons (a floor), the donut and the return reads count one /return/<tag>/d0 row per device. */
+/** The two arrival definitions, labelled the same way in the tagged-funnel, first-session and Tagged so far lines. The numbers differ on purpose: the report counts first-ever tagged beacons (a floor), the donut and the return reads count one /return/<tag>/d0 row per device. */
 export const ARRIVALS_TAGGED_ROWS_LABEL = 'arrivals (new-visitor tagged rows)'
 export const D0_DEVICES_LABEL = 'd0 devices (/return/<tag>/d0)'
 const pct = (x: number | null | undefined, dp = 2) => (x == null ? '—' : `${(x * 100).toFixed(dp)}%`)
@@ -136,12 +136,12 @@ function trackingCheckCounts(c: TrackingCounts, y?: TrackingCounts): string {
 
 /** The impressions-balance check line (spec section 3): flags a split more than IMPRESSIONS_UNEVEN_GAP apart. Counts only: ad-level impressions per tag, no hour, place or device. */
 export function impressionsBalanceLine(b: ImpressionsBalance | null): string {
-  if (!b) return '  impressions balance: not checked (fewer than two ads with impressions)'
+  if (!b) return '  impressions balance: not checked (no ad impressions yet, or fewer than two ads)'
   const label = (tag: string) => tag.split('_').pop() ?? tag
   const shares = b.shares.map((x) => `${label(x.tag)} ${pct(x.share, 0)}`).join(' / ')
   return b.uneven
     ? `  impressions balance: UNEVEN: ${shares} of impressions; ad rotation isn't even, compare rates not totals`
-    : `  impressions balance: even enough (${shares} of impressions; flagged when the shares are more than ${pct(IMPRESSIONS_UNEVEN_GAP, 0)} apart)`
+    : `  impressions balance: even enough (${shares} of impressions; flagged when the shares are more than ${Math.round(IMPRESSIONS_UNEVEN_GAP * 100)} points apart)`
 }
 
 /** The tagged coach-strip line of a flight 3 morning read: per tip shown, dismissed and closed-at, plus tour-opened. Campaign-tagged ET-day totals only (cumulative, yesterday in brackets), counts only: never by hour, place or device. Tips sorted. */

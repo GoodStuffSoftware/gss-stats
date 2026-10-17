@@ -101,7 +101,7 @@ export interface TagSplit {
   untagged: { ads: number; cost: number; clicks: number; impressions: number } | null
   /** Tagged rows that could not be put on a tag (no `campaign` on the row, or a tag outside the arm). 0 in a real read. */
   unsplitHits: number
-  /** null with no cost read, or fewer than two tags that have impressions (nothing to compare). */
+  /** null with no cost read, fewer than two ad tags, or no impressions yet (nothing to compare). */
   balance: ImpressionsBalance | null
   costRead: boolean
   costError: string | null
@@ -111,12 +111,12 @@ export interface TagSplit {
 
 const round2 = (x: number) => Math.round(x * 100) / 100
 
-/** The balance check over per-tag impressions. Only tags with impressions are compared; fewer than two = null. */
+/** The balance check over per-tag impressions. Every tag passed is compared, a starved ad (0 impressions beside a live one) included, so 100/0 is UNEVEN; null with fewer than two tags or no impressions at all (nothing to compare yet). */
 export function impressionsBalance(perTag: readonly { tag: string; impressions: number }[]): ImpressionsBalance | null {
-  const live = perTag.filter((t) => t.impressions > 0)
-  if (live.length < 2) return null
-  const total = live.reduce((a, t) => a + t.impressions, 0)
-  const shares = live.map((t) => ({ tag: t.tag, share: t.impressions / total }))
+  if (perTag.length < 2) return null
+  const total = perTag.reduce((a, t) => a + t.impressions, 0)
+  if (total <= 0) return null
+  const shares = perTag.map((t) => ({ tag: t.tag, share: t.impressions / total }))
   const gap = Math.max(...shares.map((x) => x.share)) - Math.min(...shares.map((x) => x.share))
   return { shares, gap, uneven: gap > IMPRESSIONS_UNEVEN_GAP }
 }
@@ -177,7 +177,8 @@ export function buildTagSplit(i: BuildTagSplitInput): TagSplit | null {
     tags,
     untagged: i.adRows && untaggedAds.size > 0 ? { ads: untaggedAds.size, cost: round2(untagged.cost), clicks: untagged.clicks, impressions: untagged.impressions } : null,
     unsplitHits,
-    balance: i.adRows ? impressionsBalance(i.ucValues.map((tag) => ({ tag, impressions: byTag.get(tag)!.impressions }))) : null,
+    // The bare catch-all tag (a prefix of the other tags, e.g. the arm's own tag beside _hero and _feat) is not an ad in the rotation, so it is not compared.
+    balance: i.adRows ? impressionsBalance(i.ucValues.filter((tag) => !i.ucValues.some((o) => o !== tag && o.startsWith(`${tag}_`))).map((tag) => ({ tag, impressions: byTag.get(tag)!.impressions }))) : null,
     costRead: i.adRows != null,
     costError: i.adRows ? null : (i.costError ?? 'not read'),
     costThroughEt: i.adRows ? (i.costThroughEt ?? null) : null,

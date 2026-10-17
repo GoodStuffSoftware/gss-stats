@@ -51,8 +51,9 @@ describe('impressionsBalance: flagged when the largest and smallest ad share are
   it('the order of the ads does not matter', () => {
     expect(split(360, 640)!.uneven).toBe(true)
   })
-  it('fewer than two ads with impressions has nothing to compare', () => {
-    expect(split(100, 0)).toBeNull()
+  it('a starved ad (100/0) is flagged uneven; no impressions at all has nothing to compare', () => {
+    expect(split(100, 0)!.uneven).toBe(true)
+    expect(split(0, 100)!.gap).toBe(1)
     expect(split(0, 0)).toBeNull()
     expect(impressionsBalance([{ tag: 'only', impressions: 50 }])).toBeNull()
   })
@@ -82,11 +83,19 @@ describe('the per-tag split prints each tag\'s impression share and the balance 
   })
   it('60/40: the edge reads even enough and names the 20-point rule', () => {
     const t = text(600, 400)
-    expect(t).toContain('impressions balance: even enough (hero 60% / feat 40% of impressions; flagged when the shares are more than 20% apart)')
+    expect(t).toContain('impressions balance: even enough (hero 60% / feat 40% of impressions; flagged when the shares are more than 20 points apart)')
     expect(t).not.toContain('UNEVEN')
   })
   it('an even split reads even enough', () => {
     expect(text(500, 500)).toContain('impressions balance: even enough (hero 50% / feat 50% of impressions')
+  })
+  it('a small bare catch-all tag does not flag an even hero/feat split, and a starved ad does flag', () => {
+    const BARE = STAGED_FLIGHT_3.apps.ucValues[2]
+    const bare = tagSplitLines(buildTagSplit({ rows, ucValues: [HERO, FEAT, BARE], adRows: [ad('a', HERO, 5000), ad('b', FEAT, 5000), ad('c', BARE, 100)], costThroughEt: '2026-10-18' })).join('\n')
+    expect(bare).toContain('impressions balance: even enough (hero 50% / feat 50% of impressions')
+    expect(bare).not.toContain('UNEVEN')
+    const starved = tagSplitLines(buildTagSplit({ rows, ucValues: [HERO, FEAT, BARE], adRows: [ad('a', HERO, 5000), ad('b', FEAT, 0)], costThroughEt: '2026-10-18' })).join('\n')
+    expect(starved).toContain('impressions balance: UNEVEN: hero 100% / feat 0% of impressions')
   })
   it('an untagged ad is left out of the shares', () => {
     const t = text(500, 500, [ad('c', null, 9000)])
@@ -103,7 +112,7 @@ describe('the per-tag split prints each tag\'s impression share and the balance 
     expect(text(500, 500)).toContain("arrivals are first-ever tagged rows (not the donut's /return/<tag>/d0 count)")
   })
   it('impressionsBalanceLine: null when fewer than two ads have impressions', () => {
-    expect(impressionsBalanceLine(null)).toBe('  impressions balance: not checked (fewer than two ads with impressions)')
+    expect(impressionsBalanceLine(null)).toBe('  impressions balance: not checked (no ad impressions yet, or fewer than two ads)')
   })
 })
 

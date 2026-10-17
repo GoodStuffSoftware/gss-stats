@@ -303,15 +303,15 @@ link that lost its suffix still counts. All three tags are the one arm.
   ...)`. A count, never a rate. The v1.99.2 caveat appears only once its date has come; quote it with
   the count, because new accounts before and after that release are not measured the same way.
 - **Impressions balance (per-tag split).** Each tag row also prints `% of tagged-ad impressions`,
-  then one line `impressions balance: UNEVEN | even enough`. UNEVEN means the largest and smallest
-  ad share are more than 20 points apart (60/40 is the edge; 64/36 flags). On UNEVEN the ads are not
-  rotating evenly: compare each ad's rates, not its totals. A split with fewer than two ads with
-  impressions reads "not checked".
+  then one line `impressions balance: UNEVEN | even enough` over the hero and features ads only (the
+  bare catch-all tag is left out). UNEVEN means the largest and smallest ad share are more than 20
+  points apart (60/40 is the edge; 64/36 flags; an ad with 0 impressions beside a live one flags). On
+  UNEVEN the ads are not rotating evenly: compare each ad's rates, not its totals. With no impressions
+  yet it reads "not checked".
 - **Arrival labels.** The report's `arrivals (new-visitor tagged rows)` (first-ever tagged beacons, a
   floor) and the first-session step `d0 devices (/return/<tag>/d0)` (one row per device, the donut's
   basis) are different counts by design. Name both labels when quoting either; never reconcile them.
-- **Serving hours.** Both F3 arms serve 12:00-24:00 ET (changed from 12:00-23:00 once flight 3 was
-  live); flight 2 stays 12:00-23:00.
+- **Serving hours.** Both F3 arms serve 12:00-24:00 ET (changed from 12:00-23:00 on 2026-10-16, before launch); flight 2 stays 12:00-23:00.
 
 ### Secondary measures (counts only, never per-person)
 
