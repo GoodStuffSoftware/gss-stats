@@ -22,6 +22,7 @@ import {
   readingEntryKind,
   round2,
   stripLocalPaths,
+  type ReadingF3,
   type ReadingKind,
   type ReadingRecord,
   type ResolvedSpend,
@@ -29,6 +30,7 @@ import {
   type SpendSummary,
   type StoredSpend,
 } from './adsRules'
+import type { ReadoutVerdict } from './flight3Rules'
 import { freshnessOf, isClosedFetch, spendThroughFromRows, unfinishedSyncAlert, UNFINISHED_SYNC_AFTER_MS, UNFINISHED_SYNC_LOOKBACK_MS, type AdsFreshness, type SyncAlert } from './adsFreshness'
 
 export const ADS_DB_NAME = 'gss-stats-ads'
@@ -238,8 +240,8 @@ export async function writePlayDaily(db: AdsDb, rows: readonly PlayDayRow[], fet
 export function readingInsert(rec: ReadingRecord, routineVersion: string = ROUTINE_VERSION): SqlStatement {
   return {
     sql:
-      'INSERT INTO ads_readings (reading_key, campaign_id, kind, stage, read_at, et_date, spend_through_et, cumulative_spend_micros, thresholds, complete, rules, proposal, decision, counts, notes, routine_version, entry_kind) ' +
-      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING',
+      'INSERT INTO ads_readings (reading_key, campaign_id, kind, stage, read_at, et_date, spend_through_et, cumulative_spend_micros, thresholds, complete, rules, proposal, decision, counts, notes, routine_version, entry_kind, f3) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING',
     binds: [
       rec.id,
       rec.campaignId,
@@ -258,6 +260,7 @@ export function readingInsert(rec: ReadingRecord, routineVersion: string = ROUTI
       JSON.stringify(rec.notes.map(stripLocalPaths)), // no local paths in stored notes (review L10)
       routineVersion,
       rec.entryKind ?? readingEntryKind(rec),
+      rec.f3 == null ? null : JSON.stringify(rec.f3),
     ],
   }
 }
@@ -357,7 +360,7 @@ export const CONSUMED_FROM_READINGS_SQL = "SELECT thresholds FROM ads_readings W
 export const PLACEMENT_ROWS_SQL =
   'SELECT date, placement, display_name, placement_type, target_url, approved, cost_micros, impressions, clicks FROM ads_placement_daily WHERE campaign_id = ? AND date >= ? AND date <= ? ORDER BY date, placement'
 export const THRESHOLD_STATE_SQL = 'SELECT threshold_usd, fired_at FROM ads_threshold_state WHERE campaign_id = ? ORDER BY threshold_usd'
-const READING_COLS = 'reading_key, campaign_id, kind, stage, read_at, et_date, spend_through_et, cumulative_spend_micros, thresholds, complete, rules, proposal, decision, counts, notes, routine_version, entry_kind'
+const READING_COLS = 'reading_key, campaign_id, kind, stage, read_at, et_date, spend_through_et, cumulative_spend_micros, thresholds, complete, rules, proposal, decision, counts, notes, routine_version, entry_kind, f3'
 export const READINGS_SQL = `SELECT ${READING_COLS} FROM ads_readings WHERE campaign_id = ? ORDER BY read_at DESC, id DESC LIMIT ?`
 export const READINGS_ON_DAY_SQL = `SELECT ${READING_COLS} FROM ads_readings WHERE campaign_id = ? AND et_date = ? ORDER BY id`
 /** Every stored Play day (the adsPlayDaily fact; a few hundred rows at most). */
@@ -487,7 +490,29 @@ export function mapReadingRow(row: Record<string, unknown>): ReadingRecord | nul
   }
   // Rows from before migration 0003 carry no entry_kind: derive the same key from the fields.
   rec.entryKind = typeof row.entry_kind === 'string' && row.entry_kind ? row.entry_kind : readingEntryKind(rec)
+  const f3 = parseReadingF3(parseJson<unknown>(row.f3, null))
+  if (f3) rec.f3 = f3
   return rec
+}
+const F3_VERDICTS: readonly string[] = ['PASS', 'PROPOSE PAUSE', 'NOT YET', 'NO DATA', 'n/a', 'GO', 'ITERATE', 'STOP', 'INCONCLUSIVE']
+/** The stored F3 rules block (migration 0006), or undefined for NULL (every non-F3 row and rows
+ * written before the column) and for anything malformed: a bad value never reaches a card. */
+export function parseReadingF3(raw: unknown): ReadingF3 | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const o = raw as Record<string, unknown>
+  if (o.arm !== 'apps' && o.arm !== 'search') return undefined
+  if (typeof o.flightDay !== 'number' || !Number.isFinite(o.flightDay) || !Array.isArray(o.readouts)) return undefined
+  const proposal = o.proposal === 'PROPOSE PAUSE' || o.proposal === 'CONTINUE' ? o.proposal : null
+  const readouts: ReadingF3['readouts'] = []
+  for (const r of o.readouts as unknown[]) {
+    if (!r || typeof r !== 'object') return undefined
+    const x = r as Record<string, unknown>
+    if (typeof x.n !== 'number' || typeof x.name !== 'string' || typeof x.number !== 'string') return undefined
+    if (x.threshold !== null && typeof x.threshold !== 'string') return undefined
+    if (typeof x.verdict !== 'string' || !F3_VERDICTS.includes(x.verdict)) return undefined
+    readouts.push({ n: x.n, name: x.name, number: x.number, threshold: x.threshold, verdict: x.verdict as ReadoutVerdict })
+  }
+  return { v: 1, arm: o.arm, flightDay: o.flightDay, readouts, proposal }
 }
 
 // ── The store over any D1-shaped database ─────────────────────────────────────────────────

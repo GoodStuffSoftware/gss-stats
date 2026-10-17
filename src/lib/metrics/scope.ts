@@ -10,7 +10,7 @@ import { noteRawText } from '../notes'
 import { etDateFromMs, POPUPS, type PopupDef } from '../popupEvents'
 import { campaignSegmentMarker, UPSELL_SIGNEDOUT_FIX_AT } from '../adsRules'
 import { releaseAwaitingFullDay, releaseSubjectOn } from '../releases'
-import { freshnessLine, STALE_NOTE } from '../adsFreshness'
+import { etDayText, freshnessLine, STALE_NOTE } from '../adsFreshness'
 import { etDateTimeText, signUpsText } from '../adsReadingsFormat'
 import { metricWindows, METRICS, rulesOf, type MetricDef, type MetricParam } from './metrics'
 import { ratioParamsOf, ratioSupportsOrganic, ratioWindowsOf, RATIOS, type RatioDef } from './ratios'
@@ -56,6 +56,24 @@ export interface CampaignAdsInfo {
   loadedAtMs: number
   /** The campaign has a stored reading, Ads-API spend or an active flight (RepeatSpec.withActivity). */
   hasActivity?: boolean
+  /** The newest loaded daily reading that carries an F3 rules block (ads_readings.f3); absent
+   * when none does (every non-F3 campaign, and an F3 arm before its first read). */
+  f3?: CampaignF3Read
+}
+/** One rule of a stored F3 read, as the report printed it. */
+export interface RuleScope {
+  n: number
+  name: string
+  number: string
+  threshold: string | null
+  verdict: string
+}
+/** A campaign's newest stored F3 read: its ET read date, flight day, proposal and rules. */
+export interface CampaignF3Read {
+  etDate: string
+  flightDay: number
+  proposal: 'PROPOSE PAUSE' | 'CONTINUE' | null
+  rules: RuleScope[]
 }
 
 /** One object a card, section, item or table column is bound to. A nested repeat's instance
@@ -71,6 +89,7 @@ export type ScopeInstance = (
   | { kind: 'window'; window: WindowSide }
   | { kind: 'country'; country: CountryBucket }
   | { kind: 'reading'; reading: ReadingScope }
+  | { kind: 'rule'; rule: RuleScope }
 ) & { parent?: ScopeInstance }
 
 export const ROOT_SCOPE: ScopeInstance = { kind: 'root' }
@@ -165,6 +184,13 @@ export function usesAdsInfoFields(spec: unknown): boolean {
 export function usesReadingFields(spec: unknown): boolean {
   return namedScopePaths(spec).some((p) => p.startsWith('reading.'))
 }
+/** Whether the card shows a stored F3 read (`campaign.f3*`, `rule.*`, or a repeat over rules).
+ * It then needs the readings load, deep enough to reach the newest daily read behind the
+ * threshold and health rows of the same days (DEFAULT_READINGS_LIMIT per campaign). */
+export function usesF3Read(spec: unknown): boolean {
+  if (cardRepeats(spec as RepeatHolder).some((r) => r.over === 'rules')) return true
+  return namedScopePaths(spec).some((p) => p.startsWith('campaign.f3') || p.startsWith('rule.'))
+}
 /** The most readings per campaign any readings repeat of the card asks for (what to request). */
 export function readingsLimitOf(spec: RepeatHolder): number {
   const limits = cardRepeats(spec).filter((r) => r.over === 'readings').map(readingsLimit)
@@ -224,6 +250,9 @@ export function resolveRepeat(repeat: RepeatSpec | undefined, ctx: RepeatContext
       const mine = arm === undefined ? all : all.filter((r) => r.campaignId === arm)
       return mine.slice(0, readingsLimit(repeat)).map((reading) => ({ kind: 'reading', reading }))
     }
+    case 'rules':
+      // Only inside a campaign: that campaign's newest stored F3 read, rule 1 first.
+      return (campaignInstanceOf(outer)?.ads?.f3?.rules ?? []).map((rule) => ({ kind: 'rule', rule }))
     default:
       return []
   }
@@ -240,6 +269,13 @@ export function todayEtFrom(nowMs: number): string {
  * per-cell tone hook (types.ts CellTone). Only a stored reading's Rules and Proposal carry one
  * today; it styles a value that is already shown and exposes nothing of its own. */
 export function scopeTone(scope: ScopeInstance, path: ScopePath): CellTone | null {
+  // An F3 verdict: PROPOSE PAUSE red, PASS plain, NOT YET / NO DATA / n/a dim; GO..STOP (rule 9's
+  // D+7 verdict) plain. The proposal: PROPOSE PAUSE red.
+  if (path === 'rule.verdict') {
+    const v = scopeOfKind(scope, 'rule')?.rule.verdict
+    return v == null ? null : v === 'PROPOSE PAUSE' ? 'trip' : v === 'NOT YET' || v === 'NO DATA' || v === 'n/a' ? 'muted' : 'clear'
+  }
+  if (path === 'campaign.f3Proposal') return campaignInstanceOf(scope)?.ads?.f3?.proposal === 'PROPOSE PAUSE' ? 'trip' : null
   const tones = scopeOfKind(scope, 'reading')?.reading?.tones
   if (!tones) return null
   if (path === 'reading.rules') return tones.rules ?? null
@@ -293,6 +329,25 @@ export function scopeField(scope: ScopeInstance, path: ScopePath, todayEt: strin
       const fired = campaignInstanceOf(scope)?.ads?.thresholdsFired
       return fired?.length ? fired.map((t) => `$${t.threshold} · ${etDateTimeText(t.firedAt)}`).join('; ') : null
     }
+    case 'campaign.f3Read': {
+      const f3 = campaignInstanceOf(scope)?.ads?.f3
+      return f3 ? `${etDayText(f3.etDate)} · flight day ${f3.flightDay}` : null
+    }
+    case 'campaign.f3Proposal': {
+      const f3 = campaignInstanceOf(scope)?.ads?.f3
+      if (!f3) return null
+      return f3.proposal ?? noteRawText('f3-proposal-not-serving')
+    }
+    case 'rule.name': {
+      const r = scopeOfKind(scope, 'rule')?.rule
+      return r ? `${r.n} · ${r.name}` : null
+    }
+    case 'rule.number':
+      return scopeOfKind(scope, 'rule')?.rule.number ?? null
+    case 'rule.threshold':
+      return scopeOfKind(scope, 'rule')?.rule.threshold ?? null
+    case 'rule.verdict':
+      return scopeOfKind(scope, 'rule')?.rule.verdict ?? null
     case 'popup.id':
       return popup ? popup.id : null
     case 'popup.label':
@@ -478,6 +533,8 @@ export function columnDefaultLabel(scope: ScopeInstance): Label {
       return { bind: 'country.label' }
     case 'reading':
       return { bind: 'reading.readAt' }
+    case 'rule':
+      return { bind: 'rule.name' }
     default:
       return ''
   }

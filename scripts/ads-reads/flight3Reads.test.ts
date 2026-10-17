@@ -5,12 +5,12 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { fixtureDeps, type Fixture } from './cli'
 import { runMorningRead, runPostflightRead } from './read'
 import { APPS_PLAY_RELEASE_CAVEAT, formatMorningReport, formatPostflightReport } from './report'
 import { MIN_COHORT } from '../../src/lib/popupEvents'
-import { ADS_READ_PLANS, postflightDueDate } from '../../src/lib/adsRules'
+import { ADS_READ_PLANS, postflightDueDate, type ReadingRecord } from '../../src/lib/adsRules'
 import { campaignById, STAGED_FLIGHT_3_DATES } from '../../src/lib/campaigns'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -47,6 +47,21 @@ describe.each(ARMS)('$label', (a) => {
     expect(endOf(a)).toBe(addDays(startOf(a), 6))
     expect(ADS_READ_PLANS[a.id].morningReadFirstEt).toBe(addDays(startOf(a), 1))
     expect(ADS_READ_PLANS[a.id].morningReadLastEt).toBe(addDays(endOf(a), 1))
+  })
+  it('the morning read stores its F3 rules block on the daily reading only (ads_readings.f3), as the report prints it', async () => {
+    const day = addDays(startOf(a), 3)
+    const deps = fixtureDeps(armFixture(a, day), false)
+    // What the read hands the store (the memory store's own de-dup is not under test here).
+    const append = vi.spyOn(deps.store, 'appendReadings')
+    const result = await runMorningRead(deps, { campaignId: a.id, releaseHealth: 'auto', healthOnly: false, healthMinParent: MIN_COHORT, healthParentAgeHours: 24 })
+    const block = result.flight3!
+    const written = append.mock.calls.flatMap((c) => c[0] as ReadingRecord[])
+    const daily = written.find((r) => r.kind === 'daily')!
+    expect(daily.f3).toEqual({ v: 1, arm: a.arm, flightDay: block.flightDay, readouts: block.readouts.map(({ n, name, number, threshold, verdict }) => ({ n, name, number, threshold, verdict })), proposal: block.proposal })
+    expect(daily.f3!.readouts.map((r) => r.n)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9])
+    // The stored proposal agrees with the row's own column.
+    expect(daily.proposal === 'PROPOSE PAUSE').toBe(daily.f3!.proposal === 'PROPOSE PAUSE' || daily.rules?.[0]?.status === 'trip')
+    for (const r of written.filter((x) => x.kind !== 'daily')) expect(r).not.toHaveProperty('f3')
   })
   it.each([1, 2])('day %i morning read prints the tracking-check counts line', async (day) => {
     const report = await morning(a, addDays(startOf(a), day))

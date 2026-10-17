@@ -97,7 +97,7 @@ import { splitPlacements, type AdDayRow, type CampaignStatus, type DeviceRow, ty
 import { syncAdsData, type AdsMetricsSource, type CampaignSyncResult, type SyncResult } from '../../src/lib/adsSync'
 import type { SyncSource } from '../../src/lib/adsStore'
 import { buildTagSplit, isMultiTag, type TagSplit } from '../../src/lib/tagSplit'
-import { buildFlight3Rules, costPerCompleteRow, decideFlight3, F3_VERDICT_FROM_DAY, flight3VerdictWord, flightDayOf, killRuleReadout, type Flight3Block, type RuleReadout } from '../../src/lib/flight3Rules'
+import { buildFlight3Rules, costPerCompleteRow, decideFlight3, F3_VERDICT_FROM_DAY, flight3VerdictWord, flightDayOf, killRuleReadout, readingF3Of, type Flight3Block, type RuleReadout } from '../../src/lib/flight3Rules'
 import type { BeaconSource, PreflightCounts } from './beacon'
 import type { FirebaseCounts } from './firebase'
 import { HOUSEHOLD_NOTE, RETENTION_NOTE, type PlayReportsSection } from './play'
@@ -1325,6 +1325,8 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
         ...(play ? [play.line] : []),
         ...(missedReads.length ? [`previous scheduled read missing: ${missedReads.join(', ')}`] : []),
       ],
+      // F3 arms only (migration 0006): the rules block as the report prints it, for the Campaigns card.
+      ...(flight3 ? { f3: readingF3Of(flight3) } : {}),
     })
   }
   if (thresholdRead) {

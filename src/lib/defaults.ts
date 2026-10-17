@@ -486,6 +486,9 @@ export function defaultCampaignsWidgets(): Widget[] {
       h: 4,
     }),
     f3HeroDonutWidget({ x: 0, y: 78, w: 6, h: 10 }),
+    // Flight 3 rules per arm, from the newest stored morning read (ads_readings.f3). Not a panel:
+    // no CARD_PRESET_FOR_PANEL key, so the layout migrations never touch it.
+    w({ id: 'cw-f3-rules', title: 'Flight 3 rule readouts', type: 'table', dataset: 'campaigns', view: 'f3Rules', card: { preset: 'f3-rule-readouts' }, dimension: '', metric: 'pageviews', limit: 1, x: 0, y: 88, w: 12, h: 14 }),
   ])
 }
 // Flight 3 Apps arm: "No ads (hero)" vs "Features", arrivals per landing tag as a donut (geo dimension

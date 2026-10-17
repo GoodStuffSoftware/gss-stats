@@ -53,7 +53,7 @@ const rows = (sqlite: ReturnType<typeof openMigratedSqlite>) => sqlite.prepare('
 
 describe('migration 0005 (ads_play_daily)', () => {
   it('is the fifth migration and creates one counts-only table', () => {
-    expect(migrationFiles().at(-1)).toBe('0005_play_daily.sql')
+    expect(migrationFiles()).toContain('0005_play_daily.sql')
     const sqlite = openMigratedSqlite()
     const cols = (sqlite.prepare("PRAGMA table_info('ads_play_daily')").all() as { name: string }[]).map((c) => c.name)
     // No hour, country, source or device column, and no id that could tie a row to a visitor.
