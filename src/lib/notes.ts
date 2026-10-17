@@ -58,7 +58,7 @@ import type { CardSpec } from './metrics/types'
 // lib/popupEvents.ts — see that file's own comment on why it keeps AUTH_NEW_EXISTING_LIVE_AT
 // out of itself), so importing the constant from lib/adsRules.ts here is fine.
 import { AUTH_NEW_EXISTING_LIVE_AT } from './adsRules'
-import { MEASUREMENT_CHANGES, markedChanges } from './measurementChanges'
+import { MEASUREMENT_CHANGES, authMarkedChanges } from './measurementChanges'
 import { etOffsetHours } from './etTime'
 import { SIGNUPS_HINT } from './adsReadingsFormat'
 import { BAR_FIXED, ORGANIC_BAR_FACTOR, ORGANIC_MIN_D0, ORGANIC_MIN_DAYS } from './metrics/retention'
@@ -411,14 +411,14 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
   'measurement-change-note': {
     id: 'measurement-change-note',
     text: () => {
-      const marked = markedChanges()
+      const marked = authMarkedChanges()
       return marked.length > 0 ? `${marked.map((c) => `From ${c.dateEt} (${c.id}): ${c.note}.`).join(' ')} Do not read the rise as performance.` : `Measurement change (${MEASUREMENT_CHANGES[0].id}, date not set yet): ${MEASUREMENT_CHANGES[0].note}.`
     },
     kind: 'note',
     severity: 'caveat',
     scopes: ['campaigns', 'overview'],
     hideable: false,
-    activeWhen: () => markedChanges().length > 0,
+    activeWhen: () => authMarkedChanges().length > 0,
     appliesTo: (w: AutoCaveatWidget) => cardShowsAuthSuccess(w.card),
   },
   // The release panel (lib/metrics/presets.ts release-before-after): why the before window reads

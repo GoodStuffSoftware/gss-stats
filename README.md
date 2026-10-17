@@ -75,6 +75,10 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   same caveat under the tagged cards, listing both days). Once set, the timeline marks the
   day, the tagged auth-success and new-account cards carry a caveat that the rise is partly
   measurement, and the ads read reports print a marker line on that day and a "since" line after it.
+  The v1.99.3 coach-strip meaning change (× closes one tip; a written note ends the notes tip) is a
+  separate `v1.99.3 web` entry (undated) plus a `coachNote` on the Play entry: it marks the timeline
+  and shows only on the coach readouts (Coach tips card, Feature health Coach row, the report's
+  tagged coach line), never under the auth-success cards.
   Best Sudoku / Campaigns (its funnel, country, cost and return-visits panels are metric
   cards, presets `campaign-funnel`, `campaign-country` — a table with the funnel steps as rows
   and US / CA / Other as columns, each cell a campaign metric with the registry's optional
@@ -656,7 +660,10 @@ Splitting by *which tip* is a split by path, not by hour, place or device, so th
 `/coach/shown/%`, `/coach/dismissed/%` and `/coach/closed-at/%` paths are still read only as
 per-ET-day totals. Web and app combined, humans only, the same exclusions as the other cards;
 viewers can read it. Until the game version that sends the beacons ships (no coach row ever),
-the card says so and every row reads 0.
+the card says so and every row reads 0. Its caption gives the reading rule per tip (shown, then
+dismissed, closed-at, or nothing) and warns that, from v1.99.3, × closes one tip and a written
+note ends the notes tip with no beacon, so ratios and tip-to-tip comparisons are not comparable
+across that version (the note under the card appears once the version's date is set).
 
 ### Ask-order A/B
 

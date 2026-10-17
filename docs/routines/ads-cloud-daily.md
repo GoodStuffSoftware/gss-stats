@@ -211,6 +211,7 @@ link that lost its suffix still counts. All three tags are the one arm.
   | 0 to 1, with 20 or more asks | Stop paid acquisition |
   | Under 20 asks | Inconclusive (no go, iterate or stop) |
 
+- **Coach meaning change:** when the coach strip line ends with "meaning change v1.99.3", × closes one tip and a written note ends the notes tip with no beacon from that day: do not compare coach rows across it or read a dismissed row as the tips stopping.
 - **Measurement change:** when a read prints a "MEASUREMENT CHANGE TODAY" or "Measurement change since" line, on or after that marked day do not read the tagged new-account rise as performance.
 - **Traffic-held check:** coded as rule 8 of the F3 rules block (complete rows at no more than $3
   each, from rule 6, and CTR at or above the arm's flight 2 floor, Apps 0.15% and Search 1.0%, the
