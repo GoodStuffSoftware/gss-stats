@@ -229,7 +229,9 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // lib/charts.ts activationMarkerIndex), so blanking it here would just hide the
   // "before" half of the very picture that marker draws.
   const k = kind || 'shown'
-  const rowsOut: Row[] = dayCounts(agg, popup, k)
+  // An outcome kind trends its popup-outcome family, as 'reason' above breaks it down.
+  const dateFamily = (POPUP_OUTCOME_TYPES as readonly string[]).includes(k) ? `popup-outcome:${popup}` : popup
+  const rowsOut: Row[] = dayCounts(agg, dateFamily, k)
     .map(([date, c]) => ({ key: { date }, pageviews: c, visits: c }))
     .sort((a, b) => (a.key.date < b.key.date ? -1 : a.key.date > b.key.date ? 1 : 0))
   return json({ rows: rowsOut, totals: countedTotals(rowsOut), meta })

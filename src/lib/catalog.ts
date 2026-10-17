@@ -80,6 +80,11 @@ export const POPUP_KIND_OPTIONS: { value: string; label: string }[] = [
   { value: 'shown', label: 'Shown' },
   { value: 'accept', label: 'Accepted' },
   { value: 'dismiss', label: 'Dismissed' },
+  // Outcomes (the popup-outcome rows, by reason when the chart breaks down 'reason'; the window each counts is the pop-up's own).
+  { value: 'signed-in', label: 'Signed in after' },
+  { value: 'installed', label: 'Installed after' },
+  { value: 'returned', label: 'Returned after' },
+  { value: 'still-playing', label: 'Still playing after' },
 ]
 
 // type: 'rate' widgets — a single computed percentage. `widget.dimension` holds the

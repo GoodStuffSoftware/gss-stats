@@ -37,6 +37,8 @@
 // Sign-in eligibility (popup 'eligible' bar chart → preset signin-eligibility):
 //   L3  The three counts are the card's bars (labels and values as the chart's bars).
 //   A1  Added: the eligibility rate (earned over all three, a valid partition ratio) under them.
+//   R1  Added: earned split by reason (placement, committed repeat/challenge, first-50, older rows,
+//       other) and, outside the rate, below-floor, not-now and stopped rows, as two titled bar groups.
 //
 // Campaign cost (campaigns 'cost' → preset campaign-cost), with an ads store in the fixture:
 //   L4  The one freshness line "Spend through Sep 9 · synced 1h ago" is two rows, "Spend
@@ -364,6 +366,19 @@ describe('the Pop-ups page panels ≡ their /api/popups renderings', () => {
     expect(r.slice(0, 3)).toEqual(oldBars)
     expect(card.findAll('.mi-bar-fill').map((b) => (b.element as HTMLElement).style.width).slice(0, 3)).toEqual(['100%', '50%', '25%'])
     expect(r[3]).toEqual(['Sign-in eligibility rate', '57.1% (4/7)']) // A1
+    // R1 (added with the eligibility reasons): the card also splits earned by reason and counts the rows outside the
+    // rate. The fixture's 4 earned rows carry no reason, so all 4 read "older rows"; nothing else is in the range.
+    expect(r.slice(4)).toEqual([
+      ['Earned: placement', '0'],
+      ['Earned: committed repeat', '0'],
+      ['Earned: committed challenge', '0'],
+      ['Earned: first-50', '0'],
+      ['Earned: older rows (no reason)', '4'],
+      ['Earned: other reason', '0'],
+      ['Below the floor', '0'],
+      ['Not now', '0'],
+      ['Stopped', '0'],
+    ])
   })
 })
 

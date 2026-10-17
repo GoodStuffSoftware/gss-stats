@@ -286,7 +286,12 @@ export function defaultBestSudokuPopupsWidgets(): Widget[] {
       h: 11,
     }),
     w({ id: 'pu-rates', title: 'Rates (valid ratios only)', type: 'rateTable', dataset: 'popup', dimension: '', card: { preset: 'popup-rates' }, metric: 'pageviews', limit: 1, notes: ['min-cohort-caveat'], x: 0, y: 11, w: 8, h: 7 }),
-    w({ id: 'pu-eligible-bd', title: 'Sign-in eligibility', type: 'bar', dataset: 'popup', dimension: 'eligible', card: { preset: 'signin-eligibility' }, metric: 'pageviews', limit: 3, notes: ['signin-eligible-caveat'], x: 8, y: 11, w: 4, h: 7 }),
+    w({ id: 'pu-eligible-bd', title: 'Sign-in eligibility', type: 'bar', dataset: 'popup', dimension: 'eligible', card: { preset: 'signin-eligibility' }, metric: 'pageviews', limit: 3, notes: ['signin-eligible-caveat'], x: 8, y: 11, w: 4, h: 14 }),
+    // Upsell by reason, counts per reason (never by hour, place or device): the pop-up dataset's 'reason' dimension
+    // with an outcome kind (lib/popupEvents.ts: rows before the reason segment show as 'legacy'). Ids deliberately
+    // do not end in -kind/-tap/-reason/-trend, which the v9 migration deletes as pre-v9 generator ids.
+    w({ id: 'pu-upsell-dismiss-reasons', title: 'Upsell: dismissals by reason', type: 'hbar', dataset: 'popup', dimension: 'reason', popup: 'upsell', popupKind: 'dismiss', metric: 'pageviews', limit: 12, x: 0, y: 18, w: 4, h: 7 }),
+    w({ id: 'pu-upsell-signedin-reasons', title: 'Upsell: sign-ins by reason', type: 'hbar', dataset: 'popup', dimension: 'reason', popup: 'upsell', popupKind: 'signed-in', metric: 'pageviews', limit: 12, x: 4, y: 18, w: 4, h: 7 }),
   ])
 }
 
@@ -313,6 +318,9 @@ export function popupsPageV8FactoryIds(): string[] {
   return ids
 }
 const POPUPS_V9_KEPT_IDS = new Set(['pu-eligible-bd'])
+// The widgets the v9 rebuild produced, FROZEN: a Pop-ups widget added to the defaults later (the upsell-by-reason
+// charts) is added through the layout, never by this one-time rebuild of a pre-v9 page.
+const POPUPS_V9_FACTORY_IDS = new Set(['pu-bars', 'pu-rates', 'pu-eligible-bd'])
 const POPUPS_V8_ELIGIBILITY_TITLE = 'Sign-in eligibility — earned / capped / unearned'
 
 /** v9: rebuild a saved Pop-ups page. Removes the pre-v9 generated tiles (by id, the owner's
@@ -323,7 +331,11 @@ const POPUPS_V8_ELIGIBILITY_TITLE = 'Sign-in eligibility — earned / capped / u
  * remove and both new widgets already present, and returns the page unchanged. */
 export function migratePopupsPageV9(page: DashboardPage): DashboardPage {
   const survivors = page.widgets.filter((wd) => POPUPS_V9_KEPT_IDS.has(wd.id) || !isPrePopupsV9GeneratedId(wd.id))
+  // Frozen at the v9 geometry too: the eligibility card has been 7 rows tall here since v9 (a taller one is the
+  // fresh default, and a saved layout takes it through the layout, not through this rebuild).
   const defaults = defaultBestSudokuPopupsWidgets()
+    .filter((wd) => POPUPS_V9_FACTORY_IDS.has(wd.id))
+    .map((wd) => (wd.id === 'pu-eligible-bd' ? { ...wd, h: 7 } : wd))
   const fresh = defaults.filter((wd) => !POPUPS_V9_KEPT_IDS.has(wd.id) && !survivors.some((k) => k.id === wd.id))
   if (survivors.length === page.widgets.length && fresh.length === 0) return page
   const slot = (id: string) => defaults.find((d) => d.id === id)!

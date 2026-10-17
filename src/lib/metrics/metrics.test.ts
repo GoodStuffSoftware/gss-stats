@@ -1,7 +1,7 @@
 // The metric catalog: every label, unit word and caveat is a notes-registry entry, units key
 // off the beacon path families, and each metric counts the paths today's endpoints count.
 import { describe, expect, it } from 'vitest'
-import { METRIC_DEFS, METRICS, rowMatcher, rulesOf, type MetricCtx } from './metrics'
+import { ELIGIBLE_EARNED_REASON_METRICS, ELIGIBLE_OTHER_METRICS, METRIC_DEFS, METRICS, rowMatcher, rulesOf, type MetricCtx } from './metrics'
 import { RATIO_DEFS } from './ratios'
 import { PATH_FAMILY_UNIT, UNITS, unitLabelId } from './units'
 import { NOTES_REGISTRY } from '../notes'
@@ -77,6 +77,15 @@ describe('units key off the beacon path families (lib/popupEvents.ts)', () => {
     'popup.shown': { path: '/signin-prompt/streak', params: { popup: 'signin-prompt' } },
     'popup.outcomeReturned': { path: '/popup-outcome/upsell/returned', params: { popup: 'upsell' } },
     'popup.eligibleEarned': { path: '/signin-eligible/earned' },
+    'popup.eligibleEarnedPlacement': { path: '/signin-eligible/earned/placement' },
+    'popup.eligibleEarnedCommittedRepeat': { path: '/signin-eligible/earned/committed-repeat' },
+    'popup.eligibleEarnedCommittedChallenge': { path: '/signin-eligible/earned/committed-challenge' },
+    'popup.eligibleEarnedFirst50': { path: '/signin-eligible/earned/first50' },
+    'popup.eligibleEarnedLegacy': { path: '/signin-eligible/earned' },
+    'popup.eligibleEarnedOther': { path: '/signin-eligible/earned/some-new-reason' },
+    'popup.eligibleBelowFloor': { path: '/signin-eligible/below-floor' },
+    'popup.eligibleNotNow': { path: '/signin-eligible/not-now' },
+    'popup.eligibleStopped': { path: '/signin-eligible/stopped' },
     // Exceptions — the unit differs from the path family's, on purpose:
     'campaign.authSuccess': { path: '/auth/success/google' }, // a page-family path, but one row per sign-in
     'campaign.newAccounts': { path: '/auth/success/google/new' }, // same
@@ -175,6 +184,52 @@ describe('the catalog', () => {
       expect(rules, id).toEqual([{ kind: 'liveAt', atMs: AUTH_NEW_EXISTING_LIVE_AT, source: 'AUTH_NEW_EXISTING_LIVE_AT', noteId: 'auth-new-existing-note' }])
     }
     expect(rulesOf(METRICS.get('bsk.authSuccess')!, ctxFor())).toEqual([]) // predates the split, stays ungated
+  })
+  // Sign-in eligibility, split: every earned row lands in exactly one reason metric (they sum to
+  // popup.eligibleEarned), and below-floor / not-now / stopped are rows of their own outside the earned rate.
+  it('each earned row counts under exactly one reason metric, and the reasons sum to popup.eligibleEarned', () => {
+    const ctx = ctxFor()
+    const reasonMetrics = ELIGIBLE_EARNED_REASON_METRICS.map((m) => METRICS.get(m.id)!)
+    expect(reasonMetrics).toHaveLength(6)
+    const earnedPaths: [string, string][] = [
+      ['/signin-eligible/earned/placement', 'placement'],
+      ['/signin-eligible/earned/committed-repeat', 'committed-repeat'],
+      ['/signin-eligible/earned/committed-challenge', 'committed-challenge'],
+      ['/signin-eligible/earned/first50', 'first50'],
+      ['/signin-eligible/earned', 'legacy'], // a row from before the reason segment
+      ['/signin-eligible/earned/not-a-known-reason', 'other'],
+    ]
+    for (const [path, reason] of earnedPaths) {
+      const hits = ELIGIBLE_EARNED_REASON_METRICS.filter((m) => rowMatcher(METRICS.get(m.id)!, ctx)(row(path))).map((m) => m.reason)
+      expect(hits, path).toEqual([reason])
+      expect(rowMatcher(METRICS.get('popup.eligibleEarned')!, ctx)(row(path)), path).toBe(true)
+    }
+    for (const m of reasonMetrics) expect(m.subsetOf).toBe('popup.eligibleEarned')
+    for (const path of ['/signin-eligible/capped', '/signin-eligible/unearned', '/signin-eligible/below-floor']) {
+      for (const m of reasonMetrics) expect(rowMatcher(m, ctx)(row(path)), `${m.id} ${path}`).toBe(false)
+    }
+  })
+  it('below-floor, not-now and stopped are their own rows, never earned, capped or unearned', () => {
+    const ctx = ctxFor()
+    const eligibility = ['popup.eligibleEarned', 'popup.eligibleCapped', 'popup.eligibleUnearned'].map((id) => METRICS.get(id)!)
+    for (const { id, kind } of ELIGIBLE_OTHER_METRICS) {
+      const m = METRICS.get(id)!
+      expect(m.subsetOf, id).toBeUndefined()
+      expect(rowMatcher(m, ctx)(row(`/signin-eligible/${kind}`)), id).toBe(true)
+      for (const other of ELIGIBLE_OTHER_METRICS) if (other.id !== id) expect(rowMatcher(m, ctx)(row(`/signin-eligible/${other.kind}`)), `${id} vs ${other.kind}`).toBe(false)
+      for (const e of eligibility) expect(rowMatcher(e, ctx)(row(`/signin-eligible/${kind}`)), `${e.id} vs ${kind}`).toBe(false)
+    }
+    expect(ELIGIBLE_OTHER_METRICS.map((m) => m.kind)).toEqual(['below-floor', 'not-now', 'stopped'])
+  })
+  it('the eligibility split counts nothing on an empty range, and never a row of another family', () => {
+    const ctx = ctxFor()
+    const all = [...ELIGIBLE_EARNED_REASON_METRICS, ...ELIGIBLE_OTHER_METRICS].map((m) => METRICS.get(m.id)!)
+    expect(all).toHaveLength(9)
+    const rows = [] as BeaconRow[]
+    for (const m of all) expect(rows.filter(rowMatcher(m, ctx))).toHaveLength(0)
+    for (const path of ['/signin-prompt/placement', '/game', '/popup-outcome/signin-prompt/signed-in']) {
+      for (const m of all) expect(rowMatcher(m, ctx)(row(path)), `${m.id} ${path}`).toBe(false)
+    }
   })
   it('first50-congrats has no outcome tracking: its outcome metrics are never live', () => {
     for (const id of ['popup.outcomeSignedIn', 'popup.outcomeInstalled', 'popup.outcomeReturned', 'popup.outcomeStillPlaying']) {

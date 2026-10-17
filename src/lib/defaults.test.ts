@@ -15,11 +15,13 @@ import {
   overviewPageIsUncustomized,
   popupsPageV8FactoryIds,
   migratePopupsPageV9,
+  isPrePopupsV9GeneratedId,
   migrateDeviceMixV9,
   migrateTimelineV9,
   DEVICE_MIX_TITLE,
   CONFIG_VERSION,
 } from './defaults'
+import { POPUP_KIND_OPTIONS } from './catalog'
 import { NO_OUTCOME_TRACKING_NOTE, SIGNIN_ELIGIBLE_CAVEAT } from './popupEvents'
 import type { DashboardConfig, DashboardPage, Widget } from '../types'
 import { widgetsWithV16Caveats } from './__fixtures__/autoCaveats'
@@ -343,8 +345,25 @@ describe('normWidget — includeEventBeacons round-trip (via normalizeConfig)', 
 describe('defaultBestSudokuPopupsWidgets — one bar chart, a valid-rates table, eligibility', () => {
   const widgets = defaultBestSudokuPopupsWidgets()
 
-  it('is exactly the breakdown bar, the rate table and the eligibility bar', () => {
-    expect(widgets.map((w) => w.id)).toEqual(['pu-bars', 'pu-rates', 'pu-eligible-bd'])
+  it('is exactly the breakdown bar, the rate table, the eligibility card and the two upsell-by-reason charts', () => {
+    expect(widgets.map((w) => w.id)).toEqual(['pu-bars', 'pu-rates', 'pu-eligible-bd', 'pu-upsell-dismiss-reasons', 'pu-upsell-signedin-reasons'])
+  })
+
+  it('the upsell-by-reason charts read the pop-up dataset reason dimension with an outcome kind, and survive the pre-v9 cleanup', () => {
+    for (const [id, kind] of [['pu-upsell-dismiss-reasons', 'dismiss'], ['pu-upsell-signedin-reasons', 'signed-in']] as const) {
+      expect(widgets.find((w) => w.id === id)).toMatchObject({ type: 'hbar', dataset: 'popup', dimension: 'reason', popup: 'upsell', popupKind: kind, metric: 'pageviews' })
+      expect(isPrePopupsV9GeneratedId(id), id).toBe(false) // an id ending -reason would be deleted at load
+    }
+    expect(POPUP_KIND_OPTIONS.map((k) => k.value)).toEqual(expect.arrayContaining(['signed-in', 'installed', 'returned', 'still-playing']))
+  })
+
+  it('no two widgets overlap (the eligibility card is 14 rows tall beside the table and the upsell charts)', () => {
+    for (const a of widgets)
+      for (const b of widgets) {
+        if (a.id >= b.id) continue
+        const overlap = a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+        expect(overlap, `${a.id} / ${b.id}`).toBe(false)
+      }
   })
 
   it('the bar chart puts every pop-up on the axis and shown + outcomes as the series, over geo', () => {
@@ -494,7 +513,7 @@ describe('normalizeConfig — v9 migration (Pop-ups page + device mix)', () => {
 
   it('a fresh default config needs no migration and already has the new page', () => {
     const norm = normalizeConfig(defaultConfig())
-    expect(norm.pages.find((p) => p.id === 'bsk-popups')!.widgets.map((w) => w.id)).toEqual(['pu-bars', 'pu-rates', 'pu-eligible-bd'])
+    expect(norm.pages.find((p) => p.id === 'bsk-popups')!.widgets.map((w) => w.id)).toEqual(['pu-bars', 'pu-rates', 'pu-eligible-bd', 'pu-upsell-dismiss-reasons', 'pu-upsell-signedin-reasons'])
     expect(norm.pages.find((p) => p.id === 'bsk-campaigns')!.widgets.some((w) => w.view === 'deviceMix')).toBe(false)
   })
 })
