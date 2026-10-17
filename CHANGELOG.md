@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.50.0] — 2026-10-16
+
 ### Added
 - **Flight 3 report gaps closed.** The flight 3 morning read now flags uneven ad impressions, labels the report's arrivals apart from the donut's d0 devices, prints tagged coach counts and new accounts per arm (with the v1.99.2 measurement caveat), shows both arms' cost-per-arrival baselines, and treats serving as noon to midnight ET.
 
