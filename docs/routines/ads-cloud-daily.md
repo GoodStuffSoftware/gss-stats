@@ -340,7 +340,8 @@ Safari escape untagged; deferred rows lag at least 30 minutes after sign-in.
 
 Apps-arm Play caveat: v1.99.3 (19903) went public on Google Play 2026-10-17 06:34Z, before flight 3's first
 serve (12:00 ET 10-17), so flight 3 reads print no caveat (one constant in the report code, shown only for a
-reading that starts before 06:34:32Z). The note, if a reading ever spans it: "Play installs credited from v1.99.2+,
+reading that starts before 06:34:32Z). Separately, every flight 3 Apps read prints a standing note under the
+per-tag split, whatever the date (Search and flight 2 reads never do): "Play installs credited from v1.99.2+,
 public 10-17 06:34Z, before flight 3's first serve." New installs from the Apps arm get 19903, which carries the
 install referrer into the first sign-in, so flight 3 installs are credited from the first serve. A low Apps
 new-account count is still not a failed arm (a store install that signs in inside the app understates it; read the

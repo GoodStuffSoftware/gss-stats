@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Flight 3 Apps reads keep the Play-install credit note.** The line "Play installs credited from v1.99.2+, public 10-17 06:34Z, before flight 3's first serve." now prints on every flight 3 Apps read, whatever its date, and never on Search reads.
+
 ## [0.54.6] — 2026-10-17
 
 ### Fixed

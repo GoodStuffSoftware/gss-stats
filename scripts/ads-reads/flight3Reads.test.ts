@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
 import { fixtureDeps, type Fixture } from './cli'
 import { runMorningRead, runPostflightRead } from './read'
-import { APPS_PLAY_RELEASE_CAVEAT, formatMorningReport, formatPostflightReport } from './report'
+import { APPS_PLAY_CREDIT_NOTE, APPS_PLAY_RELEASE_CAVEAT, formatMorningReport, formatPostflightReport } from './report'
 import { MIN_COHORT } from '../../src/lib/popupEvents'
 import { ADS_READ_PLANS, postflightDueDate, type ReadingRecord } from '../../src/lib/adsRules'
 import { campaignById, STAGED_FLIGHT_3_DATES } from '../../src/lib/campaigns'
@@ -100,5 +100,12 @@ describe.each(ARMS)('$label', (a) => {
       expect(report).not.toMatch(/Read caveat|until the Play release/)
     }
     expect(formatPostflightReport(await postflight(a, addDays(endOf(a), 7), 'wrapup'))).not.toMatch(/Read caveat|until the Play release/)
+  })
+  it(`${a.caveat ? 'prints' : 'does not print'} the standing Play-credit note on every ${a.label} read, after the cut`, async () => {
+    const reads = [await morning(a, addDays(startOf(a), 1)), await morning(a, addDays(endOf(a), 1)), formatPostflightReport(await postflight(a, addDays(endOf(a), 7), 'wrapup'))]
+    for (const report of reads) {
+      if (a.caveat) expect(report).toContain(APPS_PLAY_CREDIT_NOTE)
+      else expect(report).not.toContain('Play installs credited')
+    }
   })
 })

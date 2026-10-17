@@ -154,8 +154,11 @@ export function coachCountsLine(c: CoachCounts, y?: CoachCounts, meaningNote?: s
   return `coach strip (tagged ET-day totals${y ? '; yesterday in brackets' : ''}; counts only): ${group('shown', (x) => x.shown)}; ${group('dismissed', (x) => x.dismissed)}; ${group('closed-at', (x) => x.closedAt)}; tour-opened ${f(c.tourOpened, y?.tourOpened ?? 0)}${meaningNote ? `; meaning change ${meaningNote}` : ''}`
 }
 
-/** The Apps-arm Play-install read caveat, printed under the Apps arm's per-tag split (the only multi-tag arm) while a reading starts before the cut (APPS_PLAY_CAVEAT_ENDS_AT_MS, lib/measurementChanges.ts: v1.99.3 went public on Play 2026-10-17T06:34:32Z). A flight 3 reading starts at 12:00 ET 10-17, after it, so it prints nothing. */
+/** The Apps-arm Play-install read caveat, printed under the Apps arm's per-tag split (the only multi-tag arm) while a reading starts before the cut (APPS_PLAY_CAVEAT_ENDS_AT_MS, lib/measurementChanges.ts: v1.99.3 went public on Play 2026-10-17T06:34:32Z). A flight 3 reading starts at 12:00 ET 10-17, after it, so this caveat does not print there; APPS_PLAY_CREDIT_NOTE below is the standing line that does. */
 export const APPS_PLAY_RELEASE_CAVEAT = "Read caveat: Play installs credited from v1.99.2+, public 10-17 06:34Z, before flight 3's first serve."
+
+/** The flight 3 Apps standing note, printed under the per-tag split on EVERY flight 3 Apps read whatever its date (the per-tag split exists only for the multi-tag Apps arm, so Search and flight 2 reads never carry it). Informational: it is separate from the gated caveat above. */
+export const APPS_PLAY_CREDIT_NOTE = "Note: Play installs credited from v1.99.2+, public 10-17 06:34Z, before flight 3's first serve."
 
 /** Where a campaign's reading window starts (its attribution start), null when unknown. */
 function readStartOf(campaignId: string): number | null {
@@ -185,6 +188,7 @@ export function tagSplitLines(sp: TagSplit | null | undefined, readStartMs?: num
   if (sp.unsplitHits) out.push(`  not on a tag: ${n(sp.unsplitHits)} tagged hit(s) have no campaign tag on the row`)
   out.push(sp.costRead ? `  ad cost through ${sp.costThroughEt ?? '—'} (closed days; Google Ads ad_group_ad, read-only)` : `  ad cost: not read (${sp.costError ?? 'unknown'})`)
   if (appsPlayCaveatApplies(readStartMs)) out.push(APPS_PLAY_RELEASE_CAVEAT)
+  out.push(APPS_PLAY_CREDIT_NOTE)
   return out
 }
 

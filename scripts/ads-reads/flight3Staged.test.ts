@@ -42,7 +42,7 @@ import { addDays } from '../../src/lib/etTime'
 import { hideLiveFlight3 } from '../../src/testing/stagedFlight3'
 import { fixtureDeps, resolveCampaignId, type Fixture } from './cli'
 import { runMorningRead, type MorningOptions } from './read'
-import { APPS_PLAY_RELEASE_CAVEAT, formatMorningReport } from './report'
+import { APPS_PLAY_CREDIT_NOTE, APPS_PLAY_RELEASE_CAVEAT, formatMorningReport } from './report'
 import { MIN_COHORT } from '../../src/lib/popupEvents'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -416,6 +416,7 @@ describe('runbook LEGS table', () => {
     for (const r of f2) expect(r[0], r[2]).toBe('past')
   })
   it('Part A selects live rows and by-date rows with both dates; a by-date row with dashes is documented as never read', () => {
+    expect(APPS_PLAY_CREDIT_NOTE).toBe("Note: Play installs credited from v1.99.2+, public 10-17 06:34Z, before flight 3's first serve.")
     expect(RUNBOOK).toContain('Part A reads every `live` row whose read window contains')
     expect(RUNBOOK).toMatch(/and every `by-date` row\nwhose Flight start and Flight end both hold a YYYY-MM-DD date/)
     expect(RUNBOOK).toMatch(/A staged `by-date` row \(dates\n`-`\) is never read, by any part, in any mode/)

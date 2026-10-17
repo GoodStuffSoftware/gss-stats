@@ -12,7 +12,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import { fixtureDeps, type Fixture } from './cli'
 import { runMorningRead, runPostflightRead, type MorningOptions } from './read'
-import { APPS_PLAY_RELEASE_CAVEAT, formatMorningReport, tagSplitLines } from './report'
+import { APPS_PLAY_CREDIT_NOTE, APPS_PLAY_RELEASE_CAVEAT, formatMorningReport, tagSplitLines } from './report'
 import { APPS_PLAY_CAVEAT_ENDS_AT_MS, appsPlayCaveatApplies } from '../../src/lib/measurementChanges'
 import { createBeaconSource, taggedRowsQuery, WEB_SITE } from './beacon'
 import { fetchAdDaily, type AdDayRow, type AdsClient } from '../../src/lib/adsApi'
@@ -517,5 +517,9 @@ describe('the Apps Play-install caveat ends when v1.99.3 went public on Play (20
     expect(appsPlayCaveatApplies(END)).toBe(false)
     expect(tagSplitLines(split, END)).not.toContain(APPS_PLAY_RELEASE_CAVEAT)
     expect(tagSplitLines(split, Date.parse('2026-10-17T16:00:00Z'))).not.toContain(APPS_PLAY_RELEASE_CAVEAT) // 12:00 ET
+  })
+  it('the standing credit note prints on the split whatever the reading start', () => {
+    for (const start of [END - 1, END, Date.parse('2026-10-17T16:00:00Z'), null, undefined]) expect(tagSplitLines(split, start)).toContain(APPS_PLAY_CREDIT_NOTE)
+    expect(tagSplitLines(null, END)).toEqual([])
   })
 })
