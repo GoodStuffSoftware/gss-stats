@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.54.3] — 2026-10-16
+
+### Fixed
+- **The v1.99.2 Play release is marked again.** It is dated 2026-10-17 (committed 22:49 ET 10-16), the Apps Play-install caveat now waits on v1.99.2 clearing Play review, and the v1.99.3 Play entry stays undated for the coach-tip change only.
+
 ## [0.54.2] — 2026-10-16
 
 ### Fixed

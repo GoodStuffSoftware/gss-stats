@@ -7,12 +7,12 @@
 // ET calendar day (YYYY-MM-DD). While it is null NOTHING shows anywhere: no timeline marker, no
 // card caveat, no read-report line (the ads-cloud-daily routine's judge line is inert then too).
 //
-// The Play release of v1.99.2 is a second entry with its own date, entered the same way once that
-// build is live on Play (it reaches the Apps arm, not the web arm). The notes registry has no
+// The Play release of v1.99.2 is a second entry with its own date (2026-10-17, committed 22:49 ET 10-16; it reaches
+// users once Google's review clears; it reaches the Apps arm, not the web arm). The notes registry has no
 // per-arm targeting, so its caveat is the generic one under the tagged new-account cards, listed
 // together with the web entry once each is dated.
 //
-// v1.99.3 web (coachOnly) and the coachNote on the v1.99.3 Play entry mark the coach strip meaning
+// v1.99.3 web and v1.99.3 Play (both coachOnly, undated) mark the coach strip meaning
 // change (x closes one tip; a written note ends the notes tip). They feed only the timeline and the
 // coach readouts (coachMeasurementNote): the Coach tips card, the Feature health Coach row and the
 // report's tagged coach line. They stay out of the auth-success caveat and the generic report lines.
@@ -42,10 +42,15 @@ export const MEASUREMENT_CHANGES: MeasurementChange[] = [
     note: 'sign-in first-touch fallback starts; the tagged new-account jump is partly measurement',
   },
   {
+    id: 'v1.99.2 Play',
+    dateEt: '2026-10-17', // committed to Play production 2026-10-17T02:49Z = 22:49 ET 10-16; reaches users when Google's review clears
+    note: "Play release of v1.99.2: Apps-arm installs get the new app, with the sign-in ask-order A/B and the auth first-touch fallback, and the Play install referrer carries the campaign into the first sign-in. Committed 22:49 ET 10-16; reaches users when Google's review clears",
+  },
+  {
     id: 'v1.99.3 Play',
     dateEt: null,
-    note: 'Play release of v1.99.3: Apps-arm installs get the new app and in-app sign-ins carry the first-touch tag from here',
-    coachNote: 'from v1.99.3 the coach × closes one tip instead of retiring the schedule and writing a pencil note ends the notes tip with no beacon, so later-tip shown counts rise and a dismissed row no longer means the tips stopped; shown/notes with no dismissed or closed-at row after it can also mean a note was written',
+    note: 'Play release of v1.99.3, coach strip meaning change: from v1.99.3 the coach × closes one tip instead of retiring the schedule and writing a pencil note ends the notes tip with no beacon, so later-tip shown counts rise and a dismissed row no longer means the tips stopped; shown/notes with no dismissed or closed-at row after it can also mean a note was written',
+    coachOnly: true,
   },
   {
     id: 'v1.99.3 web',

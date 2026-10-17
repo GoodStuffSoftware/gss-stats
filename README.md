@@ -70,16 +70,16 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   no app-version column; major releases get a labelled line, minor ones a short tick). The v1.99.1
   web release (live 2026-10-16 21:07Z) is a labelled marker that carries the v1.99.0 content, since
   v1.99.0 never went live on its own and so has no marker; the release panel takes the newest
-  release, v1.99.2 on that same day. No Play-store release is marked until its date is confirmed.
+  release, v1.99.2 on that same day. The one Play-store marker is `v1.99.2 Play` (2026-10-17: committed to Play production at 22:49 ET 10-16, reaching users once Google's review clears).
   [`src/lib/measurementChanges.ts`](src/lib/measurementChanges.ts) marks a day when *how we count*
   changed (v1.99.2's sign-in first-touch fallback): its one `dateEt` is entered by hand once the
-  version is live, and (dated 2026-10-16 for the web). The Play release of v1.99.3 (still undated) is a
-  second entry with its own `dateEt` (the notes registry has no per-arm targeting, so it uses the
+  version is live (dated 2026-10-16 for the web). The Play release of v1.99.2 is a
+  second entry with its own `dateEt` (2026-10-17) (the notes registry has no per-arm targeting, so it uses the
   same caveat under the tagged cards, listing both days). Once set, the timeline marks the
   day, the tagged auth-success and new-account cards carry a caveat that the rise is partly
   measurement, and the ads read reports print a marker line on that day and a "since" line after it.
   The v1.99.3 coach-strip meaning change (× closes one tip; a written note ends the notes tip) is a
-  separate `v1.99.3 web` entry (undated) plus a `coachNote` on the Play entry: it marks the timeline
+  separate `v1.99.3 web` entry plus a `v1.99.3 Play` entry (both coach-only and undated; the Play one carries no install caveat): it marks the timeline
   and shows only on the coach readouts (Coach tips card, Feature health Coach row, the report's
   tagged coach line), never under the auth-success cards.
   Best Sudoku / Campaigns (its funnel, country, cost and return-visits panels are metric

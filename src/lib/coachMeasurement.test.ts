@@ -16,8 +16,9 @@ describe('v1.99.3 coach entries', () => {
     expect(web.dateEt).toBeNull()
     expect(play.dateEt).toBeNull()
     expect(web.note).toContain('×')
-    expect(play.coachNote).toContain('×')
-    expect(play.note).toContain('Apps-arm installs')
+    expect(play.note).toContain('×')
+    expect(play.coachOnly).toBe(true) // coach semantics only: no Play-install caveat on it
+    expect(play.note).not.toContain('Apps-arm installs')
   })
   it('null shows nothing', () => {
     expect(coachMeasurementNote('2099-01-01')).toBeNull()
@@ -40,12 +41,13 @@ describe('v1.99.3 coach entries', () => {
   it('the coach text stays out of the auth-success caveat and the generic report lines', () => {
     web.dateEt = '2026-11-01'
     play.dateEt = '2026-11-05'
-    expect(authMarkedChanges().some((c) => c.id === 'v1.99.3 web')).toBe(false)
+    expect(authMarkedChanges().some((c) => c.id.startsWith('v1.99.3'))).toBe(false)
     const caveat = noteRawText('measurement-change-note')
     expect(caveat).not.toContain('coach')
-    expect(caveat).toContain('v1.99.3 Play')
+    expect(caveat).not.toContain('v1.99.3 Play')
     const lines = measurementReportLines('2026-11-10').join(' ')
     expect(lines).not.toContain('coach')
     expect(lines).not.toContain('v1.99.3 web')
+    expect(lines).not.toContain('v1.99.3 Play')
   })
 })

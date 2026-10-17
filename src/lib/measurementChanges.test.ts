@@ -1,7 +1,7 @@
 // The measurement-change marker (lib/measurementChanges.ts): while its date is null nothing shows
 // anywhere; once set it shows on the timeline, under the tagged new-account cards and in the read
 // reports. Each wiring is tested in both states.
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   MEASUREMENT_CHANGES,
   markedChanges,
@@ -17,11 +17,18 @@ import type { Widget } from '../types'
 
 const change = MEASUREMENT_CHANGES[0]
 const SHIPPED_DATE = change.dateEt
+const PLAY_ENTRY = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.99.2 Play')!
+const PLAY_ENTRY_DATE = PLAY_ENTRY.dateEt
+// The web-entry tests below run with the live Play date blanked; the Play describe sets its own dates.
+beforeEach(() => {
+  PLAY_ENTRY.dateEt = null
+})
 const NOTE_ID = 'measurement-change-note'
 const DAY = '2099-01-10' // after every real release, so the timeline order test stays true
 
 afterEach(() => {
   change.dateEt = SHIPPED_DATE
+  PLAY_ENTRY.dateEt = PLAY_ENTRY_DATE
 })
 
 const widget = (over: Partial<Widget> = {}): Widget => ({
@@ -138,8 +145,8 @@ describe('once the date is set', () => {
   })
 })
 
-describe('the Play release of v1.99.3 (second entry, own date)', () => {
-  const play = MEASUREMENT_CHANGES[1]
+describe('the Play release of v1.99.2 (second entry, own date)', () => {
+  const play = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.99.2 Play')!
   const PLAY_SHIPPED = play.dateEt
   const WEB_DAY = '2099-01-10'
   const PLAY_DAY = '2099-01-14'
@@ -147,13 +154,17 @@ describe('the Play release of v1.99.3 (second entry, own date)', () => {
     play.dateEt = PLAY_SHIPPED
   })
 
-  it('is listed after the web entry and ships undated', () => {
-    expect(play.id).toBe('v1.99.3 Play')
-    expect(play.note).toMatch(/^Play release of v1\.99\.3: Apps-arm installs get the new app and in-app sign-ins carry the first-touch tag/)
-    expect(PLAY_SHIPPED).toBeNull()
+  it('is listed after the web entry and is dated 2026-10-17 (committed 22:49 ET 10-16)', () => {
+    expect(MEASUREMENT_CHANGES[1]).toBe(play)
+    expect(play.id).toBe('v1.99.2 Play')
+    expect(play.note).toMatch(/^Play release of v1\.99\.2: Apps-arm installs get the new app, with the sign-in ask-order A\/B and the auth first-touch fallback, and the Play install referrer carries the campaign into the first sign-in\./)
+    expect(play.note).toContain("Committed 22:49 ET 10-16; reaches users when Google's review clears")
+    expect(PLAY_SHIPPED).toBe('2026-10-17')
+    expect(play.coachOnly).toBeUndefined()
   })
 
   it('while undated it shows nowhere, even with the web entry dated', () => {
+    play.dateEt = null
     change.dateEt = WEB_DAY
     expect(markedChanges().map((c) => c.id)).toEqual([change.id])
     expect(datedReleases().some((r) => r.version === play.id)).toBe(false)

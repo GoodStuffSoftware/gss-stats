@@ -3,7 +3,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { fixtureDeps, type Fixture } from './cli'
 import { runMorningRead, type MorningOptions } from './read'
 import { formatMorningReport, measurementLinesAt } from './report'
@@ -17,8 +17,14 @@ const opts: MorningOptions = { campaignId: '24279250691', releaseHealth: 'auto',
 
 const change = MEASUREMENT_CHANGES[0]
 const SHIPPED_DATE = change.dateEt
+const PLAY_ENTRY = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.99.2 Play')!
+const PLAY_ENTRY_DATE = PLAY_ENTRY.dateEt
+beforeEach(() => {
+  PLAY_ENTRY.dateEt = null
+})
 afterEach(() => {
   change.dateEt = SHIPPED_DATE
+  PLAY_ENTRY.dateEt = PLAY_ENTRY_DATE
 })
 
 const hasMeasurementLine = (report: string) => /MEASUREMENT CHANGE TODAY|Measurement change since/.test(report)
