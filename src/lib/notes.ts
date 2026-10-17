@@ -397,7 +397,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
   // (lib/splitGuard.ts) gives return and completion rows no country bucket.
   'country-split-excludes-refused': {
     id: 'country-split-excludes-refused',
-    text: 'Counts only: the country columns leave out return, game-start, completion, tutorial-completion, tour-skip, tour-exit and coach-strip shown, dismiss and close rows, so completed games have no row here and an arrival that came in on one of them is in no column.',
+    text: 'Counts only: the country columns leave out return, game-start, completion, tutorial-completion, tour-skip, tour-exit, coach-strip shown, dismiss and close, ask-order A/B and paid-funnel rows, so completed games have no row here and an arrival that came in on one of them is in no column.',
     kind: 'note',
     severity: 'info',
     scopes: ['campaigns'],
