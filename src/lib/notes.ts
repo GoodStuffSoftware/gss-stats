@@ -421,6 +421,20 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     activeWhen: () => markedChanges().length > 0,
     appliesTo: (w: AutoCaveatWidget) => cardShowsAuthSuccess(w.card),
   },
+  // The Cost card's cost per auth success (ratio campaign.costPerSignin): its denominator is every
+  // auth success, not only new accounts, and from the first-touch change in lib/measurementChanges.ts
+  // the count carries first-touch tags while sign-in screens mostly do not, so it is approximate.
+  // The date comes from that file, never typed here.
+  'cost-per-signin-approx': {
+    id: 'cost-per-signin-approx',
+    text: () => {
+      const since = markedChanges().find((c) => c.id === 'v1.99.2')
+      return `Cost per auth success divides spend by all auth successes, not only new accounts.${since ? ` From ${since.dateEt} (${since.id}) the auth-success count carries first-touch tags while sign-in screens mostly do not, so the figure is approximate.` : ''}`
+    },
+    kind: 'note',
+    severity: 'caveat',
+    scopes: [], // not automatic: the Cost card names it in its own captions (presets.ts CAMPAIGN_COST)
+  },
   // The release panel (lib/metrics/presets.ts release-before-after): why the before window reads
   // low. Plain wording, as the panel's own line had it.
   'release-before-partial': {
@@ -466,6 +480,9 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.campaign.accepts': 'Sign-in accepts',
     'label.campaign.signedInAfterAsk': 'Signed in after ask',
     'label.campaign.authSuccess': 'Auth successes',
+    'label.campaign.newAccounts': 'New accounts',
+    'label.campaign.f3Asks': 'Sign-in asks (flight 3)',
+    'label.campaign.clicks': 'Ad clicks',
     'label.campaign.installPrompts': 'Install prompts',
     'label.campaign.installs': 'Installs',
     'label.campaign.rawInstallSignals': RAW_INSTALL_SIGNALS_LABEL,
@@ -541,6 +558,8 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.campaign.returnD31to60PerD0': 'Return rate (d31-60)',
     'label.campaign.costPerArrival': 'Cost / arrival',
     'label.campaign.costPerSignin': 'Cost / sign-in',
+    'label.campaign.avgCpc': 'Average CPC',
+    'label.campaign.costPerComplete': 'Cost / completed game',
     'label.campaign.gameViewsVsArrivals': 'Game-screen views vs arrivals',
     'label.campaign.taggedHitsVsArrivals': 'Tagged hits vs arrivals',
     'label.bsk.popupTapRate': 'Pop-up tap rate',
@@ -560,6 +579,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'unit.showing': 'showings',
     'unit.signin': 'sign-ins',
     'unit.finish': 'finishes',
+    'unit.click': 'clicks',
     'unit.usd': 'USD',
     'unit.day': 'days',
     'unit.arrivals': 'arrivals',
@@ -647,6 +667,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'no-ads-campaign': 'No campaign has readings or stored spend yet.',
     'no-readings-yet': 'No readings yet.',
     'no-f3-read-yet': 'No F3 read yet.',
+    'f3-daily-not-yet': 'Flight 3 has not started: the daily counts appear here once its arms are live.',
     'f3-proposal-not-serving': 'Rules tripped; the campaign is not serving, nothing to pause',
     'label.f3.read': 'Read (ET)',
     'label.f3.proposal': 'Proposal',
@@ -654,6 +675,8 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.f3.number': 'Number',
     'label.f3.threshold': 'Threshold',
     'label.f3.verdict': 'Verdict',
+    'label.preset.campaign-f3-daily': 'Flight 3 daily counts',
+    'label.preset.campaign-f3-daily.description': 'One card per Flight 3 arm: by ET day, the tagged completed-game rows, tagged sign-in ask rows and tagged new accounts. Counts only, never by hour, place or device.',
     'label.preset.f3-rule-readouts': 'Flight 3 rule readouts',
     'label.preset.f3-rule-readouts.description': 'One card per Flight 3 arm: the date, flight day and proposal of its newest morning read, and each rule with its number, threshold and verdict. Proposals only.',
     'label.preset.ads-readings-log': 'Ads readings log',
@@ -886,7 +909,7 @@ export function cardSplitsByCountry(card: Widget['card']): boolean {
 }
 
 /** The metrics a measurement change moves: tagged auth successes and the new-account split. */
-const AUTH_SUCCESS_METRICS: ReadonlySet<string> = new Set(['campaign.authSuccess', 'bsk.authSuccess', 'bsk.authSuccessNew'])
+const AUTH_SUCCESS_METRICS: ReadonlySet<string> = new Set(['campaign.authSuccess', 'campaign.newAccounts', 'bsk.authSuccess', 'bsk.authSuccessNew'])
 
 /** True when a card shows a tagged auth-success or new-account count anywhere (a section item or
  * the badge). Stored data, so every level is checked defensively. */

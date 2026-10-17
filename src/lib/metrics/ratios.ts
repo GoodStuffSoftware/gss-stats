@@ -121,6 +121,9 @@ export const RATIO_DEFS: RatioDef[] = [
   // Costs: money over a count. Arrivals are a floor (ARRIVALS_CAVEAT), so cost per arrival is a ceiling.
   ratio('campaign.costPerArrival', 'cost', 'campaign.spend', 'campaign.taggedArrivals'),
   ratio('campaign.costPerSignin', 'cost', 'campaign.spend', 'campaign.authSuccess'),
+  // Average CPC: stored spend over the stored clicks of the same Google Ads days. Cost per completed game: tagged completions only.
+  ratio('campaign.avgCpc', 'cost', 'campaign.spend', 'campaign.clicks'),
+  ratio('campaign.costPerComplete', 'cost', 'campaign.spend', 'campaign.completions'),
   // Pairs: counts only — "1,111 game-screen views · 353 arrivals", never 314.7%.
   ratio('campaign.gameViewsVsArrivals', 'pair', 'campaign.gameViews', 'campaign.taggedArrivals'),
   ratio('campaign.taggedHitsVsArrivals', 'pair', 'campaign.taggedHits', 'campaign.taggedArrivals'),

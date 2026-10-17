@@ -65,6 +65,8 @@ export interface ItemViewModel {
   barValue?: number
   /** A 'sparkline' display's per-ET-day points (oldest first), when the server returned any. */
   series?: readonly SeriesPoint[]
+  /** A 'sparkline' display with `days`: the latest ET days' values as text, "Oct 17 12 · Oct 18 9". */
+  days?: string
 }
 
 export interface ItemViewOptions {
@@ -176,6 +178,16 @@ function fmtEtDay(ms: unknown): string {
   if (!finite(ms)) return '—'
   const d = etDateFromMs(ms)
   return `${MONTHS[Number(d.slice(5, 7)) - 1]} ${Number(d.slice(8, 10))}`
+}
+/** How many of the latest ET days a sparkline with `days` lists (the chart keeps up to SERIES_MAX_DAYS). */
+export const SERIES_DAYS_LISTED = 14
+/** A series as text, oldest first: "Oct 17 12 · Oct 18 9". An ET day only, never an hour, a place
+ * or a device (the series carries no finer key). `money`: a spend series, shown as dollars. */
+export function seriesDaysText(series: readonly SeriesPoint[], money: boolean): string {
+  return series
+    .slice(-SERIES_DAYS_LISTED)
+    .map((p) => `${fmtEtDay(Date.parse(`${p.day}T12:00:00Z`))} ${money ? fmtMoney(p.value) : fmtCount(p.value)}`)
+    .join(' · ')
 }
 /** The first label note a value carries (a category's own name), or null. */
 function statusNoteOf(value: MetricValue): string | null {
@@ -378,7 +390,8 @@ function metricViewModel(item: MetricItem, value: MetricValue, def: MetricDef | 
   const bar = item.display.as === 'bar' ? { barValue: finite(value.value) ? value.value : finite(value.numerator) ? value.numerator : 0 } : {}
   const mutedTooFew = value.status === 'too-few' && item.display.as !== 'percent' && item.display.as !== 'bar'
   const series = item.display.as === 'sparkline' && value.series?.length ? { series: value.series } : {}
-  return { visible: true, labelTokens, primary, deltaLines, captionTokens: valueCaptionTokens(item, value, scope, todayEt, values), ...(split ? { split } : {}), ...bar, ...series, ...(mutedTooFew ? { muted: true } : {}) }
+  const days = item.display.as === 'sparkline' && item.display.days && value.series?.length ? { days: seriesDaysText(value.series, 'unit' in def && def.unit === 'usd') } : {}
+  return { visible: true, labelTokens, primary, deltaLines, captionTokens: valueCaptionTokens(item, value, scope, todayEt, values), ...(split ? { split } : {}), ...bar, ...series, ...days, ...(mutedTooFew ? { muted: true } : {}) }
 }
 
 /** An item's label alone, resolved against its scope — used by a 'table' section's header row,

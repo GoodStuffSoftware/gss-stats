@@ -250,9 +250,14 @@ export const CAMPAIGN_COST: CardSpec = {
         { id: 'synced', label: { metric: true }, data: { metric: 'campaign.lastSync' }, display: { as: 'ago' }, gating: { whenEmpty: { note: 'not-synced-yet' } }, ...COMPACT },
         { id: 'cpa', label: { note: 'label.card.perArrival' }, data: { ratio: 'campaign.costPerArrival' }, display: { as: 'currency' }, ...COMPACT },
         { id: 'cps', label: { note: 'label.card.perAuthSuccess' }, data: { ratio: 'campaign.costPerSignin' }, display: { as: 'currency' }, ...COMPACT },
+        // Stored spend over the stored Google Ads clicks, and over the tagged completed games.
+        { id: 'cpc', label: { metric: true }, data: { ratio: 'campaign.avgCpc' }, display: { as: 'currency' }, ...COMPACT },
+        { id: 'cpg', label: { metric: true }, data: { ratio: 'campaign.costPerComplete' }, display: { as: 'currency' }, ...COMPACT },
       ],
     },
   ],
+  // What "cost per auth success" counts, and why it is approximate (lib/measurementChanges.ts).
+  captions: ['cost-per-signin-approx'],
 }
 
 /** The funnel per campaign (CampaignsWidgetBody 'funnel'): one card per beacon-tracked campaign,
@@ -559,6 +564,30 @@ export const F3_RULE_READOUTS: CardSpec = {
   ],
 }
 
+/** Flight 3, per arm, by ET day (Campaigns page, widget cw-f3-daily): the tagged completed-game
+ * rows, the tagged sign-in ask rows (the three the v1.99.0 client sends) and the tagged new accounts
+ * (/auth/success/<provider>/new). Counts only. Each is a daily series with its latest ET days listed;
+ * the metrics take no country, and completed games are a split-refused path (lib/splitGuard.ts), so
+ * a day is the finest cut here: never an hour, a place or a device. While the arms are staged (not
+ * yet registered in CAMPAIGNS) there is nothing to repeat over and the card says so. */
+export const CAMPAIGN_F3_DAILY: CardSpec = {
+  v: 1,
+  repeat: { over: 'campaigns', ids: [STAGED_FLIGHT_3.apps.ids.campaignId, STAGED_FLIGHT_3.search.ids.campaignId], empty: { label: '', text: { note: 'f3-daily-not-yet' } } },
+  minWidth: 230,
+  title: { bind: 'campaign.label' },
+  sections: [
+    {
+      layout: 'rows',
+      title: { bind: 'campaign.measurabilityNote' },
+      items: [
+        { id: 'complete', label: { metric: true }, data: { metric: 'campaign.completions' }, display: { as: 'sparkline', series: 'daily', days: true }, ...COMPACT },
+        { id: 'asks', label: { metric: true }, data: { metric: 'campaign.f3Asks' }, display: { as: 'sparkline', series: 'daily', days: true }, ...COMPACT },
+        { id: 'accounts', label: { metric: true }, data: { metric: 'campaign.newAccounts' }, display: { as: 'sparkline', series: 'daily', days: true }, ...COMPACT },
+      ],
+    },
+  ],
+}
+
 /** Every preset by id. A null prototype, so an id such as 'constructor' or 'toString' is
  * simply not a preset — read through presetById, never a bare bracket lookup. */
 export const PRESETS: Readonly<Record<string, CardSpec>> = Object.freeze(
@@ -578,6 +607,7 @@ export const PRESETS: Readonly<Record<string, CardSpec>> = Object.freeze(
     'play-installs': PLAY_INSTALLS,
     'carry-over-completions': CARRY_OVER_COMPLETIONS,
     'f3-rule-readouts': F3_RULE_READOUTS,
+    'campaign-f3-daily': CAMPAIGN_F3_DAILY,
   }),
 )
 

@@ -44,7 +44,7 @@ import {
 } from '../popupEvents'
 import { isEventPath, isPopupAccept, isPopupShown, isReturnD1Plus } from '../overview'
 import { isSplitRefusedPath } from '../splitGuard'
-import { resolveCampaignSpend, UPSELL_SIGNEDOUT_FIX_AT, AUTH_NEW_EXISTING_LIVE_AT, type SpendSummary } from '../adsRules'
+import { resolveCampaignSpend, FLIGHT3_ASK_PATHS, UPSELL_SIGNEDOUT_FIX_AT, AUTH_NEW_EXISTING_LIVE_AT, type SpendSummary } from '../adsRules'
 import { freshnessOf, spendThroughFromRows } from '../adsFreshness'
 import type { BeaconRow, FactId, FactRows } from './facts'
 import { etDateOfMs, etMidnightMs, servingEndMs, type InstrumentationRule } from './instrumentation'
@@ -404,6 +404,12 @@ export const METRIC_DEFS: MetricDef[] = [
     lagDays: [0, 1],
   }),
   campaignMetric({ id: 'campaign.authSuccess', unit: 'signin', path: step('authSuccess'), instrumented: [BEACON, SEEN] }),
+  // Flight 3's per-arm daily series card (lib/metrics/presets.ts CAMPAIGN_F3_DAILY). Both are ET-day
+  // counts for ONE campaign: no country param, so neither can be asked by place. The sign-in asks
+  // are exactly the v1.99.0 client's three (adsRules FLIGHT3_ASK_PATHS: not streak, tutorial or
+  // promo-first50); the new accounts are the /auth/success/<provider>/new rows only.
+  campaignMetric({ id: 'campaign.f3Asks', unit: 'showing', params: ['campaignId'], path: (p) => (FLIGHT3_ASK_PATHS as readonly string[]).includes(p), instrumented: [BEACON, SEEN] }),
+  campaignMetric({ id: 'campaign.newAccounts', unit: 'signin', params: ['campaignId'], path: (p) => authSuccessRow(p) === 'new', instrumented: [BEACON, { ...AUTH_NEW_EXISTING, against: 'flight' } as InstrumentationRule, SEEN] }),
   campaignMetric({ id: 'campaign.installPrompts', unit: 'showing', path: step('installPrompt'), instrumented: [BEACON, SEEN] }),
   campaignMetric({ id: 'campaign.installs', unit: 'showing', subsetOf: 'campaign.installPrompts', path: step('install'), instrumented: [BEACON, INSTALL_FIX, SEEN], lagDays: [0, 7] }),
   campaignMetric({ id: 'campaign.rawInstallSignals', unit: 'row', path: isRawInstallSignal, instrumented: [BEACON, RAW_DEDUPE], caveats: ['raw-install-dedupe'] }),
@@ -493,6 +499,20 @@ export const METRIC_DEFS: MetricDef[] = [
     windows: { attribution: 'adsSpend' },
     // Stored Google Ads spend first, else the hand-entered CAMPAIGN_SPEND (lib/adsRules.ts).
     spend: (rows, ctx) => resolveCampaignSpend(rows.find((r) => r.campaignId === ctx.params.campaignId) ?? null, CAMPAIGN_SPEND[ctx.params.campaignId ?? ''] ?? null).spend,
+    instrumented: [],
+  }),
+  // The Google Ads clicks of the same stored days as the spend above. Only the ads store holds
+  // them: a hand-entered CAMPAIGN_SPEND has no click count, so the figure is then absent (never 0)
+  // and the average CPC reads "no data".
+  campaignMetric({
+    id: 'campaign.clicks',
+    unit: 'click',
+    params: ['campaignId'],
+    windows: { attribution: 'adsSpend' },
+    spend: (rows, ctx) => {
+      const stored = rows.find((r) => r.campaignId === ctx.params.campaignId) ?? null
+      return stored && resolveCampaignSpend(stored, null).source === 'google-ads-api' ? stored.clicks : null
+    },
     instrumented: [],
   }),
 
