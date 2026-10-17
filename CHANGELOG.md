@@ -6,8 +6,18 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.49.0] — 2026-10-16
+
 ### Added
 - **Flight 3 Search Ads-side block and day 3 readout.** The Search morning read prints Google's impressions, clicks, average CPC and impression-share figures per day and per keyword, then from flight day 3 a bid-limited, budget-limited or fine line with a raise-or-hold proposal for Mike, and both flight 3 arms' spend line shows average CPC beside the earlier flights' baselines.
+
+## [0.48.1] — 2026-10-16
+
+### Changed
+- **The v1.99.2 web release is marked.** Tagged new-account readouts flag the day the sign-in first-touch fallback started; the Play marker now waits for v1.99.3.
+
+### Fixed
+- **Manual checks stay out of feature cards.** Rows from the app's manual production checks no longer count on the Features page, even with known traffic shown.
 
 ## [0.48.0] — 2026-10-16
 

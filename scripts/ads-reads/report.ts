@@ -126,7 +126,7 @@ function trackingCheckCounts(c: TrackingCounts, y?: TrackingCounts): string {
 
 /** One static read caveat printed under the Apps arm's per-tag split (the only multi-tag arm). The Apps arm started 2026-10-17, ahead of the Play release. A Play-release-day marker will come later through the measurement-changes list. */
 export const APPS_PLAY_RELEASE_CAVEAT =
-  'Read caveat: until the Play release ships, Apps-arm installs get the older Play app; in-app sign-ins after 30 minutes are untagged until v1.99.2 reaches Play.'
+  'Read caveat: until the Play release ships, Apps-arm installs get the older Play app; in-app sign-ins after 30 minutes are untagged until v1.99.3 reaches Play.'
 
 /** The per-tag split block for an arm with more than one tag (flight 3 Apps: HERO and FEATURES).
  * null / absent for a single-tag arm, which prints as it always has. Display only: every rule and

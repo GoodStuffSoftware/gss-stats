@@ -187,3 +187,24 @@ describe('coach tips: counts only (no refused dimension)', () => {
     expect(st(body, 'place', 'shown')).toMatchObject({ latest: 0, prev: 1, range: 8 })
   })
 })
+
+describe('coach tips: manual production checks', () => {
+  it('never count, with known traffic shown or hidden', async () => {
+    insertHits(db, [
+      hit('/coach/shown/notes', at(LATEST, 9), { n: 3 }),
+      hit('/coach/shown/notes', at(LATEST, 9), { n: 4, campaign: 'manual_check' }),
+    ])
+    for (const excludeKnownTraffic of [false, true]) {
+      const { body } = await post({ ...range, excludeKnownTraffic })
+      expect(tip(body, 'notes').latest).toBe(3)
+      expect(tip(body, 'notes').range).toBe(3)
+    }
+  })
+
+  it('never set everSeen on their own', async () => {
+    insertHits(db, [hit('/coach/shown/notes', at('2026-09-20', 9), { campaign: 'manual_check' })])
+    for (const excludeKnownTraffic of [false, true]) expect((await post({ ...range, excludeKnownTraffic })).body.everSeen).toBe(false)
+    insertHits(db, [hit('/coach/shown/notes', at('2026-09-21', 9))])
+    expect((await post(range)).body.everSeen).toBe(true)
+  })
+})

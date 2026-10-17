@@ -29,13 +29,13 @@ export type MarkedChange = MeasurementChange & { dateEt: string }
 export const MEASUREMENT_CHANGES: MeasurementChange[] = [
   {
     id: 'v1.99.2',
-    dateEt: null,
+    dateEt: '2026-10-16', // web live 2026-10-16T23:38:55Z = 19:38 ET
     note: 'sign-in first-touch fallback starts; the tagged new-account jump is partly measurement',
   },
   {
-    id: 'v1.99.2 Play',
+    id: 'v1.99.3 Play',
     dateEt: null,
-    note: 'Play release of v1.99.2: Apps-arm installs get the new app and in-app sign-ins carry the first-touch tag from here',
+    note: 'Play release of v1.99.3: Apps-arm installs get the new app and in-app sign-ins carry the first-touch tag from here',
   },
 ]
 

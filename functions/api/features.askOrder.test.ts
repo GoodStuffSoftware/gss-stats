@@ -239,3 +239,24 @@ describe('ask-order: the /ab twin rows stay out of every other total', () => {
     for (const f of body.features) expect(f.range).toBe(0)
   })
 })
+
+describe('ask-order: manual production checks', () => {
+  it('never count in the range columns or allTime, with known traffic shown or hidden', async () => {
+    insertHits(db, [
+      hit(askOrderAssignedPath('signin-first'), at(LATEST, 9), { n: 5 }),
+      hit(askOrderAssignedPath('signin-first'), at(LATEST, 9), { n: 4, campaign: 'manual_check' }),
+    ])
+    for (const excludeKnownTraffic of [false, true]) {
+      const { body } = await post({ ...range, excludeKnownTraffic })
+      expect(st(body, 'signin-first', assignedStepId('organic'))).toMatchObject({ latest: 5, range: 5 })
+      expect(st(body, 'signin-first', assignedStepId('tagged'))).toMatchObject({ latest: 0, range: 0 })
+      expect(body.allTime[`${askOrderFeatureId('signin-first')}.${assignedStepId('organic')}`]).toBe(5)
+      expect(body.allTime[`${askOrderFeatureId('signin-first')}.${assignedStepId('tagged')}`]).toBe(0)
+    }
+  })
+
+  it('never set everSeen on their own', async () => {
+    insertHits(db, [hit(askOrderAssignedPath('install-first'), at('2026-09-20', 9), { campaign: 'manual_check' })])
+    for (const excludeKnownTraffic of [false, true]) expect((await post({ ...range, excludeKnownTraffic })).body.everSeen).toBe(false)
+  })
+})

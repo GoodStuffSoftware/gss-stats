@@ -70,7 +70,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   no app-version column; major releases get a labelled line, minor ones a short tick).
   [`src/lib/measurementChanges.ts`](src/lib/measurementChanges.ts) marks a day when *how we count*
   changed (v1.99.2's sign-in first-touch fallback): its one `dateEt` is entered by hand once the
-  version is live, and stays `null` until then, when nothing shows. The Play release of v1.99.2 is a
+  version is live, and (dated 2026-10-16 for the web). The Play release of v1.99.3 (still undated) is a
   second entry with its own `dateEt` (the notes registry has no per-arm targeting, so it uses the
   same caveat under the tagged cards, listing both days). Once set, the timeline marks the
   day, the tagged auth-success and new-account cards carry a caveat that the rise is partly
@@ -621,7 +621,8 @@ The **Feature health** card sits on the Best Sudoku Overview under the KPIs, and
 **Features** page (last in the Best Sudoku group) charts every step of every feature, one
 line per step and one point per ET day. Both read `/api/features`
 ([`functions/api/features.ts`](functions/api/features.ts)), web and app combined, and follow
-the page's range, sites and exclusions.
+the page's range, sites and exclusions. Rows from the app's manual production checks
+(`manual_check` campaign or paths) never count here, even with known traffic shown.
 
 - **Card:** a row per feature with its status, and per step the count for the latest complete
   ET day, the day before and the selected range, plus the ratio of those counts.

@@ -41,9 +41,9 @@ const widget = (over: Partial<Widget> = {}): Widget => ({
 })
 
 describe('the marker config', () => {
-  it('is v1.99.2, and ships undated until the day is known', () => {
+  it('is v1.99.2, dated to its web go-live day', () => {
     expect(change.id).toBe('v1.99.2')
-    expect(SHIPPED_DATE).toBeNull()
+    expect(SHIPPED_DATE).toBe('2026-10-16')
   })
 })
 
@@ -135,7 +135,7 @@ describe('once the date is set', () => {
   })
 })
 
-describe('the Play release of v1.99.2 (second entry, own date)', () => {
+describe('the Play release of v1.99.3 (second entry, own date)', () => {
   const play = MEASUREMENT_CHANGES[1]
   const PLAY_SHIPPED = play.dateEt
   const WEB_DAY = '2099-01-10'
@@ -145,8 +145,8 @@ describe('the Play release of v1.99.2 (second entry, own date)', () => {
   })
 
   it('is listed after the web entry and ships undated', () => {
-    expect(play.id).toBe('v1.99.2 Play')
-    expect(play.note).toMatch(/^Play release of v1\.99\.2: Apps-arm installs get the new app and in-app sign-ins carry the first-touch tag/)
+    expect(play.id).toBe('v1.99.3 Play')
+    expect(play.note).toMatch(/^Play release of v1\.99\.3: Apps-arm installs get the new app and in-app sign-ins carry the first-touch tag/)
     expect(PLAY_SHIPPED).toBeNull()
   })
 
@@ -161,6 +161,7 @@ describe('the Play release of v1.99.2 (second entry, own date)', () => {
 
   it('once dated it is on the timeline, in the report and in the generic caveat under the tagged cards', () => {
     play.dateEt = PLAY_DAY
+    change.dateEt = null
     expect(markedChanges().map((c) => c.id)).toEqual([play.id]) // the web entry is still undated
     expect(datedReleases().find((r) => r.version === play.id)).toMatchObject({ dateEt: PLAY_DAY, note: play.note })
     expect(releaseItems().some((m) => m.label === play.id && m.date === PLAY_DAY)).toBe(true)

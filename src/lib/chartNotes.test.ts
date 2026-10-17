@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { MEASUREMENT_CHANGES } from './measurementChanges'
 import { ALWAYS_SHOWN_RUNTIME_NOTE_IDS, allChartNotes, canHideCaveatId, chartNotes, convertLegacyNotes, isChartNoteHidden, isNoteIdHideable } from './chartNotes'
 import { autoCaveatIds, cardSplitsByCountry, getNote, isStaticCaptionNote, libraryCaptionOptions, noteTemplate } from './notes'
 import { PRESETS } from './metrics/presets'
@@ -6,6 +7,15 @@ import type { CardSpec, MetricItem, RepeatSpec, Section } from './metrics/types'
 import { rangeNoticeText, type RangeNotice } from './rangeNotice'
 import { REFUSED_WHOLE_DAYS_CAPTION, SPLIT_GUARD_CAPTION } from './splitGuard'
 import type { StatsResponse, Widget } from '../types'
+
+// These tests pin the layout/notes with no counting-change marker active; the live entries carry real dates, so blank them here.
+const LIVE_DATES = MEASUREMENT_CHANGES.map((c) => c.dateEt)
+beforeEach(() => {
+  for (const c of MEASUREMENT_CHANGES) c.dateEt = null
+})
+afterEach(() => {
+  MEASUREMENT_CHANGES.forEach((c, i) => (c.dateEt = LIVE_DATES[i]))
+})
 
 const widget = (over: Partial<Widget> = {}): Widget => ({
   id: 'w1',
