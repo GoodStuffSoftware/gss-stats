@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.54.1] — 2026-10-16
+
 ### Fixed
 - **Paid-funnel rows are counts only.** Trial start, checkout start and purchase rows are no longer split by hour, place or device in any chart, and the live-update ping ignores them.
 
