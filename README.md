@@ -1526,6 +1526,34 @@ The card shows counts only: a reading's table cells read the five whitelisted co
 arrivals, asks, accepts, auth successes, sign-ups) and nothing else of the stored record, and no
 return, game-start, tutorial or tour figure, hour, place or device is reachable from it.
 
+### The Campaigns page's Flight 3 cards
+
+Three cards read flight 3 on the Campaigns page. Each is a metric card (customize it like any other);
+none adds a data source of its own.
+
+- **Flight 3 rules** (preset `f3-rule-readouts`, widget `cw-f3-rules`): one block per flight 3 arm
+  with the newest stored morning read's ET date, flight day and proposal, then the nine rules as the
+  morning report prints them (rule, number, threshold, verdict). A PROPOSE PAUSE verdict and
+  proposal show in red; a read with no stored rules yet says "no F3 read yet". The rules come from a
+  new nullable column on the readings log, `ads_readings.f3` (migration `0006_readings_f3.sql`),
+  which the daily read fills for flight 3 arms only; older rows and other campaigns' rows leave it
+  empty. The card loads the readings through `/api/ads/readings` like the readings log card. It
+  shows the report's text and changes nothing: proposals only, nothing is paused.
+- **Flight 3 daily counts** (preset `campaign-f3-daily`, widget `cw-f3-daily`): one block per
+  flight 3 arm with three rows, completed games, sign-in asks (the three the flight 3 app sends:
+  placement, committed repeat and committed challenge; streak, tutorial and first-50 asks and the
+  ask-order test twins are left out) and new accounts (`/auth/success/<provider>/new`). Each row
+  has a sparkline and the latest 14 ET days listed with their counts ("Oct 17 12 · Oct 18 9").
+  Counts only: a day is the finest cut, so there is no hour, place or device and no country
+  option on these metrics. Before an arm is live the block reads "Flight 3 has not started".
+  The new-accounts row carries the v1.99.2 measurement note like the other auth-success cards.
+- **Cost card additions** (preset `campaign-cost`): **Average CPC** (stored spend over the stored
+  Google Ads clicks, which only the ads store holds, so a hand-entered spend total reads "no data")
+  and **Cost / completed game** (spend over the campaign's tagged completed-game rows, withheld
+  under the usual minimum count). A caption under the card says the cost per auth success divides by
+  all auth successes, not only new accounts, and is approximate from v1.99.2 because the count now
+  carries first-touch tags while sign-in screens mostly do not.
+
 ### The sync Worker (`workers/sync/`, `gss-stats-sync`)
 
 - **Schedule:** a cron at :05 every hour. While a flight is live (first day through the day

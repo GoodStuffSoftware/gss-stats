@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Flight 3 cards on the Campaigns page.** A rule-readouts card shows each arm's nine rules, numbers, thresholds and verdicts from its newest morning read; a daily-counts card lists each arm's completed games, sign-in asks and new accounts by ET day with a sparkline; and the Cost card gains average CPC, cost per completed game and a note that cost per auth success is approximate from v1.99.2.
+
 ## [0.52.0] — 2026-10-16
 
 ### Added
