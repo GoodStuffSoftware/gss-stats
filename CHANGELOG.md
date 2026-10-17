@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.54.4] — 2026-10-17
+
+### Added
+- **The v1.99.3 web release is marked on 2026-10-17.** The timeline and the coach readouts now split at its go-live (05:58:55Z), noting that notes-tip completions are no longer counted and that all flight-3 web traffic is on it.
+
 ## [0.54.3] — 2026-10-16
 
 ### Fixed

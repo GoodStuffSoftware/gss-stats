@@ -194,8 +194,9 @@ describe('Coach tips card', () => {
 
   describe('the v1.99.3 web measurement note', () => {
     const web = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.99.3 web')!
+    const WEB_DATE = web.dateEt
     afterEach(() => {
-      web.dateEt = null
+      web.dateEt = WEB_DATE
     })
     it('shows nothing on the Coach tips card or the Feature health row while the date is null', async () => {
       web.dateEt = null

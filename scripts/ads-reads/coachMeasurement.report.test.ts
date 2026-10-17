@@ -5,12 +5,14 @@ import { emptyCoachCounts } from '../../src/lib/adsRules'
 import { coachCountsLine } from './report'
 
 const web = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.99.3 web')!
+const WEB_DATE = web.dateEt
 afterEach(() => {
-  web.dateEt = null
+  web.dateEt = WEB_DATE
 })
 
 describe('coachCountsLine meaning-change note', () => {
   it('null shows nothing', () => {
+    web.dateEt = null
     expect(coachCountsLine(emptyCoachCounts(), undefined, coachMeasurementNote('2099-01-01'))).not.toContain('meaning change')
   })
   it('set shows the note', () => {

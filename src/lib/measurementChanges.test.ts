@@ -19,9 +19,12 @@ const change = MEASUREMENT_CHANGES[0]
 const SHIPPED_DATE = change.dateEt
 const PLAY_ENTRY = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.99.2 Play')!
 const PLAY_ENTRY_DATE = PLAY_ENTRY.dateEt
-// The web-entry tests below run with the live Play date blanked; the Play describe sets its own dates.
+const V1993_WEB = MEASUREMENT_CHANGES.find((c) => c.id === 'v1.99.3 web')!
+const V1993_WEB_DATE = V1993_WEB.dateEt
+// The web-entry tests below run with the live Play date and the coach-only v1.99.3 web date blanked; the Play describe sets its own dates.
 beforeEach(() => {
   PLAY_ENTRY.dateEt = null
+  V1993_WEB.dateEt = null
 })
 const NOTE_ID = 'measurement-change-note'
 const DAY = '2099-01-10' // after every real release, so the timeline order test stays true
@@ -29,6 +32,7 @@ const DAY = '2099-01-10' // after every real release, so the timeline order test
 afterEach(() => {
   change.dateEt = SHIPPED_DATE
   PLAY_ENTRY.dateEt = PLAY_ENTRY_DATE
+  V1993_WEB.dateEt = V1993_WEB_DATE
 })
 
 const widget = (over: Partial<Widget> = {}): Widget => ({

@@ -60,12 +60,16 @@ describe('the flight 3 web releases', () => {
   it('v1.99.0 has no marker of its own: it never went live (v1.99.1 carries it)', () => {
     expect(at('v1.99.0')).toBe(-1)
   })
-  it('the release panel picks the newest: v1.99.2 Play (10-17) is newest; v1.99.2 wins the 10-16 tie with v1.99.1 as the subject once its day is full', () => {
-    expect(newest(datedReleases())?.version).toBe('v1.99.2 Play')
-    expect(releaseAwaitingFullDay('2026-10-16')?.version).toBe('v1.99.2 Play')
+  it('the release panel picks the newest: v1.99.3 web (10-17, listed after v1.99.2 Play) is newest; v1.99.2 wins the 10-16 tie with v1.99.1 as the subject once its day is full', () => {
+    expect(newest(datedReleases())?.version).toBe('v1.99.3 web')
+    expect(releaseAwaitingFullDay('2026-10-16')?.version).toBe('v1.99.3 web')
     expect(releaseSubjectOn('2026-10-16')?.version).toBe('v1.98.0')
     expect(releaseSubjectOn('2026-10-18')?.version).toBe('v1.99.2')
-    expect(releaseSubjectOn('2026-10-19')?.version).toBe('v1.99.2 Play')
+    expect(releaseSubjectOn('2026-10-19')?.version).toBe('v1.99.3 web')
+  })
+  it('v1.99.3 web is dated 2026-10-17 (live 05:58:55Z); only the v1.99.2 Play marker is dated among the Play ones, the v1.99.3 Play coach marker waits', () => {
+    expect(at('v1.99.3 web')).toBeGreaterThan(-1)
+    expect(datedReleases().find((r) => r.version === 'v1.99.3 web')?.dateEt).toBe('2026-10-17')
   })
   it('only the v1.99.2 Play marker is dated (2026-10-17); the v1.99.3 Play coach marker waits', () => {
     expect(datedReleases().filter((r) => /play/i.test(r.version))).toMatchObject([{ version: 'v1.99.2 Play', dateEt: '2026-10-17' }])

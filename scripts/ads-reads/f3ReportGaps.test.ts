@@ -274,8 +274,9 @@ describe('the F3 morning report: arrival labels and the tagged coach line', () =
   it('the coach line follows Tagged so far: per tip shown / dismissed / closed-at plus tour-opened, cumulative with yesterday in brackets', async () => {
     const { lines } = await report('search')
     const at = lines.findIndex((l) => l.startsWith('Tagged so far'))
-    expect(lines[at + 1]).toBe(
-      '  coach strip (tagged ET-day totals; yesterday in brackets; counts only): shown place 12 (7), streak 4 (4); dismissed place 2 (2); closed-at place 1 (0); tour-opened 8 (6)',
+    // The fixture day is past 2026-10-17, so the v1.99.3 web meaning-change note follows the counts.
+    expect(lines[at + 1]).toMatch(
+      /^ {2}coach strip \(tagged ET-day totals; yesterday in brackets; counts only\): shown place 12 \(7\), streak 4 \(4\); dismissed place 2 \(2\); closed-at place 1 \(0\); tour-opened 8 \(6\); meaning change v1\.99\.3 web \(from 2026-10-17\): /,
     )
   })
   it('the tracking-check count of /coach/shown/place rows is still the same total', async () => {

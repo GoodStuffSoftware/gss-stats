@@ -12,7 +12,7 @@
 // per-arm targeting, so its caveat is the generic one under the tagged new-account cards, listed
 // together with the web entry once each is dated.
 //
-// v1.99.3 web and v1.99.3 Play (both coachOnly, undated) mark the coach strip meaning
+// v1.99.3 web (dated 2026-10-17) and v1.99.3 Play (coachOnly, undated) mark the coach strip meaning
 // change (x closes one tip; a written note ends the notes tip). They feed only the timeline and the
 // coach readouts (coachMeasurementNote): the Coach tips card, the Feature health Coach row and the
 // report's tagged coach line. They stay out of the auth-success caveat and the generic report lines.
@@ -54,8 +54,8 @@ export const MEASUREMENT_CHANGES: MeasurementChange[] = [
   },
   {
     id: 'v1.99.3 web',
-    dateEt: null,
-    note: 'web release of v1.99.3, coach strip meaning change: from v1.99.3 the coach × closes one tip instead of retiring the schedule and writing a pencil note ends the notes tip with no beacon, so later-tip shown counts rise and a dismissed row no longer means the tips stopped; shown/notes with no dismissed or closed-at row after it can also mean a note was written',
+    dateEt: '2026-10-17', // web live 2026-10-17T05:58:55Z = 01:58:55 ET (version.json first read 1.99.3); before the first possible flight-3 serve (12:00 ET 10-17)
+    note: "web release of v1.99.3, live 2026-10-17 01:58 ET, before the first flight-3 serve (12:00 ET 10-17), so all flight-3 web traffic is on it; pre-flight organic rows since 2026-10-16 21:07Z mix v1.99.1, v1.99.2 and v1.99.3. Coach strip meaning change: from this marker the coach × closes one tip instead of retiring the schedule and writing a pencil note ends the notes tip with NO beacon, so notes-tip completions are not counted after it, later-tip shown counts rise and a dismissed row no longer means the tips stopped; shown/notes with no dismissed or closed-at row after it can also mean a note was written. The release also fixes the game reset/duplicate across devices, shows cross-device notices as pop-ups, never reloads mid-game, and saves right after email verification",
     coachOnly: true,
   },
 ]
