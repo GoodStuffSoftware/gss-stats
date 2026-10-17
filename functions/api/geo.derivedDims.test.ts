@@ -607,7 +607,9 @@ describe('manual production checks are a standing exclusion', () => {
     const bySite = Object.fromEntries(kept.body.rows.map((r: any) => [r.key.site, r.pageviews]))
     expect(bySite).toEqual({ 'bestsudoku-web': 2, 'bestsudoku-app': 1 })
     const raw = await post({ dimension: 'site', limit: 50, ...range })
-    expect(raw.body.totals.pageviews).toBe(5) // the two /return/ rows are event beacons, out of every default count
+    // Option off: the two /return/ rows are event beacons (out of every default count), and the two manual_check
+    // campaign rows are dropped too: manual checks are always left out (applyAlwaysExclusions), never an option.
+    expect(raw.body.totals.pageviews).toBe(3)
     const tagged = await post({ dimension: 'site', limit: 50, excludeKnownTraffic: true, constraints: [{ field: 'campaign', value: 'sudoku_tired_of_ads' }], ...range })
     expect(tagged.body.totals.pageviews).toBe(1)
   })
