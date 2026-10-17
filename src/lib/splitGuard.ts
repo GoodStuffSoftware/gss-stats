@@ -15,7 +15,8 @@
 //     refuses it (lib/metrics/validate.ts).
 //   - /api/popups: its UTC-hour query leaves refused rows out (none is a pop-up event).
 //   - the ads routine (scripts/ads-reads/beacon.ts): the site-wide hourly event read and the
-//     per-country read leave refused rows out, the Play line's /return/ read
+//     per-country read leave refused rows out (the hourly read keeps only the paid-funnel `/funnel/%`
+//     rows, grouped by ET day with `hr` NULL, for the site-wide "paid funnel (rows)" total), the Play line's /return/ read
 //     (returnSitesQuery) fetches only each row's ET date, never its ts, and the tagged read
 //     (taggedRowsQuery) groups refused rows by ET day with `hr` NULL (never by hour).
 // The UTC `date` dimension is refused alongside `hourEt` (R-1b review): a UTC day minus the ET

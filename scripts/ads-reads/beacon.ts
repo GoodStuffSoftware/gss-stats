@@ -6,7 +6,7 @@
 // nothing is joined across rows.
 
 import { applyExclusions, campaignAttributionClause, campaignAttributionStartMs, type CampaignFlight } from '../../src/lib/campaigns'
-import { excludeInstallGapUnmeasured, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, popupIncludeClause, type HourPathCount } from '../../src/lib/popupEvents'
+import { excludeInstallGapUnmeasured, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, NUL_PATH_SQL, popupIncludeClause, type HourPathCount } from '../../src/lib/popupEvents'
 import { ASK_PATHS, UPSELL_SIGNEDOUT_FIX_AT, type FirstSessionRowSite, type ReturnRow, type ReturnSiteStat, type TaggedRow } from '../../src/lib/adsRules'
 import { refusedPathExcludeClause, refusedPathMatch } from '../../src/lib/splitGuard'
 import { etDateSql, etWallTimeMs } from '../../src/lib/etTime'
@@ -67,19 +67,23 @@ export function taggedRowsQuery(campaign: CampaignFlight, upsellFixAtMs: number 
  * campaign-attributed — outcome beacons fire in later, untagged sessions. The rows the
  * counts-only rule protects (src/lib/splitGuard.ts: returns, game starts and completions,
  * tutorial completions, tour skips and exits) are left out (their patterns are SQL literals, so they cost
- * no binds): this read is by hour, and none of them is a pop-up event summarizeSiteEvents counts. */
+ * no binds): this read is by hour, and none of them is a pop-up event summarizeSiteEvents counts.
+ * The one refused family it DOES count is the paid funnel (`/funnel/%`, printed as the site-wide "paid
+ * funnel (rows)" total): those rows are grouped by their ET DAY (`etd`) with `hr` NULL, never by hour
+ * (the same device as taggedRowsQuery), and a NUL-bearing path is still left out. */
 export function siteEventsQuery(sinceMs: number, fixedAtMs: number | null = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS): Query {
   const inc = popupIncludeClause()
   const w = ['site = ?', 'ts >= ?', inc.sql]
   const b: unknown[] = [WEB_SITE, sinceMs, ...inc.binds]
   applyExclusions(w, b)
-  refusedPathExcludeClause(w, b)
+  const refused = refusedPathMatch().sql
+  w.push(`(NOT ${refused} OR (path LIKE '/funnel/%' AND NOT (${NUL_PATH_SQL})))`)
   // `pf` splits each hour row-exactly at the install fix (lib/popupEvents.ts
   // INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS): summarizeSiteEvents drops pre-fix gap rows and
   // counts post-fix accepts for the install health pair.
   const pf = fixedAtMs === null ? '0' : '(ts >= ?)'
   return {
-    sql: `SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, ${pf} AS pf, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY hr, path, pf`,
+    sql: `SELECT CASE WHEN ${refused} THEN NULL ELSE CAST(ts / 3600000 AS INTEGER) END AS hr, CASE WHEN ${refused} THEN ${etDateSql()} ELSE NULL END AS etd, path, ${pf} AS pf, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY hr, etd, path, pf`,
     binds: fixedAtMs === null ? b : [fixedAtMs, ...b],
   }
 }
@@ -255,7 +259,10 @@ export function createBeaconSource(select: D1Select): BeaconSource {
     async siteEvents(sinceMs) {
       const q = siteEventsQuery(sinceMs)
       const rows = await select<any>(q.sql, q.binds)
-      return rows.map((x) => ({ hourStartMs: n(x.hr) * 3_600_000, path: String(x.path ?? ''), count: n(x.c), postInstallFix: n(x.pf) === 1 }))
+      return rows.map((x) => {
+        const day = x.etd == null ? '' : String(x.etd)
+        return { hourStartMs: day ? etWallTimeMs(day) : n(x.hr) * 3_600_000, path: String(x.path ?? ''), count: n(x.c), postInstallFix: n(x.pf) === 1 }
+      })
     },
     async siteFirstSession(sinceMs, untilMs) {
       const q = siteFirstSessionQuery(sinceMs, untilMs)
