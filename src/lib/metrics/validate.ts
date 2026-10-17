@@ -99,7 +99,7 @@ export function kindOf(b: DataBinding): DataKind | null {
 
 // ── validateCard ─────────────────────────────────────────────────────────────────────────
 const SERVED_WINDOWS: ReadonlySet<string> = new Set<WindowName>(['attribution', 'todaySoFar', 'page', ...WINDOW_SIDES])
-const SCOPE_PARAM: Record<RepeatSpec['over'], MetricParam | null> = { campaigns: 'campaignId', popups: 'popup', windows: null, readings: null, countries: 'country' }
+const SCOPE_PARAM: Record<RepeatSpec['over'], MetricParam | null> = { campaigns: 'campaignId', popups: 'popup', windows: null, readings: null, countries: 'country', rules: null }
 /** The shape of a notes-registry id ('small-sample', 'label.bsk.gameViews'). A card's note ids
  * (captions, `{ note }` labels, `whenEmpty.note`) are checked for this shape only, never for
  * whether this build's registry has them: adding a registry id takes no layout version, so a tab

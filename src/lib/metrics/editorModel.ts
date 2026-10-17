@@ -172,6 +172,8 @@ export const SCOPE_PATH_OPTIONS: Record<RepeatSpec['over'], { value: ScopePath; 
     { value: 'campaign.returnTagShared', label: 'Shared return tag note' },
     { value: 'campaign.freshness', label: 'Ads data freshness (from the readings load)' },
     { value: 'campaign.thresholds', label: 'Fired spend thresholds (from the readings load)' },
+    { value: 'campaign.f3Read', label: 'Newest F3 read: date and flight day (from the readings load)' },
+    { value: 'campaign.f3Proposal', label: 'Newest F3 read: proposal (from the readings load)' },
   ],
   popups: [
     { value: 'popup.id', label: 'Pop-up id' },
@@ -194,6 +196,12 @@ export const SCOPE_PATH_OPTIONS: Record<RepeatSpec['over'], { value: ScopePath; 
     { value: 'reading.count.auth', label: 'Auth successes' },
     { value: 'reading.count.signUpsAtMost', label: 'Sign-ups (upper bound, number)' },
     { value: 'reading.count.signUps', label: 'Sign-ups (exact or at most, text)' },
+  ],
+  rules: [
+    { value: 'rule.name', label: 'Rule (number and name)' },
+    { value: 'rule.number', label: 'Measured number' },
+    { value: 'rule.threshold', label: 'Threshold' },
+    { value: 'rule.verdict', label: 'Verdict' },
   ],
 }
 export function scopePathOptions(over: RepeatSpec['over'] | undefined): { value: ScopePath; label: string }[] {

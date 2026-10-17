@@ -61,6 +61,7 @@ import {
   type StagedArmDates,
 } from './campaigns'
 import { etOffsetHours } from './etTime'
+import type { ReadoutVerdict } from './flight3Rules'
 
 // ── Accounts and campaigns ───────────────────────────────────────────────────────────────
 /** Google Ads REST API version the routine speaks. */
@@ -2061,6 +2062,18 @@ export interface ReadingRecord {
   /** The de-dup key within (campaign, etDate) — readingEntryKind(). Derived when absent (rows
    * written before migration 0003). */
   entryKind?: string
+  /** The flight 3 rules block of an F3 arm's morning read (migration 0006). Absent on every other
+   * row: F2, retest, threshold, postflight, health, and rows written before the column. */
+  f3?: ReadingF3
+}
+/** What a daily F3 read stores of its rules block: the nine readouts as printed and the proposal. */
+export interface ReadingF3 {
+  v: 1
+  arm: 'apps' | 'search'
+  flightDay: number
+  readouts: { n: number; name: string; number: string; threshold: string | null; verdict: ReadoutVerdict }[]
+  /** null = rules tripped but the campaign is not serving, so there is nothing to pause. */
+  proposal: 'PROPOSE PAUSE' | 'CONTINUE' | null
 }
 export interface ReadingsLog {
   v: 1

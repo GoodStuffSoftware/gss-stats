@@ -13,6 +13,7 @@
 // items' own captions use captionMode 'compact': no caption line on the item; the card lists
 // them behind its one collapsed "Notes" toggle (MetricCardInstance), the owner's clean look.
 
+import { STAGED_FLIGHT_3 } from '../campaigns'
 import type { CardSpec, Display, MetricItem } from './types'
 
 const COMPACT = { captionMode: 'compact' } as const satisfies Partial<MetricItem>
@@ -525,6 +526,39 @@ export const CARRY_OVER_COMPLETIONS: CardSpec = {
   captions: ['carry-over-weak-signal'],
 }
 
+/** Flight 3 rule readouts: one card per F3 arm (Apps, Search), from the newest stored F3 morning
+ * read (ads_readings.f3, migration 0006). The read's ET date and flight day, its proposal, then
+ * rules 1-9 as the report prints them: rule, number, threshold, verdict. PROPOSE PAUSE is red
+ * (scope.ts scopeTone), NOT YET / NO DATA / n/a dim. "No F3 read yet" until the first read.
+ *
+ * PRIVACY: only the printed rule text and the proposal of a stored read; no count of the record,
+ * no hour, place or device split. Proposals only: the card changes nothing. */
+export const F3_RULE_READOUTS: CardSpec = {
+  v: 1,
+  repeat: { over: 'campaigns', ids: [STAGED_FLIGHT_3.apps.ids.campaignId, STAGED_FLIGHT_3.search.ids.campaignId] },
+  minWidth: 520,
+  title: { bind: 'campaign.label' },
+  sections: [
+    {
+      layout: 'table',
+      items: [
+        { id: 'read', label: { note: 'label.f3.read' }, data: { field: 'campaign.f3Read' }, display: { as: 'text' }, gating: { whenEmpty: 'omit' } },
+        { id: 'proposal', label: { note: 'label.f3.proposal' }, data: { field: 'campaign.f3Proposal' }, display: { as: 'text' }, gating: { whenEmpty: 'omit' } },
+      ],
+    },
+    {
+      layout: 'table',
+      repeat: { over: 'rules', empty: { label: '', text: { note: 'no-f3-read-yet' } } },
+      items: [
+        { id: 'rule', label: { note: 'label.f3.rule' }, data: { field: 'rule.name' }, display: { as: 'text' } },
+        { id: 'number', label: { note: 'label.f3.number' }, data: { field: 'rule.number' }, display: { as: 'text' } },
+        { id: 'threshold', label: { note: 'label.f3.threshold' }, data: { field: 'rule.threshold' }, display: { as: 'text' } },
+        { id: 'verdict', label: { note: 'label.f3.verdict' }, data: { field: 'rule.verdict' }, display: { as: 'text' } },
+      ],
+    },
+  ],
+}
+
 /** Every preset by id. A null prototype, so an id such as 'constructor' or 'toString' is
  * simply not a preset — read through presetById, never a bare bracket lookup. */
 export const PRESETS: Readonly<Record<string, CardSpec>> = Object.freeze(
@@ -543,6 +577,7 @@ export const PRESETS: Readonly<Record<string, CardSpec>> = Object.freeze(
     'ads-readings-log': ADS_READINGS_LOG,
     'play-installs': PLAY_INSTALLS,
     'carry-over-completions': CARRY_OVER_COMPLETIONS,
+    'f3-rule-readouts': F3_RULE_READOUTS,
   }),
 )
 

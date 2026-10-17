@@ -29,6 +29,17 @@ export type ScopePath =
   /** The spend thresholds the campaign has fired, with the time each fired:
    * "$50 · Sep 26, 3:00 PM ET; $100 · …". null when none have. From the readings load. */
   | 'campaign.thresholds'
+  /** The newest stored F3 morning read of the campaign (ads_readings.f3, migration 0006): its ET
+   * read date and flight day, "Oct 18 · flight day 2"; null when there is none yet. */
+  | 'campaign.f3Read'
+  /** That read's proposal: PROPOSE PAUSE, CONTINUE, or the tripped-but-not-serving note. */
+  | 'campaign.f3Proposal'
+  /** One rule of that read (RepeatSpec.over 'rules'): "1 · Placement leak", its measured figure,
+   * what it is held to, and its verdict, all as the morning report prints them. */
+  | 'rule.name'
+  | 'rule.number'
+  | 'rule.threshold'
+  | 'rule.verdict'
   | 'popup.id'
   | 'popup.label'
   | 'window.label'
@@ -150,7 +161,8 @@ export const DEFAULT_READINGS_LIMIT = 30
 export const MAX_READINGS_LIMIT = 500
 
 export interface RepeatSpec {
-  over: 'campaigns' | 'popups' | 'windows' | 'readings' | 'countries'
+  /** 'rules': the F3 rules of the enclosing campaign's newest stored F3 read (campaign.f3Read). */
+  over: 'campaigns' | 'popups' | 'windows' | 'readings' | 'countries' | 'rules'
   ids?: string[] // campaigns, popups, countries (COUNTRY_BUCKETS); windows: WINDOW_SIDES
   status?: ('closed' | 'active' | 'upcoming')[]
   /** Campaigns only: beacon-tracked ones (not `measurement: 'spend-only'`). */

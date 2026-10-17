@@ -24,7 +24,7 @@ import { useEtClock } from '../../composables/useEtClock'
 import { useMetricTokens } from '../../composables/useMetricTokens'
 import { isInFlight, isStale, useReturnRefresh } from '../../composables/useReturnRefresh'
 import { fetchAdsReadings } from '../../api'
-import { MAX_READINGS_LIMIT } from '../../lib/metrics/types'
+import { DEFAULT_READINGS_LIMIT, MAX_READINGS_LIMIT } from '../../lib/metrics/types'
 import { NO_READINGS, readingsLoadOf } from '../../lib/metrics/readingsScope'
 import type { AdsReadingsResponse } from '../../lib/adsStore'
 import { hasNote, noteRawText } from '../../lib/notes'
@@ -34,7 +34,7 @@ import { cardLabelTexts } from '../../lib/metricValueTokens'
 import { noteValueResolver } from '../../lib/valueTokens'
 import { presetById } from '../../lib/metrics/presets'
 import { INVALID_CARD_PRESET } from '../../lib/metrics/validate'
-import { buildRequestSpec, campaignOfScope, narrowToCampaigns, readingsLimitOf, repeatsOverReadings, ROOT_SCOPE, resolveRepeat, sectionCells, todayEtFrom, usesAdsInfoFields, usesReadingFields, type ReadingScope, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
+import { buildRequestSpec, campaignOfScope, narrowToCampaigns, readingsLimitOf, repeatsOverReadings, ROOT_SCOPE, resolveRepeat, sectionCells, todayEtFrom, usesAdsInfoFields, usesF3Read, usesReadingFields, type ReadingScope, type RepeatContext, type ScopeInstance } from '../../lib/metrics/scope'
 import { CAMPAIGNS } from '../../lib/campaigns'
 import type { CardRef, CardSpec, MetricsContext } from '../../lib/metrics/types'
 import type { RefreshResult } from '../../lib/adsRefresh'
@@ -106,14 +106,17 @@ const labelValues = computed(() => noteValueResolver(labelTokens.values.value))
 // the card reload, after an ads refresh and on return to the tab. The `readings` prop stays as
 // an override for the rows (tests, previews): when given, a card that only needs the rows does
 // not fetch.
-const wantsAds = computed(() => !!spec.value && (!!spec.value.notices || usesAdsInfoFields(spec.value)))
+const wantsAds = computed(() => !!spec.value && (!!spec.value.notices || usesAdsInfoFields(spec.value) || usesF3Read(spec.value)))
 const wantsReadings = computed(() => !!spec.value && (repeatsOverReadings(spec.value) || usesReadingFields(spec.value)))
 const loadsReadings = computed(() => wantsAds.value || (wantsReadings.value && props.readings === undefined))
 /** The most readings per campaign asked for; a card that needs only the freshness asks for one. */
 const readingsQuery = computed(() => {
   const p = new URLSearchParams()
   for (const id of props.campaignIds ?? []) p.append('campaignId', id)
-  const limit = spec.value && repeatsOverReadings(spec.value) ? Math.min(readingsLimitOf(spec.value), MAX_READINGS_LIMIT) : 1
+  // A stored F3 read sits behind that day's threshold / health rows: ask deep enough to reach it.
+  const f3 = !!spec.value && usesF3Read(spec.value)
+  const deep = spec.value && repeatsOverReadings(spec.value) ? Math.min(readingsLimitOf(spec.value), MAX_READINGS_LIMIT) : 1
+  const limit = f3 ? Math.max(deep, DEFAULT_READINGS_LIMIT) : deep
   p.set('limit', String(limit))
   return p.toString()
 })

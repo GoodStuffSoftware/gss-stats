@@ -10,7 +10,7 @@ import { proposalLabel, type ReadingRecord } from '../adsRules'
 import { rulesSummary } from '../adsRulesSummary'
 import { readingKindLabel } from '../adsReadingsFormat'
 import type { AdsReadingsCampaign, AdsReadingsResponse } from '../adsStore'
-import type { CampaignAdsInfo, ReadingCountKey, ReadingScope } from './scope'
+import type { CampaignAdsInfo, CampaignF3Read, ReadingCountKey, ReadingScope } from './scope'
 import { READING_COUNT_FIELDS } from './types'
 
 /** The five allow-listed record fields, as the scope's count keys. */
@@ -43,7 +43,22 @@ export function readingScopeOf(r: ReadingRecord): ReadingScope {
 export function campaignAdsInfoOf(c: AdsReadingsCampaign, storeBound: boolean, loadedAtMs: number): CampaignAdsInfo {
   // What the readings log shows: a campaign with a stored reading, Ads-API spend or an active flight.
   const hasActivity = !!c.readings?.length || c.spend?.source === 'google-ads-api' || c.status === 'active'
-  return { spendThrough: c.spendThrough, lastSync: c.lastSync, stale: c.stale, storeBound, thresholdsFired: c.thresholdsFired, loadedAtMs, hasActivity }
+  const f3 = campaignF3ReadOf(c.readings)
+  return { spendThrough: c.spendThrough, lastSync: c.lastSync, stale: c.stale, storeBound, thresholdsFired: c.thresholdsFired, loadedAtMs, hasActivity, ...(f3 ? { f3 } : {}) }
+}
+
+/** The newest daily reading's F3 rules block (ads_readings.f3), or undefined when no loaded
+ * reading carries one. `readings` is newest first, as the endpoint returns them. Only the
+ * printed rule text and the proposal are copied: no count of the record. */
+export function campaignF3ReadOf(readings: readonly ReadingRecord[] | null | undefined): CampaignF3Read | undefined {
+  const r = (readings ?? []).find((x) => x.kind === 'daily' && x.f3 && Array.isArray(x.f3.readouts))
+  if (!r?.f3) return undefined
+  return {
+    etDate: r.etDate,
+    flightDay: r.f3.flightDay,
+    proposal: r.f3.proposal ?? null,
+    rules: r.f3.readouts.map((x) => ({ n: x.n, name: x.name, number: x.number, threshold: x.threshold ?? null, verdict: x.verdict })),
+  }
 }
 
 export interface ReadingsLoad {

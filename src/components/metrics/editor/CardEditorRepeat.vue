@@ -29,6 +29,7 @@ const OVER_LABELS: Record<RepeatSpec['over'], string> = {
   windows: 'One per before/after window',
   readings: 'One per stored reading',
   countries: 'One per country (US / CA / Other)',
+  rules: 'One per Flight 3 rule (newest stored read)',
 }
 /** What "none checked" means for each kind's id list. */
 const IDS_HEADINGS: Partial<Record<RepeatSpec['over'], { title: string; none: string }>> = {

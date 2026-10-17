@@ -117,6 +117,10 @@ export function unfinishedSyncAlert(source: string, startedAt: string): SyncAler
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+/** An ET date 'YYYY-MM-DD' as "Oct 18". */
+export function etDayText(d: string): string {
+  return `${MONTHS[Number(d.slice(5, 7)) - 1]} ${Number(d.slice(8, 10))}`
+}
 /** "Spend through Sep 27 · synced 2h ago" (the widgets' freshness line). */
 export function freshnessLine(f: Pick<AdsFreshness, 'spendThrough' | 'lastSync'>, nowMs: number): string {
   const through = f.spendThrough ? `Spend through ${MONTHS[Number(f.spendThrough.slice(5, 7)) - 1]} ${Number(f.spendThrough.slice(8, 10))}` : 'No closed spend day stored yet'

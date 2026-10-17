@@ -7,7 +7,7 @@
 //   8 traffic held (derived from 2 and 6, never counted twice)   9 D+7 verdict (decideFlight3)
 // PROPOSE ONLY: nothing here pauses a campaign. Pure functions of counts and dollars: no I/O, no
 // Intl (adsRules.ts is in the Worker bundle and this file is its sibling), no visitor id.
-import { canProposePause, type DecisionResult, type Flight3DecisionRow, type RuleResult, type ServingState } from './adsRules'
+import { canProposePause, type DecisionResult, type Flight3DecisionRow, type ReadingF3, type RuleResult, type ServingState } from './adsRules'
 import { MIN_COHORT } from './popupEvents'
 import type { StagedArm } from './campaigns'
 
@@ -282,5 +282,18 @@ export function buildFlight3Rules(i: Flight3RulesInput, opts: { ctrFloor?: numbe
     proposal,
     servingState: i.servingState,
     costPerRow: { cumulative: cost, yesterday: opts.costPerRowYesterday ?? null },
+  }
+}
+
+/** The part of a rules block a daily reading stores (migration 0006, ads_readings.f3): the
+ * readouts exactly as printed and the proposal. Copies, so a later change to the block can't
+ * reach the stored record. */
+export function readingF3Of(b: Flight3Block): ReadingF3 {
+  return {
+    v: 1,
+    arm: b.arm,
+    flightDay: b.flightDay,
+    readouts: b.readouts.map((r) => ({ n: r.n, name: r.name, number: r.number, threshold: r.threshold, verdict: r.verdict })),
+    proposal: b.proposal,
   }
 }
