@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.54.2] — 2026-10-16
+
 ### Fixed
 - **Counts-only notes name every refused family.** The country-column note, the ads report line and the related comments now also list ask-order A/B and paid-funnel rows.
 
