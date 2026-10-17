@@ -106,7 +106,7 @@ export const SPLIT_REFUSED_DIMS: ReadonlySet<string> = new Set([
 
 /** SQL LIKE patterns for the rows the rule protects: on-device return-curve beacons, game
  * completions (live and the legacy deferred path), counted game starts, tour skips and tour exit
- * steps, and tutorial completions (`first-run` / `replay` is something the device remembers about
+ * steps, coach-strip rows, the ask-order A/B family, paid-funnel rows, and tutorial completions (`first-run` / `replay` is something the device remembers about
  * itself, like the return day buckets). A pattern ending in `%` anchors on a full path segment
  * with its trailing slash, so `/game`, `/game/first-move`, `/tour/start` and other page views
  * never match; a pattern with no wildcard (`/tour/skip`) matches that one path exactly, because
