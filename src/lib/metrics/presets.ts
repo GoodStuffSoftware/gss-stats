@@ -14,6 +14,7 @@
 // them behind its one collapsed "Notes" toggle (MetricCardInstance), the owner's clean look.
 
 import { STAGED_FLIGHT_3 } from '../campaigns'
+import { ELIGIBLE_EARNED_REASON_METRICS, ELIGIBLE_OTHER_METRICS } from './metrics'
 import type { CardSpec, Display, MetricItem } from './types'
 
 const COMPACT = { captionMode: 'compact' } as const satisfies Partial<MetricItem>
@@ -207,7 +208,8 @@ export const POPUP_RATES: CardSpec = {
 
 /** Sign-in eligibility (the Pop-ups page's 'eligible' chart): signed-out finishes that earned a
  * sign-in ask, hit the cap, or did not earn one, as bars, and the eligibility rate (earned over
- * all three, a partition). Its caveat (rows arrive at least 30 minutes after the finish) is the
+ * all three, a partition), then the earned finishes by reason and the below-floor, not-now and stopped
+ * rows, which sit outside the rate. Its caveat (rows arrive at least 30 minutes after the finish) is the
  * widget's own caption, as before. */
 export const SIGNIN_ELIGIBILITY: CardSpec = {
   v: 1,
@@ -223,6 +225,16 @@ export const SIGNIN_ELIGIBILITY: CardSpec = {
     {
       layout: 'rows',
       items: [{ id: 'rate', label: { metric: true }, data: { ratio: 'popup.eligibility', window: 'page' }, display: { as: 'percent', decimals: 1 }, ...COMPACT }],
+    },
+    {
+      layout: 'bars',
+      title: { note: 'label.card.eligible.byReason' },
+      items: ELIGIBLE_EARNED_REASON_METRICS.map(({ id, reason }) => ({ id: `earned-${reason}`, label: { metric: true }, data: { metric: id, window: 'page' }, display: { as: 'bar' }, ...COMPACT })),
+    },
+    {
+      layout: 'bars',
+      title: { note: 'label.card.eligible.outsideRate' },
+      items: ELIGIBLE_OTHER_METRICS.map(({ id, kind }) => ({ id: `other-${kind}`, label: { metric: true }, data: { metric: id, window: 'page' }, display: { as: 'bar' }, ...COMPACT })),
     },
   ],
 }

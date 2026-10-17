@@ -362,7 +362,7 @@ describe('the Pop-ups page panels ≡ their /api/popups renderings', () => {
     const card = await mountCard('signin-eligibility', FIXTURE_NOW, { since: filters.since, until: filters.until, sites: [...BEST_SUDOKU_SITES], excludeOwnVisits: true, ownBrowser: 'Opera', ownOS: 'Windows' })
     const r = [...rows(card)]
     expect(r.slice(0, 3)).toEqual(oldBars)
-    expect(card.findAll('.mi-bar-fill').map((b) => (b.element as HTMLElement).style.width)).toEqual(['100%', '50%', '25%'])
+    expect(card.findAll('.mi-bar-fill').map((b) => (b.element as HTMLElement).style.width).slice(0, 3)).toEqual(['100%', '50%', '25%'])
     expect(r[3]).toEqual(['Sign-in eligibility rate', '57.1% (4/7)']) // A1
   })
 })

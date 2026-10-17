@@ -764,7 +764,11 @@ export const FACTS: Record<FactId, FactDef> = {
 export function flightPathsSeenStatement(campaign: CampaignFlight): FactStatement {
   if (!campaign.flightStart) throw new Error('flightPathsSeen needs a confirmed flightStart')
   const [startMs, endMs] = etFlightRangeMs(campaign.flightStart, campaign.flightEnd)
-  return { db: 'gss_geo', sql: 'SELECT path, COUNT(*) AS c FROM hits WHERE site = ? AND ts >= ? AND ts < ? GROUP BY path', binds: [BSK_WEB_SITE, startMs, endMs] }
+  const w = ['site = ?', 'ts >= ?', 'ts < ?']
+  const b: unknown[] = [BSK_WEB_SITE, startMs, endMs]
+  // Manual production checks are never visitors, so a path only they sent does not count as seen.
+  applyAlwaysExclusions(w, b)
+  return { db: 'gss_geo', sql: `SELECT path, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY path`, binds: b }
 }
 
 /** The dedupe/cache identity of one fact instance: its id plus only the params it keys on. */

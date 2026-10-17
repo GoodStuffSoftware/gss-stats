@@ -30,10 +30,13 @@ import {
   classifyPopupPath,
   GAME_COMPLETE_LIVE_AT,
   INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS,
+  ELIGIBLE_EARNED_REASONS,
+  ELIGIBLE_OTHER_KINDS,
   isAuthErrorPath,
   isAuthRedirectPath,
   isTourExitPath,
   isTutorialCompletePath,
+  LEGACY_REASON,
   MIN_COHORT,
   POPUPS,
   RAW_INSTALL_DEDUPE_LIVE_AT_UTC_MS,
@@ -217,6 +220,13 @@ const RETURN_METRICS: { id: string; bucket: ReturnBucket; lag?: [number, number]
   { id: 'campaign.returnD15to30', bucket: 'd15-30', lag: [15, 30] },
   { id: 'campaign.returnD31to60', bucket: 'd31-60', lag: [31, 60] },
 ]
+
+// ── Sign-in eligibility, split (lib/popupEvents.ts ELIGIBLE_EARNED_REASONS / ELIGIBLE_OTHER_KINDS) ──
+const camel = (slug: string) => slug.replace(/(^|-)([a-z0-9])/g, (_m, _d, c: string) => c.toUpperCase())
+/** One metric per earned reason, then the pre-reason rows and the unknown reasons. Ids: popup.eligibleEarned<Reason>. */
+export const ELIGIBLE_EARNED_REASON_METRICS: { id: string; reason: string }[] = [...ELIGIBLE_EARNED_REASONS, LEGACY_REASON, 'other'].map((reason) => ({ id: `popup.eligibleEarned${camel(reason)}`, reason }))
+/** One metric per eligibility row kind outside the rate. Ids: popup.eligible<Kind>. */
+export const ELIGIBLE_OTHER_METRICS: { id: string; kind: string }[] = ELIGIBLE_OTHER_KINDS.map((kind) => ({ id: `popup.eligible${camel(kind)}`, kind }))
 
 // ── Pop-up outcomes (lib/popupEvents.ts POPUP_OUTCOME_TYPES; the app's own windows) ──────
 const OUTCOME_METRICS: { id: string; outcome: string; lag: [number, number] }[] = [
@@ -644,6 +654,36 @@ export const METRIC_DEFS: MetricDef[] = [
       path: (p) => {
         const ev = popupEventOf(p)
         return !!ev && ev.family === 'signin-eligible' && ev.kind === k
+      },
+      instrumented: [TRACKING],
+      caveats: ['signin-eligible-caveat'],
+    }),
+  ),
+  // Earned finishes by the reason on the row (/signin-eligible/earned/<reason>); a row from before the reason
+  // segment existed reads 'legacy', any reason outside the known list 'other'. Subsets of earned, which they sum to.
+  ...ELIGIBLE_EARNED_REASON_METRICS.map(({ id, reason }) =>
+    popupMetric({
+      id,
+      unit: 'finish',
+      subsetOf: 'popup.eligibleEarned',
+      params: [],
+      path: (p) => {
+        const ev = popupEventOf(p)
+        return !!ev && ev.family === 'signin-eligible' && ev.kind === 'earned' && ev.extra === reason
+      },
+      instrumented: [TRACKING],
+      caveats: ['signin-eligible-caveat'],
+    }),
+  ),
+  // Rows of their own (never part of the earned / capped / unearned rate): a finish below the floor, a "not now", a stop.
+  ...ELIGIBLE_OTHER_METRICS.map(({ id, kind }) =>
+    popupMetric({
+      id,
+      unit: 'finish',
+      params: [],
+      path: (p) => {
+        const ev = popupEventOf(p)
+        return !!ev && ev.family === 'signin-eligible' && ev.kind === kind
       },
       instrumented: [TRACKING],
       caveats: ['signin-eligible-caveat'],

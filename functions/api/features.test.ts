@@ -299,3 +299,52 @@ describe('/api/features: manual production checks', () => {
     }
   })
 })
+
+describe('/api/features: money funnel and in-app install help', () => {
+  it('counts the paid funnel per step, web and Play apart, with purchases per checkout', async () => {
+    insertHits(db, [
+      hit('/funnel/trial-start', at(LATEST, 9), { n: 8 }),
+      hit('/funnel/checkout-start/web', at(LATEST, 10), { n: 5 }),
+      hit('/funnel/checkout-start/play', at(LATEST, 11), { n: 4 }),
+      hit('/funnel/purchase/web', at(LATEST, 12), { n: 2 }),
+      hit('/funnel/purchase/play', at(LATEST, 13), { n: 1 }),
+      hit('/funnel/purchase/web', at(PREV, 9), { n: 3 }),
+      hit('/funnel/purchase/stripe', at(LATEST, 14), { n: 9 }), // an unknown store: counted nowhere
+    ])
+    const { body } = await post(range)
+    expect(feature(body, 'funnel').steps.map((x: any) => x.id)).toEqual(['trial', 'checkout-web', 'checkout-play', 'purchase-web', 'purchase-play'])
+    expect(step(body, 'funnel', 'trial').latest).toBe(8)
+    expect(step(body, 'funnel', 'checkout-web').latest).toBe(5)
+    expect(step(body, 'funnel', 'checkout-play').latest).toBe(4)
+    const web = step(body, 'funnel', 'purchase-web')
+    expect([web.latest, web.prev, web.range]).toEqual([2, 3, 5])
+    expect(web.ratio.latest).toBeCloseTo(0.4)
+    expect(step(body, 'funnel', 'purchase-play').ratio.latest).toBeCloseTo(0.25)
+    expect(feature(body, 'funnel').latest).toBe(8 + 5 + 4 + 2 + 1)
+  })
+  it('an empty funnel reads New with zero counts and no ratios', async () => {
+    const { body } = await post(range)
+    const f = feature(body, 'funnel')
+    expect(f.status).toBe('new')
+    expect(f.range).toBe(0)
+    for (const st of f.steps) expect(st.perDay.every((n: number) => n === 0)).toBe(true)
+    expect(step(body, 'funnel', 'purchase-web').ratio.range).toBeNull()
+  })
+  it('counts /install/inapp/* as its own Install prompt step, outside Shown and the ratios', async () => {
+    insertHits(db, [
+      hit('/install/prompt/android', at(LATEST, 9), { n: 6 }),
+      hit('/install/inapp/instagram', at(LATEST, 10), { n: 3 }),
+      hit('/install/inapp/facebook', at(LATEST, 11), { n: 2 }),
+      hit('/install/inapp/facebook', at(PREV, 11), { n: 1 }),
+    ])
+    const { body } = await post(range)
+    const inapp = step(body, 'install', 'inapp')
+    expect([inapp.latest, inapp.prev, inapp.range]).toEqual([5, 1, 6])
+    expect(inapp.ratio).toBeUndefined()
+    expect(step(body, 'install', 'shown').latest).toBe(6)
+  })
+  it('an empty install feature has a zero in-app step', async () => {
+    const { body } = await post(range)
+    expect(step(body, 'install', 'inapp').range).toBe(0)
+  })
+})

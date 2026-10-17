@@ -13,7 +13,7 @@
 // { dimension, breakdown } and get the same result via a fallback.
 
 import { popupExcludeClause, pathFamilySqlCase, popupDimSqlCase, popupDimPrefilter } from '../../src/lib/popupEvents'
-import { gameDimSqlCase, gameDimPrefilter, campaignFlightSqlCase, campaignFlightPrefilter, landingTagSqlCase, landingTagPrefilter, arrivalSqlCase, keyEventSqlCase, flightDaySqlCase, withFlightRegistry, applyExclusions } from '../../src/lib/campaigns'
+import { gameDimSqlCase, gameDimPrefilter, campaignFlightSqlCase, campaignFlightPrefilter, landingTagSqlCase, landingTagPrefilter, arrivalSqlCase, keyEventSqlCase, flightDaySqlCase, withFlightRegistry, applyExclusions, applyAlwaysExclusions } from '../../src/lib/campaigns'
 import { excludeOwnClause as sharedExcludeOwnClause, selfReferralClause as sharedSelfReferralClause } from '../../src/lib/ownExclusion'
 import { etDateSql, etHourSql } from '../../src/lib/etTime'
 import { isDateDim } from '../../src/lib/rings'
@@ -330,7 +330,9 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // their numbers (the Overview timeline sets it).
   const excludeKnownTraffic = body.excludeKnownTraffic === true
   const knownTrafficClause = (w: string[], b: any[]) => {
+    // Manual production checks are never visitors: dropped whatever the toggle says.
     if (excludeKnownTraffic) applyExclusions(w, b)
+    else applyAlwaysExclusions(w, b)
   }
 
   const isPoints = dim === 'points' || body.dimension === 'points'
