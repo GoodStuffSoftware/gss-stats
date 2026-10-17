@@ -138,6 +138,8 @@ export const FEATURES: readonly FeatureDef[] = [
       { id: 'dismiss', label: 'Declined', match: { exact: ['/install/prompt/dismiss', '/install/prompt/dismiss-forever', '/install/prompt/have-it', '/install/pwa-decline'] }, ratioOf: { per: 'shown' } },
       // No ratio: Accepted also counts Play and app-store taps, which never produce a PWA-installed row.
       { id: 'installed', label: 'Installed (PWA)', match: { exact: ['/install/pwa-installed'] } },
+      // No ratio: the in-app-browser help (a page opened inside another app's browser, where the install prompt cannot run) is its own row, not a step after Shown. Provisional beacon: not checked against production D1.
+      { id: 'inapp', label: 'In-app install help', match: { prefix: ['/install/inapp/'] } },
     ],
   },
   {
@@ -171,6 +173,20 @@ export const FEATURES: readonly FeatureDef[] = [
       ],
     }),
   ),
+  // Last, so the default Features layout keeps every earlier chart where it was.
+  {
+    id: 'funnel',
+    label: 'Money funnel',
+    blurb: 'Paid conversion: a trial started, a checkout opened and a purchase made, on the web and on Google Play.',
+    // Provisional beacons (counts only, sent at least 30 minutes after the event), not checked against production D1: the feature reads "New" until rows arrive.
+    steps: [
+      { id: 'trial', label: 'Trial started', match: { exact: ['/funnel/trial-start'] } },
+      { id: 'checkout-web', label: 'Checkout started (web)', match: { exact: ['/funnel/checkout-start/web'] } },
+      { id: 'checkout-play', label: 'Checkout started (Play)', match: { exact: ['/funnel/checkout-start/play'] } },
+      { id: 'purchase-web', label: 'Purchased (web)', match: { exact: ['/funnel/purchase/web'] }, ratioOf: { per: 'checkout-web' } },
+      { id: 'purchase-play', label: 'Purchased (Play)', match: { exact: ['/funnel/purchase/play'] }, ratioOf: { per: 'checkout-play' } },
+    ],
+  },
 ]
 
 /** The widget view that draws a feature's step chart: `steps:<featureId>`. */

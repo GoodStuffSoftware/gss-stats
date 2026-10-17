@@ -7,7 +7,9 @@ import type { DatabaseSync } from 'node:sqlite'
 import { onRequestPost as popupsPost } from './popups'
 import { onRequestPost as completionsPost } from './completions'
 import { onRequestGet as sitesGet } from './sites'
-import { FACTS } from '../../src/lib/metrics/facts'
+import { onRequestPost as geoPost } from './geo'
+import { FACTS, flightPathsSeenStatement } from '../../src/lib/metrics/facts'
+import { CAMPAIGNS, etFlightRangeMs } from '../../src/lib/campaigns'
 import { insertHits, installCaches, memoryCache, openHitsDb, pagesContext, postJson, sqliteD1 } from '../_lib/testing/hitsDb'
 
 const NOW = Date.parse('2026-10-16T16:00:00Z')
@@ -85,5 +87,42 @@ describe('the pop-up range facts', () => {
   })
   it('popupRangeDaily, its twin, drops them too', () => {
     expect(sum(FACTS.popupRangeDaily.build(params, NOW))).toBe(3)
+  })
+})
+
+describe('/api/geo with the hide-known-traffic option off', () => {
+  const rows = () =>
+    insertHits(db, [
+      { ts: T, site: SITE, path: '/', n: 3 },
+      { ts: T + 1, site: SITE, path: '/', campaign: 'manual_check', n: 6 },
+      { ts: T + 2, site: SITE, path: '/return/manual_check/d0', n: 4 },
+    ])
+  const total = async (excludeKnownTraffic: boolean) => {
+    const res = await geoPost(pagesContext(postJson('/api/geo', { dimension: 'site', since: '2026-10-13', until: '2026-10-15', ...(excludeKnownTraffic ? { excludeKnownTraffic: true } : {}) }), { gss_geo: sqliteD1(db) }))
+    return ((await res.json()) as { totals: { pageviews: number } }).totals.pageviews
+  }
+  it('still drops manual-check rows (the always entries)', async () => {
+    rows()
+    expect(await total(false)).toBe(3)
+  })
+  it('drops them with the option on as well', async () => {
+    rows()
+    expect(await total(true)).toBe(3)
+  })
+})
+
+describe('flightPathsSeenStatement', () => {
+  it('does not count a path only the manual checks sent as seen', () => {
+    const flight = CAMPAIGNS.find((c) => c.flightStart)!
+    const [startMs, endMs] = etFlightRangeMs(flight.flightStart!, flight.flightEnd)
+    const mid = Math.floor((startMs + endMs) / 2)
+    insertHits(db, [
+      { ts: mid, site: SITE, path: '/seen/by-visitors', n: 2 },
+      { ts: mid + 1, site: SITE, path: '/seen/by-checks-only', campaign: 'manual_check', n: 5 },
+      { ts: mid + 2, site: SITE, path: '/return/manual_check/d0', n: 4 },
+    ])
+    const stmt = flightPathsSeenStatement(flight)
+    const seen = db.prepare(stmt.sql).all(...(stmt.binds as (string | number)[])) as { path: string; c: number }[]
+    expect(Object.fromEntries(seen.map((r) => [r.path, r.c]))).toEqual({ '/seen/by-visitors': 2 })
   })
 })

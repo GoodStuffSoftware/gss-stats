@@ -560,7 +560,7 @@ exports[`fact SQL snapshots > flightPathsSeen {"campaignId":"24215315197"} 1`] =
     1789012800000,
   ],
   "db": "gss_geo",
-  "sql": "SELECT path, COUNT(*) AS c FROM hits WHERE site = ? AND ts >= ? AND ts < ? GROUP BY path",
+  "sql": "SELECT path, COUNT(*) AS c FROM hits WHERE site = ? AND ts >= ? AND ts < ? AND (COALESCE(campaign, '') <> 'manual_check' AND COALESCE(path, '') NOT LIKE '/return/manual\\_check/%' ESCAPE '\\') GROUP BY path",
 }
 `;
 
@@ -572,7 +572,7 @@ exports[`fact SQL snapshots > flightPathsSeen {"campaignId":"24234347705"} 1`] =
     1789358400000,
   ],
   "db": "gss_geo",
-  "sql": "SELECT path, COUNT(*) AS c FROM hits WHERE site = ? AND ts >= ? AND ts < ? GROUP BY path",
+  "sql": "SELECT path, COUNT(*) AS c FROM hits WHERE site = ? AND ts >= ? AND ts < ? AND (COALESCE(campaign, '') <> 'manual_check' AND COALESCE(path, '') NOT LIKE '/return/manual\\_check/%' ESCAPE '\\') GROUP BY path",
 }
 `;
 
@@ -584,7 +584,7 @@ exports[`fact SQL snapshots > flightPathsSeen {"campaignId":"24279250691"} 1`] =
     1791000000000,
   ],
   "db": "gss_geo",
-  "sql": "SELECT path, COUNT(*) AS c FROM hits WHERE site = ? AND ts >= ? AND ts < ? GROUP BY path",
+  "sql": "SELECT path, COUNT(*) AS c FROM hits WHERE site = ? AND ts >= ? AND ts < ? AND (COALESCE(campaign, '') <> 'manual_check' AND COALESCE(path, '') NOT LIKE '/return/manual\\_check/%' ESCAPE '\\') GROUP BY path",
 }
 `;
 
@@ -596,7 +596,7 @@ exports[`fact SQL snapshots > flightPathsSeen {"campaignId":"24311309184"} 1`] =
     1791691200000,
   ],
   "db": "gss_geo",
-  "sql": "SELECT path, COUNT(*) AS c FROM hits WHERE site = ? AND ts >= ? AND ts < ? GROUP BY path",
+  "sql": "SELECT path, COUNT(*) AS c FROM hits WHERE site = ? AND ts >= ? AND ts < ? AND (COALESCE(campaign, '') <> 'manual_check' AND COALESCE(path, '') NOT LIKE '/return/manual\\_check/%' ESCAPE '\\') GROUP BY path",
 }
 `;
 
@@ -608,7 +608,7 @@ exports[`fact SQL snapshots > flightPathsSeen {"campaignId":"24316608605"} 1`] =
     1791691200000,
   ],
   "db": "gss_geo",
-  "sql": "SELECT path, COUNT(*) AS c FROM hits WHERE site = ? AND ts >= ? AND ts < ? GROUP BY path",
+  "sql": "SELECT path, COUNT(*) AS c FROM hits WHERE site = ? AND ts >= ? AND ts < ? AND (COALESCE(campaign, '') <> 'manual_check' AND COALESCE(path, '') NOT LIKE '/return/manual\\_check/%' ESCAPE '\\') GROUP BY path",
 }
 `;
 
