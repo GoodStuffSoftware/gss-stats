@@ -53,6 +53,7 @@ describe('units key off the beacon path families (lib/popupEvents.ts)', () => {
     'campaign.completions': { path: '/game/complete/normal/easy' },
     'campaign.asks': { path: '/signin-prompt/placement' },
     'campaign.accepts': { path: '/signin-prompt/accept' },
+    'campaign.f3Asks': { path: '/signin-prompt/committed-challenge' },
     'campaign.signedInAfterAsk': { path: '/popup-outcome/signin-prompt/signed-in' },
     'campaign.installPrompts': { path: '/install/prompt/android' },
     'campaign.installs': { path: '/popup-outcome/install-prompt/installed' },
@@ -78,6 +79,7 @@ describe('units key off the beacon path families (lib/popupEvents.ts)', () => {
     'popup.eligibleEarned': { path: '/signin-eligible/earned' },
     // Exceptions — the unit differs from the path family's, on purpose:
     'campaign.authSuccess': { path: '/auth/success/google' }, // a page-family path, but one row per sign-in
+    'campaign.newAccounts': { path: '/auth/success/google/new' }, // same
     'bsk.authSuccess': { path: '/auth/success/email' }, // same
     'campaign.rawInstallSignals': { path: '/install/pwa-installed' }, // raw signals can double-count one install: rows
     'bsk.rawInstallSignals': { path: '/install/standalone-detected' }, // same
@@ -85,6 +87,7 @@ describe('units key off the beacon path families (lib/popupEvents.ts)', () => {
   }
   const EXCEPTIONS: Record<string, string> = {
     'campaign.authSuccess': 'signin',
+    'campaign.newAccounts': 'signin',
     'bsk.authSuccess': 'signin',
     'bsk.authSuccessNew': 'signin',
     'bsk.authSuccessExisting': 'signin',

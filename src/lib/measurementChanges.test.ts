@@ -117,6 +117,9 @@ describe('once the date is set', () => {
     expect(cardShowsAuthSuccess({ preset: 'campaign-scorecard' })).toBe(true)
     expect(cardShowsAuthSuccess({ preset: 'campaign-funnel' })).toBe(true)
     expect(autoCaveatIds(widget({ dataset: 'overview', card: { preset: 'bsk-kpis' } }))).toContain(NOTE_ID)
+    // the Flight 3 daily card lists new accounts, so it carries the note; the Cost card names its own caption instead
+    expect(cardShowsAuthSuccess({ preset: 'campaign-f3-daily' })).toBe(true)
+    expect(autoCaveatIds(widget({ card: { preset: 'campaign-f3-daily' } }))).toContain(NOTE_ID)
     expect(cardShowsAuthSuccess({ preset: 'campaign-cost' })).toBe(false)
     expect(autoCaveatIds(widget({ card: { preset: 'campaign-cost' } }))).not.toContain(NOTE_ID)
     // a plain chart, a note widget, an unknown preset and a stored spec with junk in it show none
