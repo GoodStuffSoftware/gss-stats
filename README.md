@@ -451,7 +451,15 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   signals as the series — `popupOutcome`, where the shown row counts as outcome `shown`), a
   **rate table** with only the valid ratios (each pop-up's taps over its showings, and install
   over post-fix install prompts — `POPUP_RATE_TABLE_KEYS`; each with its n/d and "too few to
-  report" under `MIN_COHORT`), and the sign-in eligibility counts with their rate. The rate table
+  report" under `MIN_COHORT`), the sign-in eligibility counts with their rate, and two upsell
+  charts by reason. The eligibility card also splits the earned finishes by the reason on the row
+  (placement, committed repeat, committed challenge, first-50, rows from before the reason existed,
+  any other) and counts, outside the rate, finishes below the floor, "not now" and stopped
+  (`/signin-eligible/{below-floor,not-now,stopped}`; counts only). The two upsell charts
+  (`pu-upsell-dismiss-reasons`, `pu-upsell-signedin-reasons`) are the `reason` breakdown of the
+  upsell's dismissals and of the sign-ins after it; the chart editor's Pop-up stage picker also
+  offers the outcome stages (signed in, installed, returned, still playing) for any pop-up's
+  reason or per-day chart. The rate table
   and the eligibility panel are metric cards (presets `popup-rates` and `signin-eligibility`, since
   layout version 11), over the page's range, sites and "hide my own visits", as before. Outcome-over-shown rates are
   not shown as percentages: outcomes land days after the showing, so a range mixes cohorts.
@@ -649,6 +657,11 @@ it is not comparable to flight 2 because the guest trial changed in v1.99.1.
   keeps flagging for up to 7 zero days, then stops being news.
 - **Coach:** the coach strip reads "New / no rows yet" until the app ships its `/coach`
   beacons.
+- **Money funnel:** the last feature (Features page, after Ask-order), with the steps trial
+  started, checkout started (web, Play) and purchased (web, Play), each purchase per its
+  checkout. Provisional beacons (`/funnel/*`): the feature reads "New" until rows arrive.
+- **In-app install help:** a step of the Install prompt feature (`/install/inapp/*`, no ratio): the
+  help shown inside another app's browser, where the install prompt cannot run.
 - **Adding a feature** is one entry in `FEATURES` in
   [`src/lib/featureHealth.ts`](src/lib/featureHealth.ts): it adds a card row and a Features
   chart.
@@ -1331,7 +1344,8 @@ Rows the app's own manual production checks write (`utm_campaign=manual_check`, 
 paths) sit in the standing exclusions (`EXCLUSIONS` in `campaigns.ts`), so the campaign reads, the
 morning read and every chart or fact that applies "hide known test and household traffic" leave them out.
 A few readers have no such setting and always drop them: the pop-ups reader (`/api/popups`) and its
-two range facts, `/api/completions` and the site tag counts in `/api/sites`.
+two range facts, `/api/completions`, the site tag counts in `/api/sites`, the geo charts and maps
+(`/api/geo`) with "hide known traffic" off, and the flight-paths-seen read.
 
 **Flight 3 report gaps.** The flight 3 morning read also prints: an `impressions balance: UNEVEN | even
 enough` line under the per-tag split (each ad's share of tagged-ad impressions; UNEVEN when the shares are

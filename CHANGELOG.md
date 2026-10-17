@@ -6,6 +6,15 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Money funnel on the Features page.** A new Money funnel feature charts trials started, checkouts opened and purchases made, on the web and on Google Play, and it joins the Overview Feature health card.
+- **In-app install help is counted.** The Install prompt feature gains an In-app install help step for the help shown inside another app's browser.
+- **The sign-in eligibility card gives reasons.** Earned finishes are split by why they earned, and finishes below the floor, "not now" and stopped are counted next to the rate, outside it.
+- **Upsell by reason on the Pop-ups page.** Two new charts show the upsell's dismissals and its sign-ins by reason, and the chart editor can now pick the signed-in, installed, returned and still-playing stages.
+
+### Fixed
+- **Manual check visits stay off the map and the flight paths.** Rows from the app's manual production checks are now always left out of the geo charts and maps and of the flight paths seen, whatever the known-traffic setting.
+
 ## [0.52.0] — 2026-10-16
 
 ### Added
