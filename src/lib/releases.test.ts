@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { RELEASES, datedReleases, latestDatedRelease, newest, releaseAwaitingFullDay, releaseSubjectOn, type DatedRelease } from './releases'
 import { etMidnightMs } from './metrics/instrumentation'
+import { MEASUREMENT_CHANGES } from './measurementChanges'
 
 // Derived from the marker list so adding a release never breaks these.
 const dated = datedReleases()
@@ -60,19 +61,34 @@ describe('the flight 3 web releases', () => {
   it('v1.99.0 has no marker of its own: it never went live (v1.99.1 carries it)', () => {
     expect(at('v1.99.0')).toBe(-1)
   })
-  it('the release panel picks the newest: v1.99.3 Play (10-17 06:09:41Z, listed last so it wins the same-day tie over v1.99.3 web 05:58:55Z) is newest; v1.99.2 wins the 10-16 tie with v1.99.1 as the subject once its day is full', () => {
-    expect(newest(datedReleases())?.version).toBe('v1.99.3 Play')
-    expect(releaseAwaitingFullDay('2026-10-16')?.version).toBe('v1.99.3 Play')
+  it('the release panel picks the newest: v1.99.4 Play (10-18 15:15:55Z, listed after v1.99.4 web 14:57:49Z so it wins the same-day tie) is newest; v1.99.3 Play (10-17 06:09:41Z, listed after v1.99.3 web 05:58:55Z so it wins that same-day tie); v1.99.2 wins the 10-16 tie with v1.99.1 as the subject once its day is full', () => {
+    expect(newest(datedReleases())?.version).toBe('v1.99.4 Play')
+    expect(releaseAwaitingFullDay('2026-10-16')?.version).toBe('v1.99.4 Play')
     expect(releaseSubjectOn('2026-10-16')?.version).toBe('v1.98.0')
     expect(releaseSubjectOn('2026-10-18')?.version).toBe('v1.99.2')
     expect(releaseSubjectOn('2026-10-19')?.version).toBe('v1.99.3 Play')
+    expect(releaseSubjectOn('2026-10-20')?.version).toBe('v1.99.4 Play')
+  })
+  it('v1.99.4 web is a plain marker dated 2026-10-18 (live 14:57:49Z, rules 14:58:51Z), not a measurement change', () => {
+    expect(datedReleases().find((r) => r.version === 'v1.99.4 web')).toMatchObject({
+      dateEt: '2026-10-18',
+      note: 'Web live 14:57:49Z 10-18 (rules 14:58:51Z). No change to the counting beacon.',
+    })
+    expect(MEASUREMENT_CHANGES.some((c) => c.id.startsWith('v1.99.4'))).toBe(false)
+  })
+  it('v1.99.4 Play is a plain marker dated 2026-10-18 (promoted 15:15:55Z, 19904), listed after v1.99.4 web', () => {
+    expect(datedReleases().find((r) => r.version === 'v1.99.4 Play')).toMatchObject({
+      dateEt: '2026-10-18',
+      note: "Play production 15:15:55Z 10-18 (19904); reaches users when Google's review clears. No change to the counting beacon.",
+    })
+    expect(at('v1.99.4 Play')).toBeGreaterThan(at('v1.99.4 web'))
   })
   it('v1.99.3 web is dated 2026-10-17 (live 05:58:55Z); the v1.99.3 Play marker is dated separately below', () => {
     expect(at('v1.99.3 web')).toBeGreaterThan(-1)
     expect(datedReleases().find((r) => r.version === 'v1.99.3 web')?.dateEt).toBe('2026-10-17')
   })
-  it('both Play markers are dated 2026-10-17, v1.99.3 Play listed after v1.99.3 web (the later-timed one wins the same-day tie)', () => {
-    expect(datedReleases().filter((r) => /play/i.test(r.version))).toMatchObject([{ version: 'v1.99.2 Play', dateEt: '2026-10-17' }, { version: 'v1.99.3 Play', dateEt: '2026-10-17' }])
+  it('the Play markers are dated (v1.99.2 and v1.99.3 on 2026-10-17, v1.99.4 on 2026-10-18), v1.99.3 Play listed after v1.99.3 web (the later-timed one wins the same-day tie)', () => {
+    expect(datedReleases().filter((r) => /play/i.test(r.version))).toMatchObject([{ version: 'v1.99.2 Play', dateEt: '2026-10-17' }, { version: 'v1.99.3 Play', dateEt: '2026-10-17' }, { version: 'v1.99.4 Play', dateEt: '2026-10-18' }])
     expect(at('v1.99.3 Play')).toBeGreaterThan(at('v1.99.3 web'))
     expect(at('v1.99.3 web')).toBeGreaterThan(at('v1.99.2 Play'))
   })

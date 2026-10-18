@@ -212,6 +212,19 @@ export const RELEASES: ReleaseMarker[] = [
       major: true,
     }),
   ),
+  // v1.99.4 web is a plain release marker, not a measurement change: it has no count effect (the
+  // beacon is unchanged), so it stays out of MEASUREMENT_CHANGES and no caveat or read line follows it.
+  // Listed last: newest; the Play entry follows the web one so it wins the same-day tie (it is the later-timed).
+  {
+    version: 'v1.99.4 web',
+    dateEt: '2026-10-18', // web live 2026-10-18T14:57:49Z = 10:57:49 ET (rules 14:58:51Z)
+    note: 'Web live 14:57:49Z 10-18 (rules 14:58:51Z). No change to the counting beacon.',
+  },
+  {
+    version: 'v1.99.4 Play',
+    dateEt: '2026-10-18', // promoted to Play production 2026-10-18T15:15:55Z = 11:15:55 ET (full rollout, versionCode 19904)
+    note: "Play production 15:15:55Z 10-18 (19904); reaches users when Google's review clears. No change to the counting beacon.",
+  },
 ]
 
 export type DatedRelease = ReleaseMarker & { dateEt: string }
