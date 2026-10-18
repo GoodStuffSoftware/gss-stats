@@ -6,6 +6,8 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.54.9] — 2026-10-18
+
 ### Added
 - **v1.99.4 release markers.** The release timeline and panel now date v1.99.4 web and v1.99.4 Play at 2026-10-18 (web live 14:57:49Z, Play promoted 15:15:55Z; no change to the counting beacon).
 
