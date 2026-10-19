@@ -130,6 +130,37 @@ describe('rule 5: tracking check', () => {
   })
 })
 
+describe('rule 5: Play-direct tracking check (keyed on the arm property, not on an id)', () => {
+  const pd = (clicks: number | null, d0Rows: number | null) => ({ playDirect: { clicks, d0Rows } })
+  it.each([2, 3, 8])('day %i: 30+ clicks with 0 tagged d0 rows proposes a pause and says the install-referrer path looks broken', (day) => {
+    const r = rule(buildFlight3Rules(input('apps', day, pd(30, 0))), 5)
+    expect(r.verdict).toBe('PROPOSE PAUSE')
+    expect(r.number).toBe('30 clicks, 0 tagged /return/<uc>/d0 rows; install-referrer path looks broken')
+    expect(r.threshold).toBe('30+ clicks need 1+ tagged /return/<uc>/d0 row')
+  })
+  it('one tagged d0 row clears it, and the pause is a proposal only (no rule reads it as a stop)', () => {
+    expect(verdictOf('apps', 2, 5, pd(400, 1))).toBe('PASS')
+    const b = buildFlight3Rules(input('apps', 2, pd(40, 0)))
+    expect(b.tripped).toContain(5)
+    expect(b.proposal).toBe('PROPOSE PAUSE')
+    expect(buildFlight3Rules(input('apps', 2, { ...pd(40, 0), servingState: 'paused' })).proposal).toBeNull() // nothing to pause
+  })
+  it('day 1 is NOT YET; under 30 clicks is NOT YET on day 2 and NO DATA from day 3; unread clicks or rows are NO DATA from day 2', () => {
+    expect(verdictOf('apps', 1, 5, pd(90, 0))).toBe('NOT YET')
+    expect(verdictOf('apps', 2, 5, pd(29, 0))).toBe('NOT YET')
+    expect(verdictOf('apps', 3, 5, pd(29, 0))).toBe('NO DATA')
+    expect(rule(buildFlight3Rules(input('apps', 3, pd(29, 0))), 5).number).toContain('too few clicks to judge')
+    expect(verdictOf('apps', 2, 5, pd(null, 0))).toBe('NO DATA')
+    expect(verdictOf('apps', 2, 5, pd(50, null))).toBe('NO DATA')
+    expect(verdictOf('apps', 2, 5, { playDirect: null })).toBe('NO DATA')
+  })
+  it('a web arm (no playDirect input) keeps its own rule 5 untouched, and the block carries the sign-ups for the Play readout', () => {
+    expect(rule(buildFlight3Rules(input('apps', 3, { tagged: tagged({ taggedArrivals: 31, coachShownPlace: 0 }) })), 5).verdict).toBe('PROPOSE PAUSE')
+    expect(rule(buildFlight3Rules(input('apps', 3)), 5).threshold).toContain('/coach/shown/place')
+    expect(buildFlight3Rules(input('apps', 3, { signUps: { count: 3, note: 'exact' } })).signUps).toEqual({ count: 3, note: 'exact' })
+  })
+})
+
 describe('rule 6: cost per complete row', () => {
   it.each(ARMS)('%s: days 1 and 2 are NOT YET whatever the spend', (arm) => {
     for (const day of [1, 2]) {

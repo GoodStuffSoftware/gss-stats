@@ -2073,7 +2073,7 @@ export interface ReadingRecord {
 /** What a daily F3 read stores of its rules block: the nine readouts as printed and the proposal. */
 export interface ReadingF3 {
   v: 1
-  arm: 'apps' | 'search'
+  arm: StagedArm
   flightDay: number
   readouts: { n: number; name: string; number: string; threshold: string | null; verdict: ReadoutVerdict }[]
   /** null = rules tripped but the campaign is not serving, so there is nothing to pause. */

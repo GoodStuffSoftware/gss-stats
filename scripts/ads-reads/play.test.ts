@@ -22,6 +22,7 @@ import {
   rowsToRecords,
   shapeInstallsOverview,
   shapeStorePerformance,
+  sumByUtmCampaign,
 } from './play'
 
 afterEach(() => clearRegisteredSecrets())
@@ -76,7 +77,7 @@ describe('shapeStorePerformance — regression: the real country column is "Coun
   it('finds the dimension column via the real alias, not just "Country"', () => {
     const csv = `${REAL_COUNTRY_HEADER}\n2026-09-26,com.bestsudoku.app,Other,1,3,0.333\n`
     const rows = shapeStorePerformance(rowsToRecords(parseCsvText(csv)), ['Country / region', 'Country'])
-    expect(rows).toEqual([{ date: '2026-09-26', dimension: 'Other', visitors: 3, acquisitions: 1, conversionRate: 0.333 }])
+    expect(rows).toEqual([{ date: '2026-09-26', dimension: 'Other', utmCampaign: null, visitors: 3, acquisitions: 1, conversionRate: 0.333 }])
   })
   it('would have silently lost the dimension with only the old alias list (proves the bug this fixes)', () => {
     const csv = `${REAL_COUNTRY_HEADER}\n2026-09-26,com.bestsudoku.app,Other,1,3,0.333\n`
@@ -87,7 +88,33 @@ describe('shapeStorePerformance — regression: the real country column is "Coun
   it('reads the traffic-source file by its real column name', () => {
     const csv = `${REAL_SOURCE_HEADER}\n2026-09-26,com.bestsudoku.app,Google Ads,Other,google,sudoku_funnel_retest,1,10,0.1\n`
     const rows = shapeStorePerformance(rowsToRecords(parseCsvText(csv)), ['Traffic source', 'Traffic Source'])
-    expect(rows).toEqual([{ date: '2026-09-26', dimension: 'Google Ads', visitors: 10, acquisitions: 1, conversionRate: 0.1 }])
+    expect(rows).toEqual([{ date: '2026-09-26', dimension: 'Google Ads', utmCampaign: 'sudoku_funnel_retest', visitors: 10, acquisitions: 1, conversionRate: 0.1 }])
+  })
+})
+
+describe('sumByUtmCampaign — store-listing acquisitions per utm_campaign (aggregate counts, no per-day or visitor detail)', () => {
+  const HEADER = 'Date,Package name,Traffic source,Search term,UTM source,UTM campaign,Store listing acquisitions,Store listing visitors,Store listing conversion rate'
+  const shape = (csv: string) => shapeStorePerformance(rowsToRecords(parseCsvText(csv)), ['Traffic source', 'Traffic Source'])
+  it('sums visitors and acquisitions per campaign tag across days and traffic-source rows, with the first and last date', () => {
+    const rows = shape(
+      [
+        HEADER,
+        '2026-10-20,com.bestsudoku.app,Ads and referrals,Other,google,sudoku_funnel_test_play,1,30,0.033',
+        '2026-10-21,com.bestsudoku.app,Ads and referrals,Other,google,sudoku_funnel_test_play,2,40,0.05',
+        '2026-10-21,com.bestsudoku.app,Ads and referrals,Other,google,sudoku_other_test,0,9,0',
+      ].join('\n'),
+    )
+    expect(sumByUtmCampaign(rows)).toEqual([
+      { utmCampaign: 'sudoku_funnel_test_play', visitors: 70, acquisitions: 3, firstDate: '2026-10-20', lastDate: '2026-10-21' },
+      { utmCampaign: 'sudoku_other_test', visitors: 9, acquisitions: 0, firstDate: '2026-10-21', lastDate: '2026-10-21' },
+    ])
+  })
+  it('leaves out rows with no campaign tag (Other, empty, not set) and rows from a file with no UTM column', () => {
+    const rows = shape([HEADER, '2026-10-20,p,Other,Other,Other,Other,6,82,0.07', '2026-10-20,p,Ads and referrals,Other,Other,,4,59,0.07', '2026-10-20,p,x,Other,google,(not set),1,2,0.5'].join('\n'))
+    expect(sumByUtmCampaign(rows)).toEqual([])
+    const noCol = shapeStorePerformance(rowsToRecords(parseCsvText('Date,Package name,Country / region,Store listing acquisitions,Store listing visitors\n2026-10-20,p,US,1,3\n')), ['Country / region'])
+    expect(noCol[0].utmCampaign).toBeNull()
+    expect(sumByUtmCampaign(noCol)).toEqual([])
   })
 })
 
@@ -156,7 +183,7 @@ describe('readPlayReports — end to end against a fake GCS harness', () => {
     const sa = tmpSa(privateKey)
     const installsCsv = 'Date,Package name,Daily Device Installs,Daily Device Uninstalls,Daily Device Upgrades,Total User Installs,Daily User Installs,Daily User Uninstalls,Active Device Installs,Install events,Update events,Uninstall events\n2026-09-20,com.bestsudoku.app,1,0,0,0,1,0,10,1,0,0\n'
     const countryCsv = 'Date,Package name,Country / region,Store listing acquisitions,Store listing visitors,Store listing conversion rate\n2026-09-19,com.bestsudoku.app,Other,0,1,0.0\n'
-    const sourceCsv = 'Date,Package name,Traffic source,Search term,UTM source,UTM campaign,Store listing acquisitions,Store listing visitors,Store listing conversion rate\n2026-09-19,com.bestsudoku.app,Other,Other,Other,Other,0,1,0.0\n'
+    const sourceCsv = 'Date,Package name,Traffic source,Search term,UTM source,UTM campaign,Store listing acquisitions,Store listing visitors,Store listing conversion rate\n2026-09-19,com.bestsudoku.app,Other,Other,Other,Other,0,1,0.0\n2026-09-19,com.bestsudoku.app,Ads and referrals,Other,google,sudoku_funnel_test_play,1,12,0.083\n'
     const installsBuf = csvBuf(installsCsv)
     const countryBuf = csvBuf(countryCsv)
     const sourceBuf = csvBuf(sourceCsv)
@@ -190,7 +217,8 @@ describe('readPlayReports — end to end against a fake GCS harness', () => {
       expect(out.ok).toBe(true)
       expect(out.bucket).toBe('pubsite_prod_test')
       expect(out.installsByDay).toEqual([{ date: '2026-09-20', deviceInstalls: 1, userInstalls: 1, deviceUninstalls: 0, activeDeviceInstalls: 10 }])
-      expect(out.acquisitionByCountry).toEqual([{ date: '2026-09-19', dimension: 'Other', visitors: 1, acquisitions: 0, conversionRate: 0 }])
+      expect(out.acquisitionByCountry).toEqual([{ date: '2026-09-19', dimension: 'Other', utmCampaign: null, visitors: 1, acquisitions: 0, conversionRate: 0 }])
+      expect(out.acquisitionByUtmCampaign).toEqual([{ utmCampaign: 'sudoku_funnel_test_play', visitors: 12, acquisitions: 1, firstDate: '2026-09-19', lastDate: '2026-09-19' }])
       expect(out.installsThrough).toBe('2026-09-20')
       expect(out.storePerformanceThrough).toBe('2026-09-19')
       expect(out.installsLagDays).toBe(7) // 2026-09-20 -> 2026-09-27

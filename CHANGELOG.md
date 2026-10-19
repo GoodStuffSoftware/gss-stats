@@ -6,6 +6,12 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.55.0] — 2026-10-19
+
+### Added
+- **Play-direct arms read their own Play installs.** A campaign whose ads open the Play listing now gets a tracking check (30+ clicks with no tagged first open proposes a pause), the Play store-listing acquisitions for its utm_campaign labelled PARTIAL or INSTALL VERDICT (or "not landed yet (lags 6-14 days)"), a note that these are not device installs, and a baseline line from the closed Play-direct twin.
+- **Staged arms can run a shorter window.** An arm may allow 4 to 7 serving days instead of exactly 7.
+
 ## [0.54.11] — 2026-10-19
 
 ### Changed

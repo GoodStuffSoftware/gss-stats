@@ -15,6 +15,10 @@ import type { StagedArm } from './campaigns'
 export const F3_SEARCH_MIN_COMPLETES = 10
 /** Rule 5: Apps needs this many tagged arrivals before "zero /coach/shown/place rows" means broken tracking. */
 export const F3_APPS_MIN_ARRIVALS = 30
+/** Rule 5, Play-direct arm: this many clicks with no tagged /return/<uc>/d0 row means the install-referrer path is broken. */
+export const F3_PLAY_DIRECT_MIN_CLICKS = 30
+/** The wording the Play-direct tracking check carries when it trips. */
+export const F3_PLAY_DIRECT_BROKEN_TEXT = 'install-referrer path looks broken'
 /** Rule 6 and 8: most a tagged complete row may cost. */
 export const F3_MAX_COST_PER_COMPLETE_ROW = 3
 /** Rule 7: first-move rows over d0 arrival rows must reach this share. */
@@ -147,6 +151,9 @@ export interface Flight3RulesInput {
   firstSession: { firstMove: number | null; arrivals: number | null } | null
   /** Tagged /auth/success/<provider>/new rows, capped at Firestore new accounts once that was read. */
   signUps: { count: number; note: string } | null
+  /** Set only for a Play-direct arm (CampaignFlight.kind === 'play-direct', a registry property, never an id): cumulative closed-day
+   * ad clicks and the tagged /return/<uc>/d0 row count, for the rule 5 install-referrer tracking check. Absent = a web arm. */
+  playDirect?: { clicks: number | null; d0Rows: number | null } | null
 }
 export interface Flight3Block {
   arm: StagedArm
@@ -160,6 +167,8 @@ export interface Flight3Block {
   servingState: ServingState
   /** Cumulative and yesterday's cost per tagged complete row (null under 1 row), for the "Tagged so far" line. */
   costPerRow: { cumulative: number | null; yesterday: number | null }
+  /** The new-account count the D+7 verdict used (rule 9), kept for the Play-direct readout line; null when the tagged read failed. */
+  signUps?: { count: number; note: string } | null
 }
 
 /** Rules 5-9 and the whole block. `ctrFloor` is the arm's CTR floor, only to word rule 8's threshold. */
@@ -177,7 +186,23 @@ export function buildFlight3Rules(i: Flight3RulesInput, opts: { ctrFloor?: numbe
     let number: string
     let threshold: string
     let verdict: ReadoutVerdict
-    if (search) {
+    if (i.playDirect !== undefined) {
+      // Play-direct: the ad opens the Play listing, so no web arrival exists. The only proof the install-referrer path
+      // works is a tagged first open (/return/<uc>/d0) once the clicks add up. Propose only; day 1-2 is when it matters.
+      const pd = i.playDirect
+      threshold = `${F3_PLAY_DIRECT_MIN_CLICKS}+ clicks need 1+ tagged /return/<uc>/d0 row`
+      number = pd?.clicks != null && pd.d0Rows != null ? `${pd.clicks} clicks, ${pd.d0Rows} tagged /return/<uc>/d0 rows` : 'clicks or tagged d0 rows not read'
+      if (day < 2) verdict = 'NOT YET'
+      else if (!pd || pd.clicks == null || pd.d0Rows == null) verdict = 'NO DATA'
+      else if (pd.clicks >= F3_PLAY_DIRECT_MIN_CLICKS) {
+        verdict = pd.d0Rows === 0 ? 'PROPOSE PAUSE' : 'PASS'
+        if (verdict === 'PROPOSE PAUSE') number += `; ${F3_PLAY_DIRECT_BROKEN_TEXT}`
+      } else if (day < F3_JUDGE_FROM_DAY) verdict = 'NOT YET'
+      else {
+        verdict = 'NO DATA'
+        number += '; too few clicks to judge'
+      }
+    } else if (search) {
       threshold = `${F3_SEARCH_MIN_COMPLETES}+ complete rows need 1+ sign-in ask row`
       number = t ? `${t.completeRows} complete rows, ${t.flight3Asks} sign-in ask rows` : 'tagged read failed'
       if (day < 2) verdict = 'NOT YET'
@@ -282,6 +307,7 @@ export function buildFlight3Rules(i: Flight3RulesInput, opts: { ctrFloor?: numbe
     proposal,
     servingState: i.servingState,
     costPerRow: { cumulative: cost, yesterday: opts.costPerRowYesterday ?? null },
+    signUps: i.signUps,
   }
 }
 

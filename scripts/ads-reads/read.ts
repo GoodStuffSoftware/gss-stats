@@ -101,6 +101,7 @@ import { buildFlight3Rules, costPerCompleteRow, decideFlight3, F3_VERDICT_FROM_D
 import type { BeaconSource, PreflightCounts } from './beacon'
 import type { FirebaseCounts } from './firebase'
 import { HOUSEHOLD_NOTE, RETENTION_NOTE, type PlayReportsSection } from './play'
+import { buildPlayDirectBlock, closedPlayDirectCampaigns, playDirectBaseline, type PlayDirectBlock } from './playDirect'
 import { redact, summarizeError } from '../../src/lib/adsRedact'
 import { buildSearchAdsSide, type SearchAdsSideBlock, type SearchSideRaw } from '../../src/lib/searchAdsSide'
 
@@ -809,6 +810,20 @@ async function playReportsRead(deps: ReadDeps, campaign: CampaignFlight, todayEt
   return r.ok ? r.value : { ...playReportsNotRead(r.error), error: r.error }
 }
 
+/** The Play-direct arm's block (campaign.kind === 'play-direct' only): its counts, the labelled Play installs and the
+ * closed twin's baseline. The baseline is a second Play read over the twin's dates; best-effort, never throws. */
+async function playDirectRead(
+  deps: ReadDeps,
+  campaign: CampaignFlight,
+  playReports: PlayReportsSection | null,
+  counts: { clicks: number | null; d0Rows: number | null; signIns: { count: number; note: string } | null },
+): Promise<PlayDirectBlock> {
+  const twins = closedPlayDirectCampaigns().filter((c) => c.id !== campaign.id)
+  const twin = twins.sort((a, b) => b.flightEnd.localeCompare(a.flightEnd))[0]
+  const baseline = twin ? await playDirectBaseline(twin, deps.playReports ? (o) => deps.playReports!.read(o) : null) : null
+  return buildPlayDirectBlock({ campaign, playReports, ...counts, baseline })
+}
+
 export interface DedupSection {
   /** Records not appended: a same-day rerun of the same entry that carries nothing new. */
   skipped: { kind: ReadingRecord['kind']; entryKind: string; reason: string }[]
@@ -899,6 +914,8 @@ export interface MorningResult {
    * /return/ status — see play.ts). null only in health-only mode; otherwise always populated,
    * `ok: false` when not read or when the read failed. */
   playReports: PlayReportsSection | null
+  /** Play-direct campaigns only (CampaignFlight.kind): tagged first opens and sign-ins, the labelled Play Console installs and the closed twin's baseline. Report data only. */
+  playDirect?: PlayDirectBlock
   store: StoreSection
   /** Short names of the reads that failed this run — any entry pushes. */
   failures: string[]
@@ -1101,6 +1118,8 @@ async function flight3BlockRead(
       closedCompletes,
       firstSession: steps ? { firstMove: steps.firstMove.tagged, arrivals: steps.arrivals.tagged } : null,
       signUps,
+      // A Play-direct arm (the registry property, not an id) is checked on clicks against tagged d0 rows (rule 5).
+      ...(campaign.kind === 'play-direct' ? { playDirect: { clicks: spend.ok ? spend.cumulative.clicks : null, d0Rows: steps ? steps.arrivals.tagged : null } } : {}),
     },
     { ctrFloor: plan.ctrFloor, costPerRowYesterday: yesterdayCost },
   )
@@ -1276,6 +1295,10 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
     ? { spendThroughEt: null, hourly: null, geo: null, devices: null, targeting: null, recommendations: null, countryCounts: null, accountCrossCheck: null, errors: [] }
     : await diagnosticsRead(deps, campaign, plan.campaignId, plan.adGroupPlacementCounts, spend.throughEt, taggedRows, plan.channel)
   const playReports: PlayReportsSection | null = opts.healthOnly ? null : await playReportsRead(deps, campaign, todayEt, cumulative)
+  const playDirect: PlayDirectBlock | undefined =
+    !opts.healthOnly && campaign.kind === 'play-direct'
+      ? await playDirectRead(deps, campaign, playReports, { clicks: spend.ok ? spend.cumulative.clicks : null, d0Rows: firstSession?.funnel.steps.arrivals.tagged ?? null, signIns: flight3?.signUps ?? null })
+      : undefined
 
   const servedToday = spend.ok ? (spend.todayPartial?.cost ?? 0) > 0 : null
   const health: HealthSection =
@@ -1421,6 +1444,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
     diagnostics,
     play,
     playReports,
+    ...(playDirect ? { playDirect } : {}),
     store: {
       kind: deps.store.kind,
       dryRun: deps.dryRun,
@@ -1500,6 +1524,8 @@ export interface PostflightResult {
   cohortNote: string | null
   /** Post-flight recommendations (proposals only; beacon changes wait for the freeze to end). */
   recommendations: string[]
+  /** Play-direct campaigns only: the labelled Play Console installs line (PARTIAL or INSTALL VERDICT), tagged counts and the closed twin's baseline. */
+  playDirect?: PlayDirectBlock
   store: StoreSection
   /** Short, secret-free names of the reads that failed. */
   failures: string[]
@@ -1642,6 +1668,14 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
   })
   for (const e of read.errors) if (!errors.includes(e)) errors.push(e)
   base.read = read
+  if (campaign.kind === 'play-direct') {
+    const pr = await playReportsRead(deps, campaign, todayEt, spend.ok ? spend.cumulative.cost : 0)
+    base.playDirect = await playDirectRead(deps, campaign, pr, {
+      clicks: spend.ok ? spend.cumulative.clicks : null,
+      d0Rows: read.returns ? read.returns.app.d0 + read.returns.web.d0 : null,
+      signIns: read.decision ? { count: read.decision.signUpsAtMost, note: read.decision.signUpsExact ? 'exact' : 'at most' } : null,
+    })
+  }
 
   if (read.site) {
     const o = read.site.summary.outcomes
