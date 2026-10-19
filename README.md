@@ -1404,6 +1404,43 @@ npm run -s ads:postflight-read -- --stage wrapup --campaign <arm B id>
 plans, so register any arm, then redeploy the Worker, or its cron and Refresh won't sync that
 arm; the CLI reads still work (they sync for themselves).
 
+### The Play-direct arm kind and the Play install lines
+
+A **Play-direct** arm is a campaign whose ads open the Play Store listing instead of a web page
+(`CampaignFlight.kind === 'play-direct'`; a staged arm sets `kind` and, for a window shorter than
+seven days, `servingDays: { min, max }` in `STAGED_FLIGHT_3`, `src/lib/campaigns.ts`; unset means
+a 7-day web arm). Everything below follows from that registry property, never from a campaign id.
+There is no web arrival, so the first open is the proof: the app reads the Play install referrer
+and its first open writes a tagged `/return/<uc>/d0` row.
+
+- **Tracking check (rule 5).** At 30+ closed-day clicks with no tagged `/return/<uc>/d0` row the
+  rule reads `PROPOSE PAUSE` with `install-referrer path looks broken`. It is a proposal only; no
+  Google Ads setting is changed.
+- **Play Console installs.** `scripts/ads-reads/play.ts` also sums Play's store-listing file by its
+  UTM campaign column, one row per tag (`acquisitionByUtmCampaign`: listing visitors and listing
+  acquisitions as Play prints them, aggregate counts only). A Play-direct morning or post-flight
+  read prints the arm's own figure from it (`scripts/ads-reads/playDirect.ts`), labelled by how
+  far Play has caught up: `PARTIAL` until the store-listing data runs seven days past the flight
+  end, `INSTALL VERDICT` after. With no row for the tag it says `not landed yet (lags 6-14 days)`
+  while Play's data is short of the flight end, and `no row ... (0 acquisitions as printed)` once
+  it is not. Play lags 6-14 days (15 on 2026-10-19), so the 11-07 post-flight read is expected to
+  say `PARTIAL` and the 11-21 read `INSTALL VERDICT`.
+- **Acquisitions are not device installs.** A store-listing acquisition is an installer Play ties
+  to a visit through the tag. The installs-by-day lines count every device install on the account,
+  the developer's own household devices included, with no campaign attached. The report prints this
+  note under the install line and never subtracts one from the other.
+- **Baseline.** Each read also prints the closed Play-direct twin (found by `kind` and
+  `status: 'closed'`) beside the arm: its stored spend ($75.17), its figures from a second Play
+  read over its own dates by its own tag (September's file: `2 acquisitions / 120 listing visitors
+  (Play UTM file)`), and `tagged app rows: none`. A separate quoted note, `"8 net device installs"
+  (hand-derived in the September review ...)`, carries the review's hand-derived number with its
+  source; it is not read from any file.
+
+These lines are report text and data only: no widget, no kill rule, no visitor id and no join, and
+no hour, place or device split on return, complete, start or tour rows. Tests:
+`playDirect.test.ts` (labels, baseline, lines) and `playDirectArm.test.ts` (a made-up arm read end
+to end).
+
 ### Play installs (`ads:play-sync`, table `ads_play_daily`)
 
 The Best Sudoku Retention page's **Play installs** card (preset `play-installs`: registry
