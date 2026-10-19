@@ -54,6 +54,13 @@ const decimals = computed<(typeof DECIMALS_OPTIONS)[number]>({
     if (display.value.as === 'percent') display.value = { as: 'percent', decimals: v }
   },
 })
+// Sparkline "list the days": the latest ET days' counts printed next to the line ("Oct 17 12 · Oct 18 9").
+const sparklineDays = computed<boolean>({
+  get: () => display.value.as === 'sparkline' && !!display.value.days,
+  set: (v) => {
+    if (display.value.as === 'sparkline') display.value = v ? { as: 'sparkline', series: 'daily', days: true } : { as: 'sparkline', series: 'daily' }
+  },
+})
 const dateRangeDays = computed<boolean>({
   get: () => display.value.as === 'dateRange' && !!display.value.days,
   set: (v) => {
@@ -109,6 +116,9 @@ const dateRangeDays = computed<boolean>({
 
     <template v-else-if="display.as === 'sparkline'">
       <p class="hint">Draws the metric's count (or spend) for each Eastern day in the range, next to its number. A day it was not measured is a gap in the line, not a zero.</p>
+      <div class="field check">
+        <label><input type="checkbox" v-model="sparklineDays" /> List the days, e.g. "Oct 17 12 · Oct 18 9"</label>
+      </div>
     </template>
 
     <template v-else-if="display.as === 'counts'">

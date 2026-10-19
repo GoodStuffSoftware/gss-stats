@@ -1,13 +1,12 @@
 import type { ChartConfiguration } from 'chart.js'
 import type { DrillConstraint, GlobalFilters, Widget, StatsResponse, StatsRow, Metric } from '../types'
-import { COUNTRY_NAMES, datasetSupportsBreakdown, dimensionTitle } from './catalog'
+import { COUNTRY_NAMES, datasetSupportsBreakdown, dimensionDefOf, dimensionTitle, widgetShowsShares } from './catalog'
 import { ringDims, isDateDim } from './rings'
 import { etDateFast } from './etTime'
 import { TRACKING_ACTIVATION_DATE_ET, PLAY_TRACKING_MARKER_LABEL, POPUPS, POPUP_FAMILY_ORDER, POPUP_OUTCOME_ORDER, POPUP_OUTCOME_LABELS } from './popupEvents'
 import { GAME_COMPLETE_MODES, GAME_COMPLETE_DIFFICULTIES, CAMPAIGNS, flightDayIndex, type CampaignFlight } from './campaigns'
 import { campaignSegmentMarker, UPSELL_SIGNEDOUT_FIX_AT } from './adsRules'
 import { isMobileViewport } from './responsive'
-import { LANDING_TAGS, landingTagLabel } from './landingTags'
 import { layoutMarkerLabels } from './markerLayout'
 import { overlayItems, layoutFlightBands, markerIndex, type OverlayItem } from './timelineOverlay'
 
@@ -38,8 +37,6 @@ const LINE = '#E7E2D7'
 const STABLE_COLORS: Record<string, Record<string, string>> = {
   device: { desktop: PALETTE[0], mobile: PALETTE[1], tablet: PALETTE[2], tv: PALETTE[5], bot: PALETTE[7] },
   visitor: { returning: PALETTE[0], new: PALETTE[1] },
-  // The hero-vs-features donut: one fixed color per landing tag (the bare tag is a muted grey).
-  landingTag: Object.fromEntries(LANDING_TAGS.map((t, i) => [t.tag, i === LANDING_TAGS.length - 1 ? PALETTE[7] : PALETTE[i === 0 ? 1 : 0]])),
   // Pop-up outcomes: shown is the brand hue, then one fixed color per tap/outcome, so the same
   // series reads the same on every breakdown chart. Install's raw signals share muted tones.
   popupOutcome: {
@@ -65,7 +62,10 @@ function normDimKey(dim: string): string {
 }
 function stableColor(dim: string, rawValue: string): string | null {
   const map = STABLE_COLORS[normDimKey(dim)]
-  return map ? (map[String(rawValue).toLowerCase()] ?? null) : null
+  if (map) return map[String(rawValue).toLowerCase()] ?? null
+  // A dimension that fixes its own colours (catalog.ts DimensionDef.valueColors: palette slots).
+  const slot = dimensionDefOf(dim)?.valueColors?.[String(rawValue).toLowerCase()]
+  return slot === undefined ? null : PALETTE[slot]
 }
 function rampColor(i: number, total: number): string {
   const t = total <= 1 ? 0 : i / (total - 1) // rows arrive sorted desc → i=0 is the highest
@@ -624,8 +624,8 @@ const BEACON_SITE_LABELS: Record<string, string> = {
   bestsudoku: 'bestsudoku.app',
 }
 
-/** "Label · N · P%" for one slice of the landing-tag donut; P is the slice's share of every plotted slice. */
-export function landingLegendText(label: string, value: number, all: number[]): string {
+/** "Label · N · P%" for one slice of a doughnut or pie that shows shares; P is the slice's share of every plotted slice. */
+export function shareLegendText(label: string, value: number, all: number[]): string {
   const total = all.reduce((a, b) => a + b, 0)
   const pct = total > 0 ? Math.round((value / total) * 100) : 0
   return `${label} · ${value.toLocaleString('en-US')} · ${pct}%`
@@ -646,7 +646,8 @@ export function formatKey(dimension: string, value: string): string {
   if (dimension === 'popupOutcome') return POPUP_OUTCOME_LABELS[value] ?? value
   if (dimension === 'campaignFlight') return CAMPAIGNS.find((c) => c.id === value)?.label ?? value
   if (dimension === 'hourEt') return `${value}:00`
-  if (dimension === 'landingTag') return landingTagLabel(value)
+  const valueLabel = dimensionDefOf(dimension)?.valueLabel
+  if (valueLabel) return valueLabel(value)
   // "Day 3", and "Day 3 ▼ upsell fix" on a campaign's flight day the signed-out upsell fix falls
   // on (a funnel segment boundary; lib/adsRules.ts UPSELL_SIGNEDOUT_FIX_AT, unset today).
   if (dimension === 'flightDay') return upsellFixFlightDays().has(Number(value)) ? `Day ${value} ▼ upsell fix` : `Day ${value}`
@@ -1096,10 +1097,11 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse, seriesResp
   const colors = pairs ? pairColors(widget, pairs) : seriesColors(dim, rawValues)
 
   if (widget.type === 'doughnut' || widget.type === 'pie' || widget.type === 'nestedDoughnut') {
-    // The landing-tag donut reads its slices as counts AND shares: the legend line is
-    // "Label · N · P%" (P of the plotted slices' sum) and the tooltip says the same.
-    const withShares = dim === 'landingTag' && !pairs
-    const shown = withShares ? labels.map((l, i) => landingLegendText(l, values[i], values)) : labels
+    // A doughnut or pie that shows shares (Widget.showShares, else its dimension's default) reads its
+    // slices as counts AND shares: the legend line is "Label · N · P%" (P of the plotted slices' sum)
+    // and the tooltip says the same.
+    const withShares = widgetShowsShares(widget)
+    const shown = withShares ? labels.map((l, i) => shareLegendText(l, values[i], values)) : labels
     return {
       type: widget.type === 'pie' ? 'pie' : 'doughnut',
       data: {
@@ -1113,7 +1115,7 @@ export function buildChartConfig(widget: Widget, resp: StatsResponse, seriesResp
         // dimension, so a pie that lost its breakdown can never pass for the paired one.
         plugins: {
           legend: { position: 'right', title: legendTitle(sliceTitle(widget, !!pairs), 11), labels: { color: tickColor(), font: { family: 'Inter', size: 11 }, boxWidth: 12 } },
-          ...(withShares ? { tooltip: { callbacks: { title: () => '', label: (ctx: any) => ` ${landingLegendText(labels[ctx.dataIndex], values[ctx.dataIndex], values)}` } } } : {}),
+          ...(withShares ? { tooltip: { callbacks: { title: () => '', label: (ctx: any) => ` ${shareLegendText(labels[ctx.dataIndex], values[ctx.dataIndex], values)}` } } } : {}),
         },
       },
     }

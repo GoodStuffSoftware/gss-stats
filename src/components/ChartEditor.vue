@@ -16,6 +16,7 @@ import {
   CAMPAIGN_OPTIONS,
   BAR_MODES,
   breakdownCapability,
+  widgetShowsShares,
 } from '../lib/catalog'
 import { ringDims, RING_SOFT_CAP, isDateDim } from '../lib/rings'
 import { BEST_SUDOKU_SITES, CAPTION_MAX_CHARS, CARD_PRESET_FOR_PANEL, HIDDEN_CAVEATS_MAX, HIDDEN_CAVEAT_ID_RE, isCardPanel, syncCardWithView } from '../lib/defaults'
@@ -563,6 +564,10 @@ watch(
 )
 const isPairBreakdown = computed(() => PAIR_TYPES.includes(draft.type) && !!draft.breakdown && breakdownAllowed.value)
 const isBreakdownLine = computed(() => (draft.type === 'line' || draft.type === 'area') && !isDateLine.value && !!draft.breakdown)
+// Doughnut / pie: list each slice's share in the legend. Checked from the chart's own choice, else its
+// dimension's default (catalog.ts widgetShowsShares), so the box always says what the chart does.
+const isShareChart = computed(() => draft.type === 'doughnut' || draft.type === 'pie')
+const showSharesChecked = computed(() => widgetShowsShares(draft))
 const canUseSeries = computed(() => isDateLine.value && isGeo.value)
 const SERIES_FIELDS = GEO_DIMENSIONS.filter((d) => !isDateDim(d.key))
 function addSeries() {
@@ -806,6 +811,7 @@ function save() {
   if (typeDef.value && !typeDef.value.needsDimension) draft.dimension = ''
   if (!breakdownAllowed.value) draft.breakdown = undefined
   if (!isBreakdownLine.value) draft.cumulative = undefined
+  if (!isShareChart.value) draft.showShares = undefined
   if (draft.breakdown === '') draft.breakdown = undefined
   // A breakdown by the Group by dimension itself splits nothing (the APIs ignore it).
   if (draft.breakdown && draft.breakdown === draft.dimension) draft.breakdown = undefined
@@ -1049,6 +1055,11 @@ function resetToDefault() {
       <!-- Line with a breakdown: also each line's running total, dashed on a right-hand axis -->
       <div class="field check" v-if="isBreakdownLine">
         <label><input type="checkbox" :checked="!!draft.cumulative" @change="draft.cumulative = ($event.target as HTMLInputElement).checked || undefined" /> Add cumulative lines (dashed, right axis)</label>
+      </div>
+
+      <!-- Doughnut / pie: each slice's share in the legend and tooltip -->
+      <div class="field check" v-if="isShareChart">
+        <label><input type="checkbox" :checked="showSharesChecked" @change="draft.showShares = ($event.target as HTMLInputElement).checked" /> Show each slice's share in the legend, e.g. "Features · 3 · 30%"</label>
       </div>
 
       <!-- Breakdown bar: series side by side, or stacked into one bar per axis value -->

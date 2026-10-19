@@ -41,8 +41,8 @@ const frameId = useId()
 // Auto-correct the display when the data binding changes under it and the new data's kind no
 // longer allows it — never leaves an item saveable with an incompatible display (validateCard
 // would reject it anyway; this just avoids the interim invalid state showing as a saved error).
-// "Allows", not "offers": a stored sparkline (not pickable in the form yet) keeps its display
-// and series while the data stays a kind that can draw one.
+// "Allows", not "offers": a stored sparkline keeps its display, series and day list while the
+// data stays a kind that can draw one (the form offers it only where it can: see displayOptionsFor).
 watch(
   () => item.value.data,
   () => {
