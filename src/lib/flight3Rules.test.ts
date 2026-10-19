@@ -347,3 +347,86 @@ describe('flightDayOf', () => {
     expect(flightDayOf('2026-10-28', '2026-11-04')).toBe(8)
   })
 })
+
+describe('Play-direct arm: every rule that reads TAGGED rows is a WATCH line (keyed on the playDirect input, never an id)', () => {
+  const pd = { playDirect: { clicks: 120, d0Rows: 0 } }
+  // Rule 3 trip (zero asks), rule 6 over $3 a row, rule 7 under 20%, and rule 5 (30+ clicks, no first open): all four tagged-row rules fire at once.
+  const WATCH_KILLS: RuleResult[] = [kill('placement-leak', 'clear', 0.02, 0.1), kill('ctr', 'clear', 0.02, 0.01), kill('funnel-reach', 'trip', 0, 0), kill('hard-cap', 'clear', 20, 70)]
+  const allWatch = (arm: StagedArm = 'apps', o: Partial<Flight3RulesInput> = {}) =>
+    input(arm, 4, { killRules: WATCH_KILLS, closedSpend: 40, closedCompletes: 4, firstSession: { firstMove: 1, arrivals: 100 }, ...pd, ...o })
+
+  it('rules 3, 5, 6 and 7 all fire together: four WATCH lines, no PROPOSE PAUSE, no tripped rule, proposal CONTINUE', () => {
+    const b = buildFlight3Rules(allWatch())
+    expect([3, 5, 6, 7].map((n) => rule(b, n).verdict)).toEqual(['WATCH', 'WATCH', 'WATCH', 'WATCH'])
+    expect(b.readouts.some((r) => r.verdict === 'PROPOSE PAUSE')).toBe(false)
+    expect(b.tripped).toEqual([])
+    expect(b.proposal).toBe('CONTINUE')
+    for (const n of [3, 6, 7]) expect(rule(b, n).number).toContain('WATCH on a Play-direct arm')
+  })
+  it('a WATCH never proposes a pause whatever the serving state', () => {
+    for (const servingState of ['serving', 'unknown', 'paused', 'ended'] as const) expect(buildFlight3Rules(allWatch('apps', { servingState })).proposal).toBe('CONTINUE')
+  })
+  it('rule 6: over $3 a complete row and zero complete rows over $3 are WATCH; a good ratio is still PASS and NOT YET stays NOT YET', () => {
+    expect(verdictOf('apps', 4, 6, { ...pd, closedSpend: 40, closedCompletes: 4 })).toBe('WATCH')
+    expect(verdictOf('apps', 4, 6, { ...pd, closedSpend: 12, closedCompletes: 0 })).toBe('WATCH')
+    expect(verdictOf('apps', 4, 6, { ...pd, closedSpend: 12, closedCompletes: 8 })).toBe('PASS')
+    expect(verdictOf('apps', 2, 6, { ...pd, closedSpend: 40, closedCompletes: 0 })).toBe('NOT YET')
+  })
+  it('rule 7: a first-move ratio under 20% is WATCH; at 20% it passes; under the cohort floor it stays NO DATA', () => {
+    expect(verdictOf('apps', 4, 7, { ...pd, firstSession: { firstMove: 5, arrivals: 100 } })).toBe('WATCH')
+    expect(verdictOf('apps', 4, 7, { ...pd, firstSession: { firstMove: 20, arrivals: 100 } })).toBe('PASS')
+    expect(verdictOf('apps', 4, 7, { ...pd, firstSession: { firstMove: 0, arrivals: 2 } })).toBe('NO DATA')
+  })
+  it('rule 3: the readout of a funnel-reach trip is WATCH; a funnel-reach clear stays PASS', () => {
+    expect(verdictOf('apps', 4, 3, { ...pd })).toBe('PASS')
+    expect(verdictOf('apps', 4, 3, { ...pd, killRules: WATCH_KILLS })).toBe('WATCH')
+  })
+  it('the same inputs on a web arm (no playDirect input) still propose a pause on rules 3, 6 and 7', () => {
+    for (const arm of ARMS) {
+      const b = buildFlight3Rules(allWatch(arm, { playDirect: undefined }))
+      expect(rule(b, 3).verdict).toBe('PROPOSE PAUSE')
+      expect(rule(b, 6).verdict).toBe('PROPOSE PAUSE')
+      expect(b.tripped).toContain(3)
+      expect(b.tripped).toContain(6)
+      expect(b.proposal).toBe('PROPOSE PAUSE')
+    }
+    expect(rule(buildFlight3Rules(allWatch('apps', { playDirect: undefined })), 7).verdict).toBe('PROPOSE PAUSE')
+  })
+  it('rules 1, 2 and 4 stay real: each still proposes a pause on a Play-direct arm', () => {
+    for (const [id, n, limit] of [['placement-leak', 1, 0.1], ['ctr', 2, 0.0015], ['hard-cap', 4, 49.14]] as const) {
+      const killRules = KILLS_CLEAR.map((r) => (r.id === id ? kill(id, 'trip', n === 4 ? 49.5 : 0.2, limit) : r))
+      const b = buildFlight3Rules(allWatch('apps', { killRules, playDirect: { clicks: 120, d0Rows: 5 } }))
+      expect(rule(b, n).verdict).toBe('PROPOSE PAUSE')
+      expect(b.tripped).toContain(n)
+      expect(b.proposal).toBe('PROPOSE PAUSE')
+    }
+  })
+  it('rule 8 (traffic held) stays real: a CTR trip proposes a pause; a rule 6 WATCH alone does not', () => {
+    const ctrTrip = KILLS_CLEAR.map((r) => (r.id === 'ctr' ? kill('ctr', 'trip', 0.001, 0.0015) : r))
+    expect(verdictOf('apps', 4, 8, { ...pd, killRules: ctrTrip, closedSpend: 12, closedCompletes: 8 })).toBe('PROPOSE PAUSE')
+    const only6 = buildFlight3Rules(allWatch())
+    expect(rule(only6, 6).verdict).toBe('WATCH')
+    expect(rule(only6, 8).verdict).toBe('PASS')
+    expect(rule(only6, 8).number).toContain('rule 6 is a WATCH line on this arm')
+    // a web arm's rule 8 is still derived from rule 6 as before
+    expect(verdictOf('apps', 4, 8, { closedSpend: 40, closedCompletes: 4 })).toBe('PROPOSE PAUSE')
+  })
+  it('a funnel-reach status of watch (what the kill evaluation reports for a Play-direct arm) reads WATCH on rule 3, and PASS as before on a web arm', () => {
+    const watchKills = KILLS_CLEAR.map((r) => (r.id === 'funnel-reach' ? kill('funnel-reach', 'watch', 0, 0) : r))
+    const b = buildFlight3Rules(input('apps', 4, { killRules: watchKills, playDirect: { clicks: 10, d0Rows: 3 } }))
+    expect(rule(b, 3).verdict).toBe('WATCH')
+    expect(rule(b, 3).number).toContain('WATCH on a Play-direct arm')
+    expect(b.proposal).toBe('CONTINUE')
+    expect(verdictOf('apps', 4, 3, { killRules: watchKills })).toBe('PASS')
+  })
+  it('rule 9 at the D+7 read: NOT YET with the interim tagged first opens and sign-ins, and the install verdict read named', () => {
+    const r9 = rule(buildFlight3Rules(input('apps', 6, { playDirect: { clicks: 140, d0Rows: 17 }, signUps: { count: 2, note: 'exact' } })), 9)
+    expect(r9.verdict).toBe('NOT YET')
+    expect(r9.number).toContain('tagged first opens (/return/<uc>/d0): 17')
+    expect(r9.number).toContain('tagged sign-ins (/auth/success/*/new): 2')
+    expect(r9.number).toContain('the 11-21 d35 read is the install verdict')
+    expect(rule(buildFlight3Rules(input('apps', 6, { playDirect: { clicks: null, d0Rows: null }, signUps: null, tagged: null })), 9).number).toContain('tagged first opens (/return/<uc>/d0): not read')
+    // a web arm's rule 9 line is unchanged
+    expect(rule(buildFlight3Rules(input('apps', 6)), 9).number).not.toMatch(/interim|install verdict/)
+  })
+})

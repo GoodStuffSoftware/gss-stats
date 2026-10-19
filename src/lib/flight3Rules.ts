@@ -20,6 +20,12 @@ export const F3_PLAY_DIRECT_MIN_CLICKS = 30
 /** What the Play-direct WATCH line says after its counts: the app side is proven, so 0 first opens is a watch item, not a break. */
 export const F3_PLAY_DIRECT_WATCH_TEXT =
   'The app side is proven: an emulator check on 10-19 showed the Play-delivered app emits /return/<uc>/d0 and tags later beacons. If the Play UTM file later shows acquisitions while tagged first opens stay 0, the break is Play handing the referrer to the production app. At this size, 0 opens can also be chance.'
+/** Added to a rule that reads TAGGED rows when a Play-direct arm turns its would-be pause into a WATCH line: Play's referrer hand-off,
+ * tiny counts and an install question that cannot be read in flight make a tagged-row rule a signal to watch, never a pause or a push. */
+export const F3_PLAY_DIRECT_TAGGED_WATCH_TEXT =
+  "WATCH on a Play-direct arm: tagged rows depend on Play's referrer hand-off, the numbers are tiny, and the arm's question (installs) cannot be read in flight; no pause proposal"
+/** Rule 9 beside the interim tagged counts on a Play-direct arm: where the install verdict is read. */
+export const F3_PLAY_DIRECT_INSTALL_VERDICT_TEXT = 'the 11-21 d35 read is the install verdict'
 /** Rule 6 and 8: most a tagged complete row may cost. */
 export const F3_MAX_COST_PER_COMPLETE_ROW = 3
 /** Rule 7: first-move rows over d0 arrival rows must reach this share. */
@@ -182,6 +188,17 @@ export function buildFlight3Rules(i: Flight3RulesInput, opts: { ctrFloor?: numbe
   const missing = (n: number): RuleReadout => ({ n, name: ['placement leak', 'CTR', 'funnel reach', 'hard cap'][n - 1], number: 'not evaluated', threshold: 'n/a', verdict: 'NO DATA' })
   const readouts: RuleReadout[] = [1, 2, 3, 4].map((n) => killByN.get(n) ?? missing(n))
   const t = i.tagged
+  // On a Play-direct arm (the registry property, never an id) every rule that reads TAGGED rows is a WATCH line at most: a verdict that
+  // would propose a pause prints as WATCH instead, and no WATCH reaches `tripped` or the proposal. Rules 1, 2, 4 and 8 stay Ads-side.
+  const playDirectArm = i.playDirect !== undefined
+  const toWatch = (r: RuleReadout): RuleReadout =>
+    playDirectArm && r.verdict === 'PROPOSE PAUSE' ? { ...r, verdict: 'WATCH', number: `${r.number}. ${F3_PLAY_DIRECT_TAGGED_WATCH_TEXT}` } : r
+  // Rule 3 (funnel reach) reads tagged asks: the kill evaluation already reports its zero-asks finding as 'watch' for a Play-direct arm
+  // (evaluateKillRules playDirect), and a 'trip' handed in anyway is converted here, so neither can reach a proposal.
+  readouts[2] = toWatch(readouts[2])
+  if (playDirectArm && i.killRules.find((r) => r.id === 'funnel-reach')?.status === 'watch') {
+    readouts[2] = { ...readouts[2], verdict: 'WATCH', number: `${readouts[2].number}. ${F3_PLAY_DIRECT_TAGGED_WATCH_TEXT}` }
+  }
 
   // 5. Tracking check: a week of spend on broken tracking is the cost this rule exists to cap.
   {
@@ -244,7 +261,7 @@ export function buildFlight3Rules(i: Flight3RulesInput, opts: { ctrFloor?: numbe
     else if (!i.spendOk || i.closedCompletes == null) verdict = 'NO DATA'
     else if (i.closedCompletes === 0) verdict = i.closedSpend > F3_MAX_COST_PER_COMPLETE_ROW ? 'PROPOSE PAUSE' : 'NO DATA'
     else verdict = cost! > F3_MAX_COST_PER_COMPLETE_ROW ? 'PROPOSE PAUSE' : 'PASS'
-    readouts.push({ n: 6, name: 'cost per complete row', number, threshold, verdict })
+    readouts.push(toWatch({ n: 6, name: 'cost per complete row', number, threshold, verdict }))
   }
 
   // 7. First-move row ratio (Apps only): first-move rows over /return/<uc>/d0 arrival rows. Row counts with no visitor join.
@@ -259,14 +276,15 @@ export function buildFlight3Rules(i: Flight3RulesInput, opts: { ctrFloor?: numbe
         ? `${pct(fm / d0, 1)} (${fm} first-move rows / ${d0} d0 rows; row ratio, same definition as F2's 6.4%)`
         : `${fm ?? '—'} first-move rows / ${d0 ?? '—'} d0 rows (needs ${MIN_COHORT}+ d0 rows; row ratio, same definition as F2's 6.4%)`
       const verdict: ReadoutVerdict = day < F3_JUDGE_FROM_DAY ? 'NOT YET' : !ready ? 'NO DATA' : fm / d0 < F3_MIN_FIRST_MOVE_RATIO ? 'PROPOSE PAUSE' : 'PASS'
-      readouts.push({ n: 7, name, number, threshold: `at least ${pct(F3_MIN_FIRST_MOVE_RATIO, 0)} of d0 rows`, verdict })
+      readouts.push(toWatch({ n: 7, name, number, threshold: `at least ${pct(F3_MIN_FIRST_MOVE_RATIO, 0)} of d0 rows`, verdict }))
     }
   }
 
   // 8. Traffic held: derived from rules 2 and 6 (cost per complete row and the CTR floor), never counted twice.
   {
     const r2 = readouts[1]
-    const r6 = readouts[5]
+    // A Play-direct arm's rule 6 is a WATCH line (tagged rows): rule 8 then rests on the Ads-side CTR half alone, and WATCH counts as no finding.
+    const r6 = readouts[5].verdict === 'WATCH' ? { ...readouts[5], verdict: 'PASS' as ReadoutVerdict } : readouts[5]
     const verdict: ReadoutVerdict =
       r2.verdict === 'PROPOSE PAUSE' || r6.verdict === 'PROPOSE PAUSE'
         ? 'PROPOSE PAUSE'
@@ -281,22 +299,27 @@ export function buildFlight3Rules(i: Flight3RulesInput, opts: { ctrFloor?: numbe
     readouts.push({
       n: 8,
       name: 'traffic held',
-      number: `cost per complete row ${cpr}, CTR ${ctrText} (derived from rules 2 and 6)`,
+      number: `cost per complete row ${cpr}, CTR ${ctrText} (derived from rules 2 and 6${readouts[5].verdict === 'WATCH' ? '; rule 6 is a WATCH line on this arm, so only the CTR half can propose a pause' : ''})`,
       threshold: `complete rows at most ${usd(F3_MAX_COST_PER_COMPLETE_ROW)} each and CTR at least ${opts.ctrFloor != null ? pct(opts.ctrFloor) : 'the arm floor'}`,
       verdict,
     })
   }
 
   // 9. D+7 verdict: the go / iterate / stop table. NOT YET until the final read; before it, the running figure and what the table would say.
+  // A Play-direct arm adds its interim tagged counts and names the read that holds the install verdict.
   {
+    const pd = i.playDirect
+    const interim = playDirectArm
+      ? `; interim, tagged first opens (/return/<uc>/d0): ${pd?.d0Rows ?? 'not read'}, tagged sign-ins (/auth/success/*/new): ${i.signUps ? i.signUps.count : 'not read'}; ${F3_PLAY_DIRECT_INSTALL_VERDICT_TEXT}`
+      : ''
     const threshold = `5+ new accounts go, 2-4 iterate, 0-1 stop; under ${F3_VALIDITY_ASKS} asks inconclusive`
-    if (!t || !i.signUps) readouts.push({ n: 9, name: 'D+7 verdict', number: 'tagged read failed', threshold, verdict: day >= F3_VERDICT_FROM_DAY ? 'NO DATA' : 'NOT YET' })
+    if (!t || !i.signUps) readouts.push({ n: 9, name: 'D+7 verdict', number: `tagged read failed${interim}`, threshold, verdict: day >= F3_VERDICT_FROM_DAY ? 'NO DATA' : 'NOT YET' })
     else {
       const d = decideFlight3(i.signUps.count, t.flight3Asks)
       const word = VERDICT_WORD[d.row as Flight3DecisionRow]
       const base = `${i.signUps.count} new accounts (${i.signUps.note}), ${t.flight3Asks} ask rows`
-      if (day >= F3_VERDICT_FROM_DAY) readouts.push({ n: 9, name: 'D+7 verdict', number: base, threshold, verdict: word })
-      else readouts.push({ n: 9, name: 'D+7 verdict', number: `${base}; running, the table would say ${word}`, threshold, verdict: 'NOT YET' })
+      if (day >= F3_VERDICT_FROM_DAY) readouts.push({ n: 9, name: 'D+7 verdict', number: `${base}${interim}`, threshold, verdict: word })
+      else readouts.push({ n: 9, name: 'D+7 verdict', number: `${base}; running, the table would say ${word}${interim}`, threshold, verdict: 'NOT YET' })
     }
   }
 

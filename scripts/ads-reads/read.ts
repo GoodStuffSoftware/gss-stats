@@ -550,6 +550,7 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
     plan,
     cumulativeSpend,
     flightDay: flightDayOf(campaign.flightStart!, etDateFromMs(Date.parse(i.readAt))),
+    playDirect: campaign.kind === 'play-direct',
     campaignState: i.campaignState,
     delivery: i.stored && i.spendThroughEt ? { impressions: totals.impressions, clicks: totals.clicks } : null,
     placements: split ? { campaignCost: cumulativeSpend, approvedCost: split.approvedCost, itemizedCost: split.itemizedCost } : null,
@@ -816,7 +817,7 @@ async function playDirectRead(
   deps: ReadDeps,
   campaign: CampaignFlight,
   playReports: PlayReportsSection | null,
-  counts: { clicks: number | null; d0Rows: number | null; signIns: { count: number; note: string } | null },
+  counts: { clicks: number | null; spend: number | null; d0Rows: number | null; signIns: { count: number; note: string } | null },
 ): Promise<PlayDirectBlock> {
   const twins = closedPlayDirectCampaigns().filter((c) => c.id !== campaign.id)
   const twin = twins.sort((a, b) => b.flightEnd.localeCompare(a.flightEnd))[0]
@@ -1073,6 +1074,7 @@ async function flight3BlockRead(
       plan,
       cumulativeSpend: cumulative,
       flightDay,
+      playDirect: campaign.kind === 'play-direct',
       campaignState: i.campaignState,
       delivery: spend.ok && spend.throughEt ? { impressions: spend.cumulative.impressions, clicks: spend.cumulative.clicks } : null,
       placements,
@@ -1297,7 +1299,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
   const playReports: PlayReportsSection | null = opts.healthOnly ? null : await playReportsRead(deps, campaign, todayEt, cumulative)
   const playDirect: PlayDirectBlock | undefined =
     !opts.healthOnly && campaign.kind === 'play-direct'
-      ? await playDirectRead(deps, campaign, playReports, { clicks: spend.ok ? spend.cumulative.clicks : null, d0Rows: firstSession?.funnel.steps.arrivals.tagged ?? null, signIns: flight3?.signUps ?? null })
+      ? await playDirectRead(deps, campaign, playReports, { clicks: spend.ok ? spend.cumulative.clicks : null, spend: spend.ok ? spend.cumulative.cost : null, d0Rows: firstSession?.funnel.steps.arrivals.tagged ?? null, signIns: flight3?.signUps ?? null })
       : undefined
 
   const servedToday = spend.ok ? (spend.todayPartial?.cost ?? 0) > 0 : null

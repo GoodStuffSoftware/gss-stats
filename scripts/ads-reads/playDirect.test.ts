@@ -11,6 +11,7 @@ import {
   PLAY_NOT_LANDED_TEXT,
   buildPlayDirectBlock,
   closedPlayDirectCampaigns,
+  costPerTaggedFirstOpenLine,
   playDirectBaseline,
   playDirectInstalls,
   playDirectLines,
@@ -198,6 +199,36 @@ describe('playDirectLines', () => {
   it('a baseline whose Play read failed says so', async () => {
     const baseline = await playDirectBaseline(twin, null, 75.17)
     expect(text(block(section(), baseline))).toContain('Baseline (closed Play-direct twin Made-up closed twin, 2026-09-09..2026-09-13, $75.17 spent, utm_campaign sudoku_tired_of_ads_play): not read (--play-sa not given)')
+  })
+  describe('WATCH line: cost per tagged first open', () => {
+    const withSpend = (spend: number | null, d0Rows: number | null, baseline = null as Awaited<ReturnType<typeof playDirectBaseline>> | null) =>
+      buildPlayDirectBlock({ campaign: campaign(), playReports: section(), clicks: 120, spend, d0Rows, signIns: null, baseline })
+    it('is spend over the tagged first opens, labelled watch only, with no baseline line when there is no twin', () => {
+      const t = costPerTaggedFirstOpenLine(withSpend(60, 8))
+      expect(t).toBe('  WATCH \u00b7 cost per tagged first open: $7.50 ($60.00 closed-day spend / 8 tagged first opens); watch only, a first open is not an install')
+    })
+    it('0 first opens prints "no tagged first opens yet", never a divide-by-zero', () => {
+      const t = costPerTaggedFirstOpenLine(withSpend(60, 0))
+      expect(t).toBe('  WATCH \u00b7 cost per tagged first open: no tagged first opens yet')
+      expect(t).not.toMatch(/Infinity|NaN/)
+      expect(costPerTaggedFirstOpenLine(withSpend(0, 0))).toContain('no tagged first opens yet')
+    })
+    it('unread counts say so; the line is part of the Play-direct block', () => {
+      expect(costPerTaggedFirstOpenLine(withSpend(60, null))).toContain('tagged first opens not read')
+      expect(costPerTaggedFirstOpenLine(withSpend(null, 5))).toContain('spend not read (5 tagged first opens)')
+      expect(playDirectLines(withSpend(60, 8)).join('\n')).toContain('WATCH \u00b7 cost per tagged first open: $7.50')
+    })
+    it('the September twin is the reference, quoted as hand-derived from the same source as the net device installs; a later twin gets none', async () => {
+      const sept = await playDirectBaseline(twin, async () => section(), 75.17)
+      const t = costPerTaggedFirstOpenLine(withSpend(60, 8, sept))
+      expect(t).toContain("reference, the September twin's ~$9.50 per net install")
+      expect(t).toContain('hand-derived in the September review')
+      expect(t).toContain('the same source note as the net device installs figure in the Baseline line')
+      expect(costPerTaggedFirstOpenLine(withSpend(60, 0, sept))).toContain('no tagged first opens yet; reference, the September twin')
+      const later = campaign({ id: '99900000055', label: 'Made-up later arm', ucValues: ['made_up_later_uc'], flightStart: '2026-10-20', flightEnd: '2026-10-23', status: 'closed' })
+      const lb = await playDirectBaseline(later, async () => section(), 40)
+      expect(costPerTaggedFirstOpenLine(withSpend(60, 8, lb))).not.toContain('September')
+    })
   })
   it('counts only: the lines carry no visitor id, hour, place or device split', () => {
     const t = text(block(section()))

@@ -5,8 +5,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { ADS_READ_PLANS, STAGED_FLIGHT_3_PLAN_SETTINGS, buildReadPlan } from '../../src/lib/adsRules'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ADS_READ_PLANS, STAGED_FLIGHT_3_PLAN_SETTINGS, buildReadPlan, type ReadingRecord } from '../../src/lib/adsRules'
 import { CAMPAIGNS, STAGED_FLIGHT_3, buildStagedCampaign } from '../../src/lib/campaigns'
 import { MIN_COHORT } from '../../src/lib/popupEvents'
 import { hideLiveFlight3 } from '../../src/testing/stagedFlight3'
@@ -140,6 +140,104 @@ describe('a Play-direct arm, morning read', () => {
     const r = await runMorningRead(fixtureDeps(fixtureFor(), true), opts)
     expect(r.playDirect).toBeUndefined()
     expect(formatMorningReport(r)).not.toContain('Play-direct arm (the ads open the Play listing')
+  })
+})
+
+describe('a Play-direct arm, daily read: tagged-row rules are WATCH lines and never a pause or a push', () => {
+  // A daily read, not a threshold read: no spend threshold of the plan is reachable.
+  const dailyPlan = (hardCapUsd?: number) => {
+    if (hardCapUsd != null) CAMPAIGNS.find((c) => c.id === PLAY_ID)!.hardCapUsd = hardCapUsd
+    ADS_READ_PLANS[PLAY_ID] = buildReadPlan(PLAY_ID, {
+      ...STAGED_FLIGHT_3_PLAN_SETTINGS.apps,
+      thresholds: [500],
+      killRulesFrom: 50,
+      morningReadFirstEt: '2026-09-27',
+      morningReadLastEt: '2026-10-03',
+    })
+  }
+  const ASK_ROW = /^\/(signin-prompt|promo-first50)\//
+  /** Zero tagged and zero site-wide sign-in asks (rule 3 would trip on a web arm), and the tagged d0 rows kept or dropped. */
+  function zeroAsksFixture(noD0: boolean): Fixture {
+    const fx = fixtureFor(noD0)
+    if (fx.beacon && !('error' in fx.beacon)) {
+      fx.beacon.tagged = fx.beacon.tagged.filter((r) => !ASK_ROW.test(r.path))
+      fx.beacon.siteEvents = fx.beacon.siteEvents.filter((r) => !ASK_ROW.test(r.path))
+    }
+    return fx
+  }
+  const rule = (r: Awaited<ReturnType<typeof runMorningRead>>, n: number) => r.flight3!.readouts.find((x) => x.n === n)!
+
+  it('rules 3, 5 and 6 fire together (no tagged first opens): WATCH lines, no PROPOSE PAUSE, Push: no, the cost line says no first opens yet', async () => {
+    dailyPlan()
+    const { deps } = withPlay(zeroAsksFixture(true), section('2026-09-30', null))
+    const r = await runMorningRead(deps, opts)
+    expect([3, 5, 6].map((n) => rule(r, n).verdict)).toEqual(['WATCH', 'WATCH', 'WATCH'])
+    expect(r.flight3!.readouts.some((x) => x.verdict === 'PROPOSE PAUSE')).toBe(false)
+    expect(r.flight3!.proposal).toBe('CONTINUE')
+    expect(r.flight3!.tripped).toEqual([])
+    expect(r.notify.push).toBe(false)
+    const report = formatMorningReport(r)
+    expect(report).not.toContain('PROPOSE PAUSE')
+    expect(report).toContain('Push: no (')
+    expect(report).toContain('WATCH · cost per tagged first open: no tagged first opens yet')
+    expect(report).not.toMatch(/Infinity|NaN/)
+  })
+
+  it('rules 3, 6 and 7 fire together (tagged first opens present, few first moves): WATCH lines, Push: no, a cost per tagged first open is printed', async () => {
+    dailyPlan()
+    const fx = zeroAsksFixture(false)
+    // low first-move share: 29 d0 rows, first-move rows dropped from the site-wide first-session tally
+    const { deps } = withPlay(fx, section('2026-09-30', { visitors: 60, acquisitions: 4 }))
+    const r = await runMorningRead(deps, opts)
+    expect([3, 6].map((n) => rule(r, n).verdict)).toEqual(['WATCH', 'WATCH'])
+    expect(rule(r, 7).verdict).not.toBe('PROPOSE PAUSE')
+    expect(r.flight3!.readouts.some((x) => x.verdict === 'PROPOSE PAUSE')).toBe(false)
+    expect(r.flight3!.proposal).toBe('CONTINUE')
+    expect(r.notify.push).toBe(false)
+    const report = formatMorningReport(r)
+    expect(report).toContain('Push: no (')
+    // closed-day spend $50.10 / 29 tagged first opens
+    expect(report).toContain('WATCH · cost per tagged first open: $1.73 ($50.10 closed-day spend / 29 tagged first opens)')
+    expect(report).toContain("the September twin's ~$9.50 per net install")
+    expect(report).toContain('hand-derived in the September review')
+    expect(report).toContain('the 11-21 d35 read is the install verdict')
+  })
+
+  it('a threshold read stores rule 3 as watch with no proposal, and its push is the threshold alone (no kill-rule trip)', async () => {
+    // the beforeEach plan: spend thresholds 25 / 50 / 75 / 100, so the $50.10 read is a threshold read
+    const { deps } = withPlay(zeroAsksFixture(true), section('2026-09-30', null), false)
+    const append = vi.spyOn(deps.store, 'appendReadings')
+    const r = await runMorningRead(deps, opts)
+    const written = append.mock.calls.flatMap((c) => c[0] as ReadingRecord[])
+    const threshold = written.find((x) => x.kind === 'threshold')!
+    expect(threshold.rules!.find((x) => x.id === 'funnel-reach')!.status).toBe('watch')
+    expect(threshold.proposal).toBe('CONTINUE')
+    expect(r.notify.reason).toBe('threshold read at $50')
+    expect(r.notify.text).not.toContain('PROPOSE PAUSE')
+    expect(formatMorningReport(r)).not.toContain('PROPOSE PAUSE')
+  })
+
+  it('rule 4 still proposes a pause on a Play-direct arm, and the push says so', async () => {
+    dailyPlan(49.14)
+    const { deps } = withPlay(zeroAsksFixture(true), section('2026-09-30', null))
+    const r = await runMorningRead(deps, opts)
+    expect(rule(r, 4).verdict).toBe('PROPOSE PAUSE')
+    expect(r.flight3!.proposal).toBe('PROPOSE PAUSE')
+    expect(r.notify.push).toBe(true)
+    expect(formatMorningReport(r)).toContain('PROPOSE PAUSE')
+  })
+
+  it('rule 2 (CTR under 0.15%) still proposes a pause on a Play-direct arm', async () => {
+    dailyPlan()
+    const fx = zeroAsksFixture(true)
+    for (const d of Object.values(fx.ads!.daily)) d.impressions *= 20 // 140 clicks / ~356k impressions = 0.039%
+    const { deps } = withPlay(fx, section('2026-09-30', null))
+    const r = await runMorningRead(deps, opts)
+    expect(rule(r, 2).verdict).toBe('PROPOSE PAUSE')
+    expect(r.flight3!.tripped).toContain(2)
+    expect(r.flight3!.proposal).toBe('PROPOSE PAUSE')
+    expect(r.notify.push).toBe(true)
+    expect(formatMorningReport(r)).toContain('PROPOSE PAUSE')
   })
 })
 

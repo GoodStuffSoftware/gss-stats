@@ -22,6 +22,9 @@ export const PLAY_BASELINE_NET_DEVICE_NOTE =
   '"8 net device installs" (hand-derived in the September review of the closed twin, not from the Play file)'
 /** The utm_campaign of the twin the September review's hand-derived figure belongs to; the quoted note prints only beside that twin. */
 export const PLAY_BASELINE_NOTE_UC = 'sudoku_tired_of_ads_play'
+/** The September twin's cost per net install, the reference beside "cost per tagged first open": hand-derived (never computed from a file), from the same source note as the net device installs. */
+export const PLAY_BASELINE_COST_PER_NET_INSTALL_NOTE =
+  '~$9.50 per net install (hand-derived in the September review of the closed twin, the same source note as the net device installs figure in the Baseline line below; not from the Play file)'
 export const PLAY_NOT_LANDED_TEXT = 'not landed yet (lags 6-14 days)'
 
 export type PlayReadLabel = 'INSTALL VERDICT' | 'PARTIAL'
@@ -135,6 +138,8 @@ export interface PlayDirectBlock {
   flightEnd: string
   /** Cumulative closed-day ad clicks (the rule 5 input); null when spend was not read. */
   clicks: number | null
+  /** Cumulative closed-day ad spend, dollars (the "cost per tagged first open" numerator); null when spend was not read. */
+  spend: number | null
   /** Tagged /return/<uc>/d0 rows: first opens that carried the install referrer. null when not read. */
   d0Rows: number | null
   /** Tagged /auth/success/<provider>/new rows, capped at Firestore new accounts when that was read. */
@@ -146,6 +151,7 @@ export function buildPlayDirectBlock(i: {
   campaign: CampaignFlight
   playReports: PlayReportsSection | null
   clicks: number | null
+  spend?: number | null
   d0Rows: number | null
   signIns: { count: number; note: string } | null
   baseline: PlayDirectBaseline | null
@@ -155,6 +161,7 @@ export function buildPlayDirectBlock(i: {
     ucValues: [...i.campaign.ucValues],
     flightEnd: i.campaign.flightEnd,
     clicks: i.clicks,
+    spend: i.spend ?? null,
     d0Rows: i.d0Rows,
     signIns: i.signIns,
     installs: playDirectInstalls(i.playReports, i.campaign.ucValues, i.campaign.flightEnd),
@@ -165,12 +172,23 @@ export function buildPlayDirectBlock(i: {
 const n = (x: number | null | undefined) => (x == null ? '—' : x.toLocaleString('en-US'))
 const money = (x: number | null) => (x == null ? '—' : `$${x.toFixed(2)}`)
 
+/** The WATCH line "cost per tagged first open": closed-day spend over the tagged /return/<uc>/d0 count. A watch figure, never a rule: a first open is not an install. */
+export function costPerTaggedFirstOpenLine(b: PlayDirectBlock): string {
+  const head = '  WATCH \u00b7 cost per tagged first open'
+  const reference = b.baseline && b.baseline.ucValues.includes(PLAY_BASELINE_NOTE_UC) ? `; reference, the September twin's ${PLAY_BASELINE_COST_PER_NET_INSTALL_NOTE}` : ''
+  if (b.d0Rows == null) return `${head}: tagged first opens not read${reference}`
+  if (b.d0Rows === 0) return `${head}: no tagged first opens yet${reference}`
+  if (b.spend == null) return `${head}: spend not read (${n(b.d0Rows)} tagged first opens)${reference}`
+  return `${head}: ${money(b.spend / b.d0Rows)} (${money(b.spend)} closed-day spend / ${n(b.d0Rows)} tagged first opens); watch only, a first open is not an install${reference}`
+}
+
 /** The report lines of a Play-direct arm: tagged first opens and sign-ins, the labelled Play installs, and the baseline. */
 export function playDirectLines(b: PlayDirectBlock | undefined | null): string[] {
   if (!b) return []
   const tags = b.ucValues.join(', ')
   const out = ['Play-direct arm (the ads open the Play listing, so there is no web arrival; informational only, never a kill rule or an automatic action):']
   out.push(`  Tagged first opens (/return/<uc>/d0 rows for ${tags}): ${n(b.d0Rows)}${b.clicks != null ? ` from ${n(b.clicks)} clicks` : ''}; tagged sign-ins (new accounts): ${b.signIns ? `${n(b.signIns.count)} (${b.signIns.note})` : 'not read'}`)
+  out.push(costPerTaggedFirstOpenLine(b))
   const ins = b.installs
   const head = `  Play Console installs (store listing acquisitions for utm_campaign ${tags}, as Play prints them)`
   if (!ins.read) out.push(`${head}: not read (${ins.error ? summarizeError(ins.error) : 'no Play read'}); ${PLAY_NOT_LANDED_TEXT}`)

@@ -1104,3 +1104,22 @@ describe('provisional P1 beacon rows in the ads read summaries', () => {
     expect(p1Line(summarizeTaggedRows([]).p1)).toBeNull()
   })
 })
+
+describe('Play-direct arm: rule 3 reads tagged rows, so a zero-asks finding is WATCH (no trip, no pause proposal)', () => {
+  it('zero asks from tagged arrivals (and zero arrivals, the Play-direct norm) is watch, not trip, and proposes nothing', () => {
+    for (const beacon of [{ asks: 0, taggedArrivals: 0 }, { asks: 0, taggedArrivals: 0, siteSigninShown: 0 }, { asks: 0, taggedArrivals: 40, siteSigninShown: 0 }]) {
+      const res = evaluateKillRules(killInput({ beacon, playDirect: true }))
+      const r = rule(res, 'funnel-reach')
+      expect(r.status).toBe('watch')
+      expect(r.detail).toMatch(/WATCH on a Play-direct arm/)
+      expect(res.tripped).not.toContain('funnel-reach')
+      expect(res.proposal).toBe('CONTINUE')
+    }
+  })
+  it('a web arm is unchanged, and rules 2 and 4 still trip on a Play-direct arm', () => {
+    expect(rule(evaluateKillRules(killInput({ beacon: { asks: 0, taggedArrivals: 0 } })), 'funnel-reach').status).toBe('trip')
+    const ctr = evaluateKillRules(killInput({ delivery: { impressions: 20000, clicks: 29 }, playDirect: true }))
+    expect(rule(ctr, 'ctr').status).toBe('trip')
+    expect(ctr.proposal).toBe('PROPOSE PAUSE')
+  })
+})

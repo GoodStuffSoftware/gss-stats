@@ -146,6 +146,7 @@ end date set at build and again at enable).
 | Budget and cap | $10/day, $70 cap, 7 days | $10/day, $70 cap, 7 days | $10/day, $49.14 cap ($70 less the $20.86 Apps spent), 5 days (a 4-7 day window); thresholds 12 / 25 / 37 / 49.14 |
 | Start day D | 2026-10-17: Apps started ahead of the Play release | 2026-10-17, the prod web deploy day | 2026-10-19, serving from 12:00 ET; ends 2026-10-23 |
 | Device check | the printed device block | none: Search runs on all devices, so the device block is informational and no device spend is an anomaly | the printed device block |
+| Rules that are WATCH | none | none | rules 3, 5, 6 and 7 (every rule that reads tagged app rows); rules 1, 2, 4 and 8 stay real and can PROPOSE PAUSE; rule 9 stays NOT YET to day 8 with the interim tagged first opens and sign-ins beside it |
 
 ### Apps: two ads, one arm (hero and features)
 
@@ -290,6 +291,15 @@ link that lost its suffix still counts. All three tags are the one arm.
     referrer to the production app. At this size, 0 opens can also be chance.` Relay it as printed;
     do not propose a pause for it and do not recompute it. The Play Console installs line below it
     (PARTIAL or INSTALL VERDICT, or `not landed yet (lags 6-14 days)`) is relayed as printed too.
+    **The other tagged-row rules are WATCH lines on this arm as well:** rule 3 (funnel reach), rule 6
+    (cost per complete row) and rule 7 (first-move ratio) print `WATCH`, never `PROPOSE PAUSE`, and
+    never set the push, because tagged rows here depend on Play's referrer hand-off and the numbers
+    are tiny. Rules 1 (placement leak), 2 (CTR floor), 4 (hard cap) and 8 (traffic held) are
+    Ads-side and still propose a pause; relay them as printed. On the D+7 read (flight day 6) rule 9 is
+    NOT YET and carries the interim tagged first opens and sign-ins; the 11-21 d35 read is the install
+    verdict. The `WATCH · cost per tagged first open` line (spend over tagged first opens, beside
+    the September twin's ~$9.50 per net install, hand-derived in the September review) is relayed
+    as printed, and `no tagged first opens yet` is the 0-opens text.
   - The thresholds are minimums: a quiet day reads "too few rows", not a false alarm.
   - If the whole tagged read failed, the line reads "Tagged: NOT READ": the check is then not
     readable that day (name it in Step 3); never infer a count or propose a pause from it.
