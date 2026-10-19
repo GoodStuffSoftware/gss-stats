@@ -9,7 +9,7 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [0.57.0] — 2026-10-19
 
 ### Changed
-- **On the Play-direct arm every rule that reads tagged rows is a WATCH line.** Rules 3 (funnel reach), 6 (cost per complete row) and 7 (first-move ratio) join rule 5: they print WATCH, never a pause proposal, and never push; rules 1, 2, 4 and 8 stay real. A new "cost per tagged first open" watch line sits beside the September twin's ~$9.50 per net install, and the D+7 line carries the interim tagged first opens and sign-ins and names the 11-21 read as the install verdict. The cost per first open divides closed-day spend by the opens in the same closed days, and the post-flight read prints the same WATCH lines.
+- **On the Play-direct arm every rule that reads tagged rows is a WATCH line.** Rules 3 (funnel reach), 6 (cost per complete row) and 7 (first-move ratio) join rule 5: they print WATCH, never a pause proposal, and never push; rules 1, 2, 4 and 8 stay real. A new "cost per tagged first open" watch line sits beside the September twin's ~$9.50 per net install, and the D+7 line carries the interim tagged first opens and sign-ins and names the 11-21 read as the install verdict. The cost per first open divides closed-day spend by the opens in the same closed days, and the post-flight read prints the same WATCH lines.
 
 ## [0.56.0] — 2026-10-19
 
