@@ -16,6 +16,9 @@ export const PLAY_VERDICT_SETTLE_DAYS = 7
 /** Said where the numbers are printed: acquisitions and device installs are different counts. */
 export const PLAY_ACQUISITION_NOTE =
   "store listing acquisitions are installers Play attributes to a visit through this utm_campaign, as Play prints them; they differ from device installs (the installs-by-day lines count every device install on the account, the developer's own household devices included, with no campaign attached), and Play's lag is 6-14 days"
+/** The twin's net device installs: derived by hand in the September review, so it is quoted with its source and never computed from a file. */
+export const PLAY_BASELINE_NET_DEVICE_NOTE =
+  '"8 net device installs" (hand-derived in the September review of the closed twin, not from the Play file)'
 export const PLAY_NOT_LANDED_TEXT = 'not landed yet (lags 6-14 days)'
 
 export type PlayReadLabel = 'INSTALL VERDICT' | 'PARTIAL'
@@ -78,8 +81,6 @@ export interface PlayDirectBaseline {
   /** Store-listing figures by the twin's own utm_campaign (the Play UTM file). */
   listingAcquisitions: number | null
   listingVisitors: number | null
-  /** Device installs over the twin's flight dates from Play's installs file: account-wide, household devices included, NOT utm-attributed. Shown apart. */
-  deviceInstalls: number | null
   /** The twin ran before the app could read the install referrer: it has no tagged app rows. */
   taggedAppRows: 'none'
 }
@@ -107,21 +108,18 @@ export async function playDirectBaseline(twin: CampaignFlight, read: PlayRead | 
     error: null,
     listingAcquisitions: null,
     listingVisitors: null,
-    deviceInstalls: null,
     taggedAppRows: 'none',
   }
-  if (!read) return { ...base, error: 'not read (--play-sa not given)' }
+  if (!read) return { ...base, error: '--play-sa not given' }
   try {
     const p = await read({ since: twin.flightStart!, until: addDays(twin.flightEnd, BASELINE_TAIL_DAYS), flightStart: twin.flightStart!, cumulativeSpend: spend ?? 0 })
     if (!p.ok) return { ...base, error: p.error ?? 'Play read failed' }
     const mine = playDirectInstalls(p, twin.ucValues, twin.flightEnd)
-    const days = (p.installsByDay ?? []).filter((d) => d.date >= twin.flightStart! && d.date <= twin.flightEnd && d.deviceInstalls != null)
     return {
       ...base,
       read: true,
       listingAcquisitions: mine.acquisitions,
       listingVisitors: mine.visitors,
-      deviceInstalls: p.installsByDay == null ? null : days.reduce((a, d) => a + (d.deviceInstalls ?? 0), 0),
     }
   } catch (e) {
     return { ...base, error: e instanceof Error ? e.message : String(e) }
@@ -190,7 +188,7 @@ export function playDirectLines(b: PlayDirectBlock | undefined | null): string[]
     else {
       const listing = bl.listingAcquisitions == null ? 'no store-listing row in the Play UTM file' : `${n(bl.listingAcquisitions)} acquisitions / ${n(bl.listingVisitors)} listing visitors (Play UTM file)`
       out.push(
-        `  Baseline (closed Play-direct twin ${where}): ${listing}; shown apart, device installs over the same dates ${n(bl.deviceInstalls)} (Play installs file, account-wide, household devices included, not tied to the tag); tagged app rows: none (the app could not read the install referrer then)`,
+        `  Baseline (closed Play-direct twin ${where}): ${listing}; separately, ${PLAY_BASELINE_NET_DEVICE_NOTE}; tagged app rows: none (the app could not read the install referrer then)`,
       )
     }
   }
