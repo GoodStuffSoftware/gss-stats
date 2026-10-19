@@ -611,7 +611,7 @@ async function fullRead(deps: ReadDeps, i: FullReadInput): Promise<{ read: FullR
   // makes it incomplete (review L6): the sign-up bound would silently loosen without it.
   const complete = placementRows.ok && i.tagged.ok && siteRows.ok && returnRaw.ok && returnSites.ok && i.stored != null && !(decision && fbErr)
   return {
-    read: { thresholds: i.thresholds, spendThroughEt: i.spendThroughEt, cumulativeSpend, complete, errors, failedSources, failedDetails, placements: placementView, kill, ...(plan.flight3Arm ? { f3Arm: plan.flight3Arm, f3Rules: kill.rules.map((r) => killRuleReadout(r, { taggedArrivals: tagged?.summary.taggedArrivals })) } : {}), decision, segments, tagged, site, returns, play, firebase: fb && fb.ok ? fb.value : null, tagSplit },
+    read: { thresholds: i.thresholds, spendThroughEt: i.spendThroughEt, cumulativeSpend, complete, errors, failedSources, failedDetails, placements: placementView, kill, ...(plan.flight3Arm ? { f3Arm: plan.flight3Arm, f3Rules: kill.rules.map((r) => killRuleReadout(r, { taggedArrivals: tagged?.summary.taggedArrivals, playDirect: campaign.kind === 'play-direct' })) } : {}), decision, segments, tagged, site, returns, play, firebase: fb && fb.ok ? fb.value : null, tagSplit },
     siteRows,
     returns: returns ? { ok: true, value: returns } : { ok: false, error: returnRaw.ok ? 'returns unavailable' : returnRaw.error },
   }
@@ -817,12 +817,24 @@ async function playDirectRead(
   deps: ReadDeps,
   campaign: CampaignFlight,
   playReports: PlayReportsSection | null,
-  counts: { clicks: number | null; spend: number | null; d0Rows: number | null; signIns: { count: number; note: string } | null },
+  counts: { clicks: number | null; spend: number | null; d0Rows: number | null; closedD0Rows?: number | null; signIns: { count: number; note: string } | null },
 ): Promise<PlayDirectBlock> {
   const twins = closedPlayDirectCampaigns().filter((c) => c.id !== campaign.id)
   const twin = twins.sort((a, b) => b.flightEnd.localeCompare(a.flightEnd))[0]
   const baseline = twin ? await playDirectBaseline(twin, deps.playReports ? (o) => deps.playReports!.read(o) : null) : null
   return buildPlayDirectBlock({ campaign, playReports, ...counts, baseline })
+}
+
+/** Tagged first opens (/return/<uc>/d0 rows) in the CLOSED days only, through `throughEt`: the same days the
+ * closed-day spend covers, so the cost-per-first-open line divides like by like (today's partial day is in neither).
+ * No closed day yet = 0 opens; an unreadable source = null. */
+async function closedDayFirstOpens(deps: ReadDeps, campaign: CampaignFlight, throughEt: string | null): Promise<number | null> {
+  if (!throughEt) return 0
+  const beacon = deps.beacon
+  if (!beacon?.returnArrivals) return null
+  const untilMs = Math.min(deps.nowMs, flightEndExclusiveMs(campaign), etMidnightUtcMs(addEtDays(throughEt, 1)))
+  const r = await attempt('beacon first-session arrivals (closed days)', () => beacon.returnArrivals!(campaign, attributionStartMs(campaign), untilMs))
+  return r.ok ? tallyTaggedFirstSession([], { rows: r.value, ucValues: campaign.ucValues }).steps.arrivals : null
 }
 
 export interface DedupSection {
@@ -1299,7 +1311,7 @@ export async function runMorningRead(deps: ReadDeps, opts: MorningOptions): Prom
   const playReports: PlayReportsSection | null = opts.healthOnly ? null : await playReportsRead(deps, campaign, todayEt, cumulative)
   const playDirect: PlayDirectBlock | undefined =
     !opts.healthOnly && campaign.kind === 'play-direct'
-      ? await playDirectRead(deps, campaign, playReports, { clicks: spend.ok ? spend.cumulative.clicks : null, spend: spend.ok ? spend.cumulative.cost : null, d0Rows: firstSession?.funnel.steps.arrivals.tagged ?? null, signIns: flight3?.signUps ?? null })
+      ? await playDirectRead(deps, campaign, playReports, { clicks: spend.ok ? spend.cumulative.clicks : null, spend: spend.ok ? spend.cumulative.cost : null, d0Rows: firstSession?.funnel.steps.arrivals.tagged ?? null, closedD0Rows: await closedDayFirstOpens(deps, campaign, spend.throughEt), signIns: flight3?.signUps ?? null })
       : undefined
 
   const servedToday = spend.ok ? (spend.todayPartial?.cost ?? 0) > 0 : null
@@ -1674,6 +1686,7 @@ export async function runPostflightRead(deps: ReadDeps, opts: PostflightOptions)
     const pr = await playReportsRead(deps, campaign, todayEt, spend.ok ? spend.cumulative.cost : 0)
     base.playDirect = await playDirectRead(deps, campaign, pr, {
       clicks: spend.ok ? spend.cumulative.clicks : null,
+      spend: spend.ok ? spend.cumulative.cost : null,
       d0Rows: read.returns ? read.returns.app.d0 + read.returns.web.d0 : null,
       signIns: read.decision ? { count: read.decision.signUpsAtMost, note: read.decision.signUpsExact ? 'exact' : 'at most' } : null,
     })

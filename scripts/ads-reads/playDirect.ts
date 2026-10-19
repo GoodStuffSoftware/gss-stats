@@ -142,6 +142,9 @@ export interface PlayDirectBlock {
   spend: number | null
   /** Tagged /return/<uc>/d0 rows: first opens that carried the install referrer. null when not read. */
   d0Rows: number | null
+  /** Tagged first opens in the same closed days the spend covers (the cost line's denominator), so today's partial day
+   * is in neither side. undefined = not computed separately (a finished flight: every day is closed); null = not read. */
+  closedD0Rows?: number | null
   /** Tagged /auth/success/<provider>/new rows, capped at Firestore new accounts when that was read. */
   signIns: { count: number; note: string } | null
   installs: PlayDirectInstalls
@@ -153,6 +156,7 @@ export function buildPlayDirectBlock(i: {
   clicks: number | null
   spend?: number | null
   d0Rows: number | null
+  closedD0Rows?: number | null
   signIns: { count: number; note: string } | null
   baseline: PlayDirectBaseline | null
 }): PlayDirectBlock {
@@ -163,6 +167,7 @@ export function buildPlayDirectBlock(i: {
     clicks: i.clicks,
     spend: i.spend ?? null,
     d0Rows: i.d0Rows,
+    ...(i.closedD0Rows !== undefined ? { closedD0Rows: i.closedD0Rows } : {}),
     signIns: i.signIns,
     installs: playDirectInstalls(i.playReports, i.campaign.ucValues, i.campaign.flightEnd),
     baseline: i.baseline,
@@ -176,10 +181,12 @@ const money = (x: number | null) => (x == null ? '—' : `$${x.toFixed(2)}`)
 export function costPerTaggedFirstOpenLine(b: PlayDirectBlock): string {
   const head = '  WATCH \u00b7 cost per tagged first open'
   const reference = b.baseline && b.baseline.ucValues.includes(PLAY_BASELINE_NOTE_UC) ? `; reference, the September twin's ${PLAY_BASELINE_COST_PER_NET_INSTALL_NOTE}` : ''
-  if (b.d0Rows == null) return `${head}: tagged first opens not read${reference}`
-  if (b.d0Rows === 0) return `${head}: no tagged first opens yet${reference}`
-  if (b.spend == null) return `${head}: spend not read (${n(b.d0Rows)} tagged first opens)${reference}`
-  return `${head}: ${money(b.spend / b.d0Rows)} (${money(b.spend)} closed-day spend / ${n(b.d0Rows)} tagged first opens); watch only, a first open is not an install${reference}`
+  // Spend is through yesterday (closed days); the opens must cover the same days, not today's partial one.
+  const opens = b.closedD0Rows !== undefined ? b.closedD0Rows : b.d0Rows
+  if (opens == null) return `${head}: tagged first opens ${b.closedD0Rows !== undefined ? 'in the closed days ' : ''}not read${reference}`
+  if (opens === 0) return `${head}: no tagged first opens yet${reference}`
+  if (b.spend == null) return `${head}: spend not read (${n(opens)} tagged first opens)${reference}`
+  return `${head}: ${money(b.spend / opens)} (${money(b.spend)} closed-day spend / ${n(opens)} tagged first opens in those same closed days); watch only, a first open is not an install${reference}`
 }
 
 /** The report lines of a Play-direct arm: tagged first opens and sign-ins, the labelled Play installs, and the baseline. */

@@ -1457,7 +1457,7 @@ and its first open writes a tagged `/return/<uc>/d0` row.
   (`/return/<uc>/d0`) and sign-ins (`/auth/success/*/new`) beside it, naming the 11-21 d35 read as
   the install verdict.
 - **Cost per tagged first open.** A `WATCH · cost per tagged first open` line under the first-opens
-  line: closed-day spend over the tagged `/return/<uc>/d0` count, with the September twin's
+  line: closed-day spend over the tagged `/return/<uc>/d0` count in those same closed days (today's partial day is in neither), with the September twin's
   ~$9.50 per net install as its reference, labelled hand-derived in the September review (the same
   source note as the net device installs figure; never computed from a file, and printed only beside
   that twin). With 0 opens it reads `no tagged first opens yet`. A first open is not an install, so it

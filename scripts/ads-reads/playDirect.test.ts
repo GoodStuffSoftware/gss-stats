@@ -205,13 +205,20 @@ describe('playDirectLines', () => {
       buildPlayDirectBlock({ campaign: campaign(), playReports: section(), clicks: 120, spend, d0Rows, signIns: null, baseline })
     it('is spend over the tagged first opens, labelled watch only, with no baseline line when there is no twin', () => {
       const t = costPerTaggedFirstOpenLine(withSpend(60, 8))
-      expect(t).toBe('  WATCH \u00b7 cost per tagged first open: $7.50 ($60.00 closed-day spend / 8 tagged first opens); watch only, a first open is not an install')
+      expect(t).toBe('  WATCH \u00b7 cost per tagged first open: $7.50 ($60.00 closed-day spend / 8 tagged first opens in those same closed days); watch only, a first open is not an install')
     })
     it('0 first opens prints "no tagged first opens yet", never a divide-by-zero', () => {
       const t = costPerTaggedFirstOpenLine(withSpend(60, 0))
       expect(t).toBe('  WATCH \u00b7 cost per tagged first open: no tagged first opens yet')
       expect(t).not.toMatch(/Infinity|NaN/)
       expect(costPerTaggedFirstOpenLine(withSpend(0, 0))).toContain('no tagged first opens yet')
+    })
+    it('divides by the closed-day opens when they are given, not by the to-date count that includes today', () => {
+      const b = { ...withSpend(60, 10), closedD0Rows: 8 }
+      expect(costPerTaggedFirstOpenLine(b)).toContain('$7.50 ($60.00 closed-day spend / 8 tagged first opens in those same closed days)')
+      expect(costPerTaggedFirstOpenLine({ ...b, closedD0Rows: 0 })).toContain('no tagged first opens yet')
+      expect(costPerTaggedFirstOpenLine({ ...b, closedD0Rows: null })).toContain('tagged first opens in the closed days not read')
+      expect(playDirectLines(b).join('\n')).toContain('Tagged first opens (/return/')
     })
     it('unread counts say so; the line is part of the Play-direct block', () => {
       expect(costPerTaggedFirstOpenLine(withSpend(60, null))).toContain('tagged first opens not read')

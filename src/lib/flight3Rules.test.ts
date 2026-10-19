@@ -69,6 +69,11 @@ describe('killRuleReadout (rules 1-4)', () => {
     expect(killRuleReadout(kill('ctr', 'not-armed'))).toMatchObject({ n: 2, verdict: 'NOT YET' })
     expect(killRuleReadout(kill('ctr', 'no-data'))).toMatchObject({ n: 2, verdict: 'NO DATA' })
     expect(killRuleReadout(kill('funnel-reach', 'watch', 1, 1))).toMatchObject({ n: 3, verdict: 'PASS' })
+    // on a Play-direct arm the same 'watch' status reads WATCH, with the reason; other statuses are unchanged
+    expect(killRuleReadout(kill('funnel-reach', 'watch', 0, 1), { playDirect: true })).toMatchObject({ n: 3, verdict: 'WATCH' })
+    expect(killRuleReadout(kill('funnel-reach', 'watch', 0, 1), { playDirect: true }).number).toContain('WATCH on a Play-direct arm')
+    expect(killRuleReadout(kill('funnel-reach', 'clear', 2, 1), { playDirect: true })).toMatchObject({ verdict: 'PASS' })
+    expect(killRuleReadout(kill('ctr', 'trip', 0.0005, 0.01), { playDirect: true })).toMatchObject({ verdict: 'PROPOSE PAUSE' })
   })
   it('the hard cap is always armed: not-armed reads PASS, not NOT YET', () => {
     expect(killRuleReadout(kill('hard-cap', 'not-armed', 5, 70))).toMatchObject({ n: 4, name: 'hard cap', verdict: 'PASS' })
@@ -351,6 +356,8 @@ describe('flightDayOf', () => {
 describe('Play-direct arm: every rule that reads TAGGED rows is a WATCH line (keyed on the playDirect input, never an id)', () => {
   const pd = { playDirect: { clicks: 120, d0Rows: 0 } }
   // Rule 3 trip (zero asks), rule 6 over $3 a row, rule 7 under 20%, and rule 5 (30+ clicks, no first open): all four tagged-row rules fire at once.
+  // An invariant test of the pure function only: rule 5 WATCH needs 0 d0 rows and rule 7 needs >= MIN_COHORT, so production never feeds this
+  // combination (both read the same arrivals count). The end-to-end Play-arm tests cover the two real combinations (3/5/6 and 3/6/7).
   const WATCH_KILLS: RuleResult[] = [kill('placement-leak', 'clear', 0.02, 0.1), kill('ctr', 'clear', 0.02, 0.01), kill('funnel-reach', 'trip', 0, 0), kill('hard-cap', 'clear', 20, 70)]
   const allWatch = (arm: StagedArm = 'apps', o: Partial<Flight3RulesInput> = {}) =>
     input(arm, 4, { killRules: WATCH_KILLS, closedSpend: 40, closedCompletes: 4, firstSession: { firstMove: 1, arrivals: 100 }, ...pd, ...o })

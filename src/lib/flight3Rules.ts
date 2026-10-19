@@ -74,13 +74,14 @@ const KILL_RULE_NUMBER: Record<RuleResult['id'], number> = { 'placement-leak': 1
 const KILL_RULE_NAME: Record<RuleResult['id'], string> = { 'placement-leak': 'placement leak', ctr: 'CTR', 'funnel-reach': 'funnel reach', 'hard-cap': 'hard cap' }
 
 /** A coded kill rule (1-4) in the readout shape: trip -> PROPOSE PAUSE, clear -> PASS, not armed ->
- * NOT YET (the hard cap, which is always "armed", reads PASS under its cap), no data -> NO DATA. */
-export function killRuleReadout(r: RuleResult, ctx: { taggedArrivals?: number | null } = {}): RuleReadout {
+ * NOT YET (the hard cap, which is always "armed", reads PASS under its cap), no data -> NO DATA. A 'watch'
+ * status reads PASS by default; `ctx.playDirect` (a Play-direct arm: the zero-asks finding of rule 3) reads WATCH, with its reason. */
+export function killRuleReadout(r: RuleResult, ctx: { taggedArrivals?: number | null; playDirect?: boolean } = {}): RuleReadout {
   const n = KILL_RULE_NUMBER[r.id]
   const name = KILL_RULE_NAME[r.id]
   if (r.status === 'n/a') return { n, name, number: r.detail, threshold: null, verdict: 'n/a' }
   const verdict: ReadoutVerdict =
-    r.status === 'trip' ? 'PROPOSE PAUSE' : r.status === 'clear' || r.status === 'watch' ? 'PASS' : r.status === 'not-armed' ? (r.id === 'hard-cap' ? 'PASS' : 'NOT YET') : 'NO DATA'
+    r.status === 'trip' ? 'PROPOSE PAUSE' : r.status === 'watch' && ctx.playDirect ? 'WATCH' : r.status === 'clear' || r.status === 'watch' ? 'PASS' : r.status === 'not-armed' ? (r.id === 'hard-cap' ? 'PASS' : 'NOT YET') : 'NO DATA'
   let number = r.detail
   let threshold: string
   switch (r.id) {
@@ -102,6 +103,7 @@ export function killRuleReadout(r: RuleResult, ctx: { taggedArrivals?: number | 
       else if (r.status === 'no-data') number = 'campaign status unreadable'
       break
   }
+  if (verdict === 'WATCH' && r.id === 'funnel-reach') number = `${number}. ${F3_PLAY_DIRECT_TAGGED_WATCH_TEXT}`
   return { n, name, number, threshold, verdict }
 }
 
