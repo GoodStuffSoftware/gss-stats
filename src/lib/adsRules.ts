@@ -1557,6 +1557,10 @@ export interface KillRuleInput {
   /** The read's flight day (day 1 = flightStart's ET date). Only used by a plan with ctrFromFlightDay:
    * kill rule 2 is then armed from that day instead of at killRulesFrom dollars. */
   flightDay?: number | null
+  /** A Play-direct arm (CampaignFlight.kind === 'play-direct', never an id): rule 3 reads TAGGED rows, which depend on Play's
+   * referrer hand-off, so a zero-asks finding is reported as 'watch' (no pause proposal, no push) instead of 'trip'. Rules 1, 2 and 4
+   * are Ads-side and unchanged. */
+  playDirect?: boolean
 }
 export interface KillRuleEvaluation {
   rules: RuleResult[]
@@ -1690,11 +1694,13 @@ export function evaluateKillRules(i: KillRuleInput): KillRuleEvaluation {
       // committed-* asks included, ASK_PATHS) is an observable dead ask surface and still trips.
       const notComputable = i.beacon.asks === 0 && i.beacon.taggedArrivals > 0 && site !== 0
       const siteLine = ` Site-wide asks shown: ${site ?? 'unavailable'}.${notComputable ? ' NOT COMPUTABLE: tagged attribution expires 30 min after the ad click, so later-session prompts are not tagged asks, and with no first-session ask beacon in the window zero tagged asks cannot be told from a funnel that works.' : ''}`
+      const zeroAsks: RuleStatus = i.playDirect ? 'watch' : 'trip'
+      const watchNote = i.playDirect && i.beacon.asks === 0 && !notComputable ? " WATCH on a Play-direct arm: tagged rows depend on Play's referrer hand-off; no pause proposal." : ''
       rules.push({
         ...base,
-        status: i.beacon.asks > 0 ? 'clear' : notComputable ? 'no-data' : 'trip',
+        status: i.beacon.asks > 0 ? 'clear' : notComputable ? 'no-data' : zeroAsks,
         value: i.beacon.asks,
-        detail: `${i.beacon.asks} asks from ${i.beacon.taggedArrivals} tagged arrivals.${siteLine}${mode}${zeroArrivals}`,
+        detail: `${i.beacon.asks} asks from ${i.beacon.taggedArrivals} tagged arrivals.${siteLine}${mode}${zeroArrivals}${watchNote}`,
       })
     }
   }

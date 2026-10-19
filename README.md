@@ -1340,7 +1340,7 @@ the same for both channels.
 **Flight 3 rule readouts.** Every flight 3 morning read prints an `F3 rules (proposals only; nothing
 is paused)` block between the first-session lines and `Thresholds:`: nine numbered lines, each
 `Rule <n> · <name>: <number> | threshold <t> → PASS | PROPOSE PAUSE | WATCH | NOT YET | NO DATA` (WATCH is
-only the Play-direct tracking check below and never a pause proposal), then a
+only a Play-direct arm's tagged-row rules, listed below, and never a pause proposal), then a
 `Proposal:` line. Rules 1-4 are the coded kill rules above; 5 is the day 1-2 tracking check, 6 cost
 per tagged complete row (at most $3), 7 the Apps first-move row ratio (at least 20% of d0 rows),
 8 traffic held (derived from rules 2 and 6) and 9 the D+7 go / iterate / stop table
@@ -1442,6 +1442,26 @@ and its first open writes a tagged `/return/<uc>/d0` row.
   (UTM file)`), and `tagged app rows: none`. A separate quoted note, `"8 net device installs"
   (hand-derived in the September review ...)`, carries the review's hand-derived number with its
   source; it is not read from any file, and it prints only beside that September twin.
+
+- **WATCH rules on a Play-direct arm.** Tagged rows here depend on Play's referrer hand-off, the
+  numbers are tiny, and the arm's question (installs) cannot be read in flight, so every rule that
+  reads tagged app rows prints as a `WATCH` line, with no pause proposal and no push (keyed on
+  `kind === 'play-direct'`, never an id): **rule 3** (funnel reach reads tagged ask rows; the kill
+  evaluation reports its zero-asks finding as `watch`, not `trip`, so neither the daily proposal nor
+  the threshold push sees it), **rule 5** (the tracking check above), **rule 6** (cost per complete
+  row) and **rule 7** (first-move row ratio). A rule that would have proposed a pause prints WATCH
+  instead; one that passes still passes. **Rules 1 (placement leak), 2 (CTR floor), 4 (hard cap) and
+  8 (traffic held)** are Ads-side, mean the same thing here and still propose a pause; rule 8 rests
+  on the CTR half alone while rule 6 is a WATCH line. **Rule 9** stays NOT YET until the arm's day-8
+  verdict day (the last read is flight day 6) and prints the interim tagged first opens
+  (`/return/<uc>/d0`) and sign-ins (`/auth/success/*/new`) beside it, naming the 11-21 d35 read as
+  the install verdict.
+- **Cost per tagged first open.** A `WATCH · cost per tagged first open` line under the first-opens
+  line: closed-day spend over the tagged `/return/<uc>/d0` count in those same closed days (today's partial day is in neither), with the September twin's
+  ~$9.50 per net install as its reference, labelled hand-derived in the September review (the same
+  source note as the net device installs figure; never computed from a file, and printed only beside
+  that twin). With 0 opens it reads `no tagged first opens yet`. A first open is not an install, so it
+  is a watch figure and never a rule.
 
 These lines are report text and data only: no widget, no kill rule, no visitor id and no join, and
 no hour, place or device split on return, complete, start or tour rows. Tests:

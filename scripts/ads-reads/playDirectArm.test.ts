@@ -5,14 +5,16 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { ADS_READ_PLANS, STAGED_FLIGHT_3_PLAN_SETTINGS, buildReadPlan } from '../../src/lib/adsRules'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ADS_READ_PLANS, STAGED_FLIGHT_3_PLAN_SETTINGS, buildReadPlan, type ReadingRecord } from '../../src/lib/adsRules'
 import { CAMPAIGNS, STAGED_FLIGHT_3, buildStagedCampaign } from '../../src/lib/campaigns'
 import { MIN_COHORT } from '../../src/lib/popupEvents'
 import { hideLiveFlight3 } from '../../src/testing/stagedFlight3'
 import { fixtureDeps, type Fixture } from './cli'
 import type { PlayReportsSection } from './play'
 import { PLAY_BASELINE_NET_DEVICE_NOTE } from './playDirect'
+import { etMidnightUtcMs } from '../../src/lib/campaigns'
+import { addEtDays } from '../../src/lib/overview'
 import { runMorningRead, runPostflightRead, type MorningOptions } from './read'
 import { formatMorningReport, formatPostflightReport } from './report'
 
@@ -89,6 +91,17 @@ function withPlay(fx: Fixture, own: PlayReportsSection, dryRun = true) {
   return { deps, seen }
 }
 
+const ASK_ROW = /^\/(signin-prompt|promo-first50)\//
+/** Zero tagged and zero site-wide sign-in asks (rule 3 would trip on a web arm), and the tagged d0 rows kept or dropped. */
+function zeroAsksFixture(noD0: boolean): Fixture {
+  const fx = fixtureFor(noD0)
+  if (fx.beacon && !('error' in fx.beacon)) {
+    fx.beacon.tagged = fx.beacon.tagged.filter((r) => !ASK_ROW.test(r.path))
+    fx.beacon.siteEvents = fx.beacon.siteEvents.filter((r) => !ASK_ROW.test(r.path))
+  }
+  return fx
+}
+
 describe('a Play-direct arm, morning read', () => {
   it('the arm is read as play-direct from the registry, not from its id', () => {
     expect(arm.kind).toBe('play-direct')
@@ -143,11 +156,138 @@ describe('a Play-direct arm, morning read', () => {
   })
 })
 
+describe('a Play-direct arm, daily read: tagged-row rules are WATCH lines and never a pause or a push', () => {
+  // A daily read, not a threshold read: no spend threshold of the plan is reachable.
+  const dailyPlan = (hardCapUsd?: number) => {
+    if (hardCapUsd != null) CAMPAIGNS.find((c) => c.id === PLAY_ID)!.hardCapUsd = hardCapUsd
+    ADS_READ_PLANS[PLAY_ID] = buildReadPlan(PLAY_ID, {
+      ...STAGED_FLIGHT_3_PLAN_SETTINGS.apps,
+      thresholds: [500],
+      killRulesFrom: 50,
+      morningReadFirstEt: '2026-09-27',
+      morningReadLastEt: '2026-10-03',
+    })
+  }
+  const rule = (r: Awaited<ReturnType<typeof runMorningRead>>, n: number) => r.flight3!.readouts.find((x) => x.n === n)!
+
+  it('rules 3, 5 and 6 fire together (no tagged first opens): WATCH lines, no PROPOSE PAUSE, Push: no, the cost line says no first opens yet', async () => {
+    dailyPlan()
+    const { deps } = withPlay(zeroAsksFixture(true), section('2026-09-30', null))
+    const r = await runMorningRead(deps, opts)
+    expect([3, 5, 6].map((n) => rule(r, n).verdict)).toEqual(['WATCH', 'WATCH', 'WATCH'])
+    expect(r.flight3!.readouts.some((x) => x.verdict === 'PROPOSE PAUSE')).toBe(false)
+    expect(r.flight3!.proposal).toBe('CONTINUE')
+    expect(r.flight3!.tripped).toEqual([])
+    expect(r.notify.push).toBe(false)
+    const report = formatMorningReport(r)
+    expect(report).not.toContain('PROPOSE PAUSE')
+    expect(report).toContain('Push: no (')
+    expect(report).toContain('WATCH · cost per tagged first open: no tagged first opens yet')
+    expect(report).not.toMatch(/Infinity|NaN/)
+  })
+
+  it('rules 3, 6 and 7 fire together (tagged first opens present, few first moves): WATCH lines, Push: no, a cost per tagged first open is printed', async () => {
+    dailyPlan()
+    const fx = zeroAsksFixture(false)
+    // 29 d0 rows and no first-move rows: the first-move ratio is 0%, under the 20% floor
+    const { deps } = withPlay(fx, section('2026-09-30', { visitors: 60, acquisitions: 4 }))
+    const r = await runMorningRead(deps, opts)
+    expect([3, 6, 7].map((n) => rule(r, n).verdict)).toEqual(['WATCH', 'WATCH', 'WATCH'])
+    expect(r.flight3!.readouts.some((x) => x.verdict === 'PROPOSE PAUSE')).toBe(false)
+    expect(r.flight3!.proposal).toBe('CONTINUE')
+    expect(r.notify.push).toBe(false)
+    const report = formatMorningReport(r)
+    expect(report).toContain('Push: no (')
+    // closed-day spend $50.10 / 29 tagged first opens (the fixture's closed-day window holds them all)
+    expect(report).toContain('WATCH · cost per tagged first open: $1.73 ($50.10 closed-day spend / 29 tagged first opens in those same closed days)')
+    expect(report).toContain("the September twin's ~$9.50 per net install")
+    expect(report).toContain('hand-derived in the September review')
+    expect(report).toContain('the 11-21 d35 read is the install verdict')
+  })
+
+  it('the cost per tagged first open divides closed-day spend by the opens in the same closed days, not by the partial day of today', async () => {
+    dailyPlan()
+    const { deps } = withPlay(zeroAsksFixture(false), section('2026-09-30', { visitors: 60, acquisitions: 4 }))
+    const base = deps.beacon!.returnArrivals!
+    const untils: number[] = []
+    deps.beacon!.returnArrivals = async (c, since, until) => {
+      untils.push(until)
+      const rows = await base(c, since, until)
+      // only the closed-day window (it ends at an ET midnight) sees fewer rows; the to-date window includes today's opens
+      return until === Math.min(...untils) && untils.length > 1 ? rows.map((x) => ({ ...x, count: Math.floor(x.count / 2) })) : rows
+    }
+    const r = await runMorningRead(deps, opts)
+    const closedUntil = etMidnightUtcMs(addEtDays(r.spend.throughEt!, 1))
+    expect(untils).toContain(closedUntil)
+    expect(r.playDirect!.d0Rows).toBe(29)
+    expect(r.playDirect!.closedD0Rows).toBe(14)
+    const report = formatMorningReport(r)
+    expect(report).toContain('Tagged first opens (/return/<uc>/d0 rows for')
+    expect(report).toContain(': 29 from 140 clicks')
+    expect(report).toContain('WATCH · cost per tagged first open: $3.58 ($50.10 closed-day spend / 14 tagged first opens in those same closed days)')
+  })
+
+  it('a threshold read stores rule 3 as watch with no proposal, and its push is the threshold alone (no kill-rule trip)', async () => {
+    // the beforeEach plan: spend thresholds 25 / 50 / 75 / 100, so the $50.10 read is a threshold read
+    const { deps } = withPlay(zeroAsksFixture(true), section('2026-09-30', null), false)
+    const append = vi.spyOn(deps.store, 'appendReadings')
+    const r = await runMorningRead(deps, opts)
+    const written = append.mock.calls.flatMap((c) => c[0] as ReadingRecord[])
+    const threshold = written.find((x) => x.kind === 'threshold')!
+    expect(threshold.rules!.find((x) => x.id === 'funnel-reach')!.status).toBe('watch')
+    expect(threshold.proposal).toBe('CONTINUE')
+    expect(r.notify.reason).toBe('threshold read at $50')
+    expect(r.notify.text).not.toContain('PROPOSE PAUSE')
+    expect(formatMorningReport(r)).not.toContain('PROPOSE PAUSE')
+  })
+
+  it('rule 4 still proposes a pause on a Play-direct arm, and the push says so', async () => {
+    dailyPlan(49.14)
+    const { deps } = withPlay(zeroAsksFixture(true), section('2026-09-30', null))
+    const r = await runMorningRead(deps, opts)
+    expect(rule(r, 4).verdict).toBe('PROPOSE PAUSE')
+    expect(r.flight3!.proposal).toBe('PROPOSE PAUSE')
+    expect(r.notify.push).toBe(true)
+    expect(formatMorningReport(r)).toContain('PROPOSE PAUSE')
+  })
+
+  it('rule 2 (CTR under 0.15%) still proposes a pause on a Play-direct arm', async () => {
+    dailyPlan()
+    const fx = zeroAsksFixture(true)
+    if (fx.ads && !('error' in fx.ads)) for (const d of Object.values(fx.ads.daily)) d.impressions *= 20 // 140 clicks / ~356k impressions = 0.039%
+    const { deps } = withPlay(fx, section('2026-09-30', null))
+    const r = await runMorningRead(deps, opts)
+    expect(rule(r, 2).verdict).toBe('PROPOSE PAUSE')
+    expect(r.flight3!.tripped).toContain(2)
+    expect(r.flight3!.proposal).toBe('PROPOSE PAUSE')
+    expect(r.notify.push).toBe(true)
+    expect(formatMorningReport(r)).toContain('PROPOSE PAUSE')
+  })
+})
+
 describe('a Play-direct arm, post-flight read', () => {
   const post = (fx: Fixture, own: PlayReportsSection) => {
     const { deps } = withPlay(fx, own)
     return runPostflightRead(deps, { campaignId: PLAY_ID, stage: 'wrapup', force: true })
   }
+
+  it('prints a real cost per tagged first open (the spend is passed through, never "spend not read")', async () => {
+    const r = await post(fixtureFor(), section('2026-10-04', { visitors: 70, acquisitions: 5 }))
+    expect(r.playDirect!.spend).toBeGreaterThan(0)
+    const report = formatPostflightReport(r)
+    expect(report).toMatch(/WATCH · cost per tagged first open: \$\d+\.\d\d \(\$\d+\.\d\d closed-day spend \/ \d+ tagged first opens/)
+    expect(report).not.toContain('spend not read')
+  })
+
+  it('a zero-asks rule 3 prints WATCH (not PASS) with its reason, and no pause proposal, on the post-flight read', async () => {
+    const r = await post(zeroAsksFixture(false), section('2026-10-04', { visitors: 70, acquisitions: 5 }))
+    const line = formatPostflightReport(r).split('\n').find((l) => l.startsWith('Rule 3 '))
+    expect(line, 'a Rule 3 line is printed').toBeDefined()
+    expect(line).toContain('→ WATCH')
+    expect(line).not.toContain('→ PASS')
+    expect(line).toContain('WATCH on a Play-direct arm')
+    expect(formatPostflightReport(r)).not.toContain('PROPOSE PAUSE')
+  })
 
   it('prints PARTIAL while Play runs less than a week past the flight end', async () => {
     const r = await post(fixtureFor(), section('2026-10-04', { visitors: 70, acquisitions: 5 }))
