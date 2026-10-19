@@ -791,7 +791,6 @@ function playReportsNotRead(reason: string): PlayReportsSection {
     installsByDay: null,
     acquisitionByCountry: null,
     acquisitionBySource: null,
-    acquisitionByUtmCampaign: null,
     retentionNote: RETENTION_NOTE,
     householdNote: HOUSEHOLD_NOTE,
     checkpoints: [],

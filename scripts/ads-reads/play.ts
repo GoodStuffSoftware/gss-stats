@@ -347,8 +347,8 @@ export interface PlayReportsSection {
   installsByDay: PlayInstallDay[] | null
   acquisitionByCountry: PlayAcquisitionRow[] | null
   acquisitionBySource: PlayAcquisitionRow[] | null
-  /** Store-listing visitors and acquisitions per utm_campaign over the requested window (the traffic-source file's UTM column); null when not read. */
-  acquisitionByUtmCampaign: PlayUtmCampaignRow[] | null
+  /** Store-listing visitors and acquisitions per utm_campaign over the requested window (the traffic-source file's UTM column); absent until the Play read has run (so the report JSON of a read without Play is unchanged). */
+  acquisitionByUtmCampaign?: PlayUtmCampaignRow[] | null
   retentionNote: string
   householdNote: string
   checkpoints: PlayCheckpoint[]
