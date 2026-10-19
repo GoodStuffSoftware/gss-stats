@@ -284,7 +284,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
     own captions (from its preset or spec) take the same Show/Hide buttons in the card builder,
     and a caption id this version does not know is kept as saved until its Remove button is used.
     In the card builder's custom mode every caption row has a Remove button, and an **Add a caption**
-    picker lists the registry notes (not caveats) that suit the card and are not already on it.
+    picker lists every caption note that is true for the card and is not already on it.
   - **Upgrading a chart.** Version 16 hides, once per chart, every hideable caveat that chart did
     not show before (`seedHiddenAutoCaveatsV16`, run only on a layout stored below version 16), so
     an existing chart looks the same; the built-in default charts, a fresh layout and "restore
@@ -1935,7 +1935,7 @@ guard serves ([ADR 0002, 2026-09-30 amendment](docs/adr/0002-google-auth.md#amen
 Only the `dev` alias is served; other preview URLs still 404.
 
 - **Real data.** The preview binds the same D1 databases as production (geo and ads) and the
-  real `gss-stats-sync` Worker, so it shows live numbers and **an ads refresh on the preview
+  real `gss-stats-sync` and `gss-live` Workers, so it shows live numbers and **an ads refresh on the preview
   runs a real Google Ads sync**. Only the saved layout is separate.
 - **One-time owner setup**, before the first preview deploy (it is fail-closed, 503, until then):
   1. Add `https://dev.gss-stats.pages.dev/auth/google/callback` as an **Authorized redirect
