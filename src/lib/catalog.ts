@@ -1,6 +1,7 @@
-import type { SiteKey, ChartType, Metric, Dataset } from '../types'
+import type { SiteKey, ChartType, Metric, Dataset, Widget } from '../types'
 import { POPUPS, POPUP_RATE_SPECS } from './popupEvents'
-import { CAMPAIGNS } from './campaigns'
+import { CAMPAIGNS, liveLandingTags } from './campaigns'
+import { LANDING_NOT_LIVE_TEXT, LANDING_TAGS, landingTagLabel } from './landingTags'
 import { isDateDim } from './rings'
 
 // `creatable: false` keeps a dataset out of "Add chart" → Data source while its label stays here for
@@ -95,7 +96,10 @@ export const POPUP_RATE_DIMENSIONS: { key: string; label: string }[] = POPUP_RAT
 }))
 
 // Geo-beacon dimensions (D1-backed). Single dimension per chart; metric is count.
-export const GEO_DIMENSIONS: { key: string; label: string }[] = [
+// The landing-tag donut's fixed colours as palette slots (charts.ts PALETTE): the first tag teal, the
+// second amber, the bare tag (last) a muted grey.
+const LANDING_TAG_COLOR_SLOTS: Record<string, number> = Object.fromEntries(LANDING_TAGS.map((t, i) => [t.tag, i === LANDING_TAGS.length - 1 ? 7 : i === 0 ? 1 : 0]))
+export const GEO_DIMENSIONS: DimensionDef[] = [
   { key: 'region', label: 'Region / state' },
   { key: 'city', label: 'City' },
   { key: 'postal', label: 'Postal / ZIP' },
@@ -129,7 +133,15 @@ export const GEO_DIMENSIONS: { key: string; label: string }[] = [
   { key: 'keyEvent', label: 'Key event (sign-in / install / raw install / completion)' },
   { key: 'hourEt', label: 'Hour of day (ET)' },
   { key: 'flightDay', label: 'Campaign flight day (day 1 = first day)' },
-  { key: 'landingTag', label: 'Flight 3 Apps landing tag (d0 devices)' },
+  {
+    key: 'landingTag',
+    label: 'Flight 3 Apps landing tag (d0 devices)',
+    valueLabel: landingTagLabel,
+    valueColors: LANDING_TAG_COLOR_SLOTS,
+    sharesByDefault: true,
+    // The arm is staged until a registered campaign carries its tags: nothing to count, so no query is sent.
+    unavailableText: () => (liveLandingTags().length === 0 ? LANDING_NOT_LIVE_TEXT : null),
+  },
   { key: 'date', label: 'Date (trend)' },
   { key: 'dateEt', label: 'Date (trend, ET)' },
 ]
@@ -159,9 +171,22 @@ export const SITE_OPTIONS: { value: SiteKey; label: string }[] = [
   { value: 'all', label: 'All sites (merged)' },
 ]
 
+/** One dimension of a dataset (the editor's Group by / Break down by) and, optionally, how a chart
+ * treats its values. The optional traits are read by the shared chart code (charts.ts, ChartCard.vue)
+ * so a dimension never needs a branch keyed on its name there. */
 export interface DimensionDef {
   key: string
   label: string
+  /** The name of one value on a chart (a slice, a bar, a legend line). Absent = the raw value. */
+  valueLabel?: (value: string) => string
+  /** Fixed colours: value -> slot in charts.ts PALETTE, so a value reads the same on every chart. */
+  valueColors?: Record<string, number>
+  /** A doughnut or pie of this dimension lists each slice's share in its legend until the chart says
+   * otherwise (Widget.showShares). */
+  sharesByDefault?: boolean
+  /** Set while the dimension has nothing to count yet (for example its campaign is staged): the text a
+   * chart shows instead of data. It sends no query. Evaluated at each render and load, never cached. */
+  unavailableText?: () => string | null
 }
 
 export const DIMENSIONS: DimensionDef[] = [
@@ -228,7 +253,7 @@ export const COUNTRY_NAMES: Record<string, string> = {
 }
 
 /** The dimension catalog a widget's data source picks from (the editor's Group by / Break down by). */
-export function dimensionsFor(dataset?: Dataset): { key: string; label: string }[] {
+export function dimensionsFor(dataset?: Dataset): DimensionDef[] {
   if (dataset === 'geo') return GEO_DIMENSIONS
   if (dataset === 'completions') return COMPLETIONS_DIMENSIONS
   if (dataset === 'popup') return POPUP_DIMENSIONS
@@ -239,4 +264,21 @@ export function dimensionsFor(dataset?: Dataset): { key: string; label: string }
 export function dimensionTitle(dataset: Dataset | undefined, key: string): string {
   const label = dimensionsFor(dataset).find((d) => d.key === key)?.label ?? DIMENSIONS.find((d) => d.key === key)?.label ?? key
   return label.replace(/\s*\(.*\)\s*$/, '')
+}
+
+/** The definition of dimension `key`: in `dataset`'s catalog when given, else the first catalog that has it. */
+export function dimensionDefOf(key: string, dataset?: Dataset): DimensionDef | undefined {
+  if (!key) return undefined
+  if (dataset) return dimensionsFor(dataset).find((d) => d.key === key)
+  return [GEO_DIMENSIONS, POPUP_DIMENSIONS, COMPLETIONS_DIMENSIONS, DIMENSIONS].map((l) => l.find((d) => d.key === key)).find((d) => d)
+}
+/** The "this dimension has nothing to show yet" text for a widget's Group by dimension, or null. */
+export function widgetUnavailableText(widget: Pick<Widget, 'dataset' | 'dimension' | 'type'>): string | null {
+  if (widget.type === 'note') return null
+  return dimensionDefOf(widget.dimension, widget.dataset)?.unavailableText?.() ?? null
+}
+/** Whether a doughnut or pie lists each slice's share in its legend: the chart's own choice
+ * (Widget.showShares), else its dimension's default. */
+export function widgetShowsShares(widget: Pick<Widget, 'dataset' | 'dimension' | 'showShares'>): boolean {
+  return widget.showShares ?? !!dimensionDefOf(widget.dimension, widget.dataset)?.sharesByDefault
 }

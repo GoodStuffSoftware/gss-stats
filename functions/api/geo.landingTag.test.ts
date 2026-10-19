@@ -8,7 +8,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { onRequestPost } from './geo'
 import { CAMPAIGNS, STAGED_FLIGHT_3, landingTagPrefilter, liveLandingTags, type CampaignFlight } from '../../src/lib/campaigns'
 import { F3_APPS_BARE_TAG, F3_APPS_FEATURES_TAG, F3_APPS_HERO_TAG, landingArrivalPath } from '../../src/lib/landingTags'
-import { landingLegendText } from '../../src/lib/charts'
+import { shareLegendText } from '../../src/lib/charts'
 import { insertHits, installCaches, memoryCache, openHitsDb, sqliteD1, type HitRow } from '../_lib/testing/hitsDb'
 
 const real = CAMPAIGNS.slice()
@@ -55,7 +55,7 @@ describe('landingTag: slices and shares', () => {
     expect(body.rows.map((r: any) => r.key.landingTag)).toEqual([F3_APPS_HERO_TAG, F3_APPS_FEATURES_TAG, F3_APPS_BARE_TAG])
     expect(slices(body.rows)).toEqual({ [F3_APPS_HERO_TAG]: 6, [F3_APPS_FEATURES_TAG]: 3, [F3_APPS_BARE_TAG]: 1 })
     const values = body.rows.map((r: any) => r.pageviews)
-    expect(values.map((v: number) => landingLegendText('x', v, values))).toEqual(['x · 6 · 60%', 'x · 3 · 30%', 'x · 1 · 10%'])
+    expect(values.map((v: number) => shareLegendText('x', v, values))).toEqual(['x · 6 · 60%', 'x · 3 · 30%', 'x · 1 · 10%'])
   })
 
   it('Untagged (the bare tag) only appears when it has arrivals', async () => {

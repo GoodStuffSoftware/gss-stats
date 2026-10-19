@@ -1239,6 +1239,8 @@ function normWidget(x: any): Widget {
     flightBands: x.flightBands === true || undefined,
     // A line with a breakdown: also each series' running total (dashed, right axis).
     cumulative: x.cumulative === true || undefined,
+    // A doughnut / pie: an explicit true or false (absent = the dimension's default, catalog.ts widgetShowsShares).
+    showShares: typeof x.showShares === 'boolean' ? x.showShares : undefined,
     // Per-chart site override (Widget.siteSel): site tokens only.
     siteSel: Array.isArray(x.siteSel) ? x.siteSel.filter((t: any) => typeof t === 'string' && /^[a-z0-9.\-]{1,60}$/i.test(t)) : undefined,
     // Series line chart (Widget.series): label + optional field=value filters + axis/style.

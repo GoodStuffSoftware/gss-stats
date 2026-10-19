@@ -11,7 +11,7 @@
 // this directly). Item/section ids are generated here too, never typed by the user, for the
 // same reason.
 import { CAMPAIGNS } from '../campaigns'
-import { getNote, hasNote, NOTES_REGISTRY, noteOptions, noteRawText } from '../notes'
+import { getNote, hasNote, NOTES_REGISTRY, noteOptions, noteRawText, type AutoCaveatWidget } from '../notes'
 import { POPUPS } from '../popupEvents'
 import { METRICS, metricWindows, type MetricDef, type MetricParam } from './metrics'
 import { seriesTwin } from './series'
@@ -225,6 +225,18 @@ export interface NoteOption {
 }
 export function noteLabelOptions(): NoteOption[] {
   return noteOptions().map((o) => ({ value: o.value, preview: noteRawText(o.value) || o.value }))
+}
+/** The notes the card editor's "Add caption" picker offers for a card: every caption note in the
+ * registry (not a label entry) that the card does not already carry and that is true for this card
+ * (a caveat with a widget condition, NoteDef.appliesTo, is offered only where it holds: "Costs
+ * count ..." is never offered on a card with no cost). The ids a spec lists are the card's own
+ * captions: they replace the automatic caveat of the same id (notes.ts autoCaveatIds). */
+export function cardCaptionOptions(spec: CardSpec): NoteOption[] {
+  const have = new Set(spec.captions ?? [])
+  const stub = { type: 'stat', card: { spec } } as AutoCaveatWidget
+  return noteOptions()
+    .filter((o) => !have.has(o.value) && (getNote(o.value)?.appliesTo?.(stub) ?? true))
+    .map((o) => ({ value: o.value, preview: notePreview(o.value) ?? o.value }))
 }
 /** A card's captions after ticking (`checked`) or unticking caption `id`: the offered options
  * that are ticked, in the picker's order, then every stored id the picker doesn't offer (one this

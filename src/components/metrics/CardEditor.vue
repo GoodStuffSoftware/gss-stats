@@ -41,7 +41,7 @@ import CardEditorRepeat from './editor/CardEditorRepeat.vue'
 import CardEditorSection from './editor/CardEditorSection.vue'
 import { presetById } from '../../lib/metrics/presets'
 import { cardLimitProblems, validateCard } from '../../lib/metrics/validate'
-import { notePreview } from '../../lib/metrics/editorModel'
+import { cardCaptionOptions, notePreview } from '../../lib/metrics/editorModel'
 import { isNoteIdHideable } from '../../lib/chartNotes'
 import { HIDDEN_CAVEAT_ID_RE } from '../../lib/defaults'
 import { BADGE_TONE_MAX, BADGE_TONE_OPTIONS, CARD_ACTION_OPTIONS, cloneSpec, emptySection, groupErrors, moveBy, presetOptions, rowsToTones, specFromPresetId, specsEqual, toneValueProblem, tonesToRows, withField, type BadgeTone, type ToneRow } from '../../lib/metrics/editorModel'
@@ -82,6 +82,7 @@ function presetLabel(id: string): string {
 // beside a <select>/<input> as a visual sibling gives a screen reader no name for that control.
 const startFromId = useId()
 const captionsId = useId()
+const addCaptionId = useId()
 const minWidthId = useId()
 const showUpdatedId = useId()
 
@@ -309,8 +310,8 @@ function toggleAction(a: CardAction, on: boolean) {
 }
 // The card's own captions (D7): each one the spec carries, with a Show/Hide toggle. Show/Hide
 // edits only the widget's hidden list (emitted as `update:hiddenCaptions`), never `spec.captions`,
-// so a preset's captions stay the preset's. The one spec edit here is N1: an id the registry no
-// longer knows is listed as such, kept exactly as stored, and can be removed.
+// so a preset's captions stay the preset's. The spec edits here (custom mode): "Add a caption" and Remove,
+// and N1: an id the registry no longer knows is listed as such, kept exactly as stored.
 // A local copy, so the toggles also work for a host that does not write the list back.
 const hiddenList = ref<string[]>([...(props.hiddenCaptions ?? [])])
 watch(
@@ -340,10 +341,20 @@ function setCaptionHidden(id: string, hide: boolean) {
   hiddenList.value = next
   emit('update:hiddenCaptions', [...next])
 }
-function removeUnknownCaption(id: string) {
+function removeCaption(id: string) {
   const next = (spec.captions ?? []).filter((c) => c !== id)
   if (next.length) spec.captions = next
   else delete spec.captions
+}
+// "Add caption" (custom mode only; a preset's captions stay the preset's): the registry notes this
+// card can carry and does not yet. The pick goes into spec.captions, so it shows under the whole card.
+const captionChoices = computed(() => cardCaptionOptions(spec))
+function addCaption(ev: Event) {
+  const el = ev.target as HTMLSelectElement
+  const id = el.value
+  el.value = '' // back to the prompt; the pick is now a row and no longer offered
+  if (!id || (spec.captions ?? []).includes(id)) return
+  spec.captions = [...(spec.captions ?? []), id]
 }
 const linkValue = computed<boolean>({
   get: () => spec.link === 'campaigns-page',
@@ -496,7 +507,7 @@ function removeSection(i: number) {
             <li v-for="c in captionRows" :key="c.id" class="ce-caption-row" :class="{ 'is-hidden': c.hidden, 'is-unknown': c.preview === null }">
               <template v-if="c.preview === null">
                 <span class="ce-caption-text">Unknown note {{ c.id }}</span>
-                <button v-if="mode === 'custom'" type="button" class="btn ce-caption-remove" :title="'Remove the unknown note ' + c.id" @click="removeUnknownCaption(c.id)">Remove</button>
+                <button v-if="mode === 'custom'" type="button" class="btn ce-caption-remove" :title="'Remove the unknown note ' + c.id" @click="removeCaption(c.id)">Remove</button>
               </template>
               <template v-else>
                 <span class="ce-caption-text">{{ c.preview }}</span>
@@ -512,10 +523,18 @@ function removeSection(i: number) {
                 </button>
                 <span v-if="!c.hideable" class="hint ce-caption-reason">always shown: affects what the data means</span>
                 <span v-else-if="c.hidden" class="hint">hidden on this card</span>
+                <button v-if="mode === 'custom'" type="button" class="btn ce-caption-remove" :title="'Remove this caption from the card'" :aria-label="'Remove: ' + c.preview" @click="removeCaption(c.id)">Remove</button>
               </template>
             </li>
           </ul>
           <p v-else class="hint">This card has no captions of its own.</p>
+          <div v-if="mode === 'custom' && captionChoices.length" class="ce-caption-add">
+            <label class="visually-hidden" :for="addCaptionId">Add a caption</label>
+            <select :id="addCaptionId" @change="addCaption">
+              <option value="">Add a caption…</option>
+              <option v-for="o in captionChoices" :key="o.value" :value="o.value">{{ o.preview }}</option>
+            </select>
+          </div>
           <p class="hint">Add your own text in the chart's Caption field.</p>
         </div>
 

@@ -2,7 +2,7 @@
 // "Label · N · P%", the tooltip, fixed colors, no cost anywhere, and the pins that keep the landing-tag list
 // (lib/landingTags.ts) in step with the staged arm and the site constants. Made-up data.
 import { describe, expect, it } from 'vitest'
-import { buildChartConfig, formatKey, landingLegendText } from './charts'
+import { buildChartConfig, formatKey, shareLegendText } from './charts'
 import { f3HeroDonutWidget, defaultCampaignsWidgets } from './defaults'
 import { STAGED_FLIGHT_3 } from './campaigns'
 import { LANDING_SITES, LANDING_TAGS, LANDING_TAG_NOTE, F3_APPS_BARE_TAG, F3_APPS_FEATURES_TAG, F3_APPS_HERO_TAG } from './landingTags'
@@ -35,9 +35,9 @@ describe('landing-tag donut: labels and legend', () => {
   })
 
   it('shares are rounded and a thousand is separated', () => {
-    expect(landingLegendText('A', 1, [1, 2])).toBe('A · 1 · 33%')
-    expect(landingLegendText('A', 1234, [1234, 1234])).toBe('A · 1,234 · 50%')
-    expect(landingLegendText('A', 0, [0])).toBe('A · 0 · 0%')
+    expect(shareLegendText('A', 1, [1, 2])).toBe('A · 1 · 33%')
+    expect(shareLegendText('A', 1234, [1234, 1234])).toBe('A · 1,234 · 50%')
+    expect(shareLegendText('A', 0, [0])).toBe('A · 0 · 0%')
   })
 
   it('keeps each tag its own color whatever the order', () => {

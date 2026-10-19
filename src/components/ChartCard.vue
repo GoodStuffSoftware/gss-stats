@@ -10,8 +10,7 @@ import { isDateDim } from '../lib/rings'
 import { dayTitle } from '../lib/glanceDay'
 import { filterOverrideSummary } from '../lib/filterSummary'
 import { isSiteDim, semanticKey } from '../lib/drill'
-import { liveLandingTags } from '../lib/campaigns'
-import { LANDING_NOT_LIVE_TEXT } from '../lib/landingTags'
+import { widgetUnavailableText } from '../lib/catalog'
 import { isMobileViewport } from '../lib/responsive'
 import { isFit, widgetNeedsChartHeight } from '../lib/fit'
 import { useFitHeight } from '../composables/useFitHeight'
@@ -326,7 +325,7 @@ let liveSafeKey: string | null = null
 // the effective filters.
 const NON_REQUEST_FIELDS = new Set([
   'x', 'y', 'w', 'h', 'i', 'id', 'fit', 'title', 'note', 'noteId', 'longText', 'notes', 'caption', 'hiddenCaveats', 'isDefault',
-  'markers', 'goLiveMarkers', 'flightBands', 'cumulative', 'axisTitles', 'barMode',
+  'markers', 'goLiveMarkers', 'flightBands', 'cumulative', 'showShares', 'axisTitles', 'barMode',
   // grid-layout-plus writes `moved` onto every widget it lays out (after ChartCard's first load, so the
   // key would change under the answer's flag and never match again). It is the only field the library
   // adds in our configuration (`static` is touched only under restoreOnDrag, which Dashboard never sets).
@@ -343,16 +342,16 @@ watch(requestKey, () => {
   liveSafeKey = null
 }, { flush: 'sync' })
 let lastLiveRefetchAt: number | null = null
-// The Flight 3 Apps hero-vs-features donut while its arm is staged (no registered campaign carries the
-// landing tags): it says so and sends NO query at all. A function, not a computed: CAMPAIGNS is a
-// plain module constant, so the answer is read fresh at each render and load.
-const LANDING_TAG_DIM = 'landingTag'
-function landingNotLive(): boolean {
-  return props.widget.dataset === 'geo' && props.widget.dimension === LANDING_TAG_DIM && liveLandingTags().length === 0
+// A chart whose Group by dimension has nothing to count yet (catalog.ts DimensionDef.unavailableText: the
+// Flight 3 Apps hero-vs-features donut while its arm is staged): it shows that text and sends NO query at
+// all. A function, not a computed: the dimension's condition reads module constants (CAMPAIGNS), so the
+// answer is read fresh at each render and load.
+function dimensionUnavailable(): string | null {
+  return widgetUnavailableText(props.widget)
 }
 async function load(background = false) {
   if (isBespokeBody.value) return // own data fetch (or none) — see MetricCard/NoteWidgetBody
-  if (landingNotLive()) {
+  if (dimensionUnavailable()) {
     reqId++ // drop any answer still in flight
     data.value = null
     seriesData.value = null
@@ -683,7 +682,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
       <p v-else-if="widget.dataset === 'overview' || widget.dataset === 'campaigns'" class="state mono">{{ retiredPanelText }}</p>
       <NoteWidgetBody v-else-if="widget.type === 'note'" :widget="widget" :values="noteValues" />
 
-      <div v-else-if="landingNotLive()" class="state mono">{{ LANDING_NOT_LIVE_TEXT }}</div>
+      <div v-else-if="dimensionUnavailable()" class="state mono">{{ dimensionUnavailable() }}</div>
       <div v-else-if="loading" class="state mono">Loading…</div>
       <div v-else-if="error" class="state error mono">{{ error }}</div>
       <div v-else-if="popupNotYetActive" class="state mono">Tracking not yet active</div>

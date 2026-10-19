@@ -108,6 +108,10 @@ export interface Widget {
   // type 'line' with a breakdown: also draw each series' running total as a dashed line on a
   // right-hand axis (the campaigns flight-day chart's cumulative view).
   cumulative?: boolean
+  // type 'doughnut' / 'pie': list each slice's share in the legend and the tooltip ("Features · 3 · 30%",
+  // the share of every plotted slice). Absent = the dimension's own default (catalog.ts
+  // DimensionDef.sharesByDefault); true / false is the chart's own choice.
+  showShares?: boolean
   // A beacon (geo) line/area chart on the date axis: draw these series instead of one line. Each
   // series is its own date query narrowed by `filter` (native geo field = value pairs, e.g.
   // keyEvent = 'install'; none = every page view), on the left or right y-axis.
