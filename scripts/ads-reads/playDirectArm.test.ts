@@ -109,7 +109,7 @@ describe('a Play-direct arm, morning read', () => {
     expect(report).not.toContain('INSTALL VERDICT')
     expect(report).toContain('they differ from device installs')
     // the baseline: data first, the quoted hand-derived note apart, the stored twin spend
-    expect(report).toContain('2 acquisitions / 120 listing visitors (Play UTM file)')
+    expect(report).toContain('2 acquisitions / 120 listing visitors (UTM file)')
     expect(report).toContain(PLAY_BASELINE_NET_DEVICE_NOTE)
     expect(report).toContain('$75.17 spent')
     expect(report).not.toContain('76.25')
@@ -150,7 +150,7 @@ describe('a Play-direct arm, post-flight read', () => {
     const r = await post(fixtureFor(), section('2026-10-04', { visitors: 70, acquisitions: 5 }))
     const report = formatPostflightReport(r)
     expect(report).toContain(`Play Console installs (store listing acquisitions for utm_campaign ${PLAY_UC}, as Play prints them): 5 acquisitions of 70 listing visitors; PARTIAL`)
-    expect(report).toContain('2 acquisitions / 120 listing visitors (Play UTM file)')
+    expect(report).toContain('2 acquisitions / 120 listing visitors (UTM file)')
     expect(report).toContain(PLAY_BASELINE_NET_DEVICE_NOTE)
   })
 

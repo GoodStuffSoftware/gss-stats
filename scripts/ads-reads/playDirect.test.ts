@@ -33,7 +33,7 @@ const campaign = (over: Partial<CampaignFlight> = {}): CampaignFlight => ({
   notes: 'test fixture only',
   ...over,
 })
-const twin = campaign({ id: '99900000099', label: 'Made-up closed twin', ucValues: ['made_up_twin_uc'], flightStart: '2026-09-09', flightEnd: '2026-09-13', status: 'closed' })
+const twin = campaign({ id: '99900000099', label: 'Made-up closed twin', ucValues: ['sudoku_tired_of_ads_play'], flightStart: '2026-09-09', flightEnd: '2026-09-13', status: 'closed' })
 
 const section = (over: Partial<PlayReportsSection> = {}): PlayReportsSection => ({
   ok: true,
@@ -103,7 +103,7 @@ describe('playDirectBaseline', () => {
     let seen: { since: string; until: string; flightStart: string; cumulativeSpend: number } | null = null
     const read = async (o: { since: string; until: string; flightStart: string; cumulativeSpend: number }) => {
       seen = o
-      return section({ acquisitionByUtmCampaign: [{ utmCampaign: 'made_up_twin_uc', visitors: 120, acquisitions: 2, firstDate: '2026-09-09', lastDate: '2026-09-19' }], storePerformanceThrough: '2026-09-19' })
+      return section({ acquisitionByUtmCampaign: [{ utmCampaign: 'sudoku_tired_of_ads_play', visitors: 120, acquisitions: 2, firstDate: '2026-09-09', lastDate: '2026-09-19' }], storePerformanceThrough: '2026-09-19' })
     }
     const b = await playDirectBaseline(twin, read, 75.17)
     expect(seen).toEqual({ since: '2026-09-09', until: '2026-10-04', flightStart: '2026-09-09', cumulativeSpend: 75.17 })
@@ -161,7 +161,7 @@ describe('playDirectLines', () => {
   })
   it('no row at the horizon is a labelled zero, not "not landed"', () => {
     const t = text(block(section({ acquisitionByUtmCampaign: [], storePerformanceThrough: '2026-10-25' })))
-    expect(t).toContain('no row for the tag in Play\'s store-listing file through 2026-10-25 (0 acquisitions as printed); PARTIAL')
+    expect(t).toContain('no row for the tag in Play\'s store-listing file through 2026-10-25 (0 acquisitions as printed; Play folds small tags into Other); PARTIAL')
     expect(t).not.toContain('not landed yet')
   })
   it('a failed Play read says not read and also carries the not-landed text', () => {
@@ -175,11 +175,11 @@ describe('playDirectLines', () => {
   it('the baseline prints the data figures first and the hand-derived net device installs apart, as a quoted note naming its source', async () => {
     const baseline = await playDirectBaseline(
       twin,
-      async () => section({ acquisitionByUtmCampaign: [{ utmCampaign: 'made_up_twin_uc', visitors: 120, acquisitions: 2, firstDate: '2026-09-09', lastDate: '2026-09-19' }] }),
+      async () => section({ acquisitionByUtmCampaign: [{ utmCampaign: 'sudoku_tired_of_ads_play', visitors: 120, acquisitions: 2, firstDate: '2026-09-09', lastDate: '2026-09-19' }] }),
       75.17,
     )
     const t = text(block(section(), baseline))
-    expect(t).toContain('2 acquisitions / 120 listing visitors (Play UTM file)')
+    expect(t).toContain('2 acquisitions / 120 listing visitors (UTM file)')
     expect(t).toContain('$75.17 spent')
     expect(t).not.toContain('76.25')
     expect(t).toContain(PLAY_BASELINE_NET_DEVICE_NOTE)
@@ -187,9 +187,17 @@ describe('playDirectLines', () => {
     expect(t.indexOf('2 acquisitions / 120')).toBeLessThan(t.indexOf('8 net device installs'))
     expect(t).toContain('tagged app rows: none')
   })
+  it('a later closed Play-direct arm gets the data figures but neither the September note nor "tagged app rows: none"', async () => {
+    const later = campaign({ id: '99900000055', label: 'Made-up later arm', ucValues: ['made_up_later_uc'], flightStart: '2026-10-20', flightEnd: '2026-10-23', status: 'closed' })
+    const baseline = await playDirectBaseline(later, async () => section({ acquisitionByUtmCampaign: [{ utmCampaign: 'made_up_later_uc', visitors: 50, acquisitions: 4, firstDate: '2026-10-20', lastDate: '2026-10-25' }] }), 40)
+    const t = text(block(section(), baseline))
+    expect(t).toContain('4 acquisitions / 50 listing visitors (UTM file)')
+    expect(t).not.toContain('net device installs')
+    expect(t).not.toContain('tagged app rows')
+  })
   it('a baseline whose Play read failed says so', async () => {
     const baseline = await playDirectBaseline(twin, null, 75.17)
-    expect(text(block(section(), baseline))).toContain('Baseline (closed Play-direct twin Made-up closed twin, 2026-09-09..2026-09-13, $75.17 spent, utm_campaign made_up_twin_uc): not read (--play-sa not given)')
+    expect(text(block(section(), baseline))).toContain('Baseline (closed Play-direct twin Made-up closed twin, 2026-09-09..2026-09-13, $75.17 spent, utm_campaign sudoku_tired_of_ads_play): not read (--play-sa not given)')
   })
   it('counts only: the lines carry no visitor id, hour, place or device split', () => {
     const t = text(block(section()))

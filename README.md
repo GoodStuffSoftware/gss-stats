@@ -1413,7 +1413,7 @@ a 7-day web arm). Everything below follows from that registry property, never fr
 There is no web arrival, so the first open is the proof: the app reads the Play install referrer
 and its first open writes a tagged `/return/<uc>/d0` row.
 
-- **Tracking check (rule 5).** At 30+ closed-day clicks with no tagged `/return/<uc>/d0` row the
+- **Tracking check (rule 5).** From flight day 2, at 30+ closed-day clicks with no tagged `/return/<uc>/d0` row the
   rule reads `PROPOSE PAUSE` with `install-referrer path looks broken`. It is a proposal only; no
   Google Ads setting is changed.
 - **Play Console installs.** `scripts/ads-reads/play.ts` also sums Play's store-listing file by its
@@ -1423,8 +1423,8 @@ and its first open writes a tagged `/return/<uc>/d0` row.
   far Play has caught up: `PARTIAL` until the store-listing data runs seven days past the flight
   end, `INSTALL VERDICT` after. With no row for the tag it says `not landed yet (lags 6-14 days)`
   while Play's data is short of the flight end, and `no row ... (0 acquisitions as printed)` once
-  it is not. Play lags 6-14 days (15 on 2026-10-19), so the 11-07 post-flight read is expected to
-  say `PARTIAL` and the 11-21 read `INSTALL VERDICT`.
+  it is not. Play's bulk files lag 6-14 days, so an early post-flight read is expected to say `PARTIAL`
+  and a later one `INSTALL VERDICT`.
 - **Acquisitions are not device installs.** A store-listing acquisition is an installer Play ties
   to a visit through the tag. The installs-by-day lines count every device install on the account,
   the developer's own household devices included, with no campaign attached. The report prints this
@@ -1432,9 +1432,9 @@ and its first open writes a tagged `/return/<uc>/d0` row.
 - **Baseline.** Each read also prints the closed Play-direct twin (found by `kind` and
   `status: 'closed'`) beside the arm: its stored spend ($75.17), its figures from a second Play
   read over its own dates by its own tag (September's file: `2 acquisitions / 120 listing visitors
-  (Play UTM file)`), and `tagged app rows: none`. A separate quoted note, `"8 net device installs"
+  (UTM file)`), and `tagged app rows: none`. A separate quoted note, `"8 net device installs"
   (hand-derived in the September review ...)`, carries the review's hand-derived number with its
-  source; it is not read from any file.
+  source; it is not read from any file, and it prints only beside that September twin.
 
 These lines are report text and data only: no widget, no kill rule, no visitor id and no join, and
 no hour, place or device split on return, complete, start or tour rows. Tests:

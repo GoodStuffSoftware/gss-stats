@@ -8,6 +8,7 @@
 // listing data runs a week past the flight's last day, INSTALL VERDICT after. Aggregate counts only: no
 // visitor id, no join, no hour/place/device split. Report text and data only; never a rule.
 import { addDays } from '../../src/lib/etTime'
+import { summarizeError } from '../../src/lib/adsRedact'
 import { CAMPAIGN_SPEND, CAMPAIGNS, type CampaignFlight } from '../../src/lib/campaigns'
 import type { PlayReportsSection, PlayUtmCampaignRow } from './play'
 
@@ -19,6 +20,8 @@ export const PLAY_ACQUISITION_NOTE =
 /** The twin's net device installs: derived by hand in the September review, so it is quoted with its source and never computed from a file. */
 export const PLAY_BASELINE_NET_DEVICE_NOTE =
   '"8 net device installs" (hand-derived in the September review of the closed twin, not from the Play file)'
+/** The utm_campaign of the twin the September review's hand-derived figure belongs to; the quoted note prints only beside that twin. */
+export const PLAY_BASELINE_NOTE_UC = 'sudoku_tired_of_ads_play'
 export const PLAY_NOT_LANDED_TEXT = 'not landed yet (lags 6-14 days)'
 
 export type PlayReadLabel = 'INSTALL VERDICT' | 'PARTIAL'
@@ -122,7 +125,7 @@ export async function playDirectBaseline(twin: CampaignFlight, read: PlayRead | 
       listingVisitors: mine.visitors,
     }
   } catch (e) {
-    return { ...base, error: e instanceof Error ? e.message : String(e) }
+    return { ...base, error: summarizeError(e) }
   }
 }
 
@@ -170,14 +173,14 @@ export function playDirectLines(b: PlayDirectBlock | undefined | null): string[]
   out.push(`  Tagged first opens (/return/<uc>/d0 rows for ${tags}): ${n(b.d0Rows)}${b.clicks != null ? ` from ${n(b.clicks)} clicks` : ''}; tagged sign-ins (new accounts): ${b.signIns ? `${n(b.signIns.count)} (${b.signIns.note})` : 'not read'}`)
   const ins = b.installs
   const head = `  Play Console installs (store listing acquisitions for utm_campaign ${tags}, as Play prints them)`
-  if (!ins.read) out.push(`${head}: not read (${ins.error ?? 'no Play read'}); ${PLAY_NOT_LANDED_TEXT}`)
+  if (!ins.read) out.push(`${head}: not read (${ins.error ? summarizeError(ins.error) : 'no Play read'}); ${PLAY_NOT_LANDED_TEXT}`)
   else if (ins.state === 'no row yet') out.push(`${head}: ${PLAY_NOT_LANDED_TEXT}; Play's listing data runs through ${ins.through ?? 'no date yet'}, the flight ends ${b.flightEnd}`)
   else {
     const labelText =
       ins.label === 'INSTALL VERDICT'
         ? `INSTALL VERDICT: Play's listing data runs through ${ins.through}, ${PLAY_VERDICT_SETTLE_DAYS}+ days past the flight end ${b.flightEnd}`
         : `PARTIAL: Play's listing data runs through ${ins.through} against a flight end of ${b.flightEnd} (needs ${addDays(b.flightEnd, PLAY_VERDICT_SETTLE_DAYS)}); later days are not in yet, so this is a floor`
-    if (ins.state === 'no row at horizon') out.push(`${head}: no row for the tag in Play's store-listing file through ${ins.through} (0 acquisitions as printed); ${labelText}`)
+    if (ins.state === 'no row at horizon') out.push(`${head}: no row for the tag in Play's store-listing file through ${ins.through} (0 acquisitions as printed; Play folds small tags into Other); ${labelText}`)
     else out.push(`${head}: ${n(ins.acquisitions)} acquisitions of ${n(ins.visitors)} listing visitors; ${labelText}`)
   }
   out.push(`  Note: ${PLAY_ACQUISITION_NOTE}.`)
@@ -186,9 +189,11 @@ export function playDirectLines(b: PlayDirectBlock | undefined | null): string[]
     const where = `${bl.label}, ${bl.flightStart}..${bl.flightEnd}, ${money(bl.spend)} spent, utm_campaign ${bl.ucValues.join(', ')}`
     if (!bl.read) out.push(`  Baseline (closed Play-direct twin ${where}): not read (${bl.error ?? 'no Play read'})`)
     else {
-      const listing = bl.listingAcquisitions == null ? 'no store-listing row in the Play UTM file' : `${n(bl.listingAcquisitions)} acquisitions / ${n(bl.listingVisitors)} listing visitors (Play UTM file)`
+      const listing = bl.listingAcquisitions == null ? 'no store-listing row in the Play UTM file' : `${n(bl.listingAcquisitions)} acquisitions / ${n(bl.listingVisitors)} listing visitors (UTM file)`
+      // The hand-derived net device installs and the "no tagged app rows" fact are the September twin's alone: a later closed Play-direct arm gets neither.
+      const september = bl.ucValues.includes(PLAY_BASELINE_NOTE_UC)
       out.push(
-        `  Baseline (closed Play-direct twin ${where}): ${listing}; separately, ${PLAY_BASELINE_NET_DEVICE_NOTE}; tagged app rows: none (the app could not read the install referrer then)`,
+        `  Baseline (closed Play-direct twin ${where}): ${listing}${september ? `; separately, ${PLAY_BASELINE_NET_DEVICE_NOTE}; tagged app rows: none (the app could not read the install referrer then)` : ''}`,
       )
     }
   }
