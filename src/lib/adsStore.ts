@@ -494,7 +494,7 @@ export function mapReadingRow(row: Record<string, unknown>): ReadingRecord | nul
   if (f3) rec.f3 = f3
   return rec
 }
-const F3_VERDICTS: readonly string[] = ['PASS', 'PROPOSE PAUSE', 'NOT YET', 'NO DATA', 'n/a', 'GO', 'ITERATE', 'STOP', 'INCONCLUSIVE']
+const F3_VERDICTS: readonly string[] = ['PASS', 'PROPOSE PAUSE', 'WATCH', 'NOT YET', 'NO DATA', 'n/a', 'GO', 'ITERATE', 'STOP', 'INCONCLUSIVE']
 /** The stored F3 rules block (migration 0006), or undefined for NULL (every non-F3 row and rows
  * written before the column) and for anything malformed: a bad value never reaches a card. */
 export function parseReadingF3(raw: unknown): ReadingF3 | undefined {

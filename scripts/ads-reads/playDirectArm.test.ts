@@ -118,15 +118,18 @@ describe('a Play-direct arm, morning read', () => {
     expect(r.playDirect).toMatchObject({ campaignId: PLAY_ID, clicks: 140, d0Rows: 29 })
   })
 
-  it('30+ clicks with no tagged d0 row propose a pause: install-referrer path looks broken', async () => {
+  it('30+ clicks with no tagged d0 row print a WATCH line and never a pause proposal', async () => {
     const { deps } = withPlay(fixtureFor(true), section('2026-09-30', null))
     const r = await runMorningRead(deps, opts)
     const rule5 = r.flight3!.readouts.find((x) => x.n === 5)!
-    expect(rule5.verdict).toBe('PROPOSE PAUSE')
-    expect(rule5.number).toContain('install-referrer path looks broken')
-    expect(r.flight3!.proposal).toMatch(/PAUSE/)
+    expect(rule5.verdict).toBe('WATCH')
+    expect(rule5.number).toContain('Watch: 140 clicks, 0 tagged first opens. The app side is proven')
+    expect(r.flight3!.tripped).not.toContain(5)
     const report = formatMorningReport(r)
-    expect(report).toContain('install-referrer path looks broken')
+    expect(report).toContain('Watch: 140 clicks, 0 tagged first opens.')
+    expect(report).toContain('At this size, 0 opens can also be chance.')
+    expect(report).toContain('→ WATCH')
+    expect(report).not.toContain('install-referrer path looks broken')
     // no Play row yet and the horizon is short of the flight end: the exact not-landed text
     expect(report).toContain('not landed yet (lags 6-14 days)')
   })

@@ -103,7 +103,7 @@ export interface CampaignFlight {
 // its read plan); the runbook's matching edits and the steps no date can drive are listed in
 // "To activate flight 3" in docs/routines/ads-cloud-daily.md. The two arms start independently
 // (both started 2026-10-17, Apps ahead of the Play release), each with its own 7-day week.
-export type StagedArm = 'apps' | 'search'
+export type StagedArm = 'apps' | 'search' | 'appsPlay'
 /** The Google Ads objects built for a staged arm (a read-side record; nothing here changes Google Ads).
  * The customer id is not stored here: README "Spend" names it once. */
 export interface StagedArmIds {
@@ -179,6 +179,26 @@ export const STAGED_FLIGHT_3: Record<StagedArm, StagedArmConfig> = {
     notes:
       '"Best Sudoku - Search - Desktop intent - F3 Search", budget resource 15958435831, utm google / cpc / sudoku_funnel_f3_search. A buyer-intent test on best-sudoku v1.99.0 (Mike, 2026-10-15; desk card ads-f3-16): the \"no ads\" keyword family only (sudoku no ads, sudoku without ads, sudoku app no ads, ad free sudoku and the rest), exact + phrase, F2\'s free-seeker terms dropped; manual CPC $0.99 max (a hard ceiling under $1, no day-3 raise); ALL devices, no mobile or tablet hard stop; F2\'s 10 negatives plus free, online free, printable and puzzle book; F2\'s RSA plus a price headline; US+CA, ad schedule 12:00-24:00 ET, $10/day, $70 cap over 7 serving days. No placements: its read plan has channel search. Expected volume is about 15-25 clicks a week, so one week will likely read inconclusive (under 20 asks). Started 2026-10-17, the prod web deploy day. Created PAUSED 2026-10-16 by the API tool; enabled by Mike\'s yes, which with the arm\'s dates (STAGED_FLIGHT_3_DATES) is the whole activation.',
   },
+  appsPlay: {
+    label: 'Flight 3 — display, Sudoku app placements, Play direct',
+    ids: {
+      campaignId: '24369758153',
+      budgetId: '15962489953',
+      adGroups: [{ id: '205107438870', name: 'Sudoku app placements - F3 Play', maxCpcUsd: 0.35 }],
+      ads: [{ id: '828453801048', label: 'HERO', tag: 'sudoku_funnel_f3_apps_play' }],
+    },
+    // One responsive display ad whose Install button opens the Play listing, no web landing page: the first sign of a
+    // person is the Play-delivered app's first open (/return/<uc>/d0), tagged through the install referrer.
+    ucValues: ['sudoku_funnel_f3_apps_play'],
+    dailyBudgetUsd: 10,
+    hardCapUsd: 49.14,
+    flightStartTimeEt: '12:00',
+    servingHoursEt: [12, 24],
+    kind: 'play-direct',
+    servingDays: { min: 4, max: 7 },
+    notes:
+      '"Best Sudoku - Display - Sudoku app placements - F3 Play", budget resource 15962489953, one HERO responsive display ad with the Install call to action. The final URL is the Play listing with the install referrer (https://play.google.com/store/apps/details?id=com.bestsudoku.app&referrer=utm_source%3Dgoogle%26utm_medium%3Ddisplay%26utm_campaign%3Dsudoku_funnel_f3_apps_play), so there is no web arrival: the proof of tracking is a tagged /return/<uc>/d0 first open, and the install count comes from the Play Console store listing acquisitions for that utm_campaign (lags about 15 days). The 17 approved Android app placements of the Apps arm, manual CPC $0.35 max, US+CA, ad schedule 12:00-24:00 ET, $10/day. Cap $49.14 = the $70 Apps cap less the $20.86 Apps spent. Serves 2026-10-19 12:00 ET .. 2026-10-23 (a five-day window); created PAUSED by the API tool and enabled by Mike.',
+  },
 }
 
 /** The CampaignFlight for a staged arm from its dates: the flight start (the enable day) and the
@@ -234,8 +254,10 @@ export const STAGED_FLIGHT_3_DATES: Record<StagedArm, StagedArmDates> = {
   // Both arms: approved to auto-enable by Mike (relayed by the ads session); ET days. Apps starts 2026-10-17, ahead of the Play release.
   apps: { flightStart: '2026-10-17', flightEnd: '2026-10-23' },
   search: { flightStart: '2026-10-17', flightEnd: '2026-10-23' },
+  // Play direct: enabled 2026-10-19 (serves from 12:00 ET), a five-day window inside the 4-7 serving days its servingDays allows.
+  appsPlay: { flightStart: '2026-10-19', flightEnd: '2026-10-23' },
 }
-export const STAGED_ARMS: readonly StagedArm[] = ['apps', 'search']
+export const STAGED_ARMS: readonly StagedArm[] = ['apps', 'search', 'appsPlay']
 /** Whether an arm's dates are filled (live) or null (staged). Throws on exactly one date set: a
  * half-filled arm is a mistake, never a staged arm. */
 export function stagedArmIsLive(arm: StagedArm, dates: Record<StagedArm, StagedArmDates> = STAGED_FLIGHT_3_DATES): boolean {

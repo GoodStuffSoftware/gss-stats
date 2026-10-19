@@ -15,10 +15,11 @@ import type { StagedArm } from './campaigns'
 export const F3_SEARCH_MIN_COMPLETES = 10
 /** Rule 5: Apps needs this many tagged arrivals before "zero /coach/shown/place rows" means broken tracking. */
 export const F3_APPS_MIN_ARRIVALS = 30
-/** Rule 5, Play-direct arm: this many clicks with no tagged /return/<uc>/d0 row means the install-referrer path is broken. */
+/** Rule 5, Play-direct arm: this many clicks with no tagged /return/<uc>/d0 row is worth a WATCH line (never a pause proposal). */
 export const F3_PLAY_DIRECT_MIN_CLICKS = 30
-/** The wording the Play-direct tracking check carries when it trips. */
-export const F3_PLAY_DIRECT_BROKEN_TEXT = 'install-referrer path looks broken'
+/** What the Play-direct WATCH line says after its counts: the app side is proven, so 0 first opens is a watch item, not a break. */
+export const F3_PLAY_DIRECT_WATCH_TEXT =
+  'The app side is proven: an emulator check on 10-19 showed the Play-delivered app emits /return/<uc>/d0 and tags later beacons. If the Play UTM file later shows acquisitions while tagged first opens stay 0, the break is Play handing the referrer to the production app. At this size, 0 opens can also be chance.'
 /** Rule 6 and 8: most a tagged complete row may cost. */
 export const F3_MAX_COST_PER_COMPLETE_ROW = 3
 /** Rule 7: first-move rows over d0 arrival rows must reach this share. */
@@ -39,9 +40,10 @@ export const F3_VERDICT_FROM_DAY = 8
 export const F3_ARM_BASELINES: Record<StagedArm, string> = {
   apps: 'F1/F2 Apps $0.32-0.34 per arrival, first-move 6.4% (see rule 7)',
   search: 'F2 Search $0.64 per arrival',
+  appsPlay: 'closed Play-direct twin (sudoku_tired_of_ads_play): see the Baseline line under the Play-direct block; no web arrival, so no cost per arrival',
 }
 
-export type ReadoutVerdict = 'PASS' | 'PROPOSE PAUSE' | 'NOT YET' | 'NO DATA' | 'n/a' | 'GO' | 'ITERATE' | 'STOP' | 'INCONCLUSIVE'
+export type ReadoutVerdict = 'PASS' | 'PROPOSE PAUSE' | 'WATCH' | 'NOT YET' | 'NO DATA' | 'n/a' | 'GO' | 'ITERATE' | 'STOP' | 'INCONCLUSIVE'
 export interface RuleReadout {
   /** 1-9. */
   n: number
@@ -187,16 +189,17 @@ export function buildFlight3Rules(i: Flight3RulesInput, opts: { ctrFloor?: numbe
     let threshold: string
     let verdict: ReadoutVerdict
     if (i.playDirect !== undefined) {
-      // Play-direct: the ad opens the Play listing, so no web arrival exists. The only proof the install-referrer path
-      // works is a tagged first open (/return/<uc>/d0) once the clicks add up. Propose only; day 1-2 is when it matters.
+      // Play-direct: the ad opens the Play listing, so no web arrival exists. A tagged first open (/return/<uc>/d0) is the
+      // sign the install-referrer path reaches the app. The app side is proven (emulator check, 2026-10-19), so 0 first
+      // opens at 30+ clicks is a WATCH line, never a pause proposal (the ads lead's pick, option b).
       const pd = i.playDirect
       threshold = `${F3_PLAY_DIRECT_MIN_CLICKS}+ clicks need 1+ tagged /return/<uc>/d0 row`
       number = pd?.clicks != null && pd.d0Rows != null ? `${pd.clicks} clicks, ${pd.d0Rows} tagged /return/<uc>/d0 rows` : 'clicks or tagged d0 rows not read'
       if (day < 2) verdict = 'NOT YET'
       else if (!pd || pd.clicks == null || pd.d0Rows == null) verdict = 'NO DATA'
       else if (pd.clicks >= F3_PLAY_DIRECT_MIN_CLICKS) {
-        verdict = pd.d0Rows === 0 ? 'PROPOSE PAUSE' : 'PASS'
-        if (verdict === 'PROPOSE PAUSE') number += `; ${F3_PLAY_DIRECT_BROKEN_TEXT}`
+        verdict = pd.d0Rows === 0 ? 'WATCH' : 'PASS'
+        if (verdict === 'WATCH') number = `Watch: ${pd.clicks} clicks, 0 tagged first opens. ${F3_PLAY_DIRECT_WATCH_TEXT}`
       } else if (day < F3_JUDGE_FROM_DAY) verdict = 'NOT YET'
       else {
         verdict = 'NO DATA'

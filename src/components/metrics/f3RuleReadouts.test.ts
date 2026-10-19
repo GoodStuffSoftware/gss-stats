@@ -27,6 +27,7 @@ const mocked = vi.mocked(fetchAdsReadings)
 
 const APPS = STAGED_FLIGHT_3.apps.ids.campaignId
 const SEARCH = STAGED_FLIGHT_3.search.ids.campaignId
+const PLAY = STAGED_FLIGHT_3.appsPlay.ids.campaignId
 
 const readouts = (verdict2: ReadingF3['readouts'][number]['verdict']): ReadingF3['readouts'] => [
   { n: 1, name: 'Placement leak', number: '$0.40 on 1 placement', threshold: 'under $2 on any one', verdict: 'PASS' },
@@ -110,10 +111,10 @@ afterEach(() => {
 })
 
 describe('f3-rule-readouts preset', () => {
-  it('is a valid registered preset over the two F3 arms, on the Campaigns page defaults', () => {
+  it('is a valid registered preset over the three F3 arms, on the Campaigns page defaults', () => {
     expect(presetById('f3-rule-readouts')).toBe(F3_RULE_READOUTS)
     expect(validateCard(F3_RULE_READOUTS)).toEqual([])
-    expect(F3_RULE_READOUTS.repeat).toMatchObject({ over: 'campaigns', ids: [APPS, SEARCH] })
+    expect(F3_RULE_READOUTS.repeat).toMatchObject({ over: 'campaigns', ids: [APPS, SEARCH, PLAY] })
     expect(usesF3Read(F3_RULE_READOUTS)).toBe(true)
     const wd = defaultCampaignsWidgets().find((x) => x.id === 'cw-f3-rules')
     expect(wd).toMatchObject({ card: { preset: 'f3-rule-readouts' }, x: 0, y: 88, w: 12 })
@@ -122,23 +123,23 @@ describe('f3-rule-readouts preset', () => {
 
 describe('the card', () => {
   it('asks the readings endpoint deep enough to reach the daily read behind same-day rows', async () => {
-    serve([camp(APPS, []), camp(SEARCH, [])])
+    serve([camp(APPS, []), camp(SEARCH, []), camp(PLAY, [])])
     await newCard()
     expect(mocked).toHaveBeenCalled()
     expect(new URLSearchParams(mocked.mock.calls[0][0] as string).get('limit')).toBe('30')
   })
   it('empty: "No F3 read yet." per arm, no read or proposal row; an F2-era reading does not count', async () => {
-    serve([camp(APPS, [rec(APPS)]), camp(SEARCH, [])])
+    serve([camp(APPS, [rec(APPS)]), camp(SEARCH, []), camp(PLAY, [])])
     const w = await newCard()
     const b = blocks(w)
-    expect(b.map((x) => x.label)).toEqual([campaignById(APPS)!.label, campaignById(SEARCH)!.label])
+    expect(b.map((x) => x.label)).toEqual([campaignById(APPS)!.label, campaignById(SEARCH)!.label, campaignById(PLAY)!.label])
     for (const x of b) {
       expect(x.empty).toBe('No F3 read yet.')
       expect(x.tables.flatMap((t) => t.rows)).toEqual([])
     }
   })
   it('filled: the read date and flight day, the proposal, and each rule with number, threshold and verdict', async () => {
-    serve([camp(APPS, [rec(APPS, { f3: f3('CONTINUE', 'PASS') })]), camp(SEARCH, [])])
+    serve([camp(APPS, [rec(APPS, { f3: f3('CONTINUE', 'PASS') })]), camp(SEARCH, []), camp(PLAY, [])])
     const [apps, search] = blocks(await newCard())
     expect(apps.empty).toBeNull()
     expect(apps.tables[0]).toMatchObject({ heads: ['Read (ET)', 'Proposal'], rows: [['Oct 19 · flight day 2', 'CONTINUE']], tones: [[null, null]] })
@@ -156,7 +157,7 @@ describe('the card', () => {
     const older = rec(APPS, { readAt: '2026-10-18T12:05:00Z', etDate: '2026-10-18', f3: f3('CONTINUE', 'PASS', 1) })
     const newest = rec(APPS, { proposal: 'PROPOSE PAUSE', f3: f3('PROPOSE PAUSE', 'PROPOSE PAUSE') })
     const threshold = rec(APPS, { kind: 'threshold', thresholds: [50] })
-    serve([camp(APPS, [threshold, newest, older]), camp(SEARCH, [])])
+    serve([camp(APPS, [threshold, newest, older]), camp(SEARCH, []), camp(PLAY, [])])
     const [apps] = blocks(await newCard())
     expect(apps.tables[0].rows).toEqual([['Oct 19 · flight day 2', 'PROPOSE PAUSE']])
     expect(apps.tables[0].tones).toEqual([[null, 'trip']])

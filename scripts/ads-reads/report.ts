@@ -50,6 +50,7 @@ export const COST_PER_ARRIVAL_BENCHMARK = 0.32
 export const F3_COST_PER_ARRIVAL_BENCHMARK_TEXT: Record<StagedArm, string> = {
   apps: 'about $0.32-0.34, the F1/F2 in-app figure',
   search: 'about $0.64, the F2 Search figure',
+  appsPlay: 'none: the ads open the Play listing, so first opens (not web arrivals) are the count; see the Play-direct block',
 }
 /** The two arrival definitions, labelled the same way in the tagged-funnel, first-session and Tagged so far lines. The numbers differ on purpose: the report counts first-ever tagged beacons (a floor), the donut and the return reads count one /return/<tag>/d0 row per device. */
 export const ARRIVALS_TAGGED_ROWS_LABEL = 'arrivals (new-visitor tagged rows)'

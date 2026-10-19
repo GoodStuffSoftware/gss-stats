@@ -37,6 +37,7 @@ import {
   liveStagedCampaigns,
   stagedArmIsLive,
   stagedCampaign,
+  type StagedArm,
   type StagedArmDates,
 } from '../../src/lib/campaigns'
 import { addDays } from '../../src/lib/etTime'
@@ -65,11 +66,11 @@ afterEach(() => {
   restoreFlight3()
 })
 
-type Dates = Record<'apps' | 'search', StagedArmDates>
-const NULL_DATES: Dates = { apps: { flightStart: null, flightEnd: null }, search: { flightStart: null, flightEnd: null } }
+type Dates = Record<StagedArm, StagedArmDates>
+const NULL_DATES: Dates = { apps: { flightStart: null, flightEnd: null }, search: { flightStart: null, flightEnd: null }, appsPlay: { flightStart: null, flightEnd: null } }
 const APPS_ONLY: Dates = { ...NULL_DATES, apps: { flightStart: '2026-10-21', flightEnd: '2026-10-27' } }
 const SEARCH_ONLY: Dates = { ...NULL_DATES, search: { flightStart: '2026-10-17', flightEnd: '2026-10-23' } }
-const BOTH: Dates = { apps: APPS_ONLY.apps, search: SEARCH_ONLY.search }
+const BOTH: Dates = { ...NULL_DATES, apps: APPS_ONLY.apps, search: SEARCH_ONLY.search }
 const F3_APPS_ID = STAGED_FLIGHT_3.apps.ids.campaignId
 const F3_SEARCH_ID = STAGED_FLIGHT_3.search.ids.campaignId
 /** What filling the dates does in the real modules: the arm's campaign joins CAMPAIGNS and its plan ADS_READ_PLANS. */
@@ -109,8 +110,28 @@ describe('flight 3 staged config matches the launch plan', () => {
     expect([s.ctrFloor, s.killRulesFrom, s.reportLabel, s.auditSlug]).toEqual([0.01, 35, 'F3 search', 'f3-search'])
     expect(s.thresholds).toEqual([18, 35, 53, 70])
   })
-  it('the ladder tops out at the cap, so the last read IS the $70 cap', () => {
-    for (const arm of ['apps', 'search'] as const) {
+  it('appsPlay: a play-direct arm, tag sudoku_funnel_f3_apps_play, $10/day, $49.14 cap over a 4-7 day window, 12/25/37/49.14 ladder', () => {
+    const c = STAGED_FLIGHT_3.appsPlay
+    expect(c.kind).toBe('play-direct')
+    expect(c.servingDays).toEqual({ min: 4, max: 7 })
+    expect(c.ucValues).toEqual(['sudoku_funnel_f3_apps_play'])
+    expect([c.dailyBudgetUsd, c.hardCapUsd, c.flightStartTimeEt, c.servingHoursEt]).toEqual([10, 49.14, '12:00', [12, 24]])
+    expect(c.ids).toEqual({
+      campaignId: '24369758153',
+      budgetId: '15962489953',
+      adGroups: [{ id: '205107438870', name: 'Sudoku app placements - F3 Play', maxCpcUsd: 0.35 }],
+      ads: [{ id: '828453801048', label: 'HERO', tag: 'sudoku_funnel_f3_apps_play' }],
+    })
+    expect(STAGED_FLIGHT_3_DATES.appsPlay).toEqual({ flightStart: '2026-10-19', flightEnd: '2026-10-23' })
+    const s = STAGED_FLIGHT_3_PLAN_SETTINGS.appsPlay
+    expect([s.thresholds, s.killRulesFrom, s.ctrFloor, s.placementLeakMaxShare, s.reportLabel, s.auditSlug, s.flight3Arm]).toEqual([[12, 25, 37, 49.14], 25, 0.0015, 0.1, 'F3 apps play', 'f3-apps-play', 'appsPlay'])
+    expect(s.approvedPlacements).toBe(RETEST_APPROVED_PLACEMENTS)
+    // the live registry carries it as a play-direct campaign with the five-day window
+    const live = stagedCampaign('appsPlay', STAGED_FLIGHT_3_DATES.appsPlay as { flightStart: string; flightEnd: string })
+    expect([live.kind, live.flightStart, live.flightEnd, live.hardCapUsd]).toEqual(['play-direct', '2026-10-19', '2026-10-23', 49.14])
+  })
+  it('the ladder tops out at the cap, so the last read IS the cap', () => {
+    for (const arm of ['apps', 'search', 'appsPlay'] as const) {
       expect(STAGED_FLIGHT_3_PLAN_SETTINGS[arm].thresholds.at(-1)).toBe(STAGED_FLIGHT_3[arm].hardCapUsd)
     }
   })
@@ -384,9 +405,9 @@ function legsRows(): string[][] {
 
 describe('runbook LEGS table', () => {
   const ISO = /^\d{4}-\d{2}-\d{2}$/
-  it('has the two flight 3 rows by-date, each with the arm real numeric campaign id (no placeholder)', () => {
+  it('has the three flight 3 rows by-date, each with the arm real numeric campaign id (no placeholder)', () => {
     const f3 = legsRows().filter((r) => /F3/.test(r[2]))
-    expect(f3.map((r) => r[2])).toEqual(['F3 apps (display, Sudoku app placements)', 'F3 search (desktop intent)'])
+    expect(f3.map((r) => r[2])).toEqual(['F3 apps (display, Sudoku app placements)', 'F3 search (desktop intent)', 'F3 apps play (display, Sudoku app placements, Play direct)'])
     for (const r of f3) {
       expect(r[0], r[2]).toBe('by-date')
       expect(r[1], r[2]).toMatch(/^\d{10,}$/)
@@ -394,6 +415,7 @@ describe('runbook LEGS table', () => {
     }
     expect(f3[0][1]).toBe(STAGED_FLIGHT_3.apps.ids.campaignId)
     expect(f3[1][1]).toBe(STAGED_FLIGHT_3.search.ids.campaignId)
+    expect(f3[2][1]).toBe(STAGED_FLIGHT_3.appsPlay.ids.campaignId)
   })
   it('a by-date row holds two ISO dates or two dashes, never one of each', () => {
     for (const r of legsRows().filter((x) => x[0] === 'by-date')) {
@@ -465,8 +487,8 @@ describe('runbook LEGS rows track STAGED_FLIGHT_3_DATES', () => {
   // where `-` is a null date (staged) and a YYYY-MM-DD cell is the same date as STAGED_FLIGHT_3_DATES.
   it('each F3 row carries the arm real campaign id and exactly the dates in STAGED_FLIGHT_3_DATES (`-` is null)', () => {
     const f3 = legsRows().filter((r) => /F3/.test(r[2]))
-    expect(f3).toHaveLength(2)
-    for (const [arm, label] of [['apps', 'F3 apps'], ['search', 'F3 search']] as const) {
+    expect(f3).toHaveLength(3)
+    for (const [arm, label] of [['apps', 'F3 apps ('], ['search', 'F3 search'], ['appsPlay', 'F3 apps play']] as const) {
       const row = f3.find((r) => r[2].startsWith(label))!
       expect(row[0], label).toBe('by-date')
       expect(row[1], label).toBe(STAGED_FLIGHT_3[arm].ids.campaignId)
@@ -474,11 +496,12 @@ describe('runbook LEGS rows track STAGED_FLIGHT_3_DATES', () => {
       expect([cell(row[3]), cell(row[4])], label).toEqual([STAGED_FLIGHT_3_DATES[arm].flightStart, STAGED_FLIGHT_3_DATES[arm].flightEnd])
     }
   })
-  it('both arms are live with a seven-day week; the read window is start + 1 .. end + 1 (dates read from the code, so a slip never turns this red)', () => {
+  it('all arms are live (Apps and Search a seven-day week, Apps play a 4-7 day window); the read window is start + 1 .. end + 1 (dates read from the code, so a slip never turns this red)', () => {
     restoreFlight3() // the REAL registry, with the committed dates
-    for (const arm of ['apps', 'search'] as const) {
+    for (const arm of ['apps', 'search', 'appsPlay'] as const) {
       const { flightStart, flightEnd } = STAGED_FLIGHT_3_DATES[arm]
-      expect(flightEnd, arm).toBe(addDays(flightStart!, 6))
+      if (arm === 'appsPlay') expect([addDays(flightStart!, 3), addDays(flightStart!, 4), addDays(flightStart!, 5), addDays(flightStart!, 6)], arm).toContain(flightEnd)
+      else expect(flightEnd, arm).toBe(addDays(flightStart!, 6))
       expect(stagedArmIsLive(arm), arm).toBe(true)
       const c = campaignById(STAGED_FLIGHT_3[arm].ids.campaignId)!
       expect(c.flightStart, arm).toBe(flightStart)

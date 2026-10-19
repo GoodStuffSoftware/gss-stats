@@ -21,6 +21,7 @@ import type { CardSpec, MetricsResponseBody } from '../../lib/metrics/types'
 
 const APPS = STAGED_FLIGHT_3.apps.ids.campaignId
 const SEARCH = STAGED_FLIGHT_3.search.ids.campaignId
+const PLAY = STAGED_FLIGHT_3.appsPlay.ids.campaignId
 const LIVE = '24279250691' // a registered flight standing in for a live F3 arm
 const NOW = Date.parse('2026-10-19T12:10:00Z')
 
@@ -98,10 +99,10 @@ afterEach(() => {
 })
 
 describe('campaign-f3-daily preset', () => {
-  it('is a valid registered preset over the two staged F3 arms, on the Campaigns page defaults', () => {
+  it('is a valid registered preset over the three staged F3 arms, on the Campaigns page defaults', () => {
     expect(presetById('campaign-f3-daily')).toBe(CAMPAIGN_F3_DAILY)
     expect(validateCard(CAMPAIGN_F3_DAILY)).toEqual([])
-    expect(CAMPAIGN_F3_DAILY.repeat).toMatchObject({ over: 'campaigns', ids: [APPS, SEARCH] })
+    expect(CAMPAIGN_F3_DAILY.repeat).toMatchObject({ over: 'campaigns', ids: [APPS, SEARCH, PLAY] })
     const wd = defaultCampaignsWidgets().find((x) => x.id === 'cw-f3-daily')
     expect(wd).toMatchObject({ card: { preset: 'campaign-f3-daily' }, x: 0, y: 102, w: 12 })
   })
@@ -152,13 +153,13 @@ describe('the card, with no arm registered (the staged state)', () => {
 })
 
 describe('the card, on the real F3 arms', () => {
-  it('one card per registered arm: the Apps and Search arms, each with its three rows', async () => {
+  it('one card per registered arm: the Apps, Search and Apps play arms, each with its three rows', async () => {
     stubMetrics(seriesAnswer)
     const w = await mountCard({ preset: 'campaign-f3-daily' })
     const titles = w.findAll('.mc-title').map((t) => squash(t.text()))
-    expect(titles).toEqual([campaignById(APPS)!.label, campaignById(SEARCH)!.label])
-    expect(w.findAll('.metric-item')).toHaveLength(6)
-    expect(new Set(sent.map((r) => String(r.params?.campaignId)))).toEqual(new Set([APPS, SEARCH]))
+    expect(titles).toEqual([campaignById(APPS)!.label, campaignById(SEARCH)!.label, campaignById(PLAY)!.label])
+    expect(w.findAll('.metric-item')).toHaveLength(9)
+    expect(new Set(sent.map((r) => String(r.params?.campaignId)))).toEqual(new Set([APPS, SEARCH, PLAY]))
   })
 })
 

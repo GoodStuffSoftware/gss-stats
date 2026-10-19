@@ -287,6 +287,19 @@ export const STAGED_FLIGHT_3_PLAN_SETTINGS: Record<StagedArm, Omit<ReadPlanSetti
     flight3Arm: 'search',
     ctrFromFlightDay: 3,
   },
+  // Play direct: Apps' placements and floors, the $49.14 cap (Apps' $70 less its $20.86 spend) over five serving days.
+  appsPlay: {
+    thresholds: [12, 25, 37, 49.14],
+    killRulesFrom: 25,
+    placementLeakMaxShare: 0.1,
+    ctrFloor: 0.0015,
+    approvedPlacements: RETEST_APPROVED_PLACEMENTS,
+    reportLabel: 'F3 apps play',
+    auditSlug: 'f3-apps-play',
+    adGroupPlacementCounts: RETEST_AD_GROUP_PLACEMENT_COUNTS,
+    flight3Arm: 'appsPlay',
+    ctrFromFlightDay: 3,
+  },
 }
 /** A staged flight 3 arm's read plan, once its campaign is in CAMPAIGNS (as `stagedCampaign(...)`):
  * the arm's settings plus the morning-read window, day 2 .. flight end + 1, from that campaign's

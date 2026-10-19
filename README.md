@@ -1339,7 +1339,8 @@ the same for both channels.
 
 **Flight 3 rule readouts.** Every flight 3 morning read prints an `F3 rules (proposals only; nothing
 is paused)` block between the first-session lines and `Thresholds:`: nine numbered lines, each
-`Rule <n> · <name>: <number> | threshold <t> → PASS | PROPOSE PAUSE | NOT YET | NO DATA`, then a
+`Rule <n> · <name>: <number> | threshold <t> → PASS | PROPOSE PAUSE | WATCH | NOT YET | NO DATA` (WATCH is
+only the Play-direct tracking check below and never a pause proposal), then a
 `Proposal:` line. Rules 1-4 are the coded kill rules above; 5 is the day 1-2 tracking check, 6 cost
 per tagged complete row (at most $3), 7 the Apps first-move row ratio (at least 20% of d0 rows),
 8 traffic held (derived from rules 2 and 6) and 9 the D+7 go / iterate / stop table
@@ -1417,8 +1418,11 @@ There is no web arrival, so the first open is the proof: the app reads the Play 
 and its first open writes a tagged `/return/<uc>/d0` row.
 
 - **Tracking check (rule 5).** From flight day 2, at 30+ closed-day clicks with no tagged `/return/<uc>/d0` row the
-  rule reads `PROPOSE PAUSE` with `install-referrer path looks broken`. It is a proposal only; no
-  Google Ads setting is changed.
+  rule reads `WATCH`: `Watch: N clicks, 0 tagged first opens`, then the reason it is a watch item, not a
+  break (an emulator check on 2026-10-19 showed the Play-delivered app emits `/return/<uc>/d0` and tags
+  later beacons; if Play's UTM file later shows acquisitions while tagged first opens stay 0, the break is
+  Play handing the referrer to the production app; at this size 0 opens can also be chance). It is never a
+  pause proposal, and no Google Ads setting is changed.
 - **Play Console installs.** `scripts/ads-reads/play.ts` also sums Play's store-listing file by its
   UTM campaign column, one row per tag (`acquisitionByUtmCampaign`: listing visitors and listing
   acquisitions as Play prints them, aggregate counts only). A Play-direct morning or post-flight

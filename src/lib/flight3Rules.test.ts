@@ -132,18 +132,21 @@ describe('rule 5: tracking check', () => {
 
 describe('rule 5: Play-direct tracking check (keyed on the arm property, not on an id)', () => {
   const pd = (clicks: number | null, d0Rows: number | null) => ({ playDirect: { clicks, d0Rows } })
-  it.each([2, 3, 8])('day %i: 30+ clicks with 0 tagged d0 rows proposes a pause and says the install-referrer path looks broken', (day) => {
-    const r = rule(buildFlight3Rules(input('apps', day, pd(30, 0))), 5)
-    expect(r.verdict).toBe('PROPOSE PAUSE')
-    expect(r.number).toBe('30 clicks, 0 tagged /return/<uc>/d0 rows; install-referrer path looks broken')
+  it.each([2, 3, 8])('day %i: 30+ clicks with 0 tagged d0 rows is a WATCH line, never a pause proposal', (day) => {
+    const b = buildFlight3Rules(input('apps', day, pd(30, 0)))
+    const r = rule(b, 5)
+    expect(r.verdict).toBe('WATCH')
+    expect(r.number.startsWith('Watch: 30 clicks, 0 tagged first opens. The app side is proven:')).toBe(true)
+    expect(r.number).toContain('At this size, 0 opens can also be chance.')
+    expect(r.number).not.toMatch(/PAUSE|broken/i)
     expect(r.threshold).toBe('30+ clicks need 1+ tagged /return/<uc>/d0 row')
+    expect(b.tripped).not.toContain(5)
+    expect(b.proposal).toBe('CONTINUE')
   })
-  it('one tagged d0 row clears it, and the pause is a proposal only (no rule reads it as a stop)', () => {
+  it('one tagged d0 row clears it, and a WATCH never reaches the proposal, whatever the serving state', () => {
     expect(verdictOf('apps', 2, 5, pd(400, 1))).toBe('PASS')
-    const b = buildFlight3Rules(input('apps', 2, pd(40, 0)))
-    expect(b.tripped).toContain(5)
-    expect(b.proposal).toBe('PROPOSE PAUSE')
-    expect(buildFlight3Rules(input('apps', 2, { ...pd(40, 0), servingState: 'paused' })).proposal).toBeNull() // nothing to pause
+    expect(buildFlight3Rules(input('apps', 2, pd(40, 0))).proposal).toBe('CONTINUE')
+    expect(buildFlight3Rules(input('apps', 2, { ...pd(40, 0), servingState: 'paused' })).proposal).toBe('CONTINUE')
   })
   it('day 1 is NOT YET; under 30 clicks is NOT YET on day 2 and NO DATA from day 3; unread clicks or rows are NO DATA from day 2', () => {
     expect(verdictOf('apps', 1, 5, pd(90, 0))).toBe('NOT YET')

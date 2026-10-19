@@ -77,6 +77,7 @@ plan, rules and checks are in "Flight 3" below. Its two rows are `by-date`: the 
 |---|---|---|---|---|---|---|
 | by-date | 24358792494 | F3 apps (display, Sudoku app placements) | 2026-10-17 | 2026-10-23 | start+1..end+1 | none |
 | by-date | 24358792551 | F3 search (desktop intent) | 2026-10-17 | 2026-10-23 | start+1..end+1 | none |
+| by-date | 24369758153 | F3 apps play (display, Sudoku app placements, Play direct) | 2026-10-19 | 2026-10-23 | start+1..end+1 | none |
 | past | 24316608605 | F2 apps (display, Sudoku app placements) | 2026-10-04 | 2026-10-10 | 2026-10-05..2026-10-11 (done) | none |
 | past | 24311309184 | F2 search (desktop intent) | 2026-10-04 | 2026-10-10 | 2026-10-05..2026-10-11 (done) | none |
 | past | 24279250691 | Flight 1: US+CA web retest | 2026-09-26 | 2026-10-02 | 2026-09-27..2026-10-03 (done) | none |
@@ -102,7 +103,7 @@ rows (they run one after another). LABEL is the report name used in subjects and
 dates come from the CLI itself (flight end + 7 for wrapup, + 15 for day15, ...); this table
 only says which ones the routine runs. Flight 3's reports are not rows here: for a live `by-date`
 arm, REPORTS also holds `wrapup` on its flight end + 7 and `day15` on its flight end + 15 (LABEL
-`F3 apps` or `F3 search`), derived from the row's Flight end. The return windows are cumulative `/return/<uc>/` bucket
+`F3 apps`, `F3 search` or `F3 apps play`), derived from the row's Flight end. The return windows are cumulative `/return/<uc>/` bucket
 counts, so each read shows every bucket the flight has reached.
 
 | DATE (ET) | CAMPAIGN | LABEL | STAGE | What it adds |
@@ -137,14 +138,14 @@ dates are filled. Google Ads is read-only: every rule below only PROPOSES, and M
 Each arm starts on its own day D and is read against its own week (D .. D + 6, 7 serving days,
 end date set at build and again at enable).
 
-| | F3 apps | F3 search |
-|---|---|---|
-| utm | google / display / `sudoku_funnel_f3_apps_hero` and `sudoku_funnel_f3_apps_feat` (plus the bare `sudoku_funnel_f3_apps` as a catch-all) | google / cpc / `sudoku_funnel_f3_search` |
-| Report label | `F3 apps` | `F3 search` |
-| Channel and devices | display; 17 Android app placements | search, ALL devices (no device exclusion) |
-| Budget and cap | $10/day, $70 cap, 7 days | $10/day, $70 cap, 7 days |
-| Start day D | 2026-10-17: Apps started ahead of the Play release | 2026-10-17, the prod web deploy day |
-| Device check | the printed device block | none: Search runs on all devices, so the device block is informational and no device spend is an anomaly |
+| | F3 apps | F3 search | F3 apps play |
+|---|---|---|---|
+| utm | google / display / `sudoku_funnel_f3_apps_hero` and `sudoku_funnel_f3_apps_feat` (plus the bare `sudoku_funnel_f3_apps` as a catch-all) | google / cpc / `sudoku_funnel_f3_search` | google / display / `sudoku_funnel_f3_apps_play`, carried by the Play install referrer (the ad opens the Play listing, no web page) |
+| Report label | `F3 apps` | `F3 search` | `F3 apps play` |
+| Channel and devices | display; 17 Android app placements | search, ALL devices (no device exclusion) | display; the same 17 Android app placements |
+| Budget and cap | $10/day, $70 cap, 7 days | $10/day, $70 cap, 7 days | $10/day, $49.14 cap ($70 less the $20.86 Apps spent), 5 days (a 4-7 day window); thresholds 12 / 25 / 37 / 49.14 |
+| Start day D | 2026-10-17: Apps started ahead of the Play release | 2026-10-17, the prod web deploy day | 2026-10-19, serving from 12:00 ET; ends 2026-10-23 |
+| Device check | the printed device block | none: Search runs on all devices, so the device block is informational and no device spend is an anomaly | the printed device block |
 
 ### Apps: two ads, one arm (hero and features)
 
@@ -177,7 +178,7 @@ link that lost its suffix still counts. All three tags are the one arm.
 - **F3 rules block (every F3 morning read; proposals only, nothing is paused).** After the
   first-session lines and before `Thresholds:` the morning report prints `F3 rules (proposals only;
   nothing is paused):`, nine numbered lines, each
-  `Rule <n> · <name>: <number> | threshold <t> → PASS | PROPOSE PAUSE | NOT YET | NO DATA`
+  `Rule <n> · <name>: <number> | threshold <t> → PASS | PROPOSE PAUSE | WATCH | NOT YET | NO DATA`
   (an n/a rule prints its number only), then a `Proposal:` line (`PROPOSE PAUSE`, `CONTINUE`, or
   none when the campaign is not serving). Relay the block as printed; never recompute a rule.
   Rules 1-4 are the coded kill rules (placement leak, CTR, funnel reach, hard cap); 5 is the tracking
@@ -280,6 +281,15 @@ link that lost its suffix still counts. All three tags are the one arm.
     (the printed `/coach/shown/place rows` count): propose pausing Apps and checking the live
     bundle. The strip shows on a first game, so this fires only if the coach beacons or the
     tagging are broken.
+  - **Apps play (Play direct):** the ads open the Play listing, so there are no web arrivals and no
+    coach rows to count. Rule 5 counts clicks against tagged `/return/<uc>/d0` rows (first opens).
+    30 or more clicks with 0 tagged first opens prints a **WATCH** line, never a pause proposal:
+    `Watch: N clicks, 0 tagged first opens. The app side is proven: an emulator check on 10-19
+    showed the Play-delivered app emits /return/<uc>/d0 and tags later beacons. If the Play UTM
+    file later shows acquisitions while tagged first opens stay 0, the break is Play handing the
+    referrer to the production app. At this size, 0 opens can also be chance.` Relay it as printed;
+    do not propose a pause for it and do not recompute it. The Play Console installs line below it
+    (PARTIAL or INSTALL VERDICT, or `not landed yet (lags 6-14 days)`) is relayed as printed too.
   - The thresholds are minimums: a quiet day reads "too few rows", not a false alarm.
   - If the whole tagged read failed, the line reads "Tagged: NOT READ": the check is then not
     readable that day (name it in Step 3); never infer a count or propose a pause from it.
@@ -292,8 +302,8 @@ link that lost its suffix still counts. All three tags are the one arm.
     report prints for rule 3. This check adds the 10-complete-rows and 30-arrivals minimums and the
     coach count rule 3 does not have. It does not touch rule 3's code.
   - **From the moment the dates are filled:** this check applies to an arm from the moment its dates
-    are filled. Both arms start 10-17, so both are judged on 10-17 and 10-18: the first morning read
-    that holds both days is 10-19 (cumulative is then days 1-2); an arm with `-` dates has no report
+    are filled. Apps and Search start 10-17, so both are judged on 10-17 and 10-18: the first morning read
+    that holds both days is 10-19 (Apps play starts 10-19 at noon ET, so its days 1-2 are 10-19 and 10-20 and the first read holding both is 10-21) (cumulative is then days 1-2); an arm with `-` dates has no report
     and no check.
   - **Counts only:** the coach count is a campaign-tagged ET-day total, like the other tagged
     counts. `/coach/shown/%` is on the refused-split list, so the report never splits it by hour,
@@ -416,12 +426,12 @@ Call the printed date DATE and the printed mode MODE. MODE applies to Part B onl
 - REPORTS = the Part B rows whose DATE is today (zero, one or more), each with its CAMPAIGN,
   LABEL and STAGE, plus for each `by-date` row with both dates filled its derived reports:
   `wrapup` when DATE is Flight end + 7 and `day15` when DATE is Flight end + 15 (CAMPAIGN the
-  row's id, LABEL `F3 apps` or `F3 search`). Exception: if a routine-fire payload is present and its whole text is
+  row's id, LABEL `F3 apps`, `F3 search` or `F3 apps play`). Exception: if a routine-fire payload is present and its whole text is
   exactly `stage=wrapup`, `stage=day15`, `stage=day30`, `stage=day60` or `stage=december`,
   REPORTS is the single row (campaign 24279250691, LABEL BSK retest) with that STAGE (a manual
   rerun of flight 1); if the whole text is `stage=STAGE campaign=ID` with STAGE as above and ID
   a CAMPAIGN in the table or a flight 3 arm with both dates filled (F3 apps 24358792494, F3 search
-  24358792551), REPORTS is that campaign at that STAGE (LABEL from its row, or `F3 apps` / `F3 search`). In
+  24358792551, F3 apps play 24369758153), REPORTS is that campaign at that STAGE (LABEL from its row, or `F3 apps` / `F3 search` / `F3 apps play`). In
   both cases ARMS is empty: a `stage=` fire runs Part B only, with no Part A read, daily push
   or bus copy.
 - TEST mode: if a routine-fire payload is present and its whole text is exactly `test`, this is

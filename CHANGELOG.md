@@ -6,6 +6,12 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.56.0] — 2026-10-19
+
+### Added
+- **The F3 Play arm is registered.** Campaign 24369758153 (display, Sudoku app placements, Play direct) is read from 2026-10-19 to 2026-10-23 with a $49.14 cap, and joins the Campaigns-page flight 3 cards and the daily routine's arm list.
+- **The Play-direct tracking check is a WATCH line.** 30+ clicks with no tagged first open now prints a watch note (the app side is proven; chance or the Play referrer hand-off are the open readings) instead of proposing a pause.
+
 ## [0.55.0] — 2026-10-19
 
 ### Added

@@ -552,7 +552,7 @@ export const CARRY_OVER_COMPLETIONS: CardSpec = {
  * no hour, place or device split. Proposals only: the card changes nothing. */
 export const F3_RULE_READOUTS: CardSpec = {
   v: 1,
-  repeat: { over: 'campaigns', ids: [STAGED_FLIGHT_3.apps.ids.campaignId, STAGED_FLIGHT_3.search.ids.campaignId] },
+  repeat: { over: 'campaigns', ids: [STAGED_FLIGHT_3.apps.ids.campaignId, STAGED_FLIGHT_3.search.ids.campaignId, STAGED_FLIGHT_3.appsPlay.ids.campaignId] },
   minWidth: 520,
   title: { bind: 'campaign.label' },
   sections: [
@@ -584,7 +584,7 @@ export const F3_RULE_READOUTS: CardSpec = {
  * yet registered in CAMPAIGNS) there is nothing to repeat over and the card says so. */
 export const CAMPAIGN_F3_DAILY: CardSpec = {
   v: 1,
-  repeat: { over: 'campaigns', ids: [STAGED_FLIGHT_3.apps.ids.campaignId, STAGED_FLIGHT_3.search.ids.campaignId], empty: { label: '', text: { note: 'f3-daily-not-yet' } } },
+  repeat: { over: 'campaigns', ids: [STAGED_FLIGHT_3.apps.ids.campaignId, STAGED_FLIGHT_3.search.ids.campaignId, STAGED_FLIGHT_3.appsPlay.ids.campaignId], empty: { label: '', text: { note: 'f3-daily-not-yet' } } },
   minWidth: 230,
   title: { bind: 'campaign.label' },
   sections: [
