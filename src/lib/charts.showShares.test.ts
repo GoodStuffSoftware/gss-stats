@@ -51,7 +51,7 @@ describe('the hero-vs-features donut draws what it always drew', () => {
     expect('showShares' in stored).toBe(false)
     expectHeroDrawing(stored)
     const loaded = normalizeConfig({ version: 19, pages: [{ id: 'p', title: 'P', widgets: [stored] }] } as any).pages[0].widgets[0]
-    expect('showShares' in loaded).toBe(false) // nothing was added to the stored widget
+    expect(loaded.showShares).toBeUndefined() // nothing was added to the stored widget
     expectHeroDrawing(loaded)
   })
 

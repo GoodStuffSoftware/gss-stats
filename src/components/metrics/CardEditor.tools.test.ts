@@ -140,15 +140,15 @@ describe('Add a caption', () => {
     expect(rows(w)).toHaveLength(1)
     const sel = addSelect(w)
     expect(sel.exists()).toBe(true)
-    expect([...(sel.element as HTMLSelectElement).options].some((o) => o.value === 'cost-per-signin-approx')).toBe(true)
+    expect([...(sel.element as unknown as HTMLSelectElement).options].some((o) => o.value === 'cost-per-signin-approx')).toBe(true)
 
     await sel.setValue('cost-per-signin-approx')
     await flushPromises()
     expect(lastSpec(w).captions).toEqual(['release-before-partial', 'cost-per-signin-approx'])
     expect(validateCard(lastSpec(w))).toEqual([])
     expect(rows(w)).toHaveLength(2)
-    expect([...(addSelect(w).element as HTMLSelectElement).options].some((o) => o.value === 'cost-per-signin-approx')).toBe(false)
-    expect((addSelect(w).element as HTMLSelectElement).value).toBe('')
+    expect([...(addSelect(w).element as unknown as HTMLSelectElement).options].some((o) => o.value === 'cost-per-signin-approx')).toBe(false)
+    expect((addSelect(w).element as unknown as HTMLSelectElement).value).toBe('')
 
     // Reload: a fresh editor on the saved spec lists both.
     const w2 = await mountEditor({ spec: plain(lastSpec(w)), from: 'release-before-after' })

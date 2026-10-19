@@ -553,7 +553,8 @@ describe('ChartEditor: card spec captions (CardEditor wiring, part B2)', () => {
     // Slice 1a: an id this build doesn't know is valid as stored, so Save stays on.
     expect(w.get('button.btn-primary').attributes('disabled')).toBeUndefined()
     expect(((await save(w)).card as { spec: CardSpec }).spec.captions).toEqual(['release-before-partial', 'no-such-note-b3'])
-    await w.get('button.ce-caption-remove').trigger('click')
+    // Every caption row has a Remove in custom mode now; the unknown id is the last row.
+    await w.findAll('button.ce-caption-remove').at(-1)!.trigger('click')
     await flushPromises()
     expect(w.get('button.btn-primary').attributes('disabled')).toBeUndefined()
     const out = await save(w)
