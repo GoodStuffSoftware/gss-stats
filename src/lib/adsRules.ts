@@ -730,9 +730,12 @@ export interface P1BeaconCounts {
   /** /install/inapp/* and /install/prompt/<ios|android>-inapp rows, by kind. */
   inapp: Record<string, number>
 }
+/** Printed in place of the /funnel/purchase/* rows when a flight 3 day15 read leaves them out (the purchases read owns them). */
+export const P1_PURCHASES_OMITTED_NOTE = 'purchase rows not shown here (the flight 3 purchases read owns them)'
 /** One report line for the P1 counters, or null while every counter is zero (nothing shipped yet).
+ * `omitPurchases` leaves the /funnel/purchase/* rows out (the flight 3 day15 read only; flight 2 output is pinned byte-identical).
  * Row counts only; old rows without a reason segment read as `legacy`. */
-export function p1Line(c: P1BeaconCounts): string | null {
+export function p1Line(c: P1BeaconCounts, opts: { omitPurchases?: boolean } = {}): string | null {
   const list = (m: Record<string, number>) => Object.entries(m).filter(([, v]) => v > 0).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]) => `${k} ${v}`).join(', ')
   const parts: string[] = []
   const earned = list(c.earnedByReason)
@@ -742,8 +745,9 @@ export function p1Line(c: P1BeaconCounts): string | null {
   const outcomes = list(c.outcomeByReason)
   if (outcomes) parts.push(`outcomes by popup/outcome/reason: ${outcomes}`)
   const f = c.funnel
-  const funnel = [f['trial-start'] ? `trial-start ${f['trial-start']}` : '', ...Object.entries(f['checkout-start']).map(([k, v]) => `checkout-start/${k} ${v}`), ...Object.entries(f.purchase).map(([k, v]) => `purchase/${k} ${v}`)].filter(Boolean).join(', ')
+  const funnel = [f['trial-start'] ? `trial-start ${f['trial-start']}` : '', ...Object.entries(f['checkout-start']).map(([k, v]) => `checkout-start/${k} ${v}`), ...(opts.omitPurchases ? [] : Object.entries(f.purchase).map(([k, v]) => `purchase/${k} ${v}`))].filter(Boolean).join(', ')
   if (funnel) parts.push(`paid funnel (rows): ${funnel}`)
+  if (opts.omitPurchases && Object.values(f.purchase).some((v) => v > 0)) parts.push(P1_PURCHASES_OMITTED_NOTE)
   const inapp = list(c.inapp)
   if (inapp) parts.push(`in-app browser help (rows): ${inapp}`)
   return parts.length ? `${parts.join('; ')} [provisional beacon names]` : null

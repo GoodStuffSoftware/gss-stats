@@ -1346,7 +1346,7 @@ per tagged complete row (at most $3), 7 the Apps first-move row ratio (at least 
 (`decideFlight3`, `src/lib/flight3Rules.ts`). Rules 5-7 read NOT YET until their data exists and CTR
 arms from flight day 3; rule 9 reads NOT YET until the final read. A rules 1-7 pause proposal pushes
 once per ET day per arm; the cap decision push on a flight 3 row reads `F3 verdict GO | ITERATE |
-STOP | INCONCLUSIVE`. Every figure is a tagged row count or dollars (counts only), and flight 2 and
+STOP | INCONCLUSIVE` (the cloud read on flight end + 1 stores its row but sends no push or bus message: the 07:05 final read reports the verdict; the flight 3 day15 read leaves out the purchase rows, which the D + 21 purchases read owns). Every figure is a tagged row count or dollars (counts only), and flight 2 and
 retest reads print exactly what they did before (pinned byte for byte by `f2ReportGolden.test.ts`).
 Rows the app's own manual production checks write (`utm_campaign=manual_check`, `/return/manual_check/`
 paths) sit in the standing exclusions (`EXCLUSIONS` in `campaigns.ts`), so the campaign reads, the

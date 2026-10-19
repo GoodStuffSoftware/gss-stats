@@ -57,6 +57,11 @@ code, relay what it says, and (Part A only) write a short analysis from its own 
    yourself is plain ASCII too: no em-dashes, no arrows, no curly quotes.
 8. No trackers, no PII: sign-ups and promo claims are window COUNTS. Never join rows to
    individuals.
+9. Delivery (Mike, 2026-10-18): never call PushNotification; nothing automated pushes to his
+   phone. Wherever this runbook says push, compose the same lines but they go into the run's ONE
+   Agent Findings finding, written as the last step (the saved prompt's REPORTING block and AGENT
+   FINDINGS CONTRACT define the write; they win over any push step here). Bus messages
+   (`agent_send`) are unaffected.
 
 ## Legs (the lead edits this table; the only other per-campaign edit is "To activate flight 3")
 
@@ -190,7 +195,8 @@ link that lost its suffix still counts. All three tags are the one arm.
   - **Pause push.** A PROPOSE PAUSE from rules 1-7 pushes Mike once per ET day per arm (a same-day
     rerun that repeats the stored daily record is not pushed again), flight 3 only. Flight 2 reads and
     pushes are unchanged. At the final read the cap decision push reads `F3 verdict GO | ITERATE |
-    STOP | INCONCLUSIVE`, not flight 2's `row N`.
+    STOP | INCONCLUSIVE`, not flight 2's `row N`. The read on Flight end + 1 sends no push and no
+    bus message at all (A3): the 07:05 final read reports the verdict.
   - **Counts only.** Every figure in the block is a tagged row count or dollars: no visitor id, no
     hour, place or device split.
   - **Manual checks are excluded.** Rows with `utm_campaign=manual_check` or a `/return/manual_check/`
@@ -202,7 +208,7 @@ link that lost its suffix still counts. All three tags are the one arm.
 - **Validity:** at least 20 tagged post-game ask rows (`/signin-prompt/committed-repeat`,
   `committed-challenge`, and placement). Under 20 asks the result is INCONCLUSIVE, whatever the
   new-account count.
-- **Go / iterate / stop (proposals only), judged at the final read on the arm's own $70 (the routine's own D + 7 08:37 read, which comes after the flight ends, may state the verdict as a proposal; the 07:05 final read is the authoritative one):**
+- **Go / iterate / stop (proposals only), judged at the final read on the arm's own $70 (the routine's own D + 7 08:37 read, which comes after the flight ends, stores the arm's readings row but reports nothing; the local gss-ads-f3-final-read task at 07:05 is the one reporter of the verdict):**
 
   | Result | Proposal |
   |---|---|
@@ -366,7 +372,10 @@ appear before about D + 14; whether the long trial helps or hurts is first reada
   has no search-term query or report block, so a read-only pull is a new fetch, a report block and
   tests, not a one-line step. Build it as its own change, then add it to Part A here.
 - The D + 7 07:05 ET final read and the D + 21 / D + 35 purchase reads are scheduled by the lead
-  (or run by hand), not by this routine.
+  (or run by hand), not by this routine. The final read (gss-ads-f3-final-read) is the one reporter
+  of the D + 7 verdict; this routine's Flight end + 1 read sends nothing (A3). The D + 21 purchase
+  read owns purchase counts: the day15 read here leaves the `/funnel/purchase/*` rows out for
+  flight 3.
 
 ### To activate flight 3 (lead; per arm, the two arms are independent)
 
@@ -557,8 +566,16 @@ Reading rules for the analysis (they are the local morning read's rules, unchang
   installs include Mike's household.
 
 A3. Notify. Part A is the DAILY summary: every run with at least one arm in ARMS sends ONE
-push (never more, across all arms) and one bus message per arm (per "Bus delivery of a
-report").
+push line set (never more, across all arms; it goes into the run's finding, hard rule 9) and one
+bus message per arm (per "Bus delivery of a report"), except as the next bullet says.
+- **Flight 3 arm on Flight end + 1 (D + 7): no push and no bus message.** When DATE is a
+  `by-date` arm's Flight end + 1, run A1 as usual (the CLI stores that arm's D1 readings row) and
+  write its A2 analysis, but add NO line for it to the push lines and send NO bus message for it.
+  The local gss-ads-f3-final-read task (07:05 ET) is the one reporter of the D + 7 verdict. Say so
+  in Step 3 (`F3 D + 7 verdict: reported by gss-ads-f3-final-read; push and bus not sent for this
+  arm`). This covers a threshold-read arm and a FAILED arm too. Flight 2, the other flight 3 days
+  and every other arm in the same run are unchanged. If every arm in ARMS is suppressed this way,
+  send nothing at all.
 - Push: ONE PushNotification, one line per arm in table order, each line plain ASCII and under
   200 characters:
   - an arm with push=true: its exact `text=` value;
@@ -629,7 +646,7 @@ read_exit. Never print `/tmp/pf/CAMPAIGN/err.txt`.
 B3. Notify. BODY = the exact content of that report's `/tmp/pf/CAMPAIGN/report.txt` with only
 its final newline removed. Copy it character for character; do not summarize, reflow or add
 anything. The mode rules are the same for every campaign; only LABEL, CAMPAIGN and STAGE
-change. Part B sends ONE push in total (one line per report, in table order, each line plain
+change. Part B sends ONE push in total (hard rule 9: its lines go into the run's finding; one line per report, in table order, each line plain
 ASCII and under 200 characters) and ONE bus message per report (numbered parts if BODY is over
 15000 characters). The push is skipped when no report has a line to send.
 

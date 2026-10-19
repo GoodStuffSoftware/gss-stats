@@ -206,7 +206,7 @@ export function flight3RulesLines(b: Flight3Block): string[] {
   return ['F3 rules (proposals only; nothing is paused):', ...b.readouts.map(ruleReadoutLine), `Proposal: ${proposal}`]
 }
 
-export function fullReadLines(r: FullRead, title: string, opts: { postflight?: boolean; f3Block?: boolean; readStartMs?: number | null } = {}): string[] {
+export function fullReadLines(r: FullRead, title: string, opts: { postflight?: boolean; f3Block?: boolean; readStartMs?: number | null; omitPurchases?: boolean } = {}): string[] {
   const promoNote = promoArmNoteApplies(r, !!opts.postflight)
   const isF3 = !!r.f3Rules
   const out: string[] = [`=== ${title} (cumulative ${money(r.cumulativeSpend)}, closed days through ${r.spendThroughEt ?? '—'}) — ${r.complete ? 'complete' : 'INCOMPLETE, retried next run'} ===`]
@@ -239,7 +239,7 @@ export function fullReadLines(r: FullRead, title: string, opts: { postflight?: b
     out.push(`  ${n(s.asks.total)} asks · ${n(s.taggedArrivals)} ${isF3 ? ARRIVALS_TAGGED_ROWS_LABEL : 'arrivals'}; accept rate ${formatGated(t.acceptRate)}; cost per tagged arrival ${money(t.costPerArrival)} (cumulative spend / tagged arrivals; benchmark ${isF3 && r.f3Arm ? F3_COST_PER_ARRIVAL_BENCHMARK_TEXT[r.f3Arm] : `about ${money(COST_PER_ARRIVAL_BENCHMARK)}, the F1/F2 in-app figure`})`)
     out.push(`  dismisses (read separately): sign-in ${n(s.dismisses.signinPrompt)}, promo ${n(s.dismisses.promoFirst50)}`)
     out.push(`  install: prompt shown ${n(s.install.promptShown)}, taps ${n(s.install.taps)}, installed ${n(s.install.installed)} [${installOutcomeGapNote()}]; ${RAW_INSTALL_SIGNALS_LABEL} ${n(s.install.rawSignals)}; signin-eligible (count of asks) earned ${n(s.signinEligible.earned)}, capped ${n(s.signinEligible.capped)}, unearned ${n(s.signinEligible.unearned)}`)
-    const tp1 = p1Line(s.p1)
+    const tp1 = p1Line(s.p1, { omitPurchases: opts.omitPurchases })
     if (tp1) out.push(`  tagged P1 beacons: ${tp1}`)
   }
   out.push(...tagSplitLines(r.tagSplit, opts.readStartMs))
@@ -258,7 +258,7 @@ export function fullReadLines(r: FullRead, title: string, opts: { postflight?: b
     }
     out.push(`  promo accept/dismiss ${n(s.promoFirst50.accept)}/${n(s.promoFirst50.dismiss)}; upsell accept/dismiss ${n(s.upsell.accept)}/${n(s.upsell.dismiss)}; install-prompt installed ${n(s.outcomes.install.installed)} [${installOutcomeGapNote()}]; ${RAW_INSTALL_SIGNALS_LABEL} ${n(s.rawInstallSignals)}`)
     out.push(`  signin-eligible: earned ${n(s.signinEligible.earned)}, capped ${n(s.signinEligible.capped)}, unearned ${n(s.signinEligible.unearned)} (${SIGNIN_ELIGIBLE_COUNT_NOTE})`)
-    const sp1 = p1Line(s.p1)
+    const sp1 = p1Line(s.p1, { omitPurchases: opts.omitPurchases })
     if (sp1) out.push(`  site-wide P1 beacons: ${sp1}`)
     if (s.upsell.shown <= 1) out.push(`  ${UPSELL_SIGNEDOUT_EXPECTED_NOTE}`)
   }
@@ -534,7 +534,7 @@ export function formatPostflightReport(r: PostflightResult): string {
   out.push(`Spend ended ${r.spendEndEt ?? '—'}; this stage is due ${r.dueEt ?? '—'} (${r.due ? 'due' : 'NOT due yet'})`)
   if (r.postFlightSpend) out.push(`After-flight spend: [${r.postFlightSpend.status}] ${r.postFlightSpend.detail}`)
   if (r.hardCap) out.push(`Hard cap: [${r.hardCap.status}] ${r.hardCap.detail}`)
-  if (r.read) out.push('', ...fullReadLines(r.read, `POST-FLIGHT ${r.stage.toUpperCase()}`, { postflight: true, readStartMs: readStartOf(r.campaign.id) }))
+  if (r.read) out.push('', ...fullReadLines(r.read, `POST-FLIGHT ${r.stage.toUpperCase()}`, { postflight: true, readStartMs: readStartOf(r.campaign.id), omitPurchases: r.stage === 'day15' && !!r.read.f3Rules }))
   const b = r.promoSplit.beacon
   if (b) {
     const row = (o: Record<string, number>, shown: number) => POPUP_OUTCOME_TYPES.map((t) => `${t} ${formatGated(gateRate(o[t], shown))}`).join(', ')
