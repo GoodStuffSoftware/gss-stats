@@ -101,8 +101,8 @@ export interface CampaignFlight {
 // CAMPAIGNS nor ADS_READ_PLANS, so nothing reads it. Filling both dates is the whole activation in
 // code (liveStagedCampaigns() adds the CampaignFlight to CAMPAIGNS, adsRules.ts liveStagedReadPlans()
 // its read plan); the runbook's matching edits and the steps no date can drive are listed in
-// "To activate flight 3" in docs/routines/ads-cloud-daily.md. The two arms start independently
-// (both started 2026-10-17, Apps ahead of the Play release), each with its own 7-day week.
+// "To activate flight 3" in docs/routines/ads-cloud-daily.md. The arms start independently
+// (Apps and Search started 2026-10-17, each with its own 7-day week; the Play arm 2026-10-19 with a 5-day window).
 export type StagedArm = 'apps' | 'search' | 'appsPlay'
 /** The Google Ads objects built for a staged arm (a read-side record; nothing here changes Google Ads).
  * The customer id is not stored here: README "Spend" names it once. */

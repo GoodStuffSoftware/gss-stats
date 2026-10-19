@@ -269,11 +269,11 @@ export function todayEtFrom(nowMs: number): string {
  * per-cell tone hook (types.ts CellTone). Only a stored reading's Rules and Proposal carry one
  * today; it styles a value that is already shown and exposes nothing of its own. */
 export function scopeTone(scope: ScopeInstance, path: ScopePath): CellTone | null {
-  // An F3 verdict: PROPOSE PAUSE red, PASS and WATCH plain, NOT YET / NO DATA / n/a dim; GO..STOP (rule 9's
+  // An F3 verdict: PROPOSE PAUSE red, WATCH amber, PASS plain, NOT YET / NO DATA / n/a dim; GO..STOP (rule 9's
   // D+7 verdict) plain. The proposal: PROPOSE PAUSE red.
   if (path === 'rule.verdict') {
     const v = scopeOfKind(scope, 'rule')?.rule.verdict
-    return v == null ? null : v === 'PROPOSE PAUSE' ? 'trip' : v === 'NOT YET' || v === 'NO DATA' || v === 'n/a' ? 'muted' : 'clear'
+    return v == null ? null : v === 'PROPOSE PAUSE' ? 'trip' : v === 'WATCH' ? 'watch' : v === 'NOT YET' || v === 'NO DATA' || v === 'n/a' ? 'muted' : 'clear'
   }
   if (path === 'campaign.f3Proposal') return campaignInstanceOf(scope)?.ads?.f3?.proposal === 'PROPOSE PAUSE' ? 'trip' : null
   const tones = scopeOfKind(scope, 'reading')?.reading?.tones

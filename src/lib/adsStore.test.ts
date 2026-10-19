@@ -6,6 +6,7 @@ import {
   mapReadingRow,
   scrubPlayHour,
   parseCampaignIdsParam,
+  parseReadingF3,
   placementDailyUpserts,
   readingInsert,
   readReadings,
@@ -184,6 +185,20 @@ describe('dashboard readers fail soft', () => {
     const m = await readSpendSummaries(stub([{ campaign_id: '24215315197', cost_micros: 124_470_711, impressions: 48844, clicks: 539, days: 8, first_date: '2026-09-02', last_date: '2026-09-09', fetched_at: 'x' }]))
     expect(m!.get('24215315197')!.costMicros).toBe(124_470_711)
     expect(SPEND_SUMMARY_SQL).toMatch(/GROUP BY campaign_id$/)
+  })
+})
+
+describe('parseReadingF3 accepts the Play arm and the WATCH verdict', () => {
+  const raw = (arm: string, verdict: string) => ({ v: 1, arm, flightDay: 3, proposal: 'CONTINUE', readouts: [{ n: 5, name: 'tracking check', number: 'Watch: 40 clicks, 0 tagged first opens.', threshold: '30+ clicks need 1+ tagged /return/<uc>/d0 row', verdict }] })
+  it('a stored appsPlay reading with a WATCH rule round-trips', () => {
+    const r = parseReadingF3(raw('appsPlay', 'WATCH'))
+    expect(r?.arm).toBe('appsPlay')
+    expect(r?.readouts[0].verdict).toBe('WATCH')
+    expect(r?.proposal).toBe('CONTINUE')
+  })
+  it('an unknown arm or verdict is still refused', () => {
+    expect(parseReadingF3(raw('nope', 'WATCH'))).toBeUndefined()
+    expect(parseReadingF3(raw('appsPlay', 'MAYBE'))).toBeUndefined()
   })
 })
 
