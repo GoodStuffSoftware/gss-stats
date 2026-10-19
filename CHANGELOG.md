@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **v1.99.4 Play release note.** The release timeline and panel now say v1.99.4 went public on Play at 15:43Z on 10-18.
+
 ## [0.60.5] — 2026-10-26
 
 ### Added

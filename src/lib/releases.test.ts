@@ -91,7 +91,7 @@ describe('the flight 3 web releases', () => {
   it('v1.99.4 Play is a plain marker dated 2026-10-18 (promoted 15:15:55Z, 19904), listed after v1.99.4 web', () => {
     expect(datedReleases().find((r) => r.version === 'v1.99.4 Play')).toMatchObject({
       dateEt: '2026-10-18',
-      note: "Play production 15:15:55Z 10-18 (19904); reaches users when Google's review clears. No change to the counting beacon.",
+      note: "Play production 15:15:55Z 10-18 (19904); public on Play 15:43Z 10-18. No change to the counting beacon.",
     })
     expect(at('v1.99.4 Play')).toBeGreaterThan(at('v1.99.4 web'))
   })

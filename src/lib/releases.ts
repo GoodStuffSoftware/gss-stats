@@ -224,7 +224,7 @@ export const RELEASES: ReleaseMarker[] = [
   {
     version: 'v1.99.4 Play',
     dateEt: '2026-10-18', // promoted to Play production 2026-10-18T15:15:55Z = 11:15:55 ET (full rollout, versionCode 19904)
-    note: "Play production 15:15:55Z 10-18 (19904); reaches users when Google's review clears. No change to the counting beacon.",
+    note: "Play production 15:15:55Z 10-18 (19904); public on Play 15:43Z 10-18. No change to the counting beacon.",
   },
   // v1.103.0 web (1.102.0 never reached prod; 1.103.0 carries its paths) starts the first-finish beacons
   // (/game/first-finish, /signin-prompt/first-finish, /signin-eligible/earned/first-finish,
