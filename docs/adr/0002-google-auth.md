@@ -211,7 +211,7 @@ reach production. Everything above still holds for production.
   (`gss-stats-config-preview`), seeded once with a copy of production's `dashboard:default`,
   so saving a layout on the preview never writes production's layout or its backups.
 - **Shared data.** The preview binds the same D1 databases and the same `ADS_SYNC` Worker
-  as production: it reads real data, and an ads refresh there runs a real sync.
+  as production (and the `gss-live` Worker): it reads real data, and an ads refresh there runs a real sync.
 - **Its own secrets.** Pages keeps secrets per environment, so the preview is fail-closed
   (503) until the owner sets its sign-in secrets under Preview. README "Deploy" →
   "Preview (dev)" lists them.
