@@ -126,6 +126,14 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   (its dates in `STAGED_FLIGHT_3_DATES` still null, so not yet in `CAMPAIGNS`) the card reads "Flight 3
   isn't live yet" and sends no query; it fills in when the arm's dates are filled. Like every `/return/` read it is whole ET days and never split by hour,
   place or device. The card is in the defaults only; a saved layout gets it by adding the widget.
+  The legend shares come from the chart editor's **Show each slice's share in the legend** option
+  (`Widget.showShares`, doughnut and pie only; saved as an explicit true or false), which the
+  landing-tag dimension turns on by default, so this donut looks the same with no saved change. The
+  slice labels, colours and the "isn't live yet" text belong to the dimension's definition
+  (`DimensionDef` in [`src/lib/catalog.ts`](src/lib/catalog.ts): `valueLabel`, `valueColors`,
+  `sharesByDefault`, `unavailableText`), not to code that names the dimension; another dimension
+  gets the same behaviour by declaring those traits. Shares also work on a doughnut or pie with a
+  breakdown.
 - **Movable / composable charts** — drag the header, resize from the corner; add /
   edit / duplicate / delete charts of any type: stat, bar, horizontal bar, stacked
   bar, **breakdown bar** (one dimension on the axis × another as the series, grouped or
@@ -152,7 +160,8 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   option with the reason otherwise. A day the metric was not measured (before a go-live, or an
   unsynced spend day) is a break in the line, never a zero; a measured day with no rows is 0. A
   money series rounds each day to cents, so its points can differ from the tile's total by a cent
-  or two. Days only: no hour, place or device split (a `/return` or game-complete row gets no
+  or two. A sparkline item has a **List the days** checkbox in the card builder (`days: true`) that
+  prints the latest 14 ET days with their counts under the line. Days only: no hour, place or device split (a `/return` or game-complete row gets no
   more than the day's count and the kind the tile already reads). Each series is one extra
   statement per distinct twin read (items that share a window share it) against the 40-statement
   batch budget ([`docs/capacity.md`](docs/capacity.md) §9). Layout version 14 was a save
@@ -267,6 +276,8 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
     disjoint-populations note) always shows; listing one in `hiddenCaveats` does nothing. A card's
     own captions (from its preset or spec) take the same Show/Hide buttons in the card builder,
     and a caption id this version does not know is kept as saved until its Remove button is used.
+    In the card builder's custom mode every caption row has a Remove button, and an **Add a caption**
+    picker lists the registry notes (not caveats) that suit the card and are not already on it.
   - **Upgrading a chart.** Version 16 hides, once per chart, every hideable caveat that chart did
     not show before (`seedHiddenAutoCaveatsV16`, run only on a layout stored below version 16), so
     an existing chart looks the same; the built-in default charts, a fresh layout and "restore

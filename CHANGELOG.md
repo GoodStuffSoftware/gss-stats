@@ -7,6 +7,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Sparkline day list in the card builder.** A sparkline item now has a "List the days" checkbox that prints the latest days with their counts under the line.
+- **Add and remove captions on a card.** The card builder's custom mode has an "Add a caption" picker and a Remove button on every caption, so a card's notes are no longer fixed by its preset.
+- **Show each slice's share on a doughnut or pie.** The chart editor has a new option for the legend and tooltip shares, which now also works on a chart with a breakdown; the Flight 3 landing-tag donut looks the same.
 - **A hosted preview at dev.gss-stats.pages.dev.** Preview deployments of branch `dev` are now served (still behind Google sign-in) with their own saved-layout store, seeded from production's, while reading the same live data; production's hosts, settings and saved layout are unchanged.
 
 ### Changed
