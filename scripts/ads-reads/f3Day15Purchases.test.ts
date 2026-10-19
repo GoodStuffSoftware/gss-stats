@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { fixtureDeps, type Fixture } from './cli'
 import { runPostflightRead } from './read'
-import { formatPostflightReport } from './report'
+import { formatPostflightReport, withJson } from './report'
 import { P1_PURCHASES_OMITTED_NOTE, emptyP1Counts, p1Line } from '../../src/lib/adsRules'
 import { STAGED_FLIGHT_3_DATES } from '../../src/lib/campaigns'
 
@@ -38,16 +38,18 @@ function fixtureFor(arm: (typeof F3)[number] | null, nowEt: string): Fixture {
 }
 
 /** Runs a post-flight read, plants purchase and checkout rows on both P1 sections, prints the report. */
-async function report(arm: (typeof F3)[number] | null, stage: 'wrapup' | 'day15', nowEt: string): Promise<string> {
+async function report(arm: { id: string; uc: string } | null, stage: 'wrapup' | 'day15', nowEt: string, f2 = false): Promise<string> {
   const id = arm ? arm.id : RETEST
-  const r = await runPostflightRead(fixtureDeps(fixtureFor(arm, nowEt), true), { campaignId: id, stage, force: true })
+  const fx = f2 && arm ? (JSON.parse(fs.readFileSync(path.join(here, 'fixtures', 'threshold-50.json'), 'utf8').split(RETEST).join(arm.id).split('sudoku_funnel_retest').join(arm.uc)) as Fixture) : fixtureFor(arm as (typeof F3)[number] | null, nowEt)
+  if (f2) fx.now = `${nowEt}T12:05:00Z`
+  const r = await runPostflightRead(fixtureDeps(fx, true), { campaignId: id, stage, force: true })
   expect(r.read).toBeTruthy()
   for (const section of [r.read!.tagged?.summary, r.read!.site?.summary]) {
     expect(section).toBeTruthy()
     section!.p1.funnel.purchase = { web: 3, play: 2 }
     section!.p1.funnel['checkout-start'] = { web: 5 }
   }
-  return formatPostflightReport(r)
+  return withJson(formatPostflightReport(r), r)
 }
 
 describe('p1Line omitPurchases', () => {
@@ -90,9 +92,27 @@ describe.each(F3)('flight 3 $arm', (a) => {
     expect(text).toContain(P1_PURCHASES_OMITTED_NOTE)
     expect(text).toMatch(/tagged P1 beacons: .*checkout-start\/web 5/)
     expect(text).toMatch(/site-wide P1 beacons: .*checkout-start\/web 5/)
+    // The purchases read can still take the counts from the JSON section.
+    expect(text).toMatch(/"purchase": \{\s+"web": 3,\s+"play": 2\s+\}/)
   })
   it('the wrapup read still prints them (the purchases read is not on that date)', async () => {
     const text = await report(a, 'wrapup', addDays(end, 7))
+    expect(text).toContain('purchase/web 3, purchase/play 2')
+    expect(text).not.toContain(P1_PURCHASES_OMITTED_NOTE)
+  })
+})
+
+const F2 = [
+  { label: 'F2 search', id: '24311309184', uc: 'sudoku_funnel_f2_search' },
+  { label: 'F2 apps', id: '24316608605', uc: 'sudoku_funnel_f2_apps' },
+] as const
+describe.each(F2)('$label (flight 2 keeps its purchase rows)', (a) => {
+  it.each([
+    ['wrapup', '2026-10-17'],
+    ['day15', '2026-10-25'],
+  ] as const)('%s prints them and no omission note', async (stage, day) => {
+    const text = await report(a, stage, day, true)
+    expect(text).toContain(`post-flight ${stage} read`)
     expect(text).toContain('purchase/web 3, purchase/play 2')
     expect(text).not.toContain(P1_PURCHASES_OMITTED_NOTE)
   })

@@ -731,7 +731,7 @@ export interface P1BeaconCounts {
   inapp: Record<string, number>
 }
 /** Printed in place of the /funnel/purchase/* rows when a flight 3 day15 read leaves them out (the purchases read owns them). */
-export const P1_PURCHASES_OMITTED_NOTE = 'purchase rows not shown here (the flight 3 purchases read owns them)'
+export const P1_PURCHASES_OMITTED_NOTE = 'purchase rows not shown here (the flight 3 purchases read owns them; the JSON below still holds them)'
 /** One report line for the P1 counters, or null while every counter is zero (nothing shipped yet).
  * `omitPurchases` leaves the /funnel/purchase/* rows out (the flight 3 day15 read only; flight 2 output is pinned byte-identical).
  * Row counts only; old rows without a reason segment read as `legacy`. */

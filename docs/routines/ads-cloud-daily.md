@@ -60,8 +60,8 @@ code, relay what it says, and (Part A only) write a short analysis from its own 
 9. Delivery (Mike, 2026-10-18): never call PushNotification; nothing automated pushes to his
    phone. Wherever this runbook says push, compose the same lines but they go into the run's ONE
    Agent Findings finding, written as the last step (the saved prompt's REPORTING block and AGENT
-   FINDINGS CONTRACT define the write; they win over any push step here). Bus messages
-   (`agent_send`) are unaffected.
+   FINDINGS CONTRACT define the write; they win over any push step here; trim the lines to the
+   finding's 300-character detail limit). Bus messages (`agent_send`) are unaffected.
 
 ## Legs (the lead edits this table; the only other per-campaign edit is "To activate flight 3")
 
@@ -435,7 +435,7 @@ If ARMS is empty AND REPORTS is empty: print
 `no live leg and no post-flight report on DATE; nothing to do` and stop. No push, no bus
 message, no install.
 
-0.3 Tools. Find the PushNotification tool and the deckhand `agent_send` tool (ToolSearch by
+0.3 Tools. Find the deckhand `agent_send` tool (PushNotification is never used, rule 9; ToolSearch by
 the bare name `agent_send`, under any prefix). Note which are missing; do not stop for that.
 
 0.4 Install and preflight (the cloud-check preflight runs before any read, so a credential
@@ -569,13 +569,16 @@ A3. Notify. Part A is the DAILY summary: every run with at least one arm in ARMS
 push line set (never more, across all arms; it goes into the run's finding, hard rule 9) and one
 bus message per arm (per "Bus delivery of a report"), except as the next bullet says.
 - **Flight 3 arm on Flight end + 1 (D + 7): no push and no bus message.** When DATE is a
-  `by-date` arm's Flight end + 1, run A1 as usual (the CLI stores that arm's D1 readings row) and
+  `by-date` arm's Flight end + 1, run A1 as usual (the CLI stores that arm's D1 readings row, or
+  finds it already stored by the 07:05 read) and
   write its A2 analysis, but add NO line for it to the push lines and send NO bus message for it.
   The local gss-ads-f3-final-read task (07:05 ET) is the one reporter of the D + 7 verdict. Say so
   in Step 3 (`F3 D + 7 verdict: reported by gss-ads-f3-final-read; push and bus not sent for this
-  arm`). This covers a threshold-read arm and a FAILED arm too. Flight 2, the other flight 3 days
-  and every other arm in the same run are unchanged. If every arm in ARMS is suppressed this way,
-  send nothing at all.
+  arm`). This covers a threshold-read arm and a FAILED arm too (a failed read still shows in the
+  run's finding). Flight 2, the other flight 3 days and every other arm in the same run are
+  unchanged. TEST mode ignores this bullet. If every arm in ARMS is suppressed this way, send no
+  push lines and no bus message at all; the run's finding (hard rule 9) is still written: a quiet
+  fyi naming the hand-off, or `FAILED:` with expect "act" if a read or Step 0.4 failed.
 - Push: ONE PushNotification, one line per arm in table order, each line plain ASCII and under
   200 characters:
   - an arm with push=true: its exact `text=` value;
@@ -591,7 +594,7 @@ bus message per arm (per "Bus delivery of a report"), except as the next bullet 
   newline dropped (numbered parts if over 15000 characters). A FAILED arm sends one message
   with body `<arm name> daily read did not run: REASON`. The A2 analysis is not in the bus
   body; it goes in Step 3.
-- If PushNotification or `agent_send` is missing, skip that send and say so in Step 3.
+- If `agent_send` is missing, skip that send and say so in Step 3.
 
 A4. Report page (optional). Only when an Artifact tool exists in this session AND the arm's
 legs-table row has a Page link; otherwise skip silently and write `artifact: n/a` in Step 3.
@@ -676,7 +679,7 @@ The `notify` JSON both CLIs print (fields the steps above read):
 In this order, plain ASCII:
 1. If any report has a `READ FAILED` line or a release-health `ALERT` line, lead with it
    exactly as reported (for an alert: its parent and child counts).
-2. Part A: each arm's A2 analysis, then at most three lines: push sent|not sent|tool missing,
+2. Part A: each arm's A2 analysis, then at most three lines: finding written|not written (never a push),
    bus sent (count)|not sent|failed|tool missing, artifact published|not published|n/a; any `errors` in plain words (no paths, no values);
    on a threshold read, the proposal and kill-rule results exactly as the report states them.
    Name any diagnostics ANOMALY line as a proposal for Mike.
