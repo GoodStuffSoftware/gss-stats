@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
 import { fixtureDeps, type Fixture } from './cli'
 import { runMorningRead, runPostflightRead } from './read'
-import { APPS_PLAY_CREDIT_NOTE, APPS_PLAY_RELEASE_CAVEAT, formatMorningReport, formatPostflightReport } from './report'
+import { APPS_PAUSED_NOTE, APPS_PLAY_CREDIT_NOTE, APPS_PLAY_RELEASE_CAVEAT, formatMorningReport, formatPostflightReport } from './report'
 import { MIN_COHORT } from '../../src/lib/popupEvents'
 import { ADS_READ_PLANS, postflightDueDate, type ReadingRecord } from '../../src/lib/adsRules'
 import { campaignById, STAGED_FLIGHT_3_DATES } from '../../src/lib/campaigns'
@@ -106,6 +106,8 @@ describe.each(ARMS)('$label', (a) => {
     for (const report of reads) {
       if (a.caveat) expect(report).toContain(APPS_PLAY_CREDIT_NOTE)
       else expect(report).not.toContain('Play installs credited')
+      if (a.caveat) expect(report).toContain(APPS_PAUSED_NOTE)
+      else expect(report).not.toContain('Paused 10-19')
     }
   })
 })

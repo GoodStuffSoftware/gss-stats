@@ -160,6 +160,9 @@ export const APPS_PLAY_RELEASE_CAVEAT = "Read caveat: Play installs credited fro
 /** The flight 3 Apps standing note, printed under the per-tag split on EVERY flight 3 Apps read whatever its date (the per-tag split exists only for the multi-tag Apps arm, so Search and flight 2 reads never carry it). Informational: it is separate from the gated caveat above. */
 export const APPS_PLAY_CREDIT_NOTE = "Note: Play installs credited from v1.99.2+, public 10-17 06:34Z, before flight 3's first serve."
 
+/** The flight 3 Apps early-pause note, printed with the Play-credit note on EVERY flight 3 Apps read (same Apps-only per-tag block), so the D+7 read carries it. Dated data: paused 2026-10-19T04:59:56Z (00:59 ET) on Mike's pick by day-3 rules 6 and 7; last serving day 10-18. */
+export const APPS_PAUSED_NOTE = "Note: Paused 10-19 00:59 ET by day-3 rules 6 and 7 (Mike)."
+
 /** Where a campaign's reading window starts (its attribution start), null when unknown. */
 function readStartOf(campaignId: string): number | null {
   const c = campaignById(campaignId)
@@ -189,6 +192,7 @@ export function tagSplitLines(sp: TagSplit | null | undefined, readStartMs?: num
   out.push(sp.costRead ? `  ad cost through ${sp.costThroughEt ?? '—'} (closed days; Google Ads ad_group_ad, read-only)` : `  ad cost: not read (${sp.costError ?? 'unknown'})`)
   if (appsPlayCaveatApplies(readStartMs)) out.push(APPS_PLAY_RELEASE_CAVEAT)
   out.push(APPS_PLAY_CREDIT_NOTE)
+  out.push(APPS_PAUSED_NOTE)
   return out
 }
 

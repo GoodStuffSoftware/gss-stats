@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.54.10] — 2026-10-19
+
+### Added
+- **Flight 3 Apps reads note the early pause.** Every Apps read, including the D+7 one, now says the arm was paused 10-19 00:59 ET by day-3 rules 6 and 7, with its dates unchanged.
+
 ## [0.54.9] — 2026-10-18
 
 ### Added
