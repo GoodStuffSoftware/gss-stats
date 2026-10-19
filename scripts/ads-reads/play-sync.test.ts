@@ -22,8 +22,9 @@ function section(over: Partial<PlayReportsSection> = {}): PlayReportsSection {
     storePerformanceLagDays: null,
     installsByDay: DAYS,
     // The reader also returns acquisition splits: the sync must never store them.
-    acquisitionByCountry: [{ date: '2026-09-27', dimension: 'US', visitors: 9, acquisitions: 2, conversionRate: 0.2 }] as PlayReportsSection['acquisitionByCountry'],
+    acquisitionByCountry: [{ date: '2026-09-27', dimension: 'US', utmCampaign: null, visitors: 9, acquisitions: 2, conversionRate: 0.2 }] as PlayReportsSection['acquisitionByCountry'],
     acquisitionBySource: [],
+    acquisitionByUtmCampaign: [],
     retentionNote: RETENTION_NOTE,
     householdNote: HOUSEHOLD_NOTE,
     checkpoints: [],

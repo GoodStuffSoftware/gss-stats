@@ -16,7 +16,7 @@
 // writes the beacon's gss-geo database.
 
 import type { CampaignFlight } from './campaigns'
-import { CAMPAIGNS } from './campaigns'
+import { CAMPAIGNS, STAGED_ARMS, type StagedArm } from './campaigns'
 import {
   microsToDollars,
   readingEntryKind,
@@ -500,7 +500,7 @@ const F3_VERDICTS: readonly string[] = ['PASS', 'PROPOSE PAUSE', 'NOT YET', 'NO 
 export function parseReadingF3(raw: unknown): ReadingF3 | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
   const o = raw as Record<string, unknown>
-  if (o.arm !== 'apps' && o.arm !== 'search') return undefined
+  if (typeof o.arm !== 'string' || !STAGED_ARMS.includes(o.arm as StagedArm)) return undefined
   if (typeof o.flightDay !== 'number' || !Number.isFinite(o.flightDay) || !Array.isArray(o.readouts)) return undefined
   const proposal = o.proposal === 'PROPOSE PAUSE' || o.proposal === 'CONTINUE' ? o.proposal : null
   const readouts: ReadingF3['readouts'] = []
@@ -512,7 +512,7 @@ export function parseReadingF3(raw: unknown): ReadingF3 | undefined {
     if (typeof x.verdict !== 'string' || !F3_VERDICTS.includes(x.verdict)) return undefined
     readouts.push({ n: x.n, name: x.name, number: x.number, threshold: x.threshold, verdict: x.verdict as ReadoutVerdict })
   }
-  return { v: 1, arm: o.arm, flightDay: o.flightDay, readouts, proposal }
+  return { v: 1, arm: o.arm as StagedArm, flightDay: o.flightDay, readouts, proposal }
 }
 
 // ── The store over any D1-shaped database ─────────────────────────────────────────────────

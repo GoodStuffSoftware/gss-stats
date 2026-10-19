@@ -126,6 +126,11 @@ export interface StagedArmConfig {
   /** The ad schedule's start (serves 12:00-24:00 ET): the attribution lower bound. */
   flightStartTimeEt: string
   servingHoursEt: [number, number]
+  /** Where the ads send people; unset = 'web'. A 'play-direct' arm goes straight to the Play listing: its
+   * tracking check (flight3Rules.ts rule 5) and its Play Console install lines follow from this property, not from any id. */
+  kind?: 'web' | 'play-direct'
+  /** How many serving days the arm's window may span, both ends inclusive; unset = exactly 7 (flightEnd = flightStart + 6). */
+  servingDays?: { min: number; max: number }
   notes: string
 }
 export const STAGED_FLIGHT_3: Record<StagedArm, StagedArmConfig> = {
@@ -177,16 +182,28 @@ export const STAGED_FLIGHT_3: Record<StagedArm, StagedArmConfig> = {
 }
 
 /** The CampaignFlight for a staged arm from its dates: the flight start (the enable day) and the
- * flight end (start + 6, 7 serving days). The campaign id is the arm's own (STAGED_FLIGHT_3[arm].ids);
- * `v.id` overrides it for tests that use a made-up id. Throws on anything that would register a wrong
- * campaign: a non-numeric id, a malformed date, or a window that is not seven days. */
+ * flight end. The campaign id is the arm's own (STAGED_FLIGHT_3[arm].ids); `v.id` overrides it for
+ * tests that use a made-up id. Throws on anything that would register a wrong campaign: a
+ * non-numeric id, a malformed date, or a window outside the arm's serving days (seven for an arm
+ * that sets no `servingDays`). */
 export function stagedCampaign(arm: StagedArm, v: { id?: string; flightStart: string; flightEnd: string }): CampaignFlight {
-  const id = v.id ?? STAGED_FLIGHT_3[arm].ids.campaignId
+  return buildStagedCampaign(arm, STAGED_FLIGHT_3[arm], { ...v, id: v.id ?? STAGED_FLIGHT_3[arm].ids.campaignId })
+}
+/** stagedCampaign() over any arm config (exported so a made-up config can be tested without touching the registry). */
+export function buildStagedCampaign(arm: string, c: StagedArmConfig, v: { id: string; flightStart: string; flightEnd: string }): CampaignFlight {
+  const id = v.id
   if (!/^\d+$/.test(id)) throw new Error(`staged flight 3 ${arm}: campaign id must be the numeric Google Ads id, got ${JSON.stringify(id)}`)
   const dateRe = /^\d{4}-\d{2}-\d{2}$/
   if (!dateRe.test(v.flightStart) || !dateRe.test(v.flightEnd)) throw new Error(`staged flight 3 ${arm}: flightStart and flightEnd must be YYYY-MM-DD`)
-  if (v.flightEnd !== addDays(v.flightStart, 6)) throw new Error(`staged flight 3 ${arm}: flightEnd must be flightStart + 6 (7 serving days), got ${v.flightStart} .. ${v.flightEnd}`)
-  const c = STAGED_FLIGHT_3[arm]
+  const days = c.servingDays ?? { min: 7, max: 7 }
+  const ok = Array.from({ length: days.max - days.min + 1 }, (_, k) => days.min + k).some((d) => v.flightEnd === addDays(v.flightStart, d - 1))
+  if (!ok) {
+    throw new Error(
+      days.min === days.max
+        ? `staged flight 3 ${arm}: flightEnd must be flightStart + ${days.max - 1} (${days.max} serving days), got ${v.flightStart} .. ${v.flightEnd}`
+        : `staged flight 3 ${arm}: the window must span ${days.min} to ${days.max} serving days (flightEnd between flightStart + ${days.min - 1} and flightStart + ${days.max - 1}), got ${v.flightStart} .. ${v.flightEnd}`,
+    )
+  }
   return {
     id,
     label: c.label,
@@ -195,7 +212,7 @@ export function stagedCampaign(arm: StagedArm, v: { id?: string; flightStart: st
     flightStartTimeEt: c.flightStartTimeEt,
     flightEnd: v.flightEnd,
     status: 'upcoming',
-    kind: 'web',
+    kind: c.kind ?? 'web',
     dailyBudgetUsd: c.dailyBudgetUsd,
     hardCapUsd: c.hardCapUsd,
     servingHoursEt: [...c.servingHoursEt],

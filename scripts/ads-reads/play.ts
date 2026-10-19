@@ -213,6 +213,8 @@ export function shapeInstallsOverview({ header, records }: { header: string[]; r
 export interface PlayAcquisitionRow {
   date: string
   dimension: string | null
+  /** The traffic-source file's "UTM campaign" column; null in the country file or when the column is absent. */
+  utmCampaign: string | null
   visitors: number | null
   acquisitions: number | null
   conversionRate: number | null
@@ -226,6 +228,7 @@ export function shapeStorePerformance({ header, records }: { header: string[]; r
   const visitorsCol = findCol(header, ['Store listing visitors', 'Store Listing Visitors', 'Visitors'])
   const acqCol = findCol(header, ['Store listing acquisitions', 'Store Listing Acquisitions', 'Installers', 'Acquisitions'])
   const cvrCol = findCol(header, ['Store listing conversion rate', 'Store Listing Conversion Rate', 'Conversion Rate'])
+  const utmCol = findCol(header, ['UTM campaign', 'UTM Campaign'])
   if (!dateCol) return []
   return records.map((r) => {
     const visitors = visitorsCol ? toNum(r[visitorsCol]) : null
@@ -233,11 +236,43 @@ export function shapeStorePerformance({ header, records }: { header: string[]; r
     return {
       date: normalizeDate(r[dateCol]),
       dimension: dimCol ? String(r[dimCol]) : null,
+      utmCampaign: utmCol ? String(r[utmCol]).trim() : null,
       visitors,
       acquisitions,
       conversionRate: cvrCol ? toNum(r[cvrCol]) : visitors && acquisitions !== null ? acquisitions / visitors : null,
     }
   })
+}
+
+/** One utm_campaign's store-listing totals over a window, exactly as Play prints them. */
+export interface PlayUtmCampaignRow {
+  utmCampaign: string
+  visitors: number
+  acquisitions: number
+  /** First and last date that had a row for this utm_campaign inside the window. */
+  firstDate: string
+  lastDate: string
+}
+/** Play prints these in the UTM campaign column when a visit carried no campaign tag. */
+const UTM_NO_CAMPAIGN = new Set(['', 'other', '(not set)', 'not set', '(none)'])
+
+/** Traffic-source rows -> store-listing visitors and acquisitions per utm_campaign (aggregate counts
+ * only: no visitor id, no per-day or per-source split). Rows with no campaign tag are left out.
+ * These are LISTING acquisitions (people who installed after a visit to the Play listing, by Play's
+ * own attribution), not device installs: the installs-by-day figures differ on purpose. */
+export function sumByUtmCampaign(rows: readonly PlayAcquisitionRow[]): PlayUtmCampaignRow[] {
+  const byTag = new Map<string, PlayUtmCampaignRow>()
+  for (const r of rows) {
+    const tag = (r.utmCampaign ?? '').trim()
+    if (UTM_NO_CAMPAIGN.has(tag.toLowerCase())) continue
+    const cur = byTag.get(tag) ?? { utmCampaign: tag, visitors: 0, acquisitions: 0, firstDate: r.date, lastDate: r.date }
+    cur.visitors += r.visitors ?? 0
+    cur.acquisitions += r.acquisitions ?? 0
+    if (r.date < cur.firstDate) cur.firstDate = r.date
+    if (r.date > cur.lastDate) cur.lastDate = r.date
+    byTag.set(tag, cur)
+  }
+  return [...byTag.values()].sort((a, b) => a.utmCampaign.localeCompare(b.utmCampaign))
 }
 
 export function filterDateRange<T extends { date: string }>(rows: T[], since: string, until: string): T[] {
@@ -312,6 +347,8 @@ export interface PlayReportsSection {
   installsByDay: PlayInstallDay[] | null
   acquisitionByCountry: PlayAcquisitionRow[] | null
   acquisitionBySource: PlayAcquisitionRow[] | null
+  /** Store-listing visitors and acquisitions per utm_campaign over the requested window (the traffic-source file's UTM column); null when not read. */
+  acquisitionByUtmCampaign: PlayUtmCampaignRow[] | null
   retentionNote: string
   householdNote: string
   checkpoints: PlayCheckpoint[]
@@ -358,6 +395,7 @@ export async function readPlayReports(
     installsByDay: null,
     acquisitionByCountry: null,
     acquisitionBySource: null,
+    acquisitionByUtmCampaign: null,
     retentionNote: RETENTION_NOTE,
     householdNote: HOUSEHOLD_NOTE,
     checkpoints: [],
@@ -425,6 +463,7 @@ export async function readPlayReports(
   out.installsByDay = filterDateRange(overviewRows, opts.since, opts.until).sort((a, b) => a.date.localeCompare(b.date))
   out.acquisitionByCountry = filterDateRange(countryRows, opts.since, opts.until).sort((a, b) => a.date.localeCompare(b.date))
   out.acquisitionBySource = filterDateRange(sourceRows, opts.since, opts.until).sort((a, b) => a.date.localeCompare(b.date))
+  out.acquisitionByUtmCampaign = sumByUtmCampaign(out.acquisitionBySource)
 
   // Horizon and lag are computed from ALL rows read for the requested months, not just the
   // since/until-filtered slice, so a narrow window still reports the true reporting horizon.

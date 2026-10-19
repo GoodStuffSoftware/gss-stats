@@ -33,6 +33,7 @@ import { appsPlayCaveatApplies, coachMeasurementNote, measurementReportLines, ne
 import { noteRawText } from '../../src/lib/notes'
 import { F3_ARM_BASELINES, ruleReadoutLine, type Flight3Block } from '../../src/lib/flight3Rules'
 import { searchAdsSideLines } from '../../src/lib/searchAdsSide'
+import { playDirectLines } from './playDirect'
 import type { DiagnosticsSection, FullRead, MorningResult, PostflightResult, SpendSection } from './read'
 import type { FirebaseCounts } from './firebase'
 import { IMPRESSIONS_UNEVEN_GAP, type ImpressionsBalance, type TagSplit } from '../../src/lib/tagSplit'
@@ -366,6 +367,8 @@ export function formatMorningReport(r: MorningResult): string {
   if (diag.length) out.push('', ...diag)
   const playLines = playReportsLines(r.playReports)
   if (playLines.length) out.push('', ...playLines)
+  const pdLines = playDirectLines(r.playDirect)
+  if (pdLines.length) out.push('', ...pdLines)
   if (r.thresholdRead) out.push('', ...fullReadLines(r.thresholdRead, `THRESHOLD READ at $${Math.max(...r.thresholdRead.thresholds)}`, { f3Block: !!r.flight3, readStartMs: readStartOf(r.campaign.id) }))
   out.push('', storeLine(r))
   out.push(`Errors: ${r.errors.length ? r.errors.join(' | ') : 'none'}`)
@@ -534,6 +537,8 @@ export function formatPostflightReport(r: PostflightResult): string {
   out.push(`Spend ended ${r.spendEndEt ?? '—'}; this stage is due ${r.dueEt ?? '—'} (${r.due ? 'due' : 'NOT due yet'})`)
   if (r.postFlightSpend) out.push(`After-flight spend: [${r.postFlightSpend.status}] ${r.postFlightSpend.detail}`)
   if (r.hardCap) out.push(`Hard cap: [${r.hardCap.status}] ${r.hardCap.detail}`)
+  const pdLines = playDirectLines(r.playDirect)
+  if (pdLines.length) out.push('', ...pdLines)
   if (r.read) out.push('', ...fullReadLines(r.read, `POST-FLIGHT ${r.stage.toUpperCase()}`, { postflight: true, readStartMs: readStartOf(r.campaign.id) }))
   const b = r.promoSplit.beacon
   if (b) {

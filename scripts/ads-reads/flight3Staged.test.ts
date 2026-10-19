@@ -28,6 +28,7 @@ import {
   STAGED_FLIGHT_3,
   STAGED_FLIGHT_3_DATES,
   assertOrganicReserved,
+  buildStagedCampaign,
   campaignAttributionClause,
   campaignAttributionStartMs,
   campaignById,
@@ -309,6 +310,18 @@ describe('activation is an id and dates only', () => {
     expect(() => stagedCampaign('apps', { ...ok, flightStart: 'TBD' })).toThrow(/YYYY-MM-DD/)
     expect(() => stagedCampaign('apps', { ...ok, flightEnd: '2026-10-27' })).toThrow(/flightStart \+ 6/)
     expect(() => stagedCampaign('apps', { ...ok, flightEnd: '2026-10-25' })).toThrow(/flightStart \+ 6/)
+  })
+  it('an arm that sets servingDays accepts a shorter window and carries its kind; the 7-day arms still refuse one', () => {
+    const play = { ...STAGED_FLIGHT_3.apps, ucValues: ['sudoku_funnel_f3_test_play'], kind: 'play-direct' as const, servingDays: { min: 4, max: 7 }, hardCapUsd: 49.14 }
+    const at = (flightStart: string, flightEnd: string) => buildStagedCampaign('testPlay', play, { id: '99900000013', flightStart, flightEnd })
+    for (const end of ['2026-10-23', '2026-10-24', '2026-10-25', '2026-10-26']) expect(at('2026-10-20', end)).toMatchObject({ kind: 'play-direct', flightEnd: end, hardCapUsd: 49.14, status: 'upcoming' })
+    expect(() => at('2026-10-20', '2026-10-22')).toThrow(/4 to 7 serving days/) // 3 days is too short
+    expect(() => at('2026-10-20', '2026-10-27')).toThrow(/4 to 7 serving days/) // 8 days is too long
+    // 5 serving days (the enable day through the 10-23 end)
+    expect(at('2026-10-19', '2026-10-23').flightEnd).toBe('2026-10-23')
+    // an arm with no servingDays keeps the seven-day rule and the web kind
+    expect(() => buildStagedCampaign('apps', STAGED_FLIGHT_3.apps, { id: APPS_ID, flightStart: START, flightEnd: '2026-10-23' })).toThrow(/flightStart \+ 6/)
+    expect(stagedCampaign('apps', { id: APPS_ID, flightStart: START, flightEnd: END }).kind).toBe('web')
   })
   it('a registered staged pair reads through the same code as flight 2: plan, label, audit folder, window day 2 .. end + 1', () => {
     CAMPAIGNS.push(stagedCampaign('apps', { id: APPS_ID, flightStart: START, flightEnd: END }), stagedCampaign('search', { id: SEARCH_ID, flightStart: '2026-10-21', flightEnd: '2026-10-27' }))
