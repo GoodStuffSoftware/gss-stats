@@ -16,6 +16,7 @@ import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { redact, redactedFirstLine, registerSecret } from '../../src/lib/adsRedact'
+import { findBwsToken } from './bwsToken'
 import { cloudEnvKey, prodProjectId, prodSecrets, runBwsBinary } from './bwsProd'
 import { BWS_KEYS, type BwsRunner } from './secrets'
 
@@ -120,8 +121,7 @@ export interface CloudEnvDeps {
 
 export async function runCloudEnv(d: CloudEnvDeps): Promise<void> {
   if (d.platform !== 'win32') throw new Error('ads:cloud-env copies to the Windows clipboard; run it on Windows')
-  if (!d.env.BWS_ACCESS_TOKEN) throw new Error('BWS_ACCESS_TOKEN is not set')
-  registerSecret(d.env.BWS_ACCESS_TOKEN)
+  if (!findBwsToken(d.env)) throw new Error('BWS_ACCESS_TOKEN is not set (and the token file ~/.bws-token is missing or empty)')
   const prodId = await prodProjectId(d.bws)
   const secrets = await prodSecrets(d.bws, prodId)
   let built: { block: string; names: string[] } | null = buildEnvBlock(secrets)

@@ -62,7 +62,7 @@ interface CheckSpec {
 
 function specs(env: Env, probes: CloudCheckProbes): CheckSpec[] {
   const adsNames = Object.values(ENV_KEYS)
-  const source = adsCredentialSource(env)
+  const source = adsCredentialSource(env, { useFile: false })
   // With BWS_ACCESS_TOKEN set the CLI takes the bws path (the local default), so the ADS_*
   // names are reported but not required. Otherwise either credential set passes:
   // ADS_SA_B64 + ADS_DEVELOPER_TOKEN (the service account, which wins when ADS_SA_B64 is set),

@@ -24,6 +24,8 @@ export default defineConfig({
     port: 5173,
   },
   test: {
+    // Keeps tests off the operator's real bws token file (~/.bws-token); the bws-token tests set their own.
+    env: { BWS_TOKEN_FILE: os.tmpdir() + '/gss-stats-vitest-no-such-bws-token' },
     // workers/live imports the Workers runtime module `cloudflare:workers`, which Node does not have.
     alias: {
       'cloudflare:workers': fileURLToPath(new URL('./workers/live/test/cloudflare-workers-stub.ts', import.meta.url)),

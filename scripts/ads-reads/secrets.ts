@@ -1,7 +1,7 @@
 // Google Ads API credentials, held in process memory ONLY: never printed, logged, returned in
 // the JSON block, passed on a command line, or written to disk. Two sources, in this order:
-//  1. Bitwarden Secrets Manager (`bws secret list`) when BWS_ACCESS_TOKEN is set — the local
-//     default, unchanged.
+//  1. Bitwarden Secrets Manager (`bws secret list`) when a bws token is available (BWS_ACCESS_TOKEN, else the
+//     file ~/.bws-token; bwsToken.ts) — the local default.
 //  2. Otherwise plain env vars, for the claude.ai cloud routine, which has no bws. Either
 //     ADS_SA_B64 (a read-only service account's JSON key, base64 on one line, signed in with an
 //     RS256 JWT for the adwords scope) plus ADS_DEVELOPER_TOKEN, or all four of ADS_CLIENT_ID /
@@ -15,6 +15,7 @@
 
 import { execFile } from 'node:child_process'
 import { registerSecret, redactedFirstLine } from '../../src/lib/adsRedact'
+import { bwsChildEnv, findBwsToken } from './bwsToken'
 import { EXTERNAL_TIMEOUT_MS, TIMED_OUT_TEXT } from './wrangler'
 import type { AdsAuth, AdsCredentials, AdsTokenAuth } from '../../src/lib/adsApi'
 import { ADWORDS_SCOPE, serviceAccountAccessToken, type ServiceAccountKey } from './googleSa'
@@ -49,7 +50,7 @@ export function adsCredentialsFromEnv(env: Env): { creds: AdsCredentials | null;
 
 /** The error when neither source is usable: variable NAMES only. */
 export function missingAdsCredentialsMessage(missingEnv: readonly string[]): string {
-  return `no Google Ads credentials: set BWS_ACCESS_TOKEN (Bitwarden Secrets Manager), or ${ADS_SA_ENV} and ${ENV_KEYS.developerToken}, or all of ${Object.values(ENV_KEYS).join(', ')} (missing: ${missingEnv.join(', ')})`
+  return `no Google Ads credentials: set BWS_ACCESS_TOKEN or the token file ~/.bws-token (Bitwarden Secrets Manager), or ${ADS_SA_ENV} and ${ENV_KEYS.developerToken}, or all of ${Object.values(ENV_KEYS).join(', ')} (missing: ${missingEnv.join(', ')})`
 }
 
 /** The service-account alternative to the refresh-token env set. */
@@ -105,10 +106,10 @@ export function pickAdsCredentials(list: unknown): { creds: AdsCredentials | nul
 
 export type BwsRunner = (args: string[]) => Promise<{ code: number; stdout: string; stderr: string }>
 
-function runBws(args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+function runBws(args: string[], token: string): Promise<{ code: number; stdout: string; stderr: string }> {
   const bin = process.env.BWS_BIN || 'bws'
   return new Promise((resolve) => {
-    execFile(bin, args, { maxBuffer: 32 * 1024 * 1024, windowsHide: true, env: process.env, timeout: EXTERNAL_TIMEOUT_MS }, (err, stdout, stderr) => {
+    execFile(bin, args, { maxBuffer: 32 * 1024 * 1024, windowsHide: true, env: bwsChildEnv(token), timeout: EXTERNAL_TIMEOUT_MS }, (err, stdout, stderr) => {
       const e = err as (NodeJS.ErrnoException & { killed?: boolean; signal?: string }) | null
       if (e && e.killed) {
         resolve({ code: 124, stdout: '', stderr: `bws ${TIMED_OUT_TEXT}` })
@@ -122,11 +123,8 @@ function runBws(args: string[]): Promise<{ code: number; stdout: string; stderr:
 
 /** Which source loadAdsAuth() will use for this env (no I/O): bws, the service account
  * (env-sa), the refresh-token env set (env), or none. */
-export function adsCredentialSource(env: Env = process.env): 'bws' | 'env-sa' | 'env' | null {
-  if (env.BWS_ACCESS_TOKEN) {
-    registerSecret(env.BWS_ACCESS_TOKEN)
-    return 'bws'
-  }
+export function adsCredentialSource(env: Env = process.env, opts: { useFile?: boolean } = {}): 'bws' | 'env-sa' | 'env' | null {
+  if (findBwsToken(env, opts)) return 'bws'
   if (env[ADS_SA_ENV]?.trim()) return 'env-sa'
   return adsCredentialsFromEnv(env).creds ? 'env' : null
 }
@@ -135,7 +133,7 @@ export function adsCredentialSource(env: Env = process.env): 'bws' | 'env-sa' | 
  * refresh-token env set. Every value is registered with redact() before any use. */
 export async function loadAdsAuth(opts: { env?: Env; runBws?: BwsRunner } = {}): Promise<AdsAuth> {
   const env = opts.env ?? process.env
-  if (!env.BWS_ACCESS_TOKEN && env[ADS_SA_ENV]?.trim()) {
+  if (!findBwsToken(env) && env[ADS_SA_ENV]?.trim()) {
     if (env.GOOGLE_ADS_LOGIN_CUSTOMER_ID) {
       process.stderr.write('note: GOOGLE_ADS_LOGIN_CUSTOMER_ID is set in the environment and is ignored (no login-customer-id header is ever sent)\n')
     }
@@ -152,14 +150,14 @@ export async function loadAdsCredentials(opts: { env?: Env; runBws?: BwsRunner }
     // Never used: the routine queries customer 8726535246 directly, with no manager header.
     process.stderr.write('note: GOOGLE_ADS_LOGIN_CUSTOMER_ID is set in the environment and is ignored (no login-customer-id header is ever sent)\n')
   }
-  if (!env.BWS_ACCESS_TOKEN) {
+  const token = findBwsToken(env)
+  if (!token) {
     const { creds, missing } = adsCredentialsFromEnv(env)
     if (!creds) throw new Error(missingAdsCredentialsMessage(missing))
     for (const v of Object.values(creds)) registerSecret(v)
     return creds
   }
-  registerSecret(env.BWS_ACCESS_TOKEN)
-  const res = await (opts.runBws ?? runBws)(['secret', 'list', '--output', 'json', '--color', 'no'])
+  const res = await (opts.runBws ?? ((a: string[]) => runBws(a, token)))(['secret', 'list', '--output', 'json', '--color', 'no'])
   if (res.code !== 0) throw new Error(`bws secret list failed (exit ${res.code}): ${redactedFirstLine(res.stderr)}`)
   let parsed: unknown
   try {

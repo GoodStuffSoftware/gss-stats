@@ -29,6 +29,7 @@ import { exec, execFile } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import { redact, redactedFirstLine, registerSecret } from '../../src/lib/adsRedact'
 import { createTimedFetch, type FetchLike } from '../../src/lib/adsApi'
+import { resolveBwsToken } from './bwsToken'
 import { cloudEnvKey, createProdSecret, prodProjectId, prodSecrets, runBwsBinary } from './bwsProd'
 import { BWS_KEYS, type BwsRunner } from './secrets'
 import { resolveCfAccountId } from './cfAccount'
@@ -409,8 +410,7 @@ async function main() {
     process.exitCode = 1
     return
   }
-  if (!process.env.BWS_ACCESS_TOKEN) throw new Error('BWS_ACCESS_TOKEN is not set (the key goes straight into Bitwarden)')
-  registerSecret(process.env.BWS_ACCESS_TOKEN)
+  resolveBwsToken() // throws (naming both sources) when there is none; the key goes straight into Bitwarden
   await MINTERS[kind](liveMintDeps())
 }
 

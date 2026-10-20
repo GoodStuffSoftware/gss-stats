@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.57.1] — 2026-10-20
+
+### Fixed
+- **Ads reads find the Bitwarden token in its file.** When BWS_ACCESS_TOKEN is not set, the ads read tools take the token from ~/.bws-token (or BWS_TOKEN_FILE), and say plainly when neither exists.
+
 ## [0.57.0] — 2026-10-19
 
 ### Changed

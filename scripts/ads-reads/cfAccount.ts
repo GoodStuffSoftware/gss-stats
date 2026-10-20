@@ -6,6 +6,7 @@
 //     ads:cloud-env copies into the cloud routine's environment), when BWS_ACCESS_TOKEN is set.
 // Errors name the variable and the key, never a value.
 
+import { findBwsToken } from './bwsToken'
 import { cloudEnvKey, prodProjectId, prodSecrets, runBwsBinary } from './bwsProd'
 import type { BwsRunner } from './secrets'
 
@@ -29,7 +30,7 @@ export async function resolveCfAccountId(opts: { env?: Env; bws?: BwsRunner } = 
     if (!id) throw new Error(`${CF_ACCOUNT_ENV} is set but is not a 32-hex Cloudflare account id`)
     return id
   }
-  if (!opts.bws && !env.BWS_ACCESS_TOKEN) throw new Error(`no Cloudflare account id: set ${CF_ACCOUNT_ENV}, or BWS_ACCESS_TOKEN so it is read from bws prod ${CF_ACCOUNT_BWS_KEY}`)
+  if (!opts.bws && !findBwsToken(env)) throw new Error(`no Cloudflare account id: set ${CF_ACCOUNT_ENV}, or BWS_ACCESS_TOKEN (or the file ~/.bws-token) so it is read from bws prod ${CF_ACCOUNT_BWS_KEY}`)
   const bws = opts.bws ?? runBwsBinary
   const secrets = await prodSecrets(bws, await prodProjectId(bws))
   const id = parseCfAccountId(secrets.get(CF_ACCOUNT_BWS_KEY))
