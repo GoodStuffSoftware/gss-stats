@@ -1046,7 +1046,7 @@ npm run typecheck:scripts
   or an incomplete narrative fails the build and writes nothing.
 - **Spend** comes from the Google Ads REST API only (customer 8726535246, no manager
   header), and only through the shared sync (see [Ads data freshness](#ads-data-freshness)).
-  Credentials are read from Bitwarden Secrets Manager with `bws` (needs `BWS_ACCESS_TOKEN`),
+  Credentials are read from Bitwarden Secrets Manager with `bws` (needs `BWS_ACCESS_TOKEN`, else the token file `~/.bws-token`, or `BWS_TOKEN_FILE`),
   or from env vars when that is unset (see
   [Running the ads reads from env vars](#running-the-ads-reads-from-env-vars-cloud)), into
   process memory, and are never printed, logged or written.
@@ -1140,12 +1140,12 @@ npm run typecheck:scripts
 
 The claude.ai cloud routine has no `bws`, no key files and no `--cf-token-file`, so every
 credential the reads need can come from plain environment variables instead. Nothing here
-changes the local default: with `BWS_ACCESS_TOKEN` set, the Ads keys still come from Bitwarden.
+changes the local default: with a bws token available (`BWS_ACCESS_TOKEN`, else the file `~/.bws-token`), the Ads keys still come from Bitwarden.
 
 | Variable | Used for |
 |---|---|
-| `ADS_SA_B64`, `ADS_DEVELOPER_TOKEN` | Google Ads API through a service account, when `BWS_ACCESS_TOKEN` is unset: the service account's JSON key, base64 on one line, signed in with an RS256 JWT for the `adwords` scope (the same signer the Firestore reads use). The service account is added in Google Ads as a **Read only** user. Wins over the four variables below when set. The search requests carry the same headers either way. |
-| `ADS_CLIENT_ID`, `ADS_CLIENT_SECRET`, `ADS_REFRESH_TOKEN`, `ADS_DEVELOPER_TOKEN` | Google Ads API through a refresh token, when `BWS_ACCESS_TOKEN` and `ADS_SA_B64` are unset. All four are required. The names match the sync Worker's bindings ([`workers/sync/wrangler.toml`](workers/sync/wrangler.toml)). |
+| `ADS_SA_B64`, `ADS_DEVELOPER_TOKEN` | Google Ads API through a service account, when no bws token is available (no `BWS_ACCESS_TOKEN` and no `~/.bws-token`): the service account's JSON key, base64 on one line, signed in with an RS256 JWT for the `adwords` scope (the same signer the Firestore reads use). The service account is added in Google Ads as a **Read only** user. Wins over the four variables below when set. The search requests carry the same headers either way. |
+| `ADS_CLIENT_ID`, `ADS_CLIENT_SECRET`, `ADS_REFRESH_TOKEN`, `ADS_DEVELOPER_TOKEN` | Google Ads API through a refresh token, when no bws token is available and `ADS_SA_B64` is unset. All four are required. The names match the sync Worker's bindings ([`workers/sync/wrangler.toml`](workers/sync/wrangler.toml)). |
 | `FIRESTORE_SA_B64` | Firestore COUNT reads, when `--firebase-sa` is not given: the service-account JSON, base64-encoded on one line. It is decoded in memory and never written to disk. |
 | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | wrangler's D1 reads and writes (`gss-stats-ads` and the beacon's `gss-geo`), with no `--cf-token-file`. |
 
@@ -1173,7 +1173,7 @@ at print time, so a routine can relay the text exactly and still send ASCII.
 #### Minting the cloud keys into Bitwarden
 
 Three argument-free scripts mint the cloud routine's keys straight into Bitwarden (project
-`prod`), for an agent to run locally with `BWS_ACCESS_TOKEN` set. Each one refuses if its key
+`prod`), for an agent to run locally with a bws token available (`BWS_ACCESS_TOKEN`, else `~/.bws-token`). Each one refuses if its key
 already exists, hands the value to `bws secret create` from inside Node, and prints only
 `stored <KEY> (prod)` plus non-secret names (a service-account email, a project id, a key id,
 a token name and id). Service-account keys are created through the IAM REST API, so no key
@@ -2277,7 +2277,7 @@ the Cloudflare account id come from one of these at run time, never from a commi
 | Pages Functions (viewer list) | KV `STATS_CONFIG` keys `auth:viewer:<email>` ([View-only access](#view-only-access)) | `npx wrangler kv key put … --binding STATS_CONFIG --remote` |
 | `gss-stats-sync` Worker | Cloudflare Secrets Store (the four Google Ads credentials) | `npm run ads:worker-secrets` (from Bitwarden) |
 | GitHub Actions | Repo secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_WORKERS_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `GSS_GEO_D1_ID` | `gh secret set <NAME>`, value on stdin |
-| Local scripts (`scripts/`) | Bitwarden Secrets Manager (`bws`, `BWS_ACCESS_TOKEN`) or env vars; the account id is `CLOUDFLARE_ACCOUNT_ID`, else bws prod `infra--cloud-routine-env--CLOUDFLARE_ACCOUNT_ID` | `bws secret create` |
+| Local scripts (`scripts/`) | Bitwarden Secrets Manager (`bws`, token from `BWS_ACCESS_TOKEN`, else the file `~/.bws-token`) or env vars; the account id is `CLOUDFLARE_ACCOUNT_ID`, else bws prod `infra--cloud-routine-env--CLOUDFLARE_ACCOUNT_ID` | `bws secret create` |
 | Local `wrangler pages dev` | The gitignored `.dev.vars` ([`.dev.vars.example`](.dev.vars.example) lists the names) | by hand |
 
 What stays committed, on purpose: the binding ids `wrangler.toml` and `workers/sync/wrangler.toml`

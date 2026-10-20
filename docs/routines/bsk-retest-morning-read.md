@@ -117,7 +117,7 @@ write) for a manual/debug run, but the scheduled trigger never passes it — the
 above already covers release health.
 
 Not `--dry-run`: this run is the one that syncs spend, appends the daily line and marks a
-fired threshold. Never run `npm run ads:sync` before it "to be safe": the read syncs itself. `BWS_ACCESS_TOKEN` is already in the environment. If the service-account
+fired threshold. Never run `npm run ads:sync` before it "to be safe": the read syncs itself. The bws token is `BWS_ACCESS_TOKEN` if set, else the file `~/.bws-token`, which the CLI reads itself. If the service-account
 file is missing, drop `--firebase-sa` (the account counts then read "not read"); never go
 looking for other credentials. Same for `--play-sa`: if that file is missing, drop the flag
 (the Play bulk-reports section then reads "not read (--play-sa not given)"); never substitute
