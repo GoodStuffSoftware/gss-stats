@@ -121,7 +121,7 @@ describe('sign-ups: "at most N" until the new/existing split is live, then exact
 
 describe('kill rule 3: the ask definition is unchanged by the new instrumentation', () => {
   it('asks are exactly the sign-in placement/streak/tutorial prompts and the first-50 offer shown', () => {
-    expect([...ASK_PATHS]).toEqual(['/signin-prompt/placement', '/signin-prompt/streak', '/signin-prompt/tutorial', '/signin-prompt/committed-repeat', '/signin-prompt/committed-challenge', '/promo-first50/shown'])
+    expect([...ASK_PATHS]).toEqual(['/signin-prompt/placement', '/signin-prompt/streak', '/signin-prompt/tutorial', '/signin-prompt/committed-repeat', '/signin-prompt/committed-challenge', '/signin-prompt/first-finish', '/promo-first50/shown'])
     const s = summarizeTaggedRows([
       row('2026-09-29T21:00:00Z', '/upsell/shown/game-limit', 5),
       row('2026-09-29T21:00:00Z', '/auth/success/google/new', 2),

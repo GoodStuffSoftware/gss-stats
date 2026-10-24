@@ -160,7 +160,7 @@ describe('classifyPopupPath', () => {
 
   // PROVISIONAL P1 names (best-sudoku docs/design/signin-ask-buyer-intent.md section 7.4 @ ffc46239).
   it('signin-eligible: /earned/<reason> (new) and /earned (old) both classify as earned; the old shape reads as the legacy reason', () => {
-    for (const reason of ['placement', 'committed-repeat', 'committed-challenge', 'first50']) {
+    for (const reason of ['placement', 'committed-repeat', 'committed-challenge', 'first50', 'first-finish']) {
       expect(classifyPopupPath(`/signin-eligible/earned/${reason}`)).toEqual({ family: 'signin-eligible', kind: 'earned', extra: reason })
     }
     expect(classifyPopupPath('/signin-eligible/earned')).toEqual({ family: 'signin-eligible', kind: 'earned', extra: 'legacy' })
@@ -189,6 +189,8 @@ describe('classifyPopupPath', () => {
   it('popup-outcome: the new /<popup>/<reason>/<outcome> shape classifies by its LAST segment, never reading an outcome as a reason', () => {
     expect(classifyPopupPath('/popup-outcome/signin-prompt/placement/signed-in')).toEqual({ family: 'popup-outcome:signin-prompt', kind: 'signed-in', extra: 'placement' })
     expect(classifyPopupPath('/popup-outcome/signin-prompt/committed-repeat/returned')).toEqual({ family: 'popup-outcome:signin-prompt', kind: 'returned', extra: 'committed-repeat' })
+    expect(classifyPopupPath('/popup-outcome/signin-prompt/first-finish/signed-in')).toEqual({ family: 'popup-outcome:signin-prompt', kind: 'signed-in', extra: 'first-finish' })
+    expect(classifyPopupPath('/signin-prompt/first-finish')).toEqual({ family: 'signin-prompt', kind: 'shown', extra: 'first-finish' })
     expect(classifyPopupPath('/popup-outcome/install-prompt/ios-inapp/installed')).toEqual({ family: 'popup-outcome:install', kind: 'installed', extra: 'ios-inapp' })
     expect(classifyPopupPath('/popup-outcome/first50-offer/first50/still-playing')).toEqual({ family: 'popup-outcome:promo-first50', kind: 'still-playing', extra: 'first50' })
     // old shape: the second segment IS the outcome, and the reason is legacy

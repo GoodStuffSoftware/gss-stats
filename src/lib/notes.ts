@@ -557,6 +557,7 @@ export const NOTES_REGISTRY: Record<string, NoteDef> = Object.assign(Object.crea
     'label.popup.eligibleEarnedCommittedRepeat': 'Earned: committed repeat',
     'label.popup.eligibleEarnedCommittedChallenge': 'Earned: committed challenge',
     'label.popup.eligibleEarnedFirst50': 'Earned: first-50',
+    'label.popup.eligibleEarnedFirstFinish': 'Earned: first finish',
     'label.popup.eligibleEarnedLegacy': 'Earned: older rows (no reason)',
     'label.popup.eligibleEarnedOther': 'Earned: other reason',
     'label.popup.eligibleBelowFloor': 'Below the floor',

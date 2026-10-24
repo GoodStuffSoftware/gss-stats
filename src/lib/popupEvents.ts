@@ -311,7 +311,7 @@ export const POPUP_OUTCOME_TYPES = ['signed-in', 'installed', 'returned', 'still
 // whenever it is a known outcome type).
 export const LEGACY_REASON = 'legacy'
 /** Reasons of /signin-eligible/earned/<reason>; any other value is bucketed 'other'. */
-export const ELIGIBLE_EARNED_REASONS = ['placement', 'committed-repeat', 'committed-challenge', 'first50'] as const
+export const ELIGIBLE_EARNED_REASONS = ['placement', 'committed-repeat', 'committed-challenge', 'first50', 'first-finish'] as const
 /** /signin-eligible/<kind> kinds that are NOT part of the earned/capped/unearned denominator. */
 export const ELIGIBLE_OTHER_KINDS = ['below-floor', 'not-now', 'stopped'] as const
 export const FUNNEL_KINDS = ['trial-start', 'checkout-start', 'purchase'] as const

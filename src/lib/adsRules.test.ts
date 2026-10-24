@@ -524,7 +524,7 @@ describe('summarizeTaggedRows (campaign-attributed new indicators)', () => {
   it('asks are EXACTLY placement + streak + tutorial + promo-first50/shown; any other reason is reported separately', () => {
     const s = summarizeTaggedRows(rows)
     expect(s.asks.total).toBe(7)
-    expect(s.asks.byPath).toEqual({ '/signin-prompt/placement': 2, '/signin-prompt/streak': 1, '/signin-prompt/tutorial': 3, '/signin-prompt/committed-repeat': 0, '/signin-prompt/committed-challenge': 0, '/promo-first50/shown': 1 })
+    expect(s.asks.byPath).toEqual({ '/signin-prompt/placement': 2, '/signin-prompt/streak': 1, '/signin-prompt/tutorial': 3, '/signin-prompt/committed-repeat': 0, '/signin-prompt/committed-challenge': 0, '/signin-prompt/first-finish': 0, '/promo-first50/shown': 1 })
     expect(s.asks.otherShownReasons).toBe(4)
     expect(s.accepts.total).toBe(1)
   })
@@ -1115,6 +1115,30 @@ describe('provisional P1 beacon rows in the ads read summaries', () => {
     expect(s.p1.outcomeByReason).toEqual({ 'signin-prompt/signed-in/legacy': 2, 'signin-prompt/signed-in/committed-repeat': 3 })
     expect(s.p1.funnel).toEqual({ 'trial-start': 1, 'checkout-start': {}, purchase: { web: 2 } })
     expect(s.p1.inapp).toEqual({ open: 6 })
+  })
+  it('first-finish (Best Sudoku 1.102.0): the shown path is an ask, its eligible and outcome rows land with the sign-in rows, the twins stay out, existing reasons are unchanged', () => {
+    const ff = [
+      r('/signin-prompt/first-finish', 4),
+      r('/signin-prompt/accept', 1),
+      r('/signin-eligible/earned/first-finish', 6),
+      r('/popup-outcome/signin-prompt/first-finish/signed-in', 2),
+      r('/popup-outcome/signin-prompt/first-finish/returned', 1),
+      r('/ab/ask-order/A/signin-prompt/first-finish', 100),
+      r('/signin-prompt/committed-repeat', 3),
+    ]
+    const s = summarizeTaggedRows(ff)
+    expect(s.asks.total).toBe(7)
+    expect(s.asks.byPath['/signin-prompt/first-finish']).toBe(4)
+    expect(s.asks.byPath['/signin-prompt/committed-repeat']).toBe(3)
+    expect(s.asks.otherShownReasons).toBe(0)
+    expect(s.signinEligible).toEqual({ earned: 6, capped: 0, unearned: 0 })
+    expect(s.popupOutcomes['signin-prompt']['signed-in']).toBe(2)
+    expect(s.popupOutcomes['signin-prompt'].returned).toBe(1)
+    expect(s.p1.earnedByReason).toEqual({ 'first-finish': 6 })
+    expect(s.p1.outcomeByReason).toEqual({ 'signin-prompt/signed-in/first-finish': 2, 'signin-prompt/returned/first-finish': 1 })
+    const site = summarizeSiteEvents(ff.map(({ hourStartMs, path, count }) => ({ hourStartMs, path, count })), at + 86_400_000)
+    expect(site.shown['signin-prompt']).toBe(7)
+    expect(site.signinEligible.earned).toBe(6)
   })
   it('site-wide: same totals, and the line names old rows as legacy', () => {
     const s = summarizeSiteEvents(rows.map(({ hourStartMs, path, count }) => ({ hourStartMs, path, count })), at + 86_400_000)

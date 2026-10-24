@@ -6,6 +6,9 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **First-finish sign-in ask is counted.** Best Sudoku's new ask after a player's first finished puzzle now counts as a sign-in ask (shown, eligible and outcome rows), with its own "Earned: first finish" line on the eligibility card.
+
 ### Fixed
 - **Extended-flight dailies label the D+7 verdict interim.** On Search's second week the daily read's rule 9 now says "interim, week 2 running; final on 10-31" instead of reading as final; the week-1 pinned read, Apps and Apps Play are unchanged. Docs now state Search's $140 cap and 35/70/105/140 ladder.
 

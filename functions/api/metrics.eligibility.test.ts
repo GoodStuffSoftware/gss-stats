@@ -39,6 +39,7 @@ describe('/api/metrics eligibility split', () => {
       { site: WEB, ts: AT, path: '/signin-eligible/earned/committed-repeat', n: 2 },
       { site: WEB, ts: AT, path: '/signin-eligible/earned/committed-challenge', n: 1 },
       { site: WEB, ts: AT, path: '/signin-eligible/earned/first50', n: 4 },
+      { site: WEB, ts: AT, path: '/signin-eligible/earned/first-finish', n: 8 },
       { site: WEB, ts: AT, path: '/signin-eligible/earned', n: 5 }, // before the reason segment
       { site: WEB, ts: AT, path: '/signin-eligible/earned/brand-new-reason', n: 2 },
       { site: WEB, ts: AT, path: '/signin-eligible/capped', n: 6 },
@@ -49,11 +50,12 @@ describe('/api/metrics eligibility split', () => {
     expect(value(r, 'popup.eligibleEarnedCommittedRepeat')).toBe(2)
     expect(value(r, 'popup.eligibleEarnedCommittedChallenge')).toBe(1)
     expect(value(r, 'popup.eligibleEarnedFirst50')).toBe(4)
+    expect(value(r, 'popup.eligibleEarnedFirstFinish')).toBe(8)
     expect(value(r, 'popup.eligibleEarnedLegacy')).toBe(5)
     expect(value(r, 'popup.eligibleEarnedOther')).toBe(2)
     const sum = ELIGIBLE_EARNED_REASON_METRICS.reduce((a, m) => a + (value(r, m.id) ?? 0), 0)
-    expect(sum).toBe(17)
-    expect(value(r, 'popup.eligibleEarned')).toBe(17)
+    expect(sum).toBe(25)
+    expect(value(r, 'popup.eligibleEarned')).toBe(25)
     expect(value(r, 'popup.eligibleCapped')).toBe(6)
     expect(value(r, 'popup.eligibleUnearned')).toBe(7)
   })

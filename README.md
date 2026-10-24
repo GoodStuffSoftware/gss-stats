@@ -453,7 +453,7 @@ npm run typecheck   # tsc --noEmit over src/**/*.ts + functions/**/*.ts (not .vu
   over post-fix install prompts — `POPUP_RATE_TABLE_KEYS`; each with its n/d and "too few to
   report" under `MIN_COHORT`), the sign-in eligibility counts with their rate, and two upsell
   charts by reason. The eligibility card also splits the earned finishes by the reason on the row
-  (placement, committed repeat, committed challenge, first-50, rows from before the reason existed,
+  (placement, committed repeat, committed challenge, first-50, first finish, rows from before the reason existed,
   any other) and counts, outside the rate, finishes below the floor, "not now" and stopped
   (`/signin-eligible/{below-floor,not-now,stopped}`; counts only). The two upsell charts
   (`pu-upsell-dismiss-reasons`, `pu-upsell-signedin-reasons`) are the `reason` breakdown of the
@@ -1074,7 +1074,7 @@ npm run typecheck:scripts
   clients may keep sending a few), so no tutorial row, stale or not, makes zero tagged asks decisive.
   Zero tagged asks with tagged arrivals reads **NOT COMPUTABLE** (status no-data, named in the push),
   never a false trip or WATCH, unless site-wide asks are known to be exactly zero, which still trips. Asks are counted over ASK_PATHS (placement, streak, tutorial,
-  committed-repeat, committed-challenge, first-50 promo).
+  committed-repeat, committed-challenge, first-finish, first-50 promo).
   Every morning read also prints a **first-session funnel** (arrivals → game views →
   tour start → tour complete/skip, with the skips split by stage (preamble / hub / section) →
   game starts by difficulty → tutorial complete (first run vs replay) → first move → game

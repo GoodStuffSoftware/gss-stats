@@ -373,6 +373,7 @@ describe('the Pop-ups page panels ≡ their /api/popups renderings', () => {
       ['Earned: committed repeat', '0'],
       ['Earned: committed challenge', '0'],
       ['Earned: first-50', '0'],
+      ['Earned: first finish', '0'],
       ['Earned: older rows (no reason)', '4'],
       ['Earned: other reason', '0'],
       ['Below the floor', '0'],

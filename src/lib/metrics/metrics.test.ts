@@ -82,6 +82,7 @@ describe('units key off the beacon path families (lib/popupEvents.ts)', () => {
     'popup.eligibleEarnedCommittedRepeat': { path: '/signin-eligible/earned/committed-repeat' },
     'popup.eligibleEarnedCommittedChallenge': { path: '/signin-eligible/earned/committed-challenge' },
     'popup.eligibleEarnedFirst50': { path: '/signin-eligible/earned/first50' },
+    'popup.eligibleEarnedFirstFinish': { path: '/signin-eligible/earned/first-finish' },
     'popup.eligibleEarnedLegacy': { path: '/signin-eligible/earned' },
     'popup.eligibleEarnedOther': { path: '/signin-eligible/earned/some-new-reason' },
     'popup.eligibleBelowFloor': { path: '/signin-eligible/below-floor' },
@@ -191,12 +192,13 @@ describe('the catalog', () => {
   it('each earned row counts under exactly one reason metric, and the reasons sum to popup.eligibleEarned', () => {
     const ctx = ctxFor()
     const reasonMetrics = ELIGIBLE_EARNED_REASON_METRICS.map((m) => METRICS.get(m.id)!)
-    expect(reasonMetrics).toHaveLength(6)
+    expect(reasonMetrics).toHaveLength(7)
     const earnedPaths: [string, string][] = [
       ['/signin-eligible/earned/placement', 'placement'],
       ['/signin-eligible/earned/committed-repeat', 'committed-repeat'],
       ['/signin-eligible/earned/committed-challenge', 'committed-challenge'],
       ['/signin-eligible/earned/first50', 'first50'],
+      ['/signin-eligible/earned/first-finish', 'first-finish'],
       ['/signin-eligible/earned', 'legacy'], // a row from before the reason segment
       ['/signin-eligible/earned/not-a-known-reason', 'other'],
     ]
@@ -225,7 +227,7 @@ describe('the catalog', () => {
   it('the eligibility split counts nothing on an empty range, and never a row of another family', () => {
     const ctx = ctxFor()
     const all = [...ELIGIBLE_EARNED_REASON_METRICS, ...ELIGIBLE_OTHER_METRICS].map((m) => METRICS.get(m.id)!)
-    expect(all).toHaveLength(9)
+    expect(all).toHaveLength(10)
     const rows = [] as BeaconRow[]
     for (const m of all) expect(rows.filter(rowMatcher(m, ctx))).toHaveLength(0)
     for (const path of ['/signin-prompt/placement', '/game', '/popup-outcome/signin-prompt/signed-in']) {
