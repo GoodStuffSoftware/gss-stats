@@ -22,6 +22,9 @@ describe('SPLIT_REFUSED_PATH_PATTERNS beacon parity', () => {
       '/ab/ask-order/%',
       '/funnel/%',
       '/game/first-finish', // once per device: the beacon repo adds the same line to functions/_lib/refused.ts and its pin
+      '/signin-prompt/first-finish', // the first-finish sign-in ask (ruling 2026-10-24): the beacon mirrors these three too
+      '/signin-eligible/earned/first-finish',
+      '/popup-outcome/signin-prompt/first-finish/%',
     ])
   })
 })
@@ -58,6 +61,12 @@ describe('isSplitRefusedPath beacon parity (matcher)', () => {
       '/funnel/checkout-start/web',
       '/funnel/purchase/play',
       '/FUNNEL/Purchase/Web',
+      '/signin-prompt/first-finish',
+      '/SIGNIN-PROMPT/First-Finish',
+      '/signin-eligible/earned/first-finish',
+      '/popup-outcome/signin-prompt/first-finish/signed-in',
+      '/popup-outcome/signin-prompt/first-finish/still-playing',
+      '/popup-outcome/signin-prompt/first-finish/x',
     ]) {
       expect(isSplitRefusedPath(p), p).toBe(true)
     }
@@ -83,6 +92,19 @@ describe('isSplitRefusedPath beacon parity (matcher)', () => {
       '/return',
       '/game/completed',
       '/x/return/y',
+      '/signin-prompt',
+      '/signin-prompt/placement',
+      '/signin-prompt/accept',
+      '/signin-prompt/first-finish/x',
+      '/signin-prompt/first-finished',
+      '/signin-eligible/earned',
+      '/signin-eligible/earned/placement',
+      '/signin-eligible/earned/first-finish/x',
+      '/signin-eligible/capped',
+      '/popup-outcome/signin-prompt/first-finish',
+      '/popup-outcome/signin-prompt/placement/signed-in',
+      '/popup-outcome/signin-prompt/first-finished/signed-in',
+      '/popup-outcome/signin-prompt/signed-in',
       '',
     ]) {
       expect(isSplitRefusedPath(p), p).toBe(false)

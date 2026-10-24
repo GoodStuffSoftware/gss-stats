@@ -11,6 +11,7 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ### Fixed
 - **Extended-flight dailies label the D+7 verdict interim.** On Search's second week the daily read's rule 9 now says "interim, week 2 running; final on 10-31" instead of reading as final; the week-1 pinned read, Apps and Apps Play are unchanged. Docs now state Search's $140 cap and 35/70/105/140 ladder.
+- **First-finish sign-in ask stays counts only.** Its showings, eligibility and outcome rows count in totals and per-ET-day trends on the Pop-ups page and in the morning read, but never in an hour, place or device split; the Overview pop-ups-shown tile leaves them out and says so, and the Overview tap rate, whose accepts still include the ask's taps, carries a caveat that it can read high.
 
 ## [0.58.1] — 2026-10-23
 

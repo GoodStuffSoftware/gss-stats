@@ -27,6 +27,9 @@ export interface RatioDef {
   alignDenominator?: boolean
   /** Note ids that travel with every value (what the figure is NOT). */
   caveats?: string[]
+  /** proportion only: the numerator is NOT a subset of the denominator, yet the figure still
+   * shows as a percent (it can exceed 100%). Allowed only with a caveat that says so. */
+  notSubset?: true
 }
 
 export interface RatioVerdict {
@@ -37,7 +40,7 @@ export interface RatioVerdict {
 const NOT_COUNTS: ReadonlySet<string> = new Set(['instant', 'code', 'rate'])
 
 /** The validity rule (the prototype's), plus: a time or a category is never a side. */
-export function ratioVerdict(r: Pick<RatioDef, 'kind' | 'num' | 'den'>, metrics: ReadonlyMap<string, MetricDef> = METRICS): RatioVerdict {
+export function ratioVerdict(r: Pick<RatioDef, 'kind' | 'num' | 'den' | 'notSubset'>, metrics: ReadonlyMap<string, MetricDef> = METRICS): RatioVerdict {
   const n = metrics.get(r.num)
   const d = metrics.get(r.den)
   if (!n || !d) return { ok: false, reason: 'unknown metric' }
@@ -48,6 +51,7 @@ export function ratioVerdict(r: Pick<RatioDef, 'kind' | 'num' | 'den'>, metrics:
   if (r.kind === 'cost') return n.unit === 'usd' && d.unit !== 'usd' ? { ok: true, reason: 'money per ' + d.unit } : { ok: false, reason: 'cost needs usd over a count' }
   if (r.kind !== 'proportion') return { ok: false, reason: `unknown kind ${String(r.kind)}` } // a registration from untyped data
   if (n.unit !== d.unit) return { ok: false, reason: `unit ${n.unit} over ${d.unit}` }
+  if (r.notSubset) return { ok: true, reason: `${n.unit} over ${n.unit}, not a subset (caveated)` }
   const visited = new Set<string>()
   for (let cur: MetricDef | undefined = n; cur && !visited.has(cur.id); cur = cur.subsetOf ? metrics.get(cur.subsetOf) : undefined) {
     visited.add(cur.id)
@@ -66,6 +70,7 @@ export function defineRatios(defs: readonly RatioDef[], metrics: ReadonlyMap<str
     if (r.label !== `label.${r.id}`) throw new Error(`ratio ${r.id}: label must be label.${r.id}`)
     const v = ratioVerdict(r, metrics)
     if (!v.ok) throw new Error(`ratio ${r.id} (${r.kind} ${r.num} / ${r.den}) is invalid: ${v.reason}`)
+    if (r.notSubset && (r.kind !== 'proportion' || !r.caveats?.length)) throw new Error(`ratio ${r.id}: notSubset is for a caveated proportion only`)
     if (r.alignDenominator && r.kind !== 'proportion') throw new Error(`ratio ${r.id}: alignDenominator is for proportions only`)
     if (!ratioWindowsOf(r, metrics).length) throw new Error(`ratio ${r.id}: numerator and denominator share no window`)
     out.set(r.id, r)
@@ -132,7 +137,8 @@ export const RATIO_DEFS: RatioDef[] = [
   // A per: completions per arrival (E1). Can exceed 1, inflated by repeat players; NOT the share who played.
   ratio('campaign.engagementPerArrival', 'per', 'campaign.completions', 'campaign.returnD0', { caveats: ['engagement-per-arrival'] }),
   // Site-wide and pop-up proportions.
-  ratio('bsk.popupTapRate', 'proportion', 'bsk.popupAccepts', 'bsk.popupShown'),
+  // Not a true share: accepts include the first-finish ask's taps, which bsk.popupShown leaves out (can exceed 100%).
+  ratio('bsk.popupTapRate', 'proportion', 'bsk.popupAccepts', 'bsk.popupShown', { notSubset: true, caveats: ['popup-tap-rate-includes-first-finish-taps'] }),
   ratio('popup.tapRate', 'proportion', 'popup.accepts', 'popup.shown'),
   ratio('popup.signedInRate', 'proportion', 'popup.outcomeSignedIn', 'popup.shown'),
   ratio('popup.installedRate', 'proportion', 'popup.outcomeInstalled', 'popup.shown', { alignDenominator: true }),

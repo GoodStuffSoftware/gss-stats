@@ -204,6 +204,7 @@ export const POPUP_RATES: CardSpec = {
       ],
     },
   ],
+  captions: ['first-finish-ask-whole-days'],
 }
 
 /** Sign-in eligibility (the Pop-ups page's 'eligible' chart): signed-out finishes that earned a
@@ -237,6 +238,7 @@ export const SIGNIN_ELIGIBILITY: CardSpec = {
       items: ELIGIBLE_OTHER_METRICS.map(({ id, kind }) => ({ id: `other-${kind}`, label: { metric: true }, data: { metric: id, window: 'page' }, display: { as: 'bar' }, ...COMPACT })),
     },
   ],
+  captions: ['first-finish-ask-whole-days'],
 }
 
 /** Cost per arrival / auth success (CampaignsWidgetBody 'cost'): one card per campaign, spend-only

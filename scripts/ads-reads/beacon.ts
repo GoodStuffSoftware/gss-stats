@@ -8,7 +8,7 @@
 import { applyExclusions, campaignAttributionClause, campaignAttributionStartMs, type CampaignFlight } from '../../src/lib/campaigns'
 import { excludeInstallGapUnmeasured, INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS, NUL_PATH_SQL, popupIncludeClause, type HourPathCount } from '../../src/lib/popupEvents'
 import { ASK_PATHS, UPSELL_SIGNEDOUT_FIX_AT, type FirstSessionRowSite, type ReturnRow, type ReturnSiteStat, type TaggedRow } from '../../src/lib/adsRules'
-import { refusedPathExcludeClause, refusedPathMatch } from '../../src/lib/splitGuard'
+import { refusedPathExcludeClause, refusedPathMatch, refusedPopupMatchSql } from '../../src/lib/splitGuard'
 import { etDateSql, etWallTimeMs } from '../../src/lib/etTime'
 import type { D1Select } from './d1'
 
@@ -68,16 +68,18 @@ export function taggedRowsQuery(campaign: CampaignFlight, upsellFixAtMs: number 
  * counts-only rule protects (src/lib/splitGuard.ts: returns, game starts and completions,
  * tutorial completions, tour skips and exits) are left out (their patterns are SQL literals, so they cost
  * no binds): this read is by hour, and none of them is a pop-up event summarizeSiteEvents counts.
- * The one refused family it DOES count is the paid funnel (`/funnel/%`, printed as the site-wide "paid
- * funnel (rows)" total): those rows are grouped by their ET DAY (`etd`) with `hr` NULL, never by hour
- * (the same device as taggedRowsQuery), and a NUL-bearing path is still left out. */
+ * The refused rows it DOES count are the paid funnel (`/funnel/%`, printed as the site-wide "paid
+ * funnel (rows)" total) and the refused pop-up rows (src/lib/splitGuard.ts REFUSED_POPUP_PATH_PATTERNS:
+ * the first-finish sign-in ask, its eligibility row and its outcomes): those rows are grouped by their
+ * ET DAY (`etd`) with `hr` NULL, never by hour (the same device as taggedRowsQuery), and a NUL-bearing
+ * path is still left out. */
 export function siteEventsQuery(sinceMs: number, fixedAtMs: number | null = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS): Query {
   const inc = popupIncludeClause()
   const w = ['site = ?', 'ts >= ?', inc.sql]
   const b: unknown[] = [WEB_SITE, sinceMs, ...inc.binds]
   applyExclusions(w, b)
   const refused = refusedPathMatch().sql
-  w.push(`(NOT ${refused} OR (path LIKE '/funnel/%' AND NOT (${NUL_PATH_SQL})))`)
+  w.push(`(NOT ${refused} OR (path LIKE '/funnel/%' AND NOT (${NUL_PATH_SQL})) OR ${refusedPopupMatchSql()})`)
   // `pf` splits each hour row-exactly at the install fix (lib/popupEvents.ts
   // INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS): summarizeSiteEvents drops pre-fix gap rows and
   // counts post-fix accepts for the install health pair.
@@ -166,8 +168,9 @@ export function etDay(v: unknown): string | null {
 /** Campaign-attributed arrivals by country, aggregate counts only (R5). The SAME attribution
  * and exclusion clauses as taggedRowsQuery (household etc.), so it can never disagree with the
  * funnel reads it sits alongside — no separate rule, no individual-level join. The rows the
- * counts-only rule protects (src/lib/splitGuard.ts) are left out: none is split by place, the
- * same as the dashboard's country columns. */
+ * counts-only rule protects (src/lib/splitGuard.ts, the refused pop-up rows included) are left out:
+ * none is split by place, the same as the dashboard's country columns. No total is taken from this
+ * read; the tagged and site-wide reads count those rows per ET day. */
 export function taggedCountryQuery(campaign: CampaignFlight): Query {
   const attr = campaignAttributionClause(campaign)
   const w = [attr.sql]

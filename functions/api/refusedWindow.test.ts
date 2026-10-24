@@ -10,7 +10,7 @@ import { onRequestPost as geoPost } from './geo'
 import { onRequestPost as completionsPost } from './completions'
 import { onRequestPost as metricsPost } from './metrics'
 import { insertHits, installCaches, memoryCache, openHitsDb, pagesContext, postJson, sqliteD1 } from '../_lib/testing/hitsDb'
-import { isSplitRefusedPath, reachableRefusedPatterns, REFUSED_WINDOW_KEY, REFUSED_WINDOW_SNAP, refusedPathMatch, SPLIT_REFUSED_PATH_PATTERNS } from '../../src/lib/splitGuard'
+import { isSplitRefusedPath, reachableRefusedPatterns, REFUSED_WINDOW_KEY, REFUSED_WINDOW_SNAP, refusedPathMatch, refusedWindowClause, SPLIT_REFUSED_PATH_PATTERNS } from '../../src/lib/splitGuard'
 import { etDateSql, etWallTimeMs } from '../../src/lib/etTime'
 import { applyAlwaysExclusions } from '../../src/lib/campaigns'
 import { buildFact } from '../../src/lib/metrics/engine'
@@ -475,7 +475,7 @@ describe('the daily twins follow the same rule', () => {
     expect(aligned.completions.noteIds ?? []).not.toContain('refused-whole-days')
   })
 
-  it('popupRangeDaily: no refused row on any range, pop-up rows exact, and the exclusion adds no bind', () => {
+  it('popupRangeDaily: no refused non-pop-up row on any range, pop-up rows exact, and the exclusion adds no bind', () => {
     insertHits(db, [{ ts: Z('2026-10-01T15:30:00Z'), site: SITE, path: '/signin-prompt/shown', n: 3 }])
     const sites = [SITE]
     const gap: unknown[] = []
@@ -484,7 +484,9 @@ describe('the daily twins follow the same rule', () => {
       const { stmt, rows } = run('popupRangeDaily', { since, until, sites })
       expect(stmt.sql).toContain(`NOT ${refusedPathMatch().sql}`)
       expect(refusedRows(rows)).toEqual([])
-      expect(stmt.binds).toEqual([Date.parse(since), Date.parse(until), ...sites, ...gap])
+      // The window is popupRangePath's (refusedWindowClause: its refused pop-up rows over whole ET days); the
+      // exclusion itself is literals only.
+      expect(stmt.binds).toEqual([...refusedWindowClause(Date.parse(since), Date.parse(until)).binds, ...sites, ...gap])
     }
     expect(sum(run('popupRangeDaily', { since: HOURS[1][0], until: HOURS[1][1], sites }).rows)).toBe(3)
     expect(sum(run('popupRangeDaily', { since: HOURS[0][0], until: HOURS[0][1], sites }).rows)).toBe(0)
