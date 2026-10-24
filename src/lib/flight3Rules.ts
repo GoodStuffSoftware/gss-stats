@@ -39,6 +39,8 @@ export const F3_ITERATE_MIN = 2
 export const F3_JUDGE_FROM_DAY = 3
 /** First flight day whose read states the D+7 verdict (the final read, flight end + 1 = day 8). */
 export const F3_VERDICT_FROM_DAY = 8
+/** Rule 9's name suffix on an unpinned daily read of an extended flight that is still running past its D+7 day. */
+export const F3_INTERIM_LABEL = 'interim, week 2 running'
 
 /** Baselines printed beside each arm's Spend line (stats-requirements spec section 1): what the earlier
  * flights paid per tagged ARRIVAL (not per click), and the F2 Apps first-move row ratio rule 7 uses. A
@@ -183,6 +185,10 @@ export interface Flight3RulesInput {
   /** Set only for a Play-direct arm (CampaignFlight.kind === 'play-direct', a registry property, never an id): cumulative closed-day
    * ad clicks and the tagged /return/<uc>/d0 row count, for the rule 5 install-referrer tracking check. Absent = a web arm. */
   playDirect?: { clicks: number | null; d0Rows: number | null } | null
+  /** Set only on a read of an arm whose flight was extended past its D+7 and is still running (the read date is on or before the
+   * flight end that read sees, which a --window-end pin moves back): the ET date of the final read (flight end + 1). Rule 9 then names
+   * itself interim. Absent = the read is the final one, or the flight never ran past D+7. */
+  interimFinalEt?: string
 }
 export interface Flight3Block {
   arm: StagedArm
@@ -333,14 +339,16 @@ export function buildFlight3Rules(i: Flight3RulesInput, opts: { ctrFloor?: numbe
     const interim = playDirectArm
       ? `; interim, tagged first opens (/return/<uc>/d0): ${pd?.d0Rows ?? 'not read'}, tagged sign-ins (/auth/success/*/new): ${i.signUps ? i.signUps.count : 'not read'}; ${F3_PLAY_DIRECT_INSTALL_VERDICT_TEXT}`
       : ''
+    // An extended flight reads day 8+ before its end: the word counts rows that week 2 is still adding to, so it is labelled interim.
+    const name = i.interimFinalEt && day >= F3_VERDICT_FROM_DAY ? `D+7 verdict (${F3_INTERIM_LABEL}; final on ${i.interimFinalEt.slice(5)})` : 'D+7 verdict'
     const threshold = `5+ new accounts go, 2-4 iterate, 0-1 stop; under ${F3_VALIDITY_ASKS} asks inconclusive`
-    if (!t || !i.signUps) readouts.push({ n: 9, name: 'D+7 verdict', number: `tagged read failed${interim}`, threshold, verdict: day >= F3_VERDICT_FROM_DAY ? 'NO DATA' : 'NOT YET' })
+    if (!t || !i.signUps) readouts.push({ n: 9, name, number: `tagged read failed${interim}`, threshold, verdict: day >= F3_VERDICT_FROM_DAY ? 'NO DATA' : 'NOT YET' })
     else {
       const d = decideFlight3(i.signUps.count, t.flight3Asks)
       const word = VERDICT_WORD[d.row as Flight3DecisionRow]
       const base = `${i.signUps.count} new accounts (${i.signUps.note}), ${t.flight3Asks} ask rows`
-      if (day >= F3_VERDICT_FROM_DAY) readouts.push({ n: 9, name: 'D+7 verdict', number: `${base}${interim}`, threshold, verdict: word })
-      else readouts.push({ n: 9, name: 'D+7 verdict', number: `${base}; running, the table would say ${word}${interim}`, threshold, verdict: 'NOT YET' })
+      if (day >= F3_VERDICT_FROM_DAY) readouts.push({ n: 9, name, number: `${base}${interim}`, threshold, verdict: word })
+      else readouts.push({ n: 9, name, number: `${base}; running, the table would say ${word}${interim}`, threshold, verdict: 'NOT YET' })
     }
   }
 

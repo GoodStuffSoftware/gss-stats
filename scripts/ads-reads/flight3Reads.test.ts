@@ -87,6 +87,30 @@ describe.each(ARMS)('$label', (a) => {
     expect(pinned).not.toContain('not due')
     await expect(run('2026-10-31')).rejects.toThrow(/--window-end must be/)
   })
+  describe('rule 9 label', () => {
+    const rule9 = (report: string) => report.split(/\r?\n/).find((l) => l.startsWith('Rule 9 · '))!
+    const INTERIM = /^Rule 9 · D\+7 verdict \(interim, week 2 running; final on (\d\d-\d\d)\)/
+    it('names rule 9 interim on every unpinned daily of an extended flight from day 8 up to the flight end, with the final read on end + 1; the final read and a pin are plain', async () => {
+      const extended = endOf(a) > addDays(startOf(a), 6)
+      const finalEt = addDays(endOf(a), 1)
+      for (let d = 1; d <= 16; d++) {
+        const day = addDays(startOf(a), d)
+        const inWindow = day <= finalEt
+        if (!inWindow) continue
+        const line = rule9(await morning(a, day))
+        if (extended && d >= 7 && day <= endOf(a)) {
+          expect(line, day).toMatch(INTERIM)
+          expect(line.match(INTERIM)![1], day).toBe(finalEt.slice(5))
+        } else expect(line, day).toMatch(/^Rule 9 · D\+7 verdict: /)
+      }
+    })
+    it.runIf(a.arm === 'search')('a read pinned at the week-1 end prints the plain, unlabelled rule 9', async () => {
+      const fx = armFixture(a, '2026-10-24')
+      const pinned = formatMorningReport(await runMorningRead(fixtureDeps(fx, true), { campaignId: a.id, releaseHealth: 'auto', healthOnly: false, healthMinParent: MIN_COHORT, healthParentAgeHours: 24, windowEndEt: '2026-10-23' }))
+      expect(rule9(pinned)).toMatch(/^Rule 9 · D\+7 verdict: \d+ new accounts \(/)
+      expect(pinned).not.toContain('interim, week 2 running')
+    })
+  })
   it('a read one day past the window still reads the flight only (spend stays closed at the flight end, no error)', async () => {
     const report = await morning(a, addDays(endOf(a), 2))
     expect(report).toContain(`closed days through ${endOf(a)}`)

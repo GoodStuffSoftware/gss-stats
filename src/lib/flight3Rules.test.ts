@@ -299,6 +299,28 @@ describe('rule 9: D+7 verdict', () => {
   })
 })
 
+describe('rule 9: interim label on an extended flight', () => {
+  const live = { tagged: tagged({ flight3Asks: 30 }), signUps: { count: 6, note: 'exact' } }
+  const LABEL = 'D+7 verdict (interim, week 2 running; final on 10-31)'
+  it('names rule 9 interim, with the final read date, from day 8 while the flight still runs; the word and every other field are unchanged', () => {
+    const plain = buildFlight3Rules(input('search', 9, live))
+    const interim = buildFlight3Rules(input('search', 9, { ...live, interimFinalEt: '2026-10-31' }))
+    expect(rule(interim, 9).name).toBe(LABEL)
+    expect(ruleReadoutLine(rule(interim, 9))).toContain(LABEL)
+    expect(rule(interim, 9).verdict).toBe('GO')
+    expect({ ...interim, readouts: interim.readouts.map((r) => (r.n === 9 ? { ...r, name: 'D+7 verdict' } : r)) }).toEqual(plain)
+    expect(interim.proposal).toBe(plain.proposal)
+    expect(interim.tripped).toEqual(plain.tripped)
+  })
+  it('labels the failed-read NO DATA word too', () => {
+    expect(rule(buildFlight3Rules(input('search', 8, { signUps: null, interimFinalEt: '2026-10-31' })), 9).name).toBe(LABEL)
+  })
+  it('is plain without the input (the final read, a pinned week-1 read, an arm never extended) and before day 8', () => {
+    expect(rule(buildFlight3Rules(input('search', 8, live)), 9).name).toBe('D+7 verdict')
+    for (const day of [1, 3, 7]) expect(rule(buildFlight3Rules(input('search', day, { ...live, interimFinalEt: '2026-10-31' })), 9).name).toBe('D+7 verdict')
+  })
+})
+
 describe('proposal', () => {
   it('CONTINUE when nothing tripped', () => {
     for (const arm of ARMS) for (const day of DAYS) expect(buildFlight3Rules(input(arm, day)).proposal).toBe('CONTINUE')
