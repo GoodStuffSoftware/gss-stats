@@ -13,10 +13,16 @@
 //     `cb` as '' (lib/metrics/facts.ts), so a country column never counts one; the completion
 //     metric takes no country param, and a card cannot put a country repeat over a metric that
 //     refuses it (lib/metrics/validate.ts).
-//   - /api/popups: its UTC-hour query leaves refused rows out (none is a pop-up event).
-//   - the ads routine (scripts/ads-reads/beacon.ts): the site-wide hourly event read and the
-//     per-country read leave refused rows out (the hourly read keeps only the paid-funnel `/funnel/%`
-//     rows, grouped by ET day with `hr` NULL, for the site-wide "paid funnel (rows)" total), the Play line's /return/ read
+//   - /api/popups, the metrics pop-up facts (popupRangePath, popupRangeDaily) and the routine's
+//     site-wide event read count only the refused rows that are pop-up rows
+//     (REFUSED_POPUP_PATH_PATTERNS: the first-finish sign-in ask, its eligibility row and its
+//     outcomes), and only as per-ET-day totals: each one is read by its ET day (`etd`, `hr` NULL)
+//     over whole ET days (refusedWindowClause), and every other refused row stays out
+//     (refusedNonPopupExcludeClause). No reader offers an hour, place or device split of them.
+//   - the ads routine (scripts/ads-reads/beacon.ts): the site-wide hourly event read keeps, of the
+//     refused rows, the paid-funnel `/funnel/%` rows (the site-wide "paid funnel (rows)" total) and
+//     the refused pop-up rows above, each grouped by ET day with `hr` NULL; the per-country read leaves
+//     every refused row out (a country split), the Play line's /return/ read
 //     (returnSitesQuery) fetches only each row's ET date, never its ts, and the tagged read
 //     (taggedRowsQuery) groups refused rows by ET day with `hr` NULL (never by hour).
 // The UTC `date` dimension is refused alongside `hourEt` (R-1b review): a UTC day minus the ET
@@ -55,8 +61,8 @@
 // window (facts.ts bskRangePath and its daily twin bskRangeDaily, so a sparkline's days match
 // its tile; the engine adds the 'refused-whole-days' note to every metric that can count a
 // refused row, by MetricDef.countsRefused). /api/popups' hourly read, the metrics pop-up facts
-// (popupRangePath, popupRangeDaily) and the routine's per-hour and per-country reads already
-// leave refused rows out.
+// (popupRangePath, popupRangeDaily) take the same refused window for their refused pop-up rows,
+// and the routine's per-country read leaves refused rows out.
 // Today's refused totals stay live (ruling 2026-10-03: no hold until the ET day closes). A hold
 // would cap refusedRowWindow's `to` at the open day's ET midnight; every caller already takes
 // its refused bounds from there.
@@ -88,8 +94,8 @@
 //     total up to a moving instant, the same residual as "today so far" above.
 //   - Flight boundaries (etFlightRangeMs, flightDaySqlCase) are ET days already.
 
-import { addDays, etDateFast, etWallTimeMs } from './etTime'
-import { FIRST_FINISH_PATH, NUL_PATH_SQL, isPopupEventPath, pathFamilyOf, sqlInt, sqlLit } from './popupEvents'
+import { addDays, etDateFast, etDateSql, etWallTimeMs } from './etTime'
+import { FIRST_FINISH_PATH, NUL_PATH_SQL, POPUPS, isPopupEventPath, pathFamilyOf, sqlInt, sqlLit } from './popupEvents'
 
 /** Dimensions that tie a row to an hour, a place or a device. `dateEt` and `flightDay` are ET-day
  * totals and stay allowed; `site` (web vs. app) is a product split, not a device one. */
@@ -148,7 +154,27 @@ export const SPLIT_REFUSED_PATH_PATTERNS: readonly string[] = [
   // means "this device remembered its own first finish", like `/return`. The path is the one constant
   // lib/popupEvents.ts FIRST_FINISH_PATH, an exact match with no trailing %.
   FIRST_FINISH_PATH,
+  // The first-finish sign-in ask (Best Sudoku 1.102.0; ruling 2026-10-24, ~/.claude/DECISIONS.md): each row
+  // fires once per device, right after that device's first finish, so it is counts only like the first-finish
+  // row itself. The ask shown and its eligibility row are exact paths; its outcomes are
+  // `/popup-outcome/signin-prompt/first-finish/<outcome>`. They are pop-up rows, so the pop-up readers still
+  // count them, per ET day only (REFUSED_POPUP_PATH_PATTERNS). The other sign-in ask rows stay splittable.
+  '/signin-prompt/first-finish',
+  '/signin-eligible/earned/first-finish',
+  '/popup-outcome/signin-prompt/first-finish/%',
 ]
+
+/** Path prefixes of the pop-up rows /api/popups, the metrics pop-up facts and the routine's site-wide
+ * event read classify (lib/popupEvents.ts classifyPopupPath): every registered pop-up, the sign-in
+ * eligibility rows and the outcome rows. The paid funnel is NOT one: it is its own family. */
+const POPUP_ROW_PREFIXES: readonly string[] = [...POPUPS.map((p) => p.id), 'signin-eligible', 'popup-outcome'].map((f) => `/${f}/`)
+
+/** The refused patterns that are pop-up rows (today the three first-finish sign-in ask patterns). The
+ * pop-up readers count these rows as per-ET-day totals and never split them; every other refused row
+ * stays out of them, as before. Derived from SPLIT_REFUSED_PATH_PATTERNS, never a list of its own. */
+export const REFUSED_POPUP_PATH_PATTERNS: readonly string[] = SPLIT_REFUSED_PATH_PATTERNS.filter((pat) =>
+  POPUP_ROW_PREFIXES.some((pre) => pat.toLowerCase().startsWith(pre)),
+)
 
 /** The JS reading of SPLIT_REFUSED_PATH_PATTERNS, matching SQLite LIKE exactly (ASCII case
  * folded; a pattern ending in `%` is a prefix match, any other pattern is an exact match), so a
@@ -201,6 +227,36 @@ export function refusedPathExcludeClause(w: string[], b: unknown[]): void {
   const m = refusedPathMatch()
   w.push(`NOT ${m.sql}`)
   b.push(...m.binds)
+}
+
+/** `((path LIKE '/signin-prompt/first-finish' OR ...) AND NOT instr(path, char(0)) > 0)`: true for a refused
+ * pop-up row (REFUSED_POPUP_PATH_PATTERNS) whose path has no NUL. A NUL-bearing path is never one: it stays
+ * refused and out, as every NUL path is. `0` when the list is empty. Literals only, no binds. */
+export function refusedPopupMatchSql(): string {
+  if (!REFUSED_POPUP_PATH_PATTERNS.length) return '0'
+  const likes = REFUSED_POPUP_PATH_PATTERNS.map((p) => `path LIKE ${sqlLit(p)}`)
+  return `((${likes.join(' OR ')}) AND NOT ${NUL_PATH_SQL})`
+}
+
+/** Appends `(NOT <refused> OR <refused pop-up row>)` to `w`: every refused row stays out except the refused
+ * pop-up rows, which a pop-up reader counts per ET day (refusedEtDayColumns) over whole ET days
+ * (refusedWindowClause). Pushes nothing to `b`. */
+export function refusedNonPopupExcludeClause(w: string[], b: unknown[]): void {
+  const m = refusedPathMatch()
+  w.push(`(NOT ${m.sql} OR ${refusedPopupMatchSql()})`)
+  b.push(...m.binds)
+}
+
+/** The two SELECT columns that read a refused row by its ET day only: `hr` (the UTC hour bucket, NULL on a
+ * refused row) and `etd` (the row's ET date 'YYYY-MM-DD' by lib/etTime.ts etDateSql, the geo `dateEt`
+ * expression; NULL on any other row). So no hour of a refused row ever leaves D1. */
+export function refusedEtDayColumns(): { hr: string; etd: string } {
+  const etDateExpr = etDateSql()
+  const refused = refusedPathMatch().sql
+  return {
+    hr: `CASE WHEN ${refused} THEN NULL ELSE CAST(ts / 3600000 AS INTEGER) END AS hr`,
+    etd: `CASE WHEN ${refused} THEN ${etDateExpr} ELSE NULL END AS etd`,
+  }
 }
 
 // ---- R-1d: whole ET days for refused rows on sub-day windows (header: SUB-DAY WINDOWS) ----

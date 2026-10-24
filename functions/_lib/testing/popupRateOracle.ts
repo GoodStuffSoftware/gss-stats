@@ -5,7 +5,8 @@
 // It restates that branch over the same pieces it was built from, so it does not depend on any
 // route: the same range rule (a datetime as given, a bare YYYY-MM-DD read as UTC days), the same
 // WHERE (sites, "hide my own visits", the pop-up path filter, the counts-only guard), the same
-// UTC-hour x path x install-fix GROUP BY, then `aggregatePopupRows` and `computePopupRate`.
+// UTC-hour x path x install-fix GROUP BY, then `aggregatePopupRows` and `computePopupRate`. The guard
+// is today's: a refused pop-up row (the first-finish sign-in ask) counts by ET day over whole ET days.
 import type { DatabaseSync } from 'node:sqlite'
 import {
   INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS,
@@ -18,7 +19,8 @@ import {
   type HourPathCount,
 } from '../../../src/lib/popupEvents'
 import { excludeOwnClause } from '../../../src/lib/ownExclusion'
-import { refusedPathExcludeClause } from '../../../src/lib/splitGuard'
+import { refusedEtDayColumns, refusedNonPopupExcludeClause, refusedWindowClause } from '../../../src/lib/splitGuard'
+import { etWallTimeMs } from '../../../src/lib/etTime'
 
 export interface OracleOwn {
   excludeOwnVisits?: boolean
@@ -39,8 +41,9 @@ const isDateOnly = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v)
 export function popupRateOracle(db: DatabaseSync, key: string, range: { since: string; until: string; sites?: string[] } & OracleOwn): OracleRate {
   const sinceMs = Date.parse(range.since)
   const untilMs = isDateOnly(range.until) ? Date.parse(range.until) + 86_400_000 : Date.parse(range.until)
-  const w: string[] = ['ts >= ?', 'ts < ?']
-  const b: unknown[] = [sinceMs, untilMs]
+  const win = refusedWindowClause(sinceMs, untilMs)
+  const w: string[] = [...win.terms]
+  const b: unknown[] = [...win.binds]
   const sites = range.sites ?? []
   if (sites.length) {
     w.push(`site IN (${sites.map(() => '?').join(', ')})`)
@@ -50,13 +53,14 @@ export function popupRateOracle(db: DatabaseSync, key: string, range: { since: s
   const inc = popupIncludeClause()
   w.push(inc.sql)
   b.push(...inc.binds)
-  refusedPathExcludeClause(w, b)
+  refusedNonPopupExcludeClause(w, b)
   const fixAt = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS
   const pfSql = fixAt === null ? '0' : '(ts >= ?)'
-  const sql = `SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, ${pfSql} AS pf, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY hr, path, pf`
+  const day = refusedEtDayColumns()
+  const sql = `SELECT ${day.hr}, ${day.etd}, path, ${pfSql} AS pf, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY hr, etd, path, pf`
   const binds = [...(fixAt === null ? [] : [fixAt]), ...b] as (string | number)[]
   const rows: HourPathCount[] = (db.prepare(sql).all(...binds) as any[]).map((r) => ({
-    hourStartMs: Number(r.hr) * 3_600_000,
+    hourStartMs: typeof r.etd === 'string' ? etWallTimeMs(r.etd) : Number(r.hr) * 3_600_000,
     path: String(r.path ?? ''),
     count: Number(r.c) || 0,
     postInstallFix: Number(r.pf) === 1,

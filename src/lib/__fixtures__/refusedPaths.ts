@@ -5,7 +5,7 @@
 // (any return bucket or tag, any completion mode/difficulty, either tutorial run kind, any tour
 // exit step) cannot opt out of the note unnoticed.
 import { CAMPAIGNS, GAME_COMPLETE_DIFFICULTIES, GAME_COMPLETE_MODES, ORGANIC_ARM_ID, RETURN_BUCKETS } from '../campaigns'
-import { TOUR_EXIT_STEPS } from '../popupEvents'
+import { POPUP_OUTCOME_TYPES, TOUR_EXIT_STEPS } from '../popupEvents'
 import { SPLIT_REFUSED_PATH_PATTERNS } from '../splitGuard'
 
 /** One sample path per refused pattern (the SQLite fixture rows of splitGuard.window.test.ts). */
@@ -25,6 +25,9 @@ export const REFUSED_SAMPLE_PATHS: readonly string[] = [
   '/ab/ask-order/signin-first/assigned',
   '/funnel/purchase/web',
   '/game/first-finish',
+  '/signin-prompt/first-finish',
+  '/signin-eligible/earned/first-finish',
+  '/popup-outcome/signin-prompt/first-finish/signed-in',
 ]
 
 /** Every segment value a refused beacon is known to carry, plus junk ('x', '1', ''). */
@@ -34,6 +37,7 @@ export const REFUSED_PATH_TOKENS: readonly string[] = [
     ...GAME_COMPLETE_MODES,
     ...GAME_COMPLETE_DIFFICULTIES,
     ...TOUR_EXIT_STEPS,
+    ...POPUP_OUTCOME_TYPES,
     'first-run',
     'replay',
     ORGANIC_ARM_ID,

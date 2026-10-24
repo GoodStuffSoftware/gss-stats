@@ -11,7 +11,9 @@
 // or device — there is no visitor id in `hits` and none is added here. The one D1 query
 // below groups by (UTC hour bucket, path) purely so lib/popupEvents can map each bucket
 // to its correct America/New_York calendar day (see etDateFromMs) — it is still a
-// COUNT(*) GROUP BY, not a row fetch.
+// COUNT(*) GROUP BY, not a row fetch. A refused pop-up row (src/lib/splitGuard.ts
+// REFUSED_POPUP_PATH_PATTERNS, the first-finish sign-in ask) is grouped by its ET day instead,
+// never by hour, and counted over whole ET days; no dimension here splits by hour, place or device.
 //
 // POST { dimension, since, until, sites?, popup?, kind?, limit?, excludeOwnVisits?, ownBrowser?, ownOS? }
 //   dimension:
@@ -44,7 +46,8 @@ import {
 import { WHEN_RE, SITE_TAG_RE } from '../../src/lib/range'
 import { excludeOwnClause } from '../../src/lib/ownExclusion'
 import { MAX_SITES, statementTooLarge } from '../../src/lib/queryLimits'
-import { refusedPathExcludeClause } from '../../src/lib/splitGuard'
+import { refusedEtDayColumns, refusedNonPopupExcludeClause, refusedWindowClause } from '../../src/lib/splitGuard'
+import { etWallTimeMs } from '../../src/lib/etTime'
 import { applyAlwaysExclusions } from '../../src/lib/campaigns'
 
 interface Env {
@@ -109,8 +112,11 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
 
   // One aggregate query fetches every popup-event row in range, grouped by UTC hour
   // bucket + path (see file header — this stays an aggregate, never a row fetch).
-  const w: string[] = ['ts >= ?', 'ts < ?']
-  const b: any[] = [sinceMs, untilMs]
+  // Counts only (src/lib/splitGuard.ts R-1d): a refused pop-up row counts over whole ET days, every
+  // other row over the exact window. An ET-midnight window (every bare-date range) keeps the plain pair.
+  const win = refusedWindowClause(sinceMs, untilMs)
+  const w: string[] = [...win.terms]
+  const b: any[] = [...win.binds]
   if (sites.length) {
     w.push(`site IN (${sites.map(() => '?').join(', ')})`)
     b.push(...sites)
@@ -121,10 +127,9 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   const inc = popupIncludeClause()
   w.push(inc.sql)
   b.push(...inc.binds)
-  // Counts-only rule (src/lib/splitGuard.ts): this query buckets by UTC hour, so the rows the rule
-  // protects (returns, game starts and completions, tutorial completions, tour skips and exits) stay out of
-  // it. None is a pop-up event (lib/popupEvents.ts classifyPopupPath), so no count changes.
-  refusedPathExcludeClause(w, b)
+  // Counts-only rule (src/lib/splitGuard.ts): every refused row stays out of this query except the
+  // refused pop-up rows (the first-finish sign-in ask), which it reads by ET day (`etd`, `hr` NULL).
+  refusedNonPopupExcludeClause(w, b)
   // Manual production checks (utm_campaign=manual_check, /return/manual_check/ paths) are never visitors.
   applyAlwaysExclusions(w, b)
 
@@ -133,7 +138,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // dropping post-fix rows that share their hour.
   const fixAt = INSTALL_ACCEPT_OUTCOME_FIXED_AT_UTC_MS
   const pfSql = fixAt === null ? '0' : '(ts >= ?)'
-  const sql = `SELECT CAST(ts / 3600000 AS INTEGER) AS hr, path, ${pfSql} AS pf, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY hr, path, pf`
+  const day = refusedEtDayColumns()
+  const sql = `SELECT ${day.hr}, ${day.etd}, path, ${pfSql} AS pf, COUNT(*) AS c FROM hits WHERE ${w.join(' AND ')} GROUP BY hr, etd, path, pf`
   const allBinds = [...(fixAt === null ? [] : [fixAt]), ...b]
   // Same D1-bound-parameter guard functions/api/geo.ts applies (src/lib/queryLimits.ts) — a
   // clear 400 naming what to change, never a raw D1 error surfacing as the generic 500 below.
@@ -146,7 +152,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     return json({ error: 'd1 query failed', detail: String(e) }, 500)
   }
   const rows: HourPathCount[] = (res.results ?? []).map((r: any) => ({
-    hourStartMs: Number(r.hr) * 3_600_000,
+    // A refused pop-up row carries only its ET day: placed at that day's ET midnight.
+    hourStartMs: typeof r.etd === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.etd) ? etWallTimeMs(r.etd) : Number(r.hr) * 3_600_000,
     path: String(r.path ?? ''),
     count: Number(r.c) || 0,
     postInstallFix: Number(r.pf) === 1,
