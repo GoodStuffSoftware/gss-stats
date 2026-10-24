@@ -459,6 +459,7 @@ is the growth path, and it keeps the SQL surface small and auditable.
 | `campaign.taggedArrivals` | device | | `visitor = 'new'` | beaconMeasurable |
 | `campaign.gameViews` | pageview | | `path = '/game'` | beaconMeasurable |
 | `campaign.completions` | completion | | `/game/complete/` prefix | liveAt `GAME_COMPLETE_LIVE_AT` against flight; seenInFlightWindow |
+| `campaign.firstFinish` | device | | path `/game/first-finish` (`FIRST_FINISH_PATH` in lib/popupEvents.ts, the one constant; the app team may rename it). One row per device, the first time it finishes a puzzle while its campaign tag is active, no id: counts only, a split-refused path, so no hour, place or device split. Paired ratio `campaign.costPerFinisher` (stored spend over these rows) | beaconMeasurable; seenInFlightWindow |
 | `campaign.asks` | showing | | sign-in prompt and first-50 `shown` | seenInFlightWindow |
 | `campaign.accepts` | showing | asks | ... `accept` | seenInFlightWindow |
 | `campaign.signedInAfterAsk` | showing | asks | `popup-outcome:{signin-prompt,promo-first50}` `signed-in` | liveOnEtDate `TRACKING_ACTIVATION_DATE_ET`; seenInFlightWindow; lag 0-1 d |

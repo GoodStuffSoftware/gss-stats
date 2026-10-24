@@ -108,6 +108,24 @@ export function killRuleReadout(r: RuleResult, ctx: { taggedArrivals?: number | 
 }
 
 /** Cost per tagged complete row: closed-day spend over the tagged complete rows in the same closed days. null under 1 row. */
+/** Cost per PERSON who finished a puzzle: spend over tagged first-finish rows (one per device, so repeat finishers count once).
+ * null when spend is unknown or no one has finished (never a divide by zero). */
+export function costPerFinisher(spend: number | null | undefined, people: number | null | undefined): number | null {
+  return costPerCompleteRow(spend, people)
+}
+
+/** The WATCH-only morning-read line for people who finished and cost per person who finished. No rule reads it and no verdict or
+ * threshold rides on it. 0 people prints the n/a text: the count is the campaign's tagged first-finish rows, so 0 means the app has not shipped
+ * first-finish (or no tagged device has finished yet). Counts only: a device remembers its own first finish; no id, no hour, place or device split. */
+export function firstFinishWatchLine(people: number | null | undefined, spend: number | null | undefined): string {
+  const head = 'WATCH · cost per person who finished'
+  if (people == null) return `${head}: not read (tagged rows unavailable)`
+  if (people === 0) return `${head}: n/a until the app ships first-finish (0 first-finish rows so far)`
+  const cost = costPerFinisher(spend, people)
+  const usd2 = (x: number) => `$${x.toFixed(2)}`
+  return `${head}: ${cost == null ? 'spend not read' : usd2(cost)} (${spend == null ? '—' : usd2(spend)} cumulative spend / ${people} people who finished; first-finish rows, one per device; the per-row figure above includes repeats; WATCH only, no rule reads it)`
+}
+
 export function costPerCompleteRow(spend: number | null | undefined, rows: number | null | undefined): number | null {
   return spend != null && rows != null && rows > 0 ? spend / rows : null
 }

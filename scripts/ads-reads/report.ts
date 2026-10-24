@@ -31,7 +31,7 @@ import { GAME_START_DIFFICULTIES, POPUP_OUTCOME_TYPES, TOUR_EXIT_STEPS, TUTORIAL
 import { RAW_INSTALL_SIGNALS_LABEL, campaignAttributionStartMs, campaignById, type StagedArm } from '../../src/lib/campaigns'
 import { appsPlayCaveatApplies, coachMeasurementNote, measurementReportLines, newAccountMeasurementNote } from '../../src/lib/measurementChanges'
 import { noteRawText } from '../../src/lib/notes'
-import { F3_ARM_BASELINES, ruleReadoutLine, type Flight3Block } from '../../src/lib/flight3Rules'
+import { F3_ARM_BASELINES, firstFinishWatchLine, ruleReadoutLine, type Flight3Block } from '../../src/lib/flight3Rules'
 import { searchAdsSideLines } from '../../src/lib/searchAdsSide'
 import { playDirectLines } from './playDirect'
 import type { DiagnosticsSection, FullRead, MorningResult, PostflightResult, SpendSection } from './read'
@@ -337,10 +337,11 @@ export function formatMorningReport(r: MorningResult): string {
     const t = r.tagged
     out.push(
       t.ok
-        ? `Tagged so far: ${n(t.cumulative!.taggedArrivals)} ${r.flight3 ? `${ARRIVALS_TAGGED_ROWS_LABEL}, a floor` : 'arrivals (floor)'}, ${n(t.cumulative!.taggedHits)} hits, ${n(t.cumulative!.asks)} asks, ${n(t.cumulative!.accepts)} accepts, ${n(t.cumulative!.authSuccess)} auth successes; yesterday ${n(t.yesterday!.taggedArrivals)} arrivals, ${n(t.yesterday!.asks)} asks; ${trackingCheckCounts(t.cumulative!, t.yesterday!)}${r.flight3 ? `; cost per complete row ${money(r.flight3.costPerRow.cumulative)} (yesterday ${money(r.flight3.costPerRow.yesterday)})${newAccountsText(t.cumulative!.newAccounts ?? 0, r.readAt)}` : ''}`
+        ? `Tagged so far: ${n(t.cumulative!.taggedArrivals)} ${r.flight3 ? `${ARRIVALS_TAGGED_ROWS_LABEL}, a floor` : 'arrivals (floor)'}, ${n(t.cumulative!.taggedHits)} hits, ${n(t.cumulative!.asks)} asks, ${n(t.cumulative!.accepts)} accepts, ${n(t.cumulative!.authSuccess)} auth successes; yesterday ${n(t.yesterday!.taggedArrivals)} arrivals, ${n(t.yesterday!.asks)} asks; ${trackingCheckCounts(t.cumulative!, t.yesterday!)}${r.flight3 ? `; cost per complete row, includes repeats ${money(r.flight3.costPerRow.cumulative)} (yesterday ${money(r.flight3.costPerRow.yesterday)})${newAccountsText(t.cumulative!.newAccounts ?? 0, r.readAt)}` : ''}`
         : `Tagged: NOT READ (${t.error})`,
     )
     if (r.flight3 && t.ok) out.push(`  ${coachCountsLine(t.cumulative!.coach ?? emptyCoachCounts(), t.yesterday!.coach ?? emptyCoachCounts(), coachMeasurementNote(etDateFromMs(Date.parse(r.readAt))))}`)
+    if (r.flight3 && t.ok) out.push(firstFinishWatchLine(t.cumulative!.firstFinish ?? 0, r.spend.ok ? r.spend.cumulative.cost : null))
     out.push(...tagSplitLines(r.tagSplit, readStartOf(r.campaign.id)))
     if (r.preflightGate) out.push(r.preflightGate.ok ? preflightGateLine(r.preflightGate.counts) : `Pre-flight gate: NOT READ (${r.preflightGate.error})`)
     out.push(...firstSessionLines(r.firstSession, !!r.flight3))

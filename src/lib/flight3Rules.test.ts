@@ -6,6 +6,8 @@ import type { RuleResult } from './adsRules'
 import {
   buildFlight3Rules,
   costPerCompleteRow,
+  costPerFinisher,
+  firstFinishWatchLine,
   decideFlight3,
   F3_VALIDITY_ASKS,
   flight3VerdictWord,
@@ -203,6 +205,19 @@ describe('rule 6: cost per complete row', () => {
     expect(costPerCompleteRow(10, 0)).toBeNull()
     expect(costPerCompleteRow(null, 5)).toBeNull()
     expect(costPerCompleteRow(10, 4)).toBe(2.5)
+  })
+  it('cost per person who finished: spend over people, null at 0 people or no spend', () => {
+    expect(costPerFinisher(30, 12)).toBe(2.5)
+    expect(costPerFinisher(30, 0)).toBeNull()
+    expect(costPerFinisher(null, 5)).toBeNull()
+  })
+  it('the first-finish WATCH line: n/a before the app ships it, the figure after, per-row figure labelled as repeats', () => {
+    expect(firstFinishWatchLine(0, 40)).toBe('WATCH · cost per person who finished: n/a until the app ships first-finish (0 first-finish rows so far)')
+    const line = firstFinishWatchLine(8, 40)
+    expect(line).toContain('WATCH · cost per person who finished: $5.00 ($40.00 cumulative spend / 8 people who finished')
+    expect(line).toContain('includes repeats')
+    expect(firstFinishWatchLine(8, null)).toContain('spend not read')
+    expect(firstFinishWatchLine(null, 40)).toContain('not read')
   })
 })
 

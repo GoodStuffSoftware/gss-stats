@@ -89,7 +89,7 @@
 //   - Flight boundaries (etFlightRangeMs, flightDaySqlCase) are ET days already.
 
 import { addDays, etDateFast, etWallTimeMs } from './etTime'
-import { NUL_PATH_SQL, isPopupEventPath, pathFamilyOf, sqlInt, sqlLit } from './popupEvents'
+import { FIRST_FINISH_PATH, NUL_PATH_SQL, isPopupEventPath, pathFamilyOf, sqlInt, sqlLit } from './popupEvents'
 
 /** Dimensions that tie a row to an hour, a place or a device. `dateEt` and `flightDay` are ET-day
  * totals and stay allowed; `site` (web vs. app) is a product split, not a device one. */
@@ -144,6 +144,10 @@ export const SPLIT_REFUSED_PATH_PATTERNS: readonly string[] = [
   // `/funnel/purchase/<web|play>`. Money rows on tiny numbers, so refused unconditionally: a split by hour, place
   // or device of a handful of purchases would point at a person. ET-day and web/app totals stay allowed.
   '/funnel/%',
+  // Once-per-device first finish (the people who finished a puzzle; the ads' cost-per-person figure): a row
+  // means "this device remembered its own first finish", like `/return`. The path is the one constant
+  // lib/popupEvents.ts FIRST_FINISH_PATH, an exact match with no trailing %.
+  FIRST_FINISH_PATH,
 ]
 
 /** The JS reading of SPLIT_REFUSED_PATH_PATTERNS, matching SQLite LIKE exactly (ASCII case

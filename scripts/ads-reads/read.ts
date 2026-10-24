@@ -206,6 +206,8 @@ export interface TaggedCounts {
   completeRows: number
   flight3Asks: number
   coachShownPlace: number
+  /** Tagged first-finish rows (FIRST_FINISH_PATH): people who finished a puzzle, one per device. Flight 3 reads only. */
+  firstFinish?: number
   /** Tagged /auth/success/<provider>/new rows (the headline new-account count; counts, not rates). Flight 3 reads only: left off flight 2 and the retest so their result JSON is unchanged. */
   newAccounts?: number
   /** Tagged coach-strip rows per tip and tour-opened: ET-day totals, never by hour, place or device. Flight 3 reads only. */
@@ -435,7 +437,7 @@ function taggedCounts(s: TaggedSummary, f3: boolean): TaggedCounts {
     completeRows: s.funnel.completed,
     flight3Asks: s.flight3Asks,
     coachShownPlace: s.coachShownPlace,
-    ...(f3 ? { newAccounts: s.authSuccessSplit.new, coach: s.coach ?? emptyCoachCounts() } : {}),
+    ...(f3 ? { firstFinish: s.firstFinish ?? 0, newAccounts: s.authSuccessSplit.new, coach: s.coach ?? emptyCoachCounts() } : {}),
   }
 }
 

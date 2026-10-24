@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { FIRST_FINISH_PATH } from './popupEvents'
+import { isSplitRefusedPath, refusedPathMatch, SPLIT_REFUSED_PATH_PATTERNS } from './splitGuard'
 import {
   ADS_READ_PLANS,
   appendReading,
@@ -525,6 +527,26 @@ describe('summarizeTaggedRows (campaign-attributed new indicators)', () => {
     expect(s.asks.byPath).toEqual({ '/signin-prompt/placement': 2, '/signin-prompt/streak': 1, '/signin-prompt/tutorial': 3, '/signin-prompt/committed-repeat': 0, '/signin-prompt/committed-challenge': 0, '/promo-first50/shown': 1 })
     expect(s.asks.otherShownReasons).toBe(4)
     expect(s.accepts.total).toBe(1)
+  })
+  it('first-finish rows count people who finished: one per device, apart from complete rows (made-up rows)', () => {
+    const ff = [
+      { hourStartMs: H('2026-09-28T17:00:00Z'), path: '/game/first-finish', visitor: 'returning', count: 3 },
+      { hourStartMs: H('2026-09-28T18:00:00Z'), path: '/game/first-finish', visitor: 'new', count: 2 },
+      { hourStartMs: H('2026-09-29T18:00:00Z'), path: '/game/first-finish', visitor: 'returning', count: 4 },
+      { hourStartMs: H('2026-09-28T18:00:00Z'), path: '/game/complete/normal/easy', visitor: 'returning', count: 9 },
+    ]
+    const all = summarizeTaggedRows(ff)
+    expect(all.firstFinish).toBe(9)
+    expect(all.funnel.completed).toBe(9) // the per-row figure keeps its repeats and never counts first-finish rows
+    expect(summarizeTaggedRows(ff, { toMs: H('2026-09-29T00:00:00Z') }).firstFinish).toBe(5)
+    expect(summarizeTaggedRows(rows).firstFinish).toBeUndefined() // no row, no field: F2 and retest JSON unchanged
+  })
+  it('the first-finish path is split-refused: no hour, place or device split is offered on it', () => {
+    expect(isSplitRefusedPath(FIRST_FINISH_PATH)).toBe(true)
+    expect(isSplitRefusedPath('/game/first-finish')).toBe(true)
+    expect(SPLIT_REFUSED_PATH_PATTERNS).toContain(FIRST_FINISH_PATH)
+    expect(refusedPathMatch().sql).toContain(`path LIKE '${FIRST_FINISH_PATH}'`)
+    expect(isSplitRefusedPath('/game/first-finish-extra')).toBe(false) // exact, not a prefix
   })
   it('dismisses are kept per dialog, never summed', () => {
     expect(summarizeTaggedRows(rows).dismisses).toEqual({ signinPrompt: 2, promoFirst50: 1 })

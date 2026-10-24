@@ -82,7 +82,7 @@ describe('the flight 3 rules block (Search, flight day 3)', () => {
     const out = await lines(day3())
     const tagged = out.find((l) => l.startsWith('Tagged so far'))!
     // cumulative $17.50 / 14 rows; yesterday (10-18) $9.50 / 8 rows
-    expect(tagged).toContain('; cost per complete row $1.25 (yesterday $1.19)')
+    expect(tagged).toContain('; cost per complete row, includes repeats $1.25 (yesterday $1.19)')
   })
   it('a tripped rule is listed in the proposal', async () => {
     const fx = day3()

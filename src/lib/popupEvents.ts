@@ -18,6 +18,13 @@
 
 import { etOffsetHours, etWallTimeMs } from './etTime'
 
+/** The once-per-device "first finish" beacon row: sent the first time a device completes a puzzle while its
+ * 30-minute campaign tag is active, never again from that device, no id. It carries the same campaign tag
+ * params as other tagged rows. ONE constant: the app team may still rename the path. A row counts one PERSON
+ * who finished (the device remembers its own first finish; counts only), so the ads read judges cost per person
+ * who finished with it. A split-refused path (lib/splitGuard.ts). */
+export const FIRST_FINISH_PATH = '/game/first-finish'
+
 // ── Exclusion: every prefix below is an EVENT beacon, not a screen view. Every existing
 // page-view / visit / path count (geo.ts totals + breakdowns, sites.ts site counts) must
 // exclude them — hard requirement #2 in the task brief.
@@ -109,6 +116,8 @@ export const POPUP_EVENT_PREFIXES = [
   // `/coach/closed-at/<tip>` and `/coach/tour-opened`, <tip> one of place|wheel|notes|hint|clash.
   // Events, never screen views. `shown`, `closed-at` and `dismissed` are count-only (splitGuard.ts).
   '/coach',
+  // Once-per-device first finish (see FIRST_FINISH_PATH): an event, never a screen view, and count-only (splitGuard.ts).
+  FIRST_FINISH_PATH,
 ] as const
 
 /** The provisional `/ab/ask-order/<group>/...` A/B twin rows: duplicates of real ask / eligible /
@@ -124,6 +133,7 @@ export function isPopupEventPath(path: string): boolean {
 /** True for a stored path that contains U+0000 (the JS matcher refuses those too). Literal SQL, no binds. LIKE reads text
  * only up to its first NUL; instr() sees the whole value. Lives here, not in splitGuard.ts, which imports this module. */
 export const NUL_PATH_SQL = 'instr(path, char(0)) > 0'
+
 
 /** Appends `path <> '<prefix>' AND path NOT LIKE '<prefix>/%'` (ANDed) for every prefix —
  * excludes all popup-event rows. A prefix that already ends in '/' (see
@@ -203,6 +213,7 @@ const PATH_FAMILY_LABELS: Record<(typeof POPUP_EVENT_PREFIXES)[number], string> 
   '/funnel': 'funnel',
   '/ab/ask-order': 'ab-ask-order',
   '/coach': 'coach',
+  [FIRST_FINISH_PATH]: 'game-first-finish',
 }
 
 /** Path → family label. 'page' for anything that isn't an event beacon (an ordinary page
@@ -254,6 +265,7 @@ export const PATH_FAMILY_OPTIONS: { value: string; label: string }[] = [
   { value: 'funnel', label: 'Paid funnel (trial / checkout / purchase)' },
   { value: 'ab-ask-order', label: 'Ask-order A/B twin (duplicate rows)' },
   { value: 'coach', label: 'Coach strip (tips shown / dismissed / closed, tour opened)' },
+  { value: 'game-first-finish', label: 'First finish (once per device)' },
 ]
 
 // ── Classification ──────────────────────────────────────────────────────────────────

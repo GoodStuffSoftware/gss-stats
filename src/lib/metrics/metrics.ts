@@ -41,6 +41,7 @@ import {
   POPUPS,
   RAW_INSTALL_DEDUPE_LIVE_AT_UTC_MS,
   TOUR_TRACKING_LIVE_AT,
+  FIRST_FINISH_PATH,
   ORGANIC_TRACKING_LIVE_AT,
   TRACKING_ACTIVATION_DATE_ET,
   type PopupEvent,
@@ -400,6 +401,10 @@ export const METRIC_DEFS: MetricDef[] = [
   // (lib/splitGuard.ts), so they are never split by place — the fact reports them with no
   // country bucket, and a card cannot ask for one.
   campaignMetric({ id: 'campaign.completions', unit: 'completion', params: ['campaignId'], path: step('completed'), instrumented: [BEACON, { ...GAME_COMPLETE, against: 'flight' } as InstrumentationRule, SEEN] }),
+  // People who finished a puzzle: the once-per-device first-finish row (lib/popupEvents.ts FIRST_FINISH_PATH),
+  // so one device is one row however many puzzles it finishes. Counts only: the path is split-refused (no
+  // country param, no hour, place or device split), and SEEN reads "not tracking yet" until a row exists.
+  campaignMetric({ id: 'campaign.firstFinish', unit: 'device', unitLabel: 'unit.people', params: ['campaignId'], path: (p) => p === FIRST_FINISH_PATH, instrumented: [BEACON, SEEN] }),
   campaignMetric({ id: 'campaign.asks', unit: 'showing', path: step('ask'), instrumented: [BEACON, SEEN] }),
   campaignMetric({ id: 'campaign.accepts', unit: 'showing', subsetOf: 'campaign.asks', path: step('accept'), instrumented: [BEACON, SEEN] }),
   campaignMetric({

@@ -126,6 +126,7 @@ describe('splitGuard module', () => {
       '/coach/shown/%',
       '/ab/ask-order/%',
       '/funnel/%',
+      '/game/first-finish',
     ])
   })
 
@@ -140,7 +141,7 @@ describe('splitGuard module', () => {
         "path LIKE '/tour/skip' OR " +
         "path LIKE '/tour/skip/%' OR path LIKE '/coach/dismissed/%' OR " +
         "path LIKE '/coach/closed-at/%' OR path LIKE '/coach/shown/%' OR " +
-        "path LIKE '/ab/ask-order/%' OR path LIKE '/funnel/%' OR instr(path, char(0)) > 0)",
+        "path LIKE '/ab/ask-order/%' OR path LIKE '/funnel/%' OR path LIKE '/game/first-finish' OR instr(path, char(0)) > 0)",
     ])
     expect(b).toEqual([])
   })

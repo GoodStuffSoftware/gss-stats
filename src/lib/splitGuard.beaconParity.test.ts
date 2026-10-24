@@ -21,6 +21,7 @@ describe('SPLIT_REFUSED_PATH_PATTERNS beacon parity', () => {
       '/coach/shown/%',
       '/ab/ask-order/%',
       '/funnel/%',
+      '/game/first-finish', // once per device: the beacon repo adds the same line to functions/_lib/refused.ts and its pin
     ])
   })
 })

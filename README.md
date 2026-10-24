@@ -861,7 +861,7 @@ part of the rule. Likewise the Best Sudoku coach strip (`/coach/shown/<tip>`, `/
 `/coach/closed-at/<tip>`, `/coach/tour-opened`; tip is place, wheel, notes, hint or clash) is an event family (path family
 `coach`), kept out of page views; only `/coach/tour-opened` stays splittable, like `/tour/start` (`/coach/shown/…` is once per tip per device, so it is counts only like `/return`). The metric cards follow the same rule: in a country cell (`campaign-country`)
 these rows belong to no country, so they count only where no country is asked, and
-`campaign.completions` takes no `country` param at all. `/api/popups` and the ads-read
+`campaign.completions` takes no `country` param at all. The same holds for the once-per-device first-finish row (`/game/first-finish`, path family `game-first-finish`, constant `FIRST_FINISH_PATH`): it marks a person who finished a puzzle, a device remembering its own first finish (no id), so it is counts only like `/return`. Its metric components `campaign.firstFinish` (people who finished) and `campaign.costPerFinisher` (stored spend over those rows) are usable in the card and chart editors. The ads morning read prints a WATCH-only line for them (no rule reads it; n/a until the app ships the row) and labels its per-row cost as including repeats. `/api/popups` and the ads-read
 routine's hourly site-event read and per-country read leave them out too, and the routine's tagged read groups them by ET day (never by hour). The guard keys on dimensions and drills;
 a date range that is not whole ET days is handled by the whole-days rule below. One visible effect: the **Arrivals by ET hour of day** chart no longer counts an arrival
 whose first beacon was a return or completion row, so its total can sit slightly below the

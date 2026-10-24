@@ -27,6 +27,7 @@ import {
   installOutcomeGapNote,
   installOutcomeGapOpen,
   rowIsPostInstallFix,
+  FIRST_FINISH_PATH,
   GAME_START_DIFFICULTIES,
   isGameStartPath,
   isTourExitPath,
@@ -818,6 +819,8 @@ export interface TaggedSummary {
   taggedHits: number
   /** visitor='new' tagged rows — a floor (lib/campaigns.ts ARRIVALS_CAVEAT). */
   taggedArrivals: number
+  /** Tagged FIRST_FINISH_PATH rows: one per person (device) who finished a puzzle; counts only, no id. Absent until the first such row. */
+  firstFinish?: number
   funnel: Record<FunnelStepKey, number>
   asks: { total: number; byPath: Record<string, number>; otherShownReasons: number }
   /** Tagged ask rows on FLIGHT3_ASK_PATHS only (the Search day 1-2 tracking check's ask count). */
@@ -875,6 +878,7 @@ export function summarizeTaggedRows(rows: readonly TaggedRow[], opts: { fromMs?:
     if (isAbTwinPath(r.path)) continue
     s.taggedHits += r.count
     if (r.visitor === 'new') s.taggedArrivals += r.count
+    if (r.path === FIRST_FINISH_PATH) s.firstFinish = (s.firstFinish ?? 0) + r.count // created on the first row, so a summary with none (flight 2, the retest) is unchanged
     if ((ASK_PATHS as readonly string[]).includes(r.path)) {
       s.asks.total += r.count
       s.asks.byPath[r.path] += r.count

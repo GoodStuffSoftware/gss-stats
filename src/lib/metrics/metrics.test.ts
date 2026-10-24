@@ -51,7 +51,7 @@ describe('units key off the beacon path families (lib/popupEvents.ts)', () => {
   const SAMPLES: Record<string, { path: string; params?: MetricCtx['params'] }> = {
     'campaign.gameViews': { path: '/game' },
     'campaign.completions': { path: '/game/complete/normal/easy' },
-    'campaign.asks': { path: '/signin-prompt/placement' },
+    'campaign.firstFinish': { path: '/game/first-finish' },    'campaign.asks': { path: '/signin-prompt/placement' },
     'campaign.accepts': { path: '/signin-prompt/accept' },
     'campaign.f3Asks': { path: '/signin-prompt/committed-challenge' },
     'campaign.signedInAfterAsk': { path: '/popup-outcome/signin-prompt/signed-in' },

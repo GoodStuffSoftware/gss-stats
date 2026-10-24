@@ -526,7 +526,7 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
   // exactly how '/return' was accidentally left off this list on this branch — see the
   // 2026-09-25 review). If this ever fails, either a prefix was removed (update this
   // literal list deliberately) or one was never added (fix the array instead).
-  it('POPUP_EVENT_PREFIXES is exactly these 22 prefixes', () => {
+  it('POPUP_EVENT_PREFIXES is exactly these 23 prefixes', () => {
     expect([...POPUP_EVENT_PREFIXES]).toEqual([
       '/signin-prompt',
       '/signin-eligible',
@@ -551,6 +551,7 @@ describe('isPopupEventPath (geo.ts/sites.ts exclusion)', () => {
       '/funnel',
       '/ab/ask-order',
       '/coach',
+      '/game/first-finish',
     ])
   })
   // v1.97.0 (first row at 2026-10-03T17:03:40Z): the three count-only first-run beacons. Until

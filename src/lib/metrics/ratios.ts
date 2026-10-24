@@ -124,6 +124,8 @@ export const RATIO_DEFS: RatioDef[] = [
   // Average CPC: stored spend over the stored clicks of the same Google Ads days. Cost per completed game: tagged completions only.
   ratio('campaign.avgCpc', 'cost', 'campaign.spend', 'campaign.clicks'),
   ratio('campaign.costPerComplete', 'cost', 'campaign.spend', 'campaign.completions'),
+  // Cost per PERSON who finished a puzzle: stored spend over first-finish rows (one per device), so repeat finishers count once.
+  ratio('campaign.costPerFinisher', 'cost', 'campaign.spend', 'campaign.firstFinish'),
   // Pairs: counts only — "1,111 game-screen views · 353 arrivals", never 314.7%.
   ratio('campaign.gameViewsVsArrivals', 'pair', 'campaign.gameViews', 'campaign.taggedArrivals'),
   ratio('campaign.taggedHitsVsArrivals', 'pair', 'campaign.taggedHits', 'campaign.taggedArrivals'),

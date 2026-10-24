@@ -6,6 +6,11 @@ All notable changes to **gss-stats** are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.58.0] — 2026-10-23
+
+### Added
+- **Ads are now judged on people who finished a puzzle.** The morning read counts each device once, the first time it finishes a puzzle while its ad tag is active, and shows the cost per person who finished beside the per-row figure (which now says it includes repeats). Until the app starts sending that signal the line reads n/a. Both numbers are also available to the card and chart editors as "People who finished (first finish)" and "Cost per person who finished".
+
 ## [0.57.1] — 2026-10-20
 
 ### Fixed
