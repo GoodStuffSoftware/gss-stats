@@ -158,6 +158,16 @@ describe('morning-read: review lows', () => {
     expect(line).toMatch(/hits; game-screen views \d+; asks/)
     expect(line).not.toMatch(/\bplayed\b/)
   })
+  it('the tagged-funnel line names first-finish asks (Best Sudoku 1.102.0) when there are any, and omits them at zero', async () => {
+    const zero = await runMorningRead(fixtureDeps(base(), true), opts)
+    expect(formatMorningReport(zero).split('\n').find((l) => l.startsWith('Tagged funnel'))!).not.toContain('first-finish')
+    const fx = base()
+    const b = fx.beacon as Extract<Fixture['beacon'], { tagged: unknown }>
+    b.tagged.push({ ...b.tagged[0], path: '/signin-prompt/first-finish', count: 3 })
+    const r = await runMorningRead(fixtureDeps(fx, true), opts)
+    expect(r.thresholdRead!.tagged!.summary.asks.byPath['/signin-prompt/first-finish']).toBe(3)
+    expect(formatMorningReport(r).split('\n').find((l) => l.startsWith('Tagged funnel'))!).toContain('first-finish 3, promo')
+  })
   it('the cost-per-arrival line is cumulative spend / tagged arrivals, with the $0.32 benchmark beside it', async () => {
     const r = await runMorningRead(fixtureDeps(base(), true), opts)
     const tagged = r.thresholdRead!.tagged!

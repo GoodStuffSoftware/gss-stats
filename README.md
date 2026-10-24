@@ -1128,7 +1128,7 @@ npm run typecheck:scripts
   tagged funnel, the campaign and Overview cards (`/api/metrics`), the sign-up bound — matches the exact base
   shape, and the status split reads only the three-segment rows. A prefix match would count each
   new-client sign-in twice. Kill rule 3's asks include the tutorial ask
-  (`/signin-prompt/tutorial`) and the provisional `committed-repeat` / `committed-challenge` asks
+  (`/signin-prompt/tutorial`) and the provisional `committed-repeat` / `committed-challenge` / `first-finish` asks
   alongside placement, streak and the first-50 promo.
 - **One reading per entry per day.** A reading is stored once per (campaign, ET day, entry
   kind: `morning`, `backstop`, `threshold-50`, `postflight-wrapup`, …). A same-day rerun is
